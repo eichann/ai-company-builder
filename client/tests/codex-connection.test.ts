@@ -40,6 +40,20 @@ function setup(rpc = new FakeRpc(), approval?: (name: string, input: Record<stri
   return { rpc, connection }
 }
 
+test('in a folder without .git, Codex is told where the root is, or it would not read the company\'s Skills from a department folder', async () => {
+  const seen: Array<string[] | undefined> = []
+  const start = (projectRootMarker?: string) => {
+    const rpc = new FakeRpc()
+    const connection = createCodexConnection({ getShellEnv: () => ({}) }, (_env, overrides) => { seen.push(overrides); return rpc })
+    const model = connection.createChatModel({ modelId: 'test-model', ...(projectRootMarker ? { projectRootMarker } : {}) }) as Model
+    const response = model.doGenerate({ prompt })
+    return tick().then(tick).then(() => { rpc.complete(); return response })
+  }
+  await start('.agents/.acb-root')
+  await start()
+  assert.deepEqual(seen, [['project_root_markers=[".agents/.acb-root"]'], []])
+})
+
 test('provider and model switches never resume stale native context', () => {
   const session = { providerId: 'claude-code' as const, id: 'claude-a', modelId: 'sonnet' }
   assert.equal(resumeSession(session, 'codex', 'test-model'), undefined)

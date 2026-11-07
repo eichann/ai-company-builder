@@ -39,6 +39,7 @@ import type { ChatHistoryEvents } from '../chat-history/ipc'
 import type { PrivateFolderGuards } from '../private-folders/guards'
 import { buildSystemPrompt } from './system-prompt'
 import type { WorkingFolders } from '../../services/working-folders'
+import type { SkillShelfStore } from '../skill-shelf/store'
 import { topicAfterTaskMade } from '../../../shared/consultation-task'
 
 export interface ChatServerConfigDeps {
@@ -86,6 +87,8 @@ export interface ChatServerConfigDeps {
    * write guard keeps only its own rules there, and the company file tools are not offered.
    */
   workingFolders?: Pick<WorkingFolders, 'has'>
+  /** What the company delivered into a working folder (features/skill-shelf/store.ts). */
+  skillShelf?: Pick<SkillShelfStore, 'managedPaths' | 'turn'>
 }
 
 function hostOf(url: string): string | undefined {
@@ -118,6 +121,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
           root,
           folderKind: 'none' as const,
           getAccess: () => undefined,
+          getShelfPaths: () => deps.skillShelf?.managedPaths(root) ?? [],
           getInstructionAuthority: () => deps.privateFolders.authority(companyId),
         }
       }
@@ -138,6 +142,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         getPrivateSkills: () => readLocalPrivateSkills(root),
       }
     },
+    shelfTurn: (root, departmentFolder) => (deps.workingFolders?.has(root) ? deps.skillShelf?.turn(root, departmentFolder) : undefined),
     getBrokerEnv: async ({ agent, companyId, conversationId, department }) =>
       deps.brokerTokens ? deps.brokerTokens.envFor({ companyId, conversationId, department, reservedServices: agentBrokerReservedServices(agent) }) : {},
     // 「もう一方の AI に聞く」: the company's setting from the policy (unknown = not allowed).

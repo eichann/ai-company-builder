@@ -39,6 +39,11 @@ export const SkillCard = memo(function SkillCard({ skill, color, isSelected, onS
         <h3 className="text-base font-semibold text-gray-900 dark:text-zinc-100">
           {skill.name}
         </h3>
+        {skill.shelf && (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">
+            {skill.shelf.state === 'company' ? '会社の Skill' : '会社と同じ名前'}
+          </span>
+        )}
         {skill.isNurturing && (
           <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
             育て中

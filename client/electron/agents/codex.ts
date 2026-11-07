@@ -34,8 +34,8 @@ type Part = StreamResult['stream'] extends ReadableStream<infer T> ? T : never
 type Usage = Extract<Part, { type: 'finish' }>['usage']
 type Request = Parameters<AgentConnection['createChatModel']>[0]
 export type CodexTransport = Pick<CodexRpc, 'initialize' | 'request' | 'send' | 'close' | 'onMessage' | 'onFailure'>
-type RpcFactory = (env: Record<string, string>) => CodexTransport
-const defaultRpc: RpcFactory = env => new CodexRpc(env)
+type RpcFactory = (env: Record<string, string>, overrides?: string[]) => CodexTransport
+const defaultRpc: RpcFactory = (env, overrides) => new CodexRpc(env, overrides)
 // The version floor applies to the member's CLI; an injected transport (tests) has none to check.
 const noVersionCheck: CodexVersionCheck = async () => ({ ok: true })
 const versionCheckFor = (createRpc: RpcFactory) => createRpc === defaultRpc ? checkInstalledCodex : noVersionCheck
@@ -264,7 +264,9 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             if (!version.ok) throw new Error(version.message)
             if (ended) return
             // The key broker's variables for this consultation (turnEnv) replace any of the same names.
-            rpc = createRpc({ ...withoutBrokerEnv(config.getShellEnv()), ...request.turnEnv })
+            // A working folder has no `.git`: without this Codex reads only the folder it starts in.
+            const rootOverride = request.projectRootMarker ? [`project_root_markers=${JSON.stringify([request.projectRootMarker])}`] : []
+            rpc = createRpc({ ...withoutBrokerEnv(config.getShellEnv()), ...request.turnEnv }, rootOverride)
             rpc.onFailure = error => finish(error)
             rpc.onMessage = message => {
               if (ended) return

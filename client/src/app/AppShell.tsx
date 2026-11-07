@@ -532,6 +532,7 @@ export function AppShell() {
           onOpenTool={(tool, port) => skillsTab.setActiveTool({ tool, port })}
           onPublish={sharedFolder ? skillsTab.shareSkill : undefined}
           onToggleNurturing={skillsTab.toggleNurturing}
+          companyShelf={sharedFolder ? undefined : { publish: skillsTab.publishToCompany, editLocally: skillsTab.editLocally }}
         />
       ),
     },

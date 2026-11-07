@@ -346,6 +346,68 @@ test('a company without the shared folder: no sync, preview or backups (one shor
   expect(await calls(page, 'gitSync')).toEqual([])
 })
 
+// The Skill shelf (plugins.md "The Skill shelf in the app"): delivered Skills are told from the
+// member's own, a local one can go to the company, and the server's refusal reads as it was written.
+test('without the shared folder: a company Skill says so and offers only 手元で直す; 育て中 and 会社に公開 are not offered on it', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none' })
+  await deptTab(page, '全社').click()
+  await page.getByRole('heading', { name: 'weekly-report' }).click()
+  await expect(page.getByText('会社の Skill（版 abcd1234）')).toBeVisible()
+  await expect(page.getByText('AI はこの Skill を変えられません。')).toBeVisible()
+  await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
+  await expect(page.getByText('ステータス')).toBeHidden()
+  await expect(page.getByText('この PC だけのスキルです')).toHaveCount(0)
+  await page.getByRole('button', { name: '手元で直す' }).click()
+  await expect(page.getByText('公開し直すまで会社の更新は届きません')).toBeVisible()
+  expect(await calls(page, 'editCompanySkillLocally')).toEqual([])
+  await page.getByRole('button', { name: '手元で直す' }).click()
+  expect(await calls(page, 'editCompanySkillLocally')).toEqual([['weekly-report']])
+})
+
+test('without the shared folder: a local Skill stays 「この PC だけ」 and goes to the company only after the confirmation', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none' })
+  await deptTab(page, '営業部').click()
+  await page.getByRole('heading', { name: 'proposal' }).click()
+  await expect(page.getByText('この PC だけのスキルです（ほかの人には共有されません）。')).toBeVisible()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await expect(page.getByText('会社の Skill として公開します。')).toBeVisible()
+  await page.getByRole('button', { name: 'キャンセル' }).click()
+  expect(await calls(page, 'publishSkillToCompany')).toEqual([])
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await expect.poll(() => calls(page, 'publishSkillToCompany')).toEqual([['proposal', null]])
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('without the shared folder: the server\'s refusal is shown in its words', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', shelf: 'refused' })
+  await deptTab(page, '営業部').click()
+  await page.getByRole('heading', { name: 'proposal' }).click()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await expect(page.getByRole('alert')).toContainText('この Skill・指示を変えられるのは、決められた人だけです。')
+})
+
+test('without the shared folder: the member\'s Skill beside a company one of the same name says so, and publishing names the version it replaces', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', download: 'done' })
+  await deptTab(page, '開発部').click()
+  await page.getByRole('heading', { name: 'release-note' }).click()
+  await expect(page.getByText('会社にも同じ名前の Skill があります。')).toBeVisible()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await expect(page.getByText('会社の同じ名前の Skill を、この内容に置き換えます。')).toBeVisible()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await expect.poll(() => calls(page, 'publishSkillToCompany')).toEqual([['release-note', 'abcd1234'.repeat(8)]])
+})
+
+test('a git company keeps its 公開 section: no 会社に公開, no company mark', async ({ page }) => {
+  await openPreview(page, 'skill-layout')
+  await deptTab(page, '全社').click()
+  await page.getByRole('heading', { name: 'weekly-report' }).click()
+  await expect(page.getByText('公開中')).toBeVisible()
+  await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
+  await expect(page.getByText('会社の Skill')).toHaveCount(0)
+})
+
 // The task card's own file actions (owner decision 2026-11-07): a company without the shared folder
 // cannot link files (the server answers NO_COMPANY_FOLDER), so its card offers neither; a git company keeps both.
 for (const kind of ['git', 'none'] as const) {

@@ -11,6 +11,7 @@ import { parseFrontmatter } from '../../../shared/skill-frontmatter'
 import { SkillsCache } from '../../../shared/skills-refresh'
 import type { FileChange } from '../../company-watcher'
 import type { IpcRegistrar } from '../../ipc/registrar'
+import type { SkillShelfMark } from '../../../shared/skill-shelf'
 import type { PathGuard } from '../ports'
 import { readLocalPrivateSkills, removeSharedLines, setLocalPrivateSkill } from '../../sync/local-ignores'
 
@@ -33,6 +34,7 @@ interface SkillInfo {
   group: string
   isPrivate?: boolean
   isNurturing?: boolean
+  shelf?: SkillShelfMark
   files: {
     skillMd: string
     rules?: string[]
@@ -102,6 +104,8 @@ export interface SkillsDeps {
    * already true and publishing has nowhere to go.
    */
   isWorkingFolder?: (rootPath: string) => boolean
+  /** In a working folder: what the Skill shelf says of the Skill folder at `rel` (client/shared/skill-shelf.ts). */
+  shelfMark?: (rootPath: string, rel: string) => SkillShelfMark | undefined
 }
 
 /** skills:publish in a company without the shared folder. */
@@ -113,9 +117,11 @@ export const SKILL_ALREADY_SHARED = 'このスキルはすでに会社で共有�
 export interface SkillsFeature {
   /** A skill the AI (or anything else) created, changed or removed is scanned afresh by the next skills:list. */
   invalidateForChanges(changes: FileChange[]): void
+  /** Every scan of this folder is stale (what the Skill shelf says of its Skills changed). */
+  invalidateRoot(rootPath: string): void
 }
 
-export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRefusal, isWorkingFolder }: SkillsDeps): SkillsFeature {
+export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRefusal, isWorkingFolder, shelfMark }: SkillsDeps): SkillsFeature {
   // Skills scans (skills:list), reused for plain tab switches (5 s) and dropped
   // as soon as a watcher event makes them stale (invalidateForChanges) or the
   // renderer forces a refresh. Keys and staleness rules: shared/skills-refresh.ts.
@@ -259,6 +265,7 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRef
 
         const skillRelativePath = `${gitignoreRelativePrefix}.claude/skills/${entry.name}/`
         const isPrivate = gitignoreLines.some(line => line === skillRelativePath)
+        const shelf = shelfMark?.(rootPath, skillRelativePath.slice(0, -1))
 
         skills.push({
           id: `${departmentId}-${group.replace(/\s*\/\s*/g, '-').replace(/\s+/g, '-').toLowerCase()}-${entry.name}`,
@@ -269,6 +276,7 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRef
           group,
           isPrivate,
           isNurturing: frontmatter.status === 'nurturing',
+          ...(shelf ? { shelf } : {}),
           files,
         })
       } catch (err) {
@@ -454,5 +462,5 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRef
     }
   })
 
-  return { invalidateForChanges: changes => skillsCache.invalidateForChanges(changes) }
+  return { invalidateForChanges: changes => skillsCache.invalidateForChanges(changes), invalidateRoot: rootPath => invalidateSkillsCache(rootPath) }
 }

@@ -1,5 +1,5 @@
 import { SkillGrid } from './SkillGrid'
-import { SkillDetailPanel } from './SkillDetailPanel'
+import { SkillDetailPanel, type CompanyShelfActions } from './SkillDetailPanel'
 import type { Skill, SkillTool } from '../model'
 
 interface Props {
@@ -19,6 +19,8 @@ interface Props {
   /** Absent for a company without the shared folder: skills stay on this PC (no 共有 section). */
   onPublish?: (skill: Skill) => Promise<string | null>
   onToggleNurturing: (skill: Skill) => Promise<string | null>
+  /** A company without the shared folder: 「会社に公開」 and 「手元で直す」. */
+  companyShelf?: CompanyShelfActions
 }
 
 /** The スキル tab: the department's skills, and the chosen one's details beside them. */
@@ -49,6 +51,7 @@ export function SkillsPanel(props: Props) {
             onOpenTool={props.onOpenTool}
             onPublish={props.onPublish}
             onToggleNurturing={props.onToggleNurturing}
+            companyShelf={props.companyShelf}
           />
         </div>
       )}

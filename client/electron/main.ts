@@ -39,6 +39,9 @@ import { registerFsIpc } from './features/fs/ipc'
 import { wireSync } from './features/sync/wire'
 import { createChatServerConfig } from './features/chat/server-config'
 import { registerSkillsIpc } from './features/skills/ipc'
+import { createShelfClient } from './features/skill-shelf/client'
+import { registerSkillShelfIpc } from './features/skill-shelf/ipc'
+import { createSkillShelfStore } from './features/skill-shelf/store'
 import { skillIsShared } from './features/skills/shared-check'
 import { registerCompanySetupIpc } from './features/company-setup/ipc'
 import { registerDownloadChoicesIpc } from './features/download-choices/ipc'
@@ -352,10 +355,25 @@ const aiRunRegistry = createRunRegistry()
 const workingFolders = createWorkingFolders()
 // The app's git (binary, credentials, guarded configuration: services/app-git.ts), refusing working folders.
 const appGit = withoutWorkingFolders(createAppGit({ token: session.gitToken, appGitDir: () => path.join(userDataDir(), 'git') }), workingFolders)
-// Which Skill a consultation used (records.md "Which Skill"): folder name + git tree id, read-only git, never a blob fetched.
+// The company's Skills, rules and AI instructions in a working folder (features/skill-shelf): fetched
+// when the folder opens and, at most every few minutes, when the AI policy answers.
+let skillShelfChanged: (root: string) => void = () => {}
+const shelfClient = createShelfClient({ baseUrl: getServerApiUrl, cookies: session.cookies })
+const skillShelf = createSkillShelfStore({
+  dir: () => path.join(userDataDir(), 'skill-shelf'),
+  userId: session.userId,
+  client: shelfClient,
+  onChanged: (companyId, root) => {
+    skillShelfChanged(root)
+    appWindow.send('skillShelf:changed', { companyId })
+  },
+})
+agentControl.policy.onPolicy(companyId => skillShelf.poll(companyId))
+// Which Skill a consultation used (records.md "Which Skill"): folder name + git tree id (the shelf's version in a working folder), read-only git, never a blob fetched.
 const skillUses = createSkillUseReporter({
   baseUrl: getServerApiUrl, cookies: session.cookies, home: os.homedir(), log: console,
   git: (root, args) => appGit.create(root, { GIT_NO_LAZY_FETCH: '1' }).raw(args),
+  shelfVersion: (root, rel) => (workingFolders.has(root) ? skillShelf.versionOf(root, rel) : undefined),
 })
 const recordsApi = createRecordsApi({
   baseUrl: getServerApiUrl, cookies: session.cookies, log: console, runOf: aiRunRegistry.runOf,
@@ -461,7 +479,10 @@ const skills = registerSkillsIpc(ipc, {
   isShared: (rootPath, relFolder) => skillIsShared(appGit.create(rootPath, { GIT_NO_LAZY_FETCH: '1' }), relFolder),
   skillRefusal: (absPath, options) => privateFolderGuards.skillRefusal(absPath, options),
   isWorkingFolder: rootPath => workingFolders.has(rootPath),
+  shelfMark: (rootPath, rel) => (workingFolders.has(rootPath) ? skillShelf.markOf(rootPath, rel) : undefined),
 })
+skillShelfChanged = root => skills.invalidateRoot(root)
+registerSkillShelfIpc(ipc, { paths: allowedRoots, isWorkingFolder: rootPath => workingFolders.has(rootPath), store: skillShelf, client: shelfClient })
 
 // The company folder on disk (features/fs): file tree, editor, watchers.
 const files = registerFsIpc(ipc, {
@@ -478,7 +499,7 @@ lifecycle.beforeQuit(() => files.closeWatchers())
 
 // Setting a company folder up, and what this computer downloads
 // (features/company-setup, features/download-choices).
-registerCompanySetupIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, userDataDir, home: () => app.getPath('home'), workingFolders })
+registerCompanySetupIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, userDataDir, home: () => app.getPath('home'), workingFolders, onWorkingFolder: (companyId, folder) => void skillShelf.attach(companyId, folder) })
 registerDownloadChoicesIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, privateFolders: gitSync, activity: syncActivity })
 
 registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell, writeRefusal: absPath => privateFolderGuards.writeRefusal(absPath) })
@@ -520,6 +541,7 @@ app.whenReady().then(async () => {
         requestFromOwner(agentInteractions, webContentsForSession(appSessionId), request, appSessionId, signal),
       runAppCommand: appCommands.run,
       workingFolders,
+      skillShelf,
     })
     // A business plugin's step run: only its step's tools (plugin-steps.md), from the claim main holds.
     const result = await startChatServer({

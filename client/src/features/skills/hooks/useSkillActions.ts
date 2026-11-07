@@ -2,8 +2,8 @@ import { useCallback } from 'react'
 import type { DepartmentConfig } from '../../../types'
 import type { FileOpResult } from '../../../../shared/ipc-contract'
 import type { Skill } from '../model'
-import { copySkill, createSkillDirectory, createSkillFile, makeSkillPrivate, pathExists, publishSkill, readSkillFile, setSkillNurturing, skillWriteRefusal, writeSkillFile } from '../api'
-import { newSkillMarkdown, renameSkillMarkdown, skillNameTakenMessage, SKILL_ALREADY_SHARED_MESSAGE, SKILL_CREATE_FAILED, SKILL_COPY_FAILED, type NewSkillInput, type SkillActionResult } from '../model'
+import { copySkill, createSkillDirectory, createSkillFile, editCompanySkillLocally, makeSkillPrivate, pathExists, publishSkill, publishSkillToCompany, readSkillFile, setSkillNurturing, skillWriteRefusal, writeSkillFile } from '../api'
+import { newSkillMarkdown, renameSkillMarkdown, skillNameTakenMessage, SKILL_ALREADY_SHARED_MESSAGE, SKILL_CREATE_FAILED, SKILL_COPY_FAILED, SKILL_PUBLISH_FAILED, type NewSkillInput, type SkillActionResult } from '../model'
 
 const refusalOf = (result: FileOpResult): string | null => (result.code === 'refused' && result.error ? result.error : null)
 
@@ -107,6 +107,22 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
     return refusalOf(result)
   }, [rootPath, departments, refreshSkills])
 
+  /** 「会社に公開」; answers the sentence when it was not published, or null. */
+  const publishToCompany = useCallback(async (skill: Skill): Promise<string | null> => {
+    if (!rootPath || !skill.skillPath) return null
+    const result = await publishSkillToCompany(rootPath, skill.skillPath, skill.shelf?.version ?? null)
+    refreshSkills()
+    return result.success ? null : result.error ?? SKILL_PUBLISH_FAILED
+  }, [rootPath, refreshSkills])
+
+  /** 「手元で直す」; answers the sentence when it did not happen, or null. */
+  const editLocally = useCallback(async (skill: Skill): Promise<string | null> => {
+    if (!rootPath || !skill.skillPath) return null
+    const result = await editCompanySkillLocally(rootPath, skill.skillPath)
+    refreshSkills()
+    return result.success ? null : result.error ?? SKILL_PUBLISH_FAILED
+  }, [rootPath, refreshSkills])
+
   const toggleNurturing = useCallback(async (skill: Skill): Promise<string | null> => {
     if (!skill.files.skillMd) return null
     const result = await setSkillNurturing(skill.files.skillMd, !skill.isNurturing)
@@ -114,5 +130,5 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
     return refusalOf(result)
   }, [refreshSkills])
 
-  return { createSkill, copySkillHere, shareSkill, toggleNurturing }
+  return { createSkill, copySkillHere, shareSkill, publishToCompany, editLocally, toggleNurturing }
 }

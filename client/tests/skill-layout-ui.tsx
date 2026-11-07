@@ -105,6 +105,12 @@ const skill = (folder: string, name: string, description: string) => ({
   id: `${folder}:${name}`, name, description, departmentId: DEPARTMENTS.find(d => d.folder === folder)?.id ?? 'company',
   skillPath: `${ROOT}/${folder}/.claude/skills/${name}`, files: { skillMd: 'SKILL.md' },
 })
+const SHELF_VERSION = 'abcd1234'.repeat(8)
+/** ?kind=none: weekly-report came from the company; release-note is the member's own beside a company one. */
+const SHELF_MARKS: Record<string, { state: 'company' | 'clash'; version: string }> = {
+  'weekly-report': { state: 'company', version: SHELF_VERSION },
+  'release-note': { state: 'clash', version: SHELF_VERSION },
+}
 const SKILLS: Record<string, ReturnType<typeof skill>[]> = {
   '': [skill('', 'weekly-report', '週報をまとめる')],
   営業部: [skill('営業部', 'proposal', '提案書のたたき台を作る')],
@@ -192,7 +198,7 @@ const api: Partial<ElectronAPI> = {
   onFileChange: () => () => {},
   listSkills: async (_root: string, folder: string, _id: string, _name?: string, options?: { force?: boolean }) => {
     record('listSkills', [folder, !!options?.force])
-    return { success: true, skills: [...(SKILLS[folder] ?? [])] }
+    return { success: true, skills: (SKILLS[folder] ?? []).map(s => (params.get('kind') === 'none' && SHELF_MARKS[s.name] ? { ...s, shelf: SHELF_MARKS[s.name] } : s)) }
   },
   getWriteAccess: async () => ({ version: 'v1', role: 'member', all: false, scopes: [{ path: '', write: true }, { path: '総務', write: false }] }),
   onWriteAccessChanged: () => () => {},
@@ -300,6 +306,16 @@ const api: Partial<ElectronAPI> = {
     return { success: true, recordId }
   },
   onPluginsChanged: () => () => {},
+  // A company without the shared folder (?kind=none): ?shelf=refused = the server says no.
+  publishSkillToCompany: async (_root: string, skillPath: string, expectedVersion: string | null) => {
+    record('publishSkillToCompany', [skillPath.split('/').pop(), expectedVersion])
+    return params.get('shelf') === 'refused' ? { success: false, error: 'この Skill・指示を変えられるのは、決められた人だけです。' } : { success: true }
+  },
+  editCompanySkillLocally: async (_root: string, skillPath: string) => {
+    record('editCompanySkillLocally', [skillPath.split('/').pop()])
+    return { success: true }
+  },
+  onSkillShelfChanged: () => () => {},
   onNotificationsChanged: () => () => {},
   onRecordsChanged: recordsChanged.subscribe,
   onNotificationsOpenTasks: () => () => {},

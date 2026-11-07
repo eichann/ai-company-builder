@@ -61,6 +61,8 @@ export interface AgentCapabilities {
   readonly rateLimits: boolean
   /** Images attached to a message reach the model. */
   readonly imageInput: boolean
+  /** It loads `.claude/rules/*.md` by itself; another agent is told where the company's are (client/shared/skill-shelf.ts). */
+  readonly ruleFiles: boolean
   /** Read-only company files over MCP (company-files/tools.ts). */
   readonly companyFilesMcp: boolean
   /** The company map's tools over MCP (records/tools.ts): look up records, 「あなたの番」. */
@@ -221,6 +223,7 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     subagentProgress: true,
     rateLimits: true,
     imageInput: true,
+    ruleFiles: true,
     companyFilesMcp: true,
     recordsMcp: true,
     recordActions: true,
@@ -294,6 +297,7 @@ const CODEX: AgentDescriptor = {
     subagentProgress: false,
     rateLimits: true,
     imageInput: true,
+    ruleFiles: false,
     companyFilesMcp: true,
     recordsMcp: true,
     recordActions: false,
@@ -340,6 +344,7 @@ const API_KEY: AgentDescriptor = {
     subagentProgress: false,
     rateLimits: false,
     imageInput: true,
+    ruleFiles: false,
     companyFilesMcp: false,
     recordsMcp: false,
     recordActions: false,

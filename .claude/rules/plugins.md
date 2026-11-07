@@ -1,5 +1,7 @@
 ---
 paths:
+  - "client/electron/features/skill-shelf/**"
+  - "client/shared/skill-shelf.ts"
   - "shared/core/plugins.ts"
   - "shared/core/plugin-*.ts"
   - "shared/core/upstream-path.ts"
@@ -647,15 +649,74 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
 - **Admin** 「会社の Skill」 (`admin/src/components/skill-shelf/`, menu for owners / admins /
   managers of a `none` company): list by kind with version, who, when; 「これまでの版」 and
   「この版に戻す」, 「この版を消す」 (owner/admin); 「配るのをやめる」; 「消す」 for an item taken off
-  (owner/admin). Publishing new content is the app's (next step; no upload
-  in the admin yet).
-- Not yet: the app fetching, placing (plain files in the working folder) and protecting them;
-  plugin steps pinning a shelf Skill by its version; Skill-use reports by version. The app (next
-  step) places only the company-wide items and those of the member's own departments (`belongs`).
+  (owner/admin). Publishing new content is the app's (no upload in the admin yet).
+- Not yet: plugin steps pinning a shelf Skill by its version (they need the server's step-skill
+  routes and pins to learn the shelf; `plugin-steps.md`).
 - Tests: `server/tests/integration/skill-shelf.test.ts` (each role and kind, auto-run parts,
   concurrency, rollback, delivery scoping by department / restricted place / group, no name leaks,
   refusals, the version's listing, git company refused — mutation-checked), permission matrix rows
   + `CROSS`, `server/tests/integration/admin-contract.test.ts`, `admin/tests/skill-shelf.test.tsx`.
+
+## The Skill shelf in the app (`none` companies only)
+
+`client/electron/features/skill-shelf/` (`client.ts` the calls and the check of what comes,
+`store.ts` placing and the manifest, `ipc.ts` the two buttons), `client/shared/skill-shelf.ts`
+(pure: the delivery answer, targets, sentences). In the app Skills stay **plain files**. A git
+company never reaches any of it: the store knows a company only from
+`companySetup:openWorkingFolder` (`attach`), and `skillShelf:*` refuse any other folder
+(`ipc-skill-shelf.test.ts`).
+
+- **When**: on opening the working folder, and at most every 5 minutes (`SHELF_POLL_MS`) when the
+  AI policy answers (`agent-policy-store.ts` `onPolicy`: no timer of its own), and after a publish.
+  A failed or unreadable list changes nothing (never read as "nothing delivered").
+- **What**: company-wide items and those of departments the member belongs to (`belongs`;
+  `readShelfDeliveries` also leaves out any name or folder that could not be placed safely).
+  Leaving a department or 配るのをやめる removes the item at the next fetch.
+- **Check** (`verifyShelfContent`): paths by `shelfFilePathProblem`, no clash, sizes, `SKILL.md`,
+  and the files' `shelfListing` hash equal to the version **the delivery list** named. Refused →
+  nothing written, the last good copy stays.
+- **Where** (`shelfTargets`): a Skill at `.claude/skills/<name>/` and `.agents/skills/<name>/`, at
+  the working folder's root or in `<department>/`; a rule file at `.claude/rules/<name>.md`
+  (likewise). Checked on CLI 2.1.319 / codex-cli 0.153.4: Claude Code walks up from its working
+  directory (root Skills and rules work from a department folder; a department's Skills are listed
+  from inside it). Codex in a folder without `.git` reads only the folder it starts in, so the store
+  writes `.agents/.acb-root` (`SHELF_ROOT_MARKER`) and the chat starts Codex with
+  `-c project_root_markers=[…]` for a working folder that has one (`projectRootMarker`). A thread's
+  `config` moves AGENTS.md but not `skills/list`: it has to be the process's `-c`.
+- **Instruction texts never become files**: `turn()` gives the company's and the shown department's
+  text to `chat-server.ts`, which adds it to the system prompt (`withShelfInstructions`) for every
+  agent, but not to an unattended step (which loads no project instructions either). One path for
+  Claude, Codex and the API-key mode, no clash with the member's own CLAUDE.md / AGENTS.md, nothing
+  on disk for the AI to change, no 32 KB cut-off of Codex's `project_doc_max_bytes`. Kept in the
+  manifest for offline turns; re-hashed against its version when read. Rule files are files for
+  Claude Code; an agent without `capabilities.ruleFiles` gets a list of them in the prompt.
+- **Writing**: a Skill is written to `.shelf-<id>` beside `skills/` (in `.claude/` / `.agents/`:
+  same disk, not read as a Skill), then renamed in; a rule file likewise over the old one. Failure
+  or a crash leaves the last good copy (or nothing); leftovers are swept at the next sync. A link
+  on the way (`.claude` → elsewhere) refuses the write; a removal never follows one.
+- **Manifest** `<userData>/skill-shelf/<company>/<hash of the folder>.json`: outside the working
+  folder so neither the AI nor a Skill's files can say what the app owns. Per folder, not per
+  account (the next account's sync removes what it should not have); `current()` hands out nothing
+  for another signed-in account.
+- **The member's own**: whatever is at a target and is not in the manifest is theirs and is never
+  touched. A different content = a **clash**: the item is placed nowhere (both agents see the same
+  Skill), the panel says so (`SkillShelfMark`, 「会社と同じ名前」). The same content as the listed
+  version is taken over (a Skill just published, or a lost manifest) and, when it stops being
+  delivered, given back instead of removed (`taken`).
+- **A local change** to a managed target is a difference like any other: the next fetch puts the
+  version back. `.DS_Store`, `node_modules` and the like are not content (`isNotSkillContent`):
+  never uploaded, never a change, so a Skill's installed tool survives.
+- **Publishing** (`skillShelf:publish`, 「会社に公開」 on a local Skill at the root or directly in a
+  department): the folder (no links, ≤ the limits) with `expectedVersion` = what the panel showed
+  (null, or the version of the clash); the server decides, its sentence is shown as written
+  (`shelfRefusalMessage`). The button is shown to everyone: who may is the server's answer. A
+  company Skill changes by **「手元で直す」** (`skillShelf:editLocally`, `release`): on this
+  computer it becomes the member's own (a clash that stays even while unchanged; the `.agents/` copy
+  goes), then 「会社に公開」 replaces the version they saw and the next sync takes it over.
+- **Use reports**: `shelfVersion` in `skill-use-reporter.ts`: the version in the `tree` field (64
+  hex, the same validator), `dirty` when the files differ; a Skill not delivered is not reported.
+- Tests: `client/tests/skill-shelf.test.ts`, `client/tests/ipc-skill-shelf.test.ts`,
+  `codex-connection.test.ts`, `tests/ui/skill-layout.spec.ts` (each guard mutation-checked).
 
 ## What we say, and what we do not claim (review §12, owner-approved wording)
 

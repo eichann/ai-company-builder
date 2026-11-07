@@ -465,5 +465,8 @@ the server: `agent-events.md` ("Sending from the app").
   call, decision `stopped`).
 - **Which Skill** (`records.md` "Which Skill"): `withSkillSightings` wraps a consultation turn's
   host; a `Skill` call that ran (`skillLoadedBy`) also goes to `onSkillUsed` → main's
-  `services/skill-use-reporter.ts` (folder name + git tree id + dirty, never a path). Codex has
-  no Skill tool: nothing is recorded for it.
+  `services/skill-use-reporter.ts` (folder name + git tree id + dirty, never a path; in a working
+  folder the Skill shelf's version instead). Codex has no Skill tool: nothing is recorded for it.
+- **A working folder's company Skills** (`plugins.md` "The Skill shelf in the app"): the instruction
+  texts join the system prompt, Codex gets `project_root_markers`, the rule files are named to an
+  agent without `capabilities.ruleFiles`.

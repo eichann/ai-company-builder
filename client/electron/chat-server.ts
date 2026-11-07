@@ -126,6 +126,8 @@ export interface ChatServerConfig extends AgentHost {
   onChatActivity?: (token: string, active: boolean) => void
   getAuthMode: () => AuthMode
   buildSystemPrompt: (workingDirectory?: string) => string
+  /** A working folder's turn: the delivered instruction texts and where Codex's project root is (features/skill-shelf/store.ts `turn`). */
+  shelfTurn?: (root: string, departmentFolder: string | undefined) => { instructions: string; ruleInstructions: string; rootMarker?: string } | undefined
   /**
    * The write guard for a chat in this company (write-guard.ts): refreshes the
    * member's write access (short timeout, cached answer on failure) and
@@ -194,6 +196,12 @@ export function externalRepositoryInstruction(companyRootPath?: string): string 
  * company folder and working folder. Without a consultation (or a host that
  * takes no sightings) the host is returned unchanged.
  */
+/** The system prompt with what the company delivered: its texts for every agent, the rule files for one that does not load them. */
+export function withShelfInstructions(prompt: string | undefined, shelf: { instructions: string; ruleInstructions: string } | undefined, agentLoadsRuleFiles: boolean): string | undefined {
+  const parts = [prompt, shelf?.instructions, agentLoadsRuleFiles ? '' : shelf?.ruleInstructions].filter(Boolean)
+  return parts.length > 0 ? parts.join('\n\n') : undefined
+}
+
 export function withSkillSightings<H extends Pick<ChatServerConfig, 'onToolEvent' | 'onSkillUsed'>>(
   config: H,
   turn: Omit<SkillUseSighting, 'skill'> | undefined,
@@ -369,6 +377,11 @@ export async function startChatServer(config: ChatServerConfig) {
       // Its executeCommand runs the same clone / init guard (chat-tools.ts).
       if (workingDirectory) finalSystemPrompt += `\n\n${externalRepositoryInstruction(companyRootPath)}`
     }
+
+    // A company without the shared folder (plugins.md "The Skill shelf in the app"): its AI instruction
+    // texts go with the system prompt, for every agent. An unattended step loads no project instructions.
+    const shelf = !aiTurnStep && companyRootPath ? config.shelfTurn?.(companyRootPath, activeDepartment?.folder) : undefined
+    finalSystemPrompt = withShelfInstructions(finalSystemPrompt, shelf, can.ruleFiles)
 
     // A different provider/model starts from visible history, never an older native session.
     const storedSession = appSessionId ? agentSessionMap.get(appSessionId) : undefined
@@ -567,7 +580,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, appCommands, records, webResearch: webResearch?.tools, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools } } : {}) }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, appCommands, records, webResearch: webResearch?.tools, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(shelf?.rootMarker ? { projectRootMarker: shelf.rootMarker } : {}), ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools } } : {}) }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })

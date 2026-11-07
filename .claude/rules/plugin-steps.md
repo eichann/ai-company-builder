@@ -66,7 +66,8 @@ A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target
   refused for a step that is not `overridable` (400 `STEP_NOT_OVERRIDABLE`,
   `companySkillOverrideProblem`) and for a Skill not on the shared branch (409
   `STEP_SKILL_MISSING`). Unreadable at a first run → 409 `STEP_SKILL_MISSING` (never a silent
-  fall-back). A company without the shared company folder has no company Skills yet: the app
+  fall-back). A company without the shared company folder cannot pin a Skill to a step yet (the
+  Skill shelf is not known to these routes, and `readPluginProcedure` reads a git tree): the app
   shows `STEP_SKILL_NOT_HERE` instead of the server's 「…置いて同期して…」 for a person's start
   (`features/plugin-steps/ipc.ts`; test `ipc-company-without-folder.test.ts`). The admin console sets it in 「つなぎ先」 → the business → 「手順を会社のスキルで」
   (`admin/src/app/companies/[id]/integrations/step-skills.tsx`; only overridable steps are shown, a

@@ -322,7 +322,7 @@ git-http and everything repository-based with `NO_COMPANY_FOLDER`). The app read
   `generateSummary` / `log` / `unsharedLargeFiles`, `git:sparse*`, `git:folderSizes`,
   `git:setupCompanyRemote` → refused by the git factory; `git:inspectCompanyFolder` → `refuse`
   (the folder belongs to a company without the shared folder); `skills:makePrivate` → success
-  (every skill there is the member's own), `skills:publish` → refused; `git:listFiles` /
+  (every skill there is the member's own), `skills:publish` → refused (the way there is `skillShelf:publish`, `plugins.md` "The Skill shelf in the app"); `git:listFiles` /
   `git:grep` (探す, Cmd+P) read the disk (`electron/plain-search.ts`, git-search's caps; never
   `.git` / `.backups` / `.workspace` / `node_modules`). The renderer passes no folder to sync,
   automatic sync, download choices and private folders (their hooks stay idle) and hides their

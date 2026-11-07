@@ -19,6 +19,9 @@ export type SkillRefusals = ElectronPort<'reservedPathRefusal'>
  */
 export type SkillSharingWrites = ElectronPort<'makeSkillPrivate' | 'publishSkill'>
 
+/** A company without the shared folder: a Skill to the company's shelf and back (main checks, the server decides). */
+export type SkillShelfActions = ElectronPort<'publishSkillToCompany' | 'editCompanySkillLocally' | 'onSkillShelfChanged'>
+
 type ListSkillsArgs = Parameters<ElectronAPI['listSkills']>
 
 export function listSkills(
@@ -81,6 +84,21 @@ export function setSkillNurturing(skillMdPath: string, makeNurturing: boolean, w
 /** Keeps the skill out of the next sync (`.gitignore`); refused (`already_shared`) for a skill the company has. */
 export function makeSkillPrivate(rootPath: string, skillRelativePath: string, sharing: SkillSharingWrites = window.electronAPI) {
   return sharing.makeSkillPrivate(rootPath, skillRelativePath)
+}
+
+/** 「会社に公開」: `expectedVersion` is the company's Skill of this name the member saw (null: none). */
+export function publishSkillToCompany(rootPath: string, skillPath: string, expectedVersion: string | null, shelf: SkillShelfActions = window.electronAPI) {
+  return shelf.publishSkillToCompany(rootPath, skillPath, expectedVersion)
+}
+
+/** 「手元で直す」: on this computer the delivered Skill becomes the member's own until they publish it. */
+export function editCompanySkillLocally(rootPath: string, skillPath: string, shelf: SkillShelfActions = window.electronAPI) {
+  return shelf.editCompanySkillLocally(rootPath, skillPath)
+}
+
+/** What the company delivered changed. */
+export function subscribeSkillShelfChanges(listener: () => void, shelf: SkillShelfActions = window.electronAPI) {
+  return shelf.onSkillShelfChanged(listener)
 }
 
 /** One way: the next sync shares the skill with everyone. */

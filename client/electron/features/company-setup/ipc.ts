@@ -35,6 +35,8 @@ export interface CompanySetupDeps {
   home: () => string
   /** Working folders of companies without the shared folder (services/working-folders.ts). */
   workingFolders: WorkingFolders
+  /** A working folder was opened: its company's Skills are fetched (in the background). */
+  onWorkingFolder?: (companyId: string, folder: string) => void
 }
 
 /** Where company folders go when the member is not asked (`~/AI Company Builder/<会社名>`). */
@@ -47,7 +49,7 @@ export const WORKING_FOLDER_TAKEN_MESSAGE = 'このフォルダは、全社フ�
 export const SYNCED_FOLDER_MESSAGE = 'このフォルダはほかの会社と同期しているフォルダのため使えません。別のフォルダを選ぶか、「新しく作成」を使ってください。'
 const NOT_WITHOUT_FOLDER_MESSAGE = 'この会社のフォルダを準備できませんでした。もう一度お試しください。'
 
-export function registerCompanySetupIpc(ipc: IpcRegistrar, { paths, appGit, session, serverUrl, userDataDir, home, workingFolders }: CompanySetupDeps): void {
+export function registerCompanySetupIpc(ipc: IpcRegistrar, { paths, appGit, session, serverUrl, userDataDir, home, workingFolders, onWorkingFolder }: CompanySetupDeps): void {
   const authHeaders = (): Record<string, string> => session.cookies().length > 0 ? { 'Cookie': session.cookies().join('; ') } : {}
 
   // A company without the shared company folder (client/shared/company-folder.ts): its
@@ -91,6 +93,7 @@ export function registerCompanySetupIpc(ipc: IpcRegistrar, { paths, appGit, sess
     }
     workingFolders.add(safe)
     paths.add(safe)
+    onWorkingFolder?.(companyId, safe)
     return { success: true }
   })
 

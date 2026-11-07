@@ -88,6 +88,8 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   // lane B ▼
   // lane B ▲
   // lane C ▼
+  'skillShelf:publish': { args: [IN, IN, null], paths: [0, 1] },
+  'skillShelf:editLocally': { args: [IN, IN], paths: [0, 1] },
   // lane C ▲
 }
 

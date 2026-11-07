@@ -51,6 +51,7 @@ export function useSkills({ rootPath, departmentFolder, departmentId, department
           group: skill.group,
           isPrivate: skill.isPrivate,
           isNurturing: skill.isNurturing,
+          shelf: skill.shelf,
           skillPath: skill.skillPath,
           files: skill.files,
         }))

@@ -62,6 +62,7 @@ import { isSameOrAncestorPath, lookalikeKey, pathKey } from '../../shared/core/p
 import { recordFileEditProblem } from '../../shared/core/records'
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { insideDeliverableFolder } from '../../shared/core/plugin-step-runs'
+import { managedShelfPath } from '../shared/skill-shelf'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import type { GuardReason } from '../shared/agent-events'
@@ -124,6 +125,13 @@ export interface WriteGuard {
    * Absent: a company with the shared folder (git), every check as before.
    */
   folderKind?: 'none'
+  /**
+   * With `folderKind: 'none'`: what the company delivered into the working folder (working-folder
+   * relative Skill folders and rule files; features/skill-shelf/store.ts, read on every call).
+   * Nobody's AI changes those, whatever their role: the next fetch would put them back, and a
+   * company Skill changes by publishing.
+   */
+  getShelfPaths?: () => readonly string[]
 }
 
 /** Where a path really lands, relative to the company folder's real path ('/'-separated); null when outside it or unknown. */
@@ -232,7 +240,10 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
   if (area.deny) return area
   const rel = repoRelativePath(guard.root, target, cwd)
   if (rel === null) return { deny: false } // outside the company: not ours to judge
-  if (guard.folderKind === 'none') return checkAgentConfig(guard, rel)
+  if (guard.folderKind === 'none') {
+    const delivered = checkShelfFile(guard, rel, target, cwd)
+    return delivered.deny ? delivered : checkAgentConfig(guard, rel)
+  }
   // Not downloaded: the member (and the AI) cannot see what teammates keep
   // there, and sync would hold the file back rather than share it.
   const notDownloaded = guard.getNotDownloaded?.() ?? []
@@ -280,6 +291,20 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
   if (decision.write) return { deny: false }
   const folder = decision.scopePath ?? rel.split('/').slice(0, -1).join('/')
   return { deny: true, path: rel, folder, message: readOnlyMessage(folder), code: 'read-only-folder' }
+}
+
+export function shelfFileMessage(path: string): string {
+  return `このファイル（${path}）は会社から届いた Skill や決まりのため、AI は変更できません。この PC で変えても、次に受け取るときに元に戻ります。変更が必要な場合は、スキルの画面の「手元で直す」でメンバーに直してもらうか、管理者に依頼してください。`
+}
+
+/** A file the company delivered: both as written and where it resolves on disk, so a link cannot lead in. */
+function checkShelfFile(guard: WriteGuard, rel: string, target: string, cwd?: string): GuardDecision {
+  const managed = guard.getShelfPaths?.() ?? []
+  if (managed.length === 0) return { deny: false }
+  const real = realRelativePath(guard.root, target, cwd)
+  const hit = managedShelfPath(managed, rel) ?? (real === null ? null : managedShelfPath(managed, real))
+  if (hit === null) return { deny: false }
+  return { deny: true, path: rel, folder: hit, message: shelfFileMessage(rel), code: isInstructionFile(hit) ? 'instruction-file' : 'skill-file' }
 }
 
 /** Agent config (.mcp.json, .claude/settings*.json, hooks, .codex/…): owner/admin only; unknown authority never blocks. */
