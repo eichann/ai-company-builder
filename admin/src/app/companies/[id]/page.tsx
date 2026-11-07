@@ -45,6 +45,7 @@ import { SUMMARY_LABELS } from '@/lib/permission-labels'
 import { explainRejection } from '@/lib/rejections'
 import { useQuery } from '@/lib/use-query'
 import { cn } from '@/lib/utils'
+import { NO_FOLDER_WORDS } from '@/lib/company-folder'
 
 export default function OverviewPage() {
   const { isAdmin, role, managedDepartmentIds } = useCompany()
@@ -64,7 +65,7 @@ const STEPS: Record<SetupStepId, { title: string; hint: string; path: string }> 
 }
 
 function HomeView() {
-  const { companyId, isAdmin, canViewAgentEvents } = useCompany()
+  const { companyId, isAdmin, canViewAgentEvents, hasCompanyFolder } = useCompany()
   const home = useQuery(`home:${companyId}`, () => homeApi.get(companyId))
   const base = `/companies/${companyId}`
   const data = home.data
@@ -86,9 +87,10 @@ function HomeView() {
         <ErrorState error={home.error} onRetry={home.reload} />
       ) : data ? (
         <div className="space-y-8">
-          {data.setup && <SetupCard setup={data.setup} base={base} />}
+          {data.setup && <SetupCard setup={data.setup} base={base} hasCompanyFolder={hasCompanyFolder} />}
           <Attention
             attention={data.attention}
+            hasCompanyFolder={hasCompanyFolder}
             membersHref={`${base}/members`}
             permissionsHref={`${base}/folders`}
             rejectionsHref={`${base}/advanced/info/rules`}
@@ -111,7 +113,7 @@ function HomeView() {
   )
 }
 
-function SetupCard({ setup, base }: { setup: NonNullable<AdminHome['setup']>; base: string }) {
+function SetupCard({ setup, base, hasCompanyFolder }: { setup: NonNullable<AdminHome['setup']>; base: string; hasCompanyFolder: boolean }) {
   if (setup.done >= setup.total) {
     return (
       <p role="status" className="flex items-center gap-2 text-sm text-success">
@@ -135,7 +137,7 @@ function SetupCard({ setup, base }: { setup: NonNullable<AdminHome['setup']>; ba
         </div>
         <ol aria-label="最初にやること" className="space-y-1">
           {setup.steps.map((step, i) => {
-            const words = STEPS[step.id]
+            const words = !hasCompanyFolder && step.id === 'departments' ? { ...STEPS.departments, hint: NO_FOLDER_WORDS.departmentsStepHint } : STEPS[step.id]
             const isNext = step === next
             const href = `${base}/${words.path}`
             return (
@@ -221,6 +223,7 @@ function ExtraAttention({ attention, base }: { attention: AdminHome['attention']
 
 function Attention({
   attention,
+  hasCompanyFolder = true,
   membersHref,
   permissionsHref,
   rejectionsHref,
@@ -228,13 +231,16 @@ function Attention({
   extraCount = 0,
 }: {
   attention: Overview['attention']
+  /** False for a company without the shared folder: nobody syncs, so 「しばらく同期していません」 never applies. */
+  hasCompanyFolder?: boolean
   membersHref: string
   permissionsHref: string
   rejectionsHref: string
   extra?: ReactNode
   extraCount?: number
 }) {
-  const { recentRejections, outdatedClients, unknownClients, notSyncedRecently } = attention
+  const { recentRejections, outdatedClients, unknownClients } = attention
+  const notSyncedRecently = hasCompanyFolder ? attention.notSyncedRecently : []
   const orphanedScopes = attention.orphanedScopes ?? []
   const total =
     recentRejections.length + orphanedScopes.length + outdatedClients.length + unknownClients.length + notSyncedRecently.length + extraCount
@@ -244,7 +250,7 @@ function Attention({
       <EmptyState
         icon={CheckCircle}
         title="対応が必要なことはありません"
-        description="全員のアプリが最新で、最近の同期も問題なく行われています。"
+        description={hasCompanyFolder ? '全員のアプリが最新で、最近の同期も問題なく行われています。' : NO_FOLDER_WORDS.nothingToDo}
       />
     )
   }

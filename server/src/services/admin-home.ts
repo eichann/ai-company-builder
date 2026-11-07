@@ -82,6 +82,8 @@ export interface AdminHomeDeps {
   securityAlerts?: (member: Member) => SecurityAlertView[]
   /** Installed plugins that are on and have a problem. */
   stoppedPlugins: (member: Member) => Promise<Array<{ id: string; label: string; problem: string }>>
+  /** The company has the shared company folder (services/company-folder.ts `has`). */
+  hasCompanyFolder: (companyId: string) => boolean
 }
 
 export function createAdminHomeService(deps: AdminHomeDeps) {
@@ -123,6 +125,11 @@ export function createAdminHomeService(deps: AdminHomeDeps) {
     return { ...computeAttention(members, new Date(clock.nowMs())), recentRejections: [], orphanedScopes: [] }
   }
 
+  /** Nobody syncs in a company without the shared folder: 「しばらく同期していません」 would name everyone. */
+  function syncAttention<T extends { notSyncedRecently: OverviewMember[] }>(companyId: string, attention: T): T {
+    return deps.hasCompanyFolder(companyId) ? attention : { ...attention, notSyncedRecently: [] }
+  }
+
   async function view(member: Member): Promise<Outcome<AdminHome>> {
     const handle = companyData.forCompany(member.companyId)
     const counts = { members: memberships.listByCompany(member.companyId).length, departments: handle.departments.count() }
@@ -132,7 +139,7 @@ export function createAdminHomeService(deps: AdminHomeDeps) {
         view: 'admin',
         setup: { steps, done: steps.filter(s => s.done).length, total: steps.length },
         departments: [],
-        attention: { ...overview.attention, meetingDuplicates: deps.meetingDuplicates(member) ?? 0, stoppedPlugins, securityAlerts: deps.securityAlerts?.(member) ?? [] },
+        attention: { ...syncAttention(member.companyId, overview.attention), meetingDuplicates: deps.meetingDuplicates(member) ?? 0, stoppedPlugins, securityAlerts: deps.securityAlerts?.(member) ?? [] },
         counts,
       })
     }
@@ -143,7 +150,7 @@ export function createAdminHomeService(deps: AdminHomeDeps) {
       view: 'manager',
       setup: null,
       departments,
-      attention: { ...managerAttention(member, departments.map(d => d.id)), meetingDuplicates: 0, stoppedPlugins: [], securityAlerts: [] },
+      attention: { ...syncAttention(member.companyId, managerAttention(member, departments.map(d => d.id))), meetingDuplicates: 0, stoppedPlugins: [], securityAlerts: [] },
       counts,
     })
   }

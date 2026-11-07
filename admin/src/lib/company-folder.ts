@@ -25,3 +25,18 @@ export const NO_COMPANY_FOLDER_NOTE = {
   title: 'この会社は全社フォルダを使わない設定です',
   description: '共有のフォルダがないため、フォルダごとの編集の権限や非公開フォルダはありません。部署は「部署」のページで管理します。',
 }
+
+/**
+ * Words for pages a company without the shared folder sees, where a git company's words talk
+ * about files being synced or downloaded (owner decision 2026-11-07). Git companies keep theirs.
+ */
+export const NO_FOLDER_WORDS = {
+  inviteDepartments:
+    '参加すると、選んだ部署に所属します。部署は、所属・記録の置き場所・お願いの届け先に使います。選ばないときは、あとから部署のページで入れられます。',
+  memberRole: 'メンバーは、やること・記録・承認や AI スキルを使えます。管理画面の設定は変更できません。',
+  memberRoleDescription: 'やること・記録・承認や AI スキルを使えます。管理画面の設定は変更できません。',
+  removeMember: 'さんは、この会社のやること・記録などを見られなくなります。本人のPCにあるファイルは削除されません。',
+  leaveCompany: '退出すると、この会社のやること・記録などを見られなくなります。PCにあるファイルは削除されません。',
+  departmentsStepHint: '部署は、所属・記録の置き場所・お願いの届け先に使います。',
+  nothingToDo: '全員のアプリが最新です。',
+}

@@ -3,7 +3,7 @@
 import { ArrowRight, Check, CloudArrowDown, FolderOpen, SpinnerGap } from '@phosphor-icons/react'
 import type { CompanyInfo } from '../../../../shared/ipc-contract'
 import { BACK_BUTTON, ChoiceButton, ErrorNotice, PRIMARY_BUTTON, ScreenHeading } from './SelectorParts'
-import { WORKING_FOLDER_NOTE } from '../../../../shared/company-folder'
+import { WORKING_FOLDER_BACKUP_NOTE, WORKING_FOLDER_NOTE } from '../../../../shared/company-folder'
 
 export function FolderChoice({ company, withoutSharedFolder = false, error, isPreparing, onOpenExisting, onCreateNew, onBack }: {
   company: CompanyInfo
@@ -21,7 +21,10 @@ export function FolderChoice({ company, withoutSharedFolder = false, error, isPr
         作業フォルダを選択してください
       </ScreenHeading>
 
-      {withoutSharedFolder && <p className="text-sm text-text-secondary">{WORKING_FOLDER_NOTE}</p>}
+      {withoutSharedFolder && <div className="space-y-1 text-sm text-text-secondary">
+        <p>{WORKING_FOLDER_NOTE}</p>
+        <p data-working-folder-backup>{WORKING_FOLDER_BACKUP_NOTE}</p>
+      </div>}
 
       <ErrorNotice error={error} />
 

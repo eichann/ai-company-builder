@@ -24,3 +24,9 @@ export function companyHasSharedFolder(company: { folderKind?: unknown } | null 
 
 /** The note a company without the shared folder shows where git companies have sync and history. */
 export const WORKING_FOLDER_NOTE = 'この会社では、ファイルはこの PC の中だけに置かれます（ほかの人には共有されません）。'
+
+/**
+ * What a member of such a company must know (owner decision 2026-11-07): the working folder is
+ * kept nowhere else, while records are on the server.
+ */
+export const WORKING_FOLDER_BACKUP_NOTE = '作業フォルダのファイルはこの PC の中だけにあり、サーバーには残りません。PC のバックアップ機能で守ってください。やること・決めたことなどの記録はサーバーに残ります。'

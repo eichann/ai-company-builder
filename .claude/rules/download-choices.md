@@ -177,7 +177,11 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
 
 Nothing is downloaded or left out: the company opens in a plain working folder with a folder per
 department (`companySetup:openWorkingFolder`, no picker, no setup screen; the folder choice says
-「この会社では、ファイルはこの PC の中だけに置かれます…」). Settings has no 同期 group (download
+「この会社では、ファイルはこの PC の中だけに置かれます…」 and, below it, the backup note
+`WORKING_FOLDER_BACKUP_NOTE` (`client/shared/company-folder.ts`, owner 2026-11-07: the files exist
+only on this PC and are not kept on the server — back them up with the PC's own backup; records
+are kept on the server). The title bar's 「この PC だけで作業」 is a button that shows both lines
+(`TitleBar.tsx` `WorkingFolderNote`; Esc or a press outside closes it); only for `none`). Settings has no 同期 group (download
 choices with folder sizes, automatic sync, .gitignore) and nothing shows as not downloaded. Details
 and every git entry point: `sync.md` "Companies without the shared company folder". Tests:
 `tests/ui/company-selector.spec.ts`, `tests/ui/skill-layout.spec.ts` 「a company without the shared folder…」.

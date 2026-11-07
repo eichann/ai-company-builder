@@ -226,6 +226,9 @@ test('one company whose default folder is refused: the folder choice says why, n
 test('several companies: the list is shown, and a first setup still uses 所属 when there is one', async ({ page }) => {
   await open(page, { mine: 'd1' })
   await chooseCompany(page)
+  // The backup note is only for a company without the shared folder.
+  await expect(button(page, /既存のフォルダを開く/)).toBeVisible()
+  await expect(page.getByText(/PC のバックアップ機能/)).toHaveCount(0)
   await button(page, /既存のフォルダを開く/).click()
   await expect(opened(page)).toBeVisible()
   expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([['gitSetupCompanyRemote', '/Users/demo/作業', 'c1', ['営業部']]])
@@ -235,6 +238,8 @@ test('a company without the shared folder opens in the chosen folder as it is: a
   const state = await open(page, { kind: 'none' })
   await chooseCompany(page)
   await expect(page.getByText('この会社では、ファイルはこの PC の中だけに置かれます（ほかの人には共有されません）。')).toBeVisible()
+  // Nothing in the working folder is kept on the server: the member is told to back it up (records are kept).
+  await expect(page.getByText('作業フォルダのファイルはこの PC の中だけにあり、サーバーには残りません。PC のバックアップ機能で守ってください。やること・決めたことなどの記録はサーバーに残ります。')).toBeVisible()
   await button(page, /既存のフォルダを開く/).click()
   await expect(opened(page)).toContainText('"rootPath":"/Users/demo/作業","folderKind":"none"')
   expect(await callsOf(page, 'openWorkingFolder')).toEqual([['openWorkingFolder', '/Users/demo/作業', 'c1']])
