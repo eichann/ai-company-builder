@@ -26,6 +26,7 @@
  *   when there is no まとまりの責任者: the meeting's readers, else they); `said_by` / `objection` are
  *   what the AI read in the minutes (who said it, whether anyone objected) — outside text.
  */
+import { FEATURE_OFF } from '../../shared/core/features'
 import { nameKey, normalizeRepoPath, isSameOrAncestorPath } from '../../shared/core/paths'
 import { findPrivateScope, resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
 import type { LedgerValue } from '../../shared/core/record-ledger'
@@ -52,6 +53,11 @@ export interface DecisionServiceDeps {
   writer: ServiceRecordWriter
   tokenDigest: TokenDigest
   ids: IdGenerator
+  /**
+   * 「使う機能」 決めたこと is on (records.md "Features on and off"). Off: nothing is recorded,
+   * by a person or the AI (409 FEATURE_OFF); earlier decisions stay readable. Absent → on.
+   */
+  enabled?: (companyId: string) => boolean
 }
 
 /** Says nothing about the place (a private folder's name or existence never leaks). */
@@ -96,6 +102,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
+      if (deps.enabled && !deps.enabled(member.companyId)) return refuse('conflict', FEATURE_OFF.error, { code: FEATURE_OFF.code })
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null || Array.isArray(b)) return bad('The body must be an object')
       const known = ['folder', 'title', 'why', 'source', 'links', 'important', 'exception', 'key', 'quote', 'said_by', 'objection']

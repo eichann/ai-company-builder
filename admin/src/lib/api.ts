@@ -72,6 +72,7 @@ import {
   scopeRulesResultSchema,
   slackSchema,
   taskSettingsSchema,
+  featuresSchema,
   userSchema,
   memberGroupSchema,
   memberGroupsSchema,
@@ -835,6 +836,22 @@ export const recordSettingsApi = {
   get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/records/settings`, recordSettingsSchema),
   update: (companyId: string, enabled: boolean) =>
     getData(`/api/companies/${enc(companyId)}/records/settings`, recordSettingsSchema, { method: 'PUT', body: { enabled } }),
+}
+
+// ---------------------------------------------------------------------------
+// 「使う機能」 (records.md "Features on and off"): the five feature switches, every member reads,
+// owners/admins change one at a time. Turning one off deletes nothing: its records stay, 見るだけ.
+// ---------------------------------------------------------------------------
+
+export type { FeaturesView } from '../../../shared/types/features'
+export type { CompanyFeatures, FeatureId } from '../../../shared/core/features'
+
+import type { FeatureId } from '../../../shared/core/features'
+
+export const featuresApi = {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/features`, featuresSchema),
+  set: (companyId: string, feature: FeatureId, on: boolean) =>
+    getData(`/api/companies/${enc(companyId)}/features`, featuresSchema, { method: 'PUT', body: { feature, on } }),
 }
 
 // ---------------------------------------------------------------------------

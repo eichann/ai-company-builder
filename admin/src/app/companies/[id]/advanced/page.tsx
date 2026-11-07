@@ -5,18 +5,19 @@ import { CaretRight, LockSimple } from '@phosphor-icons/react'
 
 import { EmptyState, PageHeader } from '@/components/app/states'
 import { Badge } from '@/components/ui/badge'
-import { agentEventsApi, agentSandboxApi, inboxSettingsApi, keyBrokerApi, recordSettingsApi, secondOpinionApi, taskSettingsApi } from '@/lib/api'
-import { ADVANCED_SECTIONS, aiSafetyChanged, calendarChanged, inboxChanged, workChanged, type AdvancedSection } from '@/lib/advanced'
+import { agentEventsApi, agentSandboxApi, featuresApi, inboxSettingsApi, keyBrokerApi, recordSettingsApi, secondOpinionApi, taskSettingsApi } from '@/lib/api'
+import { ADVANCED_SECTIONS, aiSafetyChanged, calendarChanged, featuresChanged, inboxChanged, workChanged, type AdvancedSection } from '@/lib/advanced'
 import { useCompany } from '@/lib/company-context'
 import { useQuery } from '@/lib/use-query'
 
 /**
  * 「詳しい設定」 (管理画面の見直し 2-3, owner decision 2026-11-02: shown to admins, tucked away at the
- * bottom of the menu): five headings, each with 「初期値のまま」 or 「変えています」.
+ * bottom of the menu): six headings, each with 「初期値のまま」 or 「変えています」.
  */
 export default function AdvancedSettingsPage() {
   const { companyId, isAdmin, role } = useCompany()
   const on = (key: string) => (isAdmin ? `${key}:${companyId}` : null)
+  const features = useQuery(on('features'), () => featuresApi.get(companyId))
   const tasks = useQuery(on('task-settings'), () => taskSettingsApi.get(companyId))
   const records = useQuery(on('records-settings'), () => recordSettingsApi.get(companyId))
   const inbox = useQuery(on('inbox-settings'), () => inboxSettingsApi.get(companyId))
@@ -36,6 +37,7 @@ export default function AdvancedSettingsPage() {
 
   // null while not known (loading, or a part the server cannot answer): no badge rather than a wrong one.
   const changed: Record<AdvancedSection, boolean | null> = {
+    features: features.data ? featuresChanged(features.data.features) : null,
     work: tasks.data && !records.loading ? workChanged(tasks.data.settings, records.data?.enabled) : null,
     calendar: tasks.data ? calendarChanged(tasks.data.settings) : null,
     inbox: inbox.data ? inboxChanged(inbox.data.settings) : null,

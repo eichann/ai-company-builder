@@ -85,8 +85,10 @@ export const MEETING_BUNDLE_LINKED_ACTION = 'link_bundle'
  * Whether a meeting asks 「どのまとまりの会議ですか？」 at all: only one with someone from outside
  * (an internal meeting has no 案件 to name), never one whose question was closed or that has its まとまり.
  */
-export function meetingAsksBundle(m: { externalAttendees: number; hasBundle: boolean; noBundleChosen: boolean }): boolean {
-  return m.externalAttendees > 0 && !m.hasBundle && !m.noBundleChosen
+export function meetingAsksBundle(m: { externalAttendees: number; hasBundle: boolean; noBundleChosen: boolean; bundleKindInUse?: boolean }): boolean {
+  // `bundleKindInUse: false` — nothing the company makes could be chosen (no business plugin's kind and
+  // the core's プロジェクト turned off, 「使う機能」): never asked. Left out = there is one (as before).
+  return m.externalAttendees > 0 && !m.hasBundle && !m.noBundleChosen && m.bundleKindInUse !== false
 }
 
 /** The record's summary of a meeting's minutes (characters). */

@@ -43,10 +43,12 @@ interface Props {
    * press on the card itself (the card stays to show 「完了」 / 「済んだ」).
    */
   onCompleted?: (recordId: string) => void
+  /** 「今日の予定」 belongs to 会議と議事録 (owner decision 2026-11-07): off, no meeting is read or mixed in. */
+  showCalendar?: boolean
 }
 
 /** The task list tab (やること): the list; an item opens in a tab in the middle (records and files share the tabs). */
-export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult, askFolder = null, onCompleted }: Props) {
+export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult, askFolder = null, onCompleted, showCalendar = true }: Props) {
   const [choosing, setChoosing] = useState<TaskListItem | null>(null)
   const [mode, setMode] = useState<ListMode>('turn')
   const [tag, setTag] = useState<string | null>(null)
@@ -56,7 +58,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
   const [nowMs, setNowMs] = useState(() => Date.now())
   useInterval(() => setNowMs(Date.now()), 60_000)
   const now = useMemo(() => companyNow(nowMs), [nowMs])
-  const calendar = useCalendarToday(companyId)
+  const calendar = useCalendarToday(showCalendar ? companyId : undefined)
 
   const items = useMemo(() => list.data?.items ?? [], [list.data])
   const tags = useMemo(() => tagCounts(items), [items])

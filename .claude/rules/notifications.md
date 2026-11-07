@@ -298,6 +298,11 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   list's 「あなたの番」 and the morning summary use the same rule, so the three agree. The bell = 「起きたこと」 (読むだけ): a dot only for unread notices, the list, 「すべて読んだ」,
   「知らせの設定」 (one checkbox per kind, `NOTIFICATION_KIND_LABELS`). Opening a notice marks only
   that notice read.
+- **Arrived minutes** (owner decision 2026-11-07): where the department shows no task list, the
+  meetings that arrived and nobody asked the AI to read (`arrived`) are rows of the 「会議」 part too,
+  needing a person, with ［AI に読ませる］ (`arrivedMeetingTurns`, `client/shared/notifications-app.ts`;
+  AppShell reads them from the arrivals). A feature turned off writes none of its notices
+  (`records.md` "Features on and off").
 - **Meetings where the department shows no task list** (`tasks-ui.md` "Minutes and AI turns"):
   `TitleBarNotices` takes `meetings` (AppShell, only while the task list is hidden) — a まとまり to
   choose and received minutes with the automatic runner's state, each with its buttons, in a 「会議」

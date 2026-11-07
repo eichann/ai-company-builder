@@ -221,6 +221,15 @@ nor archived in one.
   only the known messages, the undone 済んだ on both paths, a double follow-up once, the reply check
   archives nothing, the cursor waits past the limit.
 
+## The inbox turned off (「使う機能」, owner decision 2026-11-07; `records.md` "Features on and off")
+
+`InboxDeps.enabled` false: `receive` skips every message (Slack's signals, our own replies), `pollCompany`
+reads no mailbox, `awaitOwnMessage` makes nothing, `judge` / `replyCheck` / `claim` answer 409
+`FEATURE_OFF`; `interaction` and `reply_request` are 「見るだけ」; 受信を読む reads as not allowed; the
+inbox tools are not given to the AI; 「返事を待つ」 is not offered (`outbound-mail.md`). Settings and the
+reads of what came before stay. On again, the poll reads from where it stopped (its window rules).
+Test: `inbox.test.ts` 「使う機能」.
+
 ## In the app without mail or chat (owner decision 2026-11-03)
 
 A company with no usable connector for the `mail` and `chat` roles sees no mail / chat parts

@@ -105,6 +105,8 @@ export interface ServiceTransitionInput {
 export type ServiceWriteFailure =
   | 'records-off' | 'type-unknown' | 'not-service-owned' | 'bad-value' | 'bad-place' | 'assignee-cannot-read'
   | 'exists' | 'not-found' | 'stale' | 'transition-not-allowed'
+  /** The type's feature is off (「使う機能」): its records are 「見るだけ」, nothing new, no change. */
+  | 'feature-off'
 
 export type ServiceWriteFailed = { ok: false; reason: ServiceWriteFailure; detail?: string }
 export type ServiceWriteResult = { ok: true; record: RecordSummary; entry: LedgerEntry } | ServiceWriteFailed
@@ -139,7 +141,7 @@ export function placeOfRow(row: Pick<RecordAccessRow, 'folder' | 'personalOwner'
  * members it names told (kind + version only). Whether that actor may do it
  * (an approver approving, the author sending) is the calling service's rule.
  */
-export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyData' | 'transactions' | 'clock' | 'ids' | 'isMember' | 'roleOf' | 'notify' | 'recordChanged'>) {
+export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyData' | 'transactions' | 'clock' | 'ids' | 'isMember' | 'roleOf' | 'notify' | 'recordChanged' | 'featureOff'>) {
   const { companyData } = deps
 
   /** Every person value can read a record at `place` (a private folder's name is never said). */
@@ -177,6 +179,9 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     const records = companyData.forCompany(companyId).records
     if (!records.settings().enabled) return fail('records-off')
     if (!SERVICE_OWNED_TYPES.includes(input.type) && !SERVICE_RECEIPT_TYPES.includes(input.type) && !SERVICE_MADE_TYPES.includes(input.type)) return fail('not-service-owned')
+    // A feature turned off makes nothing new (records.md "Features on and off"): the backstop under every service.
+    // A sent mail's receipt (SERVICE_RECEIPT_TYPES) is still written: sending stays on with the inbox off.
+    if (!SERVICE_RECEIPT_TYPES.includes(input.type) && deps.featureOff?.(companyId, input.type)) return fail('feature-off')
     const def = currentTypes(records).get(input.type)?.definition
     if (!def) return fail('type-unknown')
     const title = input.title.normalize('NFC').trim()
@@ -285,6 +290,8 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       if (!records.settings().enabled) return fail('records-off')
       const row = RECORD_ID_RE.test(input.recordId) ? records.byIds([input.recordId])[0] : undefined
       if (!row || row.removedAt !== null) return fail('not-found')
+      // 「見るだけ」: a record of a feature that is off is never moved (the clock, a service) until it is on again.
+      if (deps.featureOff?.(companyId, row.type)) return fail('feature-off')
       // Another type (task) only along its listed state changes (the server clock's move, core-types.ts
       // WAIT_OVER; the inbox's reply check) — or a note alone that changes nothing (「返事は済み」):
       // never a field-only or link change.

@@ -97,6 +97,11 @@ export interface OutboundMailDeps {
   transactions: Transactions
   writer: ServiceRecordWriter
   payloads: MailPayloadStore
+  /**
+   * 「使う機能」 受信の振り分け・返事のお願い is on for the company (records.md "Features on and off"):
+   * 「返事を待つ」 needs the inbox to see their answer, so it is offered only then. Absent → on.
+   */
+  inboxOn?: (companyId: string) => boolean
   /** sha256 hex of a text (the refs; not a secret). */
   digest: (text: string) => string
   /** sha256 hex of bytes (an attachment's fingerprint); without it no file can be attached. */
@@ -221,9 +226,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     return records.byIds(preparedBy).find(r => r.type === 'task' && r.removedAt === null)?.id ?? null
   }
 
-  /** 「返事を待つ」 is offered for a new mail (not a reply in a thread, not Slack). */
+  /** 「返事を待つ」 is offered for a new mail (not a reply in a thread, not Slack) while the inbox feature is on. */
   const offersAwait = (companyId: string, messageId: string, fields: Record<string, LedgerValue>) =>
-    fields.channel !== 'slack' && interactionOf(companyId, messageId) === null
+    fields.channel !== 'slack' && interactionOf(companyId, messageId) === null && (deps.inboxOn?.(companyId) ?? true)
 
   /** The 連絡 a draft answers (its `interaction` link), or null. */
   const interactionOf = (companyId: string, messageId: string): string | null =>

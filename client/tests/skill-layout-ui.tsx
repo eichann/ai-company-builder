@@ -14,6 +14,8 @@
 //   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
 //   kind      none = the company has no shared company folder (folderKind none: a working folder on this PC)
 //   personal  1 = (with tasks=1) the opened task is one only the member sees (its card offers 新しいファイル)
+//   features  (「使う機能」) listoff = the task list turned off: 「確かめること」 with an approval, an AI-prepared task,
+//             a decision to confirm, an arrived meeting and today's meeting; listoff,meetingsoff = 会議 off too
 //   companies 1 | 2 = the member's companies from the server (株式会社デモ, then 別会社); absent = the list cannot be read
 //   sync      manual = 「サーバーと同期」 runs until window.__acbLayout.finishSync()
 //
@@ -34,6 +36,7 @@ import { AppShell } from '../src/app/AppShell'
 import { emitter, installElectronAPI, type ElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
+const featuresParam = (params.get('features') ?? '').split(',')
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const downloadOffline = params.get('download') === 'offline'
 try {
@@ -270,8 +273,16 @@ const api: Partial<ElectronAPI> = {
     : [],
   getAgentInteractions: async () => [],
   signOut: async () => { record('signOut', []); return { success: true } },
-  // ?tasks=1: the やること tab (features/tasks) with a few rows; otherwise records give no list.
-  getTaskList: async () => params.get('tasks') === '1'
+  // ?features=listoff: the task list turned off (「使う機能」): the small list 「確かめること」.
+  getTaskList: async () => featuresParam.includes('listoff')
+    ? { success: true, data: { available: true, listDepartmentIds: null, features: { taskList: false, meetings: !featuresParam.includes('meetingsoff'), inbox: true, decisions: true, projects: true },
+      decisionsToConfirm: [{ id: 'decision-0000aa', title: '値引きは10%まで' }],
+      items: [
+        { id: 'approval-0000aa', type: 'approval', typeLabel: '承認のお願い', title: '金額の変更', turn: 'mine' as const, state: 'pending', version: 1, due: null, tags: [], waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null, stateLabel: null },
+        { id: 'task-prep0001', type: 'task', typeLabel: 'やること', title: '見積の下書きを確かめる', turn: 'mine' as const, state: 'todo', version: 1, due: null, tags: [], waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, stateLabel: null, aiPrepared: true as const },
+        { id: 'task-plain001', type: 'task', typeLabel: 'やること', title: 'ふつうのやること', turn: 'mine' as const, state: 'todo', version: 1, due: null, tags: [], waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, stateLabel: null },
+      ] } }
+    : params.get('tasks') === '1'
     ? { success: true, data: { available: true, listDepartmentIds: null, items: Array.from({ length: 3 }, (_, i) => ({
       id: i === 0 ? RECORD_TASK.id : `task-row00${i}`, type: 'task', typeLabel: 'タスク', title: i === 0 ? RECORD_TASK.title : `やること ${i + 1}`, turn: 'mine' as const, state: 'todo', version: i === 0 ? taskVersion : 1, due: null,
       tags: [], waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, stateLabel: null,
@@ -292,7 +303,12 @@ const api: Partial<ElectronAPI> = {
   onNotificationsChanged: () => () => {},
   onRecordsChanged: recordsChanged.subscribe,
   onNotificationsOpenTasks: () => () => {},
-  getCalendarToday: async () => ({ success: true, data: { date: '2026-11-02', timeZone: 'Asia/Tokyo', reason: null, events: [] } }),
+  getCalendarToday: async () => ({ success: true, data: { date: '2026-11-02', timeZone: 'Asia/Tokyo', reason: null, events: featuresParam.includes('listoff')
+    ? [{ id: 'ev1', title: '朝会', start: '2026-11-02T00:00:00Z', end: '2026-11-02T00:30:00Z', allDay: false, online: true, hasExternalAttendees: false, attendeeCount: 3 }] : [] } }) as never,
+  // Answered even with 会議 off (the server would answer none): the screen must not show them by itself.
+  getMeetingArrivals: async () => featuresParam.includes('listoff')
+    ? { available: true, items: [{ recordId: 'meeting-0000cc', title: 'A社 定例', version: 2, meetingAt: '2026-11-02T01:00:00Z', status: 'arrived' as const, attendeeCount: 2, by: null, byYou: false, series: false, autoSeries: false, made: null }] }
+    : { available: false, items: [] },
 }
 installElectronAPI(api)
 

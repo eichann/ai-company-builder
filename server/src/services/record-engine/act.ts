@@ -19,7 +19,7 @@ import { BUNDLE_PLACED_TYPES, bundleLinkName, placeWithin, WIDER_THAN_BUNDLE } f
 import { linkAllowed, type RecordReader } from '../record-access'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
-import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict, fileLinksUnavailable, OK_BY_CANNOT_READ, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict, fileLinksUnavailable, OK_BY_CANNOT_READ, featureOffRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import { callVia, type ActorInput } from './types'
 import { checkValue, NOTE_MAX, OK_REQUIRED, parseMaterials, parseOkStatement, provenance, REF_RE } from './values'
 
@@ -173,6 +173,8 @@ export function acting(ctx: EngineContext) {
       const { records, reader } = opened
       const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId]).find(r => reader.record(r)) : undefined
       if (!row || serviceStateOnly(row.type)) return null
+      // 「見るだけ」 (its feature is off): nothing to press.
+      if (ctx.deps.featureOff?.(member.companyId, row.type)) return null
       const def = currentTypes(records).get(row.type)?.definition
       if (!def) return null
       const current = stateOf(records, row, def)
@@ -199,6 +201,8 @@ export function acting(ctx: EngineContext) {
       if (!row) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
       // Approving / sending run through their services only (a company's definition adding an action changes nothing).
       if (serviceStateOnly(row.type)) return refuse('forbidden', STATE_CHANGED_BY_SERVICE.error, { code: STATE_CHANGED_BY_SERVICE.code })
+      const off = featureOffRefusal(ctx.deps.featureOff, member.companyId, row.type)
+      if (off) return off
       const def = currentTypes(records).get(row.type)?.definition
       if (!def) return conflict('この記録の型の定義がありません', 'TYPE_UNKNOWN')
       const action: ActionDef | undefined = Object.prototype.hasOwnProperty.call(def.actions, actionName) ? def.actions[actionName] : undefined

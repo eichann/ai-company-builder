@@ -81,6 +81,7 @@ const TYPES: Record<string, string> = {
   SecurityAlerts: 'SecurityAlertsView',
   SecurityAlertSettings: 'SecurityAlertSettings',
   RecordSettings: 'RecordSettings',
+  Features: 'FeaturesView',
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
   Google: 'GoogleAdminView',
@@ -428,6 +429,9 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
   it('「記録とやることの一覧を使う」 (the records switch)', async () => {
     await expectShape('RecordSettings', USERS.owner, 'GET', `${base}/records/settings`)
     await expectShape('RecordSettings', USERS.admin, 'PUT', `${base}/records/settings`, { enabled: false })
+    await expectShape('Features', USERS.member, 'GET', `${base}/features`)
+    await expectShape('Features', USERS.admin, 'PUT', `${base}/features`, { feature: 'projects', on: false })
+    await expectShape('Features', USERS.owner, 'PUT', `${base}/features`, { feature: 'projects', on: true })
   })
 
   it('emergency stop (「AI の緊急停止」)', async () => {

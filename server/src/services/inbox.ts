@@ -25,6 +25,7 @@
  * caller's own.
  */
 import { INBOX_ACTIONS, INBOX_ACTOR, WAIT_OVER_ACTION } from '../../shared/core/core-types'
+import { FEATURE_OFF } from '../../shared/core/features'
 import type { ConnectorRole, RoleResolution } from '../../shared/core/connector-roles'
 import {
   companyDomains, defaultIntakeSettings, parseIntakeSettings, pollWindow, routeIncoming, BACKFILL_DAYS,
@@ -118,6 +119,13 @@ const DM_REPLY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
 
 export interface InboxDeps {
   companyData: CompanyDataSource
+  /**
+   * 「使う機能」 受信の振り分け・返事のお願い is on (records.md "Features on and off"). Off: nothing comes in
+   * (the clock's mail poll, Slack's signals, our own replies), 「返事を待つ」 waits for nothing, and the
+   * AI's judgement / reply check and 引き受ける answer 409 FEATURE_OFF. What came in before stays
+   * readable. Absent → on.
+   */
+  enabled?: (companyId: string) => boolean
   clock: Clock
   ids: IdGenerator
   writer: Pick<ServiceRecordWriter, 'create' | 'transition' | 'retitle'>
@@ -221,6 +229,8 @@ export function createInboxService(deps: InboxDeps) {
   const handleOf = (companyId: string) => companyData.forCompany(companyId)
   const notFound = () => refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
   const disabled = () => refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
+  const featureOn = (companyId: string) => deps.enabled?.(companyId) ?? true
+  const featureOff = () => refuse('conflict', FEATURE_OFF.error, { code: FEATURE_OFF.code })
 
   /** The settings in force (a stored document that no longer validates reads as the defaults). */
   function settingsOf(companyId: string): IntakeSettings {
@@ -487,6 +497,8 @@ export function createInboxService(deps: InboxDeps) {
     if (!msg) { console.warn('[inbox] a message without the required pointers was skipped'); return 'skipped' }
     const handle = handleOf(companyId)
     if (!handle.records.settings().enabled) return 'skipped'
+    // The inbox turned off: nothing comes in (Slack's signals, our own replies) until it is on again.
+    if (!featureOn(companyId)) return 'skipped'
     if (deps.roleOf(companyId, reporterId) === null) return 'skipped'
     if (handle.inbox.message(msg.channel, msg.messageId)) return 'duplicate'
     const settings = settingsOf(companyId)
@@ -598,6 +610,7 @@ export function createInboxService(deps: InboxDeps) {
     const { companyId, userId } = input
     const handle = handleOf(companyId)
     if (!handle.records.settings().enabled) return null
+    if (!featureOn(companyId)) return null
     const member = memberOf(companyId, userId)
     if (!member) return null
     const interaction = handle.records.byIds([input.interactionId])[0]
@@ -1040,6 +1053,8 @@ export function createInboxService(deps: InboxDeps) {
      * requests between members (the clock's yield).
      */
     async pollCompany(companyId: string, between: () => Promise<void> = async () => {}): Promise<number> {
+      // The inbox turned off: no mailbox is read (the clock skips it; on again, it reads from where it stopped).
+      if (!featureOn(companyId)) return 0
       const source = await sourceFor(companyId)
       if (source?.ready) {
         for (const { userId } of deps.memberAddresses(companyId)) {
@@ -1104,6 +1119,7 @@ export function createInboxService(deps: InboxDeps) {
     claim(member: Member, recordId: string, body: unknown): Outcome<{ record: RecordSummary }> {
       const handle = handleOf(member.companyId)
       if (!handle.records.settings().enabled) return disabled()
+      if (!featureOn(member.companyId)) return featureOff()
       const found = readable(member, recordId, 'interaction')
       if (!found) return notFound()
       const cur = fieldsOf(handle, recordId)
@@ -1139,6 +1155,7 @@ export function createInboxService(deps: InboxDeps) {
     judge(member: Member, actor: ServiceActor, recordId: string, body: unknown): Outcome<InboxJudgementResult> {
       const handle = handleOf(member.companyId)
       if (!handle.records.settings().enabled) return disabled()
+      if (!featureOn(member.companyId)) return featureOff()
       const found = readable(member, recordId, 'interaction')
       if (!found) return notFound()
       const bad = (error: string) => refuse('bad-request', error, { code: 'BAD_REQUEST' })
@@ -1235,6 +1252,7 @@ export function createInboxService(deps: InboxDeps) {
     replyCheck(member: Member, actor: ServiceActor, recordId: string, body: unknown): Outcome<InboxReplyCheckResult> {
       const handle = handleOf(member.companyId)
       if (!handle.records.settings().enabled) return disabled()
+      if (!featureOn(member.companyId)) return featureOff()
       const found = readable(member, recordId, 'interaction')
       if (!found) return notFound()
       const bad = (error: string) => refuse('bad-request', error, { code: 'BAD_REQUEST' })

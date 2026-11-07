@@ -93,6 +93,12 @@ export interface RecordEngineDeps {
    * default settings and no company holidays.
    */
   replyGuideline?: (companyId: string, receivedAt: string) => string
+  /**
+   * 「使う機能」 (shared/core/features.ts, records.md "Features on and off"): are records of this
+   * type 「見るだけ」 now (its feature is off)? Then nothing of it is created and no action, undo
+   * or link change runs on it (409 FEATURE_OFF); reading is unchanged. Absent → never.
+   */
+  featureOff?: (companyId: string, type: string) => boolean
 }
 
 /** The entry a notify is about (the record's type and its server fields after the entry). */

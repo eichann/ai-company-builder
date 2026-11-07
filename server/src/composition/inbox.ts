@@ -36,6 +36,8 @@ export interface InboxLaneDeps {
   serviceRecords: ServiceRecordWriter
   roleOf: (companyId: string, userId: string) => string | null
   taskSettings: (companyId: string) => TaskSettings
+  /** 「使う機能」 受信の振り分け・返事のお願い is on (records.md "Features on and off"). */
+  inboxOn?: InboxDeps['enabled']
   /** Role resolution (connector-roles.md), from lane A. */
   roles?: InboxDeps['roles']
   /** Lane A's hook for Slack's signals (a DM, a mention, an @channel for a member; never the text). */
@@ -111,6 +113,7 @@ export function wireInboxLane(deps: InboxLaneDeps) {
       })
     },
     taskSettings: deps.taskSettings,
+    enabled: deps.inboxOn,
     roles: deps.roles,
     connectorReadsFor: deps.connectorReadsFor,
     autoRunFor: deps.autoRunFor,

@@ -12,6 +12,7 @@
 //   recordViews:findHome 探す with nothing typed: the member's unfinished 案件, this week's meetings
 // The server answers only what the member may read (counts included); nothing is added here.
 
+import { featuresFrom, typeIsViewOnly, type CompanyFeatures } from '../../../../shared/core/features'
 import type { TypeDefinition } from '../../../../shared/core/record-types'
 import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
@@ -69,10 +70,14 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
     error: a === null || a.status >= 500 ? RECORD_VIEWS_OFFLINE_TEXT : '表示できませんでした。',
   })
 
-  async function types(companyId: string): Promise<Map<string, TypeDefinition>> {
+  /** The type definitions in force and the company's 「使う機能」 (an older server sends none = everything on). */
+  async function typesAnswer(companyId: string): Promise<{ defs: Map<string, TypeDefinition>; features: CompanyFeatures }> {
     const a = await call(companyId, 'GET', '/records/types')
-    const list = a?.status === 200 ? (a.json?.data as { types?: RecordTypeView[] } | undefined)?.types ?? [] : []
-    return new Map(list.map(t => [t.definition.name, t.definition]))
+    const data = a?.status === 200 ? (a.json?.data as { types?: RecordTypeView[]; features?: unknown } | undefined) : undefined
+    return { defs: new Map((data?.types ?? []).map(t => [t.definition.name, t.definition])), features: featuresFrom(data?.features) }
+  }
+  async function types(companyId: string): Promise<Map<string, TypeDefinition>> {
+    return (await typesAnswer(companyId)).defs
   }
 
   async function list(companyId: string, query: Record<string, unknown>): Promise<RecordListResult> {
@@ -143,10 +148,10 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
     async card(companyId: string, recordId: string): Promise<RecordCardResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
       const id = encodeURIComponent(recordId)
-      const [item, history, defs, members, runs, me, viewers] = await Promise.all([
+      const [item, history, { defs, features }, members, runs, me, viewers] = await Promise.all([
         call(companyId, 'GET', `/records/item/${id}`),
         call(companyId, 'GET', `/records/item/${id}/history`),
-        types(companyId),
+        typesAnswer(companyId),
         memberNames(companyId),
         call(companyId, 'GET', '/ai-runs'),
         myId(),
@@ -186,6 +191,8 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
         success: true,
         card: {
           record: summaryView(detail.record, def),
+          // Its feature turned off: 「見るだけ」 (the card offers nothing to press).
+          ...(typeIsViewOnly(detail.record.type, features) ? { featureOff: true as const } : {}),
           version: detail.record.version,
           ...(view ? { detail: view } : {}),
           fields: cardFields(rest, def, members),

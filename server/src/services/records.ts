@@ -15,6 +15,7 @@ import { fileLinkPath, fileLinkShown, RECORD_ID_RE } from '../../shared/core/rec
 import { pathKey } from '../../shared/core/paths'
 import { turnsOf } from '../../shared/core/record-turns'
 import { enteredByWaitOver, SERVICE_STATE_TYPES, TASK_WAIT_OVER_STEP, WAIT_OVER, waitCameBack } from '../../shared/core/core-types'
+import { featuresFrom, typeIsViewOnly, type CompanyFeatures } from '../../shared/core/features'
 import type {
   RecordDetail, RecordFieldValue, RecordIndexProblem, RecordLinkView, RecordQueryResult, RecordSettings, RecordSummary, RecordTypeView,
 } from '../../shared/types/records'
@@ -57,6 +58,13 @@ export interface RecordServiceDeps {
    * for `decisionChecks` (decision version 6). Without it the detail carries none.
    */
   whoMay?: (member: Member, recordId: string, actions: readonly string[]) => { may: Record<string, boolean>; responsible: string[]; cannotRead: string[] } | null
+  /**
+   * 「使う機能」 (records.md "Features on and off"): the company's features, answered with the type
+   * definitions (`GET /records/types`, session and the AI's token), and whether records of a type are
+   * 「見るだけ」 now — those stay readable everywhere but are out of 「あなたの番」 and 「AI の番」 (no
+   * action can be taken on them). Absent → every feature on.
+   */
+  features?: (companyId: string) => CompanyFeatures
 }
 
 /**
@@ -318,6 +326,12 @@ export function createRecordService(deps: RecordServiceDeps) {
     return { total: waiting.length, records: out }
   }
   const handleOf = (member: Member) => companyData.forCompany(member.companyId)
+  const featuresOf = (member: Member): CompanyFeatures => deps.features?.(member.companyId) ?? featuresFrom(null)
+  /** Whether a type's records are 「見るだけ」 for this member's company now (read once per answer). */
+  const viewOnlyOf = (member: Member) => {
+    const f = featuresOf(member)
+    return (type: string) => typeIsViewOnly(type, f)
+  }
   /** Records of an earlier connection of an outside system (plugins.md "Connections"). */
   const oldConnectionIds = (member: Member): Set<string> => new Set(handleOf(member).plugins.oldConnectionRecordIds())
   const enabled = (member: Member) => handleOf(member).records.settings().enabled
@@ -376,7 +390,7 @@ export function createRecordService(deps: RecordServiceDeps) {
       return indexer.schedule(member.companyId)
     },
 
-    types(member: Member): Outcome<{ types: RecordTypeView[] }> {
+    types(member: Member): Outcome<{ types: RecordTypeView[]; features: CompanyFeatures }> {
       const records = handleOf(member).records
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const versions = new Map<string, number[]>()
@@ -384,7 +398,8 @@ export function createRecordService(deps: RecordServiceDeps) {
       const types = [...currentTypes(records)].sort(([a], [b]) => (a < b ? -1 : 1)).map(([name, t]): RecordTypeView => ({
         definition: t.definition, source: t.source, versions: versions.get(name) ?? [t.version],
       }))
-      return ok({ types })
+      // 「使う機能」 rides along (an older app ignores it): the app's tools and screens follow it.
+      return ok({ types, features: featuresOf(member) })
     },
 
     query(member: Member, body: unknown): Outcome<RecordQueryResult> {
@@ -491,7 +506,8 @@ export function createRecordService(deps: RecordServiceDeps) {
       const records = handleOf(member).records
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const reader = recordReader(member, handleOf(member).scopes.listWithRules())
-      const waiting = waitingFor(records, [member.userId, ...actsFor(member)], oldConnectionIds(member)).filter(w => reader.record(w.row))
+      const viewOnly = viewOnlyOf(member)
+      const waiting = waitingFor(records, [member.userId, ...actsFor(member)], oldConnectionIds(member)).filter(w => reader.record(w.row) && !viewOnly(w.row.type))
       const answer = turnAnswer(records, member, waiting)
       // Given back by the clock (task version 12): 「先方からの返事が来ていません（n日）」 and the Mac notice.
       for (const r of answer.records) {
@@ -525,9 +541,10 @@ export function createRecordService(deps: RecordServiceDeps) {
       const ids = [member.userId, ...actsFor(member)]
       const reader = recordReader(member, handleOf(member).scopes.listWithRules())
       const seen = new Set<string>()
+      const viewOnly = viewOnlyOf(member)
       const visible = ['assignee', 'next_actor']
         .flatMap(field => records.candidates({ types: names, fields: [{ name: field, values: ids }] }, MAX_CANDIDATES))
-        .filter(r => !seen.has(r.id) && (seen.add(r.id), true) && reader.record(r))
+        .filter(r => !seen.has(r.id) && (seen.add(r.id), true) && reader.record(r) && !viewOnly(r.type))
       const states = new Map(records.states(visible.map(r => r.id)).map(s => [s.recordId, s]))
       const waiting = visible.filter(r => aiStates.get(r.type)?.has(states.get(r.id)?.state ?? '')).map(row => {
         const fields = parseFields(states.get(row.id)?.fields)
@@ -553,6 +570,8 @@ export function createRecordService(deps: RecordServiceDeps) {
       const reader = recordReader(member, handleOf(member).scopes.listWithRules())
       const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId]).find(r => reader.record(r)) : undefined
       if (!row) return 'not-found'
+      // 「見るだけ」 (its feature off): no AI step runs on it until the feature is on again.
+      if (viewOnlyOf(member)(row.type)) return 'not-ai-turn'
       const def = currentTypes(records).get(row.type)?.definition
       const state = records.states([row.id])[0]
       if (!def || !state) return 'not-ai-turn'

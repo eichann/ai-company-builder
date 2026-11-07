@@ -16,7 +16,7 @@ import { DEFAULT_TASK_SETTINGS, replyTarget } from '../../../shared/core/task-se
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
-import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, fileLinksUnavailable, FOLDER_NOT_PLACEABLE, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, fileLinksUnavailable, FOLDER_NOT_PLACEABLE, featureOffRefusal, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { checkValue, provenance } from './values'
 import { MEETING_OUTPUT_KEY_MAX } from '../../../shared/core/meeting-outputs'
@@ -175,6 +175,9 @@ export function creating(ctx: EngineContext) {
       const def = currentTypes(records).get(b.type)?.definition
       if (!def) return bad('Unknown type', 'TYPE_UNKNOWN')
       if (SERVICE_OWNED_TYPES.includes(def.name)) return bad(TYPE_CREATED_BY_SERVICE.error, TYPE_CREATED_BY_SERVICE.code)
+      // A feature turned off makes nothing new (「使う機能」: a `project` while プロジェクト is off).
+      const off = featureOffRefusal(deps.featureOff, member.companyId, def.name)
+      if (off) return off
       if (def.storage === 'file') return bad('Records of this type are files: create the file', 'FILE_RECORD')
       if (typeof b.title !== 'string' || b.title.trim() === '' || b.title.length > 200) return bad('title: 1–200 characters')
       if (b.summary !== undefined && (typeof b.summary !== 'string' || b.summary.length > 300)) return bad('summary: up to 300 characters')

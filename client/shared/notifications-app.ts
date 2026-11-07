@@ -198,4 +198,16 @@ export function meetingTurns(items: readonly TaskListItem[], ai: readonly AiTurn
   return out
 }
 
+/**
+ * 「議事録が届きました」 for the title bar (owner decision 2026-11-07, records.md "Features on and off"):
+ * where the department shows no task list, the meetings that arrived and nobody asked the AI to read
+ * yet (`arrived`, nobody's turn) are counted in 「あなたの番」 too, with ［AI に読ませる］. Whoever may
+ * see the meeting gets it; once someone presses it, it is no longer `arrived` and drops out. A
+ * meeting already among `taken` (in 「AI の番」) is not listed twice.
+ */
+export function arrivedMeetingTurns(arrivals: ReadonlyArray<{ recordId: string; title: string; status: string }>, taken: ReadonlySet<string> = new Set()): MeetingTurn[] {
+  return arrivals.filter(a => a.status === 'arrived' && !taken.has(a.recordId))
+    .map(a => ({ id: a.recordId, title: a.title, kind: 'minutes' as const, text: '議事録が届きました', needsPerson: true, ai: null }))
+}
+
 export type { NotificationItem, NotificationKind, NotificationList }

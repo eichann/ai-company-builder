@@ -86,6 +86,11 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
   the app reads it as `teamMode.on` of `GET /me/work-switches` (`workSwitches:get`). The task card
   reading it is the screen's (画面乙); the server does not refuse team actions by it yet.
 
+## 「使う機能」 (owner decisions 2026-11-07)
+
+The company's feature switches (`GET|PUT /features`, `company_features` behind the handle's `tasks`)
+live next to the task settings but in their own table: `records.md` "Features on and off".
+
 ## Each member's switches (自分の設定, owner decision 2026-11-02)
 
 - 受信を読む and AI が自動で進める are each member's own, within the company's (rule:

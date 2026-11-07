@@ -51,6 +51,8 @@ import { createCompanyScopeService } from './services/company-scopes'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
 import { createTaskSettingsService } from './services/task-settings'
+import { createFeatureService } from './services/features'
+import { noticeTurnedOff } from '../shared/core/features'
 import { replyTarget } from '../shared/core/task-settings'
 import { createWorkSwitches } from './services/work-switches'
 import { slackFeaturesOf } from './services/slack-client'
@@ -250,6 +252,20 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // Notices (知らせ, notifications.md): written at the engine's notify points, pushed as a bare version.
   // Who belongs to a department may decide who writes there (department rules): membership changes take the rule editor's outdated-app guard.
   const taskSettings = createTaskSettingsService({ ...repos, ...shared, guardWrite: permissionEditor.guardWrite })
+  // 「使う機能」 (records.md "Features on and off"): one switch per feature, all on by default. A change
+  // tells every member's app to read again (the `records` signal: content-free, notifications.md).
+  const features = createFeatureService({
+    ...shared,
+    changed: companyId => push.notify(companyId, repos.memberships.listByCompany(companyId).map(m => m.user_id), { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+  })
+  const typeOff = (companyId: string, type: string) => features.typeOff(companyId, type)
+  const featureOn = (feature: 'meetings' | 'inbox' | 'decisions' | 'projects') => (companyId: string) => features.isOn(companyId, feature)
+  // 受信を読む follows the inbox feature too: off, it is off for everyone (as the company's own switch),
+  // without changing what the company chose for it.
+  const settingsWithFeatures = (companyId: string) => {
+    const s = taskSettings.settingsOf(companyId)
+    return features.isOn(companyId, 'inbox') ? s : { ...s, readIncoming: { ...s.readIncoming, allowed: false } }
+  }
   // Each member's own 受信を読む / AI が自動で進める within the company's (自分の設定, tasks.md).
   const readingConnected = (companyId: string, userId: string) => {
     const connectors = shared.companyData.forCompany(companyId).connectors
@@ -262,7 +278,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   }
   const workSwitches = createWorkSwitches({
     ...shared,
-    settingsOf: companyId => taskSettings.settingsOf(companyId),
+    settingsOf: settingsWithFeatures,
     readingConnected,
     // The roles are wired below (Google block, Slack in the connectors lane); asked per request only.
     channelsOf: async companyId => {
@@ -274,7 +290,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     },
   })
   const readIncoming = {
-    allowed: (companyId: string) => taskSettings.settingsOf(companyId).readIncoming.allowed,
+    allowed: (companyId: string) => settingsWithFeatures(companyId).readIncoming.allowed,
     on: (companyId: string, userId: string) => workSwitches.isOn(companyId, userId, 'readIncoming'),
   }
   // Absence and the delegate (代わりの人, records.md): the ONE resolution of who acts for whom
@@ -301,6 +317,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     // 大事な知らせを Slack の DM で (lane A, composition/connectors.ts): called after construction only.
     outside: (companyId, rows) => connectorsLane.noticesOutside(companyId, rows),
+    // A feature turned off writes none of its notices, nor any about its 「見るだけ」 records.
+    noticeOff: (companyId, kind, recordType) => noticeTurnedOff(features.of(companyId), kind, recordType),
   })
   /** The engine's notify: the notices of the people an entry concerns (the push signal is `recordChanged`'s). */
   const notifyRecords = (companyId: string, userIds: string[], change?: RecordChange) => {
@@ -348,12 +366,14 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       const s = taskSettings.settingsOf(companyId)
       return replyTarget(receivedAt, s.reply, s.companyHolidays.map(h => h.date)).date
     },
+    featureOff: typeOff,
   })
 
   // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,
   // decisions): handed to those services only, never to a route (records.md "Service writer").
   const serviceRecords = createServiceRecordWriter({
     ...shared,
+    featureOff: typeOff,
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     notify: notifyRecords,
@@ -364,6 +384,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const contentEraser = sqliteRecordContentEraser(conn)
   const decisions = createDecisionService({
     ...shared,
+    enabled: featureOn('decisions'),
     writer: serviceRecords,
     tokenDigest: sha256TokenDigest,
   })
@@ -456,6 +477,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     fixed: fixedPayloads,
     operations: pluginOperations,
     decisions,
+    decisionsOn: featureOn('decisions'),
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     admins: companyId => repos.memberships.listByCompany(companyId).filter(m => m.role === 'owner' || m.role === 'admin').map(m => m.user_id),
     managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
@@ -569,6 +591,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // with the member's own permission; makes `meeting` records through the service writer.
   const minutes = createMinutesService({
     ...shared,
+    enabled: featureOn('meetings'),
+    projectsOn: featureOn('projects'),
     writer: serviceRecords,
     meetings: coreConnectors.roleProviders.meetings,
     tokenDigest: sha256TokenDigest,
@@ -632,9 +656,14 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyIds: () => repos.companies.allIds(),
     // 「返事を待つ」's default day counts the company's business days (task settings).
     holidaysOf: companyId => taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
+    // 「返事を待つ」 needs the inbox to see their answer (records.md "Features on and off").
+    inboxOn: featureOn('inbox'),
   })
 
-  const records = createRecordService({ ...shared, indexer: recordIndexer, recordFiles, actsFor, whoMay: (member, recordId, actions) => recordEngine.whoMay(member, recordId, actions) })
+  const records = createRecordService({
+    ...shared, indexer: recordIndexer, recordFiles, actsFor, whoMay: (member, recordId, actions) => recordEngine.whoMay(member, recordId, actions),
+    features: companyId => features.of(companyId),
+  })
   // Execution runs of 「AI の番」 (S10b, records.md "Execution runs"): the server stores and checks; the AI runs on the PC.
   const aiRuns = createAiRunService({
     ...shared, tokenDigest: sha256TokenDigest, aiTurnOf: (member, recordId, step) => records.aiTurnOf(member, recordId, step),
@@ -677,6 +706,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     conn, ...shared, memberships: repos.memberships, serviceRecords,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     taskSettings: companyId => taskSettings.settingsOf(companyId),
+    inboxOn: featureOn('inbox'),
     roles: connectorsLane.connectorRoles,
     onSlackSignal: listen => connectorsLane.onSlackSignal(listen),
     inboxSources: coreConnectors.inboxSources,
@@ -755,6 +785,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     invitations: createInvitationService({ ...repos, ...shared }),
     departments: createDepartmentService({ ...repos, ...shared, repoStore, companyFolders }),
     taskSettings,
+    features,
     workSwitches,
     // 見られる人 for the lists (records.md "Who can see it").
     viewers: createViewersService({ ...repos, ...shared }),
@@ -829,7 +860,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyScopes: createCompanyScopeService(shared),
     records,
     // 束ねる種類 (records.md "Bundle kinds"): what each department makes, and the core kind's name.
-    bundleKinds: createBundleKinds({ companyData: shared.companyData, shelf: pluginShelf, settingsOf: companyId => taskSettings.settingsOf(companyId) }),
+    bundleKinds: createBundleKinds({ companyData: shared.companyData, shelf: pluginShelf, settingsOf: companyId => taskSettings.settingsOf(companyId), projectsOn: featureOn('projects') }),
     // The names behind person ids in the AI's record answers (records.md "Typed tools in the app").
     // 探す (records.md "探す"): records found by words, with department, mine, 案件 and summaries.
     recordFind: createRecordFind({ companyData: shared.companyData }),

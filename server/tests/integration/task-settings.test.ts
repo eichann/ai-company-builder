@@ -188,3 +188,30 @@ describe('department membership (所属する部署)', () => {
     expect(() => db.prepare('INSERT INTO department_members (company_id, department_id, user_id, created_at) VALUES (?, ?, ?, ?)').run(CO, OTHER_DEPT, 'ts-member', ts())).toThrow(/must be the company of its department/)
   })
 })
+
+// 「使う機能」 (records.md "Features on and off"): who changes them on the real routes, and 受信を読む
+// following the inbox feature without the company's own choice being changed.
+describe('the company\'s features (使う機能)', () => {
+  it('every member reads them (all on); only owners and admins change one; 受信を読む is off for everyone while the inbox is, and back after', async () => {
+    const read = await call('ts-member', 'GET', `${BASE}/features`)
+    expect(read.status).toBe(200)
+    expect(read.json.data.features).toEqual({ taskList: true, meetings: true, inbox: true, decisions: true, projects: true })
+    expect(read.json.data.canEdit).toBe(false)
+    expect((await call('ts-member', 'PUT', `${BASE}/features`, { feature: 'inbox', on: false })).status).toBe(403)
+    expect((await call('ts-manager', 'PUT', `${BASE}/features`, { feature: 'inbox', on: false })).status).toBe(403)
+    expect((await call('ts-admin', 'PUT', `${BASE}/features`, { feature: 'inbox' })).status).toBe(400)
+    expect((await call('ts-stranger', 'GET', `${BASE}/features`)).status).toBe(404)
+
+    expect((await call('ts-member', 'GET', `${BASE}/me/work-switches`)).json.data.readIncoming.allowed).toBe(true)
+    const off = await call('ts-admin', 'PUT', `${BASE}/features`, { feature: 'inbox', on: false })
+    expect(off.status).toBe(200)
+    expect(off.json.data.features.inbox).toBe(false)
+    expect((await call('ts-member', 'GET', `${BASE}/me/work-switches`)).json.data.readIncoming.allowed).toBe(false)
+    // The company's own choice is untouched; another company's inbox stays on.
+    expect((await call('ts-member', 'GET', `${BASE}/task-settings`)).json.data.settings.readIncoming.allowed).toBe(true)
+    expect((await call('ts-stranger', 'GET', `/api/companies/${OTHER}/features`)).json.data.features.inbox).toBe(true)
+
+    await call('ts-owner', 'PUT', `${BASE}/features`, { feature: 'inbox', on: true })
+    expect((await call('ts-member', 'GET', `${BASE}/me/work-switches`)).json.data.readIncoming.allowed).toBe(true)
+  })
+})

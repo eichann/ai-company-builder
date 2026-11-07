@@ -148,6 +148,11 @@ export function removableOf(self: Pick<RecordSummary, 'id' | 'version'>, l: { na
 }
 export interface RecordCardView {
   record: RecordViewSummary
+  /**
+   * 「見るだけ」 (records.md "Features on and off"): the company turned this record's feature off —
+   * the card says `FEATURE_OFF_NOTE` and offers nothing to press (the server refuses any change).
+   */
+  featureOff?: true
   /** The record's version now (what a link change sends as `expectedVersion`). */
   version?: number
   /** A meeting's, a 来た連絡's or a bundle's own parts (`record-details.ts`); absent for other kinds. */

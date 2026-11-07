@@ -265,6 +265,8 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/security-alerts/settings', w => ({ path: `${C(w)}/security-alerts/settings`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/task-settings', w => ({ path: `${C(w)}/task-settings` }), MEMBERS),
   r('PUT /api/companies/:companyId/task-settings', w => ({ path: `${C(w)}/task-settings`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/features', w => ({ path: `${C(w)}/features` }), MEMBERS),
+  r('PUT /api/companies/:companyId/features', w => ({ path: `${C(w)}/features`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   // 自分の設定 (受信を読む, AI が自動で進める; tasks.md): any member, their own only.
   r('GET /api/companies/:companyId/me/work-switches', w => ({ path: `${C(w)}/me/work-switches` }), MEMBERS),
   r('PUT /api/companies/:companyId/me/work-switches', w => ({ path: `${C(w)}/me/work-switches`, body: {} }), [400, 400, 400, 400, 404, 401]),

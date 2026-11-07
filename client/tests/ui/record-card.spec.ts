@@ -237,3 +237,22 @@ test('a 非公開 案件 shows who takes part; who may change it adds and takes 
   await expect(named.getByRole('button', { name: /を外す$/ })).toHaveCount(0)
   expectNoPageErrors(reader)
 })
+
+// 「使う機能」 (owner decision 2026-11-07): a record of a feature turned off is 「見るだけ」 — the card
+// says so and offers nothing to press. Catches the note missing and ［済んだ］ / ［取り込まない］ still shown.
+test('a record of a feature turned off: 「この機能は今オフです」 and nothing to press', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { record: 'slack', off: '1' })
+  const card = page.getByTestId('record-card')
+  await expect(card.getByTestId('feature-off')).toContainText('この機能は今オフです')
+  await expect(card.getByText('資料送付のお願い').first()).toBeVisible()
+  await expect(card.getByRole('button', { name: '済んだ', exact: true })).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('a record whose feature is on has no such note', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { record: 'slack' })
+  const card = page.getByTestId('record-card')
+  await expect(card.getByRole('button', { name: '済んだ', exact: true })).toBeVisible()
+  await expect(card.getByTestId('feature-off')).toHaveCount(0)
+  expectNoPageErrors(state)
+})

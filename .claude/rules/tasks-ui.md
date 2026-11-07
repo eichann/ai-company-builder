@@ -780,6 +780,31 @@ link stays possible (［＋ファイル・フォルダをつなぐ］, ［〇〇
   drags as its record). Preview pages answer drops with the real `dropLinkPlan`
   (`tests/ui/fixtures/link-drop.ts`).
 
+## Features on and off (「使う機能」, owner decisions 2026-11-07; `records.md` "Features on and off")
+
+`tasks:list` answers `features` (from `GET /records/types`, all on when absent) and
+`decisionsToConfirm` (`POST /records/query { type: decision, state: [unconfirmed], fields: { owner: me } }`,
+asked only while 決めたこと is on). AppShell reads them with `featuresFrom`:
+
+- **やることの一覧 off**: no やること tab anywhere (`tasksShown` also needs `features.taskList`;
+  `taskListDepartmentIds` still narrows when on). Instead the tab **「確かめること」** (`CorePressPanel.tsx`):
+  「今日の予定」 (while 会議 is on), the arrived minutes (`MeetingBanners`, ［AI に読ませる］), then
+  「確かめること」 — approvals waiting for the member and what the AI prepared for them
+  (`corePressItems`, `client/shared/tasks.ts`; `aiPrepared`: a handed-over `prep_summary` or
+  「議事録を確認する」), and 決めたこと to confirm. Rows open the card where the press happens. The
+  morning summary opens 「確かめること」. The title bar counts the arrived minutes too
+  (`arrivedMeetingTurns`, `notifications.md`), whoever may see the meeting, until someone presses
+  ［AI に読ませる］.
+- **会議と議事録 off**: no 「今日の予定」 (the list's `showCalendar`; `useCalendarToday` reads nothing),
+  no 「議事録が届きました」, no 「議事録を確かめる」, no ［自分で読み取る］.
+- **決めたこと off**: the meeting lines say only やることの案 (`madeWords`, `MeetingBanners`'s title), the
+  manual reading's first message asks for no decision (`startMinutesReading(…, features)`).
+- **プロジェクト off**: `departmentBundleKind` gives null for the core's kind (`coreOff`), so nothing
+  offers 「新しいプロジェクトにする」; a business plugin's kind is unchanged.
+- **A record whose feature is off** (`recordViews:card` `featureOff`): the record card says
+  「この機能は今オフです」 with one line on what it means (`FeatureOffBand`) and draws no actions, no
+  案件 field and no meeting buttons.
+
 ## Minutes and AI turns (S11, owner decision 2026-11-01: 議事録の帯をやめる)
 
 Since 2026-11-04 (meetings for their attendees, design §4-5) one compact block sits above the list

@@ -1,6 +1,7 @@
 /** The engine's refusals that more than one operation (or another service) gives. */
 import { SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
 import { NO_COMPANY_FOLDER_FILE_LINK } from '../../../shared/core/company-folder'
+import { FEATURE_OFF } from '../../../shared/core/features'
 import { refuse } from '../outcome'
 
 export const conflict = (error: string, code: string, extra: Record<string, unknown> = {}) => refuse('conflict', error, { code, ...extra })
@@ -62,4 +63,12 @@ export function fileLinksUnavailable(hasCompanyFolder: ((companyId: string) => b
   return hasCompanyFolder && !hasCompanyFolder(companyId)
     ? conflict(NO_COMPANY_FOLDER_FILE_LINK.error, NO_COMPANY_FOLDER_FILE_LINK.code)
     : null
+}
+
+/**
+ * A record of a feature the company turned off (「使う機能」, records.md "Features on and off"): it
+ * stays readable (「見るだけ」) but nothing changes it. Null when its feature is on (or not known).
+ */
+export function featureOffRefusal(featureOff: ((companyId: string, type: string) => boolean) | undefined, companyId: string, type: string) {
+  return featureOff && featureOff(companyId, type) ? conflict(FEATURE_OFF.error, FEATURE_OFF.code) : null
 }

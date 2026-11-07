@@ -30,6 +30,7 @@
  *   calendar.ts           the member's own calendar today: event shape, reasons, the day window
  *   business-days.ts      business days: weekends, Japanese public holidays (calculated), company holidays
  *   task-settings.ts      the company's task settings (task list departments, reply 目安, auto-run); replyTarget
+ *   features.ts           the company's 「使う機能」: feature switches, defaults, what each owns, their words
  *   turn-timing.ts        which of the member's 「あなたの番」 is this week's (title bar, list, morning summary)
  *   absences.ts           absence and the delegate (代わりの人): the one resolution of who acts for whom today
  *   connector-roles.ts    the core roles (役目) a core connector serves, and resolving which one serves a role
@@ -63,6 +64,7 @@ export * from './minutes'
 export * from './calendar'
 export * from './business-days'
 export * from './task-settings'
+export * from './features'
 export * from './absences'
 export * from './connector-roles'
 export * from './company-folder'

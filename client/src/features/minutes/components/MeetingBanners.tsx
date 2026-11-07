@@ -27,6 +27,8 @@ interface Props {
   /** Something changed on the server: read the meetings again. */
   onChanged: () => void
   now?: number
+  /** 決めたこと is on (「使う機能」): off, the AI makes no decisions from the minutes and the lines do not say it. */
+  decisionsOn?: boolean
 }
 
 type Toast = { text: string; undo?: () => void }
@@ -39,7 +41,7 @@ function readClosed(companyId: string): Set<string> {
   } catch { return new Set() }
 }
 
-export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, now = Date.now() }: Props) {
+export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, now = Date.now(), decisionsOn = true }: Props) {
   // 「読み終わりました」 closed on this PC (［見る］ or ×), per company.
   const [closed, setClosed] = useState(() => readClosed(companyId))
   // Chosen ［読まない］ here: gone at once while 元に戻す is offered.
@@ -147,7 +149,7 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
   const locked = (id: string) => busy === id || busy === BULK
   const row = ({ m, banner }: (typeof rows)[number]) => {
     const words = meetingRowWords(m, now)
-    const line = banner.kind === 'read' ? `読み終わりました ${m.title}：${madeWords(m.made)}` : words
+    const line = banner.kind === 'read' ? `読み終わりました ${m.title}：${madeWords(m.made, decisionsOn)}` : words
     return (
       <div key={m.recordId} data-banner={m.recordId} className="px-1 py-0.5">
         <div className="flex items-center gap-1.5 text-[12px] leading-5">
@@ -159,7 +161,7 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
           <span title={line} className="min-w-0 flex-1 truncate text-gray-800 dark:text-zinc-100">{line}</span>
           {banner.kind === 'arrived' && <>
             {banner.failedBefore && <span title="前回は AI が読めませんでした。もう一度読ませられます" className="shrink-0 text-[10.5px] text-gray-500 dark:text-zinc-400">前回読めず</span>}
-            <button type="button" disabled={locked(m.recordId)} title="AI に読ませると、決めたこととやることの案を作ります" onClick={() => void read(m)} className={SHORT}>AI に読ませる</button>
+            <button type="button" disabled={locked(m.recordId)} title={decisionsOn ? 'AI に読ませると、決めたこととやることの案を作ります' : 'AI に読ませると、やることの案を作ります'} onClick={() => void read(m)} className={SHORT}>AI に読ませる</button>
             <button type="button" disabled={locked(m.recordId)} onClick={() => void skip(m)} className={QUIET}>読まない</button>
           </>}
           {banner.kind === 'reading' && <>

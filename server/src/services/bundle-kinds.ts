@@ -30,6 +30,8 @@ export interface BundleKindDeps {
   companyData: CompanyDataSource
   shelf: Pick<PluginShelf, 'find'>
   settingsOf: (companyId: string) => Pick<TaskSettings, 'bundleName'>
+  /** 「使う機能」 プロジェクト is on (records.md "Features on and off"); absent → on. */
+  projectsOn?: (companyId: string) => boolean
 }
 
 /** Most records of one type read to see which departments it lives in. */
@@ -112,7 +114,7 @@ export function createBundleKinds(deps: BundleKindDeps) {
         if (!kinds.some(x => x.type === k.type)) kinds.push(k)
       }
       if (!kinds.some(k => k.type === core.type)) kinds.push(core)
-      return ok({ core, departments, kinds })
+      return ok({ core, departments, kinds, ...(deps.projectsOn && !deps.projectsOn(member.companyId) ? { coreOff: true as const } : {}) })
     },
   }
 }

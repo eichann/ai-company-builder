@@ -115,6 +115,59 @@ thing that applies to every company is the push checker's rule on `.acb/types/` 
 used that folder before, and a type someone added while the switch was off would steer the
 engine the day it is turned on.
 
+## Features on and off (「使う機能」, owner decisions 2026-11-07)
+
+The record types stay in the core and are always installed; what a company switches is a
+**feature**, one switch each, all **on** by default (a company that never chose sees no change).
+One copy of the rules: `shared/core/features.ts` (`FEATURE_IDS`, `featuresFrom` — lenient: anything
+missing or not `false` is on —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `FEATURE_NOTICE_KINDS`,
+`noticeTurnedOff`, the words `FEATURE_WORDS` / `FEATURE_OFF_NOTE` / `FEATURE_OFF_CONFIRM`).
+
+| feature | id | its types (「見るだけ」 while off) | what stops |
+|---|---|---|---|
+| やることの一覧 | `taskList` | — (`task` is the core's) | the app's やること tab (`tasks-ui.md` "Features on and off") |
+| 会議と議事録 | `meetings` | `meeting` | discovery (clock + `POST /me/minutes/check`), arrivals, reading / まとまり / skip / auto-series routes, `minutes_arrived`, the AI's `minutes_read` / `minutes_link_bundle`, 「今日の予定」 in the app (`minutes.md` "Switches") |
+| 受信の振り分け・返事のお願い | `inbox` | `interaction`, `reply_request` | the mail poll, Slack's signals, our replies into threads, 「返事を待つ」 (`offersAwait`), the AI's judgement / reply check, 引き受ける, 受信を読む (off for everyone, as the company's own switch), the inbox's notices and tools (`inbox.md`) |
+| 決めたこと | `decisions` | `decision` | `POST /records/decisions` (person and AI: 409 `FEATURE_OFF`), the approval's 「〇〇を承認」 decision (skipped, the approval stands), `decisions_record` and its instructions |
+| プロジェクト | `projects` | `project` | creating a `project` (person and AI), 「どの〇〇の会議ですか？」 where no business kind exists, `GET /records/bundle-kinds` says `coreOff: true` |
+
+- **Storage and API**: table `company_features` (one JSON object per company, behind the handle's
+  `tasks`; no row = all on), apart from the task settings so an older admin console's whole-document
+  PUT never turns a feature back on. `GET /features` (any member, `FeaturesView` in
+  `shared/types/features.ts`, + `canEdit`), `PUT /features { feature, on }` (owner / admin, one switch;
+  403 otherwise, 400 for a bad body) — `services/features.ts`, `routes/task-settings.ts`. A change sends
+  the `records` signal to every member (the apps read again). The same `features` rides on
+  `GET /records/types` (session and the AI's token): an older app ignores it, a newer app reads an
+  older server's answer without it as all on.
+- **「見るだけ」** (records made before the switch-off): still readable everywhere (detail, query,
+  探す, links), but out of 「あなたの番」 / 「AI の番」 / the morning summary, `aiTurnOf` says
+  `not-ai-turn` (no run can be claimed), and no create, action, undo, file or record link change
+  (409 `FEATURE_OFF`; `whoMay` answers null, so a screen offers nothing). The engine asks
+  `RecordEngineDeps.featureOff` (`refusals.ts` `featureOffRefusal`); the **service writer** refuses a
+  create or a transition of such a type (`feature-off`) — the backstop under every service and the
+  server clock (a 返事のお願い whose wait is over is not moved). Exception: a sent mail's receipt
+  (`SERVICE_RECEIPT_TYPES`, `interaction`) is still written while the inbox is off (sending stays on).
+  Turning the feature on again continues from where it stopped: nothing was changed meanwhile.
+- **Notices**: none of a feature's own kinds, and none about a 「見るだけ」 record
+  (`NotificationServiceDeps.noticeOff` → `noticeTurnedOff`, applied before every insert).
+- **Combinations**: 決めたこと off with 会議 on — the minutes reading gets no `decisions_record`, its
+  instructions and first message drop the decision part, the approval step is skipped. プロジェクト off —
+  no `project` made, no まとまり question without a business kind (`meetingAsksBundle`'s
+  `bundleKindInUse`). 受信 off — no 「返事を待つ」, nothing comes in. 会議 off — the business plugin's
+  「会議のあと自動で」 cannot start (a meeting can no longer become read); its button still works.
+- Existing switches keep their meaning: `record_settings.enabled` is still the whole records switch
+  (off = 404 everywhere); `taskListDepartmentIds` still says which departments show the list when
+  やることの一覧 is on; `readIncoming.allowed` is kept as stored and only *read* as off while the inbox
+  is (`composition.ts` `settingsWithFeatures`).
+- Admin console: 詳しい設定 › 「使う機能」 (`/companies/[id]/advanced/features`,
+  `admin/src/components/advanced/features-page.tsx`): the five switches with one line each on what
+  turning it off does; off asks first and says past records stay to read.
+- Tests: `server/tests/unit/features.test.ts` (who changes them, the view-only rules per feature,
+  back on, the receipt exception, the clock, notices, minutes discovery / arrivals, the まとまり
+  question, `coreOff`), `inbox.test.ts` 「使う機能」, `client/tests/records-tools-features.test.ts`,
+  `client/tests/features-screens.test.ts`, `tests/ui/tasks-layout.spec.ts` / `record-card.spec.ts`
+  (「使う機能」), `admin/tests/features.test.tsx` — each guard mutation-checked.
+
 ## Type definitions (`shared/core/record-types.ts`)
 
 - One file per type at `.acb/types/<name>.md` in the company repository (direct children; not
