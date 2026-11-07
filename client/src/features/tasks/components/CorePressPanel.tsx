@@ -1,4 +1,4 @@
-// 「ACB で押すもの」 (owner decision 2026-11-07, records.md "Features on and off"): with the company's
+// 「確かめること」 (owner decision 2026-11-07, records.md "Features on and off"): with the company's
 // task list turned off, the small list of what only ACB can act on — approvals waiting for the
 // member, what the AI prepared for them to check, 決めたこと to confirm (［そうです］ on its card) and,
 // given by the screen, arrived minutes (［AI に読ませる］). 「今日の予定」 (会議と議事録) sits above it.
@@ -42,7 +42,7 @@ export function CorePressPanel({ companyId, data, showCalendar, meetings, onOpen
     </button>
   )
   return (
-    <section aria-label="ACB で押すもの" className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <section aria-label="確かめること" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2 pt-1">
         {showCalendar && events.length > 0 && (
           <div data-testid="press-calendar" className="mb-2">
@@ -51,8 +51,8 @@ export function CorePressPanel({ companyId, data, showCalendar, meetings, onOpen
           </div>
         )}
         {meetings}
-        <p className="px-2.5 pt-2 text-[13px] font-medium text-gray-800 dark:text-zinc-100">ACB で押すもの</p>
-        <p className="px-2.5 pb-1 text-[11px] leading-relaxed text-gray-500 dark:text-zinc-400">承認や確かめることなど、ACB の中でしか押せないものです。開くと押すボタンがあります。</p>
+        <p className="px-2.5 pt-2 text-[13px] font-medium text-gray-800 dark:text-zinc-100">確かめること</p>
+        <p className="px-2.5 pb-1 text-[11px] leading-relaxed text-gray-500 dark:text-zinc-400">承認や AI が用意したものなど、ACB の中でしか押せないものです。開くと押すボタンがあります。</p>
         {approvals.length > 0 && <><p className={HEAD}>承認のお願い</p>{approvals.map(row)}</>}
         {prepared.length > 0 && <><p className={HEAD}>AI が用意したもの（確かめてください）</p>{prepared.map(row)}</>}
         {decisions.length > 0 && (
@@ -66,7 +66,7 @@ export function CorePressPanel({ companyId, data, showCalendar, meetings, onOpen
             ))}
           </>
         )}
-        {data && nothing && <p className="px-2.5 py-3 text-[12px] text-gray-500 dark:text-zinc-400">今は押すものはありません。</p>}
+        {data && nothing && <p className="px-2.5 py-3 text-[12px] text-gray-500 dark:text-zinc-400">今は確かめることはありません。</p>}
       </div>
     </section>
   )

@@ -787,12 +787,12 @@ link stays possible (［＋ファイル・フォルダをつなぐ］, ［〇〇
 asked only while 決めたこと is on). AppShell reads them with `featuresFrom`:
 
 - **やることの一覧 off**: no やること tab anywhere (`tasksShown` also needs `features.taskList`;
-  `taskListDepartmentIds` still narrows when on). Instead the tab **「押すもの」** (`CorePressPanel.tsx`):
+  `taskListDepartmentIds` still narrows when on). Instead the tab **「確かめること」** (`CorePressPanel.tsx`):
   「今日の予定」 (while 会議 is on), the arrived minutes (`MeetingBanners`, ［AI に読ませる］), then
-  「ACB で押すもの」 — approvals waiting for the member and what the AI prepared for them
+  「確かめること」 — approvals waiting for the member and what the AI prepared for them
   (`corePressItems`, `client/shared/tasks.ts`; `aiPrepared`: a handed-over `prep_summary` or
   「議事録を確認する」), and 決めたこと to confirm. Rows open the card where the press happens. The
-  morning summary opens 「押すもの」. The title bar counts the arrived minutes too
+  morning summary opens 「確かめること」. The title bar counts the arrived minutes too
   (`arrivedMeetingTurns`, `notifications.md`), whoever may see the meeting, until someone presses
   ［AI に読ませる］.
 - **会議と議事録 off**: no 「今日の予定」 (the list's `showCalendar`; `useCalendarToday` reads nothing),

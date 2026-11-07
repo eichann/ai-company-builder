@@ -407,7 +407,7 @@ export function createTasksApi(deps: TasksDeps) {
       }
       // 「使う機能」 rides on the types answer; an older server sends none = everything on.
       const features = featuresFrom(types?.status === 200 ? (types.json?.data as { features?: unknown } | undefined)?.features : null)
-      // 決めたこと waiting for the member's ［そうです］ (the small list 「ACB で押すもの」), only while 決めたこと is on.
+      // 決めたこと waiting for the member's ［そうです］ (the small list 「確かめること」), only while 決めたこと is on.
       const toConfirm = features.decisions
         ? records(await call(companyId, 'POST', '/records/query', { type: 'decision', state: ['unconfirmed'], fields: { owner: id }, limit: 50 })) ?? []
         : []

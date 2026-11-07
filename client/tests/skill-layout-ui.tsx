@@ -14,7 +14,7 @@
 //   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
 //   kind      none = the company has no shared company folder (folderKind none: a working folder on this PC)
 //   personal  1 = (with tasks=1) the opened task is one only the member sees (its card offers 新しいファイル)
-//   features  (「使う機能」) listoff = the task list turned off: 「押すもの」 with an approval, an AI-prepared task,
+//   features  (「使う機能」) listoff = the task list turned off: 「確かめること」 with an approval, an AI-prepared task,
 //             a decision to confirm, an arrived meeting and today's meeting; listoff,meetingsoff = 会議 off too
 //   companies 1 | 2 = the member's companies from the server (株式会社デモ, then 別会社); absent = the list cannot be read
 //   sync      manual = 「サーバーと同期」 runs until window.__acbLayout.finishSync()
@@ -273,7 +273,7 @@ const api: Partial<ElectronAPI> = {
     : [],
   getAgentInteractions: async () => [],
   signOut: async () => { record('signOut', []); return { success: true } },
-  // ?features=listoff: the task list turned off (「使う機能」): the small list 「ACB で押すもの」.
+  // ?features=listoff: the task list turned off (「使う機能」): the small list 「確かめること」.
   getTaskList: async () => featuresParam.includes('listoff')
     ? { success: true, data: { available: true, listDepartmentIds: null, features: { taskList: false, meetings: !featuresParam.includes('meetingsoff'), inbox: true, decisions: true, projects: true },
       decisionsToConfirm: [{ id: 'decision-0000aa', title: '値引きは10%まで' }],

@@ -2,7 +2,7 @@
 // Guards:
 // - the task list's read carries the company's features (an older server without them = everything
 //   on) and asks for 決めたこと to confirm only while 決めたこと is on;
-// - 「ACB で押すもの」 lists only approvals waiting for the member and what the AI prepared for them —
+// - 「確かめること」 lists only approvals waiting for the member and what the AI prepared for them —
 //   never an ordinary or resting task, never someone else's;
 // - the title bar counts arrived minutes (nobody asked the AI yet) once, with what the list has;
 // - a record's card is 「見るだけ」 exactly when its type's feature is off;
@@ -71,7 +71,7 @@ const item = (id: string, over: Partial<TaskListItem> = {}): TaskListItem => ({
   waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, ...over,
 })
 
-test('「ACB で押すもの」: approvals waiting for the member and what the AI prepared for them, nothing else', () => {
+test('「確かめること」: approvals waiting for the member and what the AI prepared for them, nothing else', () => {
   const r = corePressItems([
     item('approval-1', { type: 'approval' }),
     item('task-prepared', { aiPrepared: true }),

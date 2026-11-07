@@ -416,7 +416,7 @@ export function AppShell() {
   // 「使う機能」 (records.md "Features on and off"): an older server or main without them = everything on.
   const features = featuresFrom(taskList.data?.features)
   const tasksShown = !!taskList.data?.available && features.taskList && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds)
-  // The task list turned off for the company: 「ACB で押すもの」, the small list of what only ACB can act on.
+  // The task list turned off for the company: 「確かめること」, the small list of what only ACB can act on.
   const pressShown = !!taskList.data?.available && !features.taskList
   // 「議事録が届きました」 only while 会議と議事録 is on (the server answers none while it is off, too).
   const arrivalsShown = meetings.arrivals.available && features.meetings
@@ -588,7 +588,7 @@ export function AppShell() {
     },
     {
       // The task list turned off (「使う機能」): what only ACB can act on, with 今日の予定 and arrived minutes above it.
-      id: 'press', title: '押すもの', icon: HandPointing, mount: 'once-opened', className: 'flex',
+      id: 'press', title: '確かめること', icon: HandPointing, mount: 'once-opened', className: 'flex',
       visible: pressShown,
       render: () => currentCompany ? (
         <CorePressPanel companyId={currentCompany.id} data={taskList.data} showCalendar={features.meetings}

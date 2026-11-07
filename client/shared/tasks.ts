@@ -91,7 +91,7 @@ export interface TaskListItem {
   /**
    * In the member's turn with something the AI made for them to check: a task the AI prepared and
    * handed over (`prep_summary`), or 「議事録を確認する」 (`task_kind: minutes_review`). The small list
-   * 「ACB で押すもの」 shows these.
+   * 「確かめること」 shows these.
    */
   aiPrepared?: true
 }
@@ -102,7 +102,7 @@ function aiPreparedOf(r: RecordSummary): boolean {
 }
 
 /**
- * 「ACB で押すもの」 (owner decision 2026-11-07, records.md "Features on and off"): with the task list
+ * 「確かめること」 (owner decision 2026-11-07, records.md "Features on and off"): with the task list
  * turned off, the small list of what only ACB can act on — approvals waiting for the member and what
  * the AI prepared for them to check, from the list's own data (arrived minutes and 決めたこと to confirm
  * are added by the screen). Nothing resting, nothing of others.
@@ -261,7 +261,7 @@ export interface TaskListData {
   features?: CompanyFeatures
   /**
    * 決めたこと waiting for the member's ［そうです］ (unconfirmed, the member its 確かめる人 `owner`):
-   * the small list 「ACB で押すもの」 (records.md "Features on and off"). Absent: none read.
+   * the small list 「確かめること」 (records.md "Features on and off"). Absent: none read.
    */
   decisionsToConfirm?: Array<{ id: string; title: string }>
 }
