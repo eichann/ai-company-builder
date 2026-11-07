@@ -49,7 +49,7 @@ export {
 export { linkLedgerValue } from './record-engine/links'
 export { mayAct, NOT_VIA } from './record-engine/act'
 export { callVia } from './record-engine/types'
-export { INVITE_ACTION, SHARE_ACTION } from './record-engine/share'
+export { INVITE_ACTION, REMOVE_MEMBERS_ACTION, SHARE_ACTION } from './record-engine/share'
 export {
   createExternalRecordWriter, type ExternalRecordInput, type ExternalRecordResult, type ExternalRecordWriter,
 } from './record-engine/external-writer'

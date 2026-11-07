@@ -285,6 +285,7 @@ GET  /api/config                                  setup state (no auth)
                               GET /records/my-turn, POST /records/item,
                               POST /records/item/:recordId/actions/:action,
                               POST /records/item/:recordId/file-links (+ /remove),
+                              POST /records/item/:recordId/members (+ /remove), GET …/members/choices,
                               POST …/undo, GET …/history, GET …/versions/:version,
                               POST /me/record-tokens, DELETE /me/record-tokens/:tokenId   records.ts
                               GET /ai-runs, POST /ai-run-claims, GET /ai-runs/:runId,
@@ -404,7 +405,8 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   `departments-list.test.ts`, `department-stats.test.ts`.
 - Rules follow the membership: removing a member deletes every rule naming them in that company
   (`deleteUserRules`, private folders included) and takes them off every members-only record's
-  list (`RecordRepository.forgetMember`, `records.md` "Members-only records"), so re-adding them starts from nothing; a
+  list (`RecordRepository.forgetMember`, `records.md` "Members-only records"; a group or department on a
+  list follows who is in it), so re-adding them starts from nothing; a
   promotion to owner/admin deletes them too. `everyone` rules are untouched, so nothing starts
   inheriting.
 - Invitations are single-use (`services/invitations.ts` `signUp`): a sign-up with `X-Invitation-Token`

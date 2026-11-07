@@ -83,10 +83,15 @@ test('the card: ［招待する］ says what the invited see and that it cannot 
   const dialog = page.getByRole('dialog', { name: '会議に人を招待する' })
   await expect(dialog).toContainText('招待した人は会議の記録と要約・決めたこと・やることを見られます。Google の議事録そのものは、Google で共有されていないと読めません。一度招待すると、取り消すことはできません')
   await expect(dialog.getByRole('button', { name: '招待する' })).toBeDisabled()
+  // Groups and departments, with the strict rule said before anything is chosen; what is on the list already is named, not offered.
+  await expect(dialog).toContainText('オーナーや管理者も、入れなければ見られません。')
+  await expect(dialog).toContainText('いま見られる人には、「面接官」の人も入っています。')
+  await expect(dialog.getByLabel('「面接官」の人')).toHaveCount(0)
   await dialog.getByLabel('田中部長さん').check()
+  await dialog.getByLabel('「採用チーム」の人').check()
   await dialog.getByRole('button', { name: '招待する' }).click()
-  await expect(page.locator('#log')).toHaveText('invite meeting-teirei01 u-boss@1')
-  await expect(card).toContainText('田中部長さんを招待しました。')
+  await expect(page.locator('#log')).toHaveText('invite meeting-teirei01 u-boss,group:grp-1@1')
+  await expect(card).toContainText('田中部長さん、「採用チーム」の人を招待しました。')
 
   await card.getByRole('button', { name: 'この会議について相談する' }).click()
   await expect(page.locator('#log')).toContainText('consult meeting-teirei01')

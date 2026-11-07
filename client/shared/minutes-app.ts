@@ -78,10 +78,33 @@ export type MeetingPressResult =
   /** `noAccess`: the member's Google cannot open the minutes (403 MINUTES_NO_ACCESS) — another attendee may. */
   | { success: false; error: string; noAccess?: true }
 
-/** ［招待する］ on a members-only record: who was newly added, or why not. */
+/** A group (見える人のまとまり) or a department (its 所属) on a members-only list (records.md "Members-only records"). */
+export interface InviteSet {
+  type: 'group' | 'department'
+  id: string
+}
+
+/** ［招待する］ on a members-only record: who / which groups and departments were newly added, or why not. */
 export type MeetingInviteResult =
-  | { success: true; added: string[] }
+  | { success: true; added: string[]; addedSets: InviteSet[] }
   | { success: false; error: string }
+
+/**
+ * What ［招待する］ may offer besides people (the server decides: the record's 責任者, a 部署の管理役 or an
+ * owner / admin may add groups and departments), and the groups / departments on the list now.
+ */
+export type MeetingInviteChoicesResult =
+  | {
+    success: true
+    maySets: boolean
+    groups: Array<{ id: string; name: string }>
+    departments: Array<{ id: string; name: string }>
+    listed: Array<InviteSet & { name: string }>
+  }
+  | { success: false; error: string }
+
+/** What a person must know before adding a group or a department: the list stays strict, and it follows who is in it. */
+export const INVITE_SETS_NOTE = 'まとまりや部署を選ぶと、そこに入っている人が見られます。あとから入った人も見られ、抜けた人は見られなくなります。オーナーや管理者も、入れなければ見られません。'
 
 /** MINUTES_NO_ACCESS in the member's words: the reader rotation (design §4-3). */
 export const MEETING_NO_ACCESS_TEXT = 'あなたの Google では、この会議の議事録を開けません（Google で共有されていません）。ほかの参加者が［AI に読ませる］を押すと、その人の AI が読めます。'

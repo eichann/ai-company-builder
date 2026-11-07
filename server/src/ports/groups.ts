@@ -44,6 +44,8 @@ export interface PermissionHistoryEntry {
     | 'department-delete'
     /** A private folder made, with its first viewers and editors. */
     | 'private-folder-create'
+    /** A members-only record's list changed by a person (records.md "Members-only records"): who / which groups and departments. */
+    | 'record-members'
   /**
    * What changed, as JSON-able data (ids, names, a place's path, rules before / after; for a
    * group's or a department's members `before` / `after` ids and, when not an edit of the list
