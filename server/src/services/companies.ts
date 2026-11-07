@@ -383,6 +383,8 @@ export function createCompanyService(deps: CompanyServiceDeps) {
         companyData.forCompany(companyId).tasks.removeMember(targetUserId, actor.userId, clock.now())
         // …and on no members-only record's list (records.md "Members-only records").
         companyData.forCompany(companyId).records.forgetMember(targetUserId)
+        // …and in no group (server.md "Groups"): joining again starts from nothing.
+        companyData.forCompany(companyId).groups.forgetMember(targetUserId)
         // …and hold no business role (plugin-roles.md): a role reads student data through a connector's calls.
         companyData.forCompany(companyId).pluginRoles.forgetMember(targetUserId, clock.now(), actor.userId)
       })

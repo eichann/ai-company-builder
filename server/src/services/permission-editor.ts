@@ -11,6 +11,9 @@ import type { CompanyDataSource } from '../ports/company-data'
 import type { PushRejectionRepository } from '../ports/push-rejections'
 import type { RepoStore } from '../ports/repo-store'
 import type { NewRule, ScopeRecord } from '../ports/scopes'
+import type { PermissionHistoryEntry } from '../ports/groups'
+import type { Clock } from '../ports/clock'
+
 import type { Transactions } from '../ports/transactions'
 import { supportsWriteDeniedRecovery } from '../lib/client-version'
 import { membersLosingWrite } from '../lib/write-loss'
@@ -31,6 +34,13 @@ import { ok, refuse, type Outcome } from './outcome'
 
 export const READ_RESTRICTION_UNAVAILABLE =
   'Restricting read access is not available yet: every rule lets its subject read. Set canWrite only (read restriction comes in a later update).'
+
+/** Only owners and admins change who reads a place (owner decision 2026-11-07, server.md "Groups"). */
+export const READERS_OWNER_ONLY = '見られる人を決められるのはオーナーと管理者だけです。'
+
+export const GROUPS_UNAVAILABLE = 'Groups can be named only in a company without the shared folder'
+
+export const WRITE_NEEDS_READ = 'A rule that lets someone edit must also let them read'
 
 export const PRIVATE_RULES_REQUIRED = 'A private folder always keeps its own rules (who can see it); change them instead'
 
@@ -55,8 +65,9 @@ export interface PrivatePlace {
 }
 
 /**
- * canRead must be absent or true, except on a private folder itself
- * (`readRestrictable`), where it may be false; canWrite a boolean.
+ * canRead must be absent or true, except where `readRestrictable` (a private folder itself, or a
+ * place of a company without the shared folder: editor.readRestrictable), where it may be false;
+ * canWrite a boolean.
  */
 export function parseAccess(body: Record<string, unknown>, readRestrictable = false): { canRead: boolean; canWrite: boolean } | { error: string } {
   if ((body.canRead === false || body.read === false) && !readRestrictable) return { error: READ_RESTRICTION_UNAVAILABLE }
@@ -99,10 +110,19 @@ export function departmentSubjectLabel(name: string | undefined): string {
   return `${name ?? '（削除された部署）'}に所属する人`
 }
 
-function subjectLabel(r: Pick<ScopeRule, 'subjectType' | 'subjectId'>, users: Map<string, AccountSummary>, departmentName: (id: string) => string | undefined): string {
+/** How a group rule reads: 「〇〇（まとまり）の人」. */
+export function groupSubjectLabel(name: string | undefined): string {
+  return `${name ?? '（削除されたまとまり）'}の人`
+}
+
+function subjectLabel(
+  r: Pick<ScopeRule, 'subjectType' | 'subjectId'>, users: Map<string, AccountSummary>,
+  departmentName: (id: string) => string | undefined, groupName: (id: string) => string | undefined,
+): string {
   if (r.subjectType === 'everyone') return '全員'
   if (r.subjectType === 'role') return ROLE_LABELS[r.subjectId ?? ''] ?? r.subjectId ?? ''
   if (r.subjectType === 'department') return departmentSubjectLabel(departmentName(r.subjectId ?? ''))
+  if (r.subjectType === 'group') return groupSubjectLabel(groupName(r.subjectId ?? ''))
   const u = r.subjectId ? users.get(r.subjectId) : undefined
   return u?.name || u?.email || r.subjectId || ''
 }
@@ -117,30 +137,77 @@ export interface PermissionEditorDeps {
   /** With or without the shared folder: without, the places that take rules are the company and its departments. */
   companyFolders: CompanyFolders
   transactions: Transactions
+  clock: Clock
   /** Folders (NFC) of the departments the user manages (permission-views.ts). */
   managedFolders(companyId: string, userId: string): string[]
 }
 
 export function createPermissionEditorService(deps: PermissionEditorDeps) {
-  const { companyData, memberships, clientActivity, pushRejections, accounts, repoStore, companyFolders, transactions, managedFolders } = deps
+  const { companyData, memberships, clientActivity, pushRejections, accounts, repoStore, companyFolders, transactions, clock, managedFolders } = deps
   // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
   const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
   const privateFoldersOf = (companyId: string) => companyData.forCompany(companyId).privateFolders
 
   /**
-   * Without the shared folder the places that take rules are the departments (services/company-folder.ts):
-   * at the top their folders, inside one nothing, anywhere else null (not found).
+   * Without the shared folder the places that take rules are the departments and the places
+   * made inside them (scope rows only, services/company-folder.ts): at the top the departments'
+   * folders, inside a place the places one level below it that have rules, anywhere outside a
+   * department null (not found).
    */
   function departmentPlaces(companyId: string, path: string): string[] | null {
     if (path === '') return companyData.forCompany(companyId).departments.list().map(d => d.folder)
-    return companyFolders.departmentPlaceOf(companyId, path)?.department === path ? [] : null
+    if (companyFolders.departmentPlaceOf(companyId, path) === null) return null
+    const depth = path.split('/').length + 1
+    return scopesOf(companyId).listWithRules()
+      .filter(s => s.rules.length > 0 && s.path.split('/').length === depth && isSameOrAncestorPath(path, s.path))
+      .map(s => s.path.split('/').pop()!)
   }
 
-  /** May the actor edit rules of the scope at `path`? */
+  /** Read-restricted places (a company without the shared folder) at or above `path`. */
+  function restrictedAtOrAbove(companyId: string, path: string) {
+    return scopesOf(companyId).listWithRules().filter(s => s.readRestricted === true && isSameOrAncestorPath(s.path, path))
+  }
+
+  /**
+   * May the actor edit rules of the scope at `path`? A department manager never at or inside a
+   * read-restricted place: only owners and admins change who reads one (owner decision
+   * 2026-11-07), and a manager who cannot read it is not to learn it is there.
+   */
   function canEditPath(actor: Member, path: string): boolean {
     if (hasFullAccess(actor.role)) return true
     if (path === '') return false
+    if (restrictedAtOrAbove(actor.companyId, path).length > 0) return false
     return managedFolders(actor.companyId, actor.userId).some(folder => isSameOrAncestorPath(folder, path))
+  }
+
+  /** Can a rule at `path` deny read? A private folder itself, or a place of a company without the shared folder. */
+  function readRestrictable(companyId: string, path: string, place: PrivatePlace | null): boolean {
+    if (place?.root === true) return true
+    if (path === '' || place !== null || companyFolders.has(companyId)) return false
+    return companyFolders.departmentPlaceOf(companyId, path) !== null
+  }
+
+  const ruleShape = (r: Pick<ScopeRule, 'subjectType' | 'subjectId' | 'canRead' | 'canWrite'>) =>
+    ({ subjectType: r.subjectType, subjectId: r.subjectId, canRead: r.canRead, canWrite: r.canWrite })
+
+  /** Record a rule change (permission_history): the place's rules before and after. */
+  function recordChange<T>(actor: Member, action: PermissionHistoryEntry['action'], paths: string[], mutate: () => T): T {
+    const scopes = scopesOf(actor.companyId)
+    const rulesAt = (p: string) => {
+      const s = scopes.getByPath(p)
+      return s ? scopes.rulesOf(s.id).map(ruleShape) : []
+    }
+    return transactions.run(() => {
+      const before = paths.map(rulesAt)
+      const result = mutate()
+      companyData.forCompany(actor.companyId).permissionHistory.append({
+        action,
+        detail: { places: paths.map((path, i) => ({ path, before: before[i], after: rulesAt(path) })) },
+        at: clock.now(),
+        byUser: actor.userId,
+      })
+      return result
+    })
   }
 
   function privatePlaceOf(companyId: string, path: string): PrivatePlace | null {
@@ -150,6 +217,7 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
   }
 
   const departmentNameOf = (companyId: string) => (id: string) => companyData.forCompany(companyId).departments.find(id)?.name
+  const groupNameOf = (companyId: string) => (id: string) => companyData.forCompany(companyId).groups.find(id)?.name
 
   function serializeRules(companyId: string, rules: ScopeRule[]) {
     const users = accounts.byIds(rules.filter(r => r.subjectType === 'user' && r.subjectId).map(r => r.subjectId!))
@@ -157,17 +225,34 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
       id: r.id,
       subjectType: r.subjectType,
       subjectId: r.subjectId,
-      subjectLabel: subjectLabel(r, users, departmentNameOf(companyId)),
+      subjectLabel: subjectLabel(r, users, departmentNameOf(companyId), groupNameOf(companyId)),
       canRead: r.canRead,
       canWrite: r.canWrite,
-      // Who belongs (any member may read it: GET /departments/:id/members), for the editor's preview.
-      ...(r.subjectType === 'department' ? { memberIds: [...(r.memberIds ?? [])] } : {}),
+      // Who belongs / is in it, for the editor's preview (department: any member may read it; a
+      // group: only owners/admins edit rules naming one, see parseSubject).
+      ...(r.subjectType === 'department' || r.subjectType === 'group' ? { memberIds: [...(r.memberIds ?? [])] } : {}),
     }))
   }
 
   return {
     canEditPath,
     privatePlaceOf,
+    readRestrictable,
+
+    /**
+     * A rule set that changes who reads a place — denies read to someone, or lands at or inside a
+     * read-restricted place — is an owner's or admin's (owner decision 2026-11-07). null = allowed.
+     */
+    readersChangeRefusal(actor: Member, path: string, rules: Array<{ canRead: boolean }>): string | null {
+      if (hasFullAccess(actor.role)) return null
+      if (rules.some(r => !r.canRead) || restrictedAtOrAbove(actor.companyId, path).length > 0) return READERS_OWNER_ONLY
+      return null
+    },
+
+    /** Without the shared folder, a rule that edits must also read (no write-only readers). */
+    writeNeedsRead(companyId: string, rule: { canRead: boolean; canWrite: boolean }): boolean {
+      return !companyFolders.has(companyId) && rule.canWrite && !rule.canRead
+    },
 
     /** Owner/admin, or a manager of at least one department. */
     canEditAnything(actor: Member): boolean {
@@ -193,6 +278,14 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
         if (!companyData.forCompany(actor.companyId).departments.exists(id)) return { error: 'Unknown department' }
         return { subjectType: 'department', subjectId: id }
       }
+      if (type === 'group') {
+        // Groups are for read-restricted places (no shared folder), kept by owners/admins only.
+        if (companyFolders.has(actor.companyId)) return { error: GROUPS_UNAVAILABLE }
+        if (!hasFullAccess(actor.role)) return { error: READERS_OWNER_ONLY }
+        if (typeof id !== 'string' || id.length === 0 || id.length > 200) return { error: 'subjectId must be a group ID' }
+        if (!companyData.forCompany(actor.companyId).groups.find(id)) return { error: 'Unknown group' }
+        return { subjectType: 'group', subjectId: id }
+      }
       if (type === 'user') {
         if (typeof id !== 'string' || id.length === 0 || id.length > 200) return { error: 'subjectId must be a user ID' }
         const role = memberships.roleOf(actor.companyId, id)
@@ -200,14 +293,14 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
         if (hasFullAccess(role)) return { error: FULL_ACCESS_SUBJECT }
         return { subjectType: 'user', subjectId: id }
       }
-      return { error: 'subjectType must be everyone, role, department or user' }
+      return { error: 'subjectType must be everyone, role, department, group or user' }
     },
 
     /** Does the folder exist — in the company repository, or inside its private folder's repository? */
     async folderExists(companyId: string, path: string, place: PrivatePlace | null): Promise<boolean> {
       if (path === '') return true
-      // Without the shared folder: a department's own folder, nothing below it (there are no files).
-      if (!companyFolders.has(companyId)) return companyFolders.departmentPlaceOf(companyId, path)?.department === path
+      // Without the shared folder: a department's folder, or a place named inside one (scope rows only).
+      if (!companyFolders.has(companyId)) return companyFolders.departmentPlaceOf(companyId, path) !== null
       if (!place) return (await repoStore.resolveFolder(companyId, path)) !== null
       if (place.root) return true
       const folder = privateFoldersOf(companyId).get(place.scopeId)
@@ -229,12 +322,19 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
     getRule: (companyId: string, ruleId: string) => scopesOf(companyId).ruleWithScope(ruleId),
     rulesOf: (actor: Member, scopeId: string) => scopesOf(actor.companyId).rulesOf(scopeId),
 
-    replaceRules: (actor: Member, path: string, rules: NewRule[]) => scopesOf(actor.companyId).replaceRules(path, rules, actor.userId),
-    upsertRule: (actor: Member, path: string, rule: NewRule) => scopesOf(actor.companyId).upsertRule(path, rule, actor.userId),
-    updateRuleAccess: (actor: Member, ruleId: string, canRead: boolean, canWrite: boolean) => scopesOf(actor.companyId).updateRuleAccess(ruleId, canRead, canWrite),
-    deleteRule: (actor: Member, ruleId: string, scope: ScopeRecord) => scopesOf(actor.companyId).deleteRule(ruleId, scope),
-    clearRules: (actor: Member, scope: ScopeRecord) => scopesOf(actor.companyId).clearRules(scope),
-    moveRules: (actor: Member, fromPath: string, toPath: string) => scopesOf(actor.companyId).moveRules(fromPath, toPath, actor.userId),
+    // Every change is recorded (permission_history: who, when, the place's rules before / after).
+    replaceRules: (actor: Member, path: string, rules: NewRule[]) =>
+      recordChange(actor, 'rules-replace', [path], () => scopesOf(actor.companyId).replaceRules(path, rules, actor.userId)),
+    upsertRule: (actor: Member, path: string, rule: NewRule) =>
+      recordChange(actor, 'rule-set', [path], () => scopesOf(actor.companyId).upsertRule(path, rule, actor.userId)),
+    updateRuleAccess: (actor: Member, ruleId: string, canRead: boolean, canWrite: boolean, path: string) =>
+      recordChange(actor, 'rule-update', [path], () => scopesOf(actor.companyId).updateRuleAccess(ruleId, canRead, canWrite)),
+    deleteRule: (actor: Member, ruleId: string, scope: ScopeRecord) =>
+      recordChange(actor, 'rule-delete', [scope.path], () => scopesOf(actor.companyId).deleteRule(ruleId, scope)),
+    clearRules: (actor: Member, scope: ScopeRecord) =>
+      recordChange(actor, 'rules-clear', [scope.path], () => scopesOf(actor.companyId).clearRules(scope)),
+    moveRules: (actor: Member, fromPath: string, toPath: string) =>
+      recordChange(actor, 'rules-move', [fromPath, toPath], () => scopesOf(actor.companyId).moveRules(fromPath, toPath, actor.userId)),
 
     /** The scope and its rules as the editor shows them. */
     scopeView(companyId: string, scopeId: string) {
@@ -254,11 +354,13 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
      */
     guardWrite<T>(actor: Member, force: boolean, roots: string[], mutate: () => T): Outcome<T> {
       const companyId = actor.companyId
+      // Without the shared folder nobody pushes, so no app can be stuck on a write refusal.
+      const noPushes = !companyFolders.has(companyId)
       try {
         return ok(transactions.run(() => {
           const before = scopesOf(companyId).listWithRules()
           const result = mutate()
-          if (force) return result
+          if (force || noPushes) return result
           const members = memberships.listByCompany(companyId).map(m => ({ userId: m.user_id, role: m.role }))
           const losing = membersLosingWrite(companyId, members, before, scopesOf(companyId).listWithRules(), roots)
           if (losing.length === 0) return result
@@ -319,7 +421,7 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
             scopeId: governing!.id,
             path: governing!.path,
             subjectType: decided[0].subjectType,
-            subjectLabel: subjectLabel(decided[0], users, departmentNameOf(companyId)),
+            subjectLabel: subjectLabel(decided[0], users, departmentNameOf(companyId), groupNameOf(companyId)),
           },
         }
       })
@@ -327,8 +429,9 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
       return {
         path,
         governingScope: governing ? { id: governing.id, path: governing.path, inherited: governing.path !== path } : null,
-        // Read restriction is real only for private folders (their own repository).
-        readRestrictionEnforced: privatePlaceOf(companyId, path) !== null,
+        // Read restriction is real for private folders (their own repository) and, without the
+        // shared folder, for read-restricted places (they decide who sees the records there).
+        readRestrictionEnforced: privatePlaceOf(companyId, path) !== null || restrictedAtOrAbove(companyId, path).length > 0,
         members,
       }
     },

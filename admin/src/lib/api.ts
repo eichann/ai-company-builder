@@ -73,6 +73,9 @@ import {
   slackSchema,
   taskSettingsSchema,
   userSchema,
+  memberGroupSchema,
+  memberGroupsSchema,
+  groupDeletedSchema,
 } from './api-schemas'
 import type {
   AgentEventQuery,
@@ -416,12 +419,13 @@ export type EffectiveSummary = 'everyone-rw' | 'everyone-r' | 'restricted'
 
 export interface PermissionRule {
   id: string
-  subjectType: 'everyone' | 'role' | 'department' | 'user'
+  /** 'group' (見える人のまとまり) only in a company without the shared folder (not edited on 「フォルダ」). */
+  subjectType: 'everyone' | 'role' | 'department' | 'group' | 'user'
   subjectId: string | null
   subjectLabel: string
   canRead: boolean
   canWrite: boolean
-  /** 'department' only: who belongs to it now (所属), for the preview. */
+  /** 'department' / 'group' only: who belongs to it / is in it now, for the preview. */
   memberIds?: string[]
 }
 
@@ -457,9 +461,11 @@ export type RuleSubject =
   | { subjectType: 'everyone'; subjectId: null }
   | { subjectType: 'role'; subjectId: 'member' }
   | { subjectType: 'department'; subjectId: string }
+  | { subjectType: 'group'; subjectId: string }
   | { subjectType: 'user'; subjectId: string }
 
 export interface ScopeRulesResult {
+
   /** null when the folder's last rule was removed (it inherits again). */
   scope: { id: string; path: string; kind: PermissionScope['kind']; inherited: boolean } | null
   rules: PermissionRule[]
@@ -974,6 +980,28 @@ export const skillEditorsApi = {
       method: 'PUT',
       body: { departmentId, userIds },
     }),
+}
+
+export type { MemberGroup, MemberGroupsView } from '../../../shared/types/groups'
+
+const groupsBase = (companyId: string) => `/api/companies/${enc(companyId)}/groups`
+
+/** 見える人のまとまり (owners and admins). A group holds exactly the members put in it. */
+export const groupsApi = {
+  list: (companyId: string) => getData(groupsBase(companyId), memberGroupsSchema),
+
+  create: (companyId: string, name: string, userIds: string[] = []) =>
+    getData(groupsBase(companyId), memberGroupSchema, { method: 'POST', body: { name, userIds } }),
+
+  rename: (companyId: string, groupId: string, name: string) =>
+    getData(`${groupsBase(companyId)}/${enc(groupId)}`, memberGroupSchema, { method: 'PATCH', body: { name } }),
+
+  setMembers: (companyId: string, groupId: string, userIds: string[]) =>
+    getData(`${groupsBase(companyId)}/${enc(groupId)}/members`, memberGroupSchema, { method: 'PUT', body: { userIds } }),
+
+  /** 409 GROUP_IN_USE (with `places`) while a place's rules name it. */
+  delete: (companyId: string, groupId: string) =>
+    getData(`${groupsBase(companyId)}/${enc(groupId)}`, groupDeletedSchema, { method: 'DELETE' }),
 }
 
 const deptBase = (companyId: string) => `/api/companies/${enc(companyId)}/departments`

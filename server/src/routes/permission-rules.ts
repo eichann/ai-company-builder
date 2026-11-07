@@ -26,12 +26,20 @@
  * - other members: nothing (403).
  *
  * What may be stored:
- * - write: true/false per subject (everyone / the member role / one user);
+ * - write: true/false per subject (everyone / the member role / a department /
+ *   a group — only without the shared folder, owner/admin — / one user);
  * - read: always true, except on a PRIVATE folder itself (Phase 3,
- *   lib/private-folders.ts), the only place a read restriction is enforced
- *   (its own repository). Anywhere else — the company repository, or a folder
+ *   lib/private-folders.ts), where its own repository enforces it, and — in a
+ *   company WITHOUT the shared folder — on a department or a place inside one
+ *   (a read-restricted place: it decides who sees the records placed there;
+ *   server.md "Groups"). Anywhere else — the company repository, or a folder
  *   inside a private folder (same repository) — `read: false` is refused
  *   with 400 instead of being stored and silently not enforced.
+ * - Who reads a place is an owner's or admin's (owner decision 2026-11-07):
+ *   outside private folders, a department manager's rules that deny read, and
+ *   any edit at or inside a read-restricted place, get 403 READERS_OWNER_ONLY
+ *   (inside one canEditPath already refuses them). Without the shared folder
+ *   a rule that edits must also read (400 WRITE_NEEDS_READ).
  * - A private folder always keeps rules of its own (never back to
  *   inheriting, which would make it readable): clearing them, removing the
  *   last rule or moving them away is refused. Changes inside private folders
@@ -64,8 +72,10 @@
  *          (adapters/orphaned-scopes.ts). Same authorization as editing, for both
  *          the old and the new place.
  *
- * Audit: there is no audit log in this codebase yet; rule rows keep
- * created_at / created_by.
+ * Audit: every change through these routes is recorded in permission_history
+ * (who, when, the place's rules before and after; services/permission-editor.ts).
+ * Rule rows also keep created_at / created_by.
+
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
@@ -79,6 +89,8 @@ import {
   PRIVATE_RULES_REQUIRED,
   PRIVATE_SUBJECT_ERROR,
   READ_RESTRICTION_UNAVAILABLE,
+  READERS_OWNER_ONLY,
+  WRITE_NEEDS_READ,
   parseAccess,
   privateRootRuleError,
 } from '../services/permission-editor'
@@ -127,6 +139,8 @@ const MAX_RULES_PER_SCOPE = 200
 
 const replaceError = (c: Ctx, error: string, code?: string) => c.json({ error, ...(code ? { code } : {}) }, 400)
 
+const readersOwnerOnly = (c: Ctx) => c.json({ error: READERS_OWNER_ONLY, code: 'READERS_OWNER_ONLY' }, 403)
+
 // PUT /permissions/scopes/by-path  { path, rules: [{ subjectType, subjectId?, canWrite, canRead? }] }
 // Replaces the path's whole rule set in one transaction. [] = inherit again.
 permissionRulesRoute.put('/permissions/scopes/by-path', companyMember, serviceBody, async (c) => {
@@ -144,12 +158,13 @@ permissionRulesRoute.put('/permissions/scopes/by-path', companyMember, serviceBo
   if (!Array.isArray(body.rules)) return replaceError(c, 'rules must be an array')
   if (body.rules.length > MAX_RULES_PER_SCOPE) return replaceError(c, `At most ${MAX_RULES_PER_SCOPE} rules per folder`)
   const place = editor.privatePlaceOf(actor.companyId, parsed.path)
+  const restrictable = editor.readRestrictable(actor.companyId, parsed.path, place)
   const rules: Array<Omit<ScopeRule, 'id'>> = []
   const seen = new Set<string>()
   for (const item of body.rules as unknown[]) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return replaceError(c, 'Each rule must be an object')
     const raw = item as Record<string, unknown>
-    const ruleAccess = parseAccess(raw, place?.root === true)
+    const ruleAccess = parseAccess(raw, restrictable)
     if ('error' in ruleAccess) return replaceError(c, ruleAccess.error, ruleAccess.error === READ_RESTRICTION_UNAVAILABLE ? 'READ_RESTRICTION_UNAVAILABLE' : undefined)
     const subject = editor.parseSubject(actor, raw)
     if ('error' in subject) return replaceError(c, subject.error)
@@ -158,8 +173,11 @@ permissionRulesRoute.put('/permissions/scopes/by-path', companyMember, serviceBo
     seen.add(key)
     const privateError = privateRootRuleError(place, { ...subject, ...ruleAccess })
     if (privateError) return replaceError(c, privateError, 'PRIVATE_FOLDER_RULE')
+    if (editor.writeNeedsRead(actor.companyId, ruleAccess)) return replaceError(c, WRITE_NEEDS_READ, 'WRITE_NEEDS_READ')
     rules.push({ ...subject, canRead: ruleAccess.canRead, canWrite: ruleAccess.canWrite })
   }
+  // Who reads a place (outside private folders, whose own editor rules stay) is an owner's or admin's.
+  if (!place && editor.readersChangeRefusal(actor, parsed.path, rules)) return readersOwnerOnly(c)
   if (rules.length === 0 && place?.root) return replaceError(c, PRIVATE_RULES_REQUIRED, 'PRIVATE_RULES_REQUIRED')
   if (rules.length === 0 && parsed.path === '') {
     return replaceError(c, 'The company-wide rules cannot be removed; change them instead', 'COMPANY_RULE_REQUIRED')
@@ -193,12 +211,14 @@ permissionRulesRoute.post('/permissions/rules', companyMember, serviceBody, asyn
   const force = parseForce(c, actor, body)
   if (force instanceof Response) return force
   const place = editor.privatePlaceOf(actor.companyId, parsed.path)
-  const ruleAccess = parseAccess(body, place?.root === true)
+  const ruleAccess = parseAccess(body, editor.readRestrictable(actor.companyId, parsed.path, place))
   if ('error' in ruleAccess) return c.json({ error: ruleAccess.error, code: ruleAccess.error === READ_RESTRICTION_UNAVAILABLE ? 'READ_RESTRICTION_UNAVAILABLE' : undefined }, 400)
   const subject = editor.parseSubject(actor, body)
   if ('error' in subject) return c.json({ error: subject.error }, 400)
   const privateError = privateRootRuleError(place, { ...subject, ...ruleAccess })
   if (privateError) return c.json({ error: privateError, code: 'PRIVATE_FOLDER_RULE' }, 400)
+  if (editor.writeNeedsRead(actor.companyId, ruleAccess)) return c.json({ error: WRITE_NEEDS_READ, code: 'WRITE_NEEDS_READ' }, 400)
+  if (!place && editor.readersChangeRefusal(actor, parsed.path, [ruleAccess])) return readersOwnerOnly(c)
 
   if (!(await editor.folderExists(actor.companyId, parsed.path, place))) {
     return c.json({ error: 'Folder not found in the company repository' }, 400)
@@ -223,13 +243,15 @@ permissionRulesRoute.patch('/permissions/rules/:ruleId', companyMember, serviceB
   const force = parseForce(c, actor, body)
   if (force instanceof Response) return force
   const place = editor.privatePlaceOf(actor.companyId, found.scope.path)
-  const ruleAccess = parseAccess(body, place?.root === true)
+  const ruleAccess = parseAccess(body, editor.readRestrictable(actor.companyId, found.scope.path, place))
   if ('error' in ruleAccess) return c.json({ error: ruleAccess.error, code: ruleAccess.error === READ_RESTRICTION_UNAVAILABLE ? 'READ_RESTRICTION_UNAVAILABLE' : undefined }, 400)
   const privateError = privateRootRuleError(place, { subjectType: found.rule.subjectType, ...ruleAccess })
   if (privateError) return c.json({ error: privateError, code: 'PRIVATE_FOLDER_RULE' }, 400)
+  if (editor.writeNeedsRead(actor.companyId, ruleAccess)) return c.json({ error: WRITE_NEEDS_READ, code: 'WRITE_NEEDS_READ' }, 400)
+  if (!place && editor.readersChangeRefusal(actor, found.scope.path, [ruleAccess])) return readersOwnerOnly(c)
 
   const update = () => {
-    editor.updateRuleAccess(actor, found.rule.id, ruleAccess.canRead, ruleAccess.canWrite)
+    editor.updateRuleAccess(actor, found.rule.id, ruleAccess.canRead, ruleAccess.canWrite, found.scope.path)
     return true
   }
   const done = place ? update() : guarded(c, actor, force, [found.scope.path], update)

@@ -161,6 +161,17 @@ export function createTaskSettingsService(deps: TaskSettingsDeps) {
       if (unique.length > MAX_DEPARTMENT_MEMBERS) return refuse('bad-request', `A department can have at most ${MAX_DEPARTMENT_MEMBERS} members`)
       const current = new Set(memberships.listByCompany(member.companyId).map(m => m.user_id))
       if (unique.some(id => !current.has(id))) return refuse('bad-request', 'Every user must be a member of this company')
+      // Only owners/admins change who reads a read-restricted place (owner decision 2026-11-07,
+      // server.md "Groups"): when a rule there lets this department's people read, a manager may
+      // take people off the department but not add them (adding would widen the place's readers).
+      if (!hasFullAccess(member.role)) {
+        const before = new Set(handle(member.companyId).tasks.departmentMemberIds(departmentId))
+        const grantsRestrictedRead = handle(member.companyId).scopes.listWithRules().some(s => s.readRestricted === true
+          && s.rules.some(r => r.subjectType === 'department' && r.subjectId === departmentId && r.canRead))
+        if (grantsRestrictedRead && unique.some(id => !before.has(id))) {
+          return refuse('forbidden', 'この部署の人は見られる人を決めた場所を見られるため、人を足せるのはオーナーと管理者だけです。', { code: 'READERS_OWNER_ONLY' })
+        }
+      }
       const force = (body as { force?: unknown }).force === true
       if (force && !hasFullAccess(member.role)) return refuse('forbidden', FORCE_NOT_ALLOWED_ERROR, { code: 'FORCE_NOT_ALLOWED' })
       const done = guardWrite(member, force, [''], () => {

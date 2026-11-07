@@ -14,7 +14,7 @@ import { contentStoreSchema } from './schema/content-store'
 import { fixedPayloadSchema, migrateFixedPayloads } from './schema/fixed-payloads'
 import { migrateNotificationsForUser, notificationSchema } from './schema/notifications'
 import { migrateOutboundAttachments, migrateOutboundSendSources, outboundMailSchema } from './schema/outbound-mail'
-import { migrateDepartmentRuleSubject, migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
+import { migrateDepartmentRuleSubject, migrateGroupRuleSubject, migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
 import { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewers, recordSchema } from './schema/records'
 import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
@@ -37,7 +37,7 @@ import { pluginRoleSchema } from './schema/plugin-roles'
 // lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
-export { migrateDepartmentRuleSubject, migrateRuleAndManagerCompanies } from './schema/permissions'
+export { migrateDepartmentRuleSubject, migrateGroupRuleSubject, migrateRuleAndManagerCompanies } from './schema/permissions'
 export { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables } from './schema/plugins'
 export { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewers } from './schema/records'
 export { migrateConnectorProviders } from './schema/connectors'
@@ -151,6 +151,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateRuleAndManagerCompanies(conn)
   // After it: the rebuild keeps company_id and recreates its triggers.
   migrateDepartmentRuleSubject(conn)
+  // After it: groups as a rule subject (server.md "Groups").
+  migrateGroupRuleSubject(conn)
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // The Google features the admin turned off for the company (google-connector.md).

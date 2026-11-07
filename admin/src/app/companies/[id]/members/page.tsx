@@ -14,8 +14,10 @@ import {
   UserMinus,
   UserPlus,
   Users,
+  UsersFour,
   X,
 } from '@phosphor-icons/react'
+import Link from 'next/link'
 
 import { ConfirmByTypingDialog } from '@/components/app/confirm-by-typing'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -183,10 +185,19 @@ export default function MembersPage() {
         }
         actions={
           isAdmin && (
-            <Button onClick={() => setInviteOpen(true)}>
-              <UserPlus />
-              メンバーを招待
-            </Button>
+            <>
+              {/* 見える人のまとまり (owners and admins): who reads a place can be a set of members. */}
+              <Button asChild variant="outline">
+                <Link href={`/companies/${encodeURIComponent(companyId)}/groups`}>
+                  <UsersFour />
+                  見える人のまとまり
+                </Link>
+              </Button>
+              <Button onClick={() => setInviteOpen(true)}>
+                <UserPlus />
+                メンバーを招待
+              </Button>
+            </>
           )
         }
       />

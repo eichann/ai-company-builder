@@ -33,7 +33,12 @@ database: paths, company-repository lookups, archive files, pushes in flight, th
 
 A company without the shared folder (`server.md` "Companies without a shared folder") has none:
 `POST /private-folders` answers 409 `NO_COMPANY_FOLDER` (after the `PRIVATE_FOLDERS_UNAVAILABLE`
-check), git-http 404 for its scope repositories; the admin console hides 「フォルダ」.
+check), git-http 404 for its scope repositories; the admin console hides 「フォルダ」. Its read
+restriction is a **read-restricted place** instead (a department or a place inside one whose rules
+deny `everyone` read; no repository): the same gate in `resolveAccess` (`isGate`) and the same
+name rule below, in `server.md` "Groups and read-restricted places". A company with the shared
+folder keeps refusing `read: false` outside private folders exactly as described here.
+
 
 ## Names never leak (owner decision B)
 

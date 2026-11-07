@@ -444,6 +444,29 @@ describe('a meeting read moves its まとまり to the business plugin\'s step (
     setState(deal, 'talking')
   })
 
+  it('a meeting in a place only some read (a private folder or a read-restricted place): its note names no meeting either', async () => {
+    const deal = recordOf('1000000002')
+    setState(deal, 'talking')
+    // 営業部/役員会: a gate the member reads (server.md "Groups"; the private folder row stands for both kinds).
+    const at = ts()
+    db.prepare("INSERT INTO scopes (id, company_id, path, kind, department_id, repo_id, created_at) VALUES ('ps-gate', ?, '営業部/役員会', 'folder', NULL, 'ps-gate-repo', ?)").run(CO, at)
+    db.prepare("INSERT INTO scope_rules (id, company_id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('ps-gate-1', ?, 'ps-gate', 'everyone', NULL, 0, 0, ?)").run(CO, at)
+    db.prepare("INSERT INTO scope_rules (id, company_id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('ps-gate-2', ?, 'ps-gate', 'user', ?, 1, 1, ?)").run(CO, member.userId, at)
+    try {
+      const m = meeting(deal)
+      db.prepare("UPDATE records SET folder = '営業部/役員会' WHERE company_id = ? AND id = ?").run(CO, m)
+      expect(await finish(member, m)).toMatchObject({ ok: true })
+      expect(stateOf(deal).state).toBe('after_meeting')
+      const entries = services.recordEngine.history(member, deal).value.entries as Json[]
+      const last = entries[entries.length - 1]
+      expect(last).toMatchObject({ action: 'meeting_held', note: '会議を読んだあと' })
+    } finally {
+      db.prepare("DELETE FROM scope_rules WHERE company_id = ? AND scope_id = 'ps-gate'").run(CO)
+      db.prepare("DELETE FROM scopes WHERE company_id = ? AND id = 'ps-gate'").run(CO)
+      setState(deal, 'talking')
+    }
+  })
+
   it('the まとまり chosen later by a person: the meeting stays read, no AI run of its own, and the deal moves the same way', async () => {
     const deal = recordOf('1000000002')
     const m = meeting(null, 'read')

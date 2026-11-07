@@ -170,7 +170,7 @@ describe('validation (and nothing is written when refused)', () => {
     ['an owner subject', { path: '営業部', rules: [everyone(false), user('rp-member'), user('rp-owner')] }, /always read and edit/],
     ['the admin role', { path: '営業部', rules: [everyone(false), { subjectType: 'role', subjectId: 'admin', canWrite: true }] }, /always read and edit/],
     ['a stranger', { path: '営業部', rules: [everyone(false), user('rp-stranger')] }, /Not a member/],
-    ['an unknown subject type', { path: '営業部', rules: [everyone(false), { subjectType: 'group', canWrite: true }] }, /subjectType/],
+    ['an unknown subject type', { path: '営業部', rules: [everyone(false), { subjectType: 'team', canWrite: true }] }, /subjectType/],
     ['a missing canWrite', { path: '営業部', rules: [{ subjectType: 'everyone' }] }, /canWrite/],
     ['a duplicate subject', { path: '営業部', rules: [everyone(false), user('rp-member'), user('rp-member', false)] }, /only once/, 'DUPLICATE_SUBJECT'],
     ['no everyone rule', { path: '営業部', rules: [user('rp-member')] }, /needs a rule for everyone/, 'EVERYONE_RULE_REQUIRED'],
