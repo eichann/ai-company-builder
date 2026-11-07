@@ -264,8 +264,15 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
         ? await repoStore.deleteDepartmentFolder(companyId, folder, `Delete department: ${existing.name} (${folder})`)
         : { deletedFiles: 0, deletedFolders: 0 }
       transactions.run(() => {
+        // Who belonged goes with the department (ON DELETE CASCADE): recorded with the other
+        // changes of who reads and writes (permission_history, server.md "Groups"), in the same transaction.
+        const handle = companyData.forCompany(companyId)
+        const members = handle.tasks.departmentMemberIds(existing.id)
         scopesOf(companyId).deleteDepartmentScopes(existing.id, folder)
         departmentsOf(member).delete(existing.id)
+        handle.permissionHistory.append({
+          action: 'department-delete', detail: { departmentId: existing.id, folder, members }, at: clock.now(), byUser: member.userId,
+        })
       })
       return counts
     },

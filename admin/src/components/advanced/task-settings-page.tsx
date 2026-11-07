@@ -7,7 +7,7 @@ import { CalendarBlank, CheckCircle, ChatCircleText, Database, EnvelopeSimple, H
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { RadioCard } from '@/components/app/radio-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
-import { DepartmentMembersDialog, MemberAbsenceDialog } from '@/components/departments/department-members-dialog'
+import { DepartmentMembersDialog, MemberAbsenceDialog, membershipNote } from '@/components/departments/department-members-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -28,6 +28,7 @@ import {
 } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import { AdvancedCrumb } from '@/components/advanced/crumb'
+import { useCompanyFeatures, WhenFeatureOn } from '@/components/advanced/feature-off'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
 import {
@@ -274,6 +275,7 @@ function SettingsForm({
   departments: Department[]
   onSaved: (next: TaskSettingsView) => void
 }) {
+  const features = useCompanyFeatures()
   const { companyId } = useCompany()
   const [draft, setDraft] = useState<TaskSettings>(() => cloneSettings(view.settings))
   const [busy, setBusy] = useState(false)
@@ -307,14 +309,25 @@ function SettingsForm({
     <>
       {part === 'work' ? (
         <>
-          <ReadIncomingCard draft={draft} change={change} />
+          {/* A card of a feature that is off (使う機能) shows only its title and one line; its answers are kept and saved unchanged. */}
+          <WhenFeatureOn feature="inbox" features={features} title="受信を読む" icon={<EnvelopeSimple size={16} />}>
+            <ReadIncomingCard draft={draft} change={change} />
+          </WhenFeatureOn>
           <AutoRunCard draft={draft} change={change} />
           <TeamModeCard draft={draft} change={change} />
-          <MeetingTasksCard draft={draft} change={change} />
-          <BundleNameCard draft={draft} change={change} />
-          <ReplyCard draft={draft} change={change} />
+          <WhenFeatureOn feature="meetings" features={features} title="会議から AI が作るやること" icon={<ListChecks size={16} />}>
+            <MeetingTasksCard draft={draft} change={change} />
+          </WhenFeatureOn>
+          <WhenFeatureOn feature="projects" features={features} title="やることを束ねるものの名前" icon={<Target size={16} />}>
+            <BundleNameCard draft={draft} change={change} />
+          </WhenFeatureOn>
+          <WhenFeatureOn feature="inbox" features={features} title="届いた連絡に締め切りが書いていないとき、いつまでに返しますか？" icon={<ChatCircleText size={16} />}>
+            <ReplyCard draft={draft} change={change} />
+          </WhenFeatureOn>
           {draft.teamMode && <AcceptanceCard draft={draft} change={change} />}
-          <DepartmentsCard draft={draft} change={change} departments={departments} />
+          <WhenFeatureOn feature="taskList" features={features} title="どの部署で、やることの一覧を使いますか？" icon={<ListChecks size={16} />}>
+            <DepartmentsCard draft={draft} change={change} departments={departments} />
+          </WhenFeatureOn>
         </>
       ) : (
         <HolidaysCard draft={draft} change={change} />
@@ -821,7 +834,7 @@ export function MembershipCard({
   openFor?: string | null
   onOpened?: () => void
 }) {
-  const { companyId } = useCompany()
+  const { companyId, hasCompanyFolder } = useCompany()
   const members = useQuery(`members:${companyId}`, () => companiesApi.getMembers(companyId))
   const ids = departments?.map((d) => d.id) ?? []
   const membership = useQuery(departments ? `department-members:${companyId}:${ids.join(',')}` : null, async () => {
@@ -846,7 +859,7 @@ export function MembershipCard({
           それぞれの部署に、だれが所属していますか？
         </CardTitle>
         <CardDescription>
-所属は、やることの一覧や部署あての連絡をだれが受け持つかに使います。新しく作った部署では、所属する人だけがその部署のフォルダを編集できます（オーナーと管理者はいつでも編集できます。見るのは全員できます）。1人が複数の部署に所属できます。
+{membershipNote(hasCompanyFolder)}
         </CardDescription>
       </CardHeader>
       {error && !departments ? (

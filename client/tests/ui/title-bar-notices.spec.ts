@@ -6,7 +6,8 @@
 // buttons, one the AI is reading in the bell, and the bell's dot is only for unread notices; a notice
 // that the member's AI completed a task their reply finished offers ［元に戻す］ — the undo of exactly
 // that entry (owner FB #19); so do a mail closed because it was archived in Gmail and one archived
-// there (2026-11-05, `UNDOABLE_NOTIFICATION_KINDS`) — and no other notice does.
+// there (2026-11-05, `UNDOABLE_NOTIFICATION_KINDS`) — and no other notice does; 「知らせの設定」 lists no
+// kind of a feature that is off in 「使う機能」 (all listed while everything is on).
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -121,5 +122,25 @@ test('「AI が変えました」 offers ［元に戻す］ through its operatio
   await expect(page.locator('#undone')).toHaveText('corporate-sales|op-preview01')
   await expect(list).toContainText('元に戻しました')
   await expect(page.locator('#opened')).toHaveText('')
+  expectNoPageErrors(state)
+})
+
+test('「知らせの設定」 lists no kind of a feature that is off; with everything on, all are listed', async ({ page }) => {
+  const settings = async () => {
+    await page.getByRole('button', { name: /起きたこと/ }).click()
+    await page.getByRole('button', { name: '知らせの設定' }).click()
+    const panel = page.locator('[aria-label="知らせの設定"]')
+    await expect(panel.getByText('頼んだことが終わった・中止になった')).toBeVisible()
+    return panel
+  }
+  const state = await openPreview(page, 'title-bar-notices', { features: 'off' })
+  let panel = await settings()
+  await expect(panel.getByText('出た会議の議事録が届いた')).toHaveCount(0)
+  await expect(panel.getByText('返事を待っていた連絡に、相手から返事が来た')).toHaveCount(0)
+
+  await openPreview(page, 'title-bar-notices')
+  panel = await settings()
+  await expect(panel.getByText('出た会議の議事録が届いた')).toBeVisible()
+  await expect(panel.getByText('返事を待っていた連絡に、相手から返事が来た')).toBeVisible()
   expectNoPageErrors(state)
 })

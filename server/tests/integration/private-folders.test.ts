@@ -256,6 +256,11 @@ describe('creating private folders', () => {
     expect(d.members.find((x: Loose) => x.userId === 'u-viewer')).toMatchObject({ canWrite: false, via: 'rule' })
     expect(d.members.find((x: Loose) => x.userId === 'u-admin')).toMatchObject({ canWrite: true, via: 'role' })
     expect(d.members.some((x: Loose) => x.userId === 'u-other')).toBe(false)
+    // Its first readers are recorded like a later change of who reads (PR #650 decision 4); the refused tries left nothing.
+    const made = (db.prepare("SELECT by_user, detail FROM permission_history WHERE company_id = ? AND action = 'private-folder-create'").all(CO) as Array<{ by_user: string; detail: string }>)
+      .map(e => ({ by: e.by_user, ...JSON.parse(e.detail) }))
+    expect(made).toEqual([{ by: 'u-owner', scopeId: evalId, path: '人事/評価', after: { viewers: expect.arrayContaining(['u-viewer']), editors: ['u-editor'] } }])
+    expect(made[0].after.viewers).not.toContain('u-editor')
     const row = db.prepare(`SELECT repo_id FROM scopes WHERE id = ?`).get(evalId) as { repo_id: string }
     expect(existsSync(join(process.env.REPOS_DIR!, `${CO}.scopes`, `${row.repo_id}.git`))).toBe(true)
     const cfg = git(['-C', join(process.env.REPOS_DIR!, `${CO}.scopes`, `${row.repo_id}.git`), 'config', 'receive.denyNonFastForwards']).trim()

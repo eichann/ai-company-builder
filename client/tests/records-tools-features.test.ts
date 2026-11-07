@@ -7,8 +7,8 @@
  * - a feature turned off takes its own tools away (minutes_read / minutes_link_bundle with 会議,
  *   decisions_record with 決めたこと, the inbox's tools with 受信) and every action tool and create of
  *   its 「見るだけ」 types (meeting, decision, interaction, reply_request, project);
- * - 決めたこと off: the instructions, minutes_read's description and the minutes first message ask
- *   for no decision, and the instructions say not to record one;
+ * - 決めたこと off: the instructions, minutes_read's description and the minutes first message (the
+ *   manual start and the automatic 「AI の番」 alike) ask for no decision, and the instructions say not to record one;
  * - 受信 off: the mail draft tool does not ask the AI to mark 「返事を待つ」;
  * - an older server that sends no `features` keeps every tool (everything on).
  */
@@ -20,8 +20,10 @@ import { recordToolProviders } from '../electron/records/tool-providers'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import type { CompanyFeatures } from '../../shared/core/features'
 import { minutesFirstMessage } from '../shared/minutes-app'
+import { minutesReading } from '../shared/ai-turn-steps/minutes-reading'
 
 const TYPES = coreTypeDefinitions()
+const ALL_ON: CompanyFeatures = { taskList: true, meetings: true, inbox: true, decisions: true, projects: true }
 const ALL_OFF: CompanyFeatures = { taskList: false, meetings: false, inbox: false, decisions: false, projects: false }
 
 async function toolsWith(features: Partial<CompanyFeatures> | undefined) {
@@ -82,6 +84,11 @@ test('決めたこと off alone: minutes are still read, but nothing asks the AI
   const first = minutesFirstMessage({ id: 'meeting-abcdef123456', title: '定例', meetingAt: null }, { decisions: false })
   assert.ok(!first.includes('decisions_record') && !first.includes('決まったこと'))
   assert.ok(minutesFirstMessage({ id: 'meeting-abcdef123456', title: '定例', meetingAt: null }).includes('decisions_record'))
+  // The automatic reading (the unattended 「AI の番」) follows the switches like the manual start.
+  const candidate = { id: 'meeting-abcdef123456', title: '定例', version: 3, meetingAt: null }
+  const auto = minutesReading.firstMessage(candidate, 4, { ...ALL_ON, decisions: false })
+  assert.ok(!auto.includes('decisions_record') && !auto.includes('決まったこと'))
+  assert.ok(minutesReading.firstMessage(candidate, 4, ALL_ON).includes('decisions_record'))
 })
 
 test('受信 off: the inbox tools are gone and the mail draft asks for no 「返事を待つ」', async () => {

@@ -8,6 +8,7 @@
 // `?undo=1`: a notice that the member's AI completed a task their reply finished (`replied_done`),
 // whose ［元に戻す］ writes the undo asked for (`<record>|<version>|<expectedVersion>`) to `#undone`;
 // `?undo=mail`: a mail closed because it was archived in Gmail, and one archived there (2026-11-05).
+// `?features=off`: 会議と議事録 and 受信 are off in 「使う機能」 (records.md "Features on and off").
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -15,6 +16,7 @@ import '../src/index.css'
 import { TitleBarNotices, type MeetingTurnRow } from '../src/features/notifications/components/TitleBarNotices'
 import { useNotices } from '../src/features/notifications/hooks/useNotices'
 import type { NoticesState } from '../shared/notifications-app'
+import { NOTIFICATION_KINDS } from '../../shared/types/notifications'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 
 const changed = emitter<{ companyId: string }>()
@@ -37,6 +39,9 @@ let state: NoticesState = {
   },
 }
 const readIds: string[] = []
+const features = new URLSearchParams(location.search).get('features') === 'off'
+  ? { taskList: true, meetings: false, inbox: false, decisions: true, projects: true }
+  : undefined
 const withMeetings = new URLSearchParams(location.search).get('meetings') === '1'
 if (new URLSearchParams(location.search).get('undo') === '1') {
   state = { ...state, notices: { ...state.notices, items: [
@@ -69,6 +74,7 @@ function Preview() {
     watchNotifications: async () => {},
     getNotificationsState: async () => state,
     onNotificationsChanged: changed.subscribe,
+    getNotificationSettings: async () => ({ success: true, kinds: Object.fromEntries(NOTIFICATION_KINDS.map(k => [k, true])) }),
     markNotificationsRead: async (companyId, ids) => {
       const list = ids === 'all' ? state.notices.items.map(i => i.id) : ids
       readIds.push(...list)
@@ -96,7 +102,7 @@ function Preview() {
   return (
     <main className="min-h-screen bg-white p-8 text-gray-900">
       <p className="mb-4 text-xs text-gray-500">表示確認用の人工データ。</p>
-      <header className="flex justify-end"><TitleBarNotices companyId="co-preview" state={notices} meetings={meetings} onOpen={t => setOpened(`${t.recordId}|${t.title}`)} onOpenTasks={() => setOpened('task list')} /></header>
+      <header className="flex justify-end"><TitleBarNotices companyId="co-preview" state={notices} meetings={meetings} onOpen={t => setOpened(`${t.recordId}|${t.title}`)} onOpenTasks={() => setOpened('task list')} features={features} /></header>
       <pre id="opened">{opened}</pre>
       <pre id="read">{read}</pre>
       <pre id="undone">{undone}</pre>

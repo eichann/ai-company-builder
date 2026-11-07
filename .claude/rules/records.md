@@ -121,7 +121,8 @@ The record types stay in the core and are always installed; what a company switc
 **feature**, one switch each, all **on** by default (a company that never chose sees no change).
 One copy of the rules: `shared/core/features.ts` (`FEATURE_IDS`, `featuresFrom` — lenient: anything
 missing or not `false` is on —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `FEATURE_NOTICE_KINDS`,
-`noticeTurnedOff`, the words `FEATURE_WORDS` / `FEATURE_OFF_NOTE` / `FEATURE_OFF_CONFIRM`).
+`noticeTurnedOff`, `noticeKindsShown`, the words `FEATURE_WORDS` / `FEATURE_OFF_NOTE` /
+`FEATURE_OFF_CONFIRM` / `FEATURE_OFF_SETTINGS_LINE`).
 
 | feature | id | its types (「見るだけ」 while off) | what stops |
 |---|---|---|---|
@@ -149,9 +150,13 @@ missing or not `false` is on —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `FEATURE_NOTI
   (`SERVICE_RECEIPT_TYPES`, `interaction`) is still written while the inbox is off (sending stays on).
   Turning the feature on again continues from where it stopped: nothing was changed meanwhile.
 - **Notices**: none of a feature's own kinds, and none about a 「見るだけ」 record
-  (`NotificationServiceDeps.noticeOff` → `noticeTurnedOff`, applied before every insert).
+  (`NotificationServiceDeps.noticeOff` → `noticeTurnedOff`, applied before every insert). The bell's
+  「知らせの設定」 lists no kind of a feature that is off (`noticeKindsShown`; the member's stored choice
+  is left as it was).
 - **Combinations**: 決めたこと off with 会議 on — the minutes reading gets no `decisions_record`, its
-  instructions and first message drop the decision part, the approval step is skipped. プロジェクト off —
+  instructions and first message drop the decision part — the manual start (［AI に読ませる］ /
+  自分で読み取る) and the automatic 「AI の番」 alike (`AiTurnStepDefinition.firstMessage` gets the
+  features, `useAiTurnRunner`'s `features`) —, the approval step is skipped. プロジェクト off —
   no `project` made, no まとまり question without a business kind (`meetingAsksBundle`'s
   `bundleKindInUse`). 受信 off — no 「返事を待つ」, nothing comes in. 会議 off — the business plugin's
   「会議のあと自動で」 cannot start (a meeting can no longer become read); its button still works.
@@ -161,12 +166,19 @@ missing or not `false` is on —, `TYPE_FEATURE`, `FEATURE_TOOLS`, `FEATURE_NOTI
   is (`composition.ts` `settingsWithFeatures`).
 - Admin console: 詳しい設定 › 「使う機能」 (`/companies/[id]/advanced/features`,
   `admin/src/components/advanced/features-page.tsx`): the five switches with one line each on what
-  turning it off does; off asks first and says past records stay to read.
+  turning it off does; off asks first and says past records stay to read. A settings card of a
+  feature that is off keeps its title and shows only 「この機能は今オフです（使う機能で切り替えられます）」
+  (`FEATURE_OFF_SETTINGS_LINE`, `admin/src/components/advanced/feature-off.tsx` `WhenFeatureOn`; owner
+  decision 2026-11-08, one way everywhere; its stored answers are saved unchanged): 仕事の進め方's
+  受信を読む and 返事の目安 (受信), 会議から AI が作るやること (会議), 束ねるものの名前 (プロジェクト), やることの一覧を使う部署
+  (やることの一覧); 来た連絡の決まり (受信); つなぎ先 › Google's 会議の記録 period (会議). Unknown switches (an
+  older server, an error) read as all on.
 - Tests: `server/tests/unit/features.test.ts` (who changes them, the view-only rules per feature,
   back on, the receipt exception, the clock, notices, minutes discovery / arrivals, the まとまり
   question, `coreOff`), `inbox.test.ts` 「使う機能」, `client/tests/records-tools-features.test.ts`,
   `client/tests/features-screens.test.ts`, `tests/ui/tasks-layout.spec.ts` / `record-card.spec.ts`
-  (「使う機能」), `admin/tests/features.test.tsx` — each guard mutation-checked.
+  (「使う機能」), `tests/ui/title-bar-notices.spec.ts` (知らせの設定), `admin/tests/features.test.tsx`,
+  `admin/tests/feature-off-settings.test.tsx` — each guard mutation-checked.
 
 ## Type definitions (`shared/core/record-types.ts`)
 

@@ -20,6 +20,7 @@ import { consultationStatusOf } from '../consultationStatusStore'
 import { publishChatPane, showInOtherChatPane } from '../chatPanes'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
+import type { CompanyFeatures } from '../../../../../shared/core/features'
 import type { AiTurnCandidate } from '../../../../shared/ai-turn-steps/types'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import { consultationAbout, taskConsultFirstMessage, taskConsultPurposeTitle, taskConsultTitle } from '../../../../shared/task-consult'
@@ -44,6 +45,8 @@ interface ChatPanelProps {
   aiTurnQueue?: readonly AiTurnCandidate[]
   /** Each waiting record's state and the member's 「もう一度」 / 「人に渡す」 (shown by the screens that list them). */
   onAiTurnItems?: (view: AiTurnItemsView) => void
+  /** The company's 「使う機能」 (absent = all on): the runner's first messages follow it. */
+  features?: CompanyFeatures
   /** The record open in the middle: the list narrows to consultations about it (「すべて表示」 lifts it). */
   focus?: { recordId: string; title: string } | null
   /** The member's 今日のフォルダ now (company path; today-folder.ts), sent with each request. */
@@ -59,7 +62,7 @@ export function ChatPanel(props: ChatPanelProps) {
   return <CompanyChatPanel key={`${userId}:${companyId}`} userId={userId} {...props} />
 }
 
-function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat', aiTurnQueue = NO_AI_TURNS, onAiTurnItems, focus, todayFolder }: ChatPanelProps & { userId: string }) {
+function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat', aiTurnQueue = NO_AI_TURNS, onAiTurnItems, features, focus, todayFolder }: ChatPanelProps & { userId: string }) {
   const { t } = useTranslation()
   const chatServer = useChatServer()
   const currentCompany = useAppStore((s) => s.currentCompany)
@@ -140,6 +143,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
     closeTab,
     deliver: (tabId, request) => setAiTurnRequest({ tabId, request }),
     onItems: onAiTurnItems,
+    features,
   })
   const aiTurnNotice = aiTurns.notice && <AiTurnNotice text={aiTurns.notice} canResume={aiTurns.canResume} onResume={aiTurns.resume} />
 

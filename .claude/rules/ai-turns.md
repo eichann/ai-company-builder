@@ -90,7 +90,8 @@ turns").
   the runner's queue finds them (`listedBy`: `minutes` = main's received minutes, only while Google
   may read them; `ai-turn` = the task list's 「AI の番」, `turn: 'ai'`), main's `claim` (action, from
   state) and `settle` states (done / couldNot / closed / working, `putBack`), the consultation's
-  title and first message (`minutesId` link or not), and its `tools`. Today: `minutes-reading.ts`,
+  title and first message (`minutesId` link or not; it gets the company's 「使う機能」 and asks
+  nothing of a feature that is off, `records.md` "Features on and off"), and its `tools`. Today: `minutes-reading.ts`,
   `inbox-triage.ts` (lane B, B4: an `interaction` in 届いた, `inbox.md`), `follow-up.ts` (lane B,
   B5: a `reply_request` in 準備中 / 確かめ中; `claim.from` may list several states only without a
   start mark, `claimStates`), `reply-check.ts` (lane B, owner FB #19: an `interaction` in

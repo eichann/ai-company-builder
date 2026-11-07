@@ -178,7 +178,13 @@ live next to the task settings but in their own table: `records.md` "Features on
   A member removed from the company is removed from every department of it
   (`services/companies.ts` `removeMember`).
   Every change of who belongs (this route, an invitation's 所属, a member leaving) is recorded in
-  `permission_history` (`department-members`; `server.md` "Groups and read-restricted places").
+  `permission_history` (`department-members`; `server.md` "Groups and read-restricted places"), and
+  a department's deletion with who belonged (`department-delete`).
+- The admin console's line on 所属 (「それぞれの部署に、だれが所属していますか？」 and its dialog,
+  `membershipNote` in `department-members-dialog.tsx`): with the shared folder, who belongs edits a
+  new department's folder and everyone reads it; without it (`folderKind: 'none'`), who sees a
+  department's things is its 「見られる人」 — never 「見るのは全員できます」 there
+  (`admin/tests/company-without-folder.test.tsx`).
 - Starts empty for every department: nobody belongs until an admin or manager says so.
 - Absences (代わりの人, `records.md` "Absence and the delegate") are stored next to it
   (`member_absences`, same repository) and use it: a department's managers set the absences of

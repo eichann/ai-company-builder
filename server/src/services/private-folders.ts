@@ -44,6 +44,12 @@ export const PRIVATE_FOLDERS_OUTDATED_ERROR =
 
 interface DepartmentFolder { id: string; folder: string }
 
+/** Who reads a private folder, as permission_history keeps it: its viewers and its editors (ids). */
+function readersOf(scope: PrivateFolderRecord['scope'] | undefined): { viewers: string[]; editors: string[] } {
+  const users = (scope?.rules ?? []).filter(r => r.subjectType === 'user' && r.subjectId && r.canRead)
+  return { viewers: users.filter(r => !r.canWrite).map(r => r.subjectId!), editors: users.filter(r => r.canWrite).map(r => r.subjectId!) }
+}
+
 export interface PrivateFolderServiceDeps {
   companyData: CompanyDataSource
   memberships: MembershipRepository
@@ -225,7 +231,12 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
           ? refuse('conflict', reservedPathMessage(path), { code: 'FOLDER_NAME_UNAVAILABLE' })
           : refusalOf(created)
       }
-      return ok(detail(actor.companyId, privateFoldersOf(actor.companyId).get(created.scopeId)!))
+      const made = privateFoldersOf(actor.companyId).get(created.scopeId)!
+      // Its first readers are a change of who reads, like a later edit (permission_history, server.md "Groups").
+      companyData.forCompany(actor.companyId).permissionHistory.append({
+        action: 'private-folder-create', detail: { scopeId: made.scope.id, path: made.scope.path, after: readersOf(made.scope) }, at: clock.now(), byUser: actor.userId,
+      })
+      return ok(detail(actor.companyId, made))
     },
 
     /** The private folder if the actor may manage it; otherwise a 404 that reveals nothing. */
@@ -253,13 +264,9 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
     replaceMembers(actor: Member, folder: PrivateFolderRecord, rules: PrivateRuleSet): PrivateFolderDetail {
       // Recorded with the other changes of who reads (permission_history, server.md "Groups").
       transactions.run(() => {
-        const ruleSet = (scope: PrivateFolderRecord['scope'] | undefined) => {
-          const users = (scope?.rules ?? []).filter(r => r.subjectType === 'user' && r.subjectId && r.canRead)
-          return { viewers: users.filter(r => !r.canWrite).map(r => r.subjectId!), editors: users.filter(r => r.canWrite).map(r => r.subjectId!) }
-        }
-        const before = ruleSet(privateFoldersOf(actor.companyId).get(folder.scope.id)?.scope)
+        const before = readersOf(privateFoldersOf(actor.companyId).get(folder.scope.id)?.scope)
         privateFoldersOf(actor.companyId).replaceRules(folder.scope.id, rules, actor.userId)
-        const after = ruleSet(privateFoldersOf(actor.companyId).get(folder.scope.id)?.scope)
+        const after = readersOf(privateFoldersOf(actor.companyId).get(folder.scope.id)?.scope)
         companyData.forCompany(actor.companyId).permissionHistory.append({
           action: 'private-folder-members', detail: { scopeId: folder.scope.id, path: folder.scope.path, before, after }, at: clock.now(), byUser: actor.userId,
         })
