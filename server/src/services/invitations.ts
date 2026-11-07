@@ -231,7 +231,18 @@ export function createInvitationService(deps: InvitationServiceDeps) {
         // 所属 chosen by who invited them (departments deleted since are skipped).
         const departmentIds = storedDepartmentIds(invitation.department_ids)
         if (departmentIds.length > 0) {
-          companyData.forCompany(invitation.company_id).tasks.addDepartmentMember(userId, departmentIds, invitation.created_by, timestamp)
+          const handle = companyData.forCompany(invitation.company_id)
+          handle.tasks.addDepartmentMember(userId, departmentIds, invitation.created_by, timestamp)
+          // Recorded like any 所属 change (server.md "Groups" audit): who chose it is the inviter.
+          for (const departmentId of handle.tasks.departmentIdsOf(userId)) {
+            const after = handle.tasks.departmentMemberIds(departmentId)
+            handle.permissionHistory.append({
+              action: 'department-members',
+              detail: { departmentId, before: after.filter(id => id !== userId), after, via: 'invitation' },
+              at: timestamp,
+              byUser: invitation.created_by,
+            })
+          }
         }
         return true
       })

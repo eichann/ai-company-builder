@@ -175,7 +175,16 @@ export function createTaskSettingsService(deps: TaskSettingsDeps) {
       const force = (body as { force?: unknown }).force === true
       if (force && !hasFullAccess(member.role)) return refuse('forbidden', FORCE_NOT_ALLOWED_ERROR, { code: 'FORCE_NOT_ALLOWED' })
       const done = guardWrite(member, force, [''], () => {
-        handle(member.companyId).tasks.replaceDepartmentMembers(departmentId, unique, member.userId, clock.now())
+        const tasks = handle(member.companyId).tasks
+        const before = tasks.departmentMemberIds(departmentId)
+        const at = clock.now()
+        tasks.replaceDepartmentMembers(departmentId, unique, member.userId, at)
+        // Who belongs decides who reads / writes where a rule names the department (server.md
+        // "Groups"): recorded with the rule changes, in the same transaction.
+        const after = tasks.departmentMemberIds(departmentId)
+        if (before.length !== after.length || before.some(id => !after.includes(id))) {
+          handle(member.companyId).permissionHistory.append({ action: 'department-members', detail: { departmentId, before, after }, at, byUser: member.userId })
+        }
       })
       if (!done.ok) return done
       return ok(membersView(member, departmentId))

@@ -331,6 +331,18 @@ describe('only owners and admins change who reads', () => {
     expect((await call('PUT', co(`/departments/${hrId}/members`), { userIds: [] })).status).toBe(200)
   })
 
+  it('who belongs to a department is recorded with the rules: who, when, before and after', () => {
+    const entries = history(none).filter(e => e.action === 'department-members').map(e => ({ by: e.byUser, ...JSON.parse(e.detail) }))
+    expect(entries.filter(e => e.departmentId === hrId)).toEqual([
+      { by: 'rp-owner', departmentId: hrId, before: [], after: ['rp-carol'] },
+      { by: 'rp-mgr', departmentId: hrId, before: ['rp-carol'], after: [] },
+      { by: 'rp-owner', departmentId: hrId, before: [], after: ['rp-bob'] },
+      { by: 'rp-owner', departmentId: hrId, before: ['rp-bob'], after: [] },
+    ])
+    // The refused add left nothing behind.
+    expect(entries.some(e => e.by === 'rp-mgr' && e.after.includes('rp-bob'))).toBe(false)
+  })
+
   it('without the shared folder a rule that edits must also read', async () => {
     const r = await call('POST', co('/permissions/rules'), { path: '経理部', subjectType: 'user', subjectId: 'rp-bob', canRead: false, canWrite: true })
     expect(r).toMatchObject({ status: 400, body: { code: 'WRITE_NEEDS_READ' } })
@@ -343,11 +355,17 @@ describe('only owners and admins change who reads', () => {
 })
 
 describe('leaving the company', () => {
-  it('takes the member out of every group', async () => {
+  it('takes the member out of every group and department, and records both', async () => {
+    expect((await call('PUT', co(`/departments/${hrId}/members`), { userIds: ['rp-alice', 'rp-carol'] })).status).toBe(200)
     const r = await call('DELETE', `/api/companies/${none}/members/rp-alice`)
     expect(r.status).toBe(200)
     const g = (await call('GET', co('/groups'))).body.data.groups.find((x: Json) => x.id === groupId)
     expect(g.memberIds).not.toContain('rp-alice')
+    const left = history(none).filter(e => JSON.parse(e.detail).via === 'left-company').map(e => ({ action: e.action, by: e.byUser, ...JSON.parse(e.detail) }))
+    expect(left).toEqual([
+      { action: 'department-members', by: 'rp-owner', departmentId: hrId, before: ['rp-alice', 'rp-carol'], after: ['rp-carol'], via: 'left-company' },
+      { action: 'group-members', by: 'rp-owner', groupId, before: ['rp-alice', 'rp-mgr'], after: ['rp-mgr'], via: 'left-company' },
+    ])
   })
 })
 

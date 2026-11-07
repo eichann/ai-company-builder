@@ -104,7 +104,8 @@ access itself: `google-connector.md` (G3).
    `counterpart`. `candidates` (with each one's `typeLabel`) in the text answer; a person or their AI chooses with
    `POST …/minutes/…/bundle { bundleId, expectedVersion? }` (assignee or owner/admin; only a
    まとまり the member reads — anything else, missing or unreadable, one 400 `BAD_LINK`; the service
-   writer's `links`, ledger `link_bundle`). Nothing is written to the outside system by this.
+   writer's `links`, ledger `link_bundle`). The まとまり's 相手 is linked too (and answered as
+   `counterpartId`) only when the member reads it — else none, as if it had none. Nothing is written to the outside system by this.
 3. **Reading** — the AI (tool `minutes_read`) or the app reads the text (below), runs
    `meeting__start_reading`, makes the outputs with the existing tools (`records_create` task —
    assignee = attending member ids, due within a year —, `decisions_record` linking meeting /
@@ -218,7 +219,9 @@ or the decision service stops calling it, or another module uses the older per-m
   / retracted / discarded left out); `POST /records/meeting-duplicates/merge { keepId, duplicateIds }`
   (one listed group only, else 400 `NOT_DUPLICATES`) cancels each task / retracts each decision
   through the engine as that admin, note 「同じ会議から重複して作られたため、こちらは使いません。残したもの：…（id）」
-  — nothing is deleted; a mail draft is listed only (`mergeable: false`, its author discards it).
+  — naming the kept one only when every member who reads the duplicate reads it too, else the
+  note ends after 「使いません。」 (`mergedNote`; a duplicate's history must not name a record its
+  readers cannot read: `tests/unit/hidden-record-ids.test.ts`) — nothing is deleted; a mail draft is listed only (`mergeable: false`, its author discards it).
   Admin console: 「やることの一覧」→「同じ会議から重複して作られたもの」 (`meeting-duplicates.tsx`).
 - Test: `server/tests/unit/source-slot-candidates.test.ts` (a second reading's reused `task:1` is made;
   one candidate per quote from two attendees' AIs, told only when readable; a close title kept and

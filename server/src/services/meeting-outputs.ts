@@ -15,7 +15,8 @@
  *
  * For what was made twice before this rule, owner/admin list the duplicates (same meeting, type
  * and title) and merge them: each duplicate is cancelled (task) or retracted (decision) with a note
- * naming the kept one — nothing is deleted. Mail drafts are listed only (the author discards them).
+ * naming the kept one — only when everyone who reads the duplicate also reads the kept one (else the
+ * note names nothing: a record they cannot read does not exist for them) — nothing is deleted. Mail drafts are listed only (the author discards them).
  */
 import { outputTitleKey } from '../../shared/core/meeting-outputs'
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
@@ -28,7 +29,7 @@ import type { TokenDigest } from '../ports/key-broker'
 import type { RecordRepository, RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
-import { recordReader } from './record-access'
+import { recordReader, recordReaders } from './record-access'
 import type { ActorInput } from './record-engine/types'
 import { RECORDS_DISABLED, recordSummaries } from './records'
 
@@ -69,6 +70,15 @@ export interface MeetingOutputServiceDeps {
   companyData: CompanyDataSource
   /** The engine's action (cancel / retract), as the owner/admin who merges. */
   act: (member: Member, actor: ActorInput, recordId: string, action: string, body: unknown) => Promise<Outcome<{ record: RecordSummary; entry: LedgerEntry }>>
+  /** The company's members with their roles (who reads a duplicate and the kept one). */
+  members: (companyId: string) => Array<{ userId: string; role: string }>
+}
+
+/** The note on a merged duplicate; `kept` only when every reader of the duplicate reads it too. */
+export function mergedNote(kept: { id: string; title: string } | null): string {
+  return kept
+    ? `同じ会議から重複して作られたため、こちらは使いません。残したもの：「${kept.title}」（${kept.id}）`
+    : '同じ会議から重複して作られたため、こちらは使いません。'
 }
 
 export function createMeetingOutputService(deps: MeetingOutputServiceDeps) {
@@ -144,11 +154,20 @@ export function createMeetingOutputService(deps: MeetingOutputServiceDeps) {
       const action = MERGE_ACTION[group.type]
       if (!action) return refuse('bad-request', 'この種類は、作った人が画面で取り消します', { code: 'NOT_MERGEABLE' })
       const kept = members.find(m => m.id === b.keepId) as RecordSummary
-      const note = `同じ会議から重複して作られたため、こちらは使いません。残したもの：「${kept.title}」（${kept.id}）`
+      const handle = deps.companyData.forCompany(member.companyId)
+      const scopes = handle.scopes.listWithRules()
+      const people = deps.members(member.companyId)
+      const rows = new Map(records.byIds([kept.id, ...(ids as string[])]).map(r => [r.id, r]))
+      const keptRow = rows.get(kept.id)
+      const keptReaders = new Set(keptRow ? recordReaders(member.companyId, keptRow, people, scopes) : [])
       const merged: string[] = []
       const failed: Array<{ id: string; code: string | null }> = []
       for (const id of ids as string[]) {
         const now = records.states([id])[0]
+        // The duplicate's history is read by its own readers: it names the kept one only to those who read it.
+        const row = rows.get(id)
+        const named = !!row && recordReaders(member.companyId, row, people, scopes).every(u => keptReaders.has(u))
+        const note = mergedNote(named ? kept : null)
         const r = await deps.act(member, { kind: 'human' }, id, action, { expectedVersion: now?.version ?? 0, note })
         if (r.ok) merged.push(id)
         else failed.push({ id, code: typeof r.body.code === 'string' ? r.body.code : null })

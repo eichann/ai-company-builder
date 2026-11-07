@@ -123,7 +123,7 @@ In this order, nothing sent unless all pass:
    placed like the mail record itself — the まとまり's folder, else the meeting's / 連絡's / やること's
    place, owner-only / members-only kept; never wider than the mail, so a department task's mail
    outside any まとまり is not company-wide (audit B-M2, `outbound-mail.test.ts` "a department
-   task's mail outside any まとまり"); links `bundle` and, when the まとまり links a 相手, `counterpart`). 4xx / 429 / not sent → stays `draft` (409 `SEND_REFUSED` / 503
+   task's mail outside any まとまり"); links `bundle` and, when the まとまり links a 相手 the sender reads, `counterpart`). 4xx / 429 / not sent → stays `draft` (409 `SEND_REFUSED` / 503
    `GOOGLE_UNAVAILABLE`). A lost answer or a 5xx → `unknown`
    「届いたか分かりません。Gmail の送信済みを確かめてください。」; ACB does not look in Gmail's sent mail (受信を読む
    reads the inbox only, and only for a member who allowed it), so the person answers `POST …/resolve { sent }`: true → `sent`, false →

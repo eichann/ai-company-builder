@@ -14,7 +14,8 @@ import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
 import type { PrivateFolderRecord, PrivateRuleSet } from '../ports/private-folders'
 import type { RepoStore } from '../ports/repo-store'
-import type { CompanyLock } from '../ports/transactions'
+import type { CompanyLock, Transactions } from '../ports/transactions'
+import type { Clock } from '../ports/clock'
 import { supportsPrivateFolders } from '../lib/client-version'
 import {
   canReadPrivateScope,
@@ -50,10 +51,12 @@ export interface PrivateFolderServiceDeps {
   accounts: AccountDirectory
   repoStore: RepoStore
   companyLock: CompanyLock
+  transactions: Transactions
+  clock: Clock
 }
 
 export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
-  const { companyData, memberships, clientActivity, accounts, repoStore, companyLock } = deps
+  const { companyData, memberships, clientActivity, accounts, repoStore, companyLock, transactions, clock } = deps
   // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
   const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
   const privateFoldersOf = (companyId: string) => companyData.forCompany(companyId).privateFolders
@@ -248,7 +251,19 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
     },
 
     replaceMembers(actor: Member, folder: PrivateFolderRecord, rules: PrivateRuleSet): PrivateFolderDetail {
-      privateFoldersOf(actor.companyId).replaceRules(folder.scope.id, rules, actor.userId)
+      // Recorded with the other changes of who reads (permission_history, server.md "Groups").
+      transactions.run(() => {
+        const ruleSet = (scope: PrivateFolderRecord['scope'] | undefined) => {
+          const users = (scope?.rules ?? []).filter(r => r.subjectType === 'user' && r.subjectId && r.canRead)
+          return { viewers: users.filter(r => !r.canWrite).map(r => r.subjectId!), editors: users.filter(r => r.canWrite).map(r => r.subjectId!) }
+        }
+        const before = ruleSet(privateFoldersOf(actor.companyId).get(folder.scope.id)?.scope)
+        privateFoldersOf(actor.companyId).replaceRules(folder.scope.id, rules, actor.userId)
+        const after = ruleSet(privateFoldersOf(actor.companyId).get(folder.scope.id)?.scope)
+        companyData.forCompany(actor.companyId).permissionHistory.append({
+          action: 'private-folder-members', detail: { scopeId: folder.scope.id, path: folder.scope.path, before, after }, at: clock.now(), byUser: actor.userId,
+        })
+      })
       return detail(actor.companyId, privateFoldersOf(actor.companyId).get(folder.scope.id)!)
     },
 

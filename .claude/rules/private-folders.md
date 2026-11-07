@@ -133,6 +133,8 @@ or who can see it. So:
 - `GET /private-folders` (owner/admin: all; managers: their departments'),
   `GET /private-folders/:scopeId`, `PUT /private-folders/:scopeId/members` `{ viewers, editors? }`
   (owner/admin and the department's managers; anyone else 404). Counts include owners/admins.
+  A change of readers is recorded in `permission_history` (`private-folder-members`, before /
+  after, in one transaction with the change; `server.md` "Groups and read-restricted places").
 - `POST /private-folders/:scopeId/make-public` (owner/admin): refuse new pushes to the scope repo
   and wait for running ones, archive, write its tree into company `main` at the same path as ONE
   commit (compare-and-swap `update-ref`, retried; idempotent), then in one transaction make every

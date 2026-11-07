@@ -788,12 +788,18 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     return view ? ok({ outcome: 'sent', draft: view }) : notFound()
   }
 
-  /** The まとまり's 相手 (the first record it links to whose type implements `counterpart`), as a link of the interaction. */
-  function counterpartLink(companyId: string, bundleId: string): { counterpart?: string[] } {
-    const records = companyData.forCompany(companyId).records
+  /**
+   * The まとまり's 相手 (the first record it links to whose type implements `counterpart` and that
+   * the sender reads), as a link of the interaction: one they cannot read does not exist for them
+   * (records.md "No leaks").
+   */
+  function counterpartLink(member: Member, bundleId: string): { counterpart?: string[] } {
+    const handle = companyData.forCompany(member.companyId)
+    const records = handle.records
     const types = currentTypes(records)
+    const reader = recordReader(member, handle.scopes.listWithRules())
     const targets = records.linksFrom([bundleId]).map(l => l.targetId).filter((t): t is string => !!t)
-    const found = records.byIds(targets).find(r => r.removedAt === null && types.get(r.type)?.definition.implements.includes('counterpart'))
+    const found = records.byIds(targets).find(r => r.removedAt === null && types.get(r.type)?.definition.implements.includes('counterpart') && reader.record(r))
     return found ? { counterpart: [found.id] } : {}
   }
 
@@ -828,7 +834,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
         occurred_at: at, channel: 'email', counterpart_text: domains, source_ref: gmailId ? `gmail:${gmailId}` : null, needs_reply: false,
         ...(waiting ? { message_id: waiting.messageId, thread_ref: waiting.threadId ? `gmail:${waiting.threadId}` : null, assignee: member.userId } : {}),
       },
-      links: bundle ? { bundle: [bundle.id], ...counterpartLink(member.companyId, bundle.id) } : {},
+      links: bundle ? { bundle: [bundle.id], ...counterpartLink(member, bundle.id) } : {},
       actor: { id: member.userId, kind: 'human', source: null },
       ...(waiting ? { state: 'handled', quiet: true } : {}),
     })

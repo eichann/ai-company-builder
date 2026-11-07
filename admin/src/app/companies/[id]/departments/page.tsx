@@ -17,6 +17,7 @@ import {
   ArrowsClockwise,
   DotsSixVertical,
   DotsThree,
+  Eye,
   Folder,
   PencilSimple,
   Plus,
@@ -30,6 +31,7 @@ import { DepartmentIcon } from '@/components/app/department-icon'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { DepartmentFormDialog } from '@/components/departments/department-form-dialog'
 import { ManagersDialog } from '@/components/departments/managers-dialog'
+import { PlaceReadersDialog, useDepartmentReaders } from '@/components/departments/place-readers-dialog'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -55,6 +57,9 @@ export default function DepartmentsPage() {
   const departments = useQuery(`departments:${companyId}`, () => departmentsApi.list(companyId))
   const managers = useDepartmentManagers(companyId, departments.data)
   const members = useQuery(isAdmin ? `members:${companyId}` : null, () => companiesApi.getMembers(companyId))
+  // 見られる人 of a department and the places inside it (a company without the shared folder).
+  const readers = useDepartmentReaders(companyId, members.data, departments.data)
+  const [readersFor, setReadersFor] = useState<Department | null>(null)
 
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Department | null>(null)
@@ -230,6 +235,8 @@ export default function DepartmentsPage() {
                     }}
                     onManagers={() => setManagersFor(d)}
                     onDelete={() => openDelete(d)}
+                    readers={readers.line(d)}
+                    onReaders={() => setReadersFor(d)}
                   />
                 ))}
               </ul>
@@ -248,6 +255,21 @@ export default function DepartmentsPage() {
           onOpened={membersOpened}
         />
       </div>
+
+      {readers.shown && (
+        <PlaceReadersDialog
+          open={readersFor !== null}
+          onOpenChange={(open) => !open && setReadersFor(null)}
+          companyId={companyId}
+          department={readersFor}
+          scopes={readers.scopes}
+          members={members.data ?? []}
+          departments={departments.data ?? []}
+          groups={readers.groups}
+          editable={isAdmin}
+          onSaved={readers.reload}
+        />
+      )}
 
       {isAdmin && (
         <>
@@ -317,6 +339,8 @@ function DepartmentRow({
   onEdit,
   onManagers,
   onDelete,
+  readers,
+  onReaders,
 }: {
   department: Department
   managers: DepartmentManager[] | undefined
@@ -326,6 +350,9 @@ function DepartmentRow({
   onEdit: () => void
   onManagers: () => void
   onDelete: () => void
+  /** 見られる人 (a company without the shared folder; owners/admins and the department's managers). */
+  readers?: { text: string; restricted: boolean }
+  onReaders: () => void
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: d.id,
@@ -366,6 +393,17 @@ function DepartmentRow({
           {isMine && <Badge variant="brand">あなたが管理役</Badge>}
         </div>
         {d.description && <p className="truncate text-sm text-muted-foreground">{d.description}</p>}
+        {readers && (
+          <button
+            type="button"
+            onClick={onReaders}
+            aria-label={`${d.name} を見られる人：${readers.text}`}
+            className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <Eye size={12} className={cn(readers.restricted && 'text-brand')} aria-hidden="true" />
+            <span className="truncate">見られる人：{readers.text}</span>
+          </button>
+        )}
       </div>
 
       <div className="hidden min-w-0 items-center gap-2 sm:flex">
@@ -408,6 +446,12 @@ function DepartmentRow({
               <UserGear />
               管理役を設定
             </DropdownMenuItem>
+            {readers && (
+              <DropdownMenuItem onSelect={onReaders}>
+                <Eye />
+                見られる人を決める
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={onDelete}>
               <Trash />

@@ -172,6 +172,8 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
   `[WRITE_DENIED]`; `force: true` is owner/admin only (a manager's → 403 `FORCE_NOT_ALLOWED`).
   A member removed from the company is removed from every department of it
   (`services/companies.ts` `removeMember`).
+  Every change of who belongs (this route, an invitation's 所属, a member leaving) is recorded in
+  `permission_history` (`department-members`; `server.md` "Groups and read-restricted places").
 - Starts empty for every department: nobody belongs until an admin or manager says so.
 - Absences (代わりの人, `records.md` "Absence and the delegate") are stored next to it
   (`member_absences`, same repository) and use it: a department's managers set the absences of

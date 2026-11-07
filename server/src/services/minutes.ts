@@ -334,11 +334,15 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     return open(records.byIds(all.map(r => r.id))).filter(titleMatch)
   }
 
-  /** The まとまり's 相手: the first record it links to whose type implements `counterpart`, if any. */
-  function counterpartOf(handle: CompanyData, bundleId: string): string | null {
+  /**
+   * The まとまり's 相手: the first record it links to whose type implements `counterpart` and that
+   * the member reads, if any — one they cannot read does not exist for them (its id is never
+   * answered nor linked by them; records.md "No leaks").
+   */
+  function counterpartOf(handle: CompanyData, reader: RecordReader, bundleId: string): string | null {
     const counterparts = typesImplementing(handle, 'counterpart')
     const targets = handle.records.linksFrom([bundleId]).map(l => l.targetId).filter((t): t is string => !!t)
-    const live = new Map(handle.records.byIds(targets).filter(r => r.removedAt === null && counterparts.has(r.type)).map(r => [r.id, r]))
+    const live = new Map(handle.records.byIds(targets).filter(r => r.removedAt === null && counterparts.has(r.type) && reader.record(r)).map(r => [r.id, r]))
     return targets.find(t => live.has(t)) ?? null
   }
 
@@ -972,7 +976,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         ? records.byIds([b.bundleId]).find(r => r.removedAt === null && bundles.has(r.type) && reader.record(r))
         : undefined
       if (!bundleRow) return refuse('bad-request', 'bundleId: a まとまり (bundle) record you can read', { code: 'BAD_LINK' })
-      const counterpart = counterpartOf(handle, bundleRow.id)
+      const counterpart = counterpartOf(handle, reader, bundleRow.id)
       const expected = typeof b.expectedVersion === 'number' ? b.expectedVersion : now.version
       // Read without a まとまり: the meeting stays read (no AI run of its own); the まとまり moves to the
       // business plugin's step for it, as after a reading — once (minutes.md "A まとまり chosen later").

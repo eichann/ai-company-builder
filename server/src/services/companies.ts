@@ -379,8 +379,23 @@ export function createCompanyService(deps: CompanyServiceDeps) {
         scopesOf(companyId).removeManagerFromCompany(targetUserId)
         scopesOf(companyId).removeSkillEditorFromCompany(targetUserId)
         scopesOf(companyId).deleteUserRules(targetUserId)
-        // They belong to no department of it any more (tasks.md "Department membership").
-        companyData.forCompany(companyId).tasks.removeMember(targetUserId, actor.userId, clock.now())
+        // They belong to no department of it any more (tasks.md "Department membership"), and are
+        // in no group (below): both decide who reads restricted places, so both are recorded
+        // (permission_history, server.md "Groups").
+        const handle = companyData.forCompany(companyId)
+        const at = clock.now()
+        for (const departmentId of handle.tasks.departmentIdsOf(targetUserId)) {
+          const before = handle.tasks.departmentMemberIds(departmentId)
+          handle.permissionHistory.append({
+            action: 'department-members', detail: { departmentId, before, after: before.filter(id => id !== targetUserId), via: 'left-company' }, at, byUser: actor.userId,
+          })
+        }
+        for (const group of handle.groups.list().filter(g => g.memberIds.includes(targetUserId))) {
+          handle.permissionHistory.append({
+            action: 'group-members', detail: { groupId: group.id, before: group.memberIds, after: group.memberIds.filter(id => id !== targetUserId), via: 'left-company' }, at, byUser: actor.userId,
+          })
+        }
+        handle.tasks.removeMember(targetUserId, actor.userId, at)
         // …and on no members-only record's list (records.md "Members-only records").
         companyData.forCompany(companyId).records.forgetMember(targetUserId)
         // …and in no group (server.md "Groups"): joining again starts from nothing.

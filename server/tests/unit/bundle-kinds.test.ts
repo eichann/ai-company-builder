@@ -8,6 +8,7 @@
  * - a department where an enabled business plugin's bundle type lives — placed there by its
  *   mapping, or with records there — makes that kind; other departments the core's;
  * - a turned-off plugin, or another company's plugin and records, decide nothing;
+ * - records the member cannot read decide nothing for them (records.md "No leaks");
  * - the name is checked (one line, 1–20 characters) and a document without it reads 「プロジェクト」.
  */
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -119,6 +120,18 @@ describe('which kind each department makes', () => {
     expect(byFolder().営業部).toBe('project:プロジェクト')
     conn.prepare("UPDATE plugin_installs SET enabled = 0 WHERE company_id = 'a'").run()
     expect(byFolder()).toEqual({ 営業部: 'project:プロジェクト', 開発部: 'project:プロジェクト' })
+  })
+
+  it('records the member cannot read decide nothing for them', () => {
+    install('a', { enabled: true })
+    // 開発部: u-bob may not read it.
+    conn.prepare("INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('a-dev', 'a', '開発部', 'folder', ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-dev-e', 'a-dev', 'everyone', NULL, 1, 1, ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-dev-b', 'a-dev', 'user', 'u-bob', 0, 0, ?)").run(TS)
+    ok(engine.create(m('a'), { kind: 'human' }, { type: 'deal', title: '開発部の案件', folder: '開発部', fields: { owner: 'u-alice' } }))
+    expect(byFolder().開発部).toBe('deal:案件')
+    const bob = ok(createBundleKinds({ companyData: source, shelf, settingsOf: () => ({ bundleName: 'プロジェクト' }) }).kinds(m('a', 'u-bob')))
+    expect(Object.fromEntries(bob.departments.map(d => [d.folder, d.kind.type]))).toEqual({ 営業部: 'project', 開発部: 'project' })
   })
 
   it('answers like every records route while the company map is off', () => {

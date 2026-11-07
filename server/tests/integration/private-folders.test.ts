@@ -279,6 +279,21 @@ describe('creating private folders', () => {
     expect((await create('owner', { parentPath: 'sales', name: 'y', viewers: ['u-nobody'] })).body.code).toBe('INVALID_MEMBERS')
   })
 
+  it('a change of who reads it is recorded in permission_history: who, before and after', async () => {
+    const put = (viewers: string[], editors: string[]) => as('owner', 'PUT', `/api/companies/${CO}/private-folders/${evalId}/members`, { viewers, editors })
+    const logged = () => (db.prepare("SELECT by_user, detail FROM permission_history WHERE company_id = ? AND action = 'private-folder-members' ORDER BY seq").all(CO) as Array<{ by_user: string; detail: string }>)
+      .map(e => ({ by: e.by_user, ...JSON.parse(e.detail) }))
+    const before = logged().length
+    expect((await put(['u-viewer', 'u-editor', 'u-other'], ['u-editor'])).status).toBe(200)
+    expect((await put(['u-viewer', 'u-editor'], ['u-editor'])).status).toBe(200)
+    const [widened, narrowed] = logged().slice(before)
+    expect(widened).toMatchObject({ by: 'u-owner', scopeId: evalId, path: '人事/評価' })
+    expect(widened.after.viewers).toContain('u-other')
+    expect(widened.before.viewers).not.toContain('u-other')
+    expect(narrowed).toMatchObject({ before: widened.after, after: widened.before })
+    expect(narrowed.after.editors).toEqual(['u-editor'])
+  })
+
   it('a taken name answers the same for a public folder (any case) and a private one', async () => {
     const pub = await create('owner', { parentPath: 'sales', name: 'docs' })
     const priv = await create('owner', { parentPath: '人事', name: '評価' })
