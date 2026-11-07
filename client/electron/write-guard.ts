@@ -115,6 +115,15 @@ export interface WriteGuard {
    * outside the company folder included, is refused. Absent: an ordinary consultation.
    */
   writeArea?: { folder: string }
+  /**
+   * `none`: the working folder of a company without the shared company folder. Nothing written
+   * there reaches the push checker, so the checks that only mirror it (write access, not
+   * downloaded, private folders, instruction and skill files, type definitions, git clone into
+   * the folder) are not made; the app's own rules stay — the deliverable folder, agent config
+   * (what the AI loads and runs: settings, hooks, MCP) and record-file frontmatter.
+   * Absent: a company with the shared folder (git), every check as before.
+   */
+  folderKind?: 'none'
 }
 
 /** Where a path really lands, relative to the company folder's real path ('/'-separated); null when outside it or unknown. */
@@ -223,6 +232,7 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
   if (area.deny) return area
   const rel = repoRelativePath(guard.root, target, cwd)
   if (rel === null) return { deny: false } // outside the company: not ours to judge
+  if (guard.folderKind === 'none') return checkAgentConfig(guard, rel)
   // Not downloaded: the member (and the AI) cannot see what teammates keep
   // there, and sync would hold the file back rather than share it.
   const notDownloaded = guard.getNotDownloaded?.() ?? []
@@ -248,12 +258,8 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
   // Agent config (.mcp.json, .codex/, and everything in .claude/ / .agents/
   // that is not a skill or instruction file): owner/admin only, the push
   // check's rule (shared/core/agent-config.ts). Unknown authority never blocks.
-  if (isAgentConfig(rel) && !isUnsharedPath(rel)) {
-    const authority = guard.getInstructionAuthority?.()
-    if (authority && !FULL_ACCESS_ROLES.has(authority.role)) {
-      return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: agentConfigMessage(rel), code: 'agent-config' }
-    }
-  }
+  const config = checkAgentConfig(guard, rel)
+  if (config.deny) return config
   if (TYPE_DEFINITION_RE.test(lookalikeKey(rel))) {
     const authority = guard.getInstructionAuthority?.()
     if (authority && !FULL_ACCESS_ROLES.has(authority.role)) {
@@ -274,6 +280,17 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
   if (decision.write) return { deny: false }
   const folder = decision.scopePath ?? rel.split('/').slice(0, -1).join('/')
   return { deny: true, path: rel, folder, message: readOnlyMessage(folder), code: 'read-only-folder' }
+}
+
+/** Agent config (.mcp.json, .claude/settings*.json, hooks, .codex/…): owner/admin only; unknown authority never blocks. */
+function checkAgentConfig(guard: WriteGuard, rel: string): GuardDecision {
+  if (isAgentConfig(rel) && !isUnsharedPath(rel)) {
+    const authority = guard.getInstructionAuthority?.()
+    if (authority && !FULL_ACCESS_ROLES.has(authority.role)) {
+      return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: agentConfigMessage(rel), code: 'agent-config' }
+    }
+  }
+  return { deny: false }
 }
 
 /**
@@ -425,7 +442,8 @@ export function decideToolWrite(guard: WriteGuard | undefined, toolName: string,
   if (toolName === 'Bash') {
     const command = toolInput?.command
     if (typeof command !== 'string') return { deny: false }
-    const clone = checkGitClone(guard.root, command, cwd)
+    // Nothing in a working folder is shared or synced: a repository there harms nobody.
+    const clone = guard.folderKind === 'none' ? { deny: false as const } : checkGitClone(guard.root, command, cwd)
     if (clone.deny) return clone
     for (const target of bashWriteTargets(command)) {
       const d = checkWritePath(guard, target, cwd)

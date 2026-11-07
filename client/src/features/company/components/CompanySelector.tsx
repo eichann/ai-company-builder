@@ -8,7 +8,7 @@ import { useAppStore } from '../../../stores/appStore'
 import { useAuthStore } from '../../../stores/authStore'
 import type { CompanyInfo } from '../../../../shared/ipc-contract'
 import { chooseFolder, getDefaultParentFolder } from '../api'
-import { prepareCompanyFolder } from '../folderSetup'
+import { openCompanyWithoutFolder, opensWithoutSharedFolder, prepareCompanyFolder } from '../folderSetup'
 import { companyToOpenWithoutChoosing, offersCompanyCreation, type PickableDepartment, type SelectorView, type SetupKind } from '../model'
 import { hasRememberedCompany } from '../restore-company'
 import { useCompanies } from '../hooks/useCompanies'
@@ -53,6 +53,15 @@ export function CompanySelector() {
   async function prepare(company: CompanyInfo, companyPath: string, backView: SelectorView) {
     setIsPreparing(true)
     setError(null)
+    // A company without the shared folder: a plain working folder, nothing downloaded (no picker, no setup screen).
+    if (opensWithoutSharedFolder(company)) {
+      const opened = await openCompanyWithoutFolder(company, companyPath).finally(() => setIsPreparing(false))
+      if ('error' in opened) {
+        setError(opened.error)
+        setView(backView)
+      } else addCompany(opened.company)
+      return
+    }
     const next = await prepareCompanyFolder(companyPath, company.id).finally(() => setIsPreparing(false))
     if (next.kind === 'pick') {
       setPicker({ folder: companyPath, departments: next.departments, backView })
@@ -161,6 +170,7 @@ export function CompanySelector() {
         {view === 'clone' && selected && (
           <FolderChoice
             company={selected}
+            withoutSharedFolder={opensWithoutSharedFolder(selected)}
             error={error}
             isPreparing={isPreparing}
             onOpenExisting={() => openExistingFolder(selected)}

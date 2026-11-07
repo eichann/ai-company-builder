@@ -189,7 +189,12 @@ function OverviewTab({
         <h4 className="text-xs font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider mb-2">
           共有
         </h4>
-        {skill.isPrivate ? (
+        {!onPublish ? (
+          // A company without the shared folder: nothing is shared (client/shared/company-folder.ts).
+          <div className="p-3 rounded-xl bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50 text-xs text-gray-600 dark:text-zinc-400">
+            この PC だけのスキルです（ほかの人には共有されません）。
+          </div>
+        ) : skill.isPrivate ? (
           <div className="p-3 rounded-xl bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50">
             <div className="flex items-center gap-2 mb-2">
               <EyeSlash size={16} className="text-gray-500 dark:text-zinc-400" />

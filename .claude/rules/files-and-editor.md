@@ -409,6 +409,15 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
 - UI tests: `tests/ui/skill-layout.spec.ts` (search with records, the card, ← →, 「前の版」 after a
   sync), `skill-layout-state.spec.ts` (the side column keeps the editor inside the window).
 
+## Companies without the shared company folder
+
+The file tree, editor and file operations work in the plain working folder as in a company folder
+(the main-process file guards find no company repository there, so the skill / agent-config /
+reserved-name refusals of the app's own operations do not apply: the folder is the member's own).
+Hidden there: 「やることにつなぐ…」 (the server refuses file links), the file's side column
+(つながっているもの, 前の版), the 「大きすぎて共有されていません」 marks and 閲覧のみ. 探す and Cmd+P read the
+disk (`electron/plain-search.ts`). Skills show 「この PC だけのスキルです」 instead of 共有.
+
 ## Search, Cmd+P and a file's history (`client/electron/git-search.ts`, `features/git-history/ipc.ts`)
 
 - Content search is a fixed string, A–Z case-insensitive (`LC_ALL=C -F -i`), ≤ 20 matches per

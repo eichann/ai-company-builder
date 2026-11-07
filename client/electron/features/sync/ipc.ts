@@ -11,6 +11,7 @@ import type { SyncActivity } from '../../services/sync-activity'
 import type { WriteAccessStore } from '../../write-access-store'
 import type { PathGuard } from '../ports'
 import type { AutoSyncMode, AutoSyncRendererState } from '../../../shared/auto-sync'
+import { NO_GIT_IN_WORKING_FOLDER, type WorkingFolders } from '../../services/working-folders'
 
 export interface SyncDeps {
   paths: PathGuard
@@ -20,15 +21,19 @@ export interface SyncDeps {
   activity: Pick<SyncActivity, 'current'>
   /** An AI turn is running in some chat. */
   aiRunning: () => boolean
+  /** Working folders of companies without the shared folder: nothing there is ever synced. */
+  workingFolders: Pick<WorkingFolders, 'has'>
 }
 
-export function registerSyncIpc(ipc: IpcRegistrar, { paths, gitSync, writeAccess, activity, aiRunning }: SyncDeps): void {
+export function registerSyncIpc(ipc: IpcRegistrar, { paths, gitSync, writeAccess, activity, aiRunning, workingFolders }: SyncDeps): void {
   ipc.handle('git:sync', async (_, repoPath: string, companyId: string, commitMessage: string) => {
     try {
       repoPath = paths.validate(repoPath)
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error), errorType: 'unknown' as const }
     }
+    // A company without the shared folder: refused before anything runs (no dialog, no git).
+    if (workingFolders.has(repoPath)) return { success: false, error: NO_GIT_IN_WORKING_FOLDER, errorType: 'unknown' as const }
     const result = await gitSync(repoPath, companyId, commitMessage)
     // Rules may have changed since the last look: refresh the chat guard / badges.
     if (result.success && companyId) void writeAccess.refresh(companyId)
@@ -43,6 +48,8 @@ export function registerSyncIpc(ipc: IpcRegistrar, { paths, gitSync, writeAccess
     } catch (error) {
       return { status: 'sent' as const, result: { success: false, error: error instanceof Error ? error.message : String(error), errorType: 'unknown' as const } }
     }
+    // Never synced: skipped every time, so the timer records a skip, never an error.
+    if (workingFolders.has(repoPath)) return { status: 'skipped' as const, reason: 'no-company-folder' as const }
     const answer = await runAutoSync({ gitSync, aiRunning, activity: () => activity.current() }, repoPath, companyId, mode, state)
     if (answer.status === 'sent' && answer.result.success && companyId) void writeAccess.refresh(companyId)
     return answer

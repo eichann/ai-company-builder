@@ -9,7 +9,8 @@ import { SpinnerGap } from '@phosphor-icons/react'
 import type { CompanyView } from './types'
 import { checkRememberedCompany, LAST_COMPANY_KEY_PREFIX } from './features/company/restore-company'
 import { getServerUrl } from './features/auth/api'
-import { companyPathExists, getCompanies } from './features/company/api'
+import { companyPathExists, getCompanies, openWorkingFolder } from './features/company/api'
+import { answeredCompanyFolderKind, type CompanyFolderKind } from '../shared/company-folder'
 import { registerCompanyFolder } from './shared/ipc/allowed-folders'
 
 
@@ -104,20 +105,25 @@ function App() {
     void (async () => {
       // lib/restore-company.ts: registers the folder before asking whether it
       // exists (main answers only for registered folders).
+      // The kind comes from the server's answer, never from what this computer remembered.
+      const kinds = new Map<string, CompanyFolderKind>()
       const outcome = await checkRememberedCompany(last, {
         accessibleCompanyIds: async () => {
           const result = await getCompanies()
           if (!result?.success || !Array.isArray(result.data)) return null
-          return (result.data as Array<{ id: string }>).map((c) => c.id)
+          for (const c of result.data) kinds.set(c.id, answeredCompanyFolderKind(c.folderKind))
+          return result.data.map((c) => c.id)
         },
         registerAllowedRoot: (folder) => registerCompanyFolder(folder),
         exists: (target) => companyPathExists(target),
+        withoutSharedFolder: (id) => kinds.get(id) === 'none',
+        openWorkingFolder: async (folder, id) => (await openWorkingFolder(folder, id).catch(() => null))?.success === true,
       })
       // Not cancelled by this effect re-running (restore is attempted once per
       // session, so a cancelled attempt would never be retried): only a
       // company picked meanwhile or another account wins.
       if (useAppStore.getState().currentCompany || useAuthStore.getState().user?.id !== userId) return
-      if (outcome === 'open') setCurrentCompany(last)
+      if (outcome === 'open') setCurrentCompany({ ...last, folderKind: kinds.get(last.id) ?? 'git' })
       else if (outcome === 'forget') safeWriteLastCompany(userId, null)
     })()
   }, [user, currentCompany, setCurrentCompany])

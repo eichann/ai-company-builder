@@ -16,6 +16,8 @@ import { previewChanges, withScratchIndex } from '../../sync/preview'
 import { findUnsharedLargeFiles } from '../../sync/large-files'
 import type { PathGuard } from '../ports'
 import { keepCurrentVersion } from '../backups/keep-current'
+import { grepPlainFiles, listPlainFiles } from '../../plain-search'
+import type { WorkingFolders } from '../../services/working-folders'
 
 /** Shown when the member's version could not be kept: nothing was undone. */
 export const REVERT_KEEP_FAILED = '今の内容を .backups に保存できなかったため、元に戻しませんでした。何も変更していません。'
@@ -37,9 +39,14 @@ export interface GitHistoryDeps {
   paths: PathGuard
   git: AppGit
   commitMessagesFor: CommitMessagesFor
+  /**
+   * Working folders of companies without the shared folder: their 探す / Cmd+P read the disk
+   * (plain-search.ts); every other view here needs git and is refused by the app's git.
+   */
+  workingFolders?: Pick<WorkingFolders, 'has'>
 }
 
-export function registerGitHistoryIpc(ipc: IpcRegistrar, { paths, git: appGit, commitMessagesFor }: GitHistoryDeps): void {
+export function registerGitHistoryIpc(ipc: IpcRegistrar, { paths, git: appGit, commitMessagesFor, workingFolders }: GitHistoryDeps): void {
   // Report which git binary is in use (bundled dugite git vs system fallback),
   // so the UI can warn when the bundled binary failed (e.g. arch mismatch).
   ipc.handle('git:getBinaryStatus', async () => appGit.binaryStatus())
@@ -173,6 +180,7 @@ export function registerGitHistoryIpc(ipc: IpcRegistrar, { paths, git: appGit, c
   ipc.handle('git:listFiles', async (_, repoPath: string, folderPath: string) => {
     try {
       const safePath = paths.validate(repoPath)
+      if (workingFolders?.has(safePath)) return { success: true, ...await listPlainFiles(safePath, String(folderPath ?? '')) }
       const scope = companySearchScope(safePath, normalizeSearchFolder(folderPath))
       const { files, truncated } = await listCompanyFiles(appGit.searchCommand(), scope)
       return { success: true, files, truncated }
@@ -219,8 +227,9 @@ export function registerGitHistoryIpc(ipc: IpcRegistrar, { paths, git: appGit, c
     runningGreps.set(senderId, controller)
     try {
       const safePath = paths.validate(repoPath)
-      const scope = companySearchScope(safePath, normalizeSearchFolder(folderPath))
-      const { matches, truncated, timedOut } = await grepCompany(appGit.searchCommand(), scope, String(query ?? ''), controller.signal)
+      const { matches, truncated, timedOut } = workingFolders?.has(safePath)
+        ? await grepPlainFiles(safePath, String(folderPath ?? ''), String(query ?? ''), controller.signal)
+        : await grepCompany(appGit.searchCommand(), companySearchScope(safePath, normalizeSearchFolder(folderPath)), String(query ?? ''), controller.signal)
       return { success: true, results: matches, truncated, timedOut, cancelled: controller.signal.aborted }
     } catch (err: unknown) {
       console.error('Git grep error:', err)

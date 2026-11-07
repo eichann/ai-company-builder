@@ -249,6 +249,7 @@ const api: ElectronAPI = {
     invoke('git:inspectCompanyFolder', folder, companyId),
   getMyDepartments: (companyId: string) => invoke('companySetup:myDepartments', companyId),
   getDefaultParentFolder: () => invoke('companySetup:defaultParentFolder'),
+  openWorkingFolder: (folder: string, companyId: string) => invoke('companySetup:openWorkingFolder', folder, companyId),
   onSetupProgress: callback => subscribe('setup:progress', callback),
 
   // Sparse checkout

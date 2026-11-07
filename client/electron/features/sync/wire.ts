@@ -13,6 +13,7 @@ import type { Session } from '../../services/session'
 import type { WriteAccessStore } from '../../write-access-store'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { PathGuard } from '../ports'
+import type { WorkingFolders } from '../../services/working-folders'
 import { registerGitHistoryIpc } from '../git-history/ipc'
 import { registerSyncIpc } from './ipc'
 
@@ -27,14 +28,16 @@ export interface SyncWiring extends Omit<CommitMessagesDeps, 'cwd'> {
   writeAccess: WriteAccessStore
   /** An AI turn is running in some chat (automatic sync waits). */
   aiRunning: () => boolean
+  /** Working folders of companies without the shared folder (services/working-folders.ts). */
+  workingFolders: Pick<WorkingFolders, 'has'>
 }
 
-export function wireSync(ipc: IpcRegistrar, { paths, appGit, userDataDir, dialog, serverUrl, session, writeAccess, aiRunning, ...messages }: SyncWiring) {
+export function wireSync(ipc: IpcRegistrar, { paths, appGit, userDataDir, dialog, serverUrl, session, writeAccess, aiRunning, workingFolders, ...messages }: SyncWiring) {
   const commitMessagesFor = createCommitMessages({ ...messages, cwd: () => path.join(userDataDir(), 'commit-message') })
 
   // The working tree and its history for the sync preview, the diff views,
   // the search tab and Cmd+P (features/git-history).
-  registerGitHistoryIpc(ipc, { paths, git: appGit, commitMessagesFor })
+  registerGitHistoryIpc(ipc, { paths, git: appGit, commitMessagesFor, workingFolders })
 
   // Download-choice changes and private-folder creation, which automatic sync waits for.
   const activity = createSyncActivity()
@@ -50,6 +53,6 @@ export function wireSync(ipc: IpcRegistrar, { paths, appGit, userDataDir, dialog
     officeLockProbe: systemLockProbe(process.platform),
   })
 
-  registerSyncIpc(ipc, { paths, gitSync, writeAccess, activity, aiRunning })
+  registerSyncIpc(ipc, { paths, gitSync, writeAccess, activity, aiRunning, workingFolders })
   return { gitSync, activity }
 }

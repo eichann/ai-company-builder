@@ -66,6 +66,7 @@ import { fileShownStore } from './features/notifications/shown-store'
 import { registerOutboundMailIpc } from './features/outbound-mail/ipc'
 import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
+import { createWorkingFolders, withoutWorkingFolders } from './services/working-folders'
 import { createSkillUseReporter } from './services/skill-use-reporter'
 import type { StoppableTurns } from './services/agent-stop'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
@@ -341,8 +342,11 @@ registerOutboundMailIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookie
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
 // Execution runs (S10b): which consultation runs which claimed 「AI の番」; its record tokens are bound to the run.
 const aiRunRegistry = createRunRegistry()
-// The app's git (binary, credentials, guarded configuration: services/app-git.ts).
-const appGit = createAppGit({ token: session.gitToken, appGitDir: () => path.join(userDataDir(), 'git') })
+// Working folders of companies without the shared company folder (client/shared/company-folder.ts):
+// registered by companySetup:openWorkingFolder; no git ever runs in one (services/working-folders.ts).
+const workingFolders = createWorkingFolders()
+// The app's git (binary, credentials, guarded configuration: services/app-git.ts), refusing working folders.
+const appGit = withoutWorkingFolders(createAppGit({ token: session.gitToken, appGitDir: () => path.join(userDataDir(), 'git') }), workingFolders)
 // Which Skill a consultation used (records.md "Which Skill"): folder name + git tree id, read-only git, never a blob fetched.
 const skillUses = createSkillUseReporter({
   baseUrl: getServerApiUrl, cookies: session.cookies, home: os.homedir(), log: console,
@@ -401,7 +405,7 @@ registerPluginScreensIpc(ipc, {
 // lane B ▼
 // lane B ▲
 // lane C ▼
-registerPluginStepsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, readProcedure: readPluginProcedure, paths: allowedRoots })
+registerPluginStepsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, readProcedure: readPluginProcedure, paths: allowedRoots, isWorkingFolder: root => workingFolders.has(root) })
 // Where a step's run or consultation may write: its deliverable folder (plugin-steps.md).
 const stepWriteAreas = createStepWriteAreas({ baseUrl: getServerApiUrl, cookies: session.cookies, automatic: conversationId => aiTurnClaims.pluginStepWriteArea(conversationId) })
 const bindPersonStep = createPersonStepBinder({ baseUrl: getServerApiUrl, cookies: session.cookies })
@@ -438,6 +442,7 @@ const { gitSync, activity: syncActivity } = wireSync(ipc, {
   claudeCli,
   shellEnv,
   aiAllowed: () => agentControl.stop.oneShotAiAllowed(),
+  workingFolders,
 })
 syncBeforeClose = gitSync
 
@@ -450,6 +455,7 @@ const skills = registerSkillsIpc(ipc, {
   paths: allowedRoots,
   isShared: (rootPath, relFolder) => skillIsShared(appGit.create(rootPath, { GIT_NO_LAZY_FETCH: '1' }), relFolder),
   skillRefusal: (absPath, options) => privateFolderGuards.skillRefusal(absPath, options),
+  isWorkingFolder: rootPath => workingFolders.has(rootPath),
 })
 
 // The company folder on disk (features/fs): file tree, editor, watchers.
@@ -467,7 +473,7 @@ lifecycle.beforeQuit(() => files.closeWatchers())
 
 // Setting a company folder up, and what this computer downloads
 // (features/company-setup, features/download-choices).
-registerCompanySetupIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, userDataDir, home: () => app.getPath('home') })
+registerCompanySetupIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, userDataDir, home: () => app.getPath('home'), workingFolders })
 registerDownloadChoicesIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, privateFolders: gitSync, activity: syncActivity })
 
 registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell, writeRefusal: absPath => privateFolderGuards.writeRefusal(absPath) })
@@ -508,6 +514,7 @@ app.whenReady().then(async () => {
       requestInteraction: (request, appSessionId, signal) =>
         requestFromOwner(agentInteractions, webContentsForSession(appSessionId), request, appSessionId, signal),
       runAppCommand: appCommands.run,
+      workingFolders,
     })
     // A business plugin's step run: only its step's tools (plugin-steps.md), from the claim main holds.
     const result = await startChatServer({

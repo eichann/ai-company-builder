@@ -26,6 +26,17 @@ export type CompanyFolderReads = ElectronPort<'gitInspectCompanyFolder' | 'readD
  */
 export type CompanySetupWrites = ElectronPort<'createDirectory' | 'gitSetupCompanyRemote'>
 
+/**
+ * A company without the shared folder: main prepares its working folder on this PC (the
+ * folder and one folder per department, nothing downloaded, nothing shared) and lets the
+ * app's file operations reach it. Asks the company server the company's kind and departments.
+ */
+export type WorkingFolderWrites = ElectronPort<'openWorkingFolder'>
+
+export function openWorkingFolder(folder: string, companyId: string, writes: WorkingFolderWrites = window.electronAPI) {
+  return writes.openWorkingFolder(folder, companyId)
+}
+
 /** Which departments the member belongs to (所属): asks the company server, sends only who the member is. */
 export type MembershipReads = ElectronPort<'getMyDepartments'>
 /**

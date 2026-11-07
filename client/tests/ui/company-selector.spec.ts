@@ -230,3 +230,24 @@ test('several companies: the list is shown, and a first setup still uses 所属 
   await expect(opened(page)).toBeVisible()
   expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([['gitSetupCompanyRemote', '/Users/demo/作業', 'c1', ['営業部']]])
 })
+
+test('a company without the shared folder opens in the chosen folder as it is: a note, no department picker, nothing inspected or downloaded', async ({ page }) => {
+  const state = await open(page, { kind: 'none' })
+  await chooseCompany(page)
+  await expect(page.getByText('この会社では、ファイルはこの PC の中だけに置かれます（ほかの人には共有されません）。')).toBeVisible()
+  await button(page, /既存のフォルダを開く/).click()
+  await expect(opened(page)).toContainText('"rootPath":"/Users/demo/作業","folderKind":"none"')
+  expect(await callsOf(page, 'openWorkingFolder')).toEqual([['openWorkingFolder', '/Users/demo/作業', 'c1']])
+  expect(await callsOf(page, 'gitInspectCompanyFolder')).toEqual([])
+  expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([])
+  expectNoPageErrors(state)
+})
+
+test('the only company without the shared folder opens by itself in the default place; a refused folder stays on the choice with the reason', async ({ page }) => {
+  await openPreview(page, 'company-selector', { companies: 'one', kind: 'none' })
+  await expect(opened(page)).toContainText('"rootPath":"/Users/demo/AI Company Builder/阿部商店","folderKind":"none"')
+  expect(await callsOf(page, 'gitInspectCompanyFolder')).toEqual([])
+  await openPreview(page, 'company-selector', { companies: 'one', kind: 'none', working: 'fail' })
+  await expect(page.getByText('このフォルダは使えません。')).toBeVisible()
+  await expect(opened(page)).toHaveCount(0)
+})

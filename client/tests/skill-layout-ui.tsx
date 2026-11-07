@@ -12,6 +12,7 @@
 //   tasks     1 = records on with a task list: the やること tab shows (tests/ui/tasks-layout.spec.ts)
 //   check     1 = (with tasks=1) each row offers its ☑ 完了にする; the press is recorded (actOnTask)
 //   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
+//   kind      none = the company has no shared company folder (folderKind none: a working folder on this PC)
 //
 // 今日のフォルダ: the member belongs to 開発部 (not downloaded) and 営業部, so it is in 営業部;
 // `createDirectory` makes folders on the fake disk (recorded).
@@ -43,8 +44,8 @@ const ROOT = '/Users/demo/会社'
 const COMPANY = 'demo'
 // A second company (with no departments of its own on disk) for per-company state.
 const OTHER_ROOT = '/Users/demo/別会社'
-const COMPANIES: Record<string, { name: string; rootPath: string }> = {
-  [COMPANY]: { name: '株式会社デモ', rootPath: ROOT },
+const COMPANIES: Record<string, { name: string; rootPath: string; folderKind?: 'none' }> = {
+  [COMPANY]: { name: '株式会社デモ', rootPath: ROOT, ...(params.get('kind') === 'none' ? { folderKind: 'none' as const } : {}) },
   other: { name: '別会社', rootPath: OTHER_ROOT },
 }
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))

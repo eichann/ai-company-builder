@@ -112,6 +112,12 @@ server's `[RESERVED_PATH]` and sync's recovery are the safety net.
   fetches, offers local edits back with the WRITE_DENIED dialog (member's version to the private
   backups, `<ts>_write_denied`) and resets the clone. Cancel → `errorType: 'write_denied'`.
 
+## Companies without the shared company folder
+
+No private folders: 「新しいフォルダ」 offers no 公開範囲 (one note: the folder stays on this PC),
+the private-folder list is not loaded, and the server refuses creating one (`NO_COMPANY_FOLDER`).
+A read-restricted place without git is a later decision.
+
 ## Notes
 
 - `shared/package.json` is `"type": "module"` so tsx (harness) sees named exports of the shared

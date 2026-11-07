@@ -124,6 +124,19 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
     refusal). A new conversation, or one reopened after a restart / new chat
     (`forgetPrivateReads`), asks again. Tests: `client/tests/private-read-guard.test.ts`.
 
+## Companies without the shared company folder (`WriteGuard.folderKind: 'none'`)
+
+In the working folder of a company without the shared folder (`services/working-folders.ts`;
+`sync.md` "Companies without the shared company folder") nothing reaches the push checker, so
+`checkWritePath` makes only the app's own checks: the step's deliverable folder, agent config
+(owner/admin only, as everywhere: what the AI loads and runs) and — in `decideToolWrite` — record
+frontmatter. Write access, not downloaded, private folders, instruction and skill files, type
+definitions and the git clone / init rule are not judged there; `features/chat/server-config.ts`
+builds that guard (no access, no private-folder view). `.claude/settings.json` / `.mcp.json` in such
+a folder are the member's own, never shared. The renderer shows no 閲覧のみ there
+(`useWriteAccess`). Git companies keep every check. Test: `client/tests/company-without-folder.test.ts`
+(mutation-checked).
+
 ## Decisions and limits
 
 - Claude Code permission deny rules (`disallowedTools: ['Edit(...)']`) are deliberately not used:

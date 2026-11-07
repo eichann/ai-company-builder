@@ -76,3 +76,9 @@ same empty search, absent from every listing.
   The api-key mode does not get these tools.
 - Not yet: pptx / pdf / xlsx are not searchable (text extraction is on hold).
 - Tests: `server/tests/integration/company-files.test.ts`, `client/tests/company-files.test.ts`.
+
+## Companies without the shared company folder
+
+The server answers `NO_COMPANY_FOLDER` for them, so the chat does not offer the `company_*` tools
+at all there (`features/chat/server-config.ts` `createCompanyFiles`: undefined for a registered
+working folder, `services/working-folders.ts`). Test: `client/tests/company-without-folder.test.ts`.

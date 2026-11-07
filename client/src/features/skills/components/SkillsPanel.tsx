@@ -16,7 +16,8 @@ interface Props {
   onCopySkill?: () => void
   onEditFile: (filePath: string) => void
   onOpenTool: (tool: SkillTool, port: number) => void
-  onPublish: (skill: Skill) => Promise<string | null>
+  /** Absent for a company without the shared folder: skills stay on this PC (no 共有 section). */
+  onPublish?: (skill: Skill) => Promise<string | null>
   onToggleNurturing: (skill: Skill) => Promise<string | null>
 }
 

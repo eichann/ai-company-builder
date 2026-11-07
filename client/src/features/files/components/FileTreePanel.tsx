@@ -32,6 +32,11 @@ interface FileTreePanelProps {
   onCreateFile?: () => void
   /** A private folder was created on the server: sync so it reaches this computer. */
   onPrivateFolderCreated?: () => void
+  /**
+   * False for a company without the shared company folder (a plain working folder on this PC):
+   * no private folders, no 「大きすぎて共有されていません」 marks (nothing is shared).
+   */
+  sharedFolder?: boolean
   /** 「やることにつなぐ…」 in the right-click menu: the file or folder's absolute path. Absent: no item. */
   onLinkToTask?: (path: string) => void
   /** Items business plugins add to a row's right-click menu (plugin-frame.md "The four slots"); the entry's absolute path. */
@@ -56,6 +61,7 @@ export function FileTreePanel({
   onSelectFile,
   onDoubleClickFile,
   onPrivateFolderCreated,
+  sharedFolder = true,
   onLinkToTask,
   extraMenuItems,
   onOpenToday,
@@ -83,7 +89,7 @@ export function FileTreePanel({
   const [showDotFiles, setShowDotFiles] = useState(true)
   const { model, treeVersion, isLoading, refreshTree, showChangeIn } = useFileTreeModel(rootPath, departmentPath)
   const notDownloaded = useNotDownloadedFolders(rootPath, model, warn)
-  const isTooLarge = useUnsharedLargeFiles(rootPath)
+  const isTooLarge = useUnsharedLargeFiles(sharedFolder ? rootPath : '')
   const [tooLargeHelp, setTooLargeHelp] = useState<string | null>(null)
   const { rows, visiblePaths } = useVisibleRows(model, treeVersion, departmentPath, showDotFiles, notDownloaded.withPlaceholders)
   const selection = useTreeSelection()
@@ -294,6 +300,7 @@ export function FileTreePanel({
         parentRel={newFolderParentRel}
         placeLabel={newFolderParentRel ? newFolderParentRel.split('/').join(' / ') : '会社のフォルダ'}
         insidePrivate={newFolder ? privateFolders.privateOf(`${newFolder.parentPath}/_`) : null}
+        privateFolders={sharedFolder}
         onCancel={() => ops.setNewFolder(null)}
         onCreatePlain={name => newFolder ? ops.createPlainFolder(newFolder.parentPath, name) : undefined}
         onCreatedPrivate={(_result, name) => {

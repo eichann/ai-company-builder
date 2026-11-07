@@ -172,3 +172,12 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
   prompt; another department starts without the old error (`client/tests/ui/skill-layout.spec.ts`).
 - Preview: `client/tests/download-folders-ui.html?view=settings|filetree&theme=light|dark&state=normal|offline|slow|confirm|applyOffline`
   (serve with `npx vite -c tests/ui/vite.config.ts`; see `testing.md`).
+
+## Companies without the shared company folder
+
+Nothing is downloaded or left out: the company opens in a plain working folder with a folder per
+department (`companySetup:openWorkingFolder`, no picker, no setup screen; the folder choice says
+「この会社では、ファイルはこの PC の中だけに置かれます…」). Settings has no 同期 group (download
+choices with folder sizes, automatic sync, .gitignore) and nothing shows as not downloaded. Details
+and every git entry point: `sync.md` "Companies without the shared company folder". Tests:
+`tests/ui/company-selector.spec.ts`, `tests/ui/skill-layout.spec.ts` 「a company without the shared folder…」.

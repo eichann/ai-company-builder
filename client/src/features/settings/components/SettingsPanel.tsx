@@ -1,4 +1,5 @@
 import { VoiceShortcutSettings } from '../../voice/components/VoiceShortcutSettings'
+import { companyHasSharedFolder } from '../../../../shared/company-folder'
 import { VoicePromptSettings } from '../../voice/components/VoicePromptSettings'
 import { PromptSuggestionSettings } from './PromptSuggestionSettings'
 import { AgentEnvSettings } from './AgentEnvSettings'
@@ -83,6 +84,15 @@ const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; ico
     ],
   },
 ]
+
+/**
+ * The sections a company shows: without the shared company folder nothing is synced or
+ * downloaded, so the 同期 group (download choices with folder sizes, automatic sync,
+ * .gitignore) is not offered.
+ */
+function settingsGroupsFor(sharedFolder: boolean): typeof NAV {
+  return sharedFolder ? NAV : NAV.filter(group => group.group !== '同期')
+}
 
 const INPUT = 'h-9 rounded-lg border border-zinc-200 bg-white px-3 text-[13px] text-zinc-900 placeholder:text-zinc-400 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-indigo-400/60'
 const TEXTAREA = 'h-80 w-full resize-none rounded-lg border border-zinc-200 bg-white px-4 py-3 font-mono text-[13px] leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500'
@@ -306,7 +316,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
             <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400" title={currentCompany.rootPath}>{currentCompany.name}</p>
           </div>
           <div className="min-h-0 space-y-5 overflow-y-auto">
-            {NAV.map(group => (
+            {settingsGroupsFor(companyHasSharedFolder(currentCompany)).map(group => (
               <div key={group.group}>
                 <p className="px-2.5 pb-1.5 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">{group.group}</p>
                 <ul className="space-y-0.5">

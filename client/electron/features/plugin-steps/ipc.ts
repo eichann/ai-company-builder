@@ -25,7 +25,16 @@ export interface PluginStepsIpcDeps {
   readProcedure: (companyId: string, pin: PluginStepProcedurePin, file: string, companyRoot: string | null) => Promise<string | null>
   paths: PathGuard
   fetch?: typeof fetch
+  /** The working folder of a company without the shared folder (services/working-folders.ts). */
+  isWorkingFolder?: (root: string) => boolean
 }
+
+/**
+ * The server's STEP_SKILL_MISSING in a company without the shared company folder: its words ask
+ * to place the Skill and sync, which such a company cannot do (company Skills are not handed out
+ * to it yet), so the member is told plainly instead.
+ */
+export const STEP_SKILL_NOT_HERE = 'この手順は会社のスキルを使いますが、全社フォルダを使わない会社では、会社のスキルをまだ使えません。管理者に相談してください。'
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
 const ID = /^[a-z0-9][a-z0-9_-]{0,79}$/
@@ -58,7 +67,7 @@ export function createPersonStepBinder(deps: Pick<PluginStepsIpcDeps, 'baseUrl' 
 export function registerPluginStepsIpc(ipc: IpcRegistrar, deps: PluginStepsIpcDeps): void {
   const doFetch = deps.fetch ?? fetch
 
-  async function session(companyId: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; data: unknown; error?: string } | null> {
+  async function session(companyId: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; data: unknown; error?: string; code?: string } | null> {
     const base = deps.baseUrl().replace(/\/+$/, '')
     const cookies = deps.cookies()
     if (!base || cookies.length === 0) return null
@@ -68,8 +77,8 @@ export function registerPluginStepsIpc(ipc: IpcRegistrar, deps: PluginStepsIpcDe
         headers: { Cookie: cookies.join('; '), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       })
-      const json = await res.json().catch(() => null) as { data?: unknown; error?: unknown } | null
-      return { status: res.status, data: json?.data, ...(typeof json?.error === 'string' ? { error: json.error } : {}) }
+      const json = await res.json().catch(() => null) as { data?: unknown; error?: unknown; code?: unknown } | null
+      return { status: res.status, data: json?.data, ...(typeof json?.error === 'string' ? { error: json.error } : {}), ...(typeof json?.code === 'string' ? { code: json.code } : {}) }
     } catch {
       return null
     }
@@ -105,6 +114,7 @@ export function registerPluginStepsIpc(ipc: IpcRegistrar, deps: PluginStepsIpcDe
       return { ok: false, error: NOT_STARTED }
     }
     const r = await session(companyId, 'POST', `/me/plugin-steps/records/${encodeURIComponent(recordId)}/${encodeURIComponent(pluginId)}/${encodeURIComponent(step)}/start`)
+    if (r && r.status >= 300 && r.code === 'STEP_SKILL_MISSING' && root && deps.isWorkingFolder?.(root)) return { ok: false, error: STEP_SKILL_NOT_HERE }
     if (!r || r.status >= 300) return { ok: false, error: r?.error ?? NOT_STARTED }
     const view = r.data as { label?: unknown; procedure?: unknown; version?: unknown; pin?: unknown; deliverableFolder?: unknown } | undefined
     const pin = parseProcedurePin(view?.pin)
