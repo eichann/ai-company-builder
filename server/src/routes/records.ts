@@ -30,7 +30,10 @@
  *   POST    /records/item/:recordId/share             { folder, expectedVersion, note? } the owner shows their
  *                                                     owner-only or members-only record to a folder's readers (session only)
  *   POST    /records/item/:recordId/members           { add, expectedVersion, note? } a listed member adds members
- *                                                     to a members-only record (session only)
+ *                                                     to a members-only record (session only); people, groups, departments
+ *   POST    /records/item/:recordId/members/remove    { remove, expectedVersion, note? } a listed member takes
+ *                                                     people / groups / departments off the list (session only)
+ *   GET     /records/item/:recordId/members/choices   the groups / departments the caller may add, and the list's
  *   POST    /records/item/:recordId/opened            the app opened the record: the first opening of the
  *                                                     turn by its holder is kept (session only, records.md)
  *   GET     /records/item/:recordId/history           the ledger
@@ -218,6 +221,17 @@ recordsRoute.post('/records/item/:recordId/members', companyMember, serviceBody,
   const member = c.var.member
   const body = c.var.body
   return answer(c, recordEngine.invite(member, humanWith(body), c.req.param('recordId'), body))
+})
+
+recordsRoute.post('/records/item/:recordId/members/remove', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  const body = c.var.body
+  return answer(c, recordEngine.removeMembers(member, humanWith(body), c.req.param('recordId'), body))
+})
+
+recordsRoute.get('/records/item/:recordId/members/choices', companyMember, async (c) => {
+  const member = c.var.member
+  return answer(c, recordEngine.listChoices(member, c.req.param('recordId')))
 })
 
 recordsRoute.get('/records/item/:recordId/history', companyMember, async (c) => {

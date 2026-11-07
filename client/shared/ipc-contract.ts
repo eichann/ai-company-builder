@@ -39,7 +39,7 @@ import type { ApprovalResult } from './approvals'
 import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
 import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
 import type { ViewersQuery, ViewersResult } from './viewers'
-import type { MeetingArrivalsResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteResult, MeetingPressResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
+import type { InviteSet, MeetingArrivalsResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteChoicesResult, MeetingInviteResult, MeetingPressResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { FindHomeResult, FindResult, RecordCardResult, RecordListResult } from './record-views'
 import type { ConsultationTopicsResult } from './consultation-topics'
@@ -608,8 +608,10 @@ export interface IpcInvokeChannels {
   'minutes:skipReading': { args: [companyId: string, meetingId: string, expectedVersion: number]; result: MeetingPressResult }
   /** 「この定例は次から自動で読む」 (true) / 「次から自動で読まない」 (false): the member's own choice. */
   'minutes:autoSeries': { args: [companyId: string, meetingId: string, auto: boolean]; result: MinutesActionResult }
-  /** ［招待する］: members added to a members-only record's list (never undone). */
-  'minutes:invite': { args: [companyId: string, recordId: string, memberIds: string[], expectedVersion: number]; result: MeetingInviteResult }
+  /** ［招待する］: members — and groups / departments (`sets`) — added to a members-only record's list (never undone). */
+  'minutes:invite': { args: [companyId: string, recordId: string, memberIds: string[], expectedVersion: number, sets?: InviteSet[]]; result: MeetingInviteResult }
+  /** What ［招待する］ may offer besides people, and the groups / departments on the list now. */
+  'minutes:inviteChoices': { args: [companyId: string, recordId: string]; result: MeetingInviteChoicesResult }
   // 「AI の番」 run automatically in the main window (ai-turns.md): main claims and settles, never runs the AI.
   'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
   /** Take the record's AI turn for this hidden consultation (its first AI action at this version; one PC wins). */
@@ -1060,6 +1062,7 @@ export interface ElectronAPI {
   skipMeetingReading: Invoke<'minutes:skipReading'>
   setMeetingAutoSeries: Invoke<'minutes:autoSeries'>
   inviteToRecord: Invoke<'minutes:invite'>
+  getInviteChoices: Invoke<'minutes:inviteChoices'>
   onMinutesChanged: Subscribe<'minutes:changed'>
   // 「AI の番」 run automatically (the main window only).
   getAutoTurnSettings: Invoke<'aiTurns:settings'>

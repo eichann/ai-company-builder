@@ -1,7 +1,39 @@
 // Meetings for their attendees (minutes.md "Meetings for their attendees", design §4-5): what the
 // task list's banner says for one meeting, in the member's words. Pure.
 import type { AiTurnItemView } from '../../../shared/ai-turns'
-import type { MeetingArrivalView } from '../../../shared/minutes-app'
+import type { InviteSet, MeetingArrivalView, MeetingInviteChoicesResult } from '../../../shared/minutes-app'
+
+type InviteChoices = Extract<MeetingInviteChoicesResult, { success: true }>
+
+/** A group or a department on a members-only list, in the member's words. */
+export function inviteSetLabel(set: InviteSet, name: string): string {
+  return set.type === 'group' ? `「${name}」の人` : `${name}に所属する人`
+}
+
+/**
+ * What ［招待する］ offers besides people: the groups and departments the server says the member may
+ * add (none unless `maySets`), less those already on the list.
+ */
+export function offeredSets(choices: InviteChoices | null): Array<InviteSet & { label: string }> {
+  if (!choices?.maySets) return []
+  return [
+    ...choices.groups.map(g => ({ type: 'group' as const, id: g.id, label: inviteSetLabel({ type: 'group', id: g.id }, g.name) })),
+    ...choices.departments.map(d => ({ type: 'department' as const, id: d.id, label: inviteSetLabel({ type: 'department', id: d.id }, d.name) })),
+  ].filter(s => !choices.listed.some(l => l.type === s.type && l.id === s.id))
+}
+
+/** What ［招待する］ added, in the member's words (already on it: nothing new to say). */
+export function invitedText(
+  added: readonly string[], addedSets: readonly InviteSet[], members: ReadonlyArray<{ id: string; name: string }>, choices: InviteChoices | null,
+): string {
+  const people = added.map(id => members.find(p => p.id === id)?.name ?? '').filter(Boolean).map(n => `${n}さん`)
+  const sets = addedSets.map(s => {
+    const name = (s.type === 'group' ? choices?.groups : choices?.departments)?.find(x => x.id === s.id)?.name ?? ''
+    return name === '' ? '' : inviteSetLabel(s, name)
+  }).filter(Boolean)
+  const all = [...people, ...sets]
+  return all.length > 0 ? `${all.join('、')}を招待しました。` : '選んだ人は、もうこの会議を見られます。'
+}
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`

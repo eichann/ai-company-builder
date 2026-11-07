@@ -14,7 +14,7 @@
 import type { ScopeWithRules } from '../../../shared/core/permissions'
 import type { TypeDefinition } from '../../../shared/core/record-types'
 import type { RecordAccessRow, RecordLinkRow, RecordRepository } from '../../ports/records'
-import { recordReader } from '../record-access'
+import { listedUserIds, recordReader } from '../record-access'
 import { currentTypes } from '../record-index'
 
 /** The types whose place follows their まとまり (the core's やること). */
@@ -36,7 +36,7 @@ export const NAMED_PERSON_CANNOT_READ = {
 const NOBODY_MEMBER = '\u0000any-member'
 const NOBODY_ADMIN = '\u0000any-admin'
 
-type Place = Pick<RecordAccessRow, 'id' | 'type' | 'scopeId' | 'path' | 'folder' | 'personalOwner' | 'members'>
+type Place = Pick<RecordAccessRow, 'id' | 'type' | 'scopeId' | 'path' | 'folder' | 'personalOwner' | 'members' | 'memberSets'>
 
 /**
  * Is every member who reads `task` also a reader of `bundle`? `roleOf` is the company's role of a
@@ -53,7 +53,7 @@ export function placeWithin(
       if (r.subjectType === 'department' || r.subjectType === 'group') for (const id of r.memberIds ?? []) named.add(id)
     }
   }
-  for (const id of [...(task.members ?? []), ...(bundle.members ?? []), bundle.personalOwner]) if (id) named.add(id)
+  for (const id of [...listedUserIds(task), ...listedUserIds(bundle), bundle.personalOwner]) if (id) named.add(id)
   const people: Array<{ userId: string; role: string }> = [
     { userId: NOBODY_MEMBER, role: 'member' },
     { userId: NOBODY_ADMIN, role: 'admin' },

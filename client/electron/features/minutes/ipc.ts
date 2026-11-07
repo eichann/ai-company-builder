@@ -6,7 +6,7 @@
 //   minutes:linkBundle  「どのまとまりの会議ですか？」 (the session; nothing is written outside)
 //   minutes:noBundle    「まとまりはない（社内の会議など）」: the question closed for good
 //   minutes:bundleQuestion  the meeting card's question (may a まとまり be chosen)
-//   minutes:arrivals / meeting / requestReading / skipReading / autoSeries / invite
+//   minutes:arrivals / meeting / requestReading / skipReading / autoSeries / invite / inviteChoices
 //                       meetings for their attendees: the task list's 「議事録が届きました」 and the
 //                       meeting card's buttons (meetings.ts)
 // Everything goes with the member's session, which stays in main.
@@ -37,6 +37,8 @@ export function registerMinutesIpc(ipc: IpcRegistrar, minutes: MinutesChecker, m
   ipc.handle('minutes:skipReading', (_event, companyId, meetingId, expectedVersion) =>
     str(companyId) && str(meetingId) ? meetings.skip(companyId, meetingId, expectedVersion) : invalid)
   ipc.handle('minutes:autoSeries', (_event, companyId, meetingId, auto) => str(companyId) && str(meetingId) ? meetings.autoSeries(companyId, meetingId, auto) : invalid)
-  ipc.handle('minutes:invite', (_event, companyId, recordId, memberIds, expectedVersion) =>
-    str(companyId) && str(recordId) ? meetings.invite(companyId, recordId, memberIds, expectedVersion) : invalid)
+  ipc.handle('minutes:invite', (_event, companyId, recordId, memberIds, expectedVersion, sets) =>
+    str(companyId) && str(recordId) ? meetings.invite(companyId, recordId, memberIds, expectedVersion, sets) : invalid)
+  ipc.handle('minutes:inviteChoices', (_event, companyId, recordId) =>
+    str(companyId) && str(recordId) ? meetings.inviteChoices(companyId, recordId) : invalid)
 }

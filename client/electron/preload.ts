@@ -19,6 +19,7 @@ import type { MailAwaitReply, MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
 import type { WorkSwitch } from '../shared/work-switches'
 import type { ViewersQuery } from '../shared/viewers'
+import type { InviteSet } from '../shared/minutes-app'
 import type { ArchiveCursor, BundleCreateInput, RecordLinkInput, TaskActInput, TaskCreateInput, TypedFileTarget } from '../shared/tasks'
 import type { DroppedThing } from '../shared/link-drop'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
@@ -197,7 +198,8 @@ const api: ElectronAPI = {
   requestMeetingReading: (companyId: string, meetingId: string, expectedVersion: number) => invoke('minutes:requestReading', companyId, meetingId, expectedVersion),
   skipMeetingReading: (companyId: string, meetingId: string, expectedVersion: number) => invoke('minutes:skipReading', companyId, meetingId, expectedVersion),
   setMeetingAutoSeries: (companyId: string, meetingId: string, auto: boolean) => invoke('minutes:autoSeries', companyId, meetingId, auto),
-  inviteToRecord: (companyId: string, recordId: string, memberIds: string[], expectedVersion: number) => invoke('minutes:invite', companyId, recordId, memberIds, expectedVersion),
+  inviteToRecord: (companyId: string, recordId: string, memberIds: string[], expectedVersion: number, sets?: InviteSet[]) => invoke('minutes:invite', companyId, recordId, memberIds, expectedVersion, sets),
+  getInviteChoices: (companyId: string, recordId: string) => invoke('minutes:inviteChoices', companyId, recordId),
   onMinutesChanged: callback => subscribe('minutes:changed', callback),
   getAutoTurnSettings: (companyId: string) => invoke('aiTurns:settings', companyId),
   claimAiTurn: (companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string) => invoke('aiTurns:claim', companyId, recordId, expectedVersion, conversationId, companyRoot),

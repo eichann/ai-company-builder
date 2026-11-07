@@ -22,11 +22,11 @@ import { cn } from '@/lib/utils'
 
 /** What the page says at the top (plain words: no 権限・スコープ・グループ). */
 export const GROUPS_INTRO =
-  '「見える人のまとまり」は、記録を見られる人を決めるときに使う、メンバーの組み合わせです（例：採用チーム）。まとまりに入っている人の分だけが対象になり、あとから入れた人・外した人もすぐに反映されます。オーナーと管理者は、まとまりに入れなくても、いつでもすべてを見られます。'
+  '「見える人のまとまり」は、記録を見られる人を決めるときに使う、メンバーの組み合わせです（例：採用チーム）。まとまりに入っている人の分だけが対象になり、あとから入れた人・外した人もすぐに反映されます。部署や場所の設定では、オーナーと管理者は、まとまりに入れなくても、いつでもすべてを見られます。「この人たちだけ」の記録（会議など）の見られる人にも使えます。こちらは、オーナーや管理者も、入れなければ見られません。'
 
-/** Shown in a company that uses the shared company folder: the places it is used in are not there yet. */
+/** Shown in a company that uses the shared company folder: place rules cannot name a group there; members-only records can. */
 export const GROUPS_WITH_FOLDER_NOTE =
-  'いまは、全社フォルダを使わない会社で、部署やその中の場所を見られる人を決めるときに使えます。この会社ではまだ設定に使えません。'
+  'この会社では、部署やフォルダを見られる人の設定にはまだ使えません。「この人たちだけ」の記録（会議など）の見られる人には使えます。'
 
 const personName = (m: { name: string | null; email: string | null }) => m.name || m.email || '名前未設定'
 
@@ -150,7 +150,7 @@ export function GroupsPage() {
         open={deleting !== null}
         onOpenChange={(o) => !o && setDeleting(null)}
         title={deleting ? `「${deleting.name}」を削除しますか？` : ''}
-        description="入っている人はそのままです（メンバーから外れることはありません）。"
+        description="入っている人はそのままです（メンバーから外れることはありません）。このまとまりで見られるようにしていた「この人たちだけ」の記録は、まとまりから見られなくなります。"
         confirmLabel="削除する"
         onConfirm={async () => {
           const target = deleting!

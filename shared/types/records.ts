@@ -491,9 +491,44 @@ export interface ShareRecordRequest {
  * RECORD_NOT_FOUND). Session only (no AI route).
  */
 export interface InviteRecordMembersRequest {
-  add: string[]
+  /**
+   * People (a member id, as older apps send) and, in a place rule's subject form, groups and
+   * departments (2026-11-08). A group or department only by the record's 責任者, a 部署の管理役 or an
+   * owner / admin (403 LIST_WIDENING_NOT_ALLOWED); unknown → 400 BAD_GROUP / BAD_DEPARTMENT.
+   * Answer: `{ record, entry, added, addedSets }`.
+   */
+  add: Array<string | RecordListSubject>
   expectedVersion: number
   note?: string
+}
+
+/** One entry of a members-only list, written like a place rule's subject. */
+export interface RecordListSubject {
+  subjectType: 'user' | 'group' | 'department'
+  subjectId: string
+}
+
+/**
+ * 「見る人を減らす」 (`POST /records/item/:recordId/members/remove`): any reader takes people, groups
+ * or departments off a members-only list. 400 NOT_ON_LIST (none of them is on it),
+ * NAMED_PERSON_CANNOT_READ (someone the record names would lose it), LIST_WOULD_BE_EMPTY. Answer
+ * `{ record (null when the caller took themself off), entry, removed, removedSets }`.
+ */
+export interface RemoveRecordMembersRequest {
+  remove: Array<string | RecordListSubject>
+  expectedVersion: number
+  note?: string
+}
+
+/** `GET /records/item/:recordId/members/choices`: what the caller may add besides people, and the list's groups / departments. */
+export interface RecordMemberChoices {
+  /** May the caller add groups / departments (the record's 責任者, a 部署の管理役, an owner / admin)? */
+  maySets: boolean
+  /** Empty unless `maySets`. */
+  groups: Array<{ id: string; name: string }>
+  departments: Array<{ id: string; name: string }>
+  /** The groups and departments on the list now. */
+  listed: Array<{ type: 'group' | 'department'; id: string; name: string }>
 }
 
 /**

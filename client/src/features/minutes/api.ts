@@ -2,7 +2,7 @@
 // small ports, each function taking its port last (default window.electronAPI).
 // Main asks the company server with the member's session; nothing here holds minutes text.
 import type { ElectronPort } from '../../shared/ipc/electron-api'
-import type { MeetingArrivalsResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteResult, MeetingPressResult, MinutesNoticesResult } from '../../../shared/minutes-app'
+import type { MeetingArrivalsResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteChoicesResult, MeetingInviteResult, InviteSet, MeetingPressResult, MinutesNoticesResult } from '../../../shared/minutes-app'
 
 /** Watching a company's received minutes: main checks with the server (start, every 10 minutes) while subscribed. */
 export type MinutesReads = ElectronPort<'watchMinutes' | 'getMinutesNotices' | 'onMinutesChanged'>
@@ -60,8 +60,8 @@ export type MeetingReads = ElectronPort<'getMeetingArrivals' | 'getMeetingCardSt
 export type MeetingWrites = ElectronPort<'requestMeetingReading' | 'skipMeetingReading' | 'undoTaskAction' | 'setMeetingAutoSeries'>
 /** 「許可をし直す」: Google's page opens in the browser, as the settings' button does. */
 export type MeetingGoogleWrites = ElectronPort<'connectGoogle'>
-/** ［招待する］: shows the meeting to more members (never undone). */
-export type MeetingInviteWrites = ElectronPort<'inviteToRecord'>
+/** ［招待する］: shows the meeting to more members — or groups / departments — (never undone), and what it may offer. */
+export type MeetingInviteWrites = ElectronPort<'inviteToRecord' | 'getInviteChoices'>
 
 const NO_ARRIVALS: MeetingArrivalsResult = { available: false, items: [] }
 
@@ -105,8 +105,14 @@ export async function setMeetingAutoSeries(companyId: string, meetingId: string,
   return r?.success ? null : (r?.error ?? 'できませんでした。')
 }
 
-export async function inviteToMeeting(companyId: string, meetingId: string, memberIds: string[], expectedVersion: number, writes: MeetingInviteWrites = window.electronAPI): Promise<MeetingInviteResult> {
-  return (await writes.inviteToRecord(companyId, meetingId, memberIds, expectedVersion)) ?? { success: false, error: 'できませんでした。' }
+export async function inviteToMeeting(
+  companyId: string, meetingId: string, memberIds: string[], expectedVersion: number, sets: InviteSet[] = [], writes: MeetingInviteWrites = window.electronAPI,
+): Promise<MeetingInviteResult> {
+  return (await writes.inviteToRecord(companyId, meetingId, memberIds, expectedVersion, sets)) ?? { success: false, error: 'できませんでした。' }
+}
+
+export async function getInviteChoices(companyId: string, meetingId: string, writes: MeetingInviteWrites = window.electronAPI): Promise<MeetingInviteChoicesResult> {
+  return (await writes.getInviteChoices(companyId, meetingId)) ?? { success: false, error: 'できませんでした。' }
 }
 
 /** 見られる人 of the 案件 a meeting is about to be linked to (said before the link). */

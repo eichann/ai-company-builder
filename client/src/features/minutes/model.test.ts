@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { MeetingArrivalView } from '../../../shared/minutes-app'
-import { foldMeetings, madeWords, meetingBanner, meetingRowWords, meetingWhen, skippableMeetings, type MeetingBanner } from './model'
+import { foldMeetings, invitedText, madeWords, meetingBanner, meetingRowWords, meetingWhen, offeredSets, skippableMeetings, type MeetingBanner } from './model'
 
 const NOW = new Date(2026, 10, 4, 13, 0).getTime()
 const item = (over: Partial<MeetingArrivalView> = {}): MeetingArrivalView => ({
@@ -54,4 +54,20 @@ test('two rows at most stay out; ［まとめて読まない］ takes only the f
   assert.deepEqual(folded.map(r => r.n), [2, 3, 4])
   assert.deepEqual(skippableMeetings(folded).map(r => r.n), [2])
   assert.deepEqual(foldMeetings(rows.slice(0, 2)).folded, [])
+})
+
+test('［招待する］: groups and departments only when the server says the member may add them, never one already on the list', () => {
+  const choices = {
+    success: true as const, maySets: true,
+    groups: [{ id: 'g1', name: '採用チーム' }, { id: 'g2', name: '面接官' }], departments: [{ id: 'd1', name: '営業部' }],
+    listed: [{ type: 'group' as const, id: 'g2', name: '面接官' }],
+  }
+  assert.deepEqual(offeredSets(choices), [
+    { type: 'group', id: 'g1', label: '「採用チーム」の人' }, { type: 'department', id: 'd1', label: '営業部に所属する人' },
+  ])
+  assert.deepEqual(offeredSets({ ...choices, maySets: false }), [])
+  assert.deepEqual(offeredSets(null), [])
+  const members = [{ id: 'u-1', name: '有田' }]
+  assert.equal(invitedText(['u-1'], [{ type: 'group', id: 'g1' }, { type: 'department', id: 'd1' }], members, choices), '有田さん、「採用チーム」の人、営業部に所属する人を招待しました。')
+  assert.equal(invitedText([], [], members, choices), '選んだ人は、もうこの会議を見られます。')
 })

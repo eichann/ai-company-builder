@@ -218,6 +218,44 @@ export function migrateRecordViewers(conn: Database.Database): void {
 }
 
 /**
+ * Groups and departments on a members-only list (records.md "Members-only records", owner direction
+ * 2026-11-08: a record's exception is written in the same subjects as a place's rules). People stay
+ * in `record_viewers`, untouched; this table adds the lists' groups (見える人のまとまり) and
+ * departments (所属), whose members are read with the list, never stored. Additive: an older server
+ * build ignores the table, so it reads such a record by its people alone (narrower, never wider).
+ * A row's subject is of its own company (triggers); deleting the group or the department takes it
+ * off every list (also narrower). Idempotent.
+ */
+export function migrateRecordViewerSets(conn: Database.Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS record_viewer_sets (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      record_id TEXT NOT NULL,
+      subject_type TEXT NOT NULL CHECK (subject_type IN ('group', 'department')),
+      subject_id TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      added_by TEXT NOT NULL,
+      PRIMARY KEY (company_id, record_id, subject_type, subject_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_record_viewer_sets_subject ON record_viewer_sets(company_id, subject_type, subject_id);
+
+    CREATE TRIGGER IF NOT EXISTS record_viewer_sets_company_insert BEFORE INSERT ON record_viewer_sets
+    WHEN NOT EXISTS (SELECT 1 FROM member_groups WHERE NEW.subject_type = 'group' AND id = NEW.subject_id AND company_id = NEW.company_id)
+      AND NOT EXISTS (SELECT 1 FROM departments WHERE NEW.subject_type = 'department' AND id = NEW.subject_id AND company_id = NEW.company_id)
+    BEGIN SELECT RAISE(ABORT, 'record_viewer_sets: the group or department must be of the same company'); END;
+
+    CREATE TRIGGER IF NOT EXISTS record_viewer_sets_no_update BEFORE UPDATE ON record_viewer_sets
+    BEGIN SELECT RAISE(ABORT, 'record_viewer_sets rows are added or removed, never changed'); END;
+
+    CREATE TRIGGER IF NOT EXISTS record_viewer_sets_group_gone AFTER DELETE ON member_groups
+    BEGIN DELETE FROM record_viewer_sets WHERE company_id = OLD.company_id AND subject_type = 'group' AND subject_id = OLD.id; END;
+
+    CREATE TRIGGER IF NOT EXISTS record_viewer_sets_department_gone AFTER DELETE ON departments
+    BEGIN DELETE FROM record_viewer_sets WHERE company_id = OLD.company_id AND subject_type = 'department' AND subject_id = OLD.id; END;
+  `)
+}
+
+/**
  * 「この定例は次から自動で読む」 (minutes.md "Meetings for their attendees", owner decision
  * 2026-11-04): a member's own choice per recurring series. `series_key` is a digest of the
  * calendar's series id (no Google id stored here). `meeting_events`: what discovery knows of one

@@ -50,7 +50,7 @@ import type { InboxSource } from '../ports/inbox'
 import type { RecordRow } from '../ports/records'
 import { hasFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
-import { recordReader } from './record-access'
+import { onList, recordReader } from './record-access'
 import { placeOfRow, type ServiceActor, type ServiceRecordWriter, type ServiceWriteResult } from './record-engine'
 import { recordSummaries, RECORD_NOT_FOUND, RECORDS_DISABLED } from './records'
 
@@ -527,7 +527,7 @@ export function createInboxService(deps: InboxDeps) {
       // (a reply that went to another member alone is not the owner's to hear of).
       if (!outgoing && row.personalOwner !== null && !reporterAndRecipients.has(row.personalOwner)) continue
       // A members-only one only when it reached someone on its list (never as if it were the company's).
-      if (row.members !== null && !row.members.some(u => reporterAndRecipients.has(u))) continue
+      if (row.members !== null && ![...reporterAndRecipients].some(u => onList(row, u))) continue
       // The reporter's own message (their Sent mail, their own chat message) touches only a record
       // they read: another member's sent mail never moves someone else's records. Nothing is kept,
       // so the copy that reached the owner (their inbox) is still taken when it comes.
@@ -545,7 +545,7 @@ export function createInboxService(deps: InboxDeps) {
       const last = dm ? handle.inbox.latestIncoming('chat', `${dm[1]}:`, since, msg.occurredAt) : null
       const row = last ? handle.records.byIds([last.interactionId])[0] : undefined
       if (row && row.removedAt === null && row.type === 'interaction' && (row.personalOwner === null || row.personalOwner === reporterId)
-        && (row.members === null || row.members.includes(reporterId))) {
+        && (row.members === null || onList(row, reporterId))) {
         continueThread(companyId, handle, row, msg, outgoing, reporterId)
         return 'continued'
       }
