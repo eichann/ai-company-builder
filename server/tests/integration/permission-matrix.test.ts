@@ -114,6 +114,8 @@ interface World {
     outboundMail: string
     /** An absence of the other company's member (代わりの人). */
     absence: string
+    /** A group (見える人のまとまり) of the other company, with its member in it. */
+    group: string
     /** An execution run of the other company's member, with an operation of unknown result (records.md "Execution runs"). */
     aiRun: string
   }
@@ -179,6 +181,12 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/skill-editors', w => ({ path: `${C(w)}/skill-editors` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/skill-editors', w => ({ path: `${C(w)}/skill-editors`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/skill-editors/everyone', w => ({ path: `${C(w)}/skill-editors/everyone`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  // 見える人のまとまり (server.md "Groups"): owners and admins only, a manager too gets 403.
+  r('GET /api/companies/:companyId/groups', w => ({ path: `${C(w)}/groups` }), [200, 200, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/groups', w => ({ path: `${C(w)}/groups`, body: {} }), [400, 400, 403, 403, 404, 401], 'no name'),
+  r('PATCH /api/companies/:companyId/groups/:groupId', w => ({ path: `${C(w)}/groups/no-such-group`, body: { name: 'x' } }), [404, 404, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/groups/:groupId/members', w => ({ path: `${C(w)}/groups/no-such-group/members`, body: { userIds: [] } }), [404, 404, 403, 403, 404, 401]),
+  r('DELETE /api/companies/:companyId/groups/:groupId', w => ({ path: `${C(w)}/groups/no-such-group` }), [404, 404, 403, 403, 404, 401]),
   // Department membership (所属する部署): any member reads; owner/admin and the department's own managers change it
   r('GET /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members` }), MEMBERS),
   r('PUT /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members`, body: {} }), [400, 400, 403, 400, 404, 401], 'the manager\'s department'),
@@ -679,6 +687,9 @@ const CROSS: CrossRow[] = [
 
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
   x('DELETE /api/companies/:companyId/absences/:absenceId', (w, id) => ({ path: `${C(w)}/absences/${id}` }), w => w.other.absence),
+  x('PATCH /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}`, body: { name: '乗っ取り' } }), w => w.other.group),
+  x('PUT /api/companies/:companyId/groups/:groupId/members', (w, id) => ({ path: `${C(w)}/groups/${id}/members`, body: { userIds: [] } }), w => w.other.group),
+  x('DELETE /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}` }), w => w.other.group),
 
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
@@ -947,6 +958,11 @@ async function seed(): Promise<World> {
   // An absence of the other company's member, current until far ahead.
   db.prepare("INSERT INTO member_absences (company_id, id, user_id, from_day, until_day, delegate_id, set_by, set_at) VALUES (?, 'absence-other-1', ?, '2000-01-01', '2100-12-31', ?, ?, ?)")
     .run(other, otherMember, USER.outsider, USER.outsider, expires)
+  // A group of the other company with its member in it (server.md "Groups").
+  db.prepare("INSERT INTO member_groups (id, company_id, name, name_key, created_at, created_by) VALUES ('group-other-1', ?, '他社のまとまり', '他社のまとまり', ?, ?)")
+    .run(other, expires, USER.outsider)
+  db.prepare("INSERT INTO member_group_members (company_id, group_id, user_id, added_at, added_by) VALUES (?, 'group-other-1', ?, ?, ?)")
+    .run(other, otherMember, expires, USER.outsider)
   // An execution run of the other company's member, waiting for reconciliation (rows as services/ai-runs.ts writes them).
   db.prepare(`INSERT INTO ai_runs (company_id, id, record_id, step, user_id, state, generation, created_at, updated_at)
     VALUES (?, 'run-other-1', 'deal-other001', 'task-prep', ?, 'waiting_reconcile', 1, ?, ?)`).run(other, otherMember, expires, expires)
@@ -983,7 +999,9 @@ async function seed(): Promise<World> {
       approval: 'approval-other001',
       outboundMail: 'outbound_message-other00000001',
       absence: 'absence-other-1',
+      group: 'group-other-1',
       aiRun: 'run-other-1',
+
     },
   }
 }

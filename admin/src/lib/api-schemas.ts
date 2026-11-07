@@ -24,6 +24,7 @@ import type { AgentSandboxView } from '../../../shared/types/agent-sandbox'
 import type { AgentStopView } from '../../../shared/types/agent-stop'
 import type { CoreConnectorsView } from '../../../shared/types/core-connectors'
 import type { GoogleAdminView, GoogleRelayAdminView } from '../../../shared/types/google'
+import type { MemberGroup, MemberGroupsView } from '../../../shared/types/groups'
 import type { InboxSettingsView } from '../../../shared/types/inbox'
 import type { BrokerView } from '../../../shared/types/key-broker'
 import type { MinutesFolderSetting } from '../../../shared/types/minutes'
@@ -344,6 +345,11 @@ export const inboxSettingsSchema = topLevel<InboxSettingsView>({ settings: obj, 
 export const memberAbsencesSchema = topLevel<MemberAbsencesView>({ userId: str, absences: list, canEdit: bool, covering: list, today: str })
 export const absenceCreatedSchema = topLevel<AbsenceCreated>({ absence: obj, delegateCannotRead: num })
 export const absenceRemovedSchema = topLevel<{ removed: true }>({ removed: bool })
+
+// 見える人のまとまり (groups)
+export const memberGroupSchema = topLevel<MemberGroup>({ id: str, name: str, memberIds: list, usedIn: list, createdAt: str })
+export const memberGroupsSchema = topLevel<MemberGroupsView>({ groups: list })
+export const groupDeletedSchema = topLevel<{ deleted: true }>({ deleted: bool })
 
 // API keys, plugins and connectors
 export const brokerSchema = topLevel<BrokerView>({

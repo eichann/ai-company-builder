@@ -226,7 +226,7 @@ describe('what needs the repository refuses clearly', () => {
 })
 
 describe('permission rules: the places are the departments', () => {
-  it('lists the departments as folders and takes rules on them, nothing below', async () => {
+  it('lists the departments as folders and takes rules on them and on places inside them, nothing outside', async () => {
     const top = await call('GET', `/api/companies/${none}/permissions/folders`)
     expect(top.status).toBe(200)
     expect(top.body.data.folders.map((f: Json) => f.name)).toContain('営業部')
@@ -237,7 +237,13 @@ describe('permission rules: the places are the departments', () => {
 
     const rule = { path: '経理部', subjectType: 'everyone', canRead: true, canWrite: false }
     expect((await call('POST', `/api/companies/${none}/permissions/rules`, rule)).status).toBe(201)
-    expect((await call('POST', `/api/companies/${none}/permissions/rules`, { ...rule, path: '経理部/下' })).status).toBe(400)
+    // A place inside a department (server.md "Groups": scope rows only) is made by its first rule
+    // and listed inside its department; a path in no department is still not found.
+    expect((await call('POST', `/api/companies/${none}/permissions/rules`, { ...rule, path: '経理部/下' })).status).toBe(201)
+    const below = await call('GET', `/api/companies/${none}/permissions/folders?path=${encodeURIComponent('経理部')}`)
+    expect(below.body.data.folders.map((f: Json) => f.name)).toEqual(['下'])
+    expect((await call('POST', `/api/companies/${none}/permissions/rules`, { ...rule, path: 'どこにもない/下' })).status).toBe(400)
+    expect((await call('DELETE', `/api/companies/${none}/permissions/scopes/${below.body.data.folders[0].scopeId}/rules`)).status).toBe(200)
   })
 })
 
@@ -282,19 +288,22 @@ describe('who sees a record does not depend on the repository', () => {
     const at = new Date().toISOString()
     db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run('nf-membership', 'nf-member', none, 'member', at, at)
-    // 総務 is read only by owners and admins. The rule row is inserted directly: no API can make
-    // a read-restricted place for a company without the shared folder yet (read restriction is
-    // only through private folders, which it has none of; pinned below). The row proves that
-    // who sees a record comes from the database and never widens without a repository.
+    // 総務 is read only by owners and admins. The rule row is inserted directly: it proves that
+    // who sees a record comes from the database and never widens without a repository. (The
+    // editor makes such places too since the groups PR: restricted-places.test.ts.)
     const scope = db.prepare('SELECT id FROM scopes WHERE company_id = ? AND path = ?').get(none, '総務') as { id: string }
     db.prepare('INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run('nf-rule-somu', scope.id, 'everyone', null, 0, 0, at)
   })
 
-  it('today the rules editor cannot restrict who reads a department (no private folders; a place without git is the next work)', async () => {
+  it('the rules editor restricts who reads a department, never the whole company', async () => {
     const r = await call('POST', `/api/companies/${none}/permissions/rules`, { path: '経理部', subjectType: 'everyone', canRead: false, canWrite: false })
-    expect(r.status).toBe(400)
-    expect(r.body.code).toBe('READ_RESTRICTION_UNAVAILABLE')
+    expect(r.status).toBe(200)
+    const root = await call('POST', `/api/companies/${none}/permissions/rules`, { path: '', subjectType: 'everyone', canRead: false, canWrite: false })
+    expect(root.status).toBe(400)
+    expect(root.body.code).toBe('READ_RESTRICTION_UNAVAILABLE')
+    // Back to everyone reading (the tests below use 経理部 freely).
+    expect((await call('POST', `/api/companies/${none}/permissions/rules`, { path: '経理部', subjectType: 'everyone', canRead: true, canWrite: false })).status).toBe(200)
   })
 
   it('a record in a department the member cannot read stays hidden; one they can read is shown', async () => {

@@ -100,6 +100,9 @@ const TYPES: Record<string, string> = {
   DepartmentStats: '{ files: number; folders: number; exists: boolean }',
   Managers: '{ managers: DepartmentManager[] }',
   SkillEditors: 'SkillEditors',
+  Groups: 'MemberGroupsView',
+  Group: 'MemberGroup',
+  GroupDeleted: '{ deleted: true }',
   DepartmentMembers: 'DepartmentMembersView',
   TaskSettings: 'TaskSettingsView',
   InboxSettings: 'InboxSettingsView',
@@ -235,6 +238,7 @@ beforeAll(async () => {
   const { permissionsRoute } = await import('../../src/routes/permissions')
   const { permissionRulesRoute } = await import('../../src/routes/permission-rules')
   const { skillEditorsRoute } = await import('../../src/routes/skill-editors')
+  const { groupsRoute } = await import('../../src/routes/groups')
   const { privateFoldersRoute } = await import('../../src/routes/private-folders')
   const { invitationsRoute } = await import('../../src/routes/invitations')
   const { agentEventsRoute } = await import('../../src/routes/agent-events')
@@ -256,6 +260,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', permissionsRoute)
   app.route('/api/companies/:companyId', permissionRulesRoute)
   app.route('/api/companies/:companyId', skillEditorsRoute)
+  app.route('/api/companies/:companyId', groupsRoute)
   app.route('/api/companies/:companyId', privateFoldersRoute)
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
@@ -313,6 +318,13 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('SkillEditors', USERS.owner, 'PUT', `${base}/skill-editors`, { departmentId: created.id, userIds: [USERS.member] })
     await expectShape('SkillEditors', USERS.owner, 'GET', `${base}/skill-editors`)
     await expectShape('SkillEditors', USERS.owner, 'PUT', `${base}/skill-editors/everyone`, { everyone: false })
+    // 見える人のまとまり (server.md "Groups").
+    const group = await expectShape('Group', USERS.owner, 'POST', `${base}/groups`, { name: '採用チーム', userIds: [USERS.member] })
+    await expectShape('Groups', USERS.owner, 'GET', `${base}/groups`)
+    await expectShape('Group', USERS.owner, 'PATCH', `${base}/groups/${group.id}`, { name: '採用の人' })
+    await expectShape('Group', USERS.owner, 'PUT', `${base}/groups/${group.id}/members`, { userIds: [] })
+    await expectShape('GroupDeleted', USERS.owner, 'DELETE', `${base}/groups/${group.id}`)
+
     await expectShape('DepartmentMembers', USERS.owner, 'PUT', `${base}/departments/${created.id}/members`, { userIds: [USERS.member] })
     await expectShape('DepartmentMembers', USERS.member, 'GET', `${base}/departments/${created.id}/members`)
     await expectShape('Success', USERS.owner, 'POST', `${base}/departments/reorder`, { items: [{ id: created.id, sortOrder: 0 }] }, false)

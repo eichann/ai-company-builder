@@ -28,6 +28,7 @@ import type { ConnectorRepository } from './connectors'
 import type { DepartmentRepository } from './departments'
 import type { GoogleDriveRepository } from './google-drive'
 import type { FixedPayloadRepository } from './fixed-payloads'
+import type { GroupRepository, PermissionHistoryRepository } from './groups'
 import type { InvitationRepository } from './invitations'
 import type { NotificationRepository } from './notifications'
 import type { OrphanedScopeReader } from './orphaned-scopes'
@@ -60,6 +61,10 @@ export interface CompanyData {
   /** Permission scopes, rules and department managers. */
   readonly scopes: ScopeRepository
   readonly privateFolders: PrivateFolderRepository
+  /** 見える人のまとまり: groups and who is in them (ports/groups.ts). */
+  readonly groups: GroupRepository
+  /** Who changed groups and permission rules, when, what (append-only, ports/groups.ts). */
+  readonly permissionHistory: PermissionHistoryRepository
   /** Rules whose folder disappeared from the shared branch (git + orphaned_scopes). */
   readonly orphanedScopes: OrphanedScopeReader
   /** The company map of the light ontology: switch, types, record index, links, state (ports/records.ts). */

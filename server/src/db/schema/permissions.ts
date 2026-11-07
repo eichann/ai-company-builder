@@ -25,7 +25,7 @@ export const permissionSchema = `
     CREATE TABLE IF NOT EXISTS scope_rules (
       id TEXT PRIMARY KEY,
       scope_id TEXT NOT NULL REFERENCES scopes(id) ON DELETE CASCADE,
-      subject_type TEXT NOT NULL CHECK (subject_type IN ('everyone', 'role', 'department', 'user')),
+      subject_type TEXT NOT NULL CHECK (subject_type IN ('everyone', 'role', 'department', 'group', 'user')),
       subject_id TEXT,
       can_read INTEGER NOT NULL DEFAULT 0,
       can_write INTEGER NOT NULL DEFAULT 0,
@@ -129,6 +129,56 @@ export const permissionSchema = `
       created_at TEXT NOT NULL,
       created_by TEXT
     );
+
+    -- 見える人のまとまり (groups, server.md "Groups"): a named set of members of one
+    -- company, kept by owners/admins. A rule may name one (subject 'group'); who
+    -- is in it is read with the rules (memberIds), never stored on the rule. A
+    -- group holds members only (no nesting) and exactly those put in it.
+    CREATE TABLE IF NOT EXISTS member_groups (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      -- NFC + A–Z folded (shared/core/paths.ts nameKey): one name once per company.
+      name_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      created_by TEXT,
+      UNIQUE(company_id, name_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS member_group_members (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      group_id TEXT NOT NULL REFERENCES member_groups(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      added_by TEXT,
+      PRIMARY KEY (group_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_member_group_members_company_user ON member_group_members(company_id, user_id);
+
+    CREATE TRIGGER IF NOT EXISTS member_group_members_company_insert BEFORE INSERT ON member_group_members
+    WHEN NEW.company_id IS NOT (SELECT company_id FROM member_groups WHERE id = NEW.group_id)
+    BEGIN SELECT RAISE(ABORT, 'member_group_members.company_id must be the company of its group'); END;
+
+    CREATE TRIGGER IF NOT EXISTS member_group_members_company_update BEFORE UPDATE OF company_id, group_id ON member_group_members
+    WHEN NEW.company_id IS NOT (SELECT company_id FROM member_groups WHERE id = NEW.group_id)
+    BEGIN SELECT RAISE(ABORT, 'member_group_members.company_id must be the company of its group'); END;
+
+    -- Who changed groups and permission rules, when, and what (append-only;
+    -- services/groups.ts, services/permission-editor.ts). detail: JSON — the
+    -- group's name / member ids, or a place's path with its rules before and
+    -- after. Never served by an endpoint yet: the record is for the owner and
+    -- the operator (a page to read it is later work).
+    CREATE TABLE IF NOT EXISTS permission_history (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      action TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      at TEXT NOT NULL,
+      by_user TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_permission_history_company ON permission_history(company_id, seq);
+    CREATE TRIGGER IF NOT EXISTS permission_history_no_update BEFORE UPDATE ON permission_history
+    BEGIN SELECT RAISE(ABORT, 'permission_history is append-only'); END;
 
     CREATE INDEX IF NOT EXISTS idx_scope_repos_company_id ON scope_repos(company_id);
     CREATE INDEX IF NOT EXISTS idx_scopes_department_id ON scopes(department_id);
@@ -239,33 +289,46 @@ export function migrateRuleAndManagerCompanies(conn: Database.Database): {
  *
  * Runs after migrateRuleAndManagerCompanies (needs company_id).
  */
+/** scope_rules' table SQL ('' before the table exists). */
+function scopeRulesSql(conn: Database.Database): string {
+  return (conn.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'scope_rules'`).get() as { sql: string } | undefined)?.sql ?? ''
+}
+
+/**
+ * Rebuild scope_rules with the CHECK of today's subjects (rows, ids,
+ * created_at/by, company_id and rowid order kept), then its index, the company
+ * triggers and the subject triggers again (they went with the old table).
+ */
+function rebuildScopeRules(conn: Database.Database): void {
+  conn.exec(`
+    CREATE TABLE scope_rules_rebuilt (
+      id TEXT PRIMARY KEY,
+      scope_id TEXT NOT NULL REFERENCES scopes(id) ON DELETE CASCADE,
+      subject_type TEXT NOT NULL CHECK (subject_type IN ('everyone', 'role', 'department', 'group', 'user')),
+      subject_id TEXT,
+      can_read INTEGER NOT NULL DEFAULT 0,
+      can_write INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      created_by TEXT,
+      company_id TEXT REFERENCES companies(id) ON DELETE CASCADE
+    );
+    INSERT INTO scope_rules_rebuilt (rowid, id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by, company_id)
+      SELECT rowid, id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by, company_id FROM scope_rules;
+    DROP TABLE scope_rules;
+    ALTER TABLE scope_rules_rebuilt RENAME TO scope_rules;
+    CREATE INDEX IF NOT EXISTS idx_scope_rules_scope_id ON scope_rules(scope_id);
+  `)
+  migrateRuleAndManagerCompanies(conn)
+}
+
 export function migrateDepartmentRuleSubject(conn: Database.Database): { rebuilt: boolean } {
-  const sql = (conn.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'scope_rules'`).get() as { sql: string } | undefined)?.sql ?? ''
+  const sql = scopeRulesSql(conn)
   const rebuilt = sql !== '' && !sql.includes("'department'")
   conn.transaction(() => {
-    if (rebuilt) {
-      conn.exec(`
-        CREATE TABLE scope_rules_rebuilt (
-          id TEXT PRIMARY KEY,
-          scope_id TEXT NOT NULL REFERENCES scopes(id) ON DELETE CASCADE,
-          subject_type TEXT NOT NULL CHECK (subject_type IN ('everyone', 'role', 'department', 'user')),
-          subject_id TEXT,
-          can_read INTEGER NOT NULL DEFAULT 0,
-          can_write INTEGER NOT NULL DEFAULT 0,
-          created_at TEXT NOT NULL,
-          created_by TEXT,
-          company_id TEXT REFERENCES companies(id) ON DELETE CASCADE
-        );
-        INSERT INTO scope_rules_rebuilt (rowid, id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by, company_id)
-          SELECT rowid, id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by, company_id FROM scope_rules;
-        DROP TABLE scope_rules;
-        ALTER TABLE scope_rules_rebuilt RENAME TO scope_rules;
-        CREATE INDEX IF NOT EXISTS idx_scope_rules_scope_id ON scope_rules(scope_id);
-      `)
-      // Indexes and company triggers went with the old table.
-      migrateRuleAndManagerCompanies(conn)
-    }
+    // The rebuild takes today's CHECK (group included), so migrateGroupRuleSubject finds nothing to do.
+    if (rebuilt) rebuildScopeRules(conn)
     conn.exec(`
+
       CREATE TRIGGER IF NOT EXISTS scope_rules_department_insert BEFORE INSERT ON scope_rules
       WHEN NEW.subject_type = 'department' AND NOT EXISTS (
         SELECT 1 FROM departments WHERE id = NEW.subject_id
@@ -279,5 +342,44 @@ export function migrateDepartmentRuleSubject(conn: Database.Database): { rebuilt
     `)
   })()
   if (rebuilt) console.log('[db] scope_rules rebuilt for department rules')
+  return { rebuilt }
+}
+
+/**
+ * The rule subject 'group' (見える人のまとまり, member_groups; shared/core/permissions.ts).
+ * Like migrateDepartmentRuleSubject, idempotent:
+ *
+ * - A database whose scope_rules CHECK does not know 'group' is rebuilt once
+ *   (every row kept, in order), then the company and department triggers are
+ *   made again. An older server build keeps working on the database: it never
+ *   inserts a group rule, and one it reads matches no one (fails closed).
+ * - Triggers: a group rule names a group of the rule's own company (never
+ *   another company's, never none), and keeps naming one.
+ *
+ * Runs after migrateDepartmentRuleSubject.
+ */
+export function migrateGroupRuleSubject(conn: Database.Database): { rebuilt: boolean } {
+  const sql = scopeRulesSql(conn)
+  const rebuilt = sql !== '' && !sql.includes("'group'")
+  conn.transaction(() => {
+    if (rebuilt) {
+      rebuildScopeRules(conn)
+      // The department triggers went with the old table.
+      migrateDepartmentRuleSubject(conn)
+    }
+    conn.exec(`
+      CREATE TRIGGER IF NOT EXISTS scope_rules_group_insert BEFORE INSERT ON scope_rules
+      WHEN NEW.subject_type = 'group' AND NOT EXISTS (
+        SELECT 1 FROM member_groups WHERE id = NEW.subject_id
+          AND company_id = COALESCE(NEW.company_id, (SELECT company_id FROM scopes WHERE id = NEW.scope_id)))
+      BEGIN SELECT RAISE(ABORT, 'a group rule names a group of the same company'); END;
+
+      CREATE TRIGGER IF NOT EXISTS scope_rules_group_update BEFORE UPDATE OF subject_type, subject_id, company_id, scope_id ON scope_rules
+      WHEN NEW.subject_type = 'group' AND NOT EXISTS (
+        SELECT 1 FROM member_groups WHERE id = NEW.subject_id AND company_id = NEW.company_id)
+      BEGIN SELECT RAISE(ABORT, 'a group rule names a group of the same company'); END;
+    `)
+  })()
+  if (rebuilt) console.log('[db] scope_rules rebuilt for group rules')
   return { rebuilt }
 }

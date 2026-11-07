@@ -43,7 +43,9 @@ import {
   type ScopeWithRules,
   type SubjectType,
 } from '../../../shared/core/permissions'
+import { hasCompanyFolder, storedCompanyFolderKind } from '../../../shared/core/company-folder'
 import type { ScopeRecord } from '../../ports/scopes'
+
 
 type Conn = Database.Database
 
@@ -90,8 +92,27 @@ function departmentMemberIds(conn: Conn, companyId: string): Map<string, string[
   return byDepartment
 }
 
-/** A stored rule as the model sees it; a department rule gets who belongs now. */
-function toRule(r: RuleRow, members: () => Map<string, string[]>): ScopeRule {
+/** Who is in each group of the company (member_group_members), for the group rules. */
+function groupMemberIds(conn: Conn, companyId: string): Map<string, string[]> {
+  const rows = conn.prepare(`
+    SELECT group_id, user_id FROM member_group_members WHERE company_id = ? ORDER BY added_at, user_id
+  `).all(companyId) as Array<{ group_id: string; user_id: string }>
+  const byGroup = new Map<string, string[]>()
+  for (const r of rows) {
+    const list = byGroup.get(r.group_id) ?? []
+    list.push(r.user_id)
+    byGroup.set(r.group_id, list)
+  }
+  return byGroup
+}
+
+interface MemberSets {
+  departments(): Map<string, string[]>
+  groups(): Map<string, string[]>
+}
+
+/** A stored rule as the model sees it; a department or group rule gets who is in it now. */
+function toRule(r: RuleRow, members: MemberSets): ScopeRule {
   const rule: ScopeRule = {
     id: r.id,
     subjectType: r.subject_type,
@@ -99,14 +120,30 @@ function toRule(r: RuleRow, members: () => Map<string, string[]>): ScopeRule {
     canRead: r.can_read === 1,
     canWrite: r.can_write === 1,
   }
-  if (r.subject_type === 'department') rule.memberIds = members().get(r.subject_id ?? '') ?? []
+  if (r.subject_type === 'department') rule.memberIds = members.departments().get(r.subject_id ?? '') ?? []
+  if (r.subject_type === 'group') rule.memberIds = members.groups().get(r.subject_id ?? '') ?? []
   return rule
 }
 
-/** Read department_members at most once, and only when a department rule needs it. */
-function lazyMembers(conn: Conn, companyId: string): () => Map<string, string[]> {
-  let cached: Map<string, string[]> | null = null
-  return () => (cached ??= departmentMemberIds(conn, companyId))
+/** Read department_members / member_group_members at most once each, and only when a rule needs it. */
+function lazyMembers(conn: Conn, companyId: string): MemberSets {
+  let departments: Map<string, string[]> | null = null
+  let groups: Map<string, string[]> | null = null
+  return {
+    departments: () => (departments ??= departmentMemberIds(conn, companyId)),
+    groups: () => (groups ??= groupMemberIds(conn, companyId)),
+  }
+}
+
+/**
+ * Without the shared folder (companies.folder_kind other than an exact 'git',
+ * shared/core/company-folder.ts) read restriction is a place's own rules: such
+ * a company's scope whose everyone rule denies read is `readRestricted`.
+ */
+function companyWithoutFolder(conn: Conn, companyId: string): boolean {
+  const row = conn.prepare(`SELECT folder_kind FROM companies WHERE id = ?`).get(companyId) as { folder_kind: string | null } | undefined
+  // No such company: nothing is restricted by this rule (nothing reads its scopes anyway).
+  return row !== undefined && !hasCompanyFolder(storedCompanyFolderKind(row.folder_kind))
 }
 
 /** Remove a scope of the company and its rules. */
@@ -297,14 +334,21 @@ export function listScopesWithRules(conn: Conn, companyId: string): ScopeWithRul
     list.push(toRule(r, members))
     byScope.set(r.scope_id, list)
   }
-  return scopes.map(s => ({
-    id: s.id,
-    path: s.path,
-    kind: s.kind,
-    departmentId: s.department_id,
-    repoId: s.repo_id,
-    rules: byScope.get(s.id) ?? [],
-  }))
+  // A company with the shared folder never has a read-restricted place (private folders only).
+  const restrictable = companyWithoutFolder(conn, companyId)
+  return scopes.map(s => {
+    const own = byScope.get(s.id) ?? []
+    const readRestricted = restrictable && s.repo_id === null && own.some(r => r.subjectType === 'everyone' && !r.canRead)
+    return {
+      id: s.id,
+      path: s.path,
+      kind: s.kind,
+      departmentId: s.department_id,
+      repoId: s.repo_id,
+      ...(readRestricted ? { readRestricted: true } : {}),
+      rules: own,
+    }
+  })
 }
 
 export function getMemberRole(conn: Conn, companyId: string, userId: string): string | null {

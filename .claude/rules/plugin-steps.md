@@ -107,7 +107,7 @@ A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target
 - Another company: the record and the plugin are the same 404 as none; no turns.
 - Test (after a meeting): `plugin-steps.test.ts` "a meeting read moves its まとまり…" (read → the
   deal at the step's state by the AI for the reader, its note naming the meeting — an owner-only or
-  members-only meeting is not named: 「会議を読んだあと」, the deal's readers are not its readers — the step in the
+  members-only meeting, or one inside a private folder or a read-restricted place, is not named: 「会議を読んだあと」, the deal's readers are not its readers — the step in the
   turns; the まとまり chosen later by a person the same — the meeting stays read, no run, once; no まとまり / already the AI's turn
   / not the assignee / two AI ways → nothing; a person-only way is not a second way) and "the core's
   minutes reading writes nothing…" (a minutes-reading run reads the deal, cannot update it) —

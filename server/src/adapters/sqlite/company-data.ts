@@ -8,6 +8,7 @@ import { sqliteConnectorRepository } from './connectors'
 import { sqliteDepartmentRepository } from './departments'
 import { sqliteGoogleDriveRepository } from './google-drive'
 import { sqliteFixedPayloadRepository } from './fixed-payloads'
+import { sqliteGroupRepository, sqlitePermissionHistoryRepository } from './groups'
 import { sqliteInvitationRepository } from './invitations'
 import { sqliteNotificationRepository } from './notifications'
 import { sqliteOutboundMailRepository } from './outbound-mail'
@@ -45,6 +46,8 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         invitations: sqliteInvitationRepository(conn, companyId),
         scopes: sqliteScopeRepository(conn, companyId),
         privateFolders: sqlitePrivateFolderRepository(conn, companyId),
+        groups: sqliteGroupRepository(conn, companyId),
+        permissionHistory: sqlitePermissionHistoryRepository(conn, companyId),
         orphanedScopes: gitOrphanedScopeReader(conn, companyId),
         records: sqliteRecordRepository(conn, companyId),
         plugins: sqlitePluginRepository(conn, companyId),
