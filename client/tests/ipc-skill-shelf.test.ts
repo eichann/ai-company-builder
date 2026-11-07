@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { commitRepo, loadMain, writeFiles, type MainHarness } from './ipc-harness/main-harness.ts'
 import { shelfListing } from '../../shared/core/skill-shelf.ts'
+import { WORKING_FOLDER_TAKEN_MESSAGE } from '../electron/features/company-setup/ipc.ts'
 import { SHELF_ALREADY_COMPANY_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_TOO_MUCH_MESSAGE } from '../shared/skill-shelf.ts'
 
 let h: MainHarness
@@ -62,7 +63,7 @@ test('opening a working folder places the company\'s Skills; the Skills panel te
 
 test('「会社に公開」: the folder goes up with what the member saw, leaving out what the system added, and the Skill becomes the company\'s', async () => {
   const { folder, shelf } = await open('co-pub')
-  writeFiles(folder, { '営業部/.claude/skills/visit/SKILL.md': 'visit\n', '営業部/.claude/skills/visit/scripts/a.py': 'print(1)\n', '営業部/.claude/skills/visit/.DS_Store': 'x', '営業部/.claude/skills/visit/tools/app/node_modules/x.js': 'x' })
+  writeFiles(folder, { '営業部/.claude/skills/visit/SKILL.md': 'visit\n', '営業部/.claude/skills/visit/scripts/a.py': 'print(1)\n', '営業部/.claude/skills/visit/.DS_Store': 'x', '営業部/.claude/skills/visit/tools/app/node_modules/x.js': 'x', '営業部/.claude/skills/visit/.env': 'KEY=secret\n', '営業部/.claude/skills/visit/.env.local': 'KEY=secret\n', '営業部/.claude/skills/visit/.git/config': 'x', '営業部/.claude/skills/visit/venv/lib/x.py': 'x', '営業部/.claude/skills/visit/scripts/a.pyc': 'x', '営業部/.claude/skills/visit/.tool-output.log': 'x' })
   const posted: Array<Record<string, unknown>> = []
   h.server.on('POST', '/api/companies/co-pub/skill-shelf', req => {
     posted.push(JSON.parse(req.body!))
@@ -111,6 +112,29 @@ test('「手元で直す」 through main: the Skill is no longer the company\'s 
   assert.deepEqual(await h.invoke('skillShelf:editLocally', folder, skillPath), { success: true })
   const listed = await h.invoke<{ skills: Array<{ shelf?: unknown }> }>('skills:list', folder, '', 'company', undefined, { force: true })
   assert.deepEqual(listed.skills[0].shelf, { state: 'clash', version: versionOf(skill) })
+})
+
+test('a folder another company works in is refused, and nothing is delivered into it', async () => {
+  const { folder } = await open('co-first', { proposal: { 'SKILL.md': 'x\n' } })
+  h.server.on('GET', '/api/companies/co-second', { json: { success: true, data: { id: 'co-second', name: 'b', folderKind: 'none' } } })
+  h.server.on('GET', '/api/companies/co-second/departments', { json: { success: true, data: [] } })
+  assert.deepEqual(await h.invoke('companySetup:openWorkingFolder', folder, 'co-second'), { success: false, error: WORKING_FOLDER_TAKEN_MESSAGE })
+  assert.deepEqual(h.server.to('/api/companies/co-second/me/skill-shelf'), [])
+  assert.deepEqual(await h.invoke('companySetup:openWorkingFolder', folder, 'co-first'), { success: true }, 'its own company reopens it')
+})
+
+test('a rule file kept back by a file of the member\'s is said in the Skills panel', async () => {
+  const id = 'co-rule'
+  const { folder } = await open(id)
+  writeFiles(folder, { '.claude/rules/tone.md': 'mine\n' })
+  const files = { 'tone.md': '敬語で\n' }
+  h.server.on('GET', `/api/companies/${id}/me/skill-shelf`, { json: { success: true, data: { items: [{ id: 'r1', kind: 'rule', name: 'tone', department: null, version: versionOf(files), fileCount: 1, totalBytes: 1 }] } } })
+  writeFiles(folder, { '.claude/skills/own/SKILL.md': 'own\n' })
+  h.server.on('POST', `/api/companies/${id}/skill-shelf`, { status: 201, json: { success: true, data: { changed: true, item: {} } } })
+  await h.invoke('skillShelf:publish', folder, path.join(folder, '.claude/skills/own'), null)
+  const listed = await h.invoke<{ ruleClashes?: string[] }>('skills:list', folder, '', 'company', undefined, { force: true })
+  assert.deepEqual(listed.ruleClashes, ['tone'])
+  assert.equal(fs.readFileSync(path.join(folder, '.claude/rules/tone.md'), 'utf8'), 'mine\n')
 })
 
 test('a git company\'s folder: nothing is asked of the shelf, publishing and 手元で直す are refused, and skills:list marks nothing', async () => {

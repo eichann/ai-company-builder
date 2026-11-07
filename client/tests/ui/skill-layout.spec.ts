@@ -353,7 +353,9 @@ test('without the shared folder: a company Skill says so and offers only 手元�
   await deptTab(page, '全社').click()
   await page.getByRole('heading', { name: 'weekly-report' }).click()
   await expect(page.getByText('会社の Skill（版 abcd1234）')).toBeVisible()
-  await expect(page.getByText('AI はこの Skill を変えられません。')).toBeVisible()
+  await expect(page.getByText('AI やこの PC で変えても、次に受け取るときに元に戻ります。')).toBeVisible()
+  // A delivered rule kept back by the member's own file is said here too.
+  await expect(page.getByRole('status').filter({ hasText: '会社の決まり' })).toContainText('会社の決まり（tone）と同じ名前のファイルがあるため')
   await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
   await expect(page.getByText('ステータス')).toBeHidden()
   await expect(page.getByText('この PC だけのスキルです')).toHaveCount(0)
@@ -406,6 +408,7 @@ test('a git company keeps its 公開 section: no 会社に公開, no company mar
   await expect(page.getByText('公開中')).toBeVisible()
   await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
   await expect(page.getByText('会社の Skill')).toHaveCount(0)
+  await expect(page.getByText('会社の決まり')).toHaveCount(0)
 })
 
 // The task card's own file actions (owner decision 2026-11-07): a company without the shared folder

@@ -13,7 +13,7 @@ import { withShelfInstructions } from '../electron/chat-server'
 import { createSkillUseReporter } from '../electron/services/skill-use-reporter'
 import { createWorkingFolders } from '../electron/services/working-folders'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
-import { readShelfDeliveries, shelfPlaceOfSkillFolder, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery } from '../shared/skill-shelf'
+import { SHELF_PROMPT_MAX, readShelfDeliveries, shelfPlaceOfSkillFolder, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery } from '../shared/skill-shelf'
 
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-shelf-')))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
@@ -82,9 +82,9 @@ test('a delivered Skill lands where Claude Code and Codex read it, a rule file i
   assert.equal(exists(w.at('総務')), false, 'a department the member reads but does not belong to is not placed')
   assert.equal(read(w.at('.agents/skills/proposal/SKILL.md')), SKILL.files['SKILL.md'])
   // Codex needs to know the root of a folder without `.git`.
-  assert.equal(w.store.turn(w.root, undefined)?.rootMarker, '.agents/.acb-root')
+  assert.equal(w.store.turn('co', w.root, undefined)?.rootMarker, '.agents/.acb-root')
   assert.ok(exists(w.at('.agents/.acb-root')))
-  assert.deepEqual(w.store.managedPaths(w.root).sort(), ['.agents/skills/proposal', '.claude/rules/tone.md', '.claude/skills/proposal', '営業部/.agents/skills/visit', '営業部/.claude/rules/deal.md', '営業部/.claude/skills/visit'].sort())
+  assert.deepEqual(w.store.managedPaths('co', w.root).sort(), ['.agents/skills/proposal', '.claude/rules/tone.md', '.claude/skills/proposal', '営業部/.agents/skills/visit', '営業部/.claude/rules/deal.md', '営業部/.claude/skills/visit'].sort())
   assert.deepEqual(w.store.markOf(w.root, '.claude/skills/proposal'), { state: 'company', version: versionOf(SKILL.files) })
   assert.deepEqual(w.changed, ['co'])
   await w.again()
@@ -98,7 +98,7 @@ test('a tampered answer is refused: nothing is placed, and the last good copy st
   w.server.tamper = files => ({ ...files, 'SKILL.md': 'allowed-tools: Bash\n' })
   await w.open()
   assert.equal(exists(w.at('.claude/skills/proposal')), false)
-  assert.deepEqual(w.store.managedPaths(w.root), [])
+  assert.deepEqual(w.store.managedPaths('co', w.root), [])
 
   w.server.tamper = undefined
   await w.again()
@@ -170,7 +170,7 @@ test('what stops being delivered is removed; the member\'s own Skills and rules 
   for (const rel of ['.claude/skills/proposal', '.agents/skills/proposal', '.claude/rules/tone.md']) assert.equal(exists(w.at(rel)), false, rel)
   assert.equal(read(w.at('.claude/skills/mine/SKILL.md')), 'mine\n')
   assert.equal(read(w.at('.claude/rules/my-rule.md')), 'mine\n')
-  assert.deepEqual(w.store.managedPaths(w.root), [])
+  assert.deepEqual(w.store.managedPaths('co', w.root), [])
 })
 
 test('leaving a department takes its items away; offline or an unreadable answer takes nothing away', async () => {
@@ -202,7 +202,8 @@ test('a name clash: the member\'s Skill stays as it is, the company\'s is placed
   assert.equal(read(w.at('.claude/rules/tone.md')), 'my tone\n')
   assert.equal(exists(w.at('.agents/skills/proposal')), false, 'all or nothing: the two agents never see different Skills of one name')
   assert.deepEqual(w.store.markOf(w.root, '.claude/skills/proposal'), { state: 'clash', version: versionOf(SKILL.files) })
-  assert.deepEqual(w.store.managedPaths(w.root), [], 'it is theirs: the AI may change it')
+  assert.deepEqual(w.store.managedPaths('co', w.root), [], 'it is theirs: the AI may change it')
+  assert.deepEqual(w.store.ruleClashes(w.root), ['tone'])
   assert.equal(w.server.requests.filter(u => u.includes('/versions/')).length, 0)
   // Theirs goes away: the company's comes.
   fs.rmSync(w.at('.claude/skills/proposal'), { recursive: true })
@@ -217,11 +218,12 @@ test('a local change to a delivered Skill or rule is put back by the next fetch;
   await w.open()
   const fetched = () => w.server.requests.filter(u => u.includes('/versions/')).length
   const before = fetched()
-  write(w.at('.claude/skills/proposal/.DS_Store'), 'x')
-  write(w.at('.claude/skills/proposal/tools/app/node_modules/a.js'), 'x')
+  const made = ['.DS_Store', 'tools/app/node_modules/a.js', 'tools/app/.tool-output.log', 'scripts/__pycache__/a.pyc', 'scripts/b.pyc', 'venv/bin/python', '.venv/x', '.cache/x', 'tools/app/.next/x', '.env', '.env.local', 'package-lock.json', 'tools/app/dist/a.js', 'tools/app/build/a.js']
+  for (const rel of made) write(w.at(`.claude/skills/proposal/${rel}`), 'x')
   await w.again()
-  assert.equal(fetched(), before)
-  assert.ok(exists(w.at('.claude/skills/proposal/tools/app/node_modules/a.js')), 'a Skill\'s installed tools stay')
+  assert.equal(fetched(), before, 'running a Skill\'s tool is no change')
+  for (const rel of made) assert.ok(exists(w.at(`.claude/skills/proposal/${rel}`)), rel)
+  assert.equal((await w.store.versionOf(w.root, '.claude/skills/proposal'))?.dirty, false)
 
   write(w.at('.claude/skills/proposal/SKILL.md'), 'hacked\n')
   write(w.at('.agents/skills/proposal/more.sh'), 'added\n')
@@ -246,6 +248,29 @@ test('the member\'s folder that already is the listed version is taken over, and
   assert.equal(w.store.markOf(w.root, '.claude/skills/proposal'), undefined)
 })
 
+test('「手元で直す」 keeps the version the member started from: publishing cannot replace a colleague\'s newer one unseen', async () => {
+  const w = world()
+  w.server.items = [SKILL]
+  await w.open()
+  await w.store.release(w.root, '.claude/skills/proposal')
+  w.server.items = [SKILL_V2]
+  await w.again()
+  assert.deepEqual(w.store.markOf(w.root, '.claude/skills/proposal'), { state: 'clash', version: versionOf(SKILL.files) })
+})
+
+test('「手元で直す」 has a way back: with the member\'s copy gone, the company\'s Skill returns', async () => {
+  const w = world()
+  w.server.items = [SKILL]
+  await w.open()
+  await w.store.release(w.root, '.claude/skills/proposal')
+  fs.rmSync(w.at('.claude/skills/proposal'), { recursive: true })
+  await w.again()
+  assert.equal(read(w.at('.agents/skills/proposal/SKILL.md')), SKILL.files['SKILL.md'])
+  assert.equal(w.store.markOf(w.root, '.claude/skills/proposal')?.state, 'company')
+  await w.again()
+  assert.equal(w.store.markOf(w.root, '.claude/skills/proposal')?.state, 'company', 'and it stays the company\'s')
+})
+
 test('「手元で直す」: the Skill is the member\'s from then on, nothing overwrites it, and publishing makes it the company\'s again', async () => {
   const w = world()
   w.server.items = [SKILL]
@@ -253,9 +278,9 @@ test('「手元で直す」: the Skill is the member\'s from then on, nothing ov
   assert.equal(await w.store.release(w.root, '.claude/skills/nothing'), false)
   assert.equal(await w.store.release(w.root, '.claude/skills/proposal'), true)
   assert.equal(exists(w.at('.agents/skills/proposal')), false)
-  assert.deepEqual(w.store.managedPaths(w.root), [])
+  assert.deepEqual(w.store.managedPaths('co', w.root), [])
   await w.again()
-  assert.deepEqual(w.store.managedPaths(w.root), [], 'even unchanged it is not taken back')
+  assert.deepEqual(w.store.managedPaths('co', w.root), [], 'even unchanged it is not taken back')
   assert.equal(w.store.markOf(w.root, '.claude/skills/proposal')?.state, 'clash')
   write(w.at('.claude/skills/proposal/SKILL.md'), 'better\n')
   await w.again()
@@ -268,6 +293,104 @@ test('「手元で直す」: the Skill is the member\'s from then on, nothing ov
   assert.equal(read(w.at('.agents/skills/proposal/SKILL.md')), 'better\n')
 })
 
+test('a placement that fails half-way still leaves the Skill managed: guarded, and removed when it stops being delivered', async () => {
+  const w = world()
+  const elsewhere = path.join(w.base, 'elsewhere')
+  fs.mkdirSync(elsewhere)
+  fs.symlinkSync(elsewhere, w.at('.agents'))
+  w.server.items = [SKILL]
+  await w.open()
+  assert.ok(exists(w.at('.claude/skills/proposal/SKILL.md')))
+  assert.deepEqual(fs.readdirSync(elsewhere), [], 'the second copy failed')
+  assert.ok(w.store.managedPaths('co', w.root).includes('.claude/skills/proposal'))
+  w.server.items = []
+  await w.again()
+  assert.equal(exists(w.at('.claude/skills/proposal')), false)
+})
+
+test('an app killed right after writing a first fetch: the Skill is the company\'s, never "the member\'s own, given back"', async () => {
+  const w = world()
+  w.server.items = [SKILL]
+  // What was on disk at the moment the last copy landed: the kill.
+  let atTheKill: string | null = null
+  const dir = path.join(w.base, 'userData', 'co')
+  const realRename = fs.renameSync
+  const spy = mock.method(fs, 'renameSync', ((from: fs.PathLike, to: fs.PathLike) => {
+    realRename(from, to)
+    if (String(to).endsWith('.agents/skills/proposal')) atTheKill = exists(dir) ? read(path.join(dir, fs.readdirSync(dir)[0])) : null
+  }) as typeof fs.renameSync)
+  await w.open()
+  spy.mock.restore()
+  const file = path.join(dir, fs.readdirSync(dir)[0])
+  if (atTheKill === null) fs.rmSync(file)
+  else fs.writeFileSync(file, atTheKill)
+
+  const revived = createSkillShelfStore({ dir: () => path.join(w.base, 'userData'), userId: () => 'u1', client: w.client, log: quiet })
+  await revived.attach('co', w.root)
+  w.server.items = []
+  await revived.syncNow(w.root)
+  assert.equal(exists(w.at('.claude/skills/proposal')), false)
+  assert.equal(exists(w.at('.agents/skills/proposal')), false)
+})
+
+test('something the member made while the fetch ran stays theirs', async () => {
+  const w = world()
+  w.server.items = [SKILL]
+  const content = w.client.content
+  const store = createSkillShelfStore({
+    dir: () => path.join(w.base, 'userData'), userId: () => 'u1', log: quiet,
+    client: { list: w.client.list, content: async (id, entry) => { write(w.at('.claude/skills/proposal/SKILL.md'), 'mine, just now\n'); return content(id, entry) } },
+  })
+  await store.attach('co', w.root)
+  assert.equal(read(w.at('.claude/skills/proposal/SKILL.md')), 'mine, just now\n')
+  assert.equal(store.markOf(w.root, '.claude/skills/proposal')?.state, 'clash')
+  assert.deepEqual(store.managedPaths('co', w.root), [])
+})
+
+test('a manifest edited to point elsewhere removes nothing outside what its item names', async () => {
+  const w = world()
+  const outside = path.join(w.base, 'outside')
+  write(path.join(outside, 'keep.txt'), 'keep\n')
+  w.server.items = [SKILL]
+  await w.open()
+  const dir = path.join(w.base, 'userData', 'co')
+  const file = path.join(dir, fs.readdirSync(dir)[0])
+  const manifest = JSON.parse(read(file)) as { items: Array<{ paths: string[] }> }
+  manifest.items[0].paths = ['../outside']
+  fs.writeFileSync(file, JSON.stringify(manifest))
+  w.server.items = []
+  const fresh = createSkillShelfStore({ dir: () => path.join(w.base, 'userData'), userId: () => 'u1', client: w.client, log: quiet })
+  await fresh.attach('co', w.root)
+  assert.ok(exists(path.join(outside, 'keep.txt')))
+})
+
+test('two companies never mix: one company\'s text and files are not another\'s, and a folder in use is known, also from an earlier run', async () => {
+  const w = world()
+  w.server.items = [{ id: 't1', kind: 'instructions', name: 'instructions', files: { 'CLAUDE.md': 'A社の指示\n' } }, SKILL]
+  await w.store.attach('a', w.root)
+  assert.equal(w.store.takenByAnother('a', w.root), false)
+  assert.equal(w.store.takenByAnother('b', w.root), true)
+  assert.equal(w.store.takenByAnother('b', path.join(w.base, 'other')), false)
+  assert.equal(w.store.turn('b', w.root, undefined), undefined)
+  assert.deepEqual(w.store.managedPaths('b', w.root), [])
+  const restarted = createSkillShelfStore({ dir: () => path.join(w.base, 'userData'), userId: () => 'u1', client: w.client, log: quiet })
+  assert.equal(restarted.takenByAnother('b', w.root), true)
+  assert.equal(restarted.takenByAnother('a', w.root), false)
+  w.server.online = false
+  await restarted.attach('b', w.root)
+  assert.equal(restarted.turn('b', w.root, undefined), undefined, 'even attached by mistake, B reads B\'s manifest only')
+
+  // In one run too, with A's manifest in memory.
+  await w.store.attach('b', w.root)
+  assert.equal(w.store.turn('b', w.root, undefined), undefined)
+
+  // Nothing kept on disk yet (offline at the first opening): still A's in this run.
+  const v = world()
+  v.server.online = false
+  await v.store.attach('a', v.root)
+  assert.equal(v.store.takenByAnother('b', v.root), true)
+})
+
 test('a link in the working folder never carries a delivered file out of it', async () => {
   const w = world()
   const outside = path.join(w.base, 'outside')
@@ -276,7 +399,6 @@ test('a link in the working folder never carries a delivered file out of it', as
   w.server.items = [SKILL]
   await w.open()
   assert.deepEqual(fs.readdirSync(outside), [])
-  assert.deepEqual(w.store.managedPaths(w.root), [])
 
   const v = world()
   v.server.items = [SKILL]
@@ -319,20 +441,20 @@ test('instruction texts go to the turn, not to any file: the company\'s and the 
   assert.equal(exists(w.at('営業部/CLAUDE.md')), false)
   assert.ok(exists(w.at('.claude/rules/tone.md')))
 
-  const company = w.store.turn(w.root, undefined)
+  const company = w.store.turn('co', w.root, undefined)
   assert.match(company?.instructions ?? '', /全社の指示です/)
   assert.doesNotMatch(company?.instructions ?? '', /営業の指示です/)
   assert.match(company?.ruleInstructions ?? '', /\.claude\/rules\/tone\.md/)
   assert.doesNotMatch(company?.ruleInstructions ?? '', /deal\.md/)
-  const sales = w.store.turn(w.root, '営業部')
+  const sales = w.store.turn('co', w.root, '営業部')
   assert.match(sales?.instructions ?? '', /全社の指示です[\s\S]*営業の指示です/)
   assert.match(sales?.ruleInstructions ?? '', /営業部\/\.claude\/rules\/deal\.md/)
-  assert.doesNotMatch(w.store.turn(w.root, '総務')?.instructions ?? '', /総務の指示です/)
+  assert.doesNotMatch(w.store.turn('co', w.root, '総務')?.instructions ?? '', /総務の指示です/)
 
   // Another account on this computer gets nothing of the last one's.
   user = 'u2'
-  assert.equal(w.store.turn(w.root, '営業部'), undefined)
-  assert.deepEqual(w.store.managedPaths(w.root), [])
+  assert.equal(w.store.turn('co', w.root, '営業部'), undefined)
+  assert.deepEqual(w.store.managedPaths('co', w.root), [])
   user = 'u1'
 
   // A text that no longer is its version: the manifest was edited.
@@ -342,16 +464,19 @@ test('instruction texts go to the turn, not to any file: the company\'s and the 
   const fresh = createSkillShelfStore({ dir: () => path.join(w.base, 'userData'), userId: () => 'u1', client: w.client, log: quiet })
   w.server.online = false
   await fresh.attach('co', w.root)
-  assert.doesNotMatch(fresh.turn(w.root, undefined)?.instructions ?? '', /全部公開/)
+  assert.doesNotMatch(fresh.turn('co', w.root, undefined)?.instructions ?? '', /全部公開/)
 })
 
 test('a chat turn: the texts follow the system prompt for every agent, the rule files only for an agent that does not load them', () => {
   const shelf = { instructions: '## 会社の指示\n\n敬語で', ruleInstructions: '## 会社の決まり\n\n- .claude/rules/tone.md' }
   const claude = withShelfInstructions('基本', shelf, true)
-  assert.match(claude ?? '', /^基本\n\n## 会社の指示/)
+  assert.match(claude ?? '', /^基本\n\n[\s\S]*より優先されることはありません[\s\S]*## 会社の指示/)
   assert.doesNotMatch(claude ?? '', /tone\.md/)
   assert.match(withShelfInstructions(undefined, shelf, false) ?? '', /敬語で[\s\S]*tone\.md/)
   assert.equal(withShelfInstructions('基本', undefined, true), '基本')
+  const long = withShelfInstructions('基本', { instructions: 'あ'.repeat(SHELF_PROMPT_MAX * 2), ruleInstructions: '' }, true) ?? ''
+  assert.ok(long.length < SHELF_PROMPT_MAX + 500, 'the company\'s text has a limit')
+  assert.match(long, /渡していません/)
 })
 
 test('the app asks the shelf only for a company it opened as a working folder, and not on every policy answer', async () => {
@@ -381,7 +506,7 @@ test('the write guard: no AI changes what the company delivered, whatever its ro
   const guard: WriteGuard = {
     root: w.root, folderKind: 'none', getAccess: () => undefined,
     getInstructionAuthority: () => ({ role: 'owner', managedFolders: [] }),
-    getShelfPaths: () => w.store.managedPaths(w.root),
+    getShelfPaths: () => w.store.managedPaths('co', w.root),
   }
   const denied = (input: Record<string, unknown>, tool = 'Write', cwd = w.root) => decideToolWrite(guard, tool, input, cwd)
   for (const rel of ['.claude/skills/proposal/SKILL.md', '.claude/skills/proposal/new.py', '.agents/skills/proposal/SKILL.md', '.claude/rules/tone.md', '営業部/.claude/skills/visit/SKILL.md', '.CLAUDE/Skills/Proposal/SKILL.md']) {
@@ -411,7 +536,7 @@ test('the chat wiring: the guard and the turn read the shelf for a working folde
   const seen: string[] = []
   const deps = {
     workingFolders,
-    skillShelf: { managedPaths: () => ['.claude/skills/x'], turn: (root: string) => { seen.push(root); return { instructions: 'i', ruleInstructions: '' } } },
+    skillShelf: { managedPaths: () => ['.claude/skills/x'], turn: (_c: string, root: string) => { seen.push(root); return { instructions: 'i', ruleInstructions: '' } } },
     writeAccess: { refresh: async () => undefined, get: () => undefined },
     privateFolders: { refreshReadable: async () => {}, refreshAuthority: async () => {}, authority: () => undefined, readable: () => [], guardView: () => undefined },
     companyFiles: {}, claudeCli: {}, config: { load: () => ({}) }, shellEnv: { env: () => ({}) },
@@ -421,9 +546,9 @@ test('the chat wiring: the guard and the turn read the shelf for a working folde
   assert.equal(decideToolWrite(none, 'Write', { file_path: '/Users/me/作業/.claude/skills/x/SKILL.md', content: 'x' }).deny, true)
   const git = await config.getWriteGuard!('c1', '/Users/me/会社')
   assert.equal(git.getShelfPaths, undefined)
-  assert.equal(config.shelfTurn?.('/Users/me/会社', undefined), undefined)
+  assert.equal(config.shelfTurn?.('c1', '/Users/me/会社', undefined), undefined)
   assert.deepEqual(seen, [])
-  assert.equal(config.shelfTurn?.('/Users/me/作業', undefined)?.instructions, 'i')
+  assert.equal(config.shelfTurn?.('c1', '/Users/me/作業', undefined)?.instructions, 'i')
 })
 
 test('a use is reported with the shelf\'s version, `dirty` when the files differ; the member\'s own Skill is not reported; a git folder still asks git', async () => {

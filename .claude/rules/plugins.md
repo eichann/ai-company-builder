@@ -685,34 +685,48 @@ company never reaches any of it: the store knows a company only from
   `config` moves AGENTS.md but not `skills/list`: it has to be the process's `-c`.
 - **Instruction texts never become files**: `turn()` gives the company's and the shown department's
   text to `chat-server.ts`, which adds it to the system prompt (`withShelfInstructions`) for every
-  agent, but not to an unattended step (which loads no project instructions either). One path for
+  agent, but not to an unattended step (which loads no project instructions either), under a line
+  saying it never outranks the app's rules and cut at 64 K characters (`boundedShelfPrompt`). One path for
   Claude, Codex and the API-key mode, no clash with the member's own CLAUDE.md / AGENTS.md, nothing
   on disk for the AI to change, no 32 KB cut-off of Codex's `project_doc_max_bytes`. Kept in the
   manifest for offline turns; re-hashed against its version when read. Rule files are files for
   Claude Code; an agent without `capabilities.ruleFiles` gets a list of them in the prompt.
-- **Writing**: a Skill is written to `.shelf-<id>` beside `skills/` (in `.claude/` / `.agents/`:
-  same disk, not read as a Skill), then renamed in; a rule file likewise over the old one. Failure
-  or a crash leaves the last good copy (or nothing); leftovers are swept at the next sync. A link
-  on the way (`.claude` → elsewhere) refuses the write; a removal never follows one.
+- **Writing**: the item goes into the manifest **first** (`intend`), so a Skill half-placed, or an
+  app killed mid-fetch, stays managed: guarded, tried again, removed when undelivered (otherwise
+  the next sync would call it taken over and give it back). Then a Skill is written to `.shelf-<id>`
+  beside `skills/` (in `.claude/` / `.agents/`: same disk, not read as a Skill) and renamed in; a
+  rule file likewise over the old one. A target not managed is looked at again after the download.
+  Failure or a crash leaves the last good copy (or nothing); leftovers are swept at the next sync.
+  A link on the way (`.claude` → elsewhere) refuses the write; a removal never follows one.
 - **Manifest** `<userData>/skill-shelf/<company>/<hash of the folder>.json`: outside the working
-  folder so neither the AI nor a Skill's files can say what the app owns. Per folder, not per
-  account (the next account's sync removes what it should not have); `current()` hands out nothing
-  for another signed-in account.
+  folder so neither the AI nor a Skill's files can say what the app owns. Per company and folder,
+  not per account (the next account's sync removes what it should not have); nothing is handed out
+  to another signed-in account. An item read back must be what its name and place give
+  (`wellFormed`): an edited `paths` is dropped, so removal stays inside the folder. **One folder, one
+  company**: `companySetup:openWorkingFolder` refuses a folder another company uses
+  (`takenByAnother`: this run, or a manifest from an earlier one), and `turn` / `managedPaths` are
+  asked with the company.
 - **The member's own**: whatever is at a target and is not in the manifest is theirs and is never
   touched. A different content = a **clash**: the item is placed nowhere (both agents see the same
-  Skill), the panel says so (`SkillShelfMark`, 「会社と同じ名前」). The same content as the listed
+  Skill), the panel says so (`SkillShelfMark`, 「会社と同じ名前」; a rule file by a line above the
+  list, `SkillsResult.ruleClashes`). The same content as the listed
   version is taken over (a Skill just published, or a lost manifest) and, when it stops being
   delivered, given back instead of removed (`taken`).
 - **A local change** to a managed target is a difference like any other: the next fetch puts the
-  version back. `.DS_Store`, `node_modules` and the like are not content (`isNotSkillContent`):
-  never uploaded, never a change, so a Skill's installed tool survives.
+  version back. One list says what is not content, for comparing and uploading
+  (`isNotSkillContent`): sync's leftovers (`skill-leftovers.ts`: `node_modules`, `*.pyc`, `venv`,
+  `.tool-output.log`…), `.git`, `.env*` (keys never go up). A lock file or a tool's `dist/` added to
+  a Skill that did not have them (`isSkillArtifactPath`) is no change either, so running a tool
+  never wipes the folder; a real new version does replace the folder, leftovers included.
 - **Publishing** (`skillShelf:publish`, 「会社に公開」 on a local Skill at the root or directly in a
   department): the folder (no links, ≤ the limits) with `expectedVersion` = what the panel showed
   (null, or the version of the clash); the server decides, its sentence is shown as written
   (`shelfRefusalMessage`). The button is shown to everyone: who may is the server's answer. A
   company Skill changes by **「手元で直す」** (`skillShelf:editLocally`, `release`): on this
   computer it becomes the member's own (a clash that stays even while unchanged; the `.agents/` copy
-  goes), then 「会社に公開」 replaces the version they saw and the next sync takes it over.
+  goes), then 「会社に公開」 replaces the version they **started from** (`released` keeps it, a
+  colleague's newer one → 409) and the next sync takes it over. With their copy deleted, the
+  company's comes back.
 - **Use reports**: `shelfVersion` in `skill-use-reporter.ts`: the version in the `tree` field (64
   hex, the same validator), `dirty` when the files differ; a Skill not delivered is not reported.
 - Tests: `client/tests/skill-shelf.test.ts`, `client/tests/ipc-skill-shelf.test.ts`,

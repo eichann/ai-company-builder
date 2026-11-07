@@ -121,7 +121,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
           root,
           folderKind: 'none' as const,
           getAccess: () => undefined,
-          getShelfPaths: () => deps.skillShelf?.managedPaths(root) ?? [],
+          getShelfPaths: () => deps.skillShelf?.managedPaths(companyId, root) ?? [],
           getInstructionAuthority: () => deps.privateFolders.authority(companyId),
         }
       }
@@ -142,7 +142,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         getPrivateSkills: () => readLocalPrivateSkills(root),
       }
     },
-    shelfTurn: (root, departmentFolder) => (deps.workingFolders?.has(root) ? deps.skillShelf?.turn(root, departmentFolder) : undefined),
+    shelfTurn: (companyId, root, departmentFolder) => (deps.workingFolders?.has(root) ? deps.skillShelf?.turn(companyId, root, departmentFolder) : undefined),
     getBrokerEnv: async ({ agent, companyId, conversationId, department }) =>
       deps.brokerTokens ? deps.brokerTokens.envFor({ companyId, conversationId, department, reservedServices: agentBrokerReservedServices(agent) }) : {},
     // 「もう一方の AI に聞く」: the company's setting from the policy (unknown = not allowed).

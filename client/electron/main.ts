@@ -480,6 +480,7 @@ const skills = registerSkillsIpc(ipc, {
   skillRefusal: (absPath, options) => privateFolderGuards.skillRefusal(absPath, options),
   isWorkingFolder: rootPath => workingFolders.has(rootPath),
   shelfMark: (rootPath, rel) => (workingFolders.has(rootPath) ? skillShelf.markOf(rootPath, rel) : undefined),
+  shelfRuleClashes: rootPath => (workingFolders.has(rootPath) ? skillShelf.ruleClashes(rootPath) : []),
 })
 skillShelfChanged = root => skills.invalidateRoot(root)
 registerSkillShelfIpc(ipc, { paths: allowedRoots, isWorkingFolder: rootPath => workingFolders.has(rootPath), store: skillShelf, client: shelfClient })
@@ -499,7 +500,7 @@ lifecycle.beforeQuit(() => files.closeWatchers())
 
 // Setting a company folder up, and what this computer downloads
 // (features/company-setup, features/download-choices).
-registerCompanySetupIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, userDataDir, home: () => app.getPath('home'), workingFolders, onWorkingFolder: (companyId, folder) => void skillShelf.attach(companyId, folder) })
+registerCompanySetupIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, userDataDir, home: () => app.getPath('home'), workingFolders, onWorkingFolder: (companyId, folder) => void skillShelf.attach(companyId, folder), workingFolderTaken: (companyId, folder) => skillShelf.takenByAnother(companyId, folder) })
 registerDownloadChoicesIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, privateFolders: gitSync, activity: syncActivity })
 
 registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell, writeRefusal: absPath => privateFolderGuards.writeRefusal(absPath) })

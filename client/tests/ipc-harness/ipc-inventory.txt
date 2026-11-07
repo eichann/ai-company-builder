@@ -934,6 +934,7 @@ contract.type SkillInfo.shelf = shelf?: SkillShelfMark
 contract.type SkillInfo.skillPath = skillPath: string
 contract.type SkillsResult = export interface SkillsResult { }
 contract.type SkillsResult.error = error?: string
+contract.type SkillsResult.ruleClashes = ruleClashes?: string[]
 contract.type SkillsResult.skills = skills: SkillInfo[]
 contract.type SkillsResult.success = success: boolean
 contract.type SparseExclusionsResult = export interface SparseExclusionsResult { }

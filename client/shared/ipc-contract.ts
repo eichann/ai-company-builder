@@ -422,6 +422,8 @@ export interface SkillInfo {
 export interface SkillsResult {
   success: boolean
   skills: SkillInfo[]
+  /** A company without the shared folder: delivered rule files not placed (the member has a file of that name). */
+  ruleClashes?: string[]
   error?: string
 }
 

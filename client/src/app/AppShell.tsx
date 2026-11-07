@@ -220,7 +220,7 @@ export function AppShell() {
   const selectOpenFile = useCallback((path: string) => { visitFile(path); handleSelectOpenFile(path) }, [visitFile, handleSelectOpenFile])
 
   // The shown department's skills (none while it is not downloaded), and the company-wide ones for slash commands.
-  const { skills, isLoading: isLoadingSkills, refresh: refreshSkills } = useSkills({
+  const { skills, ruleClashes, isLoading: isLoadingSkills, refresh: refreshSkills } = useSkills({
     rootPath: rootPath || '',
     departmentFolder: isSelectedDeptUnsynced ? '' : effectiveDeptFolder,
     departmentId: isSelectedDeptUnsynced ? '' : (isCompanyWide ? COMPANY_TAB_ID : selectedDeptId),
@@ -532,6 +532,7 @@ export function AppShell() {
           onOpenTool={(tool, port) => skillsTab.setActiveTool({ tool, port })}
           onPublish={sharedFolder ? skillsTab.shareSkill : undefined}
           onToggleNurturing={skillsTab.toggleNurturing}
+          ruleClashes={ruleClashes}
           companyShelf={sharedFolder ? undefined : { publish: skillsTab.publishToCompany, editLocally: skillsTab.editLocally }}
         />
       ),

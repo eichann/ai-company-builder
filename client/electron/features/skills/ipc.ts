@@ -106,6 +106,8 @@ export interface SkillsDeps {
   isWorkingFolder?: (rootPath: string) => boolean
   /** In a working folder: what the Skill shelf says of the Skill folder at `rel` (client/shared/skill-shelf.ts). */
   shelfMark?: (rootPath: string, rel: string) => SkillShelfMark | undefined
+  /** In a working folder: the delivered rule files not placed because the member has a file of that name. */
+  shelfRuleClashes?: (rootPath: string) => string[]
 }
 
 /** skills:publish in a company without the shared folder. */
@@ -121,7 +123,7 @@ export interface SkillsFeature {
   invalidateRoot(rootPath: string): void
 }
 
-export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRefusal, isWorkingFolder, shelfMark }: SkillsDeps): SkillsFeature {
+export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRefusal, isWorkingFolder, shelfMark, shelfRuleClashes }: SkillsDeps): SkillsFeature {
   // Skills scans (skills:list), reused for plain tab switches (5 s) and dropped
   // as soon as a watcher event makes them stale (invalidateForChanges) or the
   // renderer forces a refresh. Keys and staleness rules: shared/skills-refresh.ts.
@@ -348,12 +350,14 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRef
       // A forced refresh (watcher event, sync, the member's own change) rescans.
       if (options?.force) invalidateSkillsCache(rootPath, departmentFolder)
       const cached = skillsCache.get(rootPath, departmentFolder)
-      if (cached) return { success: true, skills: cached }
+      const ruleClashes = shelfRuleClashes?.(rootPath) ?? []
+      const notes = ruleClashes.length > 0 ? { ruleClashes } : {}
+      if (cached) return { success: true, skills: cached, ...notes }
 
       const skills = await scanSkills(rootPath, departmentFolder, departmentId, departmentName)
       skillsCache.set(rootPath, departmentFolder, skills)
 
-      return { success: true, skills }
+      return { success: true, skills, ...notes }
     } catch (error) {
       console.error('Skills list error:', error)
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error', skills: [] }

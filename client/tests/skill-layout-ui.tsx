@@ -198,7 +198,7 @@ const api: Partial<ElectronAPI> = {
   onFileChange: () => () => {},
   listSkills: async (_root: string, folder: string, _id: string, _name?: string, options?: { force?: boolean }) => {
     record('listSkills', [folder, !!options?.force])
-    return { success: true, skills: (SKILLS[folder] ?? []).map(s => (params.get('kind') === 'none' && SHELF_MARKS[s.name] ? { ...s, shelf: SHELF_MARKS[s.name] } : s)) }
+    return { success: true, ...(params.get('kind') === 'none' ? { ruleClashes: ['tone'] } : {}), skills: (SKILLS[folder] ?? []).map(s => (params.get('kind') === 'none' && SHELF_MARKS[s.name] ? { ...s, shelf: SHELF_MARKS[s.name] } : s)) }
   },
   getWriteAccess: async () => ({ version: 'v1', role: 'member', all: false, scopes: [{ path: '', write: true }, { path: '総務', write: false }] }),
   onWriteAccessChanged: () => () => {},

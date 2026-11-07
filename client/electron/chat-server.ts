@@ -1,3 +1,4 @@
+import { boundedShelfPrompt } from '../shared/skill-shelf'
 import { aiTurnStepAllowsRecordCall, aiTurnStepAllowsRecordTool, aiTurnStepCreateTypes, aiTurnStepDefinition, isAiTurnStep } from '../shared/ai-turn-steps/registry'
 import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
 import { narrowCreateTypes, type RecordTools } from './records/tools'
@@ -127,7 +128,7 @@ export interface ChatServerConfig extends AgentHost {
   getAuthMode: () => AuthMode
   buildSystemPrompt: (workingDirectory?: string) => string
   /** A working folder's turn: the delivered instruction texts and where Codex's project root is (features/skill-shelf/store.ts `turn`). */
-  shelfTurn?: (root: string, departmentFolder: string | undefined) => { instructions: string; ruleInstructions: string; rootMarker?: string } | undefined
+  shelfTurn?: (companyId: string, root: string, departmentFolder: string | undefined) => { instructions: string; ruleInstructions: string; rootMarker?: string } | undefined
   /**
    * The write guard for a chat in this company (write-guard.ts): refreshes the
    * member's write access (short timeout, cached answer on failure) and
@@ -198,7 +199,8 @@ export function externalRepositoryInstruction(companyRootPath?: string): string 
  */
 /** The system prompt with what the company delivered: its texts for every agent, the rule files for one that does not load them. */
 export function withShelfInstructions(prompt: string | undefined, shelf: { instructions: string; ruleInstructions: string } | undefined, agentLoadsRuleFiles: boolean): string | undefined {
-  const parts = [prompt, shelf?.instructions, agentLoadsRuleFiles ? '' : shelf?.ruleInstructions].filter(Boolean)
+  const delivered = [shelf?.instructions, agentLoadsRuleFiles ? '' : shelf?.ruleInstructions].filter(Boolean).join('\n\n')
+  const parts = [prompt, delivered && boundedShelfPrompt(delivered)].filter(Boolean)
   return parts.length > 0 ? parts.join('\n\n') : undefined
 }
 
@@ -380,7 +382,7 @@ export async function startChatServer(config: ChatServerConfig) {
 
     // A company without the shared folder (plugins.md "The Skill shelf in the app"): its AI instruction
     // texts go with the system prompt, for every agent. An unattended step loads no project instructions.
-    const shelf = !aiTurnStep && companyRootPath ? config.shelfTurn?.(companyRootPath, activeDepartment?.folder) : undefined
+    const shelf = !aiTurnStep && companyRootPath && companyId ? config.shelfTurn?.(companyId, companyRootPath, activeDepartment?.folder) : undefined
     finalSystemPrompt = withShelfInstructions(finalSystemPrompt, shelf, can.ruleFiles)
 
     // A different provider/model starts from visible history, never an older native session.
