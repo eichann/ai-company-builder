@@ -852,7 +852,10 @@ GET     /records/item/:recordId    any member: the record + its readable links (
 
 - **No leaks** (0.13-1, 4-2): a record is readable exactly when its file is (`resolveAccess`
   read; inside a private folder also `canReadPrivateScope`), a server-only record when its
-  folder is (none = everyone) — and an owner-only record by its owner alone, a members-only record
+  folder is (none = everyone; in a company without the shared folder a read-restricted place —
+  a department or a place inside one, people / groups / departments named by its rules — gates it
+  like a private folder: `server.md` "Groups and read-restricted places") — and an owner-only
+  record by its owner alone, a members-only record
   by its listed members alone ("Owner-only records", "Members-only records" below). Answers, `total`, link lists and traversals all apply it, so an
   unreadable private record is identical to a nonexistent one (same 404 body). `total` counts up
   to `MAX_CANDIDATES` (20,000) rows.
@@ -1004,8 +1007,10 @@ owner-only one, before every role or folder rule).
   mail's record is restricted; `outbound-mail.ts`) and the inbox's 返事のお願い (`inbox.ts`). Copying
   `folder` alone would place it company-wide.
 - **Elsewhere**: the inbox joins a message to a members-only やりとり's thread only when it reached
-  someone on the list (`inbox.md`); a members-only (or owner-only) meeting is not named in the note
-  of its まとまり's step move (`plugin-steps.ts`, 「会議を読んだあと」).
+  someone on the list (`inbox.md`); a members-only (or owner-only) meeting, or one inside a private
+  folder or a read-restricted place, is not named in the note of its まとまり's step move
+  (`plugin-steps.ts`, 「会議を読んだあと」).
+
 - 見られる人 (`services/viewers.ts`): judged by its own list before the per-place cache (every such
   record has folder null; the cache would hand one record's readers to another), with the existing
   phrases (「あなただけ」「あなたと〇〇さん」「N人が見られます」…), names only to listed callers.

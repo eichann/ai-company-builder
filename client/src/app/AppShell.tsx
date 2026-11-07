@@ -96,6 +96,10 @@ import { usePluginScreens } from '../features/plugins/hooks/usePluginScreens'
 import { LazyPluginFileActionDialog as PluginFileActionDialog } from '../features/plugins/components/LazyPluginSlots'
 import { pluginSlots, type FileActionOpen } from './pluginSlots'
 import { companyHasSharedFolder } from '../../shared/company-folder'
+import { closeStopsTheAI } from '../../shared/chat-windows'
+import { someConsultationStatus } from '../features/chat/consultationStatusStore'
+import { useCompanySwitch } from '../features/company/hooks/useCompanySwitch'
+import { CompanySwitcher } from '../features/company/components/CompanySwitcher'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -276,6 +280,15 @@ export function AppShell() {
     }
   }, [leaving, signOut, signedInUserId])
   const { handleSync } = sync
+
+  // The title bar's company switch: waits for a running sync, asks before stopping an AI at work, saves every tab.
+  const companySwitch = useCompanySwitch({
+    currentId: currentCompany?.id,
+    userId: signedInUserId,
+    isSyncing: sync.isSyncing,
+    aiWorking: () => someConsultationStatus(closeStopsTheAI),
+    saveTabs: leaving.confirmLeave,
+  })
 
   // 「自動で受け取る」 / 「自動で送る」 while the app is open (Settings → 自動同期).
   const autoSync = useAutoSync({
@@ -613,6 +626,18 @@ export function AppShell() {
         onShowBackups={() => setShowBackupHistory(true)}
         onShowSettings={() => setShowSettings(true)}
         onLogout={() => { void handleLogout() }}
+        companySwitcher={currentCompany ? (
+          <CompanySwitcher
+            companyName={currentCompany.name}
+            shown={companySwitch.shown}
+            targets={companySwitch.targets}
+            onSwitch={company => { void companySwitch.switchTo(company) }}
+            question={companySwitch.question}
+            onAnswer={companySwitch.answer}
+            waitingForSync={companySwitch.waitingForSync}
+            onStopWaiting={companySwitch.stopWaiting}
+          />
+        ) : undefined}
         extra={minutes.available && features.meetings && currentCompany ? <MinutesCheckButton companyId={currentCompany.id} /> : undefined}
         notices={currentCompany ? (
           <TitleBarNotices

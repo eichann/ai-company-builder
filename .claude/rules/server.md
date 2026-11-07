@@ -429,7 +429,9 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   like one that exists nowhere — and a trigger refuses a row naming another company's
   department or none; who belongs is read from `department_members` with the rules as
   `memberIds`, never stored on the rule; deleting the department deletes the rules naming it;
-  labelled 「〇〇に所属する人」), `user`. Managers (`departments/:id/managers`) may manage their
+  labelled 「〇〇に所属する人」), `group` (見える人のまとまり, only without the shared folder: "Groups
+  and read-restricted places"), `user`. Managers (`departments/:id/managers`) may manage their
+
   departments' private folders and instruction files, and the skill files in their departments.
 - 「Skill を直せる人」 (`skill_editors`, `department_id` NULL = the whole company; `ScopeRepository`,
   `departments.replaceSkillEditors`, `permissionViews.skillEditing`): who else may change skill
@@ -510,18 +512,17 @@ never a stand-in that pretends a repository exists. For `none`:
 - 409 `NO_COMPANY_FOLDER`: `POST /private-folders`, `/files/*`, `/folder-sizes`,
   `/api/git/repos/:companyId`. git-http answers 404 for the company and its scope repositories
   (like a missing repository, before the membership check), whatever is on disk.
-- Permission rules take the company and its departments only (`/permissions/folders` lists the
-  departments, nothing inside them). Record places: departments; file links refused (`records.md`).
+- Permission rules take the company, its departments and places named inside them (scope rows only:
+  `/permissions/folders` lists the departments, and inside one the places below it that have rules;
+  a path in no department is not found). Record places: departments and paths below them; file
+  links refused (`records.md`). Read restriction: "Groups and read-restricted places" below.
 - Company Skills (plugin steps' `company_skill`) are none (`STEP_SKILL_MISSING`); company types from
   `.acb/types/` none.
-- **Gap today**: read restriction exists only through private folders, so nothing can restrict who
-  reads a `none` company's department records (`POST /permissions/rules` with `canRead: false`
-  → 400 `READ_RESTRICTION_UNAVAILABLE`); only owner-only and members-only records are narrower. A
-  read-restricted place without git (per department / place, people or groups) and the department
-  visibility editor are the next work, before a `none` company is used for real (owner 2026-11-07).
-  File links on records will be a Drive (later OneDrive) file id + revision + fingerprint, or an
-  owner-only local link — no general upload.
-- Admin console: 「会社を作成」 asks 「全社フォルダ」 (使う（今までどおり）／使わない; `admin/src/lib/company-folder.ts`);
+- Read restriction without git: "Groups and read-restricted places" below (API only so far — the
+  admin console's place visibility editor is the next work). File links on records will be a Drive
+  (later OneDrive) file id + revision + fingerprint, or an owner-only local link — no general upload.
+- Admin console: 「会社を作成」 asks 「全社フォルダ」 (使う（今までどおり）／使わない; `admin/src/lib/company-folder.ts`;
+  one hint under it, `FOLDER_KIND_HINT`: sharing files through ACB or already elsewhere, and final);
   for `none` the menu has no 「フォルダ」 (the page, reached by URL, says why) and 「部署」 no
   「フォルダを取り込む」. Texts that speak of files being synced or downloaded have a `none` version
   (`NO_FOLDER_WORDS`, owner 2026-11-07): the invitation's 「所属する部署」 (the department is for
@@ -533,6 +534,64 @@ never a stand-in that pretends a repository exists. For `none`:
   `sync.md` "Companies without the shared company folder".
 - Test: `tests/integration/company-without-folder.test.ts`, `tests/unit/company-folder-kind-migration.test.ts`,
   `admin/tests/company-without-folder.test.tsx`.
+
+## Groups and read-restricted places (見える人のまとまり, owner decisions 2026-11-07)
+
+Who reads a department (or a place inside one) of a company **without** the shared folder, with
+groups as a way to name the people. Companies with the shared folder are unchanged (read
+restriction there stays private folders; groups cannot be named in their rules).
+
+- **Groups** (`member_groups`, `member_group_members`; port `ports/groups.ts`, handle `groups`,
+  `adapters/sqlite/groups.ts`; `services/groups.ts`, `routes/groups.ts`; contract
+  `shared/types/groups.ts`): `GET|POST /groups`, `PATCH|DELETE /groups/:groupId`, `PUT
+  /groups/:groupId/members { userIds }`. **Owners/admins only** — a member or a department manager
+  gets 403 and no group name (nothing a member does needs one yet). A name once per company
+  (`nameKey`, 409 `GROUP_NAME_TAKEN`, Japanese `error`), 1–40 characters (400 `BAD_GROUP_NAME`);
+  members of the company only (400 `BAD_MEMBER`); ≤ 200 groups, ≤ 1000 members. A group holds
+  exactly the members put in it (owners/admins are not added by themselves — they read everything
+  anyway), never another group. Deleting one a rule names → 409 `GROUP_IN_USE` with `places` (the
+  paths; owners/admins read all) — a place's readers change in the place, on purpose. Leaving the
+  company takes the member out of every group (`removeMember`). Another company's group id = a
+  group that does not exist (permission matrix rows + `CROSS`). Admin console: 「見える人のまとまり」
+  (`/companies/:id/groups`, linked from 「メンバー」; `admin/src/components/groups/groups-page.tsx`).
+- **The subject `group`** (`shared/core/permissions.ts`): `memberIds` read with the rules (absent =
+  nobody), so a change of who is in a group applies at once. **Precedence**: user > (department ∪
+  group: one level, unioned) > role > everyone — both are "a set of people", and putting someone
+  into a group never takes away what their department gives on the same place; narrowing one person
+  stays a user rule. `scope_rules`' CHECK gained `'group'` (`migrateGroupRuleSubject`: one rebuild,
+  rows kept; triggers `scope_rules_group_insert|update` keep a group rule naming a group of its own
+  company). `parseSubject` takes a group only without the shared folder (400 `Groups can be named
+  only…`) and only from owners/admins. `bundle-place.ts` asks each group member as a representative.
+- **Read-restricted places** (`ScopeWithRules.readRestricted`, filled by the permission store: a
+  scope of a `none` company whose `everyone` rule denies read; never for a `git` company, whatever
+  its rows say): `PUT /permissions/scopes/by-path` (and the per-rule routes) accept `canRead:
+  false` on a department or a place inside one (`readRestrictable`; the company root still 400
+  `READ_RESTRICTION_UNAVAILABLE`); a rule that edits must also read (400 `WRITE_NEEDS_READ`). Like a
+  private folder, such a place **gates** everything inside it (`isGate`, resolveAccess step 5: a
+  deeper rule narrows, never widens); owners/admins always read. Records placed there are read by
+  its readers only — through `recordReader`, so every listing applies it (`records.md` "No
+  leaks"). The outdated-app guard does not run for a `none` company (nobody pushes).
+- **Only owners/admins change who reads** (owner decision 3): a manager's rule set that denies read
+  anywhere, and any edit at or inside a read-restricted place (`canEditPath` refuses it), → 403
+  `READERS_OWNER_ONLY`; a manager may take people off a department whose rule lets them read a
+  restricted place, not add them (403 `READERS_OWNER_ONLY`, `task-settings.ts`); a department
+  holding a restricted place cannot be deleted (409 `RESTRICTED_PLACES_INSIDE`: its records would
+  fall back to the company's rules).
+- **Names never leak** (as private folders, `private-folders.md`): `/me/write-access`
+  (`writeAccessSummary` hides every unreadable gate), a manager's `/permissions` (unreadable
+  restricted places and what is inside them left out) and `/permissions/folders` (nothing at or
+  inside one for a manager) never name a place the caller cannot read; placing a record there
+  answers the same `FOLDER_NOT_PLACEABLE` as a place that does not exist; a meeting inside a gate is
+  not named in its まとまり's step note (`plugin-steps.ts`). Department names stay visible to
+  every member (they are the organisation, already in invitations and 所属): a restricted
+  department hides its records and the places inside it, not its own name.
+- **Audit**: every change of groups and of rules through the permission editor goes to
+  `permission_history` (append-only: action, who, when, detail JSON — the group's name / members,
+  or each place's rules before and after). No endpoint reads it yet. Private-folder member changes
+  (`PUT /private-folders/:id/members`) and 所属 changes are not recorded there.
+- Tests: `tests/unit/permissions-groups.test.ts`, `tests/integration/restricted-places.test.ts`
+  (each guard mutation-checked), `company-without-folder.test.ts`, `plugin-steps.test.ts` (the note),
+  permission matrix + `CROSS`, `admin-contract.test.ts`, `admin/tests/groups.test.tsx`.
 
 ## Admin home
 

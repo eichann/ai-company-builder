@@ -8,7 +8,7 @@
  * every member who reads the task also reads the まとまり. An owner-only task is never wider (the
  * owner wants personal tasks linkable to a project). Rather than walk every membership, it asks a
  * set of representatives that covers every distinct answer the readers can give: everyone a rule,
- * a department rule or either record's list names, plus one plain member and one owner/admin that
+ * a department or group rule or either record's list names, plus one plain member and one owner/admin that
  * nothing names (any other member reads exactly what one of those two reads).
  */
 import type { ScopeWithRules } from '../../../shared/core/permissions'
@@ -50,7 +50,7 @@ export function placeWithin(
   for (const s of scopes) {
     for (const r of s.rules) {
       if (r.subjectType === 'user' && r.subjectId) named.add(r.subjectId)
-      if (r.subjectType === 'department') for (const id of r.memberIds ?? []) named.add(id)
+      if (r.subjectType === 'department' || r.subjectType === 'group') for (const id of r.memberIds ?? []) named.add(id)
     }
   }
   for (const id of [...(task.members ?? []), ...(bundle.members ?? []), bundle.personalOwner]) if (id) named.add(id)

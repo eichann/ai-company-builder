@@ -57,6 +57,11 @@ const KNOWN_MESSAGES: Array<[RegExp, string]> = [
   [/invitation.*(expired|used|invalid|not found)/i, 'この招待リンクは無効か、有効期限が切れています。管理者に新しいリンクを依頼してください。'],
 ]
 
+/** Error codes whose `error` the server writes in Japanese for the person (shown as is). */
+const JAPANESE_CODES: ReadonlySet<string> = new Set([
+  'GROUP_NAME_TAKEN', 'BAD_GROUP_NAME', 'GROUP_IN_USE', 'RESTRICTED_PLACES_INSIDE', 'READERS_OWNER_ONLY',
+])
+
 /** A Japanese sentence explaining a failed request and the next step. */
 export function describeError(err: unknown): string {
   if (err instanceof ApiError) {
@@ -68,6 +73,8 @@ export function describeError(err: unknown): string {
     if (err.code === 'FOLDER_NAME_UNAVAILABLE' && err.message) return err.message
     // Japanese already (server/src/services/companies.ts COMPANY_CREATION_FORBIDDEN, COMPANY_CREATION_FAILED).
     if ((err.code === 'COMPANY_CREATION_RESTRICTED' || err.code === 'COMPANY_CREATION_FAILED') && err.message) return err.message
+    // Japanese already (server/src/services/groups.ts, departments.ts, task-settings.ts: 見える人のまとまり).
+    if (err.code && JAPANESE_CODES.has(err.code) && err.message) return err.message
     for (const [re, msg] of KNOWN_MESSAGES) {
       if (re.test(err.message)) return msg
     }

@@ -5,7 +5,8 @@
  * department folder, or any other folder inside the company repository. A
  * *rule* on a scope grants read and/or write to a subject: everyone in the
  * company, a role (owner / admin / member), the people who belong to one
- * department (所属, department_members), or one user.
+ * department (所属, department_members), the members of one group (見える人の
+ * まとまり, member_groups), or one user.
  *
  *   scopes        (company_id, path)  kind company | department | folder
  *   scope_rules   (scope_id, subject_type, subject_id, can_read, can_write)
@@ -20,12 +21,16 @@
  *      original fully-open behaviour.)
  *   3. Evaluate only that scope's rules, by precedence:
  *        user rules for this user  >  department rules of a department the
- *        user belongs to  >  role rules for the user's role  >  everyone
- *      The most specific subject type that has at least one matching rule
- *      decides; several matching rules of that type are unioned. So a user rule
- *      can narrow (or widen) what `everyone` gets on the same scope, and a
- *      department rule gives the people who belong to it more (or less) than
- *      everyone else.
+ *        user belongs to AND group rules of a group the user is in (one
+ *        level, unioned)  >  role rules for the user's role  >  everyone
+ *      The most specific level that has at least one matching rule decides;
+ *      several matching rules of that level are unioned. So a user rule can
+ *      narrow (or widen) what `everyone` gets on the same scope, and a
+ *      department or group rule gives the people in it more (or less) than
+ *      everyone else. Groups share the department's level instead of sitting
+ *      above it: both are "a set of people", and putting someone into a group
+ *      never takes away what their department gives them on the same place;
+ *      narrowing one person stays a user rule (groups PR, 2026-11-07).
  *
  * A department rule names the department (subjectId = department id); who
  * belongs is not stored on the rule but resolved when the rules are read
@@ -34,7 +39,16 @@
  * who it grants, and nothing can drift. A department rule without `memberIds`
  * matches nobody. A new department (POST /departments) starts with
  * `everyone: read` + `department: read + write` (server/src/services/departments.ts).
+ * A group rule works the same way: subjectId = group id, `memberIds` = the
+ * group's members now (member_group_members), absent = nobody. A group holds
+ * exactly the members put in it (owners/admins are not added by themselves —
+ * they read everything anyway) and never another group.
  *   4. If nothing there grants anything, deny (reason 'no-rule').
+ *   5. Gates (narrow only): a PRIVATE folder (`repoId`) and a READ-RESTRICTED
+ *      place (`readRestricted`, a company without the shared folder) gate
+ *      everything inside them: read/write at a deeper path also needs read of
+ *      every gate at or above it, so a rule deeper inside can narrow, never
+ *      widen.
  *
  * Being a department manager (department_managers) grants NO file access in
  * Phase 1: management rights (who may edit a department's rules — Phase 2) are
@@ -50,18 +64,19 @@ import { compareScopePaths, isSameOrAncestorPath, normalizeRepoPath } from './pa
 import type { WriteAccessScope } from './write-access'
 
 export type ScopeKind = 'company' | 'department' | 'folder'
-export type SubjectType = 'everyone' | 'role' | 'department' | 'user'
+export type SubjectType = 'everyone' | 'role' | 'department' | 'group' | 'user'
 
 export interface ScopeRule {
   id: string
   subjectType: SubjectType
-  /** Role name for 'role', department id for 'department', user id for 'user', null for 'everyone'. */
+  /** Role name for 'role', department id for 'department', group id for 'group', user id for 'user', null for 'everyone'. */
   subjectId: string | null
   canRead: boolean
   canWrite: boolean
   /**
-   * 'department' only: the user ids that belong to the department (所属),
-   * resolved from department_members when the rules are read. Absent = nobody.
+   * 'department' / 'group' only: the user ids that belong to the department
+   * (所属, department_members) or are in the group (member_group_members),
+   * resolved when the rules are read. Absent = nobody.
    */
   memberIds?: readonly string[]
 }
@@ -77,6 +92,16 @@ export interface ScopeWithRules {
    * who may read this scope; the path is reserved in the main repository.
    */
   repoId: string | null
+  /**
+   * A read-restricted place of a company WITHOUT the shared folder (no
+   * repository: places are scope rows only, and read restriction decides who
+   * sees the records placed there). Filled by the permission store: true only
+   * for such a company's scope whose `everyone` rule denies read — never for a
+   * company with the shared folder (there read restriction is private folders
+   * only). Like a private folder it gates everything inside it (resolveAccess
+   * step 5), and its name is not shown to who cannot read it. Absent = false.
+   */
+  readRestricted?: boolean
   rules: ScopeRule[]
 }
 
@@ -130,8 +155,9 @@ export function findGoverningScope<T extends { path: string; rules: unknown[] }>
 export function applicableRules(rules: ScopeRule[], userId: string, role: string): ScopeRule[] {
   const userRules = rules.filter(r => r.subjectType === 'user' && r.subjectId === userId)
   if (userRules.length > 0) return userRules
-  const departmentRules = rules.filter(r => r.subjectType === 'department' && (r.memberIds ?? []).includes(userId))
-  if (departmentRules.length > 0) return departmentRules
+  // One level for the sets of people: the departments the user belongs to and the groups they are in.
+  const setRules = rules.filter(r => (r.subjectType === 'department' || r.subjectType === 'group') && (r.memberIds ?? []).includes(userId))
+  if (setRules.length > 0) return setRules
   const roleRules = rules.filter(r => r.subjectType === 'role' && r.subjectId === role)
   if (roleRules.length > 0) return roleRules
   return rules.filter(r => r.subjectType === 'everyone')
@@ -160,20 +186,51 @@ export function resolveAccess(
   const rules = applicableRules(scope.rules, userId, role)
   let read = rules.some(r => r.canRead)
   let write = rules.some(r => r.canWrite)
-  // Inside a private folder, its own rules decide who gets the repository at
-  // all: a rule deeper inside can narrow access, never widen it past them.
-  // A private scope without rules (never stored, but never inherit) denies.
-  const priv = findPrivateScope(scopes, normalized)
-  if (priv && priv.id !== scope.id) {
-    const rootRead = priv.rules.length > 0 && applicableRules(priv.rules, userId, role).some(r => r.canRead)
-    read = read && rootRead
-    write = write && rootRead
+  // Inside a private folder its own rules decide who gets the repository at
+  // all; inside a read-restricted place, who reads it. A rule deeper inside
+  // can narrow access, never widen it past them. A gate without rules (a
+  // private scope is never stored so; it never inherits) denies.
+  for (const gate of scopes) {
+    if (gate.id === scope.id || !isGate(gate) || !isSameOrAncestorPath(gate.path, normalized)) continue
+    const gateRead = gate.rules.length > 0 && applicableRules(gate.rules, userId, role).some(r => r.canRead)
+    read = read && gateRead
+    write = write && gateRead
   }
   return {
     read,
     write,
     source: { scopeId: scope.id, path: scope.path, reason: read || write ? 'rule' : 'no-rule' },
   }
+}
+
+/**
+ * Does this scope gate everything inside it (resolveAccess step 5)? A private
+ * folder, or a read-restricted place of a company without the shared folder.
+ */
+export function isGate(scope: { repoId: string | null; readRestricted?: boolean }): boolean {
+  return scope.repoId !== null || scope.readRestricted === true
+}
+
+/**
+ * May this member read the gate itself (owner/admin always)? For a private
+ * folder it is canReadPrivateScope. Who cannot is not to learn its name
+ * (owner decision B; read-restricted places: groups PR, 2026-11-07).
+ */
+export function canReadGate(scope: ScopeWithRules, userId: string, role: string): boolean {
+  if (FULL_ACCESS_ROLES.has(role)) return true
+  return scope.rules.length > 0 && applicableRules(scope.rules, userId, role).some(r => r.canRead)
+}
+
+/**
+ * The scopes a member may know of: every scope except those at or under a
+ * gate (private folder, read-restricted place) the member cannot read. What
+ * lists places to a member filters through it, so an unreadable place's name
+ * never reaches them.
+ */
+export function scopesKnownTo<T extends ScopeWithRules>(scopes: T[], userId: string, role: string): T[] {
+  if (FULL_ACCESS_ROLES.has(role)) return scopes
+  const hidden = scopes.filter(s => isGate(s) && !canReadGate(s, userId, role))
+  return scopes.filter(s => !hidden.some(h => isSameOrAncestorPath(h.path, s.path)))
 }
 
 /** The private scope at or above `path`, or null (private folders do not nest). */
@@ -248,9 +305,11 @@ export function writeAccessSummary(scopes: ScopeWithRules[], userId: string, rol
   // Private folders the member cannot read are left out entirely — their
   // names are not to be revealed (the member's push there is refused as
   // [RESERVED_PATH] anyway). Inside a readable one, write also needs read of
-  // the private folder itself (resolveAccess).
-  const readablePrivate = scopes.filter(s => s.repoId !== null && canReadPrivateScope(s, userId, role))
-  const hidden = scopes.filter(s => s.repoId !== null && !readablePrivate.includes(s))
+  // the private folder itself (resolveAccess). The same for a read-restricted
+  // place (a company without the shared folder has no files to write there,
+  // but the place's name is not to be revealed either).
+  const hidden = scopes.filter(s => isGate(s) && !canReadGate(s, userId, role))
+
   const decided = scopes
     .filter(s => s.rules.length > 0 && !hidden.some(h => isSameOrAncestorPath(h.path, s.path)))
     .map((s): WriteAccessScope => ({

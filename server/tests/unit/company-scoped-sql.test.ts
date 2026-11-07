@@ -63,6 +63,10 @@ const HANDLE_TABLES: Record<string, string[]> = {
   department_managers: ['adapters/sqlite/permission-store.ts', 'db/schema/permissions.ts'],
   scope_repos: ['adapters/private-folders.ts'],
   private_folder_archives: ['adapters/private-folders.ts'],
+  // 見える人のまとまり and who changed groups / rules (server.md "Groups").
+  member_groups: ['adapters/sqlite/groups.ts'],
+  member_group_members: ['adapters/sqlite/groups.ts'],
+  permission_history: ['adapters/sqlite/groups.ts'],
   orphaned_scopes: ['adapters/orphaned-scopes.ts'],
   // The company map (records.md). record-contents.ts: the startup move of older texts into the content store.
   record_settings: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
@@ -160,6 +164,7 @@ const HANDLE_FACTORIES = [
   'sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository', 'sqliteConnectorRepository', 'sqliteGoogleDriveRepository', 'sqliteOutboundMailRepository', 'sqliteFixedPayloadRepository',
   'sqliteSecondOpinionSettingRepository',
   'sqliteSecurityAlertRepository',
+  'sqliteGroupRepository', 'sqlitePermissionHistoryRepository',
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // lane A ▲

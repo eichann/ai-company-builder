@@ -15,6 +15,10 @@ paths:
   - "client/src/shared/lib/download-selection.ts"
   - "client/src/features/company/folderPlan.ts"
   - "client/src/features/company/restore-company.ts"
+  - "client/src/features/company/reopen.ts"
+  - "client/src/features/company/switching.ts"
+  - "client/src/features/company/hooks/useCompanySwitch.ts"
+  - "client/src/features/company/components/CompanySwitcher.tsx"
   - "client/src/shared/hooks/useSparseCheckout.ts"
   - "client/src/shared/lib/exclusionChanges.ts"
   - "client/src/features/sync/hooks/useDepartmentDownload.ts"
@@ -76,6 +80,23 @@ Background and the rejected cone-mode design: `docs/architecture/download-choice
 - After login the remembered company (`localStorage lastCompany:<userId>`) opens directly:
   `src/features/company/restore-company.ts` registers its folder as an allowed root **before** `fs:exists`
   (main answers only for registered roots; checking first always said "missing").
+- **Switching company from the title bar** (staging 2026-11-07: signing out and in reopened the
+  last company, so a member of two could not reach the other). For a member of two or more
+  companies (`GET /api/companies`) the company's name in the title bar opens a menu of the others
+  (`components/CompanySwitcher.tsx`, `hooks/useCompanySwitch.ts`; when it may go ahead is
+  `switching.ts`, pure): a running sync of the company on screen (`useSync`'s `isSyncing`, also set
+  by automatic 送る) is never left half-way — 「同期の途中です」 asks 終わったら切り替える (waits,
+  「やめる」 gives up) / 切り替えない; an AI that works or waits for an answer (`closeStopsTheAI`)
+  asks first (switching stops it, as closing its window would); every tab is saved
+  (`useSaveBeforeLeaving`); the open's checks run, and the switch happens only if no sync started
+  meanwhile. Every company opened is remembered per member (`companyFolder:<userId>:<companyId>`,
+  App.tsx) and reopens through the same checks as after sign-in (`reopen.ts` over
+  `restore-company.ts`: access, folder registered, exists, `none` working folder, kind from the
+  server). Not remembered, or `forget` → the selector starts at that company's folder choice
+  (`appStore.chooseCompany` / `companyToChoose`; never a download in a default place by itself).
+  `App.tsx` keys `AppShell` by company id, so nothing of the last company's screen stays mounted.
+  Tests: `src/features/company/switching.test.ts`, `tests/ui/company-switcher.spec.ts`,
+  `company-selector.spec.ts` 「switched to from the title bar…」.
 
 ## Partial clone
 

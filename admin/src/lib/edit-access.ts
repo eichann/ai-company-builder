@@ -72,7 +72,8 @@ export function draftFromRules(rules: PermissionRule[]): { draft: AccessDraft; c
     : {
         mode: 'specific',
         editors: rules
-          .filter((r) => r.subjectType !== 'everyone' && r.canWrite)
+          // A group rule (only without the shared folder) is no choice of this editor: 個別の設定 below.
+          .filter((r) => r.subjectType !== 'everyone' && r.subjectType !== 'group' && r.canWrite)
           .map((r): Editor =>
             r.subjectType === 'role'
               ? ROLE_MEMBER_EDITOR
@@ -81,6 +82,7 @@ export function draftFromRules(rules: PermissionRule[]): { draft: AccessDraft; c
       }
   const custom =
     everyone.length === 0 ||
+    rules.some((r) => r.subjectType === 'group') ||
     rules.some((r) => r.subjectType === 'role' && r.subjectId !== 'member') ||
     rules.some((r) => r.subjectType !== 'everyone' && r.canWrite !== grants(draft, r))
   return { draft, custom }
@@ -108,8 +110,8 @@ export function rulesAsInputs(rules: PermissionRule[]): RuleInput[] {
       ? { subjectType: 'everyone', subjectId: null, canWrite: r.canWrite }
       : r.subjectType === 'role'
         ? { subjectType: 'role', subjectId: 'member', canWrite: r.canWrite }
-        : r.subjectType === 'department'
-          ? { subjectType: 'department', subjectId: r.subjectId ?? '', canWrite: r.canWrite }
+        : r.subjectType === 'department' || r.subjectType === 'group'
+          ? { subjectType: r.subjectType, subjectId: r.subjectId ?? '', canWrite: r.canWrite }
           : { subjectType: 'user', subjectId: r.subjectId ?? '', canWrite: r.canWrite }
   )
 }
@@ -128,6 +130,7 @@ export function subjectName(
     const name = departments?.name(s.subjectId ?? '')
     return name !== undefined || !s.subjectLabel ? departmentEditorName(name) : s.subjectLabel
   }
+  if (s.subjectType === 'group') return s.subjectLabel || '見える人のまとまり'
   const m = members.find((x) => x.userId === s.subjectId)
   return m ? memberName(m) : s.subjectLabel || '（退会したメンバー）'
 }
@@ -169,7 +172,10 @@ export function previewAccess(
     canWrite: r.canWrite,
     ...(r.subjectType === 'department'
       ? { memberIds: ('memberIds' in r && r.memberIds) || departments?.memberIds(r.subjectId ?? '') || [] }
-      : {}),
+      : r.subjectType === 'group'
+        ? { memberIds: ('memberIds' in r && r.memberIds) || [] }
+        : {}),
+
   }))
   const scope: ScopeWithRules = { id: 'preview', path: decidingPath, kind: 'folder', departmentId: null, repoId: null, rules: scopeRules }
   return members.map((m) => {

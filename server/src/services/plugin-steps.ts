@@ -41,6 +41,7 @@ import {
 import { MEETING_BUNDLE_LINKED_ACTION } from '../../shared/core/minutes'
 import { automaticStepCeiling, deliverableFolderOf, deliverableFolderProblem } from '../../shared/core/plugin-step-runs'
 import { RECORD_ID_RE } from '../../shared/core/records'
+import { isGate, isSameOrAncestorPath } from '../../shared/core/permissions'
 import type { PluginStepContinuationView, PluginStepOnRecord, PluginStepSkillsView, PluginStepStartView, PluginStepTurn, PluginStepView } from '../../shared/types/plugins'
 import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -325,8 +326,12 @@ export function createPluginStepService(deps: PluginStepDeps) {
       if (moves.length !== 1) return
       const row = handle.records.byIds([done.recordId])[0]
       // The まとまり's readers see this note: an owner-only or members-only meeting is not named there
-      // (records.md "Members-only records" — its title and id stay with its own readers).
-      const restricted = !row || row.personalOwner !== null || row.members !== null
+      // (records.md "Members-only records" — its title and id stay with its own readers), nor one
+      // inside a private folder or a read-restricted place (server.md "Groups": its readers may be
+      // fewer than the まとまり's; the name is left out even when they are the same people).
+      const place = row ? (row.path ?? row.folder ?? '') : ''
+      const gated = !!row && place !== '' && handle.scopes.listWithRules().some(s => isGate(s) && isSameOrAncestorPath(s.path, place))
+      const restricted = !row || row.personalOwner !== null || row.members !== null || gated
       const note = restricted ? '会議を読んだあと' : `会議「${row.title.slice(0, 80)}」（${done.recordId}）を読んだあと`.slice(0, 200)
       // A person's choice moves it as their AI too: the step it leads to is the AI's turn.
       const ai: ActorInput = actor.kind === 'ai' ? actor : { kind: 'ai', conversationId: null, runId: null }

@@ -11,7 +11,9 @@ import type { MembershipRepository } from '../ports/memberships'
 import type { PushRejectionRepository } from '../ports/push-rejections'
 import { computeAttention, type OverviewMember } from '../lib/overview'
 import {
+  canReadGate,
   compareScopePaths,
+
   findGoverningScope,
   FULL_ACCESS_ROLES,
   isSameOrAncestorPath,
@@ -22,7 +24,7 @@ import {
 } from '../../shared/core/permissions'
 import type { SkillEditing } from '../../shared/core/skill-files'
 import type { Member } from './access'
-import { departmentSubjectLabel } from './permission-editor'
+import { departmentSubjectLabel, groupSubjectLabel } from './permission-editor'
 import { ok, refuse, type Outcome } from './outcome'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -128,7 +130,10 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
           return refuse('forbidden', 'Only owners, admins and department managers can view permissions')
         }
         const roots = all.filter(s => s.departmentId !== null && managed.has(s.departmentId)).map(s => s.path)
-        visible = all.filter(s => roots.some(root => isSameOrAncestorPath(root, s.path)))
+        // A read-restricted place (no shared folder) the manager cannot read, and every rule inside
+        // it, is left out: its name is not theirs to learn (server.md "Groups").
+        const hidden = all.filter(s => s.readRestricted === true && !canReadGate(s, member.userId, member.role))
+        visible = all.filter(s => roots.some(root => isSameOrAncestorPath(root, s.path)) && !hidden.some(h => isSameOrAncestorPath(h.path, s.path)))
       }
 
       // What each scope would follow without rules of its own ("上の階層と同じ"):
@@ -143,10 +148,12 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
       }
       const users = accounts.byIds([...userIds])
       const departmentNames = new Map(companyData.forCompany(companyId).departments.listUnordered().map(d => [d.id, d.name]))
+      const groupNames = new Map(companyData.forCompany(companyId).groups.list().map(g => [g.id, g.name]))
       const label = (r: ScopeRule): string => {
         if (r.subjectType === 'everyone') return '全員'
         if (r.subjectType === 'role') return ROLE_LABELS[r.subjectId ?? ''] ?? r.subjectId ?? ''
         if (r.subjectType === 'department') return departmentSubjectLabel(departmentNames.get(r.subjectId ?? ''))
+        if (r.subjectType === 'group') return groupSubjectLabel(groupNames.get(r.subjectId ?? ''))
         const u = r.subjectId ? users.get(r.subjectId) : undefined
         return u?.name || u?.email || r.subjectId || ''
       }
@@ -158,7 +165,7 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
         canRead: r.canRead,
         canWrite: r.canWrite,
         // Who belongs (any member may read it: GET /departments/:id/members), for the editor's preview.
-        ...(r.subjectType === 'department' ? { memberIds: [...(r.memberIds ?? [])] } : {}),
+        ...(r.subjectType === 'department' || r.subjectType === 'group' ? { memberIds: [...(r.memberIds ?? [])] } : {}),
       })
 
       // Rules whose folder is gone from the shared branch (renamed or removed by a
@@ -182,6 +189,7 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
           kind: s.kind,
           departmentId: s.departmentId,
           repoId: s.repoId,
+          ...(s.readRestricted ? { readRestricted: true } : {}),
           inherited: s.rules.length === 0,
           rules: s.rules.map(serialize),
           effectiveSummary: summarizeRules(findGoverningScope(all, s.path)?.rules ?? []),

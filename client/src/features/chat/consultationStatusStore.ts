@@ -37,6 +37,12 @@ export function consultationStatusOf(tabId: string): ConsultationStatus | undefi
   return statuses.get(tabId)
 }
 
+/** Whether any open tab's status passes `test` now (outside React: the company switch asks before stopping an AI). */
+export function someConsultationStatus(test: (status: ConsultationStatus) => boolean): boolean {
+  for (const status of statuses.values()) if (test(status)) return true
+  return false
+}
+
 export function useConsultationStatuses(): ReadonlyMap<string, ConsultationStatus> {
   return useSyncExternalStore(subscribe, () => statuses)
 }

@@ -43,11 +43,19 @@ describe('creating a company', () => {
     expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ name: '株式会社サンプル', folderKind: 'git' })
   })
 
-  it('sends 「使わない」 when chosen, and says it cannot be changed later', async () => {
+  it('the choice carries one plain hint: how to decide, and that it cannot be changed later', async () => {
+    mockApi({ 'GET /api/me': operator })
+    render(<AuthProvider><NewCompanyPage /></AuthProvider>)
+    const choice = await screen.findByRole('radiogroup', { name: '全社フォルダ' })
+    expect(choice).toHaveAccessibleDescription(
+      '社員どうしのファイルの共有を ACB で行いますか？ すでに Google Drive などで共有しているなら「使わない」で始められます（あとから変えられません）。',
+    )
+  })
+
+  it('sends 「使わない」 when chosen', async () => {
     const { calls } = mockApi({ 'GET /api/me': operator, 'POST /api/companies': created })
     render(<AuthProvider><NewCompanyPage /></AuthProvider>)
     await userEvent.type(await screen.findByLabelText('会社名'), '株式会社サンプル')
-    expect(screen.getByText('あとから変えることはできません。')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('radio', { name: /全社フォルダを使わない（各自の PC のフォルダだけ）/ }))
     await userEvent.click(screen.getByRole('button', { name: '会社を作成' }))
     expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ folderKind: 'none' })

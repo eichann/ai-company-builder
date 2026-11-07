@@ -140,7 +140,16 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
 
     /** Deleting the folder would strand its private folders' repositories. */
     checkDeletable(member: Member, department: DepartmentRow): Outcome<void> {
-      return privateFoldersAtOrUnder(member.companyId, department.folder).length > 0 ? privateInside() : ok(undefined)
+      if (privateFoldersAtOrUnder(member.companyId, department.folder).length > 0) return privateInside()
+      // A read-restricted place (a company without the shared folder, server.md "Groups") at or
+      // under it: deleting would drop its rules, and the records placed there would fall back to
+      // the company's rules — readable by everyone. Its readers are changed first, on purpose.
+      const key = pathKey(department.folder)
+      const restricted = scopesOf(member.companyId).listWithRules()
+        .some(s => s.readRestricted === true && (pathKey(s.path) === key || pathKey(s.path).startsWith(`${key}/`)))
+      return restricted
+        ? refuse('conflict', 'この部署には見られる人を決めた場所があります。先にその設定を「全員」に戻してください。', { code: 'RESTRICTED_PLACES_INSIDE' })
+        : ok(undefined)
     },
 
     /**

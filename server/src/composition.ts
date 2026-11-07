@@ -79,6 +79,7 @@ import { createRecordSignal } from './services/record-signal'
 import { companyNow, createNotificationService } from './services/notifications'
 import { createAiRunService } from './services/ai-runs'
 import { createSkillUseService } from './services/skill-uses'
+import { createGroupService } from './services/groups'
 import { createServerClock } from './services/server-clock'
 import { createSecurityAlertService } from './services/security-alerts'
 import { createTaskAcceptance } from './services/task-acceptance'
@@ -866,6 +867,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     recordEngine,
     // Which company Skill a consultation used (records.md "Which Skill").
     skillUses: createSkillUseService(shared),
+    // 見える人のまとまり (server.md "Groups"): owners/admins keep them; rules name them.
+    groups: createGroupService({ ...repos, ...shared }),
     notifications,
     decisions,
     meetingOutputs,
