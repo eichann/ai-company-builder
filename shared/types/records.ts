@@ -311,6 +311,13 @@ export interface BundleKindsResult {
   departments: Array<{ departmentId: string; folder: string; kind: BundleKind }>
   /** Every kind in use in the company (where kinds mix: 「案件・プロジェクトごと」, searching across departments). */
   kinds: BundleKind[]
+  /**
+   * 「使う機能」 プロジェクト is off (records.md "Features on and off"): the core's kind is still named
+   * (existing ones are 「見るだけ」) but nothing new of it is made — a department whose `kind` is the
+   * core's has nothing to make or choose. Absent = on (and from older servers; an older app ignores it,
+   * and its 「新しいプロジェクトにする」 gets the server's FEATURE_OFF words).
+   */
+  coreOff?: true
 }
 
 export interface RecordDetail {

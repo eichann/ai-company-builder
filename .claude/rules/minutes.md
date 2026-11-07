@@ -631,6 +631,13 @@ a digest (no calendar id leaves the server).
 
 ## Switches
 
+- **「使う機能」 会議と議事録** (`records.md` "Features on and off"): off, `pollCompany` and `check`
+  find nothing (no calendar read; `check` answers `checked: false` quietly for older apps), arrivals and
+  まとまり questions answer empty, the reading / まとまり / skip / auto-series / text routes answer 409
+  `FEATURE_OFF` (`MinutesServiceDeps.enabled`), meetings are 「見るだけ」 (out of 「AI の番」, no action),
+  no `minutes_arrived`. プロジェクト off: the core's `project` is no choice for the まとまり question
+  (`projectsOn`, `meetingAsksBundle` `bundleKindInUse`).
+
 Google (operator stop, the company's switch, vault, grant, scope — `google-connector.md`): both
 discovery and the text refuse from the next call: 403 `GOOGLE_STOPPED`, 409
 `GOOGLE_NOT_CONNECTED` (no / ended grant), 403 `MINUTES_NO_ACCESS` (Drive refused the

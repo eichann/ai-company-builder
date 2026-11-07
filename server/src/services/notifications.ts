@@ -85,6 +85,18 @@ export interface NotificationServiceDeps {
   membersOf?: (companyId: string) => string[]
   /** Whom the member covers today (their 「あなたの番」 holds those items too; services/absences.ts). */
   actsFor?: (companyId: string, userId: string) => string[]
+  /**
+   * 「使う機能」 (records.md "Features on and off"): is this notice turned off with its feature — a kind
+   * the feature owns (`minutes_arrived`, the inbox's kinds), or any notice about a record whose type's
+   * feature is off (「見るだけ」)? Such a notice is never written. Absent → every notice is written.
+   */
+  noticeOff?: (companyId: string, kind: string, recordType: string | null) => boolean
+}
+
+/** A record id's type (ids start with their type: `<type>-<token>`, shared/core/records.ts), or null. */
+const typeOfRecordId = (recordId: string): string | null => {
+  const i = recordId.lastIndexOf('-')
+  return recordId === '' || i <= 0 ? null : recordId.slice(0, i)
 }
 
 /** Why an absentee's item reaches nobody (a `delegate_stopped` notice's dedupe key ends with it). */
@@ -447,7 +459,13 @@ export function createNotificationService(deps: NotificationServiceDeps) {
   }
 
   /** Write computed rows (a dedupe key already there is skipped); signal the members who got a new one with its kind on. */
-  function writeComputed(companyId: string, handle: CompanyData, rows: NotificationRow[]): number {
+  /** The rows whose feature is on (a notice of a feature turned off is never written). */
+  function featureRows(companyId: string, rows: NotificationRow[]): NotificationRow[] {
+    return deps.noticeOff ? rows.filter(r => !deps.noticeOff!(companyId, r.kind, typeOfRecordId(r.recordId))) : rows
+  }
+
+  function writeComputed(companyId: string, handle: CompanyData, all: NotificationRow[]): number {
+    const rows = featureRows(companyId, all)
     if (rows.length === 0) return 0
     const written = new Set(handle.notifications.insert(rows))
     const fresh = rows.filter(r => written.has(r.id))
@@ -472,7 +490,8 @@ export function createNotificationService(deps: NotificationServiceDeps) {
    */
   function turnCounts(companyId: string, handle: CompanyData, userId: string, mayRead: (userId: string, rec: RecordAccessRow) => boolean, today: string) {
     const waiting = waitingFor(handle.records, [userId, ...(deps.actsFor?.(companyId, userId) ?? [])], new Set(handle.plugins.oldConnectionRecordIds()))
-      .filter(w => mayRead(userId, w.row))
+      // 「見るだけ」 records (their feature off) are out of 「あなたの番」, as in `records.myTurn`.
+      .filter(w => mayRead(userId, w.row) && !deps.noticeOff?.(companyId, '', w.row.type))
     const types = new Map(waiting.map(w => [w.row.id, w.row.type]))
     let total = 0
     let dueToday = 0
@@ -730,7 +749,7 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const def = currentTypes(handle.records).get(change.type)?.definition
       const final = new Set(def?.final ?? [])
       const now = clock.now()
-      const rows: NotificationRow[] = []
+      let rows: NotificationRow[] = []
       // Only members who can read the record now get a notice (and a signal): an owner-only
       // record's notice reaches its owner alone, admins included (records.md "Owner-only").
       const rec = handle.records.byIds([change.entry.recordId])[0]
@@ -802,6 +821,7 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         }
       }
       if (stops.length > 0) writeComputed(companyId, handle, stops)
+      rows = featureRows(companyId, rows)
       if (rows.length === 0) return
       // An `asked` already told for this assignment, or a `from_message` for this record, is skipped (its dedupe key).
       const written = new Set(handle.notifications.insert(rows))

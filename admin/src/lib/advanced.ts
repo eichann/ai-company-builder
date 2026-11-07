@@ -1,18 +1,20 @@
 /**
- * 「詳しい設定」 (管理画面の見直し 2-3, 3): five headings, each saying whether the company still
+ * 「詳しい設定」 (管理画面の見直し 2-3, 3): six headings, each saying whether the company still
  * has the starting values (「初期値のまま」) or changed something (「変えています」). The starting
  * values are the shared rules' own (shared/core); this file only compares.
  */
 import { DEFAULT_AGENT_SANDBOX_SETTINGS } from '../../../shared/core/agent-sandbox'
+import { DEFAULT_FEATURES, FEATURE_IDS, type CompanyFeatures } from '../../../shared/core/features'
 import { DEFAULT_INTAKE_SETTINGS, type IntakeSettings } from '../../../shared/core/intake-settings'
 import { DEFAULT_TASK_SETTINGS, type TaskSettings } from '../../../shared/core/task-settings'
 import type { AgentSandboxView } from '../../../shared/types/agent-sandbox'
 import type { BrokerView } from '../../../shared/types/key-broker'
 import type { SecondOpinionView } from '../../../shared/types/second-opinion'
 
-export type AdvancedSection = 'work' | 'calendar' | 'inbox' | 'ai-safety' | 'info'
+export type AdvancedSection = 'features' | 'work' | 'calendar' | 'inbox' | 'ai-safety' | 'info'
 
 export const ADVANCED_SECTIONS: Array<{ id: AdvancedSection; title: string; description: string; path: string }> = [
+  { id: 'features', title: '使う機能', description: 'やることの一覧・会議と議事録・受信の振り分け・決めたこと・プロジェクトを、会社で使うかどうか', path: 'advanced/features' },
   { id: 'work', title: '仕事の進め方', description: '記録とやることの一覧を使う・受信を読む・AI が自動で進める・チームの進め方・会議から AI が作るやること・呼び名・返事の目安', path: 'advanced/work' },
   { id: 'calendar', title: '会社の暦', description: '夏休み・年末年始など、会社の休み（土日・祝日は自動）', path: 'advanced/calendar' },
   { id: 'inbox', title: '来た連絡の決まり', description: '宛先が何人もいるとき・CC だけのとき・メルマガ・共有の受付アドレスなど', path: 'advanced/inbox' },
@@ -77,4 +79,9 @@ export function aiSafetyChanged(parts: {
   if (secondOpinion?.allowed) return true
   if (broker && (broker.keys.some((k) => k.scope === 'company') || !broker.settings.memberKeysAllowed)) return true
   return false
+}
+
+/** 使う機能: some feature is turned off (every feature starts on, shared/core/features.ts). */
+export function featuresChanged(f: CompanyFeatures): boolean {
+  return FEATURE_IDS.some((id) => f[id] !== DEFAULT_FEATURES[id])
 }

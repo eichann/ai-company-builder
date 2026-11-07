@@ -31,6 +31,17 @@ export function sqliteTaskSettingsRepository(conn: Database.Database, companyId:
         ON CONFLICT(company_id) DO UPDATE SET settings = excluded.settings, updated_at = excluded.updated_at, updated_by = excluded.updated_by
       `).run(companyId, stored.settings, stored.updatedAt, stored.updatedBy)
     },
+    features() {
+      const r = conn.prepare('SELECT features, updated_at, updated_by FROM company_features WHERE company_id = ?')
+        .get(companyId) as { features: string; updated_at: string; updated_by: string | null } | undefined
+      return r ? { features: r.features, updatedAt: r.updated_at, updatedBy: r.updated_by } : null
+    },
+    saveFeatures(features, updatedBy, at) {
+      conn.prepare(`
+        INSERT INTO company_features (company_id, features, updated_at, updated_by) VALUES (?, ?, ?, ?)
+        ON CONFLICT(company_id) DO UPDATE SET features = excluded.features, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+      `).run(companyId, features, at, updatedBy)
+    },
     departmentMemberIds(departmentId) {
       return (conn.prepare(`
         SELECT user_id FROM department_members WHERE company_id = ? AND department_id = ? ORDER BY created_at, user_id

@@ -11,7 +11,7 @@ import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS } from './links'
-import { bad, conflict, FILE_NOT_LINKABLE, fileLinksUnavailable, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
+import { bad, conflict, FILE_NOT_LINKABLE, fileLinksUnavailable, featureOffRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
 
@@ -34,6 +34,8 @@ export function fileLinking(ctx: EngineContext) {
       const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId]).find(r => reader.record(r)) : undefined
       if (!row) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
       if (serviceStateOnly(row.type)) return refuse('forbidden', STATE_CHANGED_BY_SERVICE.error, { code: STATE_CHANGED_BY_SERVICE.code })
+      const off = featureOffRefusal(ctx.deps.featureOff, member.companyId, row.type)
+      if (off) return off
       const def = currentTypes(records).get(row.type)?.definition
       if (!def) return conflict('この記録の型の定義がありません', 'TYPE_UNKNOWN')
       if (actor.kind === 'ai' && !Object.values(def.actions).some(a => a.who.includes('ai'))) {

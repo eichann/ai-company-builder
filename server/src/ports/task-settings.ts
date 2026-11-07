@@ -32,6 +32,10 @@ export interface TaskSettingsRepository {
   get(): StoredTaskSettings | null
   save(stored: StoredTaskSettings): void
 
+  /** The 「使う機能」 as last saved (JSON, shared/core/features.ts `featuresFrom`), null while never changed. */
+  features(): { features: string; updatedAt: string; updatedBy: string | null } | null
+  saveFeatures(features: string, updatedBy: string, at: string): void
+
   /** Who belongs to the department, oldest first; empty for a department of another company. */
   departmentMemberIds(departmentId: string): string[]
   /** Replace who belongs to the department (kept rows keep created_at/by); a department of another company is left alone. */

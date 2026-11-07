@@ -38,9 +38,10 @@ export function skippableMeetings<T extends { banner: MeetingBanner }>(folded: r
   return folded.filter(r => r.banner.kind === 'arrived')
 }
 
-/** 「決めたこと2・やることの案3」 */
-export function madeWords(made: MeetingArrivalView['made']): string {
-  return `決めたこと${made?.decisions ?? 0}・やることの案${made?.proposals ?? 0}`
+/** 「決めたこと2・やることの案3」; 「やることの案3」 while 決めたこと is turned off (「使う機能」). */
+export function madeWords(made: MeetingArrivalView['made'], decisionsOn = true): string {
+  const proposals = `やることの案${made?.proposals ?? 0}`
+  return decisionsOn ? `決めたこと${made?.decisions ?? 0}・${proposals}` : proposals
 }
 
 export type MeetingBanner =

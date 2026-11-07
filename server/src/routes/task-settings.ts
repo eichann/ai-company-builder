@@ -5,6 +5,8 @@
  *
  *   GET  /task-settings   any member: the settings in force (+ canEdit)
  *   PUT  /task-settings   owner/admin: the whole document
+ *   GET  /features        any member: the company's 「使う機能」 (+ canEdit)
+ *   PUT  /features        owner/admin: one switch { feature, on } (shared/core/features.ts)
  *
  * Department membership (所属する部署) is under the departments:
  * GET|PUT /departments/:id/members (routes/departments.ts).
@@ -37,6 +39,17 @@ taskSettingsRoute.get('/me/work-switches', companyMember, async (c) => {
 
 taskSettingsRoute.put('/me/work-switches', companyMember, serviceBody, async (c) => {
   const result = await services.workSwitches.set(c.var.member, c.var.body)
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+// 「使う機能」 (records.md "Features on and off"; services/features.ts).
+taskSettingsRoute.get('/features', companyMember, (c) => {
+  return c.json({ success: true, data: services.features.get(c.var.member) })
+})
+
+taskSettingsRoute.put('/features', companyMember, serviceBody, (c) => {
+  const result = services.features.set(c.var.member, c.var.body)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })

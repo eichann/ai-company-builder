@@ -24,6 +24,7 @@
  */
 import { z, type ZodTypeAny } from 'zod'
 import { argDefaultOf, SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
+import { DEFAULT_FEATURES, featuresFrom, toolAllowed, typeIsViewOnly, type CompanyFeatures } from '../../../shared/core/features'
 import { DATE_VALUE_RE, isSystemOnly, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type FieldKind, type TypeDefinition } from '../../../shared/core/record-types'
 import { CALL_CURSOR_RE } from '../../../shared/core/plugin-call-answer'
 import type { PluginAiOperation, PluginAiTools } from '../../../shared/types/plugins'
@@ -84,8 +85,11 @@ export interface ExtraRecordTools {
   instructions: string
 }
 
-/** Makes one connector's tools for a turn (`tool-providers.ts`); null = none (not set up for the company). */
-export type RecordToolProvider = (access: RecordTurnAccess, signal?: AbortSignal) => Promise<ExtraRecordTools | null>
+/**
+ * Makes one connector's tools for a turn (`tool-providers.ts`); null = none (not set up for the
+ * company, or its feature is off: `turn.features`, the company's 「使う機能」 read with the types).
+ */
+export type RecordToolProvider = (access: RecordTurnAccess, signal?: AbortSignal, turn?: { features: CompanyFeatures }) => Promise<ExtraRecordTools | null>
 
 export interface RecordToolSpec extends RecordToolDescriptor {
   /** Shows an approval request: the answer becomes the app's approval card in the reply. */
@@ -240,7 +244,7 @@ export function minutesReadText(answer: MinutesText, part = 1, chars: number = M
 const MINUTES_KEPT = 4
 
 /** Reading a meeting's minutes (any token) and choosing its まとまり (act). */
-const MINUTES_READ_TOOL: RecordToolSpec = {
+const MINUTES_READ_TOOL_ALL_ON: RecordToolSpec = {
   name: 'minutes_read', readOnly: true,
   schema: z.object({
     id: meetingRef(),
@@ -273,6 +277,22 @@ const MINUTES_LINK_BUNDLE_TOOL: RecordToolSpec = {
     'Link the meeting to a bundle (a deal, a project…; the assignee\'s or an admin\'s AI; nothing is written outside). Choose from minutes_read\'s candidates; ask the member when unsure.',
   request: input => ({ method: 'POST', path: `/minutes/${encodeURIComponent(String(input.id))}/bundle`, body: { bundleId: input.bundleId, ...(input.expectedVersion !== undefined ? { expectedVersion: input.expectedVersion } : {}) } }),
 }
+
+const MINUTES_READ_DECISIONS_JA = '決まったことは decisions_record（folder は答えの folder。答えの folder が null なら folder を付けない。links に meeting と bundle）、'
+const MINUTES_READ_DECISIONS_EN = 'decisions_record (folder = the answer\'s folder, none when it is null; link meeting and bundle), '
+
+/**
+ * minutes_read for the company's features (「使う機能」, records.md "Features on and off"): with 決めたこと
+ * off the reading leaves no decision, so the tool never asks for one (decisions_record is not offered).
+ */
+function minutesReadTool(features: CompanyFeatures): RecordToolSpec {
+  if (features.decisions) return MINUTES_READ_TOOL_ALL_ON
+  const description = MINUTES_READ_TOOL_ALL_ON.description
+    .replace(MINUTES_READ_DECISIONS_JA, '')
+    .replace(MINUTES_READ_DECISIONS_EN, '')
+  return { ...MINUTES_READ_TOOL_ALL_ON, description }
+}
+const MINUTES_READ_NAME = MINUTES_READ_TOOL_ALL_ON.name
 
 /** 「決めたこと」 as a server record (services/decisions.ts; no file). */
 const DECISION_TOOL: RecordToolSpec = {
@@ -394,6 +414,20 @@ export const MAIL_ACTION_TOOLS: RecordToolSpec[] = [
   },
 ]
 
+const MAIL_AWAIT_JA = '新しく送るメールが相手の返事を必要とするなら expectsReply: true（メンバーが送るときに「返事を待つ」を選べ、返事が来なければ催促を用意する流れになる）。\n'
+const MAIL_AWAIT_EN = 'For a new mail that needs their answer set expectsReply: true (the member may then choose 「返事を待つ」 when sending; silence leads to a follow-up draft). '
+
+/**
+ * The drafting tools for the company's features: with 受信の振り分け・返事のお願い off nothing waits for
+ * their answer (the server offers no 「返事を待つ」), so the AI is not told to mark one.
+ */
+function mailActionTools(features: CompanyFeatures): RecordToolSpec[] {
+  if (features.inbox) return MAIL_ACTION_TOOLS
+  return MAIL_ACTION_TOOLS.map(t => (t.name === 'mail_draft_create'
+    ? { ...t, description: t.description.replace(MAIL_AWAIT_JA, '\n').replace(MAIL_AWAIT_EN, '') }
+    : t))
+}
+
 /** Link a file to a record, or remove that link (records.md "Linking files later"). */
 function fileLinkTools(typeNames: string[]): RecordToolSpec[] {
   const schema = z.object({
@@ -465,11 +499,18 @@ export function narrowCreateTypes<T extends RecordToolDescriptor>(spec: T, types
   }
 }
 
-/** The state-changing tools for these types (one per action, and creating server-only records). */
-export function actionToolSpecs(types: TypeDefinition[], place: { department?: string | null } = {}): RecordToolSpec[] {
+/**
+ * The state-changing tools for these types (one per action, and creating server-only records).
+ * `features` (the company's 「使う機能」, records.md "Features on and off"; default: all on): a type
+ * whose feature is off is 「見るだけ」 — nothing of it is created and none of its actions is offered
+ * (the server refuses them anyway) — and a feature's own tools (decisions_record,
+ * minutes_link_bundle) are offered only while it is on, whatever types exist.
+ */
+export function actionToolSpecs(types: TypeDefinition[], place: { department?: string | null } = {}, features: CompanyFeatures = DEFAULT_FEATURES): RecordToolSpec[] {
   const specs: RecordToolSpec[] = []
+  const live = types.filter(t => !typeIsViewOnly(t.name, features))
   // Service-owned types (議事録・承認のお願い・送るメール・決めたこと) are made by the server's own steps only.
-  const creatable = types.filter(t => t.storage !== 'file' && !SERVICE_OWNED_TYPES.includes(t.name)).map(t => t.name)
+  const creatable = live.filter(t => t.storage !== 'file' && !SERVICE_OWNED_TYPES.includes(t.name)).map(t => t.name)
   if (creatable.length > 0) {
     // Each type's link names: the AI otherwise guesses one (a task linked to the meeting) and is refused.
     const linkNames = types.filter(t => creatable.includes(t.name))
@@ -496,7 +537,7 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
       format: createdAnswer,
     })
   }
-  for (const t of types) {
+  for (const t of live) {
     // Approving and sending change state through their own screens only (the server refuses the rest).
     if (SERVICE_STATE_TYPES.includes(t.name)) continue
     for (const [name, a] of Object.entries(t.actions)) {
@@ -550,12 +591,12 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
     }
   }
   // Linking files later: types with a `file` link whose definition lets the AI act (the server checks again).
-  const linkable = types.filter(t => !SERVICE_STATE_TYPES.includes(t.name) && Object.values(t.links).some(l => l.target === 'file')
+  const linkable = live.filter(t => !SERVICE_STATE_TYPES.includes(t.name) && Object.values(t.links).some(l => l.target === 'file')
     && Object.values(t.actions).some(a => a.who.includes('ai')))
   if (linkable.length > 0) specs.push(...fileLinkTools(linkable.map(t => t.name)))
   if (types.some(t => t.name === 'decision')) specs.push(DECISION_TOOL)
   if (types.some(t => t.name === 'meeting')) specs.push(MINUTES_LINK_BUNDLE_TOOL)
-  return specs
+  return specs.filter(spec => toolAllowed(spec.name, features))
 }
 
 /** Tool names are `<plugin>__<operation>`; the plugin id is the declaration's (`^[a-z][a-z0-9_-]*`). */
@@ -771,14 +812,35 @@ const APPROVAL_LOOKUPS: RecordToolSpec[] = [
   },
 ]
 
-export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。記録（タスク・決めたことなど）はサーバーだけが持ちます。記録のファイルは作らず、作る・状態を変えるときは必ずこの道具を使ってください。見積・計画などの中身はふつうのファイルに書き、記録から links でつなぎます（作ったあとは records_link_file）。タスクの相談では、まず records_get でつながったファイル（links の path）を確かめ、必要なものを読んでください（メンバーが記録を入力欄に落として、その要約が渡されたときは、まずその要約で答え、足りないときだけ読みます）。期限は日付（YYYY-MM-DD）か、時刻つき（YYYY-MM-DDTHH:MM）です。担当などの人の欄は id で指定します。` +
+const RECORDS_INSTRUCTIONS_BASE = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。記録（タスク・決めたことなど）はサーバーだけが持ちます。記録のファイルは作らず、作る・状態を変えるときは必ずこの道具を使ってください。見積・計画などの中身はふつうのファイルに書き、記録から links でつなぎます（作ったあとは records_link_file）。タスクの相談では、まず records_get でつながったファイル（links の path）を確かめ、必要なものを読んでください（メンバーが記録を入力欄に落として、その要約が渡されたときは、まずその要約で答え、足りないときだけ読みます）。期限は日付（YYYY-MM-DD）か、時刻つき（YYYY-MM-DDTHH:MM）です。担当などの人の欄は id で指定します。` +
   `記録の答えの people は、答えに出てくる人の id と名前の対応です（会社のメンバーだけ）。メンバーへの返事では人を名前で呼び（「佐藤さんの番です」）、id は見せないでください。people に無い id は、名前の分からない人です（会社のメンバーではないなど）。名前を推測せず、そう伝えてください。道具に人を渡すときは id を使います。` +
   `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
   `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。` +
   `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。前に出した下書きをもう一度見てもらいたいときは mail_draft_show でカードを出し直し、出し直すためだけに中身を直さないでください。提案書などの PDF を付けるときは mail_draft_create / mail_draft_update の attachments に会社フォルダの中のパスを渡します（PDF だけ。付けても送られず、メンバーがカードでファイルを開いて確かめてから送ります）。` +
   `タスクを AI が下ごしらえしてから渡すときは、records_create で state: "preparing" にして作り、確かめたこと・作った下書きを済ませてから task__finish_prep（prep_summary に何を確かめて何を作ったか、links.prepared に作ったメールの下書き・承認のお願いの id）で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、抱え込まずに task__hand_over（note に理由、links.prepared にできている分）で早めに渡してください。タスクの完了と「引き受ける」「受けられない」は本人だけができます（AI はできません）。ほかの部署の人に頼んだタスクは「引き受け待ち」になり、担当が引き受けると担当の番になります。` +
+  ''
+
+/** The two paragraphs about 決めたこと: said only while that feature is on (records.md "Features on and off"). */
+const RECORDS_DECISION_INSTRUCTIONS =
   `決めたこと（decision）のうち state が unconfirmed のもの（proposalNotice「まだ確かめていない案」つき）は、決める立場の人がまだ確かめていない案です。決めたこととして扱わず、前例や根拠に使わないでください。話に出すときは「まだ確かめていない案」と添えてください。` +
   `過去の決めたことを前例として使うときは、exception: true（exceptionNotice「例外（この件だけ）」つき）の決めたことを、ほかの件に当てはめないでください。それはつながった件だけの判断です。一回限りの判断を decisions_record で残すときは exception: true にしてください。`
+
+/**
+ * Said instead when 決めたこと is off: a first message composed without the company's features (the
+ * minutes reading started from a screen) may still ask for decisions — this says not to.
+ */
+export const RECORDS_DECISIONS_OFF = 'この会社では「決めたこと」の機能がオフです。決めたことは残さないでください（議事録を読むときも、頼まれたときも。決めたことを残す道具はありません）。'
+
+/**
+ * What every consultation's AI is told about the record tools, for the company's 「使う機能」: with
+ * 決めたこと off the decision paragraphs (and decisions_record) are left out.
+ */
+export function recordsInstructions(features: CompanyFeatures = DEFAULT_FEATURES): string {
+  return RECORDS_INSTRUCTIONS_BASE + (features.decisions ? RECORDS_DECISION_INSTRUCTIONS : RECORDS_DECISIONS_OFF)
+}
+
+/** The instructions with every feature on (today's companies). */
+export const RECORDS_INSTRUCTIONS = recordsInstructions(DEFAULT_FEATURES)
 
 export interface RecordTools {
   specs: RecordToolDescriptor[]
@@ -848,9 +910,12 @@ export interface RecordToolsOptions {
 
 export async function createRecordTools(access: RecordTurnAccess, signal?: AbortSignal, options: RecordToolsOptions = {}): Promise<RecordTools | null> {
   let types: TypeDefinition[]
+  // 「使う機能」 rides on the types' answer; an older server sends none = everything on.
+  let features: CompanyFeatures
   try {
-    const answer = await access.call('GET', '/types', undefined, signal) as { types?: Array<{ definition: TypeDefinition }> }
+    const answer = await access.call('GET', '/types', undefined, signal) as { types?: Array<{ definition: TypeDefinition }>; features?: unknown }
     types = (answer.types ?? []).map(t => t.definition)
+    features = featuresFrom(answer.features)
   } catch {
     await access.close()
     return null
@@ -862,8 +927,12 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     if (answer && Array.isArray(answer.plugins)) plugins = answer
   } catch { /* no plugin tools this turn */ }
   // Mail tools exist where outbound_message does; drafting needs an act token (Codex reads only).
-  const mail = types.some(t => t.name === 'outbound_message') ? [MAIL_LOOKUP_TOOL, MAIL_SHOW_TOOL, ...(access.scope === 'act' ? MAIL_ACTION_TOOLS : [])] : []
-  const specs = [...LOOKUPS, ...(types.some(t => t.name === 'meeting') ? [MINUTES_READ_TOOL] : []), ...(types.some(t => t.name === 'approval') ? APPROVAL_LOOKUPS : []), ...(access.scope === 'act' ? actionToolSpecs(types, { department: options.department }) : []), ...pluginToolSpecs(plugins, access.scope === 'act'), ...pluginCallToolSpecs(plugins), ...mail]
+  const mail = types.some(t => t.name === 'outbound_message') ? [MAIL_LOOKUP_TOOL, MAIL_SHOW_TOOL, ...(access.scope === 'act' ? mailActionTools(features) : [])] : []
+  // A feature's tools follow the feature, not whether its type exists (the types stay installed).
+  const specs = [
+    ...LOOKUPS, ...(types.some(t => t.name === 'meeting') ? [minutesReadTool(features)] : []), ...(types.some(t => t.name === 'approval') ? APPROVAL_LOOKUPS : []),
+    ...(access.scope === 'act' ? actionToolSpecs(types, { department: options.department }, features) : []), ...pluginToolSpecs(plugins, access.scope === 'act'), ...pluginCallToolSpecs(plugins), ...mail,
+  ].filter(spec => toolAllowed(spec.name, features))
   const newId = options.newId ?? (() => crypto.randomUUID())
   const now = options.now ?? (() => new Date())
   const byName = new Map(specs.map(s => [s.name, s]))
@@ -872,13 +941,14 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
   const minutesKept = new Map<string, unknown>()
   const fieldKindOf = (type: string, field: string) => types.find(t => t.name === type)?.fields[field]?.kind
   // A provider's tool never replaces a record tool or an earlier provider's (first one wins).
-  const provided = await Promise.all((options.toolProviders ?? []).map(p => p(access, signal).catch(() => null)))
+  const provided = await Promise.all((options.toolProviders ?? []).map(p => p(access, signal, { features }).catch(() => null)))
   const owner = new Map<string, ExtraRecordTools>()
   const extraSpecs: RecordToolDescriptor[] = []
   let extraInstructions = ''
   for (const extra of provided) {
     if (!extra) continue
-    const mine = extra.specs.filter(s => TOOL_NAME_RE.test(s.name) && !byName.has(s.name) && !owner.has(s.name))
+    // A feature's tools (the inbox's) stay out while it is off, even from a provider that did not ask.
+    const mine = extra.specs.filter(s => TOOL_NAME_RE.test(s.name) && !byName.has(s.name) && !owner.has(s.name) && toolAllowed(s.name, features))
     for (const s of mine) owner.set(s.name, extra)
     if (mine.length === 0) continue
     extraSpecs.push(...mine)
@@ -903,7 +973,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
   }
   return {
     specs: [...specs, ...extraSpecs],
-    instructions: RECORDS_INSTRUCTIONS + extraInstructions,
+    instructions: recordsInstructions(features) + extraInstructions,
     close: () => access.close(),
     readTask,
     linkNewFile,
@@ -924,7 +994,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       if (spec.card) return runUpdate(spec.card, parsed.data, req)
       if (spec.approvalCard) return showApproval(req)
       try {
-        const minutesId = spec.name === MINUTES_READ_TOOL.name ? String(parsed.data.id) : null
+        const minutesId = spec.name === MINUTES_READ_NAME ? String(parsed.data.id) : null
         const laterPart = minutesId !== null && typeof parsed.data.part === 'number' && parsed.data.part > 1
         const kept = laterPart ? minutesKept.get(minutesId) : undefined
         const answer = kept ?? await access.call(req.method, req.path, req.body, signal)

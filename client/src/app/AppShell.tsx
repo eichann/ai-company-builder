@@ -1,6 +1,6 @@
 import { Suspense, useState, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, ListChecks } from '@phosphor-icons/react'
+import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, ListChecks, HandPointing } from '@phosphor-icons/react'
 import { ChatPanel } from '../features/chat/components/ChatPanel'
 import { useLinkedConsultations } from '../features/chat/recordConsultationsStore'
 import { useConsultationTopics } from '../features/chat/consultationTopicsStore'
@@ -61,7 +61,7 @@ import { LeaveConfirmDialog } from '../features/editor/components/LeaveConfirmDi
 import { useAuthStore } from '../stores/authStore'
 import { useMinutesNotices } from '../features/minutes/hooks/useMinutesNotices'
 import { startMinutesReading } from '../features/minutes/startReading'
-import { declineMeetingBundle, skipMinutes } from '../features/minutes/api'
+import { declineMeetingBundle, requestMeetingReading, skipMinutes } from '../features/minutes/api'
 import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
 import { MeetingBanners } from '../features/minutes/components/MeetingBanners'
 import { useMeetingArrivals } from '../features/minutes/hooks/useMeetingArrivals'
@@ -69,7 +69,7 @@ import { renderMeetingPanel } from './meetingCard'
 import type { AiTurnItemsView } from '../../shared/ai-turns'
 import { useNotices, useOpenTasksRequest } from '../features/notifications/hooks/useNotices'
 import { TitleBarNotices, type MeetingTurnRow } from '../features/notifications/components/TitleBarNotices'
-import { meetingTurns } from '../../shared/notifications-app'
+import { arrivedMeetingTurns, meetingTurns } from '../../shared/notifications-app'
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { useSeenTasks } from '../features/tasks/hooks/useSeenTasks'
 import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
@@ -77,6 +77,8 @@ import { ContinueStepButton } from '../features/plugin-steps/components/Continue
 import { PersonStepButtons } from '../features/plugin-steps/components/PersonStepButtons'
 import { StepDeliverables } from '../features/plugin-steps/components/StepDeliverables'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
+import { CorePressPanel } from '../features/tasks/components/CorePressPanel'
+import { featuresFrom } from '../../../shared/core/features'
 import { renderRecordBundleField } from './recordBundleField'
 import { renderRecordSource } from './recordSource'
 import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
@@ -398,7 +400,13 @@ export function AppShell() {
   // Business plugins' four slots (plugin-frame.md "The four slots"): only verified packages the company lists now.
   const pluginScreens = usePluginScreens(currentCompany?.id)
   const plugins = pluginSlots({ companyId: currentCompany?.id, rootPath, plugins: pluginScreens, taskItems: taskList.data?.items ?? [], onFileAction: setFileAction })
-  const tasksShown = !!taskList.data?.available && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds)
+  // 「使う機能」 (records.md "Features on and off"): an older server or main without them = everything on.
+  const features = featuresFrom(taskList.data?.features)
+  const tasksShown = !!taskList.data?.available && features.taskList && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds)
+  // The task list turned off for the company: 「ACB で押すもの」, the small list of what only ACB can act on.
+  const pressShown = !!taskList.data?.available && !features.taskList
+  // 「議事録が届きました」 only while 会議と議事録 is on (the server answers none while it is off, too).
+  const arrivalsShown = meetings.arrivals.available && features.meetings
   // What the department on screen makes as its 案件・プロジェクト (全社: the company's own kind; records.md "Bundle kinds").
   const bundleKinds = taskList.data?.bundleKinds
   const deptBundleKind = departmentBundleKind(bundleKinds, effectiveDeptFolder)
@@ -430,7 +438,10 @@ export function AppShell() {
     return readOnly
   }
   // A department without the task list: its meetings (received minutes, a まとまり to choose) wait in the title bar.
-  const titleBarMeetings: MeetingTurnRow[] = tasksShown || !currentCompany ? [] : meetingTurns(taskList.data?.items ?? [], aiTurnItems?.items ?? [], bundleWord).map(m => {
+  const listMeetings = tasksShown || !currentCompany ? [] : meetingTurns(taskList.data?.items ?? [], aiTurnItems?.items ?? [], bundleWord)
+  // Minutes that arrived and nobody asked the AI to read count too, with ［AI に読ませる］ (owner decision 2026-11-07).
+  const arrivedMeetings = tasksShown || !currentCompany || !arrivalsShown ? [] : arrivedMeetingTurns(meetings.arrivals.items, new Set(listMeetings.map(m => m.id)))
+  const titleBarMeetings: MeetingTurnRow[] = !currentCompany ? [] : [...arrivedMeetings, ...listMeetings].map(m => {
     const actions: MeetingTurnRow['actions'] = []
     if (m.kind === 'bundle') {
       const s = m.suggestedBundle
@@ -438,8 +449,13 @@ export function AppShell() {
       actions.push({ label: s ? 'ちがう／選ぶ' : meetingWords.choose, run: () => setChoosingBundle({ id: m.id, title: m.title }) })
       actions.push({ label: meetingWords.none, run: () => void declineMeetingBundle(currentCompany.id, m.id).then(() => taskList.reload()) })
     }
+    if (arrivedMeetings.some(a => a.id === m.id)) {
+      const arrival = meetings.arrivals.items.find(a => a.recordId === m.id)
+      if (arrival) actions.push({ label: 'AI に読ませる', run: () => void requestMeetingReading(currentCompany.id, arrival.recordId, arrival.version).then(() => { meetings.reload(); taskList.reload() }) })
+      return { ...m, actions }
+    }
     if (m.kind === 'minutes' && m.ai?.state !== 'running' && minutes.available && taskList.data?.items.find(i => i.id === m.id)?.state === 'received') {
-      actions.push({ label: '自分で読み取る', run: () => { const notice = minutes.notices.find(n => n.id === m.id); if (notice) startMinutesReading(notice) } })
+      actions.push({ label: '自分で読み取る', run: () => { const notice = minutes.notices.find(n => n.id === m.id); if (notice) startMinutesReading(notice, features) } })
       actions.push({ label: '今は読まない', run: () => void skipMinutes(currentCompany.id, m.id).then(() => taskList.reload()) })
     }
     if (m.ai?.canRetry) actions.push({ label: 'もう一度', run: () => aiTurnItems?.retry(m.id) })
@@ -475,7 +491,7 @@ export function AppShell() {
     setLeftTab(id)
   }
   // The morning's 「今日のあなたの番」 (its Mac notification or its bell line) opens the task list.
-  const openTasks = () => { if (tasksShown) selectLeftTab('tasks') }
+  const openTasks = () => { if (tasksShown) selectLeftTab('tasks'); else if (pressShown) selectLeftTab('press') }
   useOpenTasksRequest(currentCompany?.id, openTasks)
   // A skill opens where a click in the スキル tab opens it; a company-wide one under 全社.
   const openSkillFromPalette = (id: string) => {
@@ -534,7 +550,7 @@ export function AppShell() {
       dot: leftTab !== 'tasks' && myTurnIds.some(id => !seenTasks.seen.has(id)),
       render: () => currentCompany && rootPath ? (
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        {meetings.arrivals.available && <MeetingBanners key={currentCompany.id} companyId={currentCompany.id} items={meetings.arrivals.items} aiTurns={aiTurnItems}
+        {arrivalsShown && <MeetingBanners key={currentCompany.id} companyId={currentCompany.id} items={meetings.arrivals.items} aiTurns={aiTurnItems} decisionsOn={features.decisions}
           onView={m => openTab(recordTabKey(m.id))} onChanged={() => { meetings.reload(); taskList.reload() }} />}
         <div className="flex min-h-0 flex-1">
         <TaskListPanel
@@ -547,13 +563,25 @@ export function AppShell() {
           onConsult={consultAbout}
           onCompleted={id => closeTabs([recordTabKey(id)])}
           askFolder={isCompanyWide ? null : (selectedDept?.folder ?? null)}
-          meetingActions={minutes.available ? {
-            read: recordId => { const notice = minutes.notices.find(n => n.id === recordId); if (notice) startMinutesReading(notice) },
+          showCalendar={features.meetings}
+          meetingActions={minutes.available && features.meetings ? {
+            read: recordId => { const notice = minutes.notices.find(n => n.id === recordId); if (notice) startMinutesReading(notice, features) },
             skip: async recordId => { const r = await skipMinutes(currentCompany.id, recordId); return r && !r.success ? r.error : null },
           } : undefined}
         />
         </div>
         </div>
+      ) : null,
+    },
+    {
+      // The task list turned off (「使う機能」): what only ACB can act on, with 今日の予定 and arrived minutes above it.
+      id: 'press', title: '押すもの', icon: HandPointing, mount: 'once-opened', className: 'flex',
+      visible: pressShown,
+      render: () => currentCompany ? (
+        <CorePressPanel companyId={currentCompany.id} data={taskList.data} showCalendar={features.meetings}
+          onOpen={id => { const item = taskList.data?.items.find(i => i.id === id); if (item) openListItem(item); else openTab(recordTabKey(id)) }}
+          meetings={arrivalsShown ? <MeetingBanners key={currentCompany.id} companyId={currentCompany.id} items={meetings.arrivals.items} aiTurns={aiTurnItems} decisionsOn={features.decisions}
+            onView={m => openTab(recordTabKey(m.id))} onChanged={() => { meetings.reload(); taskList.reload() }} /> : null} />
       ) : null,
     },
     {
@@ -585,7 +613,7 @@ export function AppShell() {
         onShowBackups={() => setShowBackupHistory(true)}
         onShowSettings={() => setShowSettings(true)}
         onLogout={() => { void handleLogout() }}
-        extra={minutes.available && currentCompany ? <MinutesCheckButton companyId={currentCompany.id} /> : undefined}
+        extra={minutes.available && features.meetings && currentCompany ? <MinutesCheckButton companyId={currentCompany.id} /> : undefined}
         notices={currentCompany ? (
           <TitleBarNotices
             companyId={currentCompany.id}

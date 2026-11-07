@@ -249,7 +249,8 @@ GET  /api/config                                  setup state (no auth)
                               GET /security-alerts, PUT /security-alerts/settings (owner/admin)
                                                                              security-alerts.ts
                                                                 (気になる動き: security-alerts.md)
-                              GET|PUT /task-settings, GET|PUT /me/work-switches task-settings.ts
+                              GET|PUT /task-settings, GET|PUT /me/work-switches,
+                              GET|PUT /features (「使う機能」: records.md)    task-settings.ts
                               GET /home, PUT /home/holidays-checked           admin-home.ts
                                                                 (管理画面のホーム: "Admin home" below)
                               POST /viewers (見られる人)                      viewers.ts

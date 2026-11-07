@@ -38,7 +38,8 @@ export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordTo
   // lane A ▲
   // lane B ▼
   // The inbox (来た連絡, inbox.md): read a message's thread on demand, record the judgement (B4).
-  providers.push((access, signal) => createInboxTools(access, signal))
+  // Only while the company's 受信の振り分け・返事のお願い is on (「使う機能」; absent = an older server = on).
+  providers.push((access, signal, t) => (t && !t.features.inbox ? Promise.resolve(null) : createInboxTools(access, signal)))
   // lane B ▲
   // lane C ▼
   // A task's wait that is over (ai-turns.md): the wait-over step's one read of its task.

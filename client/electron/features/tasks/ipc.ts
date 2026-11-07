@@ -34,6 +34,7 @@
 import { isCalendarDate } from '../../../../shared/core/business-days'
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { MESSAGE_TYPE } from '../../../../shared/core/core-types'
+import { featuresFrom } from '../../../../shared/core/features'
 import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import { isDateValue, normalizeTagsValue } from '../../../../shared/core/record-types'
 import type { BundleKindsResult, RecordDetail, RecordQueryResult, RecordSummary, RecordTypeView } from '../../../../shared/types/records'
@@ -404,6 +405,12 @@ export function createTasksApi(deps: TasksDeps) {
       if (myTurn?.status === 404 && myTurn.json?.code === 'RECORDS_DISABLED') {
         return { success: true, data: { available: false, listDepartmentIds: null, items: [] } }
       }
+      // 「使う機能」 rides on the types answer; an older server sends none = everything on.
+      const features = featuresFrom(types?.status === 200 ? (types.json?.data as { features?: unknown } | undefined)?.features : null)
+      // 決めたこと waiting for the member's ［そうです］ (the small list 「ACB で押すもの」), only while 決めたこと is on.
+      const toConfirm = features.decisions
+        ? records(await call(companyId, 'POST', '/records/query', { type: 'decision', state: ['unconfirmed'], fields: { owner: id }, limit: 50 })) ?? []
+        : []
       const lists = [myTurn, aiTurn, asked, doneMine, doneAsked].map(records)
       if (lists.some(l => l === null)) {
         const bad = [myTurn, aiTurn, asked, doneMine, doneAsked].find(a => a?.status !== 200) ?? null
@@ -433,6 +440,8 @@ export function createTasksApi(deps: TasksDeps) {
           listDepartmentIds: Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : null,
           me: id,
           ...(bundleKinds ? { bundleKinds } : {}),
+          features,
+          decisionsToConfirm: toConfirm.map(r => ({ id: r.id, title: r.title || '（名前なし）' })),
           members: Object.entries(names).map(([memberId, name]) => ({ id: memberId, name })),
           items: classifyTasks({
             me: id,

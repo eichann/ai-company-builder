@@ -23,6 +23,11 @@ member's **own** calendar now, with **their own** permission, and keeps nothing 
 「予定を読む」 (`connector-roles.md` "Role providers": `roleProviders.calendar`; no usable
 connector → `stopped`), so everything Google-specific stays in one module.
 
+「今日の予定」 belongs to the feature 会議と議事録 (owner decision 2026-11-07, `records.md` "Features on and
+off"): the app reads and shows it only while that feature is on — above the task list, or above the
+small list 「押すもの」 when the list is off (`tasks-ui.md`). The route itself stays (the member's own
+calendar, read now, nothing kept).
+
 ## Layers
 
 - `shared/core/calendar.ts`: the neutral event shape `CalendarEvent` (id, title, start / end ISO

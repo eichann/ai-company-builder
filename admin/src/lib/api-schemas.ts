@@ -22,6 +22,7 @@ import type {
 } from '../../../shared/types/agent-events'
 import type { AgentSandboxView } from '../../../shared/types/agent-sandbox'
 import type { AgentStopView } from '../../../shared/types/agent-stop'
+import type { FeaturesView } from '../../../shared/types/features'
 import type { CoreConnectorsView } from '../../../shared/types/core-connectors'
 import type { GoogleAdminView, GoogleRelayAdminView } from '../../../shared/types/google'
 import type { InboxSettingsView } from '../../../shared/types/inbox'
@@ -335,6 +336,9 @@ export const secondOpinionSchema = topLevel<SecondOpinionView>({ allowed: bool, 
 
 // 「記録とやることの一覧を使う」 (shared/types/records.ts)
 export const recordSettingsSchema = topLevel<RecordSettings>({ enabled: bool, updatedAt: nullableStr })
+
+// 「使う機能」 (shared/types/features.ts)
+export const featuresSchema = topLevel<FeaturesView>({ features: obj, canEdit: bool, updatedAt: nullableStr, updatedBy: nullableStr, updatedByName: nullableStr })
 
 // Tasks, inbox and absences
 export const taskSettingsSchema = topLevel<TaskSettingsView>({

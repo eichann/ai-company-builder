@@ -1,3 +1,4 @@
+import { FEATURE_OFF_DETAIL, FEATURE_OFF_NOTE } from '../../../../../shared/core/features'
 import { useState, type ReactNode } from 'react'
 import { CircleNotch } from '@phosphor-icons/react'
 import type { RecordCardView, RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
@@ -118,14 +119,16 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     await undo({ recordId: card.record.id, version: card.version })
     setBusy(false)
   }
-  const incoming = card.detail?.kind === 'incoming' && card.version !== undefined
+  // 「見るだけ」 (its feature is off, records.md "Features on and off"): nothing to press on this card.
+  const viewOnly = card.featureOff === true
+  const incoming = viewOnly ? null : card.detail?.kind === 'incoming' && card.version !== undefined
     ? <IncomingActions m={card.detail} busy={busy} onAct={a => void act(a)} onUndo={() => void unsettle()}
       openReplies={card.links.filter(l => l.record?.type === 'reply_request' && !l.record.finished).length} />
     : card.detail?.kind === 'reply' && card.version !== undefined
       ? <ReplyRequestActions m={card.detail} busy={busy} onAct={a => void act(a)} />
       : null
   const bundleLink = card.links.find(l => l.bundle && l.record)
-  const field = renderBundleField && (card.detail?.kind === 'meeting' || card.detail?.kind === 'incoming') && card.version !== undefined
+  const field = !viewOnly && renderBundleField && (card.detail?.kind === 'meeting' || card.detail?.kind === 'incoming') && card.version !== undefined
     ? renderBundleField({
       record: card.record, version: card.version, bundle: bundleLink?.record ?? null, removable: bundleLink?.removable ?? null, onChanged: changed,
       counterpart: card.links.flatMap(l => (l.counterpart && l.record ? [{ id: l.record.id, title: l.record.title }] : []))[0] ?? null,
@@ -144,7 +147,7 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
   const participants = card.privateFolder && card.participants
     ? <ProjectParticipants companyId={companyId} card={{ privateFolder: card.privateFolder, participants: card.participants, viewers: card.viewers, record: card.record }} onChanged={reload} />
     : null
-  return <CardBody participants={participants} card={card} rootPath={rootPath} incoming={incoming} renderMeeting={renderMeeting} onReload={reload} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
+  return <CardBody participants={participants} card={card} rootPath={rootPath} incoming={incoming} renderMeeting={viewOnly ? undefined : renderMeeting} onReload={reload} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
     field={field} notes={notes} notDownloadedFolderOf={notDownloadedFolderOf} drop={{ label: 'ファイル・フォルダ・やること・相談', accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(card.record.id, e) }, notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }} onUnlink={(link, label) => void unlink(link, label)}
     consult={consultationLinks(consultations, onConsult && (fresh => onConsult({ id: card.record.id, title: card.record.title }, fresh)))} />
 }
@@ -202,7 +205,7 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
   return (
     <RecordPage testId="record-card" kind={record.thing} name={record.typeLabel} title={record.title} chips={chips} from={from} actions={actions}
       seenBy={card.viewers ? <SeenBy who={detail?.kind === 'meeting' ? meetingSeenWords(detail.attendees.length, card.viewers) : card.viewers.text} /> : record.personal ? <SeenBy who={ONLY_YOU} /> : null}
-      top={ai && <AiBand ai={ai} onShowHistory={() => setHistoryOpen(true)} />}
+      top={card.featureOff || ai ? <>{card.featureOff && <FeatureOffBand />}{ai && <AiBand ai={ai} onShowHistory={() => setHistoryOpen(true)} />}</> : null}
       bottomLast={detail?.kind === 'meeting'}
       bottom={<><HistoryFold lines={card.history} open={historyOpen} onToggle={setHistoryOpen} /><FieldsFold fields={card.fields} /></>}
       links={<LinkedColumn rows={rows} notice={notes} drop={drop} extras={consult.extra ? [consult.extra] : []} first={record.thing === 'bundle' ? 'task' : undefined} />}>
@@ -211,5 +214,15 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
       {source}
       {sections}
     </RecordPage>
+  )
+}
+
+/** 「この機能は今オフです」: the record stays to read; the company turned its feature off (owner decision 2026-11-07). */
+function FeatureOffBand() {
+  return (
+    <p data-testid="feature-off" role="note" className="mb-3 rounded-md bg-gray-100 px-3 py-2 text-[12.5px] leading-relaxed text-gray-700 dark:bg-zinc-800 dark:text-zinc-300">
+      <span className="font-medium">{FEATURE_OFF_NOTE}</span>
+      <span className="block text-[11.5px] text-gray-500 dark:text-zinc-400">{FEATURE_OFF_DETAIL}</span>
+    </p>
   )
 }

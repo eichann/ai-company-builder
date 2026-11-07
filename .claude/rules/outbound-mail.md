@@ -259,7 +259,8 @@ then the hash shown, an unseen 連絡 shows nothing).
 
 ## Waiting for their answer (「返事を待つ」, owner decision 2026-11-03 「①」)
 
-A new mail **we send first** (not a reply to a 連絡, not Slack: `offersAwait`) may wait for the
+A new mail **we send first** (not a reply to a 連絡, not Slack, and only while the inbox feature is on —
+`OutboundMailDeps.inboxOn`, `records.md` "Features on and off": `offersAwait`) may wait for the
 other side's answer; from then on the inbox's usual machinery (`inbox.md` "The thread went on",
 "Following up") catches their reply or their silence. Nothing is sent by itself; the server runs
 no AI.

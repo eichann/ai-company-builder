@@ -15,6 +15,17 @@ export const taskSchema = `
       updated_by TEXT
     );
 
+    -- The company's 「使う機能」 (feature switches, owner decisions 2026-11-07,
+    -- shared/core/features.ts): one JSON object per company; no row = every feature on.
+    -- Behind the company handle (ports/task-settings.ts). Kept apart from task_settings so an
+    -- older admin console's whole-document PUT of the task settings never turns a feature back on.
+    CREATE TABLE IF NOT EXISTS company_features (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      features TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT
+    );
+
     -- Department membership (所属する部署, stage 2 S6): who belongs to a
     -- department. A rule may name it (subject 'department', shared/core/permissions.ts):
     -- then who belongs decides who writes there (new departments start so).

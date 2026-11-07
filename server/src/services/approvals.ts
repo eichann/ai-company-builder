@@ -101,6 +101,8 @@ export interface ApprovalDeps {
   operations: ApprovalOperations
   /** 「決めたこと」 after an approval (services/decisions.ts). */
   decisions: { record(member: Member, actor: ActorInput, body: unknown): Promise<Outcome<unknown>> }
+  /** 「使う機能」 決めたこと is on: off, an approval leaves no 「〇〇を承認」 decision (records.md "Features on and off"). Absent → on. */
+  decisionsOn?: (companyId: string) => boolean
   roleOf: (companyId: string, userId: string) => string | null
   /** Owners and admins of the company (member ids). */
   admins: (companyId: string) => string[]
@@ -841,6 +843,8 @@ export function createApprovalService(deps: ApprovalDeps) {
    * approval stands and only the refusal's code is logged.
    */
   async function recordDecision(approver: Member, a: Loaded, payload: PluginApprovalPayload, reason: string): Promise<void> {
+    // 決めたこと turned off: the approval stands, no decision is left (and nothing is logged as a failure).
+    if (deps.decisionsOn && !deps.decisionsOn(approver.companyId)) return
     const handle = companyData.forCompany(approver.companyId)
     const dept = departmentOf(handle, a.row.folder)
     if (!dept) return

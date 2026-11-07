@@ -32,7 +32,8 @@
  *   instruction-like flags. The consultation AI reads it (no separate reader AI,
  *   owner §11) and makes outputs with the typed tools; the server's gates decide.
  */
-import { CLOCK_ACTOR } from '../../shared/core/core-types'
+import { CLOCK_ACTOR, CORE_BUNDLE_TYPE } from '../../shared/core/core-types'
+import { FEATURE_OFF } from '../../shared/core/features'
 import {
   MEETING_ARRIVED_DAYS, MEETING_ARRIVED_STATE, MEETING_ATTENDEES_ACTION, MEETING_BUNDLE_DAYS_MAX, MEETING_BUNDLE_DAYS_MIN, MEETING_INTAKE_CHOICES,
   MEETING_BUNDLE_LINKED_ACTION, MEETING_NO_BUNDLE_ACTION, MEETING_READ_REQUEST_ACTION, MEETING_SKIP_ACTION, MEETING_TYPE, meetingAsksBundle,
@@ -74,6 +75,19 @@ export interface MinutesMember {
 
 export interface MinutesServiceDeps {
   companyData: CompanyDataSource
+  /**
+   * 「使う機能」 会議と議事録 is on (records.md "Features on and off"). Off: no meeting is found
+   * (the clock, the app's check), the reading, まとまり, skip and auto-series routes answer 409
+   * FEATURE_OFF, arrivals and まとまり questions answer empty; earlier meetings stay readable on their
+   * card. Absent → on.
+   */
+  enabled?: (companyId: string) => boolean
+  /**
+   * 「使う機能」 プロジェクト is on: off, 「どの〇〇の会議ですか？」 is asked only where a business
+   * plugin's 束ねるもの exists (a department of the core's プロジェクト alone has nothing to choose).
+   * Absent → on.
+   */
+  projectsOn?: (companyId: string) => boolean
   writer: ServiceRecordWriter
   /** The core role 会議の記録を読む, routed to the company's connector (connector-roles.md). */
   meetings: MeetingRecordsReader
@@ -266,6 +280,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     return writer.transition(companyId, { recordId, action: back.action, expectedVersion: now.version, to: back.to, actor, note }).ok
   }
   const disabled = () => refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
+  const featureOn = (companyId: string) => deps.enabled?.(companyId) ?? true
+  const featureOff = () => refuse('conflict', FEATURE_OFF.error, { code: FEATURE_OFF.code })
   const notFound = () => refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
 
   /** Department folders that may hold minutes (never a private folder). */
@@ -833,6 +849,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
      */
     async check(member: Member): Promise<Outcome<MinutesCheckResult>> {
       if (!companyData.forCompany(member.companyId).records.settings().enabled) return disabled()
+      // 会議と議事録 off: nothing is looked up; an older app's periodic check gets a quiet empty answer.
+      if (!featureOn(member.companyId)) return ok({ checked: false, message: FEATURE_OFF.error, meetings: 0, internalOnly: 0, created: [], existing: 0, waiting: 0, stale: [] })
       const stale = putBackStale(member)
       const found = await discover(member.companyId, member.userId, { calls: MEETING_CALLS_PER_CHECK })
       if (!found.ok) return found
@@ -847,6 +865,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
      */
     async pollCompany(companyId: string, between: () => Promise<void> = async () => {}, calls = MEETING_CALLS_PER_RUN): Promise<number> {
       if (!companyData.forCompany(companyId).records.settings().enabled) return 0
+      if (!featureOn(companyId)) return 0
       const budget = { calls }
       // A different member first on each run, so a capped run does not always leave the same ones out.
       const all = deps.members(companyId)
@@ -892,6 +911,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return disabled()
+      if (!featureOn(member.companyId)) return featureOff()
       const reader = recordReader(member, handle.scopes.listWithRules())
       const row = readableMeeting(handle, reader, recordId)
       if (!row) return notFound()
@@ -952,6 +972,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return disabled()
+      if (!featureOn(member.companyId)) return featureOff()
       const reader = recordReader(member, handle.scopes.listWithRules())
       const row = readableMeeting(handle, reader, recordId)
       if (!row) return notFound()
@@ -1006,9 +1027,12 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return disabled()
+      if (!featureOn(member.companyId)) return ok({ days: meetingBundleDaysOf(records.meetingBundleDays()), questions: [] })
       const days = meetingBundleDaysOf(records.meetingBundleDays())
       const reader = recordReader(member, handle.scopes.listWithRules())
-      const bundleTypes = [...typesImplementing(handle, 'bundle').keys()]
+      // プロジェクト off (「使う機能」): the core's kind is no choice; a business plugin's kind still is.
+      const projectsOn = deps.projectsOn?.(member.companyId) ?? true
+      const bundleTypes = [...typesImplementing(handle, 'bundle').keys()].filter(t => projectsOn || t !== CORE_BUNDLE_TYPE)
       if (bundleTypes.length === 0 || !records.candidates({ types: bundleTypes }, 200).some(r => reader.record(r))) return ok({ days, questions: [] })
       const since = new Date(deps.clock.nowMs() - days * 86_400_000).toISOString()
       const rows = records.candidates({
@@ -1023,6 +1047,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
           externalAttendees: typeof now.fields.external_count === 'number' ? now.fields.external_count : 0,
           hasBundle: hasBundleLink(handle, row.id),
           noBundleChosen: ledger.some(e => e.action === MEETING_NO_BUNDLE_ACTION),
+          bundleKindInUse: bundleTypes.length > 0,
         })
         if (!asks) continue
         const readAt = [...ledger].reverse().find(e => e.toState === 'read' && e.fromState !== 'read')?.at
@@ -1041,6 +1066,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     bundleQuestion(member: Member, recordId: string): Outcome<MeetingBundleQuestionState> {
       const handle = companyData.forCompany(member.companyId)
       if (!handle.records.settings().enabled) return disabled()
+      if (!featureOn(member.companyId)) return featureOff()
       const row = readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), recordId)
       if (!row) return notFound()
       const now = fieldsOf(handle.records, row.id)
@@ -1062,6 +1088,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return disabled()
+      if (!featureOn(member.companyId)) return featureOff()
       const row = readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), recordId)
       if (!row) return notFound()
       const now = fieldsOf(records, row.id)
@@ -1102,6 +1129,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return disabled()
+      if (!featureOn(member.companyId)) return featureOff()
       const row = readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), recordId)
       if (!row) return notFound()
       const now = fieldsOf(records, row.id)
@@ -1130,6 +1158,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return disabled()
+      if (!featureOn(member.companyId)) return featureOff()
       const row = readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), recordId)
       if (!row) return notFound()
       const now = fieldsOf(records, row.id)
@@ -1160,6 +1189,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return disabled()
+      if (!featureOn(member.companyId)) return featureOff()
       const row = readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), recordId)
       if (!row) return notFound()
       const now = fieldsOf(records, row.id)
@@ -1184,6 +1214,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return disabled()
+      // 会議と議事録 off: nothing has arrived (earlier meetings stay on their cards and in 探す).
+      if (!featureOn(member.companyId)) return ok({ days: MEETING_ARRIVED_DAYS, items: [] })
       const reader = recordReader(member, handle.scopes.listWithRules())
       const since = new Date(deps.clock.nowMs() - MEETING_ARRIVED_DAYS * 86_400_000).toISOString()
       // Only meetings whose list names the member (every meeting found since 2026-11-04), then by time.

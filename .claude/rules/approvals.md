@@ -166,7 +166,8 @@ POST /api/companies/:id/approvals/:approvalId/same-as     { recordId, linkMeetin
     (when the request had one), the department of the request's folder, title
     「<what changed>を承認」, why = the approver's reason, key `<approval id>:decision`. When the
     decisions service refuses (the place), the approval stands and only the refusal's code is
-    logged.
+    logged. While 決めたこと is turned off (「使う機能」, `ApprovalServiceDeps.decisionsOn`) no decision is
+    made and nothing is logged.
   - `CHANGED_OUTSIDE`, `APPROVAL_STALE`, `VERSION_CONFLICT`, `ACCOUNT_CHANGED`, `NOT_LINKED` →
     `stale`, nothing written; 409 with the code, 「HubSpot 側で変わっています。もう一度お願いし直して
     ください」 and the view.

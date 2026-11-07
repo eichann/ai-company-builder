@@ -9,6 +9,7 @@ import { argDefaultOf, MESSAGE_TYPE } from '../../shared/core/core-types'
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import { actionWho, linkWhoName, parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
 import { restingTask } from '../../shared/core/turn-timing'
+import type { CompanyFeatures } from '../../shared/core/features'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type { BundleKindsResult, RecordSummary } from '../../shared/types/records'
 import type { MeetingBundleQuestion } from '../../shared/types/minutes'
@@ -87,6 +88,31 @@ export interface TaskListItem {
    * 「先のこと」; neither is counted in 「あなたの番」 (the title bar and the morning summary agree).
    */
   resting?: true
+  /**
+   * In the member's turn with something the AI made for them to check: a task the AI prepared and
+   * handed over (`prep_summary`), or 「議事録を確認する」 (`task_kind: minutes_review`). The small list
+   * 「ACB で押すもの」 shows these.
+   */
+  aiPrepared?: true
+}
+
+/** The AI made something in this record for the member to check (see `TaskListItem.aiPrepared`). */
+function aiPreparedOf(r: RecordSummary): boolean {
+  return (typeof r.fields.prep_summary === 'string' && r.fields.prep_summary.trim() !== '') || r.fields.task_kind === 'minutes_review'
+}
+
+/**
+ * 「ACB で押すもの」 (owner decision 2026-11-07, records.md "Features on and off"): with the task list
+ * turned off, the small list of what only ACB can act on — approvals waiting for the member and what
+ * the AI prepared for them to check, from the list's own data (arrived minutes and 決めたこと to confirm
+ * are added by the screen). Nothing resting, nothing of others.
+ */
+export function corePressItems(items: readonly TaskListItem[]): { approvals: TaskListItem[]; prepared: TaskListItem[] } {
+  const mine = items.filter(i => i.turn === 'mine' && !i.resting)
+  return {
+    approvals: mine.filter(i => i.type === 'approval'),
+    prepared: mine.filter(i => i.type !== 'approval' && i.aiPrepared === true),
+  }
 }
 
 const COMPLETE_FROM = new Set(['todo', 'in_progress', 'review', 'waiting', 'awaiting_acceptance', 'declined'])
@@ -228,6 +254,16 @@ export interface TaskListData {
   /** The member's own id and the company's members (the one line's 「担当」 picker); absent from an older main. */
   me?: string
   members?: Array<{ id: string; name: string }>
+  /**
+   * The company's 「使う機能」 (shared/core/features.ts), from `GET /records/types`: what the screens
+   * show. Absent (an older main) and an older server's answer without it = everything on.
+   */
+  features?: CompanyFeatures
+  /**
+   * 決めたこと waiting for the member's ［そうです］ (unconfirmed, the member its 確かめる人 `owner`):
+   * the small list 「ACB で押すもの」 (records.md "Features on and off"). Absent: none read.
+   */
+  decisionsToConfirm?: Array<{ id: string; title: string }>
 }
 
 export type TaskListResult =
@@ -462,6 +498,7 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
       ...(bundleGroup && suggested ? { suggestedBundle: suggested } : {}),
       ...(turn === 'ai' && r.waitOver ? { waitOver: true as const } : {}),
       ...(turn === 'mine' && restingTask(r) ? { resting: true as const } : {}),
+      ...(turn === 'mine' && aiPreparedOf(r) ? { aiPrepared: true as const } : {}),
       ...(r.type === 'task' && turn !== 'done' && r.fields.requested_by === src.me && typeof r.fields.assignee === 'string' && r.fields.assignee !== src.me ? { askedOfOthers: true as const } : {}),
       // ☑ on the member's own rows (and a check waiting for them), never on what they asked of someone else.
       ...((turn !== 'ai' && (turn !== 'others' || r.fields.assignee === src.me)) && checkOf(r, src.me) ? { check: checkOf(r, src.me) } : {}),

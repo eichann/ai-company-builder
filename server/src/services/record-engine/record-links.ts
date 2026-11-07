@@ -15,7 +15,7 @@ import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import type { RecordAccessRow } from '../../ports/records'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
-import { bad, conflict, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
+import { bad, conflict, featureOffRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
 import { BUNDLE_PLACED_TYPES, bundleLinkName, NAMED_PERSON_CANNOT_READ, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
@@ -45,6 +45,8 @@ export function recordLinking(ctx: EngineContext) {
       const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId]).find(r => reader.record(r)) : undefined
       if (!row) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
       if (serviceStateOnly(row.type)) return refuse('forbidden', STATE_CHANGED_BY_SERVICE.error, { code: STATE_CHANGED_BY_SERVICE.code })
+      const off = featureOffRefusal(ctx.deps.featureOff, member.companyId, row.type)
+      if (off) return off
       const types = currentTypes(records)
       const def = types.get(row.type)?.definition
       if (!def) return conflict('この記録の型の定義がありません', 'TYPE_UNKNOWN')

@@ -6,6 +6,7 @@
 // request and what the AI last did; `?record=reply` a 返事のお願い in 確かめ中 (the AI's turn) that is the member's,
 // ［終わりにする］ moving it as the server would (`&type=v4`: an older server's type, close only from 返事をする / 返事待ち) (`?ai=working`: while it works); `?field=real` draws the meeting's real
 // 案件・プロジェクト field (no 案件 yet: 「新しいプロジェクトにする」). Links opened outside show in `#opened`.
+// `&off=1`: the record's feature is turned off (「使う機能」): the card is 「見るだけ」.
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -92,8 +93,9 @@ const card = kind === 'bundle'
   : { record: view(record), version: 3, detail: recordDetailOf(record, people) ?? undefined, fields: [], history: [], links, viewers: kind === 'slack' ? { kind: 'only-you' as const, text: 'あなただけ', count: 1 } : { kind: 'department' as const, text: '営業部のみんな', count: 4 } }
 
 installElectronAPI({
-  getRecordCard: async () => ({ success: true, card: kind === 'slack' ? slackCard() : kind === 'reply' ? replyCard() : privateMode && kind === 'bundle'
-    ? { ...card, participants: participantsNow(), viewers: { kind: 'private-folder' as const, text: `『A社 研修導入』の参加者（${participantRules.length}人）`, count: participantRules.length } } : card }),
+  getRecordCard: async () => ({ success: true, card: { ...(kind === 'slack' ? slackCard() : kind === 'reply' ? replyCard() : privateMode && kind === 'bundle'
+    ? { ...card, participants: participantsNow(), viewers: { kind: 'private-folder' as const, text: `『A社 研修導入』の参加者（${participantRules.length}人）`, count: participantRules.length } } : card),
+    ...(params.get('off') === '1' ? { featureOff: true as const } : {}) } }),
   getPrivateFolderCreateContext: async () => ({ success: true, context: { role: 'member', managedDepartmentIds: ['d-sales'], department: { id: 'd-sales', name: '営業部', folder: '営業部' }, managerIds: [], members: [
     { userId: 'u-sato', name: '佐藤', email: null, role: 'member' }, { userId: 'u-kato', name: '加藤', email: null, role: 'member' }, { userId: 'u-admin', name: '管理', email: null, role: 'admin' },
   ] } }),

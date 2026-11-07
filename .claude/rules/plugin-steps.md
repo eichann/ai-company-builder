@@ -123,6 +123,10 @@ A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target
   steps at the state, the turns, another company) — mutation-checked; permission matrix rows +
   `CROSS`.
 
+While 会議と議事録 is turned off (「使う機能」, `records.md` "Features on and off") a meeting cannot
+become read (its actions are refused), so 「会議を読んだあと」 never starts a step by itself; a step's
+［ボタン］ still works.
+
 ## Starting by itself (owner decisions 2026-11-06, 「仕事から Skill で成果物まで」)
 
 A step declared `start: person` stays a button unless the company chooses 「自動で始める」 for it;

@@ -98,6 +98,8 @@ let slackReads = new Set<string>()
 let pluginNotifiers: ConnectedNotifier[] = []
 /** Members whose own 自動で進める is off (the composition's `autoRunFor`). */
 let autoRunOff = new Set<string>()
+/** Companies whose 「使う機能」 受信の振り分け・返事のお願い is off (records.md "Features on and off"). */
+let inboxOff = new Set<string>()
 
 const m = (userId: string, co = 'a'): Member => ({ companyId: co, userId, role: ROLES[userId] ?? 'member' })
 const AI = (userId: string): ServiceActor => ({ id: userId, kind: 'ai', source: 'claude-code', conversationId: 'conv-1', runId: null })
@@ -157,6 +159,7 @@ beforeEach(() => {
   slackReads = new Set()
   pluginNotifiers = []
   autoRunOff = new Set()
+  inboxOff = new Set()
   told = []
   mailbox = {}
   ready = new Set()
@@ -193,6 +196,7 @@ beforeEach(() => {
     connectorReadsFor: (_co, userId, connectorId) => connectorId === 'slack' && slackReads.has(userId),
     pluginNotifiers: async () => pluginNotifiers,
     autoRunFor: (_co, userId) => !autoRunOff.has(userId),
+    enabled: co => !inboxOff.has(co),
   })
   engine = createRecordEngine({
     companyData: source, transactions: sqliteTransactions(conn), clock, ids,
@@ -584,6 +588,33 @@ describe('polling through the role, reconnecting', () => {
     })
     lone.connect('a', 'u-alice', 'email')
     expect(await lone.poll('a', 'u-alice')).toEqual({ read: 0, outcome: 'no-source' })
+  })
+})
+
+describe('「使う機能」: the inbox turned off (owner decision 2026-11-07)', () => {
+  it('nothing comes in — the clock reads no mailbox, Slack and our own replies are skipped, 返事を待つ waits for nothing, the AI cannot judge — and on again it reads from where it stopped', async () => {
+    inbox.receive('a', 'u-alice', mail({ occurredAt: '2026-11-02T00:30:00.000Z' }))
+    const before = interactions()[0]
+    inbox.connect('a', 'u-alice', 'email')
+    inboxOff.add('a')
+    mailbox['u-alice'] = [mail({ occurredAt: '2026-11-02T01:30:00.000Z' })]
+    nowMs = Date.parse('2026-11-02T02:00:00.000Z')
+    expect(await inbox.pollCompany('a')).toBe(0)
+    expect(listedSince).toEqual([])
+    expect(inbox.receive('a', 'u-alice', mail({ occurredAt: '2026-11-02T01:40:00.000Z' }))).toBe('skipped')
+    expect(inbox.awaitOwnMessage({
+      companyId: 'a', userId: 'u-alice', interactionId: before.id, channel: 'email', messageId: '<x@acme.example>', sourceRef: 'gmail:x',
+      occurredAt: '2026-11-02T01:40:00.000Z', waitUntil: '2026-11-05T09:00', title: '見積', waitingOn: '佐藤さんからの返事', to: 'sato@client.example', taskId: null,
+    })).toBeNull()
+    const judged = inbox.judge(m('u-alice'), AI('u-alice'), before.id, { expectedVersion: 1, outcome: 'reply', reason: '見積の依頼' })
+    expect(judged.ok ? null : (judged.body as { code?: string }).code).toBe('FEATURE_OFF')
+    expect(interactions()).toHaveLength(1)
+    // Another company's inbox goes on.
+    expect(inbox.receive('b', 'u-alice', mail({ occurredAt: '2026-11-02T01:45:00.000Z' }))).not.toBe('skipped')
+
+    inboxOff.delete('a')
+    expect(await inbox.pollCompany('a')).toBe(1)
+    expect(interactions()).toHaveLength(2)
   })
 })
 

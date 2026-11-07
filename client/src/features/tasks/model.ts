@@ -198,7 +198,9 @@ export function bundleListWord(items: readonly TaskListItem[], companyWord = '�
  */
 export function departmentBundleKind(kinds: BundleKindsResult | null | undefined, folder: string | null | undefined): BundleKind | null {
   if (!kinds) return null
-  return kinds.departments.find(d => d.folder === folder)?.kind ?? kinds.core
+  const kind = kinds.departments.find(d => d.folder === folder)?.kind ?? kinds.core
+  // プロジェクト turned off (「使う機能」, `coreOff`): the core's kind is made nowhere, so nothing is offered to make.
+  return kinds.coreOff && kind.source === 'core' ? null : kind
 }
 
 /** A department a new 案件・プロジェクト may belong to (null folder = 全社), with what it makes there. */

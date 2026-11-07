@@ -11,7 +11,7 @@ import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import type { EngineContext } from './context'
 import { isPlaceOrLinkChange, linkLedgerValue, linkTargetsOf, withLinkTargets } from './links'
-import { bad, conflict, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
+import { bad, conflict, featureOffRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
 
@@ -27,6 +27,8 @@ export function undoing(ctx: EngineContext) {
       if (!row) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
       // An undo would reopen a used approval or a sent message: never through here.
       if (serviceStateOnly(row.type)) return refuse('forbidden', STATE_CHANGED_BY_SERVICE.error, { code: STATE_CHANGED_BY_SERVICE.code })
+      const off = featureOffRefusal(ctx.deps.featureOff, member.companyId, row.type)
+      if (off) return off
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null) return bad('The body must be an object')
       if (!Number.isInteger(b.version) || !Number.isInteger(b.expectedVersion)) return bad('version and expectedVersion are required')
