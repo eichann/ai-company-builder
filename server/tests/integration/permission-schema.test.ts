@@ -112,7 +112,8 @@ describe('migration of a database created by the previous server', () => {
       client_activity: conn.prepare('SELECT * FROM client_activity').all(),
     }
     initDatabase(conn)
-    expect(conn.prepare('SELECT * FROM companies ORDER BY id').all()).toEqual(before.companies)
+    // …each with the shared company folder it always had (folder_kind, server.md "Companies without a shared folder").
+    expect(conn.prepare('SELECT * FROM companies ORDER BY id').all()).toEqual(before.companies.map(c => ({ ...(c as object), folder_kind: 'git' })))
     expect(conn.prepare('SELECT * FROM memberships ORDER BY id').all()).toEqual(before.memberships)
     expect(conn.prepare('SELECT * FROM departments ORDER BY id').all()).toEqual(before.departments)
     expect(conn.prepare('SELECT * FROM client_activity').all()).toEqual(before.client_activity)

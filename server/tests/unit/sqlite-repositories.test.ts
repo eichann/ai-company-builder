@@ -21,7 +21,7 @@ beforeEach(() => {
 })
 
 function company(id: string, createdAt: string) {
-  sqliteCompanyRepository(conn).insert({ id, name: `Co ${id}`, slug: `co-${id}`, ownerId: 'u1', repoPath: null, createdAt })
+  sqliteCompanyRepository(conn).insert({ id, name: `Co ${id}`, slug: `co-${id}`, ownerId: 'u1', repoPath: null, createdAt, folderKind: 'git' })
 }
 
 describe('companies', () => {
@@ -35,7 +35,7 @@ describe('companies', () => {
 
     const rows = repo.listForUser('u1')
     expect(rows.map(r => [r.id, r.role])).toEqual([['b', 'member'], ['a', 'owner']])
-    expect(Object.keys(rows[0]).sort()).toEqual(['created_at', 'id', 'name', 'owner_id', 'repo_path', 'role', 'slug', 'updated_at'])
+    expect(Object.keys(rows[0]).sort()).toEqual(['created_at', 'folder_kind', 'id', 'name', 'owner_id', 'repo_path', 'role', 'slug', 'updated_at'])
     expect(rows[0].updated_at).toBe(rows[0].created_at)
     expect(repo.listForUser('nobody')).toEqual([])
   })
