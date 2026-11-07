@@ -525,13 +525,13 @@ never a stand-in that pretends a repository exists. For `none`:
   (like a missing repository, before the membership check), whatever is on disk.
 - Permission rules take the company, its departments and places named inside them (scope rows only:
   `/permissions/folders` lists the departments, and inside one the places below it that have rules;
-  a path in no department is not found). Record places: departments and paths below them; file
-  links refused (`records.md`). Read restriction: "Groups and read-restricted places" below.
+  a path in no department is not found). Record places: departments and paths below them; company-path
+  file links refused (`records.md`). Read restriction: "Groups and read-restricted places" below.
 - Company Skills (plugin steps' `company_skill`) are none (`STEP_SKILL_MISSING`); company types from
   `.acb/types/` none.
 - Read restriction without git: "Groups and read-restricted places" below (set on 「部署」: 「見られる人」).
-  File links on records will be a Drive
-  (later OneDrive) file id + revision + fingerprint, or an owner-only local link — no general upload.
+  File links on records are a Drive file id + revision + fingerprint, or an owner-only link to a file
+  of the member's PC — no general upload (`records.md` "File links without the shared folder"; OneDrive later).
 - Admin console: 「会社を作成」 asks 「全社フォルダ」 (使う（今までどおり）／使わない; `admin/src/lib/company-folder.ts`;
   one hint under it, `FOLDER_KIND_HINT`: sharing files through ACB or already elsewhere, and final);
   for `none` the menu has no 「フォルダ」 (the page, reached by URL, says why) and 「部署」 no

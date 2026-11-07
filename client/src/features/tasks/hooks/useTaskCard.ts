@@ -28,6 +28,8 @@ export function useTaskCard(companyId: string, recordId: string, onLoaded?: (loo
   const [result, show] = useShown(shownCards, companyId, recordId)
   // Linked files inside a `.personal/` folder that are on this computer (the server never has them).
   const [personalHere, setPersonalHere] = useState<ReadonlySet<string>>(new Set())
+  // A company without the shared folder: the member's own PC files linked here that are on this computer.
+  const [localHere, setLocalHere] = useState<ReadonlySet<string> | null>(null)
   const reload = useCallback(() => {
     void getTaskCard(companyId, recordId).then(
       r => {
@@ -38,6 +40,9 @@ export function useTaskCard(companyId: string, recordId: string, onLoaded?: (loo
           const personal = r.card.files.map(f => f.path).filter(isPersonalPath)
           void Promise.all(personal.map(p => fileIsHere(`${rootPath}/${p}`).then(here => (here ? [p] : []), () => [])))
             .then(found => setPersonalHere(new Set(found.flat())))
+          const local = r.card.localFiles.map(f => f.path)
+          void Promise.all(local.map(p => fileIsHere(`${rootPath}/${p}`).then(here => (here ? [p] : []), () => [])))
+            .then(found => setLocalHere(new Set(found.flat())))
         }
         if (r.success) loadedRef.current?.({ title: r.card.record.title, type: r.card.record.type, typeLabel: r.card.record.typeLabel, state: r.card.record.state })
       },
@@ -55,5 +60,5 @@ export function useTaskCard(companyId: string, recordId: string, onLoaded?: (loo
     return onTasksMayHaveChanged(companyId, () => listener(asked))
   }, [companyId, asked])
   useIpcEvent(subscribe, reload)
-  return { result, reload, personalHere }
+  return { result, reload, personalHere, localHere }
 }

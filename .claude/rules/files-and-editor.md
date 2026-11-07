@@ -415,7 +415,9 @@ The file tree, editor and file operations work in the plain working folder as in
 (the main-process file guards find no company repository there, so the skill / agent-config /
 reserved-name refusals of the app's own operations do not apply: the folder is the member's own).
 Hidden there: 「やることにつなぐ…」 and, on a task card, ［＋ファイル・フォルダをつなぐ］ and ［新しいファイル］
-(the server refuses file links; `TaskCard` `sharedFolder`, `tasks-ui.md` "Linking files"), the file's side column
+(the server refuses company paths; `TaskCard` `sharedFolder`). A file dragged from the tree onto a task
+card or a task row is linked as the member's own (「あなただけ」), and the card offers ［Google Drive の
+ファイルをつなぐ］ (`tasks-ui.md` "Linking files", `records.md` "File links without the shared folder"). Also hidden: the file's side column
 (つながっているもの, 前の版), the 「大きすぎて共有されていません」 marks and 閲覧のみ. 探す and Cmd+P read the
 disk (`electron/plain-search.ts`). Skills show 「この PC だけのスキルです」 instead of 共有.
 

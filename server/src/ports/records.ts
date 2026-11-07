@@ -85,6 +85,21 @@ export interface RecordLinkRow {
    * Absent / null: not known (a record file's link, a link from before it was kept).
    */
   createdBy?: string | null
+  /** A `drive:` link's facts as they were when it was linked (absent for every other link). */
+  drive?: DriveLinkMeta | null
+}
+
+/**
+ * What ACB kept of a Google Drive file when a member linked it (records.md "File links without the
+ * shared folder"): the revision it was at, its name as picked (shown to the linker only), the sha256
+ * of the content ACB read then (null when ACB could not read it), its MIME type and when.
+ */
+export interface DriveLinkMeta {
+  revisionId: string | null
+  name: string
+  sha256: string | null
+  mimeType: string | null
+  linkedAt: string
 }
 
 export interface RecordProblemRow {

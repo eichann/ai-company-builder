@@ -11,7 +11,7 @@ import { parseAiRunProcedure } from '../../../shared/core/ai-runs'
 import type { ExternalReceipt, LedgerEntry, LedgerVia } from '../../../shared/core/record-ledger'
 import { parseSkillUses } from '../../../shared/core/skill-uses'
 import type {
-  RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordMemberSet, RecordProblemRow, RecordRepoKey, RecordRepository,
+  DriveLinkMeta, RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordMemberSet, RecordProblemRow, RecordRepoKey, RecordRepository,
   RecordRow, RecordStateRow, RecordTypeRow,
   MeetingEventRow,
 } from '../../ports/records'
@@ -71,8 +71,27 @@ const toRecord = (r: Row): RecordRow => ({
   id: r.id, type: r.type, typeVersion: r.type_version, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: ownerOf(r.personal_owner),
   members: membersOf(r.members_json), ...withSets(r.sets_json), title: r.title, summary: r.summary, createdAt: r.created_at, updatedAt: r.updated_at, removedAt: r.removed_at,
 })
-type LinkRow = { source_id: string; name: string; position: number; target_id: string | null; target_path: string | null; created_by: string | null }
-const toLink = (r: LinkRow): RecordLinkRow => ({ sourceId: r.source_id, name: r.name, position: r.position, targetId: r.target_id, targetPath: r.target_path, createdBy: r.created_by ?? null })
+type LinkRow = { source_id: string; name: string; position: number; target_id: string | null; target_path: string | null; created_by: string | null; target_meta: string | null }
+/** A Drive link's kept facts (records.md "File links without the shared folder"); anything unreadable is none. */
+function driveMetaOf(text: string | null): DriveLinkMeta | null {
+  if (!text) return null
+  try {
+    const v = JSON.parse(text) as Record<string, unknown>
+    if (typeof v !== 'object' || v === null || typeof v.name !== 'string' || typeof v.linkedAt !== 'string') return null
+    return {
+      name: v.name, linkedAt: v.linkedAt,
+      revisionId: typeof v.revisionId === 'string' ? v.revisionId : null,
+      sha256: typeof v.sha256 === 'string' ? v.sha256 : null,
+      mimeType: typeof v.mimeType === 'string' ? v.mimeType : null,
+    }
+  } catch {
+    return null
+  }
+}
+const toLink = (r: LinkRow): RecordLinkRow => {
+  const drive = driveMetaOf(r.target_meta)
+  return { sourceId: r.source_id, name: r.name, position: r.position, targetId: r.target_id, targetPath: r.target_path, createdBy: r.created_by ?? null, ...(drive ? { drive } : {}) }
+}
 
 type LedgerRow = {
   record_id: string; version: number; action: string; from_state: string | null; to_state: string | null; actor_id: string
@@ -437,17 +456,17 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
 
     linksFrom(ids) {
       if (ids.length === 0) return []
-      return (conn.prepare('SELECT source_id, name, position, target_id, target_path, created_by FROM record_links WHERE company_id = ? AND source_id IN (SELECT value FROM json_each(?)) ORDER BY source_id, name, position')
+      return (conn.prepare('SELECT source_id, name, position, target_id, target_path, created_by, target_meta FROM record_links WHERE company_id = ? AND source_id IN (SELECT value FROM json_each(?)) ORDER BY source_id, name, position')
         .all(companyId, JSON.stringify(ids)) as LinkRow[]).map(toLink)
     },
     linksTo(ids) {
       if (ids.length === 0) return []
-      return (conn.prepare('SELECT source_id, name, position, target_id, target_path, created_by FROM record_links WHERE company_id = ? AND target_id IN (SELECT value FROM json_each(?)) ORDER BY source_id, name, position')
+      return (conn.prepare('SELECT source_id, name, position, target_id, target_path, created_by, target_meta FROM record_links WHERE company_id = ? AND target_id IN (SELECT value FROM json_each(?)) ORDER BY source_id, name, position')
         .all(companyId, JSON.stringify(ids)) as LinkRow[]).map(toLink)
     },
     fileLinksTo(paths) {
       if (paths.length === 0) return []
-      return (conn.prepare('SELECT source_id, name, position, target_id, target_path, created_by FROM record_links WHERE company_id = ? AND target_path IN (SELECT value FROM json_each(?)) ORDER BY source_id, name, position')
+      return (conn.prepare('SELECT source_id, name, position, target_id, target_path, created_by, target_meta FROM record_links WHERE company_id = ? AND target_path IN (SELECT value FROM json_each(?)) ORDER BY source_id, name, position')
         .all(companyId, JSON.stringify(paths)) as LinkRow[]).map(toLink)
     },
     retargetFileLinks(links) {
@@ -465,8 +484,8 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     },
     replaceLinks(sourceId, links) {
       conn.prepare('DELETE FROM record_links WHERE company_id = ? AND source_id = ?').run(companyId, sourceId)
-      const insert = conn.prepare('INSERT INTO record_links (company_id, source_id, name, position, target_id, target_path, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      for (const l of links) insert.run(companyId, sourceId, l.name, l.position, l.targetId, l.targetPath, l.createdBy ?? null)
+      const insert = conn.prepare('INSERT INTO record_links (company_id, source_id, name, position, target_id, target_path, created_by, target_meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      for (const l of links) insert.run(companyId, sourceId, l.name, l.position, l.targetId, l.targetPath, l.createdBy ?? null, l.drive ? JSON.stringify(l.drive) : null)
     },
 
     states(ids) {

@@ -24,6 +24,11 @@ export interface LinkDropOptions {
   targetWord: string
   /** Something was linked or put back (the card / the list reads again). */
   onChanged?: () => void
+  /**
+   * A company without the shared folder (records.md "File links without the shared folder"): a
+   * dropped file of the working folder is linked as the member's own (`local`, seen by them alone).
+   */
+  localFiles?: boolean
   ports?: { links?: LinkDrops; topics?: ConsultationTopics }
 }
 
@@ -45,7 +50,7 @@ const companyPath = (path: string, rootPath: string): string | null => {
  * choice); a consultation becomes one about the record (its topic, this PC's history). One notice
  * per target, so a drop on a list row speaks where the list shows its messages.
  */
-export function useLinkDrop({ companyId, rootPath, targetWord, onChanged, ports = {} }: LinkDropOptions) {
+export function useLinkDrop({ companyId, rootPath, targetWord, onChanged, localFiles = false, ports = {} }: LinkDropOptions) {
   // The notice belongs to the record dropped on (a list row speaks under that row), named by each
   // caller: an answer arriving after another drop still speaks where its own drop was.
   const [state, setState] = useState<{ notice: LinkDropNotice; target: string; at: number } | null>(null)
@@ -115,7 +120,7 @@ export function useLinkDrop({ companyId, rootPath, targetWord, onChanged, ports 
     if (consultation) { void topic(targetId, consultation.sessionId, consultation.title, consultation.topicRecordId); return true }
     // The first dragged path inside the company folder (one link per drop).
     const path = draggedFilePaths(data).map(p => companyPath(p, rootPath)).find((p): p is string => p !== null)
-    if (path) { void link(targetId, { kind: 'path', path }); return true }
+    if (path) { void link(targetId, localFiles ? { kind: 'path', path, local: true } : { kind: 'path', path }); return true }
     return false
   }
 

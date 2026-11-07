@@ -52,8 +52,10 @@ export interface RecordEngineDeps {
   folderExists?: (companyId: string, path: string) => Promise<boolean | null>
   /**
    * Does the company have its shared folder (services/company-folder.ts)? Without one a path on a
-   * member's PC means nothing to anyone else: new file links, attached file versions and file
-   * materials are refused (409 NO_COMPANY_FOLDER). Absent → yes.
+   * member's PC means nothing to anyone else: new company-path links, attached file versions and
+   * file materials are refused (409 NO_COMPANY_FOLDER); such a company links a Drive file or an
+   * owner-only file of the member's PC instead ("File links without the shared folder"), which a
+   * company with the folder refuses (409 FILE_LINK_KIND_NOT_HERE). Absent → yes.
    */
   hasCompanyFolder?: (companyId: string) => boolean
   /** Digests an output's item key into its id (minutes.md "Outputs made once"); absent → by title only. */
@@ -99,6 +101,20 @@ export interface RecordEngineDeps {
    * or link change runs on it (409 FEATURE_OFF); reading is unchanged. Absent → never.
    */
   featureOff?: (companyId: string, type: string) => boolean
+}
+
+/**
+ * A Google Drive file the Google connector checked for the linking member (records.md "File links
+ * without the shared folder"): one of their own live picks, opened with their own `drive.file`
+ * token, its revision, name, type and the sha256 of the content ACB read (null when it could not).
+ * Only the route hands it over (services/google-drive.ts `linkable`), never a request body.
+ */
+export interface VerifiedDriveFile {
+  fileId: string
+  revisionId: string | null
+  name: string
+  mimeType: string | null
+  sha256: string | null
 }
 
 /** The entry a notify is about (the record's type and its server fields after the entry). */

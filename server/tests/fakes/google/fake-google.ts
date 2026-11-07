@@ -817,6 +817,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
 
   const driveFileOut = (f: LiveDriveFile, viewer: string): Record<string, unknown> => ({
     kind: 'drive#file', id: f.id, name: f.name, mimeType: f.mimeType, trashed: false, parents: f.parents, modifiedTime: f.modifiedTime,
+    // Drive's file version (int64 as a string): every file has one, Google documents too.
+    version: '1',
     webViewLink: `https://drive.google.com/file/d/${f.id}/view`, appProperties: f.appProperties,
     ...(f.mimeType.startsWith('application/vnd.google-apps.') ? {} : { headRevisionId: f.headRevisionId, size: String(f.content.byteLength) }),
     capabilities: { canAddChildren: f.mimeType === 'application/vnd.google-apps.folder' && (f.writers ?? [f.owner]).some(w => w.toLowerCase() === viewer.toLowerCase()) },

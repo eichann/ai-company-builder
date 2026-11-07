@@ -281,6 +281,79 @@ describe('the AI reads picked files only', () => {
   })
 })
 
+describe('a picked file linked to a record (a company without the shared folder, records.md)', () => {
+  const linkDrive = (user: string, recordId: string, fileId: string, expectedVersion: number) =>
+    person(user, 'POST', `/records/item/${recordId}/file-links`, { target: { kind: 'drive', fileId }, expectedVersion })
+  const driveLinks = async (user: string, recordId: string) =>
+    ((await person(user, 'GET', `/records/item/${recordId}`)).body.data.links as Json[]).filter(l => l.drive).map(l => l.drive)
+
+  it('the linker’s own pick, checked with their permission: revision and the sha256 of what ACB read kept; the name for the linker only', async () => {
+    db.prepare("UPDATE companies SET folder_kind = 'none' WHERE id = ?").run(CO)
+    try {
+      const made = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '提案書を作る', fields: { assignee: 'm-tanaka' } })
+      expect(made.status, made.text).toBe(201)
+      const id = made.body.data.record.id as string
+
+      // A PDF: Drive's head revision, the sha256 of its bytes.
+      expect((await linkDrive('m-sato', id, GOOGLE_SEED.handNotesPdf, 1)).status).toBe(200)
+      // A Google document: no head revision → its version; the sha256 of the text ACB exported.
+      expect((await linkDrive('m-sato', id, GOOGLE_SEED.pastProposalDoc, 2)).status).toBe(200)
+      const mine = await driveLinks('m-sato', id)
+      expect(mine.map((d: Json) => d.name)).toEqual(['手書きメモ.pdf', '過去の提案書（株式会社テスト）'])
+      expect(mine[0].revisionId).toMatch(/^rev-/)
+      expect(mine[0].sha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(mine[1].revisionId).toMatch(/^version:\d+$/)
+      expect(mine[1].sha256).toMatch(/^[0-9a-f]{64}$/)
+      expect(mine.every((d: Json) => d.mine)).toBe(true)
+
+      // Tanaka reads the task: the rows, never the names; no Google call is made for him.
+      const calls = google.requests.length
+      const his = await driveLinks('m-tanaka', id)
+      expect(his).toEqual([{ fileId: GOOGLE_SEED.handNotesPdf, mine: false }, { fileId: GOOGLE_SEED.pastProposalDoc, mine: false }])
+      expect(google.requests.length).toBe(calls)
+      // He cannot link a file he did not pick (another member's pick is not his): nothing asked of Google.
+      const refused = await linkDrive('m-tanaka', id, GOOGLE_SEED.pastProposalSlides, 3)
+      expect([refused.status, refused.body.code]).toEqual([403, 'DRIVE_NOT_PICKED'])
+      expect(google.requests.length).toBe(calls)
+    } finally {
+      db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
+    }
+  })
+
+  it('every record check comes first: a missing, unreadable, stale or already linked record asks Google nothing', async () => {
+    db.prepare("UPDATE companies SET folder_kind = 'none' WHERE id = ?").run(CO)
+    try {
+      // Tanaka's own task (owner-only): Sato cannot read it — the same answer as a record that does not exist.
+      const hidden = await person('m-tanaka', 'POST', '/records/item', { type: 'task', title: '田中さんのメモ', personal: true, fields: { assignee: 'm-tanaka' } })
+      expect(hidden.status, hidden.text).toBe(201)
+      const mine = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '佐藤さんの件', fields: { assignee: 'm-sato' } })
+      const id = mine.body.data.record.id as string
+      expect((await linkDrive('m-sato', id, GOOGLE_SEED.handNotesPdf, 1)).status).toBe(200)
+
+      const calls = google.requests.length
+      const missing = await linkDrive('m-sato', 'task-0000000000000000', GOOGLE_SEED.handNotesPdf, 1)
+      expect([missing.status, missing.body.code]).toEqual([404, 'RECORD_NOT_FOUND'])
+      const unreadable = await linkDrive('m-sato', hidden.body.data.record.id, GOOGLE_SEED.handNotesPdf, 1)
+      expect([unreadable.status, unreadable.body.code]).toEqual([404, 'RECORD_NOT_FOUND'])
+      const stale = await linkDrive('m-sato', id, GOOGLE_SEED.pastProposalDoc, 1)
+      expect([stale.status, stale.body.code]).toEqual([409, 'VERSION_CONFLICT'])
+      const again = await linkDrive('m-sato', id, GOOGLE_SEED.handNotesPdf, 2)
+      expect([again.status, again.body.data.changed]).toEqual([200, false])
+      expect(google.requests.length).toBe(calls)
+    } finally {
+      db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
+    }
+  })
+
+  it('a company with the shared folder refuses it without asking Google', async () => {
+    const made = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '別の件', fields: { assignee: 'm-sato' } })
+    const calls = google.requests.length
+    const r = await linkDrive('m-sato', made.body.data.record.id, GOOGLE_SEED.handNotesPdf, 1)
+    expect([r.status, r.body.code]).toEqual([409, 'FILE_LINK_KIND_NOT_HERE'])
+    expect(google.requests.length).toBe(calls)
+  })
+})
+
 describe('the AI puts a PDF / HTML into a picked folder', () => {
   it('a read token cannot put; an unpicked folder, another kind, a fake PDF, a changed file, a wrong extension are refused', async () => {
     const read = await tokenFor('m-sato', 'read')

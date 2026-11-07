@@ -202,6 +202,7 @@ contract.invoke tasks:card
 contract.invoke tasks:create
 contract.invoke tasks:createBundle
 contract.invoke tasks:dropLink
+contract.invoke tasks:linkDriveFiles
 contract.invoke tasks:linkFile
 contract.invoke tasks:linkRecord
 contract.invoke tasks:list
@@ -214,6 +215,7 @@ contract.invoke tasks:suggestTags
 contract.invoke tasks:undo
 contract.invoke tasks:unlinkFile
 contract.invoke tasks:unlinkRecord
+contract.invoke tasks:unlinkTarget
 contract.invoke threads:get
 contract.invoke tool-approval-response
 contract.invoke tools:start
@@ -438,6 +440,7 @@ contract.type ElectronAPI.gitSync = gitSync: Invoke<'git:sync'>
 contract.type ElectronAPI.gitUnsharedLargeFiles = gitUnsharedLargeFiles: Invoke<'git:unsharedLargeFiles'>
 contract.type ElectronAPI.hasApiKey = hasApiKey: Invoke<'config:hasApiKey'>
 contract.type ElectronAPI.inviteToRecord = inviteToRecord: Invoke<'minutes:invite'>
+contract.type ElectronAPI.linkDriveFilesToTask = linkDriveFilesToTask: Invoke<'tasks:linkDriveFiles'>
 contract.type ElectronAPI.linkFileToTask = linkFileToTask: Invoke<'tasks:linkFile'>
 contract.type ElectronAPI.linkMinutesBundle = linkMinutesBundle: Invoke<'minutes:linkBundle'>
 contract.type ElectronAPI.linkRecordToRecord = linkRecordToRecord: Invoke<'tasks:linkRecord'>
@@ -542,6 +545,7 @@ contract.type ElectronAPI.undoPluginOperation = undoPluginOperation: Invoke<'plu
 contract.type ElectronAPI.undoTaskAction = undoTaskAction: Invoke<'tasks:undo'>
 contract.type ElectronAPI.unlinkFileFromTask = unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
 contract.type ElectronAPI.unlinkRecordFromRecord = unlinkRecordFromRecord: Invoke<'tasks:unlinkRecord'>
+contract.type ElectronAPI.unlinkTargetFromTask = unlinkTargetFromTask: Invoke<'tasks:unlinkTarget'>
 contract.type ElectronAPI.unwatchCompany = unwatchCompany: Invoke<'fs:unwatch'>
 contract.type ElectronAPI.updateEnv = updateEnv: Invoke<'env:update'>
 contract.type ElectronAPI.updateHandoff = updateHandoff: Invoke<'handoff:update'>
@@ -860,6 +864,7 @@ contract.type IpcInvokeChannels.'tasks:card' = 'tasks:card': { args: [companyId:
 contract.type IpcInvokeChannels.'tasks:create' = 'tasks:create': { args: [companyId: string, input: TaskCreateInput]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:createBundle' = 'tasks:createBundle': { args: [companyId: string, input: BundleCreateInput]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:dropLink' = 'tasks:dropLink': { args: [companyId: string, targetId: string, dropped: DroppedThing, link?: string]; result: DropLinkResult }
+contract.type IpcInvokeChannels.'tasks:linkDriveFiles' = 'tasks:linkDriveFiles': { args: [companyId: string, recordId: string, expectedVersion: number]; result: TaskDriveLinkResult }
 contract.type IpcInvokeChannels.'tasks:linkFile' = 'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:linkRecord' = 'tasks:linkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId: string]; result: TaskListResult }
@@ -872,6 +877,7 @@ contract.type IpcInvokeChannels.'tasks:suggestTags' = 'tasks:suggestTags': { arg
 contract.type IpcInvokeChannels.'tasks:undo' = 'tasks:undo': { args: [companyId: string, recordId: string, version: number, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:unlinkFile' = 'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:unlinkRecord' = 'tasks:unlinkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:unlinkTarget' = 'tasks:unlinkTarget': { args: [companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'threads:get' = 'threads:get': { args: [companyId: string, recordId: string]; result: RecordThreadResult }
 contract.type IpcInvokeChannels.'tool-approval-response' = 'tool-approval-response': { args: [toolUseId: string, approved: boolean]; result: boolean }
 contract.type IpcInvokeChannels.'tools:start' = 'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
@@ -1144,6 +1150,7 @@ main.handle tasks:card @ features/tasks/ipc.ts (companyId, recordId)
 main.handle tasks:create @ features/tasks/ipc.ts (companyId, input)
 main.handle tasks:createBundle @ features/tasks/ipc.ts (companyId, input)
 main.handle tasks:dropLink @ features/tasks/ipc.ts (companyId, targetId, dropped, link)
+main.handle tasks:linkDriveFiles @ features/tasks/ipc.ts (companyId, recordId, expectedVersion)
 main.handle tasks:linkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
 main.handle tasks:linkRecord @ features/tasks/ipc.ts (companyId, recordId, input)
 main.handle tasks:list @ features/tasks/ipc.ts (companyId)
@@ -1156,6 +1163,7 @@ main.handle tasks:suggestTags @ features/tasks/ipc.ts (companyId, title, inUse)
 main.handle tasks:undo @ features/tasks/ipc.ts (companyId, recordId, version, expectedVersion)
 main.handle tasks:unlinkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
 main.handle tasks:unlinkRecord @ features/tasks/ipc.ts (companyId, recordId, input)
+main.handle tasks:unlinkTarget @ features/tasks/ipc.ts (companyId, recordId, target, expectedVersion)
 main.handle threads:get @ features/threads/ipc.ts (companyId, recordId)
 main.handle tool-approval-response @ features/agent-interactions/ipc.ts (toolUseId: string, approved: boolean)
 main.handle tools:start @ features/tools/ipc.ts (unsafeToolPath: string, startCommand: string = 'dev', companyId?: string)
@@ -1419,6 +1427,8 @@ preload hasApiKey -> invoke config:hasApiKey()
 preload hasApiKey : () => Promise<boolean>
 preload inviteToRecord -> invoke minutes:invite($0, $1, $2, $3, $4)
 preload inviteToRecord : (companyId: string, recordId: string, memberIds: string[], expectedVersion: number, sets?: InviteSet[] | undefined) => Promise<MeetingInviteResult>
+preload linkDriveFilesToTask -> invoke tasks:linkDriveFiles($0, $1, $2)
+preload linkDriveFilesToTask : (companyId: string, recordId: string, expectedVersion: number) => Promise<TaskDriveLinkResult>
 preload linkFileToTask -> invoke tasks:linkFile($0, $1, $2, $3)
 preload linkFileToTask : (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => Promise<TaskWriteResult>
 preload linkMinutesBundle -> invoke minutes:linkBundle($0, $1, $2)
@@ -1627,6 +1637,8 @@ preload unlinkFileFromTask -> invoke tasks:unlinkFile($0, $1, $2, $3)
 preload unlinkFileFromTask : (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => Promise<TaskWriteResult>
 preload unlinkRecordFromRecord -> invoke tasks:unlinkRecord($0, $1, $2)
 preload unlinkRecordFromRecord : (companyId: string, recordId: string, input: RecordLinkInput) => Promise<TaskWriteResult>
+preload unlinkTargetFromTask -> invoke tasks:unlinkTarget($0, $1, $2, $3)
+preload unlinkTargetFromTask : (companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number) => Promise<TaskWriteResult>
 preload unwatchCompany -> invoke fs:unwatch($0)
 preload unwatchCompany : (rootPath: string) => Promise<SimpleResult>
 preload updateEnv -> invoke env:update($0, $1)

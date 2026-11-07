@@ -16,6 +16,33 @@ import {
   type LinkedPath, type RecordCardField, type RecordCardHistoryLine, type RecordCardLink, type RecordViewSummary,
 } from './record-views'
 
+/**
+ * A file of the member's own PC linked to the task (a company without the shared folder; records.md
+ * "File links without the shared folder"): `path` inside their working folder. The server answers it
+ * to its owner alone, so a card that has one is that member's.
+ */
+export interface TaskLocalFile { path: string }
+
+/**
+ * A Google Drive file linked to the task: every reader gets the row; `name` only for the member who
+ * linked it (`mine`) — anyone else sees 「Google Drive のファイル」 and Drive decides who may open it.
+ */
+export interface TaskDriveFile { fileId: string; mine: boolean; name: string | null }
+
+/** Under 「ファイル」 in a company without the shared folder: who sees what. */
+export const TYPED_FILES_NOTE = 'Google Drive のファイルは、このやることを見られる人みんなに見えます（名前は、つないだ人だけ）。このパソコンのファイルは、あなただけに見えます'
+
+/** What a PC file's row says when it is not on this computer (moved, deleted, or another PC of the member). */
+export const LOCAL_FILE_MISSING = 'このパソコンに見つかりません（動かしたか、消したかもしれません）'
+
+/** What a Drive file's row says when its name is not the member's to see. */
+export const DRIVE_FILE_NEUTRAL = 'Google Drive のファイル'
+
+/** Drive's own page for a file (opened in the member's browser; Drive decides who may see it). */
+export function driveFileUrl(fileId: string): string {
+  return `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/view`
+}
+
 export interface TaskCardArg {
   name: string
   label: string
@@ -106,6 +133,10 @@ export interface TaskCardData {
   /** The drafts and approval requests the AI made (「AI が用意したもの」), newest first. */
   prepared: RecordViewSummary[]
   files: LinkedPath[]
+  /** A company without the shared folder: the member's own PC files linked here (theirs alone). */
+  localFiles: TaskLocalFile[]
+  /** A company without the shared folder: Drive files linked here. */
+  driveFiles: TaskDriveFile[]
   links: RecordCardLink[]
   history: RecordCardHistoryLine[]
   runs: TaskCardRun[]
@@ -265,7 +296,14 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
   let originLink: { kind: 'meeting' | 'interaction'; record: RecordSummary } | null = null
   let fromIncoming = false
   const files: LinkedPath[] = []
+  const localFiles: TaskLocalFile[] = []
+  const driveFiles: TaskDriveFile[] = []
   for (const l of src.detail.links) {
+    if (l.direction === 'out' && l.local && typeof l.local.path === 'string') { localFiles.push({ path: l.local.path }); continue }
+    if (l.direction === 'out' && l.drive && typeof l.drive.fileId === 'string') {
+      driveFiles.push({ fileId: l.drive.fileId, mine: l.drive.mine === true, name: l.drive.mine === true && typeof l.drive.name === 'string' ? l.drive.name : null })
+      continue
+    }
     if (l.path !== undefined) {
       if (l.direction === 'out') files.push(linkedPathOf({ ...l, path: l.path }, src.cannotOpen))
       continue
@@ -317,7 +355,7 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     roles, names, reviewerId: str(r.fields.reviewer), assigneeId: str(r.fields.assignee), self: { id: me, name: people[me] ?? null }, whenDone, bundle, origin, fromIncoming,
     canSetBundle: !!def?.links.bundle && !def.links.bundle.origin && !(def.final ?? []).includes(r.state ?? ''), actions, canSetTags, okLine,
     prepSummary: str(r.fields.prep_summary),
-    prepared, files, links, history, runs,
+    prepared, files, localFiles, driveFiles, links, history, runs,
     people: Object.entries(people).filter(([id]) => id !== me).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ja')),
     wait, holidays: src.holidays ?? [],
   }

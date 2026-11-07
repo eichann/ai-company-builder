@@ -4,7 +4,8 @@ import { isSameOrAncestorPath } from '../../../shared/core/paths'
 import { actionWho, INTERFACES, isSystemOnly, linkPersonWho, linkWhoName, OK_FIELDS, viaOf, type ActionDef, type TypeDefinition } from '../../../shared/core/record-types'
 import { ROLE_WHO_PREFIX } from '../../../shared/core/plugin-roles'
 import type { LedgerAttachment, LedgerChange, LedgerDecision, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
-import { fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
+import { driveLinkTarget, fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
+import { DRIVE_VERSION_NOT_FIXED, FILE_LINK_KIND_NOT_HERE, LOCAL_FILE_NOT_SHARED } from '../../../shared/core/company-folder'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordFileRepo } from '../../ports/record-files'
 import type { RecordLinkRow, RecordRepository, RecordRow } from '../../ports/records'
@@ -321,10 +322,24 @@ export function acting(ctx: EngineContext) {
       if (b.attachments !== undefined) {
         if (!Array.isArray(b.attachments) || b.attachments.length > 20) return bad('attachments: up to 20')
         if (action.attach.length === 0) return bad('This action attaches no files')
-        const noFolder = b.attachments.length > 0 ? fileLinksUnavailable(deps.hasCompanyFolder, member.companyId) : null
-        if (noFolder) return noFolder
+        const noFolder = fileLinksUnavailable(deps.hasCompanyFolder, member.companyId)
         const linked = records.linksFrom([row.id]).filter(l => l.targetPath !== null && action.attach.includes(l.name))
         for (const a of b.attachments as Array<Record<string, unknown>>) {
+          // A company without the shared folder hands over a Drive file the record links, at the
+          // revision and fingerprint kept when it was linked; a file of one PC never (records.md
+          // "File links without the shared folder").
+          if (a?.target !== undefined) {
+            const t = a.target as Record<string, unknown> | null
+            if (t?.kind === 'local') return bad(LOCAL_FILE_NOT_SHARED.error, LOCAL_FILE_NOT_SHARED.code)
+            if (!noFolder) return conflict(FILE_LINK_KIND_NOT_HERE.error, FILE_LINK_KIND_NOT_HERE.code)
+            const target = t?.kind === 'drive' ? driveLinkTarget(t.fileId) : null
+            const link = target ? linked.find(l => l.name === a.link && l.targetPath === target) : undefined
+            if (!link) return bad('attachments: { link, target: { kind: drive, fileId } } of Drive files this record links', 'BAD_ATTACHMENT')
+            if (!link.drive?.revisionId || !link.drive.sha256) return bad(DRIVE_VERSION_NOT_FIXED.error, DRIVE_VERSION_NOT_FIXED.code)
+            attachments.push({ link: link.name, kind: 'drive', fileId: t!.fileId as string, revisionId: link.drive.revisionId, sha256: link.drive.sha256 })
+            continue
+          }
+          if (noFolder) return noFolder
           const link = linked.find(l => l.name === a?.link && l.targetPath === (typeof a?.path === 'string' ? fileLinkPath(a.path) : null))
           if (!link || typeof a.commit !== 'string' || !/^[0-9a-f]{40,64}$/.test(a.commit)) return bad('attachments: { link, path, commit } of files this record links', 'BAD_ATTACHMENT')
           const path = link.targetPath as string
@@ -345,13 +360,27 @@ export function acting(ctx: EngineContext) {
       if (b.decision !== undefined && b.decision !== null) {
         if (!action.decision) return bad('This action is not a decision')
         const d = b.decision as Record<string, unknown>
+        // A file only on one member's PC is never what a decision rests on: nobody else could check it.
+        if (Array.isArray(d.materials) && d.materials.some(m => (m as Record<string, unknown> | null)?.kind === 'local')) {
+          return bad(LOCAL_FILE_NOT_SHARED.error, LOCAL_FILE_NOT_SHARED.code)
+        }
         const materials = parseMaterials(d.materials)
         if (typeof materials === 'string') return bad(materials)
+        const linksNow = materials.some(m => m.kind === 'drive') ? records.linksFrom([row.id]) : []
         for (const m of materials) {
           if (m.kind === 'record') {
             const r = records.byIds([m.id]).find(x => reader.record(x))
             const v = r ? (records.states([r.id])[0]?.version ?? 0) : 0
             if (!r || m.version > v) return bad('materials: a record you can read, at a version it has had', 'BAD_MATERIAL')
+          } else if (m.kind === 'drive') {
+            // A Drive file the record links (a company without the shared folder), fixed at the
+            // revision and fingerprint kept when it was linked.
+            if (!fileLinksUnavailable(deps.hasCompanyFolder, member.companyId)) return conflict(FILE_LINK_KIND_NOT_HERE.error, FILE_LINK_KIND_NOT_HERE.code)
+            const link = linksNow.find(l => l.targetPath !== null && l.targetPath === driveLinkTarget(m.fileId))
+            if (!link) return bad('materials: a Drive file this record links', 'BAD_MATERIAL')
+            if (!link.drive?.revisionId || !link.drive.sha256) return bad(DRIVE_VERSION_NOT_FIXED.error, DRIVE_VERSION_NOT_FIXED.code)
+            m.revisionId = link.drive.revisionId
+            m.sha256 = link.drive.sha256
           } else {
             const noFolder = fileLinksUnavailable(deps.hasCompanyFolder, member.companyId)
             if (noFolder) return noFolder

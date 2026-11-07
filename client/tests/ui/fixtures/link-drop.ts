@@ -17,7 +17,7 @@ export function fakeDropLink(log: (line: string) => void) {
     const what = dropped.kind === 'path' ? dropped.path : dropped.id
     if (!link && plan.choices.length > 1) return { success: true, choose: plan.choices, question: `「${what}」を、どのつながりにしますか？` }
     const pick = plan.choices.find(c => c.link === (link ?? plan.choices[0].link))!
-    log(`drop ${targetId} ${what} ${pick.source}:${pick.link}`)
+    log(`drop ${targetId} ${what} ${pick.source}:${pick.link}${dropped.kind === 'path' && dropped.local ? ' local' : ''}`)
     const holder = pick.source === 'target' || dropped.kind === 'path' ? targetId : dropped.id
     return { success: true, done: { text: `「${what.split('/').pop()}」をつなぎました`, undo: { recordId: holder, version: 9 } } }
   }

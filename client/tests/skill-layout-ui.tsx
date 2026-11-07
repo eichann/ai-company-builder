@@ -246,7 +246,7 @@ const api: Partial<ElectronAPI> = {
       record: { ...RECORD_TASK, state: 'in_progress', version: taskVersion, ...(params.get('personal') === '1' ? { personal: true } : {}) }, due: null, tags: [], purpose: null,
       fields: [{ label: '担当', value: '田中 太郎' }],
       roles: { assignee: false, requester: false, okGiver: false, reviewer: false }, names: { assignee: '田中 太郎', requester: null, reviewer: null }, reviewerId: null, assigneeId: 'u-tanaka', self: { id: 'u-me', name: null }, whenDone: null, bundle: null, canSetBundle: false, teamMode: false, origin: null, review: null, actions: [], canSetTags: false, okLine: null, prepSummary: null, prepared: [],
-      files: taskFiles.map(path => ({ path })),
+      files: taskFiles.map(path => ({ path })), localFiles: [], driveFiles: [],
       links: [{ label: '決めたこと', record: RECORD_DECISION }],
       history: [{ at: '2026-10-30T10:00:00+09:00', text: '山田 花子：作りました', ai: false }],
       runs: [], people: [], wait: null, holidays: [], fromIncoming: false,
