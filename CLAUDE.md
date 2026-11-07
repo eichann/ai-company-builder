@@ -159,7 +159,15 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
 - Branch from the latest `origin/main`; one topic per PR. Commit subjects follow the history's
   style: `type(scope): summary` (`fix(client): …`, `refactor(shared): …`, `ci: …`).
 - Open a PR and wait for **all** CI checks (`gh pr checks <n>`; make sure checks exist before
-  reading them as green). The owner merges; don't enable auto-merge.
+  reading them as green). The owner merges; don't merge, use admin overrides or enable auto-merge.
+- PR body: first a short Japanese 「概要（オーナー向け）」 (what changes for people, what does not,
+  how today's users are kept safe), then English details, then "Decisions for the owner" listing
+  each choice made on the safe side.
+- A change to permissions, visibility, keys, sync, or anything that could leak a name or record
+  gets an **independent review** before the owner is asked to merge: a separate reviewer
+  (another agent or `/code-review`) reads the diff without the author's conclusions, looking for
+  leaks and removed or weakened guards.
+- After a PR is merged, remove its worktree (`git worktree remove <path>`); each is ~2 GB.
 - CI (`.github/workflows/ci.yml`): typecheck and changed-file lint always run; on PRs the other
   jobs run only when their inputs change (`.github/scripts/changed-areas.sh`; a skipped job
   reports success). Required for merge: Typecheck, Lint (changed files), Server tests, Client
@@ -179,7 +187,8 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
 - When you change behaviour described in a rule file, update the rule in the same PR, and keep
   the code comments that point to a rule file accurate.
 
-Before calling a change done: run the tests of the files you touched, typecheck the packages
-you touched (`pnpm --filter <client|server|admin|shared> typecheck`), make sure anything you
+Before calling a change done: run the tests of the files you touched, check that each new guard
+is caught by a test (remove or invert it and a test fails; `testing.md` "What a test is for"),
+typecheck the packages you touched (`pnpm --filter <client|server|admin|shared> typecheck`), make sure anything you
 started (dev servers, Vite preview, watchers, temp harness worlds) is stopped, and check that
 the rule files you relied on still describe the code.
