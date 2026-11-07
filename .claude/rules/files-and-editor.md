@@ -211,8 +211,8 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   every tab with edits without asking; `features/editor/hooks/useSaveBeforeLeaving.ts` runs them and
   names what could not be saved (「保存できていない編集があります」 … 「保存せずに進む」 / 「キャンセル」,
   Enter does not confirm; `LeaveConfirmDialog`). Sign-out (`AppShell` → `authStore.signOut`, the
-  one sign-out: it also closes the company, so the login screen shows) and closing the main
-  window go through it. Closing / quitting: main holds the window's close and asks the renderer
+  one sign-out: it also closes the company, so the login screen shows), switching company from
+  the title bar (`download-choices.md`) and closing the main window go through it. Closing / quitting: main holds the window's close and asks the renderer
   (`app:closeRequested`; `electron/services/close-guard.ts`), `src/app/WindowCloseGuard.tsx`
   (mounted next to `App` on every screen) answers `app:closeResponse` `ack` at once, then
   `close` or `stay`; no `ack` within 3 s → it goes on anyway. A quit held this way quits after

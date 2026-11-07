@@ -23,12 +23,14 @@ interface Props {
   extra?: ReactNode
   /** 「あなたの番 N」 and the bell (features/notifications), drawn by the core app only. */
   notices?: ReactNode
+  /** The company's name as a menu to switch companies (features/company), drawn instead of the plain name. */
+  companySwitcher?: ReactNode
 }
 
 const ICON_BUTTON = 'p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
 
 /** The window's title bar (draggable): the company, 変更を確認 / 同期, backups, language, theme, settings, sign-out. */
-export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra, notices }: Props) {
+export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra, notices, companySwitcher }: Props) {
   const { t } = useTranslation()
   const hasCompany = useAppStore((s) => s.currentCompany) != null
   const theme = useAppStore((s) => s.theme)
@@ -42,12 +44,14 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
 
   return (
     <header className="flex-shrink-0 h-12 flex items-center justify-between pl-20 pr-4 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 app-drag">
+      {companySwitcher ? <div className="app-no-drag">{companySwitcher}</div> : (
       <div className="flex items-center gap-3 app-no-drag">
         <House size={18} className="text-gray-500 dark:text-zinc-400" />
         <span className="text-sm font-medium text-gray-700 dark:text-zinc-200">
           {companyName || 'AI Company Builder'}
         </span>
       </div>
+      )}
       <div className="flex items-center gap-2 app-no-drag">
         {notices}
         {!sharedFolder && <WorkingFolderNote />}

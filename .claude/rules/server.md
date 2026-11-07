@@ -520,7 +520,8 @@ never a stand-in that pretends a repository exists. For `none`:
 - Read restriction without git: "Groups and read-restricted places" below (API only so far — the
   admin console's place visibility editor is the next work). File links on records will be a Drive
   (later OneDrive) file id + revision + fingerprint, or an owner-only local link — no general upload.
-- Admin console: 「会社を作成」 asks 「全社フォルダ」 (使う（今までどおり）／使わない; `admin/src/lib/company-folder.ts`);
+- Admin console: 「会社を作成」 asks 「全社フォルダ」 (使う（今までどおり）／使わない; `admin/src/lib/company-folder.ts`;
+  one hint under it, `FOLDER_KIND_HINT`: sharing files through ACB or already elsewhere, and final);
   for `none` the menu has no 「フォルダ」 (the page, reached by URL, says why) and 「部署」 no
   「フォルダを取り込む」. Texts that speak of files being synced or downloaded have a `none` version
   (`NO_FOLDER_WORDS`, owner 2026-11-07): the invitation's 「所属する部署」 (the department is for

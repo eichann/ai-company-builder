@@ -10,6 +10,7 @@
 //   ?mine=d1,d2              the departments the member belongs to (所属); none by default
 //   ?create=no|yes           the server's canCreateCompany for this account (absent by default: an older server)
 //   ?kind=none               阿部商店 has no shared company folder (folderKind none); ?working=fail main refuses its folder
+//   ?choose=c2               switched to from the title bar (appStore companyToChoose): 山田工務店 starts chosen
 // Calls the page made are in window.__acbCompany.calls; the opened company is
 // shown under 「開いた会社」.
 import { createRoot } from 'react-dom/client'
@@ -59,6 +60,8 @@ useAuthStore.setState({
   },
   signOut: async () => { calls.push(['signOut']) },
 })
+
+if (params.get('choose')) useAppStore.setState({ companyToChoose: params.get('choose') })
 
 installElectronAPI({
   getCompanies: async () => {

@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label'
 import { companiesApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
 import { NOT_A_MEMBER_YET, offersCompanyCreation } from '@/lib/company-creation'
-import { FOLDER_KIND_CHOICES, FOLDER_KIND_FIXED } from '@/lib/company-folder'
+import { FOLDER_KIND_CHOICES, FOLDER_KIND_HINT } from '@/lib/company-folder'
 import type { CompanyFolderKind } from '../../../../../shared/core/company-folder'
 import { describeError } from '@/lib/errors'
 
@@ -97,12 +97,12 @@ function NewCompanyForm() {
             </div>
             <fieldset className="grid gap-2">
               <legend className="mb-2 text-sm font-medium">全社フォルダ</legend>
-              <div role="radiogroup" aria-label="全社フォルダ" className="grid gap-2">
+              <div role="radiogroup" aria-label="全社フォルダ" aria-describedby="folder-kind-hint" className="grid gap-2">
                 {FOLDER_KIND_CHOICES.map((c) => (
                   <RadioCard key={c.kind} checked={folderKind === c.kind} onSelect={() => setFolderKind(c.kind)} label={c.label} help={c.help} />
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground">{FOLDER_KIND_FIXED}</p>
+              <p id="folder-kind-hint" className="text-xs text-muted-foreground">{FOLDER_KIND_HINT}</p>
             </fieldset>
             {error && (
               <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">

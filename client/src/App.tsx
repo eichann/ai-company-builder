@@ -7,20 +7,14 @@ import { CompanySelector } from './features/company/components/CompanySelector'
 import { ServerSetupScreen } from './features/auth/components/ServerSetupScreen'
 import { SpinnerGap } from '@phosphor-icons/react'
 import type { CompanyView } from './types'
-import { checkRememberedCompany, LAST_COMPANY_KEY_PREFIX } from './features/company/restore-company'
+import { LAST_COMPANY_KEY_PREFIX, parseRememberedCompany, rememberCompanyFolder } from './features/company/restore-company'
+import { reopenRememberedCompany } from './features/company/reopen'
 import { getServerUrl } from './features/auth/api'
-import { companyPathExists, getCompanies, openWorkingFolder } from './features/company/api'
-import { answeredCompanyFolderKind, type CompanyFolderKind } from '../shared/company-folder'
-import { registerCompanyFolder } from './shared/ipc/allowed-folders'
 
 
 function safeReadLastCompany(userId: string): CompanyView | null {
   try {
-    const raw = localStorage.getItem(`${LAST_COMPANY_KEY_PREFIX}${userId}`)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed?.id || !parsed?.rootPath) return null
-    return { ...parsed, createdAt: new Date(parsed.createdAt) }
+    return parseRememberedCompany<CompanyView>(localStorage.getItem(`${LAST_COMPANY_KEY_PREFIX}${userId}`))
   } catch {
     return null
   }
@@ -76,6 +70,8 @@ function App() {
   useEffect(() => {
     if (!user || !currentCompany) return
     safeWriteLastCompany(user.id, currentCompany)
+    // Every company opened here, so switching from the title bar can reopen it where it is.
+    rememberCompanyFolder(user.id, currentCompany.id, currentCompany)
   }, [user, currentCompany])
 
   // Restore the previously selected company after login. Runs once per
@@ -103,27 +99,13 @@ function App() {
 
     const userId = user.id
     void (async () => {
-      // lib/restore-company.ts: registers the folder before asking whether it
-      // exists (main answers only for registered folders).
-      // The kind comes from the server's answer, never from what this computer remembered.
-      const kinds = new Map<string, CompanyFolderKind>()
-      const outcome = await checkRememberedCompany(last, {
-        accessibleCompanyIds: async () => {
-          const result = await getCompanies()
-          if (!result?.success || !Array.isArray(result.data)) return null
-          for (const c of result.data) kinds.set(c.id, answeredCompanyFolderKind(c.folderKind))
-          return result.data.map((c) => c.id)
-        },
-        registerAllowedRoot: (folder) => registerCompanyFolder(folder),
-        exists: (target) => companyPathExists(target),
-        withoutSharedFolder: (id) => kinds.get(id) === 'none',
-        openWorkingFolder: async (folder, id) => (await openWorkingFolder(folder, id).catch(() => null))?.success === true,
-      })
+      // features/company/reopen.ts: the remembered folder's checks and the kind the server answers.
+      const { outcome, company } = await reopenRememberedCompany(last)
       // Not cancelled by this effect re-running (restore is attempted once per
       // session, so a cancelled attempt would never be retried): only a
       // company picked meanwhile or another account wins.
       if (useAppStore.getState().currentCompany || useAuthStore.getState().user?.id !== userId) return
-      if (outcome === 'open') setCurrentCompany({ ...last, folderKind: kinds.get(last.id) ?? 'git' })
+      if (outcome === 'open') setCurrentCompany(company)
       else if (outcome === 'forget') safeWriteLastCompany(userId, null)
     })()
   }, [user, currentCompany, setCurrentCompany])
@@ -167,7 +149,8 @@ function App() {
     return <CompanySelector />
   }
 
-  return <AppShell />
+  // A fresh screen per company: nothing of the last company's screen stays mounted.
+  return <AppShell key={currentCompany.id} />
 }
 
 export default App

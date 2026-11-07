@@ -31,6 +31,9 @@ export function CompanySelector() {
   const { user, signOut, refreshUser } = useAuthStore()
   const canCreate = offersCompanyCreation(user)
   const list = useCompanies(companies => {
+    // Switched to from the title bar, not known on this computer yet: its folder choice.
+    const chosen = companies.find(c => c.id === useAppStore.getState().companyToChoose)
+    if (chosen) { select(chosen); return }
     const only = user ? companyToOpenWithoutChoosing(companies, hasRememberedCompany(user.id)) : null
     if (only) void openWithoutChoosing(only)
   })
