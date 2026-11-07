@@ -124,5 +124,7 @@ scheduleAgentEventRetention(() => services.agentEvents.prune())
 scheduleMailBodyRetention(() => services.outboundMail.cleanupBodies())
 // The access log of a connector's reads, a year after each read (plugins.md "Contract 3"): one run per server, per company handle.
 scheduleAccessLogRetention(() => services.pluginCalls.cleanupAccessLog())
+// Companies without the shared folder never push: their core record types follow this build now.
+void services.indexCompaniesWithoutFolder()
 // The server clock (notifications.md "The server clock"): one per server process; it never runs the AI.
 scheduleServerClock(() => services.serverClock.runOnce(), { intervalMs: CLOCK_INTERVAL_MS })

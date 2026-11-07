@@ -8,6 +8,7 @@ import {
 } from '../lib/git-server'
 import { services } from '../composition'
 import { companyMemberNotFound } from './guards'
+import { refusal } from './respond'
 
 /**
  * /api/git — what the desktop app needs to find its company's repository.
@@ -50,6 +51,10 @@ gitRoute.get('/repos/:companyId', companyMemberNotFound(REPO_NOT_FOUND), async (
   const notFound = () => c.json(REPO_NOT_FOUND, 404)
 
   if (sanitizedId !== companyId) return notFound()
+
+  // A company without the shared folder has no repository to clone (409 NO_COMPANY_FOLDER, for its members only).
+  const withFolder = services.companyFolders.require(c.var.member)
+  if (!withFolder.ok) return refusal(c, withFolder)
 
   if (!services.repoStore.companyRepoExists(sanitizedId)) return notFound()
 

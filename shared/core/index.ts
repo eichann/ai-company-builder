@@ -33,6 +33,7 @@
  *   turn-timing.ts        which of the member's 「あなたの番」 is this week's (title bar, list, morning summary)
  *   absences.ts           absence and the delegate (代わりの人): the one resolution of who acts for whom today
  *   connector-roles.ts    the core roles (役目) a core connector serves, and resolving which one serves a role
+ *   company-folder.ts     a company with or without the shared company folder: its kind, the refusal
  *
  * Dependency rule: nothing here imports anything outside shared/core — no
  * Node built-ins, Electron, React, Hono, database or git (enforced by
@@ -64,3 +65,4 @@ export * from './business-days'
 export * from './task-settings'
 export * from './absences'
 export * from './connector-roles'
+export * from './company-folder'

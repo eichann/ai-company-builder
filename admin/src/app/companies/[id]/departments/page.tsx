@@ -51,7 +51,7 @@ import { cn } from '@/lib/utils'
 import { MembershipCard } from '@/components/advanced/task-settings-page'
 
 export default function DepartmentsPage() {
-  const { companyId, isAdmin, managedDepartmentIds } = useCompany()
+  const { companyId, isAdmin, managedDepartmentIds, hasCompanyFolder } = useCompany()
   const departments = useQuery(`departments:${companyId}`, () => departmentsApi.list(companyId))
   const managers = useDepartmentManagers(companyId, departments.data)
   const members = useQuery(isAdmin ? `members:${companyId}` : null, () => companiesApi.getMembers(companyId))
@@ -148,24 +148,28 @@ export default function DepartmentsPage() {
       <PageHeader
         title="部署"
         description={
-          isAdmin
-            ? '部署ごとに共有フォルダがあります。ドラッグで並べ替えると、デスクトップアプリの表示順も変わります。'
-            : '部署ごとに共有フォルダがあります。'
+          (hasCompanyFolder
+            ? '部署ごとに共有フォルダがあります。'
+            : 'この会社は全社フォルダを使いません。部署は、やることや記録の置き場所と所属に使います。') +
+          (isAdmin ? 'ドラッグで並べ替えると、デスクトップアプリの表示順も変わります。' : '')
         }
         actions={
           isAdmin && (
             <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="outline" onClick={importFolders} disabled={importing}>
-                    <ArrowsClockwise className={cn(importing && 'animate-spin')} />
-                    フォルダを取り込む
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  メンバーが共有フォルダの一番上に作ったフォルダを、部署として登録します
-                </TooltipContent>
-              </Tooltip>
+              {/* Taking in folders: only from the shared folder. */}
+              {hasCompanyFolder && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" onClick={importFolders} disabled={importing}>
+                      <ArrowsClockwise className={cn(importing && 'animate-spin')} />
+                      フォルダを取り込む
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    メンバーが共有フォルダの一番上に作ったフォルダを、部署として登録します
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <Button onClick={openCreate}>
                 <Plus />
                 部署を追加
@@ -184,9 +188,11 @@ export default function DepartmentsPage() {
           icon={TreeStructure}
           title="部署がありません"
           description={
-            isAdmin
-              ? '部署を追加すると、その部署用の共有フォルダが作られます。'
-              : 'オーナーか管理者が部署を追加すると、ここに表示されます。'
+            !isAdmin
+              ? 'オーナーか管理者が部署を追加すると、ここに表示されます。'
+              : hasCompanyFolder
+                ? '部署を追加すると、その部署用の共有フォルダが作られます。'
+                : '部署を追加すると、ここに表示されます。'
           }
           action={
             isAdmin && (
@@ -250,6 +256,7 @@ export default function DepartmentsPage() {
             onOpenChange={setFormOpen}
             companyId={companyId}
             department={editing}
+            hasCompanyFolder={hasCompanyFolder}
             onSaved={(saved) => {
               if (!editing) setMembersFor(saved.id)
               departments.reload()
@@ -271,19 +278,25 @@ export default function DepartmentsPage() {
             onOpenChange={(open) => !open && setDeleting(null)}
             title={`「${deleting?.department.name ?? ''}」を削除`}
             description={
-              <div className="space-y-2">
+              !hasCompanyFolder ? (
                 <p>
-                  共有フォルダ <span className="font-mono text-foreground">{deleting?.department.folder}</span>{' '}
-                  {deleting && deleting.files + deleting.folders > 0
-                    ? `と、その中のファイル${deleting.files}件・フォルダ${deleting.folders}件`
-                    : '（空のフォルダ）'}
-                  がサーバーから削除されます。
+                  部署「{deleting?.department.name}」を削除します。この部署の所属や管理役もなくなります。この操作は取り消せません。
                 </p>
-                <p>
-                  メンバーのPCからも次回の同期で削除されます。同期していない変更がある人の分は、その人のPCの
-                  .backups フォルダに残ります。この操作は取り消せません。
-                </p>
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  <p>
+                    共有フォルダ <span className="font-mono text-foreground">{deleting?.department.folder}</span>{' '}
+                    {deleting && deleting.files + deleting.folders > 0
+                      ? `と、その中のファイル${deleting.files}件・フォルダ${deleting.folders}件`
+                      : '（空のフォルダ）'}
+                    がサーバーから削除されます。
+                  </p>
+                  <p>
+                    メンバーのPCからも次回の同期で削除されます。同期していない変更がある人の分は、その人のPCの
+                    .backups フォルダに残ります。この操作は取り消せません。
+                  </p>
+                </div>
+              )
             }
             confirmText={deleting?.department.name ?? ''}
             confirmLabel="部署を削除"

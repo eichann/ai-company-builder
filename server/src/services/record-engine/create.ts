@@ -16,7 +16,7 @@ import { DEFAULT_TASK_SETTINGS, replyTarget } from '../../../shared/core/task-se
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
-import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, FOLDER_NOT_PLACEABLE, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, fileLinksUnavailable, FOLDER_NOT_PLACEABLE, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { checkValue, provenance } from './values'
 import { MEETING_OUTPUT_KEY_MAX } from '../../../shared/core/meeting-outputs'
@@ -262,6 +262,8 @@ export function creating(ctx: EngineContext) {
         if (targets.length > 50) return bad('At most 50 targets per link')
         for (const t of targets) {
           if (l.target === 'file') {
+            const noFolder = fileLinksUnavailable(deps.hasCompanyFolder, member.companyId)
+            if (noFolder) return noFolder
             const p = typeof t === 'string' ? fileLinkPath(t) : null
             if (!p) return bad(`${name}: a company path`)
             // As linking later: a file the member reads, never inside a private folder (the record is outside every one).

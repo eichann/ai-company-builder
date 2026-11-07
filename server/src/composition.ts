@@ -41,6 +41,7 @@ import { parseCompanyCreationPolicy, type CompanyCreationPolicy } from './servic
 import { createInvitationService } from './services/invitations'
 import { createClientActivityService } from './services/client-activity'
 import { createPushRejectionRecorder } from './services/push-rejections'
+import { createCompanyFolders } from './services/company-folder'
 import { createDepartmentService } from './services/departments'
 import { createAdminHomeService } from './services/admin-home'
 import { createPermissionViewService } from './services/permission-views'
@@ -190,12 +191,15 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ids: randomIds,
   }
   const repoStore = localRepoStore()
+  // With or without the shared company folder (owner decision 2026-11-07): what needs the repository asks.
+  const companyFolders = createCompanyFolders({ companies: repos.companies, companyData: shared.companyData })
 
   const permissionViews = createPermissionViewService({ ...repos, ...shared })
   const permissionEditor = createPermissionEditorService({
     ...repos,
     ...shared,
     repoStore,
+    companyFolders,
     managedFolders: permissionViews.managedFolders,
   })
   const brokerVault = createBrokerVault({ ...repos, brokerCipher })
@@ -238,7 +242,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
 
   // The company map (light ontology 4-2): indexed from pushes, off per company by default.
   const recordFiles = gitRecordFileSource()
-  const recordIndexer = createRecordIndexer({ ...shared, recordFiles })
+  const recordIndexer = createRecordIndexer({ ...shared, recordFiles, hasCompanyFolder: companyFolders.has })
 
   const access = createAccessPolicy(repos.memberships)
   // The state engine (4-3): the only writer of record_state / record_ledger.
@@ -310,7 +314,12 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ...shared,
     files: gitRecordFileWriter(),
     // Is a folder in the company folder? (audit B-M1: a missing one answers like a private one.)
-    folderExists: async (companyId, path) => (repoStore.companyRepoExists(companyId) ? (await repoStore.resolveFolder(companyId, path)) !== null : null),
+    // Without the shared folder (services/company-folder.ts) the places are the departments (and below them).
+    folderExists: async (companyId, path) => {
+      if (!companyFolders.has(companyId)) return companyFolders.departmentPlaceOf(companyId, path) !== null
+      return repoStore.companyRepoExists(companyId) ? (await repoStore.resolveFolder(companyId, path)) !== null : null
+    },
+    hasCompanyFolder: companyFolders.has,
     managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
@@ -690,6 +699,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     conn, companyData: shared.companyData, clock: shared.clock, pluginShelf, agentPolicy, recordEngine, approvals, pluginOperations, aiRuns, actsFor,
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
+    hasCompanyFolder: companyFolders.has,
   })
   // lanes ▲
 
@@ -731,9 +741,15 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companies: createCompanyService({ ...repos, ...shared, repoStore,
       creationPolicy: companyCreationPolicyFromEnv(),
       isOperator: userId => operatorUserIds().has(userId),
+      indexRecords: companyId => recordIndexer.schedule(companyId),
     }),
+    /**
+     * At start (index.ts): index every company without the shared folder, so a new server build's
+     * core types reach them (a company with the folder gets them at its next push). Never rejects.
+     */
+    indexCompaniesWithoutFolder: () => Promise.all(repos.companies.allIds().filter(id => !companyFolders.has(id)).map(id => recordIndexer.schedule(id))).then(() => undefined),
     invitations: createInvitationService({ ...repos, ...shared }),
-    departments: createDepartmentService({ ...repos, ...shared, repoStore }),
+    departments: createDepartmentService({ ...repos, ...shared, repoStore, companyFolders }),
     taskSettings,
     workSwitches,
     // 見られる人 for the lists (records.md "Who can see it").
@@ -775,6 +791,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     }),
     permissionEditor,
     privateFolders: createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock }),
+    companyFolders,
     agentEvents,
     agentSandbox,
     agentStops,

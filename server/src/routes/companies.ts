@@ -4,6 +4,8 @@ import { toCamelCase } from '../lib/camel-case'
 import { services } from '../composition'
 import { requireFullAccess, requireOwner } from '../services/access'
 import { MAX_COMPANY_NAME_LENGTH } from '../services/companies'
+import type { CompanyRow } from '../ports/companies'
+import { DEFAULT_COMPANY_FOLDER_KIND, parseCompanyFolderKind, storedCompanyFolderKind } from '../../shared/core/company-folder'
 import { refusal } from './respond'
 import { companyAdmin, companyMember, serviceBody, signedIn } from './guards'
 
@@ -11,7 +13,12 @@ export const companiesRoute = new Hono()
 const { companies } = services
 
 const ROLE = z.enum(['owner', 'admin', 'member'])
-const CreateCompanyBody = z.object({ name: z.string().refine(v => v.trim().length > 0), slug: z.unknown().optional() })
+const CreateCompanyBody = z.object({ name: z.string().refine(v => v.trim().length > 0), slug: z.unknown().optional(), folderKind: z.unknown().optional() })
+/** `folderKind` other than 'git' / 'none' (shared/core/company-folder.ts). */
+const INVALID_FOLDER_KIND = { error: 'folderKind must be git or none', code: 'INVALID_FOLDER_KIND' }
+
+/** A company as the API answers it: its columns camelCased, the folder kind read as the core reads it. */
+const companyView = (row: CompanyRow) => ({ ...toCamelCase(row), folderKind: storedCompanyFolderKind(row.folder_kind) })
 const AddMemberBody = z.object({ userId: z.string().min(1).max(200), role: ROLE.nullish().transform(r => r ?? 'member') })
 const RenameBody = z.object({ name: z.string() })
 const RoleBody = z.object({ role: ROLE })
@@ -21,7 +28,7 @@ companiesRoute.get('/', signedIn, (c) => {
   const { user } = c.var
   return c.json({
     success: true,
-    data: companies.listForUser(user.id).map(toCamelCase),
+    data: companies.listForUser(user.id).map(row => ({ ...companyView(row), role: row.role })),
   })
 })
 
@@ -33,7 +40,7 @@ companiesRoute.get('/:companyId', companyMember, (c) => {
   return c.json({
     success: true,
     data: {
-      ...toCamelCase(company),
+      ...companyView(company),
       role: member.role,
     },
   })
@@ -49,16 +56,20 @@ companiesRoute.post('/', signedIn, serviceBody, async (c) => {
   const parsed = CreateCompanyBody.safeParse(c.var.body)
   if (!parsed.success) return c.json({ error: 'Company name is required' }, 400)
   const { name, slug } = parsed.data
+  // With the shared company folder (`git`, the default: older admin consoles send none) or
+  // without (`none`); not changeable later.
+  const folderKind = parsed.data.folderKind === undefined ? DEFAULT_COMPANY_FOLDER_KIND : parseCompanyFolderKind(parsed.data.folderKind)
+  if (folderKind === null) return c.json(INVALID_FOLDER_KIND, 400)
 
   // All or nothing: a failed step answers 503 COMPANY_CREATION_FAILED and keeps nothing
-  const created = await companies.tryCreate(user.id, name, slug)
+  const created = await companies.tryCreate(user.id, name, slug, folderKind)
   if (!created.ok) return refusal(c, created)
   const company = created.value
 
   return c.json({
     success: true,
     data: {
-      ...toCamelCase(company),
+      ...companyView(company),
       role: 'owner',
     },
   }, 201)
@@ -125,7 +136,7 @@ companiesRoute.patch('/:companyId', companyMember, serviceBody, (c) => {
   }
 
   const company = companies.rename(actor.value, name)
-  return c.json({ success: true, data: { ...toCamelCase(company), role: actor.value.role } })
+  return c.json({ success: true, data: { ...companyView(company), role: actor.value.role } })
 })
 
 // Change a member's role. Owners only: they alone may grant or revoke admin

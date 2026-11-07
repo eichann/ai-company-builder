@@ -12,7 +12,9 @@ export const companySchema = `
       owner_id TEXT NOT NULL,
       repo_path TEXT,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      -- The shared company folder (shared/core/company-folder.ts): git = repository + sync, none = no folder.
+      folder_kind TEXT NOT NULL DEFAULT 'git' CHECK (folder_kind IN ('git', 'none'))
     );
 
     CREATE TABLE IF NOT EXISTS memberships (
@@ -108,4 +110,16 @@ export function migrateInvitationClaims(conn: Database.Database): void {
   // The departments the invitee will belong to (所属), chosen by who invited them: JSON list of
   // department ids of this company, added to department_members when the link is accepted.
   if (!cols.has('department_ids')) conn.exec(`ALTER TABLE invitations ADD COLUMN department_ids TEXT NOT NULL DEFAULT '[]'`)
+}
+
+/**
+ * The company folder's kind (owner decision 2026-11-07, shared/core/company-folder.ts): every
+ * company made before it has the company repository, so the column's default `git` is theirs
+ * (and what an older build gets when it inserts without the column). Idempotent.
+ */
+export function migrateCompanyFolderKind(conn: Database.Database): void {
+  const cols = new Set((conn.prepare(`PRAGMA table_info(companies)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('folder_kind')) {
+    conn.exec(`ALTER TABLE companies ADD COLUMN folder_kind TEXT NOT NULL DEFAULT 'git' CHECK (folder_kind IN ('git', 'none'))`)
+  }
 }

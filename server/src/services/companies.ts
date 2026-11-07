@@ -22,6 +22,7 @@ import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
 import type { RepoStore } from '../ports/repo-store'
 import type { Transactions } from '../ports/transactions'
+import { DEFAULT_COMPANY_FOLDER_KIND, hasCompanyFolder, type CompanyFolderKind } from '../../shared/core/company-folder'
 import { clientBuildOf, parseClientVersion, supportsAgentEvents } from '../lib/client-version'
 import { isOwner, type Member } from './access'
 import type { CompanyCreationPolicy } from './company-creation-policy'
@@ -109,6 +110,12 @@ export interface CompanyServiceDeps {
   creationPolicy: CompanyCreationPolicy
   /** A server operator (OPERATOR_USER_IDS, lib/config.ts): may create companies. */
   isOperator: (userId: string) => boolean
+  /**
+   * Index the new company's records now (services/record-index.ts: the core types). A company
+   * with the folder gets them at its first push; one without never pushes, so it is indexed
+   * here (and at every start, index.ts). Never rejects. Absent → nothing.
+   */
+  indexRecords?: (companyId: string) => Promise<void>
 }
 
 // Slug from a name: lowercase ASCII words joined by '-'
@@ -166,7 +173,8 @@ export function createCompanyService(deps: CompanyServiceDeps) {
 
   /**
    * Create a company owned by `ownerId` (the route checks `mayCreate` first),
-   * all or nothing: the repository with its seeded department folders, then
+   * with the shared company folder (`git`, the default) or without (`none`: no
+   * repository; not changeable later), all or nothing: the repository with its seeded department folders, then
    * the rows (company, owner membership, default departments, permission
    * scopes) in one transaction. If any step fails, the rows are rolled back,
    * the repository this call created is removed, and the answer is
@@ -178,17 +186,23 @@ export function createCompanyService(deps: CompanyServiceDeps) {
    * transaction must stay synchronous; nobody can reach the repository
    * before the membership row exists.
    */
-  async function tryCreate(ownerId: string, name: string, requestedSlug: unknown): Promise<Outcome<CompanyRow>> {
+  async function tryCreate(ownerId: string, name: string, requestedSlug: unknown, folderKind: CompanyFolderKind = DEFAULT_COMPANY_FOLDER_KIND): Promise<Outcome<CompanyRow>> {
     const id = ids.newId()
     const slug = buildUniqueSlug(name, requestedSlug, id)
     const timestamp = clock.now()
+    // A company without the shared folder (owner decision 2026-11-07) gets no repository at all:
+    // its departments are its rows (services/company-folder.ts).
+    const withFolder = hasCompanyFolder(folderKind)
 
     try {
       // Filesystem = source of truth: the department folders exist before their rows
-      const repoPath = await repoStore.createCompanyRepo(id)
-      await repoStore.seedCompanyRepo(id, repoPath, DEFAULT_DEPARTMENTS.map(d => d.folder))
+      let repoPath: string | null = null
+      if (withFolder) {
+        repoPath = await repoStore.createCompanyRepo(id)
+        await repoStore.seedCompanyRepo(id, repoPath, DEFAULT_DEPARTMENTS.map(d => d.folder))
+      }
       transactions.run(() => {
-        companies.insert({ id, name: name.trim(), slug, ownerId, repoPath, createdAt: timestamp })
+        companies.insert({ id, name: name.trim(), slug, ownerId, repoPath, createdAt: timestamp, folderKind })
         memberships.insert({ id: ids.newId(), userId: ownerId, companyId: id, role: 'owner', createdAt: timestamp })
         initializeDefaultDepartments(id, ownerId)
         // Company-wide `everyone: read + write` and one inheriting scope per department
@@ -202,13 +216,15 @@ export function createCompanyService(deps: CompanyServiceDeps) {
     } catch (e) {
       logError('companies', 'failed to create the company; nothing was kept', e, { company: id })
       try {
-        await repoStore.removeCompanyRepo(id)
+        if (withFolder) await repoStore.removeCompanyRepo(id)
       } catch (removeError) {
         logError('companies', 'failed to remove the repository of a company that was not created', removeError, { company: id })
       }
       return refuse('unavailable', COMPANY_CREATION_FAILED.error, { code: COMPANY_CREATION_FAILED.code })
     }
 
+    // No push will ever index a company without the folder: its core types (やること…) are made now.
+    if (!withFolder) await deps.indexRecords?.(id)
     return ok(companies.findById(id)!)
   }
 
@@ -240,8 +256,8 @@ export function createCompanyService(deps: CompanyServiceDeps) {
     tryCreate,
 
     /** tryCreate for callers without an HTTP answer (tests, scripts): throws when nothing was created. */
-    async create(ownerId: string, name: string, requestedSlug: unknown): Promise<CompanyRow> {
-      const created = await tryCreate(ownerId, name, requestedSlug)
+    async create(ownerId: string, name: string, requestedSlug: unknown, folderKind?: CompanyFolderKind): Promise<CompanyRow> {
+      const created = await tryCreate(ownerId, name, requestedSlug, folderKind)
       if (!created.ok) throw new Error(`Company creation failed: ${created.body.error}`)
       return created.value
     },

@@ -7,6 +7,7 @@
 import type { ZodMiniType } from 'zod/mini'
 
 import type { ClientBuild } from '../../../shared/core/client-version'
+import type { CompanyFolderKind } from '../../../shared/core/company-folder'
 import type { SecurityAlertView } from '../../../shared/types/security-alerts'
 import {
   absenceCreatedSchema,
@@ -235,6 +236,11 @@ export interface Company {
   createdAt: string
   updatedAt: string
   role?: Role
+  /**
+   * With the shared company folder (`git`) or without (`none`: each member works in a folder of
+   * their own PC; shared/core/company-folder.ts). Absent from an older server: `git`.
+   */
+  folderKind?: CompanyFolderKind
 }
 
 export interface Member {
@@ -250,8 +256,9 @@ export interface Member {
 export const companiesApi = {
   list: () => getData('/api/companies', companiesSchema),
 
-  create: (name: string, slug?: string) =>
-    getData('/api/companies', companySchema, { method: 'POST', body: { name, slug } }),
+  /** `folderKind` is chosen once: it cannot be changed later. */
+  create: (name: string, slug?: string, folderKind?: CompanyFolderKind) =>
+    getData('/api/companies', companySchema, { method: 'POST', body: { name, slug, ...(folderKind ? { folderKind } : {}) } }),
 
   get: (id: string) => getData(`/api/companies/${enc(id)}`, companySchema),
 

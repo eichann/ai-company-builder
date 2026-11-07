@@ -382,7 +382,8 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   sanitized requested slug or name (or `company`) + `-` + the first 8 characters of the new
   company's own id (the whole id in the unlikely case those collide). Existing slugs are never
   changed; nothing routes by slug. `tests/integration/company-slug.test.ts`.
-- Creating a company is all or nothing (2026-11, `services/companies.ts` `tryCreate`): the
+- Creating a company is all or nothing (2026-11, `services/companies.ts` `tryCreate`): for a
+  company with the shared folder ("Companies without a shared folder" below), the
   repository and its seeded department folders first (async), then the company, owner
   membership, default departments and permission scopes in one `transactions.run`. Any failure
   rolls the rows back, removes the repository (`RepoStore.removeCompanyRepo`) and answers 503
@@ -450,7 +451,8 @@ Code: `routes/departments.ts` (HTTP) → `services/departments.ts` (rules) → t
 from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
 `lib/bare-commit.ts` under `withCompanyLock`).
 
-- The file system is the source of truth; the DB holds display settings (order, icon, color,
+- (A company without the shared folder: the rows are the departments, below "Companies without a
+  shared folder".) The file system is the source of truth; the DB holds display settings (order, icon, color,
   display name); the admin UI can also perform file operations.
 - Listing (and `POST /sync`, stats): `git ls-tree` the shared branch (`main`, else `master`) of
   the company's bare repo — the non-hidden root directories — then return the DB rows (by
@@ -487,6 +489,36 @@ from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
   `setRepoGitTimeoutsForTests`): 60 s per local step, 300 s for the push, which kills git's whole
   process group, hook included, and fails the change (a seeding failure fails the whole
   company creation, below).
+
+## Companies without a shared folder (owner decision 2026-11-07)
+
+A company is made with the shared company folder (`folderKind: git`, the repository + sync, as
+every company before; the default) or without (`none`: each member works in a folder of their own
+PC). Side by side; an existing company is `git` (`companies.folder_kind`, `migrateCompanyFolderKind`,
+default `'git'`, CHECK git / none). Chosen at `POST /api/companies { folderKind }` (operators, as
+creating at all; anything else 400 `INVALID_FOLDER_KIND`), **not changeable later**. Answered as
+`folderKind` by `GET /api/companies` and `GET /api/companies/:companyId` (old apps ignore it).
+Rule and words: `shared/core/company-folder.ts` (only an exact stored `git` has a folder:
+`storedCompanyFolderKind`). The services ask `services/company-folder.ts` (`CompanyFolders`: `has`,
+`require` → 409 `NO_COMPANY_FOLDER` with a Japanese `error`, `departmentPlaceOf`) — a capability,
+never a stand-in that pretends a repository exists. For `none`:
+
+- Creation makes no repository (repo_path NULL); its records are indexed at once (core types).
+- Departments are the rows (list, create, rename, delete change rows only; a folder name is taken
+  once by `nameKey`; stats `{0, 0, exists: false}`); `POST /departments/sync` 409.
+- 409 `NO_COMPANY_FOLDER`: `POST /private-folders`, `/files/*`, `/folder-sizes`,
+  `/api/git/repos/:companyId`. git-http answers 404 for the company and its scope repositories
+  (like a missing repository, before the membership check), whatever is on disk.
+- Permission rules take the company and its departments only (`/permissions/folders` lists the
+  departments, nothing inside them). Record places: departments; file links refused (`records.md`).
+- Company Skills (plugin steps' `company_skill`) are none (`STEP_SKILL_MISSING`); company types from
+  `.acb/types/` none. Read-restricted places without a repository (a private-folder equivalent)
+  are a later decision.
+- Admin console: 「会社を作成」 asks 「全社フォルダ」 (使う（今までどおり）／使わない; `admin/src/lib/company-folder.ts`);
+  for `none` the menu has no 「フォルダ」 (the page, reached by URL, says why) and 「部署」 no
+  「フォルダを取り込む」. The desktop app's side (a work folder without git) is a later change.
+- Test: `tests/integration/company-without-folder.test.ts`, `tests/unit/company-folder-kind-migration.test.ts`,
+  `admin/tests/company-without-folder.test.tsx`.
 
 ## Admin home
 

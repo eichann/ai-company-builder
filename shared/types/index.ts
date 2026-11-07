@@ -1,3 +1,5 @@
+import type { CompanyFolderKind } from '../core/company-folder'
+
 // User and Auth Types
 export interface User {
   id: string
@@ -20,6 +22,8 @@ export interface Company {
   ownerId: string
   createdAt: Date
   updatedAt: Date
+  /** With the shared company folder or without (shared/core/company-folder.ts); absent from an older server = `git`. */
+  folderKind?: CompanyFolderKind
 }
 
 export interface CompanyMember {

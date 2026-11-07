@@ -11,12 +11,12 @@ import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS } from './links'
-import { bad, conflict, FILE_NOT_LINKABLE, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
+import { bad, conflict, FILE_NOT_LINKABLE, fileLinksUnavailable, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
 
 export function fileLinking(ctx: EngineContext) {
-  const { companyData, transactions, clock, open, stateOf, summaryOf, changed } = ctx
+  const { deps, companyData, transactions, clock, open, stateOf, summaryOf, changed } = ctx
   return {
     /**
      * Link a file to a record after it was made, or remove that link
@@ -48,6 +48,11 @@ export function fileLinking(ctx: EngineContext) {
       if (fileLinks.length === 0) return bad('この種類の記録にはファイルをつなげません', 'NO_FILE_LINK')
       const name = b.link === undefined && fileLinks.length === 1 ? fileLinks[0] : b.link
       if (typeof name !== 'string' || !fileLinks.includes(name)) return bad(`link: one of ${fileLinks.join(', ')}`, 'BAD_LINK')
+      // Linking needs the shared folder; removing a link never does.
+      if (op === 'link') {
+        const noFolder = fileLinksUnavailable(deps.hasCompanyFolder, member.companyId)
+        if (noFolder) return noFolder
+      }
       const path = typeof b.path === 'string' ? fileLinkPath(b.path) : null
       if (!path) return bad('path: a path inside the company folder', 'BAD_PATH')
       if (!Number.isInteger(b.expectedVersion) || (b.expectedVersion as number) < 0) return bad('expectedVersion: the version you saw', 'VERSION_REQUIRED')

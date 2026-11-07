@@ -1,5 +1,6 @@
 /** The engine's refusals that more than one operation (or another service) gives. */
 import { SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
+import { NO_COMPANY_FOLDER_FILE_LINK } from '../../../shared/core/company-folder'
 import { refuse } from '../outcome'
 
 export const conflict = (error: string, code: string, extra: Record<string, unknown> = {}) => refuse('conflict', error, { code, ...extra })
@@ -51,3 +52,14 @@ export const FOLDER_NOT_PLACEABLE = {
   error: 'このフォルダには記録を置けません。部署のフォルダを選んでください（非公開のフォルダや、会社のフォルダにまだ無いフォルダには置けません）',
   code: 'FOLDER_NOT_PLACEABLE',
 } as const
+
+/**
+ * A company without the shared folder (services/company-folder.ts): a file path names a place on
+ * one member's PC, which nobody else can open or check — new file links, attached versions and
+ * file materials are refused. Null when the company has its folder (or the engine was not told).
+ */
+export function fileLinksUnavailable(hasCompanyFolder: ((companyId: string) => boolean) | undefined, companyId: string) {
+  return hasCompanyFolder && !hasCompanyFolder(companyId)
+    ? conflict(NO_COMPANY_FOLDER_FILE_LINK.error, NO_COMPANY_FOLDER_FILE_LINK.code)
+    : null
+}

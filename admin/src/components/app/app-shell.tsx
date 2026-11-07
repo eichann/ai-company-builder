@@ -60,6 +60,8 @@ export interface NavContext {
   isManager: boolean
   /** The log's viewer setting lets this user read it (see CompanyContextValue). */
   canViewAgentEvents: boolean
+  /** The company has the shared company folder (see CompanyContextValue); absent = it has. */
+  hasCompanyFolder?: boolean
 }
 
 /**
@@ -74,7 +76,8 @@ export const NAV_ITEMS: NavItem[] = [
   { segment: 'members', label: 'メンバー', icon: Users, visible: (c) => c.isAdmin },
   { segment: 'departments', label: '部署', icon: TreeStructure },
   // 「権限」 and 「非公開フォルダ」 as one (管理画面の見直し 2-3).
-  { segment: 'folders', label: 'フォルダ', icon: FolderSimple, visible: (c) => c.isAdmin || c.isManager },
+  // Not for a company without the shared folder: nothing there to manage (the page itself says so).
+  { segment: 'folders', label: 'フォルダ', icon: FolderSimple, visible: (c) => c.hasCompanyFolder !== false && (c.isAdmin || c.isManager) },
   { segment: 'integrations', label: 'つなぎ先', icon: PlugsConnected, visible: (c) => c.isAdmin },
 ]
 
@@ -122,8 +125,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
-  const { companyId, isAdmin, managedDepartmentIds, canViewAgentEvents } = useCompany()
-  const navContext: NavContext = { isAdmin, isManager: managedDepartmentIds.length > 0, canViewAgentEvents }
+  const { companyId, isAdmin, managedDepartmentIds, canViewAgentEvents, hasCompanyFolder } = useCompany()
+  const navContext: NavContext = { isAdmin, isManager: managedDepartmentIds.length > 0, canViewAgentEvents, hasCompanyFolder }
   const base = `/companies/${companyId}`
 
   return (

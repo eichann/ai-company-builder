@@ -38,12 +38,15 @@ export function DepartmentFormDialog({
   companyId,
   department,
   onSaved,
+  hasCompanyFolder = true,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   companyId: string
   department: Department | null
   onSaved: (saved: Department) => void
+  /** false: the company has no shared folder — a department is only a name and a place for records. */
+  hasCompanyFolder?: boolean
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -52,6 +55,7 @@ export function DepartmentFormDialog({
           <DepartmentForm
             companyId={companyId}
             department={department}
+            hasCompanyFolder={hasCompanyFolder}
             onCancel={() => onOpenChange(false)}
             onSaved={(d) => {
               onSaved(d)
@@ -67,11 +71,13 @@ export function DepartmentFormDialog({
 function DepartmentForm({
   companyId,
   department,
+  hasCompanyFolder,
   onCancel,
   onSaved,
 }: {
   companyId: string
   department: Department | null
+  hasCompanyFolder: boolean
   onCancel: () => void
   onSaved: (saved: Department) => void
 }) {
@@ -129,11 +135,13 @@ function DepartmentForm({
         <DialogDescription>
           {editing
             ? '部署の名前や表示を変更します。'
-            : '部署ごとに共有フォルダが作られ、メンバーのPCには次回の同期で表示されます。'}
+            : hasCompanyFolder
+              ? '部署ごとに共有フォルダが作られ、メンバーのPCには次回の同期で表示されます。'
+              : 'この会社は全社フォルダを使わないため、フォルダは作られません。部署は、やることや記録の置き場所と所属に使います。'}
         </DialogDescription>
       </DialogHeader>
 
-      {!editing && (
+      {!editing && hasCompanyFolder && (
         <p className="flex gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-foreground">
           <Info size={16} className="mt-px shrink-0 text-muted-foreground" />
           <span>
@@ -184,10 +192,12 @@ function DepartmentForm({
         />
         <p id="dept-folder-help" className={cn('text-xs', folderValid ? 'text-muted-foreground' : 'text-destructive')}>
           {folderValid
-            ? '共有フォルダの名前です。日本語・英数字と「.」「_」「-」が使えます（スペースは使えません）。'
+            ? hasCompanyFolder
+              ? '共有フォルダの名前です。日本語・英数字と「.」「_」「-」が使えます（スペースは使えません）。'
+              : '部署を見分けるための名前です（フォルダは作られません）。日本語・英数字と「.」「_」「-」が使えます（スペースは使えません）。'
             : '使えない文字が含まれています。日本語・英数字で始め、「.」「_」「-」以外の記号やスペースは使わないでください。'}
         </p>
-        {renaming && (
+        {renaming && hasCompanyFolder && (
           <p className="flex gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-foreground">
             <Warning size={16} className="mt-px shrink-0 text-warning" />
             <span>

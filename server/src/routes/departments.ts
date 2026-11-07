@@ -242,7 +242,9 @@ departmentsRoute.post('/sync', companyMember, async (c) => {
 
   try {
     // Same folder listing as GET /, from the bare repo's shared branch
-    const { added, removed } = await departments.syncWithRepo(actor.value)
+    const synced = await departments.syncWithRepo(actor.value)
+    if (!synced.ok) return refusal(c, synced)
+    const { added, removed } = synced.value
 
     return c.json({
       success: true,

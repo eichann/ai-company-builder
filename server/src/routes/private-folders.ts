@@ -80,6 +80,9 @@ privateFoldersRoute.post('/private-folders', companyMember, serviceBody, async (
   if (privateFoldersClientCutoff() === null) {
     return c.json({ error: PRIVATE_FOLDERS_UNAVAILABLE_MESSAGE, code: 'PRIVATE_FOLDERS_UNAVAILABLE' }, 409)
   }
+  // A private folder is a repository inside the company folder: none without one (409 NO_COMPANY_FOLDER).
+  const withFolder = services.companyFolders.require(actor)
+  if (!withFolder.ok) return refusal(c, withFolder)
   const body = objectBody(c.var.body)
   if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
 

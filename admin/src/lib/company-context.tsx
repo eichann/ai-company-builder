@@ -18,6 +18,11 @@ export interface CompanyContextValue {
   isAdmin: boolean
   /** Departments the signed-in user is a manager (部署の管理役) of. */
   managedDepartmentIds: string[]
+  /**
+   * The company has the shared company folder (folderKind `git`, or absent from an older server).
+   * Without it there are no folders, private folders or folder rules to manage.
+   */
+  hasCompanyFolder: boolean
   /** May open 「AI の操作の記録」: owner/admin, or a department manager while the log's viewer setting allows it. */
   canViewAgentEvents: boolean
   /** Re-read the company, the company list and the user's role (after a rename or role change). */
@@ -46,6 +51,7 @@ export function CompanyProvider({ companyId, children }: { companyId: string; ch
   const managedDepartmentIds = capabilities.data?.managedDepartmentIds
   // Until capabilities arrive: owner/admin can always read the log.
   const canViewAgentEvents = capabilities.data?.canViewAgentEvents ?? isAdminRole(role)
+  const hasCompanyFolder = company.data?.folderKind !== 'none'
   const { reload: reloadCompany } = company
   const { reload: reloadCompanies } = companies
   const { reload: reloadCapabilities } = capabilities
@@ -59,13 +65,14 @@ export function CompanyProvider({ companyId, children }: { companyId: string; ch
       isAdmin: isAdminRole(role),
       managedDepartmentIds: managedDepartmentIds ?? [],
       canViewAgentEvents,
+      hasCompanyFolder,
       refresh: () => {
         reloadCompany()
         reloadCompanies()
         reloadCapabilities()
       },
     }),
-    [companyId, company, companies, role, managedDepartmentIds, canViewAgentEvents, reloadCompany, reloadCompanies, reloadCapabilities]
+    [companyId, company, companies, role, managedDepartmentIds, canViewAgentEvents, hasCompanyFolder, reloadCompany, reloadCompanies, reloadCapabilities]
   )
 
   return <CompanyContext.Provider value={value}>{children}</CompanyContext.Provider>

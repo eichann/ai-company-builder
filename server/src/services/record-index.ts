@@ -284,15 +284,21 @@ export interface RecordIndexerDeps {
   transactions: Transactions
   clock: Clock
   recordFiles: RecordFileSource
+  /**
+   * Does the company have its shared folder (services/company-folder.ts)? Without one there are no
+   * record files and no company types (`.acb/types/`): only the core and plugin types. Absent → yes.
+   */
+  hasCompanyFolder?: (companyId: string) => boolean
 }
 
-export function createRecordIndexer({ companyData, transactions, clock, recordFiles }: RecordIndexerDeps) {
+export function createRecordIndexer({ companyData, transactions, clock, recordFiles, hasCompanyFolder }: RecordIndexerDeps) {
   const runs = new Map<string, { again: boolean; done: Promise<void> }>()
 
   async function indexCompany(companyId: string): Promise<void> {
     const handle = companyData.forCompany(companyId)
     if (!handle.records.settings().enabled) return
     transactions.run(() => ensureCoreTypes(handle.records, clock.now()))
+    if (hasCompanyFolder && !hasCompanyFolder(companyId)) return
     const scopes = handle.scopes.listWithRules()
     const repos: Array<{ key: RecordRepoKey; scopeId: string | null; prefix: string; repo: Parameters<RecordFileSource['read']>[1] }> = [
       { key: 'company', scopeId: null, prefix: '', repo: { kind: 'company' } },

@@ -33,9 +33,9 @@ export function sqliteCompanyRepository(conn: Database.Database): CompanyReposit
 
     insert(company) {
       conn.prepare(`
-        INSERT INTO companies (id, name, slug, owner_id, repo_path, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(company.id, company.name, company.slug, company.ownerId, company.repoPath, company.createdAt, company.createdAt)
+        INSERT INTO companies (id, name, slug, owner_id, repo_path, created_at, updated_at, folder_kind)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(company.id, company.name, company.slug, company.ownerId, company.repoPath, company.createdAt, company.createdAt, company.folderKind)
     },
 
     rename(companyId, name, updatedAt) {

@@ -26,6 +26,7 @@ import {
 } from '../../shared/core/permissions'
 import { isValidFolderName } from '../../shared/core/names'
 import { hasFullAccess, type Member } from './access'
+import type { CompanyFolders } from './company-folder'
 import { ok, refuse, type Outcome } from './outcome'
 
 export const READ_RESTRICTION_UNAVAILABLE =
@@ -113,16 +114,27 @@ export interface PermissionEditorDeps {
   pushRejections: PushRejectionRepository
   accounts: AccountDirectory
   repoStore: RepoStore
+  /** With or without the shared folder: without, the places that take rules are the company and its departments. */
+  companyFolders: CompanyFolders
   transactions: Transactions
   /** Folders (NFC) of the departments the user manages (permission-views.ts). */
   managedFolders(companyId: string, userId: string): string[]
 }
 
 export function createPermissionEditorService(deps: PermissionEditorDeps) {
-  const { companyData, memberships, clientActivity, pushRejections, accounts, repoStore, transactions, managedFolders } = deps
+  const { companyData, memberships, clientActivity, pushRejections, accounts, repoStore, companyFolders, transactions, managedFolders } = deps
   // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
   const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
   const privateFoldersOf = (companyId: string) => companyData.forCompany(companyId).privateFolders
+
+  /**
+   * Without the shared folder the places that take rules are the departments (services/company-folder.ts):
+   * at the top their folders, inside one nothing, anywhere else null (not found).
+   */
+  function departmentPlaces(companyId: string, path: string): string[] | null {
+    if (path === '') return companyData.forCompany(companyId).departments.list().map(d => d.folder)
+    return companyFolders.departmentPlaceOf(companyId, path)?.department === path ? [] : null
+  }
 
   /** May the actor edit rules of the scope at `path`? */
   function canEditPath(actor: Member, path: string): boolean {
@@ -194,6 +206,8 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
     /** Does the folder exist — in the company repository, or inside its private folder's repository? */
     async folderExists(companyId: string, path: string, place: PrivatePlace | null): Promise<boolean> {
       if (path === '') return true
+      // Without the shared folder: a department's own folder, nothing below it (there are no files).
+      if (!companyFolders.has(companyId)) return companyFolders.departmentPlaceOf(companyId, path)?.department === path
       if (!place) return (await repoStore.resolveFolder(companyId, path)) !== null
       if (place.root) return true
       const folder = privateFoldersOf(companyId).get(place.scopeId)
@@ -329,7 +343,9 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
     async folders(actor: Member, path: string) {
       const place = privatePlaceOf(actor.companyId, path)
       const privateFolder = place ? privateFoldersOf(actor.companyId).get(place.scopeId) : null
-      let names = privateFolder
+      let names = !companyFolders.has(actor.companyId)
+        ? departmentPlaces(actor.companyId, path)
+        : privateFolder
         ? await repoStore.listPrivateSubfolders(actor.companyId, privateFolder, path)
         : await repoStore.listSubfolders(actor.companyId, path)
       if (names === null) return null

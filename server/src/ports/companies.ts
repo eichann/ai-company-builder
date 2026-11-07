@@ -1,3 +1,5 @@
+import type { CompanyFolderKind } from '../../shared/core/company-folder'
+
 /**
  * A `companies` row, column names as stored. The API returns every column
  * (camelCased in the route), so rows are passed through whole.
@@ -10,6 +12,8 @@ export type CompanyRow = {
   repo_path: string | null
   created_at: string
   updated_at: string
+  /** 'git' | 'none' as stored; read it with storedCompanyFolderKind (shared/core/company-folder.ts). */
+  folder_kind: string
 }
 
 export interface NewCompany {
@@ -19,6 +23,7 @@ export interface NewCompany {
   ownerId: string
   repoPath: string | null
   createdAt: string
+  folderKind: CompanyFolderKind
 }
 
 export interface CompanyRepository {

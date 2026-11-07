@@ -7,6 +7,11 @@
  * repository, company lock, async git); the rows follow only once the folder change succeeded. A
  * private folder's path is reserved: no department may take it, and a
  * department containing one can be neither renamed nor deleted.
+ *
+ * A company without the shared folder (services/company-folder.ts, owner decision 2026-11-07)
+ * has no repository: its departments are its rows, and creating / renaming / deleting one
+ * changes only rows (a folder name is taken when another department has it, compared as
+ * `nameKey`). Nothing pretends a repository is there.
  */
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
@@ -15,11 +20,12 @@ import type { DepartmentChanges, DepartmentRow } from '../ports/departments'
 import type { MembershipRepository } from '../ports/memberships'
 import type { RepoStore } from '../ports/repo-store'
 import type { Transactions } from '../ports/transactions'
-import { pathKey } from '../../shared/core/paths'
+import { nameKey, pathKey } from '../../shared/core/paths'
 import { isValidFolderName } from '../../shared/core/names'
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import type { CreateDepartmentInput, UpdateDepartmentInput } from '../../shared/types'
 import type { Member } from './access'
+import type { CompanyFolders } from './company-folder'
 import { ok, refuse, type Outcome } from './outcome'
 
 export const MAX_MANAGERS_PER_DEPARTMENT = 50
@@ -48,13 +54,14 @@ export interface DepartmentServiceDeps {
   memberships: MembershipRepository
   accounts: AccountDirectory
   repoStore: RepoStore
+  companyFolders: CompanyFolders
   transactions: Transactions
   clock: Clock
   ids: IdGenerator
 }
 
 export function createDepartmentService(deps: DepartmentServiceDeps) {
-  const { companyData, memberships, accounts, repoStore, transactions, clock, ids } = deps
+  const { companyData, memberships, accounts, repoStore, companyFolders, transactions, clock, ids } = deps
   // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
   const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
   const privateFoldersOf = (companyId: string) => companyData.forCompany(companyId).privateFolders
@@ -77,6 +84,10 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
 
   // The member's company: every department read or write below goes through it.
   const departmentsOf = (member: Member) => companyData.forCompany(member.companyId).departments
+
+  // Without the shared folder: is `folder` another department's folder (nameKey: NFC, A–Z folded)?
+  const folderTakenByRow = (member: Member, folder: string, exceptId: string | null) =>
+    departmentsOf(member).listUnordered().some(d => d.id !== exceptId && nameKey(d.folder) === nameKey(folder))
 
   function nextSortOrder(member: Member): number {
     return (departmentsOf(member).maxSortOrder() ?? -1) + 1
@@ -109,6 +120,8 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
      * Reads the bare repository (no pull/clone); throws without one.
      */
     async list(member: Member): Promise<DepartmentRow[]> {
+      // Without the shared folder the rows are the departments.
+      if (!companyFolders.has(member.companyId)) return departmentsOf(member).list().sort((a, b) => a.sort_order - b.sort_order)
       const folders = new Set(await repoStore.listRootFolders(member.companyId))
       return departmentsOf(member).list()
         .filter(d => folders.has(d.folder))
@@ -139,7 +152,9 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
      */
     async create(member: Member, body: CreateDepartmentInput): Promise<Outcome<DepartmentRow>> {
       const { companyId, userId } = member
-      if (!await repoStore.createDepartmentFolder(companyId, body.folder, `Add department: ${body.name}`)) {
+      if (!companyFolders.has(companyId)) {
+        if (folderTakenByRow(member, body.folder.trim(), null)) return refuse('conflict', FOLDER_EXISTS_ERROR)
+      } else if (!await repoStore.createDepartmentFolder(companyId, body.folder, `Add department: ${body.name}`)) {
         return refuse('conflict', FOLDER_EXISTS_ERROR)
       }
 
@@ -175,7 +190,8 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
      */
     async update(member: Member, existing: DepartmentRow, body: UpdateDepartmentInput): Promise<Outcome<DepartmentRow>> {
       const { companyId, userId } = member
-      if (!repoStore.companyRepoExists(companyId)) {
+      const withFolder = companyFolders.has(companyId)
+      if (withFolder && !repoStore.companyRepoExists(companyId)) {
         throw new Error('Repository not found')
       }
       const oldFolder = existing.folder
@@ -188,9 +204,10 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
         if (privateFoldersAtOrUnder(companyId, oldFolder).length > 0) return privateInside()
         if (privateFoldersAtOrUnder(companyId, newFolder).length > 0) return folderUnavailable(newFolder)
 
-        const renamed = await repoStore.renameDepartmentFolder(
-          companyId, oldFolder, newFolder, `Rename department: ${oldFolder} -> ${newFolder}`,
-        )
+        const renamed = withFolder
+          ? await repoStore.renameDepartmentFolder(companyId, oldFolder, newFolder, `Rename department: ${oldFolder} -> ${newFolder}`)
+          // Only rows: a case-only rename of its own folder is allowed, as with a repository.
+          : !folderTakenByRow(member, newFolder, existing.id)
         if (!renamed) {
           return refuse('conflict', FOLDER_EXISTS_ERROR)
         }
@@ -234,7 +251,9 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
     async delete(member: Member, existing: DepartmentRow): Promise<{ deletedFiles: number; deletedFolders: number }> {
       const { companyId } = member
       const folder = existing.folder
-      const counts = await repoStore.deleteDepartmentFolder(companyId, folder, `Delete department: ${existing.name} (${folder})`)
+      const counts = companyFolders.has(companyId)
+        ? await repoStore.deleteDepartmentFolder(companyId, folder, `Delete department: ${existing.name} (${folder})`)
+        : { deletedFiles: 0, deletedFolders: 0 }
       transactions.run(() => {
         scopesOf(companyId).deleteDepartmentScopes(existing.id, folder)
         departmentsOf(member).delete(existing.id)
@@ -248,6 +267,8 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
      * full folder is empty right before they delete it.
      */
     async stats(member: Member, existing: DepartmentRow): Promise<{ files: number; folders: number; exists: boolean }> {
+      // Without the shared folder there is no folder to count: the server holds no files.
+      if (!companyFolders.has(member.companyId)) return { files: 0, folders: 0, exists: false }
       const counts = await repoStore.countFilesInFolder(member.companyId, existing.folder)
       return counts ? { ...counts, exists: true } : { files: 0, folders: 0, exists: false }
     },
@@ -261,8 +282,11 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
      * without one, none for folders that are gone; scopes follow the rows.
      * Throws without a repository.
      */
-    async syncWithRepo(member: Member): Promise<{ added: number; removed: number }> {
+    async syncWithRepo(member: Member): Promise<Outcome<{ added: number; removed: number }>> {
       const { companyId, userId } = member
+      // Nothing to follow without the shared folder: the rows are the departments.
+      const withFolder = companyFolders.require(member)
+      if (!withFolder.ok) return withFolder
       const folders = await repoStore.listRootFolders(companyId)
       const departments = departmentsOf(member)
       const rows = departments.listUnordered()
@@ -299,7 +323,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
       }
 
       scopesOf(companyId).syncCompanyScopes()
-      return { added, removed }
+      return ok({ added, removed })
     },
 
     /** The department, when it belongs to the member's company. */
