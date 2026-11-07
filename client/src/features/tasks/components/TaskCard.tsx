@@ -82,6 +82,11 @@ interface Props {
   createTodayFile?: (name: string) => Promise<{ path: string } | { error: string }>
   /** The not-downloaded folder holding a path (a linked folder left out on this computer is marked). */
   notDownloadedFolderOf?: NotDownloadedFolderOf
+  /**
+   * Whether the company has the shared company folder (default yes). Without one (`folderKind`
+   * `none`) the server refuses every file link (`NO_COMPANY_FOLDER`), so the card offers none.
+   */
+  sharedFolder?: boolean
 }
 
 /** What the member's last press left on the card. */
@@ -97,7 +102,7 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, bundlePlaces, onLoaded, createTodayFile, onDetachConsultation, notDownloadedFolderOf }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, bundlePlaces, onLoaded, createTodayFile, onDetachConsultation, notDownloadedFolderOf, sharedFolder = true }: Props) {
   const { result, reload, personalHere } = useTaskCard(companyId, recordId, onLoaded, rootPath, knownVersion)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -200,7 +205,7 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
       : null
   return <><CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     linkDrop={linkDrop} notDownloadedFolderOf={notDownloadedFolderOf}
-    onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)} personalHere={personalHere}
+    onLinkFile={sharedFolder ? p => fileLink(p, false) : null} onUnlinkFile={p => fileLink(p, true)} personalHere={personalHere}
     {...(card.record.personal && createTodayFile ? { onNewFile: async (name: string) => {
       const made = await createTodayFile(name)
       if ('error' in made) return { error: made.error }
@@ -253,7 +258,8 @@ interface BodyProps {
   onReconcile: (runId: string, key: string, done: boolean) => Promise<string | null>
   linkDrop: ReturnType<typeof useLinkDrop>
   notDownloadedFolderOf?: NotDownloadedFolderOf
-  onLinkFile: (companyPath: string) => Promise<string | null>
+  /** ［＋ファイル・フォルダをつなぐ］; null = not offered (a company without the shared folder). */
+  onLinkFile: ((companyPath: string) => Promise<string | null>) | null
   onUnlinkFile: (companyPath: string) => Promise<string | null>
   /** Linked `.personal/` files that are on this computer. */
   personalHere: ReadonlySet<string>
@@ -300,6 +306,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
     setUnlinked(failure ? null : path)
   }
   const relink = async (path: string) => {
+    if (!onLinkFile) return
     const failure = await onLinkFile(path)
     setLinkError(failure)
     if (!failure) setUnlinked(null)
@@ -337,11 +344,11 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       bottom={<><HistoryFold lines={card.history} /><FieldsFold fields={card.fields} /></>}
       seenBy={card.viewers ? <SeenBy who={card.viewers.text} /> : record.personal ? <SeenBy who={ONLY_YOU} /> : null}
       links={<LinkedColumn rows={[...rows, ...consult.rows]}
-        extras={[{ name: 'ファイル', kind: 'file', action: <>
+        extras={[...(onLinkFile ? [{ name: 'ファイル', kind: 'file' as const, action: <>
           <TaskFiles rootPath={rootPath} linked={card.files.map(f => f.path)} busy={busy} onLink={onLinkFile} />
           {onNewFile && <button type="button" disabled={busy} onClick={() => setNaming({ error: null })} data-new-file className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />新しいファイル</button>}
-        </>, note: 'つながりは、このやることを見られる人みんなに見えます' }, ...(consult.extra ? [consult.extra] : [])]}
-        drop={{ label: `ファイル・フォルダ・やること・${bundleWord}・相談`, accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(record.id, e) },
+        </>, note: 'つながりは、このやることを見られる人みんなに見えます' }] : []), ...(consult.extra ? [consult.extra] : [])]}
+        drop={{ label: `${onLinkFile ? 'ファイル・フォルダ・' : ''}やること・${bundleWord}・相談`, accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(record.id, e) },
           notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }}
         notice={<>
           {linkError && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{linkError}</p>}

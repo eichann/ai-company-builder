@@ -28,11 +28,12 @@ import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { formatDate, roleLabel } from '@/lib/format'
 import { useQuery } from '@/lib/use-query'
+import { NO_FOLDER_WORDS } from '@/lib/company-folder'
 
 export default function SettingsPage() {
   const router = useRouter()
   const { user } = useAuth()
-  const { companyId, company, role, isAdmin, refresh } = useCompany()
+  const { companyId, company, role, isAdmin, refresh, hasCompanyFolder } = useCompany()
   const members = useQuery(`members:${companyId}`, () => companiesApi.getMembers(companyId))
   const [leaving, setLeaving] = useState(false)
   const [renaming, setRenaming] = useState(false)
@@ -164,7 +165,7 @@ export default function SettingsPage() {
         open={leaving}
         onOpenChange={setLeaving}
         title="この会社から退出"
-        description="退出すると、この会社のファイルやAIスキルを同期できなくなります。PCにあるファイルは削除されません。"
+        description={hasCompanyFolder ? '退出すると、この会社のファイルやAIスキルを同期できなくなります。PCにあるファイルは削除されません。' : NO_FOLDER_WORDS.leaveCompany}
         confirmText={c?.name ?? ''}
         confirmLabel="退出する"
         onConfirm={leave}

@@ -326,7 +326,11 @@ test('自分の設定: 今日のフォルダ says where it is and which departme
 
 test('a company without the shared folder: no sync, preview or backups (one short note), no 閲覧のみ, no download prompt, no 同期 settings', async ({ page }) => {
   await openPreview(page, 'skill-layout', { kind: 'none' })
-  await expect(page.getByText('この PC だけで作業')).toBeVisible()
+  // Pressed, the note says the files are on this PC only and to back them up; records are on the server.
+  await page.getByRole('button', { name: 'この PC だけで作業' }).click()
+  await expect(page.getByRole('note')).toContainText('サーバーには残りません。PC のバックアップ機能で守ってください。やること・決めたことなどの記録はサーバーに残ります。')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('note')).toHaveCount(0)
   for (const name of ['サーバーと同期', '変更を確認', 'バックアップ履歴']) await expect(page.getByRole('button', { name })).toHaveCount(0)
   // 開発部 is "not downloaded" for a git company: here every folder is on this PC.
   await deptTab(page, '開発部').click()
@@ -341,3 +345,19 @@ test('a company without the shared folder: no sync, preview or backups (one shor
   for (const name of ['ダウンロードするフォルダ', '自動同期', '同期しないファイル']) await expect(page.getByRole('button', { name })).toHaveCount(0)
   expect(await calls(page, 'gitSync')).toEqual([])
 })
+
+// The task card's own file actions (owner decision 2026-11-07): a company without the shared folder
+// cannot link files (the server answers NO_COMPANY_FOLDER), so its card offers neither; a git company keeps both.
+for (const kind of ['git', 'none'] as const) {
+  test(`a task card in a ${kind} company: ［ファイル・フォルダをつなぐ］ and ［新しいファイル］ ${kind === 'git' ? 'offered' : 'not offered'}`, async ({ page }) => {
+    await openPreview(page, 'skill-layout', { tasks: '1', personal: '1', ...(kind === 'none' ? { kind: 'none' } : {}) })
+    await page.getByRole('button', { name: /^やること/ }).first().click()
+    await page.getByRole('region', { name: 'やることの一覧' }).getByText('A社 提案書を仕上げる').click()
+    const card = page.getByTestId('record-tab')
+    await expect(card.getByText('A社 提案書を仕上げる').first()).toBeVisible()
+    await expect(card.getByText('決めたこと').first()).toBeVisible()
+    const shown = kind === 'git' ? 1 : 0
+    await expect(card.getByRole('button', { name: 'ファイル・フォルダをつなぐ' })).toHaveCount(shown)
+    await expect(card.getByRole('button', { name: '新しいファイル' })).toHaveCount(shown)
+  })
+}

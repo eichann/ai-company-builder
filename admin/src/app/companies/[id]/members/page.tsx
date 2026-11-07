@@ -65,6 +65,7 @@ import { compareBuilds, formatBuild, formatDate, formatDateTime, formatRelative,
 import { departmentsByManager, useDepartmentManagers } from '@/lib/managers'
 import { useQuery, type QueryResult } from '@/lib/use-query'
 import { cn } from '@/lib/utils'
+import { NO_FOLDER_WORDS } from '@/lib/company-folder'
 
 type BuildStatus = 'latest' | 'outdated' | 'unknown'
 
@@ -99,7 +100,7 @@ function buildStatusOf(
 }
 
 export default function MembersPage() {
-  const { companyId, isAdmin, role: myRole, refresh } = useCompany()
+  const { companyId, isAdmin, role: myRole, refresh, hasCompanyFolder } = useCompany()
   const { user } = useAuth()
   const members = useQuery(`members:${companyId}`, () => companiesApi.getMembers(companyId))
   const departments = useQuery(`departments:${companyId}`, () => departmentsApi.list(companyId))
@@ -232,7 +233,7 @@ export default function MembersPage() {
                   <SortableHead label="役割" k="role" sort={sort} onSort={toggleSort} />
                   <TableHead>部署の管理役</TableHead>
                   {isAdmin && <SortableHead label="アプリ" k="app" sort={sort} onSort={toggleSort} />}
-                  {isAdmin && <SortableHead label="最終同期" k="lastSync" sort={sort} onSort={toggleSort} />}
+                  {isAdmin && hasCompanyFolder && <SortableHead label="最終同期" k="lastSync" sort={sort} onSort={toggleSort} />}
                   {isAdmin && (
                     <TableHead className="w-12 pr-4">
                       <span className="sr-only">操作</span>
@@ -281,7 +282,7 @@ export default function MembersPage() {
                         <AppCell row={r} loading={activity.loading} />
                       </TableCell>
                     )}
-                    {isAdmin && (
+                    {isAdmin && hasCompanyFolder && (
                       <TableCell className="whitespace-nowrap">
                         {activity.loading ? (
                           <span className="text-muted-foreground">…</span>
@@ -355,6 +356,7 @@ export default function MembersPage() {
           open={inviteOpen}
           onOpenChange={setInviteOpen}
           companyId={companyId}
+          hasCompanyFolder={hasCompanyFolder}
           departments={(departments.data ?? []).filter((d) => !d.parentId)}
           onCreated={invitations.reload}
         />
@@ -389,7 +391,8 @@ export default function MembersPage() {
         description={
           <>
             <p>
-              {removing?.name} さんは、この会社のファイルやAIスキルを同期できなくなります。本人のPCにあるファイルは削除されません。
+              {removing?.name}
+              {hasCompanyFolder ? ' さんは、この会社のファイルやAIスキルを同期できなくなります。本人のPCにあるファイルは削除されません。' : ` ${NO_FOLDER_WORDS.removeMember}`}
             </p>
             <p className="mt-2">もう一度参加してもらうには、新しい招待リンクが必要です。</p>
           </>
@@ -479,26 +482,29 @@ function InviteDialog({
   open,
   onOpenChange,
   companyId,
+  hasCompanyFolder,
   departments,
   onCreated,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   companyId: string
+  hasCompanyFolder: boolean
   departments: Department[]
   onCreated: () => void
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        {open && <InviteForm companyId={companyId} departments={departments} onCreated={onCreated} onDone={() => onOpenChange(false)} />}
+        {open && <InviteForm companyId={companyId} hasCompanyFolder={hasCompanyFolder} departments={departments} onCreated={onCreated} onDone={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>
   )
 }
 
-function InviteForm({ companyId, departments, onCreated, onDone }: {
+function InviteForm({ companyId, hasCompanyFolder, departments, onCreated, onDone }: {
   companyId: string
+  hasCompanyFolder: boolean
   departments: Department[]
   onCreated: () => void
   onDone: () => void
@@ -614,14 +620,18 @@ function InviteForm({ companyId, departments, onCreated, onDone }: {
             ))}
           </div>
           <p className="text-xs text-muted-foreground">
-            参加すると、選んだ部署に所属します。アプリは最初に、所属する部署のファイルだけを自動で入れます（ほかの部署はあとから設定で入れられます）。選ばないときは、アプリで本人が選びます。
+            {hasCompanyFolder
+              ? '参加すると、選んだ部署に所属します。アプリは最初に、所属する部署のファイルだけを自動で入れます（ほかの部署はあとから設定で入れられます）。選ばないときは、アプリで本人が選びます。'
+              : NO_FOLDER_WORDS.inviteDepartments}
           </p>
         </fieldset>
       )}
       <p className="text-xs text-muted-foreground">
         {role === 'admin'
           ? '管理者は、メンバーの招待・削除や部署の設定など、この管理画面のほぼすべての操作ができます。'
-          : 'メンバーは、会社のファイルやAIスキルを同期して使えます。管理画面の設定は変更できません。'}
+          : hasCompanyFolder
+            ? 'メンバーは、会社のファイルやAIスキルを同期して使えます。管理画面の設定は変更できません。'
+            : NO_FOLDER_WORDS.memberRole}
       </p>
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onDone}>
@@ -773,6 +783,7 @@ function RoleForm({
   onCancel: () => void
   onSave: (role: Role) => Promise<void>
 }) {
+  const { hasCompanyFolder } = useCompany()
   const [role, setRole] = useState<Role>(row.member.role)
   const [busy, setBusy] = useState(false)
   const unchanged = role === row.member.role
@@ -809,7 +820,7 @@ function RoleForm({
             <SelectItem value="member">メンバー</SelectItem>
           </SelectContent>
         </Select>
-        <p className="text-xs text-muted-foreground">{ROLE_DESCRIPTIONS[role]}</p>
+        <p className="text-xs text-muted-foreground">{role === 'member' && !hasCompanyFolder ? NO_FOLDER_WORDS.memberRoleDescription : ROLE_DESCRIPTIONS[role]}</p>
       </div>
       {lastOwner && (
         <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">

@@ -522,7 +522,12 @@ never a stand-in that pretends a repository exists. For `none`:
   owner-only local link — no general upload.
 - Admin console: 「会社を作成」 asks 「全社フォルダ」 (使う（今までどおり）／使わない; `admin/src/lib/company-folder.ts`);
   for `none` the menu has no 「フォルダ」 (the page, reached by URL, says why) and 「部署」 no
-  「フォルダを取り込む」. The desktop app's side (a work folder without git) is a later change.
+  「フォルダを取り込む」. Texts that speak of files being synced or downloaded have a `none` version
+  (`NO_FOLDER_WORDS`, owner 2026-11-07): the invitation's 「所属する部署」 (the department is for
+  affiliation, where records are placed and whom requests go to), the member role, removing a
+  member, leaving the company, the home's 部署 step hint and its empty state; the members table has
+  no 「最終同期」 and the home no 「しばらく同期していません」 (nobody syncs). The desktop app's side:
+  `sync.md` "Companies without the shared company folder".
 - Test: `tests/integration/company-without-folder.test.ts`, `tests/unit/company-folder-kind-migration.test.ts`,
   `admin/tests/company-without-folder.test.tsx`.
 

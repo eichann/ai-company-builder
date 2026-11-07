@@ -13,6 +13,7 @@
 //   check     1 = (with tasks=1) each row offers its ☑ 完了にする; the press is recorded (actOnTask)
 //   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
 //   kind      none = the company has no shared company folder (folderKind none: a working folder on this PC)
+//   personal  1 = (with tasks=1) the opened task is one only the member sees (its card offers 新しいファイル)
 //
 // 今日のフォルダ: the member belongs to 開発部 (not downloaded) and 営業部, so it is in 営業部;
 // `createDirectory` makes folders on the fake disk (recorded).
@@ -227,7 +228,7 @@ const api: Partial<ElectronAPI> = {
   // A task opens in the task card (features/tasks): the same data, with nothing for this member to press.
   getTaskCard: async (_companyId: string, recordId: string) => recordId === RECORD_TASK.id
     ? (cardReads++, await sleep(120), { success: true, card: {
-      record: { ...RECORD_TASK, state: 'in_progress', version: taskVersion }, due: null, tags: [], purpose: null,
+      record: { ...RECORD_TASK, state: 'in_progress', version: taskVersion, ...(params.get('personal') === '1' ? { personal: true } : {}) }, due: null, tags: [], purpose: null,
       fields: [{ label: '担当', value: '田中 太郎' }],
       roles: { assignee: false, requester: false, okGiver: false, reviewer: false }, names: { assignee: '田中 太郎', requester: null, reviewer: null }, reviewerId: null, assigneeId: 'u-tanaka', self: { id: 'u-me', name: null }, whenDone: null, bundle: null, canSetBundle: false, teamMode: false, origin: null, review: null, actions: [], canSetTags: false, okLine: null, prepSummary: null, prepared: [],
       files: taskFiles.map(path => ({ path })),

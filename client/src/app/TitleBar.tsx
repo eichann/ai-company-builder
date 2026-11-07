@@ -1,8 +1,9 @@
-import { useCallback, type ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ClockCounterClockwise, CloudArrowUp, GearSix, Globe, House, ListChecks, Moon, SignOut, SpinnerGap, Sun } from '@phosphor-icons/react'
 import { useAppStore } from '../stores/appStore'
-import { WORKING_FOLDER_NOTE } from '../../shared/company-folder'
+import { WORKING_FOLDER_BACKUP_NOTE, WORKING_FOLDER_NOTE } from '../../shared/company-folder'
+import { useDismiss } from '../shared/hooks/useDismiss'
 
 interface Props {
   companyName: string | undefined
@@ -49,11 +50,7 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
       </div>
       <div className="flex items-center gap-2 app-no-drag">
         {notices}
-        {!sharedFolder && (
-          <span className="px-2 py-1 rounded-md text-xs text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800" title={WORKING_FOLDER_NOTE}>
-            この PC だけで作業
-          </span>
-        )}
+        {!sharedFolder && <WorkingFolderNote />}
         {sharedFolder && <>
         <button
           onClick={onPreview}
@@ -124,5 +121,26 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
         </button>
       </div>
     </header>
+  )
+}
+
+/** 「この PC だけで作業」 (a company without the shared folder): pressed, it says where files are kept and to back them up. */
+function WorkingFolderNote() {
+  const [open, setOpen] = useState(false)
+  const [box, setBox] = useState<HTMLDivElement | null>(null)
+  useDismiss(box, open, () => setOpen(false))
+  return (
+    <div ref={setBox} className="relative">
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open} title={WORKING_FOLDER_NOTE}
+        className="px-2 py-1 rounded-md text-xs text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 hover:text-gray-700 dark:hover:text-zinc-200">
+        この PC だけで作業
+      </button>
+      {open && (
+        <div role="note" data-working-folder-note className="absolute right-0 top-full z-50 mt-1 w-80 space-y-1 rounded-lg border border-gray-200 bg-white p-3 text-xs leading-relaxed text-gray-600 shadow-lg dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+          <p>{WORKING_FOLDER_NOTE}</p>
+          <p>{WORKING_FOLDER_BACKUP_NOTE}</p>
+        </div>
+      )}
+    </div>
   )
 }
