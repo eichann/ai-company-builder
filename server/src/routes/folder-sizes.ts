@@ -9,6 +9,8 @@
  */
 import { Hono } from 'hono'
 import { companyMember } from './guards'
+import { refusal } from './respond'
+import { services } from '../composition'
 import { folderSizes } from '../lib/folder-sizes'
 import { logError } from '../lib/error-log'
 
@@ -24,6 +26,9 @@ function validFolder(p: string): boolean {
 
 folderSizesRoute.get('/', companyMember, async (c) => {
   const { companyId } = c.var.member
+  // Nothing is downloaded from a company without the shared folder (409 NO_COMPANY_FOLDER).
+  const withFolder = services.companyFolders.require(c.var.member)
+  if (!withFolder.ok) return refusal(c, withFolder)
 
   const folder = c.req.query('path') ?? ''
   const measure = c.req.queries('measure') ?? []

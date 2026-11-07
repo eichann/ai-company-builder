@@ -50,6 +50,12 @@ export interface RecordEngineDeps {
    * folder (audit B-M1: a missing folder answers like a private one). Absent → not checked.
    */
   folderExists?: (companyId: string, path: string) => Promise<boolean | null>
+  /**
+   * Does the company have its shared folder (services/company-folder.ts)? Without one a path on a
+   * member's PC means nothing to anyone else: new file links, attached file versions and file
+   * materials are refused (409 NO_COMPANY_FOLDER). Absent → yes.
+   */
+  hasCompanyFolder?: (companyId: string) => boolean
   /** Digests an output's item key into its id (minutes.md "Outputs made once"); absent → by title only. */
   tokenDigest?: TokenDigest
   /**

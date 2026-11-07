@@ -418,7 +418,9 @@ function authAndAuthorize(c: { req: { raw: Request; header: (name: string) => st
 
   const repoPath = join(REPOS_DIR, `${companyId}.git`)
 
-  if (!existsSync(repoPath)) {
+  // A company without the shared folder (services/company-folder.ts) has no repository, whatever
+  // lies on disk: the same answer as a repository that does not exist, before any membership check.
+  if (!services.companyFolders.has(companyId) || !existsSync(repoPath)) {
     return new Response('Repository not found', { status: 404 })
   }
 
@@ -610,6 +612,8 @@ function authAndAuthorizeScope(c: { req: { raw: Request; header: (name: string) 
   const companyId = sanitizeCompanyId(c.req.param('company'))
   const scopeId = c.req.param('repo').replace(/\.git$/, '')
   if (!companyId || !SCOPE_ID_RE.test(scopeId)) return notFound()
+  // No shared folder, no private folders' repositories either (as above).
+  if (!services.companyFolders.has(companyId)) return notFound()
   const member = services.access.memberOf(companyId, user.id)
   if (!member) return notFound()
   const role = member.role

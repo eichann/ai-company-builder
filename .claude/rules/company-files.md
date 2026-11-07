@@ -31,6 +31,8 @@ Contract: `shared/types/company-files.ts`. Any member, under `/api/companies/:co
 - `GET /search?q=&path=&regex=&caseSensitive=&limit=` — `git grep -I` on `main`; ≤ 200 matches,
   ≤ 20 per file, ≤ 100 files, 10 s → `timedOut`; at most 2 running + 4 queued per company, else
   429 `BUSY`; async spawn only.
+- A company without the shared folder (`server.md` "Companies without a shared folder"): every
+  route answers 409 `NO_COMPANY_FOLDER` (a Japanese sentence the app can relay), never an empty view.
 - Every answer carries the `commit` it was read from (and a private folder's own commit). Paths
   compare as NFC + A–Z folded; answers spell them as stored.
 

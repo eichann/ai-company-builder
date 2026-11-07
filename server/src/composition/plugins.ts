@@ -43,12 +43,14 @@ export interface PluginsLaneDeps {
   actsFor: (companyId: string, userId: string) => string[]
   isMember: (companyId: string, userId: string) => boolean
   managedFolders: (companyId: string, userId: string) => string[]
+  /** The company has its shared folder (services/company-folder.ts): only then has it company Skills. */
+  hasCompanyFolder: (companyId: string) => boolean
 }
 
 export function wirePluginsLane(deps: PluginsLaneDeps) {
   // C5 「手順の自動実行」: a step's work is pinned at its first run; runs of `<pluginId>__<step>` are claimed at its state.
   const pluginSteps = createPluginStepService({
-    companyData: deps.companyData, clock: deps.clock, shelf: deps.pluginShelf, skillTree: companySkillTree, actsFor: deps.actsFor,
+    companyData: deps.companyData, clock: deps.clock, shelf: deps.pluginShelf, skillTree: (companyId, name) => (deps.hasCompanyFolder(companyId) ? companySkillTree(companyId, name) : Promise.resolve(null)), actsFor: deps.actsFor,
     act: (member, actor, recordId, action, body) => deps.recordEngine.act(member, actor, recordId, action, body),
   })
   // A meeting read moves its まとまり to the business plugin's step for it (plan C5, plugin-steps.md).

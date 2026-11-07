@@ -8,7 +8,7 @@ import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox, migrateSecondOpinionSetting } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns } from './schema/ai-runs'
 import { brokerSchema, migrateBrokerSettings } from './schema/broker'
-import { companySchema, migrateInvitationClaims } from './schema/company'
+import { companySchema, migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
 import { connectorSchema, migrateConnectorProviders, migrateGooglePicker } from './schema/connectors'
 import { contentStoreSchema } from './schema/content-store'
 import { fixedPayloadSchema, migrateFixedPayloads } from './schema/fixed-payloads'
@@ -36,7 +36,7 @@ import { pluginStepSchema } from './schema/plugin-steps'
 import { pluginRoleSchema } from './schema/plugin-roles'
 // lane C ▲
 // The migrations tests run on their own against older databases.
-export { migrateInvitationClaims } from './schema/company'
+export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
 export { migrateDepartmentRuleSubject, migrateRuleAndManagerCompanies } from './schema/permissions'
 export { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables } from './schema/plugins'
 export { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewers } from './schema/records'
@@ -109,6 +109,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
 
   // Single-use invitation links (services/invitations.ts signUp).
   migrateInvitationClaims(conn)
+  migrateCompanyFolderKind(conn)
   migrateRecordLedgerProvenance(conn)
   migrateRecordPersonalOwner(conn)
   migrateRecordLinkCreator(conn)

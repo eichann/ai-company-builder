@@ -50,9 +50,13 @@ describe('the menu (管理画面の見直し 2-3)', () => {
   const shown = (c: NavContext) => [...NAV_ITEMS, ADVANCED_ITEM].filter((i) => !i.visible || i.visible(c)).map((i) => i.label)
 
   it('owners and admins: the five places and 「詳しい設定」; a department manager ホーム・部署・フォルダ; a member ホーム・部署', () => {
-    expect(shown({ isAdmin: true, isManager: false, canViewAgentEvents: true })).toEqual(['ホーム', 'メンバー', '部署', 'フォルダ', 'つなぎ先', '詳しい設定'])
-    expect(shown({ isAdmin: false, isManager: true, canViewAgentEvents: true })).toEqual(['ホーム', '部署', 'フォルダ'])
-    expect(shown({ isAdmin: false, isManager: false, canViewAgentEvents: false })).toEqual(['ホーム', '部署'])
+    expect(shown({ isAdmin: true, isManager: false, canViewAgentEvents: true, hasCompanyFolder: true })).toEqual(['ホーム', 'メンバー', '部署', 'フォルダ', 'つなぎ先', '詳しい設定'])
+    expect(shown({ isAdmin: false, isManager: true, canViewAgentEvents: true, hasCompanyFolder: true })).toEqual(['ホーム', '部署', 'フォルダ'])
+    expect(shown({ isAdmin: false, isManager: false, canViewAgentEvents: false, hasCompanyFolder: true })).toEqual(['ホーム', '部署'])
+  })
+
+  it('a company without the shared folder has no 「フォルダ」 (nothing there to manage)', () => {
+    expect(shown({ isAdmin: true, isManager: true, canViewAgentEvents: true, hasCompanyFolder: false })).toEqual(['ホーム', 'メンバー', '部署', 'つなぎ先', '詳しい設定'])
   })
 })
 

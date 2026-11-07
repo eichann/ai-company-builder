@@ -100,6 +100,8 @@ export const companySchema: z.ZodMiniType<Company> = z.looseObject({
   createdAt: str,
   updatedAt: str,
   role: z.optional(role),
+  // Older servers do not send it (= git).
+  folderKind: z.optional(z.enum(['git', 'none'])),
 })
 
 export const companiesSchema = z.array(companySchema)

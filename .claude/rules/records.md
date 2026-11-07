@@ -203,6 +203,11 @@ repository), `record_index_problems` (for owners/admins). Ids are bound as one J
   - **public → private links** are stored but never shown or followed, for anyone
     (`linkAllowed`): a record outside a private folder never reveals or reaches one inside it.
 - A removed file marks the record removed (`removed_at`); its state is kept.
+- **A company without the shared folder** (`folderKind: none`, `server.md` "Companies without a
+  shared folder"): no repository is read — only the core and plugin types, no `.acb/types/` and no
+  record files (`RecordIndexerDeps.hasCompanyFolder`). Nothing pushes there, so the core types are
+  made when the company is created (`tryCreate` → `indexRecords`) and at every server start
+  (`services.indexCompaniesWithoutFolder`, `index.ts`).
 
 ### Links to files (owner decision 10/29)
 
@@ -250,6 +255,10 @@ repository), `record_index_problems` (for owners/admins). Ids are bound as one J
 to a record after it was made; `…/file-links/remove` (tool `records_unlink_file`) removes the link.
 Engine `fileLink` (`services/record-engine/file-links.ts`), generic: any type with a `file` link (`link` may
 be left out when the type has one; task: `files`). Contract `FileLinkRequest` / `FileLinkResult`.
+A company without the shared folder (`server.md`) refuses every new file path — linked here, on
+create, as an attached version or a decision's file material — with 409 `NO_COMPANY_FOLDER`
+(`fileLinksUnavailable`, `RecordEngineDeps.hasCompanyFolder`): a path on one member's PC means
+nothing to anyone else. Removing a link is never refused. Uploads / Drive links: later.
 
 - Who: anyone who reads the record (as reading it) and **reads the file** (`reader.file`). The
   member's **AI** only on types whose definition lets the AI act at all (some action's `who` lists
@@ -866,7 +875,11 @@ unchanged. Column added by `migrateRecordPersonalOwner` (nullable, no data migra
   `folderExists`; not known, e.g. no repository: left to the engine). So the answer never tells
   whether a private folder of that name exists (owner decision B). Replaces `PRIVATE_PLACE` /
   403 「You cannot read that folder」. Test: `record-ai-placement.test.ts` "a private folder's name
-  is never confirmed by the answer" (mutation-checked). Clears
+  is never confirmed by the answer" (mutation-checked). In a company without the shared folder the
+  places are its departments: a department's folder or a path below it is placeable, anything else
+  `FOLDER_NOT_PLACEABLE` (composition's `folderExists` from the rows; who sees the record is still
+  the scopes' rules, owner-only and members-only lists — nothing depends on a repository:
+  `company-without-folder.test.ts`). Clears
   `personal_owner`, sets `folder` (`RecordRepository.setPlace`); ledger action `share`, state
   unchanged, changes `place.personal_owner` / `place.folder` before / after, version + 1
   (`VERSION_CONFLICT`). A task linked to a meeting answers `similar` when a live item of that meeting

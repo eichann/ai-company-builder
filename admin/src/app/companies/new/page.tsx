@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft } from '@phosphor-icons/react'
 
 import { RequireAuth } from '@/components/app/auth-guard'
+import { RadioCard } from '@/components/app/radio-card'
 import { AuthLayout } from '@/components/app/brand'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,6 +14,8 @@ import { Label } from '@/components/ui/label'
 import { companiesApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
 import { NOT_A_MEMBER_YET, offersCompanyCreation } from '@/lib/company-creation'
+import { FOLDER_KIND_CHOICES, FOLDER_KIND_FIXED } from '@/lib/company-folder'
+import type { CompanyFolderKind } from '../../../../../shared/core/company-folder'
 import { describeError } from '@/lib/errors'
 
 export default function NewCompanyPage() {
@@ -27,6 +30,8 @@ function NewCompanyForm() {
   const router = useRouter()
   const { user, refresh } = useAuth()
   const [name, setName] = useState('')
+  // Today's kind unless the operator chooses otherwise (owner decision 2026-11-07).
+  const [folderKind, setFolderKind] = useState<CompanyFolderKind>('git')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -36,7 +41,7 @@ function NewCompanyForm() {
     setBusy(true)
     try {
       // The server derives a unique URL slug from the name.
-      const company = await companiesApi.create(name.trim())
+      const company = await companiesApi.create(name.trim(), undefined, folderKind)
       // The first company of a fresh server: its creator may not make another.
       await refresh()
       router.push(`/companies/${company.id}`)
@@ -74,7 +79,7 @@ function NewCompanyForm() {
         <CardHeader>
           <CardTitle className="text-base">会社を作成</CardTitle>
           <CardDescription>
-            会社ごとに共有フォルダが用意され、標準の部署が作成されます。作成したあなたがオーナーになります。
+            標準の部署が作成され、作成したあなたがオーナーになります。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -90,6 +95,15 @@ function NewCompanyForm() {
                 required
               />
             </div>
+            <fieldset className="grid gap-2">
+              <legend className="mb-2 text-sm font-medium">全社フォルダ</legend>
+              <div role="radiogroup" aria-label="全社フォルダ" className="grid gap-2">
+                {FOLDER_KIND_CHOICES.map((c) => (
+                  <RadioCard key={c.kind} checked={folderKind === c.kind} onSelect={() => setFolderKind(c.kind)} label={c.label} help={c.help} />
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">{FOLDER_KIND_FIXED}</p>
+            </fieldset>
             {error && (
               <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                 {error}

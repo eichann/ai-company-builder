@@ -16,6 +16,7 @@ import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { services } from '../composition'
 import { companyMember } from './guards'
+import { refusal } from './respond'
 import {
   CompanyFilesError,
   listTree,
@@ -49,6 +50,9 @@ function boolParam(raw: string | undefined): boolean | null {
 const invalid = (c: Context, code: 'INVALID_PATH' | 'INVALID_QUERY', message: string) => c.json({ error: message, code }, 400)
 
 async function respond(c: Context, m: Member, run: (view: CompanyFilesView) => Promise<unknown> | unknown) {
+  // No shared company folder, no company files to read (409 NO_COMPANY_FOLDER, a plain sentence for the AI to relay).
+  const withFolder = services.companyFolders.require(m)
+  if (!withFolder.ok) return refusal(c, withFolder)
   try {
     const view = await services.companyFiles.build(m.companyId, m.userId, m.role)
     return c.json({ success: true, data: await run(view) })

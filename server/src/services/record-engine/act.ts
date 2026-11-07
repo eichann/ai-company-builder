@@ -19,7 +19,7 @@ import { BUNDLE_PLACED_TYPES, bundleLinkName, placeWithin, WIDER_THAN_BUNDLE } f
 import { linkAllowed, type RecordReader } from '../record-access'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
-import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict, OK_BY_CANNOT_READ, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict, fileLinksUnavailable, OK_BY_CANNOT_READ, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import { callVia, type ActorInput } from './types'
 import { checkValue, NOTE_MAX, OK_REQUIRED, parseMaterials, parseOkStatement, provenance, REF_RE } from './values'
 
@@ -317,6 +317,8 @@ export function acting(ctx: EngineContext) {
       if (b.attachments !== undefined) {
         if (!Array.isArray(b.attachments) || b.attachments.length > 20) return bad('attachments: up to 20')
         if (action.attach.length === 0) return bad('This action attaches no files')
+        const noFolder = b.attachments.length > 0 ? fileLinksUnavailable(deps.hasCompanyFolder, member.companyId) : null
+        if (noFolder) return noFolder
         const linked = records.linksFrom([row.id]).filter(l => l.targetPath !== null && action.attach.includes(l.name))
         for (const a of b.attachments as Array<Record<string, unknown>>) {
           const link = linked.find(l => l.name === a?.link && l.targetPath === (typeof a?.path === 'string' ? fileLinkPath(a.path) : null))
@@ -346,7 +348,11 @@ export function acting(ctx: EngineContext) {
             const r = records.byIds([m.id]).find(x => reader.record(x))
             const v = r ? (records.states([r.id])[0]?.version ?? 0) : 0
             if (!r || m.version > v) return bad('materials: a record you can read, at a version it has had', 'BAD_MATERIAL')
-          } else if (!reader.file(m.path)) return bad('materials: a file you can read', 'BAD_MATERIAL')
+          } else {
+            const noFolder = fileLinksUnavailable(deps.hasCompanyFolder, member.companyId)
+            if (noFolder) return noFolder
+            if (!reader.file(m.path)) return bad('materials: a file you can read', 'BAD_MATERIAL')
+          }
         }
         const precedents = d.precedents === undefined ? [] : d.precedents
         if (!Array.isArray(precedents) || precedents.length > 20 || !precedents.every(p => typeof p === 'string' && REF_RE.test(p))) return bad('precedents: up to 20 `<record id>@<version>`')
