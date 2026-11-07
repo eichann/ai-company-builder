@@ -36,7 +36,15 @@ export interface PermissionHistoryEntry {
   action:
     | 'group-create' | 'group-rename' | 'group-delete' | 'group-members'
     | 'rules-replace' | 'rule-set' | 'rule-update' | 'rule-delete' | 'rules-clear' | 'rules-move'
-  /** What changed, as JSON-able data (ids, names, a place's path, rules before / after). */
+    /** Who belongs to a department (所属): a department rule's readers / writers follow it. */
+    | 'department-members'
+    /** Who reads / edits a private folder (its viewers and editors). */
+    | 'private-folder-members'
+  /**
+   * What changed, as JSON-able data (ids, names, a place's path, rules before / after; for a
+   * group's or a department's members `before` / `after` ids and, when not an edit of the list
+   * itself, `via`: 'invitation' | 'left-company').
+   */
   detail: Record<string, unknown>
   at: string
   byUser: string

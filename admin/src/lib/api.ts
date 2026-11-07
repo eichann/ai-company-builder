@@ -435,6 +435,8 @@ export interface PermissionScope {
   kind: 'company' | 'department' | 'folder'
   departmentId: string | null
   repoId: string | null
+  /** A company without the shared folder: this place decides who reads it (its everyone rule denies read). */
+  readRestricted?: boolean
   inherited: boolean
   rules: PermissionRule[]
   effectiveSummary: EffectiveSummary
@@ -453,8 +455,12 @@ export interface InheritedRules {
   summary: EffectiveSummary
 }
 
-/** One rule of a complete rule set sent to replaceScope (read is always allowed). */
-export type RuleInput = RuleSubject & { canWrite: boolean }
+/**
+ * One rule of a complete rule set sent to replaceScope. `canRead` absent = true; false only where
+ * the server lets a place restrict who reads it (a private folder itself, or a department / place
+ * inside one in a company without the shared folder: 「見られる人」).
+ */
+export type RuleInput = RuleSubject & { canWrite: boolean; canRead?: boolean }
 
 /** Who a rule is for. Rules for owners/admins are refused: they can always edit. */
 export type RuleSubject =

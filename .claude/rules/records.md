@@ -636,7 +636,8 @@ What a department makes as its 束ねるもの is decided **without a setting** 
 - The answer: `core` (the core kind under the company's name), `departments` (each department's
   id, folder and kind) and `kinds` (every kind in use, for places where kinds mix — the company-wide
   list 「案件・プロジェクトごと」, searching across departments). A turned-off plugin, another
-  company's plugin and records decide nothing.
+  company's plugin and records decide nothing. Only records the member reads count (a restricted
+  department's records never tell them what kind it makes; the answer is per member).
 - Test: `server/tests/unit/bundle-kinds.test.ts` (no business kind → the core's under the
   company's name; mapping placement and records each decide; off and other companies decide
   nothing; records off → `RECORDS_DISABLED`; the name's checks and default) — mutation-checked.
@@ -1852,7 +1853,9 @@ existing one: `minutes.md` "Outputs made once"; a person's key with a meeting li
   (`server/tests/integration/records.test.ts` 「例外（この件だけ）」).
 - `key` (e.g. `meeting-…:decision:2`): the id is derived from it (sha256) and it is stored in
   `source_key`; a known key answers the existing record, so the same item is written once even
-  for two calls at once.
+  for two calls at once. Only a decision the member reads counts: one with the key they cannot read
+  does not exist for them (no 409 `KEY_TAKEN`, which once told it existed) — theirs is made under an
+  id of its own and found by their next call (`tests/unit/hidden-record-ids.test.ts`).
 
 ### A person confirms it (decision version 6, owner decision 2026-11-07 「決めたことを人が確かめる」)
 

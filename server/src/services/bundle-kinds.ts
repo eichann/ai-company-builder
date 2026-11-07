@@ -22,6 +22,7 @@ import type { CompanyDataSource } from '../ports/company-data'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import { currentTypes } from './record-index'
+import { recordReader, type RecordReader } from './record-access'
 import { RECORDS_DISABLED } from './records'
 import type { PluginShelf } from './plugin-shelf'
 
@@ -50,8 +51,12 @@ function mappingPlaces(text: string): Map<string, string> {
 export function createBundleKinds(deps: BundleKindDeps) {
   const { companyData } = deps
 
-  /** Every business plugin bundle type of the company, with the places its records live. */
-  function businessBundles(companyId: string): Array<{ type: string; label: string; places: string[] }> {
+  /**
+   * Every business plugin bundle type of the company, with the places its records live — only the
+   * records `reader` reads: one in a place the member cannot read is a record that does not exist
+   * (records.md "No leaks"), so it never tells them what kind a restricted department makes.
+   */
+  function businessBundles(companyId: string, reader: RecordReader): Array<{ type: string; label: string; places: string[] }> {
     const handle = companyData.forCompany(companyId)
     const inForce = currentTypes(handle.records)
     const out: Array<{ type: string; label: string; places: string[] }> = []
@@ -72,7 +77,7 @@ export function createBundleKinds(deps: BundleKindDeps) {
           if (p) places.push(p)
         }
         for (const r of handle.records.candidates({ types: [type] }, MAX_RECORDS_PER_TYPE)) {
-          if (r.folder) places.push(r.folder)
+          if (r.folder && reader.record(r)) places.push(r.folder)
         }
         out.push({ type, label: now.label, places })
       }
@@ -91,7 +96,7 @@ export function createBundleKinds(deps: BundleKindDeps) {
       const handle = companyData.forCompany(member.companyId)
       if (!handle.records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const core: BundleKind = { type: CORE_BUNDLE_TYPE, name: deps.settingsOf(member.companyId).bundleName, source: 'core' }
-      const business = businessBundles(member.companyId)
+      const business = businessBundles(member.companyId, recordReader(member, handle.scopes.listWithRules()))
       const departments = handle.departments.list().map(d => {
         let best: { type: string; label: string; count: number } | null = null
         for (const b of business) {

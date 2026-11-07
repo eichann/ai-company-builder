@@ -273,6 +273,9 @@ describe('invitations', () => {
       addUser('u-joiner')
       expect((await as('u-joiner', 'POST', `/api/invitations/${token}/accept`)).status).toBe(200)
       expect(belongsTo('u-joiner')).toEqual([{ department_id: 'd-sales', created_by: 'u-owner' }])
+      // Recorded like every 所属 change (server.md "Groups" audit): who chose it, what changed.
+      const logged = db.prepare("SELECT by_user, detail FROM permission_history WHERE company_id = ? AND action = 'department-members'").all(CO) as Array<{ by_user: string; detail: string }>
+      expect(logged.map(e => ({ by: e.by_user, ...JSON.parse(e.detail) }))).toContainEqual({ by: 'u-owner', departmentId: 'd-sales', before: [], after: ['u-joiner'], via: 'invitation' })
 
       const listed = await as('u-owner', 'GET', `/api/companies/${CO}/invitations`)
       expect(listed.body.data.find((i: { token: string }) => i.token === token).departmentIds).toEqual(['d-sales', 'd-gone'])

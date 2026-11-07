@@ -160,15 +160,15 @@ export function previewAccess(
   departments?: DepartmentLookup
 ): EffectiveMember[] {
   // The server's own evaluation (shared/core/permissions.ts resolveAccess):
-  // the deciding place as the one scope with rules. A rule input carries no
-  // read flag: every rule the console writes lets its subject read. A
+  // the deciding place as the one scope with rules. A rule input without a
+  // read flag lets its subject read (the server's default). A
   // department rule grants the people who belong to it: as the server sent
   // them with the rule, else as `departments` knows them (nobody when unknown).
   const scopeRules: ScopeRule[] = rules.map((r, i) => ({
     id: `preview-${i}`,
     subjectType: r.subjectType,
     subjectId: r.subjectId,
-    canRead: 'canRead' in r ? r.canRead : true,
+    canRead: r.canRead ?? true,
     canWrite: r.canWrite,
     ...(r.subjectType === 'department'
       ? { memberIds: ('memberIds' in r && r.memberIds) || departments?.memberIds(r.subjectId ?? '') || [] }

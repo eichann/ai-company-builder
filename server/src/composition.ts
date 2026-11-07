@@ -705,7 +705,10 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // lanes ▲
 
   // What one meeting's reading made twice: owner/admin list and merge (minutes.md "Outputs made once").
-  const meetingOutputs = createMeetingOutputService({ companyData: shared.companyData, act: (...a) => recordEngine.act(...a) })
+  const meetingOutputs = createMeetingOutputService({
+    companyData: shared.companyData, act: (...a) => recordEngine.act(...a),
+    members: companyId => repos.memberships.listByCompany(companyId).map(m => ({ userId: m.user_id, role: m.role })),
+  })
 
   // 「気になる動き」 (security-alerts.md): the clock's sweep, git-http's download counter, sign-in (app.ts).
   const securityAlerts = createSecurityAlertService({

@@ -517,8 +517,8 @@ never a stand-in that pretends a repository exists. For `none`:
   links refused (`records.md`). Read restriction: "Groups and read-restricted places" below.
 - Company Skills (plugin steps' `company_skill`) are none (`STEP_SKILL_MISSING`); company types from
   `.acb/types/` none.
-- Read restriction without git: "Groups and read-restricted places" below (API only so far — the
-  admin console's place visibility editor is the next work). File links on records will be a Drive
+- Read restriction without git: "Groups and read-restricted places" below (set on 「部署」: 「見られる人」).
+  File links on records will be a Drive
   (later OneDrive) file id + revision + fingerprint, or an owner-only local link — no general upload.
 - Admin console: 「会社を作成」 asks 「全社フォルダ」 (使う（今までどおり）／使わない; `admin/src/lib/company-folder.ts`);
   for `none` the menu has no 「フォルダ」 (the page, reached by URL, says why) and 「部署」 no
@@ -583,13 +583,31 @@ restriction there stays private folders; groups cannot be named in their rules).
   not named in its まとまり's step note (`plugin-steps.ts`). Department names stay visible to
   every member (they are the organisation, already in invitations and 所属): a restricted
   department hides its records and the places inside it, not its own name.
-- **Audit**: every change of groups and of rules through the permission editor goes to
-  `permission_history` (append-only: action, who, when, detail JSON — the group's name / members,
-  or each place's rules before and after). No endpoint reads it yet. Private-folder member changes
-  (`PUT /private-folders/:id/members`) and 所属 changes are not recorded there.
+- **Admin console** (owner decision 2026-11-08): 「部署」 shows each department's 「見られる人」 (全員 / the
+  chosen readers) in a company without the shared folder, and its dialog
+  (`admin/src/components/departments/place-readers-dialog.tsx`, rules built by
+  `admin/src/lib/place-readers.ts`) lets owners/admins choose 全員 or 選んだ人だけ (people — never
+  owners/admins, who always read and are said to —, departments' people, groups) for the department
+  and for places inside it (listed; 「場所を作る」 names a new one, made when its readers are saved;
+  部署と同じ = no rules of its own). Only who reads is chosen: 選んだ人だけ sends `everyone: no read`
+  + each reader reading, writing as its rule did (a new reader: as everyone did); 全員 for a
+  department keeps its user / department / role rules and drops groups. A department manager sees
+  their own departments' line and dialog read only (no group list asked); a git company is not
+  offered it. Test: `admin/tests/place-readers.test.tsx` (mutation-checked).
+- **Audit**: every change of who reads goes to `permission_history` (append-only: action, who,
+  when, detail JSON): groups (`group-*`: name / members) and rules through the permission editor
+  (each place's rules before and after); **所属** (`department-members`: `departmentId`, `before`,
+  `after` member ids — `PUT …/departments/:id/members` in the change's transaction, an invitation's
+  所属 on accepting (by its inviter, `via: 'invitation'`), and a member leaving the company
+  (`via: 'left-company'`, also `group-members` for each group they were in)); private folders' readers
+  (`private-folder-members`: `scopeId`, `path`, `before` / `after` viewers and editors, `PUT
+  /private-folders/:id/members`). No endpoint reads it yet. Not recorded: a department deleted with
+  its 所属 (refused while a restricted place is inside it), a private folder's creation (its first
+  readers are its creation).
 - Tests: `tests/unit/permissions-groups.test.ts`, `tests/integration/restricted-places.test.ts`
-  (each guard mutation-checked), `company-without-folder.test.ts`, `plugin-steps.test.ts` (the note),
-  permission matrix + `CROSS`, `admin-contract.test.ts`, `admin/tests/groups.test.tsx`.
+  (each guard mutation-checked; 所属 history), `company-without-folder.test.ts`, `plugin-steps.test.ts` (the note),
+  `private-folders.test.ts` and `account-security.test.ts` (history), permission matrix + `CROSS`,
+  `admin-contract.test.ts`, `admin/tests/groups.test.tsx`, `admin/tests/place-readers.test.tsx`.
 
 ## Admin home
 

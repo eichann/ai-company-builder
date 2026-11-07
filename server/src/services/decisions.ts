@@ -65,6 +65,8 @@ const WHY_MAX = 1000
 const SOURCE_MAX = 300
 const KEY_MAX = 200
 const SUMMARY_MAX = 300
+/** Decisions read with one key: a key the member cannot read may be held by more than one (below). */
+const MAX_SAME_KEY = 50
 const SAID_BY_MAX = 60
 /** `objection` (decision version 6): whether anyone objected, as the minutes say. */
 const OBJECTIONS = ['none', 'raised', 'unknown']
@@ -181,14 +183,17 @@ export function createDecisionService(deps: DecisionServiceDeps) {
         key = slot.key !== null ? `${links.meeting}:${slot.key}` : undefined
       }
       // The same item once: an earlier decision with this key is the answer.
+      // Only one the member reads counts: a decision with this key they cannot read does not exist
+      // for them (records.md "No leaks"; it once answered 409 KEY_TAKEN, which told that it existed),
+      // so theirs is made as when there is none, under an id of its own (the key's id is taken).
       if (key !== undefined && !bySlot) {
-        const earlier = records.candidates({ types: ['decision'], fields: [{ name: 'source_key', values: [key] }] }, 1)[0]
-          ?? (records.find(id) ? { id } : undefined)
-        if (earlier) {
-          const row = records.byIds([earlier.id]).find(r => reader.record(r))
-          if (!row) return refuse('conflict', 'この目印の決めたことは、すでにほかの場所にあります', { code: 'KEY_TAKEN' })
-          return ok({ record: recordSummaries(records, [row]).get(row.id) as RecordSummary, created: false, reused: true, note: MEETING_OUTPUT_REUSED_NOTE })
-        }
+        const earlier = [
+          ...records.candidates({ types: ['decision'], fields: [{ name: 'source_key', values: [key] }] }, MAX_SAME_KEY).map(r => r.id),
+          ...(records.find(id) ? [id] : []),
+        ]
+        const row = records.byIds([...new Set(earlier)]).find(r => reader.record(r))
+        if (row) return ok({ record: recordSummaries(records, [row]).get(row.id) as RecordSummary, created: false, reused: true, note: MEETING_OUTPUT_REUSED_NOTE })
+        if (earlier.length > 0) id = newRecordId('decision', deps.ids.newToken().slice(0, 16))
       }
 
       // 残した人 (decision version 6): only without a meeting — with one, the meeting's readers decide
