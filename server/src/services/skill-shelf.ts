@@ -15,7 +15,9 @@
  * - Reading (`list`, `versions`, `content`, `mine`) shows only items of places the member reads
  *   (a department, or a read-restricted department of #648 / its groups, through `resolveAccess`):
  *   anything else is the same 404 as an item that does not exist, never named.
- * - Every version is kept: putting an earlier one back is `restore` (checked like publishing it).
+ * - Every version is kept until an owner/admin removes it (`removeVersion`, never the current one;
+ *   `removeItem` for an item taken off): putting an earlier one back is `restore` (checked like
+ *   publishing it, secrets included). The company limit is checked inside the publish's write.
  */
 import { resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
 import { secretIn } from '../../shared/core/secret-patterns'
@@ -32,7 +34,7 @@ import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { ShelfItemRow, ShelfStoredFile } from '../ports/skill-shelf'
-import type { Member } from './access'
+import { hasFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
 export const SHELF_NOT_HERE = {
@@ -55,6 +57,13 @@ export const SHELF_COMPANY_FULL = {
   error: '会社の Skill の置き場がいっぱいです。使っていない Skill を整理してください。',
   code: 'SHELF_COMPANY_FULL',
 } as const
+
+export const SHELF_OWNER_ADMIN_ONLY = { error: '版や Skill を消せるのは、オーナーと管理者だけです。', code: 'SHELF_OWNER_ADMIN_ONLY' } as const
+export const SHELF_VERSION_IS_CURRENT = {
+  error: 'いま配っている版は消せません。別の版に戻すか、配るのをやめてから消してください。',
+  code: 'SHELF_VERSION_IS_CURRENT',
+} as const
+export const SHELF_ITEM_PUBLISHED = { error: '配っているものは消せません。先に配るのをやめてください。', code: 'SHELF_ITEM_PUBLISHED' } as const
 
 export interface SkillShelfDeps {
   companyData: CompanyDataSource
@@ -201,6 +210,15 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
     return deps.sha256(Buffer.from(shelfListing(files.map(f => ({ path: f.path, sha256: deps.sha256(f.bytes) }))), 'utf8'))
   }
 
+  /** The push checker's secret patterns over every file (a binary file is read as text, the patterns are ASCII). */
+  function secretsIn(files: ShelfFile[]): Refusal | null {
+    for (const f of files) {
+      const secret = secretIn(f.text ?? utf8(f.bytes))
+      if (secret) return bad('SHELF_SECRET_DETECTED', 'パスワードやキーのようなものが入っています。取り除いてから、もう一度やり直してください。', { path: f.path, pattern: secret })
+    }
+    return null
+  }
+
   function notAllowed(list: Array<{ path: string; reason: string; findings?: string[] }>): Refusal {
     return refuse('forbidden', SHELF_NOT_ALLOWED.error, { code: SHELF_NOT_ALLOWED.code, files: list })
   }
@@ -219,7 +237,7 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
     return { item: view(ctx, row, people([row.changedBy])), changed: wasChanged }
   }
 
-  return {
+  const service = {
     /** GET /skill-shelf — every item of a place the member reads, published or taken off. */
     list(member: Member): Outcome<ShelfListView> {
       if (deps.hasCompanyFolder(member.companyId)) return notHere()
@@ -301,25 +319,24 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       if (!ctx.reads(departmentId)) return refuse('not-found', SHELF_PLACE_NOT_FOUND.error, { code: SHELF_PLACE_NOT_FOUND.code })
       const problems = ctx.problems(kind, departmentId, name, files, true)
       if (problems.length > 0) return notAllowed(problems)
-      for (const f of files) {
-        const secret = secretIn(f.text ?? utf8(f.bytes))
-        if (secret) return bad('SHELF_SECRET_DETECTED', 'パスワードやキーのようなものが入っています。取り除いてから、もう一度やり直してください。', { path: f.path, pattern: secret })
-      }
+      const secret = secretsIn(files)
+      if (secret) return secret
       const totalBytes = files.reduce((n, f) => n + f.bytes.length, 0)
       const version = versionOf(files)
       const existing = ctx.handle.skillShelf.itemAt(kind, departmentId, name)
-      const known = existing ? ctx.handle.skillShelf.version(existing.id, version) : null
-      if (!known && ctx.handle.skillShelf.storedBytes() + totalBytes > SHELF_LIMITS.companyBytes) {
-        return refuse('conflict', SHELF_COMPANY_FULL.error, { code: SHELF_COMPANY_FULL.code })
-      }
       const written = ctx.handle.skillShelf.put({
         newItemId: ids.newId(), kind, departmentId, name, expected: expected.value, version,
         files: files.map(f => ({ path: f.path, base64: f.bytes.toString('base64') })),
         fileCount: files.length, totalBytes,
         autorun: files.some(f => f.text !== undefined && kind === 'skill' && autorunFindingsInText(f.text).length > 0),
+        companyLimitBytes: SHELF_LIMITS.companyBytes,
         at: clock.now(), by: member.userId,
       })
-      if (!written.ok) return written.reason === 'conflict' ? changed(written.currentVersion) : itemNotFound()
+      if (!written.ok) {
+        if (written.reason === 'conflict') return changed(written.currentVersion)
+        if (written.reason === 'full') return refuse('conflict', SHELF_COMPANY_FULL.error, { code: SHELF_COMPANY_FULL.code })
+        return itemNotFound()
+      }
       return ok({ ...result(ctx, written.itemId, written.changed), created: !existing })
     },
 
@@ -335,8 +352,12 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       if (!expected.ok) return expected
       const stored = ctx.handle.skillShelf.versionFiles(row.id, body.version)
       if (!stored) return refuse('not-found', SHELF_VERSION_NOT_FOUND.error, { code: SHELF_VERSION_NOT_FOUND.code })
-      const problems = ctx.problems(row.kind, row.departmentId, row.name, filesOf(stored), true)
+      const restored = filesOf(stored)
+      const problems = ctx.problems(row.kind, row.departmentId, row.name, restored, true)
       if (problems.length > 0) return notAllowed(problems)
+      // Checked again: a version stored before a pattern was added must not come back with it.
+      const secret = secretsIn(restored)
+      if (secret) return secret
       const written = ctx.handle.skillShelf.setCurrent(row.id, expected.value, body.version, clock.now(), member.userId)
       if (!written.ok) return written.reason === 'conflict' ? changed(written.currentVersion) : itemNotFound()
       return ok(result(ctx, row.id, written.changed))
@@ -361,7 +382,41 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       if (!written.ok) return written.reason === 'conflict' ? changed(written.currentVersion) : itemNotFound()
       return ok(result(ctx, row.id, written.changed))
     },
+
+    /**
+     * DELETE /skill-shelf/:itemId/versions/:version — owners and admins remove an old version (never
+     * the current one) to make room; the removal is in the history. Without it, versions only grow
+     * and one busy editor could fill the company's limit for everyone.
+     */
+    removeVersion(member: Member, itemId: string, version: string): Outcome<ShelfVersionsView> {
+      if (deps.hasCompanyFolder(member.companyId)) return notHere()
+      const ctx = contextOf(member)
+      const found = readableItem(ctx, itemId)
+      if (!found.ok) return found
+      if (!hasFullAccess(member.role)) return refuse('forbidden', SHELF_OWNER_ADMIN_ONLY.error, { code: SHELF_OWNER_ADMIN_ONLY.code })
+      const removed = isShelfVersion(version) ? ctx.handle.skillShelf.removeVersion(found.value.id, version, clock.now(), member.userId) : 'not-found'
+      if (removed === 'not-found') return refuse('not-found', SHELF_VERSION_NOT_FOUND.error, { code: SHELF_VERSION_NOT_FOUND.code })
+      if (removed === 'current') return refuse('conflict', SHELF_VERSION_IS_CURRENT.error, { code: SHELF_VERSION_IS_CURRENT.code })
+      return service.versions(member, itemId)
+    },
+
+    /**
+     * DELETE /skill-shelf/:itemId — owners and admins remove an item that is taken off, with its
+     * versions and history (what a department needs before it can be deleted).
+     */
+    removeItem(member: Member, itemId: string): Outcome<{ removed: true }> {
+      if (deps.hasCompanyFolder(member.companyId)) return notHere()
+      const ctx = contextOf(member)
+      const found = readableItem(ctx, itemId)
+      if (!found.ok) return found
+      if (!hasFullAccess(member.role)) return refuse('forbidden', SHELF_OWNER_ADMIN_ONLY.error, { code: SHELF_OWNER_ADMIN_ONLY.code })
+      const removed = ctx.handle.skillShelf.removeItem(found.value.id)
+      if (removed === 'not-found') return itemNotFound()
+      if (removed === 'published') return refuse('conflict', SHELF_ITEM_PUBLISHED.error, { code: SHELF_ITEM_PUBLISHED.code })
+      return ok({ removed: true })
+    },
   }
+  return service
 }
 
 export type SkillShelfService = ReturnType<typeof createSkillShelfService>

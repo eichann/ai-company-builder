@@ -238,7 +238,8 @@ GET  /api/config                                  setup state (no auth)
                               GET|PUT /skill-editors, PUT /skill-editors/everyone (owner/admin)
                                                                              skill-editors.ts
                               GET|POST /skill-shelf, GET /skill-shelf/:itemId/versions(/:version),
-                              POST /skill-shelf/:itemId/restore | unpublish, GET /me/skill-shelf
+                              POST /skill-shelf/:itemId/restore | unpublish, GET /me/skill-shelf,
+                              DELETE /skill-shelf/:itemId(/versions/:version) (owner/admin)
                                                                              skill-shelf.ts
                                                                 (会社の Skill, no shared folder only: plugins.md "The Skill shelf")
                               /private-folders…, /me/private-folders, /me/scopes,
@@ -490,7 +491,9 @@ from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
   commits NFD). Delete reports the files / folders under the folder, hidden entries skipped
   (`countFilesInTree`, the count the old on-disk walk made). Missing source: rename and delete
   change nothing (true / 0, 0). Departments containing a private folder cannot be deleted or
-  renamed; a reserved name is refused.
+  renamed; a reserved name is refused. A department holding items on the Skill shelf (a company
+  without the shared folder) is not deleted either: 409 `SHELF_ITEMS_INSIDE` with the count
+  (`plugins.md` "The Skill shelf").
 - All of it runs under a per-company promise-chain lock (`withCompanyLock`,
   `lib/company-lock.ts`, port `CompanyLock`). Company creation (`services/companies.ts` →
   `adapters/git-repo-store.ts`) seeds the default department folders the same way (root commit;

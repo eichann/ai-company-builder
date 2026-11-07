@@ -343,7 +343,9 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/skill-shelf/:itemId/versions/:version', w => ({ path: `${C(w)}/skill-shelf/no-such-item/versions/${'0'.repeat(64)}` }), [409, 409, 409, 409, 404, 401]),
   r('POST /api/companies/:companyId/skill-shelf/:itemId/restore', w => ({ path: `${C(w)}/skill-shelf/no-such-item/restore`, body: {} }), [409, 409, 409, 409, 404, 401]),
   r('POST /api/companies/:companyId/skill-shelf/:itemId/unpublish', w => ({ path: `${C(w)}/skill-shelf/no-such-item/unpublish`, body: {} }), [409, 409, 409, 409, 404, 401]),
-  r('GET /api/companies/:companyId/me/skill-shelf', w => ({ path: `${C(w)}/me/skill-shelf` }), [409, 409, 409, 409, 404, 401]),
+  r('DELETE /api/companies/:companyId/skill-shelf/:itemId/versions/:version', w => ({ path: `${C(w)}/skill-shelf/no-such-item/versions/${'0'.repeat(64)}` }), [409, 409, 409, 409, 404, 401]),
+  r('DELETE /api/companies/:companyId/skill-shelf/:itemId', w => ({ path: `${C(w)}/skill-shelf/no-such-item` }), [409, 409, 409, 409, 404, 401]),
+  r('GET /api/companies/:companyId/me/skill-shelf',w => ({ path: `${C(w)}/me/skill-shelf` }), [409, 409, 409, 409, 404, 401]),
   // The AI's routes take a record token (Bearer), never a session: every caller here has only a session.
   r('GET /api/records-ai/types', () => ({ path: '/api/records-ai/types' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/records-ai/my-turn', () => ({ path: '/api/records-ai/my-turn' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
@@ -706,7 +708,9 @@ const CROSS: CrossRow[] = [
   x('GET /api/companies/:companyId/skill-shelf/:itemId/versions', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/versions` }), w => w.other.shelfItem),
   x('GET /api/companies/:companyId/skill-shelf/:itemId/versions/:version', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/versions/${'a'.repeat(64)}` }), w => w.other.shelfItem),
   x('POST /api/companies/:companyId/skill-shelf/:itemId/restore', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/restore`, body: { version: 'a'.repeat(64), expectedVersion: null } }), w => w.other.shelfItem),
-  x('POST /api/companies/:companyId/skill-shelf/:itemId/unpublish', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/unpublish`, body: { expectedVersion: 'a'.repeat(64) } }), w => w.other.shelfItem),
+  x('DELETE /api/companies/:companyId/skill-shelf/:itemId/versions/:version', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/versions/${'a'.repeat(64)}` }), w => w.other.shelfItem),
+  x('DELETE /api/companies/:companyId/skill-shelf/:itemId', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}` }), w => w.other.shelfItem),
+  x('POST /api/companies/:companyId/skill-shelf/:itemId/unpublish',(w, id) => ({ path: `${C(w)}/skill-shelf/${id}/unpublish`, body: { expectedVersion: 'a'.repeat(64) } }), w => w.other.shelfItem),
 
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼

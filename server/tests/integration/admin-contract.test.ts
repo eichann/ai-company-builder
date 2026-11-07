@@ -107,6 +107,7 @@ const TYPES: Record<string, string> = {
   ShelfList: 'ShelfListView',
   ShelfVersions: 'ShelfVersionsView',
   ShelfPublishResult: 'ShelfPublishResult',
+  ShelfRemoved: '{ removed: true }',
   DepartmentMembers: 'DepartmentMembersView',
   TaskSettings: 'TaskSettingsView',
   InboxSettings: 'InboxSettingsView',
@@ -479,6 +480,8 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
       await expectShape('ShelfVersions', USERS.owner, 'GET', `${base}/skill-shelf/${item.id}/versions`)
       await expectShape('ShelfPublishResult', USERS.owner, 'POST', `${base}/skill-shelf/${item.id}/restore`, { version: item.version, expectedVersion: second.json.data.item.version })
       await expectShape('ShelfPublishResult', USERS.owner, 'POST', `${base}/skill-shelf/${item.id}/unpublish`, { expectedVersion: item.version })
+      await expectShape('ShelfVersions', USERS.owner, 'DELETE', `${base}/skill-shelf/${item.id}/versions/${second.json.data.item.version}`)
+      await expectShape('ShelfRemoved', USERS.owner, 'DELETE', `${base}/skill-shelf/${item.id}`)
     } finally {
       db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
     }

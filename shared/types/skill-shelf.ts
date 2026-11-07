@@ -10,6 +10,8 @@
  *   GET  /skill-shelf/:itemId/versions/:version       ShelfVersionContent (the files)
  *   POST /skill-shelf/:itemId/restore                 { version, expectedVersion } → ShelfPublishResult
  *   POST /skill-shelf/:itemId/unpublish               { expectedVersion } → ShelfPublishResult
+ *   DELETE /skill-shelf/:itemId/versions/:version     owner/admin: remove an old version → ShelfVersionsView
+ *   DELETE /skill-shelf/:itemId                       owner/admin: remove an item taken off → { removed: true }
  *   GET  /me/skill-shelf                              MyShelfView (what the member's app places)
  */
 import type { ShelfKind } from '../core/skill-shelf'
@@ -75,7 +77,7 @@ export interface ShelfVersionView {
 }
 
 export interface ShelfHistoryEntry {
-  action: 'publish' | 'restore' | 'unpublish'
+  action: 'publish' | 'restore' | 'unpublish' | 'remove-version'
   version: string | null
   at: string
   by: ShelfPerson

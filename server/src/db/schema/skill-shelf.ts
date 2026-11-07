@@ -6,13 +6,14 @@
  */
 export const skillShelfSchema = `
     -- One item per place × kind × name: department_id NULL = the whole company. A department
-    -- deleted takes its items with it (as deleting its folder took its .claude/ in git).
+    -- with items cannot be deleted (services/departments.ts checkDeletable; the foreign key
+    -- refuses any other path).
     -- current_version NULL = taken off the shelf (its versions stay, to be put back).
     CREATE TABLE IF NOT EXISTS shelf_items (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
       kind TEXT NOT NULL CHECK (kind IN ('skill', 'instructions', 'rule')),
-      department_id TEXT REFERENCES departments(id) ON DELETE CASCADE,
+      department_id TEXT REFERENCES departments(id),
       name TEXT NOT NULL,
       current_version TEXT,
       created_at TEXT NOT NULL,
@@ -38,12 +39,12 @@ export const skillShelfSchema = `
     );
     CREATE INDEX IF NOT EXISTS shelf_versions_company ON shelf_versions(company_id);
 
-    -- Who changed what is handed out, when (append-only).
+    -- Who changed what is handed out, when (never updated; rows go only with their item).
     CREATE TABLE IF NOT EXISTS shelf_history (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
       item_id TEXT NOT NULL REFERENCES shelf_items(id) ON DELETE CASCADE,
-      action TEXT NOT NULL CHECK (action IN ('publish', 'restore', 'unpublish')),
+      action TEXT NOT NULL CHECK (action IN ('publish', 'restore', 'unpublish', 'remove-version')),
       version TEXT,
       at TEXT NOT NULL,
       by_user TEXT NOT NULL

@@ -74,15 +74,18 @@ export function sqliteSkillShelfRepository(conn: Database.Database, companyId: s
         .all(companyId, itemId) as Array<{ action: ShelfHistoryRow['action']; version: string | null; at: string; by_user: string }>)
         .map(r => ({ action: r.action, version: r.version, at: r.at, byUser: r.by_user }))
     },
-    storedBytes() {
-      return (conn.prepare('SELECT IFNULL(SUM(total_bytes), 0) AS n FROM shelf_versions WHERE company_id = ?').get(companyId) as { n: number }).n
-    },
     put(input: ShelfPut): ShelfWrite {
       return conn.transaction((): ShelfWrite => {
         const existing = findAt(input.kind, input.departmentId, input.name)
         const current = existing?.currentVersion ?? null
         if (current !== input.expected) return { ok: false, reason: 'conflict', currentVersion: current }
         if (existing && current === input.version) return { ok: true, itemId: existing.id, changed: false }
+        const stored = existing ? hasVersion(existing.id, input.version) : false
+        // In the same transaction as the write: two publishes at once cannot both pass the limit.
+        if (!stored) {
+          const { n } = conn.prepare('SELECT IFNULL(SUM(total_bytes), 0) AS n FROM shelf_versions WHERE company_id = ?').get(companyId) as { n: number }
+          if (n + input.totalBytes > input.companyLimitBytes) return { ok: false, reason: 'full' }
+        }
         let itemId = existing?.id
         if (!itemId) {
           itemId = input.newItemId
@@ -90,7 +93,7 @@ export function sqliteSkillShelfRepository(conn: Database.Database, companyId: s
               VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`)
             .run(itemId, companyId, input.kind, input.departmentId, input.name, input.at, input.by, input.at, input.by)
         }
-        if (!hasVersion(itemId, input.version)) {
+        if (!stored) {
           conn.prepare(`INSERT INTO shelf_versions (company_id, item_id, version, files, file_count, total_bytes, autorun, published_at, published_by)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
             .run(companyId, itemId, input.version, JSON.stringify(input.files), input.fileCount, input.totalBytes, input.autorun ? 1 : 0, input.at, input.by)
@@ -107,6 +110,31 @@ export function sqliteSkillShelfRepository(conn: Database.Database, companyId: s
         if (existing.currentVersion === v) return { ok: true, itemId, changed: false }
         makeCurrent(itemId, v, v === null ? 'unpublish' : 'restore', at, by)
         return { ok: true, itemId, changed: true }
+      })()
+    },
+    countInDepartment(departmentId) {
+      return (conn.prepare('SELECT COUNT(*) AS n FROM shelf_items WHERE company_id = ? AND department_id = ?').get(companyId, departmentId) as { n: number }).n
+    },
+    removeVersion(itemId, v, at, by) {
+      return conn.transaction((): 'removed' | 'not-found' | 'current' => {
+        const existing = findItem(itemId)
+        if (!existing || !hasVersion(itemId, v)) return 'not-found'
+        if (existing.currentVersion === v) return 'current'
+        conn.prepare('DELETE FROM shelf_versions WHERE company_id = ? AND item_id = ? AND version = ?').run(companyId, itemId, v)
+        conn.prepare('INSERT INTO shelf_history (company_id, item_id, action, version, at, by_user) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(companyId, itemId, 'remove-version', v, at, by)
+        return 'removed'
+      })()
+    },
+    removeItem(itemId) {
+      return conn.transaction((): 'removed' | 'not-found' | 'published' => {
+        const existing = findItem(itemId)
+        if (!existing) return 'not-found'
+        if (existing.currentVersion !== null) return 'published'
+        conn.prepare('DELETE FROM shelf_history WHERE company_id = ? AND item_id = ?').run(companyId, itemId)
+        conn.prepare('DELETE FROM shelf_versions WHERE company_id = ? AND item_id = ?').run(companyId, itemId)
+        conn.prepare('DELETE FROM shelf_items WHERE company_id = ? AND id = ?').run(companyId, itemId)
+        return 'removed'
       })()
     },
   }

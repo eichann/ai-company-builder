@@ -38,10 +38,11 @@ const itemLabel = (item: ShelfItemView) => (item.kind === 'instructions' ? `${pl
 const personLabel = (p: { id: string; name: string | null }) => p.name || 'もういない人'
 
 export function SkillShelfPage() {
-  const { companyId, hasCompanyFolder } = useCompany()
+  const { companyId, hasCompanyFolder, isAdmin } = useCompany()
   const shelf = useQuery(hasCompanyFolder ? null : `skill-shelf:${companyId}`, () => skillShelfApi.list(companyId))
   const [viewing, setViewing] = useState<ShelfItemView | null>(null)
   const [stopping, setStopping] = useState<ShelfItemView | null>(null)
+  const [removing, setRemoving] = useState<ShelfItemView | null>(null)
 
   if (hasCompanyFolder) {
     return (
@@ -100,6 +101,11 @@ export function SkillShelfPage() {
                                 配るのをやめる
                               </Button>
                             )}
+                            {!item.version && isAdmin && (
+                              <Button variant="ghost" size="sm" onClick={() => setRemoving(item)}>
+                                消す
+                              </Button>
+                            )}
                           </div>
                         </li>
                       ))}
@@ -121,6 +127,7 @@ export function SkillShelfPage() {
           setViewing(item)
         }}
         onConflict={shelf.reload}
+        canRemove={isAdmin}
       />
       <ConfirmDialog
         open={stopping !== null}
@@ -142,6 +149,26 @@ export function SkillShelfPage() {
           setStopping(null)
         }}
       />
+      <ConfirmDialog
+        open={removing !== null}
+        onOpenChange={(o) => !o && setRemoving(null)}
+        title={removing ? `「${itemLabel(removing)}」を消しますか？` : ''}
+        description="これまでの版もすべて消え、元に戻せません。部署を削除する前や、置き場を空けるときに使います。"
+        confirmLabel="消す"
+        destructive
+        onConfirm={async () => {
+          const target = removing!
+          try {
+            await skillShelfApi.removeItem(companyId, target.id)
+            shelf.setData((prev) => ({ items: (prev?.items ?? []).filter((x) => x.id !== target.id) }))
+            toast.success(`「${itemLabel(target)}」を消しました`)
+          } catch (err) {
+            toast.error(describeError(err))
+            shelf.reload()
+          }
+          setRemoving(null)
+        }}
+      />
     </div>
   )
 }
@@ -152,17 +179,21 @@ function VersionsDialog({
   onOpenChange,
   onChanged,
   onConflict,
+  canRemove,
 }: {
   item: ShelfItemView | null
   companyId: string
   onOpenChange: (open: boolean) => void
   onChanged: (item: ShelfItemView) => void
   onConflict: () => void
+  /** Owners and admins may remove old versions (never the current one). */
+  canRemove: boolean
 }) {
   const versions = useQuery<ShelfVersionsView>(item ? `skill-shelf-versions:${companyId}:${item.id}:${item.version ?? ''}` : null, () =>
     skillShelfApi.versions(companyId, item!.id),
   )
   const [busy, setBusy] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
 
   return (
     <Dialog open={item !== null} onOpenChange={onOpenChange}>
@@ -210,10 +241,35 @@ function VersionsDialog({
                     この版に戻す
                   </Button>
                 )}
+                {!v.current && canRemove && (
+                  <Button variant="ghost" size="sm" disabled={busy !== null} onClick={() => setRemoving(v.version)}>
+                    この版を消す
+                  </Button>
+                )}
               </li>
             ))}
           </ul>
         )}
+        <ConfirmDialog
+          open={removing !== null}
+          onOpenChange={(o) => !o && setRemoving(null)}
+          title={removing ? `版 ${shortVersion(removing)} を消しますか？` : ''}
+          description="この版には戻せなくなります。いま配っている版はそのままです。置き場を空けるときに使います。"
+          confirmLabel="この版を消す"
+          destructive
+          onConfirm={async () => {
+            const version = removing!
+            try {
+              const view = await skillShelfApi.removeVersion(companyId, item!.id, version)
+              versions.setData(() => view)
+              toast.success(`版 ${shortVersion(version)} を消しました`)
+            } catch (err) {
+              toast.error(describeError(err))
+              versions.reload()
+            }
+            setRemoving(null)
+          }}
+        />
       </DialogContent>
     </Dialog>
   )

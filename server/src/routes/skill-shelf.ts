@@ -58,6 +58,18 @@ skillShelfRoute.post('/skill-shelf/:itemId/unpublish', companyMember, serviceBod
   return c.json({ success: true, data: result.value })
 })
 
+skillShelfRoute.delete('/skill-shelf/:itemId/versions/:version', companyMember, (c) => {
+  const result = skillShelf.removeVersion(c.var.member, c.req.param('itemId'), c.req.param('version'))
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+skillShelfRoute.delete('/skill-shelf/:itemId', companyMember, (c) => {
+  const result = skillShelf.removeItem(c.var.member, c.req.param('itemId'))
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
 skillShelfRoute.get('/me/skill-shelf', companyMember, (c) => {
   const result = skillShelf.mine(c.var.member)
   if (!result.ok) return refusal(c, result)

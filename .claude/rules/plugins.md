@@ -595,13 +595,15 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
 
 - **Model** (`shared/core/skill-shelf.ts`, tables `shelf_items` / `shelf_versions` /
   `shelf_history` behind the handle's `skillShelf`, `adapters/sqlite/skill-shelf.ts`): one item per
-  place (company or one department; a department deleted takes its items) × kind (`skill`,
+  place (company or one department; a department holding items is not deleted: 409
+  `SHELF_ITEMS_INSIDE` with the count, `services/departments.ts` `checkDeletable`, owner decision
+  2026-11-08 — take them off and remove them first) × kind (`skill`,
   `instructions` — one per place, name `instructions`, stored as `CLAUDE.md`; Codex gets the same
   text —, `rule` — `<name>.md`) × name (`isValidShelfName`: the skill folder rule, ≤ 64). Every
   distinct content is a **version** = sha256 of `shelfListing` (`<sha256 of the file> <path>\n`,
   sorted): stable, the same in the app, so it can pin a Skill the way a git tree id does
-  (plugin steps' company Skill: the next step). Versions are never deleted; the item's
-  `current_version` is what is handed out (null = taken off).
+  (plugin steps' company Skill: the next step). The item's `current_version` is what is handed out
+  (null = taken off); every other version is kept until an owner/admin removes it (below).
 - **Routes** (`routes/skill-shelf.ts` → `services/skill-shelf.ts`, contract
   `shared/types/skill-shelf.ts`, any member): `GET /skill-shelf` (items of places the caller
   reads, with `canChange`), `POST /skill-shelf` (publish: a Skill as `files: [{ path, base64 }]`,
@@ -609,7 +611,10 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   `GET …/versions/:version` (the files; re-hashed on the way out, 409 `SHELF_CONTENT_CHANGED`),
   `POST …/restore { version, expectedVersion }`, `POST …/unpublish { expectedVersion }`,
   `GET /me/skill-shelf` (what the member's app places: current versions of readable places, with
-  `belongs` for the member's departments).
+  `belongs` for the member's departments); owners/admins only: `DELETE …/versions/:version`
+  (an old version, never the current one — 409 `SHELF_VERSION_IS_CURRENT`; history action
+  `remove-version`) and `DELETE /skill-shelf/:itemId` (an item taken off, with its versions and
+  history — 409 `SHELF_ITEM_PUBLISHED` otherwise); others 403 `SHELF_OWNER_ADMIN_ONLY`.
 - **Checks are the push checker's, asked of the place path** (`shelfPlacePath`:
   `<department>/.claude/skills/<name>/<file>`, `<department>/CLAUDE.md`,
   `<department>/.claude/rules/<name>.md`; no prefix for the company): `shelfChangeProblems` with
@@ -619,13 +624,15 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   (`shared/core/skill-autorun.ts`, the one copy the push checker also uses: owner/admin only), plus
   the write check of the place (`resolveAccess(...).write`: a list grants no folder access) and the
   secret patterns (`shared/core/secret-patterns.ts`, also the push checker's). Restore runs the
-  same checks on the restored files; unpublish runs who-may-change without the auto-run check (a
+  same checks on the restored files, secrets included; unpublish runs who-may-change without the auto-run check (a
   deletion in git). 403 `SHELF_NOT_ALLOWED` lists each file with `owner-admin-only` /
   `not-allowed` / `autorun` (+ findings) / `no-write`.
 - **Upload rules**: paths relative, NFC, no empty / `.` / `..` segment, no character a Mac or
   Windows disk refuses, no trailing dot / space or device name, ≤ 10 deep, ≤ 300 long; no two
   paths a disk folds together, no file that is also a folder (`SHELF_BAD_PATH`); `SKILL.md` at the
-  top; ≤ 200 files, 2 MB a file, 10 MB a Skill, 256 KB a text, 500 MB a company (all versions);
+  top; ≤ 200 files, 2 MB a file, 10 MB a Skill, 256 KB a text, 500 MB a company (all versions,
+  checked inside the publish's write transaction; content already stored takes no more room;
+  owners/admins make room by removing old versions);
   codes `SHELF_BAD_KIND`, `SHELF_BAD_NAME`, `SHELF_NO_SKILL_MD`, `SHELF_TOO_MANY_FILES`,
   `SHELF_FILE_TOO_LARGE`, `SHELF_TOO_LARGE` (also the route's 413), `SHELF_EMPTY_TEXT`,
   `SHELF_BAD_CONTENT`, `SHELF_SECRET_DETECTED`, `SHELF_COMPANY_FULL`, `SHELF_BAD_VERSION`.
@@ -639,10 +646,12 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   item is one that does not exist.
 - **Admin** 「会社の Skill」 (`admin/src/components/skill-shelf/`, menu for owners / admins /
   managers of a `none` company): list by kind with version, who, when; 「これまでの版」 and
-  「この版に戻す」; 「配るのをやめる」. Publishing new content is the app's (next step; no upload
+  「この版に戻す」, 「この版を消す」 (owner/admin); 「配るのをやめる」; 「消す」 for an item taken off
+  (owner/admin). Publishing new content is the app's (next step; no upload
   in the admin yet).
 - Not yet: the app fetching, placing (plain files in the working folder) and protecting them;
-  plugin steps pinning a shelf Skill by its version; Skill-use reports by version.
+  plugin steps pinning a shelf Skill by its version; Skill-use reports by version. The app (next
+  step) places only the company-wide items and those of the member's own departments (`belongs`).
 - Tests: `server/tests/integration/skill-shelf.test.ts` (each role and kind, auto-run parts,
   concurrency, rollback, delivery scoping by department / restricted place / group, no name leaks,
   refusals, the version's listing, git company refused — mutation-checked), permission matrix rows

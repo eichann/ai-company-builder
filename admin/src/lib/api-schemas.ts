@@ -360,6 +360,7 @@ export const groupDeletedSchema = topLevel<{ deleted: true }>({ deleted: bool })
 export const shelfListSchema = topLevel<ShelfListView>({ items: list })
 export const shelfVersionsSchema = topLevel<ShelfVersionsView>({ item: obj, versions: list, history: list })
 export const shelfPublishResultSchema = topLevel<ShelfPublishResult>({ item: obj, changed: bool })
+export const shelfRemovedSchema = topLevel<{ removed: true }>({ removed: bool })
 
 // API keys, plugins and connectors
 export const brokerSchema = topLevel<BrokerView>({

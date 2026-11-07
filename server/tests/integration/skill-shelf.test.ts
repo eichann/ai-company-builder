@@ -18,6 +18,10 @@
  *   that does not exist, and never its name; another company's item is one that does not exist;
  * - paths, names, sizes and secrets refused with their codes; nothing stored;
  * - the version is the sha256 of the canonical listing (the app recomputes it);
+ * - making room: owners/admins remove old versions (never the current one, in the history) and
+ *   items taken off; the company limit is checked in the write; a full shelf refuses new content;
+ * - a department holding shelf items cannot be deleted (409 SHELF_ITEMS_INSIDE with the count);
+ * - restore re-checks secrets;
  * - a company with the shared folder: every endpoint 409 SKILL_SHELF_NOT_HERE.
  */
 import { describe, it, expect, beforeAll, vi } from 'vitest'
@@ -294,6 +298,16 @@ describe('versions: concurrency, rollback, taking off', () => {
     expect(history.map((h: Json) => h.action)).toEqual(['restore', 'unpublish', 'restore', 'publish', 'publish'])
   })
 
+  it('putting a version back checks it for secrets again (one stored before a pattern was added)', async () => {
+    const v1 = (await publishSkill('secret-later', null)).body.data.item
+    const v2 = (await publishSkill('secret-later', null, `${SKILL}v2\n`, 'sh-owner', v1.version)).body.data.item
+    db.prepare('UPDATE shelf_versions SET files = ? WHERE company_id = ? AND item_id = ? AND version = ?')
+      .run(JSON.stringify([{ path: 'SKILL.md', base64: b64(SKILL) }, { path: 'env.txt', base64: b64(`KEY=${'AKIA'}${'ABCDEFGHIJKLMNOP'}`) }]), none, v1.id, v1.version)
+    const refused = await call('POST', co(`/skill-shelf/${v1.id}/restore`), { version: v1.version, expectedVersion: v2.version })
+    expect(refused).toMatchObject({ status: 400, body: { code: 'SHELF_SECRET_DETECTED', path: 'env.txt' } })
+    expect((await call('GET', co(`/skill-shelf/${v1.id}/versions`))).body.data.item.version).toBe(v2.version)
+  })
+
   it('the version is the sha256 of the canonical listing, and the files come back as sent', async () => {
     const files = skillFiles(SKILL, { 'tools/run.py': 'print(1)\n' })
     const made = await call('POST', co('/skill-shelf'), { kind: 'skill', departmentId: null, name: 'listing', files, expectedVersion: null })
@@ -380,13 +394,71 @@ describe('reading and delivery follow who reads the place', () => {
     expect(publishIntoTheirs.body.code).toBe('SHELF_PLACE_NOT_FOUND')
   })
 
-  it("a department deleted takes its items with it", async () => {
+  it('a department holding shelf items is not deleted until they are taken off and removed', async () => {
     const tmp = await call('POST', co('/departments'), { name: '一時部', folder: '一時部' })
     const made = await publishSkill('tmp-skill', tmp.body.data.id)
     expect(made.status).toBe(201)
+    const rule = await call('POST', co('/skill-shelf'), { kind: 'rule', departmentId: tmp.body.data.id, name: 'tmp-rule', text: '決まり', expectedVersion: null })
+    expect(rule.status).toBe(201)
+    const refused = await call('DELETE', co(`/departments/${tmp.body.data.id}`))
+    expect(refused).toMatchObject({ status: 409, body: { code: 'SHELF_ITEMS_INSIDE', count: 2 } })
+    expect(refused.body.error).toContain('2 件')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM departments WHERE company_id = ? AND id = ?').get(none, tmp.body.data.id)).toEqual({ n: 1 })
+    // Taken off is not enough: the item and its versions stay until removed.
+    for (const item of [made.body.data.item, rule.body.data.item]) {
+      expect((await call('POST', co(`/skill-shelf/${item.id}/unpublish`), { expectedVersion: item.version })).status).toBe(200)
+    }
+    expect((await call('DELETE', co(`/departments/${tmp.body.data.id}`))).body).toMatchObject({ code: 'SHELF_ITEMS_INSIDE', count: 2 })
+    for (const item of [made.body.data.item, rule.body.data.item]) {
+      expect((await call('DELETE', co(`/skill-shelf/${item.id}`))).body.data).toEqual({ removed: true })
+    }
     expect((await call('DELETE', co(`/departments/${tmp.body.data.id}`))).status).toBe(200)
-    expect(db.prepare('SELECT COUNT(*) AS n FROM shelf_items WHERE company_id = ? AND id = ?').get(none, made.body.data.item.id)).toEqual({ n: 0 })
-    expect(db.prepare('SELECT COUNT(*) AS n FROM shelf_versions WHERE company_id = ? AND item_id = ?').get(none, made.body.data.item.id)).toEqual({ n: 0 })
+  })
+})
+
+describe('making room: removing old versions and items (owners and admins)', () => {
+
+  it('an old version is removed by an owner or admin only, never the current one, and the history says so', async () => {
+    const v1 = (await publishSkill('room', null)).body.data.item
+    const v2 = (await publishSkill('room', null, `${SKILL}v2\n`, 'sh-owner', v1.version)).body.data.item
+    for (const who of ['sh-editor', 'sh-bob']) {
+      expect((await call('DELETE', co(`/skill-shelf/${v1.id}/versions/${v1.version}`), undefined, who)).body.code).toBe('SHELF_OWNER_ADMIN_ONLY')
+    }
+    expect((await call('DELETE', co(`/skill-shelf/${v1.id}/versions/${v2.version}`), undefined, 'sh-admin')).body.code).toBe('SHELF_VERSION_IS_CURRENT')
+    const removed = await call('DELETE', co(`/skill-shelf/${v1.id}/versions/${v1.version}`), undefined, 'sh-admin')
+    expect(removed.status).toBe(200)
+    expect(removed.body.data.versions.map((v: Json) => v.version)).toEqual([v2.version])
+    expect(removed.body.data.history[0]).toMatchObject({ action: 'remove-version', version: v1.version, by: { id: 'sh-admin' } })
+    expect((await call('GET', co(`/skill-shelf/${v1.id}/versions/${v1.version}`))).body.code).toBe('SHELF_VERSION_NOT_FOUND')
+    expect((await call('POST', co(`/skill-shelf/${v1.id}/restore`), { version: v1.version, expectedVersion: v2.version })).body.code).toBe('SHELF_VERSION_NOT_FOUND')
+    expect((await call('DELETE', co(`/skill-shelf/${v1.id}/versions/${v1.version}`))).body.code).toBe('SHELF_VERSION_NOT_FOUND')
+  })
+
+  it('an item is removed only once taken off, by an owner or admin', async () => {
+    const item = (await publishSkill('to-remove', null)).body.data.item
+    expect((await call('DELETE', co(`/skill-shelf/${item.id}`))).body.code).toBe('SHELF_ITEM_PUBLISHED')
+    await call('POST', co(`/skill-shelf/${item.id}/unpublish`), { expectedVersion: item.version })
+    expect((await call('DELETE', co(`/skill-shelf/${item.id}`), undefined, 'sh-editor')).body.code).toBe('SHELF_OWNER_ADMIN_ONLY')
+    expect((await call('DELETE', co(`/skill-shelf/${item.id}`))).status).toBe(200)
+    expect((await call('GET', co(`/skill-shelf/${item.id}/versions`))).body.code).toBe('SHELF_ITEM_NOT_FOUND')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM shelf_versions WHERE company_id = ? AND item_id = ?').get(none, item.id)).toEqual({ n: 0 })
+  })
+
+  it('a full shelf refuses new content until an owner removes old versions', async () => {
+    const big = (await publishSkill('big', null)).body.data.item
+    const current = (await publishSkill('big', null, `${SKILL}今の版\n`, 'sh-owner', big.version)).body.data.item
+    // The old version stands for a shelf filled close to the company's limit.
+    const used = (db.prepare('SELECT SUM(total_bytes) AS n FROM shelf_versions WHERE company_id = ?').get(none) as { n: number }).n
+    db.prepare('UPDATE shelf_versions SET total_bytes = total_bytes + ? WHERE company_id = ? AND item_id = ? AND version = ?')
+      .run(500 * 1024 * 1024 - used - 10, none, big.id, big.version)
+    const full = await publishSkill('one-more', null, SKILL, 'sh-editor')
+    expect(full).toMatchObject({ status: 409, body: { code: 'SHELF_COMPANY_FULL' } })
+    expect(db.prepare("SELECT COUNT(*) AS n FROM shelf_items WHERE company_id = ? AND name = 'one-more'").get(none)).toEqual({ n: 0 })
+    // Content already stored takes no more room: publishing it again, or putting it back, still works.
+    expect((await publishSkill('big', null, SKILL, 'sh-owner', current.version)).body.data.item.version).toBe(big.version)
+    expect((await call('POST', co(`/skill-shelf/${big.id}/restore`), { version: current.version, expectedVersion: big.version })).status).toBe(200)
+    expect((await call('DELETE', co(`/skill-shelf/${big.id}/versions/${big.version}`))).status).toBe(200)
+    expect((await publishSkill('one-more', null, SKILL, 'sh-editor')).status).toBe(201)
   })
 })
 

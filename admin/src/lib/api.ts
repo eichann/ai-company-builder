@@ -78,6 +78,7 @@ import {
   memberGroupsSchema,
   shelfListSchema,
   shelfPublishResultSchema,
+  shelfRemovedSchema,
   shelfVersionsSchema,
   groupDeletedSchema,
 } from './api-schemas'
@@ -1052,6 +1053,14 @@ export const skillShelfApi = {
 
   unpublish: (companyId: string, itemId: string, expectedVersion: string | null) =>
     getData(`${shelfBase(companyId)}/${enc(itemId)}/unpublish`, shelfPublishResultSchema, { method: 'POST', body: { expectedVersion } }),
+
+  /** Owners and admins: remove an old version (never the current one, 409 SHELF_VERSION_IS_CURRENT). */
+  removeVersion: (companyId: string, itemId: string, version: string) =>
+    getData(`${shelfBase(companyId)}/${enc(itemId)}/versions/${enc(version)}`, shelfVersionsSchema, { method: 'DELETE' }),
+
+  /** Owners and admins: remove an item that is taken off, with its versions (409 SHELF_ITEM_PUBLISHED otherwise). */
+  removeItem: (companyId: string, itemId: string) =>
+    getData(`${shelfBase(companyId)}/${enc(itemId)}`, shelfRemovedSchema, { method: 'DELETE' }),
 }
 
 const deptBase = (companyId: string) => `/api/companies/${enc(companyId)}/departments`
