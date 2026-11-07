@@ -512,8 +512,14 @@ never a stand-in that pretends a repository exists. For `none`:
 - Permission rules take the company and its departments only (`/permissions/folders` lists the
   departments, nothing inside them). Record places: departments; file links refused (`records.md`).
 - Company Skills (plugin steps' `company_skill`) are none (`STEP_SKILL_MISSING`); company types from
-  `.acb/types/` none. Read-restricted places without a repository (a private-folder equivalent)
-  are a later decision.
+  `.acb/types/` none.
+- **Gap today**: read restriction exists only through private folders, so nothing can restrict who
+  reads a `none` company's department records (`POST /permissions/rules` with `canRead: false`
+  → 400 `READ_RESTRICTION_UNAVAILABLE`); only owner-only and members-only records are narrower. A
+  read-restricted place without git (per department / place, people or groups) and the department
+  visibility editor are the next work, before a `none` company is used for real (owner 2026-11-07).
+  File links on records will be a Drive (later OneDrive) file id + revision + fingerprint, or an
+  owner-only local link — no general upload.
 - Admin console: 「会社を作成」 asks 「全社フォルダ」 (使う（今までどおり）／使わない; `admin/src/lib/company-folder.ts`);
   for `none` the menu has no 「フォルダ」 (the page, reached by URL, says why) and 「部署」 no
   「フォルダを取り込む」. The desktop app's side (a work folder without git) is a later change.
