@@ -255,7 +255,7 @@ test('「手元で直す」 keeps the version the member started from: publishin
   await w.store.release(w.root, '.claude/skills/proposal')
   w.server.items = [SKILL_V2]
   await w.again()
-  assert.deepEqual(w.store.markOf(w.root, '.claude/skills/proposal'), { state: 'clash', version: versionOf(SKILL.files) })
+  assert.deepEqual(w.store.markOf(w.root, '.claude/skills/proposal'), { state: 'editing', version: versionOf(SKILL.files) })
 })
 
 test('「手元で直す」 has a way back: with the member\'s copy gone, the company\'s Skill returns', async () => {
@@ -281,7 +281,7 @@ test('「手元で直す」: the Skill is the member\'s from then on, nothing ov
   assert.deepEqual(w.store.managedPaths('co', w.root), [])
   await w.again()
   assert.deepEqual(w.store.managedPaths('co', w.root), [], 'even unchanged it is not taken back')
-  assert.equal(w.store.markOf(w.root, '.claude/skills/proposal')?.state, 'clash')
+  assert.equal(w.store.markOf(w.root, '.claude/skills/proposal')?.state, 'editing')
   write(w.at('.claude/skills/proposal/SKILL.md'), 'better\n')
   await w.again()
   assert.equal(read(w.at('.claude/skills/proposal/SKILL.md')), 'better\n')

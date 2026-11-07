@@ -107,9 +107,9 @@ const skill = (folder: string, name: string, description: string) => ({
 })
 const SHELF_VERSION = 'abcd1234'.repeat(8)
 /** ?kind=none: weekly-report came from the company; release-note is the member's own beside a company one. */
-const SHELF_MARKS: Record<string, { state: 'company' | 'clash'; version: string }> = {
+const SHELF_MARKS: Record<string, { state: 'company' | 'clash' | 'editing'; version: string }> = {
   'weekly-report': { state: 'company', version: SHELF_VERSION },
-  'release-note': { state: 'clash', version: SHELF_VERSION },
+  'release-note': { state: params.get('shelf') === 'editing' ? 'editing' : 'clash', version: SHELF_VERSION },
 }
 const SKILLS: Record<string, ReturnType<typeof skill>[]> = {
   '': [skill('', 'weekly-report', '週報をまとめる')],

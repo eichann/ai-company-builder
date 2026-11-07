@@ -388,6 +388,21 @@ test('without the shared folder: the server\'s refusal is shown in its words', a
   await page.getByRole('button', { name: '会社に公開' }).click()
   await page.getByRole('button', { name: '会社に公開' }).click()
   await expect(page.getByRole('alert')).toContainText('この Skill・指示を変えられるのは、決められた人だけです。')
+  // It was about that Skill: another one opens without it.
+  await page.evaluate(() => window.__acbLayout.addSkill('営業部', 'visit-memo'))
+  await page.getByRole('heading', { name: 'visit-memo' }).click()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('without the shared folder: a Skill being changed by 手元で直す says that, not that a name happens to clash', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', shelf: 'editing' })
+  await deptTab(page, '開発部').click()
+  await page.getByRole('heading', { name: 'release-note' }).click()
+  await expect(page.getByText('あなたが手元で直している Skill を使っています。')).toBeVisible()
+  await expect(page.getByText('会社にも同じ名前の Skill があります。')).toHaveCount(0)
+  await expect(page.getByText('この PC だけのスキルです')).toHaveCount(0)
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await expect(page.getByText('会社の同じ名前の Skill を、この内容に置き換えます。')).toBeVisible()
 })
 
 test('without the shared folder: the member\'s Skill beside a company one of the same name says so, and publishing names the version it replaces', async ({ page }) => {

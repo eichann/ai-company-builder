@@ -111,7 +111,7 @@ test('「手元で直す」 through main: the Skill is no longer the company\'s 
   const skillPath = path.join(folder, '.claude/skills/proposal')
   assert.deepEqual(await h.invoke('skillShelf:editLocally', folder, skillPath), { success: true })
   const listed = await h.invoke<{ skills: Array<{ shelf?: unknown }> }>('skills:list', folder, '', 'company', undefined, { force: true })
-  assert.deepEqual(listed.skills[0].shelf, { state: 'clash', version: versionOf(skill) })
+  assert.deepEqual(listed.skills[0].shelf, { state: 'editing', version: versionOf(skill) })
 })
 
 test('a folder another company works in is refused, and nothing is delivered into it', async () => {

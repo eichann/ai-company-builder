@@ -95,9 +95,12 @@ export function shelfPlaceOfSkillFolder(rel: string): { departmentFolder: string
   return { departmentFolder: at === 1 ? parts[0] : null, name }
 }
 
-/** What the Skills panel says of a Skill: delivered by the company, or the member's own beside a delivered one of the same name. */
+/**
+ * What the Skills panel says of a Skill: delivered by the company; the member's own beside a
+ * delivered one of the same name; or a delivered one they chose to change here (「手元で直す」).
+ */
 export interface SkillShelfMark {
-  state: 'company' | 'clash'
+  state: 'company' | 'clash' | 'editing'
   version: string
 }
 
@@ -108,6 +111,7 @@ export function shelfMarkTitle(version: string): string {
 
 export const SHELF_COMPANY_NOTE = 'これは会社の Skill です。AI やこの PC で変えても、次に受け取るときに元に戻ります。'
 export const SHELF_CLASH_NOTE = '会社にも同じ名前の Skill があります。あなたの Skill をそのまま使っているので、会社の Skill はこの PC に置いていません。'
+export const SHELF_EDITING_NOTE = 'この PC では、あなたが手元で直している Skill を使っています。公開し直すまで、会社の更新は届きません。やめるときは、この Skill のフォルダを消すと会社の Skill に戻ります。'
 export const SHELF_PUBLISH_CONFIRM = '会社の Skill として公開します。この場所の全員に届きます。公開のあとは、AI やこの PC で変えても、次に受け取るときに元に戻ります。'
 export const SHELF_REPLACE_CONFIRM = '会社の同じ名前の Skill を、この内容に置き換えます。この場所の全員に届きます。'
 export const SHELF_EDIT_CONFIRM = 'この PC ではあなたの Skill になり、公開し直すまで会社の更新は届きません。ほかの人の Skill は変わりません。'

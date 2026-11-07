@@ -723,8 +723,8 @@ company never reaches any of it: the store knows a company only from
   (null, or the version of the clash); the server decides, its sentence is shown as written
   (`shelfRefusalMessage`). The button is shown to everyone: who may is the server's answer. A
   company Skill changes by **「手元で直す」** (`skillShelf:editLocally`, `release`): on this
-  computer it becomes the member's own (a clash that stays even while unchanged; the `.agents/` copy
-  goes), then 「会社に公開」 replaces the version they **started from** (`released` keeps it, a
+  computer it becomes the member's own (mark `editing`, kept even while unchanged; the `.agents/`
+  copy goes), then 「会社に公開」 replaces the version they **started from** (`released` keeps it, a
   colleague's newer one → 409) and the next sync takes it over. With their copy deleted, the
   company's comes back.
 - **Use reports**: `shelfVersion` in `skill-use-reporter.ts`: the version in the `tree` field (64

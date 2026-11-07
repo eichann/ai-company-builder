@@ -462,7 +462,8 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
       const item = manifest.items.find(i => i.kind === 'skill' && i.paths.includes(rel))
       if (item) return { state: 'company', version: item.version }
       const clash = manifest.clashes.find(c => c.targets.includes(rel))
-      return clash ? { state: 'clash', version: clash.version } : undefined
+      if (!clash) return undefined
+      return { state: manifest.released.some(r => r.id === clash.id) ? 'editing' : 'clash', version: clash.version }
     },
     /** For a Skill-use report: the version of the managed Skill at `rel`, and whether its files differ from it now. */
     async versionOf(root: string, rel: string): Promise<{ version: string; dirty: boolean } | null> {

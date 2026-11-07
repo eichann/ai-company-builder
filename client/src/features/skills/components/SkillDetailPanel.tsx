@@ -22,7 +22,7 @@ import {
 import type { Skill, SkillTool } from '../model'
 import { startSkillTool, stopSkillTool } from '../api'
 import { useAppStore } from '../../../stores/appStore'
-import { SHELF_CLASH_NOTE, SHELF_COMPANY_NOTE, SHELF_EDIT_CONFIRM, SHELF_PUBLISH_CONFIRM, SHELF_REPLACE_CONFIRM, shelfMarkTitle } from '../../../../shared/skill-shelf'
+import { SHELF_CLASH_NOTE, SHELF_COMPANY_NOTE, SHELF_EDIT_CONFIRM, SHELF_EDITING_NOTE, SHELF_PUBLISH_CONFIRM, SHELF_REPLACE_CONFIRM, shelfMarkTitle } from '../../../../shared/skill-shelf'
 
 type TabId = 'overview' | 'rules' | 'references' | 'scripts' | 'tools'
 
@@ -134,7 +134,7 @@ export function SkillDetailPanel({
       {/* Tab Content */}
       <div className="flex-1 overflow-auto p-5">
         {activeTab === 'overview' && (
-          <OverviewTab skill={skill} onEditFile={onEditFile} onPublish={onPublish} onToggleNurturing={onToggleNurturing} companyShelf={companyShelf} />
+          <OverviewTab key={skill.id} skill={skill} onEditFile={onEditFile} onPublish={onPublish} onToggleNurturing={onToggleNurturing} companyShelf={companyShelf} />
         )}
         {activeTab === 'rules' && (
           <FileListTab
@@ -205,13 +205,13 @@ function CompanyShelfSection({ skill, actions, onRefused }: { skill: Skill; acti
       </div>
     )
   }
-  const clash = skill.shelf?.state === 'clash'
+  const state = skill.shelf?.state
   return (
     <div className={box}>
-      <div>この PC だけのスキルです（ほかの人には共有されません）。</div>
-      {clash && <div>{SHELF_CLASH_NOTE}</div>}
+      {state === 'editing' ? <div>{SHELF_EDITING_NOTE}</div> : <div>この PC だけのスキルです（ほかの人には共有されません）。</div>}
+      {state === 'clash' && <div>{SHELF_CLASH_NOTE}</div>}
       {actions && (confirming === 'publish'
-        ? confirmation(clash ? SHELF_REPLACE_CONFIRM : SHELF_PUBLISH_CONFIRM, '会社に公開', actions.publish)
+        ? confirmation(state ? SHELF_REPLACE_CONFIRM : SHELF_PUBLISH_CONFIRM, '会社に公開', actions.publish)
         : <button disabled={busy} onClick={() => setConfirming('publish')} className={button}><CloudArrowUp size={14} />会社に公開</button>)}
     </div>
   )
