@@ -164,15 +164,19 @@ recordsRoute.post('/records/item/:recordId/undo', companyMember, serviceBody, as
 recordsRoute.post('/records/item/:recordId/file-links', companyMember, serviceBody, async (c) => {
   const member = c.var.member
   const body = c.var.body
-  // A Drive file (a company without the shared folder): the Google connector checks it is this
-  // member's own pick, with their own permission, before the engine links it (records.md "File links
-  // without the shared folder"). Nothing else ever asks Drive about a linked file.
+  // A Drive file (a company without the shared folder; records.md "File links without the shared
+  // folder"): every record check first (records on, the record readable, the body, the version, not
+  // linked already — who → body → rules), and only then the Google connector checks it is this
+  // member's own pick, with their own permission. Nothing else ever asks Drive about a linked file; a
+  // refusal before that point asks Google nothing.
   const target = (body as { target?: { kind?: unknown; fileId?: unknown } } | null)?.target
-  // (A company with the shared folder refuses the kind in the engine; Google is not asked for it.)
-  if (target?.kind === 'drive' && !services.companyFolders.has(member.companyId)) {
+  if (target?.kind === 'drive') {
+    const actor = humanWith(body)
+    const before = recordEngine.fileLinkBeforeDrive(member, actor, c.req.param('recordId'), body)
+    if (!before.ok || before.value !== 'ask-drive') return answer(c, before as Outcome<unknown>)
     const checked = await services.googleDrive.linkable(member, target.fileId)
     if (!checked.ok) return answer(c, checked)
-    return answer(c, recordEngine.fileLink(member, humanWith(body), c.req.param('recordId'), 'link', body, checked.value))
+    return answer(c, recordEngine.fileLink(member, actor, c.req.param('recordId'), 'link', body, checked.value))
   }
   return answer(c, recordEngine.fileLink(member, humanWith(body), c.req.param('recordId'), 'link', body))
 })

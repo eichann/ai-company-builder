@@ -185,6 +185,21 @@ describe('a Google Drive file', () => {
     }
   })
 
+  it('the connector is asked only after every record check (missing, unreadable, stale, already linked answer first)', () => {
+    const t = task()
+    const before = (who: string, id: string, expectedVersion: number) =>
+      engine.fileLinkBeforeDrive(m(who), HUMAN, id, { target: { kind: 'drive', fileId: FILE_ID }, expectedVersion })
+    expect(before('u-alice', t.id, 1)).toEqual({ ok: true, value: 'ask-drive' })
+    const own = ok(engine.create(m('u-bob'), HUMAN, { type: 'task', title: 'ボブのメモ', personal: true, fields: { assignee: 'u-bob' } })).record
+    expect(before('u-alice', own.id, 1)).toMatchObject({ ok: false, body: { code: 'RECORD_NOT_FOUND' } })
+    expect(before('u-alice', 'task-000000000000', 1)).toMatchObject({ ok: false, body: { code: 'RECORD_NOT_FOUND' } })
+    expect(before('u-alice', t.id, 7)).toMatchObject({ ok: false, body: { code: 'VERSION_CONFLICT' } })
+    ok(linkDrive('u-alice', t.id, 1))
+    expect(before('u-alice', t.id, 2)).toMatchObject({ ok: true, value: { changed: false } })
+    // Nothing was written by asking.
+    expect(versionOf(t.id)).toBe(2)
+  })
+
   it('is linked only after the connector checked it, and only by a person', () => {
     const t = task()
     // Without the route's check (the AI route never makes one; a body cannot claim it).

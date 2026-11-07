@@ -312,8 +312,33 @@ describe('a picked file linked to a record (a company without the shared folder,
       expect(his).toEqual([{ fileId: GOOGLE_SEED.handNotesPdf, mine: false }, { fileId: GOOGLE_SEED.pastProposalDoc, mine: false }])
       expect(google.requests.length).toBe(calls)
       // He cannot link a file he did not pick (another member's pick is not his): nothing asked of Google.
-      const refused = await linkDrive('m-tanaka', id, GOOGLE_SEED.handNotesPdf, 3)
+      const refused = await linkDrive('m-tanaka', id, GOOGLE_SEED.pastProposalSlides, 3)
       expect([refused.status, refused.body.code]).toEqual([403, 'DRIVE_NOT_PICKED'])
+      expect(google.requests.length).toBe(calls)
+    } finally {
+      db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
+    }
+  })
+
+  it('every record check comes first: a missing, unreadable, stale or already linked record asks Google nothing', async () => {
+    db.prepare("UPDATE companies SET folder_kind = 'none' WHERE id = ?").run(CO)
+    try {
+      // Tanaka's own task (owner-only): Sato cannot read it — the same answer as a record that does not exist.
+      const hidden = await person('m-tanaka', 'POST', '/records/item', { type: 'task', title: '田中さんのメモ', personal: true, fields: { assignee: 'm-tanaka' } })
+      expect(hidden.status, hidden.text).toBe(201)
+      const mine = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '佐藤さんの件', fields: { assignee: 'm-sato' } })
+      const id = mine.body.data.record.id as string
+      expect((await linkDrive('m-sato', id, GOOGLE_SEED.handNotesPdf, 1)).status).toBe(200)
+
+      const calls = google.requests.length
+      const missing = await linkDrive('m-sato', 'task-0000000000000000', GOOGLE_SEED.handNotesPdf, 1)
+      expect([missing.status, missing.body.code]).toEqual([404, 'RECORD_NOT_FOUND'])
+      const unreadable = await linkDrive('m-sato', hidden.body.data.record.id, GOOGLE_SEED.handNotesPdf, 1)
+      expect([unreadable.status, unreadable.body.code]).toEqual([404, 'RECORD_NOT_FOUND'])
+      const stale = await linkDrive('m-sato', id, GOOGLE_SEED.pastProposalDoc, 1)
+      expect([stale.status, stale.body.code]).toEqual([409, 'VERSION_CONFLICT'])
+      const again = await linkDrive('m-sato', id, GOOGLE_SEED.handNotesPdf, 2)
+      expect([again.status, again.body.data.changed]).toEqual([200, false])
       expect(google.requests.length).toBe(calls)
     } finally {
       db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)

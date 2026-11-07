@@ -394,10 +394,13 @@ ledger's `links.<name>` arrays — `fileLinkPath` refuses `<letters>:`, so none 
 company path:
 
 - **`drive:<fileId>`** — a Google Drive file. `POST …/file-links { target: { kind: 'drive', fileId },
-  expectedVersion }` (session only): the route first asks the Google connector
-  (`services/google-drive.ts` `linkable`, `google-drive.md` "Linked to a record"), which checks the
-  file is **the member's own live pick** and reads it with **their own** `drive.file` permission; the
-  engine takes only that answer (`VerifiedDriveFile`, never a body: without it 403
+  expectedVersion }` (session only). **Every record check comes first** (who → body → rules:
+  `recordEngine.fileLinkBeforeDrive` — records on, the record exists and is readable, the body, the
+  version current, not linked already, a company without the shared folder, a person); any refusal or
+  `changed: false` is answered with Google asked nothing. Only then does the route ask the Google
+  connector (`services/google-drive.ts` `linkable`, `google-drive.md` "Linked to a record"), which
+  checks the file is **the member's own live pick** and reads it with **their own** `drive.file`
+  permission; the engine takes only that answer (`VerifiedDriveFile`, never a body: without it 403
   `DRIVE_NOT_PICKED`). Kept beside the row (`record_links.target_meta`, JSON, `DriveLinkMeta`):
   revision (`headRevisionId`, or `version:<n>` for a Google document), the name as picked, the sha256
   of the content ACB read (null when it could not be read), the MIME type, when. **Every reader of the
@@ -427,7 +430,9 @@ company path:
   fileId }` and `attachments` `{ link, target: { kind: 'drive', fileId } }` — a Drive file the record
   links; the ledger keeps `{ fileId, revisionId, sha256 }` from the link (the body's are never taken),
   and a link whose content ACB could not read (no sha256 or no revision) → 400
-  `DRIVE_VERSION_NOT_FIXED`. A PC file is never material or an attachment (400
+  `DRIVE_VERSION_NOT_FIXED`. **Those values enter the ledger and are visible to every reader of the
+  record** (経緯, `versions/:version`, the AI's `records_history`): the fileId, the revisionId and the
+  sha256 — never the file's name, which stays the linker's alone. A PC file is never material or an attachment (400
   `LOCAL_FILE_NOT_SHARED`: nobody else could check it). The old `{ path, commit }` forms stay 409
   `NO_COMPANY_FOLDER` here; `drive` ones in a company with the shared folder → 409
   `FILE_LINK_KIND_NOT_HERE`. Approval requests take no file materials yet (`approvals.md`).
