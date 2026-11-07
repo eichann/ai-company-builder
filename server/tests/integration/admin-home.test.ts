@@ -130,6 +130,24 @@ describe('the admin home', () => {
     expect(JSON.stringify(manager.json)).not.toContain('評価')
   })
 
+  it('names nobody as 「しばらく同期していません」 in a company without the shared folder (nobody syncs there)', async () => {
+    db.prepare("UPDATE companies SET folder_kind = 'none' WHERE id = ?").run(CO)
+    try {
+      const owner = await call('ah-owner', 'GET', `${BASE}/home`)
+      expect(owner.status).toBe(200)
+      expect(owner.json.data.attention.notSyncedRecently).toEqual([])
+      const manager = await call('ah-manager', 'GET', `${BASE}/home`)
+      expect(manager.json.data.attention.notSyncedRecently).toEqual([])
+    } finally {
+      db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
+    }
+    // The same members in a company with the folder are still named (the test above, once more).
+    const owner = await call('ah-owner', 'GET', `${BASE}/home`)
+    expect(owner.json.data.attention.notSyncedRecently.map((m: Json) => m.userId).sort()).toEqual(['ah-hr', 'ah-member'])
+    const manager = await call('ah-manager', 'GET', `${BASE}/home`)
+    expect(manager.json.data.attention.notSyncedRecently.map((m: Json) => m.userId)).toEqual(['ah-member'])
+  })
+
   it('refuses a member who manages nothing', async () => {
     expect((await call('ah-member', 'GET', `${BASE}/home`)).status).toBe(403)
   })

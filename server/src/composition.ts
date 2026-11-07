@@ -779,6 +779,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     adminHome: createAdminHomeService({
       ...repos, ...shared,
       overview: m => permissionViews.overview(m),
+      hasCompanyFolder: companyFolders.has,
       googleUsable: companyId => googleConnector.usable(companyId),
       meetingDuplicates: m => { const r = meetingOutputs.duplicates(m); return r.ok ? r.value.groups.length : null },
       securityAlerts: m => securityAlerts.forHome(m),
