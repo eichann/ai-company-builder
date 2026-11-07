@@ -3,6 +3,7 @@ import type { AiTurnItemsView, AiTurnItemView, AiTurnSettleResult, AutoTurnSetti
 import { pluginStepConsultationTitle } from '../../../../shared/ai-turn-steps/plugin'
 import { aiTurnStepForRecord } from '../../../../shared/ai-turn-steps/registry'
 import type { AiTurnCandidate } from '../../../../shared/ai-turn-steps/types'
+import { DEFAULT_FEATURES, type CompanyFeatures } from '../../../../../shared/core/features'
 import { useInterval } from '../../../shared/hooks/useInterval'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { rateLimitsOf } from '../agentStatusStore'
@@ -56,6 +57,8 @@ export interface AiTurnRunnerOptions {
   deliver: (tabId: string, request: Extract<ChatInputRequest, { kind: 'aiTurn' }>) => void
   /** Each waiting record's state changed (for the screens that list them). */
   onItems?: (view: AiTurnItemsView) => void
+  /** The company's 「使う機能」 (absent = all on): the first message asks nothing of a feature that is off. */
+  features?: CompanyFeatures
 }
 
 const storageKey = (companyId: string, userId: string) => `aiTurns:${companyId}:${userId}`
@@ -142,7 +145,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
         run.phase = 'running'
         run.since = Date.now()
         // The message names the version the claim left the record at (the AI cannot look it up).
-        const message = step ? step.firstMessage(notice, result.version) : result.message
+        const message = step ? step.firstMessage(notice, result.version, latest.current.features ?? DEFAULT_FEATURES) : result.message
         if (!message) { running.current = null; latest.current.closeTab(tabId); return null }
         return { message }
       },

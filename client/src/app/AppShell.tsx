@@ -646,6 +646,7 @@ export function AppShell() {
             meetings={titleBarMeetings}
             onOpen={target => { void runCommand('record.open', { recordId: target.recordId }).catch(() => {}) }}
             onOpenTasks={openTasks}
+            features={features}
           />
         ) : undefined}
       />
@@ -689,6 +690,7 @@ export function AppShell() {
             paneId={paneId}
             aiTurnQueue={aiTurns}
             onAiTurnItems={setAiTurnItems}
+            features={features}
             focus={activeRecordId ? { recordId: activeRecordId, title: recordLooks[activeRecordId]?.title ?? '' } : null}
             todayFolder={today.folderNow}
           />

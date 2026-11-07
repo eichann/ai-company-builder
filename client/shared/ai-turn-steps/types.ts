@@ -3,6 +3,7 @@
  * runs, how main claims and settles them, the consultation it opens and the ONLY tools the
  * unattended run gets. One kind per file in this folder, listed in `registry.ts`. Pure.
  */
+import type { CompanyFeatures } from '../../../shared/core/features'
 
 /** A record waiting for the member's AI, as the runner queues it. */
 export interface AiTurnCandidate {
@@ -90,8 +91,12 @@ export interface AiTurnStepDefinition<Step extends string = string> {
   /** The hidden consultation: its title, and whether it is linked to the minutes (chat history `minutesId`). */
   consultationTitle(candidate: AiTurnCandidate): string
   linksMinutes: boolean
-  /** The first message, with the record's version after the claim (null when the server did not say). */
-  firstMessage(candidate: AiTurnCandidate, version: number | null): string
+  /**
+   * The first message, with the record's version after the claim (null when the server did not
+   * say) and the company's 「使う機能」 (records.md "Features on and off": a feature that is off is
+   * not asked for, the same as the manual start).
+   */
+  firstMessage(candidate: AiTurnCandidate, version: number | null, features: CompanyFeatures): string
 }
 
 /** The states a step's claim starts from (one or several). */
