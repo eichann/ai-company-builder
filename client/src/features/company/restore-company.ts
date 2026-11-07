@@ -64,3 +64,42 @@ export function hasRememberedCompany(userId: string): boolean {
     return false
   }
 }
+
+/**
+ * localStorage key prefix of every company opened on this computer, per member and company
+ * (`companyFolder:<user>:<company>`): switching from the title bar reopens one where it is.
+ */
+export const COMPANY_FOLDER_KEY_PREFIX = 'companyFolder:'
+
+/** A remembered company as stored (JSON of a CompanyView); null when missing or unreadable. */
+export function parseRememberedCompany<T extends { id: string; rootPath: string; createdAt: Date }>(raw: string | null): T | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed?.id || !parsed?.rootPath) return null
+    return { ...parsed, createdAt: new Date(parsed.createdAt) }
+  } catch {
+    return null
+  }
+}
+
+const companyFolderKey = (userId: string, companyId: string) => `${COMPANY_FOLDER_KEY_PREFIX}${userId}:${companyId}`
+
+/** Remembers (or with null forgets) where this member's company is on this computer. Storage errors are ignored. */
+export function rememberCompanyFolder(userId: string, companyId: string, company: object | null): void {
+  try {
+    if (company) localStorage.setItem(companyFolderKey(userId, companyId), JSON.stringify(company))
+    else localStorage.removeItem(companyFolderKey(userId, companyId))
+  } catch {
+    // Storage may be unavailable (private mode, quota): the switch then asks for the folder.
+  }
+}
+
+export function rememberedCompanyFolder<T extends { id: string; rootPath: string; createdAt: Date }>(userId: string, companyId: string): T | null {
+  try {
+    const company = parseRememberedCompany<T>(localStorage.getItem(companyFolderKey(userId, companyId)))
+    return company?.id === companyId ? company : null
+  } catch {
+    return null
+  }
+}

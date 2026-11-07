@@ -18,7 +18,9 @@ export const FOLDER_KIND_CHOICES: Array<{ kind: CompanyFolderKind; label: string
   },
 ]
 
-export const FOLDER_KIND_FIXED = 'あとから変えることはできません。'
+/** Under the choice: how to decide, and that it is final. */
+export const FOLDER_KIND_HINT =
+  '社員どうしのファイルの共有を ACB で行いますか？ すでに Google Drive などで共有しているなら「使わない」で始められます（あとから変えられません）。'
 
 /** Shown where a page is about folders, for a company without the shared folder. */
 export const NO_COMPANY_FOLDER_NOTE = {

@@ -14,6 +14,8 @@
 //   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
 //   kind      none = the company has no shared company folder (folderKind none: a working folder on this PC)
 //   personal  1 = (with tasks=1) the opened task is one only the member sees (its card offers 新しいファイル)
+//   companies 1 | 2 = the member's companies from the server (株式会社デモ, then 別会社); absent = the list cannot be read
+//   sync      manual = 「サーバーと同期」 runs until window.__acbLayout.finishSync()
 //
 // 今日のフォルダ: the member belongs to 開発部 (not downloaded) and 営業部, so it is in 営業部;
 // `createDirectory` makes folders on the fake disk (recorded).
@@ -126,6 +128,7 @@ const appCommandAnswers = new Map<string, unknown>()
 let taskVersion = 2
 let taskFiles = ['営業部/提案書/A社_提案.md']
 let cardReads = 0
+let finishSync: (() => void) | null = null
 const calls: Array<{ name: string; args: unknown[] }> = []
 const record = (name: string, args: unknown[]) => { calls.push({ name, args }) }
 
@@ -146,7 +149,16 @@ const api: Partial<ElectronAPI> = {
     return { success: true, enabled: next.length > 0, excluded: [...next] } as never
   },
   onSparseProgress: () => () => {},
-  exists: async (path: string) => path === ROOT || path in DISK || path in FILES,
+  exists: async (path: string) => path === ROOT || path === OTHER_ROOT || path in DISK || path in FILES,
+  // Opening a company registers its folder (the title bar's switch, features/company/reopen.ts).
+  registerAllowedRoot: async (folder: string) => { record('registerAllowedRoot', [folder]); return { success: true } },
+  getCompanies: async () => {
+    record('getCompanies', [])
+    const count = Number(params.get('companies'))
+    if (!count) return undefined as never
+    const info = (id: string) => ({ id, name: COMPANIES[id].name, role: 'member', slug: id, ownerId: 'u_owner', repoPath: null, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', ...(COMPANIES[id].folderKind ? { folderKind: COMPANIES[id].folderKind } : {}) })
+    return { success: true, data: [COMPANY, 'other'].slice(0, count).map(info) }
+  },
   getMyDepartments: async () => ({ success: true, departmentIds: ['d_dev', 'd_sales'] }),
   createDirectory: async (path: string) => {
     record('createDirectory', [path])
@@ -243,7 +255,8 @@ const api: Partial<ElectronAPI> = {
   },
   gitSync: async () => {
     record('gitSync', [])
-    await sleep(150)
+    if (params.get('sync') === 'manual') await new Promise<void>(resolve => { finishSync = resolve })
+    else await sleep(150)
     COMMITS.unshift({ hash: 'c3'.padEnd(40, '0'), hashShort: 'c3000000', message: 'チームの変更を取り込み', author: '高橋 美咲', date: '2026-10-23T09:00:00+09:00' })
     return { success: true, message: '同期しました' }
   },
@@ -333,6 +346,10 @@ Object.assign((window as unknown as { __acbLayout: object }).__acbLayout, {
   editorWasEmpty: () => editorWasEmpty,
   /** After ログアウト: is anyone signed in, is a company open? */
   session: () => ({ user: useAuthStore.getState().user?.id ?? null, company: useAppStore.getState().currentCompany?.id ?? null }),
+  /** ?sync=manual: the running sync ends. */
+  finishSync: () => { finishSync?.(); finishSync = null },
+  /** The company the selector would start with (a switch to a company this computer does not know). */
+  companyToChoose: () => useAppStore.getState().companyToChoose,
   /** Like the app: back to the company list (the screen unmounts), then open another company. */
   async switchCompany(id: string) {
     useAppStore.setState({ currentCompany: null })
@@ -348,6 +365,6 @@ openCompany(COMPANY)
 // App.tsx shows the screen only while a company is open.
 function Screen() {
   const company = useAppStore(s => s.currentCompany)
-  return company ? <AppShell /> : null
+  return company ? <AppShell key={company.id} /> : null
 }
 createRoot(document.getElementById('root')!).render(<div className="h-screen"><Screen /></div>)

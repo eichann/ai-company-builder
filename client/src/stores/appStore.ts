@@ -76,6 +76,8 @@ interface AppState {
 
   // Company state
   currentCompany: CompanyView | null
+  /** The company the selector starts with (a switch to a company this computer does not know yet). */
+  companyToChoose: string | null
 
   // AI model state
   aiModel: AIModel
@@ -91,6 +93,8 @@ interface AppState {
   setAIEffort: (effort: AIEffort) => void
   setCurrentCompany: (company: CompanyView | null) => void
   addCompany: (company: CompanyView) => void
+  /** Closes the company on screen and shows the selector with that company chosen. */
+  chooseCompany: (companyId: string) => void
 
   // Chat markdown rendering toggle
   setChatMarkdownRender: (enabled: boolean) => void
@@ -102,6 +106,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   aiModel: getInitialModel(),
   aiEffort: getInitialEffort(),
   currentCompany: null,
+  companyToChoose: null,
   chatMarkdownRender: getInitialChatMarkdownRender(),
 
   toggleTheme: () => {
@@ -139,7 +144,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     // Another company or none (sign-out sets none): no view shows what it remembered of the last one.
     if (company?.id !== get().currentCompany?.id) forgetAllShown()
-    set({ currentCompany: company })
+    set({ currentCompany: company, companyToChoose: null })
   },
 
   addCompany: (company) => {
@@ -147,7 +152,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       registerCompanyFolder(company.rootPath)
     }
     if (company.id !== get().currentCompany?.id) forgetAllShown()
-    set({ currentCompany: company })
+    set({ currentCompany: company, companyToChoose: null })
+  },
+
+  chooseCompany: (companyId) => {
+    get().setCurrentCompany(null)
+    set({ companyToChoose: companyId })
   },
 
   setChatMarkdownRender: (enabled) => {

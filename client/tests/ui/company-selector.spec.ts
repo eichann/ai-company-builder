@@ -256,3 +256,13 @@ test('the only company without the shared folder opens by itself in the default 
   await expect(page.getByText('このフォルダは使えません。')).toBeVisible()
   await expect(opened(page)).toHaveCount(0)
 })
+
+test('switched to from the title bar: the selector starts at that company\'s folder choice, nothing is opened by itself', async ({ page }) => {
+  const state = await openPreview(page, 'company-selector', { choose: 'c2' })
+  await expect(page.getByRole('heading', { name: '山田工務店' })).toBeVisible()
+  await expect(page.getByText('作業フォルダを選択してください')).toBeVisible()
+  expect(await callsOf(page, 'gitInspectCompanyFolder')).toEqual([])
+  await button(page, '戻る').click()
+  await expect(page.getByRole('heading', { name: '会社を選択' })).toBeVisible()
+  expectNoPageErrors(state)
+})
