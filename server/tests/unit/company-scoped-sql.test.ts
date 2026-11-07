@@ -85,6 +85,10 @@ const HANDLE_TABLES: Record<string, string[]> = {
   ai_run_operations: ['adapters/sqlite/ai-runs.ts'],
   // Which Skill a consultation used (records.md "Which Skill"); copied by the records / Drive adapters through skillUsesJson.
   consultation_skill_uses: ['adapters/sqlite/skill-uses.ts'],
+  // The Skill shelf of a company without the shared folder (plugins.md "The Skill shelf").
+  shelf_items: ['adapters/sqlite/skill-shelf.ts'],
+  shelf_versions: ['adapters/sqlite/skill-shelf.ts'],
+  shelf_history: ['adapters/sqlite/skill-shelf.ts'],
   // Connector plugins (plugins.md).
   plugin_installs: ['adapters/sqlite/plugins.ts'],
   plugin_access_log: ['adapters/sqlite/plugins.ts'],
@@ -164,6 +168,7 @@ const HANDLE_FACTORIES = [
   'sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository', 'sqliteConnectorRepository', 'sqliteGoogleDriveRepository', 'sqliteOutboundMailRepository', 'sqliteFixedPayloadRepository',
   'sqliteSecondOpinionSettingRepository',
   'sqliteSecurityAlertRepository',
+  'sqliteSkillShelfRepository',
   'sqliteGroupRepository', 'sqlitePermissionHistoryRepository',
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼

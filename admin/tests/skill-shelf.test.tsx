@@ -1,0 +1,164 @@
+// 会社の Skill (plugins.md "The Skill shelf"): a company without the shared folder lists its
+// Skills, instruction texts and rule files with the version handed out, who changed it and when;
+// shows the earlier versions and puts one back with the version the page saw; takes an item off
+// after a confirmation; offers no change where the server says the caller may not; a company with
+// the shared folder gets a note and no call. The menu shows the page only for such a company.
+import type { ReactNode } from 'react'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
+
+import SkillsRoute from '@/app/companies/[id]/skills/page'
+import { NAV_ITEMS } from '@/components/app/app-shell'
+import { SHELF_WITH_FOLDER_NOTE } from '@/components/skill-shelf/skill-shelf-page'
+import { base, companyRoutes, renderInCompany } from './company-harness'
+import { company, managerCapabilities, ok } from './fixtures'
+import { mockApi } from './mock-api'
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+  usePathname: () => '/companies/co_123/skills',
+  useSearchParams: () => new URLSearchParams(),
+}))
+vi.mock('next/link', () => ({
+  default: ({ href, children, ...rest }: { href: string; children: ReactNode }) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
+}))
+
+const V1 = 'a'.repeat(64)
+const V2 = 'b'.repeat(64)
+const quote = {
+  id: 's_1', kind: 'skill', name: 'quote', department: { id: 'd_sales', name: '営業部', folder: '営業部' },
+  version: V2, fileCount: 2, totalBytes: 120, changedAt: '2026-11-07T01:00:00.000Z', changedBy: { id: 'u_member', name: '田中 太郎' }, canChange: true,
+}
+const instructions = {
+  id: 's_2', kind: 'instructions', name: 'instructions', department: null,
+  version: V1, fileCount: 1, totalBytes: 40, changedAt: '2026-11-06T01:00:00.000Z', changedBy: { id: 'u_owner', name: '佐藤 花子' }, canChange: false,
+}
+const versions = {
+  item: quote,
+  versions: [
+    { version: V2, fileCount: 2, totalBytes: 120, publishedAt: '2026-11-07T01:00:00.000Z', publishedBy: { id: 'u_member', name: '田中 太郎' }, current: true, autorun: false },
+    { version: V1, fileCount: 1, totalBytes: 60, publishedAt: '2026-11-06T01:00:00.000Z', publishedBy: { id: 'u_owner', name: '佐藤 花子' }, current: false, autorun: true },
+  ],
+  history: [],
+}
+
+const withoutFolder = (extra: Record<string, unknown> = {}) => ({
+  ...companyRoutes(),
+  [`GET ${base}`]: { body: ok({ ...company, role: 'owner', folderKind: 'none' }) },
+  [`GET ${base}/skill-shelf`]: { body: ok({ items: [quote, instructions] }) },
+  [`GET ${base}/skill-shelf/s_1/versions`]: { body: ok(versions) },
+  ...extra,
+})
+
+describe('会社の Skill', () => {
+  it('lists each item by kind with its place, version, who and when, in plain words', async () => {
+    mockApi(withoutFolder())
+    renderInCompany(<SkillsRoute />)
+    const skills = await screen.findByRole('list', { name: 'Skill' })
+    expect(within(skills).getByText('quote')).toBeInTheDocument()
+    expect(within(skills).getByText('営業部')).toBeInTheDocument()
+    expect(within(skills).getByText('配っています（版 bbbbbbbb・ファイル 2 個）')).toBeInTheDocument()
+    expect(within(skills).getByText(/田中 太郎さんが .* に変えました/)).toBeInTheDocument()
+    const inst = screen.getByRole('list', { name: 'AI への指示' })
+    expect(within(inst).getByText('会社全体の指示')).toBeInTheDocument()
+    // The server says this caller may not change it: no button to take it off.
+    expect(within(inst).queryByRole('button', { name: '配るのをやめる' })).not.toBeInTheDocument()
+    expect(screen.getByText('まだ AI への決まりはありません。')).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/コミット|リポジトリ|プッシュ|ブランチ/)
+  })
+
+  it('puts an earlier version back, sending the version the page saw', async () => {
+    const restored = { ...quote, version: V1 }
+    const { calls } = mockApi(withoutFolder({ [`POST ${base}/skill-shelf/s_1/restore`]: { body: ok({ item: restored, changed: true }) } }))
+    renderInCompany(<SkillsRoute />)
+    const skills = await screen.findByRole('list', { name: 'Skill' })
+    await userEvent.click(within(skills).getByRole('button', { name: 'これまでの版' }))
+    const list = await screen.findByRole('list', { name: 'これまでの版' })
+    expect(within(list).getByText('いま配っている版')).toBeInTheDocument()
+    expect(within(list).getByText(/自動で動く部分があります/)).toBeInTheDocument()
+    await userEvent.click(within(list).getByRole('button', { name: 'この版に戻す' }))
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ version: V1, expectedVersion: V2 })
+    expect(await screen.findByText('配っています（版 aaaaaaaa・ファイル 2 個）')).toBeInTheDocument()
+  })
+
+  it('takes an item off after a confirmation, with the version the page saw', async () => {
+    const off = { ...quote, version: null }
+    const { calls } = mockApi(withoutFolder({ [`POST ${base}/skill-shelf/s_1/unpublish`]: { body: ok({ item: off, changed: true }) } }))
+    renderInCompany(<SkillsRoute />)
+    const skills = await screen.findByRole('list', { name: 'Skill' })
+    await userEvent.click(within(skills).getByRole('button', { name: '配るのをやめる' }))
+    expect(screen.getByText(/これまでの版は残るので/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '配るのをやめる' }))
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ expectedVersion: V2 })
+    expect(await screen.findByText('配るのをやめています')).toBeInTheDocument()
+  })
+
+  it('an owner removes an old version after a confirmation (never offered on the current one)', async () => {
+    const after = { ...versions, versions: [versions.versions[0]], history: [] }
+    const { calls } = mockApi(withoutFolder({ [`DELETE ${base}/skill-shelf/s_1/versions/${V1}`]: { body: ok(after) } }))
+    renderInCompany(<SkillsRoute />)
+    const skills = await screen.findByRole('list', { name: 'Skill' })
+    await userEvent.click(within(skills).getByRole('button', { name: 'これまでの版' }))
+    const list = await screen.findByRole('list', { name: 'これまでの版' })
+    // One button: the old version's (the current one has none).
+    await userEvent.click(within(list).getByRole('button', { name: 'この版を消す' }))
+    expect(screen.getByText(/この版には戻せなくなります/)).toBeInTheDocument()
+    const confirm = screen.getAllByRole('button', { name: 'この版を消す' }).at(-1)!
+    await userEvent.click(confirm)
+    expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith(`/skill-shelf/s_1/versions/${V1}`))).toBe(true)
+    await waitFor(() => expect(within(screen.getByRole('list', { name: 'これまでの版' })).queryByText('版 aaaaaaaa')).not.toBeInTheDocument())
+    expect(within(screen.getByRole('list', { name: 'これまでの版' })).getByText('版 bbbbbbbb')).toBeInTheDocument()
+  })
+
+  it('an owner removes an item that is taken off; a manager is offered neither removal', async () => {
+    const off = { ...quote, version: null }
+    const { calls } = mockApi(withoutFolder({
+      [`GET ${base}/skill-shelf`]: { body: ok({ items: [off] }) },
+      [`DELETE ${base}/skill-shelf/s_1`]: { body: ok({ removed: true }) },
+    }))
+    const { unmount } = renderInCompany(<SkillsRoute />)
+    const skills = await screen.findByRole('list', { name: 'Skill' })
+    await userEvent.click(within(skills).getByRole('button', { name: '消す' }))
+    expect(screen.getByText(/これまでの版もすべて消え/)).toBeInTheDocument()
+    await userEvent.click(screen.getAllByRole('button', { name: '消す' }).at(-1)!)
+    expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/skill-shelf/s_1'))).toBe(true)
+    expect(await screen.findByText('まだ何もありません')).toBeInTheDocument()
+    unmount()
+
+    mockApi({
+      ...companyRoutes(managerCapabilities),
+      [`GET ${base}`]: { body: ok({ ...company, role: 'member', folderKind: 'none' }) },
+      [`GET ${base}/skill-shelf`]: { body: ok({ items: [off, { ...quote, id: 's_3' }] }) },
+      [`GET ${base}/skill-shelf/s_3/versions`]: { body: ok({ ...versions, item: { ...quote, id: 's_3' } }) },
+    })
+    renderInCompany(<SkillsRoute />)
+    const managed = await screen.findByRole('list', { name: 'Skill' })
+    expect(within(managed).queryByRole('button', { name: '消す' })).not.toBeInTheDocument()
+    await userEvent.click(within(managed).getAllByRole('button', { name: 'これまでの版' })[1])
+    const list = await screen.findByRole('list', { name: 'これまでの版' })
+    expect(within(list).getByRole('button', { name: 'この版に戻す' })).toBeInTheDocument()
+    expect(within(list).queryByRole('button', { name: 'この版を消す' })).not.toBeInTheDocument()
+  })
+
+  it('a company with the shared folder gets a note and the server is not asked', async () => {
+    const { calls } = mockApi(companyRoutes())
+    renderInCompany(<SkillsRoute />)
+    expect(await screen.findByText(SHELF_WITH_FOLDER_NOTE)).toBeInTheDocument()
+    expect(calls.some((c) => c.url.includes('/skill-shelf'))).toBe(false)
+  })
+
+  it('the menu offers it only in a company without the shared folder, to owners, admins and managers', () => {
+    const item = NAV_ITEMS.find((i) => i.segment === 'skills')!
+    const ctx = { isAdmin: true, isManager: false, canViewAgentEvents: true }
+    expect(item.visible!({ ...ctx, hasCompanyFolder: false })).toBe(true)
+    expect(item.visible!({ ...ctx, isAdmin: false, isManager: true, hasCompanyFolder: false })).toBe(true)
+    expect(item.visible!({ ...ctx, isAdmin: false, hasCompanyFolder: false })).toBe(false)
+    expect(item.visible!({ ...ctx, hasCompanyFolder: true })).toBe(false)
+    expect(item.visible!(ctx)).toBe(false)
+  })
+})

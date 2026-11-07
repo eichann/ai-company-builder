@@ -23,6 +23,8 @@
 import { AGENT_CONFIG_PATTERN, AGENT_FOLDER_PATTERN } from '../../../shared/core/agent-config'
 import { INSTRUCTION_FILE_NAMES, RULES_FILE_PATTERN } from '../../../shared/core/instruction-files'
 import { SKILL_FOLDER_PATTERN } from '../../../shared/core/skill-files'
+import { autorunFindingsInText } from '../../../shared/core/skill-autorun'
+import { SECRET_PATTERNS } from '../../../shared/core/secret-patterns'
 import { diskKey, lookalikeKey, pathKey } from '../../../shared/core/paths'
 
 export const ZERO_SHA = '0000000000000000000000000000000000000000'
@@ -223,43 +225,13 @@ export function skillFilePaths(changedLines: string[]): string[] {
 export const AUTORUN_DIR_RE = SKILL_DIR_RE
 export const AUTORUN_UNAVAILABLE_REASON = '内容を確認できませんでした'
 
-const AUTORUN_KEYS = ['hooks', 'mcpServers', 'lspServers', 'monitors']
-// A key spelled as a whole YAML scalar: at line start / after "? " "- " "{" ","
-// "[" / after an anchor or tag, optionally quoted, then ":" or the end of the
-// scalar (an anchored "&a hooks" can be reused as a key through "*a :").
-const AUTORUN_KEY_RE = new RegExp(
-  String.raw`(?:^[ \t]*|[?\-][ \t]+|[{,\[][ \t]*|[&!]\S*[ \t]+)["']?(${AUTORUN_KEYS.join('|')})["']?[ \t]*(?::|$|[,\]}#])`,
-  'gim')
-
-/** Reasons a skill/agent/command Markdown file would run something on load. */
+/**
+ * Reasons a skill/agent/command Markdown file would run something on load:
+ * the blob decoded as UTF-8 and judged by the one copy in
+ * shared/core/skill-autorun.ts (the server's Skill shelf asks the same).
+ */
 export function autorunFindings(buf: Buffer): string[] {
-  let text = buf.toString('utf8')
-  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
-  const found = new Set<string>()
-  // Frontmatter: Claude Code reads it only when the file starts with "---",
-  // up to the next "---" (anywhere). Leading blank lines are accepted here too.
-  const lf = text.replace(/\r\n?/g, '\n')
-  const open = /^\s*---/.exec(lf)
-  if (open) {
-    const start = open.index + open[0].length
-    const end = lf.indexOf('---', start)
-    const fm = lf.slice(start, end < 0 ? undefined : end)
-      .replace(/\\\n[ \t]*/g, '') // escaped line break inside a double-quoted key
-      .replace(/\\x([0-9a-fA-F]{2})|\\u([0-9a-fA-F]{4})|\\U([0-9a-fA-F]{8})/g, (m, a, b, c) => {
-        const cp = parseInt(a || b || c, 16)
-        return cp <= 0x10ffff ? String.fromCodePoint(cp) : m
-      })
-    for (const m of fm.matchAll(AUTORUN_KEY_RE)) {
-      found.add(`frontmatter の ${AUTORUN_KEYS.find(k => k.toLowerCase() === m[1].toLowerCase())}`)
-    }
-  }
-  // Body: Claude Code runs ```!…``` blocks and !`…` where "!" starts a line
-  // or follows whitespace (/(?<=^|\s)!`[^`]+`/m), fenced code included. Any
-  // opener counts, closed or not: arguments substituted at invocation time can
-  // complete it.
-  if (text.includes('```!')) found.add('```! ブロック')
-  if (/(?<=^|\s)!`/m.test(text)) found.add('!`…` コマンド')
-  return [...found]
+  return autorunFindingsInText(buf.toString('utf8'))
 }
 
 /** What the auto-run check has to look at in one ref update. */
@@ -437,17 +409,8 @@ export function addedGitlinks(diffTreeOut: string): string[] {
 // ----------------------------------------------------------------------------
 // Secrets
 // ----------------------------------------------------------------------------
-
-export const SECRET_PATTERNS: ReadonlyArray<{ name: string; re: RegExp }> = [
-  { name: 'AWS Access Key ID', re: /AKIA[0-9A-Z]{16}/ },
-  { name: 'Private Key', re: /-----BEGIN (RSA|EC|OPENSSH|DSA|PGP) PRIVATE KEY-----/ },
-  { name: 'GitHub Personal Access Token', re: /ghp_[0-9a-zA-Z]{36}/ },
-  { name: 'GitHub OAuth Token', re: /gho_[0-9a-zA-Z]{36}/ },
-  { name: 'GitHub Fine-grained PAT', re: /github_pat_[0-9a-zA-Z_]{22,}/ },
-  { name: 'OpenAI/Anthropic API Key', re: /sk-[a-zA-Z0-9]{20,}/ },
-  { name: 'Slack Token', re: /xox[bpsa]-[0-9a-zA-Z-]{10,}/ },
-  { name: 'Google API Key', re: /AIza[0-9A-Za-z_-]{35}/ },
-]
+// The patterns are shared/core/secret-patterns.ts (the Skill shelf scans with the same list).
+export { SECRET_PATTERNS }
 
 /**
  * Secret scan over a unified diff, fed line by line (byte strings).

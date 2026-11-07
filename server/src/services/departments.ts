@@ -147,8 +147,14 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
       const key = pathKey(department.folder)
       const restricted = scopesOf(member.companyId).listWithRules()
         .some(s => s.readRestricted === true && (pathKey(s.path) === key || pathKey(s.path).startsWith(`${key}/`)))
-      return restricted
-        ? refuse('conflict', 'この部署には見られる人を決めた場所があります。先にその設定を「全員」に戻してください。', { code: 'RESTRICTED_PLACES_INSIDE' })
+      if (restricted) {
+        return refuse('conflict', 'この部署には見られる人を決めた場所があります。先にその設定を「全員」に戻してください。', { code: 'RESTRICTED_PLACES_INSIDE' })
+      }
+      // Its Skills and AI instructions on the server's shelf (plugins.md "The Skill shelf", owner
+      // decision 2026-11-08): never deleted along with the department; they are taken off first.
+      const shelved = companyData.forCompany(member.companyId).skillShelf.countInDepartment(department.id)
+      return shelved > 0
+        ? refuse('conflict', `この部署には、会社の Skill・AI への指示が ${shelved} 件あります。先に管理画面の「会社の Skill」で配るのをやめて消してから、部署を削除してください。`, { code: 'SHELF_ITEMS_INSIDE', count: shelved })
         : ok(undefined)
     },
 

@@ -157,7 +157,9 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   department membership 所属する部署, `adapters/sqlite/task-settings.ts`, `tasks.md`) and `aiRuns`
   (execution runs of 「AI の番」 and their operations by idempotency key, `adapters/sqlite/ai-runs.ts`,
   `records.md` "Execution runs") and `securityAlerts` (「気になる動き」: alerts, their Slack setting,
-  members' hourly download counts, the rules' read-only queries; `security-alerts.md`).
+  members' hourly download counts, the rules' read-only queries; `security-alerts.md`) and
+  `skillShelf` (the Skill shelf of a company without the shared folder: items, versions, history;
+  `plugins.md` "The Skill shelf").
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
@@ -235,6 +237,11 @@ GET  /api/config                                  setup state (no auth)
                               GET /push-rejections                            permission-rules.ts
                               GET|PUT /skill-editors, PUT /skill-editors/everyone (owner/admin)
                                                                              skill-editors.ts
+                              GET|POST /skill-shelf, GET /skill-shelf/:itemId/versions(/:version),
+                              POST /skill-shelf/:itemId/restore | unpublish, GET /me/skill-shelf,
+                              DELETE /skill-shelf/:itemId(/versions/:version) (owner/admin)
+                                                                             skill-shelf.ts
+                                                                (会社の Skill, no shared folder only: plugins.md "The Skill shelf")
                               /private-folders…, /me/private-folders, /me/scopes,
                               POST /paths/check                               private-folders.ts
                               POST|GET /agent-events, /agent-events/summary,
@@ -486,7 +493,9 @@ from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
   commits NFD). Delete reports the files / folders under the folder, hidden entries skipped
   (`countFilesInTree`, the count the old on-disk walk made). Missing source: rename and delete
   change nothing (true / 0, 0). Departments containing a private folder cannot be deleted or
-  renamed; a reserved name is refused.
+  renamed; a reserved name is refused. A department holding items on the Skill shelf (a company
+  without the shared folder) is not deleted either: 409 `SHELF_ITEMS_INSIDE` with the count
+  (`plugins.md` "The Skill shelf").
 - All of it runs under a per-company promise-chain lock (`withCompanyLock`,
   `lib/company-lock.ts`, port `CompanyLock`). Company creation (`services/companies.ts` →
   `adapters/git-repo-store.ts`) seeds the default department folders the same way (root commit;

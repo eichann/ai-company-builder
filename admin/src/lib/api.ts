@@ -76,6 +76,10 @@ import {
   userSchema,
   memberGroupSchema,
   memberGroupsSchema,
+  shelfListSchema,
+  shelfPublishResultSchema,
+  shelfRemovedSchema,
+  shelfVersionsSchema,
   groupDeletedSchema,
 } from './api-schemas'
 import type {
@@ -1025,6 +1029,38 @@ export const groupsApi = {
   /** 409 GROUP_IN_USE (with `places`) while a place's rules name it. */
   delete: (companyId: string, groupId: string) =>
     getData(`${groupsBase(companyId)}/${enc(groupId)}`, groupDeletedSchema, { method: 'DELETE' }),
+}
+
+export type {
+  ShelfHistoryEntry, ShelfItemView, ShelfKind, ShelfListView, ShelfPublishResult, ShelfVersionView, ShelfVersionsView,
+} from '../../../shared/types/skill-shelf'
+
+const shelfBase = (companyId: string) => `/api/companies/${enc(companyId)}/skill-shelf`
+
+/**
+ * 会社の Skill (a company without the shared folder; plugins.md "The Skill shelf"). The list holds
+ * what the caller may read; publishing new content is the desktop app's. 409
+ * SHELF_VERSION_CHANGED when someone changed it first; 403 SHELF_NOT_ALLOWED.
+ */
+export const skillShelfApi = {
+  list: (companyId: string) => getData(shelfBase(companyId), shelfListSchema),
+
+  versions: (companyId: string, itemId: string) =>
+    getData(`${shelfBase(companyId)}/${enc(itemId)}/versions`, shelfVersionsSchema),
+
+  restore: (companyId: string, itemId: string, version: string, expectedVersion: string | null) =>
+    getData(`${shelfBase(companyId)}/${enc(itemId)}/restore`, shelfPublishResultSchema, { method: 'POST', body: { version, expectedVersion } }),
+
+  unpublish: (companyId: string, itemId: string, expectedVersion: string | null) =>
+    getData(`${shelfBase(companyId)}/${enc(itemId)}/unpublish`, shelfPublishResultSchema, { method: 'POST', body: { expectedVersion } }),
+
+  /** Owners and admins: remove an old version (never the current one, 409 SHELF_VERSION_IS_CURRENT). */
+  removeVersion: (companyId: string, itemId: string, version: string) =>
+    getData(`${shelfBase(companyId)}/${enc(itemId)}/versions/${enc(version)}`, shelfVersionsSchema, { method: 'DELETE' }),
+
+  /** Owners and admins: remove an item that is taken off, with its versions (409 SHELF_ITEM_PUBLISHED otherwise). */
+  removeItem: (companyId: string, itemId: string) =>
+    getData(`${shelfBase(companyId)}/${enc(itemId)}`, shelfRemovedSchema, { method: 'DELETE' }),
 }
 
 const deptBase = (companyId: string) => `/api/companies/${enc(companyId)}/departments`
