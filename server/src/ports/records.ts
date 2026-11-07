@@ -51,6 +51,12 @@ export interface RecordRow {
    * with `addMembers` in the same transaction; `setPlace` ends it. Never set together with `personalOwner`.
    */
   members: readonly string[] | null
+  /**
+   * The groups and departments on a members-only list (records.md "Members-only records"), with
+   * who is in each now (read with the row, never stored). Absent or empty = people only. Only a
+   * members-only row has any; added with `addMemberSets`.
+   */
+  memberSets?: readonly RecordMemberSet[]
   title: string
   summary: string
   createdAt: string
@@ -120,6 +126,19 @@ export interface RecordAccessRow {
   personalOwner: string | null
   /** Members-only (records.md "Members-only records"): the members who read it; null = not members-only. */
   members: readonly string[] | null
+  /** …and the groups and departments on that list, with who is in each now (absent = none). */
+  memberSets?: readonly RecordMemberSet[]
+}
+
+/** A group or a department on a members-only list (records.md "Members-only records"). */
+export interface RecordSetSubject {
+  type: 'group' | 'department'
+  id: string
+}
+
+/** …as read with the row: who is in it now (`memberIds`, never stored). */
+export interface RecordMemberSet extends RecordSetSubject {
+  memberIds: readonly string[]
 }
 
 /** The AI's credential for the company map (only the digest of its value). */
@@ -194,6 +213,16 @@ export interface RecordRepository {
    * members-only (call it inside the transaction that wrote the record or its version).
    */
   addMembers(id: string, userIds: readonly string[], by: string, at: string): string[]
+  /**
+   * Add groups / departments to a members-only record's list (each of this company: the database
+   * refuses another's). Returns those newly added; throws for a record that is not members-only.
+   */
+  addMemberSets(id: string, sets: readonly RecordSetSubject[], by: string, at: string): RecordSetSubject[]
+  /**
+   * Take people, groups and departments off a members-only record's list (「見る人を減らす」).
+   * Returns what was on it and is now gone; throws for a record that is not members-only.
+   */
+  removeMembers(id: string, userIds: readonly string[], sets: readonly RecordSetSubject[]): { users: string[]; sets: RecordSetSubject[] }
   /** A member left the company: they are on no members-only record's list any more (re-joining starts from nothing). */
   forgetMember(userId: string): void
   /** The recurring series (digests) a member set to 「自動で読む」 (minutes.md "Meetings for their attendees"). */

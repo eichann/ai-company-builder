@@ -163,6 +163,32 @@ export function applicableRules(rules: ScopeRule[], userId: string, role: string
   return rules.filter(r => r.subjectType === 'everyone')
 }
 
+/**
+ * One entry of a record's members-only list (「この人たちだけ」, records.md "Members-only records"),
+ * written in the same subject form as a place's rules: a person, a group (見える人のまとまり) or a
+ * department (the people who belong to it, 所属). `memberIds` as on a rule: who is in the group or
+ * department now, resolved when the list is read; absent = nobody.
+ */
+export interface ListSubject {
+  type: 'user' | 'group' | 'department'
+  id: string
+  memberIds?: readonly string[]
+}
+
+/**
+ * Does a members-only list include the user? The list's subjects match exactly as a scope's rules
+ * do (`applicableRules`: a user subject names them, a group or department subject has them among
+ * its `memberIds`), each granting read. No role and no `everyone` subject exists on a list, so an
+ * owner or admin is included only when listed — the list is strict (records.md "Members-only
+ * records"), unlike a place where `FULL_ACCESS_ROLES` read everything.
+ */
+export function listIncludes(subjects: readonly ListSubject[], userId: string): boolean {
+  const rules: ScopeRule[] = subjects.map(s => ({
+    id: '', subjectType: s.type, subjectId: s.id, canRead: true, canWrite: false, ...(s.memberIds ? { memberIds: s.memberIds } : {}),
+  }))
+  return applicableRules(rules, userId, '').some(r => r.canRead)
+}
+
 export function resolveAccess(
   companyId: string,
   userId: string,

@@ -9,7 +9,7 @@ import type { RecordDetail } from '../../../../shared/types/records'
 import type { MeetingArrival, MeetingArrivals } from '../../../../shared/types/minutes'
 import {
   MEETING_NO_ACCESS_TEXT, MINUTES_ID_RE, MINUTES_OFFLINE_TEXT,
-  type MeetingArrivalsResult, type MeetingArrivalView, type MeetingCardStateResult, type MeetingInviteResult, type MeetingPressResult, type MinutesActionResult,
+  type MeetingArrivalsResult, type MeetingArrivalView, type MeetingCardStateResult, type InviteSet, type MeetingInviteChoicesResult, type MeetingInviteResult, type MeetingPressResult, type MinutesActionResult,
 } from '../../../shared/minutes-app'
 import { reviewOf } from '../../../shared/task-card'
 
@@ -212,18 +212,51 @@ export function createMeetingsApi(deps: MeetingsDeps) {
       return { success: false, error: memberText(a, `できませんでした（サーバーの応答 ${a.status}）。`) }
     },
 
-    /** ［招待する］: members added to a members-only record's list (never undone; the server checks the caller is on it). */
-    async invite(companyId: string, recordId: string, add: string[], expectedVersion: number): Promise<MeetingInviteResult> {
+    /**
+     * ［招待する］: members — and groups / departments, written as a place rule's subjects — added to a
+     * members-only record's list (never undone; the server checks the caller is on it and who may add
+     * a group or a department).
+     */
+    async invite(companyId: string, recordId: string, add: string[], expectedVersion: number, sets: InviteSet[] = []): Promise<MeetingInviteResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !Number.isInteger(expectedVersion)) return BAD_INPUT
-      if (!Array.isArray(add) || add.length === 0 || add.length > 200 || !add.every(m => typeof m === 'string' && MEMBER.test(m))) return BAD_INPUT
-      const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/members`, { add: [...new Set(add)], expectedVersion })
+      if (!Array.isArray(add) || !add.every(m => typeof m === 'string' && MEMBER.test(m))) return BAD_INPUT
+      if (!Array.isArray(sets) || !sets.every(s => s && (s.type === 'group' || s.type === 'department') && typeof s.id === 'string' && MEMBER.test(s.id))) return BAD_INPUT
+      const people = [...new Set(add)]
+      if (people.length + sets.length === 0 || people.length + sets.length > 200) return BAD_INPUT
+      const subjects = [...people, ...sets.map(s => ({ subjectType: s.type, subjectId: s.id }))]
+      const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/members`, { add: subjects, expectedVersion })
       if (!a) return { success: false, error: MINUTES_OFFLINE_TEXT }
       if (a.status === 200 || a.status === 201) {
-        const added = (a.json?.data as { added?: unknown } | undefined)?.added
-        return { success: true, added: Array.isArray(added) ? added.filter((x): x is string => typeof x === 'string') : [] }
+        const data = a.json?.data as { added?: unknown; addedSets?: unknown } | undefined
+        const added = Array.isArray(data?.added) ? data.added.filter((x): x is string => typeof x === 'string') : []
+        const addedSets = Array.isArray(data?.addedSets)
+          ? data.addedSets.filter((x): x is InviteSet => !!x && typeof x === 'object' && ((x as InviteSet).type === 'group' || (x as InviteSet).type === 'department') && typeof (x as InviteSet).id === 'string')
+          : []
+        return { success: true, added, addedSets }
       }
       log.warn(`[minutes] invite: answered ${a.status}`)
       return { success: false, error: memberText(a, `招待できませんでした（サーバーの応答 ${a.status}）。`) }
+    },
+
+    /** What ［招待する］ may offer besides people (the server's answer, reshaped only). */
+    async inviteChoices(companyId: string, recordId: string): Promise<MeetingInviteChoicesResult> {
+      if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
+      const a = await call(companyId, 'GET', `/records/item/${encodeURIComponent(recordId)}/members/choices`)
+      if (!a) return { success: false, error: MINUTES_OFFLINE_TEXT }
+      if (a.status !== 200) {
+        log.warn(`[minutes] invite choices: answered ${a.status}`)
+        return { success: false, error: memberText(a, `読み込めませんでした（サーバーの応答 ${a.status}）。`) }
+      }
+      const d = (a.json?.data ?? {}) as Record<string, unknown>
+      const named = (v: unknown) => Array.isArray(v)
+        ? v.filter((x): x is { id: string; name: string } => !!x && typeof x === 'object' && typeof (x as { id?: unknown }).id === 'string' && typeof (x as { name?: unknown }).name === 'string')
+          .map(x => ({ id: x.id, name: x.name }))
+        : []
+      const listed = Array.isArray(d.listed)
+        ? d.listed.filter((x): x is InviteSet & { name: string } => !!x && typeof x === 'object' && ((x as InviteSet).type === 'group' || (x as InviteSet).type === 'department')
+          && typeof (x as InviteSet).id === 'string' && typeof (x as { name?: unknown }).name === 'string').map(x => ({ type: x.type, id: x.id, name: x.name }))
+        : []
+      return { success: true, maySets: d.maySets === true, groups: named(d.groups), departments: named(d.departments), listed }
     },
   }
 }

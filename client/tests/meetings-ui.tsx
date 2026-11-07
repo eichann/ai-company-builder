@@ -107,7 +107,15 @@ installElectronAPI({
   },
   actOnTask: async (_c, id, input) => { say(`act ${id} ${input.action}@${input.expectedVersion} ${input.note ?? ''}`.trim()); return { success: true, recordId: id } },
   setMeetingAutoSeries: async (_c, id, auto) => { say(`auto ${id} ${auto}`); if (auto) autoSeries.add(id); else autoSeries.delete(id); tell(); return { success: true } },
-  inviteToRecord: async (_c, id, add, at) => { say(`invite ${id} ${add.join(',')}@${at}`); return { success: true, added: add } },
+  inviteToRecord: async (_c, id, add, at, sets = []) => {
+    say(`invite ${id} ${[...add, ...sets.map(x => `${x.type}:${x.id}`)].join(',')}@${at}`)
+    return { success: true, added: add, addedSets: sets }
+  },
+  // The server decides who may add a group or a department (record-member-subjects.test.ts); here: this member may.
+  getInviteChoices: async () => ({
+    success: true, maySets: true, groups: [{ id: 'grp-1', name: '採用チーム' }], departments: [{ id: 'dep-1', name: '営業部' }],
+    listed: [{ type: 'group', id: 'grp-0', name: '面接官' }],
+  }),
   getRecordCard: async (_c, id) => {
     const m = find(id)
     const r = { ...meetingRecord(m), version: m.version }

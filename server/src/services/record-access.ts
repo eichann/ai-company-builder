@@ -17,13 +17,44 @@
  * this check (answers, counts, links, traversals, 「あなたの番」, the AI, undo).
  *
  * Members-only records (「この人たちだけ」, records.md "Members-only records", owner decision
- * 2026-11-04): the same rule for a list — readable by the members on its `members` list alone
- * (an empty list: nobody), owners, admins and department managers included.
+ * 2026-11-04): the same rule for a list — readable by those on its list alone (an empty list:
+ * nobody), owners, admins and department managers included. The list is written in a place
+ * rule's subjects (owner direction 2026-11-08): people (`members`), groups and departments
+ * (`memberSets`, who is in them read with the row), matched by `listIncludes` — the core's
+ * `applicableRules`, the very matching `resolveAccess` uses, so there is one copy of it. Two
+ * layers, one function: the record's own exception first, then the place's rules.
  */
 import {
-  canReadPrivateScope, findPrivateScope, resolveAccess, type PermissionRepository, type ScopeWithRules,
+  canReadPrivateScope, findPrivateScope, listIncludes, resolveAccess, type ListSubject, type PermissionRepository, type ScopeWithRules,
 } from '../../shared/core/permissions'
 import type { RecordAccessRow } from '../ports/records'
+
+type ListedRow = Pick<RecordAccessRow, 'members' | 'memberSets'>
+
+/** A members-only row's list as subjects (people first, then its groups and departments); [] when it is not one. */
+export function listSubjectsOf(row: ListedRow): ListSubject[] {
+  if (row.members == null) return []
+  return [
+    ...row.members.map(id => ({ type: 'user' as const, id })),
+    ...(row.memberSets ?? []).map(s => ({ type: s.type, id: s.id, memberIds: s.memberIds })),
+  ]
+}
+
+/** Is the user on a members-only row's list (as a person, or in a group / department on it)? */
+export function onList(row: ListedRow, userId: string): boolean {
+  return row.members != null && listIncludes(listSubjectsOf(row), userId)
+}
+
+/**
+ * Everyone a members-only row's list includes now (its people, then who is in its groups and
+ * departments), each once; [] when it is not one. Not filtered by membership of the company:
+ * callers that answer with people pass them through `recordReaders` or their member list.
+ */
+export function listedUserIds(row: ListedRow): string[] {
+  const subjects = listSubjectsOf(row)
+  const candidates = new Set(subjects.flatMap(s => (s.type === 'user' ? [s.id] : [...(s.memberIds ?? [])])))
+  return [...candidates].filter(id => listIncludes(subjects, id))
+}
 import type { Member } from './access'
 
 export interface RecordReader {
@@ -46,7 +77,7 @@ export function recordReader(member: Member, scopes: ScopeWithRules[]): RecordRe
       // Before every role or folder rule: an owner-only record is its owner's alone.
       if (r.personalOwner !== null) return r.personalOwner === member.userId
       // …and a members-only record its listed members' (`!= null`: a row built without the field is not one).
-      if (r.members != null) return r.members.includes(member.userId)
+      if (r.members != null) return onList(r, member.userId)
       if (r.path === null) return r.scopeId === null && readable(r.folder ?? '')
       if (r.scopeId !== null) {
         const scope = byId.get(r.scopeId)
@@ -72,10 +103,7 @@ export function recordReaders(
   companyId: string, row: RecordAccessRow, members: Array<{ userId: string; role: string }>, scopes: ScopeWithRules[],
 ): string[] {
   if (row.personalOwner !== null) return members.some(m => m.userId === row.personalOwner) ? [row.personalOwner] : []
-  if (row.members != null) {
-    const listed = new Set(row.members)
-    return members.filter(m => listed.has(m.userId)).map(m => m.userId)
-  }
+  if (row.members != null) return members.filter(m => onList(row, m.userId)).map(m => m.userId)
   return members.filter(m => recordReader({ companyId, userId: m.userId, role: m.role }, scopes).record(row)).map(m => m.userId)
 }
 

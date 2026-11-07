@@ -38,6 +38,9 @@ function fakeServer(opts: { arrivals?: 'missing'; readRequest?: { status: number
     if (url.endsWith('/me/minutes/arrivals')) {
       return opts.arrivals === 'missing' ? new Response('Not Found', { status: 404 }) : json({ days: 3, items: [arrival(), arrival({ recordId: 'bad id', status: 'arrived' })] })
     }
+    if (url.endsWith('/members/choices')) {
+      return json({ maySets: true, groups: [{ id: 'grp-1', name: '採用チーム' }, { id: 7 }], departments: [{ id: 'dep-1', name: '営業部' }], listed: [{ type: 'group', id: 'grp-0', name: '面接官' }, { type: 'x', id: 'y', name: 'z' }] })
+    }
     if (url.includes(`/records/item/${ID}`) && (init.method ?? 'GET') === 'GET') {
       return json({
         record: summary({ id: ID, type: 'meeting', state: 'read', version: 5, fields: { summary_text: '要約', meeting_at: '2026-11-04T03:00:00.000Z' } }),
@@ -58,7 +61,7 @@ function fakeServer(opts: { arrivals?: 'missing'; readRequest?: { status: number
       return new Response(JSON.stringify(r.body), { status: r.status })
     }
     if (url.endsWith('/companies/co/members')) return json([{ userId: 'u-boss', name: '阿部', email: 'abe@acb.example.jp' }, { userId: 'u-me', name: '佐藤' }])
-    if (url.endsWith('/members')) return json({ added: ['u-2'] })
+    if (url.endsWith('/members')) return json({ added: ['u-2'], addedSets: [{ type: 'group', id: 'grp-1' }, { type: 'role', id: 'admin' }] })
     return json({ recordId: ID, version: 3 })
   }) as unknown as typeof globalThis.fetch
   const asked: string[] = []
@@ -136,10 +139,29 @@ test('a malformed meeting id or member never reaches the server', async () => {
   assert.equal((await api.skip('co', ID, Number.NaN)).success, false)
   assert.equal((await api.invite('co', ID, ['u-2', 'a/b'], 3)).success, false)
   assert.equal((await api.autoSeries('co', 'meeting-x/../y', true)).success, false)
+  assert.equal((await api.invite('co', ID, [], 3)).success, false)
+  assert.equal((await api.invite('co', ID, [], 3, [{ type: 'role' as 'group', id: 'admin' }])).success, false)
+  assert.equal((await api.invite('co', ID, [], 3, [{ type: 'group', id: '../x' }])).success, false)
+  assert.equal((await api.inviteChoices('co', '../x')).success, false)
   assert.equal(seen.length, 0)
   const ok = await api.invite('co', ID, ['u-2', 'u-2'], 3)
-  assert.deepEqual(ok, { success: true, added: ['u-2'] })
+  assert.deepEqual(ok, { success: true, added: ['u-2'], addedSets: [{ type: 'group', id: 'grp-1' }] })
   assert.deepEqual(JSON.parse(seen[0].body!), { add: ['u-2'], expectedVersion: 3 })
+})
+
+test('［招待する］ with a group and a department: sent in a place rule\'s subject form; the choices are the server\'s, checked field by field', async () => {
+  const { api, seen } = fakeServer()
+  const r = await api.invite('co', ID, [], 4, [{ type: 'group', id: 'grp-1' }, { type: 'department', id: 'dep-1' }])
+  assert.equal(r.success, true)
+  assert.deepEqual(JSON.parse(seen[0].body!), {
+    add: [{ subjectType: 'group', subjectId: 'grp-1' }, { subjectType: 'department', subjectId: 'dep-1' }], expectedVersion: 4,
+  })
+  assert.deepEqual(await api.inviteChoices('co', ID), {
+    success: true, maySets: true, groups: [{ id: 'grp-1', name: '採用チーム' }], departments: [{ id: 'dep-1', name: '営業部' }],
+    listed: [{ type: 'group', id: 'grp-0', name: '面接官' }],
+  })
+  assert.equal(seen[1].method, 'GET')
+  assert.match(seen[1].url, /\/records\/item\/[^/]+\/members\/choices$/)
 })
 
 test('見られる人 of a members-only meeting: who attended and who was invited; another place keeps the server\'s phrase', () => {

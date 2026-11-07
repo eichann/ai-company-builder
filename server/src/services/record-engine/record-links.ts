@@ -20,6 +20,7 @@ import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
 import { BUNDLE_PLACED_TYPES, bundleLinkName, NAMED_PERSON_CANNOT_READ, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
 import { placeOfRow } from './service-writer'
+import { listLedgerValue } from './members'
 
 /** A link that says where the record came from (`origin: true`): history, never changed by hand. */
 export const LINK_IS_ORIGIN = { error: 'このつながりは、この記録がどこから来たかを表すので外せません', code: 'LINK_IS_ORIGIN' } as const
@@ -119,7 +120,7 @@ export function recordLinking(ctx: EngineContext) {
       // Narrowed: `place.*` changes, so the entry is never undone (undoing it would widen the task again).
       const placeChanges = narrowTo === null ? [] : [
         row.members !== null
-          ? { field: 'place.members', before: row.members.join(',') || null, after: null }
+          ? { field: 'place.members', before: listLedgerValue(row.members, (row.memberSets ?? []).map(s => ({ type: s.type, id: s.id }))), after: null }
           : { field: 'place.personal_owner', before: row.personalOwner, after: narrowTo.personalOwner },
         { field: 'place.folder', before: row.folder, after: narrowTo.folder },
       ]

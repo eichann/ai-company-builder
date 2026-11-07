@@ -5,7 +5,7 @@ import type { TypeDefinition } from '../../../shared/core/record-types'
 import type { LedgerChange, LedgerEntry, LedgerValue, LedgerVia } from '../../../shared/core/record-ledger'
 import { newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
-import type { RecordAccessRow, RecordLinkRow } from '../../ports/records'
+import type { RecordAccessRow, RecordLinkRow, RecordMemberSet } from '../../ports/records'
 import { recordReader } from '../record-access'
 import { currentTypes } from '../record-index'
 import { recordSummaries } from '../records'
@@ -59,6 +59,11 @@ export interface ServiceCreateInput {
    * itself (its list and the people named) — then a `folder` is refused (`bad-place`).
    */
   members?: readonly string[]
+  /**
+   * With `members`: the groups and departments on that list, copied from the record it is placed
+   * like (`placeOfRow`), so the copy follows them as the original does. Only with `members`.
+   */
+  memberSets?: readonly RecordMemberSet[]
   /**
    * Start in this state instead of the type's initial one: only a state the
    * initial one may move to along `SERVICE_TRANSITIONS` (as if created, then
@@ -114,7 +119,7 @@ export type ServiceWriteResult = { ok: true; record: RecordSummary; entry: Ledge
 const fail = (reason: ServiceWriteFailure, detail?: string): ServiceWriteFailed => ({ ok: false, reason, ...(detail ? { detail } : {}) })
 
 /** Where a record is read (a service's input), as another record's place. */
-export type ServicePlace = { folder: string | null } | { personalOwner: string } | { members: readonly string[] }
+export type ServicePlace = { folder: string | null } | { personalOwner: string } | { members: readonly string[]; memberSets?: readonly RecordMemberSet[] }
 
 /**
  * The place of `row`, for a record a service makes from it (a reply placed like its 連絡, a
@@ -122,9 +127,9 @@ export type ServicePlace = { folder: string | null } | { personalOwner: string }
  * folder. The one copy — copying `folder` alone would place what came from a members-only
  * record company-wide (records.md "Members-only records").
  */
-export function placeOfRow(row: Pick<RecordAccessRow, 'folder' | 'personalOwner' | 'members'>): ServicePlace {
+export function placeOfRow(row: Pick<RecordAccessRow, 'folder' | 'personalOwner' | 'members' | 'memberSets'>): ServicePlace {
   if (row.personalOwner !== null) return { personalOwner: row.personalOwner }
-  if (row.members !== null) return { members: row.members }
+  if (row.members !== null) return { members: row.members, ...(row.memberSets && row.memberSets.length > 0 ? { memberSets: row.memberSets } : {}) }
   return { folder: row.folder }
 }
 
@@ -197,8 +202,11 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     const personalOwner = input.personalOwner ?? null
     if (personalOwner !== null && (folder !== null || !deps.isMember(companyId, personalOwner))) return fail('bad-place')
     let members: string[] | null = null
+    let memberSets: RecordMemberSet[] = []
+    if (input.memberSets !== undefined && input.members === undefined) return fail('bad-place')
     if (input.members !== undefined) {
       members = [...new Set(input.members)]
+      memberSets = [...(input.memberSets ?? [])]
       if (folder !== null || personalOwner !== null || members.length > MEMBERS_MAX || !members.every(m => deps.isMember(companyId, m))) return fail('bad-place')
     }
     const state = input.state ?? def.initial
@@ -229,14 +237,15 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     const inherited = members === null && personalOwner === null ? meetingMembers(records, links) : null
     if (inherited !== null) {
       if (folder !== null) return fail('bad-place')
-      members = withNamedPeople(inherited, def, values)
+      members = withNamedPeople(inherited.users, def, values)
+      memberSets = inherited.sets
     }
     // Owner-only / members-only only when the calling service says whose (the inbox) or a meeting's list is inherited.
-    const place: RecordAccessRow = { id, type: def.name, scopeId: null, path: null, folder, personalOwner, members }
+    const place: RecordAccessRow = { id, type: def.name, scopeId: null, path: null, folder, personalOwner, members, memberSets }
     if (!readersOk(companyId, place, values, def)) return fail('assignee-cannot-read', ASSIGNEE_CANNOT_READ)
     const existing = records.find(id)
     if (existing && (existing.type !== def.name || records.states([id]).length > 0)) return fail('exists')
-    return { ok: true as const, records, def, id, title, summary, folder, personalOwner, members, state, values, links }
+    return { ok: true as const, records, def, id, title, summary, folder, personalOwner, members, memberSets, state, values, links }
   }
 
   return {
@@ -272,6 +281,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
             members: p.members, title: p.title, summary: p.summary, createdAt: existing?.createdAt ?? at, updatedAt: at, removedAt: null,
           })
           if (p.members !== null) records.addMembers(id, p.members, input.actor.id, at)
+          if (p.members !== null && p.memberSets.length > 0) records.addMemberSets(id, p.memberSets, input.actor.id, at)
           records.replaceLinks(id, links)
           if (!records.writeState({ recordId: id, state, fields: JSON.stringify(values), version: 1, updatedAt: at }, 0)) throw new Error('exists')
           records.appendLedger(entry)
@@ -341,7 +351,9 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       if (input.addMembers && (row.members === null || adding.length > MEMBERS_MAX || !adding.every(m => deps.isMember(companyId, m)))) return fail('bad-place')
       const joined = row.members !== null ? adding.filter(m => !row.members?.includes(m)) : []
       if (joined.length > 0) {
-        changes.push({ field: 'place.members', before: (row.members ?? []).join(','), after: [...(row.members ?? []), ...joined].join(',') })
+        // The list's groups / departments stay, after its people (`listLedgerValue`'s order); none: as before.
+        const sets = (row.memberSets ?? []).map(s => `${s.type}:${s.id}`)
+        changes.push({ field: 'place.members', before: [...(row.members ?? []), ...sets].join(','), after: [...(row.members ?? []), ...joined, ...sets].join(',') })
       }
       const replacedLinks = input.links
         ? [...currentLinks.filter(x => !(x.name in (input.links as Record<string, string[]>))), ...newLinks].map((x, i) => ({ ...x, position: i }))

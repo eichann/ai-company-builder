@@ -853,7 +853,9 @@ GET     /records/types             any member: definitions in force + stored ver
 POST    /records/item/:recordId/file-links (+ /remove)   link a file later ("Linking files later")
 POST    /records/item/:recordId/record-links (+ /remove) link a record later ("Linking records later")
 POST    /records/item/:recordId/share          the owner / a listed member shows an owner-only / members-only record to a folder (session only)
-POST    /records/item/:recordId/members        a listed member adds members to a members-only record (「招待する」, session only)
+POST    /records/item/:recordId/members        a listed member adds people / groups / departments to a members-only record (「招待する」, session only)
+POST    /records/item/:recordId/members/remove a listed member takes people / groups / departments off it (「見る人を減らす」, session only)
+GET     /records/item/:recordId/members/choices the groups / departments the caller may add, and the list's (session only)
 POST    /records/item/:recordId/opened         the app opened it: the turn-holder's first opening kept ("Whose turn it was")
 POST    /records/find              any member: 探す { text, today } → hits with department / mine / 案件, hub summaries ("探す" below)
 POST    /records/find-home         any member: 探す with nothing typed { today, from, to }
@@ -1006,8 +1008,9 @@ owner-only one, before every role or folder rule).
   404 `RECORD_NOT_FOUND`); not members-only → 409 `NOT_MEMBERS_ONLY`; each a member (400
   `BAD_MEMBER`, ≤ 200). Ledger action `invite`, change `place.members` before / after (ids,
   comma-separated), version + 1 (`VERSION_CONFLICT`), answer `added` (the newly listed). **Never
-  undone** (`place.*`). No notice kind: the `records` signal reaches the added. No removing (not
-  built). The app: the meeting card's ［招待する］ (`minutes:invite`, `minutes.md` "In the app").
+  undone** (`place.*`). No notice kind: the `records` signal reaches the added. Groups, departments
+  and removing: "Groups and departments on the list" below. The app: the meeting card's ［招待する］
+  (`minutes:invite`, `minutes:inviteChoices`, `minutes.md` "In the app").
 - **Share** 「部署に出す」 (`share`, "Owner-only records"): also from members-only, by any listed
   member; ledger `place.members` (the list → null) and `place.folder`. Its assignee / reviewer must
   read the folder (400 `ASSIGNEE_CANNOT_READ` / `REVIEWER_CANNOT_READ`). The folder's readers then see
@@ -1029,6 +1032,64 @@ owner-only one, before every role or folder rule).
   phrases (「あなただけ」「あなたと〇〇さん」「N人が見られます」…), names only to listed callers.
 - Acceptance's personal rule (`act.ts`, "Acceptance") stays owner-only. Delegates and approvals:
   nothing special (listed under "Not yet").
+
+#### Groups and departments on the list (owner direction 2026-11-08)
+
+A record's exception is written in **a place rule's subjects**: people, groups (見える人のまとまり) and
+departments (所属), so a group changed once applies to its places and its records alike. **Still one
+decision, two layers**: `recordReader` takes the record's own exception first (owner-only, then the
+list), then the place's rules. The list's matching is `listIncludes` (`shared/core/permissions.ts`),
+which runs the core's `applicableRules` — the matching `resolveAccess` uses — over the list as rules
+that grant read; no role or `everyone` subject exists on a list, so **owners, admins and managers are
+included only when listed** (strict, as before; a group never includes them by itself). `onList`,
+`listedUserIds`, `listSubjectsOf` (`services/record-access.ts`) are the only server helpers over it.
+
+- **Storage**: people stay in `record_viewers`, untouched; groups and departments in
+  `record_viewer_sets (company_id, record_id, subject_type group|department, subject_id, added_at,
+  added_by)` (`migrateRecordViewerSets`, additive: an older build ignores it and reads such a record by
+  its people alone — narrower, never wider). Triggers: the subject must be of the row's company
+  (another company's id throws, like a missing one), rows are never updated, deleting a group or a
+  department takes it off every list (narrower). Who is in a group / department is read with the row
+  (`RecordRow.memberSets[].memberIds`, never stored — like a rule's `memberIds`), so joining or
+  leaving applies at once on every path. A row without groups or departments has **no `memberSets`
+  key** (existing data reads exactly as before).
+- **Both kinds of company**: records live in the database for a company with or without the shared
+  folder and nothing of a list reaches the repository, the push checker or the app's sync, so groups
+  and departments are allowed on lists in every company (place rules keep groups for companies
+  without the shared folder only, groups PR).
+- **Invite** (`add`): a plain string is a person (older apps), `{ subjectType: user | group |
+  department, subjectId }` the subject form. People: any listed member (unchanged). **A group or a
+  department** (it widens to whoever joins later): only the record's 責任者 (its `assignee`, or a
+  まとまり's `owner`), a 部署の管理役 (of any department) or an owner / admin — each also on the list, since
+  nobody else finds the record — else 403 `LIST_WIDENING_NOT_ALLOWED`; unknown or another company's →
+  400 `BAD_GROUP` / `BAD_DEPARTMENT`. Answer adds `addedSets`. Ledger `place.members` lists people,
+  then `group:<id>` / `department:<id>` (`listLedgerValue`).
+- **Narrowing** 「見る人を減らす」 (`POST …/members/remove { remove, expectedVersion, note? }`): any
+  reader (owner direction: narrowing is free); 400 `NOT_ON_LIST` (none of them is on it),
+  `LIST_WOULD_BE_EMPTY` (no member of the company would read it), `NAMED_PERSON_CANNOT_READ` (someone a
+  person field names would lose it). Ledger action `remove_members` (never undone: `place.*`); answer
+  `record: null` when the caller took themself off.
+- **Choices** (`GET …/members/choices`, contract `RecordMemberChoices`): `maySets` and, only then, the
+  company's groups and departments (a member never gets the groups' names otherwise), plus the list's
+  groups / departments by name.
+- **permission_history**: every invite that added something and every narrowing, action
+  `record-members` (`{ recordId, via: invite | remove, added | removed }`; no titles).
+- **Copied lists**: one meeting's list is inherited as written (its groups too: `meetingMembers`
+  returns `{ users, sets, readers }`; several meetings → who is on all of them now, as people);
+  `placeOfRow` copies `memberSets`; the service writer takes `memberSets` only with `members`
+  (else `bad-place`). Inbox threads, `bundle-place` representatives and the まとまり chooser of a meeting
+  use `onList` / `listedUserIds`. **Stays people-only on purpose**: a meeting's attendee steps
+  (`isAttendee`: ［AI に読ませる］, the text, 自動で読む) and 「議事録が届きました」 (`listedRecordIds`) — someone
+  who reads through a group did not attend.
+- Tests: `server/tests/unit/record-member-subjects.test.ts` — the **equivalence matrix** (companies
+  with and without the shared folder × 7 roles × people-only lists, owner-only records, server records in
+  every kind of place, file records in and out of a private folder: the new reader and `recordReaders`
+  equal a frozen copy of the reader before this change, and people-only rows carry no new key), a
+  group / department joined and left on every read path (detail, history, query, count, text, linkedTo,
+  探す, 「あなたの番」, 見られる人, notices, `recordReaders`, the push signal), the group / department deleted,
+  who may widen, narrowing's guards, ledger and history, another company's subjects, inheritance and
+  copies, `bundle-place` — 25 guards mutation-checked; `client/tests/meetings-app.test.ts`,
+  `src/features/minutes/model.test.ts`, `tests/ui/meetings.spec.ts` (the dialog).
 - Tests: `server/tests/unit/record-members.test.ts` (same-department member, manager, admin, company
   owner: a missing record's answers on every route; query / count / text / link / finishedSince /
   sort / linkedTo / linkedToFile / 探す / 「あなたの番」 / 「AI の番」 exclude it; links to it refused
@@ -1975,9 +2036,9 @@ Production had 0 decisions; once members-only meetings could record theirs (#643
 
 The plugin-SDK / admin-API surfaces, attachments sent by the AI tools,
 the app's id assignment and duplicate repair, archiving finished tasks (0.6).
-Members-only records ("Members-only records"): removing someone from a list; delegates (代わりの人)
-reading a list they are not on; approvals placed by a members-only record; the app's screens
-(招待する, the label of members-only cards) — the server's label text already reaches old apps.
+Members-only records ("Members-only records"): the app's screen for taking someone off a list (the
+server has it); delegates (代わりの人) reading a list they are not on; approvals placed by a
+members-only record; the label of members-only cards — the server's label text already reaches old apps.
 A money field (`money: true`) of a company's own type is written only by a plugin operation
 (through an approval request): the engine has no approval path of its own, so no action or create
 writes it (coordinator decision 2026-11-02: acceptable for now).
