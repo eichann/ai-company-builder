@@ -284,12 +284,38 @@ export interface RecordLinkView {
    */
   folder?: true
   /**
+   * A file of the member's own PC (a company without the shared folder: records.md "File links
+   * without the shared folder"): `path` inside their working folder. Only ever in an answer to the
+   * member who linked it — nobody else gets the row, its path or a count of it. Remove it with
+   * `file-links/remove { target: { kind: 'local', path } }`.
+   */
+  local?: { path: string }
+  /**
+   * A Google Drive file linked to the record (a company without the shared folder). Every reader of
+   * the record gets the row (`fileId`, opened in Drive, which decides who may see it); only the member
+   * who linked it (`mine`) gets what ACB read then: the name as picked, the revision, the sha256 of
+   * the content ACB read (null when it could not read it), the type and when.
+   */
+  drive?: DriveLinkView
+  /**
    * The link cannot be removed by hand (no 「…」→「つながりを外す」): it says where the record came
    * from (an `origin` link: もとの会議・もとの連絡・AI が用意したもの), or the record's links change only
    * through its service or its file. Absent = it can be removed (`record-links/remove`,
    * `file-links/remove`).
    */
   fixed?: true
+}
+
+/** A Drive link as `RecordLinkView.drive` answers it. */
+export interface DriveLinkView {
+  fileId: string
+  /** The caller linked it (only then the facts below). */
+  mine: boolean
+  name?: string
+  revisionId?: string | null
+  sha256?: string | null
+  mimeType?: string | null
+  linkedAt?: string
 }
 
 /**
@@ -417,7 +443,13 @@ export interface UndoRequest {
  */
 export interface FileLinkRequest {
   /** Company path of the file or folder (as in the company folder, e.g. `営業部/提案書/見積.md`). */
-  path: string
+  path?: string
+  /**
+   * Instead of `path`, in a company without the shared folder (records.md "File links without the
+   * shared folder"; session only): a file of the member's own working folder (`local`, shown to
+   * them alone) or a Google Drive file they picked (`drive`; the server checks the pick with Google).
+   */
+  target?: { kind: 'local'; path: string } | { kind: 'drive'; fileId: string }
   /** The link's name; may be left out when the type has one file link (task: `files`). */
   link?: string
   expectedVersion: number

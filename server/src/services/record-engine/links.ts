@@ -75,9 +75,14 @@ export function withLinkTargets(sourceId: string, current: RecordLinkRow[], name
   const pool = current.filter(l => l.name === name)
   const mine = targets.map(t => {
     const i = pool.findIndex(l => (target === 'file' ? l.targetPath : l.targetId) === t)
-    const kept = i >= 0 ? pool.splice(i, 1)[0].createdBy ?? null : null
-    const by = i >= 0 ? kept : target === 'file' ? createdBy ?? null : null
-    return { sourceId, name, position: 0, targetId: target === 'file' ? null : t, targetPath: target === 'file' ? t : null, createdBy: by }
+    const keptRow = i >= 0 ? pool.splice(i, 1)[0] : null
+    const by = keptRow ? keptRow.createdBy ?? null : target === 'file' ? createdBy ?? null : null
+    // A Drive link kept keeps what was read when it was linked; one brought back by an undo has none
+    // (its name then shows as 「Google Drive のファイル」 to everyone, the linker too).
+    return {
+      sourceId, name, position: 0, targetId: target === 'file' ? null : t, targetPath: target === 'file' ? t : null, createdBy: by,
+      ...(keptRow?.drive ? { drive: keptRow.drive } : {}),
+    }
   })
   return [...others, ...mine].map((l, i) => ({ ...l, position: i }))
 }

@@ -322,6 +322,11 @@ registerTasksIpc(ipc, {
   baseUrl: getServerApiUrl, cookies: session.cookies,
   // Tag suggestions: a Haiku model through the company's key (the broker's relay), text only.
   tagSuggest: { brokerEnv: request => brokerTokens.envFor(request), aiAllowed: () => agentControl.stop.oneShotAiAllowed() },
+  // 「Google Drive のファイルをつなぐ」 (a company without the shared folder): the Picker flow the AI's tool uses.
+  pickDriveFiles: async companyId => {
+    const r = await drivePicking.pick(companyId, 'files')
+    return r.ok ? { ok: true, files: r.picks.filter(p => p.kind === 'file').map(p => ({ id: p.id, name: p.name })) } : { ok: false, cancelled: r.reason === 'cancelled', message: r.message }
+  },
 })
 // The chat card's 「変更前の値を書き戻す」: the person's own action, with the session (never the AI's token).
 registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })

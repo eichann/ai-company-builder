@@ -35,7 +35,7 @@ import { isCalendarDate } from '../../../../shared/core/business-days'
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { MESSAGE_TYPE } from '../../../../shared/core/core-types'
 import { featuresFrom } from '../../../../shared/core/features'
-import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
+import { driveLinkTarget, fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import { isDateValue, normalizeTagsValue } from '../../../../shared/core/record-types'
 import type { BundleKindsResult, RecordDetail, RecordQueryResult, RecordSummary, RecordTypeView } from '../../../../shared/types/records'
 import type { LedgerEntry } from '../../../../shared/core/record-ledger'
@@ -49,11 +49,22 @@ import { linkedPaths } from '../../../shared/record-views'
 import { dropLinkPlan, type DroppedThing, type DropLinkResult } from '../../../shared/link-drop'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
-  ARCHIVE_PAGE, ARCHIVE_SHOWN_DAYS, archivedTasks, archivePage, classifyTasks, isArchiveCursor, OPEN_TASK_STATES, proposalMay, similarOf, TASKS_OFFLINE_TEXT,
+  type TaskDriveLinkResult, type TypedFileTarget, ARCHIVE_PAGE, ARCHIVE_SHOWN_DAYS, archivedTasks, archivePage, classifyTasks, isArchiveCursor, OPEN_TASK_STATES, proposalMay, similarOf, TASKS_OFFLINE_TEXT,
   type ArchivedTasksResult, type SimilarItem, type BundleChoicesResult, type BundleCreateInput, type BundleKindsAnswer, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
 } from '../../../shared/tasks'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import { createTagSuggester, type TagSuggestDeps } from './tag-suggest'
+
+/** Only a working-folder path or a well-formed Drive id ever reaches the server. */
+function typedTarget(t: unknown): TypedFileTarget | null {
+  const v = t as { kind?: unknown; path?: unknown; fileId?: unknown } | null
+  if (v?.kind === 'local' && typeof v.path === 'string') {
+    const path = fileLinkPath(v.path.normalize('NFC'))
+    return path ? { kind: 'local', path } : null
+  }
+  if (v?.kind === 'drive' && driveLinkTarget(v.fileId)) return { kind: 'drive', fileId: v.fileId as string }
+  return null
+}
 
 export interface TasksDeps {
   baseUrl: () => string
@@ -64,6 +75,11 @@ export interface TasksDeps {
   timeoutMs?: number
   /** Tag suggestions through the company's key; absent → the app's own matching only. */
   tagSuggest?: TagSuggestDeps
+  /**
+   * Google Picker for 「Google Drive のファイルをつなぐ」 (the Google connection's flow, composed in
+   * main.ts): the files the member picked, kept by the server as their picks. Absent → not offered.
+   */
+  pickDriveFiles?: (companyId: string) => Promise<{ ok: true; files: Array<{ id: string; name: string }> } | { ok: false; cancelled: boolean; message: string }>
 }
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
@@ -287,6 +303,46 @@ export function createTasksApi(deps: TasksDeps) {
       return a?.status === 200 ? { success: true, recordId } : failure(remove ? 'unlink file' : 'link file', a)
     },
 
+    /**
+     * A file of the member's PC or a Drive file taken off a task (a company without the shared
+     * folder; records.md "File links without the shared folder"). Main sends only a working-folder
+     * path (`fileLinkPath`) or a Drive id.
+     */
+    async unlinkTarget(companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number): Promise<TaskWriteResult> {
+      const t = typedTarget(target)
+      if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !t || !Number.isInteger(expectedVersion)) return BAD_INPUT
+      const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/file-links/remove`, { target: t, expectedVersion })
+      if (a?.status !== 200) return failure('unlink typed file', a)
+      const entry = (a.json?.data as { entry?: { version?: unknown } | null } | undefined)?.entry
+      return { success: true, recordId, ...(typeof entry?.version === 'number' ? { entryVersion: entry.version } : {}) }
+    },
+
+    /**
+     * 「Google Drive のファイルをつなぐ」: the member picks files in Google Picker (the Google
+     * connection's own flow, `pickDriveFiles`), then each is linked to the task at the version the
+     * previous link moved it to. The server checks each pick with the member's own permission.
+     */
+    async linkDriveFiles(companyId: string, recordId: string, expectedVersion: number): Promise<TaskDriveLinkResult> {
+      if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !Number.isInteger(expectedVersion)) return BAD_INPUT
+      if (!deps.pickDriveFiles) return { success: false, offline: false, error: 'この画面からは Google Drive を使えません。' }
+      const picked = await deps.pickDriveFiles(companyId)
+      if (!picked.ok) return picked.cancelled ? { success: true, recordId, linked: [] } : { success: false, offline: false, error: picked.message }
+      let at = expectedVersion
+      const linked: string[] = []
+      for (const f of picked.files) {
+        if (!driveLinkTarget(f.id)) continue
+        const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/file-links`, { target: { kind: 'drive', fileId: f.id }, expectedVersion: at })
+        if (a?.status !== 200) {
+          const f2 = failure('link drive file', a)
+          return linked.length > 0 ? { success: true, recordId, linked, error: f2.error } : f2
+        }
+        const data = a.json?.data as { entry?: { version?: unknown } | null } | undefined
+        if (typeof data?.entry?.version === 'number') at = data.entry.version
+        linked.push(f.name)
+      }
+      return { success: true, recordId, linked }
+    },
+
     async share(companyId: string, recordId: string, folder: string, expectedVersion: number): Promise<TaskWriteResult> {
       const path = typeof folder === 'string' ? fileLinkPath(folder.normalize('NFC')) : null
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !path || !Number.isInteger(expectedVersion)) return BAD_INPUT
@@ -355,8 +411,11 @@ export function createTasksApi(deps: TasksDeps) {
         return { success: true, choose: plan.choices, question: `「${name}」を、どのつながりにしますか？` }
       }
       const source = pick.source === 'target' ? target : other!
+      // A file of the member's own working folder (a company without the shared folder): theirs alone.
+      const local = dropped?.kind === 'path' && dropped.local === true
       const a = path
-        ? await call(companyId, 'POST', `/records/item/${encodeURIComponent(targetId)}/file-links`, { path, link: pick.link, expectedVersion: target.version })
+        ? await call(companyId, 'POST', `/records/item/${encodeURIComponent(targetId)}/file-links`,
+          local ? { target: { kind: 'local', path }, link: pick.link, expectedVersion: target.version } : { path, link: pick.link, expectedVersion: target.version })
         : await call(companyId, 'POST', `/records/item/${encodeURIComponent(source.id)}/record-links`,
           { link: pick.link, target: pick.source === 'target' ? other!.id : target.id, expectedVersion: source.version })
       if (a?.status !== 200 && a?.status !== 201) {
@@ -366,7 +425,8 @@ export function createTasksApi(deps: TasksDeps) {
       const data = a.json?.data as { entry?: { version?: unknown } | null; changed?: unknown } | undefined
       if (data?.changed === false) return { success: true, done: { text: `「${name}」はもうつながっています`, undo: null } }
       const version = data?.entry?.version
-      return { success: true, done: { text: `「${name}」をつなぎました`, undo: typeof version === 'number' ? { recordId: source.id, version } : null } }
+      const said = local ? `「${name}」をつなぎました（あなただけに見えます）` : `「${name}」をつなぎました`
+      return { success: true, done: { text: said, undo: typeof version === 'number' ? { recordId: source.id, version } : null } }
     },
 
     async retryRun(companyId: string, runId: string): Promise<TaskWriteResult> {
@@ -573,6 +633,10 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
     api.linkFile(typeof companyId === 'string' ? companyId : '', recordId, companyPath, expectedVersion, false))
   ipc.handle('tasks:unlinkFile', (_event, companyId, recordId, companyPath, expectedVersion) =>
     api.linkFile(typeof companyId === 'string' ? companyId : '', recordId, companyPath, expectedVersion, true))
+  ipc.handle('tasks:unlinkTarget', (_event, companyId, recordId, target, expectedVersion) =>
+    api.unlinkTarget(typeof companyId === 'string' ? companyId : '', recordId, target, expectedVersion))
+  ipc.handle('tasks:linkDriveFiles', (_event, companyId, recordId, expectedVersion) =>
+    api.linkDriveFiles(typeof companyId === 'string' ? companyId : '', recordId, expectedVersion))
   ipc.handle('tasks:share', (_event, companyId, recordId, folder, expectedVersion) =>
     api.share(typeof companyId === 'string' ? companyId : '', recordId, folder, expectedVersion))
   ipc.handle('tasks:shareToBundle', (_event, companyId, recordId, expectedVersion) =>

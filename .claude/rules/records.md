@@ -320,10 +320,11 @@ repository), `record_index_problems` (for owners/admins). Ids are bound as one J
 to a record after it was made; `…/file-links/remove` (tool `records_unlink_file`) removes the link.
 Engine `fileLink` (`services/record-engine/file-links.ts`), generic: any type with a `file` link (`link` may
 be left out when the type has one; task: `files`). Contract `FileLinkRequest` / `FileLinkResult`.
-A company without the shared folder (`server.md`) refuses every new file path — linked here, on
+A company without the shared folder (`server.md`) refuses every new company path — linked here, on
 create, as an attached version or a decision's file material — with 409 `NO_COMPANY_FOLDER`
 (`fileLinksUnavailable`, `RecordEngineDeps.hasCompanyFolder`): a path on one member's PC means
-nothing to anyone else. Removing a link is never refused. Uploads / Drive links: later.
+nothing to anyone else. It links a Drive file or a file of the member's own PC instead ("File links
+without the shared folder" below). Removing a link is never refused.
 
 - Who: anyone who reads the record (as reading it) and **reads the file** (`reader.file`). The
   member's **AI** only on types whose definition lets the AI act at all (some action's `who` lists
@@ -382,6 +383,61 @@ link to one is **its maker's alone**: everyone else — owners and admins includ
 - Test: `server/tests/unit/record-personal-links.test.ts` (detail, linkedToFile, 経緯, replay, 探す;
   unlink / link by another; kept through others' changes and undo; links without a maker) —
   mutation-checked.
+
+### File links without the shared folder (owner decisions 2026-11-07/08)
+
+No general upload (ACB does not rebuild Drive). A company without the shared folder (`folderKind:
+none`) links exactly two other kinds of file; a company with it keeps company paths, unchanged (both
+kinds → 409 `FILE_LINK_KIND_NOT_HERE`, and Google is not asked). The kinds (`FileLinkKind`,
+`shared/core/records.ts`) live in the one target string of `record_links.target_path` and the
+ledger's `links.<name>` arrays — `fileLinkPath` refuses `<letters>:`, so none is ever taken for a
+company path:
+
+- **`drive:<fileId>`** — a Google Drive file. `POST …/file-links { target: { kind: 'drive', fileId },
+  expectedVersion }` (session only): the route first asks the Google connector
+  (`services/google-drive.ts` `linkable`, `google-drive.md` "Linked to a record"), which checks the
+  file is **the member's own live pick** and reads it with **their own** `drive.file` permission; the
+  engine takes only that answer (`VerifiedDriveFile`, never a body: without it 403
+  `DRIVE_NOT_PICKED`). Kept beside the row (`record_links.target_meta`, JSON, `DriveLinkMeta`):
+  revision (`headRevisionId`, or `version:<n>` for a Google document), the name as picked, the sha256
+  of the content ACB read (null when it could not be read), the MIME type, when. **Every reader of the
+  record gets the row** (`RecordLinkView.drive { fileId, mine }`, opened in Drive, which decides who
+  may see it); **the name and the rest only the member who linked it** (`mine`) — anyone else is shown
+  「Google Drive のファイル」. Owner decision (asked 2026-11-08): only the linker can be checked with
+  `drive.file`, so ACB never calls Drive with another member's token to look at a linked file, and
+  never shows the picked name to others. A Drive link brought back by an undo has no kept facts (the
+  linker then sees 「Google Drive のファイル」 too).
+- **`local:<owner id>:<path>`** — a file of the member's own working folder (`path` relative to it,
+  checked like a company path; never an absolute path, so no user name leaves the PC). `{ target: {
+  kind: 'local', path } }`. **Its owner's alone**, like a `.personal/` link but decided by the owner
+  id in the target itself (`fileLinkShown`, `localLinkOwner`): nobody else — owners and admins
+  included — gets the row, its path or a count of it through any answer: the detail (the card, the
+  AI's `records_get`), 探す's counts (`record-find.ts`), 経緯 and a replay (`personal-links.ts`: an
+  entry that only linked or took off someone else's PC file is not there at all), the entry answered
+  by someone else's link change or undo (scrubbed: `fileLink`, `undo`), and an undo (an entry that
+  adds or removes a PC file the caller cannot see answers 404 `ENTRY_NOT_FOUND` — also for an
+  admin, who may undo anyone's entries). Two members' files of the same name are two links.
+  `linkedToFile` cannot name one (`fileLinkPath`).
+- **People only**: the member's AI gets 403 `TYPED_LINK_PERSON_ONLY` for either kind (the AI reads a
+  Drive-linked file only through `drive_read`, which needs the member's own pick, and a PC file with
+  its ordinary file tools in the working folder). Removing either: `…/file-links/remove { target }`
+  (a Drive link: any reader, as for company paths; a PC file: its owner — anyone else gets 404
+  `LINK_NOT_FOUND`).
+- **Materials and attached versions** (`act.ts`): `decision.materials` may name `{ kind: 'drive',
+  fileId }` and `attachments` `{ link, target: { kind: 'drive', fileId } }` — a Drive file the record
+  links; the ledger keeps `{ fileId, revisionId, sha256 }` from the link (the body's are never taken),
+  and a link whose content ACB could not read (no sha256 or no revision) → 400
+  `DRIVE_VERSION_NOT_FIXED`. A PC file is never material or an attachment (400
+  `LOCAL_FILE_NOT_SHARED`: nobody else could check it). The old `{ path, commit }` forms stay 409
+  `NO_COMPANY_FOLDER` here; `drive` ones in a company with the shared folder → 409
+  `FILE_LINK_KIND_NOT_HERE`. Approval requests take no file materials yet (`approvals.md`).
+- The app: `tasks-ui.md` "Linking files". Mail attachments stay as they are (`outbound-mail.md`).
+- Tests: `server/tests/unit/record-typed-links.test.ts` (a PC file through detail, 経緯, replay, 探す,
+  someone else's unlink / undo / answers; two owners of one name; the path checks; the Drive name only
+  to the linker; the connector's check and people only; materials / attachments; a company with the
+  shared folder unchanged), `server/tests/integration/google-drive.test.ts` 「a picked file linked to a
+  record」 (the pick checked with the linker's permission, revision and sha256, no Google call for
+  anyone else or for a company with the shared folder) — every guard mutation-checked.
 
 ### Task version 12: 返事待ち says until when (owner decision 2026-11-03 「②」)
 

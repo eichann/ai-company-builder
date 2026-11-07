@@ -124,6 +124,18 @@ The AI reads and writes **only** the member's own live picks.
   check; `requestKey = drivePutRequestKey(folder, name, sha256)` (same file, folder and name →
   the same key: never two copies). Unattended runs see none of these tools (their allowlists).
 
+## Linked to a record (a company without the shared folder; `records.md` "File links without the shared folder")
+
+`linkable(member, fileId)` — asked only by the records session route `POST …/file-links { target: {
+kind: 'drive', fileId } }`, and only for a company without the shared folder: the member's own live
+pick of a file (else 403 `DRIVE_NOT_PICKED`, nothing asked of Google), `files.get` with **their own**
+token (`id,name,mimeType,trashed,headRevisionId,version`), then the content read as `read` does
+(export / download, ≤ 10 MB) only to compute its sha256 — nothing of it kept or logged. Never called
+for anyone but the member linking, never to look at a file someone else linked: other readers get
+the row without its name and open it in Drive. The app's 「Google Drive のファイルをつなぐ」 is this
+connector's Picker flow (`createDrivePicking().pick(companyId, 'files')`, composed in `main.ts` into
+`tasks:linkDriveFiles`). The AI reads a linked file only with `drive_read` (its member's own picks).
+
 ## Not yet
 
 A person-side put (session route + card), a record ledger entry linking a put to a まとまり, and
@@ -131,7 +143,7 @@ A person-side put (session route + card), a record ledger entry linking a put to
 
 ## Tests
 
-`server/tests/integration/google-drive.test.ts` (fake Google, practice redirect) and
+`server/tests/integration/google-drive.test.ts` (fake Google, practice redirect; 「a picked file linked to a record」) and
 `server/tests/unit/google-drive-core.test.ts`; `client/tests/google-drive-tools.test.ts`;
 `admin/tests/integrations.test.tsx` 「Drive の ファイル選び」. Mutation-checked: the Picker
 token's scope check and the narrowing parameter, `drive.file` before asking Google, the Picker

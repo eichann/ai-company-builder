@@ -569,6 +569,7 @@ export function AppShell() {
         <TaskListPanel
           companyId={currentCompany.id}
           rootPath={rootPath}
+          localFiles={!sharedFolder}
           list={taskList}
           aiTurns={aiTurnItems}
           activeRecordId={activeRecordId}

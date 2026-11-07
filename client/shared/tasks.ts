@@ -328,6 +328,14 @@ export interface RecordLinkInput {
   narrow?: boolean
 }
 
+/** A typed file link's target as the renderer names it (records.md "File links without the shared folder"). */
+export type TypedFileTarget = { kind: 'local'; path: string } | { kind: 'drive'; fileId: string }
+
+/** What 「Google Drive のファイルをつなぐ」 did: the names linked (`error` when one after them was refused). */
+export type TaskDriveLinkResult =
+  | { success: true; recordId: string; linked: string[]; error?: string }
+  | { success: false; offline: boolean; error: string; code?: string | null }
+
 export type TaskWriteResult =
   /**
    * `entryVersion`: the ledger entry the change made (取り消す undoes it); absent when nothing changed or not known.

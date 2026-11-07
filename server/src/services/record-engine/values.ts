@@ -4,7 +4,7 @@
  */
 import { isDateValue, normalizeTagsValue, type FieldKind } from '../../../shared/core/record-types'
 import type { DecisionMaterial, LedgerValue } from '../../../shared/core/record-ledger'
-import { fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
+import { driveLinkTarget, fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
 import type { ActorInput } from './types'
 
 // eslint-disable-next-line no-control-regex -- refusing control characters is the point
@@ -64,7 +64,10 @@ export function parseMaterials(raw: unknown): DecisionMaterial[] | string {
       out.push({ kind: 'file', path: fileLinkPath(m.path) as string, commit: m.commit })
     } else if (m?.kind === 'record' && typeof m.id === 'string' && RECORD_ID_RE.test(m.id) && Number.isInteger(m.version) && (m.version as number) >= 1) {
       out.push({ kind: 'record', id: m.id, version: m.version as number })
-    } else return 'materials: { kind: file, path, commit } or { kind: record, id, version }'
+    } else if (m?.kind === 'drive' && driveLinkTarget(m.fileId) !== null) {
+      // The revision and fingerprint come from the record's link (act.ts), never from the body.
+      out.push({ kind: 'drive', fileId: m.fileId as string, revisionId: '', sha256: '' })
+    } else return 'materials: { kind: file, path, commit }, { kind: record, id, version } or { kind: drive, fileId }'
   }
   return out
 }

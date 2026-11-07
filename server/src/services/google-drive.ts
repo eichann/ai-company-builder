@@ -59,6 +59,19 @@ export interface GoogleDriveDeps {
   sha256(bytes: Uint8Array): string
 }
 
+/**
+ * A picked file checked for linking it to a record (records.md "File links without the shared
+ * folder"): its revision when linked, its name as picked, its type and the sha256 of the content ACB
+ * read (export or download, as `read` does; null when it could not be read). Nothing of it is logged.
+ */
+export interface DriveLinkableFile {
+  fileId: string
+  revisionId: string | null
+  name: string
+  mimeType: string | null
+  sha256: string | null
+}
+
 /** Who puts a file: the member's AI (record token) or the member. */
 export interface DriveActor {
   kind: 'ai' | 'person'
@@ -251,6 +264,45 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       h.prunePicks(now)
       if (rows.length > 0) h.savePicks(rows)
       return ok({ picks: rows.map(pickView), refused })
+    },
+
+    /**
+     * A file the member picked, checked for linking it to a record (session only; the records route
+     * asks it before the engine links, records.md "File links without the shared folder"). Only the
+     * member's own live pick of a file, opened with their own `drive.file` token — never anyone
+     * else's, never to look at a file someone else linked. The revision is Drive's `headRevisionId`
+     * (a binary file) or `version:<n>` (a Google document, which has no head revision); the sha256 is
+     * over the bytes ACB read (Docs / Slides / Sheets exported as `read` does, others downloaded,
+     * ≤ 10 MB), null when that failed or the type cannot be read. Nothing of the content is kept.
+     */
+    async linkable(member: Member, fileId: unknown): Promise<Outcome<DriveLinkableFile>> {
+      if (!isDriveId(fileId)) return refuse('bad-request', 'fileId must be a Drive id')
+      const pick = handle(member.companyId).googleDrive.pick(member.userId, fileId, clock.now())
+      if (!pick || pick.kind !== 'file') {
+        return refuse('forbidden', 'Google Drive で選んだファイルだけをつなげます。もう一度選んでください。', { code: 'DRIVE_NOT_PICKED' })
+      }
+      const noAccess = 'このファイルを Google Drive から開けませんでした（消されたか、見られなくなった可能性があります）。'
+      const m = await drive(member.companyId, member.userId, {
+        method: 'GET', path: `/drive/v3/files/${fileId}`,
+        query: { fields: 'id,name,mimeType,trashed,headRevisionId,version', supportsAllDrives: 'true' },
+        operation: 'drive.files.get',
+      })
+      if (!m.ok) return googleRefusal(m, noAccess)
+      const f = isObj(m.json) ? m.json : {}
+      if (f.trashed === true || f.id !== fileId) return refuse('forbidden', noAccess, { code: 'DRIVE_NO_ACCESS' })
+      const mimeType = str(f.mimeType)
+      const head = str(f.headRevisionId)
+      const version = typeof f.version === 'string' && /^\d{1,20}$/.test(f.version) ? f.version : typeof f.version === 'number' && Number.isInteger(f.version) ? String(f.version) : null
+      const revisionId = head && head.length <= 200 ? head : version ? `version:${version}` : null
+      const how = mimeType ? DRIVE_READ_AS[mimeType] : undefined
+      let sha256: string | null = null
+      if (how) {
+        const r = how.how === 'export'
+          ? await drive(member.companyId, member.userId, { method: 'GET', path: `/drive/v3/files/${fileId}/export`, query: { mimeType: how.mime }, binary: true, operation: 'drive.files.export' })
+          : await drive(member.companyId, member.userId, { method: 'GET', path: `/drive/v3/files/${fileId}`, query: { alt: 'media', supportsAllDrives: 'true' }, binary: true, operation: 'drive.files.download' })
+        if (r.ok && r.bytes && r.bytes.byteLength <= DRIVE_READ_PDF_MAX_BYTES) sha256 = deps.sha256(r.bytes)
+      }
+      return ok({ fileId, revisionId, name: (str(f.name) ?? pick.name).normalize('NFC').slice(0, 300), mimeType, sha256 })
     },
 
     /** POST /api/records-ai/google/drive/read { fileId } (any token): a picked file, as outside text (or a PDF's bytes). */

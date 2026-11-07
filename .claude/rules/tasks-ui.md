@@ -655,11 +655,22 @@ folder not downloaded; the chooser `LinkToTaskDialog` lists the member's open ta
 file or folder dropped on a task row or a card's 「つながっているもの」 ("Dropping links" below), and the
 card's 「＋ファイル・フォルダをつなぐ」 (the company's file names on this computer, `git:listFiles`, and
 every folder above them: `linkCandidates`, `model.ts`). **A company without the shared folder**
-(`folderKind: none`, owner 2026-11-07): the server refuses every file link (`NO_COMPANY_FOLDER`), so
-the card has no 「ファイル」 group — neither ［＋ファイル・フォルダをつなぐ］ nor ［新しいファイル］ — and its drop
-zone's words leave out files (a file dropped anyway gets the server's refusal) (`TaskCard`
-`sharedFolder`, from AppShell's `companyHasSharedFolder`); test `tests/ui/skill-layout.spec.ts`
-「a task card in a git / none company」. Each linked file's
+(`folderKind: none`, owner 2026-11-07/08; server `records.md` "File links without the shared folder"):
+company paths are refused, so the card has neither ［＋ファイル・フォルダをつなぐ］ nor ［新しいファイル］
+(`TaskCard` `sharedFolder`, from AppShell's `companyHasSharedFolder`; test `tests/ui/skill-layout.spec.ts`
+「a task card in a git / none company」). Instead its 「ファイル」 group (`typedFiles`, `TYPED_FILES_NOTE`)
+offers **［Google Drive のファイルをつなぐ］** (`tasks:linkDriveFiles`: the Google connector's Picker,
+then each pick linked at the version the previous link moved to; 「「…」をつなぎました」) and lists
+`card.localFiles` — files of the member's own PC, each with the small 「あなただけ」 (`data-only-you`;
+opens on this PC with `file.open`; not here (`exists`) → 「このパソコンに見つかりません（動かしたか、消した
+かもしれません）」, said again on a press, nothing opened) — and `card.driveFiles` — the member's own by
+its name, anyone else's as 「Google Drive のファイル」 (`DRIVE_FILE_NEUTRAL`), opened in the browser
+(`driveFileUrl`). 「…」→「つながりを外す」 is `tasks:unlinkTarget` (main sends only a `fileLinkPath`-checked
+path or a Drive id; ［取り消す］ for a PC file). **A file dragged from the tree onto the card or a list
+row is linked as the member's own** (`useLinkDrop` `localFiles`, `DroppedThing.local`; 「…をつなぎました
+（あなただけに見えます）」), and the drop zone says 「このパソコンのファイル（あなただけ）」. Tests:
+`client/tests/typed-file-links.test.ts`, `tests/ui/task-card.spec.ts` (`?kind=none`; 「a company with the
+shared folder: no Drive button, a dropped file stays a company file」) — mutation-checked. Each linked file's
 「…」 offers 「つながりを外す」, then 「「<name>」とのつながりを外しました［取り消す］」 (取り消す links it again).
 
 **Links between records** (owner 2026-11-02; server `records.md` "Linking records later"): each row

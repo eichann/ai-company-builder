@@ -5,9 +5,9 @@ import { CheckCircle, CircleNotch, Plus, Robot, Sparkle, Warning } from '@phosph
 import { fileNameFromTitle } from '../../../../shared/today-folder'
 import { InputDialog } from '../../../shared/ui/InputDialog'
 import { runCommand } from '../../../shared/commands/commands'
-import type { TaskCardData } from '../../../../shared/task-card'
+import { DRIVE_FILE_NEUTRAL, driveFileUrl, LOCAL_FILE_MISSING, TYPED_FILES_NOTE, type TaskCardData } from '../../../../shared/task-card'
 import type { RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
-import { mergeActionFor, type BundleChoice, type RecordLinkInput, type SimilarItem, type TaskActInput } from '../../../../shared/tasks'
+import { mergeActionFor, type BundleChoice, type RecordLinkInput, type SimilarItem, type TaskActInput, type TypedFileTarget } from '../../../../shared/tasks'
 import { slotMergedNote } from '../../../../../shared/core/source-slot-candidates'
 import type { BundleKind } from '../../../../../shared/types/records'
 import { CALM, ONLY_YOU } from '../../../../shared/thing-words'
@@ -17,7 +17,7 @@ import { consultationLinks, type LinkedConsultation } from '../../../shared/ui/c
 import { LinkedColumn, type LinkedRow } from '../../../shared/ui/LinkedColumn'
 import { SeenBy } from '../../../shared/ui/ThingIcon'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
-import { actOnTask, createBundle, createPrivateBundleFolder, linkFileToTask, reconcileTaskRun, retryTaskRun, setRecordLink, shareTaskToBundle, shareTaskToFolder, undoTaskAction, unlinkFileFromTask } from '../api'
+import { actOnTask, createBundle, createPrivateBundleFolder, linkDriveFilesToTask, linkFileToTask, openOutside, reconcileTaskRun, retryTaskRun, setRecordLink, shareTaskToBundle, shareTaskToFolder, undoTaskAction, unlinkFileFromTask, unlinkTargetFromTask } from '../api'
 import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
@@ -103,13 +103,15 @@ type Notice =
  * comes from the type; the server decides every action.
  */
 export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, bundlePlaces, onLoaded, createTodayFile, onDetachConsultation, notDownloadedFolderOf, sharedFolder = true }: Props) {
-  const { result, reload, personalHere } = useTaskCard(companyId, recordId, onLoaded, rootPath, knownVersion)
+  const { result, reload, personalHere, localHere } = useTaskCard(companyId, recordId, onLoaded, rootPath, knownVersion)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
   // 「〇〇と同じ人たちだけに見えるようにしますか？」: a task wider than the 案件 it is being linked to.
   const [narrowing, setNarrowing] = useState<{ word: string; answer: (yes: boolean) => void } | null>(null)
   // A file, folder, record or consultation dropped on 「つながっているもの」 is linked (owner decision 2026-11-03).
-  const linkDrop = useLinkDrop({ companyId, rootPath, targetWord: 'やること', onChanged: () => { reload(); onChanged?.() } })
+  // A company without the shared folder: a file dropped from the tree is linked as the member's own (records.md
+  // "File links without the shared folder").
+  const linkDrop = useLinkDrop({ companyId, rootPath, targetWord: 'やること', localFiles: !sharedFolder, onChanged: () => { reload(); onChanged?.() } })
   if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />{CALM.loading}</div>
   if (!result.success) return <div role="alert" className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-500 dark:text-zinc-400">{result.error}</div>
 
@@ -175,6 +177,20 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     const r = await (remove ? unlinkFileFromTask : linkFileToTask)(companyId, recordId, companyPath, version)
     return r.success ? null : r.error
   })
+  // A company without the shared folder: 「Google Drive のファイルをつなぐ」 (Google Picker) and taking a PC / Drive file off.
+  const linkDrive = () => change(async () => {
+    const r = await linkDriveFilesToTask(companyId, recordId, version)
+    if (!r.success) return r.error
+    if (r.linked.length > 0) setNotice({ kind: 'done', text: `${r.linked.map(n => `「${n}」`).join('・')}をつなぎました`, undo: null })
+    return r.error ?? null
+  })
+  const unlinkTarget = (target: TypedFileTarget, label: string) => change(async () => {
+    const r = await unlinkTargetFromTask(companyId, recordId, target, version)
+    if (!r.success) return r.error
+    // A PC file comes back with 取り消す; a Drive file is linked again through the Picker.
+    setNotice({ kind: 'done', text: `「${label}」とのつながりを外しました`, undo: target.kind === 'local' && r.entryVersion ? { recordId, version: r.entryVersion } : null })
+    return null
+  })
   const share = (folder: string) => change(async () => {
     const r = await shareTaskToFolder(companyId, recordId, folder, version)
     if (r.success && r.similar) setNotice({ kind: 'similar', similar: r.similar })
@@ -206,6 +222,7 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
   return <><CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     linkDrop={linkDrop} notDownloadedFolderOf={notDownloadedFolderOf}
     onLinkFile={sharedFolder ? p => fileLink(p, false) : null} onUnlinkFile={p => fileLink(p, true)} personalHere={personalHere}
+    {...(!sharedFolder ? { typedFiles: { localHere, onLinkDrive: linkDrive, onUnlink: unlinkTarget } } : {})}
     {...(card.record.personal && createTodayFile ? { onNewFile: async (name: string) => {
       const made = await createTodayFile(name)
       if ('error' in made) return { error: made.error }
@@ -263,6 +280,17 @@ interface BodyProps {
   onUnlinkFile: (companyPath: string) => Promise<string | null>
   /** Linked `.personal/` files that are on this computer. */
   personalHere: ReadonlySet<string>
+  /**
+   * A company without the shared folder (records.md "File links without the shared folder"): the
+   * member's own PC files (「あなただけ」) and Drive files, 「Google Drive のファイルをつなぐ」 and taking
+   * one off. Absent for a company with the shared folder (its card is unchanged).
+   */
+  typedFiles?: {
+    /** The PC files linked here that are on this computer (null until checked). */
+    localHere: ReadonlySet<string> | null
+    onLinkDrive: () => Promise<string | null>
+    onUnlink: (target: TypedFileTarget, label: string) => Promise<string | null>
+  }
   /** ［＋ 新しいファイル］ (a task only the member sees): `error` keeps the name window open. */
   onNewFile?: (name: string) => Promise<{ error: string } | { linkError: string | null }>
   companyId: string
@@ -285,7 +313,7 @@ interface BodyProps {
   review: ReactNode
 }
 
-function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, linkDrop, notDownloadedFolderOf, onLinkFile, onUnlinkFile, personalHere, onNewFile, companyId, bundleWord, onCreateBundle, bundlePlaces, onShowToBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, onDetachConsultation, tagField, review }: BodyProps) {
+function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, linkDrop, notDownloadedFolderOf, onLinkFile, onUnlinkFile, personalHere, typedFiles, onNewFile, companyId, bundleWord, onCreateBundle, bundlePlaces, onShowToBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, onDetachConsultation, tagField, review }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -322,6 +350,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       ...fileRow(rootPath, f.path, f.broken, personalHere.has(f.path), pathFacts(f, notDownloadedFolderOf)),
       menu: [{ label: 'つながりを外す', hint: 'ファイルは消えません。経緯に残ります', onClick: () => { if (!busy) void unlink(f.path) } }],
     })),
+    ...(typedFiles ? typedFileRows(card, rootPath, typedFiles, busy, setLinkError) : []),
   ]
   // 「AIへの相談」 on the right: the consultations about this task, ［相談する］［＋新しい相談］.
   const consult = consultationLinks(consultations, onConsult && (fresh => onConsult({ id: record.id, title: record.title }, fresh)), onDetachConsultation)
@@ -347,8 +376,13 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
         extras={[...(onLinkFile ? [{ name: 'ファイル', kind: 'file' as const, action: <>
           <TaskFiles rootPath={rootPath} linked={card.files.map(f => f.path)} busy={busy} onLink={onLinkFile} />
           {onNewFile && <button type="button" disabled={busy} onClick={() => setNaming({ error: null })} data-new-file className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />新しいファイル</button>}
-        </>, note: 'つながりは、このやることを見られる人みんなに見えます' }] : []), ...(consult.extra ? [consult.extra] : [])]}
-        drop={{ label: `${onLinkFile ? 'ファイル・フォルダ・' : ''}やること・${bundleWord}・相談`, accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(record.id, e) },
+        </>, note: 'つながりは、このやることを見られる人みんなに見えます' }] : []),
+        ...(typedFiles ? [{ name: 'ファイル', kind: 'file' as const, action: (
+          <button type="button" disabled={busy} onClick={() => { void typedFiles.onLinkDrive().then(setLinkError) }} data-link-drive
+            className="mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />Google Drive のファイルをつなぐ</button>
+        ), note: TYPED_FILES_NOTE }] : []),
+        ...(consult.extra ? [consult.extra] : [])]}
+        drop={{ label: `${onLinkFile ? 'ファイル・フォルダ・' : typedFiles ? 'このパソコンのファイル（あなただけ）・' : ''}やること・${bundleWord}・相談`, accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(record.id, e) },
           notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }}
         notice={<>
           {linkError && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{linkError}</p>}
@@ -407,4 +441,35 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
         placeholder="メモ.md" error={naming?.error ?? null} onConfirm={makeFile} onCancel={() => setNaming(null)} />
     </RecordPage>
   )
+}
+
+/**
+ * The rows of a company without the shared folder: the member's own PC files with 「あなただけ」
+ * (open on this PC; missing → said plainly, nothing opened) and Drive files (opened in the browser;
+ * Drive decides who may see it; the name only to who linked it).
+ */
+function typedFileRows(card: TaskCardData, rootPath: string, typed: NonNullable<BodyProps['typedFiles']>, busy: boolean, say: (text: string | null) => void): LinkedRow[] {
+  const local = card.localFiles.map((f): LinkedRow => {
+    const label = f.path.split('/').pop() ?? f.path
+    const missing = typed.localHere !== null && !typed.localHere.has(f.path)
+    return {
+      key: `local:${f.path}`, name: 'ファイル', kind: 'file', label,
+      sub: missing ? LOCAL_FILE_MISSING : f.path,
+      marks: <span data-only-you className="rounded bg-gray-200 px-1 text-[10.5px] text-gray-600 dark:bg-zinc-700 dark:text-zinc-300">{ONLY_YOU}</span>,
+      onOpen: () => {
+        if (missing) { say(`「${label}」は${LOCAL_FILE_MISSING}`); return }
+        void runCommand('file.open', { path: `${rootPath}/${f.path}` })
+      },
+      menu: [{ label: 'つながりを外す', hint: 'ファイルは消えません', onClick: () => { if (!busy) void typed.onUnlink({ kind: 'local', path: f.path }, label).then(say) } }],
+    }
+  })
+  const drive = card.driveFiles.map((f): LinkedRow => {
+    const label = f.name ?? DRIVE_FILE_NEUTRAL
+    return {
+      key: `drive:${f.fileId}`, name: 'ファイル', kind: 'file', label, sub: 'Google Drive',
+      onOpen: () => { void openOutside(driveFileUrl(f.fileId)) },
+      menu: [{ label: 'つながりを外す', hint: 'Drive のファイルは消えません', onClick: () => { if (!busy) void typed.onUnlink({ kind: 'drive', fileId: f.fileId }, label).then(say) } }],
+    }
+  })
+  return [...local, ...drive]
 }

@@ -6,7 +6,7 @@ import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
 import type { TaskCardResult } from '../../../shared/task-card'
 import type { TagSuggestions } from '../../../shared/tag-suggest'
-import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from '../../../shared/tasks'
+import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveLinkResult, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
 export type CalendarReads = ElectronPort<'getCalendarToday'>
@@ -116,6 +116,27 @@ export function linkFileToTask(companyId: string, recordId: string, companyPath:
 
 export function unlinkFileFromTask(companyId: string, recordId: string, companyPath: string, expectedVersion: number, writes: TaskFileWrites = window.electronAPI): Promise<TaskWriteResult> {
   return writes.unlinkFileFromTask(companyId, recordId, companyPath, expectedVersion)
+}
+
+/**
+ * A company without the shared folder (records.md "File links without the shared folder"): a PC
+ * file or a Drive file taken off a task, and 「Google Drive のファイルをつなぐ」 (Google Picker, then the links).
+ */
+export type TypedFileWrites = ElectronPort<'unlinkTargetFromTask' | 'linkDriveFilesToTask'>
+
+export function unlinkTargetFromTask(companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number, writes: TypedFileWrites = window.electronAPI): Promise<TaskWriteResult> {
+  return writes.unlinkTargetFromTask(companyId, recordId, target, expectedVersion)
+}
+
+export function linkDriveFilesToTask(companyId: string, recordId: string, expectedVersion: number, writes: TypedFileWrites = window.electronAPI): Promise<TaskDriveLinkResult> {
+  return writes.linkDriveFilesToTask(companyId, recordId, expectedVersion)
+}
+
+/** A Drive file opened in the member's browser (Drive decides who may see it). */
+export type DriveFileOpening = ElectronPort<'openExternal'>
+
+export function openOutside(url: string, links: DriveFileOpening = window.electronAPI) {
+  return links.openExternal(url)
 }
 
 /** Whether a linked file inside a `.personal/` folder (never synced) is on this computer. */

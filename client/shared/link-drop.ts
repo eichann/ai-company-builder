@@ -13,7 +13,12 @@ import { SERVICE_STATE_TYPES } from '../../shared/core/core-types'
 import { thingName } from './thing-words'
 
 /** What was dropped: a record (by id), or a company path (a file or a folder). */
-export type DroppedThing = { kind: 'record'; id: string } | { kind: 'path'; path: string }
+/**
+ * What was dropped: a record, or a file / folder of the company folder. `local: true` (a company
+ * without the shared folder): a file of the member's own working folder, linked as theirs alone
+ * (records.md "File links without the shared folder").
+ */
+export type DroppedThing = { kind: 'record'; id: string } | { kind: 'path'; path: string; local?: true }
 
 /** One way the drop can link: the link `link` held by `source` (the record dropped on, or the one dropped). */
 export interface DropLinkChoice {

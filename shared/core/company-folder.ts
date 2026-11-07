@@ -38,8 +38,39 @@ export const NO_COMPANY_FOLDER = {
   error: 'この会社は全社フォルダを使わない設定のため、この操作はできません。',
 } as const
 
-/** …the same refusal, said for a file linked to a record (a path on one PC means nothing to others). */
+/**
+ * …the same refusal, said for a company path linked to a record (a path on one PC means nothing to
+ * others). Such a company links a Google Drive file or a file of the member's own PC instead
+ * (records.md "File links without the shared folder").
+ */
 export const NO_COMPANY_FOLDER_FILE_LINK = {
   code: NO_COMPANY_FOLDER.code,
-  error: 'この会社は全社フォルダを使わない設定のため、記録にファイルをつなげることはできません。',
+  error: 'この会社は全社フォルダを使わない設定のため、全社フォルダのファイルはつなげません。Google Drive のファイルか、このパソコンのファイル（あなただけに見えます）をつないでください。',
+} as const
+
+/**
+ * A company with the shared folder links files by company path only (Drive and PC links are for
+ * companies without it: records.md "File links without the shared folder").
+ */
+export const FILE_LINK_KIND_NOT_HERE = {
+  code: 'FILE_LINK_KIND_NOT_HERE',
+  error: 'この会社では、記録には全社フォルダのファイルをつなぎます。',
+} as const
+
+/** A file only on one member's PC cannot be what others check (decision materials, attached versions). */
+export const LOCAL_FILE_NOT_SHARED = {
+  code: 'LOCAL_FILE_NOT_SHARED',
+  error: 'このパソコンだけにあるファイルは、ほかの人が確かめられないため、材料や添付にはできません。Google Drive のファイルをつないで使ってください。',
+} as const
+
+/** Only the member themself links a file of their PC or of Drive (never their AI). */
+export const TYPED_LINK_PERSON_ONLY = {
+  code: 'TYPED_LINK_PERSON_ONLY',
+  error: 'このパソコンのファイルや Google Drive のファイルは、本人が画面からつないでください。',
+} as const
+
+/** A Drive file used as material or an attachment must have been read by ACB when it was linked. */
+export const DRIVE_VERSION_NOT_FIXED = {
+  code: 'DRIVE_VERSION_NOT_FIXED',
+  error: 'この Google Drive のファイルは、つないだときに ACB が中身を読めなかったため、版を固定できません。読める形式（Google ドキュメント・スプレッドシート・スライド、PDF、テキスト）のファイルをつないでください。',
 } as const

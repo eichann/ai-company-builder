@@ -9,6 +9,10 @@
 // `?task=unassigned`: a task the member asked with nobody holding it (「自分が担当する」 heads the 「…」, 「終わったら」, アーカイブ);
 // `?task=archived`: the same task archived (［戻す］, 経緯 「佐藤さんがアーカイブしました」).
 // `?similar=1`: 部署に出す answers 「似ているやることがあります」 (the server's `similar`).
+// `?kind=none`: a company without the shared folder (records.md "File links without the shared folder"): two files
+// of the member's PC (メモ.md is on this PC, 消えた.md is not), a Drive file the member linked and one someone else
+// linked; ［Google Drive のファイルをつなぐ］ logs `drive@<version>`, a link taken off `unlinkTarget <kind> <path|id>@<version>`,
+// a Drive file opened `external <url>`.
 // The owner-only task links a note in a `.personal/` folder (on this Mac); ［＋ 新しいファイル］ makes one through the
 // screen's `createTodayFile` (`today <name>` in `#acted`, 「既存.md」 answers a taken name), and `file.open` is logged as `open <path>`.
 import { createRoot } from 'react-dom/client'
@@ -48,6 +52,13 @@ const plainTodo = waitMode === 'todo-team' || waitMode === 'todo-own'
 // `?folders=1`: linked folders — one 2 members cannot open (`cannotOpen`), one left out on this Mac (総務); `folder.reveal` logs `reveal <path>`.
 const withFolders = params.get('folders') === '1'
 const menuMode = ['unassigned', 'archived'].includes(params.get('task') ?? '') ? params.get('task') : null
+const noFolder = params.get('kind') === 'none'
+const typedLinks = [
+  { name: 'files', direction: 'out' as const, local: { path: '営業/メモ.md' } },
+  { name: 'files', direction: 'out' as const, local: { path: '営業/消えた.md' } },
+  { name: 'files', direction: 'out' as const, drive: { fileId: '1AbCdEfGhIjKlMnOp', mine: true, name: 'A社 提案書（下書き）', revisionId: 'rev-1', sha256: 'a'.repeat(64) } },
+  { name: 'files', direction: 'out' as const, drive: { fileId: '1ZyXwVuTsRqPoNmLk', mine: false } },
+]
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
 const task = rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
@@ -106,9 +117,11 @@ const shownCard = menuCard ?? waitCard ?? (reviewing ? reviewCard : taskCardOf({
       { name: 'prepared', direction: 'out', record: rec('outbound_message-01', 'outbound_message', 'お礼メール', 'draft') },
       ...(noBundle ? [] : [{ name: 'bundle', direction: 'out' as const, record: rec('deal-0001ab', 'deal', 'A社 問い合わせ対応の効率化', 'open') }]),
       { name: 'tasks', direction: 'in', record: rec('decision-0002', 'decision', '今回だけ20%値引き', 'confirmed', { exception: true }, { exceptionNotice: '例外' }) },
-      { name: 'files', direction: 'out', path: '営業/見積書_v2.xlsx', broken: false },
-      // Never synced: the server calls it broken; this Mac has it.
-      { name: 'files', direction: 'out', path: '営業/.personal/inbox/日付別/2026/20261102/打ち合わせメモ.md', broken: true },
+      ...(noFolder ? typedLinks : [
+        { name: 'files', direction: 'out' as const, path: '営業/見積書_v2.xlsx', broken: false },
+        // Never synced: the server calls it broken; this Mac has it.
+        { name: 'files', direction: 'out' as const, path: '営業/.personal/inbox/日付別/2026/20261102/打ち合わせメモ.md', broken: true },
+      ]),
       { name: 'related', direction: 'out', record: rec('task-0000bb', 'task', 'スケジュール案を出す', 'todo') },
       // The server says `folder: true` for a folder on the shared branch (records.md "Folder links").
       ...(withFolders ? [{ name: 'files', direction: 'out' as const, path: '経理/月次', broken: false, folder: true as const }, { name: 'files', direction: 'out' as const, path: '総務', broken: false }] : []),
@@ -163,7 +176,13 @@ installElectronAPI({
   undoTaskAction: async (_c, recordId, version, expected) => { show('acted', `undo ${version}@${expected}`); return { success: true, recordId } },
   linkFileToTask: async (_c, recordId, companyPath, version) => { show('acted', `link ${companyPath}@${version}`); return { success: true, recordId } },
   unlinkFileFromTask: async (_c, recordId, companyPath, version) => { show('acted', `unlink ${companyPath}@${version}`); return { success: true, recordId } },
-  exists: async (path: string) => path.endsWith('打ち合わせメモ.md'),
+  exists: async (path: string) => path.endsWith('打ち合わせメモ.md') || path.endsWith('/営業/メモ.md'),
+  unlinkTargetFromTask: async (_c, recordId, target, version) => {
+    show('acted', `unlinkTarget ${target.kind} ${target.kind === 'local' ? target.path : target.fileId}@${version}`)
+    return { success: true, recordId, entryVersion: version + 1 }
+  },
+  linkDriveFilesToTask: async (_c, recordId, version) => { show('acted', `drive@${version}`); return { success: true, recordId, linked: ['B社 見積'] } },
+  openExternal: async (url: string) => { show('acted', `external ${url}`); return { success: true } as never },
   gitListFiles: async () => ({ success: true, files: ['営業/見積書_v2.xlsx', '営業/提案書.md', '経理/請求書.xlsx'] }),
   shareTask: async (_c, recordId, folder, version) => {
     show('acted', `share ${folder}@${version}`)
@@ -200,7 +219,7 @@ function Preview() {
           { folder: '開発部', name: '開発部', kind: { type: 'project', name: 'プロジェクト', source: 'core' as const }, departmentId: 'd-dev' },
         ] } } : {})}
         consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: '見積の相談', updatedAt: '2026-11-05T07:00:00.000Z' }]}
-        tagsInUse={['営業', '見積', '経理']} createTodayFile={createTodayFile} notDownloadedFolderOf={p => (p === '総務' || p.startsWith('総務/') ? '総務' : null)} onDetachConsultation={id => show('acted', `detach ${id}`)} />
+        sharedFolder={!noFolder} tagsInUse={['営業', '見積', '経理']} createTodayFile={createTodayFile} notDownloadedFolderOf={p => (p === '総務' || p.startsWith('総務/') ? '総務' : null)} onDetachConsultation={id => show('acted', `detach ${id}`)} />
     </main>
   )
 }

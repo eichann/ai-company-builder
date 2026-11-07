@@ -2,7 +2,7 @@
 import { undoableByAssignee } from '../../../shared/core/core-types'
 import { FULL_ACCESS_ROLES } from '../../../shared/core/permissions'
 import { replayRecordState, type LedgerEntry, type LedgerValue } from '../../../shared/core/record-ledger'
-import { RECORD_ID_RE } from '../../../shared/core/records'
+import { isOwnOnlyLinkTarget, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordLinkRow } from '../../ports/records'
 import type { Member } from '../access'
@@ -11,9 +11,21 @@ import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import type { EngineContext } from './context'
 import { isPlaceOrLinkChange, linkLedgerValue, linkTargetsOf, withLinkTargets } from './links'
+import { personalPathsSeen, scrubLedger } from './personal-links'
 import { bad, conflict, featureOffRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
+
+/** Whether an entry adds or removes a link target this member may not see. */
+function changesUnseenTarget(entry: LedgerEntry, seen: ReadonlySet<string>): boolean {
+  return entry.changes.some(c => {
+    if (!c.field.startsWith('links.')) return false
+    const before = linkTargetsOf('file', c.before) ?? []
+    const after = linkTargetsOf('file', c.after) ?? []
+    const moved = [...before.filter(t => !after.includes(t)), ...after.filter(t => !before.includes(t))]
+    return moved.some(t => isOwnOnlyLinkTarget(t) && !seen.has(t))
+  })
+}
 
 export function undoing(ctx: EngineContext) {
   const { transactions, clock, open, tell, summaryOf } = ctx
@@ -35,7 +47,12 @@ export function undoing(ctx: EngineContext) {
       const note = b.note === undefined ? '' : b.note
       if (typeof note !== 'string' || note.length > NOTE_MAX) return bad(`note: up to ${NOTE_MAX} characters`)
       const ledger = records.ledger(row.id)
-      const target = ledger.find(e => e.version === b.version)
+      const found = ledger.find(e => e.version === b.version)
+      // An entry that linked or took off another member's `.personal/` or PC file is not there for
+      // this member (records.md "File links without the shared folder"): the same answer as a
+      // version that does not exist, so undoing cannot tell it existed nor take it away.
+      const seen = personalPathsSeen(member.userId, row, ledger, records.linksFrom([row.id]))
+      const target = found && !changesUnseenTarget(found, seen) ? found : undefined
       if (!target) return refuse('not-found', 'その変更はありません', { code: 'ENTRY_NOT_FOUND' })
       // Sharing an owner-only record is not taken back: the folder's readers may already have seen it.
       if (target.action === 'create' || target.action === 'undo' || target.changes.some(c => c.field.startsWith('place.'))) {
@@ -96,7 +113,7 @@ export function undoing(ctx: EngineContext) {
       tell(member, [nextFields.next_actor], { type: row.type, entry, fields: nextFields })
       // The services' follow-up of an undo (the inbox puts a mail back in the mailbox inbox).
       try { ctx.deps.afterAct?.(member.companyId, { type: row.type, entry, fields: nextFields }) } catch { /* the undo stands */ }
-      return ok({ record: summaryOf(records, row.id), entry })
+      return ok({ record: summaryOf(records, row.id), entry: scrubLedger([entry], seen)[0] ?? { ...entry, changes: [] } })
     },
   }
 }

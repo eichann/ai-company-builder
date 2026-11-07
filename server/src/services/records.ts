@@ -11,7 +11,7 @@
  */
 import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
 import { aiTurnStates, noTurnStates, normalizeTag, ONTOLOGY_NAME_RE, type FieldKind } from '../../shared/core/record-types'
-import { fileLinkPath, fileLinkShown, RECORD_ID_RE } from '../../shared/core/records'
+import { driveLinkFileId, fileLinkKind, fileLinkPath, fileLinkShown, localLinkPath, RECORD_ID_RE } from '../../shared/core/records'
 import { pathKey } from '../../shared/core/paths'
 import { turnsOf } from '../../shared/core/record-turns'
 import { enteredByWaitOver, SERVICE_STATE_TYPES, TASK_WAIT_OVER_STEP, WAIT_OVER, waitCameBack } from '../../shared/core/core-types'
@@ -23,7 +23,7 @@ import { DECISION_CHECK_ACTIONS, DECISION_EXCEPTION_NOTICE, DECISION_PROPOSAL_NO
 import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { RecordFileRepo, RecordFileSource } from '../ports/record-files'
-import type { RecordAccessRow, RecordCandidateFilter, RecordRepository, RecordRow } from '../ports/records'
+import type { RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordRepository, RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { requireFullAccess } from './access'
 import { logError } from '../lib/error-log'
@@ -307,6 +307,31 @@ export function waitingFor(records: RecordRepository, userIds: string[], old: Re
     if (typeof who === 'string' && userIds.includes(who)) out.push({ row, userId: who })
   }
   return out
+}
+
+/**
+ * A Drive or PC-file link as `viewerId` may see it (records.md "File links without the shared
+ * folder"), or null: a PC file only to its owner; a Drive file to every reader of the record, its
+ * name and what ACB read only to the member who linked it.
+ */
+export function typedLinkView(viewerId: string, source: { personalOwner: string | null }, l: RecordLinkRow): Pick<RecordLinkView, 'local' | 'drive'> | null {
+  if (l.targetPath === null || !fileLinkShown(viewerId, source, l)) return null
+  const kind = fileLinkKind(l.targetPath)
+  if (kind === 'local') {
+    const path = localLinkPath(l.targetPath)
+    return path ? { local: { path } } : null
+  }
+  if (kind !== 'drive') return null
+  const fileId = driveLinkFileId(l.targetPath)
+  if (!fileId) return null
+  const mine = !!l.createdBy && l.createdBy === viewerId
+  const d = mine ? l.drive : null
+  return {
+    drive: {
+      fileId, mine,
+      ...(d ? { name: d.name, revisionId: d.revisionId, sha256: d.sha256, mimeType: d.mimeType, linkedAt: d.linkedAt } : {}),
+    },
+  }
 }
 
 export function createRecordService(deps: RecordServiceDeps) {
@@ -622,14 +647,21 @@ export function createRecordService(deps: RecordServiceDeps) {
       const otherIds = [...new Set([...out.flatMap(l => (l.targetId ? [l.targetId] : [])), ...inn.map(l => l.sourceId)])].slice(0, MAX_NEIGHBOURS)
       const others = new Map(records.byIds(otherIds).map(r => [r.id, r]))
       const shown = new Map<string, RecordRow>()
-      const links: Array<{ name: string; direction: 'out' | 'in'; id?: string; path?: string; fixed: boolean }> = []
+      const links: Array<{ name: string; direction: 'out' | 'in'; id?: string; path?: string; typed?: Pick<RecordLinkView, 'local' | 'drive'>; fixed: boolean }> = []
       // Whether a link of `source` cannot be removed by hand (records.md "Linking records later"):
       // an origin link (出どころ), a record whose links only its service changes, a file record's text.
       const types = currentTypes(records)
       const fixed = (source: RecordRow, name: string) =>
         types.get(source.type)?.definition.links[name]?.origin === true || SERVICE_STATE_TYPES.includes(source.type) || source.path !== null
       for (const l of out) {
-        if (l.targetPath !== null) { if (reader.file(l.targetPath) && fileLinkShown(member.userId, row, l)) links.push({ name: l.name, direction: 'out', path: l.targetPath, fixed: fixed(row, l.name) }); continue }
+        if (l.targetPath !== null) {
+          const kind = fileLinkKind(l.targetPath)
+          if (kind === 'company-path') { if (reader.file(l.targetPath) && fileLinkShown(member.userId, row, l)) links.push({ name: l.name, direction: 'out', path: l.targetPath, fixed: fixed(row, l.name) }); continue }
+          // A Drive file or a file of a member's PC (records.md "File links without the shared folder").
+          const typed = typedLinkView(member.userId, row, l)
+          if (typed) links.push({ name: l.name, direction: 'out', typed, fixed: fixed(row, l.name) })
+          continue
+        }
         const t = others.get(l.targetId as string)
         if (t && linkAllowed(row, t) && reader.record(t)) { shown.set(t.id, t); links.push({ name: l.name, direction: 'out', id: t.id, fixed: fixed(row, l.name) }) }
       }
@@ -668,7 +700,9 @@ export function createRecordService(deps: RecordServiceDeps) {
         links: links.map((l): RecordLinkView => ({
           ...(l.id
             ? { name: l.name, direction: l.direction, record: sums.get(l.id)! }
-            : { name: l.name, direction: l.direction, path: l.path!, ...(files?.known.has(l.path!) ? { broken: files.missing.has(l.path!) } : {}), ...(files?.folders.has(l.path!) ? { folder: true as const } : {}) }),
+            : l.typed
+              ? { name: l.name, direction: l.direction, ...l.typed }
+              : { name: l.name, direction: l.direction, path: l.path!, ...(files?.known.has(l.path!) ? { broken: files.missing.has(l.path!) } : {}), ...(files?.folders.has(l.path!) ? { folder: true as const } : {}) }),
           ...(l.fixed ? { fixed: true as const } : {}),
         })),
       })

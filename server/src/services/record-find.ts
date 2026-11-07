@@ -11,7 +11,7 @@
  * what the caller could not open.
  */
 import { foldAsciiCase } from '../../shared/core/paths'
-import { fileLinkShown } from '../../shared/core/records'
+import { fileLinkKind, fileLinkShown } from '../../shared/core/records'
 import type { TypeDefinition } from '../../shared/core/record-types'
 import type { RecordFindHit, RecordFindHome, RecordFindHub, RecordFindResult, RecordSummary } from '../../shared/types/records'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -107,7 +107,9 @@ export function createRecordFind(deps: RecordFindDeps) {
     const next = meetings.map(meetingAt).filter((at): at is string => !!at && at.slice(0, 10) >= today).sort()[0] ?? null
     const sources = new Map([hub, ...bundles].map(r => [r.id, r]))
     const fileLinks = records.linksFrom([hub.id, ...bundles.map(b => b.id)])
-      .filter(l => l.targetPath !== null && reader.file(l.targetPath) && fileLinkShown(viewerId, sources.get(l.sourceId) ?? { personalOwner: null }, l))
+      // A company path the caller reads; a Drive file for every reader; a PC file for its owner only.
+      .filter(l => l.targetPath !== null && (fileLinkKind(l.targetPath) !== 'company-path' || reader.file(l.targetPath))
+        && fileLinkShown(viewerId, sources.get(l.sourceId) ?? { personalOwner: null }, l))
     const moved = [sums.get(hub.id)?.updatedAt ?? '', ...list.map(s => s.updatedAt)].sort()
     return {
       id: hub.id,

@@ -164,6 +164,16 @@ recordsRoute.post('/records/item/:recordId/undo', companyMember, serviceBody, as
 recordsRoute.post('/records/item/:recordId/file-links', companyMember, serviceBody, async (c) => {
   const member = c.var.member
   const body = c.var.body
+  // A Drive file (a company without the shared folder): the Google connector checks it is this
+  // member's own pick, with their own permission, before the engine links it (records.md "File links
+  // without the shared folder"). Nothing else ever asks Drive about a linked file.
+  const target = (body as { target?: { kind?: unknown; fileId?: unknown } } | null)?.target
+  // (A company with the shared folder refuses the kind in the engine; Google is not asked for it.)
+  if (target?.kind === 'drive' && !services.companyFolders.has(member.companyId)) {
+    const checked = await services.googleDrive.linkable(member, target.fileId)
+    if (!checked.ok) return answer(c, checked)
+    return answer(c, recordEngine.fileLink(member, humanWith(body), c.req.param('recordId'), 'link', body, checked.value))
+  }
   return answer(c, recordEngine.fileLink(member, humanWith(body), c.req.param('recordId'), 'link', body))
 })
 

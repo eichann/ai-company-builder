@@ -44,7 +44,7 @@ import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { FindHomeResult, FindResult, RecordCardResult, RecordListResult } from './record-views'
 import type { ConsultationTopicsResult } from './consultation-topics'
 import type { CalendarTodayResult } from './calendar'
-import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from './tasks'
+import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveLinkResult, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from './tasks'
 import type { DroppedThing, DropLinkResult } from './link-drop'
 import type { TagSuggestions } from './tag-suggest'
 import type { TaskCardResult } from './task-card'
@@ -561,6 +561,10 @@ export interface IpcInvokeChannels {
   /** A company file or folder linked to a task (`companyPath`: inside the company folder, e.g. `営業/見積.xlsx`). */
   'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
   'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
+  /** A company without the shared folder: a file of the member's PC or a Drive file taken off a task. */
+  'tasks:unlinkTarget': { args: [companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number]; result: TaskWriteResult }
+  /** 「Google Drive のファイルをつなぐ」: Google Picker, then each picked file linked to the task. */
+  'tasks:linkDriveFiles': { args: [companyId: string, recordId: string, expectedVersion: number]; result: TaskDriveLinkResult }
   /** 「もう一度」 on a run held for a person. */
   /** 「部署に出す」: an owner-only task shown to a department folder's readers (never undone). */
   'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
@@ -1030,6 +1034,8 @@ export interface ElectronAPI {
   getTaskProposals: Invoke<'tasks:proposals'>
   getBundleKinds: Invoke<'tasks:bundleKinds'>
   unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
+  unlinkTargetFromTask: Invoke<'tasks:unlinkTarget'>
+  linkDriveFilesToTask: Invoke<'tasks:linkDriveFiles'>
   retryTaskRun: Invoke<'tasks:retryRun'>
   shareTask: Invoke<'tasks:share'>
   shareTaskToBundle: Invoke<'tasks:shareToBundle'>

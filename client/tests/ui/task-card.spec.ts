@@ -90,6 +90,69 @@ test('「＋ファイル・フォルダをつなぐ」 links a company file; a l
   expectNoPageErrors(state)
 })
 
+// A company without the shared folder (records.md "File links without the shared folder", owner decision
+// 2026-11-08): the card offers ［Google Drive のファイルをつなぐ］ instead of the company's files; the member's PC files
+// show 「あなただけ」, open on this PC or say plainly they are missing; a Drive file the member did not link is
+// 「Google Drive のファイル」; a file dropped from the tree becomes the member's own link. A git company: unchanged.
+test('a company without the shared folder: Drive and this PC’s files on the card, a dropped file linked as the member’s own', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { kind: 'none' })
+  const card = page.getByTestId('task-card')
+  const links = card.getByRole('complementary', { name: 'つながっているもの' })
+  await expect(links.getByRole('button', { name: 'ファイル・フォルダをつなぐ' })).toHaveCount(0)
+  await links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' }).click()
+  await expect(page.locator('#acted')).toHaveText('drive@3')
+  await expect(card.getByRole('status').filter({ hasText: '「B社 見積」をつなぎました' })).toBeVisible()
+
+  // This PC's files: 「あなただけ」 on each; one here opens, one missing says so and opens nothing.
+  await expect(links.locator('[data-only-you]')).toHaveCount(2)
+  await links.getByRole('button', { name: /メモ\.md/ }).first().click()
+  await expect(page.locator('#acted')).toContainText('open /Users/me/company/営業/メモ.md')
+  await expect(links).toContainText('このパソコンに見つかりません')
+  await links.getByRole('button', { name: /消えた\.md/ }).first().click()
+  await expect(links.getByRole('alert')).toContainText('「消えた.md」はこのパソコンに見つかりません')
+  await expect(page.locator('#acted')).not.toContainText('消えた.md')
+
+  // Drive files: the member's own by its name, another's in neutral words; both open in the browser.
+  await expect(links).toContainText('A社 提案書（下書き）')
+  await links.getByRole('button', { name: 'ほか 1 件' }).click()
+  await links.getByRole('button', { name: /^Google Drive のファイル(?!をつなぐ)/ }).first().click()
+  await expect(page.locator('#acted')).toContainText('external https://drive.google.com/file/d/1ZyXwVuTsRqPoNmLk/view')
+
+  // Taken off from its 「…」, with 取り消す for a PC file.
+  await page.getByRole('button', { name: '「メモ.md」の操作' }).click()
+  await page.getByRole('menuitem', { name: /つながりを外す/ }).click()
+  await expect(page.locator('#acted')).toContainText('unlinkTarget local 営業/メモ.md@3')
+  await card.getByRole('status').filter({ hasText: '「メモ.md」とのつながりを外しました' }).getByRole('button', { name: '取り消す' }).click()
+  await expect(page.locator('#acted')).toContainText('undo 4@4')
+
+  const data = await page.evaluateHandle(() => {
+    const dt = new DataTransfer()
+    dt.setData('application/x-file-paths', JSON.stringify(['/Users/me/company/経理/請求書.xlsx']))
+    return dt
+  })
+  await links.dispatchEvent('dragover', { dataTransfer: data })
+  await links.dispatchEvent('drop', { dataTransfer: data })
+  await expect(page.locator('#acted')).toContainText('drop task-0000aa 経理/請求書.xlsx target:files local')
+  expectNoPageErrors(state)
+})
+
+test('a company with the shared folder: no Drive button, a dropped file stays a company file', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  const links = page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' })
+  await expect(links.getByRole('button', { name: 'ファイル・フォルダをつなぐ' })).toHaveCount(1)
+  await expect(links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' })).toHaveCount(0)
+  await expect(links.locator('[data-only-you]')).toHaveCount(0)
+  const data = await page.evaluateHandle(() => {
+    const dt = new DataTransfer()
+    dt.setData('application/x-file-paths', JSON.stringify(['/Users/me/company/経理/請求書.xlsx']))
+    return dt
+  })
+  await links.dispatchEvent('dragover', { dataTransfer: data })
+  await links.dispatchEvent('drop', { dataTransfer: data })
+  await expect(page.locator('#acted')).toHaveText('drop task-0000aa 経理/請求書.xlsx target:files')
+  expectNoPageErrors(state)
+})
+
 test('the source slot shows what the screen gives only for a task that came from a 来た連絡 (no もとの連絡 block on a task made by hand)', async ({ page }) => {
   const state = await openPreview(page, 'task-card', { source: '1' })
   const card = page.getByTestId('task-card')

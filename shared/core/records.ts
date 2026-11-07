@@ -149,12 +149,94 @@ export function isPersonalPath(companyPath: string): boolean {
 }
 
 /**
+ * The kinds of a record's file link (records.md "File links without the shared folder", owner
+ * decision 2026-11-08). A link's target is stored as one string (`record_links.target_path`, the
+ * ledger's `links.<name>` arrays):
+ *
+ *   company-path  a path of the company folder (`営業部/見積.md`) — every link of a company with
+ *                 the shared folder
+ *   drive         `drive:<fileId>` — a Google Drive file the linker picked (a company without the
+ *                 shared folder); its revision, name and fingerprint are kept beside the row
+ *   local         `local:<owner id>:<path>` — a file in the linker's own working folder on their PC,
+ *                 its maker's alone (shown to nobody else, like a `.personal/` link). The owner is
+ *                 part of the target, so two members' links to the same name stay two links and
+ *                 every reader (detail, 経緯, replay, counts) knows whose it is from the string alone
+ *
+ * A company path never starts with `<letters>:` (`fileLinkPath` refuses it), so the kinds cannot
+ * be mistaken for one another.
+ */
+export type FileLinkKind = 'company-path' | 'drive' | 'local'
+export const DRIVE_LINK_PREFIX = 'drive:'
+export const LOCAL_LINK_PREFIX = 'local:'
+/** A Drive file id as Drive spells it (the same shape the Google connector checks). */
+const DRIVE_FILE_ID_RE = /^[A-Za-z0-9_-]{10,200}$/
+
+export function fileLinkKind(target: string): FileLinkKind {
+  if (target.startsWith(DRIVE_LINK_PREFIX)) return 'drive'
+  if (target.startsWith(LOCAL_LINK_PREFIX)) return 'local'
+  return 'company-path'
+}
+
+/** `drive:<fileId>` for a well-formed Drive id, else null. */
+export function driveLinkTarget(fileId: unknown): string | null {
+  return typeof fileId === 'string' && DRIVE_FILE_ID_RE.test(fileId) ? DRIVE_LINK_PREFIX + fileId : null
+}
+
+/** The Drive id of a `drive:` target, else null. */
+export function driveLinkFileId(target: string): string | null {
+  const id = target.startsWith(DRIVE_LINK_PREFIX) ? target.slice(DRIVE_LINK_PREFIX.length) : ''
+  return DRIVE_FILE_ID_RE.test(id) ? id : null
+}
+
+/** A member id as it may stand in a `local:` target (no `:`, no separators). */
+const LOCAL_OWNER_RE = /^[A-Za-z0-9_-]{1,100}$/
+
+/**
+ * `local:<owner id>:<path>` for a path inside the member's working folder (relative, no `..`,
+ * checked as a company path is), else null. Never an absolute path: the PC's user name stays on the PC.
+ */
+export function localLinkTarget(ownerId: string, path: unknown): string | null {
+  if (typeof path !== 'string' || !LOCAL_OWNER_RE.test(ownerId)) return null
+  const p = fileLinkPath(path.normalize('NFC'))
+  return p === null ? null : `${LOCAL_LINK_PREFIX}${ownerId}:${p}`
+}
+
+function localParts(target: string): { owner: string; path: string } | null {
+  if (!target.startsWith(LOCAL_LINK_PREFIX)) return null
+  const rest = target.slice(LOCAL_LINK_PREFIX.length)
+  const i = rest.indexOf(':')
+  const owner = i > 0 ? rest.slice(0, i) : ''
+  const path = i > 0 ? fileLinkPath(rest.slice(i + 1)) : null
+  return LOCAL_OWNER_RE.test(owner) && path !== null ? { owner, path } : null
+}
+
+/** The path inside the working folder of a `local:` target, else null. */
+export function localLinkPath(target: string): string | null {
+  return localParts(target)?.path ?? null
+}
+
+/** Whose PC a `local:` target is on (null for anything else, or a malformed one: nobody's). */
+export function localLinkOwner(target: string): string | null {
+  return localParts(target)?.owner ?? null
+}
+
+/**
+ * A link target only its maker may ever see: a `.personal/` path (records.md "Links into
+ * .personal/") or a `local:` file on the maker's PC.
+ */
+export function isOwnOnlyLinkTarget(target: string): boolean {
+  return fileLinkKind(target) === 'local' || isPersonalPath(target)
+}
+
+/**
  * Whether `viewerId` may see a file link of a record (records.md "Links into .personal/"): any
- * path but a `.personal/` one; that one only by the member who made the link — a link from before
- * the maker was kept (`createdBy` null) only by the owner of an owner-only record.
+ * target but a `.personal/` path or a `local:` file; those only by the member who made the link — a
+ * link from before the maker was kept (`createdBy` null) only by the owner of an owner-only record.
  */
 export function fileLinkShown(viewerId: string, source: { personalOwner: string | null }, link: { targetPath: string | null; createdBy?: string | null }): boolean {
-  if (link.targetPath === null || !isPersonalPath(link.targetPath)) return true
+  if (link.targetPath === null || !isOwnOnlyLinkTarget(link.targetPath)) return true
+  // A PC's file: the target names its owner; a malformed one is nobody's.
+  if (fileLinkKind(link.targetPath) === 'local') return localLinkOwner(link.targetPath) === viewerId
   return link.createdBy ? link.createdBy === viewerId : source.personalOwner === viewerId
 }
 

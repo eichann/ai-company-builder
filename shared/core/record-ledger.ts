@@ -24,17 +24,24 @@ export interface LedgerChange {
 
 export type ActorKind = 'human' | 'ai' | 'external'
 
-/** A file attached to an action: the version handed over (0.18-1). */
-export interface LedgerAttachment {
-  link: string
-  path: string
-  commit: string
-}
+/**
+ * A file attached to an action: the version handed over (0.18-1) — a company file at a commit, or
+ * (a company without the shared folder) a Google Drive file linked to the record, at the revision
+ * and with the fingerprint of the content ACB read when it was linked.
+ */
+export type LedgerAttachment =
+  | { link: string; path: string; commit: string }
+  | { link: string; kind: 'drive'; fileId: string; revisionId: string; sha256: string }
 
-/** Material a decision rests on: a file at a commit, or a record at a version (§13.5). */
+/**
+ * Material a decision rests on (§13.5): a file at a commit, a record at a version, or a Google Drive
+ * file linked to the record at its revision with its fingerprint (a company without the shared
+ * folder). A file only on one member's PC is never material: nobody else could check it.
+ */
 export type DecisionMaterial =
   | { kind: 'file'; path: string; commit: string }
   | { kind: 'record'; id: string; version: number }
+  | { kind: 'drive'; fileId: string; revisionId: string; sha256: string }
 
 /** The thick ledger entry of a decision (§13.2 案 Y): the container; most of it is filled in later stages. */
 export interface LedgerDecision {

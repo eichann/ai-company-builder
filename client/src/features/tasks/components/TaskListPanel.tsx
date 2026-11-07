@@ -45,10 +45,12 @@ interface Props {
   onCompleted?: (recordId: string) => void
   /** 「今日の予定」 belongs to 会議と議事録 (owner decision 2026-11-07): off, no meeting is read or mixed in. */
   showCalendar?: boolean
+  /** A company without the shared folder: a file dropped on a row is linked as the member's own (あなただけ). */
+  localFiles?: boolean
 }
 
 /** The task list tab (やること): the list; an item opens in a tab in the middle (records and files share the tabs). */
-export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult, askFolder = null, onCompleted, showCalendar = true }: Props) {
+export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult, askFolder = null, onCompleted, showCalendar = true, localFiles = false }: Props) {
   const [choosing, setChoosing] = useState<TaskListItem | null>(null)
   const [mode, setMode] = useState<ListMode>('turn')
   const [tag, setTag] = useState<string | null>(null)
@@ -115,7 +117,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
     else void run(item, [{ action: c.action }])
   }
   // A file, folder, record or consultation dropped on a task row is linked to it (owner decision 2026-11-03).
-  const linkDrop = useLinkDrop({ companyId, rootPath, targetWord: 'やること', onChanged: list.reload })
+  const linkDrop = useLinkDrop({ companyId, rootPath, targetWord: 'やること', localFiles, onChanged: list.reload })
   const yesBundle = async (item: TaskListItem, bundleId: string) => {
     setBusy(item.id)
     setMessage(null)

@@ -19,7 +19,7 @@ import type { MailAwaitReply, MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
 import type { WorkSwitch } from '../shared/work-switches'
 import type { ViewersQuery } from '../shared/viewers'
-import type { ArchiveCursor, BundleCreateInput, RecordLinkInput, TaskActInput, TaskCreateInput } from '../shared/tasks'
+import type { ArchiveCursor, BundleCreateInput, RecordLinkInput, TaskActInput, TaskCreateInput, TypedFileTarget } from '../shared/tasks'
 import type { DroppedThing } from '../shared/link-drop'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
@@ -173,6 +173,8 @@ const api: ElectronAPI = {
   getBundleKinds: (companyId: string) => invoke('tasks:bundleKinds', companyId),
   linkFileToTask: (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => invoke('tasks:linkFile', companyId, recordId, companyPath, expectedVersion),
   unlinkFileFromTask: (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => invoke('tasks:unlinkFile', companyId, recordId, companyPath, expectedVersion),
+  unlinkTargetFromTask: (companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number) => invoke('tasks:unlinkTarget', companyId, recordId, target, expectedVersion),
+  linkDriveFilesToTask: (companyId: string, recordId: string, expectedVersion: number) => invoke('tasks:linkDriveFiles', companyId, recordId, expectedVersion),
   shareTask: (companyId: string, recordId: string, folder: string, expectedVersion: number) => invoke('tasks:share', companyId, recordId, folder, expectedVersion),
   shareTaskToBundle: (companyId: string, recordId: string, expectedVersion: number) => invoke('tasks:shareToBundle', companyId, recordId, expectedVersion),
   suggestTaskTags: (companyId: string, title: string, tagsInUse: string[]) => invoke('tasks:suggestTags', companyId, title, tagsInUse),
