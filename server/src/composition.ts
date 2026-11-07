@@ -79,6 +79,7 @@ import { createRecordSignal } from './services/record-signal'
 import { companyNow, createNotificationService } from './services/notifications'
 import { createAiRunService } from './services/ai-runs'
 import { createSkillUseService } from './services/skill-uses'
+import { createSkillShelfService } from './services/skill-shelf'
 import { createGroupService } from './services/groups'
 import { createServerClock } from './services/server-clock'
 import { createSecurityAlertService } from './services/security-alerts'
@@ -870,6 +871,14 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     recordEngine,
     // Which company Skill a consultation used (records.md "Which Skill").
     skillUses: createSkillUseService(shared),
+    // The Skill shelf of a company without the shared folder (plugins.md "The Skill shelf").
+    skillShelf: createSkillShelfService({
+      ...shared,
+      hasCompanyFolder: companyFolders.has,
+      managedFolders: permissionViews.managedFolders,
+      skillEditing: permissionViews.skillEditing,
+      sha256: sha256Bytes,
+    }),
     // 見える人のまとまり (server.md "Groups"): owners/admins keep them; rules name them.
     groups: createGroupService({ ...repos, ...shared }),
     notifications,

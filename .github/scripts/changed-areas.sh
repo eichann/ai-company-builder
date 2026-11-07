@@ -49,6 +49,7 @@ SYNC=(
   shared/core/record-types.ts shared/core/records.ts shared/core/reserved-paths.ts shared/core/skill-files.ts
   shared/core/write-access.ts shared/core/yaml-lite.ts
   shared/core/connector-roles.ts shared/core/names.ts shared/core/plugin-step-runs.ts
+  shared/core/skill-autorun.ts shared/core/secret-patterns.ts
   shared/types/private-folders.ts shared/package.json shared/tsconfig.json
   .github/scripts/sync-shard.mjs
 )

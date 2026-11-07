@@ -40,6 +40,7 @@ import type { ScopeRepository } from './scopes'
 import type { SecondOpinionSettingRepository } from './second-opinion'
 import type { SecurityAlertRepository } from './security-alerts'
 import type { SkillUseRepository } from './skill-uses'
+import type { SkillShelfRepository } from './skill-shelf'
 import type { TaskSettingsRepository } from './task-settings'
 
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
@@ -91,6 +92,8 @@ export interface CompanyData {
   readonly secondOpinion: SecondOpinionSettingRepository
   /** 「気になる動き」: alerts, their setting, download counters, and the rules' reads (ports/security-alerts.ts). */
   readonly securityAlerts: SecurityAlertRepository
+  /** The Skill shelf of a company without the shared folder: Skills, instruction texts, rule files and their versions (ports/skill-shelf.ts). */
+  readonly skillShelf: SkillShelfRepository
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // lane A ▲

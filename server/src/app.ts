@@ -33,6 +33,7 @@ import { viewersRoute } from './routes/viewers'
 import { recordsRoute } from './routes/records'
 import { aiRunsRoute } from './routes/ai-runs'
 import { skillUsesRoute } from './routes/skill-uses'
+import { skillShelfRoute } from './routes/skill-shelf'
 import { recordsAiRoute } from './routes/records-ai'
 import { googleDriveAiRoute, googleDriveRoute, googlePickerPageRoute } from './routes/google-drive'
 import { outboundMailRoute } from './routes/outbound-mail'
@@ -186,6 +187,7 @@ app.route('/api/companies/:companyId', keyBrokerRoute)
 app.route('/api/companies/:companyId', recordsRoute)
 app.route('/api/companies/:companyId', aiRunsRoute)
 app.route('/api/companies/:companyId', skillUsesRoute)
+app.route('/api/companies/:companyId', skillShelfRoute)
 app.route('/api/companies/:companyId', outboundMailRoute)
 app.route('/api/companies/:companyId', pluginsRoute)
 app.route('/api/companies/:companyId', googleRoute)

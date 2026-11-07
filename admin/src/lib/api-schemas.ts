@@ -41,6 +41,7 @@ import type {
 import type { RecordSettings } from '../../../shared/types/records'
 import type { SecondOpinionView } from '../../../shared/types/second-opinion'
 import type { SecurityAlertSettings, SecurityAlertView, SecurityAlertsView } from '../../../shared/types/security-alerts'
+import type { ShelfListView, ShelfPublishResult, ShelfVersionsView } from '../../../shared/types/skill-shelf'
 import type { SlackAdminView } from '../../../shared/types/slack'
 import type { DepartmentMembersView, TaskSettingsView } from '../../../shared/types/task-settings'
 import type {
@@ -354,6 +355,11 @@ export const absenceRemovedSchema = topLevel<{ removed: true }>({ removed: bool 
 export const memberGroupSchema = topLevel<MemberGroup>({ id: str, name: str, memberIds: list, usedIn: list, createdAt: str })
 export const memberGroupsSchema = topLevel<MemberGroupsView>({ groups: list })
 export const groupDeletedSchema = topLevel<{ deleted: true }>({ deleted: bool })
+
+// 会社の Skill (the Skill shelf of a company without the shared folder)
+export const shelfListSchema = topLevel<ShelfListView>({ items: list })
+export const shelfVersionsSchema = topLevel<ShelfVersionsView>({ item: obj, versions: list, history: list })
+export const shelfPublishResultSchema = topLevel<ShelfPublishResult>({ item: obj, changed: bool })
 
 // API keys, plugins and connectors
 export const brokerSchema = topLevel<BrokerView>({

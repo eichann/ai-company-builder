@@ -32,6 +32,9 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `reserved-paths.ts` | `reservedPrefixOf` / `reservedAncestorOf` (push check `[RESERVED_PATH]`), `isPathUsable` (`POST …/paths/check`); compared as `diskKey`s |
 | `instruction-files.ts` | `CLAUDE.md` / `CLAUDE.local.md` / `AGENTS.md` / `AGENTS.override.md` and `.claude/rules/*.md` (`RULES_FILE_PATTERN`): names, who may change them |
 | `skill-files.ts` | everything under `.claude/skills|agents|commands` and `.agents/skills` (`SKILL_FOLDERS`, `SKILL_FOLDER_PATTERN`): `isSkillFile`, who may change it (`mayChangeSkillFile`, `skillFileAllowed`, `SkillEditing`) |
+| `skill-autorun.ts` | the auto-run parts of a Skill's Markdown (`autorunFindingsInText`): the push checker (`rules.ts` `autorunFindings`) and the Skill shelf |
+| `skill-shelf.ts` | the server's Skill shelf of a company without the shared folder (`plugins.md` "The Skill shelf"): kinds, names, upload paths, `shelfPlacePath`, `shelfChangeProblems` (the push checker's file rules asked of the place path), `shelfListing` (the version) |
+| `secret-patterns.ts` | `SECRET_PATTERNS` (`[SECRET_DETECTED]`, re-exported by `rules.ts`) and `secretIn` (the Skill shelf) |
 | `agent-config.ts` | what the agents load and run, owner/admin only: the named config (`AGENT_CONFIG_PATTERN`) and the default-deny of the rest of `.claude/` / `.agents/` (`AGENT_FOLDER_PATTERN`): `isAgentConfig`; the push checker builds its bytewise regexes from the patterns |
 | `write-access.ts` | `evaluateWrite` (the app's answer from `GET /me/write-access`), `foldScopePaths` (the push check's A–Z-folded pass) |
 | `client-version.ts` | desktop-app build identity: `parseClientVersion`, `compareClientVersions` (the server's version gates re-export them from `server/src/lib/client-version.ts`), `ClientBuild` / `clientBuildOf` / `parseClientBuild` / `compareClientBuilds` (the API's parsed build; the admin members page ranks with them) |

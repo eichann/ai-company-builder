@@ -157,7 +157,9 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   department membership 所属する部署, `adapters/sqlite/task-settings.ts`, `tasks.md`) and `aiRuns`
   (execution runs of 「AI の番」 and their operations by idempotency key, `adapters/sqlite/ai-runs.ts`,
   `records.md` "Execution runs") and `securityAlerts` (「気になる動き」: alerts, their Slack setting,
-  members' hourly download counts, the rules' read-only queries; `security-alerts.md`).
+  members' hourly download counts, the rules' read-only queries; `security-alerts.md`) and
+  `skillShelf` (the Skill shelf of a company without the shared folder: items, versions, history;
+  `plugins.md` "The Skill shelf").
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
@@ -235,6 +237,10 @@ GET  /api/config                                  setup state (no auth)
                               GET /push-rejections                            permission-rules.ts
                               GET|PUT /skill-editors, PUT /skill-editors/everyone (owner/admin)
                                                                              skill-editors.ts
+                              GET|POST /skill-shelf, GET /skill-shelf/:itemId/versions(/:version),
+                              POST /skill-shelf/:itemId/restore | unpublish, GET /me/skill-shelf
+                                                                             skill-shelf.ts
+                                                                (会社の Skill, no shared folder only: plugins.md "The Skill shelf")
                               /private-folders…, /me/private-folders, /me/scopes,
                               POST /paths/check                               private-folders.ts
                               POST|GET /agent-events, /agent-events/summary,

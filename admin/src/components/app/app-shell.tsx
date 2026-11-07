@@ -12,6 +12,7 @@ import {
   FolderSimple,
   GearSix,
   House,
+  Lightning,
   List,
   Moon,
   Plus,
@@ -78,6 +79,8 @@ export const NAV_ITEMS: NavItem[] = [
   // 「権限」 and 「非公開フォルダ」 as one (管理画面の見直し 2-3).
   // Not for a company without the shared folder: nothing there to manage (the page itself says so).
   { segment: 'folders', label: 'フォルダ', icon: FolderSimple, visible: (c) => c.hasCompanyFolder !== false && (c.isAdmin || c.isManager) },
+  // 会社の Skill: only a company without the shared folder (one with it shares Skills by sync).
+  { segment: 'skills', label: '会社の Skill', icon: Lightning, visible: (c) => c.hasCompanyFolder === false && (c.isAdmin || c.isManager) },
   { segment: 'integrations', label: 'つなぎ先', icon: PlugsConnected, visible: (c) => c.isAdmin },
 ]
 

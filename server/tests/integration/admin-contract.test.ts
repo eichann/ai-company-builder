@@ -104,6 +104,9 @@ const TYPES: Record<string, string> = {
   Groups: 'MemberGroupsView',
   Group: 'MemberGroup',
   GroupDeleted: '{ deleted: true }',
+  ShelfList: 'ShelfListView',
+  ShelfVersions: 'ShelfVersionsView',
+  ShelfPublishResult: 'ShelfPublishResult',
   DepartmentMembers: 'DepartmentMembersView',
   TaskSettings: 'TaskSettingsView',
   InboxSettings: 'InboxSettingsView',
@@ -262,6 +265,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', permissionRulesRoute)
   app.route('/api/companies/:companyId', skillEditorsRoute)
   app.route('/api/companies/:companyId', groupsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/skill-shelf')).skillShelfRoute)
   app.route('/api/companies/:companyId', privateFoldersRoute)
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
@@ -458,6 +462,26 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/settings`, { internalHosts: ['crm.example.com'] })
     await expectShape('Broker', USERS.owner, 'POST', `${base}/broker/stop-all`)
     await expectShape('Broker', USERS.owner, 'DELETE', `${base}/broker/keys/${id}`)
+  })
+
+  it('会社の Skill (a company without the shared folder)', async () => {
+    const { db } = await import('../../src/db')
+    // The shelf answers only a company without the folder: this one is made so for this block.
+    db.prepare("UPDATE companies SET folder_kind = 'none' WHERE id = ?").run(CO)
+    try {
+      const skill = [{ path: 'SKILL.md', base64: Buffer.from('---\nname: x\n---\n見積\n').toString('base64') }]
+      const first = await call(USERS.owner, 'POST', `${base}/skill-shelf`, { kind: 'skill', departmentId: null, name: 'contract', files: skill, expectedVersion: null })
+      expect(first.status).toBe(201)
+      const item = first.json.data.item
+      const second = await call(USERS.owner, 'POST', `${base}/skill-shelf`, { kind: 'skill', departmentId: null, name: 'contract', files: [{ ...skill[0], base64: Buffer.from('v2').toString('base64') }], expectedVersion: item.version })
+      expect(second.status).toBe(200)
+      await expectShape('ShelfList', USERS.owner, 'GET', `${base}/skill-shelf`)
+      await expectShape('ShelfVersions', USERS.owner, 'GET', `${base}/skill-shelf/${item.id}/versions`)
+      await expectShape('ShelfPublishResult', USERS.owner, 'POST', `${base}/skill-shelf/${item.id}/restore`, { version: item.version, expectedVersion: second.json.data.item.version })
+      await expectShape('ShelfPublishResult', USERS.owner, 'POST', `${base}/skill-shelf/${item.id}/unpublish`, { expectedVersion: item.version })
+    } finally {
+      db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
+    }
   })
 
   it('つなぎ先 → Slack', async () => {
