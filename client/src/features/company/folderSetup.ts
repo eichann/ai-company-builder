@@ -1,7 +1,9 @@
 // The asynchronous steps of setting a company folder up, over the feature's ports (api.ts).
-import type { DepartmentFolder } from '../../types'
+import type { CompanyView, DepartmentFolder } from '../../types'
+import type { CompanyInfo } from '../../../shared/ipc-contract'
+import { answeredCompanyFolderKind } from '../../../shared/company-folder'
 import { getDepartments } from '../../shared/ipc/departments'
-import { companyPathExists, getMyDepartments, inspectCompanyFolder, readCompanyFolder } from './api'
+import { companyPathExists, getMyDepartments, inspectCompanyFolder, openWorkingFolder, readCompanyFolder } from './api'
 import { planFolderSetup } from './folderPlan'
 import { departmentIdFor, isDepartmentEntry, membershipFolders, pickableDepartments, type PickableDepartment, type SetupKind } from './model'
 
@@ -46,4 +48,41 @@ export async function readFolderDepartments(companyPath: string): Promise<Depart
     })
   }
   return departments
+}
+
+export interface WorkingFolderOpening {
+  openWorkingFolder: (folder: string, companyId: string) => Promise<{ success: boolean; error?: string }>
+  readDepartments: (folder: string) => Promise<DepartmentFolder[]>
+}
+
+/**
+ * Whether a chosen company opens without the shared company folder: only a company the
+ * server answered exactly `none` for (an older server's answer → git, set up as before).
+ */
+export function opensWithoutSharedFolder(company: Pick<CompanyInfo, 'folderKind'>): boolean {
+  return answeredCompanyFolderKind(company.folderKind) === 'none'
+}
+
+/**
+ * Opening a company without the shared folder (client/shared/company-folder.ts) in
+ * `companyPath`: main prepares the plain working folder; nothing is inspected, downloaded or
+ * set up as a clone, and no department picker is shown (nothing is downloaded).
+ */
+export async function openCompanyWithoutFolder(
+  company: CompanyInfo,
+  companyPath: string,
+  ports: WorkingFolderOpening = { openWorkingFolder, readDepartments: readFolderDepartments },
+): Promise<{ company: CompanyView } | { error: string }> {
+  const opened = await ports.openWorkingFolder(companyPath, company.id).catch(() => null)
+  if (!opened?.success) return { error: opened?.error || 'フォルダを準備できませんでした。もう一度お試しください。' }
+  return {
+    company: {
+      id: company.id,
+      name: company.name,
+      rootPath: companyPath,
+      departments: await ports.readDepartments(companyPath),
+      createdAt: new Date(company.createdAt),
+      folderKind: 'none',
+    },
+  }
 }

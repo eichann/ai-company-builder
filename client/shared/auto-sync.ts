@@ -24,6 +24,8 @@ export type AutoSyncSkipReason =
   | 'private-folder-setup'
   /** A rebase / merge / cherry-pick is in progress in the repository. */
   | 'repository-busy'
+  /** A company without the shared company folder: nothing is ever synced (company-folder.ts). */
+  | 'no-company-folder'
 
 /** What the renderer knows and tells main with each request. */
 export interface AutoSyncRendererState {

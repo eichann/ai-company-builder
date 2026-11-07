@@ -5,6 +5,9 @@ paths:
   - "client/electron/commit-message.ts"
   - "client/electron/features/sync/**"
   - "client/electron/services/app-git.ts"
+  - "client/electron/services/working-folders.ts"
+  - "client/shared/company-folder.ts"
+  - "client/tests/ipc-company-without-folder.test.ts"
   - "client/electron/services/commit-messages.ts"
   - "client/tests/sync/**"
   - "client/tests/sync-harness/**"
@@ -295,3 +298,33 @@ No AI, a failure, no tagged block or 30 s → 「Sync from AI Company Builder」
 logged. A private folder's clone (`kind: 'scope'`) uses only `privateFolderCommitMessages` agents (the
 API key), so its file names never go to a CLI sign-in or another vendor. Log lines name the agent
 id (`[commit-message] claude-code failed …`).
+
+## Companies without the shared company folder (`folderKind: 'none'`, 2026-11-07)
+
+A company may have no shared company folder (`shared/core/company-folder.ts`; the server refuses
+git-http and everything repository-based with `NO_COMPANY_FOLDER`). The app reads the server's
+`folderKind` with `answeredCompanyFolderKind` (`client/shared/company-folder.ts`): **only an exact
+`none`** is such a company; absent (an older server) or anything else is a git company, unchanged.
+
+- **Its working folder** is a plain folder on this PC (default `~/AI Company Builder/<会社名>`, or
+  a folder the member picks): `companySetup:openWorkingFolder` asks the server the company's kind
+  (exactly `none`, else refused), refuses a folder holding `.git` (another company's synced folder
+  stays untouched), creates the folder and one folder per department (`isValidFolderName` names
+  only, never a path), and registers it in `services/working-folders.ts`. Restoring the remembered
+  company does the same (kind from the server's list, never from localStorage); if main cannot take
+  the folder, the company is not opened.
+- **No git ever runs there.** `withoutWorkingFolders` wraps the app's one git factory
+  (`services/app-git.ts`): a git for a registered working folder throws
+  `NO_GIT_IN_WORKING_FOLDER` — so also not in a repository *around* the folder on disk. Folders
+  match exactly (a git company's folder is a repository root with its own `.git`, so it is never
+  one). Entry points: `git:sync` refused before anything runs (no dialog); `git:autoSync` →
+  `skipped` / `no-company-folder` (never an error loop); `git:preview` / `revertFile` / diffs /
+  `generateSummary` / `log` / `unsharedLargeFiles`, `git:sparse*`, `git:folderSizes`,
+  `git:setupCompanyRemote` → refused by the git factory; `git:inspectCompanyFolder` → `refuse`
+  (the folder belongs to a company without the shared folder); `skills:makePrivate` → success
+  (every skill there is the member's own), `skills:publish` → refused; `git:listFiles` /
+  `git:grep` (探す, Cmd+P) read the disk (`electron/plain-search.ts`, git-search's caps; never
+  `.git` / `.backups` / `.workspace` / `node_modules`). The renderer passes no folder to sync,
+  automatic sync, download choices and private folders (their hooks stay idle) and hides their
+  buttons. Test: `client/tests/ipc-company-without-folder.test.ts` (mutation-checked; the folder
+  sits inside another repository there, so a missed guard would act on that one).

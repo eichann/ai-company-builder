@@ -93,6 +93,7 @@ import type { RecordViewSummary } from '../../shared/record-views'
 import { usePluginScreens } from '../features/plugins/hooks/usePluginScreens'
 import { LazyPluginFileActionDialog as PluginFileActionDialog } from '../features/plugins/components/LazyPluginSlots'
 import { pluginSlots, type FileActionOpen } from './pluginSlots'
+import { companyHasSharedFolder } from '../../shared/company-folder'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -113,6 +114,11 @@ export function AppShell() {
   const { t } = useTranslation()
   const currentCompany = useAppStore((s) => s.currentCompany)
   const rootPath = currentCompany?.rootPath
+  // A company without the shared folder (client/shared/company-folder.ts): rootPath is a plain
+  // working folder on this PC. Sync, download choices, private folders, history and backups
+  // get no folder (their hooks stay idle) and their buttons are hidden.
+  const sharedFolder = companyHasSharedFolder(currentCompany)
+  const syncedRoot = sharedFolder ? rootPath : undefined
 
   const { departments, isLoading: isLoadingDepartments, refresh: refreshDepartments } = useDepartments(currentCompany?.id)
   // Received minutes: main checks while Google may read the member's minutes (features/minutes); the
@@ -144,7 +150,7 @@ export function AppShell() {
   // 「やることにつなぐ…」 from the file tree: the file chosen (as the company names it), while its chooser is open.
   const [linkingFile, setLinkingFile] = useState<string | null>(null)
   const [fileAction, setFileAction] = useState<FileActionOpen | null>(null)
-  const sparseCheckout = useSparseCheckout({ rootPath: rootPath || '' })
+  const sparseCheckout = useSparseCheckout({ rootPath: syncedRoot || '' })
 
   // The department tab, saved per company; 全社 when the saved one is gone.
   const { selectedDeptId, selectDepartment } = useDepartmentSelection(currentCompany?.id, departments)
@@ -153,7 +159,7 @@ export function AppShell() {
   const effectiveDeptFolder = isCompanyWide ? '' : (selectedDept?.folder || '')
   // Which departments are not on this computer, and whether the selected one shows the download prompt.
   const { unsyncedFolders, isSelectedDeptUnsynced, markDownloaded } =
-    useDepartmentAvailability(rootPath, departments, selectedDept, isCompanyWide, sparseCheckout)
+    useDepartmentAvailability(syncedRoot, departments, selectedDept, isCompanyWide, sparseCheckout)
 
   // Open tabs (files and records side by side), the active one and the left tab, saved per company.
   // Set while a wide left tab (スキル…) covers the middle. The daily tidy hears when a company's tabs are restored (set below).
@@ -246,14 +252,14 @@ export function AppShell() {
 
   // After a sync: private folders, departments, teammates' skills (shown and slash commands) and history.
   const handleSynced = useCallback(async () => {
-    if (currentCompany?.id) void usePrivateFolderStore.getState().load(currentCompany.id)
+    if (currentCompany?.id && sharedFolder) void usePrivateFolderStore.getState().load(currentCompany.id)
     await refreshDepartments()
     void refreshSkills()
     if (!isCompanyWide) void refreshCompanySkills()
     refreshFileVersions()
-  }, [currentCompany?.id, refreshDepartments, refreshSkills, refreshCompanySkills, isCompanyWide])
+  }, [currentCompany?.id, sharedFolder, refreshDepartments, refreshSkills, refreshCompanySkills, isCompanyWide])
   const signedInUserId = useAuthStore(s => s.user?.id)
-  const sync = useSync({ rootPath, companyId: currentCompany?.id, userId: signedInUserId, onSynced: handleSynced })
+  const sync = useSync({ rootPath: syncedRoot, companyId: currentCompany?.id, userId: signedInUserId, onSynced: handleSynced })
 
   // Signing out closes this screen: every open tab is saved first (useSaveBeforeLeaving).
   const leaving = useSaveBeforeLeaving()
@@ -271,7 +277,7 @@ export function AppShell() {
 
   // 「自動で受け取る」 / 「自動で送る」 while the app is open (Settings → 自動同期).
   const autoSync = useAutoSync({
-    rootPath,
+    rootPath: syncedRoot,
     companyId: currentCompany?.id,
     isSyncing: sync.isSyncing,
     setIsSyncing: sync.setIsSyncing,
@@ -495,7 +501,7 @@ export function AppShell() {
           onCopySkill={!isCompanyWide ? () => skillsTab.setCopyOpen(true) : undefined}
           onEditFile={handleEditFile}
           onOpenTool={(tool, port) => skillsTab.setActiveTool({ tool, port })}
-          onPublish={skillsTab.shareSkill}
+          onPublish={sharedFolder ? skillsTab.shareSkill : undefined}
           onToggleNurturing={skillsTab.toggleNurturing}
         />
       ),
@@ -511,7 +517,9 @@ export function AppShell() {
           onSelectFile={openFileFromTree}
           onDoubleClickFile={handlePinFile}
           onPrivateFolderCreated={handlePrivateFolderCreated}
-          onLinkToTask={tasksShown && rootPath ? path => setLinkingFile(companyPathOf(path, rootPath)) : undefined}
+          sharedFolder={sharedFolder}
+          // A file on one PC means nothing to others: the server refuses file links without the shared folder.
+          onLinkToTask={tasksShown && rootPath && sharedFolder ? path => setLinkingFile(companyPathOf(path, rootPath)) : undefined}
           extraMenuItems={plugins.fileMenuItems}
           onOpenToday={() => { void openToday() }}
           controls={treeControls}
@@ -571,6 +579,7 @@ export function AppShell() {
         isLoadingPreview={sync.isLoadingPreview}
         isSyncing={sync.isSyncing}
         syncTitle={autoSync.syncButtonTitle}
+        sharedFolder={sharedFolder}
         onPreview={sync.handlePreview}
         onSync={() => handleSync()}
         onShowBackups={() => setShowBackupHistory(true)}
@@ -659,7 +668,7 @@ export function AppShell() {
                   navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
                   renderRecord={recordCard}
                   gotoLine={gotoLine?.path === activeFilePath ? gotoLine.line : null}
-                  aside={activeFilePath && !activeRecordId && rootPath
+                  aside={activeFilePath && !activeRecordId && rootPath && sharedFolder
                     ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />
                     : undefined}
                   pinnedTabs={tidying.pinned}

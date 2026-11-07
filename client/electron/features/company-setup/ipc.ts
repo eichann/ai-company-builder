@@ -7,6 +7,8 @@
 // A member's first time without choices (管理画面の見直し 2-2): the departments they belong
 // to (所属, set by the invitation or the admin) and the folder the company goes in by default.
 //   companySetup:myDepartments, companySetup:defaultParentFolder
+// A company without the shared company folder (`none`): its working folder on this PC, no git.
+//   companySetup:openWorkingFolder
 
 import fs from 'fs'
 import path from 'path'
@@ -19,6 +21,8 @@ import { checkoutSelectedDepartments } from '../../sync/first-setup'
 import { configureOrigin } from '../../sync/remote'
 import { isDownloadFailure } from '../../sync/sparse'
 import type { PathGuard } from '../ports'
+import type { WorkingFolders } from '../../services/working-folders'
+import { isValidFolderName } from '../../../../shared/core/names'
 
 export interface CompanySetupDeps {
   paths: PathGuard
@@ -29,14 +33,66 @@ export interface CompanySetupDeps {
   userDataDir: () => string
   /** The member's home folder (the default company folder goes under it). */
   home: () => string
+  /** Working folders of companies without the shared folder (services/working-folders.ts). */
+  workingFolders: WorkingFolders
 }
 
 /** Where company folders go when the member is not asked (`~/AI Company Builder/<会社名>`). */
 export const DEFAULT_PARENT_FOLDER_NAME = 'AI Company Builder'
 
 const SETUP_OFFLINE_MESSAGE = 'サーバーに接続できませんでした。インターネット接続を確認して、もう一度お試しください。'
+/** A folder already used as the working folder of a company without the shared folder. */
+export const WORKING_FOLDER_TAKEN_MESSAGE = 'このフォルダは、全社フォルダを使わない会社の作業フォルダとして使われています。別のフォルダを選んでください。'
+/** A synced company folder chosen as a working folder: it stays the other company's, untouched. */
+export const SYNCED_FOLDER_MESSAGE = 'このフォルダはほかの会社と同期しているフォルダのため使えません。別のフォルダを選ぶか、「新しく作成」を使ってください。'
+const NOT_WITHOUT_FOLDER_MESSAGE = 'この会社のフォルダを準備できませんでした。もう一度お試しください。'
 
-export function registerCompanySetupIpc(ipc: IpcRegistrar, { paths, appGit, session, serverUrl, userDataDir, home }: CompanySetupDeps): void {
+export function registerCompanySetupIpc(ipc: IpcRegistrar, { paths, appGit, session, serverUrl, userDataDir, home, workingFolders }: CompanySetupDeps): void {
+  const authHeaders = (): Record<string, string> => session.cookies().length > 0 ? { 'Cookie': session.cookies().join('; ') } : {}
+
+  // A company without the shared company folder (client/shared/company-folder.ts): its
+  // working folder is a plain folder on this PC — created if missing, with a folder per
+  // department (never touching what is there), and never a clone. Only when the server
+  // says the company is exactly `none` (the server is the authority; an older server or a
+  // git company is refused here and set up as before), and never a folder holding a `.git`
+  // (another company's synced folder stays untouched). Registered as a working folder:
+  // no git runs there afterwards (services/working-folders.ts).
+  ipc.handle('companySetup:openWorkingFolder', async (_, folder: string, companyId: string) => {
+    let safe: string
+    try {
+      safe = paths.validate(folder)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+    if (typeof companyId !== 'string' || !companyId) return { success: false, error: NOT_WITHOUT_FOLDER_MESSAGE }
+    const base = `${serverUrl()}/api/companies/${encodeURIComponent(companyId)}`
+    let departmentFolders: string[]
+    try {
+      const answer = await fetch(base, { headers: authHeaders() })
+      const company = answer.ok ? await answer.json() as { data?: { folderKind?: unknown } } | null : null
+      if (company?.data?.folderKind !== 'none') return { success: false, error: NOT_WITHOUT_FOLDER_MESSAGE }
+      const listed = await fetch(`${base}/departments`, { headers: authHeaders() })
+      const departments = listed.ok ? await listed.json() as { success?: unknown; data?: unknown } | null : null
+      departmentFolders = departments?.success === true && Array.isArray(departments.data)
+        ? (departments.data as Array<{ folder?: unknown }>).map(d => d.folder)
+          // A department's root folder only, by the department folder-name rule: never a path.
+          .filter((f): f is string => typeof f === 'string' && isValidFolderName(f))
+        : []
+    } catch {
+      return { success: false, error: SETUP_OFFLINE_MESSAGE }
+    }
+    if (fs.existsSync(path.join(safe, '.git'))) return { success: false, error: SYNCED_FOLDER_MESSAGE }
+    try {
+      await fs.promises.mkdir(safe, { recursive: true })
+      for (const name of departmentFolders) await fs.promises.mkdir(paths.validate(path.join(safe, name)), { recursive: true })
+    } catch (error) {
+      console.warn('Working folder: could not prepare the folder:', error instanceof Error ? error.message : 'unknown')
+      return { success: false, error: 'フォルダを作れませんでした。別の場所を選んでください。' }
+    }
+    workingFolders.add(safe)
+    paths.add(safe)
+    return { success: true }
+  })
 
   // The folder company folders are made in when nobody picks one: created if missing and
   // registered like a folder picked in the dialog. The company folder inside it still goes
@@ -112,6 +168,7 @@ export function registerCompanySetupIpc(ipc: IpcRegistrar, { paths, appGit, sess
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
+    if (workingFolders.has(safe)) return { success: true, decision: { action: 'refuse', reason: 'notEmpty', message: WORKING_FOLDER_TAKEN_MESSAGE } satisfies CompanyFolderDecision }
     try {
       const remoteUrl = await companyRemoteUrl(companyId)
       if (remoteUrl) return { success: true, decision: (await companyFolderDecision(safe, remoteUrl)).decision }
@@ -139,6 +196,7 @@ export function registerCompanySetupIpc(ipc: IpcRegistrar, { paths, appGit, sess
     let stopProgress: (() => void) | null = null
     try {
       repoPath = paths.validate(repoPath)
+      if (workingFolders.has(repoPath)) return { success: false, refused: true, error: WORKING_FOLDER_TAKEN_MESSAGE }
       // Fetch HTTPS URL from server API
       let remoteUrl: string | null
       try {

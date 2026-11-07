@@ -85,6 +85,10 @@ is below, editable per company in the admin. Background: `docs/sandbox-web-broke
   `codexVersionMessage` (「お使いの Codex（x）は古いため…npm install -g @openai/codex@latest…」), the
   CLI is not started. A passing CLI is remembered per path for the app run.
 
+A company without the shared company folder (`sync.md` "Companies without the shared company
+folder") passes its working folder as the company folder (`companyRootPath` = the opened
+company's `rootPath`), so the sandbox applies there exactly as for a git company's folder.
+
 ## Server and admin (S1)
 
 - Tables `agent_sandbox_settings` (company → JSON setting; no row = `DEFAULT_AGENT_SANDBOX_SETTINGS`:

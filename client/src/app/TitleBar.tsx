@@ -2,6 +2,7 @@ import { useCallback, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ClockCounterClockwise, CloudArrowUp, GearSix, Globe, House, ListChecks, Moon, SignOut, SpinnerGap, Sun } from '@phosphor-icons/react'
 import { useAppStore } from '../stores/appStore'
+import { WORKING_FOLDER_NOTE } from '../../shared/company-folder'
 
 interface Props {
   companyName: string | undefined
@@ -9,6 +10,8 @@ interface Props {
   isSyncing: boolean
   /** The sync button's tooltip (with the last automatic sync). */
   syncTitle?: string
+  /** False for a company without the shared company folder: no sync, preview or backups (one short note instead). */
+  sharedFolder?: boolean
   onPreview: () => void
   onSync: () => void
   onShowBackups: () => void
@@ -24,7 +27,7 @@ interface Props {
 const ICON_BUTTON = 'p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
 
 /** The window's title bar (draggable): the company, 変更を確認 / 同期, backups, language, theme, settings, sign-out. */
-export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra, notices }: Props) {
+export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra, notices }: Props) {
   const { t } = useTranslation()
   const hasCompany = useAppStore((s) => s.currentCompany) != null
   const theme = useAppStore((s) => s.theme)
@@ -46,6 +49,12 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
       </div>
       <div className="flex items-center gap-2 app-no-drag">
         {notices}
+        {!sharedFolder && (
+          <span className="px-2 py-1 rounded-md text-xs text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800" title={WORKING_FOLDER_NOTE}>
+            この PC だけで作業
+          </span>
+        )}
+        {sharedFolder && <>
         <button
           onClick={onPreview}
           disabled={isLoadingPreview || !hasCompany}
@@ -71,8 +80,10 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
             <CloudArrowUp size={18} />
           )}
         </button>
+        </>}
         {extra}
         <div className="w-px h-4 bg-gray-200 dark:bg-zinc-700" />
+        {sharedFolder && (
         <button
           onClick={onShowBackups}
           disabled={!hasCompany}
@@ -81,6 +92,7 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
         >
           <ClockCounterClockwise size={18} />
         </button>
+        )}
         <button
           onClick={toggleLanguage}
           className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors text-xs font-medium"

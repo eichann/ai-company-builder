@@ -51,6 +51,7 @@ import type { TaskCardResult } from './task-card'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
 import type { MailAttachmentOpenResult, MailAwaitReply, MailDraftEdit, OutboundMailResult } from './outbound-mail'
 import type { AppCommandAnswer, AppCommandRequest } from './app-commands'
+import type { CompanyFolderKind } from './company-folder'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { GoogleRelayResult } from './google'
@@ -106,6 +107,8 @@ export interface CompanyInfo {
   role: string
   createdAt: string
   updatedAt: string
+  /** With the shared company folder or without (client/shared/company-folder.ts); absent from an older server = `git`. */
+  folderKind?: CompanyFolderKind
 }
 
 export interface CompaniesResult {
@@ -654,6 +657,8 @@ export interface IpcInvokeChannels {
   // A member's first time without choices (features/company-setup): 所属 and the default folder
   'companySetup:myDepartments': { args: [companyId: string]; result: { success: boolean; departmentIds?: string[] } }
   'companySetup:defaultParentFolder': { args: []; result: { success: boolean; folder?: string } }
+  /** A company without the shared folder: its working folder on this PC (created with the department folders; no git). */
+  'companySetup:openWorkingFolder': { args: [folder: string, companyId: string]; result: { success: boolean; error?: string } }
   'git:sparseGetExclusions': { args: [repoPath: string]; result: SparseExclusionsResult }
   'git:sparseSetExclusions': { args: [repoPath: string, excluded: string[]]; result: SparseSetExclusionsResult }
   'git:sparseUncommittedChanges': { args: [repoPath: string, folders: string[]]; result: SparseUncommittedChangesResult }
@@ -1091,6 +1096,7 @@ export interface ElectronAPI {
   gitInspectCompanyFolder: Invoke<'git:inspectCompanyFolder'>
   getMyDepartments: Invoke<'companySetup:myDepartments'>
   getDefaultParentFolder: Invoke<'companySetup:defaultParentFolder'>
+  openWorkingFolder: Invoke<'companySetup:openWorkingFolder'>
   onSetupProgress: Subscribe<'setup:progress'>
 
   // Sparse checkout

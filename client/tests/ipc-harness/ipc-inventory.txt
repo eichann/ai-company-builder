@@ -70,6 +70,7 @@ contract.invoke chatWindow:reportStatus
 contract.invoke codex:status
 contract.invoke companySetup:defaultParentFolder
 contract.invoke companySetup:myDepartments
+contract.invoke companySetup:openWorkingFolder
 contract.invoke config:getAgentEnvPassthrough
 contract.invoke config:getApiKeyStatus
 contract.invoke config:getAuthMode
@@ -278,6 +279,7 @@ contract.type CompaniesResult.success = success: boolean
 contract.type CompanyFolderDecisionView = export type CompanyFolderDecisionView = | { action: 'firstSetup' | 'existingClone' | 'uploadExisting' } | { action: 'refuse'; reason: 'otherRemote' | 'unrelatedRepo' | 'notEmpty'; message: string }
 contract.type CompanyInfo = export interface CompanyInfo { }
 contract.type CompanyInfo.createdAt = createdAt: string
+contract.type CompanyInfo.folderKind = folderKind?: CompanyFolderKind
 contract.type CompanyInfo.id = id: string
 contract.type CompanyInfo.name = name: string
 contract.type CompanyInfo.ownerId = ownerId: string
@@ -473,6 +475,7 @@ contract.type ElectronAPI.openChatWindow = openChatWindow: Invoke<'chatWindow:op
 contract.type ElectronAPI.openExternal = openExternal: Invoke<'shell:openExternal'>
 contract.type ElectronAPI.openFileInMainWindow = openFileInMainWindow: Invoke<'chatWindow:openFile'>
 contract.type ElectronAPI.openOutboundMailAttachment = openOutboundMailAttachment: Invoke<'outboundMail:openAttachment'>
+contract.type ElectronAPI.openWorkingFolder = openWorkingFolder: Invoke<'companySetup:openWorkingFolder'>
 contract.type ElectronAPI.patchChatSession = patchChatSession: Invoke<'chatHistory:patchSession'>
 contract.type ElectronAPI.publishSkill = publishSkill: Invoke<'skills:publish'>
 contract.type ElectronAPI.readDirectory = readDirectory: Invoke<'fs:readDirectory'>
@@ -723,6 +726,7 @@ contract.type IpcInvokeChannels.'chatWindow:reportStatus' = 'chatWindow:reportSt
 contract.type IpcInvokeChannels.'codex:status' = 'codex:status': { args: []; result: CodexStatus }
 contract.type IpcInvokeChannels.'companySetup:defaultParentFolder' = 'companySetup:defaultParentFolder': { args: []; result: { success: boolean; folder?: string } }
 contract.type IpcInvokeChannels.'companySetup:myDepartments' = 'companySetup:myDepartments': { args: [companyId: string]; result: { success: boolean; departmentIds?: string[] } }
+contract.type IpcInvokeChannels.'companySetup:openWorkingFolder' = 'companySetup:openWorkingFolder': { args: [folder: string, companyId: string]; result: { success: boolean; error?: string } }
 contract.type IpcInvokeChannels.'config:getAgentEnvPassthrough' = 'config:getAgentEnvPassthrough': { args: []; result: string[] }
 contract.type IpcInvokeChannels.'config:getApiKeyStatus' = 'config:getApiKeyStatus': { args: []; result: ApiKeyStatus }
 contract.type IpcInvokeChannels.'config:getAuthMode' = 'config:getAuthMode': { args: []; result: AuthMode }
@@ -1005,6 +1009,7 @@ main.handle chatWindow:reportStatus @ features/chat-windows/ipc.ts (status: unkn
 main.handle codex:status @ features/settings/ipc.ts ()
 main.handle companySetup:defaultParentFolder @ features/company-setup/ipc.ts ()
 main.handle companySetup:myDepartments @ features/company-setup/ipc.ts (companyId: string)
+main.handle companySetup:openWorkingFolder @ features/company-setup/ipc.ts (folder: string, companyId: string)
 main.handle config:getAgentEnvPassthrough @ features/settings/ipc.ts ()
 main.handle config:getApiKeyStatus @ features/settings/ipc.ts ()
 main.handle config:getAuthMode @ features/settings/ipc.ts ()
@@ -1486,6 +1491,8 @@ preload openFileInMainWindow -> invoke chatWindow:openFile($0)
 preload openFileInMainWindow : (filePath: string) => Promise<ChatWindowOpenFileResult>
 preload openOutboundMailAttachment -> invoke outboundMail:openAttachment($0, $1, $2)
 preload openOutboundMailAttachment : (companyId: string, messageId: string, sha256: string) => Promise<MailAttachmentOpenResult>
+preload openWorkingFolder -> invoke companySetup:openWorkingFolder($0, $1)
+preload openWorkingFolder : (folder: string, companyId: string) => Promise<{ success: boolean; error?: string | undefined; }>
 preload patchChatSession -> invoke chatHistory:patchSession($0, $1, $2)
 preload patchChatSession : (companyId: string, sessionId: string, patch: ChatMetadataPatch) => Promise<ChatSession | null>
 preload publishSkill -> invoke skills:publish($0, $1)

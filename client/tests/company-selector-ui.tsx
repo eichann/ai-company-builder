@@ -9,6 +9,7 @@
 //   ?companies=one           the member belongs to one company (it opens by itself)
 //   ?mine=d1,d2              the departments the member belongs to (所属); none by default
 //   ?create=no|yes           the server's canCreateCompany for this account (absent by default: an older server)
+//   ?kind=none               阿部商店 has no shared company folder (folderKind none); ?working=fail main refuses its folder
 // Calls the page made are in window.__acbCompany.calls; the opened company is
 // shown under 「開いた会社」.
 import { createRoot } from 'react-dom/client'
@@ -33,6 +34,7 @@ let finishSetup: (() => void) | null = null
 
 const company = (id: string, name: string, role: string): CompanyInfo => ({
   id, name, role, slug: id, ownerId: 'u1', repoPath: null, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z',
+  ...(id === 'c1' && params.get('kind') === 'none' ? { folderKind: 'none' as const } : {}),
 })
 const department = (id: string, name: string, folder: string): DepartmentInfo => ({
   id, name, folder, companyId: 'c1', parentId: null, nameEn: null, icon: '', color: '', description: null, sortOrder: 0, isActive: true, createdAt: '', updatedAt: '',
@@ -91,6 +93,10 @@ installElectronAPI({
     return { success: true, folder: '/Users/demo/AI Company Builder' }
   },
   createDirectory: async path => { calls.push(['createDirectory', path]); return true },
+  openWorkingFolder: async (path, companyId) => {
+    calls.push(['openWorkingFolder', path, companyId])
+    return params.get('working') === 'fail' ? { success: false, error: 'このフォルダは使えません。' } : { success: true }
+  },
   gitSetupCompanyRemote: async (path, companyId, selected) => {
     calls.push(['gitSetupCompanyRemote', path, companyId, selected ?? null])
     if (params.get('setup') === 'manual') await new Promise<void>(resolve => { finishSetup = resolve })
@@ -108,7 +114,7 @@ installElectronAPI({
 function OpenedCompany() {
   const current = useAppStore(s => s.currentCompany)
   if (!current) return null
-  const shown = { id: current.id, name: current.name, rootPath: current.rootPath, departments: current.departments.map(d => `${d.id}:${d.name}:${d.hasAgent ? 'agent' : '-'}`) }
+  const shown = { id: current.id, name: current.name, rootPath: current.rootPath, ...(current.folderKind ? { folderKind: current.folderKind } : {}), departments: current.departments.map(d => `${d.id}:${d.name}:${d.hasAgent ? 'agent' : '-'}`) }
   return <pre role="status" aria-label="開いた会社" className="text-xs">{JSON.stringify(shown)}</pre>
 }
 

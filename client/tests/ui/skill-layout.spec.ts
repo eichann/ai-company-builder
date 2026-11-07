@@ -323,3 +323,21 @@ test('自分の設定: 今日のフォルダ says where it is and which departme
   await select.selectOption({ label: '総務' })
   await expect(row).toContainText('総務/.personal/inbox/日付別/2026/20261103/')
 })
+
+test('a company without the shared folder: no sync, preview or backups (one short note), no 閲覧のみ, no download prompt, no 同期 settings', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none' })
+  await expect(page.getByText('この PC だけで作業')).toBeVisible()
+  for (const name of ['サーバーと同期', '変更を確認', 'バックアップ履歴']) await expect(page.getByRole('button', { name })).toHaveCount(0)
+  // 開発部 is "not downloaded" for a git company: here every folder is on this PC.
+  await deptTab(page, '開発部').click()
+  await expect(overlay(page)).toHaveCount(0)
+  // 総務 is read-only for this member in a git company: the working folder is the member's own.
+  await deptTab(page, '全社').click()
+  await leftTab(page, 'ファイル').click()
+  await expect(page.getByRole('button', { name: 'README.md' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^総務/ }).filter({ hasText: '閲覧のみ' })).toHaveCount(0)
+  await page.getByRole('button', { name: '設定' }).click()
+  await expect(page.getByRole('button', { name: '自分の設定' })).toBeVisible()
+  for (const name of ['ダウンロードするフォルダ', '自動同期', '同期しないファイル']) await expect(page.getByRole('button', { name })).toHaveCount(0)
+  expect(await calls(page, 'gitSync')).toEqual([])
+})

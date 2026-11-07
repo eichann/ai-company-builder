@@ -23,6 +23,12 @@ export interface DepartmentFolder {
 
 /** The company open in the app: the server's company plus where its folder is on this computer. */
 export interface CompanyView extends Pick<Company, 'id' | 'name' | 'createdAt'> {
+  /**
+   * The company folder (a clone of the company repository) or, for a company without the
+   * shared folder (`folderKind: 'none'`), its working folder: a plain folder on this PC.
+   */
   rootPath: string
+  /** As the server answered when the company was opened; absent = `git` (client/shared/company-folder.ts). */
+  folderKind?: Company['folderKind']
   departments: DepartmentFolder[]
 }

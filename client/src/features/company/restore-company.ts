@@ -13,6 +13,14 @@ export interface RestoreDeps {
   accessibleCompanyIds: () => Promise<string[] | null>
   registerAllowedRoot: (folder: string) => Promise<unknown>
   exists: (target: string) => Promise<boolean>
+  /**
+   * A company the server answered `none` for (no shared company folder, asked after
+   * `accessibleCompanyIds`): main prepares its working folder again and registers it as one
+   * (no git there, services/working-folders.ts); true when ready. Absent or false for the
+   * company → a git company, restored as before.
+   */
+  withoutSharedFolder?: (companyId: string) => boolean
+  openWorkingFolder?: (folder: string, companyId: string) => Promise<boolean>
 }
 
 /**
@@ -34,7 +42,12 @@ export async function checkRememberedCompany(
     await deps.registerAllowedRoot(remembered.rootPath)
     // The folder may have been deleted or moved since the last session:
     // opening it anyway leaves no files, no git and no way back.
-    return (await deps.exists(remembered.rootPath)) ? 'open' : 'forget'
+    if (!(await deps.exists(remembered.rootPath))) return 'forget'
+    if (deps.withoutSharedFolder?.(remembered.id)) {
+      // Without it main would not know the folder is one where no git may run.
+      return deps.openWorkingFolder && await deps.openWorkingFolder(remembered.rootPath, remembered.id) ? 'open' : 'keep'
+    }
+    return 'open'
   } catch {
     return 'keep'
   }

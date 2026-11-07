@@ -96,7 +96,16 @@ export interface SkillsDeps {
   isShared: (rootPath: string, relFolder: string) => Promise<boolean>
   /** The sentence when the member may not change this skill file (`sharing`: not even one they keep private); null to allow. */
   skillRefusal: (absPath: string, options?: { sharing?: boolean }) => Promise<string | null>
+  /**
+   * The working folder of a company without the shared folder (services/working-folders.ts):
+   * every skill there is the member's own and nothing is shared, so making one private is
+   * already true and publishing has nowhere to go.
+   */
+  isWorkingFolder?: (rootPath: string) => boolean
 }
+
+/** skills:publish in a company without the shared folder. */
+export const SKILL_NOT_SHARED_HERE = 'この会社では、スキルはこの PC の中だけで使われます（ほかの人には共有されません）。'
 
 /** skills:makePrivate on a skill the company already has. */
 export const SKILL_ALREADY_SHARED = 'このスキルはすでに会社で共有されているため、非公開にはできません。'
@@ -106,7 +115,7 @@ export interface SkillsFeature {
   invalidateForChanges(changes: FileChange[]): void
 }
 
-export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRefusal }: SkillsDeps): SkillsFeature {
+export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRefusal, isWorkingFolder }: SkillsDeps): SkillsFeature {
   // Skills scans (skills:list), reused for plain tab switches (5 s) and dropped
   // as soon as a watcher event makes them stale (invalidateForChanges) or the
   // renderer forces a refresh. Keys and staleness rules: shared/skills-refresh.ts.
@@ -355,6 +364,7 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRef
     try {
       rootPath = paths.validate(rootPath)
       skillGitignoreEntry(skillRelativePath)
+      if (isWorkingFolder?.(rootPath)) return { success: false, error: SKILL_NOT_SHARED_HERE, code: 'refused' as const }
       // Asked before the line goes: refused at sync, the skill would move to .backups/.
       const refused = await skillRefusal(path.join(rootPath, skillRelativePath), { sharing: true })
       if (refused) return { success: false, error: refused, code: 'refused' as const }
@@ -387,6 +397,8 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRef
     try {
       rootPath = paths.validate(rootPath)
       skillGitignoreEntry(skillRelativePath)
+      // Nothing in a working folder is shared: the skill is the member's own already (no .git to write).
+      if (isWorkingFolder?.(rootPath)) return { success: true }
       if (await isShared(rootPath, skillRelativePath)) return { success: false, error: SKILL_ALREADY_SHARED, code: 'already_shared' as const }
       localExcludeOf(rootPath)
       if (setLocalPrivateSkill(rootPath, skillRelativePath, true)) invalidateSkillsCache(rootPath)

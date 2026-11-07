@@ -38,6 +38,7 @@ import type { ToolApprovals } from '../agent-interactions/ipc'
 import type { ChatHistoryEvents } from '../chat-history/ipc'
 import type { PrivateFolderGuards } from '../private-folders/guards'
 import { buildSystemPrompt } from './system-prompt'
+import type { WorkingFolders } from '../../services/working-folders'
 import { topicAfterTaskMade } from '../../../shared/consultation-task'
 
 export interface ChatServerConfigDeps {
@@ -80,6 +81,11 @@ export interface ChatServerConfigDeps {
   paths?: PathGuard
   /** Which Skill a consultation used (services/skill-use-reporter.ts, records.md "Which Skill"); absent = not recorded. */
   skillUses?: Pick<SkillUseReporter, 'observe'>
+  /**
+   * Working folders of companies without the shared folder (services/working-folders.ts): the
+   * write guard keeps only its own rules there, and the company file tools are not offered.
+   */
+  workingFolders?: Pick<WorkingFolders, 'has'>
 }
 
 function hostOf(url: string): string | undefined {
@@ -104,6 +110,17 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       if (!active) deps.agentEvents.turnEnded()
     },
     getWriteGuard: async (companyId, root) => {
+      if (deps.workingFolders?.has(root)) {
+        // Nothing here reaches the push checker: only the rules that are the app's own
+        // (write-guard.ts `folderKind: 'none'`). Who may change agent config: /me/capabilities.
+        await deps.privateFolders.refreshAuthority(companyId, 3000)
+        return {
+          root,
+          folderKind: 'none' as const,
+          getAccess: () => undefined,
+          getInstructionAuthority: () => deps.privateFolders.authority(companyId),
+        }
+      }
       const [access] = await Promise.all([
         deps.writeAccess.refresh(companyId, { timeoutMs: 3000 }),
         deps.privateFolders.refreshReadable(companyId, 3000),
@@ -143,6 +160,9 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       }
     },
     createCompanyFiles: (companyId, root, signal) => {
+      // A company without the shared folder has no company files on the server (NO_COMPANY_FOLDER):
+      // tools that always fail are not offered.
+      if (root && deps.workingFolders?.has(root)) return undefined
       let notDownloaded: string[] = []
       try { notDownloaded = root ? notDownloadedFolders(root) : [] } catch { /* unknown: the instructions just do not list them */ }
       return {

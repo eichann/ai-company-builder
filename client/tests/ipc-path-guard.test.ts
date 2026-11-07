@@ -68,6 +68,7 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'git:log': { args: [IN, '', 5], paths: [0] },
   'git:setupCompanyRemote': { args: [IN, 'co', []], paths: [0] },
   'git:inspectCompanyFolder': { args: [IN, 'co'], paths: [0] },
+  'companySetup:openWorkingFolder': { args: [IN, 'co'], paths: [0] },
   'git:sparseGetExclusions': { args: [IN], paths: [0] },
   'git:sparseSetExclusions': { args: [IN, []], paths: [0] },
   'git:sparseUncommittedChanges': { args: [IN, []], paths: [0] },

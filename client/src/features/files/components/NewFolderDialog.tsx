@@ -28,6 +28,7 @@ import { PrivateFolderHelpLink, PrivateFolderHelpPanel } from './PrivateFolderHe
 // The server's department folder-name rule (private folder names follow it too).
 import { isValidFolderName } from '../../../../../shared/core/names'
 import { createPrivateFolder, getPrivateFolderCreateContext } from '../api'
+import { WORKING_FOLDER_NOTE } from '../../../../shared/company-folder'
 
 export interface NewFolderDialogProps {
   isOpen: boolean
@@ -39,6 +40,8 @@ export interface NewFolderDialogProps {
   placeLabel: string
   /** The private folder the parent is inside: plain folders there are private already. */
   insidePrivate: MyPrivateFolder | null
+  /** False for a company without the shared company folder: no 公開範囲 choice, the folder stays on this PC. */
+  privateFolders?: boolean
   onCancel: () => void
   /** 公開 (or inside a private folder): create on disk as before. Answers why it was refused (the dialog stays open). */
   onCreatePlain: (name: string) => Promise<string | null | void> | void
@@ -57,7 +60,7 @@ export function NewFolderDialog(props: NewFolderDialogProps) {
   return <NewFolderForm {...props} />
 }
 
-function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, onCancel, onCreatePlain, onCreatedPrivate }: NewFolderDialogProps) {
+function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, privateFolders = true, onCancel, onCreatePlain, onCreatedPrivate }: NewFolderDialogProps) {
   const titleId = useId()
   const nameId = useId()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -78,7 +81,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
   // Who may create where, the members and the department's managers — only
   // needed for 非公開, so not inside a private folder.
   useEffect(() => {
-    if (insidePrivate || !companyId) return
+    if (insidePrivate || !companyId || !privateFolders) return
     if (typeof navigator !== 'undefined' && navigator.onLine === false) { setCtx({ status: 'offline' }); return }
     let active = true
     getPrivateFolderCreateContext(companyId, parentRel)
@@ -89,7 +92,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
       })
       .catch(() => { if (active) setCtx({ status: 'offline' }) })
     return () => { active = false }
-  }, [companyId, parentRel, insidePrivate])
+  }, [companyId, parentRel, insidePrivate, privateFolders])
 
   const context = ctx.status === 'ready' ? ctx.context : null
   const allowed = !!context && canCreatePrivateAt(parentRel, context)
@@ -99,7 +102,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
         : ctx.status === 'error' ? OFFLINE_REASON
           : !allowed ? NOT_ALLOWED_REASON
             : null
-  const isPrivate = visibility === 'private' && !privateDisabledReason && !insidePrivate
+  const isPrivate = privateFolders && visibility === 'private' && !privateDisabledReason && !insidePrivate
 
   const viewerIds = useMemo(
     () => viewers ?? (context ? defaultViewerIds(meId, context) : []),
@@ -199,7 +202,9 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
             )}
           </div>
 
-          {insidePrivate ? (
+          {!privateFolders ? (
+            <p className="text-[12px] text-zinc-500 dark:text-zinc-400">{WORKING_FOLDER_NOTE}</p>
+          ) : insidePrivate ? (
             <div className="flex gap-2.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3.5 py-3 text-[13px] text-indigo-900 dark:border-indigo-400/20 dark:bg-indigo-400/[0.08] dark:text-indigo-100">
               <LockSimple size={16} weight="fill" className="mt-0.5 shrink-0 text-indigo-500" />
               <p>
