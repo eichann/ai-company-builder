@@ -24,6 +24,7 @@ export interface Skill {
   isPrivate?: boolean     // true = .gitignore に含まれ同期されない（不可逆: 公開したら戻せない）
   isNurturing?: boolean   // true = 育て中（SKILL.md frontmatter status: nurturing）
   shelf?: SkillShelfMark  // 全社フォルダを使わない会社: 会社から届いた Skill か、同じ名前の自分の Skill か
+  shelfPublish?: boolean  // 全社フォルダを使わない会社: 「会社に公開」を出すか（サーバーが公開を認める場所か）
   skillPath?: string      // Absolute path to skill directory
   // File paths relative to department folder
   files: {

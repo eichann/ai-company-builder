@@ -35,6 +35,7 @@ interface SkillInfo {
   isPrivate?: boolean
   isNurturing?: boolean
   shelf?: SkillShelfMark
+  shelfPublish?: boolean
   files: {
     skillMd: string
     rules?: string[]
@@ -106,6 +107,8 @@ export interface SkillsDeps {
   isWorkingFolder?: (rootPath: string) => boolean
   /** In a working folder: what the Skill shelf says of the Skill folder at `rel` (client/shared/skill-shelf.ts). */
   shelfMark?: (rootPath: string, rel: string) => SkillShelfMark | undefined
+  /** In a working folder: is 「会社に公開」 offered for the Skill folder at `rel` (the server's `skillPublishing`)? */
+  shelfMayPublish?: (rootPath: string, rel: string) => boolean | undefined
   /** In a working folder: the delivered rule files not placed because the member has a file of that name. */
   shelfRuleClashes?: (rootPath: string) => string[]
 }
@@ -123,7 +126,7 @@ export interface SkillsFeature {
   invalidateRoot(rootPath: string): void
 }
 
-export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRefusal, isWorkingFolder, shelfMark, shelfRuleClashes }: SkillsDeps): SkillsFeature {
+export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRefusal, isWorkingFolder, shelfMark, shelfMayPublish, shelfRuleClashes }: SkillsDeps): SkillsFeature {
   // Skills scans (skills:list), reused for plain tab switches (5 s) and dropped
   // as soon as a watcher event makes them stale (invalidateForChanges) or the
   // renderer forces a refresh. Keys and staleness rules: shared/skills-refresh.ts.
@@ -268,6 +271,7 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRef
         const skillRelativePath = `${gitignoreRelativePrefix}.claude/skills/${entry.name}/`
         const isPrivate = gitignoreLines.some(line => line === skillRelativePath)
         const shelf = shelfMark?.(rootPath, skillRelativePath.slice(0, -1))
+        const shelfPublish = shelfMayPublish?.(rootPath, skillRelativePath.slice(0, -1))
 
         skills.push({
           id: `${departmentId}-${group.replace(/\s*\/\s*/g, '-').replace(/\s+/g, '-').toLowerCase()}-${entry.name}`,
@@ -279,6 +283,7 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRef
           isPrivate,
           isNurturing: frontmatter.status === 'nurturing',
           ...(shelf ? { shelf } : {}),
+          ...(shelfPublish !== undefined ? { shelfPublish } : {}),
           files,
         })
       } catch (err) {

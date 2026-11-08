@@ -13,7 +13,7 @@ import { withShelfInstructions } from '../electron/chat-server'
 import { createSkillUseReporter } from '../electron/services/skill-use-reporter'
 import { createWorkingFolders } from '../electron/services/working-folders'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
-import { SHELF_PROMPT_MAX, readShelfDeliveries, shelfPlaceOfSkillFolder, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery } from '../shared/skill-shelf'
+import { SHELF_PROMPT_MAX, mayPublishShelfSkill, readShelfDeliveries, readShelfPublishing, shelfPlaceOfSkillFolder, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery } from '../shared/skill-shelf'
 
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-shelf-')))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
@@ -25,7 +25,7 @@ const exists = (file: string) => fs.existsSync(file)
 type Files = Record<string, string>
 const versionOf = (files: Files) => shelfVersionOf(Object.entries(files).map(([p, text]) => ({ path: p, sha256: sha256Hex(Buffer.from(text)) })), sha256Hex)
 
-interface Item { id: string; kind: 'skill' | 'rule' | 'instructions'; name: string; files: Files; department?: { id: string; folder: string; belongs: boolean } | null }
+interface Item { id: string; kind: 'skill' | 'rule' | 'instructions'; name: string; files: Files; department?: { id: string; folder: string } | null }
 
 /** The server's two read routes, behind the real client. */
 function fakeServer() {
@@ -33,6 +33,8 @@ function fakeServer() {
     items: [] as Item[],
     online: true,
     listAnswer: undefined as unknown,
+    /** The answer's `skillPublishing` (absent: an answer without it). */
+    publishing: undefined as unknown,
     /** Changes the answer's files (a tampered server or line). */
     tamper: undefined as undefined | ((files: Files) => Files),
     requests: [] as string[],
@@ -42,7 +44,7 @@ function fakeServer() {
     if (!server.online) throw new TypeError('fetch failed')
     if (url.endsWith('/me/skill-shelf')) {
       if (server.listAnswer !== undefined) return Response.json(server.listAnswer)
-      return Response.json({ success: true, data: { items: server.items.map(i => ({ id: i.id, kind: i.kind, name: i.name, department: i.department ?? null, version: versionOf(i.files), fileCount: 1, totalBytes: 1 })) } })
+      return Response.json({ success: true, data: { items: server.items.map(i => ({ id: i.id, kind: i.kind, name: i.name, department: i.department ?? null, version: versionOf(i.files), fileCount: 1, totalBytes: 1 })), ...(server.publishing !== undefined ? { skillPublishing: server.publishing } : {}) } })
     }
     const m = /\/skill-shelf\/([^/]+)\/versions\/([0-9a-f]+)$/.exec(url)
     const item = server.items.find(i => i.id === m?.[1])
@@ -68,28 +70,30 @@ function world(options: { user?: () => string | null; now?: () => number } = {})
 const SKILL: Item = { id: 'i1', kind: 'skill', name: 'proposal', files: { 'SKILL.md': '---\nname: proposal\n---\nv1\n', 'scripts/run.py': 'print(1)\n' } }
 const SKILL_V2: Item = { ...SKILL, files: { 'SKILL.md': '---\nname: proposal\n---\nv2\n' } }
 
-test('a delivered Skill lands where Claude Code and Codex read it, a rule file in .claude/rules/, a department\'s in its folder, and only the member\'s own departments', async () => {
+test('a delivered Skill lands where Claude Code and Codex read it, a rule file in .claude/rules/, a department\'s in its folder, every department the server lists (each one the member reads)', async () => {
   const w = world()
   w.server.items = [
     SKILL,
     { id: 'i2', kind: 'rule', name: 'tone', files: { 'tone.md': '敬語で\n' } },
-    { id: 'i3', kind: 'skill', name: 'visit', department: { id: 'd1', folder: '営業部', belongs: true }, files: { 'SKILL.md': 'visit\n' } },
-    { id: 'i4', kind: 'rule', name: 'deal', department: { id: 'd1', folder: '営業部', belongs: true }, files: { 'deal.md': '案件\n' } },
-    { id: 'i5', kind: 'skill', name: 'other', department: { id: 'd2', folder: '総務', belongs: false }, files: { 'SKILL.md': 'other\n' } },
+    { id: 'i3', kind: 'skill', name: 'visit', department: { id: 'd1', folder: '営業部' }, files: { 'SKILL.md': 'visit\n' } },
+    { id: 'i4', kind: 'rule', name: 'deal', department: { id: 'd1', folder: '営業部' }, files: { 'deal.md': '案件\n' } },
+    { id: 'i5', kind: 'skill', name: 'other', department: { id: 'd2', folder: '総務' }, files: { 'SKILL.md': 'other\n' } },
   ]
   await w.open()
   for (const rel of ['.claude/skills/proposal/SKILL.md', '.agents/skills/proposal/scripts/run.py', '.claude/rules/tone.md', '営業部/.claude/skills/visit/SKILL.md', '営業部/.agents/skills/visit/SKILL.md', '営業部/.claude/rules/deal.md']) assert.ok(exists(w.at(rel)), rel)
-  assert.equal(exists(w.at('総務')), false, 'a department the member reads but does not belong to is not placed')
+  // A department the member reads without belonging to it (a group, or named on it): placed as well.
+  assert.ok(exists(w.at('総務/.claude/skills/other/SKILL.md')))
+  assert.ok(exists(w.at('総務/.agents/skills/other/SKILL.md')))
   assert.equal(read(w.at('.agents/skills/proposal/SKILL.md')), SKILL.files['SKILL.md'])
   // Codex needs to know the root of a folder without `.git`.
   assert.equal(w.store.turn('co', w.root, undefined)?.rootMarker, '.agents/.acb-root')
   assert.ok(exists(w.at('.agents/.acb-root')))
-  assert.deepEqual(w.store.managedPaths('co', w.root).sort(), ['.agents/skills/proposal', '.claude/rules/tone.md', '.claude/skills/proposal', '営業部/.agents/skills/visit', '営業部/.claude/rules/deal.md', '営業部/.claude/skills/visit'].sort())
+  assert.deepEqual(w.store.managedPaths('co', w.root).sort(), ['.agents/skills/proposal', '.claude/rules/tone.md', '.claude/skills/proposal', '営業部/.agents/skills/visit', '営業部/.claude/rules/deal.md', '営業部/.claude/skills/visit', '総務/.agents/skills/other', '総務/.claude/skills/other'].sort())
   assert.deepEqual(w.store.markOf(w.root, '.claude/skills/proposal'), { state: 'company', version: versionOf(SKILL.files) })
   assert.deepEqual(w.changed, ['co'])
   await w.again()
   assert.deepEqual(w.changed, ['co'], 'nothing new, nothing announced')
-  assert.equal(w.server.requests.filter(u => u.includes('/versions/')).length, 4, 'an unchanged version is not downloaded again')
+  assert.equal(w.server.requests.filter(u => u.includes('/versions/')).length, 5, 'an unchanged version is not downloaded again')
 })
 
 test('a tampered answer is refused: nothing is placed, and the last good copy stays', async () => {
@@ -173,10 +177,10 @@ test('what stops being delivered is removed; the member\'s own Skills and rules 
   assert.deepEqual(w.store.managedPaths('co', w.root), [])
 })
 
-test('leaving a department takes its items away; offline or an unreadable answer takes nothing away', async () => {
+test('no longer reading a department (out of its group) takes its items away; offline or an unreadable answer takes nothing away', async () => {
   const w = world()
-  const dept = (belongs: boolean): Item => ({ id: 'i3', kind: 'skill', name: 'visit', department: { id: 'd1', folder: '営業部', belongs }, files: { 'SKILL.md': 'visit\n' } })
-  w.server.items = [SKILL, dept(true)]
+  const dept: Item = { id: 'i3', kind: 'skill', name: 'visit', department: { id: 'd1', folder: '営業部' }, files: { 'SKILL.md': 'visit\n' } }
+  w.server.items = [SKILL, dept]
   await w.open()
   w.server.online = false
   await w.again()
@@ -186,7 +190,8 @@ test('leaving a department takes its items away; offline or an unreadable answer
   w.server.listAnswer = undefined
   assert.ok(exists(w.at('.claude/skills/proposal/SKILL.md')))
   assert.ok(exists(w.at('営業部/.claude/skills/visit/SKILL.md')))
-  w.server.items = [SKILL, dept(false)]
+  // The server lists only places the member reads: 営業部 is no longer listed.
+  w.server.items = [SKILL]
   await w.again()
   assert.equal(exists(w.at('営業部/.claude/skills/visit')), false)
   assert.ok(exists(w.at('.claude/skills/proposal/SKILL.md')))
@@ -429,10 +434,10 @@ test('instruction texts go to the turn, not to any file: the company\'s and the 
   const w = world({ user: () => user })
   w.server.items = [
     { id: 't1', kind: 'instructions', name: 'instructions', files: { 'CLAUDE.md': '全社の指示です\n' } },
-    { id: 't2', kind: 'instructions', name: 'instructions', department: { id: 'd1', folder: '営業部', belongs: true }, files: { 'CLAUDE.md': '営業の指示です\n' } },
-    { id: 't3', kind: 'instructions', name: 'instructions', department: { id: 'd2', folder: '総務', belongs: false }, files: { 'CLAUDE.md': '総務の指示です\n' } },
+    { id: 't2', kind: 'instructions', name: 'instructions', department: { id: 'd1', folder: '営業部' }, files: { 'CLAUDE.md': '営業の指示です\n' } },
+    { id: 't3', kind: 'instructions', name: 'instructions', department: { id: 'd2', folder: '総務' }, files: { 'CLAUDE.md': '総務の指示です\n' } },
     { id: 'r1', kind: 'rule', name: 'tone', files: { 'tone.md': '敬語で\n' } },
-    { id: 'r2', kind: 'rule', name: 'deal', department: { id: 'd1', folder: '営業部', belongs: true }, files: { 'deal.md': '案件\n' } },
+    { id: 'r2', kind: 'rule', name: 'deal', department: { id: 'd1', folder: '営業部' }, files: { 'deal.md': '案件\n' } },
   ]
   write(w.at('CLAUDE.md'), 'my own\n')
   await w.open()
@@ -449,7 +454,9 @@ test('instruction texts go to the turn, not to any file: the company\'s and the 
   const sales = w.store.turn('co', w.root, '営業部')
   assert.match(sales?.instructions ?? '', /全社の指示です[\s\S]*営業の指示です/)
   assert.match(sales?.ruleInstructions ?? '', /営業部\/\.claude\/rules\/deal\.md/)
-  assert.doesNotMatch(w.store.turn('co', w.root, '総務')?.instructions ?? '', /総務の指示です/)
+  // A department read without belonging to it: its text goes with a turn shown there.
+  assert.match(w.store.turn('co', w.root, '総務')?.instructions ?? '', /総務の指示です/)
+  assert.doesNotMatch(w.store.turn('co', w.root, '総務')?.instructions ?? '', /営業の指示です/)
 
   // Another account on this computer gets nothing of the last one's.
   user = 'u2'
@@ -465,6 +472,13 @@ test('instruction texts go to the turn, not to any file: the company\'s and the 
   w.server.online = false
   await fresh.attach('co', w.root)
   assert.doesNotMatch(fresh.turn('co', w.root, undefined)?.instructions ?? '', /全部公開/)
+
+  // No longer reading 総務: its text no longer goes with a turn there.
+  w.server.online = true
+  w.server.items = w.server.items.filter(i => i.id !== 't3')
+  await w.again()
+  assert.doesNotMatch(w.store.turn('co', w.root, '総務')?.instructions ?? '', /総務の指示です/)
+  assert.match(w.store.turn('co', w.root, '営業部')?.instructions ?? '', /営業の指示です/)
 })
 
 test('a chat turn: the texts follow the system prompt for every agent, the rule files only for an agent that does not load them', () => {
@@ -500,7 +514,7 @@ test('the app asks the shelf only for a company it opened as a working folder, a
 
 test('the write guard: no AI changes what the company delivered, whatever its role; the member\'s own stay writable; a git company is judged as before', async () => {
   const w = world()
-  w.server.items = [SKILL, { id: 'i2', kind: 'rule', name: 'tone', files: { 'tone.md': '敬語で\n' } }, { id: 'i3', kind: 'skill', name: 'visit', department: { id: 'd1', folder: '営業部', belongs: true }, files: { 'SKILL.md': 'x\n' } }]
+  w.server.items = [SKILL, { id: 'i2', kind: 'rule', name: 'tone', files: { 'tone.md': '敬語で\n' } }, { id: 'i3', kind: 'skill', name: 'visit', department: { id: 'd1', folder: '営業部' }, files: { 'SKILL.md': 'x\n' } }]
   write(w.at('.claude/skills/mine/SKILL.md'), 'mine\n')
   await w.open()
   const guard: WriteGuard = {
@@ -589,10 +603,45 @@ test('the delivery answer: only places that can be placed, and an unreadable ans
   assert.equal(readShelfDeliveries(null), undefined)
   assert.equal(readShelfDeliveries({ items: 'x' }), undefined)
   assert.deepEqual(readShelfDeliveries({ items: [] }), [])
-  for (const bad of [{ name: '../x' }, { name: 'A b' }, { kind: 'plugin' }, { version: 'short' }, { id: '' }, { department: { id: 'd', folder: '../外', belongs: true } }, { department: { id: 'd', folder: 'a/b', belongs: true } }, { department: { id: 'd', folder: '.hidden', belongs: true } }, { department: { id: 'd', folder: '総務', belongs: false } }]) {
+  for (const bad of [{ name: '../x' }, { name: 'A b' }, { kind: 'plugin' }, { version: 'short' }, { id: '' }, { department: { id: 'd', folder: '../外' } }, { department: { id: 'd', folder: 'a/b' } }, { department: { id: 'd', folder: '.hidden' } }, { department: { id: 7, folder: '総務' } }]) {
     assert.deepEqual(readShelfDeliveries({ items: [item(bad)] }), [], JSON.stringify(bad))
   }
-  assert.equal(readShelfDeliveries({ items: [item({ department: { id: 'd', folder: '営業部', belongs: true } })] })?.length, 1)
+  assert.equal(readShelfDeliveries({ items: [item({ department: { id: 'd', folder: '営業部' } })] })?.length, 1)
+  // Every department the server lists is taken: it lists only those the member reads (no 所属 of its own here).
+  assert.deepEqual(readShelfDeliveries({ items: [item({ department: { id: 'd', folder: '総務', belongs: false } })] })?.map(d => d.department), [{ id: 'd', folder: '総務' }])
+})
+
+test('会社に公開 is offered only where the server says the member may publish a Skill; an answer without it offers it nowhere', async () => {
+  const publishing = readShelfPublishing({ skillPublishing: { company: false, departmentFolders: ['営業部', '../外', 3] } })
+  assert.deepEqual(publishing, { company: false, departmentFolders: ['営業部'] })
+  assert.equal(mayPublishShelfSkill(publishing, '営業部/.claude/skills/a'), true)
+  assert.equal(mayPublishShelfSkill(publishing, '総務/.claude/skills/a'), false)
+  assert.equal(mayPublishShelfSkill(publishing, '.claude/skills/a'), false)
+  assert.equal(mayPublishShelfSkill({ company: true, departmentFolders: [] }, '.claude/skills/a'), true)
+  assert.equal(mayPublishShelfSkill({ company: true, departmentFolders: [] }, '営業部/.claude/skills/a'), false)
+  // Not a place a Skill is published from.
+  assert.equal(mayPublishShelfSkill({ company: true, departmentFolders: ['営業部'] }, '営業部/x/.claude/skills/a'), false)
+  for (const odd of [undefined, null, {}, { skillPublishing: 'yes' }, { skillPublishing: { company: 'true' } }]) {
+    assert.deepEqual(readShelfPublishing(odd), { company: false, departmentFolders: [] }, JSON.stringify(odd))
+  }
+
+  // Through the store: what the last list said, kept with the folder's manifest, changed by the next list.
+  const w = world()
+  w.server.items = [SKILL]
+  w.server.publishing = { company: false, departmentFolders: ['営業部'] }
+  await w.open()
+  assert.equal(w.store.mayPublish(w.root, '営業部/.claude/skills/mine'), true)
+  assert.equal(w.store.mayPublish(w.root, '.claude/skills/mine'), false)
+  const fresh = createSkillShelfStore({ dir: () => path.join(w.base, 'userData'), userId: () => 'u1', client: w.client, log: quiet })
+  w.server.online = false
+  await fresh.attach('co', w.root)
+  assert.equal(fresh.mayPublish(w.root, '営業部/.claude/skills/mine'), true, 'kept for a start without the server')
+  w.server.online = true
+  w.server.publishing = undefined
+  const before = w.changed.length
+  await w.again()
+  assert.equal(w.store.mayPublish(w.root, '営業部/.claude/skills/mine'), false)
+  assert.equal(w.changed.length, before + 1, 'the panel is told to look again')
 })
 
 test('what can be published from: a Skill folder at the root or directly in a department; refusals keep the server\'s plain sentence', () => {

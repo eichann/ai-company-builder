@@ -612,8 +612,11 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   a text as `text`, with `expectedVersion`), `GET /skill-shelf/:itemId/versions`,
   `GET …/versions/:version` (the files; re-hashed on the way out, 409 `SHELF_CONTENT_CHANGED`),
   `POST …/restore { version, expectedVersion }`, `POST …/unpublish { expectedVersion }`,
-  `GET /me/skill-shelf` (what the member's app places: current versions of readable places, with
-  `belongs` for the member's departments); owners/admins only: `DELETE …/versions/:version`
+  `GET /me/skill-shelf` (what the member's app places: current versions of every place the member
+  reads — the same `reads` as every other shelf answer, `resolveAccess`: a department's people, its
+  groups, people named on it; owners/admins every place —, and `skillPublishing { company,
+  departmentFolders }`: where they may publish a Skill, asked of `problems` itself without the
+  files, departments they read only); owners/admins only: `DELETE …/versions/:version`
   (an old version, never the current one — 409 `SHELF_VERSION_IS_CURRENT`; history action
   `remove-version`) and `DELETE /skill-shelf/:itemId` (an item taken off, with its versions and
   history — 409 `SHELF_ITEM_PUBLISHED` otherwise); others 403 `SHELF_OWNER_ADMIN_ONLY`.
@@ -649,11 +652,16 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
 - **Admin** 「会社の Skill」 (`admin/src/components/skill-shelf/`, menu for owners / admins /
   managers of a `none` company): list by kind with version, who, when; 「これまでの版」 and
   「この版に戻す」, 「この版を消す」 (owner/admin); 「配るのをやめる」; 「消す」 for an item taken off
-  (owner/admin). Publishing new content is the app's (no upload in the admin yet).
+  (owner/admin). Each of 「この版に戻す」, 「この版を消す」, 「配るのをやめる」 and 「消す」 asks first
+  (`ConfirmDialog`); 「この版に戻す」 says everyone's app gets that version and the current one stays,
+  to be put back from 「これまでの版」 (owner decision 2026-11-08). Publishing new content is the
+  app's (no upload in the admin yet).
 - Not yet: plugin steps pinning a shelf Skill by its version (they need the server's step-skill
   routes and pins to learn the shelf; `plugin-steps.md`).
 - Tests: `server/tests/integration/skill-shelf.test.ts` (each role and kind, auto-run parts,
-  concurrency, rollback, delivery scoping by department / restricted place / group, no name leaks,
+  concurrency, rollback, delivery scoping by department / restricted place / group — a group reader
+  gets the place's Skill and text, out of the group nothing, no name, id or version leaks —,
+  `skillPublishing` per role and equal to publishing's answers,
   refusals, the version's listing, git company refused — mutation-checked), permission matrix rows
   + `CROSS`, `server/tests/integration/admin-contract.test.ts`, `admin/tests/skill-shelf.test.tsx`.
 
@@ -669,9 +677,15 @@ company never reaches any of it: the store knows a company only from
 - **When**: on opening the working folder, and at most every 5 minutes (`SHELF_POLL_MS`) when the
   AI policy answers (`agent-policy-store.ts` `onPolicy`: no timer of its own), and after a publish.
   A failed or unreadable list changes nothing (never read as "nothing delivered").
-- **What**: company-wide items and those of departments the member belongs to (`belongs`;
-  `readShelfDeliveries` also leaves out any name or folder that could not be placed safely).
-  Leaving a department or 配るのをやめる removes the item at the next fetch.
+- **What**: company-wide items and those of **every department the member reads** (owner decision
+  2026-11-08: a reader through a group or named on a read-restricted department gets its Skills,
+  rule files and instruction text, as one who belongs does; owners/admins read every department).
+  The app takes every department the server lists — the server's `reads` is the one decision —
+  and `readShelfDeliveries` leaves out only a name or folder that could not be placed safely. No
+  longer reading a department (out of the group, a rule changed) or 配るのをやめる removes the
+  item at the next fetch, and its text no longer goes with a turn there. Claude Code and Codex are
+  alike: in a department the member reads, both get its Skills (`.claude/skills` / `.agents/skills`
+  there); in one they cannot read, nothing of it is placed and both see the company's only.
 - **Check** (`verifyShelfContent`): paths by `shelfFilePathProblem`, no clash, sizes, `SKILL.md`,
   and the files' `shelfListing` hash equal to the version **the delivery list** named. Refused →
   nothing written, the last good copy stays.
@@ -721,7 +735,11 @@ company never reaches any of it: the store knows a company only from
 - **Publishing** (`skillShelf:publish`, 「会社に公開」 on a local Skill at the root or directly in a
   department): the folder (no links, ≤ the limits) with `expectedVersion` = what the panel showed
   (null, or the version of the clash); the server decides, its sentence is shown as written
-  (`shelfRefusalMessage`). The button is shown to everyone: who may is the server's answer. A
+  (`shelfRefusalMessage`). The button is offered only where the last list's `skillPublishing`
+  allows a Skill (`mayPublishShelfSkill`: the company root, or one of those department folders;
+  kept in the manifest, absent or unreadable = nowhere; `SkillInfo.shelfPublish`; owner decision
+  2026-11-08) — the notes stay, and the server still decides (auto-run parts are judged on the
+  files). 「手元で直す」 stays open to everyone. A
   company Skill changes by **「手元で直す」** (`skillShelf:editLocally`, `release`): on this
   computer it becomes the member's own (mark `editing`, kept even while unchanged; the `.agents/`
   copy goes), then 「会社に公開」 replaces the version they **started from** (`released` keeps it, a

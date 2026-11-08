@@ -931,6 +931,7 @@ contract.type SkillInfo.isNurturing = isNurturing?: boolean
 contract.type SkillInfo.isPrivate = isPrivate?: boolean
 contract.type SkillInfo.name = name: string
 contract.type SkillInfo.shelf = shelf?: SkillShelfMark
+contract.type SkillInfo.shelfPublish = shelfPublish?: boolean
 contract.type SkillInfo.skillPath = skillPath: string
 contract.type SkillsResult = export interface SkillsResult { }
 contract.type SkillsResult.error = error?: string

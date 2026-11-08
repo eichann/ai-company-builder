@@ -32,8 +32,8 @@ import { isValidFolderName } from '../../../../shared/core/names'
 import { INSTRUCTIONS_FILE, isShelfKind, isShelfVersion, isValidShelfName } from '../../../../shared/core/skill-shelf'
 import type { ShelfKind } from '../../../../shared/core/skill-shelf'
 import {
-  SHELF_ROOT_MARKER, SHELF_STAGING_PREFIX, isNotSkillContent, shelfInstructionsPrompt, shelfPlaceOfSkillFolder, shelfTargets, shelfVersionOf,
-  type ShelfDelivery, type SkillShelfMark,
+  SHELF_ROOT_MARKER, SHELF_STAGING_PREFIX, isNotSkillContent, mayPublishShelfSkill, readShelfPublishing, shelfInstructionsPrompt, shelfPlaceOfSkillFolder,
+  shelfTargets, shelfVersionOf, type ShelfDelivery, type ShelfPublishing, type SkillShelfMark,
 } from '../../../shared/skill-shelf'
 import { isSkillArtifactPath } from '../../../shared/skill-leftovers'
 import { sha256Hex, type ShelfClient, type ShelfFile } from './client'
@@ -74,6 +74,8 @@ interface Manifest {
   clashes: Array<{ id: string; targets: string[]; version: string }>
   /** What the member took over with 「手元で直す」: the Skill folder and the version they started from. */
   released: Released[]
+  /** Where the member may publish a Skill, as the last list said (`mayPublishShelfSkill`; absent: nowhere). */
+  publishing?: ShelfPublishing
 }
 
 interface Released {
@@ -244,6 +246,7 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
         items: raw.items.filter(wellFormed),
         clashes: Array.isArray(raw.clashes) ? raw.clashes : [],
         released: Array.isArray(raw.released) ? raw.released.filter(r => isShelfVersion(r?.version) && typeof r.rel === 'string' && shelfPlaceOfSkillFolder(r.rel) !== null) : [],
+        publishing: readShelfPublishing({ skillPublishing: raw.publishing }),
       }
       memory.set(memoryKey(companyId, root), manifest)
       return manifest
@@ -363,7 +366,7 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
       }
     }
 
-    const next: Manifest = { user, items: [], clashes: [], released: previous.released.filter(r => delivered.has(r.id)) }
+    const next: Manifest = { user, items: [], clashes: [], released: previous.released.filter(r => delivered.has(r.id)), publishing: listed.publishing }
     // Removal failures stay managed, to be tried again.
     next.items.push(...kept.filter(item => !delivered.has(item.id)))
     for (const entry of listed.items) {
@@ -464,6 +467,10 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
       const clash = manifest.clashes.find(c => c.targets.includes(rel))
       if (!clash) return undefined
       return { state: manifest.released.some(r => r.id === clash.id) ? 'editing' : 'clash', version: clash.version }
+    },
+    /** Is 「会社に公開」 offered for the Skill folder at `rel` (the last list's `skillPublishing`)? */
+    mayPublish(root: string, rel: string): boolean {
+      return mayPublishShelfSkill(current(root)?.publishing, rel)
     },
     /** For a Skill-use report: the version of the managed Skill at `rel`, and whether its files differ from it now. */
     async versionOf(root: string, rel: string): Promise<{ version: string; dirty: boolean } | null> {

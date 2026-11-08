@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto'
 import { SHELF_LIMITS, shelfFilePathProblem, shelfPathClash, shelfTextFileName } from '../../../../shared/core/skill-shelf'
 import type { ShelfFileUpload, ShelfPublishResult } from '../../../../shared/types/skill-shelf'
-import { readShelfDeliveries, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery } from '../../../shared/skill-shelf'
+import { readShelfDeliveries, readShelfPublishing, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery, type ShelfPublishing } from '../../../shared/skill-shelf'
 
 export interface ShelfClientDeps {
   baseUrl: () => string
@@ -25,7 +25,7 @@ export interface ShelfFile {
 }
 
 export type ShelfContentResult = { ok: true; files: ShelfFile[] } | { ok: false; reason: string }
-export type ShelfListResult = { ok: true; items: ShelfDelivery[] } | { ok: false; reason: string }
+export type ShelfListResult = { ok: true; items: ShelfDelivery[]; publishing: ShelfPublishing } | { ok: false; reason: string }
 export type ShelfPublishAnswer = { ok: true; result: ShelfPublishResult } | { ok: false; message: string } | { ok: false; offline: true }
 
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/
@@ -75,8 +75,9 @@ export function createShelfClient(deps: ShelfClientDeps) {
       try {
         const res = await doFetch(urlOf(companyId, '/me/skill-shelf'), { headers: headers(), redirect: 'error', signal: signal() })
         if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` }
-        const items = readShelfDeliveries((await res.json() as { data?: unknown } | null)?.data)
-        return items ? { ok: true, items } : { ok: false, reason: 'unexpected answer' }
+        const data = (await res.json() as { data?: unknown } | null)?.data
+        const items = readShelfDeliveries(data)
+        return items ? { ok: true, items, publishing: readShelfPublishing(data) } : { ok: false, reason: 'unexpected answer' }
       } catch (error) {
         return { ok: false, reason: error instanceof Error ? error.message : 'request failed' }
       }

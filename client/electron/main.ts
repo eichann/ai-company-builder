@@ -480,6 +480,7 @@ const skills = registerSkillsIpc(ipc, {
   skillRefusal: (absPath, options) => privateFolderGuards.skillRefusal(absPath, options),
   isWorkingFolder: rootPath => workingFolders.has(rootPath),
   shelfMark: (rootPath, rel) => (workingFolders.has(rootPath) ? skillShelf.markOf(rootPath, rel) : undefined),
+  shelfMayPublish: (rootPath, rel) => (workingFolders.has(rootPath) ? skillShelf.mayPublish(rootPath, rel) : undefined),
   shelfRuleClashes: rootPath => (workingFolders.has(rootPath) ? skillShelf.ruleClashes(rootPath) : []),
 })
 skillShelfChanged = root => skills.invalidateRoot(root)

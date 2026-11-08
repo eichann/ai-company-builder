@@ -25,7 +25,7 @@ export function isNotSkillContent(name: string, isFolder: boolean): boolean {
   return isLeftoverName(name, isFolder) || name === '.git' || /^\.env/i.test(name)
 }
 
-/** One delivered item the app takes: the company's, or a department the member belongs to. */
+/** One delivered item the app takes: the company's, or a department's the member reads. */
 export interface ShelfDelivery {
   id: string
   kind: ShelfKind
@@ -35,10 +35,11 @@ export interface ShelfDelivery {
 }
 
 /**
- * The answer of `GET /me/skill-shelf`, kept to what this member's app places (owner decision: the
- * whole company and their own departments; the server also lists other departments they read).
- * Undefined when the answer is not one: the app then keeps what it has, and never reads it as
- * "nothing is delivered". An entry that cannot be placed safely is left out.
+ * The answer of `GET /me/skill-shelf`: the whole company's items and those of every department the
+ * member reads (owner decision 2026-11-08: a reader through a group or by name gets them too; the
+ * server lists only places the member reads, its one read check). Undefined when the answer is not
+ * one: the app then keeps what it has, and never reads it as "nothing is delivered". An entry that
+ * cannot be placed safely is left out.
  */
 export function readShelfDeliveries(data: unknown): ShelfDelivery[] | undefined {
   const items = (data as { items?: unknown } | null | undefined)?.items
@@ -47,17 +48,47 @@ export function readShelfDeliveries(data: unknown): ShelfDelivery[] | undefined 
   for (const raw of items as Array<Record<string, unknown> | null>) {
     if (!raw || typeof raw.id !== 'string' || !raw.id || !isShelfKind(raw.kind)) continue
     if (!isValidShelfName(raw.kind, raw.name) || !isShelfVersion(raw.version)) continue
-    const place = raw.department as { id?: unknown; folder?: unknown; belongs?: unknown } | null | undefined
+    const place = raw.department as { id?: unknown; folder?: unknown } | null | undefined
     if (place === null || place === undefined) {
       kept.push({ id: raw.id, kind: raw.kind, name: raw.name, department: null, version: raw.version })
       continue
     }
-    if (place.belongs !== true || typeof place.id !== 'string' || typeof place.folder !== 'string') continue
+    if (typeof place.id !== 'string' || typeof place.folder !== 'string') continue
     // A department's root folder, by the department folder rule: never a path.
     if (!isValidFolderName(place.folder)) continue
     kept.push({ id: raw.id, kind: raw.kind, name: raw.name, department: { id: place.id, folder: place.folder.normalize('NFC') }, version: raw.version })
   }
   return kept
+}
+
+/** Where the member may publish a Skill (`MyShelfView.skillPublishing`): the whole company, and department folders (NFC). */
+export interface ShelfPublishing {
+  company: boolean
+  departmentFolders: string[]
+}
+
+/** The answer's `skillPublishing`; anything else (an unreadable answer) is "nowhere": the button is then not offered. */
+export function readShelfPublishing(data: unknown): ShelfPublishing {
+  const raw = (data as { skillPublishing?: { company?: unknown; departmentFolders?: unknown } } | null | undefined)?.skillPublishing
+  const folders = Array.isArray(raw?.departmentFolders) ? raw.departmentFolders : []
+  return {
+    company: raw?.company === true,
+    departmentFolders: folders.filter((f): f is string => typeof f === 'string' && isValidFolderName(f)).map(f => f.normalize('NFC')),
+  }
+}
+
+/**
+ * Is 「会社に公開」 offered for the Skill folder at `rel` (working-folder relative)? Only where the
+ * server said the member may publish a Skill — the company root or one of those departments. The
+ * server still decides (content: auto-run parts); this only spares the member a button that
+ * would always be refused.
+ */
+export function mayPublishShelfSkill(publishing: ShelfPublishing | undefined, rel: string): boolean {
+  const place = shelfPlaceOfSkillFolder(rel)
+  if (!publishing || !place) return false
+  if (place.departmentFolder === null) return publishing.company
+  const key = diskKey(place.departmentFolder)
+  return publishing.departmentFolders.some(folder => diskKey(folder) === key)
 }
 
 /**
@@ -112,8 +143,8 @@ export function shelfMarkTitle(version: string): string {
 export const SHELF_COMPANY_NOTE = 'これは会社の Skill です。AI やこの PC で変えても、次に受け取るときに元に戻ります。'
 export const SHELF_CLASH_NOTE = '会社にも同じ名前の Skill があります。あなたの Skill をそのまま使っているので、会社の Skill はこの PC に置いていません。'
 export const SHELF_EDITING_NOTE = 'この PC では、あなたが手元で直している Skill を使っています。公開し直すまで、会社の更新は届きません。やめるときは、この Skill のフォルダを消すと会社の Skill に戻ります。'
-export const SHELF_PUBLISH_CONFIRM = '会社の Skill として公開します。この場所の全員に届きます。公開のあとは、AI やこの PC で変えても、次に受け取るときに元に戻ります。'
-export const SHELF_REPLACE_CONFIRM = '会社の同じ名前の Skill を、この内容に置き換えます。この場所の全員に届きます。'
+export const SHELF_PUBLISH_CONFIRM = '会社の Skill として公開します。この場所を見られる全員に届きます。公開のあとは、AI やこの PC で変えても、次に受け取るときに元に戻ります。'
+export const SHELF_REPLACE_CONFIRM = '会社の同じ名前の Skill を、この内容に置き換えます。この場所を見られる全員に届きます。'
 export const SHELF_EDIT_CONFIRM = 'この PC ではあなたの Skill になり、公開し直すまで会社の更新は届きません。ほかの人の Skill は変わりません。'
 
 export const SHELF_NOT_HERE_MESSAGE = 'この会社では、Skill を会社に公開できません。'

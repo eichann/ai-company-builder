@@ -194,6 +194,7 @@ function VersionsDialog({
   )
   const [busy, setBusy] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
+  const [restoring, setRestoring] = useState<string | null>(null)
 
   return (
     <Dialog open={item !== null} onOpenChange={onOpenChange}>
@@ -223,20 +224,7 @@ function VersionsDialog({
                     variant="outline"
                     size="sm"
                     disabled={busy !== null}
-                    onClick={async () => {
-                      setBusy(v.version)
-                      try {
-                        const result = await skillShelfApi.restore(companyId, item.id, v.version, versions.data!.item.version)
-                        toast.success(`版 ${shortVersion(v.version)} に戻しました`)
-                        onChanged(result.item)
-                      } catch (err) {
-                        toast.error(describeError(err))
-                        onConflict()
-                        versions.reload()
-                      } finally {
-                        setBusy(null)
-                      }
-                    }}
+                    onClick={() => setRestoring(v.version)}
                   >
                     この版に戻す
                   </Button>
@@ -250,6 +238,30 @@ function VersionsDialog({
             ))}
           </ul>
         )}
+        <ConfirmDialog
+          open={restoring !== null}
+          onOpenChange={(o) => !o && setRestoring(null)}
+          title={restoring ? `版 ${shortVersion(restoring)} に戻しますか？` : ''}
+          description="みんなのアプリに、この版が届きます。いま配っている版も残るので、あとで「これまでの版」から戻せます。"
+          confirmLabel="この版に戻す"
+          destructive={false}
+          onConfirm={async () => {
+            const version = restoring!
+            setBusy(version)
+            try {
+              const result = await skillShelfApi.restore(companyId, item!.id, version, versions.data!.item.version)
+              toast.success(`版 ${shortVersion(version)} に戻しました`)
+              onChanged(result.item)
+            } catch (err) {
+              toast.error(describeError(err))
+              onConflict()
+              versions.reload()
+            } finally {
+              setBusy(null)
+              setRestoring(null)
+            }
+          }}
+        />
         <ConfirmDialog
           open={removing !== null}
           onOpenChange={(o) => !o && setRemoving(null)}

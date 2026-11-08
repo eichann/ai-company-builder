@@ -410,6 +410,8 @@ export interface SkillInfo {
   isNurturing?: boolean
   /** A company without the shared folder: delivered by the company, or the member's own beside a delivered one. */
   shelf?: SkillShelfMark
+  /** A company without the shared folder: may the member publish this Skill to the company (the server's answer; it still decides)? */
+  shelfPublish?: boolean
   files: {
     skillMd: string
     rules?: string[]

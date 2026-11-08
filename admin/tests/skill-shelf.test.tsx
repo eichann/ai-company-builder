@@ -72,7 +72,7 @@ describe('会社の Skill', () => {
     expect(document.body.textContent).not.toMatch(/コミット|リポジトリ|プッシュ|ブランチ/)
   })
 
-  it('puts an earlier version back, sending the version the page saw', async () => {
+  it('puts an earlier version back after a confirmation, sending the version the page saw', async () => {
     const restored = { ...quote, version: V1 }
     const { calls } = mockApi(withoutFolder({ [`POST ${base}/skill-shelf/s_1/restore`]: { body: ok({ item: restored, changed: true }) } }))
     renderInCompany(<SkillsRoute />)
@@ -82,6 +82,10 @@ describe('会社の Skill', () => {
     expect(within(list).getByText('いま配っている版')).toBeInTheDocument()
     expect(within(list).getByText(/自動で動く部分があります/)).toBeInTheDocument()
     await userEvent.click(within(list).getByRole('button', { name: 'この版に戻す' }))
+    // Nothing is sent until the member confirms; the words say the current version stays.
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    expect(screen.getByText(/いま配っている版も残るので/)).toBeInTheDocument()
+    await userEvent.click(screen.getAllByRole('button', { name: 'この版に戻す' }).at(-1)!)
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ version: V1, expectedVersion: V2 })
     expect(await screen.findByText('配っています（版 aaaaaaaa・ファイル 2 個）')).toBeInTheDocument()
   })

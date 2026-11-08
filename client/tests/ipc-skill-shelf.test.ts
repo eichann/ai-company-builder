@@ -26,12 +26,12 @@ const sha = (text: string) => createHash('sha256').update(text).digest('hex')
 const versionOf = (files: Record<string, string>) => sha(shelfListing(Object.entries(files).map(([p, text]) => ({ path: p, sha256: sha(text) }))))
 
 /** A `none` company with these delivered Skills at its root; its working folder opened. */
-async function open(id: string, delivered: Record<string, Record<string, string>> = {}) {
+async function open(id: string, delivered: Record<string, Record<string, string>> = {}, skillPublishing: unknown = { company: true, departmentFolders: ['営業部'] }) {
   h.server.on('GET', `/api/companies/${id}`, { json: { success: true, data: { id, name: id, folderKind: 'none' } } })
   h.server.on('GET', `/api/companies/${id}/departments`, { json: { success: true, data: [{ id: 'd1', folder: '営業部' }] } })
   const shelf = { delivered }
   h.server.on('GET', `/api/companies/${id}/me/skill-shelf`, () => ({
-    json: { success: true, data: { items: Object.entries(shelf.delivered).map(([name, files]) => ({ id: `item-${name}`, kind: 'skill', name, department: null, version: versionOf(files), fileCount: 1, totalBytes: 1 })) } },
+    json: { success: true, data: { items: Object.entries(shelf.delivered).map(([name, files]) => ({ id: `item-${name}`, kind: 'skill', name, department: null, version: versionOf(files), fileCount: 1, totalBytes: 1 })), skillPublishing } },
   }))
   h.server.on('GET', new RegExp(`^/api/companies/${id}/skill-shelf/item-`), req => {
     const name = /item-([^/]+)/.exec(req.path)![1]
@@ -52,12 +52,17 @@ async function until(done: () => boolean) {
   assert.ok(done())
 }
 
-test('opening a working folder places the company\'s Skills; the Skills panel tells them from the member\'s own, and hears of it', async () => {
+test('opening a working folder places the company\'s Skills; the Skills panel tells them from the member\'s own, says where 会社に公開 is offered, and hears of it', async () => {
   const skill = { 'SKILL.md': '---\nname: 提案\n---\n本文\n' }
-  const { folder } = await open('co-open', { proposal: skill })
-  writeFiles(folder, { '.claude/skills/mine/SKILL.md': '# mine\n' })
-  const listed = await h.invoke<{ skills: Array<{ name: string; skillPath: string; shelf?: unknown }> }>('skills:list', folder, '', 'company', undefined, { force: true })
+  const { folder } = await open('co-open', { proposal: skill }, { company: false, departmentFolders: ['営業部'] })
+  writeFiles(folder, { '.claude/skills/mine/SKILL.md': '# mine\n', '営業部/.claude/skills/visit/SKILL.md': 'visit\n' })
+  type Listed = { skills: Array<{ name: string; skillPath: string; shelf?: unknown; shelfPublish?: boolean }> }
+  const listed = await h.invoke<Listed>('skills:list', folder, '', 'company', undefined, { force: true })
   assert.deepEqual(listed.skills.map(s => [path.basename(s.skillPath), s.shelf]).sort(), [['mine', undefined], ['proposal', { state: 'company', version: versionOf(skill) }]])
+  // The server said: not at the company root, but in 営業部.
+  assert.equal(listed.skills.find(s => s.skillPath.endsWith('mine'))?.shelfPublish, false)
+  const sales = await h.invoke<Listed>('skills:list', folder, '営業部', 'd1', '営業部', { force: true })
+  assert.equal(sales.skills.find(s => s.skillPath.endsWith('visit'))?.shelfPublish, true)
   assert.ok(h.renderer().sent.some(event => event.channel === 'skillShelf:changed'))
 })
 
@@ -144,7 +149,8 @@ test('a git company\'s folder: nothing is asked of the shelf, publishing and 手
   const skillPath = path.join(folder, '.claude/skills/proposal')
   assert.deepEqual(await h.invoke('skillShelf:publish', folder, skillPath, null), { success: false, error: SHELF_NOT_HERE_MESSAGE })
   assert.deepEqual(await h.invoke('skillShelf:editLocally', folder, skillPath), { success: false, error: SHELF_NOT_HERE_MESSAGE })
-  const listed = await h.invoke<{ skills: Array<{ shelf?: unknown }> }>('skills:list', folder, '', 'company', undefined, { force: true })
+  const listed = await h.invoke<{ skills: Array<{ shelf?: unknown; shelfPublish?: boolean }> }>('skills:list', folder, '', 'company', undefined, { force: true })
   assert.equal(listed.skills[0].shelf, undefined)
+  assert.equal(listed.skills[0].shelfPublish, undefined)
   assert.deepEqual(h.server.to(/co-git.*skill-shelf/), [])
 })

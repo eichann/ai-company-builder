@@ -210,7 +210,8 @@ function CompanyShelfSection({ skill, actions, onRefused }: { skill: Skill; acti
     <div className={box}>
       {state === 'editing' ? <div>{SHELF_EDITING_NOTE}</div> : <div>この PC だけのスキルです（ほかの人には共有されません）。</div>}
       {state === 'clash' && <div>{SHELF_CLASH_NOTE}</div>}
-      {actions && (confirming === 'publish'
+      {/* Offered only where the server said this member may publish a Skill; the server still decides. */}
+      {actions && skill.shelfPublish && (confirming === 'publish'
         ? confirmation(state ? SHELF_REPLACE_CONFIRM : SHELF_PUBLISH_CONFIRM, '会社に公開', actions.publish)
         : <button disabled={busy} onClick={() => setConfirming('publish')} className={button}><CloudArrowUp size={14} />会社に公開</button>)}
     </div>
