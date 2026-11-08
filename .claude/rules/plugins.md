@@ -654,7 +654,8 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   「この版に戻す」, 「この版を消す」 (owner/admin); 「配るのをやめる」; 「消す」 for an item taken off
   (owner/admin). Each of 「この版に戻す」, 「この版を消す」, 「配るのをやめる」 and 「消す」 asks first
   (`ConfirmDialog`); 「この版に戻す」 says everyone's app gets that version and the current one stays,
-  to be put back from 「これまでの版」 (owner decision 2026-11-08). Publishing new content is the
+  to be put back from 「これまでの版」, or — on an item taken off, where it is reachable too —
+  that handing it out starts again (`restoreDescription`; owner decision 2026-11-08). Publishing new content is the
   app's (no upload in the admin yet).
 - Not yet: plugin steps pinning a shelf Skill by its version (they need the server's step-skill
   routes and pins to learn the shelf; `plugin-steps.md`).
@@ -739,7 +740,12 @@ company never reaches any of it: the store knows a company only from
   allows a Skill (`mayPublishShelfSkill`: the company root, or one of those department folders;
   kept in the manifest, absent or unreadable = nowhere; `SkillInfo.shelfPublish`; owner decision
   2026-11-08) — the notes stay, and the server still decides (auto-run parts are judged on the
-  files). 「手元で直す」 stays open to everyone. A
+  files). The department of a Skill folder is matched by `sameDepartmentFolder` (`pathKey`) for the
+  button and for the publish's department lookup alike (`client.departmentId`), so the button never
+  offers a publish that would answer 「この部署には公開できません」. 「手元で直す」 stays open to
+  everyone; someone who may not publish there is told so truly (`shelfEditTexts`: their copy is
+  used on this PC only, company updates stop, deleting the folder brings the company's back —
+  never 「公開し直すまで」). A
   company Skill changes by **「手元で直す」** (`skillShelf:editLocally`, `release`): on this
   computer it becomes the member's own (mark `editing`, kept even while unchanged; the `.agents/`
   copy goes), then 「会社に公開」 replaces the version they **started from** (`released` keeps it, a

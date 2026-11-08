@@ -13,7 +13,7 @@ import { withShelfInstructions } from '../electron/chat-server'
 import { createSkillUseReporter } from '../electron/services/skill-use-reporter'
 import { createWorkingFolders } from '../electron/services/working-folders'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
-import { SHELF_PROMPT_MAX, mayPublishShelfSkill, readShelfDeliveries, readShelfPublishing, shelfPlaceOfSkillFolder, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery } from '../shared/skill-shelf'
+import { SHELF_EDIT_CONFIRM, SHELF_EDITING_NOTE, SHELF_PROMPT_MAX, mayPublishShelfSkill, shelfEditTexts, readShelfDeliveries, readShelfPublishing, shelfPlaceOfSkillFolder, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery } from '../shared/skill-shelf'
 
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-shelf-')))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
@@ -609,6 +609,29 @@ test('the delivery answer: only places that can be placed, and an unreadable ans
   assert.equal(readShelfDeliveries({ items: [item({ department: { id: 'd', folder: '営業部' } })] })?.length, 1)
   // Every department the server lists is taken: it lists only those the member reads (no 所属 of its own here).
   assert.deepEqual(readShelfDeliveries({ items: [item({ department: { id: 'd', folder: '総務', belongs: false } })] })?.map(d => d.department), [{ id: 'd', folder: '総務' }])
+})
+
+test('the button and the publish\'s department lookup name a department folder the same way: the button is never shown for a place the publish cannot find', async () => {
+  const departments = [{ id: 'd1', folder: 'Sales' }, { id: 'd2', folder: '営業部' }]
+  const lookup = createShelfClient({ baseUrl: () => 'http://server', cookies: () => [], fetch: (async () => Response.json({ success: true, data: departments })) as typeof fetch })
+  const publishing = { company: false, departmentFolders: departments.map(d => d.folder) }
+  // A Mac may hand the folder in NFD; a member may type another ASCII case: both are that department.
+  for (const [spelling, id] of [['Sales', 'd1'], ['sales', 'd1'], ['営業部'.normalize('NFD'), 'd2'], ['総務', undefined]] as const) {
+    const offered = mayPublishShelfSkill(publishing, `${spelling}/.claude/skills/a`)
+    const found = await lookup.departmentId('co', spelling)
+    assert.equal(found, id, spelling)
+    assert.equal(offered, found !== undefined, `the button and the lookup agree for ${spelling}`)
+  }
+})
+
+test('「手元で直す」 tells of publishing only someone who may publish there; anyone else is told how to get the company\'s back', () => {
+  assert.deepEqual(shelfEditTexts(true), { confirm: SHELF_EDIT_CONFIRM, note: SHELF_EDITING_NOTE })
+  const local = shelfEditTexts(false)
+  for (const text of [local.confirm, local.note]) {
+    assert.doesNotMatch(text, /公開/)
+    assert.match(text, /フォルダを消/)
+    assert.match(text, /届/)
+  }
 })
 
 test('会社に公開 is offered only where the server says the member may publish a Skill; an answer without it offers it nowhere', async () => {

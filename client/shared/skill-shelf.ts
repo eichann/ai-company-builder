@@ -2,7 +2,7 @@
 // company without the shared folder gets, where it lands in the working folder, and the sentences
 // around it. Pure. The shelf's own rules: shared/core/skill-shelf.ts.
 import { isValidFolderName } from '../../shared/core/names'
-import { diskKey, isSameOrAncestorPath } from '../../shared/core/paths'
+import { diskKey, isSameOrAncestorPath, pathKey } from '../../shared/core/paths'
 import { isLeftoverName } from './skill-leftovers'
 import { isShelfKind, isShelfVersion, isValidShelfName, shelfListing, shelfTextFileName, type ShelfKind } from '../../shared/core/skill-shelf'
 
@@ -87,8 +87,16 @@ export function mayPublishShelfSkill(publishing: ShelfPublishing | undefined, re
   const place = shelfPlaceOfSkillFolder(rel)
   if (!publishing || !place) return false
   if (place.departmentFolder === null) return publishing.company
-  const key = diskKey(place.departmentFolder)
-  return publishing.departmentFolders.some(folder => diskKey(folder) === key)
+  return publishing.departmentFolders.some(folder => sameDepartmentFolder(folder, place.departmentFolder as string))
+}
+
+/**
+ * Is a folder name in the working folder this department's folder? `pathKey` (NFC, A–Z folded):
+ * how the server names a place and keeps department folders apart, so the button
+ * (`mayPublishShelfSkill`) and the publish's department lookup (`client.departmentId`) agree.
+ */
+export function sameDepartmentFolder(departmentFolder: string, folder: string): boolean {
+  return pathKey(departmentFolder) === pathKey(folder)
 }
 
 /**
@@ -143,9 +151,18 @@ export function shelfMarkTitle(version: string): string {
 export const SHELF_COMPANY_NOTE = 'これは会社の Skill です。AI やこの PC で変えても、次に受け取るときに元に戻ります。'
 export const SHELF_CLASH_NOTE = '会社にも同じ名前の Skill があります。あなたの Skill をそのまま使っているので、会社の Skill はこの PC に置いていません。'
 export const SHELF_EDITING_NOTE = 'この PC では、あなたが手元で直している Skill を使っています。公開し直すまで、会社の更新は届きません。やめるときは、この Skill のフォルダを消すと会社の Skill に戻ります。'
+/** The same, for someone who may not publish here (no 「会社に公開」 for them). */
+export const SHELF_EDITING_NOTE_LOCAL = 'この PC では、あなたが手元で直している Skill を使っています。会社の Skill が新しくなっても、この PC には届きません。会社の Skill に戻すときは、この Skill のフォルダを消してください（次に受け取るときに戻ります）。'
 export const SHELF_PUBLISH_CONFIRM = '会社の Skill として公開します。この場所を見られる全員に届きます。公開のあとは、AI やこの PC で変えても、次に受け取るときに元に戻ります。'
 export const SHELF_REPLACE_CONFIRM = '会社の同じ名前の Skill を、この内容に置き換えます。この場所を見られる全員に届きます。'
 export const SHELF_EDIT_CONFIRM = 'この PC ではあなたの Skill になり、公開し直すまで会社の更新は届きません。ほかの人の Skill は変わりません。'
+/** The same, for someone who may not publish here: their changes stay on this PC. */
+export const SHELF_EDIT_CONFIRM_LOCAL = 'この PC ではあなたの Skill になり、直した内容はこの PC だけで使われます。会社の Skill が新しくなっても届かなくなります。会社の Skill に戻すときは、この Skill のフォルダを消してください。ほかの人の Skill は変わりません。'
+
+/** 「手元で直す」's confirmation and the note while it lasts: only someone who may publish here is told of publishing. */
+export function shelfEditTexts(mayPublish: boolean): { confirm: string; note: string } {
+  return mayPublish ? { confirm: SHELF_EDIT_CONFIRM, note: SHELF_EDITING_NOTE } : { confirm: SHELF_EDIT_CONFIRM_LOCAL, note: SHELF_EDITING_NOTE_LOCAL }
+}
 
 export const SHELF_NOT_HERE_MESSAGE = 'この会社では、Skill を会社に公開できません。'
 export const SHELF_OFFLINE_MESSAGE = 'サーバーにつながらないため公開できませんでした。つながってから、もう一度やり直してください。'

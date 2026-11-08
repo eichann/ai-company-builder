@@ -22,7 +22,7 @@ import {
 import type { Skill, SkillTool } from '../model'
 import { startSkillTool, stopSkillTool } from '../api'
 import { useAppStore } from '../../../stores/appStore'
-import { SHELF_CLASH_NOTE, SHELF_COMPANY_NOTE, SHELF_EDIT_CONFIRM, SHELF_EDITING_NOTE, SHELF_PUBLISH_CONFIRM, SHELF_REPLACE_CONFIRM, shelfMarkTitle } from '../../../../shared/skill-shelf'
+import { SHELF_CLASH_NOTE, SHELF_COMPANY_NOTE, SHELF_PUBLISH_CONFIRM, SHELF_REPLACE_CONFIRM, shelfEditTexts, shelfMarkTitle } from '../../../../shared/skill-shelf'
 
 type TabId = 'overview' | 'rules' | 'references' | 'scripts' | 'tools'
 
@@ -200,7 +200,7 @@ function CompanyShelfSection({ skill, actions, onRefused }: { skill: Skill; acti
         <div className="text-sm font-medium text-gray-700 dark:text-zinc-300">{shelfMarkTitle(skill.shelf.version)}</div>
         <div>{SHELF_COMPANY_NOTE}</div>
         {actions && (confirming === 'edit'
-          ? confirmation(SHELF_EDIT_CONFIRM, '手元で直す', actions.editLocally)
+          ? confirmation(shelfEditTexts(!!skill.shelfPublish).confirm, '手元で直す', actions.editLocally)
           : <button disabled={busy} onClick={() => setConfirming('edit')} className="w-full py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors">手元で直す</button>)}
       </div>
     )
@@ -208,7 +208,7 @@ function CompanyShelfSection({ skill, actions, onRefused }: { skill: Skill; acti
   const state = skill.shelf?.state
   return (
     <div className={box}>
-      {state === 'editing' ? <div>{SHELF_EDITING_NOTE}</div> : <div>この PC だけのスキルです（ほかの人には共有されません）。</div>}
+      {state === 'editing' ? <div>{shelfEditTexts(!!skill.shelfPublish).note}</div> : <div>この PC だけのスキルです（ほかの人には共有されません）。</div>}
       {state === 'clash' && <div>{SHELF_CLASH_NOTE}</div>}
       {/* Offered only where the server said this member may publish a Skill; the server still decides. */}
       {actions && skill.shelfPublish && (confirming === 'publish'

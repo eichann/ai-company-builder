@@ -426,10 +426,21 @@ test('without the shared folder: 会社に公開 is not offered where the server
   await page.getByRole('heading', { name: 'release-note' }).click()
   await expect(page.getByText('会社にも同じ名前の Skill があります。')).toBeVisible()
   await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
-  // 手元で直す stays open to everyone.
+  // 手元で直す stays open to everyone, in words true for someone who cannot publish.
   await deptTab(page, '全社').click()
   await page.getByRole('heading', { name: 'weekly-report' }).click()
-  await expect(page.getByRole('button', { name: '手元で直す' })).toBeVisible()
+  await page.getByRole('button', { name: '手元で直す' }).click()
+  await expect(page.getByText('直した内容はこの PC だけで使われます')).toBeVisible()
+  await expect(page.getByText('公開し直すまで')).toHaveCount(0)
+})
+
+test('without the shared folder: a Skill under 手元で直す, for someone who cannot publish, says how to get the company\'s back, not to publish again', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', shelf: 'editing', publish: 'no', download: 'done' })
+  await deptTab(page, '開発部').click()
+  await page.getByRole('heading', { name: 'release-note' }).click()
+  await expect(page.getByText('会社の Skill に戻すときは、この Skill のフォルダを消してください')).toBeVisible()
+  await expect(page.getByText('公開し直すまで')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
 })
 
 test('a git company keeps its 公開 section: no 会社に公開, no company mark', async ({ page }) => {

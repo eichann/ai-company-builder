@@ -90,6 +90,25 @@ describe('会社の Skill', () => {
     expect(await screen.findByText('配っています（版 aaaaaaaa・ファイル 2 個）')).toBeInTheDocument()
   })
 
+  it('on an item taken off, putting a version back says it starts handing it out again (no version is current)', async () => {
+    const off = { ...quote, version: null }
+    const offVersions = { ...versions, item: off, versions: versions.versions.map((v) => ({ ...v, current: false })) }
+    const { calls } = mockApi(withoutFolder({
+      [`GET ${base}/skill-shelf`]: { body: ok({ items: [off, instructions] }) },
+      [`GET ${base}/skill-shelf/s_1/versions`]: { body: ok(offVersions) },
+      [`POST ${base}/skill-shelf/s_1/restore`]: { body: ok({ item: { ...quote, version: V1 }, changed: true }) },
+    }))
+    renderInCompany(<SkillsRoute />)
+    const skills = await screen.findByRole('list', { name: 'Skill' })
+    await userEvent.click(within(skills).getByRole('button', { name: 'これまでの版' }))
+    const list = await screen.findByRole('list', { name: 'これまでの版' })
+    await userEvent.click(within(list).getAllByRole('button', { name: 'この版に戻す' })[1])
+    expect(screen.getByText('配るのを再開し、この版がみんなのアプリに届きます。')).toBeInTheDocument()
+    expect(screen.queryByText(/いま配っている版も残る/)).not.toBeInTheDocument()
+    await userEvent.click(screen.getAllByRole('button', { name: 'この版に戻す' }).at(-1)!)
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ version: V1, expectedVersion: null })
+  })
+
   it('takes an item off after a confirmation, with the version the page saw', async () => {
     const off = { ...quote, version: null }
     const { calls } = mockApi(withoutFolder({ [`POST ${base}/skill-shelf/s_1/unpublish`]: { body: ok({ item: off, changed: true }) } }))

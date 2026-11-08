@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto'
 import { SHELF_LIMITS, shelfFilePathProblem, shelfPathClash, shelfTextFileName } from '../../../../shared/core/skill-shelf'
 import type { ShelfFileUpload, ShelfPublishResult } from '../../../../shared/types/skill-shelf'
-import { readShelfDeliveries, readShelfPublishing, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery, type ShelfPublishing } from '../../../shared/skill-shelf'
+import { readShelfDeliveries, readShelfPublishing, sameDepartmentFolder, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery, type ShelfPublishing } from '../../../shared/skill-shelf'
 
 export interface ShelfClientDeps {
   baseUrl: () => string
@@ -98,7 +98,7 @@ export function createShelfClient(deps: ShelfClientDeps) {
         const res = await doFetch(urlOf(companyId, '/departments'), { headers: headers(), redirect: 'error', signal: signal() })
         const body = res.ok ? await res.json() as { data?: unknown } | null : null
         const list = Array.isArray(body?.data) ? body.data as Array<{ id?: unknown; folder?: unknown }> : []
-        const found = list.find(d => typeof d.folder === 'string' && d.folder.normalize('NFC') === folder.normalize('NFC'))
+        const found = list.find(d => typeof d.folder === 'string' && sameDepartmentFolder(d.folder, folder))
         return typeof found?.id === 'string' ? found.id : undefined
       } catch {
         return undefined

@@ -173,6 +173,16 @@ export function SkillShelfPage() {
   )
 }
 
+/**
+ * What 「この版に戻す」 does, in true words: an item handed out keeps its current version among the
+ * earlier ones; one taken off (no current version) starts being handed out again.
+ */
+function restoreDescription(currentVersion: string | null): string {
+  return currentVersion === null
+    ? '配るのを再開し、この版がみんなのアプリに届きます。'
+    : 'みんなのアプリに、この版が届きます。いま配っている版も残るので、あとで「これまでの版」から戻せます。'
+}
+
 function VersionsDialog({
   item,
   companyId,
@@ -242,7 +252,7 @@ function VersionsDialog({
           open={restoring !== null}
           onOpenChange={(o) => !o && setRestoring(null)}
           title={restoring ? `版 ${shortVersion(restoring)} に戻しますか？` : ''}
-          description="みんなのアプリに、この版が届きます。いま配っている版も残るので、あとで「これまでの版」から戻せます。"
+          description={restoreDescription(versions.data?.item.version ?? null)}
           confirmLabel="この版に戻す"
           destructive={false}
           onConfirm={async () => {
