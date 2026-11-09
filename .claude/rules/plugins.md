@@ -679,7 +679,9 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   `ShelfHistoryEntry.requestedBy`, `migrateShelfHistoryRequester`); the request's files go either way.
   No notice (知らせ are record notices, `notifications.md`): publishers see requests in the admin
   page, members their state in the app; the admin sends the version it listed, keys its files view by
-  id + version and says so when the files are another version. Tests: `server/tests/integration/skill-shelf-requests.test.ts`
+  id + version and says so when the files are another version, and reads the list again when the
+  files view finds the request sent again or decided. Tests: `server/tests/integration/skill-shelf-requests.test.ts`,
+  `server/tests/unit/skill-shelf-request-publish.test.ts` (the check inside the publish transaction)
   (each guard mutation-checked), permission matrix rows + `CROSS`, `admin-contract.test.ts`.
 - **Admin** 「会社の Skill」 (`admin/src/components/skill-shelf/`, menu for owners / admins /
   managers / 「Skill を直せる人」 (`skillEditing` of `/me/capabilities`) of a `none` company):

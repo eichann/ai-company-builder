@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
@@ -84,7 +84,13 @@ export function ShelfRequests({ companyId, onPublished }: { companyId: string; o
         </ul>
       </Card>
 
-      <RequestFilesDialog companyId={companyId} request={viewing} onOpenChange={(o) => !o && setViewing(null)} />
+      <RequestFilesDialog
+        companyId={companyId}
+        request={viewing}
+        onOpenChange={(o) => !o && setViewing(null)}
+        // Sent again (404) or decided (409) since the list was read: the list is out of date too.
+        onStale={requests.reload}
+      />
       <ConfirmDialog
         open={publishing !== null}
         onOpenChange={(o) => !o && setPublishing(null)}
@@ -138,10 +144,16 @@ export function readableText(base64: string): string | null {
   }
 }
 
-function RequestFilesDialog({ companyId, request, onOpenChange }: { companyId: string; request: ShelfRequestView | null; onOpenChange: (open: boolean) => void }) {
+function RequestFilesDialog({ companyId, request, onOpenChange, onStale }: {
+  companyId: string; request: ShelfRequestView | null; onOpenChange: (open: boolean) => void; onStale: () => void
+}) {
   const content = useQuery<ShelfRequestContent>(request ? `skill-shelf-request-files:${companyId}:${request.id}:${request.version}` : null, () =>
     skillShelfApi.requestFiles(companyId, request!.id),
   )
+  const stale = !!content.error || (!!content.data && !!request && content.data.version !== request.version)
+  useEffect(() => {
+    if (stale) onStale()
+  }, [stale, onStale])
   // SKILL.md first, then the rest by name.
   const files = [...(content.data?.files ?? [])].sort((a, b) => (a.path === 'SKILL.md' ? -1 : b.path === 'SKILL.md' ? 1 : a.path.localeCompare(b.path)))
   return (

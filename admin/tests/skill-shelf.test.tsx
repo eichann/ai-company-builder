@@ -219,6 +219,22 @@ describe('会社の Skill', () => {
     expect(screen.queryByText('# 差し替えた中身')).not.toBeInTheDocument()
   })
 
+  it('公開のお願い: 中身を見る on a request sent again or decided since reads the list again', async () => {
+    let lists = 0
+    const { calls } = mockApi(withoutFolder({
+      [`GET ${base}/skill-shelf-requests`]: () => {
+        lists++
+        return { body: ok({ requests: lists === 1 ? [request] : [] }) }
+      },
+      [`GET ${base}/skill-shelf-requests/r_1/files`]: { status: 404, body: { success: false, error: 'お願いが見つかりません。', code: 'SHELF_REQUEST_NOT_FOUND' } },
+    }))
+    renderInCompany(<SkillsRoute />)
+    const list = await screen.findByRole('list', { name: '公開のお願い' })
+    await userEvent.click(within(list).getByRole('button', { name: '中身を見る' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.url.endsWith('/skill-shelf-requests'))).toHaveLength(2))
+    await waitFor(() => expect(screen.queryByRole('list', { name: '公開のお願い' })).not.toBeInTheDocument())
+  })
+
   it('公開のお願い: 見送る takes an optional short reason; a too long one cannot be sent', async () => {
     const { calls } = mockApi(withoutFolder({
       [`GET ${base}/skill-shelf-requests`]: { body: ok({ requests: [request] }) },
