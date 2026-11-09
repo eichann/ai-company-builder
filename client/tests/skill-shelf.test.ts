@@ -292,7 +292,7 @@ const backupsOf = (w: { at: (rel: string) => string }) => (exists(w.at('.backups
 test('「会社の版に戻す」: the member\'s version is kept whole in .backups, nothing is deleted, and the company\'s comes back at the next fetch', async () => {
   const w = await editing({ now: () => Date.UTC(2026, 10, 9, 1, 2, 3, 4) })
   const done = await w.store.restoreCompany(w.root, '.claude/skills/proposal')
-  assert.deepEqual(done, { ok: true, backup: '.backups/2026-11-09T01-02-03-004_skill_edit' })
+  assert.deepEqual(done, { ok: true, backup: '.backups/2026-11-09T01-02-03-004_skill_edit', id: 'i1' })
   const kept = w.at('.backups/2026-11-09T01-02-03-004_skill_edit/.claude/skills/proposal')
   assert.deepEqual(await folderFiles(kept), { 'SKILL.md': 'mine\n', 'scripts/run.py': SKILL.files['scripts/run.py'], 'notes/a.md': 'a\n' })
   assert.deepEqual(JSON.parse(read(w.at('.backups/2026-11-09T01-02-03-004_skill_edit/_metadata.json'))).files, ['.claude/skills/proposal'])
@@ -306,7 +306,7 @@ test('「会社の版に戻す」: the member\'s version is kept whole in .backu
   // A second time in the same millisecond: its own folder, the first copy untouched.
   await w.store.release(w.root, '.claude/skills/proposal')
   write(w.at('.claude/skills/proposal/SKILL.md'), 'second\n')
-  assert.deepEqual(await w.store.restoreCompany(w.root, '.claude/skills/proposal'), { ok: true, backup: '.backups/2026-11-09T01-02-03-004_skill_edit_2' })
+  assert.deepEqual(await w.store.restoreCompany(w.root, '.claude/skills/proposal'), { ok: true, backup: '.backups/2026-11-09T01-02-03-004_skill_edit_2', id: 'i1' })
   assert.equal(read(path.join(kept, 'SKILL.md')), 'mine\n')
   assert.equal(read(w.at('.backups/2026-11-09T01-02-03-004_skill_edit_2/.claude/skills/proposal/SKILL.md')), 'second\n')
 })
@@ -343,13 +343,13 @@ test('「会社の版に戻す」 acts only on a Skill under 「自分用に直�
   assert.deepEqual(backupsOf(w), [])
 })
 
-test('「会社の版に戻す」 never moves through a link: at the Skill folder, on the way to it, or at .backups; nothing changes', async () => {
+test('「会社の版に戻す」 never moves through a link or onto a file: at the Skill folder, on the way to it, or at .backups; nothing changes', async () => {
   const outside = (w: { base: string }) => { const dir = path.join(w.base, 'outside'); write(path.join(dir, 'keep.txt'), 'keep\n'); return dir }
 
   const a = await editing()
   fs.rmSync(a.at('.claude/skills/proposal'), { recursive: true })
   fs.symlinkSync(outside(a), a.at('.claude/skills/proposal'))
-  assert.deepEqual(await a.store.restoreCompany(a.root, '.claude/skills/proposal'), { ok: false, reason: 'unsafe' })
+  assert.deepEqual(await a.store.restoreCompany(a.root, '.claude/skills/proposal'), { ok: false, reason: 'place' })
   assert.ok(exists(path.join(a.base, 'outside/keep.txt')))
   assert.ok(fs.lstatSync(a.at('.claude/skills/proposal')).isSymbolicLink())
   assert.deepEqual(backupsOf(a), [])
@@ -359,20 +359,32 @@ test('「会社の版に戻す」 never moves through a link: at the Skill folde
   const elsewhere = path.join(b.base, 'elsewhere')
   fs.renameSync(b.at('.claude'), elsewhere)
   fs.symlinkSync(elsewhere, b.at('.claude'))
-  assert.deepEqual(await b.store.restoreCompany(b.root, '.claude/skills/proposal'), { ok: false, reason: 'unsafe' })
+  assert.deepEqual(await b.store.restoreCompany(b.root, '.claude/skills/proposal'), { ok: false, reason: 'place' })
   assert.equal(read(path.join(elsewhere, 'skills/proposal/SKILL.md')), 'mine\n')
   assert.deepEqual(backupsOf(b), [])
 
   const c = await editing()
   const away = outside(c)
   fs.symlinkSync(away, c.at('.backups'))
-  assert.deepEqual(await c.store.restoreCompany(c.root, '.claude/skills/proposal'), { ok: false, reason: 'unsafe' })
+  assert.deepEqual(await c.store.restoreCompany(c.root, '.claude/skills/proposal'), { ok: false, reason: 'backups' })
   assert.equal(read(c.at('.claude/skills/proposal/SKILL.md')), 'mine\n')
   assert.deepEqual(fs.readdirSync(away), ['keep.txt'])
   assert.equal(c.store.markOf(c.root, '.claude/skills/proposal')?.state, 'editing')
+
+  // Not a link but a file, at the Skill's place or at .backups: the same refusal, nothing moved.
+  const d = await editing()
+  fs.rmSync(d.at('.claude/skills/proposal'), { recursive: true })
+  write(d.at('.claude/skills/proposal'), 'a file\n')
+  assert.deepEqual(await d.store.restoreCompany(d.root, '.claude/skills/proposal'), { ok: false, reason: 'place' })
+  assert.equal(read(d.at('.claude/skills/proposal')), 'a file\n')
+  const e = await editing()
+  write(e.at('.backups'), 'a file\n')
+  assert.deepEqual(await e.store.restoreCompany(e.root, '.claude/skills/proposal'), { ok: false, reason: 'backups' })
+  assert.equal(read(e.at('.claude/skills/proposal/SKILL.md')), 'mine\n')
+  assert.equal(read(e.at('.backups')), 'a file\n')
 })
 
-test('「会社の版に戻す」 trusts no place a manifest was edited to name: a folder outside the working folder is not moved', async () => {
+test('a place a manifest was edited to name outside the working folder is dropped when read back: never looked at, held or moved', async () => {
   const w = await editing()
   const outside = path.join(w.base, '.claude/skills/proposal')
   write(path.join(outside, 'SKILL.md'), 'not the member\'s\n')
@@ -383,17 +395,76 @@ test('「会社の版に戻す」 trusts no place a manifest was edited to name:
   manifest.clashes[0].targets = ['../.claude/skills/proposal']
   fs.writeFileSync(file, JSON.stringify(manifest))
   const fresh = createSkillShelfStore({ dir: () => path.join(w.base, 'userData'), userId: () => 'u1', client: w.client, log: quiet })
-  w.server.online = false
   await fresh.attach('co', w.root)
-  assert.equal((await fresh.restoreCompany(w.root, '../.claude/skills/proposal')).ok, false)
+  // The sync did not take `../` for the member's copy: the member's real folder is what clashes.
+  assert.equal(fresh.markOf(w.root, '../.claude/skills/proposal'), undefined)
+  assert.equal(fresh.markOf(w.root, '.claude/skills/proposal')?.state, 'clash')
+  assert.deepEqual(await fresh.restoreCompany(w.root, '../.claude/skills/proposal'), { ok: false, reason: 'not-editing' })
   assert.equal(read(path.join(outside, 'SKILL.md')), 'not the member\'s\n')
+  assert.equal(read(w.at('.claude/skills/proposal/SKILL.md')), 'mine\n')
   assert.deepEqual(backupsOf(w), [])
+  assert.equal(shelfPlaceOfSkillFolder('../.claude/skills/proposal'), null)
+})
+
+test('a move that fails leaves no empty backup folder behind, only what was there before', async () => {
+  const w = await editing()
+  write(w.at('.backups/older/keep.txt'), 'keep\n')
+  fs.chmodSync(w.at('.claude/skills'), 0o555)
+  try {
+    await assert.rejects(w.store.restoreCompany(w.root, '.claude/skills/proposal'))
+  } finally {
+    fs.chmodSync(w.at('.claude/skills'), 0o755)
+  }
+  assert.deepEqual(backupsOf(w), ['older'])
+  assert.equal(read(w.at('.claude/skills/proposal/SKILL.md')), 'mine\n')
+  assert.equal(w.store.markOf(w.root, '.claude/skills/proposal')?.state, 'editing')
+  // Without a .backups before, none is left either.
+  fs.rmSync(w.at('.backups'), { recursive: true })
+  fs.chmodSync(w.at('.claude/skills'), 0o555)
+  try {
+    await assert.rejects(w.store.restoreCompany(w.root, '.claude/skills/proposal'))
+  } finally {
+    fs.chmodSync(w.at('.claude/skills'), 0o755)
+  }
+  assert.equal(exists(w.at('.backups')), false)
+})
+
+test('after 会社の版に戻す the store tells what the sync did: back, later (offline), no longer delivered, or something of the member\'s in the way', async () => {
+  const rel = '.claude/skills/proposal'
+  const back = await editing()
+  const a = await back.store.restoreCompany(back.root, rel)
+  assert.ok(a.ok)
+  await back.again()
+  assert.equal(back.store.restoredOutcome(back.root, rel, 'i1'), 'back')
+
+  const later = await editing()
+  await later.store.restoreCompany(later.root, rel)
+  later.server.online = false
+  await later.again()
+  assert.equal(later.store.restoredOutcome(later.root, rel, 'i1'), 'later')
+  // The app started again offline: no list answered yet is no reason to say it is gone.
+  const restarted = createSkillShelfStore({ dir: () => path.join(later.base, 'userData'), userId: () => 'u1', client: later.client, log: quiet })
+  await restarted.attach('co', later.root)
+  assert.equal(restarted.restoredOutcome(later.root, rel, 'i1'), 'later')
+
+  const gone = await editing()
+  await gone.store.restoreCompany(gone.root, rel)
+  gone.server.items = []
+  await gone.again()
+  assert.equal(gone.store.restoredOutcome(gone.root, rel, 'i1'), 'not-delivered')
+
+  const taken = await editing()
+  await taken.store.restoreCompany(taken.root, rel)
+  write(taken.at('.claude/skills/proposal/SKILL.md'), 'made again\n')
+  await taken.again()
+  assert.equal(taken.store.restoredOutcome(taken.root, rel, 'i1'), 'occupied')
+  assert.equal(read(taken.at('.claude/skills/proposal/SKILL.md')), 'made again\n')
 })
 
 test('「会社の版に戻す」 with the member\'s folder already gone: the hold goes, nothing to keep, and the company\'s comes back', async () => {
   const w = await editing()
   fs.rmSync(w.at('.claude/skills/proposal'), { recursive: true })
-  assert.deepEqual(await w.store.restoreCompany(w.root, '.claude/skills/proposal'), { ok: true, backup: null })
+  assert.deepEqual(await w.store.restoreCompany(w.root, '.claude/skills/proposal'), { ok: true, backup: null, id: 'i1' })
   await w.again()
   assert.equal(w.store.markOf(w.root, '.claude/skills/proposal')?.state, 'company')
 })

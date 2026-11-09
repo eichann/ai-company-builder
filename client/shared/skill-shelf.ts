@@ -129,6 +129,8 @@ export function shelfPlaceOfSkillFolder(rel: string): { departmentFolder: string
   const at = parts.length - 3
   if (at !== 0 && at !== 1) return null
   if (parts[at] !== '.claude' || parts[at + 1] !== 'skills') return null
+  // A department folder is a folder name (never `..`): a place read back from disk stays inside.
+  if (at === 1 && !isValidFolderName(parts[0])) return null
   const name = parts[at + 2]
   if (!isValidShelfName('skill', name)) return null
   return { departmentFolder: at === 1 ? parts[0] : null, name }
@@ -171,12 +173,25 @@ export function shelfEditTexts(mayPublish: boolean): { confirm: string; detail: 
 export const SHELF_RESTORE_CONFIRM = '会社の版に戻します。あなたが直した内容は、念のため控えに残します（作業フォルダの中の「.backups」フォルダ）。会社の版は、このあとすぐに受け取ります。'
 /** Restored, but the company's version was not received just now (offline, or no longer delivered). */
 export const SHELF_RESTORED_LATER_NOTE = '会社の版に戻しました。会社の版は、次に受け取るときに届きます。'
+/** Restored, but the company no longer delivers this Skill here: nothing will come. */
+export const SHELF_RESTORED_GONE_NOTE = '会社の版に戻しました。ただ、この Skill は会社から配られなくなったため、会社の版は届きません。あなたが直した内容は「.backups」フォルダの控えに残っています。'
+/** Restored, but something of the member's stands where the company's would go. */
+export const SHELF_RESTORED_OCCUPIED_NOTE = '会社の版に戻しました。ただ、同じ場所に同じ名前の Skill があるため、会社の版を置けませんでした。その Skill の名前を変えるか別の場所に移すと、次に受け取るときに会社の版が届きます。'
 export const SHELF_NOT_EDITING_MESSAGE = 'この Skill は自分用に直している Skill ではないため、戻せませんでした。'
-export const SHELF_RESTORE_UNSAFE_MESSAGE = 'Skill のフォルダの場所にショートカット（リンク）があるため、戻せませんでした。何も変更していません。'
+export const SHELF_RESTORE_PLACE_MESSAGE = 'この Skill の場所が普通のフォルダではない（ショートカットやファイルになっている）ため、戻せませんでした。何も変更していません。'
+export const SHELF_RESTORE_BACKUPS_MESSAGE = '控えを置く「.backups」が普通のフォルダではない（ショートカットやファイルになっている）ため、戻せませんでした。何も変更していません。'
 export const SHELF_RESTORE_FAILED_MESSAGE = '会社の版に戻せませんでした。時間をおいて、もう一度やり直してください。'
 
-/** What `skillShelf:restoreCompany` answers: whether the company's version is already back. */
-export type SkillShelfRestoreResult = { success: true; companyVersionBack: boolean } | { success: false; error: string }
+/**
+ * What `skillShelf:restoreCompany` answers: the company's version is back (`back`), comes with a
+ * later fetch (`later`), is no longer delivered (`not-delivered`), or something stands in its place (`occupied`).
+ */
+export type SkillShelfRestoreResult = { success: true; companyVersion: 'back' | 'later' | 'not-delivered' | 'occupied' } | { success: false; error: string }
+
+/** The sentence shown after a restore; null when the company's version is already there. */
+export function shelfRestoredNote(companyVersion: 'back' | 'later' | 'not-delivered' | 'occupied'): string | null {
+  return { back: null, later: SHELF_RESTORED_LATER_NOTE, 'not-delivered': SHELF_RESTORED_GONE_NOTE, occupied: SHELF_RESTORED_OCCUPIED_NOTE }[companyVersion]
+}
 
 export const SHELF_NOT_HERE_MESSAGE = 'この会社では、Skill を会社に公開できません。'
 export const SHELF_OFFLINE_MESSAGE = 'サーバーにつながらないため公開できませんでした。つながってから、もう一度やり直してください。'

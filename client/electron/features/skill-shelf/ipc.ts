@@ -8,7 +8,7 @@ import path from 'node:path'
 import { SHELF_LIMITS, isShelfVersion } from '../../../../shared/core/skill-shelf'
 import {
   SHELF_ALREADY_COMPANY_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_NO_PLACE_MESSAGE,
-  SHELF_NOT_EDITING_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_RESTORE_FAILED_MESSAGE, SHELF_RESTORE_UNSAFE_MESSAGE, SHELF_TOO_MUCH_MESSAGE, shelfPlaceOfSkillFolder,
+  SHELF_NOT_EDITING_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_RESTORE_BACKUPS_MESSAGE, SHELF_RESTORE_FAILED_MESSAGE, SHELF_RESTORE_PLACE_MESSAGE, SHELF_TOO_MUCH_MESSAGE, shelfPlaceOfSkillFolder,
   type SkillShelfRestoreResult,
 } from '../../../shared/skill-shelf'
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -19,7 +19,7 @@ import { readSkillFolder, type SkillShelfStore } from './store'
 export interface SkillShelfIpcDeps {
   paths: PathGuard
   isWorkingFolder: (rootPath: string) => boolean
-  store: Pick<SkillShelfStore, 'companyOf' | 'markOf' | 'published' | 'release' | 'restoreCompany' | 'syncNow'>
+  store: Pick<SkillShelfStore, 'companyOf' | 'markOf' | 'published' | 'release' | 'restoreCompany' | 'restoredOutcome' | 'syncNow'>
   client: Pick<ShelfClient, 'departmentId' | 'publish'>
 }
 
@@ -81,10 +81,10 @@ export function registerSkillShelfIpc(ipc: IpcRegistrar, { paths, isWorkingFolde
       const at = located(rootPath, skillPath)
       if ('error' in at) return { success: false, error: at.error }
       const done = await store.restoreCompany(at.root, at.rel)
-      if (!done.ok) return { success: false, error: done.reason === 'unsafe' ? SHELF_RESTORE_UNSAFE_MESSAGE : SHELF_NOT_EDITING_MESSAGE }
-      // Placed now when the server answers; otherwise by the next fetch (the hold is gone either way).
+      if (!done.ok) return { success: false, error: { 'not-editing': SHELF_NOT_EDITING_MESSAGE, place: SHELF_RESTORE_PLACE_MESSAGE, backups: SHELF_RESTORE_BACKUPS_MESSAGE }[done.reason] }
+      // Placed now when the server answers; otherwise by a later fetch (the hold is gone either way).
       await store.syncNow(at.root)
-      return { success: true, companyVersionBack: store.markOf(at.root, at.rel)?.state === 'company' }
+      return { success: true, companyVersion: store.restoredOutcome(at.root, at.rel, done.id) }
     } catch (error) {
       console.error('Skill shelf restore error:', error instanceof Error ? error.message : 'unknown')
       return { success: false, error: SHELF_RESTORE_FAILED_MESSAGE }

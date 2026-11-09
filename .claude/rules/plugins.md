@@ -756,21 +756,28 @@ company never reaches any of it: the store knows a company only from
   publisher only, ［会社に公開］.
 - **「会社の版に戻す」** (`skillShelf:restoreCompany`, store `restoreCompany`), after a confirmation
   (`SHELF_RESTORE_CONFIRM`): only a Skill held by `released` at exactly that folder for the signed-in
-  account (anything else → `SHELF_NOT_EDITING_MESSAGE`); the folder must be a Skill place by name
-  (a department folder a valid name: the manifest is read back from disk) with no link on the way,
-  at the folder or at `.backups` (→ `SHELF_RESTORE_UNSAFE_MESSAGE`, nothing changed). The member's
-  folder is **moved whole** (one rename, never deleted, never uploaded: `.backups` is local only) to
+  account (anything else → `SHELF_NOT_EDITING_MESSAGE`). A link on the way, or a link or a file at the
+  Skill's place → `SHELF_RESTORE_PLACE_MESSAGE`; `.backups` a link or a file →
+  `SHELF_RESTORE_BACKUPS_MESSAGE`; nothing changed either way. The member's folder is **moved whole**
+  (one rename, never deleted, never uploaded: `.backups` is local only) to
   `.backups/<ts>_skill_edit/<the Skill folder's path>` with `_metadata.json` (`_2`, `_3` … when the
-  name is taken), the hold goes, and the handler asks the shelf at once (`syncNow`): the company's
-  version is back before the answer (`companyVersionBack: true`), or, offline, at the next fetch
-  (`SHELF_RESTORED_LATER_NOTE`). A working folder has no backups panel: the copy is reached in the
-  folder itself (Finder hides `.backups`).
+  name is taken); the folders made for it are taken away again (empty, only those) when the move
+  fails. The hold goes and the handler asks the shelf at once (`syncNow`), then answers
+  `companyVersion` from `restoredOutcome`: `back` (placed), `later` (no list answered or the version
+  not fetched: 「次に受け取るときに届きます」), `not-delivered` (the last list no longer has it:
+  `SHELF_RESTORED_GONE_NOTE`), `occupied` (something of the member's stands at its place:
+  `SHELF_RESTORED_OCCUPIED_NOTE`); `shelfRestoredNote` gives the sentence. A working folder has no
+  backups panel: the copy is reached in the folder itself (Finder hides `.backups`).
+- A `released` place is read back only when `shelfPlaceOfSkillFolder` accepts it, and that needs a
+  department folder to be a valid folder name: an edited manifest's `../.claude/skills/x` is dropped
+  on load, so no sync or restore looks at it.
 - **Use reports**: `shelfVersion` in `skill-use-reporter.ts`: the version in the `tree` field (64
   hex, the same validator), `dirty` when the files differ; a Skill not delivered is not reported.
 - Tests: `client/tests/skill-shelf.test.ts`, `client/tests/ipc-skill-shelf.test.ts`,
   `codex-connection.test.ts`, `tests/ui/skill-layout.spec.ts` (each guard mutation-checked; 会社の版に戻す:
-  only the held folder, another account, a link at / on the way / at `.backups`, an edited manifest's
-  `..` place, a taken backup name, moved not deleted).
+  only the held folder, another account, a link or a file at / on the way / at `.backups`, an edited
+  manifest's `..` place, a taken backup name, moved not deleted, no empty folders after a failed move,
+  each `restoredOutcome`).
 
 ## What we say, and what we do not claim (review §12, owner-approved wording)
 

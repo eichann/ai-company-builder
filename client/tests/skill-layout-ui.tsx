@@ -323,7 +323,7 @@ const api: Partial<ElectronAPI> = {
   // ?restore=later: the company's version was not received just now (offline).
   restoreCompanySkill: async (_root: string, skillPath: string) => {
     record('restoreCompanySkill', [skillPath.split('/').pop()])
-    return { success: true as const, companyVersionBack: params.get('restore') !== 'later' }
+    return { success: true as const, companyVersion: params.get('restore') === 'later' ? 'later' as const : 'back' as const }
   },
   onSkillShelfChanged: () => () => {},
   onNotificationsChanged: () => () => {},

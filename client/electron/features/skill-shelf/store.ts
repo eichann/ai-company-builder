@@ -205,6 +205,9 @@ function putFile(root: string, rel: string, file: ShelfFile): void {
   }
 }
 
+type RestoreAnswer = { ok: true; backup: string | null; id: string } | { ok: false; reason: 'not-editing' | 'place' | 'backups' }
+export type RestoredOutcome = 'back' | 'later' | 'not-delivered' | 'occupied'
+
 /** The backup folder's suffix of 「会社の版に戻す」 (`.backups/<ts>_skill_edit/<the Skill folder>`). */
 export const SKILL_EDIT_BACKUP_REASON = 'skill_edit'
 
@@ -238,6 +241,8 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
   const lastAsked = new Map<string, number>()
   /** company and folder → the manifest, as last read or written (the write guard reads this on every call). */
   const memory = new Map<string, Manifest>()
+  /** company → the ids its last answered list delivered (`restoredOutcome`). */
+  const lastListed = new Map<string, Set<string>>()
   let chain: Promise<void> = Promise.resolve()
 
   /** One spelling of a folder, whoever names it (the app's stores and the renderer may differ in links and form). */
@@ -360,6 +365,7 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
       log.warn(`[skill-shelf] ${companyId}: keeping what is here (${listed.reason})`)
       return
     }
+    lastListed.set(companyId, new Set(listed.items.map(i => i.id)))
     const before = load(companyId, root)
     const previous = before?.user === user ? before : before ? { ...before, user, clashes: [], released: [] } : emptyManifest(user)
     const delivered = new Set(listed.items.map(i => i.id))
@@ -515,39 +521,50 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
     /**
      * 「会社の版に戻す」: only a Skill this store handed over with `release` at exactly `rel` (mark
      * `editing`). The member's folder moves whole to `.backups/<ts>_skill_edit/<rel>` (same disk,
-     * never deleted, never sent: `.backups` is local only), the hold goes, and the next sync places
-     * the company's version. Refused when a link stands on the way, at the folder, or at `.backups`.
+     * never deleted, never sent: `.backups` is local only) and the hold goes; the next sync places
+     * the company's version (`restoredOutcome` says what it did). Refused, nothing changed, when a
+     * link or a file stands at the Skill's place or on the way (`place`), or at `.backups` (`backups`).
      */
-    restoreCompany(root: string, rel: string): Promise<{ ok: true; backup: string | null } | { ok: false; reason: 'not-editing' | 'unsafe' }> {
-      const result = chain.then((): { ok: true; backup: string | null } | { ok: false; reason: 'not-editing' | 'unsafe' } => {
+    restoreCompany(root: string, rel: string): Promise<RestoreAnswer> {
+      const result = chain.then((): RestoreAnswer => {
         const companyId = companyOf(root)
         const manifest = current(root)
         const held = manifest?.released.find(r => r.rel === rel)
         if (!companyId || !manifest || !held) return { ok: false, reason: 'not-editing' }
-        // A Skill folder of the working folder by name too (a manifest is read back from disk).
-        const place = shelfPlaceOfSkillFolder(rel)
-        if (!place || (place.departmentFolder !== null && !isValidFolderName(place.departmentFolder))) return { ok: false, reason: 'unsafe' }
-        if (linkOnTheWay(root, rel)) return { ok: false, reason: 'unsafe' }
+        if (linkOnTheWay(root, rel)) return { ok: false, reason: 'place' }
         const abs = path.join(root, rel)
         let there = true
         try {
-          if (!fs.lstatSync(abs).isDirectory()) return { ok: false, reason: 'unsafe' }
+          if (!fs.lstatSync(abs).isDirectory()) return { ok: false, reason: 'place' }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
           there = false
         }
         let backup: string | null = null
         if (there) {
+          const backups = path.join(root, '.backups')
+          try {
+            if (!fs.lstatSync(backups).isDirectory()) return { ok: false, reason: 'backups' }
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          }
           const stamp = `${backupStamp(new Date(now()))}_${SKILL_EDIT_BACKUP_REASON}`
           let folder = stamp
-          for (let n = 2; fs.existsSync(path.join(root, '.backups', folder)) || isLink(path.join(root, '.backups', folder)); n++) folder = `${stamp}_${n}`
+          for (let n = 2; fs.existsSync(path.join(backups, folder)) || isLink(path.join(backups, folder)); n++) folder = `${stamp}_${n}`
           backup = `.backups/${folder}`
+          // Only folders made here, outermost first: taken away again, empty, if the move fails.
+          const made: string[] = []
           try {
-            preparedParent(root, `${backup}/${rel}`)
-          } catch {
-            return { ok: false, reason: 'unsafe' }
+            let at = root
+            for (const part of `${backup}/${rel}`.split('/').slice(0, -1)) {
+              at = path.join(at, part)
+              if (!fs.existsSync(at)) { fs.mkdirSync(at); made.push(at) }
+            }
+            fs.renameSync(abs, path.join(root, backup, rel))
+          } catch (error) {
+            for (const dir of made.reverse()) { try { fs.rmdirSync(dir) } catch { break } }
+            throw error
           }
-          fs.renameSync(abs, path.join(root, backup, rel))
           try {
             fs.writeFileSync(path.join(root, backup, '_metadata.json'), JSON.stringify({ timestamp: new Date(now()).toISOString(), reason: SKILL_EDIT_BACKUP_REASON, files: [rel] }, null, 2))
           } catch { /* the copy is what matters */ }
@@ -559,10 +576,25 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
         })
         log.info(`[skill-shelf] a Skill went back to the company's version${backup ? ' (the member\'s kept in .backups)' : ''}`)
         deps.onChanged?.(companyId, root)
-        return { ok: true, backup }
+        return { ok: true, backup, id: held.id }
       })
       chain = result.then(() => undefined, () => undefined)
       return result
+    },
+    /**
+     * After `restoreCompany` and a sync: the company's version is placed (`back`), the list did not
+     * answer or the version could not be fetched (`later`), the Skill is no longer delivered here
+     * (`not-delivered`), or something of the member's stands at its place (`occupied`).
+     */
+    restoredOutcome(root: string, rel: string, id: string): RestoredOutcome {
+      const companyId = companyOf(root)
+      const manifest = current(root)
+      if (!companyId || !manifest) return 'later'
+      if (manifest.items.some(i => i.id === id && i.paths.includes(rel))) return 'back'
+      const listed = lastListed.get(companyId)
+      if (!listed) return 'later'
+      if (!listed.has(id)) return 'not-delivered'
+      return manifest.clashes.some(c => c.id === id) ? 'occupied' : 'later'
     },
     /** The member published the Skill at `rel`: the next sync takes it over when it is the listed version. */
     published(root: string, rel: string): Promise<void> {

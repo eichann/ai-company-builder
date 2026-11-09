@@ -9,7 +9,7 @@ import path from 'node:path'
 import { commitRepo, loadMain, writeFiles, type MainHarness } from './ipc-harness/main-harness.ts'
 import { shelfListing } from '../../shared/core/skill-shelf.ts'
 import { WORKING_FOLDER_TAKEN_MESSAGE } from '../electron/features/company-setup/ipc.ts'
-import { SHELF_ALREADY_COMPANY_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_EDITING_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_RESTORE_UNSAFE_MESSAGE, SHELF_TOO_MUCH_MESSAGE } from '../shared/skill-shelf.ts'
+import { SHELF_ALREADY_COMPANY_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_EDITING_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_RESTORE_PLACE_MESSAGE, SHELF_TOO_MUCH_MESSAGE } from '../shared/skill-shelf.ts'
 
 let h: MainHarness
 before(async () => {
@@ -129,7 +129,7 @@ test('「会社の版に戻す」 through main: the member\'s version goes to .b
 
   assert.deepEqual(await h.invoke('skillShelf:editLocally', folder, skillPath), { success: true })
   writeFiles(folder, { '.claude/skills/proposal/SKILL.md': 'mine\n' })
-  assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: true, companyVersionBack: true })
+  assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: true, companyVersion: 'back' })
   assert.equal(fs.readFileSync(path.join(skillPath, 'SKILL.md'), 'utf8'), 'v1\n')
   const [kept] = fs.readdirSync(path.join(folder, '.backups'))
   assert.match(kept, /_skill_edit$/)
@@ -142,7 +142,7 @@ test('「会社の版に戻す」 through main: the member\'s version goes to .b
   assert.deepEqual(await h.invoke('skillShelf:editLocally', folder, skillPath), { success: true })
   h.server.offline = true
   try {
-    assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: true, companyVersionBack: false })
+    assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: true, companyVersion: 'later' })
   } finally {
     h.server.offline = false
   }
@@ -158,7 +158,7 @@ test('「会社の版に戻す」 through main refuses a Skill folder that is a 
   writeFiles(folder, { 'メモ/SKILL.md': 'memo\n' })
   fs.rmSync(skillPath, { recursive: true })
   fs.symlinkSync(inside, skillPath)
-  assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: false, error: SHELF_RESTORE_UNSAFE_MESSAGE })
+  assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: false, error: SHELF_RESTORE_PLACE_MESSAGE })
   assert.ok(fs.lstatSync(skillPath).isSymbolicLink())
   assert.equal(fs.readFileSync(path.join(inside, 'SKILL.md'), 'utf8'), 'memo\n')
   assert.equal(fs.existsSync(path.join(folder, '.backups')), false)
