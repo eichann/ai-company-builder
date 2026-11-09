@@ -4,6 +4,7 @@ paths:
   - "server/src/routes/agent-stops.ts"
   - "server/src/services/agent-stops.ts"
   - "server/src/services/agent-policy.ts"
+  - "server/src/services/ai-runs.ts"
   - "server/src/services/push-channel.ts"
   - "server/src/ports/agent-stops.ts"
   - "server/src/adapters/sqlite/agent-stops.ts"
@@ -58,6 +59,24 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   refused, and ended before its next attempt, by the company's or the member's stop of the whole AI and by a
   stop of the `mcp-external` or `web` kind (`policyFor`), since it reaches a service outside. Test
   `server/tests/integration/plugin-calls.test.ts`.
+- **Runs with no person present** (「AI の番」 and a business plugin's `ai_turn` step; `services/ai-runs.ts`,
+  `AiRunDeps.aiStops` = `policyFor`): the server is the authority here too, so an app that does not follow
+  the stop (older, modified) cannot start one. `POST /ai-run-claims` is refused — before the turn check and
+  the plugin pin, so nothing is read, made or pinned — while the member's merged policy has the whole AI
+  stopped (the company's or theirs) or any of `write` / `web` / `mcp-external` (`STOPS_UNATTENDED_RUN`:
+  each names something an unattended run can reach — a plugin step's deliverable files, `web_research`,
+  outside services through connectors and plugin operations). Not `command`: no unattended run has a shell
+  (`ai-turns.md`). The answer is **503** `AI_STOPPED` 「管理者が AI の利用を一時停止しています。再開されるまで
+  AI の番は進みません。」 (no reason, no scope): released apps read a 5xx claim as `unavailable` and try again
+  later, so the record runs by itself once released; a 4xx would mark it `taken` at that version until a
+  restart. `POST /ai-runs/:runId/renew` gets the same 503 and changes nothing (lease, generation, state):
+  not a 409, which makes the app let go of the run and leave it unfinished. The lease runs out within
+  `AI_RUN_CLAIM_TTL_MS`; fencing and the idempotency keys are untouched, so a later claim is an ordinary
+  take-over. Finish, retry and reconcile are never refused (they end or give back). A run-bound token's
+  calls are **not** fenced by a narrower stop (only the company-wide whole-AI stop's 403 `ACB_STOPPED`,
+  `records.md` "Who is acting"). Test `server/tests/integration/ai-runs.test.ts` "the emergency stop
+  refuses a run with nobody present" (mutation-checked: the claim check, the renew check, the kinds,
+  `command` left out, the status).
 - **Apps that do not follow the stop** (「停止に対応していないアプリ」): an app that follows it
   sends `X-ACB-Agent-Stop: 1` on `/me/agent-policy` and `/me/events`, recorded with its
   `X-ACB-Client-Version`. A member is counted when `client_activity` has a build for them and it
@@ -152,7 +171,8 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   `mayStartAiTurns`: 自動で進める on or a record the member asked for — and shows 「止める設定をサーバーで確かめ
   られないため、…」, `ai-turns.md`). Conversations are unchanged; a run already going keeps today's
   behaviour (a received stop still ends it). Server-side operations (connectors, key broker,
-  outbound gate) were already stopped by the server; this covers local commands and file writes.
+  outbound gate) were already stopped by the server, and the server refuses the run's claim itself
+  ("Runs with no person present" above); this covers local commands and file writes.
 - `chat-server.ts`: `prepareAgentStop` before anything else of the turn (403 `AI_STOPPED`),
   `toolStop` into the model request and the API-key tools, and a re-check after the turn is
   tracked (a stop that arrived while it was prepared stops it).

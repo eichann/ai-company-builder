@@ -1593,7 +1593,12 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   version join the procedure (a consultation's Skills: "Which Skill" below). Additive, nullable columns (`migrateAiRunColumns`).
 - A run is its member's: anyone else, another company's id and a missing one get the same 404
   `RUN_NOT_FOUND` (permission matrix rows + `CROSS`).
-- Test: `server/tests/integration/ai-runs.test.ts` (two devices → one claim; the older
+- **The emergency stop** (`agent-stop.md` "Runs with no person present"): while the member's stop
+  policy has the whole AI or a `write` / `web` / `mcp-external` kind stopped, a claim answers 503
+  `AI_STOPPED` before anything is read, made or pinned, and a renew answers the same and changes
+  nothing (finish, retry and reconcile go on). Not `command`.
+- Test: `server/tests/integration/ai-runs.test.ts` (the emergency stop: company-wide, one member,
+  the kinds, renew — mutation-checked; two devices → one claim; the older
   generation refused and nothing written after a re-claim; the same key → one effect, no key
   refused, a key never reused; in flight at a re-claim / a lost answer → no resume and no second
   send until reconciled; each failure class's place; the ledger's cause; which procedure each run
