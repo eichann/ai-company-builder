@@ -109,8 +109,8 @@ export interface DeliveredShelfItem {
   id: string
   kind: ShelfKind
   name: string
-  /** null = the whole company. `belongs`: the member belongs to it (所属); every department listed is one they read. */
-  department: { id: string; folder: string; belongs: boolean } | null
+  /** null = the whole company; else a department the member reads (its people, a group or a person named on it; owners/admins: every one). */
+  department: { id: string; folder: string } | null
   /** The version to fetch (GET /skill-shelf/:itemId/versions/:version) and to check against shelfListing. */
   version: string
   fileCount: number
@@ -119,6 +119,12 @@ export interface DeliveredShelfItem {
 
 export interface MyShelfView {
   items: DeliveredShelfItem[]
+  /**
+   * Where the member may publish a Skill (the publish check without the files: auto-run parts are
+   * judged when they are sent): the whole company, and the folders (NFC) of departments they read
+   * and may publish to. The app offers 「会社に公開」 only there; the server still decides.
+   */
+  skillPublishing: { company: boolean; departmentFolders: string[] }
 }
 
 /** 409 SHELF_VERSION_CHANGED: someone changed it first. */

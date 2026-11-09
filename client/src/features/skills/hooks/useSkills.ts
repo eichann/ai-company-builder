@@ -11,6 +11,8 @@ interface UseSkillsOptions {
 
 interface UseSkillsResult {
   skills: Skill[]
+  /** Delivered rule files not placed: the member has a file of that name. */
+  ruleClashes: string[]
   isLoading: boolean
   error: string | null
   /** Rescan now, bypassing the main process's short cache (file events, sync, the member's own change). */
@@ -19,6 +21,7 @@ interface UseSkillsResult {
 
 export function useSkills({ rootPath, departmentFolder, departmentId, departmentName }: UseSkillsOptions): UseSkillsResult {
   const [skills, setSkills] = useState<Skill[]>([])
+  const [ruleClashes, setRuleClashes] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Only the latest request may set the list (a forced rescan can finish
@@ -51,10 +54,13 @@ export function useSkills({ rootPath, departmentFolder, departmentId, department
           group: skill.group,
           isPrivate: skill.isPrivate,
           isNurturing: skill.isNurturing,
+          shelf: skill.shelf,
+          shelfPublish: skill.shelfPublish,
           skillPath: skill.skillPath,
           files: skill.files,
         }))
         setSkills(mappedSkills)
+        setRuleClashes(result.ruleClashes ?? [])
       } else {
         setError(result.error || 'Failed to load skills')
         setSkills([])
@@ -77,6 +83,7 @@ export function useSkills({ rootPath, departmentFolder, departmentId, department
 
   return {
     skills,
+    ruleClashes,
     isLoading,
     error,
     refresh,

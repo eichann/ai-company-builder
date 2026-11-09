@@ -3,6 +3,7 @@ import { isChatInputRecentlyActive } from '../../../shared/lib/chatInputActivity
 import { subscribeFileChanges } from '../../../shared/lib/fileEvents'
 import { perfMark } from '../../../shared/lib/perfDiagnostics'
 import { scanAffected, skillsScopesAffected } from '../../../../shared/skills-refresh'
+import { subscribeSkillShelfChanges } from '../api'
 
 const SKILLS_MAX_DEFER_COUNT = 4
 
@@ -72,6 +73,12 @@ export function useSkillsAutoRefresh({ rootPath, shownFolder, shownIsCompany, re
   // .gitignore (private marks), or folders moved in/out of the department
   // (shared/skills-refresh.ts). The main process drops its cache on the same
   // events; the renderer's refresh is forced anyway.
+  // What the company delivered changed without any file changing (a name clash, a Skill taken over).
+  useEffect(() => {
+    if (!rootPath) return
+    return subscribeSkillShelfChanges(() => requestDeferredSkillsRefresh({ shown: true, company: true }))
+  }, [rootPath, requestDeferredSkillsRefresh])
+
   useEffect(() => {
     const root = rootPath
     if (!root) return

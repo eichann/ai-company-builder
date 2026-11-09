@@ -80,6 +80,11 @@ export interface AgentConnection {
      */
     secondOpinion?: SecondOpinionTools
     resumeId?: string
+    /**
+     * A file that marks the project root in a folder without `.git` (Codex: `project_root_markers`,
+     * so it reads what lies above a department folder; Claude Code walks up by itself).
+     */
+    projectRootMarker?: string
     /** Refuse edits to read-only folders before they happen (write-guard.ts). */
     writeGuard?: WriteGuard
     /** What this conversation read from private folders, and where they are (private-read-guard.ts). */

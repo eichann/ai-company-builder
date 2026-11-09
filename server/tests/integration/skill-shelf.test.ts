@@ -16,6 +16,9 @@
  * - delivery and reading: a department restricted to a group — its items are listed, delivered
  *   and readable only by readers; anyone else gets the same answers as for an item / department
  *   that does not exist, and never its name; another company's item is one that does not exist;
+ * - a reader through a group gets the place's Skill and instruction text (not only those who
+ *   belong to it); out of the group, neither; `skillPublishing` says where a Skill may be
+ *   published, by the publish check, never naming a place the member cannot read;
  * - paths, names, sizes and secrets refused with their codes; nothing stored;
  * - the version is the sha256 of the canonical listing (the app recomputes it);
  * - making room: owners/admins remove old versions (never the current one, in the history) and
@@ -327,33 +330,80 @@ describe('versions: concurrency, rollback, taking off', () => {
 describe('reading and delivery follow who reads the place', () => {
   let hrSkill: string
   let hrVersion: string
+  let hrText: string
+  let groupId: string
 
   beforeAll(async () => {
     const group = await call('POST', co('/groups'), { name: '人事の人', userIds: ['sh-carol'] })
     expect(group.status).toBe(201)
+    groupId = group.body.data.id
     const put = await call('PUT', co('/permissions/scopes/by-path'), {
       path: '人事部',
-      rules: [{ subjectType: 'everyone', canRead: false, canWrite: false }, { subjectType: 'group', subjectId: group.body.data.id, canRead: true, canWrite: true }],
+      rules: [{ subjectType: 'everyone', canRead: false, canWrite: false }, { subjectType: 'group', subjectId: groupId, canRead: true, canWrite: true }],
     })
     expect(put.status).toBe(200)
-    const made = await publishSkill('hr-secret-skill', dept['人事部'])
+    const made = await publishSkill('hr-secret-skill', dept['人事部'], '---\nname: hr\ndescription: 人事の手続き\n---\n人事だけの手順。\n')
     expect(made.status).toBe(201)
     hrSkill = made.body.data.item.id
     hrVersion = made.body.data.item.version
+    const text = await call('POST', co('/skill-shelf'), { kind: 'instructions', departmentId: dept['人事部'], text: '人事の指示です', expectedVersion: null })
+    expect(text.status).toBe(201)
+    hrText = text.body.data.item.id
   })
 
-  it('a reader of the place gets it listed and delivered (belongs as stored); everyone else never sees its name', async () => {
+  const delivered = async (who: string) => (await call('GET', co('/me/skill-shelf'), undefined, who)).body.data.items.map((i: Json) => i.id)
+
+  it('a reader through a group gets its Skill and its instruction text delivered, though not belonging to it; everyone else never sees its name', async () => {
     const carol = (await call('GET', co('/me/skill-shelf'), undefined, 'sh-carol')).body.data.items
-    expect(carol.find((i: Json) => i.id === hrSkill)).toMatchObject({ name: 'hr-secret-skill', version: hrVersion, department: { folder: '人事部', belongs: false } })
+    expect(carol.find((i: Json) => i.id === hrSkill)).toEqual({ id: hrSkill, kind: 'skill', name: 'hr-secret-skill', department: { id: dept['人事部'], folder: '人事部' }, version: hrVersion, fileCount: 1, totalBytes: expect.any(Number) })
+    expect(carol.find((i: Json) => i.id === hrText)).toMatchObject({ kind: 'instructions', department: { folder: '人事部' } })
     for (const who of ['sh-bob', 'sh-mgr', 'sh-editor']) {
       const mine = await call('GET', co('/me/skill-shelf'), undefined, who)
       const listed = await call('GET', co('/skill-shelf'), undefined, who)
       expect(mine.status).toBe(200)
-      expect(mine.text).not.toContain('hr-secret-skill')
-      expect(listed.text).not.toContain('hr-secret-skill')
+      for (const answer of [mine.text, listed.text]) {
+        expect(answer).not.toContain('hr-secret-skill')
+        expect(answer).not.toContain('人事部')
+        expect(answer).not.toContain(hrSkill)
+        expect(answer).not.toContain(hrText)
+        expect(answer).not.toContain(hrVersion)
+      }
       // Company-wide and readable departments' items are there.
       expect(mine.body.data.items.map((i: Json) => i.name)).toContain('quote')
     }
+  })
+
+  it('taking the member out of the group stops the delivery of the place\'s Skill and text; putting them back brings it', async () => {
+    expect(await delivered('sh-carol')).toEqual(expect.arrayContaining([hrSkill, hrText]))
+    expect((await call('PUT', co(`/groups/${groupId}/members`), { userIds: [] })).status).toBe(200)
+    const after = await call('GET', co('/me/skill-shelf'), undefined, 'sh-carol')
+    expect(after.body.data.items.map((i: Json) => i.id)).not.toEqual(expect.arrayContaining([hrSkill]))
+    expect(after.body.data.items.map((i: Json) => i.id)).not.toContain(hrText)
+    expect(after.text).not.toContain('人事部')
+    expect((await call('PUT', co(`/groups/${groupId}/members`), { userIds: ['sh-carol'] })).status).toBe(200)
+    expect(await delivered('sh-carol')).toEqual(expect.arrayContaining([hrSkill, hrText]))
+  })
+
+  it('says where each member may publish a Skill, by the publish check, and never names a place they cannot read', async () => {
+    const publishing = async (who: string) => (await call('GET', co('/me/skill-shelf'), undefined, who)).body.data.skillPublishing
+    const owner = await publishing('sh-owner')
+    expect(owner.company).toBe(true)
+    expect(owner.departmentFolders).toEqual(expect.arrayContaining(['営業部', '人事部', '法務部']))
+    expect(await publishing('sh-bob')).toEqual({ company: false, departmentFolders: [] })
+    // A reader who may write there is still no one who may change Skills.
+    expect(await publishing('sh-carol')).toEqual({ company: false, departmentFolders: [] })
+    expect(await publishing('sh-sales-editor')).toEqual({ company: false, departmentFolders: ['営業部'] })
+    expect(await publishing('sh-mgr')).toEqual({ company: false, departmentFolders: ['営業部'] })
+    const editor = await publishing('sh-editor')
+    expect(editor.company).toBe(true)
+    expect(editor.departmentFolders).toContain('営業部')
+    // 法務部: only the people who belong write (a list grants no folder access); 人事部: not read.
+    expect(editor.departmentFolders).not.toContain('法務部')
+    expect(editor.departmentFolders).not.toContain('人事部')
+    // The same answers as publishing itself.
+    expect((await publishSkill('pub-check', dept['営業部'], SKILL, 'sh-sales-editor')).status).toBe(201)
+    expect((await publishSkill('pub-check', null, SKILL, 'sh-sales-editor')).status).toBe(403)
+    expect((await publishSkill('pub-check', dept['法務部'], SKILL, 'sh-editor')).status).toBe(403)
   })
 
   it('its versions and files answer exactly as for an item that does not exist', async () => {

@@ -14,6 +14,7 @@ contract.events notifications:openTasks
 contract.events plugins:changed
 contract.events records:changed
 contract.events setup:progress
+contract.events skillShelf:changed
 contract.events sparse:progress
 contract.events tool-approval-request
 contract.events voice:event
@@ -185,6 +186,9 @@ contract.invoke recordViews:forFile
 contract.invoke recordViews:search
 contract.invoke recordViews:topics
 contract.invoke shell:openExternal
+contract.invoke skillShelf:editLocally
+contract.invoke skillShelf:publish
+contract.invoke skillShelf:restoreCompany
 contract.invoke skills:list
 contract.invoke skills:makePrivate
 contract.invoke skills:publish
@@ -363,6 +367,7 @@ contract.type ElectronAPI.disconnectGoogle = disconnectGoogle: Invoke<'google:di
 contract.type ElectronAPI.disconnectSlack = disconnectSlack: Invoke<'slack:disconnect'>
 contract.type ElectronAPI.dismissAppLinkServer = dismissAppLinkServer: Invoke<'appLink:dismissServer'>
 contract.type ElectronAPI.dropLinkOnRecord = dropLinkOnRecord: Invoke<'tasks:dropLink'>
+contract.type ElectronAPI.editCompanySkillLocally = editCompanySkillLocally: Invoke<'skillShelf:editLocally'>
 contract.type ElectronAPI.exists = exists: Invoke<'fs:exists'>
 contract.type ElectronAPI.findRecords = findRecords: Invoke<'recordViews:find'>
 contract.type ElectronAPI.findRecordsHome = findRecordsHome: Invoke<'recordViews:findHome'>
@@ -473,6 +478,7 @@ contract.type ElectronAPI.onNotificationsOpenTasks = onNotificationsOpenTasks: S
 contract.type ElectronAPI.onPluginsChanged = onPluginsChanged: Subscribe<'plugins:changed'>
 contract.type ElectronAPI.onRecordsChanged = onRecordsChanged: Subscribe<'records:changed'>
 contract.type ElectronAPI.onSetupProgress = onSetupProgress: Subscribe<'setup:progress'>
+contract.type ElectronAPI.onSkillShelfChanged = onSkillShelfChanged: Subscribe<'skillShelf:changed'>
 contract.type ElectronAPI.onSparseProgress = onSparseProgress: Subscribe<'sparse:progress'>
 contract.type ElectronAPI.onToolApprovalRequest = onToolApprovalRequest: Subscribe<'tool-approval-request'>
 contract.type ElectronAPI.onWriteAccessChanged = onWriteAccessChanged: Subscribe<'writeAccess:changed'>
@@ -483,6 +489,7 @@ contract.type ElectronAPI.openOutboundMailAttachment = openOutboundMailAttachmen
 contract.type ElectronAPI.openWorkingFolder = openWorkingFolder: Invoke<'companySetup:openWorkingFolder'>
 contract.type ElectronAPI.patchChatSession = patchChatSession: Invoke<'chatHistory:patchSession'>
 contract.type ElectronAPI.publishSkill = publishSkill: Invoke<'skills:publish'>
+contract.type ElectronAPI.publishSkillToCompany = publishSkillToCompany: Invoke<'skillShelf:publish'>
 contract.type ElectronAPI.readDirectory = readDirectory: Invoke<'fs:readDirectory'>
 contract.type ElectronAPI.readDirectoryTree = readDirectoryTree: (path: string, maxDepth?: number) => Promise<InvokeResult<'fs:readDirectoryTree'>>
 contract.type ElectronAPI.readFile = readFile: Invoke<'fs:readFile'>
@@ -502,6 +509,7 @@ contract.type ElectronAPI.reservedPathRefusal = reservedPathRefusal: Invoke<'pri
 contract.type ElectronAPI.resolveOutboundMail = resolveOutboundMail: Invoke<'outboundMail:resolve'>
 contract.type ElectronAPI.respondAgentInteraction = respondAgentInteraction: Invoke<'agent-interaction:respond'>
 contract.type ElectronAPI.respondToolApproval = respondToolApproval: Invoke<'tool-approval-response'>
+contract.type ElectronAPI.restoreCompanySkill = restoreCompanySkill: Invoke<'skillShelf:restoreCompany'>
 contract.type ElectronAPI.retryAiTurn = retryAiTurn: Invoke<'aiTurns:retry'>
 contract.type ElectronAPI.retryTaskRun = retryTaskRun: Invoke<'tasks:retryRun'>
 contract.type ElectronAPI.sameAsApproval = sameAsApproval: Invoke<'approvals:sameAs'>
@@ -675,6 +683,7 @@ contract.type IpcEventChannels.'notifications:openTasks' = 'notifications:openTa
 contract.type IpcEventChannels.'plugins:changed' = 'plugins:changed': [change: { companyId: string }]
 contract.type IpcEventChannels.'records:changed' = 'records:changed': [data: { companyId: string }]
 contract.type IpcEventChannels.'setup:progress' = 'setup:progress': [data: DownloadProgress]
+contract.type IpcEventChannels.'skillShelf:changed' = 'skillShelf:changed': [change: { companyId: string }]
 contract.type IpcEventChannels.'sparse:progress' = 'sparse:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'tool-approval-request' = 'tool-approval-request': [data: ToolApprovalRequest]
 contract.type IpcEventChannels.'voice:event' = 'voice:event': [event: VoiceEvent]
@@ -847,6 +856,9 @@ contract.type IpcInvokeChannels.'recordViews:forFile' = 'recordViews:forFile': {
 contract.type IpcInvokeChannels.'recordViews:search' = 'recordViews:search': { args: [companyId: string, text: string]; result: RecordListResult }
 contract.type IpcInvokeChannels.'recordViews:topics' = 'recordViews:topics': { args: [companyId: string, recordIds: string[]]; result: ConsultationTopicsResult }
 contract.type IpcInvokeChannels.'shell:openExternal' = 'shell:openExternal': { args: [url: string]; result: SimpleResult }
+contract.type IpcInvokeChannels.'skillShelf:editLocally' = 'skillShelf:editLocally': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
+contract.type IpcInvokeChannels.'skillShelf:publish' = 'skillShelf:publish': { args: [rootPath: string, skillPath: string, expectedVersion: string | null]; result: SimpleResult }
+contract.type IpcInvokeChannels.'skillShelf:restoreCompany' = 'skillShelf:restoreCompany': { args: [rootPath: string, skillPath: string]; result: SkillShelfRestoreResult }
 contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
 contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
 contract.type IpcInvokeChannels.'skills:publish' = 'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: FileOpResult }
@@ -921,9 +933,12 @@ contract.type SkillInfo.id = id: string
 contract.type SkillInfo.isNurturing = isNurturing?: boolean
 contract.type SkillInfo.isPrivate = isPrivate?: boolean
 contract.type SkillInfo.name = name: string
+contract.type SkillInfo.shelf = shelf?: SkillShelfMark
+contract.type SkillInfo.shelfPublish = shelfPublish?: boolean
 contract.type SkillInfo.skillPath = skillPath: string
 contract.type SkillsResult = export interface SkillsResult { }
 contract.type SkillsResult.error = error?: string
+contract.type SkillsResult.ruleClashes = ruleClashes?: string[]
 contract.type SkillsResult.skills = skills: SkillInfo[]
 contract.type SkillsResult.success = success: boolean
 contract.type SparseExclusionsResult = export interface SparseExclusionsResult { }
@@ -1133,6 +1148,9 @@ main.handle recordViews:forFile @ features/record-views/ipc.ts (companyId, compa
 main.handle recordViews:search @ features/record-views/ipc.ts (companyId, text)
 main.handle recordViews:topics @ features/record-views/ipc.ts (companyId, recordIds)
 main.handle shell:openExternal @ features/tools/ipc.ts (url: string)
+main.handle skillShelf:editLocally @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
+main.handle skillShelf:publish @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string, expectedVersion: string | null)
+main.handle skillShelf:restoreCompany @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
 main.handle skills:list @ features/skills/ipc.ts (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean })
 main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:publish @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
@@ -1197,6 +1215,7 @@ main.send notifications:openTasks @ main.ts
 main.send plugins:changed @ main.ts
 main.send records:changed @ main.ts
 main.send setup:progress @ features/company-setup/ipc.ts
+main.send skillShelf:changed @ main.ts
 main.send sparse:progress @ features/download-choices/ipc.ts
 main.send tool-approval-request @ main.ts
 main.send voice:event @ voice-input.ts
@@ -1273,6 +1292,8 @@ preload dismissAppLinkServer -> invoke appLink:dismissServer()
 preload dismissAppLinkServer : () => Promise<void>
 preload dropLinkOnRecord -> invoke tasks:dropLink($0, $1, $2, $3)
 preload dropLinkOnRecord : (companyId: string, targetId: string, dropped: DroppedThing, link?: string | undefined) => Promise<DropLinkResult>
+preload editCompanySkillLocally -> invoke skillShelf:editLocally($0, $1)
+preload editCompanySkillLocally : (rootPath: string, skillPath: string) => Promise<SimpleResult>
 preload exists -> invoke fs:exists($0)
 preload exists : (path: string) => Promise<boolean>
 preload findRecords -> invoke recordViews:find($0, $1, $2)
@@ -1493,6 +1514,8 @@ preload onRecordsChanged -> on records:changed(<fn>) ; removeListener records:ch
 preload onRecordsChanged : (callback: (data: { companyId: string; }) => void) => () => void
 preload onSetupProgress -> on setup:progress(<fn>) ; removeListener setup:progress(<fn>)
 preload onSetupProgress : (callback: (data: DownloadProgress) => void) => () => void
+preload onSkillShelfChanged -> on skillShelf:changed(<fn>) ; removeListener skillShelf:changed(<fn>)
+preload onSkillShelfChanged : (callback: (change: { companyId: string; }) => void) => () => void
 preload onSparseProgress -> on sparse:progress(<fn>) ; removeListener sparse:progress(<fn>)
 preload onSparseProgress : (callback: (data: DownloadProgress) => void) => () => void
 preload onToolApprovalRequest -> on tool-approval-request(<fn>) ; removeListener tool-approval-request(<fn>)
@@ -1513,6 +1536,8 @@ preload patchChatSession -> invoke chatHistory:patchSession($0, $1, $2)
 preload patchChatSession : (companyId: string, sessionId: string, patch: ChatMetadataPatch) => Promise<ChatSession | null>
 preload publishSkill -> invoke skills:publish($0, $1)
 preload publishSkill : (rootPath: string, skillRelativePath: string) => Promise<FileOpResult>
+preload publishSkillToCompany -> invoke skillShelf:publish($0, $1, $2)
+preload publishSkillToCompany : (rootPath: string, skillPath: string, expectedVersion: string | null) => Promise<SimpleResult>
 preload readDirectory -> invoke fs:readDirectory($0)
 preload readDirectory : (path: string) => Promise<DirectoryEntry[]>
 preload readDirectoryTree -> invoke fs:readDirectoryTree($0, $1)
@@ -1551,6 +1576,8 @@ preload respondAgentInteraction -> invoke agent-interaction:respond($0, $1)
 preload respondAgentInteraction : (id: string, response: AgentInteractionResponse) => Promise<boolean>
 preload respondToolApproval -> invoke tool-approval-response($0, $1)
 preload respondToolApproval : (toolUseId: string, approved: boolean) => Promise<boolean>
+preload restoreCompanySkill -> invoke skillShelf:restoreCompany($0, $1)
+preload restoreCompanySkill : (rootPath: string, skillPath: string) => Promise<SkillShelfRestoreResult>
 preload retryAiTurn -> invoke aiTurns:retry($0, $1)
 preload retryAiTurn : (companyId: string, recordId: string) => Promise<{ ok: boolean; }>
 preload retryTaskRun -> invoke tasks:retryRun($0, $1)

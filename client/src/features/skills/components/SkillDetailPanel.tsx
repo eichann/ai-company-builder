@@ -22,6 +22,7 @@ import {
 import type { Skill, SkillTool } from '../model'
 import { startSkillTool, stopSkillTool } from '../api'
 import { useAppStore } from '../../../stores/appStore'
+import { SHELF_CLASH_NOTE, SHELF_COMPANY_NOTE, SHELF_EDITING_NOTE, SHELF_EDITING_TITLE, SHELF_PUBLISH_CONFIRM, SHELF_REPLACE_CONFIRM, SHELF_RESTORE_CONFIRM, shelfEditTexts, shelfMarkTitle } from '../../../../shared/skill-shelf'
 
 type TabId = 'overview' | 'rules' | 'references' | 'scripts' | 'tools'
 
@@ -34,6 +35,14 @@ interface SkillDetailPanelProps {
   onOpenTool?: (tool: SkillTool, port: number) => void
   onPublish?: (skill: Skill) => Promise<string | null>
   onToggleNurturing?: (skill: Skill) => Promise<string | null>
+  companyShelf?: CompanyShelfActions
+}
+
+/** A company without the shared folder: each answers the sentence when it did not happen, or null. */
+export interface CompanyShelfActions {
+  publish: (skill: Skill) => Promise<string | null>
+  editLocally: (skill: Skill) => Promise<string | null>
+  restoreCompany: (skill: Skill) => Promise<string | null>
 }
 
 export function SkillDetailPanel({
@@ -45,6 +54,7 @@ export function SkillDetailPanel({
   onOpenTool,
   onPublish,
   onToggleNurturing,
+  companyShelf,
 }: SkillDetailPanelProps) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<TabId>('overview')
@@ -125,7 +135,7 @@ export function SkillDetailPanel({
       {/* Tab Content */}
       <div className="flex-1 overflow-auto p-5">
         {activeTab === 'overview' && (
-          <OverviewTab skill={skill} onEditFile={onEditFile} onPublish={onPublish} onToggleNurturing={onToggleNurturing} />
+          <OverviewTab key={skill.id} skill={skill} onEditFile={onEditFile} onPublish={onPublish} onToggleNurturing={onToggleNurturing} companyShelf={companyShelf} />
         )}
         {activeTab === 'rules' && (
           <FileListTab
@@ -160,16 +170,85 @@ export function SkillDetailPanel({
   )
 }
 
+/** The 共有 section of a company without the shared folder (client/shared/skill-shelf.ts). */
+function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill: Skill; actions?: CompanyShelfActions; onEditFile: (path: string) => void; onRefused: (sentence: string | null) => void }) {
+  const [confirming, setConfirming] = useState<'publish' | 'edit' | 'restore' | null>(null)
+  const [busy, setBusy] = useState(false)
+  const box = 'p-3 rounded-xl bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50 text-xs text-gray-600 dark:text-zinc-400 space-y-2'
+  const button = 'w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50'
+  const quiet = 'w-full flex items-center justify-center gap-2 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50'
+  const run = (action: (skill: Skill) => Promise<string | null>) => {
+    setBusy(true)
+    setConfirming(null)
+    onRefused(null)
+    void action(skill).then(onRefused).finally(() => setBusy(false))
+  }
+  const confirmation = (text: string, label: string, action: (skill: Skill) => Promise<string | null>) => (
+    <div className="space-y-2">
+      <div className="flex items-start gap-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400">
+        <Warning size={14} className="flex-shrink-0 mt-0.5" />
+        <span>{text}</span>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={() => run(action)} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors">{label}</button>
+        <button onClick={() => setConfirming(null)} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors">キャンセル</button>
+      </div>
+    </div>
+  )
+  // Offered only where the server said this member may publish a Skill; the server still decides.
+  const publish = actions && skill.shelfPublish && (confirming === 'publish'
+    ? confirmation(skill.shelf ? SHELF_REPLACE_CONFIRM : SHELF_PUBLISH_CONFIRM, '会社に公開', actions.publish)
+    : <button disabled={busy} onClick={() => setConfirming('publish')} className={button}><CloudArrowUp size={14} />会社に公開</button>)
+
+  if (skill.shelf?.state === 'company') {
+    return (
+      <div className={box}>
+        <div className="text-sm font-medium text-gray-700 dark:text-zinc-300">{shelfMarkTitle(skill.shelf.version)}</div>
+        <div>{SHELF_COMPANY_NOTE}</div>
+        {actions && (confirming === 'edit'
+          ? confirmation(shelfEditTexts(!!skill.shelfPublish).confirm, '自分用に直す', actions.editLocally)
+          : <button disabled={busy} onClick={() => setConfirming('edit')} className={quiet}>自分用に直す</button>)}
+      </div>
+    )
+  }
+  if (skill.shelf?.state === 'editing') {
+    // One card: what it means, then what the member can do next (open it, go back, publish).
+    return (
+      <section aria-label={SHELF_EDITING_TITLE} className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 text-xs text-gray-600 dark:text-zinc-400 space-y-2">
+        <h5 className="text-sm font-medium text-amber-800 dark:text-amber-300">{SHELF_EDITING_TITLE}</h5>
+        <p className="text-gray-700 dark:text-zinc-300">{SHELF_EDITING_NOTE}</p>
+        <p>{shelfEditTexts(!!skill.shelfPublish).detail}</p>
+        {skill.files.skillMd && (
+          <button onClick={() => onEditFile(skill.files.skillMd!)} className={quiet}><PencilSimple size={14} />SKILL.md を開いて直す</button>
+        )}
+        {actions && (confirming === 'restore'
+          ? confirmation(SHELF_RESTORE_CONFIRM, '会社の版に戻す', actions.restoreCompany)
+          : <button disabled={busy} onClick={() => setConfirming('restore')} className={quiet}>会社の版に戻す</button>)}
+        {publish}
+      </section>
+    )
+  }
+  return (
+    <div className={box}>
+      <div>この PC だけのスキルです（ほかの人には共有されません）。</div>
+      {skill.shelf?.state === 'clash' && <div>{SHELF_CLASH_NOTE}</div>}
+      {publish}
+    </div>
+  )
+}
+
 function OverviewTab({
   skill,
   onEditFile,
   onPublish,
   onToggleNurturing,
+  companyShelf,
 }: {
   skill: Skill
   onEditFile: (path: string) => void
   onPublish?: (skill: Skill) => Promise<string | null>
   onToggleNurturing?: (skill: Skill) => Promise<string | null>
+  companyShelf?: CompanyShelfActions
 }) {
   const { t } = useTranslation()
   const [showPublishConfirm, setShowPublishConfirm] = useState(false)
@@ -190,10 +269,8 @@ function OverviewTab({
           共有
         </h4>
         {!onPublish ? (
-          // A company without the shared folder: nothing is shared (client/shared/company-folder.ts).
-          <div className="p-3 rounded-xl bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50 text-xs text-gray-600 dark:text-zinc-400">
-            この PC だけのスキルです（ほかの人には共有されません）。
-          </div>
+          // A company without the shared folder: the files stay on this PC; the Skill shelf is the way to the others.
+          <CompanyShelfSection skill={skill} actions={companyShelf} onEditFile={onEditFile} onRefused={setRefusal} />
         ) : skill.isPrivate ? (
           <div className="p-3 rounded-xl bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50">
             <div className="flex items-center gap-2 mb-2">
@@ -252,8 +329,8 @@ function OverviewTab({
         )}
       </div>
 
-      {/* Nurturing Status */}
-      <div>
+      {/* Nurturing Status (a mark in SKILL.md: on a delivered Skill the next fetch would take it away) */}
+      <div hidden={skill.shelf?.state === 'company'}>
         <h4 className="text-xs font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider mb-2">
           ステータス
         </h4>

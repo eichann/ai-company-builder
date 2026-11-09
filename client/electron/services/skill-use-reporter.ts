@@ -21,6 +21,10 @@
 // The AI's next write in the consultation waits for the report in flight
 // (`settled`, used by records/api.ts) so the server can copy it onto what the
 // AI writes. Failures are logged without names and never reach the AI.
+//
+// A working folder (a company without the shared folder) has no git: the version
+// is the Skill shelf's (64 hex, the same field), `dirty` when the files differ
+// from it. A Skill not delivered by the company there is the member's own: nothing.
 
 import fs from 'fs'
 import path from 'path'
@@ -32,6 +36,11 @@ export interface SkillUseReporterDeps {
   cookies: () => string[]
   /** `git <args>` in the repository at `root`; resolves with stdout, rejects on failure. */
   git: (root: string, args: string[]) => Promise<string>
+  /**
+   * The shelf's version of a Skill folder in a working folder: undefined = `root` is no working
+   * folder (git decides), null = not a delivered Skill (nothing is reported).
+   */
+  shelfVersion?: (root: string, rel: string) => Promise<{ version: string; dirty: boolean } | null> | undefined
   /** The member's home (their own skills under ~/.claude/skills shadow a company skill of the same name). */
   home?: string
   fetch?: typeof fetch
@@ -93,8 +102,12 @@ export function createSkillUseReporter(deps: SkillUseReporterDeps) {
     if (!isSkillUseName(s.skill)) return // a plugin's `plugin:skill`, or not a skill folder name
     const at = locateCompanySkill(s.companyRoot, s.workingDirectory, s.skill, deps.home)
     if ('none' in at) return
-    const version = await skillFolderVersion(deps.git, s.companyRoot, at.rel)
-    if (!version) return // not in HEAD: only on this PC
+    const shelf = deps.shelfVersion?.(s.companyRoot, at.rel)
+    const onShelf = shelf ? await shelf : undefined
+    const version = shelf
+      ? (onShelf ? { tree: onShelf.version, dirty: onShelf.dirty } : null)
+      : await skillFolderVersion(deps.git, s.companyRoot, at.rel)
+    if (!version) return // not in HEAD (or not delivered): only on this PC
     const key = [s.companyId, s.conversationId, s.skill, version.tree, version.dirty].join('\n')
     if (reported.has(key)) return
     const base = deps.baseUrl().replace(/\/+$/, '')

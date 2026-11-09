@@ -69,6 +69,19 @@ export function skillExcludeLines(sharing: SkillSharing, companyPath: string): s
   return [...SKILL_LEFTOVER_PATTERNS, ...artifacts, ...theirs]
 }
 
+/** One file or folder name that is a leftover, wherever it is (a Skill delivered without git has no exclude file). */
+export function isLeftoverName(name: string, isFolder: boolean): boolean {
+  return isFolder ? LEFTOVER_FOLDERS.has(name) : LEFTOVER_FILES.has(name) || name.endsWith('.pyc')
+}
+
+/** A path inside a Skill folder that is an artifact: a lock file, a tool's build. */
+export function isSkillArtifactPath(pathInSkill: string): boolean {
+  const segments = pathInSkill.split('/')
+  if (ARTIFACT_FILES.has(segments[segments.length - 1])) return true
+  const tools = segments.indexOf('tools')
+  return tools >= 0 && segments.slice(tools + 1, -1).some(s => TOOL_BUILD_FOLDERS.has(s))
+}
+
 /** A leftover (never an artifact) anywhere in the agents' folders (every skill folder lies in one). */
 export function isSkillLeftover(repoPath: string): boolean {
   if (!AGENT_FOLDER_RE.test(lookalikeKey(repoPath))) return false

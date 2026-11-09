@@ -85,4 +85,4 @@ working folder, `services/working-folders.ts`). Test: `client/tests/company-with
 
 Their Skills, AI instruction texts and rule files are not files of a company folder at all: they
 come from the server's Skill shelf (`plugins.md` "The Skill shelf"), checked on upload with the
-push checker's rules.
+push checker's rules; the app places them in the working folder (`plugins.md` "The Skill shelf in the app").

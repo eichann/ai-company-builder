@@ -247,22 +247,32 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       return ok({ items: rows.map(r => view(ctx, r, person)) })
     },
 
-    /** GET /me/skill-shelf — what the member's app places: the current version of every item they read. */
+    /**
+     * GET /me/skill-shelf — what the member's app places: the current version of every item of a
+     * place they read (`reads`, the one read check: a department's people, its groups, people
+     * named on it; owners/admins read every place), and where they may publish a Skill
+     * (`problems`, the publish check itself), so the app offers 「会社に公開」 only there.
+     */
     mine(member: Member): Outcome<MyShelfView> {
       if (deps.hasCompanyFolder(member.companyId)) return notHere()
       const ctx = contextOf(member)
-      const belongs = new Set(ctx.handle.tasks.departmentIdsOf(member.userId))
       const items: DeliveredShelfItem[] = ctx.handle.skillShelf.items()
         .filter(r => r.currentVersion !== null && ctx.reads(r.departmentId))
         .map(r => {
           const dept = r.departmentId === null ? null : ctx.departments.get(r.departmentId)
           return {
             id: r.id, kind: r.kind, name: r.name,
-            department: dept ? { id: dept.id, folder: dept.folder, belongs: belongs.has(dept.id) } : null,
+            department: dept ? { id: dept.id, folder: dept.folder } : null,
             version: r.currentVersion as string, fileCount: r.fileCount, totalBytes: r.totalBytes,
           }
         })
-      return ok({ items })
+      // Content aside (auto-run parts are judged on the files): may a Skill be published at the place at all?
+      const mayPublish = (departmentId: string | null) => ctx.problems('skill', departmentId, 'skill', [{ path: 'SKILL.md' }], false).length === 0
+      // `reads` as publishing asks it first (a company without the shared folder allows no write-only rule).
+      const departmentFolders = [...ctx.departments.values()]
+        .filter(d => ctx.reads(d.id) && mayPublish(d.id))
+        .map(d => d.folder.normalize('NFC'))
+      return ok({ items, skillPublishing: { company: mayPublish(null), departmentFolders } })
     },
 
     /** GET /skill-shelf/:itemId/versions — every version (newest first) and who changed what. */

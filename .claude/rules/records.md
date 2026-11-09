@@ -1613,6 +1613,8 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   conversation, company folder, working folder) — not for an unattended step, a chat without a
   company folder or the API-key mode. **Codex: not recorded** — it has no Skill tool (its skills are
   instructions it reads with ordinary commands), so there is no reliable signal.
+- **A working folder** (no git): the version is the Skill shelf's (`plugins.md` "The Skill shelf in
+  the app"), `dirty` when the files differ from it; only delivered Skills are reported.
 - **Version** (`client/electron/services/skill-use-reporter.ts`, main): the folder is
   `.claude/skills/<name>/SKILL.md` in the working folder or a parent up to the company folder;
   version = the git tree id of that folder at HEAD (`rev-parse HEAD:<rel>` + `cat-file -t` =

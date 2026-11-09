@@ -2,6 +2,7 @@
 // copied one, and the slash commands the chat offers.
 import type { DepartmentConfig } from '../../types'
 import { setFrontmatterField, yamlQuoted } from '../../../shared/skill-frontmatter'
+import type { SkillShelfMark } from '../../../shared/skill-shelf'
 
 /** A web app inside a skill's folder (`tools/<name>/`). */
 export interface SkillTool {
@@ -22,6 +23,8 @@ export interface Skill {
   group?: string          // Hierarchy group label (e.g., "全社", "営業部", "営業部 / 顧客A案件")
   isPrivate?: boolean     // true = .gitignore に含まれ同期されない（不可逆: 公開したら戻せない）
   isNurturing?: boolean   // true = 育て中（SKILL.md frontmatter status: nurturing）
+  shelf?: SkillShelfMark  // 全社フォルダを使わない会社: 会社から届いた Skill か、同じ名前の自分の Skill か
+  shelfPublish?: boolean  // 全社フォルダを使わない会社: 「会社に公開」を出すか（サーバーが公開を認める場所か）
   skillPath?: string      // Absolute path to skill directory
   // File paths relative to department folder
   files: {
@@ -44,6 +47,7 @@ export function skillNameTakenMessage(folderName: string): string {
 export const SKILL_ALREADY_SHARED_MESSAGE = 'このフォルダ名のスキルはすでに会社で共有されています。別のフォルダ名にしてください。'
 export const SKILL_CREATE_FAILED = 'スキルを作成できませんでした。もう一度試してください。'
 export const SKILL_COPY_FAILED = 'スキルをコピーできませんでした。もう一度試してください。'
+export const SKILL_PUBLISH_FAILED = 'できませんでした。もう一度試してください。'
 
 /** The SKILL.md of a new skill (frontmatter + the sections the wizard fills in). */
 export function newSkillMarkdown(data: NewSkillInput): string {

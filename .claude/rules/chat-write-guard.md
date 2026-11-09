@@ -129,9 +129,13 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
 In the working folder of a company without the shared folder (`services/working-folders.ts`;
 `sync.md` "Companies without the shared company folder") nothing reaches the push checker, so
 `checkWritePath` makes only the app's own checks: the step's deliverable folder, agent config
-(owner/admin only, as everywhere: what the AI loads and runs) and — in `decideToolWrite` — record
-frontmatter. Write access, not downloaded, private folders, instruction and skill files, type
-definitions and the git clone / init rule are not judged there; `features/chat/server-config.ts`
+(owner/admin only, as everywhere: what the AI loads and runs), what the company delivered
+(`getShelfPaths`: a delivered Skill folder or rule file, as written or where it resolves, for every
+role, even owners — guard reason `skill-file` / `instruction-file`, 「…AI は変更できません…」;
+`plugins.md` "The Skill shelf in the app") and — in `decideToolWrite` — record
+frontmatter. Bash beyond literal redirects and Codex are not covered, as everywhere: the next fetch
+puts a changed file back. Instruction texts have no file to protect. Write access, not downloaded, private folders, the member's own instruction and skill
+files, type definitions and the git clone / init rule are not judged there; `features/chat/server-config.ts`
 builds that guard (no access, no private-folder view). `.claude/settings.json` / `.mcp.json` in such
 a folder are the member's own, never shared. The renderer shows no 閲覧のみ there
 (`useWriteAccess`). Git companies keep every check. Test: `client/tests/company-without-folder.test.ts`

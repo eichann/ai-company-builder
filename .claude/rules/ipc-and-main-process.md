@@ -37,7 +37,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `company-setup` (git:inspectCompanyFolder, git:setupCompanyRemote), `broker` (brokerKeys:*,
   the member's own API keys, and `brokerKeys:moveFromEnv`, which reads a `.env` key in main, sends
   it and removes it locally only after the server kept it: `key-broker.md`), `download-choices`
-  (git:sparse*, git:folderSizes), `skills` (skills:*, scan + cache), `tools` (tools:start/stop,
+  (git:sparse*, git:folderSizes), `skills` (skills:*, scan + cache), `skill-shelf` (skillShelf:publish / editLocally and the event
+  `skillShelf:changed`: a company without the shared folder, `plugins.md` "The Skill shelf in the app"), `tools` (tools:start/stop,
   shell:openExternal; running tools stop on quit), `app-link` (appLink:serverOffer / acceptServer /
   dismissServer: the invitation link's server address, below), `chat` (`server-config.ts`: what the embedded
   chat server gets; `system-prompt.ts`), `chat-windows` (chatWindow:*, 「別ウィンドウで開く」;

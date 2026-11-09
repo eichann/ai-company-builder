@@ -346,6 +346,149 @@ test('a company without the shared folder: no sync, preview or backups (one shor
   expect(await calls(page, 'gitSync')).toEqual([])
 })
 
+// The Skill shelf (plugins.md "The Skill shelf in the app"): delivered Skills are told from the
+// member's own, a local one can go to the company, and the server's refusal reads as it was written.
+test('without the shared folder: a company Skill says so and offers only 自分用に直す; 育て中 and 会社に公開 are not offered on it', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none' })
+  await deptTab(page, '全社').click()
+  await page.getByRole('heading', { name: 'weekly-report' }).click()
+  await expect(page.getByText('会社の Skill（版 abcd1234）')).toBeVisible()
+  await expect(page.getByText('AI やこの PC で変えても、次に受け取るときに元に戻ります。')).toBeVisible()
+  // A delivered rule kept back by the member's own file is said here too.
+  await expect(page.getByRole('status').filter({ hasText: '会社の決まり' })).toContainText('会社の決まり（tone）と同じ名前のファイルがあるため')
+  await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
+  await expect(page.getByText('ステータス')).toBeHidden()
+  await expect(page.getByText('この PC だけのスキルです')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '会社の版に戻す' })).toHaveCount(0)
+  await page.getByRole('button', { name: '自分用に直す' }).click()
+  await expect(page.getByText('この PC だけで、あなたが直した版を使うようにします。')).toBeVisible()
+  expect(await calls(page, 'editCompanySkillLocally')).toEqual([])
+  await page.getByRole('button', { name: '自分用に直す' }).click()
+  expect(await calls(page, 'editCompanySkillLocally')).toEqual([['weekly-report']])
+})
+
+test('without the shared folder: a local Skill stays 「この PC だけ」 and goes to the company only after the confirmation', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none' })
+  await deptTab(page, '営業部').click()
+  await page.getByRole('heading', { name: 'proposal' }).click()
+  await expect(page.getByText('この PC だけのスキルです（ほかの人には共有されません）。')).toBeVisible()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await expect(page.getByText('会社の Skill として公開します。')).toBeVisible()
+  await page.getByRole('button', { name: 'キャンセル' }).click()
+  expect(await calls(page, 'publishSkillToCompany')).toEqual([])
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await expect.poll(() => calls(page, 'publishSkillToCompany')).toEqual([['proposal', null]])
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('without the shared folder: the server\'s refusal is shown in its words', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', shelf: 'refused' })
+  await deptTab(page, '営業部').click()
+  await page.getByRole('heading', { name: 'proposal' }).click()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await expect(page.getByRole('alert')).toContainText('この Skill・指示を変えられるのは、決められた人だけです。')
+  // It was about that Skill: another one opens without it.
+  await page.evaluate(() => window.__acbLayout.addSkill('営業部', 'visit-memo'))
+  await page.getByRole('heading', { name: 'visit-memo' }).click()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('without the shared folder: a Skill under 自分用に直す is one card that says what it means and what to do next, not that a name happens to clash', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', shelf: 'editing' })
+  await deptTab(page, '開発部').click()
+  await page.getByRole('heading', { name: 'release-note' }).click()
+  await expect(page.getByText('自分用に直し中')).toBeVisible()
+  const card = page.getByRole('region', { name: '自分用に直している Skill' })
+  await expect(card.getByRole('heading', { name: '自分用に直している Skill' })).toBeVisible()
+  await expect(card).toContainText('この PC の AI だけが、あなたの直した版を使います。ほかの人には届きません。')
+  await expect(card.getByRole('button', { name: 'SKILL.md を開いて直す' })).toBeVisible()
+  await expect(card.getByRole('button', { name: '会社の版に戻す' })).toBeVisible()
+  await expect(card.getByRole('button', { name: '会社に公開' })).toBeVisible()
+  await expect(page.getByText(/フォルダを消/)).toHaveCount(0)
+  await expect(page.getByText('会社にも同じ名前の Skill があります。')).toHaveCount(0)
+  await expect(page.getByText('この PC だけのスキルです')).toHaveCount(0)
+  await card.getByRole('button', { name: '会社に公開' }).click()
+  await expect(page.getByText('会社の同じ名前の Skill を、この内容に置き換えます。')).toBeVisible()
+})
+
+test('without the shared folder: 会社の版に戻す asks first, says the member\'s version is kept, and only then goes back', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', shelf: 'editing', download: 'done' })
+  await deptTab(page, '開発部').click()
+  await page.getByRole('heading', { name: 'release-note' }).click()
+  const card = page.getByRole('region', { name: '自分用に直している Skill' })
+  await card.getByRole('button', { name: '会社の版に戻す' }).click()
+  await expect(card).toContainText('会社の版に戻します。あなたが直した内容は、念のため控えに残します')
+  await card.getByRole('button', { name: 'キャンセル' }).click()
+  expect(await calls(page, 'restoreCompanySkill')).toEqual([])
+  await card.getByRole('button', { name: '会社の版に戻す' }).click()
+  await card.getByRole('button', { name: '会社の版に戻す' }).click()
+  await expect.poll(() => calls(page, 'restoreCompanySkill')).toEqual([['release-note']])
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('without the shared folder: 会社の版に戻す while the company\'s version cannot be received says when it comes', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', shelf: 'editing', restore: 'later', download: 'done' })
+  await deptTab(page, '開発部').click()
+  await page.getByRole('heading', { name: 'release-note' }).click()
+  const card = page.getByRole('region', { name: '自分用に直している Skill' })
+  await card.getByRole('button', { name: '会社の版に戻す' }).click()
+  await card.getByRole('button', { name: '会社の版に戻す' }).click()
+  await expect(page.getByRole('alert')).toContainText('会社の版は、次に受け取るときに届きます。')
+})
+
+test('without the shared folder: the member\'s Skill beside a company one of the same name says so, and publishing names the version it replaces', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', download: 'done' })
+  await deptTab(page, '開発部').click()
+  await page.getByRole('heading', { name: 'release-note' }).click()
+  await expect(page.getByText('会社にも同じ名前の Skill があります。')).toBeVisible()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await expect(page.getByText('会社の同じ名前の Skill を、この内容に置き換えます。')).toBeVisible()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await expect.poll(() => calls(page, 'publishSkillToCompany')).toEqual([['release-note', 'abcd1234'.repeat(8)]])
+})
+
+test('without the shared folder: 会社に公開 is not offered where the server says the member may not publish; the notes stay', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', publish: 'no', download: 'done' })
+  await deptTab(page, '営業部').click()
+  await page.getByRole('heading', { name: 'proposal' }).click()
+  await expect(page.getByText('この PC だけのスキルです（ほかの人には共有されません）。')).toBeVisible()
+  await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
+  await deptTab(page, '開発部').click()
+  await page.getByRole('heading', { name: 'release-note' }).click()
+  await expect(page.getByText('会社にも同じ名前の Skill があります。')).toBeVisible()
+  await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
+  // 自分用に直す stays open to everyone, in words true for someone who cannot publish.
+  await deptTab(page, '全社').click()
+  await page.getByRole('heading', { name: 'weekly-report' }).click()
+  await page.getByRole('button', { name: '自分用に直す' }).click()
+  const confirm = page.getByText('この PC だけで、あなたが直した版を使うようにします。')
+  await expect(confirm).toBeVisible()
+  await expect(confirm).not.toContainText('公開')
+})
+
+test('without the shared folder: a Skill under 自分用に直す, for someone who cannot publish, offers 会社の版に戻す and says nothing of publishing', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', shelf: 'editing', publish: 'no', download: 'done' })
+  await deptTab(page, '開発部').click()
+  await page.getByRole('heading', { name: 'release-note' }).click()
+  const card = page.getByRole('region', { name: '自分用に直している Skill' })
+  await expect(card).toContainText('「会社の版に戻す」を押すまで、この PC には届きません。')
+  await expect(card).not.toContainText('公開')
+  await expect(card.getByRole('button', { name: '会社の版に戻す' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
+})
+
+test('a git company keeps its 公開 section: no 会社に公開, no company mark', async ({ page }) => {
+  await openPreview(page, 'skill-layout')
+  await deptTab(page, '全社').click()
+  await page.getByRole('heading', { name: 'weekly-report' }).click()
+  await expect(page.getByText('公開中')).toBeVisible()
+  await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
+  await expect(page.getByText('会社の Skill')).toHaveCount(0)
+  await expect(page.getByText('会社の決まり')).toHaveCount(0)
+})
+
 // The task card's own file actions (owner decision 2026-11-07): a company without the shared folder
 // cannot link files (the server answers NO_COMPANY_FOLDER), so its card offers neither; a git company keeps both.
 for (const kind of ['git', 'none'] as const) {
