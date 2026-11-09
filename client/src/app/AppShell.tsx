@@ -533,7 +533,7 @@ export function AppShell() {
           onPublish={sharedFolder ? skillsTab.shareSkill : undefined}
           onToggleNurturing={skillsTab.toggleNurturing}
           ruleClashes={ruleClashes}
-          companyShelf={sharedFolder ? undefined : { publish: skillsTab.publishToCompany, editLocally: skillsTab.editLocally }}
+          companyShelf={sharedFolder ? undefined : { publish: skillsTab.publishToCompany, editLocally: skillsTab.editLocally, restoreCompany: skillsTab.restoreCompany }}
         />
       ),
     },

@@ -742,19 +742,35 @@ company never reaches any of it: the store knows a company only from
   2026-11-08) — the notes stay, and the server still decides (auto-run parts are judged on the
   files). The department of a Skill folder is matched by `sameDepartmentFolder` (`pathKey`) for the
   button and for the publish's department lookup alike (`client.departmentId`), so the button never
-  offers a publish that would answer 「この部署には公開できません」. 「手元で直す」 stays open to
-  everyone; someone who may not publish there is told so truly (`shelfEditTexts`: their copy is
-  used on this PC only, company updates stop, deleting the folder brings the company's back —
-  never 「公開し直すまで」). A
-  company Skill changes by **「手元で直す」** (`skillShelf:editLocally`, `release`): on this
-  computer it becomes the member's own (mark `editing`, kept even while unchanged; the `.agents/`
-  copy goes), then 「会社に公開」 replaces the version they **started from** (`released` keeps it, a
-  colleague's newer one → 409) and the next sync takes it over. With their copy deleted, the
-  company's comes back.
+  offers a publish that would answer 「この部署には公開できません」. 「自分用に直す」 stays open to
+  everyone; only someone who may publish there is told of publishing (`shelfEditTexts`), and no
+  text tells a member to delete a folder (owner feedback 2026-11-09: that way back scared people). A
+  company Skill changes by **「自分用に直す」** (`skillShelf:editLocally`, `release`; the action was
+  「手元で直す」 until 2026-11-09, identifiers unchanged): on this
+  computer it becomes the member's own (mark `editing`, 「自分用に直し中」, kept even while unchanged;
+  the `.agents/` copy goes), then 「会社に公開」 replaces the version they **started from** (`released`
+  keeps it, a colleague's newer one → 409) and the next sync takes it over. With their copy deleted, the
+  company's comes back. While it lasts the detail panel shows one card (`SkillDetailPanel`,
+  region 「自分用に直している Skill」): 「この PC の AI だけが、あなたの直した版を使います。ほかの人には
+  届きません。」, that company updates wait, then ［SKILL.md を開いて直す］, ［会社の版に戻す］ and, for a
+  publisher only, ［会社に公開］.
+- **「会社の版に戻す」** (`skillShelf:restoreCompany`, store `restoreCompany`), after a confirmation
+  (`SHELF_RESTORE_CONFIRM`): only a Skill held by `released` at exactly that folder for the signed-in
+  account (anything else → `SHELF_NOT_EDITING_MESSAGE`); the folder must be a Skill place by name
+  (a department folder a valid name: the manifest is read back from disk) with no link on the way,
+  at the folder or at `.backups` (→ `SHELF_RESTORE_UNSAFE_MESSAGE`, nothing changed). The member's
+  folder is **moved whole** (one rename, never deleted, never uploaded: `.backups` is local only) to
+  `.backups/<ts>_skill_edit/<the Skill folder's path>` with `_metadata.json` (`_2`, `_3` … when the
+  name is taken), the hold goes, and the handler asks the shelf at once (`syncNow`): the company's
+  version is back before the answer (`companyVersionBack: true`), or, offline, at the next fetch
+  (`SHELF_RESTORED_LATER_NOTE`). A working folder has no backups panel: the copy is reached in the
+  folder itself (Finder hides `.backups`).
 - **Use reports**: `shelfVersion` in `skill-use-reporter.ts`: the version in the `tree` field (64
   hex, the same validator), `dirty` when the files differ; a Skill not delivered is not reported.
 - Tests: `client/tests/skill-shelf.test.ts`, `client/tests/ipc-skill-shelf.test.ts`,
-  `codex-connection.test.ts`, `tests/ui/skill-layout.spec.ts` (each guard mutation-checked).
+  `codex-connection.test.ts`, `tests/ui/skill-layout.spec.ts` (each guard mutation-checked; 会社の版に戻す:
+  only the held folder, another account, a link at / on the way / at `.backups`, an edited manifest's
+  `..` place, a taken backup name, moved not deleted).
 
 ## What we say, and what we do not claim (review §12, owner-approved wording)
 

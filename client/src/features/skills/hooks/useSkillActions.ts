@@ -2,7 +2,8 @@ import { useCallback } from 'react'
 import type { DepartmentConfig } from '../../../types'
 import type { FileOpResult } from '../../../../shared/ipc-contract'
 import type { Skill } from '../model'
-import { copySkill, createSkillDirectory, createSkillFile, editCompanySkillLocally, makeSkillPrivate, pathExists, publishSkill, publishSkillToCompany, readSkillFile, setSkillNurturing, skillWriteRefusal, writeSkillFile } from '../api'
+import { SHELF_RESTORED_LATER_NOTE } from '../../../../shared/skill-shelf'
+import { copySkill, createSkillDirectory, createSkillFile, editCompanySkillLocally, makeSkillPrivate, pathExists, publishSkill, publishSkillToCompany, readSkillFile, restoreCompanySkill, setSkillNurturing, skillWriteRefusal, writeSkillFile } from '../api'
 import { newSkillMarkdown, renameSkillMarkdown, skillNameTakenMessage, SKILL_ALREADY_SHARED_MESSAGE, SKILL_CREATE_FAILED, SKILL_COPY_FAILED, SKILL_PUBLISH_FAILED, type NewSkillInput, type SkillActionResult } from '../model'
 
 const refusalOf = (result: FileOpResult): string | null => (result.code === 'refused' && result.error ? result.error : null)
@@ -115,12 +116,21 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
     return result.success ? null : result.error ?? SKILL_PUBLISH_FAILED
   }, [rootPath, refreshSkills])
 
-  /** 「手元で直す」; answers the sentence when it did not happen, or null. */
+  /** 「自分用に直す」; answers the sentence when it did not happen, or null. */
   const editLocally = useCallback(async (skill: Skill): Promise<string | null> => {
     if (!rootPath || !skill.skillPath) return null
     const result = await editCompanySkillLocally(rootPath, skill.skillPath)
     refreshSkills()
     return result.success ? null : result.error ?? SKILL_PUBLISH_FAILED
+  }, [rootPath, refreshSkills])
+
+  /** 「会社の版に戻す」; answers the sentence to show (refused, or the company's version comes later), or null. */
+  const restoreCompany = useCallback(async (skill: Skill): Promise<string | null> => {
+    if (!rootPath || !skill.skillPath) return null
+    const result = await restoreCompanySkill(rootPath, skill.skillPath)
+    refreshSkills()
+    if (!result.success) return result.error
+    return result.companyVersionBack ? null : SHELF_RESTORED_LATER_NOTE
   }, [rootPath, refreshSkills])
 
   const toggleNurturing = useCallback(async (skill: Skill): Promise<string | null> => {
@@ -130,5 +140,5 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
     return refusalOf(result)
   }, [refreshSkills])
 
-  return { createSkill, copySkillHere, shareSkill, publishToCompany, editLocally, toggleNurturing }
+  return { createSkill, copySkillHere, shareSkill, publishToCompany, editLocally, restoreCompany, toggleNurturing }
 }

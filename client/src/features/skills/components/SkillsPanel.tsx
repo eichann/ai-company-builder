@@ -20,7 +20,7 @@ interface Props {
   /** Absent for a company without the shared folder: skills stay on this PC (no 共有 section). */
   onPublish?: (skill: Skill) => Promise<string | null>
   onToggleNurturing: (skill: Skill) => Promise<string | null>
-  /** A company without the shared folder: 「会社に公開」 and 「手元で直す」. */
+  /** A company without the shared folder: 「会社に公開」, 「自分用に直す」 and 「会社の版に戻す」. */
   companyShelf?: CompanyShelfActions
   /** Delivered rule files not placed: the member has a file of that name. */
   ruleClashes?: string[]

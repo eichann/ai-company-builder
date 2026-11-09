@@ -136,7 +136,7 @@ export function shelfPlaceOfSkillFolder(rel: string): { departmentFolder: string
 
 /**
  * What the Skills panel says of a Skill: delivered by the company; the member's own beside a
- * delivered one of the same name; or a delivered one they chose to change here (「手元で直す」).
+ * delivered one of the same name; or a delivered one they chose to change here (「自分用に直す」).
  */
 export interface SkillShelfMark {
   state: 'company' | 'clash' | 'editing'
@@ -150,24 +150,38 @@ export function shelfMarkTitle(version: string): string {
 
 export const SHELF_COMPANY_NOTE = 'これは会社の Skill です。AI やこの PC で変えても、次に受け取るときに元に戻ります。'
 export const SHELF_CLASH_NOTE = '会社にも同じ名前の Skill があります。あなたの Skill をそのまま使っているので、会社の Skill はこの PC に置いていません。'
-export const SHELF_EDITING_NOTE = 'この PC では、あなたが手元で直している Skill を使っています。公開し直すまで、会社の更新は届きません。やめるときは、この Skill のフォルダを消すと会社の Skill に戻ります。'
-/** The same, for someone who may not publish here (no 「会社に公開」 for them). */
-export const SHELF_EDITING_NOTE_LOCAL = 'この PC では、あなたが手元で直している Skill を使っています。会社の Skill が新しくなっても、この PC には届きません。会社の Skill に戻すときは、この Skill のフォルダを消してください（次に受け取るときに戻ります）。'
 export const SHELF_PUBLISH_CONFIRM = '会社の Skill として公開します。この場所を見られる全員に届きます。公開のあとは、AI やこの PC で変えても、次に受け取るときに元に戻ります。'
 export const SHELF_REPLACE_CONFIRM = '会社の同じ名前の Skill を、この内容に置き換えます。この場所を見られる全員に届きます。'
-export const SHELF_EDIT_CONFIRM = 'この PC ではあなたの Skill になり、公開し直すまで会社の更新は届きません。ほかの人の Skill は変わりません。'
-/** The same, for someone who may not publish here: their changes stay on this PC. */
-export const SHELF_EDIT_CONFIRM_LOCAL = 'この PC ではあなたの Skill になり、直した内容はこの PC だけで使われます。会社の Skill が新しくなっても届かなくなります。会社の Skill に戻すときは、この Skill のフォルダを消してください。ほかの人の Skill は変わりません。'
 
-/** 「手元で直す」's confirmation and the note while it lasts: only someone who may publish here is told of publishing. */
-export function shelfEditTexts(mayPublish: boolean): { confirm: string; note: string } {
-  return mayPublish ? { confirm: SHELF_EDIT_CONFIRM, note: SHELF_EDITING_NOTE } : { confirm: SHELF_EDIT_CONFIRM_LOCAL, note: SHELF_EDITING_NOTE_LOCAL }
+/** The card of a Skill under 「自分用に直す」: its heading and the one line everyone reads. */
+export const SHELF_EDITING_TITLE = '自分用に直している Skill'
+export const SHELF_EDITING_NOTE = 'この PC の AI だけが、あなたの直した版を使います。ほかの人には届きません。'
+/** What else holds while it lasts; only someone who may publish here is told of publishing. */
+export const SHELF_EDITING_DETAIL = '会社の版が新しくなっても、「会社の版に戻す」か「会社に公開」を押すまで、この PC には届きません。'
+export const SHELF_EDITING_DETAIL_LOCAL = '会社の版が新しくなっても、「会社の版に戻す」を押すまで、この PC には届きません。'
+export const SHELF_EDIT_CONFIRM = 'この PC だけで、あなたが直した版を使うようにします。ほかの人の Skill は変わりません。みんなに使ってほしくなったら「会社に公開」、やめるときは「会社の版に戻す」を押します。'
+export const SHELF_EDIT_CONFIRM_LOCAL = 'この PC だけで、あなたが直した版を使うようにします。ほかの人の Skill は変わりません。やめるときは「会社の版に戻す」を押します。'
+
+/** 「自分用に直す」's confirmation and the card's second line: only someone who may publish here is told of publishing. */
+export function shelfEditTexts(mayPublish: boolean): { confirm: string; detail: string } {
+  return mayPublish ? { confirm: SHELF_EDIT_CONFIRM, detail: SHELF_EDITING_DETAIL } : { confirm: SHELF_EDIT_CONFIRM_LOCAL, detail: SHELF_EDITING_DETAIL_LOCAL }
 }
+
+/** 「会社の版に戻す」: the member's version is moved to `.backups/<ts>_skill_edit/` (store.ts `restoreCompany`), never deleted. */
+export const SHELF_RESTORE_CONFIRM = '会社の版に戻します。あなたが直した内容は、念のため控えに残します（作業フォルダの中の「.backups」フォルダ）。会社の版は、このあとすぐに受け取ります。'
+/** Restored, but the company's version was not received just now (offline, or no longer delivered). */
+export const SHELF_RESTORED_LATER_NOTE = '会社の版に戻しました。会社の版は、次に受け取るときに届きます。'
+export const SHELF_NOT_EDITING_MESSAGE = 'この Skill は自分用に直している Skill ではないため、戻せませんでした。'
+export const SHELF_RESTORE_UNSAFE_MESSAGE = 'Skill のフォルダの場所にショートカット（リンク）があるため、戻せませんでした。何も変更していません。'
+export const SHELF_RESTORE_FAILED_MESSAGE = '会社の版に戻せませんでした。時間をおいて、もう一度やり直してください。'
+
+/** What `skillShelf:restoreCompany` answers: whether the company's version is already back. */
+export type SkillShelfRestoreResult = { success: true; companyVersionBack: boolean } | { success: false; error: string }
 
 export const SHELF_NOT_HERE_MESSAGE = 'この会社では、Skill を会社に公開できません。'
 export const SHELF_OFFLINE_MESSAGE = 'サーバーにつながらないため公開できませんでした。つながってから、もう一度やり直してください。'
 export const SHELF_NOT_A_PLACE_MESSAGE = '公開できるのは、作業フォルダの直下か部署のフォルダの直下にある Skill だけです。'
-export const SHELF_ALREADY_COMPANY_MESSAGE = 'これは会社から届いた Skill です。直すときは「手元で直す」を押してください。'
+export const SHELF_ALREADY_COMPANY_MESSAGE = 'これは会社から届いた Skill です。直すときは「自分用に直す」を押してください。'
 export const SHELF_NOT_READABLE_MESSAGE = 'Skill のフォルダを読めませんでした。中にショートカット（リンク）があるときは、取り除いてからやり直してください。'
 export const SHELF_NO_PLACE_MESSAGE = 'この部署には公開できません。部署の名前が変わっていないか確かめてください。'
 export const SHELF_TOO_MUCH_MESSAGE = 'Skill が大きすぎるため公開できません（200 個のファイル・全体で 10 MB まで）。'

@@ -64,7 +64,7 @@ import type { PluginScreensResult } from './plugin-screens'
 // lane B ▼
 // lane B ▲
 // lane C ▼
-import type { SkillShelfMark } from './skill-shelf'
+import type { SkillShelfMark, SkillShelfRestoreResult } from './skill-shelf'
 import type { PluginStepButton, PluginStepContinuation, PluginStepContinueResult, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
 import type { StepDeliverablesView } from './step-deliverables'
 // lane C ▲
@@ -697,6 +697,7 @@ export interface IpcInvokeChannels {
   'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: FileOpResult }
   'skillShelf:publish': { args: [rootPath: string, skillPath: string, expectedVersion: string | null]; result: SimpleResult }
   'skillShelf:editLocally': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
+  'skillShelf:restoreCompany': { args: [rootPath: string, skillPath: string]; result: SkillShelfRestoreResult }
   'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
   'tools:stop': { args: [toolPath: string]; result: StopToolResult }
   'shell:openExternal': { args: [url: string]; result: SimpleResult }
@@ -1169,6 +1170,7 @@ export interface ElectronAPI {
   onPluginsChanged: Subscribe<'plugins:changed'>
   publishSkillToCompany: Invoke<'skillShelf:publish'>
   editCompanySkillLocally: Invoke<'skillShelf:editLocally'>
+  restoreCompanySkill: Invoke<'skillShelf:restoreCompany'>
   onSkillShelfChanged: Subscribe<'skillShelf:changed'>
   // lane A ▲
   // lane B ▼

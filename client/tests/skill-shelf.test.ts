@@ -13,7 +13,7 @@ import { withShelfInstructions } from '../electron/chat-server'
 import { createSkillUseReporter } from '../electron/services/skill-use-reporter'
 import { createWorkingFolders } from '../electron/services/working-folders'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
-import { SHELF_EDIT_CONFIRM, SHELF_EDITING_NOTE, SHELF_PROMPT_MAX, mayPublishShelfSkill, shelfEditTexts, readShelfDeliveries, readShelfPublishing, shelfPlaceOfSkillFolder, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery } from '../shared/skill-shelf'
+import { SHELF_EDIT_CONFIRM, SHELF_EDITING_DETAIL, SHELF_PROMPT_MAX, mayPublishShelfSkill, shelfEditTexts, readShelfDeliveries, readShelfPublishing, shelfPlaceOfSkillFolder, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery } from '../shared/skill-shelf'
 
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-shelf-')))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
@@ -253,7 +253,7 @@ test('the member\'s folder that already is the listed version is taken over, and
   assert.equal(w.store.markOf(w.root, '.claude/skills/proposal'), undefined)
 })
 
-test('「手元で直す」 keeps the version the member started from: publishing cannot replace a colleague\'s newer one unseen', async () => {
+test('「自分用に直す」 keeps the version the member started from: publishing cannot replace a colleague\'s newer one unseen', async () => {
   const w = world()
   w.server.items = [SKILL]
   await w.open()
@@ -263,7 +263,7 @@ test('「手元で直す」 keeps the version the member started from: publishin
   assert.deepEqual(w.store.markOf(w.root, '.claude/skills/proposal'), { state: 'editing', version: versionOf(SKILL.files) })
 })
 
-test('「手元で直す」 has a way back: with the member\'s copy gone, the company\'s Skill returns', async () => {
+test('「自分用に直す」 has a way back: with the member\'s copy gone, the company\'s Skill returns', async () => {
   const w = world()
   w.server.items = [SKILL]
   await w.open()
@@ -276,7 +276,129 @@ test('「手元で直す」 has a way back: with the member\'s copy gone, the co
   assert.equal(w.store.markOf(w.root, '.claude/skills/proposal')?.state, 'company', 'and it stays the company\'s')
 })
 
-test('「手元で直す」: the Skill is the member\'s from then on, nothing overwrites it, and publishing makes it the company\'s again', async () => {
+/** A world where the member took the company's Skill with 「自分用に直す」 and changed it. */
+async function editing(options: { now?: () => number } = {}) {
+  const w = world(options)
+  w.server.items = [SKILL]
+  await w.open()
+  assert.equal(await w.store.release(w.root, '.claude/skills/proposal'), true)
+  write(w.at('.claude/skills/proposal/SKILL.md'), 'mine\n')
+  write(w.at('.claude/skills/proposal/notes/a.md'), 'a\n')
+  return w
+}
+
+const backupsOf = (w: { at: (rel: string) => string }) => (exists(w.at('.backups')) ? fs.readdirSync(w.at('.backups')).sort() : [])
+
+test('「会社の版に戻す」: the member\'s version is kept whole in .backups, nothing is deleted, and the company\'s comes back at the next fetch', async () => {
+  const w = await editing({ now: () => Date.UTC(2026, 10, 9, 1, 2, 3, 4) })
+  const done = await w.store.restoreCompany(w.root, '.claude/skills/proposal')
+  assert.deepEqual(done, { ok: true, backup: '.backups/2026-11-09T01-02-03-004_skill_edit' })
+  const kept = w.at('.backups/2026-11-09T01-02-03-004_skill_edit/.claude/skills/proposal')
+  assert.deepEqual(await folderFiles(kept), { 'SKILL.md': 'mine\n', 'scripts/run.py': SKILL.files['scripts/run.py'], 'notes/a.md': 'a\n' })
+  assert.deepEqual(JSON.parse(read(w.at('.backups/2026-11-09T01-02-03-004_skill_edit/_metadata.json'))).files, ['.claude/skills/proposal'])
+  assert.equal(w.store.markOf(w.root, '.claude/skills/proposal'), undefined, 'no longer held for the member')
+  await w.again()
+  assert.equal(read(w.at('.claude/skills/proposal/SKILL.md')), SKILL.files['SKILL.md'])
+  assert.equal(read(w.at('.agents/skills/proposal/SKILL.md')), SKILL.files['SKILL.md'])
+  assert.equal(w.store.markOf(w.root, '.claude/skills/proposal')?.state, 'company')
+  assert.equal(read(path.join(kept, 'SKILL.md')), 'mine\n', 'the copy stays where it was put')
+
+  // A second time in the same millisecond: its own folder, the first copy untouched.
+  await w.store.release(w.root, '.claude/skills/proposal')
+  write(w.at('.claude/skills/proposal/SKILL.md'), 'second\n')
+  assert.deepEqual(await w.store.restoreCompany(w.root, '.claude/skills/proposal'), { ok: true, backup: '.backups/2026-11-09T01-02-03-004_skill_edit_2' })
+  assert.equal(read(path.join(kept, 'SKILL.md')), 'mine\n')
+  assert.equal(read(w.at('.backups/2026-11-09T01-02-03-004_skill_edit_2/.claude/skills/proposal/SKILL.md')), 'second\n')
+})
+
+test('「会社の版に戻す」 acts only on a Skill under 「自分用に直す」 at that very place: the company\'s, the member\'s own, another place and another account are left alone', async () => {
+  const w = world()
+  w.server.items = [SKILL, { id: 'i9', kind: 'skill', name: 'visit', department: { id: 'd1', folder: '営業部' }, files: { 'SKILL.md': 'visit\n' } }]
+  write(w.at('営業部/.claude/skills/visit/SKILL.md'), 'my own visit\n')
+  write(w.at('.claude/skills/mine/SKILL.md'), 'mine\n')
+  await w.open()
+  assert.equal(w.store.markOf(w.root, '営業部/.claude/skills/visit')?.state, 'clash')
+  for (const rel of ['.claude/skills/proposal', '営業部/.claude/skills/visit', '.claude/skills/mine', '']) {
+    assert.deepEqual(await w.store.restoreCompany(w.root, rel), { ok: false, reason: 'not-editing' }, rel)
+  }
+  assert.equal(read(w.at('営業部/.claude/skills/visit/SKILL.md')), 'my own visit\n')
+  assert.equal(read(w.at('.claude/skills/mine/SKILL.md')), 'mine\n')
+  assert.ok(exists(w.at('.claude/skills/proposal/SKILL.md')))
+  assert.deepEqual(backupsOf(w), [])
+
+  // Held at .claude/skills/proposal: asking for the same name elsewhere is not it.
+  await w.store.release(w.root, '.claude/skills/proposal')
+  write(w.at('総務/.claude/skills/proposal/SKILL.md'), 'other\n')
+  assert.deepEqual(await w.store.restoreCompany(w.root, '総務/.claude/skills/proposal'), { ok: false, reason: 'not-editing' })
+  assert.equal(read(w.at('総務/.claude/skills/proposal/SKILL.md')), 'other\n')
+
+  // Another account signed in on this PC: the hold is not theirs to undo.
+  let user = 'u1'
+  const shared = createSkillShelfStore({ dir: () => path.join(w.base, 'userData'), userId: () => user, client: w.client, log: quiet })
+  w.server.online = false
+  await shared.attach('co', w.root)
+  user = 'u2'
+  assert.deepEqual(await shared.restoreCompany(w.root, '.claude/skills/proposal'), { ok: false, reason: 'not-editing' })
+  assert.ok(exists(w.at('.claude/skills/proposal/SKILL.md')))
+  assert.deepEqual(backupsOf(w), [])
+})
+
+test('「会社の版に戻す」 never moves through a link: at the Skill folder, on the way to it, or at .backups; nothing changes', async () => {
+  const outside = (w: { base: string }) => { const dir = path.join(w.base, 'outside'); write(path.join(dir, 'keep.txt'), 'keep\n'); return dir }
+
+  const a = await editing()
+  fs.rmSync(a.at('.claude/skills/proposal'), { recursive: true })
+  fs.symlinkSync(outside(a), a.at('.claude/skills/proposal'))
+  assert.deepEqual(await a.store.restoreCompany(a.root, '.claude/skills/proposal'), { ok: false, reason: 'unsafe' })
+  assert.ok(exists(path.join(a.base, 'outside/keep.txt')))
+  assert.ok(fs.lstatSync(a.at('.claude/skills/proposal')).isSymbolicLink())
+  assert.deepEqual(backupsOf(a), [])
+  assert.equal(a.store.markOf(a.root, '.claude/skills/proposal')?.state, 'editing')
+
+  const b = await editing()
+  const elsewhere = path.join(b.base, 'elsewhere')
+  fs.renameSync(b.at('.claude'), elsewhere)
+  fs.symlinkSync(elsewhere, b.at('.claude'))
+  assert.deepEqual(await b.store.restoreCompany(b.root, '.claude/skills/proposal'), { ok: false, reason: 'unsafe' })
+  assert.equal(read(path.join(elsewhere, 'skills/proposal/SKILL.md')), 'mine\n')
+  assert.deepEqual(backupsOf(b), [])
+
+  const c = await editing()
+  const away = outside(c)
+  fs.symlinkSync(away, c.at('.backups'))
+  assert.deepEqual(await c.store.restoreCompany(c.root, '.claude/skills/proposal'), { ok: false, reason: 'unsafe' })
+  assert.equal(read(c.at('.claude/skills/proposal/SKILL.md')), 'mine\n')
+  assert.deepEqual(fs.readdirSync(away), ['keep.txt'])
+  assert.equal(c.store.markOf(c.root, '.claude/skills/proposal')?.state, 'editing')
+})
+
+test('「会社の版に戻す」 trusts no place a manifest was edited to name: a folder outside the working folder is not moved', async () => {
+  const w = await editing()
+  const outside = path.join(w.base, '.claude/skills/proposal')
+  write(path.join(outside, 'SKILL.md'), 'not the member\'s\n')
+  const dir = path.join(w.base, 'userData', 'co')
+  const file = path.join(dir, fs.readdirSync(dir)[0])
+  const manifest = JSON.parse(read(file)) as { released: Array<{ rel: string }>; clashes: Array<{ targets: string[] }> }
+  manifest.released[0].rel = '../.claude/skills/proposal'
+  manifest.clashes[0].targets = ['../.claude/skills/proposal']
+  fs.writeFileSync(file, JSON.stringify(manifest))
+  const fresh = createSkillShelfStore({ dir: () => path.join(w.base, 'userData'), userId: () => 'u1', client: w.client, log: quiet })
+  w.server.online = false
+  await fresh.attach('co', w.root)
+  assert.equal((await fresh.restoreCompany(w.root, '../.claude/skills/proposal')).ok, false)
+  assert.equal(read(path.join(outside, 'SKILL.md')), 'not the member\'s\n')
+  assert.deepEqual(backupsOf(w), [])
+})
+
+test('「会社の版に戻す」 with the member\'s folder already gone: the hold goes, nothing to keep, and the company\'s comes back', async () => {
+  const w = await editing()
+  fs.rmSync(w.at('.claude/skills/proposal'), { recursive: true })
+  assert.deepEqual(await w.store.restoreCompany(w.root, '.claude/skills/proposal'), { ok: true, backup: null })
+  await w.again()
+  assert.equal(w.store.markOf(w.root, '.claude/skills/proposal')?.state, 'company')
+})
+
+test('「自分用に直す」: the Skill is the member\'s from then on, nothing overwrites it, and publishing makes it the company\'s again', async () => {
   const w = world()
   w.server.items = [SKILL]
   await w.open()
@@ -624,14 +746,14 @@ test('the button and the publish\'s department lookup name a department folder t
   }
 })
 
-test('「手元で直す」 tells of publishing only someone who may publish there; anyone else is told how to get the company\'s back', () => {
-  assert.deepEqual(shelfEditTexts(true), { confirm: SHELF_EDIT_CONFIRM, note: SHELF_EDITING_NOTE })
+test('「自分用に直す」 tells of publishing only someone who may publish there; nobody is told to delete a folder', () => {
+  assert.deepEqual(shelfEditTexts(true), { confirm: SHELF_EDIT_CONFIRM, detail: SHELF_EDITING_DETAIL })
   const local = shelfEditTexts(false)
-  for (const text of [local.confirm, local.note]) {
+  for (const text of [local.confirm, local.detail]) {
     assert.doesNotMatch(text, /公開/)
-    assert.match(text, /フォルダを消/)
-    assert.match(text, /届/)
+    assert.match(text, /会社の版に戻す/)
   }
+  for (const text of [...Object.values(shelfEditTexts(true)), ...Object.values(local)]) assert.doesNotMatch(text, /消/)
 })
 
 test('会社に公開 is offered only where the server says the member may publish a Skill; an answer without it offers it nowhere', async () => {

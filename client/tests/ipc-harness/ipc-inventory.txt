@@ -188,6 +188,7 @@ contract.invoke recordViews:topics
 contract.invoke shell:openExternal
 contract.invoke skillShelf:editLocally
 contract.invoke skillShelf:publish
+contract.invoke skillShelf:restoreCompany
 contract.invoke skills:list
 contract.invoke skills:makePrivate
 contract.invoke skills:publish
@@ -508,6 +509,7 @@ contract.type ElectronAPI.reservedPathRefusal = reservedPathRefusal: Invoke<'pri
 contract.type ElectronAPI.resolveOutboundMail = resolveOutboundMail: Invoke<'outboundMail:resolve'>
 contract.type ElectronAPI.respondAgentInteraction = respondAgentInteraction: Invoke<'agent-interaction:respond'>
 contract.type ElectronAPI.respondToolApproval = respondToolApproval: Invoke<'tool-approval-response'>
+contract.type ElectronAPI.restoreCompanySkill = restoreCompanySkill: Invoke<'skillShelf:restoreCompany'>
 contract.type ElectronAPI.retryAiTurn = retryAiTurn: Invoke<'aiTurns:retry'>
 contract.type ElectronAPI.retryTaskRun = retryTaskRun: Invoke<'tasks:retryRun'>
 contract.type ElectronAPI.sameAsApproval = sameAsApproval: Invoke<'approvals:sameAs'>
@@ -856,6 +858,7 @@ contract.type IpcInvokeChannels.'recordViews:topics' = 'recordViews:topics': { a
 contract.type IpcInvokeChannels.'shell:openExternal' = 'shell:openExternal': { args: [url: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:editLocally' = 'skillShelf:editLocally': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:publish' = 'skillShelf:publish': { args: [rootPath: string, skillPath: string, expectedVersion: string | null]; result: SimpleResult }
+contract.type IpcInvokeChannels.'skillShelf:restoreCompany' = 'skillShelf:restoreCompany': { args: [rootPath: string, skillPath: string]; result: SkillShelfRestoreResult }
 contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
 contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
 contract.type IpcInvokeChannels.'skills:publish' = 'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: FileOpResult }
@@ -1147,6 +1150,7 @@ main.handle recordViews:topics @ features/record-views/ipc.ts (companyId, record
 main.handle shell:openExternal @ features/tools/ipc.ts (url: string)
 main.handle skillShelf:editLocally @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
 main.handle skillShelf:publish @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string, expectedVersion: string | null)
+main.handle skillShelf:restoreCompany @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
 main.handle skills:list @ features/skills/ipc.ts (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean })
 main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:publish @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
@@ -1572,6 +1576,8 @@ preload respondAgentInteraction -> invoke agent-interaction:respond($0, $1)
 preload respondAgentInteraction : (id: string, response: AgentInteractionResponse) => Promise<boolean>
 preload respondToolApproval -> invoke tool-approval-response($0, $1)
 preload respondToolApproval : (toolUseId: string, approved: boolean) => Promise<boolean>
+preload restoreCompanySkill -> invoke skillShelf:restoreCompany($0, $1)
+preload restoreCompanySkill : (rootPath: string, skillPath: string) => Promise<SkillShelfRestoreResult>
 preload retryAiTurn -> invoke aiTurns:retry($0, $1)
 preload retryAiTurn : (companyId: string, recordId: string) => Promise<{ ok: boolean; }>
 preload retryTaskRun -> invoke tasks:retryRun($0, $1)

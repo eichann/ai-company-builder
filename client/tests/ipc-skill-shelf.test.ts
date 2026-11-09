@@ -9,7 +9,7 @@ import path from 'node:path'
 import { commitRepo, loadMain, writeFiles, type MainHarness } from './ipc-harness/main-harness.ts'
 import { shelfListing } from '../../shared/core/skill-shelf.ts'
 import { WORKING_FOLDER_TAKEN_MESSAGE } from '../electron/features/company-setup/ipc.ts'
-import { SHELF_ALREADY_COMPANY_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_TOO_MUCH_MESSAGE } from '../shared/skill-shelf.ts'
+import { SHELF_ALREADY_COMPANY_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_EDITING_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_RESTORE_UNSAFE_MESSAGE, SHELF_TOO_MUCH_MESSAGE } from '../shared/skill-shelf.ts'
 
 let h: MainHarness
 before(async () => {
@@ -110,13 +110,58 @@ test('what is not sent at all: a delivered Skill, a Skill deeper in a folder, a 
   assert.equal(h.server.to('/api/companies/co-odd/skill-shelf').filter(r => r.method === 'POST').length, 0)
 })
 
-test('「手元で直す」 through main: the Skill is no longer the company\'s on this computer, and 「会社に公開」 then replaces the version the member saw', async () => {
+test('「自分用に直す」 through main: the Skill is no longer the company\'s on this computer, and 「会社に公開」 then replaces the version the member saw', async () => {
   const skill = { 'SKILL.md': 'v1\n' }
   const { folder } = await open('co-edit', { proposal: skill })
   const skillPath = path.join(folder, '.claude/skills/proposal')
   assert.deepEqual(await h.invoke('skillShelf:editLocally', folder, skillPath), { success: true })
   const listed = await h.invoke<{ skills: Array<{ shelf?: unknown }> }>('skills:list', folder, '', 'company', undefined, { force: true })
   assert.deepEqual(listed.skills[0].shelf, { state: 'editing', version: versionOf(skill) })
+})
+
+test('「会社の版に戻す」 through main: the member\'s version goes to .backups, the company\'s is back at once; offline it comes later', async () => {
+  const skill = { 'SKILL.md': 'v1\n' }
+  const { folder } = await open('co-back', { proposal: skill })
+  const skillPath = path.join(folder, '.claude/skills/proposal')
+  // Only a Skill under 自分用に直す: the company's own is refused and stays.
+  assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: false, error: SHELF_NOT_EDITING_MESSAGE })
+  assert.equal(fs.existsSync(path.join(folder, '.backups')), false)
+
+  assert.deepEqual(await h.invoke('skillShelf:editLocally', folder, skillPath), { success: true })
+  writeFiles(folder, { '.claude/skills/proposal/SKILL.md': 'mine\n' })
+  assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: true, companyVersionBack: true })
+  assert.equal(fs.readFileSync(path.join(skillPath, 'SKILL.md'), 'utf8'), 'v1\n')
+  const [kept] = fs.readdirSync(path.join(folder, '.backups'))
+  assert.match(kept, /_skill_edit$/)
+  assert.equal(fs.readFileSync(path.join(folder, '.backups', kept, '.claude/skills/proposal/SKILL.md'), 'utf8'), 'mine\n')
+  const listed = await h.invoke<{ skills: Array<{ shelf?: unknown }> }>('skills:list', folder, '', 'company', undefined, { force: true })
+  assert.deepEqual(listed.skills.map(s => s.shelf), [{ state: 'company', version: versionOf(skill) }], 'the copy in .backups is not listed as a Skill')
+  // Nothing of it went to the server.
+  assert.deepEqual(h.server.to('/api/companies/co-back/skill-shelf').filter(r => r.method === 'POST'), [])
+
+  assert.deepEqual(await h.invoke('skillShelf:editLocally', folder, skillPath), { success: true })
+  h.server.offline = true
+  try {
+    assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: true, companyVersionBack: false })
+  } finally {
+    h.server.offline = false
+  }
+  assert.equal(fs.existsSync(skillPath), false)
+  assert.equal(fs.readdirSync(path.join(folder, '.backups')).length, 2)
+})
+
+test('「会社の版に戻す」 through main refuses a Skill folder that is a link, and changes nothing', async () => {
+  const { folder } = await open('co-link', { proposal: { 'SKILL.md': 'v1\n' } })
+  const skillPath = path.join(folder, '.claude/skills/proposal')
+  assert.deepEqual(await h.invoke('skillShelf:editLocally', folder, skillPath), { success: true })
+  const inside = path.join(folder, 'メモ')
+  writeFiles(folder, { 'メモ/SKILL.md': 'memo\n' })
+  fs.rmSync(skillPath, { recursive: true })
+  fs.symlinkSync(inside, skillPath)
+  assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: false, error: SHELF_RESTORE_UNSAFE_MESSAGE })
+  assert.ok(fs.lstatSync(skillPath).isSymbolicLink())
+  assert.equal(fs.readFileSync(path.join(inside, 'SKILL.md'), 'utf8'), 'memo\n')
+  assert.equal(fs.existsSync(path.join(folder, '.backups')), false)
 })
 
 test('a folder another company works in is refused, and nothing is delivered into it', async () => {
@@ -142,13 +187,15 @@ test('a rule file kept back by a file of the member\'s is said in the Skills pan
   assert.equal(fs.readFileSync(path.join(folder, '.claude/rules/tone.md'), 'utf8'), 'mine\n')
 })
 
-test('a git company\'s folder: nothing is asked of the shelf, publishing and 手元で直す are refused, and skills:list marks nothing', async () => {
+test('a git company\'s folder: nothing is asked of the shelf, publishing, 自分用に直す and 会社の版に戻す are refused, and skills:list marks nothing', async () => {
   const folder = h.companyDir('co-git')
   commitRepo(h.base, folder, { '.claude/skills/proposal/SKILL.md': 'x\n' })
   await h.invoke('fs:registerAllowedRoot', folder)
   const skillPath = path.join(folder, '.claude/skills/proposal')
   assert.deepEqual(await h.invoke('skillShelf:publish', folder, skillPath, null), { success: false, error: SHELF_NOT_HERE_MESSAGE })
   assert.deepEqual(await h.invoke('skillShelf:editLocally', folder, skillPath), { success: false, error: SHELF_NOT_HERE_MESSAGE })
+  assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: false, error: SHELF_NOT_HERE_MESSAGE })
+  assert.equal(fs.readFileSync(path.join(skillPath, 'SKILL.md'), 'utf8'), 'x\n')
   const listed = await h.invoke<{ skills: Array<{ shelf?: unknown; shelfPublish?: boolean }> }>('skills:list', folder, '', 'company', undefined, { force: true })
   assert.equal(listed.skills[0].shelf, undefined)
   assert.equal(listed.skills[0].shelfPublish, undefined)

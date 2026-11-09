@@ -20,7 +20,7 @@ export type SkillRefusals = ElectronPort<'reservedPathRefusal'>
 export type SkillSharingWrites = ElectronPort<'makeSkillPrivate' | 'publishSkill'>
 
 /** A company without the shared folder: a Skill to the company's shelf and back (main checks, the server decides). */
-export type SkillShelfActions = ElectronPort<'publishSkillToCompany' | 'editCompanySkillLocally' | 'onSkillShelfChanged'>
+export type SkillShelfActions = ElectronPort<'publishSkillToCompany' | 'editCompanySkillLocally' | 'restoreCompanySkill' | 'onSkillShelfChanged'>
 
 type ListSkillsArgs = Parameters<ElectronAPI['listSkills']>
 
@@ -91,9 +91,14 @@ export function publishSkillToCompany(rootPath: string, skillPath: string, expec
   return shelf.publishSkillToCompany(rootPath, skillPath, expectedVersion)
 }
 
-/** 「手元で直す」: on this computer the delivered Skill becomes the member's own until they publish it. */
+/** 「自分用に直す」: on this computer the delivered Skill becomes the member's own until they publish it. */
 export function editCompanySkillLocally(rootPath: string, skillPath: string, shelf: SkillShelfActions = window.electronAPI) {
   return shelf.editCompanySkillLocally(rootPath, skillPath)
+}
+
+/** 「会社の版に戻す」: the member's version is kept in .backups and the company's comes back. */
+export function restoreCompanySkill(rootPath: string, skillPath: string, shelf: SkillShelfActions = window.electronAPI) {
+  return shelf.restoreCompanySkill(rootPath, skillPath)
 }
 
 /** What the company delivered changed. */

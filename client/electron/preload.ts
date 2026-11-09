@@ -397,6 +397,7 @@ const api: ElectronAPI = {
   onPluginsChanged: callback => subscribe('plugins:changed', callback),
   publishSkillToCompany: (rootPath: string, skillPath: string, expectedVersion: string | null) => invoke('skillShelf:publish', rootPath, skillPath, expectedVersion),
   editCompanySkillLocally: (rootPath: string, skillPath: string) => invoke('skillShelf:editLocally', rootPath, skillPath),
+  restoreCompanySkill: (rootPath: string, skillPath: string) => invoke('skillShelf:restoreCompany', rootPath, skillPath),
   onSkillShelfChanged: callback => subscribe('skillShelf:changed', callback),
   // lane A ▲
   // lane B ▼

@@ -22,7 +22,7 @@ import {
 import type { Skill, SkillTool } from '../model'
 import { startSkillTool, stopSkillTool } from '../api'
 import { useAppStore } from '../../../stores/appStore'
-import { SHELF_CLASH_NOTE, SHELF_COMPANY_NOTE, SHELF_PUBLISH_CONFIRM, SHELF_REPLACE_CONFIRM, shelfEditTexts, shelfMarkTitle } from '../../../../shared/skill-shelf'
+import { SHELF_CLASH_NOTE, SHELF_COMPANY_NOTE, SHELF_EDITING_NOTE, SHELF_EDITING_TITLE, SHELF_PUBLISH_CONFIRM, SHELF_REPLACE_CONFIRM, SHELF_RESTORE_CONFIRM, shelfEditTexts, shelfMarkTitle } from '../../../../shared/skill-shelf'
 
 type TabId = 'overview' | 'rules' | 'references' | 'scripts' | 'tools'
 
@@ -42,6 +42,7 @@ interface SkillDetailPanelProps {
 export interface CompanyShelfActions {
   publish: (skill: Skill) => Promise<string | null>
   editLocally: (skill: Skill) => Promise<string | null>
+  restoreCompany: (skill: Skill) => Promise<string | null>
 }
 
 export function SkillDetailPanel({
@@ -170,11 +171,12 @@ export function SkillDetailPanel({
 }
 
 /** The 共有 section of a company without the shared folder (client/shared/skill-shelf.ts). */
-function CompanyShelfSection({ skill, actions, onRefused }: { skill: Skill; actions?: CompanyShelfActions; onRefused: (sentence: string | null) => void }) {
-  const [confirming, setConfirming] = useState<'publish' | 'edit' | null>(null)
+function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill: Skill; actions?: CompanyShelfActions; onEditFile: (path: string) => void; onRefused: (sentence: string | null) => void }) {
+  const [confirming, setConfirming] = useState<'publish' | 'edit' | 'restore' | null>(null)
   const [busy, setBusy] = useState(false)
   const box = 'p-3 rounded-xl bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50 text-xs text-gray-600 dark:text-zinc-400 space-y-2'
   const button = 'w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50'
+  const quiet = 'w-full flex items-center justify-center gap-2 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50'
   const run = (action: (skill: Skill) => Promise<string | null>) => {
     setBusy(true)
     setConfirming(null)
@@ -193,6 +195,10 @@ function CompanyShelfSection({ skill, actions, onRefused }: { skill: Skill; acti
       </div>
     </div>
   )
+  // Offered only where the server said this member may publish a Skill; the server still decides.
+  const publish = actions && skill.shelfPublish && (confirming === 'publish'
+    ? confirmation(skill.shelf ? SHELF_REPLACE_CONFIRM : SHELF_PUBLISH_CONFIRM, '会社に公開', actions.publish)
+    : <button disabled={busy} onClick={() => setConfirming('publish')} className={button}><CloudArrowUp size={14} />会社に公開</button>)
 
   if (skill.shelf?.state === 'company') {
     return (
@@ -200,20 +206,33 @@ function CompanyShelfSection({ skill, actions, onRefused }: { skill: Skill; acti
         <div className="text-sm font-medium text-gray-700 dark:text-zinc-300">{shelfMarkTitle(skill.shelf.version)}</div>
         <div>{SHELF_COMPANY_NOTE}</div>
         {actions && (confirming === 'edit'
-          ? confirmation(shelfEditTexts(!!skill.shelfPublish).confirm, '手元で直す', actions.editLocally)
-          : <button disabled={busy} onClick={() => setConfirming('edit')} className="w-full py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors">手元で直す</button>)}
+          ? confirmation(shelfEditTexts(!!skill.shelfPublish).confirm, '自分用に直す', actions.editLocally)
+          : <button disabled={busy} onClick={() => setConfirming('edit')} className={quiet}>自分用に直す</button>)}
       </div>
     )
   }
-  const state = skill.shelf?.state
+  if (skill.shelf?.state === 'editing') {
+    // One card: what it means, then what the member can do next (open it, go back, publish).
+    return (
+      <section aria-label={SHELF_EDITING_TITLE} className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 text-xs text-gray-600 dark:text-zinc-400 space-y-2">
+        <h5 className="text-sm font-medium text-amber-800 dark:text-amber-300">{SHELF_EDITING_TITLE}</h5>
+        <p className="text-gray-700 dark:text-zinc-300">{SHELF_EDITING_NOTE}</p>
+        <p>{shelfEditTexts(!!skill.shelfPublish).detail}</p>
+        {skill.files.skillMd && (
+          <button onClick={() => onEditFile(skill.files.skillMd!)} className={quiet}><PencilSimple size={14} />SKILL.md を開いて直す</button>
+        )}
+        {actions && (confirming === 'restore'
+          ? confirmation(SHELF_RESTORE_CONFIRM, '会社の版に戻す', actions.restoreCompany)
+          : <button disabled={busy} onClick={() => setConfirming('restore')} className={quiet}>会社の版に戻す</button>)}
+        {publish}
+      </section>
+    )
+  }
   return (
     <div className={box}>
-      {state === 'editing' ? <div>{shelfEditTexts(!!skill.shelfPublish).note}</div> : <div>この PC だけのスキルです（ほかの人には共有されません）。</div>}
-      {state === 'clash' && <div>{SHELF_CLASH_NOTE}</div>}
-      {/* Offered only where the server said this member may publish a Skill; the server still decides. */}
-      {actions && skill.shelfPublish && (confirming === 'publish'
-        ? confirmation(state ? SHELF_REPLACE_CONFIRM : SHELF_PUBLISH_CONFIRM, '会社に公開', actions.publish)
-        : <button disabled={busy} onClick={() => setConfirming('publish')} className={button}><CloudArrowUp size={14} />会社に公開</button>)}
+      <div>この PC だけのスキルです（ほかの人には共有されません）。</div>
+      {skill.shelf?.state === 'clash' && <div>{SHELF_CLASH_NOTE}</div>}
+      {publish}
     </div>
   )
 }
@@ -251,7 +270,7 @@ function OverviewTab({
         </h4>
         {!onPublish ? (
           // A company without the shared folder: the files stay on this PC; the Skill shelf is the way to the others.
-          <CompanyShelfSection skill={skill} actions={companyShelf} onRefused={setRefusal} />
+          <CompanyShelfSection skill={skill} actions={companyShelf} onEditFile={onEditFile} onRefused={setRefusal} />
         ) : skill.isPrivate ? (
           <div className="p-3 rounded-xl bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50">
             <div className="flex items-center gap-2 mb-2">

@@ -27,7 +27,7 @@ export function useSkillsTab({ rootPath, departments, departmentFolder, departme
   const [activeTool, setActiveTool] = useState<{ tool: SkillTool; port: number } | null>(null)
   const selectedSkill = useMemo(() => skills.find((s) => s.id === selectedSkillId), [skills, selectedSkillId])
 
-  const { createSkill, copySkillHere, shareSkill, publishToCompany, editLocally, toggleNurturing } = useSkillActions({
+  const { createSkill, copySkillHere, shareSkill, publishToCompany, editLocally, restoreCompany, toggleNurturing } = useSkillActions({
     rootPath, departments, departmentFolder, departmentId, refreshSkills,
   })
 
@@ -58,6 +58,6 @@ export function useSkillsTab({ rootPath, departments, departmentFolder, departme
   return {
     selectedSkillId, selectedSkill, selectSkill: setSelectedSkillId,
     wizardOpen, setWizardOpen, copyOpen, setCopyOpen, activeTool, setActiveTool,
-    executeSkill, create, copy, shareSkill, publishToCompany, editLocally, toggleNurturing,
+    executeSkill, create, copy, shareSkill, publishToCompany, editLocally, restoreCompany, toggleNurturing,
   }
 }

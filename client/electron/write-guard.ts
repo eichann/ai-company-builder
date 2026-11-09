@@ -294,7 +294,7 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
 }
 
 export function shelfFileMessage(path: string): string {
-  return `このファイル（${path}）は会社から届いた Skill や決まりのため、AI は変更できません。この PC で変えても、次に受け取るときに元に戻ります。変更が必要な場合は、スキルの画面の「手元で直す」でメンバーに直してもらうか、管理者に依頼してください。`
+  return `このファイル（${path}）は会社から届いた Skill や決まりのため、AI は変更できません。この PC で変えても、次に受け取るときに元に戻ります。変更が必要な場合は、スキルの画面の「自分用に直す」でメンバーに直してもらうか、管理者に依頼してください。`
 }
 
 /** A file the company delivered: both as written and where it resolves on disk, so a link cannot lead in. */

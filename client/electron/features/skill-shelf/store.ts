@@ -36,6 +36,7 @@ import {
   shelfTargets, shelfVersionOf, type ShelfDelivery, type ShelfPublishing, type SkillShelfMark,
 } from '../../../shared/skill-shelf'
 import { isSkillArtifactPath } from '../../../shared/skill-leftovers'
+import { backupStamp } from '../../../shared/editor-disk-state'
 import { sha256Hex, type ShelfClient, type ShelfFile } from './client'
 
 export interface SkillShelfDeps {
@@ -72,7 +73,7 @@ interface Manifest {
   items: ManagedItem[]
   /** Delivered Skills and rule files not placed: what is there is the member's own. */
   clashes: Array<{ id: string; targets: string[]; version: string }>
-  /** What the member took over with 「手元で直す」: the Skill folder and the version they started from. */
+  /** What the member took over with 「自分用に直す」: the Skill folder and the version they started from. */
   released: Released[]
   /** Where the member may publish a Skill, as the last list said (`mayPublishShelfSkill`; absent: nowhere). */
   publishing?: ShelfPublishing
@@ -204,6 +205,19 @@ function putFile(root: string, rel: string, file: ShelfFile): void {
   }
 }
 
+/** The backup folder's suffix of 「会社の版に戻す」 (`.backups/<ts>_skill_edit/<the Skill folder>`). */
+export const SKILL_EDIT_BACKUP_REASON = 'skill_edit'
+
+/** Is any folder on the way to `rel` (the target itself left out) a link? */
+function linkOnTheWay(root: string, rel: string): boolean {
+  let at = root
+  for (const part of rel.split('/').slice(0, -1)) {
+    at = path.join(at, part)
+    if (isLink(at)) return true
+  }
+  return false
+}
+
 /** Remove what a killed sync left in `.claude/` and `.agents/` of these places. */
 function sweepStaging(root: string, departmentFolders: Iterable<string>): void {
   for (const base of ['', ...departmentFolders]) {
@@ -283,11 +297,7 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
 
   function removeTarget(root: string, rel: string): void {
     // Through a link there is someone else's folder: leave it.
-    let at = root
-    for (const part of rel.split('/').slice(0, -1)) {
-      at = path.join(at, part)
-      if (isLink(at)) return
-    }
+    if (linkOnTheWay(root, rel)) return
     fs.rmSync(path.join(root, rel), { recursive: true, force: true })
   }
 
@@ -479,7 +489,7 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
       return { version: item.version, dirty: await versionOnDisk('skill', item.name, path.join(root, rel), item.version) !== item.version }
     },
     /**
-     * 「手元で直す」: a delivered Skill becomes the member's own on this computer until they publish
+     * 「自分用に直す」: a delivered Skill becomes the member's own on this computer until they publish
      * it (the way to change a company Skill: the AI and the next fetch leave it alone from now on).
      * Its copy for the other agent goes, so the two can never differ. False: not a managed Skill.
      */
@@ -498,6 +508,58 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
         })
         deps.onChanged?.(companyId, root)
         return true
+      })
+      chain = result.then(() => undefined, () => undefined)
+      return result
+    },
+    /**
+     * 「会社の版に戻す」: only a Skill this store handed over with `release` at exactly `rel` (mark
+     * `editing`). The member's folder moves whole to `.backups/<ts>_skill_edit/<rel>` (same disk,
+     * never deleted, never sent: `.backups` is local only), the hold goes, and the next sync places
+     * the company's version. Refused when a link stands on the way, at the folder, or at `.backups`.
+     */
+    restoreCompany(root: string, rel: string): Promise<{ ok: true; backup: string | null } | { ok: false; reason: 'not-editing' | 'unsafe' }> {
+      const result = chain.then((): { ok: true; backup: string | null } | { ok: false; reason: 'not-editing' | 'unsafe' } => {
+        const companyId = companyOf(root)
+        const manifest = current(root)
+        const held = manifest?.released.find(r => r.rel === rel)
+        if (!companyId || !manifest || !held) return { ok: false, reason: 'not-editing' }
+        // A Skill folder of the working folder by name too (a manifest is read back from disk).
+        const place = shelfPlaceOfSkillFolder(rel)
+        if (!place || (place.departmentFolder !== null && !isValidFolderName(place.departmentFolder))) return { ok: false, reason: 'unsafe' }
+        if (linkOnTheWay(root, rel)) return { ok: false, reason: 'unsafe' }
+        const abs = path.join(root, rel)
+        let there = true
+        try {
+          if (!fs.lstatSync(abs).isDirectory()) return { ok: false, reason: 'unsafe' }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          there = false
+        }
+        let backup: string | null = null
+        if (there) {
+          const stamp = `${backupStamp(new Date(now()))}_${SKILL_EDIT_BACKUP_REASON}`
+          let folder = stamp
+          for (let n = 2; fs.existsSync(path.join(root, '.backups', folder)) || isLink(path.join(root, '.backups', folder)); n++) folder = `${stamp}_${n}`
+          backup = `.backups/${folder}`
+          try {
+            preparedParent(root, `${backup}/${rel}`)
+          } catch {
+            return { ok: false, reason: 'unsafe' }
+          }
+          fs.renameSync(abs, path.join(root, backup, rel))
+          try {
+            fs.writeFileSync(path.join(root, backup, '_metadata.json'), JSON.stringify({ timestamp: new Date(now()).toISOString(), reason: SKILL_EDIT_BACKUP_REASON, files: [rel] }, null, 2))
+          } catch { /* the copy is what matters */ }
+        }
+        save(companyId, root, {
+          ...manifest,
+          clashes: manifest.clashes.filter(c => c.id !== held.id),
+          released: manifest.released.filter(r => r !== held),
+        })
+        log.info(`[skill-shelf] a Skill went back to the company's version${backup ? ' (the member\'s kept in .backups)' : ''}`)
+        deps.onChanged?.(companyId, root)
+        return { ok: true, backup }
       })
       chain = result.then(() => undefined, () => undefined)
       return result

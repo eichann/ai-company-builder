@@ -1,13 +1,15 @@
 // A company Skill from the Skills panel (plugins.md "The Skill shelf in the app"), only in a working
 // folder: skillShelf:publish (「会社に公開」: a local Skill's folder goes to the server, which
-// decides) and skillShelf:editLocally (「手元で直す」: a delivered Skill becomes the member's own
-// on this computer until they publish it). A git company's folder is refused.
+// decides), skillShelf:editLocally (「自分用に直す」: a delivered Skill becomes the member's own
+// on this computer until they publish it) and skillShelf:restoreCompany (「会社の版に戻す」: their
+// version goes to .backups and the company's comes back). A git company's folder is refused.
 
 import path from 'node:path'
 import { SHELF_LIMITS, isShelfVersion } from '../../../../shared/core/skill-shelf'
 import {
   SHELF_ALREADY_COMPANY_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_NO_PLACE_MESSAGE,
-  SHELF_OFFLINE_MESSAGE, SHELF_TOO_MUCH_MESSAGE, shelfPlaceOfSkillFolder,
+  SHELF_NOT_EDITING_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_RESTORE_FAILED_MESSAGE, SHELF_RESTORE_UNSAFE_MESSAGE, SHELF_TOO_MUCH_MESSAGE, shelfPlaceOfSkillFolder,
+  type SkillShelfRestoreResult,
 } from '../../../shared/skill-shelf'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { PathGuard } from '../ports'
@@ -17,7 +19,7 @@ import { readSkillFolder, type SkillShelfStore } from './store'
 export interface SkillShelfIpcDeps {
   paths: PathGuard
   isWorkingFolder: (rootPath: string) => boolean
-  store: Pick<SkillShelfStore, 'companyOf' | 'markOf' | 'published' | 'release' | 'syncNow'>
+  store: Pick<SkillShelfStore, 'companyOf' | 'markOf' | 'published' | 'release' | 'restoreCompany' | 'syncNow'>
   client: Pick<ShelfClient, 'departmentId' | 'publish'>
 }
 
@@ -71,6 +73,21 @@ export function registerSkillShelfIpc(ipc: IpcRegistrar, { paths, isWorkingFolde
       return await store.release(at.root, at.rel) ? { success: true } : { success: false, error: SHELF_NOT_A_PLACE_MESSAGE }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : SHELF_NOT_READABLE_MESSAGE }
+    }
+  })
+
+  ipc.handle('skillShelf:restoreCompany', async (_, rootPath: string, skillPath: string): Promise<SkillShelfRestoreResult> => {
+    try {
+      const at = located(rootPath, skillPath)
+      if ('error' in at) return { success: false, error: at.error }
+      const done = await store.restoreCompany(at.root, at.rel)
+      if (!done.ok) return { success: false, error: done.reason === 'unsafe' ? SHELF_RESTORE_UNSAFE_MESSAGE : SHELF_NOT_EDITING_MESSAGE }
+      // Placed now when the server answers; otherwise by the next fetch (the hold is gone either way).
+      await store.syncNow(at.root)
+      return { success: true, companyVersionBack: store.markOf(at.root, at.rel)?.state === 'company' }
+    } catch (error) {
+      console.error('Skill shelf restore error:', error instanceof Error ? error.message : 'unknown')
+      return { success: false, error: SHELF_RESTORE_FAILED_MESSAGE }
     }
   })
 }
