@@ -59,7 +59,7 @@ const withoutFolder = (extra: Record<string, unknown> = {}) => ({
 const b64 = (text: string) => btoa(String.fromCharCode(...new TextEncoder().encode(text)))
 const request = {
   id: 'r_1', name: 'estimate', department: { id: 'd_sales', name: '営業部', folder: '営業部' },
-  requestedBy: { id: 'u_member', name: '田中 太郎' }, requestedAt: '2026-11-09T01:00:00.000Z', state: 'pending', fileCount: 2, totalBytes: 50,
+  requestedBy: { id: 'u_member', name: '田中 太郎' }, requestedAt: '2026-11-09T01:00:00.000Z', state: 'pending', fileCount: 2, totalBytes: 50, version: V1,
   autorun: false, decidedBy: null, decidedAt: null, reason: null, publishedVersion: null, mine: false, canDecide: true, currentVersion: null,
 }
 
@@ -203,8 +203,20 @@ describe('会社の Skill', () => {
     expect(screen.getByText(/いま配っている同じ名前の Skill を置き換えます/)).toBeInTheDocument()
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
     await userEvent.click(screen.getAllByRole('button', { name: '公開する' }).at(-1)!)
-    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ url: expect.stringContaining('/skill-shelf-requests/r_2/publish'), body: { expectedVersion: V2 } })
+    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ url: expect.stringContaining('/skill-shelf-requests/r_2/publish'), body: { requestVersion: V1, expectedVersion: V2 } })
     await waitFor(() => expect(within(screen.getByRole('list', { name: '公開のお願い' })).getAllByRole('listitem')).toHaveLength(1))
+  })
+
+  it('公開のお願い: files that are not the version the list showed are not shown as if they were', async () => {
+    mockApi(withoutFolder({
+      [`GET ${base}/skill-shelf-requests`]: { body: ok({ requests: [request] }) },
+      [`GET ${base}/skill-shelf-requests/r_1/files`]: { body: ok({ id: 'r_1', name: 'estimate', version: V2, files: [{ path: 'SKILL.md', base64: b64('# 差し替えた中身\n') }] }) },
+    }))
+    renderInCompany(<SkillsRoute />)
+    const list = await screen.findByRole('list', { name: '公開のお願い' })
+    await userEvent.click(within(list).getByRole('button', { name: '中身を見る' }))
+    expect(await screen.findByText('お願いの中身が変わりました。もう一度中身を見てください。')).toBeInTheDocument()
+    expect(screen.queryByText('# 差し替えた中身')).not.toBeInTheDocument()
   })
 
   it('公開のお願い: 見送る takes an optional short reason; a too long one cannot be sent', async () => {
@@ -221,7 +233,7 @@ describe('会社の Skill', () => {
     await userEvent.clear(box)
     await userEvent.type(box, '  いまは使わないため  ')
     await userEvent.click(screen.getAllByRole('button', { name: '見送る' }).at(-1)!)
-    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ reason: 'いまは使わないため' })
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ requestVersion: V1, reason: 'いまは使わないため' })
     await waitFor(() => expect(screen.queryByRole('list', { name: '公開のお願い' })).not.toBeInTheDocument())
   })
 

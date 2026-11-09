@@ -95,7 +95,8 @@ export function ShelfRequests({ companyId, onPublished }: { companyId: string; o
         onConfirm={async () => {
           const target = publishing!
           try {
-            await skillShelfApi.publishRequest(companyId, target.id, target.currentVersion)
+            // The version shown in this list and in 中身を見る (one request id never changes its files).
+            await skillShelfApi.publishRequest(companyId, target.id, target.version, target.currentVersion)
             settle(target.id)
             toast.success(`「${target.name}」を公開しました`)
             onPublished()
@@ -112,7 +113,7 @@ export function ShelfRequests({ companyId, onPublished }: { companyId: string; o
         onDecline={async (reason) => {
           const target = declining!
           try {
-            await skillShelfApi.declineRequest(companyId, target.id, reason)
+            await skillShelfApi.declineRequest(companyId, target.id, target.version, reason)
             settle(target.id)
             toast.success(`「${target.name}」のお願いを見送りました`)
           } catch (err) {
@@ -138,7 +139,7 @@ export function readableText(base64: string): string | null {
 }
 
 function RequestFilesDialog({ companyId, request, onOpenChange }: { companyId: string; request: ShelfRequestView | null; onOpenChange: (open: boolean) => void }) {
-  const content = useQuery<ShelfRequestContent>(request ? `skill-shelf-request-files:${companyId}:${request.id}` : null, () =>
+  const content = useQuery<ShelfRequestContent>(request ? `skill-shelf-request-files:${companyId}:${request.id}:${request.version}` : null, () =>
     skillShelfApi.requestFiles(companyId, request!.id),
   )
   // SKILL.md first, then the rest by name.
@@ -150,7 +151,10 @@ function RequestFilesDialog({ companyId, request, onOpenChange }: { companyId: s
           <DialogTitle>{request ? `「${request.name}」の中身` : ''}</DialogTitle>
           <DialogDescription>{request ? `${personOf(request.requestedBy)}さんが送った Skill のファイルです。` : ''}</DialogDescription>
         </DialogHeader>
-        {content.error && !content.data ? (
+        {content.data && request && content.data.version !== request.version ? (
+          // What is there now is not what this list showed: look again from a fresh list.
+          <p role="alert" className="text-sm text-destructive">お願いの中身が変わりました。もう一度中身を見てください。</p>
+        ) : content.error && !content.data ? (
           <p role="alert" className="text-sm text-destructive">{describeError(content.error)}</p>
         ) : !content.data ? (
           <p className="text-sm text-muted-foreground">読み込んでいます…</p>

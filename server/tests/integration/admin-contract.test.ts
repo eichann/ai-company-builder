@@ -492,8 +492,8 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
       expect(other.status).toBe(201)
       await expectShape('ShelfRequests', USERS.owner, 'GET', `${base}/skill-shelf-requests`)
       await expectShape('ShelfRequestContent', USERS.owner, 'GET', `${base}/skill-shelf-requests/${asked.json.data.id}/files`)
-      await expectShape('ShelfRequestDecided', USERS.owner, 'POST', `${base}/skill-shelf-requests/${asked.json.data.id}/publish`, { expectedVersion: null })
-      await expectShape('ShelfRequestDecided', USERS.owner, 'POST', `${base}/skill-shelf-requests/${other.json.data.id}/decline`, { reason: '今回は見送ります' })
+      await expectShape('ShelfRequestDecided', USERS.owner, 'POST', `${base}/skill-shelf-requests/${asked.json.data.id}/publish`, { requestVersion: asked.json.data.version, expectedVersion: null })
+      await expectShape('ShelfRequestDecided', USERS.owner, 'POST', `${base}/skill-shelf-requests/${other.json.data.id}/decline`, { requestVersion: other.json.data.version, reason: '今回は見送ります' })
     } finally {
       db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
     }

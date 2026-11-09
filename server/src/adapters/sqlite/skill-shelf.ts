@@ -65,6 +65,33 @@ export function sqliteSkillShelfRepository(conn: Database.Database, companyId: s
     const r = conn.prepare(`SELECT ${REQUEST_COLUMNS} FROM shelf_requests WHERE company_id = ? AND id = ?`).get(companyId, requestId) as RequestRow | undefined
     return r ? request(r) : null
   }
+  /** Puts a version at its place and makes it current; call inside a transaction. */
+  const putVersion = (input: ShelfPut): ShelfWrite => {
+    const existing = findAt(input.kind, input.departmentId, input.name)
+    const current = existing?.currentVersion ?? null
+    if (current !== input.expected) return { ok: false, reason: 'conflict', currentVersion: current }
+    if (existing && current === input.version) return { ok: true, itemId: existing.id, changed: false }
+    const stored = existing ? hasVersion(existing.id, input.version) : false
+    // In the same transaction as the write: two publishes at once cannot both pass the limit.
+    if (!stored) {
+      const { n } = conn.prepare('SELECT IFNULL(SUM(total_bytes), 0) AS n FROM shelf_versions WHERE company_id = ?').get(companyId) as { n: number }
+      if (n + input.totalBytes > input.companyLimitBytes) return { ok: false, reason: 'full' }
+    }
+    let itemId = existing?.id
+    if (!itemId) {
+      itemId = input.newItemId
+      conn.prepare(`INSERT INTO shelf_items (id, company_id, kind, department_id, name, current_version, created_at, created_by, changed_at, changed_by)
+          VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`)
+        .run(itemId, companyId, input.kind, input.departmentId, input.name, input.at, input.by, input.at, input.by)
+    }
+    if (!stored) {
+      conn.prepare(`INSERT INTO shelf_versions (company_id, item_id, version, files, file_count, total_bytes, autorun, published_at, published_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(companyId, itemId, input.version, JSON.stringify(input.files), input.fileCount, input.totalBytes, input.autorun ? 1 : 0, input.at, input.by)
+    }
+    makeCurrent(itemId, input.version, 'publish', input.at, input.by, input.requestedBy ?? null)
+    return { ok: true, itemId, changed: true }
+  }
 
   return {
     items() {
@@ -94,30 +121,18 @@ export function sqliteSkillShelfRepository(conn: Database.Database, companyId: s
     },
     put(input: ShelfPut): ShelfWrite {
       return conn.transaction((): ShelfWrite => {
-        const existing = findAt(input.kind, input.departmentId, input.name)
-        const current = existing?.currentVersion ?? null
-        if (current !== input.expected) return { ok: false, reason: 'conflict', currentVersion: current }
-        if (existing && current === input.version) return { ok: true, itemId: existing.id, changed: false }
-        const stored = existing ? hasVersion(existing.id, input.version) : false
-        // In the same transaction as the write: two publishes at once cannot both pass the limit.
-        if (!stored) {
-          const { n } = conn.prepare('SELECT IFNULL(SUM(total_bytes), 0) AS n FROM shelf_versions WHERE company_id = ?').get(companyId) as { n: number }
-          if (n + input.totalBytes > input.companyLimitBytes) return { ok: false, reason: 'full' }
+        const from = input.fromRequest
+        // Before anything is written: the request is still the one the approver looked at.
+        if (from && !conn.prepare(`SELECT 1 FROM shelf_requests WHERE company_id = ? AND id = ? AND version = ? AND state = 'pending'`).get(companyId, from.id, from.version)) {
+          return { ok: false, reason: 'request-changed' }
         }
-        let itemId = existing?.id
-        if (!itemId) {
-          itemId = input.newItemId
-          conn.prepare(`INSERT INTO shelf_items (id, company_id, kind, department_id, name, current_version, created_at, created_by, changed_at, changed_by)
-              VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`)
-            .run(itemId, companyId, input.kind, input.departmentId, input.name, input.at, input.by, input.at, input.by)
+        const written = putVersion(input)
+        if (written.ok && from) {
+          conn.prepare(`UPDATE shelf_requests SET state = 'published', decided_by = ?, decided_at = ?, reason = NULL, published_version = ?, files = NULL
+              WHERE company_id = ? AND id = ? AND version = ? AND state = 'pending'`)
+            .run(input.by, input.at, input.version, companyId, from.id, from.version)
         }
-        if (!stored) {
-          conn.prepare(`INSERT INTO shelf_versions (company_id, item_id, version, files, file_count, total_bytes, autorun, published_at, published_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-            .run(companyId, itemId, input.version, JSON.stringify(input.files), input.fileCount, input.totalBytes, input.autorun ? 1 : 0, input.at, input.by)
-        }
-        makeCurrent(itemId, input.version, 'publish', input.at, input.by, input.requestedBy ?? null)
-        return { ok: true, itemId, changed: true }
+        return written
       })()
     },
     setCurrent(itemId, expected, v, at, by): ShelfWrite {
@@ -180,9 +195,11 @@ export function sqliteSkillShelfRepository(conn: Database.Database, companyId: s
           `SELECT COUNT(*) AS n, IFNULL(SUM(total_bytes), 0) AS bytes FROM shelf_requests WHERE company_id = ? AND state = 'pending' AND id <> ?${where}`,
         ).get(companyId, earlier?.id ?? '', ...args) as { n: number; bytes: number }
         if (others(' AND requested_by = ?', input.by).n >= input.limits.pendingPerMember) return { ok: false as const, reason: 'member-limit' as const }
-        const company = others('')
+        // Requests of someone who left the company wait for nobody: not counted.
+        const company = others(' AND requested_by IN (SELECT user_id FROM memberships WHERE company_id = ?)', companyId)
         if (company.n >= input.limits.pendingPerCompany || company.bytes + input.totalBytes > input.limits.pendingCompanyBytes) return { ok: false as const, reason: 'company-limit' as const }
-        const id = earlier?.id ?? input.newId
+        // Always a new id: a decision taken on what was looked at can never land on what replaced it.
+        const id = input.newId
         if (earlier) conn.prepare('DELETE FROM shelf_requests WHERE company_id = ? AND id = ?').run(companyId, earlier.id)
         conn.prepare(`INSERT INTO shelf_requests (id, company_id, department_id, name, requested_by, requested_at, version, files, file_count, total_bytes, autorun, state)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`)
@@ -190,10 +207,10 @@ export function sqliteSkillShelfRepository(conn: Database.Database, companyId: s
         return { ok: true as const, id }
       })()
     },
-    decideRequest(requestId, decision) {
-      return conn.prepare(`UPDATE shelf_requests SET state = ?, decided_by = ?, decided_at = ?, reason = ?, published_version = ?, files = NULL
-          WHERE company_id = ? AND id = ? AND state = 'pending'`)
-        .run(decision.state, decision.by, decision.at, decision.reason, decision.publishedVersion, companyId, requestId).changes === 1
+    declineRequest(requestId, v, decision) {
+      return conn.prepare(`UPDATE shelf_requests SET state = 'declined', decided_by = ?, decided_at = ?, reason = ?, published_version = NULL, files = NULL
+          WHERE company_id = ? AND id = ? AND version = ? AND state = 'pending'`)
+        .run(decision.by, decision.at, decision.reason, companyId, requestId, v).changes === 1
     },
   }
 }

@@ -40,7 +40,8 @@ import { groupsRoute } from '../../src/routes/groups'
 import { skillEditorsRoute } from '../../src/routes/skill-editors'
 import { skillShelfRoute } from '../../src/routes/skill-shelf'
 import { setRepoGitTimeoutsForTests } from '../../src/adapters/git-repo-store'
-import { SHELF_REQUEST_LIMITS } from '../../shared/core/skill-shelf'
+import { createHash } from 'node:crypto'
+import { SHELF_REQUEST_LIMITS, shelfListing } from '../../shared/core/skill-shelf'
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })
 
@@ -93,6 +94,14 @@ const ask = (name: string, departmentId: string | null, as: string, body = SKILL
   call('POST', co('/skill-shelf-requests'), { departmentId, name, files: files(body, extra) }, as)
 const listed = async (as: string) => (await call('GET', co('/skill-shelf-requests'), undefined, as))
 const myRequests = async (as: string) => (await call('GET', co('/me/skill-shelf'), undefined, as)).body.data.requests as Json[]
+const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
+/** The version the server gives these files (what an approver is shown). */
+const versionOfFiles = (fs: Array<{ path: string; base64: string }>) =>
+  sha(Buffer.from(shelfListing(fs.map(f => ({ path: f.path, sha256: sha(Buffer.from(f.base64, 'base64')) }))), 'utf8'))
+const publishReq = (r: { id: string; version: string }, expectedVersion: string | null, as: string) =>
+  call('POST', co(`/skill-shelf-requests/${r.id}/publish`), { requestVersion: r.version, expectedVersion }, as)
+const declineReq = (r: { id: string; version: string }, as: string, reason?: string) =>
+  call('POST', co(`/skill-shelf-requests/${r.id}/decline`), { requestVersion: r.version, reason }, as)
 const stored = () => (db.prepare('SELECT COUNT(*) AS n FROM shelf_requests WHERE company_id = ?').get(none) as { n: number }).n
 
 function addMembers(companyId: string, people: Array<[string, string]>) {
@@ -219,9 +228,8 @@ describe('公開する and 見送る', () => {
   it('the sender cannot decide; a publisher publishes once, as a new version noting who asked; its files go', async () => {
     const made = await ask('estimate', null, 'rq-bob', SKILL, { 'tools/a.txt': 'tool' })
     const id = made.body.data.id
-    expect(await call('POST', co(`/skill-shelf-requests/${id}/publish`), { expectedVersion: null }, 'rq-bob'))
-      .toMatchObject({ status: 403, body: { code: 'SHELF_REQUEST_NOT_DECIDER' } })
-    const done = await call('POST', co(`/skill-shelf-requests/${id}/publish`), { expectedVersion: null }, 'rq-editor')
+    expect(await publishReq(made.body.data, null, 'rq-bob')).toMatchObject({ status: 403, body: { code: 'SHELF_REQUEST_NOT_DECIDER' } })
+    const done = await publishReq(made.body.data, null, 'rq-editor')
     expect(done.status).toBe(200)
     expect(done.body.data.request).toMatchObject({ state: 'published', decidedBy: { id: 'rq-editor' }, publishedVersion: expect.any(String) })
     expect(done.body.data.item).toMatchObject({ kind: 'skill', name: 'estimate', department: null, fileCount: 2 })
@@ -229,8 +237,8 @@ describe('公開する and 見送る', () => {
     expect(versions.body.data.history[0]).toMatchObject({ action: 'publish', by: { id: 'rq-editor' }, requestedBy: { id: 'rq-bob', name: 'Name rq-bob' } })
     expect(done.body.data.request.publishedVersion).toBe(done.body.data.item.version)
     // Decided: no second decision, no files kept.
-    expect(await call('POST', co(`/skill-shelf-requests/${id}/publish`), { expectedVersion: null }, 'rq-owner')).toMatchObject({ status: 409, body: { code: 'SHELF_REQUEST_DECIDED' } })
-    expect(await call('POST', co(`/skill-shelf-requests/${id}/decline`), {}, 'rq-owner')).toMatchObject({ status: 409, body: { code: 'SHELF_REQUEST_DECIDED' } })
+    expect(await publishReq(made.body.data, null, 'rq-owner')).toMatchObject({ status: 409, body: { code: 'SHELF_REQUEST_DECIDED' } })
+    expect(await declineReq(made.body.data, 'rq-owner')).toMatchObject({ status: 409, body: { code: 'SHELF_REQUEST_DECIDED' } })
     expect(await call('GET', co(`/skill-shelf-requests/${id}/files`), undefined, 'rq-bob')).toMatchObject({ status: 409, body: { code: 'SHELF_REQUEST_DECIDED' } })
     expect(db.prepare('SELECT files FROM shelf_requests WHERE company_id = ? AND id = ?').get(none, id)).toEqual({ files: null })
     expect((await myRequests('rq-bob')).find(r => r.id === id)).toMatchObject({ state: 'published', decidedAt: expect.any(String) })
@@ -241,34 +249,72 @@ describe('公開する and 見送る', () => {
     const hooked = '---\nname: h\ndescription: d\nhooks:\n  PreToolUse: []\n---\nbody\n'
     db.prepare(`INSERT INTO shelf_requests (id, company_id, department_id, name, requested_by, requested_at, version, files, file_count, total_bytes, autorun, state)
         VALUES ('rq-old', ?, NULL, 'old-hooked', 'rq-bob', ?, ?, ?, 1, ?, 0, 'pending')`)
-      .run(none, new Date().toISOString(), 'a'.repeat(64), JSON.stringify(files(hooked)), hooked.length)
-    expect(await call('POST', co('/skill-shelf-requests/rq-old/publish'), { expectedVersion: null }, 'rq-editor'))
+      .run(none, new Date().toISOString(), versionOfFiles(files(hooked)), JSON.stringify(files(hooked)), hooked.length)
+    const old = { id: 'rq-old', version: versionOfFiles(files(hooked)) }
+    expect(await publishReq(old, null, 'rq-editor'))
       .toMatchObject({ status: 403, body: { code: 'SHELF_NOT_ALLOWED', files: [{ path: 'SKILL.md', reason: 'autorun' }] } })
-    expect((await call('POST', co('/skill-shelf-requests/rq-old/publish'), { expectedVersion: null }, 'rq-owner')).status).toBe(200)
+    expect((await publishReq(old, null, 'rq-owner')).status).toBe(200)
   })
 
   it('publishing checks the version the publisher saw, like any publish', async () => {
     const first = await ask('versioned', null, 'rq-bob')
-    expect((await call('POST', co(`/skill-shelf-requests/${first.body.data.id}/publish`), { expectedVersion: null }, 'rq-owner')).status).toBe(200)
+    expect((await publishReq(first.body.data, null, 'rq-owner')).status).toBe(200)
     const again = await ask('versioned', null, 'rq-bob', `${SKILL}二つめ。\n`)
     expect(again.body.data.currentVersion).toMatch(/^[0-9a-f]{64}$/)
-    expect(await call('POST', co(`/skill-shelf-requests/${again.body.data.id}/publish`), { expectedVersion: null }, 'rq-owner'))
+    expect(await publishReq(again.body.data, null, 'rq-owner'))
       .toMatchObject({ status: 409, body: { code: 'SHELF_VERSION_CHANGED', currentVersion: again.body.data.currentVersion } })
-    expect((await call('POST', co(`/skill-shelf-requests/${again.body.data.id}/publish`), { expectedVersion: again.body.data.currentVersion }, 'rq-owner')).status).toBe(200)
+    expect((await publishReq(again.body.data, again.body.data.currentVersion, 'rq-owner')).status).toBe(200)
   })
 
   it('見送る with a short reason (or none); the sender sees it', async () => {
     const made = await ask('declined', null, 'rq-bob')
     const id = made.body.data.id
-    const long = await call('POST', co(`/skill-shelf-requests/${id}/decline`), { reason: 'あ'.repeat(SHELF_REQUEST_LIMITS.reasonLength + 1) }, 'rq-owner')
+    const long = await declineReq(made.body.data, 'rq-owner', 'あ'.repeat(SHELF_REQUEST_LIMITS.reasonLength + 1))
     expect(long).toMatchObject({ status: 400, body: { code: 'SHELF_BAD_REASON' } })
-    const done = await call('POST', co(`/skill-shelf-requests/${id}/decline`), { reason: '  いまは使わないため  ' }, 'rq-owner')
+    const done = await declineReq(made.body.data, 'rq-owner', '  いまは使わないため  ')
     expect(done.body.data.request).toMatchObject({ state: 'declined', reason: 'いまは使わないため', decidedBy: { id: 'rq-owner' } })
     expect((await myRequests('rq-bob')).find(r => r.id === id)).toMatchObject({ state: 'declined', reason: 'いまは使わないため' })
     expect(db.prepare('SELECT files FROM shelf_requests WHERE company_id = ? AND id = ?').get(none, id)).toEqual({ files: null })
-    // Asking again at the same place replaces the decided request with a pending one.
+    // Asking again at the same place replaces the decided request with a pending one, under a new id.
     const again = await ask('declined', null, 'rq-bob', `${SKILL}直しました。\n`)
-    expect(again.body.data).toMatchObject({ id, state: 'pending' })
+    expect(again.body.data).toMatchObject({ state: 'pending' })
+    expect(again.body.data.id).not.toBe(id)
+  })
+
+  it('a request sent again after it was looked at: the old id and the old version decide nothing', async () => {
+    const first = await ask('swap', null, 'rq-bob')
+    const seen = (await call('GET', co(`/skill-shelf-requests/${first.body.data.id}/files`), undefined, 'rq-owner')).body.data
+    expect(seen.version).toBe(first.body.data.version)
+    // Swapped after the owner looked: a new id, the old one gone.
+    const swapped = await ask('swap', null, 'rq-bob', `${SKILL}あとから足した中身。\n`)
+    expect(swapped.body.data.id).not.toBe(first.body.data.id)
+    expect(await publishReq(seen, null, 'rq-owner')).toMatchObject({ status: 404, body: { code: 'SHELF_REQUEST_NOT_FOUND' } })
+    expect(await declineReq(seen, 'rq-owner')).toMatchObject({ status: 404, body: { code: 'SHELF_REQUEST_NOT_FOUND' } })
+    // The new request with the version looked at before: refused, nothing published or decided.
+    const changed = await publishReq({ id: swapped.body.data.id, version: seen.version }, null, 'rq-owner')
+    expect(changed).toMatchObject({ status: 409, body: { code: 'SHELF_REQUEST_CHANGED', error: 'お願いの中身が変わりました。もう一度中身を見てください。' } })
+    expect(await declineReq({ id: swapped.body.data.id, version: seen.version }, 'rq-owner')).toMatchObject({ status: 409, body: { code: 'SHELF_REQUEST_CHANGED' } })
+    expect(await call('POST', co(`/skill-shelf-requests/${swapped.body.data.id}/publish`), { expectedVersion: null }, 'rq-owner')).toMatchObject({ status: 400, body: { code: 'SHELF_BAD_VERSION' } })
+    expect((await call('GET', co('/skill-shelf'))).body.data.items.some((i: Json) => i.name === 'swap')).toBe(false)
+    expect(db.prepare('SELECT state FROM shelf_requests WHERE company_id = ? AND id = ?').get(none, swapped.body.data.id)).toEqual({ state: 'pending' })
+    // Looked at again: the new version publishes what was shown.
+    const now = (await call('GET', co(`/skill-shelf-requests/${swapped.body.data.id}/files`), undefined, 'rq-owner')).body.data
+    const done = await publishReq(now, null, 'rq-owner')
+    expect(done.status).toBe(200)
+    expect(done.body.data.item.version).toBe(now.version)
+  })
+
+  it('the files kept with a request are the version it names and follow the upload rules, or nothing is published', async () => {
+    const made = await ask('tampered', null, 'rq-bob')
+    // Files no longer matching the request's version (changed underneath): refused.
+    db.prepare('UPDATE shelf_requests SET files = ? WHERE company_id = ? AND id = ?').run(JSON.stringify(files(`${SKILL}違う。\n`)), none, made.body.data.id)
+    expect(await publishReq(made.body.data, null, 'rq-owner')).toMatchObject({ status: 409, body: { code: 'SHELF_REQUEST_CHANGED' } })
+    // Files breaking the upload rules (a path no publish takes): refused with publishing's answer.
+    const bad = [...files(), { path: '../escape.txt', base64: b64('x') }]
+    db.prepare('UPDATE shelf_requests SET files = ?, version = ? WHERE company_id = ? AND id = ?').run(JSON.stringify(bad), versionOfFiles(bad), none, made.body.data.id)
+    const refused = await publishReq({ id: made.body.data.id, version: versionOfFiles(bad) }, null, 'rq-owner')
+    expect(refused.status).toBe(400)
+    expect((await call('GET', co('/skill-shelf'))).body.data.items.some((i: Json) => i.name === 'tampered')).toBe(false)
   })
 })
 
@@ -280,6 +326,37 @@ describe('limits', () => {
     expect(replaced.status).toBe(201)
     expect((db.prepare("SELECT COUNT(*) AS n FROM shelf_requests WHERE company_id = ? AND requested_by = 'rq-dan'").get(none) as { n: number }).n).toBe(SHELF_REQUEST_LIMITS.pendingPerMember)
   })
+
+  it('a company has at most so many pending requests and bytes; those of someone who left do not count', async () => {
+    const at = new Date().toISOString()
+    const fill = (n: number, bytes: number) => {
+      for (let i = 0; i < n; i++) {
+        db.prepare(`INSERT INTO shelf_requests (id, company_id, department_id, name, requested_by, requested_at, version, files, file_count, total_bytes, autorun, state)
+            VALUES (?, ?, NULL, ?, 'rq-fill', ?, ?, '[]', 1, ?, 0, 'pending')`).run(`fill-${i}`, none, `fill-${i}`, at, 'b'.repeat(64), bytes)
+      }
+    }
+    const clear = () => db.prepare("DELETE FROM shelf_requests WHERE company_id = ? AND (id LIKE 'fill-%' OR requested_by = 'rq-carol')").run(none)
+    const leave = () => db.prepare("DELETE FROM memberships WHERE company_id = ? AND user_id = 'rq-fill'").run(none)
+    try {
+      clear()
+      const pending = (db.prepare("SELECT COUNT(*) AS n FROM shelf_requests WHERE company_id = ? AND state = 'pending'").get(none) as { n: number }).n
+      // Count: filled up to the limit by a member still in the company.
+      addMembers(none, [['rq-fill', 'member']])
+      fill(SHELF_REQUEST_LIMITS.pendingPerCompany - pending, 1)
+      expect(await ask('one-too-many', null, 'rq-carol')).toMatchObject({ status: 409, body: { code: 'SHELF_REQUEST_LIMIT', error: expect.stringContaining('会社全体') } })
+      // The same rows from someone who left the company: nobody waits on them.
+      leave()
+      expect((await ask('one-too-many', null, 'rq-carol')).status).toBe(201)
+      clear()
+      // Bytes: one pending request holding all of them.
+      addMembers(none, [['rq-fill', 'member']])
+      fill(1, SHELF_REQUEST_LIMITS.pendingCompanyBytes)
+      expect(await ask('too-big', null, 'rq-carol')).toMatchObject({ status: 409, body: { code: 'SHELF_REQUEST_LIMIT', error: expect.stringContaining('会社全体') } })
+    } finally {
+      clear()
+      leave()
+    }
+  })
 })
 
 describe('a company with the shared folder', () => {
@@ -289,7 +366,7 @@ describe('a company with the shared folder', () => {
       await call('GET', g('/skill-shelf-requests'), undefined, 'rq-bob'),
       await call('POST', g('/skill-shelf-requests'), { departmentId: null, name: 'x', files: files() }, 'rq-bob'),
       await call('GET', g('/skill-shelf-requests/any/files')),
-      await call('POST', g('/skill-shelf-requests/any/publish'), { expectedVersion: null }),
+      await call('POST', g('/skill-shelf-requests/any/publish'), { expectedVersion: null, requestVersion: 'a'.repeat(64) }),
       await call('POST', g('/skill-shelf-requests/any/decline'), {}),
     ]
     for (const a of answers) expect(a).toMatchObject({ status: 409, body: { code: 'SKILL_SHELF_NOT_HERE' } })

@@ -62,12 +62,18 @@ export interface ShelfPut {
   by: string
   /** Published from a request: who asked (kept in the history beside `by`, who approved). */
   requestedBy?: string
+  /**
+   * Published from a request: the request and the version the approver looked at. In the same
+   * transaction as the publish it must still be pending with that version (else nothing is written,
+   * `request-changed`), and it is marked published.
+   */
+  fromRequest?: { id: string; version: string }
 }
 
 export type ShelfWrite =
   | { ok: true; itemId: string; changed: boolean }
   | { ok: false; reason: 'conflict'; currentVersion: string | null }
-  | { ok: false; reason: 'not-found' | 'full' }
+  | { ok: false; reason: 'not-found' | 'full' | 'request-changed' }
 
 /** A request to publish a Skill (「会社に出してほしいと頼む」); always a Skill. */
 export interface ShelfRequestRow {
@@ -148,5 +154,6 @@ export interface SkillShelfRepository {
    */
   putRequest(input: ShelfRequestPut): ShelfRequestWrite
   /** Decide a pending request (its files go); false when it is not pending any more. */
-  decideRequest(requestId: string, decision: { state: 'published' | 'declined'; by: string; at: string; reason: string | null; publishedVersion: string | null }): boolean
+  /** Declines a pending request whose version is still `version`; false when it is not (decided, replaced or gone). */
+  declineRequest(requestId: string, version: string, decision: { by: string; at: string; reason: string | null }): boolean
 }

@@ -245,8 +245,8 @@ GET  /api/config                                  setup state (no auth)
                               GET|POST /skill-shelf, GET /skill-shelf/:itemId/versions(/:version),
                               POST /skill-shelf/:itemId/restore | unpublish, GET /me/skill-shelf,
                               DELETE /skill-shelf/:itemId(/versions/:version) (owner/admin),
-                              GET|POST /skill-shelf-requests, GET …/requests/:requestId/files,
-                              POST …/requests/:requestId/publish | decline (公開のお願い)
+                              GET|POST /skill-shelf-requests, GET /skill-shelf-requests/:requestId/files,
+                              POST /skill-shelf-requests/:requestId/publish | decline (公開のお願い)
                                                                              skill-shelf.ts
                                                                 (会社の Skill, no shared folder only: plugins.md "The Skill shelf")
                               /private-folders…, /me/private-folders, /me/scopes,

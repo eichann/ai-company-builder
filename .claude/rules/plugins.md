@@ -650,26 +650,36 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   to such a department answers as a missing one (404 `SHELF_PLACE_NOT_FOUND`); another company's
   item is one that does not exist.
 - **Requests to publish a Skill** (「会社に出してほしいと頼む」, owner decision 2026-11-09; table
-  `shelf_requests`, one row per member × place × name — a new request replaces their earlier one —,
+  `shelf_requests`, one row per member × place × name — a new request replaces their earlier one,
+  always under a **new id** —,
   files kept only while pending, the row going with its department): `POST /skill-shelf-requests
   { departmentId, name, files }` (any member) — the place must be one they read (else 404
   `SHELF_PLACE_NOT_FOUND`); someone who may publish there gets 409 `SHELF_REQUEST_NOT_NEEDED`; the
   upload rules and secrets as publishing (`parseShelfContent`, `secretsIn`), and what only an
   owner/admin may publish (`shelfRequestProblems`: agent config, auto-run parts) refused when sent
   with publishing's 403 `SHELF_NOT_ALLOWED`; ≤ 5 pending per member, ≤ 50 and 100 MB pending per
-  company (`SHELF_REQUEST_LIMITS`, checked in the write: 409 `SHELF_REQUEST_LIMIT`). **Who sees
+  company, counting only requesters who are still members (`SHELF_REQUEST_LIMITS`, checked in the
+  write: 409 `SHELF_REQUEST_LIMIT`). **Who sees
   one**: its sender and those who may publish a Skill at its place (`mayDecide`: the publish
   check without the files), and only while they read the place (`GET /skill-shelf-requests`,
-  `GET …/requests/:requestId/files`, `MyShelfView.requests` for the app); anyone else — a
+  `GET /skill-shelf-requests/:requestId/files`, `MyShelfView.requests` for the app); anyone else — a
   department they cannot read included, its name never in the answer — gets the same 404
-  `SHELF_REQUEST_NOT_FOUND` as for a request that does not exist. `POST …/publish { expectedVersion }`
-  and `POST …/decline { reason? ≤ 200 }`: only who may publish there (the sender who may not: 403
-  `SHELF_REQUEST_NOT_DECIDER`), once (409 `SHELF_REQUEST_DECIDED`). 公開する runs the whole publish
-  check again with the publisher's authority (a request kept before a rule changed is judged now)
-  and `expectedVersion` like any publish; the history row keeps who asked (`shelf_history.requested_by`,
+  `SHELF_REQUEST_NOT_FOUND` as for a request that does not exist.
+  `POST /skill-shelf-requests/:requestId/publish { requestVersion, expectedVersion }` and
+  `POST /skill-shelf-requests/:requestId/decline { requestVersion, reason? ≤ 200 }`: only who may
+  publish there (the sender who may not: 403 `SHELF_REQUEST_NOT_DECIDER`), once (409
+  `SHELF_REQUEST_DECIDED`). **What was looked at is what is decided** (review 2026-11-09: a sender
+  could swap the files after review): `requestVersion` is the version of the files the decider was
+  shown (`ShelfRequestView.version` / `ShelfRequestContent.version`); another one → 409
+  `SHELF_REQUEST_CHANGED` 「お願いの中身が変わりました。もう一度中身を見てください。」; publishing checks it
+  again inside the publish transaction (`ShelfPut.fromRequest`) and marks the request there, and
+  declining in its UPDATE; the kept files must hash to that version and pass the upload rules again
+  (`parseShelfContent`). 公開する runs the whole publish check again with the publisher's authority
+  (a request kept before a rule changed is judged now) and `expectedVersion` like any publish; the history row keeps who asked (`shelf_history.requested_by`,
   `ShelfHistoryEntry.requestedBy`, `migrateShelfHistoryRequester`); the request's files go either way.
   No notice (知らせ are record notices, `notifications.md`): publishers see requests in the admin
-  page, members their state in the app. Tests: `server/tests/integration/skill-shelf-requests.test.ts`
+  page, members their state in the app; the admin sends the version it listed, keys its files view by
+  id + version and says so when the files are another version. Tests: `server/tests/integration/skill-shelf-requests.test.ts`
   (each guard mutation-checked), permission matrix rows + `CROSS`, `admin-contract.test.ts`.
 - **Admin** 「会社の Skill」 (`admin/src/components/skill-shelf/`, menu for owners / admins /
   managers / 「Skill を直せる人」 (`skillEditing` of `/me/capabilities`) of a `none` company):

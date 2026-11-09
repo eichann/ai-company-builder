@@ -1075,13 +1075,17 @@ export const skillShelfApi = {
   requestFiles: (companyId: string, requestId: string) =>
     getData(`${shelfBase(companyId)}-requests/${enc(requestId)}/files`, shelfRequestContentSchema),
 
-  /** 公開する: published as a new version (409 SHELF_VERSION_CHANGED when the item changed since the page saw it). */
-  publishRequest: (companyId: string, requestId: string, expectedVersion: string | null) =>
-    getData(`${shelfBase(companyId)}-requests/${enc(requestId)}/publish`, shelfRequestDecidedSchema, { method: 'POST', body: { expectedVersion } }),
+  /**
+   * 公開する: published as a new version. `requestVersion` is the version of the request's files the
+   * page showed (409 SHELF_REQUEST_CHANGED when they are not what is there now; 409
+   * SHELF_VERSION_CHANGED when the item changed since the page saw it).
+   */
+  publishRequest: (companyId: string, requestId: string, requestVersion: string, expectedVersion: string | null) =>
+    getData(`${shelfBase(companyId)}-requests/${enc(requestId)}/publish`, shelfRequestDecidedSchema, { method: 'POST', body: { requestVersion, expectedVersion } }),
 
-  /** 見送る, with a short reason or none. */
-  declineRequest: (companyId: string, requestId: string, reason: string) =>
-    getData(`${shelfBase(companyId)}-requests/${enc(requestId)}/decline`, shelfRequestDecidedSchema, { method: 'POST', body: { reason } }),
+  /** 見送る, with a short reason or none (`requestVersion` as for 公開する). */
+  declineRequest: (companyId: string, requestId: string, requestVersion: string, reason: string) =>
+    getData(`${shelfBase(companyId)}-requests/${enc(requestId)}/decline`, shelfRequestDecidedSchema, { method: 'POST', body: { requestVersion, reason } }),
 }
 
 const deptBase = (companyId: string) => `/api/companies/${enc(companyId)}/departments`

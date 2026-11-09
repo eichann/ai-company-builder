@@ -174,8 +174,11 @@ export interface ShelfRequestCreate {
 }
 
 export interface ShelfRequestView {
+  /** A request sent again gets a new id (its earlier one is gone). */
   id: string
   name: string
+  /** The version of its files: sent back as `requestVersion` by 公開する / 見送る. */
+  version: string
   /** null = the whole company. */
   department: { id: string; name: string; folder: string } | null
   requestedBy: ShelfPerson

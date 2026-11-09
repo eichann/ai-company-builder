@@ -79,6 +79,7 @@ export const SHELF_REQUEST_NOT_NEEDED = {
   error: 'あなたはこの場所に公開できます。お願いせずに「会社に公開」を使ってください。',
   code: 'SHELF_REQUEST_NOT_NEEDED',
 } as const
+export const SHELF_REQUEST_CHANGED = { error: 'お願いの中身が変わりました。もう一度中身を見てください。', code: 'SHELF_REQUEST_CHANGED' } as const
 export const SHELF_REQUEST_DECIDED = { error: 'このお願いは、もう公開されたか見送られています。', code: 'SHELF_REQUEST_DECIDED' } as const
 export const SHELF_REQUEST_NOT_DECIDER = {
   error: 'このお願いを公開したり見送ったりできるのは、この場所に Skill を公開できる人だけです。',
@@ -290,6 +291,7 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       state: row.state,
       fileCount: row.fileCount,
       totalBytes: row.totalBytes,
+      version: row.version,
       autorun: row.autorun,
       decidedBy: row.decidedBy ? person(row.decidedBy) : null,
       decidedAt: row.decidedAt,
@@ -308,6 +310,13 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
     if (!mayDecide(ctx, found.value)) return refuse('forbidden', SHELF_REQUEST_NOT_DECIDER.error, { code: SHELF_REQUEST_NOT_DECIDER.code })
     if (found.value.state !== 'pending') return refuse('conflict', SHELF_REQUEST_DECIDED.error, { code: SHELF_REQUEST_DECIDED.code })
     return found
+  }
+
+  const requestChanged = () => refuse('conflict', SHELF_REQUEST_CHANGED.error, { code: SHELF_REQUEST_CHANGED.code })
+  /** The version of the request's files the decider looked at (`ShelfRequestContent.version`, also in the list). */
+  function parseRequestVersion(body: unknown): Outcome<string> {
+    const v = isObject(body) ? body.requestVersion : undefined
+    return isShelfVersion(v) ? ok(v) : bad('SHELF_BAD_VERSION', 'requestVersion must be the version of the request that was looked at')
   }
 
   function decidedView(ctx: Context, member: Member, requestId: string, itemId?: string): ShelfRequestDecided {
@@ -580,9 +589,11 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
     },
 
     /**
-     * POST /skill-shelf-requests/:requestId/publish { expectedVersion } — 公開する: published as a new
-     * version by the caller (every publish check again, with their authority), the history noting
-     * who asked; the request is then decided and its files go.
+     * POST /skill-shelf-requests/:requestId/publish { expectedVersion, requestVersion } — 公開する:
+     * published as a new version by the caller (every publish check again, with their authority), the
+     * history noting who asked; the request is decided and its files go, in the same transaction.
+     * `requestVersion` is the version of the files the caller looked at: anything else → 409
+     * `SHELF_REQUEST_CHANGED` (a request sent again has a new id, so an old id is 404 anyway).
      */
     publishRequest(member: Member, requestId: string, body: unknown): Outcome<ShelfRequestDecided> {
       if (deps.hasCompanyFolder(member.companyId)) return notHere()
@@ -592,9 +603,16 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       const row = found.value
       const expected = parseExpected(isObject(body) ? body.expectedVersion : undefined)
       if (!expected.ok) return expected
+      const seen = parseRequestVersion(body)
+      if (!seen.ok) return seen
+      if (seen.value !== row.version) return requestChanged()
       const stored = ctx.handle.skillShelf.requestFiles(row.id)
       if (!stored) return refuse('conflict', SHELF_REQUEST_DECIDED.error, { code: SHELF_REQUEST_DECIDED.code })
-      const files = filesOf(stored)
+      // The upload rules again (paths, sizes, count), and the files are still the version looked at.
+      const content = parseShelfContent('skill', row.name, { files: stored })
+      if (!content.ok) return content
+      const files = content.value
+      if (versionOf(files) !== row.version) return requestChanged()
       const problems = ctx.problems('skill', row.departmentId, row.name, files, true)
       if (problems.length > 0) return notAllowed(problems)
       // Checked again: a pattern added since it was sent.
@@ -607,18 +625,18 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
         files: stored, fileCount: files.length, totalBytes: files.reduce((n, f) => n + f.bytes.length, 0),
         autorun: files.some(f => f.text !== undefined && autorunFindingsInText(f.text).length > 0),
         companyLimitBytes: SHELF_LIMITS.companyBytes,
-        at, by: member.userId, requestedBy: row.requestedBy,
+        at, by: member.userId, requestedBy: row.requestedBy, fromRequest: { id: row.id, version: row.version },
       })
       if (!written.ok) {
+        if (written.reason === 'request-changed') return requestChanged()
         if (written.reason === 'conflict') return changed(written.currentVersion)
         if (written.reason === 'full') return refuse('conflict', SHELF_COMPANY_FULL.error, { code: SHELF_COMPANY_FULL.code })
         return itemNotFound()
       }
-      ctx.handle.skillShelf.decideRequest(row.id, { state: 'published', by: member.userId, at, reason: null, publishedVersion: version })
       return ok(decidedView(ctx, member, row.id, written.itemId))
     },
 
-    /** POST /skill-shelf-requests/:requestId/decline { reason? } — 見送る, with a short reason or none. */
+    /** POST /skill-shelf-requests/:requestId/decline { requestVersion, reason? } — 見送る, with a short reason or none. */
     declineRequest(member: Member, requestId: string, body: unknown): Outcome<ShelfRequestDecided> {
       if (deps.hasCompanyFolder(member.companyId)) return notHere()
       const ctx = contextOf(member)
@@ -628,7 +646,9 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       if (raw !== undefined && raw !== null && typeof raw !== 'string') return bad('SHELF_BAD_REASON', 'reason must be a string')
       const reason = typeof raw === 'string' ? raw.trim() : ''
       if (reason.length > SHELF_REQUEST_LIMITS.reasonLength) return bad('SHELF_BAD_REASON', `理由は ${SHELF_REQUEST_LIMITS.reasonLength} 文字までです。`)
-      ctx.handle.skillShelf.decideRequest(found.value.id, { state: 'declined', by: member.userId, at: clock.now(), reason: reason || null, publishedVersion: null })
+      const seen = parseRequestVersion(body)
+      if (!seen.ok) return seen
+      if (!ctx.handle.skillShelf.declineRequest(found.value.id, seen.value, { by: member.userId, at: clock.now(), reason: reason || null })) return requestChanged()
       return ok(decidedView(ctx, member, found.value.id))
     },
   }
