@@ -52,7 +52,7 @@ const withoutFolder = (extra: Record<string, unknown> = {}) => ({
   [`GET ${base}`]: { body: ok({ ...company, role: 'owner', folderKind: 'none' }) },
   [`GET ${base}/skill-shelf`]: { body: ok({ items: [quote, instructions] }) },
   [`GET ${base}/skill-shelf/s_1/versions`]: { body: ok(versions) },
-  [`GET ${base}/skill-shelf/requests`]: { body: ok({ requests: [] }) },
+  [`GET ${base}/skill-shelf-requests`]: { body: ok({ requests: [] }) },
   ...extra,
 })
 
@@ -179,9 +179,9 @@ describe('会社の Skill', () => {
   it('公開のお願い: a publisher sees the pending requests, looks at the files, and publishes after a confirmation', async () => {
     const replacing = { ...request, id: 'r_2', name: 'quote', currentVersion: V2 }
     const { calls } = mockApi(withoutFolder({
-      [`GET ${base}/skill-shelf/requests`]: { body: ok({ requests: [request, replacing, { ...request, id: 'r_mine', name: 'own', mine: true, canDecide: false }, { ...request, id: 'r_done', name: 'done', state: 'published' }] }) },
-      [`GET ${base}/skill-shelf/requests/r_1/files`]: { body: ok({ id: 'r_1', name: 'estimate', version: V1, files: [{ path: 'notes/a.bin', base64: b64('\u0000\u0001') }, { path: 'SKILL.md', base64: b64('# 見積の作り方\n') }] }) },
-      [`POST ${base}/skill-shelf/requests/r_2/publish`]: { body: ok({ request: { ...replacing, state: 'published' } }) },
+      [`GET ${base}/skill-shelf-requests`]: { body: ok({ requests: [request, replacing, { ...request, id: 'r_mine', name: 'own', mine: true, canDecide: false }, { ...request, id: 'r_done', name: 'done', state: 'published' }] }) },
+      [`GET ${base}/skill-shelf-requests/r_1/files`]: { body: ok({ id: 'r_1', name: 'estimate', version: V1, files: [{ path: 'notes/a.bin', base64: b64('\u0000\u0001') }, { path: 'SKILL.md', base64: b64('# 見積の作り方\n') }] }) },
+      [`POST ${base}/skill-shelf-requests/r_2/publish`]: { body: ok({ request: { ...replacing, state: 'published' } }) },
     }))
     renderInCompany(<SkillsRoute />)
     const list = await screen.findByRole('list', { name: '公開のお願い' })
@@ -203,14 +203,14 @@ describe('会社の Skill', () => {
     expect(screen.getByText(/いま配っている同じ名前の Skill を置き換えます/)).toBeInTheDocument()
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
     await userEvent.click(screen.getAllByRole('button', { name: '公開する' }).at(-1)!)
-    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ url: expect.stringContaining('/skill-shelf/requests/r_2/publish'), body: { expectedVersion: V2 } })
+    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ url: expect.stringContaining('/skill-shelf-requests/r_2/publish'), body: { expectedVersion: V2 } })
     await waitFor(() => expect(within(screen.getByRole('list', { name: '公開のお願い' })).getAllByRole('listitem')).toHaveLength(1))
   })
 
   it('公開のお願い: 見送る takes an optional short reason; a too long one cannot be sent', async () => {
     const { calls } = mockApi(withoutFolder({
-      [`GET ${base}/skill-shelf/requests`]: { body: ok({ requests: [request] }) },
-      [`POST ${base}/skill-shelf/requests/r_1/decline`]: { body: ok({ request: { ...request, state: 'declined' } }) },
+      [`GET ${base}/skill-shelf-requests`]: { body: ok({ requests: [request] }) },
+      [`POST ${base}/skill-shelf-requests/r_1/decline`]: { body: ok({ request: { ...request, state: 'declined' } }) },
     }))
     renderInCompany(<SkillsRoute />)
     const list = await screen.findByRole('list', { name: '公開のお願い' })

@@ -210,7 +210,7 @@ test('「会社に出してほしいと頼む」 through main: the folder goes t
   const { folder } = await open(id, { proposal: { 'SKILL.md': 'x\n' } }, { company: false, departmentFolders: [] }, requests)
   writeFiles(folder, { '営業部/.claude/skills/visit/SKILL.md': 'visit\n', '営業部/.claude/skills/visit/scripts/a.py': 'print(1)\n', '営業部/.claude/skills/visit/.env': 'KEY=secret\n', '営業部/.claude/skills/visit/.git/config': 'x' })
   const posted: Array<Record<string, unknown>> = []
-  h.server.on('POST', `/api/companies/${id}/skill-shelf/requests`, req => {
+  h.server.on('POST', `/api/companies/${id}/skill-shelf-requests`, req => {
     posted.push(JSON.parse(req.body!))
     requests.push({ id: 'r1', name: 'visit', department: { id: 'd1', folder: '営業部' }, state: 'pending', requestedAt: '2026-11-09T01:00:00.000Z', decidedAt: null, reason: null })
     return { status: 201, json: { success: true, data: { id: 'r1' } } }
@@ -229,7 +229,7 @@ test('「会社に出してほしいと頼む」 through main: the folder goes t
   // A delivered Skill is not sent; the server's refusal is shown as written; offline says so.
   assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, path.join(folder, '.claude/skills/proposal')), { success: false, error: SHELF_ALREADY_COMPANY_MESSAGE })
   const sentence = 'パスワードやキーのようなものが入っています。取り除いてから、もう一度やり直してください。'
-  h.server.on('POST', `/api/companies/${id}/skill-shelf/requests`, { status: 400, json: { error: sentence, code: 'SHELF_SECRET_DETECTED' } })
+  h.server.on('POST', `/api/companies/${id}/skill-shelf-requests`, { status: 400, json: { error: sentence, code: 'SHELF_SECRET_DETECTED' } })
   assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, skillPath), { success: false, error: sentence })
   writeFiles(folder, { '.claude/skills/own/SKILL.md': 'own\n' })
   h.server.offline = true

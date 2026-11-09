@@ -130,7 +130,7 @@ export function createShelfClient(deps: ShelfClientDeps) {
     },
     /** 「会社に出してほしいと頼む」: send a Skill's folder to those who may publish it. The server decides who may ask. */
     async request(companyId: string, request: { departmentId: string | null; name: string; files: ShelfFileUpload[] }): Promise<{ ok: true } | { ok: false; message: string } | { ok: false; offline: true }> {
-      const answer = await post(companyId, '/skill-shelf/requests', request)
+      const answer = await post(companyId, '/skill-shelf-requests', request)
       return answer.ok ? { ok: true } : answer
     },
   }

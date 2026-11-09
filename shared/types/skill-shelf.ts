@@ -13,11 +13,11 @@
  *   DELETE /skill-shelf/:itemId/versions/:version     owner/admin: remove an old version → ShelfVersionsView
  *   DELETE /skill-shelf/:itemId                       owner/admin: remove an item taken off → { removed: true }
  *   GET  /me/skill-shelf                              MyShelfView (what the member's app places)
- *   GET  /skill-shelf/requests                        ShelfRequestsView (their own, and those they may decide)
- *   POST /skill-shelf/requests                        ShelfRequestCreate → ShelfRequestView (someone who may not publish there)
- *   GET  /skill-shelf/requests/:requestId/files       ShelfRequestContent (a pending one's files)
- *   POST /skill-shelf/requests/:requestId/publish     { expectedVersion } → ShelfRequestDecided (who may publish there)
- *   POST /skill-shelf/requests/:requestId/decline     { reason? } → ShelfRequestDecided (who may publish there)
+ *   GET  /skill-shelf-requests                        ShelfRequestsView (their own, and those they may decide)
+ *   POST /skill-shelf-requests                        ShelfRequestCreate → ShelfRequestView (someone who may not publish there)
+ *   GET  /skill-shelf-requests/:requestId/files       ShelfRequestContent (a pending one's files)
+ *   POST /skill-shelf-requests/:requestId/publish     { expectedVersion } → ShelfRequestDecided (who may publish there)
+ *   POST /skill-shelf-requests/:requestId/decline     { reason? } → ShelfRequestDecided (who may publish there)
  */
 import type { ShelfKind, ShelfRequestState } from '../core/skill-shelf'
 
@@ -165,7 +165,7 @@ export interface ShelfNotAllowedBody {
   files: Array<{ path: string; reason: 'owner-admin-only' | 'not-allowed' | 'autorun' | 'no-write'; findings?: string[] }>
 }
 
-/** POST /skill-shelf/requests: a Skill folder, sent by someone who may not publish it there. */
+/** POST /skill-shelf-requests: a Skill folder, sent by someone who may not publish it there. */
 export interface ShelfRequestCreate {
   /** null = the whole company. */
   departmentId: string | null

@@ -651,7 +651,7 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   item is one that does not exist.
 - **Requests to publish a Skill** (「会社に出してほしいと頼む」, owner decision 2026-11-09; table
   `shelf_requests`, one row per member × place × name — a new request replaces their earlier one —,
-  files kept only while pending, the row going with its department): `POST /skill-shelf/requests
+  files kept only while pending, the row going with its department): `POST /skill-shelf-requests
   { departmentId, name, files }` (any member) — the place must be one they read (else 404
   `SHELF_PLACE_NOT_FOUND`); someone who may publish there gets 409 `SHELF_REQUEST_NOT_NEEDED`; the
   upload rules and secrets as publishing (`parseShelfContent`, `secretsIn`), and what only an
@@ -659,7 +659,7 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   with publishing's 403 `SHELF_NOT_ALLOWED`; ≤ 5 pending per member, ≤ 50 and 100 MB pending per
   company (`SHELF_REQUEST_LIMITS`, checked in the write: 409 `SHELF_REQUEST_LIMIT`). **Who sees
   one**: its sender and those who may publish a Skill at its place (`mayDecide`: the publish
-  check without the files), and only while they read the place (`GET /skill-shelf/requests`,
+  check without the files), and only while they read the place (`GET /skill-shelf-requests`,
   `GET …/requests/:requestId/files`, `MyShelfView.requests` for the app); anyone else — a
   department they cannot read included, its name never in the answer — gets the same 404
   `SHELF_REQUEST_NOT_FOUND` as for a request that does not exist. `POST …/publish { expectedVersion }`

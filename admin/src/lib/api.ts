@@ -1069,19 +1069,19 @@ export const skillShelfApi = {
     getData(`${shelfBase(companyId)}/${enc(itemId)}`, shelfRemovedSchema, { method: 'DELETE' }),
 
   /** 「公開のお願い」: the caller's own requests and those they may decide (places they read only). */
-  requests: (companyId: string) => getData(`${shelfBase(companyId)}/requests`, shelfRequestsSchema),
+  requests: (companyId: string) => getData(`${shelfBase(companyId)}-requests`, shelfRequestsSchema),
 
   /** A pending request's files (409 SHELF_REQUEST_DECIDED once decided). */
   requestFiles: (companyId: string, requestId: string) =>
-    getData(`${shelfBase(companyId)}/requests/${enc(requestId)}/files`, shelfRequestContentSchema),
+    getData(`${shelfBase(companyId)}-requests/${enc(requestId)}/files`, shelfRequestContentSchema),
 
   /** 公開する: published as a new version (409 SHELF_VERSION_CHANGED when the item changed since the page saw it). */
   publishRequest: (companyId: string, requestId: string, expectedVersion: string | null) =>
-    getData(`${shelfBase(companyId)}/requests/${enc(requestId)}/publish`, shelfRequestDecidedSchema, { method: 'POST', body: { expectedVersion } }),
+    getData(`${shelfBase(companyId)}-requests/${enc(requestId)}/publish`, shelfRequestDecidedSchema, { method: 'POST', body: { expectedVersion } }),
 
   /** 見送る, with a short reason or none. */
   declineRequest: (companyId: string, requestId: string, reason: string) =>
-    getData(`${shelfBase(companyId)}/requests/${enc(requestId)}/decline`, shelfRequestDecidedSchema, { method: 'POST', body: { reason } }),
+    getData(`${shelfBase(companyId)}-requests/${enc(requestId)}/decline`, shelfRequestDecidedSchema, { method: 'POST', body: { reason } }),
 }
 
 const deptBase = (companyId: string) => `/api/companies/${enc(companyId)}/departments`

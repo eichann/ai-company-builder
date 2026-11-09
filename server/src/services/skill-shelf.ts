@@ -516,7 +516,7 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       return ok({ removed: true })
     },
 
-    /** GET /skill-shelf/requests — the member's own requests and those they may decide, at places they read. */
+    /** GET /skill-shelf-requests — the member's own requests and those they may decide, at places they read. */
     requests(member: Member): Outcome<ShelfRequestsView> {
       if (deps.hasCompanyFolder(member.companyId)) return notHere()
       const ctx = contextOf(member)
@@ -527,7 +527,7 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
     },
 
     /**
-     * POST /skill-shelf/requests — 「会社に出してほしいと頼む」: a Skill folder from someone who may not
+     * POST /skill-shelf-requests — 「会社に出してほしいと頼む」: a Skill folder from someone who may not
      * publish it at that place. Refused when sent for what no publisher could take from them either.
      */
     createRequest(member: Member, body: unknown): Outcome<ShelfRequestView> {
@@ -568,7 +568,7 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       return ok(requestView(ctx, member, row, people([member.userId])))
     },
 
-    /** GET /skill-shelf/requests/:requestId/files — a pending request's files (its sender, or who may decide it). */
+    /** GET /skill-shelf-requests/:requestId/files — a pending request's files (its sender, or who may decide it). */
     requestFiles(member: Member, requestId: string): Outcome<ShelfRequestContent> {
       if (deps.hasCompanyFolder(member.companyId)) return notHere()
       const ctx = contextOf(member)
@@ -580,7 +580,7 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
     },
 
     /**
-     * POST /skill-shelf/requests/:requestId/publish { expectedVersion } — 公開する: published as a new
+     * POST /skill-shelf-requests/:requestId/publish { expectedVersion } — 公開する: published as a new
      * version by the caller (every publish check again, with their authority), the history noting
      * who asked; the request is then decided and its files go.
      */
@@ -618,7 +618,7 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       return ok(decidedView(ctx, member, row.id, written.itemId))
     },
 
-    /** POST /skill-shelf/requests/:requestId/decline { reason? } — 見送る, with a short reason or none. */
+    /** POST /skill-shelf-requests/:requestId/decline { reason? } — 見送る, with a short reason or none. */
     declineRequest(member: Member, requestId: string, body: unknown): Outcome<ShelfRequestDecided> {
       if (deps.hasCompanyFolder(member.companyId)) return notHere()
       const ctx = contextOf(member)
