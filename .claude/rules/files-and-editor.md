@@ -2,6 +2,7 @@
 paths:
   - "client/electron/company-watcher.ts"
   - "client/electron/features/fs/**"
+  - "client/electron/file-guards.ts"
   - "client/electron/features/skills/**"
   - "client/electron/features/git-history/**"
   - "client/electron/git-search.ts"
@@ -124,7 +125,7 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   `fs:createFile` writes with `wx`; `fs:rename` / `fs:move` / `fs:moveFromExternal` / `fs:copy`
   refuse a target that exists (`code: 'name_taken'`,
   「同じ名前のファイルまたはフォルダがすでにあります。別の名前にしてください。」,
-  `features/fs/file-guards.ts`), except the same entry under another spelling (a case-only
+  `electron/file-guards.ts`), except the same entry under another spelling (a case-only
   rename) and the review's temporary save file renamed over its own sidecar. `fs:writeFile` is
   saving and replaces on purpose (editor, sidecars). The tree checks typed names first
   (`client/shared/file-names.ts`: no `/ \ < > : " | ? *`, control characters, trailing space or

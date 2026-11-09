@@ -91,6 +91,21 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   agent boundaries (CLAUDE.md "App modules point one way too") and the renderer's (no feature →
   feature imports, `src/shared` ↛ `src/features` / `src/app`, `window.electronAPI` only in the
   data layer, no exceptions: `renderer-structure.md`).
+- **Features do not reach into each other.** `electron/features/<a>` imports a value from
+  `electron/features/<b>` only through the files listed in `MAIN_FEATURE_IMPORT_EXCEPTIONS`
+  (`architecture-boundaries.test.ts`, one entry per imported file with its reason, each must keep
+  occurring): today agent-control → plugins (fetch, store), broker → tools/ipc, fs and
+  git-history → backups/keep-current, sync → git-history/ipc. Otherwise main.ts (or a wire
+  module) injects what one feature needs from another, or the shared part leaves `features/`
+  (`electron/file-guards.ts`, used by fs and backups, moved out on 2026-11-09 so the two no
+  longer import each other). Type-only imports are not listed: a feature naming the type of what
+  main.ts hands it is how injection is written, and the type has one definition.
+- **No new folder-level import cycles** (same test, `KNOWN_FOLDER_CYCLES`): a folder is
+  `features/<name>`, else the first folder under `electron/`, `src/` or `shared/` (a file
+  directly there is its own unit); value imports only. Listed today, with how to untangle:
+  the agents ⇄ their tool modules (12 folders, the host should hand the agents a tool list) and
+  the renderer's `features/auth` ⇄ `shared` ⇄ `stores`. A new cycle, or a folder joining a
+  listed one, fails; a listed one that disappeared fails until it is removed from the list.
 - **Windows.** Every app window — the main one and the consultation windows — gets the one
   `webPreferences()` of `createAppPages` (`electron-adapter.ts`; contextIsolation, sandbox, no Node, the one preload; CSP from
   `index.html`). Every app window also shows only the app's page (`keepAppPageInWindow`): a

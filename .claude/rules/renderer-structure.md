@@ -66,6 +66,11 @@ deleted (refactor 5-6). Do not create them again: new code goes to `features/<na
    registered with a reason; using its `hooks/` or `api.ts` needs a reason why it cannot be
    avoided. A PR that adds an entry says why `app/` cannot compose the two through props or a
    slot. Still no barrels: the registered files are a feature's public surface.
+   "Imported from anywhere" still makes no new folder-level cycle (`KNOWN_FOLDER_CYCLES`, same
+   test, value imports only): `stores/` importing a feature or `shared/` that imports `stores/`
+   back closes one. Listed today: `features/auth` ⇄ `shared` ⇄ `stores` (authStore calls
+   `features/auth/api.ts`; appStore uses `shared/` while shared hooks read appStore); untangle
+   by moving authStore into `features/auth` and handing `shared/` what it reads from appStore.
 3. **No barrel files.** No `index.ts` that re-exports a folder: import the file you need. The
    boundary test, not a public index, guards a feature's edges (barrels also defeat tree shaking).
 4. **IPC goes through a data layer.** Components, hooks, stores and `App.tsx` do not call
