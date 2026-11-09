@@ -9,7 +9,7 @@ import path from 'path'
 import { privateBackupsDir } from '../../sync/private-folders'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { DesktopShell, PathGuard } from '../ports'
-import { notDownloadedRefusal } from '../fs/file-guards'
+import { notDownloadedRefusal } from '../../file-guards'
 import { keepCurrentVersion } from './keep-current'
 
 /** backup:list ids of private folders' backups (kept in .git, privateBackupsDir). */

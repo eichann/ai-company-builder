@@ -14,7 +14,7 @@ import type { IpcRegistrar } from '../../ipc/registrar'
 import { keepCurrentVersion } from '../backups/keep-current'
 import type { DesktopShell, PathGuard, WindowPort } from '../ports'
 import { NAME_TAKEN_MESSAGE } from '../../../shared/file-names'
-import { isAtomicSaveRename, nameTaken, notDownloadedRefusal } from './file-guards'
+import { isAtomicSaveRename, nameTaken, notDownloadedRefusal } from '../../file-guards'
 import { createCompanyWatchers } from './watchers'
 
 export interface FsDeps {

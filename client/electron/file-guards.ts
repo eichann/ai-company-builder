@@ -2,12 +2,14 @@
 // company folder (fs:*, backup:restore): a folder not downloaded on this
 // computer, and a name that is already taken. The renderer checks the same
 // first for a better message; these are the backstop (files-and-editor.md).
+// Outside features/ because two features use it (fs and backups): kept in
+// either one, the two features would import each other.
 
 import fs from 'fs'
 import path from 'path'
-import { notDownloadedUserMessage } from '../../../shared/sparse-paths'
-import { isTempSaveFile } from '../../../shared/temp-save-file'
-import { notDownloadedFolderFor } from '../../sync/not-downloaded'
+import { notDownloadedUserMessage } from '../shared/sparse-paths'
+import { isTempSaveFile } from '../shared/temp-save-file'
+import { notDownloadedFolderFor } from './sync/not-downloaded'
 
 /**
  * Refuse an app file operation that would create or change something inside
