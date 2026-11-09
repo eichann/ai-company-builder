@@ -1,29 +1,34 @@
 // A company Skill from the Skills panel (plugins.md "The Skill shelf in the app"), only in a working
 // folder: skillShelf:publish (「会社に公開」: a local Skill's folder goes to the server, which
 // decides), skillShelf:editLocally (「自分用に直す」: a delivered Skill becomes the member's own
-// on this computer until they publish it) and skillShelf:restoreCompany (「会社の版に戻す」: their
-// version goes to .backups and the company's comes back). A git company's folder is refused.
+// on this computer until they publish it), skillShelf:restoreCompany (「会社の版に戻す」: their
+// version goes to .backups and the company's comes back), skillShelf:requestPublish
+// (「会社に出してほしいと頼む」: the folder goes to those who may publish it, the server decides) and
+// skillShelf:openBackup (「控えを開く」: the newest copy 会社の版に戻す kept, shown in Finder). A git
+// company's folder is refused.
 
 import path from 'node:path'
 import { SHELF_LIMITS, isShelfVersion } from '../../../../shared/core/skill-shelf'
 import {
-  SHELF_ALREADY_COMPANY_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_NO_PLACE_MESSAGE,
-  SHELF_NOT_EDITING_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_RESTORE_BACKUPS_MESSAGE, SHELF_RESTORE_FAILED_MESSAGE, SHELF_RESTORE_PLACE_MESSAGE, SHELF_TOO_MUCH_MESSAGE, shelfPlaceOfSkillFolder,
+  SHELF_ALREADY_COMPANY_MESSAGE, SHELF_BACKUP_OPEN_FAILED_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_NO_BACKUP_MESSAGE, SHELF_NO_PLACE_MESSAGE,
+  SHELF_NOT_EDITING_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_REQUEST_OFFLINE_MESSAGE, SHELF_RESTORE_BACKUPS_MESSAGE, SHELF_RESTORE_FAILED_MESSAGE, SHELF_RESTORE_PLACE_MESSAGE, SHELF_TOO_MUCH_MESSAGE, shelfPlaceOfSkillFolder,
   type SkillShelfRestoreResult,
 } from '../../../shared/skill-shelf'
+import type { ShelfFileUpload } from '../../../../shared/types/skill-shelf'
 import type { IpcRegistrar } from '../../ipc/registrar'
-import type { PathGuard } from '../ports'
+import type { DesktopShell, PathGuard } from '../ports'
 import type { ShelfClient } from './client'
 import { readSkillFolder, type SkillShelfStore } from './store'
 
 export interface SkillShelfIpcDeps {
   paths: PathGuard
   isWorkingFolder: (rootPath: string) => boolean
-  store: Pick<SkillShelfStore, 'companyOf' | 'markOf' | 'published' | 'release' | 'restoreCompany' | 'restoredOutcome' | 'syncNow'>
-  client: Pick<ShelfClient, 'departmentId' | 'publish'>
+  store: Pick<SkillShelfStore, 'companyOf' | 'markOf' | 'published' | 'release' | 'restoreCompany' | 'restoredOutcome' | 'syncNow' | 'latestBackup'>
+  client: Pick<ShelfClient, 'departmentId' | 'publish' | 'request'>
+  shell: Pick<DesktopShell, 'openPath'>
 }
 
-export function registerSkillShelfIpc(ipc: IpcRegistrar, { paths, isWorkingFolder, store, client }: SkillShelfIpcDeps): void {
+export function registerSkillShelfIpc(ipc: IpcRegistrar, { paths, isWorkingFolder, store, client, shell }: SkillShelfIpcDeps): void {
   /** The folder's place in the working folder, or why there is none. */
   function located(rootPath: string, skillPath: string): { root: string; skill: string; rel: string; companyId: string } | { error: string } {
     const root = paths.validate(rootPath)
@@ -34,28 +39,31 @@ export function registerSkillShelfIpc(ipc: IpcRegistrar, { paths, isWorkingFolde
     return { root, skill, rel, companyId }
   }
 
+  /**
+   * What a local Skill sends (publish and request alike): a Skill folder at a place that takes
+   * Skills, not one the company delivered, read without links and junk (`readSkillFolder`), within
+   * the shelf's limits, its department found by the folder.
+   */
+  async function upload(rootPath: string, skillPath: string): Promise<{ error: string } | { root: string; rel: string; companyId: string; departmentId: string | null; name: string; files: ShelfFileUpload[] }> {
+    const at = located(rootPath, skillPath)
+    if ('error' in at) return at
+    const place = shelfPlaceOfSkillFolder(at.rel)
+    if (!place) return { error: SHELF_NOT_A_PLACE_MESSAGE }
+    if (store.markOf(at.root, at.rel)?.state === 'company') return { error: SHELF_ALREADY_COMPANY_MESSAGE }
+    const files = await readSkillFolder(at.skill)
+    if (!files) return { error: SHELF_NOT_READABLE_MESSAGE }
+    if (files.length > SHELF_LIMITS.files || files.reduce((sum, f) => sum + f.bytes.length, 0) > SHELF_LIMITS.skillBytes) return { error: SHELF_TOO_MUCH_MESSAGE }
+    const departmentId = place.departmentFolder === null ? null : await client.departmentId(at.companyId, place.departmentFolder)
+    if (departmentId === undefined) return { error: SHELF_NO_PLACE_MESSAGE }
+    return { root: at.root, rel: at.rel, companyId: at.companyId, departmentId, name: place.name, files: files.map(f => ({ path: f.path, base64: f.bytes.toString('base64') })) }
+  }
+
   ipc.handle('skillShelf:publish', async (_, rootPath: string, skillPath: string, expectedVersion: string | null) => {
     try {
-      const at = located(rootPath, skillPath)
+      const at = await upload(rootPath, skillPath)
       if ('error' in at) return { success: false, error: at.error }
-      const place = shelfPlaceOfSkillFolder(at.rel)
-      if (!place) return { success: false, error: SHELF_NOT_A_PLACE_MESSAGE }
       if (expectedVersion !== null && !isShelfVersion(expectedVersion)) return { success: false, error: SHELF_NOT_READABLE_MESSAGE }
-      if (store.markOf(at.root, at.rel)?.state === 'company') return { success: false, error: SHELF_ALREADY_COMPANY_MESSAGE }
-
-      const files = await readSkillFolder(at.skill)
-      if (!files) return { success: false, error: SHELF_NOT_READABLE_MESSAGE }
-      if (files.length > SHELF_LIMITS.files || files.reduce((sum, f) => sum + f.bytes.length, 0) > SHELF_LIMITS.skillBytes) return { success: false, error: SHELF_TOO_MUCH_MESSAGE }
-
-      const departmentId = place.departmentFolder === null ? null : await client.departmentId(at.companyId, place.departmentFolder)
-      if (departmentId === undefined) return { success: false, error: SHELF_NO_PLACE_MESSAGE }
-
-      const answer = await client.publish(at.companyId, {
-        departmentId,
-        name: place.name,
-        files: files.map(f => ({ path: f.path, base64: f.bytes.toString('base64') })),
-        expectedVersion,
-      })
+      const answer = await client.publish(at.companyId, { departmentId: at.departmentId, name: at.name, files: at.files, expectedVersion })
       if (!answer.ok) return { success: false, error: 'offline' in answer ? SHELF_OFFLINE_MESSAGE : answer.message }
       await store.published(at.root, at.rel)
       await store.syncNow(at.root)
@@ -63,6 +71,36 @@ export function registerSkillShelfIpc(ipc: IpcRegistrar, { paths, isWorkingFolde
     } catch (error) {
       console.error('Skill shelf publish error:', error instanceof Error ? error.message : 'unknown')
       return { success: false, error: error instanceof Error ? error.message : SHELF_NOT_READABLE_MESSAGE }
+    }
+  })
+
+  ipc.handle('skillShelf:requestPublish', async (_, rootPath: string, skillPath: string) => {
+    try {
+      const at = await upload(rootPath, skillPath)
+      if ('error' in at) return { success: false, error: at.error }
+      const answer = await client.request(at.companyId, { departmentId: at.departmentId, name: at.name, files: at.files })
+      if (!answer.ok) return { success: false, error: 'offline' in answer ? SHELF_REQUEST_OFFLINE_MESSAGE : answer.message }
+      // The card shows 待っている from the next list.
+      await store.syncNow(at.root)
+      return { success: true }
+    } catch (error) {
+      console.error('Skill shelf request error:', error instanceof Error ? error.message : 'unknown')
+      return { success: false, error: SHELF_NOT_READABLE_MESSAGE }
+    }
+  })
+
+  ipc.handle('skillShelf:openBackup', async (_, rootPath: string, skillPath: string) => {
+    try {
+      const at = located(rootPath, skillPath)
+      if ('error' in at) return { success: false, error: at.error }
+      const copy = store.latestBackup(at.root, at.rel)
+      if (!copy) return { success: false, error: SHELF_NO_BACKUP_MESSAGE }
+      // The store found it inside this working folder's own .backups, no link on the way (latestBackup).
+      const opened = await shell.openPath(copy)
+      return opened ? { success: false, error: SHELF_BACKUP_OPEN_FAILED_MESSAGE } : { success: true }
+    } catch (error) {
+      console.error('Skill shelf backup error:', error instanceof Error ? error.message : 'unknown')
+      return { success: false, error: SHELF_BACKUP_OPEN_FAILED_MESSAGE }
     }
   })
 

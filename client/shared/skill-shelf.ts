@@ -4,7 +4,7 @@
 import { isValidFolderName } from '../../shared/core/names'
 import { diskKey, isSameOrAncestorPath, pathKey } from '../../shared/core/paths'
 import { isLeftoverName } from './skill-leftovers'
-import { isShelfKind, isShelfVersion, isValidShelfName, shelfListing, shelfTextFileName, type ShelfKind } from '../../shared/core/skill-shelf'
+import { isShelfKind, isShelfVersion, isValidShelfName, shelfListing, shelfTextFileName, type ShelfKind, type ShelfRequestState } from '../../shared/core/skill-shelf'
 
 /**
  * Where Codex's project root is (`project_root_markers`): a folder without `.git` has none, so
@@ -32,6 +32,8 @@ export interface ShelfDelivery {
   name: string
   department: { id: string; folder: string } | null
   version: string
+  /** When this version became the one handed out (absent from an older server). */
+  changedAt?: string
 }
 
 /**
@@ -49,14 +51,15 @@ export function readShelfDeliveries(data: unknown): ShelfDelivery[] | undefined 
     if (!raw || typeof raw.id !== 'string' || !raw.id || !isShelfKind(raw.kind)) continue
     if (!isValidShelfName(raw.kind, raw.name) || !isShelfVersion(raw.version)) continue
     const place = raw.department as { id?: unknown; folder?: unknown } | null | undefined
+    const changedAt = typeof raw.changedAt === 'string' && !Number.isNaN(Date.parse(raw.changedAt)) ? { changedAt: raw.changedAt } : {}
     if (place === null || place === undefined) {
-      kept.push({ id: raw.id, kind: raw.kind, name: raw.name, department: null, version: raw.version })
+      kept.push({ id: raw.id, kind: raw.kind, name: raw.name, department: null, version: raw.version, ...changedAt })
       continue
     }
     if (typeof place.id !== 'string' || typeof place.folder !== 'string') continue
     // A department's root folder, by the department folder rule: never a path.
     if (!isValidFolderName(place.folder)) continue
-    kept.push({ id: raw.id, kind: raw.kind, name: raw.name, department: { id: place.id, folder: place.folder.normalize('NFC') }, version: raw.version })
+    kept.push({ id: raw.id, kind: raw.kind, name: raw.name, department: { id: place.id, folder: place.folder.normalize('NFC') }, version: raw.version, ...changedAt })
   }
   return kept
 }
@@ -143,6 +146,64 @@ export function shelfPlaceOfSkillFolder(rel: string): { departmentFolder: string
 export interface SkillShelfMark {
   state: 'company' | 'clash' | 'editing'
   version: string
+  /** 'editing': the company has handed out a newer version than the one the member started from (「会社の版が新しくなっています」). */
+  newer?: { version: string; at: string }
+}
+
+/**
+ * One of the member's requests to publish a Skill (「会社に出してほしいと頼む」), as the last
+ * `GET /me/skill-shelf` said: where (department folder, null = the whole company), and its state.
+ */
+export interface ShelfRequestMark {
+  name: string
+  departmentFolder: string | null
+  state: ShelfRequestState
+  requestedAt: string
+  decidedAt: string | null
+  reason: string | null
+}
+
+const REQUEST_STATES: readonly ShelfRequestState[] = ['pending', 'published', 'declined']
+
+/** The answer's `requests`: entries that name a place safely and have a state; anything else is left out (an older server: none). */
+export function readShelfRequests(data: unknown): ShelfRequestMark[] {
+  const raw = (data as { requests?: unknown } | null | undefined)?.requests
+  if (!Array.isArray(raw)) return []
+  const kept: ShelfRequestMark[] = []
+  for (const r of raw as Array<Record<string, unknown> | null>) {
+    if (!r || !isValidShelfName('skill', r.name) || !REQUEST_STATES.includes(r.state as ShelfRequestState) || typeof r.requestedAt !== 'string') continue
+    const place = r.department as { folder?: unknown } | null | undefined
+    if (place && (typeof place.folder !== 'string' || !isValidFolderName(place.folder))) continue
+    kept.push({
+      name: r.name,
+      departmentFolder: place ? (place.folder as string).normalize('NFC') : null,
+      state: r.state as ShelfRequestState,
+      requestedAt: r.requestedAt,
+      decidedAt: typeof r.decidedAt === 'string' ? r.decidedAt : null,
+      reason: typeof r.reason === 'string' ? r.reason.slice(0, 200) : null,
+    })
+  }
+  return kept
+}
+
+/** The member's latest request for the Skill folder at `rel` (working-folder relative), if any. */
+export function shelfRequestOf(requests: readonly ShelfRequestMark[] | undefined, rel: string): ShelfRequestMark | undefined {
+  const place = shelfPlaceOfSkillFolder(rel)
+  if (!place || !requests) return undefined
+  return requests.find(r => r.name === place.name && (r.departmentFolder === null
+    ? place.departmentFolder === null
+    : place.departmentFolder !== null && sameDepartmentFolder(r.departmentFolder, place.departmentFolder)))
+}
+
+/** What the Skills panel knows of 「会社に出してほしいと頼む」 for one Skill: offered there, and the member's latest request. */
+export interface SkillShelfRequestInfo {
+  offered: boolean
+  last?: ShelfRequestMark
+}
+
+/** 「会社に出してほしいと頼む」 is offered on a Skill the member may not publish at a place that takes Skills. */
+export function mayRequestShelfSkill(publishing: ShelfPublishing | undefined, rel: string): boolean {
+  return shelfPlaceOfSkillFolder(rel) !== null && !mayPublishShelfSkill(publishing, rel)
 }
 
 /** A version as the member sees it. */
@@ -192,6 +253,54 @@ export type SkillShelfRestoreResult = { success: true; companyVersion: 'back' | 
 export function shelfRestoredNote(companyVersion: 'back' | 'later' | 'not-delivered' | 'occupied'): string | null {
   return { back: null, later: SHELF_RESTORED_LATER_NOTE, 'not-delivered': SHELF_RESTORED_GONE_NOTE, occupied: SHELF_RESTORED_OCCUPIED_NOTE }[companyVersion]
 }
+
+/** 「会社に出してほしいと頼む」: what happens, said before it is sent. */
+export const SHELF_REQUEST_CONFIRM = 'この Skill を、会社に公開できる人に送って、公開をお願いします。公開されるまでは、この PC だけで使われます。'
+export const SHELF_REQUEST_OFFLINE_MESSAGE = 'サーバーにつながらないためお願いを送れませんでした。つながってから、もう一度やり直してください。'
+
+/** The month, day and time of an ISO date, as the member reads it (local time). */
+export function shelfDateLabel(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** What the card says of the member's request: 待っている / 公開された / 見送られた (with the reason). */
+export function shelfRequestStateText(request: Pick<ShelfRequestMark, 'state' | 'requestedAt' | 'decidedAt' | 'reason'>): string {
+  if (request.state === 'pending') return `公開をお願いしています（${shelfDateLabel(request.requestedAt)} に送りました）。返事を待っています。`
+  const when = request.decidedAt ? `（${shelfDateLabel(request.decidedAt)}）` : ''
+  if (request.state === 'published') return `お願いした Skill が公開されました${when}。`
+  return `お願いは見送られました${when}。${request.reason ? `理由：${request.reason}` : ''}`
+}
+
+/** 「会社の版が新しくなっています」 on the card of a Skill the member is changing for themselves. */
+export function shelfNewerText(at: string, mayPublish: boolean): string {
+  const when = shelfDateLabel(at)
+  const head = `会社の版が新しくなっています${when ? `（${when}）` : ''}。`
+  return mayPublish
+    ? `${head}「会社の版に戻す」と新しい版が届きます。「会社に公開」を押すと、新しい版をあなたの版で置き換えます。`
+    : `${head}「会社の版に戻す」と新しい版が届きます。`
+}
+
+/**
+ * 「AI と一緒に直す」: the new consultation's first message and title, naming the Skill by its folder
+ * and pointing the AI at that folder (working-folder relative, '/'-separated on every system).
+ */
+export function shelfFixWithAi(rootPath: string, skillPath: string): { message: string; title: string } {
+  const slashed = (p: string) => p.replace(/\\/g, '/')
+  const root = slashed(rootPath).replace(/\/+$/, '')
+  const folder = slashed(skillPath)
+  const rel = folder.startsWith(`${root}/`) ? folder.slice(root.length + 1) : folder
+  const name = rel.split('/').pop() ?? rel
+  return {
+    message: `この Skill（${name}）を直したいです。\nSkill のフォルダ：${rel}\nまず中身を読んで、どう直したいかを私に聞いてください。`,
+    title: `Skill「${name}」を直す`,
+  }
+}
+
+/** 「控えを開く」: no copy of this Skill is kept in `.backups` (or it is not a plain folder). */
+export const SHELF_NO_BACKUP_MESSAGE = 'この Skill の控えは見つかりませんでした。'
+export const SHELF_BACKUP_OPEN_FAILED_MESSAGE = '控えのフォルダを開けませんでした。'
 
 export const SHELF_NOT_HERE_MESSAGE = 'この会社では、Skill を会社に公開できません。'
 export const SHELF_OFFLINE_MESSAGE = 'サーバーにつながらないため公開できませんでした。つながってから、もう一度やり直してください。'

@@ -158,7 +158,7 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   (execution runs of 「AI の番」 and their operations by idempotency key, `adapters/sqlite/ai-runs.ts`,
   `records.md` "Execution runs") and `securityAlerts` (「気になる動き」: alerts, their Slack setting,
   members' hourly download counts, the rules' read-only queries; `security-alerts.md`) and
-  `skillShelf` (the Skill shelf of a company without the shared folder: items, versions, history;
+  `skillShelf` (the Skill shelf of a company without the shared folder: items, versions, history, requests to publish;
   `plugins.md` "The Skill shelf").
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
@@ -239,7 +239,9 @@ GET  /api/config                                  setup state (no auth)
                                                                              skill-editors.ts
                               GET|POST /skill-shelf, GET /skill-shelf/:itemId/versions(/:version),
                               POST /skill-shelf/:itemId/restore | unpublish, GET /me/skill-shelf,
-                              DELETE /skill-shelf/:itemId(/versions/:version) (owner/admin)
+                              DELETE /skill-shelf/:itemId(/versions/:version) (owner/admin),
+                              GET|POST /skill-shelf/requests, GET …/requests/:requestId/files,
+                              POST …/requests/:requestId/publish | decline (公開のお願い)
                                                                              skill-shelf.ts
                                                                 (会社の Skill, no shared folder only: plugins.md "The Skill shelf")
                               /private-folders…, /me/private-folders, /me/scopes,
@@ -564,7 +566,8 @@ restriction there stays private folders; groups cannot be named in their rules).
   paths; owners/admins read all) — a place's readers change in the place, on purpose. Leaving the
   company takes the member out of every group (`removeMember`). Another company's group id = a
   group that does not exist (permission matrix rows + `CROSS`). Admin console: 「見える人のまとまり」
-  (`/companies/:id/groups`, linked from 「メンバー」; `admin/src/components/groups/groups-page.tsx`).
+  (`/companies/:id/groups`, in the left menu for owners/admins since 2026-11-09, also linked from 「メンバー」
+  and the readers dialog; `admin/src/components/groups/groups-page.tsx`).
 - **The subject `group`** (`shared/core/permissions.ts`): `memberIds` read with the rules (absent =
   nobody), so a change of who is in a group applies at once. **Precedence**: user > (department ∪
   group: one level, unioned) > role > everyone — both are "a set of people", and putting someone

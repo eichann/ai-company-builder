@@ -64,7 +64,7 @@ import type { PluginScreensResult } from './plugin-screens'
 // lane B ▼
 // lane B ▲
 // lane C ▼
-import type { SkillShelfMark, SkillShelfRestoreResult } from './skill-shelf'
+import type { SkillShelfMark, SkillShelfRequestInfo, SkillShelfRestoreResult } from './skill-shelf'
 import type { PluginStepButton, PluginStepContinuation, PluginStepContinueResult, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
 import type { StepDeliverablesView } from './step-deliverables'
 // lane C ▲
@@ -412,6 +412,10 @@ export interface SkillInfo {
   shelf?: SkillShelfMark
   /** A company without the shared folder: may the member publish this Skill to the company (the server's answer; it still decides)? */
   shelfPublish?: boolean
+  /** A company without the shared folder: is 「会社に出してほしいと頼む」 offered, and the member's latest request for it. */
+  shelfRequest?: SkillShelfRequestInfo
+  /** A company without the shared folder: a copy 「会社の版に戻す」 kept of this Skill is there (「控えを開く」). */
+  shelfBackup?: boolean
   files: {
     skillMd: string
     rules?: string[]
@@ -698,6 +702,8 @@ export interface IpcInvokeChannels {
   'skillShelf:publish': { args: [rootPath: string, skillPath: string, expectedVersion: string | null]; result: SimpleResult }
   'skillShelf:editLocally': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
   'skillShelf:restoreCompany': { args: [rootPath: string, skillPath: string]; result: SkillShelfRestoreResult }
+  'skillShelf:requestPublish': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
+  'skillShelf:openBackup': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
   'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
   'tools:stop': { args: [toolPath: string]; result: StopToolResult }
   'shell:openExternal': { args: [url: string]; result: SimpleResult }
@@ -1171,6 +1177,8 @@ export interface ElectronAPI {
   publishSkillToCompany: Invoke<'skillShelf:publish'>
   editCompanySkillLocally: Invoke<'skillShelf:editLocally'>
   restoreCompanySkill: Invoke<'skillShelf:restoreCompany'>
+  requestCompanySkill: Invoke<'skillShelf:requestPublish'>
+  openCompanySkillBackup: Invoke<'skillShelf:openBackup'>
   onSkillShelfChanged: Subscribe<'skillShelf:changed'>
   // lane A ▲
   // lane B ▼

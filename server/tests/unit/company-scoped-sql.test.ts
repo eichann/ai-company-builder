@@ -89,6 +89,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   shelf_items: ['adapters/sqlite/skill-shelf.ts'],
   shelf_versions: ['adapters/sqlite/skill-shelf.ts'],
   shelf_history: ['adapters/sqlite/skill-shelf.ts'],
+  shelf_requests: ['adapters/sqlite/skill-shelf.ts'],
   // Connector plugins (plugins.md).
   plugin_installs: ['adapters/sqlite/plugins.ts'],
   plugin_access_log: ['adapters/sqlite/plugins.ts'],

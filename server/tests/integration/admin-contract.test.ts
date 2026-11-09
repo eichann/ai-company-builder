@@ -108,6 +108,9 @@ const TYPES: Record<string, string> = {
   ShelfVersions: 'ShelfVersionsView',
   ShelfPublishResult: 'ShelfPublishResult',
   ShelfRemoved: '{ removed: true }',
+  ShelfRequests: 'ShelfRequestsView',
+  ShelfRequestContent: 'ShelfRequestContent',
+  ShelfRequestDecided: 'ShelfRequestDecided',
   DepartmentMembers: 'DepartmentMembersView',
   TaskSettings: 'TaskSettingsView',
   InboxSettings: 'InboxSettingsView',
@@ -482,6 +485,15 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
       await expectShape('ShelfPublishResult', USERS.owner, 'POST', `${base}/skill-shelf/${item.id}/unpublish`, { expectedVersion: item.version })
       await expectShape('ShelfVersions', USERS.owner, 'DELETE', `${base}/skill-shelf/${item.id}/versions/${second.json.data.item.version}`)
       await expectShape('ShelfRemoved', USERS.owner, 'DELETE', `${base}/skill-shelf/${item.id}`)
+      // 公開のお願い: a member who may not publish asks; the owner looks, publishes one and declines another.
+      const asked = await call(USERS.member, 'POST', `${base}/skill-shelf/requests`, { departmentId: null, name: 'asked', files: skill })
+      expect(asked.status).toBe(201)
+      const other = await call(USERS.member, 'POST', `${base}/skill-shelf/requests`, { departmentId: null, name: 'asked-too', files: skill })
+      expect(other.status).toBe(201)
+      await expectShape('ShelfRequests', USERS.owner, 'GET', `${base}/skill-shelf/requests`)
+      await expectShape('ShelfRequestContent', USERS.owner, 'GET', `${base}/skill-shelf/requests/${asked.json.data.id}/files`)
+      await expectShape('ShelfRequestDecided', USERS.owner, 'POST', `${base}/skill-shelf/requests/${asked.json.data.id}/publish`, { expectedVersion: null })
+      await expectShape('ShelfRequestDecided', USERS.owner, 'POST', `${base}/skill-shelf/requests/${other.json.data.id}/decline`, { reason: '今回は見送ります' })
     } finally {
       db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
     }

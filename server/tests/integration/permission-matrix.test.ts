@@ -120,6 +120,7 @@ interface World {
     aiRun: string
     /** A Skill on the other company's shelf (plugins.md "The Skill shelf"). */
     shelfItem: string
+    shelfRequest: string
   }
 }
 
@@ -347,6 +348,11 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/skill-shelf/:itemId/unpublish', w => ({ path: `${C(w)}/skill-shelf/no-such-item/unpublish`, body: {} }), [409, 409, 409, 409, 404, 401]),
   r('DELETE /api/companies/:companyId/skill-shelf/:itemId/versions/:version', w => ({ path: `${C(w)}/skill-shelf/no-such-item/versions/${'0'.repeat(64)}` }), [409, 409, 409, 409, 404, 401]),
   r('DELETE /api/companies/:companyId/skill-shelf/:itemId', w => ({ path: `${C(w)}/skill-shelf/no-such-item` }), [409, 409, 409, 409, 404, 401]),
+  r('GET /api/companies/:companyId/skill-shelf/requests', w => ({ path: `${C(w)}/skill-shelf/requests` }), [409, 409, 409, 409, 404, 401]),
+  r('POST /api/companies/:companyId/skill-shelf/requests', w => ({ path: `${C(w)}/skill-shelf/requests`, body: {} }), [409, 409, 409, 409, 404, 401]),
+  r('GET /api/companies/:companyId/skill-shelf/requests/:requestId/files', w => ({ path: `${C(w)}/skill-shelf/requests/no-such-request/files` }), [409, 409, 409, 409, 404, 401]),
+  r('POST /api/companies/:companyId/skill-shelf/requests/:requestId/publish', w => ({ path: `${C(w)}/skill-shelf/requests/no-such-request/publish`, body: {} }), [409, 409, 409, 409, 404, 401]),
+  r('POST /api/companies/:companyId/skill-shelf/requests/:requestId/decline', w => ({ path: `${C(w)}/skill-shelf/requests/no-such-request/decline`, body: {} }), [409, 409, 409, 409, 404, 401]),
   r('GET /api/companies/:companyId/me/skill-shelf',w => ({ path: `${C(w)}/me/skill-shelf` }), [409, 409, 409, 409, 404, 401]),
   // The AI's routes take a record token (Bearer), never a session: every caller here has only a session.
   r('GET /api/records-ai/types', () => ({ path: '/api/records-ai/types' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
@@ -714,6 +720,9 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/skill-shelf/:itemId/restore', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/restore`, body: { version: 'a'.repeat(64), expectedVersion: null } }), w => w.other.shelfItem),
   x('DELETE /api/companies/:companyId/skill-shelf/:itemId/versions/:version', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/versions/${'a'.repeat(64)}` }), w => w.other.shelfItem),
   x('DELETE /api/companies/:companyId/skill-shelf/:itemId', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}` }), w => w.other.shelfItem),
+  x('GET /api/companies/:companyId/skill-shelf/requests/:requestId/files', (w, id) => ({ path: `${C(w)}/skill-shelf/requests/${id}/files` }), w => w.other.shelfRequest),
+  x('POST /api/companies/:companyId/skill-shelf/requests/:requestId/publish', (w, id) => ({ path: `${C(w)}/skill-shelf/requests/${id}/publish`, body: { expectedVersion: null } }), w => w.other.shelfRequest),
+  x('POST /api/companies/:companyId/skill-shelf/requests/:requestId/decline', (w, id) => ({ path: `${C(w)}/skill-shelf/requests/${id}/decline`, body: {} }), w => w.other.shelfRequest),
   x('POST /api/companies/:companyId/skill-shelf/:itemId/unpublish',(w, id) => ({ path: `${C(w)}/skill-shelf/${id}/unpublish`, body: { expectedVersion: 'a'.repeat(64) } }), w => w.other.shelfItem),
 
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
@@ -998,6 +1007,9 @@ async function seed(): Promise<World> {
     VALUES ('shelf-other-1', ?, 'skill', NULL, 'other-skill', ?, ?, ?, ?, ?)`).run(other, 'a'.repeat(64), expires, otherMember, expires, otherMember)
   db.prepare(`INSERT INTO shelf_versions (company_id, item_id, version, files, file_count, total_bytes, autorun, published_at, published_by)
     VALUES (?, 'shelf-other-1', ?, '[]', 0, 0, 0, ?, ?)`).run(other, 'a'.repeat(64), expires, otherMember)
+  // A pending request to publish a Skill on the other company's shelf (rows as adapters/sqlite/skill-shelf.ts writes them).
+  db.prepare(`INSERT INTO shelf_requests (id, company_id, department_id, name, requested_by, requested_at, version, files, file_count, total_bytes, autorun, state)
+    VALUES ('shelf-request-other-1', ?, NULL, 'other-request', ?, ?, ?, '[]', 0, 0, 0, 'pending')`).run(other, otherMember, expires, 'a'.repeat(64))
 
   return {
     co, sales, accounting,
@@ -1032,6 +1044,7 @@ async function seed(): Promise<World> {
       group: 'group-other-1',
       aiRun: 'run-other-1',
       shelfItem: 'shelf-other-1',
+      shelfRequest: 'shelf-request-other-1',
 
     },
   }

@@ -649,8 +649,34 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   unpublish answer exactly as an item that does not exist (404 `SHELF_ITEM_NOT_FOUND`); publishing
   to such a department answers as a missing one (404 `SHELF_PLACE_NOT_FOUND`); another company's
   item is one that does not exist.
+- **Requests to publish a Skill** (「会社に出してほしいと頼む」, owner decision 2026-11-09; table
+  `shelf_requests`, one row per member × place × name — a new request replaces their earlier one —,
+  files kept only while pending, the row going with its department): `POST /skill-shelf/requests
+  { departmentId, name, files }` (any member) — the place must be one they read (else 404
+  `SHELF_PLACE_NOT_FOUND`); someone who may publish there gets 409 `SHELF_REQUEST_NOT_NEEDED`; the
+  upload rules and secrets as publishing (`parseShelfContent`, `secretsIn`), and what only an
+  owner/admin may publish (`shelfRequestProblems`: agent config, auto-run parts) refused when sent
+  with publishing's 403 `SHELF_NOT_ALLOWED`; ≤ 5 pending per member, ≤ 50 and 100 MB pending per
+  company (`SHELF_REQUEST_LIMITS`, checked in the write: 409 `SHELF_REQUEST_LIMIT`). **Who sees
+  one**: its sender and those who may publish a Skill at its place (`mayDecide`: the publish
+  check without the files), and only while they read the place (`GET /skill-shelf/requests`,
+  `GET …/requests/:requestId/files`, `MyShelfView.requests` for the app); anyone else — a
+  department they cannot read included, its name never in the answer — gets the same 404
+  `SHELF_REQUEST_NOT_FOUND` as for a request that does not exist. `POST …/publish { expectedVersion }`
+  and `POST …/decline { reason? ≤ 200 }`: only who may publish there (the sender who may not: 403
+  `SHELF_REQUEST_NOT_DECIDER`), once (409 `SHELF_REQUEST_DECIDED`). 公開する runs the whole publish
+  check again with the publisher's authority (a request kept before a rule changed is judged now)
+  and `expectedVersion` like any publish; the history row keeps who asked (`shelf_history.requested_by`,
+  `ShelfHistoryEntry.requestedBy`, `migrateShelfHistoryRequester`); the request's files go either way.
+  No notice (知らせ are record notices, `notifications.md`): publishers see requests in the admin
+  page, members their state in the app. Tests: `server/tests/integration/skill-shelf-requests.test.ts`
+  (each guard mutation-checked), permission matrix rows + `CROSS`, `admin-contract.test.ts`.
 - **Admin** 「会社の Skill」 (`admin/src/components/skill-shelf/`, menu for owners / admins /
-  managers of a `none` company): list by kind with version, who, when; 「これまでの版」 and
+  managers / 「Skill を直せる人」 (`skillEditing` of `/me/capabilities`) of a `none` company):
+  **「公開のお願い」** (`shelf-requests.tsx`) on top, only while one waits that the caller may decide:
+  who sent it and when, ［中身を見る］ (text files shown, others named), ［公開する］ (asks first; says
+  when it replaces the current version, sent with that version) and ［見送る］ (optional reason ≤ 200);
+  a version published from a request says whose request it was; list by kind with version, who, when; 「これまでの版」 and
   「この版に戻す」, 「この版を消す」 (owner/admin); 「配るのをやめる」; 「消す」 for an item taken off
   (owner/admin). Each of 「この版に戻す」, 「この版を消す」, 「配るのをやめる」 and 「消す」 asks first
   (`ConfirmDialog`); 「この版に戻す」 says everyone's app gets that version and the current one stays,
@@ -767,17 +793,38 @@ company never reaches any of it: the store knows a company only from
   not fetched: 「次に受け取るときに届きます」), `not-delivered` (the last list no longer has it:
   `SHELF_RESTORED_GONE_NOTE`), `occupied` (something of the member's stands at its place:
   `SHELF_RESTORED_OCCUPIED_NOTE`); `shelfRestoredNote` gives the sentence. A working folder has no
-  backups panel: the copy is reached in the folder itself (Finder hides `.backups`).
+  backups panel: the copy is reached with ［控えを開く］ (below; Finder hides `.backups`).
 - A `released` place is read back only when `shelfPlaceOfSkillFolder` accepts it, and that needs a
   department folder to be a valid folder name: an edited manifest's `../.claude/skills/x` is dropped
   on load, so no sync or restore looks at it.
+- **「会社の版が新しくなっています」** (owner decision 2026-11-09): while a Skill is held by `released`,
+  a delivered version other than the one the member started from is kept as `released.newer
+  { version, at }` (`at` = the item's `changedAt` in `GET /me/skill-shelf`) and shown on the card with
+  its date (`shelfNewerText`; to a publisher also that 「会社に公開」 replaces it). It is never placed
+  over their copy; 「会社に公開」 there sends `newer.version` as `expectedVersion` (they were told it
+  replaces that one). Back at the version they started from, the notice goes.
+- **「会社に出してほしいと頼む」** (`skillShelf:requestPublish`): offered on a local Skill and on one under
+  「自分用に直す」 at a place that takes Skills where the member may **not** publish
+  (`mayRequestShelfSkill`, `SkillInfo.shelfRequest.offered`); the same folder reading as publishing
+  (`upload` in `ipc.ts`: no links, `.env*` / `.git` / leftovers left out, the limits, a delivered Skill
+  refused); the server decides and its sentence is shown. The member's latest request for that place
+  (`MyShelfView.requests` → manifest `requests`, `readShelfRequests` drops a place that cannot be
+  named safely) is told on the card: 待っている / 公開された / 見送られた + reason (`shelfRequestStateText`).
+- **「AI と一緒に直す」**: on the editing card and a local Skill's card, `chat.newConsultation` with
+  `shelfFixWithAi` (the Skill's folder, working-folder relative, in the first message; sent like a
+  skill's 実行).
+- **「控えを開く」** (`skillShelf:openBackup`): on a company Skill whose edited copy 「会社の版に戻す」 kept
+  (`SkillInfo.shelfBackup`), the newest `.backups/<stamp>_skill_edit(_n)/<the Skill folder>` is shown
+  in Finder (`DesktopShell.openPath`); `latestBackup` takes only that name pattern, a Skill folder's
+  place, `.backups` a plain folder and no link anywhere on the way (`SHELF_NO_BACKUP_MESSAGE` otherwise).
 - **Use reports**: `shelfVersion` in `skill-use-reporter.ts`: the version in the `tree` field (64
   hex, the same validator), `dirty` when the files differ; a Skill not delivered is not reported.
 - Tests: `client/tests/skill-shelf.test.ts`, `client/tests/ipc-skill-shelf.test.ts`,
   `codex-connection.test.ts`, `tests/ui/skill-layout.spec.ts` (each guard mutation-checked; 会社の版に戻す:
   only the held folder, another account, a link or a file at / on the way / at `.backups`, an edited
   manifest's `..` place, a taken backup name, moved not deleted, no empty folders after a failed move,
-  each `restoredOutcome`).
+  each `restoredOutcome`; the newer notice and its clearing, the request marks and where 頼む is offered,
+  `latestBackup`'s name pattern, newest first, links at `.backups`, the copy or on the way).
 
 ## What we say, and what we do not claim (review §12, owner-approved wording)
 

@@ -13,7 +13,7 @@ import { withShelfInstructions } from '../electron/chat-server'
 import { createSkillUseReporter } from '../electron/services/skill-use-reporter'
 import { createWorkingFolders } from '../electron/services/working-folders'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
-import { SHELF_EDIT_CONFIRM, SHELF_EDITING_DETAIL, SHELF_PROMPT_MAX, mayPublishShelfSkill, shelfEditTexts, readShelfDeliveries, readShelfPublishing, shelfPlaceOfSkillFolder, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery } from '../shared/skill-shelf'
+import { SHELF_EDIT_CONFIRM, SHELF_EDITING_DETAIL, SHELF_PROMPT_MAX, mayPublishShelfSkill, shelfEditTexts, readShelfDeliveries, readShelfPublishing, readShelfRequests, shelfFixWithAi, shelfNewerText, shelfPlaceOfSkillFolder, shelfRefusalMessage, shelfRequestStateText, shelfVersionOf, type ShelfDelivery } from '../shared/skill-shelf'
 
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-shelf-')))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
@@ -25,7 +25,7 @@ const exists = (file: string) => fs.existsSync(file)
 type Files = Record<string, string>
 const versionOf = (files: Files) => shelfVersionOf(Object.entries(files).map(([p, text]) => ({ path: p, sha256: sha256Hex(Buffer.from(text)) })), sha256Hex)
 
-interface Item { id: string; kind: 'skill' | 'rule' | 'instructions'; name: string; files: Files; department?: { id: string; folder: string } | null }
+interface Item { id: string; kind: 'skill' | 'rule' | 'instructions'; name: string; files: Files; department?: { id: string; folder: string } | null; changedAt?: string }
 
 /** The server's two read routes, behind the real client. */
 function fakeServer() {
@@ -38,13 +38,15 @@ function fakeServer() {
     /** Changes the answer's files (a tampered server or line). */
     tamper: undefined as undefined | ((files: Files) => Files),
     requests: [] as string[],
+    /** The answer's `requests` (the member's own requests to publish; absent: an older server). */
+    myRequests: undefined as unknown,
   }
   const fetchFake = (async (url: string) => {
     server.requests.push(url)
     if (!server.online) throw new TypeError('fetch failed')
     if (url.endsWith('/me/skill-shelf')) {
       if (server.listAnswer !== undefined) return Response.json(server.listAnswer)
-      return Response.json({ success: true, data: { items: server.items.map(i => ({ id: i.id, kind: i.kind, name: i.name, department: i.department ?? null, version: versionOf(i.files), fileCount: 1, totalBytes: 1 })), ...(server.publishing !== undefined ? { skillPublishing: server.publishing } : {}) } })
+      return Response.json({ success: true, data: { items: server.items.map(i => ({ id: i.id, kind: i.kind, name: i.name, department: i.department ?? null, version: versionOf(i.files), fileCount: 1, totalBytes: 1, ...(i.changedAt ? { changedAt: i.changedAt } : {}) })), ...(server.publishing !== undefined ? { skillPublishing: server.publishing } : {}), ...(server.myRequests !== undefined ? { requests: server.myRequests } : {}) } })
     }
     const m = /\/skill-shelf\/([^/]+)\/versions\/([0-9a-f]+)$/.exec(url)
     const item = server.items.find(i => i.id === m?.[1])
@@ -258,9 +260,29 @@ test('「自分用に直す」 keeps the version the member started from: publis
   w.server.items = [SKILL]
   await w.open()
   await w.store.release(w.root, '.claude/skills/proposal')
-  w.server.items = [SKILL_V2]
+  w.server.items = [{ ...SKILL_V2, changedAt: '2026-11-09T05:06:00.000Z' }]
+  await w.again()
+  // Still the version they started from (what publishing replaces), and the newer one told with its date.
+  assert.deepEqual(w.store.markOf(w.root, '.claude/skills/proposal'), {
+    state: 'editing', version: versionOf(SKILL.files), newer: { version: versionOf(SKILL_V2.files), at: '2026-11-09T05:06:00.000Z' },
+  })
+  assert.equal(read(w.at('.claude/skills/proposal/SKILL.md')), SKILL.files['SKILL.md'], 'the newer one is not placed over theirs')
+  // Read back from disk (another app run) it is the same.
+  const again = createSkillShelfStore({ dir: () => path.join(w.base, 'userData'), userId: () => 'u1', client: w.client, log: quiet })
+  await again.attach('co', w.root)
+  assert.deepEqual(again.markOf(w.root, '.claude/skills/proposal')?.newer, { version: versionOf(SKILL_V2.files), at: '2026-11-09T05:06:00.000Z' })
+  // The company goes back to the version they started from: nothing newer any more.
+  w.server.items = [SKILL]
   await w.again()
   assert.deepEqual(w.store.markOf(w.root, '.claude/skills/proposal'), { state: 'editing', version: versionOf(SKILL.files) })
+})
+
+test('「会社の版が新しくなっています」 says when, and to a publisher that 会社に公開 replaces the newer version', () => {
+  const at = new Date(2026, 10, 9, 14, 5).toISOString()
+  assert.match(shelfNewerText(at, false), /^会社の版が新しくなっています（11月9日 14:05）。/)
+  assert.doesNotMatch(shelfNewerText(at, false), /会社に公開/, 'never told to someone who may not publish')
+  assert.match(shelfNewerText(at, true), /「会社に公開」を押すと、新しい版をあなたの版で置き換えます/)
+  assert.match(shelfNewerText('', false), /^会社の版が新しくなっています。/)
 })
 
 test('「自分用に直す」 has a way back: with the member\'s copy gone, the company\'s Skill returns', async () => {
@@ -867,4 +889,77 @@ test('what can be published from: a Skill folder at the root or directly in a de
   assert.equal(shelfRefusalMessage(409, { error: 'ほかの人が先に変えました。' }), 'ほかの人が先に変えました。')
   assert.match(shelfRefusalMessage(500, { error: 'Internal Server Error' }), /公開できませんでした（500）/)
   assert.match(shelfRefusalMessage(502, null), /公開できませんでした/)
+})
+
+test('the member\'s requests: each Skill folder gets its own latest request; offered only where they may not publish; a place that cannot be placed is left out', async () => {
+  const w = world()
+  w.server.items = [SKILL]
+  w.server.publishing = { company: false, departmentFolders: ['営業部'] }
+  w.server.myRequests = [
+    { id: 'r1', name: 'mine', department: null, state: 'pending', requestedAt: '2026-11-09T01:00:00.000Z', decidedAt: null, reason: null },
+    { id: 'r2', name: 'visit', department: { id: 'd1', folder: '営業部' }, state: 'declined', requestedAt: '2026-11-08T01:00:00.000Z', decidedAt: '2026-11-09T02:00:00.000Z', reason: 'いまは不要' },
+    { id: 'r3', name: 'bad', department: { id: 'd2', folder: '../x' }, state: 'pending', requestedAt: '2026-11-09T01:00:00.000Z' },
+    { id: 'r4', name: 'odd', department: null, state: 'lost', requestedAt: '2026-11-09T01:00:00.000Z' },
+  ]
+  await w.open()
+  assert.deepEqual(w.store.requestOf(w.root, '.claude/skills/mine'), {
+    offered: true, last: { name: 'mine', departmentFolder: null, state: 'pending', requestedAt: '2026-11-09T01:00:00.000Z', decidedAt: null, reason: null },
+  })
+  // 営業部: the member may publish there, so nothing is offered (their old request is still told).
+  assert.deepEqual(w.store.requestOf(w.root, '営業部/.claude/skills/visit'), {
+    offered: false, last: { name: 'visit', departmentFolder: '営業部', state: 'declined', requestedAt: '2026-11-08T01:00:00.000Z', decidedAt: '2026-11-09T02:00:00.000Z', reason: 'いまは不要' },
+  })
+  // A folder that is no place Skills are published from.
+  assert.deepEqual(w.store.requestOf(w.root, '営業部/案件/.claude/skills/deep'), { offered: false })
+  assert.equal(readShelfRequests({ requests: w.server.myRequests }).length, 2)
+  assert.deepEqual(readShelfRequests({}), [], 'an older server: none')
+  // The member's sentence for each state.
+  assert.match(shelfRequestStateText({ state: 'pending', requestedAt: '2026-11-09T01:00:00.000Z', decidedAt: null, reason: null }), /返事を待っています/)
+  assert.match(shelfRequestStateText({ state: 'published', requestedAt: '2026-11-09T01:00:00.000Z', decidedAt: '2026-11-09T02:00:00.000Z', reason: null }), /公開されました/)
+  assert.match(shelfRequestStateText({ state: 'declined', requestedAt: '2026-11-09T01:00:00.000Z', decidedAt: '2026-11-09T02:00:00.000Z', reason: 'いまは不要' }), /見送られました.*理由：いまは不要/)
+})
+
+test('「AI と一緒に直す」: the first message names the Skill and its folder inside the working folder', () => {
+  assert.deepEqual(shelfFixWithAi('/Users/me/作業', '/Users/me/作業/営業部/.claude/skills/visit'), {
+    message: 'この Skill（visit）を直したいです。\nSkill のフォルダ：営業部/.claude/skills/visit\nまず中身を読んで、どう直したいかを私に聞いてください。',
+    title: 'Skill「visit」を直す',
+  })
+  assert.match(shelfFixWithAi('C:\\作業\\', 'C:\\作業\\.claude\\skills\\mine').message, /Skill のフォルダ：\.claude\/skills\/mine/)
+})
+
+test('「控えを開く」 finds the newest copy 会社の版に戻す kept of that Skill, a plain folder inside .backups only', async () => {
+  let clock = Date.UTC(2026, 10, 9, 1, 0, 0, 0)
+  const w = await editing({ now: () => clock })
+  const rel = '.claude/skills/proposal'
+  assert.equal(w.store.latestBackup(w.root, rel), null, 'nothing kept yet')
+  await w.store.restoreCompany(w.root, rel)
+  await w.again()
+  const first = w.at('.backups/2026-11-09T01-00-00-000_skill_edit/.claude/skills/proposal')
+  assert.equal(w.store.latestBackup(w.root, rel), first)
+  // Another round later: the newest is the second one.
+  clock += 60_000
+  await w.store.release(w.root, rel)
+  write(w.at(`${rel}/SKILL.md`), 'second\n')
+  await w.store.restoreCompany(w.root, rel)
+  const second = w.at('.backups/2026-11-09T01-01-00-000_skill_edit/.claude/skills/proposal')
+  assert.equal(w.store.latestBackup(w.root, rel), second)
+  // Another Skill's name, a backup of another kind and a folder that is no place: never.
+  assert.equal(w.store.latestBackup(w.root, '.claude/skills/other'), null)
+  write(w.at('.backups/2026-11-09T09-00-00-000_conflict/.claude/skills/proposal/SKILL.md'), 'x')
+  assert.equal(w.store.latestBackup(w.root, rel), second)
+  // A place that is no Skill folder's (it would name a folder of .backups itself): never.
+  write(w.at('.backups/.claude/skills/proposal/SKILL.md'), 'x')
+  assert.equal(w.store.latestBackup(w.root, '../.claude/skills/proposal'), null)
+  // A link in place of the newest copy (or on the way to it) is passed over, never followed.
+  const outside = path.join(w.base, 'outside')
+  fs.mkdirSync(path.join(outside, 'skills', 'proposal'), { recursive: true })
+  fs.mkdirSync(w.at('.backups/2026-11-09T02-00-00-000_skill_edit/.claude'), { recursive: true })
+  fs.symlinkSync(path.join(outside, 'skills'), w.at('.backups/2026-11-09T02-00-00-000_skill_edit/.claude/skills'))
+  fs.symlinkSync(outside, w.at('.backups/2026-11-09T03-00-00-000_skill_edit'))
+  assert.equal(w.store.latestBackup(w.root, rel), second)
+  // .backups itself a link: nothing.
+  const elsewhere = path.join(w.base, 'elsewhere-backups')
+  fs.renameSync(w.at('.backups'), elsewhere)
+  fs.symlinkSync(elsewhere, w.at('.backups'))
+  assert.equal(w.store.latestBackup(w.root, rel), null)
 })

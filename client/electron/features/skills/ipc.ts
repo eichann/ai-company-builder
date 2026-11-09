@@ -11,7 +11,7 @@ import { parseFrontmatter } from '../../../shared/skill-frontmatter'
 import { SkillsCache } from '../../../shared/skills-refresh'
 import type { FileChange } from '../../company-watcher'
 import type { IpcRegistrar } from '../../ipc/registrar'
-import type { SkillShelfMark } from '../../../shared/skill-shelf'
+import type { SkillShelfMark, SkillShelfRequestInfo } from '../../../shared/skill-shelf'
 import type { PathGuard } from '../ports'
 import { readLocalPrivateSkills, removeSharedLines, setLocalPrivateSkill } from '../../sync/local-ignores'
 
@@ -36,6 +36,8 @@ interface SkillInfo {
   isNurturing?: boolean
   shelf?: SkillShelfMark
   shelfPublish?: boolean
+  shelfRequest?: SkillShelfRequestInfo
+  shelfBackup?: boolean
   files: {
     skillMd: string
     rules?: string[]
@@ -111,6 +113,10 @@ export interface SkillsDeps {
   shelfMayPublish?: (rootPath: string, rel: string) => boolean | undefined
   /** In a working folder: the delivered rule files not placed because the member has a file of that name. */
   shelfRuleClashes?: (rootPath: string) => string[]
+  /** In a working folder: is 「会社に出してほしいと頼む」 offered for the Skill folder at `rel`, and the member's latest request for it. */
+  shelfRequest?: (rootPath: string, rel: string) => SkillShelfRequestInfo | undefined
+  /** In a working folder: is a copy 「会社の版に戻す」 kept of the Skill folder at `rel` (「控えを開く」)? */
+  shelfBackup?: (rootPath: string, rel: string) => boolean | undefined
 }
 
 /** skills:publish in a company without the shared folder. */
@@ -126,7 +132,7 @@ export interface SkillsFeature {
   invalidateRoot(rootPath: string): void
 }
 
-export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRefusal, isWorkingFolder, shelfMark, shelfMayPublish, shelfRuleClashes }: SkillsDeps): SkillsFeature {
+export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRefusal, isWorkingFolder, shelfMark, shelfMayPublish, shelfRuleClashes, shelfRequest, shelfBackup }: SkillsDeps): SkillsFeature {
   // Skills scans (skills:list), reused for plain tab switches (5 s) and dropped
   // as soon as a watcher event makes them stale (invalidateForChanges) or the
   // renderer forces a refresh. Keys and staleness rules: shared/skills-refresh.ts.
@@ -272,6 +278,8 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRef
         const isPrivate = gitignoreLines.some(line => line === skillRelativePath)
         const shelf = shelfMark?.(rootPath, skillRelativePath.slice(0, -1))
         const shelfPublish = shelfMayPublish?.(rootPath, skillRelativePath.slice(0, -1))
+        const request = shelfRequest?.(rootPath, skillRelativePath.slice(0, -1))
+        const backup = shelf?.state === 'company' ? shelfBackup?.(rootPath, skillRelativePath.slice(0, -1)) : undefined
 
         skills.push({
           id: `${departmentId}-${group.replace(/\s*\/\s*/g, '-').replace(/\s+/g, '-').toLowerCase()}-${entry.name}`,
@@ -284,6 +292,8 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRef
           isNurturing: frontmatter.status === 'nurturing',
           ...(shelf ? { shelf } : {}),
           ...(shelfPublish !== undefined ? { shelfPublish } : {}),
+          ...(request ? { shelfRequest: request } : {}),
+          ...(backup ? { shelfBackup: true } : {}),
           files,
         })
       } catch (err) {

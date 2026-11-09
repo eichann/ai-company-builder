@@ -355,7 +355,7 @@ describe('reading and delivery follow who reads the place', () => {
 
   it('a reader through a group gets its Skill and its instruction text delivered, though not belonging to it; everyone else never sees its name', async () => {
     const carol = (await call('GET', co('/me/skill-shelf'), undefined, 'sh-carol')).body.data.items
-    expect(carol.find((i: Json) => i.id === hrSkill)).toEqual({ id: hrSkill, kind: 'skill', name: 'hr-secret-skill', department: { id: dept['人事部'], folder: '人事部' }, version: hrVersion, fileCount: 1, totalBytes: expect.any(Number) })
+    expect(carol.find((i: Json) => i.id === hrSkill)).toEqual({ id: hrSkill, kind: 'skill', name: 'hr-secret-skill', department: { id: dept['人事部'], folder: '人事部' }, version: hrVersion, fileCount: 1, totalBytes: expect.any(Number), changedAt: expect.any(String) })
     expect(carol.find((i: Json) => i.id === hrText)).toMatchObject({ kind: 'instructions', department: { folder: '人事部' } })
     for (const who of ['sh-bob', 'sh-mgr', 'sh-editor']) {
       const mine = await call('GET', co('/me/skill-shelf'), undefined, who)

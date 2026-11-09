@@ -91,6 +91,8 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'skillShelf:publish': { args: [IN, IN, null], paths: [0, 1] },
   'skillShelf:editLocally': { args: [IN, IN], paths: [0, 1] },
   'skillShelf:restoreCompany': { args: [IN, IN], paths: [0, 1] },
+  'skillShelf:requestPublish': { args: [IN, IN], paths: [0, 1] },
+  'skillShelf:openBackup': { args: [IN, IN], paths: [0, 1] },
   // lane C ▲
 }
 

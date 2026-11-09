@@ -70,6 +70,38 @@ skillShelfRoute.delete('/skill-shelf/:itemId', companyMember, (c) => {
   return c.json({ success: true, data: result.value })
 })
 
+// 「会社に出してほしいと頼む」: requests to publish a Skill (who sees and decides what: the service).
+skillShelfRoute.get('/skill-shelf/requests', companyMember, (c) => {
+  const result = skillShelf.requests(c.var.member)
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+skillShelfRoute.post('/skill-shelf/requests', companyMember, publishBodyLimit, serviceBody, (c) => {
+  const result = skillShelf.createRequest(c.var.member, c.var.body)
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value }, 201)
+})
+
+skillShelfRoute.get('/skill-shelf/requests/:requestId/files', companyMember, (c) => {
+  const result = skillShelf.requestFiles(c.var.member, c.req.param('requestId'))
+  if (!result.ok) return refusal(c, result)
+  c.header('Cache-Control', 'no-store')
+  return c.json({ success: true, data: result.value })
+})
+
+skillShelfRoute.post('/skill-shelf/requests/:requestId/publish', companyMember, serviceBody, (c) => {
+  const result = skillShelf.publishRequest(c.var.member, c.req.param('requestId'), c.var.body)
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+skillShelfRoute.post('/skill-shelf/requests/:requestId/decline', companyMember, serviceBody, (c) => {
+  const result = skillShelf.declineRequest(c.var.member, c.req.param('requestId'), c.var.body)
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
 skillShelfRoute.get('/me/skill-shelf', companyMember, (c) => {
   const result = skillShelf.mine(c.var.member)
   if (!result.ok) return refusal(c, result)

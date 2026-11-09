@@ -205,3 +205,40 @@ export function shelfListing(files: ReadonlyArray<{ path: string; sha256: string
 export function isShelfVersion(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
 }
+
+/**
+ * 「会社に出してほしいと頼む」 (owner decision 2026-11-09): someone who may not publish a Skill at
+ * a place sends it to those who may. Limits so the table cannot be filled: pending requests per
+ * member and per company, and the bytes of every pending request of a company together (a decided
+ * request keeps no files).
+ */
+export const SHELF_REQUEST_LIMITS = {
+  /** Pending requests one member may have in one company. */
+  pendingPerMember: 5,
+  /** Pending requests of one company together. */
+  pendingPerCompany: 50,
+  /** Bytes of every pending request of one company together. */
+  pendingCompanyBytes: 100 * 1024 * 1024,
+  /** The publisher's reason for 見送る (characters). */
+  reasonLength: 200,
+  /** Decided requests a list answer shows (newest first; pending ones are always shown). */
+  decidedShown: 50,
+} as const
+
+export type ShelfRequestState = 'pending' | 'published' | 'declined'
+
+/**
+ * What no request may carry, whoever would publish it: the parts only an owner/admin may put on
+ * the shelf (agent config, auto-run parts), so a request is refused early with the reasons
+ * publishing gives. Judged as if someone allowed to change every skill file sent it, so
+ * 'not-allowed' never appears.
+ */
+export function shelfRequestProblems(
+  kind: ShelfKind,
+  departmentFolder: string | null,
+  name: string,
+  files: ReadonlyArray<{ path: string; text?: string }>,
+): ShelfProblem[] {
+  const skillEditor: ShelfAuthority = { role: 'member', managedFolders: [], skillEditing: { everywhere: true, folders: [] } }
+  return shelfChangeProblems(skillEditor, kind, departmentFolder, name, files, { autorun: true })
+}

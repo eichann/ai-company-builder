@@ -79,6 +79,9 @@ import {
   shelfListSchema,
   shelfPublishResultSchema,
   shelfRemovedSchema,
+  shelfRequestContentSchema,
+  shelfRequestDecidedSchema,
+  shelfRequestsSchema,
   shelfVersionsSchema,
   groupDeletedSchema,
 } from './api-schemas'
@@ -298,6 +301,8 @@ export interface Capabilities {
   managedDepartmentIds: string[]
   /** May open 「AI の操作の記録」 (owner/admin; a manager while the log's viewer setting allows). */
   canViewAgentEvents: boolean
+  /** 「Skill を直せる人」: named for the whole company (or 全員が直せる), or for these department folders. */
+  skillEditing?: { everywhere: boolean; folders: string[] }
 }
 
 export const capabilitiesApi = {
@@ -1032,7 +1037,8 @@ export const groupsApi = {
 }
 
 export type {
-  ShelfHistoryEntry, ShelfItemView, ShelfKind, ShelfListView, ShelfPublishResult, ShelfVersionView, ShelfVersionsView,
+  ShelfHistoryEntry, ShelfItemView, ShelfKind, ShelfListView, ShelfPublishResult, ShelfRequestContent, ShelfRequestDecided, ShelfRequestView,
+  ShelfRequestsView, ShelfVersionView, ShelfVersionsView,
 } from '../../../shared/types/skill-shelf'
 
 const shelfBase = (companyId: string) => `/api/companies/${enc(companyId)}/skill-shelf`
@@ -1061,6 +1067,21 @@ export const skillShelfApi = {
   /** Owners and admins: remove an item that is taken off, with its versions (409 SHELF_ITEM_PUBLISHED otherwise). */
   removeItem: (companyId: string, itemId: string) =>
     getData(`${shelfBase(companyId)}/${enc(itemId)}`, shelfRemovedSchema, { method: 'DELETE' }),
+
+  /** 「公開のお願い」: the caller's own requests and those they may decide (places they read only). */
+  requests: (companyId: string) => getData(`${shelfBase(companyId)}/requests`, shelfRequestsSchema),
+
+  /** A pending request's files (409 SHELF_REQUEST_DECIDED once decided). */
+  requestFiles: (companyId: string, requestId: string) =>
+    getData(`${shelfBase(companyId)}/requests/${enc(requestId)}/files`, shelfRequestContentSchema),
+
+  /** 公開する: published as a new version (409 SHELF_VERSION_CHANGED when the item changed since the page saw it). */
+  publishRequest: (companyId: string, requestId: string, expectedVersion: string | null) =>
+    getData(`${shelfBase(companyId)}/requests/${enc(requestId)}/publish`, shelfRequestDecidedSchema, { method: 'POST', body: { expectedVersion } }),
+
+  /** 見送る, with a short reason or none. */
+  declineRequest: (companyId: string, requestId: string, reason: string) =>
+    getData(`${shelfBase(companyId)}/requests/${enc(requestId)}/decline`, shelfRequestDecidedSchema, { method: 'POST', body: { reason } }),
 }
 
 const deptBase = (companyId: string) => `/api/companies/${enc(companyId)}/departments`

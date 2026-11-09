@@ -4,6 +4,7 @@ import type { Skill, SkillTool } from '../model'
 import { runCommand } from '../../../shared/commands/commands'
 import type { NewSkillInput } from '../model'
 import { useSkillActions } from './useSkillActions'
+import { shelfFixWithAi } from '../../../../shared/skill-shelf'
 
 interface Options {
   rootPath: string | undefined
@@ -27,7 +28,7 @@ export function useSkillsTab({ rootPath, departments, departmentFolder, departme
   const [activeTool, setActiveTool] = useState<{ tool: SkillTool; port: number } | null>(null)
   const selectedSkill = useMemo(() => skills.find((s) => s.id === selectedSkillId), [skills, selectedSkillId])
 
-  const { createSkill, copySkillHere, shareSkill, publishToCompany, editLocally, restoreCompany, toggleNurturing } = useSkillActions({
+  const { createSkill, copySkillHere, shareSkill, publishToCompany, editLocally, restoreCompany, requestToCompany, openBackup, toggleNurturing } = useSkillActions({
     rootPath, departments, departmentFolder, departmentId, refreshSkills,
   })
 
@@ -37,6 +38,15 @@ export function useSkillsTab({ rootPath, departments, departmentFolder, departme
     const folderName = skill?.skillPath?.split('/').pop()
     if (folderName) void runCommand('chat.newConsultation', { message: `/${folderName} ` })
   }, [skills])
+
+  /**
+   * 「AI と一緒に直す」: a new consultation whose first message names the Skill and its folder
+   * (working-folder relative), sent the way a skill's 実行 is (chat.newConsultation).
+   */
+  const fixWithAi = useCallback((skill: Skill) => {
+    if (!rootPath || !skill.skillPath) return
+    void runCommand('chat.newConsultation', shelfFixWithAi(rootPath, skill.skillPath))
+  }, [rootPath])
 
   /** Answers why nothing was made (the dialog stays open and shows it), or null when done. */
   const create = useCallback(async (data: NewSkillInput): Promise<string | null> => {
@@ -58,6 +68,6 @@ export function useSkillsTab({ rootPath, departments, departmentFolder, departme
   return {
     selectedSkillId, selectedSkill, selectSkill: setSelectedSkillId,
     wizardOpen, setWizardOpen, copyOpen, setCopyOpen, activeTool, setActiveTool,
-    executeSkill, create, copy, shareSkill, publishToCompany, editLocally, restoreCompany, toggleNurturing,
+    executeSkill, create, copy, shareSkill, publishToCompany, editLocally, restoreCompany, requestToCompany, openBackup, fixWithAi, toggleNurturing,
   }
 }
