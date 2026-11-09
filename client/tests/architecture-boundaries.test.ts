@@ -57,15 +57,31 @@ function stripComments(source: string): string {
     .replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1')
 }
 
+/**
+ * `import type { A }`, `export type { A }` and `import { type A, type B }`:
+ * erased when the app is built. A list that names one value is not.
+ */
+function typeOnlyClause(clause: string): boolean {
+  if (/^\s*type\s/.test(clause)) return true
+  if (!/^\s*\{[^}]*\}\s*$/.test(clause)) return false
+  const names = clause.replace(/[{}]/g, '').split(',').map(n => n.trim()).filter(Boolean)
+  return names.length > 0 && names.every(n => /^type\s/.test(n))
+}
+
+/** Every module a source imports or re-exports (static, side-effect and dynamic), and whether only types. */
+function importStatementsIn(source: string): Array<{ spec: string; typeOnly: boolean }> {
+  const code = stripComments(source)
+  return [
+    ...[...code.matchAll(/(?:^|\n)\s*(?:import|export)\b([^'"]*?)from\s+['"]([^'"]+)['"]/g)]
+      .map(m => ({ spec: m[2], typeOnly: typeOnlyClause(m[1]) })),
+    ...[...code.matchAll(/(?:^|\n)\s*import\s+['"]([^'"]+)['"]/g)].map(m => ({ spec: m[1], typeOnly: false })),
+    ...[...code.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g)].map(m => ({ spec: m[1], typeOnly: false })),
+  ]
+}
+
 /** Every module specifier a file imports or re-exports (static and dynamic). */
 function importsOf(file: string): string[] {
-  const source = stripComments(readFileSync(file, 'utf8'))
-  const specs = [
-    ...source.matchAll(/(?:^|\n)\s*(?:import|export)\b[^'"]*?from\s+['"]([^'"]+)['"]/g),
-    ...source.matchAll(/(?:^|\n)\s*import\s+['"]([^'"]+)['"]/g),
-    ...source.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g),
-  ]
-  return specs.map(m => m[1])
+  return importStatementsIn(readFileSync(file, 'utf8')).map(s => s.spec)
 }
 
 /** Client-relative path of a relative or `@/` import ('electron/agents/claude'), or `pkg:<specifier>`. */
@@ -217,8 +233,9 @@ test('the chat and the agents never reach the private-folder API, directly or th
 
 // ---- Renderer (client/src) — .claude/rules/renderer-structure.md ----
 
-/** 'editor' for anything under src/features/editor/, else null. */
-const featureOf = (clientPath: string): string | null => /^src\/features\/([^/]+)\//.exec(clientPath)?.[1] ?? null
+/** 'editor' for anything under src/features/editor/ (or the root given), else null. */
+const featureOf = (clientPath: string, root = 'src/features/'): string | null =>
+  clientPath.startsWith(root) ? /^([^/]+)\//.exec(clientPath.slice(root.length))?.[1] ?? null : null
 
 /**
  * Feature → feature imports allowed on purpose, one entry per imported FILE,
@@ -259,13 +276,13 @@ const withExtension = (path: string): string =>
   [`${path}.ts`, `${path}.tsx`, `${path}/index.ts`].find(candidate => existsSync(join(CLIENT, candidate))) ?? path
 
 /** Feature → feature edges, as 'from -> to/<file inside that feature>' (see FEATURE_IMPORT_EXCEPTIONS). */
-function crossFeatureImports(edges: Array<[file: string, imported: string]>, resolveFile = withExtension): Array<[entry: string, where: string]> {
+function crossFeatureImports(edges: Array<[file: string, imported: string]>, resolveFile = withExtension, root = 'src/features/'): Array<[entry: string, where: string]> {
   const out: Array<[string, string]> = []
   for (const [file, imported] of edges) {
-    const from = featureOf(file)
-    const to = featureOf(imported)
+    const from = featureOf(file, root)
+    const to = featureOf(imported, root)
     if (from && to && from !== to) {
-      const inside = resolveFile(imported).slice(`src/features/${to}/`.length)
+      const inside = resolveFile(imported).slice(`${root}${to}/`.length)
       out.push([`${from} -> ${to}/${inside}`, `${file}: ${imported}`])
     }
   }
@@ -453,4 +470,157 @@ test('the duplicate type name check sees definitions, not re-exports or imports 
     ['b.ts', "type Company = { id: number }\nexport type { Pair } from './a'\nimport { type Pair as P } from './a'\ninterface Props { b: string }"],
     ['c.ts', 'export type Pair<T extends string = string> = T[]\n// interface Company {}'],
   ]), { Company: ['a.ts', 'b.ts'], Pair: ['a.ts', 'c.ts'] })
+})
+
+// ---- Main-process features (client/electron/features) — ipc-and-main-process.md ----
+
+/**
+ * Main-process feature → feature imports allowed on purpose, one entry per
+ * imported FILE, as 'from -> to/<file inside that feature>': reason (the
+ * renderer's FEATURE_IMPORT_EXCEPTIONS style). Each must keep occurring.
+ * Normally main.ts wires features together by injecting what one needs from
+ * another; add one only with a reason the owner would accept.
+ *
+ * Type-only imports (`import type`, `import { type A }`) are not listed: they
+ * are erased when the app is built, and they are how injection is written —
+ * a feature names the type of what main.ts hands it, and that type has one
+ * definition, in the feature that provides it (a copy would fail the
+ * duplicate type name check above). An import that names a value is checked.
+ */
+const MAIN_FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
+  'agent-control -> plugins/fetch.ts': 'the AI policy the server sends lists the company\'s business plugins; wireAgentControl fetches their packages with each policy answer (plan C2)',
+  'agent-control -> plugins/store.ts': 'the AI policy the server sends lists the company\'s business plugins; wireAgentControl keeps their verified packages in step with each policy answer (plan C2)',
+  'broker -> tools/ipc.ts': 'skills\' web-app tools get the key broker\'s short-lived token variables like the chat, so the broker\'s wiring registers tools:* with its token store (key-broker.md)',
+  'fs -> backups/keep-current.ts': 'editor:backupBeforeOverwrite keeps the version on disk in .backups/ through the one keep-current helper, owned by backups',
+  'git-history -> backups/keep-current.ts': 'git:revertFile keeps the current version in .backups/ first, through the same keep-current helper (before_revert)',
+  'sync -> git-history/ipc.ts': 'wireSync registers the history views with the same app git and AI commit messages the sync button uses',
+}
+
+/** Main-process feature → feature imports that name a value (type-only ones are left out, see above). */
+function mainFeatureImports(): Array<[entry: string, where: string]> {
+  const files = sourceFiles(join(CLIENT, 'electron', 'features'), { tests: true })
+  const edges = files.flatMap(f => importStatementsIn(readFileSync(f, 'utf8'))
+    .filter(s => !s.typeOnly)
+    .map(s => [rel(f), target(f, s.spec)] as [string, string]))
+  return crossFeatureImports(edges, withExtension, 'electron/features/')
+}
+
+test('a main-process feature imports another feature only through the files registered with a reason', () => {
+  const found = new Set<string>()
+  const unexpected: string[] = []
+  for (const [entry, where] of mainFeatureImports()) {
+    if (entry in MAIN_FEATURE_IMPORT_EXCEPTIONS) found.add(entry)
+    else unexpected.push(`${entry} (${where})`)
+  }
+  assert.deepEqual(unexpected, [], 'inject what the feature needs from main.ts (or a wire module), move the shared part out of features/ (electron/ or services/), or register that file with a reason')
+  const stale = Object.keys(MAIN_FEATURE_IMPORT_EXCEPTIONS).filter(entry => !found.has(entry))
+  assert.deepEqual(stale, [], 'remove exceptions that no longer occur')
+})
+
+test('the main-process feature check sees value imports, not type-only ones (self-test)', () => {
+  const kinds = importStatementsIn([
+    "import type { A } from './a'",
+    "import { type B, type C } from './b'",
+    "import { type D, e } from './d'",
+    "export type { F } from './f'",
+    "import typed from './g'",
+    "export * from './h'",
+    "const i = await import('./i')",
+  ].join('\n')).map(s => `${s.spec}:${s.typeOnly}`)
+  assert.deepEqual(kinds, ['./a:true', './b:true', './d:false', './f:true', './g:false', './h:false', './i:false'])
+  assert.deepEqual(crossFeatureImports([
+    ['electron/features/fs/ipc.ts', 'electron/features/backups/keep-current'],
+    ['electron/features/fs/ipc.ts', 'electron/features/ports'],
+    ['electron/features/fs/ipc.ts', 'electron/file-guards'],
+  ], p => `${p}.ts`, 'electron/features/').map(([entry]) => entry), ['fs -> backups/keep-current.ts'])
+})
+
+// ---- Folder-level import cycles (client) ----
+
+/**
+ * The folder a client file counts under for the cycle check: features/<name>
+ * (electron/ and src/), else the first folder under electron/, src/ or
+ * shared/ (electron/agents, src/stores); a file directly in one of those three
+ * is a unit of its own (electron/main.ts is not "the electron folder").
+ */
+function folderOf(clientPath: string): string {
+  const parts = clientPath.replace(/\.tsx?$/, '').split('/')
+  if (parts.length <= 2) return parts.join('/')
+  return parts.slice(0, parts[1] === 'features' && parts.length > 3 ? 3 : 2).join('/')
+}
+
+/** Strongly connected groups of more than one node (Tarjan), each sorted, as 'a ⇄ b ⇄ c'. */
+function cyclesIn(edges: Array<[from: string, to: string]>): string[] {
+  const next = new Map<string, Set<string>>()
+  for (const [a, b] of edges) if (a !== b) next.set(a, (next.get(a) ?? new Set()).add(b))
+  let counter = 0
+  const index = new Map<string, number>()
+  const low = new Map<string, number>()
+  const stack: string[] = []
+  const onStack = new Set<string>()
+  const out: string[] = []
+  const visit = (v: string) => {
+    index.set(v, counter); low.set(v, counter); counter++
+    stack.push(v); onStack.add(v)
+    for (const w of next.get(v) ?? []) {
+      if (!index.has(w)) { visit(w); low.set(v, Math.min(low.get(v)!, low.get(w)!)) }
+      else if (onStack.has(w)) low.set(v, Math.min(low.get(v)!, index.get(w)!))
+    }
+    if (low.get(v) !== index.get(v)) return
+    const group: string[] = []
+    let w: string
+    do { w = stack.pop()!; onStack.delete(w); group.push(w) } while (w !== v)
+    if (group.length > 1) out.push(group.sort().join(' ⇄ '))
+  }
+  for (const v of next.keys()) if (!index.has(v)) visit(v)
+  return out.sort()
+}
+
+/**
+ * Folder-level cycles that exist today (2026-11-09 assessment), as the sorted
+ * folders joined by ' ⇄ ': why it exists, and how to untangle it later. Only
+ * imports that name a value count (type-only ones are erased at build). No new
+ * cycle may appear (a folder joining a listed one is a new cycle too); when a
+ * listed one disappears or shrinks, update this list, so it only gets shorter.
+ */
+const KNOWN_FOLDER_CYCLES: Record<string, string> = {
+  [['electron/agents', 'electron/app-commands', 'electron/claude-oneshot', 'electron/company-files', 'electron/consultations',
+    'electron/features/ai-turns', 'electron/features/google', 'electron/features/inbox', 'electron/handoff', 'electron/records',
+    'electron/review', 'electron/web-research'].join(' ⇄ ')]:
+    'agents/claude.ts and codex.ts import the six ACB tool modules themselves (records, consultations, company-files, review, '
+    + 'app-commands, web-research), which build on agents/loopback-mcp.ts; agents/registry.ts reaches handoff/ and '
+    + 'claude-oneshot.ts, which use agents/ again; records/tool-providers.ts pulls in features/ai-turns, google and inbox, which '
+    + 'use records/api.ts. To untangle later: the host hands the agents a tool list through AgentHostConfig (assessment proposal 2).',
+  'src/features/auth ⇄ src/shared ⇄ src/stores':
+    'stores/authStore.ts calls features/auth/api.ts while the login screen reads authStore; stores/appStore.ts uses src/shared '
+    + '(ipc, lib) while shared hooks and the code editor read appStore. To untangle later: authStore moves into features/auth, and '
+    + 'what src/shared reads from appStore is handed in.',
+}
+
+test('no new folder-level import cycles in the app (listed ones only shrink)', () => {
+  const files = ['electron', 'src', 'shared'].flatMap(r => sourceFiles(join(CLIENT, r)))
+  const inTree = new Set(files.map(rel))
+  const edges: Array<[string, string]> = []
+  for (const f of files) {
+    for (const s of importStatementsIn(readFileSync(f, 'utf8'))) {
+      if (s.typeOnly) continue
+      const t = withExtension(target(f, s.spec))
+      if (inTree.has(t)) edges.push([folderOf(rel(f)), folderOf(t)])
+    }
+  }
+  assert.ok(edges.length > 1000, 'the check sees the imports (self-test)')
+  const cycles = cyclesIn(edges)
+  assert.deepEqual(cycles.filter(c => !(c in KNOWN_FOLDER_CYCLES)), [],
+    'a folder now imports, directly or through others, a folder that imports it: point the dependency one way (inject it, or move the shared part to a folder both may use)')
+  assert.deepEqual(Object.keys(KNOWN_FOLDER_CYCLES).filter(c => !cycles.includes(c)), [],
+    'a listed cycle is gone or changed: remove it from KNOWN_FOLDER_CYCLES (or list the smaller one that is left)')
+})
+
+test('the folder cycle check finds cycles through several folders (self-test)', () => {
+  assert.equal(folderOf('electron/features/fs/ipc.ts'), 'electron/features/fs')
+  assert.equal(folderOf('electron/features/ports.ts'), 'electron/features')
+  assert.equal(folderOf('electron/main.ts'), 'electron/main')
+  assert.equal(folderOf('src/shared/ui/CodeEditor.tsx'), 'src/shared')
+  assert.deepEqual(cyclesIn([['a', 'b'], ['b', 'c'], ['c', 'a'], ['c', 'd'], ['d', 'd'], ['e', 'f'], ['f', 'e']]), ['a ⇄ b ⇄ c', 'e ⇄ f'])
+  assert.deepEqual(cyclesIn([['a', 'b'], ['b', 'c'], ['a', 'c']]), [])
 })

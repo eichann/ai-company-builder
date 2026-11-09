@@ -28,9 +28,10 @@ src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts
 
 - `server/tests/unit/layering.test.ts` enforces the direction: ports import only ports (and
   shared/core types), services only ports / services / shared / pure lib, only the composition
-  root imports adapters (and `db/index.ts`, whose startup seeding runs
-  `adapters/sqlite/permission-store.ts` and the content-store move on the connection it migrates;
-  the `db/schema/*` modules import no adapter), no route runs SQL or
+  root imports adapters (and `db/index.ts`, but only the adapters in `DB_INDEX_ADAPTERS`, which its
+  startup migrations run on the connection it migrates: `sqlite/permission-store` (scope seeding),
+  `sqlite/record-contents` (the content-store move) and `sqlite/records` (the per-company record
+  migrations); another one fails, and the `db/schema/*` modules import no adapter), no route runs SQL or
   imports `db` (git-http's push snapshot, private-folder lookups and orphan checks use
   `services.access` / `services.companyScopes` with the Member), and `lib/` does not import the database except the modules listed in
   `LIB_WITH_DATABASE` with their reason (only `lib/auth.ts`: Better Auth's own connection, next
@@ -38,6 +39,12 @@ src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts
   computes or runs git / files stays in `lib/` (`lib/push-rejections.ts` parses,
   `lib/client-activity.ts` reads headers and receive-pack results, `lib/private-folders.ts` keeps
   paths, archives and the pushes in flight).
+- No new cycle between `src/` folders (same test, `KNOWN_FOLDER_CYCLES`; a folder is the first one
+  under `src/`, a file directly in `src/` its own unit; value imports only). Listed today:
+  `adapters ⇄ db` (the startup migrations above; untangle by running them from the composition
+  root after `initDatabase()`). A new cycle fails; a listed one that disappeared fails until
+  removed from the list. A file-level cycle inside one folder is not caught (today
+  `services/record-engine.ts` → `record-engine/create.ts` → `plugin-operation-checks.ts`).
 - Client activity (`client_activity`): `services/client-activity.ts` records it (throttled,
   never throws) from `routes/client-activity-middleware.ts` (API) and git-http, and holds the
   active-members build check; table in `adapters/sqlite/client-activity.ts`.

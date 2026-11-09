@@ -116,8 +116,15 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
   an agent needs (`AgentHostConfig`); one agent's implementation (`agents/claude`, `codex*`,
   `anthropic-api`) is reached through `agents/registry.ts` (exceptions: `main.ts`, that agent's
   `handoff/` module); agent ids are compared only inside the agent modules (the per-agent UI
-  and a few named legacy spots are listed exceptions, each with its reason). New code goes where
-  its layer is; widen an exception only with a reason the owner would accept.
+  and a few named legacy spots are listed exceptions, each with its reason); a main-process
+  feature (`electron/features/<a>`) imports another feature's code only through the files listed
+  in `MAIN_FEATURE_IMPORT_EXCEPTIONS` with their reason (type-only imports are free: that is how
+  injection is typed), like the renderer's `FEATURE_IMPORT_EXCEPTIONS`. **No new folder-level
+  import cycle** in the app, the server (`layering.test.ts`) or the admin
+  (`admin/tests/folder-cycles.test.ts`): the cycles of 2026-11-09 are listed in
+  `KNOWN_FOLDER_CYCLES` with their reason and how to untangle them, and the list only shrinks
+  (a listed cycle that disappears fails until removed). New code goes where its layer is; widen
+  an exception only with a reason the owner would accept.
 - **Agents and models come from the registry** (`client/shared/agents/registry.ts`, factories
   in `client/electron/agents/registry.ts`): callers ask `capabilities` instead of branching on an
   agent id, and every model id lives there (a test fails on a literal elsewhere), so adding a
@@ -130,7 +137,8 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
   guaranteed by types or another test. No tests of pass-throughs or of fakes returning what they
   were given. → `testing.md` ("What a test is for")
 - **Server layers point one way**: routes (HTTP) → services (rules) → ports ← adapters; only
-  `src/composition.ts` imports adapters (`tests/unit/layering.test.ts`). → `server.md`
+  `src/composition.ts` imports adapters (`tests/unit/layering.test.ts`; `db/index.ts` only the
+  three its startup migrations run, listed); no new cycle between `src/` folders. → `server.md`
 - **Server request handlers stay async.** No `execFileSync` / `spawnSync` in `server/src`
   (`tests/security/no-exec-sync.test.ts`): one synchronous git call froze every company's
   requests for 42 s. → `server.md`
