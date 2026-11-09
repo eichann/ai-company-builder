@@ -153,6 +153,7 @@ const MEETING_ITEM: TaskListItem = {
 const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled: [] as string[], retried: [] as string[], order: [] as string[] }
 installElectronAPI({
   getAutoTurnSettings: async () => ({ enabled: true, dailyLimit: 20, stopAfterFailures: 3 }),
+  getAiTurnStopConfirmed: async () => true,
   claimAiTurn: async (companyId, recordId, version, conversationId) => {
     aiTurns.claims.push([companyId, recordId, version, conversationId])
     aiTurns.order.push('claim')

@@ -40,6 +40,12 @@ export interface AiTurnClaimsDeps {
   windowOpen: () => boolean
   /** The emergency stop allows AI (agent-stop.md). */
   aiAllowed: () => boolean
+  /**
+   * The company's stop policy is confirmed by the server recently (agent-stop.ts
+   * `stopPolicyConfirmed`): an AI turn has no person present, so it never starts on a policy this
+   * app cannot confirm (owner decision 2026-11-09).
+   */
+  stopPolicyConfirmed: (companyId: string) => Promise<boolean>
   /** Which consultation runs which execution run (shared with the records API). */
   runs: RunRegistry
   /** This app instance (random per launch): the server's claim holder. */
@@ -248,6 +254,11 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
       return { ...company, enabled: company.enabled && readOwnAutoRun(mine?.status === 200 ? mine.data : undefined) }
     },
 
+    /** The runner asks before it starts anything: the stop policy is confirmed (else it waits and says why). */
+    stopPolicyConfirmed(companyId: string): Promise<boolean> {
+      return COMPANY.test(companyId) ? deps.stopPolicyConfirmed(companyId).catch(() => false) : Promise.resolve(false)
+    },
+
     /**
      * Take the record's AI turn for this consultation, or learn that another PC (or person) was
      * first. The version comes from the record read now: the notice's may be old (an earlier run
@@ -261,6 +272,8 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
       }
       const agent = deps.agent()
       if (!deps.windowOpen() || !deps.aiAllowed() || !agentCan(agent, 'recordActions')) return { claimed: false, reason: 'not-allowed' }
+      // No person present: not without a stop policy the server confirmed (before any server call).
+      if (!(await deps.stopPolicyConfirmed(companyId).catch(() => false))) return { claimed: false, reason: 'not-allowed' }
       if (pluginTurn) return claimPluginStep(companyId, pluginTurn, conversationId, companyRoot ?? null)
       if (!kind) return { claimed: false, reason: 'not-allowed' }
       const now = await recordOf(companyId, recordId)

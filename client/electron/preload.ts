@@ -202,6 +202,7 @@ const api: ElectronAPI = {
   getInviteChoices: (companyId: string, recordId: string) => invoke('minutes:inviteChoices', companyId, recordId),
   onMinutesChanged: callback => subscribe('minutes:changed', callback),
   getAutoTurnSettings: (companyId: string) => invoke('aiTurns:settings', companyId),
+  getAiTurnStopConfirmed: (companyId: string) => invoke('aiTurns:stopConfirmed', companyId),
   claimAiTurn: (companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string) => invoke('aiTurns:claim', companyId, recordId, expectedVersion, conversationId, companyRoot),
   settleAiTurn: (companyId: string, recordId: string) => invoke('aiTurns:settle', companyId, recordId),
   retryAiTurn: (companyId: string, recordId: string) => invoke('aiTurns:retry', companyId, recordId),

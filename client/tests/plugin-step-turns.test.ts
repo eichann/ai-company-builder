@@ -61,7 +61,7 @@ function claimsFor(server: ReturnType<typeof fakeServer>, over: Partial<AiTurnCl
   const runs = createRunRegistry()
   return createAiTurnClaims({
     ...base, records: createRecordsApi({ ...base, fetch: server.fetch, runOf: runs.runOf }), runs, deviceId: 'device-plugin-1',
-    renewEveryMs: 3_600_000, fetch: server.fetch, agent: () => 'claude-code', windowOpen: () => true, aiAllowed: () => true,
+    renewEveryMs: 3_600_000, fetch: server.fetch, agent: () => 'claude-code', windowOpen: () => true, aiAllowed: () => true, stopPolicyConfirmed: async () => true,
     log: { warn: () => {} },
     readProcedure: async (_c, pin) => pin.source === 'plugin' ? `# 案件を進める ${pin.version}\n手順の本文` : '# 会社の手順\n',
     ...over,
@@ -126,6 +126,16 @@ test('the emergency stop: no server call at all', async () => {
   const before = server.calls.length
   assert.deepEqual(await claims.claim(COMPANY, DEAL, 4, 'conv-plugin-0004'), { claimed: false, reason: 'not-allowed' })
   assert.equal(server.calls.length, before)
+})
+
+test('a stop policy the server has not confirmed: a plugin step is not claimed and the server is not asked (owner decision 2026-11-09)', async () => {
+  const server = fakeServer()
+  const claims = claimsFor(server, { stopPolicyConfirmed: async () => false })
+  await claims.pluginTurns(COMPANY)
+  const before = server.calls.length
+  assert.deepEqual(await claims.claim(COMPANY, DEAL, 4, 'conv-plugin-0009'), { claimed: false, reason: 'not-allowed' })
+  assert.equal(server.calls.length, before)
+  assert.equal(claims.pluginStepTools('conv-plugin-0009', 'sample-sales__work'), null)
 })
 
 test('settle: the record left the step\'s state → done; still there → tried again later', async () => {

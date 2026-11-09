@@ -172,8 +172,14 @@ turns").
   (`recordMovedOn` → `minutes.recordsSignal`), so this PC stops showing 「AI が読み取る予定です」.
   Answers `{ claimed: true, version }` (the version after the start). The ledger records it as the AI's, pointing at the consultation.
   Refused without a call to the server (`not-allowed`): an agent without `recordActions` (Codex,
-  the API key), a closed main window, the emergency stop (`oneShotAiAllowed`), a record kind not
-  in the table, a malformed conversation id.
+  the API key), a closed main window, the emergency stop (`oneShotAiAllowed`), **a stop policy the
+  server has not confirmed recently** (`stopPolicyConfirmed`, owner decision 2026-11-09:
+  `agent-stop.md` "No person present"; plugin steps too), a record kind not in the table, a
+  malformed conversation id.
+- `aiTurns:stopConfirmed(companyId)` — main window only: the same check, asked by the runner each
+  tick while something could start (`mayStartAiTurns`: 自動で進める on or a record asked for; off
+  with nothing asked → not asked, so the server is not polled) (no hidden tab is opened while unconfirmed); unconfirmed, main asks
+  the server again, so the runner starts by itself once it answers.
 - `aiTurns:settle(companyId, recordId)` — reads the record with the session: `read` → done,
   `failed` / `skipped` → failed, still `reading` → put back to 「AI の番」 so it is not stuck for 30
   minutes: finishing the run as failed does it on the server (`afterFailedRun` in
@@ -231,6 +237,10 @@ Checked in this order: setting off → nothing (except a meeting the member aske
 themselves: the queue's `asked`, from ［AI に読ませる］ or their own 「次から自動で読む」 series, `minutes.md`
 "In the app" — the press is the start; the others' rows still say the setting is off, `autoOff`); nothing waiting → nothing; agent without
 `recordActions` → told 「…Claude Code が必要です」 (Codex never starts one); not signed in → told;
+the stop policy not confirmed by the server (`stopConfirmed`, owner decision 2026-11-09 — also for
+what the member asked for, since the run itself has no person present) → told
+`STOP_UNCONFIRMED_TEXT` 「止める設定をサーバーで確かめられないため、AI の番を自動では始めていません。
+サーバーにつながると自動で再開します。」, `waiting`, no 「もう一度」 (it resumes by itself);
 stopped after N failures → told, with 「もう一度自動で進める」; Claude's usage limit → paused
 until the full window resets (the chat's rate-limit snapshot, `rateLimitsOf('claude-code')`;
 not a failure) and told, also with 「もう一度自動で進める」 (owner report 2026-11-05: signed in with
@@ -248,7 +258,7 @@ foundation (S5) will take over.
 
 Every record waiting in 「AI の番」 has a state with a plain-Japanese reason (`AiTurnItemView` in
 `client/shared/ai-turns.ts`, computed by `aiTurnItems`): `running`; `waiting` (its turn, Claude's
-usage pause, today's limit, a stop); `not-allowed` (no Claude Code, Codex, not signed in, the
+usage pause, today's limit, a stop, the stop policy not confirmed); `not-allowed` (no Claude Code, Codex, not signed in, the
 setting off); `failed` (the AI could not finish — handed to the person at once with the reason);
 `handed` (given to the person early). The runner reports them through `ChatPanel`'s
 `onAiTurnItems` (`AiTurnItemsView`: items + `retry` + `handOver`); AppShell passes them to the
@@ -297,7 +307,7 @@ the server's run in `waiting_person` (a claim → `RUN_WAITING` → `taken`).
 
 ## Tests
 
-`src/features/chat/aiTurns.test.ts` (setting off, Codex, order, one at a time and the pass cap,
+`src/features/chat/aiTurns.test.ts` (setting off, Codex, the stop policy not confirmed → nothing starts, asked ones included, with its reason, order, one at a time and the pass cap,
 daily limit, attempts per record, stop after failures and resume, usage pause, a record whose due is not the turn's never handed early, a hand-off given back when the record waits in another state (never the member's own), the pause resumed by the member and lifted by a newer snapshot or a change of AI but never by an older snapshot, the consultation renamed after its record but never over the member's name, settings values; a meeting asked for again runs, other hand-offs stay; a failure handed with its reason and 「もう一度」, every state has a reason and stopped ones offer both choices, 「人に渡す」, due soon handed early),
 `tests/ai-turn-unattended.test.ts` (an unattended run's Claude options: no settings layers, strict
 MCP config, no built-in tools, shell / web / write denied, only the record server, everything else
@@ -305,8 +315,8 @@ refused even in bypass; a normal turn unchanged; Codex refuses; the minutes step
 step rides on one request only), `tests/ai-turn-claims.test.ts` (two PCs → one claim, decided by the server's run, the
 winner's token bound to it; writes carry an idempotency key made from the request; a replayed
 write is read back, not redone; a run held for a person is not started and 「もう一度」 gives it back;
-the run finished with its class; settle answers the record's title; Codex / API key / closed window / stop →
-no server call; minutes only; settle puts an unfinished reading back; a notice older than the record
+the run finished with its class; settle answers the record's title; Codex / API key / closed window / stop /
+the stop policy not confirmed → no server call; minutes only; settle puts an unfinished reading back; a notice older than the record
 still claims at the version now; a record already finished claims nothing and re-reads the notices;
 an unfinished run is put back by the run's finish, not the member's retry), `tests/ai-turn-unattended.test.ts`
 also: after earlier put-backs (version > 2) an unattended run finishes without `records_get`

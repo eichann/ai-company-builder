@@ -52,13 +52,19 @@ export const URGENT_WITHIN_MS = 2 * 60 * 60_000
 const USAGE_PAUSE_FALLBACK_MS = 60 * 60_000
 
 export type AiTurnWait =
-  | 'off' | 'not-ready' | 'needs-claude' | 'paused-usage' | 'stopped' | 'daily-limit' | 'busy' | 'pass-cap' | 'empty'
+  | 'off' | 'not-ready' | 'needs-claude' | 'stop-unconfirmed' | 'paused-usage' | 'stopped' | 'daily-limit' | 'busy' | 'pass-cap' | 'empty'
 
 export interface AiTurnDecisionInput {
   settings: AutoTurnSettings | null
   /** The chosen AI (registry id) and whether it is set up and signed in. */
   agent: string
   agentReady: boolean
+  /**
+   * The company's stop policy is confirmed by the server in this app run, recently (main's
+   * `aiTurns:stopConfirmed`). No person is present in an AI turn, so without it nothing starts
+   * (owner decision 2026-11-09); the runner asks every tick and starts once it is.
+   */
+  stopConfirmed: boolean
   /** A run is in progress (one at a time). */
   busy: boolean
   log: AiTurnLog
@@ -129,12 +135,21 @@ export function nextAiTurn(input: AiTurnDecisionInput): { run: AiTurnCandidate }
   // Codex and the API key cannot take the record's AI actions (registry recordActions).
   if (!agentCan(input.agent, 'recordActions')) return { wait: 'needs-claude' }
   if (!input.agentReady) return { wait: 'not-ready' }
+  if (!input.stopConfirmed) return { wait: 'stop-unconfirmed' }
   if (log.stopped) return { wait: 'stopped' }
   if (log.pausedUntil !== null && log.pausedUntil > now) return { wait: 'paused-usage' }
   if (log.runs >= settings.dailyLimit) return { wait: 'daily-limit' }
   if (input.busy) return { wait: 'busy' }
   if (input.pass && now - input.pass.startedAt < AI_TURN_PASS_INTERVAL_MS && input.pass.started >= AI_TURN_PASS_CAP) return { wait: 'pass-cap' }
   return { run: waiting[0] }
+}
+
+/**
+ * Whether anything could start (「自動で進める」 on, or a record the member asked for): only then
+ * does the runner ask main to confirm the stop policy, which asks the server while unconfirmed.
+ */
+export function mayStartAiTurns(settings: AutoTurnSettings | null, queue: readonly AiTurnCandidate[]): boolean {
+  return !!settings && (settings.enabled || queue.some(c => c.asked))
 }
 
 /** A run starts (counted when the claim succeeded). */
@@ -266,6 +281,9 @@ export function aiTurnItems(input: {
       case 'stopped':
       case 'daily-limit':
         return { recordId: c.id, state: 'waiting', reason: noticeText ?? '', canRetry: true, canHand: true }
+      // Resumes by itself once the server answers: nothing for 「もう一度」 to do.
+      case 'stop-unconfirmed':
+        return { recordId: c.id, state: 'waiting', reason: noticeText ?? '', canRetry: false, canHand: true }
       default:
         return { recordId: c.id, state: 'waiting', reason: 'AI が順番に進めます。', canRetry: false, canHand: true }
     }
@@ -320,12 +338,17 @@ export function usagePauseUntil(snapshot: RateLimitSnapshot | undefined, now: nu
 }
 
 /** What the member is told (null: nothing to say). Shown only while something waits for the AI. */
+/** No stop policy confirmed by the server (offline, or not answered yet since the app started). */
+export const STOP_UNCONFIRMED_TEXT = '止める設定をサーバーで確かめられないため、AI の番を自動では始めていません。サーバーにつながると自動で再開します。'
+
 export function aiTurnNoticeText(wait: AiTurnWait, ctx: { log: AiTurnLog; settings: AutoTurnSettings | null }): string | null {
   switch (wait) {
     case 'needs-claude':
       return 'AI の番の自動実行には Claude Code が必要です。相談の設定で Claude Code を選ぶと、議事録の読み取りなどを自動で進めます。'
     case 'not-ready':
       return 'AI の番の自動実行には Claude Code へのログインが必要です。相談の設定から Claude Code にログインしてください。'
+    case 'stop-unconfirmed':
+      return STOP_UNCONFIRMED_TEXT
     case 'paused-usage': {
       const until = ctx.log.pausedUntil
       const at = until ? new Date(until) : null

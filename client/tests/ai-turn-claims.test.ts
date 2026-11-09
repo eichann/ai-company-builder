@@ -96,6 +96,7 @@ function claimsFor(server: ReturnType<typeof fakeServer>, over: Partial<AiTurnCl
     agent: () => 'claude-code',
     windowOpen: () => true,
     aiAllowed: () => true,
+    stopPolicyConfirmed: async () => true,
     log: { warn: () => {} },
     ...over,
   })
@@ -184,6 +185,20 @@ test('Codex, a closed main window or the emergency stop: nothing is claimed and 
     assert.deepEqual(server.calls, [])
     assert.deepEqual(server.record, { state: 'received', version: 3 })
   }
+})
+
+test('a stop policy the server has not confirmed: nothing is claimed and the server is not asked (owner decision 2026-11-09)', async () => {
+  const server = fakeServer()
+  const asked: string[] = []
+  const claims = claimsFor(server, { stopPolicyConfirmed: async companyId => { asked.push(companyId); return false } })
+  assert.deepEqual(await claims.claim(COMPANY, RECORD, 3, 'conversation-aaaa'), { claimed: false, reason: 'not-allowed' })
+  assert.deepEqual(asked, [COMPANY])
+  assert.deepEqual(server.calls, [])
+  assert.deepEqual(server.record, { state: 'received', version: 3 })
+  // A check that fails counts as not confirmed.
+  const broken = claimsFor(server, { stopPolicyConfirmed: async () => { throw new Error('boom') } })
+  assert.deepEqual(await broken.claim(COMPANY, RECORD, 3, 'conversation-aaaa'), { claimed: false, reason: 'not-allowed' })
+  assert.deepEqual(server.calls, [])
 })
 
 test('a record kind without a step is never claimed and the server is not asked', async () => {

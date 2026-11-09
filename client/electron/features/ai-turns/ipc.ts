@@ -1,5 +1,6 @@
 // 「AI の番」 run automatically (stage 2 S10, .claude/rules/ai-turns.md):
 //   aiTurns:settings  the company's 「自動で進める」 and its limits
+//   aiTurns:stopConfirmed  the stop policy is confirmed by the server (else nothing starts by itself)
 //   aiTurns:claim     take a record's AI turn for a hidden consultation (one PC wins)
 //   aiTurns:settle    after the turn: done / failed / put back to 「AI の番」
 //   aiTurns:retry     「もう一度」: the server's run held for a person goes back to the AI (S10b)
@@ -15,6 +16,8 @@ const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0 &
 export function registerAiTurnsIpc(ipc: IpcRegistrar, deps: { claims: AiTurnClaims; isMainWindow: (senderId: number) => boolean; paths: PathGuard }): void {
   const { claims, isMainWindow, paths } = deps
   ipc.handle('aiTurns:settings', (_event, companyId) => claims.settings(str(companyId) ? companyId : ''))
+  ipc.handle('aiTurns:stopConfirmed', (event, companyId) =>
+    isMainWindow(event.sender.id) && str(companyId) ? claims.stopPolicyConfirmed(companyId) : false)
   ipc.handle('aiTurns:claim', (event, companyId, recordId, expectedVersion, conversationId, companyRoot) => {
     // The company folder: where a company Skill pinned as a plugin step's procedure is read (plugin-steps.md).
     let root: string | null = null

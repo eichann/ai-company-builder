@@ -52,7 +52,7 @@ function claimsFor(server: ReturnType<typeof fakeServer>) {
   const runs = createRunRegistry()
   return createAiTurnClaims({
     ...base, records: createRecordsApi({ ...base, fetch: server.fetch, runOf: runs.runOf }), runs, deviceId: 'device-auto-1',
-    renewEveryMs: 3_600_000, fetch: server.fetch, agent: () => 'claude-code', windowOpen: () => true, aiAllowed: () => true,
+    renewEveryMs: 3_600_000, fetch: server.fetch, agent: () => 'claude-code', windowOpen: () => true, aiAllowed: () => true, stopPolicyConfirmed: async () => true,
     log: { warn: () => {} }, readProcedure: async () => '# 提案書（会社の手順）\n',
   })
 }
