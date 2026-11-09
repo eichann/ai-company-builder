@@ -8,7 +8,7 @@ import { useInterval } from '../../../shared/hooks/useInterval'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { rateLimitsOf } from '../agentStatusStore'
 import { consultationStatusOf } from '../consultationStatusStore'
-import { claimAiTurn, getAutoTurnSettings, getChatSessionSummaries, patchChatSession, retryAiTurn, settleAiTurn } from '../api'
+import { claimAiTurn, getAiTurnStopConfirmed, getAutoTurnSettings, getChatSessionSummaries, patchChatSession, retryAiTurn, settleAiTurn } from '../api'
 import {
   AI_TURN_PASS_INTERVAL_MS, aiTurnItems, aiTurnNoticeText, askedAgain, canResumeAiTurns, handUrgent, handedOver, logForToday, movedOn,
   nextAiTurn, recordOutcome, recordStarted, resumed, retitledConsultation, retried, usageLimitReached, usagePause, usagePauseLifted,
@@ -216,8 +216,11 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
         const urgent = handUrgent(log, queue, current?.recordId ?? null, now)
         if (urgent !== log) saveLog(log = urgent)
       }
+      // No person present: nothing starts until main confirms the stop policy with the server (asked
+      // every tick; main asks the server again while unconfirmed, so this resumes by itself).
+      const stopConfirmed = await getAiTurnStopConfirmed(o.companyId).catch(() => false)
       const decision = nextAiTurn({
-        settings: settings.current?.value ?? null, agent: o.authMode, agentReady: o.agentReady,
+        settings: settings.current?.value ?? null, agent: o.authMode, agentReady: o.agentReady, stopConfirmed,
         busy: current !== null, log, queue, pass: pass.current, now,
       })
       const wait = 'wait' in decision ? decision.wait : null

@@ -393,6 +393,8 @@ const aiTurnClaims = createAiTurnClaims({
   agent: () => config.authMode(),
   windowOpen: () => { const win = mainWindowHost.window(); return !!win && !win.isDestroyed() },
   aiAllowed: () => agentControl.stop.oneShotAiAllowed(),
+  // No person present: an AI turn starts only on a stop policy the server confirmed recently (agent-stop.md).
+  stopPolicyConfirmed: companyId => agentControl.stop.stopPolicyConfirmed(companyId),
   runs: aiRunRegistry,
   // This app instance (per launch): the server's claim holder.
   deviceId: `app-${randomUUID()}`,

@@ -6,7 +6,7 @@ import { DEFAULT_AUTO_TURN_SETTINGS, readAutoTurnSettings } from '../../../share
 import {
   AI_TURN_PASS_CAP, AI_TURN_PASS_INTERVAL_MS, MAX_ATTEMPTS_PER_RECORD, freshLog, logForToday, nextAiTurn, orderAiTurns,
   FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, askedAgain, handUrgent, handedOver, movedOn, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
-  canResumeAiTurns, retitledConsultation, usagePause, usagePauseLifted,
+  canResumeAiTurns, retitledConsultation, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT,
 } from './aiTurns'
 import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
 
@@ -19,7 +19,7 @@ const A = minutes('minutes-aaaaaaaa', '2026-10-31T10:00:00Z')
 const B = minutes('minutes-bbbbbbbb', '2026-10-30T10:00:00Z')
 
 const input = (over: Partial<AiTurnDecisionInput> = {}): AiTurnDecisionInput => ({
-  settings: ON, agent: 'claude-code', agentReady: true, busy: false,
+  settings: ON, agent: 'claude-code', agentReady: true, stopConfirmed: true, busy: false,
   log: freshLog(NOW), queue: [A, B], pass: null, now: NOW, ...over,
 })
 
@@ -45,6 +45,19 @@ test('Codex (or the API key) never starts an AI turn: the member is told it need
   assert.deepEqual(nextAiTurn(input({ agent: 'codex' })), { wait: 'needs-claude' })
   assert.deepEqual(nextAiTurn(input({ agent: 'api-key' })), { wait: 'needs-claude' })
   assert.deepEqual(nextAiTurn(input({ agentReady: false })), { wait: 'not-ready' })
+})
+
+test('no person present: without a stop policy the server confirmed, nothing starts — even one the member asked for — and it says so (owner decision 2026-11-09)', () => {
+  assert.deepEqual(nextAiTurn(input({ stopConfirmed: false })), { wait: 'stop-unconfirmed' })
+  const asked = minutes('minutes-eeeeeeee', '2026-10-29T10:00:00Z', { asked: true })
+  assert.deepEqual(nextAiTurn(input({ stopConfirmed: false, queue: [asked] })), { wait: 'stop-unconfirmed' })
+  // Confirmed again: it starts by itself, nothing for the member to press.
+  assert.deepEqual(nextAiTurn(input({ stopConfirmed: true })), { run: B })
+  const text = aiTurnNoticeText('stop-unconfirmed', { log: freshLog(NOW), settings: ON })
+  assert.equal(text, STOP_UNCONFIRMED_TEXT)
+  assert.equal(canResumeAiTurns('stop-unconfirmed'), false)
+  const items = aiTurnItems({ queue: [A, B], log: freshLog(NOW), wait: 'stop-unconfirmed', noticeText: text, running: null })
+  for (const item of items) assert.deepEqual(item, { recordId: item.recordId, state: 'waiting', reason: STOP_UNCONFIRMED_TEXT, canRetry: false, canHand: true })
 })
 
 test('earliest due first; without a due date the oldest meeting first', () => {

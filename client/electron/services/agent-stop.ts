@@ -16,7 +16,12 @@
  *   formatting, hand-off memos) is off while any company the account kept a
  *   whole-AI stop for is stopped: those callers fall back quietly (fixed text,
  *   no title, the raw transcript, no memo) and no AI is asked.
- * - Never received a policy → nothing is stopped (owner decision).
+ * - Never received a policy → nothing is stopped in a conversation (a person is there; owner
+ *   decision 2026-10-25 / 10-31).
+ * - Runs with no person present (「AI の番」, ai-turns.md) start only while the stop policy is
+ *   confirmed: the server answered it in this app run within `STOP_POLICY_FRESH_MS`
+ *   (`stopPolicyConfirmed`; owner decision 2026-11-09). A stop restored from disk alone, or an
+ *   answer older than that, does not count. Running turns are unaffected.
  */
 import { AGENT_STOP_MESSAGES, stoppedKind, type AgentStopPolicy, type AgentStopToolKind } from '../../shared/agent-stop'
 import type { ToolCategory, TurnStopReason } from '../../shared/agent-events'
@@ -27,14 +32,26 @@ export interface StoppableTurns {
   abort(filter: (info: { companyId?: string }) => boolean, reason?: TurnStopReason): number
 }
 
+/**
+ * How recent the server's answer must be for a run with no person present to start. The policy
+ * is refreshed every 60 s per watched company (agent-push-channel.ts `PUSH_POLL_MS`) and on each
+ * push event, so a connected app stays well inside it; three missed checks (≈ 3 minutes without
+ * the server) and nothing new starts by itself.
+ */
+export const STOP_POLICY_FRESH_MS = 3 * 60_000
+/** While unconfirmed, the readiness check asks the server again at most this often per company. */
+export const STOP_POLICY_RETRY_MS = 10_000
+
 export interface AgentStopDeps {
-  policy: Pick<AgentPolicyStore, 'refresh' | 'stop' | 'stoppedCompanies' | 'onStopChange'>
+  policy: Pick<AgentPolicyStore, 'refresh' | 'stop' | 'stoppedCompanies' | 'onStopChange' | 'confirmedAt'>
   /** Keep the company's policy live (the push channel). */
   watch: (companyId: string) => void
   turns: () => StoppableTurns | null
   log?: Pick<Console, 'log' | 'warn'>
   /** The policy refresh budget before a turn. */
   refreshTimeoutMs?: number
+  /** The clock (tests); default Date.now. */
+  now?: () => number
 }
 
 export interface TurnStop {
@@ -46,6 +63,13 @@ export interface TurnStop {
 
 export function createAgentStop(deps: AgentStopDeps) {
   const log = deps.log ?? console
+  const now = deps.now ?? Date.now
+  /** company → when the readiness check last asked the server (throttle while unconfirmed). */
+  const asked = new Map<string, number>()
+  const confirmedNow = (companyId: string) => {
+    const at = deps.policy.confirmedAt(companyId)
+    return at !== null && now() - at <= STOP_POLICY_FRESH_MS
+  }
 
   const apply = (companyId: string, stop: AgentStopPolicy | undefined) => {
     if (!stop?.all) {
@@ -65,6 +89,24 @@ export function createAgentStop(deps: AgentStopDeps) {
       const toolStopped = (category: ToolCategory) => stoppedKind(deps.policy.stop(companyId), category)
       if (deps.policy.stop(companyId)?.all) return { refused: AGENT_STOP_MESSAGES.turnRefused, toolStopped }
       return { toolStopped }
+    },
+
+    /**
+     * A run with no person present (「AI の番」) may start in this company: the server answered
+     * the stop policy in this app run, recently (`STOP_POLICY_FRESH_MS`). Not confirmed → the
+     * company is watched and the policy asked again (at most every `STOP_POLICY_RETRY_MS`), so
+     * the runner starts by itself once the server answers. Whether a confirmed stop refuses the
+     * run is the claim's own check (`oneShotAiAllowed`).
+     */
+    async stopPolicyConfirmed(companyId: string): Promise<boolean> {
+      if (confirmedNow(companyId)) return true
+      deps.watch(companyId)
+      const last = asked.get(companyId)
+      if (last === undefined || now() - last >= STOP_POLICY_RETRY_MS) {
+        asked.set(companyId, now())
+        await deps.policy.refresh(companyId, { timeoutMs: deps.refreshTimeoutMs ?? 3000 })
+      }
+      return confirmedNow(companyId)
     },
 
     /** AI outside conversations may run (no company has the whole AI stopped). */

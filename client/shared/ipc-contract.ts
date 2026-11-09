@@ -621,6 +621,8 @@ export interface IpcInvokeChannels {
   'minutes:inviteChoices': { args: [companyId: string, recordId: string]; result: MeetingInviteChoicesResult }
   // 「AI の番」 run automatically in the main window (ai-turns.md): main claims and settles, never runs the AI.
   'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
+  /** The company's stop policy is confirmed by the server recently: without it no AI turn starts by itself (agent-stop.md). */
+  'aiTurns:stopConfirmed': { args: [companyId: string]; result: boolean }
   /** Take the record's AI turn for this hidden consultation (its first AI action at this version; one PC wins). */
   'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string]; result: AiTurnClaimResult }
   /** After the automatic turn: done / failed / still in progress → put back to 「AI の番」. */
@@ -1077,6 +1079,7 @@ export interface ElectronAPI {
   onMinutesChanged: Subscribe<'minutes:changed'>
   // 「AI の番」 run automatically (the main window only).
   getAutoTurnSettings: Invoke<'aiTurns:settings'>
+  getAiTurnStopConfirmed: Invoke<'aiTurns:stopConfirmed'>
   claimAiTurn: Invoke<'aiTurns:claim'>
   settleAiTurn: Invoke<'aiTurns:settle'>
   retryAiTurn: Invoke<'aiTurns:retry'>

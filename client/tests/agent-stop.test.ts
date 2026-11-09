@@ -15,7 +15,7 @@ import { claudeCode } from 'ai-sdk-provider-claude-code'
 import { createSseParser, pushChannelUrl, stoppedKind, type AgentStopPolicy } from '../shared/agent-stop'
 import { createAgentPushChannel, reconnectDelay, PUSH_POLL_MS, PUSH_IDLE_TIMEOUT_MS } from '../electron/services/agent-push-channel'
 import { createAgentPolicyStore } from '../electron/services/agent-policy-store'
-import { createAgentStop } from '../electron/services/agent-stop'
+import { createAgentStop, STOP_POLICY_FRESH_MS, STOP_POLICY_RETRY_MS } from '../electron/services/agent-stop'
 import { withStop } from '../electron/services/commit-messages'
 import { createChatTurns } from '../electron/chat-turns'
 import { createClaudeConnection } from '../electron/agents/claude'
@@ -249,6 +249,66 @@ test('never received → nothing is stopped; once received, the last stop is kep
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }
+})
+
+// Owner decision 2026-11-09: a run with no person present (「AI の番」) starts only on a stop
+// policy the server confirmed in this app run, recently. Conversations keep "never received →
+// nothing stops".
+test('no person present: never received → no automatic start; a consultation still runs', async () => {
+  const t = 1_000_000
+  const answers = policyFetch([new Error('offline')])
+  const store = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', fetch: answers.f, log: quiet, now: () => t })
+  const watched: string[] = []
+  const stop = createAgentStop({ policy: store, watch: id => watched.push(id), turns: () => null, log: quiet, now: () => t })
+  assert.equal(await stop.stopPolicyConfirmed('co'), false)
+  assert.deepEqual(watched, ['co'], 'unconfirmed: the company is watched so the policy can arrive')
+  assert.equal(answers.headers.length, 1, 'and the server was asked')
+  // The person's consultation is unchanged: nothing received → nothing stops.
+  assert.equal((await stop.prepareTurn('co')).refused, undefined)
+})
+
+test('no person present: a stop restored from disk does not count until the server answers in this run', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-stop-'))
+  try {
+    let t = 1_000_000
+    const opts = { baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', dir: () => dir, log: quiet, now: () => t }
+    await createAgentPolicyStore({ ...opts, fetch: policyFetch([{ version: V1, sandbox, stop: { all: false, tools: [] } }]).f }).refresh('co')
+
+    // Restarted, the server not answering yet: the kept stop is known, but nothing is confirmed.
+    const restarted = createAgentPolicyStore({ ...opts, fetch: policyFetch([new Error('offline'), { version: V1, sandbox, stop: { all: false, tools: [] } }]).f })
+    const stop = createAgentStop({ policy: restarted, watch: () => {}, turns: () => null, log: quiet, now: () => t })
+    assert.deepEqual(restarted.stop('co'), { all: false, tools: [] })
+    assert.equal(await stop.stopPolicyConfirmed('co'), false)
+    t += 1_000
+    assert.equal(await stop.stopPolicyConfirmed('co'), false, 'not asked again before the retry interval')
+    // The server answers when asked again: it starts by itself, no member action.
+    t += STOP_POLICY_RETRY_MS
+    assert.equal(await stop.stopPolicyConfirmed('co'), true)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('no person present: an answer older than the window is stale; a fresh answer or a push of the same version confirms', async () => {
+  let t = 1_000_000
+  const opts = { baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', log: quiet, now: () => t }
+  const store = createAgentPolicyStore({ ...opts, fetch: policyFetch([{ version: V1, sandbox, stop: { all: false, tools: [] } }]).f })
+  const stop = createAgentStop({ policy: store, watch: () => {}, turns: () => null, log: quiet, now: () => t })
+  assert.equal(await stop.stopPolicyConfirmed('co'), true, 'confirmed: the server answered with the stop part')
+  t += STOP_POLICY_FRESH_MS
+  assert.equal(await stop.stopPolicyConfirmed('co'), true, 'still inside the window')
+  t += 1
+  // Stale, and the server cannot be reached (no answer left): no automatic start.
+  assert.equal(await stop.stopPolicyConfirmed('co'), false)
+  // The push channel names the version already held: the server just said it is unchanged.
+  assert.equal(store.confirmVersion('co', V2), false, 'another version is not a confirmation')
+  assert.equal(await stop.stopPolicyConfirmed('co'), false)
+  assert.equal(store.confirmVersion('co', V1), true)
+  assert.equal(await stop.stopPolicyConfirmed('co'), true)
+
+  // An older server's answer without the stop part never confirms.
+  const older = createAgentPolicyStore({ ...opts, fetch: policyFetch([{ version: V1, sandbox }]).f })
+  assert.equal(await createAgentStop({ policy: older, watch: () => {}, turns: () => null, log: quiet, now: () => t }).stopPolicyConfirmed('co'), false)
 })
 
 test('a received stop of the whole AI stops that company\'s running turns, not another company\'s', async () => {

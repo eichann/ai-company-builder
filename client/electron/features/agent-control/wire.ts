@@ -53,7 +53,8 @@ export function wireAgentControl({ serverUrl, session, userDataDir, home, turns,
     baseUrl: serverUrl,
     cookies: session.cookies,
     refresh: (companyId, version) => {
-      if (version && policy.get(companyId)?.version === version) return
+      // The version already held: the server just said it is unchanged (confirms the stop, agent-stop.ts).
+      if (version && policy.confirmVersion(companyId, version)) return
       void policy.refresh(companyId)
     },
     onRecords,

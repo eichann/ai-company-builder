@@ -12,7 +12,11 @@
  * - Stop: the last stop part received is also kept on disk per account and
  *   company (`<dir>/<user>/<company>.json`, 0600), so a restart while offline
  *   still knows it. Never received (no answer, an older server without `stop`)
- *   = unknown → the app stops nothing (owner decision §6 #5).
+ *   = unknown → the app stops nothing in a conversation (owner decision §6 #5).
+ * - Confirmed (`confirmedAt`): when, in this app run, the server last answered a policy that
+ *   carries the stop part (a 200, a 304 for such a policy, or a push event naming its version).
+ *   Memory only: a stop read back from disk is never a confirmation. Runs with no person
+ *   present (「AI の番」) start only while this is recent (agent-stop.ts, owner decision 2026-11-09).
  *
  * Every request says the app follows the stop (X-ACB-Agent-Stop), which is how
  * the admin counts the apps that do not.
@@ -34,6 +38,8 @@ export interface AgentPolicyStoreDeps {
   userId?: () => string | null
   /** Where the last stop received is kept (<userData>/agent-policy). */
   dir?: () => string
+  /** The clock (tests); default Date.now. */
+  now?: () => number
 }
 
 export interface AgentPolicyStore {
@@ -51,6 +57,16 @@ export interface AgentPolicyStore {
    * for the cached one), e.g. to keep the plugin packages it lists (plan C2).
    */
   onPolicy(listener: (companyId: string, policy: AgentPolicy) => void): void
+  /**
+   * When the server last answered this company's policy with its stop part in this app run
+   * (epoch ms; null = not in this run — a stop restored from disk does not count).
+   */
+  confirmedAt(companyId: string): number | null
+  /**
+   * The push channel named this version: when it is the policy already held (received in this
+   * run), the server has just said it is unchanged — confirmed now. True = nothing to fetch.
+   */
+  confirmVersion(companyId: string, version: string): boolean
   /** Sign-out: forget the memory copy (the files stay, per account). */
   clear(): void
 }
@@ -111,6 +127,12 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
 
   const user = () => deps.userId?.() ?? null
   const keyOf = (companyId: string) => `${user() ?? ''}\0${companyId}`
+  const now = deps.now ?? Date.now
+  /** `${user}\0${company}` → when the server last answered with the stop part (this run only). */
+  const confirmed = new Map<string, number>()
+  const confirm = (companyId: string, policy: AgentPolicy | undefined) => {
+    if (policy?.stop) confirmed.set(keyOf(companyId), now())
+  }
   const fileOf = (companyId: string): string | undefined => {
     const id = user()
     const dir = deps.dir?.()
@@ -164,6 +186,7 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
       if (cached) headers['If-None-Match'] = `"${cached.version}"`
       const res = await doFetch(`${base}/api/companies/${encodeURIComponent(companyId)}/me/agent-policy`, { headers, redirect: 'error' })
       if (res.status === 304) {
+        confirm(companyId, cached)
         if (cached) answered(companyId, cached)
         return cached
       }
@@ -178,11 +201,15 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
         log.warn(`[agent-policy] ${companyId}: unexpected response; ${keep}`)
         // The stop part on its own still counts: a stop must not wait for a sandbox setting this app cannot read.
         const stop = parseAgentStopPolicy((data as { stop?: unknown } | undefined)?.stop)
-        if (stop) receivedStop(companyId, stop)
+        if (stop) {
+          receivedStop(companyId, stop)
+          confirmed.set(keyOf(companyId), now())
+        }
         return cached
       }
       cache.set(companyId, policy)
       receivedStop(companyId, policy.stop)
+      confirm(companyId, policy)
       answered(companyId, policy)
       return policy
     } catch (error) {
@@ -226,6 +253,13 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
     },
     onStopChange(listener) { listeners.push(listener) },
     onPolicy(listener) { policyListeners.push(listener) },
-    clear() { cache.clear(); stops.clear(); scanned.clear() },
+    confirmedAt: companyId => confirmed.get(keyOf(companyId)) ?? null,
+    confirmVersion(companyId, version) {
+      const cached = cache.get(companyId)
+      if (cached?.version !== version) return false
+      confirm(companyId, cached)
+      return true
+    },
+    clear() { cache.clear(); stops.clear(); scanned.clear(); confirmed.clear() },
   }
 }

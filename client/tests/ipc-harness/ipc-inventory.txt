@@ -29,6 +29,7 @@ contract.invoke aiTurns:pluginTurns
 contract.invoke aiTurns:retry
 contract.invoke aiTurns:settings
 contract.invoke aiTurns:settle
+contract.invoke aiTurns:stopConfirmed
 contract.invoke api:createCompany
 contract.invoke api:getCompanies
 contract.invoke api:getDepartments
@@ -377,6 +378,7 @@ contract.type ElectronAPI.folderSizes = folderSizes: Invoke<'git:folderSizes'>
 contract.type ElectronAPI.getAbsences = getAbsences: Invoke<'absences:get'>
 contract.type ElectronAPI.getAgentEnvPassthrough = getAgentEnvPassthrough: Invoke<'config:getAgentEnvPassthrough'>
 contract.type ElectronAPI.getAgentInteractions = getAgentInteractions: Invoke<'agent-interaction:list'>
+contract.type ElectronAPI.getAiTurnStopConfirmed = getAiTurnStopConfirmed: Invoke<'aiTurns:stopConfirmed'>
 contract.type ElectronAPI.getApiKeyStatus = getApiKeyStatus: Invoke<'config:getApiKeyStatus'>
 contract.type ElectronAPI.getAppLinkServerOffer = getAppLinkServerOffer: Invoke<'appLink:serverOffer'>
 contract.type ElectronAPI.getApproval = getApproval: Invoke<'approvals:get'>
@@ -699,6 +701,7 @@ contract.type IpcInvokeChannels.'aiTurns:pluginTurns' = 'aiTurns:pluginTurns': {
 contract.type IpcInvokeChannels.'aiTurns:retry' = 'aiTurns:retry': { args: [companyId: string, recordId: string]; result: { ok: boolean } }
 contract.type IpcInvokeChannels.'aiTurns:settings' = 'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
 contract.type IpcInvokeChannels.'aiTurns:settle' = 'aiTurns:settle': { args: [companyId: string, recordId: string]; result: AiTurnSettleResult }
+contract.type IpcInvokeChannels.'aiTurns:stopConfirmed' = 'aiTurns:stopConfirmed': { args: [companyId: string]; result: boolean }
 contract.type IpcInvokeChannels.'api:createCompany' = 'api:createCompany': { args: [name: string]; result: CompanyResult }
 contract.type IpcInvokeChannels.'api:getCompanies' = 'api:getCompanies': { args: []; result: CompaniesResult }
 contract.type IpcInvokeChannels.'api:getDepartments' = 'api:getDepartments': { args: [companyId: string]; result: DepartmentsResult }
@@ -991,6 +994,7 @@ main.handle aiTurns:pluginTurns @ features/ai-turns/ipc.ts (companyId)
 main.handle aiTurns:retry @ features/ai-turns/ipc.ts (companyId, recordId)
 main.handle aiTurns:settings @ features/ai-turns/ipc.ts (companyId)
 main.handle aiTurns:settle @ features/ai-turns/ipc.ts (companyId, recordId)
+main.handle aiTurns:stopConfirmed @ features/ai-turns/ipc.ts (companyId)
 main.handle api:createCompany @ features/auth/ipc.ts (name: string)
 main.handle api:getCompanies @ features/auth/ipc.ts ()
 main.handle api:getDepartments @ features/auth/ipc.ts (companyId: string)
@@ -1312,6 +1316,8 @@ preload getAgentEnvPassthrough -> invoke config:getAgentEnvPassthrough()
 preload getAgentEnvPassthrough : () => Promise<string[]>
 preload getAgentInteractions -> invoke agent-interaction:list()
 preload getAgentInteractions : () => Promise<AgentInteractionRequest[]>
+preload getAiTurnStopConfirmed -> invoke aiTurns:stopConfirmed($0)
+preload getAiTurnStopConfirmed : (companyId: string) => Promise<boolean>
 preload getApiKeyStatus -> invoke config:getApiKeyStatus()
 preload getApiKeyStatus : () => Promise<ApiKeyStatus>
 preload getAppLinkServerOffer -> invoke appLink:serverOffer()
