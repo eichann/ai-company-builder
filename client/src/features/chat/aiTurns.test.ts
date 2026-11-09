@@ -6,7 +6,7 @@ import { DEFAULT_AUTO_TURN_SETTINGS, readAutoTurnSettings } from '../../../share
 import {
   AI_TURN_PASS_CAP, AI_TURN_PASS_INTERVAL_MS, MAX_ATTEMPTS_PER_RECORD, freshLog, logForToday, nextAiTurn, orderAiTurns,
   FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, askedAgain, handUrgent, handedOver, movedOn, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
-  canResumeAiTurns, retitledConsultation, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT,
+  canResumeAiTurns, retitledConsultation, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT, mayStartAiTurns,
 } from './aiTurns'
 import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
 
@@ -58,6 +58,14 @@ test('no person present: without a stop policy the server confirmed, nothing sta
   assert.equal(canResumeAiTurns('stop-unconfirmed'), false)
   const items = aiTurnItems({ queue: [A, B], log: freshLog(NOW), wait: 'stop-unconfirmed', noticeText: text, running: null })
   for (const item of items) assert.deepEqual(item, { recordId: item.recordId, state: 'waiting', reason: STOP_UNCONFIRMED_TEXT, canRetry: false, canHand: true })
+})
+
+test('the stop policy is asked about only when something could start (the server is not polled while 自動で進める is off)', () => {
+  const asked = minutes('minutes-ffffffff', '2026-10-29T10:00:00Z', { asked: true })
+  assert.equal(mayStartAiTurns({ ...ON, enabled: false }, [A, B]), false)
+  assert.equal(mayStartAiTurns(null, [asked]), false)
+  assert.equal(mayStartAiTurns({ ...ON, enabled: false }, [A, asked]), true)
+  assert.equal(mayStartAiTurns(ON, [A]), true)
 })
 
 test('earliest due first; without a due date the oldest meeting first', () => {

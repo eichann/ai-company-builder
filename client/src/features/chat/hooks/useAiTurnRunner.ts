@@ -11,7 +11,7 @@ import { consultationStatusOf } from '../consultationStatusStore'
 import { claimAiTurn, getAiTurnStopConfirmed, getAutoTurnSettings, getChatSessionSummaries, patchChatSession, retryAiTurn, settleAiTurn } from '../api'
 import {
   AI_TURN_PASS_INTERVAL_MS, aiTurnItems, aiTurnNoticeText, askedAgain, canResumeAiTurns, handUrgent, handedOver, logForToday, movedOn,
-  nextAiTurn, recordOutcome, recordStarted, resumed, retitledConsultation, retried, usageLimitReached, usagePause, usagePauseLifted,
+  mayStartAiTurns, nextAiTurn, recordOutcome, recordStarted, resumed, retitledConsultation, retried, usageLimitReached, usagePause, usagePauseLifted,
   type AiTurnLog, type AiTurnOutcome,
 } from '../aiTurns'
 import type { ChatInputRequest } from '../components/ChatConversation'
@@ -217,8 +217,9 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
         if (urgent !== log) saveLog(log = urgent)
       }
       // No person present: nothing starts until main confirms the stop policy with the server (asked
-      // every tick; main asks the server again while unconfirmed, so this resumes by itself).
-      const stopConfirmed = await getAiTurnStopConfirmed(o.companyId).catch(() => false)
+      // each tick while something could start; main asks the server again, so this resumes by itself).
+      const stopConfirmed = mayStartAiTurns(settings.current?.value ?? null, queue)
+        ? await getAiTurnStopConfirmed(o.companyId).catch(() => false) : false
       const decision = nextAiTurn({
         settings: settings.current?.value ?? null, agent: o.authMode, agentReady: o.agentReady, stopConfirmed,
         busy: current !== null, log, queue, pass: pass.current, now,

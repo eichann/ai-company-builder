@@ -128,6 +128,16 @@ test('the emergency stop: no server call at all', async () => {
   assert.equal(server.calls.length, before)
 })
 
+test('a stop policy the server has not confirmed: a plugin step is not claimed and the server is not asked (owner decision 2026-11-09)', async () => {
+  const server = fakeServer()
+  const claims = claimsFor(server, { stopPolicyConfirmed: async () => false })
+  await claims.pluginTurns(COMPANY)
+  const before = server.calls.length
+  assert.deepEqual(await claims.claim(COMPANY, DEAL, 4, 'conv-plugin-0009'), { claimed: false, reason: 'not-allowed' })
+  assert.equal(server.calls.length, before)
+  assert.equal(claims.pluginStepTools('conv-plugin-0009', 'sample-sales__work'), null)
+})
+
 test('settle: the record left the step\'s state → done; still there → tried again later', async () => {
   for (const moved of [true, false]) {
     const server = fakeServer()

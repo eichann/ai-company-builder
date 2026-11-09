@@ -15,7 +15,8 @@ import { claudeCode } from 'ai-sdk-provider-claude-code'
 import { createSseParser, pushChannelUrl, stoppedKind, type AgentStopPolicy } from '../shared/agent-stop'
 import { createAgentPushChannel, reconnectDelay, PUSH_POLL_MS, PUSH_IDLE_TIMEOUT_MS } from '../electron/services/agent-push-channel'
 import { createAgentPolicyStore } from '../electron/services/agent-policy-store'
-import { createAgentStop, STOP_POLICY_FRESH_MS, STOP_POLICY_RETRY_MS } from '../electron/services/agent-stop'
+import { createAgentStop, STOP_POLICY_FRESH_MS, STOP_POLICY_RETRY_MS, STOP_POLICY_RETRY_MAX_MS } from '../electron/services/agent-stop'
+import { refreshOnPush } from '../electron/features/agent-control/wire'
 import { withStop } from '../electron/services/commit-messages'
 import { createChatTurns } from '../electron/chat-turns'
 import { createClaudeConnection } from '../electron/agents/claude'
@@ -309,6 +310,142 @@ test('no person present: an answer older than the window is stale; a fresh answe
   // An older server's answer without the stop part never confirms.
   const older = createAgentPolicyStore({ ...opts, fetch: policyFetch([{ version: V1, sandbox }]).f })
   assert.equal(await createAgentStop({ policy: older, watch: () => {}, turns: () => null, log: quiet, now: () => t }).stopPolicyConfirmed('co'), false)
+})
+
+/** A policy server: each answer is a policy (200), 304, an Error (offline) or 'hang' (never answers unless aborted). */
+function policyServer(answers: Array<unknown | 304 | Error | 'hang'>) {
+  let calls = 0
+  const f = (async (_url: string, init: RequestInit) => {
+    calls++
+    const next = answers.shift()
+    if (next === 'hang') {
+      return new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted'))))
+    }
+    if (next === 304) return new Response(null, { status: 304 })
+    if (next instanceof Error || next === undefined) throw next ?? new Error('offline')
+    return new Response(JSON.stringify({ success: true, data: next }), { status: 200 })
+  }) as unknown as typeof fetch
+  return { f, calls: () => calls }
+}
+const running = { version: V1, sandbox, stop: { all: false, tools: [] } }
+
+test('no person present: a 304 for the policy held confirms again', async () => {
+  let t = 1_000_000
+  const server = policyServer([running, 304])
+  const store = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', fetch: server.f, log: quiet, now: () => t })
+  const stop = createAgentStop({ policy: store, watch: () => {}, turns: () => null, log: quiet, now: () => t })
+  assert.equal(await stop.stopPolicyConfirmed('co'), true)
+  t += STOP_POLICY_FRESH_MS + 1
+  assert.equal(store.confirmedWithin('co', STOP_POLICY_FRESH_MS), false)
+  // Stale → asked again → the server answers 304 (unchanged): confirmed.
+  assert.equal(await stop.stopPolicyConfirmed('co'), true)
+  assert.equal(server.calls(), 2)
+})
+
+test('no person present: a push event naming the version held confirms without a fetch; another version refetches', async () => {
+  let t = 1_000_000
+  const server = policyServer([running, { ...running, version: V2 }])
+  const store = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', fetch: server.f, log: quiet, now: () => t })
+  await store.refresh('co')
+  t += STOP_POLICY_FRESH_MS + 1
+  const onPush = refreshOnPush(store)
+  onPush('co', V1)
+  assert.equal(server.calls(), 1, 'the version held: nothing fetched')
+  assert.equal(store.confirmedWithin('co', STOP_POLICY_FRESH_MS), true)
+  onPush('co', V2)
+  await store.refresh('co')
+  assert.equal(server.calls(), 2, 'another version: fetched')
+  assert.equal(store.get('co')?.version, V2)
+})
+
+test('no person present: a confirmation is per account and company', async () => {
+  let user = 'u1'
+  const store = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => user, fetch: policyServer([running]).f, log: quiet, now: () => 1_000 })
+  await store.refresh('co')
+  assert.equal(store.confirmedWithin('co', STOP_POLICY_FRESH_MS), true)
+  assert.equal(store.confirmedWithin('co-other', STOP_POLICY_FRESH_MS), false, 'another company')
+  user = 'u2'
+  assert.equal(store.confirmedWithin('co', STOP_POLICY_FRESH_MS), false, 'another account on this PC')
+})
+
+test('no person present: the clock is monotonic — the wall clock does not decide, and a clock that went back is not recent', async t => {
+  // The default clock is the monotonic one: its time passing ages a confirmation, the wall clock's does not.
+  const store = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', fetch: policyServer([running]).f, log: quiet })
+  let mono = 5_000
+  const clock = t.mock.method(performance, 'now', () => mono)
+  await store.refresh('co')
+  assert.equal(store.confirmedWithin('co', STOP_POLICY_FRESH_MS), true)
+  mono += STOP_POLICY_FRESH_MS + 1
+  assert.equal(store.confirmedWithin('co', STOP_POLICY_FRESH_MS), false, 'aged on the monotonic clock')
+  clock.mock.restore()
+  // An injected clock that goes back: not counted as recent.
+  let now = 1_000_000
+  const back = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', fetch: policyServer([running]).f, log: quiet, now: () => now })
+  await back.refresh('co')
+  now -= 60 * 60_000
+  assert.equal(back.confirmedWithin('co', STOP_POLICY_FRESH_MS), false)
+})
+
+test('no person present: unconfirmed, the server is asked again with a doubling wait (to 2 min), reset once confirmed', async () => {
+  let t = 0
+  const server = policyServer([])
+  const store = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', fetch: server.f, log: quiet, now: () => t })
+  const stop = createAgentStop({ policy: store, watch: () => {}, turns: () => null, log: quiet, now: () => t })
+  const askedAt: number[] = []
+  for (t = 0; t <= 600_000; t += 1_000) {
+    const before = server.calls()
+    await stop.stopPolicyConfirmed('co')
+    if (server.calls() > before) askedAt.push(t)
+  }
+  // 0, +10 s, +20 s, +40 s, +80 s, then every 120 s.
+  assert.deepEqual(askedAt, [0, 10_000, 30_000, 70_000, 150_000, 270_000, 390_000, 510_000])
+  assert.equal(STOP_POLICY_RETRY_MAX_MS, 120_000)
+  // The server answers: confirmed, and the wait starts again at 10 s next time.
+  const online = policyServer([running])
+  const store2 = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', fetch: online.f, log: quiet, now: () => t })
+  const stop2 = createAgentStop({ policy: store2, watch: () => {}, turns: () => null, log: quiet, now: () => t })
+  t = 0
+  assert.equal(await stop2.stopPolicyConfirmed('co'), true)
+  t = STOP_POLICY_FRESH_MS + 1
+  assert.equal(await stop2.stopPolicyConfirmed('co'), false)
+  t += STOP_POLICY_RETRY_MS - 1
+  assert.equal(online.calls(), 2)
+  await stop2.stopPolicyConfirmed('co')
+  assert.equal(online.calls(), 2, 'not before 10 s')
+  t += 1
+  await stop2.stopPolicyConfirmed('co')
+  assert.equal(online.calls(), 3, 'after 10 s: the wait was reset by the confirmation')
+})
+
+test('no person present: a confirmation that came another way (the 60 s check, a push) also resets the wait', async () => {
+  let t = 0
+  const server = policyServer([new Error('offline'), new Error('offline'), running])
+  const store = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', fetch: server.f, log: quiet, now: () => t })
+  const stop = createAgentStop({ policy: store, watch: () => {}, turns: () => null, log: quiet, now: () => t })
+  await stop.stopPolicyConfirmed('co')
+  t = 10_000
+  await stop.stopPolicyConfirmed('co')
+  assert.equal(server.calls(), 2)
+  t = 11_000
+  await store.refresh('co') // the 60 s check answers
+  t = 12_000
+  assert.equal(await stop.stopPolicyConfirmed('co'), true)
+  t = 11_000 + STOP_POLICY_FRESH_MS + 1
+  assert.equal(await stop.stopPolicyConfirmed('co'), false)
+  assert.equal(server.calls(), 4)
+  t += STOP_POLICY_RETRY_MS
+  await stop.stopPolicyConfirmed('co')
+  assert.equal(server.calls(), 5, 'asked again after 10 s, not after the longer wait from before')
+})
+
+test('no person present: a hung policy request is given up, so the next check asks again', async () => {
+  const server = policyServer(['hang', running])
+  const store = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', fetch: server.f, log: quiet, fetchTimeoutMs: 50 })
+  await store.refresh('co', { timeoutMs: 20 })
+  await new Promise(resolve => setTimeout(resolve, 100))
+  await store.refresh('co', { timeoutMs: 500 })
+  assert.equal(server.calls(), 2)
+  assert.equal(store.confirmedWithin('co', STOP_POLICY_FRESH_MS), true)
 })
 
 test('a received stop of the whole AI stops that company\'s running turns, not another company\'s', async () => {

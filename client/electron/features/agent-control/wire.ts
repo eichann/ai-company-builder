@@ -2,7 +2,7 @@
 // per company, the emergency stop and its push channel, and the AI action log.
 import path from 'path'
 import type { Session } from '../../services/session'
-import { createAgentPolicyStore } from '../../services/agent-policy-store'
+import { createAgentPolicyStore, type AgentPolicyStore } from '../../services/agent-policy-store'
 import { createAgentPushChannel } from '../../services/agent-push-channel'
 import { createAgentStop, type StoppableTurns } from '../../services/agent-stop'
 import { createAgentEventSender } from '../../services/agent-event-sender'
@@ -25,6 +25,17 @@ export interface AgentControlDeps {
   onNotifications?: (companyId: string) => void
   /** The plugin packages a company lists and this app keeps changed (its plugin screens change, A6). */
   onPluginsChanged?: (companyId: string) => void
+}
+
+/**
+ * What a push event does to the policy (its only effect): the version already held → the server
+ * just said it is unchanged, which confirms the stop (agent-stop.ts); anything else → refetch.
+ */
+export function refreshOnPush(policy: Pick<AgentPolicyStore, 'confirmVersion' | 'refresh'>) {
+  return (companyId: string, version?: string) => {
+    if (version && policy.confirmVersion(companyId, version)) return
+    void policy.refresh(companyId)
+  }
 }
 
 export function wireAgentControl({ serverUrl, session, userDataDir, home, turns, lifecycle, onRecords, onNotifications, onPluginsChanged }: AgentControlDeps) {
@@ -52,11 +63,7 @@ export function wireAgentControl({ serverUrl, session, userDataDir, home, turns,
   const pushChannel = createAgentPushChannel({
     baseUrl: serverUrl,
     cookies: session.cookies,
-    refresh: (companyId, version) => {
-      // The version already held: the server just said it is unchanged (confirms the stop, agent-stop.ts).
-      if (version && policy.confirmVersion(companyId, version)) return
-      void policy.refresh(companyId)
-    },
+    refresh: refreshOnPush(policy),
     onRecords,
     onNotifications,
   })

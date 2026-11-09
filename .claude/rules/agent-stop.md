@@ -121,10 +121,12 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   `<userData>/agent-policy/<user>/<company>.json` (0600, tmp + rename), read back after a
   restart (offline included). **Never received → nothing stops** in a conversation (an answer
   without `stop` from an older server counts as not received). `onStopChange` listeners run on a
-  change. `confirmedAt(companyId)`: when the server last answered a policy **with** its stop part
-  in this app run (a 200, a 304 for such a policy, or a push event naming the version held —
-  `confirmVersion`, used by `wire.ts` instead of comparing versions itself); memory only, so a stop
-  read back from disk is never a confirmation.
+  change. `confirmedWithin(companyId, ms)`: the server answered a policy **with** its stop part in
+  this app run, for this account and company, at most `ms` ago (a 200, a 304 for such a policy, or
+  a push event naming the version held — `confirmVersion`, through `refreshOnPush` in `wire.ts`);
+  memory only, so a stop read back from disk is never a confirmation. Timed on a **monotonic**
+  clock (`performance.now`), never the wall clock; a clock that went back counts as not confirmed.
+  A policy request is given up after 15 s (`fetchTimeoutMs`), so a hung one cannot hold the check.
 - `services/agent-stop.ts` (`createAgentStop`): `prepareTurn(companyId)` (watch, refresh with
   3 s, `refused` = 「管理者が AI の利用を一時停止しています。…」 for a whole-AI stop) and the turn's
   live `toolStopped(category)`; a received whole-AI stop calls the chat server's
@@ -139,13 +141,15 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   voice formatting → the transcript as is (`voice-formatter.ts` `aiAllowed`); hand-off memos →
   the job waits and re-checks every 60 s, no error shown (`handoff/service.ts` `aiAllowed`).
 - **No person present** (owner decision 2026-11-09): `stopPolicyConfirmed(companyId)` is true only
-  while `confirmedAt` is at most `STOP_POLICY_FRESH_MS` (3 minutes) old — the policy is refreshed
+  while `confirmedWithin(companyId, STOP_POLICY_FRESH_MS)` (3 minutes) — the policy is refreshed
   every 60 s per watched company and on each push event, so a connected app stays inside it, and
   about three missed checks without the server stop new automatic starts. Unconfirmed → the company is watched and
-  the policy asked again (3 s budget, at most every `STOP_POLICY_RETRY_MS`, 10 s), so the runner
-  starts by itself once the server answers. Never received, restored from disk only, stale, or an
+  the policy asked again (3 s budget; after `STOP_POLICY_RETRY_MS` 10 s, doubling to
+  `STOP_POLICY_RETRY_MAX_MS` 2 min, reset by any confirmation), so the runner starts by itself once
+  the server answers. Never received, restored from disk only, stale, or an
   older server without `stop` → **no AI turn starts** (`aiTurns:claim` refuses before any server
-  call; the runner asks `aiTurns:stopConfirmed` each tick and shows 「止める設定をサーバーで確かめ
+  call; the runner asks `aiTurns:stopConfirmed` each tick while something could start —
+  `mayStartAiTurns`: 自動で進める on or a record the member asked for — and shows 「止める設定をサーバーで確かめ
   られないため、…」, `ai-turns.md`). Conversations are unchanged; a run already going keeps today's
   behaviour (a received stop still ends it). Server-side operations (connectors, key broker,
   outbound gate) were already stopped by the server; this covers local commands and file writes.
@@ -169,8 +173,10 @@ only cause a refetch; no https → no connection but the 60 s check runs; jitter
 drop, 404 stops watching; never received → no stop, the last stop survives a restart per
 account (0600); no person present: never received / restored from disk only / stale / an answer
 without `stop` → not confirmed, a fresh answer or a push of the held version confirms, an
-unconfirmed check asks the server again and resumes by itself, a consultation still runs (each
-mutation-checked); a whole-AI stop stops that company's turns only; the fixed commit message, no
+unconfirmed check asks the server again and resumes by itself, a consultation still runs; a 304
+and a push of the held version confirm; per account and company; the monotonic clock (a clock
+gone back is not recent); the doubling re-poll wait reset by any confirmation; a hung request
+given up (each mutation-checked); a whole-AI stop stops that company's turns only; the fixed commit message, no
 title, the raw voice transcript and no hand-off memo while stopped (each mutation-checked);
 Claude / Codex / API key refuse a stopped kind and log `stopped`; the chat server refuses a new
 turn before any agent starts. `client/tests/agent-tool-events.test.ts`: the stop text and part.

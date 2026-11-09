@@ -13,7 +13,7 @@
  *   company (`<dir>/<user>/<company>.json`, 0600), so a restart while offline
  *   still knows it. Never received (no answer, an older server without `stop`)
  *   = unknown → the app stops nothing in a conversation (owner decision §6 #5).
- * - Confirmed (`confirmedAt`): when, in this app run, the server last answered a policy that
+ * - Confirmed (`confirmedWithin`): in this app run, the server last answered a policy that
  *   carries the stop part (a 200, a 304 for such a policy, or a push event naming its version).
  *   Memory only: a stop read back from disk is never a confirmation. Runs with no person
  *   present (「AI の番」) start only while this is recent (agent-stop.ts, owner decision 2026-11-09).
@@ -38,8 +38,13 @@ export interface AgentPolicyStoreDeps {
   userId?: () => string | null
   /** Where the last stop received is kept (<userData>/agent-policy). */
   dir?: () => string
-  /** The clock (tests); default Date.now. */
+  /**
+   * A monotonic clock in ms (tests); default performance.now. Not the wall clock: a clock set
+   * back must not make an old confirmation look recent.
+   */
   now?: () => number
+  /** A policy request that has not answered by then is given up (default 15 s): a hung one never holds the confirmation. */
+  fetchTimeoutMs?: number
 }
 
 export interface AgentPolicyStore {
@@ -58,10 +63,11 @@ export interface AgentPolicyStore {
    */
   onPolicy(listener: (companyId: string, policy: AgentPolicy) => void): void
   /**
-   * When the server last answered this company's policy with its stop part in this app run
-   * (epoch ms; null = not in this run — a stop restored from disk does not count).
+   * The server answered this company's policy with its stop part in this app run, for this
+   * account, at most `ms` ago (a stop restored from disk never counts; a clock that went back
+   * counts as not confirmed).
    */
-  confirmedAt(companyId: string): number | null
+  confirmedWithin(companyId: string, ms: number): boolean
   /**
    * The push channel named this version: when it is the policy already held (received in this
    * run), the server has just said it is unchanged — confirmed now. True = nothing to fetch.
@@ -127,7 +133,7 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
 
   const user = () => deps.userId?.() ?? null
   const keyOf = (companyId: string) => `${user() ?? ''}\0${companyId}`
-  const now = deps.now ?? Date.now
+  const now = deps.now ?? (() => performance.now())
   /** `${user}\0${company}` → when the server last answered with the stop part (this run only). */
   const confirmed = new Map<string, number>()
   const confirm = (companyId: string, policy: AgentPolicy | undefined) => {
@@ -184,7 +190,9 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
     try {
       const headers: Record<string, string> = { Cookie: deps.cookies().join('; '), [AGENT_STOP_SUPPORT_HEADER]: '1' }
       if (cached) headers['If-None-Match'] = `"${cached.version}"`
-      const res = await doFetch(`${base}/api/companies/${encodeURIComponent(companyId)}/me/agent-policy`, { headers, redirect: 'error' })
+      const res = await doFetch(`${base}/api/companies/${encodeURIComponent(companyId)}/me/agent-policy`, {
+        headers, redirect: 'error', signal: AbortSignal.timeout(deps.fetchTimeoutMs ?? 15_000),
+      })
       if (res.status === 304) {
         confirm(companyId, cached)
         if (cached) answered(companyId, cached)
@@ -253,7 +261,12 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
     },
     onStopChange(listener) { listeners.push(listener) },
     onPolicy(listener) { policyListeners.push(listener) },
-    confirmedAt: companyId => confirmed.get(keyOf(companyId)) ?? null,
+    confirmedWithin(companyId, ms) {
+      const at = confirmed.get(keyOf(companyId))
+      if (at === undefined) return false
+      const age = now() - at
+      return age >= 0 && age <= ms
+    },
     confirmVersion(companyId, version) {
       const cached = cache.get(companyId)
       if (cached?.version !== version) return false

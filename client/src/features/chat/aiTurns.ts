@@ -144,6 +144,14 @@ export function nextAiTurn(input: AiTurnDecisionInput): { run: AiTurnCandidate }
   return { run: waiting[0] }
 }
 
+/**
+ * Whether anything could start (「自動で進める」 on, or a record the member asked for): only then
+ * does the runner ask main to confirm the stop policy, which asks the server while unconfirmed.
+ */
+export function mayStartAiTurns(settings: AutoTurnSettings | null, queue: readonly AiTurnCandidate[]): boolean {
+  return !!settings && (settings.enabled || queue.some(c => c.asked))
+}
+
 /** A run starts (counted when the claim succeeded). */
 export function recordStarted(log: AiTurnLog, recordId: string): AiTurnLog {
   return { ...log, runs: log.runs + 1, attempts: { ...log.attempts, [recordId]: (log.attempts[recordId] ?? 0) + 1 } }

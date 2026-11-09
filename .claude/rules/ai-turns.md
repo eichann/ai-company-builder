@@ -176,8 +176,9 @@ turns").
   server has not confirmed recently** (`stopPolicyConfirmed`, owner decision 2026-11-09:
   `agent-stop.md` "No person present"; plugin steps too), a record kind not in the table, a
   malformed conversation id.
-- `aiTurns:stopConfirmed(companyId)` — main window only: the same check, asked by the runner every
-  tick before anything starts (no hidden tab is opened while unconfirmed); unconfirmed, main asks
+- `aiTurns:stopConfirmed(companyId)` — main window only: the same check, asked by the runner each
+  tick while something could start (`mayStartAiTurns`: 自動で進める on or a record asked for; off
+  with nothing asked → not asked, so the server is not polled) (no hidden tab is opened while unconfirmed); unconfirmed, main asks
   the server again, so the runner starts by itself once it answers.
 - `aiTurns:settle(companyId, recordId)` — reads the record with the session: `read` → done,
   `failed` / `skipped` → failed, still `reading` → put back to 「AI の番」 so it is not stuck for 30
