@@ -362,7 +362,7 @@ describe('a run is its member’s, inside its company', () => {
   })
 })
 
-describe('the emergency stop refuses a run with nobody present (agent-stop.md "No person present")', () => {
+describe('the emergency stop and runs with no person present (agent-stop.md "Runs with no person present")', () => {
   const owner = (company = CO) => ({ companyId: company, userId: 'u-owner', role: 'owner' })
   /** Stops and answers how to release exactly that stop. */
   const stop = (body: { userId?: string; tool?: string }, company = CO) => {
@@ -419,19 +419,47 @@ describe('the emergency stop refuses a run with nobody present (agent-stop.md "N
     } finally { release() }
   })
 
-  it('a renew while stopped is refused without touching the run (same lease and generation, still finishable); released, it renews', async () => {
+  it('a running run’s token reaches nothing while the member’s AI is stopped (nothing written, no operation key taken); a consultation’s token and a kind stop leave it; released, it works', async () => {
     const id = await preparingTask('走っている間に止める')
     const run = (await claim('u-bob', id, 'device-aaaa')).body.data.run
-    later(MINUTE)
+    const token = await runToken('u-bob', run)
+    const consult = (await session('u-bob', 'POST', '/me/record-tokens', { conversationId: 'consult-stop', agent: 'claude-code', scope: 'act' })).body.data.token as string
+    const before = await ledger(id)
+    const opsOf = () => (db.prepare('SELECT COUNT(*) AS n FROM ai_run_operations WHERE company_id = ? AND run_id = ?').get(CO, run.id) as { n: number }).n
+
+    const release = stop({ userId: 'u-bob' })
+    try {
+      expect(await ai(token, 'GET', `/item/${id}`)).toMatchObject(STOPPED)
+      expect(await ai(token, 'POST', `/item/${id}/actions/set_tags`, { expectedVersion: 1, args: { tags: ['止めた'] } })).toMatchObject(STOPPED)
+      expect(await ai(token, 'POST', '/item', { type: 'task', title: '止めた間の作成', fields: { assignee: 'u-bob' } }, 'stop-create-1')).toMatchObject(STOPPED)
+      expect(await ledger(id)).toEqual(before)
+      expect(opsOf()).toBe(0)
+      // Someone present: the consultation's token is the app's to stop.
+      expect((await ai(consult, 'GET', `/item/${id}`)).status).toBe(200)
+    } finally { release() }
+
+    // A kind stop refuses new claims only; the run's record calls are the AI's own tools, not that kind.
+    const releaseWeb = stop({ tool: 'web' })
+    try {
+      expect((await ai(token, 'GET', `/item/${id}`)).status).toBe(200)
+    } finally { releaseWeb() }
+
+    expect((await ai(token, 'POST', `/item/${id}/actions/set_tags`, { expectedVersion: 1, args: { tags: ['再開'] } })).status).toBe(200)
+  })
+
+  it('a renew while stopped still extends the lease (the token is what is stopped), so nobody else can claim the record the moment it is released; finish is never refused', async () => {
+    const id = await preparingTask('止めている間も手放さない')
+    const run = (await claim('u-bob', id, 'device-aaaa')).body.data.run
     const release = stop({})
     try {
-      expect(await session('u-bob', 'POST', `/ai-runs/${run.id}/renew`, { generation: 1 })).toMatchObject(STOPPED)
-      expect((await session('u-bob', 'GET', `/ai-runs/${run.id}`)).body.data.run).toMatchObject({ state: 'running', generation: 1, claimExpiresAt: run.claimExpiresAt })
+      later(4 * MINUTE)
+      const renewed = await session('u-bob', 'POST', `/ai-runs/${run.id}/renew`, { generation: 1 })
+      expect(renewed.status).toBe(200)
+      expect(Date.parse(renewed.body.data.run.claimExpiresAt)).toBeGreaterThan(Date.parse(run.claimExpiresAt))
+      later(2 * MINUTE)
     } finally { release() }
-    const renewed = await session('u-bob', 'POST', `/ai-runs/${run.id}/renew`, { generation: 1 })
-    expect(renewed.status).toBe(200)
-    expect(Date.parse(renewed.body.data.run.claimExpiresAt)).toBeGreaterThan(Date.parse(run.claimExpiresAt))
-    // Ending a run is never refused: the app that holds it finishes it as usual.
+    // 6 minutes after the claim, past its first lease: still this PC's, another PC is told so.
+    expect(await claim('u-bob', id, 'device-bbbb')).toMatchObject({ status: 409, body: { code: 'RUN_CLAIMED' } })
     const releaseBob = stop({ userId: 'u-bob' })
     try {
       expect((await session('u-bob', 'POST', `/ai-runs/${run.id}/finish`, { generation: 1, outcome: 'done' })).body.data.run.state).toBe('done')

@@ -227,12 +227,12 @@ The execution state lives on the server; the AI still runs only here.
   plugin operation) so the tools see the same answer, never a second effect.
 - **Renewal**: every minute while the run is held (`renewEveryMs`); a 409 (taken over) stops it.
 - **The server's emergency stop** (`agent-stop.md` "Runs with no person present"): the server
-  refuses a claim and a renew with 503 `AI_STOPPED` while the member's AI (or a `write` / `web` /
-  `mcp-external` kind) is stopped. Main reads the claim's 5xx as `unavailable` (nothing started,
-  the tab closed, tried again on a later tick; never `taken`) and ignores a renew that is not a
-  409 (it keeps holding and finishes the run as usual). Keep both: a new refusal must stay a 5xx
-  for the claim and not a 409 for the renew, or released apps mark the record taken or leave the
-  run unfinished.
+  refuses a claim with 503 `AI_STOPPED` while the member's AI (or a `write` / `web` / `mcp-external`
+  kind) is stopped, and every call of the run's token while the whole AI is stopped for the member;
+  renew keeps working. Main reads the claim's 5xx as `unavailable` (nothing started, the tab closed,
+  tried again on a later tick; never `taken`), and a record call's 5xx is the tool's `SERVER_ERROR`.
+  Keep both: a refusal of the claim must stay a 5xx and a refusal of the renew must not be a 409, or
+  released apps mark the record taken or let go of a run they can no longer finish.
 - **Finish** (in `settle`): read → done; the AI's `fail_reading` → `bad-input` (`waiting_person`:
   a person looks); still reading → `temporary` (`UNFINISHED`, retried later; the server sends it
   to a person after three); not readable → temporary. A run with an unknown outside result goes

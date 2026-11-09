@@ -27,6 +27,7 @@ import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { TokenDigest } from '../ports/key-broker'
 import type { Member } from './access'
+import { AI_RUN_STOPPED } from './ai-runs'
 import { ok, refuse, type Outcome } from './outcome'
 
 export const RECORD_TOKEN_PREFIX = 'acb_rec_'
@@ -68,6 +69,8 @@ export interface RecordAiTokenDeps {
   runs: {
     bindable(member: Member, run: unknown, conversationId: string): Outcome<{ runId: string; generation: number }>
     fence(companyId: string, userId: string, runId: string, generation: number): boolean
+    /** The whole AI is stopped for this member (agent-stop.md "Runs with no person present"). */
+    runStopped(member: Member): boolean
   }
 }
 
@@ -141,6 +144,9 @@ export function createRecordAiTokenService(deps: RecordAiTokenDeps) {
       if (run && !deps.runs.fence(companyId, row.userId, run.id, run.generation)) {
         return refuse('conflict', 'この実行はほかの PC が引き受け直したか、もう終わっています。ここからの続きは書き込めません。', { code: 'RUN_SUPERSEDED' })
       }
+      // A run with nobody present stops with the member's AI (a consultation's token is the app's to stop).
+      // 503 like the claim: the app's tool fails; nothing reaches the handler, so no operation key is taken.
+      if (run && deps.runs.runStopped(member)) return refuse('unavailable', AI_RUN_STOPPED.error, { code: AI_RUN_STOPPED.code })
       return ok({ member, scope: row.scope, agent: row.agent, tokenId: row.id, conversationId: row.conversationId, run })
     },
   }

@@ -1595,10 +1595,11 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   `RUN_NOT_FOUND` (permission matrix rows + `CROSS`).
 - **The emergency stop** (`agent-stop.md` "Runs with no person present"): while the member's stop
   policy has the whole AI or a `write` / `web` / `mcp-external` kind stopped, a claim answers 503
-  `AI_STOPPED` before anything is read, made or pinned, and a renew answers the same and changes
-  nothing (finish, retry and reconcile go on). Not `command`.
+  `AI_STOPPED` before anything is read, made or pinned (not `command`); while the whole AI is stopped
+  for the member, every call of a run-bound token answers the same (`authenticate`, after the fence).
+  Renew, finish, retry and reconcile are never refused.
 - Test: `server/tests/integration/ai-runs.test.ts` (the emergency stop: company-wide, one member,
-  the kinds, renew — mutation-checked; two devices → one claim; the older
+  the kinds, the run's token, renew — mutation-checked; two devices → one claim; the older
   generation refused and nothing written after a re-claim; the same key → one effect, no key
   refused, a key never reused; in flight at a re-claim / a lost answer → no resume and no second
   send until reconciled; each failure class's place; the ledger's cause; which procedure each run
@@ -1753,7 +1754,8 @@ complete and idempotent; the immutability trigger — mutation-checked).
 - The company id in the token only chooses which company's handle to look the digest up in:
   another company's id finds nothing (no `UNSCOPED` lookup across companies). The holder must
   still be a member; while the company's whole AI is stopped (`agent-stop.md`) every token gets
-  403 `ACB_STOPPED`.
+  403 `ACB_STOPPED`, and while the whole AI is stopped for the token's member a run-bound token
+  gets 503 `AI_STOPPED` (`agent-stop.md` "Runs with no person present").
 - No undo for the AI (people undo).
 - Tests: `server/tests/integration/record-tokens.test.ts` (a token call is recorded as ai and
   cannot run an action without `ai` even when the body claims human; a session call is recorded

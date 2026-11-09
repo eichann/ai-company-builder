@@ -231,6 +231,22 @@ afterAll(async () => {
   for (const k of ['BROKER_KEK_FILE', 'PLUGINS_DIR', 'ACB_ALLOW_FAKE_UPSTREAMS', 'ACB_FAKE_HUBSPOT_URL']) delete process.env[k]
 })
 
+describe('the emergency stop (agent-stop.md "Runs with no person present")', () => {
+  it('a step claimed while the member’s AI is stopped is refused before anything is pinned or run', async () => {
+    const a = recordOf('1000000001')
+    const pins = () => (db.prepare('SELECT COUNT(*) AS n FROM plugin_step_pins WHERE company_id = ? AND record_id = ?').get(CO, a) as Json).n
+    expect(pins()).toBe(0)
+    const stopped = services.agentStops.stop(owner, { userId: member.userId }).value
+    try {
+      expect(await claim(a)).toMatchObject({ ok: false, kind: 'unavailable', body: { code: 'AI_STOPPED' } })
+      expect(pins()).toBe(0)
+      expect((companyData.forCompany(CO).aiRuns.openOf(member.userId) as Json[]).filter(r => r.recordId === a)).toEqual([])
+    } finally {
+      for (const s of stopped.active) services.agentStops.release(owner, s.id)
+    }
+  })
+})
+
 describe('a step’s work is pinned at its first run', () => {
   it('pins the installed version; later runs keep it after a newer install, and the gate follows the pin', async () => {
     const a = recordOf('1000000001')
