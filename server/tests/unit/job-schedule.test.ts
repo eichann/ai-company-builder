@@ -71,6 +71,21 @@ describe('month shapes', () => {
     expect(latestJobSlot(month(1, 'as_is'), '2027-01-01T09:00')).toBe('2027-01-01T09:00')
   })
 
+  it('a shift back across the month or year end is found while the window ends before it (December → January)', () => {
+    // 2027-01-01 (元日) moves back to 2026-12-31: on that day, after 09:00, it is the newest slot — not 12-01.
+    expect(latestJobSlot(month(1, 'before'), '2026-12-31T09:05')).toBe('2026-12-31T09:00')
+    expect(latestJobSlot(month(1, 'before'), '2026-12-31T10:00')).toBe('2026-12-31T09:00')
+    expect(nextJobSlot(month(1, 'before'), '2026-12-20T00:00')).toBe('2026-12-31T09:00')
+    expect(latestJobSlot(month(1, 'before'), '2026-12-31T08:00')).toBe('2026-12-01T09:00')
+    expect(nextJobSlot(month(1, 'before'), '2026-12-15T10:00')).toBe('2026-12-31T09:00')
+    expect(jobSlotDates(month(1, 'before'), '2026-12-01', '2026-12-31')).toEqual(['2026-12-01', '2026-12-31'])
+    // Mid-year: 2026-08-01 is a Saturday → Friday 07-31.
+    expect(latestJobSlot(month(1, 'before'), '2026-07-31T10:00')).toBe('2026-07-31T09:00')
+    // Forward across the end: 2027-01-31 (Sunday) → 02-01; from the window's start side, 2026-11-01 (Sunday) → 11-02.
+    expect(jobSlotDates(month('last', 'after'), '2027-02-01', '2027-02-10')).toEqual(['2027-02-01'])
+    expect(jobSlotDates(month(1, 'after'), '2026-11-02', '2026-11-05')).toEqual(['2026-11-02'])
+  })
+
   it('the newest slot after a long gap is still found (a month and more back)', () => {
     expect(latestJobSlot(month(15, 'as_is'), '2027-01-10T09:00')).toBe('2026-12-15T09:00')
   })

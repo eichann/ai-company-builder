@@ -313,6 +313,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     skillTree: (companyId, name) => (companyFolders.has(companyId) ? companySkillTree(companyId, name) : Promise.resolve(null)),
     hasCompanyFolder: companyFolders.has,
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
+    // A pause / the company's stop holds the occurrences (jobs.md "Held"); bound late: built below.
+    occurrenceHolds: {
+      holdDue: (companyId, jobId, code) => jobOccurrences.holdDue(companyId, jobId, code),
+      holdPassedSlot: (companyId, jobId, code) => jobOccurrences.holdPassedSlot(companyId, jobId, code),
+    },
   })
   const notifications = createNotificationService({
     ...shared,

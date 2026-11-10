@@ -64,6 +64,15 @@ export interface JobServiceDeps {
   hasCompanyFolder: (companyId: string) => boolean
   /** Tell these members their notices changed (the push signal, kind + version only). Absent → nothing. */
   noticesChanged?: (companyId: string, userIds: string[]) => void
+  /**
+   * The occurrences' side of a pause or the company's stop (services/job-occurrences.ts, jobs.md "Held"), in
+   * the change's transaction: when it begins, `due` ones are held; when it ends, a slot that passed meanwhile
+   * is written held. `jobId` null: every job of the company. Absent → nothing (3a's tests).
+   */
+  occurrenceHolds?: {
+    holdDue(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void
+    holdPassedSlot(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void
+  }
 }
 
 const sha256 = hashCanonical
@@ -227,6 +236,7 @@ export function createJobService(deps: JobServiceDeps) {
     for (const job of jobs) {
       if (job.state === 'retired' || job.pausedReason === reason) continue
       handle.jobs.setState(job.id, 'paused', reason, actorId, at)
+      deps.occurrenceHolds?.holdDue(companyId, job.id, 'JOB_PAUSED')
       handle.notifications.insert(admins.map(userId => ({
         id: ids.newId(), userId, kind: 'job_paused', recordId: '', recordVersion: 0, action: '', actorId: null, actorKind: null,
         dedupeKey: `job_paused:${job.id}:${reason}:${at}`, createdAt: at, readAt: null,
@@ -353,7 +363,11 @@ export function createJobService(deps: JobServiceDeps) {
       const reason: JobPauseReason = hasFullAccess(member.role) ? 'ADMIN' : 'BY_RESPONSIBLE'
       // An owner/admin's pause holds over the responsible person's own (who could otherwise resume it); a system pause stays as it is.
       if (job.state !== 'paused' || (reason === 'ADMIN' && job.pausedReason === 'BY_RESPONSIBLE')) {
-        handle.jobs.setState(jobId, 'paused', reason, member.userId, clock.now())
+        transactions.run(() => {
+          handle.jobs.setState(jobId, 'paused', reason, member.userId, clock.now())
+          // Nothing still waiting runs after this pause, also not after resuming.
+          deps.occurrenceHolds?.holdDue(member.companyId, jobId, 'JOB_PAUSED')
+        })
       }
       return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true))
     },
@@ -386,6 +400,8 @@ export function createJobService(deps: JobServiceDeps) {
           if (!rights.ok) return rights
         }
         handle.jobs.setState(jobId, current.approvedVersion === null ? 'draft' : 'active', null, null, clock.now())
+        // A slot that passed while it was paused is held, never made due afterwards.
+        deps.occurrenceHolds?.holdPassedSlot(member.companyId, jobId, 'JOB_PAUSED')
         return ok(undefined)
       })
       if (!result.ok) return result
@@ -396,8 +412,16 @@ export function createJobService(deps: JobServiceDeps) {
     setStopped(member: Member, body: unknown): Outcome<{ stopped: boolean }> {
       if (!hasFullAccess(member.role)) return refuse('forbidden', JOBS_FORBIDDEN)
       if (!isObject(body) || Object.keys(body).length !== 1 || typeof body.stopped !== 'boolean') return BAD_BODY('{ stopped: boolean }')
-      companyData.forCompany(member.companyId).jobs.setStopped(body.stopped, member.userId, clock.now())
-      return ok({ stopped: body.stopped })
+      const handle = companyData.forCompany(member.companyId)
+      const stopped = body.stopped
+      transactions.run(() => {
+        const was = handle.jobs.stopped()
+        handle.jobs.setStopped(stopped, member.userId, clock.now())
+        // Begins: nothing still waiting runs. Ends: a slot that passed while it lasted is held, never made due.
+        if (stopped) deps.occurrenceHolds?.holdDue(member.companyId, null, 'COMPANY_STOPPED')
+        else if (was) deps.occurrenceHolds?.holdPassedSlot(member.companyId, null, 'COMPANY_STOPPED')
+      })
+      return ok({ stopped })
     },
 
     /**

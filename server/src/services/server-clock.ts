@@ -100,6 +100,7 @@ export function createServerClock(deps: ServerClockDeps) {
   const limits = deps.limits ?? CLOCK_LIMITS
   const log = deps.log ?? ((message: string) => console.log(message))
   let running = false
+  let jobsRunning = false
 
   /** Waiting records of one company whose expected time has passed, moved to the right turn. */
   function moveWaitOver(companyId: string): number {
@@ -153,28 +154,47 @@ export function createServerClock(deps: ServerClockDeps) {
     if (deps.pollInbox) run.mailRead += await deps.pollInbox(companyId, deps.yieldNow)
   }
 
+  /**
+   * Scheduled jobs (jobs.md "The clock"): every company's occurrences, then the runner started (never
+   * awaited). Its own overlap guard, apart from the rest of the pass, so a hung company elsewhere in an
+   * earlier pass never stops it.
+   */
+  async function jobsPass(run: ClockRun) {
+    if (jobsRunning || (!deps.makeOccurrences && !deps.startJobRunner)) return
+    jobsRunning = true
+    try {
+      if (deps.makeOccurrences) {
+        for (const companyId of deps.companyIds()) {
+          try {
+            run.occurrences += deps.makeOccurrences(companyId)
+          } catch (error) {
+            run.failedCompanies++
+            log(`[server-clock] company ${companyId} jobs failed: ${error instanceof Error ? error.name : 'unknown error'}`)
+          }
+          await deps.yieldNow()
+        }
+      }
+      // The runner goes on by itself (its own overlap guard); the clock does not wait for it.
+      try { deps.startJobRunner?.() } catch { /* the next run starts it again */ }
+    } finally {
+      jobsRunning = false
+    }
+  }
+
   return {
-    /** One pass over every company. A call while a pass is running does nothing (`ran: false`). */
+    /**
+     * One pass over every company. A call while a pass is running does nothing more than the scheduled
+     * jobs' part (`ran: false`).
+     */
     async runOnce(): Promise<ClockRun> {
       const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, mailRead: 0, meetingsFound: 0, alerts: 0, occurrences: 0, failedCompanies: 0 }
+      // Scheduled jobs first, with their own guard: a pass whose slow work (mail, calendar) still hangs
+      // never keeps a later run from making occurrences or starting the runner.
+      await jobsPass(run)
       if (running) return run
       running = true
       run.ran = true
       try {
-        // Scheduled jobs first, every company: a slow company's mail or calendar never holds an occurrence up.
-        if (deps.makeOccurrences) {
-          for (const companyId of deps.companyIds()) {
-            try {
-              run.occurrences += deps.makeOccurrences(companyId)
-            } catch (error) {
-              run.failedCompanies++
-              log(`[server-clock] company ${companyId} jobs failed: ${error instanceof Error ? error.name : 'unknown error'}`)
-            }
-            await deps.yieldNow()
-          }
-        }
-        // The runner goes on by itself (its own overlap guard); the clock does not wait for it.
-        try { deps.startJobRunner?.() } catch { /* the next run starts it again */ }
         for (const companyId of deps.companyIds()) {
           try {
             await runCompany(companyId, run)

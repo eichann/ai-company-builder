@@ -43,13 +43,13 @@ export function jobSlotDates(trigger: JobTrigger, from: string, to: string, comp
     }
   } else {
     // Day `day` (or the last) of every month around the window; a day off stays, or moves to the
-    // business day before / after (`ifHoliday`) — which may cross into the next or previous month.
-    let y = Number(from.slice(0, 4))
-    let m = Number(from.slice(5, 7)) - 1
-    if (m === 0) { y -= 1; m = 12 }
-    const endY = Number(to.slice(0, 4))
-    const endM = Number(to.slice(5, 7))
-    for (let guard = 0; guard < 24 && (y < endY || (y === endY && m <= endM + 1)); guard++) {
+    // business day before / after (`ifHoliday`) — which may cross into the next or previous month (or
+    // year): so the month before the window and the month after it are always looked at too.
+    const monthIndex = (date: string) => Number(date.slice(0, 4)) * 12 + Number(date.slice(5, 7)) - 1
+    const last = monthIndex(to) + 1
+    for (let i = monthIndex(from) - 1; i <= last; i++) {
+      const y = Math.floor(i / 12)
+      const m = (i % 12) + 1
       const day = trigger.day === 'last' ? lastDayOfMonth(y, m) : trigger.day
       let d = `${y}-${pad(m)}-${pad(day)}`
       if (!isBusinessDay(d, own)) {
@@ -57,8 +57,6 @@ export function jobSlotDates(trigger: JobTrigger, from: string, to: string, comp
         else if (trigger.ifHoliday === 'after') d = nextBusinessDay(d, own)
       }
       if (d >= from && d <= to) out.add(d)
-      m += 1
-      if (m === 13) { y += 1; m = 1 }
     }
   }
   return [...out].sort()

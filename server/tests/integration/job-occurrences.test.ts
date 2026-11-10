@@ -84,15 +84,18 @@ const realWriter: ServiceRecordWriter = createServiceRecordWriter({
 const jobService: JobService = createJobService({
   companyData, memberships, transactions, clock, ids: randomIds,
   skillTree: async () => null, hasCompanyFolder: () => true, noticesChanged: (_, users) => pushed.push(users),
+  // As composition.ts: a pause / the company's stop holds the occurrences.
+  occurrenceHolds: { holdDue: (co, job, code) => occ.holdDue(co, job, code), holdPassedSlot: (co, job, code) => occ.holdPassedSlot(co, job, code) },
 })
 let writer: Pick<ServiceRecordWriter, 'check' | 'create'> = realWriter
 function occurrencesService(): JobOccurrences {
   return createJobOccurrences({
     companyData, transactions, clock, ids: randomIds, timeZoneOf: () => 'Asia/Tokyo', holidaysOf: () => [], roleOf, jobs: jobService,
     writer: { check: (co, input) => writer.check(co, input), create: (co, input) => writer.create(co, input) },
-    noticesChanged: (_, users) => pushed.push(users), log: () => {},
+    noticesChanged: (_, users) => pushed.push(users), log: line => logged.push(line),
   })
 }
+const logged: string[] = []
 let occ: JobOccurrences
 
 const owner = (co = CO) => ({ companyId: co, userId: 'u-owner', role: 'owner' })
@@ -160,6 +163,7 @@ beforeEach(() => {
   db.prepare('DELETE FROM company_features').run()
   writer = realWriter
   pushed.length = 0
+  logged.length = 0
   nowMs = jst('2026-11-13T10:00') // a Friday: the job is approved now
   occ = occurrencesService()
 })
@@ -214,6 +218,22 @@ describe('the clock makes occurrences', () => {
     expect((await jobService.approve(owner(), job, { version: 2 })).ok).toBe(true)
     const after = services.notifications.list(alice())
     expect(after.ok && after.value.items).toEqual([])
+  })
+
+  it('told only to a responsible person still a member and a creator still an owner / admin', async () => {
+    const job = await runnableJob()
+    // The creator is a member now (not an owner / admin): not told.
+    db.prepare("UPDATE ai_jobs SET created_by = 'u-bob' WHERE id = ?").run(job)
+    nowMs = jst('2026-11-17T09:30')
+    occ.makeOccurrences(CO)
+    expect(noticesOf('job_expired').map(n => n.user_id)).toEqual(['u-alice'])
+    // The responsible person left (no clock ran in between to pause the job): not told; the owner creator is.
+    db.prepare('DELETE FROM notifications').run()
+    db.prepare("UPDATE ai_jobs SET created_by = 'u-owner' WHERE id = ?").run(job)
+    db.prepare("DELETE FROM memberships WHERE company_id = ? AND user_id = 'u-alice'").run(CO)
+    nowMs = jst('2026-11-24T09:30')
+    occ.makeOccurrences(CO)
+    expect(noticesOf('job_expired').map(n => n.user_id)).toEqual(['u-owner'])
   })
 
   it('a due one whose time ran out before the runner took it: expired and told', async () => {
@@ -360,7 +380,7 @@ describe('held, skipped and paused: nothing made', () => {
     expect(tasksOf()).toEqual([])
   })
 
-  it('stopped or paused after it was made: held at run time; resuming runs nothing', async () => {
+  it('stopped or paused after it was made: held (also when the stop was written without holding, as a 3a build does)', async () => {
     const job = await runnableJob()
     nowMs = jst('2026-11-16T09:02')
     occ.makeOccurrences(CO)
@@ -369,15 +389,91 @@ describe('held, skipped and paused: nothing made', () => {
     expect(occurrencesOf(job).map(o => [o.state, o.outcome_code])).toEqual([['held', 'COMPANY_STOPPED']])
     jobService.setStopped(owner(), { stopped: false })
 
+    // A build before 3b (rolled back to, then forward) stops and pauses without holding what is due:
+    // the runner itself still refuses it.
+    const handle = companyData.forCompany(CO)
     nowMs = jst('2026-11-23T09:02')
     occ.makeOccurrences(CO)
-    jobService.pause(owner(), job)
+    handle.jobs.setStopped(true, 'u-owner', clock.now())
     occ.runDue(CO)
+    handle.jobs.setStopped(false, 'u-owner', clock.now())
+    nowMs = jst('2026-11-30T09:02')
+    occ.makeOccurrences(CO)
+    handle.jobs.setState(job, 'paused', 'ADMIN', 'u-owner', clock.now())
+    occ.runDue(CO)
+    expect(occurrencesOf(job).map(o => [o.state, o.outcome_code])).toEqual([
+      ['held', 'COMPANY_STOPPED'], ['held', 'COMPANY_STOPPED'], ['held', 'JOB_PAUSED'],
+    ])
+    expect(tasksOf()).toEqual([])
+  })
+
+  it('paused and resumed with no clock run in between: the occurrence left due is held, not run', async () => {
+    const job = await runnableJob()
+    nowMs = jst('2026-11-16T09:02')
+    occ.makeOccurrences(CO)
+    jobService.pause(owner(), job)
     expect((await jobService.resume(owner(), job)).ok).toBe(true)
     occ.makeOccurrences(CO)
     occ.runDue(CO)
-    expect(occurrencesOf(job).map(o => [o.state, o.outcome_code])).toEqual([['held', 'COMPANY_STOPPED'], ['held', 'JOB_PAUSED']])
+    expect(occurrencesOf(job).map(o => [o.state, o.outcome_code])).toEqual([['held', 'JOB_PAUSED']])
     expect(tasksOf()).toEqual([])
+  })
+
+  it('a slot that passed while paused (no clock run meanwhile) is held at resume, never made due', async () => {
+    const job = await runnableJob()
+    nowMs = jst('2026-11-16T08:00')
+    jobService.pause(owner(), job)
+    nowMs = jst('2026-11-16T10:00')
+    expect((await jobService.resume(owner(), job)).ok).toBe(true)
+    occ.makeOccurrences(CO)
+    occ.runDue(CO)
+    expect(occurrencesOf(job).map(o => [o.due_slot, o.state, o.outcome_code])).toEqual([['2026-11-16T09:00', 'held', 'JOB_PAUSED']])
+    expect(tasksOf()).toEqual([])
+    // The next week runs as usual.
+    nowMs = jst('2026-11-23T09:02')
+    occ.makeOccurrences(CO)
+    expect(occ.runDue(CO)).toBe(1)
+  })
+
+  it('the company’s stop on and off with no clock run in between: a due one held, a slot that passed held', async () => {
+    const job = await runnableJob()
+    nowMs = jst('2026-11-16T09:02')
+    occ.makeOccurrences(CO)
+    jobService.setStopped(owner(), { stopped: true })
+    jobService.setStopped(owner(), { stopped: false })
+    occ.runDue(CO)
+    nowMs = jst('2026-11-23T08:00')
+    jobService.setStopped(owner(), { stopped: true })
+    nowMs = jst('2026-11-23T10:00')
+    jobService.setStopped(owner(), { stopped: false })
+    // Switching off again when it was not on holds nothing.
+    jobService.setStopped(owner(), { stopped: false })
+    occ.makeOccurrences(CO)
+    occ.runDue(CO)
+    expect(occurrencesOf(job).map(o => [o.due_slot, o.state, o.outcome_code])).toEqual([
+      ['2026-11-16T09:00', 'held', 'COMPANY_STOPPED'], ['2026-11-23T09:00', 'held', 'COMPANY_STOPPED'],
+    ])
+    expect(tasksOf()).toEqual([])
+  })
+
+  it('a pause the server made (the responsible person left) holds what was due, also after a resume', async () => {
+    const job = await runnableJob()
+    nowMs = jst('2026-11-16T09:02')
+    occ.makeOccurrences(CO)
+    jobService.memberLeft(CO, 'u-alice', 'u-owner')
+    expect((await jobService.resume(owner(), job)).ok).toBe(true)
+    occ.runDue(CO)
+    expect(occurrencesOf(job).map(o => [o.state, o.outcome_code])).toEqual([['held', 'JOB_PAUSED']])
+    expect(tasksOf()).toEqual([])
+  })
+
+  it('lifting a stop that was not on holds nothing', async () => {
+    const job = await runnableJob()
+    nowMs = jst('2026-11-16T09:01')
+    jobService.setStopped(owner(), { stopped: false })
+    occ.makeOccurrences(CO)
+    expect(occ.runDue(CO)).toBe(1)
+    expect(occurrencesOf(job).map(o => o.state)).toEqual(['done'])
   })
 
   it('a paused job’s slot is made held; a version approved but not accepted is held', async () => {
@@ -428,6 +524,15 @@ describe('held, skipped and paused: nothing made', () => {
     expect([tasksOf(), runsOf()]).toEqual([[], []])
   })
 
+  it('an absence that begins later does not skip today', async () => {
+    const job = await runnableJob()
+    db.prepare(`INSERT INTO member_absences (company_id, id, user_id, from_day, until_day, delegate_id, set_by, set_at) VALUES (?, 'abs-2', 'u-alice', '2026-11-23', '2026-11-27', 'u-bob', 'u-alice', ?)`).run(CO, TS)
+    nowMs = jst('2026-11-16T09:02')
+    occ.makeOccurrences(CO)
+    expect(occ.runDue(CO)).toBe(1)
+    expect(occurrencesOf(job).map(o => o.state)).toEqual(['done'])
+  })
+
   it('absent that day (D5): skipped and told, no delegate runs it', async () => {
     const job = await runnableJob()
     db.prepare(`INSERT INTO member_absences (company_id, id, user_id, from_day, until_day, delegate_id, set_by, set_at) VALUES (?, 'abs-1', 'u-alice', '2026-11-16', '2026-11-16', 'u-bob', 'u-alice', ?)`).run(CO, TS)
@@ -465,7 +570,6 @@ describe('companies apart', () => {
 
   it('a slow company does not hold up another’s occurrences: made first, and run without waiting for the clock', async () => {
     const theirs = await runnableJob(weekly(), OTHER)
-    nowMs = jst('2026-11-16T09:02')
     let runner: Promise<number> | null = null
     const jobRunner = createJobRunner({ companyIds: () => [CO, OTHER], occurrences: occ, yieldNow: () => new Promise<void>(r => setImmediate(r)), log: () => {} })
     const serverClock = createServerClock({
@@ -477,10 +581,69 @@ describe('companies apart', () => {
       startJobRunner: () => { runner = jobRunner.runOnce() },
       yieldNow: () => new Promise<void>(r => setImmediate(r)), log: () => {},
     })
-    void serverClock.runOnce()
-    for (let i = 0; i < 50 && runner === null; i++) await new Promise<void>(r => setImmediate(r))
-    expect(await runner).toBe(1)
+    // Pass 1 hangs on this company's mail; passes 2 and 3 (later slots) still make and run the other's.
+    const job = await runnableJob(weekly({ trigger: { every: 'day', at: '09:00', businessDaysOnly: false } }), OTHER)
+    for (const [i, at] of ['2026-11-16T09:02', '2026-11-17T09:02', '2026-11-18T09:02'].entries()) {
+      nowMs = jst(at)
+      runner = null
+      void serverClock.runOnce()
+      for (let n = 0; n < 50 && runner === null; n++) await new Promise<void>(r => setImmediate(r))
+      expect(await runner).toBe(i === 0 ? 2 : 1)
+    }
     expect(occurrencesOf(theirs, OTHER).map(o => o.state)).toEqual(['done'])
+    expect(occurrencesOf(job, OTHER).map(o => [o.due_slot, o.state])).toEqual([
+      ['2026-11-16T09:00', 'done'], ['2026-11-17T09:00', 'done'], ['2026-11-18T09:00', 'done'],
+    ])
+  })
+})
+
+describe('the runner', () => {
+  it('leaves a PC job’s occurrence alone (its app claims it, PR 5)', async () => {
+    db.prepare("INSERT OR IGNORE INTO scopes (id, company_id, path, kind, created_at) VALUES ('occ-doc', ?, '資料', 'folder', ?)").run(CO, TS)
+    const pcJobs = createJobService({ companyData, memberships, transactions, clock, ids: randomIds, skillTree: async () => 'a'.repeat(40), hasCompanyFolder: () => true })
+    const made = await pcJobs.create(owner(), { definition: {
+      ...weekly(), check: { kind: 'new_files', path: '資料' }, run: { kind: 'procedure', procedure: { source: 'company_skill', skill: 'weekly-report' } }, placement: 'a',
+      grant: { tools: ['files_read'], creates: [], routes: [], reads: { paths: ['資料'], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 5, runsPerDay: 1 } },
+    } })
+    if (!made.ok) throw new Error(JSON.stringify(made.body))
+    const job = made.value.id
+    expect((await pcJobs.approve(owner(), job, { version: 1 })).ok).toBe(true)
+    expect((await pcJobs.accept(alice(), job, { version: 1 })).ok).toBe(true)
+    db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at)
+      VALUES (?, ?, ?, 1, '2026-11-16T09:00', 'Asia/Tokyo', '2026-11-16T00:00:00.000Z', '2026-11-17T00:00:00.000Z', 'due', ?, ?)`).run(CO, `occ.${'c'.repeat(32)}`, job, TS, TS)
+    nowMs = jst('2026-11-16T09:02')
+    expect(occ.runDue(CO)).toBe(0)
+    expect(occurrencesOf(job).map(o => o.state)).toEqual(['due'])
+    expect(tasksOf()).toEqual([])
+    // Not even tried (nothing failed on the way).
+    expect(logged).toEqual([])
+  })
+
+  it('yields to the event loop after each occurrence of a batch', async () => {
+    const job = await runnableJob(weekly({ trigger: { every: 'day', at: '09:00', businessDaysOnly: false }, missed: { policy: 'latest_only', expiresAfterMinutes: 7 * 24 * 60 } }))
+    const other = await runnableJob(weekly({ name: 'もう一つ', trigger: { every: 'day', at: '09:00', businessDaysOnly: false } }))
+    nowMs = jst('2026-11-16T09:02')
+    occ.makeOccurrences(CO)
+    let yields = 0
+    const runner = createJobRunner({ companyIds: () => [CO], occurrences: occ, yieldNow: async () => { yields++ }, log: () => {} })
+    expect(await runner.runOnce()).toBe(2)
+    // One after each occurrence, one after the company.
+    expect(yields).toBe(3)
+    expect([...occurrencesOf(job), ...occurrencesOf(other)].map(o => o.state)).toEqual(['done', 'done'])
+  })
+})
+
+describe('the clock’s jobs part', () => {
+  it('never runs twice at once (its own guard)', async () => {
+    let calls = 0
+    const serverClock = createServerClock({
+      companyIds: () => [CO, OTHER], companyData, clock,
+      writer: { transition: () => ({ ok: false, reason: 'stale' }) }, notifications: { sweep: () => 0 }, autoRunFor: () => false, timeZoneOf: () => 'Asia/Tokyo',
+      makeOccurrences: () => { calls++; return 0 },
+      yieldNow: () => new Promise<void>(r => setImmediate(r)), log: () => {},
+    })
+    await Promise.all([serverClock.runOnce(), serverClock.runOnce()])
+    expect(calls).toBe(2)
   })
 })
 

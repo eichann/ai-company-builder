@@ -220,7 +220,9 @@ compare-and-set and ledger), and writes notices.
   `stale` and left alone.
 - **Scheduled jobs** (`jobs.md` "The clock"): `makeOccurrences` — every company first of all, records on
   or off (fast: no content, nothing outside), then `startJobRunner` starts the jobs' runner, which the
-  clock never awaits (a slow company's mail or calendar never holds an occurrence up); `ClockRun.occurrences`.
+  clock never awaits (a slow company's mail or calendar never holds an occurrence up). This part has its
+  own overlap guard and runs before the shared one: a pass still hanging on a company's mail never stops
+  a later run's occurrences; `ClockRun.occurrences`.
 - **「気になる動き」**: `securitySweep` — every company first, records on or off
   (`security-alerts.md`); `ClockRun.alerts` counts what it wrote.
 - **Notices**: `notifications.sweep(companyId, limit)` (overdue, stuck AI turns, acceptance

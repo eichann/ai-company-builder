@@ -108,32 +108,50 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
   const accepted = (job: JobRow, version: JobVersionRow) => job.acceptedConsent !== null && job.acceptedConsent === version.consentFingerprint
 
   /**
+   * The newest slot of an approved placement-`e` job at or before now, as an occurrence row would hold it
+   * (state still to decide), or null: no approved version, a PC job (claimed by its responsible person's app,
+   * PR 5: none made until then), no slot, or a slot from before the version was approved.
+   */
+  function latestSlotOf(companyId: string, handle: CompanyData, job: JobRow, nowMs: number) {
+    if (job.approvedVersion === null || (job.state !== 'active' && job.state !== 'paused')) return null
+    const version = handle.jobs.version(job.id, job.approvedVersion)
+    if (!version || version.approvedAt === null) return null
+    const definition = definitionOf(version)
+    if (definition.placement !== 'e') return null
+    const zone = deps.timeZoneOf(companyId)
+    const slot = latestJobSlot(definition.trigger, companyNow(nowMs, zone), deps.holidaysOf(companyId))
+    if (slot === null) return null
+    const dueAt = companyTimeToUtc(slot, zone)
+    const dueMs = Date.parse(dueAt)
+    // Never a slot from before the version was approved.
+    if (dueMs < Date.parse(version.approvedAt)) return null
+    const expiresAt = new Date(dueMs + definition.missed.expiresAfterMinutes * 60_000).toISOString()
+    return { version, definition, slot, zone, dueAt, dueMs, expiresAt }
+  }
+
+  const newRow = (job: JobRow, s: NonNullable<ReturnType<typeof latestSlotOf>>, state: JobOccurrenceState, code: JobOutcomeCode | null): JobOccurrenceRow => {
+    const at = clock.now()
+    return {
+      id: newOccurrenceId(ids.newId().replace(/-/g, '').toLowerCase().slice(0, 32).padEnd(32, '0')),
+      jobId: job.id, jobVersion: s.version.version, dueSlot: s.slot, timeZone: s.zone, dueAt: s.dueAt, expiresAt: s.expiresAt, state, runId: null, outcomeCode: code,
+      createdAt: at, updatedAt: at,
+    }
+  }
+
+  /**
    * The clock's part (fast, no content, nothing outside): make each approved job's newest slot once, and
    * expire `due` occurrences whose time ran out. The number of occurrences made or expired.
    */
   function makeOccurrences(companyId: string): number {
     const handle = companyData.forCompany(companyId)
-    const zone = deps.timeZoneOf(companyId)
-    const holidays = deps.holidaysOf(companyId)
     const nowMs = clock.nowMs()
-    const nowLocal = companyNow(nowMs, zone)
     const told = new Set<string>()
     let changed = 0
     const stopped = handle.jobs.stopped()
     for (const job of handle.jobs.list()) {
-      if (job.approvedVersion === null || (job.state !== 'active' && job.state !== 'paused')) continue
-      const version = handle.jobs.version(job.id, job.approvedVersion)
-      if (!version || version.approvedAt === null) continue
-      const definition = definitionOf(version)
-      // A PC job (placement `a`) is claimed by its responsible person's app (PR 5): none made until then.
-      if (definition.placement !== 'e') continue
-      const slot = latestJobSlot(definition.trigger, nowLocal, holidays)
-      if (slot === null) continue
-      const dueAt = companyTimeToUtc(slot, zone)
-      const dueMs = Date.parse(dueAt)
-      // Never a slot from before the version was approved.
-      if (dueMs < Date.parse(version.approvedAt)) continue
-      const expiresAt = new Date(dueMs + definition.missed.expiresAfterMinutes * 60_000).toISOString()
+      const latest = latestSlotOf(companyId, handle, job, nowMs)
+      if (!latest) continue
+      const { version, definition, slot, dueMs, expiresAt } = latest
       let state: JobOccurrenceState = 'due'
       let code: JobOutcomeCode | null = null
       if (job.state === 'paused') { state = 'held'; code = 'JOB_PAUSED' }
@@ -141,12 +159,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
       else if (!accepted(job, version)) { state = 'held'; code = 'NOT_ACCEPTED' }
       else if (nowMs >= Date.parse(expiresAt)) { state = 'expired'; code = 'EXPIRED' }
       else if (definition.missed.policy === 'skip' && nowMs >= dueMs + JOB_ON_TIME_MS) { state = 'skipped'; code = 'MISSED' }
-      const at = clock.now()
-      const row: JobOccurrenceRow = {
-        id: newOccurrenceId(ids.newId().replace(/-/g, '').toLowerCase().slice(0, 32).padEnd(32, '0')),
-        jobId: job.id, jobVersion: version.version, dueSlot: slot, timeZone: zone, dueAt, expiresAt, state, runId: null, outcomeCode: code,
-        createdAt: at, updatedAt: at,
-      }
+      const row = newRow(job, latest, state, code)
+      const at = row.createdAt
       transactions.run(() => {
         if (!handle.jobs.insertOccurrence(row)) return
         changed++
@@ -220,8 +234,10 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         // The responsible person's rights now, with the pinned version (like approval): else the job pauses (3a's notice).
         const refusal = deps.jobs.runnerRefusal(companyId, version)
         if (refusal) {
+          // The occurrence first (its own code), then the pause (which holds the job's other due ones).
+          const held = end('held', refusal, null, job, acting)
           deps.jobs.pauseBySystem(companyId, job.id, refusal)
-          return end('held', refusal, null, job, acting)
+          return held
         }
         // Absent that day (D5): nobody runs it for them.
         const day = occ.dueSlot.slice(0, 10)
@@ -256,7 +272,6 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         return 'done'
       })
     } catch (error) {
-      told.clear()
       if (!(error instanceof TaskNotCreated)) {
         // Left `due`: the next run tries again until it expires (then it is told). No content in the log.
         log(`[job-runner] company ${companyId} occurrence failed: ${error instanceof Error ? error.name : 'unknown error'}`)
@@ -273,14 +288,46 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     return outcome
   }
 
+  /**
+   * A pause or the company's stop begins (in the caller's transaction, jobs.md "Held"): every occurrence of
+   * the job (null: of every job of the company) still `due` is `held` — it never runs, also not after resuming.
+   */
+  function holdDue(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void {
+    const handle = companyData.forCompany(companyId)
+    const at = clock.now()
+    for (const occ of handle.jobs.dueOccurrences(10_000)) {
+      if (jobId === null || occ.jobId === jobId) handle.jobs.moveOccurrence(occ.id, ['due'], 'held', { outcomeCode: code }, at)
+    }
+  }
+
+  /**
+   * A pause or the company's stop ends (in the caller's transaction): the newest slot that passed while it
+   * lasted — not made yet because no clock ran in between — is written `held`, so the clock never makes
+   * it `due` afterwards (「再開しても動かさない」). For the job (null: every job of the company).
+   */
+  function holdPassedSlot(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void {
+    const handle = companyData.forCompany(companyId)
+    const nowMs = clock.nowMs()
+    for (const job of jobId === null ? handle.jobs.list() : [handle.jobs.find(jobId)].filter((j): j is JobRow => j !== null)) {
+      const latest = latestSlotOf(companyId, handle, job, nowMs)
+      if (latest) handle.jobs.insertOccurrence(newRow(job, latest, 'held', code))
+    }
+  }
+
   return {
     makeOccurrences,
     runOccurrence,
+    holdDue,
+    holdPassedSlot,
     /** The runner's part for one company: its `due` occurrences, oldest first, at most `limit`. The number that ran (`done`). */
     runDue(companyId: string, limit = JOB_RUNNER_LIMIT): number {
       let ran = 0
       for (const occ of companyData.forCompany(companyId).jobs.dueOccurrences(limit)) if (runOccurrence(companyId, occ.id) === 'done') ran++
       return ran
+    },
+    /** The ids of the company's `due` occurrences, oldest first, at most `limit` (the runner's batch). */
+    dueIds(companyId: string, limit = JOB_RUNNER_LIMIT): string[] {
+      return companyData.forCompany(companyId).jobs.dueOccurrences(limit).map(o => o.id)
     },
   }
 }
@@ -289,8 +336,8 @@ export type JobOccurrences = ReturnType<typeof createJobOccurrences>
 
 export interface JobRunnerDeps {
   companyIds: () => string[]
-  occurrences: Pick<JobOccurrences, 'runDue'>
-  /** Let the event loop serve requests between companies. */
+  occurrences: Pick<JobOccurrences, 'dueIds' | 'runOccurrence'>
+  /** Let the event loop serve requests between occurrences and companies. */
   yieldNow: () => Promise<void>
   log?: (message: string) => void
 }
@@ -307,7 +354,11 @@ export function createJobRunner(deps: JobRunnerDeps) {
     let ran = 0
     for (const companyId of deps.companyIds()) {
       try {
-        ran += deps.occurrences.runDue(companyId)
+        // One occurrence at a time, a yield after each: a batch never holds the event loop.
+        for (const id of deps.occurrences.dueIds(companyId)) {
+          if (deps.occurrences.runOccurrence(companyId, id) === 'done') ran++
+          await deps.yieldNow()
+        }
       } catch (error) {
         log(`[job-runner] company ${companyId} failed: ${error instanceof Error ? error.name : 'unknown error'}`)
       }

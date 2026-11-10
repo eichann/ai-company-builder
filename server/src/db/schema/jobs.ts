@@ -90,6 +90,8 @@ export const jobSchema = `
       UNIQUE (company_id, job_id, due_slot),
       FOREIGN KEY (company_id, job_id, job_version) REFERENCES ai_job_versions(company_id, job_id, version) ON DELETE CASCADE
     );
+    -- The runner's and the clock's look-up of what is still due (held / done rows pile up, one per job and slot).
+    CREATE INDEX IF NOT EXISTS idx_ai_job_occurrences_due ON ai_job_occurrences(company_id, state, due_at);
 
     -- 「定期の仕事をすべて止める」 (owner decision D8: its own switch, apart from the AI's emergency stop).
     -- No row = not stopped.
