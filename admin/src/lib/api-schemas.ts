@@ -41,7 +41,7 @@ import type {
 import type { RecordSettings } from '../../../shared/types/records'
 import type { SecondOpinionView } from '../../../shared/types/second-opinion'
 import type { SecurityAlertSettings, SecurityAlertView, SecurityAlertsView } from '../../../shared/types/security-alerts'
-import type { ShelfListView, ShelfPublishResult, ShelfVersionsView } from '../../../shared/types/skill-shelf'
+import type { ShelfListView, ShelfPublishResult, ShelfRequestContent, ShelfRequestDecided, ShelfRequestsView, ShelfVersionsView } from '../../../shared/types/skill-shelf'
 import type { SlackAdminView } from '../../../shared/types/slack'
 import type { DepartmentMembersView, TaskSettingsView } from '../../../shared/types/task-settings'
 import type {
@@ -125,6 +125,7 @@ export const capabilitiesSchema: z.ZodMiniType<Capabilities> = z.looseObject({
   role,
   managedDepartmentIds: z.array(str),
   canViewAgentEvents: z.boolean(),
+  skillEditing: z.optional(z.looseObject({ everywhere: z.boolean(), folders: z.array(str) })),
 })
 
 const overviewMemberSchema: z.ZodMiniType<OverviewMember> = z.looseObject({
@@ -361,6 +362,9 @@ export const shelfListSchema = topLevel<ShelfListView>({ items: list })
 export const shelfVersionsSchema = topLevel<ShelfVersionsView>({ item: obj, versions: list, history: list })
 export const shelfPublishResultSchema = topLevel<ShelfPublishResult>({ item: obj, changed: bool })
 export const shelfRemovedSchema = topLevel<{ removed: true }>({ removed: bool })
+export const shelfRequestsSchema = topLevel<ShelfRequestsView>({ requests: list })
+export const shelfRequestContentSchema = topLevel<ShelfRequestContent>({ id: str, name: str, version: str, files: list })
+export const shelfRequestDecidedSchema = topLevel<ShelfRequestDecided>({ request: obj, item: z.optional(obj) })
 
 // API keys, plugins and connectors
 export const brokerSchema = topLevel<BrokerView>({

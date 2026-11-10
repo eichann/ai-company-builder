@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto'
 import { SHELF_LIMITS, shelfFilePathProblem, shelfPathClash, shelfTextFileName } from '../../../../shared/core/skill-shelf'
 import type { ShelfFileUpload, ShelfPublishResult } from '../../../../shared/types/skill-shelf'
-import { readShelfDeliveries, readShelfPublishing, sameDepartmentFolder, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery, type ShelfPublishing } from '../../../shared/skill-shelf'
+import { readShelfDeliveries, readShelfPublishing, readShelfRequests, sameDepartmentFolder, shelfRefusalMessage, shelfVersionOf, type ShelfDelivery, type ShelfPublishing, type ShelfRequestMark } from '../../../shared/skill-shelf'
 
 export interface ShelfClientDeps {
   baseUrl: () => string
@@ -25,7 +25,7 @@ export interface ShelfFile {
 }
 
 export type ShelfContentResult = { ok: true; files: ShelfFile[] } | { ok: false; reason: string }
-export type ShelfListResult = { ok: true; items: ShelfDelivery[]; publishing: ShelfPublishing } | { ok: false; reason: string }
+export type ShelfListResult = { ok: true; items: ShelfDelivery[]; publishing: ShelfPublishing; requests: ShelfRequestMark[] } | { ok: false; reason: string }
 export type ShelfPublishAnswer = { ok: true; result: ShelfPublishResult } | { ok: false; message: string } | { ok: false; offline: true }
 
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/
@@ -68,6 +68,25 @@ export function createShelfClient(deps: ShelfClientDeps) {
   const headers = () => ({ Cookie: deps.cookies().join('; ') })
   const signal = () => AbortSignal.timeout(TIMEOUT_MS)
 
+  /** A Skill's folder up to the server: its answer's data, its refusal in its own words, or offline. */
+  async function post(companyId: string, rest: string, body: unknown): Promise<{ ok: true; data: unknown } | { ok: false; message: string } | { ok: false; offline: true }> {
+    let res: Response
+    try {
+      res = await doFetch(urlOf(companyId, rest), {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        redirect: 'error',
+        signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS),
+      })
+    } catch {
+      return { ok: false, offline: true }
+    }
+    const answer = await res.json().catch(() => null) as { data?: unknown; error?: unknown } | null
+    if (!res.ok || !answer?.data) return { ok: false, message: shelfRefusalMessage(res.status, answer) }
+    return { ok: true, data: answer.data }
+  }
+
   return {
     /** What this member's app should have now. */
     async list(companyId: string): Promise<ShelfListResult> {
@@ -77,7 +96,7 @@ export function createShelfClient(deps: ShelfClientDeps) {
         if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` }
         const data = (await res.json() as { data?: unknown } | null)?.data
         const items = readShelfDeliveries(data)
-        return items ? { ok: true, items, publishing: readShelfPublishing(data) } : { ok: false, reason: 'unexpected answer' }
+        return items ? { ok: true, items, publishing: readShelfPublishing(data), requests: readShelfRequests(data) } : { ok: false, reason: 'unexpected answer' }
       } catch (error) {
         return { ok: false, reason: error instanceof Error ? error.message : 'request failed' }
       }
@@ -106,21 +125,13 @@ export function createShelfClient(deps: ShelfClientDeps) {
     },
     /** Publish a Skill's folder. The server decides who may, and says why not. */
     async publish(companyId: string, request: { departmentId: string | null; name: string; files: ShelfFileUpload[]; expectedVersion: string | null }): Promise<ShelfPublishAnswer> {
-      let res: Response
-      try {
-        res = await doFetch(urlOf(companyId, '/skill-shelf'), {
-          method: 'POST',
-          headers: { ...headers(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ kind: 'skill', ...request }),
-          redirect: 'error',
-          signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS),
-        })
-      } catch {
-        return { ok: false, offline: true }
-      }
-      const body = await res.json().catch(() => null) as { data?: ShelfPublishResult; error?: unknown } | null
-      if (!res.ok || !body?.data) return { ok: false, message: shelfRefusalMessage(res.status, body) }
-      return { ok: true, result: body.data }
+      const answer = await post(companyId, '/skill-shelf', { kind: 'skill', ...request })
+      return answer.ok ? { ok: true, result: answer.data as ShelfPublishResult } : answer
+    },
+    /** 「会社に出してほしいと頼む」: send a Skill's folder to those who may publish it. The server decides who may ask. */
+    async request(companyId: string, request: { departmentId: string | null; name: string; files: ShelfFileUpload[] }): Promise<{ ok: true } | { ok: false; message: string } | { ok: false; offline: true }> {
+      const answer = await post(companyId, '/skill-shelf-requests', request)
+      return answer.ok ? { ok: true } : answer
     },
   }
 }

@@ -484,9 +484,11 @@ const skills = registerSkillsIpc(ipc, {
   shelfMark: (rootPath, rel) => (workingFolders.has(rootPath) ? skillShelf.markOf(rootPath, rel) : undefined),
   shelfMayPublish: (rootPath, rel) => (workingFolders.has(rootPath) ? skillShelf.mayPublish(rootPath, rel) : undefined),
   shelfRuleClashes: rootPath => (workingFolders.has(rootPath) ? skillShelf.ruleClashes(rootPath) : []),
+  shelfRequest: (rootPath, rel) => (workingFolders.has(rootPath) ? skillShelf.requestOf(rootPath, rel) : undefined),
+  shelfBackup: (rootPath, rel) => (workingFolders.has(rootPath) ? skillShelf.latestBackup(rootPath, rel) !== null : undefined),
 })
 skillShelfChanged = root => skills.invalidateRoot(root)
-registerSkillShelfIpc(ipc, { paths: allowedRoots, isWorkingFolder: rootPath => workingFolders.has(rootPath), store: skillShelf, client: shelfClient })
+registerSkillShelfIpc(ipc, { paths: allowedRoots, isWorkingFolder: rootPath => workingFolders.has(rootPath), store: skillShelf, client: shelfClient, shell: desktopShell })
 
 // The company folder on disk (features/fs): file tree, editor, watchers.
 const files = registerFsIpc(ipc, {

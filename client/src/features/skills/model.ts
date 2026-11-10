@@ -2,7 +2,7 @@
 // copied one, and the slash commands the chat offers.
 import type { DepartmentConfig } from '../../types'
 import { setFrontmatterField, yamlQuoted } from '../../../shared/skill-frontmatter'
-import type { SkillShelfMark } from '../../../shared/skill-shelf'
+import type { SkillShelfMark, SkillShelfRequestInfo } from '../../../shared/skill-shelf'
 
 /** A web app inside a skill's folder (`tools/<name>/`). */
 export interface SkillTool {
@@ -25,6 +25,8 @@ export interface Skill {
   isNurturing?: boolean   // true = 育て中（SKILL.md frontmatter status: nurturing）
   shelf?: SkillShelfMark  // 全社フォルダを使わない会社: 会社から届いた Skill か、同じ名前の自分の Skill か
   shelfPublish?: boolean  // 全社フォルダを使わない会社: 「会社に公開」を出すか（サーバーが公開を認める場所か）
+  shelfRequest?: SkillShelfRequestInfo  // 全社フォルダを使わない会社: 「会社に出してほしいと頼む」を出すか、自分のお願いの状態
+  shelfBackup?: boolean   // 全社フォルダを使わない会社: 「会社の版に戻す」で残した控えがあるか（「控えを開く」）
   skillPath?: string      // Absolute path to skill directory
   // File paths relative to department folder
   files: {

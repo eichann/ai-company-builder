@@ -107,10 +107,20 @@ const skill = (folder: string, name: string, description: string) => ({
 })
 const SHELF_VERSION = 'abcd1234'.repeat(8)
 /** ?kind=none: weekly-report came from the company; release-note is the member's own beside a company one. */
-const SHELF_MARKS: Record<string, { state: 'company' | 'clash' | 'editing'; version: string }> = {
+const SHELF_MARKS: Record<string, { state: 'company' | 'clash' | 'editing'; version: string; newer?: { version: string; at: string } }> = {
   'weekly-report': { state: 'company', version: SHELF_VERSION },
-  'release-note': { state: params.get('shelf') === 'editing' ? 'editing' : 'clash', version: SHELF_VERSION },
+  'release-note': {
+    state: params.get('shelf') === 'editing' ? 'editing' : 'clash', version: SHELF_VERSION,
+    // ?newer=1: the company handed out a newer version since the member started (「会社の版が新しくなっています」).
+    ...(params.get('newer') === '1' ? { newer: { version: 'ef567890'.repeat(8), at: new Date(2026, 10, 9, 14, 5).toISOString() } } : {}),
+  },
 }
+/** ?request=pending|declined: the member's latest request to publish (「会社に出してほしいと頼む」). */
+const SHELF_REQUEST_LAST = params.get('request') === 'pending'
+  ? { name: 'x', departmentFolder: null, state: 'pending' as const, requestedAt: new Date(2026, 10, 9, 9, 30).toISOString(), decidedAt: null, reason: null }
+  : params.get('request') === 'declined'
+    ? { name: 'x', departmentFolder: null, state: 'declined' as const, requestedAt: new Date(2026, 10, 8, 9, 30).toISOString(), decidedAt: new Date(2026, 10, 9, 10, 0).toISOString(), reason: 'いまは使わないため' }
+    : undefined
 const SKILLS: Record<string, ReturnType<typeof skill>[]> = {
   '': [skill('', 'weekly-report', '週報をまとめる')],
   営業部: [skill('営業部', 'proposal', '提案書のたたき台を作る')],
@@ -201,8 +211,11 @@ const api: Partial<ElectronAPI> = {
     return { success: true, ...(params.get('kind') === 'none' ? { ruleClashes: ['tone'] } : {}), skills: (SKILLS[folder] ?? []).map(s => (params.get('kind') !== 'none' ? s : {
       ...s,
       ...(SHELF_MARKS[s.name] ? { shelf: SHELF_MARKS[s.name] } : {}),
-      // ?publish=no: the server says this member may not publish a Skill here.
+      // ?publish=no: the server says this member may not publish a Skill here (so 頼む is offered on their own).
       shelfPublish: params.get('publish') !== 'no',
+      ...(SHELF_MARKS[s.name]?.state === 'company' ? {} : { shelfRequest: { offered: params.get('publish') === 'no', ...(SHELF_REQUEST_LAST ? { last: SHELF_REQUEST_LAST } : {}) } }),
+      // ?backup=1: 会社の版に戻す kept a copy of the company Skill.
+      ...(SHELF_MARKS[s.name]?.state === 'company' && params.get('backup') === '1' ? { shelfBackup: true } : {}),
     })) }
   },
   getWriteAccess: async () => ({ version: 'v1', role: 'member', all: false, scopes: [{ path: '', write: true }, { path: '総務', write: false }] }),
@@ -324,6 +337,14 @@ const api: Partial<ElectronAPI> = {
   restoreCompanySkill: async (_root: string, skillPath: string) => {
     record('restoreCompanySkill', [skillPath.split('/').pop()])
     return { success: true as const, companyVersion: params.get('restore') === 'later' ? 'later' as const : 'back' as const }
+  },
+  requestCompanySkill: async (_root: string, skillPath: string) => {
+    record('requestCompanySkill', [skillPath.split('/').pop()])
+    return { success: true }
+  },
+  openCompanySkillBackup: async (_root: string, skillPath: string) => {
+    record('openCompanySkillBackup', [skillPath.split('/').pop()])
+    return { success: true }
   },
   onSkillShelfChanged: () => () => {},
   onNotificationsChanged: () => () => {},

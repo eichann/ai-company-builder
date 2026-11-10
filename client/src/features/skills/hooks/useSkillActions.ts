@@ -3,7 +3,7 @@ import type { DepartmentConfig } from '../../../types'
 import type { FileOpResult } from '../../../../shared/ipc-contract'
 import type { Skill } from '../model'
 import { shelfRestoredNote } from '../../../../shared/skill-shelf'
-import { copySkill, createSkillDirectory, createSkillFile, editCompanySkillLocally, makeSkillPrivate, pathExists, publishSkill, publishSkillToCompany, readSkillFile, restoreCompanySkill, setSkillNurturing, skillWriteRefusal, writeSkillFile } from '../api'
+import { copySkill, createSkillDirectory, createSkillFile, editCompanySkillLocally, makeSkillPrivate, openCompanySkillBackup, pathExists, publishSkill, publishSkillToCompany, readSkillFile, requestCompanySkill, restoreCompanySkill, setSkillNurturing, skillWriteRefusal, writeSkillFile } from '../api'
 import { newSkillMarkdown, renameSkillMarkdown, skillNameTakenMessage, SKILL_ALREADY_SHARED_MESSAGE, SKILL_CREATE_FAILED, SKILL_COPY_FAILED, SKILL_PUBLISH_FAILED, type NewSkillInput, type SkillActionResult } from '../model'
 
 const refusalOf = (result: FileOpResult): string | null => (result.code === 'refused' && result.error ? result.error : null)
@@ -108,10 +108,14 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
     return refusalOf(result)
   }, [rootPath, departments, refreshSkills])
 
-  /** 「会社に公開」; answers the sentence when it was not published, or null. */
+  /**
+   * 「会社に公開」; answers the sentence when it was not published, or null. Under
+   * 「会社の版が新しくなっています」 the member has been told that publishing replaces the newer
+   * version, so that is the version they saw.
+   */
   const publishToCompany = useCallback(async (skill: Skill): Promise<string | null> => {
     if (!rootPath || !skill.skillPath) return null
-    const result = await publishSkillToCompany(rootPath, skill.skillPath, skill.shelf?.version ?? null)
+    const result = await publishSkillToCompany(rootPath, skill.skillPath, skill.shelf?.newer?.version ?? skill.shelf?.version ?? null)
     refreshSkills()
     return result.success ? null : result.error ?? SKILL_PUBLISH_FAILED
   }, [rootPath, refreshSkills])
@@ -133,6 +137,21 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
     return shelfRestoredNote(result.companyVersion)
   }, [rootPath, refreshSkills])
 
+  /** 「会社に出してほしいと頼む」; answers the sentence when it was not sent, or null (the card then shows it waiting). */
+  const requestToCompany = useCallback(async (skill: Skill): Promise<string | null> => {
+    if (!rootPath || !skill.skillPath) return null
+    const result = await requestCompanySkill(rootPath, skill.skillPath)
+    refreshSkills()
+    return result.success ? null : result.error ?? SKILL_PUBLISH_FAILED
+  }, [rootPath, refreshSkills])
+
+  /** 「控えを開く」; answers the sentence when it could not be opened, or null. */
+  const openBackup = useCallback(async (skill: Skill): Promise<string | null> => {
+    if (!rootPath || !skill.skillPath) return null
+    const result = await openCompanySkillBackup(rootPath, skill.skillPath)
+    return result.success ? null : result.error ?? SKILL_PUBLISH_FAILED
+  }, [rootPath])
+
   const toggleNurturing = useCallback(async (skill: Skill): Promise<string | null> => {
     if (!skill.files.skillMd) return null
     const result = await setSkillNurturing(skill.files.skillMd, !skill.isNurturing)
@@ -140,5 +159,5 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
     return refusalOf(result)
   }, [refreshSkills])
 
-  return { createSkill, copySkillHere, shareSkill, publishToCompany, editLocally, restoreCompany, toggleNurturing }
+  return { createSkill, copySkillHere, shareSkill, publishToCompany, editLocally, restoreCompany, requestToCompany, openBackup, toggleNurturing }
 }

@@ -21,6 +21,7 @@ import {
   Sun,
   TreeStructure,
   Users,
+  UsersFour,
 } from '@phosphor-icons/react'
 import type { Icon } from '@phosphor-icons/react'
 
@@ -63,10 +64,12 @@ export interface NavContext {
   canViewAgentEvents: boolean
   /** The company has the shared company folder (see CompanyContextValue); absent = it has. */
   hasCompanyFolder?: boolean
+  /** On 「Skill を直せる人」 somewhere (see CompanyContextValue). */
+  isSkillEditor?: boolean
 }
 
 /**
- * The menu (管理画面の見直し 2-3, owner decisions 2026-11-02): five places used day to day, and
+ * The menu (管理画面の見直し 2-3, owner decisions 2026-11-02; 見える人のまとまり added 2026-11-09): six places used day to day, and
  * 「詳しい設定」 alone at the bottom (`ADVANCED_ITEM`) — 仕事の進め方・会社の暦・来た連絡の決まり・
  * AI の安全・会社の情報 are inside it. A department manager (部署の管理役) sees ホーム・部署・フォルダ;
  * a member ホーム・部署. Pages left out of the menu still answer their own URL (each checks who may
@@ -75,12 +78,15 @@ export interface NavContext {
 export const NAV_ITEMS: NavItem[] = [
   { segment: '', label: 'ホーム', icon: House },
   { segment: 'members', label: 'メンバー', icon: Users, visible: (c) => c.isAdmin },
+  // 見える人のまとまり (owners and admins): who may see a place, reached from the menu too (owner decision 2026-11-09).
+  { segment: 'groups', label: '見える人のまとまり', icon: UsersFour, visible: (c) => c.isAdmin },
   { segment: 'departments', label: '部署', icon: TreeStructure },
   // 「権限」 and 「非公開フォルダ」 as one (管理画面の見直し 2-3).
   // Not for a company without the shared folder: nothing there to manage (the page itself says so).
   { segment: 'folders', label: 'フォルダ', icon: FolderSimple, visible: (c) => c.hasCompanyFolder !== false && (c.isAdmin || c.isManager) },
-  // 会社の Skill: only a company without the shared folder (one with it shares Skills by sync).
-  { segment: 'skills', label: '会社の Skill', icon: Lightning, visible: (c) => c.hasCompanyFolder === false && (c.isAdmin || c.isManager) },
+  // 会社の Skill: only a company without the shared folder (one with it shares Skills by sync). A
+  // 「Skill を直せる人」 sees it too: the requests to publish wait there for whoever may publish.
+  { segment: 'skills', label: '会社の Skill', icon: Lightning, visible: (c) => c.hasCompanyFolder === false && (c.isAdmin || c.isManager || !!c.isSkillEditor) },
   { segment: 'integrations', label: 'つなぎ先', icon: PlugsConnected, visible: (c) => c.isAdmin },
 ]
 
@@ -128,8 +134,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
-  const { companyId, isAdmin, managedDepartmentIds, canViewAgentEvents, hasCompanyFolder } = useCompany()
-  const navContext: NavContext = { isAdmin, isManager: managedDepartmentIds.length > 0, canViewAgentEvents, hasCompanyFolder }
+  const { companyId, isAdmin, managedDepartmentIds, canViewAgentEvents, hasCompanyFolder, isSkillEditor } = useCompany()
+  const navContext: NavContext = { isAdmin, isManager: managedDepartmentIds.length > 0, canViewAgentEvents, hasCompanyFolder, isSkillEditor }
   const base = `/companies/${companyId}`
 
   return (

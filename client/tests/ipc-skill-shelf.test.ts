@@ -9,7 +9,7 @@ import path from 'node:path'
 import { commitRepo, loadMain, writeFiles, type MainHarness } from './ipc-harness/main-harness.ts'
 import { shelfListing } from '../../shared/core/skill-shelf.ts'
 import { WORKING_FOLDER_TAKEN_MESSAGE } from '../electron/features/company-setup/ipc.ts'
-import { SHELF_ALREADY_COMPANY_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_EDITING_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_RESTORE_PLACE_MESSAGE, SHELF_TOO_MUCH_MESSAGE } from '../shared/skill-shelf.ts'
+import { SHELF_ALREADY_COMPANY_MESSAGE, SHELF_NO_BACKUP_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_EDITING_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_REQUEST_OFFLINE_MESSAGE, SHELF_RESTORE_PLACE_MESSAGE, SHELF_TOO_MUCH_MESSAGE } from '../shared/skill-shelf.ts'
 
 let h: MainHarness
 before(async () => {
@@ -26,12 +26,12 @@ const sha = (text: string) => createHash('sha256').update(text).digest('hex')
 const versionOf = (files: Record<string, string>) => sha(shelfListing(Object.entries(files).map(([p, text]) => ({ path: p, sha256: sha(text) }))))
 
 /** A `none` company with these delivered Skills at its root; its working folder opened. */
-async function open(id: string, delivered: Record<string, Record<string, string>> = {}, skillPublishing: unknown = { company: true, departmentFolders: ['営業部'] }) {
+async function open(id: string, delivered: Record<string, Record<string, string>> = {}, skillPublishing: unknown = { company: true, departmentFolders: ['営業部'] }, requests: unknown[] = []) {
   h.server.on('GET', `/api/companies/${id}`, { json: { success: true, data: { id, name: id, folderKind: 'none' } } })
   h.server.on('GET', `/api/companies/${id}/departments`, { json: { success: true, data: [{ id: 'd1', folder: '営業部' }] } })
   const shelf = { delivered }
   h.server.on('GET', `/api/companies/${id}/me/skill-shelf`, () => ({
-    json: { success: true, data: { items: Object.entries(shelf.delivered).map(([name, files]) => ({ id: `item-${name}`, kind: 'skill', name, department: null, version: versionOf(files), fileCount: 1, totalBytes: 1 })), skillPublishing } },
+    json: { success: true, data: { items: Object.entries(shelf.delivered).map(([name, files]) => ({ id: `item-${name}`, kind: 'skill', name, department: null, version: versionOf(files), fileCount: 1, totalBytes: 1 })), skillPublishing, requests } },
   }))
   h.server.on('GET', new RegExp(`^/api/companies/${id}/skill-shelf/item-`), req => {
     const name = /item-([^/]+)/.exec(req.path)![1]
@@ -195,9 +195,70 @@ test('a git company\'s folder: nothing is asked of the shelf, publishing, 自分
   assert.deepEqual(await h.invoke('skillShelf:publish', folder, skillPath, null), { success: false, error: SHELF_NOT_HERE_MESSAGE })
   assert.deepEqual(await h.invoke('skillShelf:editLocally', folder, skillPath), { success: false, error: SHELF_NOT_HERE_MESSAGE })
   assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: false, error: SHELF_NOT_HERE_MESSAGE })
+  assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, skillPath), { success: false, error: SHELF_NOT_HERE_MESSAGE })
+  assert.deepEqual(await h.invoke('skillShelf:openBackup', folder, skillPath), { success: false, error: SHELF_NOT_HERE_MESSAGE })
   assert.equal(fs.readFileSync(path.join(skillPath, 'SKILL.md'), 'utf8'), 'x\n')
   const listed = await h.invoke<{ skills: Array<{ shelf?: unknown; shelfPublish?: boolean }> }>('skills:list', folder, '', 'company', undefined, { force: true })
   assert.equal(listed.skills[0].shelf, undefined)
   assert.equal(listed.skills[0].shelfPublish, undefined)
   assert.deepEqual(h.server.to(/co-git.*skill-shelf/), [])
+})
+
+test('「会社に出してほしいと頼む」 through main: the folder goes to the requests with what publishing would send; the card then shows it waiting; refusals in the server\'s words', async () => {
+  const id = 'co-ask'
+  const requests: unknown[] = []
+  const { folder } = await open(id, { proposal: { 'SKILL.md': 'x\n' } }, { company: false, departmentFolders: [] }, requests)
+  writeFiles(folder, { '営業部/.claude/skills/visit/SKILL.md': 'visit\n', '営業部/.claude/skills/visit/scripts/a.py': 'print(1)\n', '営業部/.claude/skills/visit/.env': 'KEY=secret\n', '営業部/.claude/skills/visit/.git/config': 'x' })
+  const posted: Array<Record<string, unknown>> = []
+  h.server.on('POST', `/api/companies/${id}/skill-shelf-requests`, req => {
+    posted.push(JSON.parse(req.body!))
+    requests.push({ id: 'r1', name: 'visit', department: { id: 'd1', folder: '営業部' }, state: 'pending', requestedAt: '2026-11-09T01:00:00.000Z', decidedAt: null, reason: null })
+    return { status: 201, json: { success: true, data: { id: 'r1' } } }
+  })
+  const skillPath = path.join(folder, '営業部/.claude/skills/visit')
+  type Listed = { skills: Array<{ skillPath: string; shelfPublish?: boolean; shelfRequest?: { offered: boolean; last?: { state: string } } }> }
+  const before = await h.invoke<Listed>('skills:list', folder, '営業部', 'd1', '営業部', { force: true })
+  assert.deepEqual(before.skills.find(s => s.skillPath.endsWith('visit'))?.shelfRequest, { offered: true })
+  assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, skillPath), { success: true })
+  const { files, ...rest } = posted[0] as { files: Array<{ path: string }> }
+  assert.deepEqual(rest, { departmentId: 'd1', name: 'visit' })
+  assert.deepEqual(files.map(f => f.path).sort(), ['SKILL.md', 'scripts/a.py'], 'no .env, no .git')
+  const after = await h.invoke<Listed>('skills:list', folder, '営業部', 'd1', '営業部', { force: true })
+  assert.equal(after.skills.find(s => s.skillPath.endsWith('visit'))?.shelfRequest?.last?.state, 'pending')
+
+  // A delivered Skill is not sent; the server's refusal is shown as written; offline says so.
+  assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, path.join(folder, '.claude/skills/proposal')), { success: false, error: SHELF_ALREADY_COMPANY_MESSAGE })
+  const sentence = 'パスワードやキーのようなものが入っています。取り除いてから、もう一度やり直してください。'
+  h.server.on('POST', `/api/companies/${id}/skill-shelf-requests`, { status: 400, json: { error: sentence, code: 'SHELF_SECRET_DETECTED' } })
+  assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, skillPath), { success: false, error: sentence })
+  writeFiles(folder, { '.claude/skills/own/SKILL.md': 'own\n' })
+  h.server.offline = true
+  try {
+    assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, path.join(folder, '.claude/skills/own')), { success: false, error: SHELF_REQUEST_OFFLINE_MESSAGE })
+  } finally {
+    h.server.offline = false
+  }
+  assert.equal(posted.length, 1)
+})
+
+test('「控えを開く」 through main: only after 会社の版に戻す kept a copy, and only that copy inside the working folder is shown', async () => {
+  const { folder } = await open('co-copy', { proposal: { 'SKILL.md': 'v1\n' } })
+  const skillPath = path.join(folder, '.claude/skills/proposal')
+  const opened = h.fake.openedPaths.length
+  assert.deepEqual(await h.invoke('skillShelf:openBackup', folder, skillPath), { success: false, error: SHELF_NO_BACKUP_MESSAGE })
+  assert.deepEqual(await h.invoke('skillShelf:editLocally', folder, skillPath), { success: true })
+  writeFiles(folder, { '.claude/skills/proposal/SKILL.md': 'mine\n' })
+  assert.deepEqual(await h.invoke('skillShelf:restoreCompany', folder, skillPath), { success: true, companyVersion: 'back' })
+  type Listed = { skills: Array<{ shelfBackup?: boolean }> }
+  assert.equal((await h.invoke<Listed>('skills:list', folder, '', 'company', undefined, { force: true })).skills[0].shelfBackup, true)
+  assert.deepEqual(await h.invoke('skillShelf:openBackup', folder, skillPath), { success: true })
+  const [kept] = fs.readdirSync(path.join(folder, '.backups'))
+  assert.deepEqual(h.fake.openedPaths.slice(opened), [path.join(folder, '.backups', kept, '.claude/skills/proposal')])
+  // A copy whose folder became a link out of the working folder is never opened.
+  const outside = h.companyDir('co-copy-outside')
+  fs.mkdirSync(path.join(outside, 'proposal'), { recursive: true })
+  fs.rmSync(path.join(folder, '.backups', kept, '.claude/skills'), { recursive: true })
+  fs.symlinkSync(outside, path.join(folder, '.backups', kept, '.claude/skills'))
+  assert.deepEqual(await h.invoke('skillShelf:openBackup', folder, skillPath), { success: false, error: SHELF_NO_BACKUP_MESSAGE })
+  assert.equal(h.fake.openedPaths.length, opened + 1)
 })

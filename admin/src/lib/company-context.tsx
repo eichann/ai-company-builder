@@ -25,6 +25,8 @@ export interface CompanyContextValue {
   hasCompanyFolder: boolean
   /** May open 「AI の操作の記録」: owner/admin, or a department manager while the log's viewer setting allows it. */
   canViewAgentEvents: boolean
+  /** On 「Skill を直せる人」 (the whole company, 全員が直せる, or a department): may publish Skills somewhere, so decides requests. */
+  isSkillEditor: boolean
   /** Re-read the company, the company list and the user's role (after a rename or role change). */
   refresh: () => void
 }
@@ -52,6 +54,8 @@ export function CompanyProvider({ companyId, children }: { companyId: string; ch
   // Until capabilities arrive: owner/admin can always read the log.
   const canViewAgentEvents = capabilities.data?.canViewAgentEvents ?? isAdminRole(role)
   const hasCompanyFolder = company.data?.folderKind !== 'none'
+  const editing = capabilities.data?.skillEditing
+  const isSkillEditor = !!editing && (editing.everywhere || editing.folders.length > 0)
   const { reload: reloadCompany } = company
   const { reload: reloadCompanies } = companies
   const { reload: reloadCapabilities } = capabilities
@@ -66,13 +70,14 @@ export function CompanyProvider({ companyId, children }: { companyId: string; ch
       managedDepartmentIds: managedDepartmentIds ?? [],
       canViewAgentEvents,
       hasCompanyFolder,
+      isSkillEditor,
       refresh: () => {
         reloadCompany()
         reloadCompanies()
         reloadCapabilities()
       },
     }),
-    [companyId, company, companies, role, managedDepartmentIds, canViewAgentEvents, hasCompanyFolder, reloadCompany, reloadCompanies, reloadCapabilities]
+    [companyId, company, companies, role, managedDepartmentIds, canViewAgentEvents, hasCompanyFolder, isSkillEditor, reloadCompany, reloadCompanies, reloadCapabilities]
   )
 
   return <CompanyContext.Provider value={value}>{children}</CompanyContext.Provider>

@@ -20,7 +20,7 @@ import { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordL
 import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 import { securityAlertSchema } from './schema/security-alerts'
-import { skillShelfSchema } from './schema/skill-shelf'
+import { migrateShelfHistoryRequester, skillShelfSchema } from './schema/skill-shelf'
 
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
@@ -48,6 +48,7 @@ export { migrateAiRunColumns } from './schema/ai-runs'
 export { migrateMemberAbsenceHistory, migrateMemberWorkSwitches } from './schema/tasks'
 export { migrateSkillUseColumns } from './schema/skill-uses'
 export { migrateSecondOpinionSetting } from './schema/agents'
+export { migrateShelfHistoryRequester } from './schema/skill-shelf'
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -176,6 +177,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // lane C ▲
   // Each member's own switches (自分の設定); after the connector migrations (it reads their grants).
   migrateMemberWorkSwitches(conn)
+  // Who asked for a version published from a request (plugins.md "Requests to publish").
+  migrateShelfHistoryRequester(conn)
 
   // Company scope + default `everyone: read + write` rule, one scope per
   // department. Idempotent; repairs drift left by older server builds.

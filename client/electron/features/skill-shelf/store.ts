@@ -32,8 +32,8 @@ import { isValidFolderName } from '../../../../shared/core/names'
 import { INSTRUCTIONS_FILE, isShelfKind, isShelfVersion, isValidShelfName } from '../../../../shared/core/skill-shelf'
 import type { ShelfKind } from '../../../../shared/core/skill-shelf'
 import {
-  SHELF_ROOT_MARKER, SHELF_STAGING_PREFIX, isNotSkillContent, mayPublishShelfSkill, readShelfPublishing, shelfInstructionsPrompt, shelfPlaceOfSkillFolder,
-  shelfTargets, shelfVersionOf, type ShelfDelivery, type ShelfPublishing, type SkillShelfMark,
+  SHELF_ROOT_MARKER, SHELF_STAGING_PREFIX, isNotSkillContent, mayPublishShelfSkill, mayRequestShelfSkill, readShelfPublishing, readShelfRequests, shelfInstructionsPrompt, shelfPlaceOfSkillFolder,
+  shelfRequestOf, shelfTargets, shelfVersionOf, type ShelfDelivery, type ShelfPublishing, type ShelfRequestMark, type SkillShelfMark, type SkillShelfRequestInfo,
 } from '../../../shared/skill-shelf'
 import { isSkillArtifactPath } from '../../../shared/skill-leftovers'
 import { backupStamp } from '../../../shared/editor-disk-state'
@@ -77,13 +77,27 @@ interface Manifest {
   released: Released[]
   /** Where the member may publish a Skill, as the last list said (`mayPublishShelfSkill`; absent: nowhere). */
   publishing?: ShelfPublishing
+  /** The member's requests to publish (「会社に出してほしいと頼む」), as the last list said. */
+  requests?: ShelfRequestMark[]
 }
 
 interface Released {
   id: string
   rel: string
   version: string
+  /** The company hands out a newer version than `version` (「会社の版が新しくなっています」). */
+  newer?: { version: string; at: string }
 }
+
+/** A `released` entry read back from disk: its own fields checked, a `newer` that is not one dropped. */
+function releasedFrom(raw: Released): Released | null {
+  if (!raw || !isShelfVersion(raw.version) || typeof raw.rel !== 'string' || shelfPlaceOfSkillFolder(raw.rel) === null || typeof raw.id !== 'string') return null
+  const newer = raw.newer && isShelfVersion(raw.newer.version) && typeof raw.newer.at === 'string' ? { newer: { version: raw.newer.version, at: raw.newer.at } } : {}
+  return { id: raw.id, rel: raw.rel, version: raw.version, ...newer }
+}
+
+/** The backup folders 「会社の版に戻す」 makes: `<stamp>_skill_edit`, `_2`, `_3` … when taken. */
+const SKILL_EDIT_BACKUP_RE = /^\d{4}-\d{2}-\d{2}T[\d-]+_skill_edit(?:_\d+)?$/
 
 const emptyManifest = (user: string): Manifest => ({ user, items: [], clashes: [], released: [] })
 
@@ -264,8 +278,9 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
         // Removal trusts `paths`: only what this item's name and place would give is kept.
         items: raw.items.filter(wellFormed),
         clashes: Array.isArray(raw.clashes) ? raw.clashes : [],
-        released: Array.isArray(raw.released) ? raw.released.filter(r => isShelfVersion(r?.version) && typeof r.rel === 'string' && shelfPlaceOfSkillFolder(r.rel) !== null) : [],
+        released: Array.isArray(raw.released) ? raw.released.map(releasedFrom).filter((r): r is Released => r !== null) : [],
         publishing: readShelfPublishing({ skillPublishing: raw.publishing }),
+        requests: readShelfRequests({ requests: raw.requests }),
       }
       memory.set(memoryKey(companyId, root), manifest)
       return manifest
@@ -382,7 +397,7 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
       }
     }
 
-    const next: Manifest = { user, items: [], clashes: [], released: previous.released.filter(r => delivered.has(r.id)), publishing: listed.publishing }
+    const next: Manifest = { user, items: [], clashes: [], released: previous.released.filter(r => delivered.has(r.id)), publishing: listed.publishing, requests: listed.requests }
     // Removal failures stay managed, to be tried again.
     next.items.push(...kept.filter(item => !delivered.has(item.id)))
     for (const entry of listed.items) {
@@ -397,6 +412,10 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
         if (held && await versionOnDisk(entry.kind, entry.name, path.join(root, held.rel), entry.version) !== null) {
           // The version they started from: publishing must not replace a newer one unseen.
           next.clashes.push({ id: entry.id, targets: [held.rel], version: held.version })
+          // A newer company version is told on the card (with its date), never placed over theirs.
+          const base: Released = { id: held.id, rel: held.rel, version: held.version }
+          const now = entry.version !== held.version ? { ...base, newer: { version: entry.version, at: entry.changedAt ?? '' } } : base
+          next.released = next.released.map(r => (r === held ? now : r))
           continue
         }
         // The member's copy is gone: the company's comes back.
@@ -482,7 +501,46 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
       if (item) return { state: 'company', version: item.version }
       const clash = manifest.clashes.find(c => c.targets.includes(rel))
       if (!clash) return undefined
-      return { state: manifest.released.some(r => r.id === clash.id) ? 'editing' : 'clash', version: clash.version }
+      const held = manifest.released.find(r => r.id === clash.id)
+      if (!held) return { state: 'clash', version: clash.version }
+      return { state: 'editing', version: clash.version, ...(held.newer ? { newer: held.newer } : {}) }
+    },
+    /**
+     * 「会社に出してほしいと頼む」 for the Skill folder at `rel`: offered (a place that takes Skills,
+     * where the member may not publish), and their latest request for it.
+     */
+    requestOf(root: string, rel: string): SkillShelfRequestInfo {
+      const manifest = current(root)
+      if (!manifest) return { offered: false }
+      const last = shelfRequestOf(manifest.requests, rel)
+      return { offered: mayRequestShelfSkill(manifest.publishing, rel), ...(last ? { last } : {}) }
+    },
+    /**
+     * 「控えを開く」: the newest copy 「会社の版に戻す」 kept of the Skill folder at `rel`
+     * (`.backups/<stamp>_skill_edit…/<rel>`), or null. Only a plain folder inside the working
+     * folder's own `.backups`: a link anywhere on the way (`.backups`, the backup, a folder of
+     * `rel`) is never followed.
+     */
+    latestBackup(root: string, rel: string): string | null {
+      if (shelfPlaceOfSkillFolder(rel) === null) return null
+      const backups = path.join(root, '.backups')
+      let names: string[] = []
+      try {
+        if (!fs.lstatSync(backups).isDirectory()) return null
+        names = fs.readdirSync(backups).filter(name => SKILL_EDIT_BACKUP_RE.test(name)).sort().reverse()
+      } catch {
+        return null
+      }
+      for (const name of names) {
+        const copy = path.join(backups, name, ...rel.split('/'))
+        try {
+          if (linkOnTheWay(backups, `${name}/${rel}/x`) || !fs.lstatSync(copy).isDirectory()) continue
+        } catch {
+          continue
+        }
+        return copy
+      }
+      return null
     },
     /** Is 「会社に公開」 offered for the Skill folder at `rel` (the last list's `skillPublishing`)? */
     mayPublish(root: string, rel: string): boolean {

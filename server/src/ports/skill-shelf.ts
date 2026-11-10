@@ -3,7 +3,7 @@
  * limited to the handle's company. Check-then-write stays inside one call (better-sqlite3 is
  * synchronous): `put` and `setCurrent` compare the current version and write in one transaction.
  */
-import type { ShelfKind } from '../../shared/core/skill-shelf'
+import type { ShelfKind, ShelfRequestState } from '../../shared/core/skill-shelf'
 
 export interface ShelfItemRow {
   id: string
@@ -39,6 +39,8 @@ export interface ShelfHistoryRow {
   version: string | null
   at: string
   byUser: string
+  /** A version published from a request: who asked for it (`byUser` approved it). */
+  requestedBy: string | null
 }
 
 export interface ShelfPut {
@@ -58,12 +60,57 @@ export interface ShelfPut {
   companyLimitBytes: number
   at: string
   by: string
+  /** Published from a request: who asked (kept in the history beside `by`, who approved). */
+  requestedBy?: string
+  /**
+   * Published from a request: the request and the version the approver looked at. In the same
+   * transaction as the publish it must still be pending with that version (else nothing is written,
+   * `request-changed`), and it is marked published.
+   */
+  fromRequest?: { id: string; version: string }
 }
 
 export type ShelfWrite =
   | { ok: true; itemId: string; changed: boolean }
   | { ok: false; reason: 'conflict'; currentVersion: string | null }
-  | { ok: false; reason: 'not-found' | 'full' }
+  | { ok: false; reason: 'not-found' | 'full' | 'request-changed' }
+
+/** A request to publish a Skill (「会社に出してほしいと頼む」); always a Skill. */
+export interface ShelfRequestRow {
+  id: string
+  departmentId: string | null
+  name: string
+  requestedBy: string
+  requestedAt: string
+  version: string
+  fileCount: number
+  totalBytes: number
+  autorun: boolean
+  state: ShelfRequestState
+  decidedBy: string | null
+  decidedAt: string | null
+  reason: string | null
+  publishedVersion: string | null
+}
+
+export interface ShelfRequestPut {
+  /** The new row's id when the member has none at this place yet. */
+  newId: string
+  departmentId: string | null
+  name: string
+  by: string
+  at: string
+  version: string
+  files: ShelfStoredFile[]
+  fileCount: number
+  totalBytes: number
+  autorun: boolean
+  limits: { pendingPerMember: number; pendingPerCompany: number; pendingCompanyBytes: number }
+}
+
+export type ShelfRequestWrite =
+  | { ok: true; id: string }
+  | { ok: false; reason: 'member-limit' | 'company-limit' }
 
 export interface SkillShelfRepository {
   items(): ShelfItemRow[]
@@ -92,4 +139,21 @@ export interface SkillShelfRepository {
   removeVersion(itemId: string, version: string, at: string, by: string): 'removed' | 'not-found' | 'current'
   /** Remove an item that is taken off (no current version), with its versions and history. */
   removeItem(itemId: string): 'removed' | 'not-found' | 'published'
+
+  /** Every request: the pending ones, and the newest `decidedLimit` decided ones (newest first). */
+  requests(decidedLimit: number): ShelfRequestRow[]
+  /** One member's requests (every state), newest first. */
+  requestsBy(userId: string): ShelfRequestRow[]
+  request(requestId: string): ShelfRequestRow | null
+  /** A pending request's files; null when there is none or it is decided (its files are gone). */
+  requestFiles(requestId: string): ShelfStoredFile[] | null
+  /**
+   * A member's request at a place: replaces their earlier one there (pending or decided) with a
+   * pending one. The limits count pending requests other than the one replaced; checked and
+   * written in one transaction.
+   */
+  putRequest(input: ShelfRequestPut): ShelfRequestWrite
+  /** Decide a pending request (its files go); false when it is not pending any more. */
+  /** Declines a pending request whose version is still `version`; false when it is not (decided, replaced or gone). */
+  declineRequest(requestId: string, version: string, decision: { by: string; at: string; reason: string | null }): boolean
 }

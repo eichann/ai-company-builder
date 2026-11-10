@@ -188,7 +188,9 @@ contract.invoke recordViews:search
 contract.invoke recordViews:topics
 contract.invoke shell:openExternal
 contract.invoke skillShelf:editLocally
+contract.invoke skillShelf:openBackup
 contract.invoke skillShelf:publish
+contract.invoke skillShelf:requestPublish
 contract.invoke skillShelf:restoreCompany
 contract.invoke skills:list
 contract.invoke skills:makePrivate
@@ -485,6 +487,7 @@ contract.type ElectronAPI.onSparseProgress = onSparseProgress: Subscribe<'sparse
 contract.type ElectronAPI.onToolApprovalRequest = onToolApprovalRequest: Subscribe<'tool-approval-request'>
 contract.type ElectronAPI.onWriteAccessChanged = onWriteAccessChanged: Subscribe<'writeAccess:changed'>
 contract.type ElectronAPI.openChatWindow = openChatWindow: Invoke<'chatWindow:open'>
+contract.type ElectronAPI.openCompanySkillBackup = openCompanySkillBackup: Invoke<'skillShelf:openBackup'>
 contract.type ElectronAPI.openExternal = openExternal: Invoke<'shell:openExternal'>
 contract.type ElectronAPI.openFileInMainWindow = openFileInMainWindow: Invoke<'chatWindow:openFile'>
 contract.type ElectronAPI.openOutboundMailAttachment = openOutboundMailAttachment: Invoke<'outboundMail:openAttachment'>
@@ -506,6 +509,7 @@ contract.type ElectronAPI.removeAbsence = removeAbsence: Invoke<'absences:remove
 contract.type ElectronAPI.removeOutboundMailAttachment = removeOutboundMailAttachment: Invoke<'outboundMail:removeAttachment'>
 contract.type ElectronAPI.renameItem = renameItem: Invoke<'fs:rename'>
 contract.type ElectronAPI.reportChatWindowStatus = reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
+contract.type ElectronAPI.requestCompanySkill = requestCompanySkill: Invoke<'skillShelf:requestPublish'>
 contract.type ElectronAPI.requestMeetingReading = requestMeetingReading: Invoke<'minutes:requestReading'>
 contract.type ElectronAPI.reservedPathRefusal = reservedPathRefusal: Invoke<'privateFolders:reservedPathRefusal'>
 contract.type ElectronAPI.resolveOutboundMail = resolveOutboundMail: Invoke<'outboundMail:resolve'>
@@ -860,7 +864,9 @@ contract.type IpcInvokeChannels.'recordViews:search' = 'recordViews:search': { a
 contract.type IpcInvokeChannels.'recordViews:topics' = 'recordViews:topics': { args: [companyId: string, recordIds: string[]]; result: ConsultationTopicsResult }
 contract.type IpcInvokeChannels.'shell:openExternal' = 'shell:openExternal': { args: [url: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:editLocally' = 'skillShelf:editLocally': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
+contract.type IpcInvokeChannels.'skillShelf:openBackup' = 'skillShelf:openBackup': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:publish' = 'skillShelf:publish': { args: [rootPath: string, skillPath: string, expectedVersion: string | null]; result: SimpleResult }
+contract.type IpcInvokeChannels.'skillShelf:requestPublish' = 'skillShelf:requestPublish': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:restoreCompany' = 'skillShelf:restoreCompany': { args: [rootPath: string, skillPath: string]; result: SkillShelfRestoreResult }
 contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
 contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
@@ -937,7 +943,9 @@ contract.type SkillInfo.isNurturing = isNurturing?: boolean
 contract.type SkillInfo.isPrivate = isPrivate?: boolean
 contract.type SkillInfo.name = name: string
 contract.type SkillInfo.shelf = shelf?: SkillShelfMark
+contract.type SkillInfo.shelfBackup = shelfBackup?: boolean
 contract.type SkillInfo.shelfPublish = shelfPublish?: boolean
+contract.type SkillInfo.shelfRequest = shelfRequest?: SkillShelfRequestInfo
 contract.type SkillInfo.skillPath = skillPath: string
 contract.type SkillsResult = export interface SkillsResult { }
 contract.type SkillsResult.error = error?: string
@@ -1153,7 +1161,9 @@ main.handle recordViews:search @ features/record-views/ipc.ts (companyId, text)
 main.handle recordViews:topics @ features/record-views/ipc.ts (companyId, recordIds)
 main.handle shell:openExternal @ features/tools/ipc.ts (url: string)
 main.handle skillShelf:editLocally @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
+main.handle skillShelf:openBackup @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
 main.handle skillShelf:publish @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string, expectedVersion: string | null)
+main.handle skillShelf:requestPublish @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
 main.handle skillShelf:restoreCompany @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
 main.handle skills:list @ features/skills/ipc.ts (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean })
 main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
@@ -1530,6 +1540,8 @@ preload onWriteAccessChanged -> on writeAccess:changed(<fn>) ; removeListener wr
 preload onWriteAccessChanged : (callback: (data: { companyId: string; access: WriteAccess; }) => void) => () => void
 preload openChatWindow -> invoke chatWindow:open($0, $1)
 preload openChatWindow : (sessionId: string, request: ChatWindowOpenRequest) => Promise<ChatWindowOpenResult>
+preload openCompanySkillBackup -> invoke skillShelf:openBackup($0, $1)
+preload openCompanySkillBackup : (rootPath: string, skillPath: string) => Promise<SimpleResult>
 preload openExternal -> invoke shell:openExternal($0)
 preload openExternal : (url: string) => Promise<SimpleResult>
 preload openFileInMainWindow -> invoke chatWindow:openFile($0)
@@ -1572,6 +1584,8 @@ preload renameItem -> invoke fs:rename($0, $1)
 preload renameItem : (oldPath: string, newPath: string) => Promise<FileOpResult & { newPath?: string | undefined; }>
 preload reportChatWindowStatus -> invoke chatWindow:reportStatus($0)
 preload reportChatWindowStatus : (status: ChatWindowStatus) => Promise<boolean>
+preload requestCompanySkill -> invoke skillShelf:requestPublish($0, $1)
+preload requestCompanySkill : (rootPath: string, skillPath: string) => Promise<SimpleResult>
 preload requestMeetingReading -> invoke minutes:requestReading($0, $1, $2)
 preload requestMeetingReading : (companyId: string, meetingId: string, expectedVersion: number) => Promise<MeetingPressResult>
 preload reservedPathRefusal -> invoke privateFolders:reservedPathRefusal($0)

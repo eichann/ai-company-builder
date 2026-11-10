@@ -15,6 +15,7 @@ import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
 import { useQuery } from '@/lib/use-query'
+import { ShelfRequests } from './shelf-requests'
 
 /** What the page says at the top (plain words: no Git words). */
 export const SHELF_INTRO =
@@ -60,6 +61,7 @@ export function SkillShelfPage() {
   return (
     <div className="mx-auto w-full max-w-4xl">
       <PageHeader title="会社の Skill" description={SHELF_INTRO} />
+      <ShelfRequests companyId={companyId} onPublished={shelf.reload} />
       {shelf.error && !shelf.data ? (
         <ErrorState error={shelf.error} onRetry={shelf.reload} />
       ) : shelf.loading || !shelf.data ? (
@@ -183,6 +185,11 @@ function restoreDescription(currentVersion: string | null): string {
     : 'みんなのアプリに、この版が届きます。いま配っている版も残るので、あとで「これまでの版」から戻せます。'
 }
 
+/** Who asked for this version to be published (「公開のお願い」), from the history; null when nobody asked. */
+function requesterOf(view: ShelfVersionsView, version: string) {
+  return view.history.find((h) => h.action === 'publish' && h.version === version && h.requestedBy)?.requestedBy ?? null
+}
+
 function VersionsDialog({
   item,
   companyId,
@@ -227,6 +234,9 @@ function VersionsDialog({
                     {v.current && <Badge>いま配っている版</Badge>}
                   </p>
                   <p className="text-xs text-muted-foreground">{`${personLabel(v.publishedBy)}さん・${formatDateTime(v.publishedAt)}・ファイル ${v.fileCount} 個`}</p>
+                  {requesterOf(versions.data!, v.version) && (
+                    <p className="text-xs text-muted-foreground">{`${personLabel(requesterOf(versions.data!, v.version)!)}さんのお願いで公開しました`}</p>
+                  )}
                   {v.autorun && <p className="text-xs text-muted-foreground">自動で動く部分があります（戻せるのはオーナーと管理者だけです）</p>}
                 </div>
                 {!v.current && item?.canChange && (

@@ -52,8 +52,16 @@ const withoutFolder = (extra: Record<string, unknown> = {}) => ({
   [`GET ${base}`]: { body: ok({ ...company, role: 'owner', folderKind: 'none' }) },
   [`GET ${base}/skill-shelf`]: { body: ok({ items: [quote, instructions] }) },
   [`GET ${base}/skill-shelf/s_1/versions`]: { body: ok(versions) },
+  [`GET ${base}/skill-shelf-requests`]: { body: ok({ requests: [] }) },
   ...extra,
 })
+
+const b64 = (text: string) => btoa(String.fromCharCode(...new TextEncoder().encode(text)))
+const request = {
+  id: 'r_1', name: 'estimate', department: { id: 'd_sales', name: '営業部', folder: '営業部' },
+  requestedBy: { id: 'u_member', name: '田中 太郎' }, requestedAt: '2026-11-09T01:00:00.000Z', state: 'pending', fileCount: 2, totalBytes: 50, version: V1,
+  autorun: false, decidedBy: null, decidedAt: null, reason: null, publishedVersion: null, mine: false, canDecide: true, currentVersion: null,
+}
 
 describe('会社の Skill', () => {
   it('lists each item by kind with its place, version, who and when, in plain words', async () => {
@@ -168,6 +176,94 @@ describe('会社の Skill', () => {
     expect(within(list).queryByRole('button', { name: 'この版を消す' })).not.toBeInTheDocument()
   })
 
+  it('公開のお願い: a publisher sees the pending requests, looks at the files, and publishes after a confirmation', async () => {
+    const replacing = { ...request, id: 'r_2', name: 'quote', currentVersion: V2 }
+    const { calls } = mockApi(withoutFolder({
+      [`GET ${base}/skill-shelf-requests`]: { body: ok({ requests: [request, replacing, { ...request, id: 'r_mine', name: 'own', mine: true, canDecide: false }, { ...request, id: 'r_done', name: 'done', state: 'published' }] }) },
+      [`GET ${base}/skill-shelf-requests/r_1/files`]: { body: ok({ id: 'r_1', name: 'estimate', version: V1, files: [{ path: 'notes/a.bin', base64: b64('\u0000\u0001') }, { path: 'SKILL.md', base64: b64('# 見積の作り方\n') }] }) },
+      [`POST ${base}/skill-shelf-requests/r_2/publish`]: { body: ok({ request: { ...replacing, state: 'published' } }) },
+    }))
+    renderInCompany(<SkillsRoute />)
+    const list = await screen.findByRole('list', { name: '公開のお願い' })
+    // Only what the caller may decide and that still waits.
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(list).getAllByText(/田中 太郎さんから .*・ファイル 2 個/)).toHaveLength(2)
+    expect(within(list).queryByText('own')).toBeNull()
+    expect(within(list).queryByText('done')).toBeNull()
+
+    const first = within(list).getAllByRole('listitem')[0]
+    await userEvent.click(within(first).getByRole('button', { name: '中身を見る' }))
+    const files = await screen.findByRole('list', { name: 'ファイル' })
+    expect(within(files).getByText('# 見積の作り方')).toBeInTheDocument()
+    expect(within(files).getByText(/文字ではないファイルです/)).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+
+    const second = within(list).getAllByRole('listitem')[1]
+    await userEvent.click(within(second).getByRole('button', { name: '公開する' }))
+    expect(screen.getByText(/いま配っている同じ名前の Skill を置き換えます/)).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    await userEvent.click(screen.getAllByRole('button', { name: '公開する' }).at(-1)!)
+    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ url: expect.stringContaining('/skill-shelf-requests/r_2/publish'), body: { requestVersion: V1, expectedVersion: V2 } })
+    await waitFor(() => expect(within(screen.getByRole('list', { name: '公開のお願い' })).getAllByRole('listitem')).toHaveLength(1))
+  })
+
+  it('公開のお願い: files that are not the version the list showed are not shown as if they were', async () => {
+    mockApi(withoutFolder({
+      [`GET ${base}/skill-shelf-requests`]: { body: ok({ requests: [request] }) },
+      [`GET ${base}/skill-shelf-requests/r_1/files`]: { body: ok({ id: 'r_1', name: 'estimate', version: V2, files: [{ path: 'SKILL.md', base64: b64('# 差し替えた中身\n') }] }) },
+    }))
+    renderInCompany(<SkillsRoute />)
+    const list = await screen.findByRole('list', { name: '公開のお願い' })
+    await userEvent.click(within(list).getByRole('button', { name: '中身を見る' }))
+    expect(await screen.findByText('お願いの中身が変わりました。もう一度中身を見てください。')).toBeInTheDocument()
+    expect(screen.queryByText('# 差し替えた中身')).not.toBeInTheDocument()
+  })
+
+  it('公開のお願い: 中身を見る on a request sent again or decided since reads the list again', async () => {
+    let lists = 0
+    const { calls } = mockApi(withoutFolder({
+      [`GET ${base}/skill-shelf-requests`]: () => {
+        lists++
+        return { body: ok({ requests: lists === 1 ? [request] : [] }) }
+      },
+      [`GET ${base}/skill-shelf-requests/r_1/files`]: { status: 404, body: { success: false, error: 'お願いが見つかりません。', code: 'SHELF_REQUEST_NOT_FOUND' } },
+    }))
+    renderInCompany(<SkillsRoute />)
+    const list = await screen.findByRole('list', { name: '公開のお願い' })
+    await userEvent.click(within(list).getByRole('button', { name: '中身を見る' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.url.endsWith('/skill-shelf-requests'))).toHaveLength(2))
+    await waitFor(() => expect(screen.queryByRole('list', { name: '公開のお願い' })).not.toBeInTheDocument())
+  })
+
+  it('公開のお願い: 見送る takes an optional short reason; a too long one cannot be sent', async () => {
+    const { calls } = mockApi(withoutFolder({
+      [`GET ${base}/skill-shelf-requests`]: { body: ok({ requests: [request] }) },
+      [`POST ${base}/skill-shelf-requests/r_1/decline`]: { body: ok({ request: { ...request, state: 'declined' } }) },
+    }))
+    renderInCompany(<SkillsRoute />)
+    const list = await screen.findByRole('list', { name: '公開のお願い' })
+    await userEvent.click(within(list).getByRole('button', { name: '見送る' }))
+    const box = screen.getByLabelText('理由（なくてもかまいません）')
+    await userEvent.type(box, 'あ'.repeat(201))
+    expect(screen.getAllByRole('button', { name: '見送る' }).at(-1)).toBeDisabled()
+    await userEvent.clear(box)
+    await userEvent.type(box, '  いまは使わないため  ')
+    await userEvent.click(screen.getAllByRole('button', { name: '見送る' }).at(-1)!)
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ requestVersion: V1, reason: 'いまは使わないため' })
+    await waitFor(() => expect(screen.queryByRole('list', { name: '公開のお願い' })).not.toBeInTheDocument())
+  })
+
+  it('a version published from a request says whose request it was', async () => {
+    mockApi(withoutFolder({
+      [`GET ${base}/skill-shelf/s_1/versions`]: { body: ok({ ...versions, history: [{ action: 'publish', version: V2, at: '2026-11-07T01:00:00.000Z', by: { id: 'u_owner', name: '佐藤 花子' }, requestedBy: { id: 'u_bob', name: '鈴木 一郎' } }] }) },
+    }))
+    renderInCompany(<SkillsRoute />)
+    const skills = await screen.findByRole('list', { name: 'Skill' })
+    await userEvent.click(within(skills).getByRole('button', { name: 'これまでの版' }))
+    const list = await screen.findByRole('list', { name: 'これまでの版' })
+    expect(within(list).getByText('鈴木 一郎さんのお願いで公開しました')).toBeInTheDocument()
+  })
+
   it('a company with the shared folder gets a note and the server is not asked', async () => {
     const { calls } = mockApi(companyRoutes())
     renderInCompany(<SkillsRoute />)
@@ -183,5 +279,16 @@ describe('会社の Skill', () => {
     expect(item.visible!({ ...ctx, isAdmin: false, hasCompanyFolder: false })).toBe(false)
     expect(item.visible!({ ...ctx, hasCompanyFolder: true })).toBe(false)
     expect(item.visible!(ctx)).toBe(false)
+    // 「Skill を直せる人」 decide requests there too.
+    expect(item.visible!({ ...ctx, isAdmin: false, isSkillEditor: true, hasCompanyFolder: false })).toBe(true)
+    expect(item.visible!({ ...ctx, isAdmin: false, isSkillEditor: true, hasCompanyFolder: true })).toBe(false)
+  })
+
+  it('見える人のまとまり is in the menu for owners and admins', () => {
+    const item = NAV_ITEMS.find((i) => i.segment === 'groups')!
+    const ctx = { isAdmin: true, isManager: false, canViewAgentEvents: true }
+    expect(item.label).toBe('見える人のまとまり')
+    expect(item.visible!(ctx)).toBe(true)
+    expect(item.visible!({ ...ctx, isAdmin: false, isManager: true })).toBe(false)
   })
 })

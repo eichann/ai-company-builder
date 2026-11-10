@@ -13,10 +13,15 @@
  *   DELETE /skill-shelf/:itemId/versions/:version     owner/admin: remove an old version → ShelfVersionsView
  *   DELETE /skill-shelf/:itemId                       owner/admin: remove an item taken off → { removed: true }
  *   GET  /me/skill-shelf                              MyShelfView (what the member's app places)
+ *   GET  /skill-shelf-requests                        ShelfRequestsView (their own, and those they may decide)
+ *   POST /skill-shelf-requests                        ShelfRequestCreate → ShelfRequestView (someone who may not publish there)
+ *   GET  /skill-shelf-requests/:requestId/files       ShelfRequestContent (a pending one's files)
+ *   POST /skill-shelf-requests/:requestId/publish     { expectedVersion } → ShelfRequestDecided (who may publish there)
+ *   POST /skill-shelf-requests/:requestId/decline     { reason? } → ShelfRequestDecided (who may publish there)
  */
-import type { ShelfKind } from '../core/skill-shelf'
+import type { ShelfKind, ShelfRequestState } from '../core/skill-shelf'
 
-export type { ShelfKind }
+export type { ShelfKind, ShelfRequestState }
 
 export interface ShelfFileUpload {
   /** Path inside the Skill folder ('SKILL.md', 'tools/run.py'). */
@@ -81,6 +86,8 @@ export interface ShelfHistoryEntry {
   version: string | null
   at: string
   by: ShelfPerson
+  /** Published from a request: who asked for it (`by` approved it). Absent otherwise. */
+  requestedBy?: ShelfPerson
 }
 
 export interface ShelfVersionsView {
@@ -115,10 +122,27 @@ export interface DeliveredShelfItem {
   version: string
   fileCount: number
   totalBytes: number
+  /** When this version became the one handed out (「会社の版が新しくなっています」 shows it). */
+  changedAt: string
+}
+
+/** One of the member's own requests, as their app shows it (only at places they read). */
+export interface MyShelfRequest {
+  id: string
+  name: string
+  /** null = the whole company. */
+  department: { id: string; folder: string } | null
+  state: ShelfRequestState
+  requestedAt: string
+  decidedAt: string | null
+  /** 見送る's reason, when one was given. */
+  reason: string | null
 }
 
 export interface MyShelfView {
   items: DeliveredShelfItem[]
+  /** The member's own requests (「会社に出してほしいと頼む」); absent from an older server. */
+  requests?: MyShelfRequest[]
   /**
    * Where the member may publish a Skill (the publish check without the files: auto-run parts are
    * judged when they are sent): the whole company, and the folders (NFC) of departments they read
@@ -139,4 +163,58 @@ export interface ShelfNotAllowedBody {
   error: string
   code: 'SHELF_NOT_ALLOWED'
   files: Array<{ path: string; reason: 'owner-admin-only' | 'not-allowed' | 'autorun' | 'no-write'; findings?: string[] }>
+}
+
+/** POST /skill-shelf-requests: a Skill folder, sent by someone who may not publish it there. */
+export interface ShelfRequestCreate {
+  /** null = the whole company. */
+  departmentId: string | null
+  name: string
+  files: ShelfFileUpload[]
+}
+
+export interface ShelfRequestView {
+  /** A request sent again gets a new id (its earlier one is gone). */
+  id: string
+  name: string
+  /** The version of its files: sent back as `requestVersion` by 公開する / 見送る. */
+  version: string
+  /** null = the whole company. */
+  department: { id: string; name: string; folder: string } | null
+  requestedBy: ShelfPerson
+  requestedAt: string
+  state: ShelfRequestState
+  fileCount: number
+  totalBytes: number
+  /** Has auto-run parts (never accepted: a request with them is refused when sent). */
+  autorun: boolean
+  decidedBy: ShelfPerson | null
+  decidedAt: string | null
+  reason: string | null
+  /** Published: the version it became. */
+  publishedVersion: string | null
+  /** The caller sent it. */
+  mine: boolean
+  /** The caller may publish there, so may 公開する / 見送る while it is pending. */
+  canDecide: boolean
+  /** The item at that place now (to send as expectedVersion), or null when there is none or it is taken off. */
+  currentVersion: string | null
+}
+
+export interface ShelfRequestsView {
+  /** Pending first (newest first), then recently decided ones. */
+  requests: ShelfRequestView[]
+}
+
+export interface ShelfRequestContent {
+  id: string
+  name: string
+  version: string
+  files: ShelfFileUpload[]
+}
+
+export interface ShelfRequestDecided {
+  request: ShelfRequestView
+  /** 公開する: the shelf item as it is now. */
+  item?: ShelfItemView
 }

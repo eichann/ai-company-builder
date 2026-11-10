@@ -18,22 +18,31 @@
  * - Every version is kept until an owner/admin removes it (`removeVersion`, never the current one;
  *   `removeItem` for an item taken off): putting an earlier one back is `restore` (checked like
  *   publishing it, secrets included). The company limit is checked inside the publish's write.
+ * - Requests (「会社に出してほしいと頼む」, owner decision 2026-11-09): someone who may NOT publish a
+ *   Skill at a place sends it (`createRequest`: the publish checks that do not depend on who sends
+ *   it — paths, sizes, secrets, and the parts only an owner/admin may publish, `shelfRequestProblems`
+ *   — refused when sent); those who may publish there see it (`requests`, `requestFiles`) and
+ *   publish it (`publishRequest`: the whole publish check again, with their authority; the history
+ *   keeps who asked) or decline it (`declineRequest`). A request is seen only by its sender and by
+ *   those who may publish at its place, and only while they read that place: anything else is the
+ *   same 404 as a request that does not exist.
  */
 import { resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
 import { secretIn } from '../../shared/core/secret-patterns'
 import {
-  INSTRUCTIONS_NAME, SHELF_LIMITS, isShelfKind, isShelfVersion, isValidShelfName, shelfChangeProblems, shelfFileNeedsText,
-  shelfFilePathProblem, shelfListing, shelfPathClash, shelfTextFileName, type ShelfAuthority, type ShelfKind,
+  INSTRUCTIONS_NAME, SHELF_LIMITS, SHELF_REQUEST_LIMITS, isShelfKind, isShelfVersion, isValidShelfName, shelfChangeProblems, shelfFileNeedsText,
+  shelfFilePathProblem, shelfListing, shelfPathClash, shelfRequestProblems, shelfTextFileName, type ShelfAuthority, type ShelfKind,
 } from '../../shared/core/skill-shelf'
 import { autorunFindingsInText } from '../../shared/core/skill-autorun'
 import type { SkillEditing } from '../../shared/core/skill-files'
 import type {
-  DeliveredShelfItem, MyShelfView, ShelfItemView, ShelfListView, ShelfPerson, ShelfPublishResult, ShelfVersionContent, ShelfVersionsView,
+  DeliveredShelfItem, MyShelfRequest, MyShelfView, ShelfItemView, ShelfListView, ShelfPerson, ShelfPublishResult, ShelfRequestContent,
+  ShelfRequestDecided, ShelfRequestView, ShelfRequestsView, ShelfVersionContent, ShelfVersionsView,
 } from '../../shared/types/skill-shelf'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
-import type { ShelfItemRow, ShelfStoredFile } from '../ports/skill-shelf'
+import type { ShelfItemRow, ShelfRequestRow, ShelfStoredFile } from '../ports/skill-shelf'
 import { hasFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
@@ -64,6 +73,26 @@ export const SHELF_VERSION_IS_CURRENT = {
   code: 'SHELF_VERSION_IS_CURRENT',
 } as const
 export const SHELF_ITEM_PUBLISHED = { error: '配っているものは消せません。先に配るのをやめてください。', code: 'SHELF_ITEM_PUBLISHED' } as const
+
+export const SHELF_REQUEST_NOT_FOUND = { error: 'そのお願いは見つかりません。', code: 'SHELF_REQUEST_NOT_FOUND' } as const
+export const SHELF_REQUEST_NOT_NEEDED = {
+  error: 'あなたはこの場所に公開できます。お願いせずに「会社に公開」を使ってください。',
+  code: 'SHELF_REQUEST_NOT_NEEDED',
+} as const
+export const SHELF_REQUEST_CHANGED = { error: 'お願いの中身が変わりました。もう一度中身を見てください。', code: 'SHELF_REQUEST_CHANGED' } as const
+export const SHELF_REQUEST_DECIDED = { error: 'このお願いは、もう公開されたか見送られています。', code: 'SHELF_REQUEST_DECIDED' } as const
+export const SHELF_REQUEST_NOT_DECIDER = {
+  error: 'このお願いを公開したり見送ったりできるのは、この場所に Skill を公開できる人だけです。',
+  code: 'SHELF_REQUEST_NOT_DECIDER',
+} as const
+export const SHELF_REQUEST_MEMBER_LIMIT = {
+  error: `返事を待っているお願いが多すぎます（1人 ${SHELF_REQUEST_LIMITS.pendingPerMember} 件まで）。返事が来てから、もう一度やり直してください。`,
+  code: 'SHELF_REQUEST_LIMIT',
+} as const
+export const SHELF_REQUEST_COMPANY_LIMIT = {
+  error: '会社全体で、返事を待っているお願いが多すぎます。管理者に相談してください。',
+  code: 'SHELF_REQUEST_LIMIT',
+} as const
 
 export interface SkillShelfDeps {
   companyData: CompanyDataSource
@@ -237,6 +266,66 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
     return { item: view(ctx, row, people([row.changedBy])), changed: wasChanged }
   }
 
+  /** May the member publish a Skill at this request's place (who may 公開する / 見送る)? Content aside: judged again on publishing. */
+  const mayDecide = (ctx: Context, row: ShelfRequestRow) =>
+    ctx.reads(row.departmentId) && ctx.problems('skill', row.departmentId, row.name, [{ path: 'SKILL.md' }], false).length === 0
+
+  /** The request when the member sent it or may decide it, and reads its place; else the one 404. */
+  function visibleRequest(ctx: Context, member: Member, requestId: unknown): Outcome<ShelfRequestRow> {
+    const notFound = refuse('not-found', SHELF_REQUEST_NOT_FOUND.error, { code: SHELF_REQUEST_NOT_FOUND.code })
+    if (typeof requestId !== 'string' || requestId.length > 100) return notFound
+    const row = ctx.handle.skillShelf.request(requestId)
+    if (!row || !ctx.reads(row.departmentId)) return notFound
+    if (row.requestedBy !== member.userId && !mayDecide(ctx, row)) return notFound
+    return ok(row)
+  }
+
+  function requestView(ctx: Context, member: Member, row: ShelfRequestRow, person: (id: string) => ShelfPerson): ShelfRequestView {
+    const dept = row.departmentId === null ? null : ctx.departments.get(row.departmentId)
+    return {
+      id: row.id,
+      name: row.name,
+      department: dept ? { id: dept.id, name: dept.name, folder: dept.folder } : null,
+      requestedBy: person(row.requestedBy),
+      requestedAt: row.requestedAt,
+      state: row.state,
+      fileCount: row.fileCount,
+      totalBytes: row.totalBytes,
+      version: row.version,
+      autorun: row.autorun,
+      decidedBy: row.decidedBy ? person(row.decidedBy) : null,
+      decidedAt: row.decidedAt,
+      reason: row.reason,
+      publishedVersion: row.publishedVersion,
+      mine: row.requestedBy === member.userId,
+      canDecide: mayDecide(ctx, row),
+      currentVersion: ctx.handle.skillShelf.itemAt('skill', row.departmentId, row.name)?.currentVersion ?? null,
+    }
+  }
+
+  /** Who may 公開する / 見送る, checked before the body: 404 when not seen, 403 for a sender who may not, 409 once decided. */
+  function decidable(ctx: Context, member: Member, requestId: string): Outcome<ShelfRequestRow> {
+    const found = visibleRequest(ctx, member, requestId)
+    if (!found.ok) return found
+    if (!mayDecide(ctx, found.value)) return refuse('forbidden', SHELF_REQUEST_NOT_DECIDER.error, { code: SHELF_REQUEST_NOT_DECIDER.code })
+    if (found.value.state !== 'pending') return refuse('conflict', SHELF_REQUEST_DECIDED.error, { code: SHELF_REQUEST_DECIDED.code })
+    return found
+  }
+
+  const requestChanged = () => refuse('conflict', SHELF_REQUEST_CHANGED.error, { code: SHELF_REQUEST_CHANGED.code })
+  /** The version of the request's files the decider looked at (`ShelfRequestContent.version`, also in the list). */
+  function parseRequestVersion(body: unknown): Outcome<string> {
+    const v = isObject(body) ? body.requestVersion : undefined
+    return isShelfVersion(v) ? ok(v) : bad('SHELF_BAD_VERSION', 'requestVersion must be the version of the request that was looked at')
+  }
+
+  function decidedView(ctx: Context, member: Member, requestId: string, itemId?: string): ShelfRequestDecided {
+    const row = ctx.handle.skillShelf.request(requestId) as ShelfRequestRow
+    const out: ShelfRequestDecided = { request: requestView(ctx, member, row, people(row.decidedBy ? [row.requestedBy, row.decidedBy] : [row.requestedBy])) }
+    if (itemId) out.item = result(ctx, itemId, true).item
+    return out
+  }
+
   const service = {
     /** GET /skill-shelf — every item of a place the member reads, published or taken off. */
     list(member: Member): Outcome<ShelfListView> {
@@ -263,7 +352,7 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
           return {
             id: r.id, kind: r.kind, name: r.name,
             department: dept ? { id: dept.id, folder: dept.folder } : null,
-            version: r.currentVersion as string, fileCount: r.fileCount, totalBytes: r.totalBytes,
+            version: r.currentVersion as string, fileCount: r.fileCount, totalBytes: r.totalBytes, changedAt: r.changedAt,
           }
         })
       // Content aside (auto-run parts are judged on the files): may a Skill be published at the place at all?
@@ -272,7 +361,17 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       const departmentFolders = [...ctx.departments.values()]
         .filter(d => ctx.reads(d.id) && mayPublish(d.id))
         .map(d => d.folder.normalize('NFC'))
-      return ok({ items, skillPublishing: { company: mayPublish(null), departmentFolders } })
+      // Their own requests, only at places they still read (a department's name never leaks through them).
+      const requests: MyShelfRequest[] = ctx.handle.skillShelf.requestsBy(member.userId)
+        .filter(r => ctx.reads(r.departmentId))
+        .map(r => {
+          const dept = r.departmentId === null ? null : ctx.departments.get(r.departmentId)
+          return {
+            id: r.id, name: r.name, department: dept ? { id: dept.id, folder: dept.folder } : null,
+            state: r.state, requestedAt: r.requestedAt, decidedAt: r.decidedAt, reason: r.reason,
+          }
+        })
+      return ok({ items, skillPublishing: { company: mayPublish(null), departmentFolders }, requests })
     },
 
     /** GET /skill-shelf/:itemId/versions — every version (newest first) and who changed what. */
@@ -284,14 +383,14 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       const row = found.value
       const versions = ctx.handle.skillShelf.versions(row.id)
       const history = ctx.handle.skillShelf.history(row.id)
-      const person = people([row.changedBy, ...versions.map(v => v.publishedBy), ...history.map(h => h.byUser)])
+      const person = people([row.changedBy, ...versions.map(v => v.publishedBy), ...history.flatMap(h => (h.requestedBy ? [h.byUser, h.requestedBy] : [h.byUser]))])
       return ok({
         item: view(ctx, row, person),
         versions: versions.map(v => ({
           version: v.version, fileCount: v.fileCount, totalBytes: v.totalBytes, publishedAt: v.publishedAt,
           publishedBy: person(v.publishedBy), current: v.version === row.currentVersion, autorun: v.autorun,
         })),
-        history: history.map(h => ({ action: h.action, version: h.version, at: h.at, by: person(h.byUser) })),
+        history: history.map(h => ({ action: h.action, version: h.version, at: h.at, by: person(h.byUser), ...(h.requestedBy ? { requestedBy: person(h.requestedBy) } : {}) })),
       })
     },
 
@@ -424,6 +523,133 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       if (removed === 'not-found') return itemNotFound()
       if (removed === 'published') return refuse('conflict', SHELF_ITEM_PUBLISHED.error, { code: SHELF_ITEM_PUBLISHED.code })
       return ok({ removed: true })
+    },
+
+    /** GET /skill-shelf-requests — the member's own requests and those they may decide, at places they read. */
+    requests(member: Member): Outcome<ShelfRequestsView> {
+      if (deps.hasCompanyFolder(member.companyId)) return notHere()
+      const ctx = contextOf(member)
+      const rows = ctx.handle.skillShelf.requests(SHELF_REQUEST_LIMITS.decidedShown)
+        .filter(r => ctx.reads(r.departmentId) && (r.requestedBy === member.userId || mayDecide(ctx, r)))
+      const person = people(rows.flatMap(r => (r.decidedBy ? [r.requestedBy, r.decidedBy] : [r.requestedBy])))
+      return ok({ requests: rows.map(r => requestView(ctx, member, r, person)) })
+    },
+
+    /**
+     * POST /skill-shelf-requests — 「会社に出してほしいと頼む」: a Skill folder from someone who may not
+     * publish it at that place. Refused when sent for what no publisher could take from them either.
+     */
+    createRequest(member: Member, body: unknown): Outcome<ShelfRequestView> {
+      if (deps.hasCompanyFolder(member.companyId)) return notHere()
+      if (!isObject(body)) return bad('SHELF_BAD_CONTENT', 'Request body must be a JSON object')
+      if (!isValidShelfName('skill', body.name)) return bad('SHELF_BAD_NAME', '名前は半角の英小文字・数字・「-」「_」で入れてください（64文字まで）。')
+      const name = body.name
+      if (body.departmentId !== null && typeof body.departmentId !== 'string') return bad('SHELF_BAD_CONTENT', 'departmentId must be a department id or null')
+      const content = parseShelfContent('skill', name, { files: body.files })
+      if (!content.ok) return content
+      const files = content.value
+
+      const ctx = contextOf(member)
+      const departmentId = body.departmentId as string | null
+      // A department that does not exist and one the member cannot read: one answer.
+      if (!ctx.reads(departmentId)) return refuse('not-found', SHELF_PLACE_NOT_FOUND.error, { code: SHELF_PLACE_NOT_FOUND.code })
+      // Someone who may publish here publishes; a request is for those who may not.
+      if (ctx.problems('skill', departmentId, name, files, false).length === 0) {
+        return refuse('conflict', SHELF_REQUEST_NOT_NEEDED.error, { code: SHELF_REQUEST_NOT_NEEDED.code })
+      }
+      // What only an owner/admin may publish (agent config, auto-run parts): refused now, with publishing's reasons.
+      const onlyOwners = shelfRequestProblems('skill', ctx.folderOf(departmentId) ?? null, name, files)
+      if (onlyOwners.length > 0) return notAllowed(onlyOwners)
+      const secret = secretsIn(files)
+      if (secret) return secret
+      const written = ctx.handle.skillShelf.putRequest({
+        newId: ids.newId(), departmentId, name, by: member.userId, at: clock.now(), version: versionOf(files),
+        files: files.map(f => ({ path: f.path, base64: f.bytes.toString('base64') })), fileCount: files.length,
+        totalBytes: files.reduce((n, f) => n + f.bytes.length, 0),
+        autorun: false,
+        limits: SHELF_REQUEST_LIMITS,
+      })
+      if (!written.ok) {
+        const limit = written.reason === 'member-limit' ? SHELF_REQUEST_MEMBER_LIMIT : SHELF_REQUEST_COMPANY_LIMIT
+        return refuse('conflict', limit.error, { code: limit.code })
+      }
+      const row = ctx.handle.skillShelf.request(written.id) as ShelfRequestRow
+      return ok(requestView(ctx, member, row, people([member.userId])))
+    },
+
+    /** GET /skill-shelf-requests/:requestId/files — a pending request's files (its sender, or who may decide it). */
+    requestFiles(member: Member, requestId: string): Outcome<ShelfRequestContent> {
+      if (deps.hasCompanyFolder(member.companyId)) return notHere()
+      const ctx = contextOf(member)
+      const found = visibleRequest(ctx, member, requestId)
+      if (!found.ok) return found
+      const stored = ctx.handle.skillShelf.requestFiles(found.value.id)
+      if (!stored) return refuse('conflict', SHELF_REQUEST_DECIDED.error, { code: SHELF_REQUEST_DECIDED.code })
+      return ok({ id: found.value.id, name: found.value.name, version: found.value.version, files: stored.map(f => ({ path: f.path, base64: f.base64 })) })
+    },
+
+    /**
+     * POST /skill-shelf-requests/:requestId/publish { expectedVersion, requestVersion } — 公開する:
+     * published as a new version by the caller (every publish check again, with their authority), the
+     * history noting who asked; the request is decided and its files go, in the same transaction.
+     * `requestVersion` is the version of the files the caller looked at: anything else → 409
+     * `SHELF_REQUEST_CHANGED` (a request sent again has a new id, so an old id is 404 anyway).
+     */
+    publishRequest(member: Member, requestId: string, body: unknown): Outcome<ShelfRequestDecided> {
+      if (deps.hasCompanyFolder(member.companyId)) return notHere()
+      const ctx = contextOf(member)
+      const found = decidable(ctx, member, requestId)
+      if (!found.ok) return found
+      const row = found.value
+      const expected = parseExpected(isObject(body) ? body.expectedVersion : undefined)
+      if (!expected.ok) return expected
+      const seen = parseRequestVersion(body)
+      if (!seen.ok) return seen
+      if (seen.value !== row.version) return requestChanged()
+      const stored = ctx.handle.skillShelf.requestFiles(row.id)
+      if (!stored) return refuse('conflict', SHELF_REQUEST_DECIDED.error, { code: SHELF_REQUEST_DECIDED.code })
+      // The upload rules again (paths, sizes, count), and the files are still the version looked at.
+      const content = parseShelfContent('skill', row.name, { files: stored })
+      if (!content.ok) return content
+      const files = content.value
+      if (versionOf(files) !== row.version) return requestChanged()
+      const problems = ctx.problems('skill', row.departmentId, row.name, files, true)
+      if (problems.length > 0) return notAllowed(problems)
+      // Checked again: a pattern added since it was sent.
+      const secret = secretsIn(files)
+      if (secret) return secret
+      const version = versionOf(files)
+      const at = clock.now()
+      const written = ctx.handle.skillShelf.put({
+        newItemId: ids.newId(), kind: 'skill', departmentId: row.departmentId, name: row.name, expected: expected.value, version,
+        files: stored, fileCount: files.length, totalBytes: files.reduce((n, f) => n + f.bytes.length, 0),
+        autorun: files.some(f => f.text !== undefined && autorunFindingsInText(f.text).length > 0),
+        companyLimitBytes: SHELF_LIMITS.companyBytes,
+        at, by: member.userId, requestedBy: row.requestedBy, fromRequest: { id: row.id, version: row.version },
+      })
+      if (!written.ok) {
+        if (written.reason === 'request-changed') return requestChanged()
+        if (written.reason === 'conflict') return changed(written.currentVersion)
+        if (written.reason === 'full') return refuse('conflict', SHELF_COMPANY_FULL.error, { code: SHELF_COMPANY_FULL.code })
+        return itemNotFound()
+      }
+      return ok(decidedView(ctx, member, row.id, written.itemId))
+    },
+
+    /** POST /skill-shelf-requests/:requestId/decline { requestVersion, reason? } — 見送る, with a short reason or none. */
+    declineRequest(member: Member, requestId: string, body: unknown): Outcome<ShelfRequestDecided> {
+      if (deps.hasCompanyFolder(member.companyId)) return notHere()
+      const ctx = contextOf(member)
+      const found = decidable(ctx, member, requestId)
+      if (!found.ok) return found
+      const raw = isObject(body) ? body.reason : undefined
+      if (raw !== undefined && raw !== null && typeof raw !== 'string') return bad('SHELF_BAD_REASON', 'reason must be a string')
+      const reason = typeof raw === 'string' ? raw.trim() : ''
+      if (reason.length > SHELF_REQUEST_LIMITS.reasonLength) return bad('SHELF_BAD_REASON', `理由は ${SHELF_REQUEST_LIMITS.reasonLength} 文字までです。`)
+      const seen = parseRequestVersion(body)
+      if (!seen.ok) return seen
+      if (!ctx.handle.skillShelf.declineRequest(found.value.id, seen.value, { by: member.userId, at: clock.now(), reason: reason || null })) return requestChanged()
+      return ok(decidedView(ctx, member, found.value.id))
     },
   }
   return service

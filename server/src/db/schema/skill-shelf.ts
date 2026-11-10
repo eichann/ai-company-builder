@@ -63,4 +63,37 @@ export const skillShelfSchema = `
     BEGIN SELECT RAISE(ABORT, 'shelf_history.company_id must be the company of its item'); END;
     CREATE TRIGGER IF NOT EXISTS shelf_history_no_update BEFORE UPDATE ON shelf_history
     BEGIN SELECT RAISE(ABORT, 'shelf_history is append-only'); END;
+
+    -- 「会社に出してほしいと頼む」: a Skill someone who may not publish it at a place asks those who
+    -- may to publish. One row per member × place × name (a new request replaces their earlier
+    -- one). files: JSON [{ path, base64 }] while pending, NULL once decided. Goes with its
+    -- department (nothing of it may outlive the place it names).
+    CREATE TABLE IF NOT EXISTS shelf_requests (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      department_id TEXT REFERENCES departments(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      requested_by TEXT NOT NULL,
+      requested_at TEXT NOT NULL,
+      version TEXT NOT NULL,
+      files TEXT,
+      file_count INTEGER NOT NULL,
+      total_bytes INTEGER NOT NULL,
+      autorun INTEGER NOT NULL DEFAULT 0 CHECK (autorun IN (0, 1)),
+      state TEXT NOT NULL CHECK (state IN ('pending', 'published', 'declined')),
+      decided_by TEXT,
+      decided_at TEXT,
+      reason TEXT,
+      published_version TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS shelf_requests_place ON shelf_requests(company_id, requested_by, IFNULL(department_id, ''), name);
+    CREATE TRIGGER IF NOT EXISTS shelf_requests_department_company BEFORE INSERT ON shelf_requests
+    WHEN NEW.department_id IS NOT NULL AND NEW.company_id IS NOT (SELECT company_id FROM departments WHERE id = NEW.department_id)
+    BEGIN SELECT RAISE(ABORT, 'shelf_requests.company_id must be the company of its department'); END;
 `
+
+/** Who asked for a version published from a request (shelf_history.requested_by; NULL = nobody asked). Idempotent. */
+export function migrateShelfHistoryRequester(conn: { prepare(sql: string): { all(): unknown[] }; exec(sql: string): unknown }): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(shelf_history)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('requested_by')) conn.exec('ALTER TABLE shelf_history ADD COLUMN requested_by TEXT')
+}
