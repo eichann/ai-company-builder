@@ -188,6 +188,8 @@ installElectronAPI({
     show('acted', `drive@${version}${fileIds?.length ? ` show=${fileIds.join('+')}` : ''}${chosen ? ` chosen=${chosen.map(f => f.id).join(',')}` : ''}`)
     // `?drive=slow`: the chooser stays open a while (the card is busy).
     if (params.get('drive') === 'slow') await new Promise(r => setTimeout(r, 1500))
+    // `?drive=cancel`: the member closes Google's chooser without choosing.
+    if (params.get('drive') === 'cancel') return { success: true, recordId, linked: [] }
     return { success: true, recordId, linked: chosen ? chosen.map(f => f.name) : ['B社 見積'] }
   },
   // `?drive=off`: the company has not set Drive up; `?drive=first`: offered, not allowed yet.

@@ -22,7 +22,7 @@ import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
 import { whenDoneLine } from '../cardActions'
-import { companyNow, droppedText, mayCarryLink, NOT_A_DRIVE_LINK } from '../model'
+import { companyNow, DRIVE_LINK_EMPTY_HINT, droppedText, mayCarryLink, NOT_A_DRIVE_LINK } from '../model'
 import { RecordSourcePanel } from './RecordSourcePanel'
 import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
 import { MinutesReview } from './MinutesReview'
@@ -110,6 +110,8 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
   // 「〇〇と同じ人たちだけに見えるようにしますか？」: a task wider than the 案件 it is being linked to.
+  // The chooser opened on a pasted link ended with nothing chosen (it may have shown no file): say why, until the next action.
+  const [driveLinkHint, setDriveLinkHint] = useState(false)
   const [narrowing, setNarrowing] = useState<{ word: string; answer: (yes: boolean) => void } | null>(null)
   // A file, folder, record or consultation dropped on 「つながっているもの」 is linked (owner decision 2026-11-03).
   // A company without the shared folder: a file dropped from the tree is linked as the member's own (records.md
@@ -124,6 +126,7 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
   const version = card.record.version
   const change = async (fn: () => Promise<string | null>): Promise<string | null> => {
     setBusy(true)
+    setDriveLinkHint(false)
     try {
       return await fn()
     } finally {
@@ -190,11 +193,14 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     driveSetup.reload()
     if (!r.success) return r.error
     if (r.linked.length > 0) setNotice({ kind: 'done', text: `${r.linked.map(n => `「${n}」`).join('・')}をつなぎました`, undo: null })
+    // Only for a pasted / dropped link: a plain chooser's cancel is the member's own choice.
+    else if (options?.fileIds?.length && !r.error) setDriveLinkHint(true)
     return r.error ?? null
   })
   const linkDriveText = (text: string): Promise<string | null> => {
     // While the chooser is open (busy), another link would open a second chooser window.
     if (busy) return Promise.resolve(null)
+    setDriveLinkHint(false)
     if (!driveSetup.usable) return Promise.resolve(driveSetup.note)
     const ids = driveFileIdsFromText(text)
     return ids.length > 0 ? linkDrive({ fileIds: ids }) : Promise.resolve(NOT_A_DRIVE_LINK)
@@ -237,7 +243,7 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
   return <><CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     linkDrop={linkDrop} notDownloadedFolderOf={notDownloadedFolderOf}
     onLinkFile={sharedFolder ? p => fileLink(p, false) : null} onUnlinkFile={p => fileLink(p, true)} personalHere={personalHere}
-    {...(!sharedFolder ? { typedFiles: { localHere, onLinkDrive: (chosen?: TaskDriveChoice[]) => linkDrive(chosen ? { chosen } : undefined), onLinkDriveText: linkDriveText, drive: { usable: driveSetup.usable, note: driveSetup.note }, onUnlink: unlinkTarget } } : {})}
+    {...(!sharedFolder ? { typedFiles: { localHere, onLinkDrive: (chosen?: TaskDriveChoice[]) => linkDrive(chosen ? { chosen } : undefined), onLinkDriveText: linkDriveText, drive: { usable: driveSetup.usable, note: driveSetup.note, hint: driveLinkHint ? DRIVE_LINK_EMPTY_HINT : null }, onUnlink: unlinkTarget } } : {})}
     {...(card.record.personal && createTodayFile ? { onNewFile: async (name: string) => {
       const made = await createTodayFile(name)
       if ('error' in made) return { error: made.error }
@@ -308,7 +314,7 @@ interface BodyProps {
     /** A pasted or dropped Drive link: the chooser opens showing that file (one 「選択」 links it). */
     onLinkDriveText: (text: string) => Promise<string | null>
     /** Whether Drive is set up for the company, and what to tell before the first press. */
-    drive: { usable: boolean; note: string | null }
+    drive: { usable: boolean; note: string | null; hint: string | null }
     onUnlink: (target: TypedFileTarget, label: string) => Promise<string | null>
   }
   /** ［＋ 新しいファイル］ (a task only the member sees): `error` keeps the name window open. */
@@ -398,7 +404,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
           {onNewFile && <button type="button" disabled={busy} onClick={() => setNaming({ error: null })} data-new-file className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />新しいファイル</button>}
         </>, note: 'つながりは、このやることを見られる人みんなに見えます' }] : []),
         ...(typedFiles ? [{ name: 'ファイル', kind: 'file' as const, action: (
-          <DriveLinkAction companyId={companyId} linked={card.driveFiles.map(f => f.fileId)} busy={busy} usable={typedFiles.drive.usable} note={typedFiles.drive.note}
+          <DriveLinkAction companyId={companyId} linked={card.driveFiles.map(f => f.fileId)} busy={busy} usable={typedFiles.drive.usable} note={typedFiles.drive.note} hint={typedFiles.drive.hint}
             onLink={typedFiles.onLinkDrive} onLinkText={t => { void typedFiles.onLinkDriveText(t).then(setLinkError) }} />
         ), note: TYPED_FILES_NOTE }] : []),
         ...(consult.extra ? [consult.extra] : [])]}

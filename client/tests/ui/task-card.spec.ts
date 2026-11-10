@@ -93,6 +93,28 @@ test('「＋ファイル・フォルダをつなぐ」 links a company file; a l
 // A Drive link pasted or dropped on the card (owner 2026-11-09): Google's chooser opens showing just that
 // file; anything else is refused in plain words. Drive not set up for the company: the button is off and
 // says the administrator prepares it; not allowed yet: the card says Google will ask, for chosen files only.
+// The chooser opened on a pasted link may show no file (not visible to the member, or a type ACB cannot
+// read): a cancel there says what to check, until the next action; a plain chooser's cancel says nothing.
+test('a pasted Drive link whose chooser ends with nothing chosen explains why it may be empty; a plain cancel does not', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { kind: 'none', drive: 'cancel' })
+  const links = page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' })
+  const hint = links.locator('[data-drive-link-hint]')
+  // A plain chooser closed without a choice: nothing to explain.
+  await links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' }).click()
+  await expect(page.locator('#acted')).toHaveText('drive@3')
+  await expect(hint).toHaveCount(0)
+  const box = links.getByRole('textbox', { name: 'Google Drive のリンクを貼りつけてつなぐ' })
+  await box.fill('https://docs.google.com/spreadsheets/d/1AbC-def_GhIjKlMnOpQrStUv/edit')
+  await box.press('Enter')
+  await expect(page.locator('#acted')).toHaveText('drive@3,drive@3 show=1AbC-def_GhIjKlMnOpQrStUv')
+  await expect(hint).toContainText('読める種類（Google ドキュメント・スプレッドシート・スライド・PDF・テキスト）')
+  // The next action takes it away.
+  await links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' }).click()
+  await expect(page.locator('#acted')).toHaveText('drive@3,drive@3 show=1AbC-def_GhIjKlMnOpQrStUv,drive@3')
+  await expect(hint).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
 test('a company without the shared folder: a pasted or dropped Drive link opens the chooser on that file; not set up → off with a note', async ({ page }) => {
   const ID = '1AbC-def_GhIjKlMnOpQrStUv'
   const state = await openPreview(page, 'task-card', { kind: 'none' })

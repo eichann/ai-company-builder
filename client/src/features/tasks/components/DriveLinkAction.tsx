@@ -6,7 +6,7 @@ import { useState } from 'react'
 import type { TaskDriveChoice } from '../../../../shared/tasks'
 import { DriveFiles } from './DriveFiles'
 
-export function DriveLinkAction({ companyId, linked, busy, usable, note, onLink, onLinkText }: {
+export function DriveLinkAction({ companyId, linked, busy, usable, note, hint, onLink, onLinkText }: {
   companyId: string
   /** Drive files already linked to this task. */
   linked: readonly string[]
@@ -14,6 +14,8 @@ export function DriveLinkAction({ companyId, linked, busy, usable, note, onLink,
   /** False when the company has not set Drive up: the button is off and `note` says who can. */
   usable: boolean
   note: string | null
+  /** After the chooser opened on a pasted link ended with nothing chosen: why it may have been empty. */
+  hint: string | null
   /** `chosen` = files from the member's own list; absent = Google's chooser. null = done; else why not. */
   onLink: (chosen?: TaskDriveChoice[]) => Promise<string | null>
   /** A pasted link (or links): the caller reads the Drive ids and opens the chooser with them. */
@@ -32,6 +34,7 @@ export function DriveLinkAction({ companyId, linked, busy, usable, note, onLink,
           onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(text) } }}
           className="w-full rounded border border-gray-200 bg-transparent px-1.5 py-0.5 text-[11px] placeholder:text-gray-400 dark:border-zinc-700" />
       )}
+      {hint && <p role="status" data-drive-link-hint className="text-[11px] text-amber-700 dark:text-amber-300">{hint}</p>}
       {note && <p data-drive-link-note className="text-[11px] text-gray-500 dark:text-zinc-400">{note}</p>}
     </div>
   )

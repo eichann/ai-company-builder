@@ -670,6 +670,9 @@ with none listed the Picker opens at once. `tasks:linkDriveFiles(companyId, reco
 file (`google-drive.md`; the bare id array of an unreleased build is read as `fileIds`); neither — the
 Picker as it opens. Then each is linked at the version the previous link moved to; 「「…」をつなぎました」.
 Anything pasted that is not a Drive file link says 「Google Drive のファイルのリンクではないため、つなげません。」;
+when the Picker opened on a pasted / dropped link ends with nothing chosen (it may have shown no file:
+not visible to the member, or a type ACB cannot read), a quiet line under the box says what to check
+(`DRIVE_LINK_EMPTY_HINT`, `model.ts`) until the next action — never after a plain Picker's cancel;
 the button (list included) is off with a plain note while Drive is not set up for the company, and says
 before the first press that Google will ask (`useDriveLinkSetup`, `driveLinkView`); while the Picker is open
 (busy) neither the list nor a pasted link starts another. A file the consultation's AI put into Drive is
@@ -684,7 +687,8 @@ row is linked as the member's own** (`useLinkDrop` `localFiles`, `DroppedThing.l
 （あなただけに見えます）」), and the drop zone says 「このパソコンのファイル（あなただけ）」. Tests:
 `client/tests/typed-file-links.test.ts`, `tests/ui/task-card.spec.ts` (`?kind=none`; `&drive=list`: 「the
 member's own Drive files offered first」; 「a company with the
-shared folder: no Drive button, a dropped file stays a company file」; 「…a pasted or dropped Drive link…」) — mutation-checked. Each linked file's
+shared folder: no Drive button, a dropped file stays a company file」; 「…a pasted or dropped Drive link…」;
+`&drive=cancel`: 「…explains why it may be empty; a plain cancel does not」) — mutation-checked. Each linked file's
 「…」 offers 「つながりを外す」, then 「「<name>」とのつながりを外しました［取り消す］」 (取り消す links it again).
 
 **Links between records** (owner 2026-11-02; server `records.md` "Linking records later"): each row
