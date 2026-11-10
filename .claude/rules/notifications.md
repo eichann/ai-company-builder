@@ -305,7 +305,7 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   AppShell reads them from the arrivals). A feature turned off writes none of its notices
   (`records.md` "Features on and off").
 - **Meetings where the department shows no task list** (`tasks-ui.md` "Minutes and AI turns"):
-  `TitleBarNotices` takes `meetings` (AppShell, only while the task list is hidden) — a まとまり to
+  `TitleBarNotices` takes `meetings` (the minutes feature's `useMinutesSlots` `titleBarMeetings`, placed by AppShell, only while the task list is hidden) — a まとまり to
   choose and received minutes with the automatic runner's state, each with its buttons, in a 「会議」
   part: those waiting for the member (`needsPerson`: a まとまり to choose; minutes the AI is not
   reading or about to read) at the top of 「あなたの番」 and in its count; the others (the AI reading)

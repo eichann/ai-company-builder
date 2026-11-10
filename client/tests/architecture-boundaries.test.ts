@@ -303,6 +303,32 @@ test('a renderer feature never imports another feature, beyond the files registe
   assert.deepEqual(stale, [], 'remove exceptions that no longer occur')
 })
 
+/**
+ * Features the screen skeleton reaches through one slot file only (renderer-structure.md
+ * "Planned shape of the screen"): what the feature puts on the main screen is that file's,
+ * so AppShell knows nothing else of it. Other app/ files may still compose its parts.
+ */
+const APP_SHELL_SLOTS: Record<string, string> = {
+  minutes: 'src/features/minutes/hooks/useMinutesSlots',
+}
+
+/** AppShell's imports of a slot feature other than its slot file. */
+function shellSlotViolations(imported: readonly string[]): string[] {
+  return imported.filter(t => {
+    const feature = featureOf(t)
+    return feature !== null && feature in APP_SHELL_SLOTS && t !== APP_SHELL_SLOTS[feature]
+  })
+}
+
+test('AppShell reaches the minutes feature only through its slot (useMinutesSlots)', () => {
+  const shell = join(CLIENT, 'src', 'app', 'AppShell.tsx')
+  const imported = importsOf(shell).map(s => target(shell, s))
+  assert.deepEqual(shellSlotViolations(imported), [], 'put what the screen needs of the feature into its slot instead of importing its parts into AppShell')
+  for (const slot of Object.values(APP_SHELL_SLOTS)) assert.ok(imported.includes(slot), `AppShell no longer uses ${slot}: update APP_SHELL_SLOTS`)
+  assert.deepEqual(shellSlotViolations(['src/features/minutes/api', 'src/features/minutes/hooks/useMinutesSlots', 'src/features/tasks/api']),
+    ['src/features/minutes/api'], 'the check sees a minutes import beside the slot (self-test)')
+})
+
 const sharedMayImport = (t: string) => !/^src\/(features|app)(\/|$)/.test(t)
 
 // The folders by kind were emptied into features/ and shared/ (refactor 5-6); new code goes there.

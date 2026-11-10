@@ -846,7 +846,7 @@ unchanged.
   runner's state in words and its reason (「AI が進めています」「AI では始められません：…」…), with
   「もう一度」 / 「人に渡す」 when stopped and, while the AI has not started it, 「自分で読み取る」 (a
   consultation the person starts, `startMinutesReading`) and 「今は読まない」 (`minutes:skip`) —
-  `meetingActions`, composed by `AppShell` from the minutes feature.
+  `meetingActions`, from the minutes feature's `useMinutesSlots`, passed on by `AppShell`.
 - What the AI made shows where the member works: homework tasks in the list, drafts and approval
   requests in a task's card (「AI が用意したもの」), and the server's notices.
 - **No 「まとまり」 on screen** (owner 2026-11-02, concrete kind names only): every word of this
@@ -870,7 +870,7 @@ unchanged.
 - **A department without the list** (`tasksShown` false): the same meetings reach the title bar
   instead (`notifications.md` "The app"): `meetingTurns` (`client/shared/notifications-app.ts`)
   picks the `needsBundle` items and the received meetings in 「AI の番」 from the list AppShell already
-  reads, with the runner's state (`meetingTurns(…, word)`); AppShell gives each its buttons (〇〇を選ぶ → `BundleChooser`,
+  reads, with the runner's state (`meetingTurns(…, word)`); the minutes feature's `useMinutesSlots` gives each its buttons (〇〇を選ぶ → `BundleChooser`,
   自分で読み取る / 今は読まない for a received meeting only, もう一度 / 人に渡す). The minutes first message
   tells the AI, when none is linked, to leave the まとまり's fields and the meeting log and finish the
   rest; choosing the まとまり afterwards gives just that part back to the AI once (`minutes.md` "A
