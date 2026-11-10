@@ -670,6 +670,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ...shared, tokenDigest: sha256TokenDigest, aiTurnOf: (member, recordId, step) => records.aiTurnOf(member, recordId, step),
     // An unfinished minutes reading goes back to 「届いた」 at once, as the run's doing (the app's step name).
     afterFailedRun: (member, run) => { if (run.step === 'minutes-reading') minutes.putBackAfterRun(member, run.recordId, run.id) },
+    // The emergency stop: no run with nobody present starts (or renews its lease) while stopped (agent-stop.md).
+    aiStops: member => agentStops.policyFor(member),
   })
 
   // The parallel lanes (A connectors, B inbox, C plugins) wire their services in their own files

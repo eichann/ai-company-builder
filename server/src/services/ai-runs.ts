@@ -33,6 +33,7 @@ import { notInStep } from './plugin-operation-checks'
 import type { PluginStepProcedurePin } from '../../shared/core/plugins'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type { AiRunView } from '../../shared/types/ai-runs'
+import type { AgentStopPolicy, AgentStopToolKind } from '../../shared/types/agent-stop'
 import type { AiRunOperationRow, AiRunRepository, AiRunRow } from '../ports/ai-runs'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -57,6 +58,8 @@ export interface AiRunDeps {
    * still 「読んでいる」 → 「届いた」), recorded as caused by the run, not by the member.
    */
   afterFailedRun?: (member: Member, run: { id: string; recordId: string; step: string }) => void
+  /** The emergency stop in force for this member (everyone's stops and their own: agent-stops.ts `policyFor`). */
+  aiStops: (member: Member) => AgentStopPolicy
 }
 
 /**
@@ -91,6 +94,19 @@ export const RUN_SUPERSEDED = {
 const RUN_CLAIMED = { error: 'ほかの PC が進めています', code: 'RUN_CLAIMED' }
 const RUN_NEEDS_RECONCILE = { error: '外への操作の結果が分からないものがあります。確かめてから続きを進めます。', code: 'RUN_NEEDS_RECONCILE' }
 const RUN_WAITING = { error: '人の確認を待っています。「もう一度」を押すと AI が続きを進めます。', code: 'RUN_WAITING' }
+/**
+ * The emergency stop and runs with nobody present (agent-stop.md "Runs with no person present").
+ * A claim is refused by the whole AI and by each kind an unattended run can reach — a plugin step's
+ * files in its deliverable folder (`write`), `web_research` (`web`), outside services through
+ * connectors and plugin operations (`mcp-external`). Not `command`: no unattended run has a shell
+ * (ai-turns.md). A running run's token is refused by the whole AI only (`runStopped`).
+ * 503: a released app reads a claim's 5xx as 「今は無理」 (claims.ts → `unavailable`, tried again
+ * later), where a 4xx would mark the record taken at that version; a record call's 5xx is a tool failure.
+ */
+const STOPS_UNATTENDED_RUN: readonly AgentStopToolKind[] = ['write', 'web', 'mcp-external']
+export const AI_RUN_STOPPED = {
+  error: '管理者が AI の利用を一時停止しています。再開されるまで AI の番は進みません。', code: 'AI_STOPPED',
+}
 const CONTROL = /[\u0000-\u001f\u007f]/ // eslint-disable-line no-control-regex
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -191,6 +207,12 @@ export function createAiRunService(deps: AiRunDeps) {
     ...run, state: 'open', deviceId: null, claimExpiresAt: null, attempts: 0, failureClass: null, failureCode: null, retryAt: null, updatedAt: at,
   })
 
+  function claimStopped(member: Member): Refusal | null {
+    const stop = deps.aiStops(member)
+    if (!stop.all && !stop.tools.some(kind => STOPS_UNATTENDED_RUN.includes(kind))) return null
+    return refuse('unavailable', AI_RUN_STOPPED.error, { code: AI_RUN_STOPPED.code })
+  }
+
   function generationOf(body: unknown): number | null {
     const g = isObj(body) ? body.generation : undefined
     return typeof g === 'number' && Number.isInteger(g) && g >= 1 ? g : null
@@ -205,6 +227,7 @@ export function createAiRunService(deps: AiRunDeps) {
      * A business plugin's step (`<pluginId>__<step>`, plan C5) is claimable at
      * its state and runs the procedure its work is pinned to (pinned at the
      * first claim); without the plugins lane bound it is never claimable.
+     * Refused (503 `AI_STOPPED`) while the emergency stop covers the member (`STOPS_UNATTENDED_RUN`).
      */
     async claim(member: Member, body: unknown, appBuild?: string | null): Promise<Outcome<{ run: AiRunView; created: boolean }>> {
       if (!isObj(body)) return refuse('bad-request', 'Body must be a JSON object')
@@ -216,6 +239,9 @@ export function createAiRunService(deps: AiRunDeps) {
       for (const v of [pluginVersion, stepsVersion]) {
         if (v !== undefined && !shortText(v, 60)) return refuse('bad-request', 'pluginVersion / stepsVersion are short texts')
       }
+      // Before the turn check and the pin: a stopped AI's claim reads, makes and pins nothing.
+      const stopped = claimStopped(member)
+      if (stopped) return stopped
       // A plugin step's name (`<pluginId>__<step>`) is never a core step's: unbound, it is nobody's turn.
       const steps = step.includes('__') ? pluginSteps : null
       if (step.includes('__') && !steps?.isPluginStep(step)) return refuse('conflict', 'この記録はいま AI の番ではありません', { code: 'NOT_AI_TURN' })
@@ -285,6 +311,8 @@ export function createAiRunService(deps: AiRunDeps) {
       if (generation === null) return refuse('bad-request', 'generation is a whole number ≥ 1')
       const { r, run } = own
       if (run.state !== 'running' || run.generation !== generation) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
+      // Not refused while stopped: the run's token is (`runStopped`). A lease left to run out would let another
+      // PC or step claim the record the moment the stop is released, while this PC still holds the run.
       const at = clock.nowMs()
       const next: AiRunRow = { ...run, claimExpiresAt: nowIso(at + AI_RUN_CLAIM_TTL_MS), updatedAt: nowIso(at) }
       if (!save(r, run, next)) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
@@ -427,6 +455,11 @@ export function createAiRunService(deps: AiRunDeps) {
     },
 
     fence,
+
+    /** The whole AI is stopped for this member (the company's or theirs): a run-bound token reaches nothing (record-ai-tokens). */
+    runStopped(member: Member): boolean {
+      return deps.aiStops(member).all
+    },
 
     /**
      * The server's scope of a built-in step's token (ai-turns.md, `shared/core/ai-turn-routes.ts`):
