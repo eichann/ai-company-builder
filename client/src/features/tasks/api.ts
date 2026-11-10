@@ -4,6 +4,7 @@
 // member may read and do.
 import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
+import type { GoogleStatusResult } from '../../../shared/google'
 import type { TaskCardResult } from '../../../shared/task-card'
 import type { TagSuggestions } from '../../../shared/tag-suggest'
 import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveLinkResult, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from '../../../shared/tasks'
@@ -128,8 +129,18 @@ export function unlinkTargetFromTask(companyId: string, recordId: string, target
   return writes.unlinkTargetFromTask(companyId, recordId, target, expectedVersion)
 }
 
-export function linkDriveFilesToTask(companyId: string, recordId: string, expectedVersion: number, writes: TypedFileWrites = window.electronAPI): Promise<TaskDriveLinkResult> {
-  return writes.linkDriveFilesToTask(companyId, recordId, expectedVersion)
+export function linkDriveFilesToTask(companyId: string, recordId: string, expectedVersion: number, fileIds?: string[], writes: TypedFileWrites = window.electronAPI): Promise<TaskDriveLinkResult> {
+  return writes.linkDriveFilesToTask(companyId, recordId, expectedVersion, fileIds)
+}
+
+/**
+ * Whether ［Google Drive のファイルをつなぐ］ can work for the member: their Google status as the
+ * server answers it (no token; the same read as 設定 → Google).
+ */
+export type DriveSetupReads = ElectronPort<'getGoogleStatus'>
+
+export function getDriveSetup(companyId: string, reads: DriveSetupReads = window.electronAPI): Promise<GoogleStatusResult> {
+  return reads.getGoogleStatus(companyId)
 }
 
 /** A Drive file opened in the member's browser (Drive decides who may see it). */

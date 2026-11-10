@@ -181,7 +181,13 @@ installElectronAPI({
     show('acted', `unlinkTarget ${target.kind} ${target.kind === 'local' ? target.path : target.fileId}@${version}`)
     return { success: true, recordId, entryVersion: version + 1 }
   },
-  linkDriveFilesToTask: async (_c, recordId, version) => { show('acted', `drive@${version}`); return { success: true, recordId, linked: ['B社 見積'] } },
+  linkDriveFilesToTask: async (_c, recordId, version, fileIds) => { show('acted', `drive@${version}${fileIds?.length ? ` show=${fileIds.join('+')}` : ''}`); return { success: true, recordId, linked: ['B社 見積'] } },
+  // `?drive=off`: the company has not set Drive up; `?drive=first`: offered, not allowed yet.
+  getGoogleStatus: async () => ({ success: true, data: {
+    available: true, reason: null, connected: true, status: 'active', googleEmail: 'me@div.example', domain: 'div.example', practice: false, featuresOff: [], seen: [],
+    features: params.get('drive') === 'off' || params.get('drive') === 'first' ? ['minutes'] : ['minutes', 'drive'],
+    companyFeatures: params.get('drive') === 'off' ? ['minutes', 'mail'] : ['minutes', 'mail', 'drive'],
+  } as never }),
   openExternal: async (url: string) => { show('acted', `external ${url}`); return { success: true } as never },
   gitListFiles: async () => ({ success: true, files: ['営業/見積書_v2.xlsx', '営業/提案書.md', '経理/請求書.xlsx'] }),
   shareTask: async (_c, recordId, folder, version) => {

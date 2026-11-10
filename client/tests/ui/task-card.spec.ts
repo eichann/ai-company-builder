@@ -90,6 +90,41 @@ test('「＋ファイル・フォルダをつなぐ」 links a company file; a l
   expectNoPageErrors(state)
 })
 
+// A Drive link pasted or dropped on the card (owner 2026-11-09): Google's chooser opens showing just that
+// file; anything else is refused in plain words. Drive not set up for the company: the button is off and
+// says the administrator prepares it; not allowed yet: the card says Google will ask, for chosen files only.
+test('a company without the shared folder: a pasted or dropped Drive link opens the chooser on that file; not set up → off with a note', async ({ page }) => {
+  const ID = '1AbC-def_GhIjKlMnOpQrStUv'
+  const state = await openPreview(page, 'task-card', { kind: 'none' })
+  const card = page.getByTestId('task-card')
+  const links = card.getByRole('complementary', { name: 'つながっているもの' })
+  const box = links.getByRole('textbox', { name: 'Google Drive のリンクを貼りつけてつなぐ' })
+  await expect(links.locator('[data-drive-link-note]')).toHaveCount(0)
+  await box.fill(`https://docs.google.com/document/d/${ID}/edit`)
+  await box.press('Enter')
+  await expect(page.locator('#acted')).toHaveText(`drive@3 show=${ID}`)
+  // A look-alike host is not a Drive link: nothing opens.
+  await box.fill(`https://drive.google.com.evil.example/file/d/${ID}/view`)
+  await box.press('Enter')
+  await expect(links.getByRole('alert')).toHaveText('Google Drive のファイルのリンクではないため、つなげません。')
+  await expect(page.locator('#acted')).toHaveText(`drive@3 show=${ID}`)
+  // A link dragged from the browser onto 「つながっているもの」.
+  const data = await page.evaluateHandle(url => { const dt = new DataTransfer(); dt.setData('text/uri-list', url); return dt }, `https://drive.google.com/file/d/${ID}/view`)
+  await links.dispatchEvent('dragover', { dataTransfer: data })
+  await links.dispatchEvent('drop', { dataTransfer: data })
+  await expect(page.locator('#acted')).toHaveText(`drive@3 show=${ID},drive@3 show=${ID}`)
+  expectNoPageErrors(state)
+
+  await openPreview(page, 'task-card', { kind: 'none', drive: 'first' })
+  await expect(links.locator('[data-drive-link-note]')).toContainText('あなたが選んだファイルだけ')
+  await expect(links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' })).toBeEnabled()
+
+  await openPreview(page, 'task-card', { kind: 'none', drive: 'off' })
+  await expect(links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' })).toBeDisabled()
+  await expect(links.locator('[data-drive-link-note]')).toHaveText('Google Drive のファイルをつなぐには、会社の管理者による準備が必要です。管理者に頼んでください。')
+  await expect(links.getByRole('textbox', { name: 'Google Drive のリンクを貼りつけてつなぐ' })).toHaveCount(0)
+})
+
 // A company without the shared folder (records.md "File links without the shared folder", owner decision
 // 2026-11-08): the card offers ［Google Drive のファイルをつなぐ］ instead of the company's files; the member's PC files
 // show 「あなただけ」, open on this PC or say plainly they are missing; a Drive file the member did not link is

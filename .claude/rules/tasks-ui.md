@@ -660,7 +660,12 @@ company paths are refused, so the card has neither ［＋ファイル・フォ�
 (`TaskCard` `sharedFolder`, from AppShell's `companyHasSharedFolder`; test `tests/ui/skill-layout.spec.ts`
 「a task card in a git / none company」). Instead its 「ファイル」 group (`typedFiles`, `TYPED_FILES_NOTE`)
 offers **［Google Drive のファイルをつなぐ］** (`tasks:linkDriveFiles`: the Google connector's Picker,
-then each pick linked at the version the previous link moved to; 「「…」をつなぎました」) and lists
+then each pick linked at the version the previous link moved to; 「「…」をつなぎました」) — also a Drive
+link **pasted** into the box under it or **dragged from the browser** onto 「つながっているもの」 (owner
+2026-11-09; `DriveLinkAction.tsx`, `mayCarryLink` / `droppedText` in `model.ts`): the Picker opens
+showing just that file (`google-drive.md`), anything else says 「Google Drive のファイルのリンクではないため、
+つなげません。」; the button is off with a plain note while Drive is not set up for the company, and says
+before the first press that Google will ask (`useDriveLinkSetup`, `driveLinkView`) — and lists
 `card.localFiles` — files of the member's own PC, each with the small 「あなただけ」 (`data-only-you`;
 opens on this PC with `file.open`; not here (`exists`) → 「このパソコンに見つかりません（動かしたか、消した
 かもしれません）」, said again on a press, nothing opened) — and `card.driveFiles` — the member's own by
@@ -670,7 +675,7 @@ path or a Drive id; ［取り消す］ for a PC file). **A file dragged from the
 row is linked as the member's own** (`useLinkDrop` `localFiles`, `DroppedThing.local`; 「…をつなぎました
 （あなただけに見えます）」), and the drop zone says 「このパソコンのファイル（あなただけ）」. Tests:
 `client/tests/typed-file-links.test.ts`, `tests/ui/task-card.spec.ts` (`?kind=none`; 「a company with the
-shared folder: no Drive button, a dropped file stays a company file」) — mutation-checked. Each linked file's
+shared folder: no Drive button, a dropped file stays a company file」; 「…a pasted or dropped Drive link…」) — mutation-checked. Each linked file's
 「…」 offers 「つながりを外す」, then 「「<name>」とのつながりを外しました［取り消す］」 (取り消す links it again).
 
 **Links between records** (owner 2026-11-02; server `records.md` "Linking records later"): each row

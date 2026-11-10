@@ -142,6 +142,63 @@ export function isDrivePickerTokenScope(scope: unknown): boolean {
   return parts.length > 0 && parts.every(s => s === GOOGLE_SCOPE.driveFile)
 }
 
+// ---------------------------------------------------------------------------
+// A Drive link pasted or dropped on a task card (owner 2026-11-09): only to open the Picker with
+// that file already shown. Under drive.file an id read from a link opens nothing by itself — the
+// member still picks it in the Picker, which is what lets ACB use it.
+
+/** The only hosts a link is read from (exact names: no sub-domain, no look-alike, no trailing dot). */
+const DRIVE_LINK_HOSTS: ReadonlySet<string> = new Set(['drive.google.com', 'docs.google.com'])
+/** `docs.google.com/<kind>/(u/<n>/)d/<id>` — the kinds the Picker offers to read. */
+const DOCS_LINK_PATH = /^\/(?:document|spreadsheets|presentation|file)\/(?:u\/\d{1,2}\/)?d\/([^/]+)(?:\/.*)?$/
+/** `drive.google.com/file/(u/<n>/)d/<id>`. */
+const DRIVE_FILE_PATH = /^\/file\/(?:u\/\d{1,2}\/)?d\/([^/]+)(?:\/.*)?$/
+/** `drive.google.com/open?id=<id>` and `/uc?id=<id>`. */
+const DRIVE_QUERY_PATH = /^\/(?:open|uc)$/
+const DRIVE_LINK_MAX = 2048
+
+/**
+ * The file id of one Google Drive / Docs / Sheets / Slides address, or null: `https:` only, no
+ * user, password or port, the host exactly `drive.google.com` or `docs.google.com`, a file path
+ * (never a folder), and an id of Google's characters (`isDriveId`).
+ */
+export function driveFileIdFromLink(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const text = raw.trim()
+  if (text === '' || text.length > DRIVE_LINK_MAX) return null
+  let u: URL
+  try { u = new URL(text) } catch { return null }
+  if (u.protocol !== 'https:' || u.username !== '' || u.password !== '' || u.port !== '') return null
+  if (!DRIVE_LINK_HOSTS.has(u.hostname)) return null
+  let id: string | null | undefined
+  if (u.hostname === 'docs.google.com') id = DOCS_LINK_PATH.exec(u.pathname)?.[1]
+  else if (DRIVE_QUERY_PATH.test(u.pathname)) id = u.searchParams.getAll('id').length === 1 ? u.searchParams.get('id') : null
+  else id = DRIVE_FILE_PATH.exec(u.pathname)?.[1]
+  return isDriveId(id) ? id : null
+}
+
+/**
+ * The Drive file ids of pasted / dropped text: each whitespace-separated piece that is a Drive
+ * file address (`driveFileIdFromLink`), once each, at most DRIVE_PICK_MAX_FILES; anything else
+ * in the text is ignored.
+ */
+export function driveFileIdsFromText(raw: unknown): string[] {
+  if (typeof raw !== 'string') return []
+  const ids: string[] = []
+  for (const piece of raw.slice(0, DRIVE_LINK_MAX * DRIVE_PICK_MAX_FILES).split(/\s+/)) {
+    const id = driveFileIdFromLink(piece)
+    if (id && !ids.includes(id)) ids.push(id)
+    if (ids.length >= DRIVE_PICK_MAX_FILES) break
+  }
+  return ids
+}
+
+/** Ids handed to the Picker to show first: Drive ids only, once each, at most DRIVE_PICK_MAX_FILES; anything else dropped. */
+export function drivePreselectIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return [...new Set(raw.filter(isDriveId))].slice(0, DRIVE_PICK_MAX_FILES)
+}
+
 /** The Picker's API key (Google Cloud 「認証情報」→ API キー): ASCII, no spaces. The message never quotes it. */
 export function checkPickerApiKey(v: unknown): string | null {
   if (typeof v !== 'string' || v.trim() === '') return 'Picker の API キーを入れてください。'

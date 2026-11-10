@@ -22,7 +22,7 @@ import path from 'path'
 import { z } from 'zod'
 import {
   checkDriveFileName, checkDrivePutContent, DRIVE_PICK_MAX_FILES, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, drivePutKindOf, GOOGLE_PICKER_PAGE_PATH,
-  isDriveId, type DrivePickMode,
+  drivePreselectIds, isDriveId, type DrivePickMode,
 } from '../../../../shared/core/google-drive'
 import { isSameOrAncestorPath, pathKey } from '../../../../shared/core/paths'
 import { INSTRUCTION_LIKE_WORDS } from '../../../../shared/core/instruction-like'
@@ -100,7 +100,11 @@ export function createDrivePicking(deps: DrivePickingDeps) {
   }
 
   return {
-    async pick(companyId: string, mode: DrivePickMode, signal?: AbortSignal): Promise<DrivePickResult> {
+    /**
+     * `fileIds` (files mode only): files the Picker shows first — a Drive link the member pasted on
+     * a task card. Only Drive ids reach the window; the member's 「選択」 there is still the pick.
+     */
+    async pick(companyId: string, mode: DrivePickMode, signal?: AbortSignal, options: { fileIds?: readonly string[] } = {}): Promise<DrivePickResult> {
       const consent = await ensureConsent(companyId, signal)
       if (consent) return consent
       const started = await session(companyId, '/picker', { mode })
@@ -115,6 +119,7 @@ export function createDrivePicking(deps: DrivePickingDeps) {
         config: {
           accessToken: s.accessToken, apiKey: s.apiKey, appId: s.appId, scriptOrigin: s.scriptOrigin, mode,
           mimeTypes: DRIVE_PICKABLE_MIMES, maxItems: mode === 'folder' ? 1 : DRIVE_PICK_MAX_FILES,
+          ...(mode === 'files' && drivePreselectIds(options.fileIds).length > 0 ? { fileIds: drivePreselectIds(options.fileIds) } : {}),
         },
         timeoutMs: PICKER_TIMEOUT_MS,
       })

@@ -3,7 +3,7 @@
 // Drive file's name only when the server says the member linked it; a file dropped with `local` is sent
 // as the member's own target (a plain drop stays a company path); removing sends only a working-folder
 // path or a Drive id; 「Google Drive のファイルをつなぐ」 links each pick at the version the previous link
-// moved to, nothing when the member picked nothing.
+// moved to, nothing when the member picked nothing; a pasted link hands the Picker only Drive ids.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
@@ -92,4 +92,15 @@ test('「Google Drive のファイルをつなぐ」 links each pick at the vers
   assert.deepEqual(cancelled.sent, [])
   const none = harness()
   assert.equal((await none.api.linkDriveFiles('co1', 'task-0000aa', 7)).success, false)
+})
+
+test('a pasted Drive link: only Drive ids reach the Picker, and nothing is linked but what the member picked there', async () => {
+  const asked: string[][] = []
+  const h = harness({ pickDriveFiles: async (_c, fileIds) => { asked.push(fileIds); return { ok: true, files: [{ id: '1ZyXwVuTsRqPo', name: 'B社 見積' }] } } })
+  await h.api.linkDriveFiles('co1', 'task-0000aa', 7, ['1AbCdEfGhIjKl', 'bad/id', "x');alert(1)//", 7, '1AbCdEfGhIjKl'])
+  await h.api.linkDriveFiles('co1', 'task-0000aa', 7, 'not-a-list-1AbCdEfGhIjKl')
+  await h.api.linkDriveFiles('co1', 'task-0000aa', 7)
+  assert.deepEqual(asked, [['1AbCdEfGhIjKl'], [], []])
+  // The link is of the file picked in the Picker, not the one pasted.
+  assert.deepEqual(h.sent.map(s => (s.body as { target: unknown }).target), Array(3).fill({ kind: 'drive', fileId: '1ZyXwVuTsRqPo' }))
 })

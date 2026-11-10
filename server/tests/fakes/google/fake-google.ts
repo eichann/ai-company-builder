@@ -901,9 +901,12 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   app.get('/__picker/files', c => {
     const a = bearer(c, [GOOGLE_SCOPES.driveFile])
     const mode = c.req.query('mode')
+    // Like DocsView.setFileIds: only those files (each still only when the account can read it).
+    const only = (c.req.query('ids') ?? '').split(',').filter(Boolean)
     const email = a.email.toLowerCase()
     const list = [...driveFiles.values()]
       .filter(f => f.readers.some(r => r.toLowerCase() === email))
+      .filter(f => only.length === 0 || only.includes(f.id))
       .filter(f => (mode === 'folder') === (f.mimeType === 'application/vnd.google-apps.folder'))
       .map(f => ({ id: f.id, name: f.name, mimeType: f.mimeType }))
     return c.json({ files: list }, 200, cors)
@@ -1533,11 +1536,13 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
  * A stand-in for Google Picker (`gapi.load('picker')`, `google.picker.*`), for
  * staging only: lists what `/__picker/files` returns for the token, and on a
  * click marks the choice as picked (`/__picker/pick`) and calls back like
- * Google Picker (`{ action: 'picked', docs: [{ id }] }`).
+ * Google Picker (`{ action: 'picked', docs: [{ id }] }`). `DocsView.setFileIds`
+ * narrows the list to those files, as Google's does.
  */
 const FAKE_PICKER_SCRIPT = `(function () {
   var origin = (document.currentScript && new URL(document.currentScript.src).origin) || ''
-  function DocsView(viewId) { this.viewId = viewId }
+  function DocsView(viewId) { this.viewId = viewId; this.fileIds = '' }
+  DocsView.prototype.setFileIds = function (ids) { this.fileIds = String(ids); return this }
   ;['setIncludeFolders', 'setSelectFolderEnabled', 'setMimeTypes', 'setEnableDrives'].forEach(function (m) { DocsView.prototype[m] = function () { return this } })
   function PickerBuilder() { this.o = {} }
   PickerBuilder.prototype.addView = function (v) { this.o.view = v; return this }
@@ -1549,7 +1554,7 @@ const FAKE_PICKER_SCRIPT = `(function () {
     return { setVisible: function () {
       var mode = o.view.viewId === 'folders' ? 'folder' : 'files'
       var auth = { authorization: 'Bearer ' + o.token }
-      fetch(origin + '/__picker/files?mode=' + mode, { headers: auth }).then(function (r) { return r.json() }).then(function (j) {
+      fetch(origin + '/__picker/files?mode=' + mode + (o.view.fileIds ? '&ids=' + encodeURIComponent(o.view.fileIds) : ''), { headers: auth }).then(function (r) { return r.json() }).then(function (j) {
         var box = document.createElement('div')
         box.id = 'fake-picker'
         ;(j.files || []).forEach(function (f) {

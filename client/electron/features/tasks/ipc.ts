@@ -35,6 +35,7 @@ import { isCalendarDate } from '../../../../shared/core/business-days'
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { MESSAGE_TYPE } from '../../../../shared/core/core-types'
 import { featuresFrom } from '../../../../shared/core/features'
+import { drivePreselectIds } from '../../../../shared/core/google-drive'
 import { driveLinkTarget, fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import { isDateValue, normalizeTagsValue } from '../../../../shared/core/record-types'
 import type { BundleKindsResult, RecordDetail, RecordQueryResult, RecordSummary, RecordTypeView } from '../../../../shared/types/records'
@@ -78,8 +79,9 @@ export interface TasksDeps {
   /**
    * Google Picker for 「Google Drive のファイルをつなぐ」 (the Google connection's flow, composed in
    * main.ts): the files the member picked, kept by the server as their picks. Absent → not offered.
+   * `fileIds`: Drive ids (already checked) the Picker shows first.
    */
-  pickDriveFiles?: (companyId: string) => Promise<{ ok: true; files: Array<{ id: string; name: string }> } | { ok: false; cancelled: boolean; message: string }>
+  pickDriveFiles?: (companyId: string, fileIds: string[]) => Promise<{ ok: true; files: Array<{ id: string; name: string }> } | { ok: false; cancelled: boolean; message: string }>
 }
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
@@ -321,11 +323,13 @@ export function createTasksApi(deps: TasksDeps) {
      * 「Google Drive のファイルをつなぐ」: the member picks files in Google Picker (the Google
      * connection's own flow, `pickDriveFiles`), then each is linked to the task at the version the
      * previous link moved it to. The server checks each pick with the member's own permission.
+     * `fileIds` (a pasted / dropped Drive link): only Drive ids go on to the Picker, to show first;
+     * nothing is linked that the member did not pick there.
      */
-    async linkDriveFiles(companyId: string, recordId: string, expectedVersion: number): Promise<TaskDriveLinkResult> {
+    async linkDriveFiles(companyId: string, recordId: string, expectedVersion: number, fileIds?: unknown): Promise<TaskDriveLinkResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !Number.isInteger(expectedVersion)) return BAD_INPUT
       if (!deps.pickDriveFiles) return { success: false, offline: false, error: 'この画面からは Google Drive を使えません。' }
-      const picked = await deps.pickDriveFiles(companyId)
+      const picked = await deps.pickDriveFiles(companyId, drivePreselectIds(fileIds))
       if (!picked.ok) return picked.cancelled ? { success: true, recordId, linked: [] } : { success: false, offline: false, error: picked.message }
       let at = expectedVersion
       const linked: string[] = []
@@ -635,8 +639,8 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
     api.linkFile(typeof companyId === 'string' ? companyId : '', recordId, companyPath, expectedVersion, true))
   ipc.handle('tasks:unlinkTarget', (_event, companyId, recordId, target, expectedVersion) =>
     api.unlinkTarget(typeof companyId === 'string' ? companyId : '', recordId, target, expectedVersion))
-  ipc.handle('tasks:linkDriveFiles', (_event, companyId, recordId, expectedVersion) =>
-    api.linkDriveFiles(typeof companyId === 'string' ? companyId : '', recordId, expectedVersion))
+  ipc.handle('tasks:linkDriveFiles', (_event, companyId, recordId, expectedVersion, fileIds) =>
+    api.linkDriveFiles(typeof companyId === 'string' ? companyId : '', recordId, expectedVersion, fileIds))
   ipc.handle('tasks:share', (_event, companyId, recordId, folder, expectedVersion) =>
     api.share(typeof companyId === 'string' ? companyId : '', recordId, folder, expectedVersion))
   ipc.handle('tasks:shareToBundle', (_event, companyId, recordId, expectedVersion) =>
