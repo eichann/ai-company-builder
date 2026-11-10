@@ -80,7 +80,10 @@ googleDriveAiRoute.get('/puts/:putId', aiReads, async (c) => {
  * The page the app's Picker window loads (google-drive.md "The Picker"). It
  * holds no secret: it asks `window.acbPicker` — present only in the app's
  * dedicated Picker window (its own preload) — for the token, the API key and
- * the app id, runs Google Picker, and hands back only the picked ids. Served
+ * the app id, runs Google Picker, and hands back only the picked ids. With
+ * `fileIds` (a Drive link the member pasted on a task card) the view shows just
+ * those files (`DocsView.setFileIds`, which Google says not to combine with
+ * `setEnableDrives`); the member still presses 「選択」 — that is the pick. Served
  * from the server so the Picker's origin is the one the admin allows on the
  * API key (`<PUBLIC_URL>/api/google-picker`).
  */
@@ -104,7 +107,9 @@ const PICKER_SCRIPT = `(function () {
         } else {
           view = new P.DocsView(P.ViewId.DOCS).setMimeTypes(cfg.mimeTypes.join(','))
         }
-        if (view.setEnableDrives) view.setEnableDrives(true)
+        var only = cfg.mode === 'files' && Array.isArray(cfg.fileIds) ? cfg.fileIds.filter(function (id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{10,200}$/.test(id) }).slice(0, 10) : []
+        if (only.length > 0 && view.setFileIds) view.setFileIds(only.join(','))
+        else if (view.setEnableDrives) view.setEnableDrives(true)
         var b = new P.PickerBuilder().addView(view).setOAuthToken(cfg.accessToken).setDeveloperKey(cfg.apiKey).setAppId(cfg.appId)
           .setOrigin(window.location.origin).setLocale('ja').setTitle(cfg.mode === 'folder' ? '置き場所のフォルダを選んでください' : '読ませるファイルを選んでください')
           .setCallback(function (data) {

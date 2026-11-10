@@ -113,6 +113,27 @@ export const GOOGLE_ARCHIVE_STOP_TEXT = '「やめる」と ACB は Gmail をア
 /** The company offers the feature (an older server without the list: as before, offered). */
 const offered = (my: MyGoogle, f: GoogleFeature) => !my.companyFeatures || my.companyFeatures.includes(f)
 
+/** The task card's ［Google Drive のファイルをつなぐ］ when the company has not set Drive up (no technical words). */
+export const DRIVE_LINK_SETUP_TEXT = 'Google Drive のファイルをつなぐには、会社の管理者による準備が必要です。管理者に頼んでください。'
+/** Said before the first press, while the member has not allowed Drive yet (owner FB #27: the browser page came as a surprise). */
+export const DRIVE_FIRST_USE_TEXT = '初めてのときは、ブラウザに Google の画面が出ます。あなたが選んだファイルだけを使う許可なので、「許可」を押してください。'
+
+/**
+ * Whether the card offers ［Google Drive のファイルをつなぐ］ (and a pasted link), from the member's
+ * Google status: Google off or not set up for the company, or Drive not offered (the Picker not
+ * registered) → not usable, with the note; not allowed yet → usable, with the first-use note.
+ * Not known (still reading, offline, a refusal) → usable: the press itself tells what is wrong.
+ */
+export function driveLinkView(status: GoogleStatusResult | null): { usable: boolean; note: string | null } {
+  if (!status || !status.success) return { usable: true, note: null }
+  const my = status.data
+  // Stopped by the service's operator or its server not ready: not the company admin's set-up (the app's usual words).
+  if (!my.available && (my.reason === 'operator-stopped' || my.reason === 'vault-off')) return { usable: false, note: GOOGLE_UNAVAILABLE_TEXT[my.reason] }
+  if (!my.available || !offered(my, 'drive')) return { usable: false, note: DRIVE_LINK_SETUP_TEXT }
+  if (!my.connected || !my.features.includes('drive')) return { usable: true, note: DRIVE_FIRST_USE_TEXT }
+  return { usable: true, note: null }
+}
+
 export function googleSectionView(my: MyGoogle): GoogleSectionView {
   const unavailable = my.available ? null : GOOGLE_UNAVAILABLE_TEXT[my.reason ?? 'not-configured']
   const ended = !my.connected && my.status ? GOOGLE_GRANT_STATUS_TEXT[my.status] ?? null : null

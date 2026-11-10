@@ -50,6 +50,8 @@ export interface DrivePickerWindowConfig {
   mode: 'folder' | 'files'
   mimeTypes: readonly string[]
   maxItems: number
+  /** Files mode only: the files the Picker shows (`DocsView.setFileIds`), already checked as Drive ids. */
+  fileIds?: readonly string[]
 }
 
 export type DrivePickerOutcome =

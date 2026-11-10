@@ -18,6 +18,8 @@
  *   with other content is refused; a lost answer is `unknown`, never re-sent, and found by the
  *   put's id (`found-by-correlation`);
  * - every Google stop applies (the company switch off → nothing uploaded);
+ * - the Picker page shows only Drive-id-shaped `fileIds` (a pasted link), in files mode only, and its
+ *   CSP hash is the script it serves;
  * - no access or refresh token in any answer but the Picker's, in any log line or table.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -25,6 +27,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { createHash, randomBytes } from 'crypto'
+import { runInNewContext } from 'vm'
 import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
@@ -232,6 +235,50 @@ describe('the Picker token', () => {
     expect(csp).toMatch(/script-src 'sha256-[A-Za-z0-9+/=]+'/)
     expect(r.text).not.toContain('ya29')
     expect(r.text).toContain('window.acbPicker')
+  })
+
+  /** Runs the page's own script against a stand-in `google.picker` that records each call. */
+  async function runPickerPage(cfg: Record<string, unknown>) {
+    const r = await call({ method: 'GET', path: '/api/google-picker' })
+    const script = /<script>([\s\S]*)<\/script>/.exec(r.text)![1]
+    const calls: Array<[string, unknown]> = []
+    const view = {
+      setMimeTypes: (v: unknown) => { calls.push(['setMimeTypes', v]); return view },
+      setIncludeFolders: () => view, setSelectFolderEnabled: () => view,
+      setEnableDrives: (v: unknown) => { calls.push(['setEnableDrives', v]); return view },
+      setFileIds: (v: unknown) => { calls.push(['setFileIds', v]); return view },
+    }
+    const builder: Record<string, unknown> = {}
+    for (const m of ['addView', 'setOAuthToken', 'setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle', 'setCallback', 'enableFeature', 'setMaxItems']) builder[m] = () => builder
+    builder.build = () => ({ setVisible: () => { calls.push(['visible', true]) } })
+    const head = { appendChild: (el: { onload: () => void }) => { el.onload() } }
+    const window: Record<string, unknown> = {
+      location: { origin: PUBLIC },
+      acbPicker: { config: () => Promise.resolve(cfg), done: () => {} },
+      gapi: { load: (_n: string, o: { callback: () => void }) => o.callback() },
+      google: { picker: { DocsView: function () { return view }, PickerBuilder: function () { return builder }, ViewId: {}, Action: {}, Feature: {} } },
+    }
+    const document = { getElementById: () => ({ textContent: '' }), createElement: () => ({}), head }
+    runInNewContext(script, { window, document })
+    await new Promise(res => setTimeout(res, 0))
+    return { calls, csp: r.headers.get('content-security-policy') ?? '', script }
+  }
+  const base = { accessToken: 't', apiKey: 'k', appId: APP_ID, scriptOrigin: 'https://apis.google.com', mimeTypes: ['application/pdf'], maxItems: 10 }
+  const GOOD = '1AbC-def_GhIjKlMnOpQrStUv'
+
+  it('a pasted link: the Picker shows only Drive-id-shaped files, in files mode only; the CSP hash is the script served', async () => {
+    const shown = await runPickerPage({ ...base, mode: 'files', fileIds: [GOOD, "x');alert(1)//", 'short', 7, 'other-good-id_0123'] })
+    expect(shown.calls).toContainEqual(['setFileIds', `${GOOD},other-good-id_0123`])
+    // Google's reference: setFileIds is not combined with setEnableDrives.
+    expect(shown.calls.map(c => c[0])).not.toContain('setEnableDrives')
+    expect(shown.calls).toContainEqual(['visible', true])
+    expect(shown.csp).toContain(`'sha256-${createHash('sha256').update(shown.script).digest('base64')}'`)
+    // Nothing usable, a folder pick, or none given: the ordinary Picker.
+    for (const cfg of [{ mode: 'files', fileIds: ['bad id!'] }, { mode: 'folder', fileIds: [GOOD] }, { mode: 'files' }, { mode: 'files', fileIds: GOOD }]) {
+      const plain = await runPickerPage({ ...base, ...cfg })
+      expect(plain.calls.map(c => c[0]), JSON.stringify(cfg)).not.toContain('setFileIds')
+      expect(plain.calls).toContainEqual(['setEnableDrives', true])
+    }
   })
 })
 

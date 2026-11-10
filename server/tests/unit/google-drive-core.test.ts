@@ -1,10 +1,11 @@
 /**
  * The Drive rules in shared/core (google-drive.md): least privilege of the scope model, the
- * Picker token's scope check, what may be put, and when a folder reaches outside.
+ * Picker token's scope check, what may be put, when a folder reaches outside, and which pasted
+ * links name a Drive file (only Google's own hosts, only a file, only an id of Google's characters).
  */
 import { describe, expect, it } from 'vitest'
 import { GOOGLE_ALLOWED_SCOPES, GOOGLE_FEATURE_SCOPES, GOOGLE_NEVER_SCOPES, GOOGLE_SCOPE, googleScopesFor, normalizeGrantedScopes } from '../../shared/core/google'
-import { checkDriveFileName, checkDrivePutContent, driveFolderReachesOutside, drivePutKindOf, isDrivePickerTokenScope } from '../../shared/core/google-drive'
+import { checkDriveFileName, checkDrivePutContent, driveFileIdFromLink, driveFileIdsFromText, driveFolderReachesOutside, drivePreselectIds, drivePutKindOf, isDrivePickerTokenScope } from '../../shared/core/google-drive'
 
 const enc = (s: string) => new TextEncoder().encode(s)
 
@@ -66,5 +67,78 @@ describe('a folder reaches outside', () => {
     expect(driveFolderReachesOutside([{ type: 'group', emailAddress: 'x@sub.div.example' }], D)).toBe(true)
     expect(driveFolderReachesOutside([{ type: 'user' }], D)).toBe(true)
     expect(driveFolderReachesOutside([{ type: 'something-new' }], D)).toBe(true)
+  })
+})
+
+describe('a pasted Drive link: only Google\'s own file addresses give an id', () => {
+  const ID = '1AbC-def_GhIjKlMnOpQrStUv'
+
+  it('Docs, Sheets, Slides and Drive file addresses (with an account number, an edit tail, ?usp)', () => {
+    for (const url of [
+      `https://docs.google.com/document/d/${ID}/edit`,
+      `https://docs.google.com/spreadsheets/d/${ID}/edit#gid=0`,
+      `https://docs.google.com/presentation/d/${ID}/edit?usp=sharing`,
+      `https://docs.google.com/document/u/1/d/${ID}/edit`,
+      `https://docs.google.com/file/d/${ID}`,
+      `https://drive.google.com/file/d/${ID}/view?usp=drive_link`,
+      `https://drive.google.com/file/u/0/d/${ID}/view`,
+      `https://drive.google.com/open?id=${ID}`,
+      `https://drive.google.com/uc?id=${ID}&export=download`,
+      `  https://DRIVE.GOOGLE.COM/file/d/${ID}/view  `,
+    ]) expect(driveFileIdFromLink(url), url).toBe(ID)
+  })
+
+  it('no id from another host, a look-alike, a sub-domain, another scheme, a user or a port', () => {
+    for (const url of [
+      `https://drive.google.com.evil.example/file/d/${ID}/view`,
+      `https://evil.example/drive.google.com/file/d/${ID}/view`,
+      `https://drive-google.com/file/d/${ID}/view`,
+      `https://drive.google.co/file/d/${ID}/view`,
+      `https://xn--drive-google-xyz.com/file/d/${ID}/view`,
+      `https://sub.drive.google.com/file/d/${ID}/view`,
+      `https://drive.google.com./file/d/${ID}/view`,
+      `https://google.com/file/d/${ID}/view`,
+      `http://drive.google.com/file/d/${ID}/view`,
+      `javascript:alert('https://drive.google.com/file/d/${ID}/view')`,
+      `file:///drive.google.com/file/d/${ID}`,
+      `https://me@drive.google.com/file/d/${ID}/view`,
+      `https://drive.google.com:8443/file/d/${ID}/view`,
+      `drive.google.com/file/d/${ID}/view`,
+      ID,
+    ]) expect(driveFileIdFromLink(url), url).toBeNull()
+  })
+
+  it('no id from a folder, another kind of page, or an id that is not Google\'s shape', () => {
+    for (const url of [
+      `https://drive.google.com/drive/folders/${ID}`,
+      `https://drive.google.com/drive/u/0/folders/${ID}`,
+      `https://docs.google.com/forms/d/${ID}/edit`,
+      `https://docs.google.com/document/d/e/2PACX-1vQpublished/pub`,
+      'https://drive.google.com/file/d/short/view',
+      `https://drive.google.com/file/d/${'a'.repeat(201)}/view`,
+      'https://drive.google.com/file/d/abc%2F..%2Fdefghijk/view',
+      'https://drive.google.com/file/d/abc def ghijklm/view',
+      `https://drive.google.com/open?id=${ID}&id=other-id-0123456789`,
+      'https://drive.google.com/open?id=bad id here!',
+      'https://drive.google.com/open',
+      '',
+    ]) expect(driveFileIdFromLink(url), url).toBeNull()
+    expect(driveFileIdFromLink(42)).toBeNull()
+    expect(driveFileIdFromLink(`https://drive.google.com/file/d/${ID}/view`.padEnd(3000, 'x'))).toBeNull()
+  })
+
+  it('a pasted text: each Drive file address once, at most 10, the rest ignored', () => {
+    const other = 'zYxW-vut_srqponmlkji'
+    expect(driveFileIdsFromText(`見て https://docs.google.com/document/d/${ID}/edit と\nhttps://evil.example/file/d/${other}/view https://drive.google.com/file/d/${ID}/view https://drive.google.com/file/d/${other}/view`)).toEqual([ID, other])
+    const many = Array.from({ length: 12 }, (_, i) => `https://drive.google.com/file/d/${ID}${i.toString().padStart(2, '0')}/view`).join(' ')
+    expect(driveFileIdsFromText(many)).toHaveLength(10)
+    expect(driveFileIdsFromText('ただの文')).toEqual([])
+    expect(driveFileIdsFromText(null)).toEqual([])
+  })
+
+  it('ids handed on to the Picker: Drive ids only, once each, at most 10', () => {
+    expect(drivePreselectIds([ID, ID, 'bad id', "x');alert(1)//", 7, 'short'])).toEqual([ID])
+    expect(drivePreselectIds('not-a-list-0123456789')).toEqual([])
+    expect(drivePreselectIds(Array.from({ length: 12 }, (_, i) => `${ID}${i.toString().padStart(2, '0')}`))).toHaveLength(10)
   })
 })

@@ -89,6 +89,32 @@ test('受信を読む is offered only to a connected member without it, and a fe
   assert.equal(googleSectionView({ ...base, features: ['minutes'], featuresOff: [], companyFeatures: ['minutes', 'mail', 'inbox'], seen: [] }).canAddInbox, true)
 })
 
+test('the card\'s ［Google Drive のファイルをつなぐ］: off with the plain note until the company sets Drive up; the first-use note until allowed', async () => {
+  const { driveLinkView, DRIVE_LINK_SETUP_TEXT, DRIVE_FIRST_USE_TEXT } = await import('../shared/google')
+  const base = { available: true, reason: null, connected: true, status: 'active' as const, googleEmail: 'sato@div.example', domain: 'div.example', practice: false, featuresOff: [], seen: [] }
+  const status = (over: object) => ({ success: true as const, data: { ...base, features: ['minutes', 'drive'], companyFeatures: ['minutes', 'mail', 'drive'], ...over } as never })
+  // The Picker not registered (Drive not offered), Google off or not set up: off, and who can fix it.
+  assert.deepEqual(driveLinkView(status({ companyFeatures: ['minutes', 'mail'], features: ['minutes'] })), { usable: false, note: DRIVE_LINK_SETUP_TEXT })
+  assert.deepEqual(driveLinkView(status({ available: false, reason: 'not-configured', companyFeatures: [], connected: false, features: [] })), { usable: false, note: DRIVE_LINK_SETUP_TEXT })
+  // An older server (no companyFeatures) with Google off: still off.
+  assert.deepEqual(driveLinkView(status({ available: false, reason: 'off', companyFeatures: undefined })), { usable: false, note: DRIVE_LINK_SETUP_TEXT })
+  // Stopped by the operator / server not ready: off, in the app's usual words (not the admin's set-up).
+  const { GOOGLE_UNAVAILABLE_TEXT } = await import('../shared/google')
+  for (const reason of ['operator-stopped', 'vault-off'] as const) {
+    assert.deepEqual(driveLinkView(status({ available: false, reason, companyFeatures: undefined })), { usable: false, note: GOOGLE_UNAVAILABLE_TEXT[reason] })
+  }
+  // Offered, not allowed yet: usable, and Google's page is announced (only the files they choose).
+  assert.deepEqual(driveLinkView(status({ features: ['minutes'] })), { usable: true, note: DRIVE_FIRST_USE_TEXT })
+  assert.deepEqual(driveLinkView(status({ connected: false, features: [] })), { usable: true, note: DRIVE_FIRST_USE_TEXT })
+  assert.match(DRIVE_FIRST_USE_TEXT, /選んだファイルだけ/)
+  assert.deepEqual(driveLinkView(status({})), { usable: true, note: null })
+  // Not known (loading, offline, an older server without the list): offered; the press tells.
+  assert.deepEqual(driveLinkView(null), { usable: true, note: null })
+  assert.deepEqual(driveLinkView({ success: false, offline: true, error: 'x' }), { usable: true, note: null })
+  assert.deepEqual(driveLinkView(status({ companyFeatures: undefined })), { usable: true, note: null })
+  for (const t of [DRIVE_LINK_SETUP_TEXT, DRIVE_FIRST_USE_TEXT]) assert.doesNotMatch(t, /Picker|OAuth|スコープ|トークン|API/)
+})
+
 test('「Google でつなぐ」 (connectAll) asks for { all } and opens only the sign-in page; 「あとで」 is a PUT of /seen', async () => {
   const h = harness({ status: 200, body: { success: true, data: { authorizeUrl: GOOGLE_URL, expiresAt: '2026-11-01T00:10:00Z' } } })
   assert.deepEqual(await h.api.connectAll('co1'), { success: true })

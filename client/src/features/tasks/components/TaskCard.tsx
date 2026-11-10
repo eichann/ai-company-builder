@@ -22,12 +22,15 @@ import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
 import { whenDoneLine } from '../cardActions'
-import { companyNow } from '../model'
+import { companyNow, droppedText, mayCarryLink, NOT_A_DRIVE_LINK } from '../model'
 import { RecordSourcePanel } from './RecordSourcePanel'
 import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
 import { MinutesReview } from './MinutesReview'
 import { TaskActions } from './TaskActions'
 import { BundleField } from './BundleField'
+import { DriveLinkAction } from './DriveLinkAction'
+import { useDriveLinkSetup } from '../hooks/useDriveLinkSetup'
+import { driveFileIdsFromText } from '../../../../../shared/core/google-drive'
 import { ShowToBundle } from './ShowToBundle'
 import type { NewBundlePlaces } from './NewBundleDialog'
 import { privateBundleFolderNames, type BundlePlace } from '../model'
@@ -112,6 +115,8 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
   // A company without the shared folder: a file dropped from the tree is linked as the member's own (records.md
   // "File links without the shared folder").
   const linkDrop = useLinkDrop({ companyId, rootPath, targetWord: 'やること', localFiles: !sharedFolder, onChanged: () => { reload(); onChanged?.() } })
+  // Whether Drive can be used here (Google and the chooser set up for the company, allowed yet).
+  const driveSetup = useDriveLinkSetup(companyId, !sharedFolder)
   if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />{CALM.loading}</div>
   if (!result.success) return <div role="alert" className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-500 dark:text-zinc-400">{result.error}</div>
 
@@ -178,12 +183,21 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     return r.success ? null : r.error
   })
   // A company without the shared folder: 「Google Drive のファイルをつなぐ」 (Google Picker) and taking a PC / Drive file off.
-  const linkDrive = () => change(async () => {
-    const r = await linkDriveFilesToTask(companyId, recordId, version)
+  // `fileIds`: a pasted / dropped Drive link — Google's chooser opens showing just those files.
+  const linkDrive = (fileIds?: string[]) => change(async () => {
+    const r = await linkDriveFilesToTask(companyId, recordId, version, fileIds)
+    driveSetup.reload()
     if (!r.success) return r.error
     if (r.linked.length > 0) setNotice({ kind: 'done', text: `${r.linked.map(n => `「${n}」`).join('・')}をつなぎました`, undo: null })
     return r.error ?? null
   })
+  const linkDriveText = (text: string): Promise<string | null> => {
+    // While the chooser is open (busy), another link would open a second chooser window.
+    if (busy) return Promise.resolve(null)
+    if (!driveSetup.usable) return Promise.resolve(driveSetup.note)
+    const ids = driveFileIdsFromText(text)
+    return ids.length > 0 ? linkDrive(ids) : Promise.resolve(NOT_A_DRIVE_LINK)
+  }
   const unlinkTarget = (target: TypedFileTarget, label: string) => change(async () => {
     const r = await unlinkTargetFromTask(companyId, recordId, target, version)
     if (!r.success) return r.error
@@ -222,7 +236,7 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
   return <><CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     linkDrop={linkDrop} notDownloadedFolderOf={notDownloadedFolderOf}
     onLinkFile={sharedFolder ? p => fileLink(p, false) : null} onUnlinkFile={p => fileLink(p, true)} personalHere={personalHere}
-    {...(!sharedFolder ? { typedFiles: { localHere, onLinkDrive: linkDrive, onUnlink: unlinkTarget } } : {})}
+    {...(!sharedFolder ? { typedFiles: { localHere, onLinkDrive: () => linkDrive(), onLinkDriveText: linkDriveText, drive: { usable: driveSetup.usable, note: driveSetup.note }, onUnlink: unlinkTarget } } : {})}
     {...(card.record.personal && createTodayFile ? { onNewFile: async (name: string) => {
       const made = await createTodayFile(name)
       if ('error' in made) return { error: made.error }
@@ -289,6 +303,10 @@ interface BodyProps {
     /** The PC files linked here that are on this computer (null until checked). */
     localHere: ReadonlySet<string> | null
     onLinkDrive: () => Promise<string | null>
+    /** A pasted or dropped Drive link: the chooser opens showing that file (one 「選択」 links it). */
+    onLinkDriveText: (text: string) => Promise<string | null>
+    /** Whether Drive is set up for the company, and what to tell before the first press. */
+    drive: { usable: boolean; note: string | null }
     onUnlink: (target: TypedFileTarget, label: string) => Promise<string | null>
   }
   /** ［＋ 新しいファイル］ (a task only the member sees): `error` keeps the name window open. */
@@ -378,11 +396,14 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
           {onNewFile && <button type="button" disabled={busy} onClick={() => setNaming({ error: null })} data-new-file className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />新しいファイル</button>}
         </>, note: 'つながりは、このやることを見られる人みんなに見えます' }] : []),
         ...(typedFiles ? [{ name: 'ファイル', kind: 'file' as const, action: (
-          <button type="button" disabled={busy} onClick={() => { void typedFiles.onLinkDrive().then(setLinkError) }} data-link-drive
-            className="mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />Google Drive のファイルをつなぐ</button>
+          <DriveLinkAction busy={busy} usable={typedFiles.drive.usable} note={typedFiles.drive.note}
+            onPick={() => { void typedFiles.onLinkDrive().then(setLinkError) }} onLinkText={t => { void typedFiles.onLinkDriveText(t).then(setLinkError) }} />
         ), note: TYPED_FILES_NOTE }] : []),
         ...(consult.extra ? [consult.extra] : [])]}
-        drop={{ label: `${onLinkFile ? 'ファイル・フォルダ・' : typedFiles ? 'このパソコンのファイル（あなただけ）・' : ''}やること・${bundleWord}・相談`, accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(record.id, e) },
+        drop={{ label: `${onLinkFile ? 'ファイル・フォルダ・' : typedFiles ? 'このパソコンのファイル（あなただけ）・Drive のリンク・' : ''}やること・${bundleWord}・相談`,
+          // A company without the shared folder also takes a Drive link dragged from the browser.
+          accepts: e => linkDrop.accepts(e) || (!!typedFiles && !busy && mayCarryLink(e.dataTransfer)),
+          onDrop: e => { if (linkDrop.accepts(e) || !typedFiles) linkDrop.drop(record.id, e); else void typedFiles.onLinkDriveText(droppedText(e.dataTransfer)).then(setLinkError) },
           notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }}
         notice={<>
           {linkError && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{linkError}</p>}

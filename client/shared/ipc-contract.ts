@@ -574,8 +574,11 @@ export interface IpcInvokeChannels {
   'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
   /** A company without the shared folder: a file of the member's PC or a Drive file taken off a task. */
   'tasks:unlinkTarget': { args: [companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number]; result: TaskWriteResult }
-  /** 「Google Drive のファイルをつなぐ」: Google Picker, then each picked file linked to the task. */
-  'tasks:linkDriveFiles': { args: [companyId: string, recordId: string, expectedVersion: number]; result: TaskDriveLinkResult }
+  /**
+   * 「Google Drive のファイルをつなぐ」: Google Picker, then each picked file linked to the task.
+   * `fileIds` (optional, added 2026-11-09): a pasted / dropped Drive link's files, shown first in the Picker.
+   */
+  'tasks:linkDriveFiles': { args: [companyId: string, recordId: string, expectedVersion: number, fileIds?: string[]]; result: TaskDriveLinkResult }
   /** 「もう一度」 on a run held for a person. */
   /** 「部署に出す」: an owner-only task shown to a department folder's readers (never undone). */
   'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }

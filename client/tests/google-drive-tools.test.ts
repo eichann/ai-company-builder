@@ -12,7 +12,8 @@
  *   a private folder (the refusal never names it) or a folder left out on this computer; PDF /
  *   HTML only, content checked; the same file, folder and name always carry the same request key;
  * - the Picker window gives its config only to the server's Picker page and reads back only
- *   Drive ids; a picked PDF is saved under `.personal/google-drive/`.
+ *   Drive ids; a picked PDF is saved under `.personal/google-drive/`;
+ * - a pasted link's files reach the Picker window only as Drive ids, and only for a files pick.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -151,6 +152,15 @@ test('picking uses the member\'s session (not the record token) and keeps only D
   }
   assert.deepEqual(JSON.parse(calls[1].body!).ids, [FOLDER])
   assert.ok(!calls[1].body!.includes(PICKER_TOKEN))
+})
+
+test('a pasted link: the Picker window gets only Drive ids to show, in files mode only', async () => {
+  const pick = picking(fakeServer('act'))
+  await pick.p.pick('co', 'files', undefined, { fileIds: [DOC, 'bad id!', "x');alert(1)//", DOC] })
+  await pick.p.pick('co', 'folder', undefined, { fileIds: [DOC] })
+  await pick.p.pick('co', 'files', undefined, { fileIds: ['bad id!'] })
+  await pick.p.pick('co', 'files')
+  assert.deepEqual(pick.opened.map(o => o.config.fileIds), [[DOC], undefined, undefined, undefined])
 })
 
 test('without the Drive permission: Google\'s consent first (drive only), then the Picker', async () => {

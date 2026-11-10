@@ -146,7 +146,8 @@ export. `drive.readonly` stays in `GOOGLE_NEVER_SCOPES`.
   IPC (lane A): `google:connectAll`, `google:markSeen`, `slack:markSeen`; Slack's button reuses
   `slack:connect` with `SLACK_SETUP_FEATURES` (`read`, `notices`) and shows only when the company
   registered Slack. Words: what each connection lets the member do (`TOOL_GOOGLE_TEXT`), no
-  OAuth / scope / token.
+  OAuth / scope / token; Drive's line says 「あなたが選んだファイル・フォルダだけ」 (what Google's page
+  asks for, FB #27).
 
 ## The relay with the member's own permission (「本人の許可で中継する」, owner decision 2026-11-04)
 

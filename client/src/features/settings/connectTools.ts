@@ -8,7 +8,8 @@ import { SLACK_SETUP_FEATURES } from '../../../../shared/core/slack'
 export const TOOL_GOOGLE_TEXT: Record<GoogleFeature, string> = {
   minutes: '予定が一覧に出て、会議の議事録を AI が読めます',
   mail: 'AI が書いたメールを、あなたが確かめてから送れます',
-  drive: '選んだ Drive のフォルダに、作った資料を置けます',
+  // 「選んだものだけ」: Google's page asks for just that (drive.file), and the first ［つなぐ］ no longer surprises (FB #27).
+  drive: 'Drive であなたが選んだファイル・フォルダだけを、やることにつないだり、AI が読んだり資料を置いたりできます',
   inbox: '届いたメールから、やることを作れます',
   sheets: 'あなたが編集できる表に、AI のスクリプトが読み書きできます（消す操作は通しません）',
   inbox_archive: 'ACB で済んだメールを、Gmail でもアーカイブします（消したり送ったりはしません）',

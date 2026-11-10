@@ -885,7 +885,7 @@ contract.type IpcInvokeChannels.'tasks:card' = 'tasks:card': { args: [companyId:
 contract.type IpcInvokeChannels.'tasks:create' = 'tasks:create': { args: [companyId: string, input: TaskCreateInput]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:createBundle' = 'tasks:createBundle': { args: [companyId: string, input: BundleCreateInput]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:dropLink' = 'tasks:dropLink': { args: [companyId: string, targetId: string, dropped: DroppedThing, link?: string]; result: DropLinkResult }
-contract.type IpcInvokeChannels.'tasks:linkDriveFiles' = 'tasks:linkDriveFiles': { args: [companyId: string, recordId: string, expectedVersion: number]; result: TaskDriveLinkResult }
+contract.type IpcInvokeChannels.'tasks:linkDriveFiles' = 'tasks:linkDriveFiles': { args: [companyId: string, recordId: string, expectedVersion: number, fileIds?: string[]]; result: TaskDriveLinkResult }
 contract.type IpcInvokeChannels.'tasks:linkFile' = 'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:linkRecord' = 'tasks:linkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId: string]; result: TaskListResult }
@@ -1182,7 +1182,7 @@ main.handle tasks:card @ features/tasks/ipc.ts (companyId, recordId)
 main.handle tasks:create @ features/tasks/ipc.ts (companyId, input)
 main.handle tasks:createBundle @ features/tasks/ipc.ts (companyId, input)
 main.handle tasks:dropLink @ features/tasks/ipc.ts (companyId, targetId, dropped, link)
-main.handle tasks:linkDriveFiles @ features/tasks/ipc.ts (companyId, recordId, expectedVersion)
+main.handle tasks:linkDriveFiles @ features/tasks/ipc.ts (companyId, recordId, expectedVersion, fileIds)
 main.handle tasks:linkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
 main.handle tasks:linkRecord @ features/tasks/ipc.ts (companyId, recordId, input)
 main.handle tasks:list @ features/tasks/ipc.ts (companyId)
@@ -1464,8 +1464,8 @@ preload hasApiKey -> invoke config:hasApiKey()
 preload hasApiKey : () => Promise<boolean>
 preload inviteToRecord -> invoke minutes:invite($0, $1, $2, $3, $4)
 preload inviteToRecord : (companyId: string, recordId: string, memberIds: string[], expectedVersion: number, sets?: InviteSet[] | undefined) => Promise<MeetingInviteResult>
-preload linkDriveFilesToTask -> invoke tasks:linkDriveFiles($0, $1, $2)
-preload linkDriveFilesToTask : (companyId: string, recordId: string, expectedVersion: number) => Promise<TaskDriveLinkResult>
+preload linkDriveFilesToTask -> invoke tasks:linkDriveFiles($0, $1, $2, $3)
+preload linkDriveFilesToTask : (companyId: string, recordId: string, expectedVersion: number, fileIds?: string[] | undefined) => Promise<TaskDriveLinkResult>
 preload linkFileToTask -> invoke tasks:linkFile($0, $1, $2, $3)
 preload linkFileToTask : (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => Promise<TaskWriteResult>
 preload linkMinutesBundle -> invoke minutes:linkBundle($0, $1, $2)
