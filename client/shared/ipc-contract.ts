@@ -64,7 +64,7 @@ import type { PluginScreensResult } from './plugin-screens'
 // lane B ▼
 // lane B ▲
 // lane C ▼
-import type { SkillShelfMark, SkillShelfRequestInfo, SkillShelfRestoreResult } from './skill-shelf'
+import type { SkillShelfMark, SkillShelfRequestInfo, SkillShelfRestoreResult, SkillShelfSendResult } from './skill-shelf'
 import type { PluginStepButton, PluginStepContinuation, PluginStepContinueResult, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
 import type { StepDeliverablesView } from './step-deliverables'
 // lane C ▲
@@ -707,10 +707,10 @@ export interface IpcInvokeChannels {
   'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: FileOpResult }
   'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
   'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: FileOpResult }
-  'skillShelf:publish': { args: [rootPath: string, skillPath: string, expectedVersion: string | null]; result: SimpleResult }
+  'skillShelf:publish': { args: [rootPath: string, skillPath: string, expectedVersion: string | null, leaveOutOutputs: boolean]; result: SkillShelfSendResult }
   'skillShelf:editLocally': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
   'skillShelf:restoreCompany': { args: [rootPath: string, skillPath: string]; result: SkillShelfRestoreResult }
-  'skillShelf:requestPublish': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
+  'skillShelf:requestPublish': { args: [rootPath: string, skillPath: string, leaveOutOutputs: boolean]; result: SkillShelfSendResult }
   'skillShelf:openBackup': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
   'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
   'tools:stop': { args: [toolPath: string]; result: StopToolResult }

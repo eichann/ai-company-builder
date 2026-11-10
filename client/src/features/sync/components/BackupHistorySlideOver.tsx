@@ -101,6 +101,10 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
         return '「元に戻す」の前の内容'
       case 'before_recovery':
         return '同期が途中で止まっていた間の内容'
+      case 'skill_edit':
+        return '「会社の版に戻す」の前の Skill'
+      case 'skill_outputs':
+        return 'Skill から外した成果物'
       default:
         return reason
     }

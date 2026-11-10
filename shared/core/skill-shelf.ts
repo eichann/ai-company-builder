@@ -109,6 +109,38 @@ export function shelfPathClash(paths: readonly string[]): string | null {
   return null
 }
 
+/**
+ * Outputs never go into a Skill (owner decision 2026-11-10): a Skill holds its procedure
+ * (`SKILL.md`), tools (`scripts/`), reference material (`references/`) and templates
+ * (`templates/`); what it produced (a proposal, a report, one run's CSV) belongs in a work folder or
+ * a Drive folder, and SKILL.md says where. A Skill is handed out to everyone who reads its place, so
+ * an output inside it reaches people it was never meant for. AIs tend to make `output/` there.
+ *
+ * The folder names directly under a Skill that look like outputs. A flag the person is asked about
+ * when publishing or asking for a publish, not a security boundary: kept small. Names a Skill's
+ * own tools often use (`out`, `dist`, `generated`, `export`) are left out on purpose.
+ */
+export const OUTPUT_FOLDER_NAMES: readonly string[] = ['output', 'outputs', 'result', 'results', '成果物', '出力']
+/** Deliverable files at the top of a Skill (deeper — `references/`, `templates/` — they are material). */
+export const OUTPUT_FILE_EXTENSIONS: readonly string[] = ['.pdf', '.docx', '.xlsx', '.pptx']
+
+const OUTPUT_FOLDER_KEYS = new Set(OUTPUT_FOLDER_NAMES.map(lookalikeKey))
+
+/**
+ * The paths (inside a Skill folder, as uploaded) that look like outputs: everything under a folder
+ * directly in the Skill named like one (`OUTPUT_FOLDER_NAMES`, compared as `lookalikeKey`: `Output`,
+ * `ＯＵＴＰＵＴ`), and a deliverable file (`OUTPUT_FILE_EXTENSIONS`) at the Skill's top. A folder of
+ * that name deeper inside (`scripts/output/`) is the tool's own and is not flagged. In the given order.
+ */
+export function outputLikePaths(paths: readonly string[]): string[] {
+  return paths.filter(p => {
+    const segments = p.split('/')
+    if (segments.length > 1) return OUTPUT_FOLDER_KEYS.has(lookalikeKey(segments[0]))
+    const key = lookalikeKey(p)
+    return OUTPUT_FILE_EXTENSIONS.some(ext => key.length > ext.length && key.endsWith(ext))
+  })
+}
+
 /** The file an instruction text or a rule file is stored as (a Skill keeps its own paths). */
 export function shelfTextFileName(kind: Exclude<ShelfKind, 'skill'>, name: string): string {
   return kind === 'instructions' ? INSTRUCTIONS_FILE : `${name}.md`

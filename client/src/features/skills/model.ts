@@ -2,7 +2,7 @@
 // copied one, and the slash commands the chat offers.
 import type { DepartmentConfig } from '../../types'
 import { setFrontmatterField, yamlQuoted } from '../../../shared/skill-frontmatter'
-import type { SkillShelfMark, SkillShelfRequestInfo } from '../../../shared/skill-shelf'
+import type { KeptAside, SkillShelfMark, SkillShelfRequestInfo } from '../../../shared/skill-shelf'
 
 /** A web app inside a skill's folder (`tools/<name>/`). */
 export interface SkillTool {
@@ -50,6 +50,20 @@ export const SKILL_ALREADY_SHARED_MESSAGE = 'このフォルダ名のスキル�
 export const SKILL_CREATE_FAILED = 'スキルを作成できませんでした。もう一度試してください。'
 export const SKILL_COPY_FAILED = 'スキルをコピーできませんでした。もう一度試してください。'
 export const SKILL_PUBLISH_FAILED = 'できませんでした。もう一度試してください。'
+
+/**
+ * What 「会社に公開」 / 「会社に出してほしいと頼む」 answer: null when it went, the sentence when it did
+ * not, the files that look like outputs (nothing sent; the panel asks 「成果物が入っていませんか？」), or —
+ * sent after 外して出す — whether the files left out moved to the kept copies.
+ */
+export type ShelfSendAnswer = string | null | { outputs: string[] } | { keptAside: KeptAside }
+
+/** The app's answer turned into what the panel shows. */
+export function shelfSendAnswer(result: { success: boolean; error?: string; outputs?: string[]; keptAside?: KeptAside }): ShelfSendAnswer {
+  if (result.success) return result.keptAside ? { keptAside: result.keptAside } : null
+  if (result.outputs && result.outputs.length > 0) return { outputs: result.outputs }
+  return result.error ?? SKILL_PUBLISH_FAILED
+}
 
 /** The SKILL.md of a new skill (frontmatter + the sections the wizard fills in). */
 export function newSkillMarkdown(data: NewSkillInput): string {

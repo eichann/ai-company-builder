@@ -159,6 +159,8 @@ describe('who asks', () => {
     expect(mcp).toMatchObject({ status: 403, body: { code: 'SHELF_NOT_ALLOWED', files: [{ path: '.mcp.json', reason: 'owner-admin-only' }] } })
     const secret = await ask('secret', null, 'rq-bob', SKILL, { 'notes.txt': `key: ${'AKIA'}${'ABCDEFGHIJKLMNOP'}` })
     expect(secret).toMatchObject({ status: 400, body: { code: 'SHELF_SECRET_DETECTED' } })
+    const outputs = await ask('with-output', null, 'rq-bob', SKILL, { 'outputs/report.md': 'r', 'scripts/run.py': 'x' })
+    expect(outputs).toMatchObject({ status: 400, body: { code: 'SHELF_OUTPUTS_INSIDE', paths: ['outputs/report.md'] } })
     const outside = await call('POST', co('/skill-shelf-requests'), { departmentId: null, name: 'out', files: [...files(), { path: '../x', base64: b64('x') }] }, 'rq-bob')
     expect(outside).toMatchObject({ status: 400, body: { code: 'SHELF_BAD_PATH' } })
     expect((await call('POST', co('/skill-shelf-requests'), { departmentId: null, name: 'Bad Name', files: files() }, 'rq-bob')).body.code).toBe('SHELF_BAD_NAME')
@@ -315,6 +317,24 @@ describe('公開する and 見送る', () => {
     const refused = await publishReq({ id: made.body.data.id, version: versionOfFiles(bad) }, null, 'rq-owner')
     expect(refused.status).toBe(400)
     expect((await call('GET', co('/skill-shelf'))).body.data.items.some((i: Json) => i.name === 'tampered')).toBe(false)
+  })
+
+  it('a request kept with outputs (sent before they were refused) is published only without them, when the publisher says so', async () => {
+    const made = await ask('kept-outputs', null, 'rq-carol')
+    expect(made.status).toBe(201)
+    const kept = files(SKILL, { 'output/提案書.md': '顧客への提案', 'guide.pdf': 'g', 'references/guide.pdf': 'r' })
+    const version = versionOfFiles(kept)
+    db.prepare('UPDATE shelf_requests SET files = ?, version = ? WHERE company_id = ? AND id = ?').run(JSON.stringify(kept), version, none, made.body.data.id)
+    const asked = await publishReq({ id: made.body.data.id, version }, null, 'rq-owner')
+    expect(asked).toMatchObject({ status: 400, body: { code: 'SHELF_OUTPUTS_INSIDE', paths: ['output/提案書.md', 'guide.pdf'] } })
+    expect((await call('GET', co('/skill-shelf'))).body.data.items.some((i: Json) => i.name === 'kept-outputs')).toBe(false)
+    // 外して出す: published without them; the request is decided.
+    const done = await call('POST', co(`/skill-shelf-requests/${made.body.data.id}/publish`), { requestVersion: version, expectedVersion: null, withoutOutputs: true }, 'rq-owner')
+    expect(done.status).toBe(200)
+    const rest = files(SKILL, { 'references/guide.pdf': 'r' })
+    expect(done.body.data.item.version).toBe(versionOfFiles(rest))
+    const published = await call('GET', co(`/skill-shelf/${done.body.data.item.id}/versions/${done.body.data.item.version}`))
+    expect(published.body.data.files.map((f: Json) => f.path).sort()).toEqual(['SKILL.md', 'references/guide.pdf'])
   })
 })
 

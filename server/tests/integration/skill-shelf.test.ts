@@ -551,4 +551,16 @@ describe('what is refused on upload (nothing stored)', () => {
     expect((await call('POST', co('/skill-shelf'), { kind: 'skill', departmentId: null, name: 'x', files: skillFiles(SKILL), expectedVersion: 'v1' })).body.code).toBe('SHELF_BAD_VERSION')
     expect(count()).toBe(before)
   })
+
+  it('what a Skill produced (an output-like folder, a deliverable at its top) is refused with the paths, even from an owner', async () => {
+    const before = count()
+    const refused = await publishSkill('proposal-out', null, SKILL, 'sh-owner', null, { 'output/提案書.md': '提案', 'Results/a.csv': 'a', 'deck.pptx': 'p', 'references/guide.pdf': 'g' })
+    expect(refused).toMatchObject({ status: 400, body: { code: 'SHELF_OUTPUTS_INSIDE', paths: ['output/提案書.md', 'Results/a.csv', 'deck.pptx'] } })
+    expect(refused.body.error).toContain('成果物')
+    expect(count()).toBe(before)
+    // The same Skill without them goes; material in references/ and a tool's own folder stay.
+    expect((await publishSkill('proposal-out', null, SKILL, 'sh-owner', null, { 'references/guide.pdf': 'g', 'scripts/output/keep.txt': 'k' })).status).toBe(201)
+    // An instruction text or a rule file has no folder: never asked.
+    expect((await call('POST', co('/skill-shelf'), { kind: 'rule', departmentId: null, name: 'output', text: '出力のきまり', expectedVersion: null })).status).toBe(201)
+  })
 })

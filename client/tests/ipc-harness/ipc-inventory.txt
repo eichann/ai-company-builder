@@ -867,8 +867,8 @@ contract.type IpcInvokeChannels.'recordViews:topics' = 'recordViews:topics': { a
 contract.type IpcInvokeChannels.'shell:openExternal' = 'shell:openExternal': { args: [url: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:editLocally' = 'skillShelf:editLocally': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:openBackup' = 'skillShelf:openBackup': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
-contract.type IpcInvokeChannels.'skillShelf:publish' = 'skillShelf:publish': { args: [rootPath: string, skillPath: string, expectedVersion: string | null]; result: SimpleResult }
-contract.type IpcInvokeChannels.'skillShelf:requestPublish' = 'skillShelf:requestPublish': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
+contract.type IpcInvokeChannels.'skillShelf:publish' = 'skillShelf:publish': { args: [rootPath: string, skillPath: string, expectedVersion: string | null, leaveOutOutputs: boolean]; result: SkillShelfSendResult }
+contract.type IpcInvokeChannels.'skillShelf:requestPublish' = 'skillShelf:requestPublish': { args: [rootPath: string, skillPath: string, leaveOutOutputs: boolean]; result: SkillShelfSendResult }
 contract.type IpcInvokeChannels.'skillShelf:restoreCompany' = 'skillShelf:restoreCompany': { args: [rootPath: string, skillPath: string]; result: SkillShelfRestoreResult }
 contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
 contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
@@ -1165,8 +1165,8 @@ main.handle recordViews:topics @ features/record-views/ipc.ts (companyId, record
 main.handle shell:openExternal @ features/tools/ipc.ts (url: string)
 main.handle skillShelf:editLocally @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
 main.handle skillShelf:openBackup @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
-main.handle skillShelf:publish @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string, expectedVersion: string | null)
-main.handle skillShelf:requestPublish @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
+main.handle skillShelf:publish @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string, expectedVersion: string | null, leaveOutOutputs: boolean)
+main.handle skillShelf:requestPublish @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string, leaveOutOutputs: boolean)
 main.handle skillShelf:restoreCompany @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
 main.handle skills:list @ features/skills/ipc.ts (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean })
 main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
@@ -1560,8 +1560,8 @@ preload patchChatSession -> invoke chatHistory:patchSession($0, $1, $2)
 preload patchChatSession : (companyId: string, sessionId: string, patch: ChatMetadataPatch) => Promise<ChatSession | null>
 preload publishSkill -> invoke skills:publish($0, $1)
 preload publishSkill : (rootPath: string, skillRelativePath: string) => Promise<FileOpResult>
-preload publishSkillToCompany -> invoke skillShelf:publish($0, $1, $2)
-preload publishSkillToCompany : (rootPath: string, skillPath: string, expectedVersion: string | null) => Promise<SimpleResult>
+preload publishSkillToCompany -> invoke skillShelf:publish($0, $1, $2, $3)
+preload publishSkillToCompany : (rootPath: string, skillPath: string, expectedVersion: string | null, leaveOutOutputs: boolean) => Promise<SkillShelfSendResult>
 preload readDirectory -> invoke fs:readDirectory($0)
 preload readDirectory : (path: string) => Promise<DirectoryEntry[]>
 preload readDirectoryTree -> invoke fs:readDirectoryTree($0, $1)
@@ -1590,8 +1590,8 @@ preload renameItem -> invoke fs:rename($0, $1)
 preload renameItem : (oldPath: string, newPath: string) => Promise<FileOpResult & { newPath?: string | undefined; }>
 preload reportChatWindowStatus -> invoke chatWindow:reportStatus($0)
 preload reportChatWindowStatus : (status: ChatWindowStatus) => Promise<boolean>
-preload requestCompanySkill -> invoke skillShelf:requestPublish($0, $1)
-preload requestCompanySkill : (rootPath: string, skillPath: string) => Promise<SimpleResult>
+preload requestCompanySkill -> invoke skillShelf:requestPublish($0, $1, $2)
+preload requestCompanySkill : (rootPath: string, skillPath: string, leaveOutOutputs: boolean) => Promise<SkillShelfSendResult>
 preload requestMeetingReading -> invoke minutes:requestReading($0, $1, $2)
 preload requestMeetingReading : (companyId: string, meetingId: string, expectedVersion: number) => Promise<MeetingPressResult>
 preload reservedPathRefusal -> invoke privateFolders:reservedPathRefusal($0)

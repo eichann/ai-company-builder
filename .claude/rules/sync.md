@@ -209,9 +209,11 @@ tracked. The sync message still counts the newly ignored files. Threshold:
   member decides what to put back; `<file>.staged-version` / `.committed-version` are versions only
   git held; `_same-name-<n>/` holds what shared a name with a file or folder in the copy; a member's
   own root `_metadata.json` is kept as `_metadata (member).json`).
-- A working folder (a company without the shared folder, no sync) has one kind: `<ts>_skill_edit/`
-  (reason `skill_edit`, `files`: the Skill folder the member moved aside with 「会社の版に戻す」;
-  `plugins.md` "The Skill shelf in the app").
+- A working folder (a company without the shared folder, no sync) has two kinds: `<ts>_skill_edit/`
+  (reason `skill_edit`, `files`: the Skill folder the member moved aside with 「会社の版に戻す」) and
+  `<ts>_skill_outputs/` (reason `skill_outputs`, `files`: what 外して出す moved out of a Skill; on a
+  failure half-way only those that moved); `plugins.md` "The Skill shelf in the app". The backup
+  list labels both (`BackupHistorySlideOver`), though a working folder has no backups panel today.
 - Private folders' backups live in `.git/acb-private-backups/` (`_private`, `_protected`,
   `_write_denied`, `_editor_overwrite`, `_made_public`, `_private_folder_existing`,
   `_outside_checkout`, `_before_recovery`), never in the working tree, so no `.gitignore` edit can share them.

@@ -254,6 +254,30 @@ export function shelfRestoredNote(companyVersion: 'back' | 'later' | 'not-delive
   return { back: null, later: SHELF_RESTORED_LATER_NOTE, 'not-delivered': SHELF_RESTORED_GONE_NOTE, occupied: SHELF_RESTORED_OCCUPIED_NOTE }[companyVersion]
 }
 
+/**
+ * What `skillShelf:publish` / `skillShelf:requestPublish` answer: done, refused with a sentence, or
+ * stopped before anything was sent because these files look like outputs (`outputLikePaths`; the
+ * member chooses 外して出す, sent again with `leaveOutOutputs`, or 戻って直す). After 外して出す,
+ * `keptAside` says whether the files left out moved to the kept copies (「控えを開く」): all, some, none.
+ */
+export type SkillShelfSendResult = { success: true; keptAside?: KeptAside } | { success: false; error: string } | { success: false; outputs: string[] }
+
+/** The question asked when a Skill about to go to the company holds what looks like outputs (owner decision 2026-11-10). */
+export const SHELF_OUTPUTS_QUESTION = '成果物が入っていませんか？'
+export const SHELF_OUTPUTS_NOTE = 'Skill には手順・道具・参考資料・ひな形だけを入れます。作ったもの（提案書・レポートなど）は、Skill を見られる全員に届いてしまうため、Skill の外（作業用のフォルダや Drive）に置き、置き場所を SKILL.md に書いておきます。次のファイルは成果物のように見えます。'
+export const SHELF_OUTPUTS_LEAVE_OUT = '外して出す'
+export const SHELF_OUTPUTS_GO_BACK = '戻って直す'
+/** What 外して出す's move did with the files left out: all in the kept copy, some of them, or none. */
+export type KeptAside = 'all' | 'some' | 'none'
+export const SHELF_OUTPUTS_KEPT_NOTE = '外したファイルは控えに移しました。'
+export const SHELF_OUTPUTS_SOME_KEPT_NOTE = '外したファイルの一部は控えに移しました。残りは移せなかったため、元の場所にあります。この PC の Skill は、送ったものとは別のままです。'
+export const SHELF_OUTPUTS_NOT_KEPT_NOTE = '外したファイルを控えに移せなかったため、元の場所に残っています。この PC の Skill は、送ったものとは別のままです。'
+
+/** The sentence after 外して出す, by what the move did. */
+export function shelfKeptAsideNote(kept: KeptAside): string {
+  return { all: SHELF_OUTPUTS_KEPT_NOTE, some: SHELF_OUTPUTS_SOME_KEPT_NOTE, none: SHELF_OUTPUTS_NOT_KEPT_NOTE }[kept]
+}
+
 /** 「会社に出してほしいと頼む」: what happens, said before it is sent. */
 export const SHELF_REQUEST_CONFIRM = 'この Skill を、会社に公開できる人に送って、公開をお願いします。公開されるまでは、この PC だけで使われます。'
 export const SHELF_REQUEST_OFFLINE_MESSAGE = 'サーバーにつながらないためお願いを送れませんでした。つながってから、もう一度やり直してください。'

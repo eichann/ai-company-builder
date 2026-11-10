@@ -30,7 +30,7 @@
 import { resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
 import { secretIn } from '../../shared/core/secret-patterns'
 import {
-  INSTRUCTIONS_NAME, SHELF_LIMITS, SHELF_REQUEST_LIMITS, isShelfKind, isShelfVersion, isValidShelfName, shelfChangeProblems, shelfFileNeedsText,
+  INSTRUCTIONS_NAME, SHELF_LIMITS, SHELF_REQUEST_LIMITS, isShelfKind, isShelfVersion, isValidShelfName, outputLikePaths, shelfChangeProblems, shelfFileNeedsText,
   shelfFilePathProblem, shelfListing, shelfPathClash, shelfRequestProblems, shelfTextFileName, type ShelfAuthority, type ShelfKind,
 } from '../../shared/core/skill-shelf'
 import { autorunFindingsInText } from '../../shared/core/skill-autorun'
@@ -88,6 +88,15 @@ export const SHELF_REQUEST_NOT_DECIDER = {
 export const SHELF_REQUEST_MEMBER_LIMIT = {
   error: `返事を待っているお願いが多すぎます（1人 ${SHELF_REQUEST_LIMITS.pendingPerMember} 件まで）。返事が来てから、もう一度やり直してください。`,
   code: 'SHELF_REQUEST_LIMIT',
+} as const
+/**
+ * 400 SHELF_OUTPUTS_INSIDE (owner decision 2026-11-10, `outputLikePaths`): what a Skill produced
+ * does not go to the shelf. The app asks first and leaves them out; an app that did not is refused
+ * here, with the paths (the sender's own upload, or the request the approver may look at anyway).
+ */
+export const SHELF_OUTPUTS_INSIDE = {
+  error: '成果物のようなファイルが入っています。Skill には手順・道具・参考資料・ひな形だけを入れ、作ったもの（提案書・レポートなど）は Skill の外に置いてください。',
+  code: 'SHELF_OUTPUTS_INSIDE',
 } as const
 export const SHELF_REQUEST_COMPANY_LIMIT = {
   error: '会社全体で、返事を待っているお願いが多すぎます。管理者に相談してください。',
@@ -248,7 +257,13 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
     return null
   }
 
-  function notAllowed(list: Array<{ path: string; reason: string; findings?: string[] }>): Refusal {
+  /** A Skill's files that look like outputs, refused (null = none). */
+  function outputsIn(kind: ShelfKind, files: ShelfFile[]): Refusal | null {
+    const paths = kind === 'skill' ? outputLikePaths(files.map(f => f.path)) : []
+    return paths.length > 0 ? bad(SHELF_OUTPUTS_INSIDE.code, SHELF_OUTPUTS_INSIDE.error, { paths }) : null
+  }
+
+  function notAllowed(list:Array<{ path: string; reason: string; findings?: string[] }>): Refusal {
     return refuse('forbidden', SHELF_NOT_ALLOWED.error, { code: SHELF_NOT_ALLOWED.code, files: list })
   }
 
@@ -430,6 +445,8 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       if (problems.length > 0) return notAllowed(problems)
       const secret = secretsIn(files)
       if (secret) return secret
+      const outputs = outputsIn(kind, files)
+      if (outputs) return outputs
       const totalBytes = files.reduce((n, f) => n + f.bytes.length, 0)
       const version = versionOf(files)
       const existing = ctx.handle.skillShelf.itemAt(kind, departmentId, name)
@@ -562,6 +579,8 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       if (onlyOwners.length > 0) return notAllowed(onlyOwners)
       const secret = secretsIn(files)
       if (secret) return secret
+      const outputs = outputsIn('skill', files)
+      if (outputs) return outputs
       const written = ctx.handle.skillShelf.putRequest({
         newId: ids.newId(), departmentId, name, by: member.userId, at: clock.now(), version: versionOf(files),
         files: files.map(f => ({ path: f.path, base64: f.bytes.toString('base64') })), fileCount: files.length,
@@ -594,6 +613,8 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
      * history noting who asked; the request is decided and its files go, in the same transaction.
      * `requestVersion` is the version of the files the caller looked at: anything else → 409
      * `SHELF_REQUEST_CHANGED` (a request sent again has a new id, so an old id is 404 anyway).
+     * Files that look like outputs → 400 `SHELF_OUTPUTS_INSIDE { paths }`, unless `withoutOutputs:
+     * true` (外して出す): then they are left out of the published version.
      */
     publishRequest(member: Member, requestId: string, body: unknown): Outcome<ShelfRequestDecided> {
       if (deps.hasCompanyFolder(member.companyId)) return notHere()
@@ -611,8 +632,13 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       // The upload rules again (paths, sizes, count), and the files are still the version looked at.
       const content = parseShelfContent('skill', row.name, { files: stored })
       if (!content.ok) return content
-      const files = content.value
-      if (versionOf(files) !== row.version) return requestChanged()
+      if (versionOf(content.value) !== row.version) return requestChanged()
+      // A request kept before outputs were refused: the approver leaves them out (`withoutOutputs`) or does not publish.
+      const outputPaths = outputLikePaths(content.value.map(f => f.path))
+      if (outputPaths.length > 0 && !(isObject(body) && body.withoutOutputs === true)) {
+        return bad(SHELF_OUTPUTS_INSIDE.code, SHELF_OUTPUTS_INSIDE.error, { paths: outputPaths })
+      }
+      const files = content.value.filter(f => !outputPaths.includes(f.path))
       const problems = ctx.problems('skill', row.departmentId, row.name, files, true)
       if (problems.length > 0) return notAllowed(problems)
       // Checked again: a pattern added since it was sent.
@@ -622,7 +648,7 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
       const at = clock.now()
       const written = ctx.handle.skillShelf.put({
         newItemId: ids.newId(), kind: 'skill', departmentId: row.departmentId, name: row.name, expected: expected.value, version,
-        files: stored, fileCount: files.length, totalBytes: files.reduce((n, f) => n + f.bytes.length, 0),
+        files: stored.filter(f => !outputPaths.includes(f.path)), fileCount: files.length, totalBytes: files.reduce((n, f) => n + f.bytes.length, 0),
         autorun: files.some(f => f.text !== undefined && autorunFindingsInText(f.text).length > 0),
         companyLimitBytes: SHELF_LIMITS.companyBytes,
         at, by: member.userId, requestedBy: row.requestedBy, fromRequest: { id: row.id, version: row.version },

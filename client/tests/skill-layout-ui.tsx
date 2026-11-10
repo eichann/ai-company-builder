@@ -115,6 +115,8 @@ const SHELF_MARKS: Record<string, { state: 'company' | 'clash' | 'editing'; vers
     ...(params.get('newer') === '1' ? { newer: { version: 'ef567890'.repeat(8), at: new Date(2026, 10, 9, 14, 5).toISOString() } } : {}),
   },
 }
+/** ?outputs=1: what main finds in the Skill that looks like outputs. */
+const SHELF_OUTPUTS = ['output/A社への提案書.md', '見積.xlsx']
 /** ?request=pending|declined: the member's latest request to publish (「会社に出してほしいと頼む」). */
 const SHELF_REQUEST_LAST = params.get('request') === 'pending'
   ? { name: 'x', departmentFolder: null, state: 'pending' as const, requestedAt: new Date(2026, 10, 9, 9, 30).toISOString(), decidedAt: null, reason: null }
@@ -324,10 +326,12 @@ const api: Partial<ElectronAPI> = {
     return { success: true, recordId }
   },
   onPluginsChanged: () => () => {},
-  // A company without the shared folder (?kind=none): ?shelf=refused = the server says no.
-  publishSkillToCompany: async (_root: string, skillPath: string, expectedVersion: string | null) => {
-    record('publishSkillToCompany', [skillPath.split('/').pop(), expectedVersion])
-    return params.get('shelf') === 'refused' ? { success: false, error: 'この Skill・指示を変えられるのは、決められた人だけです。' } : { success: true }
+  // A company without the shared folder (?kind=none): ?shelf=refused = the server says no;
+  // ?outputs=1 = the Skill holds what looks like outputs (main stops until 外して出す).
+  publishSkillToCompany: async (_root: string, skillPath: string, expectedVersion: string | null, leaveOutOutputs: boolean) => {
+    record('publishSkillToCompany', [skillPath.split('/').pop(), expectedVersion, leaveOutOutputs])
+    if (params.get('outputs') === '1' && !leaveOutOutputs) return { success: false as const, outputs: SHELF_OUTPUTS }
+    return params.get('shelf') === 'refused' ? { success: false as const, error: 'この Skill・指示を変えられるのは、決められた人だけです。' } : { success: true as const, ...(leaveOutOutputs ? { keptAside: 'all' as const } : {}) }
   },
   editCompanySkillLocally: async (_root: string, skillPath: string) => {
     record('editCompanySkillLocally', [skillPath.split('/').pop()])
@@ -338,9 +342,10 @@ const api: Partial<ElectronAPI> = {
     record('restoreCompanySkill', [skillPath.split('/').pop()])
     return { success: true as const, companyVersion: params.get('restore') === 'later' ? 'later' as const : 'back' as const }
   },
-  requestCompanySkill: async (_root: string, skillPath: string) => {
-    record('requestCompanySkill', [skillPath.split('/').pop()])
-    return { success: true }
+  requestCompanySkill: async (_root: string, skillPath: string, leaveOutOutputs: boolean) => {
+    record('requestCompanySkill', [skillPath.split('/').pop(), leaveOutOutputs])
+    if (params.get('outputs') === '1' && !leaveOutOutputs) return { success: false as const, outputs: SHELF_OUTPUTS }
+    return { success: true as const, ...(leaveOutOutputs ? { keptAside: 'all' as const } : {}) }
   },
   openCompanySkillBackup: async (_root: string, skillPath: string) => {
     record('openCompanySkillBackup', [skillPath.split('/').pop()])

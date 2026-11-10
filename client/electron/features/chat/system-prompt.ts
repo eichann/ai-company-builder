@@ -54,6 +54,8 @@ export function buildSystemPrompt(workingDirectory?: string): string {
 
 **重要**: 詳細な仕様書、API定義、長いドキュメントはSKILL.md本文ではなく \`references/\` フォルダに分離する。
 
+**重要**: スキルのフォルダに成果物（スキルで作った提案書・レポート・CSV など）を置かない（\`output/\` なども作らない）。スキルは手順・道具・参考資料・ひな形だけで、ほかの人にも配られる。成果物はスキルの外（作業用のフォルダや Drive）に置き、置き場所を SKILL.md に書く。
+
 ### スキルのディレクトリ構造
 
 \`\`\`
