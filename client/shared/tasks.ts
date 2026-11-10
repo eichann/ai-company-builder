@@ -331,6 +331,29 @@ export interface RecordLinkInput {
 /** A typed file link's target as the renderer names it (records.md "File links without the shared folder"). */
 export type TypedFileTarget = { kind: 'local'; path: string } | { kind: 'drive'; fileId: string }
 
+/**
+ * One of the member's own Drive files offered by 「Google Drive のファイルをつなぐ」 before the Picker: a
+ * file they picked earlier or one their AI put (the name is theirs; it is never shown to anyone else).
+ */
+export interface TaskDriveChoice {
+  id: string
+  name: string
+  source: 'picked' | 'put'
+}
+
+/** At most this many of them are listed (the server's own limit) and sent back to link at once. */
+export const TASK_DRIVE_CHOICES_MAX = 30
+
+/**
+ * How 「Google Drive のファイルをつなぐ」 runs (`tasks:linkDriveFiles`' 4th argument): `chosen` — files
+ * ticked in the app's own list, linked without Google's window; `fileIds` — a pasted / dropped Drive
+ * link's files, which Google's window shows first. Neither: Google's window as it opens by itself.
+ */
+export interface TaskDriveLinkOptions {
+  chosen?: TaskDriveChoice[]
+  fileIds?: string[]
+}
+
 /** What 「Google Drive のファイルをつなぐ」 did: the names linked (`error` when one after them was refused). */
 export type TaskDriveLinkResult =
   | { success: true; recordId: string; linked: string[]; error?: string }

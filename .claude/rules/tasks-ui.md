@@ -659,13 +659,24 @@ every folder above them: `linkCandidates`, `model.ts`). **A company without the 
 company paths are refused, so the card has neither ［＋ファイル・フォルダをつなぐ］ nor ［新しいファイル］
 (`TaskCard` `sharedFolder`, from AppShell's `companyHasSharedFolder`; test `tests/ui/skill-layout.spec.ts`
 「a task card in a git / none company」). Instead its 「ファイル」 group (`typedFiles`, `TYPED_FILES_NOTE`)
-offers **［Google Drive のファイルをつなぐ］** (`tasks:linkDriveFiles`: the Google connector's Picker,
-then each pick linked at the version the previous link moved to; 「「…」をつなぎました」) — also a Drive
-link **pasted** into the box under it or **dragged from the browser** onto 「つながっているもの」 (owner
-2026-11-09; `DriveLinkAction.tsx`, `mayCarryLink` / `droppedText` in `model.ts`): the Picker opens
-showing just that file (`google-drive.md`), anything else says 「Google Drive のファイルのリンクではないため、
-つなげません。」; the button is off with a plain note while Drive is not set up for the company, and says
-before the first press that Google will ask (`useDriveLinkSetup`, `driveLinkView`) — and lists
+offers **［Google Drive のファイルをつなぐ］** (`DriveLinkAction.tsx` + `DriveFiles.tsx`; owner decisions
+2026-11-09): pressed, it first offers the member's own Drive files (`tasks:driveChoices` → the connector's
+`GET /me/google/drive/files`: their live picks and what their AI put, by name — theirs only) to tick one or
+several, those already linked marked 「つないであります」 and not choosable, ［つなぐ］ and ［Google Drive から探す］;
+with none listed the Picker opens at once. `tasks:linkDriveFiles(companyId, recordId, version, options?)`,
+`TaskDriveLinkOptions`: `{ chosen }` — the ticked files (main checks the ids, ≤ 30), no Picker; `{ fileIds }`
+— a Drive link **pasted** into the box under the button or **dragged from the browser** onto
+「つながっているもの」 (`mayCarryLink` / `droppedText` in `model.ts`): straight to the Picker showing just that
+file (`google-drive.md`; the bare id array of an unreleased build is read as `fileIds`); neither — the
+Picker as it opens. Then each is linked at the version the previous link moved to; 「「…」をつなぎました」.
+Anything pasted that is not a Drive file link says 「Google Drive のファイルのリンクではないため、つなげません。」;
+when the Picker opened on a pasted / dropped link ends with nothing chosen (it may have shown no file:
+not visible to the member, or a type ACB cannot read), a quiet line under the box says what to check
+(`DRIVE_LINK_EMPTY_HINT`, `model.ts`) until the next action — never after a plain Picker's cancel;
+the button (list included) is off with a plain note while Drive is not set up for the company, and says
+before the first press that Google will ask (`useDriveLinkSetup`, `driveLinkView`); while the Picker is open
+(busy) neither the list nor a pasted link starts another. A file the consultation's AI put into Drive is
+linked by the server already (`google-drive.md`). It lists
 `card.localFiles` — files of the member's own PC, each with the small 「あなただけ」 (`data-only-you`;
 opens on this PC with `file.open`; not here (`exists`) → 「このパソコンに見つかりません（動かしたか、消した
 かもしれません）」, said again on a press, nothing opened) — and `card.driveFiles` — the member's own by
@@ -674,8 +685,10 @@ its name, anyone else's as 「Google Drive のファイル」 (`DRIVE_FILE_NEUTR
 path or a Drive id; ［取り消す］ for a PC file). **A file dragged from the tree onto the card or a list
 row is linked as the member's own** (`useLinkDrop` `localFiles`, `DroppedThing.local`; 「…をつなぎました
 （あなただけに見えます）」), and the drop zone says 「このパソコンのファイル（あなただけ）」. Tests:
-`client/tests/typed-file-links.test.ts`, `tests/ui/task-card.spec.ts` (`?kind=none`; 「a company with the
-shared folder: no Drive button, a dropped file stays a company file」; 「…a pasted or dropped Drive link…」) — mutation-checked. Each linked file's
+`client/tests/typed-file-links.test.ts`, `tests/ui/task-card.spec.ts` (`?kind=none`; `&drive=list`: 「the
+member's own Drive files offered first」; 「a company with the
+shared folder: no Drive button, a dropped file stays a company file」; 「…a pasted or dropped Drive link…」;
+`&drive=cancel`: 「…explains why it may be empty; a plain cancel does not」) — mutation-checked. Each linked file's
 「…」 offers 「つながりを外す」, then 「「<name>」とのつながりを外しました［取り消す］」 (取り消す links it again).
 
 **Links between records** (owner 2026-11-02; server `records.md` "Linking records later"): each row

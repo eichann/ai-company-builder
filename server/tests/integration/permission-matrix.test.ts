@@ -500,6 +500,7 @@ const MATRIX: Row[] = [
   // Google Drive (google-drive.md): the member's own Picker token and picks (any member); the AI's routes need a record token.
   r('POST /api/companies/:companyId/me/google/drive/picker', w => ({ path: `${C(w)}/me/google/drive/picker`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('POST /api/companies/:companyId/me/google/drive/picks', w => ({ path: `${C(w)}/me/google/drive/picks`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/me/google/drive/files', w => ({ path: `${C(w)}/me/google/drive/files` }), MEMBERS, 'only the caller\'s own picks and puts (google-drive.test.ts)'),
   r('GET /api/records-ai/google/drive/status', () => ({ path: '/api/records-ai/google/drive/status' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/google/drive/read', () => ({ path: '/api/records-ai/google/drive/read', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/google/drive/put', () => ({ path: '/api/records-ai/google/drive/put', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),

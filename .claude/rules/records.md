@@ -423,7 +423,11 @@ company path:
   `linkedToFile` cannot name one (`fileLinkPath`).
 - **People only**: the member's AI gets 403 `TYPED_LINK_PERSON_ONLY` for either kind (the AI reads a
   Drive-linked file only through `drive_read`, which needs the member's own pick, and a PC file with
-  its ordinary file tools in the working folder). Removing either: `…/file-links/remove { target }`
+  its ordinary file tools in the working folder). **One exception** (owner decision 2026-11-09): the file
+  the member's own Drive put just made in a consultation about the record is linked by the server, as
+  the AI (`recordEngine.linkDrivePut`, only from the Google connector's put route with facts from the put
+  receipt, every other check of `fileLink` kept; `google-drive.md` "The AI's routes"). A person may also
+  link a file their own put made (`linkable`). Removing either: `…/file-links/remove { target }`
   (a Drive link: any reader, as for company paths; a PC file: its owner — anyone else gets 404
   `LINK_NOT_FOUND`).
 - **Materials and attached versions** (`act.ts`): `decision.materials` may name `{ kind: 'drive',

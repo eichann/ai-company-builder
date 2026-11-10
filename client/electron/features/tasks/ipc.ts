@@ -50,7 +50,7 @@ import { linkedPaths } from '../../../shared/record-views'
 import { dropLinkPlan, type DroppedThing, type DropLinkResult } from '../../../shared/link-drop'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
-  type TaskDriveLinkResult, type TypedFileTarget, ARCHIVE_PAGE, ARCHIVE_SHOWN_DAYS, archivedTasks, archivePage, classifyTasks, isArchiveCursor, OPEN_TASK_STATES, proposalMay, similarOf, TASKS_OFFLINE_TEXT,
+  type TaskDriveChoice, type TaskDriveLinkResult, type TypedFileTarget, ARCHIVE_PAGE, TASK_DRIVE_CHOICES_MAX, ARCHIVE_SHOWN_DAYS, archivedTasks, archivePage, classifyTasks, isArchiveCursor, OPEN_TASK_STATES, proposalMay, similarOf, TASKS_OFFLINE_TEXT,
   type ArchivedTasksResult, type SimilarItem, type BundleChoicesResult, type BundleCreateInput, type BundleKindsAnswer, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
 } from '../../../shared/tasks'
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -65,6 +65,17 @@ function typedTarget(t: unknown): TypedFileTarget | null {
   }
   if (v?.kind === 'drive' && driveLinkTarget(v.fileId)) return { kind: 'drive', fileId: v.fileId as string }
   return null
+}
+
+/** A list of Drive files as main takes it: Drive ids, names as text, at most the Picker's number. */
+function driveChoicesOf(v: unknown): TaskDriveChoice[] | null {
+  if (!Array.isArray(v) || v.length > TASK_DRIVE_CHOICES_MAX) return null
+  const out: TaskDriveChoice[] = []
+  for (const f of v as Array<{ id?: unknown; name?: unknown; source?: unknown } | null>) {
+    if (!f || !driveLinkTarget(f.id) || typeof f.name !== 'string' || f.name.length > 300) return null
+    out.push({ id: f.id as string, name: f.name, source: f.source === 'put' ? 'put' : 'picked' })
+  }
+  return out
 }
 
 export interface TasksDeps {
@@ -82,6 +93,11 @@ export interface TasksDeps {
    * `fileIds`: Drive ids (already checked) the Picker shows first.
    */
   pickDriveFiles?: (companyId: string, fileIds: string[]) => Promise<{ ok: true; files: Array<{ id: string; name: string }> } | { ok: false; cancelled: boolean; message: string }>
+  /**
+   * The member's own Drive files to offer before the Picker (the Google connection's, composed in
+   * main.ts): their live picks and the files their AI put, names included (their own). Absent → none.
+   */
+  driveChoices?: (companyId: string) => Promise<TaskDriveChoice[]>
 }
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
@@ -326,10 +342,16 @@ export function createTasksApi(deps: TasksDeps) {
      * `fileIds` (a pasted / dropped Drive link): only Drive ids go on to the Picker, to show first;
      * nothing is linked that the member did not pick there.
      */
-    async linkDriveFiles(companyId: string, recordId: string, expectedVersion: number, fileIds?: unknown): Promise<TaskDriveLinkResult> {
+    async linkDriveFiles(companyId: string, recordId: string, expectedVersion: number, options?: unknown): Promise<TaskDriveLinkResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !Number.isInteger(expectedVersion)) return BAD_INPUT
-      if (!deps.pickDriveFiles) return { success: false, offline: false, error: 'この画面からは Google Drive を使えません。' }
-      const picked = await deps.pickDriveFiles(companyId, drivePreselectIds(fileIds))
+      // `{ chosen }`: files the member ticked in the app's own list (their picks and puts) — no Picker; the
+      // server checks each again. `{ fileIds }` (or the bare array an unreleased build sent): a pasted link's
+      // files the Picker shows first.
+      const o: { fileIds?: unknown; chosen?: unknown } = Array.isArray(options) ? { fileIds: options } : options && typeof options === 'object' ? options : {}
+      const listed = o.chosen === undefined ? null : driveChoicesOf(o.chosen)
+      if (o.chosen !== undefined && !listed) return BAD_INPUT
+      if (!listed && !deps.pickDriveFiles) return { success: false, offline: false, error: 'この画面からは Google Drive を使えません。' }
+      const picked = listed ? { ok: true as const, files: listed } : await deps.pickDriveFiles!(companyId, drivePreselectIds(o.fileIds))
       if (!picked.ok) return picked.cancelled ? { success: true, recordId, linked: [] } : { success: false, offline: false, error: picked.message }
       let at = expectedVersion
       const linked: string[] = []
@@ -345,6 +367,12 @@ export function createTasksApi(deps: TasksDeps) {
         linked.push(f.name)
       }
       return { success: true, recordId, linked }
+    },
+
+    /** The member's own Drive files offered before the Picker (empty when none or unknown: the Picker then opens). */
+    async driveChoices(companyId: string): Promise<TaskDriveChoice[]> {
+      if (!COMPANY.test(companyId) || !deps.driveChoices) return []
+      try { return driveChoicesOf(await deps.driveChoices(companyId)) ?? [] } catch { return [] }
     },
 
     async share(companyId: string, recordId: string, folder: string, expectedVersion: number): Promise<TaskWriteResult> {
@@ -639,8 +667,9 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
     api.linkFile(typeof companyId === 'string' ? companyId : '', recordId, companyPath, expectedVersion, true))
   ipc.handle('tasks:unlinkTarget', (_event, companyId, recordId, target, expectedVersion) =>
     api.unlinkTarget(typeof companyId === 'string' ? companyId : '', recordId, target, expectedVersion))
-  ipc.handle('tasks:linkDriveFiles', (_event, companyId, recordId, expectedVersion, fileIds) =>
-    api.linkDriveFiles(typeof companyId === 'string' ? companyId : '', recordId, expectedVersion, fileIds))
+  ipc.handle('tasks:linkDriveFiles', (_event, companyId, recordId, expectedVersion, options) =>
+    api.linkDriveFiles(typeof companyId === 'string' ? companyId : '', recordId, expectedVersion, options))
+  ipc.handle('tasks:driveChoices', (_event, companyId) => api.driveChoices(typeof companyId === 'string' ? companyId : ''))
   ipc.handle('tasks:share', (_event, companyId, recordId, folder, expectedVersion) =>
     api.share(typeof companyId === 'string' ? companyId : '', recordId, folder, expectedVersion))
   ipc.handle('tasks:shareToBundle', (_event, companyId, recordId, expectedVersion) =>

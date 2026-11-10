@@ -92,6 +92,12 @@ export interface DrivePutAnswer {
   drivePut: DrivePutView
   /** The same request (same requestKey) was put before: this is that put, nothing was sent again. */
   existing: boolean
+  /**
+   * The request named a record (`recordId`, the consultation's やること) and this put's new file was
+   * linked to it now (records.md "File links without the shared folder"). Absent: nothing was linked
+   * (no record named, a replay, a check refused it, or an older server).
+   */
+  linkedTo?: { recordId: string }
 }
 
 /** POST /api/records-ai/google/drive/put body. */
@@ -101,6 +107,28 @@ export interface DrivePutRequest {
   kind: 'pdf' | 'html'
   sha256: string
   contentBase64: string
-  /** The app's key for this put (same file, folder and name → same key): never put twice. */
+  /** The app's key for this put (same content, folder and name → same key): a byte-identical repeat is never put twice; edited content is a new file. */
   requestKey: string
+  /**
+   * The consultation's やること (its topic), set by the app, never by the AI: once the file is in
+   * Drive the server links it to that record when every record check passes. A refusal there never
+   * fails the put.
+   */
+  recordId?: string
+}
+
+/** One of the member's own Drive files ACB may open: a live pick of a file, or a file their put made. */
+export interface DriveOwnFile {
+  id: string
+  /** The name as picked or put (the member's own; never answered to anyone else). */
+  name: string
+  mimeType: string
+  source: 'picked' | 'put'
+  /** When it was picked or put. */
+  at: string
+}
+
+/** GET /api/companies/:id/me/google/drive/files (session): the member's own, newest first (empty while Drive is not available). */
+export interface DriveOwnFiles {
+  files: DriveOwnFile[]
 }

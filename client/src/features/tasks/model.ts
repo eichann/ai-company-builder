@@ -359,6 +359,8 @@ export function linkCandidates(files: readonly string[]): Array<{ path: string; 
 
 /** A paste or a drop that holds no Drive file address. */
 export const NOT_A_DRIVE_LINK = 'Google Drive のファイルのリンクではないため、つなげません。'
+/** After the chooser opened on a pasted / dropped link ended with nothing chosen: why it may have been empty. */
+export const DRIVE_LINK_EMPTY_HINT = '選ぶ画面にファイルが出てこないときは、そのリンクのファイルをあなたが見られるか、読める種類（Google ドキュメント・スプレッドシート・スライド・PDF・テキスト）かを確かめてください。'
 
 /** A drag that may carry an address (a link from the browser); the text is read only on the drop. */
 export function mayCarryLink(data: Pick<DataTransfer, 'types'> | null): boolean {

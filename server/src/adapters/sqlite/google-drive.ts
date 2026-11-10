@@ -49,6 +49,10 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
       return (conn.prepare(`SELECT ${PICK_COLUMNS} FROM google_drive_picks WHERE company_id = ? AND user_id = ? AND expires_at > ? ORDER BY picked_at DESC, file_id LIMIT ?`)
         .all(companyId, userId, now, limit) as PickRow[]).map(toPick)
     },
+    picksOfKind(userId, kind, now, limit) {
+      return (conn.prepare(`SELECT ${PICK_COLUMNS} FROM google_drive_picks WHERE company_id = ? AND user_id = ? AND kind = ? AND expires_at > ? ORDER BY picked_at DESC, file_id LIMIT ?`)
+        .all(companyId, userId, kind, now, limit) as PickRow[]).map(toPick)
+    },
     prunePicks(now) {
       conn.prepare('DELETE FROM google_drive_picks WHERE company_id = ? AND expires_at <= ?').run(companyId, now)
     },
@@ -71,6 +75,15 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
     put(userId, id) {
       const r = conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND id = ?`).get(companyId, userId, id) as PutRow | undefined
       return r ? toPut(r) : null
+    },
+    putOfFile(userId, fileId) {
+      const r = conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND file_id = ? AND state = 'done'
+        ORDER BY created_at DESC, id LIMIT 1`).get(companyId, userId, fileId) as PutRow | undefined
+      return r ? toPut(r) : null
+    },
+    donePuts(userId, limit) {
+      return (conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND state = 'done' AND file_id IS NOT NULL
+        ORDER BY created_at DESC, id LIMIT ?`).all(companyId, userId, limit) as PutRow[]).map(toPut)
     },
     settlePut(id, f) {
       return conn.prepare(`UPDATE google_drive_puts SET state = ?, file_id = ?, revision_id = ?, link = ?, reason = ?, finished_at = ?

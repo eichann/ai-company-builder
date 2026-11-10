@@ -522,3 +522,121 @@ describe('the AI puts a PDF / HTML into a picked folder', () => {
     expect(logLines.join('\n')).not.toContain('対象：営業部')
   })
 })
+
+describe('a put in a consultation about a task: its file is linked to the task (records.md "File links without the shared folder")', () => {
+  const driveLinks = async (user: string, recordId: string) =>
+    ((await person(user, 'GET', `/records/item/${recordId}`)).body.data.links as Json[]).filter(l => l.drive).map(l => l.drive)
+  const withoutFolder = async (fn: () => Promise<void>) => {
+    db.prepare("UPDATE companies SET folder_kind = 'none' WHERE id = ?").run(CO)
+    try { await fn() } finally { db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO) }
+  }
+  const task = async (user: string, title: string, extra: Record<string, unknown> = {}) => {
+    const made = await person(user, 'POST', '/records/item', { type: 'task', title, fields: { assignee: 'm-tanaka' }, ...extra })
+    expect(made.status, made.text).toBe(201)
+    return made.body.data.record.id as string
+  }
+
+  it('the put file is linked as the member\'s own, from the receipt: the name for the linker only, the revision and sha256 of the bytes put', () => withoutFolder(async () => {
+    const id = await task('m-sato', '提案書を置く')
+    const token = await tokenFor('m-sato', 'act')
+    const r = await ai(token, 'POST', '/put', { ...putBody({ name: '自動でつなぐ.pdf' }), recordId: id })
+    expect(r.status, r.text).toBe(200)
+    expect(r.body.data.drivePut.state).toBe('done')
+    expect(r.body.data.linkedTo).toEqual({ recordId: id })
+    const fileId = r.body.data.drivePut.fileId as string
+    const mine = await driveLinks('m-sato', id)
+    expect(mine).toEqual([expect.objectContaining({ fileId, mine: true, name: '自動でつなぐ.pdf', revisionId: r.body.data.drivePut.revisionId, sha256: sha(PDF) })])
+    // Another reader of the task gets the row, never the name.
+    const his = await person('m-tanaka', 'GET', `/records/item/${id}`)
+    expect((his.body.data.links as Json[]).filter(l => l.drive).map(l => l.drive)).toEqual([{ fileId, mine: false }])
+    expect(his.text).not.toContain('自動でつなぐ')
+    // The ledger says the AI linked it (owner decision: the put was the AI's, so is the link), for this member.
+    const history = await person('m-sato', 'GET', `/records/item/${id}/history`)
+    const linkEntries = (history.body.data.entries as Json[]).filter(e => e.action === 'link_file')
+    expect(linkEntries.map(e => [e.actorKind, e.actorId])).toEqual([['ai', 'm-sato']])
+    expect(history.text).not.toContain('自動でつなぐ')
+  }))
+
+  it('a replay (same request key) links nothing again, even after the member took the link off', () => withoutFolder(async () => {
+    const id = await task('m-sato', '置き直し')
+    const token = await tokenFor('m-sato', 'act')
+    const body = { ...putBody({ name: '一度だけ.pdf' }), recordId: id }
+    const first = await ai(token, 'POST', '/put', body)
+    expect(first.body.data.linkedTo).toEqual({ recordId: id })
+    const fileId = first.body.data.drivePut.fileId as string
+    const again = await ai(token, 'POST', '/put', body)
+    expect(again.body.data.existing).toBe(true)
+    expect(again.body.data.linkedTo).toBeUndefined()
+    expect(await driveLinks('m-sato', id)).toHaveLength(1)
+    const version = (await person('m-sato', 'GET', `/records/item/${id}`)).body.data.record.version as number
+    const removed = await person('m-sato', 'POST', `/records/item/${id}/file-links/remove`, { target: { kind: 'drive', fileId }, expectedVersion: version })
+    expect(removed.status, removed.text).toBe(200)
+    const third = await ai(token, 'POST', '/put', body)
+    expect(third.body.data.existing).toBe(true)
+    expect(third.body.data.linkedTo).toBeUndefined()
+    expect(await driveLinks('m-sato', id)).toEqual([])
+  }))
+
+  it('a record check that fails links nothing and the put stays done: unreadable, missing, a company with the shared folder, none named', async () => {
+    await withoutFolder(async () => {
+      const hidden = await task('m-tanaka', '田中さんだけ', { personal: true })
+      const token = await tokenFor('m-sato', 'act')
+      for (const recordId of [hidden, 'task-0000000000000000', 'not a record id']) {
+        const r = await ai(token, 'POST', '/put', { ...putBody({ name: `つながらない-${randomBytes(3).toString('hex')}.pdf` }), recordId })
+        expect(r.status, r.text).toBe(200)
+        expect(r.body.data.drivePut.state).toBe('done')
+        expect(r.body.data.linkedTo).toBeUndefined()
+      }
+      expect(await driveLinks('m-tanaka', hidden)).toEqual([])
+    })
+    // The shared folder: Drive links are not this company's kind of link.
+    const id = await task('m-sato', '共有フォルダのある会社')
+    const token = await tokenFor('m-sato', 'act')
+    const r = await ai(token, 'POST', '/put', { ...putBody({ name: '共有フォルダあり.pdf' }), recordId: id })
+    expect(r.body.data.drivePut.state).toBe('done')
+    expect(r.body.data.linkedTo).toBeUndefined()
+    expect(await driveLinks('m-sato', id)).toEqual([])
+    // No record named: the put as before.
+    const plain = await ai(token, 'POST', '/put', putBody({ name: 'つなぎ先なし.pdf' }))
+    expect(plain.body.data.drivePut.state).toBe('done')
+    expect(plain.body.data.linkedTo).toBeUndefined()
+  })
+
+  it('the member\'s own files for 「つなぐ」: their picks and puts with names; never another member\'s; another member cannot link them', () => withoutFolder(async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const put = await ai(token, 'POST', '/put', putBody({ name: '一覧に出る.pdf' }))
+    const putFileId = put.body.data.drivePut.fileId as string
+    const list = await person('m-sato', 'GET', '/me/google/drive/files')
+    expect(list.status, list.text).toBe(200)
+    const files = list.body.data.files as Json[]
+    expect(files.find(f => f.id === putFileId)).toMatchObject({ name: '一覧に出る.pdf', source: 'put' })
+    expect(files.find(f => f.id === GOOGLE_SEED.handNotesPdf)).toMatchObject({ name: '手書きメモ.pdf', source: 'picked' })
+    // Picked folders are not files to link.
+    expect(files.some(f => f.id === GOOGLE_SEED.proposalsFolder)).toBe(false)
+    // Many newer folder picks never push the member's files out of the list.
+    const later = new Date(Date.now() + 60_000).toISOString()
+    const expires = new Date(Date.now() + 86_400_000).toISOString()
+    for (let i = 0; i < 31; i++) {
+      db.prepare('INSERT INTO google_drive_picks (company_id, user_id, file_id, kind, name, mime_type, picked_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(CO, 'm-sato', `fake-many-folders-${String(i).padStart(4, '0')}`, 'folder', `フォルダ${i}`, 'application/vnd.google-apps.folder', later, expires)
+    }
+    const after = (await person('m-sato', 'GET', '/me/google/drive/files')).body.data.files as Json[]
+    expect(after.some(f => f.id === GOOGLE_SEED.handNotesPdf)).toBe(true)
+    db.prepare("DELETE FROM google_drive_picks WHERE company_id = ? AND file_id LIKE 'fake-many-folders-%'").run(CO)
+    // Tanaka's list holds none of Sato's names or ids.
+    const his = await person('m-tanaka', 'GET', '/me/google/drive/files')
+    expect(his.status).toBe(200)
+    expect(his.body.data.files).toEqual([])
+    expect(his.text).not.toContain('一覧に出る')
+    // Sato links his own put file by hand; Tanaka cannot (not his pick, not his put) — Google not asked.
+    const id = await task('m-sato', '手でつなぐ')
+    const linked = await person('m-sato', 'POST', `/records/item/${id}/file-links`, { target: { kind: 'drive', fileId: putFileId }, expectedVersion: 1 })
+    expect(linked.status, linked.text).toBe(200)
+    expect((await driveLinks('m-sato', id))[0]).toMatchObject({ fileId: putFileId, name: '一覧に出る.pdf', mine: true })
+    const other = await task('m-tanaka', '田中さんの件')
+    const calls = google.requests.length
+    const refused = await person('m-tanaka', 'POST', `/records/item/${other}/file-links`, { target: { kind: 'drive', fileId: putFileId }, expectedVersion: 1 })
+    expect([refused.status, refused.body.code]).toEqual([403, 'DRIVE_NOT_PICKED'])
+    expect(google.requests.length).toBe(calls)
+  }))
+})

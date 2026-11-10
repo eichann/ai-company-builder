@@ -97,10 +97,30 @@ test('「Google Drive のファイルをつなぐ」 links each pick at the vers
 test('a pasted Drive link: only Drive ids reach the Picker, and nothing is linked but what the member picked there', async () => {
   const asked: string[][] = []
   const h = harness({ pickDriveFiles: async (_c, fileIds) => { asked.push(fileIds); return { ok: true, files: [{ id: '1ZyXwVuTsRqPo', name: 'B社 見積' }] } } })
-  await h.api.linkDriveFiles('co1', 'task-0000aa', 7, ['1AbCdEfGhIjKl', 'bad/id', "x');alert(1)//", 7, '1AbCdEfGhIjKl'])
+  await h.api.linkDriveFiles('co1', 'task-0000aa', 7, { fileIds: ['1AbCdEfGhIjKl', 'bad/id', "x');alert(1)//", 7, '1AbCdEfGhIjKl'] })
+  // The bare array an unreleased build sent is read the same way.
+  await h.api.linkDriveFiles('co1', 'task-0000aa', 7, ['1ZyXwVuTsRqPo'])
   await h.api.linkDriveFiles('co1', 'task-0000aa', 7, 'not-a-list-1AbCdEfGhIjKl')
   await h.api.linkDriveFiles('co1', 'task-0000aa', 7)
-  assert.deepEqual(asked, [['1AbCdEfGhIjKl'], [], []])
+  assert.deepEqual(asked, [['1AbCdEfGhIjKl'], ['1ZyXwVuTsRqPo'], [], []])
   // The link is of the file picked in the Picker, not the one pasted.
-  assert.deepEqual(h.sent.map(s => (s.body as { target: unknown }).target), Array(3).fill({ kind: 'drive', fileId: '1ZyXwVuTsRqPo' }))
+  assert.deepEqual(h.sent.map(s => (s.body as { target: unknown }).target), Array(4).fill({ kind: 'drive', fileId: '1ZyXwVuTsRqPo' }))
+})
+
+test('files chosen from the member\'s own list are linked without Google\'s window; a malformed list sends nothing', async () => {
+  let pickerOpened = 0
+  const h = harness({ pickDriveFiles: async () => { pickerOpened++; return { ok: true, files: [] } } })
+  const r = await h.api.linkDriveFiles('co1', 'task-0000aa', 7, { chosen: [{ id: '1AbCdEfGhIjKl', name: 'A社 ご提案.pdf', source: 'put' }] })
+  assert.deepEqual(r, { success: true, recordId: 'task-0000aa', linked: ['A社 ご提案.pdf'] })
+  assert.equal(pickerOpened, 0)
+  assert.deepEqual(h.sent.map(s => s.body), [{ target: { kind: 'drive', fileId: '1AbCdEfGhIjKl' }, expectedVersion: 7 }])
+  for (const bad of [[{ id: '../x', name: 'a' }], [{ id: '1AbCdEfGhIjKl' }], 'x', Array.from({ length: 31 }, () => ({ id: '1AbCdEfGhIjKl', name: 'a' }))]) {
+    assert.equal((await h.api.linkDriveFiles('co1', 'task-0000aa', 7, { chosen: bad })).success, false, JSON.stringify(bad).slice(0, 60))
+  }
+  assert.equal(h.sent.length, 1)
+  assert.equal(pickerOpened, 0)
+  // The list itself: what the Google connection answered, well formed; none without it.
+  const listed = harness({ driveChoices: async () => [{ id: '1AbCdEfGhIjKl', name: 'A社 ご提案.pdf', source: 'put' }] })
+  assert.deepEqual(await listed.api.driveChoices('co1'), [{ id: '1AbCdEfGhIjKl', name: 'A社 ご提案.pdf', source: 'put' }])
+  assert.deepEqual(await harness().api.driveChoices('co1'), [])
 })

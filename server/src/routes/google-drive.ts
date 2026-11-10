@@ -6,11 +6,13 @@
  * The member's app (session), mounted at /api/companies/:companyId:
  *   POST /me/google/drive/picker   { mode }       the Picker window's token (drive.file only), API key, app id
  *   POST /me/google/drive/picks    { mode, ids }  keep what the person picked (each checked with Google)
+ *   GET  /me/google/drive/files                   the member's own picked / put files, with names (「つなぐ」's list)
  *
  * The member's AI (record token), mounted at /api/records-ai/google/drive:
  *   GET  /status            whether the Drive tools work now, the member's live picks
  *   POST /read              { fileId } a picked file, as outside text (or a PDF's bytes)        (read)
- *   POST /put               a PDF / HTML into a picked folder; Idempotency-Key in a run (S10b) (act)
+ *   POST /put               a PDF / HTML into a picked folder; Idempotency-Key in a run (S10b) (act);
+ *                           with `recordId`, the new file is then linked to that record (never failing the put)
  *   GET  /puts/:putId       the member's own put (an unknown one is looked up again)          (read)
  *   There is no route that gives the AI a Google token or picks for the person.
  *
@@ -21,12 +23,15 @@ import { createHash } from 'crypto'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { services } from '../composition'
+import { logError } from '../lib/error-log'
+import type { DrivePutAnswer } from '../../shared/types/google-drive'
 import type { Outcome } from '../services/outcome'
+import type { Member } from '../services/access'
 import { aiActor, keyedWrite } from './record-ai-auth'
 import { refusal } from './respond'
 import { aiActs, aiReads, companyMember, publicRoute, serviceBody } from './guards'
 
-const { googleDrive } = services
+const { googleDrive, recordEngine } = services
 
 function answer<T>(c: Context, result: Outcome<T>) {
   c.header('Cache-Control', 'no-store')
@@ -48,6 +53,11 @@ googleDriveRoute.post('/me/google/drive/picks', companyMember, serviceBody, asyn
   return answer(c, await googleDrive.savePicks(member, c.var.body))
 })
 
+googleDriveRoute.get('/me/google/drive/files', companyMember, async (c) => {
+  const member = c.var.member
+  return answer(c, await googleDrive.ownFiles(member))
+})
+
 // ---- the member's AI (record token) ----
 
 export const googleDriveAiRoute = new Hono()
@@ -65,9 +75,39 @@ googleDriveAiRoute.post('/read', aiReads, serviceBody, async (c) => {
 googleDriveAiRoute.post('/put', aiActs, serviceBody, async (c) => {
   const h = c.var.holder
   const body = c.var.body
-  const { conversationId, runId } = aiActor(h)
-  return keyedWrite(c, h, 'drive-put', body, async () => answer(c, await googleDrive.put(h.member, { kind: 'ai', conversationId, runId }, body)))
+  const actor = aiActor(h)
+  return keyedWrite(c, h, 'drive-put', body, async () => {
+    const put = await googleDrive.put(h.member, { kind: 'ai', conversationId: actor.conversationId, runId: actor.runId }, body)
+    if (!put.ok) return answer(c, put)
+    const recordId = (body as { recordId?: unknown } | null)?.recordId
+    const linked = typeof recordId === 'string' ? linkPutToRecord(h.member, actor, recordId, put.value) : false
+    return answer(c, { ok: true, value: linked ? { ...put.value, linkedTo: { recordId: recordId as string } } : put.value })
+  })
 })
+
+/**
+ * The file a put just made, linked to the consultation's record (google-drive.md "Linked to a
+ * record"): only a new put (a replay links nothing), only once it is done in Drive, with the facts
+ * of the member's own receipt (never a body's file id), through every record check of the engine.
+ * Anything refused or thrown is logged with its code only; the put stays done and is answered as is.
+ */
+function linkPutToRecord(member: Member, actor: ReturnType<typeof aiActor>, recordId: string, put: DrivePutAnswer): boolean {
+  if (put.existing || put.drivePut.state !== 'done') return false
+  try {
+    const file = googleDrive.putLinkable(member, put.drivePut.id)
+    if (!file) return false
+    const r = recordEngine.linkDrivePut(member, actor, recordId, file)
+    if (!r.ok) {
+      const code = typeof r.body.code === 'string' && /^[A-Z_]{1,60}$/.test(r.body.code) ? r.body.code : r.kind
+      console.warn(`[google-drive] the put's file was not linked to the record: ${code}`)
+      return false
+    }
+    return r.value.changed
+  } catch (error) {
+    logError('google-drive', 'linking the put\'s file to the record failed', error)
+    return false
+  }
+}
 
 googleDriveAiRoute.get('/puts/:putId', aiReads, async (c) => {
   const h = c.var.holder

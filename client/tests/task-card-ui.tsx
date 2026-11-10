@@ -12,7 +12,8 @@
 // `?kind=none`: a company without the shared folder (records.md "File links without the shared folder"): two files
 // of the member's PC (メモ.md is on this PC, 消えた.md is not), a Drive file the member linked and one someone else
 // linked; ［Google Drive のファイルをつなぐ］ logs `drive@<version>`, a link taken off `unlinkTarget <kind> <path|id>@<version>`,
-// a Drive file opened `external <url>`.
+// a Drive file opened `external <url>`. `&drive=list`: the member already picked / put Drive files, offered first (one of
+// them already linked); files chosen there log `drive@<version> chosen=<ids>`.
 // The owner-only task links a note in a `.personal/` folder (on this Mac); ［＋ 新しいファイル］ makes one through the
 // screen's `createTodayFile` (`today <name>` in `#acted`, 「既存.md」 answers a taken name), and `file.open` is logged as `open <path>`.
 import { createRoot } from 'react-dom/client'
@@ -35,6 +36,7 @@ const params = new URLSearchParams(location.search)
 const done = params.get('task') === 'done'
 const withSource = params.get('source') === '1'
 const shared = params.get('shared') === '1'
+const driveList = params.get('drive') === 'list'
 const conflict = params.get('conflict') === '1'
 // `?task=review`: 「議事録を確認する」 with its meeting's summary, two proposals (one put away) and decisions.
 const reviewing = params.get('task') === 'review'
@@ -181,11 +183,14 @@ installElectronAPI({
     show('acted', `unlinkTarget ${target.kind} ${target.kind === 'local' ? target.path : target.fileId}@${version}`)
     return { success: true, recordId, entryVersion: version + 1 }
   },
-  linkDriveFilesToTask: async (_c, recordId, version, fileIds) => {
-    show('acted', `drive@${version}${fileIds?.length ? ` show=${fileIds.join('+')}` : ''}`)
+  linkDriveFilesToTask: async (_c, recordId, version, options) => {
+    const { fileIds, chosen } = options ?? {}
+    show('acted', `drive@${version}${fileIds?.length ? ` show=${fileIds.join('+')}` : ''}${chosen ? ` chosen=${chosen.map(f => f.id).join(',')}` : ''}`)
     // `?drive=slow`: the chooser stays open a while (the card is busy).
     if (params.get('drive') === 'slow') await new Promise(r => setTimeout(r, 1500))
-    return { success: true, recordId, linked: ['B社 見積'] }
+    // `?drive=cancel`: the member closes Google's chooser without choosing.
+    if (params.get('drive') === 'cancel') return { success: true, recordId, linked: [] }
+    return { success: true, recordId, linked: chosen ? chosen.map(f => f.name) : ['B社 見積'] }
   },
   // `?drive=off`: the company has not set Drive up; `?drive=first`: offered, not allowed yet.
   getGoogleStatus: async () => ({ success: true, data: {
@@ -193,6 +198,11 @@ installElectronAPI({
     features: params.get('drive') === 'off' || params.get('drive') === 'first' ? ['minutes'] : ['minutes', 'drive'],
     companyFeatures: params.get('drive') === 'off' ? ['minutes', 'mail'] : ['minutes', 'mail', 'drive'],
   } as never }),
+  getTaskDriveChoices: async () => driveList ? [
+    { id: '1AbCdEfGhIjKlMnOp', name: 'A社 提案書（下書き）', source: 'picked' as const },
+    { id: '1PutByAiFile00001', name: 'A社 ご提案.pdf', source: 'put' as const },
+    { id: '1PickedEarlier001', name: '去年の見積.pdf', source: 'picked' as const },
+  ] : [],
   openExternal: async (url: string) => { show('acted', `external ${url}`); return { success: true } as never },
   gitListFiles: async () => ({ success: true, files: ['営業/見積書_v2.xlsx', '営業/提案書.md', '経理/請求書.xlsx'] }),
   shareTask: async (_c, recordId, folder, version) => {
