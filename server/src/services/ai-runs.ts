@@ -35,15 +35,13 @@ import { RECORD_ID_RE } from '../../shared/core/records'
 import type { AiRunView } from '../../shared/types/ai-runs'
 import type { AgentStopPolicy, AgentStopToolKind } from '../../shared/types/agent-stop'
 import type { AiRunOperationRow, AiRunRepository, AiRunRow } from '../ports/ai-runs'
+import type { RunSubject, RunSubjects } from '../ports/run-subjects'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { TokenDigest } from '../ports/key-broker'
 import type { Transactions } from '../ports/transactions'
 import type { Member } from './access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
-
-/** Whether a record is in the member's 「AI の番」 now (services/records.ts `aiTurnOf`). */
-export type AiTurnCheck = 'yes' | 'not-ai-turn' | 'not-found' | 'disabled'
 
 export interface AiRunDeps {
   companyData: CompanyDataSource
@@ -52,28 +50,13 @@ export interface AiRunDeps {
   transactions: Transactions
   /** sha256 (hex): a request's fingerprint. */
   tokenDigest: TokenDigest
-  aiTurnOf: (member: Member, recordId: string, step: string) => AiTurnCheck
   /**
-   * A run finished as failed: its step may give the record back to 「AI の番」 (minutes reading:
-   * still 「読んでいる」 → 「届いた」), recorded as caused by the run, not by the member.
+   * What a run works on (ports/run-subjects.ts): whether its step is the member's 「AI の番」, what it
+   * is pinned to, and what its step does after it ends. Records only today (services/run-subjects.ts).
    */
-  afterFailedRun?: (member: Member, run: { id: string; recordId: string; step: string }) => void
+  subjects: RunSubjects<Refusal>
   /** The emergency stop in force for this member (everyone's stops and their own: agent-stops.ts `policyFor`). */
   aiStops: (member: Member) => AgentStopPolicy
-}
-
-/**
- * A business plugin's steps as runs (plan C5, services/plugin-steps.ts; bound
- * once by the plugins lane): a run named `<pluginId>__<step>` is claimable
- * when the record is at the step for the member (instead of a type's AI-only
- * action), and its claim carries the procedure the work is pinned to.
- */
-export interface PluginStepRuns {
-  isPluginStep(step: string): boolean
-  turnOf(member: Member, recordId: string, step: string): AiTurnCheck
-  pinForRun(member: Member, recordId: string, step: string): Promise<Outcome<PluginStepProcedurePin>>
-  /** A plugin step's run finished as done (a person's step started by itself answers what asked for it). */
-  afterDoneRun?(member: Member, run: { recordId: string; step: string; createdAt: string }): void
 }
 
 /** Who sends an outside operation within a run: the holder of a run-bound record token. */
@@ -145,8 +128,7 @@ function outcomeOf(answer: KeyedAnswer): { state: 'done' | 'unknown' | 'none'; r
 }
 
 export function createAiRunService(deps: AiRunDeps) {
-  const { companyData, clock, ids, transactions } = deps
-  let pluginSteps: PluginStepRuns | null = null
+  const { companyData, clock, ids, transactions, subjects } = deps
   const repo = (companyId: string): AiRunRepository => companyData.forCompany(companyId).aiRuns
   const nowIso = (ms: number) => new Date(ms).toISOString()
 
@@ -218,15 +200,15 @@ export function createAiRunService(deps: AiRunDeps) {
     return typeof g === 'number' && Number.isInteger(g) && g >= 1 ? g : null
   }
 
-  return {
-    /** Bound once by the plugins lane (composition/plugins.ts): runs of business plugins' steps. */
-    usePluginSteps(r: PluginStepRuns) { pluginSteps = r },
+  /** A run's subject: today always the record of `ai_runs.record_id` (B PR 2 adds the kind). */
+  const subjectOf = (run: AiRunRow): RunSubject => ({ kind: 'record', id: run.recordId })
 
+  return {
     /**
      * POST …/ai-run-claims — one app instance wins; a re-claim raises the generation.
-     * A business plugin's step (`<pluginId>__<step>`, plan C5) is claimable at
-     * its state and runs the procedure its work is pinned to (pinned at the
-     * first claim); without the plugins lane bound it is never claimable.
+     * Whether the step is the member's 「AI の番」 and what it is pinned to is the subject's
+     * (`subjects.resolve`: a core step, or a business plugin's step `<pluginId>__<step>` at its
+     * state, running the procedure its work is pinned to).
      * Refused (503 `AI_STOPPED`) while the emergency stop covers the member (`STOPS_UNATTENDED_RUN`).
      */
     async claim(member: Member, body: unknown, appBuild?: string | null): Promise<Outcome<{ run: AiRunView; created: boolean }>> {
@@ -242,20 +224,12 @@ export function createAiRunService(deps: AiRunDeps) {
       // Before the turn check and the pin: a stopped AI's claim reads, makes and pins nothing.
       const stopped = claimStopped(member)
       if (stopped) return stopped
-      // A plugin step's name (`<pluginId>__<step>`) is never a core step's: unbound, it is nobody's turn.
-      const steps = step.includes('__') ? pluginSteps : null
-      if (step.includes('__') && !steps?.isPluginStep(step)) return refuse('conflict', 'この記録はいま AI の番ではありません', { code: 'NOT_AI_TURN' })
-      const turn = steps ? steps.turnOf(member, recordId, step) : deps.aiTurnOf(member, recordId, step)
-      if (turn === 'disabled') return refuse('not-found', 'この会社では記録の機能が有効になっていません', { code: 'RECORDS_DISABLED' })
-      if (turn === 'not-found') return refuse('not-found', '記録が見つかりません', { code: 'RECORD_NOT_FOUND' })
-      if (turn === 'not-ai-turn') return refuse('conflict', 'この記録はいま AI の番ではありません', { code: 'NOT_AI_TURN' })
-      // The procedure the work runs: pinned at its first run (the operator's stop refuses here).
-      let pin: PluginStepProcedurePin | null = null
-      if (steps) {
-        const pinned = await steps.pinForRun(member, recordId, step)
-        if (!pinned.ok) return pinned
-        pin = pinned.value
-      }
+      // Whose turn, and the procedure the work runs (pinned at its first run; the operator's stop refuses there).
+      // A core step answers at once: its turn check and the write below stay in one synchronous stretch, as before.
+      const answer = subjects.resolve(member, { kind: 'record', id: recordId }, step)
+      const resolved = answer instanceof Promise ? await answer : answer
+      if (!resolved.ok) return resolved
+      const { pin } = resolved.value
 
       const r = repo(member.companyId)
       const nowMs = clock.nowMs()
@@ -362,11 +336,11 @@ export function createAiRunService(deps: AiRunDeps) {
         if (!save(r, run, next)) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
         return ok({ run: view(r, next) })
       })
-      if (finished.ok && finished.value.run.state === 'done' && pluginSteps?.isPluginStep(run.step)) {
-        try { pluginSteps.afterDoneRun?.(member, { recordId: run.recordId, step: run.step, createdAt: run.createdAt }) } catch { /* asked again by the next meeting */ }
+      if (finished.ok && finished.value.run.state === 'done') {
+        try { subjects.afterDone(member, { id: run.id, subject: subjectOf(run), step: run.step, createdAt: run.createdAt }) } catch { /* asked again by the next meeting */ }
       }
       if (finished.ok && cls !== null) {
-        try { deps.afterFailedRun?.(member, { id: run.id, recordId: run.recordId, step: run.step }) } catch { /* the 30-minute rule catches up */ }
+        try { subjects.afterFailed(member, { id: run.id, subject: subjectOf(run), step: run.step, createdAt: run.createdAt }) } catch { /* the 30-minute rule catches up */ }
       }
       return finished
     },

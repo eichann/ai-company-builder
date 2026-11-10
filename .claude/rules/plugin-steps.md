@@ -33,8 +33,9 @@ A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target
 
 - **Whose turn**: a record at an `ai_turn` step's state, readable by the member, the member (or an
   absentee they cover, `actsFor`) its `assignee` or `next_actor` — `turnOf`, used by the claim of
-  an execution run named `<pluginId>__<step>` (`POST /ai-run-claims`, `ai-runs.ts`
-  `usePluginSteps`) instead of a type's AI-only action. A `__` step name with the lane unbound is
+  an execution run named `<pluginId>__<step>` (`POST /ai-run-claims`, through the record resolver of
+  runs' subjects, `services/run-subjects.ts` `usePluginSteps`; `ai-turns.md` "The run's subject")
+  instead of a type's AI-only action. A `__` step name with the lane unbound is
   nobody's turn. `GET /me/plugin-step-turns` lists the member's such records (the app's queue).
 - **Pinned per work** (owner decision 2026-11-01 night, plan §5-9): the step's first run for a
   record (the first claim, or a person's start) stores a pin in `plugin_step_pins` (one per record
