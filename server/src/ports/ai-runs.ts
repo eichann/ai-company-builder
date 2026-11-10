@@ -5,11 +5,13 @@
  * company's run id finds and changes nothing. Rules: services/ai-runs.ts;
  * states and classes: shared/core/ai-runs.ts.
  */
-import type { AiRunFailureClass, AiRunOperationState, AiRunState } from '../../shared/core/ai-runs'
+import type { AiRunEvent, AiRunFailureClass, AiRunOperationState, AiRunState } from '../../shared/core/ai-runs'
+import type { RunSubject } from './run-subjects'
 
 export interface AiRunRow {
   id: string
-  recordId: string
+  /** What the run works on (B PR 2): a record's AI step today. Services never see the column it is stored in. */
+  subject: RunSubject
   step: string
   /** The member under whose authority the AI runs. */
   userId: string
@@ -54,13 +56,25 @@ export interface AiRunOperationRow {
   updatedAt: string
 }
 
+/** One state change of a run (`ai_run_events`): short codes only, never text or content. */
+export interface AiRunEventRow {
+  runId: string
+  event: AiRunEvent
+  generation: number
+  /** The run's state after it (null when it did not change). */
+  stateAfter: AiRunState | null
+  /** A short code (`FAILURE_CODE_RE`), or null. */
+  code: string | null
+  at: string
+}
+
 export interface AiRunRepository {
   byId(runId: string): AiRunRow | null
-  /** The open (not closed) run of a record's step, if any. */
-  openRun(recordId: string, step: string): AiRunRow | null
-  /** Whether another step of the record has a run claimed now (running, its claim not expired at `nowIso`). */
-  liveOtherStep(recordId: string, step: string, nowIso: string): boolean
-  /** Runs of the member not closed yet, newest first. */
+  /** The open (not closed) run of a subject's step, if any. */
+  openRun(subject: RunSubject, step: string): AiRunRow | null
+  /** Whether another step of the same subject has a run claimed now (running, its claim not expired at `nowIso`). */
+  liveOtherStep(subject: RunSubject, step: string, nowIso: string): boolean
+  /** Runs of the member not closed yet, newest first — of every subject kind (callers choose what to show). */
   openOf(userId: string): AiRunRow[]
   insert(row: AiRunRow): void
   /**
@@ -78,4 +92,9 @@ export interface AiRunRepository {
     'state' | 'refKind' | 'refId' | 'status' | 'reconciledBy' | 'generation' | 'fingerprint'>>, at: string): boolean
   /** Remove an operation that had no effect (a refused request): the key may be used again. */
   deleteOperation(runId: string, key: string, state: AiRunOperationState): boolean
+
+  /** Append a state change of the run (the next `seq` of that run). */
+  appendEvent(e: AiRunEventRow): void
+  /** The run's state changes, oldest first. */
+  events(runId: string): AiRunEventRow[]
 }

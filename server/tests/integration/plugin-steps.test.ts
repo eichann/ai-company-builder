@@ -120,7 +120,7 @@ const NOT_IN_STEP = { ok: false, kind: 'forbidden', body: { code: 'NOT_IN_STEP',
 let device = 0
 /** Claim (or re-claim) the `work` step's run of a record as a fresh app instance; a held run is given back first. */
 async function claim(recordId: string) {
-  const open = (companyData.forCompany(CO).aiRuns.openOf(member.userId) as Json[]).find(r => r.recordId === recordId)
+  const open = (companyData.forCompany(CO).aiRuns.openOf(member.userId) as Json[]).find(r => r.subject.id === recordId)
   if (open?.state === 'running') {
     expect((services.aiRuns.finish(member, open.id, { generation: open.generation, outcome: 'failed', failure: { class: 'permission' } })).ok).toBe(true)
     expect(services.aiRuns.retry(member, open.id).ok).toBe(true)
@@ -240,7 +240,7 @@ describe('the emergency stop (agent-stop.md "Runs with no person present")', () 
     try {
       expect(await claim(a)).toMatchObject({ ok: false, kind: 'unavailable', body: { code: 'AI_STOPPED' } })
       expect(pins()).toBe(0)
-      expect((companyData.forCompany(CO).aiRuns.openOf(member.userId) as Json[]).filter(r => r.recordId === a)).toEqual([])
+      expect((companyData.forCompany(CO).aiRuns.openOf(member.userId) as Json[]).filter(r => r.subject.id === a)).toEqual([])
     } finally {
       for (const s of stopped.active) services.agentStops.release(owner, s.id)
     }
@@ -547,7 +547,7 @@ describe("the core's minutes reading writes nothing of a business plugin", () =>
     const at = ts()
     const runId = 'ps-run-minutes'
     companyData.forCompany(CO).aiRuns.insert({
-      id: runId, recordId: deal, step: 'minutes-reading', userId: member.userId, state: 'running', generation: 1, deviceId: 'device-ps-minutes',
+      id: runId, subject: { kind: 'record', id: deal }, step: 'minutes-reading', userId: member.userId, state: 'running', generation: 1, deviceId: 'device-ps-minutes',
       conversationId: 'conv-ps-minutes', claimExpiresAt: new Date(Date.now() + 3_600_000).toISOString(), failureClass: null, failureCode: null,
       retryAt: null, attempts: 0, pluginVersion: null, stepsVersion: null, procedure: null, createdAt: at, updatedAt: at, closedAt: null,
     })
@@ -577,13 +577,13 @@ describe('a person\'s step the company starts by itself (「自動で始める�
   /** Give back any run of the record still held, so another step may claim it (one run per record). */
   function release(recordId: string) {
     for (const r of companyData.forCompany(CO).aiRuns.openOf(member.userId) as Json[]) {
-      if (r.recordId === recordId && r.state === 'running') services.aiRuns.finish(member, r.id, { generation: r.generation, outcome: 'failed', failure: { class: 'permission' } })
+      if (r.subject.id === recordId && r.state === 'running') services.aiRuns.finish(member, r.id, { generation: r.generation, outcome: 'failed', failure: { class: 'permission' } })
     }
   }
   /** Give back every running run of the record and make it claimable again (one run per record). */
   function giveBack(recordId: string) {
     for (const r of companyData.forCompany(CO).aiRuns.openOf(member.userId) as Json[]) {
-      if (r.recordId !== recordId || r.state !== 'running') continue
+      if (r.subject.id !== recordId || r.state !== 'running') continue
       services.aiRuns.finish(member, r.id, { generation: r.generation, outcome: 'failed', failure: { class: 'permission' } })
       services.aiRuns.retry(member, r.id)
     }

@@ -33,6 +33,22 @@ export const AI_RUN_STATES = [
 export type AiRunState = typeof AI_RUN_STATES[number]
 
 /**
+ * What a run works on (B 「実行を記録から分ける」 PR 2): a record's AI step, or — reserved for B PR 3,
+ * nothing makes one yet — a job's occurrence. Only a `record` run reaches what belongs to records
+ * (the record's 「AI の番」, record tokens, the route scope, the minutes' read-back); every other kind
+ * is refused there (`.claude/rules/ai-turns.md` "Execution runs on the server").
+ */
+export const AI_RUN_SUBJECT_KINDS = ['record', 'occurrence'] as const
+export type AiRunSubjectKind = typeof AI_RUN_SUBJECT_KINDS[number]
+
+/**
+ * A run's state changes, kept per run in order (`ai_run_events`): the run's row is overwritten, so
+ * these say who claimed it again and when. Short codes only — never a reason's text or content.
+ */
+export const AI_RUN_EVENTS = ['claimed', 'finished', 'given_back', 'reconciled', 'refused_stopped'] as const
+export type AiRunEvent = typeof AI_RUN_EVENTS[number]
+
+/**
  * An outside operation of a run, by its idempotency key: in_progress (sent, no
  * answer yet), done, unknown (the effect may or may not have happened — a
  * person reconciles), not_done (a person said it did not happen: the key may run again).

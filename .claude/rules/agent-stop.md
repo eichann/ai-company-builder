@@ -71,7 +71,8 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   - **A running run is bounded by its token, not its lease.** A run-bound record token's every call is
     refused while the whole AI is stopped for its member (`aiRuns.runStopped`, checked in
     `recordAiTokens.authenticate` after the fence, before any handler — so no write and no idempotency key is
-    taken); the company-wide whole-AI stop already answers 403 `ACB_STOPPED` there first ("Who is acting" in
+    taken; the run keeps a `refused_stopped` event once per generation, as does the member's own waiting run
+    of a refused claim: `ai-turns.md` "Each state change of a run is kept"); the company-wide whole-AI stop already answers 403 `ACB_STOPPED` there first ("Who is acting" in
     `records.md`). The fence itself looks only at state + generation, never the lease's time, and a take-over
     claim is refused during a stop, so the lease bounds nothing here. A **kind** stop does not refuse the
     token: a run's record calls are ACB's own tools (`stoppedKind`: app tools stop only with the whole AI),

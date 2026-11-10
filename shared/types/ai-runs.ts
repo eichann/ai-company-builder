@@ -14,7 +14,7 @@
  * (`POST /me/record-tokens { …, run: { id, generation } }`) and an
  * `Idempotency-Key` header on every outside operation.
  */
-import type { AiRunFailureClass, AiRunOperationState, AiRunProcedure, AiRunState } from '../core/ai-runs'
+import type { AiRunFailureClass, AiRunOperationState, AiRunProcedure, AiRunState, AiRunSubjectKind } from '../core/ai-runs'
 
 export interface AiRunOperationView {
   key: string
@@ -27,7 +27,10 @@ export interface AiRunOperationView {
 
 export interface AiRunView {
   id: string
+  /** The record the run works on (`subject.id` of a record run; '' for any other kind). */
   recordId: string
+  /** What the run works on (B PR 2; absent from older servers). `GET /ai-runs` lists record runs only. */
+  subject?: { kind: AiRunSubjectKind; id: string }
   step: string
   state: AiRunState
   /** The state in plain Japanese (AI_RUN_STATE_LABELS). */

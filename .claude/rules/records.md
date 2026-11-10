@@ -1525,8 +1525,8 @@ stores and checks (the AI never runs on the server). One **run** per record × A
 `shared/core/ai-runs.ts`, contract `shared/types/ai-runs.ts`). The app's side: `ai-turns.md`.
 
 ```
-GET  /ai-runs                                    the member's open runs (session)
-POST /ai-run-claims                              { recordId, step, deviceId, conversationId, pluginVersion?, stepsVersion? }
+GET  /ai-runs                                    the member's open runs of records (session; never another subject kind)
+POST /ai-run-claims                              { recordId, step, deviceId, conversationId, pluginVersion?, stepsVersion? } → a record's run
 GET  /ai-runs/:runId
 POST /ai-runs/:runId/renew                       { generation }
 POST /ai-runs/:runId/finish                      { generation, outcome: done | failed, failure?: { class, code? } }
@@ -1597,6 +1597,8 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   version join the procedure (a consultation's Skills: "Which Skill" below). Additive, nullable columns (`migrateAiRunColumns`).
 - A run is its member's: anyone else, another company's id and a missing one get the same 404
   `RUN_NOT_FOUND` (permission matrix rows + `CROSS`).
+- **A run's subject kind and its state changes** (B PR 2, `ai_runs.subject_kind`, `ai_run_events`):
+  `ai-turns.md` "Execution runs on the server" — what stays record-only, and the events kept.
 - **The emergency stop** (`agent-stop.md` "Runs with no person present"): while the member's stop
   policy has the whole AI or a `write` / `web` / `mcp-external` kind stopped, a claim answers 503
   `AI_STOPPED` before anything is read, made or pinned (not `command`); while the whole AI is stopped

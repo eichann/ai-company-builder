@@ -255,7 +255,7 @@ describe('the member\'s AI reads the thread with its record token (B4 / B5)', ()
     const runOf = (id: string, step: string, recordId: string) => {
       const at = new Date().toISOString()
       sqliteCompanyData(db).forCompany(CO).aiRuns.insert({
-        id, recordId, step, userId: 'th-sato', state: 'running', generation: 1, deviceId: 'device-th-0001', conversationId: `conv-${id}`,
+        id, subject: { kind: 'record', id: recordId }, step, userId: 'th-sato', state: 'running', generation: 1, deviceId: 'device-th-0001', conversationId: `conv-${id}`,
         claimExpiresAt: new Date(Date.now() + 3_600_000).toISOString(), failureClass: null, failureCode: null, retryAt: null, attempts: 0,
         pluginVersion: null, stepsVersion: null, procedure: null, createdAt: at, updatedAt: at, closedAt: null,
       })
