@@ -123,6 +123,30 @@ test('a company without the shared folder: a pasted or dropped Drive link opens 
   await expect(links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' })).toBeDisabled()
   await expect(links.locator('[data-drive-link-note]')).toHaveText('Google Drive のファイルをつなぐには、会社の管理者による準備が必要です。管理者に頼んでください。')
   await expect(links.getByRole('textbox', { name: 'Google Drive のリンクを貼りつけてつなぐ' })).toHaveCount(0)
+  // A link dropped anyway: the set-up note, nothing opened.
+  const offDrop = await page.evaluateHandle(url => { const dt = new DataTransfer(); dt.setData('text/uri-list', url); return dt }, `https://drive.google.com/file/d/${ID}/view`)
+  await links.dispatchEvent('dragover', { dataTransfer: offDrop })
+  await links.dispatchEvent('drop', { dataTransfer: offDrop })
+  await expect(links.getByRole('alert')).toHaveText('Google Drive のファイルをつなぐには、会社の管理者による準備が必要です。管理者に頼んでください。')
+  await expect(page.locator('#acted')).toHaveText('')
+})
+
+// While the chooser is open (the card busy), another dropped link opens no second chooser.
+test('a company without the shared folder: a Drive link dropped while the chooser is open is ignored', async ({ page }) => {
+  const ID = '1AbC-def_GhIjKlMnOpQrStUv'
+  const state = await openPreview(page, 'task-card', { kind: 'none', drive: 'slow' })
+  const links = page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' })
+  const drop = async () => {
+    const data = await page.evaluateHandle(url => { const dt = new DataTransfer(); dt.setData('text/uri-list', url); return dt }, `https://drive.google.com/file/d/${ID}/view`)
+    await links.dispatchEvent('dragover', { dataTransfer: data })
+    await links.dispatchEvent('drop', { dataTransfer: data })
+  }
+  await drop()
+  await expect(page.locator('#acted')).toHaveText(`drive@3 show=${ID}`)
+  await drop()
+  await expect(page.getByTestId('task-card').getByRole('status').filter({ hasText: '「B社 見積」をつなぎました' })).toBeVisible()
+  await expect(page.locator('#acted')).toHaveText(`drive@3 show=${ID}`)
+  expectNoPageErrors(state)
 })
 
 // A company without the shared folder (records.md "File links without the shared folder", owner decision

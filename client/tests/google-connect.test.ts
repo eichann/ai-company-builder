@@ -96,6 +96,13 @@ test('the card\'s ［Google Drive のファイルをつなぐ］: off with the p
   // The Picker not registered (Drive not offered), Google off or not set up: off, and who can fix it.
   assert.deepEqual(driveLinkView(status({ companyFeatures: ['minutes', 'mail'], features: ['minutes'] })), { usable: false, note: DRIVE_LINK_SETUP_TEXT })
   assert.deepEqual(driveLinkView(status({ available: false, reason: 'not-configured', companyFeatures: [], connected: false, features: [] })), { usable: false, note: DRIVE_LINK_SETUP_TEXT })
+  // An older server (no companyFeatures) with Google off: still off.
+  assert.deepEqual(driveLinkView(status({ available: false, reason: 'off', companyFeatures: undefined })), { usable: false, note: DRIVE_LINK_SETUP_TEXT })
+  // Stopped by the operator / server not ready: off, in the app's usual words (not the admin's set-up).
+  const { GOOGLE_UNAVAILABLE_TEXT } = await import('../shared/google')
+  for (const reason of ['operator-stopped', 'vault-off'] as const) {
+    assert.deepEqual(driveLinkView(status({ available: false, reason, companyFeatures: undefined })), { usable: false, note: GOOGLE_UNAVAILABLE_TEXT[reason] })
+  }
   // Offered, not allowed yet: usable, and Google's page is announced (only the files they choose).
   assert.deepEqual(driveLinkView(status({ features: ['minutes'] })), { usable: true, note: DRIVE_FIRST_USE_TEXT })
   assert.deepEqual(driveLinkView(status({ connected: false, features: [] })), { usable: true, note: DRIVE_FIRST_USE_TEXT })

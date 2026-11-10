@@ -152,7 +152,9 @@ connector's Picker flow (`createDrivePicking().pick(companyId, 'files')`, compos
 `tasks:linkDriveFiles`; a pasted link: "Picker and its token" above). The card's button is off with
 「…会社の管理者による準備が必要です…」 while `MyGoogle` says Google is unavailable or `drive` is not in
 `companyFeatures` (the Picker not registered; `driveLinkView`, `client/shared/google.ts`, from
-`google:status`), and says before the first press that Google will ask, for the chosen files only.
+`google:status`; stopped by the operator or the server not ready → the app's usual `GOOGLE_UNAVAILABLE_TEXT`
+instead), says before the first press that Google will ask, for the chosen files only, and ignores a
+pasted / dropped link while the chooser is already open (no second window).
 The AI reads a linked file only with `drive_read` (its member's own picks).
 When a linked Drive file is used as a decision material or an attachment, its fileId, revisionId and
 sha256 enter the record's ledger and are visible to every reader of the record; the file's name is not

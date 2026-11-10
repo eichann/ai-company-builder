@@ -127,6 +127,8 @@ export const DRIVE_FIRST_USE_TEXT = '初めてのときは、ブラウザに Goo
 export function driveLinkView(status: GoogleStatusResult | null): { usable: boolean; note: string | null } {
   if (!status || !status.success) return { usable: true, note: null }
   const my = status.data
+  // Stopped by the service's operator or its server not ready: not the company admin's set-up (the app's usual words).
+  if (!my.available && (my.reason === 'operator-stopped' || my.reason === 'vault-off')) return { usable: false, note: GOOGLE_UNAVAILABLE_TEXT[my.reason] }
   if (!my.available || !offered(my, 'drive')) return { usable: false, note: DRIVE_LINK_SETUP_TEXT }
   if (!my.connected || !my.features.includes('drive')) return { usable: true, note: DRIVE_FIRST_USE_TEXT }
   return { usable: true, note: null }

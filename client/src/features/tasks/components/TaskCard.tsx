@@ -192,6 +192,8 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     return r.error ?? null
   })
   const linkDriveText = (text: string): Promise<string | null> => {
+    // While the chooser is open (busy), another link would open a second chooser window.
+    if (busy) return Promise.resolve(null)
     if (!driveSetup.usable) return Promise.resolve(driveSetup.note)
     const ids = driveFileIdsFromText(text)
     return ids.length > 0 ? linkDrive(ids) : Promise.resolve(NOT_A_DRIVE_LINK)
@@ -400,7 +402,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
         ...(consult.extra ? [consult.extra] : [])]}
         drop={{ label: `${onLinkFile ? 'ファイル・フォルダ・' : typedFiles ? 'このパソコンのファイル（あなただけ）・Drive のリンク・' : ''}やること・${bundleWord}・相談`,
           // A company without the shared folder also takes a Drive link dragged from the browser.
-          accepts: e => linkDrop.accepts(e) || (!!typedFiles && mayCarryLink(e.dataTransfer)),
+          accepts: e => linkDrop.accepts(e) || (!!typedFiles && !busy && mayCarryLink(e.dataTransfer)),
           onDrop: e => { if (linkDrop.accepts(e) || !typedFiles) linkDrop.drop(record.id, e); else void typedFiles.onLinkDriveText(droppedText(e.dataTransfer)).then(setLinkError) },
           notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }}
         notice={<>

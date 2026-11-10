@@ -181,7 +181,12 @@ installElectronAPI({
     show('acted', `unlinkTarget ${target.kind} ${target.kind === 'local' ? target.path : target.fileId}@${version}`)
     return { success: true, recordId, entryVersion: version + 1 }
   },
-  linkDriveFilesToTask: async (_c, recordId, version, fileIds) => { show('acted', `drive@${version}${fileIds?.length ? ` show=${fileIds.join('+')}` : ''}`); return { success: true, recordId, linked: ['B社 見積'] } },
+  linkDriveFilesToTask: async (_c, recordId, version, fileIds) => {
+    show('acted', `drive@${version}${fileIds?.length ? ` show=${fileIds.join('+')}` : ''}`)
+    // `?drive=slow`: the chooser stays open a while (the card is busy).
+    if (params.get('drive') === 'slow') await new Promise(r => setTimeout(r, 1500))
+    return { success: true, recordId, linked: ['B社 見積'] }
+  },
   // `?drive=off`: the company has not set Drive up; `?drive=first`: offered, not allowed yet.
   getGoogleStatus: async () => ({ success: true, data: {
     available: true, reason: null, connected: true, status: 'active', googleEmail: 'me@div.example', domain: 'div.example', practice: false, featuresOff: [], seen: [],
