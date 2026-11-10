@@ -168,7 +168,8 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   `adapters/sqlite/outbound-mail.ts`, `outbound-mail.md`) and `tasks` (the task settings and
   department membership 所属する部署, `adapters/sqlite/task-settings.ts`, `tasks.md`) and `aiRuns`
   (execution runs of 「AI の番」 and their operations by idempotency key, `adapters/sqlite/ai-runs.ts`,
-  `records.md` "Execution runs") and `securityAlerts` (「気になる動き」: alerts, their Slack setting,
+  `records.md` "Execution runs") and `jobs` (scheduled jobs: definitions, append-only versions,
+  occurrences, the stop switch; `adapters/sqlite/jobs.ts`, `jobs.md`) and `securityAlerts` (「気になる動き」: alerts, their Slack setting,
   members' hourly download counts, the rules' read-only queries; `security-alerts.md`) and
   `skillShelf` (the Skill shelf of a company without the shared folder: items, versions, history, requests to publish;
   `plugins.md` "The Skill shelf").
@@ -306,6 +307,9 @@ GET  /api/config                                  setup state (no auth)
                               POST /ai-runs/:runId/renew | finish | retry,
                               POST /ai-runs/:runId/operations/:key/reconcile   ai-runs.ts
                                                                 (実行の管理, S10b: records.md "Execution runs")
+                              GET|POST /jobs, GET|PUT /jobs/:jobId, POST /jobs/:jobId/approve | pause | resume,
+                              POST /me/jobs/:jobId/accept, PUT /jobs-stop     jobs.ts
+                                                                (定期の仕事, definitions only: jobs.md)
                               GET /plugins, GET|PUT /plugins/:pluginId, PUT …/enabled,
                               PUT …/mapping, POST …/mapping/restore, POST …/mapping/check, POST …/import,
                               POST …/connection/renew,
@@ -713,7 +717,7 @@ changes nothing more).
   (Better Auth; one WAL connection for the process, `lib/auth.ts` `authDb`, also used by
   `/api/config` and the sign-up check — `tests/unit/auth-db.test.ts`). Schema: one module per area in `server/src/db/schema/` (company, permissions, agents,
   broker, records, plugins, connectors, fixed-payloads, tasks, content-store, outbound-mail,
-  notifications, ai-runs), each with its tables, indexes and migrations; `server/src/db/index.ts`
+  notifications, ai-runs, jobs), each with its tables, indexes and migrations; `server/src/db/index.ts`
   `initDatabase` is the one ordered entry point: every area's `CREATE TABLE IF NOT EXISTS` in one
   batch at startup (a new area goes in its `SCHEMA` list), then the migrations in a fixed order,
   then the permission seeding. Columns added later get an idempotent check-then-`ALTER TABLE`

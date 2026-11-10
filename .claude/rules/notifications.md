@@ -63,6 +63,9 @@ a plugin can never draw a notice (§2-2).
   `minutes_arrived` (「議事録が届きました：「…」」, on by default: a meeting recorded `arrived`, or
   attendees joining it while still there, to each member on its list — the minutes service names
   them; once per meeting and member, `minutes_arrived:<record>`; `minutes.md`),
+  `job_paused` (「定期の仕事「…」を止めました：…」, on by default, recordless like the morning summary: a scheduled
+  job paused because its responsible person left or lost rights, to every owner / admin; key
+  `job_paused:<job>:<reason>:<at>`; shown only while the reader is owner / admin — `jobs.md`),
   `asked`, `morning_summary`, `due_tomorrow` (below), `others` (everything else: the AI's
   「用意ができた」 / 「先に渡す」 when it is not a first hand-over, 「自分で進める」 of task v5, sent back,
   cancelled…). While a task is the AI's (`preparing`) nobody is told on create (engine rule); the

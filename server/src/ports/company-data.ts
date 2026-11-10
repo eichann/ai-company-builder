@@ -30,6 +30,7 @@ import type { GoogleDriveRepository } from './google-drive'
 import type { FixedPayloadRepository } from './fixed-payloads'
 import type { GroupRepository, PermissionHistoryRepository } from './groups'
 import type { InvitationRepository } from './invitations'
+import type { JobRepository } from './jobs'
 import type { NotificationRepository } from './notifications'
 import type { OrphanedScopeReader } from './orphaned-scopes'
 import type { OutboundMailRepository } from './outbound-mail'
@@ -86,6 +87,8 @@ export interface CompanyData {
   readonly tasks: TaskSettingsRepository
   /** Execution runs of 「AI の番」 and their outside operations by idempotency key (ports/ai-runs.ts, S10b). */
   readonly aiRuns: AiRunRepository
+  /** Scheduled jobs: definitions, their append-only versions, the company's stop switch (ports/jobs.ts, jobs.md). */
+  readonly jobs: JobRepository
   /** Which company Skills members' consultations used (ports/skill-uses.ts, records.md "Which Skill"). */
   readonly skillUses: SkillUseRepository
   /** 「もう一方の AI に聞く」: allowed for this company or not (ports/second-opinion.ts). */

@@ -61,6 +61,10 @@ export const NOTIFICATION_KINDS = [
   // with `auto` fields, nobody approved it; owner decision 2026-11-06): what changed, the AI's reason
   // and ［元に戻す］. Told although their own AI was the actor. An app released before it shows the text.
   'ai_changed',
+  // A scheduled job paused by the server because its responsible person left the company or lost the
+  // rights it needs (jobs.md): to owners / admins only, about no record. An app released before it
+  // drops a notice with no record (its parser wants a record id) and only counts it as unread.
+  'job_paused',
   'others',
 ] as const
 export type NotificationKind = typeof NOTIFICATION_KINDS[number]
@@ -98,6 +102,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   // ── lane C ▲
   minutes_arrived: '出た会議の議事録が届いた',
   ai_changed: '担当している記録を AI が自動で変えた（元に戻せます）',
+  job_paused: '定期の仕事が止まった（責任者が会社を離れた・権限が変わった。管理者だけ）',
   others: 'そのほかの動き（担当になった・差し戻された・中止されたなど）',
 }
 
@@ -131,6 +136,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   // ── lane C ▲
   minutes_arrived: true,
   ai_changed: true,
+  job_paused: true,
   others: false,
 }
 
@@ -146,7 +152,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
  */
 export const UNDOABLE_NOTIFICATION_KINDS: readonly NotificationKind[] = ['replied_done', 'mail_left_inbox', 'mail_archived']
 
-export const RECORDLESS_NOTIFICATION_KINDS: readonly NotificationKind[] = ['morning_summary']
+export const RECORDLESS_NOTIFICATION_KINDS: readonly NotificationKind[] = ['morning_summary', 'job_paused']
 
 /** One notice as the member's app shows it. */
 export interface NotificationItem {

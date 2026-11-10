@@ -7,6 +7,7 @@ import { DECISION_VERSION, TASK_VERSION } from '../../shared/core/core-types'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox, migrateSecondOpinionSetting } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns, migrateAiRunSubjects } from './schema/ai-runs'
+import { jobSchema } from './schema/jobs'
 import { brokerSchema, migrateBrokerSettings } from './schema/broker'
 import { companySchema, migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
 import { connectorSchema, migrateConnectorProviders, migrateGooglePicker } from './schema/connectors'
@@ -84,6 +85,8 @@ const SCHEMA = [
   outboundMailSchema,
   notificationSchema,
   aiRunSchema,
+  // Scheduled jobs (jobs.md): definitions, versions, occurrences, the company's stop switch.
+  jobSchema,
   skillUseSchema,
   // 「気になる動き」 (security-alerts.md).
   securityAlertSchema,
