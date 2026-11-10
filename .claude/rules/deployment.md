@@ -285,7 +285,12 @@ is public, so anyone can open a PR; code from a fork must never run on that Mac.
   22.12+ for that download; CI never launches Electron and stays on Node 20. A checkout's binary
   lands in `node_modules/.pnpm/electron@<version>/node_modules/electron/dist/`.
 - Electron 45's sandboxed preload has no Node shims (`Buffer`, `events`, `timers`, `url`,
-  `setImmediate`): `preload.ts` may require only `electron`. `safeStorage`'s synchronous
+  `setImmediate`): `preload.ts` may require only `electron`. Both preloads (`preload.js`,
+  `picker-preload.js`) must be emitted as CommonJS — an ES-module preload does not load in a
+  sandboxed window (`vite.config.ts` `commonJsPreload`; `pnpm build` runs
+  `scripts/check-preloads.mjs` before electron-builder, so a release cannot pack a broken one).
+  When checking a release by hand, open 「Google Drive から選ぶ」 once: the Picker window must
+  not say 「この画面はアプリの中でだけ使えます。」. `safeStorage`'s synchronous
   methods (`secretBox` in `electron-adapter.ts`) are deprecated in 45 and removed in 46: move to
   the async ones before that bump.
 

@@ -75,13 +75,15 @@ CLIENT_MAC=(
   client/tests/ipc-harness/ ':(glob)client/tsconfig*.json' client/package.json shared/
   .github/scripts/client-tests.mjs
 )
-# Renderer UI tests (Playwright) and the renderer bundle size, both on Linux.
+# Renderer UI tests (Playwright) and the renderer bundle size, both on Linux; the bundle job also
+# checks the preloads the same build emits (check-preloads.mjs).
 UI=(
   client/src/ client/shared/ client/tests/ui/ ':(glob)client/tests/*-ui.*'
   client/playwright.config.ts client/vite.config.ts client/tailwind.config.js
   client/postcss.config.js client/index.html ':(glob)client/tsconfig*.json'
   client/package.json client/scripts/check-bundle-size.mjs shared/
   client/electron/features/plugins/screens.ts
+  client/electron/preload.ts client/electron/picker-preload.ts client/scripts/check-preloads.mjs
 )
 # Performance baselines (macOS): what client/tests/perf/*.perf.test.ts load
 # (the watcher, git search, the chat history store, the file tree, the chat

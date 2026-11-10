@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vite",
     "dev:no-spellcheck": "ELECTRON_DISABLE_SPELLCHECK=1 vite",
-    "build": "node scripts/build-speech.mjs && tsc && vite build && electron-builder",
+    "build": "node scripts/build-speech.mjs && tsc && vite build && node scripts/check-preloads.mjs && electron-builder",
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
