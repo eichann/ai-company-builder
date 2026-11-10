@@ -20,6 +20,7 @@ import { permissionsRoute } from './routes/permissions'
 import { permissionRulesRoute } from './routes/permission-rules'
 import { skillEditorsRoute } from './routes/skill-editors'
 import { groupsRoute } from './routes/groups'
+import { jobsRoute } from './routes/jobs'
 import { privateFoldersRoute } from './routes/private-folders'
 import { clientActivityMiddleware } from './routes/client-activity-middleware'
 import { agentEventsRoute } from './routes/agent-events'
@@ -173,6 +174,8 @@ app.route('/api/companies/:companyId', permissionsRoute)
 app.route('/api/companies/:companyId', permissionRulesRoute)
 app.route('/api/companies/:companyId', skillEditorsRoute)
 app.route('/api/companies/:companyId', groupsRoute)
+// 定期の仕事 (jobs.md): definitions and approval only.
+app.route('/api/companies/:companyId', jobsRoute)
 app.route('/api/companies/:companyId', privateFoldersRoute)
 app.route('/api/companies/:companyId', agentEventsRoute)
 app.route('/api/companies/:companyId', agentSandboxRoute)

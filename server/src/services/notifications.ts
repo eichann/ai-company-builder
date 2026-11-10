@@ -58,6 +58,8 @@ export interface NotificationServiceDeps {
   accounts: Pick<AccountDirectory, 'byIds'>
   /** Tell these members their notices changed (push channel: kind + a fresh version only). */
   push: (companyId: string, userIds: string[]) => void
+  /** `job_paused`: the job's name when the member may read it now (owner / admin), else null (jobs.md). Absent → never shown. */
+  jobNoticeOf?: (member: Member, jobId: string) => { name: string } | null
   /** The member's role in the company, or null (a notice goes only to someone who reads the record). */
   roleOf: (companyId: string, userId: string) => string | null
   /** The company's time zone for a due without one (records.md "Due with a time"); Japan by default. */
@@ -887,7 +889,14 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const recordless = new Set<string>(RECORDLESS_NOTIFICATION_KINDS)
       const recs = new Map(handle.records.byIds([...new Set(rows.filter(r => r.recordId !== '').map(r => r.recordId))]).map(r => [r.id, r]))
       // Read access is checked now: a record the member can no longer read shows nothing.
+      // A paused job's notice: `job_paused:<job id>:<reason>:<at>`, shown only while the member may see the job.
+      const jobNotice = (r: NotificationRow) => {
+        const [, jobId = '', reason = ''] = (r.dedupeKey ?? '').split(':')
+        const job = deps.jobNoticeOf?.(member, jobId) ?? null
+        return job ? { name: job.name, reason } : null
+      }
       const visible = rows.filter(r => {
+        if (r.kind === 'job_paused') return r.recordId === '' && jobNotice(r) !== null
         if (recordless.has(r.kind)) return r.recordId === ''
         const rec = recs.get(r.recordId)
         return rec !== undefined && rec.removedAt === null && reader.record(rec)
@@ -916,6 +925,11 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           const desktop = day === today && !read && local.slice(11, 16) < MORNING_SUMMARY_UNTIL && (countsNow().total > 0 || aiNow().total > 0)
             ? { title: text, body: 'やることの一覧で確かめてください' } : undefined
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read, ...(desktop ? { desktop } : {}) }
+        }
+        if (r.kind === 'job_paused') {
+          const job = jobNotice(r) as { name: string; reason: string }
+          const why = job.reason === 'OWNER_LEFT' ? '責任者が会社を離れました。新しい責任者を決めてください' : '責任者の権限が変わり、仕事の範囲に足りなくなりました'
+          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text: `定期の仕事「${job.name}」を止めました：${why}`, createdAt: r.createdAt, read }
         }
         const rec = recs.get(r.recordId) as RecordRow
         const def = types.get(rec.type)?.definition

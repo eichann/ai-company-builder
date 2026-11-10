@@ -10,6 +10,7 @@ import { sqliteGoogleDriveRepository } from './google-drive'
 import { sqliteFixedPayloadRepository } from './fixed-payloads'
 import { sqliteGroupRepository, sqlitePermissionHistoryRepository } from './groups'
 import { sqliteInvitationRepository } from './invitations'
+import { sqliteJobRepository } from './jobs'
 import { sqliteNotificationRepository } from './notifications'
 import { sqliteOutboundMailRepository } from './outbound-mail'
 import { sqlitePluginRepository } from './plugins'
@@ -59,6 +60,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         notifications: sqliteNotificationRepository(conn, companyId),
         tasks: sqliteTaskSettingsRepository(conn, companyId),
         aiRuns: sqliteAiRunRepository(conn, companyId),
+        jobs: sqliteJobRepository(conn, companyId),
         skillUses: sqliteSkillUseRepository(conn, companyId),
         secondOpinion: sqliteSecondOpinionSettingRepository(conn, companyId),
         securityAlerts: sqliteSecurityAlertRepository(conn, companyId),

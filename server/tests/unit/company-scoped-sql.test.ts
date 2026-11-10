@@ -84,6 +84,11 @@ const HANDLE_TABLES: Record<string, string[]> = {
   ai_runs: ['adapters/sqlite/ai-runs.ts'],
   ai_run_operations: ['adapters/sqlite/ai-runs.ts'],
   ai_run_events: ['adapters/sqlite/ai-runs.ts'],
+  // Scheduled jobs (jobs.md); ai_job_occurrences: nothing writes it until B PR 3b.
+  ai_jobs: ['adapters/sqlite/jobs.ts'],
+  ai_job_versions: ['adapters/sqlite/jobs.ts'],
+  ai_job_occurrences: ['adapters/sqlite/jobs.ts'],
+  ai_job_settings: ['adapters/sqlite/jobs.ts'],
   // Which Skill a consultation used (records.md "Which Skill"); copied by the records / Drive adapters through skillUsesJson.
   consultation_skill_uses: ['adapters/sqlite/skill-uses.ts'],
   // The Skill shelf of a company without the shared folder (plugins.md "The Skill shelf").
@@ -172,6 +177,7 @@ const HANDLE_FACTORIES = [
   'sqliteSecurityAlertRepository',
   'sqliteSkillShelfRepository',
   'sqliteGroupRepository', 'sqlitePermissionHistoryRepository',
+  'sqliteJobRepository',
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // lane A ▲

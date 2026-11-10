@@ -116,6 +116,10 @@ export interface CompanyServiceDeps {
    * here (and at every start, index.ts). Never rejects. Absent → nothing.
    */
   indexRecords?: (companyId: string) => Promise<void>
+  /** In removeMember's transaction: the scheduled jobs they are responsible for pause (jobs.md). Absent → nothing. */
+  onMemberLeft?: (companyId: string, userId: string, actorId: string) => void
+  /** In changeRole's transaction, after the change: a job the new role no longer covers pauses (jobs.md). Absent → nothing. */
+  onRoleChanged?: (companyId: string, userId: string, actorId: string) => void
 }
 
 // Slug from a name: lowercase ASCII words joined by '-'
@@ -354,6 +358,7 @@ export function createCompanyService(deps: CompanyServiceDeps) {
           // Owner/admin read and write everything; rules naming them are moot
           // and must not come back unnoticed if they are demoted later.
           if (role === 'owner' || role === 'admin') scopesOf(companyId).deleteUserRules(targetUserId)
+          deps.onRoleChanged?.(companyId, targetUserId, actor.userId)
           return true
         })
         if (!changed) {
@@ -402,6 +407,8 @@ export function createCompanyService(deps: CompanyServiceDeps) {
         companyData.forCompany(companyId).groups.forgetMember(targetUserId)
         // …and hold no business role (plugin-roles.md): a role reads student data through a connector's calls.
         companyData.forCompany(companyId).pluginRoles.forgetMember(targetUserId, clock.now(), actor.userId)
+        // …and no scheduled job runs in their name: each pauses, owners / admins are told (jobs.md).
+        deps.onMemberLeft?.(companyId, targetUserId, actor.userId)
       })
       return ok(undefined)
     },

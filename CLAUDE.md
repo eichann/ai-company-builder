@@ -33,7 +33,7 @@ data/     SQLite databases and repositories at runtime (gitignored)
 ```
 
 Area rules (load automatically when you touch matching files):
-ai-turns, sync, sync-guards, sync-testing, download-choices, push-check, private-folders, google-drive,
+ai-turns, jobs, sync, sync-guards, sync-testing, download-choices, push-check, private-folders, google-drive,
 private-folders-client, chat-and-agents, chat-ui-and-history, chat-write-guard, company-files, approvals,
 web-research, tasks, tasks-ui, agent-sandbox, plugins, outbound-mail, member-oauth, agent-events, agent-stop, ipc-and-main-process, files-and-editor, renderer-structure,
 commands, server, security-alerts, records, notifications, google-connector, minutes, calendar,

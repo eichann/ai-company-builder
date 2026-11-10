@@ -121,6 +121,8 @@ interface World {
     /** A Skill on the other company's shelf (plugins.md "The Skill shelf"). */
     shelfItem: string
     shelfRequest: string
+    /** A scheduled job of the other company, approved, its member responsible (jobs.md). */
+    job: string
   }
 }
 
@@ -138,6 +140,9 @@ const C = (w: World) => `/api/companies/${w.co}`
 
 const ALL_SIGNED_IN: Expect = [200, 200, 200, 200, 200, 401]
 const MEMBERS: Expect = [200, 200, 200, 200, 404, 401]
+
+const NO_SUCH_JOB = `job.${'0'.repeat(32)}`
+const OTHER_JOB = `job.${'e'.repeat(32)}`
 
 const MATRIX: Row[] = [
   // Public
@@ -190,6 +195,17 @@ const MATRIX: Row[] = [
   r('PATCH /api/companies/:companyId/groups/:groupId', w => ({ path: `${C(w)}/groups/no-such-group`, body: { name: 'x' } }), [404, 404, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/groups/:groupId/members', w => ({ path: `${C(w)}/groups/no-such-group/members`, body: { userIds: [] } }), [404, 404, 403, 403, 404, 401]),
   r('DELETE /api/companies/:companyId/groups/:groupId', w => ({ path: `${C(w)}/groups/no-such-group` }), [404, 404, 403, 403, 404, 401]),
+  // 定期の仕事 (jobs.md): owner/admin manage; a member lists the jobs they are responsible for (none here), and
+  // anyone else's job answers like a missing one; accept is the responsible person's only.
+  r('GET /api/companies/:companyId/jobs', w => ({ path: `${C(w)}/jobs` }), MEMBERS),
+  r('GET /api/companies/:companyId/jobs/:jobId', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/jobs', w => ({ path: `${C(w)}/jobs`, body: {} }), [400, 400, 403, 403, 404, 401], 'no definition'),
+  r('PUT /api/companies/:companyId/jobs/:jobId', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/jobs/:jobId/approve', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}/approve`, body: { version: 1 } }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/jobs/:jobId/pause', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}/pause` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/jobs/:jobId/resume', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}/resume` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/me/jobs/:jobId/accept', w => ({ path: `${C(w)}/me/jobs/${NO_SUCH_JOB}/accept`, body: { version: 1 } }), [404, 404, 404, 404, 404, 401]),
+  r('PUT /api/companies/:companyId/jobs-stop', w => ({ path: `${C(w)}/jobs-stop`, body: {} }), [400, 400, 403, 403, 404, 401], 'no stopped'),
   // Department membership (所属する部署): any member reads; owner/admin and the department's own managers change it
   r('GET /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members` }), MEMBERS),
   r('PUT /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members`, body: {} }), [400, 400, 403, 400, 404, 401], 'the manager\'s department'),
@@ -716,6 +732,12 @@ const CROSS: CrossRow[] = [
   x('PATCH /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}`, body: { name: '乗っ取り' } }), w => w.other.group),
   x('PUT /api/companies/:companyId/groups/:groupId/members', (w, id) => ({ path: `${C(w)}/groups/${id}/members`, body: { userIds: [] } }), w => w.other.group),
   x('DELETE /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}` }), w => w.other.group),
+  x('GET /api/companies/:companyId/jobs/:jobId', (w, id) => ({ path: `${C(w)}/jobs/${id}` }), w => w.other.job, NO_SUCH_JOB),
+  x('PUT /api/companies/:companyId/jobs/:jobId', (w, id) => ({ path: `${C(w)}/jobs/${id}`, body: { definition: { schema: 1 } } }), w => w.other.job, NO_SUCH_JOB),
+  x('POST /api/companies/:companyId/jobs/:jobId/approve', (w, id) => ({ path: `${C(w)}/jobs/${id}/approve`, body: { version: 1 } }), w => w.other.job, NO_SUCH_JOB),
+  x('POST /api/companies/:companyId/jobs/:jobId/pause', (w, id) => ({ path: `${C(w)}/jobs/${id}/pause` }), w => w.other.job, NO_SUCH_JOB),
+  x('POST /api/companies/:companyId/jobs/:jobId/resume', (w, id) => ({ path: `${C(w)}/jobs/${id}/resume` }), w => w.other.job, NO_SUCH_JOB),
+  x('POST /api/companies/:companyId/me/jobs/:jobId/accept', (w, id) => ({ path: `${C(w)}/me/jobs/${id}/accept`, body: { version: 1 } }), w => w.other.job, NO_SUCH_JOB),
   x('GET /api/companies/:companyId/skill-shelf/:itemId/versions', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/versions` }), w => w.other.shelfItem),
   x('GET /api/companies/:companyId/skill-shelf/:itemId/versions/:version', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/versions/${'a'.repeat(64)}` }), w => w.other.shelfItem),
   x('POST /api/companies/:companyId/skill-shelf/:itemId/restore', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/restore`, body: { version: 'a'.repeat(64), expectedVersion: null } }), w => w.other.shelfItem),
@@ -1008,6 +1030,11 @@ async function seed(): Promise<World> {
     VALUES ('shelf-other-1', ?, 'skill', NULL, 'other-skill', ?, ?, ?, ?, ?)`).run(other, 'a'.repeat(64), expires, otherMember, expires, otherMember)
   db.prepare(`INSERT INTO shelf_versions (company_id, item_id, version, files, file_count, total_bytes, autorun, published_at, published_by)
     VALUES (?, 'shelf-other-1', ?, '[]', 0, 0, 0, ?, ?)`).run(other, 'a'.repeat(64), expires, otherMember)
+  // A scheduled job of the other company, approved and accepted, its member responsible (rows as adapters/sqlite/jobs.ts writes them).
+  db.prepare(`INSERT INTO ai_jobs (company_id, id, name, state, acting_user_id, latest_version, approved_version, approved_fingerprint, accepted_version, accepted_consent,
+    created_by, created_at, updated_at) VALUES (?, ?, '他社の定期の仕事', 'active', ?, 1, 1, 'sha256:f', 1, 'sha256:c', ?, ?, ?)`).run(other, OTHER_JOB, otherMember, USER.outsider, expires, expires)
+  db.prepare(`INSERT INTO ai_job_versions (company_id, job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at, approved_by, approved_at)
+    VALUES (?, ?, 1, 1, '{}', 'sha256:f', 'sha256:c', ?, ?, ?, ?, ?)`).run(other, OTHER_JOB, otherMember, USER.outsider, expires, USER.outsider, expires)
   // A pending request to publish a Skill on the other company's shelf (rows as adapters/sqlite/skill-shelf.ts writes them).
   db.prepare(`INSERT INTO shelf_requests (id, company_id, department_id, name, requested_by, requested_at, version, files, file_count, total_bytes, autorun, state)
     VALUES ('shelf-request-other-1', ?, NULL, 'other-request', ?, ?, ?, '[]', 0, 0, 0, 'pending')`).run(other, otherMember, expires, 'a'.repeat(64))
@@ -1046,6 +1073,7 @@ async function seed(): Promise<World> {
       aiRun: 'run-other-1',
       shelfItem: 'shelf-other-1',
       shelfRequest: 'shelf-request-other-1',
+      job: OTHER_JOB,
 
     },
   }

@@ -82,6 +82,8 @@ import { createRecordRunSubjects } from './services/run-subjects'
 import { createSkillUseService } from './services/skill-uses'
 import { createSkillShelfService } from './services/skill-shelf'
 import { createGroupService } from './services/groups'
+import { createJobService } from './services/jobs'
+import { companySkillTree } from './lib/skill-trees'
 import { createServerClock } from './services/server-clock'
 import { createSecurityAlertService } from './services/security-alerts'
 import { createTaskAcceptance } from './services/task-acceptance'
@@ -304,8 +306,14 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     delegateCannotRead: (companyId, absenteeId, delegateId, setterId) => notifications.delegateCannotRead(companyId, absenteeId, delegateId, setterId),
   })
   const actsFor = (companyId: string, userId: string) => absences.actsFor(companyId, userId)
+  // 定期の仕事 (jobs.md): definitions and approval only in B PR 3a — nothing runs yet.
+  const jobs = createJobService({
+    ...repos, ...shared,
+    skillTree: (companyId, name) => (companyFolders.has(companyId) ? companySkillTree(companyId, name) : Promise.resolve(null)),
+  })
   const notifications = createNotificationService({
     ...shared,
+    jobNoticeOf: (member, jobId) => jobs.noticeJob(member, jobId),
     coverOf: (companyId, userId) => absences.coverOf(companyId, userId),
     managersOf: (companyId, userId) => absences.managersOf(companyId, userId),
     activeAbsences: companyId => absences.activeToday(companyId),
@@ -785,6 +793,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       creationPolicy: companyCreationPolicyFromEnv(),
       isOperator: userId => operatorUserIds().has(userId),
       indexRecords: companyId => recordIndexer.schedule(companyId),
+      // The responsible person of a scheduled job left or lost rights: the job pauses (jobs.md).
+      onMemberLeft: (companyId, userId, actorId) => jobs.memberLeft(companyId, userId, actorId),
+      onRoleChanged: (companyId, userId, actorId) => jobs.roleChanged(companyId, userId, actorId),
     }),
     /**
      * At start (index.ts): index every company without the shared folder, so a new server build's
@@ -889,6 +900,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     }),
     // 見える人のまとまり (server.md "Groups"): owners/admins keep them; rules name them.
     groups: createGroupService({ ...repos, ...shared }),
+    jobs,
     notifications,
     decisions,
     meetingOutputs,
