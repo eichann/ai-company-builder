@@ -646,7 +646,7 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   it, and SKILL.md says where — a Skill is handed out to everyone who reads its place, so an output
   inside it reaches people it was never meant for. `outputLikePaths` (`shared/core/skill-shelf.ts`;
   a flag, not a security boundary, kept small): everything under a folder **directly** in the Skill
-  named `output(s)`, `out`, `result(s)`, `成果物`, `出力`, `export(s)`, `dist`, `generated`
+  named `output(s)`, `result(s)`, `成果物`, `出力` (not `out` / `dist` / `generated` / `export`: tools use them)
   (`lookalikeKey`: case and width folded; deeper, e.g. `scripts/output/`, is a tool's own), and a
   `.pdf` / `.docx` / `.xlsx` / `.pptx` at the Skill's top (in `references/` or `templates/` it is
   material). Publishing a Skill and sending a request with such files → 400 `SHELF_OUTPUTS_INSIDE
@@ -846,16 +846,26 @@ company never reaches any of it: the store knows a company only from
   reads the folder and, when `outputLikePaths` finds anything, sends nothing and answers
   `{ success: false, outputs }` (`SkillShelfSendResult`) to 会社に公開 and 頼む alike. The card shows the
   question with the paths (≤ 10, then 「ほか N 個」) instead of the buttons: ［外して出す］ calls the
-  same channel again with `leaveOutOutputs: true` (those paths left out of what is sent; the files
-  stay on disk, never deleted), ［戻って直す］ sends nothing. The AI is told the same when it makes
-  a Skill (`system-prompt.ts` スキル作成ルール: no outputs in the Skill folder, where they go written
-  in SKILL.md). Tests: `ipc-skill-shelf.test.ts` 「outputs never go up unasked…」,
-  `tests/ui/skill-layout.spec.ts` (publish and request, both choices) — mutation-checked.
+  same channel again with `leaveOutOutputs: true` (those paths left out of what is sent),
+  ［戻って直す］ sends nothing. **Only after the server took it** (publish or request; a refusal or
+  offline leaves the files where they were) the files left out **move** (owner decision 2026-11-10,
+  option A) to the kept copies, `.backups/<ts>_skill_outputs(_n)/<the Skill folder>/<file>` +
+  `_metadata.json` (`store.keepAside` on `moveToBackup`, the one move 会社の版に戻す uses too: one
+  rename each, never deleted, never sent; folders left empty inside the Skill go), and before the
+  sync: so the folder is exactly what was published and is taken over as the company's instead of
+  becoming a clash. **Never** make the comparison ignore output-like paths instead: a later company
+  version would then replace the folder and lose them. The answer's `keptAside` → 「外したファイルは
+  控えに移しました。」 with ［控えを開く］ (`false`: they could not be moved and stay, said so). The AI is
+  told the same when it makes a Skill (`system-prompt.ts` スキル作成ルール: no outputs in the Skill
+  folder, where they go written in SKILL.md). Tests: `ipc-skill-shelf.test.ts` (asked first; 外して出す
+  → the stripped version delivered → the Skill is the company's, placed for the other agent, the
+  moved files with their content in the kept copy; a refusal / offline moves nothing; 頼む moves them
+  too), `tests/ui/skill-layout.spec.ts` (publish and request, both choices, the kept notice) — mutation-checked.
 - **「AI と一緒に直す」**: on the editing card and a local Skill's card, `chat.newConsultation` with
   `shelfFixWithAi` (the Skill's folder, working-folder relative, in the first message; sent like a
   skill's 実行).
-- **「控えを開く」** (`skillShelf:openBackup`): on a company Skill whose edited copy 「会社の版に戻す」 kept
-  (`SkillInfo.shelfBackup`), the newest `.backups/<stamp>_skill_edit(_n)/<the Skill folder>` is shown
+- **「控えを開く」** (`skillShelf:openBackup`): on a Skill with a kept copy — the edited copy 「会社の版に戻す」 kept, or the files 外して出す moved —
+  (`SkillInfo.shelfBackup`), the newest `.backups/<stamp>_skill_(edit|outputs)(_n)/<the Skill folder>` is shown
   in Finder (`DesktopShell.openPath`); `latestBackup` takes only that name pattern, a Skill folder's
   place, `.backups` a plain folder and no link anywhere on the way (`SHELF_NO_BACKUP_MESSAGE` otherwise).
 - **Use reports**: `shelfVersion` in `skill-use-reporter.ts`: the version in the `tree` field (64

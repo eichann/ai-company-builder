@@ -8,13 +8,16 @@ import { outputLikePaths } from '../../shared/core/skill-shelf'
 
 describe('outputLikePaths', () => {
   it('flags everything under an output-like folder directly in the Skill', () => {
-    const paths = ['SKILL.md', 'output/提案書.md', 'outputs/a.csv', 'out/x', 'result/r.txt', 'results/2026/r.txt', '成果物/見積.xlsx',
-      '出力/a.md', 'export/a', 'exports/b', 'dist/index.js', 'generated/g.json']
+    const paths = ['SKILL.md', 'output/提案書.md', 'outputs/a.csv', 'result/r.txt', 'results/2026/r.txt', '成果物/見積.xlsx', '出力/a.md']
     expect(outputLikePaths(paths)).toEqual(paths.slice(1))
   })
 
+  it('leaves the folder names a Skill\'s own tools use alone', () => {
+    expect(outputLikePaths(['out/x', 'dist/index.js', 'generated/g.json', 'export/a', 'exports/b'])).toEqual([])
+  })
+
   it('folds case and width the way a protected name is compared', () => {
-    expect(outputLikePaths(['Output/a.md', 'OUTPUTS/b.md', 'ＯＵＴＰＵＴ/c.md', 'Dist/d.js'])).toEqual(['Output/a.md', 'OUTPUTS/b.md', 'ＯＵＴＰＵＴ/c.md', 'Dist/d.js'])
+    expect(outputLikePaths(['Output/a.md', 'OUTPUTS/b.md', 'ＯＵＴＰＵＴ/c.md', 'Results/d.csv'])).toEqual(['Output/a.md', 'OUTPUTS/b.md', 'ＯＵＴＰＵＴ/c.md', 'Results/d.csv'])
   })
 
   it('leaves the same name deeper inside alone (a tool keeps its own folders)', () => {

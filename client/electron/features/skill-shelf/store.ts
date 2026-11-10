@@ -96,8 +96,11 @@ function releasedFrom(raw: Released): Released | null {
   return { id: raw.id, rel: raw.rel, version: raw.version, ...newer }
 }
 
-/** The backup folders 「会社の版に戻す」 makes: `<stamp>_skill_edit`, `_2`, `_3` … when taken. */
-const SKILL_EDIT_BACKUP_RE = /^\d{4}-\d{2}-\d{2}T[\d-]+_skill_edit(?:_\d+)?$/
+/**
+ * The backup folders a Skill's kept copies go to (「控えを開く」 opens the newest): 「会社の版に戻す」's
+ * `<stamp>_skill_edit` and 外して出す's `<stamp>_skill_outputs`, `_2`, `_3` … when taken.
+ */
+const SKILL_BACKUP_RE = /^\d{4}-\d{2}-\d{2}T[\d-]+_skill_(?:edit|outputs)(?:_\d+)?$/
 
 const emptyManifest = (user: string): Manifest => ({ user, items: [], clashes: [], released: [] })
 
@@ -224,6 +227,47 @@ export type RestoredOutcome = 'back' | 'later' | 'not-delivered' | 'occupied'
 
 /** The backup folder's suffix of 「会社の版に戻す」 (`.backups/<ts>_skill_edit/<the Skill folder>`). */
 export const SKILL_EDIT_BACKUP_REASON = 'skill_edit'
+/** The backup folder's suffix of 外して出す (`.backups/<ts>_skill_outputs/<the Skill folder>/<file>`). */
+export const SKILL_OUTPUTS_BACKUP_REASON = 'skill_outputs'
+
+/**
+ * Move these entries (working-folder relative) into a new `.backups/<stamp>_<reason>` (`_2`, `_3` …
+ * when taken), each at its own path below it, with `_metadata.json` naming them: one rename each
+ * (same disk), never a copy-and-delete, never sent (`.backups` is local only). 'backups' when
+ * `.backups` is not a plain folder (nothing moved). A move that fails throws; what moved before
+ * it stays in the backup, and the folders made only for the failed one are taken away again, empty.
+ */
+function moveToBackup(root: string, reason: string, rels: readonly string[], at: Date): string | 'backups' {
+  const backups = path.join(root, '.backups')
+  try {
+    if (!fs.lstatSync(backups).isDirectory()) return 'backups'
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const stamp = `${backupStamp(at)}_${reason}`
+  let folder = stamp
+  for (let n = 2; fs.existsSync(path.join(backups, folder)) || isLink(path.join(backups, folder)); n++) folder = `${stamp}_${n}`
+  const backup = `.backups/${folder}`
+  for (const rel of rels) {
+    // Only folders made here, outermost first: taken away again, empty, if the move fails.
+    const made: string[] = []
+    try {
+      let dir = root
+      for (const part of `${backup}/${rel}`.split('/').slice(0, -1)) {
+        dir = path.join(dir, part)
+        if (!fs.existsSync(dir)) { fs.mkdirSync(dir); made.push(dir) }
+      }
+      fs.renameSync(path.join(root, rel), path.join(root, backup, rel))
+    } catch (error) {
+      for (const dir of made.reverse()) { try { fs.rmdirSync(dir) } catch { break } }
+      throw error
+    }
+  }
+  try {
+    fs.writeFileSync(path.join(root, backup, '_metadata.json'), JSON.stringify({ timestamp: at.toISOString(), reason, files: rels }, null, 2))
+  } catch { /* the copy is what matters */ }
+  return backup
+}
 
 /** Is any folder on the way to `rel` (the target itself left out) a link? */
 function linkOnTheWay(root: string, rel: string): boolean {
@@ -516,8 +560,8 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
       return { offered: mayRequestShelfSkill(manifest.publishing, rel), ...(last ? { last } : {}) }
     },
     /**
-     * 「控えを開く」: the newest copy 「会社の版に戻す」 kept of the Skill folder at `rel`
-     * (`.backups/<stamp>_skill_edit…/<rel>`), or null. Only a plain folder inside the working
+     * 「控えを開く」: the newest copy kept of the Skill folder at `rel` (「会社の版に戻す」 or 外して出す)
+     * (`.backups/<stamp>_skill_edit…/<rel>`, `…_skill_outputs…/<rel>`), or null. Only a plain folder inside the working
      * folder's own `.backups`: a link anywhere on the way (`.backups`, the backup, a folder of
      * `rel`) is never followed.
      */
@@ -527,7 +571,7 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
       let names: string[] = []
       try {
         if (!fs.lstatSync(backups).isDirectory()) return null
-        names = fs.readdirSync(backups).filter(name => SKILL_EDIT_BACKUP_RE.test(name)).sort().reverse()
+        names = fs.readdirSync(backups).filter(name => SKILL_BACKUP_RE.test(name)).sort().reverse()
       } catch {
         return null
       }
@@ -600,32 +644,9 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
         }
         let backup: string | null = null
         if (there) {
-          const backups = path.join(root, '.backups')
-          try {
-            if (!fs.lstatSync(backups).isDirectory()) return { ok: false, reason: 'backups' }
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-          }
-          const stamp = `${backupStamp(new Date(now()))}_${SKILL_EDIT_BACKUP_REASON}`
-          let folder = stamp
-          for (let n = 2; fs.existsSync(path.join(backups, folder)) || isLink(path.join(backups, folder)); n++) folder = `${stamp}_${n}`
-          backup = `.backups/${folder}`
-          // Only folders made here, outermost first: taken away again, empty, if the move fails.
-          const made: string[] = []
-          try {
-            let at = root
-            for (const part of `${backup}/${rel}`.split('/').slice(0, -1)) {
-              at = path.join(at, part)
-              if (!fs.existsSync(at)) { fs.mkdirSync(at); made.push(at) }
-            }
-            fs.renameSync(abs, path.join(root, backup, rel))
-          } catch (error) {
-            for (const dir of made.reverse()) { try { fs.rmdirSync(dir) } catch { break } }
-            throw error
-          }
-          try {
-            fs.writeFileSync(path.join(root, backup, '_metadata.json'), JSON.stringify({ timestamp: new Date(now()).toISOString(), reason: SKILL_EDIT_BACKUP_REASON, files: [rel] }, null, 2))
-          } catch { /* the copy is what matters */ }
+          const moved = moveToBackup(root, SKILL_EDIT_BACKUP_REASON, [rel], new Date(now()))
+          if (moved === 'backups') return { ok: false, reason: 'backups' }
+          backup = moved
         }
         save(companyId, root, {
           ...manifest,
@@ -653,6 +674,35 @@ export function createSkillShelfStore(deps: SkillShelfDeps) {
       if (!listed) return 'later'
       if (!listed.has(id)) return 'not-delivered'
       return manifest.clashes.some(c => c.id === id) ? 'occupied' : 'later'
+    },
+    /**
+     * 外して出す, after the server took the Skill without them (owner decision 2026-11-10): the files
+     * at `paths` (inside the Skill folder at `rel`) move to `.backups/<ts>_skill_outputs/<rel>/…`, so
+     * the folder is what was sent and the next sync takes it over instead of calling it a clash.
+     * Folders left empty inside the Skill go; nothing is deleted. False, nothing moved, when a link
+     * or something that is not a file stands on the way, or `.backups` is not a plain folder.
+     */
+    keepAside(root: string, rel: string, paths: readonly string[]): Promise<boolean> {
+      const result = chain.then(() => {
+        if (shelfPlaceOfSkillFolder(rel) === null || paths.length === 0) return false
+        for (const p of paths) {
+          if (linkOnTheWay(root, `${rel}/${p}`)) return false
+          try {
+            if (!fs.lstatSync(path.join(root, rel, p)).isFile()) return false
+          } catch {
+            return false
+          }
+        }
+        const moved = moveToBackup(root, SKILL_OUTPUTS_BACKUP_REASON, paths.map(p => `${rel}/${p}`), new Date(now()))
+        if (moved === 'backups') return false
+        // The folders that held them, deepest first, when nothing else is left in them.
+        const folders = [...new Set(paths.flatMap(p => p.split('/').slice(0, -1).map((_, i, parts) => parts.slice(0, i + 1).join('/'))))]
+        for (const folder of folders.sort((a, b) => b.length - a.length)) { try { fs.rmdirSync(path.join(root, rel, folder)) } catch { /* not empty */ } }
+        log.info('[skill-shelf] files left out of a Skill were kept in .backups')
+        return true
+      })
+      chain = result.then(() => undefined, () => undefined)
+      return result
     },
     /** The member published the Skill at `rel`: the next sync takes it over when it is the listed version. */
     published(root: string, rel: string): Promise<void> {

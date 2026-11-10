@@ -402,6 +402,11 @@ test('without the shared folder: a Skill holding what looks like outputs asks �
   await expect.poll(() => calls(page, 'publishSkillToCompany')).toEqual([['proposal', null, false], ['proposal', null, false], ['proposal', null, true]])
   await expect(question).toHaveCount(0)
   await expect(page.getByRole('alert')).toHaveCount(0)
+  // Where the files left out went, and the way to them.
+  const kept = page.getByRole('status').filter({ hasText: '外したファイルは控えに移しました。' })
+  await expect(kept).toBeVisible()
+  await kept.getByRole('button', { name: '控えを開く' }).click()
+  await expect.poll(() => calls(page, 'openCompanySkillBackup')).toEqual([['proposal']])
 })
 
 test('without the shared folder: 頼む asks about outputs the same way, and 外して出す sends the request without them', async ({ page }) => {
@@ -414,6 +419,7 @@ test('without the shared folder: 頼む asks about outputs the same way, and 外
   await question.getByRole('button', { name: '外して出す' }).click()
   await expect.poll(() => calls(page, 'requestCompanySkill')).toEqual([['proposal', false], ['proposal', true]])
   await expect(question).toHaveCount(0)
+  await expect(page.getByRole('status').filter({ hasText: '外したファイルは控えに移しました。' })).toBeVisible()
 })
 
 test('without the shared folder: the server\'s refusal is shown in its words', async ({ page }) => {

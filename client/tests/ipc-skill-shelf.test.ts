@@ -84,30 +84,105 @@ test('「会社に公開」: the folder goes up with what the member saw, leavin
   assert.equal(Buffer.from(files.find(f => f.path === 'SKILL.md')!.base64, 'base64').toString(), 'visit\n')
 })
 
-test('outputs never go up unasked: output-like files stop 会社に公開 and 頼む before anything is sent; 外して出す sends the rest, the files stay on disk', async () => {
-  const id = 'co-out'
-  const { folder, shelf } = await open(id)
-  const skill = '営業部/.claude/skills/proposal'
-  writeFiles(folder, { [`${skill}/SKILL.md`]: 'p\n', [`${skill}/output/提案書.md`]: '顧客A への提案\n', [`${skill}/提案書.pdf`]: 'pdf', [`${skill}/references/guide.pdf`]: 'g', [`${skill}/scripts/output/keep.txt`]: 'k' })
-  const posted: Array<{ files: Array<{ path: string }> }> = []
-  const answer = (req: { body?: string }) => {
-    posted.push(JSON.parse(req.body!))
-    shelf.delivered = {}
-    return { status: 201, json: { success: true, data: { changed: true, item: {} } } }
-  }
-  h.server.on('POST', `/api/companies/${id}/skill-shelf`, answer)
-  h.server.on('POST', `/api/companies/${id}/skill-shelf-requests`, answer)
-  const skillPath = path.join(folder, skill)
-  const asked = { success: false, outputs: ['output/提案書.md', '提案書.pdf'] }
-  const sorted = (r: unknown) => ({ ...(r as { outputs: string[] }), outputs: [...(r as { outputs: string[] }).outputs].sort() })
-  assert.deepEqual(sorted(await h.invoke('skillShelf:publish', folder, skillPath, null, false)), sorted(asked))
-  assert.deepEqual(sorted(await h.invoke('skillShelf:requestPublish', folder, skillPath, false)), sorted(asked))
-  assert.equal(posted.length, 0, 'nothing sent before the member chose')
+/** A Skill with what looks like outputs, and what is left once they are taken out. */
+const WITH_OUTPUTS = { 'SKILL.md': 'p\n', 'output/提案書.md': '顧客A への提案\n', 'output/memo/a.md': 'メモ\n', '提案書.pdf': 'pdf', 'references/guide.pdf': 'g', 'scripts/output/keep.txt': 'k' }
+const WITHOUT_OUTPUTS = { 'SKILL.md': 'p\n', 'references/guide.pdf': 'g', 'scripts/output/keep.txt': 'k' }
+const writeSkill = (folder: string, rel: string, files: Record<string, string>) => writeFiles(folder, Object.fromEntries(Object.entries(files).map(([p, text]) => [`${rel}/${p}`, text])))
+/** The `_skill_outputs` kept copies in the working folder's `.backups`. */
+const keptCopies = (folder: string) => {
+  try { return fs.readdirSync(path.join(folder, '.backups')).filter(n => /_skill_outputs(_\d+)?$/.test(n)) } catch { return [] }
+}
 
-  assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, skillPath, true), { success: true })
-  assert.deepEqual(await h.invoke('skillShelf:publish', folder, skillPath, null, true), { success: true })
-  for (const sent of posted) assert.deepEqual(sent.files.map(f => f.path).sort(), ['SKILL.md', 'references/guide.pdf', 'scripts/output/keep.txt'])
-  assert.equal(fs.readFileSync(path.join(skillPath, 'output/提案書.md'), 'utf8'), '顧客A への提案\n', 'left out, never deleted')
+test('outputs never go up unasked: output-like files stop 会社に公開 and 頼む before anything is sent', async () => {
+  const id = 'co-out-ask'
+  const { folder } = await open(id)
+  const rel = '.claude/skills/proposal'
+  writeSkill(folder, rel, WITH_OUTPUTS)
+  const posted: unknown[] = []
+  h.server.on('POST', `/api/companies/${id}/skill-shelf`, req => { posted.push(req.body); return { status: 201, json: { success: true, data: {} } } })
+  h.server.on('POST', `/api/companies/${id}/skill-shelf-requests`, req => { posted.push(req.body); return { status: 201, json: { success: true, data: {} } } })
+  const skillPath = path.join(folder, rel)
+  const sorted = (r: unknown) => ({ ...(r as { outputs: string[] }), outputs: [...(r as { outputs: string[] }).outputs].sort() })
+  const asked = { success: false, outputs: ['output/memo/a.md', 'output/提案書.md', '提案書.pdf'] }
+  assert.deepEqual(sorted(await h.invoke('skillShelf:publish', folder, skillPath, null, false)), asked)
+  assert.deepEqual(sorted(await h.invoke('skillShelf:requestPublish', folder, skillPath, false)), asked)
+  assert.equal(posted.length, 0, 'nothing sent before the member chose')
+  assert.deepEqual(keptCopies(folder), [])
+})
+
+test('外して出す: only the rest goes up, the files left out move to the kept copies (never deleted), and the published Skill is then the company\'s, not a clash', async () => {
+  const id = 'co-out-pub'
+  const { folder, shelf } = await open(id)
+  const rel = '.claude/skills/proposal'
+  writeSkill(folder, rel, WITH_OUTPUTS)
+  const posted: Array<{ files: Array<{ path: string }> }> = []
+  h.server.on('POST', `/api/companies/${id}/skill-shelf`, req => {
+    const body = JSON.parse(req.body!) as { files: Array<{ path: string; base64: string }> }
+    posted.push(body)
+    // The server keeps what was sent and hands it out from now on.
+    shelf.delivered = { proposal: Object.fromEntries(body.files.map(f => [f.path, Buffer.from(f.base64, 'base64').toString()])) }
+    return { status: 201, json: { success: true, data: { changed: true, item: {} } } }
+  })
+  const skillPath = path.join(folder, rel)
+  assert.deepEqual(await h.invoke('skillShelf:publish', folder, skillPath, null, true), { success: true, keptAside: true })
+  assert.deepEqual(posted[0].files.map(f => f.path).sort(), Object.keys(WITHOUT_OUTPUTS).sort())
+
+  // The folder is what was published: taken over as the company's, and placed for the other agent too.
+  type Listed = { skills: Array<{ skillPath: string; shelf?: unknown; shelfBackup?: boolean }> }
+  const listed = await h.invoke<Listed>('skills:list', folder, '', 'company', undefined, { force: true })
+  const mine = listed.skills.find(s => s.skillPath.endsWith('proposal'))
+  assert.deepEqual(mine?.shelf, { state: 'company', version: versionOf(WITHOUT_OUTPUTS) })
+  assert.equal(mine?.shelfBackup, true, '控えを開く is offered')
+  assert.equal(fs.readFileSync(path.join(folder, '.agents/skills/proposal/SKILL.md'), 'utf8'), 'p\n')
+  assert.equal(fs.existsSync(path.join(skillPath, 'output')), false, 'the emptied folder goes')
+  assert.equal(fs.existsSync(path.join(skillPath, '提案書.pdf')), false)
+  assert.equal(fs.readFileSync(path.join(skillPath, 'scripts/output/keep.txt'), 'utf8'), 'k')
+
+  // The files left out, with their content, in the kept copy.
+  const [kept] = keptCopies(folder)
+  assert.ok(kept)
+  const copy = path.join(folder, '.backups', kept, rel)
+  assert.equal(fs.readFileSync(path.join(copy, 'output/提案書.md'), 'utf8'), '顧客A への提案\n')
+  assert.equal(fs.readFileSync(path.join(copy, 'output/memo/a.md'), 'utf8'), 'メモ\n')
+  assert.equal(fs.readFileSync(path.join(copy, '提案書.pdf'), 'utf8'), 'pdf')
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(folder, '.backups', kept, '_metadata.json'), 'utf8')).reason, 'skill_outputs')
+  assert.deepEqual(await h.invoke('skillShelf:openBackup', folder, skillPath), { success: true })
+})
+
+test('外して出す refused by the server (or offline): the files left out stay where they were and nothing is kept aside', async () => {
+  const id = 'co-out-no'
+  const { folder } = await open(id)
+  const rel = '.claude/skills/proposal'
+  writeSkill(folder, rel, WITH_OUTPUTS)
+  const sentence = 'この Skill・指示を変えられるのは、決められた人だけです。'
+  h.server.on('POST', `/api/companies/${id}/skill-shelf`, { status: 403, json: { error: sentence, code: 'SHELF_NOT_ALLOWED', files: [] } })
+  h.server.on('POST', `/api/companies/${id}/skill-shelf-requests`, { status: 403, json: { error: sentence, code: 'SHELF_NOT_ALLOWED', files: [] } })
+  const skillPath = path.join(folder, rel)
+  assert.deepEqual(await h.invoke('skillShelf:publish', folder, skillPath, null, true), { success: false, error: sentence })
+  assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, skillPath, true), { success: false, error: sentence })
+  h.server.offline = true
+  try {
+    assert.deepEqual(await h.invoke('skillShelf:publish', folder, skillPath, null, true), { success: false, error: SHELF_OFFLINE_MESSAGE })
+  } finally {
+    h.server.offline = false
+  }
+  for (const [p, text] of Object.entries(WITH_OUTPUTS)) assert.equal(fs.readFileSync(path.join(skillPath, p), 'utf8'), text, p)
+  assert.deepEqual(keptCopies(folder), [])
+})
+
+test('外して出す on 頼む: once the request is sent, the files left out move to the kept copies too', async () => {
+  const id = 'co-out-ask-sent'
+  const { folder } = await open(id, {}, { company: false, departmentFolders: [] })
+  const rel = '.claude/skills/proposal'
+  writeSkill(folder, rel, WITH_OUTPUTS)
+  const posted: Array<{ files: Array<{ path: string }> }> = []
+  h.server.on('POST', `/api/companies/${id}/skill-shelf-requests`, req => { posted.push(JSON.parse(req.body!)); return { status: 201, json: { success: true, data: { id: 'r1' } } } })
+  const skillPath = path.join(folder, rel)
+  assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, skillPath, true), { success: true, keptAside: true })
+  assert.deepEqual(posted[0].files.map(f => f.path).sort(), Object.keys(WITHOUT_OUTPUTS).sort())
+  const [kept] = keptCopies(folder)
+  assert.equal(fs.readFileSync(path.join(folder, '.backups', kept, rel, 'output/提案書.md'), 'utf8'), '顧客A への提案\n')
+  assert.equal(fs.existsSync(path.join(skillPath, 'output')), false)
 })
 
 test('the server\'s refusal reaches the member in its own words; offline says so; nothing changes in the folder', async () => {

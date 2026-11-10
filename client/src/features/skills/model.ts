@@ -53,13 +53,14 @@ export const SKILL_PUBLISH_FAILED = 'できませんでした。もう一度試�
 
 /**
  * What 「会社に公開」 / 「会社に出してほしいと頼む」 answer: null when it went, the sentence when it did
- * not, or the files that look like outputs (nothing sent; the panel asks 「成果物が入っていませんか？」).
+ * not, the files that look like outputs (nothing sent; the panel asks 「成果物が入っていませんか？」), or —
+ * sent after 外して出す — whether the files left out moved to the kept copies.
  */
-export type ShelfSendAnswer = string | null | { outputs: string[] }
+export type ShelfSendAnswer = string | null | { outputs: string[] } | { keptAside: boolean }
 
 /** The app's answer turned into what the panel shows. */
-export function shelfSendAnswer(result: { success: boolean; error?: string; outputs?: string[] }): ShelfSendAnswer {
-  if (result.success) return null
+export function shelfSendAnswer(result: { success: boolean; error?: string; outputs?: string[]; keptAside?: boolean }): ShelfSendAnswer {
+  if (result.success) return typeof result.keptAside === 'boolean' ? { keptAside: result.keptAside } : null
   if (result.outputs && result.outputs.length > 0) return { outputs: result.outputs }
   return result.error ?? SKILL_PUBLISH_FAILED
 }

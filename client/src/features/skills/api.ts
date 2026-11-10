@@ -106,7 +106,7 @@ export function requestCompanySkill(rootPath: string, skillPath: string, leaveOu
   return shelf.requestCompanySkill(rootPath, skillPath, leaveOutOutputs)
 }
 
-/** 「控えを開く」: the newest copy 会社の版に戻す kept of this Skill, shown in Finder. */
+/** 「控えを開く」: the newest copy kept of this Skill (会社の版に戻す, 外して出す), shown in Finder. */
 export function openCompanySkillBackup(rootPath: string, skillPath: string, shelf: SkillShelfActions = window.electronAPI) {
   return shelf.openCompanySkillBackup(rootPath, skillPath)
 }

@@ -257,15 +257,18 @@ export function shelfRestoredNote(companyVersion: 'back' | 'later' | 'not-delive
 /**
  * What `skillShelf:publish` / `skillShelf:requestPublish` answer: done, refused with a sentence, or
  * stopped before anything was sent because these files look like outputs (`outputLikePaths`; the
- * member chooses 外して出す, sent again with `leaveOutOutputs`, or 戻って直す).
+ * member chooses 外して出す, sent again with `leaveOutOutputs`, or 戻って直す). After 外して出す,
+ * `keptAside` says whether the files left out moved to the kept copies (「控えを開く」).
  */
-export type SkillShelfSendResult = { success: true } | { success: false; error: string } | { success: false; outputs: string[] }
+export type SkillShelfSendResult = { success: true; keptAside?: boolean } | { success: false; error: string } | { success: false; outputs: string[] }
 
 /** The question asked when a Skill about to go to the company holds what looks like outputs (owner decision 2026-11-10). */
 export const SHELF_OUTPUTS_QUESTION = '成果物が入っていませんか？'
 export const SHELF_OUTPUTS_NOTE = 'Skill には手順・道具・参考資料・ひな形だけを入れます。作ったもの（提案書・レポートなど）は、Skill を見られる全員に届いてしまうため、Skill の外（作業用のフォルダや Drive）に置き、置き場所を SKILL.md に書いておきます。次のファイルは成果物のように見えます。'
 export const SHELF_OUTPUTS_LEAVE_OUT = '外して出す'
 export const SHELF_OUTPUTS_GO_BACK = '戻って直す'
+export const SHELF_OUTPUTS_KEPT_NOTE = '外したファイルは控えに移しました。'
+export const SHELF_OUTPUTS_NOT_KEPT_NOTE = '外したファイルを控えに移せなかったため、元の場所に残っています。この PC の Skill は、送ったものとは別のままです。'
 
 /** 「会社に出してほしいと頼む」: what happens, said before it is sent. */
 export const SHELF_REQUEST_CONFIRM = 'この Skill を、会社に公開できる人に送って、公開をお願いします。公開されるまでは、この PC だけで使われます。'

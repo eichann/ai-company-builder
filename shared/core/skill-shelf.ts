@@ -117,9 +117,10 @@ export function shelfPathClash(paths: readonly string[]): string | null {
  * an output inside it reaches people it was never meant for. AIs tend to make `output/` there.
  *
  * The folder names directly under a Skill that look like outputs. A flag the person is asked about
- * when publishing or asking for a publish, not a security boundary: kept small.
+ * when publishing or asking for a publish, not a security boundary: kept small. Names a Skill's
+ * own tools often use (`out`, `dist`, `generated`, `export`) are left out on purpose.
  */
-export const OUTPUT_FOLDER_NAMES: readonly string[] = ['output', 'outputs', 'out', 'result', 'results', '成果物', '出力', 'export', 'exports', 'dist', 'generated']
+export const OUTPUT_FOLDER_NAMES: readonly string[] = ['output', 'outputs', 'result', 'results', '成果物', '出力']
 /** Deliverable files at the top of a Skill (deeper — `references/`, `templates/` — they are material). */
 export const OUTPUT_FILE_EXTENSIONS: readonly string[] = ['.pdf', '.docx', '.xlsx', '.pptx']
 
