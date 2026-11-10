@@ -63,15 +63,17 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
 - **Runs with no person present** (「AI の番」 and a business plugin's `ai_turn` step; `services/ai-runs.ts`,
   `AiRunDeps.aiStops` = `policyFor`): the server is the authority here too, so an app that does not follow
   the stop (older, modified) can neither start one nor go on with one.
-  - **Starting**: `POST /ai-run-claims` is refused — before the turn check and the plugin pin, so nothing is
-    read, made or pinned — while the member's merged policy has the whole AI stopped (the company's or
+  - **Starting**: `POST /ai-run-claims` is refused — before the turn check and the plugin pin, so no record is
+    read and nothing is made or pinned (only the member's own open run of that step is looked up, for its
+    `refused_stopped` event, once per generation) — while the member's merged policy has the whole AI stopped (the company's or
     theirs) or any of `write` / `web` / `mcp-external` (`STOPS_UNATTENDED_RUN`: each names something an
     unattended run can reach — a plugin step's deliverable files, `web_research`, outside services through
     connectors and plugin operations). Not `command`: no unattended run has a shell (`ai-turns.md`).
   - **A running run is bounded by its token, not its lease.** A run-bound record token's every call is
     refused while the whole AI is stopped for its member (`aiRuns.runStopped`, checked in
     `recordAiTokens.authenticate` after the fence, before any handler — so no write and no idempotency key is
-    taken); the company-wide whole-AI stop already answers 403 `ACB_STOPPED` there first ("Who is acting" in
+    taken; the run keeps a `refused_stopped` event once per generation, as does the member's own waiting run
+    of a refused claim: `ai-turns.md` "Each state change of a run is kept"); the company-wide whole-AI stop already answers 403 `ACB_STOPPED` there first ("Who is acting" in
     `records.md`). The fence itself looks only at state + generation, never the lease's time, and a take-over
     claim is refused during a stop, so the lease bounds nothing here. A **kind** stop does not refuse the
     token: a run's record calls are ACB's own tools (`stoppedKind`: app tools stop only with the whole AI),

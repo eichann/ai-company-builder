@@ -38,12 +38,16 @@ export interface RecordRunSubjectDeps {
 }
 
 const NOT_AI_TURN = { error: 'この記録はいま AI の番ではありません', code: 'NOT_AI_TURN' }
+/** What a run of another kind gets from the records (B PR 2): nothing — the same as a record that does not exist. */
+const NOT_A_RECORD = { error: '記録が見つかりません', code: 'RECORD_NOT_FOUND' }
 
 export function createRecordRunSubjects(deps: RecordRunSubjectDeps) {
   let pluginSteps: PluginStepRuns | null = null
 
   const subjects: RunSubjects<Refusal> = {
     resolve(member, subject, step) {
+      // Only a record is a record: another kind's id never reaches aiTurnOf or the plugin steps.
+      if (subject.kind !== 'record') return refuse('not-found', NOT_A_RECORD.error, { code: NOT_A_RECORD.code })
       const recordId = subject.id
       // A plugin step's name (`<pluginId>__<step>`) is never a core step's: unbound, it is nobody's turn.
       const steps = step.includes('__') ? pluginSteps : null
@@ -58,10 +62,13 @@ export function createRecordRunSubjects(deps: RecordRunSubjectDeps) {
     },
 
     afterDone(member, run: RunSubjectRun) {
+      if (run.subject.kind !== 'record') return
       if (pluginSteps?.isPluginStep(run.step)) pluginSteps.afterDoneRun?.(member, { recordId: run.subject.id, step: run.step, createdAt: run.createdAt })
     },
 
     afterFailed(member, run: RunSubjectRun) {
+      // The minutes' read-back puts a record back to 「AI の番」: never for a run of another kind.
+      if (run.subject.kind !== 'record') return
       deps.afterFailedRun?.(member, { id: run.id, recordId: run.subject.id, step: run.step })
     },
   }

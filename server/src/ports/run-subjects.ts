@@ -2,16 +2,23 @@
  * The subject of an execution run (「実行の対象」, B — separating AI runs from records, PR 1):
  * what a run of 「AI の番」 works on, and whether the member may claim it now. The run service
  * (services/ai-runs.ts) asks only this; it never asks the records or the business plugins' steps
- * itself. Today every subject is a record, resolved by services/run-subjects.ts (a core step by
+ * itself. Today every claimed subject is a record, resolved by services/run-subjects.ts (a core step by
  * `records.aiTurnOf`, a business plugin's step `<pluginId>__<step>` by `pluginSteps.turnOf` and
- * its pin), wired in src/composition.ts. A later kind (a job's occurrence) is another resolver
+ * its pin), wired in src/composition.ts; it refuses any other kind (PR 2). The run's kind is stored
+ * with it (`ai_runs.subject_kind`, adapters/sqlite/ai-runs.ts). A later kind (a job's occurrence) is another resolver
  * behind the same port; the run's fencing, idempotency keys, failure places and the emergency
  * stop do not look at the kind (.claude/rules/ai-turns.md "Execution runs on the server").
  */
+import type { AiRunSubjectKind } from '../../shared/core/ai-runs'
 import type { PluginStepProcedurePin } from '../../shared/core/plugins'
 
-/** The kinds of subject a run can have. Only records today (`ai_runs.record_id`). */
-export type RunSubjectKind = 'record'
+/**
+ * The kinds of subject a run can have (`AI_RUN_SUBJECT_KINDS`): `record` — the only kind anything
+ * claims today — and `occurrence`, reserved for a job's occurrence (B PR 3). Whatever belongs to
+ * records (the record's 「AI の番」, record tokens, the built-in steps' route scope, the minutes'
+ * read-back) is reached only by a subject whose kind is `record`.
+ */
+export type RunSubjectKind = AiRunSubjectKind
 
 export interface RunSubject {
   readonly kind: RunSubjectKind

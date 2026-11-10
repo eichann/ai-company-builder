@@ -213,10 +213,44 @@ The execution state lives on the server; the AI still runs only here.
   `<pluginId>__<step>`: `pluginSteps.turnOf` + `pinForRun`, bound by the plugins lane through its
   `usePluginSteps`; minutes' `afterFailedRun`), wired in `composition.ts`. Answers, codes and their
   order are unchanged; fencing, idempotency keys, failure places, route scope and the emergency stop
-  stay in `ai-runs.ts` and do not look at the subject. The schema before runs get a subject kind is
-  frozen in `server/tests/fixtures/app-schema-before-run-subjects.sql`
-  (`tests/unit/run-subjects-schema.test.ts`: today's migrations make exactly those run tables, and a
-  server started on such a database keeps every run and idempotency key).
+  stay in `ai-runs.ts` and do not look at the subject.
+- **The subject kind** (B PR 2, owner decision D2 = option A, 2026-11-10): a run stores what it
+  works on — `ai_runs.subject_kind` (`AI_RUN_SUBJECT_KINDS`, `shared/core/ai-runs.ts`: `record`, and
+  `occurrence` reserved for a job's occurrence, B PR 3 — nothing claims one yet) next to the old
+  `record_id` column, which holds the subject's id for every kind. Only `adapters/sqlite/ai-runs.ts`
+  knows the column name; ports and services speak `subject: { kind, id }`. The migration
+  (`db/schema/ai-runs.ts` `migrateAiRunSubjects`) only **adds**: the column `NOT NULL DEFAULT
+  'record'` (every existing run, and every run an older build inserts, is a record's), a nullable
+  `grant_fingerprint` (unused until B PR 5), the unique index `idx_ai_runs_open_subject` (company,
+  kind, id, step; open runs) **beside the kept `idx_ai_runs_open`** (record_id, step — the same while
+  every run is a record's, kept for an older build rolled back to; never drop it in a rebuild), and
+  `ai_run_events`. It never rebuilds or drops `ai_runs`: `ai_run_operations` (the idempotency keys)
+  goes with its run (`ON DELETE CASCADE`). Nothing on the wire changed: `POST /ai-run-claims {
+  recordId, … }` makes a `record` run; `AiRunView` gains only the optional `subject` (`recordId` is
+  `''` for another kind). **Record-only, each refusing every other kind**: `GET /ai-runs` lists
+  record runs only; the record resolver (`createRecordRunSubjects`) answers another kind 404
+  `RECORD_NOT_FOUND` without asking `aiTurnOf` or the plugin steps, and its `afterDone` /
+  `afterFailed` (a plugin request answered, the minutes' read-back) do nothing for it; a record token
+  binds only to a record's run (`bindable`: another kind is 404 `RUN_NOT_FOUND`); the built-in
+  steps' route scope refuses every record route to a run of another kind, whatever build calls
+  (`routeRefusal`: before the released-app gate); 「続きをする」 counts only a record's run
+  (`continuationOf`). Lookups (`openRun`, `liveOtherStep`) are per kind and id.
+- **Each state change of a run is kept** (`ai_run_events`: run, seq, at, event, generation,
+  `state_after`, `code` — short codes only, a CHECK refuses anything but `[A-Z0-9_]`, no text
+  column): `claimed` (a new run or a re-claim; a re-claim that finds an unknown result:
+  `waiting_reconcile`, `RESULT_UNKNOWN`), `finished` (the failure code), `given_back` (`RETRY` for
+  「もう一度」, `ASKED_AGAIN` for ［AI に読ませる］), `reconciled` (`DONE` / `NOT_DONE`),
+  `refused_stopped` (`AI_STOPPED`: a run-bound token refused by the stop, or a claim refused while
+  the member's own open run of that step waits — either once per generation of the run, not per call
+  or per pass of the app's runner, judged by the run's latest event only). Written in the
+  same transaction as the change. The run's row is still overwritten; these say who claimed it again
+  and when.
+- The schema before subject kinds is frozen in `server/tests/fixtures/app-schema-before-run-subjects.sql`
+  (`tests/unit/run-subjects-schema.test.ts`: upgrading it — twice — loses no run or key and keeps the
+  cascading key; today's migrations make exactly it plus the additions, new or upgraded; an older
+  build's insert is a record's run; the new index alone keeps one open run per subject and step).
+  Tests: `tests/integration/run-subject-kind.test.ts`, `tests/unit/run-subjects.test.ts` — each guard
+  mutation-checked.
 
 - **Absence** (`records.md` "Absence and the delegate"): during an absence the server lets the
   delegate's app claim the absentee's AI turns (`aiTurnOf` counts whom the member covers; the run

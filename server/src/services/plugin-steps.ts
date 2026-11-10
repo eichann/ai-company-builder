@@ -172,7 +172,7 @@ export function createPluginStepService(deps: PluginStepDeps) {
       const runId = handle.records.ledger(taskId)[0]?.runId
       const run = runId ? handle.aiRuns.byId(runId) : null
       const bound = run ? parsePluginRunStep(run.step) : null
-      if (!run || !bound || run.recordId !== bundleId) continue
+      if (!run || !bound || run.subject.kind !== 'record' || run.subject.id !== bundleId) continue
       const inst = installedStep(member.companyId, bound.pluginId, bound.step)
       if (!inst || inst.step.start !== 'person' || !atStep(bundle, inst.step)) continue
       found.push({ view: { recordId: bundleId, pluginId: bound.pluginId, step: bound.step, label: inst.step.label, taskId }, at: task.row.updatedAt })

@@ -120,7 +120,7 @@ function runOf(step: string): string {
   runs.set(step, id)
   const at = ts()
   companyData.forCompany(CO).aiRuns.insert({
-    id, recordId: recordOf('1000000001'), step, userId: member.userId, state: 'running', generation: 1, deviceId: 'device-rg-0001',
+    id, subject: { kind: 'record', id: recordOf('1000000001') }, step, userId: member.userId, state: 'running', generation: 1, deviceId: 'device-rg-0001',
     conversationId: `conv-${id}`, claimExpiresAt: new Date(Date.now() + 3_600_000).toISOString(), failureClass: null, failureCode: null,
     retryAt: null, attempts: 0, pluginVersion: null, stepsVersion: null, procedure: null, createdAt: at, updatedAt: at, closedAt: null,
   })

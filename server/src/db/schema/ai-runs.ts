@@ -79,3 +79,48 @@ export function migrateAiRunColumns(conn: Database.Database): void {
   if (!cols('ai_runs').has('procedure')) conn.exec('ALTER TABLE ai_runs ADD COLUMN procedure TEXT')
   if (!cols('record_ledger').has('procedure')) conn.exec('ALTER TABLE record_ledger ADD COLUMN procedure TEXT')
 }
+
+/**
+ * What a run works on, and its state changes (B 「実行を記録から分ける」 PR 2, owner decision D2 = option A:
+ * add, never rebuild). Runs after migrateAiRunColumns, on every startup; a second run changes nothing.
+ *
+ * - `ai_runs.subject_kind` (NOT NULL DEFAULT 'record': every existing run, and every run an older
+ *   build inserts without the column, is a record's). `record_id` keeps holding the subject's id for
+ *   every kind; only adapters/sqlite/ai-runs.ts knows that column name.
+ * - `ai_runs.grant_fingerprint` (nullable, unused until a job's run pins its grant: B PR 5).
+ * - `idx_ai_runs_open_subject`: one open run per (subject kind, subject id, step). The older
+ *   `idx_ai_runs_open` (record_id, step) is KEPT: while every row is a record it says the same, an
+ *   older build rolled back to keeps its own guarantee, and a non-record id never equals a record id
+ *   (`RECORD_ID_RE`), so it refuses nothing the new one allows. Drop it only with a reason, never as
+ *   part of a rebuild.
+ * - `ai_run_events`: who claimed, finished, gave back, reconciled a run and when it was refused by the
+ *   emergency stop — short codes only (state, generation, `code`), never a reason's text or content.
+ *
+ * Never rebuilds or drops `ai_runs`: `ai_run_operations` (the idempotency keys that stop a second
+ * send) is deleted with its run (`ON DELETE CASCADE`). Test: tests/unit/run-subjects-schema.test.ts
+ * (the frozen database before this change, upgraded twice, keeps every run and key).
+ */
+export function migrateAiRunSubjects(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(ai_runs)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('subject_kind')) conn.exec("ALTER TABLE ai_runs ADD COLUMN subject_kind TEXT NOT NULL DEFAULT 'record'")
+  if (!cols.has('grant_fingerprint')) conn.exec('ALTER TABLE ai_runs ADD COLUMN grant_fingerprint TEXT')
+  conn.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_runs_open_subject ON ai_runs(company_id, subject_kind, record_id, step) WHERE closed_at IS NULL;
+
+    -- A run's state changes in order (seq per run). event: what happened; state_after: the run's
+    -- state then (null when it did not change: refused_stopped); code: a short code (a failure's,
+    -- RETRY, DONE…), never text. Deleted with its run.
+    CREATE TABLE IF NOT EXISTS ai_run_events (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      run_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      at TEXT NOT NULL,
+      event TEXT NOT NULL CHECK (event IN ('claimed', 'finished', 'given_back', 'reconciled', 'refused_stopped')),
+      generation INTEGER NOT NULL,
+      state_after TEXT,
+      code TEXT CHECK (code IS NULL OR (length(code) BETWEEN 1 AND 60 AND code NOT GLOB '*[^A-Z0-9_]*')),
+      PRIMARY KEY (company_id, run_id, seq),
+      FOREIGN KEY (company_id, run_id) REFERENCES ai_runs(company_id, id) ON DELETE CASCADE
+    );
+  `)
+}

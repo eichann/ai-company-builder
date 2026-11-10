@@ -303,7 +303,7 @@ describe('who may read', () => {
   it('no execution run reads, whatever its step: the AI never reads with no person there', async () => {
     const at = ts()
     const insert = (id: string, step: string) => companyData.forCompany(CO).aiRuns.insert({
-      id, recordId: 'task-none', step, userId: holder.userId, state: 'running', generation: 1, deviceId: 'device-pc-0001', conversationId: `conv-${id}`,
+      id, subject: { kind: 'record', id: 'task-none' }, step, userId: holder.userId, state: 'running', generation: 1, deviceId: 'device-pc-0001', conversationId: `conv-${id}`,
       claimExpiresAt: new Date(Date.now() + 3_600_000).toISOString(), failureClass: null, failureCode: null, retryAt: null, attempts: 0, pluginVersion: null, stepsVersion: null, procedure: null, createdAt: at, updatedAt: at, closedAt: null,
     })
     db.pragma('foreign_keys = OFF')
@@ -324,7 +324,7 @@ describe('who may read', () => {
     const at = ts()
     db.pragma('foreign_keys = OFF')
     companyData.forCompany(CO).aiRuns.insert({
-      id: 'pc-run-adv', recordId: 'inquiry-adv', step: 'sample-portal-care__auto_look_up', userId: holder.userId, state: 'running', generation: 1, deviceId: 'device-pc-0001', conversationId: 'conv-adv-auto',
+      id: 'pc-run-adv', subject: { kind: 'record', id: 'inquiry-adv' }, step: 'sample-portal-care__auto_look_up', userId: holder.userId, state: 'running', generation: 1, deviceId: 'device-pc-0001', conversationId: 'conv-adv-auto',
       claimExpiresAt: new Date(Date.now() + 3_600_000).toISOString(), failureClass: null, failureCode: null, retryAt: null, attempts: 0, pluginVersion: null, stepsVersion: null, procedure: null, createdAt: at, updatedAt: at, closedAt: null,
     })
     db.pragma('foreign_keys = ON')
@@ -805,7 +805,7 @@ describe('the tool list follows the step', () => {
     const at = ts()
     db.pragma('foreign_keys = OFF')
     companyData.forCompany(CO).aiRuns.insert({
-      id: 'pc-run-list', recordId: 'task-list', step: 'minutes-reading', userId: holder.userId, state: 'running', generation: 1, deviceId: 'device-pc-0001', conversationId: 'conv-pc-run-list',
+      id: 'pc-run-list', subject: { kind: 'record', id: 'task-list' }, step: 'minutes-reading', userId: holder.userId, state: 'running', generation: 1, deviceId: 'device-pc-0001', conversationId: 'conv-pc-run-list',
       claimExpiresAt: new Date(Date.now() + 3_600_000).toISOString(), failureClass: null, failureCode: null, retryAt: null, attempts: 0, pluginVersion: null, stepsVersion: null, procedure: null, createdAt: at, updatedAt: at, closedAt: null,
     })
     for (const step of ['look_up', 'note_only']) companyData.forCompany(CO).pluginSteps.bindConsultation({ userId: holder.userId, conversationId: `conv-list-${step}`, recordId: 'inquiry-none', pluginId: 'sample-portal-care', step, at })

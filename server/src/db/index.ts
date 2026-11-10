@@ -6,7 +6,7 @@ import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCom
 import { DECISION_VERSION, TASK_VERSION } from '../../shared/core/core-types'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox, migrateSecondOpinionSetting } from './schema/agents'
-import { aiRunSchema, migrateAiRunColumns } from './schema/ai-runs'
+import { aiRunSchema, migrateAiRunColumns, migrateAiRunSubjects } from './schema/ai-runs'
 import { brokerSchema, migrateBrokerSettings } from './schema/broker'
 import { companySchema, migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
 import { connectorSchema, migrateConnectorProviders, migrateGooglePicker } from './schema/connectors'
@@ -44,7 +44,7 @@ export { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordP
 export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateOutboundAttachments, migrateOutboundSendSources } from './schema/outbound-mail'
-export { migrateAiRunColumns } from './schema/ai-runs'
+export { migrateAiRunColumns, migrateAiRunSubjects } from './schema/ai-runs'
 export { migrateMemberAbsenceHistory, migrateMemberWorkSwitches } from './schema/tasks'
 export { migrateSkillUseColumns } from './schema/skill-uses'
 export { migrateSecondOpinionSetting } from './schema/agents'
@@ -129,6 +129,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migratePluginTables(conn)
   // After migratePluginTables (which may rebuild plugin_operations).
   migrateAiRunColumns(conn)
+  migrateAiRunSubjects(conn)
   // Which Skill a consultation used, copied onto the AI's ledger entries and Drive puts (records.md "Which Skill").
   migrateSkillUseColumns(conn)
   migrateRecordTypeSources(conn)
