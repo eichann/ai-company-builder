@@ -95,6 +95,6 @@ export interface AiRunRepository {
 
   /** Append a state change of the run (the next `seq` of that run). */
   appendEvent(e: AiRunEventRow): void
-  /** The run's state changes, oldest first. */
-  events(runId: string): AiRunEventRow[]
+  /** The run's latest state change, if any. */
+  lastEvent(runId: string): AiRunEventRow | null
 }

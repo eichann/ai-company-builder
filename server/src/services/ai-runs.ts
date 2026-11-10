@@ -212,6 +212,16 @@ export function createAiRunService(deps: AiRunDeps) {
     r.appendEvent({ runId: run.id, event: e.event, generation: run.generation, stateAfter: e.stateAfter === undefined ? run.state : e.stateAfter, code: e.code, at })
   }
 
+  /**
+   * The emergency stop refused something of this run: kept once per generation, not once per call — the app
+   * asks again every pass (claims) and on every tool call (tokens), so a long stop would grow the table.
+   */
+  function stoppedOnce(r: AiRunRepository, run: AiRunRow, at: string): void {
+    const last = r.lastEvent(run.id)
+    if (last?.event === 'refused_stopped' && last.generation === run.generation) return
+    event(r, run, { event: 'refused_stopped', code: AI_RUN_STOPPED.code, stateAfter: null }, at)
+  }
+
   return {
     /**
      * POST …/ai-run-claims — one app instance wins; a re-claim raises the generation.
@@ -238,7 +248,7 @@ export function createAiRunService(deps: AiRunDeps) {
         // The member's own open run of that step, if one waits to be resumed, keeps that it was refused.
         const r = repo(member.companyId)
         const waiting = r.openRun(subject, step)
-        if (waiting && waiting.userId === member.userId) event(r, waiting, { event: 'refused_stopped', code: AI_RUN_STOPPED.code, stateAfter: null }, clock.now())
+        if (waiting && waiting.userId === member.userId) stoppedOnce(r, waiting, clock.now())
         return stopped
       }
       // Whose turn, and the procedure the work runs (pinned at its first run; the operator's stop refuses there).
@@ -467,10 +477,7 @@ export function createAiRunService(deps: AiRunDeps) {
       if (run) {
         const r = repo(member.companyId)
         const row = r.byId(run.id)
-        const last = row ? r.events(row.id).at(-1) : undefined
-        if (row && !(last?.event === 'refused_stopped' && last.generation === row.generation)) {
-          event(r, row, { event: 'refused_stopped', code: AI_RUN_STOPPED.code, stateAfter: null }, clock.now())
-        }
+        if (row) stoppedOnce(r, row, clock.now())
       }
       return true
     },

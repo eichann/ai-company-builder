@@ -240,8 +240,9 @@ The execution state lives on the server; the AI still runs only here.
   column): `claimed` (a new run or a re-claim; a re-claim that finds an unknown result:
   `waiting_reconcile`, `RESULT_UNKNOWN`), `finished` (the failure code), `given_back` (`RETRY` for
   「もう一度」, `ASKED_AGAIN` for ［AI に読ませる］), `reconciled` (`DONE` / `NOT_DONE`),
-  `refused_stopped` (`AI_STOPPED`: a run-bound token refused by the stop — once per generation, not
-  per call — or a claim refused while the member's own open run of that step waits). Written in the
+  `refused_stopped` (`AI_STOPPED`: a run-bound token refused by the stop, or a claim refused while
+  the member's own open run of that step waits — either once per generation of the run, not per call
+  or per pass of the app's runner, judged by the run's latest event only). Written in the
   same transaction as the change. The run's row is still overwritten; these say who claimed it again
   and when.
 - The schema before subject kinds is frozen in `server/tests/fixtures/app-schema-before-run-subjects.sql`

@@ -159,6 +159,14 @@ describe('ai_run_events: each state change of a run, short codes only', () => {
     ])
   })
 
+  it('a person asking for the step anew (［AI に読ませる］) gives a waiting run back, and that is kept', async () => {
+    const id = await preparingTask('もう一度読ませる')
+    const run = (await claim(id, 'device-ev07')).body.data.run
+    expect((await session('u-bob', 'POST', `/ai-runs/${run.id}/finish`, { generation: 1, outcome: 'failed', failure: { class: 'bad-input', code: 'NO_TEXT' } })).status).toBe(200)
+    services.aiRuns.askedAgain(CO, id, 'task-prep')
+    expect(eventsOf(run.id).at(-1)).toEqual({ event: 'given_back', generation: 1, state_after: 'open', code: 'ASKED_AGAIN' })
+  })
+
   it('a key of unknown result: the re-claim that finds it and the person\'s reconciliation are kept', async () => {
     const id = await preparingTask('結果が分からない')
     const run = (await claim(id, 'device-ev03')).body.data.run
@@ -186,6 +194,9 @@ describe('ai_run_events: each state change of a run, short codes only', () => {
     vi.setSystemTime(Date.now() + 6 * MINUTE)
     const again = stop({})
     try {
+      // The app's runner asks again on every pass: kept once for this generation, not once per pass.
+      expect((await claim(id, 'device-ev06')).status).toBe(503)
+      expect((await claim(id, 'device-ev06')).status).toBe(503)
       expect((await claim(id, 'device-ev06')).status).toBe(503)
     } finally { again() }
     expect(eventsOf(run.id)).toEqual([

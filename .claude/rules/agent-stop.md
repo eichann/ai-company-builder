@@ -63,8 +63,9 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
 - **Runs with no person present** (「AI の番」 and a business plugin's `ai_turn` step; `services/ai-runs.ts`,
   `AiRunDeps.aiStops` = `policyFor`): the server is the authority here too, so an app that does not follow
   the stop (older, modified) can neither start one nor go on with one.
-  - **Starting**: `POST /ai-run-claims` is refused — before the turn check and the plugin pin, so nothing is
-    read, made or pinned — while the member's merged policy has the whole AI stopped (the company's or
+  - **Starting**: `POST /ai-run-claims` is refused — before the turn check and the plugin pin, so no record is
+    read and nothing is made or pinned (only the member's own open run of that step is looked up, for its
+    `refused_stopped` event, once per generation) — while the member's merged policy has the whole AI stopped (the company's or
     theirs) or any of `write` / `web` / `mcp-external` (`STOPS_UNATTENDED_RUN`: each names something an
     unattended run can reach — a plugin step's deliverable files, `web_research`, outside services through
     connectors and plugin operations). Not `command`: no unattended run has a shell (`ai-turns.md`).

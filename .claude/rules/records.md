@@ -1601,7 +1601,9 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   `ai-turns.md` "Execution runs on the server" — what stays record-only, and the events kept.
 - **The emergency stop** (`agent-stop.md` "Runs with no person present"): while the member's stop
   policy has the whole AI or a `write` / `web` / `mcp-external` kind stopped, a claim answers 503
-  `AI_STOPPED` before anything is read, made or pinned (not `command`); while the whole AI is stopped
+  `AI_STOPPED` before the record is read and before anything is made or pinned (not `command`) — it
+  reads only the member's own open run of that step, to keep one `refused_stopped` event for it once per
+  generation (`ai-turns.md` "Each state change of a run is kept"); while the whole AI is stopped
   for the member, every call of a run-bound token answers the same (`authenticate`, after the fence).
   Renew, finish, retry and reconcile are never refused.
 - Test: `server/tests/integration/ai-runs.test.ts` (the emergency stop: company-wide, one member,

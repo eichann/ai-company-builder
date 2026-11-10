@@ -111,10 +111,10 @@ export function sqliteAiRunRepository(conn: Database.Database, companyId: string
           VALUES (?, ?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM ai_run_events WHERE company_id = ? AND run_id = ?), ?, ?, ?, ?, ?)`)
         .run(companyId, e.runId, companyId, e.runId, e.at, e.event, e.generation, e.stateAfter, e.code)
     },
-    events(runId) {
-      return (conn.prepare(`SELECT run_id, event, generation, state_after, code, at FROM ai_run_events WHERE company_id = ? AND run_id = ? ORDER BY seq`)
-        .all(companyId, runId) as Array<{ run_id: string; event: AiRunEventRow['event']; generation: number; state_after: AiRunEventRow['stateAfter']; code: string | null; at: string }>)
-        .map(r => ({ runId: r.run_id, event: r.event, generation: r.generation, stateAfter: r.state_after, code: r.code, at: r.at }))
+    lastEvent(runId) {
+      const r = conn.prepare(`SELECT run_id, event, generation, state_after, code, at FROM ai_run_events WHERE company_id = ? AND run_id = ? ORDER BY seq DESC LIMIT 1`)
+        .get(companyId, runId) as { run_id: string; event: AiRunEventRow['event']; generation: number; state_after: AiRunEventRow['stateAfter']; code: string | null; at: string } | undefined
+      return r ? { runId: r.run_id, event: r.event, generation: r.generation, stateAfter: r.state_after, code: r.code, at: r.at } : null
     },
   }
 }
