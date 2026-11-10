@@ -5,6 +5,9 @@ paths:
   - "server/src/**/jobs.ts"
   - "server/src/db/schema/jobs.ts"
   - "server/tests/**/jobs*.test.ts"
+  - "server/src/services/job-occurrences.ts"
+  - "shared/core/job-schedule.ts"
+  - "server/tests/**/job-*.test.ts"
 ---
 
 # Scheduled jobs (定期の仕事, B 「実行を記録から分ける」)
@@ -13,10 +16,9 @@ A job is work that is not a record's turn: 「毎週火曜の1営業日前の 09
 「実行を記録から分ける（B）設計メモ」 (2026-11-10, decisions D1–D10 as recommended). Job → occurrence (回)
 → run (`ai_runs`, `subject_kind: 'occurrence'`, `ai-turns.md`).
 
-**PR 3a (this): definitions and approval only — nothing runs.** No clock, no occurrence is written,
-no claim, no AI, no app or admin screen. Next: 3b (the clock makes occurrences, the server's (e)
-operation, `held` / `expired`), 4 (admin screen 「定期の仕事」, the app's accept button), 5 (the PC's (a)
-claim and the grant at every call, design memo §4-2).
+**PR 3a: definitions and approval. PR 3b: the clock makes occurrences and the server does a job's (e)
+operation (a やること) — no AI, no claim, no app or admin screen.** Next: 4 (admin screen 「定期の仕事」,
+the app's accept button), 5 (the PC's (a) claim and the grant at every call, design memo §4-2).
 
 ## Tables (`server/src/db/schema/jobs.ts`, handle `jobs`, `ports/jobs.ts`, `adapters/sqlite/jobs.ts`)
 
@@ -37,7 +39,7 @@ New tables only (additive; `CREATE … IF NOT EXISTS`, nothing else changes):
   `.` — so the kept `idx_ai_runs_open` on `record_id` never sees two kinds collide),
   `UNIQUE (company_id, job_id, due_slot)`, `time_zone`, `due_at`, `expires_at`, `state`
   (due / running / done / nothing / needs_person / skipped / expired / held), `run_id`, `outcome_code`.
-  **Nothing writes it in 3a.**
+  Written by the clock and the runner (3b, below).
 - `ai_job_settings`: 「定期の仕事をすべて止める」 (`stopped`; no row = not stopped).
 
 No feature switch in `shared/core/features.ts`: its rule is "every feature on by default", and a
@@ -120,6 +122,97 @@ PUT  /jobs-stop { stopped }         owner/admin
   changing do **not** pause a job here; only leaving the company and a role change do. The run's own
   check at every call (memo §4-2) covers the rest.
 
+## The clock (3b, `services/job-occurrences.ts` `makeOccurrences`, `shared/core/job-schedule.ts`)
+
+The server clock (`notifications.md` "The server clock") runs it **first, for every company, records on
+or off**, before any company's slower work; it reads no content and calls nothing outside.
+
+- **Slots** (`job-schedule.ts`, pure): a trigger's slot dates in company time (`latestJobSlot`,
+  `nextJobSlot`, `jobSlotDates`; business days from `business-days.ts` with the company's days off from
+  the task settings, `previousBusinessDay`): `day` (+ business days only), `week` (the weekday moved
+  `businessDaysBefore` business days earlier: 「火曜の1営業日前」 is the Friday before when Monday is a
+  holiday), `month` (`last`, a day off kept or moved before / after — across a month or year end). The
+  slot text `YYYY-MM-DDTHH:MM` is the occurrence's identity; `companyTimeToUtc` gives `due_at`, and
+  `expires_at` = `due_at` + `missed.expiresAfterMinutes`. The zone is `DEFAULT_COMPANY_TIME_ZONE` (one
+  place in `composition.ts`), kept on the row.
+- **Which jobs**: approved, `active` or `paused`, placement **`e` only** (a PC job's occurrences come with
+  its claim, PR 5: until then nothing would take them and they would only expire). Only the **newest
+  slot at or before now**, and never one before the approved version's `approved_at`.
+- **Once**: `INSERT OR IGNORE` on `UNIQUE (company, job, due_slot)` — a second clock run, a restart or a
+  second server write nothing more. Pinned: `job_version` = the approved version when made.
+- **Its state, decided when made**: the job paused → `held` `JOB_PAUSED`; the company's stop →
+  `held` `COMPANY_STOPPED`; the approved version not accepted → `held` `NOT_ACCEPTED` (held is never run,
+  also not after resuming: 「再開しても動かさない」); past `expires_at` (the server was down) → `expired`
+  (told); found more than `JOB_ON_TIME_MS` (10 min) late under `missed.policy: skip` → `skipped`
+  `MISSED` (not told: the policy says so); else `due`. **Missed slots in between are never made**
+  (`latest_only` = only the newest), and an older `due` one of the job becomes `skipped` `SUPERSEDED`.
+- A `due` one whose `expires_at` passed (the runner never took it) → `expired`, told.
+
+## The runner (3b, `createJobRunner` + `runOccurrence`)
+
+Started by the server clock right after the occurrences, **never awaited by it** (its own overlap
+guard; a slow company's mail or calendar never holds an occurrence up); each company in turn with a
+yield between, `JOB_RUNNER_LIMIT` (50) per company and pass, a company's failure logged (error name
+only). Each `due` occurrence of a placement-`e` job, **in one transaction**:
+
+1. still `due` (else nothing: another runner took it); past `expires_at` → `expired`, told;
+2. the company's stop → `held` `COMPANY_STOPPED`; the job not `active` → `held` `JOB_PAUSED`; another
+   version approved since it was made → `held` `JOB_VERSION_CHANGED` (D8; nothing made);
+3. the pinned version's responsible person **re-checked like approval** (`jobs.runnerRefusal`: a member
+   now, every place it names readable / writable) → else the job is paused (`OWNER_LEFT` /
+   `OWNER_RIGHTS_CHANGED`, owners / admins told with 3a's `job_paused`) and the occurrence is `held`
+   with that code (for a placement-`e` job of schema 1 only membership can fail: it names no place);
+4. absent that day (`member_absences` covering the slot's date) → `skipped` `OWNER_ABSENT`, told — **no
+   delegate runs it** (D5);
+5. the やること is checked first (`writer.check`): records off → `needs_person` `RECORDS_OFF`, any other
+   refusal → `needs_person` `TASK_NOT_CREATED` (both told). 「使う機能」 does not stop it (`task` is the
+   core's; with every feature off, it runs);
+6. **the run**: an `ai_runs` row (`subject_kind: 'occurrence'`, subject id = the occurrence id, step
+   `job-operation`, `user_id` = the responsible person, device `server`, generation 1), its events
+   (`claimed`, then `finished` / `DONE`), the operation by its key `create_task` (`ai_run_operations`,
+   ref the record); the やること through the service writer: id `task-<the occurrence's hex>`
+   (`occurrenceTaskId`: one per occurrence by construction), **owner-only for the responsible person**
+   (`personalOwner`: the job's words reach nobody else, owners / admins included), assignee and next
+   actor them, `due` = `dueBusinessDays` business days after the slot's date, actor `JOB_ACTOR`
+   (`acb:job`, kind `external`) with the run's id — 経緯 says cause `system` and `runId`; `quiet` (D9: no
+   notice of success, the やること in 「あなたの番」 is it); then the run `done` and **closed**, the
+   occurrence `done` with `run_id`.
+
+All or nothing: a crash anywhere leaves the occurrence `due` and nothing made (no task, no run, no key);
+the next pass does it once. A refusal by the writer after its check rolls back too and marks
+`needs_person` `TASK_NOT_CREATED` in a second transaction. Exactly once rests on three things, each
+enough alone for a second pass: the `due` check, the compare-and-set to `done`, the task id from the
+occurrence. **A server run is opened and closed in one transaction, so no open occurrence run ever
+exists** — and the record runs' paths never see one: `GET /ai-runs` lists record runs only (PR 2), a
+claim naming an occurrence id is 400 (`recordId is a record id`), and the open-runs reads of a build
+before `subject_kind` (PR 1) find nothing open.
+
+**Rolling back** (to PR 3a or PR 2): nothing reads `ai_job_occurrences` there; the occurrence runs are
+closed rows (an older `GET /ai-runs/:runId` would show one only to its responsible person, its
+`recordId` the occurrence id, which no record has: `RECORD_ID_RE` has no `.`); the occurrence notices
+are recordless rows of kinds that build does not know, which its bell drops (`isNotificationKind`).
+Rolling forward again: a `due` one left behind expires (told) at the next clock run.
+
+## Notices (3b)
+
+`job_expired`, `job_skipped`, `job_failed` (`shared/types/notifications.ts`, recordless,
+`JOB_OCCURRENCE_NOTIFICATION_KINDS`, on by default): to the responsible person (while a member) and the
+job's creator (while an owner / admin), in the same transaction as the occurrence's change, then the
+bare `notifications` push. Key `<kind>:<job>:<occurrence>` (once per occurrence and member). Text built
+when read (`notifications.ts` `jobOccurrenceText`, through `jobs.occurrenceNotice`): shown only while
+the reader may see the job (owner / admin, or its responsible person), its name 「定期の仕事」 when a
+place the newest version names is not theirs to read. **No `subject_kind` column on `notifications`**:
+a recordless notice with the job and occurrence in its key is enough while no notice is about a record
+and a job at once (add it, additive, when one is). While the company's records are off the bell is not
+shown at all (the occurrence's state says it: `GET /jobs/:jobId/occurrences`).
+
+## Occurrences in the API (3b)
+
+`GET /jobs/:jobId/occurrences` — the same people as `GET /jobs/:jobId` (anyone else, another company's
+id: the same 404 `JOB_NOT_FOUND`; permission matrix row + `CROSS`): ≤ 100, newest slot first —
+`JobOccurrenceView` (id, `jobVersion`, `dueSlot`, `timeZone`, `dueAt`, `expiresAt`, `state`,
+`outcomeCode`, `ran`, `updatedAt`): slots, states and codes only, never a name, a place or the task.
+
 ## Tests (each guard mutation-checked)
 
 - `server/tests/unit/jobs-definition.test.ts` — strict parser (unknown keys / values at every level,
@@ -134,4 +227,17 @@ PUT  /jobs-stop { stopped }         owner/admin
   for a Skill missing or changed; the definition hidden from a member who cannot read it; removeMember
   and a demotion pause and tell owners/admins (and a demoted admin's bell drops it); pause / resume; the
   company stop.
+- `server/tests/integration/job-occurrences.test.ts` (3b) — one occurrence per slot over two runs and a
+  restart, none before its time or before approval; only the newest missed slot; expiry when made and
+  when run (told to the responsible person and the creator, the bell's text, gone once they may not see
+  the job); `skip` late → skipped; superseded; no PC-job occurrence; exactly one owner-only やること with
+  its run, events, key and 経緯 (`acb:job`, `system`, `runId`), none on a second pass, all or nothing on a
+  crash, `needs_person` on a refusal and with records off, still run with every feature off, no notice
+  of success; held for the stop and the pause (when made and at run time, not run after resuming), not
+  accepted, another version approved; the responsible person gone → paused + `job_paused`; absent →
+  skipped + told; another company's occurrences untouched and 404; a hanging company does not hold up
+  another's; the record runs' paths see no occurrence run, which is closed; company time to UTC.
+- `server/tests/unit/job-schedule.test.ts` (3b) — the slot's own minute, midnight, business days with
+  holidays and company days off, 「火曜の1営業日前」 over a holiday Monday, five business days over the
+  year end, `last` (February, a leap year), `ifHoliday` before / after across a month and a year.
 - `permission-matrix.test.ts` rows + `CROSS`; `company-scoped-sql.test.ts` (`HANDLE_TABLES`).

@@ -84,7 +84,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   ai_runs: ['adapters/sqlite/ai-runs.ts'],
   ai_run_operations: ['adapters/sqlite/ai-runs.ts'],
   ai_run_events: ['adapters/sqlite/ai-runs.ts'],
-  // Scheduled jobs (jobs.md); ai_job_occurrences: nothing writes it until B PR 3b.
+  // Scheduled jobs (jobs.md): definitions, versions, occurrences (the clock and the runner, through the handle), the stop.
   ai_jobs: ['adapters/sqlite/jobs.ts'],
   ai_job_versions: ['adapters/sqlite/jobs.ts'],
   ai_job_occurrences: ['adapters/sqlite/jobs.ts'],

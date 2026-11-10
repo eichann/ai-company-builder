@@ -152,6 +152,14 @@ export function nextBusinessDay(date: string, companyHolidays: Iterable<string> 
   return next
 }
 
+/** The last business day strictly before `date`. */
+export function previousBusinessDay(date: string, companyHolidays: Iterable<string> = []): string {
+  const own = new Set(companyHolidays)
+  let prev = addDays(date, -1)
+  for (let i = 0; i < 400 && !isBusinessDay(prev, own); i++) prev = addDays(prev, -1)
+  return prev
+}
+
 /** The business day `n` business days after `date` (n ≥ 1; 0 or less → `date`). */
 export function addBusinessDays(date: string, n: number, companyHolidays: Iterable<string> = []): string {
   const own = new Set(companyHolidays)

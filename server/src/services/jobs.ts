@@ -1,6 +1,6 @@
 /**
  * Scheduled jobs (定期の仕事, B 「実行を記録から分ける」 PR 3a, `.claude/rules/jobs.md`): definitions and
- * approval only — nothing runs yet (no clock, no occurrences, no claims: PR 3b on).
+ * approval (PR 3a). The occurrences and the server's operation are services/job-occurrences.ts (PR 3b); no claims yet.
  *
  * Who (owner decisions 2026-11-10, D3 / D4 / D5 / D8 / D10):
  * - owner / admin create, edit (a new version: the approved one stays as it was), approve, pause,
@@ -19,10 +19,10 @@
  *   (notice `job_paused`), in the same transaction as the change.
  */
 import {
-  JOB_SYSTEM_PAUSE_REASONS, isJobId, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, newJobId, parseJobDefinition,
+  JOB_ACTOR, JOB_SYSTEM_PAUSE_REASONS, isJobId, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, newJobId, parseJobDefinition,
   type JobDefinition, type JobPauseReason,
 } from '../../shared/core/jobs'
-import type { JobList, JobState, JobVersionView, JobView, JobWaiting } from '../../shared/types/jobs'
+import type { JobList, JobOccurrenceView, JobState, JobVersionView, JobView, JobWaiting } from '../../shared/types/jobs'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { JobRow, JobVersionRow } from '../ports/jobs'
@@ -37,6 +37,8 @@ import { resolveAccess, type PermissionRepository } from '../../shared/core/perm
 export const JOBS_FORBIDDEN = 'Only owners and admins can manage scheduled jobs'
 /** A job's name for a responsible person who cannot read every place its newest version names. */
 export const HIDDEN_JOB_NAME = '定期の仕事'
+/** How many occurrences `GET /jobs/:jobId/occurrences` answers (newest first). */
+export const OCCURRENCES_LISTED = 100
 const NOT_FOUND = () => refuse('not-found', '定期の仕事が見つかりません。', { code: 'JOB_NOT_FOUND' })
 const BAD_DEFINITION = (problems: string[]) => refuse('bad-request', '定期の仕事の内容に正しくないところがあります。', { code: 'BAD_JOB_DEFINITION', problems })
 const BAD_BODY = (what: string) => refuse('bad-request', `Body must be ${what}`, { code: 'BAD_REQUEST' })
@@ -424,6 +426,51 @@ export function createJobService(deps: JobServiceDeps) {
         return !fitsRights(handle, userId, role, definitionOf(v))
       })
       pauseFor(companyId, lost, 'OWNER_RIGHTS_CHANGED', actorId)
+    },
+
+    /**
+     * `GET /jobs/:jobId/occurrences`: the job's occurrences (newest slot first, ≤ 100) for the same people
+     * as the job (anyone else: the same 404). Slots, states and short codes only — no name, no place.
+     */
+    occurrences(member: Member, jobId: string): Outcome<{ occurrences: JobOccurrenceView[] }> {
+      const found = visibleJob(member, jobId)
+      if (!found) return NOT_FOUND()
+      return ok({
+        occurrences: found.handle.jobs.occurrences(jobId, OCCURRENCES_LISTED).map((o): JobOccurrenceView => ({
+          id: o.id, jobVersion: o.jobVersion, dueSlot: o.dueSlot, timeZone: o.timeZone, dueAt: o.dueAt, expiresAt: o.expiresAt,
+          state: o.state, outcomeCode: o.outcomeCode, ran: o.runId !== null, updatedAt: o.updatedAt,
+        })),
+      })
+    },
+
+    /**
+     * Whether the version's responsible person may still run it now (the run's re-check, like approval's,
+     * jobs.md "The runner"): null, or why not (`OWNER_LEFT`: not a member; `OWNER_RIGHTS_CHANGED`: a
+     * place it names is no longer theirs to read or write).
+     */
+    runnerRefusal(companyId: string, version: JobVersionRow): 'OWNER_LEFT' | 'OWNER_RIGHTS_CHANGED' | null {
+      const handle = companyData.forCompany(companyId)
+      const definition = definitionOf(version)
+      const role = memberships.roleOf(companyId, definition.actingUser)
+      if (role === null) return 'OWNER_LEFT'
+      return fitsRights(handle, definition.actingUser, role, definition) ? null : 'OWNER_RIGHTS_CHANGED'
+    },
+
+    /** Pause the job for a reason the server found (in the caller's transaction) and tell every owner / admin (`job_paused`). */
+    pauseBySystem(companyId: string, jobId: string, reason: 'OWNER_LEFT' | 'OWNER_RIGHTS_CHANGED'): void {
+      const job = jobsOf(companyId).find(jobId)
+      if (job) pauseFor(companyId, [job], reason, JOB_ACTOR.id)
+    },
+
+    /** An occurrence notice's words for the member now, or null when they may not see the job (owner/admin, or its responsible person). */
+    occurrenceNotice(member: Member, jobId: string, occurrenceId: string): { name: string; dueSlot: string; outcomeCode: string | null } | null {
+      const found = visibleJob(member, jobId)
+      if (!found) return null
+      const occ = found.handle.jobs.occurrence(occurrenceId)
+      if (!occ || occ.jobId !== jobId) return null
+      const latest = found.handle.jobs.version(jobId, found.job.latestVersion)
+      const nameShown = hasFullAccess(member.role) || (latest !== null && readsAll(found.handle, member.userId, member.role, definitionOf(latest)))
+      return { name: nameShown ? found.job.name : HIDDEN_JOB_NAME, dueSlot: occ.dueSlot, outcomeCode: occ.outcomeCode }
     },
 
     /** The job's name for a notice the member may read now (owner/admin only), or null. */

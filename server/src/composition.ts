@@ -83,6 +83,7 @@ import { createSkillUseService } from './services/skill-uses'
 import { createSkillShelfService } from './services/skill-shelf'
 import { createGroupService } from './services/groups'
 import { createJobService } from './services/jobs'
+import { createJobOccurrences, createJobRunner } from './services/job-occurrences'
 import { companySkillTree } from './lib/skill-trees'
 import { createServerClock } from './services/server-clock'
 import { createSecurityAlertService } from './services/security-alerts'
@@ -306,7 +307,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     delegateCannotRead: (companyId, absenteeId, delegateId, setterId) => notifications.delegateCannotRead(companyId, absenteeId, delegateId, setterId),
   })
   const actsFor = (companyId: string, userId: string) => absences.actsFor(companyId, userId)
-  // 定期の仕事 (jobs.md): definitions and approval only in B PR 3a — nothing runs yet.
+  // 定期の仕事 (jobs.md): definitions and approval (PR 3a); occurrences and the server's operation below (PR 3b).
   const jobs = createJobService({
     ...repos, ...shared,
     skillTree: (companyId, name) => (companyFolders.has(companyId) ? companySkillTree(companyId, name) : Promise.resolve(null)),
@@ -316,6 +317,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const notifications = createNotificationService({
     ...shared,
     jobNoticeOf: (member, jobId) => jobs.noticeJob(member, jobId),
+    jobOccurrenceNoticeOf: (member, jobId, occurrenceId) => jobs.occurrenceNotice(member, jobId, occurrenceId),
     coverOf: (companyId, userId) => absences.coverOf(companyId, userId),
     managersOf: (companyId, userId) => absences.managersOf(companyId, userId),
     activeAbsences: companyId => absences.activeToday(companyId),
@@ -759,6 +761,23 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     members: companyId => repos.memberships.listByCompany(companyId).map(m => ({ userId: m.user_id, role: m.role })),
   })
 
+  // 定期の仕事の回 (jobs.md "The clock" / "The runner"): no AI — occurrences, and the server's operation (a やること).
+  const jobOccurrences = createJobOccurrences({
+    ...shared,
+    // No per-company zone yet (calendar.md): the one place a setting would replace.
+    timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+    holidaysOf: companyId => taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    jobs,
+    writer: serviceRecords,
+    noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
+  })
+  const jobRunner = createJobRunner({
+    companyIds: () => repos.companies.allIds(),
+    occurrences: jobOccurrences,
+    yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
+  })
+
   // 「気になる動き」 (security-alerts.md): the clock's sweep, git-http's download counter, sign-in (app.ts).
   const securityAlerts = createSecurityAlertService({
     ...repos, ...shared,
@@ -813,6 +832,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     viewers: createViewersService({ ...repos, ...shared }),
     // The server clock (notifications.md "The server clock"): started once per process by index.ts.
     serverClock: createServerClock({
+      // Scheduled jobs (jobs.md): occurrences first for every company, then the runner, not awaited.
+      makeOccurrences: companyId => jobOccurrences.makeOccurrences(companyId),
+      startJobRunner: () => { void jobRunner.runOnce() },
       ...shared,
       companyIds: () => repos.companies.allIds(),
       writer: serviceRecords,

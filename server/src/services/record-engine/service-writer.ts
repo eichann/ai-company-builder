@@ -2,7 +2,7 @@ import { SERVICE_MADE_TYPES, SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE
 import { findPrivateScope } from '../../../shared/core/permissions'
 import { normalizeRepoPath } from '../../../shared/core/paths'
 import type { TypeDefinition } from '../../../shared/core/record-types'
-import type { LedgerChange, LedgerEntry, LedgerValue, LedgerVia } from '../../../shared/core/record-ledger'
+import { SYSTEM_ACTOR_PREFIX, type LedgerChange, type LedgerEntry, type LedgerValue, type LedgerVia } from '../../../shared/core/record-ledger'
 import { newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordAccessRow, RecordLinkRow, RecordMemberSet } from '../../ports/records'
@@ -25,7 +25,7 @@ export interface ServiceActor {
   proposedBy?: 'ai' | null
   /** The absent member a delegate stood in for (「代わりに（本来は X）」); the calling service decides it. */
   onBehalfOf?: string | null
-  /** The AI's execution run (S10b), from its token. */
+  /** The AI's execution run (S10b), from its token; or the server's own run of a scheduled job (an `acb:` actor). */
   runId?: string | null
   /** A person's call through a plugin's screen (the bridge, plan 4b B6): kept on a created record's first entry. */
   via?: LedgerVia | null
@@ -115,6 +115,13 @@ export type ServiceWriteFailure =
 
 export type ServiceWriteFailed = { ok: false; reason: ServiceWriteFailure; detail?: string }
 export type ServiceWriteResult = { ok: true; record: RecordSummary; entry: LedgerEntry } | ServiceWriteFailed
+
+/**
+ * The run an entry was written in: the AI's (from its token), or the server's own run of a scheduled
+ * job (an `acb:` actor such as `acb:job`, jobs.md "The runner"). Never a person's or an outside system's.
+ */
+const runOf = (actor: ServiceActor): string | null =>
+  actor.kind === 'ai' || (actor.kind === 'external' && actor.id.startsWith(SYSTEM_ACTOR_PREFIX)) ? actor.runId ?? null : null
 
 const fail = (reason: ServiceWriteFailure, detail?: string): ServiceWriteFailed => ({ ok: false, reason, ...(detail ? { detail } : {}) })
 
@@ -269,7 +276,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         ],
         attachments: [], decision: null, isDecision: false, typeVersion: def.version, reversesVersion: null,
         proposedBy: input.actor.kind === 'human' && input.actor.proposedBy === 'ai' ? 'ai' : null, conversationId: input.actor.conversationId ?? null,
-        runId: input.actor.kind === 'ai' ? input.actor.runId ?? null : null,
+        runId: runOf(input.actor),
         ...(input.actor.kind === 'human' && input.actor.via ? { via: { plugin: input.actor.via.plugin, version: input.actor.via.version } } : {}),
       }
       const existing = records.find(id)
@@ -367,7 +374,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         isDecision, typeVersion: row.typeVersion, reversesVersion: null,
         proposedBy: input.actor.kind === 'human' && input.actor.proposedBy === 'ai' ? 'ai' : null, conversationId: input.actor.conversationId ?? null,
         ...(input.actor.onBehalfOf ? { onBehalfOf: input.actor.onBehalfOf } : {}),
-        runId: input.actor.kind === 'ai' ? input.actor.runId ?? null : null,
+        runId: runOf(input.actor),
       }
       const written = deps.transactions.run(() => {
         if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(next), version: entry.version, updatedAt: at }, version)) return false

@@ -65,6 +65,13 @@ export const NOTIFICATION_KINDS = [
   // rights it needs (jobs.md): to owners / admins only, about no record. An app released before it
   // drops a notice with no record (its parser wants a record id) and only counts it as unread.
   'job_paused',
+  // An occurrence of a scheduled job that did not run (jobs.md "Notices"): its time ran out before it ran
+  // (`job_expired`), the responsible person was absent that day (`job_skipped`, D5: no delegate runs it),
+  // or its work could not be done (`job_failed`). To the responsible person and the job's creator while
+  // they may see the job; about no record. No notice when it ran (D9: the やること it made is the notice).
+  'job_expired',
+  'job_skipped',
+  'job_failed',
   'others',
 ] as const
 export type NotificationKind = typeof NOTIFICATION_KINDS[number]
@@ -103,6 +110,9 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   minutes_arrived: '出た会議の議事録が届いた',
   ai_changed: '担当している記録を AI が自動で変えた（元に戻せます）',
   job_paused: '定期の仕事が止まった（責任者が会社を離れた・権限が変わった。管理者だけ）',
+  job_expired: '定期の仕事の回が、期限までに動かなかった',
+  job_skipped: '定期の仕事の回を、責任者の不在で見送った',
+  job_failed: '定期の仕事の回が、うまくできなかった',
   others: 'そのほかの動き（担当になった・差し戻された・中止されたなど）',
 }
 
@@ -137,6 +147,9 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   minutes_arrived: true,
   ai_changed: true,
   job_paused: true,
+  job_expired: true,
+  job_skipped: true,
+  job_failed: true,
   others: false,
 }
 
@@ -152,7 +165,10 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
  */
 export const UNDOABLE_NOTIFICATION_KINDS: readonly NotificationKind[] = ['replied_done', 'mail_left_inbox', 'mail_archived']
 
-export const RECORDLESS_NOTIFICATION_KINDS: readonly NotificationKind[] = ['morning_summary', 'job_paused']
+export const RECORDLESS_NOTIFICATION_KINDS: readonly NotificationKind[] = ['morning_summary', 'job_paused', 'job_expired', 'job_skipped', 'job_failed']
+
+/** A scheduled job's occurrence notices (jobs.md "Notices"): key `<kind>:<job id>:<occurrence id>`. */
+export const JOB_OCCURRENCE_NOTIFICATION_KINDS: readonly NotificationKind[] = ['job_expired', 'job_skipped', 'job_failed']
 
 /** One notice as the member's app shows it. */
 export interface NotificationItem {

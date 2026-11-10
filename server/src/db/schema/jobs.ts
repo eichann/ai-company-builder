@@ -1,6 +1,6 @@
 /**
  * Scheduled jobs (定期の仕事, B 「実行を記録から分ける」 PR 3a, `.claude/rules/jobs.md`): definitions, their
- * versions, occurrences (made from PR 3b on; nothing writes one yet) and the company's stop switch.
+ * versions, occurrences (made by the clock and the runner from PR 3b, services/job-occurrences.ts) and the company's stop switch.
  * Part of the one schema run by db/index.ts initDatabase. New tables only (additive): an older build
  * never reads them, and `CREATE … IF NOT EXISTS` makes a second start change nothing.
  * Test: tests/unit/jobs-schema.test.ts (the frozen database before them, upgraded twice).

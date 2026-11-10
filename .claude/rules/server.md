@@ -308,8 +308,9 @@ GET  /api/config                                  setup state (no auth)
                               POST /ai-runs/:runId/operations/:key/reconcile   ai-runs.ts
                                                                 (実行の管理, S10b: records.md "Execution runs")
                               GET|POST /jobs, GET|PUT /jobs/:jobId, POST /jobs/:jobId/approve | pause | resume,
-                              POST /me/jobs/:jobId/accept, PUT /jobs-stop     jobs.ts
-                                                                (定期の仕事, definitions only: jobs.md)
+                              POST /me/jobs/:jobId/accept, PUT /jobs-stop,
+                              GET /jobs/:jobId/occurrences                    jobs.ts
+                                                                (定期の仕事: jobs.md)
                               GET /plugins, GET|PUT /plugins/:pluginId, PUT …/enabled,
                               PUT …/mapping, POST …/mapping/restore, POST …/mapping/check, POST …/import,
                               POST …/connection/renew,
@@ -705,7 +706,8 @@ in `server/src` outside an allow-list (today only startup-time `configureBareRep
 Started once per process by `index.ts` (never by `composition.ts`, which tests import), timers
 unref'd: the AI action log's retention (daily), outbound mail bodies' retention (daily) and the
 **server clock** (`services/server-clock.ts`, every 5 minutes; `notifications.md` "The server
-clock"; it also runs 「気になる動き」's sweep, `security-alerts.md`). A new time-based job goes into the server clock rather than a timer of its own, and
+clock"; it also runs 「気になる動き」's sweep, `security-alerts.md`, and makes scheduled jobs' occurrences, then
+starts their runner without awaiting it, `jobs.md` "The clock"). A new time-based job goes into the server clock rather than a timer of its own, and
 keeps its rules: never runs the AI, writes records only through the engine's writers, takes
 each company through its own handle with a per-company limit and a yield between companies,
 refuses to overlap itself, and derives everything from stored rows (a restart or a second run

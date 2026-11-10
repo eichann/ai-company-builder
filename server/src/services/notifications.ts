@@ -29,7 +29,7 @@
  * - The push channel carries only `{ kind: 'notifications', version }`, a
  *   fresh value: the app asks again; it never acts on the signal.
  */
-import { isNotificationKind, NOTIFICATION_DEFAULTS, NOTIFICATION_KINDS, NOTIFICATION_LIST_MAX, RECORDLESS_NOTIFICATION_KINDS } from '../../shared/types/notifications'
+import { isNotificationKind, JOB_OCCURRENCE_NOTIFICATION_KINDS, NOTIFICATION_DEFAULTS, NOTIFICATION_KINDS, NOTIFICATION_LIST_MAX, RECORDLESS_NOTIFICATION_KINDS } from '../../shared/types/notifications'
 import type { NotificationItem, NotificationKind, NotificationList, NotificationSettings } from '../../shared/types/notifications'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import type { LedgerEntry, LedgerValue } from '../../shared/core/record-ledger'
@@ -60,6 +60,13 @@ export interface NotificationServiceDeps {
   push: (companyId: string, userIds: string[]) => void
   /** `job_paused`: the job's name when the member may read it now (owner / admin), else null (jobs.md). Absent → never shown. */
   jobNoticeOf?: (member: Member, jobId: string) => { name: string } | null
+  /**
+   * An occurrence's notice (`job_expired` / `job_skipped` / `job_failed`, jobs.md "Notices"): the job's
+   * name as the member may see it (owner / admin, or its responsible person: 「定期の仕事」 when a place it
+   * names is not theirs to read), the occurrence's slot and code — null when the member may not see the
+   * job now. Absent → never shown.
+   */
+  jobOccurrenceNoticeOf?: (member: Member, jobId: string, occurrenceId: string) => { name: string; dueSlot: string; outcomeCode: string | null } | null
   /** The member's role in the company, or null (a notice goes only to someone who reads the record). */
   roleOf: (companyId: string, userId: string) => string | null
   /** The company's time zone for a due without one (records.md "Due with a time"); Japan by default. */
@@ -186,6 +193,15 @@ export function companyNow(nowMs: number, timeZone: string): string {
   }).formatToParts(new Date(nowMs))
   const p = (type: Intl.DateTimeFormatPartTypes) => parts.find(x => x.type === type)?.value ?? '00'
   return `${p('year')}-${p('month')}-${p('day')}T${p('hour')}:${p('minute')}`
+}
+
+/** An occurrence's notice (jobs.md "Notices"), built when read: the job's name, the slot and why. */
+export function jobOccurrenceText(kind: string, occ: { name: string; dueSlot: string; outcomeCode: string | null }): string {
+  const at = dueText(occ.dueSlot)
+  if (kind === 'job_expired') return `定期の仕事「${occ.name}」の${at}の回は、期限までに動かなかったため見送りました`
+  if (kind === 'job_skipped') return `定期の仕事「${occ.name}」の${at}の回は、責任者が不在のため見送りました（代わりの人は動かしません）`
+  const why = occ.outcomeCode === 'RECORDS_OFF' ? '記録の機能がオフのため、やることを作れませんでした' : 'やることを作れませんでした'
+  return `定期の仕事「${occ.name}」の${at}の回：${why}。管理者に確かめてください`
 }
 
 /** `2026-11-05` → 11月5日, `2026-11-05T15:00` → 11月5日 15:00. */
@@ -895,8 +911,15 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         const job = deps.jobNoticeOf?.(member, jobId) ?? null
         return job ? { name: job.name, reason } : null
       }
+      // An occurrence's notice: `<kind>:<job id>:<occurrence id>`, shown only while the member may see the job.
+      const occurrenceNotice = (r: NotificationRow) => {
+        const [, jobId = '', occurrenceId = ''] = (r.dedupeKey ?? '').split(':')
+        return deps.jobOccurrenceNoticeOf?.(member, jobId, occurrenceId) ?? null
+      }
+      const jobOccurrenceKinds = new Set<string>(JOB_OCCURRENCE_NOTIFICATION_KINDS)
       const visible = rows.filter(r => {
         if (r.kind === 'job_paused') return r.recordId === '' && jobNotice(r) !== null
+        if (jobOccurrenceKinds.has(r.kind)) return r.recordId === '' && occurrenceNotice(r) !== null
         if (recordless.has(r.kind)) return r.recordId === ''
         const rec = recs.get(r.recordId)
         return rec !== undefined && rec.removedAt === null && reader.record(rec)
@@ -930,6 +953,10 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           const job = jobNotice(r) as { name: string; reason: string }
           const why = job.reason === 'OWNER_LEFT' ? '責任者が会社を離れました。新しい責任者を決めてください' : '責任者の権限が変わり、仕事の範囲に足りなくなりました'
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text: `定期の仕事「${job.name}」を止めました：${why}`, createdAt: r.createdAt, read }
+        }
+        if (jobOccurrenceKinds.has(r.kind)) {
+          const occ = occurrenceNotice(r) as { name: string; dueSlot: string; outcomeCode: string | null }
+          return { id: r.id, kind: r.kind as NotificationKind, recordId: '', recordType: '', recordTitle: '', version: 0, text: jobOccurrenceText(r.kind, occ), createdAt: r.createdAt, read }
         }
         const rec = recs.get(r.recordId) as RecordRow
         const def = types.get(rec.type)?.definition

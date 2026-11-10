@@ -1,6 +1,6 @@
 /**
  * API contract of scheduled jobs (定期の仕事, B PR 3a, `.claude/rules/jobs.md`). Definitions and
- * approval only: nothing runs yet. Mounted at /api/companies/:companyId.
+ * approval (PR 3a); the occurrences the clock makes (PR 3b). Mounted at /api/companies/:companyId.
  *
  *   GET  /jobs                        owner/admin: every job; anyone else: the jobs they are responsible for
  *   GET  /jobs/:jobId                 the same people; with every version
@@ -10,8 +10,9 @@
  *   POST /me/jobs/:jobId/accept { version, fingerprint? } the version's responsible person only
  *   POST /jobs/:jobId/pause | resume  owner/admin; the responsible person for their own
  *   PUT  /jobs-stop { stopped }       owner/admin: 「定期の仕事をすべて止める」
+ *   GET  /jobs/:jobId/occurrences     the same people as GET /jobs/:jobId: its occurrences (回), newest first (PR 3b)
  */
-import type { JobDefinition, JobPauseReason, JobState } from '../core/jobs'
+import type { JobDefinition, JobOccurrenceState, JobPauseReason, JobState } from '../core/jobs'
 
 export type { JobState } from '../core/jobs'
 
@@ -60,4 +61,22 @@ export interface JobList {
   /** Owner/admin may create, edit, approve and stop. */
   canManage: boolean
   jobs: JobView[]
+}
+
+/** One occurrence (回) of a job (`GET /jobs/:jobId/occurrences`): slots, states and codes only. */
+export interface JobOccurrenceView {
+  id: string
+  /** The approved version it was made for (its run is pinned to it). */
+  jobVersion: number
+  /** Company time, `YYYY-MM-DDTHH:MM`. */
+  dueSlot: string
+  timeZone: string
+  dueAt: string
+  expiresAt: string
+  state: JobOccurrenceState
+  /** Why it ended as it did (`JOB_OUTCOME_CODES`), or null. */
+  outcomeCode: string | null
+  /** Whether a run did its work (state `done`). */
+  ran: boolean
+  updatedAt: string
 }

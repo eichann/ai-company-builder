@@ -18,6 +18,9 @@
  * 0. looks for suspicious activity (「気になる動き」, `securitySweep`, security-alerts.md), records on or off;
  * 5. finds each member's meetings of the last days on their calendar (`pollMeetings`,
  *    minutes.md "Meetings for their attendees": ids and versions, never the minutes' text).
+ * J. makes scheduled jobs' occurrences (`makeOccurrences`, jobs.md "The clock"), first, for every
+ *    company, records on or off — then starts the jobs' runner (`startJobRunner`) without waiting for
+ *    it, so neither waits for any company's slower work below.
  *
  * Everything is derived from stored data (no state kept between runs is
  * needed for correctness): running twice changes nothing more — a moved task
@@ -64,6 +67,13 @@ export interface ServerClockDeps {
   pollMeetings?: (companyId: string, between: () => Promise<void>) => Promise<number>
   /** 「気になる動き」 (security-alerts.md): the alerts written for this company. Runs whether records are on or not. */
   securitySweep?: (companyId: string) => Promise<number>
+  /**
+   * Scheduled jobs (jobs.md "The clock"): make this company's due occurrences — fast, no content, nothing
+   * outside. Run for every company first, records on or off. The number made or expired.
+   */
+  makeOccurrences?: (companyId: string) => number
+  /** Start the jobs' runner (services/job-occurrences.ts `createJobRunner`): never awaited by the clock. */
+  startJobRunner?: () => void
   /** Let the event loop serve requests between companies. */
   yieldNow: () => Promise<void>
   log?: (message: string) => void
@@ -81,6 +91,8 @@ export interface ClockRun {
   meetingsFound: number
   /** 「気になる動き」 written. */
   alerts: number
+  /** Scheduled jobs' occurrences made or expired. */
+  occurrences: number
   failedCompanies: number
 }
 
@@ -144,11 +156,25 @@ export function createServerClock(deps: ServerClockDeps) {
   return {
     /** One pass over every company. A call while a pass is running does nothing (`ran: false`). */
     async runOnce(): Promise<ClockRun> {
-      const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, mailRead: 0, meetingsFound: 0, alerts: 0, failedCompanies: 0 }
+      const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, mailRead: 0, meetingsFound: 0, alerts: 0, occurrences: 0, failedCompanies: 0 }
       if (running) return run
       running = true
       run.ran = true
       try {
+        // Scheduled jobs first, every company: a slow company's mail or calendar never holds an occurrence up.
+        if (deps.makeOccurrences) {
+          for (const companyId of deps.companyIds()) {
+            try {
+              run.occurrences += deps.makeOccurrences(companyId)
+            } catch (error) {
+              run.failedCompanies++
+              log(`[server-clock] company ${companyId} jobs failed: ${error instanceof Error ? error.name : 'unknown error'}`)
+            }
+            await deps.yieldNow()
+          }
+        }
+        // The runner goes on by itself (its own overlap guard); the clock does not wait for it.
+        try { deps.startJobRunner?.() } catch { /* the next run starts it again */ }
         for (const companyId of deps.companyIds()) {
           try {
             await runCompany(companyId, run)
@@ -174,8 +200,8 @@ export function createServerClock(deps: ServerClockDeps) {
       } finally {
         running = false
       }
-      if (run.moved + run.notices + run.expired + run.mailRead + run.meetingsFound + run.alerts + run.failedCompanies > 0) {
-        log(`[server-clock] moved ${run.moved}, notices ${run.notices}, expired ${run.expired}, mail read ${run.mailRead}, meetings ${run.meetingsFound}, alerts ${run.alerts}${run.failedCompanies ? `, ${run.failedCompanies} company(ies) failed` : ''}`)
+      if (run.moved + run.notices + run.expired + run.mailRead + run.meetingsFound + run.alerts + run.occurrences + run.failedCompanies > 0) {
+        log(`[server-clock] moved ${run.moved}, notices ${run.notices}, expired ${run.expired}, mail read ${run.mailRead}, meetings ${run.meetingsFound}, alerts ${run.alerts}, occurrences ${run.occurrences}${run.failedCompanies ? `, ${run.failedCompanies} company(ies) failed` : ''}`)
       }
       return run
     },
