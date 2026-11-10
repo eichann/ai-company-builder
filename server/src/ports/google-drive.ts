@@ -46,6 +46,8 @@ export interface GoogleDriveRepository {
   pick(userId: string, fileId: string, now: string): DrivePickRow | null
   /** The member's live picks, newest first. */
   picks(userId: string, now: string, limit: number): DrivePickRow[]
+  /** The member's live picks of one kind, newest first. */
+  picksOfKind(userId: string, kind: DrivePickRow['kind'], now: string, limit: number): DrivePickRow[]
   /** Removes expired picks (every member). */
   prunePicks(now: string): void
 

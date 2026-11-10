@@ -49,6 +49,10 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
       return (conn.prepare(`SELECT ${PICK_COLUMNS} FROM google_drive_picks WHERE company_id = ? AND user_id = ? AND expires_at > ? ORDER BY picked_at DESC, file_id LIMIT ?`)
         .all(companyId, userId, now, limit) as PickRow[]).map(toPick)
     },
+    picksOfKind(userId, kind, now, limit) {
+      return (conn.prepare(`SELECT ${PICK_COLUMNS} FROM google_drive_picks WHERE company_id = ? AND user_id = ? AND kind = ? AND expires_at > ? ORDER BY picked_at DESC, file_id LIMIT ?`)
+        .all(companyId, userId, kind, now, limit) as PickRow[]).map(toPick)
+    },
     prunePicks(now) {
       conn.prepare('DELETE FROM google_drive_picks WHERE company_id = ? AND expires_at <= ?').run(companyId, now)
     },

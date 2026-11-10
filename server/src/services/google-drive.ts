@@ -334,8 +334,9 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const h = handle(member.companyId).googleDrive
       const now = clock.now()
       const out = new Map<string, DriveOwnFile>()
-      for (const p of h.picks(member.userId, now, OWN_FILES_LISTED)) {
-        if (p.kind === 'file') out.set(p.fileId, { id: p.fileId, name: p.name, mimeType: p.mimeType, source: 'picked', at: p.pickedAt })
+      // File picks only, in the query: folder picks never take a place of the 30.
+      for (const p of h.picksOfKind(member.userId, 'file', now, OWN_FILES_LISTED)) {
+        out.set(p.fileId, { id: p.fileId, name: p.name, mimeType: p.mimeType, source: 'picked', at: p.pickedAt })
       }
       for (const p of h.donePuts(member.userId, OWN_FILES_LISTED)) {
         if (p.fileId && !out.has(p.fileId)) out.set(p.fileId, { id: p.fileId, name: p.name, mimeType: p.mimeType, source: 'put', at: p.finishedAt ?? p.createdAt })

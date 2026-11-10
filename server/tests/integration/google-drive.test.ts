@@ -550,9 +550,10 @@ describe('a put in a consultation about a task: its file is linked to the task (
     const his = await person('m-tanaka', 'GET', `/records/item/${id}`)
     expect((his.body.data.links as Json[]).filter(l => l.drive).map(l => l.drive)).toEqual([{ fileId, mine: false }])
     expect(his.text).not.toContain('自動でつなぐ')
-    // The ledger says the AI linked it.
+    // The ledger says the AI linked it (owner decision: the put was the AI's, so is the link), for this member.
     const history = await person('m-sato', 'GET', `/records/item/${id}/history`)
-    expect(history.text).toContain('link_file')
+    const linkEntries = (history.body.data.entries as Json[]).filter(e => e.action === 'link_file')
+    expect(linkEntries.map(e => [e.actorKind, e.actorId])).toEqual([['ai', 'm-sato']])
     expect(history.text).not.toContain('自動でつなぐ')
   }))
 
@@ -612,6 +613,16 @@ describe('a put in a consultation about a task: its file is linked to the task (
     expect(files.find(f => f.id === GOOGLE_SEED.handNotesPdf)).toMatchObject({ name: '手書きメモ.pdf', source: 'picked' })
     // Picked folders are not files to link.
     expect(files.some(f => f.id === GOOGLE_SEED.proposalsFolder)).toBe(false)
+    // Many newer folder picks never push the member's files out of the list.
+    const later = new Date(Date.now() + 60_000).toISOString()
+    const expires = new Date(Date.now() + 86_400_000).toISOString()
+    for (let i = 0; i < 31; i++) {
+      db.prepare('INSERT INTO google_drive_picks (company_id, user_id, file_id, kind, name, mime_type, picked_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(CO, 'm-sato', `fake-many-folders-${String(i).padStart(4, '0')}`, 'folder', `フォルダ${i}`, 'application/vnd.google-apps.folder', later, expires)
+    }
+    const after = (await person('m-sato', 'GET', '/me/google/drive/files')).body.data.files as Json[]
+    expect(after.some(f => f.id === GOOGLE_SEED.handNotesPdf)).toBe(true)
+    db.prepare("DELETE FROM google_drive_picks WHERE company_id = ? AND file_id LIKE 'fake-many-folders-%'").run(CO)
     // Tanaka's list holds none of Sato's names or ids.
     const his = await person('m-tanaka', 'GET', '/me/google/drive/files')
     expect(his.status).toBe(200)
