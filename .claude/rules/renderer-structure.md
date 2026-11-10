@@ -269,5 +269,12 @@ D7–D9, confirmed 2026-10-30).
   goes through a named command (`runCommand('file.open', { path })`), not a new React context, a
   store field or a window-wide key listener: `commands.md`.
 
+- **A feature's slot (built for minutes, 2026-11-10).** A feature that puts several parts on the
+  main screen (banners, a title bar button, rows, the AI runner's inputs) hands them to AppShell
+  from one hook in its own folder (`features/minutes/hooks/useMinutesSlots.tsx`); AppShell places
+  them and imports nothing else of that feature. What needs a second feature is handed in as a
+  callback or composed in an `app/` file (`app/meetingCard.tsx`). `APP_SHELL_SLOTS` in
+  `architecture-boundaries.test.ts` lists such features; add one there when you give a feature a slot.
+
 Add a left tab by registering a panel, and a pane by changing the layout tree; ask first before
 adding either for an extension (loading extensions is not built yet).

@@ -59,17 +59,11 @@ import { useFilesFromChatWindows } from '../features/chat/hooks/useFilesFromChat
 import { useSaveBeforeLeaving } from '../features/editor/hooks/useSaveBeforeLeaving'
 import { LeaveConfirmDialog } from '../features/editor/components/LeaveConfirmDialog'
 import { useAuthStore } from '../stores/authStore'
-import { useMinutesNotices } from '../features/minutes/hooks/useMinutesNotices'
-import { startMinutesReading } from '../features/minutes/startReading'
-import { declineMeetingBundle, requestMeetingReading, skipMinutes } from '../features/minutes/api'
-import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
-import { MeetingBanners } from '../features/minutes/components/MeetingBanners'
-import { useMeetingArrivals } from '../features/minutes/hooks/useMeetingArrivals'
-import { renderMeetingPanel } from './meetingCard'
+import { useMinutesSlots } from '../features/minutes/hooks/useMinutesSlots'
+import { renderMeetingBundleChooser, renderMeetingPanel } from './meetingCard'
 import type { AiTurnItemsView } from '../../shared/ai-turns'
 import { useNotices, useOpenTasksRequest } from '../features/notifications/hooks/useNotices'
-import { TitleBarNotices, type MeetingTurnRow } from '../features/notifications/components/TitleBarNotices'
-import { arrivedMeetingTurns, meetingTurns } from '../../shared/notifications-app'
+import { TitleBarNotices } from '../features/notifications/components/TitleBarNotices'
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { useSeenTasks } from '../features/tasks/hooks/useSeenTasks'
 import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
@@ -83,10 +77,8 @@ import { renderRecordBundleField } from './recordBundleField'
 import { renderRecordSource } from './recordSource'
 import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
 import { bundlePlacesOf, companyPathOf, departmentBundleKind, listShownFor, tagCounts } from '../features/tasks/model'
-import { meetingBundleWords } from '../../shared/tasks'
 import { LinkToTaskDialog } from '../features/tasks/components/LinkToTaskDialog'
 import { linkFileToTask, linkMeetingBundle } from '../features/tasks/api'
-import { BundleChooser } from '../features/tasks/components/BundleChooser'
 import { TaskCard } from '../features/tasks/components/TaskCard'
 import { PreparedMailCard } from '../features/chat/components/PreparedMailCard'
 import { ApprovalCard } from '../features/chat/components/ApprovalCard'
@@ -127,10 +119,7 @@ export function AppShell() {
   const syncedRoot = sharedFolder ? rootPath : undefined
 
   const { departments, isLoading: isLoadingDepartments, refresh: refreshDepartments } = useDepartments(currentCompany?.id)
-  // Received minutes: main checks while Google may read the member's minutes (features/minutes); the
-  // AI turn runner reads them, the task list shows them in 「AI の番」.
-  const minutes = useMinutesNotices(currentCompany?.id)
-  // Where each of them stands with the automatic 「AI の番」 (the chat's runner reports it).
+  // Where each waiting record stands with the automatic 「AI の番」 (the chat's runner reports it).
   const [aiTurnItems, setAiTurnItems] = useState<AiTurnItemsView | null>(null)
   // 「あなたの番」 and the bell (features/notifications): main reads them with the session.
   const notices = useNotices(currentCompany?.id)
@@ -138,21 +127,9 @@ export function AppShell() {
   const taskList = useTaskList(currentCompany?.id)
   // The やること tab's dot: something of あなたの番 came that the member has not seen in the tab.
   const seenTasks = useSeenTasks(currentCompany?.id)
-  // What the chat's runner starts by itself: every waiting kind that has a step (ai-turn-steps/registry.ts).
   // A business plugin's steps that start as an AI turn (plugin-steps.md): the server lists the member's records at one.
   const pluginTurns = usePluginStepTurns(currentCompany?.id)
-  // 「議事録が届きました」 (meetings for their attendees): the banner on やること; what the member asked to be read runs even with 自動で進める off.
-  const meetings = useMeetingArrivals(currentCompany?.id)
-  const askedMeetings = useMemo(() => new Set(meetings.arrivals.items.filter(m => m.byYou && m.status === 'asked').map(m => m.recordId)), [meetings.arrivals])
-  const aiTurns = useMemo(
-    () => aiTurnQueue({ minutes: minutes.available ? minutes.notices : [], tasks: taskList.data?.items ?? [], plugins: pluginTurns, asked: askedMeetings }),
-    [minutes.available, minutes.notices, taskList.data, pluginTurns, askedMeetings],
-  )
   const { isReadOnly } = useWriteAccess()
-  // 「どのまとまりの会議ですか？」 chosen from the title bar (where the department shows no task list) or the list.
-  const [choosingBundle, setChoosingBundle] = useState<{ id: string; title: string } | null>(null)
-  // Bumped when a まとまり is chosen there, so an open meeting card reads again.
-  const [bundleRev, setBundleRev] = useState(0)
   // 「やることにつなぐ…」 from the file tree: the file chosen (as the company names it), while its chooser is open.
   const [linkingFile, setLinkingFile] = useState<string | null>(null)
   const [fileAction, setFileAction] = useState<FileActionOpen | null>(null)
@@ -418,15 +395,20 @@ export function AppShell() {
   const tasksShown = !!taskList.data?.available && features.taskList && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds)
   // The task list turned off for the company: 「確かめること」, the small list of what only ACB can act on.
   const pressShown = !!taskList.data?.available && !features.taskList
-  // 「議事録が届きました」 only while 会議と議事録 is on (the server answers none while it is off, too).
-  const arrivalsShown = meetings.arrivals.available && features.meetings
   // What the department on screen makes as its 案件・プロジェクト (全社: the company's own kind; records.md "Bundle kinds").
   const bundleKinds = taskList.data?.bundleKinds
   const deptBundleKind = departmentBundleKind(bundleKinds, effectiveDeptFolder)
   // 「新しい〇〇にする」 puts it in the member's own department (所属) by default (records.md "A task and its 案件・プロジェクト").
   const bundlePlaces = bundlePlacesOf(departments, bundleKinds, today.myDepartmentIds, effectiveDeptFolder || null)
   const bundleWord = deptBundleKind?.name ?? 'プロジェクト'
-  const meetingWords = meetingBundleWords(bundleWord)
+  // Meetings and received minutes (features/minutes): its banners, buttons and title bar rows.
+  const meetings = useMinutesSlots({ companyId: currentCompany?.id, features, taskItems: taskList.data?.items ?? [], reloadTasks: taskList.reload, aiTurnItems,
+    tasksShown, bundleWord, linkBundle: linkMeetingBundle, openRecord: id => openTab(recordTabKey(id)) })
+  // What the chat's runner starts by itself: every waiting kind that has a step (ai-turn-steps/registry.ts).
+  const aiTurns = useMemo(
+    () => aiTurnQueue({ minutes: meetings.aiTurnMinutes, tasks: taskList.data?.items ?? [], plugins: pluginTurns, asked: meetings.askedMeetings }),
+    [meetings.aiTurnMinutes, taskList.data, pluginTurns, meetings.askedMeetings],
+  )
   // A linked folder left out on this computer is marked on the cards (download-choices.md).
   const notDownloadedFolderOf = sparseCheckout.enabled ? sparseCheckout.notDownloadedFolderOf : undefined
   // A record's card: a task opens with its actions (its id starts with its type), anything else read only.
@@ -438,43 +420,17 @@ export function AppShell() {
       return <div key={recordId}><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><TaskCard knownVersion={taskList.data?.items.find(i => i.id === recordId)?.version} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} bundlePlaces={bundlePlaces} createTodayFile={createTodayFile} notDownloadedFolderOf={notDownloadedFolderOf} sharedFolder={sharedFolder}
         onDetachConsultation={sessionId => { void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {}) }} /></div>
     }
-    // A まとまり chosen from the list or the title bar: a meeting's open card reads again.
-    const isMeeting = recordId.startsWith('meeting-') || recordId.startsWith('minutes-')
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
-    const readOnly = <div key={isMeeting ? `${recordId}:${bundleRev}` : recordId}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><StepDeliverables companyId={currentCompany.id} recordId={recordId} renderPrepared={renderPrepared} renderFile={f => <FileLinkRow rootPath={rootPath} path={f.path} broken={f.broken} />} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} notDownloadedFolderOf={notDownloadedFolderOf}
+    // A まとまり chosen from the list or the title bar: a meeting's open card reads again (its key).
+    const readOnly = <div key={meetings.cardKey(recordId)}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><StepDeliverables companyId={currentCompany.id} recordId={recordId} renderPrepared={renderPrepared} renderFile={f => <FileLinkRow rootPath={rootPath} path={f.path} broken={f.broken} />} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} notDownloadedFolderOf={notDownloadedFolderOf}
       renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null, taskList.reload, bundlePlaces)}
-      renderMeeting={(r, parts) => renderMeetingPanel(currentCompany.id, r.id, { parts, members: (taskList.data?.members ?? []).filter(p => p.id !== taskList.data?.me), onConsult: m => consultAbout(m), onChanged: () => { meetings.reload(); taskList.reload() } })} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
+      renderMeeting={(r, parts) => renderMeetingPanel(currentCompany.id, r.id, { parts, members: (taskList.data?.members ?? []).filter(p => p.id !== taskList.data?.me), onConsult: m => consultAbout(m), onChanged: meetings.changed })} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {
       return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>
     }
     return readOnly
   }
-  // A department without the task list: its meetings (received minutes, a まとまり to choose) wait in the title bar.
-  const listMeetings = tasksShown || !currentCompany ? [] : meetingTurns(taskList.data?.items ?? [], aiTurnItems?.items ?? [], bundleWord)
-  // Minutes that arrived and nobody asked the AI to read count too, with ［AI に読ませる］ (owner decision 2026-11-07).
-  const arrivedMeetings = tasksShown || !currentCompany || !arrivalsShown ? [] : arrivedMeetingTurns(meetings.arrivals.items, new Set(listMeetings.map(m => m.id)))
-  const titleBarMeetings: MeetingTurnRow[] = !currentCompany ? [] : [...arrivedMeetings, ...listMeetings].map(m => {
-    const actions: MeetingTurnRow['actions'] = []
-    if (m.kind === 'bundle') {
-      const s = m.suggestedBundle
-      if (s) actions.push({ label: 'はい', run: () => void linkMeetingBundle(currentCompany.id, m.id, s.id).then(() => taskList.reload()) })
-      actions.push({ label: s ? 'ちがう／選ぶ' : meetingWords.choose, run: () => setChoosingBundle({ id: m.id, title: m.title }) })
-      actions.push({ label: meetingWords.none, run: () => void declineMeetingBundle(currentCompany.id, m.id).then(() => taskList.reload()) })
-    }
-    if (arrivedMeetings.some(a => a.id === m.id)) {
-      const arrival = meetings.arrivals.items.find(a => a.recordId === m.id)
-      if (arrival) actions.push({ label: 'AI に読ませる', run: () => void requestMeetingReading(currentCompany.id, arrival.recordId, arrival.version).then(() => { meetings.reload(); taskList.reload() }) })
-      return { ...m, actions }
-    }
-    if (m.kind === 'minutes' && m.ai?.state !== 'running' && minutes.available && taskList.data?.items.find(i => i.id === m.id)?.state === 'received') {
-      actions.push({ label: '自分で読み取る', run: () => { const notice = minutes.notices.find(n => n.id === m.id); if (notice) startMinutesReading(notice, features) } })
-      actions.push({ label: '今は読まない', run: () => void skipMinutes(currentCompany.id, m.id).then(() => taskList.reload()) })
-    }
-    if (m.ai?.canRetry) actions.push({ label: 'もう一度', run: () => aiTurnItems?.retry(m.id) })
-    if (m.ai?.canHand) actions.push({ label: '人に渡す', run: () => aiTurnItems?.handOver(m.id) })
-    return { ...m, actions }
-  })
   // 探す ⌘K's 「最近開いたもの」: the tabs open in the middle, newest first.
   const recentTabs: PaletteRecent[] = [...openFiles].reverse().flatMap((key): PaletteRecent[] => {
     const id = recordIdOfTab(key)
@@ -568,8 +524,7 @@ export function AppShell() {
       dot: leftTab !== 'tasks' && myTurnIds.some(id => !seenTasks.seen.has(id)),
       render: () => currentCompany && rootPath ? (
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        {arrivalsShown && <MeetingBanners key={currentCompany.id} companyId={currentCompany.id} items={meetings.arrivals.items} aiTurns={aiTurnItems} decisionsOn={features.decisions}
-          onView={m => openTab(recordTabKey(m.id))} onChanged={() => { meetings.reload(); taskList.reload() }} />}
+        {meetings.banners()}
         <div className="flex min-h-0 flex-1">
         <TaskListPanel
           companyId={currentCompany.id}
@@ -583,10 +538,7 @@ export function AppShell() {
           onCompleted={id => closeTabs([recordTabKey(id)])}
           askFolder={isCompanyWide ? null : (selectedDept?.folder ?? null)}
           showCalendar={features.meetings}
-          meetingActions={minutes.available && features.meetings ? {
-            read: recordId => { const notice = minutes.notices.find(n => n.id === recordId); if (notice) startMinutesReading(notice, features) },
-            skip: async recordId => { const r = await skipMinutes(currentCompany.id, recordId); return r && !r.success ? r.error : null },
-          } : undefined}
+          meetingActions={meetings.taskListActions}
         />
         </div>
         </div>
@@ -599,8 +551,7 @@ export function AppShell() {
       render: () => currentCompany ? (
         <CorePressPanel companyId={currentCompany.id} data={taskList.data} showCalendar={features.meetings}
           onOpen={id => { const item = taskList.data?.items.find(i => i.id === id); if (item) openListItem(item); else openTab(recordTabKey(id)) }}
-          meetings={arrivalsShown ? <MeetingBanners key={currentCompany.id} companyId={currentCompany.id} items={meetings.arrivals.items} aiTurns={aiTurnItems} decisionsOn={features.decisions}
-            onView={m => openTab(recordTabKey(m.id))} onChanged={() => { meetings.reload(); taskList.reload() }} /> : null} />
+          meetings={meetings.banners()} />
       ) : null,
     },
     {
@@ -644,12 +595,12 @@ export function AppShell() {
             onStopWaiting={companySwitch.stopWaiting}
           />
         ) : undefined}
-        extra={minutes.available && features.meetings && currentCompany ? <MinutesCheckButton companyId={currentCompany.id} /> : undefined}
+        extra={meetings.titleBarButton}
         notices={currentCompany ? (
           <TitleBarNotices
             companyId={currentCompany.id}
             state={notices}
-            meetings={titleBarMeetings}
+            meetings={meetings.titleBarMeetings}
             onOpen={target => { void runCommand('record.open', { recordId: target.recordId }).catch(() => {}) }}
             onOpenTasks={openTasks}
             features={features}
@@ -754,24 +705,11 @@ export function AppShell() {
         )}
       />
 
-      {choosingBundle && currentCompany && (
-        <BundleChooser
-          companyId={currentCompany.id} meetingTitle={choosingBundle.title} word={bundleWord}
-          onChoose={async b => {
-            const r = await linkMeetingBundle(currentCompany.id, choosingBundle.id, b.id)
-            taskList.reload()
-            setBundleRev(n => n + 1)
-            return r?.success ? null : (r?.error ?? 'できませんでした。')
-          }}
-          onNoBundle={async () => {
-            const r = await declineMeetingBundle(currentCompany.id, choosingBundle.id)
-            taskList.reload()
-            setBundleRev(n => n + 1)
-            return r.success ? null : r.error
-          }}
-          onClose={() => setChoosingBundle(null)}
-        />
-      )}
+      {meetings.choosingBundle && currentCompany && renderMeetingBundleChooser(currentCompany.id, meetings.choosingBundle, {
+        word: bundleWord,
+        onChosen: () => { taskList.reload(); meetings.bundleChosen() },
+        onClose: meetings.closeBundleChooser,
+      })}
       {linkingFile && currentCompany && (
         <LinkToTaskDialog
           key={linkingFile}

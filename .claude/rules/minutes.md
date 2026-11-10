@@ -341,7 +341,7 @@ or the decision service stops calling it, or another module uses the older per-m
   member ids checked, de-duplicated; groups / departments sent as `{ subjectType, subjectId }`) and
   `minutes:inviteChoices` (`GET …/members/choices`: what the dialog may offer besides people). Malformed ids never reach a URL.
 - **The banner** (`src/features/minutes/components/MeetingBanners.tsx`, the words in `model.ts`
-  `meetingBanner`): at the top of やること (AppShell wraps `TaskListPanel`; `useMeetingArrivals`: at
+  `meetingBanner`): at the top of やること (`useMinutesSlots` `banners()`, placed by AppShell above `TaskListPanel`; `useMeetingArrivals`: at
   mount, on `minutes:changed` / `records:changed` / `notifications:changed`, every 2 minutes, after a
   press). **It never takes the pane** (first discovery brings many meetings at once, 2026-11-05): one
   block of at most 45% of the pane with the heading 「議事録が届きました」 and `MEETING_ROWS_SHOWN` (2)
@@ -652,9 +652,19 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
 
 ## The app (milestone 4 G9, 「商談のあと」)
 
+- **Where it sits on the main screen** (2026-11-10): `src/features/minutes/hooks/useMinutesSlots.tsx`
+  holds everything of minutes the screen shows — the received minutes and arrivals, the runner's
+  inputs (`aiTurnMinutes`, `askedMeetings`), the banners, the task list's `meetingActions`, 「議事録を
+  確かめる」, the title bar's meeting rows and their buttons, the まとまり chooser's state and the meeting
+  card's key. `AppShell` only places these parts and imports nothing else of `features/minutes`
+  (`architecture-boundaries.test.ts` 「AppShell reaches the minutes feature only through its slot」);
+  what needs another feature (the meeting card with the tasks feature's `MinutesReview`, the
+  tasks feature's `BundleChooser`, `linkMeetingBundle`) is composed in `src/app/meetingCard.tsx` or
+  handed in by AppShell.
+
 - **Checking** (`client/electron/features/minutes/checker.ts`, main; the session stays there):
   the renderer names the company it works in (`minutes:watch`, from `useMinutesNotices` in
-  `AppShell`; the subscription's end sends `null`); main then checks at once, every 10 minutes
+  `useMinutesSlots`, which `AppShell` mounts; the subscription's end sends `null`); main then checks at once, every 10 minutes
   (`MINUTES_CHECK_INTERVAL_MS`) and on 「議事録を確かめる」 (`minutes:check`). Each check first asks
   `GET /me/google`: **without an active grant that includes `minutes`, nothing about minutes is
   asked or shown** (no error either). With it: `POST /me/minutes/check` (the server puts stale
