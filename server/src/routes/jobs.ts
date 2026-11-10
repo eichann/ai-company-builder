@@ -56,13 +56,13 @@ jobsRoute.post('/jobs/:jobId/pause', companyMember, async (c) => {
 })
 
 jobsRoute.post('/jobs/:jobId/resume', companyMember, async (c) => {
-  const result = jobs.resume(c.var.member, c.req.param('jobId'))
+  const result = await jobs.resume(c.var.member, c.req.param('jobId'))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
 jobsRoute.post('/me/jobs/:jobId/accept', companyMember, serviceBody, async (c) => {
-  const result = jobs.accept(c.var.member, c.req.param('jobId'), c.var.body)
+  const result = await jobs.accept(c.var.member, c.req.param('jobId'), c.var.body)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })

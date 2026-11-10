@@ -32,8 +32,11 @@ import { hashCanonical } from '../lib/content-hash'
 import { hasFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import { recordReader } from './record-access'
+import { resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
 
 export const JOBS_FORBIDDEN = 'Only owners and admins can manage scheduled jobs'
+/** A job's name for a responsible person who cannot read every place its newest version names. */
+export const HIDDEN_JOB_NAME = '定期の仕事'
 const NOT_FOUND = () => refuse('not-found', '定期の仕事が見つかりません。', { code: 'JOB_NOT_FOUND' })
 const BAD_DEFINITION = (problems: string[]) => refuse('bad-request', '定期の仕事の内容に正しくないところがあります。', { code: 'BAD_JOB_DEFINITION', problems })
 const BAD_BODY = (what: string) => refuse('bad-request', `Body must be ${what}`, { code: 'BAD_REQUEST' })
@@ -42,7 +45,9 @@ const FINGERPRINT_CHANGED = () => refuse('conflict', '画面に出ていた内�
 const OWNER_NOT_MEMBER = () => refuse('conflict', '責任者がこの会社のメンバーではありません。責任者を決め直してください。', { code: 'JOB_OWNER_NOT_MEMBER' })
 const GRANT_EXCEEDS = () => refuse('conflict', '責任者の今の権限では、この仕事の範囲に足りません。範囲か責任者を見直してください。', { code: 'JOB_GRANT_EXCEEDS' })
 const SKILL_MISSING = () => refuse('conflict', '会社のスキルが見つかりません。.claude/skills/ に置いて同期してから、もう一度ためしてください。', { code: 'JOB_SKILL_MISSING' })
+const SKILL_NOT_HERE = () => refuse('conflict', 'この会社は全社フォルダを使っていないため、会社のスキルを手順にした定期の仕事はまだ作れません。', { code: 'JOB_SKILL_NOT_HERE' })
 const SKILL_CHANGED = () => refuse('conflict', '手順のスキルが、この版を作ったあとに変わりました。新しい版を作ってから承認してください。', { code: 'JOB_SKILL_CHANGED' })
+const NOT_RESPONSIBLE = () => refuse('forbidden', 'この定期の仕事を止められるのは、承認された版の責任者か管理者だけです。', { code: 'JOB_NOT_RESPONSIBLE' })
 const RETIRED = () => refuse('conflict', 'この定期の仕事はもう使われていません。', { code: 'JOB_RETIRED' })
 
 export interface JobServiceDeps {
@@ -53,6 +58,10 @@ export interface JobServiceDeps {
   ids: IdGenerator
   /** The git tree id of a company Skill now (`.claude/skills/<name>`), or null (none, or no shared folder). */
   skillTree: (companyId: string, name: string) => Promise<string | null>
+  /** Has the company the shared company folder? Without it there is no company Skill to pin yet. */
+  hasCompanyFolder: (companyId: string) => boolean
+  /** Tell these members their notices changed (the push signal, kind + version only). Absent → nothing. */
+  noticesChanged?: (companyId: string, userIds: string[]) => void
 }
 
 const sha256 = hashCanonical
@@ -70,16 +79,29 @@ export function createJobService(deps: JobServiceDeps) {
     return jobDefinitionPaths(definition).every(p => reader.file(p))
   }
 
-  /** The responsible person is a member and reads what the version names (design memo §4-3). */
+  /**
+   * Does what the version names fit the person's rights now (design memo §4-3)? They read every place
+   * it names, and may write where its deliverables go (`writes.place`).
+   */
+  function fitsRights(handle: CompanyData, userId: string, role: string, definition: JobDefinition): boolean {
+    if (!readsAll(handle, userId, role, definition)) return false
+    if (definition.grant.writes.area !== 'deliverable') return true
+    const scopes = handle.scopes.listWithRules()
+    const perms: PermissionRepository = { getMemberRole: () => role, listScopes: () => scopes }
+    return resolveAccess(handle.companyId, userId, definition.grant.writes.place, perms).write
+  }
+
+  /** The responsible person is a member and the version fits their rights now (design memo §4-3). */
   function withinRights(handle: CompanyData, definition: JobDefinition): Outcome<void> {
     const role = memberships.roleOf(handle.companyId, definition.actingUser)
     if (role === null) return OWNER_NOT_MEMBER()
-    if (!readsAll(handle, definition.actingUser, role, definition)) return GRANT_EXCEEDS()
+    if (!fitsRights(handle, definition.actingUser, role, definition)) return GRANT_EXCEEDS()
     return ok(undefined)
   }
 
   async function skillPinned(companyId: string, definition: JobDefinition): Promise<Outcome<void>> {
     if (definition.run.kind !== 'procedure') return ok(undefined)
+    if (!deps.hasCompanyFolder(companyId)) return SKILL_NOT_HERE()
     const tree = await deps.skillTree(companyId, definition.run.procedure.skill)
     if (tree === null) return SKILL_MISSING()
     return tree === definition.run.procedure.fingerprint ? ok(undefined) : SKILL_CHANGED()
@@ -90,9 +112,13 @@ export function createJobService(deps: JobServiceDeps) {
     if (job.approvedVersion === null) return job.actingUserId
     return handle.jobs.version(job.id, job.approvedVersion)?.actingUserId ?? job.actingUserId
   }
-  /** Is the member responsible for the job (its newest or approved version)? */
+  /** Is the member named by the job (its newest or approved version)? They see it (a draft naming them is theirs to read). */
   function isResponsible(handle: CompanyData, job: JobRow, userId: string): boolean {
     return job.actingUserId === userId || responsibleOf(handle, job) === userId
+  }
+  /** Does the member control the job (pause / resume)? Only the approved version's responsible person — never someone a draft names. */
+  function controls(handle: CompanyData, job: JobRow, userId: string): boolean {
+    return responsibleOf(handle, job) === userId
   }
 
   /** The job as the member may see it; null = it does not exist for them. */
@@ -120,20 +146,26 @@ export function createJobService(deps: JobServiceDeps) {
   }
 
   function view(member: Member, handle: CompanyData, job: JobRow, withVersions: boolean): JobView {
+    const full = hasFullAccess(member.role)
+    // The name shown is the newest version's (`ai_jobs.name`). A responsible person who is not owner/admin
+    // gets it only while they read every place that version names — an admin may have named the job after
+    // a place (「経理部の月次報告」) they cannot read; otherwise the neutral 「定期の仕事」.
+    const latest = handle.jobs.version(job.id, job.latestVersion)
+    const nameShown = full || (latest !== null && readsAll(handle, member.userId, member.role, definitionOf(latest)))
     const out: JobView = {
-      id: job.id, name: job.name, state: job.state, actingUserId: job.actingUserId, latestVersion: job.latestVersion,
+      id: job.id, name: nameShown ? job.name : HIDDEN_JOB_NAME, state: job.state, actingUserId: job.actingUserId, latestVersion: job.latestVersion,
       approvedVersion: job.approvedVersion, accepted: consentAccepted(handle, job), pausedReason: job.pausedReason,
       waiting: waitingOf(handle, job, handle.jobs.stopped()), createdBy: job.createdBy, createdAt: job.createdAt, updatedAt: job.updatedAt,
     }
     if (withVersions) {
-      const full = hasFullAccess(member.role)
       out.versions = handle.jobs.versions(job.id).map((v): JobVersionView => {
         const definition = definitionOf(v)
         // A responsible person who is not owner/admin sees a version's definition only while they read
         // every place it names (a draft may name one they cannot: its name is not theirs to learn).
         const shown = full || readsAll(handle, member.userId, member.role, definition)
         return {
-          version: v.version, fingerprint: v.fingerprint, consentFingerprint: v.consentFingerprint, definition: shown ? definition : null,
+          // Hidden: the fingerprints too (a sha256 of a known shape lets someone test guesses of a place's name).
+          version: v.version, fingerprint: shown ? v.fingerprint : null, consentFingerprint: shown ? v.consentFingerprint : null, definition: shown ? definition : null,
           createdBy: v.createdBy, createdAt: v.createdAt, approvedBy: v.approvedBy, approvedAt: v.approvedAt, acceptedBy: v.acceptedBy, acceptedAt: v.acceptedAt,
         }
       })
@@ -150,6 +182,7 @@ export function createJobService(deps: JobServiceDeps) {
     const input: Record<string, unknown> = { ...body.definition }
     let tree: string | null | undefined
     if (isObject(input.run) && input.run.kind === 'procedure' && isObject(input.run.procedure)) {
+      if (!deps.hasCompanyFolder(companyId)) return SKILL_NOT_HERE()
       const skill = input.run.procedure.skill
       tree = typeof skill === 'string' ? await deps.skillTree(companyId, skill) : null
       input.run = { ...input.run, procedure: { ...input.run.procedure, fingerprint: tree ?? '' } }
@@ -188,6 +221,7 @@ export function createJobService(deps: JobServiceDeps) {
     const handle = companyData.forCompany(companyId)
     const at = clock.now()
     const admins = memberships.listByCompany(companyId).filter(m => hasFullAccess(m.role)).map(m => m.user_id)
+    let told = false
     for (const job of jobs) {
       if (job.state === 'retired' || job.pausedReason === reason) continue
       handle.jobs.setState(job.id, 'paused', reason, actorId, at)
@@ -195,7 +229,10 @@ export function createJobService(deps: JobServiceDeps) {
         id: ids.newId(), userId, kind: 'job_paused', recordId: '', recordVersion: 0, action: '', actorId: null, actorKind: null,
         dedupeKey: `job_paused:${job.id}:${reason}:${at}`, createdAt: at, readAt: null,
       })))
+      told = true
     }
+    // The apps re-read at once (a bare signal; never fails the change).
+    if (told) { try { deps.noticesChanged?.(companyId, admins) } catch { /* their own check catches up */ } }
   }
 
   return {
@@ -280,7 +317,7 @@ export function createJobService(deps: JobServiceDeps) {
     },
 
     /** `POST /me/jobs/:jobId/accept { version, fingerprint? }`: the approved version's responsible person, in their own name. */
-    accept(member: Member, jobId: string, body: unknown): Outcome<JobView> {
+    async accept(member: Member, jobId: string, body: unknown): Promise<Outcome<JobView>> {
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
       const b = versionBody(body)
@@ -291,6 +328,9 @@ export function createJobService(deps: JobServiceDeps) {
       if (v.actingUserId !== member.userId) return refuse('forbidden', 'この定期の仕事の責任者だけが受け取れます。', { code: 'JOB_NOT_RESPONSIBLE' })
       if (b.fingerprint !== null && b.fingerprint !== v.fingerprint) return FINGERPRINT_CHANGED()
       if (job.approvedVersion !== v.version) return refuse('conflict', 'まだ承認されていない版は受け取れません。', { code: 'JOB_NOT_APPROVED' })
+      // What is accepted must still be what was pinned: a Skill deleted or changed since refuses it.
+      const skill = await skillPinned(member.companyId, definitionOf(v))
+      if (!skill.ok) return skill
       const result = transactions.run((): Outcome<void> => {
         const rights = withinRights(handle, definitionOf(v))
         if (!rights.ok) return rights
@@ -306,6 +346,7 @@ export function createJobService(deps: JobServiceDeps) {
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
       const { handle, job } = found
+      if (!hasFullAccess(member.role) && !controls(handle, job, member.userId)) return NOT_RESPONSIBLE()
       if (job.state === 'retired') return RETIRED()
       const reason: JobPauseReason = hasFullAccess(member.role) ? 'ADMIN' : 'BY_RESPONSIBLE'
       // An owner/admin's pause holds over the responsible person's own (who could otherwise resume it); a system pause stays as it is.
@@ -319,13 +360,21 @@ export function createJobService(deps: JobServiceDeps) {
      * `POST /jobs/:jobId/resume`: owner/admin any pause (an approved version's responsible person and
      * rights checked again); the responsible person only a pause they made themselves.
      */
-    resume(member: Member, jobId: string): Outcome<JobView> {
+    async resume(member: Member, jobId: string): Promise<Outcome<JobView>> {
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
       const { handle, job } = found
       if (job.state !== 'paused') return ok(view(member, handle, job, true))
-      if (!hasFullAccess(member.role) && job.pausedReason !== 'BY_RESPONSIBLE') {
-        return refuse('forbidden', '管理者が止めた定期の仕事は、管理者だけが再開できます。', { code: 'JOB_PAUSED_BY_ADMIN' })
+      // A non-admin resumes only a pause they made themselves, while still the approved version's
+      // responsible person (someone a later draft names may see the job, not lift another's pause).
+      if (!hasFullAccess(member.role)
+        && !(job.pausedReason === 'BY_RESPONSIBLE' && job.pausedBy === member.userId && controls(handle, job, member.userId))) {
+        return refuse('forbidden', '止めた本人か管理者だけが、この定期の仕事を再開できます。', { code: 'JOB_PAUSED_BY_OTHER' })
+      }
+      if (job.approvedVersion !== null) {
+        const approved = handle.jobs.version(jobId, job.approvedVersion) as JobVersionRow
+        const skill = await skillPinned(member.companyId, definitionOf(approved))
+        if (!skill.ok) return skill
       }
       const result = transactions.run((): Outcome<void> => {
         const current = handle.jobs.find(jobId) as JobRow
@@ -372,7 +421,7 @@ export function createJobService(deps: JobServiceDeps) {
         if (job.state === 'paused' && JOB_SYSTEM_PAUSE_REASONS.includes(job.pausedReason as JobPauseReason)) return false
         const v = handle.jobs.version(job.id, job.approvedVersion)
         if (!v || v.actingUserId !== userId) return false
-        return !readsAll(handle, userId, role, definitionOf(v))
+        return !fitsRights(handle, userId, role, definitionOf(v))
       })
       pauseFor(companyId, lost, 'OWNER_RIGHTS_CHANGED', actorId)
     },

@@ -29,7 +29,10 @@ New tables only (additive; `CREATE … IF NOT EXISTS`, nothing else changes):
   `paused_by` / `paused_at`.
 - `ai_job_versions`: **append-only** — `definition` (canonical JSON), `fingerprint` (sha256 of it),
   `consent_fingerprint`, `acting_user_id`, `schema`; triggers refuse any update of those
-  (`ai_job_versions_append_only`) and set `approved_*` / `accepted_*` once.
+  (`ai_job_versions_append_only`) and set `approved_*` / `accepted_*` once. **The triggers block
+  UPDATE only**: DELETE and `INSERT OR REPLACE` are not blocked (deleting a company must delete its
+  rows, by cascade), so no code may use either on `ai_job_versions` — the adapter only INSERTs a new
+  version and sets approved / accepted.
 - `ai_job_occurrences`: id `occ.` + 32 hex (CHECK: never a record id's shape — `RECORD_ID_RE` has no
   `.` — so the kept `idx_ai_runs_open` on `record_id` never sees two kinds collide),
   `UNIQUE (company_id, job_id, due_slot)`, `time_zone`, `due_at`, `expires_at`, `state`
@@ -80,26 +83,42 @@ PUT  /jobs-stop { stopped }         owner/admin
 ```
 
 - **Who** (D10): only owner/admin create, edit, approve, stop (403 `Only owners and admins can manage
-  scheduled jobs`, before the body). The responsible person (of the newest or the approved version)
-  sees their own jobs; for anyone else a job does not exist — the same 404 `JOB_NOT_FOUND` as a missing
-  one or another company's (permission matrix rows + `CROSS`). No delegate acts for them (D5).
+  scheduled jobs`, before the body). A person the newest or the approved version names sees the job;
+  for anyone else a job does not exist — the same 404 `JOB_NOT_FOUND` as a missing one or another
+  company's (permission matrix rows + `CROSS`). **Control is the approved version's responsible person's
+  only** (`controls`): someone named only in an unapproved draft sees it but cannot pause it (403
+  `JOB_NOT_RESPONSIBLE`). A non-admin resumes only a pause they made themselves (`paused_by`), while
+  still the approved version's responsible person (else 403 `JOB_PAUSED_BY_OTHER`); an owner/admin's
+  pause replaces the responsible person's own. No delegate acts for them (D5).
 - **Approval re-checks** (memo §4-3), inside the write's transaction: the responsible person is a member
-  now (409 `JOB_OWNER_NOT_MEMBER`) and reads every place the version names (`recordReader(...).file`:
-  rules and private folders; 409 `JOB_GRANT_EXCEEDS`, naming no place); a pinned Skill is still the
-  company's at that tree (409 `JOB_SKILL_MISSING` / `JOB_SKILL_CHANGED`: make a new version). A
-  `fingerprint` that is not the version's → 409 `JOB_VERSION_FINGERPRINT`. Acceptance and an
-  owner/admin's resume run the same rights check.
+  now (409 `JOB_OWNER_NOT_MEMBER`), reads every place the version names — read paths, the check's
+  path, where deliverables go (`jobDefinitionPaths`; `recordReader(...).file`: rules and private
+  folders) — and may **write** where the deliverables go (`writes.place`, `resolveAccess`); otherwise 409
+  `JOB_GRANT_EXCEEDS`, naming no place. A pinned Skill is still the company's at that tree (409
+  `JOB_SKILL_MISSING` / `JOB_SKILL_CHANGED`: make a new version). A `fingerprint` that is not the
+  version's → 409 `JOB_VERSION_FINGERPRINT`. **Acceptance and every resume of an approved job run the
+  same rights and Skill checks.**
+- **A company without the shared folder** has no company Skill to pin yet: a procedure job is refused at
+  creation and approval with 409 `JOB_SKILL_NOT_HERE` (plain Japanese, no folder instructions). Pinning a
+  Skill from the Skill shelf comes later (like `STEP_SKILL_NOT_HERE`, `plugin-steps.md`).
 - **Pinned**: approval stores the version and its fingerprint; a later `PUT` adds a version and changes
   neither. `waiting` says why it would not run: `PAUSED`, `COMPANY_STOPPED`, `NOT_APPROVED`, `NOT_ACCEPTED`
   (the approved version's consent ≠ the accepted one).
-- **Names never leak**: a responsible person who is not owner/admin gets a version's `definition: null`
-  when it names a place they cannot read now.
+- **Names never leak**: a responsible person who is not owner/admin gets a version's `definition`,
+  `fingerprint` and `consentFingerprint` as null when it names a place they cannot read now (a sha256 of a
+  known shape would let them test guesses), and the job's name (the newest version's) as 「定期の仕事」
+  (`HIDDEN_JOB_NAME`) unless they read every place the newest version names. A name typed by an admin
+  that mentions a place no version names is not detected (owner/admin write it for that person).
 - **Leaving / rights**: `companies.removeMember` (its transaction, `onMemberLeft`) pauses every job whose
   newest or approved version names them (`OWNER_LEFT`); `changeRole` (`onRoleChanged`) pauses a job whose
   approved version names a place the new role no longer reads (`OWNER_RIGHTS_CHANGED`). Each writes the
-  notice `job_paused` (recordless, `notifications.md`) to every owner / admin; its text is built when read
-  and shown only while the reader is owner / admin. A permission rule changed elsewhere is not looked at
-  here (the run's own checks, PR 5).
+  notice `job_paused` (recordless, `notifications.md`) to every owner / admin and pushes the bare
+  `notifications` signal to them (`noticesChanged`); its text is built when read and shown only while the
+  reader is owner / admin. While the company's records are off the bell is not shown at all (`list`
+  answers `available: false`), so there the pause is seen in the job list (`pausedReason`, PR 4's screen).
+- **Not yet (PR 5)**: rights lost through a permission rule, a group, 所属 or a private folder's readers
+  changing do **not** pause a job here; only leaving the company and a role change do. The run's own
+  check at every call (memo §4-2) covers the rest.
 
 ## Tests (each guard mutation-checked)
 

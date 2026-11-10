@@ -310,6 +310,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const jobs = createJobService({
     ...repos, ...shared,
     skillTree: (companyId, name) => (companyFolders.has(companyId) ? companySkillTree(companyId, name) : Promise.resolve(null)),
+    hasCompanyFolder: companyFolders.has,
+    noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
   })
   const notifications = createNotificationService({
     ...shared,

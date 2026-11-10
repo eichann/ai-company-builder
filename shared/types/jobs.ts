@@ -20,10 +20,10 @@ export type JobWaiting = 'NOT_APPROVED' | 'NOT_ACCEPTED' | 'PAUSED' | 'COMPANY_S
 
 export interface JobVersionView {
   version: number
-  /** `sha256:<hex>` of the canonical definition. */
-  fingerprint: string
-  /** `sha256:<hex>` of what the responsible person accepts (`jobConsentCanonical`). */
-  consentFingerprint: string
+  /** `sha256:<hex>` of the canonical definition; null whenever `definition` is hidden. */
+  fingerprint: string | null
+  /** `sha256:<hex>` of what the responsible person accepts (`jobConsentCanonical`); null whenever `definition` is hidden. */
+  consentFingerprint: string | null
   /** null for a viewer who is not owner/admin when a place it names is not one they read now. */
   definition: JobDefinition | null
   createdBy: string
@@ -36,6 +36,7 @@ export interface JobVersionView {
 
 export interface JobView {
   id: string
+  /** The newest version's name; 「定期の仕事」 for a responsible person who cannot read every place it names. */
   name: string
   state: JobState
   /** The responsible person of the newest version. */

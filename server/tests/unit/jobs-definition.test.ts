@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  JOB_GRANT_TOOLS, OCCURRENCE_ID_RE, isOccurrenceId, jobConsentCanonical, jobDefinitionCanonical, newJobId, newOccurrenceId, parseJobDefinition,
+  JOB_GRANT_TOOLS, OCCURRENCE_ID_RE, isOccurrenceId, jobDefinitionPaths, jobConsentCanonical, jobDefinitionCanonical, newJobId, newOccurrenceId, parseJobDefinition,
   type JobDefinition,
 } from '../../shared/core/jobs'
 import { RECORD_ID_RE, newRecordId } from '../../shared/core/records'
@@ -152,6 +152,15 @@ describe('the consent part (D4)', () => {
     expect(consent(edit(pcJob(), 'missed.policy', 'skip'))).toBe(base)
     // …while the whole definition does.
     expect(jobDefinitionCanonical(parsed(edit(pcJob(), 'name', '別の名前')))).not.toBe(jobDefinitionCanonical(parsed(pcJob())))
+  })
+})
+
+describe('the places a definition names (what approval checks the responsible person against)', () => {
+  it('are the read paths, the check\'s path and where the deliverables go', () => {
+    const def = parsed(edit(edit(pcJob(), 'grant.reads.paths', ['支援/A社/文字起こし', '支援/B社']), 'grant.writes.place', '成果物'))
+    expect(jobDefinitionPaths(def).sort()).toEqual(['成果物', '支援/A社/文字起こし', '支援/B社'].sort())
+    // The check's path is counted on its own too (the parser keeps it among the reads today).
+    expect(jobDefinitionPaths({ ...def, check: { kind: 'new_files', path: '別の場所' } })).toContain('別の場所')
   })
 })
 

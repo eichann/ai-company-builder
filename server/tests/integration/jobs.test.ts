@@ -125,7 +125,14 @@ beforeAll(() => {
   db.prepare("INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES ('priv', ?, '経理部', 'folder', 'priv-repo', ?)").run(CO, TS)
   db.prepare("INSERT INTO scope_rules (id, company_id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('priv-e', ?, 'priv', 'everyone', NULL, 0, 0, ?)").run(CO, TS)
   db.prepare("INSERT INTO scope_rules (id, company_id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('priv-a', ?, 'priv', 'user', 'u-alice', 1, 1, ?)").run(CO, TS)
-  for (const [user, role] of [['u-owner', 'owner'], ['u-admin', 'admin'], ['u-alice', 'member'], ['u-bob', 'member'], ['u-mallory', 'member'], ['u-leaver', 'member'], ['u-boss', 'admin']]) member(CO, user, role)
+  for (const [user, role] of [['u-owner', 'owner'], ['u-admin', 'admin'], ['u-alice', 'member'], ['u-bob', 'member'], ['u-mallory', 'member'], ['u-leaver', 'member'], ['u-boss', 'admin'], ['u-carol', 'member'], ['u-dan', 'admin']]) member(CO, user, role)
+  // 総務: everyone reads; u-mallory may not write there. カロル室: a private folder only u-carol reads.
+  db.prepare("INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('gen', ?, '総務', 'folder', ?)").run(CO, TS)
+  db.prepare("INSERT INTO scope_rules (id, company_id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('gen-m', ?, 'gen', 'user', 'u-mallory', 1, 0, ?)").run(CO, TS)
+  db.prepare("INSERT INTO scope_rules (id, company_id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('gen-e', ?, 'gen', 'everyone', NULL, 1, 1, ?)").run(CO, TS)
+  db.prepare("INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES ('carol', ?, 'カロル室', 'folder', 'carol-repo', ?)").run(CO, TS)
+  db.prepare("INSERT INTO scope_rules (id, company_id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('carol-e', ?, 'carol', 'everyone', NULL, 0, 0, ?)").run(CO, TS)
+  db.prepare("INSERT INTO scope_rules (id, company_id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('carol-c', ?, 'carol', 'user', 'u-carol', 1, 1, ?)").run(CO, TS)
   member(OTHER, 'u-owner', 'owner')
 })
 
@@ -256,6 +263,8 @@ describe('approval checks the responsible person\'s rights now', () => {
     const seen = await as('u-bob', 'GET', `/jobs/${job.id}`)
     expect(seen.status).toBe(200)
     expect(seen.body.data.versions[0].definition).toBeNull()
+    // …nor its fingerprints (a hash of a known shape lets someone test guesses of a place's name).
+    expect(seen.body.data.versions[0]).toMatchObject({ fingerprint: null, consentFingerprint: null })
     expect(JSON.stringify(seen.body)).not.toContain('経理部')
   })
 
@@ -315,6 +324,170 @@ describe('the responsible person leaves or loses rights', () => {
   })
 })
 
+describe('review fixes (Codex on #669)', () => {
+  const owner = { companyId: CO, userId: 'u-owner', role: 'owner' }
+
+  it('a job named after a place the responsible person cannot read shows them a neutral name, in the list and the detail', async () => {
+    const r = await jobsWithSkill('tree-a').create(owner, { definition: { ...procedureJob('u-bob', '経理部/reports'), name: '経理部の月次報告' } })
+    if (!r.ok) throw new Error(JSON.stringify(r.body))
+    const list = await as('u-bob', 'GET', '/jobs')
+    const detail = await as('u-bob', 'GET', `/jobs/${r.value.id}`)
+    expect(list.body.data.jobs.find((j: Json) => j.id === r.value.id).name).toBe('定期の仕事')
+    expect(detail.body.data.name).toBe('定期の仕事')
+    for (const body of [list.body, detail.body]) expect(JSON.stringify(body)).not.toContain('経理部')
+    // The owner reads every place: the real name.
+    expect((await as('u-owner', 'GET', `/jobs/${r.value.id}`)).body.data.name).toBe('経理部の月次報告')
+  })
+
+  it('an unreadable draft renaming the responsible person\'s approved job does not show them its name', async () => {
+    const job = await approved(operationJob('u-bob', 'ボブの週次'))
+    expect((await as('u-bob', 'GET', `/jobs/${job.id}`)).body.data.name).toBe('ボブの週次')
+    const draft = await jobsWithSkill('tree-a').update(owner, job.id, { definition: { ...procedureJob('u-bob', '経理部/reports'), name: '経理部の件' } })
+    if (!draft.ok) throw new Error(JSON.stringify(draft.body))
+    const seen = await as('u-bob', 'GET', `/jobs/${job.id}`)
+    expect(seen.body.data.name).toBe('定期の仕事')
+    expect(JSON.stringify(seen.body)).not.toContain('経理部')
+    expect(JSON.stringify((await as('u-bob', 'GET', '/jobs')).body)).not.toContain('経理部')
+  })
+
+  it('only the person who paused resumes, while still the approved version\'s responsible person', async () => {
+    const def = operationJob('u-bob', '二人の責任者')
+    const job = await approved(def)
+    expect((await as('u-bob', 'POST', `/jobs/${job.id}/pause`)).body.data.pausedReason).toBe('BY_RESPONSIBLE')
+    // A draft naming Alice: she now sees the job, but did not pause it.
+    expect((await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, actingUser: 'u-alice' } })).status).toBe(200)
+    const byAlice = await as('u-alice', 'POST', `/jobs/${job.id}/resume`)
+    expect(byAlice.status).toBe(403)
+    expect(jobRow(job.id)).toMatchObject({ state: 'paused', paused_reason: 'BY_RESPONSIBLE' })
+    expect((await as('u-bob', 'POST', `/jobs/${job.id}/resume`)).body.data.state).toBe('active')
+    // Once Alice's version is approved, Bob is no longer its responsible person: his earlier pause is not his to lift.
+    await as('u-bob', 'POST', `/jobs/${job.id}/pause`)
+    await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 2 })
+    expect((await as('u-bob', 'POST', `/jobs/${job.id}/resume`)).status).toBe(404)
+    expect((await as('u-alice', 'POST', `/jobs/${job.id}/resume`)).status).toBe(403)
+    expect(jobRow(job.id).state).toBe('paused')
+    // A newer draft names Bob again: he sees the job, but the approved version is Alice's — still not his pause to lift.
+    await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, name: 'ボブに戻す案' } })
+    expect((await as('u-bob', 'POST', `/jobs/${job.id}/resume`)).status).toBe(403)
+    expect(jobRow(job.id).state).toBe('paused')
+  })
+
+  it('a Skill deleted or changed after approval refuses acceptance and an owner/admin\'s resume', async () => {
+    const made = await jobsWithSkill('tree-a').create(owner, { definition: procedureJob('u-alice', '経理部/文字起こし') })
+    if (!made.ok) throw new Error(JSON.stringify(made.body))
+    const id = made.value.id
+    if (!(await jobsWithSkill('tree-a').approve(owner, id, { version: 1 })).ok) throw new Error('approve')
+    const alice = { companyId: CO, userId: 'u-alice', role: 'member' }
+    const missing = await jobsWithSkill(null).accept(alice, id, { version: 1 })
+    expect(!missing.ok && missing.body.code).toBe('JOB_SKILL_MISSING')
+    const changed = await jobsWithSkill('tree-b').accept(alice, id, { version: 1 })
+    expect(!changed.ok && changed.body.code).toBe('JOB_SKILL_CHANGED')
+    expect(jobRow(id).accepted_consent).toBeNull()
+    expect((await jobsWithSkill('tree-a').accept(alice, id, { version: 1 })).ok).toBe(true)
+    // Paused by an admin, then the Skill changes: the admin's resume is refused, the job stays paused.
+    jobsWithSkill('tree-a').pause(owner, id)
+    const resumeChanged = await jobsWithSkill('tree-b').resume(owner, id)
+    expect(!resumeChanged.ok && resumeChanged.body.code).toBe('JOB_SKILL_CHANGED')
+    const resumeMissing = await jobsWithSkill(null).resume(owner, id)
+    expect(!resumeMissing.ok && resumeMissing.body.code).toBe('JOB_SKILL_MISSING')
+    expect(jobRow(id).state).toBe('paused')
+    expect((await jobsWithSkill('tree-a').resume(owner, id)).ok).toBe(true)
+  })
+})
+
+describe('independent review fixes on #669', () => {
+  const owner = { companyId: CO, userId: 'u-owner', role: 'owner' }
+  /** A PC job reading `read` and writing its deliverables under `place`. */
+  const writingJob = (actingUser: string, read: string, place: string) => {
+    const base = procedureJob(actingUser, read) as Json
+    return { ...base, grant: { ...base.grant, tools: ['files_read', 'files_write', 'records'], writes: { area: 'deliverable', place, folder: 'reports' } } }
+  }
+
+  it('acceptance re-checks the rights: a place the person no longer reads refuses it', async () => {
+    const made = await jobsWithSkill('tree-a').create(owner, { definition: procedureJob('u-carol', 'カロル室/文字起こし') })
+    if (!made.ok) throw new Error(JSON.stringify(made.body))
+    if (!(await jobsWithSkill('tree-a').approve(owner, made.value.id, { version: 1 })).ok) throw new Error('approve')
+    db.prepare("UPDATE scope_rules SET can_read = 0 WHERE company_id = ? AND id = 'carol-c'").run(CO)
+    try {
+      const r = await jobsWithSkill('tree-a').accept({ companyId: CO, userId: 'u-carol', role: 'member' }, made.value.id, { version: 1 })
+      expect(!r.ok && r.body.code).toBe('JOB_GRANT_EXCEEDS')
+      expect(jobRow(made.value.id).accepted_consent).toBeNull()
+    } finally {
+      db.prepare("UPDATE scope_rules SET can_read = 1 WHERE company_id = ? AND id = 'carol-c'").run(CO)
+    }
+  })
+
+  it('acceptance with a fingerprint that is not the version\'s is refused', async () => {
+    const job = await approved(operationJob('u-bob', '受け取りの指紋'))
+    const r = await as('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1, fingerprint: `sha256:${'0'.repeat(64)}` })
+    expect(r.status).toBe(409)
+    expect(r.body.code).toBe('JOB_VERSION_FINGERPRINT')
+    expect(jobRow(job.id).accepted_consent).toBeNull()
+  })
+
+  it('an owner/admin\'s pause over the responsible person\'s own is no longer theirs to lift', async () => {
+    const job = await approved(operationJob('u-bob', '上から止める'))
+    await as('u-bob', 'POST', `/jobs/${job.id}/pause`)
+    expect((await as('u-owner', 'POST', `/jobs/${job.id}/pause`)).body.data.pausedReason).toBe('ADMIN')
+    expect((await as('u-bob', 'POST', `/jobs/${job.id}/resume`)).status).toBe(403)
+    expect(jobRow(job.id)).toMatchObject({ state: 'paused', paused_reason: 'ADMIN' })
+  })
+
+  it('someone named only in an unapproved draft sees the job but cannot pause it', async () => {
+    const def = operationJob('u-bob', '案だけの人')
+    const job = await approved(def)
+    await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, actingUser: 'u-alice' } })
+    expect((await as('u-alice', 'GET', `/jobs/${job.id}`)).status).toBe(200)
+    const r = await as('u-alice', 'POST', `/jobs/${job.id}/pause`)
+    expect(r.status).toBe(403)
+    expect(jobRow(job.id).state).toBe('active')
+  })
+
+  it('a role change leaves a job the server already paused as it was, and tells nobody again', async () => {
+    const made = await jobsWithSkill('tree-a').create(owner, { definition: procedureJob('u-dan', '経理部/文字起こし') })
+    if (!made.ok) throw new Error(JSON.stringify(made.body))
+    if (!(await jobsWithSkill('tree-a').approve(owner, made.value.id, { version: 1 })).ok) throw new Error('approve')
+    db.prepare("UPDATE ai_jobs SET state = 'paused', paused_reason = 'OWNER_LEFT' WHERE company_id = ? AND id = ?").run(CO, made.value.id)
+    const before = pausedNotices('u-owner').length
+    expect(services.companies.changeRole(owner, 'u-dan', 'member').ok).toBe(true)
+    expect(jobRow(made.value.id)).toMatchObject({ state: 'paused', paused_reason: 'OWNER_LEFT' })
+    expect(pausedNotices('u-owner').length).toBe(before)
+  })
+
+  it('approval checks where the deliverables go: read and write there', async () => {
+    // Reads 総務 (allowed), writes under 秘書室 (cannot read it).
+    const unreadable = await jobsWithSkill('tree-a').create(owner, { definition: writingJob('u-mallory', '総務/x', '秘書室') })
+    if (!unreadable.ok) throw new Error(JSON.stringify(unreadable.body))
+    const r1 = await jobsWithSkill('tree-a').approve(owner, unreadable.value.id, { version: 1 })
+    expect(!r1.ok && r1.body.code).toBe('JOB_GRANT_EXCEEDS')
+    // Reads and writes under 総務, where u-mallory reads but may not write.
+    const unwritable = await jobsWithSkill('tree-a').create(owner, { definition: writingJob('u-mallory', '総務/x', '総務') })
+    if (!unwritable.ok) throw new Error(JSON.stringify(unwritable.body))
+    const r2 = await jobsWithSkill('tree-a').approve(owner, unwritable.value.id, { version: 1 })
+    expect(!r2.ok && r2.body.code).toBe('JOB_GRANT_EXCEEDS')
+    // u-alice may: approved.
+    const fine = await jobsWithSkill('tree-a').create(owner, { definition: writingJob('u-alice', '総務/x', '総務') })
+    if (!fine.ok) throw new Error(JSON.stringify(fine.body))
+    expect((await jobsWithSkill('tree-a').approve(owner, fine.value.id, { version: 1 })).ok).toBe(true)
+  })
+
+  it('a company without the shared folder is told plainly that a Skill job cannot be made yet', async () => {
+    const r = await jobsWithSkill(null, { folder: false }).create(owner, { definition: procedureJob('u-alice', '経理部/文字起こし') })
+    expect(!r.ok && r.body.code).toBe('JOB_SKILL_NOT_HERE')
+    expect(!r.ok && r.body.error).not.toContain('.claude')
+  })
+
+  it('a pause the server made tells the owners\' and admins\' apps at once', async () => {
+    const job = await approved(operationJob('u-carol', 'すぐ知らせる'))
+    const told: string[][] = []
+    jobsWithSkill('tree-a', { noticesChanged: (_c, ids) => told.push(ids) }).memberLeft(CO, 'u-carol', 'u-owner')
+    expect(jobRow(job.id).paused_reason).toBe('OWNER_LEFT')
+    expect(told).toHaveLength(1)
+    expect(told[0]).toEqual(expect.arrayContaining(['u-owner', 'u-admin']))
+    expect(told[0]).not.toContain('u-bob')
+  })
+})
+
 describe('pause, resume and the company\'s stop', () => {
   it('the responsible person pauses their own job and resumes only their own pause', async () => {
     const job = await approved(operationJob('u-bob', '止める'))
@@ -342,10 +515,11 @@ describe('pause, resume and the company\'s stop', () => {
 })
 
 /** A job service on the same database whose company Skill reads `tree` (null: none). */
-function jobsWithSkill(tree: string | null) {
+function jobsWithSkill(tree: string | null, opts: { folder?: boolean; noticesChanged?: (companyId: string, userIds: string[]) => void } = {}) {
   return createJobService({
     companyData: sqliteCompanyData(db), memberships: sqliteMembershipRepository(db), transactions: sqliteTransactions(db),
     clock: systemClock, ids: randomIds, skillTree: async () => (tree === null ? null : `${tree.replace(/[^0-9a-f]/g, '')}${'0'.repeat(40)}`.slice(0, 40)),
+    hasCompanyFolder: () => opts.folder ?? true, noticesChanged: opts.noticesChanged,
   })
 }
 /** A PC job made through a service whose Skill reads 'tree-a' (the HTTP route's company has no repository here). */
