@@ -21,6 +21,8 @@ export interface RecordToolProviderDeps {
 export interface RecordToolTurn {
   companyId: string
   companyRoot: string | null
+  /** The やること the consultation is about now (read at each use; null without one). */
+  topicTask?: () => string | null
 }
 
 export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordToolTurn): RecordToolProvider[] {
@@ -29,7 +31,7 @@ export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordTo
   // Google Drive's tools (google-drive.md); each turn asks the server whether Drive is set up for the company.
   if (drivePicking && paths) {
     providers.push((access, signal) => createDriveTools(access, {
-      picking: drivePicking, companyId: turn.companyId, companyRoot: turn.companyRoot,
+      picking: drivePicking, companyId: turn.companyId, companyRoot: turn.companyRoot, topicTask: turn.topicTask,
       local: { pathGuard: paths, notDownloaded: notDownloadedFolders, privateFolders: () => deps.privateFolders.readable(turn.companyId) },
     }, signal))
   }

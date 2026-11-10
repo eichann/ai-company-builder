@@ -330,6 +330,8 @@ registerTasksIpc(ipc, {
     const r = await drivePicking.pick(companyId, 'files', undefined, { fileIds })
     return r.ok ? { ok: true, files: r.picks.filter(p => p.kind === 'file').map(p => ({ id: p.id, name: p.name })) } : { ok: false, cancelled: r.reason === 'cancelled', message: r.message }
   },
+  // …offered first from the member's own picked / put files (their names, the member's own).
+  driveChoices: async companyId => (await drivePicking.ownFiles(companyId)).map(f => ({ id: f.id, name: f.name, source: f.source })),
 })
 // The chat card's 「変更前の値を書き戻す」: the person's own action, with the session (never the AI's token).
 registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })

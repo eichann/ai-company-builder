@@ -36,7 +36,7 @@ import {
 } from '../../shared/core/google-drive'
 import { INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
 import { neutralizeOutsideText, outsideTextFlags } from '../../shared/core/outside-text'
-import type { DriveAiStatus, DrivePick, DrivePickerSession, DrivePicksResult, DrivePutAnswer, DrivePutView, DriveReadAnswer } from '../../shared/types/google-drive'
+import type { DriveAiStatus, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerSession, DrivePicksResult, DrivePutAnswer, DrivePutView, DriveReadAnswer } from '../../shared/types/google-drive'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { DrivePickRow, DrivePutRow } from '../ports/google-drive'
@@ -85,6 +85,7 @@ const REQUEST_KEY_RE = /^[A-Za-z0-9_.:-]{8,100}$/
 const SHA256_RE = /^[0-9a-f]{64}$/
 const TRUNCATED = '\n【長いため、ここから先は省きました】'
 const PICKS_LISTED = 20
+const OWN_FILES_LISTED = 30
 const PERMISSION_PAGES = 5
 
 const STOPPED = 'この会社では、いま Google につなげません（止められているか、まだ設定されていません）。'
@@ -269,18 +270,23 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     /**
      * A file the member picked, checked for linking it to a record (session only; the records route
      * asks it before the engine links, records.md "File links without the shared folder"). Only the
-     * member's own live pick of a file, opened with their own `drive.file` token — never anyone
-     * else's, never to look at a file someone else linked. The revision is Drive's `headRevisionId`
+     * member's own live pick of a file, or a file their own put made (done), opened with their own
+     * `drive.file` token — never anyone else's, never to look at a file someone else linked. The revision is Drive's `headRevisionId`
      * (a binary file) or `version:<n>` (a Google document, which has no head revision); the sha256 is
      * over the bytes ACB read (Docs / Slides / Sheets exported as `read` does, others downloaded,
      * ≤ 10 MB), null when that failed or the type cannot be read. Nothing of the content is kept.
      */
     async linkable(member: Member, fileId: unknown): Promise<Outcome<DriveLinkableFile>> {
       if (!isDriveId(fileId)) return refuse('bad-request', 'fileId must be a Drive id')
-      const pick = handle(member.companyId).googleDrive.pick(member.userId, fileId, clock.now())
-      if (!pick || pick.kind !== 'file') {
+      const h = handle(member.companyId).googleDrive
+      const live = h.pick(member.userId, fileId, clock.now())
+      // A live pick of a file, or a file the member's own put made (ACB created it, so drive.file opens it).
+      const pick = live?.kind === 'file' ? live : null
+      const put = pick ? null : h.putOfFile(member.userId, fileId)
+      if (!pick && !put) {
         return refuse('forbidden', 'Google Drive で選んだファイルだけをつなげます。もう一度選んでください。', { code: 'DRIVE_NOT_PICKED' })
       }
+      const knownName = pick?.name ?? put?.name ?? ''
       const noAccess = 'このファイルを Google Drive から開けませんでした（消されたか、見られなくなった可能性があります）。'
       const m = await drive(member.companyId, member.userId, {
         method: 'GET', path: `/drive/v3/files/${fileId}`,
@@ -302,7 +308,39 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           : await drive(member.companyId, member.userId, { method: 'GET', path: `/drive/v3/files/${fileId}`, query: { alt: 'media', supportsAllDrives: 'true' }, binary: true, operation: 'drive.files.download' })
         if (r.ok && r.bytes && r.bytes.byteLength <= DRIVE_READ_PDF_MAX_BYTES) sha256 = deps.sha256(r.bytes)
       }
-      return ok({ fileId, revisionId, name: (str(f.name) ?? pick.name).normalize('NFC').slice(0, 300), mimeType, sha256 })
+      return ok({ fileId, revisionId, name: (str(f.name) ?? knownName).normalize('NFC').slice(0, 300), mimeType, sha256 })
+    },
+
+    /**
+     * The file a put of this member made, to link it to the consultation's record right after the put
+     * (records.md "File links without the shared folder"): the receipt is the proof — the member's own
+     * put, done, Drive's file id known. Its facts come from the receipt (the revision Drive answered,
+     * the name as put, the sha256 of the bytes ACB uploaded); Google is not asked again. Null otherwise.
+     */
+    putLinkable(member: Member, putId: string): DriveLinkableFile | null {
+      const row = handle(member.companyId).googleDrive.put(member.userId, putId)
+      if (!row || row.state !== 'done' || !row.fileId || !isDriveId(row.fileId)) return null
+      return { fileId: row.fileId, revisionId: row.revisionId, name: row.name, mimeType: row.mimeType, sha256: row.sha256 }
+    },
+
+    /**
+     * GET …/me/google/drive/files (session): the member's own Drive files ACB may open — live picks of a
+     * file and the files their puts made — with their names (the member's own), newest first, for the
+     * app's 「Google Drive のファイルをつなぐ」. Only the caller's own rows; nothing asked of Google.
+     * Empty while Drive is not available for the company (the app then opens the Picker, which says why).
+     */
+    async ownFiles(member: Member): Promise<Outcome<DriveOwnFiles>> {
+      if (!(await available(member.companyId))) return ok({ files: [] })
+      const h = handle(member.companyId).googleDrive
+      const now = clock.now()
+      const out = new Map<string, DriveOwnFile>()
+      for (const p of h.picks(member.userId, now, OWN_FILES_LISTED)) {
+        if (p.kind === 'file') out.set(p.fileId, { id: p.fileId, name: p.name, mimeType: p.mimeType, source: 'picked', at: p.pickedAt })
+      }
+      for (const p of h.donePuts(member.userId, OWN_FILES_LISTED)) {
+        if (p.fileId && !out.has(p.fileId)) out.set(p.fileId, { id: p.fileId, name: p.name, mimeType: p.mimeType, source: 'put', at: p.finishedAt ?? p.createdAt })
+      }
+      return ok({ files: [...out.values()].sort((a, b) => b.at.localeCompare(a.at)).slice(0, OWN_FILES_LISTED) })
     },
 
     /** POST /api/records-ai/google/drive/read { fileId } (any token): a picked file, as outside text (or a PDF's bytes). */

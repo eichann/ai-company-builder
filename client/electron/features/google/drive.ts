@@ -27,7 +27,7 @@ import {
 import { isSameOrAncestorPath, pathKey } from '../../../../shared/core/paths'
 import { INSTRUCTION_LIKE_WORDS } from '../../../../shared/core/instruction-like'
 import { outsideBracketsNote, outsideTextFlags, wrapOutsideText } from '../../../../shared/core/outside-text'
-import type { DriveAiStatus, DrivePick, DrivePickerSession, DrivePicksResult, DrivePutAnswer, DriveReadAnswer } from '../../../../shared/types/google-drive'
+import type { DriveAiStatus, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerSession, DrivePicksResult, DrivePutAnswer, DriveReadAnswer } from '../../../../shared/types/google-drive'
 import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from '../../../shared/google'
 import { RecordsApiError, type RecordTurnAccess } from '../../records/api'
 import type { ExtraRecordTools, RecordToolDescriptor } from '../../records/tools'
@@ -65,18 +65,19 @@ export function createDrivePicking(deps: DrivePickingDeps) {
   const sleep = deps.sleep ?? (ms => new Promise(r => setTimeout(r, ms)))
   const log = deps.log ?? console
 
-  async function session(companyId: string, rest: string, body: unknown): Promise<{ status: number; json: { data?: unknown; error?: unknown; code?: unknown } } | null> {
+  async function session(companyId: string, rest: string, body?: unknown): Promise<{ status: number; json: { data?: unknown; error?: unknown; code?: unknown } } | null> {
     const base = deps.baseUrl()
     if (!base) return null
+    const method = body === undefined ? 'GET' : 'POST'
     try {
       const res = await doFetch(`${base}/api/companies/${encodeURIComponent(companyId)}/me/google/drive${rest}`, {
-        method: 'POST', redirect: 'error',
-        headers: { Cookie: deps.cookies().join('; '), 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        method, redirect: 'error',
+        headers: { Cookie: deps.cookies().join('; '), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       })
       return { status: res.status, json: await res.json().catch(() => ({})) as { data?: unknown } }
     } catch {
-      log.warn(`[google-drive] POST ${rest}: the server could not be reached`)
+      log.warn(`[google-drive] ${method} ${rest}: the server could not be reached`)
       return null
     }
   }
@@ -100,6 +101,20 @@ export function createDrivePicking(deps: DrivePickingDeps) {
   }
 
   return {
+    /**
+     * The member's own Drive files ACB may open (live picks of a file, files their puts made), with
+     * names, newest first — what 「Google Drive のファイルをつなぐ」 offers before the Picker. Empty when
+     * there are none, Drive is not available, an older server, or the server could not be reached
+     * (the Picker then opens as before and says why).
+     */
+    async ownFiles(companyId: string): Promise<DriveOwnFile[]> {
+      const a = await session(companyId, '/files')
+      const files = a?.status === 200 ? (a.json.data as DriveOwnFiles | undefined)?.files : undefined
+      if (!Array.isArray(files)) return []
+      return files.filter(f => f && isDriveId(f.id) && typeof f.name === 'string' && (f.source === 'picked' || f.source === 'put'))
+        .map(f => ({ id: f.id, name: f.name, mimeType: typeof f.mimeType === 'string' ? f.mimeType : '', source: f.source, at: typeof f.at === 'string' ? f.at : '' }))
+    },
+
     /**
      * `fileIds` (files mode only): files the Picker shows first — a Drive link the member pasted on
      * a task card. Only Drive ids reach the window; the member's 「選択」 there is still the pick.
@@ -222,6 +237,11 @@ export interface DriveToolsDeps {
   /** The consultation's company folder (drive_put / a picked PDF); without one those two say so. */
   companyRoot: string | null
   local: LocalFileDeps
+  /**
+   * The やること the consultation is about (its topic), read at each put: the server then links the put
+   * file to it (records.md "File links without the shared folder"). The app's, never the AI's input.
+   */
+  topicTask?: () => string | null
 }
 
 const json = (v: unknown) => JSON.stringify(v)
@@ -314,14 +334,18 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
         const named = checkDriveFileName(typeof input.name === 'string' ? input.name : file.name, file.kind)
         if ('error' in named) return json({ error: named.error })
         const sha256 = createHash('sha256').update(file.bytes).digest('hex')
+        let recordId: string | null = null
+        try { recordId = deps.topicTask?.() ?? null } catch { /* no topic: nothing to link */ }
         try {
           const a = await access.call('POST', '/google/drive/put', {
             folderId: input.folderId, name: named.name, kind: file.kind, sha256, contentBase64: Buffer.from(file.bytes).toString('base64'),
             requestKey: drivePutRequestKey(String(input.folderId), named.name, sha256),
+            ...(recordId ? { recordId } : {}),
           }, signal, { timeoutMs: PUT_TIMEOUT_MS }) as DrivePutAnswer
           const p = a.drivePut
           return json({
             state: p.state, existing: a.existing, name: p.name, folderName: p.folderName, link: p.link, fileId: p.fileId, revisionId: p.revisionId,
+            ...(a.linkedTo ? { linkedToTask: true, note: 'この相談のやることに、このファイルをつなぎました（つないだのはアプリです。あなたがつなぐ必要はありません）。' } : {}),
             ...(p.state === 'done' ? {} : { instruction: '置けたか分かりません。もう一度置かず、メンバーに Google Drive のフォルダを確かめてもらってください。' }),
           })
         } catch (error) {

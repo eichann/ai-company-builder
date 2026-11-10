@@ -1,15 +1,21 @@
 // The card's ［Google Drive のファイルをつなぐ］ (a company without the shared folder) and the box a
-// Drive link is pasted into: either opens Google's own file chooser, where the member's 「選択」 is
-// the pick (google-drive.md); a pasted link only decides what that chooser shows first.
+// Drive link is pasted into. The button first offers the member's own picked / put files (DriveFiles),
+// else Google's own file chooser, where the member's 「選択」 is the pick (google-drive.md); a pasted link
+// goes straight to that chooser and only decides what it shows first.
 import { useState } from 'react'
-import { Plus } from '@phosphor-icons/react'
+import type { TaskDriveChoice } from '../../../../shared/tasks'
+import { DriveFiles } from './DriveFiles'
 
-export function DriveLinkAction({ busy, usable, note, onPick, onLinkText }: {
+export function DriveLinkAction({ companyId, linked, busy, usable, note, onLink, onLinkText }: {
+  companyId: string
+  /** Drive files already linked to this task. */
+  linked: readonly string[]
   busy: boolean
   /** False when the company has not set Drive up: the button is off and `note` says who can. */
   usable: boolean
   note: string | null
-  onPick: () => void
+  /** `chosen` = files from the member's own list; absent = Google's chooser. null = done; else why not. */
+  onLink: (chosen?: TaskDriveChoice[]) => Promise<string | null>
   /** A pasted link (or links): the caller reads the Drive ids and opens the chooser with them. */
   onLinkText: (text: string) => void
 }) {
@@ -17,8 +23,7 @@ export function DriveLinkAction({ busy, usable, note, onPick, onLinkText }: {
   const send = (value: string) => { if (value.trim() !== '') { setText(''); onLinkText(value) } }
   return (
     <div className="mt-0.5 flex flex-col items-start gap-1">
-      <button type="button" disabled={busy || !usable} onClick={onPick} data-link-drive
-        className="inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />Google Drive のファイルをつなぐ</button>
+      <DriveFiles companyId={companyId} linked={linked} busy={busy} usable={usable} onLink={onLink} />
       {usable && (
         <input type="text" value={text} disabled={busy} data-drive-link-paste aria-label="Google Drive のリンクを貼りつけてつなぐ"
           placeholder="Drive のリンクを貼りつけてもつなげます"

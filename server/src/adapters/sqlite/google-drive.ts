@@ -72,6 +72,15 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
       const r = conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND id = ?`).get(companyId, userId, id) as PutRow | undefined
       return r ? toPut(r) : null
     },
+    putOfFile(userId, fileId) {
+      const r = conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND file_id = ? AND state = 'done'
+        ORDER BY created_at DESC, id LIMIT 1`).get(companyId, userId, fileId) as PutRow | undefined
+      return r ? toPut(r) : null
+    },
+    donePuts(userId, limit) {
+      return (conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND state = 'done' AND file_id IS NOT NULL
+        ORDER BY created_at DESC, id LIMIT ?`).all(companyId, userId, limit) as PutRow[]).map(toPut)
+    },
     settlePut(id, f) {
       return conn.prepare(`UPDATE google_drive_puts SET state = ?, file_id = ?, revision_id = ?, link = ?, reason = ?, finished_at = ?
         WHERE company_id = ? AND id = ? AND state IN ('sending', 'unknown')`)

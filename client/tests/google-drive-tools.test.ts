@@ -84,7 +84,7 @@ function picking(server: ReturnType<typeof fakeServer>, over: Partial<DrivePicki
   return { p: createDrivePicking(deps), opened, connects, logs, withoutDrive: () => { features = ['minutes'] } }
 }
 
-async function tools(scope: 'read' | 'act', root: string | null, opts: { available?: boolean; pdf?: boolean } = {}, pick = picking(fakeServer(scope))) {
+async function tools(scope: 'read' | 'act', root: string | null, opts: { available?: boolean; pdf?: boolean; topicTask?: () => string | null } = {}, pick = picking(fakeServer(scope))) {
   const server = fakeServer(scope, opts)
   const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => [SESSION], fetch: server.fetch })
   const access = await api.openTurn('co', { conversationId: 'conv-1', agent: 'claude-code', scope })
@@ -92,7 +92,7 @@ async function tools(scope: 'read' | 'act', root: string | null, opts: { availab
   if (root) roots.add(root)
   const t = await createRecordTools(access!, undefined, {
     companyId: 'co', conversationId: 'conv-1',
-    toolProviders: [a => createDriveTools(a, { picking: pick.p, companyId: 'co', companyRoot: root, local: { pathGuard: roots, notDownloaded: () => ['営業部/置いていない'], privateFolders: () => ['人事'] } })],
+    toolProviders: [a => createDriveTools(a, { picking: pick.p, companyId: 'co', companyRoot: root, local: { pathGuard: roots, notDownloaded: () => ['営業部/置いていない'], privateFolders: () => ['人事'] }, topicTask: opts.topicTask })],
   })
   return { t: t!, seen: server.seen, pick }
 }
@@ -221,6 +221,23 @@ test('drive_put: only a PDF / HTML inside the company folder, never a private or
   assert.equal(sent[1].kind, 'html')
   // The record token, never the session.
   for (const s of seen.filter(x => x.url.includes('/records-ai/'))) assert.equal(s.headers.Cookie, undefined)
+})
+
+test('drive_put names the consultation\'s やること (the app\'s topic, read at each put) so the server links the file; never one the AI chose', async () => {
+  const root = companyFolder()
+  let topic: string | null = 'task-0123456789abcdef'
+  const { t, seen } = await tools('act', root, { topicTask: () => topic })
+  const sent = () => seen.filter(s => s.url.endsWith('/google/drive/put')).map(s => JSON.parse(s.body!))
+  await t.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER })
+  assert.equal(sent()[0].recordId, 'task-0123456789abcdef')
+  // The topic taken off (or none): nothing named, the put as before.
+  topic = null
+  await t.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER })
+  assert.equal('recordId' in sent()[1], false)
+  // The AI cannot name a record itself.
+  const forged = JSON.parse(await t.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER, recordId: 'task-ffffffffffffffff' }))
+  assert.ok(typeof forged.error === 'string')
+  assert.equal(sent().length, 2)
 })
 
 test('the same file, folder and name → the same request key; anything else → another', () => {

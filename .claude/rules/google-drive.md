@@ -101,6 +101,12 @@ already-granted features are added by the server) and waits ≤ 2 minutes for th
 
 ## Picks (`google_drive_picks`)
 
+`GET /me/google/drive/files` (session): the member's **own** live file picks and the files their
+puts made (done), with names, newest first, ≤ 30 (`ownFiles`; nothing asked of Google; empty while
+Drive is not available) — what the app's 「Google Drive のファイルをつなぐ」 offers before the Picker.
+Only the caller's rows: another member's names never reach them (test 「the member's own files for
+「つなぐ」」).
+
 `POST /me/google/drive/picks { mode, ids }` (session; folder: 1 id, files: ≤ 10): each id is
 opened with Google first (`drive.file` answers only for files picked for this app); a folder
 must be a folder the member can add to, a file a readable type (`DRIVE_READ_AS`); anything else
@@ -116,7 +122,7 @@ The AI reads and writes **only** the member's own live picks.
   the text's `【】` → `〔〕`, server and app, `shared/core/outside-text.ts`), ≤ 200 000
   characters; a PDF (≤ 10 MB) as base64 — the app saves it at
   `.personal/google-drive/<id16>-<name>.pdf` (never synced) and returns the path.
-- `POST /put` (act token) `{ folderId, name, kind: pdf|html, sha256, contentBase64, requestKey }`:
+- `POST /put` (act token) `{ folderId, name, kind: pdf|html, sha256, contentBase64, requestKey, recordId? }`:
   checks in order: kind allowlist → name (one segment, the kind's extension) → key / sha
   shapes → size → sha256 matches → content (`%PDF-`, UTF-8 without NUL) → folder is a live
   folder pick → **receipt first** (`claimPut`, unique per member + requestKey; same key with
@@ -131,6 +137,16 @@ The AI reads and writes **only** the member's own live picks.
   `GET /puts/:putId` and repeat; never re-sent. Refused / not sent → the receipt is removed.
   An AI put's receipt copies the Skills its consultation had used (`skills`, records.md "Which
   Skill"); `drive_put` waits for a Skill report still in flight (`records/api.ts` `beforeWrite`).
+- **Linked to the consultation's やること** (owner decision 2026-11-09): with `recordId` (the app sets it
+  from the consultation's topic, `taskTopicOf`, read at each put — never from the AI's input; the tool's
+  schema is strict), once a **new** put is `done` (`existing: false`; a replay links nothing, even after
+  the member took the link off) the route links its file to that record: `putLinkable` builds the
+  `VerifiedDriveFile` from **the member's own receipt** (fileId, revision, the name as put, the sha256 of
+  the bytes uploaded — Google is not asked again; no body's file id is ever taken), and
+  `recordEngine.linkDrivePut` runs every record check of `fileLink` (records on, readable, a type the AI
+  may act on, a company without the shared folder, not linked already) at the version current now, as
+  the AI (the one Drive link the AI may make). Answered as `linkedTo: { recordId }`; any refusal or
+  error is logged with its code only and **never fails the put**. The tool says the file was linked.
 - Confirmation: putting into the member's **own / internal** folder they picked is not sending
   outside — the pick is the person's choice of destination, so no per-file confirmation; a
   folder visible outside the company is sending outside, which stays a person's act
@@ -153,18 +169,22 @@ The AI reads and writes **only** the member's own live picks.
 kind: 'drive', fileId } }`, only for a company without the shared folder, and only **after every record
 check passed** (`recordEngine.fileLinkBeforeDrive`: records on, the record exists and is readable, the
 body, the version, not linked already; a refusal there asks Google nothing): the member's own live
-pick of a file (else 403 `DRIVE_NOT_PICKED`, nothing asked of Google), `files.get` with **their own**
+pick of a file, or a file **their own** put made (`putOfFile`: ACB created it, so `drive.file` opens it;
+another member's put is not theirs) (else 403 `DRIVE_NOT_PICKED`, nothing asked of Google), `files.get` with **their own**
 token (`id,name,mimeType,trashed,headRevisionId,version`), then the content read as `read` does
 (export / download, ≤ 10 MB) only to compute its sha256 — nothing of it kept or logged. Never called
 for anyone but the member linking, never to look at a file someone else linked: other readers get
-the row without its name and open it in Drive. The app's 「Google Drive のファイルをつなぐ」 is this
+the row without its name and open it in Drive. The app's 「Google Drive のファイルをつなぐ」 first offers
+the member's own files (`createDrivePicking().ownFiles` → `tasks:driveChoices`; `tasks-ui.md` "Linking
+files"; `tasks:linkDriveFiles(…, { chosen })` links them without the Picker) and otherwise is this
 connector's Picker flow (`createDrivePicking().pick(companyId, 'files')`, composed in `main.ts` into
-`tasks:linkDriveFiles`; a pasted link: "Picker and its token" above). The card's button is off with
+`tasks:linkDriveFiles`; a pasted link: `{ fileIds }`, "Picker and its token" above, straight to the
+Picker). The card's button is off with
 「…会社の管理者による準備が必要です…」 while `MyGoogle` says Google is unavailable or `drive` is not in
 `companyFeatures` (the Picker not registered; `driveLinkView`, `client/shared/google.ts`, from
 `google:status`; stopped by the operator or the server not ready → the app's usual `GOOGLE_UNAVAILABLE_TEXT`
 instead), says before the first press that Google will ask, for the chosen files only, and ignores a
-pasted / dropped link while the chooser is already open (no second window).
+pasted / dropped link — and does not open its own list — while the chooser is already open (no second window).
 The AI reads a linked file only with `drive_read` (its member's own picks).
 When a linked Drive file is used as a decision material or an attachment, its fileId, revisionId and
 sha256 enter the record's ledger and are visible to every reader of the record; the file's name is not
@@ -172,22 +192,23 @@ included (it stays the linker's).
 
 ## Not yet
 
-A person-side put (session route + card), a record ledger entry linking a put to a まとまり, and
+A person-side put (session route + card), a record ledger entry linking a put to a まとまり (a put in a consultation about a やること is linked to that やること, above), and
 `features_off` toggles (`member-oauth.md`).
 
 ## Tests
 
-`server/tests/integration/google-drive.test.ts` (fake Google, practice redirect; 「a picked file linked to a record」, including 「every record check comes first」) and
+`server/tests/integration/google-drive.test.ts` (fake Google, practice redirect; 「a picked file linked to a record」, including 「every record check comes first」; 「a put in a consultation about a task」: the receipt's facts, the AI as the actor, the name to the linker only, a replay never links again, a failed record check keeps the put done, the own-files list and another member's refusal) and
 `server/tests/unit/google-drive-core.test.ts` (the link parser: Google's hosts only, look-alikes,
 other schemes, folders, bad ids refused); `client/tests/google-drive-tools.test.ts`;
 `admin/tests/integrations.test.tsx` 「Drive の ファイル選び」. Mutation-checked: the Picker
 token's scope check and the narrowing parameter, `drive.file` before asking Google, the Picker
 registration, picks verified with Google, folder picks are folders, read / put only picks of
 the right kind, the act token, the MIME / name / content / sha checks, the outside-sharing
-refusal, the receipt's idempotency and key reuse, the lookup after a lost answer; in the app:
+refusal, the receipt's idempotency and key reuse, the lookup after a lost answer, the put's link only
+for a new put, a link refusal never failing the put, own puts only (list and `linkable`); in the app:
 tools only when available, put only with act, consent before the Picker, preselected ids only as
 Drive ids and only for files (window config, `typed-file-links.test.ts` for main, the page's own
 filter and mode check in `google-drive.test.ts`, which also checks the CSP hash is the script served), the path checks
 (outside, link, `.git`, nested repository, private list, left out), kind and content, the
-Picker page check and id filter, the request key; the preload's format
-(`check-preloads.mjs` fails on the build without `commonJsPreload`).
+Picker page check and id filter, the request key, the topic's record id on a put (never the AI's); the
+preload's format (`check-preloads.mjs` fails on the build without `commonJsPreload`).

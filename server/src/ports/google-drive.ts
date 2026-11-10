@@ -52,6 +52,10 @@ export interface GoogleDriveRepository {
   /** Writes a new put in `sending` (the AI's copies its consultation's Skills, answered as `skills`; `row.skills` is ignored); when the member already has one with this request key, returns it instead. */
   claimPut(row: DrivePutRow): { claimed: true; skills: SkillUse[] | null } | { claimed: false; existing: DrivePutRow }
   put(userId: string, id: string): DrivePutRow | null
+  /** The member's own put that made this Drive file (state done), or null. */
+  putOfFile(userId: string, fileId: string): DrivePutRow | null
+  /** The member's own puts that made a file (state done), newest first. */
+  donePuts(userId: string, limit: number): DrivePutRow[]
   /** Settles a put still in `sending` / `unknown` (true when a row changed). */
   settlePut(id: string, fields: Pick<DrivePutRow, 'state' | 'fileId' | 'revisionId' | 'link' | 'reason' | 'finishedAt'>): boolean
   /** Removes a put still in `sending` (refused: nothing was made; its key is free again). */

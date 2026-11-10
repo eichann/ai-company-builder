@@ -7,7 +7,7 @@ import type { CalendarTodayResult } from '../../../shared/calendar'
 import type { GoogleStatusResult } from '../../../shared/google'
 import type { TaskCardResult } from '../../../shared/task-card'
 import type { TagSuggestions } from '../../../shared/tag-suggest'
-import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveLinkResult, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from '../../../shared/tasks'
+import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveChoice, TaskDriveLinkOptions, TaskDriveLinkResult, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
 export type CalendarReads = ElectronPort<'getCalendarToday'>
@@ -123,14 +123,19 @@ export function unlinkFileFromTask(companyId: string, recordId: string, companyP
  * A company without the shared folder (records.md "File links without the shared folder"): a PC
  * file or a Drive file taken off a task, and 「Google Drive のファイルをつなぐ」 (Google Picker, then the links).
  */
-export type TypedFileWrites = ElectronPort<'unlinkTargetFromTask' | 'linkDriveFilesToTask'>
+export type TypedFileWrites = ElectronPort<'unlinkTargetFromTask' | 'linkDriveFilesToTask' | 'getTaskDriveChoices'>
 
 export function unlinkTargetFromTask(companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number, writes: TypedFileWrites = window.electronAPI): Promise<TaskWriteResult> {
   return writes.unlinkTargetFromTask(companyId, recordId, target, expectedVersion)
 }
 
-export function linkDriveFilesToTask(companyId: string, recordId: string, expectedVersion: number, fileIds?: string[], writes: TypedFileWrites = window.electronAPI): Promise<TaskDriveLinkResult> {
-  return writes.linkDriveFilesToTask(companyId, recordId, expectedVersion, fileIds)
+export function linkDriveFilesToTask(companyId: string, recordId: string, expectedVersion: number, options?: TaskDriveLinkOptions, writes: TypedFileWrites = window.electronAPI): Promise<TaskDriveLinkResult> {
+  return writes.linkDriveFilesToTask(companyId, recordId, expectedVersion, options)
+}
+
+/** The member's own Drive files offered before the Picker (their picks and their AI's puts). */
+export function getTaskDriveChoices(companyId: string, writes: TypedFileWrites = window.electronAPI): Promise<TaskDriveChoice[]> {
+  return writes.getTaskDriveChoices(companyId)
 }
 
 /**

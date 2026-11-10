@@ -195,6 +195,35 @@ test('a company without the shared folder: Drive and this PC’s files on the ca
   expectNoPageErrors(state)
 })
 
+// 「Google Drive のファイルをつなぐ」 first offers the member's own picked / put files (owner decision 2026-11-09):
+// one already linked is marked and cannot be chosen; the chosen ones are linked without Google's window;
+// 「Google Drive から探す」 opens it as before. Without any (the test above) the Picker opens at once.
+test('a company without the shared folder: the member\'s own Drive files offered first, then Google Drive', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { kind: 'none', drive: 'list' })
+  const links = page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' })
+  await links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' }).click()
+  const list = links.getByRole('group', { name: 'つなぐ Google Drive のファイル' })
+  await expect(list).toBeVisible()
+  await expect(page.locator('#acted')).not.toContainText('drive@')
+  const already = list.getByRole('checkbox', { name: /A社 提案書（下書き）/ })
+  await expect(already).toBeDisabled()
+  await expect(list).toContainText('つないであります')
+  await expect(list).toContainText('AI が置いたもの')
+  const link = list.getByRole('button', { name: 'つなぐ', exact: true })
+  await expect(link).toBeDisabled()
+  await list.getByRole('checkbox', { name: /A社 ご提案\.pdf/ }).check()
+  await list.getByRole('checkbox', { name: /去年の見積\.pdf/ }).check()
+  await link.click()
+  await expect(page.locator('#acted')).toHaveText('drive@3 chosen=1PutByAiFile00001,1PickedEarlier001')
+  await expect(list).toHaveCount(0)
+
+  // Not in the list: Google Drive's own window.
+  await links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' }).click()
+  await links.getByRole('button', { name: 'Google Drive から探す' }).click()
+  await expect(page.locator('#acted')).toHaveText('drive@3 chosen=1PutByAiFile00001,1PickedEarlier001,drive@3')
+  expectNoPageErrors(state)
+})
+
 test('a company with the shared folder: no Drive button, a dropped file stays a company file', async ({ page }) => {
   const state = await openPreview(page, 'task-card')
   const links = page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' })

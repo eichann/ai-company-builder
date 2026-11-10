@@ -36,7 +36,7 @@ export function fileLinking(ctx: EngineContext) {
    * needs the connector's answer when `drive` is `'ask'`: every record check (records on, the record
    * readable, the body, the version, not linked already) has passed, so the route asks Google only then.
    */
-  function run(member: Member, actor: ActorInput, recordId: string, op: 'link' | 'unlink', body: unknown, drive: VerifiedDriveFile | 'ask' | undefined): Outcome<FileLinkAnswer | 'ask-drive'> {
+  function run(member: Member, actor: ActorInput, recordId: string, op: 'link' | 'unlink', body: unknown, drive: VerifiedDriveFile | 'ask' | undefined, put = false): Outcome<FileLinkAnswer | 'ask-drive'> {
     const opened = open(member)
     if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
     const { records, reader } = opened
@@ -63,7 +63,8 @@ export function fileLinking(ctx: EngineContext) {
     if (b.target !== undefined) {
       // A Drive file or a file of the member's PC: only where there is no shared folder, only a person.
       if (!fileLinksUnavailable(deps.hasCompanyFolder, member.companyId)) return conflict(FILE_LINK_KIND_NOT_HERE.error, FILE_LINK_KIND_NOT_HERE.code)
-      if (actor.kind !== 'human') return refuse('forbidden', TYPED_LINK_PERSON_ONLY.error, { code: TYPED_LINK_PERSON_ONLY.code })
+      // The one exception: the file the member's own put just made (`put`, built by the server from the receipt).
+      if (actor.kind !== 'human' && !put) return refuse('forbidden', TYPED_LINK_PERSON_ONLY.error, { code: TYPED_LINK_PERSON_ONLY.code })
       const t = b.target as Record<string, unknown> | null
       const typed = t?.kind === 'local' ? localLinkTarget(member.userId, t.path) : t?.kind === 'drive' ? driveLinkTarget(t.fileId) : null
       if (!typed) return bad('target: { kind: local, path } (inside your working folder) or { kind: drive, fileId }', 'BAD_TARGET')
@@ -83,12 +84,13 @@ export function fileLinking(ctx: EngineContext) {
       }
       path = companyPath
     }
-    if (!Number.isInteger(b.expectedVersion) || (b.expectedVersion as number) < 0) return bad('expectedVersion: the version you saw', 'VERSION_REQUIRED')
+    if (!put && (!Number.isInteger(b.expectedVersion) || (b.expectedVersion as number) < 0)) return bad('expectedVersion: the version you saw', 'VERSION_REQUIRED')
     const note = b.note === undefined ? '' : b.note
     if (typeof note !== 'string' || note.length > NOTE_MAX) return bad(`note: up to ${NOTE_MAX} characters`)
 
     const current = stateOf(records, row, def)
-    const expected = b.expectedVersion as number
+    // A put's link is made by the server right after the put, at the version it reads now.
+    const expected = put ? current.version : b.expectedVersion as number
     if (expected !== current.version) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: current.version })
     const allLinks = records.linksFrom([row.id])
     const mine = allLinks.filter(l => l.name === name)
@@ -162,6 +164,22 @@ export function fileLinking(ctx: EngineContext) {
      */
     fileLinkBeforeDrive(member: Member, actor: ActorInput, recordId: string, body: unknown): Outcome<FileLinkAnswer | 'ask-drive'> {
       return run(member, actor, recordId, 'link', body, 'ask')
+    },
+
+    /**
+     * The file the member's own Drive put just made, linked to the record the consultation is about
+     * (google-drive.md "Linked to a record"; records.md "File links without the shared folder"). Only
+     * the Google connector's put route calls it, with `file` built from the put's receipt (never a
+     * body). Every record check of `fileLink` applies — records on, the record readable, a type the AI
+     * may act on, a company without the shared folder, not linked already — except that the member's AI
+     * may make this one Drive link, at the version current now (tried twice if someone wrote between).
+     */
+    linkDrivePut(member: Member, actor: ActorInput, recordId: string, file: VerifiedDriveFile): Outcome<FileLinkAnswer> {
+      const body = { target: { kind: 'drive', fileId: file.fileId } }
+      let r = run(member, actor, recordId, 'link', body, file, true)
+      if (!r.ok && r.body.code === 'VERSION_CONFLICT') r = run(member, actor, recordId, 'link', body, file, true)
+      if (!r.ok) return r
+      return r.value === 'ask-drive' ? refuse('forbidden', DRIVE_NOT_CHECKED.error, { code: DRIVE_NOT_CHECKED.code }) : ok(r.value)
     },
   }
 }

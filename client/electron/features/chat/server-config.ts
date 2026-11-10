@@ -40,7 +40,7 @@ import type { PrivateFolderGuards } from '../private-folders/guards'
 import { buildSystemPrompt } from './system-prompt'
 import type { WorkingFolders } from '../../services/working-folders'
 import type { SkillShelfStore } from '../skill-shelf/store'
-import { topicAfterTaskMade } from '../../../shared/consultation-task'
+import { taskTopicOf, topicAfterTaskMade } from '../../../shared/consultation-task'
 
 export interface ChatServerConfigDeps {
   config: ConfigStore
@@ -178,7 +178,9 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     createRecordTools: async ({ companyId, conversationId, agent, actions, companyRoot, department, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
       const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read' })
       // Connectors' tools ride on the same token (records/tool-providers.ts: Google Drive, …).
-      const toolProviders = recordToolProviders(deps, { companyId, companyRoot: companyRoot ?? null })
+      // A Drive put in a consultation about a やること is linked to it by the server (google-drive.md).
+      const topicTask = () => taskTopicOf(deps.history.get(companyId, conversationId))
+      const toolProviders = recordToolProviders(deps, { companyId, companyRoot: companyRoot ?? null, topicTask })
       const onRecordChanged = deps.recordsChanged ? () => deps.recordsChanged?.(companyId) : undefined
       // A task the AI makes in a consultation without a topic becomes its topic (consultation-task.ts).
       const onRecordCreated = (made: { id: unknown; type: unknown }) => {

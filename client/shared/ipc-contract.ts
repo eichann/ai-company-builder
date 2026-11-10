@@ -44,7 +44,7 @@ import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { FindHomeResult, FindResult, RecordCardResult, RecordListResult } from './record-views'
 import type { ConsultationTopicsResult } from './consultation-topics'
 import type { CalendarTodayResult } from './calendar'
-import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveLinkResult, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from './tasks'
+import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveChoice, TaskDriveLinkOptions, TaskDriveLinkResult, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from './tasks'
 import type { DroppedThing, DropLinkResult } from './link-drop'
 import type { TagSuggestions } from './tag-suggest'
 import type { TaskCardResult } from './task-card'
@@ -576,9 +576,12 @@ export interface IpcInvokeChannels {
   'tasks:unlinkTarget': { args: [companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number]; result: TaskWriteResult }
   /**
    * 「Google Drive のファイルをつなぐ」: Google Picker, then each picked file linked to the task.
-   * `fileIds` (optional, added 2026-11-09): a pasted / dropped Drive link's files, shown first in the Picker.
+   * `options` (optional, added 2026-11-09): `chosen` = files from `tasks:driveChoices`, linked without the
+   * Picker; `fileIds` = a pasted / dropped Drive link's files, shown first in the Picker.
    */
-  'tasks:linkDriveFiles': { args: [companyId: string, recordId: string, expectedVersion: number, fileIds?: string[]]; result: TaskDriveLinkResult }
+  'tasks:linkDriveFiles': { args: [companyId: string, recordId: string, expectedVersion: number, options?: TaskDriveLinkOptions]; result: TaskDriveLinkResult }
+  /** The member's own Drive files to offer before the Picker (their live picks and their AI's puts), newest first. */
+  'tasks:driveChoices': { args: [companyId: string]; result: TaskDriveChoice[] }
   /** 「もう一度」 on a run held for a person. */
   /** 「部署に出す」: an owner-only task shown to a department folder's readers (never undone). */
   'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
@@ -1060,6 +1063,7 @@ export interface ElectronAPI {
   unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
   unlinkTargetFromTask: Invoke<'tasks:unlinkTarget'>
   linkDriveFilesToTask: Invoke<'tasks:linkDriveFiles'>
+  getTaskDriveChoices: Invoke<'tasks:driveChoices'>
   retryTaskRun: Invoke<'tasks:retryRun'>
   shareTask: Invoke<'tasks:share'>
   shareTaskToBundle: Invoke<'tasks:shareToBundle'>
