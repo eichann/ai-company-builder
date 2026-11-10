@@ -163,8 +163,8 @@ The AI reads and writes **only** the member's own live picks.
   by name and real location (`PathGuard`), no `.git` segment, not inside a private folder (a
   nested repository on the way, or a readable private folder path — one sentence that never
   names it), not in a folder left out on this computer, PDF / HTML ≤ 10 MB with the content
-  check; `requestKey = drivePutRequestKey(folder, name, sha256)` (same file, folder and name →
-  the same key: never two copies). Unattended runs see none of these tools (their allowlists).
+  check; `requestKey = drivePutRequestKey(folder, name, sha256)` (same content, folder and name →
+  the same key: never two copies of identical content; an edited file has another sha256, so it is a new Drive file — and a new link — and the tool's description says so, since Drive files are not overwritten yet). Unattended runs see none of these tools (their allowlists).
 
 ## Linked to a record (a company without the shared folder; `records.md` "File links without the shared folder")
 

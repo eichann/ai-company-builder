@@ -107,7 +107,7 @@ export interface DrivePutRequest {
   kind: 'pdf' | 'html'
   sha256: string
   contentBase64: string
-  /** The app's key for this put (same file, folder and name → same key): never put twice. */
+  /** The app's key for this put (same content, folder and name → same key): a byte-identical repeat is never put twice; edited content is a new file. */
   requestKey: string
   /**
    * The consultation's やること (its topic), set by the app, never by the AI: once the file is in

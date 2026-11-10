@@ -325,8 +325,8 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
         folderId: z.string().regex(/^[A-Za-z0-9_-]{10,200}$/).describe('drive_pick_folder で選ばれたフォルダの id / the picked folder id'),
         name: z.string().min(1).max(200).optional().describe('Drive でのファイル名（省くとファイルの名前。拡張子は同じ） / the name in Drive (default: the file\'s)'),
       }).strict(),
-      description: '会社フォルダの PDF / HTML を、メンバーが選んだ Drive のフォルダに置く（社外の人も見られるフォルダには置けない）。同じファイルを同じ場所・同じ名前で置き直しても二つにはならない。答えの link（Drive のリンク）と revisionId を伝える。state が done でないときは置けたと言わない。unknown のときは置き直さず、メンバーに Drive を確かめてもらう。\n' +
-        'Put a PDF / HTML from the company folder into the Drive folder the member picked (not into a folder people outside the company can see). The same file, folder and name is never put twice. Report the link and revisionId. Never claim success unless state is done; when unknown, do not put it again — ask the member to check Drive.',
+      description: '会社フォルダの PDF / HTML を、メンバーが選んだ Drive のフォルダに置く（社外の人も見られるフォルダには置けない）。中身がまったく同じファイルを同じ場所・同じ名前で置き直したときだけ、二つにならない（通信が切れたときの二重置きを防ぐため）。中身を直したファイルを置くと、Drive には別のファイルとして増え、やることにももう一つつながる。今は Drive のファイルを上書きできないので、メンバーにそう伝える。答えの link（Drive のリンク）と revisionId を伝える。state が done でないときは置けたと言わない。unknown のときは置き直さず、メンバーに Drive を確かめてもらう。\n' +
+        'Put a PDF / HTML from the company folder into the Drive folder the member picked (not into a folder people outside the company can see). Only a byte-identical file put again into the same folder under the same name is not duplicated (this guards against double puts after a lost connection). An edited file is a new Drive file (and, in a consultation about a task, one more link to it): Drive files cannot be overwritten yet — tell the member so. Report the link and revisionId. Never claim success unless state is done; when unknown, do not put it again — ask the member to check Drive.',
       run: async input => {
         if (!deps.companyRoot) return json({ error: 'この相談には会社フォルダがないため、置けません。' })
         const file = readLocalFileForDrive(input.path, deps.companyRoot, deps.local)
