@@ -22,10 +22,10 @@ import {
   ChatCircleText,
   FolderOpen
 } from '@phosphor-icons/react'
-import type { Skill, SkillTool } from '../model'
+import type { ShelfSendAnswer, Skill, SkillTool } from '../model'
 import { startSkillTool, stopSkillTool } from '../api'
 import { useAppStore } from '../../../stores/appStore'
-import { SHELF_CLASH_NOTE, SHELF_COMPANY_NOTE, SHELF_EDITING_NOTE, SHELF_EDITING_TITLE, SHELF_PUBLISH_CONFIRM, SHELF_REPLACE_CONFIRM, SHELF_REQUEST_CONFIRM, SHELF_RESTORE_CONFIRM, shelfEditTexts, shelfMarkTitle, shelfNewerText, shelfRequestStateText } from '../../../../shared/skill-shelf'
+import { SHELF_CLASH_NOTE, SHELF_COMPANY_NOTE, SHELF_EDITING_NOTE, SHELF_EDITING_TITLE, SHELF_OUTPUTS_GO_BACK, SHELF_OUTPUTS_LEAVE_OUT, SHELF_OUTPUTS_NOTE, SHELF_OUTPUTS_QUESTION, SHELF_PUBLISH_CONFIRM, SHELF_REPLACE_CONFIRM, SHELF_REQUEST_CONFIRM, SHELF_RESTORE_CONFIRM, shelfEditTexts, shelfMarkTitle, shelfNewerText, shelfRequestStateText } from '../../../../shared/skill-shelf'
 
 type TabId = 'overview' | 'rules' | 'references' | 'scripts' | 'tools'
 
@@ -41,13 +41,18 @@ interface SkillDetailPanelProps {
   companyShelf?: CompanyShelfActions
 }
 
+type ShelfSend = (skill: Skill, leaveOutOutputs?: boolean) => Promise<ShelfSendAnswer>
+/** Paths listed in 「成果物が入っていませんか？」 before 「ほか N 個」. */
+const OUTPUTS_SHOWN = 10
+
 /** A company without the shared folder: each answers the sentence when it did not happen, or null. */
 export interface CompanyShelfActions {
-  publish: (skill: Skill) => Promise<string | null>
+  /** 「会社に公開」; `leaveOutOutputs` after 外して出す. */
+  publish: ShelfSend
   editLocally: (skill: Skill) => Promise<string | null>
   restoreCompany: (skill: Skill) => Promise<string | null>
   /** 「会社に出してほしいと頼む」 */
-  requestPublish?: (skill: Skill) => Promise<string | null>
+  requestPublish?: ShelfSend
   /** 「控えを開く」 */
   openBackup?: (skill: Skill) => Promise<string | null>
   /** 「AI と一緒に直す」: opens a new consultation (nothing to answer). */
@@ -183,6 +188,8 @@ export function SkillDetailPanel({
 function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill: Skill; actions?: CompanyShelfActions; onEditFile: (path: string) => void; onRefused: (sentence: string | null) => void }) {
   const [confirming, setConfirming] = useState<'publish' | 'edit' | 'restore' | 'request' | null>(null)
   const [busy, setBusy] = useState(false)
+  // Files that look like outputs stopped a publish or request: asked before anything is sent.
+  const [outputs, setOutputs] = useState<{ paths: string[]; send: ShelfSend } | null>(null)
   const box = 'p-3 rounded-xl bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50 text-xs text-gray-600 dark:text-zinc-400 space-y-2'
   const button = 'w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50'
   const quiet = 'w-full flex items-center justify-center gap-2 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50'
@@ -192,27 +199,52 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
     onRefused(null)
     void action(skill).then(onRefused).finally(() => setBusy(false))
   }
-  const confirmation = (text: string, label: string, action: (skill: Skill) => Promise<string | null>) => (
+  const send = (action: ShelfSend, leaveOutOutputs = false) => {
+    setBusy(true)
+    setConfirming(null)
+    setOutputs(null)
+    onRefused(null)
+    void action(skill, leaveOutOutputs)
+      .then(answer => (answer !== null && typeof answer === 'object' ? setOutputs({ paths: answer.outputs, send: action }) : onRefused(answer)))
+      .finally(() => setBusy(false))
+  }
+  const confirmation = (text: string, label: string, go: () => void) => (
     <div className="space-y-2">
       <div className="flex items-start gap-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400">
         <Warning size={14} className="flex-shrink-0 mt-0.5" />
         <span>{text}</span>
       </div>
       <div className="flex gap-2">
-        <button onClick={() => run(action)} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors">{label}</button>
+        <button onClick={go} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors">{label}</button>
         <button onClick={() => setConfirming(null)} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors">キャンセル</button>
       </div>
     </div>
   )
   // Offered only where the server said this member may publish a Skill; the server still decides.
   const publish = actions && skill.shelfPublish && (confirming === 'publish'
-    ? confirmation(skill.shelf ? SHELF_REPLACE_CONFIRM : SHELF_PUBLISH_CONFIRM, '会社に公開', actions.publish)
+    ? confirmation(skill.shelf ? SHELF_REPLACE_CONFIRM : SHELF_PUBLISH_CONFIRM, '会社に公開', () => send(actions.publish))
     : <button disabled={busy} onClick={() => setConfirming('publish')} className={button}><CloudArrowUp size={14} />会社に公開</button>)
 
   // For someone who may not publish here: send it to those who may (the server decides who may ask).
-  const request = actions?.requestPublish && skill.shelfRequest?.offered && !skill.shelfPublish && (confirming === 'request'
-    ? confirmation(SHELF_REQUEST_CONFIRM, '会社に出してほしいと頼む', actions.requestPublish)
+  const requestPublish = actions?.requestPublish
+  const request = requestPublish && skill.shelfRequest?.offered && !skill.shelfPublish && (confirming === 'request'
+    ? confirmation(SHELF_REQUEST_CONFIRM, '会社に出してほしいと頼む', () => send(requestPublish))
     : <button disabled={busy} onClick={() => setConfirming('request')} className={quiet}><PaperPlaneTilt size={14} />{skill.shelfRequest.last?.state === 'pending' ? 'お願いを送り直す' : '会社に出してほしいと頼む'}</button>)
+  // 「成果物が入っていませんか？」: 外して出す sends the rest, 戻って直す sends nothing (owner decision 2026-11-10).
+  const outputsQuestion = outputs && (
+    <div role="alertdialog" aria-label={SHELF_OUTPUTS_QUESTION} className="space-y-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300">
+      <div className="flex items-center gap-2 text-sm font-medium"><Warning size={14} className="flex-shrink-0" />{SHELF_OUTPUTS_QUESTION}</div>
+      <p>{SHELF_OUTPUTS_NOTE}</p>
+      <ul aria-label="成果物のように見えるファイル" className="list-disc pl-5 break-all">
+        {outputs.paths.slice(0, OUTPUTS_SHOWN).map(p => <li key={p}>{p}</li>)}
+        {outputs.paths.length > OUTPUTS_SHOWN && <li>ほか {outputs.paths.length - OUTPUTS_SHOWN} 個</li>}
+      </ul>
+      <div className="flex gap-2">
+        <button disabled={busy} onClick={() => send(outputs.send, true)} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50">{SHELF_OUTPUTS_LEAVE_OUT}</button>
+        <button disabled={busy} onClick={() => setOutputs(null)} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50">{SHELF_OUTPUTS_GO_BACK}</button>
+      </div>
+    </div>
+  )
   const requestState = skill.shelfRequest?.last && <p role="status">{shelfRequestStateText(skill.shelfRequest.last)}</p>
   const withAi = actions?.fixWithAi && (
     <button onClick={() => actions.fixWithAi?.(skill)} className={quiet}><ChatCircleText size={14} />AI と一緒に直す</button>
@@ -224,7 +256,7 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
         <div className="text-sm font-medium text-gray-700 dark:text-zinc-300">{shelfMarkTitle(skill.shelf.version)}</div>
         <div>{SHELF_COMPANY_NOTE}</div>
         {actions && (confirming === 'edit'
-          ? confirmation(shelfEditTexts(!!skill.shelfPublish).confirm, '自分用に直す', actions.editLocally)
+          ? confirmation(shelfEditTexts(!!skill.shelfPublish).confirm, '自分用に直す', () => run(actions.editLocally))
           : <button disabled={busy} onClick={() => setConfirming('edit')} className={quiet}>自分用に直す</button>)}
         {/* After 会社の版に戻す: the member's own version is kept in .backups, which Finder hides. */}
         {actions?.openBackup && skill.shelfBackup && (
@@ -248,10 +280,9 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
         )}
         {withAi}
         {actions && (confirming === 'restore'
-          ? confirmation(SHELF_RESTORE_CONFIRM, '会社の版に戻す', actions.restoreCompany)
+          ? confirmation(SHELF_RESTORE_CONFIRM, '会社の版に戻す', () => run(actions.restoreCompany))
           : <button disabled={busy} onClick={() => setConfirming('restore')} className={quiet}>会社の版に戻す</button>)}
-        {publish}
-        {request}
+        {outputsQuestion || <>{publish}{request}</>}
       </section>
     )
   }
@@ -261,8 +292,7 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
       {skill.shelf?.state === 'clash' && <div>{SHELF_CLASH_NOTE}</div>}
       {requestState}
       {withAi}
-      {publish}
-      {request}
+      {outputsQuestion || <>{publish}{request}</>}
     </div>
   )
 }

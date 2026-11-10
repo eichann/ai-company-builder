@@ -641,6 +641,24 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   codes `SHELF_BAD_KIND`, `SHELF_BAD_NAME`, `SHELF_NO_SKILL_MD`, `SHELF_TOO_MANY_FILES`,
   `SHELF_FILE_TOO_LARGE`, `SHELF_TOO_LARGE` (also the route's 413), `SHELF_EMPTY_TEXT`,
   `SHELF_BAD_CONTENT`, `SHELF_SECRET_DETECTED`, `SHELF_COMPANY_FULL`, `SHELF_BAD_VERSION`.
+- **No outputs in a Skill** (owner decision 2026-11-10): a Skill holds its procedure, tools,
+  references and templates; what it produced (a proposal, a report, one run's CSV) belongs outside
+  it, and SKILL.md says where — a Skill is handed out to everyone who reads its place, so an output
+  inside it reaches people it was never meant for. `outputLikePaths` (`shared/core/skill-shelf.ts`;
+  a flag, not a security boundary, kept small): everything under a folder **directly** in the Skill
+  named `output(s)`, `out`, `result(s)`, `成果物`, `出力`, `export(s)`, `dist`, `generated`
+  (`lookalikeKey`: case and width folded; deeper, e.g. `scripts/output/`, is a tool's own), and a
+  `.pdf` / `.docx` / `.xlsx` / `.pptx` at the Skill's top (in `references/` or `templates/` it is
+  material). Publishing a Skill and sending a request with such files → 400 `SHELF_OUTPUTS_INSIDE
+  { paths }` (the sender's own paths), whoever sends it, nothing stored: the app asks first and
+  leaves them out, so only an older app or a hand-made call meets it (its `error` is a sentence an
+  older app shows as is). 公開する of a request kept with them (sent before this rule) answers the
+  same unless sent with `withoutOutputs: true` (外して出す): then the published version leaves them
+  out (the request's version is still checked on the files as kept). Restore and unpublish are not
+  checked (versions already handed out; nothing new spreads). Sync of a company with the shared
+  folder is untouched: this is the shelf's publish-time check only. Tests:
+  `server/tests/unit/skill-outputs.test.ts`, `skill-shelf.test.ts` 「what a Skill produced…」,
+  `skill-shelf-requests.test.ts` (sent with outputs; 「a request kept with outputs…」) — mutation-checked.
 - **Concurrency**: publish / restore / unpublish compare `expectedVersion` with the current one in
   the write's transaction; someone first → 409 `SHELF_VERSION_CHANGED { currentVersion }`. The same
   content as the current version changes nothing (`changed: false`).
@@ -688,6 +706,8 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   **「公開のお願い」** (`shelf-requests.tsx`) on top, only while one waits that the caller may decide:
   who sent it and when, ［中身を見る］ (text files shown, others named), ［公開する］ (asks first; says
   when it replaces the current version, sent with that version) and ［見送る］ (optional reason ≤ 200);
+  a 400 `SHELF_OUTPUTS_INSIDE` to 公開する asks 「成果物が入っていませんか？」 with the paths, ［外して出す］
+  (sent again with `withoutOutputs`) or ［公開しない］ (nothing more sent; 見送る tells the sender);
   a version published from a request says whose request it was; list by kind with version, who, when; 「これまでの版」 and
   「この版に戻す」, 「この版を消す」 (owner/admin); 「配るのをやめる」; 「消す」 for an item taken off
   (owner/admin). Each of 「この版に戻す」, 「この版を消す」, 「配るのをやめる」 and 「消す」 asks first
@@ -822,6 +842,15 @@ company never reaches any of it: the store knows a company only from
   refused); the server decides and its sentence is shown. The member's latest request for that place
   (`MyShelfView.requests` → manifest `requests`, `readShelfRequests` drops a place that cannot be
   named safely) is told on the card: 待っている / 公開された / 見送られた + reason (`shelfRequestStateText`).
+- **「成果物が入っていませんか？」** (owner decision 2026-11-10, "No outputs in a Skill" above): `upload`
+  reads the folder and, when `outputLikePaths` finds anything, sends nothing and answers
+  `{ success: false, outputs }` (`SkillShelfSendResult`) to 会社に公開 and 頼む alike. The card shows the
+  question with the paths (≤ 10, then 「ほか N 個」) instead of the buttons: ［外して出す］ calls the
+  same channel again with `leaveOutOutputs: true` (those paths left out of what is sent; the files
+  stay on disk, never deleted), ［戻って直す］ sends nothing. The AI is told the same when it makes
+  a Skill (`system-prompt.ts` スキル作成ルール: no outputs in the Skill folder, where they go written
+  in SKILL.md). Tests: `ipc-skill-shelf.test.ts` 「outputs never go up unasked…」,
+  `tests/ui/skill-layout.spec.ts` (publish and request, both choices) — mutation-checked.
 - **「AI と一緒に直す」**: on the editing card and a local Skill's card, `chat.newConsultation` with
   `shelfFixWithAi` (the Skill's folder, working-folder relative, in the first message; sent like a
   skill's 実行).

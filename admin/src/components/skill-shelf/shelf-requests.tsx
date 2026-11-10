@@ -10,7 +10,7 @@ import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { skillShelfApi, type ShelfRequestContent, type ShelfRequestView } from '@/lib/api'
+import { ApiError, skillShelfApi, type ShelfRequestContent, type ShelfRequestView } from '@/lib/api'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
 import { useQuery } from '@/lib/use-query'
@@ -29,6 +29,17 @@ export function publishRequestDescription(r: ShelfRequestView): string {
     : reach
 }
 
+export const OUTPUTS_QUESTION = '成果物が入っていませんか？'
+export const OUTPUTS_NOTE =
+  'Skill には手順・道具・参考資料・ひな形だけを入れます。作ったもの（提案書・レポートなど）は、Skill を見られる全員に届いてしまいます。次のファイルは成果物のように見えます。外して公開するか、公開せずに「見送る」で直してもらうよう伝えてください。'
+
+/** The paths of a 400 SHELF_OUTPUTS_INSIDE answer, or null for any other error. */
+function outputPathsOf(err: unknown): string[] | null {
+  if (!(err instanceof ApiError) || err.code !== 'SHELF_OUTPUTS_INSIDE') return null
+  const paths = err.body?.paths
+  return Array.isArray(paths) && paths.every((p) => typeof p === 'string') ? paths : null
+}
+
 /**
  * 「公開のお願い」 (owner decision 2026-11-09): Skills members who may not publish sent to those who
  * may. Only pending requests the caller may decide are listed here (the server lists nothing else
@@ -40,6 +51,7 @@ export function ShelfRequests({ companyId, onPublished }: { companyId: string; o
   const [viewing, setViewing] = useState<ShelfRequestView | null>(null)
   const [publishing, setPublishing] = useState<ShelfRequestView | null>(null)
   const [declining, setDeclining] = useState<ShelfRequestView | null>(null)
+  const [withOutputs, setWithOutputs] = useState<{ request: ShelfRequestView; paths: string[] } | null>(null)
 
   const waiting = (requests.data?.requests ?? []).filter((r) => r.state === 'pending' && r.canDecide)
   // Nothing to decide (or the list could not be read): the section stays out of the way.
@@ -107,10 +119,45 @@ export function ShelfRequests({ companyId, onPublished }: { companyId: string; o
             toast.success(`「${target.name}」を公開しました`)
             onPublished()
           } catch (err) {
+            const paths = outputPathsOf(err)
+            if (paths) {
+              setWithOutputs({ request: target, paths })
+            } else {
+              toast.error(describeError(err))
+              requests.reload()
+            }
+          }
+          setPublishing(null)
+        }}
+      />
+      {/* A request kept from before outputs were refused (owner decision 2026-11-10): 外して出す or not now. */}
+      <ConfirmDialog
+        open={withOutputs !== null}
+        onOpenChange={(o) => !o && setWithOutputs(null)}
+        title={OUTPUTS_QUESTION}
+        description={withOutputs && (
+          <>
+            <p>{OUTPUTS_NOTE}</p>
+            <ul aria-label="成果物のように見えるファイル" className="list-disc pl-5 break-all">
+              {withOutputs.paths.map((p) => <li key={p}>{p}</li>)}
+            </ul>
+          </>
+        )}
+        confirmLabel="外して出す"
+        cancelLabel="公開しない"
+        destructive={false}
+        onConfirm={async () => {
+          const { request } = withOutputs!
+          try {
+            await skillShelfApi.publishRequest(companyId, request.id, request.version, request.currentVersion, true)
+            settle(request.id)
+            toast.success(`「${request.name}」を、成果物を外して公開しました`)
+            onPublished()
+          } catch (err) {
             toast.error(describeError(err))
             requests.reload()
           }
-          setPublishing(null)
+          setWithOutputs(null)
         }}
       />
       <DeclineDialog

@@ -84,6 +84,32 @@ test('「会社に公開」: the folder goes up with what the member saw, leavin
   assert.equal(Buffer.from(files.find(f => f.path === 'SKILL.md')!.base64, 'base64').toString(), 'visit\n')
 })
 
+test('outputs never go up unasked: output-like files stop 会社に公開 and 頼む before anything is sent; 外して出す sends the rest, the files stay on disk', async () => {
+  const id = 'co-out'
+  const { folder, shelf } = await open(id)
+  const skill = '営業部/.claude/skills/proposal'
+  writeFiles(folder, { [`${skill}/SKILL.md`]: 'p\n', [`${skill}/output/提案書.md`]: '顧客A への提案\n', [`${skill}/提案書.pdf`]: 'pdf', [`${skill}/references/guide.pdf`]: 'g', [`${skill}/scripts/output/keep.txt`]: 'k' })
+  const posted: Array<{ files: Array<{ path: string }> }> = []
+  const answer = (req: { body?: string }) => {
+    posted.push(JSON.parse(req.body!))
+    shelf.delivered = {}
+    return { status: 201, json: { success: true, data: { changed: true, item: {} } } }
+  }
+  h.server.on('POST', `/api/companies/${id}/skill-shelf`, answer)
+  h.server.on('POST', `/api/companies/${id}/skill-shelf-requests`, answer)
+  const skillPath = path.join(folder, skill)
+  const asked = { success: false, outputs: ['output/提案書.md', '提案書.pdf'] }
+  const sorted = (r: unknown) => ({ ...(r as { outputs: string[] }), outputs: [...(r as { outputs: string[] }).outputs].sort() })
+  assert.deepEqual(sorted(await h.invoke('skillShelf:publish', folder, skillPath, null, false)), sorted(asked))
+  assert.deepEqual(sorted(await h.invoke('skillShelf:requestPublish', folder, skillPath, false)), sorted(asked))
+  assert.equal(posted.length, 0, 'nothing sent before the member chose')
+
+  assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, skillPath, true), { success: true })
+  assert.deepEqual(await h.invoke('skillShelf:publish', folder, skillPath, null, true), { success: true })
+  for (const sent of posted) assert.deepEqual(sent.files.map(f => f.path).sort(), ['SKILL.md', 'references/guide.pdf', 'scripts/output/keep.txt'])
+  assert.equal(fs.readFileSync(path.join(skillPath, 'output/提案書.md'), 'utf8'), '顧客A への提案\n', 'left out, never deleted')
+})
+
 test('the server\'s refusal reaches the member in its own words; offline says so; nothing changes in the folder', async () => {
   const { folder } = await open('co-no')
   writeFiles(folder, { '.claude/skills/mine/SKILL.md': '# mine\n' })

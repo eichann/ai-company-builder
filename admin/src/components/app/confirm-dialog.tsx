@@ -24,6 +24,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  cancelLabel = 'キャンセル',
   destructive = true,
   onConfirm,
 }: {
@@ -32,6 +33,7 @@ export function ConfirmDialog({
   title: string
   description?: ReactNode
   confirmLabel: string
+  cancelLabel?: string
   destructive?: boolean
   onConfirm: () => Promise<void>
 }) {
@@ -58,7 +60,7 @@ export function ConfirmDialog({
         </DialogHeader>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            キャンセル
+            {cancelLabel}
           </Button>
           <Button type="button" variant={destructive ? 'destructive' : 'default'} onClick={confirm} disabled={busy}>
             {busy ? '処理しています…' : confirmLabel}

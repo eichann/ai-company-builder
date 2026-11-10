@@ -207,6 +207,38 @@ describe('会社の Skill', () => {
     await waitFor(() => expect(within(screen.getByRole('list', { name: '公開のお願い' })).getAllByRole('listitem')).toHaveLength(1))
   })
 
+  it('公開のお願い: a request holding what looks like outputs asks 「成果物が入っていませんか？」; 外して出す publishes without them, 公開しない sends nothing more', async () => {
+    let publishes = 0
+    const { calls } = mockApi(withoutFolder({
+      [`GET ${base}/skill-shelf-requests`]: { body: ok({ requests: [request] }) },
+      [`POST ${base}/skill-shelf-requests/r_1/publish`]: () => (++publishes === 1 || publishes === 2
+        ? { status: 400, body: { success: false, error: '成果物のようなファイルが入っています。', code: 'SHELF_OUTPUTS_INSIDE', paths: ['output/A社への提案書.md', '見積.xlsx'] } }
+        : { body: ok({ request: { ...request, state: 'published' } }) }),
+    }))
+    renderInCompany(<SkillsRoute />)
+    const list = await screen.findByRole('list', { name: '公開のお願い' })
+    // 公開しない: the question closes and nothing else is sent.
+    await userEvent.click(within(list).getByRole('button', { name: '公開する' }))
+    await userEvent.click(screen.getAllByRole('button', { name: '公開する' }).at(-1)!)
+    const asked = await screen.findByRole('list', { name: '成果物のように見えるファイル' })
+    expect(within(asked).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['output/A社への提案書.md', '見積.xlsx'])
+    expect(screen.getByText('成果物が入っていませんか？')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '公開しない' }))
+    await waitFor(() => expect(screen.queryByText('成果物が入っていませんか？')).not.toBeInTheDocument())
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1)
+    // Asked again, then 外して出す: sent once more saying so, and the request is settled.
+    await userEvent.click(within(list).getByRole('button', { name: '公開する' }))
+    await userEvent.click(screen.getAllByRole('button', { name: '公開する' }).at(-1)!)
+    await userEvent.click(await screen.findByRole('button', { name: '外して出す' }))
+    const posts = calls.filter((c) => c.method === 'POST')
+    expect(posts.map((c) => c.body)).toEqual([
+      { requestVersion: V1, expectedVersion: null },
+      { requestVersion: V1, expectedVersion: null },
+      { requestVersion: V1, expectedVersion: null, withoutOutputs: true },
+    ])
+    await waitFor(() => expect(screen.queryByRole('list', { name: '公開のお願い' })).not.toBeInTheDocument())
+  })
+
   it('公開のお願い: files that are not the version the list showed are not shown as if they were', async () => {
     mockApi(withoutFolder({
       [`GET ${base}/skill-shelf-requests`]: { body: ok({ requests: [request] }) },

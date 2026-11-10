@@ -1078,10 +1078,14 @@ export const skillShelfApi = {
   /**
    * 公開する: published as a new version. `requestVersion` is the version of the request's files the
    * page showed (409 SHELF_REQUEST_CHANGED when they are not what is there now; 409
-   * SHELF_VERSION_CHANGED when the item changed since the page saw it).
+   * SHELF_VERSION_CHANGED when the item changed since the page saw it; 400 SHELF_OUTPUTS_INSIDE
+   * `{ paths }` when files look like outputs — sent again with `withoutOutputs` (外して出す) they are left out).
    */
-  publishRequest: (companyId: string, requestId: string, requestVersion: string, expectedVersion: string | null) =>
-    getData(`${shelfBase(companyId)}-requests/${enc(requestId)}/publish`, shelfRequestDecidedSchema, { method: 'POST', body: { requestVersion, expectedVersion } }),
+  publishRequest: (companyId: string, requestId: string, requestVersion: string, expectedVersion: string | null, withoutOutputs = false) =>
+    getData(`${shelfBase(companyId)}-requests/${enc(requestId)}/publish`, shelfRequestDecidedSchema, {
+      method: 'POST',
+      body: { requestVersion, expectedVersion, ...(withoutOutputs ? { withoutOutputs: true } : {}) },
+    }),
 
   /** 見送る, with a short reason or none (`requestVersion` as for 公開する). */
   declineRequest: (companyId: string, requestId: string, requestVersion: string, reason: string) =>

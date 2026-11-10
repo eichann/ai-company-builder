@@ -4,7 +4,7 @@ import type { FileOpResult } from '../../../../shared/ipc-contract'
 import type { Skill } from '../model'
 import { shelfRestoredNote } from '../../../../shared/skill-shelf'
 import { copySkill, createSkillDirectory, createSkillFile, editCompanySkillLocally, makeSkillPrivate, openCompanySkillBackup, pathExists, publishSkill, publishSkillToCompany, readSkillFile, requestCompanySkill, restoreCompanySkill, setSkillNurturing, skillWriteRefusal, writeSkillFile } from '../api'
-import { newSkillMarkdown, renameSkillMarkdown, skillNameTakenMessage, SKILL_ALREADY_SHARED_MESSAGE, SKILL_CREATE_FAILED, SKILL_COPY_FAILED, SKILL_PUBLISH_FAILED, type NewSkillInput, type SkillActionResult } from '../model'
+import { newSkillMarkdown, renameSkillMarkdown, skillNameTakenMessage, SKILL_ALREADY_SHARED_MESSAGE, SKILL_CREATE_FAILED, SKILL_COPY_FAILED, SKILL_PUBLISH_FAILED, shelfSendAnswer, type NewSkillInput, type ShelfSendAnswer, type SkillActionResult } from '../model'
 
 const refusalOf = (result: FileOpResult): string | null => (result.code === 'refused' && result.error ? result.error : null)
 
@@ -109,15 +109,15 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
   }, [rootPath, departments, refreshSkills])
 
   /**
-   * 「会社に公開」; answers the sentence when it was not published, or null. Under
+   * 「会社に公開」 (`ShelfSendAnswer`; `leaveOutOutputs` after 外して出す). Under
    * 「会社の版が新しくなっています」 the member has been told that publishing replaces the newer
    * version, so that is the version they saw.
    */
-  const publishToCompany = useCallback(async (skill: Skill): Promise<string | null> => {
+  const publishToCompany = useCallback(async (skill: Skill, leaveOutOutputs = false): Promise<ShelfSendAnswer> => {
     if (!rootPath || !skill.skillPath) return null
-    const result = await publishSkillToCompany(rootPath, skill.skillPath, skill.shelf?.newer?.version ?? skill.shelf?.version ?? null)
+    const result = await publishSkillToCompany(rootPath, skill.skillPath, skill.shelf?.newer?.version ?? skill.shelf?.version ?? null, leaveOutOutputs)
     refreshSkills()
-    return result.success ? null : result.error ?? SKILL_PUBLISH_FAILED
+    return shelfSendAnswer(result)
   }, [rootPath, refreshSkills])
 
   /** 「自分用に直す」; answers the sentence when it did not happen, or null. */
@@ -137,12 +137,12 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
     return shelfRestoredNote(result.companyVersion)
   }, [rootPath, refreshSkills])
 
-  /** 「会社に出してほしいと頼む」; answers the sentence when it was not sent, or null (the card then shows it waiting). */
-  const requestToCompany = useCallback(async (skill: Skill): Promise<string | null> => {
+  /** 「会社に出してほしいと頼む」 (`ShelfSendAnswer`; on success the card then shows it waiting). */
+  const requestToCompany = useCallback(async (skill: Skill, leaveOutOutputs = false): Promise<ShelfSendAnswer> => {
     if (!rootPath || !skill.skillPath) return null
-    const result = await requestCompanySkill(rootPath, skill.skillPath)
+    const result = await requestCompanySkill(rootPath, skill.skillPath, leaveOutOutputs)
     refreshSkills()
-    return result.success ? null : result.error ?? SKILL_PUBLISH_FAILED
+    return shelfSendAnswer(result)
   }, [rootPath, refreshSkills])
 
   /** 「控えを開く」; answers the sentence when it could not be opened, or null. */

@@ -397,10 +397,10 @@ const api: ElectronAPI = {
   callPluginBridge: (companyId: string, plugin: PluginPackageRef, op: string, args: unknown) => invoke('plugins:bridge', companyId, plugin, op, args),
   getPluginScreens: (companyId: string) => invoke('plugins:screens', companyId),
   onPluginsChanged: callback => subscribe('plugins:changed', callback),
-  publishSkillToCompany: (rootPath: string, skillPath: string, expectedVersion: string | null) => invoke('skillShelf:publish', rootPath, skillPath, expectedVersion),
+  publishSkillToCompany: (rootPath: string, skillPath: string, expectedVersion: string | null, leaveOutOutputs: boolean) => invoke('skillShelf:publish', rootPath, skillPath, expectedVersion, leaveOutOutputs),
   editCompanySkillLocally: (rootPath: string, skillPath: string) => invoke('skillShelf:editLocally', rootPath, skillPath),
   restoreCompanySkill: (rootPath: string, skillPath: string) => invoke('skillShelf:restoreCompany', rootPath, skillPath),
-  requestCompanySkill: (rootPath: string, skillPath: string) => invoke('skillShelf:requestPublish', rootPath, skillPath),
+  requestCompanySkill: (rootPath: string, skillPath: string, leaveOutOutputs: boolean) => invoke('skillShelf:requestPublish', rootPath, skillPath, leaveOutOutputs),
   openCompanySkillBackup: (rootPath: string, skillPath: string) => invoke('skillShelf:openBackup', rootPath, skillPath),
   onSkillShelfChanged: callback => subscribe('skillShelf:changed', callback),
   // lane A ▲

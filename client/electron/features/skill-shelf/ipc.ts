@@ -8,11 +8,11 @@
 // company's folder is refused.
 
 import path from 'node:path'
-import { SHELF_LIMITS, isShelfVersion } from '../../../../shared/core/skill-shelf'
+import { SHELF_LIMITS, isShelfVersion, outputLikePaths } from '../../../../shared/core/skill-shelf'
 import {
   SHELF_ALREADY_COMPANY_MESSAGE, SHELF_BACKUP_OPEN_FAILED_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_NO_BACKUP_MESSAGE, SHELF_NO_PLACE_MESSAGE,
   SHELF_NOT_EDITING_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_REQUEST_OFFLINE_MESSAGE, SHELF_RESTORE_BACKUPS_MESSAGE, SHELF_RESTORE_FAILED_MESSAGE, SHELF_RESTORE_PLACE_MESSAGE, SHELF_TOO_MUCH_MESSAGE, shelfPlaceOfSkillFolder,
-  type SkillShelfRestoreResult,
+  type SkillShelfRestoreResult, type SkillShelfSendResult,
 } from '../../../shared/skill-shelf'
 import type { ShelfFileUpload } from '../../../../shared/types/skill-shelf'
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -42,26 +42,31 @@ export function registerSkillShelfIpc(ipc: IpcRegistrar, { paths, isWorkingFolde
   /**
    * What a local Skill sends (publish and request alike): a Skill folder at a place that takes
    * Skills, not one the company delivered, read without links and junk (`readSkillFolder`), within
-   * the shelf's limits, its department found by the folder.
+   * the shelf's limits, its department found by the folder. Files that look like outputs
+   * (`outputLikePaths`) stop it before anything is sent, unless the member chose to leave them out.
    */
-  async function upload(rootPath: string, skillPath: string): Promise<{ error: string } | { root: string; rel: string; companyId: string; departmentId: string | null; name: string; files: ShelfFileUpload[] }> {
+  async function upload(rootPath: string, skillPath: string, leaveOutOutputs: boolean): Promise<{ error: string } | { outputs: string[] } | { root: string; rel: string; companyId: string; departmentId: string | null; name: string; files: ShelfFileUpload[] }> {
     const at = located(rootPath, skillPath)
     if ('error' in at) return at
     const place = shelfPlaceOfSkillFolder(at.rel)
     if (!place) return { error: SHELF_NOT_A_PLACE_MESSAGE }
     if (store.markOf(at.root, at.rel)?.state === 'company') return { error: SHELF_ALREADY_COMPANY_MESSAGE }
-    const files = await readSkillFolder(at.skill)
-    if (!files) return { error: SHELF_NOT_READABLE_MESSAGE }
+    const read = await readSkillFolder(at.skill)
+    if (!read) return { error: SHELF_NOT_READABLE_MESSAGE }
+    const outputs = outputLikePaths(read.map(f => f.path))
+    if (outputs.length > 0 && leaveOutOutputs !== true) return { outputs }
+    const files = read.filter(f => !outputs.includes(f.path))
     if (files.length > SHELF_LIMITS.files || files.reduce((sum, f) => sum + f.bytes.length, 0) > SHELF_LIMITS.skillBytes) return { error: SHELF_TOO_MUCH_MESSAGE }
     const departmentId = place.departmentFolder === null ? null : await client.departmentId(at.companyId, place.departmentFolder)
     if (departmentId === undefined) return { error: SHELF_NO_PLACE_MESSAGE }
     return { root: at.root, rel: at.rel, companyId: at.companyId, departmentId, name: place.name, files: files.map(f => ({ path: f.path, base64: f.bytes.toString('base64') })) }
   }
 
-  ipc.handle('skillShelf:publish', async (_, rootPath: string, skillPath: string, expectedVersion: string | null) => {
+  ipc.handle('skillShelf:publish', async (_, rootPath: string, skillPath: string, expectedVersion: string | null, leaveOutOutputs: boolean): Promise<SkillShelfSendResult> => {
     try {
-      const at = await upload(rootPath, skillPath)
+      const at = await upload(rootPath, skillPath, leaveOutOutputs)
       if ('error' in at) return { success: false, error: at.error }
+      if ('outputs' in at) return { success: false, outputs: at.outputs }
       if (expectedVersion !== null && !isShelfVersion(expectedVersion)) return { success: false, error: SHELF_NOT_READABLE_MESSAGE }
       const answer = await client.publish(at.companyId, { departmentId: at.departmentId, name: at.name, files: at.files, expectedVersion })
       if (!answer.ok) return { success: false, error: 'offline' in answer ? SHELF_OFFLINE_MESSAGE : answer.message }
@@ -74,10 +79,11 @@ export function registerSkillShelfIpc(ipc: IpcRegistrar, { paths, isWorkingFolde
     }
   })
 
-  ipc.handle('skillShelf:requestPublish', async (_, rootPath: string, skillPath: string) => {
+  ipc.handle('skillShelf:requestPublish', async (_, rootPath: string, skillPath: string, leaveOutOutputs: boolean): Promise<SkillShelfSendResult> => {
     try {
-      const at = await upload(rootPath, skillPath)
+      const at = await upload(rootPath, skillPath, leaveOutOutputs)
       if ('error' in at) return { success: false, error: at.error }
+      if ('outputs' in at) return { success: false, outputs: at.outputs }
       const answer = await client.request(at.companyId, { departmentId: at.departmentId, name: at.name, files: at.files })
       if (!answer.ok) return { success: false, error: 'offline' in answer ? SHELF_REQUEST_OFFLINE_MESSAGE : answer.message }
       // The card shows 待っている from the next list.

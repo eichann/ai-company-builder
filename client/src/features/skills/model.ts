@@ -51,6 +51,19 @@ export const SKILL_CREATE_FAILED = 'スキルを作成できませんでした�
 export const SKILL_COPY_FAILED = 'スキルをコピーできませんでした。もう一度試してください。'
 export const SKILL_PUBLISH_FAILED = 'できませんでした。もう一度試してください。'
 
+/**
+ * What 「会社に公開」 / 「会社に出してほしいと頼む」 answer: null when it went, the sentence when it did
+ * not, or the files that look like outputs (nothing sent; the panel asks 「成果物が入っていませんか？」).
+ */
+export type ShelfSendAnswer = string | null | { outputs: string[] }
+
+/** The app's answer turned into what the panel shows. */
+export function shelfSendAnswer(result: { success: boolean; error?: string; outputs?: string[] }): ShelfSendAnswer {
+  if (result.success) return null
+  if (result.outputs && result.outputs.length > 0) return { outputs: result.outputs }
+  return result.error ?? SKILL_PUBLISH_FAILED
+}
+
 /** The SKILL.md of a new skill (frontmatter + the sections the wizard fills in). */
 export function newSkillMarkdown(data: NewSkillInput): string {
   const promptContent = data.prompt || `このスキルを実行すると、AIアシスタントが「${data.name}」タスクを実行します。`

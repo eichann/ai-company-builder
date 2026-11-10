@@ -378,8 +378,42 @@ test('without the shared folder: a local Skill stays 「この PC だけ」 and 
   expect(await calls(page, 'publishSkillToCompany')).toEqual([])
   await page.getByRole('button', { name: '会社に公開' }).click()
   await page.getByRole('button', { name: '会社に公開' }).click()
-  await expect.poll(() => calls(page, 'publishSkillToCompany')).toEqual([['proposal', null]])
+  await expect.poll(() => calls(page, 'publishSkillToCompany')).toEqual([['proposal', null, false]])
   await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('without the shared folder: a Skill holding what looks like outputs asks 「成果物が入っていませんか？」 before it goes; 戻って直す sends nothing, 外して出す sends the rest', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', outputs: '1' })
+  await deptTab(page, '営業部').click()
+  await page.getByRole('heading', { name: 'proposal' }).click()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  const question = page.getByRole('alertdialog', { name: '成果物が入っていませんか？' })
+  await expect(question).toContainText('Skill の外')
+  await expect(question.getByRole('listitem')).toHaveText(['output/A社への提案書.md', '見積.xlsx'])
+  await expect(page.getByRole('button', { name: '会社に公開' })).toHaveCount(0)
+  await question.getByRole('button', { name: '戻って直す' }).click()
+  await expect(question).toHaveCount(0)
+  expect(await calls(page, 'publishSkillToCompany')).toEqual([['proposal', null, false]])
+  // Asked again, then left out: the same Skill goes without them.
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await page.getByRole('button', { name: '会社に公開' }).click()
+  await question.getByRole('button', { name: '外して出す' }).click()
+  await expect.poll(() => calls(page, 'publishSkillToCompany')).toEqual([['proposal', null, false], ['proposal', null, false], ['proposal', null, true]])
+  await expect(question).toHaveCount(0)
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('without the shared folder: 頼む asks about outputs the same way, and 外して出す sends the request without them', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { kind: 'none', publish: 'no', outputs: '1', download: 'done' })
+  await deptTab(page, '営業部').click()
+  await page.getByRole('heading', { name: 'proposal' }).click()
+  await page.getByRole('button', { name: '会社に出してほしいと頼む' }).click()
+  await page.getByRole('button', { name: '会社に出してほしいと頼む' }).click()
+  const question = page.getByRole('alertdialog', { name: '成果物が入っていませんか？' })
+  await question.getByRole('button', { name: '外して出す' }).click()
+  await expect.poll(() => calls(page, 'requestCompanySkill')).toEqual([['proposal', false], ['proposal', true]])
+  await expect(question).toHaveCount(0)
 })
 
 test('without the shared folder: the server\'s refusal is shown in its words', async ({ page }) => {
@@ -446,7 +480,7 @@ test('without the shared folder: the member\'s Skill beside a company one of the
   await page.getByRole('button', { name: '会社に公開' }).click()
   await expect(page.getByText('会社の同じ名前の Skill を、この内容に置き換えます。')).toBeVisible()
   await page.getByRole('button', { name: '会社に公開' }).click()
-  await expect.poll(() => calls(page, 'publishSkillToCompany')).toEqual([['release-note', 'abcd1234'.repeat(8)]])
+  await expect.poll(() => calls(page, 'publishSkillToCompany')).toEqual([['release-note', 'abcd1234'.repeat(8), false]])
 })
 
 test('without the shared folder: 会社に公開 is not offered where the server says the member may not publish; the notes stay', async ({ page }) => {
@@ -489,7 +523,7 @@ test('without the shared folder: someone who cannot publish asks the company to 
   expect(await calls(page, 'requestCompanySkill')).toEqual([])
   await page.getByRole('button', { name: '会社に出してほしいと頼む' }).click()
   await page.getByRole('button', { name: '会社に出してほしいと頼む' }).click()
-  await expect.poll(() => calls(page, 'requestCompanySkill')).toEqual([['proposal']])
+  await expect.poll(() => calls(page, 'requestCompanySkill')).toEqual([['proposal', false]])
   await expect(page.getByRole('button', { name: 'AI と一緒に直す' })).toBeVisible()
 })
 
@@ -520,7 +554,7 @@ test('without the shared folder: a newer company version is told on the editing 
   await expect(card.getByRole('button', { name: 'AI と一緒に直す' })).toBeVisible()
   await card.getByRole('button', { name: '会社に公開' }).click()
   await card.getByRole('button', { name: '会社に公開' }).click()
-  await expect.poll(() => calls(page, 'publishSkillToCompany')).toEqual([['release-note', 'ef567890'.repeat(8)]])
+  await expect.poll(() => calls(page, 'publishSkillToCompany')).toEqual([['release-note', 'ef567890'.repeat(8), false]])
 })
 
 test('without the shared folder: the editing card, for someone who cannot publish, offers 頼む and never says 公開 is theirs to do', async ({ page }) => {
