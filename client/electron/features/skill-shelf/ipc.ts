@@ -12,7 +12,7 @@ import { SHELF_LIMITS, isShelfVersion, outputLikePaths } from '../../../../share
 import {
   SHELF_ALREADY_COMPANY_MESSAGE, SHELF_BACKUP_OPEN_FAILED_MESSAGE, SHELF_NOT_A_PLACE_MESSAGE, SHELF_NOT_HERE_MESSAGE, SHELF_NOT_READABLE_MESSAGE, SHELF_NO_BACKUP_MESSAGE, SHELF_NO_PLACE_MESSAGE,
   SHELF_NOT_EDITING_MESSAGE, SHELF_OFFLINE_MESSAGE, SHELF_REQUEST_OFFLINE_MESSAGE, SHELF_RESTORE_BACKUPS_MESSAGE, SHELF_RESTORE_FAILED_MESSAGE, SHELF_RESTORE_PLACE_MESSAGE, SHELF_TOO_MUCH_MESSAGE, shelfPlaceOfSkillFolder,
-  type SkillShelfRestoreResult, type SkillShelfSendResult,
+  type KeptAside, type SkillShelfRestoreResult, type SkillShelfSendResult,
 } from '../../../shared/skill-shelf'
 import type { ShelfFileUpload } from '../../../../shared/types/skill-shelf'
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -64,16 +64,16 @@ export function registerSkillShelfIpc(ipc: IpcRegistrar, { paths, isWorkingFolde
 
   /**
    * 外して出す, once the server took what was sent: the files left out move to the kept copies
-   * (`store.keepAside`); only then, so a refusal leaves them where they were. `keptAside: false`
+   * (`store.keepAside`); only then, so a refusal leaves them where they were. `keptAside: 'none'`
    * when they could not be moved (they stay where they were).
    */
-  async function keptAside(at: { root: string; rel: string; leftOut: string[] }): Promise<{ keptAside?: boolean }> {
+  async function keptAside(at: { root: string; rel: string; leftOut: string[] }): Promise<{ keptAside?: KeptAside }> {
     if (at.leftOut.length === 0) return {}
     try {
       return { keptAside: await store.keepAside(at.root, at.rel, at.leftOut) }
     } catch (error) {
       console.error('Skill shelf keep-aside error:', (error as NodeJS.ErrnoException).code ?? 'unknown')
-      return { keptAside: false }
+      return { keptAside: 'none' }
     }
   }
 

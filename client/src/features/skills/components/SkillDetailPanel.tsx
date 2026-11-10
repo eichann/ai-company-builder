@@ -25,7 +25,7 @@ import {
 import type { ShelfSendAnswer, Skill, SkillTool } from '../model'
 import { startSkillTool, stopSkillTool } from '../api'
 import { useAppStore } from '../../../stores/appStore'
-import { SHELF_CLASH_NOTE, SHELF_COMPANY_NOTE, SHELF_EDITING_NOTE, SHELF_EDITING_TITLE, SHELF_OUTPUTS_GO_BACK, SHELF_OUTPUTS_KEPT_NOTE, SHELF_OUTPUTS_LEAVE_OUT, SHELF_OUTPUTS_NOT_KEPT_NOTE, SHELF_OUTPUTS_NOTE, SHELF_OUTPUTS_QUESTION, SHELF_PUBLISH_CONFIRM, SHELF_REPLACE_CONFIRM, SHELF_REQUEST_CONFIRM, SHELF_RESTORE_CONFIRM, shelfEditTexts, shelfMarkTitle, shelfNewerText, shelfRequestStateText } from '../../../../shared/skill-shelf'
+import { SHELF_CLASH_NOTE, SHELF_COMPANY_NOTE, SHELF_EDITING_NOTE, SHELF_EDITING_TITLE, SHELF_OUTPUTS_GO_BACK, SHELF_OUTPUTS_LEAVE_OUT, SHELF_OUTPUTS_NOTE, SHELF_OUTPUTS_QUESTION, SHELF_PUBLISH_CONFIRM, SHELF_REPLACE_CONFIRM, SHELF_REQUEST_CONFIRM, SHELF_RESTORE_CONFIRM, type KeptAside, shelfEditTexts, shelfKeptAsideNote, shelfMarkTitle, shelfNewerText, shelfRequestStateText } from '../../../../shared/skill-shelf'
 
 type TabId = 'overview' | 'rules' | 'references' | 'scripts' | 'tools'
 
@@ -190,7 +190,7 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
   const [busy, setBusy] = useState(false)
   // Files that look like outputs stopped a publish or request: asked before anything is sent.
   const [outputs, setOutputs] = useState<{ paths: string[]; send: ShelfSend } | null>(null)
-  const [kept, setKept] = useState<'moved' | 'not-moved' | null>(null)
+  const [kept, setKept] = useState<KeptAside | null>(null)
   const box = 'p-3 rounded-xl bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50 text-xs text-gray-600 dark:text-zinc-400 space-y-2'
   const button = 'w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50'
   const quiet = 'w-full flex items-center justify-center gap-2 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50'
@@ -210,15 +210,15 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
       .then(answer => {
         if (answer === null || typeof answer === 'string') onRefused(answer)
         else if ('outputs' in answer) setOutputs({ paths: answer.outputs, send: action })
-        else setKept(answer.keptAside ? 'moved' : 'not-moved')
+        else setKept(answer.keptAside)
       })
       .finally(() => setBusy(false))
   }
   // After 外して出す: where the files left out went (the kept copies, opened by 控えを開く).
   const keptNotice = kept && (
     <div role="status" className="space-y-2 p-2 rounded-lg bg-white/70 dark:bg-zinc-900/40 text-gray-700 dark:text-zinc-300">
-      <p>{kept === 'moved' ? SHELF_OUTPUTS_KEPT_NOTE : SHELF_OUTPUTS_NOT_KEPT_NOTE}</p>
-      {kept === 'moved' && actions?.openBackup && (
+      <p>{shelfKeptAsideNote(kept)}</p>
+      {kept !== 'none' && actions?.openBackup && (
         <button disabled={busy} onClick={() => run(actions.openBackup!)} className={quiet}><FolderOpen size={14} />控えを開く</button>
       )}
     </div>
@@ -275,7 +275,7 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
           ? confirmation(shelfEditTexts(!!skill.shelfPublish).confirm, '自分用に直す', () => run(actions.editLocally))
           : <button disabled={busy} onClick={() => setConfirming('edit')} className={quiet}>自分用に直す</button>)}
         {/* The newest kept copy (会社の版に戻す, 外して出す) is in .backups, which Finder hides. */}
-        {actions?.openBackup && skill.shelfBackup && !kept && (
+        {actions?.openBackup && skill.shelfBackup && (!kept || kept === 'none') && (
           <button disabled={busy} onClick={() => run(actions.openBackup!)} className={quiet}><FolderOpen size={14} />控えを開く</button>
         )}
       </div>

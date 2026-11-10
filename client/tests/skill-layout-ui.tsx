@@ -331,7 +331,7 @@ const api: Partial<ElectronAPI> = {
   publishSkillToCompany: async (_root: string, skillPath: string, expectedVersion: string | null, leaveOutOutputs: boolean) => {
     record('publishSkillToCompany', [skillPath.split('/').pop(), expectedVersion, leaveOutOutputs])
     if (params.get('outputs') === '1' && !leaveOutOutputs) return { success: false as const, outputs: SHELF_OUTPUTS }
-    return params.get('shelf') === 'refused' ? { success: false as const, error: 'この Skill・指示を変えられるのは、決められた人だけです。' } : { success: true as const, ...(leaveOutOutputs ? { keptAside: true } : {}) }
+    return params.get('shelf') === 'refused' ? { success: false as const, error: 'この Skill・指示を変えられるのは、決められた人だけです。' } : { success: true as const, ...(leaveOutOutputs ? { keptAside: 'all' as const } : {}) }
   },
   editCompanySkillLocally: async (_root: string, skillPath: string) => {
     record('editCompanySkillLocally', [skillPath.split('/').pop()])
@@ -345,7 +345,7 @@ const api: Partial<ElectronAPI> = {
   requestCompanySkill: async (_root: string, skillPath: string, leaveOutOutputs: boolean) => {
     record('requestCompanySkill', [skillPath.split('/').pop(), leaveOutOutputs])
     if (params.get('outputs') === '1' && !leaveOutOutputs) return { success: false as const, outputs: SHELF_OUTPUTS }
-    return { success: true as const, ...(leaveOutOutputs ? { keptAside: true } : {}) }
+    return { success: true as const, ...(leaveOutOutputs ? { keptAside: 'all' as const } : {}) }
   },
   openCompanySkillBackup: async (_root: string, skillPath: string) => {
     record('openCompanySkillBackup', [skillPath.split('/').pop()])

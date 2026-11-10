@@ -963,3 +963,76 @@ test('「控えを開く」 finds the newest copy 会社の版に戻す kept of 
   fs.symlinkSync(elsewhere, w.at('.backups'))
   assert.equal(w.store.latestBackup(w.root, rel), null)
 })
+
+// 外して出す (plugins.md "No outputs in a Skill"): the files left out move to the kept copies.
+const OUT_REL = '.claude/skills/proposal'
+const outputsWorld = () => {
+  const w = world({ now: () => Date.UTC(2026, 10, 10, 1, 0, 0, 0) })
+  write(w.at(`${OUT_REL}/SKILL.md`), 'p\n')
+  write(w.at(`${OUT_REL}/output/a.md`), 'a\n')
+  return w
+}
+const KEPT = '.backups/2026-11-10T01-00-00-000_skill_outputs'
+
+test('外して出す never deletes what it did not move: a folder emptied of outputs goes, one still holding anything (.env, .DS_Store) stays whole', async () => {
+  const w = outputsWorld()
+  write(w.at(`${OUT_REL}/output/.env`), 'KEY=1\n')
+  write(w.at(`${OUT_REL}/output/.DS_Store`), 'x')
+  write(w.at(`${OUT_REL}/results/r.md`), 'r\n')
+  assert.equal(await w.store.keepAside(w.root, OUT_REL, ['output/a.md', 'results/r.md']), 'all')
+  assert.equal(read(w.at(`${KEPT}/${OUT_REL}/output/a.md`)), 'a\n')
+  assert.equal(read(w.at(`${KEPT}/${OUT_REL}/results/r.md`)), 'r\n')
+  assert.equal(read(w.at(`${OUT_REL}/output/.env`)), 'KEY=1\n')
+  assert.equal(read(w.at(`${OUT_REL}/output/.DS_Store`)), 'x')
+  assert.equal(exists(w.at(`${OUT_REL}/results`)), false, 'emptied: gone')
+  assert.deepEqual(JSON.parse(read(w.at(`${KEPT}/_metadata.json`))).files, [`${OUT_REL}/output/a.md`, `${OUT_REL}/results/r.md`])
+})
+
+test('外して出す moves nothing through a link or for something that is not a file', async () => {
+  const w = outputsWorld()
+  const outside = path.join(w.base, 'outside')
+  write(path.join(outside, 'b.md'), 'outside\n')
+  fs.symlinkSync(outside, w.at(`${OUT_REL}/linked`))
+  assert.equal(await w.store.keepAside(w.root, OUT_REL, ['output/a.md', 'linked/b.md']), 'none')
+  fs.mkdirSync(w.at(`${OUT_REL}/output/sub`))
+  assert.equal(await w.store.keepAside(w.root, OUT_REL, ['output/a.md', 'output/sub']), 'none')
+  fs.symlinkSync(path.join(outside, 'b.md'), w.at(`${OUT_REL}/output/link.md`))
+  assert.equal(await w.store.keepAside(w.root, OUT_REL, ['output/a.md', 'output/link.md']), 'none')
+  assert.equal(read(w.at(`${OUT_REL}/output/a.md`)), 'a\n')
+  assert.equal(read(path.join(outside, 'b.md')), 'outside\n')
+  assert.deepEqual(backupsOf(w), [])
+})
+
+test('外して出す failing half-way says so: what moved is in the kept copy and its _metadata.json, the rest stays', async () => {
+  const w = outputsWorld()
+  write(w.at(`${OUT_REL}/output/locked/b.md`), 'b\n')
+  fs.chmodSync(w.at(`${OUT_REL}/output/locked`), 0o555)
+  try {
+    assert.equal(await w.store.keepAside(w.root, OUT_REL, ['output/a.md', 'output/locked/b.md']), 'some')
+  } finally {
+    fs.chmodSync(w.at(`${OUT_REL}/output/locked`), 0o755)
+  }
+  assert.equal(read(w.at(`${KEPT}/${OUT_REL}/output/a.md`)), 'a\n')
+  assert.deepEqual(JSON.parse(read(w.at(`${KEPT}/_metadata.json`))).files, [`${OUT_REL}/output/a.md`])
+  assert.equal(read(w.at(`${OUT_REL}/output/locked/b.md`)), 'b\n')
+  assert.equal(exists(w.at(`${KEPT}/${OUT_REL}/output/locked`)), false, 'no folder left for what did not move')
+  // The first one failing: nothing moved, nothing kept.
+  const v = outputsWorld()
+  fs.chmodSync(v.at(`${OUT_REL}/output`), 0o555)
+  try {
+    await assert.rejects(v.store.keepAside(v.root, OUT_REL, ['output/a.md']))
+  } finally {
+    fs.chmodSync(v.at(`${OUT_REL}/output`), 0o755)
+  }
+  assert.equal(read(v.at(`${OUT_REL}/output/a.md`)), 'a\n')
+  assert.deepEqual(backupsOf(v), [])
+})
+
+test('「控えを開く」 opens the newest kept copy of a Skill, whether 会社の版に戻す or 外して出す made it', () => {
+  const w = world()
+  write(w.at(`.backups/2026-11-09T01-00-00-000_skill_edit/${OUT_REL}/SKILL.md`), 'edit\n')
+  write(w.at(`.backups/2026-11-10T01-00-00-000_skill_outputs/${OUT_REL}/output/a.md`), 'a\n')
+  assert.equal(w.store.latestBackup(w.root, OUT_REL), w.at(`.backups/2026-11-10T01-00-00-000_skill_outputs/${OUT_REL}`))
+  write(w.at(`.backups/2026-11-11T01-00-00-000_skill_edit/${OUT_REL}/SKILL.md`), 'edit2\n')
+  assert.equal(w.store.latestBackup(w.root, OUT_REL), w.at(`.backups/2026-11-11T01-00-00-000_skill_edit/${OUT_REL}`))
+})

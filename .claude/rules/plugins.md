@@ -854,13 +854,20 @@ company never reaches any of it: the store knows a company only from
   rename each, never deleted, never sent; folders left empty inside the Skill go), and before the
   sync: so the folder is exactly what was published and is taken over as the company's instead of
   becoming a clash. **Never** make the comparison ignore output-like paths instead: a later company
-  version would then replace the folder and lose them. The answer's `keptAside` → 「外したファイルは
-  控えに移しました。」 with ［控えを開く］ (`false`: they could not be moved and stay, said so). The AI is
+  version would then replace the folder and lose them. The answer's `keptAside` (`KeptAside`,
+  `shelfKeptAsideNote`): `all` 「外したファイルは控えに移しました。」 with ［控えを開く］; `some` (a move
+  failed half-way: what moved is in the kept copy and its `_metadata.json`, the rest stayed) says
+  exactly that, with ［控えを開く］; `none` (a link or a non-file on the way, `.backups` not a folder,
+  the first move failing) says they stayed. Empty folders go with `rmdir` only, never a folder
+  that still holds anything (`.env`, `.DS_Store`). The AI is
   told the same when it makes a Skill (`system-prompt.ts` スキル作成ルール: no outputs in the Skill
   folder, where they go written in SKILL.md). Tests: `ipc-skill-shelf.test.ts` (asked first; 外して出す
   → the stripped version delivered → the Skill is the company's, placed for the other agent, the
   moved files with their content in the kept copy; a refusal / offline moves nothing; 頼む moves them
-  too), `tests/ui/skill-layout.spec.ts` (publish and request, both choices, the kept notice) — mutation-checked.
+  too; `.backups` a file → `none`, files in place), `client/tests/skill-shelf.test.ts` (a folder still
+  holding `.env` / `.DS_Store` stays whole; a link or a non-file moves nothing; half-way → `some` with
+  the metadata of what moved; 控えを開く the newest of `skill_edit` / `skill_outputs`),
+  `tests/ui/skill-layout.spec.ts` (publish and request, both choices, the kept notice) — mutation-checked.
 - **「AI と一緒に直す」**: on the editing card and a local Skill's card, `chat.newConsultation` with
   `shelfFixWithAi` (the Skill's folder, working-folder relative, in the first message; sent like a
   skill's 実行).

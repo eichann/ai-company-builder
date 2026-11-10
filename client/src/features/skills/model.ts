@@ -2,7 +2,7 @@
 // copied one, and the slash commands the chat offers.
 import type { DepartmentConfig } from '../../types'
 import { setFrontmatterField, yamlQuoted } from '../../../shared/skill-frontmatter'
-import type { SkillShelfMark, SkillShelfRequestInfo } from '../../../shared/skill-shelf'
+import type { KeptAside, SkillShelfMark, SkillShelfRequestInfo } from '../../../shared/skill-shelf'
 
 /** A web app inside a skill's folder (`tools/<name>/`). */
 export interface SkillTool {
@@ -56,11 +56,11 @@ export const SKILL_PUBLISH_FAILED = 'できませんでした。もう一度試�
  * not, the files that look like outputs (nothing sent; the panel asks 「成果物が入っていませんか？」), or —
  * sent after 外して出す — whether the files left out moved to the kept copies.
  */
-export type ShelfSendAnswer = string | null | { outputs: string[] } | { keptAside: boolean }
+export type ShelfSendAnswer = string | null | { outputs: string[] } | { keptAside: KeptAside }
 
 /** The app's answer turned into what the panel shows. */
-export function shelfSendAnswer(result: { success: boolean; error?: string; outputs?: string[]; keptAside?: boolean }): ShelfSendAnswer {
-  if (result.success) return typeof result.keptAside === 'boolean' ? { keptAside: result.keptAside } : null
+export function shelfSendAnswer(result: { success: boolean; error?: string; outputs?: string[]; keptAside?: KeptAside }): ShelfSendAnswer {
+  if (result.success) return result.keptAside ? { keptAside: result.keptAside } : null
   if (result.outputs && result.outputs.length > 0) return { outputs: result.outputs }
   return result.error ?? SKILL_PUBLISH_FAILED
 }

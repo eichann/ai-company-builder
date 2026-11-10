@@ -124,7 +124,7 @@ test('外して出す: only the rest goes up, the files left out move to the kep
     return { status: 201, json: { success: true, data: { changed: true, item: {} } } }
   })
   const skillPath = path.join(folder, rel)
-  assert.deepEqual(await h.invoke('skillShelf:publish', folder, skillPath, null, true), { success: true, keptAside: true })
+  assert.deepEqual(await h.invoke('skillShelf:publish', folder, skillPath, null, true), { success: true, keptAside: 'all' })
   assert.deepEqual(posted[0].files.map(f => f.path).sort(), Object.keys(WITHOUT_OUTPUTS).sort())
 
   // The folder is what was published: taken over as the company's, and placed for the other agent too.
@@ -170,6 +170,18 @@ test('外して出す refused by the server (or offline): the files left out sta
   assert.deepEqual(keptCopies(folder), [])
 })
 
+test('外して出す accepted but the files cannot be moved (.backups is a file): the answer says none moved, and they stay where they were', async () => {
+  const id = 'co-out-stuck'
+  const { folder } = await open(id)
+  const rel = '.claude/skills/proposal'
+  writeSkill(folder, rel, WITH_OUTPUTS)
+  writeFiles(folder, { '.backups': 'not a folder' })
+  h.server.on('POST', `/api/companies/${id}/skill-shelf`, { status: 201, json: { success: true, data: { changed: true, item: {} } } })
+  const skillPath = path.join(folder, rel)
+  assert.deepEqual(await h.invoke('skillShelf:publish', folder, skillPath, null, true), { success: true, keptAside: 'none' })
+  for (const [p, text] of Object.entries(WITH_OUTPUTS)) assert.equal(fs.readFileSync(path.join(skillPath, p), 'utf8'), text, p)
+})
+
 test('外して出す on 頼む: once the request is sent, the files left out move to the kept copies too', async () => {
   const id = 'co-out-ask-sent'
   const { folder } = await open(id, {}, { company: false, departmentFolders: [] })
@@ -178,7 +190,7 @@ test('外して出す on 頼む: once the request is sent, the files left out mo
   const posted: Array<{ files: Array<{ path: string }> }> = []
   h.server.on('POST', `/api/companies/${id}/skill-shelf-requests`, req => { posted.push(JSON.parse(req.body!)); return { status: 201, json: { success: true, data: { id: 'r1' } } } })
   const skillPath = path.join(folder, rel)
-  assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, skillPath, true), { success: true, keptAside: true })
+  assert.deepEqual(await h.invoke('skillShelf:requestPublish', folder, skillPath, true), { success: true, keptAside: 'all' })
   assert.deepEqual(posted[0].files.map(f => f.path).sort(), Object.keys(WITHOUT_OUTPUTS).sort())
   const [kept] = keptCopies(folder)
   assert.equal(fs.readFileSync(path.join(folder, '.backups', kept, rel, 'output/提案書.md'), 'utf8'), '顧客A への提案\n')
