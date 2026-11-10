@@ -147,6 +147,9 @@ The AI reads and writes **only** the member's own live picks.
   may act on, a company without the shared folder, not linked already) at the version current now, as
   the AI (the one Drive link the AI may make). Answered as `linkedTo: { recordId }`; any refusal or
   error is logged with its code only and **never fails the put**. The tool says the file was linked.
+  The server cannot tell which record the consultation is about (topics live on the PC): it trusts the
+  app's `recordId` only as far as any act-token write — the member's AI could link that member's own new
+  put file to any record it may act on, nothing more.
 - Confirmation: putting into the member's **own / internal** folder they picked is not sending
   outside — the pick is the person's choice of destination, so no per-file confirmation; a
   folder visible outside the company is sending outside, which stays a person's act
