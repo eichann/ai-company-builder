@@ -116,4 +116,6 @@ its latest window (#154); the renderer bundle ≤ 3.0 MiB JS (raised from 2.2 �
   not drift. Each check prints `[perf] name=value unit (budget …)`; grep the job log for `[perf]`.
 - Run one: `cd client && npx tsx --test tests/perf/git-search.perf.test.ts`; bundle:
   `npx vite build && node scripts/check-bundle-size.mjs`.
+- The same job runs `scripts/check-preloads.mjs` on the build's `dist-electron`: each preload
+  loads as a sandboxed classic script and exposes its bridge (`google-drive.md` "The Picker").
 - Small-size behaviour (and the Myers diff timings) stays in the regular tests.

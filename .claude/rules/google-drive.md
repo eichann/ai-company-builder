@@ -11,6 +11,7 @@ paths:
   - "server/tests/unit/google-drive-core.test.ts"
   - "client/electron/features/google/drive.ts"
   - "client/electron/picker-preload.ts"
+  - "client/scripts/check-preloads.mjs"
   - "client/tests/google-drive-tools.test.ts"
 ---
 
@@ -69,6 +70,15 @@ already-granted features are added by the server) and waits ≤ 2 minutes for th
   (`isDrivePickerPage`); back come only Drive ids (`readDrivePickerResult`). 10 minutes, closing
   = cancel; the token is dropped with the window. It never reaches the renderer, the AI, a
   record-token request or a log.
+- `picker-preload.js` must be **CommonJS**: a sandboxed preload is a classic script, and an
+  ES-module one (a top-level `import`) fails silently, so the page finds no `window.acbPicker` and
+  shows 「この画面はアプリの中でだけ使えます。」 (release-20261109). vite-plugin-electron builds
+  every entry as `es` because `client/package.json` is `"type": "module"`, overriding
+  `rollupOptions.output.format`; `commonJsPreload()` in `vite.config.ts` sets the lib format for
+  both preloads. `client/scripts/check-preloads.mjs` loads each built preload as Electron's
+  sandbox would (function wrapper, `require` of `electron` only) and checks it exposes its bridge;
+  it runs in CI "Renderer bundle size (Linux)" and in `pnpm build` before packing. Keep the window
+  `sandbox: true`.
 - Unverified against real Google (no real accounts in tests): that Google honours the narrowed
   refresh (if not, Drive picking is refused — safe), and that Picker works in an Electron
   window without a Google sign-in cookie in that partition (Google may block a sign-in inside
@@ -157,4 +167,5 @@ the right kind, the act token, the MIME / name / content / sha checks, the outsi
 refusal, the receipt's idempotency and key reuse, the lookup after a lost answer; in the app:
 tools only when available, put only with act, consent before the Picker, the path checks
 (outside, link, `.git`, nested repository, private list, left out), kind and content, the
-Picker page check and id filter, the request key.
+Picker page check and id filter, the request key; the preload's format
+(`check-preloads.mjs` fails on the build without `commonJsPreload`).

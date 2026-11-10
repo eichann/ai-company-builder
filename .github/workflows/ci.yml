@@ -215,7 +215,8 @@ jobs:
     # from one runner and one toolchain; a committed baseline file would go
     # stale and conflict between parallel PRs). The JS Vite emits does not depend on
     # the OS, so this left the macOS perf job on 2026-11-02. Same area as the
-    # UI tests (what the renderer bundle is built from).
+    # UI tests (what the renderer bundle is built from). The build's preloads are checked here
+    # too (check-preloads.mjs).
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.ui != 'false' }}
     runs-on: ubuntu-latest
@@ -244,6 +245,12 @@ jobs:
           else
             node scripts/check-bundle-size.mjs dist
           fi
+      # The same build emits the preloads (dist-electron): each must load in a sandboxed window
+      # (CommonJS, require only "electron") — release-20261109's ES-module picker-preload.js left
+      # the Google Picker window without its bridge (google-drive.md "The Picker").
+      - name: Preloads load in a sandboxed window
+        working-directory: client
+        run: node scripts/check-preloads.mjs
 
   sync-harness-shard:
     name: Sync harness ${{ matrix.shard }}/4 (macOS)
