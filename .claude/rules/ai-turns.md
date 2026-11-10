@@ -204,6 +204,20 @@ turns").
 
 The execution state lives on the server; the AI still runs only here.
 
+- **The run's subject** (B 「実行を記録から分ける」 PR 1, 2026-11-10): `services/ai-runs.ts` never asks
+  the records or the business plugins' steps itself. Whose turn a claim is, what it is pinned to
+  and what a step does after its run ends go through the port `RunSubjects`
+  (`server/src/ports/run-subjects.ts`: `resolve(member, subject, step)`, `afterDone`,
+  `afterFailed`; a subject is `{ kind: 'record', id }`). The one resolver today is the record one,
+  `services/run-subjects.ts` `createRecordRunSubjects` (a core step: `records.aiTurnOf`; a
+  `<pluginId>__<step>`: `pluginSteps.turnOf` + `pinForRun`, bound by the plugins lane through its
+  `usePluginSteps`; minutes' `afterFailedRun`), wired in `composition.ts`. Answers, codes and their
+  order are unchanged; fencing, idempotency keys, failure places, route scope and the emergency stop
+  stay in `ai-runs.ts` and do not look at the subject. The schema before runs get a subject kind is
+  frozen in `server/tests/fixtures/app-schema-before-run-subjects.sql`
+  (`tests/unit/run-subjects-schema.test.ts`: today's migrations make exactly those run tables, and a
+  server started on such a database keeps every run and idempotency key).
+
 - **Absence** (`records.md` "Absence and the delegate"): during an absence the server lets the
   delegate's app claim the absentee's AI turns (`aiTurnOf` counts whom the member covers; the run
   uses the delegate's token and permissions, the ledger records `onBehalfOf`). The app's queue

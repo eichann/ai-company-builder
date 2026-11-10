@@ -78,6 +78,7 @@ import { createRecordEngine, type RecordChange } from './services/record-engine'
 import { createRecordSignal } from './services/record-signal'
 import { companyNow, createNotificationService } from './services/notifications'
 import { createAiRunService } from './services/ai-runs'
+import { createRecordRunSubjects } from './services/run-subjects'
 import { createSkillUseService } from './services/skill-uses'
 import { createSkillShelfService } from './services/skill-shelf'
 import { createGroupService } from './services/groups'
@@ -666,11 +667,16 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     features: companyId => features.of(companyId),
   })
   // Execution runs of 「AI の番」 (S10b, records.md "Execution runs"): the server stores and checks; the AI runs on the PC.
-  const aiRuns = createAiRunService({
-    ...shared, tokenDigest: sha256TokenDigest, aiTurnOf: (member, recordId, step) => records.aiTurnOf(member, recordId, step),
+  // What a run works on (ports/run-subjects.ts): records only today — a core step by aiTurnOf, a
+  // business plugin's step by the plugins lane (bound below in wirePluginsLane).
+  const runSubjects = createRecordRunSubjects({
+    aiTurnOf: (member, recordId, step) => records.aiTurnOf(member, recordId, step),
     // An unfinished minutes reading goes back to 「届いた」 at once, as the run's doing (the app's step name).
     afterFailedRun: (member, run) => { if (run.step === 'minutes-reading') minutes.putBackAfterRun(member, run.recordId, run.id) },
-    // The emergency stop: no run with nobody present starts (or renews its lease) while stopped (agent-stop.md).
+  })
+  const aiRuns = createAiRunService({
+    ...shared, tokenDigest: sha256TokenDigest, subjects: runSubjects,
+    // The emergency stop: no run with nobody present starts while stopped; a renew is not refused (agent-stop.md).
     aiStops: member => agentStops.policyFor(member),
   })
 
@@ -730,7 +736,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   })
   // lane C ▼
   const pluginsLane = wirePluginsLane({
-    conn, companyData: shared.companyData, clock: shared.clock, pluginShelf, agentPolicy, recordEngine, approvals, pluginOperations, aiRuns, actsFor,
+    conn, companyData: shared.companyData, clock: shared.clock, pluginShelf, agentPolicy, recordEngine, approvals, pluginOperations, runSubjects, actsFor,
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
     hasCompanyFolder: companyFolders.has,

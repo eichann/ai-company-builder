@@ -13,7 +13,7 @@ import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import { companySkillTree } from '../lib/skill-trees'
 import type { AgentPolicyService } from '../services/agent-policy'
-import type { PluginStepRuns } from '../services/ai-runs'
+import type { PluginStepRuns } from '../services/run-subjects'
 import type { ApprovalRoleHolders } from '../services/approvals'
 import { createPluginRunGate } from '../services/plugin-ai-tools'
 import { createPluginDistribution } from '../services/plugin-distribution'
@@ -38,7 +38,8 @@ export interface PluginsLaneDeps {
   }
   approvals: { useRoles(r: ApprovalRoleHolders): void }
   pluginOperations: { useRoles(r: OperationRoleHolds): void; usePinnedSteps(f: RunStepOf): void }
-  aiRuns: { usePluginSteps(r: PluginStepRuns): void }
+  /** Records as runs' subjects (services/run-subjects.ts): a business plugin's steps are bound here. */
+  runSubjects: { usePluginSteps(r: PluginStepRuns): void }
   /** Absentees a member stands in for today (services/absences.ts, the one resolution). */
   actsFor: (companyId: string, userId: string) => string[]
   isMember: (companyId: string, userId: string) => boolean
@@ -55,7 +56,7 @@ export function wirePluginsLane(deps: PluginsLaneDeps) {
   })
   // A meeting read moves its まとまり to the business plugin's step for it (plan C5, plugin-steps.md).
   deps.recordEngine.useAfterAction((member, actor, done) => pluginSteps.afterAct(member, actor, done))
-  deps.aiRuns.usePluginSteps({
+  deps.runSubjects.usePluginSteps({
     isPluginStep: step => parsePluginRunStep(step) !== null,
     turnOf: (member, recordId, step) => pluginSteps.turnOf(member, recordId, step),
     pinForRun: (member, recordId, step) => pluginSteps.pinForRun(member, recordId, step),
