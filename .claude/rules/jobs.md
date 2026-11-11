@@ -323,6 +323,10 @@ POST /ai-runs/:runId/renew | finish | retry | …/reconcile        as for any ru
   that sends the run to a person (`waiting_person` / `waiting_setup`) → `needs_person` `RUN_FAILED`, told
   (`job_failed`); a temporary failure or an unknown outside result leave it `running` — claimable again after
   its wait, or once reconciled, until it expires. A record run's finish with `jobResult` → 400.
+- **Ending a run from outside its finish** (`endPcRun`, the deadline, a pause / stop, the clock's expiry, a
+  task refusal): from `running`, `open` or `retry_later`; an outside operation still in flight becomes
+  `unknown` first, as at a finish, and then the run waits for reconciliation (`waiting_reconcile`), else for a
+  person (`waiting_person`) — either way with the code, no holder, its token fenced.
 - **The approved minutes are a hard deadline** (`grant.limits.minutes`, `pcRunDeadlineMs`): the run's first
   claim (its creation — renewals and re-claims never move it) + those minutes. After it: every call of its
   token is refused, the finish answers 409 `JOB_TIME_LIMIT` and makes nothing, a re-claim (also after a
@@ -496,8 +500,13 @@ membership can fail).
   re-claim / the clock end the run → `TIME_LIMIT`); a reconcile wait bounded (`RESULT_UNKNOWN`, never
   `expired`); the turn's hidden name; the clock's expiry of an unheld run; the server runner never starved
   by PC occurrences; the shelf pin (filled by the server, `JOB_SKILL_NOT_HERE` both ways, an unreadable place
-  missing / hiding the version, `JOB_SKILL_CHANGED`). 71 mutations (each guard removed or inverted alone)
-  each fail the file. Not reachable by a test, kept as defence: the `claimed` hook's refusal when the
+  missing / hiding the version, `JOB_SKILL_CHANGED`); ending a run (`endPcRun`) from `retry_later` and `open`
+  too, an operation in flight made unknown (→ `waiting_reconcile`), the clock's expiry ending the run.
+  Mutation check: 76 mutations were run, each removing or inverting exactly one of the guards named in this
+  section (the checks of `job-runs.ts`, the hooks and dispatch in `ai-runs.ts` / `run-subjects.ts`, the
+  clock's and `holdDue`'s PC branches and `endPcRun` in `job-occurrences.ts`, the shelf pin in `jobs.ts` /
+  `skill-shelf.ts`, `jobRunRouteAllowed`), and each of the 76 fails this file. Lines outside that list
+  (texts, view fields, the defensive checks below) were not mutated. Not reachable by a test, kept as defence: the `claimed` hook's refusal when the
   occurrence is no longer `due` (the claim's check and write are one synchronous stretch), the finish's
   `GONE` when the occurrence moved inside its own transaction, and a writer refusal after `beforeFinish`'s
   check (a race; it rolls the finish back).

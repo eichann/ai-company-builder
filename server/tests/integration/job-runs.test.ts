@@ -351,6 +351,36 @@ describe('the grant at every call', () => {
     expect(tasksOf()).toEqual([])
   })
 
+  it('a pause also ends a run waiting to be retried later, and marks an outside operation still in flight unknown', async () => {
+    const waiting = await runnable()
+    const run = (await claim(waiting.occ)).body.data.run
+    expect((await finish(run, { outcome: 'failed', failure: { class: 'temporary', code: 'OFFLINE' } })).status).toBe(200)
+    expect(runOf(run.id).state).toBe('retry_later')
+    expect(services.jobs.pause(owner(), waiting.job).ok).toBe(true)
+    expect(occOf(waiting.occ)).toMatchObject({ state: 'held', outcome_code: 'JOB_PAUSED' })
+    expect(runOf(run.id)).toMatchObject({ state: 'waiting_person', failure_code: 'JOB_PAUSED' })
+
+    const inFlight = await runnable()
+    const run2 = (await claim(inFlight.occ, 'jr-alice', 'device-alice-2')).body.data.run
+    const at = new Date().toISOString()
+    db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, created_at, updated_at)
+      VALUES (?, ?, 'draft-1', 'f', 'outbound', 'in_progress', 1, ?, ?)`).run(CO, run2.id, at, at)
+    expect(services.jobs.pause(owner(), inFlight.job).ok).toBe(true)
+    expect((db.prepare("SELECT state FROM ai_run_operations WHERE company_id = ? AND run_id = ? AND key = 'draft-1'").get(CO, run2.id) as Json).state).toBe('unknown')
+    expect(runOf(run2.id)).toMatchObject({ state: 'waiting_reconcile', failure_code: 'JOB_PAUSED' })
+
+    // A run open again after a person reconciled its operation (its occurrence still running) is ended too.
+    const reopened = await runnable()
+    const run3 = (await claim(reopened.occ, 'jr-alice', 'device-alice-3')).body.data.run
+    db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, created_at, updated_at)
+      VALUES (?, ?, 'draft-2', 'f', 'outbound', 'unknown', 1, ?, ?)`).run(CO, run3.id, at, at)
+    expect((await finish(run3, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
+    expect((await as('jr-alice', 'POST', `/ai-runs/${run3.id}/operations/draft-2/reconcile`, { done: true })).status).toBe(200)
+    expect(runOf(run3.id).state).toBe('open')
+    expect(services.jobs.pause(owner(), reopened.job).ok).toBe(true)
+    expect(runOf(run3.id)).toMatchObject({ state: 'waiting_person', failure_code: 'JOB_PAUSED' })
+  })
+
   it('the company’s jobs stop holds a running occurrence and ends its run; lifting it brings nothing back', async () => {
     const { occ } = await runnable()
     const run = (await claim(occ)).body.data.run
@@ -504,6 +534,8 @@ describe('names, the clock and the runner', () => {
     db.prepare("UPDATE ai_runs SET claim_expires_at = ? WHERE company_id = ? AND record_id = ?").run(new Date(Date.now() - 1).toISOString(), CO, occ)
     occurrences.makeOccurrences(CO)
     expect(occOf(occ)).toMatchObject({ state: 'expired', outcome_code: 'EXPIRED' })
+    // Its run is ended too: nothing may claim or finish it later.
+    expect(runOf(occOf(occ).run_id)).toMatchObject({ state: 'waiting_person', failure_code: 'EXPIRED' })
     expect(occOf(held.occ).state).toBe('running')
     expect(noticesOf('job_expired')).toEqual(['jr-alice', 'jr-owner'])
   })

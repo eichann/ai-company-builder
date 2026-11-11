@@ -96,16 +96,23 @@ export function pcRunDeadlineMs(run: Pick<AiRunRow, 'createdAt'>, definition: Jo
 }
 
 /**
- * End a PC occurrence's run from outside its finish (in the caller's transaction): `waiting_person` with `code`,
- * no holder — its tokens are fenced at once, its renew and finish refused (`RUN_SUPERSEDED`). Its occurrence
+ * End a PC occurrence's run from outside its finish (in the caller's transaction): `waiting_person` with `code`
+ * (an outside operation still in flight becomes unknown, as at a finish, and then `waiting_reconcile`), no
+ * holder — its tokens are fenced at once, its renew and finish refused (`RUN_SUPERSEDED`). Its occurrence
  * is moved by the caller (held / needs_person), so a later 「もう一度」 of the run claims nothing.
  */
 export function endPcRun(handle: CompanyData, runId: string | null, code: string, at: string): void {
   const run = runId ? handle.aiRuns.byId(runId) : null
   if (!run || (run.state !== 'running' && run.state !== 'open' && run.state !== 'retry_later')) return
-  const ended: AiRunRow = { ...run, state: 'waiting_person', deviceId: null, claimExpiresAt: null, failureClass: 'bad-input', failureCode: code, retryAt: null, updatedAt: at }
+  // As a finish does (ai-runs.ts `inFlightToUnknown`): an outside operation still in flight may have happened.
+  for (const o of handle.aiRuns.operations(run.id)) if (o.state === 'in_progress') handle.aiRuns.updateOperation(run.id, o.key, ['in_progress'], { state: 'unknown' }, at)
+  const unknown = handle.aiRuns.operations(run.id).some(o => o.state === 'unknown')
+  // One whose outside result nobody knows waits for a person's reconciliation, as a finish would leave it.
+  const ended: AiRunRow = unknown
+    ? { ...run, state: 'waiting_reconcile', deviceId: null, claimExpiresAt: null, failureClass: 'unknown-result', failureCode: code, retryAt: null, updatedAt: at }
+    : { ...run, state: 'waiting_person', deviceId: null, claimExpiresAt: null, failureClass: 'bad-input', failureCode: code, retryAt: null, updatedAt: at }
   if (handle.aiRuns.update(ended, { generation: run.generation, state: run.state })) {
-    handle.aiRuns.appendEvent({ runId: run.id, event: 'finished', generation: run.generation, stateAfter: 'waiting_person', code, at })
+    handle.aiRuns.appendEvent({ runId: run.id, event: 'finished', generation: run.generation, stateAfter: ended.state, code, at })
   }
 }
 
