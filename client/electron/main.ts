@@ -62,7 +62,7 @@ import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
 import { createMeetingsApi } from './features/minutes/meetings'
 import { createAiTurnClaims } from './features/ai-turns/claims'
-import { newFilesByGit, newFilesByTime } from './features/ai-turns/job-runs'
+import { gitCheckPoint, newFilesByGit, newFilesByTime } from './features/ai-turns/job-runs'
 import { createRunRegistry } from './records/runs'
 import { registerAiTurnsIpc } from './features/ai-turns/ipc'
 import { createNotificationsWatcher } from './features/notifications/watcher'
@@ -392,6 +392,8 @@ const readPluginProcedure = createProcedureReader({
   folderOf: (companyId, pluginId, version) => agentControl.pluginPackages.folderOf(companyId, pluginId, version),
   git: (gitRoot, args) => appGit.create(gitRoot, { GIT_NO_LAZY_FETCH: '1' }).raw(args),
 })
+// git for a job's new-files check (no lazy fetch: what is not here is not looked at).
+const jobGit = (cwd: string, args: string[]) => appGit.create(cwd, { GIT_NO_LAZY_FETCH: '1' }).raw(args)
 const aiTurnClaims = createAiTurnClaims({
   baseUrl: getServerApiUrl,
   cookies: session.cookies,
@@ -415,12 +417,16 @@ const aiTurnClaims = createAiTurnClaims({
       const file = got.ok ? got.files.find(f => f.path === 'SKILL.md') : undefined
       return file ? Buffer.from(file.bytes).toString('utf8') : null
     },
-    newFiles: async (companyRoot, place, since, until) => {
+    checkPoint: async (companyRoot, place, until) => {
       if (!companyRoot) return null
       const root = allowedRoots.validate(companyRoot)
-      return workingFolders.has(root)
-        ? newFilesByTime(root, place, since, until)
-        : newFilesByGit((cwd, args) => appGit.create(cwd, { GIT_NO_LAZY_FETCH: '1' }).raw(args), root, place, since, until)
+      return workingFolders.has(root) ? { commit: null } : gitCheckPoint(jobGit, root, place, until)
+    },
+    newFiles: async (companyRoot, place, window) => {
+      if (!companyRoot) return null
+      const root = allowedRoots.validate(companyRoot)
+      if (workingFolders.has(root)) return newFilesByTime(root, place, window.since, window.until)
+      return window.upto ? newFilesByGit(jobGit, root, place, { since: window.since, sinceCommit: window.sinceCommit, upto: window.upto }) : null
     },
     stopTurn: conversationId => { chatTurns?.abort(info => info.appSessionId === conversationId, 'job-ended') },
   },

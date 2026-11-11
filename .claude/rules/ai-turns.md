@@ -533,8 +533,10 @@ chat server like a business plugin step's (`pluginStepTools` → `jobTools`), it
 `stepWriteArea`; `aiTurns:retry` gives nothing back for an occurrence (its 「もう一度」 is the server's, 5b). Records'
 steps, their claims, settles and tests are unchanged. In the rules (`aiTurns.ts`) a job comes after the
 records, neither counts toward nor waits for their daily limit, and its failures are not theirs (`jobOutcome`: only
-Claude's usage limit). For every kind, a claim that wins after the runner stopped waiting for it (`START_TIMEOUT_MS`)
-is settled at once rather than left held with no AI. Test: `client/tests/job-runs.test.ts`, `aiTurns.test.ts`
+Claude's usage limit). For every kind — **a behaviour change for records too** (B PR 5a-2) — a claim that wins after
+the runner stopped waiting for it (`START_TIMEOUT_MS`) is settled at once (`aiTurns:settle`: a reading put back, the
+run finished as unfinished) rather than left held with no AI until its lease runs out; one line in the hook, not covered
+by a test. Test: `client/tests/job-runs.test.ts`, `aiTurns.test.ts`
 (mutation-checked).
 
 ## Not yet

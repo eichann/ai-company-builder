@@ -184,6 +184,12 @@ export function createJobRuns(deps: JobRunDeps) {
     return before ? (before.checkedUntil ?? before.dueAt) : (f.version.approvedAt ?? f.version.createdAt)
   }
 
+  /** The commit the previous occurrence that ran looked up to (its `new_files` check in the shared folder), or null. */
+  function sinceCommit(f: Found): string | null {
+    const before = f.handle.jobs.occurrences(f.job.id, 50).find(o => o.dueSlot < f.occ.dueSlot && (o.state === 'done' || o.state === 'nothing'))
+    return before?.checkedCommit ?? null
+  }
+
   /**
    * Where this occurrence's check stops (B PR 5a-2): its own `dueAt` — what came after belongs to the next
    * occurrence, so an app opened late never looks at it twice — or, once claimed, what the claim stored
@@ -208,12 +214,12 @@ export function createJobRuns(deps: JobRunDeps) {
     const all = deps.meetings(member, checkSince(f), end, 10_000)
       .filter(m => words.length === 0 || words.some(w => m.title.normalize('NFKC').toLowerCase().includes(w)))
     if (all.length <= JOB_MEETINGS_PER_RUN) return { meetings: all.map(view), until: end }
-    // More than one run takes: stop at the first meeting left over (all of its arrival time wait for the next).
+    // More than one run takes: the window ends at the first meeting left over, so every meeting recorded at that
+    // same moment waits for the next occurrence too (none cut off from its twin); only when the first one already
+    // shares it does the window end just after it.
     const next = all[JOB_MEETINGS_PER_RUN].arrivedAt
-    const taken = all.filter(m => m.arrivedAt < next)
-    return taken.length > 0
-      ? { meetings: taken.map(view), until: next }
-      : { meetings: all.filter(m => m.arrivedAt === next).map(view), until: new Date(Date.parse(next) + 1).toISOString() }
+    const until = all[0].arrivedAt < next ? next : new Date(Date.parse(next) + 1).toISOString()
+    return { meetings: all.filter(m => m.arrivedAt < until).map(view), until }
   }
   const view = (m: JobMeetingView): JobMeetingView => ({ id: m.id, title: m.title, at: m.at })
 
@@ -244,7 +250,9 @@ export function createJobRuns(deps: JobRunDeps) {
     return {
       occurrenceId: f.occ.id, jobId: f.job.id, jobVersion: f.occ.jobVersion, fingerprint: f.version.fingerprint,
       name: deps.jobs.nameOf(member, f.job.id) ?? '定期の仕事', dueSlot: f.occ.dueSlot, dueAt: f.occ.dueAt, expiresAt: f.occ.expiresAt,
-      state: f.occ.state as 'due' | 'running', check: d.check, checkSince: checkSince(f), checkUntil: checkUntil(f, member), procedure: d.run.procedure, grant: d.grant,
+      state: f.occ.state as 'due' | 'running', check: d.check, checkSince: checkSince(f), checkUntil: checkUntil(f, member),
+      ...(d.check.kind === 'new_files' ? { sinceCommit: sinceCommit(f), checkedCommit: f.occ.checkedCommit ?? null } : {}),
+      procedure: d.run.procedure, grant: d.grant,
     }
   }
 
@@ -264,13 +272,16 @@ export function createJobRuns(deps: JobRunDeps) {
       return ok({ pin: null, job: { id: f.job.id, version: f.occ.jobVersion, fingerprint: f.version.fingerprint } })
     },
 
-    claimed(member, run) {
+    claimed(member, run, asked) {
       const f = own(member, run.subject.id)
       if (!f) return NOT_FOUND()
       // A re-claim keeps its own occurrence; a due one becomes this run's. Anything else: someone else's now.
       if (f.occ.state === 'running' && f.occ.runId === run.id) return null
       // Where its check stops is fixed now, once (the next occurrence's check starts there).
-      if (!f.handle.jobs.moveOccurrence(f.occ.id, ['due'], 'running', { runId: run.id, outcomeCode: null, checkedUntil: checkUntil(f, member) }, clock.now())) return GONE()
+      if (!f.handle.jobs.moveOccurrence(f.occ.id, ['due'], 'running', {
+        runId: run.id, outcomeCode: null, checkedUntil: checkUntil(f, member),
+        checkedCommit: f.definition.check.kind === 'new_files' ? asked?.checkedCommit ?? null : null,
+      }, clock.now())) return GONE()
       return null
     },
 

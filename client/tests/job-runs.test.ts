@@ -14,7 +14,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, utimesSync, 
 import os from 'node:os'
 import path from 'node:path'
 import { createAiTurnClaims } from '../electron/features/ai-turns/claims'
-import { newFilesByGit, newFilesByTime } from '../electron/features/ai-turns/job-runs'
+import { gitCheckPoint, newFilesByGit, newFilesByTime } from '../electron/features/ai-turns/job-runs'
 import { createRecordsApi } from '../electron/records/api'
 import { createRunRegistry } from '../electron/records/runs'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
@@ -68,7 +68,7 @@ function claimsFor(server: ReturnType<typeof fakeServer>, over: Record<string, u
     ...base, records: createRecordsApi({ ...base, fetch: server.fetch, runOf: runs.runOf }), runs, deviceId: 'device-job-1',
     renewEveryMs: 3_600_000, fetch: server.fetch, agent: () => 'claude-code', windowOpen: () => true, aiAllowed: () => true, stopPolicyConfirmed: async () => true,
     log: { warn: () => {} }, readProcedure: async () => '# 面談の報告書\n文字起こしから下書きを作る。\n',
-    jobs: { readShelfSkill: async () => null, newFiles: async () => ['人事部/面談/2026-11-10_佐藤.txt'], stopTurn: (c: string) => { stopped.push(c) } } as NonNullable<Parameters<typeof createAiTurnClaims>[0]['jobs']>,
+    jobs: { readShelfSkill: async () => null, checkPoint: async () => ({ commit: 'c'.repeat(40) }), newFiles: async () => ['人事部/面談/2026-11-10_佐藤.txt'], stopTurn: (c: string) => { stopped.push(c) } } as NonNullable<Parameters<typeof createAiTurnClaims>[0]['jobs']>,
     ...over,
   })
   return { claims, stopped, runs }
@@ -118,11 +118,13 @@ test('nothing reaches the server while this PC may not run AI unattended', async
 
 test('the claim names the checks this app runs; nothing new → finished `nothing`, no message, no AI', async () => {
   const server = fakeServer()
-  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, newFiles: async () => [], stopTurn: () => {} } })
+  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async () => ({ commit: 'c'.repeat(40) }), newFiles: async () => [], stopTurn: () => {} } })
   await claims.jobTurns(COMPANY)
   const r = await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
   assert.deepEqual(r, { claimed: false, reason: 'taken' })
   assert.deepEqual(server.calls.find(c => c.path === '/job-run-claims')?.body.checks, ['new_files', 'new_meetings'])
+  // The commit the check looks up to goes with the claim (the next occurrence starts after it).
+  assert.equal(server.calls.find(c => c.path === '/job-run-claims')?.body.checkedCommit, 'c'.repeat(40))
   assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'done', jobResult: 'nothing' }])
   assert.equal(claims.jobTools('conv-job-00001', 'job-procedure'), null)
 })
@@ -268,69 +270,96 @@ test('the write guard: a job writes only in its grant\'s place, or nowhere; it r
   }
 })
 
-test('new files: by git\'s history in the shared folder (a checkout\'s times say nothing), by time in a working folder, nothing for a place not here', async () => {
-  const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-files-')))
+test('new files in the shared folder: by what is reachable, never by commit dates; only once this PC has what the server has', async () => {
+  const tmp = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-git-')))
   try {
-    const git = (cwd: string, args: string[]) => Promise.resolve(execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_DATE: '', GIT_COMMITTER_DATE: '' } }))
-    execFileSync('git', ['init', '-q'], { cwd: root })
-    execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: root })
-    execFileSync('git', ['config', 'user.name', 't'], { cwd: root })
-    mkdirSync(path.join(root, '人事部', '面談'), { recursive: true })
-    writeFileSync(path.join(root, '人事部', '面談', 'old.txt'), 'old')
-    writeFileSync(path.join(root, '営業部.txt'), 'x')
-    execFileSync('git', ['add', '-A'], { cwd: root })
-    execFileSync('git', ['commit', '-qm', 'old', '--date=2026-01-01T00:00:00Z'], { cwd: root, env: { ...process.env, GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' } })
-    writeFileSync(path.join(root, '人事部', '面談', 'new.txt'), 'new')
-    // A file changed since is not new.
-    writeFileSync(path.join(root, '人事部', '面談', 'old.txt'), 'changed')
-    execFileSync('git', ['add', '-A'], { cwd: root })
-    execFileSync('git', ['commit', '-qm', 'new'], { cwd: root })
-    const since = '2026-06-01T00:00:00.000Z'
-    const until = new Date(Date.now() + 60_000).toISOString()
-    // Not fetched since the window's end: a colleague's file may be missing — never "nothing new" on a guess.
-    assert.equal(await newFilesByGit(git, root, '人事部/面談', since, until), 'not-synced')
-    writeFileSync(path.join(root, '.git', 'FETCH_HEAD'), '')
-    const later = new Date(Date.now() + 120_000)
-    utimesSync(path.join(root, '.git', 'FETCH_HEAD'), later, later)
-    assert.deepEqual(await newFilesByGit(git, root, '人事部/面談', since, until), ['人事部/面談/new.txt'])
-    // The window ends at the occurrence's time: what came after is the next occurrence's.
-    assert.deepEqual(await newFilesByGit(git, root, '人事部/面談', since, '2026-06-02T00:00:00.000Z'), [])
-    assert.equal(await newFilesByGit(git, root, '人事部/ない', since, until), null)
-    assert.equal(await newFilesByGit(git, root, '../x', since, until), null)
-    // A link at the place itself (committed by someone) is never followed, nor its repository used.
-    const outside = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-outside-')))
-    try {
-      mkdirSync(path.join(outside, '他社'), { recursive: true })
-      writeFileSync(path.join(outside, '他社', '秘密.txt'), 'x')
-      execFileSync('git', ['init', '-q'], { cwd: outside })
-      mkdirSync(path.join(root, '営業部'), { recursive: true })
-      symlinkSync(path.join(outside, '他社'), path.join(root, '営業部', '受付'))
-      assert.equal(await newFilesByGit(git, root, '営業部/受付', since, until), null)
-      assert.equal(await newFilesByTime(root, '営業部/受付', since, until), null)
-      symlinkSync(outside, path.join(root, 'リンク'))
-      assert.equal(await newFilesByTime(root, 'リンク/他社', since, until), null)
-    } finally {
-      rmSync(outside, { recursive: true, force: true })
+    const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' }
+    const run = (cwd: string, args: string[], extra: Record<string, string> = {}) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...env, ...extra } })
+    const git = async (cwd: string, args: string[]) => run(cwd, args)
+    const server = path.join(tmp, 'server.git')
+    run(tmp, ['init', '-q', '--bare', '-b', 'main', server])
+    const colleague = path.join(tmp, 'colleague')
+    const root = path.join(tmp, 'mine')
+    run(tmp, ['clone', '-q', server, colleague])
+    run(colleague, ['checkout', '-q', '-b', 'main'])
+    const commit = (file: string, date?: string) => {
+      mkdirSync(path.dirname(path.join(colleague, file)), { recursive: true })
+      writeFileSync(path.join(colleague, file), file)
+      run(colleague, ['add', '-A'])
+      run(colleague, ['commit', '-qm', file], date ? { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : {})
+      run(colleague, ['push', '-q', 'origin', 'main'])
     }
-
-    const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-work-')))
-    try {
-      mkdirSync(path.join(work, '人事部', '面談', '.personal'), { recursive: true })
-      writeFileSync(path.join(work, '人事部', '面談', 'a.txt'), 'a')
-      writeFileSync(path.join(work, '人事部', '面談', 'b.txt'), 'b')
-      writeFileSync(path.join(work, '人事部', '面談', '.personal', 'mine.txt'), 'm')
-      const old = new Date('2026-01-01T00:00:00Z')
-      utimesSync(path.join(work, '人事部', '面談', 'a.txt'), old, old)
-      const until = new Date(Date.now() + 60_000).toISOString()
-      assert.deepEqual(await newFilesByTime(work, '人事部/面談', since, until), ['人事部/面談/b.txt'])
-      assert.deepEqual(await newFilesByTime(work, '人事部/面談', since, '2026-06-02T00:00:00.000Z'), [])
-      assert.equal(await newFilesByTime(work, '人事部/ない', since, until), null)
-    } finally {
-      rmSync(work, { recursive: true, force: true })
-    }
+    commit('人事部/面談/first.txt')
+    run(tmp, ['clone', '-q', '-b', 'main', server, root])
+    run(root, ['pull', '-q'])
+    const longAgo = '2026-01-01T00:00:00.000Z'
+    const first = await gitCheckPoint(git, root, '人事部/面談', longAgo)
+    assert.ok(first && first !== 'not-synced')
+    // Made offline long ago, reaching the server only now: still new after the previous occurrence's commit.
+    commit('人事部/面談/late.txt', '2026-01-02T00:00:00Z')
+    commit('営業部/other.txt')
+    // Fetched but not in HEAD (a fetch-only path, a sync stopped on a conflict): not yet, never `nothing`.
+    run(root, ['fetch', '-q'])
+    assert.equal(await gitCheckPoint(git, root, '人事部/面談', longAgo), 'not-synced')
+    run(root, ['merge', '-q', '--ff-only', '@{upstream}'])
+    const second = await gitCheckPoint(git, root, '人事部/面談', longAgo)
+    assert.ok(second && second !== 'not-synced')
+    assert.deepEqual(await newFilesByGit(git, root, '人事部/面談', { since: '2026-06-01T00:00:00.000Z', sinceCommit: first.commit, upto: second.commit }), ['人事部/面談/late.txt'])
+    // Nothing added between the same commits; a commit this PC does not have is "not yet".
+    assert.deepEqual(await newFilesByGit(git, root, '人事部/面談', { since: longAgo, sinceCommit: second.commit, upto: second.commit }), [])
+    assert.equal(await newFilesByGit(git, root, '人事部/面談', { since: longAgo, sinceCommit: null, upto: 'f'.repeat(40) }), 'not-synced')
+    // Not fetched since the window's end: not yet.
+    assert.equal(await gitCheckPoint(git, root, '人事部/面談', new Date(Date.now() + 3_600_000).toISOString()), 'not-synced')
+    assert.equal(await gitCheckPoint(git, root, '人事部/ない', longAgo), null)
+    assert.equal(await gitCheckPoint(git, root, '../x', longAgo), null)
+    // A link at the place itself, or above it (committed by someone), is never followed, nor its repository used.
+    const outside = path.join(tmp, 'outside')
+    mkdirSync(path.join(outside, '他社'), { recursive: true })
+    writeFileSync(path.join(outside, '他社', '秘密.txt'), 'x')
+    run(outside, ['init', '-q'])
+    symlinkSync(path.join(outside, '他社'), path.join(root, '営業部', '受付'))
+    assert.equal(await gitCheckPoint(git, root, '営業部/受付', longAgo), null)
+    assert.equal(await newFilesByGit(git, root, '営業部/受付', { since: longAgo, sinceCommit: null, upto: second.commit }), null)
+    assert.equal(await newFilesByTime(root, '営業部/受付', longAgo, new Date().toISOString()), null)
+    symlinkSync(outside, path.join(root, 'リンク'))
+    assert.equal(await newFilesByTime(root, 'リンク/他社', longAgo, new Date().toISOString()), null)
   } finally {
-    rmSync(root, { recursive: true, force: true })
+    rmSync(tmp, { recursive: true, force: true })
   }
+})
+
+test('new files in a working folder (no git): by their time, within the window', async () => {
+  const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-work-')))
+  try {
+    const since = '2026-06-01T00:00:00.000Z'
+    mkdirSync(path.join(work, '人事部', '面談', '.personal'), { recursive: true })
+    writeFileSync(path.join(work, '人事部', '面談', 'a.txt'), 'a')
+    writeFileSync(path.join(work, '人事部', '面談', 'b.txt'), 'b')
+    writeFileSync(path.join(work, '人事部', '面談', '.personal', 'mine.txt'), 'm')
+    const old = new Date('2026-01-01T00:00:00Z')
+    utimesSync(path.join(work, '人事部', '面談', 'a.txt'), old, old)
+    const until = new Date(Date.now() + 60_000).toISOString()
+    assert.deepEqual(await newFilesByTime(work, '人事部/面談', since, until), ['人事部/面談/b.txt'])
+    assert.deepEqual(await newFilesByTime(work, '人事部/面談', since, '2026-06-02T00:00:00.000Z'), [])
+    assert.equal(await newFilesByTime(work, '人事部/ない', since, until), null)
+  } finally {
+    rmSync(work, { recursive: true, force: true })
+  }
+})
+
+test('a job\'s record token only with its run: none held → no token at all, never an ordinary one', async () => {
+  const runs = createRunRegistry()
+  const asked: unknown[] = []
+  const fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    asked.push(JSON.parse(String(init?.body)))
+    return new Response(JSON.stringify({ data: { token: 't', tokenId: 'i', scope: 'act' } }), { status: 201, headers: { 'content-type': 'application/json' } })
+  }) as typeof globalThis.fetch
+  const api = createRecordsApi({ baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], fetch, runOf: runs.runOf })
+  assert.equal(await api.openTurn(COMPANY, { conversationId: 'conv-job-00001', agent: 'claude-code', scope: 'act', requireRun: true }), null)
+  assert.deepEqual(asked, [])
+  runs.set(COMPANY, 'conv-job-00001', { id: 'run-j1', generation: 1 })
+  assert.ok(await api.openTurn(COMPANY, { conversationId: 'conv-job-00001', agent: 'claude-code', scope: 'act', requireRun: true }))
+  assert.deepEqual(asked, [{ conversationId: 'conv-job-00001', agent: 'claude-code', scope: 'act', run: { id: 'run-j1', generation: 1 } }])
 })
 
 test('the runner\'s queue: an occurrence runs as a job (never as a record\'s step) and is never handed to the person for its slot\'s time', () => {
@@ -342,10 +371,42 @@ test('the runner\'s queue: an occurrence runs as a job (never as a record\'s ste
   assert.equal(handUrgent(log, queue, null, Date.parse('2026-11-11T00:30:00.000Z')), log)
 })
 
-test('not synced since the window\'s end: given back for later, never finished `nothing`', async () => {
-  const server = fakeServer()
-  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, newFiles: async () => 'not-synced' as const, stopTurn: () => {} } })
+test('not synced: nothing is claimed (tried later); a commit not here after the claim: given back, never `nothing`', async () => {
+  const before = fakeServer()
+  const { claims } = claimsFor(before, { jobs: { readShelfSkill: async () => null, checkPoint: async () => 'not-synced' as const, newFiles: async () => [], stopTurn: () => {} } })
   await claims.jobTurns(COMPANY)
   assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'unavailable' })
+  assert.equal(before.calls.some(c => c.path === '/job-run-claims'), false)
+
+  const server = fakeServer()
+  const second = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async () => ({ commit: 'c'.repeat(40) }), newFiles: async () => 'not-synced' as const, stopTurn: () => {} } }).claims
+  await second.jobTurns(COMPANY)
+  assert.deepEqual(await second.claim(COMPANY, OCC, 1, 'conv-job-00002'), { claimed: false, reason: 'unavailable' })
   assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'failed', failure: { class: 'temporary', code: 'NOT_SYNCED' } }])
+})
+
+test('the chat server never runs a job\'s turn without its run: the token is asked only with the run, and none → no turn', async () => {
+  const { startChatServer } = await import('../electron/chat-server')
+  const asked: unknown[] = []
+  const server = await startChatServer({
+    getAuthMode: () => 'claude-code', getApiKey: () => undefined, buildSystemPrompt: () => '', getShellEnv: () => ({}),
+    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude', listenPort: 0,
+    pluginStepTools: () => ({ allowsRecordTool: () => true, builtinTools: [] }),
+    getWriteGuard: () => ({ root: os.tmpdir(), getAccess: () => undefined }),
+    stepWriteArea: async () => ({ nowhere: true, reads: [] }),
+    // The run was taken away between the ceiling and the token: no token.
+    createRecordTools: async request => { asked.push(request.requireRun); return null },
+  })
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/chat`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${server.authToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ id: 'm', role: 'user', parts: [{ type: 'text', text: 'hi' }] }], companyId: 'co', companyRootPath: os.tmpdir(), appSessionId: 'conv-job-00010', aiTurnStep: 'job-procedure' }),
+    })
+    assert.equal(res.status, 400)
+    assert.equal((await res.json() as { code: string }).code, 'AI_TURN_NOT_SUPPORTED')
+    assert.deepEqual(asked, [true])
+  } finally {
+    server.server.close()
+  }
 })

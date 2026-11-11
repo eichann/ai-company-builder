@@ -54,7 +54,8 @@ New tables only (additive; `CREATE … IF NOT EXISTS`, nothing else changes):
   `.` — so the kept `idx_ai_runs_open` on `record_id` never sees two kinds collide),
   `UNIQUE (company_id, job_id, due_slot)`, `time_zone`, `due_at`, `expires_at`, `state`
   (due / running / done / nothing / needs_person / skipped / expired / held), `run_id`, `outcome_code`, and (5a-2, additive: `migrateJobOccurrenceCheckedUntil`) `checked_until` — where its check
-  stopped looking, set once at the first claim (`moveOccurrence`'s `checkedUntil`, `COALESCE`: never moved).
+  stopped looking, set once at the first claim (`moveOccurrence`'s `checkedUntil`, `COALESCE`: never moved), and
+  `checked_commit` — the commit a `new_files` check in the shared folder looked up to (the app's, with that claim).
   Written by the clock and the runner (3b, below).
 - `ai_job_settings`: 「定期の仕事をすべて止める」 (`stopped`; no row = not stopped).
 
@@ -394,16 +395,22 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   — never handed to the person for their slot's time. A record's step is never chosen for an occurrence id.
 - **Claim** (`claims.ts` → `job-runs.ts`): main's refusals first, with no server call (`not-allowed`): main window,
   the emergency stop, an agent without `recordActions`, the stop policy not confirmed, the member's 「自動で進める」 off
-  (read now; a job has no person who asked). Then `POST /job-run-claims`
-  with `checks`; then **the check, before any AI** (D6): `new_files` — files added under the place in [`checkSince`,
-  `checkUntil`), from git's history in the shared folder (`newFilesByGit`: `log --diff-filter=A --since --until`, the
-  innermost repository — a private folder's clone —; a checkout's times say nothing; committer dates, which sync's
-  commit-then-push keeps close to the push) or by modification time in a working folder (`newFilesByTime`). **The place
-  is followed only when no link is on the way** (`placeOnDisk`: its real location is exactly the place inside the
-  company folder's real location, NFC, A–Z folded) — a link committed at the place or above it never lists another
-  folder's files or uses another repository. Not fetched from the server since `checkUntil` (`FETCH_HEAD`'s time) →
-  `temporary` `NOT_SYNCED`, never `nothing` on a guess (a colleague's file may not be here yet). A place not on this PC
-  (not downloaded, a link) → `bad-input` `CHECK_NOT_POSSIBLE` (a person looks);
+  (read now; a job has no person who asked). For `new_files` in the shared folder, **before the claim**
+  (`gitCheckPoint`): this PC must have what the server has — fetched since `checkUntil` (`FETCH_HEAD`'s time) **and**
+  the server's tip (`@{upstream}`, else `FETCH_HEAD`) in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or a
+  sync stopped on a conflict leaves it out) — else nothing is claimed and it is tried later (never `nothing` on a
+  guess). Then `POST /job-run-claims` with `checks` and `checkedCommit` (this PC's `HEAD` in the place's repository;
+  the server keeps it on the occurrence, `checked_commit`, once — a re-claim looks up to the same); then **the check,
+  before any AI** (D6): `new_files` — in the shared folder, files added in `sinceCommit..checkedCommit`
+  (`newFilesByGit`: `log --diff-filter=A`, by what is reachable, **never by commit dates** — an old-dated commit that
+  reaches the server late is still new; `sinceCommit` is the previous occurrence's commit; unknown here or none — the
+  first occurrence, a build before it — the dates after `checkSince` decide), in the innermost repository (a private
+  folder's clone, found from the place's on-disk spelling); a commit not on this PC → `temporary` `NOT_SYNCED`. In a
+  working folder (no git): by modification time in [`checkSince`, `checkUntil`) (`newFilesByTime`). **The place is
+  followed only when no link is on the way** (`placeOnDisk`: its real location is exactly the place inside the company
+  folder's real location, compared as the disk folds names, `diskKey`) — a link committed at the place or above it
+  never lists another folder's files or uses another repository. A place not on this PC (not downloaded, a link) →
+  `bad-input` `CHECK_NOT_POSSIBLE` (a person looks);
   `new_meetings` — the claim's `meetings`. **Nothing found → the run is finished `done` with `jobResult: 'nothing'`**
   and no message is sent (the tab closes before anything). Then the pinned procedure: a company Skill's `SKILL.md` from
   the pinned tree (`readProcedure`, no lazy fetch), a shelf Skill fetched at the pinned version and checked against it
@@ -412,8 +419,9 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   `job_report`.
 - **Only while the run is this app's**: a run taken away while the check or the procedure was read starts nothing
   (claimed: false); the ceiling (`jobTools`) is answered only while the run is still held (registered, not lost), so
-  the chat server refuses a turn of a job consultation without one (400 `AI_TURN_NOT_SUPPORTED`) — it never runs as an
-  ordinary consultation with an ordinary token.
+  the chat server refuses a turn of a job consultation without one (400 `AI_TURN_NOT_SUPPORTED`); and its record token
+  is asked only with the run (`openTurn`'s `requireRun`: no run registered → no token at all), a turn with no record
+  tools being refused the same way — it never runs as an ordinary consultation with an ordinary token.
 - **Only the grant's tools** (`jobToolAccess`, asked by the chat server as `pluginStepTools(conversation,
   'job-procedure')`): record tools whose route the grant names within the server's ceiling (`jobRunRouteAllowed`;
   `records_create` never), `minutes_read` only with the meeting check, mail drafts only with `outbound_draft`,
@@ -443,6 +451,8 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   (`MAX_ATTEMPTS_PER_RECORD`). A claim that wins after the runner gave up waiting (`START_TIMEOUT_MS`) is settled at
   once (records too), instead of a run held with no AI.
 - **Not enforced (decision)**: `grant.limits.runsPerDay` (one occurrence per slot; a retried run is the same one).
+- **Known limit (decision)**: a member invited to a meeting **after** its record was made (「招待する」, or the calendar
+  adding them later) is never found by a later meeting check — the window counts when the record was made.
 - **An unknown outside result** (`RESULT_UNKNOWN`, decision for the owner): a job's run reaches outside only by a
   mail **draft** (`outbound: draft_only`), so an unknown result means "a draft may or may not have been made". No
   screen is added: the occurrence's state and the bell's `job_failed` tell the responsible person and the job's
@@ -627,7 +637,10 @@ membership can fail).
   by the server); `jobs-definition.test.ts` "the meeting check" (the minutes route in the grant, title words,
   `jobRunRouteAllowed` without `meetingFound` refuses), review fixes: each meeting one occurrence's (an app opened late,
   minutes recorded late), more than one run takes (the rest next time, none dropped or twice, non-matching titles never
-  hide matching ones); `client/tests/job-runs.test.ts` (no server call while this PC
+  hide matching ones; the 10th and 11th recorded at the same moment both wait), the commit kept from the first claim
+  and handed to the next occurrence; `client/tests/job-runs.test.ts` (also: an old-dated commit arriving late is new,
+  fetched-but-not-merged is not yet, a commit not here is not yet, the token only with the run and the chat server
+  refusing a job turn without it) (no server call while this PC
   may not run unattended AI; the claim's `checks`; nothing found → `nothing` and no message; the meeting titles
   quoted; the tool ceiling; the procedure not here; no report → retried, never `nothing` from the AI; the time limit
   and the renew's 409 stop the AI; the write and read areas, a link cannot lead out; new files by git's history

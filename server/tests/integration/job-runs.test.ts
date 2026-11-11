@@ -721,6 +721,21 @@ describe('the app says which checks it runs (B PR 5a-2)', () => {
     expect((db.prepare("SELECT COUNT(*) AS n FROM ai_runs WHERE subject_kind = 'occurrence'").get() as Json).n).toBe(0)
     expect((await as('jr-alice', 'POST', '/job-run-claims', { occurrenceId: occ, deviceId: 'device-alice-1', conversationId: 'c', checks: 'new_files' })).status).toBe(400)
   })
+
+  it('the commit a new-files check looked up to: kept from the first claim, where the next occurrence starts', async () => {
+    const { job, occ } = await runnable()
+    const body = (o: string, checkedCommit: unknown) => ({ occurrenceId: o, deviceId: 'device-alice-1', conversationId: 'conv-c', checks: ['new_files'], checkedCommit })
+    expect((await as('jr-alice', 'POST', '/job-run-claims', body(occ, 'not-a-commit'))).status).toBe(400)
+    const first = await as('jr-alice', 'POST', '/job-run-claims', body(occ, 'a'.repeat(40)))
+    expect(first.status).toBe(201)
+    expect(first.body.data.turn).toMatchObject({ checkedCommit: 'a'.repeat(40), sinceCommit: null })
+    expect((await finish(first.body.data.run, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
+    const next = dueOccurrence(job)
+    // A later slot than the first (its slot text is what orders them).
+    db.prepare("UPDATE ai_job_occurrences SET due_slot = '2099-01-01T09:00' WHERE company_id = ? AND id = ?").run(CO, next)
+    const second = await as('jr-alice', 'POST', '/job-run-claims', body(next, 'b'.repeat(40)))
+    expect(second.body.data.turn).toMatchObject({ sinceCommit: 'a'.repeat(40), checkedCommit: 'b'.repeat(40) })
+  })
 })
 
 describe('a meeting check: the meetings the responsible person attended, and their minutes only (B PR 5a-2)', () => {
@@ -826,6 +841,25 @@ describe('a meeting check: the meetings the responsible person attended, and the
     await at(base + 24 * 60 * MINUTE + MINUTE, async () => {
       const r = await claim(occ2)
       expect(r.body.data.turn.meetings.map((m: Json) => m.id)).toEqual([lateMinutes])
+    })
+  })
+
+  it('the 10th and 11th recorded at the same time: neither is cut off from its twin — both go to the next occurrence', async () => {
+    const base = Date.now()
+    const { job } = await runnable(CO, meetingJob)
+    const ids: string[] = []
+    for (let i = 0; i < 9; i++) ids.push(await at(base + (i + 1) * MINUTE, () => meeting(`面談：${i}`, ['jr-alice'], base)))
+    for (let i = 0; i < 2; i++) ids.push(await at(base + 20 * MINUTE, () => meeting(`面談：同時${i}`, ['jr-alice'], base)))
+    const occ1 = occAt(job, base + 60 * MINUTE, 1)
+    await at(base + 61 * MINUTE, async () => {
+      const r = await claim(occ1)
+      expect(r.body.data.turn.meetings.map((m: Json) => m.id)).toEqual(ids.slice(0, 9))
+      expect((await finish(r.body.data.run, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
+    })
+    const occ2 = occAt(job, base + 24 * 60 * MINUTE, 2)
+    await at(base + 24 * 60 * MINUTE + MINUTE, async () => {
+      const r = await claim(occ2)
+      expect(r.body.data.turn.meetings.map((m: Json) => m.id).sort()).toEqual(ids.slice(9).sort())
     })
   })
 

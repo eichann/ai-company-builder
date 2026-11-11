@@ -12,7 +12,7 @@
  *   PUT  /jobs-stop { stopped }       owner/admin: 「定期の仕事をすべて止める」
  *   GET  /jobs/:jobId/occurrences     the same people as GET /jobs/:jobId: its occurrences (回), newest first (PR 3b)
  *   GET  /me/job-turns                the caller's PC-job occurrences to claim now (PR 5a)
- *   POST /job-run-claims { occurrenceId, deviceId, conversationId, checks }   claim one (PR 5a; 503 AI_STOPPED while stopped;
+ *   POST /job-run-claims { occurrenceId, deviceId, conversationId, checks, checkedCommit? }   claim one (PR 5a; 503 AI_STOPPED while stopped;
  *                                     409 JOB_CHECK_NOT_SUPPORTED when `checks` — the check kinds the app runs — lacks it, 5a-2)
  */
 import type { JobCheck, JobDefinition, JobGrant, JobOccurrenceState, JobPauseReason, JobPlacement, JobProcedure, JobState, JobTrigger } from '../core/jobs'
@@ -142,6 +142,13 @@ export interface JobTurnView {
    * occurrence's), or what its first claim fixed. Absent from a server before 5a-2.
    */
   checkUntil?: string
+  /**
+   * A `new_files` check in the shared folder (B PR 5a-2): the commit the previous occurrence that ran looked up to
+   * (files added after it are new, whatever their commits' dates), and the commit this occurrence's first claim named
+   * (a re-claim looks up to the same). null: none known — the dates decide.
+   */
+  sinceCommit?: string | null
+  checkedCommit?: string | null
   procedure: JobProcedure
   grant: JobGrant
   /**

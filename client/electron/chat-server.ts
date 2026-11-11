@@ -1,4 +1,5 @@
 import { boundedShelfPrompt } from '../shared/skill-shelf'
+import { JOB_PC_STEP } from '../../shared/core/jobs'
 import { aiTurnStepAllowsRecordCall, aiTurnStepAllowsRecordTool, aiTurnStepCreateTypes, aiTurnStepDefinition, isAiTurnStep } from '../shared/ai-turn-steps/registry'
 import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
 import { narrowCreateTypes, type RecordTools } from './records/tools'
@@ -95,7 +96,7 @@ export interface ChatServerConfig extends AgentHost {
    * folder under `<department>/.personal/` its writes are held to this turn; null = an ordinary one.
    */
   stepWriteArea?: (companyId: string, conversationId: string) => Promise<string | WriteArea | null>
-  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; companyRoot?: string; department?: string | null; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; requireRun?: boolean; companyRoot?: string; department?: string | null; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * The consultation's topic as stored (chat history): the task its new files are linked to
    * (consultation-task.ts). Read at each new file, so a task the AI made earlier in the turn counts.
@@ -488,6 +489,8 @@ export async function startChatServer(config: ChatServerConfig) {
     const allRecords = connection.ownsConversation && can.recordsMcp && companyId
       ? await Promise.resolve(config.createRecordTools?.({
         companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions, companyRoot: companyRootPath || undefined,
+        // A scheduled job's run: its token only with the run main holds (never an ordinary one).
+        ...(requestedStep === JOB_PC_STEP ? { requireRun: true } : {}),
         // The department on screen: where a request for someone else goes (records.md "Where the AI puts a request").
         department: activeDepartment?.folder ?? null,
         // How much of long minutes this turn's model is handed (minutes.md "Long minutes").
@@ -501,6 +504,10 @@ export async function startChatServer(config: ChatServerConfig) {
         onMailDraft: card => injector.push({ type: MAIL_DRAFT_PART_TYPE, id: `mail-draft-${card.id}`, data: card }),
       }, c.req.raw.signal)).catch(() => null) ?? undefined
       : undefined
+    // A scheduled job's run whose run is gone (taken away just now): no turn at all.
+    if (requestedStep === JOB_PC_STEP && !allRecords) {
+      return c.json({ error: 'この AI では AI の番を自動で進められません。', code: 'AI_TURN_NOT_SUPPORTED' }, 400)
+    }
     // An unattended step sees only the record tools it declares, and cannot call any other.
     const records = allRecords && aiTurnStep ? {
       ...allRecords,

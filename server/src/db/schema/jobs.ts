@@ -15,6 +15,8 @@ import type Database from 'better-sqlite3'
 export function migrateJobOccurrenceCheckedUntil(conn: Database.Database): void {
   const cols = new Set((conn.prepare('PRAGMA table_info(ai_job_occurrences)').all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('checked_until')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN checked_until TEXT')
+  // The commit a `new_files` check looked up to (the app's, sent with its first claim): the next one starts there.
+  if (!cols.has('checked_commit')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN checked_commit TEXT')
 }
 
 export const jobSchema = `

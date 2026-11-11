@@ -73,7 +73,7 @@ export interface AiTurnClaimsDeps {
    * A scheduled job's run on this PC (jobs.md "The app's runner", job-runs.ts): reading a shelf Skill's
    * pinned version, the new files under a place, and stopping a consultation's AI. Absent: no job runs.
    */
-  jobs?: Pick<JobRunDeps, 'readShelfSkill' | 'newFiles' | 'stopTurn'>
+  jobs?: Pick<JobRunDeps, 'readShelfSkill' | 'checkPoint' | 'newFiles' | 'stopTurn'>
 }
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/

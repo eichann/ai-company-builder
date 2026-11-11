@@ -14,6 +14,7 @@ import path from 'node:path'
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { JOB_PC_CHECK_KINDS, isOccurrenceId, parseJobRunResult, type JobRunResult } from '../../../../shared/core/jobs'
 import { jobPathProblem } from '../../../../shared/core/jobs'
+import { diskKey } from '../../../../shared/core/paths'
 import {
   JOB_PC_STEP, jobFirstMessage, jobToolAccess, jobWriteArea, parseJobTurn, parseJobTurns,
   type JobFound, type JobToolAccess, type JobWriteArea, type QueuedJobTurn,
@@ -36,10 +37,15 @@ export interface JobRunDeps {
   /** A shelf Skill's SKILL.md at the pinned version, fetched and checked against it; null = not readable. */
   readShelfSkill: (companyId: string, item: string, skill: string, version: string) => Promise<string | null>
   /**
-   * Files (company paths) added under `place` in [since, until); null when this PC cannot tell (not downloaded, no
-   * folder, a link on the way); `not-synced` when this PC has not fetched since `until` (a colleague's file may be missing).
+   * Before a `new_files` claim: whether this PC has what the server has, and the commit the check looks up to
+   * (null in a working folder: no git). null: the place is not on this PC; `not-synced`: not yet.
    */
-  newFiles: (companyRoot: string | null, place: string, since: string, until: string) => Promise<string[] | null | 'not-synced'>
+  checkPoint: (companyRoot: string | null, place: string, until: string) => Promise<{ commit: string | null } | null | 'not-synced'>
+  /**
+   * Files (company paths) added under `place`: after `sinceCommit` up to `upto` in the shared folder (by date after
+   * `since` when no commit is known), in [since, until) by time in a working folder. null when this PC cannot tell.
+   */
+  newFiles: (companyRoot: string | null, place: string, window: { since: string; until: string; sinceCommit: string | null; upto: string | null }) => Promise<string[] | null | 'not-synced'>
   /** Stop the consultation's AI now (main's chat turns), saying why in its reply. */
   stopTurn: (conversationId: string) => void
   now?: () => number
@@ -79,12 +85,14 @@ export function createJobRuns(deps: JobRunDeps) {
     byOccurrence.delete(keyOf(h.companyId, h.occurrenceId))
   }
 
-  async function findings(turn: QueuedJobTurn, companyRoot: string | null): Promise<JobFound | null | 'not-synced'> {
+  async function findings(turn: QueuedJobTurn, companyRoot: string | null, point: { commit: string | null } | null): Promise<JobFound | null | 'not-synced'> {
     if (turn.check.kind === 'new_meetings') return { kind: 'meetings', meetings: turn.meetings ?? [] }
     if (turn.check.kind === 'new_files') {
-      // The window ends at the occurrence's own time (an older server: now).
+      if (point === null) return null
+      // The window ends at the occurrence's own time (an older server: now); a re-claim looks up to its first commit.
       const until = turn.checkUntil ?? new Date(now()).toISOString()
-      const files = await deps.newFiles(companyRoot, turn.check.path, turn.checkSince, until).catch(() => null)
+      const window = { since: turn.checkSince, until, sinceCommit: turn.sinceCommit ?? null, upto: turn.checkedCommit ?? point.commit }
+      const files = await deps.newFiles(companyRoot, turn.check.path, window).catch(() => null)
       return files === null || files === 'not-synced' ? files : { kind: 'files', files }
     }
     return null
@@ -113,8 +121,19 @@ export function createJobRuns(deps: JobRunDeps) {
      * refusals (window, agent, emergency stop, stop policy) are claims.ts's, made before this is asked.
      */
     async claim(companyId: string, occurrenceId: string, conversationId: string, companyRoot: string | null): Promise<AiTurnClaimResult> {
-      if (!listed.get(companyId)?.has(occurrenceId)) return { claimed: false, reason: 'not-allowed' }
-      const answer = await deps.session(companyId, 'POST', '/job-run-claims', { occurrenceId, deviceId: deps.deviceId, conversationId, checks: [...JOB_PC_CHECK_KINDS] })
+      const listedTurn = listed.get(companyId)?.get(occurrenceId)
+      if (!listedTurn) return { claimed: false, reason: 'not-allowed' }
+      // New files: this PC must have what the server has before anything is claimed (else tried later), and the
+      // claim names the commit the check looks up to (the next occurrence starts after it).
+      let point: { commit: string | null } | null = null
+      if (listedTurn.check.kind === 'new_files') {
+        const p = await deps.checkPoint(companyRoot, listedTurn.check.path, listedTurn.checkUntil ?? new Date(now()).toISOString()).catch(() => null)
+        if (p === 'not-synced') return { claimed: false, reason: 'unavailable' }
+        point = p
+      }
+      const answer = await deps.session(companyId, 'POST', '/job-run-claims', {
+        occurrenceId, deviceId: deps.deviceId, conversationId, checks: [...JOB_PC_CHECK_KINDS], ...(point?.commit ? { checkedCommit: point.commit } : {}),
+      })
       if (!answer || answer.status >= 500) return { claimed: false, reason: 'unavailable' }
       const data = answer.status < 300 ? answer.data as { run?: { id?: unknown; generation?: unknown; createdAt?: unknown; updatedAt?: unknown }; turn?: unknown } | undefined : undefined
       const run = data?.run
@@ -138,7 +157,7 @@ export function createJobRuns(deps: JobRunDeps) {
       }
       if (!turn || turn.occurrenceId !== occurrenceId) return giveUp({ class: 'bad-input', code: 'TURN_NOT_READABLE' })
       // The check, before any AI (D6).
-      const found = await findings(turn, companyRoot)
+      const found = await findings(turn, companyRoot, point)
       if (found === null) return giveUp({ class: 'bad-input', code: 'CHECK_NOT_POSSIBLE' })
       // Not synced since the window's end: a colleague's file may not be here yet — never `nothing` on a guess.
       if (found === 'not-synced') return giveUp({ class: 'temporary', code: 'NOT_SYNCED' })
@@ -242,8 +261,9 @@ const SKIP = new Set(['.git', '.backups', '.workspace', '.personal', 'node_modul
  * on this PC.
  */
 export async function newFilesByTime(root: string, place: string, since: string, until: string): Promise<string[] | null> {
-  const start = await placeOnDisk(root, place)
-  if (start === null) return null
+  const found = await placeOnDisk(root, place)
+  if (found === null) return null
+  const start = found.real
   const sinceMs = Date.parse(since)
   const untilMs = Date.parse(until)
   const out: string[] = []
@@ -265,46 +285,79 @@ export async function newFilesByTime(root: string, place: string, since: string,
   return out
 }
 
-/**
- * Files added under `place` after `since` in the shared company folder, from git's history (what sync
- * brought), not from times on disk (a checkout sets them). The place's own repository: the company's, or a
- * private folder's clone above it. null when the place is not on this PC (not downloaded).
- */
-export async function newFilesByGit(git: (cwd: string, args: string[]) => Promise<string>, root: string, place: string, since: string, until: string): Promise<string[] | null | 'not-synced'> {
-  const target = await placeOnDisk(root, place)
-  if (target === null) return null
-  root = await realpath(root)
-  const segments = place.split('/')
-  // The innermost repository holding the place (a private folder is a clone of its own inside the company folder).
-  let repo = root
-  for (let i = segments.length; i > 0; i--) {
-    const candidate = path.join(root, ...segments.slice(0, i))
-    if (await stat(path.join(candidate, '.git')).catch(() => null)) { repo = candidate; break }
+type Git = (cwd: string, args: string[]) => Promise<string>
+const COMMIT_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
+
+/** The place's repository (the company's, or a private folder's clone above it), found by its on-disk spelling. */
+async function repoOf(root: string, place: string): Promise<{ repo: string; relInRepo: string; repoPrefix: string } | null> {
+  const found = await placeOnDisk(root, place)
+  if (!found) return null
+  // Walk up from where the place really is, so an NFD or case spelling on disk never misses a clone's `.git`.
+  let repo = found.root
+  for (let dir = found.real; dir.length > found.root.length; dir = path.dirname(dir)) {
+    if (await stat(path.join(dir, '.git')).catch(() => null)) { repo = dir; break }
   }
-  const relInRepo = path.relative(repo, target).split(path.sep).join('/') || '.'
-  const repoPrefix = path.relative(root, repo).split(path.sep).join('/')
-  // Fetched from the server since the window's end? Else a colleague's file may not be here yet.
-  const fetchHead = await git(repo, ['rev-parse', '--git-path', 'FETCH_HEAD']).then(p => p.trim()).catch(() => null)
-  const fetched = fetchHead ? await stat(path.resolve(repo, fetchHead)).catch(() => null) : null
+  return {
+    repo,
+    relInRepo: path.relative(repo, found.real).split(path.sep).join('/') || '.',
+    repoPrefix: path.relative(found.root, repo).split(path.sep).join('/').normalize('NFC'),
+  }
+}
+
+/**
+ * Before a `new_files` check in the shared folder is claimed: this PC has what the server has — fetched since the
+ * window's end (`FETCH_HEAD`'s time) **and** the server's tip in `HEAD` (`merge-base --is-ancestor`: a fetch-only
+ * path or a sync stopped on a conflict leaves it out) — and the commit it will look up to (`HEAD`). `not-synced`:
+ * tried later, never `nothing` on a guess. null: the place is not on this PC (not downloaded, a link).
+ */
+export async function gitCheckPoint(git: Git, root: string, place: string, until: string): Promise<{ commit: string } | null | 'not-synced'> {
+  const r = await repoOf(root, place)
+  if (!r) return null
+  const fetchHead = await git(r.repo, ['rev-parse', '--git-path', 'FETCH_HEAD']).then(p => p.trim()).catch(() => null)
+  const fetched = fetchHead ? await stat(path.resolve(r.repo, fetchHead)).catch(() => null) : null
   if (!fetched || fetched.mtimeMs < Date.parse(until)) return 'not-synced'
-  const outText = await git(repo, ['log', `--since=${new Date(Date.parse(since)).toISOString()}`, `--until=${new Date(Date.parse(until)).toISOString()}`, '--diff-filter=A', '--name-only', '--format=', '-z', '--', relInRepo]).catch(() => null)
+  const tip = await git(r.repo, ['rev-parse', '--verify', '-q', '@{upstream}']).then(t => t.trim()).catch(() => null)
+    ?? await git(r.repo, ['rev-parse', '--verify', '-q', 'FETCH_HEAD']).then(t => t.trim()).catch(() => null)
+  if (!tip) return 'not-synced'
+  const merged = await git(r.repo, ['merge-base', '--is-ancestor', tip, 'HEAD']).then(() => true, () => false)
+  if (!merged) return 'not-synced'
+  const head = await git(r.repo, ['rev-parse', '--verify', 'HEAD']).then(t => t.trim()).catch(() => null)
+  return head && COMMIT_RE.test(head) ? { commit: head } : null
+}
+
+/**
+ * Files added under `place` in the shared company folder, by what is reachable, never by commit dates (an old-dated
+ * commit that reaches the server late is still new): added in `sinceCommit..upto` (the previous occurrence's commit
+ * up to this one's). Without a known `sinceCommit` (the first occurrence, another repository): added up to `upto`
+ * after `since`. null when the place is not on this PC; `not-synced` when `upto` is not here.
+ */
+export async function newFilesByGit(git: Git, root: string, place: string, window: { since: string; sinceCommit: string | null; upto: string }): Promise<string[] | null | 'not-synced'> {
+  const r = await repoOf(root, place)
+  if (!r || !COMMIT_RE.test(window.upto)) return null
+  const has = (c: string) => git(r.repo, ['cat-file', '-e', `${c}^{commit}`]).then(() => true, () => false)
+  if (!(await has(window.upto))) return 'not-synced'
+  const from = window.sinceCommit && COMMIT_RE.test(window.sinceCommit) && await has(window.sinceCommit)
+    && await git(r.repo, ['merge-base', '--is-ancestor', window.sinceCommit, window.upto]).then(() => true, () => false)
+    ? window.sinceCommit : null
+  const range = from ? [`${from}..${window.upto}`] : [`--since=${new Date(Date.parse(window.since)).toISOString()}`, window.upto]
+  const outText = await git(r.repo, ['log', ...range, '--diff-filter=A', '--name-only', '--format=', '-z', '--', r.relInRepo]).catch(() => null)
   if (outText === null) return null
-  const files = [...new Set(outText.split('\0').map(s => s.trim()).filter(Boolean))]
-  return files.slice(0, NEW_FILES_MAX).map(f => (repoPrefix ? `${repoPrefix}/${f}` : f))
+  const files = [...new Set(outText.split('\0').map(x => x.trim()).filter(Boolean))]
+  return files.slice(0, NEW_FILES_MAX).map(f => (r.repoPrefix ? `${r.repoPrefix}/${f}` : f))
 }
 
 /**
  * The place as a folder on this PC, or null: a valid company path, a folder, and **no link on the way** — its real
- * location is exactly the place inside the company folder (a link committed at the place, or above it, could
- * otherwise list another company's files or reach another repository). Compared in NFC, A–Z folded.
+ * location is exactly the place inside the company folder's real location (a link committed at the place, or above
+ * it, could otherwise list another company's files or reach another repository). Compared as the disk folds names
+ * (`diskKey`).
  */
-async function placeOnDisk(root: string, place: string): Promise<string | null> {
+async function placeOnDisk(root: string, place: string): Promise<{ root: string; real: string } | null> {
   if (jobPathProblem(place) !== null) return null
   const realRoot = await realpath(root).catch(() => null)
   if (!realRoot) return null
   const target = path.join(realRoot, ...place.split('/'))
   const real = await realpath(target).catch(() => null)
-  const key = (p: string) => p.normalize('NFC').toLowerCase()
-  if (!real || key(real) !== key(target)) return null
-  return (await stat(real).catch(() => null))?.isDirectory() ? real : null
+  if (!real || diskKey(real) !== diskKey(target)) return null
+  return (await stat(real).catch(() => null))?.isDirectory() ? { root: realRoot, real } : null
 }

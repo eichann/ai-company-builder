@@ -30,6 +30,9 @@ export interface QueuedJobTurn {
   checkSince: string
   /** Where the check stops (the occurrence's own time); absent from an older server. */
   checkUntil?: string
+  /** A `new_files` check in the shared folder: the previous occurrence's commit, and this one's first claim's. */
+  sinceCommit?: string | null
+  checkedCommit?: string | null
   procedure: JobProcedure
   grant: JobGrant
   /** Only in a claim's answer for a `new_meetings` check: what it found (the only minutes the run may read). */
@@ -51,6 +54,8 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
   if (!str(t.occurrenceId, 40) || !OCCURRENCE_ID_RE.test(t.occurrenceId) || !str(t.jobId, 40) || !str(t.name, 200)) return null
   if (!iso(t.dueAt) || !iso(t.expiresAt) || !iso(t.checkSince) || (t.state !== 'due' && t.state !== 'running')) return null
   if (t.checkUntil !== undefined && !iso(t.checkUntil)) return null
+  const commit = (v: unknown) => v === undefined || v === null || (typeof v === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(v))
+  if (!commit(t.sinceCommit) || !commit(t.checkedCommit)) return null
   const parsed = parseJobDefinition({
     schema: 1, name: '定期の仕事', actingUser: 'u', trigger: { every: 'day', at: '09:00', businessDaysOnly: false },
     check: t.check, run: { kind: 'procedure', procedure: t.procedure }, placement: 'a',
@@ -70,7 +75,8 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
   }
   return {
     occurrenceId: t.occurrenceId, jobId: t.jobId, name: t.name, dueAt: t.dueAt, expiresAt: t.expiresAt, state: t.state,
-    check, checkSince: t.checkSince, ...(typeof t.checkUntil === 'string' ? { checkUntil: t.checkUntil } : {}), procedure: parsed.definition.run.procedure, grant, ...(meetings ? { meetings } : {}),
+    check, checkSince: t.checkSince, ...(typeof t.checkUntil === 'string' ? { checkUntil: t.checkUntil } : {}),
+    ...(typeof t.sinceCommit === 'string' ? { sinceCommit: t.sinceCommit } : {}), ...(typeof t.checkedCommit === 'string' ? { checkedCommit: t.checkedCommit } : {}), procedure: parsed.definition.run.procedure, grant, ...(meetings ? { meetings } : {}),
   }
 }
 

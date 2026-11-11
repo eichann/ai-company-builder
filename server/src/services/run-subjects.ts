@@ -97,7 +97,7 @@ export function runSubjectsByKind(byKind: { record: RunSubjects<Refusal>; occurr
     },
     afterDone(member, run) { of(run.subject.kind)?.afterDone(member, run) },
     afterFailed(member, run) { of(run.subject.kind)?.afterFailed(member, run) },
-    claimed(member, run) { return of(run.subject.kind)?.claimed?.(member, run) ?? null },
+    claimed(member, run, asked) { return of(run.subject.kind)?.claimed?.(member, run, asked) ?? null },
     finishing(member, run, body) { return of(run.subject.kind)?.finishing?.(member, run, body) ?? null },
     beforeFinish(member, run, body) { return of(run.subject.kind)?.beforeFinish?.(member, run, body) ?? null },
     routeRefusal(member, run, route, params) {
