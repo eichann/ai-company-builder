@@ -7,6 +7,7 @@
  * `chat-server:info`, `ChatServerInfo` in ipc-contract.ts).
  */
 import type { PluginPersonStep, PluginRunStep } from './ai-turn-steps/plugin'
+import type { JobRunStep } from './ai-turn-steps/job'
 import type { AiTurnStep } from './ai-turn-steps/registry'
 import type { AgentSession, AuthMode } from './agent'
 import type { RateLimitSnapshot } from './rate-limits'
@@ -61,7 +62,7 @@ export interface ChatRequestOptions {
    * An unattended 「AI の番」 step (ai-turns.md): only that step's tools; absent for every member's own turn.
    * A business plugin's step is `<pluginId>__<step>` (plugin-steps.md): its tools are what main's claim holds.
    */
-  aiTurnStep?: AiTurnStep | PluginRunStep
+  aiTurnStep?: AiTurnStep | PluginRunStep | JobRunStep
   /**
    * The business plugin's person step this consultation was started from (plugin-steps.md): main
    * binds the consultation to it on the server before the turn (its AI's plugin power is that step's).

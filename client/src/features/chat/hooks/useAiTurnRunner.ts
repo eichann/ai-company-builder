@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
-import type { AiTurnItemsView, AiTurnItemView, AiTurnSettleResult, AutoTurnSettings } from '../../../../shared/ai-turns'
+import type { AiTurnClaimResult, AiTurnItemsView, AiTurnItemView, AiTurnSettleResult, AutoTurnSettings } from '../../../../shared/ai-turns'
 import { pluginStepConsultationTitle } from '../../../../shared/ai-turn-steps/plugin'
+import { JOB_PC_STEP, jobConsultationTitle } from '../../../../shared/ai-turn-steps/job'
 import { aiTurnStepForRecord } from '../../../../shared/ai-turn-steps/registry'
 import type { AiTurnCandidate } from '../../../../shared/ai-turn-steps/types'
 import { DEFAULT_FEATURES, type CompanyFeatures } from '../../../../../shared/core/features'
@@ -9,10 +10,10 @@ import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { rateLimitsOf } from '../agentStatusStore'
 import { consultationStatusOf } from '../consultationStatusStore'
 import { consultationHoldOf, rememberAutomaticConsultation } from '../automaticConsultationsStore'
-import { claimAiTurn, getAiTurnStopConfirmed, getAutoTurnSettings, getChatSessionSummaries, patchChatSession, retryAiTurn, settleAiTurn } from '../api'
+import { claimAiTurn, deleteChatSession, getAiTurnStopConfirmed, getAutoTurnSettings, getChatSessionSummaries, patchChatSession, retryAiTurn, settleAiTurn } from '../api'
 import {
-  AI_TURN_PASS_INTERVAL_MS, aiTurnItems, aiTurnNoticeText, askedAgain, canResumeAiTurns, handUrgent, handedOver, logForToday, movedOn,
-  closesWhenRunEnds, mayStartAiTurns, nextAiTurn, recordOutcome, recordStarted, resumed, retitledConsultation, retried, usageLimitReached, usagePause, usagePauseLifted,
+  AI_TURN_PASS_INTERVAL_MS, CLAIM_RETRY_MS, aiTurnItems, notDeferred, aiTurnNoticeText, askedAgain, canResumeAiTurns, handUrgent, handedOver, logForToday, movedOn,
+  closesWhenRunEnds, jobOutcome, mayStartAiTurns, nextAiTurn, recordOutcome, recordStarted, resumed, retitledConsultation, retried, usageLimitReached, usagePause, usagePauseLifted,
   type AiTurnLog, type AiTurnOutcome,
 } from '../aiTurns'
 import type { ChatInputRequest } from '../components/ChatConversation'
@@ -41,6 +42,8 @@ interface Running {
   title: string
   /** The consultation's name for the record's title now (the run may rename the record). */
   titleFor: (recordTitle: string) => string
+  /** A scheduled job's occurrence (its failures are the server's to place, not the runner's). */
+  job: boolean
 }
 
 export interface AiTurnRunnerOptions {
@@ -89,6 +92,8 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
   const pass = useRef<{ startedAt: number; started: number } | null>(null)
   // A version another PC (or the member) took first is not tried again.
   const taken = useRef(new Set<string>())
+  // A claim not won is no start: the same one waits a while before it is asked again (id → not before).
+  const deferred = useRef(new Map<string, number>())
   const ticking = useRef(false)
   // The chosen AI and whether it is signed in, as last seen (a change lifts Claude's usage pause).
   const lastAgent = useRef<string | null>(null)
@@ -104,7 +109,11 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     const result: AiTurnSettleResult = await settleAiTurn(o.companyId, run.recordId).catch(() => ({ outcome: 'unknown' }))
     const outcome: AiTurnOutcome = result.outcome === 'done' ? 'done'
       : usageLimitReached(snapshot) ? 'usage-limit' : result.outcome === 'failed' ? 'failed' : 'unfinished'
-    if (settings.current) saveLog(recordOutcome(loadLog(now), run.recordId, outcome, settings.current.value, usagePause(snapshot, now), run.version, run.state))
+    if (settings.current) {
+      saveLog(run.job
+        ? jobOutcome(loadLog(now), outcome, settings.current.value, usagePause(snapshot, now))
+        : recordOutcome(loadLog(now), run.recordId, outcome, settings.current.value, usagePause(snapshot, now), run.version, run.state))
+    }
     running.current = null
     // Ended well and nothing of the member's there: the consultation closes like a member's close
     // (「終わったもの」, history kept; owner FB #28). A review, a failure or the member's words keep it open.
@@ -121,39 +130,55 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
 
   const start = useCallback((notice: AiTurnCandidate, now: number) => {
     const o = latest.current
-    // A business plugin's step (plugin-steps.md): main's claim makes its first message from the pinned procedure.
+    // A business plugin's step (plugin-steps.md) or a scheduled job (jobs.md): main's claim makes its first message from the pinned procedure.
     const pluginStep = notice.pluginStep ?? null
-    const step = pluginStep ? null : aiTurnStepForRecord(notice.id, notice.state)
-    const stepName = step?.step ?? pluginStep
+    const job = notice.job ? JOB_PC_STEP : null
+    const step = pluginStep || job ? null : aiTurnStepForRecord(notice.id, notice.state)
+    const stepName = step?.step ?? pluginStep ?? job
     if (!stepName) return
-    const titleFor = (recordTitle: string) => step ? step.consultationTitle({ ...notice, title: recordTitle }) : pluginStepConsultationTitle(recordTitle)
+    const titleFor = (recordTitle: string) => step ? step.consultationTitle({ ...notice, title: recordTitle }) : job ? jobConsultationTitle(recordTitle) : pluginStepConsultationTitle(recordTitle)
     const title = titleFor(notice.title)
     const tabId = o.openBackgroundTab()
-    const run: Running = { recordId: notice.id, version: notice.version, state: notice.state ?? null, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false, conversationId: null, messageId: null, title, titleFor }
+    const run: Running = { recordId: notice.id, version: notice.version, state: notice.state ?? null, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false, conversationId: null, messageId: null, title, titleFor, job: !!job }
     running.current = run
-    if (!pass.current || now - pass.current.startedAt >= AI_TURN_PASS_INTERVAL_MS) pass.current = { startedAt: now, started: 0 }
-    pass.current.started += 1
     o.deliver(tabId, {
       kind: 'aiTurn',
       step: stepName,
       title,
       ...(step?.linksMinutes ? { minutesId: notice.id } : {}),
       claim: async (conversationId: string) => {
-        const result = await claimAiTurn(o.companyId, notice.id, notice.version, conversationId, o.companyRoot).catch(() => ({ claimed: false as const, reason: 'unavailable' as const }))
-        if (running.current !== run) return null
-        if (!result.claimed) {
-          if (result.reason === 'taken') taken.current.add(`${notice.id}@${notice.version}`)
-          running.current = null
+        const result: AiTurnClaimResult = await claimAiTurn(o.companyId, notice.id, notice.version, conversationId, o.companyRoot).catch(() => ({ claimed: false as const, reason: 'unavailable' as const }))
+        // The hidden consultation never ran: closed, and its empty stored copy deleted (none pile up).
+        const discard = () => {
           latest.current.closeTab(tabId)
+          void deleteChatSession(o.companyId, conversationId).catch(() => undefined)
+        }
+        if (running.current !== run) {
+          // Given up on while the claim was on its way (START_TIMEOUT_MS): a claim that won holds a run nobody runs —
+          // settle it now (put back / finished as unfinished) instead of leaving it held until its lease runs out.
+          if (result.claimed) void settleAiTurn(o.companyId, notice.id).catch(() => undefined)
+          void deleteChatSession(o.companyId, conversationId).catch(() => undefined)
           return null
         }
-        saveLog(recordStarted(loadLog(Date.now()), notice.id))
+        if (!result.claimed) {
+          if (result.reason === 'taken') taken.current.add(`${notice.id}@${notice.version}`)
+          // Not a start: it does not count toward the pass cap, and waits before it is asked again.
+          else deferred.current.set(notice.id, Date.now() + (result.retryAfterMs ?? CLAIM_RETRY_MS))
+          running.current = null
+          discard()
+          return null
+        }
+        // A start: counted toward this pass now that the claim won.
+        const at = Date.now()
+        if (!pass.current || at - pass.current.startedAt >= AI_TURN_PASS_INTERVAL_MS) pass.current = { startedAt: at, started: 0 }
+        pass.current.started += 1
+        saveLog(recordStarted(loadLog(Date.now()), notice.id, !!job))
         run.conversationId = conversationId
         run.phase = 'running'
         run.since = Date.now()
         // The message names the version the claim left the record at (the AI cannot look it up).
         const message = step ? step.firstMessage(notice, result.version, latest.current.features ?? DEFAULT_FEATURES) : result.message
-        if (!message) { running.current = null; latest.current.closeTab(tabId); return null }
+        if (!message) { running.current = null; discard(); return null }
         return { message }
       },
       // Ending the record later closes it too, unless the member wrote there (ChatPanel's chat.closeRecordConsultations).
@@ -212,7 +237,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
         if (ended || (!run.sawWorking && now - run.since > START_TIMEOUT_MS)) await settle(run, now)
       }
       const current = running.current
-      const queue = o.queue.filter(n => !taken.current.has(`${n.id}@${n.version}`))
+      const queue = notDeferred(o.queue.filter(n => !taken.current.has(`${n.id}@${n.version}`)), deferred.current, now)
       // Asked for again after a failure: the same as 「もう一度」, without the member pressing twice.
       for (const id of askedAgain(loadLog(now), queue)) await giveBack(id)
       // Handed in one state and now waiting in another (a 返事のお願い drafted, then her reply came): a new turn.

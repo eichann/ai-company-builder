@@ -67,6 +67,7 @@ import { TitleBarNotices } from '../features/notifications/components/TitleBarNo
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { useSeenTasks } from '../features/tasks/hooks/useSeenTasks'
 import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
+import { useJobTurns } from '../features/jobs/hooks/useJobTurns'
 import { ContinueStepButton } from '../features/plugin-steps/components/ContinueStepButton'
 import { PersonStepButtons } from '../features/plugin-steps/components/PersonStepButtons'
 import { StepDeliverables } from '../features/plugin-steps/components/StepDeliverables'
@@ -129,6 +130,8 @@ export function AppShell() {
   const seenTasks = useSeenTasks(currentCompany?.id)
   // A business plugin's steps that start as an AI turn (plugin-steps.md): the server lists the member's records at one.
   const pluginTurns = usePluginStepTurns(currentCompany?.id)
+  // 定期の仕事 that run on this PC (jobs.md "The app's runner"): the server lists the member's occurrences to claim.
+  const jobTurns = useJobTurns(currentCompany?.id)
   const { isReadOnly } = useWriteAccess()
   // 「やることにつなぐ…」 from the file tree: the file chosen (as the company names it), while its chooser is open.
   const [linkingFile, setLinkingFile] = useState<string | null>(null)
@@ -412,8 +415,8 @@ export function AppShell() {
     tasksShown, bundleWord, linkBundle: linkMeetingBundle, openRecord: id => openTab(recordTabKey(id)) })
   // What the chat's runner starts by itself: every waiting kind that has a step (ai-turn-steps/registry.ts).
   const aiTurns = useMemo(
-    () => aiTurnQueue({ minutes: meetings.aiTurnMinutes, tasks: taskList.data?.items ?? [], plugins: pluginTurns, asked: meetings.askedMeetings }),
-    [meetings.aiTurnMinutes, taskList.data, pluginTurns, meetings.askedMeetings],
+    () => aiTurnQueue({ minutes: meetings.aiTurnMinutes, tasks: taskList.data?.items ?? [], plugins: pluginTurns, jobs: jobTurns, asked: meetings.askedMeetings }),
+    [meetings.aiTurnMinutes, taskList.data, pluginTurns, jobTurns, meetings.askedMeetings],
   )
   // A linked folder left out on this computer is marked on the cards (download-choices.md).
   const notDownloadedFolderOf = sparseCheckout.enabled ? sparseCheckout.notDownloadedFolderOf : undefined

@@ -17,6 +17,10 @@ paths:
   - "client/shared/jobs.ts"
   - "client/tests/jobs-ipc.test.ts"
   - "server/src/services/job-runs.ts"
+  - "client/shared/ai-turn-steps/job.ts"
+  - "client/electron/features/ai-turns/job-runs.ts"
+  - "client/electron/features/ai-turns/job-report-tool.ts"
+  - "client/tests/job-runs.test.ts"
 ---
 
 # Scheduled jobs (定期の仕事, B 「実行を記録から分ける」)
@@ -28,8 +32,8 @@ A job is work that is not a record's turn: 「毎週火曜の1営業日前の 09
 **PR 3a: definitions and approval. PR 3b: the clock makes occurrences and the server does a job's (e)
 operation (a やること) — no AI, no claim. PR 4: the screens (admin 「定期の仕事」, the app's 「受け取る」) and
 the notice 「受け取りが要ります」. PR 5a: the PC's (a) claim and the grant at every call (design memo §4-2) on the
-server, and a Skill pinned from the Skill shelf.** Next: 5a-2 — the app's side (`client/electron/features/jobs/`: poll,
-claim, the check, the hidden conversation, the finish) and the clock making PC occurrences; 5b — 「もう一度」.
+server, and a Skill pinned from the Skill shelf. PR 5a-2: the clock makes PC occurrences, the app runs them ("The app's
+runner"), the meeting check ("The meeting check"), and the admin form makes PC jobs.** Next: 5b — 「もう一度」.
 
 ## Tables (`server/src/db/schema/jobs.ts`, handle `jobs`, `ports/jobs.ts`, `adapters/sqlite/jobs.ts`)
 
@@ -49,7 +53,9 @@ New tables only (additive; `CREATE … IF NOT EXISTS`, nothing else changes):
 - `ai_job_occurrences`: id `occ.` + 32 hex (CHECK: never a record id's shape — `RECORD_ID_RE` has no
   `.` — so the kept `idx_ai_runs_open` on `record_id` never sees two kinds collide),
   `UNIQUE (company_id, job_id, due_slot)`, `time_zone`, `due_at`, `expires_at`, `state`
-  (due / running / done / nothing / needs_person / skipped / expired / held), `run_id`, `outcome_code`.
+  (due / running / done / nothing / needs_person / skipped / expired / held), `run_id`, `outcome_code`, and (5a-2, additive: `migrateJobOccurrenceCheckedUntil`) `checked_until` — where its check
+  stopped looking, set once at the first claim (`moveOccurrence`'s `checkedUntil`, `COALESCE`: never moved), and
+  `checked_commit` — the commit a `new_files` check in the shared folder looked up to (the app's, with that claim).
   Written by the clock and the runner (3b, below).
 - `ai_job_settings`: 「定期の仕事をすべて止める」 (`stopped`; no row = not stopped).
 
@@ -66,8 +72,10 @@ versions the shape (a later shape is `schema: 2`; stored versions are never re-r
 - `trigger` (company time, list shapes only — no cron, no expressions): `day` (+ `businessDaysOnly`),
   `week` (`weekday`, `businessDaysBefore` 0–5), `month` (`day` 1–28 | `last`, `ifHoliday`); `at` `HH:MM`
   on 5 minutes.
-- `check`: `none` | `new_files` (`path`, one of the grant's read paths). **A procedure needs a check**
-  (D6: the clock alone never runs the AI).
+- `check`: `none` | `new_files` (`path`, one of the grant's read paths) | `new_meetings` (`titleWords`, 0–5 words
+  of ≤ 40, PR 5a-2: "The meeting check"; needs `JOB_MINUTES_ROUTE` in the grant's routes, `check.NEEDS_MINUTES_ROUTE`,
+  so reading minutes is part of what the responsible person accepts, never of the check alone). **A procedure needs a
+  check** (D6: the clock alone never runs the AI).
 - `run`: `operation` `create_task` (`title`, `dueBusinessDays`) — placement `e`, takes no AI tools,
   routes or reads, `creates: ['task']`; or `procedure` — placement `a`, a Skill pinned by what the
   **server** read when the version was made (the caller's fingerprint and name are replaced): `company_skill`
@@ -170,10 +178,9 @@ and starting the runner. It reads no content and calls nothing outside.
   slot text `YYYY-MM-DDTHH:MM` is the occurrence's identity; `companyTimeToUtc` gives `due_at`, and
   `expires_at` = `due_at` + `missed.expiresAfterMinutes`. The zone is `DEFAULT_COMPANY_TIME_ZONE` (one
   place in `composition.ts`), kept on the row.
-- **Which jobs**: approved, `active` or `paused`, placement **`e` only** (a PC job's occurrences are made
-  from 5a-2, together with the app that claims them: made before, nothing would take them and each slot
-  would only expire and be told). Only the **newest
-  slot at or before now**, and never one before the approved version's `approved_at`.
+- **Which jobs**: approved, `active` or `paused`, placement `e` and (since 5a-2, with the app that claims them)
+  `a`. Only the **newest slot at or before now**, and never one before the approved version's `approved_at`. An
+  unclaimed PC occurrence (the app closed, 自動で進める off) expires at `expires_at` and is told, as any other.
 - **Once**: `INSERT OR IGNORE` on `UNIQUE (company, job, due_slot)` — a second clock run, a restart or a
   second server write nothing more. Pinned: `job_version` = the approved version when made.
 - **Its state, decided when made**: the job paused → `held` `JOB_PAUSED`; the company's stop →
@@ -275,7 +282,7 @@ idempotency keys, failure places, reconcile and the emergency stop are the run c
 
 ```
 GET  /me/job-turns                                          the caller's PC-job occurrences to claim now (JobTurnView)
-POST /job-run-claims { occurrenceId, deviceId, conversationId }   → 201 { run, created, turn } (200 on a re-claim)
+POST /job-run-claims { occurrenceId, deviceId, conversationId, checks }   → 201 { run, created, turn } (200 on a re-claim)
 POST /ai-runs/:runId/renew | finish | retry | …/reconcile        as for any run; finish takes `jobResult` (below)
 ```
 
@@ -290,13 +297,18 @@ POST /ai-runs/:runId/renew | finish | retry | …/reconcile        as for any ru
   (`JOB_GRANT_EXCEEDS`: the job paused `OWNER_RIGHTS_CHANGED`, owners / admins told, the occurrence held);
   not absent that day (`JOB_OWNER_ABSENT`: skipped and told — D5, as the server's runner); a shelf Skill's
   pinned version still stored (`JOB_SKILL_MISSING`). **Before all of it** the emergency stop answers 503
-  `AI_STOPPED` (`STOPS_UNATTENDED_RUN`): nothing is read or written. The app's own refusals (main window,
-  Claude Code, the stop policy confirmed by the server — `ai-turns.md` "Claiming and settling") come with
-  5a-2; the server's 503 holds whatever app calls.
+  `AI_STOPPED` (`STOPS_UNATTENDED_RUN`): nothing is read or written. Right after "whose" (5a-2): **the app names
+  the checks it runs** (`checks`, `JOB_PC_CHECK_KINDS`; carried to the resolver on the claim's subject,
+  `RunSubject.checks`) and an occurrence whose check is not among them → 409 `JOB_CHECK_NOT_SUPPORTED`, nothing
+  written — an app that cannot honour a check (an older one, or a later check kind) never runs it. The app's own
+  refusals (main window, Claude Code, the stop policy confirmed by the server) are "The app's runner" below; the
+  server's 503 holds whatever app calls.
 - **The claim takes the occurrence** (`claimed`, in the claim's transaction): `due` → `running` with the run's
   id; a re-claim keeps it; anything else rolls the claim back. The run's procedure keeps `job: { id, version,
   fingerprint }` (`AiRunProcedure.job`); the claim's `turn` carries what the app runs: the check, `checkSince`
-  (the previous occurrence that ran — done / nothing —, else the approval), the pinned procedure and the grant.
+  (where the previous occurrence that ran — done / nothing — stopped looking, its `checked_until`, else its `dueAt`;
+  else the approval), `checkUntil` (5a-2: this occurrence's own `dueAt`, or what its first claim fixed), the pinned
+  procedure and the grant.
   Its places are the caller's to read (else it would not be theirs), its name follows `HIDDEN_JOB_NAME`.
 - **The grant at every call** (`routeRefusal`, asked by the record-token guard for every route a token
   bound to such a run calls, **whatever build calls** — no released-app gate here): the run still holds a
@@ -304,7 +316,9 @@ POST /ai-runs/:runId/renew | finish | retry | …/reconcile        as for any ru
   refused; the rights lost → refused, the job paused and told, the occurrence held), and the route within
   the pinned grant: `jobRunRouteAllowed` (`shared/core/jobs.ts`) — the turn start's reads
   (`AI_TURN_BASE_ROUTES`), else a route the grant names **and** within `JOB_RUN_ROUTE_CEILING` (the
-  member's own record reads; mail drafts only with `outbound: draft_only`). **Never a create**: a grant may
+  member's own record reads; mail drafts only with `outbound: draft_only`; since 5a-2 the minutes
+  of a meeting its `new_meetings` check finds **at that call** — `jobRunRouteAllowed`'s `meetingFound`, the route's
+  `recordId` among `meetingsFor`; the subject's `routeRefusal` now gets the route's parameters). **Never a create**: a grant may
   name `POST /item` (schema 1's shape, the memo's first job does), but the run's token is refused it; the one
   やること comes with the finish. Every refusal is 403 `NOT_IN_STEP`, naming nothing. A record token binds to
   such a run (`bindsTokens`); to a run of any other non-record kind (the server's own `job-operation`) still
@@ -342,8 +356,114 @@ POST /ai-runs/:runId/renew | finish | retry | …/reconcile        as for any ru
   operations/:key/reconcile` already works by run id for whoever shows it — 5a-2 / 5b); past `expires_at`
   with its run held by nobody (lease over, retried later, given back) → `expired`, told, the run ended. A run
   held within its deadline finishes as it will.
-- **Not here**: the app's side, the clock making PC occurrences (5a-2); 「もう一度」 (5b): a `needs_person`
-  occurrence stays so even when its run is given back.
+- **Not here**: 「もう一度」 (5b): a `needs_person` occurrence stays so even when its run is given back. A deliverable
+  put into a picked Google Drive folder (proposed 5a-3: a `writes` kind naming the folder, the put route checking a
+  job run's `folderId`, the finish linking the run's puts to its やること, and what a folder pick's 90-day expiry means
+  for a job; Google Docs output and overwriting are their own later work) — today the Drive routes stay outside
+  `JOB_RUN_ROUTE_CEILING`.
+
+## The meeting check (PR 5a-2, owner decision: option A — the 面談 are recorded in Google Meet)
+
+- **What it finds** (`job-runs.ts` `meetingWindow`, `minutes.attendedSince`): `meeting` records (`minutes.md`) whose
+  **people-only** list names the responsible person (`listedRecordIds` — never through a group or department: someone
+  who reads through one did not attend), that they read now (`recordReader`) and attended (`isAttendee`), **recorded**
+  in [`checkSince`, `checkUntil`) — a meeting is recorded once its minutes exist, so one whose minutes come late falls
+  in the next occurrence's window instead of being missed — and held before `checkUntil`, and, when the check names
+  words, whose title holds one (NFKC, case-folded; filtered before any limit). Oldest arrival first, at most
+  `JOB_MEETINGS_PER_RUN` (10): with more, the window ends at the first one left over (`checked_until`), so the next
+  occurrence takes the rest — none dropped, none taken twice. Nothing while the records or 「会議と議事録」 are off.
+- **The window ends at the occurrence's own `dueAt`** (`checkUntil`): an app opened two hours after the slot does not
+  take what the next occurrence will look at. `checked_until` is fixed at the first claim, and the next occurrence's
+  check starts there (`checkSince`).
+- **Only in the claim's answer** (`JobTurnView.meetings`, `turnOf`): the list (`GET /me/job-turns`) never carries
+  titles. Empty → the app finishes `nothing` without the AI.
+- **The run reads those minutes only**: `GET /minutes/:recordId/text` (`JOB_MINUTES_ROUTE`) only when the grant
+  names it **and** the meeting is among what the check finds at that call; any other meeting (not hers, before the
+  previous occurrence, another title, not held yet) and every other minutes route (`…/bundle`) → 403 `NOT_IN_STEP`.
+  The text route keeps its own rules on top (the reader's own Google, `MINUTES_NOT_YOURS`): the job widens nothing a
+  person could not do. Meeting titles are outside text: the app quotes them with `outsideTitle`.
+
+## The app's runner (PR 5a-2, `client/shared/ai-turn-steps/job.ts`, `client/electron/features/ai-turns/job-runs.ts`)
+
+The record AI turns' machinery, not a copy (`ai-turns.md`): the same runner (`useAiTurnRunner`, main window only,
+「自動で進める」 on, the stop policy confirmed, Claude Code, one at a time, the daily limit), the same hidden
+consultation, claim / hold / renew / finish (`claims.ts`), the same unattended Claude options.
+
+- **Queue**: `useJobTurns` (`src/features/jobs/hooks/`) reads `aiTurns:jobTurns` (main: `GET /me/job-turns`,
+  parsed through the one definition parser, `parseJobTurns`; remembered for the claim) on mount and every minute;
+  AppShell passes them to `aiTurnQueue` (`jobs`) as candidates `{ id: <occurrence id>, job: true, notUrgent: true }`
+  — never handed to the person for their slot's time. A record's step is never chosen for an occurrence id.
+- **Claim** (`claims.ts` → `job-runs.ts`): main's refusals first, with no server call (`not-allowed`): main window,
+  the emergency stop, an agent without `recordActions`, the stop policy not confirmed, the member's 「自動で進める」 off
+  (read now; a job has no person who asked). For `new_files` in the shared folder, **before the claim**
+  (`gitCheckPoint`): this PC must have what the server has — fetched since `checkUntil` (`FETCH_HEAD`'s time) **and**
+  the server's tip (`@{upstream}`, else `FETCH_HEAD`) in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or a
+  sync stopped on a conflict leaves it out) — else nothing is claimed and it is asked again after `NOT_SYNCED_RETRY_MS`
+  (30 s; `retryAfterMs` on the answer), never `nothing` on a guess. **Not a start** (`ai-turns.md`): it does not use
+  up the runner's pass, and its hidden consultation, which never ran, is deleted. Then `POST /job-run-claims` with `checks` and `checkedCommit` (this PC's `HEAD` in the place's repository;
+  the server keeps it on the occurrence, `checked_commit`, once — a re-claim looks up to the same); then **the check,
+  before any AI** (D6): `new_files` — in the shared folder, files added in `sinceCommit..checkedCommit`
+  (`newFilesByGit`: `log --diff-filter=A`, by what is reachable, **never by commit dates** — an old-dated commit that
+  reaches the server late is still new; `sinceCommit` is the previous occurrence's commit; unknown here or none — the
+  first occurrence, a build before it — the dates after `checkSince` decide), in the innermost repository (a private
+  folder's clone, found from the place's on-disk spelling); a commit not on this PC → `temporary` `NOT_SYNCED`. In a
+  working folder (no git): by modification time in [`checkSince`, `checkUntil`) (`newFilesByTime`). **The place is
+  followed only when no link is on the way** (`placeOnDisk`: its real location is exactly the place inside the company
+  folder's real location, compared as the disk folds names, `diskKey`) — a link committed at the place or above it
+  never lists another folder's files or uses another repository. A place not on this PC (not downloaded, a link) →
+  `bad-input` `CHECK_NOT_POSSIBLE` (a person looks);
+  `new_meetings` — the claim's `meetings`. **Nothing found → the run is finished `done` with `jobResult: 'nothing'`**
+  and no message is sent (the tab closes before anything). Then the pinned procedure: a company Skill's `SKILL.md` from
+  the pinned tree (`readProcedure`, no lazy fetch), a shelf Skill fetched at the pinned version and checked against it
+  (`verifyShelfContent`); not here → `temporary` `PROCEDURE_NOT_HERE` (tried later). The first message
+  (`jobFirstMessage`): what was found, the procedure, the places, no shell, the time it must end by, and to end with
+  `job_report`.
+- **Only while the run is this app's**: a run taken away while the check or the procedure was read starts nothing
+  (claimed: false); the ceiling (`jobTools`) is answered only while the run is still held (registered, not lost), so
+  the chat server refuses a turn of a job consultation without one (400 `AI_TURN_NOT_SUPPORTED`); and its record token
+  is asked only with the run (`openTurn`'s `requireRun`: no run registered → no token at all), a turn with no record
+  tools being refused the same way — it never runs as an ordinary consultation with an ordinary token.
+- **Only the grant's tools** (`jobToolAccess`, asked by the chat server as `pluginStepTools(conversation,
+  'job-procedure')`): record tools whose route the grant names within the server's ceiling (`jobRunRouteAllowed`;
+  `records_create` never), `minutes_read` only with the meeting check, mail drafts only with `outbound_draft`,
+  `job_report` always; Claude Code's file tools only for `files_read` / `files_write`.
+- **Writes and reads** (`jobWriteArea` → the write guard, `chat-write-guard.md`): writes only under
+  `<place>/.personal/<folder>/` of the grant (`insideDeliverableAt`), or nowhere (`NOWHERE_TO_WRITE_MESSAGE`); Claude
+  Code's reads (Read, Glob, Grep) only inside the grant's read paths or that area, as written and as resolved
+  (`readArea`, `checkReadArea`; Glob / Grep must name a `path`, a Glob pattern may not climb out).
+- **The one やること**: `job_report { title, summary? }` (`job-report-tool.ts`, a record-tool provider made only for a
+  consultation main holds a job run for) **finishes the run right there** with it as `jobResult`, so the tool's answer
+  is the server's: 「やることを作りました」, or — the run taken away meanwhile (a pause, the stop, its time; staging
+  2026-11-11: the AI said it had made one after a pause) — an error the consultation shows on the tool's row
+  (`JOB_REPORT_REFUSED` 「仕事が止められていたか、時間が来ていたため、やることは作られませんでした。…」), so the AI never
+  claims it. Asked again, the same answer; nothing is finished twice; settle then only reports the outcome. No report
+  → `temporary` `UNFINISHED` (the server retries, then a person); the AI never reports `nothing` (only the check
+  decides that).
+- **Time and the server**: main stops the AI `JOB_STOP_BEFORE_MS` (1 min) before the approved minutes from the run's
+  first claim (`run.createdAt`, on the server's clock: shifted by the difference between the claim's `updatedAt` and
+  this PC's time) end — not started at all with less left —, through the chat turns' `abort` with
+  reason `job-ended` (the reply says 「※ 定期の仕事の時間が来たか、仕事が止められたため、AI を止めました。」); settle then
+  finishes `bad-input` `TIME_LIMIT` (→ `needs_person` `RUN_FAILED`, told). A renew answered 409 (a pause, the
+  company's stop, the deadline, another PC) stops the AI the same way and settle gives the run back (`RUN_LOST`; the
+  server already ended it). A refused finish leaves the consultation open (outcome `failed`).
+- **Closing the consultation** (`ai-turns.md`, #674): done → closed when nothing of the member's is there; a
+  failure, a stop or the time limit keep it open (listed by the job's name; ending its やること does not close it —
+  the automatic consultations are remembered by the occurrence's id, which no record has).
+- **Beside the records' turns, never at their cost** (`aiTurns.ts`): jobs are ordered after records (their slot is
+  in the past by nature), do not count toward nor wait for the records' daily limit (`recordStarted(…, job)`), and
+  their failures are the server's to place — no hand-off, not one of the records' failures in a row
+  (`jobOutcome`); Claude's usage limit still pauses everything. Each occurrence is tried at most twice a day on this PC
+  (`MAX_ATTEMPTS_PER_RECORD`). A claim that wins after the runner gave up waiting (`START_TIMEOUT_MS`) is settled at
+  once (records too), instead of a run held with no AI.
+- **Not enforced (decision)**: `grant.limits.runsPerDay` (one occurrence per slot; a retried run is the same one).
+- **Known limit (decision)**: a member invited to a meeting **after** its record was made (「招待する」, or the calendar
+  adding them later) is never found by a later meeting check — the window counts when the record was made.
+- **An unknown outside result** (`RESULT_UNKNOWN`, decision for the owner): a job's run reaches outside only by a
+  mail **draft** (`outbound: draft_only`), so an unknown result means "a draft may or may not have been made". No
+  screen is added: the occurrence's state and the bell's `job_failed` tell the responsible person and the job's
+  creator; the person looks at 送るもの (the drafts) themselves. Reconciling the run (`POST /ai-runs/:runId/
+  operations/:key/reconcile`) would change nothing for the occurrence (it stays `needs_person`; 「もう一度」 is 5b), so
+  its entry point comes with 5b.
 
 ## Occurrences in the API (3b)
 
@@ -372,18 +492,23 @@ sentences the admin approved.
   also while a version's `definition` is hidden). Ids, booleans and names only, never a place. No new endpoint.
 - **Admin console 「定期の仕事」** (`/companies/:id/jobs`, menu item for owners / admins after つなぎ先;
   `admin/src/components/jobs/`): the list (name, 責任者, いつ, a badge and `jobWaitingText` — paused with
-  its reason, 承認待ち, 受け取り待ち, すべて止めています —, a newer version waiting for approval, 「PC で動く仕事は
-  まだ動きません」 for placement `a`, 次の回, 前の回), 作る / 直す, 承認する, 止める / 再開する, 回の記録 (≤ 100,
+  its reason, 承認待ち, 受け取り待ち, すべて止めています —, a newer version waiting for approval, for placement `a` that it
+  needs the responsible person's app (5a-2), 次の回, 前の回), 作る / 直す, 承認する, 止める / 再開する, 回の記録 (≤ 100,
   `jobOccurrenceText`), and 「すべて止める」 (asks first) / 「動かせるようにする」. Anyone else: the page says it
   is for owners and admins and reads nothing.
-  - **The form** (`admin/src/lib/jobs.ts`) makes the server's operation only — placement `e`, check
-    `none`, `create_task`, a grant with no tools, routes, reads, writes or outbound — and runs the shared
-    parser before sending (`definitionFromForm`; problems as plain sentences, never values). Editing keeps
-    the version's `limits` (the form does not offer them), so a name / time / due / missed change keeps
-    the consent and needs no new acceptance. A PC job (procedure) is shown, not edited here (PR 5).
+  - **The form** (`admin/src/lib/jobs.ts`) makes the server's operation — placement `e`, check `none`,
+    `create_task`, a grant with no tools, routes, reads, writes or outbound — or (PR 5a-2, 「すること」 → 「Skill を
+    責任者の PC の AI で動かす」, `pc-job-fields.tsx`) a PC job: a company Skill by its folder name, or in a company
+    without the shared folder a Skill of the shelf (`GET /skill-shelf`; the server pins the version and the name), the
+    check (`new_files` with its place / `new_meetings` with words), other read places, 「やることや記録を読む」 (the
+    record read routes), 「メールの下書きを作る」 (`outbound_draft` + its routes), the deliverable place and folder, the
+    minutes per run; `records` and `creates: ['task']` always (the one やること), the meeting check adds
+    `JOB_MINUTES_ROUTE`. It runs the shared parser before sending (`definitionFromForm`; problems as plain sentences,
+    never values). Editing the server's operation keeps the version's `limits` (the form does not offer them), so a
+    name / time / due / missed change keeps the consent and needs no new acceptance.
   - **The list's 責任者** is who it runs as now (`approved.responsibleUserId`); a newer draft naming someone
-    else says 「次の版では責任者が…さんになります（未承認）」. Whether it runs is `jobRunsText` (a PC job:
-    「まだ動きません」, badge 準備中 — never 「動いています」).
+    else says 「次の版では責任者が…さんになります（未承認）」. Whether it runs is `jobRunsText` (a PC job: 「動いています
+    （責任者のアプリが開いていて「自動で進める」が入っているときに動きます）」, badge 「PC で動きます」).
   - **Approval** shows the newest version's words and sends its `fingerprint` (the server refuses another).
     It says whether the responsible person must accept again from `latestConsentAccepted`, and its message
     afterwards comes from the answer (`approvedText`: 受け取り待ち, or what `jobRunsText` says now). **Approving one's own job also accepts it** in the approver's own
@@ -398,8 +523,8 @@ sentences the admin approved.
   It shows what it will do, on whose rights (theirs), where, the grant's lines and the missed policy; a
   version whose definition is hidden says it cannot be shown (the server would refuse the acceptance too).
   受け取る sends the version and fingerprint shown; its message is chosen from the job as re-read
-  (`client/src/features/jobs/model.ts` `acceptedText`: 「次の回から動きます」 only when it now runs — not paused,
-  stopped or a PC job). 止める for a job they run, 再開する for their own pause (`BY_RESPONSIBLE`; the server
+  (`client/src/features/jobs/model.ts` `acceptedText`: 「次の回から動きます」 only when it now runs — not paused or
+  stopped; a PC job 「次の回から、このアプリが開いていて「自動で進める」が入っているときに動きます」). 止める for a job they run, 再開する for their own pause (`BY_RESPONSIBLE`; the server
   checks it was theirs). Renderer values never change the server path (`isJobId`, `sha256:<hex>`). A server
   that answers jobs without `you` (before PR 4) is said as such (`SERVER_TOO_OLD`, 「サーバーの更新が必要です」),
   never as 「ありません」. In the
@@ -449,7 +574,7 @@ membership can fail).
 - `server/tests/integration/job-occurrences.test.ts` (3b) — one occurrence per slot over two runs and a
   restart, none before its time or before approval; only the newest missed slot; expiry when made and
   when run (told to the responsible person and the creator, the bell's text, gone once they may not see
-  the job); `skip` late → skipped; superseded; no PC-job occurrence; exactly one owner-only やること with
+  the job); `skip` late → skipped; superseded; a PC job's occurrence made, never run by the server; exactly one owner-only やること with
   its run, events, key and 経緯 (`acb:job`, `system`, `runId`), none on a second pass, all or nothing on a
   crash, `needs_person` on a refusal and with records off, still run with every feature off, no notice
   of success; held for the stop and the pause (when made, at run time — also a stop written without
@@ -479,10 +604,10 @@ membership can fail).
   heading claims no cause.
 - `client/src/features/jobs/model.test.ts` — 「次の回から動きます」 only for a job that now runs.
 - `admin/tests/jobs.test.tsx` — the form makes the operation only and the parser accepts it; editing a name
-  or time keeps the consent; a PC job is not editable; approval sends the version shown and its fingerprint,
+  or time keeps the consent; a PC job through the same parser (5a-2); approval sends the version shown and its fingerprint,
   says whether acceptance is needed from the server's answer (also back to an accepted consent), does not
   accept for someone else, accepts one's own, and says what will happen; the list's 責任者 is the approved
-  version's and a PC job is not 「動いています」; the stop asks first; a pause reason and occurrences in words;
+  version's and a PC job says it needs the app; the stop asks first; a pause reason and occurrences in words;
   nobody else reads the page.
 - `server/tests/integration/job-runs.test.ts` (PR 5a) — the turns and the claim the responsible person's
   alone (another member, an admin, the owner, another company's id, a server job's occurrence: 404); the
@@ -510,6 +635,32 @@ membership can fail).
   occurrence is no longer `due` (the claim's check and write are one synchronous stretch), the finish's
   `GONE` when the occurrence moved inside its own transaction, and a writer refusal after `beforeFinish`'s
   check (a race; it rolls the finish back).
+- PR 5a-2: `server/tests/integration/job-runs.test.ts` "the app says which checks it runs" (no `checks`, another
+  kind: 409, nothing written) and "a meeting check" (the claim answers only the meetings she attended since, with the
+  title's words; the run reads those minutes and no other meeting's — before, another title, not hers, not held yet —
+  nor another minutes route; none found → `nothing`); `job-occurrences.test.ts` (a PC job's occurrence made, never run
+  by the server); `jobs-definition.test.ts` "the meeting check" (the minutes route in the grant, title words,
+  `jobRunRouteAllowed` without `meetingFound` refuses), review fixes: each meeting one occurrence's (an app opened late,
+  minutes recorded late), more than one run takes (the rest next time, none dropped or twice, non-matching titles never
+  hide matching ones; the 10th and 11th recorded at the same moment both wait), the commit kept from the first claim
+  and handed to the next occurrence; `client/tests/job-runs.test.ts` (also: an old-dated commit arriving late is new,
+  fetched-but-not-merged is not yet, a commit not here is not yet, the token only with the run and the chat server
+  refusing a job turn without it) (no server call while this PC
+  may not run unattended AI; the claim's `checks`; nothing found → `nothing` and no message; the meeting titles
+  quoted; the tool ceiling; the procedure not here; no report → retried, never `nothing` from the AI; the time limit
+  and the renew's 409 stop the AI; the write and read areas, a link cannot lead out; new files by git's history
+  (added only, within the window) and by time; a link at or above the place never followed; not synced → given back;
+  taken away while preparing → nothing starts and no ceiling; the server's clock for the deadline; 「自動で進める」 off →
+  no claim; the queue never hands a job early); `src/features/chat/aiTurns.test.ts` (a job after the records, outside
+  their daily limit and failures in a row); `admin/tests/jobs.test.tsx` (the PC form through the
+  shared parser; the meeting check names the minutes route). Mutation check: 12 + 5 server and 24 + 14 client
+  mutations (the second numbers: the review fixes), one guard each; all fail their test file except: a meeting she is
+  not on is stopped by `listedRecordIds` and by `isAttendee` (each alone suffices, so neither single removal fails); the
+  `recordReader` check in `attendedSince` is defence only and **not reachable by a test** — a members-only meeting's
+  listed member always reads it (the reader's members-only branch comes before every other rule), and a meeting that is
+  not members-only is never in `listedRecordIds`; a check kind the app does not know is refused by the shared parser
+  itself (its own filter was dropped as redundant); and the runner's settle of a claim that won after it gave up
+  (a hook line, no test).
 - `client/tests/jobs-ipc.test.ts` — an older server without `you` reported as such; only the member's jobs (by the server's `you`), never dropped behind 80
   other jobs, a hidden approved definition still waiting for them, the approved version's name, the version
   and fingerprint sent, renderer values never change the path, which notices open the section.

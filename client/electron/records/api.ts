@@ -59,7 +59,8 @@ export interface RecordsApi {
    * A token for one turn, or null when the company map is off for the company
    * (or the member is signed out / offline: the turn simply has no record tools).
    */
-  openTurn(companyId: string, opts: { conversationId: string; agent: string; scope: 'read' | 'act' }): Promise<RecordTurnAccess | null>
+  /** `requireRun`: only with a run this app holds for the consultation (a scheduled job's): none → no token at all. */
+  openTurn(companyId: string, opts: { conversationId: string; agent: string; scope: 'read' | 'act'; requireRun?: boolean }): Promise<RecordTurnAccess | null>
 }
 
 /** The request as one text, keys sorted: what its idempotency key is made from. */
@@ -113,12 +114,15 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
       const cookies = deps.cookies()
       if (!root || cookies.length === 0) return null
       const run = deps.runOf?.(companyId, opts.conversationId) ?? null
+      // A job's run without its run (taken away just now): never an ordinary token.
+      if (opts.requireRun && !run) return null
+      const ask = { conversationId: opts.conversationId, agent: opts.agent, scope: opts.scope }
       let issued: { status: number; body: { data?: unknown } }
       try {
         issued = await request(`${root}/api/companies/${encodeURIComponent(companyId)}/me/record-tokens`, {
           method: 'POST',
           headers: { Cookie: cookies.join('; '), 'Content-Type': 'application/json' },
-          body: JSON.stringify(run ? { ...opts, run } : opts),
+          body: JSON.stringify(run ? { ...ask, run } : ask),
         })
       } catch {
         return null

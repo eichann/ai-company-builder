@@ -78,6 +78,8 @@ export interface ChatServerConfigDeps {
   brokerTokens?: BrokerTokenStore
   /** Google Drive (features/google/drive.ts): the person's Picker; absent = no Drive tools. */
   drivePicking?: Pick<DrivePicking, 'pick'>
+  /** A scheduled job's run held for a consultation: its `job_report` (features/ai-turns/job-runs.ts); null otherwise. */
+  jobReport?: (conversationId: string) => ((result: unknown) => Promise<string | null>) | null
   /** The allowed-roots check (a Drive put reads a local file). */
   paths?: PathGuard
   /** Which Skill a consultation used (services/skill-use-reporter.ts, records.md "Which Skill"); absent = not recorded. */
@@ -175,12 +177,12 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         instructions: companyFilesInstructions(notDownloaded),
       }
     },
-    createRecordTools: async ({ companyId, conversationId, agent, actions, companyRoot, department, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
-      const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read' })
+    createRecordTools: async ({ companyId, conversationId, agent, actions, requireRun, companyRoot, department, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
+      const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read', ...(requireRun ? { requireRun } : {}) })
       // Connectors' tools ride on the same token (records/tool-providers.ts: Google Drive, …).
       // A Drive put in a consultation about a やること is linked to it by the server (google-drive.md).
       const topicTask = () => taskTopicOf(deps.history.get(companyId, conversationId))
-      const toolProviders = recordToolProviders(deps, { companyId, companyRoot: companyRoot ?? null, topicTask })
+      const toolProviders = recordToolProviders(deps, { companyId, companyRoot: companyRoot ?? null, topicTask, conversationId })
       const onRecordChanged = deps.recordsChanged ? () => deps.recordsChanged?.(companyId) : undefined
       // A task the AI makes in a consultation without a topic becomes its topic (consultation-task.ts).
       const onRecordCreated = (made: { id: unknown; type: unknown }) => {

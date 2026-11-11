@@ -46,7 +46,8 @@ import { useTabArrangement } from '../src/features/editor/hooks/useTabArrangemen
 //   ?autoturn=1    the main pane gets one received minutes record as 「AI の番」: the runner claims it
 //                  (claimAiTurn recorded in __acbChat.aiTurns) and runs it in a hidden consultation;
 //                  ?autoturn=taken: another PC wins the claim; ?autoturn=fail: the AI says it cannot read it;
-//                  ?autoturn=asked-again: the log of an older build holds the failed record, back in the queue
+//                  ?autoturn=asked-again: the log of an older build holds the failed record, back in the queue;
+//                  ?autoturn=later: main answers 「not yet」 (a job's place not synced) with retryAfterMs
 //   ?topic=1       with ?history=edit: the restored conversation is about a readable やること (the topic chip
 //                  with ×; taking it off is recorded in __acbChat.patches)
 //   ?tabs=1        the middle's tab bar beside the chat: a やること, a 案件 and a file tab, to drag onto the
@@ -150,13 +151,14 @@ const MEETING_ITEM: TaskListItem = {
   id: MINUTES_NOTICE.id, type: 'meeting', typeLabel: '会議', title: MINUTES_NOTICE.title, state: 'received', stateLabel: '届いた', version: 1,
   due: null, tags: [], turn: 'ai', waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null,
 }
-const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled: [] as string[], retried: [] as string[], order: [] as string[] }
+const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled: [] as string[], retried: [] as string[], order: [] as string[], deleted: [] as string[] }
 installElectronAPI({
   getAutoTurnSettings: async () => ({ enabled: true, dailyLimit: 20, stopAfterFailures: 3 }),
   getAiTurnStopConfirmed: async () => true,
   claimAiTurn: async (companyId, recordId, version, conversationId) => {
     aiTurns.claims.push([companyId, recordId, version, conversationId])
     aiTurns.order.push('claim')
+    if (autoTurn === 'later') return { claimed: false, reason: 'unavailable', retryAfterMs: 30_000 }
     return autoTurn === 'taken' ? { claimed: false, reason: 'taken' } : { claimed: true, version: version + 1 }
   },
   settleAiTurn: async (_companyId, recordId) => { aiTurns.settled.push(recordId); return { outcome: autoTurn === 'fail' ? 'failed' : 'done' } },
@@ -200,6 +202,7 @@ installElectronAPI({
   getPermissionMode: async () => 'auto',
   getHandoff: async () => ({ status: 'waiting', message: '', canUpdate: false, pendingTurns: 0 }),
   saveChatSession: async () => ({ status: 'saved', revision: 1 }) as ChatSaveReceipt,
+  deleteChatSession: async (_company: string, id: string) => { aiTurns.deleted.push(id); return true },
   patchChatSession: async (_company: string, sessionId: string, patch) => { control.patches.push({ sessionId, ...patch }); return null },
   // The synchronous save before a send, recorded in order with the requests.
   flushChatSession: (_company: string, session: ChatSession) => {

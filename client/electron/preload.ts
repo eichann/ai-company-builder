@@ -159,6 +159,7 @@ const api: ElectronAPI = {
   addAbsence: (companyId: string, input: AbsenceAddInput) => invoke('absences:add', companyId, input),
   removeAbsence: (companyId: string, absenceId: string) => invoke('absences:remove', companyId, absenceId),
   getMyJobs: (companyId: string) => invoke('jobs:mine', companyId),
+  listJobTurns: (companyId: string) => invoke('aiTurns:jobTurns', companyId),
   acceptJob: (companyId: string, jobId: string, version: number, fingerprint: string) => invoke('jobs:accept', companyId, jobId, version, fingerprint),
   pauseJob: (companyId: string, jobId: string) => invoke('jobs:pause', companyId, jobId),
   resumeJob: (companyId: string, jobId: string) => invoke('jobs:resume', companyId, jobId),

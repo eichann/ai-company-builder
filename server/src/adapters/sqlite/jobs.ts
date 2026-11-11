@@ -22,12 +22,13 @@ const VERSION_COLUMNS = `job_id, version, schema, definition, fingerprint, conse
 
 interface OccurrenceDbRow {
   id: string; job_id: string; job_version: number; due_slot: string; time_zone: string; due_at: string; expires_at: string
-  state: string; run_id: string | null; outcome_code: string | null; created_at: string; updated_at: string
+  state: string; run_id: string | null; outcome_code: string | null; checked_until: string | null; checked_commit: string | null; created_at: string; updated_at: string
 }
 const OCCURRENCE_COLUMNS = 'id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, run_id, outcome_code, created_at, updated_at'
+const OCCURRENCE_READ = `${OCCURRENCE_COLUMNS}, checked_until, checked_commit`
 const occurrenceOf = (r: OccurrenceDbRow): JobOccurrenceRow => ({
   id: r.id, jobId: r.job_id, jobVersion: r.job_version, dueSlot: r.due_slot, timeZone: r.time_zone, dueAt: r.due_at, expiresAt: r.expires_at,
-  state: r.state as JobOccurrenceRow['state'], runId: r.run_id, outcomeCode: r.outcome_code, createdAt: r.created_at, updatedAt: r.updated_at,
+  state: r.state as JobOccurrenceRow['state'], runId: r.run_id, outcomeCode: r.outcome_code, checkedUntil: r.checked_until, checkedCommit: r.checked_commit, createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
 const jobOf = (r: JobDbRow): JobRow => ({
@@ -127,26 +128,28 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         .changes === 1
     },
     occurrence(occurrenceId) {
-      const r = conn.prepare(`SELECT ${OCCURRENCE_COLUMNS} FROM ai_job_occurrences WHERE company_id = ? AND id = ?`).get(companyId, occurrenceId) as OccurrenceDbRow | undefined
+      const r = conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND id = ?`).get(companyId, occurrenceId) as OccurrenceDbRow | undefined
       return r ? occurrenceOf(r) : null
     },
     occurrences(jobId, limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_COLUMNS} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? ORDER BY due_slot DESC, id LIMIT ?`)
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? ORDER BY due_slot DESC, id LIMIT ?`)
         .all(companyId, jobId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     dueOccurrences(limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_COLUMNS} FROM ai_job_occurrences WHERE company_id = ? AND state = 'due' ORDER BY due_at, id LIMIT ?`)
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'due' ORDER BY due_at, id LIMIT ?`)
         .all(companyId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     runningOccurrences(limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_COLUMNS} FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' ORDER BY due_at, id LIMIT ?`)
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' ORDER BY due_at, id LIMIT ?`)
         .all(companyId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     moveOccurrence(occurrenceId, from, to, change, at) {
       const runId = change.runId === undefined ? null : change.runId
-      return conn.prepare(`UPDATE ai_job_occurrences SET state = ?, outcome_code = ?, run_id = CASE WHEN ? THEN ? ELSE run_id END, updated_at = ?
+      // checked_until / checked_commit are set once (the first claim) and never moved afterwards.
+      return conn.prepare(`UPDATE ai_job_occurrences SET state = ?, outcome_code = ?, run_id = CASE WHEN ? THEN ? ELSE run_id END,
+          checked_until = COALESCE(checked_until, ?), checked_commit = CASE WHEN checked_until IS NULL THEN ? ELSE checked_commit END, updated_at = ?
           WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?))`)
-        .run(to, change.outcomeCode, change.runId === undefined ? 0 : 1, runId, at, companyId, occurrenceId, JSON.stringify(from)).changes === 1
+        .run(to, change.outcomeCode, change.runId === undefined ? 0 : 1, runId, change.checkedUntil ?? null, change.checkedCommit ?? null, at, companyId, occurrenceId, JSON.stringify(from)).changes === 1
     },
   }
 }

@@ -709,6 +709,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // A PC job's runs (jobs.md "The PC's claim", PR 5a): the occurrence's resolver behind the same port, and its turns.
   const jobRuns = createJobRuns({
     ...shared, jobs, writer: serviceRecords,
+    // A `new_meetings` check (B PR 5a-2): the meetings the responsible person attended, as minutes knows them.
+    meetings: (member, since, until, limit) => minutes.attendedSince(member, since, until, limit),
     // Bound late: the occurrences' service is built below (called only after construction).
     notices: {
       writeNotice: (companyId, kind, occ) => jobOccurrences.writeNotice(companyId, kind, occ),

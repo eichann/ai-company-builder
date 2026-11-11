@@ -62,6 +62,7 @@ import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
 import { createMeetingsApi } from './features/minutes/meetings'
 import { createAiTurnClaims } from './features/ai-turns/claims'
+import { gitCheckPoint, newFilesByGit, newFilesByTime } from './features/ai-turns/job-runs'
 import { createRunRegistry } from './records/runs'
 import { registerAiTurnsIpc } from './features/ai-turns/ipc'
 import { createNotificationsWatcher } from './features/notifications/watcher'
@@ -391,6 +392,8 @@ const readPluginProcedure = createProcedureReader({
   folderOf: (companyId, pluginId, version) => agentControl.pluginPackages.folderOf(companyId, pluginId, version),
   git: (gitRoot, args) => appGit.create(gitRoot, { GIT_NO_LAZY_FETCH: '1' }).raw(args),
 })
+// git for a job's new-files check (no lazy fetch: what is not here is not looked at).
+const jobGit = (cwd: string, args: string[]) => appGit.create(cwd, { GIT_NO_LAZY_FETCH: '1' }).raw(args)
 const aiTurnClaims = createAiTurnClaims({
   baseUrl: getServerApiUrl,
   cookies: session.cookies,
@@ -406,6 +409,27 @@ const aiTurnClaims = createAiTurnClaims({
   // Another PC (or a person) moved the record on: read the notices again rather than in 10 minutes.
   recordMovedOn: companyId => minutes.recordsSignal(companyId),
   readProcedure: readPluginProcedure,
+  // 定期の仕事 on this PC (jobs.md "The app's runner"): a shelf Skill's pinned version, checked; new files of a
+  // place (a working folder by time, the shared folder by git's history); its AI stopped before the time runs out.
+  jobs: {
+    readShelfSkill: async (companyId, item, skill, version) => {
+      const got = await shelfClient.content(companyId, { id: item, kind: 'skill', name: skill, department: null, version })
+      const file = got.ok ? got.files.find(f => f.path === 'SKILL.md') : undefined
+      return file ? Buffer.from(file.bytes).toString('utf8') : null
+    },
+    checkPoint: async (companyRoot, place, until) => {
+      if (!companyRoot) return null
+      const root = allowedRoots.validate(companyRoot)
+      return workingFolders.has(root) ? { commit: null } : gitCheckPoint(jobGit, root, place, until)
+    },
+    newFiles: async (companyRoot, place, window) => {
+      if (!companyRoot) return null
+      const root = allowedRoots.validate(companyRoot)
+      if (workingFolders.has(root)) return newFilesByTime(root, place, window.since, window.until)
+      return window.upto ? newFilesByGit(jobGit, root, place, { since: window.since, sinceCommit: window.sinceCommit, upto: window.upto }) : null
+    },
+    stopTurn: conversationId => { chatTurns?.abort(info => info.appSessionId === conversationId, 'job-ended') },
+  },
 })
 registerAiTurnsIpc(ipc, {
   claims: aiTurnClaims,
@@ -551,13 +575,15 @@ app.whenReady().then(async () => {
       requestInteraction: (request, appSessionId, signal) =>
         requestFromOwner(agentInteractions, webContentsForSession(appSessionId), request, appSessionId, signal),
       runAppCommand: appCommands.run,
+      // A scheduled job's run reports its one やること here (jobs.md).
+      jobReport: conversationId => aiTurnClaims.jobReporter(conversationId),
       workingFolders,
       skillShelf,
     })
     // A business plugin's step run: only its step's tools (plugin-steps.md), from the claim main holds.
     const result = await startChatServer({
       ...serverConfig,
-      pluginStepTools: (conversationId, step) => aiTurnClaims.pluginStepTools(conversationId, step),
+      pluginStepTools: (conversationId, step) => aiTurnClaims.pluginStepTools(conversationId, step) ?? aiTurnClaims.jobTools(conversationId, step),
       // A person step's consultation: its AI's plugin power is that step's (plugin-steps.md).
       bindPluginStep: async (companyId, conversationId, step) => {
         const bound = await bindPersonStep(companyId, conversationId, step)
@@ -565,7 +591,11 @@ app.whenReady().then(async () => {
         return bound
       },
       // A step's run or consultation writes only inside its deliverable folder (plugin-steps.md).
-      stepWriteArea: (companyId, conversationId) => stepWriteAreas.areaOf(companyId, conversationId),
+      // A scheduled job's run writes only where its grant says, or nowhere (jobs.md).
+      stepWriteArea: (companyId, conversationId) => {
+        const job = aiTurnClaims.jobWriteArea(conversationId)
+        return job ? Promise.resolve(job) : stepWriteAreas.areaOf(companyId, conversationId)
+      },
     })
     chatServerInfo = { port: result.port, authToken: result.authToken }
     chatTurns = result.turns

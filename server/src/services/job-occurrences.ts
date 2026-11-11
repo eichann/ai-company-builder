@@ -4,7 +4,8 @@
  * job's server operation (placement `e`: today a やること for the responsible person).
  *
  * - **The clock** (`makeOccurrences`, called by the server clock for every company before its slower
- *   work): for each approved job of placement `e` (active or paused, never a draft or retired), the
+ *   work): for each approved job (placement `e`, and since B PR 5a-2 `a`, whose occurrences the responsible
+ *   person's app claims; active or paused, never a draft or retired), the
  *   newest slot of the approved version's trigger at or before now (company time, `job-schedule.ts`) is
  *   written once (`INSERT OR IGNORE` on `UNIQUE (company, job, due_slot)`: a second clock run, a restart
  *   or a second server make nothing more). Slots before the version was approved are never made. Its
@@ -143,16 +144,16 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
   const accepted = (job: JobRow, version: JobVersionRow) => job.acceptedConsent !== null && job.acceptedConsent === version.consentFingerprint
 
   /**
-   * The newest slot of an approved placement-`e` job at or before now, as an occurrence row would hold it
-   * (state still to decide), or null: no approved version, a PC job (claimed by its responsible person's app,
-   * PR 5a-2: none made until then), no slot, or a slot from before the version was approved.
+   * The newest slot of an approved job at or before now, as an occurrence row would hold it (state still to
+   * decide), or null: no approved version, no slot, or a slot from before the version was approved. A PC job's
+   * (placement `a`) is made the same way since B PR 5a-2: its responsible person's app claims it.
    */
   function latestSlotOf(companyId: string, handle: CompanyData, job: JobRow, nowMs: number) {
     if (job.approvedVersion === null || (job.state !== 'active' && job.state !== 'paused')) return null
     const version = handle.jobs.version(job.id, job.approvedVersion)
     if (!version || version.approvedAt === null) return null
     const definition = definitionOf(version)
-    if (definition.placement !== 'e') return null
+    if (definition.placement !== 'e' && definition.placement !== 'a') return null
     const zone = deps.timeZoneOf(companyId)
     const slot = latestJobSlot(definition.trigger, companyNow(nowMs, zone), deps.holidaysOf(companyId))
     if (slot === null) return null

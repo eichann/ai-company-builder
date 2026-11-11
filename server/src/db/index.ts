@@ -7,7 +7,7 @@ import { DECISION_VERSION, TASK_VERSION } from '../../shared/core/core-types'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox, migrateSecondOpinionSetting } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns, migrateAiRunSubjects } from './schema/ai-runs'
-import { jobSchema } from './schema/jobs'
+import { jobSchema, migrateJobOccurrenceCheckedUntil } from './schema/jobs'
 import { brokerSchema, migrateBrokerSettings } from './schema/broker'
 import { companySchema, migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
 import { connectorSchema, migrateConnectorProviders, migrateGooglePicker } from './schema/connectors'
@@ -46,6 +46,7 @@ export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateOutboundAttachments, migrateOutboundSendSources } from './schema/outbound-mail'
 export { migrateAiRunColumns, migrateAiRunSubjects } from './schema/ai-runs'
+export { migrateJobOccurrenceCheckedUntil } from './schema/jobs'
 export { migrateMemberAbsenceHistory, migrateMemberWorkSwitches } from './schema/tasks'
 export { migrateSkillUseColumns } from './schema/skill-uses'
 export { migrateSecondOpinionSetting } from './schema/agents'
@@ -153,6 +154,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateOutboundSendSources(conn)
   migrateRecordContents(conn)
   migrateNotificationsForUser(conn)
+  // Scheduled jobs: where an occurrence's check stopped (jobs.md "The app's runner").
+  migrateJobOccurrenceCheckedUntil(conn)
   // Absences are history: removed periods are marked, never deleted (records.md "Whose turn it was").
   migrateMemberAbsenceHistory(conn)
   // Before the seeding below: it deletes stale manager rows per company.

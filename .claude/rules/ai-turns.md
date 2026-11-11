@@ -17,6 +17,8 @@ paths:
   - "client/src/features/plugin-steps/**"
   - "client/tests/plugin-step-turns.test.ts"
   - "client/electron/features/ai-turns/task-wait-tools.ts"
+  - "client/shared/ai-turn-steps/job.ts"
+  - "client/electron/features/ai-turns/job-runs.ts"
 ---
 
 # 「AI の番」 run automatically (stage 2 S10)
@@ -519,6 +521,29 @@ ceiling, the first message).
   `client/tests/ai-turn-claims.test.ts` (claimed as that step with no record action; settle),
   `server/tests/integration/ai-runs.test.ts` ("a task whose wait is over": listed and claimable
   only after the clock) — mutation-checked.
+
+## A scheduled job's run (定期の仕事, B PR 5a-2; `jobs.md` "The app's runner")
+
+A PC job's occurrence is a candidate of the same queue (`aiTurnQueue`'s `jobs`, `job: true`, `notUrgent`), run by the
+same runner and hidden consultation, with step `job-procedure` (`JOB_PC_STEP`). main's claim (`claims.ts`) routes an
+occurrence id (`occ.…`, never a record id) to `job-runs.ts` after the same refusals (main window, emergency stop,
+`recordActions`, the stop policy confirmed); `claims.ts` hands it its session, `hold` (renew; a 409 also calls the
+job's `onLost`, which stops its AI) and `finishRun` (a job's done carries `jobResult`). Its ceiling is asked by the
+chat server like a business plugin step's (`pluginStepTools` → `jobTools`), its write area and read places through
+`stepWriteArea`; `aiTurns:retry` gives nothing back for an occurrence (its 「もう一度」 is the server's, 5b). Records'
+steps, their claims, settles and tests are unchanged. In the rules (`aiTurns.ts`) a job comes after the
+records, neither counts toward nor waits for their daily limit, and its failures are not theirs (`jobOutcome`: only
+Claude's usage limit). For every kind — **a behaviour change for records too** (B PR 5a-2) — a claim that wins after
+the runner stopped waiting for it (`START_TIMEOUT_MS`) is settled at once (`aiTurns:settle`: a reading put back, the
+run finished as unfinished) rather than left held with no AI until its lease runs out; one line in the hook, not covered
+by a test. **A claim not won is not a start** (staging 2026-11-11: a job's place not synced yet was given back
+four times in nine seconds and used up the pass; the real claim came ten minutes later): only a claim that won counts
+toward `AI_TURN_PASS_CAP`, and one not won (not allowed now, unreachable, not synced) is not asked again before its
+`retryAfterMs` or `CLAIM_RETRY_MS` (60 s; `notDeferred`) — for records too. The hidden consultation of a claim not won
+(or won after the runner gave up, or with no message) is closed **and its stored copy deleted** (`deleteChatSession`),
+so empty 「新しい会話」 never pile up. Tests: `aiTurns.test.ts`, `tests/ui/ai-turns.spec.ts` (`?autoturn=later`,
+`?autoturn=taken`). Test: `client/tests/job-runs.test.ts`, `aiTurns.test.ts`
+(mutation-checked).
 
 ## Not yet
 

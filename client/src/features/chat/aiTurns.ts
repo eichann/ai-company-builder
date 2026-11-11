@@ -45,6 +45,17 @@ export interface HandOff {
 /** At most this many records are started in one pass; the next pass comes `AI_TURN_PASS_INTERVAL_MS` later. */
 export const AI_TURN_PASS_CAP = 3
 export const AI_TURN_PASS_INTERVAL_MS = 10 * 60_000
+/**
+ * A claim not won (not allowed now, the server unreachable, a job's place not synced yet) is not a start: it never
+ * counts toward `AI_TURN_PASS_CAP`, and the same one is not asked again before this long (or its `retryAfterMs`).
+ */
+export const CLAIM_RETRY_MS = 60_000
+
+/** The queue without what waits after a claim not won (`deferred`: id → not before this time). */
+export function notDeferred(queue: readonly AiTurnCandidate[], deferred: ReadonlyMap<string, number>, now: number): AiTurnCandidate[] {
+  return queue.filter(c => (deferred.get(c.id) ?? 0) <= now)
+}
+
 /** A record that failed twice today waits for a person (its notice stays). */
 export const MAX_ATTEMPTS_PER_RECORD = 2
 /** A record due within this time is handed to the person rather than waiting for the AI. */
@@ -118,9 +129,13 @@ const time = (iso: string | null | undefined): number => {
   return Number.isNaN(t) ? Infinity : t
 }
 
-/** Earliest due first; without a due date, the oldest meeting first; then by id (stable). */
+/**
+ * Records first, then scheduled jobs (their slot is in the past by nature: sorted with records, it would always
+ * come first and could keep a record's turn waiting); earliest due first; without a due date, the oldest meeting
+ * first; then by id (stable).
+ */
 export function orderAiTurns(queue: readonly AiTurnCandidate[]): AiTurnCandidate[] {
-  return [...queue].sort((a, b) =>
+  return [...queue].sort((a, b) => (a.job ? 1 : 0) - (b.job ? 1 : 0) ||
     time(a.dueAt) - time(b.dueAt) || time(a.meetingAt) - time(b.meetingAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 }
 
@@ -139,10 +154,12 @@ export function nextAiTurn(input: AiTurnDecisionInput): { run: AiTurnCandidate }
   if (!input.stopConfirmed) return { wait: 'stop-unconfirmed' }
   if (log.stopped) return { wait: 'stopped' }
   if (log.pausedUntil !== null && log.pausedUntil > now) return { wait: 'paused-usage' }
-  if (log.runs >= settings.dailyLimit) return { wait: 'daily-limit' }
+  // The daily limit counts records' turns; a scheduled job (approved, one per slot) is not held by it.
+  const startable = log.runs >= settings.dailyLimit ? waiting.filter(c => c.job) : waiting
+  if (startable.length === 0) return { wait: 'daily-limit' }
   if (input.busy) return { wait: 'busy' }
   if (input.pass && now - input.pass.startedAt < AI_TURN_PASS_INTERVAL_MS && input.pass.started >= AI_TURN_PASS_CAP) return { wait: 'pass-cap' }
-  return { run: waiting[0] }
+  return { run: startable[0] }
 }
 
 /**
@@ -153,9 +170,18 @@ export function mayStartAiTurns(settings: AutoTurnSettings | null, queue: readon
   return !!settings && (settings.enabled || queue.some(c => c.asked))
 }
 
-/** A run starts (counted when the claim succeeded). */
-export function recordStarted(log: AiTurnLog, recordId: string): AiTurnLog {
-  return { ...log, runs: log.runs + 1, attempts: { ...log.attempts, [recordId]: (log.attempts[recordId] ?? 0) + 1 } }
+/** A run starts (counted when the claim succeeded). A scheduled job's counts its attempts, never toward the records' daily limit. */
+export function recordStarted(log: AiTurnLog, recordId: string, job?: boolean): AiTurnLog {
+  return { ...log, runs: job ? log.runs : log.runs + 1, attempts: { ...log.attempts, [recordId]: (log.attempts[recordId] ?? 0) + 1 } }
+}
+
+/**
+ * After a scheduled job's run: only Claude's usage limit is the runner's (it pauses everything). A job's failure is
+ * the server's to place (retried, then a person, told) — never a hand-off here, and never one of the records'
+ * failures in a row that would stop 「AI の番」.
+ */
+export function jobOutcome(log: AiTurnLog, outcome: AiTurnOutcome, settings: AutoTurnSettings, pause: UsagePause | null): AiTurnLog {
+  return outcome === 'usage-limit' ? recordOutcome(log, '', outcome, settings, pause) : log
 }
 
 /** `failed`: the AI said it could not; `unfinished`: the turn ended (or broke) before the record was done. */

@@ -1,4 +1,5 @@
 import { boundedShelfPrompt } from '../shared/skill-shelf'
+import { JOB_PC_STEP } from '../../shared/core/jobs'
 import { aiTurnStepAllowsRecordCall, aiTurnStepAllowsRecordTool, aiTurnStepCreateTypes, aiTurnStepDefinition, isAiTurnStep } from '../shared/ai-turn-steps/registry'
 import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
 import { narrowCreateTypes, type RecordTools } from './records/tools'
@@ -39,7 +40,7 @@ import { CHOICE_PART_TYPE, type ChoicePromptRecord, type ChoiceResult } from '..
 import { createAgentConnection, type AgentHost } from './agents/registry'
 import { AGENTS, isAgentId, modelHasLargeContext, type AgentId } from '../shared/agents/registry'
 import { createFileSystemTools, createSkillTools } from './chat-tools'
-import type { WriteGuard } from './write-guard'
+import type { WriteArea, WriteGuard } from './write-guard'
 import { forgetPrivateReads, noteCompanyFileResult, privateFolderOfPath, privateReadStateFor, createPrivateReadState, seedFromMessages, type PrivateReadContext } from './private-read-guard'
 import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../shared/rate-limits'
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
@@ -94,8 +95,8 @@ export interface ChatServerConfig extends AgentHost {
    * A business plugin step's run or consultation (plugin-steps.md "The deliverable folder"): the
    * folder under `<department>/.personal/` its writes are held to this turn; null = an ordinary one.
    */
-  stepWriteArea?: (companyId: string, conversationId: string) => Promise<string | null>
-  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; companyRoot?: string; department?: string | null; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
+  stepWriteArea?: (companyId: string, conversationId: string) => Promise<string | WriteArea | null>
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; requireRun?: boolean; companyRoot?: string; department?: string | null; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * The consultation's topic as stored (chat history): the task its new files are linked to
    * (consultation-task.ts). Read at each new file, so a task the AI made earlier in the turn counts.
@@ -476,7 +477,11 @@ export async function startChatServer(config: ChatServerConfig) {
     // A step's run or consultation writes only inside its deliverable folder (write-guard.ts `writeArea`).
     const stepArea = writeGuard && companyId && appSessionId && config.stepWriteArea
       ? await config.stepWriteArea(companyId, appSessionId).catch(() => null) : null
-    if (writeGuard && stepArea) writeGuard = { ...writeGuard, writeArea: { folder: stepArea } }
+    if (writeGuard && stepArea) {
+      writeGuard = typeof stepArea === 'string' ? { ...writeGuard, writeArea: { folder: stepArea } }
+        // A scheduled job's run: its grant's write area and, for its file reads, its read places (jobs.md).
+        : { ...writeGuard, writeArea: stepArea, ...('reads' in stepArea ? { readArea: stepArea.reads } : {}) }
+    }
     else if (aiTurnStep && requestedStep !== undefined && !isAiTurnStep(requestedStep)) {
       // A business plugin step's run without its deliverable folder would write unchecked: never.
       return c.json({ error: 'この AI では AI の番を自動で進められません。', code: 'AI_TURN_NOT_SUPPORTED' }, 400)
@@ -484,6 +489,8 @@ export async function startChatServer(config: ChatServerConfig) {
     const allRecords = connection.ownsConversation && can.recordsMcp && companyId
       ? await Promise.resolve(config.createRecordTools?.({
         companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions, companyRoot: companyRootPath || undefined,
+        // A scheduled job's run: its token only with the run main holds (never an ordinary one).
+        ...(requestedStep === JOB_PC_STEP ? { requireRun: true } : {}),
         // The department on screen: where a request for someone else goes (records.md "Where the AI puts a request").
         department: activeDepartment?.folder ?? null,
         // How much of long minutes this turn's model is handed (minutes.md "Long minutes").
@@ -497,6 +504,10 @@ export async function startChatServer(config: ChatServerConfig) {
         onMailDraft: card => injector.push({ type: MAIL_DRAFT_PART_TYPE, id: `mail-draft-${card.id}`, data: card }),
       }, c.req.raw.signal)).catch(() => null) ?? undefined
       : undefined
+    // A scheduled job's run whose run is gone (taken away just now): no turn at all.
+    if (requestedStep === JOB_PC_STEP && !allRecords) {
+      return c.json({ error: 'この AI では AI の番を自動で進められません。', code: 'AI_TURN_NOT_SUPPORTED' }, 400)
+    }
     // An unattended step sees only the record tools it declares, and cannot call any other.
     const records = allRecords && aiTurnStep ? {
       ...allRecords,

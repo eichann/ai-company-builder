@@ -1,4 +1,5 @@
 import type { PluginPersonStep, PluginRunStep } from '../../../../shared/ai-turn-steps/plugin'
+import type { JobRunStep } from '../../../../shared/ai-turn-steps/job'
 import type { AiTurnStep } from '../../../../shared/ai-turn-steps/registry'
 import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
@@ -100,7 +101,7 @@ export type ChatInputRequest =
    * 「AI の番」 run automatically (ai-turns.md), for a fresh tab behind the shown one: claim the
    * record with this tab's conversation id; only when that wins, send the first message.
    */
-  | { kind: 'aiTurn'; step: AiTurnStep | PluginRunStep; title: string; minutesId?: string; claim: (conversationId: string) => Promise<{ message: string } | null>; onSent?: (messageId: string) => void }
+  | { kind: 'aiTurn'; step: AiTurnStep | PluginRunStep | JobRunStep; title: string; minutesId?: string; claim: (conversationId: string) => Promise<{ message: string } | null>; onSent?: (messageId: string) => void }
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
@@ -135,7 +136,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const { pendingImagesRef, pendingFilePathsRef, messageImages, messageReferenceFiles, stageImages, stageFilePaths } = attachments
 
   // The automatic 「AI の番」 send (aiTurn request below): its one request runs only that step's tools.
-  const aiTurnStepRef = useRef<AiTurnStep | PluginRunStep | null>(null)
+  const aiTurnStepRef = useRef<AiTurnStep | PluginRunStep | JobRunStep | null>(null)
   // A business plugin's person step this consultation was started from: its first request binds it (plugin-steps.md).
   const pluginStepRef = useRef<PluginPersonStep | null>(null)
   // Records dropped on the input (recordDrop.ts): shown in the composer until sent; the request takes their ids once.

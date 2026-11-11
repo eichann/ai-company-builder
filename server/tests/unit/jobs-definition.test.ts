@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  JOB_GRANT_TOOLS, OCCURRENCE_ID_RE, isOccurrenceId, jobDefinitionPaths, jobConsentCanonical, jobDefinitionCanonical, newJobId, newOccurrenceId, parseJobDefinition,
+  JOB_GRANT_TOOLS, OCCURRENCE_ID_RE, isOccurrenceId, jobRunRouteAllowed, jobDefinitionPaths, jobConsentCanonical, jobDefinitionCanonical, newJobId, newOccurrenceId, parseJobDefinition,
   type JobDefinition,
 } from '../../shared/core/jobs'
 import { RECORD_ID_RE, newRecordId } from '../../shared/core/records'
@@ -182,5 +182,32 @@ describe('an occurrence id is never a record id', () => {
     }
     expect(() => newOccurrenceId('xyz')).toThrow()
     expect(() => newJobId('0'.repeat(31))).toThrow()
+  })
+})
+
+describe('the meeting check (B PR 5a-2)', () => {
+  const meetingJob = () => edit(edit(pcJob(), 'check', { kind: 'new_meetings', titleWords: ['面談'] }), 'grant.routes', ['GET /item/:recordId', 'GET /minutes/:recordId/text'])
+
+  it('reading the minutes is a power of the grant (accepted by the responsible person), never of the check alone', () => {
+    expect(parsed(meetingJob()).check).toEqual({ kind: 'new_meetings', titleWords: ['面談'] })
+    expect(problems(edit(meetingJob(), 'grant.routes', ['GET /item/:recordId']))).toContain('check.NEEDS_MINUTES_ROUTE')
+  })
+
+  it('title words: at most five, each one line of at most 40, no repeats', () => {
+    expect(parsed(edit(meetingJob(), 'check.titleWords', [])).check).toEqual({ kind: 'new_meetings', titleWords: [] })
+    for (const bad of [['a', 'b', 'c', 'd', 'e', 'f'], ['x'.repeat(41)], ['面談', '面談'], [' 面談'], ['改\n行'], [''], 'x', [1]]) {
+      expect(problems(edit(meetingJob(), 'check.titleWords', bad)), JSON.stringify(bad)).toContain('check.titleWords.BAD')
+    }
+    expect(problems(edit(meetingJob(), 'check', { kind: 'new_meetings' }))).toContain('check.titleWords.MISSING')
+  })
+
+  it('the minutes route at a call: only for a meeting the server says the check found, and only when the grant names it', () => {
+    const grant = parsed(meetingJob()).grant
+    expect(jobRunRouteAllowed(grant, 'GET /minutes/:recordId/text', () => true)).toBe(true)
+    expect(jobRunRouteAllowed(grant, 'GET /minutes/:recordId/text', () => false)).toBe(false)
+    expect(jobRunRouteAllowed(grant, 'GET /minutes/:recordId/text')).toBe(false)
+    expect(jobRunRouteAllowed({ ...grant, routes: ['GET /item/:recordId'] }, 'GET /minutes/:recordId/text', () => true)).toBe(false)
+    // Never the meeting's other routes.
+    expect(jobRunRouteAllowed({ ...grant, routes: [...grant.routes, 'POST /minutes/:recordId/bundle'] }, 'POST /minutes/:recordId/bundle', () => true)).toBe(false)
   })
 })

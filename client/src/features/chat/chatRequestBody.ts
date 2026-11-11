@@ -1,6 +1,7 @@
 import type { AgentSession, AuthMode } from '../../../shared/agent'
 import type { ChatRequestOptions } from '../../../shared/chat-server-api'
 import type { PluginPersonStep, PluginRunStep } from '../../../shared/ai-turn-steps/plugin'
+import type { JobRunStep } from '../../../shared/ai-turn-steps/job'
 import type { AiTurnStep } from '../../../shared/ai-turn-steps/registry'
 
 type Ref<T> = { current: T }
@@ -27,7 +28,7 @@ export interface ChatRequestSources {
   /** Records dropped on the input (record-drop.ts): main reads each once for this request's message. */
   pendingRecordIds?: Ref<string[]>
   /** An unattended 「AI の番」 step: consumed by the one automatic request (ai-turns.md). */
-  aiTurnStep?: Ref<AiTurnStep | PluginRunStep | null>
+  aiTurnStep?: Ref<AiTurnStep | PluginRunStep | JobRunStep | null>
   /** A business plugin's person step the consultation was started from: consumed by its first request (plugin-steps.md). */
   pluginStep?: Ref<PluginPersonStep | null>
   /** Which conversation the hand-off memo of this turn belongs to (read in onFinish). */

@@ -19,6 +19,11 @@ export interface AiTurnCandidate {
    * whatever its type (the server listed it at the step's state). Absent for the static kinds.
    */
   pluginStep?: `${string}__${string}`
+  /**
+   * A scheduled job's occurrence run on this PC (`job.ts`, jobs.md): `id` is the occurrence's id, the run's
+   * step `job-procedure`, its first message made by main's claim. Absent for records.
+   */
+  job?: true
   /** Its state when queued: picks the step when one kind of record has several (a meeting's reading, its まとまり's part). */
   state?: string | null
   /**

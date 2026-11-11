@@ -29,7 +29,7 @@ import type { AgentPolicyStore } from './agent-policy-store'
 
 /** The chat server's running turns (chat-turns.ts), once it started. */
 export interface StoppableTurns {
-  abort(filter: (info: { companyId?: string }) => boolean, reason?: TurnStopReason): number
+  abort(filter: (info: { companyId?: string; appSessionId?: string }) => boolean, reason?: TurnStopReason): number
 }
 
 /**

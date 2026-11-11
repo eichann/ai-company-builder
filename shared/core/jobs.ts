@@ -83,8 +83,20 @@ export type JobTrigger =
  * What is checked first, without the AI (owner decision D6: the clock alone never runs the AI).
  * `none`: nothing (only for a server operation). `new_files`: something new under `path` since the
  * job's previous occurrence (checked on the PC; `path` must be one of the grant's `reads.paths`).
+ * `new_meetings` (B PR 5a-2): a meeting the responsible person attended since the previous occurrence
+ * (the server finds them: `meeting` records whose people-only list names them), only those whose title
+ * holds one of `titleWords` when any are given; its run may read those meetings' minutes only, and only
+ * when the grant names `JOB_MINUTES_ROUTE` (part of what the responsible person accepts).
  */
-export type JobCheck = { kind: 'none' } | { kind: 'new_files'; path: string }
+export type JobCheck = { kind: 'none' } | { kind: 'new_files'; path: string } | { kind: 'new_meetings'; titleWords: string[] }
+
+/** The checks a PC can run (`none` is the server's operation only). The app says which it runs when it claims. */
+export const JOB_PC_CHECK_KINDS = ['new_files', 'new_meetings'] as const
+export type JobPcCheckKind = typeof JOB_PC_CHECK_KINDS[number]
+export const JOB_TITLE_WORDS_MAX = 5
+export const JOB_TITLE_WORD_MAX = 40
+/** The route that reads a meeting's minutes (`minutes_read`): a PC job's run reaches it only for the meetings its check found. */
+export const JOB_MINUTES_ROUTE = 'GET /minutes/:recordId/text'
 
 /**
  * A job's procedure, pinned when its version is made (the server reads the fingerprint, never the
@@ -236,6 +248,16 @@ function parseCheck(v: unknown, problems: string[]): JobCheck | null {
     if (jobPathProblem(v.path)) { problems.push('check.path.BAD'); return null }
     return { kind: 'new_files', path: v.path as string }
   }
+  if (v.kind === 'new_meetings') {
+    if (!keysExactly(v, ['kind', 'titleWords'], 'check', problems)) return null
+    const words = uniqueStrings(v.titleWords, w => {
+      const t = w.normalize('NFC').trim()
+      // eslint-disable-next-line no-control-regex
+      return t === w && t.length > 0 && t.length <= JOB_TITLE_WORD_MAX && !/[\u0000-\u001f\u007f]/.test(t)
+    }, JOB_TITLE_WORDS_MAX)
+    if (!words) { problems.push('check.titleWords.BAD'); return null }
+    return { kind: 'new_meetings', titleWords: words }
+  }
   problems.push('check.kind.BAD')
   return null
 }
@@ -368,6 +390,8 @@ export function parseJobDefinition(input: unknown): JobDefinitionResult {
   // The AI creates through its record tools.
   if (run.kind === 'procedure' && grant.creates.length > 0 && !grant.tools.includes('records')) problems.push('grant.creates.NEEDS_RECORDS')
   if (check.kind === 'new_files' && !grant.reads.paths.includes(check.path)) problems.push('check.path.NOT_IN_READS')
+  // Reading the meetings' minutes is a power the responsible person accepts (the grant), not the check alone.
+  if (check.kind === 'new_meetings' && !grant.routes.includes(JOB_MINUTES_ROUTE)) problems.push('check.NEEDS_MINUTES_ROUTE')
   if (problems.length > 0) return { ok: false, problems }
   return { ok: true, definition: { schema: input.schema as JobSchema, name, actingUser: input.actingUser as string, trigger, check, run, placement, missed, grant } }
 }
@@ -459,26 +483,30 @@ export const JOB_OUTBOUND_ROUTES: readonly string[] = ['POST /outbound-recipient
 
 /**
  * Every AI route a PC job's run may ever reach (B PR 5a, design memo §4-2), whatever its grant says: the
- * member's own record reads and mail drafts. Never a create (`POST /item`, `POST /decisions`: the one
+ * member's own record reads, mail drafts and (B PR 5a-2) the minutes of the meetings its `new_meetings` check
+ * found — the server asks that per call (`jobRunRouteAllowed`'s `meetingFound`). Never a create (`POST /item`, `POST /decisions`: the one
  * やること a grant's `creates: ['task']` allows is made by the server when the run finishes, `JobRunResult`,
  * so a grant naming `POST /item` keeps its schema-1 shape but the token never creates), an action, a
- * plugin's operation or call, a connector's read (minutes text, threads, Drive) or a file link. A grant may
+ * plugin's operation or call, another connector read (threads, Drive, any other meeting's minutes) or a file link. A grant may
  * still name such a route (the parser takes every `AI_ROUTES` name): it is refused at every call.
  */
 export const JOB_RUN_ROUTE_CEILING: readonly string[] = [
   'GET /types', 'GET /my-turn', 'POST /query', 'GET /item/:recordId', 'GET /item/:recordId/history',
   ...JOB_OUTBOUND_ROUTES,
+  JOB_MINUTES_ROUTE,
 ]
 
 /**
  * May a PC job's run use this AI route (`<METHOD> <path under /api/records-ai>`) under this grant? The
  * turn start's reads (`AI_TURN_BASE_ROUTES`) always; anything else only when the grant names it, it is
- * within `JOB_RUN_ROUTE_CEILING`, and an outbound route only with `draft_only`. The server checks it at
- * every call of the run's token.
+ * within `JOB_RUN_ROUTE_CEILING`, an outbound route only with `draft_only`, and the minutes route only for a
+ * meeting the occurrence's check found (`meetingFound`, asked by the server per call; absent → never). The
+ * server checks it at every call of the run's token.
  */
-export function jobRunRouteAllowed(grant: JobGrant, route: string): boolean {
+export function jobRunRouteAllowed(grant: JobGrant, route: string, meetingFound?: () => boolean): boolean {
   if ((AI_TURN_BASE_ROUTES as readonly string[]).includes(route)) return true
   if (!grant.routes.includes(route) || !JOB_RUN_ROUTE_CEILING.includes(route)) return false
+  if (route === JOB_MINUTES_ROUTE) return meetingFound?.() === true
   return !JOB_OUTBOUND_ROUTES.includes(route) || grant.outbound === 'draft_only'
 }
 

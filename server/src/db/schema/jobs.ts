@@ -5,6 +5,19 @@
  * never reads them, and `CREATE … IF NOT EXISTS` makes a second start change nothing.
  * Test: tests/unit/jobs-schema.test.ts (the frozen database before them, upgraded twice).
  */
+import type Database from 'better-sqlite3'
+
+/**
+ * B PR 5a-2: where an occurrence's check stopped looking (`checked_until`, UTC ISO): the next occurrence's check
+ * starts there, so nothing is looked at twice or never. Set once, at the first claim. Additive (an older build
+ * neither reads nor writes it); every startup, idempotent.
+ */
+export function migrateJobOccurrenceCheckedUntil(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(ai_job_occurrences)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('checked_until')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN checked_until TEXT')
+  // The commit a `new_files` check looked up to (the app's, sent with its first claim): the next one starts there.
+  if (!cols.has('checked_commit')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN checked_commit TEXT')
+}
 
 export const jobSchema = `
     -- A job (behind the company handle, ports/jobs.ts). acting_user_id: the responsible person of the

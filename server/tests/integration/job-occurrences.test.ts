@@ -273,7 +273,7 @@ describe('the clock makes occurrences', () => {
     expect(occurrencesOf(job).map(o => [o.due_slot, o.state, o.outcome_code])).toEqual([['2026-11-14T09:00', 'skipped', 'SUPERSEDED'], ['2026-11-15T09:00', 'due', null]])
   })
 
-  it('a PC job (placement a) gets no occurrence before PR 5', async () => {
+  it('a PC job (placement a) gets its occurrence too (PR 5a-2: its app claims it), never run by the server', async () => {
     db.prepare("INSERT OR IGNORE INTO scopes (id, company_id, path, kind, created_at) VALUES ('occ-doc', ?, '資料', 'folder', ?)").run(CO, TS)
     const made = await createJobService({
       companyData, memberships, transactions, clock, ids: randomIds, skillTree: async () => 'a'.repeat(40), hasCompanyFolder: () => true,
@@ -284,9 +284,13 @@ describe('the clock makes occurrences', () => {
     if (!made.ok) throw new Error(JSON.stringify(made.body))
     db.prepare("UPDATE ai_jobs SET state = 'active', approved_version = 1, approved_fingerprint = 'sha256:x' WHERE id = ?").run(made.value.id)
     db.prepare('UPDATE ai_job_versions SET approved_by = ?, approved_at = ? WHERE job_id = ?').run('u-owner', clock.now(), made.value.id)
+    db.prepare('UPDATE ai_jobs SET accepted_version = 1, accepted_consent = (SELECT consent_fingerprint FROM ai_job_versions WHERE job_id = ? AND version = 1) WHERE id = ?').run(made.value.id, made.value.id)
     nowMs = jst('2026-11-16T09:02')
     occ.makeOccurrences(CO)
-    expect(occurrencesOf(made.value.id)).toEqual([])
+    expect(occurrencesOf(made.value.id).map(o => [o.due_slot, o.state])).toEqual([['2026-11-16T09:00', 'due']])
+    // The server's runner leaves it for the PC.
+    expect(occ.runDue(CO)).toBe(0)
+    expect(occurrencesOf(made.value.id).map(o => o.state)).toEqual(['due'])
   })
 })
 
