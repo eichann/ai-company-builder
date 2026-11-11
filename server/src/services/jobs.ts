@@ -33,6 +33,8 @@ import { hasFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import { recordReader } from './record-access'
 import { resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
+import { nextJobSlot } from '../../shared/core/job-schedule'
+import { companyNow } from './notifications'
 
 export const JOBS_FORBIDDEN = 'Only owners and admins can manage scheduled jobs'
 /** A job's name for a responsible person who cannot read every place its newest version names. */
@@ -73,6 +75,9 @@ export interface JobServiceDeps {
     holdDue(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void
     holdPassedSlot(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void
   }
+  /** The company's zone and days off, for a view's `nextSlot` (the clock's own: job-occurrences.ts). Absent → no `nextSlot`. */
+  timeZoneOf?: (companyId: string) => string
+  holidaysOf?: (companyId: string) => string[]
 }
 
 const sha256 = hashCanonical
@@ -156,17 +161,73 @@ export function createJobService(deps: JobServiceDeps) {
     return null
   }
 
+  /**
+   * When it runs, for the screens (PR 4): the approved version's trigger (else the newest's) — a trigger
+   * names no place, so it is answered with the job —, the approved trigger's next slot, the newest occurrence.
+   */
+  function whenOf(handle: CompanyData, job: JobRow): Pick<JobView, 'trigger' | 'placement' | 'nextSlot' | 'lastOccurrence'> {
+    const approved = job.approvedVersion === null ? null : handle.jobs.version(job.id, job.approvedVersion)
+    const shown = approved ?? handle.jobs.version(job.id, job.latestVersion)
+    const definition = shown ? definitionOf(shown) : null
+    let nextSlot: string | null = null
+    if (approved && definition && job.state !== 'retired' && deps.timeZoneOf && deps.holidaysOf) {
+      nextSlot = nextJobSlot(definition.trigger, companyNow(clock.nowMs(), deps.timeZoneOf(handle.companyId)), deps.holidaysOf(handle.companyId))
+    }
+    const last = handle.jobs.occurrences(job.id, 1)[0] ?? null
+    return {
+      ...(definition ? { trigger: definition.trigger, placement: definition.placement } : {}),
+      nextSlot,
+      lastOccurrence: last ? { dueSlot: last.dueSlot, state: last.state, outcomeCode: last.outcomeCode } : null,
+    }
+  }
+
+  /**
+   * What the screens need to know without reading a definition (PR 4; ids, booleans and a name only — never a
+   * place): the approved version's responsible person and its name (`HIDDEN_JOB_NAME` over that version's own
+   * places), whether the newest version's consent is the accepted one (approving it would run without a new
+   * acceptance), and the caller's own relation by the API's own rules.
+   */
+  function forViewer(member: Member, handle: CompanyData, job: JobRow): Pick<JobView, 'approved' | 'latestConsentAccepted' | 'you'> {
+    const approved = job.approvedVersion === null ? null : handle.jobs.version(job.id, job.approvedVersion)
+    const latest = handle.jobs.version(job.id, job.latestVersion)
+    let approvedView: JobView['approved'] = null
+    if (approved) {
+      const definition = definitionOf(approved)
+      // Never more than the job's own name shows (the newest version's places, `nameFor`): the places of both versions.
+      const nameShown = hasFullAccess(member.role)
+        || (readsAll(handle, member.userId, member.role, definition) && latest !== null && readsAll(handle, member.userId, member.role, definitionOf(latest)))
+      approvedView = { responsibleUserId: approved.actingUserId, name: nameShown ? definition.name : HIDDEN_JOB_NAME }
+    }
+    const accepted = consentAccepted(handle, job)
+    return {
+      approved: approvedView,
+      latestConsentAccepted: latest !== null && job.acceptedConsent !== null && latest.consentFingerprint === job.acceptedConsent,
+      you: {
+        named: isResponsible(handle, job, member.userId),
+        controls: approved !== null && controls(handle, job, member.userId),
+        mustAccept: approved !== null && approved.actingUserId === member.userId && !accepted && job.state !== 'retired',
+      },
+    }
+  }
+
+  /** The job's name for the member: the newest version's, or 「定期の仕事」 for a non-admin who cannot read every place it names. */
+  function nameFor(member: Member, handle: CompanyData, job: JobRow): string {
+    if (hasFullAccess(member.role)) return job.name
+    const latest = handle.jobs.version(job.id, job.latestVersion)
+    return latest !== null && readsAll(handle, member.userId, member.role, definitionOf(latest)) ? job.name : HIDDEN_JOB_NAME
+  }
+
   function view(member: Member, handle: CompanyData, job: JobRow, withVersions: boolean): JobView {
     const full = hasFullAccess(member.role)
     // The name shown is the newest version's (`ai_jobs.name`). A responsible person who is not owner/admin
     // gets it only while they read every place that version names — an admin may have named the job after
     // a place (「経理部の月次報告」) they cannot read; otherwise the neutral 「定期の仕事」.
-    const latest = handle.jobs.version(job.id, job.latestVersion)
-    const nameShown = full || (latest !== null && readsAll(handle, member.userId, member.role, definitionOf(latest)))
     const out: JobView = {
-      id: job.id, name: nameShown ? job.name : HIDDEN_JOB_NAME, state: job.state, actingUserId: job.actingUserId, latestVersion: job.latestVersion,
+      id: job.id, name: nameFor(member, handle, job), state: job.state, actingUserId: job.actingUserId, latestVersion: job.latestVersion,
       approvedVersion: job.approvedVersion, accepted: consentAccepted(handle, job), pausedReason: job.pausedReason,
       waiting: waitingOf(handle, job, handle.jobs.stopped()), createdBy: job.createdBy, createdAt: job.createdAt, updatedAt: job.updatedAt,
+      ...whenOf(handle, job),
+      ...forViewer(member, handle, job),
     }
     if (withVersions) {
       out.versions = handle.jobs.versions(job.id).map((v): JobVersionView => {
@@ -315,16 +376,28 @@ export function createJobService(deps: JobServiceDeps) {
       const definition = definitionOf(v)
       const skill = await skillPinned(member.companyId, definition)
       if (!skill.ok) return skill
+      let told = false
       const result = transactions.run((): Outcome<void> => {
         // Checked again inside the write: the membership or the rules may have changed meanwhile.
         const rights = withinRights(handle, definition)
         if (!rights.ok) return rights
         const job = handle.jobs.find(jobId) as JobRow
         const state: JobState = job.state === 'draft' ? 'active' : job.state
-        handle.jobs.approve(jobId, v.version, v.fingerprint, member.userId, clock.now(), state)
+        const at = clock.now()
+        handle.jobs.approve(jobId, v.version, v.fingerprint, member.userId, at, state)
+        // 「受け取りが要ります」 (jobs.md "The acceptance notice"): the responsible person, when this version's
+        // consent is not the one they accepted — never the approver themself (they see it on the screen).
+        if (v.consentFingerprint !== job.acceptedConsent && v.actingUserId !== member.userId) {
+          told = handle.notifications.insert([{
+            id: ids.newId(), userId: v.actingUserId, kind: 'job_accept_needed', recordId: '', recordVersion: 0, action: '', actorId: member.userId, actorKind: 'human',
+            dedupeKey: `job_accept_needed:${jobId}:${v.version}`, createdAt: at, readAt: null,
+          }]).length > 0
+        }
         return ok(undefined)
       })
       if (!result.ok) return result
+      // The app re-reads at once (a bare signal; never fails the approval).
+      if (told) { try { deps.noticesChanged?.(member.companyId, [v.actingUserId]) } catch { /* their own check catches up */ } }
       return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true))
     },
 
@@ -492,9 +565,22 @@ export function createJobService(deps: JobServiceDeps) {
       if (!found) return null
       const occ = found.handle.jobs.occurrence(occurrenceId)
       if (!occ || occ.jobId !== jobId) return null
-      const latest = found.handle.jobs.version(jobId, found.job.latestVersion)
-      const nameShown = hasFullAccess(member.role) || (latest !== null && readsAll(found.handle, member.userId, member.role, definitionOf(latest)))
-      return { name: nameShown ? found.job.name : HIDDEN_JOB_NAME, dueSlot: occ.dueSlot, outcomeCode: occ.outcomeCode }
+      return { name: nameFor(member, found.handle, found.job), dueSlot: occ.dueSlot, outcomeCode: occ.outcomeCode }
+    },
+
+    /**
+     * 「受け取りが要ります」's words for the member now (jobs.md "The acceptance notice"), or null: shown only
+     * while that version is still the approved one, the member is its responsible person, and they have not
+     * accepted its consent yet — a notice that no longer asks anything is not shown.
+     */
+    acceptNotice(member: Member, jobId: string, version: number): { name: string; contentChanged: boolean } | null {
+      const found = visibleJob(member, jobId)
+      if (!found || found.job.approvedVersion !== version || found.job.state === 'retired') return null
+      const v = found.handle.jobs.version(jobId, version)
+      if (!v || v.actingUserId !== member.userId || consentAccepted(found.handle, found.job)) return null
+      // They had accepted an earlier version as its responsible person: what changed is the content, not who.
+      const before = found.job.acceptedVersion === null ? null : found.handle.jobs.version(jobId, found.job.acceptedVersion)
+      return { name: nameFor(member, found.handle, found.job), contentChanged: before !== null && before.actingUserId === member.userId }
     },
 
     /** The job's name for a notice the member may read now (owner/admin only), or null. */

@@ -316,8 +316,8 @@ describe('the runner does the server operation exactly once', () => {
     expect(history.value.entries[0]).toMatchObject({ actorId: JOB_ACTOR.id, actorKind: 'external', cause: 'system', runId: o.run_id })
     // Nobody else reads it (an owner-only やること): not even the owner.
     expect((await services.records.get(owner(), tasks[0].id)).ok).toBe(false)
-    // D9: no notice of success.
-    expect(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ?").get(CO)).toEqual({ n: 0 })
+    // D9: no notice of success (approval's 「受け取りが要ります」 is the only one, written before the run).
+    expect(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND kind != 'job_accept_needed'").get(CO)).toEqual({ n: 0 })
   })
 
   it('a crash mid-way leaves nothing made and the occurrence due; the next run makes exactly one', async () => {

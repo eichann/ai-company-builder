@@ -43,7 +43,7 @@ interface Props {
   onOpenConsultation: (sessionId: string) => void
   showSettings: boolean
   /** Open settings on 「自分の鍵」 for this service (a new request remounts the panel). */
-  settingsFocus: { service?: string; at: number } | null
+  settingsFocus: { service?: string; tab?: 'ownkeys' | 'jobs'; at: number } | null
   onCloseSettings: () => void
   /** 自分の設定's 「今日のフォルダ」 row. */
   todayFolderSetting?: ReactNode
@@ -110,7 +110,7 @@ export function AppDialogs(props: Props) {
           <SettingsPanel
             key={settingsFocus?.at ?? 'settings'}
             onClose={onCloseSettings}
-            {...(settingsFocus ? { initialTab: 'ownkeys' as const, focusService: settingsFocus.service } : {})}
+            {...(settingsFocus ? { initialTab: settingsFocus.tab ?? 'ownkeys', focusService: settingsFocus.service } : {})}
             mineRows={<>{props.todayFolderSetting}<TidyTabsSetting on={props.tidying.dailyOn} onChange={props.tidying.setDailyTidy} /></>}
           />
         )}

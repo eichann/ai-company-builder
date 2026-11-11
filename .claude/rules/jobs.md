@@ -8,6 +8,14 @@ paths:
   - "server/src/services/job-occurrences.ts"
   - "shared/core/job-schedule.ts"
   - "server/tests/**/job-*.test.ts"
+  - "shared/core/job-words.ts"
+  - "admin/src/components/jobs/**"
+  - "admin/src/lib/jobs.ts"
+  - "admin/tests/jobs.test.tsx"
+  - "client/electron/features/jobs/**"
+  - "client/src/features/jobs/**"
+  - "client/shared/jobs.ts"
+  - "client/tests/jobs-ipc.test.ts"
 ---
 
 # Scheduled jobs (定期の仕事, B 「実行を記録から分ける」)
@@ -17,8 +25,8 @@ A job is work that is not a record's turn: 「毎週火曜の1営業日前の 09
 → run (`ai_runs`, `subject_kind: 'occurrence'`, `ai-turns.md`).
 
 **PR 3a: definitions and approval. PR 3b: the clock makes occurrences and the server does a job's (e)
-operation (a やること) — no AI, no claim, no app or admin screen.** Next: 4 (admin screen 「定期の仕事」,
-the app's accept button), 5 (the PC's (a) claim and the grant at every call, design memo §4-2).
+operation (a やること) — no AI, no claim. PR 4: the screens (admin 「定期の仕事」, the app's 「受け取る」) and
+the notice 「受け取りが要ります」.** Next: 5 (the PC's (a) claim and the grant at every call, design memo §4-2).
 
 ## Tables (`server/src/db/schema/jobs.ts`, handle `jobs`, `ports/jobs.ts`, `adapters/sqlite/jobs.ts`)
 
@@ -236,6 +244,80 @@ id: the same 404 `JOB_NOT_FOUND`; permission matrix row + `CROSS`): ≤ 100, new
 `JobOccurrenceView` (id, `jobVersion`, `dueSlot`, `timeZone`, `dueAt`, `expiresAt`, `state`,
 `outcomeCode`, `ran`, `updatedAt`): slots, states and codes only, never a name, a place or the task.
 
+## The screens (PR 4)
+
+Everything below only shows and asks; the API above decides. The words are one copy,
+`shared/core/job-words.ts` (trigger, what runs, the grant line by line, the missed policy, where it runs,
+pause reasons, `waiting`, each occurrence state and outcome code, a slot) — the person accepting reads the
+sentences the admin approved.
+
+- **What a view adds** (additive, absent from an older server): `trigger` + `placement` (the approved
+  version's, else the newest's — a trigger names no place, so it is answered whenever the job is, also
+  with `definition` hidden), `nextSlot` (`nextJobSlot` of the approved trigger in company time with the
+  clock's zone and days off, `JobServiceDeps.timeZoneOf` / `holidaysOf`; null when nothing is approved or
+  it is retired; a paused or stopped job still answers it — the screen says it would not run),
+  `lastOccurrence` (slot, state, code); `approved` (`responsibleUserId`, and `name` — 「定期の仕事」 for a
+  non-admin who cannot read every place that version **or the newest** names: never more than the job's
+  own `name` and the bell show), `latestConsentAccepted` (the newest
+  version's consent is the accepted one: approving it runs without a new 受け取る — the screens never
+  re-derive this), `you` (`named` / `controls` / `mustAccept`: the caller by the API's own rules, answered
+  also while a version's `definition` is hidden). Ids, booleans and names only, never a place. No new endpoint.
+- **Admin console 「定期の仕事」** (`/companies/:id/jobs`, menu item for owners / admins after つなぎ先;
+  `admin/src/components/jobs/`): the list (name, 責任者, いつ, a badge and `jobWaitingText` — paused with
+  its reason, 承認待ち, 受け取り待ち, すべて止めています —, a newer version waiting for approval, 「PC で動く仕事は
+  まだ動きません」 for placement `a`, 次の回, 前の回), 作る / 直す, 承認する, 止める / 再開する, 回の記録 (≤ 100,
+  `jobOccurrenceText`), and 「すべて止める」 (asks first) / 「動かせるようにする」. Anyone else: the page says it
+  is for owners and admins and reads nothing.
+  - **The form** (`admin/src/lib/jobs.ts`) makes the server's operation only — placement `e`, check
+    `none`, `create_task`, a grant with no tools, routes, reads, writes or outbound — and runs the shared
+    parser before sending (`definitionFromForm`; problems as plain sentences, never values). Editing keeps
+    the version's `limits` (the form does not offer them), so a name / time / due / missed change keeps
+    the consent and needs no new acceptance. A PC job (procedure) is shown, not edited here (PR 5).
+  - **The list's 責任者** is who it runs as now (`approved.responsibleUserId`); a newer draft naming someone
+    else says 「次の版では責任者が…さんになります（未承認）」. Whether it runs is `jobRunsText` (a PC job:
+    「まだ動きません」, badge 準備中 — never 「動いています」).
+  - **Approval** shows the newest version's words and sends its `fingerprint` (the server refuses another).
+    It says whether the responsible person must accept again from `latestConsentAccepted`, and its message
+    afterwards comes from the answer (`approvedText`: 受け取り待ち, or what `jobRunsText` says now). **Approving one's own job also accepts it** in the approver's own
+    name (`POST /me/jobs/:jobId/accept` with the same version and fingerprint; the dialog says so before
+    the press) — the server would not tell them (below).
+- **The app** — Settings → 仕事 → 「定期の仕事」 (`client/src/features/jobs/`, IPC `jobs:mine` / `accept` /
+  `pause` / `resume`, `client/electron/features/jobs/ipc.ts`, with the member's session): `jobs:mine` reads
+  `GET /jobs` and keeps, **first**, the jobs the server says are the member's (`you`: named, controls or
+  must accept — never re-derived from a definition, which may be hidden; an owner / admin's list holds every
+  job, so filtering comes before any cap), then reads the detail only of those waiting for their
+  「受け取る」 (≤ 50). The heading is the approved version's name (`approved.name`, the server's hiding rule).
+  It shows what it will do, on whose rights (theirs), where, the grant's lines and the missed policy; a
+  version whose definition is hidden says it cannot be shown (the server would refuse the acceptance too).
+  受け取る sends the version and fingerprint shown; its message is chosen from the job as re-read
+  (`client/src/features/jobs/model.ts` `acceptedText`: 「次の回から動きます」 only when it now runs — not paused,
+  stopped or a PC job). 止める for a job they run, 再開する for their own pause (`BY_RESPONSIBLE`; the server
+  checks it was theirs). Renderer values never change the server path (`isJobId`, `sha256:<hex>`). A server
+  that answers jobs without `you` (before PR 4) is said as such (`SERVER_TOO_OLD`, 「サーバーの更新が必要です」),
+  never as 「ありません」. In the
+  bell (`jobNoticeTarget`, `client/shared/jobs.ts`): `job_accept_needed` opens this section; an occurrence's
+  notice and `job_paused` open nothing (they also reach the creator / admins, who have nothing here).
+
+## The acceptance notice (PR 4)
+
+`job_accept_needed` (「定期の仕事「…」の責任者になりました。内容を確かめて「受け取る」を押してください（受け取るまで動きません）」,
+or, when they had accepted an earlier version as its responsible person, 「あなたが責任者の定期の仕事「…」の内容が
+変わりました。確かめて「受け取る」を押してください…」; recordless, on by default): written in the approval's transaction to the approved version's responsible
+person when its consent is not the one accepted — **never the approver themself** — key
+`job_accept_needed:<job>:<version>` (once per version), then the bare `notifications` push to them. Built
+when read (`jobs.acceptNotice`): shown only while that version is still the approved one, the reader is
+its responsible person and has not accepted it, the job not retired — so an old ask (accepted, handed to
+someone else, a newer version approved) is not shown. Its name follows `HIDDEN_JOB_NAME` (the newest
+version names a place they cannot read → 「定期の仕事」).
+
+## 「もう一度」 (not built)
+
+Re-running an occurrence that ended `needs_person` / `expired` / `skipped` needs owner decisions (a new
+`expires_at`, whether an absence skip may run, who is told on a second failure — the notice key is once
+per occurrence). Recommended: owner/admin only, `needs_person` and `expired` only, the same occurrence
+back to `due` with a fresh window while the job is active, accepted, not stopped and still on the same
+approved version; the task id stays `occurrenceTaskId` (still at most one やること).
+
 ## Tests (each guard mutation-checked, with the exceptions named)
 
 3b's guards were each removed or inverted alone and the test file failed — except: the runner's early
@@ -275,4 +357,27 @@ membership can fail).
   year end, `last` (February, a leap year), `ifHoliday` before / after across a month and a year —
   1 January moved back to 31 December found on that day (`latestJobSlot` at 12-31 09:05, `nextJobSlot`
   from 12-20).
+- `server/tests/integration/jobs.test.ts` "PR 4" — the acceptance notice to the responsible person only,
+  once per version, not for a consent already accepted, never the self-approver, gone once accepted /
+  handed over / superseded by a newer approved version, the neutral name; a view's trigger, next slot and
+  last occurrence (the approved trigger, not a newer draft's). `acceptNotice`'s responsible-person check
+  survives its mutation: a notice row is only ever written to that person, and someone no longer
+  responsible no longer sees the job at all (by construction).
+- `server/tests/integration/jobs.test.ts` "PR 4" (review fixes) — back to an accepted consent (v1 A
+  accepted, v2 B approved, v3 A) runs without a new ask; the content-changed wording, and 「責任者になりました」
+  for someone a hand-over names; `you` and `approved` answered while the approved definition is hidden,
+  without the place; `approved.name` hidden when a newer draft names an unreadable place.
+- `server/tests/unit/job-words.test.ts` — every state, code and pause reason has words; a held occurrence's
+  heading claims no cause.
+- `client/src/features/jobs/model.test.ts` — 「次の回から動きます」 only for a job that now runs.
+- `admin/tests/jobs.test.tsx` — the form makes the operation only and the parser accepts it; editing a name
+  or time keeps the consent; a PC job is not editable; approval sends the version shown and its fingerprint,
+  says whether acceptance is needed from the server's answer (also back to an accepted consent), does not
+  accept for someone else, accepts one's own, and says what will happen; the list's 責任者 is the approved
+  version's and a PC job is not 「動いています」; the stop asks first; a pause reason and occurrences in words;
+  nobody else reads the page.
+- `client/tests/jobs-ipc.test.ts` — an older server without `you` reported as such; only the member's jobs (by the server's `you`), never dropped behind 80
+  other jobs, a hidden approved definition still waiting for them, the approved version's name, the version
+  and fingerprint sent, renderer values never change the path, which notices open the section.
+- `server/tests/integration/admin-contract.test.ts` — the admin's calls and requests.
 - `permission-matrix.test.ts` rows + `CROSS`; `company-scoped-sql.test.ts` (`HANDLE_TABLES`).

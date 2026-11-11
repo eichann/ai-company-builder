@@ -84,6 +84,11 @@ import {
   shelfRequestsSchema,
   shelfVersionsSchema,
   groupDeletedSchema,
+  jobListSchema,
+  jobOccurrencesSchema,
+  jobSchema,
+  jobsStopSchema,
+  jobUpdatedSchema,
 } from './api-schemas'
 import type {
   AgentEventQuery,
@@ -1464,4 +1469,36 @@ export const minutesApi = {
   /** Days 「どのまとまりの会議ですか？」 stays in a member's あなたの番 after a meeting is read (1–30). */
   setBundleQuestionDays: (companyId: string, bundleQuestionDays: number) =>
     getData(`/api/companies/${enc(companyId)}/google/minutes-folder`, minutesFolderSchema, { method: 'PUT', body: { bundleQuestionDays } }),
+}
+
+// ---------------------------------------------------------------------------
+// 「定期の仕事」 (jobs.md "The screens", PR 4): owners/admins create, edit, approve, pause and stop the
+// company's scheduled jobs; each job's occurrences. Shapes from shared/types/jobs.ts; the definition
+// is shared/core/jobs.ts's (the server parses it again, strictly).
+// ---------------------------------------------------------------------------
+
+export type { JobList, JobOccurrenceView, JobVersionView, JobView, JobWaiting } from '../../../shared/types/jobs'
+export type { JobDefinition } from '../../../shared/core/jobs'
+
+import type { JobDefinition } from '../../../shared/core/jobs'
+
+export const jobsApi = {
+  list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/jobs`, jobListSchema),
+  get: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}`, jobSchema),
+  occurrences: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/occurrences`, jobOccurrencesSchema),
+  create: (companyId: string, definition: JobDefinition) =>
+    getData(`/api/companies/${enc(companyId)}/jobs`, jobSchema, { method: 'POST', body: { definition } }),
+  /** A new version (the approved one keeps running until this one is approved). */
+  update: (companyId: string, jobId: string, definition: JobDefinition) =>
+    getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}`, jobUpdatedSchema, { method: 'PUT', body: { definition } }),
+  /** `fingerprint`: the version as shown — the server refuses when it is not that version any more. */
+  approve: (companyId: string, jobId: string, version: number, fingerprint: string) =>
+    getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/approve`, jobSchema, { method: 'POST', body: { version, fingerprint } }),
+  /** The caller's own acceptance (they are the version's responsible person): an owner/admin approving their own job. */
+  accept: (companyId: string, jobId: string, version: number, fingerprint: string) =>
+    getData(`/api/companies/${enc(companyId)}/me/jobs/${enc(jobId)}/accept`, jobSchema, { method: 'POST', body: { version, fingerprint } }),
+  pause: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/pause`, jobSchema, { method: 'POST' }),
+  resume: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/resume`, jobSchema, { method: 'POST' }),
+  setStopped: (companyId: string, stopped: boolean) =>
+    getData(`/api/companies/${enc(companyId)}/jobs-stop`, jobsStopSchema, { method: 'PUT', body: { stopped } }),
 }

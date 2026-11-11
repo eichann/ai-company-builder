@@ -182,7 +182,7 @@ export function AppShell() {
   const [showFileSearch, setShowFileSearch] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   // Settings opened on 「自分の鍵」 for one service (the chat's "no key" card); null = the usual first page.
-  const [settingsFocus, setSettingsFocus] = useState<{ service?: string; at: number } | null>(null)
+  const [settingsFocus, setSettingsFocus] = useState<{ service?: string; tab?: 'ownkeys' | 'jobs'; at: number } | null>(null)
   const [showBackupHistory, setShowBackupHistory] = useState(false)
 
   // ← → over the files and records the middle showed (design §7-4): both are tabs.
@@ -603,6 +603,7 @@ export function AppShell() {
             meetings={meetings.titleBarMeetings}
             onOpen={target => { void runCommand('record.open', { recordId: target.recordId }).catch(() => {}) }}
             onOpenTasks={openTasks}
+            onOpenJobs={() => { setSettingsFocus({ tab: 'jobs', at: Date.now() }); setShowSettings(true) }}
             features={features}
           />
         ) : undefined}

@@ -37,6 +37,7 @@ import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './g
 import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
+import type { JobActionResult, MyJobsResult } from './jobs'
 import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
 import type { ViewersQuery, ViewersResult } from './viewers'
 import type { InviteSet, MeetingArrivalsResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteChoicesResult, MeetingInviteResult, MeetingPressResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
@@ -543,6 +544,13 @@ export interface IpcInvokeChannels {
   'absences:get': { args: [companyId: string]; result: AbsencesResult }
   'absences:add': { args: [companyId: string, input: AbsenceAddInput]; result: AbsenceAddResult }
   'absences:remove': { args: [companyId: string, absenceId: string]; result: AbsenceRemoveResult }
+  // Settings → 「定期の仕事」: the scheduled jobs the member is responsible for, with their session (jobs.md).
+  /** The member's jobs: what waits for their 「受け取る」 and whether they run it. */
+  'jobs:mine': { args: [companyId: string]; result: MyJobsResult }
+  /** Accept the version shown (its fingerprint: the server refuses another). */
+  'jobs:accept': { args: [companyId: string, jobId: string, version: number, fingerprint: string]; result: JobActionResult }
+  'jobs:pause': { args: [companyId: string, jobId: string]; result: JobActionResult }
+  'jobs:resume': { args: [companyId: string, jobId: string]; result: JobActionResult }
   // 自分の設定 → 「受信を読む」「AI が自動で進める」: the member's own switches, with their session.
   /** The member's switches (+ the company's 使ってよいか / 初めの値). */
   'workSwitches:get': { args: [companyId: string]; result: WorkSwitchesResult }
@@ -1042,6 +1050,10 @@ export interface ElectronAPI {
   getAbsences: Invoke<'absences:get'>
   addAbsence: Invoke<'absences:add'>
   removeAbsence: Invoke<'absences:remove'>
+  getMyJobs: Invoke<'jobs:mine'>
+  acceptJob: Invoke<'jobs:accept'>
+  pauseJob: Invoke<'jobs:pause'>
+  resumeJob: Invoke<'jobs:resume'>
   // 自分の設定 → 「受信を読む」「AI が自動で進める」.
   getWorkSwitches: Invoke<'workSwitches:get'>
   setWorkSwitch: Invoke<'workSwitches:set'>

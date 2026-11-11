@@ -72,6 +72,9 @@ export const NOTIFICATION_KINDS = [
   'job_expired',
   'job_skipped',
   'job_failed',
+  // A version of a scheduled job was approved that its responsible person must accept (jobs.md "The
+  // acceptance notice", PR 4): to them only, about no record, shown while it still waits for them.
+  'job_accept_needed',
   'others',
 ] as const
 export type NotificationKind = typeof NOTIFICATION_KINDS[number]
@@ -113,6 +116,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   job_expired: '定期の仕事の回が、期限までに動かなかった',
   job_skipped: '定期の仕事の回を、責任者の不在で見送った',
   job_failed: '定期の仕事の回が、うまくできなかった',
+  job_accept_needed: 'あなたが責任者の定期の仕事が承認され、受け取りが要る',
   others: 'そのほかの動き（担当になった・差し戻された・中止されたなど）',
 }
 
@@ -150,6 +154,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   job_expired: true,
   job_skipped: true,
   job_failed: true,
+  job_accept_needed: true,
   others: false,
 }
 
@@ -165,7 +170,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
  */
 export const UNDOABLE_NOTIFICATION_KINDS: readonly NotificationKind[] = ['replied_done', 'mail_left_inbox', 'mail_archived']
 
-export const RECORDLESS_NOTIFICATION_KINDS: readonly NotificationKind[] = ['morning_summary', 'job_paused', 'job_expired', 'job_skipped', 'job_failed']
+export const RECORDLESS_NOTIFICATION_KINDS: readonly NotificationKind[] = ['morning_summary', 'job_paused', 'job_expired', 'job_skipped', 'job_failed', 'job_accept_needed']
 
 /** A scheduled job's occurrence notices (jobs.md "Notices"): key `<kind>:<job id>:<occurrence id>`. */
 export const JOB_OCCURRENCE_NOTIFICATION_KINDS: readonly NotificationKind[] = ['job_expired', 'job_skipped', 'job_failed']

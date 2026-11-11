@@ -55,6 +55,7 @@ import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import { registerRecordViewsIpc } from './features/record-views/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
 import { registerAbsencesIpc } from './features/absences/ipc'
+import { registerJobsIpc } from './features/jobs/ipc'
 import { registerWorkSwitchesIpc } from './features/work-switches/ipc'
 import { registerViewersIpc } from './features/viewers/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
@@ -341,6 +342,8 @@ registerRecordViewsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies
 registerApprovalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // Settings → 「不在と代わりの人」 (features/absences): the member's own absences, with the session.
 registerAbsencesIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// Settings → 「定期の仕事」 (features/jobs): the jobs the member is responsible for, with the session.
+registerJobsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // 自分の設定 → 「受信を読む」「AI が自動で進める」 (features/work-switches): the member's own, with the session.
 registerWorkSwitchesIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // 見られる人 for the lists (features/viewers): with the session.

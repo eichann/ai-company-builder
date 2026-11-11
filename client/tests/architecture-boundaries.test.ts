@@ -264,6 +264,7 @@ const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
   'tasks -> records/components/RecordRows.tsx': 'the task card\'s 「つながっているもの」 follows records and files with the record card\'s own rows (one look, record.open / file.open)',
   'tasks -> records/components/linkRows.tsx': 'the task card\'s 「つながっているもの」 rows are the record card\'s own (a record opens with record.open, a file with file.open; one look)',
   'settings -> absences/components/AbsenceSection.tsx': 'the settings panel shows 「不在と代わりの人」, owned by the absences feature (like the voice settings)',
+  'settings -> jobs/components/JobsSection.tsx': 'the settings panel shows 「定期の仕事」, owned by the jobs feature (like 「不在と代わりの人」)',
   'chat -> voice/components/VoiceShortcutSettings.tsx': 'the chat\'s agent settings show the voice key with the other input settings',
   'chat -> voice/api.ts': 'the composer\'s microphone button (VoiceInputControl) records and transcribes through the voice ports',
   'chat -> voice/microphoneSelection.ts': 'the composer\'s microphone button lists and picks the microphone',

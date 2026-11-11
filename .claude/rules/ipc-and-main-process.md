@@ -55,7 +55,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `notifications` (notifications:watch / state / markRead / settings / setSetting and the event
   `notifications:changed`: the title bar's 「あなたの番」 and bell, `notifications.md`), `absences`
   (absences:get / add / remove: the member's own absences and delegate, with the session;
-  `records.md` "Absence and the delegate"), `ai-turns`
+  `records.md` "Absence and the delegate"), `jobs` (jobs:mine / accept / pause / resume: the
+  scheduled jobs the member is responsible for, with the session; `jobs.md` "The screens"), `ai-turns`
   (aiTurns:settings / claim / settle: the automatic 「AI の番」's claim by version and settle, main
   window only; the run itself is a hidden consultation in the renderer, `ai-turns.md`). `tasks`
   (tasks:list / create / act / card / linkFile / unlinkFile / retryRun / reconcile: the task list and card, read and

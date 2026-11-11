@@ -39,7 +39,8 @@ file's 「つながっているもの」), `settings`, `auth` (server address, s
 `company` (choosing a company and setting its folder up: the company selector), `tasks` (やること:
 the task list tab, `tasks-ui.md`),
 `notifications` (the title bar's 「あなたの番」 and bell, `notifications.md`), `absences` (the settings'
-「不在と代わりの人」, shown by `settings`; `records.md` "Absence and the delegate"). Only create what you need; add a feature
+「不在と代わりの人」, shown by `settings`; `records.md` "Absence and the delegate"), `jobs` (the settings'
+「定期の仕事」: the member's scheduled jobs and 「受け取る」, `jobs.md` "The screens"). Only create what you need; add a feature
 folder when the code has no home among these.
 
 Naming: `doc-review` is the review of a Markdown document (sidecar `*.review.*.json` files). Do
