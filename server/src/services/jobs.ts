@@ -19,8 +19,8 @@
  *   (notice `job_paused`), in the same transaction as the change.
  */
 import {
-  JOB_ACTOR, JOB_SYSTEM_PAUSE_REASONS, isJobId, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, newJobId, parseJobDefinition,
-  type JobDefinition, type JobPauseReason,
+  JOB_ACTOR, JOB_SYSTEM_PAUSE_REASONS, isJobId, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, newJobId, parseJobAcceptedPlace,
+  parseJobDefinition, type JobDefinition, type JobDeliveryPlace, type JobPauseReason,
 } from '../../shared/core/jobs'
 import type { JobList, JobOccurrenceView, JobState, JobVersionView, JobView, JobWaiting } from '../../shared/types/jobs'
 import type { Clock, IdGenerator } from '../ports/clock'
@@ -55,6 +55,8 @@ const SHELF_SKILL_MISSING = () => refuse('conflict', '手順の Skill が「会�
 const SKILL_CHANGED = () => refuse('conflict', '手順のスキルが、この版を作ったあとに変わりました。新しい版を作ってから承認してください。', { code: 'JOB_SKILL_CHANGED' })
 const NOT_RESPONSIBLE = () => refuse('forbidden', 'この定期の仕事を止められるのは、承認された版の責任者か管理者だけです。', { code: 'JOB_NOT_RESPONSIBLE' })
 const RETIRED = () => refuse('conflict', 'この定期の仕事はもう使われていません。', { code: 'JOB_RETIRED' })
+const PLACE_NEEDED = () => refuse('conflict', 'この定期の仕事は、できたものを置く先を責任者が受け取るときに選びます。アプリを新しくしてから、「設定」→「仕事」→「定期の仕事」の「置き先を選んで受け取る」で選んでください。', { code: 'JOB_PLACE_NEEDED' })
+const PLACE_NOT_USABLE = () => refuse('conflict', '選んだ置き先を使えません（選んでから時間がたったか、消されました）。もう一度選んでください。', { code: 'JOB_PLACE_NOT_USABLE' })
 
 export interface JobServiceDeps {
   companyData: CompanyDataSource
@@ -86,6 +88,13 @@ export interface JobServiceDeps {
   /** The company's zone and days off, for a view's `nextSlot` (the clock's own: job-occurrences.ts). Absent → no `nextSlot`. */
   timeZoneOf?: (companyId: string) => string
   holidaysOf?: (companyId: string) => string[]
+  /**
+   * A deliverable place outside (jobs.md "A deliverable place outside"): the member's own live place of that
+   * connector and kind with this `ref` — a Drive folder they picked, while the pick lasts — with its name and
+   * when the pick ends; null when it is not one (never picked by them, expired, another member's). The
+   * connector answers (composition): the core never names one. Absent → no place is ever usable.
+   */
+  places?: { live(companyId: string, userId: string, place: JobDeliveryPlace): { name: string; expiresAt: string } | null }
 }
 
 const sha256 = hashCanonical
@@ -252,6 +261,7 @@ export function createJobService(deps: JobServiceDeps) {
       waiting: waitingOf(handle, job, handle.jobs.stopped()), createdBy: job.createdBy, createdAt: job.createdAt, updatedAt: job.updatedAt,
       ...whenOf(handle, job),
       ...forViewer(member, handle, job),
+      deliverTo: placeView(member, handle, job),
     }
     if (withVersions) {
       out.versions = handle.jobs.versions(job.id).map((v): JobVersionView => {
@@ -315,14 +325,33 @@ export function createJobService(deps: JobServiceDeps) {
     }
   }
 
-  /** `{ version, fingerprint? }` */
-  function versionBody(body: unknown): { version: number; fingerprint: string | null } | null {
+  /** `{ version, fingerprint? }` (and, for an acceptance, `place?`: the deliverable place chosen, checked by `accept`). */
+  function versionBody(body: unknown, withPlace = false): { version: number; fingerprint: string | null; place: unknown } | null {
     if (!isObject(body)) return null
     const keys = Object.keys(body)
-    if (!keys.every(k => k === 'version' || k === 'fingerprint')) return null
+    if (!keys.every(k => k === 'version' || k === 'fingerprint' || (withPlace && k === 'place'))) return null
     if (typeof body.version !== 'number' || !Number.isInteger(body.version) || body.version < 1) return null
     if (body.fingerprint !== undefined && typeof body.fingerprint !== 'string') return null
-    return { version: body.version, fingerprint: (body.fingerprint as string | undefined) ?? null }
+    return { version: body.version, fingerprint: (body.fingerprint as string | undefined) ?? null, place: body.place }
+  }
+
+  /**
+   * The deliverable place outside, as a view shows it (jobs.md "A deliverable place outside"): its kind's words,
+   * whether the responsible person chose one and whether it is usable now; its name and when the pick ends only
+   * to that person (a Drive folder's name is theirs: never anyone else's to read, owners and admins included).
+   */
+  function placeView(member: Member, handle: CompanyData, job: JobRow): JobView['deliverTo'] {
+    const shownVersion = job.approvedVersion === null ? handle.jobs.version(job.id, job.latestVersion) : handle.jobs.version(job.id, job.approvedVersion)
+    const wanted = shownVersion ? definitionOf(shownVersion).grant.deliverTo : undefined
+    if (!wanted) return null
+    const chosen = job.acceptedPlace && job.acceptedPlace.connector === wanted.connector && job.acceptedPlace.kind === wanted.kind ? job.acceptedPlace : null
+    const responsible = responsibleOf(handle, job)
+    const live = chosen ? deps.places?.live(handle.companyId, responsible, chosen) ?? null : null
+    const theirs = member.userId === responsible
+    return {
+      connector: wanted.connector, kind: wanted.kind, label: jobDeliveryLabel(wanted) ?? wanted.kind, chosen: chosen !== null, usable: chosen !== null && live !== null,
+      name: theirs && live ? live.name : null, expiresAt: theirs && live ? live.expiresAt : null,
+    }
   }
 
   /** Pause each job the member is responsible for, for `reason`, and tell every owner / admin (in the caller's transaction). */
@@ -373,7 +402,7 @@ export function createJobService(deps: JobServiceDeps) {
       const id = newJobId(ids.newId().replace(/-/g, '').toLowerCase())
       handle.jobs.create({
         id, name: definition.name, state: 'draft', actingUserId: definition.actingUser, latestVersion: 1, approvedVersion: null,
-        approvedFingerprint: null, acceptedVersion: null, acceptedConsent: null, pausedReason: null, pausedBy: null, pausedAt: null,
+        approvedFingerprint: null, acceptedVersion: null, acceptedConsent: null, acceptedPlace: null, pausedReason: null, pausedBy: null, pausedAt: null,
         createdBy: member.userId, createdAt: at, updatedAt: at,
       }, versionRow(id, 1, definition, canonical, member.userId, at))
       return ok(view(member, handle, handle.jobs.find(id) as JobRow, true))
@@ -439,25 +468,37 @@ export function createJobService(deps: JobServiceDeps) {
       return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true))
     },
 
-    /** `POST /me/jobs/:jobId/accept { version, fingerprint? }`: the approved version's responsible person, in their own name. */
+    /**
+     * `POST /me/jobs/:jobId/accept { version, fingerprint?, place? }`: the approved version's responsible person, in
+     * their own name. A version whose grant names a deliverable place outside needs `place` — that place, chosen by
+     * them and usable now (their own live pick: `places.live`) — kept with the acceptance; any other version takes
+     * none. Accepting again with another place replaces it (how an expired folder pick is chosen again).
+     */
     async accept(member: Member, jobId: string, body: unknown): Promise<Outcome<JobView>> {
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
-      const b = versionBody(body)
-      if (!b) return BAD_BODY('{ version, fingerprint? }')
+      const b = versionBody(body, true)
+      if (!b) return BAD_BODY('{ version, fingerprint?, place? }')
       const { handle, job } = found
       const v = handle.jobs.version(jobId, b.version)
       if (!v) return VERSION_NOT_FOUND()
       if (v.actingUserId !== member.userId) return refuse('forbidden', 'この定期の仕事の責任者だけが受け取れます。', { code: 'JOB_NOT_RESPONSIBLE' })
       if (b.fingerprint !== null && b.fingerprint !== v.fingerprint) return FINGERPRINT_CHANGED()
       if (job.approvedVersion !== v.version) return refuse('conflict', 'まだ承認されていない版は受け取れません。', { code: 'JOB_NOT_APPROVED' })
+      const wanted = definitionOf(v).grant.deliverTo
+      if (!wanted && b.place !== undefined) return BAD_BODY('{ version, fingerprint? } (this job has no place to choose)')
+      const place = wanted ? parseJobAcceptedPlace(b.place, wanted) : null
+      if (wanted && b.place !== undefined && !place) return BAD_BODY('{ version, fingerprint?, place: { connector, kind, ref } }')
+      if (wanted && !place) return PLACE_NEEDED()
       // What is accepted must still be what was pinned: a Skill deleted or changed since refuses it.
       const skill = await skillPinned(member.companyId, definitionOf(v))
       if (!skill.ok) return skill
       const result = transactions.run((): Outcome<void> => {
         const rights = withinRights(handle, definitionOf(v))
         if (!rights.ok) return rights
-        handle.jobs.accept(jobId, v.version, v.consentFingerprint, member.userId, clock.now())
+        // The place must be theirs and usable now (their own live pick): the run later puts only there.
+        if (place && !deps.places?.live(member.companyId, member.userId, place)) return PLACE_NOT_USABLE()
+        handle.jobs.accept(jobId, v.version, v.consentFingerprint, member.userId, clock.now(), place)
         return ok(undefined)
       })
       if (!result.ok) return result
@@ -630,14 +671,18 @@ export function createJobService(deps: JobServiceDeps) {
      * while that version is still the approved one, the member is its responsible person, and they have not
      * accepted its consent yet — a notice that no longer asks anything is not shown.
      */
-    acceptNotice(member: Member, jobId: string, version: number): { name: string; contentChanged: boolean } | null {
+    acceptNotice(member: Member, jobId: string, version: number): { name: string; contentChanged: boolean; choosesPlace: boolean } | null {
       const found = visibleJob(member, jobId)
       if (!found || found.job.approvedVersion !== version || found.job.state === 'retired') return null
       const v = found.handle.jobs.version(jobId, version)
       if (!v || v.actingUserId !== member.userId || consentAccepted(found.handle, found.job)) return null
       // They had accepted an earlier version as its responsible person: what changed is the content, not who.
       const before = found.job.acceptedVersion === null ? null : found.handle.jobs.version(jobId, found.job.acceptedVersion)
-      return { name: nameFor(member, found.handle, found.job), contentChanged: before !== null && before.actingUserId === member.userId }
+      return {
+        name: nameFor(member, found.handle, found.job), contentChanged: before !== null && before.actingUserId === member.userId,
+        // The place outside is chosen in the app's 「受け取る」 (a build before it cannot: the notice says to update).
+        choosesPlace: definitionOf(v).grant.deliverTo !== undefined,
+      }
     },
 
     /** The job's name for a notice the member may read now (owner/admin only), or null. */

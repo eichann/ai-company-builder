@@ -10,6 +10,7 @@ import type { PathGuard } from '../features/ports'
 import type { PrivateFolderGuards } from '../features/private-folders/guards'
 import { notDownloadedFolders } from '../sync/not-downloaded'
 import type { RecordToolProvider } from './tools'
+import type { JobWriteArea } from '../../shared/ai-turn-steps/job'
 
 export interface RecordToolProviderDeps {
   /** Google Drive (google-drive.md): only where the app can show Google Picker. */
@@ -18,6 +19,10 @@ export interface RecordToolProviderDeps {
   privateFolders: Pick<PrivateFolderGuards, 'readable'>
   /** A scheduled job's run held for this consultation: its `job_report` (main's claim); null for any other consultation. */
   jobReport?: (conversationId: string) => ((result: unknown) => Promise<string | null>) | null
+  /** A scheduled job's run held for this consultation: its write area (drive_put reads only from there); null otherwise. */
+  jobWriteArea?: (conversationId: string) => JobWriteArea | null
+  /** Whether this consultation's record token is bound to an execution run (then drive_put reads only a job's area, else nothing). */
+  runBound?: (companyId: string, conversationId: string) => boolean
 }
 
 /** The turn the tools are for: its company and the consultation's company folder. */
@@ -35,9 +40,15 @@ export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordTo
   const { drivePicking, paths } = deps
   // Google Drive's tools (google-drive.md); each turn asks the server whether Drive is set up for the company.
   if (drivePicking && paths) {
+    // A scheduled job's run: drive_put reads only from its own deliverable area (`<place>/.personal/<folder>/`), never
+    // another company file (a prompt could otherwise send any file the member reads into the job's folder); no area → none.
+    const area = turn.conversationId ? deps.jobWriteArea?.(turn.conversationId) ?? null : null
+    // Fail closed: a run-bound token (or a held job run) whose area is not known reads nothing; only a consultation reads the company folder.
+    const bound = !!turn.conversationId && (deps.runBound?.(turn.companyId, turn.conversationId) === true || (deps.jobReport?.(turn.conversationId) ?? null) !== null)
+    const onlyUnder = area === null ? (bound ? null : undefined) : 'nowhere' in area ? null : `${area.place}/.personal/${area.folder}`
     providers.push((access, signal) => createDriveTools(access, {
       picking: drivePicking, companyId: turn.companyId, companyRoot: turn.companyRoot, topicTask: turn.topicTask,
-      local: { pathGuard: paths, notDownloaded: notDownloadedFolders, privateFolders: () => deps.privateFolders.readable(turn.companyId) },
+      local: { pathGuard: paths, notDownloaded: notDownloadedFolders, privateFolders: () => deps.privateFolders.readable(turn.companyId), onlyUnder },
     }, signal))
   }
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.

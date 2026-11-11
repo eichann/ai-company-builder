@@ -19,6 +19,17 @@ export function migrateJobOccurrenceCheckedUntil(conn: Database.Database): void 
   if (!cols.has('checked_commit')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN checked_commit TEXT')
 }
 
+/**
+ * Where a job's deliverables go outside ACB (jobs.md "A deliverable place outside"): the place the responsible
+ * person chose when accepting (`accepted_place`, JSON `{ connector, kind, ref }`; NULL = none chosen). Additive:
+ * an older build neither reads nor writes it (it never accepts a version naming such a place — its parser refuses
+ * the definition). Every startup, idempotent.
+ */
+export function migrateJobAcceptedPlace(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(ai_jobs)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('accepted_place')) conn.exec('ALTER TABLE ai_jobs ADD COLUMN accepted_place TEXT')
+}
+
 export const jobSchema = `
     -- A job (behind the company handle, ports/jobs.ts). acting_user_id: the responsible person of the
     -- newest version (whom it runs as: owner decision D3). approved_version / approved_fingerprint: the

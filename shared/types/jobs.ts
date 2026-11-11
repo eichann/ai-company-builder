@@ -7,7 +7,8 @@
  *   POST /jobs { definition }         owner/admin → 201
  *   PUT  /jobs/:jobId { definition }  owner/admin: a new version (the approved one stays)
  *   POST /jobs/:jobId/approve { version, fingerprint? }   owner/admin
- *   POST /me/jobs/:jobId/accept { version, fingerprint? } the version's responsible person only
+ *   POST /me/jobs/:jobId/accept { version, fingerprint?, place? } the version's responsible person only (`place`: the
+ *                                     deliverable place outside they chose, when the version names one)
  *   POST /jobs/:jobId/pause | resume  owner/admin; the responsible person for their own
  *   PUT  /jobs-stop { stopped }       owner/admin: 「定期の仕事をすべて止める」
  *   GET  /jobs/:jobId/occurrences     the same people as GET /jobs/:jobId: its occurrences (回), newest first (PR 3b)
@@ -15,7 +16,7 @@
  *   POST /job-run-claims { occurrenceId, deviceId, conversationId, checks, checkedCommit? }   claim one (PR 5a; 503 AI_STOPPED while stopped;
  *                                     409 JOB_CHECK_NOT_SUPPORTED when `checks` — the check kinds the app runs — lacks it, 5a-2)
  */
-import type { JobCheck, JobDefinition, JobGrant, JobOccurrenceState, JobPauseReason, JobPlacement, JobProcedure, JobState, JobTrigger } from '../core/jobs'
+import type { JobCheck, JobDefinition, JobDeliveryPlace, JobGrant, JobOccurrenceState, JobPauseReason, JobPlacement, JobProcedure, JobState, JobTrigger } from '../core/jobs'
 import type { AiRunView } from './ai-runs'
 
 export type { JobState } from '../core/jobs'
@@ -84,6 +85,14 @@ export interface JobView {
    * `mustAccept` — the approved version names them and its consent is not accepted yet.
    */
   you?: { named: boolean; controls: boolean; mustAccept: boolean }
+  /**
+   * The deliverable place outside (jobs.md "A deliverable place outside"), when the approved version (else the
+   * newest) names one: its kind (`label`, 「Google Drive のフォルダ」), whether the responsible person chose one when
+   * accepting (`chosen`) and whether it is usable now (`usable`: false once a folder pick's 90 days are over — they
+   * choose it again with 「受け取る」). `name` / `expiresAt` only for the responsible person themself (the place is
+   * their own pick), null for anyone else. null: none. Absent from an older server.
+   */
+  deliverTo?: { connector: string; kind: string; label: string; chosen: boolean; usable: boolean; name: string | null; expiresAt: string | null } | null
   /** Present on GET /jobs/:jobId (newest first). */
   versions?: JobVersionView[]
 }
@@ -151,6 +160,11 @@ export interface JobTurnView {
   checkedCommit?: string | null
   procedure: JobProcedure
   grant: JobGrant
+  /**
+   * The deliverable place outside the responsible person chose (`grant.deliverTo` with its `ref`): the one place
+   * the run may put into (the connector's route checks it at every call). Absent: none.
+   */
+  deliverTo?: JobDeliveryPlace
   /**
    * Only in a claim's answer, for a `new_meetings` check (B PR 5a-2): the meetings it found (≤ 10, oldest
    * first) — the only ones whose minutes the run may read. Empty: the run finishes `nothing`.

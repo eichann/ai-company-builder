@@ -426,7 +426,10 @@ company path:
   its ordinary file tools in the working folder). **One exception** (owner decision 2026-11-09): the file
   the member's own Drive put just made in a consultation about the record is linked by the server, as
   the AI (`recordEngine.linkDrivePut`, only from the Google connector's put route with facts from the put
-  receipt, every other check of `fileLink` kept; `google-drive.md` "The AI's routes"). A person may also
+  receipt, every other check of `fileLink` kept; `google-drive.md` "The AI's routes"; a put that **updated** a file this
+  member linked from an earlier put makes the link follow the newest revision — its kept facts replaced in a
+  `link_file` entry, `google-drive.md` "Google documents and overwriting"; a scheduled job's run links its puts to the
+  やること its finish made, `jobs.md` "A deliverable place outside"). A person may also
   link a file their own put made (`linkable`). Removing either: `…/file-links/remove { target }`
   (a Drive link: any reader, as for company paths; a PC file: its owner — anyone else gets 404
   `LINK_NOT_FOUND`).

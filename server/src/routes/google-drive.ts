@@ -11,8 +11,10 @@
  * The member's AI (record token), mounted at /api/records-ai/google/drive:
  *   GET  /status            whether the Drive tools work now, the member's live picks
  *   POST /read              { fileId } a picked file, as outside text (or a PDF's bytes)        (read)
- *   POST /put               a PDF / HTML into a picked folder; Idempotency-Key in a run (S10b) (act);
- *                           with `recordId`, the new file is then linked to that record (never failing the put)
+ *   POST /put               a PDF / HTML into a picked folder, or HTML / Markdown as a Google document, or a new
+ *                           revision of a file an earlier put made (`updateFileId`); Idempotency-Key in a run (S10b) (act);
+ *                           with `recordId`, the new file is then linked to that record (never failing the put).
+ *                           A scheduled job's run: only into the folder its responsible person chose (jobs.md)
  *   GET  /puts/:putId       the member's own put (an unknown one is looked up again)          (read)
  *   There is no route that gives the AI a Google token or picks for the person.
  *
@@ -27,11 +29,14 @@ import { logError } from '../lib/error-log'
 import type { DrivePutAnswer } from '../../shared/types/google-drive'
 import type { Outcome } from '../services/outcome'
 import type { Member } from '../services/access'
+import { NOT_IN_STEP } from '../services/not-in-step'
+import type { RecordTokenHolder } from '../services/record-ai-tokens'
+import type { DriveJobScope } from '../services/google-drive'
 import { aiActor, keyedWrite } from './record-ai-auth'
 import { refusal } from './respond'
 import { aiActs, aiReads, companyMember, publicRoute, serviceBody } from './guards'
 
-const { googleDrive, recordEngine } = services
+const { googleDrive, recordEngine, jobRuns } = services
 
 function answer<T>(c: Context, result: Outcome<T>) {
   c.header('Cache-Control', 'no-store')
@@ -62,9 +67,26 @@ googleDriveRoute.get('/me/google/drive/files', companyMember, async (c) => {
 
 export const googleDriveAiRoute = new Hono()
 
+/**
+ * A token bound to an execution run reaches these routes only as a scheduled job's run with a deliverable place
+ * (the record-token guard's route ceiling, `jobRunRouteAllowed`): its folder, asked again at every call (the run
+ * still holds its occurrence, the job still runnable as pinned). `undefined`: no run (a consultation's token).
+ */
+function jobScope(c: Context, h: RecordTokenHolder): DriveJobScope | undefined | Response {
+  if (!h.run) return undefined
+  const runId = h.run.id
+  const place = jobRuns.deliveryPlace(h.member, runId)
+  if (!place || place.connector !== 'google' || place.kind !== 'drive_folder' || typeof place.ref !== 'string') {
+    return c.json({ error: NOT_IN_STEP.error, code: NOT_IN_STEP.code }, 403)
+  }
+  return { folderId: place.ref, sameJob: other => jobRuns.sameJob(h.member, runId, other) }
+}
+
 googleDriveAiRoute.get('/status', aiReads, async (c) => {
   const h = c.var.holder
-  return answer(c, await googleDrive.aiStatus(h.member))
+  const scope = jobScope(c, h)
+  if (scope instanceof Response) return scope
+  return answer(c, await googleDrive.aiStatus(h.member, scope))
 })
 
 googleDriveAiRoute.post('/read', aiReads, serviceBody, async (c) => {
@@ -76,10 +98,13 @@ googleDriveAiRoute.post('/put', aiActs, serviceBody, async (c) => {
   const h = c.var.holder
   const body = c.var.body
   const actor = aiActor(h)
+  const scope = jobScope(c, h)
+  if (scope instanceof Response) return scope
   return keyedWrite(c, h, 'drive-put', body, async () => {
-    const put = await googleDrive.put(h.member, { kind: 'ai', conversationId: actor.conversationId, runId: actor.runId }, body)
+    const put = await googleDrive.put(h.member, { kind: 'ai', conversationId: actor.conversationId, runId: actor.runId }, body, scope)
     if (!put.ok) return answer(c, put)
-    const recordId = (body as { recordId?: unknown } | null)?.recordId
+    // A job's run links its puts to the やること its finish makes (jobs.md), never to a record its body names.
+    const recordId = scope ? undefined : (body as { recordId?: unknown } | null)?.recordId
     const linked = typeof recordId === 'string' ? linkPutToRecord(h.member, actor, recordId, put.value) : false
     return answer(c, { ok: true, value: linked ? { ...put.value, linkedTo: { recordId: recordId as string } } : put.value })
   })
@@ -111,7 +136,9 @@ function linkPutToRecord(member: Member, actor: ReturnType<typeof aiActor>, reco
 
 googleDriveAiRoute.get('/puts/:putId', aiReads, async (c) => {
   const h = c.var.holder
-  return answer(c, await googleDrive.putState(h.member, c.req.param('putId')))
+  const scope = jobScope(c, h)
+  if (scope instanceof Response) return scope
+  return answer(c, await googleDrive.putState(h.member, c.req.param('putId'), scope))
 })
 
 // ---- the Picker page (public, static) ----

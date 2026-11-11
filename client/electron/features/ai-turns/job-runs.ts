@@ -191,7 +191,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const deadlineMs = (started ?? claimedAt - skew) + skew + turn.grant.limits.minutes * 60_000
       const left = deadlineMs - JOB_STOP_BEFORE_MS - now()
       if (left <= 0) return giveUp({ class: 'bad-input', code: 'TIME_LIMIT' })
-      held.access = jobToolAccess(turn.grant, turn.check)
+      held.access = jobToolAccess(turn.grant, turn.check, turn.deliverTo)
       held.area = jobWriteArea(turn.grant)
       held.timer = setTimeout(() => {
         held.timedOut = true
@@ -208,7 +208,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const deadline = new Date(deadlineMs - JOB_STOP_BEFORE_MS)
       return {
         claimed: true, version: null,
-        message: jobFirstMessage({ name: turn.name, found, procedure, grant: turn.grant, deadline: `${deadline.getHours()}:${String(deadline.getMinutes()).padStart(2, '0')}` }),
+        message: jobFirstMessage({ name: turn.name, found, procedure, grant: turn.grant, deadline: `${deadline.getHours()}:${String(deadline.getMinutes()).padStart(2, '0')}`, deliverTo: turn.deliverTo }),
       }
     },
 

@@ -8,7 +8,10 @@
  *
  * The run's step is `job-procedure` (`JOB_PC_STEP`): the server scopes its token to the grant at every call.
  */
-import { JOB_PC_STEP, OCCURRENCE_ID_RE, jobRunRouteAllowed, parseJobDefinition, type JobCheck, type JobGrant, type JobProcedure } from '../../../shared/core/jobs'
+import {
+  JOB_PC_STEP, OCCURRENCE_ID_RE, jobDeliveryHowTo, jobDeliveryTools, jobRunRouteAllowed, parseJobAcceptedPlace, parseJobDefinition,
+  type JobCheck, type JobDeliveryPlace, type JobGrant, type JobProcedure,
+} from '../../../shared/core/jobs'
 import { OUTSIDE_TITLE_NOTE, outsideTitle } from '../../../shared/core/outside-text'
 import type { AiTurnCandidate } from './types'
 import { AUTOMATIC_NO_SHELL_RULE } from './plugin'
@@ -37,6 +40,8 @@ export interface QueuedJobTurn {
   grant: JobGrant
   /** Only in a claim's answer for a `new_meetings` check: what it found (the only minutes the run may read). */
   meetings?: Array<{ id: string; title: string; at: string }>
+  /** The deliverable place outside its responsible person chose (the grant's `deliverTo` with its id); absent: none. */
+  deliverTo?: JobDeliveryPlace
 }
 
 const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
@@ -63,6 +68,13 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
   })
   if (!parsed.ok || parsed.definition.run.kind !== 'procedure') return null
   const { check, grant } = parsed.definition
+  // The chosen place: only of the grant's own connector and kind (the one parser); without a grant's place, none.
+  let deliverTo: JobDeliveryPlace | undefined
+  if (t.deliverTo !== undefined) {
+    const place = grant.deliverTo ? parseJobAcceptedPlace(t.deliverTo, grant.deliverTo) : null
+    if (!place) return null
+    deliverTo = place
+  }
   let meetings: QueuedJobTurn['meetings']
   if (t.meetings !== undefined) {
     if (!Array.isArray(t.meetings) || t.meetings.length > 50) return null
@@ -77,6 +89,7 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
     occurrenceId: t.occurrenceId, jobId: t.jobId, name: t.name, dueAt: t.dueAt, expiresAt: t.expiresAt, state: t.state,
     check, checkSince: t.checkSince, ...(typeof t.checkUntil === 'string' ? { checkUntil: t.checkUntil } : {}),
     ...(typeof t.sinceCommit === 'string' ? { sinceCommit: t.sinceCommit } : {}), ...(typeof t.checkedCommit === 'string' ? { checkedCommit: t.checkedCommit } : {}), procedure: parsed.definition.run.procedure, grant, ...(meetings ? { meetings } : {}),
+    ...(deliverTo ? { deliverTo } : {}),
   }
 }
 
@@ -127,12 +140,14 @@ export interface JobToolAccess {
   builtinTools: string[]
 }
 
-export function jobToolAccess(grant: JobGrant, check: JobCheck): JobToolAccess {
+export function jobToolAccess(grant: JobGrant, check: JobCheck, deliverTo?: JobDeliveryPlace): JobToolAccess {
   const minutes = check.kind === 'new_meetings'
   const allowed = new Set(JOB_RECORD_TOOLS
     .filter(t => grant.tools.includes(t.group) && jobRunRouteAllowed(grant, t.route, () => minutes))
     .map(t => t.name))
   allowed.add(JOB_REPORT_TOOL)
+  // The deliverable place's own tools (its connector declares them), only once its responsible person chose it.
+  if (deliverTo) for (const name of jobDeliveryTools(grant)) allowed.add(name)
   return {
     allowsRecordTool: name => allowed.has(name),
     builtinTools: [...new Set(grant.tools.flatMap(t => BUILTIN[t] ?? []))],
@@ -158,7 +173,8 @@ export type JobFound = { kind: 'files'; files: string[] } | { kind: 'meetings'; 
  * pinned procedure as the instructions, the places it may read and write, and how it hands back its one
  * やること (`job_report`) — the server makes it; the run never creates one itself.
  */
-export function jobFirstMessage(input: { name: string; found: JobFound; procedure: string; grant: JobGrant; deadline: string }): string {
+export function jobFirstMessage(input: { name: string; found: JobFound; procedure: string; grant: JobGrant; deadline: string; deliverTo?: JobDeliveryPlace }): string {
+  const howTo = input.deliverTo ? jobDeliveryHowTo(input.deliverTo) : null
   const { found, grant } = input
   const foundLines = found.kind === 'files'
     ? ['前の回のあとに新しく入ったファイル：', ...found.files.slice(0, 50).map(f => `- ${f}`), ...(found.files.length > 50 ? [`（ほか ${found.files.length - 50} 件）`] : [])]
@@ -185,6 +201,7 @@ export function jobFirstMessage(input: { name: string; found: JobFound; procedur
     grant.writes.area === 'deliverable'
       ? `- ファイルを保存できるのは「${grant.writes.place}/.personal/${grant.writes.folder}/」の中だけです（あなただけのフォルダで、共有されません）。`
       : '- この仕事ではファイルを保存できません。',
+    ...(howTo ? [`- ${howTo}`] : []),
     '- 送る・承認するは人がします。メールは下書きまでにしてください。',
     '- やることや記録は自分で作らないでください。',
     AUTOMATIC_NO_SHELL_RULE,

@@ -250,6 +250,11 @@ export interface RecordRepository {
   listedRecordIds(userId: string, type: string): string[]
 
   linksFrom(ids: string[]): RecordLinkRow[]
+  /**
+   * Whether a ledger entry fixed this Drive file as a decision's material or an attachment (`{ kind: 'drive', fileId }`,
+   * with its revision): such a file is never overwritten (google-drive.md "Overwriting").
+   */
+  driveFileFixed(fileId: string): boolean
   /** Links whose target is a file at exactly one of `paths` (company paths). */
   fileLinksTo(paths: string[]): RecordLinkRow[]
   /** Point these links (source, name, position) at another file path. */

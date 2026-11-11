@@ -18,7 +18,7 @@ import { gitCheckPoint, newFilesByGit, newFilesByTime } from '../electron/featur
 import { createRecordsApi } from '../electron/records/api'
 import { createRunRegistry } from '../electron/records/runs'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
-import { jobToolAccess, jobWriteArea, parseJobTurn, parseJobTurns } from '../shared/ai-turn-steps/job'
+import { jobFirstMessage, jobToolAccess, jobWriteArea, parseJobTurn, parseJobTurns } from '../shared/ai-turn-steps/job'
 import type { JobGrant } from '../../shared/core/jobs'
 import { aiTurnQueue } from '../shared/ai-turn-steps/registry'
 import { freshLog, handUrgent } from '../src/features/chat/aiTurns'
@@ -103,6 +103,29 @@ test('the run\'s tools: only what its grant names and the server would let throu
   assert.deepEqual(meetings.builtinTools, [])
   const noRecords = jobToolAccess({ ...GRANT, tools: ['files_read'], writes: { area: 'none' } }, { kind: 'new_files', path: '人事部/面談' })
   assert.equal(noRecords.allowsRecordTool('records_get'), false)
+})
+
+test('a place outside: the turn carries the chosen one of the grant\'s own kind; its tools only then; the first message says where', () => {
+  const placed: JobGrant = { ...GRANT, deliverTo: { connector: 'google', kind: 'drive_folder', ref: null } }
+  const chosen = { connector: 'google', kind: 'drive_folder', ref: 'fake-folder-proposals-0001' }
+  const t = parseJobTurn(turn({ grant: placed, deliverTo: chosen }))
+  assert.deepEqual(t?.deliverTo, chosen)
+  // Another kind than the grant's, a place without one in the grant, a bad id: not a turn this app runs.
+  assert.equal(parseJobTurn(turn({ grant: placed, deliverTo: { ...chosen, kind: 'drive_file' } })), null)
+  assert.equal(parseJobTurn(turn({ deliverTo: chosen })), null)
+  assert.equal(parseJobTurn(turn({ grant: placed, deliverTo: { ...chosen, ref: '../x' } })), null)
+  const check = { kind: 'new_files', path: '人事部/面談' } as const
+  const withPlace = jobToolAccess(placed, check, t!.deliverTo)
+  assert.equal(withPlace.allowsRecordTool('drive_put'), true)
+  assert.equal(withPlace.allowsRecordTool('drive_picked'), true)
+  // Never a read or a pick of Drive; and nothing of Drive before the place is chosen or without one.
+  for (const name of ['drive_read', 'drive_pick_folder', 'drive_pick_files']) assert.equal(withPlace.allowsRecordTool(name), false, name)
+  assert.equal(jobToolAccess(placed, check).allowsRecordTool('drive_put'), false)
+  assert.equal(jobToolAccess(GRANT, check).allowsRecordTool('drive_put'), false)
+  const message = jobFirstMessage({ name: '面談の報告', found: { kind: 'files', files: ['a.txt'] }, procedure: '# 手順', grant: placed, deadline: '10:00', deliverTo: t!.deliverTo })
+  assert.match(message, /folderId: fake-folder-proposals-0001/)
+  assert.match(message, /updateFileId/)
+  assert.doesNotMatch(jobFirstMessage({ name: '面談の報告', found: { kind: 'files', files: ['a.txt'] }, procedure: '# 手順', grant: GRANT, deadline: '10:00' }), /drive_put/)
 })
 
 test('nothing reaches the server while this PC may not run AI unattended', async () => {

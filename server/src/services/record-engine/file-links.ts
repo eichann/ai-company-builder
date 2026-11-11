@@ -28,6 +28,9 @@ const DRIVE_NOT_CHECKED = {
 
 type FileLinkAnswer = { record: RecordSummary; entry: LedgerEntry | null; changed: boolean }
 
+/** The 経緯 line of a link that followed a Drive file's new revision (the put updated the file). */
+const FOLLOWED_NOTE = 'Google Drive のファイルを上書きしたので、新しい版につなぎ直しました'
+
 export function fileLinking(ctx: EngineContext) {
   const { deps, companyData, transactions, clock, open, stateOf, summaryOf, changed } = ctx
 
@@ -97,18 +100,26 @@ export function fileLinking(ctx: EngineContext) {
     // A `.personal/` link someone else made is not there for this member (records.md "Links into .personal/").
     const shown = mine.filter(l => fileLinkShown(member.userId, row, l))
     let nextLinks: RecordLinkRow[]
+    let followed = false
     if (op === 'link') {
-      if (shown.some(l => l.targetPath === path)) return ok({ record: summaryOf(records, row.id), entry: null, changed: false })
+      const already = shown.find(l => l.targetPath === path)
+      // A put that gave a new revision to a Drive file this member linked (google-drive.md "Overwriting"): the link
+      // follows the latest revision — its kept facts change, nothing else. Anything else already linked: no change.
+      const follows = already !== undefined && put && drive !== undefined && drive !== 'ask' && driveLinkTarget(drive.fileId) === path
+        && already.createdBy === member.userId && (already.drive?.revisionId !== drive.revisionId || already.drive?.sha256 !== drive.sha256)
+      if (already && !follows) return ok({ record: summaryOf(records, row.id), entry: null, changed: false })
+      followed = follows
       const added: RecordLinkRow = { sourceId: row.id, name, position: 0, targetId: null, targetPath: path, createdBy: member.userId }
       const kept = def.links[name].cardinality === 'one' ? allLinks.filter(l => l.name !== name) : allLinks
-      if (kept.filter(l => l.name === name).length + 1 > MAX_LINK_TARGETS) return bad(`At most ${MAX_LINK_TARGETS} files per link`, 'TOO_MANY_LINKS')
+      if (!followed && kept.filter(l => l.name === name).length + 1 > MAX_LINK_TARGETS) return bad(`At most ${MAX_LINK_TARGETS} files per link`, 'TOO_MANY_LINKS')
       // A Drive file: only now, every record check passed, is the connector's answer needed.
       if (fileLinkKind(path) === 'drive') {
         if (drive === 'ask') return ok('ask-drive')
         if (!drive || driveLinkTarget(drive.fileId) !== path) return refuse('forbidden', DRIVE_NOT_CHECKED.error, { code: DRIVE_NOT_CHECKED.code })
         added.drive = { revisionId: drive.revisionId, name: drive.name, sha256: drive.sha256, mimeType: drive.mimeType, linkedAt: clock.now() }
       }
-      nextLinks = [...kept, added]
+      // Following a new revision keeps the link where it is (same row, its kept facts replaced).
+      nextLinks = followed && already ? allLinks.map(l => (l === already ? { ...l, drive: added.drive } : l)) : [...kept, added]
     } else {
       const gone = shown.find(l => l.targetPath === path)
       if (!gone) return refuse('not-found', 'このファイルはこの記録につながっていません', { code: 'LINK_NOT_FOUND' })
@@ -118,7 +129,7 @@ export function fileLinking(ctx: EngineContext) {
     const at = clock.now()
     const entry: LedgerEntry = {
       recordId: row.id, version: current.version + 1, action: op === 'link' ? 'link_file' : 'unlink_file', fromState: current.state, toState: current.state,
-      actorId: member.userId, actorKind: actor.kind, actorSource: actor.source ?? null, at, note,
+      actorId: member.userId, actorKind: actor.kind, actorSource: actor.source ?? null, at, note: followed && note === '' ? FOLLOWED_NOTE : note,
       changes: [{ field: `links.${name}`, before: linkLedgerValue('file', mine), after: linkLedgerValue('file', nextLinks.filter(l => l.name === name)) }],
       attachments: [], decision: null, isDecision: false, typeVersion: row.typeVersion, reversesVersion: null, ...provenance(actor),
     }

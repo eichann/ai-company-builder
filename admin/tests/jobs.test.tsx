@@ -10,7 +10,7 @@ import JobsRoute from '@/app/companies/[id]/jobs/page'
 import { NAV_ITEMS } from '@/components/app/app-shell'
 import { approvedText } from '@/components/jobs/job-dialogs'
 import type { JobView } from '@/lib/api'
-import { definitionFromForm, emptyJobForm, formFromDefinition } from '@/lib/jobs'
+import { DELIVERY_PLACE_CHOICES, definitionFromForm, emptyJobForm, formFromDefinition, jobProblemText } from '@/lib/jobs'
 import { jobConsentCanonical, type JobDefinition } from '../../shared/core/jobs'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok } from './fixtures'
@@ -101,6 +101,23 @@ describe('the form', () => {
     // No Skill chosen: the parser's problem, said plainly.
     expect(definitionFromForm({ ...emptyJobForm('u_member'), name: 'x', kind: 'pc', checkKind: 'new_meetings' }).ok).toBe(false)
   })
+
+  it('a place outside (connector + kind, never a service\'s own field): the folder is left to the responsible person; it needs the deliverable folder', () => {
+    expect(DELIVERY_PLACE_CHOICES.map(c => [c.value, c.label])).toEqual([['google:drive_folder', 'Google Drive のフォルダ']])
+    const form = { ...emptyJobForm('u_member'), name: '面談報告書', kind: 'pc' as const, shelfItem: 'item-1', checkKind: 'new_meetings' as const, writePlace: '人事部', writeFolder: 'reports', deliverTo: 'google:drive_folder' }
+    const parsed = definitionFromForm(form, 'interview-report')
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.definition.grant.deliverTo).toEqual({ connector: 'google', kind: 'drive_folder', ref: null })
+    expect(formFromDefinition(parsed.definition).deliverTo).toBe('google:drive_folder')
+    // Without a deliverable folder there is nothing to put: said plainly.
+    const without = definitionFromForm({ ...form, writeFolder: '' }, 'interview-report')
+    expect(without.ok).toBe(false)
+    if (!without.ok) expect(jobProblemText(without.problems)).toMatch(/作ったファイルの置き場所/)
+    // None chosen: no key at all (the definition is what it always was).
+    const plain = definitionFromForm({ ...form, deliverTo: '' }, 'interview-report')
+    expect(plain.ok && 'deliverTo' in plain.definition.grant).toBe(false)
+  })
 })
 
 describe('the page', () => {
@@ -164,6 +181,33 @@ describe('the page', () => {
       [`/jobs/${JOB_ID}/approve`, { version: 1, fingerprint: 'sha256:v1' }],
       [`/me/jobs/${JOB_ID}/accept`, { version: 1, fingerprint: 'sha256:v1' }],
     ]))
+  })
+
+  it('one\'s own job that puts into a place outside: approved only — the place is chosen in one\'s app when accepting', async () => {
+    const placed = def({
+      actingUser: 'u_owner', placement: 'a', check: { kind: 'new_meetings', titleWords: [] },
+      run: { kind: 'procedure', procedure: { source: 'shelf_skill', item: 'item-1', skill: 'interview-report', fingerprint: 'f'.repeat(64) } },
+      grant: {
+        tools: ['records', 'files_write'], creates: ['task'], routes: ['GET /minutes/:recordId/text'], reads: { paths: [], calls: [] },
+        writes: { area: 'deliverable', place: '人事部', folder: 'reports' }, outbound: 'none', limits: { minutes: 30, runsPerDay: 1 },
+        deliverTo: { connector: 'google', kind: 'drive_folder', ref: null },
+      },
+    })
+    const mine = jobView({ actingUserId: 'u_owner', approvedVersion: null, accepted: false, state: 'draft', waiting: 'NOT_APPROVED', placement: 'a' })
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [mine] }) },
+      [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...mine, versions: [version(1, placed, 'c1')] }) },
+      [`POST ${base}/jobs/${JOB_ID}/approve`]: { body: ok({ ...mine, approvedVersion: 1, state: 'active', waiting: 'NOT_ACCEPTED' }) },
+    })
+    renderInCompany(<JobsRoute />)
+    await userEvent.click(within(await screen.findByRole('listitem', { name: '週の報告' })).getByRole('button', { name: '承認する' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByRole('note')).toHaveTextContent('アプリの「設定」→「仕事」→「定期の仕事」で選んで受け取って')
+    expect(dialog).toHaveTextContent('Google Drive のフォルダ')
+    await userEvent.click(within(dialog).getByRole('button', { name: '承認する' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => c.url.replace(base, ''))).toEqual([`/jobs/${JOB_ID}/approve`]))
+    expect(calls.some((c) => c.url.includes('/me/jobs/'))).toBe(false)
   })
 
   it('back to the accepted consent (v1 A accepted, v2 B not accepted, v3 A): the server\'s answer decides — no new acceptance asked', async () => {

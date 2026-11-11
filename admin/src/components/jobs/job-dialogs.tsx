@@ -245,6 +245,8 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
   const mustAccept = detail.data?.latestConsentAccepted !== true
   const who = definition ? personName(members.find((m) => m.userId === definition.actingUser)) : ''
   const own = definition !== null && definition.actingUser === myUserId
+  // A place outside is chosen by the responsible person in their app when accepting: never here, also not for oneself.
+  const placeOutside = definition?.grant.deliverTo !== undefined
 
   const approve = async () => {
     if (!newest?.fingerprint) return
@@ -254,7 +256,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
       let next = await jobsApi.approve(companyId, job.id, newest.version, newest.fingerprint)
       onApproved(next)
       // Their own job: the approver accepts it in their own name with the same press (the note says so).
-      if (own && mustAccept) {
+      if (own && mustAccept && !placeOutside) {
         try {
           next = await jobsApi.accept(companyId, job.id, newest.version, newest.fingerprint)
           onApproved(next)
@@ -286,7 +288,9 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
           <div className="space-y-3">
             <JobVersionWords definition={definition} members={members} />
             <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm" role="note">
-              {own
+              {own && placeOutside
+                ? 'あなたが責任者です。できたものを置く先は、承認したあとにあなたのアプリの「設定」→「仕事」→「定期の仕事」で選んで受け取ってください（それまで動きません）。'
+                : own
                 ? 'あなたが責任者です。承認すると、あなたの名前で受け取ったことにもなります。'
                 : mustAccept
                   ? `承認したあと、${who}さんが内容を確かめて「受け取る」を押すまで動きません（${who}さんに知らせが届きます）。`

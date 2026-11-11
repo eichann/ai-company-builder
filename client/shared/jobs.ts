@@ -26,9 +26,16 @@ export interface MyJob {
   nextSlot: string | null
   /**
    * The approved version waiting for the member's 「受け取る」, or null. `definition` null: it names a place
-   * the member cannot read now (the server would refuse the acceptance too).
+   * the member cannot read now (the server would refuse the acceptance too). `why`: `accept` — not accepted
+   * yet; `place` — accepted, but the deliverable place they chose can no longer be used (a Drive folder pick
+   * past its 90 days): 「受け取る」 again chooses it anew.
    */
-  toAccept: { version: number; fingerprint: string | null; definition: JobDefinition | null } | null
+  toAccept: { version: number; fingerprint: string | null; definition: JobDefinition | null; why: 'accept' | 'place' } | null
+  /**
+   * The deliverable place outside (the server's `deliverTo`): its kind's words, whether one was chosen and is
+   * usable now; its name and when the pick ends (only the responsible person's own). null: none.
+   */
+  deliverTo: { label: string; chosen: boolean; usable: boolean; name: string | null; expiresAt: string | null } | null
   /** The member runs it (the approved version names them): they may pause it, and resume their own pause. */
   controls: boolean
 }

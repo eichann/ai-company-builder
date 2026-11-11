@@ -366,6 +366,8 @@ const jobShape = {
   trigger: z.optional(z.looseObject({})), placement: z.optional(str), nextSlot: z.optional(nullableStr),
   lastOccurrence: z.optional(z.nullable(z.looseObject({}))), versions: z.optional(z.array(z.unknown())),
   approved: z.optional(z.nullable(z.looseObject({}))), latestConsentAccepted: z.optional(z.boolean()), you: z.optional(z.looseObject({})),
+  // A deliverable place outside (jobs.md): absent from an older server.
+  deliverTo: z.optional(z.nullable(z.looseObject({}))),
 }
 export const jobSchema = topLevel<JobView>(jobShape)
 export const jobUpdatedSchema = topLevel<JobView & { changed: boolean }>({ ...jobShape, changed: z.boolean() })

@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { PC_JOB_MINUTES, type JobForm } from '@/lib/jobs'
+import { DELIVERY_PLACE_CHOICES, PC_JOB_MINUTES, type JobForm } from '@/lib/jobs'
 
 const SELECT = 'rounded-md border bg-background px-2 py-1 text-sm'
 
@@ -71,6 +71,17 @@ export function PcJobFields({ f, set, hasCompanyFolder, shelfSkills }: {
         <Input aria-label="置き場所の場所" value={f.writePlace} onChange={(e) => set('writePlace', e.target.value)} placeholder="例：人事部" />
         <Input aria-label="置き場所のフォルダ名" value={f.writeFolder} onChange={(e) => set('writeFolder', e.target.value)} placeholder="例：interview-reports" />
       </Row>
+      <Row label="できたものを外にも置く">
+        <select aria-label="できたものを置く先" className={SELECT} value={f.deliverTo} onChange={(e) => set('deliverTo', e.target.value)}>
+          <option value="">置かない</option>
+          {DELIVERY_PLACE_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+        </select>
+      </Row>
+      {f.deliverTo && (
+        <p className="text-xs text-muted-foreground">
+          置き先は、責任者が「受け取る」ときに自分で選びます（その人が選んだ1か所だけに置けます。社外の人も見られる場所には置きません）。{DELIVERY_PLACE_CHOICES.find((c) => c.value === f.deliverTo)?.lapseNote ?? ''}
+        </p>
+      )}
       <Row label="1回の上限">
         <select aria-label="1回の上限" className={SELECT} value={f.limits.minutes} onChange={(e) => set('limits', { ...f.limits, minutes: Number(e.target.value) })}>
           {[...new Set([...PC_JOB_MINUTES, f.limits.minutes])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{m}分</option>)}

@@ -25,6 +25,7 @@ import { createRecordsApi } from '../electron/records/api'
 import { createRecordTools } from '../electron/records/tools'
 import { createDrivePicking, createDriveTools, drivePutRequestKey, isDrivePickerPage, readDrivePickerResult, readLocalFileForDrive, type DrivePickingDeps } from '../electron/features/google/drive'
 import type { DrivePickerWindowConfig } from '../electron/features/ports'
+import { recordToolProviders } from '../electron/records/tool-providers'
 import type { MyGoogle } from '../shared/google'
 
 const TOKEN = 'acb_rec_co.' + 'a'.repeat(64)
@@ -36,7 +37,7 @@ const PDF = Buffer.from('%PDF-1.7\n%%EOF\n')
 
 interface Seen { url: string; method: string; headers: Record<string, string>; body?: string }
 
-function fakeServer(scope: 'read' | 'act', opts: { available?: boolean; pdf?: boolean } = {}) {
+function fakeServer(scope: 'read' | 'act', opts: { available?: boolean; pdf?: boolean; revision?: string } = {}) {
   const seen: Seen[] = []
   const fetch = (async (url: string, init: RequestInit) => {
     seen.push({ url, method: init.method ?? 'GET', headers: init.headers as Record<string, string>, body: init.body as string | undefined })
@@ -44,7 +45,9 @@ function fakeServer(scope: 'read' | 'act', opts: { available?: boolean; pdf?: bo
     if (url.endsWith('/me/record-tokens')) return json(201, { token: TOKEN, tokenId: 'tok-1', scope, expiresAt: 'x' })
     if (url.endsWith('/api/records-ai/types')) return json(200, { types: [] })
     if (url.endsWith('/api/records-ai/plugins')) return json(200, { plugins: [] })
-    if (url.endsWith('/api/records-ai/google/drive/status')) return json(200, { available: opts.available ?? true, granted: true, picks: [] })
+    if (url.endsWith('/api/records-ai/google/drive/status')) {
+      return json(200, { available: opts.available ?? true, granted: true, picks: [], puts: [{ fileId: 'fake-upload-1', name: '面談報告書', mimeType: 'application/vnd.google-apps.document', folderId: FOLDER, link: 'l', revisionId: opts.revision ?? 'version:1', at: 't' }] })
+    }
     if (url.endsWith('/api/records-ai/google/drive/read')) {
       return json(200, opts.pdf
         ? { file: { id: DOC, name: '手書き/メモ.pdf', mimeType: 'application/pdf', modifiedTime: null }, header: 'H', text: null, footer: 'F', truncated: false, pdfBase64: PDF.toString('base64'), instructionLike: [] }
@@ -84,7 +87,7 @@ function picking(server: ReturnType<typeof fakeServer>, over: Partial<DrivePicki
   return { p: createDrivePicking(deps), opened, connects, logs, withoutDrive: () => { features = ['minutes'] } }
 }
 
-async function tools(scope: 'read' | 'act', root: string | null, opts: { available?: boolean; pdf?: boolean; topicTask?: () => string | null } = {}, pick = picking(fakeServer(scope))) {
+async function tools(scope: 'read' | 'act', root: string | null, opts: { available?: boolean; pdf?: boolean; revision?: string; topicTask?: () => string | null; onlyUnder?: string | null } = {}, pick = picking(fakeServer(scope))) {
   const server = fakeServer(scope, opts)
   const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => [SESSION], fetch: server.fetch })
   const access = await api.openTurn('co', { conversationId: 'conv-1', agent: 'claude-code', scope })
@@ -92,7 +95,7 @@ async function tools(scope: 'read' | 'act', root: string | null, opts: { availab
   if (root) roots.add(root)
   const t = await createRecordTools(access!, undefined, {
     companyId: 'co', conversationId: 'conv-1',
-    toolProviders: [a => createDriveTools(a, { picking: pick.p, companyId: 'co', companyRoot: root, local: { pathGuard: roots, notDownloaded: () => ['営業部/置いていない'], privateFolders: () => ['人事'] }, topicTask: opts.topicTask })],
+    toolProviders: [a => createDriveTools(a, { picking: pick.p, companyId: 'co', companyRoot: root, local: { pathGuard: roots, notDownloaded: () => ['営業部/置いていない'], privateFolders: () => ['人事'], ...(opts.onlyUnder !== undefined ? { onlyUnder: opts.onlyUnder } : {}) }, topicTask: opts.topicTask })],
   })
   return { t: t!, seen: server.seen, pick }
 }
@@ -104,6 +107,7 @@ function companyFolder(): string {
   fs.writeFileSync(path.join(root, '営業部', '.personal', 'ご提案.html'), '<p>提案</p>')
   fs.writeFileSync(path.join(root, '営業部', '偽物.pdf'), '<html>not a pdf</html>')
   fs.writeFileSync(path.join(root, '営業部', 'メモ.docx'), 'PK')
+  fs.writeFileSync(path.join(root, '営業部', '.personal', '面談報告書.md'), '# 面談報告書\n')
   // A private folder's clone: a repository of its own.
   fs.mkdirSync(path.join(root, '営業部', '秘密の案件', '.git'), { recursive: true })
   fs.writeFileSync(path.join(root, '営業部', '秘密の案件', '提案.pdf'), PDF)
@@ -199,7 +203,7 @@ test('drive_put: only a PDF / HTML inside the company folder, never a private or
     '人事/評価.pdf': '限られた人だけ',
     '営業部/置いていない/x.pdf': 'ダウンロードしていない',
     '営業部/偽物.pdf': 'PDF ではない',
-    '営業部/メモ.docx': 'PDF と HTML だけ',
+    '営業部/メモ.docx': 'PDF と HTML',
     '.git/config': '置けません',
   }
   for (const [p, words] of Object.entries(refusals)) {
@@ -240,8 +244,108 @@ test('drive_put names the consultation\'s やること (the app\'s topic, read a
   assert.equal(sent().length, 2)
 })
 
+test('drive_put: Markdown always as a Google document; HTML when asked; a PDF never converted; updateFileId passed on; its words say when a file is new', async () => {
+  const root = companyFolder()
+  const { t, seen } = await tools('act', root)
+  const sent = () => seen.filter(s => s.url.endsWith('/google/drive/put')).map(s => JSON.parse(s.body!))
+  await t.execute('drive_put', { path: '営業部/.personal/面談報告書.md', folderId: FOLDER })
+  assert.deepEqual([sent()[0].kind, sent()[0].as, sent()[0].name], ['markdown', 'google_doc', '面談報告書'])
+  assert.equal(sent()[0].requestKey, drivePutRequestKey(FOLDER, '面談報告書', sent()[0].sha256, { as: 'google_doc' }))
+  await t.execute('drive_put', { path: '営業部/.personal/ご提案.html', folderId: FOLDER, as: 'google_doc' })
+  assert.deepEqual([sent()[1].kind, sent()[1].as, sent()[1].name], ['html', 'google_doc', 'ご提案'])
+  const pdfDoc = JSON.parse(await t.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER, as: 'google_doc' }))
+  assert.ok(typeof pdfDoc.error === 'string')
+  assert.equal(sent().length, 2)
+  // Overwriting: the fileId goes as updateFileId, and the key is another one than a new file's.
+  const upd = JSON.parse(await t.execute('drive_put', { path: '営業部/.personal/面談報告書.md', folderId: FOLDER, updateFileId: 'fake-upload-1' }))
+  assert.equal(sent()[2].updateFileId, 'fake-upload-1')
+  assert.notEqual(sent()[2].requestKey, sent()[0].requestKey)
+  assert.equal(upd.state, 'done')
+  assert.equal(JSON.parse(await t.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER, updateFileId: '../x' })).error, '入力が正しくありません。')
+  // The description is honest about when a new file is made (the 11/10 incident) and how to update one.
+  const d = t.specs.find(s => s.name === 'drive_put')!.description
+  assert.match(d, /updateFileId を渡さないと、いつも新しいファイルを作る/)
+  assert.match(d, /without it a NEW file is always made/)
+  assert.doesNotMatch(d, /cannot be overwritten/)
+  // drive_picked lists what may be updated.
+  const picked = JSON.parse(await t.execute('drive_picked', {}))
+  assert.deepEqual(picked.putFiles.map((f: { fileId: string }) => f.fileId), ['fake-upload-1'])
+})
+
+test('a scheduled job\'s run: drive_put reads only from its own deliverable area, by name and by real location', async () => {
+  const root = companyFolder()
+  const area = path.join(root, '営業部', '.personal', 'reports')
+  fs.mkdirSync(area, { recursive: true })
+  fs.writeFileSync(path.join(area, '報告.md'), '# 報告\n')
+  fs.symlinkSync(path.join(root, '営業部', 'ご提案.pdf'), path.join(area, 'link.pdf'))
+  const { t, seen } = await tools('act', root, { onlyUnder: '営業部/.personal/reports' })
+  const put = async (p: string) => JSON.parse(await t.execute('drive_put', { path: p, folderId: FOLDER }))
+  for (const p of ['営業部/ご提案.pdf', '人事/評価.pdf', '営業部/.personal/ご提案.html', '営業部/.personal/reports', '営業部/.personal/reports/link.pdf']) {
+    const r = await put(p)
+    assert.ok(typeof r.error === 'string', `${p}: ${JSON.stringify(r)}`)
+  }
+  assert.match((await put('営業部/ご提案.pdf')).error, /この仕事の保存場所/)
+  assert.equal(seen.filter(s => s.url.endsWith('/google/drive/put')).length, 0)
+  assert.equal((await put('営業部/.personal/reports/報告.md')).state, 'done')
+  // No area at all (a job that saves nothing): nothing may be put.
+  const none = await tools('act', root, { onlyUnder: null })
+  assert.ok(typeof JSON.parse(await none.t.execute('drive_put', { path: '営業部/.personal/reports/報告.md', folderId: FOLDER })).error === 'string')
+})
+
+test('the tool providers give a job run\'s consultation its area (main\'s held run), and nothing else that limit', async () => {
+  const root = companyFolder()
+  const area = path.join(root, '営業部', '.personal', 'reports')
+  fs.mkdirSync(area, { recursive: true })
+  fs.writeFileSync(path.join(area, '報告.md'), '# 報告\n')
+  const server = fakeServer('act')
+  const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => [SESSION], fetch: server.fetch })
+  const access = await api.openTurn('co', { conversationId: 'conv-job', agent: 'claude-code', scope: 'act' })
+  const roots = new AllowedRoots()
+  roots.add(root)
+  const pick = picking(server)
+  const make = (conversationId: string) => createRecordTools(access!, undefined, {
+    companyId: 'co', conversationId,
+    toolProviders: recordToolProviders({
+      drivePicking: pick.p, paths: roots, privateFolders: { readable: () => [] },
+      jobWriteArea: c => (c === 'conv-job' ? { place: '営業部', folder: 'reports', reads: [] } : null),
+    }, { companyId: 'co', companyRoot: root, conversationId }),
+  })
+  const job = (await make('conv-job'))!
+  assert.match(JSON.parse(await job.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER })).error, /この仕事の保存場所/)
+  assert.equal(JSON.parse(await job.execute('drive_put', { path: '営業部/.personal/reports/報告.md', folderId: FOLDER })).state, 'done')
+  // Any other consultation: the company folder as before.
+  const plain = (await make('conv-other'))!
+  assert.equal(JSON.parse(await plain.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER })).state, 'done')
+  // A run-bound token whose job area is not known: nothing at all (never the whole company folder).
+  const bound = (await createRecordTools(access!, undefined, {
+    companyId: 'co', conversationId: 'conv-bound',
+    toolProviders: recordToolProviders({ drivePicking: pick.p, paths: roots, privateFolders: { readable: () => [] }, jobWriteArea: () => null, runBound: () => true }, { companyId: 'co', companyRoot: root, conversationId: 'conv-bound' }),
+  }))!
+  assert.match(JSON.parse(await bound.execute('drive_put', { path: '営業部/.personal/reports/報告.md', folderId: FOLDER })).error, /この仕事の保存場所/)
+})
+
+test('an update names the revision it replaces: a later update of the same content is another request', async () => {
+  const root = companyFolder()
+  const a = await tools('act', root, { revision: 'version:1' })
+  await a.t.execute('drive_put', { path: '営業部/.personal/面談報告書.md', folderId: FOLDER, updateFileId: 'fake-upload-1' })
+  const b = await tools('act', root, { revision: 'version:2' })
+  await b.t.execute('drive_put', { path: '営業部/.personal/面談報告書.md', folderId: FOLDER, updateFileId: 'fake-upload-1' })
+  const key = (s: typeof a.seen) => JSON.parse(s.filter(x => x.url.endsWith('/google/drive/put'))[0].body!).requestKey
+  assert.notEqual(key(a.seen), key(b.seen))
+  // A file the status does not list as one the member's puts made: not sent at all.
+  const unknown = JSON.parse(await a.t.execute('drive_put', { path: '営業部/.personal/面談報告書.md', folderId: FOLDER, updateFileId: 'fake-upload-unknown-1' }))
+  assert.match(unknown.error, /putFiles/)
+  // A document that would fetch from outside: refused here already.
+  fs.writeFileSync(path.join(root, '営業部', '.personal', '外.md'), '![x](https://evil.example/x.png)\n')
+  assert.match(JSON.parse(await a.t.execute('drive_put', { path: '営業部/.personal/外.md', folderId: FOLDER })).error, /外を読み込むかもしれない部分/)
+})
+
 test('the same file, folder and name → the same request key; anything else → another', () => {
   const a = drivePutRequestKey(FOLDER, 'ご提案.pdf', 'a'.repeat(64))
+  // A plain new file keeps the key it always had (a repeat across an update of the app is still the same put).
+  assert.equal(a, drivePutRequestKey(FOLDER, 'ご提案.pdf', 'a'.repeat(64), { as: 'file' }))
+  assert.notEqual(a, drivePutRequestKey(FOLDER, 'ご提案.pdf', 'a'.repeat(64), { as: 'google_doc' }))
+  assert.notEqual(a, drivePutRequestKey(FOLDER, 'ご提案.pdf', 'a'.repeat(64), { updateFileId: 'fake-upload-1' }))
   assert.equal(a, drivePutRequestKey(FOLDER, 'ご提案.pdf'.normalize('NFD'), 'a'.repeat(64)))
   assert.notEqual(a, drivePutRequestKey(FOLDER, 'ご提案.pdf', 'b'.repeat(64)))
   assert.notEqual(a, drivePutRequestKey('fake-folder-other-0001', 'ご提案.pdf', 'a'.repeat(64)))

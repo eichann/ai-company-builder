@@ -5,7 +5,7 @@
  * version's definition (and a trigger refuses it), only one that adds a version and ones that mark a
  * version approved / accepted once.
  */
-import type { JobOccurrenceState, JobPauseReason, JobState } from '../../shared/core/jobs'
+import type { JobDeliveryPlace, JobOccurrenceState, JobPauseReason, JobState } from '../../shared/core/jobs'
 
 export interface JobRow {
   id: string
@@ -17,6 +17,8 @@ export interface JobRow {
   approvedFingerprint: string | null
   acceptedVersion: number | null
   acceptedConsent: string | null
+  /** The deliverable place outside the responsible person chose when accepting (`ref` filled), or null. */
+  acceptedPlace: JobDeliveryPlace | null
   pausedReason: JobPauseReason | null
   pausedBy: string | null
   pausedAt: string | null
@@ -88,7 +90,7 @@ export interface JobRepository {
   /** The version approved: the job's pin, and the version's approved_* (set once). */
   approve(jobId: string, version: number, fingerprint: string, by: string, at: string, state: JobState): void
   /** The responsible person accepted this version's consent: the job's accepted_*, and the version's accepted_* (set once). */
-  accept(jobId: string, version: number, consentFingerprint: string, by: string, at: string): void
+  accept(jobId: string, version: number, consentFingerprint: string, by: string, at: string, place: JobDeliveryPlace | null): void
   /** Pause / resume: the state with its reason (null on resume). */
   setState(jobId: string, state: JobState, reason: JobPauseReason | null, by: string | null, at: string): void
   /** 「定期の仕事をすべて止める」. */
