@@ -49,7 +49,7 @@ export function useConsultationStatus({ tabId, isShown, status, approval, intera
   }, [tabId, state, kind, line])
   // The list forgets the tab when it closes.
   useEffect(() => {
-    const unregister = registerConsultationHold(tabId, () => hold.current?.() ?? { ready: false, draft: '', attachments: 0, busy: true, memberWrote: false, shown: false })
+    const unregister = registerConsultationHold(tabId, () => hold.current?.() ?? { ready: false, conversationId: null, draft: '', unsent: 0, busy: true, userMessageIds: [], shown: false })
     return () => { clearConsultationStatus(tabId); unregister() }
   }, [tabId, hold])
 }

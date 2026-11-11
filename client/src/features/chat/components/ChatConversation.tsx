@@ -100,7 +100,7 @@ export type ChatInputRequest =
    * 「AI の番」 run automatically (ai-turns.md), for a fresh tab behind the shown one: claim the
    * record with this tab's conversation id; only when that wins, send the first message.
    */
-  | { kind: 'aiTurn'; step: AiTurnStep | PluginRunStep; title: string; minutesId?: string; claim: (conversationId: string) => Promise<{ message: string } | null> }
+  | { kind: 'aiTurn'; step: AiTurnStep | PluginRunStep; title: string; minutesId?: string; claim: (conversationId: string) => Promise<{ message: string } | null>; onSent?: (messageId: string) => void }
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
@@ -141,6 +141,14 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   // Records dropped on the input (recordDrop.ts): shown in the composer until sent; the request takes their ids once.
   const [pendingRecords, setPendingRecords] = useState<DroppedRecordRef[]>([])
   const pendingRecordsRef = useLatestRef(pendingRecords)
+  // Sends between the composer emptying and the request leaving (images being read), and the
+  // messages being edited in place: both hold the member's words outside the input.
+  const preparingSendsRef = useRef(0)
+  const editingMessagesRef = useRef(new Set<string>())
+  const handleEditingChange = useCallback((messageId: string, editing: boolean) => {
+    if (editing) editingMessagesRef.current.add(messageId)
+    else editingMessagesRef.current.delete(messageId)
+  }, [])
   const pendingRecordIdsRef = useRef<string[]>([])
   const transport = useChatTransport(chatServer, {
     authMode: authModeRef,
@@ -190,7 +198,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   stampNewMessages(timestampsRef.current, messages)
 
   // The conversation in the history store: restore, autosave, flush, new chat.
-  const { isRestoringSession, historyReadyRef, deletedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, topicRecordId: topicShown, setTopic, startNewChat } = useChatHistory({
+  const { isRestoringSession, historyReadyRef, deletedRef, unmountedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, topicRecordId: topicShown, setTopic, startNewChat } = useChatHistory({
     conversation,
     initialSessionId,
     companyId: currentCompany?.id,
@@ -240,7 +248,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   // `editedMessageId`: an edited message is resent — the conversation is cut
   // just before it and the new text sent in its place, through the same steps
   // (synchronous save first, attachments staged) as any other message.
-  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string, instruction?: AppInstruction) => {
+  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string, instruction?: AppInstruction, onCreated?: (messageId: string) => void) => {
     if (!text.trim() && (!files || files.length === 0)) return
     const editing = editedMessageId !== undefined
     // An edit replaces part of the conversation: only while nothing runs.
@@ -266,44 +274,52 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       return
     }
     lastTurnAbortedRef.current = false
+    // From here until the request is on its way the composer is already empty: the tab is busy.
+    preparingSendsRef.current += 1
+    try {
+      // Images (base64) and file paths for the request body and the bubble
+      if (files && files.length > 0) {
+        try {
+          await stageImages(files)
+        } catch {
+          // Nothing was sent: the typed text goes back into the composer.
+          if (!editing) chatInputApiRef.current?.setValue(text)
+          setHistoryError(IMAGE_READ_FAILED)
+          return
+        }
+        // The tab was closed meanwhile: nothing more is done for it (its save on closing already ran).
+        if (unmountedRef.current) return
+      }
+      if (filePaths && filePaths.length > 0) stageFilePaths(filePaths)
+      // Dropped records go with this message once (main reads them now); its bubble says so.
+      const dropped = editing || instruction ? [] : pendingRecordsRef.current
+      if (dropped.length > 0) {
+        pendingRecordIdsRef.current = dropped.map(r => r.id)
+        setPendingRecords([])
+      }
 
-    // Images (base64) and file paths for the request body and the bubble
-    if (files && files.length > 0) {
-      try {
-        await stageImages(files)
-      } catch {
-        // Nothing was sent: the typed text goes back into the composer.
+      const metadata = { ...(instruction ? { appInstruction: instruction } : {}), ...(dropped.length > 0 ? { droppedRecords: dropped } : {}) }
+      const message: UIMessage = {
+        id: crypto.randomUUID(), role: 'user',
+        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+        parts: [{ type: 'text', text: text || '画像を確認してください' }],
+      }
+      timestampsRef.current.set(message.id, new Date())
+      onCreated?.(message.id)
+      // An edit leaves the composer (and its saved draft) alone; a failed save
+      // then keeps the conversation as it was and nothing is sent.
+      if (!await saveRef.current([...base, message], true, !editing)) {
         if (!editing) chatInputApiRef.current?.setValue(text)
-        setHistoryError(IMAGE_READ_FAILED)
+        if (dropped.length > 0) { pendingRecordIdsRef.current = []; setPendingRecords(dropped) }
         return
       }
+      if (editing) setMessages(base)
+      try { await sendMessage(message) }
+      catch (e) { setHistoryError(e instanceof Error ? e.message : '送信できませんでした。相談は保存されています。') }
+    } finally {
+      preparingSendsRef.current -= 1
     }
-    if (filePaths && filePaths.length > 0) stageFilePaths(filePaths)
-    // Dropped records go with this message once (main reads them now); its bubble says so.
-    const dropped = editing || instruction ? [] : pendingRecordsRef.current
-    if (dropped.length > 0) {
-      pendingRecordIdsRef.current = dropped.map(r => r.id)
-      setPendingRecords([])
-    }
-
-    const metadata = { ...(instruction ? { appInstruction: instruction } : {}), ...(dropped.length > 0 ? { droppedRecords: dropped } : {}) }
-    const message: UIMessage = {
-      id: crypto.randomUUID(), role: 'user',
-      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
-      parts: [{ type: 'text', text: text || '画像を確認してください' }],
-    }
-    timestampsRef.current.set(message.id, new Date())
-    // An edit leaves the composer (and its saved draft) alone; a failed save
-    // then keeps the conversation as it was and nothing is sent.
-    if (!await saveRef.current([...base, message], true, !editing)) {
-      if (!editing) chatInputApiRef.current?.setValue(text)
-      if (dropped.length > 0) { pendingRecordIdsRef.current = []; setPendingRecords(dropped) }
-      return
-    }
-    if (editing) setMessages(base)
-    try { await sendMessage(message) }
-    catch (e) { setHistoryError(e instanceof Error ? e.message : '送信できませんでした。相談は保存されています。') }
-  }, [status, sendMessage, setMessages, currentSessionId, stageImages, stageFilePaths, appSessionIdRef, chatInputApiRef, messagesRef, saveRef, setCurrentSessionId, setHistoryError, timestampsRef, resetSuggestion, sendWhileRunning, lastTurnAbortedRef, pendingRecordsRef])
+  }, [status, sendMessage, setMessages, currentSessionId, stageImages, stageFilePaths, appSessionIdRef, chatInputApiRef, messagesRef, saveRef, setCurrentSessionId, setHistoryError, timestampsRef, resetSuggestion, sendWhileRunning, lastTurnAbortedRef, pendingRecordsRef, unmountedRef])
   const handleSend = useCallback((text: string, files?: File[], filePaths?: string[]) => sendTurn(text, files, filePaths), [sendTurn])
 
   // A record dropped on the input (owner 2026-11-03 #5): the consultation becomes one about it — asked
@@ -335,12 +351,12 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   // What the tab holds, read live when an automatic run or its record ends (closing it must lose nothing).
   const readHold = () => ({
     ready: historyReadyRef.current && !deletedRef.current,
+    conversationId: appSessionIdRef.current,
     draft: draftInputRef.current,
-    attachments: unsentAttachmentsRef.current,
+    unsent: unsentAttachmentsRef.current + pendingRecordsRef.current.length + (topicSwitch ? 1 : 0) + editingMessagesRef.current.size,
     // Not the hand-off receipt: every turn leaves one (its memo update goes on after a close).
-    busy: running || queuedSends.length > 0 || !!pendingApproval || !!currentInteraction,
-    // An automatic consultation starts with the app's one message: any other is the member's.
-    memberWrote: messagesRef.current.filter(message => message.role === 'user').length > 1,
+    busy: running || preparingSendsRef.current > 0 || queuedSends.length > 0 || !!pendingApproval || !!currentInteraction,
+    userMessageIds: messagesRef.current.filter(message => message.role === 'user').map(message => message.id),
     shown: isShown,
   })
   useConsultationStatus({ tabId, isShown, status, approval: pendingApproval, interaction: currentInteraction, messages, rootPath: currentCompany?.rootPath, readHold })
@@ -378,7 +394,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     // Not shown on purpose: the tab is fresh, so its own conversation id is the one the claim names.
     if (inputRequest?.kind === 'aiTurn') {
       if (!historyReadyRef.current) return
-      const { step, title, minutesId, claim } = inputRequest
+      const { step, title, minutesId, claim, onSent } = inputRequest
       onInputRequestConsumed?.()
       const conversationId = appSessionIdRef.current
       if (!conversationId || !agentCan(authMode, 'recordActions')) { void claim(''); return }
@@ -390,7 +406,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
         onTitleChange?.(title)
         if (minutesId) minutesIdRef.current = minutesId
         aiTurnStepRef.current = step
-        void handleSend(message)
+        void sendTurn(message, undefined, undefined, undefined, undefined, onSent)
       })
       return
     }
@@ -502,6 +518,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
             messageReferenceFiles={messageReferenceFiles}
             onRegenerate={regenerate}
             onEditSubmit={handleEditMessage}
+            onEditingChange={handleEditingChange}
           />
         </ReviewActionsContext.Provider>
       )}

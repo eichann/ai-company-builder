@@ -78,22 +78,34 @@ turns").
   kept, listed under 「終わったもの」, reopened from there) when `closesWhenRunEnds` (`aiTurns.ts`)
   holds: the outcome is `done`, the tab's status is `unseen` / `idle`, and what the tab holds now
   (`ConsultationHold`, read live through `automaticConsultationsStore.ts`, registered by
-  `useConsultationStatus`) has no draft, no attachment, nothing running or waiting to go out, no message
-  of the member's (any user message after the app's first one), the history is restored, and it is not
-  the tab shown in front. So it **stays open** when the AI asks for a review (needs-you `review`), when
-  the run failed, did not finish or hit the usage limit (or the tab's status is `failed`), when the
-  member wrote or typed there, and while the member is looking at it. Claim / settle, the server calls,
-  the step's tools and the run limits are unchanged.
-- **Ending the record closes them too**: the claim remembers `[conversation id, record id]` per member
-  and company (localStorage `aiTurnConsultations:<company>:<user>`, the latest 200). A record the member
-  ends — the list's ☑ (完了 / 済んだ), a task card's 完了にする, a 来た連絡's 済んだ, a 返事のお願い's
-  終わりにする / もう返した (`tasks-ui.md`) — runs `chat.closeRecordConsultations { recordId }`
-  (AppShell `recordEnded`); the chat pane closes each open tab of those consultations for which
+  `useConsultationStatus` from `ChatConversation`) says nothing of the member's is there:
+  - the tab still holds **the run's conversation** (`conversationId`: a new consultation started in
+    the same tab — a skill, 「相談する」 — is another and is never closed for the run);
+  - **authorship by id, not by count**: the tab tells the runner the id of the app's first message
+    when it sends it (`ChatInputRequest` `aiTurn.onSent`, from `sendTurn`'s `onCreated`); any other
+    user message is the member's — an edit of the app's message is a new message, so the member's;
+  - no draft, and nothing kept unsent (`unsent`): attachments, records dropped on the input
+    (`pendingRecords`), an open topic question (`topicSwitch`), a message being edited in place
+    (`UserMessageBubble` reports it through `onEditingChange`);
+  - nothing busy: a turn running, **a send being prepared** (`preparingSendsRef`: from the moment the
+    composer empties — images being read — until the request ends), messages waiting to go out, an
+    approval or a question; the hand-off receipt is not counted (every turn leaves one);
+  - the history is restored, and it is not the tab shown in front.
+  So it **stays open** when the AI asks for a review (needs-you `review`), when the run failed, did not
+  finish or hit the usage limit (or the tab's status is `failed`), when the member wrote, typed,
+  edited, dropped or attached there, and while the member is looking at it. A send that was reading
+  its images when its tab closed goes no further (`useChatHistory` `unmountedRef`). Claim / settle,
+  the server calls, the step's tools and the run limits are unchanged.
+- **Ending the record closes them too**: when the app's first message is sent the runner remembers
+  `[conversation id, record id, that message's id]` per member and company (localStorage
+  `aiTurnConsultations:<company>:<user>`, the latest 200). A record the member ends — the list's ☑
+  (完了 / 済んだ), a task card's 完了にする, a 来た連絡's 済んだ, a 返事のお願い's 終わりにする / もう返した
+  (`tasks-ui.md`) — runs `chat.closeRecordConsultations { recordId }` (AppShell `recordEnded`); the
+  chat pane closes each open tab **holding one of those conversations** for which
   `closesWhenRecordEnds` holds (the same "nothing of the member's" check, without the outcome, status
   or shown conditions: a review or a failure kept it open, the member then ended the thing it was
-  about). A consultation the member wrote in, or with a draft, an attachment or a running AI, stays.
-  The pane's last tab is never closed (`closeTab`). A consultation moved to its own window is not
-  touched. Tabs left open before this change are not closed in bulk (not approved).
+  about). The pane's last tab is never closed (`closeTab`). A consultation moved to its own window is
+  not touched. Tabs left open before this change are not closed in bulk (not approved).
 - **The consultation follows the record's name** (owner FB 2026-11-05): the title is made from the
   record's title when the run starts, and a run may rename its record (a message that came without
   a subject, 「（件名なし）」, gets the AI's short title — `inbox.md`). `aiTurns:settle` answers the
@@ -401,7 +413,7 @@ also: after earlier put-backs (version > 2) an unattended run finishes without `
 (`chat-header-ui.html?autoturn=1`: claimed with the hidden consultation's id, sent and saved with
 its title, `minutesId` and the claim's version in the first message, the shown tab untouched, settled once; `?autoturn=taken` sends nothing;
 Codex claims nothing, shows the notice and hands the record over; a failed run shows its reason and 「もう一度」 gives the server's run back and claims again; `?autoturn=asked-again`: an older build's hand-off is given back, the claim after the server's answer;
-a run that ended well closes its consultation, a failed one stays; ending the record closes it, but not while it holds the member's draft or a message they wrote).
+a run that ended well closes its consultation, a failed one stays; ending the record closes it, but not while it holds the member's draft, a message they wrote, an open or sent edit of the app's message, a send still reading its image, a record dropped on its input or an open topic question; a send reading its image goes no further once its tab is closed).
 `aiTurns.test.ts` also pins `closesWhenRunEnds` / `closesWhenRecordEnds` and the remembered list (mutation-checked).
 
 ## A business plugin's steps (plan C5; server side: `plugin-steps.md`)

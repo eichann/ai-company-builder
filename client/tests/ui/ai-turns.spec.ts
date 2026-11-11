@@ -155,3 +155,130 @@ test('ending the record keeps an automatic consultation the member wrote in', as
   await page.waitForTimeout(300)
   await expect(row).toHaveCount(1)
 })
+
+// Codex review of #674: what the member keeps outside the input is theirs too. Each scenario runs in
+// a failed automatic consultation shown in front, beside another consultation with a note (so it is
+// never the pane's last tab), then the record is ended.
+const composerOf = (page: Page) => page.locator('.cm-content[role="textbox"]').locator('visible=true')
+async function failedAutomaticShown(page: Page) {
+  await expect.poll(() => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length), { timeout: 15_000 }).toBe(1)
+  await chat(page, c => c.finish())
+  await expect.poll(() => chat(page, c => c.aiTurns.settled), { timeout: 15_000 }).toEqual([MINUTES_ID])
+  await conversationList(page).getByRole('button', { name: 'AIに相談する' }).click()
+  await composerOf(page).click()
+  await page.keyboard.type('ほかの相談のメモ')
+  const row = conversationList(page).getByText(`A社 商談 のあと（${day()}）`)
+  await row.click()
+  await expect(page.getByText('自動で始めた相談').locator('visible=true')).toBeVisible()
+  return row
+}
+async function endRecordAndExpectKept(page: Page, row: ReturnType<Page['getByText']>) {
+  await closeRecordConsultations(page, MINUTES_ID)
+  await page.waitForTimeout(300)
+  await expect(row).toHaveCount(1)
+}
+async function dropOnComposer(page: Page, record: { id: string; title: string }) {
+  const data = await page.evaluateHandle(r => {
+    const dt = new DataTransfer()
+    dt.setData('application/x-acb-record', JSON.stringify(r))
+    dt.setData('text/plain', r.title)
+    return dt
+  }, record)
+  await composerOf(page).locator('xpath=ancestor::div[contains(@class, "rounded-xl")][1]').dispatchEvent('drop', { dataTransfer: data })
+}
+
+test('ending the record keeps an automatic consultation with an edit of its message open, and after the edit is sent', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  const row = await failedAutomaticShown(page)
+  const bubble = page.getByText('自動で始めた相談').locator('visible=true').locator('xpath=ancestor::div[contains(@class, "group")][1]')
+  await bubble.hover()
+  await bubble.getByTitle('編集').click()
+  const edit = page.locator('textarea').locator('visible=true')
+  await edit.press('End')
+  await edit.pressSequentially('（先方の名前も）')
+  await endRecordAndExpectKept(page, row)
+
+  // Sent: the rewritten message is the member's, not the app's.
+  await edit.press('Meta+Enter')
+  await expect.poll(() => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length), { timeout: 15_000 }).toBe(2)
+  await chat(page, c => c.finish())
+  await expect(page.locator('textarea').locator('visible=true')).toHaveCount(0)
+  await endRecordAndExpectKept(page, row)
+})
+
+test('ending the record keeps an automatic consultation whose message is still being prepared (an image being read)', async ({ page }) => {
+  // The image's reader answers only when the test says so.
+  await page.addInitScript(() => {
+    const read = FileReader.prototype.readAsDataURL
+    const w = window as unknown as { __releaseImages?: () => void }
+    const waiting: Array<() => void> = []
+    w.__releaseImages = () => { for (const go of waiting.splice(0)) go() }
+    FileReader.prototype.readAsDataURL = function (this: FileReader, blob: Blob) { waiting.push(() => read.call(this, blob)) }
+  })
+  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  const row = await failedAutomaticShown(page)
+  await composerOf(page).click()
+  await page.keyboard.insertText('この画像も見て')
+  const data = await page.evaluateHandle(() => {
+    const dt = new DataTransfer()
+    dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'screen.png', { type: 'image/png' }))
+    return dt
+  })
+  await composerOf(page).locator('xpath=ancestor::div[contains(@class, "rounded-xl")][1]').dispatchEvent('drop', { dataTransfer: data })
+  await page.keyboard.press('Meta+Enter')
+  // The composer is empty already; nothing has gone out yet.
+  await expect(composerOf(page)).not.toContainText('この画像も見て')
+  expect(await chat(page, c => c.requests.filter(r => r.path === '/api/chat').length)).toBe(1)
+  await endRecordAndExpectKept(page, row)
+  await page.evaluate(() => (window as unknown as { __releaseImages: () => void }).__releaseImages())
+  await expect.poll(() => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length), { timeout: 15_000 }).toBe(2)
+})
+
+test('a send still reading its image goes no further once the member closed its consultation', async ({ page }) => {
+  await page.addInitScript(() => {
+    const read = FileReader.prototype.readAsDataURL
+    const w = window as unknown as { __releaseImages?: () => void }
+    const waiting: Array<() => void> = []
+    w.__releaseImages = () => { for (const go of waiting.splice(0)) go() }
+    FileReader.prototype.readAsDataURL = function (this: FileReader, blob: Blob) { waiting.push(() => read.call(this, blob)) }
+  })
+  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  const row = await failedAutomaticShown(page)
+  await composerOf(page).click()
+  await page.keyboard.insertText('この画像も見て')
+  const data = await page.evaluateHandle(() => {
+    const dt = new DataTransfer()
+    dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'screen.png', { type: 'image/png' }))
+    return dt
+  })
+  await composerOf(page).locator('xpath=ancestor::div[contains(@class, "rounded-xl")][1]').dispatchEvent('drop', { dataTransfer: data })
+  await page.keyboard.press('Meta+Enter')
+  const item = conversationList(page).locator('[data-conversation-id]').filter({ hasText: `A社 商談 のあと（${day()}）` })
+  await item.hover()
+  await item.getByRole('button', { name: '相談を閉じる（履歴は残ります）' }).click()
+  await expect(row).toHaveCount(0)
+  await page.evaluate(() => (window as unknown as { __releaseImages: () => void }).__releaseImages())
+  await page.waitForTimeout(1_000)
+  expect(await chat(page, c => c.requests.filter(r => r.path === '/api/chat').length)).toBe(1)
+})
+
+test('ending the record keeps an automatic consultation with a record waiting in its input, or a topic question open', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  const row = await failedAutomaticShown(page)
+  await dropOnComposer(page, { id: 'task-0000aa', title: '見積書を作り直す' })
+  await expect(page.getByRole('button', { name: '見積書を作り直すを渡すのをやめる' })).toBeVisible()
+  await endRecordAndExpectKept(page, row)
+
+  // Another record dropped asks about the topic; with both taken off, the question alone keeps it.
+  await dropOnComposer(page, { id: 'deal-0000bb', title: 'A社 案件' })
+  await expect(page.getByRole('button', { name: '切り替える' })).toBeVisible()
+  await page.getByRole('button', { name: '見積書を作り直すを渡すのをやめる' }).click()
+  await page.getByRole('button', { name: 'A社 案件を渡すのをやめる' }).click()
+  await expect(page.getByRole('button', { name: /を渡すのをやめる$/ })).toHaveCount(0)
+  await endRecordAndExpectKept(page, row)
+
+  // Answered: nothing of the member's is left there, so ending the record closes it.
+  await page.getByRole('button', { name: 'このまま' }).click()
+  await closeRecordConsultations(page, MINUTES_ID)
+  await expect(row).toHaveCount(0)
+})

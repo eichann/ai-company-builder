@@ -1,6 +1,6 @@
 import {
   automaticConsultationsOf, forgottenAutomatic, readAutomaticConsultations, rememberedAutomatic,
-  type AutomaticConsultations, type ConsultationHold,
+  type AutomaticConsultation, type AutomaticConsultations, type ConsultationHold,
 } from './aiTurns'
 
 // The automatic 「AI の番」 consultations (ai-turns.md "Closing the consultation"): which record each
@@ -31,14 +31,14 @@ function write(key: string, list: AutomaticConsultations): void {
   try { localStorage.setItem(key, JSON.stringify(list)) } catch { /* unavailable: a record's end then closes nothing */ }
 }
 
-/** The run's consultation claimed its record. */
-export function rememberAutomaticConsultation(companyId: string, userId: string, sessionId: string, recordId: string): void {
+/** The run's consultation sent the app's first message (`messageId`) about its record. */
+export function rememberAutomaticConsultation(companyId: string, userId: string, sessionId: string, recordId: string, messageId: string): void {
   const key = storageKey(companyId, userId)
-  write(key, rememberedAutomatic(read(key), sessionId, recordId))
+  write(key, rememberedAutomatic(read(key), sessionId, recordId, messageId))
 }
 
 /** The automatic consultations of that record. */
-export function automaticConsultationsFor(companyId: string, userId: string, recordId: string): string[] {
+export function automaticConsultationsFor(companyId: string, userId: string, recordId: string): AutomaticConsultation[] {
   return automaticConsultationsOf(read(storageKey(companyId, userId)), recordId)
 }
 

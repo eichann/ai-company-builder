@@ -132,9 +132,10 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   const consumeInputRequest = useCallback(() => setInputRequest(null), [])
   // The member ended a record: its automatic consultations close, unless they hold anything of the member's.
   useCommandHandler('chat.closeRecordConsultations', ({ recordId }) => {
-    const sessions = new Set(automaticConsultationsFor(companyId, userId, recordId))
-    // The pane keeps one tab (closeTab never closes the last), so at most all but one go.
-    const closed = tabsRef.current.filter(tab => tab.sessionId && sessions.has(tab.sessionId) && closesWhenRecordEnds(consultationHoldOf(tab.id)))
+    const automatic = automaticConsultationsFor(companyId, userId, recordId)
+    // Matched by conversation (a tab that started another one in its place is not it); the pane keeps
+    // one tab (closeTab never closes the last), so at most all but one go.
+    const closed = tabsRef.current.filter(tab => automatic.some(a => a.sessionId === tab.sessionId && closesWhenRecordEnds(consultationHoldOf(tab.id), a)))
       .slice(0, Math.max(0, tabsRef.current.length - 1))
     for (const tab of closed) closeTab(tab.id)
     forgetAutomaticConsultations(companyId, userId, closed.map(tab => tab.sessionId!))
