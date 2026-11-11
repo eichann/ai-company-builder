@@ -33,7 +33,7 @@
  */
 import {
   JOB_ACTOR, JOB_PC_STEP, isOccurrenceId, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult,
-  type JobDefinition, type JobOccurrenceState, type JobOutcomeCode,
+  type JobDefinition, type JobDeliveryPlace, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
 import type { JobMeetingView, JobTurnView } from '../../shared/types/jobs'
 import type { Clock } from '../ports/clock'
@@ -60,6 +60,16 @@ export interface JobRunDeps {
    * people-only lists, what they read now). Absent: none (a `new_meetings` check then finds nothing).
    */
   meetings?: (member: Member, since: string, until: string, limit: number) => Array<JobMeetingView & { arrivedAt: string }>
+  /**
+   * A deliverable place outside (jobs.md "A deliverable place outside"), answered by its connector (composition):
+   * `live` — the responsible person's own place is usable now (a Drive folder pick within its 90 days);
+   * `linkToTask` — after a run finished done, what it put there linked to the occurrence's やること (the
+   * connector's receipts of that run; a refusal is logged, never fails anything). Absent → no place is usable.
+   */
+  places?: {
+    live(companyId: string, userId: string, place: JobDeliveryPlace): boolean
+    linkToTask(member: Member, place: JobDeliveryPlace, runId: string, recordId: string): void
+  }
 }
 
 /** At most this many meetings a `new_meetings` check hands one run (the oldest first; the next occurrence takes the rest). */
@@ -78,6 +88,7 @@ const REFUSALS: Record<string, () => Refusal> = {
   OWNER_ABSENT: () => conflict('JOB_OWNER_ABSENT', '不在の日のため、この回は見送りました。'),
   SKILL_MISSING: () => conflict('JOB_SKILL_MISSING', '手順の Skill が、承認された版のまま見つかりません。'),
   TIME_LIMIT: () => conflict('JOB_TIME_LIMIT', '承認された時間を過ぎたため、この回は AI を止めました。人が確かめる必要があります。'),
+  PLACE_NOT_USABLE: () => conflict('JOB_PLACE_NOT_USABLE', 'できたものを置く先が使えなくなっています（選んでから90日たったか、消されました）。責任者が「受け取る」から選び直してください。'),
 }
 /** The claiming app cannot run this occurrence's check (an older app, or one that does not know a newer check). */
 const CHECK_NOT_SUPPORTED = () => conflict('JOB_CHECK_NOT_SUPPORTED', 'このアプリでは、この定期の仕事を動かせません。アプリを新しくしてください。')
@@ -141,7 +152,20 @@ export function createJobRuns(deps: JobRunDeps) {
     // D5: nobody runs it for them — and an absent person's own PC does not either (as the server's runner).
     if (f.occ.state === 'due' && f.handle.tasks.absencesFrom(day).some(a => a.userId === f.definition.actingUser && a.from <= day && day <= a.until)) return 'OWNER_ABSENT'
     if (!deps.jobs.pinnedSkillKept(f.handle.companyId, f.version)) return 'SKILL_MISSING'
+    // A deliverable place outside: the one the responsible person chose must still be usable (decision: an expired
+    // Drive folder pick is never renewed by itself — the occurrence goes to a person, who chooses it again).
+    if (f.definition.grant.deliverTo) {
+      const place = placeOf(f)
+      if (!place || !deps.places?.live(f.handle.companyId, f.definition.actingUser, place)) return 'PLACE_NOT_USABLE'
+    }
     return null
+  }
+
+  /** The place the responsible person chose for this version's deliverables (its connector and kind), or null. */
+  function placeOf(f: Found): JobDeliveryPlace | null {
+    const wanted = f.definition.grant.deliverTo
+    const chosen = f.job.acceptedPlace
+    return wanted && chosen && chosen.connector === wanted.connector && chosen.kind === wanted.kind ? chosen : null
   }
 
   /** Move the occurrence and say why, in its own transaction (or the caller's); the members told. */
@@ -169,6 +193,10 @@ export function createJobRuns(deps: JobRunDeps) {
           told = deps.notices.writeNotice(f.handle.companyId, 'job_failed', f.occ)
           endPcRun(f.handle, f.occ.runId, 'TIME_LIMIT', at)
         }
+      } else if (why === 'PLACE_NOT_USABLE') {
+        // A person chooses the place again (「受け取る」); nothing ran, or what runs ends here.
+        told = end(f, ['due', 'running'], 'needs_person', 'PLACE_NOT_USABLE', 'job_failed')
+        if (f.occ.state === 'running') endPcRun(f.handle, f.occ.runId, 'PLACE_NOT_USABLE', at)
       } else if (why === 'OWNER_ABSENT') told = end(f, ['due'], 'skipped', 'OWNER_ABSENT', 'job_skipped')
       else if (why === 'JOB_VERSION_CHANGED') end(f, ['due'], 'held', 'JOB_VERSION_CHANGED', null)
     })
@@ -253,6 +281,7 @@ export function createJobRuns(deps: JobRunDeps) {
       state: f.occ.state as 'due' | 'running', check: d.check, checkSince: checkSince(f), checkUntil: checkUntil(f, member),
       ...(d.check.kind === 'new_files' ? { sinceCommit: sinceCommit(f), checkedCommit: f.occ.checkedCommit ?? null } : {}),
       procedure: d.run.procedure, grant: d.grant,
+      ...(placeOf(f) ? { deliverTo: placeOf(f) as JobDeliveryPlace } : {}),
     }
   }
 
@@ -376,7 +405,15 @@ export function createJobRuns(deps: JobRunDeps) {
       return run.subject.kind === 'occurrence' && run.step === JOB_PC_STEP
     },
 
-    afterDone(_member, run) { flush(run.id) },
+    afterDone(member, run) {
+      flush(run.id)
+      if (run.step !== JOB_PC_STEP) return
+      // What the run put into its deliverable place, linked to the やること its finish made (never fails the finish).
+      const f = own(member, run.subject.id)
+      const place = f ? placeOf(f) : null
+      if (!f || !place || f.occ.state !== 'done' || f.occ.runId !== run.id) return
+      deps.places?.linkToTask(member as Member, place, run.id, occurrenceTaskId(f.occ.id))
+    },
     afterFailed(_member, run) { flush(run.id) },
   }
 
@@ -413,6 +450,20 @@ export function createJobRuns(deps: JobRunDeps) {
       }
       turns.sort((a, b) => a.dueAt.localeCompare(b.dueAt))
       return ok({ turns })
+    },
+
+    /**
+     * The deliverable place a scheduled job's run may put into now (jobs.md "A deliverable place outside"): the place
+     * its responsible person chose, while the run still holds its occurrence and the job is runnable as pinned —
+     * asked by the connector's route at every call (the route ceiling let it through: `jobRunRouteAllowed`). Null:
+     * no such run, or none.
+     */
+    deliveryPlace(member: Member, runId: string): JobDeliveryPlace | null {
+      const run = companyData.forCompany(member.companyId).aiRuns.byId(runId)
+      if (!run || run.userId !== member.userId || run.step !== JOB_PC_STEP || run.subject.kind !== 'occurrence') return null
+      const f = held(member, { id: run.id, subject: run.subject, step: run.step, userId: run.userId, state: run.state })
+      if (!f || runnable(f)) return null
+      return placeOf(f)
     },
 
     /** The turn of the occurrence a claim just took (the claim's answer, with the meetings its check found), or null. */

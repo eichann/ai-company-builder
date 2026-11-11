@@ -20,7 +20,10 @@ paths:
 The first sales experience: 「○○社の提案書を作って」 in a consultation → the company's skill
 reads the Gemini minutes (ACB's minutes tools), past proposals / notes the member picks in Drive,
 makes the proposal as HTML + PDF locally, and ACB puts it into the Drive folder the member chose.
-Owner decisions 2026-11-01: output stays HTML / PDF (no Slides generation); Drive belongs to the
+Owner decisions 2026-11-01: output stays HTML / PDF (no Slides generation) — 2026-11-11: HTML / Markdown may
+also become a **Google document**, and a file ACB made may be **overwritten as a new revision** ("Google documents
+and overwriting"); a scheduled job may put into one folder its responsible person picked (`jobs.md` "A deliverable
+place outside"); Drive belongs to the
 Google **connector** (connection only) — never a core role, no core 「file storage」 role;
 least privilege: **`drive.file` + Google Picker only, never `drive` / `drive.readonly`**;
 per-member grant; the AI never sees a token; every call through the one Google client
@@ -122,17 +125,19 @@ The AI reads and writes **only** the member's own live picks.
   the text's `【】` → `〔〕`, server and app, `shared/core/outside-text.ts`), ≤ 200 000
   characters; a PDF (≤ 10 MB) as base64 — the app saves it at
   `.personal/google-drive/<id16>-<name>.pdf` (never synced) and returns the path.
-- `POST /put` (act token) `{ folderId, name, kind: pdf|html, sha256, contentBase64, requestKey, recordId? }`:
-  checks in order: kind allowlist → name (one segment, the kind's extension) → key / sha
-  shapes → size → sha256 matches → content (`%PDF-`, UTF-8 without NUL) → folder is a live
-  folder pick → **receipt first** (`claimPut`, unique per member + requestKey; same key with
+- `POST /put` (act token) `{ folderId, name, kind: pdf|html|markdown, as?: file|google_doc, sha256, contentBase64,
+  requestKey, updateFileId?, recordId? }`: checks in order: form allowlist (`drivePutForm`: a PDF / HTML as a file,
+  HTML / Markdown as a Google document — nothing else) → name (one segment; a file keeps the kind's extension, a
+  document none) → key / sha / `updateFileId` shapes → size → sha256 matches → content (`%PDF-`, UTF-8 without NUL)
+  → a scheduled job's run: its one folder (`DRIVE_FOLDER_NOT_GRANTED`, below) → folder is a live folder pick → an
+  update's file (below) → **receipt first** (`claimPut`, unique per member + requestKey; same key with
   other content 409 `DRIVE_PUT_KEY_REUSED`; done / unknown → answered as is, `existing: true`,
   nothing sent) → folder still a folder the member can add to → **for the AI, nobody outside
   the company's domain sees the folder** (`permissions.list` + `driveFolderReachesOutside`;
   anyone-link, another domain, an outside person/group → 403 `DRIVE_FOLDER_SHARED_OUTSIDE`;
   unreadable → 403 `DRIVE_FOLDER_SHARING_UNKNOWN`) → multipart upload with
   `appProperties.acbPutId = <put id>`, **never retried**. 2xx → `done` with `fileId`,
-  `revisionId` (`headRevisionId`) and `link`. Lost answer / 5xx → `unknown`, looked up at once
+  `revisionId` (`headRevisionId`, or `version:<n>` for a Google document: `driveRevisionOf`) and `link`. Lost answer / 5xx → `unknown`, looked up at once
   by `acbPutId` (found → `done`, reason `found-by-correlation`), and again on every
   `GET /puts/:putId` and repeat; never re-sent. Refused / not sent → the receipt is removed.
   An AI put's receipt copies the Skills its consultation had used (`skills`, records.md "Which
@@ -163,8 +168,40 @@ The AI reads and writes **only** the member's own live picks.
   by name and real location (`PathGuard`), no `.git` segment, not inside a private folder (a
   nested repository on the way, or a readable private folder path — one sentence that never
   names it), not in a folder left out on this computer, PDF / HTML ≤ 10 MB with the content
-  check; `requestKey = drivePutRequestKey(folder, name, sha256)` (same content, folder and name →
-  the same key: never two copies of identical content; an edited file has another sha256, so it is a new Drive file — and a new link — and the tool's description says so, since Drive files are not overwritten yet). Unattended runs see none of these tools (their allowlists).
+  check (Markdown too, always as a Google document); `requestKey = drivePutRequestKey(folder, name, sha256, { as,
+  updateFileId })` (same content, folder, name, form and target → the same key: never two copies of identical
+  content; a plain new file keeps the key it always had). **Whether a file is new or updated is only `updateFileId`**,
+  and the tool's description says so in both languages (incident 2026-11-10: the AI told a member that the same name
+  would not duplicate): without it every edited file is a new Drive file (and a new link); with it, the same file gets
+  a new revision. `drive_picked` lists `putFiles` (the status's `puts`: the member's own done puts, once per file, newest
+  first — what `updateFileId` may name). Unattended runs see none of these tools (their allowlists) — except a
+  scheduled job's run with a deliverable place, which gets `drive_picked` and `drive_put` only (`jobs.md`).
+
+## Google documents and overwriting (owner decisions 2026-11-11, 統合版 §12-6 E)
+
+- **A Google document**: `as: 'google_doc'` with `kind: html | markdown` uploads the text with the Docs MIME type in
+  the metadata (Drive converts it); the receipt's `mimeType` is `application/vnd.google-apps.document`, its revision
+  `version:<n>`, its `sha256` the bytes uploaded. The name has no extension (a trailing `.html` / `.md` is taken off).
+- **Overwriting** (`updateFileId`): only a file **this member's own put made** (`putOfFile`: their done receipt for
+  that file id — ACB made it, so `drive.file` opens it; a file they only picked, another member's put, an unknown id →
+  403 `DRIVE_FILE_NOT_OURS`), **in the same folder** as that put (403 `DRIVE_FILE_NOT_IN_FOLDER`), of **the same kind**
+  (a document by a document, a PDF by a PDF: 400 `DRIVE_UPDATE_KIND_MISMATCH`) — all before Google is asked and before
+  a receipt is written. After the receipt and the folder's checks, Google is asked for the file
+  (`id,mimeType,trashed,parents,capabilities(canEdit)`): still there, still in that folder, still that kind, editable
+  (else 403 `DRIVE_FILE_REFUSED`); **for the AI, the file's own sharing too** (a file can be shared outside by itself,
+  whatever its folder says: `DRIVE_FILE_SHARED_OUTSIDE` / `DRIVE_FILE_SHARING_UNKNOWN`). Then `PATCH
+  /upload/drive/v3/files/<id>?uploadType=multipart` with only `appProperties.acbPutId` (the lookup after a lost answer
+  finds the update by it) and the content; the name is not changed (the receipt keeps the file's). The receipt says
+  `updatedFileId` (`google_drive_puts.updated_file_id`, additive `migrateDrivePutUpdates`); the same request key with
+  another target is `DRIVE_PUT_KEY_REUSED`; never retried, a lost answer is `unknown` and found by `acbPutId` as for a new
+  file. The record link **follows the newest revision**: a put that updated a file this member linked from an earlier
+  put (the same `drive:<fileId>` link, made by them) replaces the link's kept facts (revision, sha256, when) in a
+  `link_file` entry noted 「Google Drive のファイルを上書きしたので、新しい版につなぎ直しました」 (`file-links.ts`
+  `follows`; records.md); anything else already linked stays as it is.
+- Unverified against real Google (the fake converts and updates in place): that Drive converts `text/markdown` into a
+  document (Google added Markdown import in 2024), and that `files.update` with HTML / Markdown media on a Google
+  document replaces its content as a new version (the Drive API documents media upload on update for Workspace
+  types).
 
 ## Linked to a record (a company without the shared folder; `records.md` "File links without the shared folder")
 
@@ -196,11 +233,14 @@ included (it stays the linker's).
 ## Not yet
 
 A person-side put (session route + card), a record ledger entry linking a put to a まとまり (a put in a consultation about a やること is linked to that やること, above), and
-`features_off` toggles (`member-oauth.md`).
+`features_off` toggles (`member-oauth.md`). Spreadsheets and Slides output; another connector's file storage (OneDrive,
+Box: its own `deliveryPlaces` kind, `connector-roles.md`).
 
 ## Tests
 
-`server/tests/integration/google-drive.test.ts` (fake Google, practice redirect; 「a picked file linked to a record」, including 「every record check comes first」; 「a put in a consultation about a task」: the receipt's facts, the AI as the actor, the name to the linker only, a replay never links again, a failed record check keeps the put done, the own-files list and another member's refusal) and
+`server/tests/integration/google-drive.test.ts` (fake Google, practice redirect; 「a picked file linked to a record」, including 「every record check comes first」; 「a put in a consultation about a task」: the receipt's facts, the AI as the actor, the name to the linker only, a replay never links again, a failed record check keeps the put done, the own-files list and another member's refusal; 「Google documents and overwriting」: HTML / Markdown as a document and every other form refused, an update keeps the id and link with a new version and is never sent twice, the key reused with another target, not the member's own put / another folder / another kind / another member — refused before Google is asked, a file moved away or shared outside by itself refused with nothing sent, a lost answer found, the task's link following the newest revision — mutation-checked, 12 guards; not reachable, kept as defence: an
+update's `fileId` taken from the receipt rather than Google's answer, and the link following only a changed revision) and
+`server/tests/integration/job-deliverables.test.ts` (a job's run: `jobs.md`) and
 `server/tests/unit/google-drive-core.test.ts` (the link parser: Google's hosts only, look-alikes,
 other schemes, folders, bad ids refused); `client/tests/google-drive-tools.test.ts`;
 `admin/tests/integrations.test.tsx` 「Drive の ファイル選び」. Mutation-checked: the Picker

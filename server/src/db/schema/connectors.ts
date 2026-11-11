@@ -161,6 +161,16 @@ export function migrateGooglePicker(conn: Database.Database): void {
  * the next call. Added after the table shipped; `[]` = every default holds,
  * so a company that never chose has 受信を読む off.
  */
+/**
+ * A Drive put that updated a file an earlier put of the member made (google-drive.md "Overwriting"): the
+ * Drive file it gave a new revision (`updated_file_id`; NULL = it made a new file). Additive: an older
+ * build neither reads nor writes it (its puts all make new files). Every startup, idempotent.
+ */
+export function migrateDrivePutUpdates(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(google_drive_puts)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('updated_file_id')) conn.exec('ALTER TABLE google_drive_puts ADD COLUMN updated_file_id TEXT')
+}
+
 export function migrateGoogleCompanyFeatures(conn: Database.Database): void {
   const cols = new Set((conn.prepare('PRAGMA table_info(google_oauth_clients)').all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('features_off')) conn.exec("ALTER TABLE google_oauth_clients ADD COLUMN features_off TEXT NOT NULL DEFAULT '[]'")

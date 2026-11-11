@@ -344,7 +344,17 @@ registerApprovalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies }
 // Settings → 「不在と代わりの人」 (features/absences): the member's own absences, with the session.
 registerAbsencesIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // Settings → 「定期の仕事」 (features/jobs): the jobs the member is responsible for, with the session.
-registerJobsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+registerJobsIpc(ipc, {
+  baseUrl: getServerApiUrl, cookies: session.cookies,
+  // A job's deliverable place outside (jobs.md): Google's kind is a Drive folder the member picks in Google Picker.
+  choosePlace: async (companyId, place) => {
+    if (place.connector !== 'google' || place.kind !== 'drive_folder') return { ok: false, message: 'このアプリでは、この置き先を選べません。アプリを新しくしてください。' }
+    const picked = await drivePicking.pick(companyId, 'folder')
+    if (!picked.ok) return { ok: false, message: picked.message }
+    const folder = picked.picks.find(p => p.kind === 'folder')
+    return folder ? { ok: true, ref: folder.id } : { ok: false, message: '選んだフォルダを使えませんでした（追加できる権限のあるフォルダを選んでください）。' }
+  },
+})
 // 自分の設定 → 「受信を読む」「AI が自動で進める」 (features/work-switches): the member's own, with the session.
 registerWorkSwitchesIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // 見られる人 for the lists (features/viewers): with the session.

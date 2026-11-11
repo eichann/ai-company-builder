@@ -44,7 +44,9 @@ function fakeServer(scope: 'read' | 'act', opts: { available?: boolean; pdf?: bo
     if (url.endsWith('/me/record-tokens')) return json(201, { token: TOKEN, tokenId: 'tok-1', scope, expiresAt: 'x' })
     if (url.endsWith('/api/records-ai/types')) return json(200, { types: [] })
     if (url.endsWith('/api/records-ai/plugins')) return json(200, { plugins: [] })
-    if (url.endsWith('/api/records-ai/google/drive/status')) return json(200, { available: opts.available ?? true, granted: true, picks: [] })
+    if (url.endsWith('/api/records-ai/google/drive/status')) {
+      return json(200, { available: opts.available ?? true, granted: true, picks: [], puts: [{ fileId: 'fake-upload-1', name: '面談報告書', mimeType: 'application/vnd.google-apps.document', folderId: FOLDER, link: 'l', at: 't' }] })
+    }
     if (url.endsWith('/api/records-ai/google/drive/read')) {
       return json(200, opts.pdf
         ? { file: { id: DOC, name: '手書き/メモ.pdf', mimeType: 'application/pdf', modifiedTime: null }, header: 'H', text: null, footer: 'F', truncated: false, pdfBase64: PDF.toString('base64'), instructionLike: [] }
@@ -104,6 +106,7 @@ function companyFolder(): string {
   fs.writeFileSync(path.join(root, '営業部', '.personal', 'ご提案.html'), '<p>提案</p>')
   fs.writeFileSync(path.join(root, '営業部', '偽物.pdf'), '<html>not a pdf</html>')
   fs.writeFileSync(path.join(root, '営業部', 'メモ.docx'), 'PK')
+  fs.writeFileSync(path.join(root, '営業部', '.personal', '面談報告書.md'), '# 面談報告書\n')
   // A private folder's clone: a repository of its own.
   fs.mkdirSync(path.join(root, '営業部', '秘密の案件', '.git'), { recursive: true })
   fs.writeFileSync(path.join(root, '営業部', '秘密の案件', '提案.pdf'), PDF)
@@ -199,7 +202,7 @@ test('drive_put: only a PDF / HTML inside the company folder, never a private or
     '人事/評価.pdf': '限られた人だけ',
     '営業部/置いていない/x.pdf': 'ダウンロードしていない',
     '営業部/偽物.pdf': 'PDF ではない',
-    '営業部/メモ.docx': 'PDF と HTML だけ',
+    '営業部/メモ.docx': 'PDF と HTML',
     '.git/config': '置けません',
   }
   for (const [p, words] of Object.entries(refusals)) {
@@ -240,8 +243,40 @@ test('drive_put names the consultation\'s やること (the app\'s topic, read a
   assert.equal(sent().length, 2)
 })
 
+test('drive_put: Markdown always as a Google document; HTML when asked; a PDF never converted; updateFileId passed on; its words say when a file is new', async () => {
+  const root = companyFolder()
+  const { t, seen } = await tools('act', root)
+  const sent = () => seen.filter(s => s.url.endsWith('/google/drive/put')).map(s => JSON.parse(s.body!))
+  await t.execute('drive_put', { path: '営業部/.personal/面談報告書.md', folderId: FOLDER })
+  assert.deepEqual([sent()[0].kind, sent()[0].as, sent()[0].name], ['markdown', 'google_doc', '面談報告書'])
+  assert.equal(sent()[0].requestKey, drivePutRequestKey(FOLDER, '面談報告書', sent()[0].sha256, { as: 'google_doc' }))
+  await t.execute('drive_put', { path: '営業部/.personal/ご提案.html', folderId: FOLDER, as: 'google_doc' })
+  assert.deepEqual([sent()[1].kind, sent()[1].as, sent()[1].name], ['html', 'google_doc', 'ご提案'])
+  const pdfDoc = JSON.parse(await t.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER, as: 'google_doc' }))
+  assert.ok(typeof pdfDoc.error === 'string')
+  assert.equal(sent().length, 2)
+  // Overwriting: the fileId goes as updateFileId, and the key is another one than a new file's.
+  const upd = JSON.parse(await t.execute('drive_put', { path: '営業部/.personal/面談報告書.md', folderId: FOLDER, updateFileId: 'fake-upload-1' }))
+  assert.equal(sent()[2].updateFileId, 'fake-upload-1')
+  assert.notEqual(sent()[2].requestKey, sent()[0].requestKey)
+  assert.equal(upd.state, 'done')
+  assert.equal(JSON.parse(await t.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER, updateFileId: '../x' })).error, '入力が正しくありません。')
+  // The description is honest about when a new file is made (the 11/10 incident) and how to update one.
+  const d = t.specs.find(s => s.name === 'drive_put')!.description
+  assert.match(d, /updateFileId を渡さないと、いつも新しいファイルを作る/)
+  assert.match(d, /without it a NEW file is always made/)
+  assert.doesNotMatch(d, /cannot be overwritten/)
+  // drive_picked lists what may be updated.
+  const picked = JSON.parse(await t.execute('drive_picked', {}))
+  assert.deepEqual(picked.putFiles.map((f: { fileId: string }) => f.fileId), ['fake-upload-1'])
+})
+
 test('the same file, folder and name → the same request key; anything else → another', () => {
   const a = drivePutRequestKey(FOLDER, 'ご提案.pdf', 'a'.repeat(64))
+  // A plain new file keeps the key it always had (a repeat across an update of the app is still the same put).
+  assert.equal(a, drivePutRequestKey(FOLDER, 'ご提案.pdf', 'a'.repeat(64), { as: 'file' }))
+  assert.notEqual(a, drivePutRequestKey(FOLDER, 'ご提案.pdf', 'a'.repeat(64), { as: 'google_doc' }))
+  assert.notEqual(a, drivePutRequestKey(FOLDER, 'ご提案.pdf', 'a'.repeat(64), { updateFileId: 'fake-upload-1' }))
   assert.equal(a, drivePutRequestKey(FOLDER, 'ご提案.pdf'.normalize('NFD'), 'a'.repeat(64)))
   assert.notEqual(a, drivePutRequestKey(FOLDER, 'ご提案.pdf', 'b'.repeat(64)))
   assert.notEqual(a, drivePutRequestKey('fake-folder-other-0001', 'ご提案.pdf', 'a'.repeat(64)))

@@ -31,12 +31,12 @@
 import { GOOGLE_SCOPE } from '../../shared/core/google'
 import {
   checkDriveFileName, checkDrivePutContent, DRIVE_FOLDER_MIME, DRIVE_PICK_MAX_FILES, DRIVE_PICK_TTL_MS, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, DRIVE_READ_AS,
-  DRIVE_READ_PDF_MAX_BYTES, DRIVE_READ_TEXT_MAX, DRIVE_TEXT_FOOTER, DRIVE_TEXT_HEADER, driveFolderReachesOutside, drivePutMimeOf, isDriveId, isDrivePickMode,
-  type DrivePermissionLike, type DrivePutKind,
+  DRIVE_READ_PDF_MAX_BYTES, DRIVE_READ_TEXT_MAX, DRIVE_TEXT_FOOTER, DRIVE_TEXT_HEADER, driveFolderReachesOutside, drivePutForm, driveRevisionOf, isDriveId, isDrivePickMode,
+  type DrivePermissionLike,
 } from '../../shared/core/google-drive'
 import { INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
 import { neutralizeOutsideText, outsideTextFlags } from '../../shared/core/outside-text'
-import type { DriveAiStatus, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerSession, DrivePicksResult, DrivePutAnswer, DrivePutView, DriveReadAnswer } from '../../shared/types/google-drive'
+import type { DriveAiStatus, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerSession, DrivePicksResult, DrivePutAnswer, DrivePutView, DriveReadAnswer, DriveUpdatableFile } from '../../shared/types/google-drive'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { DrivePickRow, DrivePutRow } from '../ports/google-drive'
@@ -116,6 +116,7 @@ function putView(p: DrivePutRow): DrivePutView {
   return {
     id: p.id, state: p.state, name: p.name, mimeType: p.mimeType, bytes: p.bytes, sha256: p.sha256, folderId: p.folderId, folderName: p.folderName,
     fileId: p.fileId, revisionId: p.revisionId, link: p.link, createdAt: p.createdAt, finishedAt: p.finishedAt, reason: p.reason, skills: p.skills,
+    updatedFileId: p.updatedFileId,
   }
 }
 
@@ -182,7 +183,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       method: 'GET', path: '/drive/v3/files',
       query: {
         q: `appProperties has { key='acbPutId' and value='${row.id}' } and trashed = false`,
-        fields: 'files(id,headRevisionId,webViewLink)', supportsAllDrives: 'true', includeItemsFromAllDrives: 'true', pageSize: '2',
+        fields: 'files(id,headRevisionId,version,webViewLink)', supportsAllDrives: 'true', includeItemsFromAllDrives: 'true', pageSize: '2',
       },
       operation: 'drive.files.list',
     })
@@ -191,7 +192,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     const found = files[0]
     if (!found || !isDriveId(found.id)) return row
     const settled = {
-      state: 'done' as const, fileId: found.id as string, revisionId: str(found.headRevisionId), link: str(found.webViewLink),
+      state: 'done' as const, fileId: found.id as string, revisionId: driveRevisionOf(found.headRevisionId, found.version), link: str(found.webViewLink),
       reason: 'found-by-correlation', finishedAt: clock.now(),
     }
     handle(companyId).googleDrive.settlePut(row.id, settled)
@@ -202,15 +203,26 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     /** Where the Picker page loads Google's script from (its CSP names it). */
     pickerScriptOrigin: deps.pickerScriptOrigin,
 
-    /** GET /api/records-ai/google/drive/status: whether the Drive tools work, the member's grant and live picks. */
-    async aiStatus(member: Member): Promise<Outcome<DriveAiStatus>> {
+    /**
+     * GET /api/records-ai/google/drive/status: whether the Drive tools work, the member's grant, live picks and
+     * the files their puts made (what `drive_put` may update). `scope` (a scheduled job's run): only its folder.
+     */
+    async aiStatus(member: Member, scope?: { folderId: string }): Promise<Outcome<DriveAiStatus>> {
       const h = handle(member.companyId)
       const grant = h.connectors.grant('google', member.userId)
       const now = clock.now()
+      const inScope = (folderId: string) => !scope || folderId === scope.folderId
+      const puts = new Map<string, DriveUpdatableFile>()
+      for (const p of h.googleDrive.donePuts(member.userId, OWN_FILES_LISTED)) {
+        if (p.fileId && !puts.has(p.fileId) && inScope(p.folderId)) {
+          puts.set(p.fileId, { fileId: p.fileId, name: p.name, mimeType: p.mimeType, folderId: p.folderId, link: p.link, at: p.finishedAt ?? p.createdAt })
+        }
+      }
       return ok({
         available: await available(member.companyId),
         granted: grant?.status === 'active' && grant.scopes.includes(GOOGLE_SCOPE.driveFile),
-        picks: h.googleDrive.picks(member.userId, now, PICKS_LISTED).map(pickView),
+        picks: h.googleDrive.picks(member.userId, now, PICKS_LISTED).filter(p => inScope(p.fileId)).map(pickView),
+        puts: [...puts.values()],
       })
     },
 
@@ -297,9 +309,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const f = isObj(m.json) ? m.json : {}
       if (f.trashed === true || f.id !== fileId) return refuse('forbidden', noAccess, { code: 'DRIVE_NO_ACCESS' })
       const mimeType = str(f.mimeType)
-      const head = str(f.headRevisionId)
-      const version = typeof f.version === 'string' && /^\d{1,20}$/.test(f.version) ? f.version : typeof f.version === 'number' && Number.isInteger(f.version) ? String(f.version) : null
-      const revisionId = head && head.length <= 200 ? head : version ? `version:${version}` : null
+      const revisionId = driveRevisionOf(f.headRevisionId, f.version)
       const how = mimeType ? DRIVE_READ_AS[mimeType] : undefined
       let sha256: string | null = null
       if (how) {
@@ -383,24 +393,34 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       })
     },
 
-    /** POST /api/records-ai/google/drive/put (act token): a PDF / HTML into a picked folder. */
-    async put(member: Member, actor: DriveActor, body: unknown): Promise<Outcome<DrivePutAnswer>> {
+    /**
+     * POST /api/records-ai/google/drive/put (act token): a PDF / HTML into a picked folder, or HTML / Markdown
+     * converted into a Google document (`as: 'google_doc'`); with `updateFileId`, a new revision of a file an
+     * earlier put of this member made in that same folder (google-drive.md "Overwriting"). `scope` (a scheduled
+     * job's run, jobs.md "A deliverable place outside"): only into that one folder — checked here at every call.
+     */
+    async put(member: Member, actor: DriveActor, body: unknown, scope?: { folderId: string }): Promise<Outcome<DrivePutAnswer>> {
       if (!isObj(body)) return refuse('bad-request', 'Body must be a JSON object')
       if (!isDriveId(body.folderId)) return refuse('bad-request', 'folderId must be a Drive id')
-      const mimeType = drivePutMimeOf(body.kind)
-      if (!mimeType) return refuse('bad-request', 'Google Drive に置けるのは PDF と HTML だけです。', { code: 'DRIVE_TYPE_REFUSED' })
-      const kind = body.kind as DrivePutKind
-      const named = checkDriveFileName(body.name, kind)
+      const form = drivePutForm(body.kind, body.as)
+      if (!form) return refuse('bad-request', 'Google Drive に置けるのは PDF と HTML（そのまま）、または Google ドキュメントにする HTML と Markdown だけです。', { code: 'DRIVE_TYPE_REFUSED' })
+      const named = checkDriveFileName(body.name, form.kind, form.as)
       if ('error' in named) return refuse('bad-request', named.error, { code: 'DRIVE_NAME_REFUSED' })
       if (typeof body.requestKey !== 'string' || !REQUEST_KEY_RE.test(body.requestKey)) return refuse('bad-request', 'requestKey is 8–100 letters, digits, . _ : -')
       if (typeof body.sha256 !== 'string' || !SHA256_RE.test(body.sha256)) return refuse('bad-request', 'sha256 must be 64 lower-case hex characters')
+      if (body.updateFileId !== undefined && !isDriveId(body.updateFileId)) return refuse('bad-request', 'updateFileId must be a Drive id')
+      const updateFileId = body.updateFileId as string | undefined
       if (typeof body.contentBase64 !== 'string' || body.contentBase64.length > Math.ceil(DRIVE_PUT_MAX_BYTES / 3) * 4 + 4) {
         return refuse('bad-request', `ファイルが大きすぎます（${DRIVE_PUT_MAX_BYTES / 1024 / 1024} MB まで）。`, { code: 'DRIVE_FILE_TOO_LARGE' })
       }
       const bytes = new Uint8Array(Buffer.from(body.contentBase64, 'base64'))
       if (deps.sha256(bytes) !== body.sha256) return refuse('bad-request', 'ファイルの中身が送る途中で変わりました。もう一度お試しください。', { code: 'DRIVE_CONTENT_MISMATCH' })
-      const contentProblem = checkDrivePutContent(kind, bytes)
+      const contentProblem = checkDrivePutContent(form.kind, bytes)
       if (contentProblem) return refuse('bad-request', contentProblem, { code: 'DRIVE_CONTENT_REFUSED' })
+      // A scheduled job's run: the one folder its responsible person chose, nothing else.
+      if (scope && body.folderId !== scope.folderId) {
+        return refuse('forbidden', 'この定期の仕事が置けるのは、責任者が選んだフォルダだけです。', { code: 'DRIVE_FOLDER_NOT_GRANTED' })
+      }
 
       const h = handle(member.companyId)
       const now = clock.now()
@@ -408,19 +428,35 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       if (!folderPick || folderPick.kind !== 'folder') {
         return refuse('forbidden', 'このフォルダはメンバーが選んだものではありません。drive_pick_folder でメンバーに置き場所を選んでもらってください。', { code: 'DRIVE_FOLDER_NOT_PICKED' })
       }
+      // Overwriting: only a file this member's own put made (ACB made it), in this same folder, of the same kind.
+      let target: DrivePutRow | null = null
+      if (updateFileId !== undefined) {
+        target = h.googleDrive.putOfFile(member.userId, updateFileId)
+        if (!target) {
+          return refuse('forbidden', 'このファイルは、このメンバーの drive_put で作ったものではないため、上書きできません。新しいファイルとして置いてください。', { code: 'DRIVE_FILE_NOT_OURS' })
+        }
+        if (target.folderId !== body.folderId) {
+          return refuse('forbidden', 'このファイルは、このフォルダに置いたものではないため、上書きできません。', { code: 'DRIVE_FILE_NOT_IN_FOLDER' })
+        }
+        if (target.mimeType !== form.driveMime) {
+          return refuse('bad-request', '上書きは同じ種類どうしだけです（Google ドキュメントは Google ドキュメントで、PDF は PDF で、HTML は HTML で）。', { code: 'DRIVE_UPDATE_KIND_MISMATCH' })
+        }
+      }
+      const targetId = target ? updateFileId as string : null
 
       const id = `drive-put-${ids.newId()}`.replace(/[^A-Za-z0-9_-]/g, '')
       const row: DrivePutRow = {
         id, userId: member.userId, requestKey: body.requestKey, actorKind: actor.kind, conversationId: actor.conversationId, runId: actor.runId,
-        folderId: body.folderId, folderName: folderPick.name, name: named.name, mimeType, bytes: bytes.byteLength, sha256: body.sha256,
-        state: 'sending', fileId: null, revisionId: null, link: null, reason: null, createdAt: now, finishedAt: null, skills: null,
+        // An update keeps the Drive file's name (Drive is not asked to rename it): the receipt says the name it has.
+        folderId: body.folderId, folderName: folderPick.name, name: target ? target.name : named.name, mimeType: form.driveMime, bytes: bytes.byteLength, sha256: body.sha256,
+        state: 'sending', fileId: null, revisionId: null, link: null, reason: null, createdAt: now, finishedAt: null, skills: null, updatedFileId: targetId,
       }
 
-      // The receipt first: the same request (the app's key: same file, folder and name) is answered with what it made.
+      // The receipt first: the same request (the app's key: same file, folder, name, form and target) is answered with what it made.
       const claimed = h.googleDrive.claimPut(row)
       if (!claimed.claimed) {
         const e = claimed.existing
-        if (e.folderId !== row.folderId || e.name !== row.name || e.sha256 !== row.sha256 || e.mimeType !== row.mimeType) {
+        if (e.folderId !== row.folderId || e.name !== row.name || e.sha256 !== row.sha256 || e.mimeType !== row.mimeType || e.updatedFileId !== row.updatedFileId) {
           return refuse('conflict', 'この requestKey は別のファイルに使われています。', { code: 'DRIVE_PUT_KEY_REUSED' })
         }
         if (e.state === 'sending') return refuse('conflict', 'このファイルはいま Google Drive に置いているところです。', { code: 'DRIVE_PUT_IN_PROGRESS' })
@@ -430,7 +466,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       // What the receipt copied (the AI's consultation's Skills, records.md "Which Skill").
       row.skills = claimed.skills
 
-      // Before the upload: the folder is still a folder ACB may add to, and (for the AI) nobody outside sees it.
+      // Before the upload: the folder is still a folder ACB may add to, and (for the AI) nobody outside sees it;
+      // an update's file is still there, in that folder, editable, and (for the AI) not shared outside by itself.
       const refusedBefore = await (async (): Promise<Outcome<never> | null> => {
         const m = await meta(member.companyId, member.userId, row.folderId)
         if (!m.ok) return googleRefusal(m, 'この置き場所を Google Drive で開けませんでした（消されたか、見られなくなった可能性があります）。')
@@ -440,13 +477,36 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         }
         const domain = h.connectors.client()?.domain
         if (!domain) return refuse('forbidden', STOPPED, { code: 'GOOGLE_STOPPED' })
-        if (actor.kind !== 'ai') return null
-        const perms = await folderPermissions(member.companyId, member.userId, row.folderId)
-        if (perms === null || !Array.isArray(perms)) {
-          return refuse('forbidden', 'このフォルダを誰が見られるか確かめられないため、AI からは置けません。メンバー本人が Google Drive に置いてください。', { code: 'DRIVE_FOLDER_SHARING_UNKNOWN' })
+        if (actor.kind === 'ai') {
+          const perms = await folderPermissions(member.companyId, member.userId, row.folderId)
+          if (perms === null || !Array.isArray(perms)) {
+            return refuse('forbidden', 'このフォルダを誰が見られるか確かめられないため、AI からは置けません。メンバー本人が Google Drive に置いてください。', { code: 'DRIVE_FOLDER_SHARING_UNKNOWN' })
+          }
+          if (driveFolderReachesOutside(perms, domain)) {
+            return refuse('forbidden', 'このフォルダは社外の人も見られるため、AI からは置けません（社外に渡すのはメンバー本人の操作です）。社内だけのフォルダを選んでもらうか、メンバー本人が置いてください。', { code: 'DRIVE_FOLDER_SHARED_OUTSIDE' })
+          }
         }
-        if (driveFolderReachesOutside(perms, domain)) {
-          return refuse('forbidden', 'このフォルダは社外の人も見られるため、AI からは置けません（社外に渡すのはメンバー本人の操作です）。社内だけのフォルダを選んでもらうか、メンバー本人が置いてください。', { code: 'DRIVE_FOLDER_SHARED_OUTSIDE' })
+        if (targetId === null) return null
+        const fileRefused = 'このファイルは上書きできません（消されたか、別の場所に移されたか、直す権限がありません）。新しいファイルとして置いてください。'
+        const t = await drive(member.companyId, member.userId, {
+          method: 'GET', path: `/drive/v3/files/${targetId}`,
+          query: { fields: 'id,mimeType,trashed,parents,capabilities(canEdit)', supportsAllDrives: 'true' },
+          operation: 'drive.files.get',
+        })
+        if (!t.ok) return googleRefusal(t, fileRefused)
+        const tf = isObj(t.json) ? t.json : {}
+        const parents = Array.isArray(tf.parents) ? tf.parents : []
+        if (tf.id !== targetId || tf.trashed === true || tf.mimeType !== form.driveMime || !parents.includes(row.folderId) || !(isObj(tf.capabilities) && tf.capabilities.canEdit === true)) {
+          return refuse('forbidden', fileRefused, { code: 'DRIVE_FILE_REFUSED' })
+        }
+        if (actor.kind !== 'ai') return null
+        // A file can be shared outside on its own, whatever its folder says: then updating it is sending outside.
+        const filePerms = await folderPermissions(member.companyId, member.userId, targetId)
+        if (filePerms === null || !Array.isArray(filePerms)) {
+          return refuse('forbidden', 'このファイルを誰が見られるか確かめられないため、AI からは上書きできません。', { code: 'DRIVE_FILE_SHARING_UNKNOWN' })
+        }
+        if (driveFolderReachesOutside(filePerms, domain)) {
+          return refuse('forbidden', 'このファイルは社外の人も見られるため、AI からは上書きできません（社外に渡すのはメンバー本人の操作です）。', { code: 'DRIVE_FILE_SHARED_OUTSIDE' })
         }
         return null
       })()
@@ -455,15 +515,27 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         return refusedBefore
       }
 
-      const upload = multipart(id, { name: named.name, parents: [row.folderId], mimeType, appProperties: { acbPutId: id } }, mimeType, bytes)
-      const r = await drive(member.companyId, member.userId, {
-        method: 'POST', path: '/upload/drive/v3/files',
-        query: { uploadType: 'multipart', supportsAllDrives: 'true', fields: 'id,headRevisionId,webViewLink' },
-        rawBody: upload, operation: 'drive.files.create',
-      })
+      const fields = 'id,headRevisionId,version,webViewLink'
+      const r = targetId !== null
+        // A new revision of the same file: only its content and ACB's correlation id (the lookup after a lost answer).
+        ? await drive(member.companyId, member.userId, {
+          method: 'PATCH', path: `/upload/drive/v3/files/${targetId}`,
+          query: { uploadType: 'multipart', supportsAllDrives: 'true', fields },
+          rawBody: multipart(id, { appProperties: { acbPutId: id } }, form.uploadMime, bytes), operation: 'drive.files.update',
+        })
+        : await drive(member.companyId, member.userId, {
+          method: 'POST', path: '/upload/drive/v3/files',
+          query: { uploadType: 'multipart', supportsAllDrives: 'true', fields },
+          rawBody: multipart(id, { name: named.name, parents: [row.folderId], mimeType: form.driveMime, appProperties: { acbPutId: id } }, form.uploadMime, bytes),
+          operation: 'drive.files.create',
+        })
       if (r.ok) {
         const j = isObj(r.json) ? r.json : {}
-        const settled = { state: 'done' as const, fileId: isDriveId(j.id) ? j.id : null, revisionId: str(j.headRevisionId), link: str(j.webViewLink), reason: null, finishedAt: clock.now() }
+        const made = isDriveId(j.id) ? j.id : null
+        const settled = {
+          state: 'done' as const, fileId: targetId ?? made, revisionId: driveRevisionOf(j.headRevisionId, j.version),
+          link: str(j.webViewLink) ?? target?.link ?? null, reason: null, finishedAt: clock.now(),
+        }
         h.googleDrive.settlePut(id, settled)
         return ok({ drivePut: putView({ ...row, ...settled }), existing: false })
       }
@@ -474,7 +546,31 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       }
       // Refused or not sent: nothing was made; the key is free again.
       h.googleDrive.dropPut(id)
-      return googleRefusal(r, 'この置き場所に置けませんでした（Google Drive が断りました）。')
+      return googleRefusal(r, targetId !== null ? 'このファイルを上書きできませんでした（Google Drive が断りました）。' : 'この置き場所に置けませんでした（Google Drive が断りました）。')
+    },
+
+    /**
+     * A scheduled job's deliverable place (jobs.md "A deliverable place outside", kind `drive_folder`): the member's
+     * own live pick of this folder — its name and when the pick ends — or null (not picked by them, expired, a file,
+     * not a Drive id). Nothing asked of Google: the put asks again at every call.
+     */
+    folderPlace(companyId: string, userId: string, folderId: unknown): { name: string; expiresAt: string } | null {
+      if (!isDriveId(folderId)) return null
+      const pick = handle(companyId).googleDrive.pick(userId, folderId, clock.now())
+      return pick && pick.kind === 'folder' ? { name: pick.name, expiresAt: pick.expiresAt } : null
+    },
+
+    /**
+     * The files a scheduled job's run put (jobs.md "A deliverable place outside"): the member's own done
+     * receipts of that run, one per Drive file (its latest put), with the receipt's facts — to link them to the
+     * やること the run's finish made. Google is not asked.
+     */
+    runDeliverables(member: Member, runId: string): DriveLinkableFile[] {
+      const byFile = new Map<string, DriveLinkableFile>()
+      for (const p of handle(member.companyId).googleDrive.runPuts(member.userId, runId, 50)) {
+        if (p.fileId && isDriveId(p.fileId)) byFile.set(p.fileId, { fileId: p.fileId, revisionId: p.revisionId, name: p.name, mimeType: p.mimeType, sha256: p.sha256 })
+      }
+      return [...byFile.values()]
     },
 
     /** GET /api/records-ai/google/drive/puts/:putId: the member's own put (an unknown one is looked up again). */

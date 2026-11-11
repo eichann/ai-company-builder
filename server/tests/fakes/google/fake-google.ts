@@ -26,7 +26,8 @@
  *                                      /v2/conferenceRecords/{id}/participants
  *   www.googleapis.com            GET  /drive/v3/files/{fileId}, /drive/v3/files/{fileId}/export
  *                                 GET  /drive/v3/files (appProperties search), /drive/v3/files/{fileId}/permissions
- *                                 POST /upload/drive/v3/files?uploadType=multipart
+ *                                 POST /upload/drive/v3/files?uploadType=multipart (a Google document from text/html or text/markdown)
+ *                                 PATCH /upload/drive/v3/files/{fileId}?uploadType=multipart (a new revision of the same file)
  *   apis.google.com               GET  /js/api.js — a stand-in Google Picker (staging only; picks through /__picker/*)
  *   gmail.googleapis.com          POST /gmail/v1/users/{userId}/messages/send
  *                                 POST /upload/gmail/v1/users/{userId}/messages/send?uploadType=media (message/rfc822 bytes)
@@ -245,7 +246,11 @@ export interface FakeGoogle {
   /** The account picked these files / folders for this client in Google Picker (drive.file now reaches them). */
   pick(clientId: string, email: string, ids: string[]): void
   /** A Drive file as it is now (null when unknown); for assertions. */
-  driveFile(id: string): { name: string; mimeType: string; parents: string[]; content: Buffer; appProperties: Record<string, string>; createdBy: string | null } | null
+  driveFile(id: string): { name: string; mimeType: string; parents: string[]; content: Buffer; appProperties: Record<string, string>; createdBy: string | null; version: number; headRevisionId: string; uploadedAs: string | null } | null
+  /** Someone shares this Drive file (or folder) by itself with another permission (anyone, another domain, a person). */
+  shareDriveFile(id: string, permission: { type: 'user' | 'group' | 'domain' | 'anyone'; role: string; emailAddress?: string; domain?: string }): void
+  /** Someone moves this Drive file into another folder (its parents become exactly that one). */
+  moveDriveFile(id: string, folderId: string): void
   /** Every Drive file the app made (uploads), oldest first. */
   uploads(): Array<{ id: string; name: string; parents: string[]; mimeType: string }>
   /** A spreadsheet as it is now (null when unknown); for assertions. */
@@ -797,11 +802,18 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     pickedFor: Set<string>
     modifiedTime: string
     headRevisionId: string
+    /** Drive's file version: grows with every change (a Google document's only revision mark). */
+    version: number
+    /** The MIME type the content was uploaded as (a Google document converted from HTML / Markdown), or null. */
+    uploadedAs: string | null
   }
   const driveFiles = new Map<string, LiveDriveFile>((seed.driveFiles ?? []).map(f => [f.id, {
     ...f, content: Buffer.from(f.content, 'utf8'), parents: f.parents ?? [], appProperties: {}, createdBy: null, pickedFor: new Set<string>(),
-    modifiedTime: iso(created), headRevisionId: `rev-${randomToken(8)}`,
+    modifiedTime: iso(created), headRevisionId: `rev-${randomToken(8)}`, version: 1, uploadedAs: null,
   }]))
+  /** What Drive converts into a Google document on upload (the importable text types this fake knows). */
+  const DOC_IMPORTS = new Set(['text/html', 'text/markdown', 'text/plain'])
+  const DOC_MIME = 'application/vnd.google-apps.document'
   const uploadOrder: string[] = []
 
   /** The file as the bearer's token may see it (drive.file: picked for this client, or made by it), else 404. */
@@ -818,10 +830,13 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   const driveFileOut = (f: LiveDriveFile, viewer: string): Record<string, unknown> => ({
     kind: 'drive#file', id: f.id, name: f.name, mimeType: f.mimeType, trashed: false, parents: f.parents, modifiedTime: f.modifiedTime,
     // Drive's file version (int64 as a string): every file has one, Google documents too.
-    version: '1',
-    webViewLink: `https://drive.google.com/file/d/${f.id}/view`, appProperties: f.appProperties,
+    version: String(f.version),
+    webViewLink: f.mimeType === DOC_MIME ? `https://docs.google.com/document/d/${f.id}/edit` : `https://drive.google.com/file/d/${f.id}/view`, appProperties: f.appProperties,
     ...(f.mimeType.startsWith('application/vnd.google-apps.') ? {} : { headRevisionId: f.headRevisionId, size: String(f.content.byteLength) }),
-    capabilities: { canAddChildren: f.mimeType === 'application/vnd.google-apps.folder' && (f.writers ?? [f.owner]).some(w => w.toLowerCase() === viewer.toLowerCase()) },
+    capabilities: {
+      canAddChildren: f.mimeType === 'application/vnd.google-apps.folder' && (f.writers ?? [f.owner]).some(w => w.toLowerCase() === viewer.toLowerCase()),
+      canEdit: (f.writers ?? [f.owner]).some(w => w.toLowerCase() === viewer.toLowerCase()),
+    },
   })
 
   /** Drive's `fields` selection: top-level names, `capabilities(...)` kept whole. */
@@ -851,11 +866,11 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     const hits = [...driveFiles.values()].filter(f => f.appProperties[m[1]] === m[2]).filter(f => {
       try { visibleDriveFile(a, f.id); return true } catch { return false }
     })
-    return c.json({ kind: 'drive#fileList', files: hits.map(f => ({ id: f.id, headRevisionId: f.headRevisionId, webViewLink: `https://drive.google.com/file/d/${f.id}/view` })) })
+    return c.json({ kind: 'drive#fileList', files: hits.map(f => selectFields(driveFileOut(f, a.email), 'id,headRevisionId,version,webViewLink')) })
   })
 
-  app.post('/upload/drive/v3/files', async c => {
-    const a = bearer(c, [GOOGLE_SCOPES.driveFile, `${AUTH}drive`], 'drive.googleapis.com')
+  /** A multipart/related upload: its JSON metadata and its media (with the media part's type). */
+  async function multipartOf(c: Context): Promise<{ meta: Record<string, unknown>; media: Buffer; mediaType: string }> {
     if (c.req.query('uploadType') !== 'multipart') throw apiError(400, 'Invalid uploadType', 'badRequest')
     const type = c.req.header('content-type') ?? ''
     const boundary = /^multipart\/related;\s*boundary=([^;]+)$/i.exec(type)?.[1]
@@ -875,16 +890,25 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       at = next
     }
     if (parts.length !== 2) throw apiError(400, 'Multipart body must have 2 parts', 'badContent')
-    const meta = JSON.parse(parts[0].body.toString('utf8')) as { name?: string; parents?: string[]; mimeType?: string; appProperties?: Record<string, string> }
+    const mediaType = /content-type:\s*([^;\r\n]+)/i.exec(parts[1].headers)?.[1]?.trim().toLowerCase() ?? ''
+    return { meta: JSON.parse(parts[0].body.toString('utf8')) as Record<string, unknown>, media: Buffer.from(parts[1].body), mediaType }
+  }
+
+  app.post('/upload/drive/v3/files', async c => {
+    const a = bearer(c, [GOOGLE_SCOPES.driveFile, `${AUTH}drive`], 'drive.googleapis.com')
+    const { meta: rawMeta, media, mediaType } = await multipartOf(c)
+    const meta = rawMeta as { name?: string; parents?: string[]; mimeType?: string; appProperties?: Record<string, string> }
     const parent = meta.parents?.[0]
     if (!parent) throw apiError(400, 'A parent is required here', 'badRequest')
     const folder = visibleDriveFile(a, parent)
     if (!(driveFileOut(folder, a.email).capabilities as { canAddChildren: boolean }).canAddChildren) throw apiError(403, 'Insufficient permissions for the specified parent.', 'insufficientParentPermissions')
+    // A Google document is made from an importable text upload (Drive converts it); anything else is refused.
+    if (meta.mimeType === DOC_MIME && !DOC_IMPORTS.has(mediaType)) throw apiError(400, 'The requested conversion is not supported.', 'badRequest')
     const id = `fake-upload-${randomBytes(8).toString('hex')}`
     driveFiles.set(id, {
-      id, name: meta.name ?? 'Untitled', mimeType: meta.mimeType ?? 'application/octet-stream', owner: a.email, readers: [...folder.readers], content: Buffer.from(parts[1].body),
-      permissions: folder.permissions, parents: [parent], appProperties: { ...(meta.appProperties ?? {}) }, createdBy: a.clientId, pickedFor: new Set(),
-      modifiedTime: iso(now()), headRevisionId: `rev-${randomToken(8)}`,
+      id, name: meta.name ?? 'Untitled', mimeType: meta.mimeType ?? 'application/octet-stream', owner: a.email, readers: [...folder.readers], content: media,
+      permissions: [...folder.permissions], parents: [parent], appProperties: { ...(meta.appProperties ?? {}) }, createdBy: a.clientId, pickedFor: new Set(),
+      modifiedTime: iso(now()), headRevisionId: `rev-${randomToken(8)}`, version: 1, uploadedAs: meta.mimeType === DOC_MIME ? mediaType : null,
     })
     uploadOrder.push(id)
     if (dropCount > 0) {
@@ -892,6 +916,29 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       return dropAnswer(c)
     }
     return c.json(selectFields(driveFileOut(driveFiles.get(id)!, a.email), c.req.query('fields')))
+  })
+
+  // files.update with media: a new revision of the same file (its id and link stay). drive.file: only a file this
+  // client made or the account picked for it; the account must be able to edit it. Only content and appProperties.
+  app.patch('/upload/drive/v3/files/:fileId', async c => {
+    const a = bearer(c, [GOOGLE_SCOPES.driveFile, `${AUTH}drive`], 'drive.googleapis.com')
+    const f = visibleDriveFile(a, c.req.param('fileId') ?? '')
+    if (!(driveFileOut(f, a.email).capabilities as { canEdit: boolean }).canEdit) throw apiError(403, 'The user does not have sufficient permissions for this file.', 'insufficientFilePermissions')
+    const { meta, media, mediaType } = await multipartOf(c)
+    if (Object.keys(meta).some(k => k !== 'appProperties' && k !== 'name')) throw apiError(400, 'Only name and appProperties may change here', 'badRequest')
+    if (f.mimeType === DOC_MIME ? !DOC_IMPORTS.has(mediaType) : mediaType !== f.mimeType) throw apiError(400, 'The requested conversion is not supported.', 'badRequest')
+    f.content = media
+    if (typeof meta.name === 'string') f.name = meta.name
+    f.appProperties = { ...f.appProperties, ...((meta.appProperties ?? {}) as Record<string, string>) }
+    f.version += 1
+    f.headRevisionId = `rev-${randomToken(8)}`
+    f.modifiedTime = iso(now())
+    if (f.mimeType === DOC_MIME) f.uploadedAs = mediaType
+    if (dropCount > 0) {
+      dropCount--
+      return dropAnswer(c)
+    }
+    return c.json(selectFields(driveFileOut(f, a.email), c.req.query('fields')))
   })
 
   // ---- the stand-in Google Picker (staging: the Picker page loads <origin>/js/api.js) ----
@@ -1520,7 +1567,20 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     },
     driveFile(id) {
       const f = driveFiles.get(id)
-      return f ? { name: f.name, mimeType: f.mimeType, parents: [...f.parents], content: f.content, appProperties: { ...f.appProperties }, createdBy: f.createdBy } : null
+      return f ? {
+        name: f.name, mimeType: f.mimeType, parents: [...f.parents], content: f.content, appProperties: { ...f.appProperties }, createdBy: f.createdBy,
+        version: f.version, headRevisionId: f.headRevisionId, uploadedAs: f.uploadedAs,
+      } : null
+    },
+    shareDriveFile(id, permission) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      f.permissions = [...f.permissions, permission]
+    },
+    moveDriveFile(id, folderId) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      f.parents = [folderId]
     },
     spreadsheet(id) {
       const sp = spreadsheets.get(id)

@@ -33,7 +33,7 @@
 import { addBusinessDays } from '../../shared/core/business-days'
 import {
   JOB_ACTOR, JOB_ON_TIME_MS, JOB_SERVER_STEP, newOccurrenceId, occurrenceTaskId,
-  type JobDefinition, type JobOccurrenceState, type JobOutcomeCode,
+  type JobDefinition, type JobDeliveryPlace, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
 import { latestJobSlot } from '../../shared/core/job-schedule'
 import type { NotificationKind } from '../../shared/types/notifications'
@@ -69,6 +69,11 @@ export interface JobOccurrenceDeps {
   /** Tell these members their notices changed (push signal; never fails the change). */
   noticesChanged?: (companyId: string, userIds: string[]) => void
   log?: (message: string) => void
+  /**
+   * A deliverable place outside (jobs.md "A deliverable place outside"): the responsible person's chosen place is
+   * usable now (a Drive folder pick within its 90 days), answered by its connector. Absent → never usable.
+   */
+  placeUsable?: (companyId: string, userId: string, place: JobDeliveryPlace) => boolean
 }
 
 /** Company time `YYYY-MM-DDTHH:MM` in `timeZone` → the UTC instant (ISO). Two passes settle a zone's offset. */
@@ -142,6 +147,13 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
 
   /** The approved version's responsible person accepted that version's consent. */
   const accepted = (job: JobRow, version: JobVersionRow) => job.acceptedConsent !== null && job.acceptedConsent === version.consentFingerprint
+  /** The place the responsible person chose for the version's deliverables is theirs and usable now (job-runs.ts checks it again at the claim). */
+  const placeUsable = (companyId: string, job: JobRow, definition: JobDefinition): boolean => {
+    const wanted = definition.grant.deliverTo
+    const chosen = job.acceptedPlace
+    if (!wanted || !chosen || chosen.connector !== wanted.connector || chosen.kind !== wanted.kind) return false
+    return deps.placeUsable?.(companyId, definition.actingUser, chosen) === true
+  }
 
   /**
    * The newest slot of an approved job at or before now, as an occurrence row would hold it (state still to
@@ -194,6 +206,9 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
       else if (stopped) { state = 'held'; code = 'COMPANY_STOPPED' }
       else if (!accepted(job, version)) { state = 'held'; code = 'NOT_ACCEPTED' }
       else if (nowMs >= Date.parse(expiresAt)) { state = 'expired'; code = 'EXPIRED' }
+      // Its deliverable place is no longer usable (a folder pick's 90 days are over): a person chooses it again
+      // (decision for the owner: never renewed by itself). Told now, at the slot, instead of an occurrence nobody claims.
+      else if (definition.grant.deliverTo && !placeUsable(companyId, job, definition)) { state = 'needs_person'; code = 'PLACE_NOT_USABLE' }
       else if (definition.missed.policy === 'skip' && nowMs >= dueMs + JOB_ON_TIME_MS) { state = 'skipped'; code = 'MISSED' }
       const row = newRow(job, latest, state, code)
       const at = row.createdAt
@@ -201,6 +216,7 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         if (!handle.jobs.insertOccurrence(row)) return
         changed++
         if (state === 'expired') notice(companyId, handle, 'job_expired', row, job, version.actingUserId, told)
+        if (state === 'needs_person') notice(companyId, handle, 'job_failed', row, job, version.actingUserId, told)
         // latest_only: an older occurrence still waiting is not run any more.
         for (const older of handle.jobs.occurrences(job.id, 20)) {
           if (older.id !== row.id && older.state === 'due' && older.dueSlot < slot) handle.jobs.moveOccurrence(older.id, ['due'], 'skipped', { outcomeCode: 'SUPERSEDED' }, at)

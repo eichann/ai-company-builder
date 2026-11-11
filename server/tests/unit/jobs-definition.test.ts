@@ -13,8 +13,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  JOB_GRANT_TOOLS, OCCURRENCE_ID_RE, isOccurrenceId, jobRunRouteAllowed, jobDefinitionPaths, jobConsentCanonical, jobDefinitionCanonical, newJobId, newOccurrenceId, parseJobDefinition,
-  type JobDefinition,
+  JOB_GRANT_TOOLS, OCCURRENCE_ID_RE, isOccurrenceId, jobRunRouteAllowed, jobDefinitionPaths, jobConsentCanonical, jobDefinitionCanonical, jobDeliveryTools, newJobId, newOccurrenceId,
+  parseJobAcceptedPlace, parseJobDefinition, type JobDefinition,
 } from '../../shared/core/jobs'
 import { RECORD_ID_RE, newRecordId } from '../../shared/core/records'
 
@@ -209,5 +209,51 @@ describe('the meeting check (B PR 5a-2)', () => {
     expect(jobRunRouteAllowed({ ...grant, routes: ['GET /item/:recordId'] }, 'GET /minutes/:recordId/text', () => true)).toBe(false)
     // Never the meeting's other routes.
     expect(jobRunRouteAllowed({ ...grant, routes: [...grant.routes, 'POST /minutes/:recordId/bundle'] }, 'POST /minutes/:recordId/bundle', () => true)).toBe(false)
+  })
+})
+
+describe('a deliverable place outside (owner decision 2026-11-11: connector + place, never one service\'s field)', () => {
+  const PLACE = { connector: 'google', kind: 'drive_folder', ref: null }
+  const placed = () => edit(pcJob(), 'grant.deliverTo', PLACE)
+
+  it('a declared connector and kind; ref chosen when accepting (null here); only with the deliverable folder; never for the server', () => {
+    expect(parsed(placed()).grant.deliverTo).toEqual(PLACE)
+    // Absent: the definition is exactly what it was (its canonical text has no such key).
+    expect(jobDefinitionCanonical(parsed(pcJob()))).not.toContain('deliverTo')
+    expect(problems(edit(pcJob(), 'grant.deliverTo', { ...PLACE, ref: 'fake-folder-0001' }))).toContain('grant.deliverTo.ref.CHOSEN_WHEN_ACCEPTING')
+    for (const bad of [{ ...PLACE, connector: 'onedrive' }, { ...PLACE, kind: 'drive_file' }, { ...PLACE, connector: 'slack' }, { ...PLACE, connector: 'toString' }]) {
+      expect(problems(edit(pcJob(), 'grant.deliverTo', bad)), JSON.stringify(bad)).toContain('grant.deliverTo.UNKNOWN_PLACE')
+    }
+    expect(problems(edit(pcJob(), 'grant.deliverTo', { ...PLACE, extra: 1 }))).toContain('grant.deliverTo.UNKNOWN_KEY')
+    expect(problems(edit(pcJob(), 'grant.deliverTo', 'google'))).toContain('grant.deliverTo.BAD')
+    const noFolder = edit(edit(edit(placed(), 'grant.writes', { area: 'none' }), 'grant.tools', ['files_read', 'records']), 'grant.deliverTo', PLACE)
+    expect(problems(noFolder)).toContain('grant.deliverTo.NEEDS_DELIVERABLE')
+    // The server's operation: it has no deliverable folder (that needs files_write, an AI power), so no place either.
+    expect(problems(edit(serverJob(), 'grant.deliverTo', PLACE))).toContain('grant.deliverTo.NEEDS_DELIVERABLE')
+  })
+
+  it('part of what the responsible person accepts', () => {
+    expect(jobConsentCanonical(parsed(placed()))).not.toBe(jobConsentCanonical(parsed(pcJob())))
+  })
+
+  it('the accepted place: the version\'s connector and kind with a ref', () => {
+    const of = parsed(placed()).grant.deliverTo!
+    expect(parseJobAcceptedPlace({ connector: 'google', kind: 'drive_folder', ref: 'fake-folder-0001' }, of)).toEqual({ connector: 'google', kind: 'drive_folder', ref: 'fake-folder-0001' })
+    for (const bad of [
+      { connector: 'google', kind: 'drive_folder', ref: null }, { connector: 'google', kind: 'drive_folder', ref: '../x' }, { connector: 'google', kind: 'drive_folder', ref: '' },
+      { connector: 'google', kind: 'drive_file', ref: 'f' }, { connector: 'box', kind: 'drive_folder', ref: 'f' }, { connector: 'google', kind: 'drive_folder', ref: 'f', more: 1 }, 'f', null,
+    ]) expect(parseJobAcceptedPlace(bad, of), JSON.stringify(bad)).toBeNull()
+  })
+
+  it('a run reaches the place\'s own routes and tools only with a place, and never a Drive read or pick', () => {
+    const with_ = parsed(placed()).grant
+    const without = parsed(pcJob()).grant
+    for (const route of ['GET /google/drive/status', 'POST /google/drive/put', 'GET /google/drive/puts/:putId']) {
+      expect(jobRunRouteAllowed(with_, route), route).toBe(true)
+      expect(jobRunRouteAllowed(without, route), route).toBe(false)
+    }
+    for (const route of ['POST /google/drive/read', 'GET /google/drive/files', 'POST /google/drive/picks']) expect(jobRunRouteAllowed(with_, route), route).toBe(false)
+    expect(jobDeliveryTools(with_)).toEqual(['drive_picked', 'drive_put'])
+    expect(jobDeliveryTools(without)).toEqual([])
   })
 })

@@ -11,6 +11,7 @@ import {
   JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
   type JobDefinition, type JobDefinitionResult, type JobGrant, type JobWeekday,
 } from '../../../shared/core/jobs'
+import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
 
 export interface JobForm {
   name: string
@@ -51,7 +52,16 @@ export interface JobForm {
   /** Where it may save files: `<writePlace>/.personal/<writeFolder>/`; empty folder = it saves nothing. */
   writePlace: string
   writeFolder: string
+  /**
+   * A place outside where it also puts what it made (`<connector>:<kind>` of a declared place, e.g. a Google Drive
+   * folder; jobs.md "A deliverable place outside"); '' = none. The exact place is the responsible person's choice when accepting.
+   */
+  deliverTo: string
 }
+
+/** The places outside a job may put its deliverables into (the connectors' declarations), as the form offers them. */
+export const DELIVERY_PLACE_CHOICES: Array<{ value: string; label: string }> = Object.values(BUILTIN_CONNECTORS)
+  .flatMap(c => (c.deliveryPlaces as readonly DeliveryPlaceKind[]).map(p => ({ value: `${c.id}:${p.kind}`, label: p.label })))
 
 /** The server's operation runs once per slot and takes no AI time: the smallest limits. */
 export const NEW_JOB_LIMITS: JobGrant['limits'] = { minutes: 5, runsPerDay: 1 }
@@ -83,6 +93,7 @@ export function emptyJobForm(actingUser: string): JobForm {
     monthDay: 1, ifHoliday: 'before', taskTitle: '', dueBusinessDays: 1, missedPolicy: 'latest_only', expiresAfterMinutes: 720,
     limits: NEW_JOB_LIMITS,
     skillName: '', shelfItem: '', checkKind: 'new_files', checkPath: '', titleWords: '', readPaths: '', readRecords: true, mailDrafts: false, writePlace: '', writeFolder: '',
+    deliverTo: '',
   }
 }
 
@@ -117,6 +128,7 @@ export function formFromDefinition(d: JobDefinition): JobForm {
     mailDrafts: d.grant.outbound === 'draft_only',
     writePlace: d.grant.writes.area === 'deliverable' ? d.grant.writes.place : '',
     writeFolder: d.grant.writes.area === 'deliverable' ? d.grant.writes.folder : '',
+    deliverTo: d.grant.deliverTo ? `${d.grant.deliverTo.connector}:${d.grant.deliverTo.kind}` : '',
   }
 }
 
@@ -130,7 +142,12 @@ function pcGrant(f: JobForm): JobGrant {
     ...(f.checkKind === 'new_meetings' ? [JOB_MINUTES_ROUTE] : []),
     ...(f.mailDrafts ? JOB_OUTBOUND_ROUTES : []),
   ]
-  return { tools, creates: ['task'], routes, reads: { paths: reads, calls: [] }, writes, outbound: f.mailDrafts ? 'draft_only' : 'none', limits: f.limits }
+  const [connector, kind] = f.deliverTo.split(':')
+  return {
+    tools, creates: ['task'], routes, reads: { paths: reads, calls: [] }, writes, outbound: f.mailDrafts ? 'draft_only' : 'none', limits: f.limits,
+    // The exact place is chosen by the responsible person when accepting (`ref` null here).
+    ...(f.deliverTo ? { deliverTo: { connector, kind, ref: null } } : {}),
+  }
 }
 
 /**
@@ -179,5 +196,7 @@ export function jobProblemText(problems: string[]): string {
   if (problems.includes('check.titleWords.BAD')) return `会議の名前に含む言葉は${JOB_TITLE_WORDS_MAX}つまで、1つ40文字までにしてください。`
   if (problems.includes('grant.reads.paths.BAD')) return '読んでよい場所は、会社のフォルダの中の場所を1行に1つ入れてください。'
   if (problems.some(p => p.startsWith('grant.writes'))) return '置き場所は、会社のフォルダの中の場所と、半角の英小文字・数字・- _ のフォルダ名で入れてください。'
+  if (problems.includes('grant.deliverTo.NEEDS_DELIVERABLE')) return 'できたものを外に置くには、先に「作ったファイルの置き場所」を入れてください（AI はそこで作ってから置きます）。'
+  if (problems.some(p => p.startsWith('grant.deliverTo'))) return 'できたものを置く先を選び直してください。'
   return '内容に正しくないところがあります。選び直してください。'
 }

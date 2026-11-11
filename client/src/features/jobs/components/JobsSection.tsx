@@ -7,6 +7,7 @@ import {
   jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobSlotText, jobTriggerText,
 } from '../../../../../shared/core/job-words'
 import { useMyJobs } from '../hooks/useMyJobs'
+import { placeLine } from '../model'
 
 export function JobsSection({ companyId }: { companyId: string }) {
   const { loadRef, jobs, error, message, busy, accept, pause, resume } = useMyJobs(companyId)
@@ -29,7 +30,8 @@ export function JobsSection({ companyId }: { companyId: string }) {
         <>
           {waiting.map(job => (
             <Card key={job.id} className="space-y-3 p-5">
-              <SubHeading>受け取りを待っています：{job.name}</SubHeading>
+              <SubHeading>{job.toAccept?.why === 'place' ? 'できたものを置く先を選び直してください' : '受け取りを待っています'}：{job.name}</SubHeading>
+              {placeLine(job) && <p className="text-[13px] text-zinc-700 dark:text-zinc-200">{placeLine(job)}</p>}
               {job.toAccept?.definition ? (
                 <>
                   <ul aria-label={`「${job.name}」の内容`} className="space-y-1 text-[13px] text-zinc-700 dark:text-zinc-200">
@@ -41,8 +43,12 @@ export function JobsSection({ companyId }: { companyId: string }) {
                     <li>{jobMissedText(job.toAccept.definition.missed)}</li>
                   </ul>
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="primary" disabled={busy || !job.toAccept.fingerprint} onClick={() => void accept(job)}>受け取る</Button>
-                    <span className="text-[12px] text-zinc-500">受け取ると、この内容のとおりにあなたの名前で動きます。違うときは管理者に知らせてください。</span>
+                    <Button size="sm" variant="primary" disabled={busy || !job.toAccept.fingerprint} onClick={() => void accept(job)}>
+                      {job.toAccept.why === 'place' ? '置き先を選び直す' : job.deliverTo ? '置き先を選んで受け取る' : '受け取る'}
+                    </Button>
+                    <span className="text-[12px] text-zinc-500">
+                      {job.deliverTo ? '押すと、置き先を選ぶ画面が開きます。選んだ1か所だけに、あなたの名前で置きます。' : '受け取ると、この内容のとおりにあなたの名前で動きます。違うときは管理者に知らせてください。'}
+                    </span>
                   </div>
                 </>
               ) : (
@@ -60,6 +66,7 @@ export function JobsSection({ companyId }: { companyId: string }) {
                     {job.trigger && <span className="text-zinc-600 dark:text-zinc-300">{jobTriggerText(job.trigger)}</span>}
                     <span className="text-zinc-600 dark:text-zinc-300">{jobRunsText(job.waiting, job.pausedReason, job.placement)}</span>
                     {job.nextSlot && job.waiting === null && job.placement !== 'a' && <span className="text-zinc-500">次は {jobSlotText(job.nextSlot)}</span>}
+                    {placeLine(job) && <span className="w-full text-[12px] text-zinc-500">{placeLine(job)}</span>}
                     {job.controls && job.state === 'active' && (
                       <Button size="sm" variant="ghost" className="ml-auto" disabled={busy} onClick={() => void pause(job)}>止める</Button>
                     )}

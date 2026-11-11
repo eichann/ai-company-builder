@@ -33,7 +33,8 @@ A job is work that is not a record's turn: 「毎週火曜の1営業日前の 09
 operation (a やること) — no AI, no claim. PR 4: the screens (admin 「定期の仕事」, the app's 「受け取る」) and
 the notice 「受け取りが要ります」. PR 5a: the PC's (a) claim and the grant at every call (design memo §4-2) on the
 server, and a Skill pinned from the Skill shelf. PR 5a-2: the clock makes PC occurrences, the app runs them ("The app's
-runner"), the meeting check ("The meeting check"), and the admin form makes PC jobs.** Next: 5b — 「もう一度」.
+runner"), the meeting check ("The meeting check"), and the admin form makes PC jobs. PR 5a-3: a deliverable place
+outside ("A deliverable place outside": a Drive folder the responsible person picks).** Next: 5b — 「もう一度」.
 
 ## Tables (`server/src/db/schema/jobs.ts`, handle `jobs`, `ports/jobs.ts`, `adapters/sqlite/jobs.ts`)
 
@@ -86,7 +87,9 @@ versions the shape (a later shape is `schema: 2`; stored versions are never re-r
 - `grant` (memo §4-1): `tools` from `PLUGIN_STEP_TOOLS` minus `web_research` and `plugin_operations`
   (`JOB_GRANT_TOOLS`), `creates` (`task`), `routes` (names from `AI_ROUTES`, no conditions), `reads`
   (`paths`, `calls: []` — connector reads stay refused to runs), `writes` (`none` | `deliverable`
-  `place` + `folder`), `outbound` (`none` | `draft_only`), `limits` (minutes 1–120, runs a day 1–24).
+  `place` + `folder`), `outbound` (`none` | `draft_only`), `limits` (minutes 1–120, runs a day 1–24), and optionally
+  `deliverTo` (`{ connector, kind, ref: null }`, "A deliverable place outside"; absent = none, so a definition without it
+  is byte for byte what it was — an older build's strict parser refuses one with it, so it never runs such a job).
   Each power is named once where it is granted (`files_read` ⇔ read paths, `files_write` ⇔ deliverable,
   `outbound_draft` ⇔ `draft_only`, a procedure's `creates` needs `records`). Paths: company paths,
   never the root, `..`, `\`, `.personal` / `.backups` / `.workspace`.
@@ -356,11 +359,61 @@ POST /ai-runs/:runId/renew | finish | retry | …/reconcile        as for any ru
   operations/:key/reconcile` already works by run id for whoever shows it — 5a-2 / 5b); past `expires_at`
   with its run held by nobody (lease over, retried later, given back) → `expired`, told, the run ended. A run
   held within its deadline finishes as it will.
-- **Not here**: 「もう一度」 (5b): a `needs_person` occurrence stays so even when its run is given back. A deliverable
-  put into a picked Google Drive folder (proposed 5a-3: a `writes` kind naming the folder, the put route checking a
-  job run's `folderId`, the finish linking the run's puts to its やること, and what a folder pick's 90-day expiry means
-  for a job; Google Docs output and overwriting are their own later work) — today the Drive routes stay outside
-  `JOB_RUN_ROUTE_CEILING`.
+- **Not here**: 「もう一度」 (5b): a `needs_person` occurrence stays so even when its run is given back.
+
+## A deliverable place outside (PR 5a-3, owner decisions 2026-11-11)
+
+The first real job (面談報告書の下書き) leaves its draft as a Google document in the Drive folder where the mentor keeps
+reports.
+
+- **Connector + place, never one service's field** (decision 1): `grant.deliverTo = { connector, kind, ref }`, the
+  kinds a built-in connector declares (`BUILTIN_CONNECTORS[…].deliveryPlaces`, `connector-roles.md`: Google's
+  `drive_folder`, its words, routes, tools and one sentence for the run). The core names no service: `jobs.ts` reads the
+  declaration (`jobDeliveryRoutes`, `jobDeliveryTools`, `jobDeliveryLabel`, `jobDeliveryHowTo`); the server asks the
+  connector through `composition.ts` `deliveryPlaces` (`live`, `linkToTask`). `writes` stays the PC's deliverable
+  folder: what goes outside is made there first (`grant.deliverTo.NEEDS_DELIVERABLE`). The ledger's `kind: 'drive'`
+  file links are unchanged.
+- **Who picks the folder** (`chosenBy: 'responsible'`): the responsible person, **when accepting**. Under `drive.file`
+  the run's calls use their own grant, and Google lets that grant open only what *they* picked (or ACB made with it): a
+  folder an admin picks in their own Picker would never open for the responsible person. So a definition's `ref` is
+  always null (`grant.deliverTo.ref.CHOSEN_WHEN_ACCEPTING`), the admin form only offers 「できたものを外にも置く：Google
+  Drive のフォルダ」, and `POST /me/jobs/:jobId/accept { version, fingerprint, place: { connector, kind, ref } }` carries
+  the place: needed for such a version (409 `JOB_PLACE_NEEDED`), of its connector and kind (`parseJobAcceptedPlace`,
+  else 400), the member's **own live pick** now (`places.live` → the Drive service's `folderPlace`: their folder pick
+  within its 90 days — another member's pick, a file, an expired or unknown one → 409 `JOB_PLACE_NOT_USABLE`); a version
+  naming none takes none (400). Kept on the job (`ai_jobs.accepted_place`, additive `migrateJobAcceptedPlace`); accepting
+  again with another place replaces it. The place is part of the consent (`jobConsentCanonical` covers the grant), so a
+  version that adds, removes or changes the kind asks for a new acceptance; the folder itself is the person's own choice.
+  An owner/admin approving their own such job does **not** accept it with the same press (the admin console has no
+  Picker): the dialog says to choose it in the app.
+- **What the person sees**: `JobView.deliverTo` (`label`, `chosen`, `usable`; the folder's `name` and `expiresAt` only
+  to the responsible person — a Drive folder's name is theirs, owners / admins see neither); the grant's words say
+  「できたものを置く先：Google Drive のフォルダ（責任者が受け取るときに選ぶ1か所だけ…）」. The app's 「受け取る」 reads the job
+  as the server answers it and, when it names a place, opens the connector's chooser first (`choosePlace`, composed in
+  `main.ts`: Google Picker in folder mode, `google-drive.md`), then sends the acceptance with it — cancelled, nothing is
+  accepted. The app's 「定期の仕事」 shows the place line (`placeLine`) and, once it is not usable, 「置き先を選び直す」
+  (`toAccept.why: 'place'`).
+- **The run** (decision 2: the scope stays `drive.file`): the claim's turn carries `deliverTo` (with `ref`), the app's
+  parser takes it only of the grant's own connector and kind. The route ceiling is widened narrowly: only a grant with a
+  `deliverTo` reaches its connector's declared routes (`GET /google/drive/status`, `POST /google/drive/put`,
+  `GET /google/drive/puts/:putId` — never a read, the file list or a pick), checked by `jobRunRouteAllowed` at every
+  call; the app gives the run only `drive_picked` and `drive_put` (`jobToolAccess(…, deliverTo)`) and its first message
+  says where (`jobDeliveryHowTo`). **The connector's route checks the folder at every call**: `routes/google-drive.ts`
+  `jobScope` asks `jobRuns.deliveryPlace(member, runId)` (the run holds its occurrence, the job runnable as pinned, the
+  accepted place) and the put refuses any other folder (403 `DRIVE_FOLDER_NOT_GRANTED`, nothing sent) — an update
+  only of a file ACB made in that folder (`google-drive.md` "Overwriting"); the status shows only that folder and the
+  files put there. Every other Drive check holds (a live pick, nobody outside the company sees the folder or the file).
+  A body's `recordId` is never linked from a run.
+- **The finish**: after a `done` finish (`afterDone`), what the run put (`googleDrive.runDeliverables`: its own receipts
+  of that run, once per file, the receipt's facts) is linked to the occurrence's やること (`recordEngine.linkDrivePut`,
+  as the AI with the run's id); a refusal (a company with the shared folder has no Drive links, records off…) is logged
+  with its code and never fails anything. In a company with the shared folder the AI's `summary` carries the link.
+- **The 90-day pick** (decision 3, decision for the owner): a folder pick is never renewed by itself while a job names
+  it (that would keep ACB's permission alive with nobody looking). When the chosen place is not usable — past 90 days,
+  or no longer the person's pick — the clock makes the slot's occurrence `needs_person` `PLACE_NOT_USABLE` at once, told
+  (`job_failed`, `makeOccurrences`' `placeUsable`), and a claim finding it so does the same (409 `JOB_PLACE_NOT_USABLE`;
+  a running one's run is ended). The person picks the folder again with 「受け取る」 (a re-pick renews the pick) and the
+  next occurrence runs. The list (`GET /me/job-turns`) leaves such an occurrence out.
 
 ## The meeting check (PR 5a-2, owner decision: option A — the 面談 are recorded in Google Meet)
 
@@ -666,3 +719,17 @@ membership can fail).
   and fingerprint sent, renderer values never change the path, which notices open the section.
 - `server/tests/integration/admin-contract.test.ts` — the admin's calls and requests.
 - `permission-matrix.test.ts` rows + `CROSS`; `company-scoped-sql.test.ts` (`HANDLE_TABLES`).
+- PR 5a-3: `server/tests/integration/job-deliverables.test.ts` (fake Google: the place needed when accepting, of its
+  kind, the member's own live pick — not someone else's, not unknown —, none for a version without one; the name to
+  the responsible person only; the claim's turn names it; the run's token reaches the place's routes only with a place,
+  never a read; a put into another picked folder refused with nothing sent; the status shows only its folder; a body's
+  `recordId` never linked; the finish links the put to its やること; a pause refuses the next call; past 90 days: the
+  claim and the clock make it `needs_person` `PLACE_NOT_USABLE`, told, and choosing again makes the next one run);
+  `jobs-definition.test.ts` "a deliverable place outside" (declared kinds only, `ref` null, needs the deliverable folder,
+  part of the consent, the accepted place's shape, the routes and tools only with a place); `client/tests/job-runs.test.ts`
+  (the turn's place only of the grant's kind, the tools only with a chosen place, never a Drive read or pick, the first
+  message); `client/tests/jobs-ipc.test.ts` (the place chosen before accepting, cancelled → nothing accepted, an expired
+  place asks again); `admin/tests/jobs.test.tsx` (the form's place with `ref` null, one's own such job approved only).
+  Mutation check: 22 guards of this section (server, core, app, admin), each removed or inverted alone, fail their test
+  file. Not reachable by a test, kept as defence: `deliveryPlace`'s runnable check (the record-token guard's
+  `routeRefusal` already refuses a paused / stopped / changed job's call before the route asks it).

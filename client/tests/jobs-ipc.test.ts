@@ -28,7 +28,8 @@ const NOT_MINE = { named: false, controls: false, mustAccept: false }
 const RUNS_IT = { named: true, controls: true, mustAccept: false }
 const WAITS = { named: true, controls: true, mustAccept: true }
 
-function api(jobs: Array<ReturnType<typeof view>>) {
+type ChoosePlace = NonNullable<Parameters<typeof createJobsApi>[0]['choosePlace']>
+function api(jobs: Array<ReturnType<typeof view> & Record<string, unknown>>, choosePlace?: ChoosePlace) {
   const calls: Array<{ method: string; url: string; body?: string; cookie?: string }> = []
   const fetch = (async (url: string, init: RequestInit) => {
     calls.push({ method: init.method ?? 'GET', url, body: init.body as string | undefined, cookie: (init.headers as Record<string, string>).Cookie })
@@ -39,7 +40,7 @@ function api(jobs: Array<ReturnType<typeof view>>) {
     if (found) return json(found)
     return json({ ok: true })
   }) as typeof globalThis.fetch
-  return { calls, jobs: createJobsApi({ baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], fetch, log: { warn() {} } }) }
+  return { calls, jobs: createJobsApi({ baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], fetch, log: { warn() {} }, ...(choosePlace ? { choosePlace } : {}) }) }
 }
 
 test('only the jobs the server says are the member\'s are shown, and only theirs waits for their 「受け取る」', async () => {
@@ -61,7 +62,7 @@ test('a job whose approved definition is hidden from the member still waits for 
   const r = await jobs.mine('c1')
   assert.ok(r.success)
   assert.equal(r.jobs.length, 1)
-  assert.deepEqual(r.jobs[0].toAccept, { version: 1, fingerprint: null, definition: null })
+  assert.deepEqual(r.jobs[0].toAccept, { version: 1, fingerprint: null, definition: null, why: 'accept' })
   assert.equal(r.jobs[0].name, '定期の仕事')
   assert.equal(r.jobs[0].controls, true)
 })
@@ -92,7 +93,39 @@ test('accepting sends the version and fingerprint shown, with the session; rende
   assert.equal((await jobs.pause('c1', `${J1}/../x`)).success, false)
   assert.deepEqual(calls, [])
   assert.ok((await jobs.accept('c1', J1, 2, FP)).success)
-  assert.deepEqual(calls.map(c => [c.method, c.url, c.body, c.cookie]), [['POST', `https://acb.example/api/companies/c1/me/jobs/${J1}/accept`, JSON.stringify({ version: 2, fingerprint: FP }), 's=1']])
+  // The job as the server answers it first (does it put into a place outside?), then the acceptance.
+  assert.deepEqual(calls.map(c => [c.method, c.url, c.body, c.cookie]), [
+    ['GET', `https://acb.example/api/companies/c1/jobs/${J1}`, undefined, 's=1'],
+    ['POST', `https://acb.example/api/companies/c1/me/jobs/${J1}/accept`, JSON.stringify({ version: 2, fingerprint: FP }), 's=1'],
+  ])
+})
+
+const PLACE_VIEW = { connector: 'google', kind: 'drive_folder', label: 'Google Drive のフォルダ', chosen: false, usable: false, name: null, expiresAt: null }
+
+test('a job that puts into a place outside: the member chooses it first (the server says which kind), and the acceptance carries it', async () => {
+  const asked: unknown[] = []
+  const { calls, jobs } = api([{ ...view(J1, WAITS), deliverTo: PLACE_VIEW }], async (_company, place) => { asked.push(place); return { ok: true, ref: 'fake-folder-proposals-0001' } })
+  assert.ok((await jobs.accept('c1', J1, 1, FP)).success)
+  assert.deepEqual(asked, [{ connector: 'google', kind: 'drive_folder' }])
+  assert.deepEqual(JSON.parse(calls.at(-1)!.body!), { version: 1, fingerprint: FP, place: { connector: 'google', kind: 'drive_folder', ref: 'fake-folder-proposals-0001' } })
+  // Cancelled, or an app that cannot choose: nothing accepted.
+  const cancelled = api([{ ...view(J1, WAITS), deliverTo: PLACE_VIEW }], async () => ({ ok: false, message: 'メンバーは何も選びませんでした。' }))
+  const no = await cancelled.jobs.accept('c1', J1, 1, FP)
+  assert.equal(no.success === false && no.error, 'メンバーは何も選びませんでした。')
+  assert.equal(cancelled.calls.some(c => c.method === 'POST'), false)
+  const older = api([{ ...view(J1, WAITS), deliverTo: PLACE_VIEW }])
+  assert.equal((await older.jobs.accept('c1', J1, 1, FP)).success, false)
+  assert.equal(older.calls.some(c => c.method === 'POST'), false)
+})
+
+test('a chosen place no longer usable asks the member to choose again; a usable one shows its name and asks nothing', async () => {
+  const lost = { ...view(J1, RUNS_IT), deliverTo: { ...PLACE_VIEW, chosen: true } }
+  const fine = { ...view(J2, RUNS_IT), deliverTo: { ...PLACE_VIEW, chosen: true, usable: true, name: '報告書', expiresAt: '2027-02-09T00:00:00.000Z' } }
+  const { jobs } = api([lost, fine])
+  const r = await jobs.mine('c1')
+  assert.ok(r.success)
+  assert.deepEqual(r.jobs.map(j => j.toAccept?.why ?? null), ['place', null])
+  assert.deepEqual(r.jobs[1].deliverTo, { label: 'Google Drive のフォルダ', chosen: true, usable: true, name: '報告書', expiresAt: '2027-02-09T00:00:00.000Z' })
 })
 
 test('a job\'s notice opens 「定期の仕事」 only for the acceptance ask; an occurrence notice (also to the creator) opens nothing', () => {

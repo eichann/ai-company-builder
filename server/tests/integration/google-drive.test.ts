@@ -640,3 +640,138 @@ describe('a put in a consultation about a task: its file is linked to the task (
     expect(google.requests.length).toBe(calls)
   }))
 })
+
+describe('Google documents and overwriting a file ACB made (google-drive.md "Google documents", "Overwriting")', () => {
+  const MD = Buffer.from('# 面談報告書\n\n- 先週の面談の要点\n- 次の一手\n')
+  const DOC = 'application/vnd.google-apps.document'
+  const docBody = (over: Record<string, unknown> = {}, content: Buffer = MD) => ({
+    ...putBody({ name: '面談報告書.md', kind: 'markdown', as: 'google_doc' }, content), ...over,
+  })
+  const rows = () => db.prepare('SELECT COUNT(*) AS n FROM google_drive_puts WHERE company_id = ?').get(CO).n as number
+
+  it('HTML or Markdown becomes a Google document (no extension in its name, its version as the revision); other forms refused', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const md = await ai(token, 'POST', '/put', docBody())
+    expect(md.status, md.text).toBe(200)
+    expect(md.body.data.drivePut).toMatchObject({ state: 'done', name: '面談報告書', mimeType: DOC, revisionId: 'version:1', updatedFileId: null, sha256: sha(MD) })
+    const made = google.driveFile(md.body.data.drivePut.fileId)!
+    expect([made.mimeType, made.uploadedAs, made.name]).toEqual([DOC, 'text/markdown', '面談報告書'])
+    expect(made.content.equals(MD)).toBe(true)
+    const html = await ai(token, 'POST', '/put', { ...putBody({}, HTML), kind: 'html', as: 'google_doc', name: '週報.html' })
+    expect(html.body.data.drivePut).toMatchObject({ state: 'done', name: '週報', mimeType: DOC })
+    expect(google.driveFile(html.body.data.drivePut.fileId)!.uploadedAs).toBe('text/html')
+    const before = google.uploads().length
+    // Markdown only as a document; a PDF is never converted; an unknown form; Markdown that is not text.
+    expect((await ai(token, 'POST', '/put', { ...docBody(), as: 'file' })).body.code).toBe('DRIVE_TYPE_REFUSED')
+    expect((await ai(token, 'POST', '/put', putBody({ as: 'google_doc' }))).body.code).toBe('DRIVE_TYPE_REFUSED')
+    expect((await ai(token, 'POST', '/put', docBody({ as: 'google_sheet' }))).body.code).toBe('DRIVE_TYPE_REFUSED')
+    expect((await ai(token, 'POST', '/put', docBody({}, Buffer.from([0x23, 0x00, 0x41])))).body.code).toBe('DRIVE_CONTENT_REFUSED')
+    expect(google.uploads()).toHaveLength(before)
+  })
+
+  it('updateFileId: a new revision of the same file (same id and link); the same request again changes nothing; without it, a new file', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const first = (await ai(token, 'POST', '/put', docBody({ name: '上書きする.md' }))).body.data.drivePut
+    const uploads = google.uploads().length
+    const edited = Buffer.from('# 面談報告書（直した版）\n')
+    const body = docBody({ name: '上書きする.md', updateFileId: first.fileId }, edited)
+    const r = await ai(token, 'POST', '/put', body)
+    expect(r.status, r.text).toBe(200)
+    expect(r.body.data.existing).toBe(false)
+    expect(r.body.data.drivePut).toMatchObject({ state: 'done', fileId: first.fileId, link: first.link, revisionId: 'version:2', updatedFileId: first.fileId, name: '上書きする', sha256: sha(edited) })
+    const file = google.driveFile(first.fileId)!
+    expect(file.content.equals(edited)).toBe(true)
+    expect(file.version).toBe(2)
+    expect(file.appProperties.acbPutId).toBe(r.body.data.drivePut.id)
+    expect(google.uploads()).toHaveLength(uploads)
+    // A repeat of that request (a lost connection): the same answer, nothing sent again.
+    const again = await ai(token, 'POST', '/put', body)
+    expect(again.body.data).toMatchObject({ existing: true, drivePut: { id: r.body.data.drivePut.id } })
+    expect(google.driveFile(first.fileId)!.version).toBe(2)
+    // The same key for a new file instead (no target) is another request: refused.
+    expect((await ai(token, 'POST', '/put', { ...body, updateFileId: undefined })).body.code).toBe('DRIVE_PUT_KEY_REUSED')
+    // Without updateFileId edited content is a new file (what the tool says).
+    const fresh = await ai(token, 'POST', '/put', docBody({ name: '上書きする.md' }, edited))
+    expect(fresh.body.data.drivePut.fileId).not.toBe(first.fileId)
+    expect(google.uploads()).toHaveLength(uploads + 1)
+    // The AI's status lists the files its puts made (what it may update), newest first, once each.
+    const status = (await ai(token, 'GET', '/status')).body.data
+    const listed = (status.puts as Json[]).filter(p => p.fileId === first.fileId)
+    expect(listed).toEqual([expect.objectContaining({ fileId: first.fileId, name: '上書きする', mimeType: DOC, folderId: GOOGLE_SEED.proposalsFolder })])
+  })
+
+  it('only a file this member\'s put made, in this folder, of the same kind — refused before Google is asked; nothing kept', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const doc = (await ai(token, 'POST', '/put', docBody({ name: '本人の.md' }))).body.data.drivePut
+    const pdf = (await ai(token, 'POST', '/put', putBody({ name: '本人の.pdf' }))).body.data.drivePut
+    const kept = rows()
+    const calls = google.requests.length
+    // Not made by ACB (a file the member picked), unknown, another folder, another kind.
+    expect((await ai(token, 'POST', '/put', docBody({ updateFileId: GOOGLE_SEED.pastProposalDoc }))).body.code).toBe('DRIVE_FILE_NOT_OURS')
+    expect((await ai(token, 'POST', '/put', docBody({ updateFileId: 'fake-upload-unknown-000000' }))).body.code).toBe('DRIVE_FILE_NOT_OURS')
+    expect((await ai(token, 'POST', '/put', docBody({ updateFileId: doc.fileId, folderId: GOOGLE_SEED.sharedOutsideFolder }))).body.code).toBe('DRIVE_FILE_NOT_IN_FOLDER')
+    expect((await ai(token, 'POST', '/put', putBody({ updateFileId: doc.fileId }))).body.code).toBe('DRIVE_UPDATE_KIND_MISMATCH')
+    expect((await ai(token, 'POST', '/put', docBody({ updateFileId: pdf.fileId }))).body.code).toBe('DRIVE_UPDATE_KIND_MISMATCH')
+    expect((await ai(token, 'POST', '/put', docBody({ updateFileId: 'not a drive id' }))).status).toBe(400)
+    // Another member — even with the same folder picked — never updates Sato's file.
+    db.prepare('INSERT INTO google_drive_picks (company_id, user_id, file_id, kind, name, mime_type, picked_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(CO, 'm-tanaka', GOOGLE_SEED.proposalsFolder, 'folder', '提案書', 'application/vnd.google-apps.folder', ts(), new Date(Date.now() + 86_400_000).toISOString())
+    try {
+      const tanaka = await tokenFor('m-tanaka', 'act')
+      expect((await ai(tanaka, 'POST', '/put', docBody({ updateFileId: doc.fileId }))).body.code).toBe('DRIVE_FILE_NOT_OURS')
+    } finally {
+      db.prepare("DELETE FROM google_drive_picks WHERE company_id = ? AND user_id = 'm-tanaka'").run(CO)
+    }
+    expect(google.requests.length).toBe(calls)
+    expect(rows()).toBe(kept)
+    expect(google.driveFile(doc.fileId)!.version).toBe(1)
+  })
+
+  it('the file shared outside by itself, or moved out of the folder: refused for the AI, nothing sent, the receipt gone', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const shared = (await ai(token, 'POST', '/put', docBody({ name: '外に共有された.md' }))).body.data.drivePut
+    const moved = (await ai(token, 'POST', '/put', docBody({ name: '移された.md' }))).body.data.drivePut
+    google.shareDriveFile(shared.fileId, { type: 'anyone', role: 'reader' })
+    google.moveDriveFile(moved.fileId, GOOGLE_SEED.sharedOutsideFolder)
+    const kept = rows()
+    const out = await ai(token, 'POST', '/put', docBody({ updateFileId: shared.fileId }, Buffer.from('# 直した\n')))
+    expect([out.status, out.body.code]).toEqual([403, 'DRIVE_FILE_SHARED_OUTSIDE'])
+    const away = await ai(token, 'POST', '/put', docBody({ updateFileId: moved.fileId }, Buffer.from('# 直した\n')))
+    expect([away.status, away.body.code]).toEqual([403, 'DRIVE_FILE_REFUSED'])
+    expect([google.driveFile(shared.fileId)!.version, google.driveFile(moved.fileId)!.version]).toEqual([1, 1])
+    expect(rows()).toBe(kept)
+  })
+
+  it('an update whose answer was lost: found by the put id, never sent twice', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const first = (await ai(token, 'POST', '/put', docBody({ name: '答えが消える.md' }))).body.data.drivePut
+    google.faults.dropAnswerAfterSend(1)
+    const body = docBody({ name: '答えが消える.md', updateFileId: first.fileId }, Buffer.from('# 二版目\n'))
+    const r = await ai(token, 'POST', '/put', body)
+    expect(r.body.data.drivePut).toMatchObject({ state: 'done', reason: 'found-by-correlation', fileId: first.fileId, revisionId: 'version:2' })
+    expect((await ai(token, 'POST', '/put', body)).body.data.existing).toBe(true)
+    expect(google.driveFile(first.fileId)!.version).toBe(2)
+  })
+
+  it('a consultation\'s task: the link follows the newest revision (one link, its revision and sha256 replaced, said in 経緯)', async () => {
+    db.prepare("UPDATE companies SET folder_kind = 'none' WHERE id = ?").run(CO)
+    try {
+      const made = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '報告書を直す', fields: { assignee: 'm-sato' } })
+      const id = made.body.data.record.id as string
+      const token = await tokenFor('m-sato', 'act')
+      const first = await ai(token, 'POST', '/put', { ...docBody({ name: 'つながる報告書.md' }), recordId: id })
+      expect(first.body.data.linkedTo).toEqual({ recordId: id })
+      const fileId = first.body.data.drivePut.fileId as string
+      const edited = Buffer.from('# つながる報告書（二版目）\n')
+      const second = await ai(token, 'POST', '/put', { ...docBody({ name: 'つながる報告書.md', updateFileId: fileId }, edited), recordId: id })
+      expect(second.body.data.linkedTo).toEqual({ recordId: id })
+      const links = ((await person('m-sato', 'GET', `/records/item/${id}`)).body.data.links as Json[]).filter(l => l.drive).map(l => l.drive)
+      expect(links).toEqual([expect.objectContaining({ fileId, mine: true, revisionId: 'version:2', sha256: sha(edited) })])
+      const entries = ((await person('m-sato', 'GET', `/records/item/${id}/history`)).body.data.entries as Json[]).filter(e => e.action === 'link_file')
+      expect(entries).toHaveLength(2)
+      expect(entries.some(e => /新しい版につなぎ直しました/.test(e.note))).toBe(true)
+    } finally {
+      db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
+    }
+  })
+})

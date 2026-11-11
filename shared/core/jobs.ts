@@ -18,6 +18,7 @@
  * `jobConsentCanonical` (sha256) — this module never hashes.
  */
 import { AI_ROUTES, AI_TURN_BASE_ROUTES } from './ai-turn-routes'
+import { BUILTIN_CONNECTORS, isBuiltinConnectorId, type DeliveryPlaceKind } from './builtin-connectors'
 import { canonicalJson } from './fixed-content'
 import { isValidSkillName } from './names'
 import { PLUGIN_STEP_TOOLS } from './plugin-flow-declaration'
@@ -136,11 +137,26 @@ export const JOB_GRANT_TOOLS: readonly string[] = PLUGIN_STEP_TOOLS.filter(t => 
 export const JOB_CREATABLE_TYPES: readonly string[] = ['task']
 
 /**
+ * A place outside ACB where a job's deliverables go (owner decision 2026-11-11): a connector and a kind of
+ * place it declares (`BUILTIN_CONNECTORS[…].deliveryPlaces`), and `ref` — the exact place. Never one
+ * service's own field, so another connector's place (OneDrive, Box) is another `connector` / `kind`, not a new
+ * shape. In a definition `ref` is null: the responsible person chooses it when accepting (`chosenBy:
+ * 'responsible'` — under a per-member permission such as Drive's `drive.file` only their own pick opens it);
+ * the accepted place has it filled (`parseJobAcceptedPlace`).
+ */
+export interface JobDeliveryPlace {
+  connector: string
+  kind: string
+  ref: string | null
+}
+
+/**
  * The grant (実行契約, design memo §4-1): the most a run of this version may do, on top of the
  * responsible person's own rights. `routes` are names from `AI_ROUTES` (no conditions in schema 1);
  * `reads.calls` (connector reads) stays empty; `writes`: nothing, or only the deliverable folder
  * `<place>/.personal/<folder>/` on the PC; `outbound`: `none`, or drafts only (sending is always a
- * person's); `limits`: minutes per run and runs per day.
+ * person's); `limits`: minutes per run and runs per day. `deliverTo` (absent = none): a place outside ACB
+ * the run may also put its deliverables (made in the deliverable folder first) into — and nothing else there.
  */
 export interface JobGrant {
   tools: string[]
@@ -150,6 +166,7 @@ export interface JobGrant {
   writes: { area: 'none' } | { area: 'deliverable'; place: string; folder: string }
   outbound: 'none' | 'draft_only'
   limits: { minutes: number; runsPerDay: number }
+  deliverTo?: JobDeliveryPlace
 }
 
 export interface JobDefinition {
@@ -175,6 +192,8 @@ const SHELF_VERSION_RE = /^[0-9a-f]{64}$/
 /** A shelf item's id (the server's own: a UUID today). */
 export const SHELF_ITEM_ID_RE = /^[A-Za-z0-9_-]{1,100}$/
 const DELIVERABLE_FOLDER_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
+/** An accepted place's `ref` (a connector's own id: a Drive folder id today). */
+const PLACE_REF_RE = /^[A-Za-z0-9_-]{1,200}$/
 const MAX_PATHS = 20
 const MAX_ROUTES = 30
 const PATH_MAX = 1024
@@ -305,8 +324,58 @@ function parseMissed(v: unknown, problems: string[]): JobMissed | null {
   return problems.length > start ? null : { policy: v.policy as JobMissed['policy'], expiresAfterMinutes: v.expiresAfterMinutes as number }
 }
 
+/** The kind of place a connector declares for a job's deliverables, or undefined. */
+function deliveryKind(connector: unknown, kind: unknown): DeliveryPlaceKind | undefined {
+  if (!isBuiltinConnectorId(connector)) return undefined
+  const places: readonly DeliveryPlaceKind[] = BUILTIN_CONNECTORS[connector].deliveryPlaces
+  return places.find(p => p.kind === kind)
+}
+
+/** A definition's place: a declared connector and kind, `ref` null (the responsible person chooses it when accepting). */
+function parseDeliverTo(v: unknown, problems: string[]): JobDeliveryPlace | null {
+  if (!isObj(v) || !keysExactly(v, ['connector', 'kind', 'ref'], 'grant.deliverTo', problems)) { if (!isObj(v)) problems.push('grant.deliverTo.BAD'); return null }
+  const declared = deliveryKind(v.connector, v.kind)
+  if (!declared) { problems.push('grant.deliverTo.UNKNOWN_PLACE'); return null }
+  // Schema 1: the exact place is the responsible person's choice (chosenBy 'responsible'), never the definition's.
+  if (v.ref !== null) { problems.push('grant.deliverTo.ref.CHOSEN_WHEN_ACCEPTING'); return null }
+  return { connector: v.connector as string, kind: v.kind as string, ref: null }
+}
+
+/**
+ * The place the responsible person chose when accepting (`POST /me/jobs/:jobId/accept { place }`): the version's
+ * connector and kind, with `ref` filled (the connector's id of it). Null when it is not one.
+ */
+export function parseJobAcceptedPlace(v: unknown, of: JobDeliveryPlace): JobDeliveryPlace | null {
+  if (!isObj(v) || Object.keys(v).length !== 3) return null
+  if (v.connector !== of.connector || v.kind !== of.kind || typeof v.ref !== 'string' || !PLACE_REF_RE.test(v.ref)) return null
+  return { connector: of.connector, kind: of.kind, ref: v.ref }
+}
+
+/** The connector's AI routes a run may use for its grant's deliverable place (none without one). */
+export function jobDeliveryRoutes(grant: JobGrant): readonly string[] {
+  return grant.deliverTo ? deliveryKind(grant.deliverTo.connector, grant.deliverTo.kind)?.routes ?? [] : []
+}
+
+/** The connector's app tools a run may use for its grant's deliverable place (none without one). */
+export function jobDeliveryTools(grant: JobGrant): readonly string[] {
+  return grant.deliverTo ? deliveryKind(grant.deliverTo.connector, grant.deliverTo.kind)?.tools ?? [] : []
+}
+
+/** How the run puts a file into its chosen place (the first message's sentence, the place's id in it), or null. */
+export function jobDeliveryHowTo(place: JobDeliveryPlace): string | null {
+  const declared = deliveryKind(place.connector, place.kind)
+  return declared && typeof place.ref === 'string' ? declared.howToPut.replace('{ref}', place.ref) : null
+}
+
+/** The words of a deliverable place's kind (「Google Drive のフォルダ」), or null for one this build does not know. */
+export function jobDeliveryLabel(place: { connector: string; kind: string }): string | null {
+  return deliveryKind(place.connector, place.kind)?.label ?? null
+}
+
 function parseGrant(v: unknown, problems: string[]): JobGrant | null {
-  if (!isObj(v) || !keysExactly(v, ['tools', 'creates', 'routes', 'reads', 'writes', 'outbound', 'limits'], 'grant', problems)) {
+  // `deliverTo` is optional (absent = none): a definition without it is exactly what it was before.
+  const grantKeys = ['tools', 'creates', 'routes', 'reads', 'writes', 'outbound', 'limits', ...(isObj(v) && Object.prototype.hasOwnProperty.call(v, 'deliverTo') ? ['deliverTo'] : [])]
+  if (!isObj(v) || !keysExactly(v, grantKeys, 'grant', problems)) {
     if (!isObj(v)) problems.push('grant.BAD')
     return null
   }
@@ -343,14 +412,17 @@ function parseGrant(v: unknown, problems: string[]): JobGrant | null {
     if (!isInt(v.limits.runsPerDay, 1, 24)) problems.push('grant.limits.runsPerDay.BAD')
     if (isInt(v.limits.minutes, 1, 120) && isInt(v.limits.runsPerDay, 1, 24)) limits = { minutes: v.limits.minutes, runsPerDay: v.limits.runsPerDay }
   } else if (!isObj(v.limits)) problems.push('grant.limits.BAD')
-  if (problems.length > start || !tools || !creates || !routes || !reads || !writes || !limits) return null
-  const grant: JobGrant = { tools, creates, routes, reads, writes, outbound: v.outbound as JobGrant['outbound'], limits }
+  const deliverTo = grantKeys.includes('deliverTo') ? parseDeliverTo(v.deliverTo, problems) : undefined
+  if (problems.length > start || !tools || !creates || !routes || !reads || !writes || !limits || deliverTo === null) return null
+  const grant: JobGrant = { tools, creates, routes, reads, writes, outbound: v.outbound as JobGrant['outbound'], limits, ...(deliverTo ? { deliverTo } : {}) }
   // Consistency: each power is named once, in the place that grants it.
   if (grant.reads.paths.length > 0 && !tools.includes('files_read')) problems.push('grant.reads.NEEDS_FILES_READ')
   if (tools.includes('files_read') && grant.reads.paths.length === 0) problems.push('grant.tools.FILES_READ_WITHOUT_PATHS')
   if ((grant.writes.area === 'deliverable') !== tools.includes('files_write')) problems.push('grant.writes.FILES_WRITE_MISMATCH')
   if ((grant.outbound === 'draft_only') !== tools.includes('outbound_draft')) problems.push('grant.outbound.OUTBOUND_DRAFT_MISMATCH')
   if (routes.length > 0 && !tools.includes('records') && !tools.includes('outbound_draft')) problems.push('grant.routes.NEEDS_RECORDS')
+  // What goes outside is made in the deliverable folder first (the app puts a file from there).
+  if (grant.deliverTo && grant.writes.area !== 'deliverable') problems.push('grant.deliverTo.NEEDS_DELIVERABLE')
   return problems.length > start ? null : grant
 }
 
@@ -382,7 +454,8 @@ export function parseJobDefinition(input: unknown): JobDefinitionResult {
   if (run.kind === 'procedure' && placement !== 'a') problems.push('placement.PROCEDURE_RUNS_ON_PC')
   // D6: the clock alone never runs the AI — a procedure needs a check without the AI first.
   if (run.kind === 'procedure' && check.kind === 'none') problems.push('check.REQUIRED_FOR_PROCEDURE')
-  // The server's operation runs no AI: it needs no AI powers, reads nothing on a PC.
+  // The server's operation runs no AI: it needs no AI powers, reads nothing on a PC (and so puts nothing outside:
+  // a place outside needs the deliverable folder, which needs `files_write`).
   if (run.kind === 'operation' && (grant.tools.length > 0 || grant.routes.length > 0 || grant.reads.paths.length > 0 || check.kind !== 'none')) {
     problems.push('grant.OPERATION_TAKES_NO_AI_POWERS')
   }
@@ -442,11 +515,13 @@ export type JobOccurrenceState = typeof JOB_OCCURRENCE_STATES[number]
  * `MISSED` (found late under `skip`); expired — `EXPIRED`; needs_person — `RECORDS_OFF`, `TASK_NOT_CREATED`,
  * `RUN_FAILED` (a PC's run ended waiting for a person), `TIME_LIMIT` (a PC's run past its approved minutes),
  * `RESULT_UNKNOWN` (a PC's run waits for a person to say whether an outside operation happened, and its time
- * ran out) — B PR 5a.
+ * ran out) — B PR 5a; `PLACE_NOT_USABLE` (the deliverable place the responsible person chose can no longer be used
+ * — a Drive folder pick past its 90 days, or gone: they choose it again when accepting).
  */
 export const JOB_OUTCOME_CODES = [
   'JOB_PAUSED', 'COMPANY_STOPPED', 'NOT_ACCEPTED', 'JOB_VERSION_CHANGED', 'OWNER_LEFT', 'OWNER_RIGHTS_CHANGED',
   'OWNER_ABSENT', 'SUPERSEDED', 'MISSED', 'EXPIRED', 'RECORDS_OFF', 'TASK_NOT_CREATED', 'RUN_FAILED', 'TIME_LIMIT', 'RESULT_UNKNOWN',
+  'PLACE_NOT_USABLE',
 ] as const
 export type JobOutcomeCode = typeof JOB_OUTCOME_CODES[number]
 
@@ -488,7 +563,10 @@ export const JOB_OUTBOUND_ROUTES: readonly string[] = ['POST /outbound-recipient
  * やること a grant's `creates: ['task']` allows is made by the server when the run finishes, `JobRunResult`,
  * so a grant naming `POST /item` keeps its schema-1 shape but the token never creates), an action, a
  * plugin's operation or call, another connector read (threads, Drive, any other meeting's minutes) or a file link. A grant may
- * still name such a route (the parser takes every `AI_ROUTES` name): it is refused at every call.
+ * still name such a route (the parser takes every `AI_ROUTES` name): it is refused at every call. Beside it, only a grant
+ * with a deliverable place outside (`deliverTo`) reaches that place's own routes (`jobDeliveryRoutes`: Drive's status,
+ * put and receipt — never a read or a pick), and the connector's route puts only into the place the responsible person
+ * chose (checked there, at every call).
  */
 export const JOB_RUN_ROUTE_CEILING: readonly string[] = [
   'GET /types', 'GET /my-turn', 'POST /query', 'GET /item/:recordId', 'GET /item/:recordId/history',
@@ -505,6 +583,8 @@ export const JOB_RUN_ROUTE_CEILING: readonly string[] = [
  */
 export function jobRunRouteAllowed(grant: JobGrant, route: string, meetingFound?: () => boolean): boolean {
   if ((AI_TURN_BASE_ROUTES as readonly string[]).includes(route)) return true
+  // The deliverable place's own routes: only with a `deliverTo`, only those its connector declares for it.
+  if (jobDeliveryRoutes(grant).includes(route)) return true
   if (!grant.routes.includes(route) || !JOB_RUN_ROUTE_CEILING.includes(route)) return false
   if (route === JOB_MINUTES_ROUTE) return meetingFound?.() === true
   return !JOB_OUTBOUND_ROUTES.includes(route) || grant.outbound === 'draft_only'

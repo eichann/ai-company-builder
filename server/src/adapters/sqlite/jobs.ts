@@ -1,11 +1,12 @@
 import type Database from 'better-sqlite3'
-import type { JobPauseReason } from '../../../shared/core/jobs'
+import type { JobDeliveryPlace, JobPauseReason } from '../../../shared/core/jobs'
 import type { JobState } from '../../../shared/types/jobs'
 import type { JobOccurrenceRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
 
 interface JobDbRow {
   id: string; name: string; state: string; acting_user_id: string; latest_version: number
   approved_version: number | null; approved_fingerprint: string | null; accepted_version: number | null; accepted_consent: string | null
+  accepted_place: string | null
   paused_reason: string | null; paused_by: string | null; paused_at: string | null
   created_by: string; created_at: string; updated_at: string
 }
@@ -15,7 +16,7 @@ interface VersionDbRow {
   approved_by: string | null; approved_at: string | null; accepted_by: string | null; accepted_at: string | null
 }
 
-const JOB_COLUMNS = `id, name, state, acting_user_id, latest_version, approved_version, approved_fingerprint, accepted_version, accepted_consent,
+const JOB_COLUMNS = `id, name, state, acting_user_id, latest_version, approved_version, approved_fingerprint, accepted_version, accepted_consent, accepted_place,
   paused_reason, paused_by, paused_at, created_by, created_at, updated_at`
 const VERSION_COLUMNS = `job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at,
   approved_by, approved_at, accepted_by, accepted_at`
@@ -31,10 +32,21 @@ const occurrenceOf = (r: OccurrenceDbRow): JobOccurrenceRow => ({
   state: r.state as JobOccurrenceRow['state'], runId: r.run_id, outcomeCode: r.outcome_code, checkedUntil: r.checked_until, checkedCommit: r.checked_commit, createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
+/** The stored place, read strictly (anything else is no place). */
+function placeOf(text: string | null): JobDeliveryPlace | null {
+  if (text === null) return null
+  try {
+    const v = JSON.parse(text) as Record<string, unknown>
+    return typeof v.connector === 'string' && typeof v.kind === 'string' && typeof v.ref === 'string' ? { connector: v.connector, kind: v.kind, ref: v.ref } : null
+  } catch {
+    return null
+  }
+}
+
 const jobOf = (r: JobDbRow): JobRow => ({
   id: r.id, name: r.name, state: r.state as JobState, actingUserId: r.acting_user_id, latestVersion: r.latest_version,
   approvedVersion: r.approved_version, approvedFingerprint: r.approved_fingerprint, acceptedVersion: r.accepted_version,
-  acceptedConsent: r.accepted_consent, pausedReason: r.paused_reason as JobPauseReason | null, pausedBy: r.paused_by, pausedAt: r.paused_at,
+  acceptedConsent: r.accepted_consent, acceptedPlace: placeOf(r.accepted_place), pausedReason: r.paused_reason as JobPauseReason | null, pausedBy: r.paused_by, pausedAt: r.paused_at,
   createdBy: r.created_by, createdAt: r.created_at, updatedAt: r.updated_at,
 })
 const versionOf = (r: VersionDbRow): JobVersionRow => ({
@@ -70,7 +82,7 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
     },
     create(job, first) {
       conn.transaction(() => {
-        conn.prepare(`INSERT INTO ai_jobs (company_id, ${JOB_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`)
+        conn.prepare(`INSERT INTO ai_jobs (company_id, ${JOB_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`)
           .run(companyId, job.id, job.name, job.state, job.actingUserId, job.latestVersion, job.createdBy, job.createdAt, job.updatedAt)
         insertVersion(first)
       })()
@@ -100,10 +112,10 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
           .run(by, at, companyId, jobId, version)
       })()
     },
-    accept(jobId, version, consentFingerprint, by, at) {
+    accept(jobId, version, consentFingerprint, by, at, place) {
       conn.transaction(() => {
-        conn.prepare(`UPDATE ai_jobs SET accepted_version = ?, accepted_consent = ?, updated_at = ? WHERE company_id = ? AND id = ?`)
-          .run(version, consentFingerprint, at, companyId, jobId)
+        conn.prepare(`UPDATE ai_jobs SET accepted_version = ?, accepted_consent = ?, accepted_place = ?, updated_at = ? WHERE company_id = ? AND id = ?`)
+          .run(version, consentFingerprint, place ? JSON.stringify({ connector: place.connector, kind: place.kind, ref: place.ref }) : null, at, companyId, jobId)
         conn.prepare(`UPDATE ai_job_versions SET accepted_by = ?, accepted_at = ? WHERE company_id = ? AND job_id = ? AND version = ? AND accepted_at IS NULL`)
           .run(by, at, companyId, jobId, version)
       })()

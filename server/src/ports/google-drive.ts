@@ -37,6 +37,8 @@ export interface DrivePutRow {
   finishedAt: string | null
   /** The company Skills the AI's consultation had used, copied when the receipt is written (records.md "Which Skill"); null otherwise. */
   skills: SkillUse[] | null
+  /** The Drive file this put gave a new revision (a file an earlier put of the member made); null: it made a new file. */
+  updatedFileId: string | null
 }
 
 export interface GoogleDriveRepository {
@@ -58,6 +60,8 @@ export interface GoogleDriveRepository {
   putOfFile(userId: string, fileId: string): DrivePutRow | null
   /** The member's own puts that made a file (state done), newest first. */
   donePuts(userId: string, limit: number): DrivePutRow[]
+  /** The member's own done puts made within this execution run (a scheduled job's deliverables), oldest first. */
+  runPuts(userId: string, runId: string, limit: number): DrivePutRow[]
   /** Settles a put still in `sending` / `unknown` (true when a row changed). */
   settlePut(id: string, fields: Pick<DrivePutRow, 'state' | 'fileId' | 'revisionId' | 'link' | 'reason' | 'finishedAt'>): boolean
   /** Removes a put still in `sending` (refused: nothing was made; its key is free again). */

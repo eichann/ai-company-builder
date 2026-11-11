@@ -45,7 +45,12 @@ Tests: `server/tests/unit/connector-roles.test.ts`.
 `shared/core/builtin-connectors.ts` (`BUILTIN_CONNECTORS`) declares the core connectors whose
 code ships with ACB: id (= the role resolver's connector id and the operator stop file's name),
 label, a sentence for the admin, the roles it serves (`RoleServing`) and its **own capabilities**
-(not roles; Google: `drive`, which only a business plugin uses by name). They are not packages in
+(not roles; Google: `drive`, which only a business plugin uses by name), and the **places a scheduled job's
+deliverables may go** (`deliveryPlaces`, owner decision 2026-11-11: a job names `{ connector, kind, ref }`, never a
+service's own field — Google: `drive_folder`, chosen by the responsible person; with its words, the AI routes and app
+tools a run may use for it, and one sentence for the run; `jobs.md` "A deliverable place outside"). The core answers
+a place through `composition.ts` `deliveryPlaces` (the connector's own check of the chosen ref), never by importing
+the connector. They are not packages in
 `PLUGINS_DIR`, but are put in and taken out like one, through the connector's existing switches:
 the company's on / off (Google: its client's `enabled`) and the operator's stop file
 (`<PLUGINS_DIR>/stopped` naming `google` or `*`). Google stays where its code is (`google-*.ts`,

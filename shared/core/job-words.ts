@@ -6,7 +6,7 @@
  * Words only: no rule is decided here (the parser is `jobs.ts`, the slots `job-schedule.ts`). Pure
  * (server/tests/unit/core-purity.test.ts).
  */
-import { JOB_MINUTES_ROUTE, type JobCheck, type JobDefinition, type JobGrant, type JobMissed, type JobOccurrenceState, type JobPauseReason, type JobRun, type JobTrigger, type JobWeekday } from './jobs'
+import { JOB_MINUTES_ROUTE, jobDeliveryLabel, type JobCheck, type JobDefinition, type JobGrant, type JobMissed, type JobOccurrenceState, type JobPauseReason, type JobRun, type JobTrigger, type JobWeekday } from './jobs'
 
 const WEEKDAY_WORDS: Record<JobWeekday, string> = { mon: '月曜', tue: '火曜', wed: '水曜', thu: '木曜', fri: '金曜', sat: '土曜', sun: '日曜' }
 
@@ -75,6 +75,8 @@ export function jobGrantLines(grant: JobGrant): string[] {
   for (const t of grant.tools) lines.push(`道具：${TOOL_WORDS[t] ?? t}`)
   if (grant.reads.paths.length > 0) lines.push(`読む場所：${grant.reads.paths.map(p => `「${p}」`).join('・')}`)
   if (grant.writes.area === 'deliverable') lines.push(`置く場所：「${grant.writes.place}」の中の、責任者だけのフォルダ「${grant.writes.folder}」`)
+  // The exact place outside is the responsible person's choice when accepting: the line names its kind only.
+  if (grant.deliverTo) lines.push(`できたものを置く先：${jobDeliveryLabel(grant.deliverTo) ?? 'つなぎ先'}（責任者が受け取るときに選ぶ1か所だけ。社外の人も見られる場所には置きません）`)
   if (grant.creates.includes('task')) lines.push('作れるもの：やること')
   if (grant.routes.includes(JOB_MINUTES_ROUTE)) lines.push('議事録：確かめで見つかった、責任者が出た会議のものだけ読む')
   if (grant.routes.length > 0) lines.push(`使える操作：${grant.routes.length}種類`)
@@ -136,6 +138,7 @@ const OUTCOME_WORDS: Record<string, string> = {
   RUN_FAILED: 'AI がこの回を終えられなかったため、人が確かめる必要があります',
   TIME_LIMIT: '承認された時間を過ぎたため AI を止めました。人が確かめる必要があります',
   RESULT_UNKNOWN: '外への操作が済んだか分からないまま時間が来ました。人が確かめる必要があります',
+  PLACE_NOT_USABLE: '責任者が選んだ置き先が使えなくなっていました（選んでから90日たったか、消されました）。責任者が「受け取る」から選び直してください',
 }
 
 const STATE_WORDS: Record<JobOccurrenceState, string> = {

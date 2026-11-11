@@ -35,7 +35,8 @@ import { diskPluginShelf } from './adapters/plugin-shelf'
 import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, PLUGINS_DIR, PRACTICE_UPSTREAMS, operatorUserIds, publicUrl, type PracticeUpstreams } from './lib/config'
 import type { BrokerCipherState } from './ports/key-broker'
 import type { UpstreamClient } from './ports/upstream'
-import { createAccessPolicy } from './services/access'
+import { createAccessPolicy, type Member } from './services/access'
+import type { JobDeliveryPlace } from '../shared/core/jobs'
 import { createCompanyService } from './services/companies'
 import { parseCompanyCreationPolicy, type CompanyCreationPolicy } from './services/company-creation-policy'
 import { createInvitationService } from './services/invitations'
@@ -332,6 +333,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     // A view's next slot (PR 4's screens): the clock's own zone and days off.
     timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
     holidaysOf: companyId => taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
+    // A deliverable place outside (jobs.md): its connector answers; bound late (built below).
+    places: { live: (companyId, userId, place) => deliveryPlaces.live(companyId, userId, place) },
   })
   const notifications = createNotificationService({
     ...shared,
@@ -617,6 +620,26 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       : 'https://apis.google.com',
   })
 
+  // A scheduled job's deliverable place outside ACB (jobs.md "A deliverable place outside"): the job names a connector
+  // and a kind of place (never a service's own field); the connector that declares it answers here. Google: a Drive
+  // folder the responsible person picked (`drive.file`: their own pick only), and the run's puts linked to its やること.
+  const deliveryPlaces = {
+    live(companyId: string, userId: string, place: JobDeliveryPlace): { name: string; expiresAt: string } | null {
+      return place.connector === 'google' && place.kind === 'drive_folder' ? googleDrive.folderPlace(companyId, userId, place.ref) : null
+    },
+    linkToTask(member: Member, place: JobDeliveryPlace, runId: string, recordId: string): void {
+      if (place.connector !== 'google' || place.kind !== 'drive_folder') return
+      for (const file of googleDrive.runDeliverables(member, runId)) {
+        try {
+          const r = recordEngine.linkDrivePut(member, { kind: 'ai', source: 'job', conversationId: null, runId }, recordId, file)
+          if (!r.ok) console.warn(`[jobs] a deliverable was not linked to the job's task: ${typeof r.body.code === 'string' && /^[A-Z_]{1,60}$/.test(r.body.code) ? r.body.code : r.kind}`)
+        } catch (error) {
+          logError('jobs', 'linking a deliverable to the job\'s task failed', error)
+        }
+      }
+    },
+  }
+
   // The core roles (connector-roles.md): Google registers as a built-in core connector; the core
   // services below ask a role (予定を読む, 会議の記録を読む, メールを送る), never Google (composition/connectors.ts).
   const coreConnectors = wireCoreConnectors({ ...shared, googleClient, googleConnector })
@@ -711,6 +734,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ...shared, jobs, writer: serviceRecords,
     // A `new_meetings` check (B PR 5a-2): the meetings the responsible person attended, as minutes knows them.
     meetings: (member, since, until, limit) => minutes.attendedSince(member, since, until, limit),
+    // A deliverable place outside: usable at the claim; what the run put there linked to its やること after a done finish.
+    places: {
+      live: (companyId, userId, place) => deliveryPlaces.live(companyId, userId, place) !== null,
+      linkToTask: (member, place, runId, recordId) => deliveryPlaces.linkToTask(member, place, runId, recordId),
+    },
     // Bound late: the occurrences' service is built below (called only after construction).
     notices: {
       writeNotice: (companyId, kind, occ) => jobOccurrences.writeNotice(companyId, kind, occ),
@@ -801,6 +829,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     jobs,
     writer: serviceRecords,
+    // A deliverable place no longer usable (a folder pick past its 90 days) sends the occurrence to a person at its slot.
+    placeUsable: (companyId, userId, place) => deliveryPlaces.live(companyId, userId, place) !== null,
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
   })
   const jobRunner = createJobRunner({

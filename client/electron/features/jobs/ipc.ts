@@ -1,12 +1,14 @@
 // Settings → 「定期の仕事」 (jobs.md "The screens", PR 4): the scheduled jobs the member is responsible for,
 // read and changed with the member's **session** (the server decides who may accept, pause, resume).
 //   jobs:mine     the member's jobs: what waits for their 「受け取る」, whether they run it
-//   jobs:accept   accept the version shown (its fingerprint: the server refuses another)
+//   jobs:accept   accept the version shown (its fingerprint: the server refuses another); a version that puts its
+//                 deliverables into a place outside first asks the member to choose that place (a Drive folder in
+//                 Google Picker: `choosePlace`, composed in main.ts — this module never names a connector)
 //   jobs:pause    pause a job they run
 //   jobs:resume   resume a pause they made
 
 import { JOBS_OFFLINE_TEXT, JOBS_SERVER_TOO_OLD_TEXT, type JobActionResult, type JobsFailure, type MyJob, type MyJobsResult } from '../../../shared/jobs'
-import { isJobId } from '../../../../shared/core/jobs'
+import { isJobId, type JobDeliveryPlace } from '../../../../shared/core/jobs'
 import type { JobView } from '../../../../shared/types/jobs'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
@@ -16,6 +18,11 @@ export interface JobsDeps {
   fetch?: typeof fetch
   log?: Pick<Console, 'warn'>
   timeoutMs?: number
+  /**
+   * The member chooses the exact place of this connector and kind (their own pick, e.g. a Drive folder in Google
+   * Picker): its id, or why not (cancelled, not available). Absent: no place can be chosen in this app.
+   */
+  choosePlace?: (companyId: string, place: Pick<JobDeliveryPlace, 'connector' | 'kind'>) => Promise<{ ok: true; ref: string } | { ok: false; message: string }>
 }
 
 /** A company id that goes into the server URL: no separators, dots or encoded characters. */
@@ -70,16 +77,21 @@ export function createJobsApi(deps: JobsDeps) {
    */
   function mine(job: JobView): MyJob | null {
     if (!job.you?.named && !job.you?.controls && !job.you?.mustAccept) return null
+    const d = job.deliverTo
     return {
       id: job.id, name: job.approved?.name ?? job.name, state: job.state, waiting: job.waiting, pausedReason: job.pausedReason,
       trigger: job.trigger ?? null, placement: job.placement ?? null, nextSlot: job.nextSlot ?? null, toAccept: null, controls: job.you.controls,
+      deliverTo: d ? { label: d.label, chosen: d.chosen, usable: d.usable, name: d.name, expiresAt: d.expiresAt } : null,
     }
   }
 
+  /** The member must choose the deliverable place again: accepted, still theirs to run, but the place no longer usable. */
+  const placeLost = (view: JobView) => !view.you?.mustAccept && !!view.you?.controls && view.accepted && !!view.deliverTo && !view.deliverTo.usable
+
   /** What waits for the member's 「受け取る」: the approved version as the server shows it to them (its definition may be hidden). */
-  function toAccept(detail: JobView): MyJob['toAccept'] {
+  function toAccept(detail: JobView, why: 'accept' | 'place'): MyJob['toAccept'] {
     const v = detail.versions?.find(x => x.version === detail.approvedVersion)
-    return v ? { version: v.version, fingerprint: v.fingerprint, definition: v.definition } : null
+    return v ? { version: v.version, fingerprint: v.fingerprint, definition: v.definition, why } : null
   }
 
   async function act(what: string, companyId: unknown, jobId: unknown, path: (id: string) => string, body?: unknown): Promise<JobActionResult> {
@@ -106,18 +118,32 @@ export function createJobsApi(deps: JobsDeps) {
         .filter((pair): pair is readonly [JobView, MyJob] => pair[1] !== null)
       let details = 0
       for (const [view, job] of out) {
-        if (!view.you?.mustAccept || details >= MAX_DETAILS) continue
+        const why = view.you?.mustAccept ? 'accept' : placeLost(view) ? 'place' : null
+        if (!why || details >= MAX_DETAILS) continue
         details += 1
         const d = await call(`${company(companyId)}/jobs/${view.id}`, 'GET')
         if (!ok(d)) return failure('detail', d)
-        job.toAccept = toAccept(d.json!.data as JobView)
+        job.toAccept = toAccept(d.json!.data as JobView, why)
       }
       return { success: true, jobs: out.map(([, job]) => job) }
     },
-    accept(companyId: unknown, jobId: unknown, version: unknown, fingerprint: unknown): Promise<JobActionResult> {
-      if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) return Promise.resolve(BAD_INPUT)
-      if (typeof fingerprint !== 'string' || !FINGERPRINT.test(fingerprint)) return Promise.resolve(BAD_INPUT)
-      return act('accept', companyId, jobId, id => `/me/jobs/${id}/accept`, { version, fingerprint })
+    async accept(companyId: unknown, jobId: unknown, version: unknown, fingerprint: unknown): Promise<JobActionResult> {
+      if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) return BAD_INPUT
+      if (typeof fingerprint !== 'string' || !FINGERPRINT.test(fingerprint)) return BAD_INPUT
+      if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId) || !isJobId(jobId)) return BAD_INPUT
+      // Whether the version puts into a place outside is the server's answer (never the renderer's): then the member
+      // chooses it first (their own pick), and the acceptance carries it.
+      const view = await call(`${company(companyId)}/jobs/${jobId}`, 'GET')
+      if (!ok(view)) return failure('accept', view)
+      const wanted = (view.json!.data as JobView).deliverTo
+      let place: JobDeliveryPlace | null = null
+      if (wanted) {
+        if (!deps.choosePlace) return { success: false, offline: false, code: 'PLACE_NOT_CHOSEN', error: 'このアプリでは置き先を選べません。アプリを新しくしてください。' }
+        const chosen = await deps.choosePlace(companyId, { connector: wanted.connector, kind: wanted.kind })
+        if (!chosen.ok) return { success: false, offline: false, code: 'PLACE_NOT_CHOSEN', error: chosen.message }
+        place = { connector: wanted.connector, kind: wanted.kind, ref: chosen.ref }
+      }
+      return act('accept', companyId, jobId, id => `/me/jobs/${id}/accept`, { version, fingerprint, ...(place ? { place } : {}) })
     },
     pause: (companyId: unknown, jobId: unknown) => act('pause', companyId, jobId, id => `/jobs/${id}/pause`),
     resume: (companyId: unknown, jobId: unknown) => act('resume', companyId, jobId, id => `/jobs/${id}/resume`),

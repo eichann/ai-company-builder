@@ -7,7 +7,7 @@ import { DECISION_VERSION, TASK_VERSION } from '../../shared/core/core-types'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox, migrateSecondOpinionSetting } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns, migrateAiRunSubjects } from './schema/ai-runs'
-import { jobSchema, migrateJobOccurrenceCheckedUntil } from './schema/jobs'
+import { jobSchema, migrateJobAcceptedPlace, migrateJobOccurrenceCheckedUntil } from './schema/jobs'
 import { brokerSchema, migrateBrokerSettings } from './schema/broker'
 import { companySchema, migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
 import { connectorSchema, migrateConnectorProviders, migrateGooglePicker } from './schema/connectors'
@@ -26,7 +26,7 @@ import { migrateShelfHistoryRequester, skillShelfSchema } from './schema/skill-s
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import { slackSchema } from './schema/slack'
-import { migrateGoogleCompanyFeatures, migrateGoogleRelay } from './schema/connectors'
+import { migrateDrivePutUpdates, migrateGoogleCompanyFeatures, migrateGoogleRelay } from './schema/connectors'
 // lane A ▲
 // lane B ▼
 import { identitySchema } from './schema/identities'
@@ -46,7 +46,7 @@ export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateOutboundAttachments, migrateOutboundSendSources } from './schema/outbound-mail'
 export { migrateAiRunColumns, migrateAiRunSubjects } from './schema/ai-runs'
-export { migrateJobOccurrenceCheckedUntil } from './schema/jobs'
+export { migrateJobAcceptedPlace, migrateJobOccurrenceCheckedUntil } from './schema/jobs'
 export { migrateMemberAbsenceHistory, migrateMemberWorkSwitches } from './schema/tasks'
 export { migrateSkillUseColumns } from './schema/skill-uses'
 export { migrateSecondOpinionSetting } from './schema/agents'
@@ -156,6 +156,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateNotificationsForUser(conn)
   // Scheduled jobs: where an occurrence's check stopped (jobs.md "The app's runner").
   migrateJobOccurrenceCheckedUntil(conn)
+  // Scheduled jobs: the deliverable place the responsible person chose when accepting (jobs.md).
+  migrateJobAcceptedPlace(conn)
   // Absences are history: removed periods are marked, never deleted (records.md "Whose turn it was").
   migrateMemberAbsenceHistory(conn)
   // Before the seeding below: it deletes stale manager rows per company.
@@ -170,6 +172,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateGoogleCompanyFeatures(conn)
   // The Google relay's cap and stops (google-connector.md "The relay").
   migrateGoogleRelay(conn)
+  // Drive puts that updated a file ACB made (google-drive.md "Overwriting").
+  migrateDrivePutUpdates(conn)
   // lane A ▲
   // lane B ▼
   migrateInboxMessageSourceRef(conn)

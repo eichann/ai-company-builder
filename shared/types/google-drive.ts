@@ -4,7 +4,7 @@
  * token: the Picker's own, `drive.file` only, answered to the member's app
  * session (never to a record token, the AI or a log).
  */
-import type { DrivePickMode } from '../core/google-drive'
+import type { DrivePickMode, DrivePutAs } from '../core/google-drive'
 import type { SkillUse } from '../core/skill-uses'
 
 export type { DrivePickMode } from '../core/google-drive'
@@ -45,8 +45,24 @@ export interface DriveAiStatus {
   available: boolean
   /** The member allowed `drive.file` (else the first pick asks for it). */
   granted: boolean
-  /** The member's live picks (newest first). */
+  /** The member's live picks (newest first). A scheduled job's run sees only its own folder. */
   picks: DrivePick[]
+  /**
+   * Files the member's puts made that `drive_put` may update (`updateFileId`), newest first: their own
+   * receipts only (a scheduled job's run: only those in its folder). Absent from an older server.
+   */
+  puts?: DriveUpdatableFile[]
+}
+
+/** A file one of the member's own puts made (the latest put of it): `drive_put` may update it as a new revision. */
+export interface DriveUpdatableFile {
+  fileId: string
+  /** The name as put (the member's own). */
+  name: string
+  mimeType: string
+  folderId: string
+  link: string | null
+  at: string
 }
 
 /** POST /api/records-ai/google/drive/read { fileId } (read token): a picked file. */
@@ -85,6 +101,11 @@ export interface DrivePutView {
   reason: string | null
   /** The company Skills the AI's consultation had used when the put was asked (records.md "Which Skill"); null when none or a person's put. */
   skills: SkillUse[] | null
+  /**
+   * This put updated a file an earlier put of the member made (a new revision of the same Drive file:
+   * `fileId` is then that file). null: it made a new file. Absent from an older server.
+   */
+  updatedFileId?: string | null
 }
 
 /** POST /api/records-ai/google/drive/put (act token) and GET …/puts/:putId. */
@@ -104,10 +125,21 @@ export interface DrivePutAnswer {
 export interface DrivePutRequest {
   folderId: string
   name: string
-  kind: 'pdf' | 'html'
+  /** What the local file is. */
+  kind: 'pdf' | 'html' | 'markdown'
+  /** `google_doc`: HTML or Markdown converted into a Google document; absent / `file`: the file as is (PDF or HTML). */
+  as?: DrivePutAs
   sha256: string
   contentBase64: string
-  /** The app's key for this put (same content, folder and name → same key): a byte-identical repeat is never put twice; edited content is a new file. */
+  /**
+   * A file an earlier put of this member made, in this same folder: it gets the content as a new revision
+   * (the same file id and link) instead of a new file being made. Absent: a new file.
+   */
+  updateFileId?: string
+  /**
+   * The app's key for this put (same content, folder, name, form and target → same key): a byte-identical
+   * repeat is never put twice; edited content without `updateFileId` is a new file.
+   */
   requestKey: string
   /**
    * The consultation's やること (its topic), set by the app, never by the AI: once the file is in
