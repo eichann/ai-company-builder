@@ -107,6 +107,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   the agents ⇄ their tool modules (12 folders, the host should hand the agents a tool list) and
   the renderer's `features/auth` ⇄ `shared` ⇄ `stores`. A new cycle, or a folder joining a
   listed one, fails; a listed one that disappeared fails until it is removed from the list.
+  Between files (electron/, src/, shared/) there is no cycle at all, and none may appear (same
+  test, no list): the folder check cannot see one inside a folder or a listed folder cycle.
 - **Windows.** Every app window — the main one and the consultation windows — gets the one
   `webPreferences()` of `createAppPages` (`electron-adapter.ts`; contextIsolation, sandbox, no Node, the one preload; CSP from
   `index.html`). Every app window also shows only the app's page (`keepAppPageInWindow`): a

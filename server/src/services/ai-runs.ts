@@ -32,7 +32,7 @@ import {
 import { parseClientVersion } from '../../shared/core/client-version'
 import { aiTurnRouteAllowed } from '../../shared/core/ai-turn-routes'
 import { aiTurnRouteScopeApplies } from '../lib/client-version'
-import { notInStep } from './plugin-operation-checks'
+import { notInStep } from './not-in-step'
 import type { PluginStepProcedurePin } from '../../shared/core/plugins'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type { AiRunView } from '../../shared/types/ai-runs'

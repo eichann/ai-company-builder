@@ -1279,7 +1279,9 @@ Code: `services/plugin-operations.ts` composes the service (run, create, similar
 recreate) from `plugin-operation-checks.ts` (the checks and the precheck before every send),
 `-inputs.ts` (bodies), `-records.ts` (the operation record and its view), `-sending.ts` (send,
 settle, reconcile — never re-sent), `-undo.ts`, `-approvals.ts` (the approval seam), `-similar.ts` and
-`-common.ts` (words, refusals, the one per-object serialiser every part shares).
+`-common.ts` (words, refusals, the one per-object serialiser every part shares). The step gate's
+one answer `NOT_IN_STEP` is the leaf `services/not-in-step.ts` (the record engine's create, AI
+runs, threads and the AI-token route give it too, without importing the checks).
 
 ```
 POST /api/companies/:companyId/plugins/:pluginId/records/:recordId/operations/:operation   a person (session)

@@ -43,8 +43,11 @@ src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts
   under `src/`, a file directly in `src/` its own unit; value imports only). Listed today:
   `adapters ⇄ db` (the startup migrations above; untangle by running them from the composition
   root after `initDatabase()`). A new cycle fails; a listed one that disappeared fails until
-  removed from the list. A file-level cycle inside one folder is not caught (today
-  `services/record-engine.ts` → `record-engine/create.ts` → `plugin-operation-checks.ts`).
+  removed from the list. Between files there is no cycle at all (same test, "no import cycle
+  between src/ files", no list): the last one, `services/record-engine.ts` →
+  `record-engine/create.ts` → `plugin-operation-checks.ts`, was untangled on 2026-11-11 by moving
+  the step gate's one answer (`NOT_IN_STEP` / `notInStep`) to the leaf `services/not-in-step.ts`.
+  A new one fails: inject the function or move the shared piece to a module both may import.
 - Client activity (`client_activity`): `services/client-activity.ts` records it (throttled,
   never throws) from `routes/client-activity-middleware.ts` (API) and git-http, and holds the
   active-members build check; table in `adapters/sqlite/client-activity.ts`.

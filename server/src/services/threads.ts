@@ -22,7 +22,7 @@ import type { MailReader, MailReadFailure } from '../ports/mail'
 import type { RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
-import { NOT_IN_STEP } from './plugin-operation-checks'
+import { NOT_IN_STEP } from './not-in-step'
 import { recordReader } from './record-access'
 import { RECORDS_DISABLED } from './records'
 
