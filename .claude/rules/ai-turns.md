@@ -242,7 +242,9 @@ The execution state lives on the server; the AI still runs only here.
 - **The subject's part of a claim and a finish** (B PR 5a, optional port hooks, records unchanged):
   `claimed` runs in the claim's transaction after the run is written (a job's occurrence becomes `running`),
   `finishing` in the finish's transaction after the run's next state is written (the occurrence's end and its
-  one やること, `jobs.md`); a refusal from either rolls the whole claim / finish back. The claim core is one
+  one やること, `jobs.md`); a refusal from either rolls the whole claim / finish back; `beforeFinish` before
+  the finish's transaction may answer instead, having ended the run itself (a PC job past its approved
+  minutes, or whose やること cannot be made: `jobs.md` "The PC's claim"). The claim core is one
   function for both kinds (`claimSubject`): the emergency stop first, then `resolve`, then the write.
 - **Each state change of a run is kept** (`ai_run_events`: run, seq, at, event, generation,
   `state_after`, `code` — short codes only, a CHECK refuses anything but `[A-Z0-9_]`, no text

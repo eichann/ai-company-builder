@@ -40,6 +40,7 @@ import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { JobOccurrenceRow, JobRow, JobVersionRow } from '../ports/jobs'
 import type { Transactions } from '../ports/transactions'
+import type { AiRunRow } from '../ports/ai-runs'
 import { hasFullAccess } from './access'
 import type { JobService } from './jobs'
 import { companyNow } from './notifications'
@@ -85,6 +86,28 @@ class TaskNotCreated extends Error {
 }
 
 const definitionOf = (v: JobVersionRow): JobDefinition => JSON.parse(v.definition) as JobDefinition
+
+/**
+ * A PC run's hard deadline (B PR 5a): its first claim — the run's creation, which renewals and re-claims never
+ * move — plus the approved grant's `limits.minutes`. After it no call, renew-extended or not, goes on.
+ */
+export function pcRunDeadlineMs(run: Pick<AiRunRow, 'createdAt'>, definition: JobDefinition): number {
+  return Date.parse(run.createdAt) + definition.grant.limits.minutes * 60_000
+}
+
+/**
+ * End a PC occurrence's run from outside its finish (in the caller's transaction): `waiting_person` with `code`,
+ * no holder — its tokens are fenced at once, its renew and finish refused (`RUN_SUPERSEDED`). Its occurrence
+ * is moved by the caller (held / needs_person), so a later 「もう一度」 of the run claims nothing.
+ */
+export function endPcRun(handle: CompanyData, runId: string | null, code: string, at: string): void {
+  const run = runId ? handle.aiRuns.byId(runId) : null
+  if (!run || (run.state !== 'running' && run.state !== 'open' && run.state !== 'retry_later')) return
+  const ended: AiRunRow = { ...run, state: 'waiting_person', deviceId: null, claimExpiresAt: null, failureClass: 'bad-input', failureCode: code, retryAt: null, updatedAt: at }
+  if (handle.aiRuns.update(ended, { generation: run.generation, state: run.state })) {
+    handle.aiRuns.appendEvent({ runId: run.id, event: 'finished', generation: run.generation, stateAfter: 'waiting_person', code, at })
+  }
+}
 
 export function createJobOccurrences(deps: JobOccurrenceDeps) {
   const { companyData, transactions, clock, ids } = deps
@@ -176,18 +199,48 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         }
       })
     }
-    // A PC's run that stopped without finishing (the app closed, retried later, given back) and whose time ran
-    // out: expired, and said so (B PR 5a). A run someone holds now finishes as it will; one with an outside
-    // result nobody knows waits for a person's reconciliation (the run's own place) and stays as it is.
+    // A PC's run (B PR 5a), in this order:
+    // - past its hard deadline (first claim + approved minutes; renewing never moves it) → the run ended,
+    //   `needs_person` `TIME_LIMIT`, told — also while its app still holds and renews it;
+    // - waiting for a person to reconcile an outside operation, and out of time (deadline or expiry) →
+    //   `needs_person` `RESULT_UNKNOWN`, told; the run stays where it is for that person;
+    // - stopped without finishing (the app closed, retried later, given back) and past its expiry → `expired`, told.
+    // A run someone holds within its deadline finishes as it will.
     for (const occ of handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT)) {
-      if (nowMs < Date.parse(occ.expiresAt)) continue
       const run = occ.runId ? handle.aiRuns.byId(occ.runId) : null
+      const version = handle.jobs.version(occ.jobId, occ.jobVersion)
+      const overdue = run !== null && version !== null && nowMs >= pcRunDeadlineMs(run, definitionOf(version))
+      const expired = nowMs >= Date.parse(occ.expiresAt)
+      const job = handle.jobs.find(occ.jobId)
+      const acting = version?.actingUserId ?? null
+      if (run?.state === 'waiting_reconcile') {
+        if (!overdue && !expired) continue
+        transactions.run(() => {
+          if (!handle.jobs.moveOccurrence(occ.id, ['running'], 'needs_person', { outcomeCode: 'RESULT_UNKNOWN' }, clock.now())) return
+          changed++
+          notice(companyId, handle, 'job_failed', occ, job, acting, told)
+        })
+        continue
+      }
+      if (overdue) {
+        transactions.run(() => {
+          const at = clock.now()
+          if (!handle.jobs.moveOccurrence(occ.id, ['running'], 'needs_person', { outcomeCode: 'TIME_LIMIT' }, at)) return
+          endPcRun(handle, occ.runId, 'TIME_LIMIT', at)
+          changed++
+          notice(companyId, handle, 'job_failed', occ, job, acting, told)
+        })
+        continue
+      }
+      if (!expired) continue
       const held = run !== null && run.state === 'running' && run.claimExpiresAt !== null && Date.parse(run.claimExpiresAt) > nowMs
-      if (held || run?.state === 'waiting_reconcile') continue
+      if (held) continue
       transactions.run(() => {
-        if (!handle.jobs.moveOccurrence(occ.id, ['running'], 'expired', { outcomeCode: 'EXPIRED' }, clock.now())) return
+        const at = clock.now()
+        if (!handle.jobs.moveOccurrence(occ.id, ['running'], 'expired', { outcomeCode: 'EXPIRED' }, at)) return
+        endPcRun(handle, occ.runId, 'EXPIRED', at)
         changed++
-        notice(companyId, handle, 'job_expired', occ, handle.jobs.find(occ.jobId), handle.jobs.version(occ.jobId, occ.jobVersion)?.actingUserId ?? null, told)
+        notice(companyId, handle, 'job_expired', occ, job, acting, told)
       })
     }
     // A `due` occurrence whose time ran out (the runner, or a PC, could not take it): expired, and said so.
@@ -310,12 +363,18 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
   /**
    * A pause or the company's stop begins (in the caller's transaction, jobs.md "Held"): every occurrence of
    * the job (null: of every job of the company) still `due` is `held` — it never runs, also not after resuming.
+   * One a PC is running (B PR 5a) is `held` too and its run ended (`endPcRun`): its token, renew and finish are
+   * refused from now on, and resuming or lifting the stop brings neither back.
    */
   function holdDue(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void {
     const handle = companyData.forCompany(companyId)
     const at = clock.now()
-    for (const occ of handle.jobs.dueOccurrences(10_000)) {
+    for (const occ of handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT)) {
       if (jobId === null || occ.jobId === jobId) handle.jobs.moveOccurrence(occ.id, ['due'], 'held', { outcomeCode: code }, at)
+    }
+    for (const occ of handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT)) {
+      if (jobId !== null && occ.jobId !== jobId) continue
+      if (handle.jobs.moveOccurrence(occ.id, ['running'], 'held', { outcomeCode: code }, at)) endPcRun(handle, occ.runId, code, at)
     }
   }
 

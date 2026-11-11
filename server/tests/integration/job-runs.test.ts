@@ -139,6 +139,7 @@ function dueOccurrence(job: string, co = CO, opts: { expiresInMs?: number; versi
 
 const claim = (occurrenceId: string, user = 'jr-alice', deviceId = 'device-alice-1', co = CO) =>
   as(user, 'POST', '/job-run-claims', { occurrenceId, deviceId, conversationId: `conv-${deviceId}` }, co)
+const runOf = (id: string, co = CO) => db.prepare('SELECT state, failure_code, generation, claim_expires_at FROM ai_runs WHERE company_id = ? AND id = ?').get(co, id) as Json
 const occOf = (id: string, co = CO) => db.prepare('SELECT state, outcome_code, run_id FROM ai_job_occurrences WHERE company_id = ? AND id = ?').get(co, id) as Json
 const jobOf = (id: string, co = CO) => db.prepare('SELECT state, paused_reason FROM ai_jobs WHERE company_id = ? AND id = ?').get(co, id) as Json
 const tasksOf = (co = CO) => db.prepare("SELECT id, personal_owner FROM records WHERE company_id = ? AND type = 'task'").all(co) as Json[]
@@ -321,30 +322,77 @@ describe('the grant at every call', () => {
     expect(jobOf(job)).toEqual({ state: 'paused', paused_reason: 'OWNER_RIGHTS_CHANGED' })
     expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'OWNER_RIGHTS_CHANGED' })
     expect(noticesOf('job_paused')).toEqual(['jr-admin', 'jr-owner'])
-    // Its finish makes nothing.
-    expect((await finish(run, { outcome: 'done', jobResult: { title: '報告書の下書き' } })).status).toBe(200)
+    // Its run was ended with it: the finish is refused and makes nothing.
+    expect((await finish(run, { outcome: 'done', jobResult: { title: '報告書の下書き' } })).status).toBe(409)
     expect(tasksOf()).toEqual([])
   })
 
-  it('the company’s jobs stop or a pause refuses the next call, and the finish makes nothing', async () => {
+  it('a pause holds a running occurrence and ends its run: nothing comes back after resuming (claim, pause, call, resume, call, finish)', async () => {
     const { job, occ } = await runnable()
     const run = (await claim(occ)).body.data.run
     const token = await tokenFor(run)
+    expect((await ai(token, 'POST', '/query', { type: 'task' })).status).toBe(200)
     expect(services.jobs.pause(owner(), job).ok).toBe(true)
-    expect(await ai(token, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 403, body: { code: 'NOT_IN_STEP' } })
-    expect((await finish(run, { outcome: 'done', jobResult: { title: '報告書の下書き' } })).status).toBe(200)
+    expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'JOB_PAUSED' })
+    expect(runOf(run.id)).toMatchObject({ state: 'waiting_person', failure_code: 'JOB_PAUSED' })
+    expect(await ai(token, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 409, body: { code: 'RUN_SUPERSEDED' } })
+    expect((await services.jobs.resume(owner(), job)).ok).toBe(true)
+    // Resumed: the same token, the finish, a renew and a later claim all stay refused; nothing is made.
+    expect(await ai(token, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 409, body: { code: 'RUN_SUPERSEDED' } })
+    expect((await finish(run, { outcome: 'done', jobResult: { title: '報告書の下書き' } })).status).toBe(409)
+    expect((await as('jr-alice', 'POST', `/ai-runs/${run.id}/renew`, { generation: run.generation })).status).toBe(409)
+    vi.setSystemTime(Date.now() + 6 * MINUTE)
+    expect(await claim(occ, 'jr-alice', 'device-alice-2')).toMatchObject({ status: 409, body: { code: 'JOB_TURN_GONE' } })
+    // 「もう一度」 of the ended run gives it back, and still nothing claims the held occurrence.
+    expect((await as('jr-alice', 'POST', `/ai-runs/${run.id}/retry`)).status).toBe(200)
+    expect(await claim(occ, 'jr-alice', 'device-alice-3')).toMatchObject({ status: 409, body: { code: 'JOB_TURN_GONE' } })
+    vi.setSystemTime(Date.now() - 6 * MINUTE)
     expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'JOB_PAUSED' })
     expect(tasksOf()).toEqual([])
+  })
 
-    const second = await runnable()
-    const run2 = (await claim(second.occ)).body.data.run
-    const token2 = await tokenFor(run2)
+  it('the company’s jobs stop holds a running occurrence and ends its run; lifting it brings nothing back', async () => {
+    const { occ } = await runnable()
+    const run = (await claim(occ)).body.data.run
+    const token = await tokenFor(run)
     services.jobs.setStopped(owner(), { stopped: true })
-    expect(await ai(token2, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 403, body: { code: 'NOT_IN_STEP' } })
-    // A re-claim of the running one is refused too.
+    expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'COMPANY_STOPPED' })
+    services.jobs.setStopped(owner(), { stopped: false })
+    expect(await ai(token, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 409, body: { code: 'RUN_SUPERSEDED' } })
+    expect((await finish(run, { outcome: 'done', jobResult: { title: '報告書の下書き' } })).status).toBe(409)
+    expect(tasksOf()).toEqual([])
+  })
+
+  it('a stop or a pause written without holding (an older build) still refuses the next call, the re-claim and the finish', async () => {
+    const { occ } = await runnable()
+    const run = (await claim(occ)).body.data.run
+    const token = await tokenFor(run)
+    db.prepare('INSERT OR REPLACE INTO ai_job_settings (company_id, stopped, updated_by, updated_at) VALUES (?, 1, ?, ?)').run(CO, 'jr-owner', new Date().toISOString())
+    expect(await ai(token, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 403, body: { code: 'NOT_IN_STEP' } })
     vi.setSystemTime(Date.now() + 6 * MINUTE)
-    expect(await claim(second.occ, 'jr-alice', 'device-alice-2')).toMatchObject({ status: 409, body: { code: 'JOB_STOPPED' } })
+    expect(await claim(occ, 'jr-alice', 'device-alice-2')).toMatchObject({ status: 409, body: { code: 'JOB_STOPPED' } })
     vi.setSystemTime(Date.now() - 6 * MINUTE)
+    expect((await finish(run, { outcome: 'done', jobResult: { title: '報告書の下書き' } })).status).toBe(200)
+    expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'COMPANY_STOPPED' })
+    expect(tasksOf()).toEqual([])
+    db.prepare('DELETE FROM ai_job_settings WHERE company_id = ?').run(CO)
+
+    const paused = await runnable()
+    const run2 = (await claim(paused.occ)).body.data.run
+    const token2 = await tokenFor(run2)
+    db.prepare("UPDATE ai_jobs SET state = 'paused', paused_reason = 'ADMIN' WHERE company_id = ? AND id = ?").run(CO, paused.job)
+    expect(await ai(token2, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 403, body: { code: 'NOT_IN_STEP' } })
+  })
+
+  it('rights narrowed by the time of the finish (no call in between): nothing made, the job paused and owners / admins told', async () => {
+    const { job, occ } = await runnable()
+    const run = (await claim(occ)).body.data.run
+    await restrictHr(false)
+    expect((await finish(run, { outcome: 'done', jobResult: { title: '報告書の下書き' } })).status).toBe(200)
+    expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'OWNER_RIGHTS_CHANGED' })
+    expect(jobOf(job)).toEqual({ state: 'paused', paused_reason: 'OWNER_RIGHTS_CHANGED' })
+    expect(noticesOf('job_paused')).toEqual(['jr-admin', 'jr-owner'])
+    expect(tasksOf()).toEqual([])
   })
 
   it('a token binds only to the run of a PC job (the server’s own run of a job binds none)', async () => {
@@ -406,6 +454,21 @@ describe('the finish', () => {
     const run = (await claim(occ)).body.data.run
     expect(await finish(run, { outcome: 'done', jobResult: { title: '報告書' } })).toMatchObject({ status: 400, body: { code: 'JOB_TASK_NOT_GRANTED' } })
     expect(occOf(occ).state).toBe('running')
+    expect(tasksOf()).toEqual([])
+  })
+
+  it('records off at the finish: the run ends, needs_person RECORDS_OFF, told — never left running', async () => {
+    const { occ } = await runnable()
+    const run = (await claim(occ)).body.data.run
+    db.prepare('UPDATE record_settings SET enabled = 0 WHERE company_id = ?').run(CO)
+    try {
+      expect(await finish(run, { outcome: 'done', jobResult: { title: '報告書' } })).toMatchObject({ status: 409, body: { code: 'RECORDS_DISABLED' } })
+    } finally {
+      db.prepare('UPDATE record_settings SET enabled = 1 WHERE company_id = ?').run(CO)
+    }
+    expect(occOf(occ)).toMatchObject({ state: 'needs_person', outcome_code: 'RECORDS_OFF' })
+    expect(runOf(run.id)).toMatchObject({ state: 'waiting_person', failure_code: 'RECORDS_OFF' })
+    expect(noticesOf('job_failed')).toEqual(['jr-alice', 'jr-owner'])
     expect(tasksOf()).toEqual([])
   })
 
@@ -535,3 +598,89 @@ describe('a Skill pinned from the Skill shelf (a company without the shared fold
     expect(await services.jobs.approve(owner(), made.value.id, { version: 1 })).toMatchObject({ ok: false, body: { code: 'JOB_SKILL_CHANGED' } })
   })
 })
+
+describe('the approved minutes are a hard deadline from the first claim', () => {
+  const short = () => runnable(CO, { grant: { ...pcJob('x').grant, limits: { minutes: 1, runsPerDay: 1 } } })
+
+  it('renewing never moves it: after it the next call is refused, the run ended, needs_person TIME_LIMIT and told; renew and finish refused', async () => {
+    const { occ } = await short()
+    const run = (await claim(occ)).body.data.run
+    const token = await tokenFor(run)
+    vi.setSystemTime(Date.now() + 40_000)
+    expect((await as('jr-alice', 'POST', `/ai-runs/${run.id}/renew`, { generation: run.generation })).status).toBe(200)
+    expect((await ai(token, 'POST', '/query', { type: 'task' })).status).toBe(200)
+    vi.setSystemTime(Date.now() + 40_000)
+    // Renewed past the deadline: the lease is still the app's, the deadline is not.
+    expect((await as('jr-alice', 'POST', `/ai-runs/${run.id}/renew`, { generation: run.generation })).status).toBe(200)
+    expect(await ai(token, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 403, body: { code: 'NOT_IN_STEP' } })
+    expect(occOf(occ)).toMatchObject({ state: 'needs_person', outcome_code: 'TIME_LIMIT' })
+    expect(runOf(run.id)).toMatchObject({ state: 'waiting_person', failure_code: 'TIME_LIMIT' })
+    expect(noticesOf('job_failed')).toEqual(['jr-alice', 'jr-owner'])
+    expect((await as('jr-alice', 'POST', `/ai-runs/${run.id}/renew`, { generation: run.generation })).status).toBe(409)
+    expect((await finish(run, { outcome: 'done', jobResult: { title: '報告書' } })).status).toBe(409)
+    vi.setSystemTime(Date.now() - 80_000)
+    expect(tasksOf()).toEqual([])
+  })
+
+  it('a finish after it is refused (JOB_TIME_LIMIT) and makes nothing, with no call in between', async () => {
+    const { occ } = await short()
+    const run = (await claim(occ)).body.data.run
+    vi.setSystemTime(Date.now() + 2 * MINUTE)
+    expect(await finish(run, { outcome: 'done', jobResult: { title: '報告書' } })).toMatchObject({ status: 409, body: { code: 'JOB_TIME_LIMIT' } })
+    vi.setSystemTime(Date.now() - 2 * MINUTE)
+    expect(occOf(occ)).toMatchObject({ state: 'needs_person', outcome_code: 'TIME_LIMIT' })
+    expect(runOf(run.id).state).toBe('waiting_person')
+    expect(tasksOf()).toEqual([])
+  })
+
+  it('a re-claim keeps the first claim’s deadline (after a temporary failure)', async () => {
+    const { occ } = await short()
+    const run = (await claim(occ)).body.data.run
+    expect((await finish(run, { outcome: 'failed', failure: { class: 'temporary', code: 'OFFLINE' } })).status).toBe(200)
+    vi.setSystemTime(Date.now() + 6 * MINUTE)
+    expect((await as('jr-alice', 'GET', '/me/job-turns')).body.data.turns).toEqual([])
+    expect(await claim(occ, 'jr-alice', 'device-alice-2')).toMatchObject({ status: 409, body: { code: 'JOB_TIME_LIMIT' } })
+    vi.setSystemTime(Date.now() - 6 * MINUTE)
+    expect(occOf(occ)).toMatchObject({ state: 'needs_person', outcome_code: 'TIME_LIMIT' })
+  })
+
+  it('the clock ends a run past its deadline even while its app renews it', async () => {
+    const { occ } = await short()
+    const run = (await claim(occ)).body.data.run
+    vi.setSystemTime(Date.now() + 2 * MINUTE)
+    expect((await as('jr-alice', 'POST', `/ai-runs/${run.id}/renew`, { generation: run.generation })).status).toBe(200)
+    occurrencesNow().makeOccurrences(CO)
+    vi.setSystemTime(Date.now() - 2 * MINUTE)
+    expect(occOf(occ)).toMatchObject({ state: 'needs_person', outcome_code: 'TIME_LIMIT' })
+    expect(runOf(run.id)).toMatchObject({ state: 'waiting_person', failure_code: 'TIME_LIMIT' })
+  })
+})
+
+describe('a run waiting for a person to reconcile an outside operation', () => {
+  it('stays while in time; out of time it is needs_person RESULT_UNKNOWN and told — never expired as if nothing had happened', async () => {
+    const { occ } = await runnable()
+    const run = (await claim(occ)).body.data.run
+    const at = new Date().toISOString()
+    db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, created_at, updated_at)
+      VALUES (?, ?, 'draft-1', 'f', 'outbound', 'unknown', 1, ?, ?)`).run(CO, run.id, at, at)
+    expect((await finish(run, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
+    expect(runOf(run.id).state).toBe('waiting_reconcile')
+    expect(occOf(occ).state).toBe('running')
+    occurrencesNow().makeOccurrences(CO)
+    expect(occOf(occ).state).toBe('running')
+    db.prepare('UPDATE ai_job_occurrences SET expires_at = ? WHERE company_id = ? AND id = ?').run(new Date(Date.now() - 1).toISOString(), CO, occ)
+    occurrencesNow().makeOccurrences(CO)
+    expect(occOf(occ)).toMatchObject({ state: 'needs_person', outcome_code: 'RESULT_UNKNOWN' })
+    expect(runOf(run.id).state).toBe('waiting_reconcile')
+    expect(noticesOf('job_failed')).toEqual(['jr-alice', 'jr-owner'])
+    expect(noticesOf('job_expired')).toEqual([])
+  })
+})
+
+function occurrencesNow() {
+  return createJobOccurrences({
+    companyData, transactions: sqliteTransactions(db), clock: { now: () => new Date().toISOString(), nowMs: () => Date.now() }, ids: randomIds,
+    timeZoneOf: () => 'Asia/Tokyo', holidaysOf: () => [], roleOf: (co, user) => sqliteMembershipRepository(db).roleOf(co, user),
+    jobs: services.jobs, writer: { check: () => null, create: () => { throw new Error('no task') } }, log: () => {},
+  })
+}

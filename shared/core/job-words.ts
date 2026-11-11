@@ -126,6 +126,8 @@ const OUTCOME_WORDS: Record<string, string> = {
   RECORDS_OFF: '記録の機能がオフのため、やることを作れませんでした',
   TASK_NOT_CREATED: 'やることを作れませんでした',
   RUN_FAILED: 'AI がこの回を終えられなかったため、人が確かめる必要があります',
+  TIME_LIMIT: '承認された時間を過ぎたため AI を止めました。人が確かめる必要があります',
+  RESULT_UNKNOWN: '外への操作が済んだか分からないまま時間が来ました。人が確かめる必要があります',
 }
 
 const STATE_WORDS: Record<JobOccurrenceState, string> = {

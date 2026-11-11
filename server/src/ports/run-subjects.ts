@@ -93,6 +93,12 @@ export interface RunSubjects<Refused> {
    */
   finishing?(member: RunSubjectMember, run: RunSubjectLiveRun, body: Record<string, unknown>): Refused | null
   /**
+   * Before the finish's transaction (the run still running at the caller's generation): a refusal the finish
+   * answers instead. The subject may have ended the run itself first, in its own transaction (a PC job's run
+   * past its approved minutes, or whose やること cannot be made: `jobs.md` "The PC's claim"). Absent: none.
+   */
+  beforeFinish?(member: RunSubjectMember, run: RunSubjectLiveRun, body: Record<string, unknown>): Refused | null
+  /**
    * Whether a run-bound record token of this subject's run may use this AI route now (the grant at every
    * call, B PR 5a); null = yes. Asked for every run whose kind is not `record` (a record run's built-in
    * steps have their own table); absent → every route refused.

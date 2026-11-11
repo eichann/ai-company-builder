@@ -99,6 +99,7 @@ export function runSubjectsByKind(byKind: { record: RunSubjects<Refusal>; occurr
     afterFailed(member, run) { of(run.subject.kind)?.afterFailed(member, run) },
     claimed(member, run) { return of(run.subject.kind)?.claimed?.(member, run) ?? null },
     finishing(member, run, body) { return of(run.subject.kind)?.finishing?.(member, run, body) ?? null },
+    beforeFinish(member, run, body) { return of(run.subject.kind)?.beforeFinish?.(member, run, body) ?? null },
     routeRefusal(member, run, route) {
       const s = of(run.subject.kind)
       return s?.routeRefusal ? s.routeRefusal(member, run, route) : notInStep()

@@ -22,7 +22,12 @@
  *   やること (owner-only for the responsible person, id from the occurrence, operation key `create_task`) and
  *   `done` — re-checked first: a job no longer runnable makes nothing and holds the occurrence; a run that went
  *   to a person (`waiting_person` / `waiting_setup`) → `needs_person` `RUN_FAILED`, told. A temporary failure or
- *   an unknown outside result leaves it `running`: the run's own semantics (retried later, reconciled).
+ *   an unknown outside result leaves it `running`: the run's own semantics (retried later, reconciled). The
+ *   やること is checked first (`beforeFinish`): refused (records off…) → the run ended, `needs_person`, told.
+ * - **The approved minutes are a hard deadline** from the run's first claim (`pcRunDeadlineMs`, never moved by a
+ *   renew or a re-claim): after it a call, the finish, a re-claim or the clock ends the run and makes the
+ *   occurrence `needs_person` `TIME_LIMIT`, told. A pause or the company's stop holds a running occurrence and
+ *   ends its run (`holdDue` → `endPcRun`), so nothing comes back after a resume.
  */
 import {
   JOB_ACTOR, JOB_PC_STEP, isOccurrenceId, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult,
@@ -35,11 +40,11 @@ import type { JobOccurrenceRow, JobRow, JobVersionRow } from '../ports/jobs'
 import type { RunSubjectLiveRun, RunSubjectMember, RunSubjects } from '../ports/run-subjects'
 import type { Transactions } from '../ports/transactions'
 import type { Member } from './access'
-import type { JobOccurrences } from './job-occurrences'
+import { endPcRun, pcRunDeadlineMs, type JobOccurrences } from './job-occurrences'
 import type { JobService } from './jobs'
 import { notInStep } from './not-in-step'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
-import type { ServiceRecordWriter } from './record-engine'
+import type { ServiceCreateInput, ServiceRecordWriter } from './record-engine'
 
 export interface JobRunDeps {
   companyData: CompanyDataSource
@@ -47,7 +52,7 @@ export interface JobRunDeps {
   clock: Clock
   jobs: Pick<JobService, 'runnerRefusal' | 'pauseBySystem' | 'pinnedSkillKept' | 'nameOf'>
   notices: Pick<JobOccurrences, 'writeNotice' | 'tell'>
-  writer: Pick<ServiceRecordWriter, 'create'>
+  writer: Pick<ServiceRecordWriter, 'check' | 'create'>
 }
 
 const NOT_FOUND = () => refuse('not-found', '定期の仕事が見つかりません。', { code: 'JOB_NOT_FOUND' })
@@ -62,6 +67,7 @@ const REFUSALS: Record<string, () => Refusal> = {
   OWNER_RIGHTS_CHANGED: () => conflict('JOB_GRANT_EXCEEDS', '責任者の今の権限では、この仕事の範囲に足りません。範囲か責任者を見直してください。'),
   OWNER_ABSENT: () => conflict('JOB_OWNER_ABSENT', '不在の日のため、この回は見送りました。'),
   SKILL_MISSING: () => conflict('JOB_SKILL_MISSING', '手順の Skill が、承認された版のまま見つかりません。'),
+  TIME_LIMIT: () => conflict('JOB_TIME_LIMIT', '承認された時間を過ぎたため、この回は AI を止めました。人が確かめる必要があります。'),
 }
 /** How many of a company's waiting occurrences the turn list looks at (at most one `due` per job). */
 const TURN_SCAN_LIMIT = 10_000
@@ -106,9 +112,16 @@ export function createJobRuns(deps: JobRunDeps) {
     return null
   }
 
+  /** A running occurrence's run is past its hard deadline (first claim + the approved minutes, `pcRunDeadlineMs`). */
+  function overdue(f: Found, nowMs: number): boolean {
+    const run = f.occ.state === 'running' && f.occ.runId ? f.handle.aiRuns.byId(f.occ.runId) : null
+    return run !== null && nowMs >= pcRunDeadlineMs(run, f.definition)
+  }
+
   /** Whose turn: everything a claim needs, without changing anything. */
   function whyNot(f: Found, nowMs: number): Why | null {
     if (f.occ.state !== 'due' && f.occ.state !== 'running') return 'GONE'
+    if (overdue(f, nowMs)) return 'TIME_LIMIT'
     if (nowMs >= Date.parse(f.occ.expiresAt)) return 'EXPIRED'
     const why = runnable(f)
     if (why) return why
@@ -128,14 +141,22 @@ export function createJobRuns(deps: JobRunDeps) {
   /**
    * What the server writes when a claim or a call finds the job no longer runnable as pinned (as its own
    * runner does, jobs.md "The runner"): the rights lost → the occurrence held and the job paused, owners /
-   * admins told (`job_paused`); absent → skipped and told; another version approved → held.
+   * admins told (`job_paused`); absent → skipped and told; another version approved → held; past the run's
+   * hard deadline → `needs_person` `TIME_LIMIT`, told. A running occurrence's run is ended with it (`endPcRun`).
    */
   function record(f: Found, why: Why): void {
     let told: string[] = []
     transactions.run(() => {
+      const at = clock.now()
       if (why === 'OWNER_RIGHTS_CHANGED') {
         end(f, ['due', 'running'], 'held', 'OWNER_RIGHTS_CHANGED', null)
+        if (f.occ.state === 'running') endPcRun(f.handle, f.occ.runId, 'OWNER_RIGHTS_CHANGED', at)
         deps.jobs.pauseBySystem(f.handle.companyId, f.job.id, 'OWNER_RIGHTS_CHANGED')
+      } else if (why === 'TIME_LIMIT') {
+        if (f.handle.jobs.moveOccurrence(f.occ.id, ['running'], 'needs_person', { outcomeCode: 'TIME_LIMIT' }, at)) {
+          told = deps.notices.writeNotice(f.handle.companyId, 'job_failed', f.occ)
+          endPcRun(f.handle, f.occ.runId, 'TIME_LIMIT', at)
+        }
       } else if (why === 'OWNER_ABSENT') told = end(f, ['due'], 'skipped', 'OWNER_ABSENT', 'job_skipped')
       else if (why === 'JOB_VERSION_CHANGED') end(f, ['due'], 'held', 'JOB_VERSION_CHANGED', null)
     })
@@ -146,6 +167,23 @@ export function createJobRuns(deps: JobRunDeps) {
   function checkSince(f: Found): string {
     const before = f.handle.jobs.occurrences(f.job.id, 50).find(o => o.dueSlot < f.occ.dueSlot && (o.state === 'done' || o.state === 'nothing'))
     return before?.dueAt ?? f.version.approvedAt ?? f.version.createdAt
+  }
+
+  /** The one やること of a finish (owner-only for the responsible person: what the job read and wrote reaches nobody else). */
+  function taskInput(f: Found, runId: string, result: { title: string; summary: string | null }): ServiceCreateInput {
+    return {
+      type: 'task', id: occurrenceTaskId(f.occ.id), title: result.title, ...(result.summary ? { summary: result.summary.slice(0, 300) } : {}),
+      personalOwner: f.definition.actingUser, fields: { assignee: f.definition.actingUser },
+      actor: { ...JOB_ACTOR, runId }, note: '定期の仕事から作りました',
+      // D9: no notice of its own — the やること in 「あなたの番」 is the notice.
+      quiet: true,
+    }
+  }
+
+  /** The run holding this occurrence now, or null (ended meanwhile, another run). */
+  function held(member: RunSubjectMember, run: RunSubjectLiveRun): Found | null {
+    const f = own(member, run.subject.id)
+    return f && f.occ.state === 'running' && f.occ.runId === run.id ? f : null
   }
 
   function turnView(member: Member, f: Found): JobTurnView {
@@ -181,11 +219,36 @@ export function createJobRuns(deps: JobRunDeps) {
       return null
     },
 
+    beforeFinish(member, run, body) {
+      if (run.step !== JOB_PC_STEP) return null
+      const f = held(member, run)
+      if (!f) return null
+      // Past the hard deadline: the run ends, the occurrence needs a person, and the finish makes nothing.
+      if (overdue(f, clock.nowMs())) {
+        record(f, 'TIME_LIMIT')
+        return REFUSALS.TIME_LIMIT()
+      }
+      // The one やること checked before anything is written (as the server's runner does): refused → the run
+      // ended, `needs_person` with that code, told — never left running.
+      const result = body.outcome === 'done' ? parseJobRunResult(body.jobResult) : null
+      if (result === null || result === 'nothing' || !f.definition.grant.creates.includes('task') || runnable(f)) return null
+      const refused = deps.writer.check(f.handle.companyId, taskInput(f, run.id, result))
+      if (!refused) return null
+      const code: JobOutcomeCode = refused.reason === 'records-off' ? 'RECORDS_OFF' : 'TASK_NOT_CREATED'
+      let told: string[] = []
+      transactions.run(() => {
+        told = end(f, ['running'], 'needs_person', code, 'job_failed')
+        endPcRun(f.handle, run.id, code, clock.now())
+      })
+      deps.notices.tell(f.handle.companyId, told)
+      return refuse('conflict', 'やることを作れませんでした。人が確かめる必要があります。', { code: code === 'RECORDS_OFF' ? 'RECORDS_DISABLED' : 'JOB_TASK_NOT_CREATED' })
+    },
+
     finishing(member, run, body) {
       if (run.step !== JOB_PC_STEP) return null
-      const f = own(member, run.subject.id)
       // Ended meanwhile (held by a pause found at a call, expired): the run's finish is all that is left.
-      if (!f || f.occ.state !== 'running' || f.occ.runId !== run.id) return null
+      const f = held(member, run)
+      if (!f) return null
       if (run.state === 'waiting_person' || run.state === 'waiting_setup') {
         const told = end(f, ['running'], 'needs_person', 'RUN_FAILED', 'job_failed')
         toTell.set(run.id, { companyId: f.handle.companyId, userIds: told })
@@ -216,14 +279,8 @@ export function createJobRuns(deps: JobRunDeps) {
           generation: 1, refKind: null, refId: null, status: null, reconciledBy: null, createdAt: at, updatedAt: at,
         })
       }
-      const made = deps.writer.create(f.handle.companyId, {
-        type: 'task', id: occurrenceTaskId(f.occ.id), title: result.title, ...(result.summary ? { summary: result.summary.slice(0, 300) } : {}),
-        // Owner-only for the responsible person: what the job read and wrote reaches nobody else, owners / admins included.
-        personalOwner: f.definition.actingUser, fields: { assignee: f.definition.actingUser },
-        actor: { ...JOB_ACTOR, runId: run.id }, note: '定期の仕事から作りました',
-        // D9: no notice of its own — the やること in 「あなたの番」 is the notice.
-        quiet: true,
-      })
+      // Checked before the transaction (`beforeFinish`); a refusal here is a race: the whole finish rolls back.
+      const made = deps.writer.create(f.handle.companyId, taskInput(f, run.id, result))
       if (!made.ok) return refuse('conflict', 'やることを作れませんでした。', { code: made.reason === 'records-off' ? 'RECORDS_DISABLED' : 'JOB_TASK_NOT_CREATED' })
       runs.updateOperation(run.id, key, ['in_progress'], { state: 'done', refKind: 'record', refId: made.record.id }, at)
       if (!f.handle.jobs.moveOccurrence(f.occ.id, ['running'], 'done', { outcomeCode: null }, at)) return GONE()
@@ -232,8 +289,13 @@ export function createJobRuns(deps: JobRunDeps) {
 
     routeRefusal(member, run, route) {
       if (run.step !== JOB_PC_STEP) return notInStep()
-      const f = own(member, run.subject.id)
-      if (!f || f.occ.state !== 'running' || f.occ.runId !== run.id) return notInStep()
+      const f = held(member, run)
+      if (!f) return notInStep()
+      // Past the hard deadline (a renewed lease does not move it): the run ends and nothing more goes through.
+      if (overdue(f, clock.nowMs())) {
+        record(f, 'TIME_LIMIT')
+        return notInStep()
+      }
       const why = runnable(f)
       if (why) {
         if (why === 'OWNER_RIGHTS_CHANGED') record(f, why)

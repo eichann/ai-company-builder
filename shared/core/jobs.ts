@@ -416,11 +416,13 @@ export type JobOccurrenceState = typeof JOB_OCCURRENCE_STATES[number]
  * approved after the occurrence was made), `OWNER_LEFT` / `OWNER_RIGHTS_CHANGED` (the job was paused for it);
  * skipped — `OWNER_ABSENT` (D5: no delegate runs it), `SUPERSEDED` (a newer occurrence, `latest_only`),
  * `MISSED` (found late under `skip`); expired — `EXPIRED`; needs_person — `RECORDS_OFF`, `TASK_NOT_CREATED`,
- * `RUN_FAILED` (a PC's run ended waiting for a person, B PR 5a).
+ * `RUN_FAILED` (a PC's run ended waiting for a person), `TIME_LIMIT` (a PC's run past its approved minutes),
+ * `RESULT_UNKNOWN` (a PC's run waits for a person to say whether an outside operation happened, and its time
+ * ran out) — B PR 5a.
  */
 export const JOB_OUTCOME_CODES = [
   'JOB_PAUSED', 'COMPANY_STOPPED', 'NOT_ACCEPTED', 'JOB_VERSION_CHANGED', 'OWNER_LEFT', 'OWNER_RIGHTS_CHANGED',
-  'OWNER_ABSENT', 'SUPERSEDED', 'MISSED', 'EXPIRED', 'RECORDS_OFF', 'TASK_NOT_CREATED', 'RUN_FAILED',
+  'OWNER_ABSENT', 'SUPERSEDED', 'MISSED', 'EXPIRED', 'RECORDS_OFF', 'TASK_NOT_CREATED', 'RUN_FAILED', 'TIME_LIMIT', 'RESULT_UNKNOWN',
 ] as const
 export type JobOutcomeCode = typeof JOB_OUTCOME_CODES[number]
 

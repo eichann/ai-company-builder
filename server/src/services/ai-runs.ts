@@ -389,6 +389,9 @@ export function createAiRunService(deps: AiRunDeps) {
       // What a PC job's run hands back (B PR 5a) is for that kind of run only.
       if (b.jobResult !== undefined && run.subject.kind === 'record') return refuse('bad-request', 'jobResult is for a job’s run only')
       if (run.state !== 'running' || run.generation !== generation) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
+      // The subject may refuse it first (a PC job's run past its approved minutes: it ends the run itself).
+      const before = subjects.beforeFinish?.(member, liveRun(run), b) ?? null
+      if (before) return before
       const nowMs = clock.nowMs()
       const at = nowIso(nowMs)
       const finished = subjectRefusal(() => transactions.run((): Outcome<{ run: AiRunView }> => {

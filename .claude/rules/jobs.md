@@ -194,7 +194,10 @@ and starting the runner. It reads no content and calls nothing outside.
 
 - **When it begins** — `POST /jobs/:jobId/pause`, a pause the server makes (`OWNER_LEFT`,
   `OWNER_RIGHTS_CHANGED`), `PUT /jobs-stop { stopped: true }`: every occurrence of the job (of the company)
-  still `due` becomes `held` (`JOB_PAUSED` / `COMPANY_STOPPED`).
+  still `due` becomes `held` (`JOB_PAUSED` / `COMPANY_STOPPED`) — and one a PC is **running** (PR 5a) too,
+  its run ended in the same transaction (`endPcRun`: `waiting_person` with that code, no holder), so its
+  token (fenced: 409 `RUN_SUPERSEDED`), renew and finish are refused at once and a resume or lifting the stop
+  brings nothing back (the occurrence stays `held`; a 「もう一度」 of the ended run claims nothing).
 - **When it ends** — a resume, `PUT /jobs-stop { stopped: false }` (only when it was on): the newest slot
   at or before now, if not made yet (no clock ran meanwhile), is written `held`, so the clock never makes
   it `due`. A slot from before the pause that no clock had reached yet is held too (the safe side).
@@ -311,15 +314,30 @@ POST /ai-runs/:runId/renew | finish | retry | …/reconcile        as for any ru
   **the one やること** — only when the grant `creates` `task` (else 400 `JOB_TASK_NOT_GRANTED`) — made by the
   service writer: id `occurrenceTaskId` (one per occurrence by construction), owner-only for the responsible
   person, assignee them, actor `JOB_ACTOR` with the run's id, quiet (D9), the run's operation key
-  `create_task`; then the occurrence `done`. No `jobResult` → 400 `JOB_RESULT_REQUIRED`, a writer refusal →
-  409; either rolls the whole finish back (the run stays running). The job checked again first: no longer
-  runnable → nothing made, the occurrence held with the reason (the rights lost also pause it). A finish
+  `create_task`; then the occurrence `done`. No `jobResult` → 400 `JOB_RESULT_REQUIRED` (the whole finish
+  rolls back, the run stays running). The やること is checked by the writer **before** the finish
+  (`beforeFinish`), as the server's runner does: refused → the run ended, the occurrence `needs_person`
+  `RECORDS_OFF` / `TASK_NOT_CREATED`, told, and 409 `RECORDS_DISABLED` / `JOB_TASK_NOT_CREATED` — never left
+  running (a refusal after that check is a race and rolls the finish back). The job checked again first: no
+  longer runnable → nothing made, the occurrence held with the reason (the rights lost also pause it). A finish
   that sends the run to a person (`waiting_person` / `waiting_setup`) → `needs_person` `RUN_FAILED`, told
   (`job_failed`); a temporary failure or an unknown outside result leave it `running` — claimable again after
   its wait, or once reconciled, until it expires. A record run's finish with `jobResult` → 400.
-- **The clock** expires a `running` occurrence past its time whose run nobody holds (lease over, retried
-  later, given back): `expired`, told. One whose run is held finishes as it will; one whose run waits for
-  reconciliation stays (a person decides first).
+- **The approved minutes are a hard deadline** (`grant.limits.minutes`, `pcRunDeadlineMs`): the run's first
+  claim (its creation — renewals and re-claims never move it) + those minutes. After it: every call of its
+  token is refused, the finish answers 409 `JOB_TIME_LIMIT` and makes nothing, a re-claim (also after a
+  temporary failure's wait) answers the same, and the turn is not listed; the first of these — or the clock,
+  also while the app still renews its lease — ends the run (`endPcRun`, `TIME_LIMIT`) and makes the occurrence
+  **`needs_person` `TIME_LIMIT`**, told (`job_failed`): a person looks at what an overrun run may have left
+  (chosen over `expired`, which says nothing happened). The limit counts the whole occurrence, retries
+  included.
+- **The clock**, for a `running` occurrence, in this order: past the deadline → as above; its run waiting for
+  a person to reconcile an outside operation and out of time (deadline or `expires_at`) → `needs_person`
+  `RESULT_UNKNOWN`, told — the run stays `waiting_reconcile` for that person (an upper bound instead of a
+  reconcile entry point for the app: `GET /ai-runs` lists record runs only, and `POST /ai-runs/:runId/
+  operations/:key/reconcile` already works by run id for whoever shows it — 5a-2 / 5b); past `expires_at`
+  with its run held by nobody (lease over, retried later, given back) → `expired`, told, the run ended. A run
+  held within its deadline finishes as it will.
 - **Not here**: the app's side, the clock making PC occurrences (5a-2); 「もう一度」 (5b): a `needs_person`
   occurrence stays so even when its run is given back.
 
@@ -470,10 +488,19 @@ membership can fail).
   ceiling, never a create, an old build scoped too, the rights lost / a pause / the stop / an ended
   occurrence refusing the next call; a token binds to a PC job's run only; the finish's one owner-only
   やること (also finished twice), `nothing`, no result, a grant without `creates`, `needs_person` told, a
-  temporary failure claimable again (generation 2); the turn's hidden name; the clock's expiry of an
-  unheld run; the server runner never starved by PC occurrences; the shelf pin (filled by the server,
-  `JOB_SKILL_NOT_HERE` both ways, an unreadable place missing / hiding the version, `JOB_SKILL_CHANGED`) —
-  every guard mutation-checked (52 mutations, each failing the file).
+  temporary failure claimable again (generation 2); records off at the finish (run ended, `needs_person`,
+  told); a pause / the company's stop holding a running occurrence and ending its run, nothing back after
+  resume or lifting (the exact sequence claim → pause → call → resume → call → finish → re-claim →
+  「もう一度」), a stop or pause written without holding still refused, the rights lost found only at the
+  finish (paused, told); the hard deadline (renewing never moves it, the next call / the finish / a
+  re-claim / the clock end the run → `TIME_LIMIT`); a reconcile wait bounded (`RESULT_UNKNOWN`, never
+  `expired`); the turn's hidden name; the clock's expiry of an unheld run; the server runner never starved
+  by PC occurrences; the shelf pin (filled by the server, `JOB_SKILL_NOT_HERE` both ways, an unreadable place
+  missing / hiding the version, `JOB_SKILL_CHANGED`). 71 mutations (each guard removed or inverted alone)
+  each fail the file. Not reachable by a test, kept as defence: the `claimed` hook's refusal when the
+  occurrence is no longer `due` (the claim's check and write are one synchronous stretch), the finish's
+  `GONE` when the occurrence moved inside its own transaction, and a writer refusal after `beforeFinish`'s
+  check (a race; it rolls the finish back).
 - `client/tests/jobs-ipc.test.ts` — an older server without `you` reported as such; only the member's jobs (by the server's `you`), never dropped behind 80
   other jobs, a hidden approved definition still waiting for them, the approved version's name, the version
   and fingerprint sent, renderer values never change the path, which notices open the section.
