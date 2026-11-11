@@ -610,6 +610,28 @@ describe('PR 4: 「受け取りが要ります」 and what the screens read', ()
     expect(texts).not.toContain(asked('中身が変わる仕事'))
   })
 
+  it('handed to someone else, the new responsible person is told they became it, not that the content changed', async () => {
+    const def = operationJob('u-bob', '引き継ぎの知らせ')
+    const job = await approved(def)
+    await as('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, actingUser: 'u-alice' } })
+    await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 2 })
+    const texts = await bellTexts('u-alice')
+    expect(texts).toContain(asked('引き継ぎの知らせ'))
+    expect(texts.some(t => t.includes('「引き継ぎの知らせ」の内容が変わりました'))).toBe(false)
+  })
+
+  it('the approved version\'s name is hidden whenever the job\'s own name is (a newer draft naming an unreadable place)', async () => {
+    const made = await jobsWithSkill('tree-a').create(owner, { definition: { ...procedureJob('u-bob', '総務/reports'), name: '総務の週報（承認）' } })
+    if (!made.ok) throw new Error(JSON.stringify(made.body))
+    if (!(await jobsWithSkill('tree-a').approve(owner, made.value.id, { version: 1 })).ok) throw new Error('approve')
+    expect((await as('u-bob', 'GET', `/jobs/${made.value.id}`)).body.data.approved.name).toBe('総務の週報（承認）')
+    await jobsWithSkill('tree-a').update(owner, made.value.id, { definition: { ...procedureJob('u-bob', '経理部/reports'), name: '総務の週報（承認）' } })
+    const view = (await as('u-bob', 'GET', `/jobs/${made.value.id}`)).body.data
+    expect(view.name).toBe('定期の仕事')
+    expect(view.approved.name).toBe('定期の仕事')
+  })
+
   it('the caller\'s relation and the approved version\'s person and name are answered even when its definition is hidden', async () => {
     const made = await jobsWithSkill('tree-a').create(owner, { definition: { ...procedureJob('u-carol', 'カロル室/文字起こし'), name: 'カロル室の報告' } })
     if (!made.ok) throw new Error(JSON.stringify(made.body))

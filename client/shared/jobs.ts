@@ -7,6 +7,9 @@ import type { JobWaiting } from '../../shared/types/jobs'
  * own pause / resume. The server decides every rule (who accepts, which pause is theirs to lift).
  */
 
+/** The server answers jobs without who the member is to them (a build before PR 4): nothing can be shown honestly. */
+export const JOBS_SERVER_TOO_OLD_TEXT = 'サーバーの更新が必要です。会社のサーバーが新しくなると、ここに定期の仕事が出ます。'
+
 export const JOBS_OFFLINE_TEXT = 'サーバーに接続できないため、いまは定期の仕事を読み込めません（オフラインの可能性があります）。'
 
 /** One job the member is responsible for, as the app shows it. */

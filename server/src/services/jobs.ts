@@ -193,7 +193,9 @@ export function createJobService(deps: JobServiceDeps) {
     let approvedView: JobView['approved'] = null
     if (approved) {
       const definition = definitionOf(approved)
-      const nameShown = hasFullAccess(member.role) || readsAll(handle, member.userId, member.role, definition)
+      // Never more than the job's own name shows (the newest version's places, `nameFor`): the places of both versions.
+      const nameShown = hasFullAccess(member.role)
+        || (readsAll(handle, member.userId, member.role, definition) && latest !== null && readsAll(handle, member.userId, member.role, definitionOf(latest)))
       approvedView = { responsibleUserId: approved.actingUserId, name: nameShown ? definition.name : HIDDEN_JOB_NAME }
     }
     const accepted = consentAccepted(handle, job)

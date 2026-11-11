@@ -5,7 +5,7 @@
 //   jobs:pause    pause a job they run
 //   jobs:resume   resume a pause they made
 
-import { JOBS_OFFLINE_TEXT, type JobActionResult, type JobsFailure, type MyJob, type MyJobsResult } from '../../../shared/jobs'
+import { JOBS_OFFLINE_TEXT, JOBS_SERVER_TOO_OLD_TEXT, type JobActionResult, type JobsFailure, type MyJob, type MyJobsResult } from '../../../shared/jobs'
 import { isJobId } from '../../../../shared/core/jobs'
 import type { JobView } from '../../../../shared/types/jobs'
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -95,6 +95,10 @@ export function createJobsApi(deps: JobsDeps) {
       const list = await call(`${company(companyId)}/jobs`, 'GET')
       if (!ok(list)) return failure('list', list)
       const views = (list.json!.data as { jobs?: unknown }).jobs
+      // A server before PR 4 answers no `you`: saying 「ありません」 would be a guess, so say what is missing.
+      if (Array.isArray(views) && views.some(j => j && typeof j === 'object' && !('you' in j))) {
+        return { success: false, offline: false, code: 'SERVER_TOO_OLD', error: JOBS_SERVER_TOO_OLD_TEXT }
+      }
       // The member's own first (an owner / admin's list holds every job), then details only for what waits for them.
       const out = (Array.isArray(views) ? views as JobView[] : [])
         .filter(j => isJobId(j?.id) && j.state !== 'retired')

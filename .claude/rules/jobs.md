@@ -257,7 +257,8 @@ sentences the admin approved.
   clock's zone and days off, `JobServiceDeps.timeZoneOf` / `holidaysOf`; null when nothing is approved or
   it is retired; a paused or stopped job still answers it — the screen says it would not run),
   `lastOccurrence` (slot, state, code); `approved` (`responsibleUserId`, and `name` — 「定期の仕事」 for a
-  non-admin who cannot read every place **that** version names), `latestConsentAccepted` (the newest
+  non-admin who cannot read every place that version **or the newest** names: never more than the job's
+  own `name` and the bell show), `latestConsentAccepted` (the newest
   version's consent is the accepted one: approving it runs without a new 受け取る — the screens never
   re-derive this), `you` (`named` / `controls` / `mustAccept`: the caller by the API's own rules, answered
   also while a version's `definition` is hidden). Ids, booleans and names only, never a place. No new endpoint.
@@ -291,7 +292,9 @@ sentences the admin approved.
   受け取る sends the version and fingerprint shown; its message is chosen from the job as re-read
   (`client/src/features/jobs/model.ts` `acceptedText`: 「次の回から動きます」 only when it now runs — not paused,
   stopped or a PC job). 止める for a job they run, 再開する for their own pause (`BY_RESPONSIBLE`; the server
-  checks it was theirs). Renderer values never change the server path (`isJobId`, `sha256:<hex>`). In the
+  checks it was theirs). Renderer values never change the server path (`isJobId`, `sha256:<hex>`). A server
+  that answers jobs without `you` (before PR 4) is said as such (`SERVER_TOO_OLD`, 「サーバーの更新が必要です」),
+  never as 「ありません」. In the
   bell (`jobNoticeTarget`, `client/shared/jobs.ts`): `job_accept_needed` opens this section; an occurrence's
   notice and `job_paused` open nothing (they also reach the creator / admins, who have nothing here).
 
@@ -361,8 +364,9 @@ membership can fail).
   survives its mutation: a notice row is only ever written to that person, and someone no longer
   responsible no longer sees the job at all (by construction).
 - `server/tests/integration/jobs.test.ts` "PR 4" (review fixes) — back to an accepted consent (v1 A
-  accepted, v2 B approved, v3 A) runs without a new ask; the content-changed wording; `you` and `approved`
-  answered while the approved definition is hidden, without the place.
+  accepted, v2 B approved, v3 A) runs without a new ask; the content-changed wording, and 「責任者になりました」
+  for someone a hand-over names; `you` and `approved` answered while the approved definition is hidden,
+  without the place; `approved.name` hidden when a newer draft names an unreadable place.
 - `server/tests/unit/job-words.test.ts` — every state, code and pause reason has words; a held occurrence's
   heading claims no cause.
 - `client/src/features/jobs/model.test.ts` — 「次の回から動きます」 only for a job that now runs.
@@ -372,7 +376,7 @@ membership can fail).
   accept for someone else, accepts one's own, and says what will happen; the list's 責任者 is the approved
   version's and a PC job is not 「動いています」; the stop asks first; a pause reason and occurrences in words;
   nobody else reads the page.
-- `client/tests/jobs-ipc.test.ts` — only the member's jobs (by the server's `you`), never dropped behind 80
+- `client/tests/jobs-ipc.test.ts` — an older server without `you` reported as such; only the member's jobs (by the server's `you`), never dropped behind 80
   other jobs, a hidden approved definition still waiting for them, the approved version's name, the version
   and fingerprint sent, renderer values never change the path, which notices open the section.
 - `server/tests/integration/admin-contract.test.ts` — the admin's calls and requests.

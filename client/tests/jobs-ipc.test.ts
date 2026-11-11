@@ -100,3 +100,12 @@ test('a job\'s notice opens 「定期の仕事」 only for the acceptance ask; a
   for (const kind of ['job_expired', 'job_skipped', 'job_failed', 'job_paused']) assert.equal(jobNoticeTarget(kind), 'none')
   assert.equal(jobNoticeTarget('morning_summary'), null)
 })
+
+test('an older server that does not say who the member is to a job is reported as such, never as 「ありません」', async () => {
+  const old = { ...view(J1, WAITS) } as Record<string, unknown>
+  delete old.you
+  const { jobs } = api([old as ReturnType<typeof view>])
+  const r = await jobs.mine('c1')
+  assert.equal(r.success === false && r.code, 'SERVER_TOO_OLD')
+  assert.match(r.success === false ? r.error : '', /サーバーの更新が必要です/)
+})
