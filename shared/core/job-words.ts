@@ -6,7 +6,7 @@
  * Words only: no rule is decided here (the parser is `jobs.ts`, the slots `job-schedule.ts`). Pure
  * (server/tests/unit/core-purity.test.ts).
  */
-import type { JobCheck, JobDefinition, JobGrant, JobMissed, JobOccurrenceState, JobPauseReason, JobRun, JobTrigger, JobWeekday } from './jobs'
+import { JOB_MINUTES_ROUTE, type JobCheck, type JobDefinition, type JobGrant, type JobMissed, type JobOccurrenceState, type JobPauseReason, type JobRun, type JobTrigger, type JobWeekday } from './jobs'
 
 const WEEKDAY_WORDS: Record<JobWeekday, string> = { mon: '月曜', tue: '火曜', wed: '水曜', thu: '木曜', fri: '金曜', sat: '土曜', sun: '日曜' }
 
@@ -33,7 +33,12 @@ export function jobRunText(run: JobRun): string {
 
 /** The check before running, or null when there is none. */
 export function jobCheckText(check: JobCheck): string | null {
-  return check.kind === 'new_files' ? `「${check.path}」に新しいファイルがあるときだけ動きます` : null
+  if (check.kind === 'new_files') return `「${check.path}」に新しいファイルがあるときだけ動きます`
+  if (check.kind === 'new_meetings') {
+    const words = check.titleWords.length > 0 ? `（名前に${check.titleWords.map(w => `「${w}」`).join('か')}を含むもの）` : ''
+    return `前の回のあとに責任者が出た会議${words}があるときだけ動きます`
+  }
+  return null
 }
 
 /** A missed occurrence (the server was down at that time). */
@@ -70,6 +75,7 @@ export function jobGrantLines(grant: JobGrant): string[] {
   if (grant.reads.paths.length > 0) lines.push(`読む場所：${grant.reads.paths.map(p => `「${p}」`).join('・')}`)
   if (grant.writes.area === 'deliverable') lines.push(`置く場所：「${grant.writes.place}」の中の、責任者だけのフォルダ「${grant.writes.folder}」`)
   if (grant.creates.includes('task')) lines.push('作れるもの：やること')
+  if (grant.routes.includes(JOB_MINUTES_ROUTE)) lines.push('議事録：確かめで見つかった、責任者が出た会議のものだけ読む')
   if (grant.routes.length > 0) lines.push(`使える操作：${grant.routes.length}種類`)
   lines.push(grant.outbound === 'draft_only' ? '外に送るもの：下書きまで（送るのは人）' : '外に送るもの：なし')
   lines.push(`上限：1回 ${jobMinutesText(grant.limits.minutes)}・1日 ${grant.limits.runsPerDay}回`)
@@ -105,10 +111,11 @@ export function jobWaitingText(waiting: 'NOT_APPROVED' | 'NOT_ACCEPTED' | 'PAUSE
 
 /**
  * Whether it runs, as a person reads it: `jobWaitingText`, except that a job on the responsible person's PC
- * (placement `a`) does not run before the PC's claim exists (PR 5) — never 「動いています」 for one.
+ * (placement `a`) runs only while their app is open with 自動で進める on (B PR 5a-2) — said so, never a bare
+ * 「動いています」 for one.
  */
 export function jobRunsText(waiting: 'NOT_APPROVED' | 'NOT_ACCEPTED' | 'PAUSED' | 'COMPANY_STOPPED' | null, pausedReason: JobPauseReason | null, placement: JobDefinition['placement'] | undefined | null): string {
-  if (waiting === null && placement === 'a') return 'まだ動きません（責任者の PC で動く仕事は準備中です）'
+  if (waiting === null && placement === 'a') return '動いています（責任者のアプリが開いていて「自動で進める」が入っているときに動きます）'
   return jobWaitingText(waiting, pausedReason)
 }
 

@@ -38,6 +38,7 @@ import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
 import type { JobActionResult, MyJobsResult } from './jobs'
+import type { QueuedJobTurn } from './ai-turn-steps/job'
 import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
 import type { ViewersQuery, ViewersResult } from './viewers'
 import type { InviteSet, MeetingArrivalsResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteChoicesResult, MeetingInviteResult, MeetingPressResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
@@ -547,6 +548,8 @@ export interface IpcInvokeChannels {
   // Settings → 「定期の仕事」: the scheduled jobs the member is responsible for, with their session (jobs.md).
   /** The member's jobs: what waits for their 「受け取る」 and whether they run it. */
   'jobs:mine': { args: [companyId: string]; result: MyJobsResult }
+  /** The member's scheduled jobs' occurrences this app can run now (B PR 5a-2, jobs.md); main remembers them for the claim. Main window only. */
+  'aiTurns:jobTurns': { args: [companyId: string]; result: QueuedJobTurn[] }
   /** Accept the version shown (its fingerprint: the server refuses another). */
   'jobs:accept': { args: [companyId: string, jobId: string, version: number, fingerprint: string]; result: JobActionResult }
   'jobs:pause': { args: [companyId: string, jobId: string]; result: JobActionResult }
@@ -1051,6 +1054,7 @@ export interface ElectronAPI {
   addAbsence: Invoke<'absences:add'>
   removeAbsence: Invoke<'absences:remove'>
   getMyJobs: Invoke<'jobs:mine'>
+  listJobTurns: Invoke<'aiTurns:jobTurns'>
   acceptJob: Invoke<'jobs:accept'>
   pauseJob: Invoke<'jobs:pause'>
   resumeJob: Invoke<'jobs:resume'>

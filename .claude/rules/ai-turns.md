@@ -17,6 +17,8 @@ paths:
   - "client/src/features/plugin-steps/**"
   - "client/tests/plugin-step-turns.test.ts"
   - "client/electron/features/ai-turns/task-wait-tools.ts"
+  - "client/shared/ai-turn-steps/job.ts"
+  - "client/electron/features/ai-turns/job-runs.ts"
 ---
 
 # 「AI の番」 run automatically (stage 2 S10)
@@ -519,6 +521,17 @@ ceiling, the first message).
   `client/tests/ai-turn-claims.test.ts` (claimed as that step with no record action; settle),
   `server/tests/integration/ai-runs.test.ts` ("a task whose wait is over": listed and claimable
   only after the clock) — mutation-checked.
+
+## A scheduled job's run (定期の仕事, B PR 5a-2; `jobs.md` "The app's runner")
+
+A PC job's occurrence is a candidate of the same queue (`aiTurnQueue`'s `jobs`, `job: true`, `notUrgent`), run by the
+same runner and hidden consultation, with step `job-procedure` (`JOB_PC_STEP`). main's claim (`claims.ts`) routes an
+occurrence id (`occ.…`, never a record id) to `job-runs.ts` after the same refusals (main window, emergency stop,
+`recordActions`, the stop policy confirmed); `claims.ts` hands it its session, `hold` (renew; a 409 also calls the
+job's `onLost`, which stops its AI) and `finishRun` (a job's done carries `jobResult`). Its ceiling is asked by the
+chat server like a business plugin step's (`pluginStepTools` → `jobTools`), its write area and read places through
+`stepWriteArea`; `aiTurns:retry` gives nothing back for an occurrence (its 「もう一度」 is the server's, 5b). Records'
+steps, their claims, settles and tests are unchanged. Test: `client/tests/job-runs.test.ts` (mutation-checked).
 
 ## Not yet
 

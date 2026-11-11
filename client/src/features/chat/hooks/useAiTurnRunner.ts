@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { AiTurnItemsView, AiTurnItemView, AiTurnSettleResult, AutoTurnSettings } from '../../../../shared/ai-turns'
 import { pluginStepConsultationTitle } from '../../../../shared/ai-turn-steps/plugin'
+import { JOB_PC_STEP, jobConsultationTitle } from '../../../../shared/ai-turn-steps/job'
 import { aiTurnStepForRecord } from '../../../../shared/ai-turn-steps/registry'
 import type { AiTurnCandidate } from '../../../../shared/ai-turn-steps/types'
 import { DEFAULT_FEATURES, type CompanyFeatures } from '../../../../../shared/core/features'
@@ -121,12 +122,13 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
 
   const start = useCallback((notice: AiTurnCandidate, now: number) => {
     const o = latest.current
-    // A business plugin's step (plugin-steps.md): main's claim makes its first message from the pinned procedure.
+    // A business plugin's step (plugin-steps.md) or a scheduled job (jobs.md): main's claim makes its first message from the pinned procedure.
     const pluginStep = notice.pluginStep ?? null
-    const step = pluginStep ? null : aiTurnStepForRecord(notice.id, notice.state)
-    const stepName = step?.step ?? pluginStep
+    const job = notice.job ? JOB_PC_STEP : null
+    const step = pluginStep || job ? null : aiTurnStepForRecord(notice.id, notice.state)
+    const stepName = step?.step ?? pluginStep ?? job
     if (!stepName) return
-    const titleFor = (recordTitle: string) => step ? step.consultationTitle({ ...notice, title: recordTitle }) : pluginStepConsultationTitle(recordTitle)
+    const titleFor = (recordTitle: string) => step ? step.consultationTitle({ ...notice, title: recordTitle }) : job ? jobConsultationTitle(recordTitle) : pluginStepConsultationTitle(recordTitle)
     const title = titleFor(notice.title)
     const tabId = o.openBackgroundTab()
     const run: Running = { recordId: notice.id, version: notice.version, state: notice.state ?? null, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false, conversationId: null, messageId: null, title, titleFor }

@@ -32,7 +32,7 @@ export function jobBadge(job: JobView): { label: string; variant: 'success' | 'w
   if (job.waiting === 'COMPANY_STOPPED') return { label: 'すべて止めています', variant: 'warning' }
   if (job.waiting === 'NOT_APPROVED') return { label: '承認待ち', variant: 'secondary' }
   if (job.waiting === 'NOT_ACCEPTED') return { label: '受け取り待ち', variant: 'warning' }
-  if (job.placement === 'a') return { label: '準備中', variant: 'secondary' }
+  if (job.placement === 'a') return { label: 'PC で動きます', variant: 'success' }
   return { label: '動いています', variant: 'success' }
 }
 

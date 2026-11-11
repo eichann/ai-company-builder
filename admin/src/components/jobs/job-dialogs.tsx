@@ -11,8 +11,9 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { jobsApi, type JobVersionView, type JobView, type Member } from '@/lib/api'
+import { jobsApi, skillShelfApi, type JobVersionView, type JobView, type Member } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
+import { PcJobFields } from './pc-job-fields'
 import { describeError } from '@/lib/errors'
 import {
   JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, definitionFromForm, emptyJobForm, formFromDefinition, jobProblemText, type JobForm,
@@ -49,12 +50,10 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
         </DialogHeader>
         {job && !detail.data ? (
           detail.error ? <p role="alert" className="text-sm text-destructive">{describeError(detail.error)}</p> : <ListSkeleton rows={3} />
-        ) : job && newest && !formFromDefinition(newest) ? (
-          <p className="text-sm text-muted-foreground">責任者の PC で動く手順の仕事は、この画面ではまだ直せません。</p>
         ) : (
           <JobFormFields
             key={job?.id ?? 'new'}
-            initial={newest ? (formFromDefinition(newest) as JobForm) : emptyJobForm(defaultActingUser)}
+            initial={newest ? formFromDefinition(newest) : emptyJobForm(defaultActingUser)}
             members={members}
             onCancel={onClose}
             onSubmit={async (definition) => {
@@ -90,6 +89,10 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
   onCancel: () => void
   onSubmit: (definition: JobDefinition) => Promise<void>
 }) {
+  const { companyId, hasCompanyFolder } = useCompany()
+  // A company without the shared folder picks its Skill from the Skill shelf (the server pins its version).
+  const shelf = useQuery(!hasCompanyFolder ? `skill-shelf:${companyId}` : null, () => skillShelfApi.list(companyId))
+  const shelfSkills = (shelf.data?.items ?? []).filter((i) => i.kind === 'skill' && i.version !== null)
   const [f, setF] = useState<JobForm>(initial)
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -99,7 +102,7 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
     : [...JOB_EXPIRY_CHOICES, { minutes: f.expiresAfterMinutes, label: `${f.expiresAfterMinutes}分` }]
 
   const submit = async () => {
-    const parsed = definitionFromForm(f)
+    const parsed = definitionFromForm(f, shelfSkills.find((i) => i.id === f.shelfItem)?.name)
     if (!parsed.ok) { setProblem(jobProblemText(parsed.problems)); return }
     setProblem(null)
     setBusy(true)
@@ -166,15 +169,26 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
           {JOB_MINUTES.map((m) => <option key={m} value={m}>{m}分</option>)}
         </select>
       </Row>
-      <Row label="作るやること">
-        <Input aria-label="作るやること" value={f.taskTitle} onChange={(e) => set('taskTitle', e.target.value)} placeholder="例：週の報告を書く" />
-        <select aria-label="期限" className={SELECT} value={f.dueBusinessDays === null ? 'none' : String(f.dueBusinessDays)}
-          onChange={(e) => set('dueBusinessDays', e.target.value === 'none' ? null : Number(e.target.value))}>
-          <option value="none">期限なし</option>
-          <option value="0">期限はその日</option>
-          {[1, 2, 3, 5, 10, 20].map((n) => <option key={n} value={n}>期限は{n}営業日後</option>)}
+      <Row label="すること">
+        <select aria-label="すること" className={SELECT} value={f.kind}
+          onChange={(e) => setF((prev) => ({ ...prev, kind: e.target.value as JobForm['kind'], limits: e.target.value === 'pc' ? { ...prev.limits, minutes: Math.max(prev.limits.minutes, 15) } : prev.limits }))}>
+          <option value="task">やることを作る（サーバーで。AI は使いません）</option>
+          <option value="pc">Skill を責任者の PC の AI で動かす</option>
         </select>
       </Row>
+      {f.kind === 'task' ? (
+        <Row label="作るやること">
+          <Input aria-label="作るやること" value={f.taskTitle} onChange={(e) => set('taskTitle', e.target.value)} placeholder="例：週の報告を書く" />
+          <select aria-label="期限" className={SELECT} value={f.dueBusinessDays === null ? 'none' : String(f.dueBusinessDays)}
+            onChange={(e) => set('dueBusinessDays', e.target.value === 'none' ? null : Number(e.target.value))}>
+            <option value="none">期限なし</option>
+            <option value="0">期限はその日</option>
+            {[1, 2, 3, 5, 10, 20].map((n) => <option key={n} value={n}>期限は{n}営業日後</option>)}
+          </select>
+        </Row>
+      ) : (
+        <PcJobFields f={f} set={set} hasCompanyFolder={hasCompanyFolder} shelfSkills={shelfSkills} />
+      )}
       <Row label="時間に動けなかったとき（サーバーが止まっていたなど）">
         <select aria-label="動けなかったとき" className={SELECT} value={f.missedPolicy} onChange={(e) => set('missedPolicy', e.target.value as JobForm['missedPolicy'])}>
           <option value="latest_only">あとから一番新しい回だけ動かす</option>

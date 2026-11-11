@@ -5,6 +5,7 @@
 import { createDriveTools, type DrivePicking } from '../features/google/drive'
 import { createInboxTools } from '../features/inbox/tools'
 import { createTaskWaitTools } from '../features/ai-turns/task-wait-tools'
+import { createJobReportTools } from '../features/ai-turns/job-report-tool'
 import type { PathGuard } from '../features/ports'
 import type { PrivateFolderGuards } from '../features/private-folders/guards'
 import { notDownloadedFolders } from '../sync/not-downloaded'
@@ -15,12 +16,16 @@ export interface RecordToolProviderDeps {
   drivePicking?: Pick<DrivePicking, 'pick'>
   paths?: PathGuard
   privateFolders: Pick<PrivateFolderGuards, 'readable'>
+  /** A scheduled job's run held for this consultation: its `job_report` (main's claim); null for any other consultation. */
+  jobReport?: (conversationId: string) => ((result: unknown) => string | null) | null
 }
 
 /** The turn the tools are for: its company and the consultation's company folder. */
 export interface RecordToolTurn {
   companyId: string
   companyRoot: string | null
+  /** The consultation (a scheduled job's run gets its `job_report` only in its own). */
+  conversationId?: string
   /** The やること the consultation is about now (read at each use; null without one). */
   topicTask?: () => string | null
 }
@@ -47,5 +52,8 @@ export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordTo
   // A task's wait that is over (ai-turns.md): the wait-over step's one read of its task.
   providers.push((access, signal) => createTaskWaitTools(access, signal))
   // lane C ▲
+  // A scheduled job's run (jobs.md): its one report, only in the consultation main holds the run for.
+  const report = turn.conversationId ? deps.jobReport?.(turn.conversationId) ?? null : null
+  if (report) providers.push(() => Promise.resolve(createJobReportTools(report)))
   return providers
 }

@@ -335,19 +335,21 @@ export function createAiRunService(deps: AiRunDeps) {
     },
 
     /**
-     * POST …/job-run-claims { occurrenceId, deviceId, conversationId } (B PR 5a): the responsible person's app
-     * claims a PC job's occurrence — the same run core as a record's claim (the emergency stop's 503 first,
+     * POST …/job-run-claims { occurrenceId, deviceId, conversationId, checks } (B PR 5a): the responsible person's
+     * app claims a PC job's occurrence — the same run core as a record's claim (the emergency stop's 503 first,
      * generations, one open run per subject, fencing), with step `job-procedure`. Whether it is theirs to run
-     * now is the occurrence's resolver (services/job-runs.ts).
+     * now is the occurrence's resolver (services/job-runs.ts), which also refuses one whose check kind is not
+     * among `checks` (B PR 5a-2: what this app can run; absent = none).
      */
     async claimOccurrence(member: Member, body: unknown, appBuild?: string | null): Promise<Outcome<{ run: AiRunView; created: boolean }>> {
       if (!isObj(body)) return refuse('bad-request', 'Body must be a JSON object')
-      const { occurrenceId, deviceId, conversationId } = body
-      if (!Object.keys(body).every(k => k === 'occurrenceId' || k === 'deviceId' || k === 'conversationId')) return refuse('bad-request', 'Body is { occurrenceId, deviceId, conversationId }')
+      const { occurrenceId, deviceId, conversationId, checks } = body
+      if (!Object.keys(body).every(k => k === 'occurrenceId' || k === 'deviceId' || k === 'conversationId' || k === 'checks')) return refuse('bad-request', 'Body is { occurrenceId, deviceId, conversationId, checks }')
       if (!isOccurrenceId(occurrenceId)) return refuse('bad-request', 'occurrenceId is an occurrence id')
+      if (checks !== undefined && (!Array.isArray(checks) || checks.length > 10 || !checks.every(k => typeof k === 'string' && /^[a-z_]{1,40}$/.test(k)))) return refuse('bad-request', 'checks is a list of check kinds')
       if (typeof deviceId !== 'string' || !DEVICE_ID_RE.test(deviceId)) return refuse('bad-request', 'deviceId is 8–100 letters, digits, _ or -')
       if (!shortText(conversationId, 200)) return refuse('bad-request', 'conversationId is required (1–200 characters)')
-      return claimSubject(member, { kind: 'occurrence', id: occurrenceId }, JOB_PC_STEP, deviceId, conversationId, appBuild, { pluginVersion: null, stepsVersion: null })
+      return claimSubject(member, { kind: 'occurrence', id: occurrenceId, checks: (checks as string[] | undefined) ?? [] }, JOB_PC_STEP, deviceId, conversationId, appBuild, { pluginVersion: null, stepsVersion: null })
     },
 
     /** POST …/ai-runs/:runId/renew { generation } — the holder extends its claim. */
@@ -549,7 +551,7 @@ export function createAiRunService(deps: AiRunDeps) {
       // a run of any other kind reaches only what its subject allows now (a PC job's grant, checked at every
       // call, B PR 5a; any other: nothing), whatever build calls.
       if (run && run.userId === member.userId && run.subject.kind !== 'record') {
-        return subjects.routeRefusal ? subjects.routeRefusal(member, liveRun(run), route) : notInStep()
+        return subjects.routeRefusal ? subjects.routeRefusal(member, liveRun(run), route, params) : notInStep()
       }
       if (!aiTurnRouteScopeApplies(build)) return null
       if (!run || run.userId !== member.userId) return null

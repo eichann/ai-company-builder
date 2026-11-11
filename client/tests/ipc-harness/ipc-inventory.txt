@@ -25,6 +25,7 @@ contract.invoke absences:remove
 contract.invoke agent-interaction:list
 contract.invoke agent-interaction:respond
 contract.invoke aiTurns:claim
+contract.invoke aiTurns:jobTurns
 contract.invoke aiTurns:pluginTurns
 contract.invoke aiTurns:retry
 contract.invoke aiTurns:settings
@@ -462,6 +463,7 @@ contract.type ElectronAPI.linkFileToTask = linkFileToTask: Invoke<'tasks:linkFil
 contract.type ElectronAPI.linkMinutesBundle = linkMinutesBundle: Invoke<'minutes:linkBundle'>
 contract.type ElectronAPI.linkRecordToRecord = linkRecordToRecord: Invoke<'tasks:linkRecord'>
 contract.type ElectronAPI.listChatWindows = listChatWindows: Invoke<'chatWindow:list'>
+contract.type ElectronAPI.listJobTurns = listJobTurns: Invoke<'aiTurns:jobTurns'>
 contract.type ElectronAPI.listOwnBrokerKeys = listOwnBrokerKeys: Invoke<'brokerKeys:list'>
 contract.type ElectronAPI.listPersonSteps = listPersonSteps: Invoke<'pluginSteps:onRecord'>
 contract.type ElectronAPI.listPluginStepTurns = listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
@@ -711,6 +713,7 @@ contract.type IpcInvokeChannels.'absences:remove' = 'absences:remove': { args: [
 contract.type IpcInvokeChannels.'agent-interaction:list' = 'agent-interaction:list': { args: []; result: AgentInteractionRequest[] }
 contract.type IpcInvokeChannels.'agent-interaction:respond' = 'agent-interaction:respond': { args: [id: string, response: AgentInteractionResponse]; result: boolean }
 contract.type IpcInvokeChannels.'aiTurns:claim' = 'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string]; result: AiTurnClaimResult }
+contract.type IpcInvokeChannels.'aiTurns:jobTurns' = 'aiTurns:jobTurns': { args: [companyId: string]; result: QueuedJobTurn[] }
 contract.type IpcInvokeChannels.'aiTurns:pluginTurns' = 'aiTurns:pluginTurns': { args: [companyId: string]; result: QueuedPluginStep[] }
 contract.type IpcInvokeChannels.'aiTurns:retry' = 'aiTurns:retry': { args: [companyId: string, recordId: string]; result: { ok: boolean } }
 contract.type IpcInvokeChannels.'aiTurns:settings' = 'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
@@ -1013,6 +1016,7 @@ main.handle absences:remove @ features/absences/ipc.ts (companyId, absenceId)
 main.handle agent-interaction:list @ features/agent-interactions/ipc.ts ()
 main.handle agent-interaction:respond @ features/agent-interactions/ipc.ts (id: string, response: AgentInteractionResponse)
 main.handle aiTurns:claim @ features/ai-turns/ipc.ts (companyId, recordId, expectedVersion, conversationId, companyRoot)
+main.handle aiTurns:jobTurns @ features/ai-turns/ipc.ts (companyId)
 main.handle aiTurns:pluginTurns @ features/ai-turns/ipc.ts (companyId)
 main.handle aiTurns:retry @ features/ai-turns/ipc.ts (companyId, recordId)
 main.handle aiTurns:settings @ features/ai-turns/ipc.ts (companyId)
@@ -1500,6 +1504,8 @@ preload linkRecordToRecord -> invoke tasks:linkRecord($0, $1, $2)
 preload linkRecordToRecord : (companyId: string, recordId: string, input: RecordLinkInput) => Promise<TaskWriteResult>
 preload listChatWindows -> invoke chatWindow:list()
 preload listChatWindows : () => Promise<ChatWindowInfo[]>
+preload listJobTurns -> invoke aiTurns:jobTurns($0)
+preload listJobTurns : (companyId: string) => Promise<QueuedJobTurn[]>
 preload listOwnBrokerKeys -> invoke brokerKeys:list($0)
 preload listOwnBrokerKeys : (companyId: string) => Promise<OwnKeysResult>
 preload listPersonSteps -> invoke pluginSteps:onRecord($0, $1)

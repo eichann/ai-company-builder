@@ -23,6 +23,8 @@ import { claimStates } from '../../../shared/ai-turn-steps/types'
 import { readAutoTurnSettings, readOwnAutoRun, type AiTurnClaimResult, type AiTurnSettleResult, type AutoTurnSettings } from '../../../shared/ai-turns'
 import type { RecordsApi } from '../../records/api'
 import type { RunRegistry } from '../../records/runs'
+import { isOccurrenceId, type JobRunResult } from '../../../../shared/core/jobs'
+import { createJobRuns, type JobRunDeps } from './job-runs'
 // lane C ▼
 import {
   isPluginRunStep, parsePluginStepTurns, parsePluginStepsOn, parseProcedurePin, pluginStepFirstMessage, pluginStepToolAccess,
@@ -67,6 +69,11 @@ export interface AiTurnClaimsDeps {
    */
   readProcedure?: (companyId: string, pin: PluginStepProcedurePin, file: string, companyRoot: string | null) => Promise<string | null>
   // lane C ▲
+  /**
+   * A scheduled job's run on this PC (jobs.md "The app's runner", job-runs.ts): reading a shelf Skill's
+   * pinned version, the new files under a place, and stopping a consultation's AI. Absent: no job runs.
+   */
+  jobs?: Pick<JobRunDeps, 'readShelfSkill' | 'newFiles' | 'stopTurn'>
 }
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
@@ -100,13 +107,14 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     return h
   }
 
-  /** Finish the run on the server: done, or failed with its class (the server decides where it goes). */
-  async function finishRun(companyId: string, recordId: string, failure: { class: 'temporary' | 'bad-input' | 'permission' | 'unknown-result'; code: string } | null) {
+  /** Finish the run on the server: done, or failed with its class (the server decides where it goes). A job's done carries its result. */
+  async function finishRun(companyId: string, recordId: string, failure: { class: 'temporary' | 'bad-input' | 'permission' | 'unknown-result'; code: string } | null, extra?: { jobResult: JobRunResult }) {
     const h = release(companyId, recordId)
-    if (!h) return
+    if (!h) return null
     const r = await session(companyId, 'POST', `/ai-runs/${encodeURIComponent(h.runId)}/finish`,
-      { generation: h.generation, outcome: failure ? 'failed' : 'done', ...(failure ? { failure } : {}) })
+      { generation: h.generation, outcome: failure ? 'failed' : 'done', ...(failure ? { failure } : {}), ...(!failure && extra ? extra : {}) })
     if (!r || r.status >= 300) log.warn(`[ai-turns] finish run: answered ${r?.status ?? 'nothing'}`)
+    return r
   }
 
   async function session(companyId: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; data: unknown } | null> {
@@ -139,13 +147,17 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   }
 
   /** Hold a claimed run: register it for the consultation's tokens and renew it while running. */
-  function hold(companyId: string, recordId: string, conversationId: string, run: { id: string; generation: number }) {
+  function hold(companyId: string, recordId: string, conversationId: string, run: { id: string; generation: number }, onLost?: () => void) {
     release(companyId, recordId)
     deps.runs.set(companyId, conversationId, { id: run.id, generation: run.generation })
     const timer = setInterval(() => {
       void session(companyId, 'POST', `/ai-runs/${encodeURIComponent(run.id)}/renew`, { generation: run.generation }).then(r => {
         // Taken over by another PC (or ended): this PC's tokens are refused from now on; stop renewing.
-        if (r && r.status === 409) release(companyId, recordId)
+        // A job's run also stops its AI (a pause, the company's stop, its time limit: jobs.md).
+        if (r && r.status === 409 && held.get(heldKey(companyId, recordId))?.runId === run.id) {
+          release(companyId, recordId)
+          onLost?.()
+        }
       })
     }, deps.renewEveryMs ?? 60_000)
     timer.unref?.()
@@ -208,7 +220,32 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   }
   // lane C ▲
 
+  // A scheduled job's run (job-runs.ts): this module's claim, hold and finish, with what only main knows.
+  const jobs = deps.jobs ? createJobRuns({
+    session, hold, finishRun, deviceId: deps.deviceId, log,
+    readCompanySkill: (companyId, skill, tree, companyRoot) =>
+      deps.readProcedure?.(companyId, { source: 'company_skill', skill, fingerprint: tree }, 'SKILL.md', companyRoot) ?? Promise.resolve(null),
+    ...deps.jobs,
+  }) : null
+
   return {
+    /** The member's scheduled jobs' occurrences this app can run now (`GET /me/job-turns`); none without job support. */
+    async jobTurns(companyId: string) {
+      return jobs && COMPANY.test(companyId) ? jobs.turns(companyId) : []
+    },
+    /** A job run's tool ceiling for its consultation (the chat server asks it with step `job-procedure`). */
+    jobTools(conversationId: string, step: string) {
+      return jobs?.toolsOf(conversationId, step) ?? null
+    },
+    /** Where a job run's consultation may write; null for any other consultation. */
+    jobWriteArea(conversationId: string) {
+      return jobs?.writeAreaOf(conversationId) ?? null
+    },
+    /** A job run's `job_report` for its consultation; null for any other. */
+    jobReporter(conversationId: string) {
+      return jobs?.reporter(conversationId) ?? null
+    },
+
     // lane C ▼
     /**
      * The member's records waiting at a business plugin's `start: ai_turn` step (`GET
@@ -265,6 +302,13 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
      * was put back), and claiming at it would be refused every time.
      */
     async claim(companyId: string, recordId: string, noticeVersion: number, conversationId: string, companyRoot?: string | null): Promise<AiTurnClaimResult> {
+      // A scheduled job's occurrence: the same refusals first (no person present), then its own claim.
+      if (isOccurrenceId(recordId)) {
+        if (!jobs || !COMPANY.test(companyId) || !CONVERSATION.test(conversationId) || !jobs.isJob(companyId, recordId)) return { claimed: false, reason: 'not-allowed' }
+        if (!deps.windowOpen() || !deps.aiAllowed() || !agentCan(deps.agent(), 'recordActions')) return { claimed: false, reason: 'not-allowed' }
+        if (!(await deps.stopPolicyConfirmed(companyId).catch(() => false))) return { claimed: false, reason: 'not-allowed' }
+        return jobs.claim(companyId, recordId, conversationId, companyRoot ?? null)
+      }
       const pluginTurn = pluginTurns.get(companyId)?.get(recordId) ?? null
       const kind = pluginTurn ? null : aiTurnStepForRecord(recordId)
       if (!COMPANY.test(companyId) || (!kind && !pluginTurn) || !Number.isInteger(noticeVersion) || noticeVersion < 1 || !CONVERSATION.test(conversationId)) {
@@ -326,6 +370,8 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
      * retried later) back to the AI. One with an unknown outside result stays until reconciled.
      */
     async retry(companyId: string, recordId: string): Promise<{ ok: boolean }> {
+      // A job's occurrence: nothing to give back here (its 「もう一度」 is the server's, 5b); the server lists it again when it may run.
+      if (isOccurrenceId(recordId)) return { ok: true }
       if (!COMPANY.test(companyId) || (!aiTurnStepForRecord(recordId) && !pluginTurns.get(companyId)?.has(recordId))) return { ok: false }
       const list = await session(companyId, 'GET', '/ai-runs')
       const runs = list?.status === 200 ? (list.data as { runs?: Array<{ id?: unknown; recordId?: unknown }> } | undefined)?.runs ?? [] : []
@@ -337,6 +383,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
 
     /** After the automatic turn: finished, failed, or still in progress → back to 「AI の番」. */
     async settle(companyId: string, recordId: string): Promise<AiTurnSettleResult> {
+      if (isOccurrenceId(recordId)) return jobs && COMPANY.test(companyId) ? jobs.settle(companyId, recordId) : { outcome: 'unknown' }
       // lane C ▼
       const started = pluginStarts.get(heldKey(companyId, recordId))
       if (started !== undefined && COMPANY.test(companyId)) {

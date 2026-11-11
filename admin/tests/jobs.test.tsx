@@ -69,9 +69,37 @@ describe('the form', () => {
     expect(jobConsentCanonical(parsed.definition)).toBe(jobConsentCanonical(before))
   })
 
-  it('a PC job (a Skill as the procedure) is not offered for editing here', () => {
-    const procedure = def({ placement: 'a', check: { kind: 'new_files', path: '総務/x' }, run: { kind: 'procedure', procedure: { source: 'company_skill', skill: 'report', fingerprint: 'a'.repeat(40) } } })
-    expect(formFromDefinition(procedure)).toBeNull()
+  it('a PC job: a Skill, a check before the AI, and a grant from plain choices — the shared parser accepts it, and it reads back the same', () => {
+    const form = {
+      ...emptyJobForm('u_member'), name: '面談の報告', kind: 'pc' as const, skillName: 'interview-report',
+      checkKind: 'new_files' as const, checkPath: '人事部/面談', readPaths: '人事部/規程', readRecords: false, mailDrafts: true,
+      writePlace: '人事部', writeFolder: 'reports', limits: { minutes: 15, runsPerDay: 1 },
+    }
+    const parsed = definitionFromForm(form)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.definition).toMatchObject({
+      placement: 'a', check: { kind: 'new_files', path: '人事部/面談' },
+      run: { kind: 'procedure', procedure: { source: 'company_skill', skill: 'interview-report' } },
+    })
+    expect(parsed.definition.grant).toEqual({
+      tools: ['records', 'files_read', 'files_write', 'outbound_draft'], creates: ['task'],
+      routes: ['POST /outbound-recipients', 'POST /outbound', 'GET /outbound/:messageId', 'PUT /outbound/:messageId'],
+      reads: { paths: ['人事部/面談', '人事部/規程'], calls: [] }, writes: { area: 'deliverable', place: '人事部', folder: 'reports' },
+      outbound: 'draft_only', limits: { minutes: 15, runsPerDay: 1 },
+    })
+    expect(formFromDefinition(parsed.definition)).toMatchObject({ kind: 'pc', skillName: 'interview-report', checkPath: '人事部/面談', readPaths: '人事部/規程', mailDrafts: true, writeFolder: 'reports' })
+  })
+
+  it('a meeting check names the minutes route in the grant (what the responsible person accepts), never the check alone', () => {
+    const parsed = definitionFromForm({ ...emptyJobForm('u_member'), name: '面談', kind: 'pc', shelfItem: 'item-1', checkKind: 'new_meetings', titleWords: '面談、1on1' }, 'interview-report')
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.definition.check).toEqual({ kind: 'new_meetings', titleWords: ['面談', '1on1'] })
+    expect(parsed.definition.run).toMatchObject({ procedure: { source: 'shelf_skill', item: 'item-1', skill: 'interview-report' } })
+    expect(parsed.definition.grant.routes).toContain('GET /minutes/:recordId/text')
+    // No Skill chosen: the parser's problem, said plainly.
+    expect(definitionFromForm({ ...emptyJobForm('u_member'), name: 'x', kind: 'pc', checkKind: 'new_meetings' }).ok).toBe(false)
   })
 })
 
@@ -161,10 +189,10 @@ describe('the page', () => {
     expect(approvedText(3, after({ waiting: null }), '田中 太郎')).toBe('第3版を承認しました。いまは「動いています」です')
     expect(approvedText(3, after({ waiting: 'NOT_ACCEPTED' }), '田中 太郎')).toBe('第3版を承認しました。田中 太郎さんの受け取りを待ちます')
     expect(approvedText(3, after({ waiting: 'PAUSED', state: 'paused', pausedReason: 'ADMIN' }), '田中 太郎')).toBe('第3版を承認しました。いまは「管理者が止めました」です')
-    expect(approvedText(3, after({ waiting: null, placement: 'a' }), '田中 太郎')).toContain('まだ動きません')
+    expect(approvedText(3, after({ waiting: null, placement: 'a' }), '田中 太郎')).toContain('責任者のアプリが開いていて')
   })
 
-  it('the list names who it runs as now (the approved version\'s person) and the next version\'s person apart; a PC job is not 「動いています」', async () => {
+  it('the list names who it runs as now (the approved version\'s person) and the next version\'s person apart; a PC job says it needs the app', async () => {
     const handed = jobView({ actingUserId: 'u_member', latestVersion: 2, approved: { responsibleUserId: 'u_admin', name: '週の報告' } })
     const pc = jobView({ id: 'job.' + 'f'.repeat(32), name: 'PC の仕事', placement: 'a' })
     mockApi({
@@ -176,8 +204,8 @@ describe('the page', () => {
     expect(row).toHaveTextContent('責任者：鈴木 一郎')
     expect(row).toHaveTextContent('次の版では責任者が田中 太郎さんになります（未承認）')
     const pcRow = screen.getByRole('listitem', { name: 'PC の仕事' })
-    expect(pcRow).toHaveTextContent('まだ動きません')
-    expect(pcRow).not.toHaveTextContent('動いています')
+    expect(pcRow).toHaveTextContent('責任者のアプリが開いていて「自動で進める」が入っているときに動きます')
+    expect(pcRow).toHaveTextContent('PC で動きます')
   })
 
   it('the company-wide stop asks first, then stops', async () => {

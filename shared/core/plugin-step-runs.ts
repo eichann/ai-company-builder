@@ -75,9 +75,24 @@ const key = (s: string) => foldAsciiCase(s.normalize('NFC'))
  * NFC and A–Z folded, as the disk folds them.
  */
 export function insideDeliverableFolder(relativePath: string, folder: string): boolean {
+  return insideDeliverableAt(relativePath, null, folder)
+}
+
+/**
+ * The same at a named place (a scheduled job's grant, `jobs.md`: `<place>/.personal/<folder>/<something>`),
+ * the place's segments compared as the disk folds them; `place` null = any visible top folder (a step's).
+ */
+export function insideDeliverableAt(relativePath: string, place: string | null, folder: string): boolean {
   if (deliverableFolderProblem(folder) !== null) return false
   const segments = relativePath.replace(/\\/g, '/').split('/')
-  if (segments.length < 4 || segments.some(s => s === '' || s === '.' || s === '..')) return false
-  const [department, personal, inside] = segments
-  return !department.startsWith('.') && key(personal) === PERSONAL_FOLDER && key(inside) === key(folder)
+  if (segments.some(s => s === '' || s === '.' || s === '..')) return false
+  const head = place === null ? 1 : place.split('/').length
+  if (place !== null) {
+    const want = place.split('/')
+    if (want.some(s => s === '' || s === '.' || s === '..') || want.some((s, i) => key(s) !== key(segments[i] ?? ''))) return false
+  }
+  if (segments.length < head + 3) return false
+  const department = segments[0]
+  return !department.startsWith('.') && key(segments[head]) === PERSONAL_FOLDER && key(segments[head + 1]) === key(folder)
 }
+

@@ -149,6 +149,8 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   // The outcome only: the reason may quote the outside message.
   [records('inbox_judge')]: say('来た連絡の判断を残しました', '来た連絡の判断を残しています', '来た連絡の判断を {n} 件残しました', input => JUDGEMENT_WORDS[String(input.outcome)]),
   // Counts only: the notes may quote the member's reply.
+  // A scheduled job's run hands back its one やること's title (job-report-tool.ts).
+  [records('job_report')]: say('定期の仕事の結果を渡しました', '定期の仕事の結果を渡しています', '定期の仕事の結果を {n} 回渡しました'),
   [records('inbox_reply_check')]: say('返事のあとのやることを確かめました', '返事のあとのやることを確かめています', '返事のあとのやることを {n} 回確かめました'),
   // The fixed app servers.
   mcp__acb_consultations__search_consultations: say('過去の相談を探しました', '過去の相談を探しています', '過去の相談を {n} 回探しました', input => shortText(input.query)),

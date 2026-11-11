@@ -42,6 +42,7 @@ import { jobsRoute } from '../../src/routes/jobs'
 import { services } from '../../src/composition'
 import { createJobOccurrences } from '../../src/services/job-occurrences'
 import { createJobService } from '../../src/services/jobs'
+import { createServiceRecordWriter } from '../../src/services/record-engine/service-writer'
 import { createRecordRunSubjects, runSubjectsByKind } from '../../src/services/run-subjects'
 import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
@@ -138,7 +139,7 @@ function dueOccurrence(job: string, co = CO, opts: { expiresInMs?: number; versi
 }
 
 const claim = (occurrenceId: string, user = 'jr-alice', deviceId = 'device-alice-1', co = CO) =>
-  as(user, 'POST', '/job-run-claims', { occurrenceId, deviceId, conversationId: `conv-${deviceId}` }, co)
+  as(user, 'POST', '/job-run-claims', { occurrenceId, deviceId, conversationId: `conv-${deviceId}`, checks: ['new_files', 'new_meetings'] }, co)
 const runOf = (id: string, co = CO) => db.prepare('SELECT state, failure_code, generation, claim_expires_at FROM ai_runs WHERE company_id = ? AND id = ?').get(co, id) as Json
 const occOf = (id: string, co = CO) => db.prepare('SELECT state, outcome_code, run_id FROM ai_job_occurrences WHERE company_id = ? AND id = ?').get(co, id) as Json
 const jobOf = (id: string, co = CO) => db.prepare('SELECT state, paused_reason FROM ai_jobs WHERE company_id = ? AND id = ?').get(co, id) as Json
@@ -706,6 +707,91 @@ describe('a run waiting for a person to reconcile an outside operation', () => {
     expect(runOf(run.id).state).toBe('waiting_reconcile')
     expect(noticesOf('job_failed')).toEqual(['jr-alice', 'jr-owner'])
     expect(noticesOf('job_expired')).toEqual([])
+  })
+})
+
+describe('the app says which checks it runs (B PR 5a-2)', () => {
+  it('a claim that does not name the occurrence’s check (an older app, or a newer check) is refused and nothing is written', async () => {
+    const { occ } = await runnable()
+    for (const checks of [undefined, [], ['new_meetings']]) {
+      const r = await as('jr-alice', 'POST', '/job-run-claims', { occurrenceId: occ, deviceId: 'device-alice-1', conversationId: 'conv-x', ...(checks ? { checks } : {}) })
+      expect(r, JSON.stringify(checks)).toMatchObject({ status: 409, body: { code: 'JOB_CHECK_NOT_SUPPORTED' } })
+    }
+    expect(occOf(occ)).toMatchObject({ state: 'due', run_id: null })
+    expect((db.prepare("SELECT COUNT(*) AS n FROM ai_runs WHERE subject_kind = 'occurrence'").get() as Json).n).toBe(0)
+    expect((await as('jr-alice', 'POST', '/job-run-claims', { occurrenceId: occ, deviceId: 'device-alice-1', conversationId: 'c', checks: 'new_files' })).status).toBe(400)
+  })
+})
+
+describe('a meeting check: the meetings the responsible person attended, and their minutes only (B PR 5a-2)', () => {
+  const meetingWriter = createServiceRecordWriter({
+    companyData, transactions: sqliteTransactions(db), clock: { now: () => new Date().toISOString(), nowMs: () => Date.now() }, ids: randomIds,
+    isMember: (co, user) => sqliteMembershipRepository(db).roleOf(co, user) !== null,
+    roleOf: (co, user) => sqliteMembershipRepository(db).roleOf(co, user),
+    notify: () => {}, recordChanged: () => {},
+  })
+  const meeting = (title: string, members: string[], at: number) => {
+    const r = meetingWriter.create(CO, {
+      type: 'meeting', title, members, fields: { assignee: members[0], meeting_at: new Date(at).toISOString() },
+      actor: { id: 'acb:minutes', kind: 'external', source: 'minutes' }, quiet: true,
+    })
+    if (!r.ok) throw new Error(r.reason)
+    return r.record.id
+  }
+  // Each test starts with no meeting (the records of an earlier one are removed, as a deleted record is).
+  beforeEach(() => {
+    const records = companyData.forCompany(CO).records
+    for (const row of db.prepare("SELECT id FROM records WHERE company_id = ? AND type = 'meeting' AND removed_at IS NULL").all(CO) as Json[]) records.markRemoved(row.id, new Date().toISOString())
+  })
+  const meetingJob = {
+    check: { kind: 'new_meetings', titleWords: ['面談'] },
+    grant: {
+      tools: ['records'], creates: ['task'], routes: ['GET /item/:recordId', 'GET /minutes/:recordId/text'],
+      reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 30, runsPerDay: 1 },
+    },
+  }
+
+  it('the claim answers the meetings found; the run reads those minutes and no other meeting’s', async () => {
+    const before = meeting('面談：前の回より前', ['jr-alice'], Date.now() - 60 * MINUTE)
+    const { occ } = await runnable(CO, meetingJob)
+    vi.setSystemTime(Date.now() + 10 * MINUTE)
+    try {
+      const found = meeting('面談：佐藤さん', ['jr-alice', 'jr-bob'], Date.now() - 5 * MINUTE)
+      const otherWords = meeting('定例', ['jr-alice'], Date.now() - 4 * MINUTE)
+      const notHers = meeting('面談：ボブさん', ['jr-bob'], Date.now() - 3 * MINUTE)
+      // On the calendar but not held yet: not a meeting since the previous occurrence.
+      const later = meeting('面談：来週', ['jr-alice'], Date.now() + 60 * MINUTE)
+      const r = await claim(occ)
+      expect(r.status).toBe(201)
+      expect(r.body.data.turn.meetings).toEqual([{ id: found, title: '面談：佐藤さん', at: expect.any(String) }])
+      // The list never carries them (only the claim does).
+      const token = await tokenFor(r.body.data.run)
+      // Its own meeting reaches the handler (whatever Google answers there); any other is refused before it.
+      const own = await ai(token, 'GET', `/minutes/${found}/text`)
+      expect(own.body?.code).not.toBe('NOT_IN_STEP')
+      for (const other of [before, otherWords, notHers, later]) {
+        expect(await ai(token, 'GET', `/minutes/${other}/text`), other).toMatchObject({ status: 403, body: { code: 'NOT_IN_STEP' } })
+      }
+      // Never the meeting's other routes.
+      expect(await ai(token, 'POST', `/minutes/${found}/bundle`, { bundleId: 'deal-000000' })).toMatchObject({ status: 403, body: { code: 'NOT_IN_STEP' } })
+    } finally {
+      vi.setSystemTime(Date.now() - 10 * MINUTE)
+    }
+  })
+
+  it('nothing found: the claim answers no meetings (the app finishes `nothing` without the AI)', async () => {
+    const { occ } = await runnable(CO, meetingJob)
+    vi.setSystemTime(Date.now() + 10 * MINUTE)
+    try {
+      meeting('定例', ['jr-alice'], Date.now() - 5 * MINUTE)
+      const r = await claim(occ)
+      expect(r.body.data.turn.meetings).toEqual([])
+      expect((await finish(r.body.data.run, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
+      expect(occOf(occ)).toMatchObject({ state: 'nothing' })
+      expect(tasksOf()).toEqual([])
+    } finally {
+      vi.setSystemTime(Date.now() - 10 * MINUTE)
+    }
   })
 })
 

@@ -59,6 +59,13 @@ export function createChatTurns(waitMs = SUGGESTION_WAIT_MS, hooks: ChatTurnsOpt
         turn.inject?.push({ type: 'text-delta', id, delta: `\n\n※ ${AGENT_STOP_MESSAGES.turnStopped}` })
         turn.inject?.push({ type: 'text-end', id })
       }
+      // A scheduled job's run stopped by the app (its time, or the server took the run away): said in the reply.
+      if (reason === 'job-ended') {
+        const id = `turn-stopped-${crypto.randomUUID()}`
+        turn.inject?.push({ type: 'text-start', id })
+        turn.inject?.push({ type: 'text-delta', id, delta: '\n\n※ 定期の仕事の時間が来たか、仕事が止められたため、AI を止めました。' })
+        turn.inject?.push({ type: 'text-end', id })
+      }
       turn.inject?.push({ type: TURN_STOPPED_PART_TYPE, data: { reason }, transient: true })
     } catch { /* stream already over */ }
     if (turn.info.appSessionId) {

@@ -43,7 +43,8 @@ export type { AgentToolEvent, FileTarget, GuardReason, SandboxMark, SensitiveLoc
  * whose reason is the same string.
  */
 export const TURN_STOPPED_PART_TYPE = 'data-turn-stopped'
-export type TurnStopReason = 'stopped-by-admin' | 'app-quit'
+/** `job-ended`: a scheduled job's run reached its time or the server took it away (jobs.md). */
+export type TurnStopReason = 'stopped-by-admin' | 'app-quit' | 'job-ended'
 
 // ---------------------------------------------------------------------------
 // Categories

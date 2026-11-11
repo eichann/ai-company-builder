@@ -5,6 +5,7 @@
 //   aiTurns:settle    after the turn: done / failed / put back to 「AI の番」
 //   aiTurns:retry     「もう一度」: the server's run held for a person goes back to the AI (S10b)
 //   aiTurns:pluginTurns  the member's records at a business plugin's ai_turn step (C5, plugin-steps.md)
+//   aiTurns:jobTurns  the member's scheduled jobs' occurrences this app can run (jobs.md, B PR 5a-2)
 // Only the main window runs AI turns: other windows are refused.
 
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -35,4 +36,6 @@ export function registerAiTurnsIpc(ipc: IpcRegistrar, deps: { claims: AiTurnClai
     isMainWindow(event.sender.id) && str(companyId) && str(recordId) ? claims.retry(companyId, recordId) : { ok: false })
   ipc.handle('aiTurns:pluginTurns', (event, companyId) =>
     isMainWindow(event.sender.id) && str(companyId) ? claims.pluginTurns(companyId) : [])
+  ipc.handle('aiTurns:jobTurns', (event, companyId) =>
+    isMainWindow(event.sender.id) && str(companyId) ? claims.jobTurns(companyId) : [])
 }

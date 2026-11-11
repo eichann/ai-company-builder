@@ -12,6 +12,7 @@ import { minutesReading } from './minutes-reading'
 // lane C ▼
 import { pluginTurnCandidate, type QueuedPluginStep } from './plugin'
 import { taskWaitOver } from './task-wait-over'
+import { jobTurnCandidate, type QueuedJobTurn } from './job'
 // lane C ▲
 import { claimStates, type AiTurnCandidate, type AiTurnStepDefinition } from './types'
 import { coreStepCreateTypes } from '../../../shared/core/ai-runs'
@@ -133,7 +134,7 @@ export function aiTurnStepCreateTypes(step: AiTurnStep): readonly string[] {
  * (`turn: 'ai'`). `asked`: meetings the member asked to be read themselves (they run while
  * 「自動で進める」 is off too).
  */
-export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: readonly TaskListItem[]; plugins?: readonly QueuedPluginStep[]; asked?: ReadonlySet<string> }): AiTurnCandidate[] {
+export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: readonly TaskListItem[]; plugins?: readonly QueuedPluginStep[]; jobs?: readonly QueuedJobTurn[]; asked?: ReadonlySet<string> }): AiTurnCandidate[] {
   const queue: AiTurnCandidate[] = []
   const seen = new Set<string>()
   // lane C ▼
@@ -160,5 +161,11 @@ export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: r
     queue.push(pluginTurnCandidate(t))
   }
   // lane C ▲
+  // A scheduled job's occurrences (job.ts, jobs.md): ids of their own (`occ.…`), never a record's.
+  for (const t of input.jobs ?? []) {
+    if (seen.has(t.occurrenceId)) continue
+    seen.add(t.occurrenceId)
+    queue.push(jobTurnCandidate(t))
+  }
   return queue
 }

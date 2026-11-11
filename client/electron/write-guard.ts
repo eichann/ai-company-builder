@@ -61,7 +61,7 @@ import { isAgentConfig } from '../../shared/core/agent-config'
 import { isSameOrAncestorPath, lookalikeKey, pathKey } from '../../shared/core/paths'
 import { recordFileEditProblem } from '../../shared/core/records'
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
-import { insideDeliverableFolder } from '../../shared/core/plugin-step-runs'
+import { insideDeliverableAt } from '../../shared/core/plugin-step-runs'
 import { managedShelfPath } from '../shared/skill-shelf'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
@@ -115,7 +115,13 @@ export interface WriteGuard {
    * on where it resolves on disk (links followed), so a link cannot lead out. Anything else,
    * outside the company folder included, is refused. Absent: an ordinary consultation.
    */
-  writeArea?: { folder: string }
+  writeArea?: WriteArea
+  /**
+   * A scheduled job's run (`jobs.md`): Claude Code's file reads (Read, Glob, Grep) only inside these company
+   * paths — its grant's read paths — or its own write area, both as written and where they resolve on disk.
+   * Absent: reads are not limited here (an ordinary consultation, a business plugin's step).
+   */
+  readArea?: readonly string[]
   /**
    * `none`: the working folder of a company without the shared company folder. Nothing written
    * there reaches the push checker, so the checks that only mirror it (write access, not
@@ -154,19 +160,33 @@ function realRelativePath(root: string, target: string, cwd?: string): string | 
   }
 }
 
+/**
+ * Where a step's run or consultation may write: `<department>/.personal/<folder>/` (a business plugin's
+ * step), `<place>/.personal/<folder>/` (a scheduled job's grant, `jobs.md`), or nowhere (a job whose grant
+ * writes nothing).
+ */
+export type WriteArea = ({ folder: string; place?: string } | { nowhere: true }) & { reads?: readonly string[] }
+
+/** The message the AI sees when a scheduled job that writes nothing tries to write. */
+export const NOWHERE_TO_WRITE_MESSAGE = 'この定期の仕事では、AI はファイルを保存できません。作ったものは、最後のやることの説明に書いてください。'
+
 /** The message the AI sees when a step's write lands outside its deliverable folder. */
-export function deliverableFolderMessage(folder: string): string {
+export function deliverableFolderMessage(folder: string, place?: string): string {
+  if (place !== undefined) return `この定期の仕事では、AI がファイルを保存できるのは「${place}/.personal/${folder}/」の中だけです（責任者だけのフォルダで、ほかの人には共有されません）。ほかの場所には保存できません。`
   return `この手順では、AI がファイルを保存できるのは「（部署のフォルダ）/.personal/${folder}/」の中だけです（あなただけのフォルダで、ほかの人には共有されません）。たとえば「営業部/.personal/${folder}/2026-11-06_相手の名前/」のように、その中に保存してください。ほかの場所には保存できません。`
 }
 
 /** A step's write: inside its deliverable folder both as written and as it resolves on disk. */
 export function checkDeliverableFolder(guard: WriteGuard, target: string, cwd?: string): GuardDecision {
-  const folder = guard.writeArea?.folder
-  if (folder === undefined) return { deny: false }
+  const area = guard.writeArea
+  if (area === undefined) return { deny: false }
   const rel = repoRelativePath(guard.root, target, cwd)
+  const refused = (message: string): GuardDecision => ({ deny: true, path: rel ?? target, folder: rel === null ? '' : rel.split('/').slice(0, -1).join('/'), message, code: 'deliverable-folder' })
+  if ('nowhere' in area) return refused(NOWHERE_TO_WRITE_MESSAGE)
   const real = rel === null ? null : realRelativePath(guard.root, target, cwd)
-  if (rel !== null && real !== null && insideDeliverableFolder(rel, folder) && insideDeliverableFolder(real, folder)) return { deny: false }
-  return { deny: true, path: rel ?? target, folder: rel === null ? '' : rel.split('/').slice(0, -1).join('/'), message: deliverableFolderMessage(folder), code: 'deliverable-folder' }
+  const place = area.place ?? null
+  if (rel !== null && real !== null && insideDeliverableAt(rel, place, area.folder) && insideDeliverableAt(real, place, area.folder)) return { deny: false }
+  return refused(deliverableFolderMessage(area.folder, area.place))
 }
 
 /** Who may change AI instruction files: the member's role and the folders of the departments they manage. */
@@ -454,9 +474,38 @@ export function decideRecordEdit(
   return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: recordFileMessage(rel, problem), code: 'record-file' }
 }
 
+/** The message the AI sees when a scheduled job's run reads outside its places. */
+export function readAreaMessage(places: readonly string[]): string {
+  return places.length > 0
+    ? `この定期の仕事で読めるのは ${places.map(p => `「${p}」`).join('・')} の中だけです。Glob と Grep には、その中の path を必ず付けてください。`
+    : 'この定期の仕事では、ファイルを読めません。'
+}
+
+/** Read / Glob / Grep: the place a call reads (`path`, Read's `file_path`); Glob and Grep must name one. */
+const READ_TOOLS: Record<string, string> = { Read: 'file_path', Glob: 'path', Grep: 'path', NotebookRead: 'notebook_path' }
+
+/** A scheduled job's read: inside one of its read places or its write area, as written and as it resolves. */
+export function checkReadArea(guard: WriteGuard, toolName: string, toolInput: Record<string, unknown> | undefined, cwd?: string): GuardDecision {
+  const places = guard.readArea
+  const key = READ_TOOLS[toolName]
+  if (places === undefined || !key) return { deny: false }
+  const refused = (shown: string): GuardDecision => ({ deny: true, path: shown, folder: '', message: readAreaMessage(places), code: 'deliverable-folder' })
+  const target = toolInput?.[key]
+  if (typeof target !== 'string' || target === '') return refused('')
+  // A Glob pattern that climbs out or is absolute reads outside whatever its path says.
+  if (toolName === 'Glob' && typeof toolInput?.pattern === 'string' && (toolInput.pattern.startsWith('/') || toolInput.pattern.split(/[\\/]/).includes('..'))) return refused(target)
+  const rel = repoRelativePath(guard.root, target, cwd)
+  const real = rel === null ? null : realRelativePath(guard.root, target, cwd)
+  if (rel === null || real === null) return refused(target)
+  const inside = (p: string) => places.some(place => isSameOrAncestorPath(pathKey(place), pathKey(p)))
+    || (guard.writeArea !== undefined && !('nowhere' in guard.writeArea) && insideDeliverableAt(p, guard.writeArea.place ?? null, guard.writeArea.folder))
+  return inside(rel) && inside(real) ? { deny: false } : refused(rel)
+}
+
 /** The PreToolUse decision for one Claude Code tool call. */
 export function decideToolWrite(guard: WriteGuard | undefined, toolName: string, toolInput: Record<string, unknown> | undefined, cwd?: string): GuardDecision {
   if (!guard) return { deny: false }
+  if (guard.readArea !== undefined && READ_TOOLS[toolName]) return checkReadArea(guard, toolName, toolInput, cwd)
   const key = FILE_TOOLS[toolName]
   if (key) {
     const target = toolInput?.[key]

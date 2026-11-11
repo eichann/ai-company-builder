@@ -796,6 +796,30 @@ export function createMinutesService(deps: MinutesServiceDeps) {
   }
 
   return {
+    /**
+     * The meetings the member attended with `meeting_at` in [since, until) — a PC job's `new_meetings` check
+     * (jobs.md, B PR 5a-2): only meetings whose people-only list names them (`listedRecordIds`, never through a
+     * group: someone who reads through a group did not attend) and that they read now (`recordReader`), oldest
+     * first, at most `limit`. Nothing while the records or the meetings feature are off.
+     */
+    attendedSince(member: Member, since: string, until: string, limit: number): Array<{ id: string; title: string; at: string }> {
+      const handle = companyData.forCompany(member.companyId)
+      if (!handle.records.settings().enabled || !featureOn(member.companyId)) return []
+      const reader = recordReader(member, handle.scopes.listWithRules())
+      const ids = handle.records.listedRecordIds(member.userId, MEETING_TYPE)
+      const out: Array<{ id: string; title: string; at: string }> = []
+      for (const row of handle.records.byIds(ids)) {
+        if (row.removedAt !== null || row.type !== MEETING_TYPE || !reader.record(row)) continue
+        const now = fieldsOf(handle.records, row.id)
+        const at = typeof now.fields.meeting_at === 'string' ? now.fields.meeting_at : null
+        if (!at || !isAttendee(row, now.fields, member.userId)) continue
+        const atMs = Date.parse(at)
+        if (Number.isNaN(atMs) || atMs < Date.parse(since) || atMs >= Date.parse(until)) continue
+        out.push({ id: row.id, title: row.title, at })
+      }
+      return out.sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || (a.id < b.id ? -1 : 1)).slice(0, limit)
+    },
+
     /** GET /google/minutes-folder — owner/admin. */
     folderSetting(member: Member): Outcome<MinutesFolderSetting> {
       if (!FULL_ACCESS_ROLES.has(member.role)) return refuse('forbidden', 'この設定は管理者だけが見られます', { code: 'FORBIDDEN' })

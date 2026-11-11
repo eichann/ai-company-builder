@@ -12,7 +12,8 @@
  *   PUT  /jobs-stop { stopped }       owner/admin: 「定期の仕事をすべて止める」
  *   GET  /jobs/:jobId/occurrences     the same people as GET /jobs/:jobId: its occurrences (回), newest first (PR 3b)
  *   GET  /me/job-turns                the caller's PC-job occurrences to claim now (PR 5a)
- *   POST /job-run-claims { occurrenceId, deviceId, conversationId }   claim one (PR 5a; 503 AI_STOPPED while stopped)
+ *   POST /job-run-claims { occurrenceId, deviceId, conversationId, checks }   claim one (PR 5a; 503 AI_STOPPED while stopped;
+ *                                     409 JOB_CHECK_NOT_SUPPORTED when `checks` — the check kinds the app runs — lacks it, 5a-2)
  */
 import type { JobCheck, JobDefinition, JobGrant, JobOccurrenceState, JobPauseReason, JobPlacement, JobProcedure, JobState, JobTrigger } from '../core/jobs'
 import type { AiRunView } from './ai-runs'
@@ -138,10 +139,22 @@ export interface JobTurnView {
   checkSince: string
   procedure: JobProcedure
   grant: JobGrant
+  /**
+   * Only in a claim's answer, for a `new_meetings` check (B PR 5a-2): the meetings it found (≤ 10, oldest
+   * first) — the only ones whose minutes the run may read. Empty: the run finishes `nothing`.
+   */
+  meetings?: JobMeetingView[]
+}
+
+/** A meeting a `new_meetings` check found: its record id, its title (outside text: the calendar's) and its time. */
+export interface JobMeetingView {
+  id: string
+  title: string
+  at: string
 }
 
 /**
- * `POST /job-run-claims { occurrenceId, deviceId, conversationId }` (B PR 5a): the run (`AiRunView`, step
+ * `POST /job-run-claims { occurrenceId, deviceId, conversationId, checks }` (B PR 5a): the run (`AiRunView`, step
  * `job-procedure`, subject kind `occurrence`) and the turn it runs. Then, as for any run: renew, finish
  * (`{ generation, outcome, failure?, jobResult? }` — `jobResult` `'nothing'` or `{ title, summary? }` on `done`).
  */

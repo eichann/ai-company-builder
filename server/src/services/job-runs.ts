@@ -9,7 +9,9 @@
  *   the occurrence's version still the approved one and accepted, the caller **that version's responsible
  *   person** (anyone else, another company's id or a server job's occurrence: the one 404 `JOB_NOT_FOUND`), their
  *   rights still covering every place it names, not absent that day, and a shelf Skill's pinned version still
- *   there. The claim's refusals that tell something changed also write it (the rights lost → the job paused
+ *   there, and (B PR 5a-2) its check among those the claiming app says it runs (`JOB_CHECK_NOT_SUPPORTED`). The
+ *   claim's answer carries the meetings a `new_meetings` check finds (`meetingsFor`), the only minutes its run
+ *   may read. The claim's refusals that tell something changed also write it (the rights lost → the job paused
  *   `OWNER_RIGHTS_CHANGED` + `job_paused` and the occurrence held, as the server's runner does; absent →
  *   skipped and told; another version approved → held); the list only leaves such an occurrence out.
  * - **The run takes the occurrence** (`claimed`, in the claim's transaction): `due` → `running` with the run.
@@ -33,7 +35,7 @@ import {
   JOB_ACTOR, JOB_PC_STEP, isOccurrenceId, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult,
   type JobDefinition, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
-import type { JobTurnView } from '../../shared/types/jobs'
+import type { JobMeetingView, JobTurnView } from '../../shared/types/jobs'
 import type { Clock } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { JobOccurrenceRow, JobRow, JobVersionRow } from '../ports/jobs'
@@ -53,7 +55,15 @@ export interface JobRunDeps {
   jobs: Pick<JobService, 'runnerRefusal' | 'pauseBySystem' | 'pinnedSkillKept' | 'nameOf'>
   notices: Pick<JobOccurrences, 'writeNotice' | 'tell'>
   writer: Pick<ServiceRecordWriter, 'check' | 'create'>
+  /**
+   * The meetings the member attended with a time in [since, until), oldest first (`minutes.attendedSince`:
+   * people-only lists, what they read now). Absent: none (a `new_meetings` check then finds nothing).
+   */
+  meetings?: (member: Member, since: string, until: string, limit: number) => JobMeetingView[]
 }
+
+/** At most this many meetings a `new_meetings` check hands one run (the oldest first; the next occurrence takes the rest). */
+export const JOB_MEETINGS_PER_RUN = 10
 
 const NOT_FOUND = () => refuse('not-found', '定期の仕事が見つかりません。', { code: 'JOB_NOT_FOUND' })
 const conflict = (code: string, error: string) => refuse('conflict', error, { code })
@@ -69,6 +79,8 @@ const REFUSALS: Record<string, () => Refusal> = {
   SKILL_MISSING: () => conflict('JOB_SKILL_MISSING', '手順の Skill が、承認された版のまま見つかりません。'),
   TIME_LIMIT: () => conflict('JOB_TIME_LIMIT', '承認された時間を過ぎたため、この回は AI を止めました。人が確かめる必要があります。'),
 }
+/** The claiming app cannot run this occurrence's check (an older app, or one that does not know a newer check). */
+const CHECK_NOT_SUPPORTED = () => conflict('JOB_CHECK_NOT_SUPPORTED', 'このアプリでは、この定期の仕事を動かせません。アプリを新しくしてください。')
 /** How many of a company's waiting occurrences the turn list looks at (at most one `due` per job). */
 const TURN_SCAN_LIMIT = 10_000
 
@@ -169,6 +181,20 @@ export function createJobRuns(deps: JobRunDeps) {
     return before?.dueAt ?? f.version.approvedAt ?? f.version.createdAt
   }
 
+  /**
+   * The meetings a `new_meetings` check finds for this occurrence (B PR 5a-2): the responsible person's own,
+   * attended since `checkSince` and until now, whose title holds one of the check's words when it names any.
+   * The run may read these meetings' minutes and no other (`routeRefusal`).
+   */
+  function meetingsFor(f: Found, member: Member, nowMs: number): JobMeetingView[] {
+    const check = f.definition.check
+    if (check.kind !== 'new_meetings' || !deps.meetings) return []
+    const words = check.titleWords.map(w => w.normalize('NFKC').toLowerCase())
+    return deps.meetings(member, checkSince(f), new Date(nowMs).toISOString(), 200)
+      .filter(m => words.length === 0 || words.some(w => m.title.normalize('NFKC').toLowerCase().includes(w)))
+      .slice(0, JOB_MEETINGS_PER_RUN)
+  }
+
   /** The one やること of a finish (owner-only for the responsible person: what the job read and wrote reaches nobody else). */
   function taskInput(f: Found, runId: string, result: { title: string; summary: string | null }): ServiceCreateInput {
     return {
@@ -201,6 +227,8 @@ export function createJobRuns(deps: JobRunDeps) {
       if (subject.kind !== 'occurrence' || step !== JOB_PC_STEP) return NOT_FOUND()
       const f = own(member, subject.id)
       if (!f) return NOT_FOUND()
+      // An app that cannot run this check never claims it (B PR 5a-2); nothing is written for it.
+      if (!subject.checks?.includes(f.definition.check.kind)) return CHECK_NOT_SUPPORTED()
       const why = whyNot(f, clock.nowMs())
       if (why === 'GONE') return GONE()
       if (why) {
@@ -287,7 +315,7 @@ export function createJobRuns(deps: JobRunDeps) {
       return null
     },
 
-    routeRefusal(member, run, route) {
+    routeRefusal(member, run, route, params) {
       if (run.step !== JOB_PC_STEP) return notInStep()
       const f = held(member, run)
       if (!f) return notInStep()
@@ -301,7 +329,9 @@ export function createJobRuns(deps: JobRunDeps) {
         if (why === 'OWNER_RIGHTS_CHANGED') record(f, why)
         return notInStep()
       }
-      return jobRunRouteAllowed(f.definition.grant, route) ? null : notInStep()
+      // The minutes route only for a meeting this occurrence's check finds now (the grant names the route too).
+      const meetingFound = () => typeof params.recordId === 'string' && meetingsFor(f, member, clock.nowMs()).some(m => m.id === params.recordId)
+      return jobRunRouteAllowed(f.definition.grant, route, meetingFound) ? null : notInStep()
     },
 
     bindsTokens(run: RunSubjectLiveRun) {
@@ -347,10 +377,12 @@ export function createJobRuns(deps: JobRunDeps) {
       return ok({ turns })
     },
 
-    /** The turn of the occurrence a claim just took (the claim's answer), or null. */
+    /** The turn of the occurrence a claim just took (the claim's answer, with the meetings its check found), or null. */
     turnOf(member: Member, occurrenceId: string): JobTurnView | null {
       const f = own(member, occurrenceId)
-      return f ? turnView(member, f) : null
+      if (!f) return null
+      const turn = turnView(member, f)
+      return f.definition.check.kind === 'new_meetings' ? { ...turn, meetings: meetingsFor(f, member, clock.nowMs()) } : turn
     },
   }
 }

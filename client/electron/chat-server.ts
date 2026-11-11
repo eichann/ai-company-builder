@@ -39,7 +39,7 @@ import { CHOICE_PART_TYPE, type ChoicePromptRecord, type ChoiceResult } from '..
 import { createAgentConnection, type AgentHost } from './agents/registry'
 import { AGENTS, isAgentId, modelHasLargeContext, type AgentId } from '../shared/agents/registry'
 import { createFileSystemTools, createSkillTools } from './chat-tools'
-import type { WriteGuard } from './write-guard'
+import type { WriteArea, WriteGuard } from './write-guard'
 import { forgetPrivateReads, noteCompanyFileResult, privateFolderOfPath, privateReadStateFor, createPrivateReadState, seedFromMessages, type PrivateReadContext } from './private-read-guard'
 import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../shared/rate-limits'
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
@@ -94,7 +94,7 @@ export interface ChatServerConfig extends AgentHost {
    * A business plugin step's run or consultation (plugin-steps.md "The deliverable folder"): the
    * folder under `<department>/.personal/` its writes are held to this turn; null = an ordinary one.
    */
-  stepWriteArea?: (companyId: string, conversationId: string) => Promise<string | null>
+  stepWriteArea?: (companyId: string, conversationId: string) => Promise<string | WriteArea | null>
   createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; companyRoot?: string; department?: string | null; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * The consultation's topic as stored (chat history): the task its new files are linked to
@@ -476,7 +476,11 @@ export async function startChatServer(config: ChatServerConfig) {
     // A step's run or consultation writes only inside its deliverable folder (write-guard.ts `writeArea`).
     const stepArea = writeGuard && companyId && appSessionId && config.stepWriteArea
       ? await config.stepWriteArea(companyId, appSessionId).catch(() => null) : null
-    if (writeGuard && stepArea) writeGuard = { ...writeGuard, writeArea: { folder: stepArea } }
+    if (writeGuard && stepArea) {
+      writeGuard = typeof stepArea === 'string' ? { ...writeGuard, writeArea: { folder: stepArea } }
+        // A scheduled job's run: its grant's write area and, for its file reads, its read places (jobs.md).
+        : { ...writeGuard, writeArea: stepArea, ...('reads' in stepArea ? { readArea: stepArea.reads } : {}) }
+    }
     else if (aiTurnStep && requestedStep !== undefined && !isAiTurnStep(requestedStep)) {
       // A business plugin step's run without its deliverable folder would write unchecked: never.
       return c.json({ error: 'この AI では AI の番を自動で進められません。', code: 'AI_TURN_NOT_SUPPORTED' }, 400)

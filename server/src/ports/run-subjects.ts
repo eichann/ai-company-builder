@@ -26,6 +26,11 @@ export type RunSubjectKind = AiRunSubjectKind
 export interface RunSubject {
   readonly kind: RunSubjectKind
   readonly id: string
+  /**
+   * Only on a PC job's claim (B PR 5a-2): the check kinds the claiming app can run. Its resolver refuses an
+   * occurrence whose check the app does not name (an app that cannot honour it never runs it).
+   */
+  readonly checks?: readonly string[]
 }
 
 /** The member a run is claimed for (services/access.ts `Member`). */
@@ -103,7 +108,7 @@ export interface RunSubjects<Refused> {
    * call, B PR 5a); null = yes. Asked for every run whose kind is not `record` (a record run's built-in
    * steps have their own table); absent → every route refused.
    */
-  routeRefusal?(member: RunSubjectMember, run: RunSubjectLiveRun, route: string): Refused | null
+  routeRefusal?(member: RunSubjectMember, run: RunSubjectLiveRun, route: string, params: Readonly<Record<string, string | undefined>>): Refused | null
   /** Whether a record token may be bound to this run at all (B PR 5a: a PC job's run); absent → only a record's run. */
   bindsTokens?(run: RunSubjectLiveRun): boolean
 }

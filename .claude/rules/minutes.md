@@ -581,6 +581,13 @@ usable folders. No folder (or one that stopped being usable) → `check` answers
 `reason: 'no-folder' | 'folder-unusable'` and reads nothing. Admin console: 「つなぎ先」→「Google」→
 「議事録の置き場所」 (`minutes-folder.tsx`).
 
+## For a scheduled job's meeting check (B PR 5a-2)
+
+`services.minutes.attendedSince(member, since, until, limit)`: the meetings whose people-only list names the member
+(`listedRecordIds`), that they read now and attended, with `meeting_at` in [since, until), oldest first — ids,
+titles and times only, never text. Nothing while the records or 「会議と議事録」 are off. Used by `job-runs.ts`
+(`jobs.md` "The meeting check"); the minutes text route keeps its own rules for the job's run.
+
 ## For the thank-you mail (G8)
 
 `services.minutes.meetingAttendees(companyId, userId, role, meetingId)` → `[{ email, name,

@@ -63,6 +63,14 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
   /.personal/<folder>/」の中だけです…」. The only line for `.personal` (never synced: no server check
   behind it). Bash: literal redirect / `tee` targets as below; an automatic run has no shell at all.
   Test: `client/tests/step-deliverable-folder.test.ts` (mutation-checked).
+- **A scheduled job's run** (`jobs.md` "The app's runner", B PR 5a-2): `writeArea` names the grant's place —
+  `<place>/.personal/<folder>/<something>` (`insideDeliverableAt`, the place's segments compared as the disk folds
+  them, as written and as resolved) — or `{ nowhere: true }` for a grant that writes nothing (every write refused,
+  「この定期の仕事では、AI はファイルを保存できません。…」). `readArea` (only for such a run) holds Claude Code's
+  Read / Glob / Grep to the grant's read paths or that area, as written and as resolved (a link cannot lead out);
+  Glob and Grep must name a `path`, a Glob pattern may not start with `/` or climb with `..`. Guard reason
+  `deliverable-folder` for both (the wire's list of reasons is unchanged). Test: `client/tests/job-runs.test.ts`
+  (mutation-checked).
 - Checked first, regardless of write access: a folder **not downloaded** on this computer
   (`WriteGuard.getNotDownloaded`) →
   「このフォルダ（コンテンツ/動画）はダウンロードしていないため、ここには保存できません。必要ならユーザーに設定でダウンロードしてもらってください。」
