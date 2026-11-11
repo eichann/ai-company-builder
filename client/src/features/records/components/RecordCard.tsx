@@ -41,6 +41,11 @@ interface Props {
   notDownloadedFolderOf?: NotDownloadedFolderOf
   /** A meeting's middle in its order: the card's parts with its own buttons and proposals (minutes.md "Meetings for their attendees"), drawn by the screen. */
   renderMeeting?: (record: RecordViewSummary, parts: MeetingCardParts) => ReactNode
+  /**
+   * The member ended it here — a 来た連絡's ［済んだ］, a 返事のお願い's ［終わりにする］ / ［もう返した］ (owner FB
+   * #29): AppShell closes its tab in the middle and its automatic consultations. Not ［取り込まない］.
+   */
+  onEnded?: (recordId: string) => void
 }
 
 /** The card's parts the screen places around a meeting's own buttons and proposals. */
@@ -76,7 +81,7 @@ export interface BundleFieldContext {
  * 来た連絡's and a 案件・プロジェクト's own parts: what it is, its body, fields and 経緯 folded, the AI
  * working on it, and 「つながっているもの」.
  */
-export function RecordCard({ companyId, rootPath, recordId, renderSections, renderSource, onLoaded, renderApproval, consultations = [], onConsult, renderBundleField, notDownloadedFolderOf, renderMeeting }: Props) {
+export function RecordCard({ companyId, rootPath, recordId, renderSections, renderSource, onLoaded, renderApproval, consultations = [], onConsult, renderBundleField, notDownloadedFolderOf, renderMeeting, onEnded }: Props) {
   const { result, reload } = useRecordCard(companyId, recordId, onLoaded)
   const [notice, setNotice] = useState<{ text: string; undo: { recordId: string; version: number } | null } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -104,6 +109,8 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
   // A 来た連絡's ［済んだ］ / ［取り込まない］, a 返事のお願い's ［終わりにする］ / ［もう返した］, at the version
   // shown (a run of the AI that wrote meanwhile makes it refused: the card reads again); 取り消す undoes that one entry.
   const DONE_WORDS = { settle: '済んだにしました', drop: 'やることにしなかった一覧に移しました', close: '終わりにしました', replied_elsewhere: '「もう返した」で終わりにしました' } as const
+  // The ones that end it (its tab and automatic consultations close); 取り込まない only moves it aside.
+  const ENDING_ACTIONS = new Set<keyof typeof DONE_WORDS>(['settle', 'close', 'replied_elsewhere'])
   const act = async (action: keyof typeof DONE_WORDS) => {
     if (card.version === undefined) return
     setBusy(true)
@@ -112,6 +119,7 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     if (!r.success) { setError(r.error); reload(); return }
     // 「もう返した」 also put its drafts away (the inbox's follow-up): taking the close back would not bring them back.
     changed(DONE_WORDS[action], action === 'replied_elsewhere' ? null : { recordId: card.record.id, version: card.version + 1 })
+    if (ENDING_ACTIONS.has(action)) onEnded?.(card.record.id)
   }
   const unsettle = async () => {
     if (card.version === undefined) return

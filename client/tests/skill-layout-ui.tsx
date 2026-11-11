@@ -10,7 +10,8 @@
 //   seed      JSON {key: value} written to localStorage before the screen mounts
 //             (what an earlier version of the app saved)
 //   tasks     1 = records on with a task list: the やること tab shows (tests/ui/tasks-layout.spec.ts)
-//   check     1 = (with tasks=1) each row offers its ☑ 完了にする; the press is recorded (actOnTask)
+//   check     1 = (with tasks=1) each row offers its ☑ 完了にする, and the opened task's card its ［完了にする］;
+//             the press is recorded (actOnTask)
 //   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
 //   kind      none = the company has no shared company folder (folderKind none: a working folder on this PC)
 //   personal  1 = (with tasks=1) the opened task is one only the member sees (its card offers 新しいファイル)
@@ -271,7 +272,7 @@ const api: Partial<ElectronAPI> = {
     ? (cardReads++, await sleep(120), { success: true, card: {
       record: { ...RECORD_TASK, state: 'in_progress', version: taskVersion, ...(params.get('personal') === '1' ? { personal: true } : {}) }, due: null, tags: [], purpose: null,
       fields: [{ label: '担当', value: '田中 太郎' }],
-      roles: { assignee: false, requester: false, okGiver: false, reviewer: false }, names: { assignee: '田中 太郎', requester: null, reviewer: null }, reviewerId: null, assigneeId: 'u-tanaka', self: { id: 'u-me', name: null }, whenDone: null, bundle: null, canSetBundle: false, teamMode: false, origin: null, review: null, actions: [], canSetTags: false, okLine: null, prepSummary: null, prepared: [],
+      roles: { assignee: false, requester: false, okGiver: false, reviewer: false }, names: { assignee: '田中 太郎', requester: null, reviewer: null }, reviewerId: null, assigneeId: 'u-tanaka', self: { id: 'u-me', name: null }, whenDone: null, bundle: null, canSetBundle: false, teamMode: false, origin: null, review: null, actions: params.get('check') === '1' ? [{ action: 'complete', title: '完了', noteRequired: false, args: [], needsOk: false, startFirst: false }] : [], canSetTags: false, okLine: null, prepSummary: null, prepared: [],
       files: taskFiles.map(path => ({ path })), localFiles: [], driveFiles: [],
       links: [{ label: '決めたこと', record: RECORD_DECISION }],
       history: [{ at: '2026-10-30T10:00:00+09:00', text: '山田 花子：作りました', ai: false }],

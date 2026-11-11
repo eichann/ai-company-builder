@@ -15,6 +15,13 @@ type Control = {
 const chat = async <T>(page: Page, fn: (control: Control) => T) =>
   (await page.evaluateHandle(() => (window as unknown as { __acbChat: Control }).__acbChat)).evaluate(fn)
 
+const conversationList = (page: Page) => page.getByRole('complementary', { name: 'AIへの相談' })
+/** The consultations open as tabs (what the chat pane remembers of its tabs). */
+const openTabSessions = (page: Page) => page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('chatTabs:'))
+  .flatMap(k => (JSON.parse(localStorage.getItem(k) ?? '{}') as { tabs?: Array<{ sessionId: string | null }> }).tabs ?? []).map(t => t.sessionId))
+const closeRecordConsultations = (page: Page, recordId: string) => page.evaluate(id =>
+  (window as unknown as { __acbCommands: { run: (cmd: string, args: unknown) => Promise<unknown> } }).__acbCommands.run('chat.closeRecordConsultations', { recordId: id }), recordId)
+
 const MINUTES_ID = 'minutes-0a1b2c3d4e5f60718293a4b5'
 const day = () => { const d = new Date('2026-11-05T06:00:00.000Z'); return `${d.getMonth() + 1}/${d.getDate()}` }
 
@@ -48,6 +55,10 @@ test('a received minutes record runs by itself in a hidden consultation that is 
   // The turn ends: the record is settled once, and nothing starts again for it.
   await chat(page, c => c.finish())
   await expect.poll(() => chat(page, c => c.aiTurns.settled), { timeout: 15_000 }).toEqual([MINUTES_ID])
+  // It ended well with nothing of the member's in it: it closes by itself (owner FB #28), saved as it was;
+  // the member's own tab stays in front. (This preview's queue never changes, so the record may run again.)
+  await expect.poll(() => openTabSessions(page), { timeout: 10_000 }).not.toContain(claim[3])
+  await expect(composer).toBeVisible()
 })
 
 test('when another PC took the AI turn first, nothing is sent from this one', async ({ page }) => {
@@ -87,8 +98,60 @@ test('a failed run is handed to the person with the reason, and 「もう一度�
   await chat(page, c => c.finish())
   await expect(notice).toContainText('AI ができませんでした', { timeout: 15_000 })
   await expect(notice).toContainText('読み取れませんでした')
+  // A failed run's consultation stays open: the reason is there (owner FB #28).
+  await expect(conversationList(page).getByText(`A社 商談 のあと（${day()}）`)).toHaveCount(1)
   await notice.getByRole('button', { name: 'もう一度' }).click()
   // The server's run, held for a person after the failure (S10b), is given back too.
   await expect.poll(() => chat(page, c => c.aiTurns.retried), { timeout: 15_000 }).toEqual([MINUTES_ID])
   await expect.poll(() => chat(page, c => c.aiTurns.claims.length), { timeout: 15_000 }).toBe(2)
+})
+
+// Owner FB #28: the member ending the record closes its automatic consultations — also one kept open
+// after a failure — but never one holding the member's words.
+test('ending the record closes its automatic consultation that stayed open; one with the member’s draft stays', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  await expect.poll(() => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length), { timeout: 15_000 }).toBe(1)
+  await chat(page, c => c.finish())
+  await expect.poll(() => chat(page, c => c.aiTurns.settled), { timeout: 15_000 }).toEqual([MINUTES_ID])
+  const row = conversationList(page).getByText(`A社 商談 のあと（${day()}）`)
+  await expect(row).toHaveCount(1)
+
+  // The member starts a note in it: ending the record leaves it open.
+  await row.click()
+  const composer = page.locator('.cm-content[role="textbox"]').locator('visible=true')
+  await composer.click()
+  await page.keyboard.type('先方に確認する')
+  // Opening it put the member's blank tab away, and the last tab is never closed: another one first.
+  const newConsultation = conversationList(page).getByRole('button', { name: 'AIに相談する' })
+  await newConsultation.click()
+  await closeRecordConsultations(page, MINUTES_ID)
+  await page.waitForTimeout(300)
+  await expect(row).toHaveCount(1)
+
+  // Without the note it closes.
+  await row.click()
+  await composer.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.press('Backspace')
+  await newConsultation.click()
+  await closeRecordConsultations(page, MINUTES_ID)
+  await expect(row).toHaveCount(0)
+})
+
+test('ending the record keeps an automatic consultation the member wrote in', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
+  await expect.poll(() => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length), { timeout: 15_000 }).toBe(1)
+  await chat(page, c => c.finish())
+  await expect.poll(() => chat(page, c => c.aiTurns.settled), { timeout: 15_000 }).toEqual([MINUTES_ID])
+  const row = conversationList(page).getByText(`A社 商談 のあと（${day()}）`)
+  await row.click()
+  await page.locator('.cm-content[role="textbox"]').locator('visible=true').click()
+  await page.keyboard.type('先方の資料を待ちます')
+  await page.keyboard.press('Meta+Enter')
+  await expect.poll(() => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length), { timeout: 15_000 }).toBe(2)
+  await chat(page, c => c.finish())
+  await conversationList(page).getByRole('button', { name: 'AIに相談する' }).click()
+  await closeRecordConsultations(page, MINUTES_ID)
+  await page.waitForTimeout(300)
+  await expect(row).toHaveCount(1)
 })

@@ -381,6 +381,12 @@ export function AppShell() {
   // 「相談する」 on a task: the chat opens the member's latest consultation about it, else starts one.
   const consultAbout = (task: { id: string; title: string }, fresh = false) => { void runCommand('chat.consultAbout', { recordId: task.id, title: task.title, ...(fresh ? { fresh } : {}) }).catch(() => {}) }
   // ［催促の下書きを作る］ on a task whose 返事の見込み passed: a new consultation that drafts the nudge (the member sends it).
+  // A record the member ended (the list's ☑, the card's 完了 / 済んだ / 終わりにする; owner FB #15, #28, #29):
+  // its tab in the middle and its automatic consultations close; 元に戻す / やり直す bring neither back.
+  const recordEnded = (recordId: string) => {
+    closeTabs([recordTabKey(recordId)])
+    void runCommand('chat.closeRecordConsultations', { recordId }).catch(() => {})
+  }
   const draftNudge = (task: { id: string; title: string }) => { void runCommand('chat.consultAbout', { recordId: task.id, title: task.title, purpose: 'nudge' }).catch(() => {}) }
   // A record's 「つながっているもの」 lists the consultations about it (this PC's history).
   const recordConsultations = useLinkedConsultations(currentCompany?.id)
@@ -417,12 +423,12 @@ export function AppShell() {
     if (recordId.startsWith('task-')) {
       // Keyed by id only: a new version (the AI linked a file, a press in the list) updates it in place.
       // 「続きをする」 sits above a やること an automatic step run handed over (plugin-steps.md).
-      return <div key={recordId}><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><TaskCard knownVersion={taskList.data?.items.find(i => i.id === recordId)?.version} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} bundlePlaces={bundlePlaces} createTodayFile={createTodayFile} notDownloadedFolderOf={notDownloadedFolderOf} sharedFolder={sharedFolder}
+      return <div key={recordId}><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><TaskCard knownVersion={taskList.data?.items.find(i => i.id === recordId)?.version} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} onEnded={recordEnded} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} bundlePlaces={bundlePlaces} createTodayFile={createTodayFile} notDownloadedFolderOf={notDownloadedFolderOf} sharedFolder={sharedFolder}
         onDetachConsultation={sessionId => { void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {}) }} /></div>
     }
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
     // A まとまり chosen from the list or the title bar: a meeting's open card reads again (its key).
-    const readOnly = <div key={meetings.cardKey(recordId)}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><StepDeliverables companyId={currentCompany.id} recordId={recordId} renderPrepared={renderPrepared} renderFile={f => <FileLinkRow rootPath={rootPath} path={f.path} broken={f.broken} />} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} notDownloadedFolderOf={notDownloadedFolderOf}
+    const readOnly = <div key={meetings.cardKey(recordId)}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><StepDeliverables companyId={currentCompany.id} recordId={recordId} renderPrepared={renderPrepared} renderFile={f => <FileLinkRow rootPath={rootPath} path={f.path} broken={f.broken} />} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} onEnded={recordEnded} notDownloadedFolderOf={notDownloadedFolderOf}
       renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null, taskList.reload, bundlePlaces)}
       renderMeeting={(r, parts) => renderMeetingPanel(currentCompany.id, r.id, { parts, members: (taskList.data?.members ?? []).filter(p => p.id !== taskList.data?.me), onConsult: m => consultAbout(m), onChanged: meetings.changed })} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
@@ -535,7 +541,7 @@ export function AppShell() {
           activeRecordId={activeRecordId}
           onOpen={id => { const item = taskList.data?.items.find(i => i.id === id); if (item) openListItem(item); else openTab(recordTabKey(id)) }}
           onConsult={consultAbout}
-          onCompleted={id => closeTabs([recordTabKey(id)])}
+          onCompleted={recordEnded}
           askFolder={isCompanyWide ? null : (selectedDept?.folder ?? null)}
           showCalendar={features.meetings}
           meetingActions={meetings.taskListActions}

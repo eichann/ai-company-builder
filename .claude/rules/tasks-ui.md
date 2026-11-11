@@ -184,12 +184,19 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   refuses when something changed since). What the AI judged is never there. Tests:
   `tasks-list.test.ts` (「a 来た連絡: ☑ …」, 「今日終わったこと asks …」), `tasks-list.spec.ts`
   (「a 来た連絡 to confirm …」).
-  **Checked off (完了にする, or a 来た連絡's 済んだ) here, its tab in the middle closes** (owner FB #15, 2026-11-04;
-  `onCompleted` → AppShell `closeTabs([recordTabKey(id)])`, the tidy's path, so 固定 marks and
-  named groups follow): only that task's tab (a card holds nothing unsaved), only after the server
-  accepted it; not for 見てもらう or やり直す, and やり直す does not reopen it. A press on the card's
-  own 完了にする keeps the card open (it shows 「完了」 and ［取り消す］). Test: `tests/ui/tasks-layout.spec.ts`
-  (「checking a task off…」: the other task's tab in the same named group stays). An AI-turn
+  **Ended (完了にする, or a 来た連絡's 済んだ) here, its tab in the middle closes** (owner FB #15, 2026-11-04;
+  `onCompleted` → AppShell `recordEnded`: `closeTabs([recordTabKey(id)])`, the tidy's path, so 固定
+  marks and named groups follow): only that record's tab (a card holds nothing unsaved), only after the
+  server accepted it; not for 見てもらう or やり直す, and やり直す / 元に戻す do not reopen it.
+  **The card's own end button does the same** (owner FB #29, 2026-11-11; this replaced 「a press on the
+  card keeps it open」): a task card's ［完了にする］ — any press whose last step is `complete`, also
+  in a dialog or the 返事待ち band (`TaskCard` `onEnded`) — and a 来た連絡's ［済んだ］ or a 返事のお願い's
+  ［終わりにする］ / ［もう返した］ (`RecordCard` `onEnded`; not ［取り込まない］, which only moves it aside).
+  The card's ［取り消す］ goes with it; the list's 元に戻す / やり直す stays. **Every such end also closes
+  the record's automatic 「AI の番」 consultations** (`chat.closeRecordConsultations`, `ai-turns.md`
+  "Closing the consultation"), never one the member wrote in. Tests: `tests/ui/tasks-layout.spec.ts`
+  (「checking a task off…」: the other task's tab in the same named group stays; 「completing a task with
+  its card's button…」), `tests/ui/record-card.spec.ts` (済んだ / 終わりにする tell the screen, 取り込まない does not). An AI-turn
   row shows the automatic runner's state and reason (`AiTurnItemView`, `ai-turns.md`) with
   「もう一度」 / 「人に渡す」 when stopped.
 - `QuickAdd` + `quickAdd.ts` (no window, owner 2026-11-02): while the line has the focus, chips show

@@ -332,7 +332,18 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const running = status === 'submitted' || status === 'streaming'
   const offeredSuggestion = !running && !currentInteraction && !pendingApproval ? suggestions.promptSuggestion : null
 
-  useConsultationStatus({ tabId, isShown, status, approval: pendingApproval, interaction: currentInteraction, messages, rootPath: currentCompany?.rootPath })
+  // What the tab holds, read live when an automatic run or its record ends (closing it must lose nothing).
+  const readHold = () => ({
+    ready: historyReadyRef.current && !deletedRef.current,
+    draft: draftInputRef.current,
+    attachments: unsentAttachmentsRef.current,
+    // Not the hand-off receipt: every turn leaves one (its memo update goes on after a close).
+    busy: running || queuedSends.length > 0 || !!pendingApproval || !!currentInteraction,
+    // An automatic consultation starts with the app's one message: any other is the member's.
+    memberWrote: messagesRef.current.filter(message => message.role === 'user').length > 1,
+    shown: isShown,
+  })
+  useConsultationStatus({ tabId, isShown, status, approval: pendingApproval, interaction: currentInteraction, messages, rootPath: currentCompany?.rootPath, readHold })
 
   // Left for another conversation with nothing typed: the tab closes and the empty conversation goes.
   useDiscardBlankOnLeave({

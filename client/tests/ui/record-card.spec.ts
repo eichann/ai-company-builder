@@ -60,16 +60,19 @@ test('a 来た連絡 to confirm: ［済んだ］ closes it (「済んだ」, ［
   const state = await openPreview(page, 'record-card', { record: 'slack' })
   const card = page.getByTestId('record-card')
   await card.getByRole('button', { name: '済んだ', exact: true }).click()
-  await expect(page.locator('#opened')).toHaveText('act interaction-0000bb settle@3')
+  // 済んだ ends it: the screen closes its tab and automatic consultations (owner FB #29).
+  await expect(page.locator('#opened')).toHaveText('act interaction-0000bb settle@3\nended interaction-0000bb')
   await expect(card).toContainText('対応済み')
   await expect(card.getByRole('button', { name: '済んだ', exact: true })).toHaveCount(0)
   await card.getByRole('button', { name: '元に戻す' }).click()
-  await expect(page.locator('#opened')).toHaveText('act interaction-0000bb settle@3\nundo interaction-0000bb 4@4')
+  await expect(page.locator('#opened')).toHaveText('act interaction-0000bb settle@3\nended interaction-0000bb\nundo interaction-0000bb 4@4')
   await expect(card).toContainText('確認待ち')
 
   await card.getByRole('button', { name: 'その他の操作' }).click()
   await page.getByRole('menuitem', { name: /取り込まない/ }).click()
   await expect(page.locator('#opened')).toContainText('act interaction-0000bb drop@5')
+  // 取り込まない only moves it aside: nothing closes.
+  await expect(page.locator('#opened')).not.toContainText('drop@5\nended')
   await expect(card).toContainText('やることにしなかった')
   await expect(card.getByRole('button', { name: '済んだ', exact: true })).toHaveCount(0)
   // Right after, 取り消す takes it back.
@@ -90,7 +93,7 @@ test('a 返事のお願い in the AI\'s turn: its person\'s ［終わりにす�
   const card = page.getByTestId('record-card')
   await expect(card).toContainText('AI が確かめている')
   await card.getByRole('button', { name: '終わりにする' }).click()
-  await expect(page.locator('#opened')).toHaveText('act reply_request-0000c1 close@3')
+  await expect(page.locator('#opened')).toHaveText('act reply_request-0000c1 close@3\nended reply_request-0000c1')
   await expect(card).toContainText('終わった')
   await expect(card.getByRole('button', { name: '終わりにする' })).toHaveCount(0)
   await card.getByRole('status').getByRole('button', { name: '取り消す' }).click()

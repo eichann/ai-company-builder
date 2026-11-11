@@ -26,6 +26,8 @@ import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import { consultationAbout, taskConsultFirstMessage, taskConsultPurposeTitle, taskConsultTitle } from '../../../../shared/task-consult'
 import { agentCan } from '../../../../shared/agents/registry'
 import { useAiTurnRunner } from '../hooks/useAiTurnRunner'
+import { automaticConsultationsFor, consultationHoldOf, forgetAutomaticConsultations } from '../automaticConsultationsStore'
+import { closesWhenRecordEnds } from '../aiTurns'
 import { AiTurnNotice } from './AiTurnNotice'
 
 // The chat panel: one company's conversations as tabs (all mounted, only the
@@ -128,6 +130,15 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   }, { target: paneId })
   useCommandHandler('chat.openConsultation', ({ sessionId }) => openOrFocus(sessionId), { target: paneId })
   const consumeInputRequest = useCallback(() => setInputRequest(null), [])
+  // The member ended a record: its automatic consultations close, unless they hold anything of the member's.
+  useCommandHandler('chat.closeRecordConsultations', ({ recordId }) => {
+    const sessions = new Set(automaticConsultationsFor(companyId, userId, recordId))
+    // The pane keeps one tab (closeTab never closes the last), so at most all but one go.
+    const closed = tabsRef.current.filter(tab => tab.sessionId && sessions.has(tab.sessionId) && closesWhenRecordEnds(consultationHoldOf(tab.id)))
+      .slice(0, Math.max(0, tabsRef.current.length - 1))
+    for (const tab of closed) closeTab(tab.id)
+    forgetAutomaticConsultations(companyId, userId, closed.map(tab => tab.sessionId!))
+  }, { target: paneId })
 
   // 「AI の番」: a hidden consultation (a tab behind the shown one) per record, one at a time.
   const [aiTurnRequest, setAiTurnRequest] = useState<{ tabId: string; request: ChatInputRequest } | null>(null)

@@ -61,6 +61,16 @@ export const COMMANDS = defineCommands([
     target: { arg: 'pane', area: 'chat' },
   },
   {
+    // The member ended a record (完了 / 済んだ / 終わりにする): its automatic 「AI の番」 consultations close
+    // (history kept), never one the member wrote in, has a draft in, or whose AI still runs.
+    id: 'chat.closeRecordConsultations', title: '記録の自動の相談を閉じる', class: 'local',
+    args: z.object({
+      recordId: z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/).describe('The record that was ended'),
+      pane: z.string().optional().describe('The chat pane; the one used last when left out'),
+    }),
+    target: { arg: 'pane', area: 'chat' },
+  },
+  {
     // Replaces the composer's text; nothing is sent.
     id: 'chat.insertText', title: '入力欄に文を入れる', class: 'local',
     args: z.object({
