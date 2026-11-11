@@ -17,7 +17,7 @@
  * Pure (server/tests/unit/core-purity.test.ts). The server hashes `jobDefinitionCanonical` /
  * `jobConsentCanonical` (sha256) — this module never hashes.
  */
-import { AI_ROUTES } from './ai-turn-routes'
+import { AI_ROUTES, AI_TURN_BASE_ROUTES } from './ai-turn-routes'
 import { canonicalJson } from './fixed-content'
 import { isValidSkillName } from './names'
 import { PLUGIN_STEP_TOOLS } from './plugin-flow-declaration'
@@ -87,14 +87,25 @@ export type JobTrigger =
 export type JobCheck = { kind: 'none' } | { kind: 'new_files'; path: string }
 
 /**
+ * A job's procedure, pinned when its version is made (the server reads the fingerprint, never the
+ * caller): a company Skill of the shared company folder at its tree id (`company_skill`), or — in a
+ * company without the shared folder (B PR 5a) — a Skill of the Skill shelf (`shelf_skill`): the shelf
+ * item (`item`, which fixes its place) at its version (`fingerprint`, sha256 of `shelfListing`), `skill`
+ * its name as the shelf had it.
+ */
+export type JobProcedure =
+  | { source: 'company_skill'; skill: string; fingerprint: string }
+  | { source: 'shelf_skill'; item: string; skill: string; fingerprint: string }
+
+/**
  * What runs. `operation` (placement `e`, on the server, no AI): today only `create_task` — a やること for
  * the responsible person titled `title`, due `dueBusinessDays` business days after the occurrence
- * (null: none). `procedure` (placement `a`, the responsible person's PC): a company Skill pinned at the
- * fingerprint the server read when this version was made (`PluginStepProcedurePin`'s company form).
+ * (null: none). `procedure` (placement `a`, the responsible person's PC): a Skill pinned at the
+ * fingerprint the server read when this version was made (`JobProcedure`).
  */
 export type JobRun =
   | { kind: 'operation'; operation: 'create_task'; title: string; dueBusinessDays: number | null }
-  | { kind: 'procedure'; procedure: { source: 'company_skill'; skill: string; fingerprint: string } }
+  | { kind: 'procedure'; procedure: JobProcedure }
 
 /** `e`: the server's own core operation. `a`: the responsible person's PC. (`b`, `c` later.) */
 export const JOB_PLACEMENTS = ['e', 'a'] as const
@@ -148,6 +159,9 @@ export type JobDefinitionResult = { ok: true; definition: JobDefinition } | { ok
 const AT_RE = /^(?:[01][0-9]|2[0-3]):[0-5][05]$/
 const USER_ID_RE = /^[A-Za-z0-9_-]{1,100}$/
 const FINGERPRINT_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
+const SHELF_VERSION_RE = /^[0-9a-f]{64}$/
+/** A shelf item's id (the server's own: a UUID today). */
+export const SHELF_ITEM_ID_RE = /^[A-Za-z0-9_-]{1,100}$/
 const DELIVERABLE_FOLDER_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 const MAX_PATHS = 20
 const MAX_ROUTES = 30
@@ -241,12 +255,20 @@ function parseRun(v: unknown, problems: string[]): JobRun | null {
   if (v.kind === 'procedure') {
     if (!keysExactly(v, ['kind', 'procedure'], 'run', problems)) return null
     const p = v.procedure
-    if (!isObj(p) || !keysExactly(p, ['source', 'skill', 'fingerprint'], 'run.procedure', problems)) { if (!isObj(p)) problems.push('run.procedure.BAD'); return null }
+    if (!isObj(p)) { problems.push('run.procedure.BAD'); return null }
+    const shelf = p.source === 'shelf_skill'
+    if (!keysExactly(p, shelf ? ['source', 'item', 'skill', 'fingerprint'] : ['source', 'skill', 'fingerprint'], 'run.procedure', problems)) return null
     const start = problems.length
-    if (p.source !== 'company_skill') problems.push('run.procedure.source.BAD')
+    if (p.source !== 'company_skill' && !shelf) problems.push('run.procedure.source.BAD')
+    if (shelf && (typeof p.item !== 'string' || !SHELF_ITEM_ID_RE.test(p.item))) problems.push('run.procedure.item.BAD')
     if (typeof p.skill !== 'string' || !isValidSkillName(p.skill) || p.skill.length > 64) problems.push('run.procedure.skill.BAD')
-    if (typeof p.fingerprint !== 'string' || !FINGERPRINT_RE.test(p.fingerprint)) problems.push('run.procedure.fingerprint.BAD')
-    return problems.length > start ? null : { kind: 'procedure', procedure: { source: 'company_skill', skill: p.skill as string, fingerprint: p.fingerprint as string } }
+    // A shelf version is sha256 (64 hex); a tree id is 40 or 64 hex.
+    if (typeof p.fingerprint !== 'string' || !(shelf ? SHELF_VERSION_RE : FINGERPRINT_RE).test(p.fingerprint)) problems.push('run.procedure.fingerprint.BAD')
+    if (problems.length > start) return null
+    const procedure: JobProcedure = shelf
+      ? { source: 'shelf_skill', item: p.item as string, skill: p.skill as string, fingerprint: p.fingerprint as string }
+      : { source: 'company_skill', skill: p.skill as string, fingerprint: p.fingerprint as string }
+    return { kind: 'procedure', procedure }
   }
   problems.push('run.kind.BAD')
   return null
@@ -393,11 +415,12 @@ export type JobOccurrenceState = typeof JOB_OCCURRENCE_STATES[number]
  * held — `JOB_PAUSED`, `COMPANY_STOPPED`, `NOT_ACCEPTED`, `JOB_VERSION_CHANGED` (another version was
  * approved after the occurrence was made), `OWNER_LEFT` / `OWNER_RIGHTS_CHANGED` (the job was paused for it);
  * skipped — `OWNER_ABSENT` (D5: no delegate runs it), `SUPERSEDED` (a newer occurrence, `latest_only`),
- * `MISSED` (found late under `skip`); expired — `EXPIRED`; needs_person — `RECORDS_OFF`, `TASK_NOT_CREATED`.
+ * `MISSED` (found late under `skip`); expired — `EXPIRED`; needs_person — `RECORDS_OFF`, `TASK_NOT_CREATED`,
+ * `RUN_FAILED` (a PC's run ended waiting for a person, B PR 5a).
  */
 export const JOB_OUTCOME_CODES = [
   'JOB_PAUSED', 'COMPANY_STOPPED', 'NOT_ACCEPTED', 'JOB_VERSION_CHANGED', 'OWNER_LEFT', 'OWNER_RIGHTS_CHANGED',
-  'OWNER_ABSENT', 'SUPERSEDED', 'MISSED', 'EXPIRED', 'RECORDS_OFF', 'TASK_NOT_CREATED',
+  'OWNER_ABSENT', 'SUPERSEDED', 'MISSED', 'EXPIRED', 'RECORDS_OFF', 'TASK_NOT_CREATED', 'RUN_FAILED',
 ] as const
 export type JobOutcomeCode = typeof JOB_OUTCOME_CODES[number]
 
@@ -421,4 +444,58 @@ export const JOB_SERVER_STEP = 'job-operation'
 export function occurrenceTaskId(occurrenceId: string): string {
   if (!OCCURRENCE_ID_RE.test(occurrenceId)) throw new Error('occurrenceTaskId: not an occurrence id')
   return `task-${occurrenceId.slice(4)}`
+}
+
+/**
+ * The step name of a PC job's run (`ai_runs.step`, placement `a`, B PR 5a): claimed by the responsible
+ * person's app through `POST /job-run-claims`, never through the record claim.
+ */
+export const JOB_PC_STEP = 'job-procedure'
+
+/** The outbound-draft routes (only with `grant.outbound: draft_only`). */
+export const JOB_OUTBOUND_ROUTES: readonly string[] = ['POST /outbound-recipients', 'POST /outbound', 'GET /outbound/:messageId', 'PUT /outbound/:messageId']
+
+/**
+ * Every AI route a PC job's run may ever reach (B PR 5a, design memo §4-2), whatever its grant says: the
+ * member's own record reads and mail drafts. Never a create (`POST /item`, `POST /decisions`: the one
+ * やること a grant's `creates: ['task']` allows is made by the server when the run finishes, `JobRunResult`,
+ * so a grant naming `POST /item` keeps its schema-1 shape but the token never creates), an action, a
+ * plugin's operation or call, a connector's read (minutes text, threads, Drive) or a file link. A grant may
+ * still name such a route (the parser takes every `AI_ROUTES` name): it is refused at every call.
+ */
+export const JOB_RUN_ROUTE_CEILING: readonly string[] = [
+  'GET /types', 'GET /my-turn', 'POST /query', 'GET /item/:recordId', 'GET /item/:recordId/history',
+  ...JOB_OUTBOUND_ROUTES,
+]
+
+/**
+ * May a PC job's run use this AI route (`<METHOD> <path under /api/records-ai>`) under this grant? The
+ * turn start's reads (`AI_TURN_BASE_ROUTES`) always; anything else only when the grant names it, it is
+ * within `JOB_RUN_ROUTE_CEILING`, and an outbound route only with `draft_only`. The server checks it at
+ * every call of the run's token.
+ */
+export function jobRunRouteAllowed(grant: JobGrant, route: string): boolean {
+  if ((AI_TURN_BASE_ROUTES as readonly string[]).includes(route)) return true
+  if (!grant.routes.includes(route) || !JOB_RUN_ROUTE_CEILING.includes(route)) return false
+  return !JOB_OUTBOUND_ROUTES.includes(route) || grant.outbound === 'draft_only'
+}
+
+/**
+ * What a PC job's run hands back when it finishes done (`POST /ai-runs/:runId/finish { jobResult }`):
+ * `nothing` — the check found nothing new (no AI ran), the occurrence ends `nothing`; or the one やること
+ * the server makes for the responsible person (owner-only, its id from the occurrence: one by
+ * construction), `title` one line ≤ `JOB_TASK_TITLE_MAX`, `summary` ≤ 300 or null. Never a place: the
+ * server places it.
+ */
+export type JobRunResult = 'nothing' | { title: string; summary: string | null }
+
+export function parseJobRunResult(v: unknown): JobRunResult | null {
+  if (v === 'nothing') return 'nothing'
+  if (!isObj(v) || !Object.keys(v).every(k => k === 'title' || k === 'summary')) return null
+  const title = typeof v.title === 'string' ? v.title.normalize('NFC').trim() : ''
+  // eslint-disable-next-line no-control-regex
+  if (title.length === 0 || title.length > JOB_TASK_TITLE_MAX || /[\u0000-\u001f\u007f]/.test(title)) return null
+  if (v.summary !== undefined && v.summary !== null && (typeof v.summary !== 'string' || v.summary.length > 300)) return null
+  const summary = typeof v.summary === 'string' && v.summary.trim() !== '' ? v.summary.normalize('NFC') : null
+  return { title, summary }
 }

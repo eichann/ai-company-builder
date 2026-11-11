@@ -342,6 +342,23 @@ export function createSkillShelfService(deps: SkillShelfDeps) {
   }
 
   const service = {
+    /**
+     * A shelf Skill as a scheduled job pins it (jobs.md "A Skill from the shelf", B PR 5a): the Skill item
+     * `itemId` — its name, its current version (null: taken off), whether `version` (when given) is still
+     * stored, and whether `who` (the job's responsible person) reads its place, by the same check as every
+     * shelf answer (`reads`), so a job never pins what its person could not fetch. null when it is no Skill,
+     * missing, or the company has the shared folder (no shelf there).
+     */
+    jobSkill(who: Member, itemId: string, version?: string): { name: string; current: string | null; kept: boolean; readable: boolean } | null {
+      if (deps.hasCompanyFolder(who.companyId) || typeof itemId !== 'string' || itemId.length > 100) return null
+      const ctx = contextOf(who)
+      const row = ctx.handle.skillShelf.item(itemId)
+      if (!row || row.kind !== 'skill') return null
+      // Internal (never an API answer as such): the job service turns an unreadable place into its own codes.
+      const kept = version !== undefined && isShelfVersion(version) && ctx.handle.skillShelf.version(row.id, version) !== null
+      return { name: row.name, current: row.currentVersion, kept, readable: ctx.reads(row.departmentId) }
+    },
+
     /** GET /skill-shelf — every item of a place the member reads, published or taken off. */
     list(member: Member): Outcome<ShelfListView> {
       if (deps.hasCompanyFolder(member.companyId)) return notHere()

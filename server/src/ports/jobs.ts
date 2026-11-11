@@ -90,6 +90,8 @@ export interface JobRepository {
   occurrences(jobId: string, limit: number): JobOccurrenceRow[]
   /** Occurrences in `due`, oldest due first (every job of the company). */
   dueOccurrences(limit: number): JobOccurrenceRow[]
+  /** Occurrences in `running` (a PC's run holds them, B PR 5a), oldest due first (every job of the company). */
+  runningOccurrences(limit: number): JobOccurrenceRow[]
   /**
    * Move an occurrence from one of `from` to `to` (compare-and-set): false = it was no longer in
    * `from` (someone else moved it first; nothing written).

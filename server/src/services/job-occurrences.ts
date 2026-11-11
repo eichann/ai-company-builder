@@ -47,6 +47,11 @@ import type { ServiceCreateInput, ServiceRecordWriter } from './record-engine'
 
 /** Per company and run: occurrences the runner takes at most. */
 export const JOB_RUNNER_LIMIT = 50
+/**
+ * How many waiting occurrences of a company the clock looks at for expiry, and the runner reads to find the
+ * server's own among the PC's (at most one `due` occurrence per job: an older one is superseded).
+ */
+const OPEN_SCAN_LIMIT = 10_000
 
 export interface JobOccurrenceDeps {
   companyData: CompanyDataSource
@@ -110,7 +115,7 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
   /**
    * The newest slot of an approved placement-`e` job at or before now, as an occurrence row would hold it
    * (state still to decide), or null: no approved version, a PC job (claimed by its responsible person's app,
-   * PR 5: none made until then), no slot, or a slot from before the version was approved.
+   * PR 5a-2: none made until then), no slot, or a slot from before the version was approved.
    */
   function latestSlotOf(companyId: string, handle: CompanyData, job: JobRow, nowMs: number) {
     if (job.approvedVersion === null || (job.state !== 'active' && job.state !== 'paused')) return null
@@ -171,8 +176,22 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         }
       })
     }
-    // A `due` occurrence whose time ran out (the runner could not take it): expired, and said so.
-    for (const occ of handle.jobs.dueOccurrences(JOB_RUNNER_LIMIT)) {
+    // A PC's run that stopped without finishing (the app closed, retried later, given back) and whose time ran
+    // out: expired, and said so (B PR 5a). A run someone holds now finishes as it will; one with an outside
+    // result nobody knows waits for a person's reconciliation (the run's own place) and stays as it is.
+    for (const occ of handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT)) {
+      if (nowMs < Date.parse(occ.expiresAt)) continue
+      const run = occ.runId ? handle.aiRuns.byId(occ.runId) : null
+      const held = run !== null && run.state === 'running' && run.claimExpiresAt !== null && Date.parse(run.claimExpiresAt) > nowMs
+      if (held || run?.state === 'waiting_reconcile') continue
+      transactions.run(() => {
+        if (!handle.jobs.moveOccurrence(occ.id, ['running'], 'expired', { outcomeCode: 'EXPIRED' }, clock.now())) return
+        changed++
+        notice(companyId, handle, 'job_expired', occ, handle.jobs.find(occ.jobId), handle.jobs.version(occ.jobId, occ.jobVersion)?.actingUserId ?? null, told)
+      })
+    }
+    // A `due` occurrence whose time ran out (the runner, or a PC, could not take it): expired, and said so.
+    for (const occ of handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT)) {
       if (nowMs < Date.parse(occ.expiresAt)) continue
       transactions.run(() => {
         if (!handle.jobs.moveOccurrence(occ.id, ['due'], 'expired', { outcomeCode: 'EXPIRED' }, clock.now())) return
@@ -314,20 +333,54 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     }
   }
 
+  /**
+   * The company's `due` occurrences the server runs itself (placement `e`), oldest first, at most `limit`: a PC
+   * job's (`a`, claimed by its responsible person's app) never takes a place in the runner's batch.
+   */
+  function serverDue(companyId: string, limit: number): JobOccurrenceRow[] {
+    const handle = companyData.forCompany(companyId)
+    const placement = new Map<string, string | null>()
+    const placementOf = (o: JobOccurrenceRow) => {
+      const key = `${o.jobId}\n${o.jobVersion}`
+      if (!placement.has(key)) {
+        const v = handle.jobs.version(o.jobId, o.jobVersion)
+        placement.set(key, v ? definitionOf(v).placement : null)
+      }
+      return placement.get(key)
+    }
+    // A version gone (never: versions are append-only) is left to runOccurrence, which holds it.
+    return handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT).filter(o => placementOf(o) !== 'a').slice(0, limit)
+  }
+
+  /**
+   * An occurrence notice (`job_expired` / `job_skipped` / `job_failed`) to its responsible person and the job's
+   * creator while an owner / admin, in the caller's transaction (B PR 5a: the PC's run). The members told, for
+   * the push afterwards (`tell`).
+   */
+  function writeNotice(companyId: string, kind: NotificationKind, occ: JobOccurrenceRow): string[] {
+    const handle = companyData.forCompany(companyId)
+    const told = new Set<string>()
+    notice(companyId, handle, kind, occ, handle.jobs.find(occ.jobId), handle.jobs.version(occ.jobId, occ.jobVersion)?.actingUserId ?? null, told)
+    return [...told]
+  }
+
   return {
     makeOccurrences,
     runOccurrence,
     holdDue,
     holdPassedSlot,
-    /** The runner's part for one company: its `due` occurrences, oldest first, at most `limit`. The number that ran (`done`). */
+    writeNotice,
+    /** Tell these members their notices changed (after the transaction that wrote them). */
+    tell: (companyId: string, userIds: string[]) => tell(companyId, new Set(userIds)),
+    /** The runner's part for one company: its `due` server occurrences, oldest first, at most `limit`. The number that ran (`done`). */
     runDue(companyId: string, limit = JOB_RUNNER_LIMIT): number {
       let ran = 0
-      for (const occ of companyData.forCompany(companyId).jobs.dueOccurrences(limit)) if (runOccurrence(companyId, occ.id) === 'done') ran++
+      for (const occ of serverDue(companyId, limit)) if (runOccurrence(companyId, occ.id) === 'done') ran++
       return ran
     },
-    /** The ids of the company's `due` occurrences, oldest first, at most `limit` (the runner's batch). */
+    /** The ids of the company's `due` server occurrences, oldest first, at most `limit` (the runner's batch). */
     dueIds(companyId: string, limit = JOB_RUNNER_LIMIT): string[] {
-      return companyData.forCompany(companyId).jobs.dueOccurrences(limit).map(o => o.id)
+      return serverDue(companyId, limit).map(o => o.id)
     },
   }
 }

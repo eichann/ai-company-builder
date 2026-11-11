@@ -114,6 +114,8 @@ export interface AiRunProcedure {
   plugins: Array<{ id: string; version: string }>
   /** A business plugin's step: the procedure the work is pinned to. Absent on other steps. */
   pin?: PluginStepProcedurePin
+  /** A PC job's run (B PR 5a): the job's version it runs, pinned by its approval (its procedure is in that version). */
+  job?: { id: string; version: number; fingerprint: string }
 }
 
 const HEX_ID_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
@@ -139,11 +141,15 @@ export function parseAiRunProcedure(raw: string | null | undefined): AiRunProced
     const v = JSON.parse(raw) as Partial<AiRunProcedure>
     if (typeof v?.step !== 'string' || !Array.isArray(v.plugins)) return null
     const pin = parseProcedurePin(v.pin)
+    const j = v.job as Record<string, unknown> | undefined
+    const job = j && typeof j.id === 'string' && Number.isInteger(j.version) && typeof j.fingerprint === 'string'
+      ? { id: j.id, version: j.version as number, fingerprint: j.fingerprint } : null
     return {
       step: v.step,
       app: typeof v.app === 'string' ? v.app : null,
       plugins: v.plugins.filter((p): p is { id: string; version: string } => typeof p?.id === 'string' && typeof p?.version === 'string'),
       ...(pin ? { pin } : {}),
+      ...(job ? { job } : {}),
     }
   } catch {
     return null

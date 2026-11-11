@@ -125,6 +125,7 @@ const OUTCOME_WORDS: Record<string, string> = {
   EXPIRED: '期限までに動かなかったため見送りました',
   RECORDS_OFF: '記録の機能がオフのため、やることを作れませんでした',
   TASK_NOT_CREATED: 'やることを作れませんでした',
+  RUN_FAILED: 'AI がこの回を終えられなかったため、人が確かめる必要があります',
 }
 
 const STATE_WORDS: Record<JobOccurrenceState, string> = {

@@ -604,7 +604,8 @@ shelf endpoint answers it 409 `SKILL_SHELF_NOT_HERE`.
   text —, `rule` — `<name>.md`) × name (`isValidShelfName`: the skill folder rule, ≤ 64). Every
   distinct content is a **version** = sha256 of `shelfListing` (`<sha256 of the file> <path>\n`,
   sorted): stable, the same in the app, so it can pin a Skill the way a git tree id does
-  (plugin steps' company Skill: the next step). The item's `current_version` is what is handed out
+  (scheduled jobs pin one since B PR 5a, `jobs.md` "A Skill from the shelf", through `jobSkill`; plugin steps' company
+  Skill: not yet). The item's `current_version` is what is handed out
   (null = taken off); every other version is kept until an owner/admin removes it (below).
 - **Routes** (`routes/skill-shelf.ts` → `services/skill-shelf.ts`, contract
   `shared/types/skill-shelf.ts`, any member): `GET /skill-shelf` (items of places the caller

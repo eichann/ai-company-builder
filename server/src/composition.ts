@@ -78,7 +78,8 @@ import { createRecordEngine, type RecordChange } from './services/record-engine'
 import { createRecordSignal } from './services/record-signal'
 import { companyNow, createNotificationService } from './services/notifications'
 import { createAiRunService } from './services/ai-runs'
-import { createRecordRunSubjects } from './services/run-subjects'
+import { createRecordRunSubjects, runSubjectsByKind } from './services/run-subjects'
+import { createJobRuns } from './services/job-runs'
 import { createSkillUseService } from './services/skill-uses'
 import { createSkillShelfService } from './services/skill-shelf'
 import { createGroupService } from './services/groups'
@@ -307,11 +308,21 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     delegateCannotRead: (companyId, absenteeId, delegateId, setterId) => notifications.delegateCannotRead(companyId, absenteeId, delegateId, setterId),
   })
   const actsFor = (companyId: string, userId: string) => absences.actsFor(companyId, userId)
+  // The Skill shelf of a company without the shared folder (plugins.md "The Skill shelf"); jobs pin its Skills (PR 5a).
+  const skillShelf = createSkillShelfService({
+    ...shared,
+    hasCompanyFolder: companyFolders.has,
+    managedFolders: permissionViews.managedFolders,
+    skillEditing: permissionViews.skillEditing,
+    sha256: sha256Bytes,
+  })
   // 定期の仕事 (jobs.md): definitions and approval (PR 3a); occurrences and the server's operation below (PR 3b).
   const jobs = createJobService({
     ...repos, ...shared,
     skillTree: (companyId, name) => (companyFolders.has(companyId) ? companySkillTree(companyId, name) : Promise.resolve(null)),
     hasCompanyFolder: companyFolders.has,
+    // A company without the shared folder pins a Skill of the shelf (jobs.md "A Skill from the shelf").
+    shelfSkill: (who, itemId, version) => skillShelf.jobSkill(who, itemId, version),
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
     // A pause / the company's stop holds the occurrences (jobs.md "Held"); bound late: built below.
     occurrenceHolds: {
@@ -695,8 +706,17 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     // An unfinished minutes reading goes back to 「届いた」 at once, as the run's doing (the app's step name).
     afterFailedRun: (member, run) => { if (run.step === 'minutes-reading') minutes.putBackAfterRun(member, run.recordId, run.id) },
   })
+  // A PC job's runs (jobs.md "The PC's claim", PR 5a): the occurrence's resolver behind the same port, and its turns.
+  const jobRuns = createJobRuns({
+    ...shared, jobs, writer: serviceRecords,
+    // Bound late: the occurrences' service is built below (called only after construction).
+    notices: {
+      writeNotice: (companyId, kind, occ) => jobOccurrences.writeNotice(companyId, kind, occ),
+      tell: (companyId, userIds) => jobOccurrences.tell(companyId, userIds),
+    },
+  })
   const aiRuns = createAiRunService({
-    ...shared, tokenDigest: sha256TokenDigest, subjects: runSubjects,
+    ...shared, tokenDigest: sha256TokenDigest, subjects: runSubjectsByKind({ record: runSubjects, occurrence: jobRuns.subjects }),
     // The emergency stop: no run with nobody present starts while stopped; a renew is not refused (agent-stop.md).
     aiStops: member => agentStops.policyFor(member),
   })
@@ -924,16 +944,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     // Which company Skill a consultation used (records.md "Which Skill").
     skillUses: createSkillUseService(shared),
     // The Skill shelf of a company without the shared folder (plugins.md "The Skill shelf").
-    skillShelf: createSkillShelfService({
-      ...shared,
-      hasCompanyFolder: companyFolders.has,
-      managedFolders: permissionViews.managedFolders,
-      skillEditing: permissionViews.skillEditing,
-      sha256: sha256Bytes,
-    }),
+    skillShelf,
     // 見える人のまとまり (server.md "Groups"): owners/admins keep them; rules name them.
     groups: createGroupService({ ...repos, ...shared }),
     jobs,
+    jobRuns,
     notifications,
     decisions,
     meetingOutputs,

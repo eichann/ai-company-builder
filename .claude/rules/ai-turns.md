@@ -217,7 +217,8 @@ The execution state lives on the server; the AI still runs only here.
 - **The subject kind** (B PR 2, owner decision D2 = option A, 2026-11-10): a run stores what it
   works on — `ai_runs.subject_kind` (`AI_RUN_SUBJECT_KINDS`, `shared/core/ai-runs.ts`: `record`, and
   `occurrence`, a job's occurrence: since B PR 3b the server's own run of a placement-`e` job, opened and
-  closed in one transaction, `jobs.md` "The runner"; no app claims one before PR 5) next to the old
+  closed in one transaction, `jobs.md` "The runner"; since B PR 5a also a PC job's run, claimed through
+  `POST /job-run-claims` — never the record claim —, step `job-procedure`, `jobs.md` "The PC's claim") next to the old
   `record_id` column, which holds the subject's id for every kind. Only `adapters/sqlite/ai-runs.ts`
   knows the column name; ports and services speak `subject: { kind, id }`. The migration
   (`db/schema/ai-runs.ts` `migrateAiRunSubjects`) only **adds**: the column `NOT NULL DEFAULT
@@ -232,10 +233,17 @@ The execution state lives on the server; the AI still runs only here.
   record runs only; the record resolver (`createRecordRunSubjects`) answers another kind 404
   `RECORD_NOT_FOUND` without asking `aiTurnOf` or the plugin steps, and its `afterDone` /
   `afterFailed` (a plugin request answered, the minutes' read-back) do nothing for it; a record token
-  binds only to a record's run (`bindable`: another kind is 404 `RUN_NOT_FOUND`); the built-in
-  steps' route scope refuses every record route to a run of another kind, whatever build calls
-  (`routeRefusal`: before the released-app gate); 「続きをする」 counts only a record's run
-  (`continuationOf`). Lookups (`openRun`, `liveOtherStep`) are per kind and id.
+  binds to a record's run, and of the other kinds only to a run whose subject scopes every call
+  (`bindable` asks `subjects.bindsTokens`: a PC job's `job-procedure` run; anything else 404
+  `RUN_NOT_FOUND`); a run of another kind reaches only what its subject allows at each call
+  (`routeRefusal` asks `subjects.routeRefusal`, before the released-app gate, whatever build calls: a PC
+  job's pinned grant; a kind without one — the server's own `job-operation` run — nothing); 「続きをする」
+  counts only a record's run (`continuationOf`). Lookups (`openRun`, `liveOtherStep`) are per kind and id.
+- **The subject's part of a claim and a finish** (B PR 5a, optional port hooks, records unchanged):
+  `claimed` runs in the claim's transaction after the run is written (a job's occurrence becomes `running`),
+  `finishing` in the finish's transaction after the run's next state is written (the occurrence's end and its
+  one やること, `jobs.md`); a refusal from either rolls the whole claim / finish back. The claim core is one
+  function for both kinds (`claimSubject`): the emergency stop first, then `resolve`, then the write.
 - **Each state change of a run is kept** (`ai_run_events`: run, seq, at, event, generation,
   `state_after`, `code` — short codes only, a CHECK refuses anything but `[A-Z0-9_]`, no text
   column): `claimed` (a new run or a re-claim; a re-claim that finds an unknown result:

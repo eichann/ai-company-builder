@@ -11,8 +11,11 @@
  *   POST /jobs/:jobId/pause | resume  owner/admin; the responsible person for their own
  *   PUT  /jobs-stop { stopped }       owner/admin: 「定期の仕事をすべて止める」
  *   GET  /jobs/:jobId/occurrences     the same people as GET /jobs/:jobId: its occurrences (回), newest first (PR 3b)
+ *   GET  /me/job-turns                the caller's PC-job occurrences to claim now (PR 5a)
+ *   POST /job-run-claims { occurrenceId, deviceId, conversationId }   claim one (PR 5a; 503 AI_STOPPED while stopped)
  */
-import type { JobDefinition, JobOccurrenceState, JobPauseReason, JobPlacement, JobState, JobTrigger } from '../core/jobs'
+import type { JobCheck, JobDefinition, JobGrant, JobOccurrenceState, JobPauseReason, JobPlacement, JobProcedure, JobState, JobTrigger } from '../core/jobs'
+import type { AiRunView } from './ai-runs'
 
 export type { JobState } from '../core/jobs'
 
@@ -108,4 +111,42 @@ export interface JobOccurrenceView {
   /** Whether a run did its work (state `done`). */
   ran: boolean
   updatedAt: string
+}
+
+/**
+ * One occurrence of a PC job (placement `a`) the caller may claim now (`GET /me/job-turns`, B PR 5a): only the
+ * approved version's responsible person gets it, and only while the job runs as pinned (active, accepted, not
+ * stopped, their rights covering every place it names). What their app needs to run it: the check (and since
+ * when a file counts as new — the previous occurrence that ran, else the approval), the pinned procedure and
+ * the grant. Its places are theirs to read (else it is not listed).
+ */
+export interface JobTurnView {
+  occurrenceId: string
+  jobId: string
+  jobVersion: number
+  /** The approved version's fingerprint (`sha256:<hex>`). */
+  fingerprint: string
+  /** The job's name by the usual rule (「定期の仕事」 when the newest version names a place they cannot read). */
+  name: string
+  dueSlot: string
+  dueAt: string
+  expiresAt: string
+  /** `due`, or `running` when its run may be claimed again (the lease ran out, retried later). */
+  state: 'due' | 'running'
+  check: JobCheck
+  /** ISO instant: a file changed after it is new for `new_files`. */
+  checkSince: string
+  procedure: JobProcedure
+  grant: JobGrant
+}
+
+/**
+ * `POST /job-run-claims { occurrenceId, deviceId, conversationId }` (B PR 5a): the run (`AiRunView`, step
+ * `job-procedure`, subject kind `occurrence`) and the turn it runs. Then, as for any run: renew, finish
+ * (`{ generation, outcome, failure?, jobResult? }` — `jobResult` `'nothing'` or `{ title, summary? }` on `done`).
+ */
+export interface JobRunClaim {
+  run: AiRunView
+  created: boolean
+  turn: JobTurnView
 }
