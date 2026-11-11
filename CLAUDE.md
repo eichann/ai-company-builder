@@ -123,7 +123,8 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
   import cycle** in the app, the server (`layering.test.ts`) or the admin
   (`admin/tests/folder-cycles.test.ts`): the cycles of 2026-11-09 are listed in
   `KNOWN_FOLDER_CYCLES` with their reason and how to untangle them, and the list only shrinks
-  (a listed cycle that disappears fails until removed). New code goes where its layer is; widen
+  (a listed cycle that disappears fails until removed); between files there is none in the app
+  or the server, and none may appear. New code goes where its layer is; widen
   an exception only with a reason the owner would accept.
 - **Agents and models come from the registry** (`client/shared/agents/registry.ts`, factories
   in `client/electron/agents/registry.ts`): callers ask `capabilities` instead of branching on an
@@ -138,7 +139,8 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
   were given. → `testing.md` ("What a test is for")
 - **Server layers point one way**: routes (HTTP) → services (rules) → ports ← adapters; only
   `src/composition.ts` imports adapters (`tests/unit/layering.test.ts`; `db/index.ts` only the
-  three its startup migrations run, listed); no new cycle between `src/` folders. → `server.md`
+  three its startup migrations run, listed); no new cycle between `src/` folders, none between
+  files. → `server.md`
 - **Server request handlers stay async.** No `execFileSync` / `spawnSync` in `server/src`
   (`tests/security/no-exec-sync.test.ts`): one synchronous git call froze every company's
   requests for 42 s. → `server.md`

@@ -211,19 +211,25 @@ const KNOWN_FOLDER_CYCLES: Record<string, string> = {
     + 'connection. To untangle later: run those per-company migrations from the composition root right after initDatabase().',
 }
 
+/** Value imports between src/ files, as [importing file, imported file] (both src-relative, with extension). */
+function fileEdges(): Array<[from: string, to: string]> {
+  const files = tsFiles(SRC)
+  const inTree = new Set(files.map(f => relative(SRC, f)))
+  const resolveFile = (t: string) => [`${t}.ts`, `${t}/index.ts`, t].find(c => inTree.has(c))
+  const edges: Array<[string, string]> = []
+  for (const file of files) {
+    for (const spec of valueImportsOf(readFileSync(file, 'utf8'))) {
+      if (!spec.startsWith('.')) continue
+      const to = resolveFile(target(file, spec))
+      if (to) edges.push([relative(SRC, file), to])
+    }
+  }
+  return edges
+}
+
 describe('folder-level import cycles', () => {
   it('no new cycle between src/ folders (listed ones only shrink)', () => {
-    const files = tsFiles(SRC)
-    const inTree = new Set(files.map(f => relative(SRC, f)))
-    const resolveFile = (t: string) => [`${t}.ts`, `${t}/index.ts`, t].find(c => inTree.has(c))
-    const edges: Array<[string, string]> = []
-    for (const file of files) {
-      for (const spec of valueImportsOf(readFileSync(file, 'utf8'))) {
-        if (!spec.startsWith('.')) continue
-        const to = resolveFile(target(file, spec))
-        if (to) edges.push([folderOf(relative(SRC, file)), folderOf(to)])
-      }
-    }
+    const edges = fileEdges().map(([a, b]) => [folderOf(a), folderOf(b)] as [string, string])
     expect(edges.length, 'the check sees the imports (self-test)').toBeGreaterThan(500)
     const cycles = cyclesIn(edges)
     expect(cycles.filter(c => !(c in KNOWN_FOLDER_CYCLES)),
@@ -231,6 +237,19 @@ describe('folder-level import cycles', () => {
       .toEqual([])
     expect(Object.keys(KNOWN_FOLDER_CYCLES).filter(c => !cycles.includes(c)),
       'a listed cycle is gone or changed: remove it from KNOWN_FOLDER_CYCLES')
+      .toEqual([])
+  })
+
+  // The folder check cannot see a cycle inside one folder (services/ is one unit). There is none
+  // today: the last one, record-engine.ts → record-engine/create.ts → plugin-operation-checks.ts
+  // → record-engine.ts, was untangled by moving the step gate's refusal to services/not-in-step.ts
+  // (2026-11-11). A cycle means a module can be read half-initialised at startup, depending on
+  // which file is imported first; point the dependency one way instead of listing one here.
+  it('no import cycle between src/ files (value imports)', () => {
+    const edges = fileEdges()
+    expect(edges.length, 'the check sees the imports (self-test)').toBeGreaterThan(500)
+    expect(cyclesIn(edges),
+      'these files import each other, directly or through others: inject the function, or move the shared piece to a module both may import')
       .toEqual([])
   })
 

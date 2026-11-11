@@ -624,7 +624,8 @@ const KNOWN_FOLDER_CYCLES: Record<string, string> = {
     + 'what src/shared reads from appStore is handed in.',
 }
 
-test('no new folder-level import cycles in the app (listed ones only shrink)', () => {
+/** Value imports between app files (electron/, src/, shared/), as [importing file, imported file], client-relative. */
+function appFileEdges(): Array<[from: string, to: string]> {
   const files = ['electron', 'src', 'shared'].flatMap(r => sourceFiles(join(CLIENT, r)))
   const inTree = new Set(files.map(rel))
   const edges: Array<[string, string]> = []
@@ -632,15 +633,30 @@ test('no new folder-level import cycles in the app (listed ones only shrink)', (
     for (const s of importStatementsIn(readFileSync(f, 'utf8'))) {
       if (s.typeOnly) continue
       const t = withExtension(target(f, s.spec))
-      if (inTree.has(t)) edges.push([folderOf(rel(f)), folderOf(t)])
+      if (inTree.has(t)) edges.push([rel(f), t])
     }
   }
+  return edges
+}
+
+test('no new folder-level import cycles in the app (listed ones only shrink)', () => {
+  const edges = appFileEdges().map(([a, b]) => [folderOf(a), folderOf(b)] as [string, string])
   assert.ok(edges.length > 1000, 'the check sees the imports (self-test)')
   const cycles = cyclesIn(edges)
   assert.deepEqual(cycles.filter(c => !(c in KNOWN_FOLDER_CYCLES)), [],
     'a folder now imports, directly or through others, a folder that imports it: point the dependency one way (inject it, or move the shared part to a folder both may use)')
   assert.deepEqual(Object.keys(KNOWN_FOLDER_CYCLES).filter(c => !cycles.includes(c)), [],
     'a listed cycle is gone or changed: remove it from KNOWN_FOLDER_CYCLES (or list the smaller one that is left)')
+})
+
+// The folder check cannot see a cycle inside one folder or one listed folder cycle (the agents'
+// 12 folders are one entry). Between files there is none today (2026-11-11): keep it so. A cycle
+// lets a module be read half-initialised, depending on which file is loaded first.
+test('no import cycle between app files (value imports)', () => {
+  const edges = appFileEdges()
+  assert.ok(edges.length > 1000, 'the check sees the imports (self-test)')
+  assert.deepEqual(cyclesIn(edges), [],
+    'these files import each other, directly or through others: inject the function, or move the shared piece to a module both may import')
 })
 
 test('the folder cycle check finds cycles through several folders (self-test)', () => {

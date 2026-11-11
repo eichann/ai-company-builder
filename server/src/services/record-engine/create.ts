@@ -27,7 +27,7 @@ import { placeOfRow } from './service-writer'
 import { coreStepCreateTypes } from '../../../shared/core/ai-runs'
 import { defaultBundleFolder } from '../../../shared/core/bundle-place'
 import { BUNDLE_PLACED_TYPES, bundleLinkName, linkedBundle, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
-import { notInStep } from '../plugin-operation-checks'
+import { notInStep } from '../not-in-step'
 
 export function creating(ctx: EngineContext) {
   const { deps, companyData, transactions, clock, open, canRead, placeFolder, changed, tell, summaryOf } = ctx

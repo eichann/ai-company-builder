@@ -8,7 +8,7 @@
 import type { Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { services } from '../composition'
-import { NOT_IN_STEP } from '../services/plugin-operation-checks'
+import { NOT_IN_STEP } from '../services/not-in-step'
 import type { RecordTokenHolder } from '../services/record-ai-tokens'
 import { noteRequestUser } from '../lib/request-log'
 import { refusal } from './respond'

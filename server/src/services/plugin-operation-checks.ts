@@ -22,6 +22,7 @@ import { conflict, engineWho, notActive, notFound, type OperationActor, type Plu
 import type { ActivePlugin } from './plugins'
 import { recordReader } from './record-access'
 import { callVia, mayAct, NOT_VIA } from './record-engine'
+import { notInStep } from './not-in-step'
 import { RECORDS_DISABLED } from './records'
 
 /**
@@ -88,10 +89,6 @@ export function parsePluginRunStep(runStep: string): { pluginId: string; step: s
   const step = runStep.slice(at + PLUGIN_RUN_STEP_SEPARATOR.length)
   return PLUGIN_ID_RE.test(pluginId) && ONTOLOGY_NAME_RE.test(step) ? { pluginId, step } : null
 }
-
-/** The gate's one answer, whatever the reason (another plugin, another company's, stopped, undeclared…): it names nothing. */
-export const NOT_IN_STEP = { error: 'この手順では使えない操作です', code: 'NOT_IN_STEP' } as const
-export const notInStep = () => refuse('forbidden', NOT_IN_STEP.error, { code: NOT_IN_STEP.code })
 
 /** An operation called from where its `via` does not list (a plugin's screen, a run, the core's screens). */
 const notVia = () => refuse('forbidden', NOT_VIA.error, { code: NOT_VIA.code })
