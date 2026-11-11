@@ -33,7 +33,8 @@ const meeting = rec('meeting-0000aa', 'meeting', 'A社 研修導入のお打ち�
   source_ref: JSON.stringify({ conference: 'c1', event: 'e1', docs: [{ kind: 'notes', id: 'notesDoc12345' }, { kind: 'transcript', id: 'transcriptDoc123' }] }),
 })
 // As the inbox stores a Slack message: channel `chat` with a `slack:` pointer, in 確認待ち (`unsure`).
-// It is the member's (u-sato): ［済んだ］ / ［取り込まない］ move it as the server would (owner FB #20).
+// It is the member's (u-sato): ［済んだ］ / ［取り込まない］ move it as the server would (owner FB #20); an end the
+// screen is told of (its tab and automatic consultations close, owner FB #29) is listed as `ended <id>`.
 let slack = rec('interaction-0000bb', 'interaction', '資料送付のお願い', 'unsure', {
   channel: 'chat', occurred_at: '2026-11-05T17:30:00Z', counterpart_text: '山田 様（C社）', needs_reply: true, source_ref: 'slack:C0123ABCD:1730800000.123456', assignee: 'u-sato',
 }, '先日の打ち合わせ資料を送ってほしいとのこと。')
@@ -146,6 +147,7 @@ function Preview() {
         renderApproval={id => <div data-testid="approval">承認のお願いのカード：{id}</div>}
         consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: 'A社 打ち合わせのあと', updatedAt: '2026-11-05T07:00:00.000Z' }]}
         onConsult={(r, fresh) => { opened.push(`consult ${r.id} ${fresh}`); document.getElementById('opened')!.textContent = opened.join('\n') }}
+        onEnded={id => say(`ended ${id}`)}
         renderBundleField={f => (realField
           ? renderRecordBundleField('co-preview', f, { type: 'project', name: 'プロジェクト', source: 'core' }, '営業部')
           : <div data-testid="bundle-field">{f.bundle?.title ?? 'なし'}・{f.removable ? '外せる' : '外せない'}</div>)} />

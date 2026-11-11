@@ -255,3 +255,24 @@ test('「使う機能」 会議と議事録 off too: 「確かめること」 ha
   await expect(panel.getByRole('button', { name: 'AI に読ませる' })).toHaveCount(0)
   expectNoPageErrors(state)
 })
+
+// Owner FB #29: 「カードの左上のボタンで完了にしたときも、真ん中のタブを閉じる」 — the card's own ［完了にする］
+// closes its tab like the list's ☑ (#15); another task's tab stays.
+test('completing a task with its card’s button closes its tab in the middle; another task’s tab stays', async ({ page }) => {
+  const TASK = 'acb-record:task-aaaaaa1'
+  const OTHER = 'acb-record:task-row001'
+  const state = await openPreview(page, 'skill-layout', { tasks: '1', check: '1', seed: JSON.stringify({
+    'editor:demo': JSON.stringify({ openFiles: [OTHER, TASK], activeFilePath: TASK, leftTab: 'tasks', records: {
+      'task-aaaaaa1': { title: 'A社 提案書を仕上げる', type: 'task' }, 'task-row001': { title: 'やること 2', type: 'task' },
+    } }),
+  }) })
+  const tabs = middleTabs(page)
+  await expect(tabs.getByRole('tab', { name: /A社 提案書を仕上げる/ })).toHaveAttribute('aria-selected', 'true')
+  const card = page.getByTestId('task-card')
+  await card.getByRole('button', { name: '完了にする', exact: true }).click()
+  await expect(tabs.getByRole('tab', { name: /A社 提案書を仕上げる/ })).toHaveCount(0)
+  await expect(tabs.getByRole('tab', { name: /やること 2/ })).toHaveAttribute('aria-selected', 'true')
+  const acts = await page.evaluate(() => (window as unknown as { __acbLayout: { calls: Array<{ name: string; args: unknown[] }> } }).__acbLayout.calls.filter(c => c.name === 'actOnTask').map(c => c.args))
+  expect(acts).toEqual([['demo', 'task-aaaaaa1', { action: 'complete', expectedVersion: 2 }]])
+  expectNoPageErrors(state)
+})

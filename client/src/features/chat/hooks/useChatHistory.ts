@@ -75,6 +75,8 @@ export function useChatHistory(o: ChatHistoryOptions) {
   const minutesIdRef = useRef<string | null>(null)
   // The record 「相談する」 started this consultation about (its main topic, stored with it).
   const topicRecordIdRef = useRef<string | null>(null)
+  // The tab was closed: an await that resumes after it must not go on (a send preparing images).
+  const unmountedRef = useRef(false)
   // The same, for the topic chip: the AI may give the consultation its task, the member may take it off.
   const [topicRecordId, setTopicState] = useState<string | null>(null)
   const setTopic = useCallback((id: string | null) => { topicRecordIdRef.current = id; setTopicState(id) }, [])
@@ -298,8 +300,10 @@ export function useChatHistory(o: ChatHistoryOptions) {
         event.returnValue = ''
       }
     }
+    unmountedRef.current = false
     window.addEventListener('beforeunload', flush)
     return () => {
+      unmountedRef.current = true
       window.removeEventListener('beforeunload', flush)
       flush()
       stop()
@@ -308,5 +312,5 @@ export function useChatHistory(o: ChatHistoryOptions) {
     }
   }, [chatServer, stop, saveRef, appSessionIdRef])
 
-  return { isRestoringSession, historyReadyRef, deletedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, topicRecordId, setTopic, startNewChat }
+  return { isRestoringSession, historyReadyRef, deletedRef, unmountedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, topicRecordId, setTopic, startNewChat }
 }

@@ -36,12 +36,15 @@ function UserMessageBubble({
   referenceFiles,
   canEdit,
   onEditSubmit,
+  onEditingChange,
 }: {
   message: UIMessage
   images?: string[]
   referenceFiles?: string[]
   canEdit: boolean
   onEditSubmit?: (messageId: string, newText: string) => void
+  /** An edit opened or closed: the conversation counts it as unsent words (nothing closes the tab under it). */
+  onEditingChange?: (messageId: string, editing: boolean) => void
 }) {
   const { t } = useTranslation()
   const [isEditing, setIsEditing] = useState(false)
@@ -61,6 +64,7 @@ function UserMessageBubble({
   }
 
   useEffect(() => {
+    onEditingChange?.(message.id, isEditing)
     if (isEditing && textareaRef.current) {
       textareaRef.current.focus()
       textareaRef.current.setSelectionRange(editText.length, editText.length)
@@ -207,11 +211,12 @@ interface MessageItemProps {
   onRegenerate?: () => void
   canEdit?: boolean
   onEditSubmit?: (messageId: string, newText: string) => void
+  onEditingChange?: (messageId: string, editing: boolean) => void
   /** Skip layout and paint while scrolled out of view (older messages only). */
   deferOffscreen?: boolean
 }
 
-const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp, images, referenceFiles, isLastAssistant, canRegenerate, onRegenerate, canEdit, onEditSubmit, deferOffscreen }: MessageItemProps) {
+const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp, images, referenceFiles, isLastAssistant, canRegenerate, onRegenerate, canEdit, onEditSubmit, onEditingChange, deferOffscreen }: MessageItemProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
   const markdownRender = useAppStore((s) => s.chatMarkdownRender)
@@ -250,6 +255,7 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
             referenceFiles={referenceFiles}
             canEdit={!!canEdit}
             onEditSubmit={onEditSubmit}
+            onEditingChange={onEditingChange}
           />
         )}
 
@@ -288,6 +294,7 @@ interface MessageListProps {
   messageReferenceFiles: Map<string, string[]>
   onRegenerate?: () => void
   onEditSubmit?: (messageId: string, newText: string) => void
+  onEditingChange?: (messageId: string, editing: boolean) => void
 }
 
 /** The latest messages are always laid out (see MessageItem's content-visibility). */
@@ -303,6 +310,7 @@ export const MessageList = memo(function MessageList({
   messageReferenceFiles,
   onRegenerate,
   onEditSubmit,
+  onEditingChange,
 }: MessageListProps) {
   const { t } = useTranslation()
 
@@ -373,6 +381,7 @@ export const MessageList = memo(function MessageList({
           onRegenerate={onRegenerate}
           canEdit={canEdit}
           onEditSubmit={onEditSubmit}
+          onEditingChange={onEditingChange}
           deferOffscreen={index < messages.length - ALWAYS_RENDERED_MESSAGES}
         />
         )

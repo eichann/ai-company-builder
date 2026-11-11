@@ -4,14 +4,18 @@ import type { AgentInteraction } from '../../../../shared/agent-interaction'
 import { deriveConsultationStatus, runningSubagentId } from '../consultationStatus'
 import { useAgentProgress } from '../agentStatusStore'
 import { clearConsultationStatus, publishConsultationStatus } from '../consultationStatusStore'
+import { registerConsultationHold } from '../automaticConsultationsStore'
+import type { ConsultationHold } from '../aiTurns'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 
 /**
  * Publishes this tab's status for the 「AIへの相談」 list. A turn that ends
  * while the member looks at another conversation is 「結果が届いています」
  * (unseen); it stays so while the member reads it and becomes done once they
- * move on to another conversation.
+ * move on to another conversation. It also lets an automatic run's end, or its
+ * record's end, read what the tab holds before closing it (`readHold`).
  */
-export function useConsultationStatus({ tabId, isShown, status, approval, interaction, messages, rootPath }: {
+export function useConsultationStatus({ tabId, isShown, status, approval, interaction, messages, rootPath, readHold }: {
   tabId: string
   isShown: boolean
   status: string
@@ -19,7 +23,10 @@ export function useConsultationStatus({ tabId, isShown, status, approval, intera
   interaction?: AgentInteraction
   messages: UIMessage[]
   rootPath?: string
+  /** What the tab holds now (draft, attachments, a running turn, the member's own messages). */
+  readHold?: () => ConsultationHold
 }) {
+  const hold = useLatestRef(readHold)
   const running = status === 'submitted' || status === 'streaming'
   const [unseen, setUnseen] = useState(false)
   // Compared with the previous render while rendering (no effect): a turn that
@@ -41,5 +48,8 @@ export function useConsultationStatus({ tabId, isShown, status, approval, intera
     publishConsultationStatus(tabId, { state, kind, line })
   }, [tabId, state, kind, line])
   // The list forgets the tab when it closes.
-  useEffect(() => () => clearConsultationStatus(tabId), [tabId])
+  useEffect(() => {
+    const unregister = registerConsultationHold(tabId, () => hold.current?.() ?? { ready: false, conversationId: null, draft: '', unsent: 0, busy: true, userMessageIds: [], shown: false })
+    return () => { clearConsultationStatus(tabId); unregister() }
+  }, [tabId, hold])
 }

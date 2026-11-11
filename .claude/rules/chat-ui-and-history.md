@@ -109,7 +109,9 @@ one place an added agent brings its own controls; everything else asks the regis
   止まっています › AIが作業中 › 開いている相談 (idle open tabs: new ones, unread replies first with a
   「新着」 mark, and ones read and possibly continued) › 終わったもの (closed conversations only — closing ends one; a
   conversation closed with nothing sent and no draft is deleted, and such leftovers are not listed);
-  a pinned conversation leaves ピン留め only for あなたの番. Tests:
+  a pinned conversation leaves ピン留め only for あなたの番. An automatic 「AI の番」 consultation closes
+  by itself when its run ends well, or when the member ends its record, unless it holds anything of
+  the member's (`ai-turns.md` "Closing the consultation"). Tests:
   `client/src/features/chat/consultation-status.test.ts`, `tests/ui/chat-panel.spec.ts`.
 - Each group heading except あなたの番 folds its rows (owner, 2026-10-30): a button with
   `aria-expanded` and a chevron, the count still shown. あなたの番 never folds, so what the AI waits

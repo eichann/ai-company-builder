@@ -6,6 +6,7 @@ import { agentCan } from '../../../shared/agents/registry'
 import type { AiTurnItemView, AutoTurnSettings } from '../../../shared/ai-turns'
 import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
 import type { RateLimitSnapshot } from '../../../shared/rate-limits'
+import type { ConsultationStatus } from './consultationStatus'
 
 /** What the runner remembers per member and company (localStorage; lost = a fresh day). */
 export interface AiTurnLog {
@@ -326,6 +327,97 @@ export function usagePauseLifted(log: AiTurnLog, snapshot: RateLimitSnapshot | u
 export function retitledConsultation(input: { given: string; current: string | null | undefined; renamed: string }): string | null {
   const { given, current, renamed } = input
   return current === given && renamed.trim() !== '' && renamed !== given ? renamed : null
+}
+
+// --- Closing the automatic consultation (owner FB #28, 2026-11-11) ------------
+
+/**
+ * What a consultation's tab holds now, read live from the tab (the stored summary lags: the draft
+ * is saved every few seconds, attachments and open edits never). Absent for a tab not mounted here.
+ */
+export interface ConsultationHold {
+  /** Its history was restored (until then nothing below is known). */
+  ready: boolean
+  /** The conversation the tab holds now: a new one started in the same tab is another. */
+  conversationId: string | null
+  /** Unsent text in its input. */
+  draft: string
+  /** Kept and not sent: attachments, records dropped on the input, an open edit of a message, an open topic question. */
+  unsent: number
+  /** A turn runs, a send is being prepared, messages wait to go out, or the AI waits for an approval or an answer. */
+  busy: boolean
+  /** Every user message of the conversation (the app's first one of an automatic run included). */
+  userMessageIds: readonly string[]
+  /** It is the tab shown in front. */
+  shown: boolean
+}
+
+/** An automatic run's consultation: its conversation and the app's first message (unknown until sent). */
+export interface AutomaticConsultation {
+  sessionId: string
+  messageId: string | null
+}
+
+/**
+ * Nothing of the member's would go with it: the tab still holds that conversation, history read,
+ * nothing running or being sent, no draft or anything kept unsent, and no user message but the
+ * app's own first one (an edit of it is a new message, so the member's).
+ */
+function holdsNothingOfTheMember(hold: ConsultationHold | undefined, automatic: AutomaticConsultation): hold is ConsultationHold {
+  return !!hold && hold.ready && hold.conversationId === automatic.sessionId && !hold.busy && !hold.draft.trim() && hold.unsent === 0
+    && hold.userMessageIds.every(id => id === automatic.messageId)
+}
+
+/**
+ * When an automatic run ends, its consultation closes by itself (a normal close: 「終わったもの」, the
+ * history kept) when the run ended well (`done`) and the member has nothing to do there. It stays
+ * open when the AI asks for a review (「確認をお願いします」), when it failed or stopped (any other
+ * outcome, or the tab's status 'failed'), when the member wrote in it or keeps anything unsent
+ * there, while anything still runs or is being sent, when the tab now holds another conversation,
+ * and while it is the tab shown in front (the member is reading it).
+ */
+export function closesWhenRunEnds(outcome: AiTurnOutcome, status: ConsultationStatus | undefined, hold: ConsultationHold | undefined, automatic: AutomaticConsultation): boolean {
+  if (outcome !== 'done' || !status || (status.state !== 'unseen' && status.state !== 'idle')) return false
+  return holdsNothingOfTheMember(hold, automatic) && !hold.shown
+}
+
+/**
+ * When the member ends the record (完了 / 済んだ / 終わりにする, on the card or with the list's ☑), its
+ * automatic consultations close too — also one that stayed open for a review or after a failure,
+ * and also the one shown in front (the member ended the thing it was about). Never one the member
+ * wrote in or keeps anything unsent in, whose AI still runs or waits, or whose tab now holds
+ * another conversation.
+ */
+export function closesWhenRecordEnds(hold: ConsultationHold | undefined, automatic: AutomaticConsultation): boolean {
+  return holdsNothingOfTheMember(hold, automatic)
+}
+
+/** The automatic consultations remembered on this PC: [conversation id, record id, the app's first message id], oldest first. */
+export type AutomaticConsultations = ReadonlyArray<readonly [sessionId: string, recordId: string, messageId: string]>
+/** How many are remembered (older ones are forgotten: their tabs were closed long ago, or stay as the member left them). */
+export const AUTOMATIC_CONSULTATIONS_KEPT = 200
+
+/** The list after a run's consultation sent its first message. */
+export function rememberedAutomatic(list: AutomaticConsultations, sessionId: string, recordId: string, messageId: string): AutomaticConsultations {
+  return [...list.filter(([s]) => s !== sessionId), [sessionId, recordId, messageId] as const].slice(-AUTOMATIC_CONSULTATIONS_KEPT)
+}
+
+/** The list without these consultations (closed). */
+export function forgottenAutomatic(list: AutomaticConsultations, sessionIds: readonly string[]): AutomaticConsultations {
+  const gone = new Set(sessionIds)
+  return list.filter(([s]) => !gone.has(s))
+}
+
+/** The automatic consultations of one record. */
+export function automaticConsultationsOf(list: AutomaticConsultations, recordId: string): AutomaticConsultation[] {
+  return list.filter(([, r]) => r === recordId).map(([sessionId, , messageId]) => ({ sessionId, messageId }))
+}
+
+/** Reads the stored list; anything malformed is dropped. */
+export function readAutomaticConsultations(stored: unknown): AutomaticConsultations {
+  if (!Array.isArray(stored)) return []
+  return stored.filter((e): e is [string, string, string] => Array.isArray(e) && e.length === 3 && e.every(v => typeof v === 'string'))
+    .slice(-AUTOMATIC_CONSULTATIONS_KEPT)
 }
 
 /** Until when to pause: the latest reset of a full window, else the earliest future reset, else an hour. */

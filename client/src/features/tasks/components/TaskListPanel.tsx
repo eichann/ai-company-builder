@@ -39,8 +39,8 @@ interface Props {
   onConsult?: (task: { id: string; title: string }) => void
   /**
    * A task the member completed with its ☑ here (owner FB #15), or a 来た連絡 they checked as 済んだ
-   * (owner FB #20): AppShell closes its tab in the middle. Not for 見てもらう, やり直す or 元に戻す, nor a
-   * press on the card itself (the card stays to show 「完了」 / 「済んだ」).
+   * (owner FB #20): AppShell closes its tab in the middle and its automatic consultations (as the card's
+   * own end button does, owner FB #29). Not for 見てもらう, やり直す or 元に戻す.
    */
   onCompleted?: (recordId: string) => void
   /** 「今日の予定」 belongs to 会議と議事録 (owner decision 2026-11-07): off, no meeting is read or mixed in. */

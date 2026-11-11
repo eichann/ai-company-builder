@@ -6,7 +6,8 @@ import { DEFAULT_AUTO_TURN_SETTINGS, readAutoTurnSettings } from '../../../share
 import {
   AI_TURN_PASS_CAP, AI_TURN_PASS_INTERVAL_MS, MAX_ATTEMPTS_PER_RECORD, freshLog, logForToday, nextAiTurn, orderAiTurns,
   FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, askedAgain, handUrgent, handedOver, movedOn, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
-  canResumeAiTurns, retitledConsultation, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT, mayStartAiTurns,
+  canResumeAiTurns, retitledConsultation, closesWhenRunEnds, closesWhenRecordEnds, rememberedAutomatic, forgottenAutomatic,
+  automaticConsultationsOf, readAutomaticConsultations, AUTOMATIC_CONSULTATIONS_KEPT, type ConsultationHold, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT, mayStartAiTurns,
 } from './aiTurns'
 import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
 
@@ -266,4 +267,84 @@ test('a hand-off an older build kept (no version, its old words) counts as asked
   assert.deepEqual(askedAgain(log, [B]), [B.id])
   // A kept version survives the daily read of the log.
   assert.equal(logForToday(recordOutcome(freshLog(NOW), B.id, 'failed', ON, null, 3), NOW).handed[B.id].version, 3)
+})
+
+// Owner FB #28 (2026-11-11): an automatic run's consultation closes itself when the run ends well;
+// it stays where the member has something to do there, and closing never loses anything of theirs.
+const AUTO = { sessionId: 'conv-auto', messageId: 'm-app' }
+const QUIET: ConsultationHold = { ready: true, conversationId: 'conv-auto', draft: '', unsent: 0, busy: false, userMessageIds: ['m-app'], shown: false }
+const UNSEEN = { state: 'unseen' as const, line: '返事が届いています' }
+
+test('a run that ended well closes its consultation (unread or already read)', () => {
+  assert.equal(closesWhenRunEnds('done', UNSEEN, QUIET, AUTO), true)
+  assert.equal(closesWhenRunEnds('done', { state: 'idle', line: '' }, QUIET, AUTO), true)
+})
+
+test('a run that failed, stopped or did not finish keeps its consultation open', () => {
+  for (const outcome of ['failed', 'unfinished', 'usage-limit'] as const) assert.equal(closesWhenRunEnds(outcome, UNSEEN, QUIET, AUTO), false, outcome)
+  assert.equal(closesWhenRunEnds('done', { state: 'failed', line: 'エラーで止まりました' }, QUIET, AUTO), false)
+})
+
+test('a run whose AI waits for the member (a review, an approval, a question) or still works keeps it open', () => {
+  assert.equal(closesWhenRunEnds('done', { state: 'needs-you', kind: 'review', line: '確認をお願いします：x' }, QUIET, AUTO), false)
+  assert.equal(closesWhenRunEnds('done', { state: 'needs-you', kind: 'approve', line: '許可を待っています' }, QUIET, AUTO), false)
+  assert.equal(closesWhenRunEnds('done', { state: 'working', line: '考えています' }, QUIET, AUTO), false)
+  assert.equal(closesWhenRunEnds('done', undefined, QUIET, AUTO), false)
+})
+
+test('closing at a run\'s end never takes anything of the member\'s with it', () => {
+  // A message of their own, or the app's first one edited (an edit is a new message).
+  assert.equal(closesWhenRunEnds('done', UNSEEN, { ...QUIET, userMessageIds: ['m-app', 'm-member'] }, AUTO), false)
+  assert.equal(closesWhenRunEnds('done', UNSEEN, { ...QUIET, userMessageIds: ['m-edited'] }, AUTO), false)
+  assert.equal(closesWhenRunEnds('done', UNSEEN, { ...QUIET, draft: '返事は' }, AUTO), false)
+  // An attachment, a dropped record, an open edit or topic question: kept unsent.
+  assert.equal(closesWhenRunEnds('done', UNSEEN, { ...QUIET, unsent: 1 }, AUTO), false)
+  // Running, or a send being prepared (the composer already emptied).
+  assert.equal(closesWhenRunEnds('done', UNSEEN, { ...QUIET, busy: true }, AUTO), false)
+  // History not restored yet, a tab not mounted here, or the app's message not known: it stays.
+  assert.equal(closesWhenRunEnds('done', UNSEEN, { ...QUIET, ready: false }, AUTO), false)
+  assert.equal(closesWhenRunEnds('done', UNSEEN, undefined, AUTO), false)
+  assert.equal(closesWhenRunEnds('done', UNSEEN, QUIET, { ...AUTO, messageId: null }), false)
+  // A draft of only spaces is nothing to keep.
+  assert.equal(closesWhenRunEnds('done', UNSEEN, { ...QUIET, draft: '  ' }, AUTO), true)
+})
+
+test('a tab that started another conversation in place of the run\'s is not closed for it', () => {
+  assert.equal(closesWhenRunEnds('done', UNSEEN, { ...QUIET, conversationId: 'conv-new', userMessageIds: [] }, AUTO), false)
+  assert.equal(closesWhenRecordEnds({ ...QUIET, conversationId: 'conv-new', userMessageIds: [] }, AUTO), false)
+})
+
+test('the consultation the member is looking at stays open when its run ends', () => {
+  assert.equal(closesWhenRunEnds('done', { state: 'idle', line: '' }, { ...QUIET, shown: true }, AUTO), false)
+})
+
+test('ending the record closes its automatic consultation, also one kept for a review or a failure, also the one shown', () => {
+  assert.equal(closesWhenRecordEnds(QUIET, AUTO), true)
+  assert.equal(closesWhenRecordEnds({ ...QUIET, shown: true }, AUTO), true)
+})
+
+test('ending the record keeps a consultation the member wrote in or keeps anything unsent in, or whose AI runs', () => {
+  assert.equal(closesWhenRecordEnds({ ...QUIET, userMessageIds: ['m-app', 'm-member'] }, AUTO), false)
+  assert.equal(closesWhenRecordEnds({ ...QUIET, draft: 'メモ' }, AUTO), false)
+  assert.equal(closesWhenRecordEnds({ ...QUIET, unsent: 2 }, AUTO), false)
+  assert.equal(closesWhenRecordEnds({ ...QUIET, busy: true }, AUTO), false)
+  assert.equal(closesWhenRecordEnds({ ...QUIET, ready: false }, AUTO), false)
+  assert.equal(closesWhenRecordEnds(undefined, AUTO), false)
+})
+
+test('the automatic consultations are remembered per record with the app\'s message, forgotten once closed, and bounded', () => {
+  let list = rememberedAutomatic([], 's1', 'interaction-aaaaaaaa', 'm1')
+  list = rememberedAutomatic(list, 's2', 'interaction-aaaaaaaa', 'm2')
+  list = rememberedAutomatic(list, 's3', 'task-bbbbbbbb', 'm3')
+  assert.deepEqual(automaticConsultationsOf(list, 'interaction-aaaaaaaa'), [{ sessionId: 's1', messageId: 'm1' }, { sessionId: 's2', messageId: 'm2' }])
+  assert.deepEqual(automaticConsultationsOf(forgottenAutomatic(list, ['s1']), 'interaction-aaaaaaaa'), [{ sessionId: 's2', messageId: 'm2' }])
+  // The same consultation remembered again is listed once.
+  assert.equal(rememberedAutomatic(list, 's1', 'interaction-aaaaaaaa', 'm1').length, 3)
+  let many: ReturnType<typeof rememberedAutomatic> = []
+  for (let i = 0; i < AUTOMATIC_CONSULTATIONS_KEPT + 5; i++) many = rememberedAutomatic(many, `s${i}`, 'task-cccccccc', `m${i}`)
+  assert.equal(many.length, AUTOMATIC_CONSULTATIONS_KEPT)
+  assert.equal(many[many.length - 1][0], `s${AUTOMATIC_CONSULTATIONS_KEPT + 4}`)
+  // What localStorage held is read strictly.
+  assert.deepEqual(readAutomaticConsultations([['s1', 'task-cccccccc', 'm1'], ['s2', 'task-cccccccc'], ['bad'], 3, ['s3', 4, 'm']]), [['s1', 'task-cccccccc', 'm1']])
+  assert.deepEqual(readAutomaticConsultations({ s1: 'x' }), [])
 })

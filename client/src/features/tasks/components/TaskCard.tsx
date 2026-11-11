@@ -70,6 +70,11 @@ interface Props {
   team?: boolean
   /** The member changed something (the list reads again). */
   onChanged?: () => void
+  /**
+   * The member completed it here (owner FB #29): AppShell closes its tab in the middle and its
+   * automatic consultations, as the list's ☑ does. Not for 見てもらう or 中止, nor for 取り消す.
+   */
+  onEnded?: (recordId: string) => void
   /** What the department on screen makes as its 案件・プロジェクト (`tasks:bundleKinds`): its name for ［〇〇につなぐ］ and the kind ［新しい〇〇にする］ makes; null until known. */
   bundleKind?: BundleKind | null
   /** The department's folder a new one is put in (全社: none) when `bundlePlaces` is not given. */
@@ -105,7 +110,7 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, bundlePlaces, onLoaded, createTodayFile, onDetachConsultation, notDownloadedFolderOf, sharedFolder = true }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, onEnded, bundleKind = null, bundleFolder = null, bundlePlaces, onLoaded, createTodayFile, onDetachConsultation, notDownloadedFolderOf, sharedFolder = true }: Props) {
   const { result, reload, personalHere, localHere } = useTaskCard(companyId, recordId, onLoaded, rootPath, knownVersion)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -148,6 +153,7 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     }
     // Only a one-step press is undone in one step.
     setNotice(done ? { kind: 'done', text: done, undo: steps.length === 1 ? { recordId, version: at } : null } : null)
+    if (steps[steps.length - 1]?.action === 'complete') onEnded?.(recordId)
     return null
   })
   const undo = (target: { recordId: string; version: number }) => change(async () => {

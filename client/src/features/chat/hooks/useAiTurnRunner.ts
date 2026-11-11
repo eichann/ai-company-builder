@@ -8,10 +8,11 @@ import { useInterval } from '../../../shared/hooks/useInterval'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { rateLimitsOf } from '../agentStatusStore'
 import { consultationStatusOf } from '../consultationStatusStore'
+import { consultationHoldOf, rememberAutomaticConsultation } from '../automaticConsultationsStore'
 import { claimAiTurn, getAiTurnStopConfirmed, getAutoTurnSettings, getChatSessionSummaries, patchChatSession, retryAiTurn, settleAiTurn } from '../api'
 import {
   AI_TURN_PASS_INTERVAL_MS, aiTurnItems, aiTurnNoticeText, askedAgain, canResumeAiTurns, handUrgent, handedOver, logForToday, movedOn,
-  mayStartAiTurns, nextAiTurn, recordOutcome, recordStarted, resumed, retitledConsultation, retried, usageLimitReached, usagePause, usagePauseLifted,
+  closesWhenRunEnds, mayStartAiTurns, nextAiTurn, recordOutcome, recordStarted, resumed, retitledConsultation, retried, usageLimitReached, usagePause, usagePauseLifted,
   type AiTurnLog, type AiTurnOutcome,
 } from '../aiTurns'
 import type { ChatInputRequest } from '../components/ChatConversation'
@@ -35,6 +36,8 @@ interface Running {
   needsYou: boolean
   /** The hidden consultation (known once the tab claims) and the name the runner gave it. */
   conversationId: string | null
+  /** The app's first message in it (known once sent): any other user message there is the member's. */
+  messageId: string | null
   title: string
   /** The consultation's name for the record's title now (the run may rename the record). */
   titleFor: (recordTitle: string) => string
@@ -103,6 +106,10 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
       : usageLimitReached(snapshot) ? 'usage-limit' : result.outcome === 'failed' ? 'failed' : 'unfinished'
     if (settings.current) saveLog(recordOutcome(loadLog(now), run.recordId, outcome, settings.current.value, usagePause(snapshot, now), run.version, run.state))
     running.current = null
+    // Ended well and nothing of the member's there: the consultation closes like a member's close
+    // (「終わったもの」, history kept; owner FB #28). A review, a failure or the member's words keep it open.
+    // Still remembered afterwards: should it stay as the last tab (closeTab keeps one), the record's end closes it later.
+    if (run.conversationId && closesWhenRunEnds(outcome, consultationStatusOf(run.tabId), consultationHoldOf(run.tabId), { sessionId: run.conversationId, messageId: run.messageId })) o.closeTab(run.tabId)
     // The run named its record (a message without a subject): the consultation follows, unless the member renamed it.
     if (result.title && run.conversationId) {
       const conversationId = run.conversationId
@@ -122,7 +129,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     const titleFor = (recordTitle: string) => step ? step.consultationTitle({ ...notice, title: recordTitle }) : pluginStepConsultationTitle(recordTitle)
     const title = titleFor(notice.title)
     const tabId = o.openBackgroundTab()
-    const run: Running = { recordId: notice.id, version: notice.version, state: notice.state ?? null, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false, conversationId: null, title, titleFor }
+    const run: Running = { recordId: notice.id, version: notice.version, state: notice.state ?? null, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false, conversationId: null, messageId: null, title, titleFor }
     running.current = run
     if (!pass.current || now - pass.current.startedAt >= AI_TURN_PASS_INTERVAL_MS) pass.current = { startedAt: now, started: 0 }
     pass.current.started += 1
@@ -148,6 +155,12 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
         const message = step ? step.firstMessage(notice, result.version, latest.current.features ?? DEFAULT_FEATURES) : result.message
         if (!message) { running.current = null; latest.current.closeTab(tabId); return null }
         return { message }
+      },
+      // Ending the record later closes it too, unless the member wrote there (ChatPanel's chat.closeRecordConsultations).
+      onSent: (messageId: string) => {
+        if (!run.conversationId) return
+        run.messageId = messageId
+        rememberAutomaticConsultation(o.companyId, o.userId, run.conversationId, notice.id, messageId)
       },
     })
   }, [latest, loadLog, saveLog])
