@@ -120,6 +120,36 @@ export function checkDrivePutContent(kind: DrivePutKind, bytes: Uint8Array): str
   return null
 }
 
+/** Attributes that make a renderer fetch what they name (on any element but a plain link). */
+const FETCHING_ATTRS = /\s(?:src|srcset|href|data|poster|background|action|formaction|xlink:href|lowsrc|dynsrc|longdesc|ping|manifest|codebase|archive)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi
+
+/**
+ * Whether HTML / Markdown about to become a Google document points at anything a converter or viewer would fetch from
+ * outside (an image, a stylesheet, a frame, a CSS `url()` or `@import`, a Markdown image): Drive's conversion could
+ * send what it fetches — and the URL itself — elsewhere, from a run nobody watches. Strict on purpose (the review of
+ * #678): any such reference counts except an inline `data:` one or a `#` fragment; plain links (`<a href>`, `[text](url)`)
+ * are not fetched and pass. The text is checked as written (an entity-encoded URL is not `data:` either, so it counts).
+ */
+export function driveDocFetchesOutside(kind: DrivePutKind, text: string): boolean {
+  const inline = (v: string) => /^["']?\s*(?:data:|#)/i.test(v)
+  // CSS anywhere (a <style> block, a style attribute, Markdown's raw HTML): url(...) not inline, or @import.
+  if (/@import/i.test(text)) return true
+  for (const m of text.matchAll(/url\s*\(\s*([^)]*)\)/gi)) if (!inline(m[1])) return true
+  // Tags (HTML, or raw HTML inside Markdown): a fetching attribute on anything but <a>.
+  for (const tag of text.matchAll(/<\s*([a-z][a-z0-9:-]*)\b([^>]*)>/gi)) {
+    if (tag[1].toLowerCase() === 'a') continue
+    // <meta http-equiv="refresh" content="0;url=…"> sends the viewer elsewhere.
+    if (/http-equiv\s*=\s*["']?\s*refresh/i.test(tag[2])) return true
+    for (const attr of tag[2].matchAll(FETCHING_ATTRS)) if (!inline(attr[1])) return true
+  }
+  if (kind === 'markdown') {
+    // ![alt](target) and ![alt][ref]: an image (a reference one's target is defined elsewhere in the text).
+    for (const m of text.matchAll(/!\[[^\]]*\]\s*\(\s*<?([^)\s>]*)/g)) if (!inline(m[1])) return true
+    if (/!\[[^\]]*\]\s*\[/.test(text)) return true
+  }
+  return false
+}
+
 /**
  * The revision ACB pins for a Drive file: its `headRevisionId` (a file with binary content), else
  * `version:<n>` (a Google document has no head revision; its version grows with every change). Null when

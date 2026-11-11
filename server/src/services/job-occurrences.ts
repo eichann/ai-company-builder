@@ -216,7 +216,9 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         if (!handle.jobs.insertOccurrence(row)) return
         changed++
         if (state === 'expired') notice(companyId, handle, 'job_expired', row, job, version.actingUserId, told)
-        if (state === 'needs_person') notice(companyId, handle, 'job_failed', row, job, version.actingUserId, told)
+        // Told once while it stays so: not again for each slot after one that already said the place is not usable.
+        const before = handle.jobs.occurrences(job.id, 2).find(o => o.id !== row.id)
+        if (state === 'needs_person' && before?.outcomeCode !== 'PLACE_NOT_USABLE') notice(companyId, handle, 'job_failed', row, job, version.actingUserId, told)
         // latest_only: an older occurrence still waiting is not run any more.
         for (const older of handle.jobs.occurrences(job.id, 20)) {
           if (older.id !== row.id && older.state === 'due' && older.dueSlot < slot) handle.jobs.moveOccurrence(older.id, ['due'], 'skipped', { outcomeCode: 'SUPERSEDED' }, at)

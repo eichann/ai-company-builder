@@ -198,10 +198,27 @@ The AI reads and writes **only** the member's own live picks.
   put (the same `drive:<fileId>` link, made by them) replaces the link's kept facts (revision, sha256, when) in a
   `link_file` entry noted 「Google Drive のファイルを上書きしたので、新しい版につなぎ直しました」 (`file-links.ts`
   `follows`; records.md); anything else already linked stays as it is.
+- **Review of #678** (each a guard with its test):
+  - **Nothing fetched from outside**: a document's HTML / Markdown may not point at anything a converter or viewer
+    fetches (an image, a stylesheet, a frame, CSS `url()` / `@import`, a refresh, a Markdown image — anything but an
+    inline `data:` or a `#` fragment; plain links pass): `driveDocFetchesOutside` (`shared/core/google-drive.ts`), 400
+    `DRIVE_EXTERNAL_RESOURCE` (the app says so first). Strict on purpose: refused, never rewritten.
+  - **Changed in Drive since ACB's last put** (its head revision / version is not the latest receipt's): 409
+    `DRIVE_FILE_CHANGED_SINCE` — nothing overwritten; put a new file.
+  - **The replaced revision is kept**: before the update, a binary file's head revision gets `keepForever` (`PATCH
+    /drive/v3/files/<id>/revisions/<rev>`, a `drive.file` call); refused or unanswered → 409 `DRIVE_REVISION_NOT_KEPT`,
+    nothing overwritten. A Google document's revisions cannot be kept that way (Drive keeps them itself), so **a file a
+    decision or an attachment rests on is never overwritten** (`RecordRepository.driveFileFixed`: a ledger entry naming
+    it), 409 `DRIVE_FILE_FIXED`, before Google is asked — for every kind.
+  - **The request key of an update names the revision it replaces** (`drivePutRequestKey(…, { updateFileId,
+    baseRevision })`, from the status's `puts[].revisionId`): A → B → A is three operations, a repeat of one is not. The
+    app sends an update only for a file the status lists (`putFiles`).
 - Unverified against real Google (the fake converts and updates in place): that Drive converts `text/markdown` into a
   document (Google added Markdown import in 2024), and that `files.update` with HTML / Markdown media on a Google
   document replaces its content as a new version (the Drive API documents media upload on update for Workspace
-  types).
+  types); that a converted document's `version` does not move by itself after the answer (else
+  `DRIVE_FILE_CHANGED_SINCE` refuses an honest update — the safe side); that `keepForever` on a revision is answered as
+  the fake does.
 
 ## Linked to a record (a company without the shared folder; `records.md` "File links without the shared folder")
 

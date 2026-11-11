@@ -31,6 +31,7 @@ import type { Outcome } from '../services/outcome'
 import type { Member } from '../services/access'
 import { NOT_IN_STEP } from '../services/not-in-step'
 import type { RecordTokenHolder } from '../services/record-ai-tokens'
+import type { DriveJobScope } from '../services/google-drive'
 import { aiActor, keyedWrite } from './record-ai-auth'
 import { refusal } from './respond'
 import { aiActs, aiReads, companyMember, publicRoute, serviceBody } from './guards'
@@ -71,13 +72,14 @@ export const googleDriveAiRoute = new Hono()
  * (the record-token guard's route ceiling, `jobRunRouteAllowed`): its folder, asked again at every call (the run
  * still holds its occurrence, the job still runnable as pinned). `undefined`: no run (a consultation's token).
  */
-function jobScope(c: Context, h: RecordTokenHolder): { folderId: string } | undefined | Response {
+function jobScope(c: Context, h: RecordTokenHolder): DriveJobScope | undefined | Response {
   if (!h.run) return undefined
-  const place = jobRuns.deliveryPlace(h.member, h.run.id)
+  const runId = h.run.id
+  const place = jobRuns.deliveryPlace(h.member, runId)
   if (!place || place.connector !== 'google' || place.kind !== 'drive_folder' || typeof place.ref !== 'string') {
     return c.json({ error: NOT_IN_STEP.error, code: NOT_IN_STEP.code }, 403)
   }
-  return { folderId: place.ref }
+  return { folderId: place.ref, sameJob: other => jobRuns.sameJob(h.member, runId, other) }
 }
 
 googleDriveAiRoute.get('/status', aiReads, async (c) => {
@@ -136,7 +138,7 @@ googleDriveAiRoute.get('/puts/:putId', aiReads, async (c) => {
   const h = c.var.holder
   const scope = jobScope(c, h)
   if (scope instanceof Response) return scope
-  return answer(c, await googleDrive.putState(h.member, c.req.param('putId')))
+  return answer(c, await googleDrive.putState(h.member, c.req.param('putId'), scope))
 })
 
 // ---- the Picker page (public, static) ----

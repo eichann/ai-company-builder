@@ -31,7 +31,7 @@
 import { GOOGLE_SCOPE } from '../../shared/core/google'
 import {
   checkDriveFileName, checkDrivePutContent, DRIVE_FOLDER_MIME, DRIVE_PICK_MAX_FILES, DRIVE_PICK_TTL_MS, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, DRIVE_READ_AS,
-  DRIVE_READ_PDF_MAX_BYTES, DRIVE_READ_TEXT_MAX, DRIVE_TEXT_FOOTER, DRIVE_TEXT_HEADER, driveFolderReachesOutside, drivePutForm, driveRevisionOf, isDriveId, isDrivePickMode,
+  DRIVE_READ_PDF_MAX_BYTES, DRIVE_READ_TEXT_MAX, DRIVE_TEXT_FOOTER, DRIVE_TEXT_HEADER, driveDocFetchesOutside, driveFolderReachesOutside, drivePutForm, driveRevisionOf, isDriveId, isDrivePickMode,
   type DrivePermissionLike,
 } from '../../shared/core/google-drive'
 import { INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
@@ -70,6 +70,15 @@ export interface DriveLinkableFile {
   name: string
   mimeType: string | null
   sha256: string | null
+}
+
+/**
+ * A scheduled job's run (jobs.md "A deliverable place outside"): the one folder its responsible person chose, and
+ * whether a run is one of the same job's (an update may name only a file a run of this job made).
+ */
+export interface DriveJobScope {
+  folderId: string
+  sameJob(runId: string): boolean
 }
 
 /** Who puts a file: the member's AI (record token) or the member. */
@@ -207,21 +216,25 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
      * GET /api/records-ai/google/drive/status: whether the Drive tools work, the member's grant, live picks and
      * the files their puts made (what `drive_put` may update). `scope` (a scheduled job's run): only its folder.
      */
-    async aiStatus(member: Member, scope?: { folderId: string }): Promise<Outcome<DriveAiStatus>> {
+    async aiStatus(member: Member, scope?: DriveJobScope): Promise<Outcome<DriveAiStatus>> {
       const h = handle(member.companyId)
       const grant = h.connectors.grant('google', member.userId)
       const now = clock.now()
-      const inScope = (folderId: string) => !scope || folderId === scope.folderId
+      // A job's run: its own folder only, selected in the query (never cut off by the member's other picks and puts),
+      // and only the files runs of the same job made (what it may update).
+      const scopedPick = scope ? h.googleDrive.pick(member.userId, scope.folderId, now) : null
+      const picks = scope ? (scopedPick && scopedPick.kind === 'folder' ? [scopedPick] : []) : h.googleDrive.picks(member.userId, now, PICKS_LISTED)
+      const rows = scope ? h.googleDrive.donePutsInFolder(member.userId, scope.folderId, OWN_FILES_LISTED) : h.googleDrive.donePuts(member.userId, OWN_FILES_LISTED)
       const puts = new Map<string, DriveUpdatableFile>()
-      for (const p of h.googleDrive.donePuts(member.userId, OWN_FILES_LISTED)) {
-        if (p.fileId && !puts.has(p.fileId) && inScope(p.folderId)) {
-          puts.set(p.fileId, { fileId: p.fileId, name: p.name, mimeType: p.mimeType, folderId: p.folderId, link: p.link, at: p.finishedAt ?? p.createdAt })
-        }
+      for (const p of rows) {
+        if (!p.fileId || puts.has(p.fileId)) continue
+        if (scope && (!p.runId || !scope.sameJob(p.runId))) continue
+        puts.set(p.fileId, { fileId: p.fileId, name: p.name, mimeType: p.mimeType, folderId: p.folderId, link: p.link, revisionId: p.revisionId, at: p.finishedAt ?? p.createdAt })
       }
       return ok({
         available: await available(member.companyId),
         granted: grant?.status === 'active' && grant.scopes.includes(GOOGLE_SCOPE.driveFile),
-        picks: h.googleDrive.picks(member.userId, now, PICKS_LISTED).filter(p => inScope(p.fileId)).map(pickView),
+        picks: picks.map(pickView),
         puts: [...puts.values()],
       })
     },
@@ -399,7 +412,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
      * earlier put of this member made in that same folder (google-drive.md "Overwriting"). `scope` (a scheduled
      * job's run, jobs.md "A deliverable place outside"): only into that one folder — checked here at every call.
      */
-    async put(member: Member, actor: DriveActor, body: unknown, scope?: { folderId: string }): Promise<Outcome<DrivePutAnswer>> {
+    async put(member: Member, actor: DriveActor, body: unknown, scope?: DriveJobScope): Promise<Outcome<DrivePutAnswer>> {
       if (!isObj(body)) return refuse('bad-request', 'Body must be a JSON object')
       if (!isDriveId(body.folderId)) return refuse('bad-request', 'folderId must be a Drive id')
       const form = drivePutForm(body.kind, body.as)
@@ -417,6 +430,10 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       if (deps.sha256(bytes) !== body.sha256) return refuse('bad-request', 'ファイルの中身が送る途中で変わりました。もう一度お試しください。', { code: 'DRIVE_CONTENT_MISMATCH' })
       const contentProblem = checkDrivePutContent(form.kind, bytes)
       if (contentProblem) return refuse('bad-request', contentProblem, { code: 'DRIVE_CONTENT_REFUSED' })
+      // Drive's conversion fetches what a document points to (an image, a stylesheet): nothing may reach outside that way.
+      if (form.as === 'google_doc' && driveDocFetchesOutside(form.kind, new TextDecoder().decode(bytes))) {
+        return refuse('bad-request', '外のサイトの画像やスタイルを読み込む部分があるため、Google ドキュメントにできません。画像は data: で埋め込むか外し、外のページはリンクだけにしてください。', { code: 'DRIVE_EXTERNAL_RESOURCE' })
+      }
       // A scheduled job's run: the one folder its responsible person chose, nothing else.
       if (scope && body.folderId !== scope.folderId) {
         return refuse('forbidden', 'この定期の仕事が置けるのは、責任者が選んだフォルダだけです。', { code: 'DRIVE_FOLDER_NOT_GRANTED' })
@@ -440,6 +457,14 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         }
         if (target.mimeType !== form.driveMime) {
           return refuse('bad-request', '上書きは同じ種類どうしだけです（Google ドキュメントは Google ドキュメントで、PDF は PDF で、HTML は HTML で）。', { code: 'DRIVE_UPDATE_KIND_MISMATCH' })
+        }
+        // A job's run updates only what runs of the same job made (never a file of a consultation or another job).
+        if (scope && (!target.runId || !scope.sameJob(target.runId))) {
+          return refuse('forbidden', 'この定期の仕事が上書きできるのは、この仕事が前に置いたファイルだけです。新しいファイルとして置いてください。', { code: 'DRIVE_FILE_NOT_THIS_JOB' })
+        }
+        // A file a decision or an attachment rests on keeps its revision: never overwritten (Drive may drop old revisions).
+        if (h.records.driveFileFixed(updateFileId as string)) {
+          return refuse('conflict', 'このファイルは決めたことや添付の根拠として記録されているため、上書きしません。新しいファイルとして置いてください。', { code: 'DRIVE_FILE_FIXED' })
         }
       }
       const targetId = target ? updateFileId as string : null
@@ -490,7 +515,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         const fileRefused = 'このファイルは上書きできません（消されたか、別の場所に移されたか、直す権限がありません）。新しいファイルとして置いてください。'
         const t = await drive(member.companyId, member.userId, {
           method: 'GET', path: `/drive/v3/files/${targetId}`,
-          query: { fields: 'id,mimeType,trashed,parents,capabilities(canEdit)', supportsAllDrives: 'true' },
+          query: { fields: 'id,mimeType,trashed,parents,headRevisionId,version,capabilities(canEdit)', supportsAllDrives: 'true' },
           operation: 'drive.files.get',
         })
         if (!t.ok) return googleRefusal(t, fileRefused)
@@ -498,6 +523,11 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         const parents = Array.isArray(tf.parents) ? tf.parents : []
         if (tf.id !== targetId || tf.trashed === true || tf.mimeType !== form.driveMime || !parents.includes(row.folderId) || !(isObj(tf.capabilities) && tf.capabilities.canEdit === true)) {
           return refuse('forbidden', fileRefused, { code: 'DRIVE_FILE_REFUSED' })
+        }
+        // Someone changed it in Drive since ACB's last put (its revision is not the receipt's): never written over.
+        const current = driveRevisionOf(tf.headRevisionId, tf.version)
+        if (current === null || current !== target?.revisionId) {
+          return refuse('conflict', 'このファイルは、前に置いたあとに Google Drive で直されています。上書きすると直したところが消えるため、新しいファイルとして置いてください。', { code: 'DRIVE_FILE_CHANGED_SINCE' })
         }
         if (actor.kind !== 'ai') return null
         // A file can be shared outside on its own, whatever its folder says: then updating it is sending outside.
@@ -515,6 +545,19 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         return refusedBefore
       }
 
+      // The revision a record may point to stays in Drive: a file's head revision is kept forever before it is replaced
+      // (Drive drops old revisions of binary files after 30 days / 100 revisions). A Google document's revisions cannot
+      // be kept that way (Drive keeps them itself); a document a decision rests on is never overwritten (above).
+      if (target && target.revisionId && !target.revisionId.startsWith('version:')) {
+        const kept = await drive(member.companyId, member.userId, {
+          method: 'PATCH', path: `/drive/v3/files/${targetId}/revisions/${encodeURIComponent(target.revisionId)}`,
+          query: { fields: 'id,keepForever' }, body: { keepForever: true }, operation: 'drive.revisions.keep',
+        })
+        if (!kept.ok || !(isObj(kept.json) && kept.json.keepForever === true)) {
+          h.googleDrive.dropPut(id)
+          return refuse('conflict', '今の版を Google Drive に残せなかったため、上書きしませんでした。新しいファイルとして置いてください。', { code: 'DRIVE_REVISION_NOT_KEPT' })
+        }
+      }
       const fields = 'id,headRevisionId,version,webViewLink'
       const r = targetId !== null
         // A new revision of the same file: only its content and ACB's correlation id (the lookup after a lost answer).
@@ -566,17 +609,27 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
      * やること the run's finish made. Google is not asked.
      */
     runDeliverables(member: Member, runId: string): DriveLinkableFile[] {
+      const h = handle(member.companyId)
+      // Its own receipts, and those it was answered with again (a repeat of an earlier put: nothing uploaded twice, but
+      // the run's operation names that receipt — S10b's `drive-put` reference).
+      const rows = [...h.googleDrive.runPuts(member.userId, runId, 50)]
+      for (const op of h.aiRuns.operations(runId)) {
+        if (op.refKind !== 'drive-put' || !op.refId) continue
+        const row = h.googleDrive.put(member.userId, op.refId)
+        if (row && row.state === 'done' && !rows.some(r => r.id === row.id)) rows.push(row)
+      }
       const byFile = new Map<string, DriveLinkableFile>()
-      for (const p of handle(member.companyId).googleDrive.runPuts(member.userId, runId, 50)) {
+      for (const p of rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
         if (p.fileId && isDriveId(p.fileId)) byFile.set(p.fileId, { fileId: p.fileId, revisionId: p.revisionId, name: p.name, mimeType: p.mimeType, sha256: p.sha256 })
       }
       return [...byFile.values()]
     },
 
     /** GET /api/records-ai/google/drive/puts/:putId: the member's own put (an unknown one is looked up again). */
-    async putState(member: Member, putId: string): Promise<Outcome<DrivePutAnswer>> {
+    async putState(member: Member, putId: string, scope?: Pick<DriveJobScope, 'folderId'>): Promise<Outcome<DrivePutAnswer>> {
       const row = /^drive-put-[A-Za-z0-9_-]{1,80}$/.test(putId) ? handle(member.companyId).googleDrive.put(member.userId, putId) : null
-      if (!row) return refuse('not-found', 'Not found', { code: 'DRIVE_PUT_NOT_FOUND' })
+      // A job's run: only receipts of its own folder (another one is not there for it — nothing answered, Google not asked).
+      if (!row || (scope && row.folderId !== scope.folderId)) return refuse('not-found', 'Not found', { code: 'DRIVE_PUT_NOT_FOUND' })
       return ok({ drivePut: putView(await reconcile(member.companyId, row)), existing: true })
     },
   }

@@ -14,7 +14,7 @@ export function placeLine(job: MyJob): string | null {
   const d = job.deliverTo
   if (!d) return null
   if (!d.chosen) return `できたものを置く先：${d.label}（「受け取る」を押すと、選ぶ画面が開きます）`
-  if (!d.usable) return `できたものを置く先：${d.label}が使えなくなりました（選んでから90日たったか、消されました）。選び直すまで動きません。`
+  if (!d.usable) return `できたものを置く先：${d.label}が使えなくなりました（使える期間が過ぎたか、消されました）。選び直すまで動きません。`
   const until = d.expiresAt ? new Date(d.expiresAt) : null
   const when = until && !Number.isNaN(until.getTime()) ? `（${until.getMonth() + 1}/${until.getDate()} まで使えます。そのあとは選び直します）` : ''
   return `できたものを置く先：${d.label}${d.name ? `「${d.name}」` : ''}${when}`

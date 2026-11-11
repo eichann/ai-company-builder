@@ -367,6 +367,11 @@ export function jobDeliveryHowTo(place: JobDeliveryPlace): string | null {
   return declared && typeof place.ref === 'string' ? declared.howToPut.replace('{ref}', place.ref) : null
 }
 
+/** How long a chosen place of this kind lasts (the connector's sentence), or null for one this build does not know. */
+export function jobDeliveryLapseNote(place: { connector: string; kind: string }): string | null {
+  return deliveryKind(place.connector, place.kind)?.lapseNote ?? null
+}
+
 /** The words of a deliverable place's kind (「Google Drive のフォルダ」), or null for one this build does not know. */
 export function jobDeliveryLabel(place: { connector: string; kind: string }): string | null {
   return deliveryKind(place.connector, place.kind)?.label ?? null

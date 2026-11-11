@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { GOOGLE_ALLOWED_SCOPES, GOOGLE_FEATURE_SCOPES, GOOGLE_NEVER_SCOPES, GOOGLE_SCOPE, googleScopesFor, normalizeGrantedScopes } from '../../shared/core/google'
 import {
   checkDriveFileName, checkDrivePutContent, DRIVE_DOC_MIME, driveFileIdFromLink, driveFileIdsFromText, driveFolderReachesOutside, drivePreselectIds, drivePutForm, drivePutKindOf,
-  driveRevisionOf, isDrivePickerTokenScope,
+  driveDocFetchesOutside, driveRevisionOf, isDrivePickerTokenScope,
 } from '../../shared/core/google-drive'
 
 const enc = (s: string) => new TextEncoder().encode(s)
@@ -170,5 +170,27 @@ describe('a pasted Drive link: only Google\'s own file addresses give an id', ()
     expect(drivePreselectIds([ID, ID, 'bad id', "x');alert(1)//", 7, 'short'])).toEqual([ID])
     expect(drivePreselectIds('not-a-list-0123456789')).toEqual([])
     expect(drivePreselectIds(Array.from({ length: 12 }, (_, i) => `${ID}${i.toString().padStart(2, '0')}`))).toHaveLength(10)
+  })
+})
+
+describe('a document never fetches from outside (review of #678)', () => {
+  it('images, stylesheets, frames, CSS url() and @import, a refresh, Markdown images: refused; inline data, fragments and plain links pass', () => {
+    const outside = [
+      ['html', '<img src="https://x.example/a.png">'], ['html', '<img src=//x.example/a.png>'], ['html', "<img srcset='https://x.example/a.png 2x'>"],
+      ['html', '<link rel="stylesheet" href="https://x.example/s.css">'], ['html', '<script src="https://x.example/s.js"></script>'],
+      ['html', '<iframe src="https://x.example/"></iframe>'], ['html', '<object data="https://x.example/o"></object>'], ['html', '<video poster="https://x.example/p.png">'],
+      ['html', '<table background="https://x.example/b.png">'], ['html', '<p style="background: url( \'https://x.example/b.png\' )">'],
+      ['html', '<style>@import "x.css";</style>'], ['html', '<meta http-equiv="Refresh" content="0;url=https://x.example/">'],
+      ['html', '<img src="&#104;ttps://x.example/a.png">'], ['html', '<img src="relative.png">'], ['html', '<svg><image xlink:href="https://x.example/a.png"/></svg>'],
+      ['markdown', '![a](https://x.example/a.png)'], ['markdown', '![a]( <https://x.example/a.png> )'], ['markdown', '![a][ref]\n\n[ref]: https://x.example/a.png'],
+      ['markdown', '<img src="https://x.example/a.png">'],
+    ] as const
+    for (const [kind, text] of outside) expect(driveDocFetchesOutside(kind, text), text).toBe(true)
+    const inside = [
+      ['html', '<a href="https://example.com/">リンク</a><p>本文</p>'], ['html', '<img src="data:image/png;base64,iVBORw0KGgo=">'], ['html', '<a href="#top">上へ</a>'],
+      ['html', '<meta charset="utf-8"><meta name="viewport" content="width=device-width">'], ['html', '<p style="color: red">赤</p>'],
+      ['markdown', '# 見出し\n[リンク](https://example.com)\n<https://example.com>'], ['markdown', '![図](data:image/png;base64,iVBORw0KGgo=)'],
+    ] as const
+    for (const [kind, text] of inside) expect(driveDocFetchesOutside(kind, text), text).toBe(false)
   })
 })

@@ -246,11 +246,13 @@ export interface FakeGoogle {
   /** The account picked these files / folders for this client in Google Picker (drive.file now reaches them). */
   pick(clientId: string, email: string, ids: string[]): void
   /** A Drive file as it is now (null when unknown); for assertions. */
-  driveFile(id: string): { name: string; mimeType: string; parents: string[]; content: Buffer; appProperties: Record<string, string>; createdBy: string | null; version: number; headRevisionId: string; uploadedAs: string | null } | null
+  driveFile(id: string): { name: string; mimeType: string; parents: string[]; content: Buffer; appProperties: Record<string, string>; createdBy: string | null; version: number; headRevisionId: string; uploadedAs: string | null; keptRevisions: string[] } | null
   /** Someone shares this Drive file (or folder) by itself with another permission (anyone, another domain, a person). */
   shareDriveFile(id: string, permission: { type: 'user' | 'group' | 'domain' | 'anyone'; role: string; emailAddress?: string; domain?: string }): void
   /** Someone moves this Drive file into another folder (its parents become exactly that one). */
   moveDriveFile(id: string, folderId: string): void
+  /** Someone edits this Drive file in Drive itself (a new revision / version, not ACB's). */
+  editDriveFile(id: string, content: string): void
   /** Every Drive file the app made (uploads), oldest first. */
   uploads(): Array<{ id: string; name: string; parents: string[]; mimeType: string }>
   /** A spreadsheet as it is now (null when unknown); for assertions. */
@@ -806,10 +808,12 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     version: number
     /** The MIME type the content was uploaded as (a Google document converted from HTML / Markdown), or null. */
     uploadedAs: string | null
+    /** Revisions marked keepForever (binary files only). */
+    kept: Set<string>
   }
   const driveFiles = new Map<string, LiveDriveFile>((seed.driveFiles ?? []).map(f => [f.id, {
     ...f, content: Buffer.from(f.content, 'utf8'), parents: f.parents ?? [], appProperties: {}, createdBy: null, pickedFor: new Set<string>(),
-    modifiedTime: iso(created), headRevisionId: `rev-${randomToken(8)}`, version: 1, uploadedAs: null,
+    modifiedTime: iso(created), headRevisionId: `rev-${randomToken(8)}`, version: 1, uploadedAs: null, kept: new Set<string>(),
   }]))
   /** What Drive converts into a Google document on upload (the importable text types this fake knows). */
   const DOC_IMPORTS = new Set(['text/html', 'text/markdown', 'text/plain'])
@@ -908,7 +912,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     driveFiles.set(id, {
       id, name: meta.name ?? 'Untitled', mimeType: meta.mimeType ?? 'application/octet-stream', owner: a.email, readers: [...folder.readers], content: media,
       permissions: [...folder.permissions], parents: [parent], appProperties: { ...(meta.appProperties ?? {}) }, createdBy: a.clientId, pickedFor: new Set(),
-      modifiedTime: iso(now()), headRevisionId: `rev-${randomToken(8)}`, version: 1, uploadedAs: meta.mimeType === DOC_MIME ? mediaType : null,
+      modifiedTime: iso(now()), headRevisionId: `rev-${randomToken(8)}`, version: 1, uploadedAs: meta.mimeType === DOC_MIME ? mediaType : null, kept: new Set<string>(),
     })
     uploadOrder.push(id)
     if (dropCount > 0) {
@@ -939,6 +943,20 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       return dropAnswer(c)
     }
     return c.json(selectFields(driveFileOut(f, a.email), c.req.query('fields')))
+  })
+
+  // revisions.update { keepForever }: binary files only (Drive keeps a Google document's revisions itself); the account
+  // must be able to edit the file; the revision must be one it has (here: its head).
+  app.patch('/drive/v3/files/:fileId/revisions/:revisionId', async c => {
+    const a = bearer(c, [GOOGLE_SCOPES.driveFile, `${AUTH}drive`], 'drive.googleapis.com')
+    const f = visibleDriveFile(a, c.req.param('fileId') ?? '')
+    if (!(driveFileOut(f, a.email).capabilities as { canEdit: boolean }).canEdit) throw apiError(403, 'The user does not have sufficient permissions for this file.', 'insufficientFilePermissions')
+    if (f.mimeType.startsWith('application/vnd.google-apps.')) throw apiError(400, 'keepForever can only be set on revisions of files with binary content.', 'invalid')
+    const rev = c.req.param('revisionId') ?? ''
+    if (rev !== f.headRevisionId && !f.kept.has(rev)) throw apiError(404, `Revision not found: ${rev}.`, 'notFound')
+    const body = await c.req.json().catch(() => ({})) as { keepForever?: unknown }
+    if (body.keepForever === true) f.kept.add(rev)
+    return c.json(selectFields({ kind: 'drive#revision', id: rev, keepForever: f.kept.has(rev) }, c.req.query('fields')))
   })
 
   // ---- the stand-in Google Picker (staging: the Picker page loads <origin>/js/api.js) ----
@@ -1569,8 +1587,15 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       const f = driveFiles.get(id)
       return f ? {
         name: f.name, mimeType: f.mimeType, parents: [...f.parents], content: f.content, appProperties: { ...f.appProperties }, createdBy: f.createdBy,
-        version: f.version, headRevisionId: f.headRevisionId, uploadedAs: f.uploadedAs,
+        version: f.version, headRevisionId: f.headRevisionId, uploadedAs: f.uploadedAs, keptRevisions: [...f.kept],
       } : null
+    },
+    editDriveFile(id, content) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      f.content = Buffer.from(content, 'utf8')
+      f.version += 1
+      f.headRevisionId = `rev-${randomToken(8)}`
     },
     shareDriveFile(id, permission) {
       const f = driveFiles.get(id)

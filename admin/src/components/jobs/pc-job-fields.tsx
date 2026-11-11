@@ -79,7 +79,7 @@ export function PcJobFields({ f, set, hasCompanyFolder, shelfSkills }: {
       </Row>
       {f.deliverTo && (
         <p className="text-xs text-muted-foreground">
-          置くフォルダは、責任者が「受け取る」ときに自分で選びます（その人が選んだ1か所だけに置けます。社外の人も見られるフォルダには置きません）。選んでから90日たつと選び直しが要ります。
+          置き先は、責任者が「受け取る」ときに自分で選びます（その人が選んだ1か所だけに置けます。社外の人も見られる場所には置きません）。{DELIVERY_PLACE_CHOICES.find((c) => c.value === f.deliverTo)?.lapseNote ?? ''}
         </p>
       )}
       <Row label="1回の上限">

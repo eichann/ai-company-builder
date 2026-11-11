@@ -103,7 +103,7 @@ describe('the form', () => {
   })
 
   it('a place outside (connector + kind, never a service\'s own field): the folder is left to the responsible person; it needs the deliverable folder', () => {
-    expect(DELIVERY_PLACE_CHOICES).toEqual([{ value: 'google:drive_folder', label: 'Google Drive のフォルダ' }])
+    expect(DELIVERY_PLACE_CHOICES.map(c => [c.value, c.label])).toEqual([['google:drive_folder', 'Google Drive のフォルダ']])
     const form = { ...emptyJobForm('u_member'), name: '面談報告書', kind: 'pc' as const, shelfItem: 'item-1', checkKind: 'new_meetings' as const, writePlace: '人事部', writeFolder: 'reports', deliverTo: 'google:drive_folder' }
     const parsed = definitionFromForm(form, 'interview-report')
     expect(parsed.ok).toBe(true)

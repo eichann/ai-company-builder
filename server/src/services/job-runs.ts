@@ -88,7 +88,7 @@ const REFUSALS: Record<string, () => Refusal> = {
   OWNER_ABSENT: () => conflict('JOB_OWNER_ABSENT', '不在の日のため、この回は見送りました。'),
   SKILL_MISSING: () => conflict('JOB_SKILL_MISSING', '手順の Skill が、承認された版のまま見つかりません。'),
   TIME_LIMIT: () => conflict('JOB_TIME_LIMIT', '承認された時間を過ぎたため、この回は AI を止めました。人が確かめる必要があります。'),
-  PLACE_NOT_USABLE: () => conflict('JOB_PLACE_NOT_USABLE', 'できたものを置く先が使えなくなっています（選んでから90日たったか、消されました）。責任者が「受け取る」から選び直してください。'),
+  PLACE_NOT_USABLE: () => conflict('JOB_PLACE_NOT_USABLE', 'できたものを置く先が使えなくなっています（使える期間が過ぎたか、消されました）。責任者が「受け取る」から選び直してください。'),
 }
 /** The claiming app cannot run this occurrence's check (an older app, or one that does not know a newer check). */
 const CHECK_NOT_SUPPORTED = () => conflict('JOB_CHECK_NOT_SUPPORTED', 'このアプリでは、この定期の仕事を動かせません。アプリを新しくしてください。')
@@ -464,6 +464,26 @@ export function createJobRuns(deps: JobRunDeps) {
       const f = held(member, { id: run.id, subject: run.subject, step: run.step, userId: run.userId, state: run.state })
       if (!f || runnable(f)) return null
       return placeOf(f)
+    },
+
+    /**
+     * Is `otherRunId` a run of the same job as `runId`, both the member's (a job's run may update only what runs of its
+     * own job put: google-drive.md "Overwriting")? Read from each run's pinned procedure (`job.id`).
+     */
+    sameJob(member: Member, runId: string, otherRunId: string): boolean {
+      const runs = companyData.forCompany(member.companyId).aiRuns
+      const jobOf = (id: string): string | null => {
+        const r = runs.byId(id)
+        if (!r || r.userId !== member.userId || r.step !== JOB_PC_STEP || !r.procedure) return null
+        try {
+          const job = (JSON.parse(r.procedure) as { job?: { id?: unknown } }).job
+          return typeof job?.id === 'string' ? job.id : null
+        } catch {
+          return null
+        }
+      }
+      const mine = jobOf(runId)
+      return mine !== null && mine === jobOf(otherRunId)
     },
 
     /** The turn of the occurrence a claim just took (the claim's answer, with the meetings its check found), or null. */

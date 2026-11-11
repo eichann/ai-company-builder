@@ -454,6 +454,13 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       conn.prepare('DELETE FROM record_links WHERE company_id = ? AND source_id = ?').run(companyId, id)
     },
 
+    driveFileFixed(fileId) {
+      // The ledger keeps materials / attachments as JSON; a Drive one carries `"kind":"drive","fileId":"<id>"`. The id is
+      // Google's (letters, digits, - and _): `_` is escaped for LIKE.
+      const like = `%"fileId":"${fileId.replace(/[\\%_]/g, ch => `\\${ch}`)}"%`
+      return conn.prepare(`SELECT 1 FROM record_ledger WHERE company_id = ? AND (attachments LIKE ? ESCAPE '\\' OR decision LIKE ? ESCAPE '\\') LIMIT 1`)
+        .get(companyId, like, like) !== undefined
+    },
     linksFrom(ids) {
       if (ids.length === 0) return []
       return (conn.prepare('SELECT source_id, name, position, target_id, target_path, created_by, target_meta FROM record_links WHERE company_id = ? AND source_id IN (SELECT value FROM json_each(?)) ORDER BY source_id, name, position')

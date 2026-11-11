@@ -60,6 +60,8 @@ export interface GoogleDriveRepository {
   putOfFile(userId: string, fileId: string): DrivePutRow | null
   /** The member's own puts that made a file (state done), newest first. */
   donePuts(userId: string, limit: number): DrivePutRow[]
+  /** The member's own puts that made a file in this folder (state done), newest first. */
+  donePutsInFolder(userId: string, folderId: string, limit: number): DrivePutRow[]
   /** The member's own done puts made within this execution run (a scheduled job's deliverables), oldest first. */
   runPuts(userId: string, runId: string, limit: number): DrivePutRow[]
   /** Settles a put still in `sending` / `unknown` (true when a row changed). */

@@ -403,16 +403,29 @@ reports.
   accepted place) and the put refuses any other folder (403 `DRIVE_FOLDER_NOT_GRANTED`, nothing sent) — an update
   only of a file ACB made in that folder (`google-drive.md` "Overwriting"); the status shows only that folder and the
   files put there. Every other Drive check holds (a live pick, nobody outside the company sees the folder or the file).
-  A body's `recordId` is never linked from a run.
+  A body's `recordId` is never linked from a run. **Review of #678**: the app's `drive_put` in a job run reads a local
+  file **only from the run's deliverable area** (`<place>/.personal/<folder>/`, by name and by real location —
+  `LocalFileDeps.onlyUnder`, given by `recordToolProviders` from main's held run, `jobWriteArea`; no area → nothing), so
+  a prompt cannot send another company file out; a run updates **only files runs of the same job put**
+  (`jobRuns.sameJob`, from each run's pinned `job.id`; 403 `DRIVE_FILE_NOT_THIS_JOB`) and its status lists only those;
+  a receipt of another folder is not there for it (`GET /puts/:putId` → 404, Google not asked); the status selects the
+  folder's picks and puts in SQL (never cut off by the member's other files).
 - **The finish**: after a `done` finish (`afterDone`), what the run put (`googleDrive.runDeliverables`: its own receipts
-  of that run, once per file, the receipt's facts) is linked to the occurrence's やること (`recordEngine.linkDrivePut`,
+  of that run, and a receipt it was answered with again — a repeat of an earlier put, nothing uploaded twice, named by the
+  run's S10b operation `drive-put` — once per file, the receipt's facts) is linked to the occurrence's やること. A place
+  that lapsed while the run worked does not stop its finish (the work is done; what was put is linked); the next
+  occurrence goes to a person (`recordEngine.linkDrivePut`,
   as the AI with the run's id); a refusal (a company with the shared folder has no Drive links, records off…) is logged
   with its code and never fails anything. In a company with the shared folder the AI's `summary` carries the link.
 - **The 90-day pick** (decision 3, decision for the owner): a folder pick is never renewed by itself while a job names
   it (that would keep ACB's permission alive with nobody looking). When the chosen place is not usable — past 90 days,
   or no longer the person's pick — the clock makes the slot's occurrence `needs_person` `PLACE_NOT_USABLE` at once, told
-  (`job_failed`, `makeOccurrences`' `placeUsable`), and a claim finding it so does the same (409 `JOB_PLACE_NOT_USABLE`;
-  a running one's run is ended). The person picks the folder again with 「受け取る」 (a re-pick renews the pick) and the
+  (`job_failed`, `makeOccurrences`' `placeUsable`) — **once**: a slot after one that already said so is made
+  `needs_person` without a second notice — and a claim finding it so does the same (409 `JOB_PLACE_NOT_USABLE`; a
+  running one's run is ended). No warning before the 90 days end (not built: the app's place line shows the date). The
+  words of how long a place lasts are the connector's (`lapseNote`); the core's say only 「使える期間が過ぎたか、消されました」.
+  An app that cannot choose a place (before 5a-3) never runs such a job (its parser refuses the turn); the acceptance
+  notice and `JOB_PLACE_NEEDED` say the app must be updated. The person picks the folder again with 「受け取る」 (a re-pick renews the pick) and the
   next occurrence runs. The list (`GET /me/job-turns`) leaves such an occurrence out.
 
 ## The meeting check (PR 5a-2, owner decision: option A — the 面談 are recorded in Google Meet)

@@ -48,6 +48,8 @@ export interface DeliveryPlaceKind {
   tools: readonly string[]
   /** One sentence for the run's first message: how to put a file there (`{ref}`: the chosen place's id). */
   howToPut: string
+  /** For the screens: how long a chosen place lasts and what ends it (the connector's own rule). */
+  lapseNote: string
 }
 
 export const BUILTIN_CONNECTORS = {
@@ -66,6 +68,7 @@ export const BUILTIN_CONNECTORS = {
       // The status (its own folder and the files its puts made there), the put, and a put's receipt; never a read or a pick.
       routes: ['GET /google/drive/status', 'POST /google/drive/put', 'GET /google/drive/puts/:putId'],
       tools: ['drive_picked', 'drive_put'],
+      lapseNote: '選んだフォルダは、選んでから90日たつと選び直しが要ります（Google Drive のフォルダを ACB が使える期間）。',
       howToPut: 'できたものは、保存したファイルを drive_put で Google Drive のフォルダ（folderId: {ref}）に置きます（Markdown / HTML は as: "google_doc" で Google ドキュメントにする）。置けるのはこのフォルダだけです。前の回に作ったファイルを直すときは drive_picked で確かめ、その fileId を updateFileId に渡して上書きします（省くと新しいファイルが増えます）。置いたファイルはやることに自動でつながります。リンクは job_report の summary にも書いてください。',
     }],
   },

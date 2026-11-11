@@ -22,13 +22,13 @@ import fs from 'fs'
 import path from 'path'
 import { z } from 'zod'
 import {
-  checkDriveFileName, checkDrivePutContent, DRIVE_PICK_MAX_FILES, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, drivePutForm, drivePutKindOf, GOOGLE_PICKER_PAGE_PATH,
+  checkDriveFileName, checkDrivePutContent, DRIVE_PICK_MAX_FILES, driveDocFetchesOutside, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, drivePutForm, drivePutKindOf, GOOGLE_PICKER_PAGE_PATH,
   drivePreselectIds, isDriveId, type DrivePickMode, type DrivePutAs, type DrivePutKind,
 } from '../../../../shared/core/google-drive'
-import { isSameOrAncestorPath, pathKey } from '../../../../shared/core/paths'
+import { diskKey, isSameOrAncestorPath, pathKey } from '../../../../shared/core/paths'
 import { INSTRUCTION_LIKE_WORDS } from '../../../../shared/core/instruction-like'
 import { outsideBracketsNote, outsideTextFlags, wrapOutsideText } from '../../../../shared/core/outside-text'
-import type { DriveAiStatus, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerSession, DrivePicksResult, DrivePutAnswer, DriveReadAnswer } from '../../../../shared/types/google-drive'
+import type { DriveAiStatus, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerSession, DrivePicksResult, DrivePutAnswer, DriveReadAnswer, DriveUpdatableFile } from '../../../../shared/types/google-drive'
 import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from '../../../shared/google'
 import { RecordsApiError, type RecordTurnAccess } from '../../records/api'
 import type { ExtraRecordTools, RecordToolDescriptor } from '../../records/tools'
@@ -166,9 +166,15 @@ export interface LocalFileDeps {
   notDownloaded(root: string): string[]
   /** Company-relative private folders the member reads (NFC), when known. */
   privateFolders(): string[] | undefined
+  /**
+   * A scheduled job's run: the one company-relative folder a file may be read from (its deliverable area), by name and
+   * by real location; null: none at all; absent: anywhere in the company folder (a consultation).
+   */
+  onlyUnder?: string | null
 }
 
 const PRIVATE_REFUSAL = 'この場所のファイルは Google Drive に置けません（限られた人だけのフォルダの中です）。'
+const JOB_AREA_REFUSAL = 'この定期の仕事が Google Drive に置けるのは、この仕事の保存場所（.personal の中の決まったフォルダ）で作ったファイルだけです。'
 
 /** The file to put, read once: the company folder only, PDF / HTML / Markdown, ≤ 10 MB. */
 export function readLocalFileForDrive(input: unknown, root: string, deps: LocalFileDeps): { bytes: Uint8Array; kind: DrivePutKind; name: string } | { error: string } {
@@ -192,6 +198,21 @@ export function readLocalFileForDrive(input: unknown, root: string, deps: LocalF
     if (fs.existsSync(path.join(root, ...segments.slice(0, i), '.git'))) return { error: PRIVATE_REFUSAL }
   }
   const key = pathKey(relSlash)
+  if (deps.onlyUnder !== undefined) {
+    // By name, then by real location (a link inside the area must not lead to another company file).
+    const area = deps.onlyUnder
+    const inArea = area !== null && isSameOrAncestorPath(pathKey(area), key) && pathKey(area) !== key
+    let realArea: string | null = null
+    let realFile: string | null = null
+    try {
+      realArea = area === null ? null : fs.realpathSync(path.join(root, ...area.split('/')))
+      realFile = fs.realpathSync(abs)
+    } catch { realArea = null }
+    // Both sides are real paths (every link resolved; the disk's own spelling), compared as the disk folds names.
+    const relReal = realArea === null || realFile === null ? null : path.relative(diskKey(realArea), diskKey(realFile))
+    const realInside = relReal !== null && relReal !== '' && !relReal.startsWith('..') && !path.isAbsolute(relReal)
+    if (!inArea || !realInside) return { error: JOB_AREA_REFUSAL }
+  }
   if ((deps.privateFolders() ?? []).some(f => isSameOrAncestorPath(pathKey(f), key))) return { error: PRIVATE_REFUSAL }
   let left: string[] = []
   try { left = deps.notDownloaded(root) } catch { /* unknown: the file must exist anyway */ }
@@ -213,8 +234,10 @@ export function readLocalFileForDrive(input: unknown, root: string, deps: LocalF
  * The same file (content), folder and name — and the same form and target — → the same key: the server never puts
  * it twice. A plain file put new keeps the key it always had (a repeat after an update of the app is still the same).
  */
-export function drivePutRequestKey(folderId: string, name: string, sha256: string, form: { as?: DrivePutAs; updateFileId?: string } = {}): string {
-  const extra = `${form.as === 'google_doc' ? '\ngoogle_doc' : ''}${form.updateFileId ? `\nupdate:${form.updateFileId}` : ''}`
+export function drivePutRequestKey(folderId: string, name: string, sha256: string, form: { as?: DrivePutAs; updateFileId?: string; baseRevision?: string | null } = {}): string {
+  // An update names the revision it replaces: A → B → A again is a new operation, a repeat of the same request is not.
+  const update = form.updateFileId ? `\nupdate:${form.updateFileId}@${form.baseRevision ?? ''}` : ''
+  const extra = `${form.as === 'google_doc' ? '\ngoogle_doc' : ''}${update}`
   return `drive-${createHash('sha256').update(`${folderId}\n${name.normalize('NFC')}\n${sha256}${extra}`).digest('hex').slice(0, 40)}`
 }
 
@@ -349,13 +372,27 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
         const named = checkDriveFileName(typeof input.name === 'string' ? input.name : file.name, file.kind, as)
         if ('error' in named) return json({ error: named.error })
         const updateFileId = typeof input.updateFileId === 'string' ? input.updateFileId : undefined
+        if (as === 'google_doc' && driveDocFetchesOutside(file.kind, new TextDecoder().decode(file.bytes))) {
+          return json({ error: '外のサイトの画像やスタイルを読み込む部分があるため、Google ドキュメントにできません。画像は data: で埋め込むか外し、外のページはリンクだけにしてください。' })
+        }
+        // The revision an update replaces (the latest put of that file, as the server lists it): part of the request key.
+        let baseRevision: string | null = null
+        if (updateFileId) {
+          let known: DriveUpdatableFile | undefined
+          try {
+            const s = await access.call('GET', '/google/drive/status', undefined, signal) as DriveAiStatus
+            known = (s.puts ?? []).find(f => f.fileId === updateFileId)
+          } catch (error) { return refusal(error) ?? json({ error: '上書きするファイルを確かめられませんでした。' }) }
+          if (!known) return json({ error: '上書きできるのは、drive_picked の putFiles にあるファイルだけです。新しいファイルとして置くときは updateFileId を省いてください。' })
+          baseRevision = known.revisionId ?? null
+        }
         const sha256 = createHash('sha256').update(file.bytes).digest('hex')
         let recordId: string | null = null
         try { recordId = deps.topicTask?.() ?? null } catch { /* no topic: nothing to link */ }
         try {
           const a = await access.call('POST', '/google/drive/put', {
             folderId: input.folderId, name: named.name, kind: file.kind, ...(as === 'google_doc' ? { as } : {}), sha256, contentBase64: Buffer.from(file.bytes).toString('base64'),
-            requestKey: drivePutRequestKey(String(input.folderId), named.name, sha256, { as, updateFileId }),
+            requestKey: drivePutRequestKey(String(input.folderId), named.name, sha256, { as, updateFileId, baseRevision }),
             ...(updateFileId ? { updateFileId } : {}),
             ...(recordId ? { recordId } : {}),
           }, signal, { timeoutMs: PUT_TIMEOUT_MS }) as DrivePutAnswer

@@ -55,7 +55,7 @@ const SHELF_SKILL_MISSING = () => refuse('conflict', '手順の Skill が「会�
 const SKILL_CHANGED = () => refuse('conflict', '手順のスキルが、この版を作ったあとに変わりました。新しい版を作ってから承認してください。', { code: 'JOB_SKILL_CHANGED' })
 const NOT_RESPONSIBLE = () => refuse('forbidden', 'この定期の仕事を止められるのは、承認された版の責任者か管理者だけです。', { code: 'JOB_NOT_RESPONSIBLE' })
 const RETIRED = () => refuse('conflict', 'この定期の仕事はもう使われていません。', { code: 'JOB_RETIRED' })
-const PLACE_NEEDED = () => refuse('conflict', 'この定期の仕事は、できたものを置く先を責任者が受け取るときに選びます。アプリの「定期の仕事」→「受け取る」から選んでください。', { code: 'JOB_PLACE_NEEDED' })
+const PLACE_NEEDED = () => refuse('conflict', 'この定期の仕事は、できたものを置く先を責任者が受け取るときに選びます。アプリを新しくしてから、「設定」→「仕事」→「定期の仕事」の「置き先を選んで受け取る」で選んでください。', { code: 'JOB_PLACE_NEEDED' })
 const PLACE_NOT_USABLE = () => refuse('conflict', '選んだ置き先を使えません（選んでから時間がたったか、消されました）。もう一度選んでください。', { code: 'JOB_PLACE_NOT_USABLE' })
 
 export interface JobServiceDeps {
@@ -671,14 +671,18 @@ export function createJobService(deps: JobServiceDeps) {
      * while that version is still the approved one, the member is its responsible person, and they have not
      * accepted its consent yet — a notice that no longer asks anything is not shown.
      */
-    acceptNotice(member: Member, jobId: string, version: number): { name: string; contentChanged: boolean } | null {
+    acceptNotice(member: Member, jobId: string, version: number): { name: string; contentChanged: boolean; choosesPlace: boolean } | null {
       const found = visibleJob(member, jobId)
       if (!found || found.job.approvedVersion !== version || found.job.state === 'retired') return null
       const v = found.handle.jobs.version(jobId, version)
       if (!v || v.actingUserId !== member.userId || consentAccepted(found.handle, found.job)) return null
       // They had accepted an earlier version as its responsible person: what changed is the content, not who.
       const before = found.job.acceptedVersion === null ? null : found.handle.jobs.version(jobId, found.job.acceptedVersion)
-      return { name: nameFor(member, found.handle, found.job), contentChanged: before !== null && before.actingUserId === member.userId }
+      return {
+        name: nameFor(member, found.handle, found.job), contentChanged: before !== null && before.actingUserId === member.userId,
+        // The place outside is chosen in the app's 「受け取る」 (a build before it cannot: the notice says to update).
+        choosesPlace: definitionOf(v).grant.deliverTo !== undefined,
+      }
     },
 
     /** The job's name for a notice the member may read now (owner/admin only), or null. */

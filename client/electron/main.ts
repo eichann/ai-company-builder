@@ -587,6 +587,8 @@ app.whenReady().then(async () => {
       runAppCommand: appCommands.run,
       // A scheduled job's run reports its one やること here (jobs.md).
       jobReport: conversationId => aiTurnClaims.jobReporter(conversationId),
+      // …and the only place its drive_put may read a file from (its deliverable area).
+      jobWriteArea: conversationId => aiTurnClaims.jobWriteArea(conversationId),
       workingFolders,
       skillShelf,
     })

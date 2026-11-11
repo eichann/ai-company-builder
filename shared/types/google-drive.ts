@@ -62,6 +62,8 @@ export interface DriveUpdatableFile {
   mimeType: string
   folderId: string
   link: string | null
+  /** The revision of its latest put (an update names it in its request key: a later update is another operation). */
+  revisionId?: string | null
   at: string
 }
 

@@ -60,8 +60,8 @@ export interface JobForm {
 }
 
 /** The places outside a job may put its deliverables into (the connectors' declarations), as the form offers them. */
-export const DELIVERY_PLACE_CHOICES: Array<{ value: string; label: string }> = Object.values(BUILTIN_CONNECTORS)
-  .flatMap(c => (c.deliveryPlaces as readonly DeliveryPlaceKind[]).map(p => ({ value: `${c.id}:${p.kind}`, label: p.label })))
+export const DELIVERY_PLACE_CHOICES: Array<{ value: string; label: string; lapseNote: string }> = Object.values(BUILTIN_CONNECTORS)
+  .flatMap(c => (c.deliveryPlaces as readonly DeliveryPlaceKind[]).map(p => ({ value: `${c.id}:${p.kind}`, label: p.label, lapseNote: p.lapseNote })))
 
 /** The server's operation runs once per slot and takes no AI time: the smallest limits. */
 export const NEW_JOB_LIMITS: JobGrant['limits'] = { minutes: 5, runsPerDay: 1 }

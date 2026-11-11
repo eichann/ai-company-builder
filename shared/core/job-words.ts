@@ -138,7 +138,7 @@ const OUTCOME_WORDS: Record<string, string> = {
   RUN_FAILED: 'AI がこの回を終えられなかったため、人が確かめる必要があります',
   TIME_LIMIT: '承認された時間を過ぎたため AI を止めました。人が確かめる必要があります',
   RESULT_UNKNOWN: '外への操作が済んだか分からないまま時間が来ました。人が確かめる必要があります',
-  PLACE_NOT_USABLE: '責任者が選んだ置き先が使えなくなっていました（選んでから90日たったか、消されました）。責任者が「受け取る」から選び直してください',
+  PLACE_NOT_USABLE: '責任者が選んだ置き先が使えなくなっていました（使える期間が過ぎたか、消されました）。責任者が「受け取る」から選び直してください',
 }
 
 const STATE_WORDS: Record<JobOccurrenceState, string> = {
