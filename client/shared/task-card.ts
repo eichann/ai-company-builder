@@ -5,12 +5,12 @@
  * OK-giver); the server's engine still decides every action. Pure.
  */
 import { WAIT_OVER, waitCameBack } from '../../shared/core/core-types'
-import { actionWho, linkWhoName, parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
+import { actionWho, parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { AiRunView } from '../../shared/types/ai-runs'
 import type { ViewersLabel } from '../../shared/types/viewers'
 import type { RecordDetail, RecordSummary } from '../../shared/types/records'
-import { recordActionChoices } from './record-actions'
+import { personInWho, recordActionChoices } from './record-actions'
 import {
   cardFields, historyEntries, historyLines, linkedPathOf, removableOf, summaryView,
   type LinkedPath, type RecordCardField, type RecordCardHistoryLine, type RecordCardLink, type RecordViewSummary,
@@ -246,7 +246,7 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
   const whenDone = r.fields.when_done === 'check' ? 'check' as const : r.fields.when_done === 'notify' ? 'notify' as const : null
   // `link:<name>` (task version 13: 「その会議を読める人」): the server answered the link's record, so the member reads it.
   const readsLink = (name: string) => src.detail.links.some(l => l.direction === 'out' && l.name === name && !!l.record)
-  const personMay = (who: string[]) => who.includes('anyone') || who.some(w => (def?.fields[w]?.kind === 'person' && holds(w)) || (linkWhoName(w) !== null && readsLink(linkWhoName(w) as string)))
+  const personMay = (who: string[]) => !!def && personInWho(who, def, r.fields, me, readsLink)
   const offer = (state: string | null, startFirst: boolean): TaskCardAction[] => (def ? recordActionChoices(def, state) : [])
     .filter(c => !NOT_ON_CARD.has(c.action) && c.links.length === 0)
     .flatMap(c => {

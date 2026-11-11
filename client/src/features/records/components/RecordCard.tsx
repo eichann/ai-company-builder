@@ -3,7 +3,7 @@ import { useState, type ReactNode } from 'react'
 import { CircleNotch } from '@phosphor-icons/react'
 import type { RecordCardView, RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
 import { CALM, ONLY_YOU } from '../../../../shared/thing-words'
-import { meetingSeenWords } from '../../../../shared/record-details'
+import { bundleDoneWords, meetingSeenWords, type BundleAction } from '../../../../shared/record-details'
 import { consultationLinks, type LinkedConsultation } from '../../../shared/ui/consultationLinks'
 import { LinkedColumn, type LinkedDrop } from '../../../shared/ui/LinkedColumn'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
@@ -14,6 +14,7 @@ import { ProjectParticipants } from './ProjectParticipants'
 import { actOnRecord, undoRecordChange, unlinkRecord } from '../api'
 import { useRecordCard } from '../hooks/useRecordCard'
 import { AiBand, BundleBody } from './BundleBody'
+import { BundleActions, type BundleActInput } from './BundleActions'
 import { linkRows, meetingOpenRows, type NotDownloadedFolderOf } from './linkRows'
 import { IncomingActions, IncomingBody, IncomingLine, MeetingLine, MeetingOutputs, MeetingSummary, OpenButton, ReplyRequestActions } from './RecordDetails'
 import { RecordMarks } from './RecordRows'
@@ -43,7 +44,8 @@ interface Props {
   renderMeeting?: (record: RecordViewSummary, parts: MeetingCardParts) => ReactNode
   /**
    * The member ended it here — a 来た連絡's ［済んだ］, a 返事のお願い's ［終わりにする］ / ［もう返した］ (owner FB
-   * #29): AppShell closes its tab in the middle and its automatic consultations. Not ［取り込まない］.
+   * #29), a 案件・プロジェクト's ［終える］ / ［やめる］ (owner FB #30): AppShell closes its tab in the middle and its
+   * automatic consultations. Not ［取り込まない］, not ［もう一度始める］.
    */
   onEnded?: (recordId: string) => void
 }
@@ -121,6 +123,19 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     changed(DONE_WORDS[action], action === 'replied_elsewhere' ? null : { recordId: card.record.id, version: card.version + 1 })
     if (ENDING_ACTIONS.has(action)) onEnded?.(card.record.id)
   }
+  // A 案件・プロジェクト's buttons (owner FB #30), at the version shown; one that ends it (into a final state of
+  // its type: 終える, やめる) also ends it on the screen, like ENDING_ACTIONS. 取り消す undoes that one entry.
+  const actBundle = async (a: BundleAction, input: BundleActInput): Promise<string | null> => {
+    if (card.version === undefined) return null
+    setBusy(true)
+    const r = await actOnRecord(companyId, card.record.id, a.action, card.version, input)
+    setBusy(false)
+    // The refusal is said where it was pressed (its window, or beside the buttons); the card reads again.
+    if (!r.success) { reload(); return r.error }
+    changed(bundleDoneWords(a, card.record.type), { recordId: card.record.id, version: card.version + 1 })
+    if (a.ends) onEnded?.(card.record.id)
+    return null
+  }
   const unsettle = async () => {
     if (card.version === undefined) return
     setBusy(true)
@@ -134,7 +149,9 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
       openReplies={card.links.filter(l => l.record?.type === 'reply_request' && !l.record.finished).length} />
     : card.detail?.kind === 'reply' && card.version !== undefined
       ? <ReplyRequestActions m={card.detail} busy={busy} onAct={a => void act(a)} />
-      : null
+      : card.detail?.kind === 'bundle' && card.detail.actions && card.version !== undefined
+        ? <BundleActions actions={card.detail.actions} busy={busy} onAct={actBundle} />
+        : null
   const bundleLink = card.links.find(l => l.bundle && l.record)
   const field = !viewOnly && renderBundleField && (card.detail?.kind === 'meeting' || card.detail?.kind === 'incoming') && card.version !== undefined
     ? renderBundleField({
@@ -164,7 +181,7 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
   /** A 非公開 案件・プロジェクト's 参加者 (`ProjectParticipants`). */
   participants?: ReactNode
   drop: LinkedDrop
-  /** A 来た連絡's ［済んだ］ and its 「…」 (`IncomingActions`), or a 返事のお願い's ［終わりにする］, beside the title. */
+  /** A 来た連絡's ［済んだ］ and its 「…」 (`IncomingActions`), a 返事のお願い's ［終わりにする］, or a 案件・プロジェクト's ［終える］ (`BundleActions`), beside the title. */
   incoming: ReactNode
   renderMeeting?: Props['renderMeeting']
   onReload: () => void
@@ -195,6 +212,7 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
     actions = <>{incoming}{detail.open && <OpenButton link={detail.open} />}</>
     body = <IncomingBody m={detail} />
   } else if (detail?.kind === 'bundle') {
+    actions = incoming
     body = <>{participants}<BundleBody b={detail} renderApproval={renderApproval} /></>
   } else if (detail?.kind === 'reply') {
     actions = incoming

@@ -5,7 +5,7 @@
  * (the engine's `who`); this only keeps impossible choices off the screen.
  * Pure (`client/shared`).
  */
-import { isSystemOnly, type TypeDefinition } from '../../shared/core/record-types'
+import { isSystemOnly, linkWhoName, type TypeDefinition } from '../../shared/core/record-types'
 
 export interface RecordActionChoice {
   action: string
@@ -29,4 +29,16 @@ export function recordActionChoices(def: TypeDefinition, state: string | null): 
     // `who: [system]`: only the server's own services run it — never offered to a person.
     .filter(([, a]) => !isSystemOnly(a.who))
     .map(([action, a]) => ({ action, title: a.label, noteRequired: a.note === 'required', args: Object.keys(a.args), okFrom: a.okFrom ?? [], links: a.links ?? [] }))
+}
+
+/**
+ * Whether `who` (an action's, after `who_unless`: `actionWho`) names the member by what the app
+ * knows: `anyone`, a person field of the record holding them, or `link:<name>` when the server
+ * answered that link's record (so they read it). Roles (`admin`, `dept_manager`) and delegates are
+ * not known to the app: they are never offered here, so a screen never offers what the server
+ * would refuse (an admin may still be allowed by the server). The task card and the bundle card
+ * both decide with this.
+ */
+export function personInWho(who: readonly string[], def: Pick<TypeDefinition, 'fields'>, fields: Readonly<Record<string, unknown>>, me: string, readsLink: (name: string) => boolean = () => false): boolean {
+  return who.includes('anyone') || who.some(w => (def.fields[w]?.kind === 'person' && fields[w] === me) || (linkWhoName(w) !== null && readsLink(linkWhoName(w) as string)))
 }

@@ -15,6 +15,7 @@
 //   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
 //   kind      none = the company has no shared company folder (folderKind none: a working folder on this PC)
 //   personal  1 = (with tasks=1) the opened task is one only the member sees (its card offers 新しいファイル)
+//   (a プロジェクト `project-aaaaaa1` whose 責任者 is the member opens in the record card with ［終える］, recorded as actOnTask)
 //   features  (「使う機能」) listoff = the task list turned off: 「確かめること」 with an approval, an AI-prepared task,
 //             a decision to confirm, an arrived meeting and today's meeting; listoff,meetingsoff = 会議 off too
 //   companies 1 | 2 = the member's companies from the server (株式会社デモ, then 別会社); absent = the list cannot be read
@@ -137,6 +138,7 @@ const COMMITS = [
 ]
 
 const RECORD_TASK = { id: 'task-aaaaaa1', type: 'task', typeLabel: 'タスク', kind: 'task' as const, thing: 'task' as const, title: 'A社 提案書を仕上げる', summary: '', stateLabel: '進めている', updatedAt: '2026-10-30T10:00:00Z' }
+const RECORD_PROJECT = { id: 'project-aaaaaa1', type: 'project', typeLabel: 'プロジェクト', kind: 'bundle' as const, thing: 'bundle' as const, title: '新人研修の見直し', summary: '', stateLabel: '進めている', updatedAt: '2026-10-30T10:00:00Z' }
 const RECORD_DECISION = { id: 'decision-bbbbbb1', type: 'decision', typeLabel: '決めたこと', kind: 'decision' as const, thing: 'decision' as const, title: 'A社には150万円で出す', summary: '', stateLabel: '確かめた', updatedAt: '2026-10-30T10:00:00Z' }
 
 const fileChanges = emitter<Array<{ type: string; path: string }>>()
@@ -259,7 +261,15 @@ const api: Partial<ElectronAPI> = {
       ] }
       : { success: true, available: true, total: 0, hits: [], hubs: [] }
   },
-  getRecordCard: async (_companyId: string, recordId: string) => recordId === RECORD_TASK.id
+  getRecordCard: async (_companyId: string, recordId: string) => recordId === RECORD_PROJECT.id
+    ? { success: true, card: {
+      record: RECORD_PROJECT, version: 2, fields: [], history: [], links: [],
+      detail: { kind: 'bundle' as const, purpose: null, owner: null, groups: [], done: 0, total: 0, pendingApprovals: [], actions: {
+        main: { action: 'finish', title: '終える', ends: true, noteRequired: false, noteOffered: false, args: [] },
+        more: [{ action: 'cancel', title: 'やめる', ends: true, noteRequired: false, noteOffered: true, args: [] }], people: [],
+      } },
+    } }
+    : recordId === RECORD_TASK.id
     ? { success: true, card: {
       record: RECORD_TASK,
       fields: [{ label: '担当', value: '田中 太郎' }, { label: '期限', value: '2026-11-05' }],
