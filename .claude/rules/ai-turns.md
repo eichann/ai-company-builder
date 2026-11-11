@@ -216,7 +216,8 @@ The execution state lives on the server; the AI still runs only here.
   stay in `ai-runs.ts` and do not look at the subject.
 - **The subject kind** (B PR 2, owner decision D2 = option A, 2026-11-10): a run stores what it
   works on — `ai_runs.subject_kind` (`AI_RUN_SUBJECT_KINDS`, `shared/core/ai-runs.ts`: `record`, and
-  `occurrence` reserved for a job's occurrence, B PR 3 — nothing claims one yet) next to the old
+  `occurrence`, a job's occurrence: since B PR 3b the server's own run of a placement-`e` job, opened and
+  closed in one transaction, `jobs.md` "The runner"; no app claims one before PR 5) next to the old
   `record_id` column, which holds the subject's id for every kind. Only `adapters/sqlite/ai-runs.ts`
   knows the column name; ports and services speak `subject: { kind, id }`. The migration
   (`db/schema/ai-runs.ts` `migrateAiRunSubjects`) only **adds**: the column `NOT NULL DEFAULT

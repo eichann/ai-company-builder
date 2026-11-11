@@ -1574,9 +1574,11 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   (`FAILURE_CODE_RE`), never free text (a reason could name a customer). `classifyFailure` maps
   an HTTP answer to a class for the app.
 - **Who caused a change**: ledger column `run_id` (also `plugin_operations.run_id`; the actor's
-  `runId` comes from the token, never a body). `ledgerCause` (`shared/core/record-ledger.ts`):
+  `runId` comes from the token, never a body; or, for the server's own run of a scheduled job, from
+  the runner — the service writer keeps `runId` only for an AI actor or an `acb:` actor, `jobs.md` "The
+  runner"). `ledgerCause` (`shared/core/record-ledger.ts`):
   `person` (a session), `ai` (the member's AI in a consultation), `run` (an automated run under
-  the member's authority), `system` (`acb:` actors: the server clock), `outside` (seen in an
+  the member's authority), `system` (`acb:` actors: the server clock, `acb:job` with its run's id), `outside` (seen in an
   outside system). The history answers each entry's `cause` and `runId`. Putting a stuck step
   back is never the member's: a run finished as failed lets its step put the record back
   (`afterFailedRun`; minutes reading → `minutes.putBackAfterRun`, actor the member's AI with the

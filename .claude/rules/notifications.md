@@ -66,6 +66,11 @@ a plugin can never draw a notice (§2-2).
   `job_paused` (「定期の仕事「…」を止めました：…」, on by default, recordless like the morning summary: a scheduled
   job paused because its responsible person left or lost rights, to every owner / admin; key
   `job_paused:<job>:<reason>:<at>`; shown only while the reader is owner / admin — `jobs.md`),
+  `job_expired` / `job_skipped` / `job_failed` (on by default, recordless: an occurrence of a scheduled job
+  whose time ran out, skipped because its responsible person was absent, or whose やること could not be
+  made — to the responsible person and the job's creator while an owner / admin; key
+  `<kind>:<job>:<occurrence>`; text built when read, shown only while the reader may see the job, its
+  name 「定期の仕事」 when not theirs to read — `jobs.md` "Notices"; no notice when it ran, D9),
   `asked`, `morning_summary`, `due_tomorrow` (below), `others` (everything else: the AI's
   「用意ができた」 / 「先に渡す」 when it is not a first hand-over, 「自分で進める」 of task v5, sent back,
   cancelled…). While a task is the AI's (`preparing`) nobody is told on create (engine rule); the
@@ -213,6 +218,11 @@ compare-and-set and ledger), and writes notices.
   in `SERVICE_TRANSITIONS.task`, and the service writer allows a type that is not service-owned
   only those state changes (never a field-only change). A task someone moved meanwhile is
   `stale` and left alone.
+- **Scheduled jobs** (`jobs.md` "The clock"): `makeOccurrences` — every company first of all, records on
+  or off (fast: no content, nothing outside), then `startJobRunner` starts the jobs' runner, which the
+  clock never awaits (a slow company's mail or calendar never holds an occurrence up). This part has its
+  own overlap guard and runs before the shared one: a pass still hanging on a company's mail never stops
+  a later run's occurrences; `ClockRun.occurrences`.
 - **「気になる動き」**: `securitySweep` — every company first, records on or off
   (`security-alerts.md`); `ClockRun.alerts` counts what it wrote.
 - **Notices**: `notifications.sweep(companyId, limit)` (overdue, stuck AI turns, acceptance

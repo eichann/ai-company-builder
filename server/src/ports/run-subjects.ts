@@ -14,7 +14,8 @@ import type { PluginStepProcedurePin } from '../../shared/core/plugins'
 
 /**
  * The kinds of subject a run can have (`AI_RUN_SUBJECT_KINDS`): `record` — the only kind anything
- * claims today — and `occurrence`, reserved for a job's occurrence (B PR 3). Whatever belongs to
+ * claims today — and `occurrence`, a job's occurrence (since B PR 3b the server's own run of a
+ * placement-e job, written by services/job-occurrences.ts, never claimed: jobs.md "The runner"). Whatever belongs to
  * records (the record's 「AI の番」, record tokens, the built-in steps' route scope, the minutes'
  * read-back) is reached only by a subject whose kind is `record`.
  */

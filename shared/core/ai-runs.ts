@@ -33,8 +33,8 @@ export const AI_RUN_STATES = [
 export type AiRunState = typeof AI_RUN_STATES[number]
 
 /**
- * What a run works on (B 「実行を記録から分ける」 PR 2): a record's AI step, or — reserved for B PR 3,
- * nothing makes one yet — a job's occurrence. Only a `record` run reaches what belongs to records
+ * What a run works on (B 「実行を記録から分ける」 PR 2): a record's AI step, or — since B PR 3b the server's
+ * own run of a placement-e job (jobs.md "The runner") — a job's occurrence. Only a `record` run reaches what belongs to records
  * (the record's 「AI の番」, record tokens, the route scope, the minutes' read-back); every other kind
  * is refused there (`.claude/rules/ai-turns.md` "Execution runs on the server").
  */

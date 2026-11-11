@@ -1,9 +1,10 @@
 /**
- * 定期の仕事 (scheduled jobs, `.claude/rules/jobs.md`; B PR 3a: definitions and approval only — nothing
- * runs yet). Rules: services/jobs.ts. Mounted at /api/companies/:companyId.
+ * 定期の仕事 (scheduled jobs, `.claude/rules/jobs.md`; B PR 3a: definitions and approval; PR 3b: the
+ * occurrences the clock made). Rules: services/jobs.ts. Mounted at /api/companies/:companyId.
  *
  *   GET  /jobs                         owner/admin: every job; anyone else: the jobs they are responsible for
  *   GET  /jobs/:jobId                  with every version (404 for anyone else)
+ *   GET  /jobs/:jobId/occurrences      its occurrences, newest first (the same people; 404 for anyone else)
  *   POST /jobs { definition }          owner/admin → 201
  *   PUT  /jobs/:jobId { definition }   owner/admin: a new version
  *   POST /jobs/:jobId/approve          owner/admin { version, fingerprint? }
@@ -27,6 +28,12 @@ jobsRoute.get('/jobs', companyMember, async (c) => {
 
 jobsRoute.get('/jobs/:jobId', companyMember, async (c) => {
   const result = jobs.get(c.var.member, c.req.param('jobId'))
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+jobsRoute.get('/jobs/:jobId/occurrences', companyMember, async (c) => {
+  const result = jobs.occurrences(c.var.member, c.req.param('jobId'))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })

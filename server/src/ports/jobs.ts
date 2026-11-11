@@ -5,7 +5,7 @@
  * version's definition (and a trigger refuses it), only one that adds a version and ones that mark a
  * version approved / accepted once.
  */
-import type { JobPauseReason, JobState } from '../../shared/core/jobs'
+import type { JobOccurrenceState, JobPauseReason, JobState } from '../../shared/core/jobs'
 
 export interface JobRow {
   id: string
@@ -42,6 +42,25 @@ export interface JobVersionRow {
   acceptedAt: string | null
 }
 
+/** An occurrence (回) of a job (`ai_job_occurrences`). */
+export interface JobOccurrenceRow {
+  id: string
+  jobId: string
+  /** The approved version when the clock made it: the run is pinned to it. */
+  jobVersion: number
+  /** Company time, `YYYY-MM-DDTHH:MM`: the occurrence's identity within its job. */
+  dueSlot: string
+  timeZone: string
+  /** UTC ISO instants. */
+  dueAt: string
+  expiresAt: string
+  state: JobOccurrenceState
+  runId: string | null
+  outcomeCode: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface JobRepository {
   /** Every job of the company, newest first. */
   list(): JobRow[]
@@ -63,4 +82,17 @@ export interface JobRepository {
   /** 「定期の仕事をすべて止める」. */
   stopped(): boolean
   setStopped(stopped: boolean, by: string, at: string): void
+
+  /** Insert an occurrence unless its (job, slot) is there already (`UNIQUE`): false = it was (nothing written). */
+  insertOccurrence(row: JobOccurrenceRow): boolean
+  occurrence(occurrenceId: string): JobOccurrenceRow | null
+  /** A job's occurrences, newest slot first. */
+  occurrences(jobId: string, limit: number): JobOccurrenceRow[]
+  /** Occurrences in `due`, oldest due first (every job of the company). */
+  dueOccurrences(limit: number): JobOccurrenceRow[]
+  /**
+   * Move an occurrence from one of `from` to `to` (compare-and-set): false = it was no longer in
+   * `from` (someone else moved it first; nothing written).
+   */
+  moveOccurrence(occurrenceId: string, from: readonly JobOccurrenceState[], to: JobOccurrenceState, change: { runId?: string | null; outcomeCode: string | null }, at: string): boolean
 }

@@ -377,3 +377,48 @@ export const JOB_PAUSE_REASONS = ['ADMIN', 'BY_RESPONSIBLE', 'OWNER_LEFT', 'OWNE
 export type JobPauseReason = typeof JOB_PAUSE_REASONS[number]
 /** Pauses the server made by itself (the responsible person left, their rights shrank): told to owners/admins. */
 export const JOB_SYSTEM_PAUSE_REASONS: readonly JobPauseReason[] = ['OWNER_LEFT', 'OWNER_RIGHTS_CHANGED']
+
+/**
+ * An occurrence's state (design memo §3-2): `due` (made by the clock, waiting for its run), `running`
+ * (a PC's run, PR 5), `done`, `nothing` (the check found nothing, PR 5), `needs_person` (the run could
+ * not do its work: a person looks), `skipped` (not run on purpose: the responsible person absent, a
+ * newer occurrence, missed under `skip`), `expired` (its time ran out before it ran), `held` (the job
+ * or the company was stopped, or the job is not runnable as pinned: never run, also not on resume).
+ */
+export const JOB_OCCURRENCE_STATES = ['due', 'running', 'done', 'nothing', 'needs_person', 'skipped', 'expired', 'held'] as const
+export type JobOccurrenceState = typeof JOB_OCCURRENCE_STATES[number]
+
+/**
+ * Why an occurrence ended as it did (`outcome_code`, short codes only, never text):
+ * held — `JOB_PAUSED`, `COMPANY_STOPPED`, `NOT_ACCEPTED`, `JOB_VERSION_CHANGED` (another version was
+ * approved after the occurrence was made), `OWNER_LEFT` / `OWNER_RIGHTS_CHANGED` (the job was paused for it);
+ * skipped — `OWNER_ABSENT` (D5: no delegate runs it), `SUPERSEDED` (a newer occurrence, `latest_only`),
+ * `MISSED` (found late under `skip`); expired — `EXPIRED`; needs_person — `RECORDS_OFF`, `TASK_NOT_CREATED`.
+ */
+export const JOB_OUTCOME_CODES = [
+  'JOB_PAUSED', 'COMPANY_STOPPED', 'NOT_ACCEPTED', 'JOB_VERSION_CHANGED', 'OWNER_LEFT', 'OWNER_RIGHTS_CHANGED',
+  'OWNER_ABSENT', 'SUPERSEDED', 'MISSED', 'EXPIRED', 'RECORDS_OFF', 'TASK_NOT_CREATED',
+] as const
+export type JobOutcomeCode = typeof JOB_OUTCOME_CODES[number]
+
+/**
+ * How late the clock may first see a slot and still count it on time (two clock runs): later than this
+ * it was missed (the server was down) — `latest_only` runs it while not expired, `skip` does not.
+ */
+export const JOB_ON_TIME_MS = 10 * 60_000
+
+/**
+ * Who a server operation's change is by (the ledger's actor): the job itself, like the clock
+ * (`CLOCK_ACTOR`) — kind `external`, an `acb:` id, so the cause is `system` (`ledgerCause`), with the
+ * run's id beside it.
+ */
+export const JOB_ACTOR = Object.freeze({ id: 'acb:job', kind: 'external' as const, source: '定期の仕事' })
+
+/** The step name of a job's server run (`ai_runs.step`): the server's own operation (placement `e`). */
+export const JOB_SERVER_STEP = 'job-operation'
+
+/** The id of the やること an occurrence's `create_task` makes: one per occurrence by construction. */
+export function occurrenceTaskId(occurrenceId: string): string {
+  if (!OCCURRENCE_ID_RE.test(occurrenceId)) throw new Error('occurrenceTaskId: not an occurrence id')
+  return `task-${occurrenceId.slice(4)}`
+}
