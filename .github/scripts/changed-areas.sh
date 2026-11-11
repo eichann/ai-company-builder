@@ -6,8 +6,11 @@
 # Pull requests are filtered by path. A push to main runs the Linux areas
 # (client, ui, server, admin) and skips the macOS ones (sync, clientmac, perf,
 # universal): the PR already ran them and macOS runners are scarce. The nightly
-# schedule and a manual run (workflow_dispatch) run everything. Typecheck and
-# lint are not areas: they always run.
+# schedule and a manual run (workflow_dispatch) run everything, except that a
+# scheduled run whose commit the last successful nightly already tested
+# (NIGHTLY_UNCHANGED=true, from nightly-unchanged.sh) runs nothing. Typecheck
+# and lint are not areas: they always run, apart from that skipped nightly
+# (job output `skip` in ci.yml).
 #
 # The lists follow what each job's tests load. For the areas with test entry
 # points (sync, client, clientmac, perf, ui) that is checked on every run by
@@ -26,6 +29,7 @@ areas=(sync client clientmac ui perf universal server admin)
 COMMON=(
   package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc patches/
   .github/workflows/ci.yml .github/actions/ .github/scripts/changed-areas.sh
+  .github/scripts/nightly-unchanged.sh
 )
 
 # Sync harness (4 macOS shards). What client/tests/sync/*.test.ts load, plus
@@ -134,6 +138,12 @@ emit() {
   echo "$1=$2"
   if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "$1=$2" >> "$GITHUB_OUTPUT"; fi
 }
+
+if [ "$event" = "schedule" ] && [ "${NIGHTLY_UNCHANGED:-}" = "true" ]; then
+  echo "Event schedule: nothing changed since the last successful nightly run; skipping every job."
+  for a in "${areas[@]}"; do emit "$a" false; done
+  exit 0
+fi
 
 if [ "$event" = "push" ]; then
   echo "Event push: Linux jobs only (macOS jobs ran on the PR; nightly runs everything)."

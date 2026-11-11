@@ -4,7 +4,9 @@ name: CI
 # .github/scripts/changed-areas.sh) and a lighter sync soak. A push to main
 # runs only the Linux jobs (the PR already ran the macOS ones; macOS runners are
 # scarce and a full run per merge queued the next PR's checks). The nightly
-# schedule and a manual run run every job with the full soak.
+# schedule and a manual run run every job with the full soak, except that a
+# nightly whose commit the last successful nightly already tested runs only job
+# `changes`, which says so (.github/scripts/nightly-unchanged.sh).
 #
 # macOS runners are the bottleneck, so only what needs a Mac runs on one: the
 # client tests that depend on macOS (client-tests.mjs, list MACOS) and the
@@ -13,9 +15,10 @@ name: CI
 #
 # Where the macOS jobs run (job `changes`, output `mac-runner`): the repository
 # variable MAC_RUNNER names a self-hosted Mac's runner label; unset, they run
-# on GitHub's macos-latest. Pull requests from forks always go to macos-latest,
-# never to the self-hosted Mac (setup and the runner-side guard:
-# .claude/rules/deployment.md "Self-hosted Mac runner").
+# on GitHub's macos-latest. Pull requests from forks and pull requests opened by
+# a bot (Dependabot) always go to macos-latest, never to the self-hosted Mac
+# (setup and the runner-side guard: .claude/rules/deployment.md "Self-hosted
+# Mac runner").
 on:
   pull_request:
     # next/** are integration branches (e.g. next/sales-meeting): their PRs get the same checks.
@@ -49,7 +52,16 @@ jobs:
     # a failure here runs everything instead of skipping a check.
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # actions: read for the last successful nightly run's commit
+    # (nightly-unchanged.sh); still read-only, no secrets.
+    permissions:
+      contents: read
+      actions: read
     outputs:
+      # 'true' only on a scheduled run whose commit the last successful
+      # nightly already tested: typecheck and lint skip too (the areas are all
+      # false then). Missing (this job failed) means run.
+      skip: ${{ steps.nightly.outputs.unchanged }}
       sync: ${{ steps.areas.outputs.sync }}
       client: ${{ steps.areas.outputs.client }}
       clientmac: ${{ steps.areas.outputs.clientmac }}
@@ -61,21 +73,42 @@ jobs:
       # The runner label for every macOS job. The self-hosted Mac
       # (vars.MAC_RUNNER) only for code from this repository: a push, the
       # nightly / manual run, or a pull request whose branch is in this
-      # repository. A fork's pull request is never sent to it. A job reading
-      # this output falls back to macos-latest when it is missing.
-      mac-runner: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.MAC_RUNNER || 'macos-latest' }}
+      # repository and that no bot opened. A fork's pull request is never sent
+      # to it, nor a pull request by Dependabot (or any `[bot]` account): its
+      # dependency install runs third-party code. A job reading this output
+      # falls back to macos-latest when it is missing.
+      mac-runner: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && !endsWith(github.event.pull_request.user.login, '[bot]') && !endsWith(github.actor, '[bot]'))) && vars.MAC_RUNNER || 'macos-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+      - id: nightly
+        name: Nightly run needed?
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: .github/scripts/nightly-unchanged.sh schedule "$SHA" "$REPO"
       - id: areas
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
+          NIGHTLY_UNCHANGED: ${{ steps.nightly.outputs.unchanged }}
         run: .github/scripts/changed-areas.sh "$EVENT_NAME" "$BASE_REF"
+      - name: Say that the nightly run was skipped
+        if: steps.nightly.outputs.unchanged == 'true'
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          echo "::notice::No change since the last successful nightly run ($SHA); every other job is skipped."
+          echo "Nightly run skipped: main is still at \`$SHA\`, which the last successful nightly run already tested." >> "$GITHUB_STEP_SUMMARY"
 
   typecheck:
     name: Typecheck (all packages)
+    # Always runs, apart from a nightly with nothing new (job `changes`, `skip`).
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -408,6 +441,9 @@ jobs:
 
   lint-changed:
     name: Lint (changed files)
+    # Always runs, apart from a nightly with nothing new (job `changes`, `skip`).
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

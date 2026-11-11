@@ -216,6 +216,15 @@ DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <
   every job. A job skipped by its `if` reports success, so required checks pass for PRs that do
   not touch them. `check-areas.mjs` (step in "Lint (changed files)") follows each area's test
   imports with esbuild and fails, naming the files, when a list misses one: extend the list.
+- **A nightly with nothing new is skipped.** On `schedule` only, job `changes` runs
+  `.github/scripts/nightly-unchanged.sh`: when the commit under test is the head of the most
+  recent successful scheduled CI run (GitHub API, job-level `actions: read`, the job's own
+  token, no secrets), every area is `false` and output `skip` is `true`, so Typecheck and Lint
+  skip too and the run is just `changes` saying so (notice + step summary), green. Any doubt —
+  the lookup fails, no earlier successful nightly, the job fails (output missing) — runs
+  everything, like the areas. A manual run (`workflow_dispatch`) always runs everything: use it
+  to re-check an unchanged main (e.g. after a runner or GitHub image change). Typecheck and Lint
+  `need` `changes` for this (a few seconds later on PRs) and still run when it fails.
 - macOS runners are scarce (all PRs share a few), so only what needs a Mac runs on one. Jobs:
   Typecheck (all packages, ubuntu), Lint (changed files, `lint-changed.sh`, + `check-areas.mjs`),
   Client tests 1/2 (Linux) + 2/2 (macOS) + the aggregate required "Client tests (macOS)"
@@ -227,8 +236,8 @@ DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <
   them.
 - Every macOS job's `runs-on` is `needs.changes.outputs.mac-runner`: the repository variable
   `MAC_RUNNER` (a self-hosted Mac's label) for pushes, nightly/manual runs and PRs from branches of
-  this repository; `macos-latest` when the variable is unset and **always for a fork's PR**. See
-  "Self-hosted Mac runner".
+  this repository; `macos-latest` when the variable is unset and **always for a fork's PR or a
+  bot's PR** (Dependabot). See "Self-hosted Mac runner".
 - `.github/workflows/docker-images.yml` builds and smoke-tests both images on PRs that touch the
   Dockerfiles, compose files, manifests, lockfile, `shared/`, the server's source or the admin's
   source and build config (`admin/src`, `public`, `next.config.ts`, `tsconfig.json`, …) (both
@@ -244,7 +253,14 @@ is public, so anyone can open a PR; code from a fork must never run on that Mac.
 - Two walls: the workflow sends fork PRs to `macos-latest` (`mac-runner` in job `changes`), but
   a fork PR runs its own copy of `ci.yml` and could name the label itself, so the runner refuses
   them too — its job-started hook (`ACTIONS_RUNNER_HOOK_JOB_STARTED`) fails any job that is not a
-  push, schedule, manual run or same-repository PR. Also set Actions → "Approval for running fork
+  push, schedule, manual run or same-repository PR.
+- **Bots' PRs never run on the Mac either.** A PR opened by Dependabot (or any `[bot]` account:
+  `github.event.pull_request.user.login` or `github.actor` ends in `[bot]`) always gets
+  `macos-latest`, though its branch is in this repository: its dependency install runs
+  third-party code (install scripts of a new package version). The job-started hook should
+  refuse these too (`GITHUB_ACTOR` ending in `[bot]` on a `pull_request` event, or the event
+  payload's `pull_request.user.login`); the hook lives on the Mac, not in this repository, so
+  keep its copy in step by hand. Also set Actions → "Approval for running fork
   pull request workflows" to **all external contributors**, and read a fork's `.github/` diff
   before approving.
 - The Mac: a dedicated standard (non-admin) macOS user that runs only the runner, with no

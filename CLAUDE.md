@@ -178,7 +178,8 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
   (another agent or `/code-review`) reads the diff without the author's conclusions, looking for
   leaks and removed or weakened guards.
 - After a PR is merged, remove its worktree (`git worktree remove <path>`); each is ~2 GB.
-- CI (`.github/workflows/ci.yml`): typecheck and changed-file lint always run; on PRs the other
+- CI (`.github/workflows/ci.yml`): typecheck and changed-file lint always run (a nightly with
+  nothing new since the last green one is skipped whole); on PRs the other
   jobs run only when their inputs change (`.github/scripts/changed-areas.sh`; a skipped job
   reports success). Required for merge: Typecheck, Lint (changed files), Server tests, Client
   tests (macOS) (aggregates a Linux and a macOS half), Sync harness (macOS); the UI, bundle, perf,
