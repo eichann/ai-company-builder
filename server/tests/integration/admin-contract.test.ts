@@ -123,6 +123,11 @@ const TYPES: Record<string, string> = {
   MakePublic: '{ path: string; commit: string }',
   PrivateFolderDelete: 'DeletePrivateFolderResult',
   OutdatedClientsBody: '{ error: string; code: "OUTDATED_CLIENTS"; members: OutdatedMember[]; canForce: boolean }',
+  Jobs: 'JobList',
+  Job: 'JobView',
+  JobUpdated: 'JobView & { changed: boolean }',
+  JobOccurrences: '{ occurrences: JobOccurrenceView[] }',
+  JobsStop: '{ stopped: boolean }',
 }
 
 /** Known, reported differences: `<call>: <field path>` of a ShapeReport error. */
@@ -144,6 +149,16 @@ policy:
 `
 const base = `/api/companies/${CO}`
 const USERS = { owner: 'ac-owner', admin: 'ac-admin', member: 'ac-member', newbie: 'ac-newbie' } as const
+/** A server-operation job (placement e) for the admin's calls (jobs.md). */
+const CONTRACT_JOB = {
+  schema: 1, name: '契約の定期', actingUser: USERS.admin,
+  trigger: { every: 'week', weekday: 'mon', at: '09:00', businessDaysBefore: 0 },
+  check: { kind: 'none' },
+  run: { kind: 'operation', operation: 'create_task', title: '週の報告を書く', dueBusinessDays: 1 },
+  placement: 'e',
+  missed: { policy: 'latest_only', expiresAfterMinutes: 720 },
+  grant: { tools: [], creates: ['task'], routes: [], reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 5, runsPerDay: 1 } },
+}
 
 let shapes: TypeShapes
 let workDir: string
@@ -287,6 +302,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', (await import('../../src/routes/slack-connection')).slackRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/minutes')).minutesRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/records')).recordsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/jobs')).jobsRoute)
   app.route('/api', invitationsRoute)
 
   // A push rejection for the overview / history.
@@ -566,6 +582,19 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Success', USERS.owner, 'DELETE', `${base}/members/${USERS.newbie}`, undefined, false)
   })
 
+  it('定期の仕事 (jobs.md "The screens")', async () => {
+    const job = await expectShape('Job', USERS.owner, 'POST', `${base}/jobs`, { definition: CONTRACT_JOB })
+    await expectShape('Jobs', USERS.owner, 'GET', `${base}/jobs`)
+    const detail = await expectShape('Job', USERS.owner, 'GET', `${base}/jobs/${job.id}`)
+    await expectShape('JobUpdated', USERS.owner, 'PUT', `${base}/jobs/${job.id}`, { definition: { ...CONTRACT_JOB, name: '契約の定期（改）' } })
+    await expectShape('Job', USERS.owner, 'POST', `${base}/jobs/${job.id}/approve`, { version: 1, fingerprint: detail.versions[0].fingerprint })
+    await expectShape('Job', USERS.admin, 'POST', `${base}/me/jobs/${job.id}/accept`, { version: 1, fingerprint: detail.versions[0].fingerprint })
+    await expectShape('Job', USERS.owner, 'POST', `${base}/jobs/${job.id}/pause`)
+    await expectShape('Job', USERS.owner, 'POST', `${base}/jobs/${job.id}/resume`)
+    await expectShape('JobOccurrences', USERS.owner, 'GET', `${base}/jobs/${job.id}/occurrences`)
+    await expectShape('JobsStop', USERS.owner, 'PUT', `${base}/jobs-stop`, { stopped: false })
+  })
+
   it('no field the admin reads is missing or of another type', () => {
     for (const [callName, extra] of extrasSeen) console.log(`[admin-contract] extra fields (not in the admin type) ${callName}: ${extra.join(', ')}`)
     for (const k of KNOWN_MISMATCHES) {
@@ -770,6 +799,26 @@ describe('the admin console\'s requests do what the admin means on the server', 
     await expect(A.pluginsApi.setEnabled(CO, 'sample-hub', true)).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_READY' })
     expect((await A.pluginsApi.setReadScope(CO, 'sample-hub', { departmentIds: [], userIds: [USERS.owner] })).readScope).toEqual({ departmentIds: [], userIds: [USERS.owner] })
     expect(row('SELECT enabled FROM plugin_installs WHERE company_id = ? AND plugin_id = ?', CO, 'sample-hub').enabled).toBe(0)
+  })
+
+  it('定期の仕事: the definition, the version approved, the pause and the stop reach the server as chosen', async () => {
+    const made = await A.jobsApi.create(CO, CONTRACT_JOB as Parameters<typeof A.jobsApi.create>[1])
+    const stored = row('SELECT definition, fingerprint FROM ai_job_versions WHERE company_id = ? AND job_id = ? AND version = 1', CO, made.id)
+    expect(JSON.parse(stored.definition)).toEqual(CONTRACT_JOB)
+    const updated = await A.jobsApi.update(CO, made.id, { ...CONTRACT_JOB, name: '契約の定期 2' } as Parameters<typeof A.jobsApi.update>[2])
+    expect(updated).toMatchObject({ changed: true, latestVersion: 2 })
+    await A.jobsApi.approve(CO, made.id, 1, stored.fingerprint)
+    expect(row('SELECT approved_version FROM ai_jobs WHERE company_id = ? AND id = ?', CO, made.id).approved_version).toBe(1)
+    // A fingerprint that is not the version's is refused (the version shown is the one approved).
+    await expect(A.jobsApi.approve(CO, made.id, 2, stored.fingerprint)).rejects.toMatchObject({ code: 'JOB_VERSION_FINGERPRINT' })
+    await A.jobsApi.pause(CO, made.id)
+    expect(row('SELECT state, paused_reason FROM ai_jobs WHERE company_id = ? AND id = ?', CO, made.id)).toEqual({ state: 'paused', paused_reason: 'ADMIN' })
+    await A.jobsApi.resume(CO, made.id)
+    expect(row('SELECT state FROM ai_jobs WHERE company_id = ? AND id = ?', CO, made.id).state).toBe('active')
+    await A.jobsApi.setStopped(CO, true)
+    expect(row('SELECT stopped FROM ai_job_settings WHERE company_id = ?', CO).stopped).toBe(1)
+    await A.jobsApi.setStopped(CO, false)
+    expect(row('SELECT stopped FROM ai_job_settings WHERE company_id = ?', CO).stopped).toBe(0)
   })
 
   it('an invitation gets the role and expiry the admin chose', async () => {

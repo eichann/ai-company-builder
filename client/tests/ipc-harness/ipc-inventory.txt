@@ -136,6 +136,10 @@ contract.invoke google:status
 contract.invoke handoff:complete
 contract.invoke handoff:get
 contract.invoke handoff:update
+contract.invoke jobs:accept
+contract.invoke jobs:mine
+contract.invoke jobs:pause
+contract.invoke jobs:resume
 contract.invoke minutes:arrivals
 contract.invoke minutes:autoSeries
 contract.invoke minutes:bundleQuestion
@@ -336,6 +340,7 @@ contract.type EditorBackupResult.skipped = skipped?: 'missing' | 'outside-compan
 contract.type EditorBackupResult.success = success: boolean
 contract.type ElectronAPI = export interface ElectronAPI { }
 contract.type ElectronAPI.acceptAppLinkServer = acceptAppLinkServer: Invoke<'appLink:acceptServer'>
+contract.type ElectronAPI.acceptJob = acceptJob: Invoke<'jobs:accept'>
 contract.type ElectronAPI.actOnTask = actOnTask: Invoke<'tasks:act'>
 contract.type ElectronAPI.addAbsence = addAbsence: Invoke<'absences:add'>
 contract.type ElectronAPI.addOutboundMailRecipient = addOutboundMailRecipient: Invoke<'outboundMail:addRecipient'>
@@ -411,6 +416,7 @@ contract.type ElectronAPI.getMeetingBundleQuestion = getMeetingBundleQuestion: I
 contract.type ElectronAPI.getMeetingCardState = getMeetingCardState: Invoke<'minutes:meeting'>
 contract.type ElectronAPI.getMinutesNotices = getMinutesNotices: Invoke<'minutes:notices'>
 contract.type ElectronAPI.getMyDepartments = getMyDepartments: Invoke<'companySetup:myDepartments'>
+contract.type ElectronAPI.getMyJobs = getMyJobs: Invoke<'jobs:mine'>
 contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
 contract.type ElectronAPI.getNotificationSettings = getNotificationSettings: Invoke<'notifications:settings'>
 contract.type ElectronAPI.getNotificationsState = getNotificationsState: Invoke<'notifications:state'>
@@ -495,6 +501,7 @@ contract.type ElectronAPI.openFileInMainWindow = openFileInMainWindow: Invoke<'c
 contract.type ElectronAPI.openOutboundMailAttachment = openOutboundMailAttachment: Invoke<'outboundMail:openAttachment'>
 contract.type ElectronAPI.openWorkingFolder = openWorkingFolder: Invoke<'companySetup:openWorkingFolder'>
 contract.type ElectronAPI.patchChatSession = patchChatSession: Invoke<'chatHistory:patchSession'>
+contract.type ElectronAPI.pauseJob = pauseJob: Invoke<'jobs:pause'>
 contract.type ElectronAPI.publishSkill = publishSkill: Invoke<'skills:publish'>
 contract.type ElectronAPI.publishSkillToCompany = publishSkillToCompany: Invoke<'skillShelf:publish'>
 contract.type ElectronAPI.readDirectory = readDirectory: Invoke<'fs:readDirectory'>
@@ -518,6 +525,7 @@ contract.type ElectronAPI.resolveOutboundMail = resolveOutboundMail: Invoke<'out
 contract.type ElectronAPI.respondAgentInteraction = respondAgentInteraction: Invoke<'agent-interaction:respond'>
 contract.type ElectronAPI.respondToolApproval = respondToolApproval: Invoke<'tool-approval-response'>
 contract.type ElectronAPI.restoreCompanySkill = restoreCompanySkill: Invoke<'skillShelf:restoreCompany'>
+contract.type ElectronAPI.resumeJob = resumeJob: Invoke<'jobs:resume'>
 contract.type ElectronAPI.retryAiTurn = retryAiTurn: Invoke<'aiTurns:retry'>
 contract.type ElectronAPI.retryTaskRun = retryTaskRun: Invoke<'tasks:retryRun'>
 contract.type ElectronAPI.sameAsApproval = sameAsApproval: Invoke<'approvals:sameAs'>
@@ -814,6 +822,10 @@ contract.type IpcInvokeChannels.'google:status' = 'google:status': { args: [comp
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
+contract.type IpcInvokeChannels.'jobs:accept' = 'jobs:accept': { args: [companyId: string, jobId: string, version: number, fingerprint: string]; result: JobActionResult }
+contract.type IpcInvokeChannels.'jobs:mine' = 'jobs:mine': { args: [companyId: string]; result: MyJobsResult }
+contract.type IpcInvokeChannels.'jobs:pause' = 'jobs:pause': { args: [companyId: string, jobId: string]; result: JobActionResult }
+contract.type IpcInvokeChannels.'jobs:resume' = 'jobs:resume': { args: [companyId: string, jobId: string]; result: JobActionResult }
 contract.type IpcInvokeChannels.'minutes:arrivals' = 'minutes:arrivals': { args: [companyId: string]; result: MeetingArrivalsResult }
 contract.type IpcInvokeChannels.'minutes:autoSeries' = 'minutes:autoSeries': { args: [companyId: string, meetingId: string, auto: boolean]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:bundleQuestion' = 'minutes:bundleQuestion': { args: [companyId: string, minutesId: string]; result: MeetingBundleQuestionResult }
@@ -1112,6 +1124,10 @@ main.handle google:status @ features/google/ipc.ts (companyId: string)
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
+main.handle jobs:accept @ features/jobs/ipc.ts (companyId, jobId, version, fingerprint)
+main.handle jobs:mine @ features/jobs/ipc.ts (companyId)
+main.handle jobs:pause @ features/jobs/ipc.ts (companyId, jobId)
+main.handle jobs:resume @ features/jobs/ipc.ts (companyId, jobId)
 main.handle minutes:arrivals @ features/minutes/ipc.ts (companyId)
 main.handle minutes:autoSeries @ features/minutes/ipc.ts (companyId, meetingId, auto)
 main.handle minutes:bundleQuestion @ features/minutes/ipc.ts (companyId, minutesId)
@@ -1240,6 +1256,8 @@ main.send voice:event @ voice-input.ts
 main.send writeAccess:changed @ main.ts
 preload acceptAppLinkServer -> invoke appLink:acceptServer()
 preload acceptAppLinkServer : () => Promise<SimpleResult>
+preload acceptJob -> invoke jobs:accept($0, $1, $2, $3)
+preload acceptJob : (companyId: string, jobId: string, version: number, fingerprint: string) => Promise<JobActionResult>
 preload actOnTask -> invoke tasks:act($0, $1, $2)
 preload actOnTask : (companyId: string, recordId: string, input: TaskActInput) => Promise<TaskWriteResult>
 preload addAbsence -> invoke absences:add($0, $1)
@@ -1390,6 +1408,8 @@ preload getMinutesNotices -> invoke minutes:notices($0)
 preload getMinutesNotices : (companyId: string) => Promise<MinutesNoticesResult>
 preload getMyDepartments -> invoke companySetup:myDepartments($0)
 preload getMyDepartments : (companyId: string) => Promise<{ success: boolean; departmentIds?: string[] | undefined; }>
+preload getMyJobs -> invoke jobs:mine($0)
+preload getMyJobs : (companyId: string) => Promise<MyJobsResult>
 preload getMyPrivateFolders -> invoke privateFolders:mine($0)
 preload getMyPrivateFolders : (companyId: string) => Promise<{ success: true; folders: MyPrivateFolder[]; } | PrivateFoldersFailure>
 preload getNotificationSettings -> invoke notifications:settings($0)
@@ -1558,6 +1578,8 @@ preload openWorkingFolder -> invoke companySetup:openWorkingFolder($0, $1)
 preload openWorkingFolder : (folder: string, companyId: string) => Promise<{ success: boolean; error?: string | undefined; }>
 preload patchChatSession -> invoke chatHistory:patchSession($0, $1, $2)
 preload patchChatSession : (companyId: string, sessionId: string, patch: ChatMetadataPatch) => Promise<ChatSession | null>
+preload pauseJob -> invoke jobs:pause($0, $1)
+preload pauseJob : (companyId: string, jobId: string) => Promise<JobActionResult>
 preload publishSkill -> invoke skills:publish($0, $1)
 preload publishSkill : (rootPath: string, skillRelativePath: string) => Promise<FileOpResult>
 preload publishSkillToCompany -> invoke skillShelf:publish($0, $1, $2, $3)
@@ -1604,6 +1626,8 @@ preload respondToolApproval -> invoke tool-approval-response($0, $1)
 preload respondToolApproval : (toolUseId: string, approved: boolean) => Promise<boolean>
 preload restoreCompanySkill -> invoke skillShelf:restoreCompany($0, $1)
 preload restoreCompanySkill : (rootPath: string, skillPath: string) => Promise<SkillShelfRestoreResult>
+preload resumeJob -> invoke jobs:resume($0, $1)
+preload resumeJob : (companyId: string, jobId: string) => Promise<JobActionResult>
 preload retryAiTurn -> invoke aiTurns:retry($0, $1)
 preload retryAiTurn : (companyId: string, recordId: string) => Promise<{ ok: boolean; }>
 preload retryTaskRun -> invoke tasks:retryRun($0, $1)

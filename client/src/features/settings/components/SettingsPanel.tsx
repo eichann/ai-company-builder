@@ -10,11 +10,12 @@ import { GoogleSection } from './GoogleSection'
 import { SlackSection } from './SlackSection'
 import { ConnectToolsScreen } from './ConnectToolsScreen'
 import { AbsenceSection } from '../../absences/components/AbsenceSection'
+import { JobsSection } from '../../jobs/components/JobsSection'
 import { MySwitchesSection } from './MySwitchesSection'
 import { LegacyKeysNote, MoveEnvKeysCard } from './MoveEnvKeysCard'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo, SlackLogo, UserSwitch, UserCircle, PlugsConnected } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo, SlackLogo, UserSwitch, UserCircle, CalendarCheck, PlugsConnected } from '@phosphor-icons/react'
 import { useAppStore } from '../../../stores/appStore'
 import { useDepartments } from '../../../shared/hooks/useDepartments'
 import { AGENT_LOG_NOTICE_TEXT, SANDBOX_NOTICE_TEXT } from '../../../shared/lib/agentLogNotice'
@@ -41,7 +42,7 @@ interface SettingsPanelProps {
   mineRows?: ReactNode
 }
 
-export type TabType = 'mine' | 'sync' | 'autosync' | 'gitignore' | 'tools' | 'ownkeys' | 'google' | 'slack' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions' | 'absences'
+export type TabType = 'mine' | 'sync' | 'autosync' | 'gitignore' | 'tools' | 'ownkeys' | 'google' | 'slack' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions' | 'absences' | 'jobs'
 
 const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; icon: ReactNode }> }> = [
   {
@@ -74,6 +75,7 @@ const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; ico
     group: '仕事',
     items: [
       { id: 'absences', label: '不在と代わりの人', icon: <UserSwitch size={16} /> },
+      { id: 'jobs', label: '定期の仕事', icon: <CalendarCheck size={16} /> },
     ],
   },
   {
@@ -393,6 +395,8 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
               </>
             ) : activeTab === 'absences' ? (
               <AbsenceSection key={currentCompany.id} companyId={currentCompany.id} />
+            ) : activeTab === 'jobs' ? (
+              <JobsSection key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'aienv' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">
                 <SectionHeader title="AIに渡す環境変数" description="このPCの環境変数のうち、AIと、AIが実行するコマンドから見えるものの設定です。" />

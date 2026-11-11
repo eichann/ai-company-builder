@@ -67,6 +67,11 @@ export interface NotificationServiceDeps {
    * job now. Absent → never shown.
    */
   jobOccurrenceNoticeOf?: (member: Member, jobId: string, occurrenceId: string) => { name: string; dueSlot: string; outcomeCode: string | null } | null
+  /**
+   * 「受け取りが要ります」 (`job_accept_needed`, jobs.md "The acceptance notice"): the job's name while the
+   * version still waits for this member's acceptance, else null (not shown). Absent → never shown.
+   */
+  jobAcceptNoticeOf?: (member: Member, jobId: string, version: number) => { name: string } | null
   /** The member's role in the company, or null (a notice goes only to someone who reads the record). */
   roleOf: (companyId: string, userId: string) => string | null
   /** The company's time zone for a due without one (records.md "Due with a time"); Japan by default. */
@@ -916,9 +921,15 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         const [, jobId = '', occurrenceId = ''] = (r.dedupeKey ?? '').split(':')
         return deps.jobOccurrenceNoticeOf?.(member, jobId, occurrenceId) ?? null
       }
+      // 「受け取りが要ります」: `job_accept_needed:<job id>:<version>`, shown only while it still waits for the member.
+      const acceptNotice = (r: NotificationRow) => {
+        const [, jobId = '', version = ''] = (r.dedupeKey ?? '').split(':')
+        return /^[1-9][0-9]{0,8}$/.test(version) ? deps.jobAcceptNoticeOf?.(member, jobId, Number(version)) ?? null : null
+      }
       const jobOccurrenceKinds = new Set<string>(JOB_OCCURRENCE_NOTIFICATION_KINDS)
       const visible = rows.filter(r => {
         if (r.kind === 'job_paused') return r.recordId === '' && jobNotice(r) !== null
+        if (r.kind === 'job_accept_needed') return r.recordId === '' && acceptNotice(r) !== null
         if (jobOccurrenceKinds.has(r.kind)) return r.recordId === '' && occurrenceNotice(r) !== null
         if (recordless.has(r.kind)) return r.recordId === ''
         const rec = recs.get(r.recordId)
@@ -953,6 +964,11 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           const job = jobNotice(r) as { name: string; reason: string }
           const why = job.reason === 'OWNER_LEFT' ? '責任者が会社を離れました。新しい責任者を決めてください' : '責任者の権限が変わり、仕事の範囲に足りなくなりました'
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text: `定期の仕事「${job.name}」を止めました：${why}`, createdAt: r.createdAt, read }
+        }
+        if (r.kind === 'job_accept_needed') {
+          const job = acceptNotice(r) as { name: string }
+          const text = `定期の仕事「${job.name}」の責任者になりました。内容を確かめて「受け取る」を押してください（受け取るまで動きません）`
+          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
         }
         if (jobOccurrenceKinds.has(r.kind)) {
           const occ = occurrenceNotice(r) as { name: string; dueSlot: string; outcomeCode: string | null }

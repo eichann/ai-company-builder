@@ -5,6 +5,7 @@ import { DEFAULT_FEATURES, noticeKindsShown, type CompanyFeatures } from '../../
 import { shortDue, turnGroups, type MeetingTurn, type NoticesState, type NoticeTarget } from '../../../../shared/notifications-app'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
+import { opensJobs } from '../../../../shared/jobs'
 import { getNoticeSettings, markNoticesRead, setNoticeSetting, undoNoticedAiChange, undoNoticedChange } from '../api'
 
 const ICON_BUTTON = 'relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
@@ -25,6 +26,8 @@ interface Props {
   onOpen: (target: NoticeTarget) => void
   /** Show the task list (the morning's 「今日のあなたの番」 is about no one record). */
   onOpenTasks?: () => void
+  /** Show the member's scheduled jobs (a job's notice — 「受け取りが要ります」 — is about no record). */
+  onOpenJobs?: () => void
   /** The company's 「使う機能」 (absent = all on): 「知らせの設定」 lists no kind of a feature that is off. */
   features?: CompanyFeatures
 }
@@ -38,7 +41,7 @@ type Open = 'turn' | 'bell' | 'settings' | null
  * Each list item opens its record; reading the bell's list marks nothing until
  * an item is opened or 「すべて既読」 is pressed, so the other PC's dot stays honest.
  */
-export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpenTasks, features = DEFAULT_FEATURES }: Props) {
+export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpenTasks, onOpenJobs, features = DEFAULT_FEATURES }: Props) {
   const [open, setOpen] = useState<Open>(null)
   const [kinds, setKinds] = useState<Record<string, boolean> | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -154,7 +157,8 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
                 onClick={() => {
                   setOpen(null)
                   if (!item.read) void markNoticesRead(companyId, [item.id])
-                  if (item.recordId === '') onOpenTasks?.()
+                  if (item.recordId === '' && opensJobs(item.kind) && onOpenJobs) onOpenJobs()
+                  else if (item.recordId === '') onOpenTasks?.()
                   else onOpen({ recordId: item.recordId, title: item.recordTitle })
                 }}>
                 <span className={`block ${item.read ? 'text-gray-500 dark:text-zinc-400' : 'font-medium text-gray-800 dark:text-zinc-100'}`}>

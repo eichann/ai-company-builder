@@ -12,7 +12,7 @@
  *   PUT  /jobs-stop { stopped }       owner/admin: 「定期の仕事をすべて止める」
  *   GET  /jobs/:jobId/occurrences     the same people as GET /jobs/:jobId: its occurrences (回), newest first (PR 3b)
  */
-import type { JobDefinition, JobOccurrenceState, JobPauseReason, JobState } from '../core/jobs'
+import type { JobDefinition, JobOccurrenceState, JobPauseReason, JobPlacement, JobState, JobTrigger } from '../core/jobs'
 
 export type { JobState } from '../core/jobs'
 
@@ -51,6 +51,22 @@ export interface JobView {
   createdBy: string
   createdAt: string
   updatedAt: string
+  /**
+   * When it runs (PR 4, for the screens): the approved version's trigger, else the newest version's. A
+   * trigger names no place, so it is answered whenever the job is (also with `definition` hidden).
+   * Absent from a server before PR 4.
+   */
+  trigger?: JobTrigger
+  /** Where the version `trigger` is from runs (`e` the server, `a` the responsible person's PC). Absent before PR 4. */
+  placement?: JobPlacement
+  /**
+   * The next slot (company time `YYYY-MM-DDTHH:MM`) of the approved version's trigger, or null (nothing
+   * approved, retired, or none in the next 70 days). Paused or stopped jobs still answer it: the screen
+   * says that it would not run. Absent before PR 4.
+   */
+  nextSlot?: string | null
+  /** The newest occurrence (slot, state, code only), or null. Absent before PR 4. */
+  lastOccurrence?: { dueSlot: string; state: JobOccurrenceState; outcomeCode: string | null } | null
   /** Present on GET /jobs/:jobId (newest first). */
   versions?: JobVersionView[]
 }

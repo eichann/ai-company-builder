@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import {
   Buildings,
+  CalendarCheck,
   CaretUpDown,
   Check,
   Desktop,
@@ -69,7 +70,7 @@ export interface NavContext {
 }
 
 /**
- * The menu (管理画面の見直し 2-3, owner decisions 2026-11-02; 見える人のまとまり added 2026-11-09): six places used day to day, and
+ * The menu (管理画面の見直し 2-3, owner decisions 2026-11-02; 見える人のまとまり added 2026-11-09; 定期の仕事 2026-11-11): six places used day to day, and
  * 「詳しい設定」 alone at the bottom (`ADVANCED_ITEM`) — 仕事の進め方・会社の暦・来た連絡の決まり・
  * AI の安全・会社の情報 are inside it. A department manager (部署の管理役) sees ホーム・部署・フォルダ;
  * a member ホーム・部署. Pages left out of the menu still answer their own URL (each checks who may
@@ -88,6 +89,8 @@ export const NAV_ITEMS: NavItem[] = [
   // 「Skill を直せる人」 sees it too: the requests to publish wait there for whoever may publish.
   { segment: 'skills', label: '会社の Skill', icon: Lightning, visible: (c) => c.hasCompanyFolder === false && (c.isAdmin || c.isManager || !!c.isSkillEditor) },
   { segment: 'integrations', label: 'つなぎ先', icon: PlugsConnected, visible: (c) => c.isAdmin },
+  // 定期の仕事 (owners and admins; jobs.md "The screens", PR 4): approving and stopping is day-to-day work.
+  { segment: 'jobs', label: '定期の仕事', icon: CalendarCheck, visible: (c) => c.isAdmin },
 ]
 
 /** 「詳しい設定」: owners and admins (owner decision 2026-11-02: shown to admins, tucked away). */

@@ -318,11 +318,15 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       holdDue: (companyId, jobId, code) => jobOccurrences.holdDue(companyId, jobId, code),
       holdPassedSlot: (companyId, jobId, code) => jobOccurrences.holdPassedSlot(companyId, jobId, code),
     },
+    // A view's next slot (PR 4's screens): the clock's own zone and days off.
+    timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+    holidaysOf: companyId => taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
   })
   const notifications = createNotificationService({
     ...shared,
     jobNoticeOf: (member, jobId) => jobs.noticeJob(member, jobId),
     jobOccurrenceNoticeOf: (member, jobId, occurrenceId) => jobs.occurrenceNotice(member, jobId, occurrenceId),
+    jobAcceptNoticeOf: (member, jobId, version) => jobs.acceptNotice(member, jobId, version),
     coverOf: (companyId, userId) => absences.coverOf(companyId, userId),
     managersOf: (companyId, userId) => absences.managersOf(companyId, userId),
     activeAbsences: companyId => absences.activeToday(companyId),

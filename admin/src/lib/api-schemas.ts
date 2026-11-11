@@ -27,6 +27,7 @@ import type { CoreConnectorsView } from '../../../shared/types/core-connectors'
 import type { GoogleAdminView, GoogleRelayAdminView } from '../../../shared/types/google'
 import type { MemberGroup, MemberGroupsView } from '../../../shared/types/groups'
 import type { InboxSettingsView } from '../../../shared/types/inbox'
+import type { JobList, JobOccurrenceView, JobView } from '../../../shared/types/jobs'
 import type { BrokerView } from '../../../shared/types/key-broker'
 import type { MinutesFolderSetting } from '../../../shared/types/minutes'
 import type { MeetingDuplicates, MeetingDuplicatesMerged } from '../../../shared/types/meeting-outputs'
@@ -356,6 +357,20 @@ export const absenceRemovedSchema = topLevel<{ removed: true }>({ removed: bool 
 export const memberGroupSchema = topLevel<MemberGroup>({ id: str, name: str, memberIds: list, usedIn: list, createdAt: str })
 export const memberGroupsSchema = topLevel<MemberGroupsView>({ groups: list })
 export const groupDeletedSchema = topLevel<{ deleted: true }>({ deleted: bool })
+
+// 定期の仕事 (shared/types/jobs.ts)
+const jobShape = {
+  id: str, name: str, state: str, actingUserId: str, latestVersion: z.number(), approvedVersion: z.nullable(z.number()), accepted: z.boolean(),
+  pausedReason: nullableStr, waiting: nullableStr, createdBy: str, createdAt: str, updatedAt: str,
+  // Absent from a server before PR 4: the page says less, nothing breaks.
+  trigger: z.optional(z.looseObject({})), placement: z.optional(str), nextSlot: z.optional(nullableStr),
+  lastOccurrence: z.optional(z.nullable(z.looseObject({}))), versions: z.optional(z.array(z.unknown())),
+}
+export const jobSchema = topLevel<JobView>(jobShape)
+export const jobUpdatedSchema = topLevel<JobView & { changed: boolean }>({ ...jobShape, changed: z.boolean() })
+export const jobListSchema = topLevel<JobList>({ stopped: z.boolean(), canManage: z.boolean(), jobs: z.array(z.unknown()) })
+export const jobOccurrencesSchema = topLevel<{ occurrences: JobOccurrenceView[] }>({ occurrences: z.array(z.unknown()) })
+export const jobsStopSchema = topLevel<{ stopped: boolean }>({ stopped: z.boolean() })
 
 // 会社の Skill (the Skill shelf of a company without the shared folder)
 export const shelfListSchema = topLevel<ShelfListView>({ items: list })

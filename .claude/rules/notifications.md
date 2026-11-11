@@ -71,6 +71,10 @@ a plugin can never draw a notice (§2-2).
   made — to the responsible person and the job's creator while an owner / admin; key
   `<kind>:<job>:<occurrence>`; text built when read, shown only while the reader may see the job, its
   name 「定期の仕事」 when not theirs to read — `jobs.md` "Notices"; no notice when it ran, D9),
+  `job_accept_needed` (「定期の仕事「…」の責任者になりました…「受け取る」を押してください」, on by default,
+  recordless: a version approved that its responsible person must accept, to them only — never the
+  approver —; key `job_accept_needed:<job>:<version>`; shown only while it still waits for them; opening it
+  shows the app's 「定期の仕事」 — `jobs.md` "The acceptance notice"),
   `asked`, `morning_summary`, `due_tomorrow` (below), `others` (everything else: the AI's
   「用意ができた」 / 「先に渡す」 when it is not a first hand-over, 「自分で進める」 of task v5, sent back,
   cancelled…). While a task is the AI's (`preparing`) nobody is told on create (engine rule); the

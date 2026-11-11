@@ -514,6 +514,88 @@ describe('pause, resume and the company\'s stop', () => {
   })
 })
 
+describe('PR 4: 「受け取りが要ります」 and what the screens read', () => {
+  const owner = { companyId: CO, userId: 'u-owner', role: 'owner' }
+  const acceptNotices = (user: string) => db.prepare("SELECT dedupe_key, actor_id FROM notifications WHERE company_id = ? AND user_id = ? AND kind = 'job_accept_needed'").all(CO, user) as Json[]
+  const bellTexts = async (user: string) => ((await as(user, 'GET', '/me/notifications')).body.data.items as Json[]).filter(i => i.kind === 'job_accept_needed').map(i => i.text)
+  const asked = (name: string) => `定期の仕事「${name}」の責任者になりました。内容を確かめて「受け取る」を押してください（受け取るまで動きません）`
+
+  it('approval tells the responsible person once, only them, and the bell shows it only while it still waits for them', async () => {
+    const def = operationJob('u-alice', '週報のやること')
+    const job = await created(def)
+    const told: string[][] = []
+    const r = await jobsWithSkill('tree-a', { noticesChanged: (_c, users) => told.push(users) }).approve(owner, job.id, { version: 1 })
+    expect(r.ok).toBe(true)
+    expect(acceptNotices('u-alice').map(n => n.dedupe_key).filter(k => k.includes(job.id))).toEqual([`job_accept_needed:${job.id}:1`])
+    expect(told).toEqual([['u-alice']])
+    for (const other of ['u-owner', 'u-admin', 'u-bob']) expect(acceptNotices(other).filter(n => n.dedupe_key.includes(job.id))).toEqual([])
+    expect(await bellTexts('u-alice')).toContain(asked('週報のやること'))
+    // Approved again: no second notice.
+    await jobsWithSkill('tree-a').approve(owner, job.id, { version: 1 })
+    expect(acceptNotices('u-alice').filter(n => n.dedupe_key.includes(job.id))).toHaveLength(1)
+    // Accepted: nothing asks any more, so the bell no longer shows it.
+    expect((await as('u-alice', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })).status).toBe(200)
+    expect(await bellTexts('u-alice')).not.toContain(asked('週報のやること'))
+    // A new version that keeps the consent needs no acceptance: nobody is told.
+    await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, name: '週報のやること（改）' } })
+    await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 2 })
+    expect(acceptNotices('u-alice').filter(n => n.dedupe_key.includes(job.id))).toHaveLength(1)
+    // One that changes it does, again once for that version.
+    await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, name: '週報のやること（改）', grant: { ...def.grant, limits: { minutes: 9, runsPerDay: 1 } } } })
+    await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 3 })
+    expect(acceptNotices('u-alice').filter(n => n.dedupe_key.includes(job.id)).map(n => n.dedupe_key)).toEqual([`job_accept_needed:${job.id}:1`, `job_accept_needed:${job.id}:3`])
+    expect(await bellTexts('u-alice')).toContain(asked('週報のやること（改）'))
+  })
+
+  it('the approver who is the responsible person is not told; someone no longer responsible no longer sees it', async () => {
+    const mine = await created(operationJob('u-admin', '自分の仕事'))
+    await as('u-admin', 'POST', `/jobs/${mine.id}/approve`, { version: 1 })
+    expect(acceptNotices('u-admin').filter(n => n.dedupe_key.includes(mine.id))).toEqual([])
+    const def = operationJob('u-bob', '引き継ぐ仕事')
+    const job = await approved(def)
+    expect(await bellTexts('u-bob')).toContain(asked('引き継ぐ仕事'))
+    // Handed to alice and approved: bob's notice asks nothing of him any more.
+    await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, actingUser: 'u-alice' } })
+    await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 2 })
+    expect(await bellTexts('u-bob')).not.toContain(asked('引き継ぐ仕事'))
+    expect(await bellTexts('u-alice')).toContain(asked('引き継ぐ仕事'))
+  })
+
+  it('a newer version approved before acceptance asks once: the older version\'s notice is no longer shown', async () => {
+    const def = operationJob('u-carol', '二度の承認')
+    const job = await approved(def)
+    await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, name: '二度の承認（改）' } })
+    await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 2 })
+    expect(acceptNotices('u-carol').filter(n => n.dedupe_key.includes(job.id))).toHaveLength(2)
+    expect((await bellTexts('u-carol')).filter(t => t.includes('二度の承認'))).toEqual([asked('二度の承認（改）')])
+  })
+
+  it('the notice names the job 「定期の仕事」 for a responsible person who cannot read a place the newest version names', async () => {
+    const made = await jobsWithSkill('tree-a').create(owner, { definition: { ...procedureJob('u-bob', '総務/reports'), name: '総務の週報' } })
+    if (!made.ok) throw new Error(JSON.stringify(made.body))
+    if (!(await jobsWithSkill('tree-a').approve(owner, made.value.id, { version: 1 })).ok) throw new Error('approve')
+    expect(await bellTexts('u-bob')).toContain(asked('総務の週報'))
+    // A draft renamed after a place bob cannot read: the approved version still waits for him, under the neutral name.
+    await jobsWithSkill('tree-a').update(owner, made.value.id, { definition: { ...procedureJob('u-bob', '経理部/reports'), name: '経理部の月次' } })
+    const texts = await bellTexts('u-bob')
+    expect(texts.some(t => t.includes('経理部'))).toBe(false)
+    expect(texts).toContain(asked('定期の仕事'))
+  })
+
+  it('a view answers when it runs: the approved trigger, its next slot, and the newest occurrence', async () => {
+    const def = operationJob('u-bob', '次の回')
+    const draft = await created(def)
+    expect(draft).toMatchObject({ trigger: def.trigger, placement: 'e', nextSlot: null, lastOccurrence: null })
+    const job = await approved(def)
+    expect(job.nextSlot).toMatch(/^\d{4}-\d{2}-\d{2}T09:00$/)
+    // A newer draft does not change when the approved version runs.
+    await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, trigger: { ...def.trigger, at: '18:00' } } })
+    const after = (await as('u-bob', 'GET', '/jobs')).body.data.jobs.find((j: Json) => j.id === job.id)
+    expect(after.trigger.at).toBe('09:00')
+    expect(after.nextSlot.endsWith('T09:00')).toBe(true)
+  })
+})
+
 /** A job service on the same database whose company Skill reads `tree` (null: none). */
 function jobsWithSkill(tree: string | null, opts: { folder?: boolean; noticesChanged?: (companyId: string, userIds: string[]) => void } = {}) {
   return createJobService({
