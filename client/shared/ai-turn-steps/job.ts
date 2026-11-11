@@ -190,6 +190,6 @@ export function jobFirstMessage(input: { name: string; found: JobFound; procedur
     AUTOMATIC_NO_SHELL_RULE,
     `- ${input.deadline} までに終えてください。それを過ぎると止まります。`,
     '',
-    `終わったら、必ず ${JOB_REPORT_TOOL} を1回呼んで、私へのやることの名前（title、80文字まで）と、作ったもの・確かめてほしいことの短い説明（summary、300文字まで）を渡してください。やることはアプリが私のために作ります。`,
+    `終わったら、必ず ${JOB_REPORT_TOOL} を1回呼んで、私へのやることの名前（title、80文字まで）と、作ったもの・確かめてほしいことの短い説明（summary、300文字まで）を渡してください。やることはそのときに作られます。${JOB_REPORT_TOOL} が断ったときは、やることは作られていません。作ったとは言わず、そのとおり伝えてください。`,
   ].join('\n')
 }

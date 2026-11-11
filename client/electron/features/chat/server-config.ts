@@ -79,7 +79,7 @@ export interface ChatServerConfigDeps {
   /** Google Drive (features/google/drive.ts): the person's Picker; absent = no Drive tools. */
   drivePicking?: Pick<DrivePicking, 'pick'>
   /** A scheduled job's run held for a consultation: its `job_report` (features/ai-turns/job-runs.ts); null otherwise. */
-  jobReport?: (conversationId: string) => ((result: unknown) => string | null) | null
+  jobReport?: (conversationId: string) => ((result: unknown) => Promise<string | null>) | null
   /** The allowed-roots check (a Drive put reads a local file). */
   paths?: PathGuard
   /** Which Skill a consultation used (services/skill-use-reporter.ts, records.md "Which Skill"); absent = not recorded. */

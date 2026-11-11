@@ -7,7 +7,7 @@ import {
   AI_TURN_PASS_CAP, AI_TURN_PASS_INTERVAL_MS, MAX_ATTEMPTS_PER_RECORD, freshLog, logForToday, nextAiTurn, orderAiTurns,
   FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, askedAgain, handUrgent, handedOver, movedOn, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
   canResumeAiTurns, retitledConsultation, closesWhenRunEnds, closesWhenRecordEnds, rememberedAutomatic, forgottenAutomatic,
-  automaticConsultationsOf, readAutomaticConsultations, AUTOMATIC_CONSULTATIONS_KEPT, type ConsultationHold, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT, mayStartAiTurns, jobOutcome,
+  automaticConsultationsOf, readAutomaticConsultations, AUTOMATIC_CONSULTATIONS_KEPT, type ConsultationHold, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT, mayStartAiTurns, jobOutcome, notDeferred,
 } from './aiTurns'
 import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
 
@@ -366,4 +366,12 @@ test('a scheduled job: after the records, outside their daily limit and their fa
   const log = freshLog(NOW)
   for (const outcome of ['failed', 'unfinished'] as const) assert.equal(jobOutcome(log, outcome, ON, null), log)
   assert.equal(jobOutcome(log, 'usage-limit', ON, { until: NOW + 60_000, seenAt: NOW }).pausedUntil, NOW + 60_000)
+})
+
+// A claim not won (a job's place not synced yet, the server unreachable) is not a start: it waits a while instead of
+// being asked again every tick, and the pass cap is left for runs (staging 2026-11-11: four empty tries used it up).
+test('a claim not won waits before it is asked again, the others go on', () => {
+  const deferred = new Map([[A.id, NOW + 30_000]])
+  assert.deepEqual(notDeferred([A, B], deferred, NOW).map(c => c.id), [B.id])
+  assert.deepEqual(notDeferred([A, B], deferred, NOW + 30_000).map(c => c.id), [A.id, B.id])
 })

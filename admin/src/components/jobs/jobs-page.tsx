@@ -21,7 +21,7 @@ import { jobOccurrenceText, jobRunsText, jobSlotText, jobTriggerText } from '../
 import { JobApproveDialog, JobFormDialog, JobOccurrences } from './job-dialogs'
 
 export const JOBS_INTRO =
-  '決まった時間に、責任者のやることを作る仕事です（例：毎週月曜 9:00 に「週の報告を書く」）。作ったあと、オーナーか管理者が承認し、責任者が内容を確かめて「受け取る」を押すと動き始めます。AI は使いません。'
+  '決まった時間に動く仕事です。やることを作るだけの仕事（例：毎週月曜 9:00 に「週の報告を書く」。AI は使いません）と、責任者の PC の AI が会社の Skill で作業して、終わったらやることを作る仕事があります。作ったあと、オーナーか管理者が承認し、責任者が内容を確かめて「受け取る」を押すと動き始めます。'
 
 const personName = (m: { name: string | null; email: string | null } | undefined) => (m ? m.name || m.email || '名前未設定' : 'もういない人')
 

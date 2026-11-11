@@ -398,8 +398,9 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   (read now; a job has no person who asked). For `new_files` in the shared folder, **before the claim**
   (`gitCheckPoint`): this PC must have what the server has — fetched since `checkUntil` (`FETCH_HEAD`'s time) **and**
   the server's tip (`@{upstream}`, else `FETCH_HEAD`) in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or a
-  sync stopped on a conflict leaves it out) — else nothing is claimed and it is tried later (never `nothing` on a
-  guess). Then `POST /job-run-claims` with `checks` and `checkedCommit` (this PC's `HEAD` in the place's repository;
+  sync stopped on a conflict leaves it out) — else nothing is claimed and it is asked again after `NOT_SYNCED_RETRY_MS`
+  (30 s; `retryAfterMs` on the answer), never `nothing` on a guess. **Not a start** (`ai-turns.md`): it does not use
+  up the runner's pass, and its hidden consultation, which never ran, is deleted. Then `POST /job-run-claims` with `checks` and `checkedCommit` (this PC's `HEAD` in the place's repository;
   the server keeps it on the occurrence, `checked_commit`, once — a re-claim looks up to the same); then **the check,
   before any AI** (D6): `new_files` — in the shared folder, files added in `sinceCommit..checkedCommit`
   (`newFilesByGit`: `log --diff-filter=A`, by what is reachable, **never by commit dates** — an old-dated commit that
@@ -431,9 +432,13 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   Code's reads (Read, Glob, Grep) only inside the grant's read paths or that area, as written and as resolved
   (`readArea`, `checkReadArea`; Glob / Grep must name a `path`, a Glob pattern may not climb out).
 - **The one やること**: `job_report { title, summary? }` (`job-report-tool.ts`, a record-tool provider made only for a
-  consultation main holds a job run for; it calls nothing) keeps it in main; settle finishes `done` with it as
-  `jobResult` and the server makes the やること. No report → `temporary` `UNFINISHED` (the server retries, then a
-  person); the AI never reports `nothing` (only the check decides that).
+  consultation main holds a job run for) **finishes the run right there** with it as `jobResult`, so the tool's answer
+  is the server's: 「やることを作りました」, or — the run taken away meanwhile (a pause, the stop, its time; staging
+  2026-11-11: the AI said it had made one after a pause) — an error the consultation shows on the tool's row
+  (`JOB_REPORT_REFUSED` 「仕事が止められていたか、時間が来ていたため、やることは作られませんでした。…」), so the AI never
+  claims it. Asked again, the same answer; nothing is finished twice; settle then only reports the outcome. No report
+  → `temporary` `UNFINISHED` (the server retries, then a person); the AI never reports `nothing` (only the check
+  decides that).
 - **Time and the server**: main stops the AI `JOB_STOP_BEFORE_MS` (1 min) before the approved minutes from the run's
   first claim (`run.createdAt`, on the server's clock: shifted by the difference between the claim's `updatedAt` and
   this PC's time) end — not started at all with less left —, through the chat turns' `abort` with

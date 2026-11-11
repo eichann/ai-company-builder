@@ -10,7 +10,7 @@ type Control = {
   requests: Array<{ path: string; body: Record<string, unknown> | null }>
   open(): boolean
   finish(): void
-  aiTurns: { claims: Array<[string, string, number, string]>; settled: string[]; retried: string[]; order: string[] }
+  aiTurns: { claims: Array<[string, string, number, string]>; settled: string[]; retried: string[]; order: string[]; deleted: string[] }
 }
 const chat = async <T>(page: Page, fn: (control: Control) => T) =>
   (await page.evaluateHandle(() => (window as unknown as { __acbChat: Control }).__acbChat)).evaluate(fn)
@@ -67,6 +67,21 @@ test('when another PC took the AI turn first, nothing is sent from this one', as
   await page.waitForTimeout(4_000)
   expect(await chat(page, c => c.requests.filter(r => r.path === '/api/chat').length)).toBe(0)
   expect(await chat(page, c => c.aiTurns.claims.length)).toBe(1)
+  // The hidden consultation never ran: its empty stored copy is deleted (none pile up).
+  const conversation = (await chat(page, c => c.aiTurns.claims))[0][3]
+  await expect.poll(() => chat(page, c => c.aiTurns.deleted), { timeout: 10_000 }).toContain(conversation)
+})
+
+// Staging 2026-11-11: a job's place not synced yet was given back four times in nine seconds, which used up the
+// starts of the pass; the real claim came ten minutes later. A claim not won is no start and waits before it is asked again.
+test('a claim answered 「not yet」 waits before it is asked again, and its empty consultation is deleted', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'later' })
+  await expect.poll(() => chat(page, c => c.aiTurns.claims.length), { timeout: 15_000 }).toBe(1)
+  await page.waitForTimeout(9_000)
+  expect(await chat(page, c => c.aiTurns.claims.length)).toBe(1)
+  const conversation = (await chat(page, c => c.aiTurns.claims))[0][3]
+  expect(await chat(page, c => c.aiTurns.deleted)).toContain(conversation)
+  expect(await chat(page, c => c.requests.filter(r => r.path === '/api/chat').length)).toBe(0)
 })
 
 test('a meeting that failed on an older build and was asked for again is given back and claimed, without pressing 「もう一度」', async ({ page }) => {

@@ -36,7 +36,7 @@ const turn = (over: Record<string, unknown> = {}) => ({
   checkSince: '2026-11-10T00:00:00.000Z', procedure: { source: 'company_skill', skill: 'interview-report', fingerprint: 'b'.repeat(40) }, grant: GRANT, ...over,
 })
 
-function fakeServer(opts: { claim?: number; renew?: number; createdAt?: string; serverNow?: string; autoRun?: boolean; turnOver?: Record<string, unknown> } = {}) {
+function fakeServer(opts: { claim?: number; renew?: number; finish?: number; createdAt?: string; serverNow?: string; autoRun?: boolean; turnOver?: Record<string, unknown> } = {}) {
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = []
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -54,7 +54,7 @@ function fakeServer(opts: { claim?: number; renew?: number; createdAt?: string; 
       return json(201, { data: { run: { id: 'run-j1', generation: 1, createdAt: opts.createdAt ?? serverNow, updatedAt: serverNow }, turn: turn({ state: 'running', ...opts.turnOver }) } })
     }
     if (p === '/ai-runs/run-j1/renew') return json(opts.renew ?? 200, {})
-    if (p === '/ai-runs/run-j1/finish') return json(200, { data: {} })
+    if (p === '/ai-runs/run-j1/finish') return json(opts.finish ?? 200, opts.finish ? { code: 'RUN_SUPERSEDED' } : { data: {} })
     return json(404, { code: 'NOT_FOUND' })
   }) as typeof fetch
   return { calls, fetch }
@@ -157,10 +157,12 @@ test('found something: the pinned procedure, the grant\'s tools and areas for th
   assert.deepEqual(claims.jobWriteArea('conv-job-00001'), { place: '人事部', folder: 'reports', reads: ['人事部/面談'] })
   const report = claims.jobReporter('conv-job-00001')
   assert.ok(report)
-  assert.ok(report({ title: '改\n行' }), 'a bad title is refused')
+  assert.ok(await report({ title: '改\n行' }), 'a bad title is refused')
   // Only the check decides there is nothing to do; the AI hands back a やること.
-  assert.ok(report('nothing'))
-  assert.equal(report({ title: '面談の報告を確かめる', summary: '下書きは reports に' }), null)
+  assert.ok(await report('nothing'))
+  // The run is finished right at the report: the やること is the server's answer, not a promise.
+  assert.equal(await report({ title: '面談の報告を確かめる', summary: '下書きは reports に' }), null)
+  assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'done', jobResult: { title: '面談の報告を確かめる', summary: '下書きは reports に' } }])
   assert.deepEqual(await claims.settle(COMPANY, OCC), { outcome: 'done' })
   assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'done', jobResult: { title: '面談の報告を確かめる', summary: '下書きは reports に' } }])
   assert.equal(claims.jobTools('conv-job-00001', 'job-procedure'), null)
@@ -375,14 +377,30 @@ test('not synced: nothing is claimed (tried later); a commit not here after the 
   const before = fakeServer()
   const { claims } = claimsFor(before, { jobs: { readShelfSkill: async () => null, checkPoint: async () => 'not-synced' as const, newFiles: async () => [], stopTurn: () => {} } })
   await claims.jobTurns(COMPANY)
-  assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'unavailable' })
+  // Asked again a little later (no start counted: the runner's pass cap is for runs, not for waiting on a sync).
+  assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'unavailable', retryAfterMs: 30_000 })
   assert.equal(before.calls.some(c => c.path === '/job-run-claims'), false)
 
   const server = fakeServer()
   const second = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async () => ({ commit: 'c'.repeat(40) }), newFiles: async () => 'not-synced' as const, stopTurn: () => {} } }).claims
   await second.jobTurns(COMPANY)
-  assert.deepEqual(await second.claim(COMPANY, OCC, 1, 'conv-job-00002'), { claimed: false, reason: 'unavailable' })
+  assert.deepEqual(await second.claim(COMPANY, OCC, 1, 'conv-job-00002'), { claimed: false, reason: 'unavailable', retryAfterMs: 30_000 })
   assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'failed', failure: { class: 'temporary', code: 'NOT_SYNCED' } }])
+})
+
+test('the report refused (paused, stopped, its time): the AI is told no やること was made, and the consultation stays open', async () => {
+  const server = fakeServer({ finish: 409 })
+  const { claims } = claimsFor(server)
+  await claims.jobTurns(COMPANY)
+  assert.ok((await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')).claimed)
+  const report = claims.jobReporter('conv-job-00001')!
+  const said = await report({ title: '面談の報告を確かめる' })
+  assert.ok(said?.includes('やることは作られませんでした'), said ?? '')
+  // Asked again, the same answer; nothing is finished twice.
+  assert.equal(await report({ title: '面談の報告を確かめる' }), said)
+  assert.equal(finishes(server).length, 1)
+  assert.deepEqual(await claims.settle(COMPANY, OCC), { outcome: 'failed' })
+  assert.equal(finishes(server).length, 1)
 })
 
 test('the chat server never runs a job\'s turn without its run: the token is asked only with the run, and none → no turn', async () => {

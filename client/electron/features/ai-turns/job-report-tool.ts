@@ -8,7 +8,7 @@ import { JOB_REPORT_TOOL } from '../../../shared/ai-turn-steps/job'
 import type { ExtraRecordTools, RecordToolDescriptor } from '../../records/tools'
 import { recordToolDisplay } from '../../../shared/acb-tool-displays'
 
-export function createJobReportTools(report: (result: unknown) => string | null): ExtraRecordTools {
+export function createJobReportTools(report: (result: unknown) => Promise<string | null>): ExtraRecordTools {
   const spec: RecordToolDescriptor = {
     name: JOB_REPORT_TOOL, readOnly: false,
     display: recordToolDisplay(JOB_REPORT_TOOL),
@@ -26,8 +26,9 @@ export function createJobReportTools(report: (result: unknown) => string | null)
       if (name !== spec.name) return JSON.stringify({ error: 'この道具はありません。' })
       const parsed = spec.schema.safeParse(input ?? {})
       if (!parsed.success) return JSON.stringify({ error: '入力が正しくありません。' })
-      const refused = report({ title: parsed.data.title, summary: parsed.data.summary ?? null })
-      return JSON.stringify(refused ? { error: refused } : { ok: true, note: '受け取りました。これで終えてください。' })
+      // The run is finished here: the answer is the server's (made, or refused — the AI must not claim it then).
+      const refused = await report({ title: parsed.data.title, summary: parsed.data.summary ?? null })
+      return JSON.stringify(refused ? { error: refused } : { ok: true, note: 'やることを作りました。これで終えてください。' })
     },
   }
 }

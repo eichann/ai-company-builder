@@ -45,6 +45,17 @@ export interface HandOff {
 /** At most this many records are started in one pass; the next pass comes `AI_TURN_PASS_INTERVAL_MS` later. */
 export const AI_TURN_PASS_CAP = 3
 export const AI_TURN_PASS_INTERVAL_MS = 10 * 60_000
+/**
+ * A claim not won (not allowed now, the server unreachable, a job's place not synced yet) is not a start: it never
+ * counts toward `AI_TURN_PASS_CAP`, and the same one is not asked again before this long (or its `retryAfterMs`).
+ */
+export const CLAIM_RETRY_MS = 60_000
+
+/** The queue without what waits after a claim not won (`deferred`: id → not before this time). */
+export function notDeferred(queue: readonly AiTurnCandidate[], deferred: ReadonlyMap<string, number>, now: number): AiTurnCandidate[] {
+  return queue.filter(c => (deferred.get(c.id) ?? 0) <= now)
+}
+
 /** A record that failed twice today waits for a person (its notice stays). */
 export const MAX_ATTEMPTS_PER_RECORD = 2
 /** A record due within this time is handed to the person rather than waiting for the AI. */

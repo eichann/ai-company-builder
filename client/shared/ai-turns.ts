@@ -55,7 +55,8 @@ export function readOwnAutoRun(value: unknown): boolean {
 export type AiTurnClaimResult =
   /** `message`: the first message main made (a business plugin's step: its pinned procedure, plugin-steps.md). */
   | { claimed: true; version: number | null; message?: string }
-  | { claimed: false; reason: 'taken' | 'not-allowed' | 'unavailable' }
+  /** `retryAfterMs`: when to try this one again (a job's place not synced yet); absent → the runner's own wait. */
+  | { claimed: false; reason: 'taken' | 'not-allowed' | 'unavailable'; retryAfterMs?: number }
 
 /**
  * The record after an automatic turn (`aiTurns:settle`): `done` = the AI

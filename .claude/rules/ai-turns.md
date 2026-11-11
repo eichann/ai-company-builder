@@ -536,7 +536,13 @@ records, neither counts toward nor waits for their daily limit, and its failures
 Claude's usage limit). For every kind — **a behaviour change for records too** (B PR 5a-2) — a claim that wins after
 the runner stopped waiting for it (`START_TIMEOUT_MS`) is settled at once (`aiTurns:settle`: a reading put back, the
 run finished as unfinished) rather than left held with no AI until its lease runs out; one line in the hook, not covered
-by a test. Test: `client/tests/job-runs.test.ts`, `aiTurns.test.ts`
+by a test. **A claim not won is not a start** (staging 2026-11-11: a job's place not synced yet was given back
+four times in nine seconds and used up the pass; the real claim came ten minutes later): only a claim that won counts
+toward `AI_TURN_PASS_CAP`, and one not won (not allowed now, unreachable, not synced) is not asked again before its
+`retryAfterMs` or `CLAIM_RETRY_MS` (60 s; `notDeferred`) — for records too. The hidden consultation of a claim not won
+(or won after the runner gave up, or with no message) is closed **and its stored copy deleted** (`deleteChatSession`),
+so empty 「新しい会話」 never pile up. Tests: `aiTurns.test.ts`, `tests/ui/ai-turns.spec.ts` (`?autoturn=later`,
+`?autoturn=taken`). Test: `client/tests/job-runs.test.ts`, `aiTurns.test.ts`
 (mutation-checked).
 
 ## Not yet

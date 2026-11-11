@@ -28,7 +28,8 @@ export function jobRunText(run: JobRun): string {
     const due = run.dueBusinessDays === null ? '期限なし' : run.dueBusinessDays === 0 ? '期限はその日' : `期限は${run.dueBusinessDays}営業日後`
     return `責任者に、やること「${run.title}」を作ります（${due}）。AI は使いません`
   }
-  return `会社の Skill「${run.procedure.skill}」を、責任者の PC の AI が動かします`
+  const skill = run.procedure.source === 'shelf_skill' ? `会社の Skill の棚の「${run.procedure.skill}」` : `会社の Skill「${run.procedure.skill}」`
+  return `${skill}を、責任者の PC の AI が動かします`
 }
 
 /** The check before running, or null when there is none. */
@@ -58,7 +59,7 @@ export function jobMinutesText(minutes: number): string {
 }
 
 const TOOL_WORDS: Record<string, string> = {
-  records: 'やること・記録を読んで書く',
+  records: 'やること・記録を読む（作るのは、終わったときのやること1つだけ）',
   approvals: '承認のお願いを出す',
   outbound_draft: 'メールの下書きを作る（送るのは人）',
   files_read: '下の場所のファイルを読む',

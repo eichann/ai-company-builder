@@ -17,7 +17,7 @@ export interface RecordToolProviderDeps {
   paths?: PathGuard
   privateFolders: Pick<PrivateFolderGuards, 'readable'>
   /** A scheduled job's run held for this consultation: its `job_report` (main's claim); null for any other consultation. */
-  jobReport?: (conversationId: string) => ((result: unknown) => string | null) | null
+  jobReport?: (conversationId: string) => ((result: unknown) => Promise<string | null>) | null
 }
 
 /** The turn the tools are for: its company and the consultation's company folder. */

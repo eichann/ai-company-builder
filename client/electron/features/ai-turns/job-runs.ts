@@ -52,6 +52,12 @@ export interface JobRunDeps {
   log?: Pick<Console, 'warn'>
 }
 
+/** A place not synced yet: asked again after this (the app syncs by itself meanwhile); no start is counted. */
+export const NOT_SYNCED_RETRY_MS = 30_000
+
+/** What the AI is told when its report could not make the やること (the run was taken away or finished meanwhile). */
+export const JOB_REPORT_REFUSED = '仕事が止められていたか、時間が来ていたため、やることは作られませんでした。作ったとは言わず、そのとおり伝えてください。'
+
 /** How long before the approved minutes run out the app stops its AI (the server refuses every call after them). */
 export const JOB_STOP_BEFORE_MS = 60_000
 
@@ -61,7 +67,8 @@ interface Held {
   runId: string
   access: JobToolAccess
   area: JobWriteArea
-  report: { title: string; summary: string | null } | null
+  /** The report's finish: `done` (the server made the やること), `refused` (it did not), null (no report yet). */
+  reported: 'done' | 'refused' | null
   timedOut: boolean
   lost: boolean
   timer: ReturnType<typeof setTimeout> | null
@@ -128,7 +135,7 @@ export function createJobRuns(deps: JobRunDeps) {
       let point: { commit: string | null } | null = null
       if (listedTurn.check.kind === 'new_files') {
         const p = await deps.checkPoint(companyRoot, listedTurn.check.path, listedTurn.checkUntil ?? new Date(now()).toISOString()).catch(() => null)
-        if (p === 'not-synced') return { claimed: false, reason: 'unavailable' }
+        if (p === 'not-synced') return { claimed: false, reason: 'unavailable', retryAfterMs: NOT_SYNCED_RETRY_MS }
         point = p
       }
       const answer = await deps.session(companyId, 'POST', '/job-run-claims', {
@@ -145,7 +152,7 @@ export function createJobRuns(deps: JobRunDeps) {
       }
       const key = keyOf(companyId, occurrenceId)
       const claimedAt = now()
-      const held: Held = { companyId, occurrenceId, runId: run.id, access: { allowsRecordTool: () => false, builtinTools: [] }, area: { nowhere: true, reads: [] }, report: null, timedOut: false, lost: false, timer: null }
+      const held: Held = { companyId, occurrenceId, runId: run.id, access: { allowsRecordTool: () => false, builtinTools: [] }, area: { nowhere: true, reads: [] }, reported: null, timedOut: false, lost: false, timer: null }
       // Taken away by the server (a pause, the company's stop, the time limit, another PC): the AI stops here too.
       deps.hold(companyId, occurrenceId, conversationId, { id: run.id, generation: run.generation }, () => {
         held.lost = true
@@ -160,7 +167,10 @@ export function createJobRuns(deps: JobRunDeps) {
       const found = await findings(turn, companyRoot, point)
       if (found === null) return giveUp({ class: 'bad-input', code: 'CHECK_NOT_POSSIBLE' })
       // Not synced since the window's end: a colleague's file may not be here yet — never `nothing` on a guess.
-      if (found === 'not-synced') return giveUp({ class: 'temporary', code: 'NOT_SYNCED' })
+      if (found === 'not-synced') {
+        await deps.finishRun(companyId, occurrenceId, { class: 'temporary', code: 'NOT_SYNCED' })
+        return { claimed: false, reason: 'unavailable', retryAfterMs: NOT_SYNCED_RETRY_MS }
+      }
       if ((found.kind === 'files' ? found.files.length : found.meetings.length) === 0) {
         const r = await deps.finishRun(companyId, occurrenceId, null, { jobResult: 'nothing' })
         if (!r || r.status >= 300) log.warn(`[jobs] finish (nothing): answered ${r?.status ?? 'nothing'}`)
@@ -214,15 +224,22 @@ export function createJobRuns(deps: JobRunDeps) {
       return byConversation.get(conversationId)?.area ?? null
     },
 
-    /** The run's `job_report` (only for a consultation this app holds a job run for). */
-    reporter(conversationId: string): ((result: unknown) => string | null) | null {
+    /**
+     * The run's `job_report` (only for a consultation this app holds a job run for): the run is finished right
+     * there with the title, so the AI's answer is the server's — the やること made, or refused (the run was taken
+     * away meanwhile: a pause, the stop, the time), which the tool says plainly so the AI never claims it.
+     */
+    reporter(conversationId: string): ((result: unknown) => Promise<string | null>) | null {
       const h = byConversation.get(conversationId)
       if (!h) return null
-      return (result: unknown) => {
+      return async (result: unknown) => {
         const parsed = parseJobRunResult(result)
         if (parsed === null || parsed === 'nothing') return 'title は1行・80文字まで、summary は300文字までにしてください。'
-        h.report = parsed
-        return null
+        if (h.reported !== null) return h.reported === 'done' ? null : JOB_REPORT_REFUSED
+        const r = h.lost ? null : await deps.finishRun(h.companyId, h.occurrenceId, null, { jobResult: parsed })
+        h.reported = r && r.status < 300 ? 'done' : 'refused'
+        if (h.timer) clearTimeout(h.timer)
+        return h.reported === 'done' ? null : JOB_REPORT_REFUSED
       }
     },
 
@@ -233,14 +250,12 @@ export function createJobRuns(deps: JobRunDeps) {
       if (!h || !conversationId) return { outcome: 'unknown' }
       forget(conversationId)
       listed.get(companyId)?.delete(occurrenceId)
+      // Finished at its report: done when the server made the やること; refused (paused, stopped, the time) → the
+      // person looks and the consultation stays open.
+      if (h.reported !== null) return { outcome: h.reported === 'done' ? 'done' : 'failed' }
       if (h.lost) {
         await deps.finishRun(companyId, occurrenceId, { class: 'temporary', code: 'RUN_LOST' })
         return { outcome: 'failed' }
-      }
-      if (h.report) {
-        const r = await deps.finishRun(companyId, occurrenceId, null, { jobResult: h.report })
-        // Refused (the time ran out, paused, stopped): the person looks; the consultation stays open.
-        return { outcome: r && r.status < 300 ? 'done' : 'failed' }
       }
       // Stopped at its time limit without a report: a person looks (needs_person); otherwise tried again later.
       await deps.finishRun(companyId, occurrenceId, h.timedOut ? { class: 'bad-input', code: 'TIME_LIMIT' } : { class: 'temporary', code: 'UNFINISHED' })
