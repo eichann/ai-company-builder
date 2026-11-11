@@ -67,6 +67,19 @@ export interface JobView {
   nextSlot?: string | null
   /** The newest occurrence (slot, state, code only), or null. Absent before PR 4. */
   lastOccurrence?: { dueSlot: string; state: JobOccurrenceState; outcomeCode: string | null } | null
+  /**
+   * The approved version (PR 4): its responsible person and its name — 「定期の仕事」 for a non-admin who cannot
+   * read every place that version names. null: none approved. Absent before PR 4.
+   */
+  approved?: { responsibleUserId: string; name: string } | null
+  /** The newest version's consent is the accepted one: approving it runs without a new acceptance. Absent before PR 4. */
+  latestConsentAccepted?: boolean
+  /**
+   * The caller, by the API's own rules (absent before PR 4): `named` — the newest or approved version names
+   * them (they see it); `controls` — they may pause it (the approved version's responsible person);
+   * `mustAccept` — the approved version names them and its consent is not accepted yet.
+   */
+  you?: { named: boolean; controls: boolean; mustAccept: boolean }
   /** Present on GET /jobs/:jobId (newest first). */
   versions?: JobVersionView[]
 }

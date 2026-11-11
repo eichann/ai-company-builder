@@ -5,7 +5,7 @@ import { DEFAULT_FEATURES, noticeKindsShown, type CompanyFeatures } from '../../
 import { shortDue, turnGroups, type MeetingTurn, type NoticesState, type NoticeTarget } from '../../../../shared/notifications-app'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
-import { opensJobs } from '../../../../shared/jobs'
+import { jobNoticeTarget } from '../../../../shared/jobs'
 import { getNoticeSettings, markNoticesRead, setNoticeSetting, undoNoticedAiChange, undoNoticedChange } from '../api'
 
 const ICON_BUTTON = 'relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
@@ -157,7 +157,9 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
                 onClick={() => {
                   setOpen(null)
                   if (!item.read) void markNoticesRead(companyId, [item.id])
-                  if (item.recordId === '' && opensJobs(item.kind) && onOpenJobs) onOpenJobs()
+                  const jobTarget = item.recordId === '' ? jobNoticeTarget(item.kind) : null
+                  if (jobTarget === 'jobs') onOpenJobs?.()
+                  else if (jobTarget === 'none') { /* read; nothing to open */ }
                   else if (item.recordId === '') onOpenTasks?.()
                   else onOpen({ recordId: item.recordId, title: item.recordTitle })
                 }}>

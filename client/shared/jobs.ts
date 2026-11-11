@@ -1,4 +1,4 @@
-import type { JobDefinition, JobPauseReason, JobState, JobTrigger } from '../../shared/core/jobs'
+import type { JobDefinition, JobPauseReason, JobPlacement, JobState, JobTrigger } from '../../shared/core/jobs'
 import type { JobWaiting } from '../../shared/types/jobs'
 
 /**
@@ -12,12 +12,14 @@ export const JOBS_OFFLINE_TEXT = 'サーバーに接続できないため、い�
 /** One job the member is responsible for, as the app shows it. */
 export interface MyJob {
   id: string
-  /** 「定期の仕事」 when a place its newest version names is not the member's to read (the server's rule). */
+  /** The approved version's name (else the newest's); 「定期の仕事」 when a place it names is not the member's to read (the server's rule). */
   name: string
   state: JobState
   waiting: JobWaiting
   pausedReason: JobPauseReason | null
   trigger: JobTrigger | null
+  /** `a`: on the responsible person's PC — does not run before PR 5. */
+  placement: JobPlacement | null
   nextSlot: string | null
   /**
    * The approved version waiting for the member's 「受け取る」, or null. `definition` null: it names a place
@@ -35,7 +37,14 @@ export type MyJobsResult = { success: true; jobs: MyJob[] } | JobsFailure
 /** `jobs:accept` / `jobs:pause` / `jobs:resume`. */
 export type JobActionResult = { success: true } | JobsFailure
 
-/** The bell's notices that open this section (they are about a job, not a record). */
-export function opensJobs(kind: string): boolean {
-  return kind === 'job_accept_needed' || kind === 'job_expired' || kind === 'job_skipped' || kind === 'job_failed'
+/**
+ * What opening a job's notice in the bell does (they are about a job, not a record): 「受け取りが要ります」 opens
+ * this section (it goes to the responsible person alone); an occurrence's notice (`job_expired` …) also
+ * reaches the job's creator, who may run nothing here, so it opens nothing — its text says what happened.
+ * null: not a job's notice.
+ */
+export function jobNoticeTarget(kind: string): 'jobs' | 'none' | null {
+  if (kind === 'job_accept_needed') return 'jobs'
+  if (kind === 'job_expired' || kind === 'job_skipped' || kind === 'job_failed' || kind === 'job_paused') return 'none'
+  return null
 }

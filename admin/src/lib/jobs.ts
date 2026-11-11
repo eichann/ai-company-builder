@@ -100,9 +100,3 @@ export function jobProblemText(problems: string[]): string {
   if (problems.includes('actingUser.BAD') || problems.includes('actingUser.NOT_MEMBER')) return '責任者を選んでください（この会社のメンバー）。'
   return '内容に正しくないところがあります。選び直してください。'
 }
-
-/** Whether accepting `version` again is needed: its consent differs from the one the approved version carries, or nothing is accepted yet. */
-export function needsAcceptance(version: { consentFingerprint: string | null }, approved: { consentFingerprint: string | null } | null, accepted: boolean): boolean {
-  if (!approved || !accepted) return true
-  return version.consentFingerprint === null || version.consentFingerprint !== approved.consentFingerprint
-}

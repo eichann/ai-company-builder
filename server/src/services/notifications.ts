@@ -71,7 +71,7 @@ export interface NotificationServiceDeps {
    * 「受け取りが要ります」 (`job_accept_needed`, jobs.md "The acceptance notice"): the job's name while the
    * version still waits for this member's acceptance, else null (not shown). Absent → never shown.
    */
-  jobAcceptNoticeOf?: (member: Member, jobId: string, version: number) => { name: string } | null
+  jobAcceptNoticeOf?: (member: Member, jobId: string, version: number) => { name: string; contentChanged: boolean } | null
   /** The member's role in the company, or null (a notice goes only to someone who reads the record). */
   roleOf: (companyId: string, userId: string) => string | null
   /** The company's time zone for a due without one (records.md "Due with a time"); Japan by default. */
@@ -966,8 +966,10 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text: `定期の仕事「${job.name}」を止めました：${why}`, createdAt: r.createdAt, read }
         }
         if (r.kind === 'job_accept_needed') {
-          const job = acceptNotice(r) as { name: string }
-          const text = `定期の仕事「${job.name}」の責任者になりました。内容を確かめて「受け取る」を押してください（受け取るまで動きません）`
+          const job = acceptNotice(r) as { name: string; contentChanged: boolean }
+          const text = job.contentChanged
+            ? `あなたが責任者の定期の仕事「${job.name}」の内容が変わりました。確かめて「受け取る」を押してください（受け取るまで動きません）`
+            : `定期の仕事「${job.name}」の責任者になりました。内容を確かめて「受け取る」を押してください（受け取るまで動きません）`
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
         }
         if (jobOccurrenceKinds.has(r.kind)) {

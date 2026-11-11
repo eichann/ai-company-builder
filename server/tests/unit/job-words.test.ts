@@ -10,6 +10,8 @@ import { jobOccurrenceText, jobPauseReasonText, jobTriggerText } from '../../sha
 describe('job words', () => {
   it('every occurrence state and outcome code has words, never the code itself', () => {
     for (const state of JOB_OCCURRENCE_STATES) expect(jobOccurrenceText(state, null).label).not.toBe(state)
+    // A held occurrence's heading claims no cause (not accepted, another version approved, a pause…): the reason says it.
+    expect(jobOccurrenceText('held', 'NOT_ACCEPTED').label).not.toContain('止め')
     for (const code of JOB_OUTCOME_CODES) {
       const why = jobOccurrenceText('held', code).why
       expect(why, code).toBeTruthy()

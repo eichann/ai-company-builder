@@ -15,12 +15,12 @@ import { jobsApi, type JobVersionView, type JobView, type Member } from '@/lib/a
 import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import {
-  JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, definitionFromForm, emptyJobForm, formFromDefinition, jobProblemText, needsAcceptance, type JobForm,
+  JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, definitionFromForm, emptyJobForm, formFromDefinition, jobProblemText, type JobForm,
 } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
 import type { JobDefinition, JobWeekday } from '../../../../shared/core/jobs'
 import {
-  jobCheckText, jobGrantLines, jobMissedText, jobOccurrenceText, jobPlacementText, jobRunText, jobSlotText, jobTriggerText,
+  jobCheckText, jobGrantLines, jobMissedText, jobOccurrenceText, jobPlacementText, jobRunText, jobRunsText, jobSlotText, jobTriggerText,
 } from '../../../../shared/core/job-words'
 
 const personName = (m: { name: string | null; email: string | null } | undefined) => (m ? m.name || m.email || '名前未設定' : 'もういない人')
@@ -226,9 +226,9 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
   const [problem, setProblem] = useState<string | null>(null)
   const versions: JobVersionView[] = detail.data?.versions ?? []
   const newest = versions[0] ?? null
-  const approved = versions.find((v) => v.version === detail.data?.approvedVersion) ?? null
   const definition = newest?.definition ?? null
-  const mustAccept = newest ? needsAcceptance(newest, approved, detail.data?.accepted ?? false) : true
+  // The server's own rule: the newest version's consent is the accepted one (else a new 受け取る is needed).
+  const mustAccept = detail.data?.latestConsentAccepted !== true
   const who = definition ? personName(members.find((m) => m.userId === definition.actingUser)) : ''
   const own = definition !== null && definition.actingUser === myUserId
 
@@ -250,7 +250,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
           return
         }
       }
-      toast.success(own || !mustAccept ? `第${newest.version}版を承認しました` : `第${newest.version}版を承認しました。${who}さんの受け取りを待ちます`)
+      toast.success(approvedText(newest.version, next, who))
       onClose()
     } catch (err) {
       setProblem(describeError(err))
@@ -273,10 +273,10 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
             <JobVersionWords definition={definition} members={members} />
             <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm" role="note">
               {own
-                ? 'あなたが責任者です。承認すると、あなたの名前で受け取ったことになり、動き始めます。'
+                ? 'あなたが責任者です。承認すると、あなたの名前で受け取ったことにもなります。'
                 : mustAccept
                   ? `承認したあと、${who}さんが内容を確かめて「受け取る」を押すまで動きません（${who}さんに知らせが届きます）。`
-                  : `${who}さんは、この内容（だれの権限で・何を・どこで）をすでに受け取っています。承認すると、この版で動きます。`}
+                  : `${who}さんは、この内容（だれの権限で・何を・どこで）をすでに受け取っています。承認すると、受け取り直しなしでこの版に切り替わります。`}
             </p>
           </div>
         ) : null}
@@ -288,6 +288,12 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
       </DialogContent>
     </Dialog>
   )
+}
+
+/** What the approval did, from the job as the server answered it (it may still not run: paused, stopped, a PC job). */
+export function approvedText(version: number, after: JobView, who: string): string {
+  if (after.waiting === 'NOT_ACCEPTED') return `第${version}版を承認しました。${who}さんの受け取りを待ちます`
+  return `第${version}版を承認しました。いまは「${jobRunsText(after.waiting, after.pausedReason, after.placement)}」です`
 }
 
 /** A job's occurrences (newest first): when, what became of it and why, in plain words. */

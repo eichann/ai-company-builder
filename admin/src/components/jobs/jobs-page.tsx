@@ -17,7 +17,7 @@ import { useAuth } from '@/lib/auth-context'
 import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
-import { jobOccurrenceText, jobSlotText, jobTriggerText, jobWaitingText } from '../../../../shared/core/job-words'
+import { jobOccurrenceText, jobRunsText, jobSlotText, jobTriggerText } from '../../../../shared/core/job-words'
 import { JobApproveDialog, JobFormDialog, JobOccurrences } from './job-dialogs'
 
 export const JOBS_INTRO =
@@ -32,6 +32,7 @@ export function jobBadge(job: JobView): { label: string; variant: 'success' | 'w
   if (job.waiting === 'COMPANY_STOPPED') return { label: 'すべて止めています', variant: 'warning' }
   if (job.waiting === 'NOT_APPROVED') return { label: '承認待ち', variant: 'secondary' }
   if (job.waiting === 'NOT_ACCEPTED') return { label: '受け取り待ち', variant: 'warning' }
+  if (job.placement === 'a') return { label: '準備中', variant: 'secondary' }
   return { label: '動いています', variant: 'success' }
 }
 
@@ -118,6 +119,8 @@ export function JobsPage() {
             {list.map((job) => {
               const badge = jobBadge(job)
               const newerDraft = job.approvedVersion !== null && job.latestVersion > job.approvedVersion
+              // Who it runs as now: the approved version's responsible person (the newest draft's may differ).
+              const runsAs = job.approved?.responsibleUserId ?? job.actingUserId
               const last = job.lastOccurrence ? jobOccurrenceText(job.lastOccurrence.state, job.lastOccurrence.outcomeCode) : null
               return (
                 <li key={job.id} className="space-y-2 px-5 py-4" aria-label={job.name}>
@@ -128,14 +131,16 @@ export function JobsPage() {
                         <Badge variant={badge.variant}>{badge.label}</Badge>
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        責任者：{personName(byId.get(job.actingUserId))}
+                        責任者：{personName(byId.get(runsAs))}
                         {job.trigger && <>　いつ：{jobTriggerText(job.trigger)}</>}
                       </p>
-                      <p className="text-sm">{jobWaitingText(job.waiting, job.pausedReason)}</p>
+                      <p className="text-sm">{jobRunsText(job.waiting, job.pausedReason, job.placement)}</p>
                       {newerDraft && (
-                        <p className="text-xs text-muted-foreground">新しい版（第{job.latestVersion}版）が承認待ちです。承認するまでは第{job.approvedVersion}版のとおりに動きます。</p>
+                        <p className="text-xs text-muted-foreground">
+                          新しい版（第{job.latestVersion}版）が承認待ちです。承認するまでは第{job.approvedVersion}版のとおりに動きます。
+                          {job.actingUserId !== runsAs && <>次の版では責任者が{personName(byId.get(job.actingUserId))}さんになります（未承認）。</>}
+                        </p>
                       )}
-                      {job.placement === 'a' && <p className="text-xs text-muted-foreground">責任者の PC で動く仕事は、まだ動きません（準備中）。</p>}
                       <p className="text-xs text-muted-foreground">
                         次の回：{job.nextSlot ? jobSlotText(job.nextSlot) : job.approvedVersion === null ? '承認すると決まります' : 'ありません'}
                         {'　'}前の回：{job.lastOccurrence && last ? `${jobSlotText(job.lastOccurrence.dueSlot)}　${last.label}` : 'まだありません'}

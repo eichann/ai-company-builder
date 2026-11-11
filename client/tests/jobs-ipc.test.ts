@@ -5,6 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createJobsApi } from '../electron/features/jobs/ipc'
+import { jobNoticeTarget } from '../shared/jobs'
 
 const J1 = 'job.' + '1'.repeat(32)
 const J2 = 'job.' + '2'.repeat(32)
@@ -17,19 +18,22 @@ const def = (actingUser: string) => ({
   missed: { policy: 'skip', expiresAfterMinutes: 60 },
   grant: { tools: [], creates: ['task'], routes: [], reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 5, runsPerDay: 1 } },
 })
-const view = (id: string, actingUserId: string, approvedFor: string | null, accepted: boolean) => ({
-  id, name: id, state: 'active', actingUserId, latestVersion: 1, approvedVersion: approvedFor ? 1 : null, accepted, pausedReason: null,
-  waiting: accepted ? null : 'NOT_ACCEPTED', trigger: def('me').trigger, nextSlot: '2026-11-12T09:00',
-  versions: [{ version: 1, fingerprint: FP, consentFingerprint: FP, definition: def(approvedFor ?? actingUserId) }],
+const view = (id: string, you: { named: boolean; controls: boolean; mustAccept: boolean }, hidden = false) => ({
+  id, name: `${id}（最新の版）`, state: 'active', actingUserId: 'x', latestVersion: 1, approvedVersion: 1, accepted: !you.mustAccept, pausedReason: null,
+  waiting: you.mustAccept ? 'NOT_ACCEPTED' : null, trigger: def('me').trigger, placement: 'e', nextSlot: '2026-11-12T09:00',
+  approved: { responsibleUserId: 'me', name: hidden ? '定期の仕事' : `${id}（承認された版）` }, you,
+  versions: [{ version: 1, fingerprint: hidden ? null : FP, consentFingerprint: hidden ? null : FP, definition: hidden ? null : def('me') }],
 })
+const NOT_MINE = { named: false, controls: false, mustAccept: false }
+const RUNS_IT = { named: true, controls: true, mustAccept: false }
+const WAITS = { named: true, controls: true, mustAccept: true }
 
-function api(jobs: ReturnType<typeof view>[]) {
+function api(jobs: Array<ReturnType<typeof view>>) {
   const calls: Array<{ method: string; url: string; body?: string; cookie?: string }> = []
   const fetch = (async (url: string, init: RequestInit) => {
     calls.push({ method: init.method ?? 'GET', url, body: init.body as string | undefined, cookie: (init.headers as Record<string, string>).Cookie })
     const path = url.replace('https://acb.example/api', '')
     const json = (data: unknown) => new Response(JSON.stringify({ success: true, data }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    if (path === '/me') return json({ id: 'me' })
     if (path === '/companies/c1/jobs') return json({ stopped: false, canManage: true, jobs })
     const found = jobs.find(j => path === `/companies/c1/jobs/${j.id}`)
     if (found) return json(found)
@@ -38,18 +42,41 @@ function api(jobs: ReturnType<typeof view>[]) {
   return { calls, jobs: createJobsApi({ baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], fetch, log: { warn() {} } }) }
 }
 
-test('only the jobs the member is responsible for are shown, and only theirs waits for their 「受け取る」', async () => {
-  const { jobs } = api([view(J1, 'someone', 'someone', false), view(J2, 'me', 'me', false), view(J3, 'me', 'me', true)])
+test('only the jobs the server says are the member\'s are shown, and only theirs waits for their 「受け取る」', async () => {
+  const { calls, jobs } = api([view(J1, NOT_MINE), view(J2, WAITS), view(J3, RUNS_IT)])
   const r = await jobs.mine('c1')
   assert.ok(r.success)
   assert.deepEqual(r.jobs.map(j => j.id), [J2, J3])
   assert.deepEqual(r.jobs.map(j => j.toAccept?.version ?? null), [1, null])
   assert.equal(r.jobs[0].toAccept?.fingerprint, FP)
+  assert.deepEqual(r.jobs.map(j => j.controls), [true, true])
+  // The heading is the approved version's name (the server's, under its hiding rule), not the newest draft's.
+  assert.equal(r.jobs[0].name, `${J2}（承認された版）`)
+  // Only what waits for them is read in detail.
+  assert.deepEqual(calls.map(c => c.url.replace('https://acb.example/api/companies/c1', '')), ['/jobs', `/jobs/${J2}`])
+})
+
+test('a job whose approved definition is hidden from the member still waits for them, shown as not readable', async () => {
+  const { jobs } = api([view(J1, WAITS, true)])
+  const r = await jobs.mine('c1')
+  assert.ok(r.success)
+  assert.equal(r.jobs.length, 1)
+  assert.deepEqual(r.jobs[0].toAccept, { version: 1, fingerprint: null, definition: null })
+  assert.equal(r.jobs[0].name, '定期の仕事')
   assert.equal(r.jobs[0].controls, true)
 })
 
+test('an owner\'s own jobs are never dropped behind other people\'s', async () => {
+  const others = Array.from({ length: 80 }, (_, i) => view('job.' + i.toString(16).padStart(32, '0'), NOT_MINE))
+  const { jobs } = api([...others, view(J2, WAITS)])
+  const r = await jobs.mine('c1')
+  assert.ok(r.success)
+  assert.deepEqual(r.jobs.map(j => j.id), [J2])
+  assert.equal(r.jobs[0].toAccept?.version, 1)
+})
+
 test('a draft naming the member, approved for someone else, is shown but asks them nothing', async () => {
-  const { jobs } = api([view(J1, 'me', 'someone', false)])
+  const { jobs } = api([view(J1, { named: true, controls: false, mustAccept: false })])
   const r = await jobs.mine('c1')
   assert.ok(r.success)
   assert.equal(r.jobs[0].toAccept, null)
@@ -66,4 +93,10 @@ test('accepting sends the version and fingerprint shown, with the session; rende
   assert.deepEqual(calls, [])
   assert.ok((await jobs.accept('c1', J1, 2, FP)).success)
   assert.deepEqual(calls.map(c => [c.method, c.url, c.body, c.cookie]), [['POST', `https://acb.example/api/companies/c1/me/jobs/${J1}/accept`, JSON.stringify({ version: 2, fingerprint: FP }), 's=1']])
+})
+
+test('a job\'s notice opens 「定期の仕事」 only for the acceptance ask; an occurrence notice (also to the creator) opens nothing', () => {
+  assert.equal(jobNoticeTarget('job_accept_needed'), 'jobs')
+  for (const kind of ['job_expired', 'job_skipped', 'job_failed', 'job_paused']) assert.equal(jobNoticeTarget(kind), 'none')
+  assert.equal(jobNoticeTarget('morning_summary'), null)
 })

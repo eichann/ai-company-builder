@@ -103,6 +103,15 @@ export function jobWaitingText(waiting: 'NOT_APPROVED' | 'NOT_ACCEPTED' | 'PAUSE
   }
 }
 
+/**
+ * Whether it runs, as a person reads it: `jobWaitingText`, except that a job on the responsible person's PC
+ * (placement `a`) does not run before the PC's claim exists (PR 5) — never 「動いています」 for one.
+ */
+export function jobRunsText(waiting: 'NOT_APPROVED' | 'NOT_ACCEPTED' | 'PAUSED' | 'COMPANY_STOPPED' | null, pausedReason: JobPauseReason | null, placement: JobDefinition['placement'] | undefined | null): string {
+  if (waiting === null && placement === 'a') return 'まだ動きません（責任者の PC で動く仕事は準備中です）'
+  return jobWaitingText(waiting, pausedReason)
+}
+
 const OUTCOME_WORDS: Record<string, string> = {
   JOB_PAUSED: '仕事が止まっていたため動かしませんでした',
   COMPANY_STOPPED: '「定期の仕事をすべて止める」が入っていたため動かしませんでした',
@@ -126,7 +135,7 @@ const STATE_WORDS: Record<JobOccurrenceState, string> = {
   needs_person: '人が確かめる必要があります',
   skipped: '見送りました',
   expired: '期限切れ',
-  held: '止めていたため動かしませんでした',
+  held: '動かしませんでした',
 }
 
 /** An occurrence's state: a short label and, when there is one, why. */

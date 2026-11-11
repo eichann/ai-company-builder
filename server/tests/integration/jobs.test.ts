@@ -544,7 +544,7 @@ describe('PR 4: 「受け取りが要ります」 and what the screens read', ()
     await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, name: '週報のやること（改）', grant: { ...def.grant, limits: { minutes: 9, runsPerDay: 1 } } } })
     await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 3 })
     expect(acceptNotices('u-alice').filter(n => n.dedupe_key.includes(job.id)).map(n => n.dedupe_key)).toEqual([`job_accept_needed:${job.id}:1`, `job_accept_needed:${job.id}:3`])
-    expect(await bellTexts('u-alice')).toContain(asked('週報のやること（改）'))
+    expect(await bellTexts('u-alice')).toContain('あなたが責任者の定期の仕事「週報のやること（改）」の内容が変わりました。確かめて「受け取る」を押してください（受け取るまで動きません）')
   })
 
   it('the approver who is the responsible person is not told; someone no longer responsible no longer sees it', async () => {
@@ -580,6 +580,53 @@ describe('PR 4: 「受け取りが要ります」 and what the screens read', ()
     const texts = await bellTexts('u-bob')
     expect(texts.some(t => t.includes('経理部'))).toBe(false)
     expect(texts).toContain(asked('定期の仕事'))
+  })
+
+  it('back to an accepted consent: the view says it runs without acceptance, approval runs it and asks nobody', async () => {
+    const def = operationJob('u-alice', '戻す仕事')
+    const job = await approved(def)
+    expect((await as('u-alice', 'GET', `/jobs/${job.id}`)).body.data.you).toEqual({ named: true, controls: true, mustAccept: true })
+    await as('u-alice', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, grant: { ...def.grant, limits: { minutes: 7, runsPerDay: 1 } } } })
+    expect((await as('u-owner', 'GET', `/jobs/${job.id}`)).body.data.latestConsentAccepted).toBe(false)
+    await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 2 })
+    // v3 is v1's consent again: the accepted one.
+    await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, name: '戻す仕事（3）' } })
+    expect((await as('u-owner', 'GET', `/jobs/${job.id}`)).body.data.latestConsentAccepted).toBe(true)
+    const r = await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 3 })
+    expect(r.body.data).toMatchObject({ accepted: true, waiting: null, you: { mustAccept: false } })
+    expect((await as('u-alice', 'GET', `/jobs/${job.id}`)).body.data.you).toEqual({ named: true, controls: true, mustAccept: false })
+    expect(acceptNotices('u-alice').filter(n => n.dedupe_key.includes(job.id)).map(n => n.dedupe_key.split(':')[2])).toEqual(['1', '2'])
+  })
+
+  it('a new version for the same responsible person says its content changed, not that they became responsible', async () => {
+    const def = operationJob('u-alice', '中身が変わる仕事')
+    const job = await approved(def)
+    await as('u-alice', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, grant: { ...def.grant, limits: { minutes: 8, runsPerDay: 1 } } } })
+    await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 2 })
+    const texts = await bellTexts('u-alice')
+    expect(texts).toContain('あなたが責任者の定期の仕事「中身が変わる仕事」の内容が変わりました。確かめて「受け取る」を押してください（受け取るまで動きません）')
+    expect(texts).not.toContain(asked('中身が変わる仕事'))
+  })
+
+  it('the caller\'s relation and the approved version\'s person and name are answered even when its definition is hidden', async () => {
+    const made = await jobsWithSkill('tree-a').create(owner, { definition: { ...procedureJob('u-carol', 'カロル室/文字起こし'), name: 'カロル室の報告' } })
+    if (!made.ok) throw new Error(JSON.stringify(made.body))
+    if (!(await jobsWithSkill('tree-a').approve(owner, made.value.id, { version: 1 })).ok) throw new Error('approve')
+    db.prepare("UPDATE scope_rules SET can_read = 0 WHERE company_id = ? AND id = 'carol-c'").run(CO)
+    try {
+      const mine = (await as('u-carol', 'GET', `/jobs/${made.value.id}`)).body.data
+      expect(mine.versions[0].definition).toBeNull()
+      expect(mine.approved).toEqual({ responsibleUserId: 'u-carol', name: '定期の仕事' })
+      expect(mine.you).toEqual({ named: true, controls: true, mustAccept: true })
+      expect(JSON.stringify(mine)).not.toContain('カロル室')
+      // An owner sees the name; their own relation is none.
+      const owners = (await as('u-owner', 'GET', '/jobs')).body.data.jobs.find((j: Json) => j.id === made.value.id)
+      expect(owners).toMatchObject({ approved: { responsibleUserId: 'u-carol', name: 'カロル室の報告' }, you: { named: false, controls: false, mustAccept: false } })
+    } finally {
+      db.prepare("UPDATE scope_rules SET can_read = 1 WHERE company_id = ? AND id = 'carol-c'").run(CO)
+    }
   })
 
   it('a view answers when it runs: the approved trigger, its next slot, and the newest occurrence', async () => {

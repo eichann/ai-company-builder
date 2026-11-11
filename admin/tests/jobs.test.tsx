@@ -8,7 +8,9 @@ import { describe, expect, it, vi } from 'vitest'
 
 import JobsRoute from '@/app/companies/[id]/jobs/page'
 import { NAV_ITEMS } from '@/components/app/app-shell'
-import { definitionFromForm, emptyJobForm, formFromDefinition, needsAcceptance } from '@/lib/jobs'
+import { approvedText } from '@/components/jobs/job-dialogs'
+import type { JobView } from '@/lib/api'
+import { definitionFromForm, emptyJobForm, formFromDefinition } from '@/lib/jobs'
 import { jobConsentCanonical, type JobDefinition } from '../../shared/core/jobs'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok } from './fixtures'
@@ -70,13 +72,6 @@ describe('the form', () => {
   it('a PC job (a Skill as the procedure) is not offered for editing here', () => {
     const procedure = def({ placement: 'a', check: { kind: 'new_files', path: '総務/x' }, run: { kind: 'procedure', procedure: { source: 'company_skill', skill: 'report', fingerprint: 'a'.repeat(40) } } })
     expect(formFromDefinition(procedure)).toBeNull()
-  })
-
-  it('acceptance is needed again exactly when the consent differs from the accepted approved version', () => {
-    expect(needsAcceptance({ consentFingerprint: 'c1' }, { consentFingerprint: 'c1' }, true)).toBe(false)
-    expect(needsAcceptance({ consentFingerprint: 'c2' }, { consentFingerprint: 'c1' }, true)).toBe(true)
-    expect(needsAcceptance({ consentFingerprint: 'c1' }, { consentFingerprint: 'c1' }, false)).toBe(true)
-    expect(needsAcceptance({ consentFingerprint: 'c1' }, null, false)).toBe(true)
   })
 })
 
@@ -143,16 +138,46 @@ describe('the page', () => {
     ]))
   })
 
-  it('a version that keeps the accepted consent is said to run at once after approval', async () => {
-    const pending = jobView({ latestVersion: 2, approvedVersion: 1, accepted: true })
-    mockApi({
+  it('back to the accepted consent (v1 A accepted, v2 B not accepted, v3 A): the server\'s answer decides — no new acceptance asked', async () => {
+    // v2 (consent B) is approved and not accepted; v3 is consent A again, which the responsible person accepted.
+    const pending = jobView({ latestVersion: 3, approvedVersion: 2, accepted: false, waiting: 'NOT_ACCEPTED', latestConsentAccepted: true })
+    const { calls } = mockApi({
       ...companyRoutes(),
       [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [pending] }) },
-      [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...pending, versions: [version(2, def({ name: '週の報告（改）' }), 'c1'), version(1, def(), 'c1')] }) },
+      [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...pending, versions: [version(3, def({ name: '週の報告（3）' }), 'cA'), version(2, def(), 'cB'), version(1, def(), 'cA')] }) },
+      [`POST ${base}/jobs/${JOB_ID}/approve`]: { body: ok({ ...pending, approvedVersion: 3, accepted: true, waiting: null }) },
     })
     renderInCompany(<JobsRoute />)
     await userEvent.click(within(await screen.findByRole('listitem', { name: '週の報告' })).getByRole('button', { name: '承認する' }))
-    expect(await within(await screen.findByRole('dialog')).findByRole('note')).toHaveTextContent('すでに受け取っています')
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByRole('note')).toHaveTextContent('すでに受け取っています')
+    await userEvent.click(within(dialog).getByRole('button', { name: '承認する' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([{ version: 3, fingerprint: 'sha256:v3' }]))
+    expect(calls.some((c) => c.url.includes('/me/jobs/'))).toBe(false)
+  })
+
+  it('what the approval says is what the server answered will happen', () => {
+    const after = (over: Record<string, unknown>) => jobView(over) as unknown as JobView
+    expect(approvedText(3, after({ waiting: null }), '田中 太郎')).toBe('第3版を承認しました。いまは「動いています」です')
+    expect(approvedText(3, after({ waiting: 'NOT_ACCEPTED' }), '田中 太郎')).toBe('第3版を承認しました。田中 太郎さんの受け取りを待ちます')
+    expect(approvedText(3, after({ waiting: 'PAUSED', state: 'paused', pausedReason: 'ADMIN' }), '田中 太郎')).toBe('第3版を承認しました。いまは「管理者が止めました」です')
+    expect(approvedText(3, after({ waiting: null, placement: 'a' }), '田中 太郎')).toContain('まだ動きません')
+  })
+
+  it('the list names who it runs as now (the approved version\'s person) and the next version\'s person apart; a PC job is not 「動いています」', async () => {
+    const handed = jobView({ actingUserId: 'u_member', latestVersion: 2, approved: { responsibleUserId: 'u_admin', name: '週の報告' } })
+    const pc = jobView({ id: 'job.' + 'f'.repeat(32), name: 'PC の仕事', placement: 'a' })
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [handed, pc] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    expect(row).toHaveTextContent('責任者：鈴木 一郎')
+    expect(row).toHaveTextContent('次の版では責任者が田中 太郎さんになります（未承認）')
+    const pcRow = screen.getByRole('listitem', { name: 'PC の仕事' })
+    expect(pcRow).toHaveTextContent('まだ動きません')
+    expect(pcRow).not.toHaveTextContent('動いています')
   })
 
   it('the company-wide stop asks first, then stops', async () => {

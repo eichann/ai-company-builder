@@ -4,7 +4,7 @@
 import { SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
 import {
-  jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobSlotText, jobTriggerText, jobWaitingText,
+  jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobSlotText, jobTriggerText,
 } from '../../../../../shared/core/job-words'
 import { useMyJobs } from '../hooks/useMyJobs'
 
@@ -58,8 +58,8 @@ export function JobsSection({ companyId }: { companyId: string }) {
                   <li key={job.id} aria-label={job.name} className="flex flex-wrap items-center gap-2 py-2 text-[13px]">
                     <span className="font-medium">{job.name}</span>
                     {job.trigger && <span className="text-zinc-600 dark:text-zinc-300">{jobTriggerText(job.trigger)}</span>}
-                    <span className="text-zinc-600 dark:text-zinc-300">{jobWaitingText(job.waiting, job.pausedReason)}</span>
-                    {job.nextSlot && job.waiting === null && <span className="text-zinc-500">次は {jobSlotText(job.nextSlot)}</span>}
+                    <span className="text-zinc-600 dark:text-zinc-300">{jobRunsText(job.waiting, job.pausedReason, job.placement)}</span>
+                    {job.nextSlot && job.waiting === null && job.placement !== 'a' && <span className="text-zinc-500">次は {jobSlotText(job.nextSlot)}</span>}
                     {job.controls && job.state === 'active' && (
                       <Button size="sm" variant="ghost" className="ml-auto" disabled={busy} onClick={() => void pause(job)}>止める</Button>
                     )}

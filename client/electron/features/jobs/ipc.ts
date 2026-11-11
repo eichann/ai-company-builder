@@ -23,7 +23,7 @@ const COMPANY_ID = /^[A-Za-z0-9_-]{1,100}$/
 const FINGERPRINT = /^sha256:[0-9a-f]{64}$/
 const BAD_INPUT: JobsFailure = { success: false, offline: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }
 const OFFLINE: JobsFailure = { success: false, offline: true, code: null, error: JOBS_OFFLINE_TEXT }
-/** At most this many jobs are read in detail per look (a member is responsible for a handful). */
+/** At most this many jobs waiting for the member's acceptance are read in detail per look (a handful in practice). */
 const MAX_DETAILS = 50
 
 type Answer = { status: number; json: Record<string, unknown> | null }
@@ -64,18 +64,22 @@ export function createJobsApi(deps: JobsDeps) {
   const ok = (r: Answer | null): r is Answer => !!r && r.status >= 200 && r.status < 300 && !!r.json?.data && typeof r.json.data === 'object'
   const company = (companyId: string) => `/companies/${encodeURIComponent(companyId)}`
 
-  /** The job as this member sees it, or null when it is not theirs (an owner / admin lists every job). */
-  function mine(detail: JobView, me: string): MyJob | null {
-    const approved = detail.versions?.find(v => v.version === detail.approvedVersion) ?? null
-    const runsIt = approved?.definition?.actingUser === me
-    if (!runsIt && detail.actingUserId !== me) return null
-    const waitsForMe = runsIt && approved !== null && !detail.accepted && detail.state !== 'retired'
+  /**
+   * The job as this member sees it, or null when it is not theirs (an owner / admin lists every job). Who
+   * they are to it is the server's answer (`you`), never re-derived from a definition, which may be hidden.
+   */
+  function mine(job: JobView): MyJob | null {
+    if (!job.you?.named && !job.you?.controls && !job.you?.mustAccept) return null
     return {
-      id: detail.id, name: detail.name, state: detail.state, waiting: detail.waiting, pausedReason: detail.pausedReason,
-      trigger: detail.trigger ?? null, nextSlot: detail.nextSlot ?? null,
-      toAccept: waitsForMe ? { version: approved.version, fingerprint: approved.fingerprint, definition: approved.definition } : null,
-      controls: runsIt,
+      id: job.id, name: job.approved?.name ?? job.name, state: job.state, waiting: job.waiting, pausedReason: job.pausedReason,
+      trigger: job.trigger ?? null, placement: job.placement ?? null, nextSlot: job.nextSlot ?? null, toAccept: null, controls: job.you.controls,
     }
+  }
+
+  /** What waits for the member's 「受け取る」: the approved version as the server shows it to them (its definition may be hidden). */
+  function toAccept(detail: JobView): MyJob['toAccept'] {
+    const v = detail.versions?.find(x => x.version === detail.approvedVersion)
+    return v ? { version: v.version, fingerprint: v.fingerprint, definition: v.definition } : null
   }
 
   async function act(what: string, companyId: unknown, jobId: unknown, path: (id: string) => string, body?: unknown): Promise<JobActionResult> {
@@ -88,22 +92,23 @@ export function createJobsApi(deps: JobsDeps) {
   return {
     async mine(companyId: unknown): Promise<MyJobsResult> {
       if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId)) return BAD_INPUT
-      const [me, list] = await Promise.all([call('/me', 'GET'), call(`${company(companyId)}/jobs`, 'GET')])
-      const meId = me && me.status === 200 && typeof (me.json?.data as { id?: unknown } | undefined)?.id === 'string' ? (me.json!.data as { id: string }).id : null
-      if (!meId) return failure('me', me)
+      const list = await call(`${company(companyId)}/jobs`, 'GET')
       if (!ok(list)) return failure('list', list)
       const views = (list.json!.data as { jobs?: unknown }).jobs
-      const candidates = (Array.isArray(views) ? views as JobView[] : [])
+      // The member's own first (an owner / admin's list holds every job), then details only for what waits for them.
+      const out = (Array.isArray(views) ? views as JobView[] : [])
         .filter(j => isJobId(j?.id) && j.state !== 'retired')
-        .slice(0, MAX_DETAILS)
-      const out: MyJob[] = []
-      for (const j of candidates) {
-        const d = await call(`${company(companyId)}/jobs/${j.id}`, 'GET')
-        if (!ok(d)) continue
-        const job = mine(d.json!.data as JobView, meId)
-        if (job) out.push(job)
+        .map(j => [j, mine(j)] as const)
+        .filter((pair): pair is readonly [JobView, MyJob] => pair[1] !== null)
+      let details = 0
+      for (const [view, job] of out) {
+        if (!view.you?.mustAccept || details >= MAX_DETAILS) continue
+        details += 1
+        const d = await call(`${company(companyId)}/jobs/${view.id}`, 'GET')
+        if (!ok(d)) return failure('detail', d)
+        job.toAccept = toAccept(d.json!.data as JobView)
       }
-      return { success: true, jobs: out }
+      return { success: true, jobs: out.map(([, job]) => job) }
     },
     accept(companyId: unknown, jobId: unknown, version: unknown, fingerprint: unknown): Promise<JobActionResult> {
       if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) return Promise.resolve(BAD_INPUT)
