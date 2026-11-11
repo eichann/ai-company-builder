@@ -2,8 +2,9 @@
 // built by main from the record's fields, which hold pointers only — never the minutes or the
 // message body. Links out go to Google / Slack, where the member's own permission decides. Pure.
 import type { RecordSummary } from '../../shared/types/records'
-import type { TypeDefinition } from '../../shared/core/record-types'
+import { actionWho, type TypeDefinition } from '../../shared/core/record-types'
 import type { ViewersLabel } from '../../shared/types/viewers'
+import { personInWho, recordActionChoices } from './record-actions'
 
 export interface OpenLink {
   label: string
@@ -63,6 +64,97 @@ export interface BundleDetailView {
   total: number
   /** Approval requests of it still waiting (drawn by the screen with the approval card). */
   pendingApprovals: string[]
+  /**
+   * What the member may press on it (owner FB #30, `bundleActionsOf`): the main button beside the
+   * title (［終える］, or ［もう一度始める］ once it is finished) and the rest in 「…」. Absent = nothing.
+   */
+  actions?: BundleActions
+}
+
+/** One argument a bundle action asks for, with the record's value now (prefilled). */
+export interface BundleActionArg {
+  name: string
+  label: string
+  kind: 'person' | 'date' | 'text'
+  value: string | null
+}
+
+/** One action of a 案件・プロジェクト's type the member may run from its state now. */
+export interface BundleAction {
+  action: string
+  /** The type's own label (「終える」「やめる」「責任者を替える」…). */
+  title: string
+  /** Moves it into a final state of its type (終える, やめる): it leaves the lists, its tab closes. */
+  ends: boolean
+  noteRequired: boolean
+  /** `note: optional` on an action that ends it: a reason may be given (「やめる理由（なくてもかまいません）」). */
+  noteOffered: boolean
+  args: BundleActionArg[]
+}
+
+export interface BundleActions {
+  main: BundleAction | null
+  more: BundleAction[]
+  /** The company's members (for a person argument: 責任者を替える), the member first as 「自分」. */
+  people: Array<{ id: string; name: string }>
+}
+
+/** What ending it does, said in 「…」 and in its window (records are never deleted). */
+export const BUNDLE_ENDS_HINT = '一覧から外れ、このタブは閉じます。消しません（経緯は残ります）'
+
+const BUNDLE_DONE: Record<string, string> = {
+  finish: '終えました', cancel: 'やめました', reopen: 'もう一度始めました',
+  set_owner: '責任者を替えました', set_purpose: 'なんのためを書きました', set_due: '期限を変えました',
+}
+
+/** The card's line after a press (with ［取り消す］): the core プロジェクト's own words, else the type's label. */
+export function bundleDoneWords(a: Pick<BundleAction, 'action' | 'title'>, type: string): string {
+  return (type === 'project' ? BUNDLE_DONE[a.action] : undefined) ?? `「${a.title}」にしました`
+}
+
+const BUNDLE_ARG_KINDS: Record<string, BundleActionArg['kind']> = { person: 'person', date: 'date', text: 'text', long_text: 'text' }
+
+/**
+ * The actions of a 案件・プロジェクト the member may press (owner FB #30): any type implementing
+ * `bundle` — the core's プロジェクト and a business plugin's 案件 alike, read from its definition.
+ * Offered only from the record's state (`recordActionChoices`) and only where `who` names the member
+ * the way the task card decides (`personInWho`: the 責任者 `owner`, a person field, `anyone`); roles
+ * (admin, 部署の管理役) are not known to the app, so nothing the server would refuse is offered. Never
+ * the AI's own steps, actions setting record links, or arguments the card has no editor for. The main
+ * button is the first action that ends it (into a final state); on a finished one, the first that
+ * brings it back. The server decides every press. Pure.
+ */
+export function bundleActionsOf(def: Pick<TypeDefinition, 'actions' | 'fields' | 'final'> | undefined, state: string | null, fields: RecordSummary['fields'], me: string | null, people: Record<string, string> = {}): BundleActions | null {
+  if (!def || !me) return null
+  const finished = state !== null && def.final.includes(state)
+  const offered: BundleAction[] = recordActionChoices(def as TypeDefinition, state).flatMap(c => {
+    const a = def.actions[c.action]
+    if (c.links.length > 0 || (a.who.length === 1 && a.who[0] === 'ai')) return []
+    if (!personInWho(actionWho(a, fields), def, fields, me)) return []
+    const args: BundleActionArg[] = []
+    for (const [name, kind] of Object.entries(a.args)) {
+      const shown = BUNDLE_ARG_KINDS[kind]
+      if (!shown) return []
+      const now = fields[name]
+      args.push({ name, label: def.fields[name]?.label ?? name, kind: shown, value: typeof now === 'string' && now ? now : null })
+    }
+    const ends = !finished && a.to !== null && def.final.includes(a.to)
+    return [{ action: c.action, title: c.title, ends, noteRequired: c.noteRequired, noteOffered: ends && a.note === 'optional', args }]
+  })
+  if (offered.length === 0) return null
+  // One press, no window: an action with nothing to fill in.
+  const plain = (a: BundleAction) => a.args.length === 0 && !a.noteRequired
+  const bringsBack = (a: BundleAction) => { const to = def.actions[a.action].to; return to !== null && !def.final.includes(to) }
+  const main = offered.find(a => plain(a) && (finished ? bringsBack(a) : a.ends)) ?? null
+  const needsPeople = offered.some(a => a.args.some(x => x.kind === 'person'))
+  return {
+    // The main button is one press (owner FB #30: ［終える］ asks nothing); an optional reason is offered in 「…」 only.
+    main: main && { ...main, noteOffered: false },
+    more: offered.filter(a => a !== main),
+    people: needsPeople
+      ? [{ id: me, name: people[me] ? `自分（${people[me]}）` : '自分' }, ...Object.entries(people).filter(([id]) => id !== me).map(([id, name]) => ({ id, name: `${name}さん` })).sort((x, y) => x.name.localeCompare(y.name, 'ja'))]
+      : [],
+  }
 }
 
 /**

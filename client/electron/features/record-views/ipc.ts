@@ -21,7 +21,7 @@ import {
   cardFields, findHitView, historyEntries, historyLines, linkedPathOf, linkedPaths, participantsOf, RECORD_VIEWS_OFFLINE_TEXT, removableOf, summaryView,
   type FindHomeResult, type FindResult, type RecordCardLink, type RecordCardResult, type RecordCardView, type RecordListResult,
 } from '../../../shared/record-views'
-import { bundleDetailOf, DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
+import { bundleActionsOf, bundleDetailOf, DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
 import { PRIVATE_SCOPE_ID_RE, type MyPrivateFolder, type PrivateFolderMember } from '../../../shared/private-folder-ui'
 import type { AiRunView } from '../../../../shared/types/ai-runs'
 import type { ViewersAnswer, ViewersLabel } from '../../../../shared/types/viewers'
@@ -181,8 +181,10 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
       const pf = detail.privateFolder
       const own = isBundle && pf && typeof pf.scopeId === 'string' && PRIVATE_SCOPE_ID_RE.test(pf.scopeId) && typeof pf.path === 'string' && fileLinkPath(pf.path)
         ? { scopeId: pf.scopeId, path: pf.path } : null
+      // A 案件・プロジェクト's own buttons (owner FB #30): from its type and the member's place in it.
+      const bundleActions = isBundle ? bundleActionsOf(def, detail.record.state, detail.record.fields, me, members) : null
       const view = isBundle
-        ? bundleDetailOf(detail.record, detail.links.flatMap(l => (l.record ? [l.record] : [])), me, members)
+        ? { ...bundleDetailOf(detail.record, detail.links.flatMap(l => (l.record ? [l.record] : [])), me, members), ...(bundleActions ? { actions: bundleActions } : {}) }
         : recordDetailOf(detail.record, members, me, def)
       const shownElsewhere = DETAIL_FIELDS[isBundle ? 'bundle' : detail.record.type]
       const runList = runs?.status === 200 ? (runs.json?.data as { runs?: AiRunView[] } | undefined)?.runs ?? [] : []

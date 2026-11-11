@@ -276,3 +276,23 @@ test('completing a task with its card’s button closes its tab in the middle; a
   expect(acts).toEqual([['demo', 'task-aaaaaa1', { action: 'complete', expectedVersion: 2 }]])
   expectNoPageErrors(state)
 })
+
+// Owner FB #30: a プロジェクト's ［終える］ on its card ends it like a task's 完了 (#29): its tab in the middle
+// closes; another tab stays.
+test('ending a プロジェクト with its card’s ［終える］ closes its tab in the middle; another tab stays', async ({ page }) => {
+  const PROJECT = 'acb-record:project-aaaaaa1'
+  const OTHER = 'acb-record:task-row001'
+  const state = await openPreview(page, 'skill-layout', { tasks: '1', seed: JSON.stringify({
+    'editor:demo': JSON.stringify({ openFiles: [OTHER, PROJECT], activeFilePath: PROJECT, leftTab: 'tasks', records: {
+      'project-aaaaaa1': { title: '新人研修の見直し', type: 'project' }, 'task-row001': { title: 'やること 2', type: 'task' },
+    } }),
+  }) })
+  const tabs = middleTabs(page)
+  await expect(tabs.getByRole('tab', { name: /新人研修の見直し/ })).toHaveAttribute('aria-selected', 'true')
+  await page.getByTestId('record-card').getByRole('button', { name: '終える', exact: true }).click()
+  await expect(tabs.getByRole('tab', { name: /新人研修の見直し/ })).toHaveCount(0)
+  await expect(tabs.getByRole('tab', { name: /やること 2/ })).toHaveAttribute('aria-selected', 'true')
+  const acts = await page.evaluate(() => (window as unknown as { __acbLayout: { calls: Array<{ name: string; args: unknown[] }> } }).__acbLayout.calls.filter(c => c.name === 'actOnTask').map(c => c.args))
+  expect(acts).toEqual([['demo', 'project-aaaaaa1', { action: 'finish', expectedVersion: 2 }]])
+  expectNoPageErrors(state)
+})

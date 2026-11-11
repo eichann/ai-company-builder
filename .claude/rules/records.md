@@ -1914,7 +1914,9 @@ test: no raw state of a core type); `CALM` for waiting, empty and
   fields, 経緯 (the ledger, newest first: who・what・note) and 「つながっているもの」 (records by kind,
   files; a file link marked `broken` says 「つながりが切れています」). Following a link runs
   `record.open` / `file.open` (`commands.md`), so ← → work (`files-and-editor.md` "Places").
-  Generic and without actions: a task opens in the task card with actions instead (`tasks-ui.md`).
+  Generic and without actions — except a 来た連絡's, a 返事のお願い's and a 案件・プロジェクト's own buttons
+  (［終える］ / ［やめる］ …, owner FB #30, `tasks-ui.md` "The card"); a task opens in the task card with actions
+  instead (`tasks-ui.md`).
 - **A file's 「つながっているもの」**: `linkedToFile` with the open file's company path.
 - **What was shown comes back at once** (owner FB #14, 2026-11-04: 「タブを切り替えるたびに『読み込み中』と
   出るのがうざい」): the middle shows only the active tab's card, so switching tabs mounts it again.

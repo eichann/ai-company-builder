@@ -190,13 +190,16 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   server accepted it; not for 見てもらう or やり直す, and やり直す / 元に戻す do not reopen it.
   **The card's own end button does the same** (owner FB #29, 2026-11-11; this replaced 「a press on the
   card keeps it open」): a task card's ［完了にする］ — any press whose last step is `complete`, also
-  in a dialog or the 返事待ち band (`TaskCard` `onEnded`) — and a 来た連絡's ［済んだ］ or a 返事のお願い's
-  ［終わりにする］ / ［もう返した］ (`RecordCard` `onEnded`; not ［取り込まない］, which only moves it aside).
+  in a dialog or the 返事待ち band (`TaskCard` `onEnded`) — and a 来た連絡's ［済んだ］, a 返事のお願い's
+  ［終わりにする］ / ［もう返した］ or a 案件・プロジェクト's ［終える］ / ［やめる］ (any action of its type into a final
+  state, `BundleAction.ends`; owner FB #30) (`RecordCard` `onEnded`; not ［取り込まない］, which only moves it
+  aside, nor ［もう一度始める］).
   The card's ［取り消す］ goes with it; the list's 元に戻す / やり直す stays. **Every such end also closes
   the record's automatic 「AI の番」 consultations** (`chat.closeRecordConsultations`, `ai-turns.md`
   "Closing the consultation"), never one the member wrote in. Tests: `tests/ui/tasks-layout.spec.ts`
   (「checking a task off…」: the other task's tab in the same named group stays; 「completing a task with
-  its card's button…」), `tests/ui/record-card.spec.ts` (済んだ / 終わりにする tell the screen, 取り込まない does not). An AI-turn
+  its card's button…」, 「ending a プロジェクト…」), `tests/ui/record-card.spec.ts` (済んだ / 終わりにする / 終える / やめる tell
+  the screen, 取り込まない / もう一度始める do not). An AI-turn
   row shows the automatic runner's state and reason (`AiTurnItemView`, `ai-turns.md`) with
   「もう一度」 / 「人に渡す」 when stopped.
 - `QuickAdd` + `quickAdd.ts` (no window, owner 2026-11-02): while the line has the focus, chips show
@@ -351,7 +354,23 @@ A **案件・プロジェクト** (any type implementing `bundle`, `bundleDetail
 the approval card (`renderApproval`, AppShell's `ApprovalCard`), and **みんなのやること** by whose turn —
 あなたの番 (the member's id from `/api/me`), AI の番, ほかの人の番・返事待ち, 終わったこと — each row saying
 whose turn and the due and opening the task; the right column starts with its やること, each with
-whose turn. **The AI on a record** (plan I.4, every record card; `aiOnRecord`): a run of it held or
+whose turn. **Its buttons** (owner FB #30, 2026-11-11: a プロジェクト could not be ended in the app;
+`BundleDetailView.actions` from `bundleActionsOf`, `client/shared/record-details.ts`, built by main with the
+server's type; `BundleActions.tsx`): the core プロジェクト shows **［終える］** beside the title (one press) and in
+「…」 **［やめる］** (a window with an optional reason; 「一覧から外れ、このタブは閉じます。消しません（経緯は残ります）」),
+責任者を替える (the members, 自分 first), 期限を変える, なんのためを書く (each prefilled); a done or cancelled one only
+**［もう一度始める］**. Generic over the type: any type implementing `bundle` (a business plugin's 案件 too) gets its
+own actions the same way — the main button is the first action into a final state (on a finished one, the first
+back out of it), the rest in 「…」; never the AI's own steps (`who: [ai]`), actions setting record links, or
+arguments other than person / date / text. **Offered only as the task card decides** (`personInWho`,
+`client/shared/record-actions.ts`, shared with `task-card.ts`): a person field of the record holding the member
+(the 責任者 `owner`), `anyone`, or a `link:` the server answered — never a role: an admin or a 部署の管理役 who is
+not the 責任者 sees no button although the server would allow them (the app knows no roles; never offering
+what the server refuses). Each press at the card's version, the type's words after it with ［取り消す］
+(`bundleDoneWords`); a refusal is said where it was pressed and the card reads again. 見るだけ (feature off):
+none. Tests: `client/tests/record-details.test.ts` (the 責任者 only, ［終える］ / 「…」, a finished one, a plugin
+type's own actions and what is left out), `tests/ui/record-card.spec.ts` (`?record=project`, `&owner=other`),
+`tests/ui/tasks-layout.spec.ts` (the tab closes) — mutation-checked. **The AI on a record** (plan I.4, every record card; `aiOnRecord`): a run of it held or
 open → 「AI が反映しています…（あと少し）」; otherwise, when the newest change in 経緯 is the AI's,
 「AI が反映しました（11/2 09:56）」 — one line in fixed words, never the AI's step names; what it did is in
 経緯, opened by the band's ［経緯で見る］. On a meeting only the working line shows: its state chip

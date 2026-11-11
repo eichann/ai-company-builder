@@ -7,7 +7,9 @@ import assert from 'node:assert/strict'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { AiRunView } from '../../shared/types/ai-runs'
 import { aiOnRecord } from '../electron/features/record-views/ipc'
-import { bundleDetailOf, recordDetailOf } from '../shared/record-details'
+import { coreTypeDefinitions } from '../../shared/core/core-types'
+import { parseTypeFile } from '../../shared/core/record-types'
+import { bundleActionsOf, bundleDetailOf, recordDetailOf } from '../shared/record-details'
 
 const people = { 'u-sato': '佐藤', 'u-abe': '阿部' }
 
@@ -63,4 +65,55 @@ test('the AI on a record: working while its run is held or open; 「反映しま
   assert.equal(aiOnRecord('deal-1', [run('done')], [entry(1, 'human'), entry(2, 'ai')], undefined, {})?.done?.text, '作りました')
   assert.equal(aiOnRecord('deal-1', [run('waiting_person')], [entry(2, 'ai'), entry(3, 'human')], undefined, {})?.done, null)
   assert.equal(aiOnRecord('deal-1', [run('running', 'deal-2')], [], undefined, {})?.working, false)
+})
+
+// Owner FB #30: a プロジェクト can be ended in the app. Guards: only what the type's `who` gives the member
+// by what the app knows (its 責任者) is offered — never to anyone else, so nothing the server refuses is
+// shown; ［終える］ is the main button and ［やめる］ in 「…」 with the fields to change; a finished one only
+// ［もう一度始める］; 終える / やめる end it (its tab closes), もう一度始める does not.
+const project = coreTypeDefinitions().find(d => d.name === 'project')!
+const names = (a: ReturnType<typeof bundleActionsOf>) => a && { main: a.main?.title ?? null, more: a.more.map(x => x.title) }
+
+test('a プロジェクト\'s buttons: its 責任者 gets ［終える］ and 「…」 ［やめる］ and the fields; a finished one ［もう一度始める］', () => {
+  const active = bundleActionsOf(project, 'active', { owner: 'u-sato', purpose: '窓口を3つに', due: '2026-12-01' }, 'u-sato', people)
+  assert.deepEqual(names(active), { main: '終える', more: ['やめる', '責任者を替える', 'なんのためを書く', '期限を変える'] })
+  assert.deepEqual([active!.main!.ends, active!.main!.noteOffered], [true, false])
+  const cancel = active!.more.find(a => a.action === 'cancel')!
+  assert.deepEqual([cancel.ends, cancel.noteOffered, cancel.noteRequired, cancel.args], [true, true, false, []])
+  // The fields come prefilled; 責任者を替える chooses among the members, the member first as 自分.
+  assert.deepEqual(active!.more.find(a => a.action === 'set_due')!.args, [{ name: 'due', label: '期限', kind: 'date', value: '2026-12-01' }])
+  assert.equal(active!.more.find(a => a.action === 'set_owner')!.ends, false)
+  assert.deepEqual(active!.people.map(p => p.id), ['u-sato', 'u-abe'])
+  for (const state of ['done', 'cancelled']) {
+    const back = bundleActionsOf(project, state, { owner: 'u-sato' }, 'u-sato', people)
+    assert.deepEqual(names(back), { main: 'もう一度始める', more: [] }, state)
+    assert.equal(back!.main!.ends, false)
+  }
+})
+
+test('a プロジェクト\'s buttons are never offered to someone the type does not name (an admin or manager is the server\'s to allow)', () => {
+  assert.equal(bundleActionsOf(project, 'active', { owner: 'u-abe' }, 'u-sato', people), null)
+  assert.equal(bundleActionsOf(project, 'active', {}, 'u-sato', people), null)
+  assert.equal(bundleActionsOf(project, 'active', { owner: 'u-sato' }, null, people), null)
+  assert.equal(bundleActionsOf(undefined, 'active', { owner: 'u-sato' }, 'u-sato', people), null)
+})
+
+test('a business plugin\'s 案件 gets its own type\'s actions the same way; the AI\'s steps, link setters and fields without an editor are left out', () => {
+  const text = ['---', 'label: 案件', 'version: 1', 'storage: server', 'implements: [bundle]', 'fields:',
+    '  owner: { label: 責任者, kind: person, source: server }', '  purpose: { label: なんのため, kind: text, source: server }',
+    '  stage: { label: 段階, kind: choice, options: [a, b], source: server }', 'links:', '  related: { label: 関係, target: deal, cardinality: many }',
+    'states: [open, won, lost]', 'initial: open', 'final: [won, lost]', 'actions:',
+    '  win: { label: 受注にする, from: [open], to: won, who: [owner, admin] }',
+    '  lose: { label: 失注にする, from: [open], to: lost, who: [owner], note: required }',
+    '  set_stage: { label: 段階を変える, from: [open], who: [owner], args: { stage: choice } }',
+    '  relate: { label: 関係をつなぐ, from: [open], who: [owner], links: [related] }',
+    '  ai_note: { label: AI がまとめる, from: [open], to: won, who: [ai] }',
+    '  reopen: { label: 商談に戻す, from: [won, lost], to: open, who: [owner] }', '---', ''].join('\n')
+  const parsed = parseTypeFile('deal', text)
+  assert.ok(parsed.ok, JSON.stringify(parsed))
+  const deal = parsed.definition
+  const open = bundleActionsOf(deal, 'open', { owner: 'u-sato' }, 'u-sato', people)
+  assert.deepEqual(names(open), { main: '受注にする', more: ['失注にする'] })
+  assert.deepEqual([open!.more[0].ends, open!.more[0].noteRequired], [true, true])
+  assert.deepEqual(names(bundleActionsOf(deal, 'lost', { owner: 'u-sato' }, 'u-sato', people)), { main: '商談に戻す', more: [] })
 })

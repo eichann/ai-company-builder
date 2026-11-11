@@ -259,3 +259,73 @@ test('a record whose feature is on has no such note', async ({ page }) => {
   await expect(card.getByTestId('feature-off')).toHaveCount(0)
   expectNoPageErrors(state)
 })
+
+// Owner FB #30: a プロジェクト could not be ended in the app. Its 責任者 gets ［終える］ beside the title and
+// ［やめる］ (with an optional reason), 責任者を替える, 期限を変える, なんのためを書く in 「…」; ending tells the screen
+// (its tab and automatic consultations close); a finished one offers ［もう一度始める］, which does not.
+test('a プロジェクト: its 責任者 ends it with ［終える］ (the screen is told), 取り消す; ［やめる］ in 「…」 asks for an optional reason; ［もう一度始める］', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { record: 'project' })
+  const card = page.getByTestId('record-card')
+  const opened = page.locator('#opened')
+  await card.getByRole('button', { name: '終える', exact: true }).click()
+  await expect(opened).toHaveText('act project-0000p1 finish@3\nended project-0000p1')
+  await expect(card.getByRole('button', { name: '終える', exact: true })).toHaveCount(0)
+  await expect(card.getByRole('button', { name: 'もう一度始める' })).toBeVisible()
+  await expect(card.getByRole('status')).toContainText('終えました')
+  // 取り消す is offered like the other record actions (the real screen has closed the tab by then).
+  await card.getByRole('status').getByRole('button', { name: '取り消す' }).click()
+  await expect(opened).toContainText('undo project-0000p1 4@4')
+  await expect(card.getByRole('button', { name: '終える', exact: true })).toBeVisible()
+
+  await card.getByRole('button', { name: 'その他の操作' }).click()
+  for (const name of ['責任者を替える', '期限を変える', 'なんのためを書く']) await expect(page.getByRole('menuitem', { name: new RegExp(name) })).toBeVisible()
+  await page.getByRole('menuitem', { name: /やめる/ }).click()
+  const dialog = page.getByRole('dialog', { name: 'やめる' })
+  await expect(dialog).toContainText('一覧から外れ、このタブは閉じます。消しません')
+  await dialog.getByRole('textbox', { name: '理由' }).fill('予算がなくなった')
+  await dialog.getByRole('button', { name: 'やめる' }).click()
+  await expect(opened).toContainText('act project-0000p1 cancel@5 note=予算がなくなった\nended project-0000p1')
+  await expect(dialog).toHaveCount(0)
+
+  // A finished one: only ［もう一度始める］, and bringing it back closes nothing.
+  await card.getByRole('button', { name: 'もう一度始める' }).click()
+  await expect(opened).toContainText('act project-0000p1 reopen@6')
+  await expect(opened).not.toContainText('reopen@6\nended')
+  await expect(card.getByRole('button', { name: '終える', exact: true })).toBeVisible()
+  expectNoPageErrors(state)
+})
+
+test('a プロジェクト: 期限を変える and 責任者を替える send the values chosen, prefilled with today\'s, and end nothing', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { record: 'project' })
+  const card = page.getByTestId('record-card')
+  const opened = page.locator('#opened')
+  await card.getByRole('button', { name: 'その他の操作' }).click()
+  await page.getByRole('menuitem', { name: /期限を変える/ }).click()
+  const due = page.getByRole('dialog', { name: '期限を変える' })
+  await expect(due.getByLabel('期限')).toHaveValue('2026-12-01')
+  await due.getByLabel('期限').fill('2026-12-15')
+  await due.getByRole('button', { name: '期限を変える' }).click()
+  await expect(opened).toHaveText('act project-0000p1 set_due@3 {"due":"2026-12-15"}')
+  await expect(card.getByRole('status')).toContainText('期限を変えました')
+
+  await card.getByRole('button', { name: 'その他の操作' }).click()
+  await page.getByRole('menuitem', { name: /責任者を替える/ }).click()
+  const owner = page.getByRole('dialog', { name: '責任者を替える' })
+  await owner.getByLabel('責任者').selectOption({ label: '阿部さん' })
+  await owner.getByRole('button', { name: '責任者を替える' }).click()
+  await expect(opened).toContainText('act project-0000p1 set_owner@4 {"owner":"u-abe"}')
+  await expect(opened).not.toContainText('ended')
+  // No longer its 責任者: nothing left to press (the server would refuse it).
+  await expect(card.getByRole('button', { name: '終える', exact: true })).toHaveCount(0)
+  await expect(card.getByRole('button', { name: 'その他の操作' })).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('a プロジェクト someone else is responsible for: no button to end or change it', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { record: 'project', owner: 'other' })
+  const card = page.getByTestId('record-card')
+  await expect(card).toContainText('新人研修の見直し')
+  await expect(card.getByRole('button', { name: '終える', exact: true })).toHaveCount(0)
+  await expect(card.getByRole('button', { name: 'その他の操作' })).toHaveCount(0)
+  expectNoPageErrors(state)
+})

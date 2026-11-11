@@ -7,6 +7,8 @@
 // ［終わりにする］ moving it as the server would (`&type=v4`: an older server's type, close only from 返事をする / 返事待ち) (`?ai=working`: while it works); `?field=real` draws the meeting's real
 // 案件・プロジェクト field (no 案件 yet: 「新しいプロジェクトにする」). Links opened outside show in `#opened`.
 // `&off=1`: the record's feature is turned off (「使う機能」): the card is 「見るだけ」.
+// `?record=project`: a プロジェクト whose 責任者 is the member (owner FB #30): ［終える］, 「…」 ［やめる］ and the fields,
+// each moving it as the server would (`act …` lines, with args / note); `&owner=other`: someone else's (nothing to press).
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -14,7 +16,7 @@ import { RecordCard } from '../src/features/records/components/RecordCard'
 import { renderRecordBundleField } from '../src/app/recordBundleField'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import type { RecordSummary } from '../../shared/types/records'
-import { bundleDetailOf, recordDetailOf } from '../shared/record-details'
+import { bundleActionsOf, bundleDetailOf, recordDetailOf } from '../shared/record-details'
 import { summaryView, type RecordCardLink } from '../shared/record-views'
 import { installElectronAPI } from './ui/fixtures/electron-api'
 import { fakeDropLink } from './ui/fixtures/link-drop'
@@ -46,6 +48,13 @@ const replyBefore: RecordSummary[] = []
 const replyDef = params.get('type') === 'v4'
   ? { actions: { ...defs.get('reply_request')!.actions, close: { ...defs.get('reply_request')!.actions.close, from: ['open', 'waiting_reply'] } } }
   : defs.get('reply_request')
+// A プロジェクト: its buttons come from the real `bundleActionsOf` over the core type, as main builds them.
+let project = rec('project-0000p1', 'project', '新人研修の見直し', 'active', { owner: params.get('owner') === 'other' ? 'u-abe' : ME, purpose: '研修を3日に縮める', due: '2026-12-01' })
+const projectBefore: RecordSummary[] = []
+const projectCard = () => {
+  const actions = bundleActionsOf(defs.get('project'), project.state, project.fields, ME, people)
+  return { record: view(project), version: project.version, detail: { ...bundleDetailOf(project, [], ME, people), ...(actions ? { actions } : {}) }, fields: [], history: [], links: [], viewers: { kind: 'department' as const, text: '営業部のみんな', count: 4 } }
+}
 const replyCard = () => ({ record: view(reply), version: reply.version, detail: recordDetailOf(reply, people, ME, replyDef) ?? undefined, fields: [], history: [], links: [], viewers: { kind: 'only-you' as const, text: 'あなただけ', count: 1 } })
 
 const realField = params.get('field') === 'real'
@@ -94,7 +103,7 @@ const card = kind === 'bundle'
   : { record: view(record), version: 3, detail: recordDetailOf(record, people) ?? undefined, fields: [], history: [], links, viewers: kind === 'slack' ? { kind: 'only-you' as const, text: 'あなただけ', count: 1 } : { kind: 'department' as const, text: '営業部のみんな', count: 4 } }
 
 installElectronAPI({
-  getRecordCard: async () => ({ success: true, card: { ...(kind === 'slack' ? slackCard() : kind === 'reply' ? replyCard() : privateMode && kind === 'bundle'
+  getRecordCard: async () => ({ success: true, card: { ...(kind === 'slack' ? slackCard() : kind === 'reply' ? replyCard() : kind === 'project' ? projectCard() : privateMode && kind === 'bundle'
     ? { ...card, participants: participantsNow(), viewers: { kind: 'private-folder' as const, text: `『A社 研修導入』の参加者（${participantRules.length}人）`, count: participantRules.length } } : card),
     ...(params.get('off') === '1' ? { featureOff: true as const } : {}) } }),
   getPrivateFolderCreateContext: async () => ({ success: true, context: { role: 'member', managedDepartmentIds: ['d-sales'], department: { id: 'd-sales', name: '営業部', folder: '営業部' }, managerIds: [], members: [
@@ -106,7 +115,13 @@ installElectronAPI({
     return { success: true, members: participantRules }
   },
   actOnTask: async (_c, recordId, input) => {
-    say(`act ${recordId} ${input.action}@${input.expectedVersion}`)
+    say(`act ${recordId} ${input.action}@${input.expectedVersion}${input.args ? ` ${JSON.stringify(input.args)}` : ''}${input.note ? ` note=${input.note}` : ''}`)
+    if (recordId === project.id) {
+      projectBefore.push(project)
+      const to = defs.get('project')!.actions[input.action].to
+      project = { ...project, state: to ?? project.state, version: project.version + 1, fields: { ...project.fields, ...(input.args as Record<string, string> | undefined) } }
+      return { success: true, recordId }
+    }
     if (recordId === reply.id) {
       replyBefore.push(reply)
       reply = { ...reply, state: 'closed', version: reply.version + 1 }
@@ -122,6 +137,11 @@ installElectronAPI({
   unlinkRecordFromRecord: async (_c, recordId, input) => { say(`unlink ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
   undoTaskAction: async (_c, recordId, version, expected) => {
     say(`undo ${recordId} ${version}@${expected}`)
+    if (recordId === project.id) {
+      const was = projectBefore.pop()
+      if (was) project = { ...was, version: project.version + 1 }
+      return { success: true, recordId }
+    }
     if (recordId === reply.id) {
       const was = replyBefore.pop()
       if (was) reply = { ...was, version: reply.version + 1 }
@@ -142,7 +162,7 @@ function Preview() {
   return (
     <main className="min-h-screen bg-white text-gray-900">
       <pre id="opened" className="text-[10px]" />
-      <RecordCard companyId="co-preview" rootPath="/Users/me/company" recordId={kind === 'reply' ? reply.id : record.id}
+      <RecordCard companyId="co-preview" rootPath="/Users/me/company" recordId={kind === 'reply' ? reply.id : kind === 'project' ? project.id : record.id}
         renderSource={r => (r.type === 'interaction' ? <div data-testid="thread">スレッドの前後と返事の下書き：{r.title}</div> : null)}
         renderApproval={id => <div data-testid="approval">承認のお願いのカード：{id}</div>}
         consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: 'A社 打ち合わせのあと', updatedAt: '2026-11-05T07:00:00.000Z' }]}

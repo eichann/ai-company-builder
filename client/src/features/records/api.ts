@@ -35,11 +35,14 @@ export function undoRecordChange(companyId: string, recordId: string, version: n
   return changes.undoTaskAction(companyId, recordId, version, version)
 }
 
-/** A 来た連絡's ［済んだ］ / ［取り込まない］ (owner FB #20): the type's action at the version shown (the server decides). */
+/**
+ * A 来た連絡's ［済んだ］ / ［取り込まない］ (owner FB #20), a 案件・プロジェクト's ［終える］ / ［やめる］ … (owner FB #30):
+ * the type's action at the version shown, with the reason and the values the member gave (the server decides).
+ */
 export type RecordActions = ElectronPort<'actOnTask'>
 
-export function actOnRecord(companyId: string, recordId: string, action: string, expectedVersion: number, writes: RecordActions = window.electronAPI) {
-  return writes.actOnTask(companyId, recordId, { action, expectedVersion })
+export function actOnRecord(companyId: string, recordId: string, action: string, expectedVersion: number, extra: { note?: string; args?: Record<string, string | null> } = {}, writes: RecordActions = window.electronAPI) {
+  return writes.actOnTask(companyId, recordId, { action, expectedVersion, ...extra })
 }
 
 /**
