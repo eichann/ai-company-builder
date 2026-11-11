@@ -9,6 +9,7 @@
 import type { PluginStepProcedurePin } from '../../shared/core/plugins'
 import type { RunSubjectRun, RunSubjects } from '../ports/run-subjects'
 import type { Member } from './access'
+import { notInStep } from './not-in-step'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
 /** Whether a record is in the member's 「AI の番」 now (services/records.ts `aiTurnOf`). */
@@ -81,3 +82,31 @@ export function createRecordRunSubjects(deps: RecordRunSubjectDeps) {
 }
 
 export type RecordRunSubjects = ReturnType<typeof createRecordRunSubjects>
+
+/**
+ * The run's subjects by kind (B PR 5a): a record's run asks the records' resolver, a job occurrence's
+ * the jobs' (services/job-runs.ts). A kind with no resolver is not found, and its hooks do nothing —
+ * except `routeRefusal`, which refuses (a run of an unknown kind reaches no route).
+ */
+export function runSubjectsByKind(byKind: { record: RunSubjects<Refusal>; occurrence?: RunSubjects<Refusal> }): RunSubjects<Refusal> {
+  const of = (kind: string): RunSubjects<Refusal> | undefined => (kind === 'record' ? byKind.record : kind === 'occurrence' ? byKind.occurrence : undefined)
+  return {
+    resolve(member, subject, step) {
+      const s = of(subject.kind)
+      return s ? s.resolve(member, subject, step) : refuse('not-found', NOT_A_RECORD.error, { code: NOT_A_RECORD.code })
+    },
+    afterDone(member, run) { of(run.subject.kind)?.afterDone(member, run) },
+    afterFailed(member, run) { of(run.subject.kind)?.afterFailed(member, run) },
+    claimed(member, run) { return of(run.subject.kind)?.claimed?.(member, run) ?? null },
+    finishing(member, run, body) { return of(run.subject.kind)?.finishing?.(member, run, body) ?? null },
+    beforeFinish(member, run, body) { return of(run.subject.kind)?.beforeFinish?.(member, run, body) ?? null },
+    routeRefusal(member, run, route) {
+      const s = of(run.subject.kind)
+      return s?.routeRefusal ? s.routeRefusal(member, run, route) : notInStep()
+    },
+    bindsTokens(run) {
+      if (run.subject.kind === 'record') return true
+      return of(run.subject.kind)?.bindsTokens?.(run) ?? false
+    },
+  }
+}

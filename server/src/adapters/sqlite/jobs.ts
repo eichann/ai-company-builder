@@ -138,6 +138,10 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       return (conn.prepare(`SELECT ${OCCURRENCE_COLUMNS} FROM ai_job_occurrences WHERE company_id = ? AND state = 'due' ORDER BY due_at, id LIMIT ?`)
         .all(companyId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
+    runningOccurrences(limit) {
+      return (conn.prepare(`SELECT ${OCCURRENCE_COLUMNS} FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' ORDER BY due_at, id LIMIT ?`)
+        .all(companyId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
+    },
     moveOccurrence(occurrenceId, from, to, change, at) {
       const runId = change.runId === undefined ? null : change.runId
       return conn.prepare(`UPDATE ai_job_occurrences SET state = ?, outcome_code = ?, run_id = CASE WHEN ? THEN ? ELSE run_id END, updated_at = ?

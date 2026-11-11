@@ -16,6 +16,7 @@ paths:
   - "client/src/features/jobs/**"
   - "client/shared/jobs.ts"
   - "client/tests/jobs-ipc.test.ts"
+  - "server/src/services/job-runs.ts"
 ---
 
 # Scheduled jobs (定期の仕事, B 「実行を記録から分ける」)
@@ -26,7 +27,9 @@ A job is work that is not a record's turn: 「毎週火曜の1営業日前の 09
 
 **PR 3a: definitions and approval. PR 3b: the clock makes occurrences and the server does a job's (e)
 operation (a やること) — no AI, no claim. PR 4: the screens (admin 「定期の仕事」, the app's 「受け取る」) and
-the notice 「受け取りが要ります」.** Next: 5 (the PC's (a) claim and the grant at every call, design memo §4-2).
+the notice 「受け取りが要ります」. PR 5a: the PC's (a) claim and the grant at every call (design memo §4-2) on the
+server, and a Skill pinned from the Skill shelf.** Next: 5a-2 — the app's side (`client/electron/features/jobs/`: poll,
+claim, the check, the hidden conversation, the finish) and the clock making PC occurrences; 5b — 「もう一度」.
 
 ## Tables (`server/src/db/schema/jobs.ts`, handle `jobs`, `ports/jobs.ts`, `adapters/sqlite/jobs.ts`)
 
@@ -66,8 +69,11 @@ versions the shape (a later shape is `schema: 2`; stored versions are never re-r
 - `check`: `none` | `new_files` (`path`, one of the grant's read paths). **A procedure needs a check**
   (D6: the clock alone never runs the AI).
 - `run`: `operation` `create_task` (`title`, `dueBusinessDays`) — placement `e`, takes no AI tools,
-  routes or reads, `creates: ['task']`; or `procedure` — a company Skill pinned at the tree id the
-  **server** read when the version was made (the caller's fingerprint is replaced) — placement `a`.
+  routes or reads, `creates: ['task']`; or `procedure` — placement `a`, a Skill pinned by what the
+  **server** read when the version was made (the caller's fingerprint and name are replaced): `company_skill`
+  — the shared folder's `.claude/skills/<name>` at its tree id; `shelf_skill` (PR 5a) — a company without
+  the shared folder: the Skill shelf's item `item` (its place) at its current version (sha256, 64 hex),
+  `skill` its name then ("A Skill from the shelf" below).
 - `placement`: `e` | `a` only. `missed`: `latest_only` | `skip` + `expiresAfterMinutes` (5 min – 7 days).
 - `grant` (memo §4-1): `tools` from `PLUGIN_STEP_TOOLS` minus `web_research` and `plugin_operations`
   (`JOB_GRANT_TOOLS`), `creates` (`task`), `routes` (names from `AI_ROUTES`, no conditions), `reads`
@@ -108,9 +114,22 @@ PUT  /jobs-stop { stopped }         owner/admin
   `JOB_SKILL_MISSING` / `JOB_SKILL_CHANGED`: make a new version). A `fingerprint` that is not the
   version's → 409 `JOB_VERSION_FINGERPRINT`. **Acceptance and every resume of an approved job run the
   same rights and Skill checks.**
-- **A company without the shared folder** has no company Skill to pin yet: a procedure job is refused at
-  creation and approval with 409 `JOB_SKILL_NOT_HERE` (plain Japanese, no folder instructions). Pinning a
-  Skill from the Skill shelf comes later (like `STEP_SKILL_NOT_HERE`, `plugin-steps.md`).
+- **A Skill from the shelf** (PR 5a, owner decision: companies without the shared folder must work too): in a
+  company without the shared folder a procedure names `{ source: 'shelf_skill', item }` and the server fills
+  `skill` and `fingerprint` from the shelf (`services/skill-shelf.ts` `jobSkill`, the shelf's own read check:
+  the item exists, is a Skill, and **the responsible person reads its place** — else 409 `JOB_SKILL_MISSING`,
+  the same answer as a Skill that is not there). A `company_skill` there, or a `shelf_skill` in a company with
+  the folder, is 409 `JOB_SKILL_NOT_HERE` (each with its own plain sentence). Approval, acceptance and a
+  resume check the item's current version is still the pinned one (`JOB_SKILL_CHANGED`, as for a tree), and
+  the Skill's place counts among the places the version names (`readsAll`): one the person no longer reads
+  hides the version's definition and the job's name from them and fails the rights check
+  (`OWNER_RIGHTS_CHANGED`). The claim checks the pinned version is still stored (`pinnedSkillKept`; a newer
+  current version does not matter: the pinned one runs); removed → 409 `JOB_SKILL_MISSING`. **Jobs only**:
+  plugin steps keep `STEP_SKILL_NOT_HERE` (`plugin-steps.md`) — their Skill pin is a step setting per company
+  (`plugin_step_skills`, a name on the shared branch), read by `readPluginProcedure` from a tree and by the
+  app with `cat-file`; moving it to the shelf changes the admin's step-skill screen, the pin type every
+  released app parses (`parseProcedurePin`) and the app's procedure reader, so it is its own PR on top of
+  `jobSkill`. The app fetches the pinned version with `GET /skill-shelf/:itemId/versions/:version` (5a-2).
 - **Pinned**: approval stores the version and its fingerprint; a later `PUT` adds a version and changes
   neither. `waiting` says why it would not run: `PAUSED`, `COMPANY_STOPPED`, `NOT_APPROVED`, `NOT_ACCEPTED`
   (the approved version's consent ≠ the accepted one).
@@ -126,9 +145,13 @@ PUT  /jobs-stop { stopped }         owner/admin
   `notifications` signal to them (`noticesChanged`); its text is built when read and shown only while the
   reader is owner / admin. While the company's records are off the bell is not shown at all (`list`
   answers `available: false`), so there the pause is seen in the job list (`pausedReason`, PR 4's screen).
-- **Not yet (PR 5)**: rights lost through a permission rule, a group, 所属 or a private folder's readers
-  changing do **not** pause a job here; only leaving the company and a role change do. The run's own
-  check at every call (memo §4-2) covers the rest.
+- **Rights lost elsewhere** (a permission rule, a group, 所属 or a private folder's readers changing) do not
+  pause a job at the moment of the change (only leaving the company and a role change do, here). They are
+  found **when they matter** (PR 5a): a PC job's claim and every call of its run's token re-check the
+  responsible person's rights with the pinned version (`runnerRefusal`) and then pause the job
+  (`OWNER_RIGHTS_CHANGED`, `job_paused` to owners / admins, as above) and hold the occurrence; the server's
+  runner does the same for a placement-`e` job. `GET /me/job-turns` only leaves such a turn out (a read
+  changes nothing).
 
 ## The clock (3b, `services/job-occurrences.ts` `makeOccurrences`, `shared/core/job-schedule.ts`)
 
@@ -147,8 +170,9 @@ and starting the runner. It reads no content and calls nothing outside.
   slot text `YYYY-MM-DDTHH:MM` is the occurrence's identity; `companyTimeToUtc` gives `due_at`, and
   `expires_at` = `due_at` + `missed.expiresAfterMinutes`. The zone is `DEFAULT_COMPANY_TIME_ZONE` (one
   place in `composition.ts`), kept on the row.
-- **Which jobs**: approved, `active` or `paused`, placement **`e` only** (a PC job's occurrences come with
-  its claim, PR 5: until then nothing would take them and they would only expire). Only the **newest
+- **Which jobs**: approved, `active` or `paused`, placement **`e` only** (a PC job's occurrences are made
+  from 5a-2, together with the app that claims them: made before, nothing would take them and each slot
+  would only expire and be told). Only the **newest
   slot at or before now**, and never one before the approved version's `approved_at`.
 - **Once**: `INSERT OR IGNORE` on `UNIQUE (company, job, due_slot)` — a second clock run, a restart or a
   second server write nothing more. Pinned: `job_version` = the approved version when made.
@@ -170,7 +194,10 @@ and starting the runner. It reads no content and calls nothing outside.
 
 - **When it begins** — `POST /jobs/:jobId/pause`, a pause the server makes (`OWNER_LEFT`,
   `OWNER_RIGHTS_CHANGED`), `PUT /jobs-stop { stopped: true }`: every occurrence of the job (of the company)
-  still `due` becomes `held` (`JOB_PAUSED` / `COMPANY_STOPPED`).
+  still `due` becomes `held` (`JOB_PAUSED` / `COMPANY_STOPPED`) — and one a PC is **running** (PR 5a) too,
+  its run ended in the same transaction (`endPcRun`: `waiting_person` with that code, no holder), so its
+  token (fenced: 409 `RUN_SUPERSEDED`), renew and finish are refused at once and a resume or lifting the stop
+  brings nothing back (the occurrence stays `held`; a 「もう一度」 of the ended run claims nothing).
 - **When it ends** — a resume, `PUT /jobs-stop { stopped: false }` (only when it was on): the newest slot
   at or before now, if not made yet (no clock ran meanwhile), is written `held`, so the clock never makes
   it `due`. A slot from before the pause that no clock had reached yet is held too (the safe side).
@@ -183,7 +210,8 @@ Started by the server clock right after the occurrences, **never awaited by it**
 guard; a slow company's mail or calendar never holds an occurrence up); each company in turn,
 `JOB_RUNNER_LIMIT` (50) per company and pass, **a yield after every occurrence** and after each company,
 a company's failure logged (error name only). Each `due` occurrence, **in one transaction** (one of a
-PC job — placement `a`, PR 5 — is left as it is, not tried):
+PC job — placement `a` — is left as it is, not tried, and never takes a place in the batch: `dueIds` /
+`runDue` read the company's waiting occurrences and keep the server's own, `serverDue`):
 
 1. still `due` (else nothing: another runner took it); past `expires_at` → `expired`, told;
 2. the company's stop → `held` `COMPANY_STOPPED`; the job not `active` → `held` `JOB_PAUSED`; another
@@ -236,6 +264,86 @@ place the newest version names is not theirs to read. **No `subject_kind` column
 a recordless notice with the job and occurrence in its key is enough while no notice is about a record
 and a job at once (add it, additive, when one is). While the company's records are off the bell is not
 shown at all (the occurrence's state says it: `GET /jobs/:jobId/occurrences`).
+
+## The PC's claim (PR 5a, `services/job-runs.ts`, design memo §3-3 / §3-5 / §4-2)
+
+The AI runs **only on the responsible person's PC**; the server lists, keeps the run and checks. The run is
+the execution run of 「AI の番」 (`services/ai-runs.ts`, `ai-turns.md` "Execution runs on the server"): subject
+kind `occurrence`, step `job-procedure` (`JOB_PC_STEP`), its resolver `createJobRuns(...).subjects` behind the
+same port (`runSubjectsByKind` in `services/run-subjects.ts`). Generations, the lease and renew, fencing,
+idempotency keys, failure places, reconcile and the emergency stop are the run core's, unchanged.
+
+```
+GET  /me/job-turns                                          the caller's PC-job occurrences to claim now (JobTurnView)
+POST /job-run-claims { occurrenceId, deviceId, conversationId }   → 201 { run, created, turn } (200 on a re-claim)
+POST /ai-runs/:runId/renew | finish | retry | …/reconcile        as for any run; finish takes `jobResult` (below)
+```
+
+- **Whose turn** (the list leaves out, the claim refuses, in this order): an occurrence of a placement-`a`
+  job whose version names **the caller** as responsible person — anyone else, an owner / admin included,
+  another company's id, a server job's occurrence: the one 404 `JOB_NOT_FOUND`; `due`, or `running` with its
+  run claimable again (the claim then answers the run core's `RUN_CLAIMED` / `RUN_WAITING` /
+  `RUN_NEEDS_RECONCILE`), else 409 `JOB_TURN_GONE`; not past `expires_at` (`JOB_TURN_EXPIRED`); the
+  company's jobs not stopped (`JOB_STOPPED`); the job `active` (`JOB_PAUSED`); the occurrence's version
+  still the approved one (`JOB_VERSION_CHANGED`, the `due` occurrence held); its consent accepted
+  (`JOB_NOT_ACCEPTED`); the responsible person's rights cover every place it names
+  (`JOB_GRANT_EXCEEDS`: the job paused `OWNER_RIGHTS_CHANGED`, owners / admins told, the occurrence held);
+  not absent that day (`JOB_OWNER_ABSENT`: skipped and told — D5, as the server's runner); a shelf Skill's
+  pinned version still stored (`JOB_SKILL_MISSING`). **Before all of it** the emergency stop answers 503
+  `AI_STOPPED` (`STOPS_UNATTENDED_RUN`): nothing is read or written. The app's own refusals (main window,
+  Claude Code, the stop policy confirmed by the server — `ai-turns.md` "Claiming and settling") come with
+  5a-2; the server's 503 holds whatever app calls.
+- **The claim takes the occurrence** (`claimed`, in the claim's transaction): `due` → `running` with the run's
+  id; a re-claim keeps it; anything else rolls the claim back. The run's procedure keeps `job: { id, version,
+  fingerprint }` (`AiRunProcedure.job`); the claim's `turn` carries what the app runs: the check, `checkSince`
+  (the previous occurrence that ran — done / nothing —, else the approval), the pinned procedure and the grant.
+  Its places are the caller's to read (else it would not be theirs), its name follows `HIDDEN_JOB_NAME`.
+- **The grant at every call** (`routeRefusal`, asked by the record-token guard for every route a token
+  bound to such a run calls, **whatever build calls** — no released-app gate here): the run still holds a
+  `running` occurrence, the job still runnable as above (stopped, paused, another version, not accepted →
+  refused; the rights lost → refused, the job paused and told, the occurrence held), and the route within
+  the pinned grant: `jobRunRouteAllowed` (`shared/core/jobs.ts`) — the turn start's reads
+  (`AI_TURN_BASE_ROUTES`), else a route the grant names **and** within `JOB_RUN_ROUTE_CEILING` (the
+  member's own record reads; mail drafts only with `outbound: draft_only`). **Never a create**: a grant may
+  name `POST /item` (schema 1's shape, the memo's first job does), but the run's token is refused it; the one
+  やること comes with the finish. Every refusal is 403 `NOT_IN_STEP`, naming nothing. A record token binds to
+  such a run (`bindsTokens`); to a run of any other non-record kind (the server's own `job-operation`) still
+  not.
+- **The finish** (`finishing`, in the finish's transaction): `done` needs `jobResult` — `'nothing'` (the
+  check found nothing: occurrence `nothing`, no やること) or `{ title, summary? }` (`parseJobRunResult`):
+  **the one やること** — only when the grant `creates` `task` (else 400 `JOB_TASK_NOT_GRANTED`) — made by the
+  service writer: id `occurrenceTaskId` (one per occurrence by construction), owner-only for the responsible
+  person, assignee them, actor `JOB_ACTOR` with the run's id, quiet (D9), the run's operation key
+  `create_task`; then the occurrence `done`. No `jobResult` → 400 `JOB_RESULT_REQUIRED` (the whole finish
+  rolls back, the run stays running). The やること is checked by the writer **before** the finish
+  (`beforeFinish`), as the server's runner does: refused → the run ended, the occurrence `needs_person`
+  `RECORDS_OFF` / `TASK_NOT_CREATED`, told, and 409 `RECORDS_DISABLED` / `JOB_TASK_NOT_CREATED` — never left
+  running (a refusal after that check is a race and rolls the finish back). The job checked again first: no
+  longer runnable → nothing made, the occurrence held with the reason (the rights lost also pause it). A finish
+  that sends the run to a person (`waiting_person` / `waiting_setup`) → `needs_person` `RUN_FAILED`, told
+  (`job_failed`); a temporary failure or an unknown outside result leave it `running` — claimable again after
+  its wait, or once reconciled, until it expires. A record run's finish with `jobResult` → 400.
+- **Ending a run from outside its finish** (`endPcRun`, the deadline, a pause / stop, the clock's expiry, a
+  task refusal): from `running`, `open` or `retry_later`; an outside operation still in flight becomes
+  `unknown` first, as at a finish, and then the run waits for reconciliation (`waiting_reconcile`), else for a
+  person (`waiting_person`) — either way with the code, no holder, its token fenced.
+- **The approved minutes are a hard deadline** (`grant.limits.minutes`, `pcRunDeadlineMs`): the run's first
+  claim (its creation — renewals and re-claims never move it) + those minutes. After it: every call of its
+  token is refused, the finish answers 409 `JOB_TIME_LIMIT` and makes nothing, a re-claim (also after a
+  temporary failure's wait) answers the same, and the turn is not listed; the first of these — or the clock,
+  also while the app still renews its lease — ends the run (`endPcRun`, `TIME_LIMIT`) and makes the occurrence
+  **`needs_person` `TIME_LIMIT`**, told (`job_failed`): a person looks at what an overrun run may have left
+  (chosen over `expired`, which says nothing happened). The limit counts the whole occurrence, retries
+  included.
+- **The clock**, for a `running` occurrence, in this order: past the deadline → as above; its run waiting for
+  a person to reconcile an outside operation and out of time (deadline or `expires_at`) → `needs_person`
+  `RESULT_UNKNOWN`, told — the run stays `waiting_reconcile` for that person (an upper bound instead of a
+  reconcile entry point for the app: `GET /ai-runs` lists record runs only, and `POST /ai-runs/:runId/
+  operations/:key/reconcile` already works by run id for whoever shows it — 5a-2 / 5b); past `expires_at`
+  with its run held by nobody (lease over, retried later, given back) → `expired`, told, the run ended. A run
+  held within its deadline finishes as it will.
+- **Not here**: the app's side, the clock making PC occurrences (5a-2); 「もう一度」 (5b): a `needs_person`
+  occurrence stays so even when its run is given back.
 
 ## Occurrences in the API (3b)
 
@@ -376,6 +484,32 @@ membership can fail).
   accept for someone else, accepts one's own, and says what will happen; the list's 責任者 is the approved
   version's and a PC job is not 「動いています」; the stop asks first; a pause reason and occurrences in words;
   nobody else reads the page.
+- `server/tests/integration/job-runs.test.ts` (PR 5a) — the turns and the claim the responsible person's
+  alone (another member, an admin, the owner, another company's id, a server job's occurrence: 404); the
+  claim's run (generation 1) taking the occurrence, another PC `RUN_CLAIMED`; the emergency stop's 503 first;
+  the jobs stop, a pause, another version (held), expired, not accepted, absent (skipped, told), the pinned
+  shelf version removed, the rights lost (paused, told, held); at every call only granted routes within the
+  ceiling, never a create, an old build scoped too, the rights lost / a pause / the stop / an ended
+  occurrence refusing the next call; a token binds to a PC job's run only; the finish's one owner-only
+  やること (also finished twice), `nothing`, no result, a grant without `creates`, `needs_person` told, a
+  temporary failure claimable again (generation 2); records off at the finish (run ended, `needs_person`,
+  told); a pause / the company's stop holding a running occurrence and ending its run, nothing back after
+  resume or lifting (the exact sequence claim → pause → call → resume → call → finish → re-claim →
+  「もう一度」), a stop or pause written without holding still refused, the rights lost found only at the
+  finish (paused, told); the hard deadline (renewing never moves it, the next call / the finish / a
+  re-claim / the clock end the run → `TIME_LIMIT`); a reconcile wait bounded (`RESULT_UNKNOWN`, never
+  `expired`); the turn's hidden name; the clock's expiry of an unheld run; the server runner never starved
+  by PC occurrences; the shelf pin (filled by the server, `JOB_SKILL_NOT_HERE` both ways, an unreadable place
+  missing / hiding the version, `JOB_SKILL_CHANGED`); ending a run (`endPcRun`) from `retry_later` and `open`
+  too, an operation in flight made unknown (→ `waiting_reconcile`), the clock's expiry ending the run.
+  Mutation check: 76 mutations were run, each removing or inverting exactly one of the guards named in this
+  section (the checks of `job-runs.ts`, the hooks and dispatch in `ai-runs.ts` / `run-subjects.ts`, the
+  clock's and `holdDue`'s PC branches and `endPcRun` in `job-occurrences.ts`, the shelf pin in `jobs.ts` /
+  `skill-shelf.ts`, `jobRunRouteAllowed`), and each of the 76 fails this file. Lines outside that list
+  (texts, view fields, the defensive checks below) were not mutated. Not reachable by a test, kept as defence: the `claimed` hook's refusal when the
+  occurrence is no longer `due` (the claim's check and write are one synchronous stretch), the finish's
+  `GONE` when the occurrence moved inside its own transaction, and a writer refusal after `beforeFinish`'s
+  check (a race; it rolls the finish back).
 - `client/tests/jobs-ipc.test.ts` — an older server without `you` reported as such; only the member's jobs (by the server's `you`), never dropped behind 80
   other jobs, a hidden approved definition still waiting for them, the approved version's name, the version
   and fingerprint sent, renderer values never change the path, which notices open the section.

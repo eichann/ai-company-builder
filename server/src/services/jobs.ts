@@ -1,6 +1,6 @@
 /**
  * Scheduled jobs (定期の仕事, B 「実行を記録から分ける」 PR 3a, `.claude/rules/jobs.md`): definitions and
- * approval (PR 3a). The occurrences and the server's operation are services/job-occurrences.ts (PR 3b); no claims yet.
+ * approval (PR 3a). The occurrences and the server's operation are services/job-occurrences.ts (PR 3b); a PC job's claim and the grant at every call are services/job-runs.ts (PR 5a).
  *
  * Who (owner decisions 2026-11-10, D3 / D4 / D5 / D8 / D10):
  * - owner / admin create, edit (a new version: the approved one stays as it was), approve, pause,
@@ -49,7 +49,9 @@ const FINGERPRINT_CHANGED = () => refuse('conflict', '画面に出ていた内�
 const OWNER_NOT_MEMBER = () => refuse('conflict', '責任者がこの会社のメンバーではありません。責任者を決め直してください。', { code: 'JOB_OWNER_NOT_MEMBER' })
 const GRANT_EXCEEDS = () => refuse('conflict', '責任者の今の権限では、この仕事の範囲に足りません。範囲か責任者を見直してください。', { code: 'JOB_GRANT_EXCEEDS' })
 const SKILL_MISSING = () => refuse('conflict', '会社のスキルが見つかりません。.claude/skills/ に置いて同期してから、もう一度ためしてください。', { code: 'JOB_SKILL_MISSING' })
-const SKILL_NOT_HERE = () => refuse('conflict', 'この会社は全社フォルダを使っていないため、会社のスキルを手順にした定期の仕事はまだ作れません。', { code: 'JOB_SKILL_NOT_HERE' })
+const SKILL_NOT_HERE = () => refuse('conflict', 'この会社は全社フォルダを使っていないため、手順には「会社の Skill」に公開された Skill を選んでください。', { code: 'JOB_SKILL_NOT_HERE' })
+const SHELF_NOT_HERE = () => refuse('conflict', 'この会社は全社フォルダを使っているため、手順には全社フォルダの .claude/skills/ にある Skill を選んでください。', { code: 'JOB_SKILL_NOT_HERE' })
+const SHELF_SKILL_MISSING = () => refuse('conflict', '手順の Skill が「会社の Skill」に見つかりません。公開されているか確かめてから、もう一度ためしてください。', { code: 'JOB_SKILL_MISSING' })
 const SKILL_CHANGED = () => refuse('conflict', '手順のスキルが、この版を作ったあとに変わりました。新しい版を作ってから承認してください。', { code: 'JOB_SKILL_CHANGED' })
 const NOT_RESPONSIBLE = () => refuse('forbidden', 'この定期の仕事を止められるのは、承認された版の責任者か管理者だけです。', { code: 'JOB_NOT_RESPONSIBLE' })
 const RETIRED = () => refuse('conflict', 'この定期の仕事はもう使われていません。', { code: 'JOB_RETIRED' })
@@ -62,8 +64,14 @@ export interface JobServiceDeps {
   ids: IdGenerator
   /** The git tree id of a company Skill now (`.claude/skills/<name>`), or null (none, or no shared folder). */
   skillTree: (companyId: string, name: string) => Promise<string | null>
-  /** Has the company the shared company folder? Without it there is no company Skill to pin yet. */
+  /** Has the company the shared company folder? Without it a Skill is pinned from the Skill shelf (`shelfSkill`). */
   hasCompanyFolder: (companyId: string) => boolean
+  /**
+   * A Skill of the Skill shelf as `who` reads it (services/skill-shelf.ts `jobSkill`): null when there is no
+   * such Skill (or the company has the shared folder); `readable` false when it is at a place `who` does not
+   * read. Absent → no shelf (every shelf Skill is missing).
+   */
+  shelfSkill?: (who: Member, itemId: string, version?: string) => { name: string; current: string | null; kept: boolean; readable: boolean } | null
   /** Tell these members their notices changed (the push signal, kind + version only). Absent → nothing. */
   noticesChanged?: (companyId: string, userIds: string[]) => void
   /**
@@ -89,10 +97,17 @@ export function createJobService(deps: JobServiceDeps) {
 
   const definitionOf = (v: JobVersionRow): JobDefinition => JSON.parse(v.definition) as JobDefinition
 
-  /** May `userId` (role `role`) read every place the definition names, now? */
+  /**
+   * May `userId` (role `role`) read every place the definition names, now? A Skill pinned from the shelf
+   * names its place too (B PR 5a): one at a place they do not read counts as a place they cannot read (a
+   * Skill gone from the shelf is the Skill check's, `skillPinned`).
+   */
   function readsAll(handle: CompanyData, userId: string, role: string, definition: JobDefinition): boolean {
     const reader = recordReader({ companyId: handle.companyId, userId, role }, handle.scopes.listWithRules())
-    return jobDefinitionPaths(definition).every(p => reader.file(p))
+    if (!jobDefinitionPaths(definition).every(p => reader.file(p))) return false
+    const procedure = definition.run.kind === 'procedure' ? definition.run.procedure : null
+    if (procedure?.source !== 'shelf_skill') return true
+    return deps.shelfSkill?.({ companyId: handle.companyId, userId, role }, procedure.item)?.readable !== false
   }
 
   /**
@@ -117,10 +132,19 @@ export function createJobService(deps: JobServiceDeps) {
 
   async function skillPinned(companyId: string, definition: JobDefinition): Promise<Outcome<void>> {
     if (definition.run.kind !== 'procedure') return ok(undefined)
+    const procedure = definition.run.procedure
+    if (procedure.source === 'shelf_skill') {
+      if (deps.hasCompanyFolder(companyId)) return SHELF_NOT_HERE()
+      // As the responsible person reads it: a Skill at a place they do not read is not there for them.
+      const role = memberships.roleOf(companyId, definition.actingUser)
+      const found = role === null ? null : deps.shelfSkill?.({ companyId, userId: definition.actingUser, role }, procedure.item)
+      if (!found || !found.readable || found.current === null) return SHELF_SKILL_MISSING()
+      return found.current === procedure.fingerprint ? ok(undefined) : SKILL_CHANGED()
+    }
     if (!deps.hasCompanyFolder(companyId)) return SKILL_NOT_HERE()
-    const tree = await deps.skillTree(companyId, definition.run.procedure.skill)
+    const tree = await deps.skillTree(companyId, procedure.skill)
     if (tree === null) return SKILL_MISSING()
-    return tree === definition.run.procedure.fingerprint ? ok(undefined) : SKILL_CHANGED()
+    return tree === procedure.fingerprint ? ok(undefined) : SKILL_CHANGED()
   }
 
   /** The responsible person: of the approved version once there is one, else of the newest. */
@@ -253,16 +277,30 @@ export function createJobService(deps: JobServiceDeps) {
     if (!isObject(body) || Object.keys(body).length !== 1 || !isObject(body.definition)) return BAD_BODY('{ definition }')
     const input: Record<string, unknown> = { ...body.definition }
     let tree: string | null | undefined
+    let missing = SKILL_MISSING
     if (isObject(input.run) && input.run.kind === 'procedure' && isObject(input.run.procedure)) {
-      if (!deps.hasCompanyFolder(companyId)) return SKILL_NOT_HERE()
-      const skill = input.run.procedure.skill
-      tree = typeof skill === 'string' ? await deps.skillTree(companyId, skill) : null
-      input.run = { ...input.run, procedure: { ...input.run.procedure, fingerprint: tree ?? '' } }
+      const procedure = input.run.procedure
+      if (procedure.source === 'shelf_skill') {
+        // A company without the shared folder (B PR 5a): the shelf Skill `item`, at its current version, as
+        // the responsible person reads it — the server fills its name and version, never the caller.
+        if (deps.hasCompanyFolder(companyId)) return SHELF_NOT_HERE()
+        missing = SHELF_SKILL_MISSING
+        const acting = typeof input.actingUser === 'string' ? input.actingUser : ''
+        const role = acting ? memberships.roleOf(companyId, acting) : null
+        const found = role !== null && typeof procedure.item === 'string' ? deps.shelfSkill?.({ companyId, userId: acting, role }, procedure.item) : null
+        tree = found && found.readable ? found.current : null
+        input.run = { ...input.run, procedure: { ...procedure, skill: found && found.readable ? found.name : procedure.skill, fingerprint: tree ?? '' } }
+      } else {
+        if (!deps.hasCompanyFolder(companyId)) return SKILL_NOT_HERE()
+        const skill = procedure.skill
+        tree = typeof skill === 'string' ? await deps.skillTree(companyId, skill) : null
+        input.run = { ...input.run, procedure: { ...procedure, fingerprint: tree ?? '' } }
+      }
     }
     const parsed = parseJobDefinition(input)
     if (!parsed.ok) {
       // Everything else was right and only the Skill is not the company's: say that, not "bad definition".
-      if (tree === null && parsed.problems.length === 1 && parsed.problems[0] === 'run.procedure.fingerprint.BAD') return SKILL_MISSING()
+      if (tree === null && parsed.problems.every(p => p === 'run.procedure.fingerprint.BAD' || p === 'run.procedure.skill.BAD') && parsed.problems.includes('run.procedure.fingerprint.BAD')) return missing()
       return BAD_DEFINITION(parsed.problems)
     }
     if (memberships.roleOf(companyId, parsed.definition.actingUser) === null) return BAD_DEFINITION(['actingUser.NOT_MEMBER'])
@@ -551,6 +589,25 @@ export function createJobService(deps: JobServiceDeps) {
       const role = memberships.roleOf(companyId, definition.actingUser)
       if (role === null) return 'OWNER_LEFT'
       return fitsRights(handle, definition.actingUser, role, definition) ? null : 'OWNER_RIGHTS_CHANGED'
+    },
+
+    /**
+     * A PC run's pinned Skill is still there for its responsible person to fetch (B PR 5a, the claim): a shelf
+     * Skill's pinned version is still stored at a place they read. A tree id of the shared folder is the
+     * app's to find in its clone (true here): the pinned procedure runs even after the Skill changed.
+     */
+    pinnedSkillKept(companyId: string, version: JobVersionRow): boolean {
+      const definition = definitionOf(version)
+      if (definition.run.kind !== 'procedure' || definition.run.procedure.source !== 'shelf_skill') return true
+      const role = memberships.roleOf(companyId, definition.actingUser)
+      const found = role === null ? null : deps.shelfSkill?.({ companyId, userId: definition.actingUser, role }, definition.run.procedure.item, definition.run.procedure.fingerprint)
+      return !!found && found.readable && found.kept
+    },
+
+    /** The job's name for the member (`nameFor`: 「定期の仕事」 unless they read every place the newest version names), or null when they may not see the job. */
+    nameOf(member: Member, jobId: string): string | null {
+      const found = visibleJob(member, jobId)
+      return found ? nameFor(member, found.handle, found.job) : null
     },
 
     /** Pause the job for a reason the server found (in the caller's transaction) and tell every owner / admin (`job_paused`). */

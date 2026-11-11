@@ -21,7 +21,8 @@
  *   bad input → waiting for a person, unknown result → waiting for
  *   reconciliation. Never silently back to 「AI の番」: the last three wait for
  *   a person's 「もう一度」 (`retry`).
- * - **What a run works on** (`run.subject`, B PR 2): the app's claim always makes a record's run; what
+ * - **What a run works on** (`run.subject`, B PR 2): `POST /ai-run-claims` always makes a record's run, and a PC
+ *   job's claim (`claimOccurrence`, B PR 5a) an occurrence's — one claim core (`claimSubject`); what
  *   belongs to records (the list the app reads, binding a record token, the built-in steps' route
  *   scope) is reached only by a `record` run. Every state change is kept in `ai_run_events` (`event`).
  */
@@ -35,6 +36,7 @@ import { aiTurnRouteScopeApplies } from '../lib/client-version'
 import { notInStep } from './not-in-step'
 import type { PluginStepProcedurePin } from '../../shared/core/plugins'
 import { RECORD_ID_RE } from '../../shared/core/records'
+import { JOB_PC_STEP, isOccurrenceId } from '../../shared/core/jobs'
 import type { AiRunView } from '../../shared/types/ai-runs'
 import type { AgentStopPolicy, AgentStopToolKind } from '../../shared/types/agent-stop'
 import type { AiRunEventRow, AiRunOperationRow, AiRunRepository, AiRunRow } from '../ports/ai-runs'
@@ -157,11 +159,20 @@ export function createAiRunService(deps: AiRunDeps) {
    * sent the claim (its X-ACB-Client-Version, kept only when it parses) and the plugins turned
    * on for the company now — read here, never taken from the app.
    */
-  function procedureOf(companyId: string, step: string, appBuild: string | null | undefined, pin: PluginStepProcedurePin | null): AiRunProcedure {
+  function procedureOf(companyId: string, step: string, appBuild: string | null | undefined, pin: PluginStepProcedurePin | null, job?: AiRunProcedure['job']): AiRunProcedure {
     const plugins = companyData.forCompany(companyId).plugins.installs()
       .filter(i => i.enabled).map(i => ({ id: i.pluginId, version: i.version })).sort((a, b) => a.id.localeCompare(b.id))
-    return { step, app: parseClientVersion(appBuild)?.raw.slice(0, 120) ?? null, plugins, ...(pin ? { pin } : {}) }
+    return { step, app: parseClientVersion(appBuild)?.raw.slice(0, 120) ?? null, plugins, ...(pin ? { pin } : {}), ...(job ? { job } : {}) }
   }
+
+  /** A subject's in-transaction refusal: thrown to roll the transaction back, then answered. */
+  class SubjectRefused extends Error {
+    constructor(readonly refusal: Refusal) { super('refused by the run subject'); this.name = 'SubjectRefused' }
+  }
+  function subjectRefusal<T>(work: () => Outcome<T>): Outcome<T> {
+    try { return work() } catch (e) { if (e instanceof SubjectRefused) return e.refusal; throw e }
+  }
+  const liveRun = (run: AiRunRow) => ({ id: run.id, subject: run.subject, step: run.step, userId: run.userId, state: run.state })
 
   /** The member's own run (anyone else's, another company's or a missing one: the same 404). */
   function ownRun(member: Member, runId: string): { r: AiRunRepository; run: AiRunRow } | Refusal {
@@ -222,6 +233,83 @@ export function createAiRunService(deps: AiRunDeps) {
     event(r, run, { event: 'refused_stopped', code: AI_RUN_STOPPED.code, stateAfter: null }, at)
   }
 
+  /**
+   * The claim of one subject's step (a record's, or a job occurrence's): one app instance wins; a re-claim
+   * raises the generation. Refused (503 `AI_STOPPED`) while the emergency stop covers the member
+   * (`STOPS_UNATTENDED_RUN`), before anything is read; whose turn it is and what it is pinned to is the
+   * subject's (`subjects.resolve`), and the subject takes the run in the same transaction (`claimed`).
+   */
+  async function claimSubject(
+    member: Member, subject: RunSubject, step: string, deviceId: string, conversationId: string, appBuild: string | null | undefined,
+    reported: { pluginVersion: string | null; stepsVersion: string | null },
+  ): Promise<Outcome<{ run: AiRunView; created: boolean }>> {
+    // Before the turn check and the pin: a stopped AI's claim reads no record, makes and pins nothing.
+    const stopped = claimStopped(member)
+    if (stopped) {
+      // The member's own open run of that step, if one waits to be resumed, keeps that it was refused.
+      const r = repo(member.companyId)
+      const waiting = r.openRun(subject, step)
+      if (waiting && waiting.userId === member.userId) stoppedOnce(r, waiting, clock.now())
+      return stopped
+    }
+    // Whose turn, and the procedure the work runs (pinned at its first run; the operator's stop refuses there).
+    // A core step answers at once: its turn check and the write below stay in one synchronous stretch, as before.
+    const answer = subjects.resolve(member, subject, step)
+    const resolved = answer instanceof Promise ? await answer : answer
+    if (!resolved.ok) return resolved
+    const { pin, job } = resolved.value
+
+    const r = repo(member.companyId)
+    const nowMs = clock.nowMs()
+    const at = nowIso(nowMs)
+    const expires = nowIso(nowMs + AI_RUN_CLAIM_TTL_MS)
+    const versions = { ...reported, procedure: JSON.stringify(procedureOf(member.companyId, step, appBuild, pin, job)) }
+    const taken = (run: AiRunRow) => {
+      const refused = subjects.claimed?.(member, liveRun(run)) ?? null
+      if (refused) throw new SubjectRefused(refused)
+    }
+    return subjectRefusal(() => transactions.run((): Outcome<{ run: AiRunView; created: boolean }> => {
+      // One run per record (ai-turns.md "One claim per record"): another step's live claim on the same
+      // record — a core step and a business plugin's, say — refuses this one. The answer names neither
+      // that run nor its step (it may be another member's).
+      if (r.liveOtherStep(subject, step, at)) return refuse('conflict', RUN_CLAIMED.error, { code: RUN_CLAIMED.code })
+      const open = r.openRun(subject, step)
+      if (!open) {
+        const run: AiRunRow = {
+          id: ids.newId(), subject, step, userId: member.userId, state: 'running', generation: 1, deviceId, conversationId,
+          claimExpiresAt: expires, failureClass: null, failureCode: null, retryAt: null, attempts: 0, ...versions,
+          createdAt: at, updatedAt: at, closedAt: null,
+        }
+        r.insert(run)
+        event(r, run, { event: 'claimed', code: null }, at)
+        taken(run)
+        return ok({ run: view(r, run), created: true })
+      }
+      const live = open.state === 'running' && open.claimExpiresAt !== null && Date.parse(open.claimExpiresAt) > nowMs
+      if (live && open.deviceId !== deviceId) return refuse('conflict', RUN_CLAIMED.error, { code: RUN_CLAIMED.code, run: view(r, open) })
+      if (open.state === 'waiting_reconcile') return refuse('conflict', RUN_NEEDS_RECONCILE.error, { code: RUN_NEEDS_RECONCILE.code, run: view(r, open) })
+      if (open.state === 'waiting_setup' || open.state === 'waiting_person'
+        || (open.state === 'retry_later' && open.retryAt !== null && Date.parse(open.retryAt) > nowMs)) {
+        return refuse('conflict', RUN_WAITING.error, { code: RUN_WAITING.code, run: view(r, open) })
+      }
+      // Taking it over: whatever the previous holder had in flight is unknown, and blocks resuming.
+      inFlightToUnknown(r, open, at)
+      if (unsettled(r.operations(open.id)).length > 0) {
+        const waiting: AiRunRow = { ...open, state: 'waiting_reconcile', deviceId: null, claimExpiresAt: null, failureClass: 'unknown-result', failureCode: 'RESULT_UNKNOWN', updatedAt: at }
+        if (save(r, open, waiting)) event(r, waiting, { event: 'claimed', code: 'RESULT_UNKNOWN' }, at)
+        return refuse('conflict', RUN_NEEDS_RECONCILE.error, { code: RUN_NEEDS_RECONCILE.code, run: view(r, waiting) })
+      }
+      const run: AiRunRow = {
+        ...open, userId: member.userId, state: 'running', generation: open.generation + 1, deviceId, conversationId,
+        claimExpiresAt: expires, retryAt: null, ...versions, updatedAt: at,
+      }
+      if (!save(r, open, run)) return refuse('conflict', RUN_CLAIMED.error, { code: RUN_CLAIMED.code })
+      event(r, run, { event: 'claimed', code: null }, at)
+      taken(run)
+      return ok({ run: view(r, run), created: false })
+    }))
+  }
+
   return {
     /**
      * POST …/ai-run-claims — one app instance wins; a re-claim raises the generation.
@@ -241,69 +329,25 @@ export function createAiRunService(deps: AiRunDeps) {
         if (v !== undefined && !shortText(v, 60)) return refuse('bad-request', 'pluginVersion / stepsVersion are short texts')
       }
       // The claim of the app's 「AI の番」 is always a record's (B PR 2): the body's shape never changes.
-      const subject: RunSubject = { kind: 'record', id: recordId }
-      // Before the turn check and the pin: a stopped AI's claim reads no record, makes and pins nothing.
-      const stopped = claimStopped(member)
-      if (stopped) {
-        // The member's own open run of that step, if one waits to be resumed, keeps that it was refused.
-        const r = repo(member.companyId)
-        const waiting = r.openRun(subject, step)
-        if (waiting && waiting.userId === member.userId) stoppedOnce(r, waiting, clock.now())
-        return stopped
-      }
-      // Whose turn, and the procedure the work runs (pinned at its first run; the operator's stop refuses there).
-      // A core step answers at once: its turn check and the write below stay in one synchronous stretch, as before.
-      const answer = subjects.resolve(member, subject, step)
-      const resolved = answer instanceof Promise ? await answer : answer
-      if (!resolved.ok) return resolved
-      const { pin } = resolved.value
-
-      const r = repo(member.companyId)
-      const nowMs = clock.nowMs()
-      const at = nowIso(nowMs)
-      const expires = nowIso(nowMs + AI_RUN_CLAIM_TTL_MS)
-      const versions = {
+      return claimSubject(member, { kind: 'record', id: recordId }, step, deviceId, conversationId as string, appBuild, {
         pluginVersion: (pluginVersion as string | undefined) ?? null, stepsVersion: (stepsVersion as string | undefined) ?? null,
-        procedure: JSON.stringify(procedureOf(member.companyId, step, appBuild, pin)),
-      }
-      return transactions.run((): Outcome<{ run: AiRunView; created: boolean }> => {
-        // One run per record (ai-turns.md "One claim per record"): another step's live claim on the same
-        // record — a core step and a business plugin's, say — refuses this one. The answer names neither
-        // that run nor its step (it may be another member's).
-        if (r.liveOtherStep(subject, step, at)) return refuse('conflict', RUN_CLAIMED.error, { code: RUN_CLAIMED.code })
-        const open = r.openRun(subject, step)
-        if (!open) {
-          const run: AiRunRow = {
-            id: ids.newId(), subject, step, userId: member.userId, state: 'running', generation: 1, deviceId, conversationId: conversationId as string,
-            claimExpiresAt: expires, failureClass: null, failureCode: null, retryAt: null, attempts: 0, ...versions,
-            createdAt: at, updatedAt: at, closedAt: null,
-          }
-          r.insert(run)
-          event(r, run, { event: 'claimed', code: null }, at)
-          return ok({ run: view(r, run), created: true })
-        }
-        const live = open.state === 'running' && open.claimExpiresAt !== null && Date.parse(open.claimExpiresAt) > nowMs
-        if (live && open.deviceId !== deviceId) return refuse('conflict', RUN_CLAIMED.error, { code: RUN_CLAIMED.code, run: view(r, open) })
-        if (open.state === 'waiting_reconcile') return refuse('conflict', RUN_NEEDS_RECONCILE.error, { code: RUN_NEEDS_RECONCILE.code, run: view(r, open) })
-        if (open.state === 'waiting_setup' || open.state === 'waiting_person'
-          || (open.state === 'retry_later' && open.retryAt !== null && Date.parse(open.retryAt) > nowMs)) {
-          return refuse('conflict', RUN_WAITING.error, { code: RUN_WAITING.code, run: view(r, open) })
-        }
-        // Taking it over: whatever the previous holder had in flight is unknown, and blocks resuming.
-        inFlightToUnknown(r, open, at)
-        if (unsettled(r.operations(open.id)).length > 0) {
-          const waiting: AiRunRow = { ...open, state: 'waiting_reconcile', deviceId: null, claimExpiresAt: null, failureClass: 'unknown-result', failureCode: 'RESULT_UNKNOWN', updatedAt: at }
-          if (save(r, open, waiting)) event(r, waiting, { event: 'claimed', code: 'RESULT_UNKNOWN' }, at)
-          return refuse('conflict', RUN_NEEDS_RECONCILE.error, { code: RUN_NEEDS_RECONCILE.code, run: view(r, waiting) })
-        }
-        const run: AiRunRow = {
-          ...open, userId: member.userId, state: 'running', generation: open.generation + 1, deviceId, conversationId: conversationId as string,
-          claimExpiresAt: expires, retryAt: null, ...versions, updatedAt: at,
-        }
-        if (!save(r, open, run)) return refuse('conflict', RUN_CLAIMED.error, { code: RUN_CLAIMED.code })
-        event(r, run, { event: 'claimed', code: null }, at)
-        return ok({ run: view(r, run), created: false })
       })
+    },
+
+    /**
+     * POST …/job-run-claims { occurrenceId, deviceId, conversationId } (B PR 5a): the responsible person's app
+     * claims a PC job's occurrence — the same run core as a record's claim (the emergency stop's 503 first,
+     * generations, one open run per subject, fencing), with step `job-procedure`. Whether it is theirs to run
+     * now is the occurrence's resolver (services/job-runs.ts).
+     */
+    async claimOccurrence(member: Member, body: unknown, appBuild?: string | null): Promise<Outcome<{ run: AiRunView; created: boolean }>> {
+      if (!isObj(body)) return refuse('bad-request', 'Body must be a JSON object')
+      const { occurrenceId, deviceId, conversationId } = body
+      if (!Object.keys(body).every(k => k === 'occurrenceId' || k === 'deviceId' || k === 'conversationId')) return refuse('bad-request', 'Body is { occurrenceId, deviceId, conversationId }')
+      if (!isOccurrenceId(occurrenceId)) return refuse('bad-request', 'occurrenceId is an occurrence id')
+      if (typeof deviceId !== 'string' || !DEVICE_ID_RE.test(deviceId)) return refuse('bad-request', 'deviceId is 8–100 letters, digits, _ or -')
+      if (!shortText(conversationId, 200)) return refuse('bad-request', 'conversationId is required (1–200 characters)')
+      return claimSubject(member, { kind: 'occurrence', id: occurrenceId }, JOB_PC_STEP, deviceId, conversationId, appBuild, { pluginVersion: null, stepsVersion: null })
     },
 
     /** POST …/ai-runs/:runId/renew { generation } — the holder extends its claim. */
@@ -342,10 +386,15 @@ export function createAiRunService(deps: AiRunDeps) {
         code = (f.code as string | undefined) ?? null
       }
       const { r, run } = own
+      // What a PC job's run hands back (B PR 5a) is for that kind of run only.
+      if (b.jobResult !== undefined && run.subject.kind === 'record') return refuse('bad-request', 'jobResult is for a job’s run only')
       if (run.state !== 'running' || run.generation !== generation) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
+      // The subject may refuse it first (a PC job's run past its approved minutes: it ends the run itself).
+      const before = subjects.beforeFinish?.(member, liveRun(run), b) ?? null
+      if (before) return before
       const nowMs = clock.nowMs()
       const at = nowIso(nowMs)
-      const finished = transactions.run((): Outcome<{ run: AiRunView }> => {
+      const finished = subjectRefusal(() => transactions.run((): Outcome<{ run: AiRunView }> => {
         inFlightToUnknown(r, run, at)
         const released = { ...run, deviceId: null, claimExpiresAt: null, updatedAt: at }
         let next: AiRunRow
@@ -364,8 +413,11 @@ export function createAiRunService(deps: AiRunDeps) {
         }
         if (!save(r, run, next)) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
         event(r, next, { event: 'finished', code: next.failureCode }, at)
+        // The subject's part, all or nothing with the finish (a job's occurrence and its one やること).
+        const refused = subjects.finishing?.(member, liveRun(next), b) ?? null
+        if (refused) throw new SubjectRefused(refused)
         return ok({ run: view(r, next) })
-      })
+      }))
       if (finished.ok && finished.value.run.state === 'done') {
         try { subjects.afterDone(member, { id: run.id, subject: run.subject, step: run.step, createdAt: run.createdAt }) } catch { /* asked again by the next meeting */ }
       }
@@ -458,8 +510,9 @@ export function createAiRunService(deps: AiRunDeps) {
       if (generation === null) return refuse('bad-request', 'run.generation is a whole number ≥ 1')
       const own = ownRun(member, run.id)
       if ('ok' in own) return own
-      // A record token works on records: only a record's run binds one (another kind is a missing run here).
-      if (own.run.subject.kind !== 'record') return refuse('not-found', RUN_NOT_FOUND.error, { code: RUN_NOT_FOUND.code })
+      // A record token works on records: a record's run binds one, and of the other kinds only a run whose
+      // every call the subject scopes (a PC job's, B PR 5a: `routeRefusal`); another is a missing run here.
+      if (own.run.subject.kind !== 'record' && !subjects.bindsTokens?.(liveRun(own.run))) return refuse('not-found', RUN_NOT_FOUND.error, { code: RUN_NOT_FOUND.code })
       if (own.run.state !== 'running' || own.run.generation !== generation || own.run.conversationId !== conversationId) {
         return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
       }
@@ -493,8 +546,11 @@ export function createAiRunService(deps: AiRunDeps) {
     routeRefusal(member: Member, runId: string, route: string, params: Readonly<Record<string, string | undefined>>, build: string | null | undefined): Refusal | null {
       const run = repo(member.companyId).byId(runId)
       // Only a record's run is the built-in steps' (and only for them is the released apps' version gate):
-      // a run of any other kind reaches no record route, whatever build calls.
-      if (run && run.userId === member.userId && run.subject.kind !== 'record') return notInStep()
+      // a run of any other kind reaches only what its subject allows now (a PC job's grant, checked at every
+      // call, B PR 5a; any other: nothing), whatever build calls.
+      if (run && run.userId === member.userId && run.subject.kind !== 'record') {
+        return subjects.routeRefusal ? subjects.routeRefusal(member, liveRun(run), route) : notInStep()
+      }
       if (!aiTurnRouteScopeApplies(build)) return null
       if (!run || run.userId !== member.userId) return null
       return aiTurnRouteAllowed(run.step, route, params) ? null : notInStep()

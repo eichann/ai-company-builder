@@ -70,7 +70,10 @@ A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target
   fall-back). A company without the shared company folder cannot pin a Skill to a step yet (the
   Skill shelf is not known to these routes, and `readPluginProcedure` reads a git tree): the app
   shows `STEP_SKILL_NOT_HERE` instead of the server's 「…置いて同期して…」 for a person's start
-  (`features/plugin-steps/ipc.ts`; test `ipc-company-without-folder.test.ts`). The admin console sets it in 「つなぎ先」 → the business → 「手順を会社のスキルで」
+  (`features/plugin-steps/ipc.ts`; test `ipc-company-without-folder.test.ts`). Scheduled jobs pin a shelf
+  Skill since B PR 5a (`jobs.md` "A Skill from the shelf", `skillShelf.jobSkill`); plugin steps do not yet —
+  their pin type, the admin's step-skill screen and the app's procedure reader would all change (why it was
+  not shared there). The admin console sets it in 「つなぎ先」 → the business → 「手順を会社のスキルで」
   (`admin/src/app/companies/[id]/integrations/step-skills.tsx`; only overridable steps are shown, a
   Skill name typed per step, empty = the business's own procedure).
 - **A person's start**: `GET /me/plugin-steps/records/:recordId` (the steps at the record's state,

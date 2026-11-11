@@ -11,6 +11,9 @@
  *   POST /jobs/:jobId/pause | resume   owner/admin; the responsible person for their own
  *   POST /me/jobs/:jobId/accept        the version's responsible person { version, fingerprint? }
  *   PUT  /jobs-stop { stopped }        owner/admin: 「定期の仕事をすべて止める」 (its own segment: server.md "Route paths")
+ *   GET  /me/job-turns                 the caller's PC-job occurrences they may claim now (B PR 5a, services/job-runs.ts)
+ *   POST /job-run-claims               the responsible person's app claims one { occurrenceId, deviceId, conversationId }
+ *                                      (the run core of services/ai-runs.ts; `/job-run-claims`, not `/jobs/…`: its own segment)
  */
 import { Hono } from 'hono'
 import { services } from '../composition'
@@ -18,7 +21,7 @@ import { refusal } from './respond'
 import { companyMember, serviceBody } from './guards'
 
 export const jobsRoute = new Hono()
-const { jobs } = services
+const { jobs, jobRuns, aiRuns } = services
 
 jobsRoute.get('/jobs', companyMember, async (c) => {
   const result = jobs.list(c.var.member)
@@ -78,4 +81,19 @@ jobsRoute.put('/jobs-stop', companyMember, serviceBody, async (c) => {
   const result = jobs.setStopped(c.var.member, c.var.body)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
+})
+
+jobsRoute.get('/me/job-turns', companyMember, async (c) => {
+  const result = jobRuns.turns(c.var.member)
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+jobsRoute.post('/job-run-claims', companyMember, serviceBody, async (c) => {
+  const m = c.var.member
+  // The app build that claims (the header every app request carries): part of the run's procedure.
+  const result = await aiRuns.claimOccurrence(m, c.var.body, c.req.header('X-ACB-Client-Version') ?? null)
+  if (!result.ok) return refusal(c, result)
+  const turn = jobRuns.turnOf(m, result.value.run.subject?.id ?? '')
+  return c.json({ success: true, data: { ...result.value, turn } }, result.value.created ? 201 : 200)
 })

@@ -312,7 +312,7 @@ GET  /api/config                                  setup state (no auth)
                                                                 (実行の管理, S10b: records.md "Execution runs")
                               GET|POST /jobs, GET|PUT /jobs/:jobId, POST /jobs/:jobId/approve | pause | resume,
                               POST /me/jobs/:jobId/accept, PUT /jobs-stop,
-                              GET /jobs/:jobId/occurrences                    jobs.ts
+                              GET /jobs/:jobId/occurrences, GET /me/job-turns, POST /job-run-claims   jobs.ts
                                                                 (定期の仕事: jobs.md)
                               GET /plugins, GET|PUT /plugins/:pluginId, PUT …/enabled,
                               PUT …/mapping, POST …/mapping/restore, POST …/mapping/check, POST …/import,
