@@ -83,6 +83,8 @@ export interface ChatServerConfigDeps {
   jobReport?: (conversationId: string) => ((result: unknown) => Promise<string | null>) | null
   /** A scheduled job's run held for a consultation: where it may write (its deliverable area); null otherwise. */
   jobWriteArea?: (conversationId: string) => JobWriteArea | null
+  /** Whether a consultation's record token is bound to an execution run (records/runs.ts). */
+  runBound?: (companyId: string, conversationId: string) => boolean
   /** The allowed-roots check (a Drive put reads a local file). */
   paths?: PathGuard
   /** Which Skill a consultation used (services/skill-use-reporter.ts, records.md "Which Skill"); absent = not recorded. */

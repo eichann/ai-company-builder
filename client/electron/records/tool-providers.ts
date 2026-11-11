@@ -21,6 +21,8 @@ export interface RecordToolProviderDeps {
   jobReport?: (conversationId: string) => ((result: unknown) => Promise<string | null>) | null
   /** A scheduled job's run held for this consultation: its write area (drive_put reads only from there); null otherwise. */
   jobWriteArea?: (conversationId: string) => JobWriteArea | null
+  /** Whether this consultation's record token is bound to an execution run (then drive_put reads only a job's area, else nothing). */
+  runBound?: (companyId: string, conversationId: string) => boolean
 }
 
 /** The turn the tools are for: its company and the consultation's company folder. */
@@ -41,7 +43,9 @@ export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordTo
     // A scheduled job's run: drive_put reads only from its own deliverable area (`<place>/.personal/<folder>/`), never
     // another company file (a prompt could otherwise send any file the member reads into the job's folder); no area → none.
     const area = turn.conversationId ? deps.jobWriteArea?.(turn.conversationId) ?? null : null
-    const onlyUnder = area === null ? undefined : 'nowhere' in area ? null : `${area.place}/.personal/${area.folder}`
+    // Fail closed: a run-bound token (or a held job run) whose area is not known reads nothing; only a consultation reads the company folder.
+    const bound = !!turn.conversationId && (deps.runBound?.(turn.companyId, turn.conversationId) === true || (deps.jobReport?.(turn.conversationId) ?? null) !== null)
+    const onlyUnder = area === null ? (bound ? null : undefined) : 'nowhere' in area ? null : `${area.place}/.personal/${area.folder}`
     providers.push((access, signal) => createDriveTools(access, {
       picking: drivePicking, companyId: turn.companyId, companyRoot: turn.companyRoot, topicTask: turn.topicTask,
       local: { pathGuard: paths, notDownloaded: notDownloadedFolders, privateFolders: () => deps.privateFolders.readable(turn.companyId), onlyUnder },

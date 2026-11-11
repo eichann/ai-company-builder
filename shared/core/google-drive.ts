@@ -120,32 +120,53 @@ export function checkDrivePutContent(kind: DrivePutKind, bytes: Uint8Array): str
   return null
 }
 
-/** Attributes that make a renderer fetch what they name (on any element but a plain link). */
-const FETCHING_ATTRS = /\s(?:src|srcset|href|data|poster|background|action|formaction|xlink:href|lowsrc|dynsrc|longdesc|ping|manifest|codebase|archive)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi
+/** Named character references a URL could be spelled with (decoded before looking; numeric ones always are). */
+const DOC_ENTITIES: Record<string, string> = {
+  colon: ':', sol: '/', bsol: '\\', period: '.', tab: '\t', newline: '\n', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', lpar: '(', rpar: ')',
+}
+/** The only schemes a document may name outside an allowed link: inline data and a mail address. */
+const DOC_SCHEMES: ReadonlySet<string> = new Set(['data', 'mailto'])
+
+function decodeDocEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z]{2,10});?/gi, (whole, e: string) => {
+    if (e[0] === '#') {
+      const code = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10)
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : ''
+    }
+    return DOC_ENTITIES[e.toLowerCase()] ?? whole
+  })
+}
+
+/** Anything that names a place to fetch: `scheme://`, a `//` or `\\` start, or `scheme:` other than `data:` / `mailto:`. */
+function hasUrlToken(text: string): boolean {
+  if (/[a-z0-9+.-]\s*:\s*[\\/]\s*[\\/]/i.test(text)) return true
+  // A network-path reference (`//host`, `\\host`): not after a scheme's colon, nor inside base64 (`+//`, `///`).
+  if (/(?:^|[^:\w+/\\])[\\/][\\/](?=[^\s\\/])/.test(text)) return true
+  for (const m of text.matchAll(/(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{0,31})\s*:(?=\S)/gi)) {
+    if (!DOC_SCHEMES.has(m[1].toLowerCase())) return true
+  }
+  return false
+}
 
 /**
- * Whether HTML / Markdown about to become a Google document points at anything a converter or viewer would fetch from
- * outside (an image, a stylesheet, a frame, a CSS `url()` or `@import`, a Markdown image): Drive's conversion could
- * send what it fetches — and the URL itself — elsewhere, from a run nobody watches. Strict on purpose (the review of
- * #678): any such reference counts except an inline `data:` one or a `#` fragment; plain links (`<a href>`, `[text](url)`)
- * are not fetched and pass. The text is checked as written (an entity-encoded URL is not `data:` either, so it counts).
+ * Whether HTML / Markdown about to become a Google document could make anything fetch from outside (an image, a
+ * stylesheet, a frame, a font, a refresh…): Drive's conversion — or a later viewer — could send what it fetches, and the
+ * URL itself, elsewhere, from a run nobody watches. **An allowlist that fails closed** (re-review of #678: a blocklist of
+ * tags and attributes was bypassable): every URL-like token counts (`scheme://`, `//`, `\\`, `scheme:` other than
+ * `data:` / `mailto:`), with exactly two exceptions — the `href` of an `<a>` tag (only that one value; any other URL in
+ * the tag still counts) and, in Markdown, an inline link `[text](url)` that is not an image. Also refused outright: CSS
+ * (`<style>`, `style=`, which can fetch and hide URLs in escapes), `srcset`, `http-equiv`, and Markdown reference
+ * definitions (`[ref]: …`, whose target an image elsewhere could use). The text is looked at as written and with its
+ * character references decoded.
  */
 export function driveDocFetchesOutside(kind: DrivePutKind, text: string): boolean {
-  const inline = (v: string) => /^["']?\s*(?:data:|#)/i.test(v)
-  // CSS anywhere (a <style> block, a style attribute, Markdown's raw HTML): url(...) not inline, or @import.
-  if (/@import/i.test(text)) return true
-  for (const m of text.matchAll(/url\s*\(\s*([^)]*)\)/gi)) if (!inline(m[1])) return true
-  // Tags (HTML, or raw HTML inside Markdown): a fetching attribute on anything but <a>.
-  for (const tag of text.matchAll(/<\s*([a-z][a-z0-9:-]*)\b([^>]*)>/gi)) {
-    if (tag[1].toLowerCase() === 'a') continue
-    // <meta http-equiv="refresh" content="0;url=…"> sends the viewer elsewhere.
-    if (/http-equiv\s*=\s*["']?\s*refresh/i.test(tag[2])) return true
-    for (const attr of tag[2].matchAll(FETCHING_ATTRS)) if (!inline(attr[1])) return true
-  }
-  if (kind === 'markdown') {
-    // ![alt](target) and ![alt][ref]: an image (a reference one's target is defined elsewhere in the text).
-    for (const m of text.matchAll(/!\[[^\]]*\]\s*\(\s*<?([^)\s>]*)/g)) if (!inline(m[1])) return true
-    if (/!\[[^\]]*\]\s*\[/.test(text)) return true
+  for (const t of [text, decodeDocEntities(text)]) {
+    if (/<\s*style\b|[\s/"']style\s*=|[\s/"']srcset\s*=|http-equiv/i.test(t)) return true
+    if (/^\s{0,3}\[[^\]]+\]\s*:/m.test(t)) return true
+    // The allowed link targets are taken out; whatever is left may name nothing outside.
+    let rest = t.replace(/<a\s[^<>]*>/gi, tag => tag.replace(/\shref\s*=\s*("[^"]*"|'[^']*'|[^\s"'<>]+)/i, ' '))
+    if (kind === 'markdown') rest = rest.replace(/(?<![!(\[\]\\])\[[^[\]()\\]*\]\([^()\s\\]*\)/g, ' ')
+    if (hasUrlToken(rest)) return true
   }
   return false
 }

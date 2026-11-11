@@ -173,23 +173,35 @@ describe('a pasted Drive link: only Google\'s own file addresses give an id', ()
   })
 })
 
-describe('a document never fetches from outside (review of #678)', () => {
-  it('images, stylesheets, frames, CSS url() and @import, a refresh, Markdown images: refused; inline data, fragments and plain links pass', () => {
+describe('a document never fetches from outside (review of #678): an allowlist that fails closed', () => {
+  const E = 'https://evil.example/x.png'
+  it('every URL-like token counts, however it is hidden; CSS, srcset, http-equiv and reference definitions are refused', () => {
     const outside = [
-      ['html', '<img src="https://x.example/a.png">'], ['html', '<img src=//x.example/a.png>'], ['html', "<img srcset='https://x.example/a.png 2x'>"],
-      ['html', '<link rel="stylesheet" href="https://x.example/s.css">'], ['html', '<script src="https://x.example/s.js"></script>'],
-      ['html', '<iframe src="https://x.example/"></iframe>'], ['html', '<object data="https://x.example/o"></object>'], ['html', '<video poster="https://x.example/p.png">'],
-      ['html', '<table background="https://x.example/b.png">'], ['html', '<p style="background: url( \'https://x.example/b.png\' )">'],
-      ['html', '<style>@import "x.css";</style>'], ['html', '<meta http-equiv="Refresh" content="0;url=https://x.example/">'],
-      ['html', '<img src="&#104;ttps://x.example/a.png">'], ['html', '<img src="relative.png">'], ['html', '<svg><image xlink:href="https://x.example/a.png"/></svg>'],
-      ['markdown', '![a](https://x.example/a.png)'], ['markdown', '![a]( <https://x.example/a.png> )'], ['markdown', '![a][ref]\n\n[ref]: https://x.example/a.png'],
-      ['markdown', '<img src="https://x.example/a.png">'],
+      ['html', `<img src="${E}">`], ['html', '<img src=//evil.example/a.png>'], ['html', '<img src="\\\\evil.example\\a.png">'], ['html', `<img alt=">" src="${E}">`],
+      ['html', `<img/src="${E}">`], ['html', `<img srcset="data:, 1x, ${E} 2x">`], ['html', '<img srcset="a.png 1x">'],
+      ['html', `<div style="background-image: image-set('${E}' 1x)">`], ['html', '<p style="background: \\75 rl(https://evil.example/b.png)">'],
+      ['html', '<p style="color: red">赤</p>'], ['html', '<style>p { color: red }</style>'], ['html', '<style>@import "x.css";</style>'],
+      ['html', `<link rel="stylesheet" href="${E}">`], ['html', `<script src="${E}"></script>`], ['html', `<iframe src="${E}"></iframe>`],
+      ['html', `<object data="${E}"></object>`], ['html', `<video poster="${E}">`], ['html', `<table background="${E}">`],
+      ['html', `<meta http-equiv="Refresh" content="0;url=${E}">`], ['html', `<meta http-equiv="Link" content="<${E}>; rel=stylesheet">`],
+      ['html', '<img src="&#104;ttps://evil.example/a.png">'], ['html', '<img src="&#x2f;&#x2f;evil.example/a.png">'], ['html', '<img src="https&colon;//evil.example/a.png">'],
+      ['html', `<svg><image xlink:href="${E}"/></svg>`], ['html', `<a href="https://example.com" ping="${E}">x</a>`], ['html', `<a href="https://example.com"><img src="${E}"></a>`],
+      ['html', `参考：${E}`], ['html', '<p>ftp:evil.example</p>'],
+      ['html', '<meta http-equiv="refresh" content="5">'], ['html', `<a ping="${E}" href="https://example.com">x</a>`], ['html', '<img src="data://evil.example/x.png">'],
+      ['markdown', `![a](${E})`], ['markdown', `![a]( <${E}> )`], ['markdown', `![a [b] c](${E})`], ['markdown', `![a\\]b](${E})`],
+      ['markdown', '![logo]\n\n[logo]: https://evil.example/x.png'], ['markdown', '[logo]: https://evil.example/x.png\n\n![logo]'], ['markdown', '![logo][1]\n\n  [1]: <x.png>'],
+      ['markdown', `<img src="${E}">`], ['markdown', `参考 <${E}>`], ['markdown', `参考 ${E}`], ['markdown', `[t](${E} "title")`], ['markdown', `[![a](${E})](https://example.com)`],
     ] as const
     for (const [kind, text] of outside) expect(driveDocFetchesOutside(kind, text), text).toBe(true)
+  })
+
+  it('ordinary reports still pass: <a href> and [text](url) links, inline data, fragments, mail, times and tables', () => {
     const inside = [
-      ['html', '<a href="https://example.com/">リンク</a><p>本文</p>'], ['html', '<img src="data:image/png;base64,iVBORw0KGgo=">'], ['html', '<a href="#top">上へ</a>'],
-      ['html', '<meta charset="utf-8"><meta name="viewport" content="width=device-width">'], ['html', '<p style="color: red">赤</p>'],
-      ['markdown', '# 見出し\n[リンク](https://example.com)\n<https://example.com>'], ['markdown', '![図](data:image/png;base64,iVBORw0KGgo=)'],
+      ['html', '<a href="https://example.com/">リンク</a><p>本文</p>'], ['html', "<a href='https://example.com/a?b=1'>リンク</a>"], ['html', '<a href="#top">上へ</a>'], ['html', '<a class="ref" target="_blank" href="https://example.com/">リンク</a>'],
+      ['html', '<img src="data:image/png;base64,iVBORw0KGgo+//8=">'], ['html', '<a href="mailto:sato@div.example">佐藤</a>'],
+      ['html', '<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><h1>報告</h1><table><tr><td>10:30</td></tr></table>'],
+      ['markdown', '# 見出し\n\n- 10:30 面談\n- [資料](https://example.com/doc?id=1)\n\n| 項目 | 値 |\n|:--|--:|\n| A | 1 |\n'],
+      ['markdown', '![図](data:image/png;base64,iVBORw0KGgo=)\n連絡は [メール](mailto:sato@div.example) へ'], ['markdown', '詳しくは [前回](#前回) を見てください。'],
     ] as const
     for (const [kind, text] of inside) expect(driveDocFetchesOutside(kind, text), text).toBe(false)
   })

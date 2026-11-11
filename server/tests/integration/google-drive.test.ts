@@ -818,6 +818,15 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     expect(u.body.data.drivePut.state, u.text).toBe('done')
     expect(google.driveFile(pdf.fileId)!.keptRevisions).toEqual([pdf.revisionId])
     expect(u.body.data.drivePut.revisionId).not.toBe(pdf.revisionId)
+    // Drive does not keep it: nothing overwritten, the receipt gone.
+    const other = (await ai(token, 'POST', '/put', putBody({ name: '残せない.pdf' }))).body.data.drivePut
+    google.refuseKeepForever(other.fileId)
+    const rowsBefore = db.prepare('SELECT COUNT(*) AS n FROM google_drive_puts WHERE company_id = ?').get(CO).n
+    const refused = await ai(token, 'POST', '/put', putBody({ name: '残せない.pdf', updateFileId: other.fileId, sha256: sha(next), contentBase64: next.toString('base64') }))
+    expect([refused.status, refused.body.code]).toEqual([409, 'DRIVE_REVISION_NOT_KEPT'])
+    expect(google.driveFile(other.fileId)!.version).toBe(1)
+    expect(google.driveFile(other.fileId)!.content.equals(PDF)).toBe(true)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM google_drive_puts WHERE company_id = ?').get(CO).n).toBe(rowsBefore)
   })
 
   it('a file a decision or an attachment rests on is never overwritten (Google not asked)', async () => {

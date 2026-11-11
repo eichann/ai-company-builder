@@ -432,7 +432,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       if (contentProblem) return refuse('bad-request', contentProblem, { code: 'DRIVE_CONTENT_REFUSED' })
       // Drive's conversion fetches what a document points to (an image, a stylesheet): nothing may reach outside that way.
       if (form.as === 'google_doc' && driveDocFetchesOutside(form.kind, new TextDecoder().decode(bytes))) {
-        return refuse('bad-request', '外のサイトの画像やスタイルを読み込む部分があるため、Google ドキュメントにできません。画像は data: で埋め込むか外し、外のページはリンクだけにしてください。', { code: 'DRIVE_EXTERNAL_RESOURCE' })
+        return refuse('bad-request', '外を読み込むかもしれない部分（画像・スタイル・URL）があるため、Google ドキュメントにできません。外のページは [文字](URL) か <a href> のリンクだけにし、style や外の画像は外してください（画像は data: で埋め込めます）。', { code: 'DRIVE_EXTERNAL_RESOURCE' })
       }
       // A scheduled job's run: the one folder its responsible person chose, nothing else.
       if (scope && body.folderId !== scope.folderId) {

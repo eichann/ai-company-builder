@@ -251,6 +251,8 @@ export interface FakeGoogle {
   shareDriveFile(id: string, permission: { type: 'user' | 'group' | 'domain' | 'anyone'; role: string; emailAddress?: string; domain?: string }): void
   /** Someone moves this Drive file into another folder (its parents become exactly that one). */
   moveDriveFile(id: string, folderId: string): void
+  /** Drive answers `keepForever: false` for this file's revisions (as if it would not keep them). */
+  refuseKeepForever(id: string): void
   /** Someone edits this Drive file in Drive itself (a new revision / version, not ACB's). */
   editDriveFile(id: string, content: string): void
   /** Every Drive file the app made (uploads), oldest first. */
@@ -819,6 +821,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   const DOC_IMPORTS = new Set(['text/html', 'text/markdown', 'text/plain'])
   const DOC_MIME = 'application/vnd.google-apps.document'
   const uploadOrder: string[] = []
+  const keepRefused = new Set<string>()
 
   /** The file as the bearer's token may see it (drive.file: picked for this client, or made by it), else 404. */
   function visibleDriveFile(a: AccessGrant, id: string): LiveDriveFile {
@@ -955,7 +958,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     const rev = c.req.param('revisionId') ?? ''
     if (rev !== f.headRevisionId && !f.kept.has(rev)) throw apiError(404, `Revision not found: ${rev}.`, 'notFound')
     const body = await c.req.json().catch(() => ({})) as { keepForever?: unknown }
-    if (body.keepForever === true) f.kept.add(rev)
+    if (body.keepForever === true && !keepRefused.has(f.id)) f.kept.add(rev)
     return c.json(selectFields({ kind: 'drive#revision', id: rev, keepForever: f.kept.has(rev) }, c.req.query('fields')))
   })
 
@@ -1590,6 +1593,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
         version: f.version, headRevisionId: f.headRevisionId, uploadedAs: f.uploadedAs, keptRevisions: [...f.kept],
       } : null
     },
+    refuseKeepForever(id) { keepRefused.add(id) },
     editDriveFile(id, content) {
       const f = driveFiles.get(id)
       if (!f) throw new Error(`fake Google: no Drive file ${id}`)

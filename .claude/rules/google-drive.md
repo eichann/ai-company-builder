@@ -199,10 +199,13 @@ The AI reads and writes **only** the member's own live picks.
   `link_file` entry noted 「Google Drive のファイルを上書きしたので、新しい版につなぎ直しました」 (`file-links.ts`
   `follows`; records.md); anything else already linked stays as it is.
 - **Review of #678** (each a guard with its test):
-  - **Nothing fetched from outside**: a document's HTML / Markdown may not point at anything a converter or viewer
-    fetches (an image, a stylesheet, a frame, CSS `url()` / `@import`, a refresh, a Markdown image — anything but an
-    inline `data:` or a `#` fragment; plain links pass): `driveDocFetchesOutside` (`shared/core/google-drive.ts`), 400
-    `DRIVE_EXTERNAL_RESOURCE` (the app says so first). Strict on purpose: refused, never rewritten.
+  - **Nothing fetched from outside** — an allowlist that fails closed (`driveDocFetchesOutside`,
+    `shared/core/google-drive.ts`; the re-review showed a tag / attribute blocklist was bypassable): in the text as
+    written and with character references decoded, every URL-like token is refused (`scheme://`, `//` or `\\` starts,
+    `scheme:` other than `data:` / `mailto:`), except the `href` value of an `<a>` tag (that value only) and, in Markdown,
+    an inline non-image link `[text](url)` (no title, not inside another bracket); CSS (`<style>`, `style=`), `srcset`,
+    `http-equiv` and Markdown reference definitions (`[ref]: …`) are refused outright. 400 `DRIVE_EXTERNAL_RESOURCE` (the
+    app says so first). Refused, never rewritten; a plain URL in a report must be written as a link.
   - **Changed in Drive since ACB's last put** (its head revision / version is not the latest receipt's): 409
     `DRIVE_FILE_CHANGED_SINCE` — nothing overwritten; put a new file.
   - **The replaced revision is kept**: before the update, a binary file's head revision gets `keepForever` (`PATCH

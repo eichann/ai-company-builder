@@ -379,6 +379,13 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
     // The next run: it sees and may update the first run's file, never the consultation's.
     const second = await claim(dueOccurrence(job))
     const t2 = await runToken(second.body.data.run)
+    // Many newer puts of hers elsewhere never push the job's own file out of what it sees.
+    const later = new Date(Date.now() + 60_000).toISOString()
+    for (let i = 0; i < 35; i++) {
+      db.prepare(`INSERT INTO google_drive_puts (id, company_id, user_id, request_key, actor_kind, conversation_id, run_id, folder_id, folder_name, name, mime_type, bytes, sha256, state,
+        file_id, revision_id, link, reason, created_at, finished_at) VALUES (?, ?, 'jd-alice', ?, 'ai', NULL, NULL, 'fake-folder-elsewhere-0002', 'ほか', 'x.pdf', 'application/pdf', 1, ?, 'done',
+        ?, 'rev-x', NULL, NULL, ?, ?)`).run(`drive-put-many-${i}`, CO, `key-many-${String(i).padStart(4, '0')}`, 'b'.repeat(64), `fake-upload-many-${String(i).padStart(4, '0')}`, later, later)
+    }
     const listed = (await ai(t2, 'GET', '/google/drive/status')).body.data.puts.map((p: Json) => p.fileId)
     expect(listed).toContain(mine.fileId)
     expect(listed).not.toContain(theirs.fileId)

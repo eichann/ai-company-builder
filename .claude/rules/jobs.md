@@ -405,7 +405,8 @@ reports.
   files put there. Every other Drive check holds (a live pick, nobody outside the company sees the folder or the file).
   A body's `recordId` is never linked from a run. **Review of #678**: the app's `drive_put` in a job run reads a local
   file **only from the run's deliverable area** (`<place>/.personal/<folder>/`, by name and by real location —
-  `LocalFileDeps.onlyUnder`, given by `recordToolProviders` from main's held run, `jobWriteArea`; no area → nothing), so
+  `LocalFileDeps.onlyUnder`, given by `recordToolProviders` from main's held run, `jobWriteArea`; no area — or a
+  run-bound token whose area is not known (`runBound`) — → nothing; real paths compared exactly), so
   a prompt cannot send another company file out; a run updates **only files runs of the same job put**
   (`jobRuns.sameJob`, from each run's pinned `job.id`; 403 `DRIVE_FILE_NOT_THIS_JOB`) and its status lists only those;
   a receipt of another folder is not there for it (`GET /puts/:putId` → 404, Google not asked); the status selects the

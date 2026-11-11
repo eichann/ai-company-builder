@@ -316,6 +316,12 @@ test('the tool providers give a job run\'s consultation its area (main\'s held r
   // Any other consultation: the company folder as before.
   const plain = (await make('conv-other'))!
   assert.equal(JSON.parse(await plain.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER })).state, 'done')
+  // A run-bound token whose job area is not known: nothing at all (never the whole company folder).
+  const bound = (await createRecordTools(access!, undefined, {
+    companyId: 'co', conversationId: 'conv-bound',
+    toolProviders: recordToolProviders({ drivePicking: pick.p, paths: roots, privateFolders: { readable: () => [] }, jobWriteArea: () => null, runBound: () => true }, { companyId: 'co', companyRoot: root, conversationId: 'conv-bound' }),
+  }))!
+  assert.match(JSON.parse(await bound.execute('drive_put', { path: '営業部/.personal/reports/報告.md', folderId: FOLDER })).error, /この仕事の保存場所/)
 })
 
 test('an update names the revision it replaces: a later update of the same content is another request', async () => {
@@ -331,7 +337,7 @@ test('an update names the revision it replaces: a later update of the same conte
   assert.match(unknown.error, /putFiles/)
   // A document that would fetch from outside: refused here already.
   fs.writeFileSync(path.join(root, '営業部', '.personal', '外.md'), '![x](https://evil.example/x.png)\n')
-  assert.match(JSON.parse(await a.t.execute('drive_put', { path: '営業部/.personal/外.md', folderId: FOLDER })).error, /外のサイト/)
+  assert.match(JSON.parse(await a.t.execute('drive_put', { path: '営業部/.personal/外.md', folderId: FOLDER })).error, /外を読み込むかもしれない部分/)
 })
 
 test('the same file, folder and name → the same request key; anything else → another', () => {

@@ -25,7 +25,7 @@ import {
   checkDriveFileName, checkDrivePutContent, DRIVE_PICK_MAX_FILES, driveDocFetchesOutside, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, drivePutForm, drivePutKindOf, GOOGLE_PICKER_PAGE_PATH,
   drivePreselectIds, isDriveId, type DrivePickMode, type DrivePutAs, type DrivePutKind,
 } from '../../../../shared/core/google-drive'
-import { diskKey, isSameOrAncestorPath, pathKey } from '../../../../shared/core/paths'
+import { isSameOrAncestorPath, pathKey } from '../../../../shared/core/paths'
 import { INSTRUCTION_LIKE_WORDS } from '../../../../shared/core/instruction-like'
 import { outsideBracketsNote, outsideTextFlags, wrapOutsideText } from '../../../../shared/core/outside-text'
 import type { DriveAiStatus, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerSession, DrivePicksResult, DrivePutAnswer, DriveReadAnswer, DriveUpdatableFile } from '../../../../shared/types/google-drive'
@@ -208,8 +208,9 @@ export function readLocalFileForDrive(input: unknown, root: string, deps: LocalF
       realArea = area === null ? null : fs.realpathSync(path.join(root, ...area.split('/')))
       realFile = fs.realpathSync(abs)
     } catch { realArea = null }
-    // Both sides are real paths (every link resolved; the disk's own spelling), compared as the disk folds names.
-    const relReal = realArea === null || realFile === null ? null : path.relative(diskKey(realArea), diskKey(realFile))
+    // Both sides are real paths (every link resolved, the disk's own spelling): compared exactly, never folded (a
+    // case-sensitive disk may hold two folders whose names fold alike).
+    const relReal = realArea === null || realFile === null ? null : path.relative(realArea, realFile)
     const realInside = relReal !== null && relReal !== '' && !relReal.startsWith('..') && !path.isAbsolute(relReal)
     if (!inArea || !realInside) return { error: JOB_AREA_REFUSAL }
   }
@@ -373,7 +374,7 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
         if ('error' in named) return json({ error: named.error })
         const updateFileId = typeof input.updateFileId === 'string' ? input.updateFileId : undefined
         if (as === 'google_doc' && driveDocFetchesOutside(file.kind, new TextDecoder().decode(file.bytes))) {
-          return json({ error: '外のサイトの画像やスタイルを読み込む部分があるため、Google ドキュメントにできません。画像は data: で埋め込むか外し、外のページはリンクだけにしてください。' })
+          return json({ error: '外を読み込むかもしれない部分（画像・スタイル・URL）があるため、Google ドキュメントにできません。外のページは [文字](URL) か <a href> のリンクだけにし、style や外の画像は外してください（画像は data: で埋め込めます）。' })
         }
         // The revision an update replaces (the latest put of that file, as the server lists it): part of the request key.
         let baseRevision: string | null = null
