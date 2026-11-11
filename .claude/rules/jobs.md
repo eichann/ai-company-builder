@@ -352,7 +352,11 @@ POST /ai-runs/:runId/renew | finish | retry | …/reconcile        as for any ru
   operations/:key/reconcile` already works by run id for whoever shows it — 5a-2 / 5b); past `expires_at`
   with its run held by nobody (lease over, retried later, given back) → `expired`, told, the run ended. A run
   held within its deadline finishes as it will.
-- **Not here**: 「もう一度」 (5b): a `needs_person` occurrence stays so even when its run is given back.
+- **Not here**: 「もう一度」 (5b): a `needs_person` occurrence stays so even when its run is given back. A deliverable
+  put into a picked Google Drive folder (proposed 5a-3: a `writes` kind naming the folder, the put route checking a
+  job run's `folderId`, the finish linking the run's puts to its やること, and what a folder pick's 90-day expiry means
+  for a job; Google Docs output and overwriting are their own later work) — today the Drive routes stay outside
+  `JOB_RUN_ROUTE_CEILING`.
 
 ## The meeting check (PR 5a-2, owner decision: option A — the 面談 are recorded in Google Meet)
 
