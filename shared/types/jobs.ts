@@ -137,6 +137,11 @@ export interface JobTurnView {
   check: JobCheck
   /** ISO instant: a file changed after it is new for `new_files`. */
   checkSince: string
+  /**
+   * ISO instant where the check stops (B PR 5a-2): the occurrence's own `dueAt` (later things are the next
+   * occurrence's), or what its first claim fixed. Absent from a server before 5a-2.
+   */
+  checkUntil?: string
   procedure: JobProcedure
   grant: JobGrant
   /**

@@ -7,7 +7,7 @@ import {
   AI_TURN_PASS_CAP, AI_TURN_PASS_INTERVAL_MS, MAX_ATTEMPTS_PER_RECORD, freshLog, logForToday, nextAiTurn, orderAiTurns,
   FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, askedAgain, handUrgent, handedOver, movedOn, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
   canResumeAiTurns, retitledConsultation, closesWhenRunEnds, closesWhenRecordEnds, rememberedAutomatic, forgottenAutomatic,
-  automaticConsultationsOf, readAutomaticConsultations, AUTOMATIC_CONSULTATIONS_KEPT, type ConsultationHold, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT, mayStartAiTurns,
+  automaticConsultationsOf, readAutomaticConsultations, AUTOMATIC_CONSULTATIONS_KEPT, type ConsultationHold, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT, mayStartAiTurns, jobOutcome,
 } from './aiTurns'
 import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
 
@@ -347,4 +347,23 @@ test('the automatic consultations are remembered per record with the app\'s mess
   // What localStorage held is read strictly.
   assert.deepEqual(readAutomaticConsultations([['s1', 'task-cccccccc', 'm1'], ['s2', 'task-cccccccc'], ['bad'], 3, ['s3', 4, 'm']]), [['s1', 'task-cccccccc', 'm1']])
   assert.deepEqual(readAutomaticConsultations({ s1: 'x' }), [])
+})
+
+// A scheduled job's occurrence (jobs.md "The app's runner") shares the runner, never at the records' cost: its past
+// slot never puts it ahead of a record, it does not use up the records' daily limit, and its failures are the
+// server's to place — not a hand-off nor one of the records' failures in a row.
+test('a scheduled job: after the records, outside their daily limit and their failures in a row', () => {
+  const job: AiTurnCandidate = { id: `occ.${'1'.repeat(32)}`, title: '面談の報告', version: 1, dueAt: '2026-10-01T00:00:00Z', job: true, notUrgent: true }
+  assert.deepEqual(orderAiTurns([job, A, B]).map(c => c.id), [B.id, A.id, job.id])
+  assert.deepEqual(nextAiTurn(input({ queue: [job, A] })), { run: A })
+  // The records' daily limit reached: a job still starts; a record waits.
+  const full = { ...freshLog(NOW), runs: ON.dailyLimit }
+  assert.deepEqual(nextAiTurn(input({ log: full, queue: [job, A] })), { run: job })
+  assert.deepEqual(nextAiTurn(input({ log: full, queue: [A] })), { wait: 'daily-limit' })
+  assert.equal(recordStarted(freshLog(NOW), job.id, true).runs, 0)
+  assert.equal(recordStarted(freshLog(NOW), job.id, true).attempts[job.id], 1)
+  // Failures: nothing of the records' changes; Claude's usage limit still pauses everything.
+  const log = freshLog(NOW)
+  for (const outcome of ['failed', 'unfinished'] as const) assert.equal(jobOutcome(log, outcome, ON, null), log)
+  assert.equal(jobOutcome(log, 'usage-limit', ON, { until: NOW + 60_000, seenAt: NOW }).pausedUntil, NOW + 60_000)
 })

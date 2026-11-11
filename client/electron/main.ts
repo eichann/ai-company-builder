@@ -415,12 +415,12 @@ const aiTurnClaims = createAiTurnClaims({
       const file = got.ok ? got.files.find(f => f.path === 'SKILL.md') : undefined
       return file ? Buffer.from(file.bytes).toString('utf8') : null
     },
-    newFiles: async (companyRoot, place, since) => {
+    newFiles: async (companyRoot, place, since, until) => {
       if (!companyRoot) return null
       const root = allowedRoots.validate(companyRoot)
       return workingFolders.has(root)
-        ? newFilesByTime(root, place, since)
-        : newFilesByGit((cwd, args) => appGit.create(cwd, { GIT_NO_LAZY_FETCH: '1' }).raw(args), root, place, since)
+        ? newFilesByTime(root, place, since, until)
+        : newFilesByGit((cwd, args) => appGit.create(cwd, { GIT_NO_LAZY_FETCH: '1' }).raw(args), root, place, since, until)
     },
     stopTurn: conversationId => { chatTurns?.abort(info => info.appSessionId === conversationId, 'job-ended') },
   },

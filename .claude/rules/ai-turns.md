@@ -531,7 +531,11 @@ occurrence id (`occ.…`, never a record id) to `job-runs.ts` after the same ref
 job's `onLost`, which stops its AI) and `finishRun` (a job's done carries `jobResult`). Its ceiling is asked by the
 chat server like a business plugin step's (`pluginStepTools` → `jobTools`), its write area and read places through
 `stepWriteArea`; `aiTurns:retry` gives nothing back for an occurrence (its 「もう一度」 is the server's, 5b). Records'
-steps, their claims, settles and tests are unchanged. Test: `client/tests/job-runs.test.ts` (mutation-checked).
+steps, their claims, settles and tests are unchanged. In the rules (`aiTurns.ts`) a job comes after the
+records, neither counts toward nor waits for their daily limit, and its failures are not theirs (`jobOutcome`: only
+Claude's usage limit). For every kind, a claim that wins after the runner stopped waiting for it (`START_TIMEOUT_MS`)
+is settled at once rather than left held with no AI. Test: `client/tests/job-runs.test.ts`, `aiTurns.test.ts`
+(mutation-checked).
 
 ## Not yet
 

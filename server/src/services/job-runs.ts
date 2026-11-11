@@ -59,7 +59,7 @@ export interface JobRunDeps {
    * The meetings the member attended with a time in [since, until), oldest first (`minutes.attendedSince`:
    * people-only lists, what they read now). Absent: none (a `new_meetings` check then finds nothing).
    */
-  meetings?: (member: Member, since: string, until: string, limit: number) => JobMeetingView[]
+  meetings?: (member: Member, since: string, until: string, limit: number) => Array<JobMeetingView & { arrivedAt: string }>
 }
 
 /** At most this many meetings a `new_meetings` check hands one run (the oldest first; the next occurrence takes the rest). */
@@ -175,10 +175,23 @@ export function createJobRuns(deps: JobRunDeps) {
     deps.notices.tell(f.handle.companyId, told)
   }
 
-  /** The previous occurrence that ran (done or nothing): new files are looked for since its time, else since approval. */
+  /**
+   * Where this occurrence's check starts: where the previous one that ran (done or nothing) stopped looking
+   * (`checkedUntil`, else its `dueAt` — a build before 5a-2), else the approval.
+   */
   function checkSince(f: Found): string {
     const before = f.handle.jobs.occurrences(f.job.id, 50).find(o => o.dueSlot < f.occ.dueSlot && (o.state === 'done' || o.state === 'nothing'))
-    return before?.dueAt ?? f.version.approvedAt ?? f.version.createdAt
+    return before ? (before.checkedUntil ?? before.dueAt) : (f.version.approvedAt ?? f.version.createdAt)
+  }
+
+  /**
+   * Where this occurrence's check stops (B PR 5a-2): its own `dueAt` — what came after belongs to the next
+   * occurrence, so an app opened late never looks at it twice — or, once claimed, what the claim stored
+   * (`checkedUntil`: earlier when a meeting check found more than one run takes).
+   */
+  function checkUntil(f: Found, member: Member): string {
+    if (f.occ.checkedUntil) return f.occ.checkedUntil
+    return f.definition.check.kind === 'new_meetings' ? meetingWindow(f, member).until : f.occ.dueAt
   }
 
   /**
@@ -186,13 +199,26 @@ export function createJobRuns(deps: JobRunDeps) {
    * attended since `checkSince` and until now, whose title holds one of the check's words when it names any.
    * The run may read these meetings' minutes and no other (`routeRefusal`).
    */
-  function meetingsFor(f: Found, member: Member, nowMs: number): JobMeetingView[] {
+  function meetingWindow(f: Found, member: Member): { meetings: JobMeetingView[]; until: string } {
     const check = f.definition.check
-    if (check.kind !== 'new_meetings' || !deps.meetings) return []
+    const end = f.occ.checkedUntil ?? f.occ.dueAt
+    if (check.kind !== 'new_meetings' || !deps.meetings) return { meetings: [], until: end }
     const words = check.titleWords.map(w => w.normalize('NFKC').toLowerCase())
-    return deps.meetings(member, checkSince(f), new Date(nowMs).toISOString(), 200)
+    // The title filter before any limit: non-matching meetings never hide matching ones.
+    const all = deps.meetings(member, checkSince(f), end, 10_000)
       .filter(m => words.length === 0 || words.some(w => m.title.normalize('NFKC').toLowerCase().includes(w)))
-      .slice(0, JOB_MEETINGS_PER_RUN)
+    if (all.length <= JOB_MEETINGS_PER_RUN) return { meetings: all.map(view), until: end }
+    // More than one run takes: stop at the first meeting left over (all of its arrival time wait for the next).
+    const next = all[JOB_MEETINGS_PER_RUN].arrivedAt
+    const taken = all.filter(m => m.arrivedAt < next)
+    return taken.length > 0
+      ? { meetings: taken.map(view), until: next }
+      : { meetings: all.filter(m => m.arrivedAt === next).map(view), until: new Date(Date.parse(next) + 1).toISOString() }
+  }
+  const view = (m: JobMeetingView): JobMeetingView => ({ id: m.id, title: m.title, at: m.at })
+
+  function meetingsFor(f: Found, member: Member): JobMeetingView[] {
+    return meetingWindow(f, member).meetings
   }
 
   /** The one やること of a finish (owner-only for the responsible person: what the job read and wrote reaches nobody else). */
@@ -218,7 +244,7 @@ export function createJobRuns(deps: JobRunDeps) {
     return {
       occurrenceId: f.occ.id, jobId: f.job.id, jobVersion: f.occ.jobVersion, fingerprint: f.version.fingerprint,
       name: deps.jobs.nameOf(member, f.job.id) ?? '定期の仕事', dueSlot: f.occ.dueSlot, dueAt: f.occ.dueAt, expiresAt: f.occ.expiresAt,
-      state: f.occ.state as 'due' | 'running', check: d.check, checkSince: checkSince(f), procedure: d.run.procedure, grant: d.grant,
+      state: f.occ.state as 'due' | 'running', check: d.check, checkSince: checkSince(f), checkUntil: checkUntil(f, member), procedure: d.run.procedure, grant: d.grant,
     }
   }
 
@@ -243,7 +269,8 @@ export function createJobRuns(deps: JobRunDeps) {
       if (!f) return NOT_FOUND()
       // A re-claim keeps its own occurrence; a due one becomes this run's. Anything else: someone else's now.
       if (f.occ.state === 'running' && f.occ.runId === run.id) return null
-      if (!f.handle.jobs.moveOccurrence(f.occ.id, ['due'], 'running', { runId: run.id, outcomeCode: null }, clock.now())) return GONE()
+      // Where its check stops is fixed now, once (the next occurrence's check starts there).
+      if (!f.handle.jobs.moveOccurrence(f.occ.id, ['due'], 'running', { runId: run.id, outcomeCode: null, checkedUntil: checkUntil(f, member) }, clock.now())) return GONE()
       return null
     },
 
@@ -330,7 +357,7 @@ export function createJobRuns(deps: JobRunDeps) {
         return notInStep()
       }
       // The minutes route only for a meeting this occurrence's check finds now (the grant names the route too).
-      const meetingFound = () => typeof params.recordId === 'string' && meetingsFor(f, member, clock.nowMs()).some(m => m.id === params.recordId)
+      const meetingFound = () => typeof params.recordId === 'string' && meetingsFor(f, member).some(m => m.id === params.recordId)
       return jobRunRouteAllowed(f.definition.grant, route, meetingFound) ? null : notInStep()
     },
 
@@ -382,7 +409,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const f = own(member, occurrenceId)
       if (!f) return null
       const turn = turnView(member, f)
-      return f.definition.check.kind === 'new_meetings' ? { ...turn, meetings: meetingsFor(f, member, clock.nowMs()) } : turn
+      return f.definition.check.kind === 'new_meetings' ? { ...turn, meetings: meetingsFor(f, member) } : turn
     },
   }
 }

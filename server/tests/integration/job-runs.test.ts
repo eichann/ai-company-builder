@@ -751,20 +751,38 @@ describe('a meeting check: the meetings the responsible person attended, and the
     },
   }
 
+  /** An occurrence of `job` due at `dueMs`, its slot text ordered by `n` (the previous one has the smaller). */
+  const occAt = (job: string, dueMs: number, n: number) => {
+    const id = `occ.${(++slot).toString(16).padStart(32, '0')}`
+    db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at)
+      VALUES (?, ?, ?, 1, ?, 'Asia/Tokyo', ?, ?, 'due', ?, ?)`).run(CO, id, job, `2027-01-${String(n).padStart(2, '0')}T09:00`,
+      new Date(dueMs).toISOString(), new Date(dueMs + 24 * 60 * MINUTE).toISOString(), new Date(dueMs).toISOString(), new Date(dueMs).toISOString())
+    return id
+  }
+  /** Run `fn` with the clock moved; the clock is put back afterwards. */
+  async function at<T>(ms: number, fn: () => Promise<T> | T): Promise<T> {
+    const back = Date.now()
+    vi.setSystemTime(ms)
+    try { return await fn() } finally { vi.setSystemTime(back) }
+  }
+
   it('the claim answers the meetings found; the run reads those minutes and no other meeting’s', async () => {
-    const before = meeting('面談：前の回より前', ['jr-alice'], Date.now() - 60 * MINUTE)
-    const { occ } = await runnable(CO, meetingJob)
-    vi.setSystemTime(Date.now() + 10 * MINUTE)
-    try {
-      const found = meeting('面談：佐藤さん', ['jr-alice', 'jr-bob'], Date.now() - 5 * MINUTE)
-      const otherWords = meeting('定例', ['jr-alice'], Date.now() - 4 * MINUTE)
-      const notHers = meeting('面談：ボブさん', ['jr-bob'], Date.now() - 3 * MINUTE)
-      // On the calendar but not held yet: not a meeting since the previous occurrence.
-      const later = meeting('面談：来週', ['jr-alice'], Date.now() + 60 * MINUTE)
+    const base = Date.now()
+    // Recorded before the job was approved: not this job's.
+    const before = await at(base - MINUTE, () => meeting('面談：前の回より前', ['jr-alice'], base - 60 * MINUTE))
+    const { job } = await runnable(CO, meetingJob)
+    const [found, otherWords, notHers, later] = await at(base + 10 * MINUTE, () => [
+      meeting('面談：佐藤さん', ['jr-alice', 'jr-bob'], base + 5 * MINUTE),
+      meeting('定例', ['jr-alice'], base + 6 * MINUTE),
+      meeting('面談：ボブさん', ['jr-bob'], base + 7 * MINUTE),
+      // On the calendar but not held yet when the occurrence is due: never this occurrence's.
+      meeting('面談：来週', ['jr-alice'], base + 60 * 24 * MINUTE),
+    ])
+    const occ = occAt(job, base + 20 * MINUTE, 1)
+    await at(base + 21 * MINUTE, async () => {
       const r = await claim(occ)
       expect(r.status).toBe(201)
       expect(r.body.data.turn.meetings).toEqual([{ id: found, title: '面談：佐藤さん', at: expect.any(String) }])
-      // The list never carries them (only the claim does).
       const token = await tokenFor(r.body.data.run)
       // Its own meeting reaches the handler (whatever Google answers there); any other is refused before it.
       const own = await ai(token, 'GET', `/minutes/${found}/text`)
@@ -774,24 +792,61 @@ describe('a meeting check: the meetings the responsible person attended, and the
       }
       // Never the meeting's other routes.
       expect(await ai(token, 'POST', `/minutes/${found}/bundle`, { bundleId: 'deal-000000' })).toMatchObject({ status: 403, body: { code: 'NOT_IN_STEP' } })
-    } finally {
-      vi.setSystemTime(Date.now() - 10 * MINUTE)
-    }
+    })
   })
 
   it('nothing found: the claim answers no meetings (the app finishes `nothing` without the AI)', async () => {
-    const { occ } = await runnable(CO, meetingJob)
-    vi.setSystemTime(Date.now() + 10 * MINUTE)
-    try {
-      meeting('定例', ['jr-alice'], Date.now() - 5 * MINUTE)
+    const base = Date.now()
+    const { job } = await runnable(CO, meetingJob)
+    await at(base + 5 * MINUTE, () => meeting('定例', ['jr-alice'], base + 4 * MINUTE))
+    const occ = occAt(job, base + 10 * MINUTE, 1)
+    await at(base + 11 * MINUTE, async () => {
       const r = await claim(occ)
       expect(r.body.data.turn.meetings).toEqual([])
       expect((await finish(r.body.data.run, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
       expect(occOf(occ)).toMatchObject({ state: 'nothing' })
       expect(tasksOf()).toEqual([])
-    } finally {
-      vi.setSystemTime(Date.now() - 10 * MINUTE)
-    }
+    })
+  })
+
+  it('each meeting is one occurrence’s: an app opened late does not take the next one’s, and minutes that arrive late go to the next', async () => {
+    const base = Date.now()
+    const { job } = await runnable(CO, meetingJob)
+    const early = await at(base + 5 * MINUTE, () => meeting('面談：A', ['jr-alice'], base + 4 * MINUTE))
+    const occ1 = occAt(job, base + 60 * MINUTE, 1)
+    // Held before the first occurrence was due, its minutes recorded only afterwards (discovery found them late).
+    const lateMinutes = await at(base + 90 * MINUTE, () => meeting('面談：B', ['jr-alice'], base + 50 * MINUTE))
+    // The app opened two hours after the slot: what came after the slot is the next occurrence's.
+    await at(base + 180 * MINUTE, async () => {
+      const r = await claim(occ1)
+      expect(r.body.data.turn.meetings.map((m: Json) => m.id)).toEqual([early])
+      expect((await finish(r.body.data.run, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
+    })
+    const occ2 = occAt(job, base + 24 * 60 * MINUTE, 2)
+    await at(base + 24 * 60 * MINUTE + MINUTE, async () => {
+      const r = await claim(occ2)
+      expect(r.body.data.turn.meetings.map((m: Json) => m.id)).toEqual([lateMinutes])
+    })
+  })
+
+  it('more meetings than one run takes: the rest go to the next occurrence, none dropped or taken twice', async () => {
+    const base = Date.now()
+    const { job } = await runnable(CO, meetingJob)
+    const ids: string[] = []
+    for (let i = 0; i < 12; i++) ids.push(await at(base + (i + 1) * MINUTE, () => meeting(`面談：${i}`, ['jr-alice'], base)))
+    // Non-matching titles never hide matching ones.
+    for (let i = 0; i < 5; i++) await at(base + MINUTE / 2 + i, () => meeting(`定例 ${i}`, ['jr-alice'], base))
+    const occ1 = occAt(job, base + 60 * MINUTE, 1)
+    await at(base + 61 * MINUTE, async () => {
+      const r = await claim(occ1)
+      expect(r.body.data.turn.meetings.map((m: Json) => m.id)).toEqual(ids.slice(0, 10))
+      expect((await finish(r.body.data.run, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
+    })
+    const occ2 = occAt(job, base + 24 * 60 * MINUTE, 2)
+    await at(base + 24 * 60 * MINUTE + MINUTE, async () => {
+      const r = await claim(occ2)
+      expect(r.body.data.turn.meetings.map((m: Json) => m.id)).toEqual(ids.slice(10))
+    })
   })
 })
 

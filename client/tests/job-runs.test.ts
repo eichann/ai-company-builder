@@ -36,7 +36,7 @@ const turn = (over: Record<string, unknown> = {}) => ({
   checkSince: '2026-11-10T00:00:00.000Z', procedure: { source: 'company_skill', skill: 'interview-report', fingerprint: 'b'.repeat(40) }, grant: GRANT, ...over,
 })
 
-function fakeServer(opts: { claim?: number; renew?: number; createdAt?: string; turnOver?: Record<string, unknown> } = {}) {
+function fakeServer(opts: { claim?: number; renew?: number; createdAt?: string; serverNow?: string; autoRun?: boolean; turnOver?: Record<string, unknown> } = {}) {
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = []
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -46,9 +46,12 @@ function fakeServer(opts: { claim?: number; renew?: number; createdAt?: string; 
     const p = url.pathname.replace(`/api/companies/${COMPANY}`, '')
     calls.push({ method, path: p, body })
     if (p === '/me/job-turns') return json(200, { data: { turns: [turn(opts.turnOver)] } })
+    if (p === '/task-settings') return json(200, { data: { settings: { autoRun: { enabled: opts.autoRun ?? true } } } })
+    if (p === '/me/work-switches') return json(404, { code: 'NOT_FOUND' })
     if (p === '/job-run-claims') {
       if (opts.claim && opts.claim !== 201) return json(opts.claim, { code: 'RUN_CLAIMED' })
-      return json(201, { data: { run: { id: 'run-j1', generation: 1, createdAt: opts.createdAt ?? new Date().toISOString() }, turn: turn({ state: 'running', ...opts.turnOver }) } })
+      const serverNow = opts.serverNow ?? new Date().toISOString()
+      return json(201, { data: { run: { id: 'run-j1', generation: 1, createdAt: opts.createdAt ?? serverNow, updatedAt: serverNow }, turn: turn({ state: 'running', ...opts.turnOver }) } })
     }
     if (p === '/ai-runs/run-j1/renew') return json(opts.renew ?? 200, {})
     if (p === '/ai-runs/run-j1/finish') return json(200, { data: {} })
@@ -65,7 +68,7 @@ function claimsFor(server: ReturnType<typeof fakeServer>, over: Record<string, u
     ...base, records: createRecordsApi({ ...base, fetch: server.fetch, runOf: runs.runOf }), runs, deviceId: 'device-job-1',
     renewEveryMs: 3_600_000, fetch: server.fetch, agent: () => 'claude-code', windowOpen: () => true, aiAllowed: () => true, stopPolicyConfirmed: async () => true,
     log: { warn: () => {} }, readProcedure: async () => '# 面談の報告書\n文字起こしから下書きを作る。\n',
-    jobs: { readShelfSkill: async () => null, newFiles: async () => ['人事部/面談/2026-11-10_佐藤.txt'], stopTurn: (c: string) => { stopped.push(c) } },
+    jobs: { readShelfSkill: async () => null, newFiles: async () => ['人事部/面談/2026-11-10_佐藤.txt'], stopTurn: (c: string) => { stopped.push(c) } } as NonNullable<Parameters<typeof createAiTurnClaims>[0]['jobs']>,
     ...over,
   })
   return { claims, stopped, runs }
@@ -92,16 +95,19 @@ test('the run\'s tools: only what its grant names and the server would let throu
   assert.equal(access.allowsRecordTool('minutes_read'), false)
   assert.equal(access.allowsRecordTool('mail_draft_create'), false)
   assert.deepEqual(access.builtinTools.sort(), ['Edit', 'Glob', 'Grep', 'MultiEdit', 'Read', 'Write'])
-  const meetings = jobToolAccess({ ...GRANT, tools: ['records'], routes: ['GET /minutes/:recordId/text'], reads: { paths: [], calls: [] }, writes: { area: 'none' } }, { kind: 'new_meetings', titleWords: [] })
+  const minutesGrant: JobGrant = { ...GRANT, tools: ['records'], routes: ['GET /minutes/:recordId/text'], reads: { paths: [], calls: [] }, writes: { area: 'none' } }
+  const meetings = jobToolAccess(minutesGrant, { kind: 'new_meetings', titleWords: [] })
   assert.equal(meetings.allowsRecordTool('minutes_read'), true)
+  // The route in the grant is not enough: minutes only with the meeting check.
+  assert.equal(jobToolAccess(minutesGrant, { kind: 'new_files', path: '人事部/面談' }).allowsRecordTool('minutes_read'), false)
   assert.deepEqual(meetings.builtinTools, [])
   const noRecords = jobToolAccess({ ...GRANT, tools: ['files_read'], writes: { area: 'none' } }, { kind: 'new_files', path: '人事部/面談' })
   assert.equal(noRecords.allowsRecordTool('records_get'), false)
 })
 
 test('nothing reaches the server while this PC may not run AI unattended', async () => {
-  for (const over of [{ windowOpen: () => false }, { agent: () => 'codex' }, { aiAllowed: () => false }, { stopPolicyConfirmed: async () => false }]) {
-    const server = fakeServer()
+  for (const over of [{ windowOpen: () => false }, { agent: () => 'codex' }, { aiAllowed: () => false }, { stopPolicyConfirmed: async () => false }, { autoRunOff: true }]) {
+    const server = fakeServer({ autoRun: !('autoRunOff' in over) })
     const { claims } = claimsFor(server, over)
     await claims.jobTurns(COMPANY)
     const r = await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
@@ -181,14 +187,40 @@ test('the AI stops before the approved minutes run out, and a person looks', asy
   assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'unavailable' })
   assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'failed', failure: { class: 'bad-input', code: 'TIME_LIMIT' } }])
 
-  const near = fakeServer({ createdAt: new Date(Date.now() - 29 * 60_000 + 50).toISOString() })
+  const near = fakeServer({ createdAt: new Date(Date.now() - 29 * 60_000 + 600).toISOString() })
   const { claims: c2, stopped } = claimsFor(near)
   await c2.jobTurns(COMPANY)
   assert.ok((await c2.claim(COMPANY, OCC, 1, 'conv-job-00003')).claimed)
-  await new Promise(resolve => setTimeout(resolve, 120))
+  await new Promise(resolve => setTimeout(resolve, 1_000))
   assert.deepEqual(stopped, ['conv-job-00003'])
   assert.deepEqual(await c2.settle(COMPANY, OCC), { outcome: 'failed' })
   assert.deepEqual(finishes(near), [{ generation: 1, outcome: 'failed', failure: { class: 'bad-input', code: 'TIME_LIMIT' } }])
+})
+
+test('taken away while the check or the procedure is read: nothing starts, and no tools for that consultation (never an ordinary turn)', async () => {
+  const server = fakeServer({ renew: 409 })
+  let release!: () => void
+  const slow = new Promise<string>(resolve => { release = () => resolve('# 手順\n') })
+  const { claims, runs } = claimsFor(server, { renewEveryMs: 10, readProcedure: () => slow })
+  await claims.jobTurns(COMPANY)
+  const pending = claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
+  await new Promise(resolve => setTimeout(resolve, 60))
+  release()
+  assert.deepEqual(await pending, { claimed: false, reason: 'unavailable' })
+  assert.equal(claims.jobTools('conv-job-00001', 'job-procedure'), null)
+  assert.equal(runs.runOf(COMPANY, 'conv-job-00001'), null)
+})
+
+test('the deadline is the server\'s: this PC\'s clock running ahead does not cut the run short', async () => {
+  // The server's clock is 29.5 minutes behind this PC's (30 approved); the run was claimed just now on the server.
+  const serverNow = new Date(Date.now() - 29.5 * 60_000).toISOString()
+  const server = fakeServer({ serverNow, createdAt: serverNow })
+  const { claims, stopped } = claimsFor(server)
+  await claims.jobTurns(COMPANY)
+  assert.ok((await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')).claimed)
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.deepEqual(stopped, [])
+  assert.deepEqual(finishes(server), [])
 })
 
 test('the server takes the run away (a pause, the stop, another PC): the renew\'s 409 stops the AI here', async () => {
@@ -198,6 +230,8 @@ test('the server takes the run away (a pause, the stop, another PC): the renew\'
   assert.ok((await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')).claimed)
   await new Promise(resolve => setTimeout(resolve, 80))
   assert.deepEqual(stopped, ['conv-job-00001'])
+  // No ceiling any more: the chat server refuses a next turn rather than run it as an ordinary one.
+  assert.equal(claims.jobTools('conv-job-00001', 'job-procedure'), null)
   assert.deepEqual(await claims.settle(COMPANY, OCC), { outcome: 'failed' })
 })
 
@@ -252,9 +286,32 @@ test('new files: by git\'s history in the shared folder (a checkout\'s times say
     execFileSync('git', ['add', '-A'], { cwd: root })
     execFileSync('git', ['commit', '-qm', 'new'], { cwd: root })
     const since = '2026-06-01T00:00:00.000Z'
-    assert.deepEqual(await newFilesByGit(git, root, '人事部/面談', since), ['人事部/面談/new.txt'])
-    assert.equal(await newFilesByGit(git, root, '人事部/ない', since), null)
-    assert.equal(await newFilesByGit(git, root, '../x', since), null)
+    const until = new Date(Date.now() + 60_000).toISOString()
+    // Not fetched since the window's end: a colleague's file may be missing — never "nothing new" on a guess.
+    assert.equal(await newFilesByGit(git, root, '人事部/面談', since, until), 'not-synced')
+    writeFileSync(path.join(root, '.git', 'FETCH_HEAD'), '')
+    const later = new Date(Date.now() + 120_000)
+    utimesSync(path.join(root, '.git', 'FETCH_HEAD'), later, later)
+    assert.deepEqual(await newFilesByGit(git, root, '人事部/面談', since, until), ['人事部/面談/new.txt'])
+    // The window ends at the occurrence's time: what came after is the next occurrence's.
+    assert.deepEqual(await newFilesByGit(git, root, '人事部/面談', since, '2026-06-02T00:00:00.000Z'), [])
+    assert.equal(await newFilesByGit(git, root, '人事部/ない', since, until), null)
+    assert.equal(await newFilesByGit(git, root, '../x', since, until), null)
+    // A link at the place itself (committed by someone) is never followed, nor its repository used.
+    const outside = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-outside-')))
+    try {
+      mkdirSync(path.join(outside, '他社'), { recursive: true })
+      writeFileSync(path.join(outside, '他社', '秘密.txt'), 'x')
+      execFileSync('git', ['init', '-q'], { cwd: outside })
+      mkdirSync(path.join(root, '営業部'), { recursive: true })
+      symlinkSync(path.join(outside, '他社'), path.join(root, '営業部', '受付'))
+      assert.equal(await newFilesByGit(git, root, '営業部/受付', since, until), null)
+      assert.equal(await newFilesByTime(root, '営業部/受付', since, until), null)
+      symlinkSync(outside, path.join(root, 'リンク'))
+      assert.equal(await newFilesByTime(root, 'リンク/他社', since, until), null)
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
 
     const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-work-')))
     try {
@@ -264,8 +321,10 @@ test('new files: by git\'s history in the shared folder (a checkout\'s times say
       writeFileSync(path.join(work, '人事部', '面談', '.personal', 'mine.txt'), 'm')
       const old = new Date('2026-01-01T00:00:00Z')
       utimesSync(path.join(work, '人事部', '面談', 'a.txt'), old, old)
-      assert.deepEqual(await newFilesByTime(work, '人事部/面談', since), ['人事部/面談/b.txt'])
-      assert.equal(await newFilesByTime(work, '人事部/ない', since), null)
+      const until = new Date(Date.now() + 60_000).toISOString()
+      assert.deepEqual(await newFilesByTime(work, '人事部/面談', since, until), ['人事部/面談/b.txt'])
+      assert.deepEqual(await newFilesByTime(work, '人事部/面談', since, '2026-06-02T00:00:00.000Z'), [])
+      assert.equal(await newFilesByTime(work, '人事部/ない', since, until), null)
     } finally {
       rmSync(work, { recursive: true, force: true })
     }
@@ -281,4 +340,12 @@ test('the runner\'s queue: an occurrence runs as a job (never as a record\'s ste
   // Its slot is in the past (the clock made it at its time): it is not a deadline the AI races.
   const log = freshLog(Date.now())
   assert.equal(handUrgent(log, queue, null, Date.parse('2026-11-11T00:30:00.000Z')), log)
+})
+
+test('not synced since the window\'s end: given back for later, never finished `nothing`', async () => {
+  const server = fakeServer()
+  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, newFiles: async () => 'not-synced' as const, stopTurn: () => {} } })
+  await claims.jobTurns(COMPANY)
+  assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'unavailable' })
+  assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'failed', failure: { class: 'temporary', code: 'NOT_SYNCED' } }])
 })

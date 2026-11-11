@@ -57,6 +57,12 @@ export interface JobOccurrenceRow {
   state: JobOccurrenceState
   runId: string | null
   outcomeCode: string | null
+  /**
+   * Where its check stopped looking (B PR 5a-2): set at the first claim — the occurrence's own `dueAt`, or for a
+   * meeting check that found more than one run takes, the time of the first meeting left for the next one. The next
+   * occurrence's check starts there. null: not claimed yet, or made by a build before it.
+   */
+  checkedUntil?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -96,5 +102,5 @@ export interface JobRepository {
    * Move an occurrence from one of `from` to `to` (compare-and-set): false = it was no longer in
    * `from` (someone else moved it first; nothing written).
    */
-  moveOccurrence(occurrenceId: string, from: readonly JobOccurrenceState[], to: JobOccurrenceState, change: { runId?: string | null; outcomeCode: string | null }, at: string): boolean
+  moveOccurrence(occurrenceId: string, from: readonly JobOccurrenceState[], to: JobOccurrenceState, change: { runId?: string | null; outcomeCode: string | null; checkedUntil?: string }, at: string): boolean
 }

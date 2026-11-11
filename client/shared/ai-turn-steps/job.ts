@@ -28,6 +28,8 @@ export interface QueuedJobTurn {
   state: 'due' | 'running'
   check: JobCheck
   checkSince: string
+  /** Where the check stops (the occurrence's own time); absent from an older server. */
+  checkUntil?: string
   procedure: JobProcedure
   grant: JobGrant
   /** Only in a claim's answer for a `new_meetings` check: what it found (the only minutes the run may read). */
@@ -48,6 +50,7 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
   const t = v as Record<string, unknown>
   if (!str(t.occurrenceId, 40) || !OCCURRENCE_ID_RE.test(t.occurrenceId) || !str(t.jobId, 40) || !str(t.name, 200)) return null
   if (!iso(t.dueAt) || !iso(t.expiresAt) || !iso(t.checkSince) || (t.state !== 'due' && t.state !== 'running')) return null
+  if (t.checkUntil !== undefined && !iso(t.checkUntil)) return null
   const parsed = parseJobDefinition({
     schema: 1, name: '定期の仕事', actingUser: 'u', trigger: { every: 'day', at: '09:00', businessDaysOnly: false },
     check: t.check, run: { kind: 'procedure', procedure: t.procedure }, placement: 'a',
@@ -67,7 +70,7 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
   }
   return {
     occurrenceId: t.occurrenceId, jobId: t.jobId, name: t.name, dueAt: t.dueAt, expiresAt: t.expiresAt, state: t.state,
-    check, checkSince: t.checkSince, procedure: parsed.definition.run.procedure, grant, ...(meetings ? { meetings } : {}),
+    check, checkSince: t.checkSince, ...(typeof t.checkUntil === 'string' ? { checkUntil: t.checkUntil } : {}), procedure: parsed.definition.run.procedure, grant, ...(meetings ? { meetings } : {}),
   }
 }
 

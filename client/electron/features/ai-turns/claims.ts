@@ -220,9 +220,25 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   }
   // lane C ▲
 
+  /**
+   * 「自動で進める」 for this member: their own switch within the company's (`GET
+   * /me/work-switches`, shared/core/work-switches.ts — the AI's turn runs on the assignee's PC),
+   * with the company's limits (`autoRun` of S6's task settings). Not readable → off; a server
+   * without the member's switch (404, older) → the company's switch as before.
+   */
+  async function autoTurnSettings(companyId: string): Promise<AutoTurnSettings> {
+    if (!COMPANY.test(companyId)) return readAutoTurnSettings(undefined)
+    const [r, mine] = await Promise.all([session(companyId, 'GET', '/task-settings'), session(companyId, 'GET', '/me/work-switches')])
+    const view = r?.status === 200 ? r.data as { settings?: { autoRun?: unknown } } | undefined : undefined
+    const company = readAutoTurnSettings(view?.settings?.autoRun)
+    if (mine?.status === 404) return company
+    return { ...company, enabled: company.enabled && readOwnAutoRun(mine?.status === 200 ? mine.data : undefined) }
+  }
+
   // A scheduled job's run (job-runs.ts): this module's claim, hold and finish, with what only main knows.
   const jobs = deps.jobs ? createJobRuns({
     session, hold, finishRun, deviceId: deps.deviceId, log,
+    holds: (companyId, key, runId) => held.get(heldKey(companyId, key))?.runId === runId,
     readCompanySkill: (companyId, skill, tree, companyRoot) =>
       deps.readProcedure?.(companyId, { source: 'company_skill', skill, fingerprint: tree }, 'SKILL.md', companyRoot) ?? Promise.resolve(null),
     ...deps.jobs,
@@ -276,20 +292,8 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     },
     // lane C ▲
 
-    /**
-     * 「自動で進める」 for this member: their own switch within the company's (`GET
-     * /me/work-switches`, shared/core/work-switches.ts — the AI's turn runs on the assignee's PC),
-     * with the company's limits (`autoRun` of S6's task settings). Not readable → off; a server
-     * without the member's switch (404, older) → the company's switch as before.
-     */
-    async settings(companyId: string): Promise<AutoTurnSettings> {
-      if (!COMPANY.test(companyId)) return readAutoTurnSettings(undefined)
-      const [r, mine] = await Promise.all([session(companyId, 'GET', '/task-settings'), session(companyId, 'GET', '/me/work-switches')])
-      const view = r?.status === 200 ? r.data as { settings?: { autoRun?: unknown } } | undefined : undefined
-      const company = readAutoTurnSettings(view?.settings?.autoRun)
-      if (mine?.status === 404) return company
-      return { ...company, enabled: company.enabled && readOwnAutoRun(mine?.status === 200 ? mine.data : undefined) }
-    },
+    /** 「自動で進める」 for this member (`autoTurnSettings`). */
+    settings: autoTurnSettings,
 
     /** The runner asks before it starts anything: the stop policy is confirmed (else it waits and says why). */
     stopPolicyConfirmed(companyId: string): Promise<boolean> {
@@ -307,6 +311,8 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
         if (!jobs || !COMPANY.test(companyId) || !CONVERSATION.test(conversationId) || !jobs.isJob(companyId, recordId)) return { claimed: false, reason: 'not-allowed' }
         if (!deps.windowOpen() || !deps.aiAllowed() || !agentCan(deps.agent(), 'recordActions')) return { claimed: false, reason: 'not-allowed' }
         if (!(await deps.stopPolicyConfirmed(companyId).catch(() => false))) return { claimed: false, reason: 'not-allowed' }
+        // A job has no person who asked: only while the member's 「自動で進める」 is on (read now, off when unreadable).
+        if (!(await autoTurnSettings(companyId)).enabled) return { claimed: false, reason: 'not-allowed' }
         return jobs.claim(companyId, recordId, conversationId, companyRoot ?? null)
       }
       const pluginTurn = pluginTurns.get(companyId)?.get(recordId) ?? null

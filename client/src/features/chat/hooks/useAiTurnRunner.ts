@@ -13,7 +13,7 @@ import { consultationHoldOf, rememberAutomaticConsultation } from '../automaticC
 import { claimAiTurn, getAiTurnStopConfirmed, getAutoTurnSettings, getChatSessionSummaries, patchChatSession, retryAiTurn, settleAiTurn } from '../api'
 import {
   AI_TURN_PASS_INTERVAL_MS, aiTurnItems, aiTurnNoticeText, askedAgain, canResumeAiTurns, handUrgent, handedOver, logForToday, movedOn,
-  closesWhenRunEnds, mayStartAiTurns, nextAiTurn, recordOutcome, recordStarted, resumed, retitledConsultation, retried, usageLimitReached, usagePause, usagePauseLifted,
+  closesWhenRunEnds, jobOutcome, mayStartAiTurns, nextAiTurn, recordOutcome, recordStarted, resumed, retitledConsultation, retried, usageLimitReached, usagePause, usagePauseLifted,
   type AiTurnLog, type AiTurnOutcome,
 } from '../aiTurns'
 import type { ChatInputRequest } from '../components/ChatConversation'
@@ -42,6 +42,8 @@ interface Running {
   title: string
   /** The consultation's name for the record's title now (the run may rename the record). */
   titleFor: (recordTitle: string) => string
+  /** A scheduled job's occurrence (its failures are the server's to place, not the runner's). */
+  job: boolean
 }
 
 export interface AiTurnRunnerOptions {
@@ -105,7 +107,11 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     const result: AiTurnSettleResult = await settleAiTurn(o.companyId, run.recordId).catch(() => ({ outcome: 'unknown' }))
     const outcome: AiTurnOutcome = result.outcome === 'done' ? 'done'
       : usageLimitReached(snapshot) ? 'usage-limit' : result.outcome === 'failed' ? 'failed' : 'unfinished'
-    if (settings.current) saveLog(recordOutcome(loadLog(now), run.recordId, outcome, settings.current.value, usagePause(snapshot, now), run.version, run.state))
+    if (settings.current) {
+      saveLog(run.job
+        ? jobOutcome(loadLog(now), outcome, settings.current.value, usagePause(snapshot, now))
+        : recordOutcome(loadLog(now), run.recordId, outcome, settings.current.value, usagePause(snapshot, now), run.version, run.state))
+    }
     running.current = null
     // Ended well and nothing of the member's there: the consultation closes like a member's close
     // (「終わったもの」, history kept; owner FB #28). A review, a failure or the member's words keep it open.
@@ -131,7 +137,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     const titleFor = (recordTitle: string) => step ? step.consultationTitle({ ...notice, title: recordTitle }) : job ? jobConsultationTitle(recordTitle) : pluginStepConsultationTitle(recordTitle)
     const title = titleFor(notice.title)
     const tabId = o.openBackgroundTab()
-    const run: Running = { recordId: notice.id, version: notice.version, state: notice.state ?? null, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false, conversationId: null, messageId: null, title, titleFor }
+    const run: Running = { recordId: notice.id, version: notice.version, state: notice.state ?? null, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false, conversationId: null, messageId: null, title, titleFor, job: !!job }
     running.current = run
     if (!pass.current || now - pass.current.startedAt >= AI_TURN_PASS_INTERVAL_MS) pass.current = { startedAt: now, started: 0 }
     pass.current.started += 1
@@ -142,14 +148,19 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
       ...(step?.linksMinutes ? { minutesId: notice.id } : {}),
       claim: async (conversationId: string) => {
         const result = await claimAiTurn(o.companyId, notice.id, notice.version, conversationId, o.companyRoot).catch(() => ({ claimed: false as const, reason: 'unavailable' as const }))
-        if (running.current !== run) return null
+        if (running.current !== run) {
+          // Given up on while the claim was on its way (START_TIMEOUT_MS): a claim that won holds a run nobody runs —
+          // settle it now (put back / finished as unfinished) instead of leaving it held until its lease runs out.
+          if (result.claimed) void settleAiTurn(o.companyId, notice.id).catch(() => undefined)
+          return null
+        }
         if (!result.claimed) {
           if (result.reason === 'taken') taken.current.add(`${notice.id}@${notice.version}`)
           running.current = null
           latest.current.closeTab(tabId)
           return null
         }
-        saveLog(recordStarted(loadLog(Date.now()), notice.id))
+        saveLog(recordStarted(loadLog(Date.now()), notice.id, !!job))
         run.conversationId = conversationId
         run.phase = 'running'
         run.since = Date.now()
