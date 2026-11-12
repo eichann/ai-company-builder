@@ -506,7 +506,7 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
     }
   })
 
-  it('a receipt outside the chosen folder is not named as a file of the place', async () => {
+  it('a receipt outside the chosen folder, or not done, is not named as a file of the place', async () => {
     try {
       const { noon, slot: today } = atNoon()
       const job = await approvedJob()
@@ -518,13 +518,22 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
       db.prepare(`INSERT INTO google_drive_puts (id, company_id, user_id, request_key, actor_kind, conversation_id, run_id, folder_id, folder_name, name, mime_type, bytes, sha256, state,
         file_id, revision_id, link, reason, created_at, finished_at) VALUES ('drive-put-otherfolder-01', ?, 'jd-alice', 'key-otherfolder-01', 'ai', NULL, ?, ?, '外のフォルダ', '別の.pdf',
         'application/pdf', 1, ?, 'done', 'fake-upload-otherfolder-01', 'rev-1', NULL, NULL, ?, ?)`).run(CO, run.id, OTHER_FOLDER, 'c'.repeat(64), at, at)
-      db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, ref_kind, ref_id, created_at, updated_at)
-        VALUES (?, ?, 'p1', 'f', 'drive-put', 'done', 1, 'drive-put', 'drive-put-otherfolder-01', ?, ?)`).run(CO, run.id, at, at)
+      // And one in the chosen folder whose receipt is not done (its result never confirmed by Drive).
+      db.prepare(`INSERT INTO google_drive_puts (id, company_id, user_id, request_key, actor_kind, conversation_id, run_id, folder_id, folder_name, name, mime_type, bytes, sha256, state,
+        file_id, revision_id, link, reason, created_at, finished_at) VALUES ('drive-put-notdone-01', ?, 'jd-alice', 'key-notdone-01', 'ai', NULL, ?, ?, '提案書', '未確定.pdf',
+        'application/pdf', 1, ?, 'unknown', 'fake-upload-notdone-0001', 'rev-1', NULL, 'answer-lost', ?, ?)`).run(CO, run.id, FOLDER, 'd'.repeat(64), at, at)
+      for (const [key, ref] of [['p1', 'drive-put-otherfolder-01'], ['p2', 'drive-put-notdone-01']]) {
+        db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, ref_kind, ref_id, created_at, updated_at)
+          VALUES (?, ?, ?, 'f', 'drive-put', 'done', 1, 'drive-put', ?, ?, ?)`).run(CO, run.id, key, ref, at, at)
+      }
       expect((await failRun(run)).status).toBe(200)
       expect((await as('jd-owner', 'POST', `/jobs/${job}/occurrences/${occ}/retry`)).status).toBe(200)
       const turn = await turnOf(occ)
-      expect(turn.madeBefore).toEqual([{ kind: 'drive-put', ref: { kind: 'drive-put', id: 'drive-put-otherfolder-01' } }])
-      expect(JSON.stringify(turn)).not.toContain('fake-upload-otherfolder-01')
+      expect(turn.madeBefore).toEqual([
+        { kind: 'drive-put', ref: { kind: 'drive-put', id: 'drive-put-otherfolder-01' } },
+        { kind: 'drive-put', ref: { kind: 'drive-put', id: 'drive-put-notdone-01' } },
+      ])
+      for (const id of ['fake-upload-otherfolder-01', 'fake-upload-notdone-0001']) expect(JSON.stringify(turn)).not.toContain(id)
     } finally {
       vi.useRealTimers()
     }
