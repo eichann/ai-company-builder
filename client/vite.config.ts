@@ -7,8 +7,8 @@ import { buildInfoDefine, computeBuildInfo } from './scripts/build-info'
 
 // A preload runs in a sandboxed window (contextIsolation + sandbox: true), and a sandboxed
 // preload is a classic script: Electron calls it with its own `require`, so it must be CommonJS
-// — one top-level `import` and the whole preload fails, leaving its bridge missing (the Google
-// Picker window showed 「この画面はアプリの中でだけ使えます。」 in release-20261109). Setting
+// — one top-level `import` and the whole preload fails, leaving its bridge missing (the former
+// Google Picker window's preload showed 「この画面はアプリの中でだけ使えます。」 in release-20261109). Setting
 // `rollupOptions.output.format` is not enough: vite-plugin-electron builds each entry in lib
 // mode with `lib.formats` taken from package.json "type" ("module" → ['es']), and in lib mode
 // Vite emits one output per lib format, overriding the output's own format. This plugin sets
@@ -37,19 +37,6 @@ export default defineConfig(({ command }) => ({
             outDir: 'dist-electron',
             rollupOptions: {
               external: ['dugite'],
-            },
-          },
-        },
-      },
-      {
-        // Google Picker's window only (google-drive.md): hands its page the config once, takes back the picked ids.
-        entry: 'electron/picker-preload.ts',
-        vite: {
-          plugins: [commonJsPreload()],
-          build: {
-            outDir: 'dist-electron',
-            rollupOptions: {
-              external: ['electron'],
             },
           },
         },

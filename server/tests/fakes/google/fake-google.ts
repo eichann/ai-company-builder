@@ -962,7 +962,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     return c.json(selectFields({ kind: 'drive#revision', id: rev, keepForever: f.kept.has(rev) }, c.req.query('fields')))
   })
 
-  // ---- the stand-in Google Picker (staging: the Picker page loads <origin>/js/api.js) ----
+  // ---- the stand-in Google Picker (staging: the Picker page in the member's browser loads <origin>/js/api.js) ----
 
   const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type', 'access-control-allow-methods': 'GET, POST' }
   app.options('/__picker/*', c => c.body(null, 204, cors))
@@ -1623,7 +1623,9 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
 
 /**
  * A stand-in for Google Picker (`gapi.load('picker')`, `google.picker.*`), for
- * staging only: lists what `/__picker/files` returns for the token, and on a
+ * staging only. The server's Picker page loads it in the member's own browser
+ * (the page holding the one-time pick ticket, google-drive.md), as it would
+ * Google's: it lists what `/__picker/files` returns for the token, and on a
  * click marks the choice as picked (`/__picker/pick`) and calls back like
  * Google Picker (`{ action: 'picked', docs: [{ id }] }`). `DocsView.setFileIds`
  * narrows the list to those files, as Google's does.

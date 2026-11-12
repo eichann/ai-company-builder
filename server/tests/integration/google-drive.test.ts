@@ -7,8 +7,10 @@
  * - least privilege: the authorization asks `drive.file` for the feature `drive`, never
  *   `drive` / `drive.readonly`; the Picker's token carries exactly `drive.file` (it cannot read
  *   the calendar), and when Google answers with more it is not handed out at all;
- * - the Picker's token goes only to the member's session (a record token never gets one), and
- *   only with the admin's Picker registration;
+ * - the Picker's token goes only to the Picker page holding a one-time pick ticket the member's session
+ *   asked for (a record token never gets one), only with the admin's Picker registration; the ticket is
+ *   stored hashed, used once, 10 minutes, bound to its company, member, mode and maximum; the picks come
+ *   back as Drive ids only and are checked as /picks checks them; a released app's old route fails closed;
  * - picks: an id Google does not let ACB open (not picked) is not kept; a folder pick must be a
  *   folder; the AI reads and writes only what the person picked;
  * - puts: PDF / HTML only, content checked (a PDF must be a PDF), sha256 must match, the name's
@@ -18,16 +20,17 @@
  *   with other content is refused; a lost answer is `unknown`, never re-sent, and found by the
  *   put's id (`found-by-correlation`);
  * - every Google stop applies (the company switch off → nothing uploaded);
- * - the Picker page shows only Drive-id-shaped `fileIds` (a pasted link), in files mode only, and its
- *   CSP hash is the script it serves;
- * - no access or refresh token in any answer but the Picker's, in any log line or table.
+ * - the Picker page reads the ticket from the URL fragment only, shows only Drive-id-shaped `fileIds` (a
+ *   pasted link), in files mode only, and its CSP hash is the script it serves;
+ * - no access or refresh token in any answer but the Picker page's config, in any log line or table; no
+ *   pick ticket in any log line or table.
  */
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { createHash, randomBytes } from 'crypto'
-import { runInNewContext } from 'vm'
+import { createContext, runInContext, runInNewContext } from 'vm'
 import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
@@ -63,7 +66,7 @@ let google: FakeGoogle
 let googleServer: ServerType
 let kekDir: string
 const logLines: string[] = []
-/** Answers of every route except the Picker session's (the one answer that carries a token). */
+/** Answers of every route except the Picker page's config (the one answer that carries a token). */
 const answers: string[] = []
 const authorizeScopes: string[] = []
 
@@ -73,7 +76,7 @@ async function call(opts: { user?: string | null; token?: string; method: string
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`
   const res: Response = await app.request(`${PUBLIC}${opts.path}`, { method: opts.method, headers, ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}) })
   const text = await res.text()
-  if (!opts.path.endsWith('/me/google/drive/picker')) answers.push(text)
+  if (!opts.path.endsWith('/api/google-picker/config')) answers.push(text)
   let body: Json = null
   try { body = JSON.parse(text) } catch { /* a page */ }
   return { status: res.status, body, text, headers: res.headers }
@@ -173,15 +176,16 @@ describe('the Picker registration (admin)', () => {
   })
 })
 
-describe('the Picker token', () => {
-  it('without the drive permission: consent needed (the app asks Google at first use)', async () => {
+describe('the Drive permission', () => {
+  it('without the drive permission: no pick ticket, consent needed (the app asks Google at first use)', async () => {
     await allow('m-sato', ['minutes'])
     const tokenCalls = () => google.requests.filter(q => q.path === '/token').length
     const before = tokenCalls()
-    const r = await person('m-sato', 'POST', '/me/google/drive/picker', { mode: 'folder' })
+    const r = await person('m-sato', 'POST', '/me/google/drive/pick-tickets', { mode: 'folder' })
     expect([r.status, r.body.code, r.body.needsGoogleConsent]).toEqual([409, 'GOOGLE_CONSENT_NEEDED', 'drive'])
-    // Refused before Google is asked for any token.
+    // Refused before Google is asked for any token, and no ticket made.
     expect(tokenCalls()).toBe(before)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM google_drive_pick_tickets').get().n).toBe(0)
   })
 
   it('the feature drive asks drive.file and never drive / drive.readonly', async () => {
@@ -191,94 +195,6 @@ describe('the Picker token', () => {
     for (const wide of ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/drive.readonly']) expect(asked).not.toContain(wide)
     const grant = db.prepare("SELECT scopes FROM connector_grants WHERE company_id = ? AND user_id = 'm-sato'").get(CO) as Json
     expect(JSON.parse(grant.scopes)).toContain(DRIVE_FILE)
-  })
-
-  it('carries exactly drive.file: the token cannot read the calendar', async () => {
-    const r = await person('m-sato', 'POST', '/me/google/drive/picker', { mode: 'files' })
-    expect(r.status, r.text).toBe(200)
-    expect(r.headers.get('cache-control')).toBe('no-store')
-    expect(r.body.data).toMatchObject({ apiKey: PICKER_KEY, appId: APP_ID, mode: 'files' })
-    const token = r.body.data.accessToken as string
-    expect(token.startsWith('ya29.fake-')).toBe(true)
-    const base = process.env.ACB_FAKE_GOOGLE_URL
-    const cal = await fetch(`${base}/calendar/v3/calendars/primary/events?timeMin=2026-11-01T00:00:00Z&timeMax=2026-11-30T00:00:00Z`, { headers: { authorization: `Bearer ${token}` } })
-    expect(cal.status).toBe(403)
-    const meet = await fetch(`${base}/drive/v3/files/${GOOGLE_SEED.salesNotesDoc}`, { headers: { authorization: `Bearer ${token}` } })
-    expect(meet.status).toBe(404)
-  })
-
-  it('a Google that answers with wider scopes: the token is not handed out', async () => {
-    google.faults.ignoreRefreshScope = true
-    try {
-      const r = await person('m-sato', 'POST', '/me/google/drive/picker', { mode: 'folder' })
-      expect([r.status, r.body.code]).toEqual([503, 'DRIVE_PICKER_SCOPE'])
-      expect(r.text).not.toContain('ya29.fake-')
-    } finally {
-      google.faults.ignoreRefreshScope = false
-    }
-  })
-
-  it('never to a record token; never without the Picker registration', async () => {
-    const token = await tokenFor('m-sato', 'act')
-    expect((await call({ token, method: 'POST', path: `${C}/me/google/drive/picker`, body: { mode: 'folder' } })).status).toBe(401)
-    expect((await person('m-owner', 'PUT', '/google/picker', { appId: null })).status).toBe(200)
-    const r = await person('m-sato', 'POST', '/me/google/drive/picker', { mode: 'folder' })
-    expect([r.status, r.body.code]).toEqual([409, 'DRIVE_PICKER_NOT_CONFIGURED'])
-    expect((await person('m-owner', 'PUT', '/google/picker', { apiKey: PICKER_KEY, appId: APP_ID })).status).toBe(200)
-  })
-
-  it('the Picker page is static: no token, a strict CSP', async () => {
-    const r = await call({ method: 'GET', path: '/api/google-picker' })
-    expect(r.status).toBe(200)
-    const csp = r.headers.get('content-security-policy') ?? ''
-    expect(csp).toContain("default-src 'none'")
-    expect(csp).toMatch(/script-src 'sha256-[A-Za-z0-9+/=]+'/)
-    expect(r.text).not.toContain('ya29')
-    expect(r.text).toContain('window.acbPicker')
-  })
-
-  /** Runs the page's own script against a stand-in `google.picker` that records each call. */
-  async function runPickerPage(cfg: Record<string, unknown>) {
-    const r = await call({ method: 'GET', path: '/api/google-picker' })
-    const script = /<script>([\s\S]*)<\/script>/.exec(r.text)![1]
-    const calls: Array<[string, unknown]> = []
-    const view = {
-      setMimeTypes: (v: unknown) => { calls.push(['setMimeTypes', v]); return view },
-      setIncludeFolders: () => view, setSelectFolderEnabled: () => view,
-      setEnableDrives: (v: unknown) => { calls.push(['setEnableDrives', v]); return view },
-      setFileIds: (v: unknown) => { calls.push(['setFileIds', v]); return view },
-    }
-    const builder: Record<string, unknown> = {}
-    for (const m of ['addView', 'setOAuthToken', 'setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle', 'setCallback', 'enableFeature', 'setMaxItems']) builder[m] = () => builder
-    builder.build = () => ({ setVisible: () => { calls.push(['visible', true]) } })
-    const head = { appendChild: (el: { onload: () => void }) => { el.onload() } }
-    const window: Record<string, unknown> = {
-      location: { origin: PUBLIC },
-      acbPicker: { config: () => Promise.resolve(cfg), done: () => {} },
-      gapi: { load: (_n: string, o: { callback: () => void }) => o.callback() },
-      google: { picker: { DocsView: function () { return view }, PickerBuilder: function () { return builder }, ViewId: {}, Action: {}, Feature: {} } },
-    }
-    const document = { getElementById: () => ({ textContent: '' }), createElement: () => ({}), head }
-    runInNewContext(script, { window, document })
-    await new Promise(res => setTimeout(res, 0))
-    return { calls, csp: r.headers.get('content-security-policy') ?? '', script }
-  }
-  const base = { accessToken: 't', apiKey: 'k', appId: APP_ID, scriptOrigin: 'https://apis.google.com', mimeTypes: ['application/pdf'], maxItems: 10 }
-  const GOOD = '1AbC-def_GhIjKlMnOpQrStUv'
-
-  it('a pasted link: the Picker shows only Drive-id-shaped files, in files mode only; the CSP hash is the script served', async () => {
-    const shown = await runPickerPage({ ...base, mode: 'files', fileIds: [GOOD, "x');alert(1)//", 'short', 7, 'other-good-id_0123'] })
-    expect(shown.calls).toContainEqual(['setFileIds', `${GOOD},other-good-id_0123`])
-    // Google's reference: setFileIds is not combined with setEnableDrives.
-    expect(shown.calls.map(c => c[0])).not.toContain('setEnableDrives')
-    expect(shown.calls).toContainEqual(['visible', true])
-    expect(shown.csp).toContain(`'sha256-${createHash('sha256').update(shown.script).digest('base64')}'`)
-    // Nothing usable, a folder pick, or none given: the ordinary Picker.
-    for (const cfg of [{ mode: 'files', fileIds: ['bad id!'] }, { mode: 'folder', fileIds: [GOOD] }, { mode: 'files' }, { mode: 'files', fileIds: GOOD }]) {
-      const plain = await runPickerPage({ ...base, ...cfg })
-      expect(plain.calls.map(c => c[0]), JSON.stringify(cfg)).not.toContain('setFileIds')
-      expect(plain.calls).toContainEqual(['setEnableDrives', true])
-    }
   })
 })
 
@@ -503,7 +419,7 @@ describe('the AI puts a PDF / HTML into a picked folder', () => {
     try {
       const r = await ai(token, 'POST', '/put', putBody({ name: '止めた後.pdf' }))
       expect(r.body.code).toBe('GOOGLE_STOPPED')
-      expect((await person('m-sato', 'POST', '/me/google/drive/picker', { mode: 'folder' })).body.code).toBe('GOOGLE_STOPPED')
+      expect((await person('m-sato', 'POST', '/me/google/drive/pick-tickets', { mode: 'folder' })).body.code).toBe('GOOGLE_STOPPED')
       expect(google.uploads()).toHaveLength(before)
     } finally {
       expect((await person('m-owner', 'PUT', '/google/enabled', { enabled: true })).status).toBe(200)
@@ -859,6 +775,537 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
       expect(kept).toEqual([{ created_by: 'm-tanaka', target_meta: meta }])
     } finally {
       db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
+    }
+  })
+})
+
+describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
+  const issued: string[] = []
+  const start = (user: string, body: unknown) => person(user, 'POST', '/me/google/drive/pick-tickets', body)
+  const state = (user: string, id: string) => person(user, 'GET', `/me/google/drive/pick-tickets/${id}`)
+  const page = (what: 'config' | 'result', body: unknown) => call({ method: 'POST', path: `/api/google-picker/${what}`, body })
+  const tokenCalls = () => google.requests.filter(q => q.path === '/token').length
+  const pickerLines = () => (db.prepare("SELECT COUNT(*) AS n FROM agent_events WHERE company_id = ? AND tool = 'google:drive.picker.token'").get(CO) as { n: number }).n
+  const ticketRow = (id: string) => db.prepare('SELECT * FROM google_drive_pick_tickets WHERE id = ?').get(id) as Json
+  // The open-ticket cap counts every open ticket of the member: each test starts without any.
+  beforeEach(() => { db.prepare('DELETE FROM google_drive_pick_tickets').run() })
+  const sleepMs = (ms: number) => new Promise(res => setTimeout(res, ms))
+  async function ticket(user: string, body: unknown = { mode: 'folder' }) {
+    const r = await start(user, body)
+    expect(r.status, r.text).toBe(200)
+    issued.push(r.body.data.ticket)
+    return r.body.data as { ticketId: string; ticket: string; expiresAt: string }
+  }
+
+  it('the ticket: unguessable, only its sha256 stored, 10 minutes, bound to the member and the mode; nothing asked of Google yet', async () => {
+    const before = tokenCalls()
+    const t = await ticket('m-sato', { mode: 'files' })
+    expect(t.ticket).toMatch(/^[0-9a-f]{64}$/)
+    expect(tokenCalls()).toBe(before)
+    const row = ticketRow(t.ticketId)
+    expect(JSON.stringify(row)).not.toContain(t.ticket)
+    expect(row.ticket_hash).toBe(createHash('sha256').update(t.ticket).digest('hex'))
+    expect([row.user_id, row.mode, row.max_items, row.state]).toEqual(['m-sato', 'files', 10, 'open'])
+    expect(Date.parse(row.expires_at) - Date.parse(row.created_at)).toBe(10 * 60 * 1000)
+    expect((await ticket('m-sato', { mode: 'folder' })).ticket).not.toBe(t.ticket)
+    expect(ticketRow((await ticket('m-sato', { mode: 'folder' })).ticketId).max_items).toBe(1)
+  })
+
+  it('the config: exactly drive.file (cannot read the calendar), handed out once, one action-log line, not cached', async () => {
+    const t = await ticket('m-sato', { mode: 'files' })
+    const lines = pickerLines()
+    const r = await page('config', { ticket: t.ticket })
+    expect(r.status, r.text).toBe(200)
+    expect(r.headers.get('cache-control')).toBe('no-store')
+    expect(r.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin')
+    expect(r.body.data).toMatchObject({ apiKey: PICKER_KEY, appId: APP_ID, mode: 'files', maxItems: 10, account: GOOGLE_SEED.member })
+    expect(pickerLines()).toBe(lines + 1)
+    const token = r.body.data.accessToken as string
+    expect(token.startsWith('ya29.fake-')).toBe(true)
+    const base = process.env.ACB_FAKE_GOOGLE_URL
+    const cal = await fetch(`${base}/calendar/v3/calendars/primary/events?timeMin=2026-11-01T00:00:00Z&timeMax=2026-11-30T00:00:00Z`, { headers: { authorization: `Bearer ${token}` } })
+    expect(cal.status).toBe(403)
+    // Once: a second page (a copied link, a reload) gets nothing and Google is not asked again.
+    const calls = tokenCalls()
+    const again = await page('config', { ticket: t.ticket })
+    expect([again.status, again.body.code]).toEqual([410, 'PICK_TICKET_GONE'])
+    expect(tokenCalls()).toBe(calls)
+    expect(pickerLines()).toBe(lines + 1)
+    expect(await state('m-sato', t.ticketId).then(x => x.body.data)).toEqual({ state: 'waiting', opened: true })
+  })
+
+  it('a Google that answers with wider scopes: the token is not handed out; the app hears why', async () => {
+    const t = await ticket('m-sato')
+    google.faults.ignoreRefreshScope = true
+    try {
+      const r = await page('config', { ticket: t.ticket })
+      expect([r.status, r.body.code]).toEqual([503, 'DRIVE_PICKER_SCOPE'])
+      expect(r.text).not.toContain('ya29.fake-')
+    } finally {
+      google.faults.ignoreRefreshScope = false
+    }
+    const s = await state('m-sato', t.ticketId)
+    expect(s.body.data).toMatchObject({ state: 'failed' })
+    expect(s.body.data.error).toContain('広い許可')
+  })
+
+  it('a ticket only through the session (never a record token); never without the Picker registration', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    expect((await call({ token, method: 'POST', path: `${C}/me/google/drive/pick-tickets`, body: { mode: 'folder' } })).status).toBe(401)
+    expect((await person('m-owner', 'PUT', '/google/picker', { appId: null })).status).toBe(200)
+    try {
+      const r = await start('m-sato', { mode: 'folder' })
+      expect([r.status, r.body.code]).toEqual([409, 'DRIVE_PICKER_NOT_CONFIGURED'])
+    } finally {
+      expect((await person('m-owner', 'PUT', '/google/picker', { apiKey: PICKER_KEY, appId: APP_ID })).status).toBe(200)
+    }
+  })
+
+  it('expired: the page gets nothing, the app hears expired until it acknowledges', async () => {
+    const t = await ticket('m-sato')
+    const setExpiry = (ms: number) => db.prepare('UPDATE google_drive_pick_tickets SET expires_at = ? WHERE id = ?').run(new Date(Date.now() + ms).toISOString(), t.ticketId)
+    setExpiry(-1000)
+    const before = tokenCalls()
+    expect((await page('config', { ticket: t.ticket })).body.code).toBe('PICK_TICKET_GONE')
+    expect((await page('result', { ticket: t.ticket, action: 'cancel' })).body.code).toBe('PICK_TICKET_GONE')
+    expect(tokenCalls()).toBe(before)
+    expect((await state('m-sato', t.ticketId)).body.data).toEqual({ state: 'expired' })
+    expect((await state('m-sato', t.ticketId)).body.data).toEqual({ state: 'expired' })
+    expect((await person('m-sato', 'DELETE', `/me/google/drive/pick-tickets/${t.ticketId}`)).status).toBe(200)
+    expect(ticketRow(t.ticketId)).toBeUndefined()
+  })
+
+  it('a pick still being kept at the ticket\'s end: the app hears saving for the grace, then expired', async () => {
+    const t = await ticket('m-sato')
+    const saving = (msAgo: number) => db.prepare("UPDATE google_drive_pick_tickets SET state = 'saving', config_handed_at = ?, expires_at = ? WHERE id = ?").run(new Date().toISOString(), new Date(Date.now() - msAgo).toISOString(), t.ticketId)
+    saving(60_000)
+    expect((await state('m-sato', t.ticketId)).body.data).toEqual({ state: 'waiting', opened: true, saving: true })
+    saving(3 * 60_000)
+    expect((await state('m-sato', t.ticketId)).body.data).toEqual({ state: 'expired' })
+  })
+
+  it('a result the app has not read yet survives the next start\'s pruning; only tickets long over go', async () => {
+    const unread = await ticket('m-sato')
+    const old = await ticket('m-sato')
+    db.prepare("UPDATE google_drive_pick_tickets SET state = 'picked', result = ?, expires_at = ? WHERE id = ?").run(JSON.stringify({ picks: [], refused: 1 }), new Date(Date.now() - 60_000).toISOString(), unread.ticketId)
+    db.prepare('UPDATE google_drive_pick_tickets SET expires_at = ? WHERE id = ?').run(new Date(Date.now() - 60 * 60_000).toISOString(), old.ticketId)
+    await ticket('m-sato')
+    expect((await state('m-sato', unread.ticketId)).body.data).toEqual({ state: 'picked', picks: [], refused: 1 })
+    expect(ticketRow(old.ticketId)).toBeUndefined()
+  })
+
+  it('at most five open tickets per member', async () => {
+    for (let i = 0; i < 5; i++) await ticket('m-sato')
+    const r = await start('m-sato', { mode: 'folder' })
+    expect([r.status, r.body.code]).toEqual([429, 'PICK_TICKETS_TOO_MANY'])
+    expect((await start('m-tanaka', { mode: 'folder' })).body.code).not.toBe('PICK_TICKETS_TOO_MANY')
+  })
+
+  it('the Drive feature turned off by the member: no ticket', async () => {
+    db.prepare("UPDATE connector_grants SET features_off = ? WHERE company_id = ? AND user_id = 'm-sato'").run(JSON.stringify(['drive']), CO)
+    try {
+      const r = await start('m-sato', { mode: 'folder' })
+      expect([r.status, r.body.code]).toEqual([409, 'GOOGLE_FEATURE_OFF'])
+    } finally {
+      db.prepare("UPDATE connector_grants SET features_off = '[]' WHERE company_id = ? AND user_id = 'm-sato'").run(CO)
+    }
+  })
+
+  it('a ticket is served from its own company: another company\'s ticket reads that company\'s settings, never this one\'s', async () => {
+    const OTHER = 'drive-co-other'
+    db.prepare('INSERT OR IGNORE INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(OTHER, OTHER, OTHER, 'm-other', ts(), ts())
+    db.prepare('INSERT OR IGNORE INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('m-m-other', 'm-other', OTHER, 'owner', ts(), ts())
+    const value = randomBytes(32).toString('hex')
+    db.prepare("INSERT INTO google_drive_pick_tickets (id, company_id, user_id, ticket_hash, mode, max_items, file_ids, state, created_at, expires_at) VALUES ('ticket-other-co', ?, 'm-other', ?, 'folder', 1, '[]', 'open', ?, ?)")
+      .run(OTHER, createHash('sha256').update(value).digest('hex'), ts(), new Date(Date.now() + 60_000).toISOString())
+    const r = await page('config', { ticket: value })
+    // That company registered no Picker: its own refusal, and nothing of this company's registration.
+    expect([r.status, r.body.code]).toEqual([409, 'DRIVE_PICKER_NOT_CONFIGURED'])
+    expect(r.text).not.toContain(PICKER_KEY)
+  })
+
+  it('a forged or reshaped ticket: nothing', async () => {
+    const t = await ticket('m-sato')
+    for (const forged of [`${CO}.${t.ticket}`, '0'.repeat(64), t.ticket.toUpperCase(), `${t.ticket}x`, t.ticket.slice(1), '', 42]) {
+      const r = await page('config', { ticket: forged })
+      expect([r.status, r.body.code], String(forged)).toEqual([410, 'PICK_TICKET_GONE'])
+    }
+    expect(ticketRow(t.ticketId).config_handed_at).toBeNull()
+  })
+
+  it('another member: cannot see, wait for or close the ticket; what is picked is kept for the ticket\'s member only', async () => {
+    google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.proposalsFolder])
+    const t = await ticket('m-sato')
+    expect((await state('m-tanaka', t.ticketId)).status).toBe(404)
+    expect((await person('m-tanaka', 'DELETE', `/me/google/drive/pick-tickets/${t.ticketId}`)).status).toBe(404)
+    expect((await page('config', { ticket: t.ticket })).status).toBe(200)
+    // The page names no member: a body's userId is not read.
+    const r = await page('result', { ticket: t.ticket, mode: 'folder', action: 'picked', ids: [GOOGLE_SEED.proposalsFolder], userId: 'm-tanaka' })
+    expect(r.status, r.text).toBe(200)
+    const owners = (db.prepare('SELECT user_id FROM google_drive_picks WHERE company_id = ? AND file_id = ?').all(CO, GOOGLE_SEED.proposalsFolder) as Json[]).map(x => x.user_id)
+    expect(owners).toEqual(['m-sato'])
+    expect((await state('m-tanaka', t.ticketId)).status).toBe(404)
+    expect((await state('m-sato', t.ticketId)).body.data).toMatchObject({ state: 'picked', picks: [{ id: GOOGLE_SEED.proposalsFolder, kind: 'folder' }], refused: 0 })
+  })
+
+  it('a member who left the company: the page gets no token', async () => {
+    const t = await ticket('m-sato')
+    const row = db.prepare("SELECT * FROM memberships WHERE company_id = ? AND user_id = 'm-sato'").get(CO) as Json
+    db.prepare("DELETE FROM memberships WHERE company_id = ? AND user_id = 'm-sato'").run(CO)
+    try {
+      const before = tokenCalls()
+      expect((await page('config', { ticket: t.ticket })).body.code).toBe('PICK_TICKET_GONE')
+      expect(tokenCalls()).toBe(before)
+    } finally {
+      db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(row.id, row.user_id, row.company_id, row.role, row.created_at, row.updated_at)
+    }
+    expect((await state('m-sato', t.ticketId)).body.data).toMatchObject({ state: 'failed' })
+  })
+
+  it('the result: only after the config, the ticket\'s mode, at most its maximum, Drive ids only; then once', async () => {
+    const folder = await ticket('m-sato', { mode: 'folder' })
+    const pick = (t: { ticket: string }, extra: Record<string, unknown>) => page('result', { ticket: t.ticket, action: 'picked', ...extra })
+    // Before the page took its config, no pick is taken.
+    expect((await pick(folder, { mode: 'folder', ids: [GOOGLE_SEED.proposalsFolder] })).body.code).toBe('PICK_TICKET_GONE')
+    expect((await page('config', { ticket: folder.ticket })).status).toBe(200)
+    expect((await pick(folder, { mode: 'files', ids: [GOOGLE_SEED.proposalsFolder] })).status).toBe(400)
+    expect((await pick(folder, { mode: 'folder', ids: [GOOGLE_SEED.proposalsFolder, GOOGLE_SEED.sharedOutsideFolder] })).status).toBe(400)
+    for (const ids of [['../x'], [], 'x', [42]]) expect((await pick(folder, { mode: 'folder', ids })).status, JSON.stringify(ids)).toBe(400)
+    expect((await pick(folder, { mode: 'folder', ids: [GOOGLE_SEED.proposalsFolder] })).status).toBe(200)
+    expect((await pick(folder, { mode: 'folder', ids: [GOOGLE_SEED.proposalsFolder] })).body.code).toBe('PICK_TICKET_GONE')
+    expect((await page('result', { ticket: folder.ticket, action: 'cancel' })).body.code).toBe('PICK_TICKET_GONE')
+
+    const files = await ticket('m-sato', { mode: 'files' })
+    expect((await page('config', { ticket: files.ticket })).status).toBe(200)
+    const eleven = Array.from({ length: 11 }, (_, i) => `fake-doc-many-${String(i).padStart(4, '0')}`)
+    expect((await pick(files, { mode: 'files', ids: eleven })).status).toBe(400)
+  })
+
+  it('picks are checked and counted as /picks does: an id Google does not open is refused, a file is not a folder', async () => {
+    google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.proposalsFolder, GOOGLE_SEED.pastProposalDoc, GOOGLE_SEED.pastProposalSlides])
+    const files = await ticket('m-sato', { mode: 'files' })
+    expect((await page('config', { ticket: files.ticket })).status).toBe(200)
+    const r = await page('result', { ticket: files.ticket, mode: 'files', action: 'picked', ids: [GOOGLE_SEED.pastProposalDoc, GOOGLE_SEED.pastProposalSlides, GOOGLE_SEED.salesNotesDoc] })
+    expect(r.status, r.text).toBe(200)
+    expect(r.body.data).toEqual({ state: 'picked', kept: 2, refused: 1 })
+    const s = await state('m-sato', files.ticketId)
+    expect(s.body.data.picks.map((p: Json) => p.id)).toEqual([GOOGLE_SEED.pastProposalDoc, GOOGLE_SEED.pastProposalSlides])
+    expect(s.body.data.refused).toBe(1)
+    // A lost answer loses nothing: the result is read again until the app acknowledges it.
+    expect((await state('m-sato', files.ticketId)).body.data).toEqual(s.body.data)
+    expect((await person('m-sato', 'DELETE', `/me/google/drive/pick-tickets/${files.ticketId}`)).status).toBe(200)
+    expect((await state('m-sato', files.ticketId)).status).toBe(404)
+    expect(ticketRow(files.ticketId)).toBeUndefined()
+
+    const folder = await ticket('m-sato', { mode: 'folder' })
+    expect((await page('config', { ticket: folder.ticket })).status).toBe(200)
+    expect((await page('result', { ticket: folder.ticket, mode: 'folder', action: 'picked', ids: [GOOGLE_SEED.pastProposalDoc] })).body.data).toEqual({ state: 'picked', kept: 0, refused: 1 })
+  })
+
+  it('cancelled in the browser (or the page closed): the app hears cancelled; the app\'s own cancel closes the ticket for the page', async () => {
+    const t = await ticket('m-sato')
+    expect((await page('result', { ticket: t.ticket, action: 'cancel' })).status).toBe(200)
+    expect((await state('m-sato', t.ticketId)).body.data).toEqual({ state: 'cancelled' })
+    expect((await page('config', { ticket: t.ticket })).body.code).toBe('PICK_TICKET_GONE')
+
+    const u = await ticket('m-sato')
+    expect((await person('m-sato', 'DELETE', `/me/google/drive/pick-tickets/${u.ticketId}`)).status).toBe(200)
+    const before = tokenCalls()
+    expect((await page('config', { ticket: u.ticket })).body.code).toBe('PICK_TICKET_GONE')
+    expect(tokenCalls()).toBe(before)
+  })
+
+  it('the app closed the ticket while Google was asked for the token: nothing handed out', async () => {
+    const t = await ticket('m-sato')
+    google.faults.delayMs = 300
+    try {
+      const pending = page('config', { ticket: t.ticket })
+      await sleepMs(100)
+      expect((await person('m-sato', 'DELETE', `/me/google/drive/pick-tickets/${t.ticketId}`)).status).toBe(200)
+      const r = await pending
+      expect([r.status, r.body.code]).toEqual([410, 'PICK_TICKET_GONE'])
+      expect(r.text).not.toContain('ya29.fake-')
+    } finally {
+      google.faults.delayMs = 0
+    }
+  })
+
+  it('the app closed the ticket while the picks were checked with Google: nothing kept, the page told', async () => {
+    google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.handNotesPdf])
+    db.prepare('DELETE FROM google_drive_picks WHERE company_id = ? AND file_id = ?').run(CO, GOOGLE_SEED.handNotesPdf)
+    const t = await ticket('m-sato', { mode: 'files' })
+    expect((await page('config', { ticket: t.ticket })).status).toBe(200)
+    google.faults.delayMs = 300
+    try {
+      const pending = page('result', { ticket: t.ticket, mode: 'files', action: 'picked', ids: [GOOGLE_SEED.handNotesPdf] })
+      await sleepMs(100)
+      expect((await person('m-sato', 'DELETE', `/me/google/drive/pick-tickets/${t.ticketId}`)).status).toBe(200)
+      const r = await pending
+      expect([r.status, r.body.code]).toEqual([410, 'PICK_TICKET_GONE'])
+    } finally {
+      google.faults.delayMs = 0
+    }
+    expect(db.prepare('SELECT COUNT(*) AS n FROM google_drive_picks WHERE company_id = ? AND file_id = ?').get(CO, GOOGLE_SEED.handNotesPdf).n).toBe(0)
+  })
+
+  it('a released app\'s Picker window (the old route): fails closed with a plain sentence; no token', async () => {
+    const before = tokenCalls()
+    const r = await person('m-sato', 'POST', '/me/google/drive/picker', { mode: 'folder' })
+    expect([r.status, r.body.code]).toEqual([409, 'DRIVE_PICKER_APP_UPDATE_NEEDED'])
+    expect(r.body.error).toContain('アプリを新しく')
+    expect(r.text).not.toContain('ya29')
+    expect(tokenCalls()).toBe(before)
+  })
+
+  it('the Picker page is static: no token, a strict CSP that lets it call its own server, not cached', async () => {
+    const r = await call({ method: 'GET', path: '/api/google-picker' })
+    expect(r.status).toBe(200)
+    const csp = (r.headers.get('content-security-policy') ?? '').split('; ')
+    const fake = process.env.ACB_FAKE_GOOGLE_URL
+    const hash = createHash('sha256').update(/<script>([\s\S]*)<\/script>/.exec(r.text)![1]).digest('base64')
+    expect(csp).toEqual([
+      "default-src 'none'",
+      `script-src 'sha256-${hash}' https://apis.google.com https://www.gstatic.com https://*.google.com ${fake}`,
+      `style-src 'unsafe-inline' https://*.gstatic.com https://fonts.googleapis.com https://*.google.com ${fake}`,
+      'img-src https: data:',
+      'font-src https://fonts.gstatic.com',
+      `frame-src https://docs.google.com https://drive.google.com https://*.google.com ${fake}`,
+      `connect-src 'self' https://*.googleapis.com https://*.google.com ${fake}`,
+      "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'",
+    ])
+    expect(r.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(r.headers.get('cache-control')).toBe('no-store')
+    expect(r.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin')
+    expect(r.text).not.toContain('ya29')
+    expect(r.text).not.toContain('acbPicker')
+  })
+
+  /**
+   * Runs the page's own script as the member's browser would — the ticket in `#t=`, its calls going to
+   * this server — against a stand-in `google.picker` that records each call and answers with `answer`.
+   * `config` replaces the server's config answer (to feed the page what the server would never send).
+   */
+  async function runPickerPage(hash: string, opts: { answer?: { action: string; docs?: Array<{ id: unknown }> }; config?: Record<string, unknown> } = {}) {
+    const r = await call({ method: 'GET', path: '/api/google-picker' })
+    const script = /<script>([\s\S]*)<\/script>/.exec(r.text)![1]
+    const calls: Array<[string, unknown]> = []
+    const posted: Array<{ path: string; body: Json; keepalive: boolean }> = []
+    const listeners: Record<string, Array<() => void>> = {}
+    const msg = { textContent: '' }
+    const view = {
+      setMimeTypes: (v: unknown) => { calls.push(['setMimeTypes', v]); return view },
+      setIncludeFolders: () => view, setSelectFolderEnabled: () => view,
+      setEnableDrives: (v: unknown) => { calls.push(['setEnableDrives', v]); return view },
+      setFileIds: (v: unknown) => { calls.push(['setFileIds', v]); return view },
+    }
+    let callback: (data: unknown) => void = () => {}
+    const builder: Record<string, unknown> = {}
+    for (const m of ['addView', 'setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle', 'enableFeature']) builder[m] = () => builder
+    builder.setOAuthToken = (t: unknown) => { calls.push(['token', t]); return builder }
+    builder.setMaxItems = (n: unknown) => { calls.push(['maxItems', n]); return builder }
+    builder.setAuthUser = (u: unknown) => { calls.push(['authUser', u]); return builder }
+    builder.setCallback = (f: (data: unknown) => void) => { callback = f; return builder }
+    builder.build = () => ({ setVisible: () => { calls.push(['visible', true]); if (opts.answer) callback(opts.answer) } })
+    const head = { appendChild: (el: { onload: () => void }) => { el.onload() } }
+    const history = { replaceState: (_s: unknown, _t: unknown, url: string) => { calls.push(['address', url]) } }
+    const window: Record<string, unknown> = {
+      location: { origin: PUBLIC, pathname: '/api/google-picker', hash },
+      history,
+      addEventListener: (type: string, fn: () => void) => { (listeners[type] ??= []).push(fn) },
+      fetch: async (path: string, init: { body: string; keepalive?: boolean }) => {
+        const body = JSON.parse(init.body)
+        posted.push({ path, body, keepalive: init.keepalive === true })
+        if (path.endsWith('/config') && opts.config) return new Response(JSON.stringify({ success: true, data: opts.config }), { status: 200 })
+        const res = await call({ method: 'POST', path, body })
+        return new Response(res.text, { status: res.status })
+      },
+      gapi: { load: (_n: string, o: { callback: () => void }) => o.callback() },
+      google: { picker: { DocsView: function () { return view }, PickerBuilder: function () { return builder }, ViewId: {}, Action: { PICKED: 'picked', CANCEL: 'cancel' }, Feature: {} } },
+    }
+    const document = { getElementById: () => msg, createElement: () => ({}), head }
+    runInNewContext(script, { window, document })
+    const settled = () => /アプリに戻って|始められません|使えません/.test(msg.textContent) || (!opts.answer && calls.some(c => c[0] === 'visible'))
+    for (let i = 0; i < 100 && !settled(); i++) await new Promise(res => setTimeout(res, 10))
+    return { calls, posted, msg: () => msg.textContent, csp: r.headers.get('content-security-policy') ?? '', script, leave: () => { for (const fn of listeners.pagehide ?? []) fn() } }
+  }
+
+  it('staging\'s stand-in Picker (the fake Google\'s /js/api.js) with the page: the member clicks a folder, the app gets it', async () => {
+    const t = await ticket('m-sato', { mode: 'folder' })
+    const r = await call({ method: 'GET', path: '/api/google-picker' })
+    expect(r.headers.get('content-security-policy')).toContain(`connect-src 'self' https://*.googleapis.com https://*.google.com ${process.env.ACB_FAKE_GOOGLE_URL}`)
+    const script = /<script>([\s\S]*)<\/script>/.exec(r.text)![1]
+    const msg = { textContent: '' }
+    type El = { tag: string; children: El[]; textContent?: string; onclick?: () => void; attrs: Record<string, string>; src?: string; onload?: () => void; appendChild(c: El): void; setAttribute(k: string, v: string): void }
+    const el = (tag: string): El => ({ tag, children: [], attrs: {}, appendChild(c) { this.children.push(c) }, setAttribute(k, v) { this.attrs[k] = v } })
+    const body = el('body')
+    let ctx: Record<string, unknown> = {}
+    const document = {
+      getElementById: () => msg, createElement: el, body, currentScript: null as null | { src: string },
+      head: { appendChild: (s: El) => { void fetch(s.src!).then(x => x.text()).then(code => { document.currentScript = { src: s.src! }; runInContext(code, ctx); s.onload!() }) } },
+    }
+    const window: Record<string, unknown> = {
+      location: { origin: PUBLIC, pathname: '/api/google-picker', hash: `#t=${t.ticket}` },
+      history: { replaceState: () => {} }, addEventListener: () => {},
+      fetch: async (path: string, init: { body: string }) => { const res = await call({ method: 'POST', path, body: JSON.parse(init.body) }); return new Response(res.text, { status: res.status }) },
+    }
+    ctx = createContext({ window, document, fetch, URL, setTimeout })
+    // The stand-in reads and writes `window.google` / `window.gapi`: the same object as the context's globals.
+    window.window = window
+    runInContext(`window.google = undefined; (function () { ${script} })()`, ctx)
+    const folderButton = async () => {
+      for (let i = 0; i < 200; i++) {
+        const box = body.children.find(c => c.attrs.id === 'fake-picker' || (c as unknown as { id?: string }).id === 'fake-picker')
+        const b = box?.children.find(c => c.attrs['data-id'] === GOOGLE_SEED.proposalsFolder)
+        if (b) return b
+        await new Promise(res => setTimeout(res, 10))
+      }
+      throw new Error('the stand-in Picker showed no folder')
+    }
+    ;(await folderButton()).onclick!()
+    for (let i = 0; i < 200 && !msg.textContent.includes('アプリに戻って'); i++) await new Promise(res => setTimeout(res, 10))
+    expect(msg.textContent).toContain('選びました。アプリに戻ってください。')
+    expect((await state('m-sato', t.ticketId)).body.data).toMatchObject({ state: 'picked', picks: [{ id: GOOGLE_SEED.proposalsFolder, kind: 'folder' }], refused: 0 })
+  })
+
+  it('the page end to end: the ticket from the fragment (then taken off the address), the config once, the pick posted; the app gets it', async () => {
+    google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.proposalsFolder])
+    const t = await ticket('m-sato', { mode: 'folder' })
+    const run = await runPickerPage(`#t=${t.ticket}`, { answer: { action: 'picked', docs: [{ id: GOOGLE_SEED.proposalsFolder }, { id: '../x' }] } })
+    expect(run.calls[0]).toEqual(['address', '/api/google-picker'])
+    expect(run.posted.map(p => p.path)).toEqual(['/api/google-picker/config', '/api/google-picker/result'])
+    expect(run.posted[1].body).toEqual({ ticket: t.ticket, mode: 'folder', action: 'picked', ids: [GOOGLE_SEED.proposalsFolder] })
+    // keepalive: closing the tab right after 「選択」 still delivers the pick.
+    expect(run.posted[1].keepalive).toBe(true)
+    expect(run.calls).toContainEqual(['authUser', GOOGLE_SEED.member])
+    expect(run.msg()).toContain('選びました。アプリに戻ってください。')
+    expect(run.csp).toContain(`'sha256-${createHash('sha256').update(run.script).digest('base64')}'`)
+    expect((await state('m-sato', t.ticketId)).body.data).toMatchObject({ state: 'picked', picks: [{ id: GOOGLE_SEED.proposalsFolder }] })
+
+    // 「キャンセル」 in the Picker: cancelled.
+    const u = await ticket('m-sato', { mode: 'folder' })
+    const cancel = await runPickerPage(`#t=${u.ticket}`, { answer: { action: 'cancel' } })
+    expect(cancel.msg()).toContain('選ぶのをやめました')
+    expect((await state('m-sato', u.ticketId)).body.data).toEqual({ state: 'cancelled' })
+
+    // The tab closed while the Picker was showing: a cancel goes out (keepalive) and the app hears it.
+    const v = await ticket('m-sato', { mode: 'folder' })
+    const closed = await runPickerPage(`#t=${v.ticket}`)
+    expect(closed.msg()).toContain(GOOGLE_SEED.member)
+    closed.leave()
+    for (let i = 0; i < 50 && closed.posted.length < 2; i++) await sleepMs(10)
+    expect(closed.posted[1]).toEqual({ path: '/api/google-picker/result', body: { ticket: v.ticket, action: 'cancel' }, keepalive: true })
+    for (let i = 0; i < 50 && ticketRow(v.ticketId)?.state !== 'cancelled'; i++) await sleepMs(10)
+    expect((await state('m-sato', v.ticketId)).body.data).toEqual({ state: 'cancelled' })
+
+    // Opened without a ticket (a bookmark, a shared link): nothing asked.
+    const none = await runPickerPage('')
+    expect(none.posted).toEqual([])
+  })
+
+  it('the first result reached the server but its answer was lost: the retry hears 410 and the page just says go back to the app', async () => {
+    google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.proposalsFolder])
+    const t = await ticket('m-sato', { mode: 'folder' })
+    const r = await call({ method: 'GET', path: '/api/google-picker' })
+    const script = /<script>([\s\S]*)<\/script>/.exec(r.text)![1]
+    const posted: string[] = []
+    const msg = { textContent: '' }
+    let callback: (data: unknown) => void = () => {}
+    const view: Record<string, unknown> = {}
+    for (const m of ['setMimeTypes', 'setIncludeFolders', 'setSelectFolderEnabled', 'setEnableDrives']) view[m] = () => view
+    const builder: Record<string, unknown> = {}
+    for (const m of ['addView', 'setOAuthToken', 'setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle']) builder[m] = () => builder
+    builder.setCallback = (f: (data: unknown) => void) => { callback = f; return builder }
+    builder.build = () => ({ setVisible: () => callback({ action: 'picked', docs: [{ id: GOOGLE_SEED.proposalsFolder }] }) })
+    let lost = true
+    const window: Record<string, unknown> = {
+      location: { origin: PUBLIC, pathname: '/api/google-picker', hash: `#t=${t.ticket}` }, history: { replaceState: () => {} }, addEventListener: () => {},
+      fetch: async (path: string, init: { body: string }) => {
+        const body = JSON.parse(init.body)
+        posted.push(`${path} ${body.action ?? ''}`)
+        const res = await call({ method: 'POST', path, body })
+        // The first pick arrived and was kept, but its answer never came back.
+        if (path.endsWith('/result') && body.action === 'picked' && lost) { lost = false; throw new TypeError('network') }
+        return new Response(res.text, { status: res.status })
+      },
+      gapi: { load: (_n: string, o: { callback: () => void }) => o.callback() },
+      google: { picker: { DocsView: function () { return view }, PickerBuilder: function () { return builder }, ViewId: {}, Action: { PICKED: 'picked', CANCEL: 'cancel' }, Feature: {} } },
+    }
+    runInNewContext(script, { window, document: { getElementById: () => msg, createElement: () => ({}), head: { appendChild: (el: { onload: () => void }) => el.onload() } } })
+    for (let i = 0; i < 100 && posted.length < 3; i++) await sleepMs(10)
+    for (let i = 0; i < 50 && !msg.textContent.includes('アプリに戻って'); i++) await sleepMs(10)
+    expect(posted).toEqual(['/api/google-picker/config ', '/api/google-picker/result picked', '/api/google-picker/result picked'])
+    expect(msg.textContent).toBe('アプリに戻ってください。（このタブは閉じてかまいません）')
+    expect(msg.textContent).not.toContain('使えません')
+    expect((await state('m-sato', t.ticketId)).body.data).toMatchObject({ state: 'picked', picks: [{ id: GOOGLE_SEED.proposalsFolder }] })
+  })
+
+  it('the result could not reach the server: tried once more, then a cancel goes out', async () => {
+    const t = await ticket('m-sato', { mode: 'folder' })
+    const r = await call({ method: 'GET', path: '/api/google-picker' })
+    const script = /<script>([\s\S]*)<\/script>/.exec(r.text)![1]
+    const posted: Array<{ path: string; body: Json; keepalive: boolean }> = []
+    const msg = { textContent: '' }
+    let callback: (data: unknown) => void = () => {}
+    const view: Record<string, unknown> = {}
+    for (const m of ['setMimeTypes', 'setIncludeFolders', 'setSelectFolderEnabled', 'setEnableDrives']) view[m] = () => view
+    const builder: Record<string, unknown> = {}
+    for (const m of ['addView', 'setOAuthToken', 'setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle']) builder[m] = () => builder
+    builder.setCallback = (f: (data: unknown) => void) => { callback = f; return builder }
+    builder.build = () => ({ setVisible: () => callback({ action: 'picked', docs: [{ id: GOOGLE_SEED.proposalsFolder }] }) })
+    const window: Record<string, unknown> = {
+      location: { origin: PUBLIC, pathname: '/api/google-picker', hash: `#t=${t.ticket}` }, history: { replaceState: () => {} }, addEventListener: () => {},
+      fetch: async (path: string, init: { body: string; keepalive?: boolean }) => {
+        const body = JSON.parse(init.body)
+        posted.push({ path, body, keepalive: init.keepalive === true })
+        if (path.endsWith('/result') && body.action === 'picked') throw new TypeError('network')
+        const res = await call({ method: 'POST', path, body })
+        return new Response(res.text, { status: res.status })
+      },
+      gapi: { load: (_n: string, o: { callback: () => void }) => o.callback() },
+      google: { picker: { DocsView: function () { return view }, PickerBuilder: function () { return builder }, ViewId: {}, Action: { PICKED: 'picked', CANCEL: 'cancel' }, Feature: {} } },
+    }
+    runInNewContext(script, { window, document: { getElementById: () => msg, createElement: () => ({}), head: { appendChild: (el: { onload: () => void }) => el.onload() } } })
+    for (let i = 0; i < 100 && posted.length < 4; i++) await sleepMs(10)
+    expect(posted.map(p => `${p.path} ${p.body.action ?? ''}`)).toEqual(['/api/google-picker/config ', '/api/google-picker/result picked', '/api/google-picker/result picked', '/api/google-picker/result cancel'])
+    for (let i = 0; i < 50 && ticketRow(t.ticketId)?.state !== 'cancelled'; i++) await sleepMs(10)
+    expect((await state('m-sato', t.ticketId)).body.data).toEqual({ state: 'cancelled' })
+    expect(msg.textContent).toContain('アプリに伝えられませんでした')
+  })
+
+  it('a pasted link: the ticket carries only Drive ids, in files mode only; the page shows only Drive-id-shaped files', async () => {
+    const GOOD = '1AbC-def_GhIjKlMnOpQrStUv'
+    const files = await ticket('m-sato', { mode: 'files', fileIds: [GOOD, "x');alert(1)//", 'short', 7, 'other-good-id_0123'] })
+    expect(JSON.parse(ticketRow(files.ticketId).file_ids)).toEqual([GOOD, 'other-good-id_0123'])
+    const shown = await runPickerPage(`#t=${files.ticket}`)
+    expect(shown.calls).toContainEqual(['setFileIds', `${GOOD},other-good-id_0123`])
+    // Google's reference: setFileIds is not combined with setEnableDrives.
+    expect(shown.calls.map(c => c[0])).not.toContain('setEnableDrives')
+    expect(shown.calls).toContainEqual(['visible', true])
+    expect(JSON.parse(ticketRow((await ticket('m-sato', { mode: 'folder', fileIds: [GOOD] })).ticketId).file_ids)).toEqual([])
+    // The page filters once more whatever it is given; nothing usable, a folder pick, or none given: the ordinary Picker.
+    const base = { accessToken: 't', apiKey: 'k', appId: APP_ID, scriptOrigin: 'https://apis.google.com', mimeTypes: ['application/pdf'], maxItems: 10 }
+    const filtered = await runPickerPage(`#t=${'a'.repeat(64)}`, { config: { ...base, mode: 'files', fileIds: [GOOD, "x');alert(1)//"] } })
+    expect(filtered.calls).toContainEqual(['setFileIds', GOOD])
+    for (const cfg of [{ mode: 'files', fileIds: ['bad id!'] }, { mode: 'folder', fileIds: [GOOD] }, { mode: 'files' }, { mode: 'files', fileIds: GOOD }]) {
+      const plain = await runPickerPage(`#t=${'a'.repeat(64)}`, { config: { ...base, ...cfg } })
+      expect(plain.calls.map(c => c[0]), JSON.stringify(cfg)).not.toContain('setFileIds')
+      expect(plain.calls).toContainEqual(['setEnableDrives', true])
+    }
+  })
+
+  it('no Picker token or pick ticket in any other answer, log line or table (only the ticket\'s sha256 is kept)', async () => {
+    expect(issued.length).toBeGreaterThan(5)
+    const haystack = [...answers, ...logLines].join('\n')
+    expect(haystack).not.toContain('ya29.fake-')
+    for (const hex of issued) {
+      // The app's own answer when the ticket was made is the one place it is said.
+      expect(answers.filter(a => a.includes(hex)).length, 'answers naming the ticket').toBeLessThanOrEqual(1)
+      expect(logLines.join('\n')).not.toContain(hex)
+      for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Json[]) {
+        const dump = JSON.stringify(db.prepare(`SELECT * FROM "${name}"`).all())
+        expect(dump, name).not.toContain(hex)
+        expect(dump, name).not.toContain('ya29.fake-')
+      }
     }
   })
 })

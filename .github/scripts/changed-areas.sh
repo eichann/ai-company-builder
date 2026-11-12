@@ -83,7 +83,7 @@ UI=(
   client/postcss.config.js client/index.html ':(glob)client/tsconfig*.json'
   client/package.json client/scripts/check-bundle-size.mjs shared/
   client/electron/features/plugins/screens.ts
-  client/electron/preload.ts client/electron/picker-preload.ts client/scripts/check-preloads.mjs
+  client/electron/preload.ts client/scripts/check-preloads.mjs
 )
 # Performance baselines (macOS): what client/tests/perf/*.perf.test.ts load
 # (the watcher, git search, the chat history store, the file tree, the chat

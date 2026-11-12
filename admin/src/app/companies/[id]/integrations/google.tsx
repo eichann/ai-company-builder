@@ -23,6 +23,7 @@ import { copyText } from '@/lib/clipboard'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
 import { GOOGLE_FEATURES } from '../../../../../../shared/core/google'
+import { drivePickerReferrerPattern } from '../../../../../../shared/core/google-drive'
 import { useQuery } from '@/lib/use-query'
 
 import { MinutesFolderSection } from './minutes-folder'
@@ -98,6 +99,8 @@ function DrivePickerSection({ companyId, view, onView }: { companyId: string; vi
   const [apiKey, setApiKey] = useState('')
   const [appId, setAppId] = useState(view.picker.appId ?? '')
   const [busy, setBusy] = useState(false)
+  // Google sees only the origin (the Picker page's Referrer-Policy), so the key allows `<origin>/*`.
+  const allow = drivePickerReferrerPattern(view.picker.pageUrl) ?? view.picker.pageUrl
 
   async function save(remove = false) {
     setBusy(true)
@@ -118,18 +121,22 @@ function DrivePickerSection({ companyId, view, onView }: { companyId: string; vi
     <section className="space-y-2" data-testid="google-drive-picker">
       <h3 className="text-sm font-medium">Google Drive のファイル選び</h3>
       <p className="text-xs text-muted-foreground">
-        設定すると、メンバーが AI への相談の中で、Google の画面から「読ませるファイル」と「提案書を置くフォルダ」を選べます。
+        設定すると、メンバーが AI への相談やタスクの中で、Google の画面から「読ませるファイル」と「提案書を置くフォルダ」を選べます。
+        選ぶ画面は、メンバーのパソコンのブラウザ（Google にログインしているもの）で開きます。
         ACB が使えるのは、メンバーが選んだファイルとフォルダ、ACB が置いたファイルだけです。
       </p>
+      <p className="text-xs text-muted-foreground">
+        Google Cloud で「Google Picker API」と「Google Drive API」を有効にし、API キーを作って、「ウェブサイトの制限」に次の値をそのまま足してください（使える API も Picker に絞ります）。
+      </p>
       <div className="flex items-center gap-2">
-        <code className="break-all rounded bg-muted px-2 py-1 text-xs" data-testid="google-picker-page">{view.picker.pageUrl}</code>
-        <Button variant="outline" size="sm" aria-label="ファイル選びのページをコピー"
-          onClick={async () => { if (await copyText(view.picker.pageUrl)) toast.success('コピーしました') }}>
+        <code className="break-all rounded bg-muted px-2 py-1 text-xs" data-testid="google-picker-referrer">{allow}</code>
+        <Button variant="outline" size="sm" aria-label="ウェブサイトの制限に足す値をコピー"
+          onClick={async () => { if (await copyText(allow)) toast.success('コピーしました') }}>
           <Copy size={14} /> コピー
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Google Cloud で「Google Picker API」と「Google Drive API」を有効にし、API キーを作って「ウェブサイトの制限」にこのページを足してください（使える API も Picker に絞ります）。
+        ページの住所（{view.picker.pageUrl}）そのものではなく、末尾が「/*」のこの値を足します。Google には住所のうち先頭の部分だけが伝わるためです。
       </p>
       <div className="grid max-w-xl gap-3">
         <div className="grid gap-1">

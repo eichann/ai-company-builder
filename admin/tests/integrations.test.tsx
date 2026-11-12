@@ -581,7 +581,7 @@ describe('つなぎ先 → Google', () => {
     expect(saves[0].body).toEqual({ feature: 'inbox', on: false })
     expect(await within(inbox).findByRole('button', { name: 'オンにする' })).toBeInTheDocument()
   })
-  it('Drive の ファイル選び: shows the page to allow, sends the API key once (password field), keeps it when left empty', async () => {
+  it('Drive の ファイル選び: shows the origin to allow (Google sees only the origin), sends the API key once (password field), keeps it when left empty', async () => {
     const saves: Call[] = []
     const registered = googleView({ picker: { configured: true, appId: '123456789012', apiKeyLast4: 'wxyz', pageUrl: 'https://acb.example.com/api/google-picker' } })
     stubApi(ownerCapabilities, {
@@ -589,7 +589,8 @@ describe('つなぎ先 → Google', () => {
       [`PUT ${base}/google/picker`]: (call) => { saves.push(call); return { body: ok(registered) } },
     })
     renderInCompany(<IntegrationsPage />)
-    expect(await screen.findByTestId('google-picker-page')).toHaveTextContent('https://acb.example.com/api/google-picker')
+    expect(await screen.findByTestId('google-picker-referrer')).toHaveTextContent(/^https:\/\/acb\.example\.com\/\*$/)
+    expect(screen.getByRole('button', { name: 'ウェブサイトの制限に足す値をコピー' })).toBeInTheDocument()
     const key = screen.getByLabelText('API キー')
     expect(key).toHaveAttribute('type', 'password')
     const KEY = 'AIzaFAKE-NOT-REAL-picker-key-0000wxyz'

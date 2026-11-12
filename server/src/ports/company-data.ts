@@ -10,7 +10,8 @@
  * client sent. In a request it is `member.companyId`, the company of a
  * membership `services/access.ts` just looked up for the signed-in account;
  * otherwise the company the service itself just created, the company a key
- * broker token row belongs to, or a startup / retention loop over the
+ * broker token row or a Google Picker pick ticket row belongs to (each found
+ * by its hash in the control plane), or a startup / retention loop over the
  * companies registry. Routes never see a handle (composition.ts does not hand
  * the source to them).
  *

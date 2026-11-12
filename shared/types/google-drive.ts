@@ -1,25 +1,53 @@
 /**
  * Google Drive through the Google connection — API contract
- * (`.claude/rules/google-drive.md`). Only `DrivePickerSession` carries a
- * token: the Picker's own, `drive.file` only, answered to the member's app
- * session (never to a record token, the AI or a log).
+ * (`.claude/rules/google-drive.md`). Only `DrivePickerPageConfig` carries a
+ * token: the Picker's own, `drive.file` only, handed once to the Picker page
+ * that holds the member's one-time pick ticket (never to a record token, the AI
+ * or a log).
  */
 import type { DrivePickMode, DrivePutAs } from '../core/google-drive'
 import type { SkillUse } from '../core/skill-uses'
 
 export type { DrivePickMode } from '../core/google-drive'
 
-/** POST /api/companies/:id/me/google/drive/picker { mode } (session) — for the app's Picker window only. */
-export interface DrivePickerSession {
+/**
+ * POST /api/companies/:id/me/google/drive/pick-tickets { mode, fileIds? } (session): a one-time pick
+ * ticket for the Picker page in the member's browser. `ticket` is answered only here, once; the server
+ * keeps its sha256. `ticketId` is what the app polls and cancels with its session.
+ */
+export interface DrivePickTicketStarted {
+  ticketId: string
+  ticket: string
+  expiresAt: string
+}
+
+/**
+ * GET …/me/google/drive/pick-tickets/:ticketId (session): `waiting` while the person chooses (`opened`:
+ * the page took its config); a final state is answered once and the ticket is closed.
+ */
+export type DrivePickTicketState =
+  | { state: 'waiting'; opened: boolean; saving?: boolean }
+  | { state: 'picked'; picks: DrivePick[]; refused: number }
+  | { state: 'cancelled' }
+  | { state: 'expired' }
+  | { state: 'failed'; error: string }
+
+/** POST /api/google-picker/config { ticket } (public, once per ticket): what the Picker page needs. */
+export interface DrivePickerPageConfig {
   /** Google access token with exactly `drive.file`; Google's lifetime (≤ 1 hour). Never stored or logged. */
   accessToken: string
-  expiresAt: string
   /** The Picker's API key (developer key) and app id (Cloud project number) the admin registered. */
   apiKey: string
   appId: string
   /** Where the Picker's script comes from: Google's, or the practice Google's origin on staging. */
   scriptOrigin: string
   mode: DrivePickMode
+  mimeTypes: readonly string[]
+  maxItems: number
+  /** Files mode only: the files the Picker shows (a pasted Drive link), already checked as Drive ids. */
+  fileIds?: string[]
+  /** The Google account of the member's grant (its `accountEmail`): the Picker opens on it when it can. */
+  account?: string
 }
 
 /** What a person picked (the server checked each one with Google before keeping it). */

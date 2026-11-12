@@ -115,6 +115,7 @@ import { createGoogleClient } from './services/google-client'
 import { createGoogleConnector } from './services/google-connector'
 import { createGoogleRelay, googleRelayOffered, GOOGLE_RELAY_TOOL } from './services/google-relay'
 import { createGoogleDriveService } from './services/google-drive'
+import { sqlitePickTicketDirectory } from './adapters/sqlite/google-drive'
 import { createMemberOAuth, oauthCallbackPath } from './services/member-oauth'
 import { createApprovalService } from './services/approvals'
 import { createSourceSlots } from './services/source-slots'
@@ -618,6 +619,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     operatorStopped: () => pluginShelf.isStopped('google', ''),
     vaultEnabled: () => brokerVault.status().enabled,
     sha256: bytes => createHash('sha256').update(bytes).digest('hex'),
+    memberOf: (companyId, userId) => access.memberOf(companyId, userId),
+    pickTickets: sqlitePickTicketDirectory(conn),
     // The practice Google serves a stand-in Picker script on staging (tests/fakes/google).
     pickerScriptOrigin: practiceGoogle
       ? `${practiceGoogle.target.protocol}//${practiceGoogle.target.hostname === 'host.docker.internal' ? 'localhost' : practiceGoogle.target.hostname}:${practiceGoogle.target.port}`

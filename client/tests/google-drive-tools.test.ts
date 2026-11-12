@@ -2,8 +2,11 @@
  * Google Drive in the consultation (`.claude/rules/google-drive.md`), the app's side.
  *
  * Guards (each mutation-checked, see the PR):
- * - the Picker's token goes to the Picker window only: it never reaches the AI's tool output,
- *   a record-token request, or a log line; picking and keeping picks use the member's session;
+ * - picking opens only the server's Picker page in the member's browser, with the one-time pick
+ *   ticket in the URL fragment; the ticket never reaches the AI's tool output, a record-token
+ *   request or a log line; asking for the ticket and waiting for its result use the member's session;
+ * - the app waits for the result, stops waiting (and closes the ticket) when the AI is stopped or after
+ *   10 minutes, and says cancelled / failed as the server answers;
  * - without the Drive permission, the first pick opens Google's consent (features: drive only)
  *   and waits for it — nothing is picked before;
  * - the Drive tools exist only where the server says Drive is set up; drive_put only with an
@@ -11,9 +14,8 @@
  * - drive_put reads a local file only inside the company folder (by real location), never in
  *   a private folder (the refusal never names it) or a folder left out on this computer; PDF /
  *   HTML only, content checked; the same file, folder and name always carry the same request key;
- * - the Picker window gives its config only to the server's Picker page and reads back only
- *   Drive ids; a picked PDF is saved under `.personal/google-drive/`;
- * - a pasted link's files reach the Picker window only as Drive ids, and only for a files pick.
+ * - only Drive ids come back as picks; a picked PDF is saved under `.personal/google-drive/`;
+ * - a pasted link's files reach the ticket only as Drive ids, and only for a files pick.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -23,22 +25,27 @@ import path from 'path'
 import { AllowedRoots } from '../electron/allowed-roots'
 import { createRecordsApi } from '../electron/records/api'
 import { createRecordTools } from '../electron/records/tools'
-import { createDrivePicking, createDriveTools, drivePutRequestKey, isDrivePickerPage, readDrivePickerResult, readLocalFileForDrive, type DrivePickingDeps } from '../electron/features/google/drive'
-import type { DrivePickerWindowConfig } from '../electron/features/ports'
+import { createDrivePicking, createDriveTools, drivePutRequestKey, readLocalFileForDrive, type DrivePickingDeps } from '../electron/features/google/drive'
 import { recordToolProviders } from '../electron/records/tool-providers'
 import type { MyGoogle } from '../shared/google'
 
 const TOKEN = 'acb_rec_co.' + 'a'.repeat(64)
 const SESSION = 'better-auth.session_token=SECRET.sig'
-const PICKER_TOKEN = 'ya29.fake-PICKER-TOKEN-must-stay-in-the-window'
+const TICKET = 'b'.repeat(64)
+const TICKET_ID = 'ticket-1'
 const FOLDER = 'fake-folder-proposals-0001'
 const DOC = 'fake-doc-past-proposal-0001'
 const PDF = Buffer.from('%PDF-1.7\n%%EOF\n')
 
 interface Seen { url: string; method: string; headers: Record<string, string>; body?: string }
 
-function fakeServer(scope: 'read' | 'act', opts: { available?: boolean; pdf?: boolean; revision?: string } = {}) {
+type PickState = Record<string, unknown>
+/** What the server says while the app waits: by default once waiting, then the folder picked. */
+const PICKED: PickState = { state: 'picked', picks: [{ id: FOLDER, kind: 'folder', name: '提案書', mimeType: 'application/vnd.google-apps.folder', pickedAt: 't', expiresAt: 't' }, { id: 'bad id!', kind: 'file', name: 'x', mimeType: 'x', pickedAt: 't', expiresAt: 't' }], refused: 0 }
+
+function fakeServer(scope: 'read' | 'act', opts: { available?: boolean; pdf?: boolean; revision?: string; states?: PickState[]; ticket?: string } = {}) {
   const seen: Seen[] = []
+  const states = [...(opts.states ?? [{ state: 'waiting', opened: false }, PICKED])]
   const fetch = (async (url: string, init: RequestInit) => {
     seen.push({ url, method: init.method ?? 'GET', headers: init.headers as Record<string, string>, body: init.body as string | undefined })
     const json = (status: number, data: unknown) => new Response(JSON.stringify({ success: true, data }), { status })
@@ -56,10 +63,10 @@ function fakeServer(scope: 'read' | 'act', opts: { available?: boolean; pdf?: bo
     if (url.endsWith('/api/records-ai/google/drive/put')) {
       return json(200, { existing: false, drivePut: { id: 'drive-put-1', state: 'done', name: 'x.pdf', mimeType: 'application/pdf', bytes: 1, sha256: 'x', folderId: FOLDER, folderName: '提案書', fileId: 'fake-upload-1', revisionId: 'rev-1', link: 'https://drive.google.com/file/d/fake-upload-1/view', createdAt: 't', finishedAt: 't', reason: null } })
     }
-    if (url.endsWith('/me/google/drive/picker')) return json(200, { accessToken: PICKER_TOKEN, expiresAt: 't', apiKey: 'key', appId: '123456789012', scriptOrigin: 'https://apis.google.com', mode: JSON.parse(String(init.body)).mode })
-    if (url.endsWith('/me/google/drive/picks')) {
-      const ids = JSON.parse(String(init.body)).ids as string[]
-      return json(200, { picks: ids.map(id => ({ id, kind: 'folder', name: '提案書', mimeType: 'application/vnd.google-apps.folder', pickedAt: 't', expiresAt: 't' })), refused: 0 })
+    if (url.endsWith('/me/google/drive/pick-tickets')) return json(200, { ticketId: TICKET_ID, ticket: opts.ticket ?? TICKET, expiresAt: 't' })
+    if (url.endsWith(`/me/google/drive/pick-tickets/${TICKET_ID}`)) {
+      if (init.method === 'DELETE') return json(200, { closed: true })
+      return json(200, states.length > 1 ? states.shift() : states[0])
     }
     return json(404, {})
   }) as unknown as typeof globalThis.fetch
@@ -69,13 +76,13 @@ function fakeServer(scope: 'read' | 'act', opts: { available?: boolean; pdf?: bo
 const my = (features: MyGoogle['features']): MyGoogle => ({ available: true, reason: null, connected: true, status: 'active', googleEmail: 'sato@div.example', features, domain: 'div.example', practice: false })
 
 function picking(server: ReturnType<typeof fakeServer>, over: Partial<DrivePickingDeps> = {}) {
-  const opened: Array<{ pageUrl: string; config: DrivePickerWindowConfig }> = []
+  const opened: string[] = []
   const connects: string[][] = []
   const logs: string[] = []
   let features: MyGoogle['features'] = ['minutes', 'drive']
   const deps: DrivePickingDeps = {
     baseUrl: () => 'https://acb.example.jp', cookies: () => [SESSION], fetch: server.fetch,
-    window: { open: async req => { opened.push(req); return { action: 'picked', ids: [FOLDER, 'bad id!'] } } },
+    openBrowser: async url => { opened.push(url) },
     google: {
       status: async () => ({ success: true, data: my(features) }),
       connect: async (_c, f) => { connects.push(f); return { success: true } },
@@ -128,43 +135,182 @@ test('the Drive tools exist only where Drive is set up; drive_put only with an a
   assert.ok((await tools('act', null)).t.instructions.includes('【Google Drive】'))
 })
 
-test('picking: the session asks for the token, the window alone gets it; the AI sees ids and names only', async () => {
+test('picking: the browser opens only the server\'s Picker page, the ticket in the fragment; the AI sees ids and names only', async () => {
   const pick = picking(fakeServer('act'))
   const { t, seen } = await tools('act', null, {}, pick)
   const out = await t.execute('drive_pick_folder', {})
   assert.deepEqual(JSON.parse(out).picked, [{ id: FOLDER, name: '提案書', kind: 'folder', mimeType: 'application/vnd.google-apps.folder' }])
-  assert.ok(!out.includes(PICKER_TOKEN))
-  assert.equal(pick.opened.length, 1)
-  assert.equal(pick.opened[0].config.accessToken, PICKER_TOKEN)
-  assert.equal(pick.opened[0].pageUrl, 'https://acb.example.jp/api/google-picker')
-  assert.equal(pick.opened[0].config.maxItems, 1)
-  // No record-token request ever carries the Picker token; the picks go back without it.
-  for (const s of seen) assert.ok(!JSON.stringify(s).includes(PICKER_TOKEN))
-  assert.deepEqual(pick.logs.filter(l => l.includes(PICKER_TOKEN)), [])
+  assert.deepEqual(pick.opened, [`https://acb.example.jp/api/google-picker#t=${TICKET}`])
+  // The ticket is the page's alone: not in the AI's answer, a record-token request or a log line.
+  assert.ok(!out.includes(TICKET))
+  for (const s of seen) assert.ok(!JSON.stringify(s).includes(TICKET))
+  assert.deepEqual(pick.logs.filter(l => l.includes(TICKET)), [])
 })
 
-test('picking uses the member\'s session (not the record token) and keeps only Drive ids', async () => {
+test('picking uses the member\'s session (not the record token) to start and to wait; the released app\'s token route is never asked', async () => {
   const server = fakeServer('act')
   const pick = picking(server)
   const r = await pick.p.pick('co', 'files')
   assert.equal(r.ok, true)
   const calls = server.seen.filter(s => s.url.includes('/me/google/drive/'))
-  assert.deepEqual(calls.map(c => c.url.replace('https://acb.example.jp/api/companies/co', '')), ['/me/google/drive/picker', '/me/google/drive/picks'])
+  assert.deepEqual(calls.map(c => `${c.method} ${c.url.replace('https://acb.example.jp/api/companies/co', '')}`),
+    ['POST /me/google/drive/pick-tickets', `GET /me/google/drive/pick-tickets/${TICKET_ID}`, `GET /me/google/drive/pick-tickets/${TICKET_ID}`, `DELETE /me/google/drive/pick-tickets/${TICKET_ID}`])
   for (const c of calls) {
     assert.equal(c.headers.Cookie, SESSION)
     assert.equal(c.headers.Authorization, undefined)
   }
-  assert.deepEqual(JSON.parse(calls[1].body!).ids, [FOLDER])
-  assert.ok(!calls[1].body!.includes(PICKER_TOKEN))
+  assert.deepEqual(JSON.parse(calls[0].body!), { mode: 'files' })
 })
 
-test('a pasted link: the Picker window gets only Drive ids to show, in files mode only', async () => {
-  const pick = picking(fakeServer('act'))
+test('the browser never opens anything but the server\'s Picker page with a ticket of the right shape', async () => {
+  for (const ticket of ['short', 'b'.repeat(64) + '#x', 'B'.repeat(64), 'https://evil.example/?' + 'b'.repeat(64)]) {
+    const server = fakeServer('act', { ticket })
+    const pick = picking(server)
+    const r = await pick.p.pick('co', 'folder')
+    assert.equal(r.ok, false, ticket)
+    assert.deepEqual(pick.opened, [], ticket)
+  }
+  const pick = picking(fakeServer('act'), { baseUrl: () => 'file:///etc' })
+  assert.equal((await pick.p.pick('co', 'folder')).ok, false)
+  assert.deepEqual(pick.opened, [])
+})
+
+test('a pasted link: the ticket carries only Drive ids to show, in files mode only', async () => {
+  const server = fakeServer('act')
+  const pick = picking(server)
   await pick.p.pick('co', 'files', undefined, { fileIds: [DOC, 'bad id!', "x');alert(1)//", DOC] })
   await pick.p.pick('co', 'folder', undefined, { fileIds: [DOC] })
   await pick.p.pick('co', 'files', undefined, { fileIds: ['bad id!'] })
-  await pick.p.pick('co', 'files')
-  assert.deepEqual(pick.opened.map(o => o.config.fileIds), [[DOC], undefined, undefined, undefined])
+  const asked = server.seen.filter(s => s.url.endsWith('/pick-tickets')).map(s => JSON.parse(s.body!).fileIds)
+  assert.deepEqual(asked, [[DOC], undefined, undefined])
+})
+
+test('waiting: cancelled in the browser, failed on the server, the AI stopped; each result acknowledged', async () => {
+  const closes = (server: ReturnType<typeof fakeServer>) => server.seen.filter(s => s.method === 'DELETE' && s.url.endsWith(`/pick-tickets/${TICKET_ID}`)).length
+
+  const cancelled = fakeServer('act', { states: [{ state: 'waiting', opened: true }, { state: 'cancelled' }] })
+  const c = await picking(cancelled).p.pick('co', 'folder')
+  assert.deepEqual([c.ok, !c.ok && c.reason], [false, 'cancelled'])
+  assert.equal(closes(cancelled), 1)
+
+  const failed = fakeServer('act', { states: [{ state: 'failed', error: '管理者が Google Drive のファイル選び（Picker）をまだ設定していません。' }] })
+  const f = await picking(failed).p.pick('co', 'folder')
+  assert.deepEqual([f.ok, !f.ok && f.reason, !f.ok && f.message], [false, 'refused', '管理者が Google Drive のファイル選び（Picker）をまだ設定していません。'])
+
+  // The AI's turn stopped while waiting: the app stops and closes the ticket on the server.
+  const stopped = fakeServer('act', { states: [{ state: 'waiting', opened: true }] })
+  const ctl = new AbortController()
+  let polls = 0
+  const s = await picking(stopped, { sleep: async () => { if (++polls === 3) ctl.abort() } }).p.pick('co', 'folder', ctl.signal)
+  assert.deepEqual([s.ok, !s.ok && s.reason], [false, 'cancelled'])
+  assert.equal(closes(stopped), 1)
+})
+
+test('the AI stopped while a poll answering 「picked」 was in flight: stopped wins', async () => {
+  const server = fakeServer('act', { states: [PICKED] })
+  const ctl = new AbortController()
+  const answerAfterStop = (async (url: string, init: RequestInit) => {
+    const res = await server.fetch(url, init)
+    if (url.includes('/pick-tickets/') && (init.method ?? 'GET') === 'GET') ctl.abort()
+    return res
+  }) as unknown as typeof globalThis.fetch
+  const r = await picking({ ...server, fetch: answerAfterStop }).p.pick('co', 'folder', ctl.signal)
+  assert.deepEqual([r.ok, !r.ok && r.message], [false, '止められました。'])
+  assert.equal(server.seen.filter(x => x.method === 'DELETE').length, 1)
+})
+
+test('the time: the server ends the wait; a pick still being kept past ten minutes is waited for; a silent server stops at the backstop', async () => {
+  const minute = (over: Partial<DrivePickingDeps>, server: ReturnType<typeof fakeServer>) => {
+    let clock = 0
+    return picking(server, { now: () => clock, sleep: async () => { clock += 60_000; if (clock > 30 * 60_000) throw new Error('still waiting after 30 minutes') }, ...over })
+  }
+  // The server said the ticket is over.
+  const over = fakeServer('act', { states: [{ state: 'waiting', opened: true }, { state: 'expired' }] })
+  const e = await minute({}, over).p.pick('co', 'folder')
+  assert.deepEqual([e.ok, !e.ok && e.message], [false, '選ばれないまま時間が過ぎました。'])
+
+  // The person chose at the last moment: the server is still keeping it at minutes 10 and 11, then answers it at 12.
+  const late = fakeServer('act', { states: [...Array.from({ length: 9 }, () => ({ state: 'waiting', opened: true })), { state: 'waiting', opened: true, saving: true }, { state: 'waiting', opened: true, saving: true }, PICKED] })
+  const r = await minute({}, late).p.pick('co', 'folder')
+  assert.equal(r.ok, true)
+
+  // A server that only ever says waiting: the backstop past its end and the grace, and the ticket closed.
+  const silent = fakeServer('act', { states: [{ state: 'waiting', opened: true }] })
+  const t = await minute({}, silent).p.pick('co', 'folder')
+  assert.deepEqual([t.ok, !t.ok && t.message], [false, '選ばれないまま時間が過ぎました。'])
+  assert.equal(silent.seen.filter(x => x.method === 'DELETE').length, 1)
+  assert.ok(silent.seen.filter(x => x.method === 'GET' && x.url.endsWith(`/pick-tickets/${TICKET_ID}`)).length >= 12)
+})
+
+test('the page never took its config (the browser did not open it): the app ends after two minutes, not ten', async () => {
+  const server = fakeServer('act', { states: [{ state: 'waiting', opened: false }] })
+  let clock = 0
+  const r = await picking(server, { now: () => clock, sleep: async () => { clock += 30_000; if (clock > 5 * 60_000) throw new Error('still waiting') } }).p.pick('co', 'folder')
+  assert.deepEqual([r.ok, !r.ok && r.reason], [false, 'refused'])
+  assert.match(!r.ok ? r.message : '', /開かれませんでした/)
+  assert.equal(server.seen.filter(x => x.method === 'DELETE').length, 1)
+})
+
+test('a signed-out session stops at once', async () => {
+  const signedOut = fakeServer('act')
+  const f401 = signedOut.fetch
+  const answer401 = (async (url: string, init: RequestInit) => url.includes('/pick-tickets/') && (init.method ?? 'GET') === 'GET' ? new Response('{}', { status: 401 }) : f401(url, init)) as unknown as typeof globalThis.fetch
+  let polls = 0
+  const s = await picking({ ...signedOut, fetch: answer401 }, { sleep: async () => { if (++polls > 3) throw new Error('kept waiting after a 401') } }).p.pick('co', 'folder')
+  assert.deepEqual([s.ok, !s.ok && s.reason], [false, 'refused'])
+})
+
+test('a stalled request never holds the wait: the AI stopped while the server does not answer ends the pick', { timeout: 10_000 }, async () => {
+  const server = fakeServer('act')
+  const stalled = (async (url: string, init: RequestInit) => {
+    if (url.includes('/pick-tickets/') && (init.method ?? 'GET') === 'GET') {
+      return new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))
+    }
+    return server.fetch(url, init)
+  }) as unknown as typeof globalThis.fetch
+  const ctl = new AbortController()
+  const r = await picking({ ...server, fetch: stalled }, { requestTimeoutMs: 60_000, sleep: async () => { setTimeout(() => ctl.abort(), 5) } }).p.pick('co', 'folder', ctl.signal)
+  assert.deepEqual([r.ok, !r.ok && r.reason], [false, 'cancelled'])
+  assert.equal(server.seen.filter(x => x.method === 'DELETE').length, 1)
+
+  // Without a stop, one stalled request ends at its own limit and the wait goes on to the server's answer.
+  const later = fakeServer('act', { states: [PICKED] })
+  let first = true
+  const once = (async (url: string, init: RequestInit) => {
+    if (first && url.includes('/pick-tickets/') && (init.method ?? 'GET') === 'GET') {
+      first = false
+      return new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))
+    }
+    return later.fetch(url, init)
+  }) as unknown as typeof globalThis.fetch
+  // (A request's own limit is an unref'd timer: hold the loop open meanwhile, as the app's window does.)
+  const hold = setInterval(() => {}, 1000)
+  const ok = await picking({ ...later, fetch: once }, { requestTimeoutMs: 20 }).p.pick('co', 'folder').finally(() => clearInterval(hold))
+  assert.equal(ok.ok, true)
+})
+
+test('the AI stopped while waiting for Google\'s consent: no ticket asked, no browser page opened', async () => {
+  // Stopped before the consent arrived.
+  const before = fakeServer('act')
+  const ctl = new AbortController()
+  const p1 = picking(before, { sleep: async () => { ctl.abort() } })
+  p1.withoutDrive()
+  const r1 = await p1.p.pick('co', 'folder', ctl.signal)
+  assert.deepEqual([r1.ok, !r1.ok && r1.reason], [false, 'cancelled'])
+  // Stopped at the moment the consent arrived: the stop still wins.
+  const same = fakeServer('act')
+  const ctl2 = new AbortController()
+  let granted = false
+  const p3 = picking(same, {
+    google: { status: async () => ({ success: true, data: my(granted ? ['minutes', 'drive'] : ['minutes']) }), connect: async () => ({ success: true }) },
+    sleep: async () => { granted = true; ctl2.abort() },
+  })
+  const r2 = await p3.p.pick('co', 'folder', ctl2.signal)
+  assert.deepEqual([r2.ok, !r2.ok && r2.reason], [false, 'cancelled'])
+  for (const [server, pick] of [[before, p1], [same, p3]] as const) {
+    assert.deepEqual(server.seen.filter(x => x.url.includes('/pick-tickets')), [])
+    assert.deepEqual(pick.opened, [])
+  }
 })
 
 test('without the Drive permission: Google\'s consent first (drive only), then the Picker', async () => {
@@ -179,7 +325,7 @@ test('without the Drive permission: Google\'s consent first (drive only), then t
   declined.withoutDrive()
   const no = await declined.p.pick('co', 'folder')
   assert.equal(no.ok, false)
-  assert.equal(declined.opened.length, 0)
+  assert.deepEqual(declined.opened, [])
 })
 
 test('drive_read: outside text; a picked PDF saved under .personal/google-drive/', async () => {
@@ -350,19 +496,6 @@ test('the same file, folder and name → the same request key; anything else →
   assert.notEqual(a, drivePutRequestKey(FOLDER, 'ご提案.pdf', 'b'.repeat(64)))
   assert.notEqual(a, drivePutRequestKey('fake-folder-other-0001', 'ご提案.pdf', 'a'.repeat(64)))
   assert.notEqual(a, drivePutRequestKey(FOLDER, 'ご提案2.pdf', 'a'.repeat(64)))
-})
-
-test('the Picker window: config only for the server\'s Picker page; only Drive ids come back', () => {
-  const page = 'https://acb.example.jp/api/google-picker'
-  assert.equal(isDrivePickerPage('https://acb.example.jp/api/google-picker', page), true)
-  assert.equal(isDrivePickerPage('https://acb.example.jp/api/google-picker?x=1', page), true)
-  for (const other of ['https://evil.example/api/google-picker', 'https://acb.example.jp/api/other', 'https://u:p@acb.example.jp/api/google-picker', 'http://acb.example.jp/api/google-picker', 'nonsense']) {
-    assert.equal(isDrivePickerPage(other, page), false, other)
-  }
-  assert.deepEqual(readDrivePickerResult({ action: 'picked', ids: [FOLDER, '../x', 42, DOC] }, 1), { action: 'picked', ids: [FOLDER] })
-  assert.deepEqual(readDrivePickerResult({ action: 'picked', ids: ['../x'] }, 10), { action: 'cancel' })
-  assert.deepEqual(readDrivePickerResult({ action: 'error' }, 10), { action: 'error' })
-  assert.deepEqual(readDrivePickerResult('picked', 10), { action: 'cancel' })
 })
 
 test('a local file check on its own: a missing file, a folder', () => {

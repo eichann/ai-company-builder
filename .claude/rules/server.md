@@ -207,7 +207,9 @@ construction, not by remembering a check (owner plan 0.13–0.14).
 - The control plane outside handles: the companies registry, memberships, accounts, and lookups
   that find the company — an invitation by token (`InvitationTokenLookup`:
   `findByToken`, `claimForSignup`, which returns the company; everything after uses that
-  company's handle) and a key-broker token by hash.
+  company's handle) and a key-broker token by hash. A Google Picker pick ticket is found the same way, by its
+  sha256 (`sqlitePickTicketDirectory`, `google-drive.md`). The OAuth `state` names its company and is
+  looked up only inside it by the sha256 of the whole value (`member-oauth.md`).
 - Do not add a repository method that reads or writes a company's rows without its company
   (`findById(id)`, `delete(id)`…); "the service checked first" is the old pattern this replaces.
 - `tests/unit/company-scoped-sql.test.ts` reads every SQL string in `server/src` and fails when a
