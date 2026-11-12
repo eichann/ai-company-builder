@@ -625,6 +625,20 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       return [...byFile.values()]
     },
 
+    /**
+     * After a scheduled job's 「もう一度」 (jobs.md "「もう一度」"): the Drive file an earlier run's put made, for the next
+     * run's turn — only the member's own done receipt, written by one of `runIds` (the occurrence's runs: never a
+     * consultation's receipt a run was answered with again), whose folder is `folderId` (the place chosen now — the
+     * receipt's folder, Google is not asked where the file is today), with a Drive file id:
+     * `{ id: <the file id>, name: <the name it was put with> }`, else null.
+     */
+    madeFile(member: Member, folderId: string, putId: string, runIds: ReadonlySet<string>): { id: string; name: string } | null {
+      if (!/^drive-put-[A-Za-z0-9_-]{1,80}$/.test(putId)) return null
+      const row = handle(member.companyId).googleDrive.put(member.userId, putId)
+      if (!row || row.state !== 'done' || !row.runId || !runIds.has(row.runId) || row.folderId !== folderId || !isDriveId(row.fileId)) return null
+      return { id: row.fileId, name: row.name }
+    },
+
     /** GET /api/records-ai/google/drive/puts/:putId: the member's own put (an unknown one is looked up again). */
     async putState(member: Member, putId: string, scope?: Pick<DriveJobScope, 'folderId'>): Promise<Outcome<DrivePutAnswer>> {
       const row = /^drive-put-[A-Za-z0-9_-]{1,80}$/.test(putId) ? handle(member.companyId).googleDrive.put(member.userId, putId) : null

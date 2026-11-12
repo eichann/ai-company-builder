@@ -367,6 +367,19 @@ export function jobDeliveryHowTo(place: JobDeliveryPlace): string | null {
   return declared && typeof place.ref === 'string' ? declared.howToPut.replace('{ref}', place.ref) : null
 }
 
+/**
+ * After 「もう一度」: how the run may update a file an earlier run of the occurrence put into the place (the first
+ * message's sentence after those files), or null for a place this build does not know.
+ */
+export function jobDeliveryUpdateHowTo(place: { connector: string; kind: string }): string | null {
+  return deliveryKind(place.connector, place.kind)?.howToUpdateMadeBefore ?? null
+}
+
+/** Whether a value is a file id of this kind of place (the connector's own rule); false for a place this build does not know. */
+export function jobDeliveryFileId(place: { connector: string; kind: string }, v: unknown): v is string {
+  return typeof v === 'string' && deliveryKind(place.connector, place.kind)?.isFileId(v) === true
+}
+
 /** How long a chosen place of this kind lasts (the connector's sentence), or null for one this build does not know. */
 export function jobDeliveryLapseNote(place: { connector: string; kind: string }): string | null {
   return deliveryKind(place.connector, place.kind)?.lapseNote ?? null

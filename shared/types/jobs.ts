@@ -143,6 +143,13 @@ export interface JobOccurrenceView {
 export interface JobMadeBefore {
   kind: string
   ref: { kind: string; id: string } | null
+  /**
+   * Only in the responsible person's own turn (`JobTurnView.madeBefore`), never in an owner / admin's view: the file
+   * this thing is in the job's deliverable place now, as the place's connector resolves `ref` (a Drive put's receipt →
+   * the Drive file id and the name it was put with), so the run can update that same file. Absent: not a file there
+   * (another kind, a receipt of another folder, an older server).
+   */
+  file?: { id: string; name: string }
 }
 
 /** `POST /jobs/:jobId/occurrences/:occurrenceId/retry` (PR 5b): the occurrence back to `due`, with its new deadline. */
