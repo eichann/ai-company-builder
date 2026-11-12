@@ -17,6 +17,11 @@ const BEFORE = readFileSync(new URL('../fixtures/app-schema-before-jobs.sql', im
 const TS = '2026-11-11T00:00:00.000Z'
 const JOB = `job.${'1'.repeat(32)}`
 const NEW_TABLES = ['ai_jobs', 'ai_job_versions', 'ai_job_occurrences', 'ai_job_settings']
+/** Tables later builds add (each its own additive `CREATE TABLE IF NOT EXISTS`): expected beside the job tables. */
+const LATER_TABLES = [
+  // google-drive.md "Picker and its token": the one-time pick tickets.
+  'google_drive_pick_tickets',
+]
 /**
  * Columns later builds add to a table that was there before (each an idempotent `ALTER TABLE … ADD COLUMN`, so
  * the table's text grows by exactly that): taken out before comparing, and nothing else may differ.
@@ -57,7 +62,7 @@ describe('the job tables are additive', () => {
     expect(objects(conn)).toEqual(once)
     for (const o of before) expect(once, o.name).toContainEqual(o)
     const added = once.filter(o => !before.some(b => b.name === o.name))
-    expect([...new Set(added.map(o => o.tbl_name))].sort()).toEqual([...NEW_TABLES].sort())
+    expect([...new Set(added.map(o => o.tbl_name))].sort()).toEqual([...NEW_TABLES, ...LATER_TABLES].sort())
     // A new database: the same objects.
     const fresh = new Database(':memory:')
     initDatabase(fresh)
