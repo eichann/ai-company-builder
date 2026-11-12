@@ -27,7 +27,7 @@ import type { CoreConnectorsView } from '../../../shared/types/core-connectors'
 import type { GoogleAdminView, GoogleRelayAdminView } from '../../../shared/types/google'
 import type { MemberGroup, MemberGroupsView } from '../../../shared/types/groups'
 import type { InboxSettingsView } from '../../../shared/types/inbox'
-import type { JobList, JobOccurrenceView, JobView } from '../../../shared/types/jobs'
+import type { JobList, JobOccurrenceView, JobRetryResult, JobView } from '../../../shared/types/jobs'
 import type { BrokerView } from '../../../shared/types/key-broker'
 import type { MinutesFolderSetting } from '../../../shared/types/minutes'
 import type { MeetingDuplicates, MeetingDuplicatesMerged } from '../../../shared/types/meeting-outputs'
@@ -374,6 +374,9 @@ export const jobUpdatedSchema = topLevel<JobView & { changed: boolean }>({ ...jo
 export const jobListSchema = topLevel<JobList>({ stopped: z.boolean(), canManage: z.boolean(), jobs: z.array(z.unknown()) })
 export const jobOccurrencesSchema = topLevel<{ occurrences: JobOccurrenceView[] }>({ occurrences: z.array(z.unknown()) })
 export const jobsStopSchema = topLevel<{ stopped: boolean }>({ stopped: z.boolean() })
+// 「もう一度」 (jobs.md, B PR 5b)
+export const jobRetrySchema = topLevel<JobRetryResult>({ occurrence: obj })
+export const jobReconcileSchema = topLevel<{ occurrenceId: string }>({ occurrenceId: str })
 
 // 会社の Skill (the Skill shelf of a company without the shared folder)
 export const shelfListSchema = topLevel<ShelfListView>({ items: list })

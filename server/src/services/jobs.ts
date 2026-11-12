@@ -25,7 +25,7 @@ import {
 import type { JobList, JobOccurrenceView, JobState, JobVersionView, JobView, JobWaiting } from '../../shared/types/jobs'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
-import type { JobRow, JobVersionRow } from '../ports/jobs'
+import type { JobOccurrenceRow, JobRow, JobVersionRow } from '../ports/jobs'
 import type { MembershipRepository } from '../ports/memberships'
 import type { Transactions } from '../ports/transactions'
 import { hashCanonical } from '../lib/content-hash'
@@ -95,6 +95,19 @@ export interface JobServiceDeps {
    * connector answers (composition): the core never names one. Absent → no place is ever usable.
    */
   places?: { live(companyId: string, userId: string, place: JobDeliveryPlace): { name: string; expiresAt: string } | null }
+  /**
+   * 「もう一度」 (B PR 5b, services/job-retry.ts `viewOf`): what an owner / admin's occurrence view adds — how often it was
+   * sent back, by whom, whether the button works now and why not. Bound late (built after this service). Absent → nothing.
+   */
+  occurrenceRetry?: (companyId: string, occ: JobOccurrenceRow) => Partial<JobOccurrenceView>
+}
+
+/** An occurrence as `GET /jobs/:jobId/occurrences` answers it to anyone who sees the job: slots, states and codes only. */
+export function occurrenceView(o: JobOccurrenceRow): JobOccurrenceView {
+  return {
+    id: o.id, jobVersion: o.jobVersion, dueSlot: o.dueSlot, timeZone: o.timeZone, dueAt: o.dueAt, expiresAt: o.expiresAt,
+    state: o.state, outcomeCode: o.outcomeCode, ran: o.runId !== null, updatedAt: o.updatedAt,
+  }
 }
 
 const sha256 = hashCanonical
@@ -611,11 +624,11 @@ export function createJobService(deps: JobServiceDeps) {
     occurrences(member: Member, jobId: string): Outcome<{ occurrences: JobOccurrenceView[] }> {
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
+      // 「もう一度」 (B PR 5b): whether it works now and why not, only for those who may press it (owner / admin).
+      const retry = hasFullAccess(member.role) ? deps.occurrenceRetry : undefined
       return ok({
-        occurrences: found.handle.jobs.occurrences(jobId, OCCURRENCES_LISTED).map((o): JobOccurrenceView => ({
-          id: o.id, jobVersion: o.jobVersion, dueSlot: o.dueSlot, timeZone: o.timeZone, dueAt: o.dueAt, expiresAt: o.expiresAt,
-          state: o.state, outcomeCode: o.outcomeCode, ran: o.runId !== null, updatedAt: o.updatedAt,
-        })),
+        occurrences: found.handle.jobs.occurrences(jobId, OCCURRENCES_LISTED)
+          .map((o): JobOccurrenceView => ({ ...occurrenceView(o), ...(retry ? retry(member.companyId, o) : {}) })),
       })
     },
 

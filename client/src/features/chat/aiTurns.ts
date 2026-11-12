@@ -58,6 +58,11 @@ export function notDeferred(queue: readonly AiTurnCandidate[], deferred: Readonl
 
 /** A record that failed twice today waits for a person (its notice stays). */
 export const MAX_ATTEMPTS_PER_RECORD = 2
+
+/** Today's automatic attempts of a queued item (counted under its `attemptKey`, else its id). */
+export function attemptsOf(log: AiTurnLog, c: Pick<AiTurnCandidate, 'id' | 'attemptKey'>): number {
+  return log.attempts[c.attemptKey ?? c.id] ?? 0
+}
 /** A record due within this time is handed to the person rather than waiting for the AI. */
 export const URGENT_WITHIN_MS = 2 * 60 * 60_000
 /** No usable reset time from Claude: try again after an hour. */
@@ -146,7 +151,7 @@ export function nextAiTurn(input: AiTurnDecisionInput): { run: AiTurnCandidate }
   // 「自動で進める」 off: only what the member asked for themselves (［AI に読ませる］) starts.
   const queue = settings.enabled ? input.queue : input.queue.filter(c => c.asked)
   if (queue.length === 0) return { wait: 'off' }
-  const waiting = orderAiTurns(queue).filter(c => !log.handed[c.id] && (log.attempts[c.id] ?? 0) < MAX_ATTEMPTS_PER_RECORD)
+  const waiting = orderAiTurns(queue).filter(c => !log.handed[c.id] && attemptsOf(log, c) < MAX_ATTEMPTS_PER_RECORD)
   if (waiting.length === 0) return { wait: 'empty' }
   // Codex and the API key cannot take the record's AI actions (registry recordActions).
   if (!agentCan(input.agent, 'recordActions')) return { wait: 'needs-claude' }
@@ -297,7 +302,7 @@ export function aiTurnItems(input: {
         ? { recordId: c.id, state: 'handed', reason: 'AI があなたの答えを待っています（「AIへの相談」のあなたの番）。', canRetry: false, canHand: false }
         : { recordId: c.id, state: 'running', reason: '', canRetry: false, canHand: false }
     }
-    if ((log.attempts[c.id] ?? 0) >= MAX_ATTEMPTS_PER_RECORD) return { recordId: c.id, state: 'failed', reason: UNFINISHED_REASON, canRetry: true, canHand: true }
+    if (attemptsOf(log, c) >= MAX_ATTEMPTS_PER_RECORD) return { recordId: c.id, state: 'failed', reason: UNFINISHED_REASON, canRetry: true, canHand: true }
     switch (input.autoOff && !c.asked ? 'off' : wait) {
       case 'off':
         return { recordId: c.id, state: 'not-allowed', reason: '会社の設定で、AI の番は自動では進めません。', canRetry: false, canHand: true }

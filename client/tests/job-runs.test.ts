@@ -18,7 +18,7 @@ import { gitCheckPoint, newFilesByGit, newFilesByTime } from '../electron/featur
 import { createRecordsApi } from '../electron/records/api'
 import { createRunRegistry } from '../electron/records/runs'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
-import { jobFirstMessage, jobToolAccess, jobWriteArea, parseJobTurn, parseJobTurns } from '../shared/ai-turn-steps/job'
+import { jobFirstMessage, jobToolAccess, jobTurnCandidate, jobWriteArea, parseJobTurn, parseJobTurns } from '../shared/ai-turn-steps/job'
 import type { JobGrant } from '../../shared/core/jobs'
 import { aiTurnQueue } from '../shared/ai-turn-steps/registry'
 import { freshLog, handUrgent } from '../src/features/chat/aiTurns'
@@ -83,6 +83,14 @@ test('the turns are parsed with the one definition parser: a check this app cann
   assert.equal(parseJobTurn(turn({ occurrenceId: 'task-123456' })), null)
   assert.equal(parseJobTurn(turn({ meetings: [{ id: 'not a record', title: 'x', at: '2026-11-10T01:00:00.000Z' }] })), null)
   assert.equal(parseJobTurns({ nope: 1 }), null)
+})
+
+test('「もう一度」 (B PR 5b): the press count reaches the queue, so a press is tried again on this PC today', () => {
+  const pressed = parseJobTurn(turn({ retries: 2 }))
+  assert.equal(pressed?.retries, 2)
+  assert.equal(jobTurnCandidate(pressed!).attemptKey, `${pressed!.occurrenceId}#2`)
+  // Never pressed, or not a count: counted under the occurrence as before.
+  for (const retries of [undefined, 0, -1, 1.5, '2']) assert.equal(jobTurnCandidate(parseJobTurn(turn({ retries }))!).attemptKey, undefined)
 })
 
 test('the run\'s tools: only what its grant names and the server would let through; minutes only with the meeting check', () => {

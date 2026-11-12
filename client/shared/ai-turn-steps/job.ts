@@ -42,6 +42,8 @@ export interface QueuedJobTurn {
   meetings?: Array<{ id: string; title: string; at: string }>
   /** The deliverable place outside its responsible person chose (the grant's `deliverTo` with its id); absent: none. */
   deliverTo?: JobDeliveryPlace
+  /** How often an owner / admin sent the occurrence back with 「もう一度」 (jobs.md, B PR 5b); absent: never. */
+  retries?: number
 }
 
 const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
@@ -90,6 +92,7 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
     check, checkSince: t.checkSince, ...(typeof t.checkUntil === 'string' ? { checkUntil: t.checkUntil } : {}),
     ...(typeof t.sinceCommit === 'string' ? { sinceCommit: t.sinceCommit } : {}), ...(typeof t.checkedCommit === 'string' ? { checkedCommit: t.checkedCommit } : {}), procedure: parsed.definition.run.procedure, grant, ...(meetings ? { meetings } : {}),
     ...(deliverTo ? { deliverTo } : {}),
+    ...(typeof t.retries === 'number' && Number.isInteger(t.retries) && t.retries > 0 && t.retries < 1_000_000 ? { retries: t.retries } : {}),
   }
 }
 
@@ -102,7 +105,11 @@ export function parseJobTurns(data: unknown): QueuedJobTurn[] | null {
 
 /** The runner's queue entry: never handed to the person for being due soon (its due is the slot, not a deadline). */
 export function jobTurnCandidate(turn: QueuedJobTurn): AiTurnCandidate {
-  return { id: turn.occurrenceId, title: turn.name, version: 1, dueAt: turn.dueAt, state: turn.state, job: true, notUrgent: true }
+  return {
+    id: turn.occurrenceId, title: turn.name, version: 1, dueAt: turn.dueAt, state: turn.state, job: true, notUrgent: true,
+    // 「もう一度」: each press is tried afresh on this PC (today's attempts count per occurrence and press).
+    ...(turn.retries ? { attemptKey: `${turn.occurrenceId}#${turn.retries}` } : {}),
+  }
 }
 
 /** The hidden consultation's title: 「<仕事の名前>（M/D）」. */

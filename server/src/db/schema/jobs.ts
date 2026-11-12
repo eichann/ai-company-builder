@@ -20,6 +20,18 @@ export function migrateJobOccurrenceCheckedUntil(conn: Database.Database): void 
 }
 
 /**
+ * B PR 5b, 「もう一度」: who last sent an occurrence back to `due` and when (`retried_by`, `retried_at`), and how often
+ * (`retries`, 0 = never; part of its notices' key, so a second failure after a press is told again). Additive (an
+ * older build neither reads nor writes them); every startup, idempotent.
+ */
+export function migrateJobOccurrenceRetries(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(ai_job_occurrences)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('retries')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN retries INTEGER NOT NULL DEFAULT 0')
+  if (!cols.has('retried_by')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN retried_by TEXT')
+  if (!cols.has('retried_at')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN retried_at TEXT')
+}
+
+/**
  * Where a job's deliverables go outside ACB (jobs.md "A deliverable place outside"): the place the responsible
  * person chose when accepting (`accepted_place`, JSON `{ connector, kind, ref }`; NULL = none chosen). Additive:
  * an older build neither reads nor writes it (it never accepts a version naming such a place — its parser refuses

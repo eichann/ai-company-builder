@@ -531,6 +531,36 @@ export const JOB_OUTCOME_CODES = [
 export type JobOutcomeCode = typeof JOB_OUTCOME_CODES[number]
 
 /**
+ * 「もう一度」 (B PR 5b, jobs.md "「もう一度」"): the states an owner / admin may send back to `due` — an occurrence that
+ * ended without doing its work and was told (`needs_person`, `expired`). Never `skipped` (an absence or a newer
+ * occurrence decided it on purpose), `held` (a pause or the stop said not to run it), nor one that ran.
+ */
+export const JOB_RETRY_STATES: readonly JobOccurrenceState[] = ['needs_person', 'expired']
+
+/**
+ * Why 「もう一度」 cannot be pressed on an occurrence now (the API's codes; the words are job-words.ts
+ * `jobRetryBlockText`): `NOT_RETRYABLE` (its state), `NOT_LATEST` (a later occurrence of the job came already:
+ * its check covered this one's window), `JOB_PAUSED` / `JOB_STOPPED` (the job paused, the company's jobs stopped),
+ * `AI_STOPPED` (the emergency stop covers its responsible person), `JOB_VERSION_CHANGED`, `JOB_NOT_ACCEPTED`,
+ * `JOB_GRANT_EXCEEDS` (the responsible person's rights now), `JOB_SKILL_MISSING`, `JOB_PLACE_NOT_USABLE`,
+ * `JOB_RESULT_UNKNOWN` (an outside operation of its run whose result nobody confirmed: 結果が分からないうちは再開しない).
+ */
+export const JOB_RETRY_BLOCKS = [
+  'NOT_RETRYABLE', 'NOT_LATEST', 'JOB_PAUSED', 'JOB_STOPPED', 'AI_STOPPED', 'JOB_VERSION_CHANGED', 'JOB_NOT_ACCEPTED',
+  'JOB_GRANT_EXCEEDS', 'JOB_SKILL_MISSING', 'JOB_PLACE_NOT_USABLE', 'JOB_RESULT_UNKNOWN',
+] as const
+export type JobRetryBlock = typeof JOB_RETRY_BLOCKS[number]
+
+/**
+ * The new deadline of an occurrence sent back by 「もう一度」: from the press, as long as the pinned version gives a
+ * slot (`missed.expiresAfterMinutes`; the clock's `expires_at` = `due_at` + it) — the window the approved version
+ * chose, counted from now instead of from the slot.
+ */
+export function jobRetryExpiresAt(nowMs: number, expiresAfterMinutes: number): string {
+  return new Date(nowMs + expiresAfterMinutes * 60_000).toISOString()
+}
+
+/**
  * How late the clock may first see a slot and still count it on time (two clock runs): later than this
  * it was missed (the server was down) — `latest_only` runs it while not expired, `skip` does not.
  */

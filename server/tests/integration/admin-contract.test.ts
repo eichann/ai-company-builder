@@ -128,6 +128,7 @@ const TYPES: Record<string, string> = {
   JobUpdated: 'JobView & { changed: boolean }',
   JobOccurrences: '{ occurrences: JobOccurrenceView[] }',
   JobsStop: '{ stopped: boolean }',
+  JobRetry: 'JobRetryResult',
 }
 
 /** Known, reported differences: `<call>: <field path>` of a ShapeReport error. */
@@ -591,7 +592,14 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Job', USERS.admin, 'POST', `${base}/me/jobs/${job.id}/accept`, { version: 1, fingerprint: detail.versions[0].fingerprint })
     await expectShape('Job', USERS.owner, 'POST', `${base}/jobs/${job.id}/pause`)
     await expectShape('Job', USERS.owner, 'POST', `${base}/jobs/${job.id}/resume`)
+    // 「もう一度」 (B PR 5b) on an occurrence that expired.
+    const { db } = await import('../../src/db')
+    const occ = `occ.${'c'.repeat(32)}`
+    const at = new Date().toISOString()
+    db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, outcome_code, created_at, updated_at)
+      VALUES (?, ?, ?, 1, '2026-11-12T09:00', 'Asia/Tokyo', ?, ?, 'expired', 'EXPIRED', ?, ?)`).run(CO, occ, job.id, at, at, at, at)
     await expectShape('JobOccurrences', USERS.owner, 'GET', `${base}/jobs/${job.id}/occurrences`)
+    await expectShape('JobRetry', USERS.owner, 'POST', `${base}/jobs/${job.id}/occurrences/${occ}/retry`)
     await expectShape('JobsStop', USERS.owner, 'PUT', `${base}/jobs-stop`, { stopped: false })
   })
 

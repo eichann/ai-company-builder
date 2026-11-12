@@ -24,6 +24,11 @@ export interface AiTurnCandidate {
    * step `job-procedure`, its first message made by main's claim. Absent for records.
    */
   job?: true
+  /**
+   * What today's attempts are counted under (`aiTurns.ts`), when not `id`: a job's occurrence sent back by an owner /
+   * admin's 「もう一度」 is a new try (`<occurrence id>#<retries>`), not one more of the attempts it already used up.
+   */
+  attemptKey?: string
   /** Its state when queued: picks the step when one kind of record has several (a meeting's reading, its まとまり's part). */
   state?: string | null
   /**

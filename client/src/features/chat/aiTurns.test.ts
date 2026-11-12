@@ -10,6 +10,7 @@ import {
   automaticConsultationsOf, readAutomaticConsultations, AUTOMATIC_CONSULTATIONS_KEPT, type ConsultationHold, usagePause, usagePauseLifted, aiTurnNoticeText, STOP_UNCONFIRMED_TEXT, mayStartAiTurns, jobOutcome, notDeferred,
 } from './aiTurns'
 import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
+import { jobTurnCandidate, type QueuedJobTurn } from '../../../shared/ai-turn-steps/job'
 
 // 「自動で進める」 on (the company default); the tests below never rely on it implicitly.
 const ON = { ...DEFAULT_AUTO_TURN_SETTINGS, enabled: true }
@@ -366,6 +367,21 @@ test('a scheduled job: after the records, outside their daily limit and their fa
   const log = freshLog(NOW)
   for (const outcome of ['failed', 'unfinished'] as const) assert.equal(jobOutcome(log, outcome, ON, null), log)
   assert.equal(jobOutcome(log, 'usage-limit', ON, { until: NOW + 60_000, seenAt: NOW }).pausedUntil, NOW + 60_000)
+})
+
+// 「もう一度」 of an occurrence (jobs.md, B PR 5b): an owner / admin's press is a new try on this PC the same day, even
+// after the occurrence used up today's attempts; without a press it stays used up.
+test('a job occurrence sent back by 「もう一度」 is tried again today', () => {
+  const id = `occ.${'2'.repeat(32)}`
+  const TURN = { occurrenceId: id, name: '面談の報告', dueAt: '2026-10-01T00:00:00Z', state: 'due' }
+  const before = jobTurnCandidate(TURN as QueuedJobTurn)
+  let log = freshLog(NOW)
+  for (let i = 0; i < MAX_ATTEMPTS_PER_RECORD; i++) log = recordStarted(log, before.attemptKey ?? before.id, true)
+  assert.deepEqual(nextAiTurn(input({ log, queue: [before] })), { wait: 'empty' })
+  const pressed = jobTurnCandidate({ ...TURN, retries: 1 } as QueuedJobTurn)
+  assert.equal(pressed.id, id)
+  assert.deepEqual(nextAiTurn(input({ log, queue: [pressed] })), { run: pressed })
+  assert.equal(jobTurnCandidate(TURN as QueuedJobTurn).attemptKey, undefined)
 })
 
 // A claim not won (a job's place not synced yet, the server unreachable) is not a start: it waits a while instead of

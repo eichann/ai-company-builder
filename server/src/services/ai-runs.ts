@@ -92,6 +92,10 @@ const RUN_WAITING = { error: '人の確認を待っています。「もう一�
  * later), where a 4xx would mark the record taken at that version; a record call's 5xx is a tool failure.
  */
 const STOPS_UNATTENDED_RUN: readonly AgentStopToolKind[] = ['write', 'web', 'mcp-external']
+/** The emergency stop in force covers a run with nobody present (the claim's check; a job's 「もう一度」 asks it too). */
+export function unattendedRunStopped(stop: AgentStopPolicy): boolean {
+  return stop.all || stop.tools.some(kind => STOPS_UNATTENDED_RUN.includes(kind))
+}
 export const AI_RUN_STOPPED = {
   error: '管理者が AI の利用を一時停止しています。再開されるまで AI の番は進みません。', code: 'AI_STOPPED',
 }
@@ -205,8 +209,7 @@ export function createAiRunService(deps: AiRunDeps) {
   })
 
   function claimStopped(member: Member): Refusal | null {
-    const stop = deps.aiStops(member)
-    if (!stop.all && !stop.tools.some(kind => STOPS_UNATTENDED_RUN.includes(kind))) return null
+    if (!unattendedRunStopped(deps.aiStops(member))) return null
     return refuse('unavailable', AI_RUN_STOPPED.error, { code: AI_RUN_STOPPED.code })
   }
 
@@ -308,6 +311,25 @@ export function createAiRunService(deps: AiRunDeps) {
       taken(run)
       return ok({ run: view(r, run), created: false })
     }))
+  }
+
+  /** A person says whether an operation of unknown result happened; with nothing unknown left, a run waiting for it is `open`. */
+  function reconcileRun(r: AiRunRepository, run: AiRunRow, key: string, done: boolean, byUserId: string): Outcome<{ run: AiRunView }> {
+    const op = OPERATION_KEY_RE.test(key) ? r.operation(run.id, key) : null
+    if (!op) return refuse('not-found', '操作が見つかりません', { code: 'OPERATION_NOT_FOUND' })
+    const at = clock.now()
+    return transactions.run((): Outcome<{ run: AiRunView }> => {
+      if (!r.updateOperation(run.id, key, ['unknown'], { state: done ? 'done' : 'not_done', reconciledBy: byUserId }, at)) {
+        return refuse('conflict', 'この操作は結果の確かめを待っていません', { code: 'OPERATION_NOT_UNKNOWN' })
+      }
+      let current = run
+      if (run.state === 'waiting_reconcile' && unsettled(r.operations(run.id)).length === 0) {
+        const next: AiRunRow = { ...run, state: 'open', failureClass: null, failureCode: null, updatedAt: at }
+        if (save(r, run, next)) current = next
+      }
+      event(r, current, { event: 'reconciled', code: done ? 'DONE' : 'NOT_DONE' }, at)
+      return ok({ run: view(r, current) })
+    })
   }
 
   return {
@@ -473,22 +495,19 @@ export function createAiRunService(deps: AiRunDeps) {
       const own = ownRun(member, runId)
       if ('ok' in own) return own
       if (!isObj(body) || typeof body.done !== 'boolean') return refuse('bad-request', 'done is true or false')
-      const { r, run } = own
-      const op = OPERATION_KEY_RE.test(key) ? r.operation(run.id, key) : null
-      if (!op) return refuse('not-found', '操作が見つかりません', { code: 'OPERATION_NOT_FOUND' })
-      const at = clock.now()
-      return transactions.run((): Outcome<{ run: AiRunView }> => {
-        if (!r.updateOperation(run.id, key, ['unknown'], { state: body.done ? 'done' : 'not_done', reconciledBy: member.userId }, at)) {
-          return refuse('conflict', 'この操作は結果の確かめを待っていません', { code: 'OPERATION_NOT_UNKNOWN' })
-        }
-        let current = run
-        if (run.state === 'waiting_reconcile' && unsettled(r.operations(run.id)).length === 0) {
-          const next: AiRunRow = { ...run, state: 'open', failureClass: null, failureCode: null, updatedAt: at }
-          if (save(r, run, next)) current = next
-        }
-        event(r, current, { event: 'reconciled', code: body.done ? 'DONE' : 'NOT_DONE' }, at)
-        return ok({ run: view(r, current) })
-      })
+      return reconcileRun(own.r, own.run, key, body.done, member.userId)
+    },
+
+    /**
+     * The same reconciliation for a run that is not the caller's own (B PR 5b: an owner / admin says, for a job's
+     * occurrence they send back with 「もう一度」, whether its run's outside operation happened). Who may is the
+     * calling service's rule (services/job-retry.ts); the run is found in the company's handle only.
+     */
+    reconcileFor(companyId: string, runId: string, key: string, done: boolean, byUserId: string): Outcome<{ run: AiRunView }> {
+      const r = repo(companyId)
+      const run = r.byId(runId)
+      if (!run) return refuse('not-found', '操作が見つかりません', { code: 'OPERATION_NOT_FOUND' })
+      return reconcileRun(r, run, key, done, byUserId)
     },
 
     /** GET …/ai-runs — the member's open runs of records only: the app's 「AI の番」 knows no other kind. */

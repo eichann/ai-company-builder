@@ -162,3 +162,29 @@ export function jobSlotText(slot: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})$/.exec(slot)
   return m ? `${Number(m[2])}月${Number(m[3])}日 ${m[4]}` : slot
 }
+
+const RETRY_BLOCK_WORDS: Record<string, string> = {
+  NOT_RETRYABLE: 'この回は「もう一度」できません（人が確かめる回と、期限切れの回だけです）',
+  NOT_LATEST: 'このあとの回がもう来ているため、この回は「もう一度」できません',
+  JOB_PAUSED: '仕事が止まっています。再開してから押してください',
+  JOB_STOPPED: '「定期の仕事をすべて止める」が入っています',
+  AI_STOPPED: '責任者の AI が止められています（緊急停止）',
+  JOB_VERSION_CHANGED: 'この回のあとに別の版が承認されたため、「もう一度」できません',
+  JOB_NOT_ACCEPTED: '責任者がまだ今の版を受け取っていません',
+  JOB_GRANT_EXCEEDS: '責任者の今の権限では、この仕事の範囲に足りません',
+  JOB_SKILL_MISSING: '手順の Skill が、承認された版のまま見つかりません',
+  JOB_PLACE_NOT_USABLE: 'できたものを置く先が使えなくなっています。責任者が「受け取る」から選び直してください',
+  JOB_RESULT_UNKNOWN: '外への操作（メールの下書きなど）が済んだか分からないものがあります。先に確かめてください',
+}
+
+/** Why 「もう一度」 cannot be pressed now, in plain words (`JOB_RETRY_BLOCKS`). */
+export function jobRetryBlockText(code: string): string {
+  return RETRY_BLOCK_WORDS[code] ?? '今は「もう一度」できません'
+}
+
+/** What an outside operation of a run was, in plain words (the run's operation kind; anything else: 外への操作). */
+export function jobOperationKindText(kind: string): string {
+  if (kind === 'mail-draft' || kind === 'mail-draft-version' || kind === 'outbound') return 'メールの下書き'
+  if (kind === 'drive-put') return 'Google Drive に置くファイル'
+  return '外への操作'
+}

@@ -25,7 +25,7 @@
  *   the run closed `done` and the occurrence `done` with the run's id — all or nothing, so a crash
  *   leaves the occurrence `due` and nothing made, and a second runner finds it no longer `due`. A run
  *   of the server is opened and closed in that one transaction: no open occurrence run ever exists.
- * - **Notices** (`job_expired`, `job_skipped`, `job_failed`; recordless, key `<kind>:<job>:<occurrence>`):
+ * - **Notices** (`job_expired`, `job_skipped`, `job_failed`; recordless, key `<kind>:<job>:<occurrence>[:<retries>]`):
  *   to the responsible person and the job's creator while an owner / admin, written in the same
  *   transaction as the occurrence's change; their text is built when read (notifications.ts). No notice
  *   when it ran (D9).
@@ -135,7 +135,9 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     const at = clock.now()
     handle.notifications.insert([...to].map(userId => ({
       id: ids.newId(), userId, kind, recordId: '', recordVersion: 0, action: '', actorId: null, actorKind: null,
-      dedupeKey: `${kind}:${occ.jobId}:${occ.id}`, createdAt: at, readAt: null,
+      // Once per occurrence — and once more after each 「もう一度」 (B PR 5b: a second failure is told again; the
+      // bell reads the job and the occurrence from the first two parts, an older build too).
+      dedupeKey: `${kind}:${occ.jobId}:${occ.id}${occ.retries ? `:${occ.retries}` : ''}`, createdAt: at, readAt: null,
     })))
     for (const u of to) told.add(u)
   }

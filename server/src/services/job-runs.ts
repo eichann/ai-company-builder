@@ -282,6 +282,8 @@ export function createJobRuns(deps: JobRunDeps) {
       ...(d.check.kind === 'new_files' ? { sinceCommit: sinceCommit(f), checkedCommit: f.occ.checkedCommit ?? null } : {}),
       procedure: d.run.procedure, grant: d.grant,
       ...(placeOf(f) ? { deliverTo: placeOf(f) as JobDeliveryPlace } : {}),
+      // 「もう一度」 (B PR 5b): the app counts its attempts per occurrence and press.
+      ...(f.occ.retries ? { retries: f.occ.retries } : {}),
     }
   }
 

@@ -298,3 +298,64 @@ describe('the page', () => {
     expect(item.visible!({ isAdmin: true, isManager: false, canViewAgentEvents: true })).toBe(true)
   })
 })
+
+describe('「もう一度」 (B PR 5b)', () => {
+  const occ = (id: string, over: Record<string, unknown>) => ({
+    id, jobVersion: 1, dueSlot: '2026-11-12T09:00', timeZone: 'Asia/Tokyo', dueAt: '', expiresAt: '', state: 'needs_person', outcomeCode: 'RUN_FAILED',
+    ran: false, updatedAt: '', retries: 0, retriedBy: null, retriedAt: null, ...over,
+  })
+
+  it('offered only where the server allows it, asked first, then sent for that occurrence; elsewhere why not, in plain words', async () => {
+    const OK = 'occ.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [jobView({ placement: 'a' })] }) },
+      [`GET ${base}/jobs/${JOB_ID}/occurrences`]: {
+        body: ok({ occurrences: [
+          occ(OK, { retry: { allowed: true }, unknownOperations: [], retries: 1, retriedBy: 'u_admin', retriedAt: '2026-11-12T01:00:00.000Z' }),
+          occ('occ.b', { dueSlot: '2026-11-11T09:00', state: 'expired', outcomeCode: 'EXPIRED', retry: { allowed: false, why: 'NOT_LATEST' }, unknownOperations: [] }),
+          occ('occ.c', { dueSlot: '2026-11-10T09:00', state: 'done', outcomeCode: null, ran: true }),
+        ] }),
+      },
+      [`POST ${base}/jobs/${JOB_ID}/occurrences/${OK}/retry`]: { body: ok({ occurrence: occ(OK, { state: 'due', outcomeCode: null }) }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    await userEvent.click(within(row).getByRole('button', { name: '回の記録' }))
+    const history = await within(row).findByRole('list', { name: '回の記録' })
+    const allowed = within(history).getByRole('listitem', { name: '11月12日 09:00の回' })
+    expect(allowed).toHaveTextContent('鈴木 一郎さんが「もう一度」を押しました')
+    expect(within(within(history).getByRole('listitem', { name: '11月11日 09:00の回' })).queryByRole('button', { name: 'もう一度' })).toBeNull()
+    expect(history).toHaveTextContent('「もう一度」はできません：このあとの回がもう来ているため、この回は「もう一度」できません')
+    expect(within(within(history).getByRole('listitem', { name: '11月10日 09:00の回' })).queryByText(/もう一度/)).toBeNull()
+
+    await userEvent.click(within(allowed).getByRole('button', { name: 'もう一度' }))
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('責任者のアプリが開いていて「自動で進める」が入っているとき')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'もう一度' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => decodeURIComponent(c.url))).toEqual([`${base}/jobs/${JOB_ID}/occurrences/${OK}/retry`]))
+  })
+
+  it('an outside result nobody knows: the responsible person’s answer is sent first (作られていた／作られていなかった)', async () => {
+    const OCC = 'occ.dddddddddddddddddddddddddddddddd'
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [jobView({ placement: 'a' })] }) },
+      [`GET ${base}/jobs/${JOB_ID}/occurrences`]: {
+        body: ok({ occurrences: [occ(OCC, { outcomeCode: 'RESULT_UNKNOWN', retry: { allowed: false, why: 'JOB_RESULT_UNKNOWN' }, unknownOperations: [{ key: 'draft-1', kind: 'mail-draft' }] })] }),
+      },
+      [`POST ${base}/jobs/${JOB_ID}/occurrences/${OCC}/operations/draft-1/reconcile`]: { body: ok({ occurrenceId: OCC }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    await userEvent.click(within(row).getByRole('button', { name: '回の記録' }))
+    const history = await within(row).findByRole('list', { name: '回の記録' })
+    expect(history).toHaveTextContent('メールの下書きが作られたか分かりません')
+    expect(within(history).queryByRole('button', { name: 'もう一度' })).toBeNull()
+    await userEvent.click(within(history).getByRole('button', { name: '作られていなかった' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'はい' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([{ done: false }]))
+  })
+})

@@ -71,6 +71,10 @@ export interface JobOccurrenceRow {
    * commits' dates. null: none named (a working folder, a meeting check, an older app).
    */
   checkedCommit?: string | null
+  /** 「もう一度」 (B PR 5b): how often an owner / admin sent it back to `due` (0: never), and the last press. */
+  retries?: number
+  retriedBy?: string | null
+  retriedAt?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -110,5 +114,11 @@ export interface JobRepository {
    * Move an occurrence from one of `from` to `to` (compare-and-set): false = it was no longer in
    * `from` (someone else moved it first; nothing written).
    */
+  /**
+   * 「もう一度」 (B PR 5b): from one of `from` back to `due` (compare-and-set) with no run, no outcome, the new
+   * `expiresAt`, `retries` + 1 and who pressed it. Where its check stopped (`checked_until` / `checked_commit`) is
+   * kept: it looks at the same window again. false = it was no longer in `from` (nothing written).
+   */
+  retryOccurrence(occurrenceId: string, from: readonly JobOccurrenceState[], expiresAt: string, by: string, at: string): boolean
   moveOccurrence(occurrenceId: string, from: readonly JobOccurrenceState[], to: JobOccurrenceState, change: { runId?: string | null; outcomeCode: string | null; checkedUntil?: string; checkedCommit?: string | null }, at: string): boolean
 }
