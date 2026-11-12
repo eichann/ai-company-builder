@@ -182,8 +182,17 @@ function multipart(boundaryId: string, metadata: unknown, mimeType: string, byte
 /** A time Google answered, as it may appear in a log line: only an RFC 3339 UTC timestamp, else a fixed word. */
 function logStamp(v: string | null): string {
   if (v === null) return 'unread'
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/.test(v) ? v : 'unusual'
+  return isLogStamp(v) ? v : 'unusual'
 }
+const isLogStamp = (v: string) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/.test(v)
+
+/**
+ * How long after the upload answer Drive's own processing may still move a new Google document's times (google-drive.md
+ * "A Google document's own changes"; real Google, 2026-11-12: ~4 s for the file, ~3 s for its one revision).
+ */
+const DOC_BASELINE_WINDOW_MS = 60_000
+/** At most this many `revisions.list` reads while waiting for the newest revision to settle (a settle wait between each). */
+const DOC_BASELINE_READS = 4
 
 /** One revision of a Google document as `revisions.list` gives it (an id or a time Google left out is null). */
 interface DocRevision {
@@ -302,38 +311,69 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
 
   /**
    * Right after Drive answered a put that made or updated a Google document — inside that request only: its baseline,
-   * kept on the receipt only when it is provably ACB's own (google-drive.md "A Google document's own changes"): two
-   * exports a moment apart give the same text (not a stale or half-processed one), the revisions are read in full, and
-   * every one of them was made last by the member's own account (`lastModifyingUser.me`; ACB writes with their token, so
-   * anyone else's edit in between shows as a revision that is not theirs), and so was the file's last change
-   * (`files.get` `lastModifyingUser.me`: a witness that does not rest on the revision list, which Google says may omit or
-   * merge revisions), and the file's `modifiedTime` read last is still the upload answer's (anyone's edit in between
-   * moves it, the member's own too, and an edit the revision list omits or merges; viewing does not). Anything else
-   * keeps none, so a later update is refused as not verifiable — never another's text taken for ACB's. A put found
-   * after a lost answer never gets one (`reconcile`).
-   * Every drop logs one line naming the failed step; never a file id, name, text or token. Real Google kept no baseline
-   * on 2026-11-12 with every call answered; these lines are to tell which step (google-drive.md).
+   * kept on the receipt only when it is provably ACB's own (google-drive.md "A Google document's own changes"):
+   * (a) two exports a moment apart give the same text (not a stale or half-processed one);
+   * (b) the revisions are read in full, settled (the newest one's id and time the same in two reads a moment apart:
+   *     Drive's post-import processing moves its time once, seconds after the answer), and every one of them was made
+   *     last by the member's own account (`lastModifyingUser.me`; ACB writes with their token, so anyone else's edit in
+   *     between shows as a revision that is not theirs — Docs never merges two accounts' edits into one revision);
+   * (c) the file's own last change is the member's (`files.get` `lastModifyingUser.me`: a witness that does not rest on
+   *     the revision list);
+   * (d) exactly one revision is new: the only one of a new document, or the only one after the previous baseline's
+   *     revision on an update (that revision still listed) — a second revision, even the member's, is refused;
+   * (e) the file's `modifiedTime` and the newest revision's are both within `DOC_BASELINE_WINDOW_MS` after the upload
+   *     answer's, never before it (real Google, 2026-11-12: processing moved them ~4 s and ~3 s with nobody editing).
+   * The newest revision's id and time **as observed** are kept; the baseline's time stays the upload answer's (comments
+   * are compared from it, the earliest moment ACB's text existed). What remains possible is the member's own edit within
+   * those seconds merged by Docs into ACB's revision — the owner's decision of 2026-11-12: the writer's own edits may be
+   * overwritten. Anything else keeps none, so a later update is refused as not verifiable. A put found after a lost
+   * answer never gets one (`reconcile`).
+   * Every drop logs one line naming the failed step; never a file id, name, text or token.
    */
-  async function keepDocBaseline(companyId: string, row: Pick<DrivePutRow, 'id' | 'userId' | 'mimeType' | 'fileId' | 'state'>, uploadedAt: string | null): Promise<void> {
+  async function keepDocBaseline(
+    companyId: string, row: Pick<DrivePutRow, 'id' | 'userId' | 'mimeType' | 'fileId' | 'state'>, uploadedAt: string | null,
+    previousRevision: string | null,
+  ): Promise<void> {
     if (row.mimeType !== DRIVE_DOC_MIME || row.state !== 'done' || !row.fileId) return
-    const drop = (step: 'no-upload-time' | 'export-failed' | 'export-differs' | 'no-revision' | 'not-me' | 'file-unread' | 'file-not-me' | 'modified-moved', detail = '') =>
-      log.warn(`[google-drive] document baseline not kept: ${step}${detail}`)
-    if (!uploadedAt || Number.isNaN(Date.parse(uploadedAt))) return drop('no-upload-time')
+    type Step = 'no-upload-time' | 'export-failed' | 'export-differs' | 'no-revision' | 'still-settling' | 'not-me'
+      | 'base-revision-gone' | 'revision-count' | 'file-unread' | 'file-not-me' | 'outside-window'
+    const drop = (step: Step, detail = '') => log.warn(`[google-drive] document baseline not kept: ${step}${detail}`)
+    const uploadMs = uploadedAt ? Date.parse(uploadedAt) : NaN
+    if (!uploadedAt || Number.isNaN(uploadMs)) return drop('no-upload-time')
     const first = await docFingerprint(companyId, row.userId, row.fileId)
     if (!first) return drop('export-failed')
     await settle()
     const second = await docFingerprint(companyId, row.userId, row.fileId)
     if (!second) return drop('export-failed')
     if (second !== first) return drop('export-differs')
-    const revisions = await docRevisions(companyId, row.userId, row.fileId)
+    // Settled: the same newest revision (id and time) and count in two reads a moment apart, at most DOC_BASELINE_READS reads.
+    let revisions = await docRevisions(companyId, row.userId, row.fileId)
     if (!revisions) return drop('no-revision')
-    // Every revision, not only those after the upload: a document ACB made is updated only from a baseline like this one,
-    // and the check before an update refuses any new revision, so a revision not the member's never belongs in it.
+    let reads = 1
+    for (;;) {
+      if (reads >= DOC_BASELINE_READS) return drop('still-settling', ` (reads: ${reads})`)
+      await settle()
+      const again = await docRevisions(companyId, row.userId, row.fileId)
+      reads++
+      if (!again) return drop('no-revision')
+      const [a, b] = [revisions[revisions.length - 1], again[again.length - 1]]
+      const same = again.length === revisions.length && a.id === b.id && a.at === b.at
+      revisions = again
+      if (same) break
+    }
+    // Every revision, not only the new ones: a document ACB made is updated only from a baseline like this one, and the
+    // check before an update refuses any new revision, so a revision not the member's never belongs in it.
     const foreign = revisions.filter(r => !r.me).length
     if (foreign > 0) return drop('not-me', ` (revisions: ${revisions.length}, not the member's: ${foreign}, the newest the member's: ${revisions[revisions.length - 1].me})`)
     const newest = revisions[revisions.length - 1]
-    // A second witness that does not rest on the revision list (Google documents that a list may omit or merge
-    // revisions): the file's own last modifier must be the member too, and its time the upload answer's (below).
+    // Exactly one new revision: ACB's upload. Post-import processing moves a time, it adds no revision (real Google).
+    let fresh = revisions.length
+    if (previousRevision !== null) {
+      const at = revisions.findIndex(r => r.id === previousRevision)
+      if (at < 0) return drop('base-revision-gone', ` (revisions: ${revisions.length})`)
+      fresh = revisions.length - 1 - at
+    }
+    if (fresh !== 1) return drop('revision-count', ` (revisions: ${revisions.length}, new: ${fresh})`)
     const f = await drive(companyId, row.userId, {
       method: 'GET', path: `/drive/v3/files/${row.fileId}`,
       query: { fields: 'modifiedTime,lastModifyingUser(me)', supportsAllDrives: 'true' },
@@ -341,11 +381,13 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     })
     if (!f.ok || !isObj(f.json)) return drop('file-unread')
     if (!(isObj(f.json.lastModifyingUser) && f.json.lastModifyingUser.me === true)) return drop('file-not-me')
-    // The strict check, unchanged: anyone's edit since the upload's answer moves the file's time. Real Google may move it
-    // with no edit after an import (2026-11-12, suspected); the times are logged so the owner's next try tells.
     const fileAt = str(f.json.modifiedTime)
-    if (fileAt !== uploadedAt) {
-      return drop('modified-moved', ` upload=${logStamp(uploadedAt)} file=${logStamp(fileAt)} newest-revision=${logStamp(newest.at)} revisions=${revisions.length}`)
+    const inWindow = (t: string | null) => {
+      const ms = t !== null && isLogStamp(t) ? Date.parse(t) : NaN
+      return !Number.isNaN(ms) && ms >= uploadMs && ms - uploadMs <= DOC_BASELINE_WINDOW_MS
+    }
+    if (!inWindow(fileAt) || !inWindow(newest.at)) {
+      return drop('outside-window', ` upload=${logStamp(uploadedAt)} file=${logStamp(fileAt)} newest-revision=${logStamp(newest.at)} revisions=${revisions.length}`)
     }
     const baseline: DriveDocBaseline = { fingerprint: first, revision: newest.id as string, revisionAt: newest.at as string, at: uploadedAt }
     handle(companyId).googleDrive.setDocBaseline(row.id, baseline)
@@ -964,7 +1006,9 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           link: str(j.webViewLink) ?? target?.link ?? null, reason: null, finishedAt: clock.now(),
         }
         h.googleDrive.settlePut(id, settled)
-        await keepDocBaseline(member.companyId, { ...row, ...settled }, str(j.modifiedTime))
+        // An update names the revision its check started from (always there: an update without a baseline was refused
+        // above; '' would match no revision and keep none).
+        await keepDocBaseline(member.companyId, { ...row, ...settled }, str(j.modifiedTime), targetId !== null ? (target?.docBaseline?.revision ?? '') : null)
         return ok({ drivePut: putView({ ...row, ...settled }), existing: false })
       }
       if (r.kind === 'unknown' || r.kind === 'server-error') {
