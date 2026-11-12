@@ -669,9 +669,10 @@ describe('Google documents and overwriting a file ACB made (google-drive.md "Goo
     expect(r.body.data.drivePut).toMatchObject({ state: 'done', reason: 'found-by-correlation', fileId: first.fileId })
     expect((await ai(token, 'POST', '/put', body)).body.data.existing).toBe(true)
     expect(updates(first.fileId)).toBe(1)
-    // Found by its id, its text was fingerprinted like an answered put: the next update can be verified and goes through.
+    // Found after a lost answer, its text now may not be ACB's: no fingerprint, so the next update is not verifiable.
     const third = await ai(token, 'POST', '/put', docBody({ name: '答えが消える.md', updateFileId: first.fileId }, Buffer.from('# 三版目\n')))
-    expect(third.body.data?.drivePut, third.text).toMatchObject({ state: 'done', fileId: first.fileId })
+    expect([third.status, third.body.code]).toEqual([409, 'DRIVE_FILE_NOT_VERIFIABLE'])
+    expect(updates(first.fileId)).toBe(1)
   })
 
   it('a consultation\'s task: the link follows the newest revision (one link, its revision and sha256 replaced, said in 経緯)', async () => {
@@ -873,6 +874,15 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     expect([r2.status, r2.body.code]).toEqual([409, 'DRIVE_FILE_NOT_VERIFIABLE'])
     expect(patches()).toBe(before)
     expect(google.driveFile(old.fileId)!.content.toString()).toBe('# 前の控え\n')
+    // Someone edits the document between ACB's upload answer and the export: their text is never taken for ACB's.
+    google.faults.editBeforeNextExport('# 誰かが直した\n')
+    const raced = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 競う\n'), { name: '競う.md' }))).body.data.drivePut
+    expect(fingerprint(raced.id)).toBeNull()
+    before = patches()
+    const r3 = await ai(token, 'POST', '/put', docBody(next, { name: '競う.md', updateFileId: raced.fileId }))
+    expect([r3.status, r3.body.code]).toEqual([409, 'DRIVE_FILE_NOT_VERIFIABLE'])
+    expect(patches()).toBe(before)
+    expect(google.driveFile(raced.fileId)!.content.toString()).toBe('# 誰かが直した\n')
     // A file with binary content keeps its head revision as the signal (a `.md` file: its version is not compared).
     const md = (await ai(token, 'POST', '/put', { ...putBody({ name: '版で見る.md' }, Buffer.from('# a\n')), kind: 'markdown', as: 'file' })).body.data.drivePut
     expect(fingerprint(md.id)).toBeNull()

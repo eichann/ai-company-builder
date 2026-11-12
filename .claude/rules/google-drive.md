@@ -279,13 +279,15 @@ The AI reads and writes **only** the member's own live picks.
   - **A Google document's own changes** (real Google, 2026-11-12: the owner opened an imported document once and closed
     it without typing; its 変更履歴 showed one version, the import, yet the update was refused `DRIVE_FILE_CHANGED_SINCE`):
     Drive's `version` counts every change on the server, "even those not visible to the user" (opening, post-import
-    processing), so it is not a "someone edited it" signal. Instead, right after ACB's own put or update of a document
-    is `done` (answered, or found by `acbPutId` after a lost answer), the service exports it once (`files.export`
-    `text/plain`, the export `drive_read` uses; BOM / CRLF cleaned) and keeps the sha256 on the receipt
-    (`google_drive_puts.doc_fingerprint`, additive `migrateDrivePutDocFingerprints`; never answered). Before an update it
+    processing), so it is not a "someone edited it" signal. Instead, right after Drive answered ACB's own put or update
+    of a document, the service exports it once (`files.export` `text/plain`, the export `drive_read` uses; BOM / CRLF
+    cleaned) and keeps the sha256 on the receipt (`google_drive_puts.doc_fingerprint`, additive
+    `migrateDrivePutDocFingerprints`; never answered) — **only when the text is provably ACB's**: the file's
+    `modifiedTime` read after the export is still the one in the upload's answer (an edit by anyone in between moves it;
+    viewing does not; Codex review of #682). A put found after a lost answer (`acbPutId`, maybe much later) gets none. Before an update it
     exports again with the member's own `drive.file` token (allowed: ACB made the file): equal → overwrite; different → 409
-    `DRIVE_FILE_CHANGED_SINCE`. **Fails closed**: no fingerprint on the receipt (every receipt from before this rule, or
-    an export that failed right after the put) or an export that fails now (refused, too large, not answered) → 409
+    `DRIVE_FILE_CHANGED_SINCE`. **Fails closed**: no fingerprint on the receipt (every receipt from before this rule, a
+    put found after a lost answer, an export or lookup that failed right after the put, a `modifiedTime` that moved) or an export that fails now (refused, too large, not answered) → 409
     `DRIVE_FILE_NOT_VERIFIABLE` 「…直されていないか確かめられません。上書きせずに、新しいファイルとして置いてください。」, nothing sent.
     `text/plain` rather than `text/markdown`: the long-standing export, and it carries no image addresses (an export with
     images names short-lived `googleusercontent` URLs that would differ every time). Accepted residual: an edit of
@@ -302,7 +304,9 @@ The AI reads and writes **only** the member's own live picks.
 - Unverified against real Google (the fake converts and updates in place): that Drive converts `text/markdown` into a
   document (Google added Markdown import in 2024), and that `files.update` with HTML / Markdown media on a Google
   document replaces its content as a new version (the Drive API documents media upload on update for Workspace
-  types); that a document's `text/plain` export is the same from one read to the next while nobody edits it (else
+  types); that a document's `modifiedTime` stays the upload answer's while nobody edits it (post-import processing
+  included; if not, no fingerprint is kept and updates are refused as not verifiable — the safe side) and its
+  `text/plain` export is the same from one read to the next (else
   `DRIVE_FILE_CHANGED_SINCE` refuses an honest update — the safe side); that `keepForever` on a revision is answered as
   the fake does.
 

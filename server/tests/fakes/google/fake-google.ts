@@ -179,6 +179,8 @@ export interface FakeGoogleFaults {
   failNext(count?: number, status?: number): void
   /** Like `failNext`, only for requests whose path starts with `prefix` (others are answered). */
   failOn(prefix: string, count?: number, status?: number): void
+  /** Someone edits the next Google document exported just before the export (new text, a later `modifiedTime`). */
+  editBeforeNextExport(content: string): void
   /**
    * The next `count` Gmail sends are stored (the mail went out) and then never
    * answered: over a real socket the connection is cut; through `app.fetch`
@@ -349,17 +351,19 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   const docsRefused = new Map<string, string>()
   const copyBlocked = new Set<string>()
   let dropCount = 0
+  let editBeforeExport: string | null = null
   const held = new Set<() => void>()
   const faults: FakeGoogleFaults = {
     delayMs: 0,
     failNext(count = 1, status = 500) { failCount = count; failStatus = status; failPrefix = null },
     failOn(prefix, count = 1, status = 500) { failCount = count; failStatus = status; failPrefix = prefix },
     dropAnswerAfterSend(count = 1) { dropCount = count },
+    editBeforeNextExport(content) { editBeforeExport = content },
     ignoreRefreshScope: false,
     refuseExport(docId, reason = 'appNotAuthorizedToFile') { exportRefused.set(docId, reason) },
     refuseDocs(docId, reason = 'PERMISSION_DENIED') { docsRefused.set(docId, reason) },
     blockCopy(docId) { copyBlocked.add(docId) },
-    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; faults.ignoreRefreshScope = false; exportRefused.clear(); docsRefused.clear(); copyBlocked.clear() },
+    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; editBeforeExport = null; faults.ignoreRefreshScope = false; exportRefused.clear(); docsRefused.clear(); copyBlocked.clear() },
   }
 
   const app = new Hono()
@@ -1001,6 +1005,12 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       if (mimeType !== 'text/plain' && mimeType !== 'text/csv') throw apiError(400, 'The requested conversion is not supported.', 'badRequest')
       const refused = exportRefused.get(f.id)
       if (refused) throw apiError(403, 'The user has not granted the app read access to the file.', refused)
+      if (editBeforeExport !== null && f.mimeType === DOC_MIME) {
+        f.content = Buffer.from(editBeforeExport, 'utf8')
+        f.version += 1
+        f.modifiedTime = iso(Math.max(now(), Date.parse(f.modifiedTime) + 1000))
+        editBeforeExport = null
+      }
       const text = '\uFEFF' + f.content.toString('utf8').replace(/\r?\n/g, '\r\n')
       if (Buffer.byteLength(text, 'utf8') > exportLimit) throw apiError(403, 'This file is too large to be exported.', 'exportSizeLimitExceeded')
       // Real Google (2026-11-12): a document's `version` moves without any edit — after an import, when it is opened or
@@ -1616,8 +1626,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     openDriveFile(id) {
       const f = driveFiles.get(id)
       if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      // Viewing moves the version only: modifiedTime is the last change by anyone (Drive's viewedByMeTime is separate).
       f.version += 3
-      f.modifiedTime = iso(now())
     },
     shareDriveFile(id, permission) {
       const f = driveFiles.get(id)

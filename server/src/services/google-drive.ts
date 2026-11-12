@@ -230,11 +230,20 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     return deps.sha256(new TextEncoder().encode(cleanExportText(new TextDecoder().decode(r.bytes))))
   }
 
-  /** Right after a put made or updated a Google document: its fingerprint kept on the receipt (a failure leaves none). */
-  async function keepDocFingerprint(companyId: string, row: Pick<DrivePutRow, 'id' | 'userId' | 'mimeType' | 'fileId' | 'state'>): Promise<void> {
-    if (row.mimeType !== DRIVE_DOC_MIME || row.state !== 'done' || !row.fileId) return
+  /**
+   * Right after a put made or updated a Google document (its answer in hand): its fingerprint kept on the receipt — only
+   * when the text exported is provably ACB's own: the file's `modifiedTime` after the export is still the one Drive
+   * answered the upload with (someone's edit in between moves it). Anything else (no time in the answer, a failed export
+   * or lookup, a time that moved) keeps none, so a later update is refused as not verifiable — never another's text
+   * taken for ACB's. Viewing a file does not move `modifiedTime`.
+   */
+  async function keepDocFingerprint(companyId: string, row: Pick<DrivePutRow, 'id' | 'userId' | 'mimeType' | 'fileId' | 'state'>, uploadedAt: string | null): Promise<void> {
+    if (row.mimeType !== DRIVE_DOC_MIME || row.state !== 'done' || !row.fileId || !uploadedAt) return
     const fp = await docFingerprint(companyId, row.userId, row.fileId)
-    if (fp) handle(companyId).googleDrive.setDocFingerprint(row.id, fp)
+    if (!fp) return
+    const m = await meta(companyId, row.userId, row.fileId)
+    if (!m.ok || !isObj(m.json) || str(m.json.modifiedTime) !== uploadedAt) return
+    handle(companyId).googleDrive.setDocFingerprint(row.id, fp)
   }
 
   /** Looks for ACB's own file of a put whose answer was lost: by the put's id in appProperties. */
@@ -256,7 +265,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       state: 'done' as const, fileId: found.id as string, revisionId: driveRevisionOf(found.headRevisionId, found.version), link: str(found.webViewLink),
       reason: 'found-by-correlation', finishedAt: clock.now(),
     }
-    if (handle(companyId).googleDrive.settlePut(row.id, settled)) await keepDocFingerprint(companyId, { ...row, ...settled })
+    // No fingerprint here: found after a lost answer (maybe much later), the text now may not be what ACB uploaded.
+    handle(companyId).googleDrive.settlePut(row.id, settled)
     return { ...row, ...settled }
   }
 
@@ -806,7 +816,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           return refuse('conflict', '今の版を Google Drive に残せなかったため、上書きしませんでした。新しいファイルとして置いてください。', { code: 'DRIVE_REVISION_NOT_KEPT' })
         }
       }
-      const fields = 'id,headRevisionId,version,webViewLink'
+      const fields = 'id,headRevisionId,version,webViewLink,modifiedTime'
       const r = targetId !== null
         // A new revision of the same file: only its content and ACB's correlation id (the lookup after a lost answer).
         ? await drive(member.companyId, member.userId, {
@@ -828,7 +838,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           link: str(j.webViewLink) ?? target?.link ?? null, reason: null, finishedAt: clock.now(),
         }
         h.googleDrive.settlePut(id, settled)
-        await keepDocFingerprint(member.companyId, { ...row, ...settled })
+        await keepDocFingerprint(member.companyId, { ...row, ...settled }, str(j.modifiedTime))
         return ok({ drivePut: putView({ ...row, ...settled }), existing: false })
       }
       if (r.kind === 'unknown' || r.kind === 'server-error') {
