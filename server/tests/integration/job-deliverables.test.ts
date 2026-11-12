@@ -570,6 +570,36 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
     }
   })
 
+  it('another job\'s run\'s receipt a run was answered with again (same request, same folder) is not offered as this occurrence\'s file', async () => {
+    try {
+      const { noon, slot: today } = atNoon()
+      // Another job of hers, into the same folder, put the very same file first (its receipt carries its run's id).
+      const other = await approvedJob()
+      expect((await services.jobs.accept(alice(), other, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      const otherRun = await claim(todaysOccurrence(other, noon, today))
+      expect(otherRun.status, otherRun.text).toBe(201)
+      const body = putBody({ name: '別の仕事の.md' })
+      const theirs = (await ai(await runToken(otherRun.body.data.run), 'POST', '/google/drive/put', body)).body.data.drivePut
+      expect(theirs).toMatchObject({ state: 'done' })
+      expect((db.prepare('SELECT run_id FROM google_drive_puts WHERE company_id = ? AND id = ?').get(CO, theirs.id) as Json).run_id).toBe(otherRun.body.data.run.id)
+      vi.setSystemTime(noon + 60_000)
+      const job = await approvedJob()
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      const occ = todaysOccurrence(job, noon, today)
+      const first = await claim(occ)
+      expect(first.status, first.text).toBe(201)
+      // This run's same request is answered with the other job's receipt (nothing uploaded again).
+      expect((await ai(await runToken(first.body.data.run), 'POST', '/google/drive/put', body)).body.data).toMatchObject({ existing: true, drivePut: { id: theirs.id } })
+      expect((await failRun(first.body.data.run)).status).toBe(200)
+      expect((await as('jd-owner', 'POST', `/jobs/${job}/occurrences/${occ}/retry`)).status).toBe(200)
+      const turn = await turnOf(occ)
+      expect(turn.madeBefore).toEqual([{ kind: 'drive-put', ref: { kind: 'drive-put', id: theirs.id } }])
+      expect(JSON.stringify(turn)).not.toContain(theirs.fileId)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('a receipt outside the chosen folder, or not done, is not named as a file of the place', async () => {
     try {
       const { noon, slot: today } = atNoon()
