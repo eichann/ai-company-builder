@@ -33,7 +33,7 @@
  */
 import { GOOGLE_SCOPE } from '../../shared/core/google'
 import {
-  checkDriveFileName, checkDrivePutContent, DRIVE_FOLDER_MIME, DRIVE_PICK_MAX_FILES, DRIVE_PICK_SAVING_GRACE_MS, DRIVE_PICK_TICKET_KEPT_AFTER_MS, DRIVE_PICK_TICKETS_OPEN_MAX, DRIVE_PICK_TICKET_TTL_MS, DRIVE_PICK_TTL_MS, drivePreselectIds, isDrivePickTicket, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, DRIVE_READ_AS,
+  checkDriveFileName, checkDrivePutContent, DRIVE_DOC_MIME, DRIVE_FOLDER_MIME, DRIVE_PICK_MAX_FILES, DRIVE_PICK_SAVING_GRACE_MS, DRIVE_PICK_TICKET_KEPT_AFTER_MS, DRIVE_PICK_TICKETS_OPEN_MAX, DRIVE_PICK_TICKET_TTL_MS, DRIVE_PICK_TTL_MS, drivePreselectIds, isDrivePickTicket, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, DRIVE_READ_AS,
   DRIVE_READ_PDF_MAX_BYTES, DRIVE_READ_TEXT_MAX, DRIVE_TEXT_FOOTER, DRIVE_TEXT_HEADER, driveDocFetchesOutside, driveFolderReachesOutside, drivePutForm, driveRevisionOf, isDriveId, isDrivePickMode,
   type DrivePermissionLike,
 } from '../../shared/core/google-drive'
@@ -217,6 +217,26 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     return null
   }
 
+  /**
+   * A Google document's fingerprint (google-drive.md "A Google document's own changes"): the sha256 of its text as Drive
+   * exports it (`text/plain`, the export `drive_read` uses; BOM and line ends cleaned), with the member's own `drive.file`
+   * token (a file ACB made: the scope allows exporting it). Null when the export failed or was refused (too large…).
+   */
+  async function docFingerprint(companyId: string, userId: string, fileId: string): Promise<string | null> {
+    const r = await drive(companyId, userId, {
+      method: 'GET', path: `/drive/v3/files/${fileId}/export`, query: { mimeType: 'text/plain' }, binary: true, operation: 'drive.files.export',
+    })
+    if (!r.ok || !r.bytes) return null
+    return deps.sha256(new TextEncoder().encode(cleanExportText(new TextDecoder().decode(r.bytes))))
+  }
+
+  /** Right after a put made or updated a Google document: its fingerprint kept on the receipt (a failure leaves none). */
+  async function keepDocFingerprint(companyId: string, row: Pick<DrivePutRow, 'id' | 'userId' | 'mimeType' | 'fileId' | 'state'>): Promise<void> {
+    if (row.mimeType !== DRIVE_DOC_MIME || row.state !== 'done' || !row.fileId) return
+    const fp = await docFingerprint(companyId, row.userId, row.fileId)
+    if (fp) handle(companyId).googleDrive.setDocFingerprint(row.id, fp)
+  }
+
   /** Looks for ACB's own file of a put whose answer was lost: by the put's id in appProperties. */
   async function reconcile(companyId: string, row: DrivePutRow): Promise<DrivePutRow> {
     if (row.state !== 'unknown' && row.state !== 'sending') return row
@@ -236,7 +256,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       state: 'done' as const, fileId: found.id as string, revisionId: driveRevisionOf(found.headRevisionId, found.version), link: str(found.webViewLink),
       reason: 'found-by-correlation', finishedAt: clock.now(),
     }
-    handle(companyId).googleDrive.settlePut(row.id, settled)
+    if (handle(companyId).googleDrive.settlePut(row.id, settled)) await keepDocFingerprint(companyId, { ...row, ...settled })
     return { ...row, ...settled }
   }
 
@@ -377,7 +397,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         return refuse('rate-limited', 'Google Drive から選ぶ画面が、もういくつも開いています。ブラウザで選び終えるか閉じてから、もう一度お試しください。', { code: 'PICK_TICKETS_TOO_MANY' })
       }
       const ticket = ids.newToken()
-      const expiresAt = new Date(clock.nowMs() + DRIVE_PICK_TICKET_TTL_MS).toISOString()
+      // From the same instant as createdAt (two clock reads made the stored lifetime 1 ms longer now and then).
+      const expiresAt = new Date(Date.parse(now) + DRIVE_PICK_TICKET_TTL_MS).toISOString()
       const id = ids.newId()
       h.createPickTicket({
         id, userId: member.userId, ticketHash: ticketHash(ticket), mode, maxItems: mode === 'folder' ? 1 : DRIVE_PICK_MAX_FILES,
@@ -691,6 +712,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         // An update keeps the Drive file's name (Drive is not asked to rename it): the receipt says the name it has.
         folderId: body.folderId, folderName: folderPick.name, name: target ? target.name : named.name, mimeType: form.driveMime, bytes: bytes.byteLength, sha256: body.sha256,
         state: 'sending', fileId: null, revisionId: null, link: null, reason: null, createdAt: now, finishedAt: null, skills: null, updatedFileId: targetId,
+        docFingerprint: null,
       }
 
       // The receipt first: the same request (the app's key: same file, folder, name, form and target) is answered with what it made.
@@ -740,10 +762,20 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         if (tf.id !== targetId || tf.trashed === true || tf.mimeType !== form.driveMime || !parents.includes(row.folderId) || !(isObj(tf.capabilities) && tf.capabilities.canEdit === true)) {
           return refuse('forbidden', fileRefused, { code: 'DRIVE_FILE_REFUSED' })
         }
-        // Someone changed it in Drive since ACB's last put (its revision is not the receipt's): never written over.
-        const current = driveRevisionOf(tf.headRevisionId, tf.version)
-        if (current === null || current !== target?.revisionId) {
-          return refuse('conflict', 'このファイルは、前に置いたあとに Google Drive で直されています。上書きすると直したところが消えるため、新しいファイルとして置いてください。', { code: 'DRIVE_FILE_CHANGED_SINCE' })
+        // Someone changed it in Drive since ACB's last put: never written over.
+        const changedSince = refuse('conflict', 'このファイルは、前に置いたあとに Google Drive で直されています。上書きすると直したところが消えるため、新しいファイルとして置いてください。', { code: 'DRIVE_FILE_CHANGED_SINCE' })
+        if (form.driveMime === DRIVE_DOC_MIME) {
+          // A Google document's `version` moves without any edit (real Google, 2026-11-12: opened once, nothing typed): its
+          // text is compared instead — exported now against the export kept right after ACB's last put. Never `version`.
+          const notVerifiable = (why: string) => refuse('conflict', `${why}上書きせずに、新しいファイルとして置いてください。`, { code: 'DRIVE_FILE_NOT_VERIFIABLE' })
+          if (!target?.docFingerprint) return notVerifiable('このファイルは、前に置いたときの中身を ACB が控えていないため、直されていないか確かめられません。')
+          const now = await docFingerprint(member.companyId, member.userId, targetId)
+          if (now === null) return notVerifiable('このファイルの今の中身を Google Drive から読めなかったため、直されていないか確かめられません。')
+          if (now !== target.docFingerprint) return changedSince
+        } else {
+          // A file with binary content: its head revision is the receipt's (it changes only with new content).
+          const current = driveRevisionOf(tf.headRevisionId, tf.version)
+          if (current === null || current !== target?.revisionId) return changedSince
         }
         if (actor.kind !== 'ai') return null
         // A file can be shared outside on its own, whatever its folder says: then updating it is sending outside.
@@ -796,6 +828,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           link: str(j.webViewLink) ?? target?.link ?? null, reason: null, finishedAt: clock.now(),
         }
         h.googleDrive.settlePut(id, settled)
+        await keepDocFingerprint(member.companyId, { ...row, ...settled })
         return ok({ drivePut: putView({ ...row, ...settled }), existing: false })
       }
       if (r.kind === 'unknown' || r.kind === 'server-error') {

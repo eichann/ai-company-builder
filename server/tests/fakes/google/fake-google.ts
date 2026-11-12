@@ -187,7 +187,7 @@ export interface FakeGoogleFaults {
   dropAnswerAfterSend(count?: number): void
   /** A refresh that asks for fewer scopes gets every granted one anyway (a Google that ignores `scope`). */
   ignoreRefreshScope: boolean
-  /** Drive opens this document (`files.get`) but refuses its export with 403 and this reason (Gemini's notes in production). */
+  /** Drive opens this document (`files.get`) but refuses its export with 403 and this reason (Gemini's notes in production; a Drive file too). */
   refuseExport(docId: string, reason?: string): void
   /** `documents.get` of this document answers 403 with this reason (the API not turned on, say). */
   refuseDocs(docId: string, reason?: string): void
@@ -255,6 +255,11 @@ export interface FakeGoogle {
   refuseKeepForever(id: string): void
   /** Someone edits this Drive file in Drive itself (a new revision / version, not ACB's). */
   editDriveFile(id: string, content: string): void
+  /**
+   * Someone opens this Google document in the browser and closes it without typing (real Google, 2026-11-12): its
+   * `version` moves, its content and revision history do not.
+   */
+  openDriveFile(id: string): void
   /** Every Drive file the app made (uploads), oldest first. */
   uploads(): Array<{ id: string; name: string; parents: string[]; mimeType: string }>
   /** A spreadsheet as it is now (null when unknown); for assertions. */
@@ -994,7 +999,14 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       const mimeType = c.req.query('mimeType')
       if (!f.mimeType.startsWith('application/vnd.google-apps.') || f.mimeType.endsWith('.folder')) throw apiError(403, 'Export only supports Docs Editors files.', 'fileNotExportable')
       if (mimeType !== 'text/plain' && mimeType !== 'text/csv') throw apiError(400, 'The requested conversion is not supported.', 'badRequest')
-      return c.body('\uFEFF' + f.content.toString('utf8').replace(/\r?\n/g, '\r\n'), 200, { 'content-type': `${mimeType}; charset=UTF-8` })
+      const refused = exportRefused.get(f.id)
+      if (refused) throw apiError(403, 'The user has not granted the app read access to the file.', refused)
+      const text = '\uFEFF' + f.content.toString('utf8').replace(/\r?\n/g, '\r\n')
+      if (Buffer.byteLength(text, 'utf8') > exportLimit) throw apiError(403, 'This file is too large to be exported.', 'exportSizeLimitExceeded')
+      // Real Google (2026-11-12): a document's `version` moves without any edit — after an import, when it is opened or
+      // read. The fake moves it on every read of its text, so nothing may treat `version` as "someone edited it".
+      if (f.mimeType === DOC_MIME) f.version += 1
+      return c.body(text, 200, { 'content-type': `${mimeType}; charset=UTF-8` })
     }
     const { d } = visibleDoc(c)
     const refusal = exportRefused.get(c.req.param('fileId') ?? '')
@@ -1600,6 +1612,12 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       f.content = Buffer.from(content, 'utf8')
       f.version += 1
       f.headRevisionId = `rev-${randomToken(8)}`
+    },
+    openDriveFile(id) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      f.version += 3
+      f.modifiedTime = iso(now())
     },
     shareDriveFile(id, permission) {
       const f = driveFiles.get(id)

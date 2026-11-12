@@ -39,6 +39,12 @@ export interface DrivePutRow {
   skills: SkillUse[] | null
   /** The Drive file this put gave a new revision (a file an earlier put of the member made); null: it made a new file. */
   updatedFileId: string | null
+  /**
+   * A Google document only: the sha256 of its text as Drive exported it (`text/plain`, BOM / CRLF cleaned) right after
+   * this put made or updated it — what an overwrite compares with, since a document's `version` moves without an edit
+   * (google-drive.md "A Google document's own changes"). Null: not a document, not read yet, or the export failed.
+   */
+  docFingerprint: string | null
 }
 
 /**
@@ -96,6 +102,8 @@ export interface GoogleDriveRepository {
   settlePut(id: string, fields: Pick<DrivePutRow, 'state' | 'fileId' | 'revisionId' | 'link' | 'reason' | 'finishedAt'>): boolean
   /** Removes a put still in `sending` (refused: nothing was made; its key is free again). */
   dropPut(id: string): void
+  /** Keeps a done put's document fingerprint (the export right after the put). */
+  setDocFingerprint(id: string, fingerprint: string): void
 
   createPickTicket(row: DrivePickTicketRow): void
   /** A ticket by the sha256 of its value (the Picker page's own request; no member known yet). */

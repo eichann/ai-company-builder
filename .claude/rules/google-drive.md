@@ -273,8 +273,24 @@ The AI reads and writes **only** the member's own live picks.
     an inline non-image link `[text](url)` (no title, not inside another bracket); CSS (`<style>`, `style=`), `srcset`,
     `http-equiv` and Markdown reference definitions (`[ref]: …`) are refused outright. 400 `DRIVE_EXTERNAL_RESOURCE` (the
     app says so first). Refused, never rewritten; a plain URL in a report must be written as a link.
-  - **Changed in Drive since ACB's last put** (its head revision / version is not the latest receipt's): 409
-    `DRIVE_FILE_CHANGED_SINCE` — nothing overwritten; put a new file.
+  - **Changed in Drive since ACB's last put**: 409 `DRIVE_FILE_CHANGED_SINCE` — nothing overwritten; put a new file. A
+    file with binary content (PDF, HTML, `.md`, `.txt`): its head revision is not the latest receipt's. A Google
+    document: its text is not what it was ("A Google document's own changes" below) — never its `version`.
+  - **A Google document's own changes** (real Google, 2026-11-12: the owner opened an imported document once and closed
+    it without typing; its 変更履歴 showed one version, the import, yet the update was refused `DRIVE_FILE_CHANGED_SINCE`):
+    Drive's `version` counts every change on the server, "even those not visible to the user" (opening, post-import
+    processing), so it is not a "someone edited it" signal. Instead, right after ACB's own put or update of a document
+    is `done` (answered, or found by `acbPutId` after a lost answer), the service exports it once (`files.export`
+    `text/plain`, the export `drive_read` uses; BOM / CRLF cleaned) and keeps the sha256 on the receipt
+    (`google_drive_puts.doc_fingerprint`, additive `migrateDrivePutDocFingerprints`; never answered). Before an update it
+    exports again with the member's own `drive.file` token (allowed: ACB made the file): equal → overwrite; different → 409
+    `DRIVE_FILE_CHANGED_SINCE`. **Fails closed**: no fingerprint on the receipt (every receipt from before this rule, or
+    an export that failed right after the put) or an export that fails now (refused, too large, not answered) → 409
+    `DRIVE_FILE_NOT_VERIFIABLE` 「…直されていないか確かめられません。上書きせずに、新しいファイルとして置いてください。」, nothing sent.
+    `text/plain` rather than `text/markdown`: the long-standing export, and it carries no image addresses (an export with
+    images names short-lived `googleusercontent` URLs that would differ every time). Accepted residual: an edit of
+    formatting or images alone does not change the text and is overwritten. `modifiedTime` is not used as a shortcut.
+    The fake moves a document's `version` on every export and `openDriveFile` (staging reproduces it).
   - **The replaced revision is kept**: before the update, a binary file's head revision gets `keepForever` (`PATCH
     /drive/v3/files/<id>/revisions/<rev>`, a `drive.file` call); refused or unanswered → 409 `DRIVE_REVISION_NOT_KEPT`,
     nothing overwritten. A Google document's revisions cannot be kept that way (Drive keeps them itself), so **a file a
@@ -286,7 +302,7 @@ The AI reads and writes **only** the member's own live picks.
 - Unverified against real Google (the fake converts and updates in place): that Drive converts `text/markdown` into a
   document (Google added Markdown import in 2024), and that `files.update` with HTML / Markdown media on a Google
   document replaces its content as a new version (the Drive API documents media upload on update for Workspace
-  types); that a converted document's `version` does not move by itself after the answer (else
+  types); that a document's `text/plain` export is the same from one read to the next while nobody edits it (else
   `DRIVE_FILE_CHANGED_SINCE` refuses an honest update — the safe side); that `keepForever` on a revision is answered as
   the fake does.
 
