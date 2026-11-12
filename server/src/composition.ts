@@ -32,7 +32,7 @@ import { localSecretCipher } from './adapters/local-secret-cipher'
 import { httpsUpstream } from './adapters/upstream-https'
 import { practiceUpstream } from './adapters/upstream-practice'
 import { diskPluginShelf } from './adapters/plugin-shelf'
-import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, driveDocSettleMs, PLUGINS_DIR, PRACTICE_UPSTREAMS, operatorUserIds, publicUrl, type PracticeUpstreams } from './lib/config'
+import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, driveDocTiming, PLUGINS_DIR, PRACTICE_UPSTREAMS, operatorUserIds, publicUrl, type PracticeUpstreams } from './lib/config'
 import type { BrokerCipherState } from './ports/key-broker'
 import type { UpstreamClient } from './ports/upstream'
 import { createAccessPolicy, type Member } from './services/access'
@@ -621,7 +621,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     sha256: bytes => createHash('sha256').update(bytes).digest('hex'),
     memberOf: (companyId, userId) => access.memberOf(companyId, userId),
     pickTickets: sqlitePickTicketDirectory(conn),
-    docSettleMs: driveDocSettleMs(),
+    docTiming: () => driveDocTiming(),
     // The practice Google serves a stand-in Picker script on staging (tests/fakes/google).
     pickerScriptOrigin: practiceGoogle
       ? `${practiceGoogle.target.protocol}//${practiceGoogle.target.hostname === 'host.docker.internal' ? 'localhost' : practiceGoogle.target.hostname}:${practiceGoogle.target.port}`
