@@ -35,7 +35,7 @@ import {
   JOB_ACTOR, JOB_MADE_BEFORE_LISTED, JOB_PC_STEP, isOccurrenceId, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult,
   type JobDefinition, type JobDeliveryPlace, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
-import type { JobMeetingView, JobTurnView } from '../../shared/types/jobs'
+import type { JobMadeBefore, JobMeetingView, JobTurnView } from '../../shared/types/jobs'
 import type { Clock } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { JobOccurrenceRow, JobRow, JobVersionRow } from '../ports/jobs'
@@ -70,6 +70,12 @@ export interface JobRunDeps {
   places?: {
     live(companyId: string, userId: string, place: JobDeliveryPlace): boolean
     linkToTask(member: Member, place: JobDeliveryPlace, runId: string, recordId: string): void
+    /**
+     * After 「もう一度」: the file in the chosen place that something an earlier run of the occurrence made is
+     * (`ref`, the run operation's reference: a Drive put's receipt → `{ id: <Drive file id>, name }`), only when it is
+     * the member's own, done, and in that place now — or null. Absent → none resolved (the turn names the ref only).
+     */
+    madeFile?(member: Member, place: JobDeliveryPlace, ref: { kind: string; id: string }): { id: string; name: string } | null
   }
 }
 
@@ -277,9 +283,23 @@ export function createJobRuns(deps: JobRunDeps) {
     return f && f.occ.state === 'running' && f.occ.runId === run.id ? f : null
   }
 
-  /** What earlier runs made, for the turn: the first `JOB_MADE_BEFORE_LISTED`, and how many in all when more. */
-  function madeBeforeOf(f: Found): Pick<JobTurnView, 'madeBefore' | 'madeBeforeTotal'> {
-    const made = madeBefore(f.handle, f.occ.id)
+  /**
+   * What earlier runs made, for the turn: the first `JOB_MADE_BEFORE_LISTED`, and how many in all when more. A thing
+   * that is a file in the job's chosen place carries that file (`file`: the responsible person's own — this is their
+   * turn; an owner / admin's view counts kinds only, job-retry.ts `viewOf`), so the run can update it; two puts of one
+   * file (made, then updated) are one thing.
+   */
+  function madeBeforeOf(member: Member, f: Found): Pick<JobTurnView, 'madeBefore' | 'madeBeforeTotal'> {
+    const place = placeOf(f)
+    const files = new Set<string>()
+    const made: JobMadeBefore[] = []
+    for (const m of madeBefore(f.handle, f.occ.id)) {
+      const file = place && m.ref && deps.places?.madeFile ? deps.places.madeFile(member, place, m.ref) : null
+      if (!file) { made.push(m); continue }
+      if (files.has(file.id)) continue
+      files.add(file.id)
+      made.push({ ...m, file })
+    }
     if (made.length === 0) return {}
     return { madeBefore: made.slice(0, JOB_MADE_BEFORE_LISTED), ...(made.length > JOB_MADE_BEFORE_LISTED ? { madeBeforeTotal: made.length } : {}) }
   }
@@ -297,7 +317,7 @@ export function createJobRuns(deps: JobRunDeps) {
       // 「もう一度」 (B PR 5b): the app counts its attempts per occurrence and press.
       ...(f.occ.retries ? { retries: f.occ.retries } : {}),
       // After a press: what the earlier runs already made outside, so the AI does not make it again blindly.
-      ...(f.occ.retries ? madeBeforeOf(f) : {}),
+      ...(f.occ.retries ? madeBeforeOf(member, f) : {}),
     }
   }
 

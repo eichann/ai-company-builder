@@ -447,3 +447,86 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
     }
   })
 })
+
+describe('「もう一度」 after a run put a file (staging 2026-11-12: the retried run could not tell which Drive file it had made)', () => {
+  /** Now fixed at 12:00 Tokyo no later than the real time (picks and Google's tokens were made then): the 09:00 slot is the newest. */
+  function atNoon(): { noon: number; slot: string } {
+    const real = Date.now()
+    let noon = Date.parse(`${new Date(real + 9 * 3_600_000).toISOString().slice(0, 10)}T03:00:00.000Z`)
+    if (noon > real) noon -= DAY
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(noon)
+    return { noon, slot: `${new Date(noon + 9 * 3_600_000).toISOString().slice(0, 10)}T09:00` }
+  }
+  /** A due occurrence of today's slot (the job's newest), its deadline the same day. */
+  function todaysOccurrence(job: string, noon: number, slotName: string): string {
+    const id = `occ.${(0xe000 + ++slot).toString(16).padStart(32, '0')}`
+    db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at)
+      VALUES (?, ?, ?, 1, ?, 'Asia/Tokyo', ?, ?, 'due', ?, ?)`).run(CO, id, job, slotName, new Date(noon - 3 * 3_600_000).toISOString(),
+      new Date(noon + 6 * 3_600_000).toISOString(), new Date(noon).toISOString(), new Date(noon).toISOString())
+    return id
+  }
+  const failRun = (run: Json) => as('jd-alice', 'POST', `/ai-runs/${run.id}/finish`, { generation: run.generation, outcome: 'failed', failure: { class: 'bad-input', code: 'NO_INFO' } })
+  const turnOf = async (occ: string) => (await as('jd-alice', 'GET', '/me/job-turns')).body.data.turns.find((t: Json) => t.occurrenceId === occ)
+
+  it('the responsible person\'s retried turn names the Drive file (id and name) so the run updates it; the owner\'s view stays kinds and counts', async () => {
+    try {
+      const { noon, slot: today } = atNoon()
+      const job = await approvedJob()
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      const occ = todaysOccurrence(job, noon, today)
+      // The first run puts its weekly report, then fails: a person looks.
+      const first = await claim(occ)
+      expect(first.status, first.text).toBe(201)
+      const t1 = await runToken(first.body.data.run)
+      const put = (await ai(t1, 'POST', '/google/drive/put', putBody({ name: '週の報告.md' }))).body.data.drivePut
+      expect(put).toMatchObject({ state: 'done', name: '週の報告' })
+      expect((await failRun(first.body.data.run)).status).toBe(200)
+      expect(occOf(occ)).toMatchObject({ state: 'needs_person' })
+      // The owner's view and press: kinds and counts only — no file id, file name, folder or receipt.
+      const viewed = (await as('jd-owner', 'GET', `/jobs/${job}/occurrences`)).body.data.occurrences.find((o: Json) => o.id === occ)
+      expect(viewed.madeBefore).toEqual([{ kind: 'drive-put', count: 1 }])
+      const pressed = await as('jd-owner', 'POST', `/jobs/${job}/occurrences/${occ}/retry`)
+      expect(pressed.status, pressed.text).toBe(200)
+      for (const seen of [JSON.stringify(viewed), pressed.text]) {
+        for (const secret of [put.fileId, '週の報告', '提案書', put.id, FOLDER]) expect(seen).not.toContain(secret)
+      }
+      // Her turn names the file the earlier run made: what updateFileId takes, with the name it was put with.
+      expect((await turnOf(occ)).madeBefore).toEqual([{ kind: 'drive-put', ref: { kind: 'drive-put', id: put.id }, file: { id: put.fileId, name: '週の報告' } }])
+      // The retried run updates that same file (a new version, nothing uploaded as a new file).
+      const second = await claim(occ)
+      expect(second.status, second.text).toBe(201)
+      expect(second.body.data.turn.madeBefore[0].file).toEqual({ id: put.fileId, name: '週の報告' })
+      const t2 = await runToken(second.body.data.run)
+      const next = Buffer.from('# 週の報告（直し）\n')
+      const updated = await ai(t2, 'POST', '/google/drive/put', putBody({ name: '週の報告.md', updateFileId: put.fileId, sha256: sha(next), contentBase64: next.toString('base64') }))
+      expect(updated.body.data.drivePut, updated.text).toMatchObject({ state: 'done', fileId: put.fileId, revisionId: 'version:2' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a receipt outside the chosen folder is not named as a file of the place', async () => {
+    try {
+      const { noon, slot: today } = atNoon()
+      const job = await approvedJob()
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      const occ = todaysOccurrence(job, noon, today)
+      const run = (await claim(occ)).body.data.run
+      // An operation of the run naming her own done receipt in another folder (not the job's place).
+      const at = new Date(noon).toISOString()
+      db.prepare(`INSERT INTO google_drive_puts (id, company_id, user_id, request_key, actor_kind, conversation_id, run_id, folder_id, folder_name, name, mime_type, bytes, sha256, state,
+        file_id, revision_id, link, reason, created_at, finished_at) VALUES ('drive-put-otherfolder-01', ?, 'jd-alice', 'key-otherfolder-01', 'ai', NULL, ?, ?, '外のフォルダ', '別の.pdf',
+        'application/pdf', 1, ?, 'done', 'fake-upload-otherfolder-01', 'rev-1', NULL, NULL, ?, ?)`).run(CO, run.id, OTHER_FOLDER, 'c'.repeat(64), at, at)
+      db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, ref_kind, ref_id, created_at, updated_at)
+        VALUES (?, ?, 'p1', 'f', 'drive-put', 'done', 1, 'drive-put', 'drive-put-otherfolder-01', ?, ?)`).run(CO, run.id, at, at)
+      expect((await failRun(run)).status).toBe(200)
+      expect((await as('jd-owner', 'POST', `/jobs/${job}/occurrences/${occ}/retry`)).status).toBe(200)
+      const turn = await turnOf(occ)
+      expect(turn.madeBefore).toEqual([{ kind: 'drive-put', ref: { kind: 'drive-put', id: 'drive-put-otherfolder-01' } }])
+      expect(JSON.stringify(turn)).not.toContain('fake-upload-otherfolder-01')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

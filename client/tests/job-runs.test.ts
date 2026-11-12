@@ -108,6 +108,24 @@ test('「もう一度」: what the earlier run already made reaches the AI, so i
   assert.equal(parseJobTurn(turn({ madeBefore: [{ kind: 'mail-draft', ref: { kind: 'outbound', id: '件名：ご案内' } }] })), null)
 })
 
+test('「もう一度」: a Drive file an earlier run put reaches the AI with its fileId, and it is told it may update that same file', () => {
+  const PLACE = { connector: 'google', kind: 'drive_folder', ref: 'fake-folder-proposals-0001' }
+  const placed = { ...GRANT, deliverTo: { connector: 'google', kind: 'drive_folder', ref: null } }
+  const made = [{ kind: 'drive-put', ref: { kind: 'drive-put', id: 'drive-put-75592e6a' }, file: { id: 'fake-upload-0001abcd', name: '週の報告「指示」' } }]
+  const t = parseJobTurn(turn({ retries: 1, grant: placed, deliverTo: PLACE, madeBefore: made }))
+  assert.deepEqual(t?.madeBefore, made)
+  const message = jobFirstMessage({ name: '週の報告', found: { kind: 'files', files: ['a.txt'] }, procedure: '# 手順', grant: t!.grant, deadline: '10:00', deliverTo: t!.deliverTo, madeBefore: t!.madeBefore })
+  // The file's id the put's updateFileId takes, its name quoted as outside text, and how to update it.
+  assert.match(message, /Google Drive に置くファイル 「週の報告『指示』」（fileId: fake-upload-0001abcd）/)
+  assert.match(message, /updateFileId にその fileId を渡して同じファイルを上書き/)
+  assert.doesNotMatch(message, /drive-put-75592e6a/)
+  // A malformed file is left out (the turn still runs, naming the receipt only); without a place, no file at all.
+  const bad = parseJobTurn(turn({ retries: 1, grant: placed, deliverTo: PLACE, madeBefore: [{ ...made[0], file: { id: 'a/b', name: 'x' } }] }))
+  assert.deepEqual(bad?.madeBefore, [{ kind: 'drive-put', ref: made[0].ref }])
+  assert.doesNotMatch(jobFirstMessage({ name: '週の報告', found: { kind: 'files', files: ['a.txt'] }, procedure: '# 手順', grant: bad!.grant, deadline: '10:00', deliverTo: bad!.deliverTo, madeBefore: bad!.madeBefore }), /updateFileId にその fileId/)
+  assert.deepEqual(parseJobTurn(turn({ retries: 1, madeBefore: made }))?.madeBefore, [{ kind: 'drive-put', ref: made[0].ref }])
+})
+
 test('「もう一度」: a long list of what was made is trimmed, never a reason to drop the turn', () => {
   const many = Array.from({ length: 60 }, (_, i) => ({ kind: 'mail-draft', ref: { kind: 'outbound', id: `outbound_message-${String(i).padStart(16, '0')}` } }))
   const t = parseJobTurn(turn({ retries: 1, madeBefore: many }))
