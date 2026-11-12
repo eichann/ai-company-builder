@@ -18,7 +18,7 @@ import { gitCheckPoint, newFilesByGit, newFilesByTime } from '../electron/featur
 import { createRecordsApi } from '../electron/records/api'
 import { createRunRegistry } from '../electron/records/runs'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
-import { jobFirstMessage, jobToolAccess, jobWriteArea, parseJobTurn, parseJobTurns } from '../shared/ai-turn-steps/job'
+import { jobFirstMessage, jobToolAccess, jobTurnCandidate, jobWriteArea, parseJobTurn, parseJobTurns } from '../shared/ai-turn-steps/job'
 import type { JobGrant } from '../../shared/core/jobs'
 import { aiTurnQueue } from '../shared/ai-turn-steps/registry'
 import { freshLog, handUrgent } from '../src/features/chat/aiTurns'
@@ -36,7 +36,7 @@ const turn = (over: Record<string, unknown> = {}) => ({
   checkSince: '2026-11-10T00:00:00.000Z', procedure: { source: 'company_skill', skill: 'interview-report', fingerprint: 'b'.repeat(40) }, grant: GRANT, ...over,
 })
 
-function fakeServer(opts: { claim?: number; renew?: number; finish?: number; createdAt?: string; serverNow?: string; autoRun?: boolean; turnOver?: Record<string, unknown> } = {}) {
+function fakeServer(opts: { claim?: number; claimCode?: string; renew?: number; finish?: number; createdAt?: string; serverNow?: string; autoRun?: boolean; turnOver?: Record<string, unknown> } = {}) {
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = []
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -49,7 +49,7 @@ function fakeServer(opts: { claim?: number; renew?: number; finish?: number; cre
     if (p === '/task-settings') return json(200, { data: { settings: { autoRun: { enabled: opts.autoRun ?? true } } } })
     if (p === '/me/work-switches') return json(404, { code: 'NOT_FOUND' })
     if (p === '/job-run-claims') {
-      if (opts.claim && opts.claim !== 201) return json(opts.claim, { code: 'RUN_CLAIMED' })
+      if (opts.claim && opts.claim !== 201) return json(opts.claim, { code: opts.claimCode ?? 'RUN_CLAIMED' })
       const serverNow = opts.serverNow ?? new Date().toISOString()
       return json(201, { data: { run: { id: 'run-j1', generation: 1, createdAt: opts.createdAt ?? serverNow, updatedAt: serverNow }, turn: turn({ state: 'running', ...opts.turnOver }) } })
     }
@@ -83,6 +83,61 @@ test('the turns are parsed with the one definition parser: a check this app cann
   assert.equal(parseJobTurn(turn({ occurrenceId: 'task-123456' })), null)
   assert.equal(parseJobTurn(turn({ meetings: [{ id: 'not a record', title: 'x', at: '2026-11-10T01:00:00.000Z' }] })), null)
   assert.equal(parseJobTurns({ nope: 1 }), null)
+})
+
+test('「もう一度」 (B PR 5b): the press count reaches the queue, so a press is tried again on this PC today', () => {
+  const pressed = parseJobTurn(turn({ retries: 2 }))
+  assert.equal(pressed?.retries, 2)
+  assert.equal(jobTurnCandidate(pressed!).attemptKey, `${pressed!.occurrenceId}#2`)
+  // Seen taken (another PC held it) before the press: the runner remembers it per id and version — the press is another.
+  assert.equal(jobTurnCandidate(pressed!).version, 3)
+  assert.equal(jobTurnCandidate(parseJobTurn(turn())!).version, 1)
+  // Never pressed, or not a count: counted under the occurrence as before.
+  for (const retries of [undefined, 0, -1, 1.5, '2']) assert.equal(jobTurnCandidate(parseJobTurn(turn({ retries }))!).attemptKey, undefined)
+})
+
+test('「もう一度」: what the earlier run already made reaches the AI, so it does not make it again blindly', () => {
+  const made = [{ kind: 'mail-draft', ref: { kind: 'outbound', id: 'outbound_message-0000000000000001' } }]
+  const t = parseJobTurn(turn({ retries: 1, madeBefore: made }))
+  assert.deepEqual(t?.madeBefore, made)
+  const message = jobFirstMessage({ name: '面談の報告', found: { kind: 'files', files: ['a.txt'] }, procedure: '# 手順', grant: GRANT, deadline: '10:00', madeBefore: t!.madeBefore })
+  assert.match(message, /前回すでに次のものを作りました/)
+  assert.match(message, /メールの下書き（outbound_message-0000000000000001）/)
+  assert.doesNotMatch(jobFirstMessage({ name: '面談の報告', found: { kind: 'files', files: ['a.txt'] }, procedure: '# 手順', grant: GRANT, deadline: '10:00' }), /前回すでに/)
+  // Ids only: text where an id belongs refuses the turn.
+  assert.equal(parseJobTurn(turn({ madeBefore: [{ kind: 'mail-draft', ref: { kind: 'outbound', id: '件名：ご案内' } }] })), null)
+})
+
+test('「もう一度」: a long list of what was made is trimmed, never a reason to drop the turn', () => {
+  const many = Array.from({ length: 60 }, (_, i) => ({ kind: 'mail-draft', ref: { kind: 'outbound', id: `outbound_message-${String(i).padStart(16, '0')}` } }))
+  const t = parseJobTurn(turn({ retries: 1, madeBefore: many }))
+  assert.equal(t?.madeBefore?.length, 20)
+  assert.equal(t?.madeBeforeTotal, 60)
+  const capped = parseJobTurn(turn({ retries: 1, madeBefore: many.slice(0, 20), madeBeforeTotal: 25 }))
+  assert.equal(capped?.madeBeforeTotal, 25)
+  const message = jobFirstMessage({ name: '面談の報告', found: { kind: 'files', files: ['a.txt'] }, procedure: '# 手順', grant: GRANT, deadline: '10:00', madeBefore: capped!.madeBefore, madeBeforeTotal: capped!.madeBeforeTotal })
+  assert.match(message, /（ほか 5 件）/)
+})
+
+test('waiting behind an earlier occurrence (JOB_EARLIER_RUNNING) is "try later", never taken', async () => {
+  const server = fakeServer({ claim: 409, claimCode: 'JOB_EARLIER_RUNNING' })
+  const { claims } = claimsFor(server)
+  await claims.jobTurns(COMPANY)
+  assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00010'), { claimed: false, reason: 'unavailable', retryAfterMs: 60_000 })
+  // Another refusal is still taken.
+  const other = fakeServer({ claim: 409 })
+  const second = claimsFor(other).claims
+  await second.jobTurns(COMPANY)
+  assert.deepEqual(await second.claim(COMPANY, OCC, 1, 'conv-job-00011'), { claimed: false, reason: 'taken' })
+})
+
+test('「もう一度」: the claim\'s first message names what the earlier run made', async () => {
+  const made = [{ kind: 'mail-draft', ref: { kind: 'outbound', id: 'outbound_message-0000000000000001' } }]
+  const server = fakeServer({ turnOver: { retries: 1, madeBefore: made } })
+  const { claims } = claimsFor(server)
+  await claims.jobTurns(COMPANY)
+  const r = await claims.claim(COMPANY, OCC, 2, 'conv-job-00009')
+  assert.ok(r.claimed && r.message?.includes('前回すでに次のものを作りました') && r.message.includes('outbound_message-0000000000000001'))
 })
 
 test('the run\'s tools: only what its grant names and the server would let through; minutes only with the meeting check', () => {

@@ -21,6 +21,7 @@ paths:
   - "client/electron/features/ai-turns/job-runs.ts"
   - "client/electron/features/ai-turns/job-report-tool.ts"
   - "client/tests/job-runs.test.ts"
+  - "server/src/services/job-retry.ts"
 ---
 
 # Scheduled jobs (定期の仕事, B 「実行を記録から分ける」)
@@ -34,7 +35,8 @@ operation (a やること) — no AI, no claim. PR 4: the screens (admin 「定�
 the notice 「受け取りが要ります」. PR 5a: the PC's (a) claim and the grant at every call (design memo §4-2) on the
 server, and a Skill pinned from the Skill shelf. PR 5a-2: the clock makes PC occurrences, the app runs them ("The app's
 runner"), the meeting check ("The meeting check"), and the admin form makes PC jobs. PR 5a-3: a deliverable place
-outside ("A deliverable place outside": a Drive folder the responsible person picks).** Next: 5b — 「もう一度」.
+outside ("A deliverable place outside": a Drive folder the responsible person picks). PR 5b: 「もう一度」 ("「もう一度」"
+below).**
 
 ## Tables (`server/src/db/schema/jobs.ts`, handle `jobs`, `ports/jobs.ts`, `adapters/sqlite/jobs.ts`)
 
@@ -56,7 +58,8 @@ New tables only (additive; `CREATE … IF NOT EXISTS`, nothing else changes):
   `UNIQUE (company_id, job_id, due_slot)`, `time_zone`, `due_at`, `expires_at`, `state`
   (due / running / done / nothing / needs_person / skipped / expired / held), `run_id`, `outcome_code`, and (5a-2, additive: `migrateJobOccurrenceCheckedUntil`) `checked_until` — where its check
   stopped looking, set once at the first claim (`moveOccurrence`'s `checkedUntil`, `COALESCE`: never moved), and
-  `checked_commit` — the commit a `new_files` check in the shared folder looked up to (the app's, with that claim).
+  `checked_commit` — the commit a `new_files` check in the shared folder looked up to (the app's, with that claim),
+  and (5b, additive: `migrateJobOccurrenceRetries`) `retries` (0 = never), `retried_by`, `retried_at` — 「もう一度」.
   Written by the clock and the runner (3b, below).
 - `ai_job_settings`: 「定期の仕事をすべて止める」 (`stopped`; no row = not stopped).
 
@@ -267,7 +270,7 @@ Rolling forward again: a `due` one left behind expires (told) at the next clock 
 `JOB_OCCURRENCE_NOTIFICATION_KINDS`, on by default): to the responsible person (while a member) and the
 job's creator (while an owner / admin), in the same transaction as the occurrence's change, then the
 bare `notifications` push (both recipient checks are tested: a creator demoted to member and a
-responsible person who left are not written to). Key `<kind>:<job>:<occurrence>` (once per occurrence and member). Text built
+responsible person who left are not written to). Key `<kind>:<job>:<occurrence>` (once per occurrence and member; `…:<retries>` after a 「もう一度」, 5b). Text built
 when read (`notifications.ts` `jobOccurrenceText`, through `jobs.occurrenceNotice`): shown only while
 the reader may see the job (owner / admin, or its responsible person), its name 「定期の仕事」 when a
 place the newest version names is not theirs to read. **No `subject_kind` column on `notifications`**:
@@ -293,7 +296,8 @@ POST /ai-runs/:runId/renew | finish | retry | …/reconcile        as for any ru
   job whose version names **the caller** as responsible person — anyone else, an owner / admin included,
   another company's id, a server job's occurrence: the one 404 `JOB_NOT_FOUND`; `due`, or `running` with its
   run claimable again (the claim then answers the run core's `RUN_CLAIMED` / `RUN_WAITING` /
-  `RUN_NEEDS_RECONCILE`), else 409 `JOB_TURN_GONE`; not past `expires_at` (`JOB_TURN_EXPIRED`); the
+  `RUN_NEEDS_RECONCILE`), else 409 `JOB_TURN_GONE`; a `due` one not while an earlier occurrence of the job is `running`
+  (`JOB_EARLIER_RUNNING`, 5b "Never side by side"); not past `expires_at` (`JOB_TURN_EXPIRED`); the
   company's jobs not stopped (`JOB_STOPPED`); the job `active` (`JOB_PAUSED`); the occurrence's version
   still the approved one (`JOB_VERSION_CHANGED`, the `due` occurrence held); its consent accepted
   (`JOB_NOT_ACCEPTED`); the responsible person's rights cover every place it names
@@ -355,11 +359,12 @@ POST /ai-runs/:runId/renew | finish | retry | …/reconcile        as for any ru
 - **The clock**, for a `running` occurrence, in this order: past the deadline → as above; its run waiting for
   a person to reconcile an outside operation and out of time (deadline or `expires_at`) → `needs_person`
   `RESULT_UNKNOWN`, told — the run stays `waiting_reconcile` for that person (an upper bound instead of a
-  reconcile entry point for the app: `GET /ai-runs` lists record runs only, and `POST /ai-runs/:runId/
-  operations/:key/reconcile` already works by run id for whoever shows it — 5a-2 / 5b); past `expires_at`
+  reconcile entry point for the app: `GET /ai-runs` lists record runs only; an owner / admin reconciles it on the
+  occurrence, 5b "「もう一度」"); past `expires_at`
   with its run held by nobody (lease over, retried later, given back) → `expired`, told, the run ended. A run
   held within its deadline finishes as it will.
-- **Not here**: 「もう一度」 (5b): a `needs_person` occurrence stays so even when its run is given back.
+- A `needs_person` occurrence stays so even when its run is given back (a run-level 「もう一度」 claims nothing: the
+  claim refuses an occurrence that is not `due` / `running`); only the occurrence's 「もう一度」 (5b, below) runs it again.
 
 ## A deliverable place outside (PR 5a-3, owner decisions 2026-11-11)
 
@@ -520,7 +525,7 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   in the past by nature), do not count toward nor wait for the records' daily limit (`recordStarted(…, job)`), and
   their failures are the server's to place — no hand-off, not one of the records' failures in a row
   (`jobOutcome`); Claude's usage limit still pauses everything. Each occurrence is tried at most twice a day on this PC
-  (`MAX_ATTEMPTS_PER_RECORD`). A claim that wins after the runner gave up waiting (`START_TIMEOUT_MS`) is settled at
+  (`MAX_ATTEMPTS_PER_RECORD`) — per press of 「もう一度」 (`attemptKey`, 5b). A claim that wins after the runner gave up waiting (`START_TIMEOUT_MS`) is settled at
   once (records too), instead of a run held with no AI.
 - **Not enforced (decision)**: `grant.limits.runsPerDay` (one occurrence per slot; a retried run is the same one).
 - **Known limit (decision)**: a member invited to a meeting **after** its record was made (「招待する」, or the calendar
@@ -528,9 +533,8 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
 - **An unknown outside result** (`RESULT_UNKNOWN`, decision for the owner): a job's run reaches outside only by a
   mail **draft** (`outbound: draft_only`), so an unknown result means "a draft may or may not have been made". No
   screen is added: the occurrence's state and the bell's `job_failed` tell the responsible person and the job's
-  creator; the person looks at 送るもの (the drafts) themselves. Reconciling the run (`POST /ai-runs/:runId/
-  operations/:key/reconcile`) would change nothing for the occurrence (it stays `needs_person`; 「もう一度」 is 5b), so
-  its entry point comes with 5b.
+  creator; the person looks at 送るもの (the drafts) themselves, and an owner / admin records what they found on the
+  occurrence (5b, "「もう一度」": 作られていた／作られていなかった) before pressing 「もう一度」.
 
 ## Occurrences in the API (3b)
 
@@ -610,13 +614,90 @@ its responsible person and has not accepted it, the job not retired — so an ol
 someone else, a newer version approved) is not shown. Its name follows `HIDDEN_JOB_NAME` (the newest
 version names a place they cannot read → 「定期の仕事」).
 
-## 「もう一度」 (not built)
+## 「もう一度」 (PR 5b, `services/job-retry.ts`, owner decisions 2026-11-12)
 
-Re-running an occurrence that ended `needs_person` / `expired` / `skipped` needs owner decisions (a new
-`expires_at`, whether an absence skip may run, who is told on a second failure — the notice key is once
-per occurrence). Recommended: owner/admin only, `needs_person` and `expired` only, the same occurrence
-back to `due` with a fresh window while the job is active, accepted, not stopped and still on the same
-approved version; the task id stays `occurrenceTaskId` (still at most one やること).
+```
+POST /jobs/:jobId/occurrences/:occurrenceId/retry                          owner/admin → { occurrence: JobOccurrenceView }
+POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }   owner/admin → { occurrenceId }
+```
+
+- **On the occurrence, not the run** (unlike `POST /ai-runs/:runId/retry`, the run's own member's): an occurrence may
+  have no run (expired unclaimed, a server job's refusal), the press acts on the occurrence (its deadline, its one
+  やること), and the person pressing is not the run's. **Who**: owner / admin only — the responsible person who is a
+  member, a 部署の管理役, anyone else: 403 `JOBS_FORBIDDEN` before anything is read (permission matrix rows); another
+  job's or company's occurrence, or none: the one 404 `JOB_NOT_FOUND` (`CROSS`).
+- **When** (`blockOf`, one order for the view and the press; 409 with the code and `jobRetryBlockText`): the state
+  `needs_person` / `expired` (`JOB_RETRY_STATES`; never `skipped` — an absence or a newer occurrence decided it —, `held`,
+  or one that ran: `NOT_RETRYABLE`); pressed fewer than `JOB_RETRY_MAX` (3) times (`RETRY_LIMIT`, decision for the
+  owner: each press gives a fresh run with its own approved minutes, so the cap bounds what one slot can cost;
+  `runsPerDay` stays not enforced); **the job's newest occurrence, and no later slot arrived** (`NOT_LATEST`, also when
+  the clock has not made the later slot's occurrence yet — `slotsOf().latest`, the clock's own `latestJobSlot`: a later
+  one's check starts where the last one that ran stopped, so it covers this window — running it again would hand the
+  same files or meetings to a second run); **time for a whole run before the next slot** (`NEXT_SLOT_SOON`
+  「次の回が近いため、もう一度はできません」: the new deadline below would leave less than `JOB_RETRY_MIN_CLAIM_MINUTES` (5) to
+  claim it); the version still the approved one (`JOB_VERSION_CHANGED`); the company's jobs not stopped (`JOB_STOPPED`), the job `active` (`JOB_PAUSED`), the approved consent accepted (`JOB_NOT_ACCEPTED`), the
+  responsible person's rights now (`runnerRefusal` → `JOB_GRANT_EXCEEDS`; nothing is paused here, the claim finds it
+  as always), for a PC job the emergency stop covering them (`unattendedRunStopped`, the claim's own check →
+  `AI_STOPPED`; a server job runs no AI), a shelf Skill's pinned version kept (`JOB_SKILL_MISSING`), the chosen place
+  outside usable (`JOB_PLACE_NOT_USABLE`), and **no outside operation of its run whose result nobody knows**
+  (`JOB_RESULT_UNKNOWN`: 結果が分からないうちは再開しない). Both state checks (here and the write's compare-and-set) stop
+  a wrong state alone, so removing one is not caught by a test.
+- **The press** (one transaction, read and checked inside it): its previous run (if any) is **closed** — `done`,
+  event `finished` `RETRIED`, its tokens fenced and its own 「もう一度」 `RUN_DONE` — so the next claim makes a **new
+  run**: its hard deadline (`pcRunDeadlineMs`) counts from that claim (a person's press is a fresh chance; the old
+  "retries included" holds for the run's own retries). The occurrence `due`, no run, no outcome, **`expires_at` = the earlier of now
+  + the pinned `missed.expiresAfterMinutes` and the job's next slot − the approved `limits.minutes`**
+  (`jobRetryExpiresAt`; `slotsOf().nextAt` from composition, the clock's zone and days off): a run claimed by that
+  deadline ends by the next slot — its approved minutes are a hard limit from its claim. `due_at`, the slot and
+  `checked_until` / `checked_commit` stay, so it looks at the same window; `retries` + 1, `retried_by` / `retried_at`
+  (who pressed it, as `approved_by` / `paused_by` keep theirs).
+  Then the server's runner (placement `e`) or the responsible person's app (`GET /me/job-turns` → `POST
+  /job-run-claims`, every claim check again — an absence that day still skips it) takes it; the やること is still
+  `occurrenceTaskId` (one per occurrence). Nobody is told of the press (the app polls its turns every minute).
+- **Never side by side** (enforced at the claim, for every occurrence, not only a pressed one): a `due` occurrence of a
+  job is not claimable while an earlier occurrence of the same job is `running` (409 `JOB_EARLIER_RUNNING`
+  「前の回がまだ動いているため…」, nothing written; `GET /me/job-turns` leaves it out) — the earlier one ends within its hard
+  deadline (the clock ends it after), and the later one's check then starts where it stopped. This also closes the
+  older case of a run whose app held its lease past the next slot. A later occurrence the clock makes while an earlier
+  one is only `due` supersedes it, as before (`latest_only`). A later occurrence waiting behind a running earlier one can
+  expire while it waits: safe — the responsible person and the creator are told (`job_expired`), and it is the job's
+  newest occurrence, so an owner / admin can press 「もう一度」 on it. The app treats `JOB_EARLIER_RUNNING` as "try later"
+  (`EARLIER_RUNNING_RETRY_MS`, 1 minute), never as taken.
+- **What earlier runs made** (`madeBefore`, `job-retry.ts`): the outside operations of the occurrence's earlier runs
+  (`ai_runs` of that subject, closed ones too: `AiRunRepository.runsOf`) that are known `done` — answered, or reconciled
+  as done (作られていた) — one per thing made (a draft's later versions are the same draft). A new run starts with an
+  empty operation table, so nothing stops it making them again: the owner / admin's view counts them by kind
+  (`madeBefore: [{ kind, count }]`, no id, title or place — they are the responsible person's own, an owner-only draft, a
+  file in their picked folder) and the confirmation says 「前回すでにメールの下書きを1件作っています。もう一度すると、また作られる
+  ことがあります。」 (`jobMadeBeforeText`); the next run's turn carries them with their ids (`JobTurnView.madeBefore`, the
+  responsible person's own things; the first `JOB_MADE_BEFORE_LISTED` (20), with `madeBeforeTotal` when there are more)
+  and its first message says 「前回すでに次のものを作りました（同じものをもう一つ作らないでください…）」 (`jobFirstMessage`, 「（ほか
+  N 件）」 for the rest; the app takes ids only, `SHORT_ID`, and trims a longer list instead of dropping the turn).
+- **Reconcile** (`reconcile`): only on a `needs_person` / `expired` occurrence (else 409 `NOT_RETRYABLE`), the body
+  `{ done: boolean }` (400), an operation of its PC run whose result is unknown (else 404 `OPERATION_NOT_FOUND`; one
+  still marked in flight on a run that no longer runs is made `unknown` first, as a finish does — never stuck); the
+  run core's reconciliation (`aiRuns.reconcileFor`, shared with `reconcile`: `reconciled_by` = the owner / admin, a run
+  `waiting_reconcile` with nothing unknown left → `open`). The admin console asks them to have the responsible person
+  look first (an owner / admin cannot see the person's drafts). The in-flight mark and the answer are one transaction.
+- **The view** (`GET /jobs/:jobId/occurrences`, owners / admins only, `JobServiceDeps.occurrenceRetry` → `viewOf`):
+  `retries`, `retriedBy`, `retriedAt`, and on a `needs_person` / `expired` one `retry` (`{ allowed: true }` or
+  `{ allowed: false, why }`), `unknownOperations` (key and kind only) and `madeBefore` (kinds and counts). The responsible
+  person's view has none.
+- **Told again, in its own words**: an occurrence notice's key is `<kind>:<job>:<occurrence>:<retries>:<code>`, read
+  from the occurrence as written in that transaction — a second failure after a press is told once more, and the bell
+  words an older notice by the code it was written with (a press clears the occurrence's own code); a key without a code
+  (written before 5b) reads the occurrence's. The bell reads the job and occurrence from the first two parts, an older
+  build too.
+- **The app** (`client/shared/ai-turn-steps/job.ts`): the turn's `retries` (additive) makes the queue's `attemptKey`
+  `<occurrence>#<retries>`, so today's attempts count per occurrence and press (`attemptsOf` in `aiTurns.ts`) — an
+  occurrence that used up its two tries today runs again after a press (the member's own 「もう一度」 on the row clears
+  those too) — and the candidate's `version` is `1 + retries`
+  (a job claim names no record version), so a PC that saw it taken by another before the press asks again after it.
+- **Admin console** (`admin/src/components/jobs/job-occurrences.tsx`, 回の記録): ［もう一度］ only where the server says
+  `allowed`, after a confirmation saying what happens (a PC job: when the responsible person's app is open with
+  「自動で進める」; the deadline counted again; still one やること); otherwise 「「もう一度」はできません：…」; who pressed it
+  and when; what earlier runs made (「前回すでに…作っています。」, also in the confirmation); an unknown outside result as
+  「メールの下書きが作られたか分かりません…」 with ［作られていた］［作られていなかった］ (asked first).
 
 ## Tests (each guard mutation-checked, with the exceptions named)
 
@@ -728,6 +809,21 @@ membership can fail).
   not members-only is never in `listedRecordIds`; a check kind the app does not know is refused by the shared parser
   itself (its own filter was dropped as redundant); and the runner's settle of a claim that won after it gave up
   (a hook line, no test).
+- PR 5b: `server/tests/integration/job-retry.test.ts` (owner / admin only — the responsible member and another member
+  403, the view's fields only for them; another company's or job's occurrence = missing; only `needs_person` /
+  `expired`; only the newest; stopped, paused, another version, not accepted, rights, the responsible person's AI stopped,
+  the pinned Skill removed, the place not usable; an unknown result refused until reconciled — who, which operation, the
+  body, only a looked-at occurrence —; the press: `due` with the new deadline, who and when kept, the old run closed and
+  its own retry `RUN_DONE`, a new run with a fresh deadline, one `occurrenceTaskId`; an expired unclaimed one claimed
+  after; a second failure told again; a server job's run again; a later slot that came but was not made yet, too
+  little time before the next slot, the deadline leaving the run's minutes, at most three presses; a claim waiting while
+  an earlier occurrence runs; what an earlier run made — counted for the admin without ids, named to the next run —;
+  a refused reconciliation leaving the in-flight mark; an older notice keeping its reason after a press), `server/tests/unit/job-words.test.ts` (every block has
+  words), `client/src/features/chat/aiTurns.test.ts` + `client/tests/job-runs.test.ts` (a press is tried again today;
+  the count parsed strictly; what was made before reaches the first message, ids only), `admin/tests/jobs.test.tsx` (the button only where allowed, asked first, the reason
+  otherwise; reconcile sends the answer chosen), permission matrix rows + `CROSS`, `admin-contract.test.ts`. Mutation
+  check: 43 server, 13 client and 5 admin guards (all review rounds), each removed or inverted alone, fail their test file — except the
+  state check in `blockOf`, which the write's compare-and-set also stops (each alone suffices).
 - `client/tests/jobs-ipc.test.ts` — an older server without `you` reported as such; only the member's jobs (by the server's `you`), never dropped behind 80
   other jobs, a hidden approved definition still waiting for them, the approved version's name, the version
   and fingerprint sent, renderer values never change the path, which notices open the section.

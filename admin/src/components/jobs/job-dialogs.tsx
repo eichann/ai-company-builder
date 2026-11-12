@@ -1,8 +1,8 @@
 'use client'
 
 // 「定期の仕事」's dialogs (jobs.md "The screens"): the form that makes a version, the approval that shows
-// exactly the version approved (and whether its responsible person must accept again), and a job's
-// occurrences. The definition is checked by the shared parser before it is sent; the server decides.
+// exactly the version approved (and whether its responsible person must accept again). The occurrences are
+// job-occurrences.tsx. The definition is checked by the shared parser before it is sent; the server decides.
 import { useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
@@ -21,7 +21,7 @@ import {
 import { useQuery } from '@/lib/use-query'
 import type { JobDefinition, JobWeekday } from '../../../../shared/core/jobs'
 import {
-  jobCheckText, jobGrantLines, jobMissedText, jobOccurrenceText, jobPlacementText, jobRunText, jobRunsText, jobSlotText, jobTriggerText,
+  jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobTriggerText,
 } from '../../../../shared/core/job-words'
 
 const personName = (m: { name: string | null; email: string | null } | undefined) => (m ? m.name || m.email || '名前未設定' : 'もういない人')
@@ -312,28 +312,4 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
 export function approvedText(version: number, after: JobView, who: string): string {
   if (after.waiting === 'NOT_ACCEPTED') return `第${version}版を承認しました。${who}さんの受け取りを待ちます`
   return `第${version}版を承認しました。いまは「${jobRunsText(after.waiting, after.pausedReason, after.placement)}」です`
-}
-
-/** A job's occurrences (newest first): when, what became of it and why, in plain words. */
-export function JobOccurrences({ jobId }: { jobId: string }) {
-  const { companyId } = useCompany()
-  const list = useQuery(`job-occurrences:${companyId}:${jobId}`, () => jobsApi.occurrences(companyId, jobId))
-  if (list.error && !list.data) return <p role="alert" className="text-sm text-destructive">{describeError(list.error)}</p>
-  if (!list.data) return <ListSkeleton rows={2} />
-  if (list.data.occurrences.length === 0) return <p className="text-sm text-muted-foreground">まだ回がありません。</p>
-  return (
-    <ul aria-label="回の記録" className="space-y-1 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-      {list.data.occurrences.map((o) => {
-        const words = jobOccurrenceText(o.state, o.outcomeCode)
-        return (
-          <li key={o.id} className="flex flex-wrap gap-x-3">
-            <span className="tabular-nums">{jobSlotText(o.dueSlot)}</span>
-            <span className="font-medium">{words.label}</span>
-            {words.why && <span className="text-muted-foreground">{words.why}</span>}
-            <span className="text-xs text-muted-foreground">第{o.jobVersion}版</span>
-          </li>
-        )
-      })}
-    </ul>
-  )
 }

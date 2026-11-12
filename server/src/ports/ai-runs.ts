@@ -74,6 +74,8 @@ export interface AiRunRepository {
   openRun(subject: RunSubject, step: string): AiRunRow | null
   /** Whether another step of the same subject has a run claimed now (running, its claim not expired at `nowIso`). */
   liveOtherStep(subject: RunSubject, step: string, nowIso: string): boolean
+  /** Every run of a subject, closed ones too, oldest first (at most 100). */
+  runsOf(subject: RunSubject): AiRunRow[]
   /** Runs of the member not closed yet, newest first — of every subject kind (callers choose what to show). */
   openOf(userId: string): AiRunRow[]
   insert(row: AiRunRow): void

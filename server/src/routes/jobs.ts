@@ -14,6 +14,8 @@
  *   GET  /me/job-turns                 the caller's PC-job occurrences they may claim now (B PR 5a, services/job-runs.ts)
  *   POST /job-run-claims               the responsible person's app claims one { occurrenceId, deviceId, conversationId }
  *                                      (the run core of services/ai-runs.ts; `/job-run-claims`, not `/jobs/…`: its own segment)
+ *   POST /jobs/:jobId/occurrences/:occurrenceId/retry                      owner/admin: 「もう一度」 (B PR 5b, services/job-retry.ts)
+ *   POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile  owner/admin { done }: its run's unknown outside result
  */
 import { Hono } from 'hono'
 import { services } from '../composition'
@@ -21,7 +23,7 @@ import { refusal } from './respond'
 import { companyMember, serviceBody } from './guards'
 
 export const jobsRoute = new Hono()
-const { jobs, jobRuns, aiRuns } = services
+const { jobs, jobRuns, jobRetry, aiRuns } = services
 
 jobsRoute.get('/jobs', companyMember, async (c) => {
   const result = jobs.list(c.var.member)
@@ -37,6 +39,18 @@ jobsRoute.get('/jobs/:jobId', companyMember, async (c) => {
 
 jobsRoute.get('/jobs/:jobId/occurrences', companyMember, async (c) => {
   const result = jobs.occurrences(c.var.member, c.req.param('jobId'))
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+jobsRoute.post('/jobs/:jobId/occurrences/:occurrenceId/retry', companyMember, async (c) => {
+  const result = jobRetry.retry(c.var.member, c.req.param('jobId'), c.req.param('occurrenceId'))
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+jobsRoute.post('/jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile', companyMember, serviceBody, async (c) => {
+  const result = jobRetry.reconcile(c.var.member, c.req.param('jobId'), c.req.param('occurrenceId'), c.req.param('key'), c.var.body)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })

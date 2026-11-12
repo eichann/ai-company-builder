@@ -18,7 +18,8 @@ import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
 import { jobOccurrenceText, jobRunsText, jobSlotText, jobTriggerText } from '../../../../shared/core/job-words'
-import { JobApproveDialog, JobFormDialog, JobOccurrences } from './job-dialogs'
+import { JobApproveDialog, JobFormDialog } from './job-dialogs'
+import { JobOccurrences } from './job-occurrences'
 
 export const JOBS_INTRO =
   '決まった時間に動く仕事です。やることを作るだけの仕事（例：毎週月曜 9:00 に「週の報告を書く」。AI は使いません）と、責任者の PC の AI が会社の Skill で作業して、終わったらやることを作る仕事があります。作ったあと、オーナーか管理者が承認し、責任者が内容を確かめて「受け取る」を押すと動き始めます。'
@@ -161,7 +162,7 @@ export function JobsPage() {
                       </Button>
                     </div>
                   </div>
-                  {historyOf === job.id && <JobOccurrences jobId={job.id} />}
+                  {historyOf === job.id && <JobOccurrences jobId={job.id} placement={job.placement} nameOf={(userId) => personName(byId.get(userId))} />}
                 </li>
               )
             })}

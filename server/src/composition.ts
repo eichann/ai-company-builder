@@ -81,11 +81,13 @@ import { companyNow, createNotificationService } from './services/notifications'
 import { createAiRunService } from './services/ai-runs'
 import { createRecordRunSubjects, runSubjectsByKind } from './services/run-subjects'
 import { createJobRuns } from './services/job-runs'
+import { createJobRetry } from './services/job-retry'
 import { createSkillUseService } from './services/skill-uses'
 import { createSkillShelfService } from './services/skill-shelf'
 import { createGroupService } from './services/groups'
 import { createJobService } from './services/jobs'
-import { createJobOccurrences, createJobRunner } from './services/job-occurrences'
+import { companyTimeToUtc, createJobOccurrences, createJobRunner } from './services/job-occurrences'
+import { latestJobSlot, nextJobSlot } from '../shared/core/job-schedule'
 import { companySkillTree } from './lib/skill-trees'
 import { createServerClock } from './services/server-clock'
 import { createSecurityAlertService } from './services/security-alerts'
@@ -335,6 +337,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     holidaysOf: companyId => taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
     // A deliverable place outside (jobs.md): its connector answers; bound late (built below).
     places: { live: (companyId, userId, place) => deliveryPlaces.live(companyId, userId, place) },
+    // 「もう一度」 on an owner / admin's occurrence view (jobs.md "「もう一度」"); bound late (built below).
+    occurrenceRetry: (companyId, occ) => jobRetry.viewOf(companyId, occ),
   })
   const notifications = createNotificationService({
     ...shared,
@@ -750,6 +754,21 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     // The emergency stop: no run with nobody present starts while stopped; a renew is not refused (agent-stop.md).
     aiStops: member => agentStops.policyFor(member),
   })
+  // 「もう一度」 of an occurrence (jobs.md, B PR 5b): owner / admin, the same stop and rights checks as a claim.
+  const jobRetry = createJobRetry({
+    ...shared, jobs,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    aiStops: member => agentStops.policyFor(member),
+    placeUsable: (companyId, userId, place) => deliveryPlaces.live(companyId, userId, place) !== null,
+    reconcileFor: (companyId, runId, key, done, by) => aiRuns.reconcileFor(companyId, runId, key, done, by),
+    // The clock's own slots (its zone and days off): the newest at or before now, and the next one.
+    slotsOf: (companyId, definition) => {
+      const now = companyNow(shared.clock.nowMs(), DEFAULT_COMPANY_TIME_ZONE)
+      const holidays = taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date)
+      const next = nextJobSlot(definition.trigger, now, holidays)
+      return { latest: latestJobSlot(definition.trigger, now, holidays), nextAt: next ? companyTimeToUtc(next, DEFAULT_COMPANY_TIME_ZONE) : null }
+    },
+  })
 
   // The parallel lanes (A connectors, B inbox, C plugins) wire their services in their own files
   // under composition/ (.claude/rules/server.md "Lane markers"); each lane edits
@@ -981,6 +1000,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     groups: createGroupService({ ...repos, ...shared }),
     jobs,
     jobRuns,
+    jobRetry,
     notifications,
     decisions,
     meetingOutputs,

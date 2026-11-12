@@ -531,6 +531,53 @@ export const JOB_OUTCOME_CODES = [
 export type JobOutcomeCode = typeof JOB_OUTCOME_CODES[number]
 
 /**
+ * 「もう一度」 (B PR 5b, jobs.md "「もう一度」"): the states an owner / admin may send back to `due` — an occurrence that
+ * ended without doing its work and was told (`needs_person`, `expired`). Never `skipped` (an absence or a newer
+ * occurrence decided it on purpose), `held` (a pause or the stop said not to run it), nor one that ran.
+ */
+export const JOB_RETRY_STATES: readonly JobOccurrenceState[] = ['needs_person', 'expired']
+
+/**
+ * Why 「もう一度」 cannot be pressed on an occurrence now (the API's codes; the words are job-words.ts
+ * `jobRetryBlockText`): `NOT_RETRYABLE` (its state), `NOT_LATEST` (a later occurrence of the job came already:
+ * its check covered this one's window), `JOB_PAUSED` / `JOB_STOPPED` (the job paused, the company's jobs stopped),
+ * `AI_STOPPED` (the emergency stop covers its responsible person), `JOB_VERSION_CHANGED`, `JOB_NOT_ACCEPTED`,
+ * `JOB_GRANT_EXCEEDS` (the responsible person's rights now), `JOB_SKILL_MISSING`, `JOB_PLACE_NOT_USABLE`,
+ * `JOB_RESULT_UNKNOWN` (an outside operation of its run whose result nobody confirmed: 結果が分からないうちは再開しない),
+ * `RETRY_LIMIT` (pressed `JOB_RETRY_MAX` times already), `NEXT_SLOT_SOON` (a whole run would not end before the next slot).
+ */
+export const JOB_RETRY_BLOCKS = [
+  'NOT_RETRYABLE', 'NOT_LATEST', 'JOB_PAUSED', 'JOB_STOPPED', 'AI_STOPPED', 'JOB_VERSION_CHANGED', 'JOB_NOT_ACCEPTED',
+  'JOB_GRANT_EXCEEDS', 'JOB_SKILL_MISSING', 'JOB_PLACE_NOT_USABLE', 'JOB_RESULT_UNKNOWN', 'RETRY_LIMIT', 'NEXT_SLOT_SOON',
+] as const
+
+/**
+ * How often an occurrence may be sent back by 「もう一度」 (decision for the owner): each press gives a fresh run with
+ * its own approved minutes, so the cap bounds what one slot can cost (`runsPerDay` stays not enforced: one occurrence
+ * per slot).
+ */
+export const JOB_RETRY_MAX = 3
+/** The shortest window a press may give for the app to claim it (the shortest `expiresAfterMinutes` a version may have). */
+export const JOB_RETRY_MIN_CLAIM_MINUTES = 5
+/** How many things an earlier run made a turn names (`JobTurnView.madeBefore`; the rest only counted, `madeBeforeTotal`). */
+export const JOB_MADE_BEFORE_LISTED = 20
+export type JobRetryBlock = typeof JOB_RETRY_BLOCKS[number]
+
+/**
+ * The new deadline of an occurrence sent back by 「もう一度」: from the press, as long as the pinned version gives a
+ * slot (`missed.expiresAfterMinutes`; the clock's `expires_at` = `due_at` + it) — the window the approved version
+ * chose, counted from now instead of from the slot — but early enough that a run claimed at the deadline still ends
+ * (its approved `runMinutes`, a hard limit) before the job's next slot (`nextSlotAt`, UTC ISO). null: less than
+ * `JOB_RETRY_MIN_CLAIM_MINUTES` would be left (the press is refused, `NEXT_SLOT_SOON`).
+ */
+export function jobRetryExpiresAt(nowMs: number, expiresAfterMinutes: number, runMinutes: number, nextSlotAt: string | null): string | null {
+  const window = nowMs + expiresAfterMinutes * 60_000
+  const next = nextSlotAt === null ? NaN : Date.parse(nextSlotAt)
+  const end = Number.isNaN(next) ? window : Math.min(window, next - runMinutes * 60_000)
+  return end - nowMs < JOB_RETRY_MIN_CLAIM_MINUTES * 60_000 ? null : new Date(end).toISOString()
+}
+
+/**
  * How late the clock may first see a slot and still count it on time (two clock runs): later than this
  * it was missed (the server was down) — `latest_only` runs it while not expired, `skip` does not.
  */

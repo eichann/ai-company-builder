@@ -172,7 +172,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
         const at = Date.now()
         if (!pass.current || at - pass.current.startedAt >= AI_TURN_PASS_INTERVAL_MS) pass.current = { startedAt: at, started: 0 }
         pass.current.started += 1
-        saveLog(recordStarted(loadLog(Date.now()), notice.id, !!job))
+        saveLog(recordStarted(loadLog(Date.now()), notice.attemptKey ?? notice.id, !!job))
         run.conversationId = conversationId
         run.phase = 'running'
         run.since = Date.now()

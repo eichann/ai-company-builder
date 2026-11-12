@@ -4,8 +4,8 @@
  * reach a person's screen raw), and the sentences describe the trigger as it runs.
  */
 import { describe, expect, it } from 'vitest'
-import { JOB_OCCURRENCE_STATES, JOB_OUTCOME_CODES, JOB_PAUSE_REASONS } from '../../shared/core/jobs'
-import { jobOccurrenceText, jobPauseReasonText, jobTriggerText } from '../../shared/core/job-words'
+import { JOB_OCCURRENCE_STATES, JOB_OUTCOME_CODES, JOB_PAUSE_REASONS, JOB_RETRY_BLOCKS } from '../../shared/core/jobs'
+import { jobOccurrenceText, jobPauseReasonText, jobRetryBlockText, jobTriggerText } from '../../shared/core/job-words'
 
 describe('job words', () => {
   it('every occurrence state and outcome code has words, never the code itself', () => {
@@ -18,6 +18,8 @@ describe('job words', () => {
       expect(why).not.toContain(code)
     }
     for (const reason of JOB_PAUSE_REASONS) expect(jobPauseReasonText(reason)).not.toBe(jobPauseReasonText(null))
+    // 「もう一度」 (B PR 5b): every reason it cannot be pressed has its own sentence.
+    for (const why of JOB_RETRY_BLOCKS) expect(jobRetryBlockText(why), why).not.toBe(jobRetryBlockText('UNKNOWN'))
   })
 
   it('the trigger reads as it runs', () => {

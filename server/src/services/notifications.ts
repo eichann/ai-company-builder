@@ -976,7 +976,11 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         }
         if (jobOccurrenceKinds.has(r.kind)) {
           const occ = occurrenceNotice(r) as { name: string; dueSlot: string; outcomeCode: string | null }
-          return { id: r.id, kind: r.kind as NotificationKind, recordId: '', recordType: '', recordTitle: '', version: 0, text: jobOccurrenceText(r.kind, occ), createdAt: r.createdAt, read }
+          // The reason it was written with (key `<kind>:<job>:<occurrence>:<retries>:<code>`, B PR 5b): a later
+          // 「もう一度」 clears the occurrence's own code. A key without one (written before) reads the occurrence's.
+          const written = (r.dedupeKey ?? '').split(':')[4]
+          const outcomeCode = written && /^[A-Z_]{1,40}$/.test(written) ? written : occ.outcomeCode
+          return { id: r.id, kind: r.kind as NotificationKind, recordId: '', recordType: '', recordTitle: '', version: 0, text: jobOccurrenceText(r.kind, { ...occ, outcomeCode }), createdAt: r.createdAt, read }
         }
         const rec = recs.get(r.recordId) as RecordRow
         const def = types.get(rec.type)?.definition

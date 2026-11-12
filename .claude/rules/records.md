@@ -1568,7 +1568,8 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   finish — even `done` — goes there, 「もう一度」 is refused, and the key answers 409
   `OPERATION_RESULT_UNKNOWN`. A person reconciles (`…/reconcile { done }`, after looking in the
   outside system): done → the key answers as done from then on; not done → the key may run
-  again; with nothing unknown left the run is `open` again. A late answer settles it too.
+  again; with nothing unknown left the run is `open` again. A late answer settles it too. The run's own member
+  reconciles; a scheduled job's occurrence run also an owner / admin, on the occurrence (`reconcileFor`, `jobs.md` "「もう一度」").
 - **Failures go to their own place** (`failureDestination`): temporary → `retry_later` (5, 10,
   20 … ≤ 60 min; after `AI_RUN_TEMPORARY_LIMIT` (3) in a row → `waiting_person`, code
   `REPEATED_TEMPORARY`); permission → `waiting_setup`; bad input → `waiting_person`; unknown

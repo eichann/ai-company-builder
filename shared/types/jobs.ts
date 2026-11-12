@@ -15,8 +15,11 @@
  *   GET  /me/job-turns                the caller's PC-job occurrences to claim now (PR 5a)
  *   POST /job-run-claims { occurrenceId, deviceId, conversationId, checks, checkedCommit? }   claim one (PR 5a; 503 AI_STOPPED while stopped;
  *                                     409 JOB_CHECK_NOT_SUPPORTED when `checks` — the check kinds the app runs — lacks it, 5a-2)
+ *   POST /jobs/:jobId/occurrences/:occurrenceId/retry                       owner/admin: 「もう一度」 (PR 5b)
+ *   POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }   owner/admin: an outside
+ *                                     operation of its run whose result was unknown happened or not (PR 5b)
  */
-import type { JobCheck, JobDefinition, JobDeliveryPlace, JobGrant, JobOccurrenceState, JobPauseReason, JobPlacement, JobProcedure, JobState, JobTrigger } from '../core/jobs'
+import type { JobCheck, JobDefinition, JobDeliveryPlace, JobGrant, JobOccurrenceState, JobPauseReason, JobPlacement, JobProcedure, JobRetryBlock, JobState, JobTrigger } from '../core/jobs'
 import type { AiRunView } from './ai-runs'
 
 export type { JobState } from '../core/jobs'
@@ -121,6 +124,30 @@ export interface JobOccurrenceView {
   /** Whether a run did its work (state `done`). */
   ran: boolean
   updatedAt: string
+  /**
+   * 「もう一度」 (PR 5b), answered to owners / admins only (absent for anyone else, and from an older server): `retries`
+   * how often it was sent back, `retriedBy` / `retriedAt` the last press; `retry` only on a `needs_person` /
+   * `expired` occurrence — whether the button works now, else why not (`JOB_RETRY_BLOCKS`); `unknownOperations` the
+   * outside operations of its run whose result nobody confirmed yet (kinds and keys only), to reconcile first.
+   */
+  retries?: number
+  retriedBy?: string | null
+  retriedAt?: string | null
+  retry?: { allowed: true } | { allowed: false; why: JobRetryBlock }
+  unknownOperations?: Array<{ key: string; kind: string }>
+  /** What its earlier runs are known to have made outside (kinds and counts only: the things are the responsible person's). */
+  madeBefore?: Array<{ kind: string; count: number }>
+}
+
+/** An outside operation an earlier run of the occurrence is known to have done: its kind and what it made (no body). */
+export interface JobMadeBefore {
+  kind: string
+  ref: { kind: string; id: string } | null
+}
+
+/** `POST /jobs/:jobId/occurrences/:occurrenceId/retry` (PR 5b): the occurrence back to `due`, with its new deadline. */
+export interface JobRetryResult {
+  occurrence: JobOccurrenceView
 }
 
 /**
@@ -165,6 +192,18 @@ export interface JobTurnView {
    * the run may put into (the connector's route checks it at every call). Absent: none.
    */
   deliverTo?: JobDeliveryPlace
+  /**
+   * How often an owner / admin sent this occurrence back with 「もう一度」 (PR 5b; absent: never, or an older server).
+   * The app counts its own attempts per occurrence and press, so a press is tried again the same day.
+   */
+  retries?: number
+  /**
+   * After a 「もう一度」: what the occurrence's earlier runs are known to have made outside (a mail draft, a Drive put),
+   * so the AI does not make it again blindly. Absent: nothing, or never pressed.
+   */
+  madeBefore?: JobMadeBefore[]
+  /** How many there are in all when `madeBefore` names only the first `JOB_MADE_BEFORE_LISTED`. */
+  madeBeforeTotal?: number
   /**
    * Only in a claim's answer, for a `new_meetings` check (B PR 5a-2): the meetings it found (≤ 10, oldest
    * first) — the only ones whose minutes the run may read. Empty: the run finishes `nothing`.

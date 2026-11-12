@@ -88,6 +88,8 @@ import {
   jobOccurrencesSchema,
   jobSchema,
   jobsStopSchema,
+  jobRetrySchema,
+  jobReconcileSchema,
   jobUpdatedSchema,
 } from './api-schemas'
 import type {
@@ -1477,7 +1479,7 @@ export const minutesApi = {
 // is shared/core/jobs.ts's (the server parses it again, strictly).
 // ---------------------------------------------------------------------------
 
-export type { JobList, JobOccurrenceView, JobVersionView, JobView, JobWaiting } from '../../../shared/types/jobs'
+export type { JobList, JobOccurrenceView, JobRetryResult, JobVersionView, JobView, JobWaiting } from '../../../shared/types/jobs'
 export type { JobDefinition } from '../../../shared/core/jobs'
 
 import type { JobDefinition } from '../../../shared/core/jobs'
@@ -1501,4 +1503,10 @@ export const jobsApi = {
   resume: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/resume`, jobSchema, { method: 'POST' }),
   setStopped: (companyId: string, stopped: boolean) =>
     getData(`/api/companies/${enc(companyId)}/jobs-stop`, jobsStopSchema, { method: 'PUT', body: { stopped } }),
+  /** 「もう一度」: the occurrence back to its turn with a new deadline (the server checks everything again). */
+  retryOccurrence: (companyId: string, jobId: string, occurrenceId: string) =>
+    getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/occurrences/${enc(occurrenceId)}/retry`, jobRetrySchema, { method: 'POST' }),
+  /** Whether an outside operation of the occurrence's run whose result was unknown happened (`done`) or not. */
+  reconcileOccurrence: (companyId: string, jobId: string, occurrenceId: string, key: string, done: boolean) =>
+    getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/occurrences/${enc(occurrenceId)}/operations/${enc(key)}/reconcile`, jobReconcileSchema, { method: 'POST', body: { done } }),
 }

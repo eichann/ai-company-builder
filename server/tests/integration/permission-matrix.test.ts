@@ -143,6 +143,8 @@ const MEMBERS: Expect = [200, 200, 200, 200, 404, 401]
 
 const NO_SUCH_JOB = `job.${'0'.repeat(32)}`
 const OTHER_JOB = `job.${'e'.repeat(32)}`
+const NO_SUCH_OCC = `occ.${'0'.repeat(32)}`
+const OTHER_OCC = `occ.${'b'.repeat(32)}`
 
 const MATRIX: Row[] = [
   // Public
@@ -200,6 +202,9 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/jobs', w => ({ path: `${C(w)}/jobs` }), MEMBERS),
   r('GET /api/companies/:companyId/jobs/:jobId', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}` }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/companies/:companyId/jobs/:jobId/occurrences', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}/occurrences` }), [404, 404, 404, 404, 404, 401]),
+  // 「もう一度」 (B PR 5b): owner / admin only — a member and a manager are refused before anything is read.
+  r('POST /api/companies/:companyId/jobs/:jobId/occurrences/:occurrenceId/retry', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}/occurrences/${NO_SUCH_OCC}/retry` }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}/occurrences/${NO_SUCH_OCC}/operations/k1/reconcile`, body: {} }), [404, 404, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/jobs', w => ({ path: `${C(w)}/jobs`, body: {} }), [400, 400, 403, 403, 404, 401], 'no definition'),
   r('PUT /api/companies/:companyId/jobs/:jobId', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}`, body: {} }), [404, 404, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/jobs/:jobId/approve', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}/approve`, body: { version: 1 } }), [404, 404, 403, 403, 404, 401]),
@@ -738,6 +743,8 @@ const CROSS: CrossRow[] = [
   x('DELETE /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}` }), w => w.other.group),
   x('GET /api/companies/:companyId/jobs/:jobId', (w, id) => ({ path: `${C(w)}/jobs/${id}` }), w => w.other.job, NO_SUCH_JOB),
   x('GET /api/companies/:companyId/jobs/:jobId/occurrences', (w, id) => ({ path: `${C(w)}/jobs/${id}/occurrences` }), w => w.other.job, NO_SUCH_JOB),
+  x('POST /api/companies/:companyId/jobs/:jobId/occurrences/:occurrenceId/retry', (w, id) => ({ path: `${C(w)}/jobs/${id}/occurrences/${OTHER_OCC}/retry` }), w => w.other.job, NO_SUCH_JOB),
+  x('POST /api/companies/:companyId/jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile', (w, id) => ({ path: `${C(w)}/jobs/${id}/occurrences/${OTHER_OCC}/operations/k1/reconcile`, body: { done: true } }), w => w.other.job, NO_SUCH_JOB),
   x('PUT /api/companies/:companyId/jobs/:jobId', (w, id) => ({ path: `${C(w)}/jobs/${id}`, body: { definition: { schema: 1 } } }), w => w.other.job, NO_SUCH_JOB),
   x('POST /api/companies/:companyId/jobs/:jobId/approve', (w, id) => ({ path: `${C(w)}/jobs/${id}/approve`, body: { version: 1 } }), w => w.other.job, NO_SUCH_JOB),
   x('POST /api/companies/:companyId/jobs/:jobId/pause', (w, id) => ({ path: `${C(w)}/jobs/${id}/pause` }), w => w.other.job, NO_SUCH_JOB),
@@ -1042,7 +1049,7 @@ async function seed(): Promise<World> {
     VALUES (?, ?, 1, 1, '{}', 'sha256:f', 'sha256:c', ?, ?, ?, ?, ?)`).run(other, OTHER_JOB, otherMember, USER.outsider, expires, USER.outsider, expires)
   // One of its occurrences (rows as adapters/sqlite/jobs.ts writes them, B PR 3b).
   db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, run_id, outcome_code, created_at, updated_at)
-    VALUES (?, ?, ?, 1, '2026-11-16T09:00', 'Asia/Tokyo', ?, ?, 'held', NULL, 'JOB_PAUSED', ?, ?)`).run(other, `occ.${'b'.repeat(32)}`, OTHER_JOB, expires, expires, expires, expires)
+    VALUES (?, ?, ?, 1, '2026-11-16T09:00', 'Asia/Tokyo', ?, ?, 'held', NULL, 'JOB_PAUSED', ?, ?)`).run(other, OTHER_OCC, OTHER_JOB, expires, expires, expires, expires)
   // A pending request to publish a Skill on the other company's shelf (rows as adapters/sqlite/skill-shelf.ts writes them).
   db.prepare(`INSERT INTO shelf_requests (id, company_id, department_id, name, requested_by, requested_at, version, files, file_count, total_bytes, autorun, state)
     VALUES ('shelf-request-other-1', ?, NULL, 'other-request', ?, ?, ?, '[]', 0, 0, 0, 'pending')`).run(other, otherMember, expires, 'a'.repeat(64))
