@@ -200,6 +200,8 @@ export interface FakeGoogleFaults {
   failNextRevisionLists(count: number, afterPages?: number): void
   /** `revisions.list` answers at most `size` revisions a page with a `nextPageToken` (0 = one page, the default). */
   pageRevisions(size: number): void
+  /** `revisions.list` leaves `lastModifyingUser` out of the newest revision even when asked (Google may: an unknown user). */
+  hideNewestRevisionAuthor(on: boolean): void
   /** The next `count` exports of a Drive file are refused with 403 (not retried by a client; the file is unchanged). */
   failNextExports(count: number): void
   /** The next `count` `files.list` searches are refused with 403 (a lost answer's lookup that does not get through). */
@@ -392,6 +394,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   let revisionListFailures = 0
   let revisionListFailAfter = 0
   let revisionPageSize = 0
+  let newestAuthorHidden = false
   let importTimeMove: { ms: number; revisionToo: boolean; fileTimeAs: string | null } | null = null
   let exportFailures = 0
   let staleExport: string | null = null
@@ -406,6 +409,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     failNextFileGets(count) { fileGetFailures = count },
     failNextRevisionLists(count, afterPages = 0) { revisionListFailures = count; revisionListFailAfter = afterPages },
     pageRevisions(size) { revisionPageSize = size },
+    hideNewestRevisionAuthor(on) { newestAuthorHidden = on },
     moveTimeAfterNextImport(opts = {}) { importTimeMove = { ms: opts.ms ?? 2000, revisionToo: opts.revisionToo ?? false, fileTimeAs: opts.fileTimeAs ?? null } },
     failNextExports(count) { exportFailures = count },
     staleNextExport(text) { staleExport = text },
@@ -414,7 +418,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     refuseExport(docId, reason = 'appNotAuthorizedToFile') { exportRefused.set(docId, reason) },
     refuseDocs(docId, reason = 'PERMISSION_DENIED') { docsRefused.set(docId, reason) },
     blockCopy(docId) { copyBlocked.add(docId) },
-    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; editBeforeExport = []; importTimeMove = null; revisionListFailures = 0; revisionListFailAfter = 0; revisionPageSize = 0; fileGetFailures = 0; exportFailures = 0; staleExport = null; searchFailures = 0; faults.ignoreRefreshScope = false; exportRefused.clear(); docsRefused.clear(); copyBlocked.clear() },
+    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; editBeforeExport = []; importTimeMove = null; revisionListFailures = 0; revisionListFailAfter = 0; revisionPageSize = 0; fileGetFailures = 0; newestAuthorHidden = false; exportFailures = 0; staleExport = null; searchFailures = 0; faults.ignoreRefreshScope = false; exportRefused.clear(); docsRefused.clear(); copyBlocked.clear() },
   }
 
   const app = new Hono()
@@ -1068,7 +1072,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       ...(end < f.history.length ? { nextPageToken: String(end) } : {}),
       revisions: f.history.slice(start, end).map(r => ({
         kind: 'drive#revision', id: r.id, modifiedTime: r.modifiedTime,
-        ...(withUser ? { lastModifyingUser: { kind: 'drive#user', me: r.by.toLowerCase() === a.email.toLowerCase() } } : {}),
+        ...(withUser && !(newestAuthorHidden && r === f.history[f.history.length - 1]) ? { lastModifyingUser: { kind: 'drive#user', me: r.by.toLowerCase() === a.email.toLowerCase() } } : {}),
       })),
     })
   })

@@ -307,17 +307,16 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
    * every one of them was made last by the member's own account (`lastModifyingUser.me`; ACB writes with their token, so
    * anyone else's edit in between shows as a revision that is not theirs), and so was the file's last change
    * (`files.get` `lastModifyingUser.me`: a witness that does not rest on the revision list, which Google says may omit or
-   * merge revisions). The file's `modifiedTime` is not compared: real Google moves it after an import with no edit
-   * (2026-11-12); it is only logged when it moved. Anything else keeps none, so a later update is refused as not
-   * verifiable. Both witnesses are Google's attribution: an edit by someone else that Google attributes to neither is
-   * not seen (google-drive.md "To confirm on real Google"). A put found
-   * after a lost answer never gets one (`reconcile`). Accepted: the member's own edit in the seconds between the upload
-   * and these reads is taken for ACB's (the same family as the update's missing If-Match).
-   * Every drop logs one line naming the failed step; never a file id, name, text or token.
+   * merge revisions), and the file's `modifiedTime` read last is still the upload answer's (anyone's edit in between
+   * moves it, the member's own too, and an edit the revision list omits or merges; viewing does not). Anything else
+   * keeps none, so a later update is refused as not verifiable — never another's text taken for ACB's. A put found
+   * after a lost answer never gets one (`reconcile`).
+   * Every drop logs one line naming the failed step; never a file id, name, text or token. Real Google kept no baseline
+   * on 2026-11-12 with every call answered; these lines are to tell which step (google-drive.md).
    */
   async function keepDocBaseline(companyId: string, row: Pick<DrivePutRow, 'id' | 'userId' | 'mimeType' | 'fileId' | 'state'>, uploadedAt: string | null): Promise<void> {
     if (row.mimeType !== DRIVE_DOC_MIME || row.state !== 'done' || !row.fileId) return
-    const drop = (step: 'no-upload-time' | 'export-failed' | 'export-differs' | 'no-revision' | 'not-me' | 'file-unread' | 'file-not-me', detail = '') =>
+    const drop = (step: 'no-upload-time' | 'export-failed' | 'export-differs' | 'no-revision' | 'not-me' | 'file-unread' | 'file-not-me' | 'modified-moved', detail = '') =>
       log.warn(`[google-drive] document baseline not kept: ${step}${detail}`)
     if (!uploadedAt || Number.isNaN(Date.parse(uploadedAt))) return drop('no-upload-time')
     const first = await docFingerprint(companyId, row.userId, row.fileId)
@@ -330,12 +329,11 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     if (!revisions) return drop('no-revision')
     // Every revision, not only those after the upload: a document ACB made is updated only from a baseline like this one,
     // and the check before an update refuses any new revision, so a revision not the member's never belongs in it.
-    // (No clock is compared: Google's times are what is in doubt.)
     const foreign = revisions.filter(r => !r.me).length
     if (foreign > 0) return drop('not-me', ` (revisions: ${revisions.length}, not the member's: ${foreign}, the newest the member's: ${revisions[revisions.length - 1].me})`)
     const newest = revisions[revisions.length - 1]
     // A second witness that does not rest on the revision list (Google documents that a list may omit or merge
-    // revisions): the file's own last modifier must be the member too. Its `modifiedTime` is read for the log only.
+    // revisions): the file's own last modifier must be the member too, and its time the upload answer's (below).
     const f = await drive(companyId, row.userId, {
       method: 'GET', path: `/drive/v3/files/${row.fileId}`,
       query: { fields: 'modifiedTime,lastModifyingUser(me)', supportsAllDrives: 'true' },
@@ -343,13 +341,14 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     })
     if (!f.ok || !isObj(f.json)) return drop('file-unread')
     if (!(isObj(f.json.lastModifyingUser) && f.json.lastModifyingUser.me === true)) return drop('file-not-me')
-    const baseline: DriveDocBaseline = { fingerprint: first, revision: newest.id as string, revisionAt: newest.at as string, at: uploadedAt }
-    handle(companyId).googleDrive.setDocBaseline(row.id, baseline)
-    // Diagnostics only (google-drive.md "To confirm on real Google"): whether Drive moved the file's time after the upload.
+    // The strict check, unchanged: anyone's edit since the upload's answer moves the file's time. Real Google may move it
+    // with no edit after an import (2026-11-12, suspected); the times are logged so the owner's next try tells.
     const fileAt = str(f.json.modifiedTime)
     if (fileAt !== uploadedAt) {
-      log.warn(`[google-drive] document baseline kept; modified-moved upload=${logStamp(uploadedAt)} file=${logStamp(fileAt)} newest-revision=${logStamp(newest.at)} revisions=${revisions.length}`)
+      return drop('modified-moved', ` upload=${logStamp(uploadedAt)} file=${logStamp(fileAt)} newest-revision=${logStamp(newest.at)} revisions=${revisions.length}`)
     }
+    const baseline: DriveDocBaseline = { fingerprint: first, revision: newest.id as string, revisionAt: newest.at as string, at: uploadedAt }
+    handle(companyId).googleDrive.setDocBaseline(row.id, baseline)
   }
 
   /** Looks for ACB's own file of a put whose answer was lost: by the put's id in appProperties. */

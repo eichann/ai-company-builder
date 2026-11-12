@@ -288,30 +288,27 @@ The AI reads and writes **only** the member's own live picks.
       after a failure), and `revisions.list` (every page, `revisions(id,modifiedTime,lastModifyingUser(me))`) must show
       **every** revision made last by the member's own account (`lastModifyingUser.me`; ACB writes with their token, so
       anyone else's edit in between is a revision that is not theirs; a document ACB updates only ever had revisions
-      that passed this and the check below), and `files.get` `modifiedTime,lastModifyingUser(me)` must say the file's
-      last change is the member's too — a second witness that does not rest on the revision list, which Google says
-      may omit or merge revisions. The newest revision's id and `modifiedTime` are kept, with the upload
-      answer's `modifiedTime` as the baseline's time (comments are compared from it). Anything else keeps none. A put
+      that passed this and the check below), and `files.get` `modifiedTime,lastModifyingUser(me)` read last must say
+      the file's last change is the member's and its `modifiedTime` must still be **exactly the upload answer's**
+      (anyone's edit in between moves it, the member's own too; viewing does not). The time check is what covers an
+      edit the revision list omits or merges (Google documents that it may): the fake cannot reproduce such an
+      omission meaningfully, so the authorship checks only add refusals and never stand in for it. The newest
+      revision's id and `modifiedTime` are kept, with the upload answer's `modifiedTime` as the baseline's time
+      (comments are compared from it). Anything else keeps none. A put
       found after a lost answer (`reconcile`: a repeat of the request, `GET /puts/:id`, any time later) never gets one —
       the document may hold a person's edit by then.
     - **Real Google, 2026-11-12** (the owner's practice document): a new put's calls all answered 200
       (`files.create`, two `files.export`, `revisions.list`, `files.get`), yet no baseline was kept and every update was
-      `DRIVE_FILE_NOT_VERIFIABLE`. The rule then also required the file's `modifiedTime` read last to equal the upload
-      answer's; most likely Drive's processing after the import moved it with no edit. That comparison is gone: the
-      file's `modifiedTime` is read only for a diagnostic line. Nothing had said which check failed, hence the logs below.
-      What the time equality caught and authorship does not: the member's own edit in those seconds (accepted, below)
-      and an edit Google attributes to nobody or to the member (to confirm, below).
+      `DRIVE_FILE_NOT_VERIFIABLE`. Suspected: Drive's processing after the import moved the file's `modifiedTime` with no
+      edit (`modified-moved`), but nothing logged which check failed. **The strict check is kept unchanged** until the
+      logs below show what real Google does; relaxing it is the owner's decision after their next real-Google try.
     - **Diagnostics** (`log.warn`, `[google-drive]`; never a file id, put id, name, text or token — only step names,
       counts and timestamp-shaped values): a baseline not kept → `document baseline not kept: <step>`, `no-upload-time` |
       `export-failed` | `export-differs` | `no-revision` | `not-me (revisions: n, not the member's: n, the newest the
-      member's: true|false)` | `file-unread` | `file-not-me`; a baseline kept while the file's time moved → `document
-      baseline kept; modified-moved upload=<t> file=<t> newest-revision=<t> revisions=<n>` (a time not shaped like an
-      RFC 3339 UTC timestamp is logged as `unusual`); an update refused by the comparison → `document update refused: changed
+      member's: true|false)` | `file-unread` | `file-not-me` | `modified-moved upload=<t> file=<t> newest-revision=<t>
+      revisions=<n>` (the upload answer's, `files.get`'s and the newest revision's `modifiedTime`; a time not shaped
+      like an RFC 3339 UTC timestamp is logged as `unusual`); an update refused by the comparison → `document update refused: changed
       since the baseline (text | revision-id | revision-time | comment)`.
-    - **Accepted residual** (the same family as the missing If-Match below): the member's own edit in the few seconds
-      between the upload and these reads is taken for ACB's (their revision is "me"), so a later update replaces it; it
-      stays in the document's 変更履歴. Another person's edit in those seconds is refused as long as Google attributes it
-      to them in the revision list or as the file's last modifier.
     - **Before an update**, with the member's own `drive.file` token (allowed on a file ACB made; the one `drive()`
       helper with `GOOGLE_SCOPE.driveFile`): the text export again → its sha256 must equal the baseline's; the newest
       revision's id **and** `modifiedTime` must be the baseline's (formatting, images, a chart, a suggestion change no text
@@ -332,14 +329,11 @@ The AI reads and writes **only** the member's own live picks.
       text and comments are unchanged: the member's own bold merged by Docs into ACB's revision looks exactly the same,
       and a person's change is never overwritten.
     - **To confirm on real Google** (if any is wrong, updates are refused — the safe side; the log lines tell which):
-      - that a baseline is now kept right after a real import: two exports agree and every revision answers
-        `lastModifyingUser.me: true` for the uploader (a `not-me` line with "not the member's: 1" on a fresh put would
-        mean Drive attributes the import to no one, `export-differs` a slower conversion);
-      - whether the file's `modifiedTime` really moves after an import (`modified-moved`), and whether the newest
-        revision's time moves with it before the reads (harmless) or after them (`revision-time` on the next update);
-      - that `lastModifyingUser.me` is answered on revisions and on the file under `drive.file`, and that Google never
-        attributes another account's edit to the member (Google documents that revision lists may omit or merge
-        revisions; the file's last modifier is the second witness);
+      - which step drops the baseline after a real import: `modified-moved` (and by how much, and whether the newest
+        revision's time moved with it), `export-differs` (a slower conversion), or `not-me` / `file-not-me` (Drive
+        attributing the import to no one);
+      - whether the newest revision's time also moves *after* the reads (`revision-time` on the next update);
+      - that `lastModifyingUser.me` is answered on revisions and on the file under `drive.file`;
       - that `revisions.list` and `comments.list` answer under `drive.file` for a file ACB made;
       - that opening and closing a document (the owner's case) moves neither the newest revision's id nor its
         `modifiedTime` (the owner's 変更履歴 showed one version).
@@ -431,7 +425,7 @@ Box: its own `deliveryPlaces` kind, `connector-roles.md`).
 
 ## Tests
 
-`server/tests/integration/google-drive.test.ts` (fake Google, practice redirect; 「a picked file linked to a record」, including 「every record check comes first」; 「a put in a consultation about a task」: the receipt's facts, the AI as the actor, the name to the linker only, a replay never links again, a failed record check keeps the put done, the own-files list and another member's refusal; 「Google documents and overwriting」: HTML / Markdown as a document and every other form refused, an update keeps the id and link with a new version and is never sent twice, the key reused with another target, not the member's own put / another folder / another kind / another member — refused before Google is asked, a file moved away or shared outside by itself refused with nothing sent, a lost answer found, the task's link following the newest revision; the document baseline: kept despite the post-import time move, not kept when any revision is not the member's (also under the member's own newer one, also on a later page) or when the file's last modifier is not (an edit the revision list omits), each dropped step and each refused part logged with nothing of the file and a malformed time as `unusual`, a later time on the same revision refused — mutation-checked, 12 guards + 12; not reachable, kept as defence: an
+`server/tests/integration/google-drive.test.ts` (fake Google, practice redirect; 「a picked file linked to a record」, including 「every record check comes first」; 「a put in a consultation about a task」: the receipt's facts, the AI as the actor, the name to the linker only, a replay never links again, a failed record check keeps the put done, the own-files list and another member's refusal; 「Google documents and overwriting」: HTML / Markdown as a document and every other form refused, an update keeps the id and link with a new version and is never sent twice, the key reused with another target, not the member's own put / another folder / another kind / another member — refused before Google is asked, a file moved away or shared outside by itself refused with nothing sent, a lost answer found, the task's link following the newest revision; the document baseline: not kept when the file's time moved after the upload (a post-import move, the member's own edit) or any revision is not the member's (also under the member's own newer one, on a later page, without its author) or the file's last modifier is not, or a later page is unreadable; each dropped step and each refused part logged with nothing of the file and a malformed time as `unusual`, a later time on the same revision refused — mutation-checked, 12 guards + 12; not reachable, kept as defence: an
 update's `fileId` taken from the receipt rather than Google's answer, and the link following only a changed revision) and
 `server/tests/integration/job-deliverables.test.ts` (a job's run: `jobs.md`) and
 `server/tests/unit/google-drive-core.test.ts` (the link parser: Google's hosts only, look-alikes,
