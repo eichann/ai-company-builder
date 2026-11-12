@@ -853,6 +853,25 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     expect(google.driveFile(fileId)!.content.toString()).toBe(text)
     return r
   }
+  /**
+   * The `[google-drive]` warnings logged while `run` runs. Each must name no file, put, folder, name, text or token
+   * (`secrets`: what this case put or read); the lines are returned for the step / part they name.
+   */
+  async function driveWarnings(run: () => Promise<unknown>, secrets: () => string[]): Promise<string[]> {
+    // console.warn may already be a spy of an earlier case (vitest then hands back the same one): only this run's calls.
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const from = spy.mock.calls.length
+    try {
+      await run()
+      const lines = spy.mock.calls.slice(from).map(c => c.map(String).join(' ')).filter(l => l.startsWith('[google-drive]'))
+      for (const line of lines) {
+        for (const secret of [...secrets(), GOOGLE_SEED.proposalsFolder, 'ya29.', '1//']) expect(line, secret).not.toContain(secret)
+      }
+      return lines
+    } finally {
+      spy.mockRestore()
+    }
+  }
 
   it('a Google document opened without an edit (its version moved) is overwritten; its baseline is the text, the newest revision and the upload\'s time', async () => {
     const token = await tokenFor('m-sato', 'act')
@@ -877,30 +896,44 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     expect(baseline(md.id).fingerprint).toBeNull()
   })
 
-  it('a person\'s change is never overwritten: new text, a change of look only (a new revision), a comment', async () => {
+  it('a person\'s change is never overwritten: new text, a change of look only (a new revision), a comment — the part that differed is logged, nothing of the file', async () => {
     const token = await tokenFor('m-sato', 'act')
-    const edited = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 文\n'), { name: '文が変わる.md' }))).body.data.drivePut
+    const seen: string[] = []
+    const secrets = () => [...seen, '文が変わる', '同じ版', '見た目', 'コメントが付く', '人が直した', '# ']
+    const refusedFor = async (part: string, put: () => Promise<unknown>) => {
+      const lines = await driveWarnings(put, secrets)
+      expect(lines).toEqual([`[google-drive] document update refused: changed since the baseline (${part})`])
+    }
+    const putDoc = async (text: string, name: string) => {
+      const p = (await ai(token, 'POST', '/put', docBody(Buffer.from(text), { name }))).body.data.drivePut
+      seen.push(p.fileId, p.id)
+      return p
+    }
+    const edited = await putDoc('# 文\n', '文が変わる.md')
     google.editDriveFile(edited.fileId, '# 人が直した文\n')
-    await refusedUpdate(token, '文が変わる.md', edited.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 人が直した文\n')
+    await refusedFor('text', () => refusedUpdate(token, '文が変わる.md', edited.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 人が直した文\n'))
     // An edit Docs merged into the newest revision (no new revision id): the text tells.
-    const merged = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 文\n'), { name: '同じ版に混ざる.md' }))).body.data.drivePut
+    const merged = await putDoc('# 文\n', '同じ版に混ざる.md')
     google.editDriveFileMerged(merged.fileId, '# 同じ版に混ざった直し\n')
-    await refusedUpdate(token, '同じ版に混ざる.md', merged.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 同じ版に混ざった直し\n')
+    await refusedFor('text', () => refusedUpdate(token, '同じ版に混ざる.md', merged.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 同じ版に混ざった直し\n'))
     // Bold, an image, a chart, a suggestion: the text export is the same, the newest revision is not.
-    const styled = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 見た目\n'), { name: '見た目が変わる.md' }))).body.data.drivePut
+    const styled = await putDoc('# 見た目\n', '見た目が変わる.md')
     google.formatDriveFile(styled.fileId)
-    await refusedUpdate(token, '見た目が変わる.md', styled.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 見た目\n')
-    // The member's bold soon after ACB's put, merged by Docs into ACB's own revision: the same id and text, a later time.
-    const bolded = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 太字\n'), { name: '同じ版で太字.md' }))).body.data.drivePut
+    await refusedFor('revision-id', () => refusedUpdate(token, '見た目が変わる.md', styled.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 見た目\n'))
+    // The member's own bold soon after ACB's put, merged by Docs into ACB's own revision: the same id and text, a later
+    // time. Refused although it is the member's: Google's own processing moving that time after the baseline would look
+    // the same, and the two cannot be told apart (the owner's decision: the safe side).
+    const bolded = await putDoc('# 太字\n', '同じ版で太字.md')
     const revBefore = baseline(bolded.id).revision
     google.formatDriveFileMerged(bolded.fileId)
     expect(google.driveFile(bolded.fileId)!.headRevisionId).toBe(revBefore)
-    await refusedUpdate(token, '同じ版で太字.md', bolded.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 太字\n')
+    await refusedFor('revision-time', () => refusedUpdate(token, '同じ版で太字.md', bolded.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 太字\n'))
     // A comment changes neither the text nor the revisions.
-    const commented = (await ai(token, 'POST', '/put', docBody(Buffer.from('# コメント\n'), { name: 'コメントが付く.md' }))).body.data.drivePut
+    const commented = await putDoc('# コメント\n', 'コメントが付く.md')
     google.commentOnDriveFile(commented.fileId)
-    const r = await refusedUpdate(token, 'コメントが付く.md', commented.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# コメント\n')
-    expect(r.body.error).toContain('コメント')
+    let r: Awaited<ReturnType<typeof refusedUpdate>> | null = null
+    await refusedFor('comment', async () => { r = await refusedUpdate(token, 'コメントが付く.md', commented.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# コメント\n') })
+    expect(r!.body.error).toContain('コメント')
   })
 
   it('not verifiable → never overwritten (「確かめられないため」): no baseline kept, an export or the revisions unreadable now', async () => {
@@ -951,6 +984,132 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     const raced = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 競う\n'), { name: '競う.md' }))).body.data.drivePut
     expect(baseline(raced.id).fingerprint).toBeNull()
     await refusedUpdate(token, '競う.md', raced.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 誰かが直した\n')
+  })
+
+  it('the file\'s time moved after the upload (as real Google may do after an import): no baseline, the update refused — the strict check unchanged — and the step logged with its timestamps only', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    for (const revisionToo of [false, true]) {
+      const name = `取り込み後に動く${revisionToo ? '2' : '1'}.md`
+      let doc: Json = {}
+      google.faults.moveTimeAfterNextImport({ revisionToo })
+      const lines = await driveWarnings(async () => {
+        doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 取り込み\n'), { name }))).body.data.drivePut
+      }, () => [doc.fileId, doc.id, '取り込み'])
+      expect(doc.state).toBe('done')
+      expect(baseline(doc.id).fingerprint, `revisionToo=${revisionToo}`).toBeNull()
+      expect(lines).toEqual([expect.stringMatching(/^\[google-drive\] document baseline not kept: modified-moved upload=\d{4}-\S+Z file=\d{4}-\S+Z newest-revision=\d{4}-\S+Z revisions=1$/)])
+      const [, upload, file, newest] = /upload=(\S+) file=(\S+) newest-revision=(\S+)/.exec(lines[0])!
+      expect(Date.parse(file) - Date.parse(upload)).toBe(2000)
+      expect(newest).toBe(revisionToo ? file : upload)
+      await refusedUpdate(token, name, doc.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 取り込み\n')
+    }
+    // The member's own edit right after the upload moves the time too: refused, never taken for ACB's text.
+    let own: Json = {}
+    google.faults.editBeforeNextExport('# 本人が直した\n', GOOGLE_SEED.member)
+    const ownLines = await driveWarnings(async () => {
+      own = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 競う\n'), { name: '本人が直す.md' }))).body.data.drivePut
+    }, () => [own.fileId, own.id, '本人', '競う'])
+    expect(baseline(own.id).fingerprint).toBeNull()
+    expect(ownLines).toEqual([expect.stringMatching(/^\[google-drive\] document baseline not kept: modified-moved .* revisions=2$/)])
+    await refusedUpdate(token, '本人が直す.md', own.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 本人が直した\n')
+    // A time that is not a timestamp (what Google answered is not trusted): logged as a fixed word, never as it came.
+    let odd: Json = {}
+    const injected = '2026-11-12T00:00:00Z secret\n[google-drive] forged line'
+    google.faults.moveTimeAfterNextImport({ fileTimeAs: injected })
+    const oddLines = await driveWarnings(async () => {
+      odd = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 変な時刻\n'), { name: '変な時刻.md' }))).body.data.drivePut
+    }, () => [odd.fileId, odd.id, '変な時刻', 'secret', 'forged', '\n'])
+    expect(oddLines).toHaveLength(1)
+    expect(oddLines[0]).toMatch(/^\[google-drive\] document baseline not kept: modified-moved upload=\d{4}-\S+Z file=unusual newest-revision=\d{4}-\S+Z revisions=1$/)
+  })
+
+  it('the baseline is kept only when every revision and the file itself are the member\'s: another person\'s edit, on any page, a revision without its author, a page that cannot be read keep none', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const secrets: string[] = ['他の人', '本人', '競う', '作者']
+    // Another person's edit between the upload and the reads: their revision is not the member's.
+    let other: Json = {}
+    google.faults.editBeforeNextExport('# 他の人が直した\n')
+    const lines = await driveWarnings(async () => {
+      other = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 競う\n'), { name: '他の人が直す.md' }))).body.data.drivePut
+    }, () => [...secrets, other.fileId, other.id])
+    expect(baseline(other.id).fingerprint).toBeNull()
+    expect(lines).toEqual(["[google-drive] document baseline not kept: not-me (revisions: 2, not the member's: 1, the newest the member's: false)"])
+    await refusedUpdate(token, '他の人が直す.md', other.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 他の人が直した\n')
+    // Another person's edit and then the member's own: the newest is the member's, the one under it is not.
+    let under: Json = {}
+    google.faults.editBeforeNextExport('# 他の人が直した\n')
+    google.faults.editBeforeNextExport('# 本人がさらに直した\n', GOOGLE_SEED.member)
+    const lines2 = await driveWarnings(async () => {
+      under = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 競う\n'), { name: '下に他の人.md' }))).body.data.drivePut
+    }, () => [...secrets, under.fileId, under.id])
+    expect(baseline(under.id).fingerprint).toBeNull()
+    expect(lines2).toEqual(["[google-drive] document baseline not kept: not-me (revisions: 3, not the member's: 1, the newest the member's: true)"])
+    // The newest revision without `lastModifyingUser` (Google may leave it out): not the member's — none kept.
+    let anon: Json = {}
+    google.faults.hideNewestRevisionAuthor(true)
+    try {
+      const lines3 = await driveWarnings(async () => {
+        anon = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 作者なし\n'), { name: '作者なし.md' }))).body.data.drivePut
+      }, () => [...secrets, anon.fileId, anon.id])
+      expect(baseline(anon.id).fingerprint).toBeNull()
+      expect(lines3).toEqual(["[google-drive] document baseline not kept: not-me (revisions: 1, not the member's: 1, the newest the member's: false)"])
+    } finally {
+      google.faults.hideNewestRevisionAuthor(false)
+    }
+    // The file's own last modifier is another person (an edit the fake leaves out of the revision list): none kept.
+    let lastBy: Json = {}
+    google.faults.editBeforeNextExport('# 他の人が直した（履歴に出ない）\n', undefined, true)
+    const lines4 = await driveWarnings(async () => {
+      lastBy = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 競う\n'), { name: '履歴に出ない.md' }))).body.data.drivePut
+    }, () => [...secrets, lastBy.fileId, lastBy.id])
+    expect(baseline(lastBy.id).fingerprint).toBeNull()
+    expect(lines4).toEqual(['[google-drive] document baseline not kept: file-not-me'])
+    // Revisions on several pages: another person's on the second page is seen; a second page that cannot be read keeps
+    // none; every page read and every revision the member's — an update of ACB's own document — keeps one.
+    const twoRevs = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 一版\n'), { name: '全部のページ.md' }))).body.data.drivePut
+    google.faults.pageRevisions(1)
+    try {
+      let paged: Json = {}
+      google.faults.editBeforeNextExport('# 二ページ目に他の人\n')
+      const lines5 = await driveWarnings(async () => {
+        paged = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 競う\n'), { name: '二ページ目.md' }))).body.data.drivePut
+      }, () => [...secrets, paged.fileId, paged.id])
+      expect(baseline(paged.id).fingerprint).toBeNull()
+      expect(lines5).toEqual(["[google-drive] document baseline not kept: not-me (revisions: 2, not the member's: 1, the newest the member's: false)"])
+      const updated = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 二版\n'), { name: '全部のページ.md', updateFileId: twoRevs.fileId }))).body.data.drivePut
+      expect(baseline(updated.id).revision).toBe(google.driveFile(twoRevs.fileId)!.headRevisionId)
+      let cut: Json = {}
+      // The check before the update reads two pages (two revisions); the baseline's second page is the one refused.
+      google.faults.failNextRevisionLists(1, 3)
+      const lines6 = await driveWarnings(async () => {
+        cut = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 三版\n'), { name: '全部のページ.md', updateFileId: twoRevs.fileId }))).body.data.drivePut
+      }, () => [...secrets, cut.fileId, cut.id])
+      expect(cut.state).toBe('done')
+      expect(baseline(cut.id).fingerprint).toBeNull()
+      expect(lines6).toEqual(['[google-drive] document baseline not kept: no-revision'])
+    } finally {
+      google.faults.pageRevisions(0)
+    }
+  })
+
+  it('each step that keeps no baseline is logged by its name, nothing of the file: export-failed, export-differs, no-revision', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const cases: Array<[string, () => void, string]> = [
+      ['export-failed', () => google.faults.failNextExports(2), '書き出せない.md'],
+      ['export-differs', () => google.faults.staleNextExport(''), '処理中の文.md'],
+      ['no-revision', () => google.faults.failNextRevisionLists(1), '履歴が読めない直後.md'],
+      ['file-unread', () => google.faults.failNextFileGets(1), '情報が読めない直後.md'],
+    ]
+    for (const [step, fault, name] of cases) {
+      let put: Json = {}
+      fault()
+      const lines = await driveWarnings(async () => {
+        put = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 手順\n'), { name }))).body.data.drivePut
+      }, () => [put.fileId, put.id, name.replace(/\.md$/, ''), '手順'])
+      expect(put.state, step).toBe('done')
+      expect(baseline(put.id).fingerprint, step).toBeNull()
+      expect(lines, step).toEqual([`[google-drive] document baseline not kept: ${step}`])
+    }
   })
 
   it('an update whose answer was lost, found later after someone edited the document: no baseline from that reading — the next overwrite is refused', async () => {
