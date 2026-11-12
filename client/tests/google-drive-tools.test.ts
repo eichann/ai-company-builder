@@ -289,6 +289,30 @@ test('a stalled request never holds the wait: the AI stopped while the server do
   assert.equal(ok.ok, true)
 })
 
+test('the AI stopped while waiting for Google\'s consent: no ticket asked, no browser page opened', async () => {
+  // Stopped before the consent arrived.
+  const before = fakeServer('act')
+  const ctl = new AbortController()
+  const p1 = picking(before, { sleep: async () => { ctl.abort() } })
+  p1.withoutDrive()
+  const r1 = await p1.p.pick('co', 'folder', ctl.signal)
+  assert.deepEqual([r1.ok, !r1.ok && r1.reason], [false, 'cancelled'])
+  // Stopped at the moment the consent arrived: the stop still wins.
+  const same = fakeServer('act')
+  const ctl2 = new AbortController()
+  let granted = false
+  const p3 = picking(same, {
+    google: { status: async () => ({ success: true, data: my(granted ? ['minutes', 'drive'] : ['minutes']) }), connect: async () => ({ success: true }) },
+    sleep: async () => { granted = true; ctl2.abort() },
+  })
+  const r2 = await p3.p.pick('co', 'folder', ctl2.signal)
+  assert.deepEqual([r2.ok, !r2.ok && r2.reason], [false, 'cancelled'])
+  for (const [server, pick] of [[before, p1], [same, p3]] as const) {
+    assert.deepEqual(server.seen.filter(x => x.url.includes('/pick-tickets')), [])
+    assert.deepEqual(pick.opened, [])
+  }
+})
+
 test('without the Drive permission: Google\'s consent first (drive only), then the Picker', async () => {
   const server = fakeServer('act')
   const pick = picking(server)

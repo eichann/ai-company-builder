@@ -1202,6 +1202,43 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     expect(none.posted).toEqual([])
   })
 
+  it('the first result reached the server but its answer was lost: the retry hears 410 and the page just says go back to the app', async () => {
+    google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.proposalsFolder])
+    const t = await ticket('m-sato', { mode: 'folder' })
+    const r = await call({ method: 'GET', path: '/api/google-picker' })
+    const script = /<script>([\s\S]*)<\/script>/.exec(r.text)![1]
+    const posted: string[] = []
+    const msg = { textContent: '' }
+    let callback: (data: unknown) => void = () => {}
+    const view: Record<string, unknown> = {}
+    for (const m of ['setMimeTypes', 'setIncludeFolders', 'setSelectFolderEnabled', 'setEnableDrives']) view[m] = () => view
+    const builder: Record<string, unknown> = {}
+    for (const m of ['addView', 'setOAuthToken', 'setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle']) builder[m] = () => builder
+    builder.setCallback = (f: (data: unknown) => void) => { callback = f; return builder }
+    builder.build = () => ({ setVisible: () => callback({ action: 'picked', docs: [{ id: GOOGLE_SEED.proposalsFolder }] }) })
+    let lost = true
+    const window: Record<string, unknown> = {
+      location: { origin: PUBLIC, pathname: '/api/google-picker', hash: `#t=${t.ticket}` }, history: { replaceState: () => {} }, addEventListener: () => {},
+      fetch: async (path: string, init: { body: string }) => {
+        const body = JSON.parse(init.body)
+        posted.push(`${path} ${body.action ?? ''}`)
+        const res = await call({ method: 'POST', path, body })
+        // The first pick arrived and was kept, but its answer never came back.
+        if (path.endsWith('/result') && body.action === 'picked' && lost) { lost = false; throw new TypeError('network') }
+        return new Response(res.text, { status: res.status })
+      },
+      gapi: { load: (_n: string, o: { callback: () => void }) => o.callback() },
+      google: { picker: { DocsView: function () { return view }, PickerBuilder: function () { return builder }, ViewId: {}, Action: { PICKED: 'picked', CANCEL: 'cancel' }, Feature: {} } },
+    }
+    runInNewContext(script, { window, document: { getElementById: () => msg, createElement: () => ({}), head: { appendChild: (el: { onload: () => void }) => el.onload() } } })
+    for (let i = 0; i < 100 && posted.length < 3; i++) await sleepMs(10)
+    for (let i = 0; i < 50 && !msg.textContent.includes('アプリに戻って'); i++) await sleepMs(10)
+    expect(posted).toEqual(['/api/google-picker/config ', '/api/google-picker/result picked', '/api/google-picker/result picked'])
+    expect(msg.textContent).toBe('アプリに戻ってください。（このタブは閉じてかまいません）')
+    expect(msg.textContent).not.toContain('使えません')
+    expect((await state('m-sato', t.ticketId)).body.data).toMatchObject({ state: 'picked', picks: [{ id: GOOGLE_SEED.proposalsFolder }] })
+  })
+
   it('the result could not reach the server: tried once more, then a cancel goes out', async () => {
     const t = await ticket('m-sato', { mode: 'folder' })
     const r = await call({ method: 'GET', path: '/api/google-picker' })

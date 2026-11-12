@@ -123,7 +123,7 @@ never matches).
   synchronous compare-and-set `saving → picked` followed by the write (`keepPicks`): a ticket the app
   closed meanwhile keeps nothing and the page gets 410. The body names no member. The page posts the
   result with **`keepalive`** (a tab closed right after 「選択」 still delivers it), tries a failed post once
-  more, then posts a cancel; it then says 「選びました。アプリに戻ってください。（このタブは閉じて
+  more (a retry told `PICK_TICKET_GONE` just says 「アプリに戻ってください。」: the first try may have arrived), then posts a cancel; it then says 「選びました。アプリに戻ってください。（このタブは閉じて
   かまいません）」 / 「選ぶのをやめました。…」.
 - **Accepted residual risk** (owner's safe-side choice): the ticket is not bound to the browser, and the
   first address `…#t=<ticket>` may stay in that browser's history (and its sync) until the page takes it

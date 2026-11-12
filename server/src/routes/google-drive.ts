@@ -191,6 +191,7 @@ const PICKER_SCRIPT = `(function () {
   }
   var problem = function (a, fallback) { return a && a.j && typeof a.j.error === 'string' ? a.j.error : fallback }
   var LOST = 'アプリに伝えられませんでした。アプリに戻って、もう一度お試しください。'
+  var BACK_TO_APP = 'アプリに戻ってください。（このタブは閉じてかまいません）'
   var finished = false
   // keepalive: the answer still reaches the server when the tab is closed right after 「選択」.
   var finish = function (body, done) {
@@ -201,6 +202,8 @@ const PICKER_SCRIPT = `(function () {
     var send = function (again) {
       post('/result', body, true).then(function (a) {
         if (a.ok) say(done)
+        // The first try may have reached the server: a retry told the ticket is used says nothing alarming.
+        else if (!again && a.j && a.j.code === 'PICK_TICKET_GONE') say(BACK_TO_APP)
         else if (a.j && typeof a.j.error === 'string') say(a.j.error)
         else if (again) send(false)
         else giveUp()

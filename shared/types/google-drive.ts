@@ -46,7 +46,7 @@ export interface DrivePickerPageConfig {
   maxItems: number
   /** Files mode only: the files the Picker shows (a pasted Drive link), already checked as Drive ids. */
   fileIds?: string[]
-  /** The Google account the member allowed (their own ACB email's): the Picker opens on it when it can. */
+  /** The Google account of the member's grant (its `accountEmail`): the Picker opens on it when it can. */
   account?: string
 }
 
