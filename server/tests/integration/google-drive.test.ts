@@ -841,7 +841,7 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
   })
 
   // A document's baseline (google-drive.md "A Google document's own changes"), read in the test from the receipt's columns.
-  const baseline = (putId: string) => db.prepare('SELECT doc_fingerprint AS fingerprint, doc_revision AS revision, doc_baseline_at AS at FROM google_drive_puts WHERE company_id = ? AND id = ?').get(CO, putId) as Json
+  const baseline = (putId: string) => db.prepare('SELECT doc_fingerprint AS fingerprint, doc_revision AS revision, doc_revision_at AS revisionAt, doc_baseline_at AS at FROM google_drive_puts WHERE company_id = ? AND id = ?').get(CO, putId) as Json
   const patches = () => google.requests.filter(r => r.method === 'PATCH' && r.path.startsWith('/upload/drive/v3/files/')).length
   const NEXT = Buffer.from('# 次の版\n')
   /** An update that must be refused with `code`, nothing written to Drive and the document's text still `text`. */
@@ -861,6 +861,7 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     const kept = baseline(doc.id)
     expect(kept.fingerprint).toMatch(/^[0-9a-f]{64}$/)
     expect(kept.revision).toBe(google.driveFile(doc.fileId)!.headRevisionId)
+    expect(kept.revisionAt).toMatch(/^\d{4}-/)
     expect(kept.at).toMatch(/^\d{4}-/)
     google.openDriveFile(doc.fileId)
     expect(`version:${google.driveFile(doc.fileId)!.version}`).not.toBe(doc.revisionId)
@@ -889,6 +890,12 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     const styled = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 見た目\n'), { name: '見た目が変わる.md' }))).body.data.drivePut
     google.formatDriveFile(styled.fileId)
     await refusedUpdate(token, '見た目が変わる.md', styled.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 見た目\n')
+    // The member's bold soon after ACB's put, merged by Docs into ACB's own revision: the same id and text, a later time.
+    const bolded = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 太字\n'), { name: '同じ版で太字.md' }))).body.data.drivePut
+    const revBefore = baseline(bolded.id).revision
+    google.formatDriveFileMerged(bolded.fileId)
+    expect(google.driveFile(bolded.fileId)!.headRevisionId).toBe(revBefore)
+    await refusedUpdate(token, '同じ版で太字.md', bolded.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 太字\n')
     // A comment changes neither the text nor the revisions.
     const commented = (await ai(token, 'POST', '/put', docBody(Buffer.from('# コメント\n'), { name: 'コメントが付く.md' }))).body.data.drivePut
     google.commentOnDriveFile(commented.fileId)
@@ -900,7 +907,7 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     const token = await tokenFor('m-sato', 'act')
     // A receipt from before baselines.
     const old = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 前の控え\n'), { name: '前の控え.md' }))).body.data.drivePut
-    db.prepare('UPDATE google_drive_puts SET doc_fingerprint = NULL, doc_revision = NULL, doc_baseline_at = NULL WHERE company_id = ? AND id = ?').run(CO, old.id)
+    db.prepare('UPDATE google_drive_puts SET doc_fingerprint = NULL, doc_revision = NULL, doc_revision_at = NULL, doc_baseline_at = NULL WHERE company_id = ? AND id = ?').run(CO, old.id)
     const r = await refusedUpdate(token, '前の控え.md', old.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 前の控え\n')
     expect(r.body.error).toContain('確かめられないため')
     expect(r.body.error).not.toContain('直されています')

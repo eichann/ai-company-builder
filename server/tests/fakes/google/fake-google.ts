@@ -270,6 +270,8 @@ export interface FakeGoogle {
   editDriveFileMerged(id: string, content: string): void
   /** Someone changes only the look of this Google document (bold, an image): a new revision, the same text. */
   formatDriveFile(id: string): void
+  /** The same, merged by Docs into the newest revision (the member's own edit soon after ACB's): its id kept, its time moved. */
+  formatDriveFileMerged(id: string): void
   /** Someone comments on this Drive file (no new revision, the same text). */
   commentOnDriveFile(id: string): void
   /**
@@ -1691,6 +1693,14 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       const f = driveFiles.get(id)
       if (!f) throw new Error(`fake Google: no Drive file ${id}`)
       f.content = Buffer.from(content, 'utf8')
+      f.version += 1
+      f.modifiedTime = iso(Math.max(now(), Date.parse(f.modifiedTime) + 1000))
+      const last = f.history[f.history.length - 1]
+      if (last) last.modifiedTime = f.modifiedTime
+    },
+    formatDriveFileMerged(id) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
       f.version += 1
       f.modifiedTime = iso(Math.max(now(), Date.parse(f.modifiedTime) + 1000))
       const last = f.history[f.history.length - 1]

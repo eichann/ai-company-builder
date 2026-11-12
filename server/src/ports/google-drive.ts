@@ -53,6 +53,11 @@ export interface DriveDocBaseline {
   fingerprint: string
   /** The id of its newest revision (`revisions.list`): any change of content, formatting or images makes a new one. */
   revision: string
+  /**
+   * That revision's `modifiedTime`: Docs merges edits made close together by the same account into one revision (ACB
+   * writes with the member's own token), so a change merged into ACB's revision keeps its id but moves this.
+   */
+  revisionAt: string
   /** The upload's `modifiedTime`: comments made or changed after it are someone's. */
   at: string
 }

@@ -240,13 +240,14 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
   }
 
   /**
-   * A Google document's newest revision (`revisions.list`, every page; a `drive.file` call on a file ACB made): a change
-   * of its content, formatting or images makes a new one, viewing does not. Null when it could not be read in full.
-   * (Kept as the whole entry's id; who made later revisions — `lastModifyingUser` — is the next step's to read.)
+   * A Google document's newest revision (`revisions.list`, every page; a `drive.file` call on a file ACB made): its id
+   * and `modifiedTime` — a change of its content, formatting or images makes a new one or (merged into the newest, as Docs
+   * does for edits close together) moves its time; viewing does neither. Null when it could not be read in full. (Who
+   * made later revisions — `lastModifyingUser` — is the next step's to read from the same list.)
    */
-  async function docNewestRevision(companyId: string, userId: string, fileId: string): Promise<string | null> {
+  async function docNewestRevision(companyId: string, userId: string, fileId: string): Promise<{ id: string; at: string } | null> {
     let pageToken: string | null = null
-    let newest: string | null = null
+    let newest: { id: string; at: string } | null = null
     for (let page = 0; page < 10; page++) {
       const r = await drive(companyId, userId, {
         method: 'GET', path: `/drive/v3/files/${fileId}/revisions`,
@@ -256,7 +257,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       if (!r.ok || !isObj(r.json)) return null
       const revs = Array.isArray(r.json.revisions) ? r.json.revisions.filter(isObj) : []
       const last = revs[revs.length - 1]
-      if (last) newest = typeof last.id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(last.id) ? last.id : null
+      if (last) newest = typeof last.id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(last.id) && str(last.modifiedTime) ? { id: last.id, at: str(last.modifiedTime) as string } : null
       pageToken = str(r.json.nextPageToken)
       if (!pageToken) return newest
     }
@@ -292,7 +293,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     if (!revision) return
     const m = await meta(companyId, row.userId, row.fileId)
     if (!m.ok || !isObj(m.json) || str(m.json.modifiedTime) !== uploadedAt) return
-    const baseline: DriveDocBaseline = { fingerprint: first, revision, at: uploadedAt }
+    const baseline: DriveDocBaseline = { fingerprint: first, revision: revision.id, revisionAt: revision.at, at: uploadedAt }
     handle(companyId).googleDrive.setDocBaseline(row.id, baseline)
   }
 
@@ -833,10 +834,12 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           const now = await docFingerprint(member.companyId, member.userId, targetId)
           if (now === null) return notVerifiable('このファイルの今の中身を読めず')
           if (now !== base.fingerprint) return changedSince
-          // Formatting, images, a chart or a suggestion change no text but make a new revision.
+          // Formatting, images, a chart or a suggestion change no text but make a new revision — or, merged into the newest
+          // one (Docs does so for one account's edits close together, and ACB writes as the member), move its time.
           const revision = await docNewestRevision(member.companyId, member.userId, targetId)
           if (revision === null) return notVerifiable('このファイルの変更履歴を読めず')
-          if (revision !== base.revision) return changedSince
+          if (revision.id !== base.revision) return changedSince
+          if (revision.at !== base.revisionAt) return changedSince
           const commented = await commentedSince(member.companyId, member.userId, targetId, base.at)
           if (commented === null) return notVerifiable('このファイルのコメントを読めず')
           if (commented) {

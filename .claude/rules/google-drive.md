@@ -281,17 +281,19 @@ The AI reads and writes **only** the member's own live picks.
     Drive's `version` counts every change on the server, "even those not visible to the user" (opening, post-import
     processing), so it is never used as a "someone edited it" signal. Owner rule: **a person's change is never
     overwritten**; when in doubt, refuse.
-    - **The baseline** (`google_drive_puts.doc_fingerprint` / `doc_revision` / `doc_baseline_at`, additive
+    - **The baseline** (`google_drive_puts.doc_fingerprint` / `doc_revision` / `doc_revision_at` / `doc_baseline_at`, additive
       `migrateDrivePutDocFingerprints`; never answered; `DriveDocBaseline`) is taken **only inside the put / update request
       itself**, right after Drive answered it (`keepDocBaseline`): two `text/plain` exports `ACB_DRIVE_DOC_SETTLE_MS`
       (default 1.5 s) apart must give the same text (not a stale or half-processed one; each export is tried once more
-      after a failure), the newest revision id from `revisions.list` (every page), and the file's `modifiedTime` read last
+      after a failure), the newest revision's id and `modifiedTime` from `revisions.list` (every page), and the file's `modifiedTime` read last
       must still be the upload answer's (anyone's edit in between moves it; viewing does not). Anything else keeps none.
       A put found after a lost answer (`reconcile`: a repeat of the request, `GET /puts/:id`, any time later) never gets
       one — the document may hold a person's edit by then.
     - **Before an update**, with the member's own `drive.file` token (allowed on a file ACB made; the one `drive()`
       helper with `GOOGLE_SCOPE.driveFile`): the text export again → its sha256 must equal the baseline's; the newest
-      revision must be the baseline's (formatting, images, a chart, a suggestion change no text but make a revision); no
+      revision's id **and** `modifiedTime` must be the baseline's (formatting, images, a chart, a suggestion change no text
+      but make a revision — or, merged by Docs into the newest one, move its time: Docs merges one account's edits close
+      together and ACB writes as the member, so the member's bold right after ACB's put lands in ACB's revision); no
       comment made or changed since the baseline's time (`comments.list` `startModifiedTime`, deleted ones included).
       Different → 409 `DRIVE_FILE_CHANGED_SINCE` (a comment: its own sentence). **Fails closed** → 409
       `DRIVE_FILE_NOT_VERIFIABLE` 「…Google Drive で直されていないか確かめられないため、上書きしません。新しいファイルとして置いてください。」,
@@ -303,9 +305,13 @@ The AI reads and writes **only** the member's own live picks.
       edit may leave the newest revision id as it was — the text then tells.
     - Prepared for the next step ("only the writer themself edited since"): the revisions are read in full, so who made
       the later ones (`lastModifyingUser`) can be asked of the same list.
-    - **To confirm on real Google**: that merely opening a document adds no revision to `revisions.list` (the owner's
-      変更履歴 showed one), that post-import processing moves neither the newest revision nor `modifiedTime`, and that two
-      exports right after an import agree. If not, updates are refused as not verifiable — the safe side.
+    - **To confirm on real Google** (if any is wrong, updates are refused — the safe side):
+      - that a baseline can be taken at all right after a real import: two exports agree, and the file's `modifiedTime`
+        and the newest revision (id and time) have settled by the time ACB reads them (else every document update is
+        `DRIVE_FILE_NOT_VERIFIABLE`);
+      - that `revisions.list` and `comments.list` answer under `drive.file` for a file ACB made;
+      - that opening and closing a document (the owner's case) moves neither the newest revision's id nor its
+        `modifiedTime` (the owner's 変更履歴 showed one version).
     - **Residual race** (accepted): Drive's `files.update` has no If-Match, so an edit typed between these checks and the
       write is lost from the document's current text; it stays in the document's own version history (変更履歴).
     - The fake moves a document's `version` on every export and on `openDriveFile`; `editDriveFile` / `formatDriveFile`
