@@ -677,11 +677,16 @@ POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }  
   `drive-put-…`, which `drive_picked` does not show, so a Skill that said "update the report" could not find it):
   in the responsible person's turn only (`job-runs.ts` `madeBeforeOf`), a made thing that is a file in the job's
   chosen place carries `file: { id, name }` — resolved by the place's connector (`JobRunDeps.places.madeFile`,
-  composed in `deliveryPlaces.madeFile` → `googleDrive.madeFile`): the member's own **done** receipt, **in the chosen
-  folder now**, with a Drive file id → that file id (what `updateFileId` takes) and the name it was put with; else no
-  `file` (another folder, not done, another kind). Two puts of one file (made, then updated) are one entry. The owner /
+  composed in `deliveryPlaces.madeFile` → `googleDrive.madeFile`): the member's own **done** receipt, **written by one
+  of this occurrence's runs** (`runsOf`: a consultation's receipt a run was answered with again — the same request — is
+  not the job's file, and its update would be refused `DRIVE_FILE_NOT_THIS_JOB`), whose **receipt folder is the place
+  chosen now** (the folder the receipt records, compared with the accepted place; Google is not asked where the file is
+  in Drive today — the put route checks that when it updates), with a Drive file id → that file id (what `updateFileId`
+  takes) and the name it was put with; else no `file`. Two puts of one file (made, then updated) are one entry, so
+  they count once against `JOB_MADE_BEFORE_LISTED` / `madeBeforeTotal`. The owner /
   admin view is unchanged (`viewOf`: kinds and counts — never a file id, a name, a folder or a receipt id). The app
-  takes `file` only on a turn with a place (id `[A-Za-z0-9_-]{1,200}`, name ≤ 500; a malformed one is left out, never
+  takes `file` only on a turn with a place (the id checked by the place kind's own rule, `jobDeliveryFileId` → the connector's `isFileId`, Drive: `isDriveId`;
+  name ≤ 500; a malformed one is left out, never
   the turn), lists it as 「Google Drive に置くファイル 「<name>」（fileId: …）」 (the name through `outsideTitle` with
   `OUTSIDE_TITLE_NOTE`) and then says the connector's `howToUpdateMadeBefore` (`jobDeliveryUpdateHowTo`,
   `builtin-connectors.ts`): when the procedure says to update, pass that fileId as `updateFileId` instead of making a
@@ -851,8 +856,9 @@ membership can fail).
   `recordId` never linked; the finish links the put to its やること; a pause refuses the next call; past 90 days: the
   claim and the clock make it `needs_person` `PLACE_NOT_USABLE`, told, and choosing again makes the next one run;
   「もう一度」 after a put: the responsible person's turn names the Drive file (id, name) and the retried run updates it,
-  the owner's view and press name none of it; a receipt of another folder is never named as a file — both
-  mutation-checked);
+  the owner's view and press name none of it; made, updated and pressed again it is one entry, also against the cap of
+  20 (no `madeBeforeTotal`); a receipt of another folder, not done, or a consultation's receipt a run was answered with
+  is never named as a file — each mutation-checked);
   `jobs-definition.test.ts` "a deliverable place outside" (declared kinds only, `ref` null, needs the deliverable folder,
   part of the consent, the accepted place's shape, the routes and tools only with a place); `client/tests/job-runs.test.ts`
   (the turn's place only of the grant's kind, the tools only with a chosen place, never a Drive read or pick, the first

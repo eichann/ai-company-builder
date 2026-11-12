@@ -642,10 +642,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
         }
       }
     },
-    // After 「もう一度」: an earlier run's put → the Drive file it made in the chosen folder (the member's own receipt).
-    madeFile(member: Member, place: JobDeliveryPlace, ref: { kind: string; id: string }): { id: string; name: string } | null {
+    // After 「もう一度」: an earlier run's put → the Drive file it made in the chosen folder (the member's own receipt,
+    // written by one of the occurrence's runs).
+    madeFile(member: Member, place: JobDeliveryPlace, ref: { kind: string; id: string }, runIds: ReadonlySet<string>): { id: string; name: string } | null {
       if (place.connector !== 'google' || place.kind !== 'drive_folder' || ref.kind !== 'drive-put' || typeof place.ref !== 'string') return null
-      return googleDrive.madeFile(member, place.ref, ref.id)
+      return googleDrive.madeFile(member, place.ref, ref.id, runIds)
     },
   }
 
@@ -747,7 +748,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     places: {
       live: (companyId, userId, place) => deliveryPlaces.live(companyId, userId, place) !== null,
       linkToTask: (member, place, runId, recordId) => deliveryPlaces.linkToTask(member, place, runId, recordId),
-      madeFile: (member, place, ref) => deliveryPlaces.madeFile(member, place, ref),
+      madeFile: (member, place, ref, runIds) => deliveryPlaces.madeFile(member, place, ref, runIds),
     },
     // Bound late: the occurrences' service is built below (called only after construction).
     notices: {

@@ -9,7 +9,7 @@
  * The run's step is `job-procedure` (`JOB_PC_STEP`): the server scopes its token to the grant at every call.
  */
 import {
-  JOB_PC_STEP, OCCURRENCE_ID_RE, jobDeliveryHowTo, jobDeliveryTools, jobDeliveryUpdateHowTo, jobRunRouteAllowed, parseJobAcceptedPlace, parseJobDefinition,
+  JOB_PC_STEP, OCCURRENCE_ID_RE, jobDeliveryFileId, jobDeliveryHowTo, jobDeliveryTools, jobDeliveryUpdateHowTo, jobRunRouteAllowed, parseJobAcceptedPlace, parseJobDefinition,
   type JobCheck, type JobDeliveryPlace, type JobGrant, type JobProcedure,
 } from '../../../shared/core/jobs'
 import { OUTSIDE_TITLE_NOTE, outsideTitle } from '../../../shared/core/outside-text'
@@ -56,8 +56,6 @@ const iso = (v: unknown): v is string => typeof v === 'string' && v.length <= 40
 const RECORD_ID = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/
 /** An operation's kind or what it made: ids only (letters, digits, . _ : -), never text. */
 const SHORT_ID = /^[A-Za-z0-9._:-]+$/
-/** A file's id in the job's place (a Drive file id): what `drive_put`'s `updateFileId` takes. */
-const PLACE_FILE_ID = /^[A-Za-z0-9_-]{1,200}$/
 /** At most this many things made before are named to the AI (the rest counted). */
 const MADE_BEFORE_KEPT = 20
 
@@ -114,7 +112,7 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
       if (x.ref !== null && (!ref || !str(ref.kind, 40) || !SHORT_ID.test(ref.kind) || !str(ref.id, 100) || !SHORT_ID.test(ref.id))) return null
       // The file it is in the job's place (only with a place): a malformed one is left out, never the turn.
       const f = (typeof x.file === 'object' && x.file !== null ? x.file : null) as Record<string, unknown> | null
-      const file = deliverTo && f && typeof f.id === 'string' && PLACE_FILE_ID.test(f.id) && str(f.name, 500) ? { id: f.id, name: f.name } : null
+      const file = deliverTo && f && jobDeliveryFileId(deliverTo, f.id) && str(f.name, 500) ? { id: f.id, name: f.name } : null
       made.push({ kind: x.kind, ref: ref ? { kind: ref.kind as string, id: ref.id as string } : null, ...(file ? { file } : {}) })
     }
   }

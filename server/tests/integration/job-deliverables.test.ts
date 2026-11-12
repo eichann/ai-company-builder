@@ -483,6 +483,7 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
       expect(put).toMatchObject({ state: 'done', name: '週の報告' })
       expect((await failRun(first.body.data.run)).status).toBe(200)
       expect(occOf(occ)).toMatchObject({ state: 'needs_person' })
+      vi.setSystemTime(noon + 60_000)
       // The owner's view and press: kinds and counts only — no file id, file name, folder or receipt.
       const viewed = (await as('jd-owner', 'GET', `/jobs/${job}/occurrences`)).body.data.occurrences.find((o: Json) => o.id === occ)
       expect(viewed.madeBefore).toEqual([{ kind: 'drive-put', count: 1 }])
@@ -501,6 +502,69 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
       const next = Buffer.from('# 週の報告（直し）\n')
       const updated = await ai(t2, 'POST', '/google/drive/put', putBody({ name: '週の報告.md', updateFileId: put.fileId, sha256: sha(next), contentBase64: next.toString('base64') }))
       expect(updated.body.data.drivePut, updated.text).toMatchObject({ state: 'done', fileId: put.fileId, revisionId: 'version:2' })
+      // That run fails too and is pressed again: the file made, then updated, is ONE thing made (not two).
+      expect((await failRun(second.body.data.run)).status).toBe(200)
+      expect((await as('jd-owner', 'POST', `/jobs/${job}/occurrences/${occ}/retry`)).status).toBe(200)
+      const again = await turnOf(occ)
+      expect(again.madeBefore).toEqual([{ kind: 'drive-put', ref: { kind: 'drive-put', id: put.id }, file: { id: put.fileId, name: '週の報告' } }])
+      expect(again.madeBeforeTotal).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the cap counts a file made then updated once: 19 drafts + one file put and updated is 20, no "more"', async () => {
+    try {
+      const { noon, slot: today } = atNoon()
+      const job = await approvedJob()
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      const occ = todaysOccurrence(job, noon, today)
+      const first = await claim(occ)
+      const t1 = await runToken(first.body.data.run)
+      const put = (await ai(t1, 'POST', '/google/drive/put', putBody({ name: '月の報告.md' }))).body.data.drivePut
+      const at = new Date(noon + 1000).toISOString()
+      for (let i = 0; i < 19; i++) {
+        db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, ref_kind, ref_id, created_at, updated_at)
+          VALUES (?, ?, ?, 'f', 'mail-draft', 'done', 1, 'outbound', ?, ?, ?)`).run(CO, first.body.data.run.id, `d${i}`, `outbound_message-${String(i).padStart(16, '0')}`, at, at)
+      }
+      expect((await failRun(first.body.data.run)).status).toBe(200)
+      vi.setSystemTime(noon + 60_000)
+      expect((await as('jd-owner', 'POST', `/jobs/${job}/occurrences/${occ}/retry`)).status).toBe(200)
+      const second = await claim(occ)
+      const t2 = await runToken(second.body.data.run)
+      const next = Buffer.from('# 月の報告（直し）\n')
+      expect((await ai(t2, 'POST', '/google/drive/put', putBody({ name: '月の報告.md', updateFileId: put.fileId, sha256: sha(next), contentBase64: next.toString('base64') }))).body.data.drivePut).toMatchObject({ state: 'done', fileId: put.fileId })
+      expect((await failRun(second.body.data.run)).status).toBe(200)
+      expect((await as('jd-owner', 'POST', `/jobs/${job}/occurrences/${occ}/retry`)).status).toBe(200)
+      const turn = await turnOf(occ)
+      expect(turn.madeBefore).toHaveLength(20)
+      expect(turn.madeBeforeTotal).toBeUndefined()
+      expect(turn.madeBefore.filter((m: Json) => m.file)).toEqual([{ kind: 'drive-put', ref: { kind: 'drive-put', id: put.id }, file: { id: put.fileId, name: '月の報告' } }])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a consultation\'s receipt a run was answered with again (same request) is not offered as this job\'s file', async () => {
+    try {
+      const { noon, slot: today } = atNoon()
+      const job = await approvedJob()
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      // A consultation (no run) put the very same file first.
+      const consultation = (await as('jd-alice', 'POST', '/me/record-tokens', { conversationId: 'conv-plain-2', agent: 'claude-code', scope: 'act' })).body.data.token as string
+      const body = putBody({ name: '相談で置いた.md' })
+      const theirs = (await ai(consultation, 'POST', '/google/drive/put', body)).body.data.drivePut
+      expect(theirs).toMatchObject({ state: 'done' })
+      const occ = todaysOccurrence(job, noon, today)
+      const first = await claim(occ)
+      const t1 = await runToken(first.body.data.run)
+      // The run's same request is answered with the consultation's receipt (nothing uploaded again).
+      expect((await ai(t1, 'POST', '/google/drive/put', body)).body.data).toMatchObject({ existing: true, drivePut: { id: theirs.id } })
+      expect((await failRun(first.body.data.run)).status).toBe(200)
+      expect((await as('jd-owner', 'POST', `/jobs/${job}/occurrences/${occ}/retry`)).status).toBe(200)
+      const turn = await turnOf(occ)
+      expect(turn.madeBefore).toEqual([{ kind: 'drive-put', ref: { kind: 'drive-put', id: theirs.id } }])
+      expect(JSON.stringify(turn)).not.toContain(theirs.fileId)
     } finally {
       vi.useRealTimers()
     }

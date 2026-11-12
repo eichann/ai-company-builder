@@ -72,10 +72,11 @@ export interface JobRunDeps {
     linkToTask(member: Member, place: JobDeliveryPlace, runId: string, recordId: string): void
     /**
      * After 「もう一度」: the file in the chosen place that something an earlier run of the occurrence made is
-     * (`ref`, the run operation's reference: a Drive put's receipt → `{ id: <Drive file id>, name }`), only when it is
-     * the member's own, done, and in that place now — or null. Absent → none resolved (the turn names the ref only).
+     * (`ref`, the run operation's reference: a Drive put's receipt → `{ id: <Drive file id>, name }`), only when the
+     * receipt is the member's own, done, written by one of `runIds` (the occurrence's runs) and put into the place
+     * chosen now — or null. Absent → none resolved (the turn names the ref only).
      */
-    madeFile?(member: Member, place: JobDeliveryPlace, ref: { kind: string; id: string }): { id: string; name: string } | null
+    madeFile?(member: Member, place: JobDeliveryPlace, ref: { kind: string; id: string }, runIds: ReadonlySet<string>): { id: string; name: string } | null
   }
 }
 
@@ -287,14 +288,16 @@ export function createJobRuns(deps: JobRunDeps) {
    * What earlier runs made, for the turn: the first `JOB_MADE_BEFORE_LISTED`, and how many in all when more. A thing
    * that is a file in the job's chosen place carries that file (`file`: the responsible person's own — this is their
    * turn; an owner / admin's view counts kinds only, job-retry.ts `viewOf`), so the run can update it; two puts of one
-   * file (made, then updated) are one thing.
+   * file (made, then updated) are one thing. Only a receipt one of this occurrence's runs wrote is a file it made (a
+   * repeat answered with a consultation's receipt is not this job's file to update).
    */
   function madeBeforeOf(member: Member, f: Found): Pick<JobTurnView, 'madeBefore' | 'madeBeforeTotal'> {
     const place = placeOf(f)
+    const runIds = new Set(f.handle.aiRuns.runsOf({ kind: 'occurrence', id: f.occ.id }).map(r => r.id))
     const files = new Set<string>()
     const made: JobMadeBefore[] = []
     for (const m of madeBefore(f.handle, f.occ.id)) {
-      const file = place && m.ref && deps.places?.madeFile ? deps.places.madeFile(member, place, m.ref) : null
+      const file = place && m.ref && deps.places?.madeFile ? deps.places.madeFile(member, place, m.ref, runIds) : null
       if (!file) { made.push(m); continue }
       if (files.has(file.id)) continue
       files.add(file.id)

@@ -177,7 +177,8 @@ The AI reads and writes **only** the member's own live picks.
   first — what `updateFileId` may name). Unattended runs see none of these tools (their allowlists) — except a
   scheduled job's run with a deliverable place, which gets `drive_picked` and `drive_put` only (`jobs.md`). After a
   job's 「もう一度」, the retried run's turn resolves an earlier run's put id to its file (`madeFile`: the member's own
-  done receipt in the job's folder → `{ id: fileId, name }`), so it can name that file in `updateFileId` (`jobs.md`
+  done receipt, written by one of the occurrence's runs, whose recorded folder is the job's chosen one → `{ id: fileId,
+  name }`), so it can name that file in `updateFileId` (`jobs.md`
   "「もう一度」").
 
 ## Google documents and overwriting (owner decisions 2026-11-11, 統合版 §12-6 E)

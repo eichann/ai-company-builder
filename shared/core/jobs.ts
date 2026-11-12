@@ -375,6 +375,11 @@ export function jobDeliveryUpdateHowTo(place: { connector: string; kind: string 
   return deliveryKind(place.connector, place.kind)?.howToUpdateMadeBefore ?? null
 }
 
+/** Whether a value is a file id of this kind of place (the connector's own rule); false for a place this build does not know. */
+export function jobDeliveryFileId(place: { connector: string; kind: string }, v: unknown): v is string {
+  return typeof v === 'string' && deliveryKind(place.connector, place.kind)?.isFileId(v) === true
+}
+
 /** How long a chosen place of this kind lasts (the connector's sentence), or null for one this build does not know. */
 export function jobDeliveryLapseNote(place: { connector: string; kind: string }): string | null {
   return deliveryKind(place.connector, place.kind)?.lapseNote ?? null
