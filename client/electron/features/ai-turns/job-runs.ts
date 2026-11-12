@@ -21,7 +21,7 @@ import {
 } from '../../../shared/ai-turn-steps/job'
 import type { AiTurnClaimResult, AiTurnSettleResult } from '../../../shared/ai-turns'
 
-type Session = (companyId: string, method: 'GET' | 'POST', path: string, body?: unknown) => Promise<{ status: number; data: unknown } | null>
+type Session = (companyId: string, method: 'GET' | 'POST', path: string, body?: unknown) => Promise<{ status: number; data: unknown; code?: string } | null>
 type Failure = { class: 'temporary' | 'bad-input' | 'permission' | 'unknown-result'; code: string }
 
 export interface JobRunDeps {
@@ -54,6 +54,8 @@ export interface JobRunDeps {
 
 /** A place not synced yet: asked again after this (the app syncs by itself meanwhile); no start is counted. */
 export const NOT_SYNCED_RETRY_MS = 30_000
+/** An earlier occurrence of the job still runs (409 `JOB_EARLIER_RUNNING`, jobs.md "Never side by side"): asked again after this. */
+export const EARLIER_RUNNING_RETRY_MS = 60_000
 
 /** What the AI is told when its report could not make the やること (the run was taken away or finished meanwhile). */
 export const JOB_REPORT_REFUSED = '仕事が止められていたか、時間が来ていたため、やることは作られませんでした。作ったとは言わず、そのとおり伝えてください。'
@@ -142,6 +144,8 @@ export function createJobRuns(deps: JobRunDeps) {
         occurrenceId, deviceId: deps.deviceId, conversationId, checks: [...JOB_PC_CHECK_KINDS], ...(point?.commit ? { checkedCommit: point.commit } : {}),
       })
       if (!answer || answer.status >= 500) return { claimed: false, reason: 'unavailable' }
+      // Waiting behind an earlier occurrence of the job: not taken — asked again a little later (it stays listed).
+      if (answer.status === 409 && answer.code === 'JOB_EARLIER_RUNNING') return { claimed: false, reason: 'unavailable', retryAfterMs: EARLIER_RUNNING_RETRY_MS }
       const data = answer.status < 300 ? answer.data as { run?: { id?: unknown; generation?: unknown; createdAt?: unknown; updatedAt?: unknown }; turn?: unknown } | undefined : undefined
       const run = data?.run
       // The turn as the claim answered it (the meetings found are only there): the server's, not the list's.
@@ -208,7 +212,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const deadline = new Date(deadlineMs - JOB_STOP_BEFORE_MS)
       return {
         claimed: true, version: null,
-        message: jobFirstMessage({ name: turn.name, found, procedure, grant: turn.grant, deadline: `${deadline.getHours()}:${String(deadline.getMinutes()).padStart(2, '0')}`, deliverTo: turn.deliverTo, madeBefore: turn.madeBefore }),
+        message: jobFirstMessage({ name: turn.name, found, procedure, grant: turn.grant, deadline: `${deadline.getHours()}:${String(deadline.getMinutes()).padStart(2, '0')}`, deliverTo: turn.deliverTo, madeBefore: turn.madeBefore, madeBeforeTotal: turn.madeBeforeTotal }),
       }
     },
 

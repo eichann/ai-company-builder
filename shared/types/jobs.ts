@@ -202,6 +202,8 @@ export interface JobTurnView {
    * so the AI does not make it again blindly. Absent: nothing, or never pressed.
    */
   madeBefore?: JobMadeBefore[]
+  /** How many there are in all when `madeBefore` names only the first `JOB_MADE_BEFORE_LISTED`. */
+  madeBeforeTotal?: number
   /**
    * Only in a claim's answer, for a `new_meetings` check (B PR 5a-2): the meetings it found (≤ 10, oldest
    * first) — the only ones whose minutes the run may read. Empty: the run finishes `nothing`.

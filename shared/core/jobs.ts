@@ -559,6 +559,8 @@ export const JOB_RETRY_BLOCKS = [
 export const JOB_RETRY_MAX = 3
 /** The shortest window a press may give for the app to claim it (the shortest `expiresAfterMinutes` a version may have). */
 export const JOB_RETRY_MIN_CLAIM_MINUTES = 5
+/** How many things an earlier run made a turn names (`JobTurnView.madeBefore`; the rest only counted, `madeBeforeTotal`). */
+export const JOB_MADE_BEFORE_LISTED = 20
 export type JobRetryBlock = typeof JOB_RETRY_BLOCKS[number]
 
 /**

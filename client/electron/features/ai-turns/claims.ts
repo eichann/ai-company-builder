@@ -117,7 +117,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     return r
   }
 
-  async function session(companyId: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; data: unknown } | null> {
+  async function session(companyId: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; data: unknown; code?: string } | null> {
     const base = deps.baseUrl().replace(/\/+$/, '')
     const cookies = deps.cookies()
     if (!base || cookies.length === 0) return null
@@ -127,8 +127,10 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
         headers: { Cookie: cookies.join('; '), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       })
-      const json = await res.json().catch(() => null) as { data?: unknown } | null
-      return { status: res.status, data: json?.data }
+      const json = await res.json().catch(() => null) as { data?: unknown; code?: unknown } | null
+      // A refusal's code (short, A–Z and _ only): what some callers decide on (a job's claim, jobs.md).
+      const code = typeof json?.code === 'string' && /^[A-Z_]{1,60}$/.test(json.code) ? json.code : undefined
+      return { status: res.status, data: json?.data, ...(code ? { code } : {}) }
     } catch {
       return null
     }

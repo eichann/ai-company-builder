@@ -470,6 +470,25 @@ describe('what an earlier run already made', () => {
   })
 })
 
+describe('what an earlier run already made, many things', () => {
+  it('the turn names the first 20 and says how many in all', async () => {
+    const job = await approvedJob()
+    const occ = occurrence(job, 'due')
+    const run = (await claim(occ)).body.data.run
+    const at = new Date().toISOString()
+    for (let i = 0; i < 25; i++) {
+      db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, ref_kind, ref_id, created_at, updated_at)
+        VALUES (?, ?, ?, 'f', 'mail-draft', 'done', 1, 'outbound', ?, ?, ?)`).run(CO, run.id, `d${i}`, `outbound_message-${String(i).padStart(16, '0')}`, at, at)
+    }
+    expect((await finish(run, { outcome: 'failed', failure: { class: 'bad-input' } })).status).toBe(200)
+    expect((await occurrenceView('jy-owner', job, occ)).madeBefore).toEqual([{ kind: 'mail-draft', count: 25 }])
+    expect((await retry('jy-owner', job, occ)).status).toBe(200)
+    const turn = (await as('jy-alice', 'GET', '/me/job-turns')).body.data.turns[0]
+    expect(turn.madeBefore).toHaveLength(20)
+    expect(turn.madeBeforeTotal).toBe(25)
+  })
+})
+
 describe('結果が分からないうちは再開しない', () => {
   async function unknownResult(job: string): Promise<{ occ: string; run: Json }> {
     const occ = occurrence(job, 'due')

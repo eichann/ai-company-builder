@@ -47,6 +47,8 @@ export interface QueuedJobTurn {
   retries?: number
   /** After a press: what earlier runs of the occurrence already made outside (kinds and ids, no body); absent: nothing. */
   madeBefore?: Array<{ kind: string; ref: { kind: string; id: string } | null }>
+  /** How many in all when `madeBefore` names only some (the server's cap, or this app's trim). */
+  madeBeforeTotal?: number
 }
 
 const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
@@ -54,6 +56,8 @@ const iso = (v: unknown): v is string => typeof v === 'string' && v.length <= 40
 const RECORD_ID = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/
 /** An operation's kind or what it made: ids only (letters, digits, . _ : -), never text. */
 const SHORT_ID = /^[A-Za-z0-9._:-]+$/
+/** At most this many things made before are named to the AI (the rest counted). */
+const MADE_BEFORE_KEPT = 20
 
 /**
  * One turn of the server's answer, checked: the check, the procedure and the grant go through the server's
@@ -93,10 +97,15 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
     }
   }
   let made: QueuedJobTurn['madeBefore']
+  let madeTotal: number | undefined
   if (t.madeBefore !== undefined) {
-    if (!Array.isArray(t.madeBefore) || t.madeBefore.length > 50) return null
+    if (!Array.isArray(t.madeBefore)) return null
+    // A long list is trimmed, never a reason to drop the turn (it would never be claimed and expire); the rest counted.
+    const total = typeof t.madeBeforeTotal === 'number' && Number.isInteger(t.madeBeforeTotal) && t.madeBeforeTotal > 0 ? t.madeBeforeTotal : t.madeBefore.length
+    if (total > MADE_BEFORE_KEPT || t.madeBefore.length > MADE_BEFORE_KEPT) madeTotal = Math.max(total, t.madeBefore.length)
+    else if (total > t.madeBefore.length) madeTotal = total
     made = []
-    for (const m of t.madeBefore as unknown[]) {
+    for (const m of (t.madeBefore as unknown[]).slice(0, MADE_BEFORE_KEPT)) {
       const x = (typeof m === 'object' && m !== null ? m : {}) as Record<string, unknown>
       const ref = (typeof x.ref === 'object' && x.ref !== null ? x.ref : null) as Record<string, unknown> | null
       if (!str(x.kind, 40) || !SHORT_ID.test(x.kind)) return null
@@ -110,7 +119,7 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
     ...(typeof t.sinceCommit === 'string' ? { sinceCommit: t.sinceCommit } : {}), ...(typeof t.checkedCommit === 'string' ? { checkedCommit: t.checkedCommit } : {}), procedure: parsed.definition.run.procedure, grant, ...(meetings ? { meetings } : {}),
     ...(deliverTo ? { deliverTo } : {}),
     ...(typeof t.retries === 'number' && Number.isInteger(t.retries) && t.retries > 0 && t.retries < 1_000_000 ? { retries: t.retries } : {}),
-    ...(made && made.length > 0 ? { madeBefore: made } : {}),
+    ...(made && made.length > 0 ? { madeBefore: made, ...(madeTotal ? { madeBeforeTotal: madeTotal } : {}) } : {}),
   }
 }
 
@@ -200,7 +209,7 @@ export type JobFound = { kind: 'files'; files: string[] } | { kind: 'meetings'; 
  * pinned procedure as the instructions, the places it may read and write, and how it hands back its one
  * やること (`job_report`) — the server makes it; the run never creates one itself.
  */
-export function jobFirstMessage(input: { name: string; found: JobFound; procedure: string; grant: JobGrant; deadline: string; deliverTo?: JobDeliveryPlace; madeBefore?: QueuedJobTurn['madeBefore'] }): string {
+export function jobFirstMessage(input: { name: string; found: JobFound; procedure: string; grant: JobGrant; deadline: string; deliverTo?: JobDeliveryPlace; madeBefore?: QueuedJobTurn['madeBefore']; madeBeforeTotal?: number }): string {
   const howTo = input.deliverTo ? jobDeliveryHowTo(input.deliverTo) : null
   const { found, grant } = input
   const foundLines = found.kind === 'files'
@@ -220,6 +229,7 @@ export function jobFirstMessage(input: { name: string; found: JobFound; procedur
     ...(input.madeBefore && input.madeBefore.length > 0 ? [
       'この回は、管理者が「もう一度」を押してやり直しています。前回すでに次のものを作りました（同じものをもう一つ作らないでください。直すときは、それを直してください）：',
       ...input.madeBefore.map(m => `- ${jobOperationKindText(m.kind)}${m.ref ? `（${m.ref.id}）` : ''}`),
+      ...(input.madeBeforeTotal && input.madeBeforeTotal > input.madeBefore.length ? [`（ほか ${input.madeBeforeTotal - input.madeBefore.length} 件）`] : []),
       '',
     ] : []),
     '手順書（会社の Skill）:',

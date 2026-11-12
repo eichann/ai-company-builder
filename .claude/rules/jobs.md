@@ -659,7 +659,10 @@ POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }  
   「前の回がまだ動いているため…」, nothing written; `GET /me/job-turns` leaves it out) — the earlier one ends within its hard
   deadline (the clock ends it after), and the later one's check then starts where it stopped. This also closes the
   older case of a run whose app held its lease past the next slot. A later occurrence the clock makes while an earlier
-  one is only `due` supersedes it, as before (`latest_only`).
+  one is only `due` supersedes it, as before (`latest_only`). A later occurrence waiting behind a running earlier one can
+  expire while it waits: safe — the responsible person and the creator are told (`job_expired`), and it is the job's
+  newest occurrence, so an owner / admin can press 「もう一度」 on it. The app treats `JOB_EARLIER_RUNNING` as "try later"
+  (`EARLIER_RUNNING_RETRY_MS`, 1 minute), never as taken.
 - **What earlier runs made** (`madeBefore`, `job-retry.ts`): the outside operations of the occurrence's earlier runs
   (`ai_runs` of that subject, closed ones too: `AiRunRepository.runsOf`) that are known `done` — answered, or reconciled
   as done (作られていた) — one per thing made (a draft's later versions are the same draft). A new run starts with an
@@ -667,8 +670,9 @@ POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }  
   (`madeBefore: [{ kind, count }]`, no id, title or place — they are the responsible person's own, an owner-only draft, a
   file in their picked folder) and the confirmation says 「前回すでにメールの下書きを1件作っています。もう一度すると、また作られる
   ことがあります。」 (`jobMadeBeforeText`); the next run's turn carries them with their ids (`JobTurnView.madeBefore`, the
-  responsible person's own things) and its first message says 「前回すでに次のものを作りました（同じものをもう一つ作らない
-  でください…）」 (`jobFirstMessage`; the app takes ids only, `SHORT_ID`).
+  responsible person's own things; the first `JOB_MADE_BEFORE_LISTED` (20), with `madeBeforeTotal` when there are more)
+  and its first message says 「前回すでに次のものを作りました（同じものをもう一つ作らないでください…）」 (`jobFirstMessage`, 「（ほか
+  N 件）」 for the rest; the app takes ids only, `SHORT_ID`, and trims a longer list instead of dropping the turn).
 - **Reconcile** (`reconcile`): only on a `needs_person` / `expired` occurrence (else 409 `NOT_RETRYABLE`), the body
   `{ done: boolean }` (400), an operation of its PC run whose result is unknown (else 404 `OPERATION_NOT_FOUND`; one
   still marked in flight on a run that no longer runs is made `unknown` first, as a finish does — never stuck); the
@@ -818,7 +822,7 @@ membership can fail).
   words), `client/src/features/chat/aiTurns.test.ts` + `client/tests/job-runs.test.ts` (a press is tried again today;
   the count parsed strictly; what was made before reaches the first message, ids only), `admin/tests/jobs.test.tsx` (the button only where allowed, asked first, the reason
   otherwise; reconcile sends the answer chosen), permission matrix rows + `CROSS`, `admin-contract.test.ts`. Mutation
-  check: 41 server, 10 client and 5 admin guards (both review rounds), each removed or inverted alone, fail their test file — except the
+  check: 43 server, 13 client and 5 admin guards (all review rounds), each removed or inverted alone, fail their test file — except the
   state check in `blockOf`, which the write's compare-and-set also stops (each alone suffices).
 - `client/tests/jobs-ipc.test.ts` — an older server without `you` reported as such; only the member's jobs (by the server's `you`), never dropped behind 80
   other jobs, a hidden approved definition still waiting for them, the approved version's name, the version

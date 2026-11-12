@@ -32,7 +32,7 @@
  *   ends its run (`holdDue` → `endPcRun`), so nothing comes back after a resume.
  */
 import {
-  JOB_ACTOR, JOB_PC_STEP, isOccurrenceId, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult,
+  JOB_ACTOR, JOB_MADE_BEFORE_LISTED, JOB_PC_STEP, isOccurrenceId, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult,
   type JobDefinition, type JobDeliveryPlace, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
 import type { JobMeetingView, JobTurnView } from '../../shared/types/jobs'
@@ -277,6 +277,13 @@ export function createJobRuns(deps: JobRunDeps) {
     return f && f.occ.state === 'running' && f.occ.runId === run.id ? f : null
   }
 
+  /** What earlier runs made, for the turn: the first `JOB_MADE_BEFORE_LISTED`, and how many in all when more. */
+  function madeBeforeOf(f: Found): Pick<JobTurnView, 'madeBefore' | 'madeBeforeTotal'> {
+    const made = madeBefore(f.handle, f.occ.id)
+    if (made.length === 0) return {}
+    return { madeBefore: made.slice(0, JOB_MADE_BEFORE_LISTED), ...(made.length > JOB_MADE_BEFORE_LISTED ? { madeBeforeTotal: made.length } : {}) }
+  }
+
   function turnView(member: Member, f: Found): JobTurnView {
     const d = f.definition
     if (d.run.kind !== 'procedure') throw new Error('not a PC job')
@@ -290,7 +297,7 @@ export function createJobRuns(deps: JobRunDeps) {
       // 「もう一度」 (B PR 5b): the app counts its attempts per occurrence and press.
       ...(f.occ.retries ? { retries: f.occ.retries } : {}),
       // After a press: what the earlier runs already made outside, so the AI does not make it again blindly.
-      ...(f.occ.retries && madeBefore(f.handle, f.occ.id).length > 0 ? { madeBefore: madeBefore(f.handle, f.occ.id) } : {}),
+      ...(f.occ.retries ? madeBeforeOf(f) : {}),
     }
   }
 
