@@ -1634,9 +1634,10 @@ const FAKE_PICKER_SCRIPT = `(function () {
   var origin = (document.currentScript && new URL(document.currentScript.src).origin) || ''
   function DocsView(viewId) { this.viewId = viewId; this.fileIds = '' }
   DocsView.prototype.setFileIds = function (ids) { this.fileIds = String(ids); return this }
-  ;['setIncludeFolders', 'setSelectFolderEnabled', 'setMimeTypes', 'setEnableDrives'].forEach(function (m) { DocsView.prototype[m] = function () { return this } })
+  ;['setIncludeFolders', 'setSelectFolderEnabled', 'setMimeTypes', 'setEnableDrives', 'setParent', 'setLabel', 'setOwnedByMe'].forEach(function (m) { DocsView.prototype[m] = function () { return this } })
   function PickerBuilder() { this.o = {} }
-  PickerBuilder.prototype.addView = function (v) { this.o.view = v; return this }
+  // The first view added is the tab the Picker opens on: the stand-in shows that one.
+  PickerBuilder.prototype.addView = function (v) { if (!this.o.view) this.o.view = v; return this }
   PickerBuilder.prototype.setOAuthToken = function (t) { this.o.token = t; return this }
   PickerBuilder.prototype.setCallback = function (f) { this.o.cb = f; return this }
   ;['setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle', 'enableFeature', 'setMaxItems'].forEach(function (m) { PickerBuilder.prototype[m] = function () { return this } })
