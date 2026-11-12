@@ -119,7 +119,7 @@ beforeAll(async () => {
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   Object.assign(process.env, {
-    BROKER_KEK_FILE: join(kekDir, 'kek'), PUBLIC_URL: PUBLIC, ACB_ALLOW_FAKE_UPSTREAMS: '1', ACB_DRIVE_DOC_SETTLE_MS: '0', ACB_DRIVE_DOC_QUIET_MS: '0',
+    BROKER_KEK_FILE: join(kekDir, 'kek'), PUBLIC_URL: PUBLIC, ACB_ALLOW_FAKE_UPSTREAMS: '1', ACB_DRIVE_DOC_SETTLE_MS: '0', ACB_DRIVE_DOC_QUIET_MS: '0', ACB_DRIVE_DOC_GAP_MS: '0',
     ACB_FAKE_GOOGLE_URL: `http://127.0.0.1:${(googleServer.address() as AddressInfo).port}`,
   })
   for (const level of ['log', 'warn', 'error', 'info'] as const) {
@@ -158,7 +158,7 @@ afterAll(async () => {
   google.close()
   await new Promise(r => googleServer.close(r))
   rmSync(kekDir, { recursive: true, force: true })
-  for (const k of ['BROKER_KEK_FILE', 'PUBLIC_URL', 'ACB_ALLOW_FAKE_UPSTREAMS', 'ACB_FAKE_GOOGLE_URL', 'ACB_DRIVE_DOC_SETTLE_MS', 'ACB_DRIVE_DOC_QUIET_MS']) delete process.env[k]
+  for (const k of ['BROKER_KEK_FILE', 'PUBLIC_URL', 'ACB_ALLOW_FAKE_UPSTREAMS', 'ACB_FAKE_GOOGLE_URL', 'ACB_DRIVE_DOC_SETTLE_MS', 'ACB_DRIVE_DOC_QUIET_MS', 'ACB_DRIVE_DOC_GAP_MS', 'ACB_DRIVE_DOC_BUDGET_MS']) delete process.env[k]
 })
 
 describe('the Picker registration (admin)', () => {
@@ -989,6 +989,7 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
   // Real Google, 2026-11-12 (the owner's practice document, a new put): one revision, the import, by the member; Drive's
   // processing moved the file's time ~4.1 s and that revision's ~3.2 s after the upload answer, with nobody editing.
   const REAL_MOVE = { ms: 4134, revisionMs: 3221 }
+  type DocTiming = { settle: number; quiet: number; gap: number; budget: number }
   const newestOf = (fileId: string) => google.driveFile(fileId)!.revisions.at(-1)!
 
   it('real Google\'s post-import move (file +4 s, its one revision +3 s, by the member): the observed baseline is kept and an update with no edit goes through, again and again', async () => {
@@ -1021,28 +1022,44 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     expect((await ai(token, 'POST', '/put', docBody(NEXT, { name: '二度動く.md', updateFileId: late.fileId }))).body.data?.drivePut.state).toBe('done')
   })
 
-  it('the newest revision still moving after every read: no baseline (still-settling), the update refused', async () => {
+  it('still changing after the observation: no baseline (still-settling), the update refused — the newest revision\'s time or the file\'s time moving, until the read limit or the time budget', async () => {
     const token = await tokenFor('m-sato', 'act')
-    let doc: Json = {}
-    google.faults.moveTimeAfterNextImport(REAL_MOVE)
-    google.faults.settleRevisionAfterNextLists(10, 900)
-    const lines = await driveWarnings(async () => {
-      doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 動き続ける\n'), { name: '動き続ける.md' }))).body.data.drivePut
-    }, () => [doc.fileId, doc.id, '動き続ける'])
-    google.faults.settleRevisionAfterNextLists(0)
-    expect(doc.state).toBe('done')
-    expect(baseline(doc.id).fingerprint).toBeNull()
-    expect(lines).toEqual(['[google-drive] document baseline not kept: still-settling (reads: 4)'])
-    await refusedUpdate(token, '動き続ける.md', doc.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 動き続ける\n')
+    const settling = async (name: string, fault: () => void, timing?: Partial<DocTiming>) => {
+      let doc: Json = {}
+      fault()
+      const lines = await driveWarnings(async () => {
+        await withDocTiming(timing ?? {}, async () => {
+          doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 動き続ける\n'), { name }))).body.data.drivePut
+        })
+      }, () => [doc.fileId, doc.id, '動き続ける'])
+      google.faults.settleRevisionAfterNextLists(0)
+      google.faults.settleFileAfterNextGets(0)
+      expect(doc.state, name).toBe('done')
+      expect(baseline(doc.id).fingerprint, name).toBeNull()
+      await refusedUpdate(token, name, doc.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 動き続ける\n')
+      return lines
+    }
+    // The newest revision's time moves after every read: the read limit (12).
+    expect(await settling('版が動き続ける.md', () => google.faults.settleRevisionAfterNextLists(100, 900)))
+      .toEqual(['[google-drive] document baseline not kept: still-settling (reads: 12)'])
+    // Only the file's time moves after every read (its processing not over): the same.
+    expect(await settling('ファイルが動き続ける.md', () => google.faults.settleFileAfterNextGets(100, 900)))
+      .toEqual(['[google-drive] document baseline not kept: still-settling (reads: 12)'])
+    // The time budget (real time): reads 100 ms apart give up after 350 ms since the answer, long before the limit.
+    const budgeted = await settling('時間切れ.md', () => google.faults.settleRevisionAfterNextLists(100, 900), { gap: 100, budget: 350 })
+    expect(budgeted).toHaveLength(1)
+    const reads = Number(/^\[google-drive\] document baseline not kept: still-settling \(reads: (\d+)\)$/.exec(budgeted[0])?.[1])
+    expect(reads).toBeGreaterThanOrEqual(1)
+    expect(reads).toBeLessThanOrEqual(4)
   })
 
-  it('times outside the window after the upload answer keep no baseline (outside-window): later than 60 s, or before the answer — the file\'s or the newest revision\'s; logged with timestamps only', async () => {
+  it('times outside the window after the upload answer keep no baseline (outside-window): later than 30 s, or before the answer — the file\'s or the newest revision\'s; logged with timestamps only', async () => {
     const token = await tokenFor('m-sato', 'act')
     const cases: Array<[string, { ms?: number; revisionMs?: number; fileTimeAs?: string }, boolean]> = [
-      ['file at 60 s (the edge)', { ms: 60_000, revisionMs: 3000 }, true],
-      ['revision at 60 s (the edge)', { ms: 4000, revisionMs: 60_000 }, true],
-      ['file later than 60 s', { ms: 60_001, revisionMs: 3000 }, false],
-      ['revision later than 60 s', { ms: 4000, revisionMs: 60_001 }, false],
+      ['file at 30 s (the edge)', { ms: 30_000, revisionMs: 3000 }, true],
+      ['revision at 30 s (the edge)', { ms: 4000, revisionMs: 30_000 }, true],
+      ['file later than 30 s', { ms: 30_001, revisionMs: 3000 }, false],
+      ['revision later than 30 s', { ms: 4000, revisionMs: 30_001 }, false],
       ['file before the answer', { ms: -1, revisionMs: 3000 }, false],
       ['revision before the answer', { ms: 4000, revisionMs: -1 }, false],
     ]
@@ -1126,82 +1143,70 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     await refusedWith('前の版が消える.md', c.fileId, 'base-revision-gone (revisions: 1)')
   })
 
-  it('someone else could edit, comment or suggest: no baseline (a merged revision names only its last modifier) — another account\'s edit hidden under the member\'s own is never overwritten later', async () => {
+  it('an edit merged into the member\'s revision during the observation is the accepted residual (google-drive.md "What the window lets through"): taken into the baseline, as the update\'s If-Match race', async () => {
     const token = await tokenFor('m-sato', 'act')
-    // Codex's case: a colleague's edit right after ACB's update, then the member's own, merged into one revision whose
-    // last modifier is the member (Google documents that revisions may be merged): every authorship check passes.
-    const doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 一版\n'), { name: '同僚も直せる.md' }))).body.data.drivePut
-    expect(baseline(doc.id).fingerprint).toMatch(/^[0-9a-f]{64}$/)
-    google.shareDriveFile(doc.fileId, { type: 'user', role: 'writer', emailAddress: GOOGLE_SEED.colleague })
+    // Documents today's behaviour, not a guarantee: a colleague's edit and then the member's own, right after ACB's put,
+    // merged by Docs into one revision whose last modifier is the member (Google: a merged revision names only its last
+    // modifier). No check can tell; the rule names it as accepted. A colleague's edit that stays its own revision is
+    // refused (「the baseline is kept only when every revision and the file itself are the member's」).
     google.faults.editAfterNextImport([
-      { content: '# 次の版\n同僚の一文\n', by: GOOGLE_SEED.colleague, omittedFromRevisions: true },
-      { content: '# 次の版\n同僚の一文\n本人の一文\n', by: GOOGLE_SEED.member, omittedFromRevisions: true },
+      { content: '# 混ざる\n同僚の一文\n', by: GOOGLE_SEED.colleague, omittedFromRevisions: true },
+      { content: '# 混ざる\n同僚の一文\n本人の一文\n', by: GOOGLE_SEED.member, omittedFromRevisions: true },
     ])
-    let u: Json = {}
-    const lines = await driveWarnings(async () => {
-      u = (await ai(token, 'POST', '/put', docBody(NEXT, { name: '同僚も直せる.md', updateFileId: doc.fileId }))).body.data.drivePut
-    }, () => [doc.fileId, doc.id, u.id, '同僚', '本人', '次の版'])
-    expect(u.state).toBe('done')
-    expect(baseline(u.id).fingerprint).toBeNull()
-    expect(lines).toEqual(["[google-drive] document baseline not kept: others-can-edit (permissions: 3, able to edit or comment besides the member: 1)"])
-    await refusedUpdate(token, '同僚も直せる.md', doc.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 次の版\n同僚の一文\n本人の一文\n')
-    // A commenter (comments and suggestions), everyone in the company or a group who can edit: none either. Readers are fine (the
-    // folder's own domain reader is on every document above).
-    for (const [name, permission] of [
-      ['コメントできる.md', { type: 'user' as const, role: 'commenter', emailAddress: GOOGLE_SEED.colleague }],
-      ['社内の誰でも直せる.md', { type: 'domain' as const, role: 'writer', domain: GOOGLE_SEED.internalDomain }],
-      ['グループが直せる.md', { type: 'group' as const, role: 'writer', emailAddress: `team@${GOOGLE_SEED.internalDomain}` }],
-    ] as const) {
-      const d = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 一版\n'), { name }))).body.data.drivePut
-      google.shareDriveFile(d.fileId, permission)
-      const next = (await ai(token, 'POST', '/put', docBody(NEXT, { name, updateFileId: d.fileId }))).body.data.drivePut
-      expect(next.state, name).toBe('done')
-      expect(baseline(next.id).fingerprint, name).toBeNull()
-    }
-    // The sharing cannot be read: none.
-    let unread: Json = {}
-    google.faults.failNextDocPermissionLists(1)
-    const unreadLines = await driveWarnings(async () => {
-      unread = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 共有が読めない\n'), { name: '共有が読めない.md' }))).body.data.drivePut
-    }, () => [unread.fileId, unread.id, '共有が読めない'])
-    expect(baseline(unread.id).fingerprint).toBeNull()
-    expect(unreadLines).toEqual(['[google-drive] document baseline not kept: sharing-unread'])
+    const doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 混ざる\n'), { name: '同じ版に混ざる直し.md' }))).body.data.drivePut
+    expect(baseline(doc.id).fingerprint).toMatch(/^[0-9a-f]{64}$/)
   })
 
-  /** Runs `run` with the document timing set (ms), then puts the test file's 0 back. */
-  async function withDocTiming(timing: { settle: number; quiet: number }, run: () => Promise<void>) {
-    process.env.ACB_DRIVE_DOC_SETTLE_MS = String(timing.settle)
-    process.env.ACB_DRIVE_DOC_QUIET_MS = String(timing.quiet)
+  /** Runs `run` with the document timing set (ms; others 0, the budget 25 s), then puts the test file's values back. */
+  async function withDocTiming(timing: Partial<DocTiming>, run: () => Promise<void>) {
+    const t = { settle: 0, quiet: 0, gap: 0, budget: 25_000, ...timing }
+    process.env.ACB_DRIVE_DOC_SETTLE_MS = String(t.settle)
+    process.env.ACB_DRIVE_DOC_QUIET_MS = String(t.quiet)
+    process.env.ACB_DRIVE_DOC_GAP_MS = String(t.gap)
+    process.env.ACB_DRIVE_DOC_BUDGET_MS = String(t.budget)
     try { await run() } finally {
       process.env.ACB_DRIVE_DOC_SETTLE_MS = '0'
       process.env.ACB_DRIVE_DOC_QUIET_MS = '0'
+      process.env.ACB_DRIVE_DOC_GAP_MS = '0'
+      delete process.env.ACB_DRIVE_DOC_BUDGET_MS
     }
   }
 
-  it('Drive\'s processing a little after the answer (real time): the revisions are read only after the quiet period, so the moved time is the baseline\'s and the next update goes through', async () => {
-    const token = await tokenFor('m-sato', 'act')
+  /**
+   * A put whose post-import move (REAL_MOVE) happens `afterMs` of real time after the answer (the fake applies it before
+   * the next request from then on), with `timing`: whether the baseline holds the moved revision time, and the next
+   * update's outcome.
+   */
+  async function observed(name: string, afterMs: number, timing: Partial<DocTiming>) {
     let doc: Json = {}
-    await withDocTiming({ settle: 0, quiet: 400 }, async () => {
-      // Every read before 200 ms would see the time from before the move, and agree with each other.
-      google.faults.moveTimeAfterNextImport({ ...REAL_MOVE, afterMs: 200 })
-      doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 静かに待つ\n'), { name: '静かに待つ.md' }))).body.data.drivePut
+    await withDocTiming(timing, async () => {
+      google.faults.moveTimeAfterNextImport({ ...REAL_MOVE, afterMs })
+      doc = (await ai(token0(), 'POST', '/put', docBody(Buffer.from('# 観察\n'), { name }))).body.data.drivePut
     })
-    expect(Date.parse(newestOf(doc.fileId).modifiedTime) - Date.parse(baseline(doc.id).at)).toBe(REAL_MOVE.revisionMs)
-    expect(baseline(doc.id).revisionAt).toBe(newestOf(doc.fileId).modifiedTime)
-    expect((await ai(token, 'POST', '/put', docBody(NEXT, { name: '静かに待つ.md', updateFileId: doc.fileId }))).body.data?.drivePut.state).toBe('done')
+    const kept = baseline(doc.id)
+    const moved = kept.fingerprint !== null && Date.parse(kept.revisionAt) - Date.parse(kept.at) === REAL_MOVE.revisionMs
+    // The next update comes once the move is surely due (it is applied before that update's first request).
+    await new Promise(resolve => setTimeout(resolve, afterMs))
+    const next = await ai(token0(), 'POST', '/put', docBody(NEXT, { name, updateFileId: doc.fileId }))
+    return { moved, next: next.body.data?.drivePut?.state ?? next.body.code }
+  }
+  let actToken = ''
+  const token0 = () => actToken
+
+  it('the observation waits for Drive\'s processing (real time): nothing read before the quiet period — reads only before the move would agree on the old time and every later update would be refused', async () => {
+    actToken = await tokenFor('m-sato', 'act')
+    // The move comes 600 ms after the answer; the quiet period is 800 ms: both reads see it.
+    expect(await observed('静かに待つ.md', 600, { quiet: 800, gap: 100 })).toEqual({ moved: true, next: 'done' })
+    // What a quiet period too short does (half of it: reads at 400 and 500 ms agree on the old time): the baseline holds
+    // the time from before the move, and the next update is refused although nobody edited — so the wait is needed.
+    expect(await observed('待ちが短い.md', 600, { quiet: 400, gap: 100 })).toEqual({ moved: false, next: 'DRIVE_FILE_CHANGED_SINCE' })
   })
 
-  it('a move between two reads (real time): the settle wait between the reads sees it, and the settled time is the baseline\'s', async () => {
-    const token = await tokenFor('m-sato', 'act')
-    let doc: Json = {}
-    await withDocTiming({ settle: 300, quiet: 0 }, async () => {
-      // The first revisions read comes after the exports' 300 ms wait; the move at 450 ms falls in the next wait.
-      google.faults.moveTimeAfterNextImport({ ...REAL_MOVE, afterMs: 450 })
-      doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 間で動く\n'), { name: '間で動く.md' }))).body.data.drivePut
-    })
-    expect(baseline(doc.id).revisionAt).toBe(newestOf(doc.fileId).modifiedTime)
-    expect(Date.parse(baseline(doc.id).revisionAt) - Date.parse(baseline(doc.id).at)).toBe(REAL_MOVE.revisionMs)
-    expect((await ai(token, 'POST', '/put', docBody(NEXT, { name: '間で動く.md', updateFileId: doc.fileId }))).body.data?.drivePut.state).toBe('done')
+  it('two reads must agree a gap apart (real time): a move between them is seen, and the settled time is the baseline\'s', async () => {
+    actToken = await tokenFor('m-sato', 'act')
+    // The move 150 ms after the answer; the first read comes at once, the second 300 ms later and sees it, the third
+    // agrees. Without the gap, two reads at once agree on the old time.
+    expect(await observed('間で動く.md', 150, { quiet: 0, gap: 300 })).toEqual({ moved: true, next: 'done' })
   })
 
   it('the baseline is kept only when every revision and the file itself are the member\'s: another person\'s edit, on any page, a revision without its author, a page that cannot be read keep none', async () => {

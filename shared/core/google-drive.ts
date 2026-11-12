@@ -385,8 +385,6 @@ export interface DrivePermissionLike {
   type?: unknown
   domain?: unknown
   emailAddress?: unknown
-  /** `owner` | `organizer` | `fileOrganizer` | `writer` | `commenter` | `reader` (Drive's words). */
-  role?: unknown
 }
 
 /**

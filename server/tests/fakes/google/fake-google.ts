@@ -204,8 +204,8 @@ export interface FakeGoogleFaults {
    * text and the file's last modifier change: a merged revision names only its last modifier).
    */
   editAfterNextImport(edits: Array<{ content: string; by?: string; omittedFromRevisions?: boolean }>): void
-  /** The next `count` `permissions.list` calls on a Google document are refused with 403 (folders and other files answer). */
-  failNextDocPermissionLists(count: number): void
+  /** Drive still processing: after each of the next `count` `files.get` answers on a Google document, its `modifiedTime` moves `ms` later (default 1000). */
+  settleFileAfterNextGets(count: number, ms?: number): void
   /**
    * Drive still processing: after each of the next `count` complete `revisions.list` answers, the newest revision's
    * `modifiedTime` moves `ms` later (default 1000; no edit, no new revision).
@@ -418,7 +418,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   let newestAuthorHidden = false
   let importTimeMove: { ms: number; revisionMs: number | null; fileTimeAs: string | ((answeredMs: number) => string) | null; afterMs: number } | null = null
   let pendingMoves: Array<{ dueAt: number; move: () => void }> = []
-  let docPermissionListFailures = 0
+  let fileSettles = { count: 0, ms: 0 }
   let importEdits: Array<{ content: string; by: string; omitted: boolean }> = []
   let revisionSettles = { count: 0, ms: 0 }
   let importReshape: 'extra-own' | 'merged' | 'pruned' | null = null
@@ -437,7 +437,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     pageRevisions(size) { revisionPageSize = size },
     hideNewestRevisionAuthor(on) { newestAuthorHidden = on },
     moveTimeAfterNextImport(opts = {}) { importTimeMove = { ms: opts.ms ?? 2000, revisionMs: opts.revisionMs ?? null, fileTimeAs: opts.fileTimeAs ?? null, afterMs: opts.afterMs ?? 0 } },
-    failNextDocPermissionLists(count) { docPermissionListFailures = count },
+    settleFileAfterNextGets(count, ms = 1000) { fileSettles = { count, ms } },
     editAfterNextImport(edits) { importEdits = edits.map(e => ({ content: e.content, by: e.by ?? SOMEONE_ELSE, omitted: e.omittedFromRevisions ?? false })) },
     settleRevisionAfterNextLists(count, ms = 1000) { revisionSettles = { count, ms } },
     reshapeRevisionsAfterNextImport(kind) { importReshape = kind },
@@ -448,7 +448,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     refuseExport(docId, reason = 'appNotAuthorizedToFile') { exportRefused.set(docId, reason) },
     refuseDocs(docId, reason = 'PERMISSION_DENIED') { docsRefused.set(docId, reason) },
     blockCopy(docId) { copyBlocked.add(docId) },
-    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; editBeforeExport = []; importTimeMove = null; pendingMoves = []; docPermissionListFailures = 0; importEdits = []; revisionSettles = { count: 0, ms: 0 }; importReshape = null; revisionListFailures = 0; revisionListFailAfter = 0; revisionPageSize = 0; fileGetFailures = 0; newestAuthorHidden = false; exportFailures = 0; staleExport = null; searchFailures = 0; faults.ignoreRefreshScope = false; exportRefused.clear(); docsRefused.clear(); copyBlocked.clear() },
+    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; editBeforeExport = []; importTimeMove = null; pendingMoves = []; fileSettles = { count: 0, ms: 0 }; importEdits = []; revisionSettles = { count: 0, ms: 0 }; importReshape = null; revisionListFailures = 0; revisionListFailAfter = 0; revisionPageSize = 0; fileGetFailures = 0; newestAuthorHidden = false; exportFailures = 0; staleExport = null; searchFailures = 0; faults.ignoreRefreshScope = false; exportRefused.clear(); docsRefused.clear(); copyBlocked.clear() },
   }
 
   const app = new Hono()
@@ -1019,10 +1019,6 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   app.get('/drive/v3/files/:fileId/permissions', c => {
     const a = bearer(c, NEEDS.drive, 'drive.googleapis.com')
     const f = visibleDriveFile(a, c.req.param('fileId') ?? '')
-    if (docPermissionListFailures > 0 && f.mimeType === DOC_MIME) {
-      docPermissionListFailures--
-      throw apiError(403, 'The user does not have sufficient permissions for this file.', 'insufficientFilePermissions')
-    }
     return c.json({ kind: 'drive#permissionList', permissions: f.permissions.map((p, i) => ({ kind: 'drive#permission', id: `perm-${i}`, ...p })) })
   })
 
@@ -1271,7 +1267,13 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
         fileGetFailures--
         throw apiError(403, 'The user does not have sufficient permissions for this file.', 'insufficientFilePermissions')
       }
-      return c.json(selectFields(driveFileOut(f, a.email), c.req.query('fields')))
+      const answer = selectFields(driveFileOut(f, a.email), c.req.query('fields'))
+      // `settleFileAfterNextGets`: answered, then Drive's processing moves the file's time.
+      if (fileSettles.count > 0 && f.mimeType === DOC_MIME) {
+        fileSettles.count--
+        f.modifiedTime = iso(Date.parse(f.modifiedTime) + fileSettles.ms)
+      }
+      return c.json(answer)
     }
     const { d } = visibleDoc(c)
     // headRevisionId is left out: Drive sets it only for files with binary content, not Google Docs.

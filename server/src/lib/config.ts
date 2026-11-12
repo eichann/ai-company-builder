@@ -188,30 +188,33 @@ export function practiceUpstreamsFrom(env: Readonly<Record<string, string | unde
 export const PRACTICE_UPSTREAMS = practiceUpstreamsFrom(process.env)
 
 /**
+ * The waits around a Google document's baseline right after ACB put it (google-drive.md "A Google document's own
+ * changes"; `DriveDocTiming` in services/google-drive.ts), read per use, each an integer in its range or its default:
+ * `ACB_DRIVE_DOC_SETTLE_MS` (between the two exports and before an export's retry; 0–10000, 1500),
+ * `ACB_DRIVE_DOC_QUIET_MS` (after the upload answer, before the first read; 0–20000, 8000),
+ * `ACB_DRIVE_DOC_GAP_MS` (between two reads that must agree; 0–10000, 2000),
+ * `ACB_DRIVE_DOC_BUDGET_MS` (after the upload answer, the observation gives up; 0–25000, 25000 — the document's times
+ * must lie within 30 s of the answer, so a longer one could not help). Worst case well inside the app's 120 s put timeout.
+ * Tests set their own.
+ */
+export function driveDocTiming(env: Readonly<Record<string, string | undefined>> = process.env): { settleMs: number; quietMs: number; gapMs: number; budgetMs: number } {
+  const read = (name: string, max: number, fallback: number) => {
+    const raw = env[name]
+    const n = Number(raw)
+    return raw !== undefined && Number.isInteger(n) && n >= 0 && n <= max ? n : fallback
+  }
+  return {
+    settleMs: read('ACB_DRIVE_DOC_SETTLE_MS', 10_000, 1500),
+    quietMs: read('ACB_DRIVE_DOC_QUIET_MS', 20_000, 8000),
+    gapMs: read('ACB_DRIVE_DOC_GAP_MS', 10_000, 2000),
+    budgetMs: read('ACB_DRIVE_DOC_BUDGET_MS', 25_000, 25_000),
+  }
+}
+
+/**
  * The address browsers reach this server at (Google's redirect URI is built
  * from it). Read per call; default http://localhost:3001, no trailing slash.
  */
-/**
- * How long the Drive service waits between the two reads of a Google document right after ACB put it, and before the
- * one retry of a failed export (google-drive.md "A Google document's own changes"): `ACB_DRIVE_DOC_SETTLE_MS`, 0–10000,
- * default 1500. Read per call. Tests set 0.
- */
-export function driveDocSettleMs(env: Readonly<Record<string, string | undefined>> = process.env): number {
-  const n = Number(env.ACB_DRIVE_DOC_SETTLE_MS)
-  return env.ACB_DRIVE_DOC_SETTLE_MS !== undefined && Number.isInteger(n) && n >= 0 && n <= 10_000 ? n : 1500
-}
-
-/**
- * How long after Drive answered a put of a Google document the service lets Drive's own processing run before it reads
- * the revisions for the baseline (google-drive.md "A Google document's own changes"; real Google, 2026-11-12: the
- * revision's time moved ~3 s and the file's ~4 s after the answer): `ACB_DRIVE_DOC_QUIET_MS`, 0–30000, default 6000.
- * Tests set 0 (and a few cases their own).
- */
-export function driveDocQuietMs(env: Readonly<Record<string, string | undefined>> = process.env): number {
-  const n = Number(env.ACB_DRIVE_DOC_QUIET_MS)
-  return env.ACB_DRIVE_DOC_QUIET_MS !== undefined && Number.isInteger(n) && n >= 0 && n <= 30_000 ? n : 6000
-}
-
 export function publicUrl(): string {
   return (process.env.PUBLIC_URL?.trim() || 'http://localhost:3001').replace(/\/+$/, '')
 }
