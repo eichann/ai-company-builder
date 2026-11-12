@@ -316,7 +316,7 @@ The AI reads and writes **only** the member's own live picks.
       made it appear in, the only account that has ever had a revision is the member's, and a merge is of one account's
       edits. What remains is **the member's own edit within those seconds merged by Docs into ACB's revision** (no new
       revision, the text exported after it): it becomes part of the baseline and a later update may overwrite it. **Owner
-      decision 2026-11-12: 「書いた本人の直しは上書きしてよい」** — the writer's own edits may be overwritten; a person
+      decision 2026-11-12: the writer's own edits may be overwritten**; a person
       other than the writer is never overwritten. A visible second revision is still refused by (d) (refusing what can
       be seen costs nothing).
     - **Diagnostics** (`log.warn`, `[google-drive]`; never a file id, put id, name, text or token — only step names,
