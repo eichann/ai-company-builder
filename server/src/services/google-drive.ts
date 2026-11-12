@@ -58,8 +58,10 @@ export interface GoogleDriveDeps {
   vaultEnabled(): boolean
   /** Where the Picker page loads Google's script from (https://apis.google.com, or the practice Google's origin). */
   pickerScriptOrigin: string
-  /** Between the two reads of a Google document right after a put, and before an export's one retry (ms; default 1500). */
-  docSettleMs?: number
+  /** Between the reads of a Google document right after a put, and before an export's one retry (ms; default 1500; read per use). */
+  docSettleMs?: () => number
+  /** How long after a put's answer Drive's processing is let run before the baseline's revisions are read (ms; default 6000). */
+  docQuietMs?: () => number
   /** Where the document checks' diagnostics go (default: console); never a file id, name, text or token. */
   log?: Pick<Console, 'warn'>
   /** sha256 of bytes, lower-case hex (composition: node's crypto). */
@@ -245,8 +247,12 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     return null
   }
 
-  const settleMs = deps.docSettleMs ?? 1500
-  const settle = () => new Promise<void>(resolve => setTimeout(resolve, settleMs))
+  const settle = () => new Promise<void>(resolve => setTimeout(resolve, deps.docSettleMs?.() ?? 1500))
+  /** Waits until `quietMs` have passed since `fromMs` (`performance.now()`): Drive's processing after an import. */
+  const quietSince = async (fromMs: number) => {
+    const left = (deps.docQuietMs?.() ?? 6000) - (performance.now() - fromMs)
+    if (left > 0) await new Promise<void>(resolve => setTimeout(resolve, left))
+  }
 
   /**
    * A Google document's fingerprint (google-drive.md "A Google document's own changes"): the sha256 of its text as Drive
@@ -313,30 +319,32 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
    * Right after Drive answered a put that made or updated a Google document — inside that request only: its baseline,
    * kept on the receipt only when it is provably ACB's own (google-drive.md "A Google document's own changes"):
    * (a) two exports a moment apart give the same text (not a stale or half-processed one);
-   * (b) the revisions are read in full, settled (the newest one's id and time the same in two reads a moment apart:
-   *     Drive's post-import processing moves its time once, seconds after the answer), and every one of them was made
-   *     last by the member's own account (`lastModifyingUser.me`; ACB writes with their token, so anyone else's edit in
-   *     between shows as a revision that is not theirs — Docs never merges two accounts' edits into one revision);
+   * (b) the revisions are read in full only after Drive's processing was given its time (`docQuietMs` after the answer:
+   *     it moves the revision's time once, seconds later), settled (the newest one's id and time the same in two reads a
+   *     moment apart), and every one of them was made last by the member's own account (`lastModifyingUser.me`; ACB
+   *     writes with their token);
    * (c) the file's own last change is the member's (`files.get` `lastModifyingUser.me`: a witness that does not rest on
    *     the revision list);
    * (d) exactly one revision is new: the only one of a new document, or the only one after the previous baseline's
    *     revision on an update (that revision still listed) — a second revision, even the member's, is refused;
    * (e) the file's `modifiedTime` and the newest revision's are both within `DOC_BASELINE_WINDOW_MS` after the upload
    *     answer's, never before it (real Google, 2026-11-12: processing moved them ~4 s and ~3 s with nobody editing).
+   * (f) nobody but the member can edit, comment on or suggest in the file (`permissions.list`: every role above
+   *     `reader` is the member's own account). Google says a revision may merge edits and names only its last
+   *     modifier, so (b) and (c) cannot prove another account's edit is absent when someone else could have made one.
    * The newest revision's id and time **as observed** are kept; the baseline's time stays the upload answer's (comments
    * are compared from it, the earliest moment ACB's text existed). What remains possible is the member's own edit within
-   * those seconds merged by Docs into ACB's revision — the owner's decision of 2026-11-12: the writer's own edits may be
-   * overwritten. Anything else keeps none, so a later update is refused as not verifiable. A put found after a lost
-   * answer never gets one (`reconcile`).
+   * those seconds — the owner's decision of 2026-11-12: the writer's own edits may be overwritten. Anything else keeps
+   * none, so a later update is refused as not verifiable. A put found after a lost answer never gets one (`reconcile`).
    * Every drop logs one line naming the failed step; never a file id, name, text or token.
    */
   async function keepDocBaseline(
     companyId: string, row: Pick<DrivePutRow, 'id' | 'userId' | 'mimeType' | 'fileId' | 'state'>, uploadedAt: string | null,
-    previousRevision: string | null,
+    previousRevision: string | null, answeredAtMs: number,
   ): Promise<void> {
     if (row.mimeType !== DRIVE_DOC_MIME || row.state !== 'done' || !row.fileId) return
     type Step = 'no-upload-time' | 'export-failed' | 'export-differs' | 'no-revision' | 'still-settling' | 'not-me'
-      | 'base-revision-gone' | 'revision-count' | 'file-unread' | 'file-not-me' | 'outside-window'
+      | 'base-revision-gone' | 'revision-count' | 'file-unread' | 'file-not-me' | 'outside-window' | 'sharing-unread' | 'others-can-edit'
     const drop = (step: Step, detail = '') => log.warn(`[google-drive] document baseline not kept: ${step}${detail}`)
     const uploadMs = uploadedAt ? Date.parse(uploadedAt) : NaN
     if (!uploadedAt || Number.isNaN(uploadMs)) return drop('no-upload-time')
@@ -346,7 +354,10 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     const second = await docFingerprint(companyId, row.userId, row.fileId)
     if (!second) return drop('export-failed')
     if (second !== first) return drop('export-differs')
-    // Settled: the same newest revision (id and time) and count in two reads a moment apart, at most DOC_BASELINE_READS reads.
+    // Drive's processing after the import moves the revision's time seconds after the answer: given its time first, so
+    // two early reads cannot both see the time from before it. Then settled: the same newest revision (id and time) and
+    // count in two reads a moment apart, at most DOC_BASELINE_READS reads.
+    await quietSince(answeredAtMs)
     let revisions = await docRevisions(companyId, row.userId, row.fileId)
     if (!revisions) return drop('no-revision')
     let reads = 1
@@ -389,6 +400,13 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     if (!inWindow(fileAt) || !inWindow(newest.at)) {
       return drop('outside-window', ` upload=${logStamp(uploadedAt)} file=${logStamp(fileAt)} newest-revision=${logStamp(newest.at)} revisions=${revisions.length}`)
     }
+    // Nobody else could have edited it: a revision may merge edits and names only its last modifier (Google), so another
+    // account's edit followed by the member's own would pass every check above. Readers cannot edit, comment or suggest.
+    const own = handle(companyId).connectors.grant('google', row.userId)?.accountEmail?.toLowerCase() ?? null
+    const perms = await folderPermissions(companyId, row.userId, row.fileId)
+    if (!own || perms === null || !Array.isArray(perms)) return drop('sharing-unread')
+    const others = perms.filter(p => p.role !== 'reader' && !(p.type === 'user' && typeof p.emailAddress === 'string' && p.emailAddress.toLowerCase() === own)).length
+    if (others > 0) return drop('others-can-edit', ` (permissions: ${perms.length}, able to edit or comment besides the member: ${others})`)
     const baseline: DriveDocBaseline = { fingerprint: first, revision: newest.id as string, revisionAt: newest.at as string, at: uploadedAt }
     handle(companyId).googleDrive.setDocBaseline(row.id, baseline)
   }
@@ -998,6 +1016,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           rawBody: multipart(id, { name: named.name, parents: [row.folderId], mimeType: form.driveMime, appProperties: { acbPutId: id } }, form.uploadMime, bytes),
           operation: 'drive.files.create',
         })
+      const answeredAtMs = performance.now()
       if (r.ok) {
         const j = isObj(r.json) ? r.json : {}
         const made = isDriveId(j.id) ? j.id : null
@@ -1008,7 +1027,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         h.googleDrive.settlePut(id, settled)
         // An update names the revision its check started from (always there: an update without a baseline was refused
         // above; '' would match no revision and keep none).
-        await keepDocBaseline(member.companyId, { ...row, ...settled }, str(j.modifiedTime), targetId !== null ? (target?.docBaseline?.revision ?? '') : null)
+        await keepDocBaseline(member.companyId, { ...row, ...settled }, str(j.modifiedTime), targetId !== null ? (target?.docBaseline?.revision ?? '') : null, answeredAtMs)
         return ok({ drivePut: putView({ ...row, ...settled }), existing: false })
       }
       if (r.kind === 'unknown' || r.kind === 'server-error') {

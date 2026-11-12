@@ -195,9 +195,17 @@ export interface FakeGoogleFaults {
    * upload is answered with one `modifiedTime`, and the file's then moves `ms` later (default 2000) with no edit and no
    * new revision. `revisionMs`: the newest revision's `modifiedTime` moves that much later too (real Google: the file's by
    * ~4 s, its one revision's by ~3 s); `fileTimeAs`: the file's time answered as this (malformed) value from then on, or as this function of the
-   * answered time gives it.
+   * answered time gives it; `afterMs`: the move happens that much real time after the answer (default at once).
    */
-  moveTimeAfterNextImport(opts?: { ms?: number; revisionMs?: number; fileTimeAs?: string | ((answeredMs: number) => string) }): void
+  moveTimeAfterNextImport(opts?: { ms?: number; revisionMs?: number; fileTimeAs?: string | ((answeredMs: number) => string); afterMs?: number }): void
+  /**
+   * Right after the next import into a Google document (before its answer is used), these edits are made in order —
+   * as `editBeforeNextExport` makes them (`by` default another person; `omittedFromRevisions`: no revision shown, the
+   * text and the file's last modifier change: a merged revision names only its last modifier).
+   */
+  editAfterNextImport(edits: Array<{ content: string; by?: string; omittedFromRevisions?: boolean }>): void
+  /** The next `count` `permissions.list` calls on a Google document are refused with 403 (folders and other files answer). */
+  failNextDocPermissionLists(count: number): void
   /**
    * Drive still processing: after each of the next `count` complete `revisions.list` answers, the newest revision's
    * `modifiedTime` moves `ms` later (default 1000; no edit, no new revision).
@@ -408,7 +416,10 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   let revisionListFailAfter = 0
   let revisionPageSize = 0
   let newestAuthorHidden = false
-  let importTimeMove: { ms: number; revisionMs: number | null; fileTimeAs: string | ((answeredMs: number) => string) | null } | null = null
+  let importTimeMove: { ms: number; revisionMs: number | null; fileTimeAs: string | ((answeredMs: number) => string) | null; afterMs: number } | null = null
+  let pendingMoves: Array<{ dueAt: number; move: () => void }> = []
+  let docPermissionListFailures = 0
+  let importEdits: Array<{ content: string; by: string; omitted: boolean }> = []
   let revisionSettles = { count: 0, ms: 0 }
   let importReshape: 'extra-own' | 'merged' | 'pruned' | null = null
   let exportFailures = 0
@@ -425,7 +436,9 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     failNextRevisionLists(count, afterPages = 0) { revisionListFailures = count; revisionListFailAfter = afterPages },
     pageRevisions(size) { revisionPageSize = size },
     hideNewestRevisionAuthor(on) { newestAuthorHidden = on },
-    moveTimeAfterNextImport(opts = {}) { importTimeMove = { ms: opts.ms ?? 2000, revisionMs: opts.revisionMs ?? null, fileTimeAs: opts.fileTimeAs ?? null } },
+    moveTimeAfterNextImport(opts = {}) { importTimeMove = { ms: opts.ms ?? 2000, revisionMs: opts.revisionMs ?? null, fileTimeAs: opts.fileTimeAs ?? null, afterMs: opts.afterMs ?? 0 } },
+    failNextDocPermissionLists(count) { docPermissionListFailures = count },
+    editAfterNextImport(edits) { importEdits = edits.map(e => ({ content: e.content, by: e.by ?? SOMEONE_ELSE, omitted: e.omittedFromRevisions ?? false })) },
     settleRevisionAfterNextLists(count, ms = 1000) { revisionSettles = { count, ms } },
     reshapeRevisionsAfterNextImport(kind) { importReshape = kind },
     failNextExports(count) { exportFailures = count },
@@ -435,7 +448,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     refuseExport(docId, reason = 'appNotAuthorizedToFile') { exportRefused.set(docId, reason) },
     refuseDocs(docId, reason = 'PERMISSION_DENIED') { docsRefused.set(docId, reason) },
     blockCopy(docId) { copyBlocked.add(docId) },
-    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; editBeforeExport = []; importTimeMove = null; revisionSettles = { count: 0, ms: 0 }; importReshape = null; revisionListFailures = 0; revisionListFailAfter = 0; revisionPageSize = 0; fileGetFailures = 0; newestAuthorHidden = false; exportFailures = 0; staleExport = null; searchFailures = 0; faults.ignoreRefreshScope = false; exportRefused.clear(); docsRefused.clear(); copyBlocked.clear() },
+    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; editBeforeExport = []; importTimeMove = null; pendingMoves = []; docPermissionListFailures = 0; importEdits = []; revisionSettles = { count: 0, ms: 0 }; importReshape = null; revisionListFailures = 0; revisionListFailAfter = 0; revisionPageSize = 0; fileGetFailures = 0; newestAuthorHidden = false; exportFailures = 0; staleExport = null; searchFailures = 0; faults.ignoreRefreshScope = false; exportRefused.clear(); docsRefused.clear(); copyBlocked.clear() },
   }
 
   const app = new Hono()
@@ -446,6 +459,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   }
 
   app.use('*', async (c, next) => {
+    applyDueMoves()
     const control = c.req.path.startsWith('/__fake/')
     if (!control && faults.delayMs > 0) await new Promise(r => setTimeout(r, faults.delayMs))
     if (!control && c.req.path !== '/o/oauth2/v2/auth' && failCount > 0 && (failPrefix === null || c.req.path.startsWith(failPrefix))) {
@@ -909,6 +923,17 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   }
   /** `moveTimeAfterNextImport`: Drive's processing moves the time after the upload was answered (no edit, no new revision). */
   function settleImport(f: LiveDriveFile, by: string): void {
+    if (f.mimeType === DOC_MIME && importEdits.length > 0) {
+      for (const edit of importEdits) {
+        f.content = Buffer.from(edit.content, 'utf8')
+        f.version += 1
+        if (edit.omitted) {
+          f.modifiedTime = iso(Math.max(now(), Date.parse(f.modifiedTime) + 1000))
+          f.lastBy = edit.by
+        } else newRevision(f, edit.by)
+      }
+      importEdits = []
+    }
     if (f.mimeType === DOC_MIME && importReshape) {
       const kind = importReshape
       importReshape = null
@@ -921,14 +946,24 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       } else if (kind === 'pruned') f.history = f.history.slice(-1)
     }
     if (!importTimeMove || f.mimeType !== DOC_MIME) return
-    const { ms, revisionMs, fileTimeAs } = importTimeMove
+    const { ms, revisionMs, fileTimeAs, afterMs } = importTimeMove
     importTimeMove = null
     const answered = Date.parse(f.modifiedTime)
-    // `fileTimeAs`: Drive answers this as the file's time from now on (a malformed answer; nothing may edit it after).
-    f.modifiedTime = typeof fileTimeAs === 'function' ? fileTimeAs(answered) : fileTimeAs ?? iso(answered + ms)
-    f.version += 1
-    const last = f.history[f.history.length - 1]
-    if (revisionMs !== null && last) last.modifiedTime = iso(answered + revisionMs)
+    const move = () => {
+      // `fileTimeAs`: Drive answers this as the file's time from now on (a malformed answer; nothing may edit it after).
+      f.modifiedTime = typeof fileTimeAs === 'function' ? fileTimeAs(answered) : fileTimeAs ?? iso(answered + ms)
+      f.version += 1
+      const last = f.history[f.history.length - 1]
+      if (revisionMs !== null && last) last.modifiedTime = iso(answered + revisionMs)
+    }
+    // `afterMs`: the move happens that long (real time) after the answer, seen by the first request from then on.
+    if (afterMs > 0) pendingMoves.push({ dueAt: Date.now() + afterMs, move })
+    else move()
+  }
+  /** Moves due by now (`moveTimeAfterNextImport({ afterMs })`), applied before any request is answered. */
+  function applyDueMoves(): void {
+    const t = Date.now()
+    for (const m of pendingMoves.filter(x => x.dueAt <= t)) { pendingMoves.splice(pendingMoves.indexOf(m), 1); m.move() }
   }
   const driveFiles = new Map<string, LiveDriveFile>((seed.driveFiles ?? []).map(f => {
     const head = `rev-${randomToken(8)}`
@@ -984,6 +1019,10 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   app.get('/drive/v3/files/:fileId/permissions', c => {
     const a = bearer(c, NEEDS.drive, 'drive.googleapis.com')
     const f = visibleDriveFile(a, c.req.param('fileId') ?? '')
+    if (docPermissionListFailures > 0 && f.mimeType === DOC_MIME) {
+      docPermissionListFailures--
+      throw apiError(403, 'The user does not have sufficient permissions for this file.', 'insufficientFilePermissions')
+    }
     return c.json({ kind: 'drive#permissionList', permissions: f.permissions.map((p, i) => ({ kind: 'drive#permission', id: `perm-${i}`, ...p })) })
   })
 
