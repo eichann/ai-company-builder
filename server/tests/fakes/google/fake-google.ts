@@ -179,6 +179,14 @@ export interface FakeGoogleFaults {
   failNext(count?: number, status?: number): void
   /** Like `failNext`, only for requests whose path starts with `prefix` (others are answered). */
   failOn(prefix: string, count?: number, status?: number): void
+  /** Someone edits the next Google document exported just before the export (new text, a later `modifiedTime`). */
+  editBeforeNextExport(content: string): void
+  /** The next `count` exports of a Drive file are refused with 403 (not retried by a client; the file is unchanged). */
+  failNextExports(count: number): void
+  /** The next `count` `files.list` searches are refused with 403 (a lost answer's lookup that does not get through). */
+  failNextFileSearches(count: number): void
+  /** The next export of a Drive file answers this text instead of the file's (Drive still processing it); the file is unchanged. */
+  staleNextExport(text: string): void
   /**
    * The next `count` Gmail sends are stored (the mail went out) and then never
    * answered: over a real socket the connection is cut; through `app.fetch`
@@ -187,7 +195,7 @@ export interface FakeGoogleFaults {
   dropAnswerAfterSend(count?: number): void
   /** A refresh that asks for fewer scopes gets every granted one anyway (a Google that ignores `scope`). */
   ignoreRefreshScope: boolean
-  /** Drive opens this document (`files.get`) but refuses its export with 403 and this reason (Gemini's notes in production). */
+  /** Drive opens this document (`files.get`) but refuses its export with 403 and this reason (Gemini's notes in production; a Drive file too). */
   refuseExport(docId: string, reason?: string): void
   /** `documents.get` of this document answers 403 with this reason (the API not turned on, say). */
   refuseDocs(docId: string, reason?: string): void
@@ -255,6 +263,22 @@ export interface FakeGoogle {
   refuseKeepForever(id: string): void
   /** Someone edits this Drive file in Drive itself (a new revision / version, not ACB's). */
   editDriveFile(id: string, content: string): void
+  /**
+   * Someone edits this Google document and Docs merges the edit into its newest revision (as Docs does for edits close
+   * together): new text, a later `modifiedTime`, the same newest revision id.
+   */
+  editDriveFileMerged(id: string, content: string): void
+  /** Someone changes only the look of this Google document (bold, an image): a new revision, the same text. */
+  formatDriveFile(id: string): void
+  /** The same, merged by Docs into the newest revision (the member's own edit soon after ACB's): its id kept, its time moved. */
+  formatDriveFileMerged(id: string): void
+  /** Someone comments on this Drive file (no new revision, the same text). */
+  commentOnDriveFile(id: string): void
+  /**
+   * Someone opens this Google document in the browser and closes it without typing (real Google, 2026-11-12): its
+   * `version` moves, its content and revision history do not.
+   */
+  openDriveFile(id: string): void
   /** Every Drive file the app made (uploads), oldest first. */
   uploads(): Array<{ id: string; name: string; parents: string[]; mimeType: string }>
   /** A spreadsheet as it is now (null when unknown); for assertions. */
@@ -344,17 +368,25 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   const docsRefused = new Map<string, string>()
   const copyBlocked = new Set<string>()
   let dropCount = 0
+  let editBeforeExport: string | null = null
+  let exportFailures = 0
+  let staleExport: string | null = null
+  let searchFailures = 0
   const held = new Set<() => void>()
   const faults: FakeGoogleFaults = {
     delayMs: 0,
     failNext(count = 1, status = 500) { failCount = count; failStatus = status; failPrefix = null },
     failOn(prefix, count = 1, status = 500) { failCount = count; failStatus = status; failPrefix = prefix },
     dropAnswerAfterSend(count = 1) { dropCount = count },
+    editBeforeNextExport(content) { editBeforeExport = content },
+    failNextExports(count) { exportFailures = count },
+    staleNextExport(text) { staleExport = text },
+    failNextFileSearches(count) { searchFailures = count },
     ignoreRefreshScope: false,
     refuseExport(docId, reason = 'appNotAuthorizedToFile') { exportRefused.set(docId, reason) },
     refuseDocs(docId, reason = 'PERMISSION_DENIED') { docsRefused.set(docId, reason) },
     blockCopy(docId) { copyBlocked.add(docId) },
-    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; faults.ignoreRefreshScope = false; exportRefused.clear(); docsRefused.clear(); copyBlocked.clear() },
+    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; editBeforeExport = null; exportFailures = 0; staleExport = null; searchFailures = 0; faults.ignoreRefreshScope = false; exportRefused.clear(); docsRefused.clear(); copyBlocked.clear() },
   }
 
   const app = new Hono()
@@ -812,11 +844,25 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     uploadedAs: string | null
     /** Revisions marked keepForever (binary files only). */
     kept: Set<string>
+    /** Every revision, oldest first (`revisions.list`): content, formatting or images changed — never a view. */
+    history: Array<{ id: string; modifiedTime: string }>
+    /** Comments on the file (`comments.list`). */
+    comments: Array<{ id: string; createdTime: string; modifiedTime: string }>
   }
-  const driveFiles = new Map<string, LiveDriveFile>((seed.driveFiles ?? []).map(f => [f.id, {
-    ...f, content: Buffer.from(f.content, 'utf8'), parents: f.parents ?? [], appProperties: {}, createdBy: null, pickedFor: new Set<string>(),
-    modifiedTime: iso(created), headRevisionId: `rev-${randomToken(8)}`, version: 1, uploadedAs: null, kept: new Set<string>(),
-  }]))
+  /** A change of the file's content or look: a new head revision in its history and a later `modifiedTime`. */
+  function newRevision(f: LiveDriveFile): void {
+    f.headRevisionId = `rev-${randomToken(8)}`
+    f.modifiedTime = iso(Math.max(now(), Date.parse(f.modifiedTime) + 1000))
+    f.history.push({ id: f.headRevisionId, modifiedTime: f.modifiedTime })
+  }
+  const driveFiles = new Map<string, LiveDriveFile>((seed.driveFiles ?? []).map(f => {
+    const head = `rev-${randomToken(8)}`
+    return [f.id, {
+      ...f, content: Buffer.from(f.content, 'utf8'), parents: f.parents ?? [], appProperties: {}, createdBy: null, pickedFor: new Set<string>(),
+      modifiedTime: iso(created), headRevisionId: head, version: 1, uploadedAs: null, kept: new Set<string>(),
+      history: [{ id: head, modifiedTime: iso(created) }], comments: [],
+    }]
+  }))
   /** What Drive converts into a Google document on upload (the importable text types this fake knows). */
   const DOC_IMPORTS = new Set(['text/html', 'text/markdown', 'text/plain'])
   const DOC_MIME = 'application/vnd.google-apps.document'
@@ -867,6 +913,10 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
 
   app.get('/drive/v3/files', c => {
     const a = bearer(c, NEEDS.drive, 'drive.googleapis.com')
+    if (searchFailures > 0) {
+      searchFailures--
+      throw apiError(403, 'The user does not have sufficient permissions.', 'insufficientPermissions')
+    }
     const q = c.req.query('q') ?? ''
     const m = /^appProperties has \{ key='([A-Za-z0-9_-]+)' and value='([A-Za-z0-9_-]+)' \} and trashed = false$/.exec(q)
     if (!m) throw apiError(400, 'Invalid Value', 'invalid', { location: 'q', locationType: 'parameter' })
@@ -912,10 +962,13 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     // A Google document is made from an importable text upload (Drive converts it); anything else is refused.
     if (meta.mimeType === DOC_MIME && !DOC_IMPORTS.has(mediaType)) throw apiError(400, 'The requested conversion is not supported.', 'badRequest')
     const id = `fake-upload-${randomBytes(8).toString('hex')}`
+    const head = `rev-${randomToken(8)}`
+    const at = iso(now())
     driveFiles.set(id, {
       id, name: meta.name ?? 'Untitled', mimeType: meta.mimeType ?? 'application/octet-stream', owner: a.email, readers: [...folder.readers], content: media,
       permissions: [...folder.permissions], parents: [parent], appProperties: { ...(meta.appProperties ?? {}) }, createdBy: a.clientId, pickedFor: new Set(),
-      modifiedTime: iso(now()), headRevisionId: `rev-${randomToken(8)}`, version: 1, uploadedAs: meta.mimeType === DOC_MIME ? mediaType : null, kept: new Set<string>(),
+      modifiedTime: at, headRevisionId: head, version: 1, uploadedAs: meta.mimeType === DOC_MIME ? mediaType : null, kept: new Set<string>(),
+      history: [{ id: head, modifiedTime: at }], comments: [],
     })
     uploadOrder.push(id)
     if (dropCount > 0) {
@@ -938,14 +991,30 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     if (typeof meta.name === 'string') f.name = meta.name
     f.appProperties = { ...f.appProperties, ...((meta.appProperties ?? {}) as Record<string, string>) }
     f.version += 1
-    f.headRevisionId = `rev-${randomToken(8)}`
-    f.modifiedTime = iso(now())
+    newRevision(f)
     if (f.mimeType === DOC_MIME) f.uploadedAs = mediaType
     if (dropCount > 0) {
       dropCount--
       return dropAnswer(c)
     }
     return c.json(selectFields(driveFileOut(f, a.email), c.req.query('fields')))
+  })
+
+  // revisions.list: every revision, oldest first (one page here). drive.file: a file this client made or the account picked.
+  app.get('/drive/v3/files/:fileId/revisions', c => {
+    const a = bearer(c, [GOOGLE_SCOPES.driveFile, `${AUTH}drive`], 'drive.googleapis.com')
+    const f = visibleDriveFile(a, c.req.param('fileId') ?? '')
+    return c.json({ kind: 'drive#revisionList', revisions: f.history.map(r => ({ kind: 'drive#revision', id: r.id, modifiedTime: r.modifiedTime })) })
+  })
+
+  // comments.list: `fields` is required (as at Google); `startModifiedTime` keeps comments changed at or after it.
+  app.get('/drive/v3/files/:fileId/comments', c => {
+    const a = bearer(c, [GOOGLE_SCOPES.driveFile, `${AUTH}drive`], 'drive.googleapis.com')
+    const f = visibleDriveFile(a, c.req.param('fileId') ?? '')
+    if (!c.req.query('fields')) throw apiError(400, "The 'fields' parameter is required for this method.", 'required')
+    const since = c.req.query('startModifiedTime')
+    const list = f.comments.filter(x => !since || Date.parse(x.modifiedTime) >= Date.parse(since))
+    return c.json({ kind: 'drive#commentList', comments: list.map(x => ({ kind: 'drive#comment', ...x })) })
   })
 
   // revisions.update { keepForever }: binary files only (Drive keeps a Google document's revisions itself); the account
@@ -994,7 +1063,26 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       const mimeType = c.req.query('mimeType')
       if (!f.mimeType.startsWith('application/vnd.google-apps.') || f.mimeType.endsWith('.folder')) throw apiError(403, 'Export only supports Docs Editors files.', 'fileNotExportable')
       if (mimeType !== 'text/plain' && mimeType !== 'text/csv') throw apiError(400, 'The requested conversion is not supported.', 'badRequest')
-      return c.body('\uFEFF' + f.content.toString('utf8').replace(/\r?\n/g, '\r\n'), 200, { 'content-type': `${mimeType}; charset=UTF-8` })
+      const refused = exportRefused.get(f.id)
+      if (refused) throw apiError(403, 'The user has not granted the app read access to the file.', refused)
+      if (exportFailures > 0) {
+        exportFailures--
+        throw apiError(403, 'The user has not granted the app read access to the file.', 'appNotAuthorizedToFile')
+      }
+      if (editBeforeExport !== null && f.mimeType === DOC_MIME) {
+        f.content = Buffer.from(editBeforeExport, 'utf8')
+        f.version += 1
+        newRevision(f)
+        editBeforeExport = null
+      }
+      const shown = staleExport ?? f.content.toString('utf8')
+      staleExport = null
+      const text = '\uFEFF' + shown.replace(/\r?\n/g, '\r\n')
+      if (Buffer.byteLength(text, 'utf8') > exportLimit) throw apiError(403, 'This file is too large to be exported.', 'exportSizeLimitExceeded')
+      // Real Google (2026-11-12): a document's `version` moves without any edit — after an import, when it is opened or
+      // read. The fake moves it on every read of its text, so nothing may treat `version` as "someone edited it".
+      if (f.mimeType === DOC_MIME) f.version += 1
+      return c.body(text, 200, { 'content-type': `${mimeType}; charset=UTF-8` })
     }
     const { d } = visibleDoc(c)
     const refusal = exportRefused.get(c.req.param('fileId') ?? '')
@@ -1599,7 +1687,43 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       if (!f) throw new Error(`fake Google: no Drive file ${id}`)
       f.content = Buffer.from(content, 'utf8')
       f.version += 1
-      f.headRevisionId = `rev-${randomToken(8)}`
+      newRevision(f)
+    },
+    editDriveFileMerged(id, content) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      f.content = Buffer.from(content, 'utf8')
+      f.version += 1
+      f.modifiedTime = iso(Math.max(now(), Date.parse(f.modifiedTime) + 1000))
+      const last = f.history[f.history.length - 1]
+      if (last) last.modifiedTime = f.modifiedTime
+    },
+    formatDriveFileMerged(id) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      f.version += 1
+      f.modifiedTime = iso(Math.max(now(), Date.parse(f.modifiedTime) + 1000))
+      const last = f.history[f.history.length - 1]
+      if (last) last.modifiedTime = f.modifiedTime
+    },
+    formatDriveFile(id) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      f.version += 1
+      newRevision(f)
+    },
+    commentOnDriveFile(id) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      const at = iso(Math.max(now(), Date.parse(f.modifiedTime) + 1000))
+      f.comments.push({ id: `comment-${randomToken(6)}`, createdTime: at, modifiedTime: at })
+      f.version += 1
+    },
+    openDriveFile(id) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      // Viewing moves the version only: modifiedTime is the last change by anyone (Drive's viewedByMeTime is separate).
+      f.version += 3
     },
     shareDriveFile(id, permission) {
       const f = driveFiles.get(id)
@@ -1632,11 +1756,13 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
  */
 const FAKE_PICKER_SCRIPT = `(function () {
   var origin = (document.currentScript && new URL(document.currentScript.src).origin) || ''
-  function DocsView(viewId) { this.viewId = viewId; this.fileIds = '' }
+  function DocsView(viewId) { this.viewId = viewId; this.fileIds = ''; this.label = '' }
   DocsView.prototype.setFileIds = function (ids) { this.fileIds = String(ids); return this }
-  ;['setIncludeFolders', 'setSelectFolderEnabled', 'setMimeTypes', 'setEnableDrives'].forEach(function (m) { DocsView.prototype[m] = function () { return this } })
-  function PickerBuilder() { this.o = {} }
-  PickerBuilder.prototype.addView = function (v) { this.o.view = v; return this }
+  DocsView.prototype.setLabel = function (label) { this.label = String(label); return this }
+  ;['setIncludeFolders', 'setSelectFolderEnabled', 'setMimeTypes', 'setEnableDrives', 'setParent', 'setOwnedByMe'].forEach(function (m) { DocsView.prototype[m] = function () { return this } })
+  function PickerBuilder() { this.o = { views: [] } }
+  // The first view added is the tab the Picker opens on: the stand-in shows that one (and names every tab, in order).
+  PickerBuilder.prototype.addView = function (v) { if (!this.o.view) this.o.view = v; this.o.views.push(v); return this }
   PickerBuilder.prototype.setOAuthToken = function (t) { this.o.token = t; return this }
   PickerBuilder.prototype.setCallback = function (f) { this.o.cb = f; return this }
   ;['setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle', 'enableFeature', 'setMaxItems'].forEach(function (m) { PickerBuilder.prototype[m] = function () { return this } })
@@ -1648,6 +1774,7 @@ const FAKE_PICKER_SCRIPT = `(function () {
       fetch(origin + '/__picker/files?mode=' + mode + (o.view.fileIds ? '&ids=' + encodeURIComponent(o.view.fileIds) : ''), { headers: auth }).then(function (r) { return r.json() }).then(function (j) {
         var box = document.createElement('div')
         box.id = 'fake-picker'
+        box.setAttribute('data-tabs', o.views.map(function (v) { return v.label }).join(','))
         ;(j.files || []).forEach(function (f) {
           var b = document.createElement('button')
           b.textContent = f.name

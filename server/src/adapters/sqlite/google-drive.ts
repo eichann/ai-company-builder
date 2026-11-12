@@ -14,6 +14,10 @@ type PutRow = {
   file_id: string | null; revision_id: string | null; link: string | null; reason: string | null; created_at: string; finished_at: string | null
   skills: string | null
   updated_file_id: string | null
+  doc_fingerprint: string | null
+  doc_revision: string | null
+  doc_revision_at: string | null
+  doc_baseline_at: string | null
 }
 
 type TicketRow = {
@@ -35,7 +39,7 @@ const toTicket = (r: TicketRow): DrivePickTicketRow => {
 }
 
 const PICK_COLUMNS = 'user_id, file_id, kind, name, mime_type, picked_at, expires_at'
-const PUT_COLUMNS = 'id, user_id, request_key, actor_kind, conversation_id, run_id, folder_id, folder_name, name, mime_type, bytes, sha256, state, file_id, revision_id, link, reason, created_at, finished_at, skills, updated_file_id'
+const PUT_COLUMNS = 'id, user_id, request_key, actor_kind, conversation_id, run_id, folder_id, folder_name, name, mime_type, bytes, sha256, state, file_id, revision_id, link, reason, created_at, finished_at, skills, updated_file_id, doc_fingerprint, doc_revision, doc_revision_at, doc_baseline_at'
 
 const toPick = (r: PickRow): DrivePickRow => ({
   userId: r.user_id, fileId: r.file_id, kind: r.kind as DrivePickRow['kind'], name: r.name, mimeType: r.mime_type, pickedAt: r.picked_at, expiresAt: r.expires_at,
@@ -45,6 +49,10 @@ const toPut = (r: PutRow): DrivePutRow => ({
   folderId: r.folder_id, folderName: r.folder_name, name: r.name, mimeType: r.mime_type, bytes: r.bytes, sha256: r.sha256, state: r.state as DrivePutRow['state'],
   fileId: r.file_id, revisionId: r.revision_id, link: r.link, reason: r.reason, createdAt: r.created_at, finishedAt: r.finished_at,
   skills: parseSkillUses(r.skills), updatedFileId: r.updated_file_id,
+  // All three or none: a baseline is only ever written whole.
+  docBaseline: r.doc_fingerprint && r.doc_revision && r.doc_revision_at && r.doc_baseline_at
+    ? { fingerprint: r.doc_fingerprint, revision: r.doc_revision, revisionAt: r.doc_revision_at, at: r.doc_baseline_at }
+    : null,
 })
 
 /** The control plane's lookup of a Google Picker pick ticket by its sha256 (google-drive.md): its company only. */
@@ -126,6 +134,10 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
       return conn.prepare(`UPDATE google_drive_puts SET state = ?, file_id = ?, revision_id = ?, link = ?, reason = ?, finished_at = ?
         WHERE company_id = ? AND id = ? AND state IN ('sending', 'unknown')`)
         .run(f.state, f.fileId, f.revisionId, f.link, f.reason, f.finishedAt, companyId, id).changes > 0
+    },
+    setDocBaseline(id, b) {
+      conn.prepare("UPDATE google_drive_puts SET doc_fingerprint = ?, doc_revision = ?, doc_revision_at = ?, doc_baseline_at = ? WHERE company_id = ? AND id = ? AND state = 'done'")
+        .run(b.fingerprint, b.revision, b.revisionAt, b.at, companyId, id)
     },
     dropPut(id) {
       conn.prepare(`DELETE FROM google_drive_puts WHERE company_id = ? AND id = ? AND state = 'sending'`).run(companyId, id)

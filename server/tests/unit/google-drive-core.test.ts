@@ -57,14 +57,17 @@ describe('what may be put', () => {
     for (const bad of ['a/b.pdf', 'a\\b.pdf', '..', 'a\n.pdf', 'a.html', '']) expect('error' in checkDriveFileName(bad, 'pdf'), bad).toBe(true)
   })
 
-  it('a Google document: only from HTML or Markdown; a PDF or HTML as a file; Markdown never as a file (owner 2026-11-11)', () => {
+  it('a Google document: only from HTML or Markdown; every kind as a file — Markdown and text too (owner 2026-11-11, 11-12)', () => {
     expect(drivePutKindOf('報告.md')).toBe('markdown')
     expect(drivePutKindOf('報告.Markdown')).toBe('markdown')
     expect(drivePutForm('markdown', 'google_doc')).toEqual({ kind: 'markdown', as: 'google_doc', uploadMime: 'text/markdown', driveMime: DRIVE_DOC_MIME })
     expect(drivePutForm('html', 'google_doc')).toMatchObject({ uploadMime: 'text/html', driveMime: DRIVE_DOC_MIME })
     expect(drivePutForm('pdf', undefined)).toMatchObject({ uploadMime: 'application/pdf', driveMime: 'application/pdf' })
     expect(drivePutForm('html', 'file')).toMatchObject({ driveMime: 'text/html' })
-    for (const [kind, as] of [['markdown', 'file'], ['markdown', undefined], ['pdf', 'google_doc'], ['docx', 'google_doc'], ['html', 'google_sheet'], ['html', null]]) {
+    expect(drivePutForm('markdown', 'file')).toEqual({ kind: 'markdown', as: 'file', uploadMime: 'text/markdown', driveMime: 'text/markdown' })
+    expect(drivePutForm('text', undefined)).toEqual({ kind: 'text', as: 'file', uploadMime: 'text/plain', driveMime: 'text/plain' })
+    expect(drivePutKindOf('メモ.txt')).toBe('text')
+    for (const [kind, as] of [['text', 'google_doc'], ['pdf', 'google_doc'], ['docx', 'google_doc'], ['html', 'google_sheet'], ['html', null]]) {
       expect(drivePutForm(kind, as), `${kind}/${as}`).toBeNull()
     }
     // A document's name has no extension; the rest of the name rules hold.

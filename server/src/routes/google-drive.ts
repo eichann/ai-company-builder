@@ -226,16 +226,36 @@ const PICKER_SCRIPT = `(function () {
     s.onload = function () {
       window.gapi.load('picker', { callback: function () {
         var P = window.google.picker
-        var view
-        if (cfg.mode === 'folder') {
-          view = new P.DocsView(P.ViewId.FOLDERS).setIncludeFolders(true).setSelectFolderEnabled(true).setMimeTypes('application/vnd.google-apps.folder')
-        } else {
-          view = new P.DocsView(P.ViewId.DOCS).setMimeTypes(cfg.mimeTypes.join(','))
+        var folder = cfg.mode === 'folder'
+        var mimes = folder ? 'application/vnd.google-apps.folder' : cfg.mimeTypes.join(',')
+        // One view per place, each with only the calls that go together (setParent, setEnableDrives and setOwnedByMe
+        // are never combined on one view); the first is the tab the Picker opens on.
+        function place(label) {
+          var v = new P.DocsView(folder ? P.ViewId.FOLDERS : P.ViewId.DOCS).setMimeTypes(mimes).setIncludeFolders(true)
+          if (folder) v = v.setSelectFolderEnabled(true)
+          if (typeof v.setLabel === 'function') v = v.setLabel(label)
+          return v
         }
+        var views = []
         var only = cfg.mode === 'files' && Array.isArray(cfg.fileIds) ? cfg.fileIds.filter(function (id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{10,200}$/.test(id) }).slice(0, 10) : []
-        if (only.length > 0 && view.setFileIds) view.setFileIds(only.join(','))
-        else if (view.setEnableDrives) view.setEnableDrives(true)
-        var b = new P.PickerBuilder().addView(view).setOAuthToken(cfg.accessToken).setDeveloperKey(cfg.apiKey).setAppId(cfg.appId)
+        if (only.length > 0) {
+          // A pasted link: just those files (Google: setFileIds is not combined with setEnableDrives).
+          var picked = new P.DocsView(P.ViewId.DOCS).setMimeTypes(mimes)
+          if (picked.setFileIds) picked.setFileIds(only.join(','))
+          views.push(picked)
+        } else {
+          var mine = place('マイドライブ')
+          if (typeof mine.setParent === 'function') mine = mine.setParent('root')
+          views.push(mine)
+          var drives = place('共有ドライブ')
+          if (typeof drives.setEnableDrives === 'function') drives = drives.setEnableDrives(true)
+          views.push(drives)
+          var withMe = place('共有アイテム')
+          if (typeof withMe.setOwnedByMe === 'function') { withMe = withMe.setOwnedByMe(false); views.push(withMe) }
+        }
+        var b = new P.PickerBuilder()
+        views.forEach(function (v) { b = b.addView(v) })
+        b = b.setOAuthToken(cfg.accessToken).setDeveloperKey(cfg.apiKey).setAppId(cfg.appId)
           .setOrigin(window.location.origin).setLocale('ja').setTitle(cfg.mode === 'folder' ? '置き場所のフォルダを選んでください' : '読ませるファイルを選んでください')
           .setCallback(function (data) {
             if (data.action === P.Action.PICKED) {

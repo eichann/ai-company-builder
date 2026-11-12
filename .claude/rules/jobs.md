@@ -692,7 +692,9 @@ POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }  
   `builtin-connectors.ts`): when the procedure says to update, pass that fileId as `updateFileId` instead of making a
   new file; a refused overwrite (changed in Drive, …) → put a new file and say so in the summary. Every Drive guard
   stays the put route's: the chosen folder only (`DRIVE_FOLDER_NOT_GRANTED`), files of the same job only
-  (`DRIVE_FILE_NOT_THIS_JOB`), `DRIVE_FILE_CHANGED_SINCE`, `keepForever` / `DRIVE_FILE_FIXED` (`google-drive.md`).
+  (`DRIVE_FILE_NOT_THIS_JOB`), `DRIVE_FILE_CHANGED_SINCE`, `DRIVE_FILE_NOT_VERIFIABLE` (a Google document whose state since its put
+  cannot be proven — e.g. every document put before that rule: the first run after it writes a new file), `keepForever` /
+  `DRIVE_FILE_FIXED` (`google-drive.md`).
 - **Reconcile** (`reconcile`): only on a `needs_person` / `expired` occurrence (else 409 `NOT_RETRYABLE`), the body
   `{ done: boolean }` (400), an operation of its PC run whose result is unknown (else 404 `OPERATION_NOT_FOUND`; one
   still marked in flight on a run that no longer runs is made `unknown` first, as a finish does — never stuck); the

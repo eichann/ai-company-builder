@@ -20,7 +20,8 @@ reads the Gemini minutes (ACB's minutes tools), past proposals / notes the membe
 makes the proposal as HTML + PDF locally, and ACB puts it into the Drive folder the member chose.
 Owner decisions 2026-11-01: output stays HTML / PDF (no Slides generation) — 2026-11-11: HTML / Markdown may
 also become a **Google document**, and a file ACB made may be **overwritten as a new revision** ("Google documents
-and overwriting"); a scheduled job may put into one folder its responsible person picked (`jobs.md` "A deliverable
+and overwriting") — 2026-11-12: Markdown and plain text may also be put **as they are** (`.md` / `.txt`, "Markdown and
+text as they are"); a scheduled job may put into one folder its responsible person picked (`jobs.md` "A deliverable
 place outside"); Drive belongs to the
 Google **connector** (connection only) — never a core role, no core 「file storage」 role;
 least privilege: **`drive.file` + Google Picker only, never `drive` / `drive.readonly`**;
@@ -137,6 +138,14 @@ never matches).
   The app's Picker window and `picker-preload.ts` were removed.
 - Unverified against real Google (no real accounts in tests): that Google honours the narrowed
   refresh (if not, Drive picking is refused — safe).
+- **Tabs** (owner report 2026-11-12: a single `FOLDERS` view with `setEnableDrives(true)` opened under 「共有アイテム」 or a
+  flat folder list, not My Drive): the page adds one `DocsView` per place, the first being the tab the Picker opens on —
+  「マイドライブ」 (`setParent('root')`), 「共有ドライブ」 (`setEnableDrives(true)`), 「共有アイテム」 (`setOwnedByMe(false)`,
+  only when the Picker has it) — each with `setIncludeFolders(true)` and the mode's MIME types (folder mode also
+  `setSelectFolderEnabled(true)`), `setLabel` when present. `setParent`, `setEnableDrives` and `setOwnedByMe` are never
+  combined on one view; a pasted link stays one view with `setFileIds` alone. Test 「the Picker opens on My Drive…」.
+  **Unverified against real Google** until the owner tries it: that `setParent('root')` opens My Drive, that `setLabel`
+  names the tabs, and that `setOwnedByMe(false)` shows folders shared with the member in folder mode.
 - Staging: the fake Google serves a stand-in Picker at `<practice origin>/js/api.js`, which the page
   loads in the browser as it would Google's (lists the account's Drive files, marks the click as
   picked — `/__picker/*`; `setFileIds` narrows the list); test 「staging's stand-in Picker…」.
@@ -174,13 +183,14 @@ The AI reads and writes **only** the member's own live picks.
 - `GET /status` → `{ available (Google on + Picker registered), granted, picks }` — the app adds
   the Drive tools only when available. `POST /read { fileId }` (picked file only, else 403
   `DRIVE_NOT_PICKED`): Docs / Slides → text/plain export, Sheets → text/csv, text files as is,
-  marked as outside text (`DRIVE_TEXT_HEADER` / `FOOTER`, `instructionLike` from `outsideTextFlags`;
+  marked as outside text — Markdown as `text/markdown` (ACB's own puts) or `text/x-markdown` (what Drive has reported
+  for an uploaded `.md`) — (`DRIVE_TEXT_HEADER` / `FOOTER`, `instructionLike` from `outsideTextFlags`;
   the text's `【】` → `〔〕`, server and app, `shared/core/outside-text.ts`), ≤ 200 000
   characters; a PDF (≤ 10 MB) as base64 — the app saves it at
   `.personal/google-drive/<id16>-<name>.pdf` (never synced) and returns the path.
-- `POST /put` (act token) `{ folderId, name, kind: pdf|html|markdown, as?: file|google_doc, sha256, contentBase64,
-  requestKey, updateFileId?, recordId? }`: checks in order: form allowlist (`drivePutForm`: a PDF / HTML as a file,
-  HTML / Markdown as a Google document — nothing else) → name (one segment; a file keeps the kind's extension, a
+- `POST /put` (act token) `{ folderId, name, kind: pdf|html|markdown|text, as?: file|google_doc, sha256, contentBase64,
+  requestKey, updateFileId?, recordId? }`: checks in order: form allowlist (`drivePutForm`: a PDF / HTML / Markdown /
+  text as a file, HTML / Markdown as a Google document — nothing else) → name (one segment; a file keeps the kind's extension, a
   document none) → key / sha / `updateFileId` shapes → size → sha256 matches → content (`%PDF-`, UTF-8 without NUL)
   → a scheduled job's run: its one folder (`DRIVE_FOLDER_NOT_GRANTED`, below) → folder is a live folder pick → an
   update's file (below) → **receipt first** (`claimPut`, unique per member + requestKey; same key with
@@ -220,8 +230,8 @@ The AI reads and writes **only** the member's own live picks.
   (act only). `drive_put` reads the local file in main: inside the consultation's company folder
   by name and real location (`PathGuard`), no `.git` segment, not inside a private folder (a
   nested repository on the way, or a readable private folder path — one sentence that never
-  names it), not in a folder left out on this computer, PDF / HTML ≤ 10 MB with the content
-  check (Markdown too, always as a Google document); `requestKey = drivePutRequestKey(folder, name, sha256, { as,
+  names it), not in a folder left out on this computer, PDF / HTML / Markdown / text ≤ 10 MB with the content
+  check (Markdown a Google document unless `as: 'file'`); `requestKey = drivePutRequestKey(folder, name, sha256, { as,
   updateFileId })` (same content, folder, name, form and target → the same key: never two copies of identical
   content; a plain new file keeps the key it always had). **Whether a file is new or updated is only `updateFileId`**,
   and the tool's description says so in both languages (incident 2026-11-10: the AI told a member that the same name
@@ -263,8 +273,50 @@ The AI reads and writes **only** the member's own live picks.
     an inline non-image link `[text](url)` (no title, not inside another bracket); CSS (`<style>`, `style=`), `srcset`,
     `http-equiv` and Markdown reference definitions (`[ref]: …`) are refused outright. 400 `DRIVE_EXTERNAL_RESOURCE` (the
     app says so first). Refused, never rewritten; a plain URL in a report must be written as a link.
-  - **Changed in Drive since ACB's last put** (its head revision / version is not the latest receipt's): 409
-    `DRIVE_FILE_CHANGED_SINCE` — nothing overwritten; put a new file.
+  - **Changed in Drive since ACB's last put**: 409 `DRIVE_FILE_CHANGED_SINCE` — nothing overwritten; put a new file. A
+    file with binary content (PDF, HTML, `.md`, `.txt`): its head revision is not the latest receipt's. A Google
+    document: its text is not what it was ("A Google document's own changes" below) — never its `version`.
+  - **A Google document's own changes** (real Google, 2026-11-12: the owner opened an imported document once and closed
+    it without typing; its 変更履歴 showed one version, the import, yet the update was refused `DRIVE_FILE_CHANGED_SINCE`):
+    Drive's `version` counts every change on the server, "even those not visible to the user" (opening, post-import
+    processing), so it is never used as a "someone edited it" signal. Owner rule: **a person's change is never
+    overwritten**; when in doubt, refuse.
+    - **The baseline** (`google_drive_puts.doc_fingerprint` / `doc_revision` / `doc_revision_at` / `doc_baseline_at`, additive
+      `migrateDrivePutDocFingerprints`; never answered; `DriveDocBaseline`) is taken **only inside the put / update request
+      itself**, right after Drive answered it (`keepDocBaseline`): two `text/plain` exports `ACB_DRIVE_DOC_SETTLE_MS`
+      (default 1.5 s) apart must give the same text (not a stale or half-processed one; each export is tried once more
+      after a failure), the newest revision's id and `modifiedTime` from `revisions.list` (every page), and the file's `modifiedTime` read last
+      must still be the upload answer's (anyone's edit in between moves it; viewing does not). Anything else keeps none.
+      A put found after a lost answer (`reconcile`: a repeat of the request, `GET /puts/:id`, any time later) never gets
+      one — the document may hold a person's edit by then.
+    - **Before an update**, with the member's own `drive.file` token (allowed on a file ACB made; the one `drive()`
+      helper with `GOOGLE_SCOPE.driveFile`): the text export again → its sha256 must equal the baseline's; the newest
+      revision's id **and** `modifiedTime` must be the baseline's (formatting, images, a chart, a suggestion change no text
+      but make a revision — or, merged by Docs into the newest one, move its time: Docs merges one account's edits close
+      together and ACB writes as the member, so the member's bold right after ACB's put lands in ACB's revision); no
+      comment made or changed since the baseline's time (`comments.list` `startModifiedTime`, deleted ones included).
+      Different → 409 `DRIVE_FILE_CHANGED_SINCE` (a comment: its own sentence). **Fails closed** → 409
+      `DRIVE_FILE_NOT_VERIFIABLE` 「…Google Drive で直されていないか確かめられないため、上書きしません。新しいファイルとして置いてください。」,
+      nothing sent: no baseline (every receipt from before this rule, a put found after a lost answer, a baseline not
+      proven), or the export, the revisions or the comments unreadable now.
+    - `text/plain` rather than `text/markdown`: the long-standing export `drive_read` uses, and it carries no image
+      addresses (an export with images names short-lived `googleusercontent` URLs that would differ every time); the
+      revision covers what the text misses. Both are needed: Docs merges edits close together into one revision, so an
+      edit may leave the newest revision id as it was — the text then tells.
+    - Prepared for the next step ("only the writer themself edited since"): the revisions are read in full, so who made
+      the later ones (`lastModifyingUser`) can be asked of the same list.
+    - **To confirm on real Google** (if any is wrong, updates are refused — the safe side):
+      - that a baseline can be taken at all right after a real import: two exports agree, and the file's `modifiedTime`
+        and the newest revision (id and time) have settled by the time ACB reads them (else every document update is
+        `DRIVE_FILE_NOT_VERIFIABLE`);
+      - that `revisions.list` and `comments.list` answer under `drive.file` for a file ACB made;
+      - that opening and closing a document (the owner's case) moves neither the newest revision's id nor its
+        `modifiedTime` (the owner's 変更履歴 showed one version).
+    - **Residual race** (accepted): Drive's `files.update` has no If-Match, so an edit typed between these checks and the
+      write is lost from the document's current text; it stays in the document's own version history (変更履歴).
+    - The fake moves a document's `version` on every export and on `openDriveFile`; `editDriveFile` / `formatDriveFile`
+      add a revision, `editDriveFileMerged` changes the text in the newest one, `commentOnDriveFile` adds a comment;
+      faults `failNextExports`, `staleNextExport`, `editBeforeNextExport`, `failNextFileSearches`. Staging reproduces it.
   - **The replaced revision is kept**: before the update, a binary file's head revision gets `keepForever` (`PATCH
     /drive/v3/files/<id>/revisions/<rev>`, a `drive.file` call); refused or unanswered → 409 `DRIVE_REVISION_NOT_KEPT`,
     nothing overwritten. A Google document's revisions cannot be kept that way (Drive keeps them itself), so **a file a
@@ -276,9 +328,36 @@ The AI reads and writes **only** the member's own live picks.
 - Unverified against real Google (the fake converts and updates in place): that Drive converts `text/markdown` into a
   document (Google added Markdown import in 2024), and that `files.update` with HTML / Markdown media on a Google
   document replaces its content as a new version (the Drive API documents media upload on update for Workspace
-  types); that a converted document's `version` does not move by itself after the answer (else
-  `DRIVE_FILE_CHANGED_SINCE` refuses an honest update — the safe side); that `keepForever` on a revision is answered as
-  the fake does.
+  types); the document baseline's assumptions ("A Google document's own changes": to confirm); that `keepForever` on a
+  revision is answered as the fake does.
+
+## Markdown and text as they are (owner request 2026-11-12)
+
+- `kind: 'markdown', as: 'file'` puts a `.md` file (`text/markdown`), `kind: 'text'` a `.txt` file (`text/plain`;
+  never a Google document) — uploaded with that MIME type in the metadata, so Drive converts nothing. The name keeps the
+  kind's extension (`.md` / `.markdown`, `.txt`). Every other put check holds: the picked folder, a job's one folder
+  (`DRIVE_FOLDER_NOT_GRANTED`), the outside-sharing refusals, the size and content checks (UTF-8 without NUL).
+- **Which form** (the tool's description and `DRIVE_INSTRUCTIONS`, both languages): Markdown without `as` is a Google
+  document (a report people read and edit; the app sends `as: 'google_doc'`); the AI passes `as: 'file'` when the member
+  asks for `.md` / Markdown as it is, or the file is material for an AI or a Skill to read later, and never says a `.md`
+  cannot be put. The API's own default (`as` absent) stays `file` for every kind.
+- **Overwriting** keeps the form: `DRIVE_UPDATE_KIND_MISMATCH` compares the receipt's `mimeType` (a document's is the
+  Docs type, a `.md`'s `text/markdown`, a `.txt`'s `text/plain`), so a document and a `.md` never replace each other.
+  A `.md` / `.txt` is a binary file in Drive's terms: it has a `headRevisionId`, which is kept forever before it is
+  replaced (`DRIVE_REVISION_NOT_KEPT`), and `DRIVE_FILE_CHANGED_SINCE` applies as for a PDF.
+- **No outside-resource check** (`driveDocFetchesOutside`) for a file put as is (PDF / HTML already were not): it exists
+  because Drive's conversion into a document fetches images and stylesheets; a file is stored as its bytes and Drive's
+  preview shows Markdown and text as text, so nothing is fetched. Material for an AI is full of URLs, which the
+  allowlist would refuse. A program that later renders the downloaded file is the reader's own act.
+- A scheduled job's deliverable stays a Google document (`jobDeliveryHowTo` says `as: "google_doc"`); the server does
+  not force it (as for a PDF), so a job's AI could put a `.md` if its procedure asked for one.
+- Unverified against real Google: that Drive keeps the metadata's `text/markdown` as the file's `mimeType` (if it
+  reported another type, an overwrite would be refused `DRIVE_FILE_REFUSED` — the safe side).
+- Staging: the fake's seed has a `text/x-markdown` file (`GOOGLE_SEED.salesNotesMd`, 「営業の型.md」) to pick and read.
+- Test (`google-drive.test.ts` 「Markdown and text as they are」, mutation-checked): a `.md` / `.txt` put as is, names and
+  content refused, the same folder rules, kind mismatch both ways (and text onto `.md`) refused before Google is asked,
+  `keepForever` before an overwrite and its refusal, changed since, a picked `.md` read (both MIME types); app
+  (`google-drive-tools.test.ts`): `as: 'file'` keeps a `.md`, a `.txt` never a document, the description's guidance.
 
 ## Linked to a record (a company without the shared folder; `records.md` "File links without the shared folder")
 

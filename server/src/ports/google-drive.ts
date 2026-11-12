@@ -39,6 +39,27 @@ export interface DrivePutRow {
   skills: SkillUse[] | null
   /** The Drive file this put gave a new revision (a file an earlier put of the member made); null: it made a new file. */
   updatedFileId: string | null
+  /**
+   * A Google document only: what it was right after this put made or updated it, proven to be ACB's own (google-drive.md
+   * "A Google document's own changes") — what an overwrite compares with, since a document's `version` moves without an
+   * edit. Null: not a document, a put found after a lost answer, or the baseline could not be proven.
+   */
+  docBaseline: DriveDocBaseline | null
+}
+
+/** A Google document as ACB left it: its text, its newest revision and when (the upload's `modifiedTime`). */
+export interface DriveDocBaseline {
+  /** sha256 of its `text/plain` export (BOM / CRLF cleaned). */
+  fingerprint: string
+  /** The id of its newest revision (`revisions.list`): any change of content, formatting or images makes a new one. */
+  revision: string
+  /**
+   * That revision's `modifiedTime`: Docs merges edits made close together by the same account into one revision (ACB
+   * writes with the member's own token), so a change merged into ACB's revision keeps its id but moves this.
+   */
+  revisionAt: string
+  /** The upload's `modifiedTime`: comments made or changed after it are someone's. */
+  at: string
 }
 
 /**
@@ -96,6 +117,8 @@ export interface GoogleDriveRepository {
   settlePut(id: string, fields: Pick<DrivePutRow, 'state' | 'fileId' | 'revisionId' | 'link' | 'reason' | 'finishedAt'>): boolean
   /** Removes a put still in `sending` (refused: nothing was made; its key is free again). */
   dropPut(id: string): void
+  /** Keeps a done put's document baseline (read right after the put). */
+  setDocBaseline(id: string, baseline: DriveDocBaseline): void
 
   createPickTicket(row: DrivePickTicketRow): void
   /** A ticket by the sha256 of its value (the Picker page's own request; no member known yet). */

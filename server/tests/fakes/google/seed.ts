@@ -175,6 +175,8 @@ export const GOOGLE_SEED = {
   pastProposalDoc: 'fake-doc-past-proposal-0001',
   pastProposalSlides: 'fake-slides-past-proposal-0001',
   handNotesPdf: 'fake-pdf-hand-notes-0001',
+  /** A Markdown file 佐藤 uploaded to Drive himself (material for an AI): Drive reports `.md` uploads as `text/x-markdown`. */
+  salesNotesMd: 'fake-md-sales-notes-0001',
   // Sheets (the relay): a practice coefficient table 佐藤 edits, and a budget he may only read.
   practiceSheet: 'fakesheet-keisu-practice-0000000000000000001',
   readOnlySheet: 'fakesheet-budget-readonly-000000000000000002',
@@ -332,6 +334,10 @@ export function defaultGoogleSeed(): GoogleSeed {
     {
       id: S.handNotesPdf, name: '手書きメモ.pdf', mimeType: 'application/pdf', owner: S.member, readers: [S.member],
       content: '%PDF-1.4\n% fake hand-written notes\n%%EOF\n', permissions: [owner(S.member)],
+    },
+    {
+      id: S.salesNotesMd, name: '営業の型.md', mimeType: 'text/x-markdown', owner: S.member, readers: [S.member],
+      content: '# 営業の型\n\n- 最初に課題を聞く\n- [参考](https://example.com/ref)\n', permissions: [owner(S.member)],
     },
   ]
   const mails: SeedMail[] = [

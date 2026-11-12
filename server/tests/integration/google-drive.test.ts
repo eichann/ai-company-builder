@@ -119,7 +119,7 @@ beforeAll(async () => {
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   Object.assign(process.env, {
-    BROKER_KEK_FILE: join(kekDir, 'kek'), PUBLIC_URL: PUBLIC, ACB_ALLOW_FAKE_UPSTREAMS: '1',
+    BROKER_KEK_FILE: join(kekDir, 'kek'), PUBLIC_URL: PUBLIC, ACB_ALLOW_FAKE_UPSTREAMS: '1', ACB_DRIVE_DOC_SETTLE_MS: '0',
     ACB_FAKE_GOOGLE_URL: `http://127.0.0.1:${(googleServer.address() as AddressInfo).port}`,
   })
   for (const level of ['log', 'warn', 'error', 'info'] as const) {
@@ -158,7 +158,7 @@ afterAll(async () => {
   google.close()
   await new Promise(r => googleServer.close(r))
   rmSync(kekDir, { recursive: true, force: true })
-  for (const k of ['BROKER_KEK_FILE', 'PUBLIC_URL', 'ACB_ALLOW_FAKE_UPSTREAMS', 'ACB_FAKE_GOOGLE_URL']) delete process.env[k]
+  for (const k of ['BROKER_KEK_FILE', 'PUBLIC_URL', 'ACB_ALLOW_FAKE_UPSTREAMS', 'ACB_FAKE_GOOGLE_URL', 'ACB_DRIVE_DOC_SETTLE_MS']) delete process.env[k]
 })
 
 describe('the Picker registration (admin)', () => {
@@ -564,6 +564,8 @@ describe('Google documents and overwriting a file ACB made (google-drive.md "Goo
     ...putBody({ name: '面談報告書.md', kind: 'markdown', as: 'google_doc' }, content), ...over,
   })
   const rows = () => db.prepare('SELECT COUNT(*) AS n FROM google_drive_puts WHERE company_id = ?').get(CO).n as number
+  // A document's `version` moves by itself (the fake reproduces it), so "never sent again" counts ACB's updates instead.
+  const updates = (fileId: string) => google.requests.filter(r => r.method === 'PATCH' && r.path === `/upload/drive/v3/files/${fileId}`).length
 
   it('HTML or Markdown becomes a Google document (no extension in its name, its version as the revision); other forms refused', async () => {
     const token = await tokenFor('m-sato', 'act')
@@ -577,9 +579,9 @@ describe('Google documents and overwriting a file ACB made (google-drive.md "Goo
     expect(html.body.data.drivePut).toMatchObject({ state: 'done', name: '週報', mimeType: DOC })
     expect(google.driveFile(html.body.data.drivePut.fileId)!.uploadedAs).toBe('text/html')
     const before = google.uploads().length
-    // Markdown only as a document; a PDF is never converted; an unknown form; Markdown that is not text.
-    expect((await ai(token, 'POST', '/put', { ...docBody(), as: 'file' })).body.code).toBe('DRIVE_TYPE_REFUSED')
+    // A PDF or text is never converted; an unknown form; Markdown that is not text.
     expect((await ai(token, 'POST', '/put', putBody({ as: 'google_doc' }))).body.code).toBe('DRIVE_TYPE_REFUSED')
+    expect((await ai(token, 'POST', '/put', { ...putBody({ name: 'メモ.txt' }, Buffer.from('メモ\n')), kind: 'text', as: 'google_doc' })).body.code).toBe('DRIVE_TYPE_REFUSED')
     expect((await ai(token, 'POST', '/put', docBody({ as: 'google_sheet' }))).body.code).toBe('DRIVE_TYPE_REFUSED')
     expect((await ai(token, 'POST', '/put', docBody({}, Buffer.from([0x23, 0x00, 0x41])))).body.code).toBe('DRIVE_CONTENT_REFUSED')
     expect(google.uploads()).toHaveLength(before)
@@ -594,16 +596,16 @@ describe('Google documents and overwriting a file ACB made (google-drive.md "Goo
     const r = await ai(token, 'POST', '/put', body)
     expect(r.status, r.text).toBe(200)
     expect(r.body.data.existing).toBe(false)
-    expect(r.body.data.drivePut).toMatchObject({ state: 'done', fileId: first.fileId, link: first.link, revisionId: 'version:2', updatedFileId: first.fileId, name: '上書きする', sha256: sha(edited) })
+    expect(r.body.data.drivePut).toMatchObject({ state: 'done', fileId: first.fileId, link: first.link, revisionId: expect.stringMatching(/^version:\d+$/), updatedFileId: first.fileId, name: '上書きする', sha256: sha(edited) })
     const file = google.driveFile(first.fileId)!
     expect(file.content.equals(edited)).toBe(true)
-    expect(file.version).toBe(2)
+    expect(updates(first.fileId)).toBe(1)
     expect(file.appProperties.acbPutId).toBe(r.body.data.drivePut.id)
     expect(google.uploads()).toHaveLength(uploads)
     // A repeat of that request (a lost connection): the same answer, nothing sent again.
     const again = await ai(token, 'POST', '/put', body)
     expect(again.body.data).toMatchObject({ existing: true, drivePut: { id: r.body.data.drivePut.id } })
-    expect(google.driveFile(first.fileId)!.version).toBe(2)
+    expect(updates(first.fileId)).toBe(1)
     // The same key for a new file instead (no target) is another request: refused.
     expect((await ai(token, 'POST', '/put', { ...body, updateFileId: undefined })).body.code).toBe('DRIVE_PUT_KEY_REUSED')
     // Without updateFileId edited content is a new file (what the tool says).
@@ -640,7 +642,7 @@ describe('Google documents and overwriting a file ACB made (google-drive.md "Goo
     }
     expect(google.requests.length).toBe(calls)
     expect(rows()).toBe(kept)
-    expect(google.driveFile(doc.fileId)!.version).toBe(1)
+    expect(updates(doc.fileId)).toBe(0)
   })
 
   it('the file shared outside by itself, or moved out of the folder: refused for the AI, nothing sent, the receipt gone', async () => {
@@ -654,7 +656,7 @@ describe('Google documents and overwriting a file ACB made (google-drive.md "Goo
     expect([out.status, out.body.code]).toEqual([403, 'DRIVE_FILE_SHARED_OUTSIDE'])
     const away = await ai(token, 'POST', '/put', docBody({ updateFileId: moved.fileId }, Buffer.from('# 直した\n')))
     expect([away.status, away.body.code]).toEqual([403, 'DRIVE_FILE_REFUSED'])
-    expect([google.driveFile(shared.fileId)!.version, google.driveFile(moved.fileId)!.version]).toEqual([1, 1])
+    expect([updates(shared.fileId), updates(moved.fileId)]).toEqual([0, 0])
     expect(rows()).toBe(kept)
   })
 
@@ -664,9 +666,13 @@ describe('Google documents and overwriting a file ACB made (google-drive.md "Goo
     google.faults.dropAnswerAfterSend(1)
     const body = docBody({ name: '答えが消える.md', updateFileId: first.fileId }, Buffer.from('# 二版目\n'))
     const r = await ai(token, 'POST', '/put', body)
-    expect(r.body.data.drivePut).toMatchObject({ state: 'done', reason: 'found-by-correlation', fileId: first.fileId, revisionId: 'version:2' })
+    expect(r.body.data.drivePut).toMatchObject({ state: 'done', reason: 'found-by-correlation', fileId: first.fileId })
     expect((await ai(token, 'POST', '/put', body)).body.data.existing).toBe(true)
-    expect(google.driveFile(first.fileId)!.version).toBe(2)
+    expect(updates(first.fileId)).toBe(1)
+    // Found after a lost answer, its text now may not be ACB's: no fingerprint, so the next update is not verifiable.
+    const third = await ai(token, 'POST', '/put', docBody({ name: '答えが消える.md', updateFileId: first.fileId }, Buffer.from('# 三版目\n')))
+    expect([third.status, third.body.code]).toEqual([409, 'DRIVE_FILE_NOT_VERIFIABLE'])
+    expect(updates(first.fileId)).toBe(1)
   })
 
   it('a consultation\'s task: the link follows the newest revision (one link, its revision and sha256 replaced, said in 経緯)', async () => {
@@ -682,13 +688,102 @@ describe('Google documents and overwriting a file ACB made (google-drive.md "Goo
       const second = await ai(token, 'POST', '/put', { ...docBody({ name: 'つながる報告書.md', updateFileId: fileId }, edited), recordId: id })
       expect(second.body.data.linkedTo).toEqual({ recordId: id })
       const links = ((await person('m-sato', 'GET', `/records/item/${id}`)).body.data.links as Json[]).filter(l => l.drive).map(l => l.drive)
-      expect(links).toEqual([expect.objectContaining({ fileId, mine: true, revisionId: 'version:2', sha256: sha(edited) })])
+      expect(links).toEqual([expect.objectContaining({ fileId, mine: true, revisionId: second.body.data.drivePut.revisionId, sha256: sha(edited) })])
+      expect(second.body.data.drivePut.revisionId).not.toBe(first.body.data.drivePut.revisionId)
       const entries = ((await person('m-sato', 'GET', `/records/item/${id}/history`)).body.data.entries as Json[]).filter(e => e.action === 'link_file')
       expect(entries).toHaveLength(2)
       expect(entries.some(e => /新しい版につなぎ直しました/.test(e.note))).toBe(true)
     } finally {
       db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
     }
+  })
+})
+
+describe('Markdown and text as they are (google-drive.md "Markdown and text as they are")', () => {
+  const MD_MIME = 'text/markdown'
+  const NOTES = Buffer.from('# 営業の型（AI に読ませる資料）\n\n- 課題を先に聞く\n- 参考: https://example.com/ref\n![図](https://example.com/x.png)\n')
+  const mdBody = (over: Record<string, unknown> = {}, content: Buffer = NOTES) => ({
+    ...putBody({ name: '営業の型.md', kind: 'markdown' }, content), ...over,
+  })
+  const docBody = (over: Record<string, unknown> = {}) => ({
+    ...putBody({ name: '報告.md', kind: 'markdown', as: 'google_doc' }, Buffer.from('# 報告\n')), ...over,
+  })
+
+  it('a .md file kept as Markdown (no conversion, its name with .md); a .txt file as text; the extension must be the kind\'s', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const md = await ai(token, 'POST', '/put', mdBody({ as: 'file' }))
+    expect(md.status, md.text).toBe(200)
+    expect(md.body.data.drivePut).toMatchObject({ state: 'done', name: '営業の型.md', mimeType: MD_MIME, sha256: sha(NOTES) })
+    expect(md.body.data.drivePut.revisionId).toMatch(/^rev-/)
+    const made = google.driveFile(md.body.data.drivePut.fileId)!
+    // Kept as the bytes uploaded: Drive converts nothing (and so fetches nothing — the URLs in it are only text).
+    expect([made.mimeType, made.uploadedAs, made.name]).toEqual([MD_MIME, null, '営業の型.md'])
+    expect(made.content.equals(NOTES)).toBe(true)
+    // `as` left out is a file too (the API's default; the app sends google_doc when it wants a document).
+    expect((await ai(token, 'POST', '/put', mdBody({ name: '既定.md' }))).body.data.drivePut).toMatchObject({ state: 'done', mimeType: MD_MIME })
+    const TXT = Buffer.from('打ち合わせメモ\n')
+    const txt = await ai(token, 'POST', '/put', { ...putBody({ name: 'メモ.txt' }, TXT), kind: 'text' })
+    expect(txt.body.data.drivePut).toMatchObject({ state: 'done', name: 'メモ.txt', mimeType: 'text/plain' })
+    expect(google.driveFile(txt.body.data.drivePut.fileId)!.mimeType).toBe('text/plain')
+    const before = google.uploads().length
+    expect((await ai(token, 'POST', '/put', mdBody({ name: '営業の型.txt' }))).body.code).toBe('DRIVE_NAME_REFUSED')
+    expect((await ai(token, 'POST', '/put', { ...putBody({ name: 'メモ.md' }, TXT), kind: 'text' })).body.code).toBe('DRIVE_NAME_REFUSED')
+    expect((await ai(token, 'POST', '/put', { ...putBody({ name: 'メモ.txt' }, Buffer.from([0x41, 0x00])), kind: 'text' })).body.code).toBe('DRIVE_CONTENT_REFUSED')
+    expect(google.uploads()).toHaveLength(before)
+  })
+
+  it('the same folder rules: a picked folder only, never one seen outside the company', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const before = google.uploads().length
+    expect((await ai(token, 'POST', '/put', mdBody({ folderId: GOOGLE_SEED.pastProposalDoc }))).body.code).toBe('DRIVE_FOLDER_NOT_PICKED')
+    expect((await ai(token, 'POST', '/put', mdBody({ folderId: GOOGLE_SEED.sharedOutsideFolder }))).body.code).toBe('DRIVE_FOLDER_SHARED_OUTSIDE')
+    expect(google.uploads()).toHaveLength(before)
+  })
+
+  it('overwriting a .md file: only by a .md file (a document and a .md never replace each other); its head revision kept forever first', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const md = (await ai(token, 'POST', '/put', mdBody({ name: '上書きする型.md' }))).body.data.drivePut
+    const doc = (await ai(token, 'POST', '/put', docBody({ name: '上書きする報告.md' }))).body.data.drivePut
+    const calls = google.requests.length
+    // A document's content onto the .md file, and a .md file's onto the document: refused before Google is asked.
+    expect((await ai(token, 'POST', '/put', docBody({ updateFileId: md.fileId }))).body.code).toBe('DRIVE_UPDATE_KIND_MISMATCH')
+    expect((await ai(token, 'POST', '/put', mdBody({ updateFileId: doc.fileId }))).body.code).toBe('DRIVE_UPDATE_KIND_MISMATCH')
+    // Nor a text file onto the .md.
+    expect((await ai(token, 'POST', '/put', { ...putBody({ name: 'x.txt' }, Buffer.from('x\n')), kind: 'text', updateFileId: md.fileId })).body.code).toBe('DRIVE_UPDATE_KIND_MISMATCH')
+    expect(google.requests.length).toBe(calls)
+    // A new .md version: the same file and link, the replaced head revision kept forever before.
+    const edited = Buffer.from('# 営業の型（二版）\n')
+    const u = await ai(token, 'POST', '/put', mdBody({ name: '上書きする型.md', updateFileId: md.fileId }, edited))
+    expect(u.body.data.drivePut, u.text).toMatchObject({ state: 'done', fileId: md.fileId, link: md.link, updatedFileId: md.fileId, mimeType: MD_MIME, name: '上書きする型.md' })
+    const file = google.driveFile(md.fileId)!
+    expect(file.content.equals(edited)).toBe(true)
+    expect(file.keptRevisions).toEqual([md.revisionId])
+    expect(u.body.data.drivePut.revisionId).not.toBe(md.revisionId)
+    // Drive does not keep it: nothing overwritten.
+    const other = (await ai(token, 'POST', '/put', mdBody({ name: '残せない型.md' }))).body.data.drivePut
+    google.refuseKeepForever(other.fileId)
+    const refused = await ai(token, 'POST', '/put', mdBody({ name: '残せない型.md', updateFileId: other.fileId }, edited))
+    expect([refused.status, refused.body.code]).toEqual([409, 'DRIVE_REVISION_NOT_KEPT'])
+    expect(google.driveFile(other.fileId)!.content.equals(NOTES)).toBe(true)
+    // Changed in Drive since ACB's put: never written over.
+    const third = (await ai(token, 'POST', '/put', mdBody({ name: '人が直す型.md' }))).body.data.drivePut
+    google.editDriveFile(third.fileId, '# 人が直した\n')
+    expect((await ai(token, 'POST', '/put', mdBody({ name: '人が直す型.md', updateFileId: third.fileId }, edited))).body.code).toBe('DRIVE_FILE_CHANGED_SINCE')
+    expect(google.driveFile(third.fileId)!.content.toString()).toBe('# 人が直した\n')
+  })
+
+  it('a picked Markdown file is read as outside text, as written (text/x-markdown from Drive, text/markdown from ACB\'s own put)', async () => {
+    const put = (await ai(await tokenFor('m-sato', 'act'), 'POST', '/put', mdBody({ name: '読ませる型.md' }))).body.data.drivePut
+    google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.salesNotesMd, put.fileId])
+    const picked = await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'files', ids: [GOOGLE_SEED.salesNotesMd, put.fileId] })
+    expect(picked.body.data, picked.text).toMatchObject({ refused: 0 })
+    const token = await tokenFor('m-sato', 'read')
+    const seeded = await ai(token, 'POST', '/read', { fileId: GOOGLE_SEED.salesNotesMd })
+    expect(seeded.status, seeded.text).toBe(200)
+    expect(seeded.body.data).toMatchObject({ text: '# 営業の型\n\n- 最初に課題を聞く\n- [参考](https://example.com/ref)\n', pdfBase64: null })
+    expect(seeded.body.data.header).toContain('外から来た文')
+    const own = await ai(token, 'POST', '/read', { fileId: put.fileId })
+    expect(own.body.data.text).toBe(NOTES.toString())
   })
 })
 
@@ -743,6 +838,135 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     expect(google.driveFile(other.fileId)!.version).toBe(1)
     expect(google.driveFile(other.fileId)!.content.equals(PDF)).toBe(true)
     expect(db.prepare('SELECT COUNT(*) AS n FROM google_drive_puts WHERE company_id = ?').get(CO).n).toBe(rowsBefore)
+  })
+
+  // A document's baseline (google-drive.md "A Google document's own changes"), read in the test from the receipt's columns.
+  const baseline = (putId: string) => db.prepare('SELECT doc_fingerprint AS fingerprint, doc_revision AS revision, doc_revision_at AS revisionAt, doc_baseline_at AS at FROM google_drive_puts WHERE company_id = ? AND id = ?').get(CO, putId) as Json
+  const patches = () => google.requests.filter(r => r.method === 'PATCH' && r.path.startsWith('/upload/drive/v3/files/')).length
+  const NEXT = Buffer.from('# 次の版\n')
+  /** An update that must be refused with `code`, nothing written to Drive and the document's text still `text`. */
+  async function refusedUpdate(token: string, name: string, fileId: string, code: string, text: string) {
+    const before = patches()
+    const r = await ai(token, 'POST', '/put', docBody(NEXT, { name, updateFileId: fileId }))
+    expect([r.status, r.body.code], r.text).toEqual([409, code])
+    expect(patches()).toBe(before)
+    expect(google.driveFile(fileId)!.content.toString()).toBe(text)
+    return r
+  }
+
+  it('a Google document opened without an edit (its version moved) is overwritten; its baseline is the text, the newest revision and the upload\'s time', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    // Real Google (2026-11-12): the owner opened the document once and closed it; its version moved, nothing was edited.
+    const doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 開いただけ\n'), { name: '開いただけ.md' }))).body.data.drivePut
+    const kept = baseline(doc.id)
+    expect(kept.fingerprint).toMatch(/^[0-9a-f]{64}$/)
+    expect(kept.revision).toBe(google.driveFile(doc.fileId)!.headRevisionId)
+    expect(kept.revisionAt).toMatch(/^\d{4}-/)
+    expect(kept.at).toMatch(/^\d{4}-/)
+    google.openDriveFile(doc.fileId)
+    expect(`version:${google.driveFile(doc.fileId)!.version}`).not.toBe(doc.revisionId)
+    const u = await ai(token, 'POST', '/put', docBody(NEXT, { name: '開いただけ.md', updateFileId: doc.fileId }))
+    expect(u.body.data?.drivePut, u.text).toMatchObject({ state: 'done', fileId: doc.fileId, updatedFileId: doc.fileId })
+    expect(google.driveFile(doc.fileId)!.content.equals(NEXT)).toBe(true)
+    // The update's own receipt gets a baseline too: the next update compares with it (the version moved again meanwhile).
+    google.openDriveFile(doc.fileId)
+    const third = Buffer.from('# 開いただけ（三版）\n')
+    expect((await ai(token, 'POST', '/put', docBody(third, { name: '開いただけ.md', updateFileId: doc.fileId }))).body.data?.drivePut.state).toBe('done')
+    // A file with binary content keeps its head revision as the signal: no document baseline.
+    const md = (await ai(token, 'POST', '/put', { ...putBody({ name: '版で見る.md' }, Buffer.from('# a\n')), kind: 'markdown', as: 'file' })).body.data.drivePut
+    expect(baseline(md.id).fingerprint).toBeNull()
+  })
+
+  it('a person\'s change is never overwritten: new text, a change of look only (a new revision), a comment', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const edited = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 文\n'), { name: '文が変わる.md' }))).body.data.drivePut
+    google.editDriveFile(edited.fileId, '# 人が直した文\n')
+    await refusedUpdate(token, '文が変わる.md', edited.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 人が直した文\n')
+    // An edit Docs merged into the newest revision (no new revision id): the text tells.
+    const merged = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 文\n'), { name: '同じ版に混ざる.md' }))).body.data.drivePut
+    google.editDriveFileMerged(merged.fileId, '# 同じ版に混ざった直し\n')
+    await refusedUpdate(token, '同じ版に混ざる.md', merged.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 同じ版に混ざった直し\n')
+    // Bold, an image, a chart, a suggestion: the text export is the same, the newest revision is not.
+    const styled = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 見た目\n'), { name: '見た目が変わる.md' }))).body.data.drivePut
+    google.formatDriveFile(styled.fileId)
+    await refusedUpdate(token, '見た目が変わる.md', styled.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 見た目\n')
+    // The member's bold soon after ACB's put, merged by Docs into ACB's own revision: the same id and text, a later time.
+    const bolded = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 太字\n'), { name: '同じ版で太字.md' }))).body.data.drivePut
+    const revBefore = baseline(bolded.id).revision
+    google.formatDriveFileMerged(bolded.fileId)
+    expect(google.driveFile(bolded.fileId)!.headRevisionId).toBe(revBefore)
+    await refusedUpdate(token, '同じ版で太字.md', bolded.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# 太字\n')
+    // A comment changes neither the text nor the revisions.
+    const commented = (await ai(token, 'POST', '/put', docBody(Buffer.from('# コメント\n'), { name: 'コメントが付く.md' }))).body.data.drivePut
+    google.commentOnDriveFile(commented.fileId)
+    const r = await refusedUpdate(token, 'コメントが付く.md', commented.fileId, 'DRIVE_FILE_CHANGED_SINCE', '# コメント\n')
+    expect(r.body.error).toContain('コメント')
+  })
+
+  it('not verifiable → never overwritten (「確かめられないため」): no baseline kept, an export or the revisions unreadable now', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    // A receipt from before baselines.
+    const old = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 前の控え\n'), { name: '前の控え.md' }))).body.data.drivePut
+    db.prepare('UPDATE google_drive_puts SET doc_fingerprint = NULL, doc_revision = NULL, doc_revision_at = NULL, doc_baseline_at = NULL WHERE company_id = ? AND id = ?').run(CO, old.id)
+    const r = await refusedUpdate(token, '前の控え.md', old.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 前の控え\n')
+    expect(r.body.error).toContain('確かめられないため')
+    expect(r.body.error).not.toContain('直されています')
+    expect(r.body.error).toContain('新しいファイルとして置いてください')
+    // Drive refuses the export now (or it is too large).
+    const unreadable = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 読めない\n'), { name: '読めない.md' }))).body.data.drivePut
+    google.faults.refuseExport(unreadable.fileId, 'exportSizeLimitExceeded')
+    await refusedUpdate(token, '読めない.md', unreadable.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 読めない\n')
+    // The export now fails twice (the retry too).
+    const flaky = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 落ちる\n'), { name: '落ちる.md' }))).body.data.drivePut
+    google.faults.failNextExports(2)
+    await refusedUpdate(token, '落ちる.md', flaky.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 落ちる\n')
+    // The revisions cannot be read now.
+    const norevs = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 履歴\n'), { name: '履歴が読めない.md' }))).body.data.drivePut
+    google.faults.failOn(`/drive/v3/files/${norevs.fileId}/revisions`, 1, 403)
+    await refusedUpdate(token, '履歴が読めない.md', norevs.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 履歴\n')
+    // The comments cannot be read now.
+    const nocomments = (await ai(token, 'POST', '/put', docBody(Buffer.from('# コメント欄\n'), { name: 'コメントが読めない.md' }))).body.data.drivePut
+    google.faults.failOn(`/drive/v3/files/${nocomments.fileId}/comments`, 1, 403)
+    await refusedUpdate(token, 'コメントが読めない.md', nocomments.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# コメント欄\n')
+  })
+
+  it('the baseline right after the put: kept only when provably ACB\'s — a failed export tried once more, a stale export or an edit in between keeps none', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    // One failed export right after the put: tried once more, the baseline kept.
+    google.faults.failNextExports(1)
+    const retried = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 一度落ちる\n'), { name: '一度落ちる.md' }))).body.data.drivePut
+    expect(baseline(retried.id).fingerprint).toMatch(/^[0-9a-f]{64}$/)
+    // The export after the write fails (and its retry): no baseline, the next update is not verifiable.
+    google.faults.failNextExports(2)
+    const failed = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 控えなし\n'), { name: '控えなし.md' }))).body.data.drivePut
+    expect(failed.state).toBe('done')
+    expect(baseline(failed.id).fingerprint).toBeNull()
+    await refusedUpdate(token, '控えなし.md', failed.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 控えなし\n')
+    // The first read shows Drive still processing (another text than the second): no baseline.
+    google.faults.staleNextExport('')
+    const stale = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 処理中\n'), { name: '処理中.md' }))).body.data.drivePut
+    expect(baseline(stale.id).fingerprint).toBeNull()
+    // Someone edits between the upload's answer and the reads: their text is never taken for ACB's.
+    google.faults.editBeforeNextExport('# 誰かが直した\n')
+    const raced = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 競う\n'), { name: '競う.md' }))).body.data.drivePut
+    expect(baseline(raced.id).fingerprint).toBeNull()
+    await refusedUpdate(token, '競う.md', raced.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 誰かが直した\n')
+  })
+
+  it('an update whose answer was lost, found later after someone edited the document: no baseline from that reading — the next overwrite is refused', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 一版\n'), { name: '答えが消えた報告.md' }))).body.data.drivePut
+    // The update's answer is lost and the lookup at once fails too: the receipt stays unknown.
+    google.faults.dropAnswerAfterSend(1)
+    google.faults.failNextFileSearches(1)
+    const lost = await ai(token, 'POST', '/put', docBody(Buffer.from('# 二版\n'), { name: '答えが消えた報告.md', updateFileId: doc.fileId }))
+    expect(lost.body.data?.drivePut, lost.text).toMatchObject({ state: 'unknown' })
+    // The next day a person edits the document; then the app reads the put back and it is found.
+    google.editDriveFile(doc.fileId, '# 人が次の日に直した\n')
+    const found = await ai(token, 'GET', `/puts/${lost.body.data.drivePut.id}`)
+    expect(found.body.data.drivePut).toMatchObject({ state: 'done', reason: 'found-by-correlation' })
+    expect(baseline(lost.body.data.drivePut.id).fingerprint).toBeNull()
+    await refusedUpdate(token, '答えが消えた報告.md', doc.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 人が次の日に直した\n')
   })
 
   it('a file a decision or an attachment rests on is never overwritten (Google not asked)', async () => {
@@ -1092,15 +1316,23 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     const posted: Array<{ path: string; body: Json; keepalive: boolean }> = []
     const listeners: Record<string, Array<() => void>> = {}
     const msg = { textContent: '' }
-    const view = {
-      setMimeTypes: (v: unknown) => { calls.push(['setMimeTypes', v]); return view },
-      setIncludeFolders: () => view, setSelectFolderEnabled: () => view,
-      setEnableDrives: (v: unknown) => { calls.push(['setEnableDrives', v]); return view },
-      setFileIds: (v: unknown) => { calls.push(['setFileIds', v]); return view },
+    // Every DocsView the page makes, with its own calls; `added` = the views in the order they were added (the first is
+    // the tab the Picker opens on).
+    type View = { viewId: unknown; calls: Array<[string, unknown]> } & Record<string, unknown>
+    const views: View[] = []
+    const added: View[] = []
+    function DocsView(viewId: unknown) {
+      const view: View = { viewId, calls: [] }
+      for (const m of ['setMimeTypes', 'setIncludeFolders', 'setSelectFolderEnabled', 'setEnableDrives', 'setFileIds', 'setParent', 'setLabel', 'setOwnedByMe']) {
+        view[m] = (v: unknown) => { view.calls.push([m, v]); if (m !== 'setIncludeFolders' && m !== 'setSelectFolderEnabled' && m !== 'setParent' && m !== 'setLabel' && m !== 'setOwnedByMe') calls.push([m, v]); return view }
+      }
+      views.push(view)
+      return view
     }
     let callback: (data: unknown) => void = () => {}
     const builder: Record<string, unknown> = {}
-    for (const m of ['addView', 'setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle', 'enableFeature']) builder[m] = () => builder
+    for (const m of ['setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle', 'enableFeature']) builder[m] = () => builder
+    builder.addView = (v: View) => { added.push(v); return builder }
     builder.setOAuthToken = (t: unknown) => { calls.push(['token', t]); return builder }
     builder.setMaxItems = (n: unknown) => { calls.push(['maxItems', n]); return builder }
     builder.setAuthUser = (u: unknown) => { calls.push(['authUser', u]); return builder }
@@ -1120,13 +1352,13 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
         return new Response(res.text, { status: res.status })
       },
       gapi: { load: (_n: string, o: { callback: () => void }) => o.callback() },
-      google: { picker: { DocsView: function () { return view }, PickerBuilder: function () { return builder }, ViewId: {}, Action: { PICKED: 'picked', CANCEL: 'cancel' }, Feature: {} } },
+      google: { picker: { DocsView, PickerBuilder: function () { return builder }, ViewId: { DOCS: 'docs', FOLDERS: 'folders' }, Action: { PICKED: 'picked', CANCEL: 'cancel' }, Feature: {} } },
     }
     const document = { getElementById: () => msg, createElement: () => ({}), head }
     runInNewContext(script, { window, document })
     const settled = () => /アプリに戻って|始められません|使えません/.test(msg.textContent) || (!opts.answer && calls.some(c => c[0] === 'visible'))
     for (let i = 0; i < 100 && !settled(); i++) await new Promise(res => setTimeout(res, 10))
-    return { calls, posted, msg: () => msg.textContent, csp: r.headers.get('content-security-policy') ?? '', script, leave: () => { for (const fn of listeners.pagehide ?? []) fn() } }
+    return { calls, posted, views, added, msg: () => msg.textContent, csp: r.headers.get('content-security-policy') ?? '', script, leave: () => { for (const fn of listeners.pagehide ?? []) fn() } }
   }
 
   it('staging\'s stand-in Picker (the fake Google\'s /js/api.js) with the page: the member clicks a folder, the app gets it', async () => {
@@ -1161,7 +1393,11 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
       }
       throw new Error('the stand-in Picker showed no folder')
     }
-    ;(await folderButton()).onclick!()
+    const shown = await folderButton()
+    // The stand-in opened on the first tab added; the page added the three places in order.
+    const box = body.children.find(c => c.attrs.id === 'fake-picker' || (c as unknown as { id?: string }).id === 'fake-picker')!
+    expect(box.attrs['data-tabs']).toBe('マイドライブ,共有ドライブ,共有アイテム')
+    shown.onclick!()
     for (let i = 0; i < 200 && !msg.textContent.includes('アプリに戻って'); i++) await new Promise(res => setTimeout(res, 10))
     expect(msg.textContent).toContain('選びました。アプリに戻ってください。')
     expect((await state('m-sato', t.ticketId)).body.data).toMatchObject({ state: 'picked', picks: [{ id: GOOGLE_SEED.proposalsFolder, kind: 'folder' }], refused: 0 })
@@ -1291,6 +1527,30 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
       expect(plain.calls.map(c => c[0]), JSON.stringify(cfg)).not.toContain('setFileIds')
       expect(plain.calls).toContainEqual(['setEnableDrives', true])
     }
+  })
+
+  it('the Picker opens on My Drive: one tab per place (マイドライブ, 共有ドライブ, 共有アイテム), each with only its own place call', async () => {
+    const base = { accessToken: 't', apiKey: 'k', appId: APP_ID, scriptOrigin: 'https://apis.google.com', mimeTypes: ['application/pdf', 'text/markdown'], maxItems: 10 }
+    const placeCalls = ['setParent', 'setEnableDrives', 'setOwnedByMe', 'setFileIds']
+    for (const mode of ['folder', 'files'] as const) {
+      const run = await runPickerPage(`#t=${'a'.repeat(64)}`, { config: { ...base, mode } })
+      expect(run.added, mode).toHaveLength(3)
+      expect(run.added.map(v => v.calls.find(c => c[0] === 'setLabel')?.[1]), mode).toEqual(['マイドライブ', '共有ドライブ', '共有アイテム'])
+      // Each place on its own view: My Drive's root first (the default tab), then shared drives, then shared with me.
+      expect(run.added.map(v => v.calls.filter(c => placeCalls.includes(c[0]))), mode).toEqual([[['setParent', 'root']], [['setEnableDrives', true]], [['setOwnedByMe', false]]])
+      for (const v of run.added) {
+        expect(v.viewId).toBe(mode === 'folder' ? 'folders' : 'docs')
+        expect(v.calls).toContainEqual(['setMimeTypes', mode === 'folder' ? 'application/vnd.google-apps.folder' : 'application/pdf,text/markdown'])
+        expect(v.calls).toContainEqual(['setIncludeFolders', true])
+        if (mode === 'folder') expect(v.calls).toContainEqual(['setSelectFolderEnabled', true])
+        else expect(v.calls.map(c => c[0])).not.toContain('setSelectFolderEnabled')
+      }
+    }
+    // A pasted link: one view with just those files, no place call besides setFileIds.
+    const GOOD = '1AbC-def_GhIjKlMnOpQrStUv'
+    const pasted = await runPickerPage(`#t=${'a'.repeat(64)}`, { config: { ...base, mode: 'files', fileIds: [GOOD] } })
+    expect(pasted.added).toHaveLength(1)
+    expect(pasted.added[0].calls.filter(c => placeCalls.includes(c[0]))).toEqual([['setFileIds', GOOD]])
   })
 
   it('no Picker token or pick ticket in any other answer, log line or table (only the ticket\'s sha256 is kept)', async () => {

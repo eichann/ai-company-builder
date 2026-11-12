@@ -156,8 +156,8 @@ export interface DrivePutRequest {
   folderId: string
   name: string
   /** What the local file is. */
-  kind: 'pdf' | 'html' | 'markdown'
-  /** `google_doc`: HTML or Markdown converted into a Google document; absent / `file`: the file as is (PDF or HTML). */
+  kind: 'pdf' | 'html' | 'markdown' | 'text'
+  /** `google_doc`: HTML or Markdown converted into a Google document; absent / `file`: the file as is (PDF, HTML, Markdown `.md`, text `.txt`). */
   as?: DrivePutAs
   sha256: string
   contentBase64: string

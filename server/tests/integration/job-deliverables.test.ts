@@ -152,7 +152,7 @@ beforeAll(async () => {
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   Object.assign(process.env, {
-    BROKER_KEK_FILE: join(kekDir, 'kek'), PUBLIC_URL: PUBLIC, ACB_ALLOW_FAKE_UPSTREAMS: '1', OPERATOR_USER_IDS: 'jd-owner',
+    BROKER_KEK_FILE: join(kekDir, 'kek'), PUBLIC_URL: PUBLIC, ACB_ALLOW_FAKE_UPSTREAMS: '1', OPERATOR_USER_IDS: 'jd-owner', ACB_DRIVE_DOC_SETTLE_MS: '0',
     ACB_FAKE_GOOGLE_URL: `http://127.0.0.1:${(googleServer.address() as AddressInfo).port}`,
   })
   for (const level of ['log', 'warn', 'info'] as const) vi.spyOn(console, level).mockImplementation(() => {})
@@ -193,7 +193,7 @@ afterAll(async () => {
   google.close()
   await new Promise(r => googleServer.close(r))
   rmSync(kekDir, { recursive: true, force: true })
-  for (const k of ['BROKER_KEK_FILE', 'PUBLIC_URL', 'ACB_ALLOW_FAKE_UPSTREAMS', 'ACB_FAKE_GOOGLE_URL', 'OPERATOR_USER_IDS']) delete process.env[k]
+  for (const k of ['BROKER_KEK_FILE', 'PUBLIC_URL', 'ACB_ALLOW_FAKE_UPSTREAMS', 'ACB_FAKE_GOOGLE_URL', 'OPERATOR_USER_IDS', 'ACB_DRIVE_DOC_SETTLE_MS']) delete process.env[k]
 })
 
 describe('accepting a job that puts into a place outside', () => {
@@ -403,7 +403,7 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
     expect([cross.status, cross.body.code]).toEqual([403, 'DRIVE_FILE_NOT_THIS_JOB'])
     const next = Buffer.from('# 面談報告書（二回目）\n')
     const updated = await ai(t2, 'POST', '/google/drive/put', putBody({ name: '週の報告.md', updateFileId: mine.fileId, sha256: sha(next), contentBase64: next.toString('base64') }))
-    expect(updated.body.data.drivePut, updated.text).toMatchObject({ state: 'done', fileId: mine.fileId, revisionId: 'version:2' })
+    expect(updated.body.data.drivePut, updated.text).toMatchObject({ state: 'done', fileId: mine.fileId, updatedFileId: mine.fileId })
   })
 
   it('a receipt of another folder is not there for a run (nothing answered, Google not asked)', async () => {
@@ -501,7 +501,7 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
       const t2 = await runToken(second.body.data.run)
       const next = Buffer.from('# 週の報告（直し）\n')
       const updated = await ai(t2, 'POST', '/google/drive/put', putBody({ name: '週の報告.md', updateFileId: put.fileId, sha256: sha(next), contentBase64: next.toString('base64') }))
-      expect(updated.body.data.drivePut, updated.text).toMatchObject({ state: 'done', fileId: put.fileId, revisionId: 'version:2' })
+      expect(updated.body.data.drivePut, updated.text).toMatchObject({ state: 'done', fileId: put.fileId, updatedFileId: put.fileId })
       // That run fails too and is pressed again: the file made, then updated, is ONE thing made (not two).
       expect((await failRun(second.body.data.run)).status).toBe(200)
       expect((await as('jd-owner', 'POST', `/jobs/${job}/occurrences/${occ}/retry`)).status).toBe(200)

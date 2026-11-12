@@ -26,7 +26,7 @@ import { migrateShelfHistoryRequester, skillShelfSchema } from './schema/skill-s
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import { slackSchema } from './schema/slack'
-import { migrateDrivePutUpdates, migrateGoogleCompanyFeatures, migrateGoogleRelay } from './schema/connectors'
+import { migrateDrivePutDocFingerprints, migrateDrivePutUpdates, migrateGoogleCompanyFeatures, migrateGoogleRelay } from './schema/connectors'
 // lane A ▲
 // lane B ▼
 import { identitySchema } from './schema/identities'
@@ -175,6 +175,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateGoogleRelay(conn)
   // Drive puts that updated a file ACB made (google-drive.md "Overwriting").
   migrateDrivePutUpdates(conn)
+  migrateDrivePutDocFingerprints(conn)
   // lane A ▲
   // lane B ▼
   migrateInboxMessageSourceRef(conn)
