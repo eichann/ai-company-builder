@@ -25,7 +25,7 @@ import fs from 'fs'
 import path from 'path'
 import { z } from 'zod'
 import {
-  checkDriveFileName, checkDrivePutContent, driveDocFetchesOutside, DRIVE_PICK_MAX_FILES, DRIVE_PICK_TICKET_TTL_MS, DRIVE_PUT_MAX_BYTES, drivePickerPageUrl, drivePutForm, drivePutKindOf,
+  checkDriveFileName, checkDrivePutContent, driveDocFetchesOutside, DRIVE_PICK_MAX_FILES, DRIVE_PICK_SAVING_GRACE_MS, DRIVE_PICK_TICKET_TTL_MS, DRIVE_PUT_MAX_BYTES, drivePickerPageUrl, drivePutForm, drivePutKindOf,
   drivePreselectIds, isDriveId, isDrivePickTicket, type DrivePickMode, type DrivePutAs, type DrivePutKind,
 } from '../../../../shared/core/google-drive'
 import { isSameOrAncestorPath, pathKey } from '../../../../shared/core/paths'
@@ -42,6 +42,12 @@ const CONSENT_WAIT_MS = 2 * 60 * 1000
 const CONSENT_POLL_MS = 3000
 const PICKER_TIMEOUT_MS = DRIVE_PICK_TICKET_TTL_MS
 const PICK_POLL_MS = 2000
+/** One request to the server waits at most this long (a stalled one never holds the wait past a stop or the time). */
+const REQUEST_TIMEOUT_MS = 15_000
+/** The page has not taken its config by then: the browser did not open it, or cannot reach the server. */
+const PICK_OPEN_WAIT_MS = 2 * 60 * 1000
+/** Past the server's own end of the ticket (and of a late pick being kept): the backstop for a silent server. */
+const PICK_DEADLINE_MARGIN_MS = 60_000
 const PUT_TIMEOUT_MS = 120_000
 const READ_TIMEOUT_MS = 60_000
 
@@ -63,8 +69,12 @@ export interface DrivePickingDeps {
   sleep?: (ms: number) => Promise<void>
   log?: Pick<Console, 'warn'>
   consentWaitMs?: number
-  /** How long the app waits for the person's choice (default 10 minutes, the ticket's life). */
+  /** The ticket's life the app assumes (default 10 minutes); the server's answers end the wait. */
   pickTimeoutMs?: number
+  /** How long the app waits for the page to take its config (default 2 minutes). */
+  openWaitMs?: number
+  /** One request's limit (default 15 s). */
+  requestTimeoutMs?: number
   now?: () => number
 }
 
@@ -76,13 +86,14 @@ export function createDrivePicking(deps: DrivePickingDeps) {
 
   const now = deps.now ?? Date.now
 
-  async function session(companyId: string, rest: string, body?: unknown, verb?: 'DELETE'): Promise<{ status: number; json: { data?: unknown; error?: unknown; code?: unknown } } | null> {
+  async function session(companyId: string, rest: string, body?: unknown, verb?: 'DELETE', stop?: AbortSignal): Promise<{ status: number; json: { data?: unknown; error?: unknown; code?: unknown } } | null> {
     const base = deps.baseUrl()
     if (!base) return null
     const method = verb ?? (body === undefined ? 'GET' : 'POST')
+    const limit = AbortSignal.timeout(deps.requestTimeoutMs ?? REQUEST_TIMEOUT_MS)
     try {
       const res = await doFetch(`${base}/api/companies/${encodeURIComponent(companyId)}/me/google/drive${rest}`, {
-        method, redirect: 'error',
+        method, redirect: 'error', signal: stop ? AbortSignal.any([stop, limit]) : limit,
         headers: { Cookie: deps.cookies().join('; '), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       })
@@ -131,42 +142,60 @@ export function createDrivePicking(deps: DrivePickingDeps) {
      * a task card. Only Drive ids go with the ticket; the member's 「選択」 in the browser is still the pick.
      */
     async pick(companyId: string, mode: DrivePickMode, signal?: AbortSignal, options: { fileIds?: readonly string[] } = {}): Promise<DrivePickResult> {
+      const STOPPED: DrivePickResult = { ok: false, reason: 'cancelled', message: '止められました。' }
       const consent = await ensureConsent(companyId, signal)
       if (consent) return consent
+      if (signal?.aborted) return STOPPED
       const fileIds = mode === 'files' ? drivePreselectIds(options.fileIds) : []
-      const started = await session(companyId, '/pick-tickets', { mode, ...(fileIds.length > 0 ? { fileIds } : {}) })
-      if (!started) return { ok: false, reason: 'offline', message: 'サーバーに接続できませんでした。' }
+      const started = await session(companyId, '/pick-tickets', { mode, ...(fileIds.length > 0 ? { fileIds } : {}) }, undefined, signal)
+      if (!started) return signal?.aborted ? STOPPED : { ok: false, reason: 'offline', message: 'サーバーに接続できませんでした。' }
       const t = started.json.data as DrivePickTicketStarted | undefined
       if (started.status !== 200 || !t || typeof t.ticketId !== 'string' || !isDrivePickTicket(t.ticket)) {
         log.warn(`[google-drive] pick ticket: answered ${started.status}`)
         return { ok: false, reason: 'refused', message: typeof started.json.error === 'string' ? started.json.error : 'Google Drive のファイル選びを始められませんでした。' }
       }
       const ticketPath = `/pick-tickets/${encodeURIComponent(t.ticketId)}`
-      const close = async () => { await session(companyId, ticketPath, undefined, 'DELETE') }
+      // Closing (or acknowledging a result) is best effort and never holds the answer; the server prunes what is left.
+      const close = () => { void session(companyId, ticketPath, undefined, 'DELETE') }
+      if (signal?.aborted) { close(); return STOPPED }
       const url = drivePickerPageUrl(deps.baseUrl(), t.ticket)
       if (!url) {
-        await close()
+        close()
         return { ok: false, reason: 'refused', message: 'Google Drive のファイル選びを始められませんでした。' }
       }
       try {
         await deps.openBrowser(url)
       } catch {
-        await close()
+        close()
         return { ok: false, reason: 'refused', message: 'ブラウザを開けませんでした。' }
       }
-      const until = now() + (deps.pickTimeoutMs ?? PICKER_TIMEOUT_MS)
+      const startedAt = now()
+      // The server decides when the ticket is over (its end, or a little later while it keeps a late pick);
+      // this is only the backstop for a server that stops answering.
+      const until = startedAt + (deps.pickTimeoutMs ?? PICKER_TIMEOUT_MS) + DRIVE_PICK_SAVING_GRACE_MS + PICK_DEADLINE_MARGIN_MS
       const NOTHING = 'メンバーは何も選びませんでした。'
       const TIMED_OUT = '選ばれないまま時間が過ぎました。'
+      const NOT_OPENED = 'ブラウザで Google Drive から選ぶ画面が開かれませんでした。ブラウザがこのサーバーにつながるか確かめてから、もう一度お試しください。'
       for (;;) {
-        if (signal?.aborted) { await close(); return { ok: false, reason: 'cancelled', message: '止められました。' } }
-        if (now() >= until) { await close(); return { ok: false, reason: 'cancelled', message: TIMED_OUT } }
+        if (signal?.aborted) { close(); return STOPPED }
+        if (now() >= until) { close(); return { ok: false, reason: 'cancelled', message: TIMED_OUT } }
         await sleep(PICK_POLL_MS)
-        const a = await session(companyId, ticketPath)
-        if (!a) continue // the server for a moment out of reach: keep waiting until the time is up
+        if (signal?.aborted) { close(); return STOPPED }
+        const a = await session(companyId, ticketPath, undefined, undefined, signal)
+        // A stop or the backstop that came while the server answered wins over the answer.
+        if (signal?.aborted) { close(); return STOPPED }
+        if (now() >= until) { close(); return { ok: false, reason: 'cancelled', message: TIMED_OUT } }
+        if (!a) continue // the server for a moment out of reach: keep waiting
         if (a.status === 404) return { ok: false, reason: 'cancelled', message: NOTHING }
+        if (a.status === 401) { close(); return { ok: false, reason: 'refused', message: 'サーバーへのログインが切れました。ログインし直してから、もう一度お試しください。' } }
         const st = a.json.data as DrivePickTicketState | undefined
         if (a.status !== 200 || !st) continue
-        if (st.state === 'waiting') continue
+        if (st.state === 'waiting') {
+          // The page never took its config: the browser did not open it, or cannot reach this server.
+          if (!st.opened && now() - startedAt >= (deps.openWaitMs ?? PICK_OPEN_WAIT_MS)) { close(); return { ok: false, reason: 'refused', message: NOT_OPENED } }
+          continue
+        }
+        close() // the result is read: acknowledged
         if (st.state === 'picked') {
           const picks = (Array.isArray(st.picks) ? st.picks : []).filter(p => p && isDriveId(p.id) && (p.kind === 'folder' || p.kind === 'file'))
           return { ok: true, picks, refused: typeof st.refused === 'number' ? st.refused : 0 }

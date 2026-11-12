@@ -31,7 +31,7 @@ import type { MyGoogle } from '../shared/google'
 
 const TOKEN = 'acb_rec_co.' + 'a'.repeat(64)
 const SESSION = 'better-auth.session_token=SECRET.sig'
-const TICKET = 'co.' + 'b'.repeat(64)
+const TICKET = 'b'.repeat(64)
 const TICKET_ID = 'ticket-1'
 const FOLDER = 'fake-folder-proposals-0001'
 const DOC = 'fake-doc-past-proposal-0001'
@@ -154,7 +154,7 @@ test('picking uses the member\'s session (not the record token) to start and to 
   assert.equal(r.ok, true)
   const calls = server.seen.filter(s => s.url.includes('/me/google/drive/'))
   assert.deepEqual(calls.map(c => `${c.method} ${c.url.replace('https://acb.example.jp/api/companies/co', '')}`),
-    ['POST /me/google/drive/pick-tickets', `GET /me/google/drive/pick-tickets/${TICKET_ID}`, `GET /me/google/drive/pick-tickets/${TICKET_ID}`])
+    ['POST /me/google/drive/pick-tickets', `GET /me/google/drive/pick-tickets/${TICKET_ID}`, `GET /me/google/drive/pick-tickets/${TICKET_ID}`, `DELETE /me/google/drive/pick-tickets/${TICKET_ID}`])
   for (const c of calls) {
     assert.equal(c.headers.Cookie, SESSION)
     assert.equal(c.headers.Authorization, undefined)
@@ -163,7 +163,7 @@ test('picking uses the member\'s session (not the record token) to start and to 
 })
 
 test('the browser never opens anything but the server\'s Picker page with a ticket of the right shape', async () => {
-  for (const ticket of ['co.short', 'co.' + 'b'.repeat(64) + '#x', 'https://evil.example/?' + 'b'.repeat(64)]) {
+  for (const ticket of ['short', 'b'.repeat(64) + '#x', 'B'.repeat(64), 'https://evil.example/?' + 'b'.repeat(64)]) {
     const server = fakeServer('act', { ticket })
     const pick = picking(server)
     const r = await pick.p.pick('co', 'folder')
@@ -185,12 +185,13 @@ test('a pasted link: the ticket carries only Drive ids to show, in files mode on
   assert.deepEqual(asked, [[DOC], undefined, undefined])
 })
 
-test('waiting: cancelled in the browser, failed on the server, the AI stopped, ten minutes passed', async () => {
+test('waiting: cancelled in the browser, failed on the server, the AI stopped; each result acknowledged', async () => {
   const closes = (server: ReturnType<typeof fakeServer>) => server.seen.filter(s => s.method === 'DELETE' && s.url.endsWith(`/pick-tickets/${TICKET_ID}`)).length
 
   const cancelled = fakeServer('act', { states: [{ state: 'waiting', opened: true }, { state: 'cancelled' }] })
   const c = await picking(cancelled).p.pick('co', 'folder')
   assert.deepEqual([c.ok, !c.ok && c.reason], [false, 'cancelled'])
+  assert.equal(closes(cancelled), 1)
 
   const failed = fakeServer('act', { states: [{ state: 'failed', error: '管理者が Google Drive のファイル選び（Picker）をまだ設定していません。' }] })
   const f = await picking(failed).p.pick('co', 'folder')
@@ -203,14 +204,89 @@ test('waiting: cancelled in the browser, failed on the server, the AI stopped, t
   const s = await picking(stopped, { sleep: async () => { if (++polls === 3) ctl.abort() } }).p.pick('co', 'folder', ctl.signal)
   assert.deepEqual([s.ok, !s.ok && s.reason], [false, 'cancelled'])
   assert.equal(closes(stopped), 1)
+})
 
-  // Nobody chose within the time: the app stops waiting and closes the ticket.
-  const slow = fakeServer('act', { states: [{ state: 'waiting', opened: false }] })
+test('the AI stopped while a poll answering 「picked」 was in flight: stopped wins', async () => {
+  const server = fakeServer('act', { states: [PICKED] })
+  const ctl = new AbortController()
+  const answerAfterStop = (async (url: string, init: RequestInit) => {
+    const res = await server.fetch(url, init)
+    if (url.includes('/pick-tickets/') && (init.method ?? 'GET') === 'GET') ctl.abort()
+    return res
+  }) as unknown as typeof globalThis.fetch
+  const r = await picking({ ...server, fetch: answerAfterStop }).p.pick('co', 'folder', ctl.signal)
+  assert.deepEqual([r.ok, !r.ok && r.message], [false, '止められました。'])
+  assert.equal(server.seen.filter(x => x.method === 'DELETE').length, 1)
+})
+
+test('the time: the server ends the wait; a pick still being kept past ten minutes is waited for; a silent server stops at the backstop', async () => {
+  const minute = (over: Partial<DrivePickingDeps>, server: ReturnType<typeof fakeServer>) => {
+    let clock = 0
+    return picking(server, { now: () => clock, sleep: async () => { clock += 60_000; if (clock > 30 * 60_000) throw new Error('still waiting after 30 minutes') }, ...over })
+  }
+  // The server said the ticket is over.
+  const over = fakeServer('act', { states: [{ state: 'waiting', opened: true }, { state: 'expired' }] })
+  const e = await minute({}, over).p.pick('co', 'folder')
+  assert.deepEqual([e.ok, !e.ok && e.message], [false, '選ばれないまま時間が過ぎました。'])
+
+  // The person chose at the last moment: the server is still keeping it at minutes 10 and 11, then answers it at 12.
+  const late = fakeServer('act', { states: [...Array.from({ length: 9 }, () => ({ state: 'waiting', opened: true })), { state: 'waiting', opened: true, saving: true }, { state: 'waiting', opened: true, saving: true }, PICKED] })
+  const r = await minute({}, late).p.pick('co', 'folder')
+  assert.equal(r.ok, true)
+
+  // A server that only ever says waiting: the backstop past its end and the grace, and the ticket closed.
+  const silent = fakeServer('act', { states: [{ state: 'waiting', opened: true }] })
+  const t = await minute({}, silent).p.pick('co', 'folder')
+  assert.deepEqual([t.ok, !t.ok && t.message], [false, '選ばれないまま時間が過ぎました。'])
+  assert.equal(silent.seen.filter(x => x.method === 'DELETE').length, 1)
+  assert.ok(silent.seen.filter(x => x.method === 'GET' && x.url.endsWith(`/pick-tickets/${TICKET_ID}`)).length >= 12)
+})
+
+test('the page never took its config (the browser did not open it): the app ends after two minutes, not ten', async () => {
+  const server = fakeServer('act', { states: [{ state: 'waiting', opened: false }] })
   let clock = 0
-  const t = await picking(slow, { now: () => clock, sleep: async () => { clock += 60_000; if (clock > 20 * 60_000) throw new Error('still waiting after 20 minutes') } }).p.pick('co', 'folder')
-  assert.deepEqual([t.ok, !t.ok && t.reason, !t.ok && t.message], [false, 'cancelled', '選ばれないまま時間が過ぎました。'])
-  assert.equal(closes(slow), 1)
-  assert.equal(slow.seen.filter(x => x.method === 'GET' && x.url.endsWith(`/pick-tickets/${TICKET_ID}`)).length, 10)
+  const r = await picking(server, { now: () => clock, sleep: async () => { clock += 30_000; if (clock > 5 * 60_000) throw new Error('still waiting') } }).p.pick('co', 'folder')
+  assert.deepEqual([r.ok, !r.ok && r.reason], [false, 'refused'])
+  assert.match(!r.ok ? r.message : '', /開かれませんでした/)
+  assert.equal(server.seen.filter(x => x.method === 'DELETE').length, 1)
+})
+
+test('a signed-out session stops at once', async () => {
+  const signedOut = fakeServer('act')
+  const f401 = signedOut.fetch
+  const answer401 = (async (url: string, init: RequestInit) => url.includes('/pick-tickets/') && (init.method ?? 'GET') === 'GET' ? new Response('{}', { status: 401 }) : f401(url, init)) as unknown as typeof globalThis.fetch
+  let polls = 0
+  const s = await picking({ ...signedOut, fetch: answer401 }, { sleep: async () => { if (++polls > 3) throw new Error('kept waiting after a 401') } }).p.pick('co', 'folder')
+  assert.deepEqual([s.ok, !s.ok && s.reason], [false, 'refused'])
+})
+
+test('a stalled request never holds the wait: the AI stopped while the server does not answer ends the pick', { timeout: 10_000 }, async () => {
+  const server = fakeServer('act')
+  const stalled = (async (url: string, init: RequestInit) => {
+    if (url.includes('/pick-tickets/') && (init.method ?? 'GET') === 'GET') {
+      return new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))
+    }
+    return server.fetch(url, init)
+  }) as unknown as typeof globalThis.fetch
+  const ctl = new AbortController()
+  const r = await picking({ ...server, fetch: stalled }, { requestTimeoutMs: 60_000, sleep: async () => { setTimeout(() => ctl.abort(), 5) } }).p.pick('co', 'folder', ctl.signal)
+  assert.deepEqual([r.ok, !r.ok && r.reason], [false, 'cancelled'])
+  assert.equal(server.seen.filter(x => x.method === 'DELETE').length, 1)
+
+  // Without a stop, one stalled request ends at its own limit and the wait goes on to the server's answer.
+  const later = fakeServer('act', { states: [PICKED] })
+  let first = true
+  const once = (async (url: string, init: RequestInit) => {
+    if (first && url.includes('/pick-tickets/') && (init.method ?? 'GET') === 'GET') {
+      first = false
+      return new Promise<Response>((_, reject) => init.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))
+    }
+    return later.fetch(url, init)
+  }) as unknown as typeof globalThis.fetch
+  // (A request's own limit is an unref'd timer: hold the loop open meanwhile, as the app's window does.)
+  const hold = setInterval(() => {}, 1000)
+  const ok = await picking({ ...later, fetch: once }, { requestTimeoutMs: 20 }).p.pick('co', 'folder').finally(() => clearInterval(hold))
+  assert.equal(ok.ok, true)
 })
 
 test('without the Drive permission: Google\'s consent first (drive only), then the Picker', async () => {

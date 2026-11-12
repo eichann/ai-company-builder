@@ -6,8 +6,8 @@
  * The member's app (session), mounted at /api/companies/:companyId:
  *   POST   /me/google/drive/picker                  { mode }  released apps' Picker window: fails closed (update the app)
  *   POST   /me/google/drive/pick-tickets            { mode, fileIds? }  a one-time pick ticket for the page in the browser
- *   GET    /me/google/drive/pick-tickets/:ticketId  the member's own ticket: waiting, or its result once (then closed)
- *   DELETE /me/google/drive/pick-tickets/:ticketId  the app stopped waiting (timeout, AI stopped)
+ *   GET    /me/google/drive/pick-tickets/:ticketId  the member's own ticket: waiting (saving), or its result until acknowledged
+ *   DELETE /me/google/drive/pick-tickets/:ticketId  the app read the result (acknowledged) or stopped waiting
  *   POST   /me/google/drive/picks                   { mode, ids }  keep what the person picked (each checked with Google)
  *   GET  /me/google/drive/files                   the member's own picked / put files, with names (「つなぐ」's list)
  *
@@ -178,7 +178,7 @@ googleDriveAiRoute.get('/puts/:putId', aiReads, async (c) => {
 const PICKER_SCRIPT = `(function () {
   var msg = document.getElementById('msg')
   var say = function (t) { msg.textContent = t }
-  var m = String(window.location.hash || '').match(/^#t=([A-Za-z0-9_-]{1,100}\\.[0-9a-f]{64})$/)
+  var m = String(window.location.hash || '').match(/^#t=([0-9a-f]{64})$/)
   try { window.history.replaceState(null, '', window.location.pathname) } catch (e) { /* keep going */ }
   if (!m) { say('この画面は、アプリで「Google Drive から選ぶ」を始めたときに開きます。アプリに戻ってください。'); return }
   var ticket = m[1]
@@ -190,13 +190,23 @@ const PICKER_SCRIPT = `(function () {
     }).then(function (r) { return r.json().catch(function () { return {} }).then(function (j) { return { ok: r.ok, j: j } }) })
   }
   var problem = function (a, fallback) { return a && a.j && typeof a.j.error === 'string' ? a.j.error : fallback }
+  var LOST = 'アプリに伝えられませんでした。アプリに戻って、もう一度お試しください。'
   var finished = false
+  // keepalive: the answer still reaches the server when the tab is closed right after 「選択」.
   var finish = function (body, done) {
     if (finished) return
     finished = true
     say('アプリに伝えています…')
-    post('/result', body).then(function (a) { say(a.ok ? done : problem(a, 'アプリに伝えられませんでした。アプリに戻って、もう一度お試しください。')) },
-      function () { say('アプリに伝えられませんでした。アプリに戻って、もう一度お試しください。') })
+    var giveUp = function () { if (body.action !== 'cancel') post('/result', { ticket: ticket, action: 'cancel' }, true).then(null, function () {}); say(LOST) }
+    var send = function (again) {
+      post('/result', body, true).then(function (a) {
+        if (a.ok) say(done)
+        else if (a.j && typeof a.j.error === 'string') say(a.j.error)
+        else if (again) send(false)
+        else giveUp()
+      }, function () { if (again) send(false); else giveUp() })
+    }
+    send(true)
   }
   window.addEventListener('pagehide', function () {
     if (finished) return
@@ -234,9 +244,10 @@ const PICKER_SCRIPT = `(function () {
             }
           })
         if (cfg.mode === 'files') b = b.enableFeature(P.Feature.MULTISELECT_ENABLED).setMaxItems(cfg.maxItems)
+        if (typeof cfg.account === 'string' && typeof b.setAuthUser === 'function') b = b.setAuthUser(cfg.account)
         b.build().setVisible(true)
         cfg.accessToken = ''
-        say('')
+        say(typeof cfg.account === 'string' ? 'Google アカウント「' + cfg.account + '」で選んでください（ブラウザで別のアカウントになっているときは、このアカウントに切り替えてください）。' : '')
       }, onerror: function () { finish({ ticket: ticket, action: 'cancel' }, 'Google の画面を読み込めませんでした。アプリに戻ってください。' + BACK) } })
     }
     document.head.appendChild(s)
@@ -277,7 +288,7 @@ googlePickerPageRoute.get('/', publicRoute('a static page holding no secret; the
 })
 
 /** The Picker's config, once per pick ticket (the ticket is the proof; it holds the company and the member). */
-googlePickerPageRoute.post('/config', publicRoute('the one-time pick ticket the member\'s app asked for with its session is the proof (sha256 looked up in its company; once; 10 minutes)'), serviceBody, async (c) => {
+googlePickerPageRoute.post('/config', publicRoute('the one-time pick ticket the member\'s app asked for with its session is the proof (found by its sha256; once; 10 minutes)'), serviceBody, async (c) => {
   pickerHeaders(c)
   return answer(c, await googleDrive.pageConfig(c.var.body))
 })

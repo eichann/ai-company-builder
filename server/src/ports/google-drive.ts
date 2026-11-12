@@ -61,6 +61,14 @@ export interface DrivePickTicketRow {
   finishedAt: string | null
 }
 
+/**
+ * The control plane's one lookup of a pick ticket (like a key-broker token by hash): which company's row
+ * holds this sha256. Everything after it reads that company's handle.
+ */
+export interface PickTicketDirectory {
+  companyOf(ticketHash: string): string | null
+}
+
 export interface GoogleDriveRepository {
   /** Insert or renew picks (a re-pick renews the name, type and expiry). */
   savePicks(rows: DrivePickRow[]): void
@@ -100,6 +108,8 @@ export interface GoogleDriveRepository {
   movePickTicket(id: string, from: DrivePickTicketRow['state'][], to: DrivePickTicketRow['state'], fields: { result?: string | null; finishedAt?: string | null }): boolean
   /** Removes the member's own ticket (closed after its result, or cancelled by the app). */
   dropPickTicket(userId: string, id: string): void
+  /** How many of the member's tickets are open or saving and not expired at `now`. */
+  openPickTickets(userId: string, now: string): number
   /** Removes tickets that expired before `before` (every member). */
   prunePickTickets(before: string): void
 }

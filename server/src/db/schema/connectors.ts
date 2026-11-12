@@ -133,7 +133,7 @@ export const connectorSchema = `
       created_at TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       finished_at TEXT,
-      UNIQUE (company_id, ticket_hash)
+      UNIQUE (ticket_hash)
     );
 
     -- Which core connector serves a role when two could (connector-roles.md; the

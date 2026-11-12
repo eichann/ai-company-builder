@@ -243,8 +243,20 @@ export function drivePickerReferrerPattern(pageUrl: string): string | null {
 /** A pick ticket lives this long: the same 10 minutes the app waits for the person's choice. */
 export const DRIVE_PICK_TICKET_TTL_MS = 10 * 60 * 1000
 
-/** A pick ticket: `<companyId>.<64 hex>` (the company finds where to look; the hex is 256 random bits). */
-export const DRIVE_PICK_TICKET_RE = /^([A-Za-z0-9_-]{1,100})\.([0-9a-f]{64})$/
+/**
+ * A pick being saved (the server asks Google about each id) may finish this long after the ticket's end;
+ * the app keeps waiting that long when the server said it is saving.
+ */
+export const DRIVE_PICK_SAVING_GRACE_MS = 2 * 60 * 1000
+
+/** A ticket's row (and an unread result) stays this long after the ticket's end, then is pruned. */
+export const DRIVE_PICK_TICKET_KEPT_AFTER_MS = DRIVE_PICK_SAVING_GRACE_MS + 5 * 60 * 1000
+
+/** At most this many open pick tickets per member (each needs the session; none asks Google). */
+export const DRIVE_PICK_TICKETS_OPEN_MAX = 5
+
+/** A pick ticket: 64 hex (256 random bits); the server finds it by its sha256. */
+export const DRIVE_PICK_TICKET_RE = /^[0-9a-f]{64}$/
 
 export function isDrivePickTicket(v: unknown): v is string {
   return typeof v === 'string' && DRIVE_PICK_TICKET_RE.test(v)

@@ -26,7 +26,7 @@ export interface DrivePickTicketStarted {
  * the page took its config); a final state is answered once and the ticket is closed.
  */
 export type DrivePickTicketState =
-  | { state: 'waiting'; opened: boolean }
+  | { state: 'waiting'; opened: boolean; saving?: boolean }
   | { state: 'picked'; picks: DrivePick[]; refused: number }
   | { state: 'cancelled' }
   | { state: 'expired' }
@@ -46,6 +46,8 @@ export interface DrivePickerPageConfig {
   maxItems: number
   /** Files mode only: the files the Picker shows (a pasted Drive link), already checked as Drive ids. */
   fileIds?: string[]
+  /** The Google account the member allowed (their own ACB email's): the Picker opens on it when it can. */
+  account?: string
 }
 
 /** What a person picked (the server checked each one with Google before keeping it). */

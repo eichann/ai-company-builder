@@ -4,7 +4,7 @@
  */
 import type Database from 'better-sqlite3'
 import { parseSkillUses } from '../../../shared/core/skill-uses'
-import type { DrivePickRow, DrivePickTicketRow, DrivePutRow, GoogleDriveRepository } from '../../ports/google-drive'
+import type { DrivePickRow, DrivePickTicketRow, DrivePutRow, GoogleDriveRepository, PickTicketDirectory } from '../../ports/google-drive'
 import { skillUsesJson } from './skill-uses'
 
 type PickRow = { user_id: string; file_id: string; kind: string; name: string; mime_type: string; picked_at: string; expires_at: string }
@@ -46,6 +46,16 @@ const toPut = (r: PutRow): DrivePutRow => ({
   fileId: r.file_id, revisionId: r.revision_id, link: r.link, reason: r.reason, createdAt: r.created_at, finishedAt: r.finished_at,
   skills: parseSkillUses(r.skills), updatedFileId: r.updated_file_id,
 })
+
+/** The control plane's lookup of a Google Picker pick ticket by its sha256 (google-drive.md): its company only. */
+export function sqlitePickTicketDirectory(conn: Database.Database): PickTicketDirectory {
+  return {
+    companyOf(ticketHash) {
+      const r = conn.prepare('SELECT company_id FROM google_drive_pick_tickets WHERE ticket_hash = ?').get(ticketHash) as { company_id: string } | undefined
+      return r ? r.company_id : null
+    },
+  }
+}
 
 export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: string): GoogleDriveRepository {
   return {
@@ -146,6 +156,10 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
     },
     dropPickTicket(userId, id) {
       conn.prepare('DELETE FROM google_drive_pick_tickets WHERE company_id = ? AND user_id = ? AND id = ?').run(companyId, userId, id)
+    },
+    openPickTickets(userId, now) {
+      return (conn.prepare(`SELECT COUNT(*) AS n FROM google_drive_pick_tickets WHERE company_id = ? AND user_id = ? AND state IN ('open', 'saving') AND expires_at > ?`)
+        .get(companyId, userId, now) as { n: number }).n
     },
     prunePickTickets(before) {
       conn.prepare('DELETE FROM google_drive_pick_tickets WHERE company_id = ? AND expires_at <= ?').run(companyId, before)

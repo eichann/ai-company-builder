@@ -69,21 +69,31 @@ never matches).
   /me/google/drive/pick-tickets { mode, fileIds? }` (**session only**): operator stop → Picker
   registered (409 `DRIVE_PICKER_NOT_CONFIGURED`) → the member's grant active with `drive.file` (else 409
   `GOOGLE_CONSENT_NEEDED`, `needsGoogleConsent: 'drive'`) and `drive` not turned off (409
-  `GOOGLE_FEATURE_OFF`) → Google on (`GOOGLE_STOPPED`); nothing is asked of Google. Answers `{ ticketId,
-  ticket, expiresAt }` once: `ticket` = `<companyId>.<64 hex>` (`ids.newToken`, 256 random bits;
-  `DRIVE_PICK_TICKET_RE`); only its **sha256** is stored, with the member, the mode, its maximum (folder
-  1, files `DRIVE_PICK_MAX_FILES`), the preselected `fileIds` (files only, `drivePreselectIds`) and
-  **10 minutes** (`DRIVE_PICK_TICKET_TTL_MS`). Expired tickets are pruned at the next start.
+  `GOOGLE_FEATURE_OFF`) → Google on (`GOOGLE_STOPPED`) → at most `DRIVE_PICK_TICKETS_OPEN_MAX` (5) open
+  tickets of the member (429 `PICK_TICKETS_TOO_MANY`); nothing is asked of Google. Answers `{ ticketId,
+  ticket, expiresAt }` once: `ticket` = 64 hex (`ids.newToken`, 256 random bits; `DRIVE_PICK_TICKET_RE`);
+  only its **sha256** is stored (unique), with the member, the mode, its maximum (folder 1, files
+  `DRIVE_PICK_MAX_FILES`), the preselected `fileIds` (files only, `drivePreselectIds`) and **10 minutes**
+  (`DRIVE_PICK_TICKET_TTL_MS`). The public routes find a ticket by its sha256 in the control plane
+  (`PickTicketDirectory`, `sqlitePickTicketDirectory`, like a key-broker token; `company-scoped-sql`
+  `UNSCOPED`), then read it through that company's handle. A ticket's row (and a result the app has not
+  read) is pruned only `DRIVE_PICK_TICKET_KEPT_AFTER_MS` (grace + 5 minutes) after its end, at a start.
 - **The app** (`createDrivePicking().pick`, main) opens `drivePickerPageUrl(server, ticket)` =
   `<server>/api/google-picker#t=<ticket>` through the shell's `openExternal` (only that address, built
   in main from a ticket of the right shape: `isDrivePickTicket`), then waits: `GET
-  /me/google/drive/pick-tickets/:ticketId` with the session every 2 s (no push channel) →
-  `{ state: 'waiting', opened }`, or once `picked` (the picks, `refused`) / `cancelled` / `expired` /
-  `failed` (`error`, a fixed sentence) — a final state is answered **once and the ticket removed**. The
-  member's own ticket only (another member's or company's id → 404 `PICK_TICKET_NOT_FOUND`). The AI's
-  turn stopped (`signal`) or 10 minutes passed → `DELETE /me/google/drive/pick-tickets/:ticketId` closes
-  it, and the tool / card says cancelled. The app never holds the Picker's token; the ticket is never
-  logged and never reaches the renderer or the AI.
+  /me/google/drive/pick-tickets/:ticketId` with the session every 2 s (no push channel; each request has
+  its own 15 s limit and the AI's stop signal) → `{ state: 'waiting', opened, saving? }`, or `picked` (the
+  picks, `refused`) / `cancelled` / `expired` / `failed` (`error`, a fixed sentence). A final state can be
+  read again (a lost answer loses nothing) until the app acknowledges it with `DELETE
+  /me/google/drive/pick-tickets/:ticketId`. The member's own ticket only (another member's or company's id
+  → 404 `PICK_TICKET_NOT_FOUND`). **The server ends the wait**: an open ticket is `expired` at its end; a
+  pick still being kept (`saving`) is waited for `DRIVE_PICK_SAVING_GRACE_MS` (2 minutes) more. The app
+  stops by itself only when: the AI's turn is stopped (checked before and after every request — a stop
+  wins over a `picked` answer that arrived meanwhile), the page never took its config within 2 minutes
+  (`opened` false: 「ブラウザで Google Drive から選ぶ画面が開かれませんでした…」), a 401 (log in again), or
+  its backstop (10 minutes + the grace + 1 minute) for a silent server; each closes the ticket (`DELETE`,
+  best effort). The app never holds the Picker's token; the ticket is never logged and never reaches the
+  renderer or the AI.
 - **The page** `GET /api/google-picker` (public, static, no secret; strict CSP with the inline script's
   hash, `connect-src 'self'` for its two calls; `no-store`; `Referrer-Policy:
   strict-origin-when-cross-origin`): reads the ticket from the **URL fragment** (never sent to a server,
@@ -95,17 +105,31 @@ never matches).
   §6 subset — never the cached token, which holds every granted scope); Google's answer must carry
   **exactly** `drive.file` (`isDrivePickerTokenScope`), else 503 `DRIVE_PICKER_SCOPE` and nothing handed
   out. Not cached, not logged (one AI-action-log line `google:drive.picker.token`). A refusal after the
-  claim closes the ticket as `failed` with its sentence (the app shows it). Answers the token, key, app
-  id, script origin, mode, MIME types, `maxItems` and `fileIds`. Any ticket that cannot be used
-  (unknown, another company's, expired, used, closed) → the one 410 `PICK_TICKET_GONE`.
+  claim closes the ticket as `failed` with its sentence (the app shows it). **After Google answered, the
+  ticket is read again**: closed by the app meanwhile → 410 and the token goes nowhere. Answers the
+  token, key, app id, script origin, mode, MIME types, `maxItems`, `fileIds` and `account` (the grant's
+  Google email). Any ticket that cannot be used (unknown, expired, used, closed) → the one 410
+  `PICK_TICKET_GONE`.
+- **The Google account**: the page calls `PickerBuilder.setAuthUser(account)` when Google's Picker has
+  it, and says 「Google アカウント「…」で選んでください（…切り替えてください）」 — a browser signed in to
+  several accounts may otherwise show another one. Unverified against real Google: that `setAuthUser`
+  exists and selects the account (if not, the sentence is what helps).
 - `POST /api/google-picker/result { ticket, action: picked | cancel, mode?, ids? }` (public): once per
   ticket. `cancel` (the Picker's 「キャンセル」, or the page closed: `pagehide` sends it with
   `keepalive`) → `cancelled`. `picked` only after the config was handed out, `mode` must be the
   ticket's (400), 1 … the ticket's maximum of `isDriveId` ids (400) → the ticket moves to `saving`
-  (atomic) → **`savePicks` for the ticket's member** (exactly `POST /me/google/drive/picks`: each id
-  opened with Google, folder / file kind, `refused` counted) → `picked` with the answer, or `failed`.
-  The body names no member. The page then says 「選びました。アプリに戻ってください。（このタブは閉じて
+  (atomic) → **checked for the ticket's member exactly as `POST /me/google/drive/picks` checks** (the one
+  `checkPicks`: each id opened with Google, folder / file kind, `refused` counted) → kept only through one
+  synchronous compare-and-set `saving → picked` followed by the write (`keepPicks`): a ticket the app
+  closed meanwhile keeps nothing and the page gets 410. The body names no member. The page posts the
+  result with **`keepalive`** (a tab closed right after 「選択」 still delivers it), tries a failed post once
+  more, then posts a cancel; it then says 「選びました。アプリに戻ってください。（このタブは閉じて
   かまいません）」 / 「選ぶのをやめました。…」.
+- **Accepted residual risk** (owner's safe-side choice): the ticket is not bound to the browser, and the
+  first address `…#t=<ticket>` may stay in that browser's history (and its sync) until the page takes it
+  off — the ticket is usable only once (the config), only for 10 minutes, and a result is taken only
+  after the config; someone who read it from the history after that could at most cancel the pick or
+  send Drive ids the member's own `drive.file` token opens, kept as that member's picks.
 - **Released apps** (≤ release-20261109, the Electron Picker window): `POST /me/google/drive/picker
   { mode }` **fails closed** — 409 `DRIVE_PICKER_APP_UPDATE_NEEDED` 「Google Drive のファイル選びは、
   新しいアプリで使えます（ブラウザで選ぶ形になりました）。アプリを新しくしてから、もう一度お試しください。」
@@ -305,8 +329,14 @@ counted by `savePicks`, closed after the result, the app's cancel, a released ap
 the fragment taken off the address, `connect-src 'self'`, the page end to end and with staging's
 stand-in; in the app (`google-drive-tools.test.ts`): only the server's page with a ticket of the right
 shape is opened, the ticket in no AI output / record-token request / log, the session to start and wait,
-cancelled / failed / the AI stopped / 10 minutes (the ticket closed) — the client's shape check and
-`drivePickerPageUrl`'s are each other's back-up (one mutated alone survives). Mutation-checked: the Picker
+cancelled / failed / the AI stopped (also while a `picked` answer was in flight) / the page never opened
+/ a 401 / the backstop, a pick being kept past ten minutes waited for, a stalled request ended by its
+limit or a stop, each result acknowledged — the client's shape check and `drivePickerPageUrl`'s are
+each other's back-up (one mutated alone survives). Also (server): the ticket found by its hash and
+served from its own company, the saving grace, results kept until acknowledged and through a later
+start's pruning, the open-ticket cap, `drive` turned off, the app closing the ticket while Google was asked
+for the token or about the picks (nothing handed out, nothing kept), the full CSP, the result's
+`keepalive`, one retry then a cancel, the close-tab cancel, `setAuthUser`. Mutation-checked: the Picker
 token's scope check and the narrowing parameter, `drive.file` before asking Google, the Picker
 registration, picks verified with Google, folder picks are folders, read / put only picks of
 the right kind, the act token, the MIME / name / content / sha checks, the outside-sharing

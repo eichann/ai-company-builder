@@ -204,6 +204,9 @@ const UNSCOPED: Record<string, Array<[sql: string, reason: string]>> = {
     ["SELECT strftime('%Y-%m-%d', at, ?) AS day, user_id, category, ${denied} AS denied, COUNT(*) AS n FROM agent_events WHERE ${w.sql} GROUP BY day, user_id, category, denied ORDER BY day ASC, user_id ASC, category ASC", BUILT_WHERE],
     ['SELECT DISTINCT company_id FROM agent_events', 'the retention job lists the companies it then prunes one at a time (ids only)'],
   ],
+  'adapters/sqlite/google-drive.ts': [
+    ['SELECT company_id FROM google_drive_pick_tickets WHERE ticket_hash = ?', BY_TOKEN],
+  ],
   'adapters/sqlite/invitations.ts': [
     ['SELECT i.*, c.name as company_name FROM invitations i JOIN companies c ON i.company_id = c.id WHERE i.token = ?', BY_TOKEN],
     ['UPDATE invitations SET signup_claimed_at = ? WHERE token = ? AND used_by IS NULL AND signup_claimed_at IS NULL AND expires_at > ? RETURNING id, company_id', BY_TOKEN],

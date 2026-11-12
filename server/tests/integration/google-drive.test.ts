@@ -25,7 +25,7 @@
  * - no access or refresh token in any answer but the Picker page's config, in any log line or table; no
  *   pick ticket in any log line or table.
  */
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -787,6 +787,9 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
   const tokenCalls = () => google.requests.filter(q => q.path === '/token').length
   const pickerLines = () => (db.prepare("SELECT COUNT(*) AS n FROM agent_events WHERE company_id = ? AND tool = 'google:drive.picker.token'").get(CO) as { n: number }).n
   const ticketRow = (id: string) => db.prepare('SELECT * FROM google_drive_pick_tickets WHERE id = ?').get(id) as Json
+  // The open-ticket cap counts every open ticket of the member: each test starts without any.
+  beforeEach(() => { db.prepare('DELETE FROM google_drive_pick_tickets').run() })
+  const sleepMs = (ms: number) => new Promise(res => setTimeout(res, ms))
   async function ticket(user: string, body: unknown = { mode: 'folder' }) {
     const r = await start(user, body)
     expect(r.status, r.text).toBe(200)
@@ -797,10 +800,10 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
   it('the ticket: unguessable, only its sha256 stored, 10 minutes, bound to the member and the mode; nothing asked of Google yet', async () => {
     const before = tokenCalls()
     const t = await ticket('m-sato', { mode: 'files' })
-    expect(t.ticket).toMatch(new RegExp(`^${CO}\\.[0-9a-f]{64}$`))
+    expect(t.ticket).toMatch(/^[0-9a-f]{64}$/)
     expect(tokenCalls()).toBe(before)
     const row = ticketRow(t.ticketId)
-    expect(JSON.stringify(row)).not.toContain(t.ticket.split('.')[1])
+    expect(JSON.stringify(row)).not.toContain(t.ticket)
     expect(row.ticket_hash).toBe(createHash('sha256').update(t.ticket).digest('hex'))
     expect([row.user_id, row.mode, row.max_items, row.state]).toEqual(['m-sato', 'files', 10, 'open'])
     expect(Date.parse(row.expires_at) - Date.parse(row.created_at)).toBe(10 * 60 * 1000)
@@ -815,7 +818,7 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     expect(r.status, r.text).toBe(200)
     expect(r.headers.get('cache-control')).toBe('no-store')
     expect(r.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin')
-    expect(r.body.data).toMatchObject({ apiKey: PICKER_KEY, appId: APP_ID, mode: 'files', maxItems: 10 })
+    expect(r.body.data).toMatchObject({ apiKey: PICKER_KEY, appId: APP_ID, mode: 'files', maxItems: 10, account: GOOGLE_SEED.member })
     expect(pickerLines()).toBe(lines + 1)
     const token = r.body.data.accessToken as string
     expect(token.startsWith('ya29.fake-')).toBe(true)
@@ -858,21 +861,72 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     }
   })
 
-  it('expired: the page gets nothing, the app hears expired and the ticket is gone', async () => {
+  it('expired: the page gets nothing, the app hears expired until it acknowledges', async () => {
     const t = await ticket('m-sato')
-    db.prepare('UPDATE google_drive_pick_tickets SET expires_at = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), t.ticketId)
+    const setExpiry = (ms: number) => db.prepare('UPDATE google_drive_pick_tickets SET expires_at = ? WHERE id = ?').run(new Date(Date.now() + ms).toISOString(), t.ticketId)
+    setExpiry(-1000)
     const before = tokenCalls()
     expect((await page('config', { ticket: t.ticket })).body.code).toBe('PICK_TICKET_GONE')
     expect((await page('result', { ticket: t.ticket, action: 'cancel' })).body.code).toBe('PICK_TICKET_GONE')
     expect(tokenCalls()).toBe(before)
     expect((await state('m-sato', t.ticketId)).body.data).toEqual({ state: 'expired' })
+    expect((await state('m-sato', t.ticketId)).body.data).toEqual({ state: 'expired' })
+    expect((await person('m-sato', 'DELETE', `/me/google/drive/pick-tickets/${t.ticketId}`)).status).toBe(200)
     expect(ticketRow(t.ticketId)).toBeUndefined()
   })
 
-  it('another company\'s name in the ticket, a forged or reshaped ticket: nothing', async () => {
+  it('a pick still being kept at the ticket\'s end: the app hears saving for the grace, then expired', async () => {
     const t = await ticket('m-sato')
-    const hex = t.ticket.split('.')[1]
-    for (const forged of [`other-co.${hex}`, `${CO}.${'0'.repeat(64)}`, hex, `${t.ticket}x`, '', 42]) {
+    const saving = (msAgo: number) => db.prepare("UPDATE google_drive_pick_tickets SET state = 'saving', config_handed_at = ?, expires_at = ? WHERE id = ?").run(new Date().toISOString(), new Date(Date.now() - msAgo).toISOString(), t.ticketId)
+    saving(60_000)
+    expect((await state('m-sato', t.ticketId)).body.data).toEqual({ state: 'waiting', opened: true, saving: true })
+    saving(3 * 60_000)
+    expect((await state('m-sato', t.ticketId)).body.data).toEqual({ state: 'expired' })
+  })
+
+  it('a result the app has not read yet survives the next start\'s pruning; only tickets long over go', async () => {
+    const unread = await ticket('m-sato')
+    const old = await ticket('m-sato')
+    db.prepare("UPDATE google_drive_pick_tickets SET state = 'picked', result = ?, expires_at = ? WHERE id = ?").run(JSON.stringify({ picks: [], refused: 1 }), new Date(Date.now() - 60_000).toISOString(), unread.ticketId)
+    db.prepare('UPDATE google_drive_pick_tickets SET expires_at = ? WHERE id = ?').run(new Date(Date.now() - 60 * 60_000).toISOString(), old.ticketId)
+    await ticket('m-sato')
+    expect((await state('m-sato', unread.ticketId)).body.data).toEqual({ state: 'picked', picks: [], refused: 1 })
+    expect(ticketRow(old.ticketId)).toBeUndefined()
+  })
+
+  it('at most five open tickets per member', async () => {
+    for (let i = 0; i < 5; i++) await ticket('m-sato')
+    const r = await start('m-sato', { mode: 'folder' })
+    expect([r.status, r.body.code]).toEqual([429, 'PICK_TICKETS_TOO_MANY'])
+    expect((await start('m-tanaka', { mode: 'folder' })).body.code).not.toBe('PICK_TICKETS_TOO_MANY')
+  })
+
+  it('the Drive feature turned off by the member: no ticket', async () => {
+    db.prepare("UPDATE connector_grants SET features_off = ? WHERE company_id = ? AND user_id = 'm-sato'").run(JSON.stringify(['drive']), CO)
+    try {
+      const r = await start('m-sato', { mode: 'folder' })
+      expect([r.status, r.body.code]).toEqual([409, 'GOOGLE_FEATURE_OFF'])
+    } finally {
+      db.prepare("UPDATE connector_grants SET features_off = '[]' WHERE company_id = ? AND user_id = 'm-sato'").run(CO)
+    }
+  })
+
+  it('a ticket is served from its own company: another company\'s ticket reads that company\'s settings, never this one\'s', async () => {
+    const OTHER = 'drive-co-other'
+    db.prepare('INSERT OR IGNORE INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(OTHER, OTHER, OTHER, 'm-other', ts(), ts())
+    db.prepare('INSERT OR IGNORE INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('m-m-other', 'm-other', OTHER, 'owner', ts(), ts())
+    const value = randomBytes(32).toString('hex')
+    db.prepare("INSERT INTO google_drive_pick_tickets (id, company_id, user_id, ticket_hash, mode, max_items, file_ids, state, created_at, expires_at) VALUES ('ticket-other-co', ?, 'm-other', ?, 'folder', 1, '[]', 'open', ?, ?)")
+      .run(OTHER, createHash('sha256').update(value).digest('hex'), ts(), new Date(Date.now() + 60_000).toISOString())
+    const r = await page('config', { ticket: value })
+    // That company registered no Picker: its own refusal, and nothing of this company's registration.
+    expect([r.status, r.body.code]).toEqual([409, 'DRIVE_PICKER_NOT_CONFIGURED'])
+    expect(r.text).not.toContain(PICKER_KEY)
+  })
+
+  it('a forged or reshaped ticket: nothing', async () => {
+    const t = await ticket('m-sato')
+    for (const forged of [`${CO}.${t.ticket}`, '0'.repeat(64), t.ticket.toUpperCase(), `${t.ticket}x`, t.ticket.slice(1), '', 42]) {
       const r = await page('config', { ticket: forged })
       expect([r.status, r.body.code], String(forged)).toEqual([410, 'PICK_TICKET_GONE'])
     }
@@ -937,7 +991,9 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     const s = await state('m-sato', files.ticketId)
     expect(s.body.data.picks.map((p: Json) => p.id)).toEqual([GOOGLE_SEED.pastProposalDoc, GOOGLE_SEED.pastProposalSlides])
     expect(s.body.data.refused).toBe(1)
-    // Answered once; then the ticket is closed.
+    // A lost answer loses nothing: the result is read again until the app acknowledges it.
+    expect((await state('m-sato', files.ticketId)).body.data).toEqual(s.body.data)
+    expect((await person('m-sato', 'DELETE', `/me/google/drive/pick-tickets/${files.ticketId}`)).status).toBe(200)
     expect((await state('m-sato', files.ticketId)).status).toBe(404)
     expect(ticketRow(files.ticketId)).toBeUndefined()
 
@@ -959,6 +1015,39 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     expect(tokenCalls()).toBe(before)
   })
 
+  it('the app closed the ticket while Google was asked for the token: nothing handed out', async () => {
+    const t = await ticket('m-sato')
+    google.faults.delayMs = 300
+    try {
+      const pending = page('config', { ticket: t.ticket })
+      await sleepMs(100)
+      expect((await person('m-sato', 'DELETE', `/me/google/drive/pick-tickets/${t.ticketId}`)).status).toBe(200)
+      const r = await pending
+      expect([r.status, r.body.code]).toEqual([410, 'PICK_TICKET_GONE'])
+      expect(r.text).not.toContain('ya29.fake-')
+    } finally {
+      google.faults.delayMs = 0
+    }
+  })
+
+  it('the app closed the ticket while the picks were checked with Google: nothing kept, the page told', async () => {
+    google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.handNotesPdf])
+    db.prepare('DELETE FROM google_drive_picks WHERE company_id = ? AND file_id = ?').run(CO, GOOGLE_SEED.handNotesPdf)
+    const t = await ticket('m-sato', { mode: 'files' })
+    expect((await page('config', { ticket: t.ticket })).status).toBe(200)
+    google.faults.delayMs = 300
+    try {
+      const pending = page('result', { ticket: t.ticket, mode: 'files', action: 'picked', ids: [GOOGLE_SEED.handNotesPdf] })
+      await sleepMs(100)
+      expect((await person('m-sato', 'DELETE', `/me/google/drive/pick-tickets/${t.ticketId}`)).status).toBe(200)
+      const r = await pending
+      expect([r.status, r.body.code]).toEqual([410, 'PICK_TICKET_GONE'])
+    } finally {
+      google.faults.delayMs = 0
+    }
+    expect(db.prepare('SELECT COUNT(*) AS n FROM google_drive_picks WHERE company_id = ? AND file_id = ?').get(CO, GOOGLE_SEED.handNotesPdf).n).toBe(0)
+  })
+
   it('a released app\'s Picker window (the old route): fails closed with a plain sentence; no token', async () => {
     const before = tokenCalls()
     const r = await person('m-sato', 'POST', '/me/google/drive/picker', { mode: 'folder' })
@@ -971,10 +1060,20 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
   it('the Picker page is static: no token, a strict CSP that lets it call its own server, not cached', async () => {
     const r = await call({ method: 'GET', path: '/api/google-picker' })
     expect(r.status).toBe(200)
-    const csp = r.headers.get('content-security-policy') ?? ''
-    expect(csp).toContain("default-src 'none'")
-    expect(csp).toMatch(/script-src 'sha256-[A-Za-z0-9+/=]+'/)
-    expect(csp).toMatch(/connect-src 'self' /)
+    const csp = (r.headers.get('content-security-policy') ?? '').split('; ')
+    const fake = process.env.ACB_FAKE_GOOGLE_URL
+    const hash = createHash('sha256').update(/<script>([\s\S]*)<\/script>/.exec(r.text)![1]).digest('base64')
+    expect(csp).toEqual([
+      "default-src 'none'",
+      `script-src 'sha256-${hash}' https://apis.google.com https://www.gstatic.com https://*.google.com ${fake}`,
+      `style-src 'unsafe-inline' https://*.gstatic.com https://fonts.googleapis.com https://*.google.com ${fake}`,
+      'img-src https: data:',
+      'font-src https://fonts.gstatic.com',
+      `frame-src https://docs.google.com https://drive.google.com https://*.google.com ${fake}`,
+      `connect-src 'self' https://*.googleapis.com https://*.google.com ${fake}`,
+      "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'",
+    ])
+    expect(r.headers.get('x-content-type-options')).toBe('nosniff')
     expect(r.headers.get('cache-control')).toBe('no-store')
     expect(r.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin')
     expect(r.text).not.toContain('ya29')
@@ -990,7 +1089,8 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     const r = await call({ method: 'GET', path: '/api/google-picker' })
     const script = /<script>([\s\S]*)<\/script>/.exec(r.text)![1]
     const calls: Array<[string, unknown]> = []
-    const posted: Array<{ path: string; body: Json }> = []
+    const posted: Array<{ path: string; body: Json; keepalive: boolean }> = []
+    const listeners: Record<string, Array<() => void>> = {}
     const msg = { textContent: '' }
     const view = {
       setMimeTypes: (v: unknown) => { calls.push(['setMimeTypes', v]); return view },
@@ -1003,6 +1103,7 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     for (const m of ['addView', 'setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle', 'enableFeature']) builder[m] = () => builder
     builder.setOAuthToken = (t: unknown) => { calls.push(['token', t]); return builder }
     builder.setMaxItems = (n: unknown) => { calls.push(['maxItems', n]); return builder }
+    builder.setAuthUser = (u: unknown) => { calls.push(['authUser', u]); return builder }
     builder.setCallback = (f: (data: unknown) => void) => { callback = f; return builder }
     builder.build = () => ({ setVisible: () => { calls.push(['visible', true]); if (opts.answer) callback(opts.answer) } })
     const head = { appendChild: (el: { onload: () => void }) => { el.onload() } }
@@ -1010,10 +1111,10 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     const window: Record<string, unknown> = {
       location: { origin: PUBLIC, pathname: '/api/google-picker', hash },
       history,
-      addEventListener: () => {},
-      fetch: async (path: string, init: { body: string }) => {
+      addEventListener: (type: string, fn: () => void) => { (listeners[type] ??= []).push(fn) },
+      fetch: async (path: string, init: { body: string; keepalive?: boolean }) => {
         const body = JSON.parse(init.body)
-        posted.push({ path, body })
+        posted.push({ path, body, keepalive: init.keepalive === true })
         if (path.endsWith('/config') && opts.config) return new Response(JSON.stringify({ success: true, data: opts.config }), { status: 200 })
         const res = await call({ method: 'POST', path, body })
         return new Response(res.text, { status: res.status })
@@ -1025,7 +1126,7 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     runInNewContext(script, { window, document })
     const settled = () => /アプリに戻って|始められません|使えません/.test(msg.textContent) || (!opts.answer && calls.some(c => c[0] === 'visible'))
     for (let i = 0; i < 100 && !settled(); i++) await new Promise(res => setTimeout(res, 10))
-    return { calls, posted, msg: msg.textContent, csp: r.headers.get('content-security-policy') ?? '', script }
+    return { calls, posted, msg: () => msg.textContent, csp: r.headers.get('content-security-policy') ?? '', script, leave: () => { for (const fn of listeners.pagehide ?? []) fn() } }
   }
 
   it('staging\'s stand-in Picker (the fake Google\'s /js/api.js) with the page: the member clicks a folder, the app gets it', async () => {
@@ -1073,19 +1174,65 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     expect(run.calls[0]).toEqual(['address', '/api/google-picker'])
     expect(run.posted.map(p => p.path)).toEqual(['/api/google-picker/config', '/api/google-picker/result'])
     expect(run.posted[1].body).toEqual({ ticket: t.ticket, mode: 'folder', action: 'picked', ids: [GOOGLE_SEED.proposalsFolder] })
-    expect(run.msg).toContain('選びました。アプリに戻ってください。')
+    // keepalive: closing the tab right after 「選択」 still delivers the pick.
+    expect(run.posted[1].keepalive).toBe(true)
+    expect(run.calls).toContainEqual(['authUser', GOOGLE_SEED.member])
+    expect(run.msg()).toContain('選びました。アプリに戻ってください。')
     expect(run.csp).toContain(`'sha256-${createHash('sha256').update(run.script).digest('base64')}'`)
     expect((await state('m-sato', t.ticketId)).body.data).toMatchObject({ state: 'picked', picks: [{ id: GOOGLE_SEED.proposalsFolder }] })
 
     // 「キャンセル」 in the Picker: cancelled.
     const u = await ticket('m-sato', { mode: 'folder' })
     const cancel = await runPickerPage(`#t=${u.ticket}`, { answer: { action: 'cancel' } })
-    expect(cancel.msg).toContain('選ぶのをやめました')
+    expect(cancel.msg()).toContain('選ぶのをやめました')
     expect((await state('m-sato', u.ticketId)).body.data).toEqual({ state: 'cancelled' })
+
+    // The tab closed while the Picker was showing: a cancel goes out (keepalive) and the app hears it.
+    const v = await ticket('m-sato', { mode: 'folder' })
+    const closed = await runPickerPage(`#t=${v.ticket}`)
+    expect(closed.msg()).toContain(GOOGLE_SEED.member)
+    closed.leave()
+    for (let i = 0; i < 50 && closed.posted.length < 2; i++) await sleepMs(10)
+    expect(closed.posted[1]).toEqual({ path: '/api/google-picker/result', body: { ticket: v.ticket, action: 'cancel' }, keepalive: true })
+    for (let i = 0; i < 50 && ticketRow(v.ticketId)?.state !== 'cancelled'; i++) await sleepMs(10)
+    expect((await state('m-sato', v.ticketId)).body.data).toEqual({ state: 'cancelled' })
 
     // Opened without a ticket (a bookmark, a shared link): nothing asked.
     const none = await runPickerPage('')
     expect(none.posted).toEqual([])
+  })
+
+  it('the result could not reach the server: tried once more, then a cancel goes out', async () => {
+    const t = await ticket('m-sato', { mode: 'folder' })
+    const r = await call({ method: 'GET', path: '/api/google-picker' })
+    const script = /<script>([\s\S]*)<\/script>/.exec(r.text)![1]
+    const posted: Array<{ path: string; body: Json; keepalive: boolean }> = []
+    const msg = { textContent: '' }
+    let callback: (data: unknown) => void = () => {}
+    const view: Record<string, unknown> = {}
+    for (const m of ['setMimeTypes', 'setIncludeFolders', 'setSelectFolderEnabled', 'setEnableDrives']) view[m] = () => view
+    const builder: Record<string, unknown> = {}
+    for (const m of ['addView', 'setOAuthToken', 'setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle']) builder[m] = () => builder
+    builder.setCallback = (f: (data: unknown) => void) => { callback = f; return builder }
+    builder.build = () => ({ setVisible: () => callback({ action: 'picked', docs: [{ id: GOOGLE_SEED.proposalsFolder }] }) })
+    const window: Record<string, unknown> = {
+      location: { origin: PUBLIC, pathname: '/api/google-picker', hash: `#t=${t.ticket}` }, history: { replaceState: () => {} }, addEventListener: () => {},
+      fetch: async (path: string, init: { body: string; keepalive?: boolean }) => {
+        const body = JSON.parse(init.body)
+        posted.push({ path, body, keepalive: init.keepalive === true })
+        if (path.endsWith('/result') && body.action === 'picked') throw new TypeError('network')
+        const res = await call({ method: 'POST', path, body })
+        return new Response(res.text, { status: res.status })
+      },
+      gapi: { load: (_n: string, o: { callback: () => void }) => o.callback() },
+      google: { picker: { DocsView: function () { return view }, PickerBuilder: function () { return builder }, ViewId: {}, Action: { PICKED: 'picked', CANCEL: 'cancel' }, Feature: {} } },
+    }
+    runInNewContext(script, { window, document: { getElementById: () => msg, createElement: () => ({}), head: { appendChild: (el: { onload: () => void }) => el.onload() } } })
+    for (let i = 0; i < 100 && posted.length < 4; i++) await sleepMs(10)
+    expect(posted.map(p => `${p.path} ${p.body.action ?? ''}`)).toEqual(['/api/google-picker/config ', '/api/google-picker/result picked', '/api/google-picker/result picked', '/api/google-picker/result cancel'])
+    for (let i = 0; i < 50 && ticketRow(t.ticketId)?.state !== 'cancelled'; i++) await sleepMs(10)
+    expect((await state('m-sato', t.ticketId)).body.data).toEqual({ state: 'cancelled' })
+    expect(msg.textContent).toContain('アプリに伝えられませんでした')
   })
 
   it('a pasted link: the ticket carries only Drive ids, in files mode only; the page shows only Drive-id-shaped files', async () => {
@@ -1100,10 +1247,10 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     expect(JSON.parse(ticketRow((await ticket('m-sato', { mode: 'folder', fileIds: [GOOD] })).ticketId).file_ids)).toEqual([])
     // The page filters once more whatever it is given; nothing usable, a folder pick, or none given: the ordinary Picker.
     const base = { accessToken: 't', apiKey: 'k', appId: APP_ID, scriptOrigin: 'https://apis.google.com', mimeTypes: ['application/pdf'], maxItems: 10 }
-    const filtered = await runPickerPage(`#t=${CO}.${'a'.repeat(64)}`, { config: { ...base, mode: 'files', fileIds: [GOOD, "x');alert(1)//"] } })
+    const filtered = await runPickerPage(`#t=${'a'.repeat(64)}`, { config: { ...base, mode: 'files', fileIds: [GOOD, "x');alert(1)//"] } })
     expect(filtered.calls).toContainEqual(['setFileIds', GOOD])
     for (const cfg of [{ mode: 'files', fileIds: ['bad id!'] }, { mode: 'folder', fileIds: [GOOD] }, { mode: 'files' }, { mode: 'files', fileIds: GOOD }]) {
-      const plain = await runPickerPage(`#t=${CO}.${'a'.repeat(64)}`, { config: { ...base, ...cfg } })
+      const plain = await runPickerPage(`#t=${'a'.repeat(64)}`, { config: { ...base, ...cfg } })
       expect(plain.calls.map(c => c[0]), JSON.stringify(cfg)).not.toContain('setFileIds')
       expect(plain.calls).toContainEqual(['setEnableDrives', true])
     }
@@ -1113,8 +1260,7 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     expect(issued.length).toBeGreaterThan(5)
     const haystack = [...answers, ...logLines].join('\n')
     expect(haystack).not.toContain('ya29.fake-')
-    for (const t of issued) {
-      const hex = t.split('.')[1]
+    for (const hex of issued) {
       // The app's own answer when the ticket was made is the one place it is said.
       expect(answers.filter(a => a.includes(hex)).length, 'answers naming the ticket').toBeLessThanOrEqual(1)
       expect(logLines.join('\n')).not.toContain(hex)
