@@ -191,6 +191,16 @@ export const PRACTICE_UPSTREAMS = practiceUpstreamsFrom(process.env)
  * The address browsers reach this server at (Google's redirect URI is built
  * from it). Read per call; default http://localhost:3001, no trailing slash.
  */
+/**
+ * How long the Drive service waits between the two reads of a Google document right after ACB put it, and before the
+ * one retry of a failed export (google-drive.md "A Google document's own changes"): `ACB_DRIVE_DOC_SETTLE_MS`, 0–10000,
+ * default 1500. Tests set 0.
+ */
+export function driveDocSettleMs(env: Readonly<Record<string, string | undefined>> = process.env): number {
+  const n = Number(env.ACB_DRIVE_DOC_SETTLE_MS)
+  return env.ACB_DRIVE_DOC_SETTLE_MS !== undefined && Number.isInteger(n) && n >= 0 && n <= 10_000 ? n : 1500
+}
+
 export function publicUrl(): string {
   return (process.env.PUBLIC_URL?.trim() || 'http://localhost:3001').replace(/\/+$/, '')
 }

@@ -194,14 +194,16 @@ export function migrateDrivePutUpdates(conn: Database.Database): void {
 }
 
 /**
- * A Google document's fingerprint (google-drive.md "A Google document's own changes"): the sha256 of its text as Drive
- * exported it right after ACB's put — what an overwrite compares with (a document's `version` moves without an edit).
- * NULL for every earlier receipt, so their documents are never overwritten. Additive: an older build ignores it.
- * Every startup, idempotent.
+ * A Google document's baseline (google-drive.md "A Google document's own changes"): right after ACB's put, the sha256 of
+ * its exported text, its newest revision id and the upload's `modifiedTime` — what an overwrite compares with (a
+ * document's `version` moves without an edit). NULL for every earlier receipt, so their documents are never
+ * overwritten. Additive: an older build ignores them. Every startup, idempotent.
  */
 export function migrateDrivePutDocFingerprints(conn: Database.Database): void {
   const cols = new Set((conn.prepare('PRAGMA table_info(google_drive_puts)').all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('doc_fingerprint')) conn.exec('ALTER TABLE google_drive_puts ADD COLUMN doc_fingerprint TEXT')
+  if (!cols.has('doc_revision')) conn.exec('ALTER TABLE google_drive_puts ADD COLUMN doc_revision TEXT')
+  if (!cols.has('doc_baseline_at')) conn.exec('ALTER TABLE google_drive_puts ADD COLUMN doc_baseline_at TEXT')
 }
 
 export function migrateGoogleCompanyFeatures(conn: Database.Database): void {

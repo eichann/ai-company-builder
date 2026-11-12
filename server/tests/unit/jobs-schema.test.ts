@@ -27,8 +27,8 @@ const LATER_TABLES = [
  * the table's text grows by exactly that): taken out before comparing, and nothing else may differ.
  */
 const LATER_COLUMNS: Record<string, string[]> = {
-  // google-drive.md "Overwriting": the file a put gave a new revision; "A Google document's own changes": its text's fingerprint.
-  google_drive_puts: ['updated_file_id TEXT', 'doc_fingerprint TEXT'],
+  // google-drive.md "Overwriting": the file a put gave a new revision; "A Google document's own changes": its baseline.
+  google_drive_puts: ['updated_file_id TEXT', 'doc_fingerprint TEXT', 'doc_revision TEXT', 'doc_baseline_at TEXT'],
 }
 
 const objects = (conn: Database.Database) => (conn.prepare(`SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name`).all() as Array<{ type: string; name: string; tbl_name: string; sql: string | null }>)

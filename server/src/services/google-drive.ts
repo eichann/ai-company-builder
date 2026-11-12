@@ -42,7 +42,7 @@ import { neutralizeOutsideText, outsideTextFlags } from '../../shared/core/outsi
 import type { DriveAiStatus, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerPageConfig, DrivePickTicketStarted, DrivePickTicketState, DrivePicksResult, DrivePutAnswer, DrivePutView, DriveReadAnswer, DriveUpdatableFile } from '../../shared/types/google-drive'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
-import type { DrivePickRow, DrivePutRow, PickTicketDirectory } from '../ports/google-drive'
+import type { DriveDocBaseline, DrivePickRow, DrivePutRow, PickTicketDirectory } from '../ports/google-drive'
 import type { Member } from './access'
 import type { GoogleClient, GoogleRequest, GoogleResult } from './google-client'
 import { cleanExportText } from './google-meetings'
@@ -58,6 +58,8 @@ export interface GoogleDriveDeps {
   vaultEnabled(): boolean
   /** Where the Picker page loads Google's script from (https://apis.google.com, or the practice Google's origin). */
   pickerScriptOrigin: string
+  /** Between the two reads of a Google document right after a put, and before an export's one retry (ms; default 1500). */
+  docSettleMs?: number
   /** sha256 of bytes, lower-case hex (composition: node's crypto). */
   sha256(bytes: Uint8Array): string
   /** The membership now (a pick ticket's member must still be one when the page uses it). */
@@ -217,33 +219,81 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     return null
   }
 
+  const settleMs = deps.docSettleMs ?? 1500
+  const settle = () => new Promise<void>(resolve => setTimeout(resolve, settleMs))
+
   /**
    * A Google document's fingerprint (google-drive.md "A Google document's own changes"): the sha256 of its text as Drive
    * exports it (`text/plain`, the export `drive_read` uses; BOM and line ends cleaned), with the member's own `drive.file`
-   * token (a file ACB made: the scope allows exporting it). Null when the export failed or was refused (too large…).
+   * token (a file ACB made: the scope allows exporting it). A failed export is tried once more after a short wait; null
+   * when that fails too (refused, too large, no answer).
    */
   async function docFingerprint(companyId: string, userId: string, fileId: string): Promise<string | null> {
-    const r = await drive(companyId, userId, {
-      method: 'GET', path: `/drive/v3/files/${fileId}/export`, query: { mimeType: 'text/plain' }, binary: true, operation: 'drive.files.export',
-    })
-    if (!r.ok || !r.bytes) return null
-    return deps.sha256(new TextEncoder().encode(cleanExportText(new TextDecoder().decode(r.bytes))))
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await settle()
+      const r = await drive(companyId, userId, {
+        method: 'GET', path: `/drive/v3/files/${fileId}/export`, query: { mimeType: 'text/plain' }, binary: true, operation: 'drive.files.export',
+      })
+      if (r.ok && r.bytes) return deps.sha256(new TextEncoder().encode(cleanExportText(new TextDecoder().decode(r.bytes))))
+    }
+    return null
   }
 
   /**
-   * Right after a put made or updated a Google document (its answer in hand): its fingerprint kept on the receipt — only
-   * when the text exported is provably ACB's own: the file's `modifiedTime` after the export is still the one Drive
-   * answered the upload with (someone's edit in between moves it). Anything else (no time in the answer, a failed export
-   * or lookup, a time that moved) keeps none, so a later update is refused as not verifiable — never another's text
-   * taken for ACB's. Viewing a file does not move `modifiedTime`.
+   * A Google document's newest revision (`revisions.list`, every page; a `drive.file` call on a file ACB made): a change
+   * of its content, formatting or images makes a new one, viewing does not. Null when it could not be read in full.
+   * (Kept as the whole entry's id; who made later revisions — `lastModifyingUser` — is the next step's to read.)
    */
-  async function keepDocFingerprint(companyId: string, row: Pick<DrivePutRow, 'id' | 'userId' | 'mimeType' | 'fileId' | 'state'>, uploadedAt: string | null): Promise<void> {
+  async function docNewestRevision(companyId: string, userId: string, fileId: string): Promise<string | null> {
+    let pageToken: string | null = null
+    let newest: string | null = null
+    for (let page = 0; page < 10; page++) {
+      const r = await drive(companyId, userId, {
+        method: 'GET', path: `/drive/v3/files/${fileId}/revisions`,
+        query: { fields: 'nextPageToken,revisions(id,modifiedTime)', pageSize: '1000', ...(pageToken ? { pageToken } : {}) },
+        operation: 'drive.revisions.list',
+      })
+      if (!r.ok || !isObj(r.json)) return null
+      const revs = Array.isArray(r.json.revisions) ? r.json.revisions.filter(isObj) : []
+      const last = revs[revs.length - 1]
+      if (last) newest = typeof last.id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(last.id) ? last.id : null
+      pageToken = str(r.json.nextPageToken)
+      if (!pageToken) return newest
+    }
+    return null
+  }
+
+  /** Whether anyone made or changed a comment (or a reply) on the file after `since`; null when it could not be read. */
+  async function commentedSince(companyId: string, userId: string, fileId: string, since: string): Promise<boolean | null> {
+    const r = await drive(companyId, userId, {
+      method: 'GET', path: `/drive/v3/files/${fileId}/comments`,
+      query: { fields: 'comments(id,modifiedTime)', startModifiedTime: since, includeDeleted: 'true', pageSize: '1' },
+      operation: 'drive.comments.list',
+    })
+    if (!r.ok || !isObj(r.json)) return null
+    return Array.isArray(r.json.comments) && r.json.comments.length > 0
+  }
+
+  /**
+   * Right after Drive answered a put that made or updated a Google document — inside that request only: its baseline,
+   * kept on the receipt only when it is provably ACB's own: two exports a moment apart give the same text (not a stale or
+   * half-processed one), the newest revision is read, and the file's `modifiedTime` is still the upload answer's
+   * (anyone's edit in between moves it; viewing does not). Anything else keeps none, so a later update is refused as not
+   * verifiable — never another's text taken for ACB's. A put found after a lost answer never gets one (`reconcile`).
+   */
+  async function keepDocBaseline(companyId: string, row: Pick<DrivePutRow, 'id' | 'userId' | 'mimeType' | 'fileId' | 'state'>, uploadedAt: string | null): Promise<void> {
     if (row.mimeType !== DRIVE_DOC_MIME || row.state !== 'done' || !row.fileId || !uploadedAt) return
-    const fp = await docFingerprint(companyId, row.userId, row.fileId)
-    if (!fp) return
+    const first = await docFingerprint(companyId, row.userId, row.fileId)
+    if (!first) return
+    await settle()
+    const second = await docFingerprint(companyId, row.userId, row.fileId)
+    if (second !== first) return
+    const revision = await docNewestRevision(companyId, row.userId, row.fileId)
+    if (!revision) return
     const m = await meta(companyId, row.userId, row.fileId)
     if (!m.ok || !isObj(m.json) || str(m.json.modifiedTime) !== uploadedAt) return
-    handle(companyId).googleDrive.setDocFingerprint(row.id, fp)
+    const baseline: DriveDocBaseline = { fingerprint: first, revision, at: uploadedAt }
+    handle(companyId).googleDrive.setDocBaseline(row.id, baseline)
   }
 
   /** Looks for ACB's own file of a put whose answer was lost: by the put's id in appProperties. */
@@ -722,7 +772,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         // An update keeps the Drive file's name (Drive is not asked to rename it): the receipt says the name it has.
         folderId: body.folderId, folderName: folderPick.name, name: target ? target.name : named.name, mimeType: form.driveMime, bytes: bytes.byteLength, sha256: body.sha256,
         state: 'sending', fileId: null, revisionId: null, link: null, reason: null, createdAt: now, finishedAt: null, skills: null, updatedFileId: targetId,
-        docFingerprint: null,
+        docBaseline: null,
       }
 
       // The receipt first: the same request (the app's key: same file, folder, name, form and target) is answered with what it made.
@@ -775,13 +825,23 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         // Someone changed it in Drive since ACB's last put: never written over.
         const changedSince = refuse('conflict', 'このファイルは、前に置いたあとに Google Drive で直されています。上書きすると直したところが消えるため、新しいファイルとして置いてください。', { code: 'DRIVE_FILE_CHANGED_SINCE' })
         if (form.driveMime === DRIVE_DOC_MIME) {
-          // A Google document's `version` moves without any edit (real Google, 2026-11-12: opened once, nothing typed): its
-          // text is compared instead — exported now against the export kept right after ACB's last put. Never `version`.
-          const notVerifiable = (why: string) => refuse('conflict', `${why}上書きせずに、新しいファイルとして置いてください。`, { code: 'DRIVE_FILE_NOT_VERIFIABLE' })
-          if (!target?.docFingerprint) return notVerifiable('このファイルは、前に置いたときの中身を ACB が控えていないため、直されていないか確かめられません。')
+          // A Google document's `version` moves without any edit (real Google, 2026-11-12: opened once, nothing typed). Its
+          // baseline is compared instead — text, newest revision and comments — and any doubt refuses. Never `version`.
+          const notVerifiable = (why: string) => refuse('conflict', `${why}、Google Drive で直されていないか確かめられないため、上書きしません。新しいファイルとして置いてください。`, { code: 'DRIVE_FILE_NOT_VERIFIABLE' })
+          const base = target?.docBaseline
+          if (!base) return notVerifiable('このファイルは前に置いたときの控えがなく')
           const now = await docFingerprint(member.companyId, member.userId, targetId)
-          if (now === null) return notVerifiable('このファイルの今の中身を Google Drive から読めなかったため、直されていないか確かめられません。')
-          if (now !== target.docFingerprint) return changedSince
+          if (now === null) return notVerifiable('このファイルの今の中身を読めず')
+          if (now !== base.fingerprint) return changedSince
+          // Formatting, images, a chart or a suggestion change no text but make a new revision.
+          const revision = await docNewestRevision(member.companyId, member.userId, targetId)
+          if (revision === null) return notVerifiable('このファイルの変更履歴を読めず')
+          if (revision !== base.revision) return changedSince
+          const commented = await commentedSince(member.companyId, member.userId, targetId, base.at)
+          if (commented === null) return notVerifiable('このファイルのコメントを読めず')
+          if (commented) {
+            return refuse('conflict', 'このファイルには、前に置いたあとにコメントが付いています。上書きするとコメントが外れるおそれがあるため、新しいファイルとして置いてください。', { code: 'DRIVE_FILE_CHANGED_SINCE' })
+          }
         } else {
           // A file with binary content: its head revision is the receipt's (it changes only with new content).
           const current = driveRevisionOf(tf.headRevisionId, tf.version)
@@ -838,7 +898,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           link: str(j.webViewLink) ?? target?.link ?? null, reason: null, finishedAt: clock.now(),
         }
         h.googleDrive.settlePut(id, settled)
-        await keepDocFingerprint(member.companyId, { ...row, ...settled }, str(j.modifiedTime))
+        await keepDocBaseline(member.companyId, { ...row, ...settled }, str(j.modifiedTime))
         return ok({ drivePut: putView({ ...row, ...settled }), existing: false })
       }
       if (r.kind === 'unknown' || r.kind === 'server-error') {
