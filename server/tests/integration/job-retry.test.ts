@@ -42,6 +42,9 @@ import { sqliteMembershipRepository } from '../../src/adapters/sqlite/membership
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import { randomIds } from '../../src/adapters/system'
 import { occurrenceTaskId } from '../../../shared/core/jobs'
+import { nextJobSlot } from '../../../shared/core/job-schedule'
+import { companyTimeToUtc } from '../../src/services/job-occurrences'
+import { companyNow } from '../../src/services/notifications'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
@@ -69,6 +72,11 @@ const owner = (co = CO) => ({ companyId: co, userId: 'jy-owner', role: 'owner' }
 const alice = (co = CO) => ({ companyId: co, userId: 'jy-alice', role: 'member' })
 const companyData = sqliteCompanyData(db)
 const clock = { now: () => new Date().toISOString(), nowMs: () => Date.now() }
+/** The deadline a press gives a daily 09:00 job: its window from now, but never past the next 09:00 (company time). */
+function deadlineOf(windowMinutes: number, nowMs = Date.now()): number {
+  const next = nextJobSlot({ every: 'day', at: '09:00', businessDaysOnly: false }, companyNow(nowMs, 'Asia/Tokyo'), [])
+  return Math.min(nowMs + windowMinutes * MINUTE, Date.parse(companyTimeToUtc(next as string, 'Asia/Tokyo')))
+}
 
 function publishSkill(co = CO): string {
   const current = (db.prepare("SELECT current_version FROM shelf_items WHERE company_id = ? AND name = 'interview-report'").get(co) as Json)?.current_version ?? null
@@ -304,7 +312,7 @@ describe('the press', () => {
     const after = occOf(occ)
     expect(after).toMatchObject({ state: 'due', outcome_code: null, run_id: null, retries: 1, retried_by: 'jy-admin' })
     // The deadline: from the press, as long as the approved version gives a slot (1440 minutes here).
-    expect(Date.parse(after.expires_at)).toBe(pressedAt + 1440 * MINUTE)
+    expect(Date.parse(after.expires_at)).toBe(deadlineOf(1440, pressedAt))
     expect(Date.parse(after.retried_at)).toBe(pressedAt)
     // The old run is closed for good: its own 「もう一度」 gives nothing back.
     expect(runOf(first.id)).toMatchObject({ state: 'done', closed_at: expect.any(String) })
@@ -323,6 +331,19 @@ describe('the press', () => {
     expect(occOf(occ)).toMatchObject({ state: 'done', run_id: second.id })
     expect(db.prepare("SELECT id FROM records WHERE company_id = ? AND type = 'task'").all(CO)).toEqual([{ id: occurrenceTaskId(occ) }])
     vi.setSystemTime(Date.now() - 60 * MINUTE)
+  })
+
+  it('the new deadline never passes the job’s next slot (the next occurrence’s check starts where this one stops)', async () => {
+    const job = await approvedJob()
+    const occ = occurrence(job, 'expired', { outcome: 'EXPIRED' })
+    const next = new Date(Date.now() + 30 * MINUTE).toISOString()
+    const jobRetry = createJobRetry({
+      companyData, transactions: sqliteTransactions(db), clock, jobs: services.jobs,
+      roleOf: (co, user) => sqliteMembershipRepository(db).roleOf(co, user), aiStops: () => ({ all: false, tools: [] }),
+      nextSlotAt: () => next, reconcileFor: () => { throw new Error('unused') },
+    })
+    expect(jobRetry.retry(owner(), job, occ).ok).toBe(true)
+    expect(occOf(occ).expires_at).toBe(next)
   })
 
   it('an expired occurrence that never ran is claimed after the press', async () => {
@@ -359,7 +380,7 @@ describe('the press', () => {
     expect((await services.jobs.accept(alice(), made.value.id, { version: 1 })).ok).toBe(true)
     const occ = occurrence(made.value.id, 'needs_person', { outcome: 'TASK_NOT_CREATED' })
     expect(await retry('jy-owner', made.value.id, occ)).toMatchObject({ status: 200 })
-    expect(Date.parse(occOf(occ).expires_at)).toBe(Date.now() + 60 * MINUTE)
+    expect(Date.parse(occOf(occ).expires_at)).toBe(deadlineOf(60))
     const made2: string[] = []
     const runner = createJobOccurrences({
       companyData, transactions: sqliteTransactions(db), clock, ids: randomIds,
@@ -399,6 +420,16 @@ describe('結果が分からないうちは再開しない', () => {
     expect(await retry('jy-owner', job, occ)).toMatchObject({ status: 200 })
     expect(runOf(run.id).state).toBe('done')
     expect(await claim(occ, 'device-alice-2')).toMatchObject({ status: 201, body: { data: { created: true } } })
+  })
+
+  it('an operation left marked in flight on an ended run is offered and reconciled as unknown (never stuck)', async () => {
+    const job = await approvedJob()
+    const { occ, run } = await unknownResult(job)
+    db.prepare("UPDATE ai_run_operations SET state = 'in_progress' WHERE company_id = ? AND run_id = ?").run(CO, run.id)
+    expect(await occurrenceView('jy-owner', job, occ)).toMatchObject({ retry: { allowed: false, why: 'JOB_RESULT_UNKNOWN' }, unknownOperations: [{ key: 'draft-1' }] })
+    expect(await reconcile('jy-owner', job, occ, 'draft-1', { done: false })).toMatchObject({ status: 200 })
+    expect(db.prepare('SELECT state FROM ai_run_operations WHERE company_id = ? AND run_id = ?').get(CO, run.id)).toEqual({ state: 'not_done' })
+    expect((await retry('jy-owner', job, occ)).status).toBe(200)
   })
 
   it('reconciling only an occurrence a person looks at (not one still running)', async () => {

@@ -641,14 +641,17 @@ POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }  
   event `finished` `RETRIED`, its tokens fenced and its own 「もう一度」 `RUN_DONE` — so the next claim makes a **new
   run**: its hard deadline (`pcRunDeadlineMs`) counts from that claim (a person's press is a fresh chance; the old
   "retries included" holds for the run's own retries). The occurrence `due`, no run, no outcome, **`expires_at` = now
-  + the pinned `missed.expiresAfterMinutes`** (`jobRetryExpiresAt`: the window the approved version gives a slot,
-  counted from the press — `due_at`, the slot and `checked_until` / `checked_commit` stay, so it looks at the same
-  window), `retries` + 1, `retried_by` / `retried_at` (who pressed it, as `approved_by` / `paused_by` keep theirs).
+  + the pinned `missed.expiresAfterMinutes`, but never past the job's next slot** (`jobRetryExpiresAt`, `nextSlotAt`
+  from composition: the clock's zone and days off; the window the approved version gives a slot, counted from the
+  press — and the next occurrence, whose check starts where the last one that ran stopped, never runs beside it; a run
+  whose app still holds its lease past that time finishes as any other, as before) — `due_at`, the slot and
+  `checked_until` / `checked_commit` stay, so it looks at the same window —, `retries` + 1, `retried_by` / `retried_at` (who pressed it, as `approved_by` / `paused_by` keep theirs).
   Then the server's runner (placement `e`) or the responsible person's app (`GET /me/job-turns` → `POST
   /job-run-claims`, every claim check again — an absence that day still skips it) takes it; the やること is still
   `occurrenceTaskId` (one per occurrence). Nobody is told of the press (the app polls its turns every minute).
 - **Reconcile** (`reconcile`): only on a `needs_person` / `expired` occurrence (else 409 `NOT_RETRYABLE`), the body
-  `{ done: boolean }` (400), an operation of its PC run whose result is unknown (else 404 `OPERATION_NOT_FOUND`); the
+  `{ done: boolean }` (400), an operation of its PC run whose result is unknown (else 404 `OPERATION_NOT_FOUND`; one
+  still marked in flight on a run that no longer runs is made `unknown` first, as a finish does — never stuck); the
   run core's reconciliation (`aiRuns.reconcileFor`, shared with `reconcile`: `reconciled_by` = the owner / admin, a run
   `waiting_reconcile` with nothing unknown left → `open`). The admin console asks them to have the responsible person
   look first (an owner / admin cannot see the person's drafts).
@@ -659,7 +662,9 @@ POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }  
   second failure is told once more (the bell reads the job and occurrence from the first two parts, an older build too).
 - **The app** (`client/shared/ai-turn-steps/job.ts`): the turn's `retries` (additive) makes the queue's `attemptKey`
   `<occurrence>#<retries>`, so today's attempts count per occurrence and press (`attemptsOf` in `aiTurns.ts`) — an
-  occurrence that used up its two tries today runs again after a press.
+  occurrence that used up its two tries today runs again after a press (the member's own 「もう一度」 on the row clears
+  those too) — and the candidate's `version` is `1 + retries`
+  (a job claim names no record version), so a PC that saw it taken by another before the press asks again after it.
 - **Admin console** (`admin/src/components/jobs/job-occurrences.tsx`, 回の記録): ［もう一度］ only where the server says
   `allowed`, after a confirmation saying what happens (a PC job: when the responsible person's app is open with
   「自動で進める」; the deadline counted again; still one やること); otherwise 「「もう一度」はできません：…」; who pressed it

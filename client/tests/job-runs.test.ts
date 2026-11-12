@@ -89,6 +89,9 @@ test('「もう一度」 (B PR 5b): the press count reaches the queue, so a pres
   const pressed = parseJobTurn(turn({ retries: 2 }))
   assert.equal(pressed?.retries, 2)
   assert.equal(jobTurnCandidate(pressed!).attemptKey, `${pressed!.occurrenceId}#2`)
+  // Seen taken (another PC held it) before the press: the runner remembers it per id and version — the press is another.
+  assert.equal(jobTurnCandidate(pressed!).version, 3)
+  assert.equal(jobTurnCandidate(parseJobTurn(turn())!).version, 1)
   // Never pressed, or not a count: counted under the occurrence as before.
   for (const retries of [undefined, 0, -1, 1.5, '2']) assert.equal(jobTurnCandidate(parseJobTurn(turn({ retries }))!).attemptKey, undefined)
 })

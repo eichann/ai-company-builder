@@ -255,7 +255,8 @@ export function retried(log: AiTurnLog, recordId: string): AiTurnLog {
   const handed = { ...log.handed }
   delete handed[recordId]
   const attempts = { ...log.attempts }
-  delete attempts[recordId]
+  // A job occurrence's attempts after an owner's 「もう一度」 are counted under `<id>#<presses>` (`attemptKey`).
+  for (const key of Object.keys(attempts)) if (key === recordId || key.startsWith(`${recordId}#`)) delete attempts[key]
   return { ...resumed(log), handed, attempts }
 }
 

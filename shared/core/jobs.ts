@@ -554,10 +554,13 @@ export type JobRetryBlock = typeof JOB_RETRY_BLOCKS[number]
 /**
  * The new deadline of an occurrence sent back by 「もう一度」: from the press, as long as the pinned version gives a
  * slot (`missed.expiresAfterMinutes`; the clock's `expires_at` = `due_at` + it) — the window the approved version
- * chose, counted from now instead of from the slot.
+ * chose, counted from now instead of from the slot — but never past the job's next slot (`nextSlotAt`, UTC ISO):
+ * the next occurrence's check starts where the last one that ran stopped, so the two must not run side by side.
  */
-export function jobRetryExpiresAt(nowMs: number, expiresAfterMinutes: number): string {
-  return new Date(nowMs + expiresAfterMinutes * 60_000).toISOString()
+export function jobRetryExpiresAt(nowMs: number, expiresAfterMinutes: number, nextSlotAt: string | null = null): string {
+  const window = nowMs + expiresAfterMinutes * 60_000
+  const next = nextSlotAt === null ? NaN : Date.parse(nextSlotAt)
+  return new Date(Number.isNaN(next) ? window : Math.min(window, next)).toISOString()
 }
 
 /**

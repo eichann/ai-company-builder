@@ -86,7 +86,8 @@ import { createSkillUseService } from './services/skill-uses'
 import { createSkillShelfService } from './services/skill-shelf'
 import { createGroupService } from './services/groups'
 import { createJobService } from './services/jobs'
-import { createJobOccurrences, createJobRunner } from './services/job-occurrences'
+import { companyTimeToUtc, createJobOccurrences, createJobRunner } from './services/job-occurrences'
+import { nextJobSlot } from '../shared/core/job-schedule'
 import { companySkillTree } from './lib/skill-trees'
 import { createServerClock } from './services/server-clock'
 import { createSecurityAlertService } from './services/security-alerts'
@@ -760,6 +761,10 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     aiStops: member => agentStops.policyFor(member),
     placeUsable: (companyId, userId, place) => deliveryPlaces.live(companyId, userId, place) !== null,
     reconcileFor: (companyId, runId, key, done, by) => aiRuns.reconcileFor(companyId, runId, key, done, by),
+    nextSlotAt: (companyId, definition) => {
+      const slot = nextJobSlot(definition.trigger, companyNow(shared.clock.nowMs(), DEFAULT_COMPANY_TIME_ZONE), taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date))
+      return slot ? companyTimeToUtc(slot, DEFAULT_COMPANY_TIME_ZONE) : null
+    },
   })
 
   // The parallel lanes (A connectors, B inbox, C plugins) wire their services in their own files

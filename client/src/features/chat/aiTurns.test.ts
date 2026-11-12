@@ -382,6 +382,10 @@ test('a job occurrence sent back by 「もう一度」 is tried again today', ()
   assert.equal(pressed.id, id)
   assert.deepEqual(nextAiTurn(input({ log, queue: [pressed] })), { run: pressed })
   assert.equal(jobTurnCandidate(TURN as QueuedJobTurn).attemptKey, undefined)
+  // Tried twice after the press too: the member's own 「もう一度」 on the row clears those attempts as well.
+  for (let i = 0; i < MAX_ATTEMPTS_PER_RECORD; i++) log = recordStarted(log, pressed.attemptKey as string, true)
+  assert.deepEqual(nextAiTurn(input({ log, queue: [pressed] })), { wait: 'empty' })
+  assert.deepEqual(nextAiTurn(input({ log: retried(log, id), queue: [pressed] })), { run: pressed })
 })
 
 // A claim not won (a job's place not synced yet, the server unreachable) is not a start: it waits a while instead of

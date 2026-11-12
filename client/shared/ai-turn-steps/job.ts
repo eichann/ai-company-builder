@@ -106,7 +106,9 @@ export function parseJobTurns(data: unknown): QueuedJobTurn[] | null {
 /** The runner's queue entry: never handed to the person for being due soon (its due is the slot, not a deadline). */
 export function jobTurnCandidate(turn: QueuedJobTurn): AiTurnCandidate {
   return {
-    id: turn.occurrenceId, title: turn.name, version: 1, dueAt: turn.dueAt, state: turn.state, job: true, notUrgent: true,
+    // `version` counts the presses of 「もう一度」 (a job claim names no record version): a PC that saw the occurrence
+    // taken by another before a press asks again after it (the runner remembers what was taken per id and version).
+    id: turn.occurrenceId, title: turn.name, version: 1 + (turn.retries ?? 0), dueAt: turn.dueAt, state: turn.state, job: true, notUrgent: true,
     // 「もう一度」: each press is tried afresh on this PC (today's attempts count per occurrence and press).
     ...(turn.retries ? { attemptKey: `${turn.occurrenceId}#${turn.retries}` } : {}),
   }

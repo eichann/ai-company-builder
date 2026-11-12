@@ -48,6 +48,8 @@ export interface JobRetryDeps {
   aiStops: (member: Member) => AgentStopPolicy
   /** The responsible person's chosen deliverable place is usable now (its connector answers). Absent → never. */
   placeUsable?: (companyId: string, userId: string, place: JobDeliveryPlace) => boolean
+  /** The job's next slot after now (UTC ISO; the clock's zone and days off), or null: the new deadline never passes it. */
+  nextSlotAt?: (companyId: string, definition: JobDefinition) => string | null
   /** The run core's reconciliation for a run the caller does not hold (services/ai-runs.ts `reconcileFor`). */
   reconcileFor: (companyId: string, runId: string, key: string, done: boolean, byUserId: string) => Outcome<{ run: AiRunView }>
 }
@@ -149,7 +151,8 @@ export function createJobRetry(deps: JobRetryDeps) {
           const at = new Date(nowMs).toISOString()
           const run = occ.runId ? handle.aiRuns.byId(occ.runId) : null
           if (run && !closeRun(handle, run, at)) throw new Refused(BLOCKED('NOT_RETRYABLE'))
-          const expiresAt = jobRetryExpiresAt(nowMs, definitionOf(f.version as JobVersionRow).missed.expiresAfterMinutes)
+          const definition = definitionOf(f.version as JobVersionRow)
+          const expiresAt = jobRetryExpiresAt(nowMs, definition.missed.expiresAfterMinutes, deps.nextSlotAt?.(handle.companyId, definition) ?? null)
           if (!handle.jobs.retryOccurrence(occ.id, JOB_RETRY_STATES, expiresAt, member.userId, at)) throw new Refused(BLOCKED('NOT_RETRYABLE'))
           const after = handle.jobs.occurrence(occ.id) as JobOccurrenceRow
           return ok({ occurrence: { ...occurrenceView(after), ...viewOf(handle.companyId, after) } })
@@ -173,6 +176,8 @@ export function createJobRetry(deps: JobRetryDeps) {
       if (!run || run.step !== JOB_PC_STEP || !unknownOperations(f.handle, f.occ).some(o => o.key === key)) {
         return refuse('not-found', '操作が見つかりません', { code: 'OPERATION_NOT_FOUND' })
       }
+      // An operation still marked in flight on a run that no longer runs may have happened: unknown, as a finish makes it.
+      if (run.state !== 'running') f.handle.aiRuns.updateOperation(run.id, key, ['in_progress'], { state: 'unknown' }, clock.now())
       const settled = deps.reconcileFor(member.companyId, run.id, key, done, member.userId)
       return settled.ok ? ok({ occurrenceId: f.occ.id }) : settled
     },
