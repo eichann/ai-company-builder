@@ -22,7 +22,7 @@ import { createApiKeyStore } from './services/api-key-store'
 import { createShellEnvironment } from './services/shell-env'
 import { configureAgentEnv } from './agents/agent-env'
 import { createClaudeCli } from './services/claude-cli'
-import { createAppPages, createBroadcastPort, createDrivePickerWindow, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, receiveAppLinks, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
+import { createAppPages, createBroadcastPort, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, receiveAppLinks, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
 import { diskFiles, registerChatWindowsIpc } from './features/chat-windows/ipc'
 import { createSession } from './services/session'
 import { registerAuthIpc } from './features/auth/ipc'
@@ -318,8 +318,9 @@ const writeAccessStore = createWriteAccessStore({
 const { tokens: brokerTokens } = wireKeyBroker(ipc, { serverUrl: getServerApiUrl, session, paths: allowedRoots, shellEnv, shell: desktopShell, lifecycle })
 // 「Google で許可」 (features/google): the session stays here; the sign-in page opens in the browser.
 const googleApi = registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
-// Google Drive (google-drive.md): the person picks in Google Picker's own window; the session stays here.
-const drivePicking = createDrivePicking({ baseUrl: getServerApiUrl, cookies: session.cookies, window: createDrivePickerWindow(__dirname), google: googleApi })
+// Google Drive (google-drive.md): the person picks in Google Picker in their own browser (a one-time pick
+// ticket; Google needs a signed-in browser); the session stays here and waits for the result.
+const drivePicking = createDrivePicking({ baseUrl: getServerApiUrl, cookies: session.cookies, openBrowser: url => desktopShell.openExternal(url), google: googleApi })
 // 「今日の予定」 (features/calendar): the member's own meetings today, read by the server with the session here.
 registerCalendarIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The task list (features/tasks): read and changed with the session here; the server decides who may.

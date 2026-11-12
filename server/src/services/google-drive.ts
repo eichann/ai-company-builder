@@ -8,12 +8,15 @@
  * files a person picked with Google Picker or ACB created. On top of that,
  * ACB keeps the person's picks (`google_drive_picks`) and reads or writes into
  * nothing else: the AI can read a file or put into a folder only after the
- * member chose it in the Picker window.
+ * member chose it in Google Picker.
  *
- * - The Picker's token (`pickerSession`, the member's app session only): a
- *   fresh access token with exactly `drive.file` (google-client.ts
- *   `pickerToken`), the admin's Picker API key and app id. Never to a record
- *   token, never stored or logged.
+ * - The Picker's token: a fresh access token with exactly `drive.file`
+ *   (google-client.ts `pickerToken`), the admin's Picker API key and app id,
+ *   handed once to the Picker page in the member's browser that holds a
+ *   one-time pick ticket the member's app asked for with its session
+ *   (`startPick` → `pageConfig` → `pageResult`; Google Picker needs a
+ *   signed-in browser, so it is not shown inside the app). Never to a record
+ *   token, never stored or logged; the ticket is stored as its sha256.
  * - Picks (`savePicks`, session): every id is opened with Google first (drive.file
  *   answers only for files picked through the Picker for this app); a folder
  *   must be a folder the member can add to, a file one ACB can read.
@@ -30,20 +33,20 @@
  */
 import { GOOGLE_SCOPE } from '../../shared/core/google'
 import {
-  checkDriveFileName, checkDrivePutContent, DRIVE_FOLDER_MIME, DRIVE_PICK_MAX_FILES, DRIVE_PICK_TTL_MS, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, DRIVE_READ_AS,
+  checkDriveFileName, checkDrivePutContent, DRIVE_FOLDER_MIME, DRIVE_PICK_MAX_FILES, DRIVE_PICK_TICKET_RE, DRIVE_PICK_TICKET_TTL_MS, DRIVE_PICK_TTL_MS, drivePreselectIds, isDrivePickTicket, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, DRIVE_READ_AS,
   DRIVE_READ_PDF_MAX_BYTES, DRIVE_READ_TEXT_MAX, DRIVE_TEXT_FOOTER, DRIVE_TEXT_HEADER, driveDocFetchesOutside, driveFolderReachesOutside, drivePutForm, driveRevisionOf, isDriveId, isDrivePickMode,
   type DrivePermissionLike,
 } from '../../shared/core/google-drive'
 import { INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
 import { neutralizeOutsideText, outsideTextFlags } from '../../shared/core/outside-text'
-import type { DriveAiStatus, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerSession, DrivePicksResult, DrivePutAnswer, DrivePutView, DriveReadAnswer, DriveUpdatableFile } from '../../shared/types/google-drive'
+import type { DriveAiStatus, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerPageConfig, DrivePickTicketStarted, DrivePickTicketState, DrivePicksResult, DrivePutAnswer, DrivePutView, DriveReadAnswer, DriveUpdatableFile } from '../../shared/types/google-drive'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { DrivePickRow, DrivePutRow } from '../ports/google-drive'
 import type { Member } from './access'
 import type { GoogleClient, GoogleRequest, GoogleResult } from './google-client'
 import { cleanExportText } from './google-meetings'
-import { ok, refuse, type Outcome } from './outcome'
+import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
 export interface GoogleDriveDeps {
   companyData: CompanyDataSource
@@ -57,6 +60,8 @@ export interface GoogleDriveDeps {
   pickerScriptOrigin: string
   /** sha256 of bytes, lower-case hex (composition: node's crypto). */
   sha256(bytes: Uint8Array): string
+  /** The membership now (a pick ticket's member must still be one when the page uses it). */
+  memberOf(companyId: string, userId: string): Member | null
 }
 
 /**
@@ -98,6 +103,33 @@ const OWN_FILES_LISTED = 30
 const PERMISSION_PAGES = 5
 
 const STOPPED = 'この会社では、いま Google につなげません（止められているか、まだ設定されていません）。'
+const PICKER_NOT_CONFIGURED = '管理者が Google Drive のファイル選び（Picker）をまだ設定していません。管理者に「つなぎ先」→「Google」の設定を頼んでください。'
+const FEATURE_OFF = '「Drive で選んだものを読む・置く」をオフにしています。アプリの「設定」→「Google」でオンにしてください。'
+const GOOGLE_UNAVAILABLE_TEXT = 'Google Drive とやりとりできませんでした。少し待ってからもう一度お試しください。'
+const APP_UPDATE_NEEDED = 'Google Drive のファイル選びは、新しいアプリで使えます（ブラウザで選ぶ形になりました）。アプリを新しくしてから、もう一度お試しください。'
+/** A ticket a page can no longer use (unknown, another company's, expired, used, closed): one answer for all. */
+const TICKET_GONE = refuse('gone', 'この画面は、もう使えません。アプリに戻って、もう一度 Google Drive から選び始めてください。', { code: 'PICK_TICKET_GONE' })
+const TICKET_NOT_FOUND = refuse('not-found', 'この Google Drive の選び直しは見つかりません。', { code: 'PICK_TICKET_NOT_FOUND' })
+/** A pick being saved (Google asked about each id) gets this long past the ticket's end. */
+const SAVING_GRACE_MS = 2 * 60 * 1000
+
+/** The stored result of a picked ticket (written by this module), read back strictly. */
+function pickedState(raw: string | null): DrivePickTicketState {
+  try {
+    const v = JSON.parse(raw ?? '') as unknown
+    if (isObj(v) && Array.isArray(v.picks) && typeof v.refused === 'number') return { state: 'picked', picks: v.picks as DrivePick[], refused: v.refused }
+  } catch { /* fall through */ }
+  return { state: 'failed', error: '選んだものを確かめられませんでした。' }
+}
+
+function failedError(raw: string | null): string {
+  try {
+    const v = JSON.parse(raw ?? '') as unknown
+    if (isObj(v) && typeof v.error === 'string') return v.error
+  } catch { /* fall through */ }
+  return 'Google Drive のファイル選びを始められませんでした。'
+}
+
 const NO_CONSENT = 'Google Drive を使う許可がまだありません。アプリが Google の画面を開くので、メンバーに「許可」を押してもらってください（Drive は、メンバーが選んだファイルとフォルダだけを使います）。'
 
 /** A Google call that did not give a usable answer → the member-facing refusal. */
@@ -208,6 +240,34 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     return { ...row, ...settled }
   }
 
+  /** The Picker is registered and the member has the Drive permission (else the app asks Google first). */
+  function pickReady(member: Member): Refusal | null {
+    const c = handle(member.companyId).connectors
+    if (!c.picker()) return refuse('conflict', PICKER_NOT_CONFIGURED, { code: 'DRIVE_PICKER_NOT_CONFIGURED' })
+    const grant = c.grant('google', member.userId)
+    if (!grant || grant.status !== 'active' || !grant.scopes.includes(GOOGLE_SCOPE.driveFile)) {
+      return refuse('conflict', NO_CONSENT, { code: 'GOOGLE_CONSENT_NEEDED', needsGoogleConsent: 'drive' })
+    }
+    if (grant.featuresOff.includes('drive')) return refuse('conflict', FEATURE_OFF, { code: 'GOOGLE_FEATURE_OFF', feature: 'drive' })
+    return null
+  }
+
+  const ticketHash = (ticket: string) => deps.sha256(new TextEncoder().encode(ticket))
+
+  /**
+   * The open, unexpired ticket a Picker page names: the company from the ticket itself, the row looked for
+   * by the ticket's sha256 inside that company only. Anything else (unknown, another company's, expired,
+   * already answered) is null and answered alike.
+   */
+  function ticketOf(body: unknown) {
+    if (!isObj(body) || !isDrivePickTicket(body.ticket)) return null
+    const companyId = DRIVE_PICK_TICKET_RE.exec(body.ticket)![1]
+    const h = handle(companyId).googleDrive
+    const row = h.pickTicketByHash(ticketHash(body.ticket))
+    if (!row || row.state !== 'open' || clock.nowMs() >= Date.parse(row.expiresAt)) return null
+    return { h, row, companyId }
+  }
+
   return {
     /** Where the Picker page loads Google's script from (its CSP names it). */
     pickerScriptOrigin: deps.pickerScriptOrigin,
@@ -239,25 +299,145 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       })
     },
 
-    /** POST …/me/google/drive/picker { mode } (session): what the app's Picker window needs. */
-    async pickerSession(member: Member, body: unknown): Promise<Outcome<DrivePickerSession>> {
+    /**
+     * POST …/me/google/drive/picker { mode } (session): the old Picker window's token (released apps up to
+     * release-20261109). Fails closed: Google Picker does not work inside the app's own window (Google needs a
+     * signed-in browser and blocks signing in inside embedded browsers), and the token is now handed out only
+     * through a one-time pick ticket to the page in the member's browser (`startPick`).
+     */
+    async pickerSession(_member: Member, body: unknown): Promise<Outcome<never>> {
       if (!isObj(body) || !isDrivePickMode(body.mode)) return refuse('bad-request', 'mode must be folder or files')
+      return refuse('conflict', APP_UPDATE_NEEDED, { code: 'DRIVE_PICKER_APP_UPDATE_NEEDED' })
+    },
+
+    /**
+     * POST …/me/google/drive/pick-tickets { mode, fileIds? } (session): a one-time pick ticket for the Picker
+     * page the app opens in the member's browser (google-drive.md "Picker and its token"). Bound to the
+     * company (in the ticket and the row), the member, the mode and its maximum; 10 minutes; only the
+     * ticket's sha256 is kept. Nothing is asked of Google here: the page gets the token with the ticket.
+     */
+    async startPick(member: Member, body: unknown): Promise<Outcome<DrivePickTicketStarted>> {
+      if (!isObj(body) || !isDrivePickMode(body.mode)) return refuse('bad-request', 'mode must be folder or files')
+      const mode = body.mode
       if (await deps.operatorStopped()) return refuse('forbidden', STOPPED, { code: 'GOOGLE_STOPPED' })
-      const picker = handle(member.companyId).connectors.picker()
-      if (!picker) {
-        return refuse('conflict', '管理者が Google Drive のファイル選び（Picker）をまだ設定していません。管理者に「つなぎ先」→「Google」の設定を頼んでください。', { code: 'DRIVE_PICKER_NOT_CONFIGURED' })
+      const ready = pickReady(member)
+      if (ready) return ready
+      if (!(await available(member.companyId))) return refuse('forbidden', STOPPED, { code: 'GOOGLE_STOPPED' })
+      const h = handle(member.companyId).googleDrive
+      const now = clock.now()
+      h.prunePickTickets(now)
+      const ticket = `${member.companyId}.${ids.newToken()}`
+      const expiresAt = new Date(clock.nowMs() + DRIVE_PICK_TICKET_TTL_MS).toISOString()
+      const id = ids.newId()
+      h.createPickTicket({
+        id, userId: member.userId, ticketHash: ticketHash(ticket), mode, maxItems: mode === 'folder' ? 1 : DRIVE_PICK_MAX_FILES,
+        fileIds: mode === 'files' ? drivePreselectIds(body.fileIds) : [], state: 'open', configHandedAt: null, result: null,
+        createdAt: now, expiresAt, finishedAt: null,
+      })
+      return ok({ ticketId: id, ticket, expiresAt })
+    },
+
+    /**
+     * GET …/me/google/drive/pick-tickets/:ticketId (session, the member's own ticket only): waiting, or the
+     * result — answered once, then the ticket is closed (removed).
+     */
+    pickState(member: Member, ticketId: string): Outcome<DrivePickTicketState> {
+      const h = handle(member.companyId).googleDrive
+      const row = h.pickTicket(member.userId, ticketId)
+      if (!row) return TICKET_NOT_FOUND
+      const done = (state: DrivePickTicketState): Outcome<DrivePickTicketState> => { h.dropPickTicket(member.userId, row.id); return ok(state) }
+      if (row.state === 'picked') return done(pickedState(row.result))
+      if (row.state === 'cancelled') return done({ state: 'cancelled' })
+      if (row.state === 'failed') return done({ state: 'failed', error: failedError(row.result) })
+      // Saving asks Google about a few ids; one stuck past its time (a restart mid-way) is over too.
+      const overAt = Date.parse(row.expiresAt) + (row.state === 'saving' ? SAVING_GRACE_MS : 0)
+      if (clock.nowMs() >= overAt) return done({ state: 'expired' })
+      return ok({ state: 'waiting', opened: row.configHandedAt !== null })
+    },
+
+    /** DELETE …/me/google/drive/pick-tickets/:ticketId (session): the app stopped waiting; the ticket is closed. */
+    cancelPick(member: Member, ticketId: string): Outcome<{ closed: true }> {
+      const h = handle(member.companyId).googleDrive
+      if (!h.pickTicket(member.userId, ticketId)) return TICKET_NOT_FOUND
+      h.dropPickTicket(member.userId, ticketId)
+      return ok({ closed: true })
+    },
+
+    /**
+     * POST /api/google-picker/config { ticket } (public; the page in the member's browser): the Picker's
+     * config — the drive.file token, the API key, the app id — once per ticket, while it is open and not
+     * expired. The company comes from the ticket and the row is looked for in that company only; the
+     * member must still be one. A refusal after the handout closes the ticket as failed (the app says why).
+     */
+    async pageConfig(body: unknown): Promise<Outcome<DrivePickerPageConfig>> {
+      const found = ticketOf(body)
+      if (!found) return TICKET_GONE
+      const { h, row, companyId } = found
+      if (!h.claimPickTicketConfig(row.id, clock.now())) return TICKET_GONE
+      const fail = (r: Refusal): Refusal => {
+        h.movePickTicket(row.id, ['open'], 'failed', { result: JSON.stringify({ error: r.body.error }), finishedAt: clock.now() })
+        return r
       }
-      const token = await google.pickerToken(member.companyId, member.userId)
+      const member = deps.memberOf(companyId, row.userId)
+      if (!member) return fail(TICKET_GONE)
+      if (await deps.operatorStopped()) return fail(refuse('forbidden', STOPPED, { code: 'GOOGLE_STOPPED' }))
+      const picker = handle(companyId).connectors.picker()
+      if (!picker) return fail(refuse('conflict', PICKER_NOT_CONFIGURED, { code: 'DRIVE_PICKER_NOT_CONFIGURED' }))
+      const token = await google.pickerToken(companyId, member.userId)
       if (!token.ok) {
         if (token.reason === 'picker-scope-too-wide') {
-          return refuse('unavailable', 'Google から、Drive のファイル選びに必要な分より広い許可が届いたため、使いませんでした。管理者に知らせてください。', { code: 'DRIVE_PICKER_SCOPE' })
+          return fail(refuse('unavailable', 'Google から、Drive のファイル選びに必要な分より広い許可が届いたため、使いませんでした。管理者に知らせてください。', { code: 'DRIVE_PICKER_SCOPE' }))
         }
-        return googleRefusal({ ok: false, kind: 'not-sent', reason: token.reason as never }, '')
+        return fail(googleRefusal({ ok: false, kind: 'not-sent', reason: token.reason as never }, '') as Refusal)
       }
       return ok({
-        accessToken: token.accessToken, expiresAt: new Date(token.expiresAtMs).toISOString(), apiKey: picker.apiKey, appId: picker.appId,
-        scriptOrigin: deps.pickerScriptOrigin, mode: body.mode,
+        accessToken: token.accessToken, apiKey: picker.apiKey, appId: picker.appId, scriptOrigin: deps.pickerScriptOrigin, mode: row.mode,
+        mimeTypes: DRIVE_PICKABLE_MIMES, maxItems: row.maxItems, ...(row.mode === 'files' && row.fileIds.length > 0 ? { fileIds: row.fileIds } : {}),
       })
+    },
+
+    /**
+     * POST /api/google-picker/result { ticket, mode, action: picked | cancel, ids? } (public; the page): the
+     * person's choice, once per ticket. A pick needs the config handed out first, the ticket's mode and at
+     * most its maximum of Drive ids; it is checked and kept exactly as `savePicks` does, for the member the
+     * ticket belongs to. Closing the page or 「キャンセル」 = cancelled.
+     */
+    async pageResult(body: unknown): Promise<Outcome<{ state: 'picked' | 'cancelled'; kept: number; refused: number }>> {
+      const found = ticketOf(body)
+      if (!found) return TICKET_GONE
+      const { h, row, companyId } = found
+      const b = body as Record<string, unknown>
+      if (b.action === 'cancel') {
+        if (!h.movePickTicket(row.id, ['open'], 'cancelled', { finishedAt: clock.now() })) return TICKET_GONE
+        return ok({ state: 'cancelled', kept: 0, refused: 0 })
+      }
+      if (b.action !== 'picked') return refuse('bad-request', 'action must be picked or cancel')
+      if (row.configHandedAt === null) return TICKET_GONE
+      if (b.mode !== row.mode) return refuse('bad-request', 'mode does not match the ticket')
+      if (!Array.isArray(b.ids) || b.ids.length === 0 || b.ids.length > row.maxItems || !b.ids.every(isDriveId)) {
+        return refuse('bad-request', `ids must list 1–${row.maxItems} Drive ids`)
+      }
+      if (!h.movePickTicket(row.id, ['open'], 'saving', {})) return TICKET_GONE
+      const finish = (state: 'picked' | 'failed', result: unknown) =>
+        h.movePickTicket(row.id, ['saving'], state, { result: JSON.stringify(result), finishedAt: clock.now() })
+      const member = deps.memberOf(companyId, row.userId)
+      if (!member) {
+        finish('failed', { error: TICKET_GONE.body.error })
+        return TICKET_GONE
+      }
+      let saved: Outcome<DrivePicksResult>
+      try {
+        saved = await this.savePicks(member, { mode: row.mode, ids: b.ids })
+      } catch (error) {
+        finish('failed', { error: GOOGLE_UNAVAILABLE_TEXT })
+        throw error
+      }
+      if (!saved.ok) {
+        finish('failed', { error: saved.body.error })
+        return saved
+      }
+      finish('picked', saved.value)
+      return ok({ state: 'picked', kept: saved.value.picks.length, refused: saved.value.refused })
     },
 
     /** POST …/me/google/drive/picks { mode, ids } (session): keeps what the person picked, each checked with Google. */

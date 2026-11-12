@@ -10,8 +10,6 @@ paths:
   - "server/tests/integration/google-drive.test.ts"
   - "server/tests/unit/google-drive-core.test.ts"
   - "client/electron/features/google/drive.ts"
-  - "client/electron/picker-preload.ts"
-  - "client/scripts/check-preloads.mjs"
   - "client/tests/google-drive-tools.test.ts"
 ---
 
@@ -34,11 +32,10 @@ per-member grant; the AI never sees a token; every call through the one Google c
 Everything is in the Google connector's files: `shared/core/google-drive.ts` (rules),
 `shared/types/google-drive.ts` (contract), server `services/google-drive.ts`,
 `routes/google-drive.ts`, `ports|adapters/sqlite/google-drive.ts` (behind the company handle
-`googleDrive`), app `client/electron/features/google/drive.ts`, the Picker window
-(`electron-adapter.ts` `createDrivePickerWindow` + `picker-preload.ts`). The core only gives
-seams: `routes/record-ai-auth.ts` (record-token auth + S10b's `keyedWrite`, shared with
+`googleDrive`), app `client/electron/features/google/drive.ts` (the Picker opens in the
+member's browser through the shell's `openExternal`). The core only gives seams: `routes/record-ai-auth.ts` (record-token auth + S10b's `keyedWrite`, shared with
 `records-ai.ts`), the tool providers (`client/electron/records/tool-providers.ts`: a connector's tools on `acb_records`, merged by `createRecordTools`), the
-`DrivePickerWindow` port, and `drive-put` in S10b's `outcomeOf` / `replayReadPath`.
+shell's `openExternal`, and `drive-put` in S10b's `outcomeOf` / `replayReadPath`.
 
 ## Scopes
 
@@ -49,58 +46,90 @@ Picker is registered, then asked with the other features in 「仕事の道具�
 already-granted features are added by the server) and waits ≤ 2 minutes for the grant.
 `GOOGLE_NEVER_SCOPES` lists what ACB never asks or stores (`drive`, `drive.readonly`, …; test).
 
-## Picker and its token (the one Google token on a client)
+## Picker and its token (the one Google token handed out to a browser)
+
+**What real Google showed (production, 2026-11-12):** Google Picker needs a browser that is
+**signed in to Google**. In the app's own Electron window (an empty session partition) Google showed
+「Google アカウントにログイン / このコンテンツにアクセスするにはログインする必要があります」, and its
+［ログイン］ opens a popup — which the window denied — and Google blocks signing in inside embedded
+browsers (Electron / CEF) anyway. So the Picker is **not usable inside Electron**: it opens in the
+member's **system browser** (already signed in), like 「Google で許可」, with a one-time pick ticket.
+Also learned: the page's `Referrer-Policy` (`strict-origin-when-cross-origin`) lets Google see only
+the origin, so the API key's website restriction must allow `<origin>/*` (the page's full address
+never matches).
 
 - Admin 「つなぎ先」→「Google」→「Google Drive のファイル選び」: API key (password field; stored
   as is — Picker's developer key is sent to the page by design; answers show its last 4) and
   the Cloud project number (`appId`), `PUT /google/picker { apiKey?, appId }` (owner/admin;
-  `appId: null` removes both). The page shows `<PUBLIC_URL>/api/google-picker` to allow in the
-  key's website restriction. The admin also enables Google Picker API + Drive API and adds
-  `drive.file` to the OAuth consent screen.
-- `POST /me/google/drive/picker { mode }` (**session only**): switches → Picker registered (409
-  `DRIVE_PICKER_NOT_CONFIGURED`) → `googleClient.pickerToken`: grant active with `drive.file`
-  (else 409 `GOOGLE_CONSENT_NEEDED`, `needsGoogleConsent: 'drive'`, nothing asked of Google), then
-  a **fresh** token from the refresh token with `scope=drive.file` (RFC 6749 §6 subset — never the
-  cached token, which holds every granted scope); Google's answer must carry **exactly**
-  `drive.file` (`isDrivePickerTokenScope`), else 503 `DRIVE_PICKER_SCOPE` and nothing handed
-  out. Not cached, not logged (one AI-action-log line `google:drive.picker.token`). `no-store`.
-- The app (main) opens Google Picker in a **window of its own**: the server's static page
-  `GET /api/google-picker` (public, no secret, strict CSP with the inline script's hash; the
-  Picker's origin is the one the admin allows), its own preload (`picker-preload.ts`: `config()`
-  / `done()` only), its own session partition, sandboxed, no popups, no navigation away. The
-  config (token, key, app id) is answered **once**, on that window's own IPC
-  (`webContents.ipc`, no global channel), only to its main frame while it shows the Picker page
-  (`isDrivePickerPage`); back come only Drive ids (`readDrivePickerResult`). 10 minutes, closing
-  = cancel; the token is dropped with the window. It never reaches the renderer, the AI, a
-  record-token request or a log.
-- `picker-preload.js` must be **CommonJS**: a sandboxed preload is a classic script, and an
-  ES-module one (a top-level `import`) fails silently, so the page finds no `window.acbPicker` and
-  shows 「この画面はアプリの中でだけ使えます。」 (release-20261109). vite-plugin-electron builds
-  every entry as `es` because `client/package.json` is `"type": "module"`, overriding
-  `rollupOptions.output.format`; `commonJsPreload()` in `vite.config.ts` sets the lib format for
-  both preloads. `client/scripts/check-preloads.mjs` loads each built preload as Electron's
-  sandbox would (function wrapper, `require` of `electron` only) and checks it exposes its bridge;
-  it runs in CI "Renderer bundle size (Linux)" and in `pnpm build` before packing. Keep the window
-  `sandbox: true`.
+  `appId: null` removes both). The page shows **`<origin>/*`** with 「コピー」 to add to the key's
+  website restriction (`drivePickerReferrerPattern(view.picker.pageUrl)`, test
+  `admin/tests/integrations.test.tsx`), and says the choosing screen opens in the member's browser. The
+  admin also enables Google Picker API + Drive API and adds `drive.file` to the OAuth consent screen.
+- **The pick ticket** (`google_drive_pick_tickets`, behind the handle's `googleDrive`): `POST
+  /me/google/drive/pick-tickets { mode, fileIds? }` (**session only**): operator stop → Picker
+  registered (409 `DRIVE_PICKER_NOT_CONFIGURED`) → the member's grant active with `drive.file` (else 409
+  `GOOGLE_CONSENT_NEEDED`, `needsGoogleConsent: 'drive'`) and `drive` not turned off (409
+  `GOOGLE_FEATURE_OFF`) → Google on (`GOOGLE_STOPPED`); nothing is asked of Google. Answers `{ ticketId,
+  ticket, expiresAt }` once: `ticket` = `<companyId>.<64 hex>` (`ids.newToken`, 256 random bits;
+  `DRIVE_PICK_TICKET_RE`); only its **sha256** is stored, with the member, the mode, its maximum (folder
+  1, files `DRIVE_PICK_MAX_FILES`), the preselected `fileIds` (files only, `drivePreselectIds`) and
+  **10 minutes** (`DRIVE_PICK_TICKET_TTL_MS`). Expired tickets are pruned at the next start.
+- **The app** (`createDrivePicking().pick`, main) opens `drivePickerPageUrl(server, ticket)` =
+  `<server>/api/google-picker#t=<ticket>` through the shell's `openExternal` (only that address, built
+  in main from a ticket of the right shape: `isDrivePickTicket`), then waits: `GET
+  /me/google/drive/pick-tickets/:ticketId` with the session every 2 s (no push channel) →
+  `{ state: 'waiting', opened }`, or once `picked` (the picks, `refused`) / `cancelled` / `expired` /
+  `failed` (`error`, a fixed sentence) — a final state is answered **once and the ticket removed**. The
+  member's own ticket only (another member's or company's id → 404 `PICK_TICKET_NOT_FOUND`). The AI's
+  turn stopped (`signal`) or 10 minutes passed → `DELETE /me/google/drive/pick-tickets/:ticketId` closes
+  it, and the tool / card says cancelled. The app never holds the Picker's token; the ticket is never
+  logged and never reaches the renderer or the AI.
+- **The page** `GET /api/google-picker` (public, static, no secret; strict CSP with the inline script's
+  hash, `connect-src 'self'` for its two calls; `no-store`; `Referrer-Policy:
+  strict-origin-when-cross-origin`): reads the ticket from the **URL fragment** (never sent to a server,
+  in a Referer or a request log) and takes it off the address (`history.replaceState`); `POST
+  /api/google-picker/config { ticket }` (public, the ticket is the proof): the company from the ticket,
+  the row by its sha256 inside that company only, open and unexpired, **the config handed out once**
+  (`claimPickTicketConfig`, atomic) → still a member → operator stop → Picker registered →
+  `googleClient.pickerToken`: a **fresh** token from the refresh token with `scope=drive.file` (RFC 6749
+  §6 subset — never the cached token, which holds every granted scope); Google's answer must carry
+  **exactly** `drive.file` (`isDrivePickerTokenScope`), else 503 `DRIVE_PICKER_SCOPE` and nothing handed
+  out. Not cached, not logged (one AI-action-log line `google:drive.picker.token`). A refusal after the
+  claim closes the ticket as `failed` with its sentence (the app shows it). Answers the token, key, app
+  id, script origin, mode, MIME types, `maxItems` and `fileIds`. Any ticket that cannot be used
+  (unknown, another company's, expired, used, closed) → the one 410 `PICK_TICKET_GONE`.
+- `POST /api/google-picker/result { ticket, action: picked | cancel, mode?, ids? }` (public): once per
+  ticket. `cancel` (the Picker's 「キャンセル」, or the page closed: `pagehide` sends it with
+  `keepalive`) → `cancelled`. `picked` only after the config was handed out, `mode` must be the
+  ticket's (400), 1 … the ticket's maximum of `isDriveId` ids (400) → the ticket moves to `saving`
+  (atomic) → **`savePicks` for the ticket's member** (exactly `POST /me/google/drive/picks`: each id
+  opened with Google, folder / file kind, `refused` counted) → `picked` with the answer, or `failed`.
+  The body names no member. The page then says 「選びました。アプリに戻ってください。（このタブは閉じて
+  かまいません）」 / 「選ぶのをやめました。…」.
+- **Released apps** (≤ release-20261109, the Electron Picker window): `POST /me/google/drive/picker
+  { mode }` **fails closed** — 409 `DRIVE_PICKER_APP_UPDATE_NEEDED` 「Google Drive のファイル選びは、
+  新しいアプリで使えます（ブラウザで選ぶ形になりました）。アプリを新しくしてから、もう一度お試しください。」
+  (a bad body still 400). Their window could not sign in to Google anyway; no token goes out on it.
+  The app's Picker window and `picker-preload.ts` were removed.
 - Unverified against real Google (no real accounts in tests): that Google honours the narrowed
-  refresh (if not, Drive picking is refused — safe), and that Picker works in an Electron
-  window without a Google sign-in cookie in that partition (Google may block a sign-in inside
-  embedded browsers; fallback then: the same page in the system browser with a one-time code).
-- Staging: the fake Google serves a stand-in Picker at `<practice origin>/js/api.js` (lists the
-  account's Drive files, marks the click as picked — `/__picker/*`; `setFileIds` narrows the list).
-- **A pasted / dropped Drive link** (owner decision 2026-11-09): the config may carry `fileIds`
-  (files mode only): the page calls `DocsView.setFileIds` (Google's Picker reference: "Sets the file
-  IDs included in the view", comma-separated; not combined with `setEnableDrives`, which it then
-  skips), so the chooser shows just that file and one 「選択」 picks it. Only Drive ids get there:
-  the renderer reads them with `driveFileIdsFromText` / `driveFileIdFromLink` (`shared/core/google-drive.ts`:
-  `https:` only, no user / password / port, the host exactly `drive.google.com` or
-  `docs.google.com`, a file path — Docs / Sheets / Slides / `file/d`, `open?id=`, `uc?id=` —
-  never a folder, the id `isDriveId`), main again with `drivePreselectIds` (`tasks:linkDriveFiles`'
-  optional 4th argument, `createDrivePicking().pick(…, { fileIds })`), and the page filters once
-  more. A pasted id opens nothing by itself (drive.file): nothing is read or linked outside the
-  Picker, and what is linked is what the member picked there. Unverified against real Google:
-  that `setFileIds` shows a file not yet granted to the app under `drive.file` (Google announced
-  it for that, 2024-11); if not, the member sees an empty chooser and cancels.
+  refresh (if not, Drive picking is refused — safe).
+- Staging: the fake Google serves a stand-in Picker at `<practice origin>/js/api.js`, which the page
+  loads in the browser as it would Google's (lists the account's Drive files, marks the click as
+  picked — `/__picker/*`; `setFileIds` narrows the list); test 「staging's stand-in Picker…」.
+- **A pasted / dropped Drive link** (owner decision 2026-11-09): the ticket may carry `fileIds`
+  (files mode only) and the config hands them to the page, which calls `DocsView.setFileIds` (Google's
+  Picker reference: "Sets the file IDs included in the view", comma-separated; not combined with
+  `setEnableDrives`, which it then skips), so the chooser shows just that file and one 「選択」 picks it.
+  Only Drive ids get there: the renderer reads them with `driveFileIdsFromText` / `driveFileIdFromLink`
+  (`shared/core/google-drive.ts`: `https:` only, no user / password / port, the host exactly
+  `drive.google.com` or `docs.google.com`, a file path — Docs / Sheets / Slides / `file/d`, `open?id=`,
+  `uc?id=` — never a folder, the id `isDriveId`), main again with `drivePreselectIds`
+  (`tasks:linkDriveFiles`' optional 4th argument, `createDrivePicking().pick(…, { fileIds })`), the
+  server once more when it makes the ticket, and the page filters once more. A pasted id opens nothing
+  by itself (drive.file): nothing is read or linked outside the Picker, and what is linked is what the
+  member picked there. Unverified against real Google: that `setFileIds` shows a file not yet granted
+  to the app under `drive.file` (Google announced it for that, 2024-11); if not, the member sees an
+  empty chooser and cancels.
 
 ## Picks (`google_drive_picks`)
 
@@ -267,15 +296,24 @@ update's `fileId` taken from the receipt rather than Google's answer, and the li
 `server/tests/integration/job-deliverables.test.ts` (a job's run: `jobs.md`) and
 `server/tests/unit/google-drive-core.test.ts` (the link parser: Google's hosts only, look-alikes,
 other schemes, folders, bad ids refused); `client/tests/google-drive-tools.test.ts`;
-`admin/tests/integrations.test.tsx` 「Drive の ファイル選び」. Mutation-checked: the Picker
+`admin/tests/integrations.test.tsx` 「Drive の ファイル選び」 (`<origin>/*`). The pick ticket
+(`google-drive.test.ts` 「the Picker in the member's browser」, mutation-checked): no ticket without the
+permission, stored as its sha256, the config once, expiry (page and app), another company's or a forged
+ticket, a member who left, another member cannot read / close it and the picks are the ticket member's,
+a pick only after the config, the ticket's mode, at most its maximum, Drive ids only, checked and
+counted by `savePicks`, closed after the result, the app's cancel, a released app's route fails closed,
+the fragment taken off the address, `connect-src 'self'`, the page end to end and with staging's
+stand-in; in the app (`google-drive-tools.test.ts`): only the server's page with a ticket of the right
+shape is opened, the ticket in no AI output / record-token request / log, the session to start and wait,
+cancelled / failed / the AI stopped / 10 minutes (the ticket closed) — the client's shape check and
+`drivePickerPageUrl`'s are each other's back-up (one mutated alone survives). Mutation-checked: the Picker
 token's scope check and the narrowing parameter, `drive.file` before asking Google, the Picker
 registration, picks verified with Google, folder picks are folders, read / put only picks of
 the right kind, the act token, the MIME / name / content / sha checks, the outside-sharing
 refusal, the receipt's idempotency and key reuse, the lookup after a lost answer, the put's link only
 for a new put, a link refusal never failing the put, own puts only (list and `linkable`); in the app:
 tools only when available, put only with act, consent before the Picker, preselected ids only as
-Drive ids and only for files (window config, `typed-file-links.test.ts` for main, the page's own
+Drive ids and only for files (the ticket, `typed-file-links.test.ts` for main, the page's own
 filter and mode check in `google-drive.test.ts`, which also checks the CSP hash is the script served), the path checks
 (outside, link, `.git`, nested repository, private list, left out), kind and content, the
-Picker page check and id filter, the request key, the topic's record id on a put (never the AI's); the
-preload's format (`check-preloads.mjs` fails on the build without `commonJsPreload`).
+picked ids filter, the request key, the topic's record id on a put (never the AI's).

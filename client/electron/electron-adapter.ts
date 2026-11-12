@@ -12,8 +12,7 @@ import { isPluginAddress, PLUGIN_SCHEME, pluginFrameNavigationAllowed } from '..
 import type { PluginFileServer } from './features/plugins/protocol'
 import { allowPermission, isAppPage, type AppPage } from './permission-policy'
 import { webLinkForBrowser } from './external-url'
-import type { DesktopShell, DrivePickerOutcome, DrivePickerWindow, WindowPort } from './features/ports'
-import { isDrivePickerPage, readDrivePickerResult } from './features/google/drive'
+import type { DesktopShell, WindowPort } from './features/ports'
 import type { ChatWindowHost } from './features/chat-windows/ipc'
 import type { MessageBoxHost } from './sync/message-box-dialog'
 import type { SecretBox } from './services/api-key-store'
@@ -363,58 +362,6 @@ export function createMessageBoxHost(getWindow: () => BrowserWindow | null): Mes
       const current = getWindow()
       const win = current && !current.isDestroyed() ? current : null
       return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)
-    },
-  }
-}
-
-/**
- * Google Picker in a window of its own (google-drive.md "The Picker"): the
- * server's static Picker page with its own preload (`picker-preload.js`:
- * two calls, nothing else of the app), isolated and sandboxed, its own
- * session partition (Google's sign-in cookies stay out of the app's), no
- * popups, no navigation away. The config — the drive.file token — is handed
- * once, on this window's own IPC (`webContents.ipc`), only to its main frame
- * while it shows the Picker page; the token is dropped when the window closes.
- */
-export function createDrivePickerWindow(appDir: string): DrivePickerWindow {
-  return {
-    open({ pageUrl, config, timeoutMs }) {
-      return new Promise<DrivePickerOutcome>(resolve => {
-        const win = new BrowserWindow({
-          width: 1060, height: 720, title: 'Google Drive から選ぶ', autoHideMenuBar: true,
-          webPreferences: {
-            preload: path.join(appDir, 'picker-preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false,
-            partition: 'persist:acb-google-picker', spellcheck: false,
-          },
-        })
-        let handed: typeof config | null = config
-        let settled = false
-        let timer: ReturnType<typeof setTimeout> | undefined
-        const finish = (outcome: DrivePickerOutcome) => {
-          if (settled) return
-          settled = true
-          handed = null
-          clearTimeout(timer)
-          resolve(outcome)
-          if (!win.isDestroyed()) win.close()
-        }
-        timer = setTimeout(() => finish({ action: 'timeout' }), timeoutMs)
-        const fromPickerPage = (frame: Electron.WebFrameMain | null | undefined) =>
-          !!frame && !win.isDestroyed() && frame === win.webContents.mainFrame && isDrivePickerPage(frame.url, pageUrl)
-        win.webContents.ipc.handle('drivePicker:config', event => {
-          if (!fromPickerPage(event.senderFrame)) return null
-          const once = handed
-          handed = null
-          return once
-        })
-        win.webContents.ipc.on('drivePicker:done', (event, result: unknown) => {
-          if (fromPickerPage(event.senderFrame)) finish(readDrivePickerResult(result, config.maxItems))
-        })
-        win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-        win.webContents.on('will-navigate', event => { if (!isDrivePickerPage(event.url, pageUrl)) event.preventDefault() })
-        win.on('closed', () => finish({ action: 'closed' }))
-        void win.loadURL(pageUrl).catch(() => finish({ action: 'error' }))
-      })
     },
   }
 }

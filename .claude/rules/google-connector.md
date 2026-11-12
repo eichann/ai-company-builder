@@ -488,9 +488,9 @@ read-only budget, and the kit's seed turns the relay on (`once('google-relay')`)
   system browser through the shell's `openExternal` only when it is
   `https://accounts.google.com/o/oauth2/v2/auth` (or the practice Google on `127.0.0.1` /
   `localhost` / `[::1]`, same path: `isGoogleSignInUrl`) and **never returns the URL** to the
-  renderer. The only Google token on the client is Google Picker's: `drive.file` only, fetched
-  by main with the session and handed to the Picker's own window, never stored
-  (`google-drive.md`). Shows the account and
+  renderer. No Google token reaches the app: Google Picker's (`drive.file` only) goes from the
+  server to the Picker page in the member's browser, once per one-time pick ticket the app asked
+  for with the session (`google-drive.md` "Picker and its token"). Shows the account and
   予定と議事録を読む / メールを送る / 受信を読む (「（オフにしています）」 when the member turned one off);
   「Google で許可」 (minutes), 「メールを送る許可も足す」 (mail), 「受信を読む許可も足す」 (inbox; both only when the company offers them),
   「許可をやめる」 (confirmation); after opening the browser 「ブラウザで Google の画面を開きました。

@@ -4,8 +4,11 @@
  * whole): rules in services/google-drive.ts, shapes in shared/types/google-drive.ts.
  *
  * The member's app (session), mounted at /api/companies/:companyId:
- *   POST /me/google/drive/picker   { mode }       the Picker window's token (drive.file only), API key, app id
- *   POST /me/google/drive/picks    { mode, ids }  keep what the person picked (each checked with Google)
+ *   POST   /me/google/drive/picker                  { mode }  released apps' Picker window: fails closed (update the app)
+ *   POST   /me/google/drive/pick-tickets            { mode, fileIds? }  a one-time pick ticket for the page in the browser
+ *   GET    /me/google/drive/pick-tickets/:ticketId  the member's own ticket: waiting, or its result once (then closed)
+ *   DELETE /me/google/drive/pick-tickets/:ticketId  the app stopped waiting (timeout, AI stopped)
+ *   POST   /me/google/drive/picks                   { mode, ids }  keep what the person picked (each checked with Google)
  *   GET  /me/google/drive/files                   the member's own picked / put files, with names (「つなぐ」's list)
  *
  * The member's AI (record token), mounted at /api/records-ai/google/drive:
@@ -18,8 +21,10 @@
  *   GET  /puts/:putId       the member's own put (an unknown one is looked up again)          (read)
  *   There is no route that gives the AI a Google token or picks for the person.
  *
- * Public, mounted at /api/google-picker:
- *   GET  /                  the Picker page (static; it gets its token only from the app's Picker window)
+ * Public, mounted at /api/google-picker (the member's own browser; the pick ticket is the proof):
+ *   GET  /                  the Picker page (static; the ticket is in the URL fragment)
+ *   POST /config            { ticket } the Picker's token (drive.file only), API key, app id — once per ticket
+ *   POST /result            { ticket, action, mode?, ids? } the picked Drive ids (kept as /picks keeps them) or a cancel
  */
 import { createHash } from 'crypto'
 import { Hono } from 'hono'
@@ -51,6 +56,21 @@ export const googleDriveRoute = new Hono()
 googleDriveRoute.post('/me/google/drive/picker', companyMember, serviceBody, async (c) => {
   const member = c.var.member
   return answer(c, await googleDrive.pickerSession(member, c.var.body))
+})
+
+googleDriveRoute.post('/me/google/drive/pick-tickets', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await googleDrive.startPick(member, c.var.body))
+})
+
+googleDriveRoute.get('/me/google/drive/pick-tickets/:ticketId', companyMember, (c) => {
+  const member = c.var.member
+  return answer(c, googleDrive.pickState(member, c.req.param('ticketId')))
+})
+
+googleDriveRoute.delete('/me/google/drive/pick-tickets/:ticketId', companyMember, (c) => {
+  const member = c.var.member
+  return answer(c, googleDrive.cancelPick(member, c.req.param('ticketId')))
 })
 
 googleDriveRoute.post('/me/google/drive/picks', companyMember, serviceBody, async (c) => {
@@ -141,30 +161,55 @@ googleDriveAiRoute.get('/puts/:putId', aiReads, async (c) => {
   return answer(c, await googleDrive.putState(h.member, c.req.param('putId'), scope))
 })
 
-// ---- the Picker page (public, static) ----
+// ---- the Picker page (public, static) and its two calls (the pick ticket is the proof) ----
 
 /**
- * The page the app's Picker window loads (google-drive.md "The Picker"). It
- * holds no secret: it asks `window.acbPicker` — present only in the app's
- * dedicated Picker window (its own preload) — for the token, the API key and
- * the app id, runs Google Picker, and hands back only the picked ids. With
- * `fileIds` (a Drive link the member pasted on a task card) the view shows just
- * those files (`DocsView.setFileIds`, which Google says not to combine with
- * `setEnableDrives`); the member still presses 「選択」 — that is the pick. Served
- * from the server so the Picker's origin is the one the admin allows on the
- * API key (`<PUBLIC_URL>/api/google-picker`).
+ * The page the app opens in the member's **own browser** (google-drive.md "Picker and its token"):
+ * Google Picker needs a browser signed in to Google, and Google blocks signing in inside an embedded
+ * browser, so it is not shown in a window of the app. The page holds no secret: it reads the one-time
+ * pick ticket from the URL fragment (`#t=`; never sent to a server, a Referer or a log) and removes it
+ * from the address, asks `config` for the token, the API key and the app id (once per ticket), runs
+ * Google Picker, and posts only the picked ids — or a cancel, also when the page is closed — to `result`.
+ * With `fileIds` (a Drive link the member pasted on a task card) the view shows just those files
+ * (`DocsView.setFileIds`, which Google says not to combine with `setEnableDrives`); the member still
+ * presses 「選択」 — that is the pick. Served from the server so the Picker's origin is the one the admin
+ * allows on the API key (`<origin>/*`: with this Referrer-Policy Google sees the origin only).
  */
 const PICKER_SCRIPT = `(function () {
   var msg = document.getElementById('msg')
   var say = function (t) { msg.textContent = t }
-  var bridge = window.acbPicker
-  if (!bridge) { say('この画面はアプリの中でだけ使えます。'); return }
-  var done = function (r) { try { bridge.done(r) } catch (e) { /* the window is closing */ } }
-  bridge.config().then(function (cfg) {
-    if (!cfg) { say('Google Drive のファイル選びを始められませんでした。'); return }
+  var m = String(window.location.hash || '').match(/^#t=([A-Za-z0-9_-]{1,100}\\.[0-9a-f]{64})$/)
+  try { window.history.replaceState(null, '', window.location.pathname) } catch (e) { /* keep going */ }
+  if (!m) { say('この画面は、アプリで「Google Drive から選ぶ」を始めたときに開きます。アプリに戻ってください。'); return }
+  var ticket = m[1]
+  var base = window.location.pathname.replace(/\\/+$/, '')
+  var post = function (path, body, keepalive) {
+    return window.fetch(base + path, {
+      method: 'POST', credentials: 'omit', cache: 'no-store', keepalive: !!keepalive,
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+    }).then(function (r) { return r.json().catch(function () { return {} }).then(function (j) { return { ok: r.ok, j: j } }) })
+  }
+  var problem = function (a, fallback) { return a && a.j && typeof a.j.error === 'string' ? a.j.error : fallback }
+  var finished = false
+  var finish = function (body, done) {
+    if (finished) return
+    finished = true
+    say('アプリに伝えています…')
+    post('/result', body).then(function (a) { say(a.ok ? done : problem(a, 'アプリに伝えられませんでした。アプリに戻って、もう一度お試しください。')) },
+      function () { say('アプリに伝えられませんでした。アプリに戻って、もう一度お試しください。') })
+  }
+  window.addEventListener('pagehide', function () {
+    if (finished) return
+    finished = true
+    try { post('/result', { ticket: ticket, action: 'cancel' }, true) } catch (e) { /* the page is going */ }
+  })
+  var BACK = '（このタブは閉じてかまいません）'
+  post('/config', { ticket: ticket }).then(function (a) {
+    var cfg = a.ok && a.j && a.j.data
+    if (!cfg) { finished = true; say(problem(a, 'Google Drive のファイル選びを始められませんでした。アプリに戻ってください。')); return }
     var s = document.createElement('script')
     s.src = cfg.scriptOrigin + '/js/api.js'
-    s.onerror = function () { say('Google の画面を読み込めませんでした。'); done({ action: 'error' }) }
+    s.onerror = function () { finish({ ticket: ticket, action: 'cancel' }, 'Google の画面を読み込めませんでした。アプリに戻ってください。' + BACK) }
     s.onload = function () {
       window.gapi.load('picker', { callback: function () {
         var P = window.google.picker
@@ -180,17 +225,22 @@ const PICKER_SCRIPT = `(function () {
         var b = new P.PickerBuilder().addView(view).setOAuthToken(cfg.accessToken).setDeveloperKey(cfg.apiKey).setAppId(cfg.appId)
           .setOrigin(window.location.origin).setLocale('ja').setTitle(cfg.mode === 'folder' ? '置き場所のフォルダを選んでください' : '読ませるファイルを選んでください')
           .setCallback(function (data) {
-            if (data.action === P.Action.PICKED) done({ action: 'picked', ids: (data.docs || []).map(function (d) { return d.id }) })
-            else if (data.action === P.Action.CANCEL) done({ action: 'cancel' })
+            if (data.action === P.Action.PICKED) {
+              var ids = (data.docs || []).map(function (d) { return d && d.id }).filter(function (id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{10,200}$/.test(id) }).slice(0, cfg.maxItems)
+              if (ids.length === 0) finish({ ticket: ticket, action: 'cancel' }, '選べるものがありませんでした。アプリに戻ってください。' + BACK)
+              else finish({ ticket: ticket, mode: cfg.mode, action: 'picked', ids: ids }, '選びました。アプリに戻ってください。' + BACK)
+            } else if (data.action === P.Action.CANCEL) {
+              finish({ ticket: ticket, action: 'cancel' }, '選ぶのをやめました。アプリに戻ってください。' + BACK)
+            }
           })
         if (cfg.mode === 'files') b = b.enableFeature(P.Feature.MULTISELECT_ENABLED).setMaxItems(cfg.maxItems)
         b.build().setVisible(true)
         cfg.accessToken = ''
         say('')
-      }, onerror: function () { say('Google の画面を読み込めませんでした。'); done({ action: 'error' }) } })
+      }, onerror: function () { finish({ ticket: ticket, action: 'cancel' }, 'Google の画面を読み込めませんでした。アプリに戻ってください。' + BACK) } })
     }
     document.head.appendChild(s)
-  }, function () { say('Google Drive のファイル選びを始められませんでした。') })
+  }, function () { finished = true; say('サーバーに接続できませんでした。アプリに戻ってください。') })
 })()`
 
 const PICKER_SCRIPT_HASH = createHash('sha256').update(PICKER_SCRIPT).digest('base64')
@@ -201,13 +251,18 @@ function pickerPage(): string {
 <body><p id="msg">Google Drive を開いています…</p><script>${PICKER_SCRIPT}</script></body></html>`
 }
 
-export const googlePickerPageRoute = new Hono()
-
-googlePickerPageRoute.get('/', publicRoute('a static page holding no secret; the token reaches it only from the app\'s own Picker window'), (c) => {
-  const extra = googleDrive.pickerScriptOrigin === 'https://apis.google.com' ? '' : ` ${googleDrive.pickerScriptOrigin}`
+/** The page's own answers: never cached, never sent on as a Referer beyond the origin. */
+function pickerHeaders(c: Context) {
   c.header('Cache-Control', 'no-store')
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   c.header('X-Content-Type-Options', 'nosniff')
+}
+
+export const googlePickerPageRoute = new Hono()
+
+googlePickerPageRoute.get('/', publicRoute('a static page holding no secret; the pick ticket reaches it only in the URL fragment, from the member\'s app'), (c) => {
+  const extra = googleDrive.pickerScriptOrigin === 'https://apis.google.com' ? '' : ` ${googleDrive.pickerScriptOrigin}`
+  pickerHeaders(c)
   c.header('Content-Security-Policy', [
     "default-src 'none'",
     `script-src 'sha256-${PICKER_SCRIPT_HASH}' https://apis.google.com https://www.gstatic.com https://*.google.com${extra}`,
@@ -215,8 +270,20 @@ googlePickerPageRoute.get('/', publicRoute('a static page holding no secret; the
     'img-src https: data:',
     'font-src https://fonts.gstatic.com',
     `frame-src https://docs.google.com https://drive.google.com https://*.google.com${extra}`,
-    `connect-src https://*.googleapis.com https://*.google.com${extra}`,
+    `connect-src 'self' https://*.googleapis.com https://*.google.com${extra}`,
     "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'",
   ].join('; '))
   return c.html(pickerPage())
+})
+
+/** The Picker's config, once per pick ticket (the ticket is the proof; it holds the company and the member). */
+googlePickerPageRoute.post('/config', publicRoute('the one-time pick ticket the member\'s app asked for with its session is the proof (sha256 looked up in its company; once; 10 minutes)'), serviceBody, async (c) => {
+  pickerHeaders(c)
+  return answer(c, await googleDrive.pageConfig(c.var.body))
+})
+
+/** The person's choice (Drive ids only) or a cancel, once per pick ticket; kept as `POST /me/google/drive/picks` keeps it. */
+googlePickerPageRoute.post('/result', publicRoute('the one-time pick ticket is the proof; only Drive ids, checked with Google for the ticket\'s member'), serviceBody, async (c) => {
+  pickerHeaders(c)
+  return answer(c, await googleDrive.pageResult(c.var.body))
 })

@@ -41,6 +41,26 @@ export interface DrivePutRow {
   updatedFileId: string | null
 }
 
+/**
+ * A one-time pick ticket for Google Picker in the member's browser (google-drive.md "Picker and its
+ * token"): only the ticket's sha256 is stored. `result` is the JSON of the picks the server kept (the
+ * service writes and reads it), `error` a fixed sentence when the picking failed.
+ */
+export interface DrivePickTicketRow {
+  id: string
+  userId: string
+  ticketHash: string
+  mode: 'folder' | 'files'
+  maxItems: number
+  fileIds: string[]
+  state: 'open' | 'saving' | 'picked' | 'cancelled' | 'failed'
+  configHandedAt: string | null
+  result: string | null
+  createdAt: string
+  expiresAt: string
+  finishedAt: string | null
+}
+
 export interface GoogleDriveRepository {
   /** Insert or renew picks (a re-pick renews the name, type and expiry). */
   savePicks(rows: DrivePickRow[]): void
@@ -68,4 +88,18 @@ export interface GoogleDriveRepository {
   settlePut(id: string, fields: Pick<DrivePutRow, 'state' | 'fileId' | 'revisionId' | 'link' | 'reason' | 'finishedAt'>): boolean
   /** Removes a put still in `sending` (refused: nothing was made; its key is free again). */
   dropPut(id: string): void
+
+  createPickTicket(row: DrivePickTicketRow): void
+  /** A ticket by the sha256 of its value (the Picker page's own request; no member known yet). */
+  pickTicketByHash(ticketHash: string): DrivePickTicketRow | null
+  /** The member's own ticket by its id (the app's session). */
+  pickTicket(userId: string, id: string): DrivePickTicketRow | null
+  /** Marks the config handed out, only once and only while the ticket is open and not expired at `now`. */
+  claimPickTicketConfig(id: string, now: string): boolean
+  /** Moves a ticket from one of `from` to `to` (with its result / error), atomically; false when it was in no state of `from`. */
+  movePickTicket(id: string, from: DrivePickTicketRow['state'][], to: DrivePickTicketRow['state'], fields: { result?: string | null; finishedAt?: string | null }): boolean
+  /** Removes the member's own ticket (closed after its result, or cancelled by the app). */
+  dropPickTicket(userId: string, id: string): void
+  /** Removes tickets that expired before `before` (every member). */
+  prunePickTickets(before: string): void
 }

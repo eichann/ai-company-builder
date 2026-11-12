@@ -123,6 +123,8 @@ interface World {
     shelfRequest: string
     /** A scheduled job of the other company, approved, its member responsible (jobs.md). */
     job: string
+    /** A Google Picker pick ticket of the other company's member (google-drive.md). */
+    pickTicket: string
   }
 }
 
@@ -522,15 +524,20 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/me/notifications/read', w => ({ path: `${C(w)}/me/notifications/read`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('GET /api/companies/:companyId/me/notifications/settings', w => ({ path: `${C(w)}/me/notifications/settings` }), MEMBERS),
   r('PUT /api/companies/:companyId/me/notifications/settings', w => ({ path: `${C(w)}/me/notifications/settings`, body: {} }), [400, 400, 400, 400, 404, 401]),
-  // Google Drive (google-drive.md): the member's own Picker token and picks (any member); the AI's routes need a record token.
-  r('POST /api/companies/:companyId/me/google/drive/picker', w => ({ path: `${C(w)}/me/google/drive/picker`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  // Google Drive (google-drive.md): the member's own pick tickets and picks (any member); the AI's routes need a record token.
+  r('POST /api/companies/:companyId/me/google/drive/picker', w => ({ path: `${C(w)}/me/google/drive/picker`, body: {} }), [400, 400, 400, 400, 404, 401], 'released apps\' Picker window: fails closed for everyone with a body'),
+  r('POST /api/companies/:companyId/me/google/drive/pick-tickets', w => ({ path: `${C(w)}/me/google/drive/pick-tickets`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/me/google/drive/pick-tickets/:ticketId', w => ({ path: `${C(w)}/me/google/drive/pick-tickets/ticket-nosuch` }), [404, 404, 404, 404, 404, 401], 'the member\'s own ticket only'),
+  r('DELETE /api/companies/:companyId/me/google/drive/pick-tickets/:ticketId', w => ({ path: `${C(w)}/me/google/drive/pick-tickets/ticket-nosuch` }), [404, 404, 404, 404, 404, 401], 'the member\'s own ticket only'),
   r('POST /api/companies/:companyId/me/google/drive/picks', w => ({ path: `${C(w)}/me/google/drive/picks`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('GET /api/companies/:companyId/me/google/drive/files', w => ({ path: `${C(w)}/me/google/drive/files` }), MEMBERS, 'only the caller\'s own picks and puts (google-drive.test.ts)'),
   r('GET /api/records-ai/google/drive/status', () => ({ path: '/api/records-ai/google/drive/status' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/google/drive/read', () => ({ path: '/api/records-ai/google/drive/read', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/google/drive/put', () => ({ path: '/api/records-ai/google/drive/put', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/records-ai/google/drive/puts/:putId', () => ({ path: '/api/records-ai/google/drive/puts/drive-put-nosuch' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
-  r('GET /api/google-picker', () => ({ path: '/api/google-picker' }), [200, 200, 200, 200, 200, 200], 'public: the static Picker page; it holds no secret (the token comes only from the app\'s Picker window)'),
+  r('GET /api/google-picker', () => ({ path: '/api/google-picker' }), [200, 200, 200, 200, 200, 200], 'public: the static Picker page; it holds no secret (the pick ticket is in the URL fragment)'),
+  r('POST /api/google-picker/config', () => ({ path: '/api/google-picker/config', body: {} }), [410, 410, 410, 410, 410, 410], 'public: the one-time pick ticket is the proof; no ticket, nothing'),
+  r('POST /api/google-picker/result', () => ({ path: '/api/google-picker/result', body: {} }), [410, 410, 410, 410, 410, 410], 'public: the one-time pick ticket is the proof; no ticket, nothing'),
   r('GET /api/oauth/:provider/callback', () => ({ path: '/api/oauth/google/callback' }), [400, 400, 400, 400, 400, 400], 'public: Google sends the browser back without a session; no state finds nothing'),
   // 「今日の予定」 (calendar.md): any member, their own calendar only (nothing in the request names
   // another person); Google is not set up here, so the answer is an empty list with a reason.
@@ -738,6 +745,8 @@ const CROSS: CrossRow[] = [
 
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
   x('DELETE /api/companies/:companyId/absences/:absenceId', (w, id) => ({ path: `${C(w)}/absences/${id}` }), w => w.other.absence),
+  x('GET /api/companies/:companyId/me/google/drive/pick-tickets/:ticketId', (w, id) => ({ path: `${C(w)}/me/google/drive/pick-tickets/${id}` }), w => w.other.pickTicket),
+  x('DELETE /api/companies/:companyId/me/google/drive/pick-tickets/:ticketId', (w, id) => ({ path: `${C(w)}/me/google/drive/pick-tickets/${id}` }), w => w.other.pickTicket),
   x('PATCH /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}`, body: { name: '乗っ取り' } }), w => w.other.group),
   x('PUT /api/companies/:companyId/groups/:groupId/members', (w, id) => ({ path: `${C(w)}/groups/${id}/members`, body: { userIds: [] } }), w => w.other.group),
   x('DELETE /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}` }), w => w.other.group),
@@ -1024,6 +1033,9 @@ async function seed(): Promise<World> {
   db.prepare("INSERT INTO outbound_mails (company_id, message_id, author_id, from_email, minutes_id, deal_id, created_at) VALUES (?, 'outbound_message-other00000001', ?, 'other@example.com', NULL, 'deal-other001', ?)")
     .run(other, otherMember, expires)
 
+  // A Google Picker pick ticket of the other company's member, open until far ahead.
+  db.prepare("INSERT INTO google_drive_pick_tickets (id, company_id, user_id, ticket_hash, mode, max_items, file_ids, state, created_at, expires_at) VALUES ('pick-ticket-other-1', ?, ?, ?, 'folder', 1, '[]', 'open', ?, '2100-01-01T00:00:00.000Z')")
+    .run(other, otherMember, 'f'.repeat(64), expires)
   // An absence of the other company's member, current until far ahead.
   db.prepare("INSERT INTO member_absences (company_id, id, user_id, from_day, until_day, delegate_id, set_by, set_at) VALUES (?, 'absence-other-1', ?, '2000-01-01', '2100-12-31', ?, ?, ?)")
     .run(other, otherMember, USER.outsider, USER.outsider, expires)
@@ -1089,6 +1101,7 @@ async function seed(): Promise<World> {
       shelfItem: 'shelf-other-1',
       shelfRequest: 'shelf-request-other-1',
       job: OTHER_JOB,
+      pickTicket: 'pick-ticket-other-1',
 
     },
   }

@@ -4,7 +4,7 @@
  */
 import type Database from 'better-sqlite3'
 import { parseSkillUses } from '../../../shared/core/skill-uses'
-import type { DrivePickRow, DrivePutRow, GoogleDriveRepository } from '../../ports/google-drive'
+import type { DrivePickRow, DrivePickTicketRow, DrivePutRow, GoogleDriveRepository } from '../../ports/google-drive'
 import { skillUsesJson } from './skill-uses'
 
 type PickRow = { user_id: string; file_id: string; kind: string; name: string; mime_type: string; picked_at: string; expires_at: string }
@@ -14,6 +14,24 @@ type PutRow = {
   file_id: string | null; revision_id: string | null; link: string | null; reason: string | null; created_at: string; finished_at: string | null
   skills: string | null
   updated_file_id: string | null
+}
+
+type TicketRow = {
+  id: string; user_id: string; ticket_hash: string; mode: string; max_items: number; file_ids: string; state: string
+  config_handed_at: string | null; result: string | null; created_at: string; expires_at: string; finished_at: string | null
+}
+const TICKET_COLUMNS = 'id, user_id, ticket_hash, mode, max_items, file_ids, state, config_handed_at, result, created_at, expires_at, finished_at'
+const toTicket = (r: TicketRow): DrivePickTicketRow => {
+  let fileIds: string[] = []
+  try {
+    const parsed = JSON.parse(r.file_ids) as unknown
+    if (Array.isArray(parsed)) fileIds = parsed.filter((v): v is string => typeof v === 'string')
+  } catch { /* stored by this module only */ }
+  return {
+    id: r.id, userId: r.user_id, ticketHash: r.ticket_hash, mode: r.mode as DrivePickTicketRow['mode'], maxItems: r.max_items, fileIds,
+    state: r.state as DrivePickTicketRow['state'], configHandedAt: r.config_handed_at, result: r.result, createdAt: r.created_at, expiresAt: r.expires_at,
+    finishedAt: r.finished_at,
+  }
 }
 
 const PICK_COLUMNS = 'user_id, file_id, kind, name, mime_type, picked_at, expires_at'
@@ -101,6 +119,36 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
     },
     dropPut(id) {
       conn.prepare(`DELETE FROM google_drive_puts WHERE company_id = ? AND id = ? AND state = 'sending'`).run(companyId, id)
+    },
+
+    createPickTicket(t) {
+      conn.prepare(`INSERT INTO google_drive_pick_tickets (id, company_id, user_id, ticket_hash, mode, max_items, file_ids, state, config_handed_at, result, created_at, expires_at, finished_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(t.id, companyId, t.userId, t.ticketHash, t.mode, t.maxItems, JSON.stringify(t.fileIds), t.state, t.configHandedAt, t.result, t.createdAt, t.expiresAt, t.finishedAt)
+    },
+    pickTicketByHash(ticketHash) {
+      const r = conn.prepare(`SELECT ${TICKET_COLUMNS} FROM google_drive_pick_tickets WHERE company_id = ? AND ticket_hash = ?`).get(companyId, ticketHash) as TicketRow | undefined
+      return r ? toTicket(r) : null
+    },
+    pickTicket(userId, id) {
+      const r = conn.prepare(`SELECT ${TICKET_COLUMNS} FROM google_drive_pick_tickets WHERE company_id = ? AND user_id = ? AND id = ?`).get(companyId, userId, id) as TicketRow | undefined
+      return r ? toTicket(r) : null
+    },
+    claimPickTicketConfig(id, now) {
+      return conn.prepare(`UPDATE google_drive_pick_tickets SET config_handed_at = ?
+        WHERE company_id = ? AND id = ? AND state = 'open' AND config_handed_at IS NULL AND expires_at > ?`).run(now, companyId, id, now).changes === 1
+    },
+    movePickTicket(id, from, to, fields) {
+      if (from.length === 0) return false
+      return conn.prepare(`UPDATE google_drive_pick_tickets SET state = ?, result = COALESCE(?, result), finished_at = COALESCE(?, finished_at)
+        WHERE company_id = ? AND id = ? AND state IN (${from.map(() => '?').join(', ')})`)
+        .run(to, fields.result ?? null, fields.finishedAt ?? null, companyId, id, ...from).changes === 1
+    },
+    dropPickTicket(userId, id) {
+      conn.prepare('DELETE FROM google_drive_pick_tickets WHERE company_id = ? AND user_id = ? AND id = ?').run(companyId, userId, id)
+    },
+    prunePickTickets(before) {
+      conn.prepare('DELETE FROM google_drive_pick_tickets WHERE company_id = ? AND expires_at <= ?').run(companyId, before)
     },
   }
 }

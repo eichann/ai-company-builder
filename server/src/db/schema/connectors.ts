@@ -114,6 +114,28 @@ export const connectorSchema = `
       UNIQUE (company_id, user_id, request_key)
     );
 
+    -- Google Picker in the member's browser (google-drive.md "Picker and its token"): a one-time
+    -- pick ticket the member's app asked for with its session. Only the sha256 of the ticket is
+    -- kept; 10 minutes; the Picker's config is handed out once (config_handed_at); the result is
+    -- the picks the server checked and kept (JSON of the answer, never a token), removed once the
+    -- app read it. state: open → saving → picked | failed, or open → cancelled.
+    CREATE TABLE IF NOT EXISTS google_drive_pick_tickets (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      ticket_hash TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK (mode IN ('folder', 'files')),
+      max_items INTEGER NOT NULL,
+      file_ids TEXT NOT NULL DEFAULT '[]',
+      state TEXT NOT NULL CHECK (state IN ('open', 'saving', 'picked', 'cancelled', 'failed')),
+      config_handed_at TEXT,
+      result TEXT,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      finished_at TEXT,
+      UNIQUE (company_id, ticket_hash)
+    );
+
     -- Which core connector serves a role when two could (connector-roles.md; the
     -- admin chooses once). The history is in connector_history (provider 'roles').
     CREATE TABLE IF NOT EXISTS connector_role_choices (

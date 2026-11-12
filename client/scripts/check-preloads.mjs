@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Every preload Vite emits must load in a sandboxed window (google-drive.md "The Picker",
-// ipc-and-main-process.md). Run after `vite build` (CI "Renderer bundle size (Linux)", and
+// Every preload Vite emits must load in a sandboxed window (ipc-and-main-process.md). Run after `vite build` (CI "Renderer bundle size (Linux)", and
 // `pnpm build` before electron-builder packs the app).
 //
 // Electron runs a sandboxed preload as a classic script, wrapped in a function that receives its
 // own `require` — which, in Electron 45, gives out only `electron` (deployment.md). An ES-module
 // preload (a top-level `import`) fails to parse there, the bridge is never exposed, and the page
-// finds no `window.acbPicker` / `window.electronAPI`: release-20261109 shipped such a
-// picker-preload.js and the Google Picker window showed 「この画面はアプリの中でだけ使えます。」.
+// finds no `window.electronAPI`: release-20261109 shipped such a preload for the former Google
+// Picker window (removed since: the Picker now opens in the member's browser), which showed
+// 「この画面はアプリの中でだけ使えます。」.
 //
 // This loads each file the same way under Node's vm: compiled as a function body (so `import` /
 // `export` are syntax errors, as in Electron), run with a require that has only a fake
@@ -23,7 +23,6 @@ const dir = process.argv[2] ?? 'dist-electron'
 /** Each preload file and the one name it exposes (electron-adapter.ts sets the windows up). */
 const PRELOADS = [
   { file: 'preload.js', exposes: 'electronAPI' },
-  { file: 'picker-preload.js', exposes: 'acbPicker' },
 ]
 
 /** What a sandboxed preload sees: the wrapper's parameters, `require` limited to `electron`. */

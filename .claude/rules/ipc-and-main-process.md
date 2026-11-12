@@ -83,9 +83,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
 - `main.ts` (~320 lines) — the composition root: creates services and stores in dependency
   order, calls each `register…Ipc` / `wire…`, owns the app lifecycle, `app:closeResponse` and
   `chat-server:getInfo`, starts voice input and the chat server in `app.whenReady`.
-- Shell layer = `main.ts`, `preload.ts`, `picker-preload.ts` (Google Picker's window only:
-  two calls on that window's own `webContents.ipc`, no global channel; `google-drive.md`),
-  `electron-adapter.ts`, `voice-input.ts`: the only files
+- Shell layer = `main.ts`, `preload.ts`, `electron-adapter.ts`, `voice-input.ts`: the only files
   that import Electron, i.e. what another desktop shell (Tauri) would replace. ESLint
   `no-restricted-imports` forbids `electron` in `features/**`, `services/**`, `ipc/**`;
   `client/tests/architecture-boundaries.test.ts` checks the same over the whole tree, plus the

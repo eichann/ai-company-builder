@@ -2,11 +2,14 @@
 // the Google connector's module on the app side (with ipc.ts): Drive is a
 // connection, never a core role, so nothing outside features/google names it.
 //
-// - Picking is the person's act: the AI's drive_pick_* tool opens Google
-//   Picker in a window of its own (the shell's DrivePickerWindow) and waits for
-//   the person's choice. The Picker's token (drive.file only) comes from the
-//   server with the member's session, which stays here; it goes to that window
-//   only and is dropped when it closes — never to the renderer, the AI or a log.
+// - Picking is the person's act: the AI's drive_pick_* tool (and the task card's
+//   「Google Drive のファイルをつなぐ」, a job's 「置き先を選んで受け取る」) asks the server
+//   for a one-time pick ticket with the member's session, opens the server's Picker
+//   page in the member's own browser (signed in to Google; Google Picker does not
+//   work inside an app window) with the ticket in the URL fragment, and waits —
+//   asking the server with the session — for the person's choice, at most 10
+//   minutes. The Picker's token (drive.file only) goes from the server to that
+//   page only; the app never holds it. The ticket is never logged.
 //   Without the Drive permission yet, the first pick opens Google's consent in
 //   the system browser (google:connect's way, 「ask when first needed」).
 // - Reading and putting go to the server with the turn's record token (the AI's
@@ -22,22 +25,23 @@ import fs from 'fs'
 import path from 'path'
 import { z } from 'zod'
 import {
-  checkDriveFileName, checkDrivePutContent, DRIVE_PICK_MAX_FILES, driveDocFetchesOutside, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, drivePutForm, drivePutKindOf, GOOGLE_PICKER_PAGE_PATH,
-  drivePreselectIds, isDriveId, type DrivePickMode, type DrivePutAs, type DrivePutKind,
+  checkDriveFileName, checkDrivePutContent, driveDocFetchesOutside, DRIVE_PICK_MAX_FILES, DRIVE_PICK_TICKET_TTL_MS, DRIVE_PUT_MAX_BYTES, drivePickerPageUrl, drivePutForm, drivePutKindOf,
+  drivePreselectIds, isDriveId, isDrivePickTicket, type DrivePickMode, type DrivePutAs, type DrivePutKind,
 } from '../../../../shared/core/google-drive'
 import { isSameOrAncestorPath, pathKey } from '../../../../shared/core/paths'
 import { INSTRUCTION_LIKE_WORDS } from '../../../../shared/core/instruction-like'
 import { outsideBracketsNote, outsideTextFlags, wrapOutsideText } from '../../../../shared/core/outside-text'
-import type { DriveAiStatus, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerSession, DrivePicksResult, DrivePutAnswer, DriveReadAnswer, DriveUpdatableFile } from '../../../../shared/types/google-drive'
+import type { DriveAiStatus, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickTicketStarted, DrivePickTicketState, DrivePutAnswer, DriveReadAnswer, DriveUpdatableFile } from '../../../../shared/types/google-drive'
 import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from '../../../shared/google'
 import { RecordsApiError, type RecordTurnAccess } from '../../records/api'
 import type { ExtraRecordTools, RecordToolDescriptor } from '../../records/tools'
 import { recordToolDisplay } from '../../../shared/acb-tool-displays'
-import type { DrivePickerOutcome, DrivePickerWindow, PathGuard } from '../ports'
+import type { PathGuard } from '../ports'
 
 const CONSENT_WAIT_MS = 2 * 60 * 1000
 const CONSENT_POLL_MS = 3000
-const PICKER_TIMEOUT_MS = 10 * 60 * 1000
+const PICKER_TIMEOUT_MS = DRIVE_PICK_TICKET_TTL_MS
+const PICK_POLL_MS = 2000
 const PUT_TIMEOUT_MS = 120_000
 const READ_TIMEOUT_MS = 60_000
 
@@ -48,7 +52,8 @@ export type DrivePickResult =
 export interface DrivePickingDeps {
   baseUrl: () => string
   cookies: () => string[]
-  window: DrivePickerWindow
+  /** Opens a page in the member's own browser (the shell's `openExternal`): only the server's Picker page with its ticket. */
+  openBrowser(url: string): Promise<void>
   /** The Google connection's own calls (ipc.ts createGoogleApi): status and 「Google で許可」 in the browser. */
   google: {
     status(companyId: string): Promise<GoogleStatusResult>
@@ -58,6 +63,9 @@ export interface DrivePickingDeps {
   sleep?: (ms: number) => Promise<void>
   log?: Pick<Console, 'warn'>
   consentWaitMs?: number
+  /** How long the app waits for the person's choice (default 10 minutes, the ticket's life). */
+  pickTimeoutMs?: number
+  now?: () => number
 }
 
 /** The person picks in Google Picker; the server checks and keeps the picks. */
@@ -66,10 +74,12 @@ export function createDrivePicking(deps: DrivePickingDeps) {
   const sleep = deps.sleep ?? (ms => new Promise(r => setTimeout(r, ms)))
   const log = deps.log ?? console
 
-  async function session(companyId: string, rest: string, body?: unknown): Promise<{ status: number; json: { data?: unknown; error?: unknown; code?: unknown } } | null> {
+  const now = deps.now ?? Date.now
+
+  async function session(companyId: string, rest: string, body?: unknown, verb?: 'DELETE'): Promise<{ status: number; json: { data?: unknown; error?: unknown; code?: unknown } } | null> {
     const base = deps.baseUrl()
     if (!base) return null
-    const method = body === undefined ? 'GET' : 'POST'
+    const method = verb ?? (body === undefined ? 'GET' : 'POST')
     try {
       const res = await doFetch(`${base}/api/companies/${encodeURIComponent(companyId)}/me/google/drive${rest}`, {
         method, redirect: 'error',
@@ -118,39 +128,52 @@ export function createDrivePicking(deps: DrivePickingDeps) {
 
     /**
      * `fileIds` (files mode only): files the Picker shows first — a Drive link the member pasted on
-     * a task card. Only Drive ids reach the window; the member's 「選択」 there is still the pick.
+     * a task card. Only Drive ids go with the ticket; the member's 「選択」 in the browser is still the pick.
      */
     async pick(companyId: string, mode: DrivePickMode, signal?: AbortSignal, options: { fileIds?: readonly string[] } = {}): Promise<DrivePickResult> {
       const consent = await ensureConsent(companyId, signal)
       if (consent) return consent
-      const started = await session(companyId, '/picker', { mode })
+      const fileIds = mode === 'files' ? drivePreselectIds(options.fileIds) : []
+      const started = await session(companyId, '/pick-tickets', { mode, ...(fileIds.length > 0 ? { fileIds } : {}) })
       if (!started) return { ok: false, reason: 'offline', message: 'サーバーに接続できませんでした。' }
-      const s = started.json.data as DrivePickerSession | undefined
-      if (started.status !== 200 || !s || typeof s.accessToken !== 'string') {
-        log.warn(`[google-drive] picker: answered ${started.status}`)
+      const t = started.json.data as DrivePickTicketStarted | undefined
+      if (started.status !== 200 || !t || typeof t.ticketId !== 'string' || !isDrivePickTicket(t.ticket)) {
+        log.warn(`[google-drive] pick ticket: answered ${started.status}`)
         return { ok: false, reason: 'refused', message: typeof started.json.error === 'string' ? started.json.error : 'Google Drive のファイル選びを始められませんでした。' }
       }
-      const outcome = await deps.window.open({
-        pageUrl: `${deps.baseUrl().replace(/\/+$/, '')}${GOOGLE_PICKER_PAGE_PATH}`,
-        config: {
-          accessToken: s.accessToken, apiKey: s.apiKey, appId: s.appId, scriptOrigin: s.scriptOrigin, mode,
-          mimeTypes: DRIVE_PICKABLE_MIMES, maxItems: mode === 'folder' ? 1 : DRIVE_PICK_MAX_FILES,
-          ...(mode === 'files' && drivePreselectIds(options.fileIds).length > 0 ? { fileIds: drivePreselectIds(options.fileIds) } : {}),
-        },
-        timeoutMs: PICKER_TIMEOUT_MS,
-      })
-      if (outcome.action !== 'picked') {
-        return { ok: false, reason: 'cancelled', message: outcome.action === 'timeout' ? '選ばれないまま時間が過ぎました。' : 'メンバーは何も選びませんでした。' }
+      const ticketPath = `/pick-tickets/${encodeURIComponent(t.ticketId)}`
+      const close = async () => { await session(companyId, ticketPath, undefined, 'DELETE') }
+      const url = drivePickerPageUrl(deps.baseUrl(), t.ticket)
+      if (!url) {
+        await close()
+        return { ok: false, reason: 'refused', message: 'Google Drive のファイル選びを始められませんでした。' }
       }
-      const ids = [...new Set(outcome.ids.filter(isDriveId))].slice(0, mode === 'folder' ? 1 : DRIVE_PICK_MAX_FILES)
-      if (ids.length === 0) return { ok: false, reason: 'cancelled', message: 'メンバーは何も選びませんでした。' }
-      const kept = await session(companyId, '/picks', { mode, ids })
-      if (!kept) return { ok: false, reason: 'offline', message: 'サーバーに接続できませんでした。' }
-      const data = kept.json.data as DrivePicksResult | undefined
-      if (kept.status !== 200 || !data) {
-        return { ok: false, reason: 'refused', message: typeof kept.json.error === 'string' ? kept.json.error : '選んだものを確かめられませんでした。' }
+      try {
+        await deps.openBrowser(url)
+      } catch {
+        await close()
+        return { ok: false, reason: 'refused', message: 'ブラウザを開けませんでした。' }
       }
-      return { ok: true, picks: data.picks, refused: data.refused }
+      const until = now() + (deps.pickTimeoutMs ?? PICKER_TIMEOUT_MS)
+      const NOTHING = 'メンバーは何も選びませんでした。'
+      const TIMED_OUT = '選ばれないまま時間が過ぎました。'
+      for (;;) {
+        if (signal?.aborted) { await close(); return { ok: false, reason: 'cancelled', message: '止められました。' } }
+        if (now() >= until) { await close(); return { ok: false, reason: 'cancelled', message: TIMED_OUT } }
+        await sleep(PICK_POLL_MS)
+        const a = await session(companyId, ticketPath)
+        if (!a) continue // the server for a moment out of reach: keep waiting until the time is up
+        if (a.status === 404) return { ok: false, reason: 'cancelled', message: NOTHING }
+        const st = a.json.data as DrivePickTicketState | undefined
+        if (a.status !== 200 || !st) continue
+        if (st.state === 'waiting') continue
+        if (st.state === 'picked') {
+          const picks = (Array.isArray(st.picks) ? st.picks : []).filter(p => p && isDriveId(p.id) && (p.kind === 'folder' || p.kind === 'file'))
+          return { ok: true, picks, refused: typeof st.refused === 'number' ? st.refused : 0 }
+        }
+        if (st.state === 'failed') return { ok: false, reason: 'refused', message: typeof st.error === 'string' ? st.error : '選んだものを確かめられませんでした。' }
+        return { ok: false, reason: 'cancelled', message: st.state === 'expired' ? TIMED_OUT : NOTHING }
+      }
     },
   }
 }
@@ -304,14 +327,14 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
     {
       name: 'drive_pick_folder', readOnly: false, schema: z.object({}).strict(),
       display: recordToolDisplay('drive_pick_folder'),
-      description: 'Google Drive の置き場所（フォルダ）をメンバーに選んでもらう：Google の画面が開き、メンバーが選ぶまで待つ（最長10分）。初めてのときは、Drive を使う許可の画面がブラウザで開く。返る id を drive_put の folderId に使う。\n' +
+      description: 'Google Drive の置き場所（フォルダ）をメンバーに選んでもらう：メンバーのブラウザで Google の画面が開き、メンバーが選ぶまで待つ（最長10分）。初めてのときは、Drive を使う許可の画面がブラウザで開く。返る id を drive_put の folderId に使う。\n' +
         'Ask the member to choose a Google Drive folder (Google Picker opens; waits for their choice). Use the returned id as drive_put\'s folderId.',
       run: async () => pickNote(await deps.picking.pick(deps.companyId, 'folder', signal)),
     },
     {
       name: 'drive_pick_files', readOnly: false, schema: z.object({}).strict(),
       display: recordToolDisplay('drive_pick_files'),
-      description: `Google Drive のファイル（過去の提案書、手書きのメモなど。Google ドキュメント・スライド・スプレッドシート・PDF・テキスト、${DRIVE_PICK_MAX_FILES} 件まで）をメンバーに選んでもらう：Google の画面が開き、メンバーが選ぶまで待つ。返る id を drive_read に使う。\n` +
+      description: `Google Drive のファイル（過去の提案書、手書きのメモなど。Google ドキュメント・スライド・スプレッドシート・PDF・テキスト、${DRIVE_PICK_MAX_FILES} 件まで）をメンバーに選んでもらう：メンバーのブラウザで Google の画面が開き、メンバーが選ぶまで待つ（最長10分）。返る id を drive_read に使う。\n` +
         'Ask the member to pick Google Drive files to read (Picker opens; waits). Then read each with drive_read.',
       run: async () => pickNote(await deps.picking.pick(deps.companyId, 'files', signal)),
     },
@@ -421,28 +444,4 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
       return spec.run(parsed.data)
     },
   }
-}
-
-// ---------------------------------------------------------------------------
-// The Picker window's checks (the shell's DrivePickerWindow uses them).
-
-/** Only the server's Picker page itself (same origin and path, nothing else) may get the config. */
-export function isDrivePickerPage(url: string, pageUrl: string): boolean {
-  try {
-    const u = new URL(url)
-    const p = new URL(pageUrl)
-    return u.origin === p.origin && u.pathname === p.pathname && !u.username && !u.password
-  } catch {
-    return false
-  }
-}
-
-/** What the page sends back, read strictly: picked Drive ids (≤ maxItems), or the end without a choice. */
-export function readDrivePickerResult(raw: unknown, maxItems: number): DrivePickerOutcome {
-  const r = raw && typeof raw === 'object' ? raw as { action?: unknown; ids?: unknown } : {}
-  if (r.action === 'picked' && Array.isArray(r.ids)) {
-    const ids = r.ids.filter(isDriveId).slice(0, maxItems)
-    return ids.length > 0 ? { action: 'picked', ids } : { action: 'cancel' }
-  }
-  return { action: r.action === 'error' ? 'error' : 'cancel' }
 }

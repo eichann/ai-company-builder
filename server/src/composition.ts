@@ -618,6 +618,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     operatorStopped: () => pluginShelf.isStopped('google', ''),
     vaultEnabled: () => brokerVault.status().enabled,
     sha256: bytes => createHash('sha256').update(bytes).digest('hex'),
+    memberOf: (companyId, userId) => access.memberOf(companyId, userId),
     // The practice Google serves a stand-in Picker script on staging (tests/fakes/google).
     pickerScriptOrigin: practiceGoogle
       ? `${practiceGoogle.target.protocol}//${practiceGoogle.target.hostname === 'host.docker.internal' ? 'localhost' : practiceGoogle.target.hostname}:${practiceGoogle.target.port}`

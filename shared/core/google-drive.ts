@@ -216,10 +216,56 @@ export const DRIVE_TEXT_HEADER = '【ここから Google Drive のファイル�
 export const DRIVE_TEXT_FOOTER = '【Google Drive のファイルの中身ここまで】'
 
 // ---------------------------------------------------------------------------
-// The Picker (a dedicated window of the app; the page is the server's).
+// The Picker (the server's page, opened in the member's own browser with a one-time pick ticket).
 
-/** The server's page that runs Google Picker (public, static; the token comes from the app's window only). */
+/**
+ * The server's page that runs Google Picker (public, static). It is opened in the member's system
+ * browser — Google Picker needs a browser signed in to Google, and Google blocks signing in inside
+ * an embedded browser (Electron) — with a one-time pick ticket in the URL fragment.
+ */
 export const GOOGLE_PICKER_PAGE_PATH = '/api/google-picker'
+
+/**
+ * What the admin adds to the Picker API key's website restriction: `<origin>/*`. The Picker page sends
+ * `Referrer-Policy: strict-origin-when-cross-origin`, so Google sees only the server's origin (found with
+ * real Google, 2026-11-12) — the page's full address would never match. Null for an unusable address.
+ */
+export function drivePickerReferrerPattern(pageUrl: string): string | null {
+  try {
+    const u = new URL(pageUrl)
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null
+    return `${u.origin}/*`
+  } catch {
+    return null
+  }
+}
+
+/** A pick ticket lives this long: the same 10 minutes the app waits for the person's choice. */
+export const DRIVE_PICK_TICKET_TTL_MS = 10 * 60 * 1000
+
+/** A pick ticket: `<companyId>.<64 hex>` (the company finds where to look; the hex is 256 random bits). */
+export const DRIVE_PICK_TICKET_RE = /^([A-Za-z0-9_-]{1,100})\.([0-9a-f]{64})$/
+
+export function isDrivePickTicket(v: unknown): v is string {
+  return typeof v === 'string' && DRIVE_PICK_TICKET_RE.test(v)
+}
+
+/**
+ * The address the app opens in the browser: the server's Picker page with the ticket in the
+ * fragment (`#t=`), which the browser never sends to a server, in a Referer or in a request log.
+ * Null when the server address or the ticket is not usable.
+ */
+export function drivePickerPageUrl(serverUrl: string, ticket: string): string | null {
+  if (!isDrivePickTicket(ticket)) return null
+  let base: URL
+  try {
+    base = new URL(serverUrl)
+  } catch {
+    return null
+  }
+  if ((base.protocol !== 'https:' && base.protocol !== 'http:') || base.username || base.password) return null
+  return `${base.origin}${base.pathname.replace(/\/+$/, '')}${GOOGLE_PICKER_PAGE_PATH}#t=${ticket}`
+}
 
 export type DrivePickMode = 'folder' | 'files'
 
