@@ -592,14 +592,20 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Job', USERS.admin, 'POST', `${base}/me/jobs/${job.id}/accept`, { version: 1, fingerprint: detail.versions[0].fingerprint })
     await expectShape('Job', USERS.owner, 'POST', `${base}/jobs/${job.id}/pause`)
     await expectShape('Job', USERS.owner, 'POST', `${base}/jobs/${job.id}/resume`)
-    // 「もう一度」 (B PR 5b) on an occurrence that expired.
+    // 「もう一度」 (B PR 5b) on an occurrence that expired (a slot no later one has come after). The weekly job's next slot
+    // leaves room for a run except in the 10 minutes before a Monday 09:00 (Tokyo), when the press is refused: a run
+    // then is moved past it.
+    const jst = new Date(Date.now() + 9 * 3_600_000)
+    const beforeMonday9 = jst.getUTCDay() === 1 && jst.getUTCHours() === 8 && jst.getUTCMinutes() >= 45
+    if (beforeMonday9) vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 30 * 60_000 })
     const { db } = await import('../../src/db')
     const occ = `occ.${'c'.repeat(32)}`
     const at = new Date().toISOString()
     db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, outcome_code, created_at, updated_at)
-      VALUES (?, ?, ?, 1, '2026-11-12T09:00', 'Asia/Tokyo', ?, ?, 'expired', 'EXPIRED', ?, ?)`).run(CO, occ, job.id, at, at, at, at)
+      VALUES (?, ?, ?, 1, '2099-01-05T09:00', 'Asia/Tokyo', ?, ?, 'expired', 'EXPIRED', ?, ?)`).run(CO, occ, job.id, at, at, at, at)
     await expectShape('JobOccurrences', USERS.owner, 'GET', `${base}/jobs/${job.id}/occurrences`)
     await expectShape('JobRetry', USERS.owner, 'POST', `${base}/jobs/${job.id}/occurrences/${occ}/retry`)
+    if (beforeMonday9) vi.useRealTimers()
     await expectShape('JobsStop', USERS.owner, 'PUT', `${base}/jobs-stop`, { stopped: false })
   })
 

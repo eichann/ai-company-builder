@@ -42,9 +42,6 @@ import { sqliteMembershipRepository } from '../../src/adapters/sqlite/membership
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import { randomIds } from '../../src/adapters/system'
 import { occurrenceTaskId } from '../../../shared/core/jobs'
-import { nextJobSlot } from '../../../shared/core/job-schedule'
-import { companyTimeToUtc } from '../../src/services/job-occurrences'
-import { companyNow } from '../../src/services/notifications'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
@@ -72,11 +69,13 @@ const owner = (co = CO) => ({ companyId: co, userId: 'jy-owner', role: 'owner' }
 const alice = (co = CO) => ({ companyId: co, userId: 'jy-alice', role: 'member' })
 const companyData = sqliteCompanyData(db)
 const clock = { now: () => new Date().toISOString(), nowMs: () => Date.now() }
-/** The deadline a press gives a daily 09:00 job: its window from now, but never past the next 09:00 (company time). */
-function deadlineOf(windowMinutes: number, nowMs = Date.now()): number {
-  const next = nextJobSlot({ every: 'day', at: '09:00', businessDaysOnly: false }, companyNow(nowMs, 'Asia/Tokyo'), [])
-  return Math.min(nowMs + windowMinutes * MINUTE, Date.parse(companyTimeToUtc(next as string, 'Asia/Tokyo')))
-}
+/**
+ * The tests' now: 2026-11-12 12:00 in Tokyo. The jobs run daily at 09:00, so today's slot (the newest) is
+ * `2026-11-12T09:00` and the next one 2026-11-13 09:00 Tokyo = `2026-11-13T00:00Z`.
+ */
+const NOW = Date.parse('2026-11-12T03:00:00.000Z')
+const TODAY = '2026-11-12T09:00'
+const NEXT_SLOT = Date.parse('2026-11-13T00:00:00.000Z')
 
 function publishSkill(co = CO): string {
   const current = (db.prepare("SELECT current_version FROM shelf_items WHERE company_id = ? AND name = 'interview-report'").get(co) as Json)?.current_version ?? null
@@ -113,14 +112,22 @@ async function approvedJob(co = CO, opts: { grant?: Record<string, unknown>; acc
   return made.value.id
 }
 
+/** A server operation job (placement e): a やること for alice every day at 09:00, no AI. */
+const serverJob = (): Json => ({
+  schema: 1, name: '週の報告', actingUser: 'jy-alice', trigger: { every: 'day', at: '09:00', businessDaysOnly: false },
+  check: { kind: 'none' }, run: { kind: 'operation', operation: 'create_task', title: '週の報告を書く', dueBusinessDays: null },
+  placement: 'e', missed: { policy: 'latest_only', expiresAfterMinutes: 60 },
+  grant: { tools: [], creates: ['task'], routes: [], reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 5, runsPerDay: 1 } },
+})
+
 let slot = 0
 /** An occurrence of the job in `state` (a later slot each time: the newest is the last one made). */
-function occurrence(job: string, state: string, opts: { co?: string; outcome?: string | null; expiresInMs?: number } = {}): string {
+function occurrence(job: string, state: string, opts: { co?: string; outcome?: string | null; expiresInMs?: number; slot?: string } = {}): string {
   const co = opts.co ?? CO
   const id = `occ.${(++slot).toString(16).padStart(32, '0')}`
   const now = Date.now()
   db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, outcome_code, created_at, updated_at)
-    VALUES (?, ?, ?, 1, ?, 'Asia/Tokyo', ?, ?, ?, ?, ?, ?)`).run(co, id, job, `2026-${String(1 + Math.floor(slot / 28) % 12).padStart(2, '0')}-${String(1 + (slot % 28)).padStart(2, '0')}T09:00`,
+    VALUES (?, ?, ?, 1, ?, 'Asia/Tokyo', ?, ?, ?, ?, ?, ?)`).run(co, id, job, opts.slot ?? TODAY,
     new Date(now - 2 * MINUTE).toISOString(), new Date(now + (opts.expiresInMs ?? 24 * 60 * MINUTE)).toISOString(), state, opts.outcome ?? null, new Date(now).toISOString(), new Date(now).toISOString())
   return id
 }
@@ -161,6 +168,7 @@ beforeAll(async () => {
     }
   }
   vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(NOW)
 })
 
 beforeEach(async () => {
@@ -226,10 +234,17 @@ describe('which occurrences', () => {
 
   it('only the job’s newest occurrence: once a later one came, its check covered this window', async () => {
     const job = await approvedJob()
-    const older = occurrence(job, 'expired', { outcome: 'EXPIRED' })
+    const older = occurrence(job, 'expired', { outcome: 'EXPIRED', slot: '2026-11-11T09:00' })
     occurrence(job, 'done')
     expect(await retry('jy-owner', job, older)).toMatchObject({ status: 409, body: { code: 'NOT_LATEST' } })
     expect(await occurrenceView('jy-owner', job, older)).toMatchObject({ retry: { allowed: false, why: 'NOT_LATEST' } })
+    // The stored newer occurrence alone says so (no slot rule here).
+    const withoutSlots = createJobRetry({
+      companyData, transactions: sqliteTransactions(db), clock, jobs: services.jobs,
+      roleOf: (co, user) => sqliteMembershipRepository(db).roleOf(co, user), aiStops: () => ({ all: false, tools: [] }),
+      reconcileFor: () => { throw new Error('unused') },
+    })
+    expect(withoutSlots.retry(owner(), job, older)).toMatchObject({ ok: false, body: { code: 'NOT_LATEST' } })
   })
 })
 
@@ -312,7 +327,8 @@ describe('the press', () => {
     const after = occOf(occ)
     expect(after).toMatchObject({ state: 'due', outcome_code: null, run_id: null, retries: 1, retried_by: 'jy-admin' })
     // The deadline: from the press, as long as the approved version gives a slot (1440 minutes here).
-    expect(Date.parse(after.expires_at)).toBe(deadlineOf(1440, pressedAt))
+    // The deadline: its 1440 minutes from the press, but a run claimed then must end (30 minutes) before the next slot.
+    expect(Date.parse(after.expires_at)).toBe(NEXT_SLOT - 30 * MINUTE)
     expect(Date.parse(after.retried_at)).toBe(pressedAt)
     // The old run is closed for good: its own 「もう一度」 gives nothing back.
     expect(runOf(first.id)).toMatchObject({ state: 'done', closed_at: expect.any(String) })
@@ -333,17 +349,43 @@ describe('the press', () => {
     vi.setSystemTime(Date.now() - 60 * MINUTE)
   })
 
-  it('the new deadline never passes the job’s next slot (the next occurrence’s check starts where this one stops)', async () => {
+  it('never beside the next occurrence: a later slot that came (made or not), and too little time before the next one', async () => {
     const job = await approvedJob()
-    const occ = occurrence(job, 'expired', { outcome: 'EXPIRED' })
-    const next = new Date(Date.now() + 30 * MINUTE).toISOString()
-    const jobRetry = createJobRetry({
-      companyData, transactions: sqliteTransactions(db), clock, jobs: services.jobs,
-      roleOf: (co, user) => sqliteMembershipRepository(db).roleOf(co, user), aiStops: () => ({ all: false, tools: [] }),
-      nextSlotAt: () => next, reconcileFor: () => { throw new Error('unused') },
-    })
-    expect(jobRetry.retry(owner(), job, occ).ok).toBe(true)
-    expect(occOf(occ).expires_at).toBe(next)
+    // Yesterday's occurrence, today's slot not made yet by the clock: still not the newest.
+    const yesterday = occurrence(job, 'expired', { outcome: 'EXPIRED', slot: '2026-11-11T09:00' })
+    expect(await retry('jy-owner', job, yesterday)).toMatchObject({ status: 409, body: { code: 'NOT_LATEST' } })
+    db.prepare('DELETE FROM ai_job_occurrences').run()
+    const today = occurrence(job, 'expired', { outcome: 'EXPIRED' })
+    // 08:28 tomorrow (Tokyo): a run must be claimed by 08:30 to end by 09:00 — 2 minutes is too little: refused, in words.
+    vi.setSystemTime(NEXT_SLOT - 32 * MINUTE)
+    expect(await retry('jy-owner', job, today)).toMatchObject({ status: 409, body: { code: 'NEXT_SLOT_SOON', error: expect.stringContaining('次の回が近いため') } })
+    expect(await occurrenceView('jy-owner', job, today)).toMatchObject({ retry: { allowed: false, why: 'NEXT_SLOT_SOON' } })
+    // 08:00: allowed, and claimable only until 08:30, so its run ends by 09:00.
+    vi.setSystemTime(NEXT_SLOT - 60 * MINUTE)
+    expect((await retry('jy-owner', job, today)).status).toBe(200)
+    expect(Date.parse(occOf(today).expires_at)).toBe(NEXT_SLOT - 30 * MINUTE)
+    vi.setSystemTime(NOW)
+  })
+
+  it('pressed at most three times per occurrence', async () => {
+    const job = await approvedJob()
+    const occ = occurrence(job, 'needs_person', { outcome: 'RUN_FAILED' })
+    db.prepare('UPDATE ai_job_occurrences SET retries = 3 WHERE company_id = ? AND id = ?').run(CO, occ)
+    expect(await retry('jy-owner', job, occ)).toMatchObject({ status: 409, body: { code: 'RETRY_LIMIT' } })
+    db.prepare('UPDATE ai_job_occurrences SET retries = 2 WHERE company_id = ? AND id = ?').run(CO, occ)
+    expect(await retry('jy-owner', job, occ)).toMatchObject({ status: 200, body: { data: { occurrence: { retries: 3 } } } })
+  })
+
+  it('a claim waits while an earlier occurrence of the job runs (the two never run side by side)', async () => {
+    const job = await approvedJob()
+    const earlier = occurrence(job, 'due', { slot: '2026-11-11T09:00' })
+    const later = occurrence(job, 'due')
+    const run = (await claim(earlier)).body.data.run
+    expect(await claim(later, 'device-alice-2')).toMatchObject({ status: 409, body: { code: 'JOB_EARLIER_RUNNING' } })
+    expect(occOf(later)).toMatchObject({ state: 'due', run_id: null })
+    expect((await as('jy-alice', 'GET', '/me/job-turns')).body.data.turns.map((t: Json) => t.occurrenceId)).toEqual([])
+    expect((await finish(run, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
+    expect(await claim(later, 'device-alice-2')).toMatchObject({ status: 201 })
   })
 
   it('an expired occurrence that never ran is claimed after the press', async () => {
@@ -368,19 +410,33 @@ describe('the press', () => {
     expect(bell).toHaveLength(2)
   })
 
+  it('an earlier notice keeps the reason it was written with after a press', async () => {
+    const made = await services.jobs.create(owner(), { definition: serverJob() })
+    if (!made.ok) throw new Error(JSON.stringify(made.body))
+    expect((await services.jobs.approve(owner(), made.value.id, { version: 1 })).ok).toBe(true)
+    expect((await services.jobs.accept(alice(), made.value.id, { version: 1 })).ok).toBe(true)
+    const occ = occurrence(made.value.id, 'due')
+    const runner = createJobOccurrences({
+      companyData, transactions: sqliteTransactions(db), clock, ids: randomIds,
+      timeZoneOf: () => 'Asia/Tokyo', holidaysOf: () => [], roleOf: (co, user) => sqliteMembershipRepository(db).roleOf(co, user), jobs: services.jobs,
+      writer: { check: () => ({ reason: 'records-off' }) as Json, create: () => { throw new Error('unused') } }, log: () => {},
+    })
+    expect(runner.runOccurrence(CO, occ)).toBe('needs_person')
+    const bell = async () => (await as('jy-alice', 'GET', '/me/notifications')).body.data.items.filter((n: Json) => n.kind === 'job_failed').map((n: Json) => n.text)
+    expect(await bell()).toEqual([expect.stringContaining('記録の機能がオフ')])
+    expect((await retry('jy-owner', made.value.id, occ)).status).toBe(200)
+    expect(occOf(occ).outcome_code).toBeNull()
+    expect(await bell()).toEqual([expect.stringContaining('記録の機能がオフ')])
+  })
+
   it('a server job’s occurrence (placement e) runs again by the server’s runner', async () => {
-    const made = await services.jobs.create(owner(), { definition: {
-      schema: 1, name: '週の報告', actingUser: 'jy-alice', trigger: { every: 'day', at: '09:00', businessDaysOnly: false },
-      check: { kind: 'none' }, run: { kind: 'operation', operation: 'create_task', title: '週の報告を書く', dueBusinessDays: null },
-      placement: 'e', missed: { policy: 'latest_only', expiresAfterMinutes: 60 },
-      grant: { tools: [], creates: ['task'], routes: [], reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 5, runsPerDay: 1 } },
-    } })
+    const made = await services.jobs.create(owner(), { definition: serverJob() })
     if (!made.ok) throw new Error(JSON.stringify(made.body))
     expect((await services.jobs.approve(owner(), made.value.id, { version: 1 })).ok).toBe(true)
     expect((await services.jobs.accept(alice(), made.value.id, { version: 1 })).ok).toBe(true)
     const occ = occurrence(made.value.id, 'needs_person', { outcome: 'TASK_NOT_CREATED' })
     expect(await retry('jy-owner', made.value.id, occ)).toMatchObject({ status: 200 })
-    expect(Date.parse(occOf(occ).expires_at)).toBe(deadlineOf(60))
+    expect(Date.parse(occOf(occ).expires_at)).toBe(Date.now() + 60 * MINUTE)
     const made2: string[] = []
     const runner = createJobOccurrences({
       companyData, transactions: sqliteTransactions(db), clock, ids: randomIds,
@@ -389,6 +445,28 @@ describe('the press', () => {
     })
     expect(runner.runOccurrence(CO, occ)).toBe('done')
     expect(made2).toEqual([occurrenceTaskId(occ)])
+  })
+})
+
+describe('what an earlier run already made', () => {
+  it('a draft made before the run failed: the owner / admin is told before pressing, and the next run’s turn names it', async () => {
+    const job = await approvedJob()
+    const occ = occurrence(job, 'due')
+    const run = (await claim(occ)).body.data.run
+    const at = new Date().toISOString()
+    // Two versions of one draft (done), and a second draft a person said was not made (not_done): one thing made.
+    for (const [key, kind, ref, state] of [['d1', 'mail-draft', 'outbound_message-0000000000000001', 'done'], ['d1v2', 'mail-draft-version', 'outbound_message-0000000000000001', 'done'], ['d2', 'mail-draft', 'outbound_message-0000000000000002', 'not_done']]) {
+      db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, ref_kind, ref_id, created_at, updated_at)
+        VALUES (?, ?, ?, 'f', ?, ?, 1, 'outbound', ?, ?, ?)`).run(CO, run.id, key, kind, state, ref, at, at)
+    }
+    expect((await finish(run, { outcome: 'failed', failure: { class: 'bad-input' } })).status).toBe(200)
+    // One draft (its second version is the same draft), by kind and count only — no id to the owner / admin.
+    const view = await occurrenceView('jy-owner', job, occ)
+    expect(view.madeBefore).toEqual([{ kind: 'mail-draft', count: 1 }])
+    expect(JSON.stringify(view)).not.toContain('outbound_message-')
+    expect((await retry('jy-owner', job, occ)).status).toBe(200)
+    expect((await as('jy-alice', 'GET', '/me/job-turns')).body.data.turns[0].madeBefore).toEqual([{ kind: 'mail-draft', ref: { kind: 'outbound', id: 'outbound_message-0000000000000001' } }])
+    expect((await claim(occ, 'device-alice-2')).body.data.turn.madeBefore).toHaveLength(1)
   })
 })
 
@@ -430,6 +508,19 @@ describe('結果が分からないうちは再開しない', () => {
     expect(await reconcile('jy-owner', job, occ, 'draft-1', { done: false })).toMatchObject({ status: 200 })
     expect(db.prepare('SELECT state FROM ai_run_operations WHERE company_id = ? AND run_id = ?').get(CO, run.id)).toEqual({ state: 'not_done' })
     expect((await retry('jy-owner', job, occ)).status).toBe(200)
+  })
+
+  it('the in-flight mark and the answer are one: a refused reconciliation leaves the operation as it was', async () => {
+    const job = await approvedJob()
+    const { occ, run } = await unknownResult(job)
+    db.prepare("UPDATE ai_run_operations SET state = 'in_progress' WHERE company_id = ? AND run_id = ?").run(CO, run.id)
+    const jobRetry = createJobRetry({
+      companyData, transactions: sqliteTransactions(db), clock, jobs: services.jobs,
+      roleOf: (co, user) => sqliteMembershipRepository(db).roleOf(co, user), aiStops: () => ({ all: false, tools: [] }),
+      reconcileFor: () => ({ ok: false, kind: 'conflict', body: { error: 'x', code: 'OPERATION_NOT_UNKNOWN' } }) as Json,
+    })
+    expect(jobRetry.reconcile(owner(), job, occ, 'draft-1', { done: true })).toMatchObject({ ok: false })
+    expect(db.prepare('SELECT state FROM ai_run_operations WHERE company_id = ? AND run_id = ?').get(CO, run.id)).toEqual({ state: 'in_progress' })
   })
 
   it('reconciling only an occurrence a person looks at (not one still running)', async () => {

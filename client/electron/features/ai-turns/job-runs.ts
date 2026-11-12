@@ -208,7 +208,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const deadline = new Date(deadlineMs - JOB_STOP_BEFORE_MS)
       return {
         claimed: true, version: null,
-        message: jobFirstMessage({ name: turn.name, found, procedure, grant: turn.grant, deadline: `${deadline.getHours()}:${String(deadline.getMinutes()).padStart(2, '0')}`, deliverTo: turn.deliverTo }),
+        message: jobFirstMessage({ name: turn.name, found, procedure, grant: turn.grant, deadline: `${deadline.getHours()}:${String(deadline.getMinutes()).padStart(2, '0')}`, deliverTo: turn.deliverTo, madeBefore: turn.madeBefore }),
       }
     },
 

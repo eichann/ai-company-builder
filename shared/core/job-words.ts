@@ -175,11 +175,22 @@ const RETRY_BLOCK_WORDS: Record<string, string> = {
   JOB_SKILL_MISSING: '手順の Skill が、承認された版のまま見つかりません',
   JOB_PLACE_NOT_USABLE: 'できたものを置く先が使えなくなっています。責任者が「受け取る」から選び直してください',
   JOB_RESULT_UNKNOWN: '外への操作（メールの下書きなど）が済んだか分からないものがあります。先に確かめてください',
+  RETRY_LIMIT: 'この回はもう3回「もう一度」をしました。次の回を待つか、仕事の内容を見直してください',
+  NEXT_SLOT_SOON: '次の回が近いため、もう一度はできません（次の回が動きます）',
 }
 
 /** Why 「もう一度」 cannot be pressed now, in plain words (`JOB_RETRY_BLOCKS`). */
 export function jobRetryBlockText(code: string): string {
   return RETRY_BLOCK_WORDS[code] ?? '今は「もう一度」できません'
+}
+
+/**
+ * What earlier runs of an occurrence already made, as one sentence (「前回すでにメールの下書きを1件作っています。」), or null
+ * when nothing is known to have been made.
+ */
+export function jobMadeBeforeText(made: ReadonlyArray<{ kind: string; count: number }>): string | null {
+  const parts = made.filter(m => m.count > 0).map(m => `${jobOperationKindText(m.kind)}を${m.count}件`)
+  return parts.length === 0 ? null : `前回すでに${parts.join('・')}作っています。`
 }
 
 /** What an outside operation of a run was, in plain words (the run's operation kind; anything else: 外への操作). */

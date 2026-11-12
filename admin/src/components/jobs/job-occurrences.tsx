@@ -13,7 +13,7 @@ import { jobsApi, type JobOccurrenceView } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
-import { jobOccurrenceText, jobOperationKindText, jobRetryBlockText, jobSlotText } from '../../../../shared/core/job-words'
+import { jobMadeBeforeText, jobOccurrenceText, jobOperationKindText, jobRetryBlockText, jobSlotText } from '../../../../shared/core/job-words'
 
 type Asking =
   | { kind: 'retry'; occ: JobOccurrenceView }
@@ -26,11 +26,12 @@ function whenText(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** What the confirmation says will happen after 「もう一度」. */
-export function retryConfirmText(placement: 'e' | 'a' | null | undefined): string {
-  return placement === 'a'
+/** What the confirmation says will happen after 「もう一度」 (and, first, what earlier runs already made). */
+export function retryConfirmText(placement: 'e' | 'a' | null | undefined, made: ReadonlyArray<{ kind: string; count: number }> = []): string {
+  const before = jobMadeBeforeText(made)
+  return (before ? `${before}もう一度すると、また作られることがあります。` : '') + (placement === 'a'
     ? 'この回を、もう一度動かします。責任者のアプリが開いていて「自動で進める」が入っているときに、責任者の PC の AI が始めます。期限は今から数え直します。やることが作られるのは、この回で1つだけです。'
-    : 'この回を、もう一度動かします。数分のうちに、やることを作り直します（この回で1つだけです）。期限は今から数え直します。'
+    : 'この回を、もう一度動かします。数分のうちに、やることを作り直します（この回で1つだけです）。期限は今から数え直します。')
 }
 
 /** A job's occurrences (newest first): when, what became of it and why, in plain words — and 「もう一度」 where it works. */
@@ -83,6 +84,9 @@ export function JobOccurrences({ jobId, placement, nameOf }: {
                   {nameOf(o.retriedBy)}さんが「もう一度」を押しました（{whenText(o.retriedAt)}{(o.retries ?? 0) > 1 ? `、${o.retries}回目` : ''}）
                 </p>
               )}
+              {jobMadeBeforeText(o.madeBefore ?? []) && (
+                <p className="text-xs text-muted-foreground">{jobMadeBeforeText(o.madeBefore ?? [])}</p>
+              )}
               {(o.unknownOperations ?? []).map((op) => {
                 const what = jobOperationKindText(op.kind)
                 return (
@@ -111,7 +115,7 @@ export function JobOccurrences({ jobId, placement, nameOf }: {
           ? (asking.done
             ? '作られていたことにします。もう一度動かしたとき、AI がまた作ることがあります。'
             : '作られていなかったことにします。もう一度動かすと、AI がもう一度作ります。')
-          : retryConfirmText(placement)}
+          : retryConfirmText(placement, asking?.occ.madeBefore ?? [])}
         confirmLabel={asking?.kind === 'reconcile' ? 'はい' : 'もう一度'}
         onConfirm={confirm}
       />

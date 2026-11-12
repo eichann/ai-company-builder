@@ -43,6 +43,7 @@ import type { RunSubjectLiveRun, RunSubjectMember, RunSubjects } from '../ports/
 import type { Transactions } from '../ports/transactions'
 import type { Member } from './access'
 import { endPcRun, pcRunDeadlineMs, type JobOccurrences } from './job-occurrences'
+import { madeBefore } from './job-retry'
 import type { JobService } from './jobs'
 import { notInStep } from './not-in-step'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
@@ -88,6 +89,7 @@ const REFUSALS: Record<string, () => Refusal> = {
   OWNER_ABSENT: () => conflict('JOB_OWNER_ABSENT', '不在の日のため、この回は見送りました。'),
   SKILL_MISSING: () => conflict('JOB_SKILL_MISSING', '手順の Skill が、承認された版のまま見つかりません。'),
   TIME_LIMIT: () => conflict('JOB_TIME_LIMIT', '承認された時間を過ぎたため、この回は AI を止めました。人が確かめる必要があります。'),
+  EARLIER_RUNNING: () => conflict('JOB_EARLIER_RUNNING', '前の回がまだ動いているため、この回は終わるまで待ちます。'),
   PLACE_NOT_USABLE: () => conflict('JOB_PLACE_NOT_USABLE', 'できたものを置く先が使えなくなっています（使える期間が過ぎたか、消されました）。責任者が「受け取る」から選び直してください。'),
 }
 /** The claiming app cannot run this occurrence's check (an older app, or one that does not know a newer check). */
@@ -144,6 +146,9 @@ export function createJobRuns(deps: JobRunDeps) {
   /** Whose turn: everything a claim needs, without changing anything. */
   function whyNot(f: Found, nowMs: number): Why | null {
     if (f.occ.state !== 'due' && f.occ.state !== 'running') return 'GONE'
+    // An earlier occurrence of the job still running (a 「もう一度」, or a run held past the next slot): this one waits,
+    // so the two never run side by side — its check starts where the earlier one stops, once it has (nothing written).
+    if (f.occ.state === 'due' && f.handle.jobs.occurrences(f.job.id, 50).some(o => o.dueSlot < f.occ.dueSlot && o.state === 'running')) return 'EARLIER_RUNNING'
     if (overdue(f, nowMs)) return 'TIME_LIMIT'
     if (nowMs >= Date.parse(f.occ.expiresAt)) return 'EXPIRED'
     const why = runnable(f)
@@ -284,6 +289,8 @@ export function createJobRuns(deps: JobRunDeps) {
       ...(placeOf(f) ? { deliverTo: placeOf(f) as JobDeliveryPlace } : {}),
       // 「もう一度」 (B PR 5b): the app counts its attempts per occurrence and press.
       ...(f.occ.retries ? { retries: f.occ.retries } : {}),
+      // After a press: what the earlier runs already made outside, so the AI does not make it again blindly.
+      ...(f.occ.retries && madeBefore(f.handle, f.occ.id).length > 0 ? { madeBefore: madeBefore(f.handle, f.occ.id) } : {}),
     }
   }
 

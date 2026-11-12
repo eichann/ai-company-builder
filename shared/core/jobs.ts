@@ -543,24 +543,36 @@ export const JOB_RETRY_STATES: readonly JobOccurrenceState[] = ['needs_person', 
  * its check covered this one's window), `JOB_PAUSED` / `JOB_STOPPED` (the job paused, the company's jobs stopped),
  * `AI_STOPPED` (the emergency stop covers its responsible person), `JOB_VERSION_CHANGED`, `JOB_NOT_ACCEPTED`,
  * `JOB_GRANT_EXCEEDS` (the responsible person's rights now), `JOB_SKILL_MISSING`, `JOB_PLACE_NOT_USABLE`,
- * `JOB_RESULT_UNKNOWN` (an outside operation of its run whose result nobody confirmed: 結果が分からないうちは再開しない).
+ * `JOB_RESULT_UNKNOWN` (an outside operation of its run whose result nobody confirmed: 結果が分からないうちは再開しない),
+ * `RETRY_LIMIT` (pressed `JOB_RETRY_MAX` times already), `NEXT_SLOT_SOON` (a whole run would not end before the next slot).
  */
 export const JOB_RETRY_BLOCKS = [
   'NOT_RETRYABLE', 'NOT_LATEST', 'JOB_PAUSED', 'JOB_STOPPED', 'AI_STOPPED', 'JOB_VERSION_CHANGED', 'JOB_NOT_ACCEPTED',
-  'JOB_GRANT_EXCEEDS', 'JOB_SKILL_MISSING', 'JOB_PLACE_NOT_USABLE', 'JOB_RESULT_UNKNOWN',
+  'JOB_GRANT_EXCEEDS', 'JOB_SKILL_MISSING', 'JOB_PLACE_NOT_USABLE', 'JOB_RESULT_UNKNOWN', 'RETRY_LIMIT', 'NEXT_SLOT_SOON',
 ] as const
+
+/**
+ * How often an occurrence may be sent back by 「もう一度」 (decision for the owner): each press gives a fresh run with
+ * its own approved minutes, so the cap bounds what one slot can cost (`runsPerDay` stays not enforced: one occurrence
+ * per slot).
+ */
+export const JOB_RETRY_MAX = 3
+/** The shortest window a press may give for the app to claim it (the shortest `expiresAfterMinutes` a version may have). */
+export const JOB_RETRY_MIN_CLAIM_MINUTES = 5
 export type JobRetryBlock = typeof JOB_RETRY_BLOCKS[number]
 
 /**
  * The new deadline of an occurrence sent back by 「もう一度」: from the press, as long as the pinned version gives a
  * slot (`missed.expiresAfterMinutes`; the clock's `expires_at` = `due_at` + it) — the window the approved version
- * chose, counted from now instead of from the slot — but never past the job's next slot (`nextSlotAt`, UTC ISO):
- * the next occurrence's check starts where the last one that ran stopped, so the two must not run side by side.
+ * chose, counted from now instead of from the slot — but early enough that a run claimed at the deadline still ends
+ * (its approved `runMinutes`, a hard limit) before the job's next slot (`nextSlotAt`, UTC ISO). null: less than
+ * `JOB_RETRY_MIN_CLAIM_MINUTES` would be left (the press is refused, `NEXT_SLOT_SOON`).
  */
-export function jobRetryExpiresAt(nowMs: number, expiresAfterMinutes: number, nextSlotAt: string | null = null): string {
+export function jobRetryExpiresAt(nowMs: number, expiresAfterMinutes: number, runMinutes: number, nextSlotAt: string | null): string | null {
   const window = nowMs + expiresAfterMinutes * 60_000
   const next = nextSlotAt === null ? NaN : Date.parse(nextSlotAt)
-  return new Date(Number.isNaN(next) ? window : Math.min(window, next)).toISOString()
+  const end = Number.isNaN(next) ? window : Math.min(window, next - runMinutes * 60_000)
+  return end - nowMs < JOB_RETRY_MIN_CLAIM_MINUTES * 60_000 ? null : new Date(end).toISOString()
 }
 
 /**

@@ -96,6 +96,27 @@ test('「もう一度」 (B PR 5b): the press count reaches the queue, so a pres
   for (const retries of [undefined, 0, -1, 1.5, '2']) assert.equal(jobTurnCandidate(parseJobTurn(turn({ retries }))!).attemptKey, undefined)
 })
 
+test('「もう一度」: what the earlier run already made reaches the AI, so it does not make it again blindly', () => {
+  const made = [{ kind: 'mail-draft', ref: { kind: 'outbound', id: 'outbound_message-0000000000000001' } }]
+  const t = parseJobTurn(turn({ retries: 1, madeBefore: made }))
+  assert.deepEqual(t?.madeBefore, made)
+  const message = jobFirstMessage({ name: '面談の報告', found: { kind: 'files', files: ['a.txt'] }, procedure: '# 手順', grant: GRANT, deadline: '10:00', madeBefore: t!.madeBefore })
+  assert.match(message, /前回すでに次のものを作りました/)
+  assert.match(message, /メールの下書き（outbound_message-0000000000000001）/)
+  assert.doesNotMatch(jobFirstMessage({ name: '面談の報告', found: { kind: 'files', files: ['a.txt'] }, procedure: '# 手順', grant: GRANT, deadline: '10:00' }), /前回すでに/)
+  // Ids only: text where an id belongs refuses the turn.
+  assert.equal(parseJobTurn(turn({ madeBefore: [{ kind: 'mail-draft', ref: { kind: 'outbound', id: '件名：ご案内' } }] })), null)
+})
+
+test('「もう一度」: the claim\'s first message names what the earlier run made', async () => {
+  const made = [{ kind: 'mail-draft', ref: { kind: 'outbound', id: 'outbound_message-0000000000000001' } }]
+  const server = fakeServer({ turnOver: { retries: 1, madeBefore: made } })
+  const { claims } = claimsFor(server)
+  await claims.jobTurns(COMPANY)
+  const r = await claims.claim(COMPANY, OCC, 2, 'conv-job-00009')
+  assert.ok(r.claimed && r.message?.includes('前回すでに次のものを作りました') && r.message.includes('outbound_message-0000000000000001'))
+})
+
 test('the run\'s tools: only what its grant names and the server would let through; minutes only with the meeting check', () => {
   const access = jobToolAccess(GRANT, { kind: 'new_files', path: '人事部/面談' })
   assert.equal(access.allowsRecordTool('records_get'), true)

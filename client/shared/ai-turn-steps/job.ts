@@ -13,6 +13,7 @@ import {
   type JobCheck, type JobDeliveryPlace, type JobGrant, type JobProcedure,
 } from '../../../shared/core/jobs'
 import { OUTSIDE_TITLE_NOTE, outsideTitle } from '../../../shared/core/outside-text'
+import { jobOperationKindText } from '../../../shared/core/job-words'
 import type { AiTurnCandidate } from './types'
 import { AUTOMATIC_NO_SHELL_RULE } from './plugin'
 
@@ -44,11 +45,15 @@ export interface QueuedJobTurn {
   deliverTo?: JobDeliveryPlace
   /** How often an owner / admin sent the occurrence back with 「もう一度」 (jobs.md, B PR 5b); absent: never. */
   retries?: number
+  /** After a press: what earlier runs of the occurrence already made outside (kinds and ids, no body); absent: nothing. */
+  madeBefore?: Array<{ kind: string; ref: { kind: string; id: string } | null }>
 }
 
 const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
 const iso = (v: unknown): v is string => typeof v === 'string' && v.length <= 40 && !Number.isNaN(Date.parse(v))
 const RECORD_ID = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/
+/** An operation's kind or what it made: ids only (letters, digits, . _ : -), never text. */
+const SHORT_ID = /^[A-Za-z0-9._:-]+$/
 
 /**
  * One turn of the server's answer, checked: the check, the procedure and the grant go through the server's
@@ -87,12 +92,25 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
       meetings.push({ id: x.id, title: x.title, at: x.at })
     }
   }
+  let made: QueuedJobTurn['madeBefore']
+  if (t.madeBefore !== undefined) {
+    if (!Array.isArray(t.madeBefore) || t.madeBefore.length > 50) return null
+    made = []
+    for (const m of t.madeBefore as unknown[]) {
+      const x = (typeof m === 'object' && m !== null ? m : {}) as Record<string, unknown>
+      const ref = (typeof x.ref === 'object' && x.ref !== null ? x.ref : null) as Record<string, unknown> | null
+      if (!str(x.kind, 40) || !SHORT_ID.test(x.kind)) return null
+      if (x.ref !== null && (!ref || !str(ref.kind, 40) || !SHORT_ID.test(ref.kind) || !str(ref.id, 100) || !SHORT_ID.test(ref.id))) return null
+      made.push({ kind: x.kind, ref: ref ? { kind: ref.kind as string, id: ref.id as string } : null })
+    }
+  }
   return {
     occurrenceId: t.occurrenceId, jobId: t.jobId, name: t.name, dueAt: t.dueAt, expiresAt: t.expiresAt, state: t.state,
     check, checkSince: t.checkSince, ...(typeof t.checkUntil === 'string' ? { checkUntil: t.checkUntil } : {}),
     ...(typeof t.sinceCommit === 'string' ? { sinceCommit: t.sinceCommit } : {}), ...(typeof t.checkedCommit === 'string' ? { checkedCommit: t.checkedCommit } : {}), procedure: parsed.definition.run.procedure, grant, ...(meetings ? { meetings } : {}),
     ...(deliverTo ? { deliverTo } : {}),
     ...(typeof t.retries === 'number' && Number.isInteger(t.retries) && t.retries > 0 && t.retries < 1_000_000 ? { retries: t.retries } : {}),
+    ...(made && made.length > 0 ? { madeBefore: made } : {}),
   }
 }
 
@@ -182,7 +200,7 @@ export type JobFound = { kind: 'files'; files: string[] } | { kind: 'meetings'; 
  * pinned procedure as the instructions, the places it may read and write, and how it hands back its one
  * やること (`job_report`) — the server makes it; the run never creates one itself.
  */
-export function jobFirstMessage(input: { name: string; found: JobFound; procedure: string; grant: JobGrant; deadline: string; deliverTo?: JobDeliveryPlace }): string {
+export function jobFirstMessage(input: { name: string; found: JobFound; procedure: string; grant: JobGrant; deadline: string; deliverTo?: JobDeliveryPlace; madeBefore?: QueuedJobTurn['madeBefore'] }): string {
   const howTo = input.deliverTo ? jobDeliveryHowTo(input.deliverTo) : null
   const { found, grant } = input
   const foundLines = found.kind === 'files'
@@ -199,6 +217,11 @@ export function jobFirstMessage(input: { name: string; found: JobFound; procedur
     '',
     ...foundLines,
     '',
+    ...(input.madeBefore && input.madeBefore.length > 0 ? [
+      'この回は、管理者が「もう一度」を押してやり直しています。前回すでに次のものを作りました（同じものをもう一つ作らないでください。直すときは、それを直してください）：',
+      ...input.madeBefore.map(m => `- ${jobOperationKindText(m.kind)}${m.ref ? `（${m.ref.id}）` : ''}`),
+      '',
+    ] : []),
     '手順書（会社の Skill）:',
     '-----',
     input.procedure.trim(),

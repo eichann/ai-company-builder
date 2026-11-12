@@ -135,6 +135,14 @@ export interface JobOccurrenceView {
   retriedAt?: string | null
   retry?: { allowed: true } | { allowed: false; why: JobRetryBlock }
   unknownOperations?: Array<{ key: string; kind: string }>
+  /** What its earlier runs are known to have made outside (kinds and counts only: the things are the responsible person's). */
+  madeBefore?: Array<{ kind: string; count: number }>
+}
+
+/** An outside operation an earlier run of the occurrence is known to have done: its kind and what it made (no body). */
+export interface JobMadeBefore {
+  kind: string
+  ref: { kind: string; id: string } | null
 }
 
 /** `POST /jobs/:jobId/occurrences/:occurrenceId/retry` (PR 5b): the occurrence back to `due`, with its new deadline. */
@@ -189,6 +197,11 @@ export interface JobTurnView {
    * The app counts its own attempts per occurrence and press, so a press is tried again the same day.
    */
   retries?: number
+  /**
+   * After a 「もう一度」: what the occurrence's earlier runs are known to have made outside (a mail draft, a Drive put),
+   * so the AI does not make it again blindly. Absent: nothing, or never pressed.
+   */
+  madeBefore?: JobMadeBefore[]
   /**
    * Only in a claim's answer, for a `new_meetings` check (B PR 5a-2): the meetings it found (≤ 10, oldest
    * first) — the only ones whose minutes the run may read. Empty: the run finishes `nothing`.

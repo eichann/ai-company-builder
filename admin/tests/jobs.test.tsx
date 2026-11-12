@@ -312,7 +312,7 @@ describe('「もう一度」 (B PR 5b)', () => {
       [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [jobView({ placement: 'a' })] }) },
       [`GET ${base}/jobs/${JOB_ID}/occurrences`]: {
         body: ok({ occurrences: [
-          occ(OK, { retry: { allowed: true }, unknownOperations: [], retries: 1, retriedBy: 'u_admin', retriedAt: '2026-11-12T01:00:00.000Z' }),
+          occ(OK, { retry: { allowed: true }, unknownOperations: [], retries: 1, retriedBy: 'u_admin', retriedAt: '2026-11-12T01:00:00.000Z', madeBefore: [{ kind: 'mail-draft', count: 1 }] }),
           occ('occ.b', { dueSlot: '2026-11-11T09:00', state: 'expired', outcomeCode: 'EXPIRED', retry: { allowed: false, why: 'NOT_LATEST' }, unknownOperations: [] }),
           occ('occ.c', { dueSlot: '2026-11-10T09:00', state: 'done', outcomeCode: null, ran: true }),
         ] }),
@@ -333,6 +333,8 @@ describe('「もう一度」 (B PR 5b)', () => {
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('責任者のアプリが開いていて「自動で進める」が入っているとき')
+    // What the earlier run already made is said first: pressing may make it again.
+    expect(dialog).toHaveTextContent('前回すでにメールの下書きを1件作っています。もう一度すると、また作られることがあります。')
     await userEvent.click(within(dialog).getByRole('button', { name: 'もう一度' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => decodeURIComponent(c.url))).toEqual([`${base}/jobs/${JOB_ID}/occurrences/${OK}/retry`]))
   })
