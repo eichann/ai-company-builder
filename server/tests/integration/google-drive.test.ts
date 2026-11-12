@@ -577,9 +577,9 @@ describe('Google documents and overwriting a file ACB made (google-drive.md "Goo
     expect(html.body.data.drivePut).toMatchObject({ state: 'done', name: '週報', mimeType: DOC })
     expect(google.driveFile(html.body.data.drivePut.fileId)!.uploadedAs).toBe('text/html')
     const before = google.uploads().length
-    // Markdown only as a document; a PDF is never converted; an unknown form; Markdown that is not text.
-    expect((await ai(token, 'POST', '/put', { ...docBody(), as: 'file' })).body.code).toBe('DRIVE_TYPE_REFUSED')
+    // A PDF or text is never converted; an unknown form; Markdown that is not text.
     expect((await ai(token, 'POST', '/put', putBody({ as: 'google_doc' }))).body.code).toBe('DRIVE_TYPE_REFUSED')
+    expect((await ai(token, 'POST', '/put', { ...putBody({ name: 'メモ.txt' }, Buffer.from('メモ\n')), kind: 'text', as: 'google_doc' })).body.code).toBe('DRIVE_TYPE_REFUSED')
     expect((await ai(token, 'POST', '/put', docBody({ as: 'google_sheet' }))).body.code).toBe('DRIVE_TYPE_REFUSED')
     expect((await ai(token, 'POST', '/put', docBody({}, Buffer.from([0x23, 0x00, 0x41])))).body.code).toBe('DRIVE_CONTENT_REFUSED')
     expect(google.uploads()).toHaveLength(before)
@@ -689,6 +689,94 @@ describe('Google documents and overwriting a file ACB made (google-drive.md "Goo
     } finally {
       db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
     }
+  })
+})
+
+describe('Markdown and text as they are (google-drive.md "Markdown and text as they are")', () => {
+  const MD_MIME = 'text/markdown'
+  const NOTES = Buffer.from('# 営業の型（AI に読ませる資料）\n\n- 課題を先に聞く\n- 参考: https://example.com/ref\n![図](https://example.com/x.png)\n')
+  const mdBody = (over: Record<string, unknown> = {}, content: Buffer = NOTES) => ({
+    ...putBody({ name: '営業の型.md', kind: 'markdown' }, content), ...over,
+  })
+  const docBody = (over: Record<string, unknown> = {}) => ({
+    ...putBody({ name: '報告.md', kind: 'markdown', as: 'google_doc' }, Buffer.from('# 報告\n')), ...over,
+  })
+
+  it('a .md file kept as Markdown (no conversion, its name with .md); a .txt file as text; the extension must be the kind\'s', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const md = await ai(token, 'POST', '/put', mdBody({ as: 'file' }))
+    expect(md.status, md.text).toBe(200)
+    expect(md.body.data.drivePut).toMatchObject({ state: 'done', name: '営業の型.md', mimeType: MD_MIME, sha256: sha(NOTES) })
+    expect(md.body.data.drivePut.revisionId).toMatch(/^rev-/)
+    const made = google.driveFile(md.body.data.drivePut.fileId)!
+    // Kept as the bytes uploaded: Drive converts nothing (and so fetches nothing — the URLs in it are only text).
+    expect([made.mimeType, made.uploadedAs, made.name]).toEqual([MD_MIME, null, '営業の型.md'])
+    expect(made.content.equals(NOTES)).toBe(true)
+    // `as` left out is a file too (the API's default; the app sends google_doc when it wants a document).
+    expect((await ai(token, 'POST', '/put', mdBody({ name: '既定.md' }))).body.data.drivePut).toMatchObject({ state: 'done', mimeType: MD_MIME })
+    const TXT = Buffer.from('打ち合わせメモ\n')
+    const txt = await ai(token, 'POST', '/put', { ...putBody({ name: 'メモ.txt' }, TXT), kind: 'text' })
+    expect(txt.body.data.drivePut).toMatchObject({ state: 'done', name: 'メモ.txt', mimeType: 'text/plain' })
+    expect(google.driveFile(txt.body.data.drivePut.fileId)!.mimeType).toBe('text/plain')
+    const before = google.uploads().length
+    expect((await ai(token, 'POST', '/put', mdBody({ name: '営業の型.txt' }))).body.code).toBe('DRIVE_NAME_REFUSED')
+    expect((await ai(token, 'POST', '/put', { ...putBody({ name: 'メモ.md' }, TXT), kind: 'text' })).body.code).toBe('DRIVE_NAME_REFUSED')
+    expect((await ai(token, 'POST', '/put', { ...putBody({ name: 'メモ.txt' }, Buffer.from([0x41, 0x00])), kind: 'text' })).body.code).toBe('DRIVE_CONTENT_REFUSED')
+    expect(google.uploads()).toHaveLength(before)
+  })
+
+  it('the same folder rules: a picked folder only, never one seen outside the company', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const before = google.uploads().length
+    expect((await ai(token, 'POST', '/put', mdBody({ folderId: GOOGLE_SEED.pastProposalDoc }))).body.code).toBe('DRIVE_FOLDER_NOT_PICKED')
+    expect((await ai(token, 'POST', '/put', mdBody({ folderId: GOOGLE_SEED.sharedOutsideFolder }))).body.code).toBe('DRIVE_FOLDER_SHARED_OUTSIDE')
+    expect(google.uploads()).toHaveLength(before)
+  })
+
+  it('overwriting a .md file: only by a .md file (a document and a .md never replace each other); its head revision kept forever first', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    const md = (await ai(token, 'POST', '/put', mdBody({ name: '上書きする型.md' }))).body.data.drivePut
+    const doc = (await ai(token, 'POST', '/put', docBody({ name: '上書きする報告.md' }))).body.data.drivePut
+    const calls = google.requests.length
+    // A document's content onto the .md file, and a .md file's onto the document: refused before Google is asked.
+    expect((await ai(token, 'POST', '/put', docBody({ updateFileId: md.fileId }))).body.code).toBe('DRIVE_UPDATE_KIND_MISMATCH')
+    expect((await ai(token, 'POST', '/put', mdBody({ updateFileId: doc.fileId }))).body.code).toBe('DRIVE_UPDATE_KIND_MISMATCH')
+    // Nor a text file onto the .md.
+    expect((await ai(token, 'POST', '/put', { ...putBody({ name: 'x.txt' }, Buffer.from('x\n')), kind: 'text', updateFileId: md.fileId })).body.code).toBe('DRIVE_UPDATE_KIND_MISMATCH')
+    expect(google.requests.length).toBe(calls)
+    // A new .md version: the same file and link, the replaced head revision kept forever before.
+    const edited = Buffer.from('# 営業の型（二版）\n')
+    const u = await ai(token, 'POST', '/put', mdBody({ name: '上書きする型.md', updateFileId: md.fileId }, edited))
+    expect(u.body.data.drivePut, u.text).toMatchObject({ state: 'done', fileId: md.fileId, link: md.link, updatedFileId: md.fileId, mimeType: MD_MIME, name: '上書きする型.md' })
+    const file = google.driveFile(md.fileId)!
+    expect(file.content.equals(edited)).toBe(true)
+    expect(file.keptRevisions).toEqual([md.revisionId])
+    expect(u.body.data.drivePut.revisionId).not.toBe(md.revisionId)
+    // Drive does not keep it: nothing overwritten.
+    const other = (await ai(token, 'POST', '/put', mdBody({ name: '残せない型.md' }))).body.data.drivePut
+    google.refuseKeepForever(other.fileId)
+    const refused = await ai(token, 'POST', '/put', mdBody({ name: '残せない型.md', updateFileId: other.fileId }, edited))
+    expect([refused.status, refused.body.code]).toEqual([409, 'DRIVE_REVISION_NOT_KEPT'])
+    expect(google.driveFile(other.fileId)!.content.equals(NOTES)).toBe(true)
+    // Changed in Drive since ACB's put: never written over.
+    const third = (await ai(token, 'POST', '/put', mdBody({ name: '人が直す型.md' }))).body.data.drivePut
+    google.editDriveFile(third.fileId, '# 人が直した\n')
+    expect((await ai(token, 'POST', '/put', mdBody({ name: '人が直す型.md', updateFileId: third.fileId }, edited))).body.code).toBe('DRIVE_FILE_CHANGED_SINCE')
+    expect(google.driveFile(third.fileId)!.content.toString()).toBe('# 人が直した\n')
+  })
+
+  it('a picked Markdown file is read as outside text, as written (text/x-markdown from Drive, text/markdown from ACB\'s own put)', async () => {
+    const put = (await ai(await tokenFor('m-sato', 'act'), 'POST', '/put', mdBody({ name: '読ませる型.md' }))).body.data.drivePut
+    google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.salesNotesMd, put.fileId])
+    const picked = await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'files', ids: [GOOGLE_SEED.salesNotesMd, put.fileId] })
+    expect(picked.body.data, picked.text).toMatchObject({ refused: 0 })
+    const token = await tokenFor('m-sato', 'read')
+    const seeded = await ai(token, 'POST', '/read', { fileId: GOOGLE_SEED.salesNotesMd })
+    expect(seeded.status, seeded.text).toBe(200)
+    expect(seeded.body.data).toMatchObject({ text: '# 営業の型\n\n- 最初に課題を聞く\n- [参考](https://example.com/ref)\n', pdfBase64: null })
+    expect(seeded.body.data.header).toContain('外から来た文')
+    const own = await ai(token, 'POST', '/read', { fileId: put.fileId })
+    expect(own.body.data.text).toBe(NOTES.toString())
   })
 })
 
@@ -1092,15 +1180,23 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     const posted: Array<{ path: string; body: Json; keepalive: boolean }> = []
     const listeners: Record<string, Array<() => void>> = {}
     const msg = { textContent: '' }
-    const view = {
-      setMimeTypes: (v: unknown) => { calls.push(['setMimeTypes', v]); return view },
-      setIncludeFolders: () => view, setSelectFolderEnabled: () => view,
-      setEnableDrives: (v: unknown) => { calls.push(['setEnableDrives', v]); return view },
-      setFileIds: (v: unknown) => { calls.push(['setFileIds', v]); return view },
+    // Every DocsView the page makes, with its own calls; `added` = the views in the order they were added (the first is
+    // the tab the Picker opens on).
+    type View = { viewId: unknown; calls: Array<[string, unknown]> } & Record<string, unknown>
+    const views: View[] = []
+    const added: View[] = []
+    function DocsView(viewId: unknown) {
+      const view: View = { viewId, calls: [] }
+      for (const m of ['setMimeTypes', 'setIncludeFolders', 'setSelectFolderEnabled', 'setEnableDrives', 'setFileIds', 'setParent', 'setLabel', 'setOwnedByMe']) {
+        view[m] = (v: unknown) => { view.calls.push([m, v]); if (m !== 'setIncludeFolders' && m !== 'setSelectFolderEnabled' && m !== 'setParent' && m !== 'setLabel' && m !== 'setOwnedByMe') calls.push([m, v]); return view }
+      }
+      views.push(view)
+      return view
     }
     let callback: (data: unknown) => void = () => {}
     const builder: Record<string, unknown> = {}
-    for (const m of ['addView', 'setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle', 'enableFeature']) builder[m] = () => builder
+    for (const m of ['setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle', 'enableFeature']) builder[m] = () => builder
+    builder.addView = (v: View) => { added.push(v); return builder }
     builder.setOAuthToken = (t: unknown) => { calls.push(['token', t]); return builder }
     builder.setMaxItems = (n: unknown) => { calls.push(['maxItems', n]); return builder }
     builder.setAuthUser = (u: unknown) => { calls.push(['authUser', u]); return builder }
@@ -1120,13 +1216,13 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
         return new Response(res.text, { status: res.status })
       },
       gapi: { load: (_n: string, o: { callback: () => void }) => o.callback() },
-      google: { picker: { DocsView: function () { return view }, PickerBuilder: function () { return builder }, ViewId: {}, Action: { PICKED: 'picked', CANCEL: 'cancel' }, Feature: {} } },
+      google: { picker: { DocsView, PickerBuilder: function () { return builder }, ViewId: { DOCS: 'docs', FOLDERS: 'folders' }, Action: { PICKED: 'picked', CANCEL: 'cancel' }, Feature: {} } },
     }
     const document = { getElementById: () => msg, createElement: () => ({}), head }
     runInNewContext(script, { window, document })
     const settled = () => /アプリに戻って|始められません|使えません/.test(msg.textContent) || (!opts.answer && calls.some(c => c[0] === 'visible'))
     for (let i = 0; i < 100 && !settled(); i++) await new Promise(res => setTimeout(res, 10))
-    return { calls, posted, msg: () => msg.textContent, csp: r.headers.get('content-security-policy') ?? '', script, leave: () => { for (const fn of listeners.pagehide ?? []) fn() } }
+    return { calls, posted, views, added, msg: () => msg.textContent, csp: r.headers.get('content-security-policy') ?? '', script, leave: () => { for (const fn of listeners.pagehide ?? []) fn() } }
   }
 
   it('staging\'s stand-in Picker (the fake Google\'s /js/api.js) with the page: the member clicks a folder, the app gets it', async () => {
@@ -1291,6 +1387,30 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
       expect(plain.calls.map(c => c[0]), JSON.stringify(cfg)).not.toContain('setFileIds')
       expect(plain.calls).toContainEqual(['setEnableDrives', true])
     }
+  })
+
+  it('the Picker opens on My Drive: one tab per place (マイドライブ, 共有ドライブ, 共有アイテム), each with only its own place call', async () => {
+    const base = { accessToken: 't', apiKey: 'k', appId: APP_ID, scriptOrigin: 'https://apis.google.com', mimeTypes: ['application/pdf', 'text/markdown'], maxItems: 10 }
+    const placeCalls = ['setParent', 'setEnableDrives', 'setOwnedByMe', 'setFileIds']
+    for (const mode of ['folder', 'files'] as const) {
+      const run = await runPickerPage(`#t=${'a'.repeat(64)}`, { config: { ...base, mode } })
+      expect(run.added, mode).toHaveLength(3)
+      expect(run.added.map(v => v.calls.find(c => c[0] === 'setLabel')?.[1]), mode).toEqual(['マイドライブ', '共有ドライブ', '共有アイテム'])
+      // Each place on its own view: My Drive's root first (the default tab), then shared drives, then shared with me.
+      expect(run.added.map(v => v.calls.filter(c => placeCalls.includes(c[0]))), mode).toEqual([[['setParent', 'root']], [['setEnableDrives', true]], [['setOwnedByMe', false]]])
+      for (const v of run.added) {
+        expect(v.viewId).toBe(mode === 'folder' ? 'folders' : 'docs')
+        expect(v.calls).toContainEqual(['setMimeTypes', mode === 'folder' ? 'application/vnd.google-apps.folder' : 'application/pdf,text/markdown'])
+        expect(v.calls).toContainEqual(['setIncludeFolders', true])
+        if (mode === 'folder') expect(v.calls).toContainEqual(['setSelectFolderEnabled', true])
+        else expect(v.calls.map(c => c[0])).not.toContain('setSelectFolderEnabled')
+      }
+    }
+    // A pasted link: one view with just those files, no place call besides setFileIds.
+    const GOOD = '1AbC-def_GhIjKlMnOpQrStUv'
+    const pasted = await runPickerPage(`#t=${'a'.repeat(64)}`, { config: { ...base, mode: 'files', fileIds: [GOOD] } })
+    expect(pasted.added).toHaveLength(1)
+    expect(pasted.added[0].calls.filter(c => placeCalls.includes(c[0]))).toEqual([['setFileIds', GOOD]])
   })
 
   it('no Picker token or pick ticket in any other answer, log line or table (only the ticket\'s sha256 is kept)', async () => {

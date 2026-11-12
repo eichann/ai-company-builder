@@ -337,7 +337,7 @@ test('drive_read: outside text; a picked PDF saved under .personal/google-drive/
   assert.ok(fs.readFileSync(path.join(root, pdf.savedPdf)).equals(PDF))
 })
 
-test('drive_put: only a PDF / HTML inside the company folder, never a private or left-out folder', async () => {
+test('drive_put: only a PDF / HTML / Markdown / text inside the company folder, never a private or left-out folder', async () => {
   const root = companyFolder()
   const { t, seen } = await tools('act', root)
   const put = async (p: string) => JSON.parse(await t.execute('drive_put', { path: p, folderId: FOLDER }))
@@ -349,7 +349,7 @@ test('drive_put: only a PDF / HTML inside the company folder, never a private or
     '人事/評価.pdf': '限られた人だけ',
     '営業部/置いていない/x.pdf': 'ダウンロードしていない',
     '営業部/偽物.pdf': 'PDF ではない',
-    '営業部/メモ.docx': 'PDF と HTML',
+    '営業部/メモ.docx': 'PDF・HTML・Markdown',
     '.git/config': '置けません',
   }
   for (const [p, words] of Object.entries(refusals)) {
@@ -390,7 +390,7 @@ test('drive_put names the consultation\'s やること (the app\'s topic, read a
   assert.equal(sent().length, 2)
 })
 
-test('drive_put: Markdown always as a Google document; HTML when asked; a PDF never converted; updateFileId passed on; its words say when a file is new', async () => {
+test('drive_put: Markdown a Google document unless as: file keeps it a .md file; text as is, never converted; HTML when asked; a PDF never converted; updateFileId passed on; its words say when a file is new', async () => {
   const root = companyFolder()
   const { t, seen } = await tools('act', root)
   const sent = () => seen.filter(s => s.url.endsWith('/google/drive/put')).map(s => JSON.parse(s.body!))
@@ -402,10 +402,29 @@ test('drive_put: Markdown always as a Google document; HTML when asked; a PDF ne
   const pdfDoc = JSON.parse(await t.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER, as: 'google_doc' }))
   assert.ok(typeof pdfDoc.error === 'string')
   assert.equal(sent().length, 2)
+  // Markdown kept a .md file (material for an AI or a Skill): its name and kind as they are, no conversion asked, the
+  // key a plain file's; a link in it is no reason to refuse (a file is not rendered by Drive).
+  fs.writeFileSync(path.join(root, '営業部', '.personal', 'AIに読ませる.md'), '# 資料\nhttps://example.com/ref\n![図](https://example.com/x.png)\n')
+  const md = JSON.parse(await t.execute('drive_put', { path: '営業部/.personal/AIに読ませる.md', folderId: FOLDER, as: 'file' }))
+  assert.equal(md.state, 'done')
+  assert.deepEqual([sent()[2].kind, 'as' in sent()[2], sent()[2].name], ['markdown', false, 'AIに読ませる.md'])
+  assert.equal(sent()[2].requestKey, drivePutRequestKey(FOLDER, 'AIに読ませる.md', sent()[2].sha256))
+  // Plain text: a .txt file as is; never a Google document.
+  fs.writeFileSync(path.join(root, '営業部', '.personal', 'メモ.txt'), 'メモ\n')
+  await t.execute('drive_put', { path: '営業部/.personal/メモ.txt', folderId: FOLDER })
+  assert.deepEqual([sent()[3].kind, 'as' in sent()[3], sent()[3].name], ['text', false, 'メモ.txt'])
+  assert.ok(typeof JSON.parse(await t.execute('drive_put', { path: '営業部/.personal/メモ.txt', folderId: FOLDER, as: 'google_doc' })).error === 'string')
+  fs.writeFileSync(path.join(root, '営業部', '.personal', '壊れた.txt'), Buffer.from([0x41, 0x00, 0x42]))
+  assert.match(JSON.parse(await t.execute('drive_put', { path: '営業部/.personal/壊れた.txt', folderId: FOLDER })).error, /テキスト ではない/)
+  assert.equal(sent().length, 4)
+  const descr = t.specs.find(s => s.name === 'drive_put')!.description
+  // The AI is told .md can be kept as it is, and when (the member asks, or material for an AI / a Skill).
+  assert.match(descr, /AI や Skill にあとで読ませる資料のときは as: file で \.md ファイルのまま/)
+  assert.match(descr, /pass as: file to keep it a \.md file/)
   // Overwriting: the fileId goes as updateFileId, and the key is another one than a new file's.
   const upd = JSON.parse(await t.execute('drive_put', { path: '営業部/.personal/面談報告書.md', folderId: FOLDER, updateFileId: 'fake-upload-1' }))
-  assert.equal(sent()[2].updateFileId, 'fake-upload-1')
-  assert.notEqual(sent()[2].requestKey, sent()[0].requestKey)
+  assert.equal(sent()[4].updateFileId, 'fake-upload-1')
+  assert.notEqual(sent()[4].requestKey, sent()[0].requestKey)
   assert.equal(upd.state, 'done')
   assert.equal(JSON.parse(await t.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER, updateFileId: '../x' })).error, '入力が正しくありません。')
   // The description is honest about when a new file is made (the 11/10 incident) and how to update one.

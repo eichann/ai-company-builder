@@ -622,8 +622,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     },
 
     /**
-     * POST /api/records-ai/google/drive/put (act token): a PDF / HTML into a picked folder, or HTML / Markdown
-     * converted into a Google document (`as: 'google_doc'`); with `updateFileId`, a new revision of a file an
+     * POST /api/records-ai/google/drive/put (act token): a PDF / HTML / Markdown / text file as is into a picked folder,
+     * or HTML / Markdown converted into a Google document (`as: 'google_doc'`); with `updateFileId`, a new revision of a file an
      * earlier put of this member made in that same folder (google-drive.md "Overwriting"). `scope` (a scheduled
      * job's run, jobs.md "A deliverable place outside"): only into that one folder — checked here at every call.
      */
@@ -631,7 +631,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       if (!isObj(body)) return refuse('bad-request', 'Body must be a JSON object')
       if (!isDriveId(body.folderId)) return refuse('bad-request', 'folderId must be a Drive id')
       const form = drivePutForm(body.kind, body.as)
-      if (!form) return refuse('bad-request', 'Google Drive に置けるのは PDF と HTML（そのまま）、または Google ドキュメントにする HTML と Markdown だけです。', { code: 'DRIVE_TYPE_REFUSED' })
+      if (!form) return refuse('bad-request', 'Google Drive に置けるのは PDF・HTML・Markdown（.md）・テキスト（.txt）のファイル（そのまま）、または Google ドキュメントにする HTML と Markdown だけです。', { code: 'DRIVE_TYPE_REFUSED' })
       const named = checkDriveFileName(body.name, form.kind, form.as)
       if ('error' in named) return refuse('bad-request', named.error, { code: 'DRIVE_NAME_REFUSED' })
       if (typeof body.requestKey !== 'string' || !REQUEST_KEY_RE.test(body.requestKey)) return refuse('bad-request', 'requestKey is 8–100 letters, digits, . _ : -')
@@ -646,6 +646,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const contentProblem = checkDrivePutContent(form.kind, bytes)
       if (contentProblem) return refuse('bad-request', contentProblem, { code: 'DRIVE_CONTENT_REFUSED' })
       // Drive's conversion fetches what a document points to (an image, a stylesheet): nothing may reach outside that way.
+      // A file put as is is stored as its bytes (nothing converted or fetched): not asked (google-drive.md "Markdown and text as they are").
       if (form.as === 'google_doc' && driveDocFetchesOutside(form.kind, new TextDecoder().decode(bytes))) {
         return refuse('bad-request', '外を読み込むかもしれない部分（画像・スタイル・URL）があるため、Google ドキュメントにできません。外のページは [文字](URL) か <a href> のリンクだけにし、style や外の画像は外してください（画像は data: で埋め込めます）。', { code: 'DRIVE_EXTERNAL_RESOURCE' })
       }
@@ -671,7 +672,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           return refuse('forbidden', 'このファイルは、このフォルダに置いたものではないため、上書きできません。', { code: 'DRIVE_FILE_NOT_IN_FOLDER' })
         }
         if (target.mimeType !== form.driveMime) {
-          return refuse('bad-request', '上書きは同じ種類どうしだけです（Google ドキュメントは Google ドキュメントで、PDF は PDF で、HTML は HTML で）。', { code: 'DRIVE_UPDATE_KIND_MISMATCH' })
+          return refuse('bad-request', '上書きは同じ種類どうしだけです（Google ドキュメントは Google ドキュメントで、PDF は PDF で、HTML は HTML で、Markdown（.md）は Markdown で、テキストはテキストで）。', { code: 'DRIVE_UPDATE_KIND_MISMATCH' })
         }
         // A job's run updates only what runs of the same job made (never a file of a consultation or another job).
         if (scope && (!target.runId || !scope.sameJob(target.runId))) {

@@ -1,7 +1,7 @@
 /**
  * Google Drive through the Google connection (`.claude/rules/google-drive.md`):
  * the one copy of the rules the server, the app and the admin console apply
- * to Drive — what may be put (PDF / HTML, or a Google document; size, name),
+ * to Drive — what may be put (PDF / HTML / Markdown / text as is, or a Google document; size, name),
  * what a picked file is read as, the Picker's registration values and the
  * Picker token's scope.
  *
@@ -9,7 +9,8 @@
  * (connection only), never a core role; least privilege — `drive.file` with
  * Google Picker only (never `drive` / `drive.readonly`); output is made
  * locally. 2026-11-11: HTML / Markdown may also become a Google document, and
- * a file ACB made may be overwritten as a new revision of the same file.
+ * a file ACB made may be overwritten as a new revision of the same file. 2026-11-12: Markdown (.md) and plain
+ * text (.txt) may also be put as they are (material for an AI or a Skill to read later).
  *
  * Pure: imports nothing outside shared/core.
  */
@@ -27,11 +28,12 @@ export const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'
 // ---------------------------------------------------------------------------
 // Putting a local file into a picked folder.
 
-/** The kinds of local file ACB puts into Drive: a PDF or HTML as is; HTML or Markdown converted into a Google document. */
+/** The kinds of local file ACB puts into Drive: each as is; HTML or Markdown also converted into a Google document. */
 export const DRIVE_PUT_TYPES = {
   pdf: 'application/pdf',
   html: 'text/html',
   markdown: 'text/markdown',
+  text: 'text/plain',
 } as const
 export type DrivePutKind = keyof typeof DRIVE_PUT_TYPES
 
@@ -41,7 +43,7 @@ export const DRIVE_DOC_MIME = 'application/vnd.google-apps.document'
 /** How a put lands in Drive: the file as it is (`file`), or converted into a Google document (`google_doc`). */
 export type DrivePutAs = 'file' | 'google_doc'
 
-/** The forms a put may take (owner decision 2026-11-11: a Google document from HTML or Markdown). */
+/** The forms a put may take (owner decisions 2026-11-11: a Google document from HTML or Markdown; 2026-11-12: Markdown / text as is). */
 export interface DrivePutForm {
   kind: DrivePutKind
   as: DrivePutAs
@@ -52,12 +54,13 @@ export interface DrivePutForm {
 }
 
 /**
- * What a put sends and what Drive keeps: a PDF or HTML as a file, HTML or Markdown as a Google document
- * (`as` absent = `file`). Null for anything else (a Markdown file as is, a PDF converted, an unknown kind).
+ * What a put sends and what Drive keeps: every kind as a file (PDF, HTML, Markdown `.md`, text `.txt`, kept as
+ * uploaded — Drive converts nothing), HTML or Markdown as a Google document (`as` absent = `file`). Null for anything
+ * else (a PDF or text converted, an unknown kind or form).
  */
 export function drivePutForm(kind: unknown, as: unknown): DrivePutForm | null {
   const a = as === undefined ? 'file' : as
-  if (a === 'file' && (kind === 'pdf' || kind === 'html')) return { kind, as: a, uploadMime: DRIVE_PUT_TYPES[kind], driveMime: DRIVE_PUT_TYPES[kind] }
+  if (a === 'file' && (kind === 'pdf' || kind === 'html' || kind === 'markdown' || kind === 'text')) return { kind, as: a, uploadMime: DRIVE_PUT_TYPES[kind], driveMime: DRIVE_PUT_TYPES[kind] }
   if (a === 'google_doc' && (kind === 'html' || kind === 'markdown')) return { kind, as: a, uploadMime: DRIVE_PUT_TYPES[kind], driveMime: DRIVE_DOC_MIME }
   return null
 }
@@ -67,17 +70,18 @@ export const DRIVE_PUT_MAX_BYTES = 10 * 1024 * 1024
 /** A file name in Drive: at most this many characters. */
 export const DRIVE_NAME_MAX = 200
 
-/** The kind a file name's extension stands for, or null (anything but .pdf / .html / .htm / .md / .markdown). */
+/** The kind a file name's extension stands for, or null (anything but .pdf / .html / .htm / .md / .markdown / .txt). */
 export function drivePutKindOf(name: string): DrivePutKind | null {
   const m = /\.([A-Za-z]{2,8})$/.exec(name)
   const ext = m?.[1]?.toLowerCase()
   if (ext === 'pdf') return 'pdf'
   if (ext === 'html' || ext === 'htm') return 'html'
   if (ext === 'md' || ext === 'markdown') return 'markdown'
+  if (ext === 'txt') return 'text'
   return null
 }
 
-/** The MIME type of an allowed kind (`application/pdf`, `text/html`, `text/markdown`); null for anything else. */
+/** The MIME type of an allowed kind (`application/pdf`, `text/html`, `text/markdown`, `text/plain`); null for anything else. */
 export function drivePutMimeOf(kind: unknown): string | null {
   return typeof kind === 'string' && Object.prototype.hasOwnProperty.call(DRIVE_PUT_TYPES, kind) ? DRIVE_PUT_TYPES[kind as DrivePutKind] : null
 }
@@ -95,13 +99,13 @@ export function checkDriveFileName(raw: unknown, kind: DrivePutKind, as: DrivePu
   // eslint-disable-next-line no-control-regex
   if (name === '' || /[\u0000-\u001f\u007f/\\]/.test(name) || name === '.' || name === '..') return { error: 'ファイル名の形が正しくありません。' }
   if ([...name].length > DRIVE_NAME_MAX) return { error: `ファイル名は ${DRIVE_NAME_MAX} 文字までです。` }
-  if (as === 'file' && drivePutKindOf(name) !== kind) return { error: 'ファイル名の拡張子が中身の種類（PDF / HTML）と合っていません。' }
+  if (as === 'file' && drivePutKindOf(name) !== kind) return { error: 'ファイル名の拡張子が中身の種類（PDF / HTML / Markdown / テキスト）と合っていません。' }
   return { name }
 }
 
 /**
- * The content really is what its kind says: a PDF starts with `%PDF-`; HTML and Markdown are UTF-8 text
- * without NUL. Null when fine, else why not.
+ * The content really is what its kind says: a PDF starts with `%PDF-`; HTML, Markdown and text are UTF-8
+ * text without NUL. Null when fine, else why not.
  */
 export function checkDrivePutContent(kind: DrivePutKind, bytes: Uint8Array): string | null {
   if (bytes.byteLength === 0) return 'ファイルが空です。'
@@ -110,7 +114,7 @@ export function checkDrivePutContent(kind: DrivePutKind, bytes: Uint8Array): str
     const head = [0x25, 0x50, 0x44, 0x46, 0x2d] // %PDF-
     return head.every((b, i) => bytes[i] === b) ? null : 'PDF ではないファイルです。'
   }
-  const what = kind === 'markdown' ? 'Markdown' : 'HTML'
+  const what = kind === 'markdown' ? 'Markdown' : kind === 'text' ? 'テキスト' : 'HTML'
   if (bytes.includes(0)) return `${what} ではないファイルです。`
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(bytes)
@@ -158,6 +162,10 @@ function hasUrlToken(text: string): boolean {
  * (`<style>`, `style=`, which can fetch and hide URLs in escapes), `srcset`, `http-equiv`, and Markdown reference
  * definitions (`[ref]: …`, whose target an image elsewhere could use). The text is looked at as written and with its
  * character references decoded.
+ *
+ * Asked only for a Google document: a file put as is (PDF, HTML, Markdown, text) is stored as its bytes — Drive
+ * converts and fetches nothing for it (its preview shows HTML / Markdown / text as text), so links and URLs in material
+ * for an AI stay as written (owner decision 2026-11-12, google-drive.md "Markdown and text as they are").
  */
 export function driveDocFetchesOutside(kind: DrivePutKind, text: string): boolean {
   for (const t of [text, decodeDocEntities(text)]) {
@@ -185,7 +193,10 @@ export function driveRevisionOf(head: unknown, version: unknown): string | null 
 // ---------------------------------------------------------------------------
 // Reading a picked file.
 
-/** What a picked file is read as: Google's own files exported as text, a PDF as the file, plain text as is. */
+/**
+ * What a picked file is read as: Google's own files exported as text, a PDF as the file, plain text as is. Markdown
+ * appears as `text/markdown` (what ACB's own puts say) or `text/x-markdown` (what Drive has reported for an uploaded `.md`).
+ */
 export const DRIVE_READ_AS: Record<string, { how: 'export'; mime: string } | { how: 'download'; kind: 'pdf' | 'text' }> = {
   'application/vnd.google-apps.document': { how: 'export', mime: 'text/plain' },
   'application/vnd.google-apps.presentation': { how: 'export', mime: 'text/plain' },
@@ -193,6 +204,7 @@ export const DRIVE_READ_AS: Record<string, { how: 'export'; mime: string } | { h
   'application/pdf': { how: 'download', kind: 'pdf' },
   'text/plain': { how: 'download', kind: 'text' },
   'text/markdown': { how: 'download', kind: 'text' },
+  'text/x-markdown': { how: 'download', kind: 'text' },
   'text/csv': { how: 'download', kind: 'text' },
 }
 
