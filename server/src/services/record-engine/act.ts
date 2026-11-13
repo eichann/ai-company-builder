@@ -326,8 +326,7 @@ export function acting(ctx: EngineContext) {
         const linked = records.linksFrom([row.id]).filter(l => l.targetPath !== null && action.attach.includes(l.name))
         for (const a of b.attachments as Array<Record<string, unknown>>) {
           // A Drive file the record links (any company, owner decision 2026-11-13), at the revision and
-          // fingerprint kept when it was linked; a file of one PC never (records.md "File links without
-          // the shared folder").
+          // fingerprint kept when it was linked; a file of one PC never (records.md "Drive and PC file links").
           if (a?.target !== undefined) {
             const t = a.target as Record<string, unknown> | null
             if (t?.kind === 'local') return bad(LOCAL_FILE_NOT_SHARED.error, LOCAL_FILE_NOT_SHARED.code)

@@ -418,7 +418,7 @@ reserved-name refusals of the app's own operations do not apply: the folder is t
 Hidden there: 「やることにつなぐ…」 and, on a task card, ［＋ファイル・フォルダをつなぐ］ and ［新しいファイル］
 (the server refuses company paths; `TaskCard` `sharedFolder`). A file dragged from the tree onto a task
 card or a task row is linked as the member's own (「あなただけ」); the card's ［Google Drive の
-ファイルをつなぐ］ is offered in every company (`tasks-ui.md` "Linking files", `records.md` "File links without the shared folder"). Also hidden: the file's side column
+ファイルをつなぐ］ is offered in every company (`tasks-ui.md` "Linking files", `records.md` "Drive and PC file links"). Also hidden: the file's side column
 (つながっているもの, 前の版), the 「大きすぎて共有されていません」 marks and 閲覧のみ. 探す and Cmd+P read the
 disk (`electron/plain-search.ts`). Skills show 「この PC だけのスキルです」 instead of 共有.
 

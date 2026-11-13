@@ -355,7 +355,7 @@ export function linkCandidates(files: readonly string[]): Array<{ path: string; 
 }
 
 // ---------------------------------------------------------------------------
-// A Drive link pasted or dropped on a card (a company without the shared folder).
+// A Drive link pasted or dropped on a card (every company, owner decision 2026-11-13).
 
 /** A paste or a drop that holds no Drive file address. */
 export const NOT_A_DRIVE_LINK = 'Google Drive のファイルのリンクではないため、つなげません。'

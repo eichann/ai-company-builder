@@ -323,7 +323,7 @@ export function createTasksApi(deps: TasksDeps) {
 
     /**
      * A file of the member's PC or a Drive file taken off a task (a company without the shared
-     * folder; records.md "File links without the shared folder"). Main sends only a working-folder
+     * folder; records.md "Drive and PC file links"). Main sends only a working-folder
      * path (`fileLinkPath`) or a Drive id.
      */
     async unlinkTarget(companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number): Promise<TaskWriteResult> {

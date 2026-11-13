@@ -41,7 +41,7 @@ export const NO_COMPANY_FOLDER = {
 /**
  * …the same refusal, said for a company path linked to a record (a path on one PC means nothing to
  * others). Such a company links a Google Drive file or a file of the member's own PC instead
- * (records.md "File links without the shared folder").
+ * (records.md "Drive and PC file links").
  */
 export const NO_COMPANY_FOLDER_FILE_LINK = {
   code: NO_COMPANY_FOLDER.code,
@@ -50,7 +50,7 @@ export const NO_COMPANY_FOLDER_FILE_LINK = {
 
 /**
  * A company with the shared folder links a file of one member's PC never: it links company paths and
- * Google Drive files (records.md "File links without the shared folder", owner decision 2026-11-13).
+ * Google Drive files (records.md "Drive and PC file links", owner decision 2026-11-13).
  */
 export const FILE_LINK_KIND_NOT_HERE = {
   code: 'FILE_LINK_KIND_NOT_HERE',

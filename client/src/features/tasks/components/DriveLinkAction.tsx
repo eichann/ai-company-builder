@@ -1,4 +1,4 @@
-// The card's ［Google Drive のファイルをつなぐ］ (a company without the shared folder) and the box a
+// The card's ［Google Drive のファイルをつなぐ］ (every company, owner decision 2026-11-13) and the box a
 // Drive link is pasted into. The button first offers the member's own picked / put files (DriveFiles),
 // else Google's own file chooser, where the member's 「選択」 is the pick (google-drive.md); a pasted link
 // goes straight to that chooser and only decides what it shows first.

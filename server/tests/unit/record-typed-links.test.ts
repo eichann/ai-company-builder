@@ -1,6 +1,5 @@
 /**
- * File links of a company without the shared folder (records.md "File links without the shared
- * folder", owner decisions 2026-11-07/08): a Google Drive file (fileId + revision + the sha256 of what
+ * File links of a company without the shared folder (records.md "Drive and PC file links", owner decisions 2026-11-07/08): a Google Drive file (fileId + revision + the sha256 of what
  * ACB read) or a file of the member's own PC, shown to that member alone. Companies with the shared
  * folder keep company paths and link Drive files too (owner decision 2026-11-13), never PC files.
  *

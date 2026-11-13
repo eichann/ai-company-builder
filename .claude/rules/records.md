@@ -323,8 +323,7 @@ be left out when the type has one; task: `files`). Contract `FileLinkRequest` / 
 A company without the shared folder (`server.md`) refuses every new company path — linked here, on
 create, as an attached version or a decision's file material — with 409 `NO_COMPANY_FOLDER`
 (`fileLinksUnavailable`, `RecordEngineDeps.hasCompanyFolder`): a path on one member's PC means
-nothing to anyone else. It links a Drive file or a file of the member's own PC instead ("File links
-without the shared folder" below). Removing a link is never refused.
+nothing to anyone else. It links a Drive file or a file of the member's own PC instead ("Drive and PC file links" below). Removing a link is never refused.
 
 - Who: anyone who reads the record (as reading it) and **reads the file** (`reader.file`). The
   member's **AI** only on types whose definition lets the AI act at all (some action's `who` lists
@@ -384,7 +383,7 @@ link to one is **its maker's alone**: everyone else — owners and admins includ
   unlink / link by another; kept through others' changes and undo; links without a maker) —
   mutation-checked.
 
-### File links without the shared folder (owner decisions 2026-11-07/08, 2026-11-13)
+### Drive and PC file links (owner decisions 2026-11-07/08, 2026-11-13)
 
 No general upload (ACB does not rebuild Drive). A company without the shared folder (`folderKind:
 none`) links exactly two other kinds of file. **A company with it links Google Drive files too**

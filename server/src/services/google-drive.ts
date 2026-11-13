@@ -71,8 +71,7 @@ export interface GoogleDriveDeps {
 }
 
 /**
- * A picked file checked for linking it to a record (records.md "File links without the shared
- * folder"): its revision when linked, its name as picked, its type and the sha256 of the content ACB
+ * A picked file checked for linking it to a record (records.md "Drive and PC file links"): its revision when linked, its name as picked, its type and the sha256 of the content ACB
  * read (export or download, as `read` does; null when it could not be read). Nothing of it is logged.
  */
 export interface DriveLinkableFile {
@@ -722,7 +721,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
 
     /**
      * A file the member picked, checked for linking it to a record (session only; the records route
-     * asks it before the engine links, records.md "File links without the shared folder"). Only the
+     * asks it before the engine links, records.md "Drive and PC file links"). Only the
      * member's own live pick of a file, or a file their own put made (done), opened with their own
      * `drive.file` token — never anyone else's, never to look at a file someone else linked. The revision is Drive's `headRevisionId`
      * (a binary file) or `version:<n>` (a Google document, which has no head revision); the sha256 is
@@ -764,7 +763,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
 
     /**
      * The file a put of this member made, to link it to the consultation's record right after the put
-     * (records.md "File links without the shared folder"): the receipt is the proof — the member's own
+     * (records.md "Drive and PC file links"): the receipt is the proof — the member's own
      * put, done, Drive's file id known. Its facts come from the receipt (the revision Drive answered,
      * the name as put, the sha256 of the bytes ACB uploaded); Google is not asked again. Null otherwise.
      */

@@ -167,8 +167,7 @@ recordsRoute.post('/records/item/:recordId/undo', companyMember, serviceBody, as
 recordsRoute.post('/records/item/:recordId/file-links', companyMember, serviceBody, async (c) => {
   const member = c.var.member
   const body = c.var.body
-  // A Drive file (any company, owner decision 2026-11-13; records.md "File links without the shared
-  // folder"): every record check first (records on, the record readable, the body, the version, not
+  // A Drive file (any company, owner decision 2026-11-13; records.md "Drive and PC file links"): every record check first (records on, the record readable, the body, the version, not
   // linked already — who → body → rules), and only then the Google connector checks it is this
   // member's own pick, with their own permission. Nothing else ever asks Drive about a linked file; a
   // refusal before that point asks Google nothing.

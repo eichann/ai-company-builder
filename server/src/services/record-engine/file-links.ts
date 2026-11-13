@@ -1,6 +1,6 @@
 /**
  * Linking a file to a record after it was made, or removing that link (records.md "Linking files
- * later", "File links without the shared folder").
+ * later", "Drive and PC file links").
  */
 import { FILE_LINK_KIND_NOT_HERE, TYPED_LINK_PERSON_ONLY } from '../../../shared/core/company-folder'
 import { findPrivateScope } from '../../../shared/core/permissions'
@@ -157,9 +157,9 @@ export function fileLinking(ctx: EngineContext) {
      * (an action whose `who` lists `ai`). A ledger entry `link_file` /
      * `unlink_file` with `links.<name>` before / after, so it can be undone.
      *
-     * A company without the shared folder links `target` instead of `path` (records.md "File links
-     * without the shared folder"): `{ kind: 'local', path }` — a file of the member's own working
-     * folder, shown to them alone — or `{ kind: 'drive', fileId }` — a Drive file the connector
+     * `target` instead of `path` (records.md "Drive and PC file links"): `{ kind: 'local', path }` (a
+     * company without the shared folder only) — a file of the member's own working folder, shown to them
+     * alone — or `{ kind: 'drive', fileId }` — a Drive file the connector
      * checked as the member's own pick (`drive`, from the route). People only; a company with the
      * shared folder refuses a PC file (Drive files are linked in every company, owner decision 2026-11-13).
      */
@@ -180,7 +180,7 @@ export function fileLinking(ctx: EngineContext) {
 
     /**
      * The file the member's own Drive put just made, linked to the record the consultation is about
-     * (google-drive.md "Linked to a record"; records.md "File links without the shared folder"). Only
+     * (google-drive.md "Linked to a record"; records.md "Drive and PC file links"). Only
      * the Google connector's put route calls it, with `file` built from the put's receipt (never a
      * body). Every record check of `fileLink` applies — records on, the record readable, a type the AI
      * may act on, not linked already — except that the member's AI

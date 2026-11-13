@@ -424,7 +424,7 @@ The AI reads and writes **only** the member's own live picks.
   `keepForever` before an overwrite and its refusal, changed since, a picked `.md` read (both MIME types); app
   (`google-drive-tools.test.ts`): `as: 'file'` keeps a `.md`, a `.txt` never a document, the description's guidance.
 
-## Linked to a record (every company, owner decision 2026-11-13; `records.md` "File links without the shared folder")
+## Linked to a record (every company, owner decision 2026-11-13; `records.md` "Drive and PC file links")
 
 `linkable(member, fileId)` — asked only by the records session route `POST …/file-links { target: {
 kind: 'drive', fileId } }`, in a company with or without the shared folder, and only **after every record

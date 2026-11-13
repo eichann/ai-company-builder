@@ -1,4 +1,4 @@
-// A company without the shared folder (records.md "File links without the shared folder", tasks-ui.md
+// A company without the shared folder (records.md "Drive and PC file links", tasks-ui.md
 // "Linking files"). Guards: the card keeps a PC file and a Drive file apart from company files, and a
 // Drive file's name only when the server says the member linked it; a file dropped with `local` is sent
 // as the member's own target (a plain drop stays a company path); removing sends only a working-folder

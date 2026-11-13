@@ -120,8 +120,8 @@ export function unlinkFileFromTask(companyId: string, recordId: string, companyP
 }
 
 /**
- * A company without the shared folder (records.md "File links without the shared folder"): a PC
- * file or a Drive file taken off a task, and 「Google Drive のファイルをつなぐ」 (Google Picker, then the links).
+ * Typed file links (records.md "Drive and PC file links"): a Drive file (every company) or a PC file
+ * (without the shared folder) taken off a task, and 「Google Drive のファイルをつなぐ」 (Google Picker, then the links).
  */
 export type TypedFileWrites = ElectronPort<'unlinkTargetFromTask' | 'linkDriveFilesToTask' | 'getTaskDriveChoices'>
 

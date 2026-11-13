@@ -16,7 +16,7 @@ interface Props {
 }
 
 /**
- * 「＋Google Drive のファイルをつなぐ」 (a company without the shared folder): first the member's own files
+ * 「＋Google Drive のファイルをつなぐ」 (every company): first the member's own files
  * that ACB may already open — the ones they picked before and the ones their AI put into Drive — to tick
  * one or several, with 「Google Drive から探す」 for anything else. Without any, Google's window opens at once.
  * The names are the member's own (the server answers each member only theirs).

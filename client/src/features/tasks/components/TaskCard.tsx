@@ -121,7 +121,7 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
   const [narrowing, setNarrowing] = useState<{ word: string; answer: (yes: boolean) => void } | null>(null)
   // A file, folder, record or consultation dropped on 「つながっているもの」 is linked (owner decision 2026-11-03).
   // A company without the shared folder: a file dropped from the tree is linked as the member's own (records.md
-  // "File links without the shared folder").
+  // "Drive and PC file links").
   const linkDrop = useLinkDrop({ companyId, rootPath, targetWord: 'やること', localFiles: !sharedFolder, onChanged: () => { reload(); onChanged?.() } })
   // Whether Drive can be used here (Google and the chooser set up for the company, allowed yet): every company.
   const driveSetup = useDriveLinkSetup(companyId)
@@ -192,7 +192,8 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     const r = await (remove ? unlinkFileFromTask : linkFileToTask)(companyId, recordId, companyPath, version)
     return r.success ? null : r.error
   })
-  // A company without the shared folder: 「Google Drive のファイルをつなぐ」 (Google Picker) and taking a PC / Drive file off.
+  // Every company (owner decision 2026-11-13): 「Google Drive のファイルをつなぐ」 (Google Picker) and taking a Drive file
+  // (or, without the shared folder, a PC file) off.
   // `chosen`: files ticked in the member's own list (no chooser); `fileIds`: a pasted / dropped Drive link —
   // Google's chooser opens showing just those files.
   const linkDrive = (options?: TaskDriveLinkOptions) => change(async () => {
@@ -310,7 +311,7 @@ interface BodyProps {
   personalHere: ReadonlySet<string>
   /**
    * Drive files in every company (owner decision 2026-11-13) and, without the shared folder, the
-   * member's own PC files (「あなただけ」) (records.md "File links without the shared folder"):
+   * member's own PC files (「あなただけ」) (records.md "Drive and PC file links"):
    * 「Google Drive のファイルをつなぐ」 and taking one off.
    */
   typedFiles: {

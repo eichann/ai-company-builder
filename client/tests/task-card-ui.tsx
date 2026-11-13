@@ -9,7 +9,7 @@
 // `?task=unassigned`: a task the member asked with nobody holding it (「自分が担当する」 heads the 「…」, 「終わったら」, アーカイブ);
 // `?task=archived`: the same task archived (［戻す］, 経緯 「佐藤さんがアーカイブしました」).
 // `?similar=1`: 部署に出す answers 「似ているやることがあります」 (the server's `similar`).
-// `?kind=none`: a company without the shared folder (records.md "File links without the shared folder"): two files
+// `?kind=none`: a company without the shared folder (records.md "Drive and PC file links"): two files
 // of the member's PC (メモ.md is on this PC, 消えた.md is not), a Drive file the member linked and one someone else
 // linked; ［Google Drive のファイルをつなぐ］ logs `drive@<version>`, a link taken off `unlinkTarget <kind> <path|id>@<version>`,
 // a Drive file opened `external <url>`. `&drive=list`: the member already picked / put Drive files, offered first (one of

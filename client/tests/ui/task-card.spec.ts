@@ -171,7 +171,7 @@ test('a company without the shared folder: a Drive link dropped while the choose
   expectNoPageErrors(state)
 })
 
-// A company without the shared folder (records.md "File links without the shared folder", owner decision
+// A company without the shared folder (records.md "Drive and PC file links", owner decision
 // 2026-11-08): the card offers ［Google Drive のファイルをつなぐ］ instead of the company's files; the member's PC files
 // show 「あなただけ」, open on this PC or say plainly they are missing; a Drive file the member did not link is
 // 「Google Drive のファイル」; a file dropped from the tree becomes the member's own link. A git company: unchanged.

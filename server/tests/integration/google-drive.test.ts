@@ -244,7 +244,7 @@ describe('the AI reads picked files only', () => {
   })
 })
 
-describe('a picked file linked to a record (records.md "File links without the shared folder")', () => {
+describe('a picked file linked to a record (records.md "Drive and PC file links")', () => {
   const linkDrive = (user: string, recordId: string, fileId: string, expectedVersion: number) =>
     person(user, 'POST', `/records/item/${recordId}/file-links`, { target: { kind: 'drive', fileId }, expectedVersion })
   const driveLinks = async (user: string, recordId: string) =>
@@ -317,6 +317,11 @@ describe('a picked file linked to a record (records.md "File links without the s
     // Tanaka did not pick it: refused, nothing asked of Google.
     const notHis = await linkDrive('m-tanaka', id, GOOGLE_SEED.handNotesPdf, 1)
     expect([notHis.status, notHis.body.code]).toEqual([403, 'DRIVE_NOT_PICKED'])
+    // Every record check still comes first here: a missing record or a stale version asks Google nothing.
+    const missing = await linkDrive('m-sato', 'task-0000000000000000', GOOGLE_SEED.handNotesPdf, 1)
+    expect([missing.status, missing.body.code]).toEqual([404, 'RECORD_NOT_FOUND'])
+    const stale = await linkDrive('m-sato', id, GOOGLE_SEED.handNotesPdf, 7)
+    expect([stale.status, stale.body.code]).toEqual([409, 'VERSION_CONFLICT'])
     expect(google.requests.length).toBe(calls)
 
     const r = await linkDrive('m-sato', id, GOOGLE_SEED.handNotesPdf, 1)
@@ -453,7 +458,7 @@ describe('the AI puts a PDF / HTML into a picked folder', () => {
   })
 })
 
-describe('a put in a consultation about a task: its file is linked to the task (records.md "File links without the shared folder")', () => {
+describe('a put in a consultation about a task: its file is linked to the task (records.md "Drive and PC file links")', () => {
   const driveLinks = async (user: string, recordId: string) =>
     ((await person(user, 'GET', `/records/item/${recordId}`)).body.data.links as Json[]).filter(l => l.drive).map(l => l.drive)
   const withoutFolder = async (fn: () => Promise<void>) => {

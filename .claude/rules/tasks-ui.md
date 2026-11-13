@@ -681,7 +681,7 @@ folder not downloaded; the chooser `LinkToTaskDialog` lists the member's open ta
 file or folder dropped on a task row or a card's 「つながっているもの」 ("Dropping links" below), and the
 card's 「＋ファイル・フォルダをつなぐ」 (the company's file names on this computer, `git:listFiles`, and
 every folder above them: `linkCandidates`, `model.ts`). **A company without the shared folder**
-(`folderKind: none`, owner 2026-11-07/08; server `records.md` "File links without the shared folder"):
+(`folderKind: none`, owner 2026-11-07/08; server `records.md` "Drive and PC file links"):
 company paths are refused, so the card has neither ［＋ファイル・フォルダをつなぐ］ nor ［新しいファイル］
 (`TaskCard` `sharedFolder`, from AppShell's `companyHasSharedFolder`; test `tests/ui/skill-layout.spec.ts`
 「a task card in a git / none company」), and its 「ファイル」 note is `TYPED_FILES_NOTE` (PC files are the member's

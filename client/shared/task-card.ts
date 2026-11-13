@@ -18,7 +18,7 @@ import {
 
 /**
  * A file of the member's own PC linked to the task (a company without the shared folder; records.md
- * "File links without the shared folder"): `path` inside their working folder. The server answers it
+ * "Drive and PC file links"): `path` inside their working folder. The server answers it
  * to its owner alone, so a card that has one is that member's.
  */
 export interface TaskLocalFile { path: string }
@@ -138,7 +138,7 @@ export interface TaskCardData {
   files: LinkedPath[]
   /** A company without the shared folder: the member's own PC files linked here (theirs alone). */
   localFiles: TaskLocalFile[]
-  /** A company without the shared folder: Drive files linked here. */
+  /** Drive files linked here (every company, owner decision 2026-11-13). */
   driveFiles: TaskDriveFile[]
   links: RecordCardLink[]
   history: RecordCardHistoryLine[]
