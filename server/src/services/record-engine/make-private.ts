@@ -11,7 +11,7 @@
  */
 import type { LedgerEntry } from '../../../shared/core/record-ledger'
 import { RECORD_ID_RE } from '../../../shared/core/records'
-import { FULL_ACCESS_ROLES, findPrivateScope } from '../../../shared/core/permissions'
+import { FULL_ACCESS_ROLES, findPrivateScope, type ScopeWithRules } from '../../../shared/core/permissions'
 import { normalizeRepoPath, pathKey } from '../../../shared/core/paths'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordAccessRow, RecordRepository, RecordRow } from '../../ports/records'
@@ -28,6 +28,9 @@ import { NOTE_MAX, provenance } from './values'
 
 /** The ledger action of moving a まとまり (and its やること) into its own private folder. */
 export const MAKE_PRIVATE_ACTION = 'make_private'
+
+/** The planned private folder's stand-in (never a real path: a NUL cannot be in one). */
+const PLANNED = '\u0000planned'
 
 const STALE = 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください'
 
@@ -137,22 +140,32 @@ export function makingPrivate(ctx: EngineContext) {
       const { records, reader, row, parent, tasks } = found
       const people = new Set(namedPeople(records, row))
       let count = 0
-      let blocked = false
       const shown: RecordRow[] = []
       for (const t of tasks) {
-        if (t.personalOwner !== null) continue
-        if (!reader.record(t)) { blocked = true; continue }
+        if (t.personalOwner !== null || !reader.record(t)) continue
         shown.push(t)
         count++
         for (const u of [...namedPeople(records, t), ...listedUserIds(t)]) people.add(u)
       }
       const named = [...people].filter(u => { const role = deps.roleOf(member.companyId, u); return role !== null && !FULL_ACCESS_ROLES.has(role) })
-      // The participants it will have (the member, the department's managers, those named): a やること
-      // placed by a folder must already be read by each of them, as the move will check (`narrowable`).
+      // The participants it will have (the member, the department's managers, those named), as a
+      // planned private folder: the move's own checks run against it, so the window refuses up
+      // front exactly what the move would (a やること already narrower than that is left alone).
       const handle = companyData.forCompany(member.companyId)
       const deptId = parent === '' ? null : handle.departments.folders().find(d => pathKey(d.folder) === pathKey(parent))?.id ?? null
-      const participants = [member.userId, ...named, ...(deptId ? handle.scopes.departmentManagerIds(deptId) : [])]
-      if (shown.some(t => t.members === null && participants.some(u => !canRead(member.companyId, u, t)))) blocked = true
+      const participants = [...new Set([member.userId, ...named, ...(deptId ? handle.scopes.departmentManagerIds(deptId) : [])])]
+      const plannedPath = parent === '' ? PLANNED : `${parent}/${PLANNED}`
+      const scopes: ScopeWithRules[] = [...handle.scopes.listWithRules(), {
+        id: PLANNED, path: plannedPath, kind: 'folder', departmentId: null, repoId: PLANNED,
+        rules: [
+          { id: `${PLANNED}e`, subjectType: 'everyone', subjectId: null, canRead: false, canWrite: false },
+          ...participants.map(u => ({ id: `${PLANNED}${u}`, subjectType: 'user' as const, subjectId: u, canRead: true, canWrite: true })),
+        ],
+      }]
+      const planned: RecordAccessRow = { ...row, scopeId: null, path: null, folder: plannedPath, personalOwner: null, members: null, memberSets: [] }
+      const roleOf = (id: string) => deps.roleOf(member.companyId, id)
+      const within = (t: RecordRow) => placeWithin(member.companyId, scopes, roleOf, planned, t)
+      const blocked = tasks.some(t => !placeWithin(member.companyId, scopes, roleOf, t, planned) && !narrowable(reader, t, within))
       return ok({ parent, tasks: count, people: named.sort(), blocked })
     },
 

@@ -239,6 +239,16 @@ describe('afterwards: participants only, its やること too', () => {
     expect(source.forCompany(CO).records.find(t.id)?.folder).toBe('開発部/秘密の企画')
   })
 
+  it('a やること already seen by fewer people (another private folder of participants only) is left as it is', () => {
+    privateFolder('small', '開発部/少人数', ['u-mgr'])
+    const p = project()
+    const t = ok(engine.create(m('u-mgr'), HUMAN, { type: 'task', title: '試作', fields: { assignee: 'u-mgr' }, folder: '営業部', links: { bundle: p.id } })).record
+    source.forCompany(CO).records.setPlace(t.id, { folder: '開発部/少人数', personalOwner: null }, TS)
+    expect(ok(engine.makePrivatePlan(m('u-mgr'), p.id)).blocked).toBe(false)
+    expect(ok(move('u-mgr', p.id)).narrowed).toBe(0)
+    expect(source.forCompany(CO).records.find(t.id)?.folder).toBe('開発部/少人数')
+  })
+
   it('a members-only やること the mover reads whose list is wider stops it too (never a list turned into a folder)', () => {
     const p = project()
     ok(engine.create(m('u-mgr'), HUMAN, { type: 'task', title: '打ち合わせ', fields: { assignee: 'u-mgr' }, members: ['u-carol'], links: { bundle: p.id } }))

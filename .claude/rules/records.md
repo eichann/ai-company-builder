@@ -1326,7 +1326,8 @@ readers by `linkAllowed`, public → private).
   blocked }`: the department folder the private folder is made in (`''` = the company root), how many linked
   やること the caller reads will be seen by the participants only (owner-only ones stay as they are), who the
   案件 and those やること name (責任者・担当・頼んだ人… and members-only lists' people; owners / admins aside —
-  the app makes them participants), and whether some linked やること would stop the move. Refused exactly as
+  the app makes them participants), and whether some linked やること would stop the move (the move's own checks run
+  against a planned private folder read by the member, those people and the department's managers). Refused exactly as
   the move is (below), so the app offers 「非公開にする」 only where it would be taken.
 - `POST /records/item/:recordId/make-private { folder, expectedVersion, note? }` (`makePrivate`, **session
   only, a person** — `NOT_ALLOWED` for the AI; no AI route). Refusals in order: missing / unreadable → the
