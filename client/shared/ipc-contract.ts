@@ -43,7 +43,7 @@ import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
 import type { ViewersQuery, ViewersResult } from './viewers'
 import type { InviteSet, MeetingArrivalsResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteChoicesResult, MeetingInviteResult, MeetingPressResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
-import type { FindHomeResult, FindResult, RecordCardResult, RecordListResult } from './record-views'
+import type { FindHomeResult, FindResult, MakePrivatePlanResult, RecordCardResult, RecordListResult } from './record-views'
 import type { ConsultationTopicsResult } from './consultation-topics'
 import type { CalendarTodayResult } from './calendar'
 import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveChoice, TaskDriveLinkOptions, TaskDriveLinkResult, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from './tasks'
@@ -599,6 +599,8 @@ export interface IpcInvokeChannels {
   'tasks:shareToBundle': { args: [companyId: string, recordId: string, expectedVersion: number]; result: TaskWriteResult }
   /** 「非公開にする」: a public 案件・プロジェクト into its own new private folder (records.md "Making a 案件・プロジェクト private"). */
   'tasks:makeBundlePrivate': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
+  /** …asked again right before the private folder is made (nothing is made when it would be refused). */
+  'tasks:makeBundlePrivatePlan': { args: [companyId: string, recordId: string]; result: MakePrivatePlanResult }
   /** Tags in use that fit a title (AI through the company's key, else local matching); only suggestions. */
   'tasks:suggestTags': { args: [companyId: string, title: string, tagsInUse: string[]]; result: TagSuggestions }
   'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
@@ -1086,6 +1088,7 @@ export interface ElectronAPI {
   shareTask: Invoke<'tasks:share'>
   shareTaskToBundle: Invoke<'tasks:shareToBundle'>
   makeBundlePrivate: Invoke<'tasks:makeBundlePrivate'>
+  makeBundlePrivatePlan: Invoke<'tasks:makeBundlePrivatePlan'>
   suggestTaskTags: Invoke<'tasks:suggestTags'>
   reconcileTaskRun: Invoke<'tasks:reconcile'>
   undoTaskAction: Invoke<'tasks:undo'>

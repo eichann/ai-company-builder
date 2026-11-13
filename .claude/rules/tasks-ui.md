@@ -748,10 +748,14 @@ admins and the department's managers see it. `MakePrivateDialog` (records featur
 ます）」, 「つながっているやること（N件）も、参加者だけに見えるようになります」, 「つながっているファイルや会議の記録は、
 今の場所のまま動きません（会議の記録は、出た人がこれまでどおり見られます）」, 「あとから公開に戻すことは、ここからはできません」; a `blocked` plan disables the press
 and says why. The press (`onMakePrivate`, composed by AppShell from `makeExistingBundlePrivate` in
-`features/tasks/api.ts`): the private folder in the plan's `parent` (`createPrivateBundleFolder`, names from
-`privateBundleFolderNames`), the plan's `people` added as participants (the folder's list kept, as
-［参加者を足す］ does), then `tasks:makeBundlePrivate` → `POST …/make-private`. A refusal after the folder was
-made says the empty folder is left. Tests: `client/tests/bundle-make-private.test.ts`,
+`features/tasks/api.ts`): the plan again (`tasks:makeBundlePrivatePlan`; refused, `blocked` or another
+version → nothing is made), the private folder in its `parent` (`createPrivateBundleFolder`, names from
+`privateBundleFolderNames`), its `people` added as participants (the folder's list kept, as ［参加者を足す］ does),
+then `tasks:makeBundlePrivate` → `POST …/make-private` at the plan's version. A move refused after the folder was
+made takes the added people off again (the list as it was made: the member and the department's managers) and
+says 「非公開にできませんでした。…作りかけた非公開のフォルダ「…」は、中身がないまま残っています…要らなければ管理者に
+消してもらってください」 (the app has no way to delete a private folder; owners / admins do it in the admin
+console). Tests: `client/tests/bundle-make-private.test.ts`,
 `src/features/records/makePrivate.test.ts`.
 **A task seen by more people than the 案件** (the server's `WIDER_THAN_BUNDLE` on ［〇〇につなぐ］, ［変える］, the tag
 hint's ［案件につなぐ］ or a new one): the card asks 「このやることは、〇〇より多くの人に見えています。〇〇と同じ人たちだけに

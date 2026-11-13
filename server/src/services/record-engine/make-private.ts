@@ -32,6 +32,12 @@ export const MAKE_PRIVATE_ACTION = 'make_private'
 /** The planned private folder's stand-in (never a real path: a NUL cannot be in one). */
 const PLANNED = '\u0000planned'
 
+/**
+ * How long after its creation a private folder is still "the one just made for this": the app makes
+ * it and moves the まとまり within seconds; anything older is an existing folder (files, people).
+ */
+export const NEW_FOLDER_WINDOW_MS = 10 * 60 * 1000
+
 const STALE = 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください'
 
 export const MAKE_PRIVATE_REFUSALS = {
@@ -67,8 +73,10 @@ export interface MakePrivatePlan {
   tasks: number
   /** Members the 案件 and those やること name (責任者・担当・頼んだ人… and members-only lists), owners / admins aside: made participants. */
   people: string[]
-  /** Some linked やること cannot be narrowed by this member: the move would be refused (`LINKED_NOT_MOVABLE`). */
+  /** Something linked cannot be changed by this member, or a participant would gain it: the move would be refused. */
   blocked: boolean
+  /** The まとまり's version now: the app checks it before making the folder (the move takes it as `expectedVersion`). */
+  version: number
 }
 
 /** The department folder holding a place (its first segment; null = the whole company). */
@@ -120,6 +128,16 @@ export function makingPrivate(ctx: EngineContext) {
     // (a meeting's attendees) keep their own list; file records stay where they are.
     const others = candidates.filter(r => r.removedAt === null && !tasks.includes(r) && r.path === null && r.personalOwner === null && r.members === null)
     return { records, reader, row, parent: dept ?? '', tasks, others }
+  }
+
+  /**
+   * Live records placed by a folder that link to any of `ids` (送るもの・返事のお願い via their `task` link…),
+   * other than `skip`: they never follow a narrowed やること, so each must already be within the new place.
+   */
+  function linkedTo(records: RecordRepository, ids: string[], skip: ReadonlySet<string>): RecordRow[] {
+    if (ids.length === 0) return []
+    const from = [...new Set(records.linksTo(ids).map(l => l.sourceId))].filter(id => !skip.has(id))
+    return records.byIds(from).filter(r => r.removedAt === null && r.path === null && r.personalOwner === null && r.members === null)
   }
 
   /** The person fields' values of a record (責任者・担当・頼んだ人・確かめる人…). */
@@ -178,10 +196,13 @@ export function makingPrivate(ctx: EngineContext) {
       const planned: RecordAccessRow = { ...row, scopeId: null, path: null, folder: plannedPath, personalOwner: null, members: null, memberSets: [] }
       const roleOf = (id: string) => deps.roleOf(member.companyId, id)
       const within = (t: RecordRow) => placeWithin(member.companyId, scopes, roleOf, planned, t)
-      const blocked = tasks.some(t => !placeWithin(member.companyId, scopes, roleOf, t, planned) && !narrowable(reader, t, within))
-        || others.some(r => !placeWithin(member.companyId, scopes, roleOf, r, planned))
+      const toNarrow = tasks.filter(t => !placeWithin(member.companyId, scopes, roleOf, t, planned))
+      const skip = new Set([row.id, ...tasks.map(t => t.id), ...others.map(r => r.id)])
+      const blocked = toNarrow.some(t => !narrowable(reader, t, within))
+        || [...others, ...linkedTo(records, toNarrow.map(t => t.id), skip)].some(r => !placeWithin(member.companyId, scopes, roleOf, r, planned))
         || !placeWithin(member.companyId, scopes, roleOf, planned, row)
-      return ok({ parent, tasks: count, people: named.sort(), blocked })
+      const def = currentTypes(records).get(row.type)!.definition
+      return ok({ parent, tasks: count, people: named.sort(), blocked, version: stateOf(records, row, def).version })
     },
 
     /**
@@ -220,6 +241,15 @@ export function makingPrivate(ctx: EngineContext) {
       if (typeof folder !== 'string') return folder
       if (!ownFolder(folder)) return notPlaceable
       if (records.placedIn(folder).some(id => id !== row.id)) return notPlaceable
+      // Only the folder just made for this: by this member, within the last minutes, with no file record in
+      // it. An existing private folder (an HR folder holding only files, another member's new one) would
+      // make its readers the 参加者 — and ［参加者を足す］ would hand out its files.
+      const handle = companyData.forCompany(member.companyId)
+      const scope = scopes.find(s => s.repoId !== null && pathKey(s.path) === pathKey(folder))
+      const made = scope ? handle.privateFolders.get(scope.id) : null
+      const age = made ? Date.parse(clock.now()) - Date.parse(made.createdAt) : NaN
+      if (!made || made.createdBy !== member.userId || !(age >= -60_000 && age <= NEW_FOLDER_WINDOW_MS)) return notPlaceable
+      if (records.fileRecordsIn(made.scope.id).length > 0) return notPlaceable
 
       const place = (r: RecordRow): RecordAccessRow => ({ ...r, scopeId: null, path: null, folder, personalOwner: null, members: null, memberSets: [] })
       const newPlace = place(row)
@@ -234,6 +264,10 @@ export function makingPrivate(ctx: EngineContext) {
       }
       // Its やること that would be seen by more people than the まとまり there.
       const wider = tasks.filter(t => !placeWithin(member.companyId, scopes, roleOf, t, newPlace))
+      const skip = new Set([row.id, ...tasks.map(t => t.id), ...others.map(r => r.id)])
+      if (linkedTo(records, wider.map(t => t.id), skip).some(r => !placeWithin(member.companyId, scopes, roleOf, r, newPlace))) {
+        return conflict(MAKE_PRIVATE_REFUSALS.linkedRecordsWider.error, MAKE_PRIVATE_REFUSALS.linkedRecordsWider.code)
+      }
       const within = (t: RecordRow) => placeWithin(member.companyId, scopes, roleOf, newPlace, t)
       if (wider.some(t => !narrowable(reader, t, within))) {
         return conflict(MAKE_PRIVATE_REFUSALS.linkedNotMovable.error, MAKE_PRIVATE_REFUSALS.linkedNotMovable.code)

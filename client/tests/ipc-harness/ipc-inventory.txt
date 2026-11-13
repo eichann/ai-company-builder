@@ -220,6 +220,7 @@ contract.invoke tasks:linkFile
 contract.invoke tasks:linkRecord
 contract.invoke tasks:list
 contract.invoke tasks:makeBundlePrivate
+contract.invoke tasks:makeBundlePrivatePlan
 contract.invoke tasks:proposals
 contract.invoke tasks:reconcile
 contract.invoke tasks:retryRun
@@ -470,6 +471,7 @@ contract.type ElectronAPI.listPersonSteps = listPersonSteps: Invoke<'pluginSteps
 contract.type ElectronAPI.listPluginStepTurns = listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
 contract.type ElectronAPI.listSkills = listSkills: Invoke<'skills:list'>
 contract.type ElectronAPI.makeBundlePrivate = makeBundlePrivate: Invoke<'tasks:makeBundlePrivate'>
+contract.type ElectronAPI.makeBundlePrivatePlan = makeBundlePrivatePlan: Invoke<'tasks:makeBundlePrivatePlan'>
 contract.type ElectronAPI.makeSkillPrivate = makeSkillPrivate: Invoke<'skills:makePrivate'>
 contract.type ElectronAPI.markGoogleSeen = markGoogleSeen: Invoke<'google:markSeen'>
 contract.type ElectronAPI.markNotificationsRead = markNotificationsRead: Invoke<'notifications:markRead'>
@@ -910,6 +912,7 @@ contract.type IpcInvokeChannels.'tasks:linkFile' = 'tasks:linkFile': { args: [co
 contract.type IpcInvokeChannels.'tasks:linkRecord' = 'tasks:linkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId: string]; result: TaskListResult }
 contract.type IpcInvokeChannels.'tasks:makeBundlePrivate' = 'tasks:makeBundlePrivate': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:makeBundlePrivatePlan' = 'tasks:makeBundlePrivatePlan': { args: [companyId: string, recordId: string]; result: MakePrivatePlanResult }
 contract.type IpcInvokeChannels.'tasks:proposals' = 'tasks:proposals': { args: [companyId: string, meetingId: string]; result: TaskProposalsResult }
 contract.type IpcInvokeChannels.'tasks:reconcile' = 'tasks:reconcile': { args: [companyId: string, runId: string, key: string, done: boolean]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:retryRun' = 'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
@@ -1214,6 +1217,7 @@ main.handle tasks:linkFile @ features/tasks/ipc.ts (companyId, recordId, company
 main.handle tasks:linkRecord @ features/tasks/ipc.ts (companyId, recordId, input)
 main.handle tasks:list @ features/tasks/ipc.ts (companyId)
 main.handle tasks:makeBundlePrivate @ features/tasks/ipc.ts (companyId, recordId, folder, expectedVersion)
+main.handle tasks:makeBundlePrivatePlan @ features/tasks/ipc.ts (companyId, recordId)
 main.handle tasks:proposals @ features/tasks/ipc.ts (companyId, meetingId)
 main.handle tasks:reconcile @ features/tasks/ipc.ts (companyId, runId, key, done)
 main.handle tasks:retryRun @ features/tasks/ipc.ts (companyId, runId)
@@ -1520,6 +1524,8 @@ preload listSkills -> invoke skills:list($0, $1, $2, $3, $4)
 preload listSkills : (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string | undefined, options?: { force?: boolean | undefined; } | undefined) => Promise<SkillsResult>
 preload makeBundlePrivate -> invoke tasks:makeBundlePrivate($0, $1, $2, $3)
 preload makeBundlePrivate : (companyId: string, recordId: string, folder: string, expectedVersion: number) => Promise<TaskWriteResult>
+preload makeBundlePrivatePlan -> invoke tasks:makeBundlePrivatePlan($0, $1)
+preload makeBundlePrivatePlan : (companyId: string, recordId: string) => Promise<MakePrivatePlanResult>
 preload makeSkillPrivate -> invoke skills:makePrivate($0, $1)
 preload makeSkillPrivate : (rootPath: string, skillRelativePath: string) => Promise<SimpleResult & { code?: "already_shared" | undefined; }>
 preload markGoogleSeen -> invoke google:markSeen($0)

@@ -187,18 +187,25 @@ export interface MakePrivateOffer {
   tasks: number
   /** Those the 案件 and its やること name, made participants with the member (owners / admins aside). */
   people: Array<{ id: string; name: string }>
-  /** Some linked やること cannot be changed by this member: the server would refuse. */
+  /** Something linked cannot be changed by this member (or a participant would gain it): the server would refuse. */
   blocked: boolean
+  /** The 案件's version when the plan was made (the move's `expectedVersion`). */
+  version: number
 }
+
+export type MakePrivatePlanResult =
+  | { success: true; offer: MakePrivateOffer }
+  | { success: false; offline: boolean; error: string }
 
 /** The server's plan as the card may show it; null for anything malformed (an older server sends none). */
 export function makePrivateOfferOf(data: unknown, names: Record<string, string>): MakePrivateOffer | null {
-  const d = data as { parent?: unknown; tasks?: unknown; people?: unknown; blocked?: unknown } | null
+  const d = data as { parent?: unknown; tasks?: unknown; people?: unknown; blocked?: unknown; version?: unknown } | null
   if (typeof d !== 'object' || d === null) return null
   if (typeof d.parent !== 'string' || (d.parent !== '' && fileLinkPath(d.parent) !== d.parent)) return null
   if (!Number.isInteger(d.tasks) || (d.tasks as number) < 0 || typeof d.blocked !== 'boolean') return null
   if (!Array.isArray(d.people) || !d.people.every(p => typeof p === 'string' && p !== '')) return null
-  return { parent: d.parent, tasks: d.tasks as number, blocked: d.blocked, people: (d.people as string[]).map(id => ({ id, name: names[id] ?? 'メンバー' })) }
+  if (!Number.isInteger(d.version) || (d.version as number) < 0) return null
+  return { parent: d.parent, tasks: d.tasks as number, blocked: d.blocked, version: d.version as number, people: (d.people as string[]).map(id => ({ id, name: names[id] ?? 'メンバー' })) }
 }
 
 export type RecordCardResult =

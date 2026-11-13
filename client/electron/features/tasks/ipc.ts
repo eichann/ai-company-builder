@@ -46,7 +46,7 @@ import type { MyWorkSwitches } from '../../../../shared/types/work-switches'
 import type { ViewersAnswer } from '../../../../shared/types/viewers'
 import type { MeetingBundleQuestions } from '../../../../shared/types/minutes'
 import { taskCardOf, type TaskCardResult } from '../../../shared/task-card'
-import { linkedPaths } from '../../../shared/record-views'
+import { linkedPaths, makePrivateOfferOf, type MakePrivatePlanResult } from '../../../shared/record-views'
 import { dropLinkPlan, type DroppedThing, type DropLinkResult } from '../../../shared/link-drop'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
@@ -400,6 +400,15 @@ export function createTasksApi(deps: TasksDeps) {
       return a?.status === 200 ? { success: true, recordId } : failure('make bundle private', a)
     },
 
+    /** The server's plan for 「非公開にする」, asked again right before anything is made; a malformed answer is a failure. */
+    async makeBundlePrivatePlan(companyId: string, recordId: string): Promise<MakePrivatePlanResult> {
+      if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
+      const [a, names] = await Promise.all([call(companyId, 'GET', `/records/item/${encodeURIComponent(recordId)}/make-private`), people(companyId)])
+      if (a?.status !== 200) { const f = failure('make bundle private plan', a); return { success: false, offline: f.offline, error: f.error } }
+      const offer = makePrivateOfferOf(a.json?.data, names)
+      return offer ? { success: true, offer } : { success: false, offline: false, error: 'できませんでした。' }
+    },
+
     async undo(companyId: string, recordId: string, version: number, expectedVersion: number): Promise<TaskWriteResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
       if (!Number.isInteger(version) || version < 2 || !Number.isInteger(expectedVersion) || expectedVersion < version) return BAD_INPUT
@@ -687,6 +696,8 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
     api.shareToBundle(typeof companyId === 'string' ? companyId : '', recordId, expectedVersion))
   ipc.handle('tasks:makeBundlePrivate', (_event, companyId, recordId, folder, expectedVersion) =>
     api.makeBundlePrivate(typeof companyId === 'string' ? companyId : '', recordId, folder, expectedVersion))
+  ipc.handle('tasks:makeBundlePrivatePlan', (_event, companyId, recordId) =>
+    api.makeBundlePrivatePlan(typeof companyId === 'string' ? companyId : '', recordId))
   ipc.handle('tasks:retryRun', (_event, companyId, runId) => api.retryRun(typeof companyId === 'string' ? companyId : '', runId))
   ipc.handle('tasks:createBundle', (_event, companyId, input) => api.createBundle(typeof companyId === 'string' ? companyId : '', input))
   ipc.handle('tasks:linkRecord', (_event, companyId, recordId, input) => api.linkRecord(typeof companyId === 'string' ? companyId : '', recordId, input, false))

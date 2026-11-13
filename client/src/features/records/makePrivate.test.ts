@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { makePrivateWords } from './makePrivate'
 
-const offer = { parent: '営業部', tasks: 2, people: [{ id: 'u-a', name: '佐藤' }], blocked: false }
+const offer = { parent: '営業部', tasks: 2, people: [{ id: 'u-a', name: '佐藤' }], blocked: false, version: 1 }
 
 test('the window names who will see it afterwards, the やること that follow and what stays', () => {
   const w = makePrivateWords(offer, 'プロジェクト')

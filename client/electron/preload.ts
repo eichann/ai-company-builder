@@ -185,6 +185,7 @@ const api: ElectronAPI = {
   shareTask: (companyId: string, recordId: string, folder: string, expectedVersion: number) => invoke('tasks:share', companyId, recordId, folder, expectedVersion),
   shareTaskToBundle: (companyId: string, recordId: string, expectedVersion: number) => invoke('tasks:shareToBundle', companyId, recordId, expectedVersion),
   makeBundlePrivate: (companyId: string, recordId: string, folder: string, expectedVersion: number) => invoke('tasks:makeBundlePrivate', companyId, recordId, folder, expectedVersion),
+  makeBundlePrivatePlan: (companyId: string, recordId: string) => invoke('tasks:makeBundlePrivatePlan', companyId, recordId),
   suggestTaskTags: (companyId: string, title: string, tagsInUse: string[]) => invoke('tasks:suggestTags', companyId, title, tagsInUse),
   retryTaskRun: (companyId: string, runId: string) => invoke('tasks:retryRun', companyId, runId),
   reconcileTaskRun: (companyId: string, runId: string, key: string, done: boolean) => invoke('tasks:reconcile', companyId, runId, key, done),

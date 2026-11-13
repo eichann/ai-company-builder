@@ -46,32 +46,48 @@ export async function createPrivateBundleFolder(companyId: string, parent: strin
  * 「非公開にする」 on an existing 案件・プロジェクト (records.md "Making a 案件・プロジェクト private"): its own private
  * folder (as 「新しい〇〇にする」 makes one), the people it names added as participants, then the move.
  */
-export type BundlePrivateWrites = ElectronPort<'createPrivateFolder' | 'getPrivateFolderMembers' | 'setPrivateFolderMembers' | 'makeBundlePrivate'>
+export type BundlePrivateWrites = ElectronPort<'makeBundlePrivatePlan' | 'createPrivateFolder' | 'getPrivateFolderMembers' | 'setPrivateFolderMembers' | 'makeBundlePrivate'>
+
+const OFFLINE = 'サーバーに接続できませんでした。'
 
 /**
- * Makes the 案件 `bundle` private: its private folder in `parent` (named after it), `people` added as
- * participants (the server already made the member and the department's managers ones), then the server
- * moves the 案件 and narrows its やること. null = done, else the reason in words. A move refused after the
- * folder was made leaves that empty folder (as a refused 「新しい〇〇にする」 does) and says so.
+ * Makes the 案件 `bundle` private. First the server's plan is asked again: refused, blocked or changed
+ * meanwhile → nothing is made. Then its private folder in the plan's department (named after it), the
+ * plan's people added as participants (the server already made the member and the department's managers
+ * ones), then the server's move. A move refused after the folder was made puts the participants back as
+ * the folder was made (the member and the managers only) and says, in words, that the empty folder is
+ * left — the app cannot delete a private folder (owners / admins do, in the admin console).
+ * null = done, else the reason in words.
  */
 export async function makeExistingBundlePrivate(
-  companyId: string, bundle: { id: string; title: string; version: number }, offer: { parent: string; people: readonly string[] }, word: string,
+  companyId: string, bundle: { id: string; title: string; version: number }, word: string,
   ports: BundlePrivateWrites = window.electronAPI,
 ): Promise<string | null> {
+  const plan = await ports.makeBundlePrivatePlan(companyId, bundle.id).catch(() => null)
+  if (!plan?.success) return plan?.error || OFFLINE
+  const offer = plan.offer
+  if (offer.blocked) return `つながっているやることや記録の中に、あなたからは見える範囲を変えられないものがあるため、非公開にできません。管理者に相談してください。`
+  if (offer.version !== bundle.version) return `ほかの人が先にこの${word}を変えました。画面を開き直してから、もう一度お試しください。`
   const made = await createPrivateBundleFolder(companyId, offer.parent, privateBundleFolderNames(bundle.title, word), ports)
   if ('error' in made) return made.error
-  const left = `（作った非公開のフォルダ「${made.path}」は残っています）`
-  if (offer.people.length > 0) {
-    const now = await ports.getPrivateFolderMembers(companyId, made.scopeId).catch(() => null)
-    if (!now?.success) return `${now?.error || 'サーバーに接続できませんでした。'}${left}`
-    const named = now.members.filter(m => m.via === 'rule')
-    const viewers = [...new Set([...named.map(m => m.userId), ...offer.people])]
-    const editors = [...new Set([...named.filter(m => m.canWrite).map(m => m.userId), ...offer.people])]
-    const set = await ports.setPrivateFolderMembers(companyId, made.scopeId, { viewers, editors }).catch(() => null)
-    if (!set?.success) return `${set?.error || 'サーバーに接続できませんでした。'}${left}`
+  const left = (why: string, restored: boolean) => `非公開にできませんでした。${why}\n作りかけた非公開のフォルダ「${made.path}」は、中身がないまま残っています（見られるのはあなたと部署の管理役・管理者だけです）。要らなければ管理者に消してもらってください。${restored ? '' : 'このフォルダに足した人を外せなかったので、管理者に相談してください。'}`
+  const first = await ports.getPrivateFolderMembers(companyId, made.scopeId).catch(() => null)
+  if (!first?.success) return left(first?.error || OFFLINE, true)
+  const named = first.members.filter(m => m.via === 'rule')
+  const before = { viewers: named.map(m => m.userId), editors: named.filter(m => m.canWrite).map(m => m.userId) }
+  const people = offer.people.map(p => p.id)
+  const added = people.some(id => !before.viewers.includes(id))
+  if (added) {
+    const set = await ports.setPrivateFolderMembers(companyId, made.scopeId, {
+      viewers: [...new Set([...before.viewers, ...people])], editors: [...new Set([...before.editors, ...people])],
+    }).catch(() => null)
+    if (!set?.success) return left(set?.error || OFFLINE, true)
   }
-  const r = await ports.makeBundlePrivate(companyId, bundle.id, made.path, bundle.version).catch(() => null)
-  return r?.success ? null : `${r?.error || 'サーバーに接続できませんでした。'}${left}`
+  const r = await ports.makeBundlePrivate(companyId, bundle.id, made.path, offer.version).catch(() => null)
+  if (r?.success) return null
+  // Refused: nobody but who the folder was made for keeps it.
+  const restored = !added || (await ports.setPrivateFolderMembers(companyId, made.scopeId, before).catch(() => null))?.success === true
+  return left(r?.error || OFFLINE, restored)
 }
 
 /** One task's card, and the AI's proposals (案) of a meeting for 「議事録を確認する」. */

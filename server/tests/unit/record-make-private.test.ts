@@ -51,8 +51,11 @@ const code = (r: { ok: boolean; body?: unknown }) => (r.ok ? 'ok' : (r.body as {
 function rule(id: string, scope: string, type: 'everyone' | 'user', subject: string | null, read: 0 | 1) {
   conn.prepare('INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, scope, type, subject, read, read, TS)
 }
-function privateFolder(id: string, path: string, readers: string[]) {
+// Made by `by` at `at` (default: u-mgr, a minute before the engine's clock — the folder just made for it).
+const JUST_NOW = '2026-11-13T01:59:00.000Z'
+function privateFolder(id: string, path: string, readers: string[], by = 'u-mgr', at = JUST_NOW) {
   conn.prepare("INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES (?, ?, ?, 'folder', ?, ?)").run(id, CO, path, `${id}-repo`, TS)
+  conn.prepare('INSERT INTO scope_repos (id, company_id, scope_id, created_at, created_by) VALUES (?, ?, ?, ?, ?)').run(`${id}-repo`, CO, id, at, by)
   rule(`${id}-e`, id, 'everyone', null, 0)
   for (const u of readers) rule(`${id}-${u}`, id, 'user', u, 1)
 }
@@ -101,6 +104,7 @@ describe('who may make an existing 案件・プロジェクト private', () => {
     for (const who of ['u-mgr', 'u-admin', 'u-owner']) {
       const p = project()
       expect(code(engine.makePrivatePlan(m(who), p.id))).toBe('ok')
+      conn.prepare("UPDATE scope_repos SET created_by = ? WHERE scope_id = 'p'").run(who)
       expect(code(move(who, p.id))).toBe('ok')
       // Each into a fresh folder: the next one goes into the same path, so free it again.
       source.forCompany(CO).records.setPlace(p.id, { folder: '営業部', personalOwner: null }, TS)
@@ -118,7 +122,7 @@ describe('who may make an existing 案件・プロジェクト private', () => {
   })
 
   it('a company-wide one: owners / admins only, into a private folder at the company root', () => {
-    privateFolder('top', '新製品', ['u-alice'])
+    privateFolder('top', '新製品', ['u-alice'], 'u-admin')
     const p = project(null)
     expect(code(move('u-mgr', p.id, '新製品'))).toBe('MAKE_PRIVATE_NOT_ALLOWED')
     expect(ok(engine.makePrivatePlan(m('u-admin'), p.id)).parent).toBe('')
@@ -155,7 +159,7 @@ describe('only a public まとまり, at the version seen', () => {
 
 describe('only its own new private folder — one answer for every other place', () => {
   it('a public folder, a deeper one, another department’s, one another 案件 is in', () => {
-    privateFolder('dev', '開発部/秘密の企画', ['u-admin'])
+    privateFolder('dev', '開発部/秘密の企画', ['u-admin'], 'u-admin')
     privateFolder('deep', '営業部/新製品/中', ['u-mgr'])
     const other = project('営業部', 'ほかの案件')
     privateFolder('used', '営業部/使用中', ['u-mgr', 'u-alice'])
@@ -175,6 +179,31 @@ describe('only its own new private folder — one answer for every other place',
   })
 })
 
+describe('only the folder just made for it', () => {
+  it('an existing private folder (old, e.g. an HR folder holding only files) → the one answer', () => {
+    privateFolder('hr', '営業部/人事', ['u-mgr', 'u-alice'], 'u-mgr', '2026-10-01T00:00:00.000Z')
+    const p = project()
+    const r = move('u-mgr', p.id, '営業部/人事')
+    expect(code(r)).toBe('FOLDER_NOT_PLACEABLE')
+    expect(JSON.stringify(r)).not.toMatch(/人事/)
+  })
+
+  it('another member’s new folder → the one answer; the mover’s own just-made one → taken', () => {
+    privateFolder('theirs', '営業部/他の人の', ['u-mgr', 'u-alice'], 'u-admin')
+    const p = project()
+    expect(code(move('u-mgr', p.id, '営業部/他の人の'))).toBe('FOLDER_NOT_PLACEABLE')
+    expect(code(move('u-mgr', p.id, NEW))).toBe('ok')
+  })
+
+  it('a just-made folder that already holds a file record → the one answer', () => {
+    privateFolder('files', '営業部/資料', ['u-mgr', 'u-alice'])
+    const records = source.forCompany(CO).records
+    records.upsert({ id: 'task-file0001', type: 'task', typeVersion: 1, scopeId: 'files', path: '営業部/資料/a.md', folder: null, personalOwner: null, members: null, title: 'a', summary: '', createdAt: TS, updatedAt: TS, removedAt: null })
+    const p = project()
+    expect(code(move('u-mgr', p.id, '営業部/資料'))).toBe('FOLDER_NOT_PLACEABLE')
+  })
+})
+
 describe('afterwards: participants only, its やること too', () => {
   it('a non-participant reads neither it nor its narrowed やること; an owner-only one stays the owner’s', async () => {
     const p = project()
@@ -183,7 +212,7 @@ describe('afterwards: participants only, its やること too', () => {
     expect(await reads('u-carol', p.id)).toBe(true)
     expect(await reads('u-carol', t.id)).toBe(true)
     const plan = ok(engine.makePrivatePlan(m('u-mgr'), p.id))
-    expect(plan).toEqual({ parent: '営業部', tasks: 1, people: ['u-alice'], blocked: false })
+    expect(plan).toEqual({ parent: '営業部', tasks: 1, people: ['u-alice'], blocked: false, version: versionOf(p.id) })
     const done = ok(move('u-mgr', p.id))
     expect(done.narrowed).toBe(1)
     expect(await reads('u-carol', p.id)).toBe(false)
@@ -259,6 +288,16 @@ describe('afterwards: participants only, its やること too', () => {
     expect(code(r)).toBe('LINKED_RECORDS_WIDER')
     expect(JSON.stringify(r)).not.toMatch(/関係する話|新製品/)
     expect(source.forCompany(CO).records.find(p.id)?.folder).toBe('営業部')
+  })
+
+  it('a record linked to a narrowed やること only (送るもの・返事のお願い via `task`) and wider stops it too', () => {
+    const p = project()
+    const t = task(p.id)
+    const mail = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '送る文面', fields: { assignee: 'u-alice' }, folder: '営業部' })).record
+    source.forCompany(CO).records.replaceLinks(mail.id, [{ sourceId: mail.id, name: 'related', position: 0, targetId: t.id, targetPath: null }])
+    expect(ok(engine.makePrivatePlan(m('u-mgr'), p.id)).blocked).toBe(true)
+    expect(code(move('u-mgr', p.id))).toBe('LINKED_RECORDS_WIDER')
+    expect(source.forCompany(CO).records.find(t.id)?.folder).toBe('営業部')
   })
 
   it('a participant who could not read the 案件 before is refused (nobody gains it with its history)', () => {

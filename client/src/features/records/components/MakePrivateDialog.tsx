@@ -38,7 +38,7 @@ export function MakePrivateDialog({ title, word, offer, onConfirm, onClose }: {
         <p className="text-[12px] text-gray-600 dark:text-zinc-300">{words.stays}</p>
         <p className="text-[12px] text-gray-600 dark:text-zinc-300">{words.once}</p>
         {words.blocked && <p role="note" className="rounded-md bg-amber-500/[0.08] px-2.5 py-2 text-[12px]">{words.blocked}</p>}
-        {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+        {error && <p role="alert" className="whitespace-pre-line text-[12px] text-red-600 dark:text-red-400">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} disabled={busy} className={SMALL_BUTTON}>やめておく</button>
           <button type="button" disabled={busy || offer.blocked} onClick={() => void run()} className={MAIN_BUTTON}>非公開にする</button>
