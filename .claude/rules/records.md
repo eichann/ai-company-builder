@@ -759,10 +759,22 @@ What a department makes as its 束ねるもの is decided **without a setting** 
   of that type are there already. Two business kinds in one department: the one with more
   signals, then the type name. There is **no "use both" setting** (owner: no more admin screens;
   a company needing both is the plugin's question then).
-- Every other department makes the core's ordinary kind, core type **`project`** (version 1,
+- Every other department makes the core's ordinary kind, core type **`project`** (version 2,
   implements `bundle`: `owner`, `purpose`, `due`; links `counterpart`, `files`; active → done /
   cancelled and back, by the owner, an admin or the department's manager; anyone may create one),
-  `CORE_BUNDLE_TYPE`.
+  `CORE_BUNDLE_TYPE`. Version 2 (owner FB #34, 2026-11-13) adds `who_fallback: [anyone]` to
+  `set_owner` (責任者を替える) only: while no 責任者 who reads it is named (one the AI made before
+  creates named the creator), any member who reads it may name one — never the AI, never 終える /
+  やめる / the other fields.
+- **A まとまり always gets a 責任者** (owner FB #34): a create (`POST /records/item`, the AI's
+  `records_create`) of a type implementing `bundle` with no `owner` (absent or null) sets `owner` to
+  the member creating it — the person, or the member whose AI it is (the record token's member). An
+  owner named keeps the usual person check (a member of this company). Who may create and where it
+  goes (private placement, readers, owner-only / members-only) are unchanged. The AI's instructions
+  say to name the member (`PLACEMENT_WORDS`, `client/electron/records/tools.ts`). Test:
+  `server/tests/unit/record-bundle-owner.test.ts` (the default for the AI and a person, a named one
+  kept, the private-folder rule unchanged, 責任者を替える on one without a 責任者 for readers only and
+  only that) — mutation-checked.
 - Names: a business kind keeps its type's label; the core kind is called by the company's
   `TaskSettings.bundleName` (`tasks.md`; default 「プロジェクト」, one per company — not per
   department). Screens never say 「まとまり」 (the code's word, `bundle`).

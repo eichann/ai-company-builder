@@ -88,9 +88,14 @@ beforeEach(() => {
   records.insertTypeVersion({ name: 'deal', version: 1, definition: canonicalTypeJson(deal.definition), source: 'plugin', commitSha: null, createdAt: TS })
 })
 
-/** A 案件 whose 責任者 is `owner` (none = a まとまり without one). Seen by the whole company. */
+/**
+ * A 案件 whose 責任者 is `owner` (none = a まとまり without one: a create now names the creator, so its
+ * 責任者 is taken off as in one made before that — owner FB #34). Seen by the whole company.
+ */
 function deal(owner?: string) {
-  return ok(engine.create(admin(), HUMAN, { type: 'deal', title: 'サンプル物産 導入案件', ...(owner ? { fields: { owner } } : {}) })).record
+  const r = ok(engine.create(admin(), HUMAN, { type: 'deal', title: 'サンプル物産 導入案件', ...(owner ? { fields: { owner } } : {}) })).record
+  if (!owner) conn.prepare("UPDATE record_state SET fields = json_remove(fields, '$.owner') WHERE record_id = ?").run(r.id)
+  return r
 }
 
 /** A meeting whose assignee (the first to press ［AI に読ませる］) is u-bob; `members` = for its attendees only. */
@@ -142,6 +147,16 @@ describe('who says 「そうです」', () => {
   it('with a まとまり that has no 責任者, any reader of the meeting confirms', async () => {
     const d = await aiDecision({ bundle: deal().id, meeting: meeting().id })
     expect(ok(await act(m('u-carol'), HUMAN, d.id, 'confirm')).record.fields.decided_by).toBe('u-carol')
+  })
+
+  // Owner FB #34 (owner decision 2026-11-13): a 案件 made without a 責任者 now gets its creator, so its
+  // decisions are the creator's to confirm (no longer any reader of the meeting).
+  it('a new 案件 made without a 責任者: its creator is the 責任者 and confirms; another reader of the meeting cannot', async () => {
+    const made = ok(engine.create(m('u-alice'), HUMAN, { type: 'deal', title: '新しい案件' })).record
+    expect(made.fields.owner).toBe('u-alice')
+    const d = await aiDecision({ bundle: made.id, meeting: meeting().id })
+    expect(await act(m('u-carol'), HUMAN, d.id, 'confirm')).toMatchObject({ ok: false, kind: 'forbidden' })
+    expect(ok(await act(m('u-alice'), HUMAN, d.id, 'confirm')).record.fields.decided_by).toBe('u-alice')
   })
 
   it('the 責任者’s delegate during an absence confirms for them', async () => {
