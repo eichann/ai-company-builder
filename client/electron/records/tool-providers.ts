@@ -33,6 +33,8 @@ export interface RecordToolTurn {
   conversationId?: string
   /** The やること the consultation is about now (read at each use; null without one). */
   topicTask?: () => string | null
+  /** The consultation's folder is the member's own working folder (a company without the shared folder). */
+  workingFolder?: boolean
 }
 
 export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordToolTurn): RecordToolProvider[] {
@@ -47,7 +49,7 @@ export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordTo
     const bound = !!turn.conversationId && (deps.runBound?.(turn.companyId, turn.conversationId) === true || (deps.jobReport?.(turn.conversationId) ?? null) !== null)
     const onlyUnder = area === null ? (bound ? null : undefined) : 'nowhere' in area ? null : `${area.place}/.personal/${area.folder}`
     providers.push((access, signal) => createDriveTools(access, {
-      picking: drivePicking, companyId: turn.companyId, companyRoot: turn.companyRoot, topicTask: turn.topicTask,
+      picking: drivePicking, companyId: turn.companyId, companyRoot: turn.companyRoot, topicTask: turn.topicTask, workingFolder: turn.workingFolder === true,
       local: { pathGuard: paths, notDownloaded: notDownloadedFolders, privateFolders: () => deps.privateFolders.readable(turn.companyId), onlyUnder },
     }, signal))
   }

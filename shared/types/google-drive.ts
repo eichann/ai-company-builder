@@ -5,10 +5,10 @@
  * that holds the member's one-time pick ticket (never to a record token, the AI
  * or a log).
  */
-import type { DrivePickMode, DrivePutAs } from '../core/google-drive'
+import type { DriveFolderSharing, DrivePickMode, DrivePickPurpose, DrivePickRefusedWhy, DrivePutAs } from '../core/google-drive'
 import type { SkillUse } from '../core/skill-uses'
 
-export type { DrivePickMode } from '../core/google-drive'
+export type { DriveFolderSharing, DrivePickMode, DrivePickPurpose, DrivePickRefusedWhy } from '../core/google-drive'
 
 /**
  * POST /api/companies/:id/me/google/drive/pick-tickets { mode, fileIds? } (session): a one-time pick
@@ -27,7 +27,8 @@ export interface DrivePickTicketStarted {
  */
 export type DrivePickTicketState =
   | { state: 'waiting'; opened: boolean; saving?: boolean }
-  | { state: 'picked'; picks: DrivePick[]; refused: number }
+  /** `refusedWhy`: why the refused ones were not kept, by reason (absent from an older server). */
+  | { state: 'picked'; picks: DrivePick[]; refused: number; refusedWhy?: DrivePickRefusedWhy }
   | { state: 'cancelled' }
   | { state: 'expired' }
   | { state: 'failed'; error: string }
@@ -42,6 +43,9 @@ export interface DrivePickerPageConfig {
   /** Where the Picker's script comes from: Google's, or the practice Google's origin on staging. */
   scriptOrigin: string
   mode: DrivePickMode
+  /** Files mode: `read` (for the AI: the readable types only) or `link` (to link to a record: every file type). */
+  purpose?: DrivePickPurpose
+  /** The types the Picker shows; empty = every type (a `link` pick). */
   mimeTypes: readonly string[]
   maxItems: number
   /** Files mode only: the files the Picker shows (a pasted Drive link), already checked as Drive ids. */
@@ -58,6 +62,11 @@ export interface DrivePick {
   mimeType: string
   pickedAt: string
   expiresAt: string
+  /**
+   * A folder picked through a pick ticket: who sees what is put into it (said right after the pick; the AI and a
+   * scheduled job cannot put into an `outside` / `unknown` one). Absent: a file, or an older server.
+   */
+  sharing?: DriveFolderSharing
 }
 
 /** POST …/me/google/drive/picks { mode, ids } → the picks kept. */
@@ -80,6 +89,13 @@ export interface DriveAiStatus {
    * receipts only (a scheduled job's run: only those in its folder). Absent from an older server.
    */
   puts?: DriveUpdatableFile[]
+  /**
+   * More files the member's puts made than `puts` lists (one entry per file, newest first): `GET /status?putsBefore=<putsNext>`
+   * reads the next page. Absent: `puts` is all of them (or an older server).
+   */
+  putsNext?: string
+  /** Why `available` is false when the company's Google is on but the admin has not registered the Picker. */
+  reason?: 'picker-not-configured'
 }
 
 /** A file one of the member's own puts made (the latest put of it): `drive_put` may update it as a new revision. */
@@ -149,6 +165,11 @@ export interface DrivePutAnswer {
    * (no record named, a replay, a check refused it, or an older server).
    */
   linkedTo?: { recordId: string }
+  /**
+   * The put is done in Drive but its file could not be linked to the named record (a record check refused it, or it
+   * failed): said plainly so the AI tells the member (they can link it from the card). `code`: the refusal's code.
+   */
+  notLinked?: { recordId: string; code: string }
 }
 
 /** POST /api/records-ai/google/drive/put body. */

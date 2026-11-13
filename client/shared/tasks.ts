@@ -354,9 +354,13 @@ export interface TaskDriveLinkOptions {
   fileIds?: string[]
 }
 
-/** What 「Google Drive のファイルをつなぐ」 did: the names linked (`error` when one after them was refused). */
+/**
+ * What 「Google Drive のファイルをつなぐ」 did: the names linked (`error` when one after them was refused). `ended`: Google's
+ * chooser ended with nothing chosen — `cancelled` (the browser's 「キャンセル」, the page closed, or the card's ［やめる］) or
+ * `timed-out` (nothing chosen in time). `notUsable`: picked files that could not be used, how many and why (one sentence).
+ */
 export type TaskDriveLinkResult =
-  | { success: true; recordId: string; linked: string[]; error?: string }
+  | { success: true; recordId: string; linked: string[]; error?: string; ended?: 'cancelled' | 'timed-out'; notUsable?: string }
   | { success: false; offline: boolean; error: string; code?: string | null }
 
 export type TaskWriteResult =

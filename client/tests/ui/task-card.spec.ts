@@ -107,7 +107,7 @@ test('a pasted Drive link whose chooser ends with nothing chosen explains why it
   await box.fill('https://docs.google.com/spreadsheets/d/1AbC-def_GhIjKlMnOpQrStUv/edit')
   await box.press('Enter')
   await expect(page.locator('#acted')).toHaveText('drive@3,drive@3 show=1AbC-def_GhIjKlMnOpQrStUv')
-  await expect(hint).toContainText('読める種類（Google ドキュメント・スプレッドシート・スライド・PDF・テキスト）')
+  await expect(hint).toContainText('Google Drive で見られるか（共有されているか）')
   // The next action takes it away.
   await links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' }).click()
   await expect(page.locator('#acted')).toHaveText('drive@3,drive@3 show=1AbC-def_GhIjKlMnOpQrStUv,drive@3')
@@ -910,4 +910,62 @@ test('新しい〇〇: 非公開（参加者だけ） makes its private folder i
   await expect(plain.getByRole('radio', { name: '非公開（参加者だけ）' })).toBeDisabled()
   await expect(plain).toContainText('非公開のプロジェクトは、部署の管理役か管理者に作ってもらってください')
   expectNoPageErrors(member)
+})
+
+// While Google's chooser is open in the member's browser the card says so, with ［やめる］ (owner FB 2026-11-14, #33):
+// never frozen silently; ［やめる］ stops it and nothing is linked. A time-out is said; picked files that were not usable
+// are said with what was linked; a pasted folder link says folders cannot be linked yet.
+test('the chooser open in the browser: said on the card with ［やめる］; a time-out and unusable picks are said; a folder link is told apart', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { kind: 'none', drive: 'wait' })
+  const links = page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' })
+  await links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' }).click()
+  const picking = links.locator('[data-drive-picking]')
+  await expect(picking).toContainText('ブラウザで Google Drive の画面を開いています')
+  // The rest of the card waits, ［やめる］ does not.
+  await expect(links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' })).toBeDisabled()
+  await picking.getByRole('button', { name: 'やめる' }).click()
+  await expect(page.locator('#acted')).toHaveText('drive@3,stopDrivePick')
+  await expect(picking).toHaveCount(0)
+  await expect(links.getByRole('alert')).toHaveCount(0)
+  await expect(links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' })).toBeEnabled()
+  // A folder's link: told apart from text that is no Drive link; nothing opens.
+  const box = links.getByRole('textbox', { name: 'Google Drive のリンクを貼りつけてつなぐ' })
+  await box.fill('https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQr')
+  await box.press('Enter')
+  await expect(links.getByRole('alert')).toHaveText('Google Drive のフォルダは、まだつなげません。フォルダの中のファイルを選んでつないでください。')
+  await expect(page.locator('#acted')).toHaveText('drive@3,stopDrivePick')
+  expectNoPageErrors(state)
+
+  const late = await openPreview(page, 'task-card', { kind: 'none', drive: 'timeout' })
+  const card = page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' })
+  await card.getByRole('button', { name: 'Google Drive のファイルをつなぐ' }).click()
+  await expect(card.getByRole('alert')).toHaveText('選ばれないまま時間が過ぎました。もう一度押すと選び直せます。')
+  expectNoPageErrors(late)
+
+  const partly = await openPreview(page, 'task-card', { kind: 'none', drive: 'notusable' })
+  await page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' }).getByRole('button', { name: 'Google Drive のファイルをつなぐ' }).click()
+  await expect(page.getByTestId('task-card')).toContainText('「B社 見積」をつなぎました。1件は使えませんでした。ゴミ箱に入っている 1件。')
+  expectNoPageErrors(partly)
+})
+
+// A linked Drive file whose content ACB could not read says so to its linker, with 「中身を確かめ直す」 (linked again,
+// showing just that file); a type the AI cannot read (linked only) says 「AI では中身を読めません」 (owner FB / decision 2026-11-14).
+// The card's note says the link is seen, opening it needs Drive's sharing.
+test('linked Drive files say what ACB could not read: 「中身を確かめ直す」 asks for just that file; a Word file is linked only', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { kind: 'none', drive: 'unchecked' })
+  const links = page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' })
+  await expect(links).toContainText('開けるのは Drive で共有されている人だけで、つないでも共有はされません')
+  await links.getByRole('button', { name: /^ほか \d+ 件$/ }).click()
+  const unchecked = links.getByRole('button', { name: /^読めなかった\.pdf/ })
+  await expect(unchecked).toContainText('中身を確かめられていません')
+  await expect(links.getByRole('button', { name: /^見積書\.docx/ })).toContainText('AI では中身を読めません')
+  await expect(links.getByRole('button', { name: /^A社 提案書（下書き）/ })).not.toContainText('中身を')
+  await page.getByRole('button', { name: '「読めなかった.pdf」の操作' }).click()
+  await page.getByRole('menuitem', { name: /中身を確かめ直す/ }).click()
+  await expect(page.locator('#acted')).toHaveText('drive@3 show=1UncheckedPdf0001')
+  // A file linked only offers nothing to check again.
+  await page.getByRole('button', { name: '「見積書.docx」の操作' }).click()
+  await expect(page.getByRole('menuitem', { name: /つながりを外す/ })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: /中身を確かめ直す/ })).toHaveCount(0)
+  expectNoPageErrors(state)
 })

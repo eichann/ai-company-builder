@@ -714,7 +714,20 @@ not visible to the member, or a type ACB cannot read), a quiet line under the bo
 (`DRIVE_LINK_EMPTY_HINT`) until the next action — never after a plain Picker's cancel;
 the button (list included) is off with a plain note while Drive is not set up for the company, and says
 before the first press that Google will ask (`useDriveLinking`, `driveLinkView`); while the Picker is open
-(busy) neither the list nor a pasted link starts another. A file the consultation's AI put into Drive is
+(busy) neither the list nor a pasted link starts another. **While the chooser is open** (owner FB 2026-11-14, #33) the
+box says 「ブラウザで Google Drive の画面を開いています。そこで選んでください（10分まで待ちます）。」 with ［やめる］
+(`DriveLinkAction` `picking` / `onStop`, `useDriveLinking().stop` → `tasks:cancelDrivePick`: main aborts the pick it started
+for the company, the ticket is closed, nothing is linked, nothing said); a time-out says 「選ばれないまま時間が過ぎました。もう一度押
+すと選び直せます。」 (`ended: 'timed-out'`); picked files that were not usable are said after 「…をつなぎました」 or alone
+(`notUsable`). The chooser for linking offers every file type (`purpose: 'link'`, google-drive.md); a pasted link whose files
+are all the member's own is linked without it; a pasted **folder** link says 「Google Drive のフォルダは、まだつなげません…」
+(`DRIVE_FOLDER_NOT_YET`). The notes say the link is seen but opening needs Drive's sharing — 「…みんなにリンクが見えます（名前
+は、つないだ人だけ）。開けるのは Drive で共有されている人だけで、つないでも共有はされません」 (`TYPED_FILES_NOTE`,
+`COMPANY_AND_DRIVE_FILES_NOTE`, `driveFilesNote`). A linked Drive file's row tells its linker 「AI では中身を読めません」 (a type
+linked only) or 「中身を確かめられていません」 with 「…」→「中身を確かめ直す」 (linked again with `{ fileIds: [id] }`: their own file
+without the chooser, else the chooser showing it; `driveFileRows` `onRecheck`, `linkedDriveFileOf().content`; records.md).
+Tests: `tests/ui/task-card.spec.ts` (`&drive=wait|timeout|notusable|unchecked`), `client/tests/google-drive-ux.test.ts`.
+A file the consultation's AI put into Drive is
 linked by the server already (`google-drive.md`). It lists
 `card.localFiles` — files of the member's own PC, each with the small 「あなただけ」 (`data-only-you`;
 opens on this PC with `file.open`; not here (`exists`) → 「このパソコンに見つかりません（動かしたか、消した

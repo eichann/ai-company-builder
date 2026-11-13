@@ -340,7 +340,7 @@ test('a プロジェクト links Google Drive files: own list, chooser, a pasted
   const links = page.getByTestId('record-card').getByRole('complementary', { name: 'つながっているもの' })
   const opened = page.locator('#opened')
   await expect(links).toContainText('研修の進め方（作業中）')
-  await expect(links).toContainText('Google Drive のファイルは、このプロジェクトを見られる人みんなに見えます（名前は、つないだ人だけ）')
+  await expect(links).toContainText('Google Drive のファイルは、このプロジェクトを見られる人みんなにリンクが見えます（名前は、つないだ人だけ）。開けるのは Drive で共有されている人だけで、つないでも共有はされません')
   await links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' }).click()
   const list = links.getByRole('group', { name: 'つなぐ Google Drive のファイル' })
   await list.getByRole('checkbox', { name: /去年の研修資料\.pdf/ }).check()

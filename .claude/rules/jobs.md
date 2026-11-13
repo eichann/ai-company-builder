@@ -396,7 +396,8 @@ reports.
   「できたものを置く先：Google Drive のフォルダ（責任者が受け取るときに選ぶ1か所だけ…）」. The app's 「受け取る」 reads the job
   as the server answers it and, when it names a place, opens the connector's chooser first (`choosePlace`, composed in
   `main.ts`: Google Picker in folder mode, in the member's browser, `google-drive.md`), then sends the acceptance with it — cancelled, nothing is
-  accepted. The app's 「定期の仕事」 shows the place line (`placeLine`) and, once it is not usable, 「置き先を選び直す」
+  accepted. A folder seen outside the company (or whose sharing could not be read) is refused there in words (「…定期の仕事は
+  ここに置けません…選び直してください」, the pick's `sharing`, owner FB 2026-11-14) — the run's put would refuse it anyway. The app's 「定期の仕事」 shows the place line (`placeLine`) and, once it is not usable, 「置き先を選び直す」
   (`toAccept.why: 'place'`).
 - **The run** (decision 2: the scope stays `drive.file`): the claim's turn carries `deliverTo` (with `ref`), the app's
   parser takes it only of the grant's own connector and kind. The route ceiling is widened narrowly: only a grant with a

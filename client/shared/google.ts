@@ -102,7 +102,17 @@ export interface GoogleSectionView {
    * turned it off: no new consent), on = ［やめる］. null: not shown.
    */
   archive: 'allow' | 'resume' | 'on' | null
+  /**
+   * 「Drive で選んだものを読む・置く」 (the member's own switch inside their grant, member-oauth.md), only while the company
+   * offers Drive and the member is connected: allow = ［許可する］ (Google's page), resume = ［オンにする］ (they turned it off:
+   * no new consent), on = ［オフにする］. null: not shown.
+   */
+  drive: 'allow' | 'resume' | 'on' | null
 }
+
+/** What the Drive card says (plain words). */
+export const GOOGLE_DRIVE_TEXT = 'あなたが Google Drive で選んだファイル・フォルダだけを、AI が読んだり、そこに置いたりします（ほかのファイルは見ません）。やることにファイルをつなぐときにも使います。'
+export const GOOGLE_DRIVE_OFF_TEXT = 'オフにすると、AI は Drive のファイルを読んだり置いたりしなくなり、カードの「Google Drive のファイルをつなぐ」も使えなくなります。Google での許可そのものは残ります。'
 
 /** What the archive card says (plain words: no labels, scopes or permissions' names). */
 export const GOOGLE_ARCHIVE_TEXT = 'ACB で来た連絡を「済んだ」「取り込まない」にしたときや、そこから作ったやることがすべて終わったときに、Gmail でもそのメールをアーカイブします（受信トレイから外すだけで、消したり送ったりはしません）。知らせの［元に戻す］で受信トレイに戻せます。'
@@ -115,6 +125,8 @@ const offered = (my: MyGoogle, f: GoogleFeature) => !my.companyFeatures || my.co
 
 /** The task card's ［Google Drive のファイルをつなぐ］ when the company has not set Drive up (no technical words). */
 export const DRIVE_LINK_SETUP_TEXT = 'Google Drive のファイルをつなぐには、会社の管理者による準備が必要です。管理者に頼んでください。'
+/** The member turned 「Drive で選んだものを読む・置く」 off: where to turn it back on. */
+export const DRIVE_TURNED_OFF_TEXT = '「Drive で選んだものを読む・置く」をオフにしています。「設定」→「Google」でオンにすると使えます。'
 /** Said before the first press, while the member has not allowed Drive yet (owner FB #27: the browser page came as a surprise). */
 export const DRIVE_FIRST_USE_TEXT = '初めてのときは、ブラウザに Google の画面が出ます。あなたが選んだファイルだけを使う許可なので、「許可」を押してください。'
 
@@ -131,6 +143,8 @@ export function driveLinkView(status: GoogleStatusResult | null): { usable: bool
   if (!my.available && (my.reason === 'operator-stopped' || my.reason === 'vault-off')) return { usable: false, note: GOOGLE_UNAVAILABLE_TEXT[my.reason] }
   if (!my.available || !offered(my, 'drive')) return { usable: false, note: DRIVE_LINK_SETUP_TEXT }
   if (!my.connected || !my.features.includes('drive')) return { usable: true, note: DRIVE_FIRST_USE_TEXT }
+  // The member turned it off themselves: the switch is in 設定 → Google (owner FB 2026-11-14).
+  if ((my.featuresOff ?? []).includes('drive')) return { usable: false, note: DRIVE_TURNED_OFF_TEXT }
   return { usable: true, note: null }
 }
 
@@ -150,6 +164,9 @@ export function googleSectionView(my: MyGoogle): GoogleSectionView {
     archive: !my.available || !my.connected || !(my.offeredByName ?? []).includes('inbox_archive') ? null
       : !my.features.includes('inbox_archive') ? 'allow'
         : (my.featuresOff ?? []).includes('inbox_archive') ? 'resume' : 'on',
+    drive: !my.available || !my.connected || !offered(my, 'drive') ? null
+      : !my.features.includes('drive') ? 'allow'
+        : (my.featuresOff ?? []).includes('drive') ? 'resume' : 'on',
   }
 }
 

@@ -4,13 +4,13 @@
 import { useState } from 'react'
 import { SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader } from '../../../shared/ui/primitives'
-import { GOOGLE_ARCHIVE_STOP_TEXT, GOOGLE_ARCHIVE_TEXT, GOOGLE_FEATURE_LABEL, GOOGLE_PRACTICE_TEXT, GOOGLE_RENEW_MINUTES_TEXT, googleSectionView } from '../../../../shared/google'
+import { GOOGLE_ARCHIVE_STOP_TEXT, GOOGLE_ARCHIVE_TEXT, GOOGLE_DRIVE_OFF_TEXT, GOOGLE_DRIVE_TEXT, GOOGLE_FEATURE_LABEL, GOOGLE_PRACTICE_TEXT, GOOGLE_RENEW_MINUTES_TEXT, googleSectionView } from '../../../../shared/google'
 import { useGoogle } from '../hooks/useGoogle'
 import { googlePermissionKey } from '../../../shared/lib/googlePermission'
 import { GoogleRelayCard } from './GoogleRelayCard'
 
 export function GoogleSection({ companyId }: { companyId: string }) {
-  const { loadRef, data, error, message, busy, waiting, connect, disconnect, setArchive } = useGoogle(companyId)
+  const { loadRef, data, error, message, busy, waiting, connect, disconnect, setArchive, setDrive } = useGoogle(companyId)
   const [confirming, setConfirming] = useState(false)
   const view = data ? googleSectionView(data) : null
 
@@ -18,7 +18,7 @@ export function GoogleSection({ companyId }: { companyId: string }) {
     <div ref={loadRef} className="space-y-5 px-8 pb-8 pt-7">
       <SectionHeader
         title="Google"
-        description="あなたの Google アカウントで「Google で許可」をすると、ACB が予定と議事録を読めるようになります。メールは、あなたが画面で送るときだけ送ります。「受信を読む」は、許可したときだけ届いたメールをその場で読みます（中身は ACB に残しません）。いつでも「許可をやめる」で止められます。"
+        description="あなたの Google アカウントで「Google で許可」をすると、ACB が予定と議事録を読めるようになります。メールは、あなたが画面で送るときだけ送ります。「受信を読む」は、許可したときだけ届いたメールをその場で読みます（中身は ACB に残しません）。Google Drive は、あなたが選んだファイルとフォルダだけを使います。機能ごとにオン・オフでき、いつでも「許可をやめる」で止められます。"
       />
       {!data && !error ? (
         <div className="flex items-center gap-2 py-10 text-[13px] text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
@@ -87,6 +87,25 @@ export function GoogleSection({ companyId }: { companyId: string }) {
                 )}
                 {view.archive === 'on' && (
                   <Button size="sm" variant="ghost" disabled={busy} onClick={() => void setArchive(false)}>やめる</Button>
+                )}
+              </div>
+            </Card>
+          )}
+          {view.drive && (
+            <Card className="space-y-2 p-5" data-testid="google-drive">
+              <p className="text-[13px] font-medium">{GOOGLE_FEATURE_LABEL.drive}</p>
+              <p className="text-[12px] text-zinc-500">{GOOGLE_DRIVE_TEXT}</p>
+              {view.drive !== 'allow' && <p className="text-[12px] text-zinc-500">{GOOGLE_DRIVE_OFF_TEXT}</p>}
+              <p className="text-[12px]">{view.drive === 'on' ? 'いまは：使っています' : view.drive === 'resume' ? 'いまは：オフにしています' : 'いまは：まだ許可していません（初めて使うときにも聞きます）'}</p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {view.drive === 'allow' && (
+                  <Button size="sm" disabled={busy || waiting} onClick={() => void connect(['drive'])}>許可する</Button>
+                )}
+                {view.drive === 'resume' && (
+                  <Button size="sm" disabled={busy} onClick={() => void setDrive(true)}>オンにする</Button>
+                )}
+                {view.drive === 'on' && (
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => void setDrive(false)}>オフにする</Button>
                 )}
               </div>
             </Card>

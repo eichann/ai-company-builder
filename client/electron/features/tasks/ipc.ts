@@ -90,9 +90,13 @@ export interface TasksDeps {
   /**
    * Google Picker for 「Google Drive のファイルをつなぐ」 (the Google connection's flow, composed in
    * main.ts): the files the member picked, kept by the server as their picks. Absent → not offered.
-   * `fileIds`: Drive ids (already checked) the Picker shows first.
+   * `fileIds`: Drive ids (already checked) the Picker shows first. `signal`: the card's ［やめる］ (the ticket is closed).
+   * `notUsable`: picked files the server did not keep, in one sentence (how many, why). `ended`: nothing chosen —
+   * cancelled or timed out (anything else is a failure with its message).
    */
-  pickDriveFiles?: (companyId: string, fileIds: string[]) => Promise<{ ok: true; files: Array<{ id: string; name: string }> } | { ok: false; cancelled: boolean; message: string }>
+  pickDriveFiles?: (companyId: string, fileIds: string[], signal?: AbortSignal) => Promise<
+    | { ok: true; files: Array<{ id: string; name: string }>; notUsable?: string }
+    | { ok: false; ended: 'cancelled' | 'timed-out' | null; message: string }>
   /**
    * The member's own Drive files to offer before the Picker (the Google connection's, composed in
    * main.ts): their live picks and the files their AI put, names included (their own). Absent → none.
@@ -132,6 +136,8 @@ export function createTasksApi(deps: TasksDeps) {
   const bundleCache = new Map<string, { id: string; title: string } | null>()
   /** The signed-in member's id per session (cookies), from /api/me. */
   let me: { cookies: string; id: string } | null = null
+  /** Google's chooser open for 「Google Drive のファイルをつなぐ」, per company: what the card's ［やめる］ stops. */
+  const picking = new Map<string, AbortController>()
 
   async function request(url: string, method: 'GET' | 'POST', body?: unknown): Promise<Answer> {
     const cookies = deps.cookies()
@@ -348,11 +354,33 @@ export function createTasksApi(deps: TasksDeps) {
       // server checks each again. `{ fileIds }` (or the bare array an unreleased build sent): a pasted link's
       // files the Picker shows first.
       const o: { fileIds?: unknown; chosen?: unknown } = Array.isArray(options) ? { fileIds: options } : options && typeof options === 'object' ? options : {}
-      const listed = o.chosen === undefined ? null : driveChoicesOf(o.chosen)
+      let listed = o.chosen === undefined ? null : driveChoicesOf(o.chosen)
       if (o.chosen !== undefined && !listed) return BAD_INPUT
+      const pasted = drivePreselectIds(o.fileIds)
+      // A pasted link to a file that is already the member's own (a live pick or what their AI put): linked straight
+      // away, no Picker (owner FB 2026-11-14). The server checks each again (`linkable`).
+      if (!listed && pasted.length > 0 && deps.driveChoices) {
+        let own: TaskDriveChoice[] = []
+        try { own = driveChoicesOf(await deps.driveChoices(companyId)) ?? [] } catch { /* unknown: the Picker */ }
+        const known = pasted.map(id => own.find(f => f.id === id))
+        if (known.every(f => f !== undefined)) listed = known as TaskDriveChoice[]
+      }
       if (!listed && !deps.pickDriveFiles) return { success: false, offline: false, error: 'この画面からは Google Drive を使えません。' }
-      const picked = listed ? { ok: true as const, files: listed } : await deps.pickDriveFiles!(companyId, drivePreselectIds(o.fileIds))
-      if (!picked.ok) return picked.cancelled ? { success: true, recordId, linked: [] } : { success: false, offline: false, error: picked.message }
+      let picked: Awaited<ReturnType<NonNullable<TasksDeps['pickDriveFiles']>>>
+      if (listed) picked = { ok: true, files: listed }
+      else {
+        // One chooser per company at a time; the card's ［やめる］ aborts it (`cancelDrivePick`).
+        picking.get(companyId)?.abort()
+        const stop = new AbortController()
+        picking.set(companyId, stop)
+        try {
+          picked = await deps.pickDriveFiles!(companyId, pasted, stop.signal)
+        } finally {
+          if (picking.get(companyId) === stop) picking.delete(companyId)
+        }
+      }
+      if (!picked.ok) return picked.ended ? { success: true, recordId, linked: [], ended: picked.ended } : { success: false, offline: false, error: picked.message }
+      const notUsable = picked.notUsable ? { notUsable: picked.notUsable } : {}
       let at = expectedVersion
       const linked: string[] = []
       for (const f of picked.files) {
@@ -360,13 +388,22 @@ export function createTasksApi(deps: TasksDeps) {
         const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/file-links`, { target: { kind: 'drive', fileId: f.id }, expectedVersion: at })
         if (a?.status !== 200) {
           const f2 = failure('link drive file', a)
-          return linked.length > 0 ? { success: true, recordId, linked, error: f2.error } : f2
+          return linked.length > 0 ? { success: true, recordId, linked, error: f2.error, ...notUsable } : f2
         }
         const data = a.json?.data as { entry?: { version?: unknown } | null } | undefined
         if (typeof data?.entry?.version === 'number') at = data.entry.version
         linked.push(f.name)
       }
-      return { success: true, recordId, linked }
+      return { success: true, recordId, linked, ...notUsable }
+    },
+
+    /** The card's ［やめる］ while Google's chooser is open: stops waiting and closes the pick ticket (nothing is linked). */
+    cancelDrivePick(companyId: string): { stopped: boolean } {
+      const stop = COMPANY.test(companyId) ? picking.get(companyId) : undefined
+      if (!stop) return { stopped: false }
+      stop.abort()
+      picking.delete(companyId)
+      return { stopped: true }
     },
 
     /** The member's own Drive files offered before the Picker (empty when none or unknown: the Picker then opens). */
@@ -693,6 +730,7 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   ipc.handle('tasks:linkDriveFiles', (_event, companyId, recordId, expectedVersion, options) =>
     api.linkDriveFiles(typeof companyId === 'string' ? companyId : '', recordId, expectedVersion, options))
   ipc.handle('tasks:driveChoices', (_event, companyId) => api.driveChoices(typeof companyId === 'string' ? companyId : ''))
+  ipc.handle('tasks:cancelDrivePick', (_event, companyId) => api.cancelDrivePick(typeof companyId === 'string' ? companyId : ''))
   ipc.handle('tasks:share', (_event, companyId, recordId, folder, expectedVersion) =>
     api.share(typeof companyId === 'string' ? companyId : '', recordId, folder, expectedVersion))
   ipc.handle('tasks:shareToBundle', (_event, companyId, recordId, expectedVersion) =>

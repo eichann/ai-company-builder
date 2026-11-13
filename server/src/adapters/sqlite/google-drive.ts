@@ -21,10 +21,10 @@ type PutRow = {
 }
 
 type TicketRow = {
-  id: string; user_id: string; ticket_hash: string; mode: string; max_items: number; file_ids: string; state: string
+  id: string; user_id: string; ticket_hash: string; mode: string; purpose: string; max_items: number; file_ids: string; state: string
   config_handed_at: string | null; result: string | null; created_at: string; expires_at: string; finished_at: string | null
 }
-const TICKET_COLUMNS = 'id, user_id, ticket_hash, mode, max_items, file_ids, state, config_handed_at, result, created_at, expires_at, finished_at'
+const TICKET_COLUMNS = 'id, user_id, ticket_hash, mode, purpose, max_items, file_ids, state, config_handed_at, result, created_at, expires_at, finished_at'
 const toTicket = (r: TicketRow): DrivePickTicketRow => {
   let fileIds: string[] = []
   try {
@@ -32,7 +32,7 @@ const toTicket = (r: TicketRow): DrivePickTicketRow => {
     if (Array.isArray(parsed)) fileIds = parsed.filter((v): v is string => typeof v === 'string')
   } catch { /* stored by this module only */ }
   return {
-    id: r.id, userId: r.user_id, ticketHash: r.ticket_hash, mode: r.mode as DrivePickTicketRow['mode'], maxItems: r.max_items, fileIds,
+    id: r.id, userId: r.user_id, ticketHash: r.ticket_hash, mode: r.mode as DrivePickTicketRow['mode'], purpose: r.purpose === 'link' ? 'link' : 'read', maxItems: r.max_items, fileIds,
     state: r.state as DrivePickTicketRow['state'], configHandedAt: r.config_handed_at, result: r.result, createdAt: r.created_at, expiresAt: r.expires_at,
     finishedAt: r.finished_at,
   }
@@ -118,13 +118,14 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
         ORDER BY created_at DESC, id LIMIT 1`).get(companyId, userId, fileId) as PutRow | undefined
       return r ? toPut(r) : null
     },
-    donePuts(userId, limit) {
-      return (conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND state = 'done' AND file_id IS NOT NULL
-        ORDER BY created_at DESC, id LIMIT ?`).all(companyId, userId, limit) as PutRow[]).map(toPut)
-    },
-    donePutsInFolder(userId, folderId, limit) {
-      return (conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND folder_id = ? AND state = 'done' AND file_id IS NOT NULL
-        ORDER BY created_at DESC, id LIMIT ?`).all(companyId, userId, folderId, limit) as PutRow[]).map(toPut)
+    donePutFiles(userId, opts) {
+      // The latest done receipt of each Drive file (ties broken by id, as putOfFile does), then the page.
+      return (conn.prepare(`SELECT ${PUT_COLUMNS} FROM (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY file_id ORDER BY created_at DESC, id) AS nth FROM google_drive_puts
+          WHERE company_id = ? AND user_id = ? AND state = 'done' AND file_id IS NOT NULL
+        ) WHERE nth = 1 AND (? IS NULL OR folder_id = ?) AND (? IS NULL OR created_at < ?)
+        ORDER BY created_at DESC, id LIMIT ?`)
+        .all(companyId, userId, opts.folderId ?? null, opts.folderId ?? null, opts.before ?? null, opts.before ?? null, opts.limit) as PutRow[]).map(toPut)
     },
     runPuts(userId, runId, limit) {
       return (conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND run_id = ? AND state = 'done' AND file_id IS NOT NULL
@@ -144,9 +145,9 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
     },
 
     createPickTicket(t) {
-      conn.prepare(`INSERT INTO google_drive_pick_tickets (id, company_id, user_id, ticket_hash, mode, max_items, file_ids, state, config_handed_at, result, created_at, expires_at, finished_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(t.id, companyId, t.userId, t.ticketHash, t.mode, t.maxItems, JSON.stringify(t.fileIds), t.state, t.configHandedAt, t.result, t.createdAt, t.expiresAt, t.finishedAt)
+      conn.prepare(`INSERT INTO google_drive_pick_tickets (id, company_id, user_id, ticket_hash, mode, purpose, max_items, file_ids, state, config_handed_at, result, created_at, expires_at, finished_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(t.id, companyId, t.userId, t.ticketHash, t.mode, t.purpose, t.maxItems, JSON.stringify(t.fileIds), t.state, t.configHandedAt, t.result, t.createdAt, t.expiresAt, t.finishedAt)
     },
     pickTicketByHash(ticketHash) {
       const r = conn.prepare(`SELECT ${TICKET_COLUMNS} FROM google_drive_pick_tickets WHERE company_id = ? AND ticket_hash = ?`).get(companyId, ticketHash) as TicketRow | undefined

@@ -44,7 +44,11 @@ Feature `drive` = `drive.file` (`GOOGLE_FEATURE_SCOPES`); offered by the company
 Picker is registered, then asked with the other features in 「仕事の道具をつなぐ」's one consent, or
 **when first used**: the first
 `drive_pick_*` opens 「Google で許可」 in the system browser with `features: ['drive']` (the
-already-granted features are added by the server) and waits ≤ 2 minutes for the grant.
+already-granted features are added by the server) and waits ≤ 5 minutes for the grant (owner FB 2026-11-14: signing in
+first took longer than 2; a wait that ends says 「まだ確かめられていません…押してから、もう一度」, never that the member did not
+press it). The member's own switch 「Drive で選んだものを読む・置く」 is in 設定 →「Google」 (`google:setDrive`, `member-oauth.md`);
+while it is off the card's button is off with 「…「設定」→「Google」でオンにすると使えます。」 (`driveLinkView`) and the server's
+`GOOGLE_FEATURE_OFF` names that switch.
 `GOOGLE_NEVER_SCOPES` lists what ACB never asks or stores (`drive`, `drive.readonly`, …; test).
 
 ## Picker and its token (the one Google token handed out to a browser)
@@ -125,7 +129,25 @@ never matches).
   closed meanwhile keeps nothing and the page gets 410. The body names no member. The page posts the
   result with **`keepalive`** (a tab closed right after 「選択」 still delivers it), tries a failed post once
   more (a retry told `PICK_TICKET_GONE` just says 「アプリに戻ってください。」: the first try may have arrived), then posts a cancel; it then says 「選びました。アプリに戻ってください。（このタブは閉じて
-  かまいません）」 / 「選ぶのをやめました。…」.
+  かまいません）」 / 「選ぶのをやめました。…」 — or the server's own sentence, `message` in `/result`'s answer (owner FB
+  2026-11-14): 「選びました。2件は使えませんでした。ゴミ箱に入っている 1件・…。」 (`drivePickRefusedText`), a folder seen outside
+  (below), or 「選んだものは使えませんでした。…選び直してください。」 when nothing was kept.
+- **What a pick says** (owner FB 2026-11-14, 「選んだのにつながらない」): `checkPicks` counts each refused id by reason
+  (`DrivePickRefusal`: `gone` trashed, `no-access` Google would not open it, `type` not a kind the pick keeps, `not-folder`,
+  `cannot-add`); the ticket's result keeps `refusedWhy` and the app hears it (`picked.refusedWhy`) — the AI's tool says
+  `notUsableWhy`, the card adds the sentence to 「…をつなぎました」 (or says it alone). A folder picked through a ticket is read
+  for its sharing right after the pick (`permissions.list` + `driveFolderReachesOutside`, the put's own check): `sharing:
+  inside | outside | unknown` on the pick, and for `outside` / `unknown` the page, the AI (`note`) and a job's 「置き先を選んで
+  受け取る」 (refused there, `main.ts` `choosePlace`) say the AI cannot put there (`driveFolderSharingText`). The put still decides.
+- **Why a files pick is made** (`purpose`, owner decision 2026-11-14 「つなぐだけ」): `POST …/pick-tickets { mode: 'files', purpose:
+  'link' }` (the card's 「Google Drive のファイルをつなぐ」, `main.ts` `pickDriveFiles`) offers **every file type** (config
+  `mimeTypes: []`, the page sets no MIME filter) and keeps any file but a folder or a shortcut (`drivePickableFor`) — Word,
+  Excel, an image, a zip; absent / `read` (the AI's `drive_pick_files`) keeps only what `drive_read` reads, as before. Folder
+  tickets are always `read`; anything else is 400. Stored in `google_drive_pick_tickets.purpose` (additive,
+  `migrateDrivePickTicketPurpose`, default `read`). A link-only file is kept as an ordinary file pick: `drive_read` refuses it
+  (`DRIVE_TYPE_UNREADABLE`), `drive_picked` marks it `readable: false`, `linkable` gives it no sha256, so it is never a
+  decision material or an attachment (`DRIVE_VERSION_NOT_FIXED`). The Picker's title says what it is for: 「置き場所のフォルダ…」 /
+  「つなぐファイル…」 / 「AI に読ませるファイル…」.
 - **Accepted residual risk** (owner's safe-side choice): the ticket is not bound to the browser, and the
   first address `…#t=<ticket>` may stay in that browser's history (and its sync) until the page takes it
   off — the ticket is usable only once (the config), only for 10 minutes, and a result is taken only
@@ -181,8 +203,14 @@ The AI reads and writes **only** the member's own live picks — and the files t
 
 ## The AI's routes (`/api/records-ai/google/drive`, record token) and tools
 
-- `GET /status` → `{ available (Google on + Picker registered), granted, picks, puts }` — the app adds
-  the Drive tools only when available. `POST /read { fileId }`: the member's own live pick of a **file**, or a file
+- `GET /status` → `{ available (Google on + Picker registered), granted, picks, puts, putsNext?, reason? }` — the app adds
+  the Drive tools only when available; `reason: 'picker-not-configured'` (Google on, the admin has not registered the
+  Picker): the app gives no tools and one sentence in the instructions (`DRIVE_NOT_SET_UP_INSTRUCTIONS`; `tools.ts` keeps the
+  instructions of a provider with no tools on purpose). **`puts` is one entry per Drive file** (its latest done put,
+  `donePutFiles`, newest first, 50 at a time; `putsNext` → `?putsBefore=<it>` the next page) — owner FB 2026-11-14: the old
+  list was the member's last 30 receipts, so re-putting one file pushed every other file out and the app's pre-check then
+  refused to overwrite them. `?fileId=<id>`: just that file's latest put (`putOfFile`, a job's run only in its folder),
+  whatever its age — what `drive_put` asks before an overwrite (an older server ignores the query and answers the list). `POST /read { fileId }`: the member's own live pick of a **file**, or a file
   **this member's own put made** (owner decision 2026-11-13; `putOfFile`: this member, this company, a `done` receipt —
   ACB created it, so their `drive.file` token opens it without a pick; another member's put, a put in another company, a
   receipt still `sending` / `unknown` are not theirs), else 403 `DRIVE_NOT_PICKED` with nothing asked of Google.
@@ -228,7 +256,9 @@ The AI reads and writes **only** the member's own live picks — and the files t
   `recordEngine.linkDrivePut` runs every record check of `fileLink` (records on, readable, a type the AI
   may act on, not linked already — in every company, owner decision 2026-11-13) at the version current now, as
   the AI (the one Drive link the AI may make). Answered as `linkedTo: { recordId }`; any refusal or
-  error is logged with its code only and **never fails the put**. The tool says the file was linked.
+  error is logged with its code only and **never fails the put** — and is answered as `notLinked: { recordId, code }` (owner
+  FB 2026-11-14: never only a log line): the tool says 「Google Drive には置けましたが、…やることにはつなげませんでした」 and
+  that the member can link it from the card. The tool says the file was linked.
   The server cannot tell which record the consultation is about (topics live on the PC): it trusts the
   app's `recordId` only as far as any act-token write — the member's AI could link that member's own new
   put file to any record it may act on, nothing more.
@@ -239,8 +269,24 @@ The AI reads and writes **only** the member's own live picks — and the files t
 - S10b: inside an execution run `POST /put` goes through `keyedWrite` (Idempotency-Key);
   `outcomeOf` reads `drivePut` (unknown → the run waits for reconcile; ref kind `drive-put`,
   replay read `GET /puts/:id`).
+- **What the tools say** (owner FB 2026-11-14, each with its test in `client/tests/google-drive-ux.test.ts`):
+  - `drive_pick_files { fileIds? }` (≤ 10 Drive ids, `drivePreselectIds`): the Picker shows just those (`pick(…, { fileIds
+    })`); ids that are already the member's live readable picks or own puts open nothing (`alreadyUsable: true`).
+  - After a pick ended `cancelled` or `timed-out` (`DrivePickResult.reason`; the server's `expired` is `timed-out`), the
+    answer's `instruction` and `DRIVE_INSTRUCTIONS` say: do not call `drive_pick_*` again, ask the member.
+  - `drive_put` answers `putId`; when `state` is not `done`, `drive_put_check { putId }` (act turns only; read only:
+    `GET /puts/:putId`, which looks the put up again, never re-sends) tells what became of it. Not in a job run's tools
+    (S10b reconciles a run's put). A refused Google document (`DRIVE_EXTERNAL_RESOURCE`) answers `DRIVE_DOC_REFUSED_OUTSIDE`
+    with `alternative: as: file` — the file as it is — and never strips anything on its own.
+  - `drive_read` adds `readScope` when it did not read everything (`readScopeNote`: cut at `DRIVE_READ_TEXT_MAX`, a
+    spreadsheet's first sheet only, a document's / slides' text only); its description says so.
+  - `drive_picked { olderThan? }` pages `putFiles` (`putFilesNext`) and marks link-only picks `readable: false`.
+  - A company without the shared folder (`RecordToolTurn.workingFolder`, from `server-config.ts`' `workingFolders`): every
+    description and refusal says 作業フォルダ instead of 会社フォルダ.
+  - While a pick runs, the chat's tool line says 「ブラウザで Google Drive の…を選んでください（開いた画面で選びます）」
+    (`acb-tool-displays.ts`).
 - Tools (`createDriveTools`, on `acb_records`): `drive_pick_folder`, `drive_pick_files` (open
-  the Picker for the person and wait), `drive_picked` (live picks), `drive_read`, `drive_put`
+  the Picker for the person and wait), `drive_picked` (live picks), `drive_read`, `drive_put`, `drive_put_check`
   (act only). `drive_put` reads the local file in main: inside the consultation's company folder
   by name and real location (`PathGuard`), no `.git` segment, not inside a private folder (a
   nested repository on the way, or a readable private folder path — one sentence that never
@@ -462,17 +508,33 @@ Picker). The card's button is off with
 instead), says before the first press that Google will ask, for the chosen files only, and ignores a
 pasted / dropped link — and does not open its own list — while the chooser is already open (no second window).
 The AI reads a linked file only with `drive_read` (its member's own picks and puts).
+**Owner FB 2026-11-14** (`tasks-ui.md` "Linking files"): while Google's chooser is open the card says 「ブラウザで Google Drive の
+画面を開いています…」 with ［やめる］ (`tasks:cancelDrivePick` aborts the pick's signal: the ticket is closed, nothing linked);
+the result tells `ended: cancelled | timed-out` apart (a time-out is said, a cancel is not) and `notUsable` (picked files
+that were not kept, in one sentence). A pasted link whose files are all the member's own (live picks, own puts:
+`tasks:driveChoices`) is linked without the chooser (`linkable` checks each again). Linking any file type and
+「確かめ直す」 are above ("What a pick says", "Why a files pick is made") and in `records.md`.
 When a linked Drive file is used as a decision material or an attachment, its fileId, revisionId and
 sha256 enter the record's ledger and are visible to every reader of the record; the file's name is not
 included (it stays the linker's).
 
 ## Not yet
 
-A person-side put (session route + card), a record ledger entry linking a put to a まとまり (a put in a consultation about a やること is linked to that やること, above), and
-`features_off` toggles (`member-oauth.md`). Spreadsheets and Slides output; another connector's file storage (OneDrive,
+A person-side put (session route + card), a record ledger entry linking a put to a まとまり (a put in a consultation about a
+やること is linked to that やること, above), a Drive **folder** linked to a record (a pasted folder link says 「…フォルダは、まだつなげ
+ません…」, `hasDriveFolderLink`). Spreadsheets and Slides output; another connector's file storage (OneDrive,
 Box: its own `deliveryPlaces` kind, `connector-roles.md`).
 
 ## Tests
+
+Usability fixes (owner FB 2026-11-14), mutation-checked: `server/tests/integration/google-drive-ux.test.ts` (one entry per
+file, paging, `?fileId=` and another member's file; refused reasons and the page's sentence; `purpose: link` keeps a Word
+file, `read` does not, a folder ticket is always `read`; a folder seen outside said; `notLinked`; the document refusal's way
+out; `picker-not-configured`), `server/tests/unit/record-typed-links.test.ts` 「…checked again by its linker」 (records.md),
+`client/tests/google-drive-ux.test.ts` (the overwrite's per-file check, ［やめる］ aborting the pick, the pasted own file
+linked directly, `drive_pick_files { fileIds }`, the instructions after a cancel / time-out, `drive_put_check`, `readScope`,
+作業フォルダ, the instruction-only provider, the 5-minute consent wait, the Drive switch, a linked file's `content`),
+`client/tests/ui/task-card.spec.ts` (「the chooser open in the browser…」, 「linked Drive files say what ACB could not read…」).
 
 `server/tests/integration/google-drive.test.ts` (fake Google, practice redirect; 「a picked file linked to a record」, including 「every record check comes first」; 「a put in a consultation about a task」: the receipt's facts, the AI as the actor, the name to the linker only, a replay never links again, a failed record check keeps the put done, the own-files list and another member's refusal; 「Google documents and overwriting」: HTML / Markdown as a document and every other form refused, an update keeps the id and link with a new version and is never sent twice, the key reused with another target, not the member's own put / another folder / another kind / another member — refused before Google is asked, a file moved away or shared outside by itself refused with nothing sent, a lost answer found, the task's link following the newest revision; the document baseline: kept after real Google's post-import move (file +4 s, its one revision +3 s, as observed after settling) and an untouched document updated again and again; not kept when a time is outside the 60 s window after the upload or before it (the file's or the newest revision's; a time not in RFC 3339 UTC form), the newest revision keeps moving (`still-settling`), a second new revision (even the member's own), an import merged into the revision before or the previous baseline's revision gone, the newest revision's or the file's time still moving (the read limit and the time budget), the quiet period (a move after it is seen; half of it is not enough) and the gap between reads (real-time moves), the merged colleague-then-member edit documented as the accepted residual, or any revision is not the member's (also under the member's own newer one, on a later page, without its author) or the file's last modifier is not, or a later page is unreadable; each dropped step and each refused part logged with nothing of the file and a malformed time as `unusual`, a later time on the same revision refused — mutation-checked (each of (a)–(e), the quiet period and half of it, the gap, the budget, the read limit, the file's time in the agreement, the observed time kept); not reachable, kept as defence: an
 update's `fileId` taken from the receipt rather than Google's answer, and the link following only a changed revision) and

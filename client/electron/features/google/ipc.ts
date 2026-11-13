@@ -4,7 +4,9 @@
 //   google:relay and google:setRelay (「スプレッドシートを中継で使う」: the member's view and own records,
 //   and 「やめる」 / turning it back on without a new consent; google-connector.md "The relay"),
 //   google:setArchive (「済んだメールを Gmail でもアーカイブする」: the member's own switch, sends only
-//   `{ feature: 'inbox_archive', on }`; google-connector.md "Archiving in Gmail")
+//   `{ feature: 'inbox_archive', on }`; google-connector.md "Archiving in Gmail"),
+//   google:setDrive (「Drive で選んだものを読む・置く」: the member's own switch, sends only `{ feature: 'drive', on }`;
+//   member-oauth.md "Feature toggles inside a grant")
 // The server holds everything (the permission, sealed); the app holds no token
 // at all. google:connect asks the server for the sign-in page's URL and opens
 // it in the system browser itself — the URL (with its one-time state) never
@@ -86,8 +88,13 @@ export function createGoogleApi(deps: GoogleDeps) {
   }
 
   /** 「済んだメールを Gmail でもアーカイブする」 off / back on: the member's own switch only (no consent). */
-  async function setArchive(companyId: string, on: boolean): Promise<GoogleStatusResult> {
-    const r = await send(companyId, 'PUT', '/features', { feature: 'inbox_archive', on })
+  const setArchive = (companyId: string, on: boolean) => setFeature(companyId, 'inbox_archive', on)
+  /** 「Drive で選んだものを読む・置く」 off / back on: the member's own switch only (no consent). */
+  const setDrive = (companyId: string, on: boolean) => setFeature(companyId, 'drive', on)
+
+  /** One of the member's own feature switches inside their grant, then their view. */
+  async function setFeature(companyId: string, feature: 'inbox_archive' | 'drive', on: boolean): Promise<GoogleStatusResult> {
+    const r = await send(companyId, 'PUT', '/features', { feature, on })
     if (!r) return offline
     const data = (r.json as { data?: unknown } | null)?.data
     if (r.res.ok && isMyGoogle(data)) return { success: true, data }
@@ -123,6 +130,7 @@ export function createGoogleApi(deps: GoogleDeps) {
     relay: relayView,
     setRelay,
     setArchive,
+    setDrive,
   }
 }
 
@@ -160,6 +168,10 @@ export function registerGoogleIpc(ipc: IpcRegistrar, deps: GoogleDeps): ReturnTy
   ipc.handle('google:setArchive', async (_, companyId: string, on: boolean) => {
     if (typeof companyId !== 'string' || !companyId || typeof on !== 'boolean') return invalid
     return api.setArchive(companyId, on)
+  })
+  ipc.handle('google:setDrive', async (_, companyId: string, on: boolean) => {
+    if (typeof companyId !== 'string' || !companyId || typeof on !== 'boolean') return invalid
+    return api.setDrive(companyId, on)
   })
   return api
 }

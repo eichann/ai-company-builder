@@ -53,8 +53,10 @@ API calls (Google: `google-connector.md`, `services/google-connector.ts` registe
   member, feature, off)`: only the descriptor's features, only their own grant; history
   `grant-features`; Google's route `PUT /me/google/features`), and the provider's client refuses
   a call whose feature is off like a scope not granted (Google: `feature-off`,
-  `google-connector.md`). The app's switch needs an IPC channel (after stage 2's screens merge);
-  until then the server and the admin view carry it.
+  `google-connector.md`). The app's switches: 設定 →「Google」's 「済んだメールを Gmail でもアーカイブする」
+  (`google:setArchive`) and 「Drive で選んだものを読む・置く」 (`google:setDrive`, owner FB 2026-11-14: the server's
+  `GOOGLE_FEATURE_OFF` told members to turn it on there before the switch existed) — each sends only its own `{ feature, on
+  }`; ［オフにする］ / ［オンにする］ never ask Google again (`googleSectionView.drive`, test `client/tests/google-drive-ux.test.ts`).
 
 ## Adding a provider
 
