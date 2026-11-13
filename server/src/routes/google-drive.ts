@@ -13,7 +13,7 @@
  *
  * The member's AI (record token), mounted at /api/records-ai/google/drive:
  *   GET  /status            whether the Drive tools work now, the member's live picks
- *   POST /read              { fileId } a picked file, as outside text (or a PDF's bytes)        (read)
+ *   POST /read              { fileId } a picked file or an own put, as outside text (or a PDF's bytes); never a run's token (read)
  *   POST /put               a PDF / HTML into a picked folder, or HTML / Markdown as a Google document, or a new
  *                           revision of a file an earlier put made (`updateFileId`); Idempotency-Key in a run (S10b) (act);
  *                           with `recordId`, the new file is then linked to that record (never failing the put).
@@ -111,6 +111,10 @@ googleDriveAiRoute.get('/status', aiReads, async (c) => {
 
 googleDriveAiRoute.post('/read', aiReads, serviceBody, async (c) => {
   const h = c.var.holder
+  // Reading is a consultation's (google-drive.md "The AI's routes"): no token bound to a run reads — a scheduled job's,
+  // a business plugin's step, a built-in step's (also from an app too old to be route-scoped). The apps' allowlists
+  // already hide drive_read from unattended runs; this is the server's own refusal.
+  if (h.run) return c.json({ error: NOT_IN_STEP.error, code: NOT_IN_STEP.code }, 403)
   return answer(c, await googleDrive.read(h.member, c.var.body))
 })
 

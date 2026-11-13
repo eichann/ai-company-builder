@@ -185,13 +185,18 @@ The AI reads and writes **only** the member's own live picks — and the files t
   the Drive tools only when available. `POST /read { fileId }`: the member's own live pick of a **file**, or a file
   **this member's own put made** (owner decision 2026-11-13; `putOfFile`: this member, this company, a `done` receipt —
   ACB created it, so their `drive.file` token opens it without a pick; another member's put, a put in another company, a
-  receipt still `sending` / `unknown` are not theirs), else 403 `DRIVE_NOT_PICKED` with nothing asked of Google. Read
+  receipt still `sending` / `unknown` are not theirs), else 403 `DRIVE_NOT_PICKED` with nothing asked of Google.
+  **A consultation's only**: a token bound to any run (a scheduled job's, a business plugin's step, a built-in step's —
+  also from an app too old to be route-scoped) gets 403 `NOT_IN_STEP` in the route, whatever the run's own route scope
+  says (defence in depth: the apps' allowlists already hide `drive_read` from unattended runs). Read
   with the member's own token; a file trashed or gone answers as a picked one does (`DRIVE_TYPE_UNREADABLE` /
   `DRIVE_NO_ACCESS`). Read only: nothing written to Drive, nothing of the content kept or logged. An own put is outside
   text like any picked file (people may have edited it in Drive since). Docs / Slides → text/plain export, Sheets →
   text/csv, text files as is, marked as outside text — Markdown as `text/markdown` (ACB's own puts) or `text/x-markdown`
   (what Drive has reported for an uploaded `.md`); HTML (`text/html`) and JSON (`application/json`) as text too (owner
-  decision 2026-11-13: an AI reads back the HTML viewer it put) — characters only, never rendered or run, so they are
+  decision 2026-11-13: an AI reads back the HTML viewer it put) — characters only, never rendered or run; their
+  `instructionLike` flags are also computed on a copy with HTML entities / JSON `\u` escapes decoded (`decodedForFlags`;
+  the text returned stays as read) — so they are
   pickable as well (`DRIVE_PICKABLE_MIMES` = the keys of `DRIVE_READ_AS`; `linkable`'s sha256 now covers them too) —
   (`DRIVE_TEXT_HEADER` / `FOOTER`, `instructionLike` from `outsideTextFlags`;
   the text's `【】` → `〔〕`, server and app, `shared/core/outside-text.ts`), ≤ 200 000

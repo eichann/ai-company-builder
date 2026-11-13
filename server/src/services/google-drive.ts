@@ -137,6 +137,23 @@ function failedError(raw: string | null): string {
 const NO_CONSENT = 'Google Drive を使う許可がまだありません。アプリが Google の画面を開くので、メンバーに「許可」を押してもらってください（Drive は、メンバーが選んだファイルとフォルダだけを使います）。'
 
 /** A Google call that did not give a usable answer → the member-facing refusal. */
+const NAMED_ENTITIES: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", nbsp: ' ' }
+const codePoint = (n: number) => (Number.isInteger(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '')
+/**
+ * HTML and JSON can spell words as escapes (`&#x3010;`, `\u0049gnore`): a copy with them decoded, for the
+ * instruction-like flags only — the text handed to the AI stays as read. Null for any other type.
+ */
+function decodedForFlags(text: string, mimeType: string): string | null {
+  if (mimeType === 'text/html') {
+    return text
+      .replace(/&#x([0-9a-f]{1,6});?/gi, (_, h: string) => codePoint(parseInt(h, 16)))
+      .replace(/&#(\d{1,7});?/g, (_, d: string) => codePoint(Number(d)))
+      .replace(/&(lt|gt|amp|quot|apos|nbsp);/gi, (_, n: string) => NAMED_ENTITIES[n.toLowerCase()] ?? '')
+  }
+  if (mimeType === 'application/json') return text.replace(/\\u([0-9a-fA-F]{4})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)))
+  return null
+}
+
 function googleRefusal(r: Extract<GoogleResult, { ok: false }>, noAccess: string): Outcome<never> {
   if (r.kind === 'not-sent') {
     if (['no-grant', 'grant-revoked', 'grant-stopped', 'scope-not-granted', 'token-refused'].includes(r.reason)) {
@@ -838,7 +855,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       return ok({
         // 【】 → 〔〕 (outside-text.ts): the text cannot close the block, in an older app too.
         ...base, text: neutralizeOutsideText(text), truncated, pdfBase64: null,
-        instructionLike: outsideTextFlags(text).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
+        instructionLike: [...new Set([...outsideTextFlags(text), ...outsideTextFlags(decodedForFlags(text, mimeType) ?? '')])]
+          .map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
       })
     },
 
