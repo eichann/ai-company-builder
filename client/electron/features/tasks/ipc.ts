@@ -397,7 +397,10 @@ export function createTasksApi(deps: TasksDeps) {
       const path = typeof folder === 'string' ? fileLinkPath(folder.normalize('NFC')) : null
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !path || !Number.isInteger(expectedVersion)) return BAD_INPUT
       const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/make-private`, { folder: path, expectedVersion })
-      return a?.status === 200 ? { success: true, recordId } : failure('make bundle private', a)
+      if (a?.status === 200) return { success: true, recordId }
+      // A code only with the server's own refusal (4xx): the app takes back what it did only then.
+      const f = failure('make bundle private', a)
+      return a && a.status >= 400 && a.status < 500 ? f : { ...f, code: null }
     },
 
     /** The server's plan for 「非公開にする」, asked again right before anything is made; a malformed answer is a failure. */

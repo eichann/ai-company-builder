@@ -46,7 +46,16 @@ export async function createPrivateBundleFolder(companyId: string, parent: strin
  * 「非公開にする」 on an existing 案件・プロジェクト (records.md "Making a 案件・プロジェクト private"): its own private
  * folder (as 「新しい〇〇にする」 makes one), the people it names added as participants, then the move.
  */
-export type BundlePrivateWrites = ElectronPort<'makeBundlePrivatePlan' | 'createPrivateFolder' | 'getPrivateFolderMembers' | 'setPrivateFolderMembers' | 'makeBundlePrivate'>
+export type BundlePrivateWrites = ElectronPort<'makeBundlePrivatePlan' | 'createPrivateFolder' | 'getPrivateFolderMembers' | 'setPrivateFolderMembers' | 'makeBundlePrivate' | 'getRecordCard'>
+
+/**
+ * The move's refusals (4xx with the server's code): nothing was moved. Anything else — no answer, a 5xx, a
+ * code not listed (NOT_PUBLIC: someone, maybe this very press, moved it) — is read again before acting.
+ */
+const MAKE_PRIVATE_REFUSED: ReadonlySet<string> = new Set([
+  'VERSION_CONFLICT', 'VERSION_REQUIRED', 'BAD_REQUEST', 'FOLDER_NOT_PLACEABLE', 'LINKED_NOT_MOVABLE', 'LINKED_RECORDS_WIDER',
+  'PARTICIPANTS_WIDER', 'NAMED_PERSON_CANNOT_READ', 'MAKE_PRIVATE_NOT_ALLOWED', 'MAKE_PRIVATE_NOT_FOR_TYPE', 'NOT_A_BUNDLE', 'NOT_ALLOWED',
+])
 
 const OFFLINE = 'サーバーに接続できませんでした。'
 
@@ -85,10 +94,16 @@ export async function makeExistingBundlePrivate(
   }
   const r = await ports.makeBundlePrivate(companyId, bundle.id, made.path, offer.version).catch(() => null)
   if (r?.success) return null
-  // Refused: nobody but who the folder was made for keeps it.
-  const restored = !added || (await ports.setPrivateFolderMembers(companyId, made.scopeId, before).catch(() => null))?.success === true
-  return left(r?.error || OFFLINE, restored)
+  // Refused for sure (the server's own answer): nobody but who the folder was made for keeps it.
+  const takeBack = async () => !added || (await ports.setPrivateFolderMembers(companyId, made.scopeId, before).catch(() => null))?.success === true
+  if (r && MAKE_PRIVATE_REFUSED.has(r.code ?? '')) return left(r.error, await takeBack())
+  // No answer, or one that does not say: the move may have been made. Read where the 案件 is now.
+  const now = await ports.getRecordCard(companyId, bundle.id).catch(() => null)
+  if (now?.success && now.card.privateFolder?.path === made.path) return null
+  if (now?.success && !now.card.privateFolder) return left(r?.error || OFFLINE, await takeBack())
+  return `うまくいったかどうか分かりませんでした（サーバーの返事が届きませんでした）。何も変えていません。この${word}の画面を開き直して、見られる人を確かめてください。`
 }
+
 
 /** One task's card, and the AI's proposals (案) of a meeting for 「議事録を確認する」. */
 export type TaskCardReads = ElectronPort<'getTaskCard' | 'getTaskProposals'>

@@ -83,6 +83,7 @@ function ports(over: Partial<Record<keyof BundlePrivateWrites, unknown>> = {}, p
     },
     setPrivateFolderMembers: async (_c: string, scopeId: string, input: unknown) => { calls.push(['set', scopeId, input]); return { success: true, members: [] } },
     makeBundlePrivate: async (_c: string, id: string, folder: string, version: number) => { calls.push(['move', id, folder, version]); return { success: true, recordId: id } },
+    getRecordCard: async () => { calls.push(['card']); return { success: false, offline: true, error: 'x' } },
     ...over,
   }
   return { calls, p: p as unknown as BundlePrivateWrites }
@@ -116,7 +117,7 @@ test('nothing is made when the plan is refused, blocked, or the 案件 changed m
 })
 
 test('a refused move after the folder was made: the people added are taken off again, and the person is told the empty folder is left', async () => {
-  const h = ports({ makeBundlePrivate: async () => ({ success: false, offline: false, error: 'ほかの人が先に変えました' }) })
+  const h = ports({ makeBundlePrivate: async () => ({ success: false, offline: false, code: 'VERSION_CONFLICT', error: 'ほかの人が先に変えました' }) })
   const r = await makeExistingBundlePrivate('co1', BUNDLE, 'プロジェクト', h.p)
   assert.deepEqual(h.calls.at(-1), ['set', 'scope-1', BEFORE])
   assert.match(r ?? '', /非公開にできませんでした。ほかの人が先に変えました/)
@@ -125,12 +126,12 @@ test('a refused move after the folder was made: the people added are taken off a
 })
 
 test('nobody else named: the participants are not touched; taking them off failing is said', async () => {
-  const quiet = ports({ makeBundlePrivate: async () => ({ success: false, offline: false, error: 'x' }) }, { success: true, offer: { ...PLAN, people: [] } })
+  const quiet = ports({ makeBundlePrivate: async () => ({ success: false, offline: false, code: 'VERSION_CONFLICT', error: 'x' }) }, { success: true, offer: { ...PLAN, people: [] } })
   await makeExistingBundlePrivate('co1', BUNDLE, 'プロジェクト', quiet.p)
   assert.equal(quiet.calls.some(c => c[0] === 'set'), false)
   let sets = 0
   const stuck = ports({
-    makeBundlePrivate: async () => ({ success: false, offline: false, error: 'x' }),
+    makeBundlePrivate: async () => ({ success: false, offline: false, code: 'FOLDER_NOT_PLACEABLE', error: 'x' }),
     setPrivateFolderMembers: async () => ({ success: ++sets === 1, members: [], offline: false, error: 'y' }),
   })
   assert.match(await makeExistingBundlePrivate('co1', BUNDLE, 'プロジェクト', stuck.p) ?? '', /外せなかった/)
@@ -141,4 +142,50 @@ test('a participant change refused: the 案件 is not moved', async () => {
   const r = await makeExistingBundlePrivate('co1', BUNDLE, 'プロジェクト', h.p)
   assert.match(r ?? '', /できません/)
   assert.equal(h.calls.some(c => c[0] === 'move'), false)
+})
+
+// The move's answer lost (no answer, a 5xx, a throw): the server may have made it. Read the 案件 again.
+const LOST = [
+  async () => ({ success: false, offline: true, code: null, error: 'つながりません' }),
+  async () => ({ success: false, offline: false, code: null, error: '一時的なエラー' }),
+  async () => { throw new Error('gone') },
+]
+const cardAt = (privateFolder?: { scopeId: string; path: string }) => async () => ({ success: true, card: { record: {}, fields: [], history: [], links: [], ...(privateFolder ? { privateFolder } : {}) } })
+
+test('a lost answer after the move was made: nothing taken back, done', async () => {
+  for (const lost of LOST) {
+    const h = ports({ makeBundlePrivate: lost, getRecordCard: cardAt({ scopeId: 'scope-1', path: '営業部/新製品-2' }) })
+    assert.equal(await makeExistingBundlePrivate('co1', BUNDLE, 'プロジェクト', h.p), null)
+    assert.equal(h.calls.filter(c => c[0] === 'set').length, 1, 'only the adding')
+  }
+})
+
+test('a lost answer and the 案件 still public: the people added are taken off, the empty folder said', async () => {
+  const h = ports({ makeBundlePrivate: LOST[0], getRecordCard: cardAt() })
+  const r = await makeExistingBundlePrivate('co1', BUNDLE, 'プロジェクト', h.p)
+  assert.deepEqual(h.calls.at(-1), ['set', 'scope-1', BEFORE])
+  assert.match(r ?? '', /中身がないまま残っています/)
+})
+
+test('still unknown after reading again: nothing changed, the person is told to reopen it (no deletion advice)', async () => {
+  const h = ports({ makeBundlePrivate: LOST[1] })
+  const r = await makeExistingBundlePrivate('co1', BUNDLE, 'プロジェクト', h.p)
+  assert.equal(h.calls.filter(c => c[0] === 'set').length, 1, 'only the adding')
+  assert.match(r ?? '', /分かりませんでした.*開き直して/)
+  assert.doesNotMatch(r ?? '', /消して/)
+})
+
+test('main passes a refusal code only with the server\'s own 4xx refusal (a 5xx carries none), and sends only a company path', async () => {
+  const { createTasksApi } = await import('../electron/features/tasks/ipc')
+  let status = 409
+  let calls = 0
+  const api = createTasksApi({ baseUrl: () => 'https://acb.test', cookies: () => ['s=1'], log: { warn: () => {} },
+    fetch: (async () => { calls++; return new Response(JSON.stringify({ code: 'VERSION_CONFLICT', error: 'x' }), { status }) }) as unknown as typeof fetch })
+  const refused = await api.makeBundlePrivate('co1', 'project-abc123', '営業部/新製品', 3)
+  assert.equal(!refused.success && refused.code, 'VERSION_CONFLICT')
+  status = 502
+  const unknown = await api.makeBundlePrivate('co1', 'project-abc123', '営業部/新製品', 3)
+  assert.equal(!unknown.success && unknown.code, null)
+  assert.equal((await api.makeBundlePrivate('co1', 'project-abc123', '../x', 3)).success, false)
+  assert.equal(calls, 2)
 })
