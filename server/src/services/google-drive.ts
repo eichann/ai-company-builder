@@ -505,12 +505,17 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       if (f.trashed === true) { refuseOne('gone'); continue }
       if (kind === 'folder' && mimeType !== DRIVE_FOLDER_MIME) { refuseOne('not-folder'); continue }
       if (kind === 'folder' && !canAdd) { refuseOne('cannot-add'); continue }
-      if (kind === 'file' && !drivePickableFor(purpose, mimeType)) { refuseOne('type'); continue }
+      if (kind === 'file' && !drivePickableFor(purpose, mimeType)) {
+        // A folder or a shortcut is not "a type the AI cannot read": its own words (review of #690).
+        refuseOne(mimeType === DRIVE_FOLDER_MIME ? 'folder' : mimeType === 'application/vnd.google-apps.shortcut' ? 'shortcut' : 'type')
+        continue
+      }
       rows.push({ userId: member.userId, fileId: id, kind, name, mimeType, pickedAt: now, expiresAt })
       if (kind === 'folder' && sharing) {
         // Said right after the pick (the put asks again and refuses the AI): nobody outside the company, or not known.
         const domain = handle(member.companyId).connectors.client()?.domain
-        const perms = domain ? await folderPermissions(member.companyId, member.userId, id) : null
+        // A failure here (even a thrown one) never fails the pick: the sharing is then not known (the put asks again).
+        const perms = domain ? await folderPermissions(member.companyId, member.userId, id).catch(() => null) : null
         shared.set(id, !domain || perms === null || !Array.isArray(perms) ? 'unknown' : driveFolderReachesOutside(perms, domain) ? 'outside' : 'inside')
       }
     }

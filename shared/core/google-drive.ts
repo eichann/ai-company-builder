@@ -246,13 +246,15 @@ export function drivePickableFor(purpose: DrivePickPurpose, mimeType: string): b
 }
 
 /** Why a picked id was not kept (said to the person in the browser and in the app; `drivePickRefusedText`). */
-export type DrivePickRefusal = 'gone' | 'no-access' | 'type' | 'not-folder' | 'cannot-add'
+export type DrivePickRefusal = 'gone' | 'no-access' | 'type' | 'folder' | 'shortcut' | 'not-folder' | 'cannot-add'
 export type DrivePickRefusedWhy = Partial<Record<DrivePickRefusal, number>>
 
 const REFUSAL_WORDS: Record<DrivePickRefusal, string> = {
   gone: 'ゴミ箱に入っている',
   'no-access': 'ACB から開けない（消されたか、見られなくなった）',
   type: 'AI では中身を読めない種類（Word・Excel・画像など）',
+  folder: 'フォルダ（フォルダはまだつなげません）',
+  shortcut: 'ショートカット（元のファイルを選んでください）',
   'not-folder': 'フォルダではない',
   'cannot-add': 'ファイルを追加する権限がない',
 }

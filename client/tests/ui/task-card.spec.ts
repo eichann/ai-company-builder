@@ -963,6 +963,8 @@ test('linked Drive files say what ACB could not read: 「中身を確かめ直�
   await page.getByRole('button', { name: '「読めなかった.pdf」の操作' }).click()
   await page.getByRole('menuitem', { name: /中身を確かめ直す/ }).click()
   await expect(page.locator('#acted')).toHaveText('drive@3 show=1UncheckedPdf0001')
+  // Refused: said where an unlink's refusal is (never dropped).
+  await expect(links.getByRole('alert')).toHaveText('Google Drive で選んだファイルだけをつなげます。もう一度選んでください。')
   // A file linked only offers nothing to check again.
   await page.getByRole('button', { name: '「見積書.docx」の操作' }).click()
   await expect(page.getByRole('menuitem', { name: /つながりを外す/ })).toBeVisible()

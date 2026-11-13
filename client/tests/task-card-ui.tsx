@@ -205,6 +205,8 @@ installElectronAPI({
       return { success: true, recordId, linked: [], ended: 'cancelled' as const }
     }
     if (params.get('drive') === 'timeout') return { success: true, recordId, linked: [], ended: 'timed-out' as const }
+    // `&drive=unchecked`: checking 読めなかった.pdf again is refused (its pick ended): said like an unlink's refusal.
+    if (params.get('drive') === 'unchecked' && fileIds?.includes('1UncheckedPdf0001')) return { success: false, offline: false, error: 'Google Drive で選んだファイルだけをつなげます。もう一度選んでください。' }
     if (params.get('drive') === 'notusable') return { success: true, recordId, linked: ['B社 見積'], notUsable: '1件は使えませんでした。ゴミ箱に入っている 1件。' }
     return { success: true, recordId, linked: chosen ? chosen.map(f => f.name) : ['B社 見積'] }
   },

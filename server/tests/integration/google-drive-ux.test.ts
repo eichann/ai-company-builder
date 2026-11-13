@@ -48,6 +48,7 @@ const PICKER_KEY = 'fake-picker-key-NOT-REAL-0123456789abcd'
 const APP_ID = '123456789012'
 const DOCX = 'fake-docx-estimate-0001'
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+const SHORTCUT = 'fake-shortcut-proposals-0001'
 const ts = () => new Date().toISOString()
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -112,6 +113,9 @@ beforeAll(async () => {
   seed.driveFiles = [...(seed.driveFiles ?? []), {
     id: DOCX, name: '見積書.docx', mimeType: DOCX_MIME, owner: GOOGLE_SEED.member, readers: [GOOGLE_SEED.member], content: 'PK fake docx',
     permissions: [{ type: 'user', role: 'owner', emailAddress: GOOGLE_SEED.member }],
+  }, {
+    id: SHORTCUT, name: '提案書へのショートカット', mimeType: 'application/vnd.google-apps.shortcut', owner: GOOGLE_SEED.member, readers: [GOOGLE_SEED.member], content: '',
+    permissions: [{ type: 'user', role: 'owner', emailAddress: GOOGLE_SEED.member }],
   }]
   google = createFakeGoogle({ seed })
   google.addClient({ clientId: CLIENT_ID, clientSecret: SECRET, redirectUris: [REDIRECT] })
@@ -152,7 +156,7 @@ beforeAll(async () => {
   expect((await person('m-owner', 'PUT', '/google/picker', { apiKey: PICKER_KEY, appId: APP_ID })).status).toBe(200)
   await allow('m-sato', ['drive'])
   await allow('m-tanaka', ['drive'])
-  google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.proposalsFolder, GOOGLE_SEED.sharedOutsideFolder, GOOGLE_SEED.pastProposalDoc, GOOGLE_SEED.handNotesPdf, DOCX])
+  google.pick(CLIENT_ID, GOOGLE_SEED.member, [GOOGLE_SEED.proposalsFolder, GOOGLE_SEED.sharedOutsideFolder, GOOGLE_SEED.pastProposalDoc, GOOGLE_SEED.handNotesPdf, DOCX, SHORTCUT])
   expect((await person('m-sato', 'POST', '/me/google/drive/picks', { mode: 'folder', ids: [GOOGLE_SEED.proposalsFolder] })).status).toBe(200)
 })
 
@@ -269,6 +273,34 @@ describe('D / H / link only: what a pick says, and what it keeps', () => {
     expect(r.cfg.mimeTypes).toEqual(expect.arrayContaining(['application/pdf']))
     expect(r.result.body.data).toMatchObject({ kept: 0, refused: 1 })
     expect(r.state.refusedWhy).toEqual({ 'not-folder': 1 })
+  })
+
+  it('a folder or a shortcut picked for linking has its own reason, never "a type the AI cannot read"', async () => {
+    const r = await pickThroughTicket('m-sato', { mode: 'files', purpose: 'link' }, [GOOGLE_SEED.proposalsFolder, SHORTCUT])
+    expect(r.result.body.data).toMatchObject({ kept: 0, refused: 2 })
+    expect(r.state.refusedWhy).toEqual({ folder: 1, shortcut: 1 })
+    expect(r.result.body.data.message).toContain('フォルダはまだつなげません')
+    expect(r.result.body.data.message).not.toContain('AI では中身を読めない')
+  })
+
+  it('reading a folder\'s sharing that throws never fails the pick: kept, its sharing not known', async () => {
+    const { services } = await import('../../src/composition')
+    const real = services.googleClient.request.bind(services.googleClient)
+    const spy = vi.spyOn(services.googleClient, 'request').mockImplementation(async (c, u, req) => {
+      if (req.path.endsWith('/permissions')) throw new Error('boom')
+      return real(c, u, req)
+    })
+    try {
+      const r = await pickThroughTicket('m-sato', { mode: 'folder' }, [GOOGLE_SEED.proposalsFolder])
+      expect(r.state.picks).toEqual([expect.objectContaining({ id: GOOGLE_SEED.proposalsFolder, sharing: 'unknown' })])
+      expect(r.result.body.data.message).toContain('誰が見られるか確かめられなかった')
+    } finally { spy.mockRestore() }
+  })
+
+  it('the page warns when the AI narrowed the chooser to files it named (reading only; never for the card\'s own link)', async () => {
+    const pageText = (await call({ method: 'GET', path: '/api/google-picker' })).text
+    expect(pageText).toContain('AI が、このファイルを選ぶよう求めています。中身に覚えがなければ選ばないでください。')
+    expect(pageText).toContain("var aiAsked = !folder && cfg.purpose !== 'link' && only.length > 0")
   })
 
   it('a folder seen outside the company is said right after the pick (the AI cannot put there); an internal one is not', async () => {

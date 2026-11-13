@@ -229,6 +229,7 @@ const PICKER_SCRIPT = `(function () {
     try { post('/result', { ticket: ticket, action: 'cancel' }, true) } catch (e) { /* the page is going */ }
   })
   var BACK = '（このタブは閉じてかまいません）'
+  var AI_ASKED = 'AI が、このファイルを選ぶよう求めています。中身に覚えがなければ選ばないでください。'
   post('/config', { ticket: ticket }).then(function (a) {
     var cfg = a.ok && a.j && a.j.data
     if (!cfg) { finished = true; say(problem(a, 'Google Drive のファイル選びを始められませんでした。アプリに戻ってください。')); return }
@@ -267,10 +268,13 @@ const PICKER_SCRIPT = `(function () {
           var withMe = place('共有アイテム')
           if (typeof withMe.setOwnedByMe === 'function') { withMe = withMe.setOwnedByMe(false); views.push(withMe) }
         }
+        // The AI narrowed the chooser to files it named (drive_pick_files' fileIds): the person decides, warned plainly
+        // (an id may come from text the AI read — review of #690).
+        var aiAsked = !folder && cfg.purpose !== 'link' && only.length > 0
         var b = new P.PickerBuilder()
         views.forEach(function (v) { b = b.addView(v) })
         b = b.setOAuthToken(cfg.accessToken).setDeveloperKey(cfg.apiKey).setAppId(cfg.appId)
-          .setOrigin(window.location.origin).setLocale('ja').setTitle(folder ? '置き場所のフォルダを選んでください' : cfg.purpose === 'link' ? 'つなぐファイルを選んでください' : 'AI に読ませるファイルを選んでください')
+          .setOrigin(window.location.origin).setLocale('ja').setTitle(folder ? '置き場所のフォルダを選んでください' : cfg.purpose === 'link' ? 'つなぐファイルを選んでください' : aiAsked ? AI_ASKED : 'AI に読ませるファイルを選んでください')
           .setCallback(function (data) {
             if (data.action === P.Action.PICKED) {
               var ids = (data.docs || []).map(function (d) { return d && d.id }).filter(function (id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{10,200}$/.test(id) }).slice(0, cfg.maxItems)
@@ -284,7 +288,7 @@ const PICKER_SCRIPT = `(function () {
         if (typeof cfg.account === 'string' && typeof b.setAuthUser === 'function') b = b.setAuthUser(cfg.account)
         b.build().setVisible(true)
         cfg.accessToken = ''
-        say(typeof cfg.account === 'string' ? 'Google アカウント「' + cfg.account + '」で選んでください（ブラウザで別のアカウントになっているときは、このアカウントに切り替えてください）。' : '')
+        say((aiAsked ? AI_ASKED + ' ' : '') + (typeof cfg.account === 'string' ? 'Google アカウント「' + cfg.account + '」で選んでください（ブラウザで別のアカウントになっているときは、このアカウントに切り替えてください）。' : ''))
       }, onerror: function () { finish({ ticket: ticket, action: 'cancel' }, 'Google の画面を読み込めませんでした。アプリに戻ってください。' + BACK) } })
     }
     document.head.appendChild(s)
