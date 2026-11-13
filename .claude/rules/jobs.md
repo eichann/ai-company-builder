@@ -421,8 +421,9 @@ reports.
   run's S10b operation `drive-put` — once per file, the receipt's facts) is linked to the occurrence's やること. A place
   that lapsed while the run worked does not stop its finish (the work is done; what was put is linked); the next
   occurrence goes to a person (`recordEngine.linkDrivePut`,
-  as the AI with the run's id); a refusal (a company with the shared folder has no Drive links, records off…) is logged
-  with its code and never fails anything. In a company with the shared folder the AI's `summary` carries the link.
+  as the AI with the run's id; also in a company with the shared folder, owner decision 2026-11-13, `records.md` "File
+  links without the shared folder"); a refusal (records off, the record gone…) is logged with its code and never fails
+  anything. The AI's `summary` may carry the link as well.
 - **The 90-day pick** (decision 3, decision for the owner): a folder pick is never renewed by itself while a job names
   it (that would keep ACB's permission alive with nobody looking). When the chosen place is not usable — past 90 days,
   or no longer the person's pick — the clock makes the slot's occurrence `needs_person` `PLACE_NOT_USABLE` at once, told

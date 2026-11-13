@@ -2,7 +2,7 @@
  * File links of a company without the shared folder (records.md "File links without the shared
  * folder", owner decisions 2026-11-07/08): a Google Drive file (fileId + revision + the sha256 of what
  * ACB read) or a file of the member's own PC, shown to that member alone. Companies with the shared
- * folder keep company paths, unchanged.
+ * folder keep company paths and link Drive files too (owner decision 2026-11-13), never PC files.
  *
  * Guards:
  * - a PC file's link never reaches anyone but its owner — not the detail (the card, the AI's
@@ -12,7 +12,8 @@
  * - a Drive link needs the connector's check (never a body), and only a person links either kind;
  * - decision materials / attachments: a Drive file at the revision and fingerprint kept when it was
  *   linked; never a PC file; never the old `{ path, commit }` here;
- * - a company with the shared folder refuses both kinds and links company paths as before.
+ * - a company with the shared folder links Drive files too (owner decision 2026-11-13), with every
+ *   safeguard above, refuses PC files, and links company paths as before.
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
@@ -244,17 +245,70 @@ describe('a Google Drive file', () => {
   })
 })
 
-describe('a company with the shared folder is unchanged', () => {
-  it('refuses both kinds and links company paths as before; a company without it refuses company paths', async () => {
+describe('a company with the shared folder (owner decision 2026-11-13: Drive links in every company)', () => {
+  it('links a Drive file the member picked: every reader gets the row, only the linker its name', async () => {
+    const t = task(GIT)
+    expect(engine.fileLinkBeforeDrive(m('u-alice', GIT), HUMAN, t.id, { target: { kind: 'drive', fileId: FILE_ID }, expectedVersion: 1 })).toEqual({ ok: true, value: 'ask-drive' })
+    // Still only with the connector's check.
+    expect(linkDrive('u-alice', t.id, 1, null, GIT)).toMatchObject({ ok: false, body: { code: 'DRIVE_NOT_PICKED' } })
+    ok(linkDrive('u-alice', t.id, 1, DRIVE, GIT))
+    expect((await detail('u-alice', t.id, GIT)).links.map(l => l.drive)).toEqual([expect.objectContaining({ fileId: FILE_ID, mine: true, name: DRIVE.name })])
+    for (const who of ['u-bob', 'u-owner']) {
+      expect((await detail(who, t.id, GIT)).links.map(l => l.drive)).toEqual([{ fileId: FILE_ID, mine: false }])
+      expect(JSON.stringify(await detail(who, t.id, GIT))).not.toContain('提案書（秘）')
+      expect(JSON.stringify(ok(engine.history(m(who, GIT), t.id)).entries)).not.toContain('提案書（秘）')
+    }
+    // Company paths stay as they were, beside it; any reader removes the Drive link.
+    ok(engine.fileLink(m('u-alice', GIT), HUMAN, t.id, 'link', { path: '営業部/見積.md', expectedVersion: 2 }))
+    ok(engine.fileLink(m('u-bob', GIT), HUMAN, t.id, 'unlink', { target: { kind: 'drive', fileId: FILE_ID }, expectedVersion: 3 }))
+    expect((await detail('u-bob', t.id, GIT)).links.map(l => l.path ?? l.drive)).toEqual(['営業部/見積.md'])
+  })
+
+  it('a file of one PC is still refused, for linking and removing alike', () => {
     const t = task(GIT)
     expect(linkLocal('u-alice', t.id, LOCAL, 1, GIT)).toMatchObject({ ok: false, body: { code: 'FILE_LINK_KIND_NOT_HERE' } })
-    expect(linkDrive('u-alice', t.id, 1, DRIVE, GIT)).toMatchObject({ ok: false, body: { code: 'FILE_LINK_KIND_NOT_HERE' } })
-    ok(engine.fileLink(m('u-alice', GIT), HUMAN, t.id, 'link', { path: '営業部/見積.md', expectedVersion: 1 }))
-    expect((await detail('u-bob', t.id, GIT)).links.map(l => l.path)).toEqual(['営業部/見積.md'])
-    const t2 = task(GIT)
-    expect(await engine.act(m('u-alice', GIT), HUMAN, t2.id, 'cancel', { expectedVersion: 1, note: 'x', decision: { materials: [{ kind: 'drive', fileId: FILE_ID }] } }))
+    expect(engine.fileLink(m('u-alice', GIT), HUMAN, t.id, 'unlink', { target: { kind: 'local', path: LOCAL }, expectedVersion: 1 }))
       .toMatchObject({ ok: false, body: { code: 'FILE_LINK_KIND_NOT_HERE' } })
+    expect(source.forCompany(GIT).records.linksFrom([t.id])).toEqual([])
+  })
 
+  it('only a person links it; the AI only the file its member’s own put just made', () => {
+    const t = task(GIT)
+    expect(engine.fileLink(m('u-alice', GIT), AI, t.id, 'link', { target: { kind: 'drive', fileId: FILE_ID }, expectedVersion: 1 }, DRIVE))
+      .toMatchObject({ ok: false, body: { code: 'TYPED_LINK_PERSON_ONLY' } })
+    expect(source.forCompany(GIT).records.linksFrom([t.id])).toEqual([])
+    const r = ok(engine.linkDrivePut(m('u-alice', GIT), AI, t.id, DRIVE))
+    expect(r.changed).toBe(true)
+    expect(source.forCompany(GIT).records.linksFrom([t.id]).map(l => l.targetPath)).toEqual([`drive:${FILE_ID}`])
+  })
+
+  it('a decision rests on it, and a version is attached, at the revision and fingerprint kept', async () => {
+    const t = task(GIT)
+    ok(linkDrive('u-bob', t.id, 1, DRIVE, GIT))
+    const review = ok(await engine.act(m('u-bob', GIT), HUMAN, t.id, 'request_review', {
+      expectedVersion: 2, args: { reviewer: 'u-alice' }, attachments: [{ link: 'files', target: { kind: 'drive', fileId: FILE_ID } }],
+    }))
+    expect(review.entry.attachments).toEqual([{ link: 'files', kind: 'drive', fileId: FILE_ID, revisionId: 'rev-1', sha256: SHA }])
+
+    const t2 = task(GIT)
+    ok(linkDrive('u-alice', t2.id, 1, DRIVE, GIT))
+    const cancel = (materials: unknown[]) => engine.act(m('u-alice', GIT), HUMAN, t2.id, 'cancel', { expectedVersion: 2, note: 'やめます', decision: { materials } })
+    expect(await cancel([{ kind: 'local', path: LOCAL }])).toMatchObject({ ok: false, body: { code: 'LOCAL_FILE_NOT_SHARED' } })
+    const done = ok(await cancel([{ kind: 'drive', fileId: FILE_ID, revisionId: 'forged', sha256: 'b'.repeat(64) }]))
+    expect(done.entry.decision?.materials).toEqual([{ kind: 'drive', fileId: FILE_ID, revisionId: 'rev-1', sha256: SHA }])
+  })
+
+  it('a Drive file ACB could not read is neither material nor an attached version', async () => {
+    const t = task(GIT)
+    ok(linkDrive('u-alice', t.id, 1, { ...DRIVE, sha256: null }, GIT))
+    expect(await engine.act(m('u-alice', GIT), HUMAN, t.id, 'cancel', { expectedVersion: 2, note: 'やめます', decision: { materials: [{ kind: 'drive', fileId: FILE_ID }] } }))
+      .toMatchObject({ ok: false, body: { code: 'DRIVE_VERSION_NOT_FIXED' } })
+    expect(await engine.act(m('u-bob', GIT), HUMAN, t.id, 'request_review', {
+      expectedVersion: 2, args: { reviewer: 'u-alice' }, attachments: [{ link: 'files', target: { kind: 'drive', fileId: FILE_ID } }],
+    })).toMatchObject({ ok: false, body: { code: 'DRIVE_VERSION_NOT_FIXED' } })
+  })
+
+  it('a company without the shared folder still refuses company paths', () => {
     const n = task()
     expect(engine.fileLink(m('u-alice'), HUMAN, n.id, 'link', { path: '営業部/見積.md', expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'NO_COMPANY_FOLDER' } })
   })

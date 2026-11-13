@@ -212,7 +212,7 @@ The AI reads and writes **only** the member's own live picks.
   `VerifiedDriveFile` from **the member's own receipt** (fileId, revision, the name as put, the sha256 of
   the bytes uploaded — Google is not asked again; no body's file id is ever taken), and
   `recordEngine.linkDrivePut` runs every record check of `fileLink` (records on, readable, a type the AI
-  may act on, a company without the shared folder, not linked already) at the version current now, as
+  may act on, not linked already — in every company, owner decision 2026-11-13) at the version current now, as
   the AI (the one Drive link the AI may make). Answered as `linkedTo: { recordId }`; any refusal or
   error is logged with its code only and **never fails the put**. The tool says the file was linked.
   The server cannot tell which record the consultation is about (topics live on the PC): it trusts the
@@ -424,10 +424,10 @@ The AI reads and writes **only** the member's own live picks.
   `keepForever` before an overwrite and its refusal, changed since, a picked `.md` read (both MIME types); app
   (`google-drive-tools.test.ts`): `as: 'file'` keeps a `.md`, a `.txt` never a document, the description's guidance.
 
-## Linked to a record (a company without the shared folder; `records.md` "File links without the shared folder")
+## Linked to a record (every company, owner decision 2026-11-13; `records.md` "File links without the shared folder")
 
 `linkable(member, fileId)` — asked only by the records session route `POST …/file-links { target: {
-kind: 'drive', fileId } }`, only for a company without the shared folder, and only **after every record
+kind: 'drive', fileId } }`, in a company with or without the shared folder, and only **after every record
 check passed** (`recordEngine.fileLinkBeforeDrive`: records on, the record exists and is readable, the
 body, the version, not linked already; a refusal there asks Google nothing): the member's own live
 pick of a file, or a file **their own** put made (`putOfFile`: ACB created it, so `drive.file` opens it;
@@ -435,7 +435,7 @@ another member's put is not theirs) (else 403 `DRIVE_NOT_PICKED`, nothing asked 
 token (`id,name,mimeType,trashed,headRevisionId,version`), then the content read as `read` does
 (export / download, ≤ 10 MB) only to compute its sha256 — nothing of it kept or logged. Never called
 for anyone but the member linking, never to look at a file someone else linked: other readers get
-the row without its name and open it in Drive. The app's 「Google Drive のファイルをつなぐ」 first offers
+the row without its name and open it in Drive. The app's 「Google Drive のファイルをつなぐ」 (on every company's task card) first offers
 the member's own files (`createDrivePicking().ownFiles` → `tasks:driveChoices`; `tasks-ui.md` "Linking
 files"; `tasks:linkDriveFiles(…, { chosen })` links them without the Picker) and otherwise is this
 connector's Picker flow (`createDrivePicking().pick(companyId, 'files')`, composed in `main.ts` into

@@ -684,9 +684,12 @@ every folder above them: `linkCandidates`, `model.ts`). **A company without the 
 (`folderKind: none`, owner 2026-11-07/08; server `records.md` "File links without the shared folder"):
 company paths are refused, so the card has neither ［＋ファイル・フォルダをつなぐ］ nor ［新しいファイル］
 (`TaskCard` `sharedFolder`, from AppShell's `companyHasSharedFolder`; test `tests/ui/skill-layout.spec.ts`
-「a task card in a git / none company」). Instead its 「ファイル」 group (`typedFiles`, `TYPED_FILES_NOTE`)
-offers **［Google Drive のファイルをつなぐ］** (`DriveLinkAction.tsx` + `DriveFiles.tsx`; owner decisions
-2026-11-09): pressed, it first offers the member's own Drive files (`tasks:driveChoices` → the connector's
+「a task card in a git / none company」), and its 「ファイル」 note is `TYPED_FILES_NOTE` (PC files are the member's
+alone). **In every company** (owner decision 2026-11-13) the 「ファイル」 group (`typedFiles`, always given;
+`typedFiles.localFiles` = no shared folder) offers **［Google Drive のファイルをつなぐ］** — in a company with the
+shared folder beside ［＋ファイル・フォルダをつなぐ］, with the note `COMPANY_AND_DRIVE_FILES_NOTE`, a tree file
+dropped there stays a company path and nothing of this PC is offered. The button (`DriveLinkAction.tsx` +
+`DriveFiles.tsx`; owner decisions 2026-11-09): pressed, it first offers the member's own Drive files (`tasks:driveChoices` → the connector's
 `GET /me/google/drive/files`: their live picks and what their AI put, by name — theirs only) to tick one or
 several, those already linked marked 「つないであります」 and not choosable, ［つなぐ］ and ［Google Drive から探す］;
 with none listed the Picker opens at once. `tasks:linkDriveFiles(companyId, recordId, version, options?)`,
@@ -713,7 +716,8 @@ row is linked as the member's own** (`useLinkDrop` `localFiles`, `DroppedThing.l
 （あなただけに見えます）」), and the drop zone says 「このパソコンのファイル（あなただけ）」. Tests:
 `client/tests/typed-file-links.test.ts`, `tests/ui/task-card.spec.ts` (`?kind=none`; `&drive=list`: 「the
 member's own Drive files offered first」; 「a company with the
-shared folder: no Drive button, a dropped file stays a company file」; 「…a pasted or dropped Drive link…」;
+shared folder: the Drive button beside company files; a dropped tree file stays a company file, a dropped Drive
+link opens the chooser」; 「…a pasted or dropped Drive link…」;
 `&drive=cancel`: 「…explains why it may be empty; a plain cancel does not」) — mutation-checked. Each linked file's
 「…」 offers 「つながりを外す」, then 「「<name>」とのつながりを外しました［取り消す］」 (取り消す links it again).
 

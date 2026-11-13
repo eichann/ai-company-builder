@@ -246,12 +246,19 @@ test('a company without the shared folder: the member\'s own Drive files offered
   expectNoPageErrors(state)
 })
 
-test('a company with the shared folder: no Drive button, a dropped file stays a company file', async ({ page }) => {
+// A company with the shared folder links Drive files too (owner decision 2026-11-13): ［Google Drive のファイルをつなぐ］
+// beside its company files, a Drive link dropped from the browser opens the chooser on it; a file dropped from the tree
+// stays a company file, and nothing of this PC (「あなただけ」) is offered.
+test('a company with the shared folder: the Drive button beside company files; a dropped tree file stays a company file, a dropped Drive link opens the chooser', async ({ page }) => {
+  const ID = '1AbC-def_GhIjKlMnOpQrStUv'
   const state = await openPreview(page, 'task-card')
   const links = page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' })
   await expect(links.getByRole('button', { name: 'ファイル・フォルダをつなぐ' })).toHaveCount(1)
-  await expect(links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' })).toHaveCount(0)
   await expect(links.locator('[data-only-you]')).toHaveCount(0)
+  await expect(links).toContainText('Google Drive のファイルの名前は、つないだ人だけ')
+  await expect(links).not.toContainText('このパソコンのファイルは、あなただけ')
+  await links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' }).click()
+  await expect(page.locator('#acted')).toHaveText('drive@3')
   const data = await page.evaluateHandle(() => {
     const dt = new DataTransfer()
     dt.setData('application/x-file-paths', JSON.stringify(['/Users/me/company/経理/請求書.xlsx']))
@@ -259,7 +266,11 @@ test('a company with the shared folder: no Drive button, a dropped file stays a 
   })
   await links.dispatchEvent('dragover', { dataTransfer: data })
   await links.dispatchEvent('drop', { dataTransfer: data })
-  await expect(page.locator('#acted')).toHaveText('drop task-0000aa 経理/請求書.xlsx target:files')
+  await expect(page.locator('#acted')).toHaveText('drive@3,drop task-0000aa 経理/請求書.xlsx target:files')
+  const link = await page.evaluateHandle(url => { const dt = new DataTransfer(); dt.setData('text/uri-list', url); return dt }, `https://drive.google.com/file/d/${ID}/view`)
+  await links.dispatchEvent('dragover', { dataTransfer: link })
+  await links.dispatchEvent('drop', { dataTransfer: link })
+  await expect(page.locator('#acted')).toHaveText(`drive@3,drop task-0000aa 経理/請求書.xlsx target:files,drive@3 show=${ID}`)
   expectNoPageErrors(state)
 })
 

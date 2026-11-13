@@ -49,12 +49,12 @@ export const NO_COMPANY_FOLDER_FILE_LINK = {
 } as const
 
 /**
- * A company with the shared folder links files by company path only (Drive and PC links are for
- * companies without it: records.md "File links without the shared folder").
+ * A company with the shared folder links a file of one member's PC never: it links company paths and
+ * Google Drive files (records.md "File links without the shared folder", owner decision 2026-11-13).
  */
 export const FILE_LINK_KIND_NOT_HERE = {
   code: 'FILE_LINK_KIND_NOT_HERE',
-  error: 'この会社では、記録には全社フォルダのファイルをつなぎます。',
+  error: 'この会社では、このパソコンだけにあるファイルはつなげません。全社フォルダのファイルか、Google Drive のファイルをつないでください。',
 } as const
 
 /** A file only on one member's PC cannot be what others check (decision materials, attached versions). */

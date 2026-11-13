@@ -29,6 +29,9 @@ export interface TaskLocalFile { path: string }
  */
 export interface TaskDriveFile { fileId: string; mine: boolean; name: string | null }
 
+/** Under 「ファイル」 in a company with the shared folder: company files and Drive files (owner decision 2026-11-13). */
+export const COMPANY_AND_DRIVE_FILES_NOTE = 'つながりは、このやることを見られる人みんなに見えます（Google Drive のファイルの名前は、つないだ人だけ）'
+
 /** Under 「ファイル」 in a company without the shared folder: who sees what. */
 export const TYPED_FILES_NOTE = 'Google Drive のファイルは、このやることを見られる人みんなに見えます（名前は、つないだ人だけ）。このパソコンのファイルは、あなただけに見えます'
 
