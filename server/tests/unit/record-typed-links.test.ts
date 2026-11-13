@@ -307,6 +307,15 @@ describe('a company with the shared folder (owner decision 2026-11-13: Drive lin
     })).toMatchObject({ ok: false, body: { code: 'DRIVE_VERSION_NOT_FIXED' } })
   })
 
+  it('a プロジェクト (the core type\'s `files`) links a Drive file the same way: every reader the row, only the linker its name', async () => {
+    const made = engine.create(m('u-alice', GIT), HUMAN, { type: 'project', title: '新人研修の見直し', fields: { owner: 'u-alice' } })
+    const p = ok(made).record
+    ok(linkDrive('u-alice', p.id, 1, DRIVE, GIT))
+    expect((await detail('u-alice', p.id, GIT)).links.map(l => l.drive)).toEqual([expect.objectContaining({ fileId: FILE_ID, mine: true, name: DRIVE.name })])
+    expect((await detail('u-bob', p.id, GIT)).links.map(l => l.drive)).toEqual([{ fileId: FILE_ID, mine: false }])
+    expect(linkLocal('u-alice', p.id, LOCAL, 2, GIT)).toMatchObject({ ok: false, body: { code: 'FILE_LINK_KIND_NOT_HERE' } })
+  })
+
   it('a company without the shared folder still refuses company paths', () => {
     const n = task()
     expect(engine.fileLink(m('u-alice'), HUMAN, n.id, 'link', { path: '営業部/見積.md', expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'NO_COMPANY_FOLDER' } })

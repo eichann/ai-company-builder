@@ -329,3 +329,57 @@ test('a プロジェクト someone else is responsible for: no button to end or 
   await expect(card.getByRole('button', { name: 'その他の操作' })).toHaveCount(0)
   expectNoPageErrors(state)
 })
+
+// A プロジェクト links Google Drive files like a やること (owner decision 2026-11-13; records.md "Drive and PC file links"):
+// ［Google Drive のファイルをつなぐ］ offers the member's own files first, then Google's chooser; a pasted or dropped Drive link
+// opens the chooser on that file; the member's own linked file by name, someone else's as 「Google Drive のファイル」, both
+// opened in Drive, and taken off from 「…」. Not set up for the company: the button is off with the plain note.
+test('a プロジェクト links Google Drive files: own list, chooser, a pasted / dropped link; names only for the linker; opened in Drive; taken off', async ({ page }) => {
+  const ID = '1AbC-def_GhIjKlMnOpQrStUv'
+  const state = await openPreview(page, 'record-card', { record: 'project', drive: '1' })
+  const links = page.getByTestId('record-card').getByRole('complementary', { name: 'つながっているもの' })
+  const opened = page.locator('#opened')
+  await expect(links).toContainText('研修の進め方（作業中）')
+  await expect(links).toContainText('Google Drive のファイルは、このプロジェクトを見られる人みんなに見えます（名前は、つないだ人だけ）')
+  await links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' }).click()
+  const list = links.getByRole('group', { name: 'つなぐ Google Drive のファイル' })
+  await list.getByRole('checkbox', { name: /去年の研修資料\.pdf/ }).check()
+  await list.getByRole('button', { name: 'つなぐ', exact: true }).click()
+  await expect(opened).toHaveText('drive project-0000p1@3 chosen=1PickedEarlier001')
+  await expect(page.getByTestId('record-card').getByRole('status').filter({ hasText: '「去年の研修資料.pdf」をつなぎました' })).toBeVisible()
+
+  const box = links.getByRole('textbox', { name: 'Google Drive のリンクを貼りつけてつなぐ' })
+  await box.fill(`https://docs.google.com/document/d/${ID}/edit`)
+  await box.press('Enter')
+  await expect(opened).toContainText(`drive project-0000p1@3 show=${ID}`)
+  await box.fill('https://example.com/not-drive')
+  await box.press('Enter')
+  await expect(links.getByRole('alert')).toHaveText('Google Drive のファイルのリンクではないため、つなげません。')
+  const data = await page.evaluateHandle(url => { const dt = new DataTransfer(); dt.setData('text/uri-list', url); return dt }, `https://drive.google.com/file/d/${ID}/view`)
+  await links.dispatchEvent('dragover', { dataTransfer: data })
+  await links.dispatchEvent('drop', { dataTransfer: data })
+  await expect(opened).toHaveText(`drive project-0000p1@3 chosen=1PickedEarlier001\ndrive project-0000p1@3 show=${ID}\ndrive project-0000p1@3 show=${ID}`)
+
+  // Someone else's file: neutral words; opened in Drive.
+  await links.getByRole('button', { name: /^Google Drive のファイル(?!をつなぐ)/ }).first().click()
+  await expect(opened).toContainText('https://drive.google.com/file/d/1ProjDocOther001/view')
+  await page.getByRole('button', { name: '「研修の進め方（作業中）」の操作' }).click()
+  await page.getByRole('menuitem', { name: /つながりを外す/ }).click()
+  await expect(opened).toContainText('unlinkTarget project-0000p1 drive 1ProjDocMine0001@3')
+  await expect(page.getByTestId('record-card').getByRole('status').filter({ hasText: '「研修の進め方（作業中）」とのつながりを外しました' })).toBeVisible()
+  expectNoPageErrors(state)
+
+  await openPreview(page, 'record-card', { record: 'project', drive: 'off' })
+  await expect(links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' })).toBeDisabled()
+  await expect(links.locator('[data-drive-link-note]')).toContainText('会社の管理者による準備が必要です')
+})
+
+test('a プロジェクト whose type offers no Drive link (or any other record card) has no Drive button', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { record: 'project' })
+  const links = page.getByTestId('record-card').getByRole('complementary', { name: 'つながっているもの' })
+  await expect(page.getByTestId('record-card')).toBeVisible()
+  await expect(links.getByRole('button', { name: 'Google Drive のファイルをつなぐ' })).toHaveCount(0)
+  await openPreview(page, 'record-card', { record: 'meeting' })
+  await expect(page.getByTestId('record-card').getByRole('button', { name: 'Google Drive のファイルをつなぐ' })).toHaveCount(0)
+  expectNoPageErrors(state)
+})

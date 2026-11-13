@@ -4,10 +4,9 @@
 // member may read and do.
 import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
-import type { GoogleStatusResult } from '../../../shared/google'
 import type { TaskCardResult } from '../../../shared/task-card'
 import type { TagSuggestions } from '../../../shared/tag-suggest'
-import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveChoice, TaskDriveLinkOptions, TaskDriveLinkResult, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from '../../../shared/tasks'
+import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
 export type CalendarReads = ElectronPort<'getCalendarToday'>
@@ -117,42 +116,6 @@ export function linkFileToTask(companyId: string, recordId: string, companyPath:
 
 export function unlinkFileFromTask(companyId: string, recordId: string, companyPath: string, expectedVersion: number, writes: TaskFileWrites = window.electronAPI): Promise<TaskWriteResult> {
   return writes.unlinkFileFromTask(companyId, recordId, companyPath, expectedVersion)
-}
-
-/**
- * Typed file links (records.md "Drive and PC file links"): a Drive file (every company) or a PC file
- * (without the shared folder) taken off a task, and 「Google Drive のファイルをつなぐ」 (Google Picker, then the links).
- */
-export type TypedFileWrites = ElectronPort<'unlinkTargetFromTask' | 'linkDriveFilesToTask' | 'getTaskDriveChoices'>
-
-export function unlinkTargetFromTask(companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number, writes: TypedFileWrites = window.electronAPI): Promise<TaskWriteResult> {
-  return writes.unlinkTargetFromTask(companyId, recordId, target, expectedVersion)
-}
-
-export function linkDriveFilesToTask(companyId: string, recordId: string, expectedVersion: number, options?: TaskDriveLinkOptions, writes: TypedFileWrites = window.electronAPI): Promise<TaskDriveLinkResult> {
-  return writes.linkDriveFilesToTask(companyId, recordId, expectedVersion, options)
-}
-
-/** The member's own Drive files offered before the Picker (their picks and their AI's puts). */
-export function getTaskDriveChoices(companyId: string, writes: TypedFileWrites = window.electronAPI): Promise<TaskDriveChoice[]> {
-  return writes.getTaskDriveChoices(companyId)
-}
-
-/**
- * Whether ［Google Drive のファイルをつなぐ］ can work for the member: their Google status as the
- * server answers it (no token; the same read as 設定 → Google).
- */
-export type DriveSetupReads = ElectronPort<'getGoogleStatus'>
-
-export function getDriveSetup(companyId: string, reads: DriveSetupReads = window.electronAPI): Promise<GoogleStatusResult> {
-  return reads.getGoogleStatus(companyId)
-}
-
-/** A Drive file opened in the member's browser (Drive decides who may see it). */
-export type DriveFileOpening = ElectronPort<'openExternal'>
-
-export function openOutside(url: string, links: DriveFileOpening = window.electronAPI) {
-  return links.openExternal(url)
 }
 
 /** Whether a linked file inside a `.personal/` folder (never synced) is on this computer. */

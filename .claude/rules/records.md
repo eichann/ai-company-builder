@@ -449,11 +449,12 @@ company path:
   `LOCAL_FILE_NOT_SHARED`: nobody else could check it). The old `{ path, commit }` forms stay 409
   `NO_COMPANY_FOLDER` without the shared folder; `drive` ones are taken in every company (owner decision
   2026-11-13; before it, a company with the folder answered 409 `FILE_LINK_KIND_NOT_HERE`). Approval requests take no file materials yet (`approvals.md`).
-- The app: `tasks-ui.md` "Linking files". Mail attachments stay as they are (`outbound-mail.md`).
+- The app: `tasks-ui.md` "Linking files" — the task card and, for Drive files, the 案件・プロジェクト card (the core
+  プロジェクト's `files`; owner decision 2026-11-13). Mail attachments stay as they are (`outbound-mail.md`).
 - Tests: `server/tests/unit/record-typed-links.test.ts` (a PC file through detail, 経緯, replay, 探す,
   someone else's unlink / undo / answers; two owners of one name; the path checks; the Drive name only
   to the linker; the connector's check and people only; materials / attachments; 「a company with the
-  shared folder」: a Drive link with the same pick check, name only to the linker, the AI only through its
+  shared folder」: a Drive link with the same pick check (on a task and on a core プロジェクト), name only to the linker, the AI only through its
   own put, materials / attachments at the fixed version, `DRIVE_VERSION_NOT_FIXED`, a PC file refused for
   linking and removing), `server/tests/integration/google-drive.test.ts` 「a picked file linked to a
   record」 (the pick checked with the linker's permission, revision and sha256, no Google call for

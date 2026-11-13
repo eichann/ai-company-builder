@@ -1,12 +1,14 @@
+// ACB foundation: the member's own Drive files offered before Google's chooser, on the task card (tasks) and the
+// 案件・プロジェクト card (records) alike (records.md "Drive and PC file links", owner decision 2026-11-13).
 import { useState } from 'react'
 import { FileText, GoogleDriveLogo, Plus } from '@phosphor-icons/react'
-import type { TaskDriveChoice } from '../../../../shared/tasks'
-import { useDismiss } from '../../../shared/hooks/useDismiss'
-import { getTaskDriveChoices } from '../api'
+import type { TaskDriveChoice } from '../../../shared/tasks'
+import { useDismiss } from '../hooks/useDismiss'
+import { getDriveChoices } from '../ipc/drive-links'
 
 interface Props {
   companyId: string
-  /** Drive files already linked to this task (shown, not chosen again). */
+  /** Drive files already linked to this record (shown, not chosen again). */
   linked: readonly string[]
   busy: boolean
   /** False when the company has not set Drive up: the button is off (the caller says why). */
@@ -42,7 +44,7 @@ export function DriveFiles({ companyId, linked, busy, usable, onLink }: Props) {
     if (busy || opening || !usable) return
     setError(null)
     setOpening(true)
-    const listed = await getTaskDriveChoices(companyId).catch(() => [] as TaskDriveChoice[])
+    const listed = await getDriveChoices(companyId).catch(() => [] as TaskDriveChoice[])
     setOpening(false)
     if (listed.length === 0) { await run(); return }
     setChoices(listed)

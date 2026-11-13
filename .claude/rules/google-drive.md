@@ -435,7 +435,7 @@ another member's put is not theirs) (else 403 `DRIVE_NOT_PICKED`, nothing asked 
 token (`id,name,mimeType,trashed,headRevisionId,version`), then the content read as `read` does
 (export / download, ≤ 10 MB) only to compute its sha256 — nothing of it kept or logged. Never called
 for anyone but the member linking, never to look at a file someone else linked: other readers get
-the row without its name and open it in Drive. The app's 「Google Drive のファイルをつなぐ」 (on every company's task card) first offers
+the row without its name and open it in Drive. The app's 「Google Drive のファイルをつなぐ」 (on every company's task card and 案件・プロジェクト card) first offers
 the member's own files (`createDrivePicking().ownFiles` → `tasks:driveChoices`; `tasks-ui.md` "Linking
 files"; `tasks:linkDriveFiles(…, { chosen })` links them without the Picker) and otherwise is this
 connector's Picker flow (`createDrivePicking().pick(companyId, 'files')`, composed in `main.ts` into

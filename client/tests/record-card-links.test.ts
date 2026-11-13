@@ -37,3 +37,45 @@ test('only links not marked fixed can be taken off, each from the record that ho
     ['task-000001', false, null],
   ])
 })
+
+// A 案件・プロジェクト's Drive files (owner decision 2026-11-13, records.md "Drive and PC file links"): their own list
+// (the name only where the server marked them the member's), never a path row; ［Google Drive のファイルをつなぐ］ only
+// for a bundle type with exactly one file link, its feature on.
+test('a プロジェクト: Drive files as their own list (names only the linker\'s), never a path row; the Drive button only for a bundle type with one file link, its feature on', async () => {
+  const { coreTypeDefinitions } = await import('../../shared/core/core-types')
+  const types = coreTypeDefinitions().map(d => ({ definition: d }))
+  const project = {
+    record: { ...summary('project-0000p1', 'project', 4), state: 'active' },
+    links: [
+      { name: 'files', direction: 'out', drive: { fileId: '1Mine00000000001', mine: true, name: '作業中の資料' } },
+      // Even if a server sent a name with someone else's link, it is not shown.
+      { name: 'files', direction: 'out', drive: { fileId: '1Other0000000001', mine: false, name: '他人の資料' } },
+      { name: 'files', direction: 'out', local: { path: '営業/メモ.md' } },
+    ],
+  }
+  const meeting = { record: { ...summary('meeting-0000aa', 'meeting', 5), state: 'read' }, links: [] }
+  const apiWith = (features: unknown) => createRecordViewsApi({
+    baseUrl: () => 'https://acb.test', cookies: () => ['session=abc'], log: { warn: () => {} },
+    fetch: (async (url: string) => {
+      const path = new URL(url).pathname
+      if (path.endsWith('/records/item/project-0000p1')) return new Response(JSON.stringify({ data: project }), { status: 200 })
+      if (path.endsWith('/records/item/meeting-0000aa')) return new Response(JSON.stringify({ data: meeting }), { status: 200 })
+      if (path.endsWith('/records/types')) return new Response(JSON.stringify({ data: { types, features } }), { status: 200 })
+      return new Response(JSON.stringify({ data: { entries: [], runs: [] } }), { status: 200 })
+    }) as unknown as typeof fetch,
+  })
+  const r = await apiWith(undefined).card('co1', 'project-0000p1')
+  assert.ok(r.success)
+  if (!r.success) return
+  assert.equal(r.card.driveLink, true)
+  assert.deepEqual(r.card.driveFiles, [
+    { fileId: '1Mine00000000001', mine: true, name: '作業中の資料' },
+    { fileId: '1Other0000000001', mine: false, name: null },
+  ])
+  assert.deepEqual(r.card.links, [])
+  const m = await apiWith(undefined).card('co1', 'meeting-0000aa')
+  assert.ok(m.success && m.card.driveLink === undefined)
+  // Its feature turned off (「見るだけ」): nothing offered.
+  const off = await apiWith({ projects: false }).card('co1', 'project-0000p1')
+  assert.ok(off.success && off.card.driveLink === undefined)
+})
