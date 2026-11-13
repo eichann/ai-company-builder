@@ -217,11 +217,12 @@ member's **own** rows (`DRIVE_PICK_TTL_MS`, `renewPick`):
 - **A file linked to a record** (`RecordRepository.driveLinkedBy`: a `drive:<fileId>` link row **made by this member** —
   their AI's put link counts, it is made as them — with the facts kept when it was linked; a link brought back by an undo
   has none and counts for nothing): `read` (and `linkable`, linking it again elsewhere) accept it with no pick and no
-  expiry, for as long as the link exists. Taking the link off (or the record removed: its links go) ends it, unless the
+  expiry, for as long as the link exists **and the member can still read that record** (`linkedReadable`: a link on a
+  record they no longer read keeps nothing alive). Taking the link off (or the record removed: its links go) ends it, unless the
   file is still picked or the member's own put. It is the member's deliberate choice of that file for that work; Google
   still decides (their own token).
 - **A plain file pick slides**: every successful `read` and `linkable` of it renews the member's live pick to now + 7 days
-  (`renewFilePick`); a refused call renews nothing; an expired pick is never brought back by use (only a re-pick). 7 days
+  (`renewFilePick`; a link renews it only after the record step made the link, `linked`); a refused call renews nothing; an expired pick is never brought back by use (only a re-pick). 7 days
   without a use end it; the refusal then says so (`DRIVE_NOT_PICKED` with `lapsed: true`, 「選んでから7日のあいだ使われなかった
   ため…」) while the expired row is still there.
 - **A folder pick**: every put that is `done` renews it to now + 90 days — a consultation's and a scheduled job's run
@@ -520,7 +521,14 @@ Google document that changed since its baseline — or has none — continues fr
   - **who changed it**: the revisions after the baseline's (all of them without a baseline or when it is gone; the newest
     itself when a change was merged into it) and the comments made or changed since the baseline (all without one).
     Every revision `me` and every comment and reply the member's own → **written at once** (`continued: 'own'`; the 11/12
-    decision: the writer's own edits may be overwritten, after reading them);
+    decision: the writer's own edits may be overwritten, after reading them) — but only when nobody else's typing could be
+    hiding in the member's revision (second review, 2026-11-14; Docs merges edits close together into one revision credited
+    to its last editor): not when the change was merged into the newest revision (text or newest revision changed with no
+    new revision listed; a comment alone is not a merge), not when a revision of the member's lies within `MERGE_NEAR_MS` of
+    someone else's revision or comment, and not when anyone else can edit the file (its permissions; unreadable → someone
+    may). Any of these → the person is asked, as for someone else's change;
+  - **an older app** (it does not send `askPerson: true`, so it cannot show the card): nothing kept, 409
+    `DRIVE_FILE_CHANGED_SINCE` with 「アプリを新しくすると、メンバーに確かめたうえで上書きできます」;
   - **someone else's** revision or comment → nothing written; 409 `DRIVE_OVERWRITE_NEEDS_CONFIRMATION` with `confirmation
     { id, fileName, editors (Google's display names, ≤ 5), commented, expiresAt }`. The names are for the member's card
     only: people choose them in Google, so the sentence to the AI (server and app) says 「ほかの人」. The file's own outside
@@ -562,9 +570,18 @@ Google document that changed since its baseline — or has none — continues fr
   says the app must be updated. The press: IPC `google:decideDriveOverwrite` (session in main); the card's refusal words
   are the app's own by code (`DRIVE_OVERWRITE_REFUSALS`). The descriptions of `drive_put` / `drive_read` and
   `DRIVE_INSTRUCTIONS` say: read, take the edits in, update the same file — never a copy.
+- **What the AI reads**: `drive_read` of a document adds its comments after the text (`commentsText`: who only as 「本人」 /
+  「ほかの人」, the words each is on, replies; deleted ones left out; inside the outside text), so the AI can take them in.
+  The kept read includes a sha256 of the comments as seen (`google_drive_doc_reads.comments_seen`): a comment added after
+  the read → `DRIVE_READ_AGAIN`. The press always checks the confirmed snapshot (text, newest revision, comments), even when
+  the baseline moved meanwhile.
+- **Kept only as long as needed** (server clock `driveSweep` → `sweep`): a waiting confirmation's content goes when it
+  expires, its row a week later; kept reads go after a week; a member removed from the company loses their reads and
+  confirmations (`forgetMember`). A put that rewrites the document closes every waiting card for that file.
 - **Limits**: a document longer than `DRIVE_READ_TEXT_MAX` is never read whole, so no read is kept and it cannot be
-  continued (the AI keeps being told to read). A file linked to a record keeps counting while the link exists even if
-  its linker can no longer read that record (they cannot take it off there); Google still checks their own token.
+  continued (the AI keeps being told to read). A file linked to a record counts only while its linker can still read that
+  record (`linkedReadable`); a link refused by the record step renews no pick (the pick is renewed only after the link is
+  made, `linked`). Google still checks their own token.
 - **Next step (not built)**: option ウ — partial edits through the Docs API (`documents.batchUpdate`), which would keep
   comments anchored and need no full replace (a new scope, `documents`, beyond `drive.file`).
 - Unverified against real Google: that `lastModifyingUser.displayName` and the comments' `author` / `replies` are answered
@@ -572,7 +589,8 @@ Google document that changed since its baseline — or has none — continues fr
 - Tests: `server/tests/integration/google-drive-continue.test.ts` (own edits only after a read in this consultation, no
   baseline, changed after the read, someone else's edit / comment → confirmation and the press writing exactly that
   content once, another member / a record token cannot press, changed while asking, decline, expiry, outside sharing at
-  the press; and "How long a pick lasts") and `job-deliverables.test.ts` (a run never continues; a run's put renews its
+  the press; and "How long a pick lasts"; the second review: the press checks the snapshot when the baseline moved,
+  comments read as 本人 / ほかの人, an older app refused with nothing kept, a refused link renews nothing, retention) and `job-deliverables.test.ts` (a run never continues; a run's put renews its
   folder; a lapsed folder's words) — mutation-checked; `client/tests/drive-overwrite.test.ts`.
 
 ## Markdown and text as they are (owner request 2026-11-12)
