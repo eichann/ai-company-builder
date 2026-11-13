@@ -119,6 +119,8 @@ export interface DrivePickTicketRow {
   userId: string
   ticketHash: string
   mode: 'folder' | 'files'
+  /** Files mode: `read` (for the AI: readable types only) or `link` (linked to a record by the person: every type). */
+  purpose: 'read' | 'link'
   maxItems: number
   fileIds: string[]
   state: 'open' | 'saving' | 'picked' | 'cancelled' | 'failed'
@@ -185,10 +187,12 @@ export interface GoogleDriveRepository {
   put(userId: string, id: string): DrivePutRow | null
   /** The member's own put that made this Drive file (state done), or null. */
   putOfFile(userId: string, fileId: string): DrivePutRow | null
-  /** The member's own puts that made a file (state done), newest first. */
-  donePuts(userId: string, limit: number): DrivePutRow[]
-  /** The member's own puts that made a file in this folder (state done), newest first. */
-  donePutsInFolder(userId: string, folderId: string, limit: number): DrivePutRow[]
+  /**
+   * The files the member's own puts made (state done): **one row per Drive file** — its latest done put — newest first,
+   * so re-putting one file many times never pushes another out of the list. `folderId`: only files whose latest put is
+   * in that folder; `before`: only those after this one in that order (the next page: its time and id, so ties are never skipped).
+   */
+  donePutFiles(userId: string, opts: { limit: number; folderId?: string; before?: { createdAt: string; id: string } }): DrivePutRow[]
   /** The member's own done puts made within this execution run (a scheduled job's deliverables), oldest first. */
   runPuts(userId: string, runId: string, limit: number): DrivePutRow[]
   /** Settles a put still in `sending` / `unknown` (true when a row changed). */

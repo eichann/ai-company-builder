@@ -140,10 +140,12 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   [records('approvals_list')]: say('承認のお願いを見ました', '承認のお願いを見ています', '承認のお願いを {n} 回見ました'),
   [records('approvals_show')]: say('承認のお願いを出しました', '承認のお願いを出しています', '承認のお願いを {n} 件出しました'),
   // Connector providers on the same server (records/tool-providers.ts).
-  [records('drive_pick_folder')]: say('Google Drive の置き場所を選んでもらいました', 'Google Drive の置き場所を選んでもらっています', 'Google Drive の置き場所を {n} 回選んでもらいました'),
-  [records('drive_pick_files')]: say('Google Drive のファイルを選んでもらいました', 'Google Drive のファイルを選んでもらっています', 'Google Drive のファイルを {n} 回選んでもらいました'),
+  // While running, the member is told where to choose (owner FB 2026-11-14): the Picker is in their browser.
+  [records('drive_pick_folder')]: say('Google Drive の置き場所を選んでもらいました', 'ブラウザで Google Drive の置き場所を選んでください（開いた画面で選びます）', 'Google Drive の置き場所を {n} 回選んでもらいました'),
+  [records('drive_pick_files')]: say('Google Drive のファイルを選んでもらいました', 'ブラウザで Google Drive のファイルを選んでください（開いた画面で選びます）', 'Google Drive のファイルを {n} 回選んでもらいました'),
   [records('drive_picked')]: say('選んだ Google Drive のファイルを確かめました', '選んだ Google Drive のファイルを確かめています', '選んだ Google Drive のファイルを {n} 回確かめました'),
   [records('drive_read')]: say('Google Drive のファイルを読みました', 'Google Drive のファイルを読んでいます', 'Google Drive のファイルを {n} 件読みました'),
+  [records('drive_put_check')]: say('Google Drive に置けたかを確かめました', 'Google Drive に置けたかを確かめています', 'Google Drive に置けたかを {n} 回確かめました'),
   [records('drive_put')]: say('Google Drive にファイルを置きました', 'Google Drive にファイルを置いています', 'Google Drive にファイルを {n} 件置きました', (input, ctx) => companyPath(input.path, ctx.root)),
   [records('inbox_read')]: say('来た連絡を読みました', '来た連絡を読んでいます', '来た連絡を {n} 件読みました'),
   // The outcome only: the reason may quote the outside message.

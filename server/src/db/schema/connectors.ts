@@ -251,6 +251,16 @@ export function migrateDrivePutDocFingerprints(conn: Database.Database): void {
   if (!cols.has('doc_baseline_at')) conn.exec('ALTER TABLE google_drive_puts ADD COLUMN doc_baseline_at TEXT')
 }
 
+/**
+ * Why a files pick ticket was made (google-drive.md "Linking any file", owner decision 2026-11-14): `read` (for the AI:
+ * the readable types only — every ticket before this column) or `link` (a person links it to a record: every file
+ * type). Additive: an older build ignores it. Every startup, idempotent.
+ */
+export function migrateDrivePickTicketPurpose(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(google_drive_pick_tickets)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('purpose')) conn.exec("ALTER TABLE google_drive_pick_tickets ADD COLUMN purpose TEXT NOT NULL DEFAULT 'read'")
+}
+
 export function migrateGoogleCompanyFeatures(conn: Database.Database): void {
   const cols = new Set((conn.prepare('PRAGMA table_info(google_oauth_clients)').all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('features_off')) conn.exec("ALTER TABLE google_oauth_clients ADD COLUMN features_off TEXT NOT NULL DEFAULT '[]'")

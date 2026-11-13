@@ -245,7 +245,9 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
   return <><CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     linkDrop={linkDrop} notDownloadedFolderOf={notDownloadedFolderOf}
     onLinkFile={sharedFolder ? p => fileLink(p, false) : null} onUnlinkFile={p => fileLink(p, true)} personalHere={personalHere}
-    typedFiles={{ localFiles: !sharedFolder, localHere, onLinkDrive: (chosen?: TaskDriveChoice[]) => linkDrive(chosen ? { chosen } : undefined), onLinkDriveText: linkDriveText, drive: { usable: drive.usable, note: drive.note, hint: drive.hint }, onUnlink: unlinkTarget }}
+    typedFiles={{ localFiles: !sharedFolder, localHere, onLinkDrive: (chosen?: TaskDriveChoice[]) => linkDrive(chosen ? { chosen } : undefined), onLinkDriveText: linkDriveText, drive: { usable: drive.usable, note: drive.note, hint: drive.hint, picking: drive.picking, onStop: drive.stop }, onUnlink: unlinkTarget,
+      // 「中身を確かめ直す」: linked again (own file → no chooser; else the chooser shows just it), which reads it again.
+      onRecheck: (fileId: string) => linkDrive({ fileIds: [fileId] }) }}
     {...(card.record.personal && createTodayFile ? { onNewFile: async (name: string) => {
       const made = await createTodayFile(name)
       if ('error' in made) return { error: made.error }
@@ -317,8 +319,10 @@ interface BodyProps {
     onLinkDrive: (chosen?: TaskDriveChoice[]) => Promise<string | null>
     /** A pasted or dropped Drive link: the chooser opens showing that file (one 「選択」 links it). */
     onLinkDriveText: (text: string) => Promise<string | null>
-    /** Whether Drive is set up for the company, and what to tell before the first press. */
-    drive: { usable: boolean; note: string | null; hint: string | null }
+    /** Whether Drive is set up for the company, and what to tell before the first press; the chooser open (［やめる］). */
+    drive: { usable: boolean; note: string | null; hint: string | null; picking: boolean; onStop: () => void }
+    /** A linked Drive file whose content ACB could not read: linked again to read it again. */
+    onRecheck: (fileId: string) => Promise<string | null>
     onUnlink: (target: TypedFileTarget, label: string) => Promise<string | null>
   }
   /** ［＋ 新しいファイル］ (a task only the member sees): `error` keeps the name window open. */
@@ -406,7 +410,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
         extras={[{ name: 'ファイル', kind: 'file' as const, action: <>
           {onLinkFile && <TaskFiles rootPath={rootPath} linked={card.files.map(f => f.path)} busy={busy} onLink={onLinkFile} />}
           {onLinkFile && onNewFile && <button type="button" disabled={busy} onClick={() => setNaming({ error: null })} data-new-file className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />新しいファイル</button>}
-          <DriveLinkAction companyId={companyId} linked={card.driveFiles.map(f => f.fileId)} busy={busy} usable={typedFiles.drive.usable} note={typedFiles.drive.note} hint={typedFiles.drive.hint}
+          <DriveLinkAction companyId={companyId} linked={card.driveFiles.map(f => f.fileId)} busy={busy} usable={typedFiles.drive.usable} note={typedFiles.drive.note} hint={typedFiles.drive.hint} picking={typedFiles.drive.picking} onStop={typedFiles.drive.onStop}
             onLink={typedFiles.onLinkDrive} onLinkText={t => { void typedFiles.onLinkDriveText(t).then(setLinkError) }} />
         </>, note: typedFiles.localFiles ? TYPED_FILES_NOTE : COMPANY_AND_DRIVE_FILES_NOTE },
         ...(consult.extra ? [consult.extra] : [])]}
@@ -494,6 +498,8 @@ function typedFileRows(card: TaskCardData, rootPath: string, typed: BodyProps['t
       menu: [{ label: 'つながりを外す', hint: 'ファイルは消えません', onClick: () => { if (!busy) void typed.onUnlink({ kind: 'local', path: f.path }, label).then(say) } }],
     }
   })
-  const drive = driveFileRows(card.driveFiles, busy, (fileId, label) => { void typed.onUnlink({ kind: 'drive', fileId }, label).then(say) })
+  const drive = driveFileRows(card.driveFiles, busy, (fileId, label) => { void typed.onUnlink({ kind: 'drive', fileId }, label).then(say) },
+    // Its refusal shows where 「つながりを外す」's does (Codex review of #690).
+    fileId => { void typed.onRecheck(fileId).then(say) })
   return [...local, ...drive]
 }

@@ -7,6 +7,8 @@
 //   `{ feature: 'inbox_archive', on }`; google-connector.md "Archiving in Gmail"),
 //   google:decideDriveOverwrite (the card's 「上書きする」 / 「やめる」 for a Google document someone else edited:
 //   the person's press with the session; google-drive.md "Continuing a document people edited")
+//   google:setDrive (「Drive で選んだものを読む・置く」: the member's own switch, sends only `{ feature: 'drive', on }`;
+//   member-oauth.md "Feature toggles inside a grant")
 // The server holds everything (the permission, sealed); the app holds no token
 // at all. google:connect asks the server for the sign-in page's URL and opens
 // it in the system browser itself — the URL (with its one-time state) never
@@ -89,8 +91,13 @@ export function createGoogleApi(deps: GoogleDeps) {
   }
 
   /** 「済んだメールを Gmail でもアーカイブする」 off / back on: the member's own switch only (no consent). */
-  async function setArchive(companyId: string, on: boolean): Promise<GoogleStatusResult> {
-    const r = await send(companyId, 'PUT', '/features', { feature: 'inbox_archive', on })
+  const setArchive = (companyId: string, on: boolean) => setFeature(companyId, 'inbox_archive', on)
+  /** 「Drive で選んだものを読む・置く」 off / back on: the member's own switch only (no consent). */
+  const setDrive = (companyId: string, on: boolean) => setFeature(companyId, 'drive', on)
+
+  /** One of the member's own feature switches inside their grant, then their view. */
+  async function setFeature(companyId: string, feature: 'inbox_archive' | 'drive', on: boolean): Promise<GoogleStatusResult> {
+    const r = await send(companyId, 'PUT', '/features', { feature, on })
     if (!r) return offline
     const data = (r.json as { data?: unknown } | null)?.data
     if (r.res.ok && isMyGoogle(data)) return { success: true, data }
@@ -127,6 +134,7 @@ export function createGoogleApi(deps: GoogleDeps) {
     setRelay,
     setArchive,
     decideDriveOverwrite,
+    setDrive,
   }
 
   /** The person's 「上書きする」 / 「やめる」 (session only): the server writes exactly the content that waited, or closes it. */
@@ -184,6 +192,10 @@ export function registerGoogleIpc(ipc: IpcRegistrar, deps: GoogleDeps): ReturnTy
     if (typeof companyId !== 'string' || !companyId || typeof confirmationId !== 'string' || !/^drive-confirm-[A-Za-z0-9_-]{1,80}$/.test(confirmationId)
       || (action !== 'confirm' && action !== 'decline')) return { ...invalid, code: null }
     return api.decideDriveOverwrite(companyId, confirmationId, action)
+  })
+  ipc.handle('google:setDrive', async (_, companyId: string, on: boolean) => {
+    if (typeof companyId !== 'string' || !companyId || typeof on !== 'boolean') return invalid
+    return api.setDrive(companyId, on)
   })
   return api
 }

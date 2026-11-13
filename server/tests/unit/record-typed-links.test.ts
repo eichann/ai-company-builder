@@ -321,3 +321,46 @@ describe('a company with the shared folder (owner decision 2026-11-13: Drive lin
     expect(engine.fileLink(m('u-alice'), HUMAN, n.id, 'link', { path: '営業部/見積.md', expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'NO_COMPANY_FOLDER' } })
   })
 })
+
+describe('a Drive link whose content ACB could not read is checked again by its linker (owner FB 2026-11-14, 「確かめ直す」)', () => {
+  const before = (who: string, id: string, expectedVersion: number) =>
+    engine.fileLinkBeforeDrive(m(who), HUMAN, id, { target: { kind: 'drive', fileId: FILE_ID }, expectedVersion })
+
+  it('linking it again asks the connector again; read now → the kept facts are replaced in place, said in 経緯', async () => {
+    const t = task()
+    ok(linkDrive('u-alice', t.id, 1, { ...DRIVE, sha256: null }))
+    // Not "already linked, nothing to do": the connector is asked again.
+    expect(before('u-alice', t.id, 2)).toEqual({ ok: true, value: 'ask-drive' })
+    const again = ok(linkDrive('u-alice', t.id, 2, { ...DRIVE, revisionId: 'rev-2' }))
+    expect(again.changed).toBe(true)
+    const links = await fileLinks('u-alice', t.id)
+    expect(links).toHaveLength(1)
+    expect(links[0].drive).toMatchObject({ fileId: FILE_ID, mine: true, sha256: SHA, revisionId: 'rev-2' })
+    expect(historyText('u-alice', t.id)).toContain('中身を確かめ直しました')
+    // Now it can be material.
+    expect(await engine.act(m('u-alice'), HUMAN, t.id, 'cancel', { expectedVersion: 3, note: 'やめます', decision: { materials: [{ kind: 'drive', fileId: FILE_ID }] } }))
+      .toMatchObject({ ok: true })
+  })
+
+  it('still unreadable (a type ACB cannot read, link only): nothing changes', async () => {
+    const t = task()
+    const docx = { ...DRIVE, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', sha256: null }
+    ok(linkDrive('u-alice', t.id, 1, docx))
+    expect(ok(linkDrive('u-alice', t.id, 2, docx)).changed).toBe(false)
+    expect(versionOf(t.id)).toBe(2)
+  })
+
+  it('only the linker, only a person: another member\'s re-link, a read link, the AI change nothing and ask nothing', async () => {
+    const t = task()
+    ok(linkDrive('u-alice', t.id, 1, { ...DRIVE, sha256: null }))
+    expect(before('u-bob', t.id, 2)).toMatchObject({ ok: true, value: { changed: false } })
+    expect(ok(linkDrive('u-bob', t.id, 2)).changed).toBe(false)
+    expect(engine.fileLink(m('u-alice'), AI, t.id, 'link', { target: { kind: 'drive', fileId: FILE_ID }, expectedVersion: 2 }, DRIVE))
+      .toMatchObject({ ok: false, body: { code: 'TYPED_LINK_PERSON_ONLY' } })
+    // A link whose content was read is not asked again.
+    const u = task()
+    ok(linkDrive('u-alice', u.id, 1))
+    expect(before('u-alice', u.id, 2)).toMatchObject({ ok: true, value: { changed: false } })
+    expect((await fileLinks('u-alice', t.id))[0].drive).toMatchObject({ sha256: null })
+  })
+})

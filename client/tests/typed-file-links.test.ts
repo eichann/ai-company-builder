@@ -87,8 +87,8 @@ test('「Google Drive のファイルをつなぐ」 links each pick at the vers
     { target: { kind: 'drive', fileId: '1AbCdEfGhIjKl' }, expectedVersion: 7 },
     { target: { kind: 'drive', fileId: '1ZyXwVuTsRqPo' }, expectedVersion: 4 },
   ])
-  const cancelled = harness({ pickDriveFiles: async () => ({ ok: false, cancelled: true, message: '' }) })
-  assert.deepEqual(await cancelled.api.linkDriveFiles('co1', 'task-0000aa', 7), { success: true, recordId: 'task-0000aa', linked: [] })
+  const cancelled = harness({ pickDriveFiles: async () => ({ ok: false, ended: 'cancelled', message: '' }) })
+  assert.deepEqual(await cancelled.api.linkDriveFiles('co1', 'task-0000aa', 7), { success: true, recordId: 'task-0000aa', linked: [], ended: 'cancelled' })
   assert.deepEqual(cancelled.sent, [])
   const none = harness()
   assert.equal((await none.api.linkDriveFiles('co1', 'task-0000aa', 7)).success, false)

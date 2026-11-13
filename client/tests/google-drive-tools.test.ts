@@ -52,7 +52,7 @@ function fakeServer(scope: 'read' | 'act', opts: { available?: boolean; pdf?: bo
     if (url.endsWith('/me/record-tokens')) return json(201, { token: TOKEN, tokenId: 'tok-1', scope, expiresAt: 'x' })
     if (url.endsWith('/api/records-ai/types')) return json(200, { types: [] })
     if (url.endsWith('/api/records-ai/plugins')) return json(200, { plugins: [] })
-    if (url.endsWith('/api/records-ai/google/drive/status')) {
+    if (url.split('?')[0].endsWith('/api/records-ai/google/drive/status')) {
       return json(200, { available: opts.available ?? true, granted: true, picks: [], puts: [{ fileId: 'fake-upload-1', name: '面談報告書', mimeType: 'application/vnd.google-apps.document', folderId: FOLDER, link: 'l', revisionId: opts.revision ?? 'version:1', at: 't' }] })
     }
     if (url.endsWith('/api/records-ai/google/drive/read')) {
@@ -129,7 +129,7 @@ function companyFolder(): string {
 test('the Drive tools exist only where Drive is set up; drive_put only with an act token', async () => {
   assert.deepEqual((await tools('act', null, { available: false })).t.specs.filter(s => s.name.startsWith('drive_')), [])
   const act = (await tools('act', null)).t.specs.map(s => s.name).filter(n => n.startsWith('drive_'))
-  assert.deepEqual(act.sort(), ['drive_pick_files', 'drive_pick_folder', 'drive_picked', 'drive_put', 'drive_read'])
+  assert.deepEqual(act.sort(), ['drive_pick_files', 'drive_pick_folder', 'drive_picked', 'drive_put', 'drive_put_check', 'drive_read'])
   const read = (await tools('read', null)).t.specs.map(s => s.name).filter(n => n.startsWith('drive_'))
   assert.ok(!read.includes('drive_put'))
   assert.ok((await tools('act', null)).t.instructions.includes('【Google Drive】'))

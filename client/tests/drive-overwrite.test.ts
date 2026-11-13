@@ -39,7 +39,7 @@ async function driveTools(put: PutAnswer, onCard?: (card: DriveOverwriteCard) =>
     if (url.endsWith('/me/record-tokens')) return json(201, { success: true, data: { token: TOKEN, tokenId: 'tok-1', scope: 'act', expiresAt: 'x' } })
     if (url.endsWith('/api/records-ai/types')) return json(200, { success: true, data: { types: [] } })
     if (url.endsWith('/api/records-ai/plugins')) return json(200, { success: true, data: { plugins: [] } })
-    if (url.endsWith('/api/records-ai/google/drive/status')) {
+    if (url.split('?')[0].endsWith('/api/records-ai/google/drive/status')) {
       return json(200, { success: true, data: { available: true, granted: true, picks: [], puts: [{ fileId: FILE, name: '面談報告書', mimeType: 'application/vnd.google-apps.document', folderId: FOLDER, link: 'l', revisionId: 'version:3', at: 't' }] } })
     }
     if (url.endsWith('/api/records-ai/google/drive/put')) return json(put.status, put.body)

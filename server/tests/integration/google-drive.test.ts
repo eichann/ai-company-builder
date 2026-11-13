@@ -1714,7 +1714,7 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
     expect((await page('config', { ticket: files.ticket })).status).toBe(200)
     const r = await page('result', { ticket: files.ticket, mode: 'files', action: 'picked', ids: [GOOGLE_SEED.pastProposalDoc, GOOGLE_SEED.pastProposalSlides, GOOGLE_SEED.salesNotesDoc] })
     expect(r.status, r.text).toBe(200)
-    expect(r.body.data).toEqual({ state: 'picked', kept: 2, refused: 1 })
+    expect(r.body.data).toMatchObject({ state: 'picked', kept: 2, refused: 1 })
     const s = await state('m-sato', files.ticketId)
     expect(s.body.data.picks.map((p: Json) => p.id)).toEqual([GOOGLE_SEED.pastProposalDoc, GOOGLE_SEED.pastProposalSlides])
     expect(s.body.data.refused).toBe(1)
@@ -1726,7 +1726,7 @@ describe('the Picker in the member\'s browser: a one-time pick ticket', () => {
 
     const folder = await ticket('m-sato', { mode: 'folder' })
     expect((await page('config', { ticket: folder.ticket })).status).toBe(200)
-    expect((await page('result', { ticket: folder.ticket, mode: 'folder', action: 'picked', ids: [GOOGLE_SEED.pastProposalDoc] })).body.data).toEqual({ state: 'picked', kept: 0, refused: 1 })
+    expect((await page('result', { ticket: folder.ticket, mode: 'folder', action: 'picked', ids: [GOOGLE_SEED.pastProposalDoc] })).body.data).toMatchObject({ state: 'picked', kept: 0, refused: 1 })
   })
 
   it('cancelled in the browser (or the page closed): the app hears cancelled; the app\'s own cancel closes the ticket for the page', async () => {

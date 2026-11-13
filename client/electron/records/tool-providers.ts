@@ -36,6 +36,8 @@ export interface RecordToolTurn {
   topicTask?: () => string | null
   /** A Drive put waiting for the member's 「上書きする」: the app's own card for the reply (google-drive.md). */
   onDriveOverwrite?: (card: DriveOverwriteCard) => void
+  /** The consultation's folder is the member's own working folder (a company without the shared folder). */
+  workingFolder?: boolean
 }
 
 export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordToolTurn): RecordToolProvider[] {
@@ -50,7 +52,7 @@ export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordTo
     const bound = !!turn.conversationId && (deps.runBound?.(turn.companyId, turn.conversationId) === true || (deps.jobReport?.(turn.conversationId) ?? null) !== null)
     const onlyUnder = area === null ? (bound ? null : undefined) : 'nowhere' in area ? null : `${area.place}/.personal/${area.folder}`
     providers.push((access, signal) => createDriveTools(access, {
-      picking: drivePicking, companyId: turn.companyId, companyRoot: turn.companyRoot, topicTask: turn.topicTask, onOverwriteCard: turn.onDriveOverwrite,
+      picking: drivePicking, companyId: turn.companyId, companyRoot: turn.companyRoot, topicTask: turn.topicTask, onOverwriteCard: turn.onDriveOverwrite, workingFolder: turn.workingFolder === true,
       local: { pathGuard: paths, notDownloaded: notDownloadedFolders, privateFolders: () => deps.privateFolders.readable(turn.companyId), onlyUnder },
     }, signal))
   }

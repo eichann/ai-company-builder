@@ -126,7 +126,8 @@ googleDriveAiRoute.get('/status', aiReads, async (c) => {
   const h = c.var.holder
   const scope = jobScope(c, h)
   if (scope instanceof Response) return scope
-  return answer(c, await googleDrive.aiStatus(h.member, scope))
+  // `fileId`: one file's latest put, whatever its age (the app's check before an overwrite); `putsBefore`: the next page.
+  return answer(c, await googleDrive.aiStatus(h.member, scope, { fileId: c.req.query('fileId'), putsBefore: c.req.query('putsBefore') }))
 })
 
 googleDriveAiRoute.post('/read', aiReads, serviceBody, async (c) => {
@@ -149,8 +150,12 @@ googleDriveAiRoute.post('/put', aiActs, serviceBody, async (c) => {
     if (!put.ok) return answer(c, put)
     // A job's run links its puts to the やること its finish makes (jobs.md), never to a record its body names.
     const recordId = scope ? undefined : (body as { recordId?: unknown } | null)?.recordId
-    const linked = typeof recordId === 'string' ? linkPutToRecord(h.member, actor, recordId, put.value) : false
-    return answer(c, { ok: true, value: linked ? { ...put.value, linkedTo: { recordId: recordId as string } } : put.value })
+    const linked = typeof recordId === 'string' ? linkPutToRecord(h.member, actor, recordId, put.value) : null
+    // Linked, or done in Drive but not linked (said plainly: the member can link it from the card), or nothing to say.
+    const value = linked === null ? put.value
+      : linked === true ? { ...put.value, linkedTo: { recordId: recordId as string } }
+        : { ...put.value, notLinked: { recordId: recordId as string, code: linked.code } }
+    return answer(c, { ok: true, value })
   })
 })
 
@@ -158,23 +163,25 @@ googleDriveAiRoute.post('/put', aiActs, serviceBody, async (c) => {
  * The file a put just made, linked to the consultation's record (google-drive.md "Linked to a
  * record"): only a new put (a replay links nothing), only once it is done in Drive, with the facts
  * of the member's own receipt (never a body's file id), through every record check of the engine.
- * Anything refused or thrown is logged with its code only; the put stays done and is answered as is.
+ * Anything refused or thrown is logged with its code only; the put stays done and is answered with `notLinked`
+ * (owner FB 2026-11-14: never only a log line — the AI tells the member, who can link it from the card).
+ * null: nothing to say (a replay, not done, already linked).
  */
-function linkPutToRecord(member: Member, actor: ActorInput, recordId: string, put: DrivePutAnswer): boolean {
-  if (put.existing || put.drivePut.state !== 'done') return false
+function linkPutToRecord(member: Member, actor: ActorInput, recordId: string, put: DrivePutAnswer): true | { code: string } | null {
+  if (put.existing || put.drivePut.state !== 'done') return null
   try {
     const file = googleDrive.putLinkable(member, put.drivePut.id)
-    if (!file) return false
+    if (!file) return { code: 'NOT_LINKABLE' }
     const r = recordEngine.linkDrivePut(member, actor, recordId, file)
     if (!r.ok) {
-      const code = typeof r.body.code === 'string' && /^[A-Z_]{1,60}$/.test(r.body.code) ? r.body.code : r.kind
+      const code = typeof r.body.code === 'string' && /^[A-Z_]{1,60}$/.test(r.body.code) ? r.body.code : r.kind.toUpperCase().replace(/[^A-Z_]/g, '_')
       console.warn(`[google-drive] the put's file was not linked to the record: ${code}`)
-      return false
+      return { code }
     }
-    return r.value.changed
+    return r.value.changed ? true : null
   } catch (error) {
     logError('google-drive', 'linking the put\'s file to the record failed', error)
-    return false
+    return { code: 'LINK_FAILED' }
   }
 }
 
@@ -225,7 +232,8 @@ const PICKER_SCRIPT = `(function () {
     var giveUp = function () { if (body.action !== 'cancel') post('/result', { ticket: ticket, action: 'cancel' }, true).then(null, function () {}); say(LOST) }
     var send = function (again) {
       post('/result', body, true).then(function (a) {
-        if (a.ok) say(done)
+        // The server's own sentence when it has one (how many were not usable and why, a folder seen outside).
+        if (a.ok) say(a.j && a.j.data && typeof a.j.data.message === 'string' ? a.j.data.message + BACK : done)
         // The first try may have reached the server: a retry told the ticket is used says nothing alarming.
         else if (!again && a.j && a.j.code === 'PICK_TICKET_GONE') say(BACK_TO_APP)
         else if (a.j && typeof a.j.error === 'string') say(a.j.error)
@@ -241,6 +249,7 @@ const PICKER_SCRIPT = `(function () {
     try { post('/result', { ticket: ticket, action: 'cancel' }, true) } catch (e) { /* the page is going */ }
   })
   var BACK = '（このタブは閉じてかまいません）'
+  var AI_ASKED = 'AI が、このファイルを選ぶよう求めています。中身に覚えがなければ選ばないでください。'
   post('/config', { ticket: ticket }).then(function (a) {
     var cfg = a.ok && a.j && a.j.data
     if (!cfg) { finished = true; say(problem(a, 'Google Drive のファイル選びを始められませんでした。アプリに戻ってください。')); return }
@@ -251,11 +260,13 @@ const PICKER_SCRIPT = `(function () {
       window.gapi.load('picker', { callback: function () {
         var P = window.google.picker
         var folder = cfg.mode === 'folder'
-        var mimes = folder ? 'application/vnd.google-apps.folder' : cfg.mimeTypes.join(',')
+        // Linking offers every type (no MIME filter); reading, the types the AI reads.
+        var mimes = folder ? 'application/vnd.google-apps.folder' : (Array.isArray(cfg.mimeTypes) ? cfg.mimeTypes.join(',') : '')
+        var typed = function (v) { return mimes ? v.setMimeTypes(mimes) : v }
         // One view per place, each with only the calls that go together (setParent, setEnableDrives and setOwnedByMe
         // are never combined on one view); the first is the tab the Picker opens on.
         function place(label) {
-          var v = new P.DocsView(folder ? P.ViewId.FOLDERS : P.ViewId.DOCS).setMimeTypes(mimes).setIncludeFolders(true)
+          var v = typed(new P.DocsView(folder ? P.ViewId.FOLDERS : P.ViewId.DOCS)).setIncludeFolders(true)
           if (folder) v = v.setSelectFolderEnabled(true)
           if (typeof v.setLabel === 'function') v = v.setLabel(label)
           return v
@@ -264,7 +275,7 @@ const PICKER_SCRIPT = `(function () {
         var only = cfg.mode === 'files' && Array.isArray(cfg.fileIds) ? cfg.fileIds.filter(function (id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{10,200}$/.test(id) }).slice(0, 10) : []
         if (only.length > 0) {
           // A pasted link: just those files (Google: setFileIds is not combined with setEnableDrives).
-          var picked = new P.DocsView(P.ViewId.DOCS).setMimeTypes(mimes)
+          var picked = typed(new P.DocsView(P.ViewId.DOCS))
           if (picked.setFileIds) picked.setFileIds(only.join(','))
           views.push(picked)
         } else {
@@ -277,10 +288,13 @@ const PICKER_SCRIPT = `(function () {
           var withMe = place('共有アイテム')
           if (typeof withMe.setOwnedByMe === 'function') { withMe = withMe.setOwnedByMe(false); views.push(withMe) }
         }
+        // The AI narrowed the chooser to files it named (drive_pick_files' fileIds): the person decides, warned plainly
+        // (an id may come from text the AI read — review of #690).
+        var aiAsked = !folder && cfg.purpose !== 'link' && only.length > 0
         var b = new P.PickerBuilder()
         views.forEach(function (v) { b = b.addView(v) })
         b = b.setOAuthToken(cfg.accessToken).setDeveloperKey(cfg.apiKey).setAppId(cfg.appId)
-          .setOrigin(window.location.origin).setLocale('ja').setTitle(cfg.mode === 'folder' ? '置き場所のフォルダを選んでください' : '読ませるファイルを選んでください')
+          .setOrigin(window.location.origin).setLocale('ja').setTitle(folder ? '置き場所のフォルダを選んでください' : cfg.purpose === 'link' ? 'つなぐファイルを選んでください' : aiAsked ? AI_ASKED : 'AI に読ませるファイルを選んでください')
           .setCallback(function (data) {
             if (data.action === P.Action.PICKED) {
               var ids = (data.docs || []).map(function (d) { return d && d.id }).filter(function (id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{10,200}$/.test(id) }).slice(0, cfg.maxItems)
@@ -294,7 +308,7 @@ const PICKER_SCRIPT = `(function () {
         if (typeof cfg.account === 'string' && typeof b.setAuthUser === 'function') b = b.setAuthUser(cfg.account)
         b.build().setVisible(true)
         cfg.accessToken = ''
-        say(typeof cfg.account === 'string' ? 'Google アカウント「' + cfg.account + '」で選んでください（ブラウザで別のアカウントになっているときは、このアカウントに切り替えてください）。' : '')
+        say((aiAsked ? AI_ASKED + ' ' : '') + (typeof cfg.account === 'string' ? 'Google アカウント「' + cfg.account + '」で選んでください（ブラウザで別のアカウントになっているときは、このアカウントに切り替えてください）。' : ''))
       }, onerror: function () { finish({ ticket: ticket, action: 'cancel' }, 'Google の画面を読み込めませんでした。アプリに戻ってください。' + BACK) } })
     }
     document.head.appendChild(s)

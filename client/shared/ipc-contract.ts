@@ -810,6 +810,10 @@ export interface IpcInvokeChannels {
   'plugins:bridge': { args: [companyId: string, plugin: PluginPackageRef, op: string, args: unknown]; result: PluginBridgeAnswer }
   /** The screens of the plugins the company lists now and this app keeps, verified (A6, plugin-frame.md). */
   'plugins:screens': { args: [companyId: string]; result: PluginScreensResult }
+  // The card's ［やめる］ while Google's chooser is open for 「Google Drive のファイルをつなぐ」 (google-drive.md): stops waiting, closes the ticket.
+  'tasks:cancelDrivePick': { args: [companyId: string]; result: { stopped: boolean } }
+  // 設定 →「Google」→「Drive で選んだものを読む・置く」: the member's own switch, back on without a consent (member-oauth.md).
+  'google:setDrive': { args: [companyId: string, on: boolean]; result: GoogleStatusResult }
   // lane A ▲
   // lane B ▼
   // lane B ▲
@@ -1216,6 +1220,8 @@ export interface ElectronAPI {
   requestCompanySkill: Invoke<'skillShelf:requestPublish'>
   openCompanySkillBackup: Invoke<'skillShelf:openBackup'>
   onSkillShelfChanged: Subscribe<'skillShelf:changed'>
+  stopDrivePick: Invoke<'tasks:cancelDrivePick'>
+  setGoogleDrive: Invoke<'google:setDrive'>
   // lane A ▲
   // lane B ▼
   // lane B ▲
