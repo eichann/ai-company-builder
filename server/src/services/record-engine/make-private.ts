@@ -44,6 +44,15 @@ export const MAKE_PRIVATE_REFUSALS = {
     error: 'つながっているやることの中に、あなたからは見える範囲を変えられないものがあるため、非公開にできません。管理者に相談してください',
     code: 'LINKED_NOT_MOVABLE',
   },
+  // Records linked to it placed by a folder (送るもの, 決めたこと, やりとり… — some copied its place when made).
+  linkedRecordsWider: {
+    error: 'この案件・プロジェクトにつながっている記録（送るもの・決めたことなど）に、参加者より多くの人が見られるものがあるため、非公開にできません。管理者に相談してください',
+    code: 'LINKED_RECORDS_WIDER',
+  },
+  participantsWider: {
+    error: '参加者の中に、今この案件・プロジェクトを見られない人がいます。その人を参加者から外してから、もう一度お試しください',
+    code: 'PARTICIPANTS_WIDER',
+  },
   namedCannotRead: {
     error: 'この案件・プロジェクトやそのやることにかかわる人（責任者・担当・頼んだ人など）が、参加者に入っていません。参加者に足してから、もう一度お試しください',
     code: 'NAMED_PERSON_CANNOT_READ',
@@ -70,7 +79,7 @@ export function makingPrivate(ctx: EngineContext) {
 
   /** The まとまり as this member may make it private, with its linked やること; else the refusal. */
   function load(member: Member, recordId: string): Outcome<never> | {
-    records: RecordRepository; reader: RecordReader; row: RecordRow; parent: string; tasks: RecordRow[]
+    records: RecordRepository; reader: RecordReader; row: RecordRow; parent: string; tasks: RecordRow[]; others: RecordRow[]
   } {
     const opened = open(member)
     if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
@@ -106,7 +115,11 @@ export function makingPrivate(ctx: EngineContext) {
       const name = tdef ? bundleLinkName(tdef) : null
       return name !== null && sources.some(l => l.sourceId === t.id && l.name === name)
     })
-    return { records, reader, row, parent: dept ?? '', tasks }
+    // Every other live record linking to it that is placed by a folder: it never follows (only やること
+    // do), so one that would be seen by more people than the まとまり stops the move. Members-only ones
+    // (a meeting's attendees) keep their own list; file records stay where they are.
+    const others = candidates.filter(r => r.removedAt === null && !tasks.includes(r) && r.path === null && r.personalOwner === null && r.members === null)
+    return { records, reader, row, parent: dept ?? '', tasks, others }
   }
 
   /** The person fields' values of a record (責任者・担当・頼んだ人・確かめる人…). */
@@ -137,7 +150,7 @@ export function makingPrivate(ctx: EngineContext) {
     makePrivatePlan(member: Member, recordId: string): Outcome<MakePrivatePlan> {
       const found = load(member, recordId)
       if (!('row' in found)) return found
-      const { records, reader, row, parent, tasks } = found
+      const { records, reader, row, parent, tasks, others } = found
       const people = new Set(namedPeople(records, row))
       let count = 0
       const shown: RecordRow[] = []
@@ -166,6 +179,8 @@ export function makingPrivate(ctx: EngineContext) {
       const roleOf = (id: string) => deps.roleOf(member.companyId, id)
       const within = (t: RecordRow) => placeWithin(member.companyId, scopes, roleOf, planned, t)
       const blocked = tasks.some(t => !placeWithin(member.companyId, scopes, roleOf, t, planned) && !narrowable(reader, t, within))
+        || others.some(r => !placeWithin(member.companyId, scopes, roleOf, r, planned))
+        || !placeWithin(member.companyId, scopes, roleOf, planned, row)
       return ok({ parent, tasks: count, people: named.sort(), blocked })
     },
 
@@ -184,7 +199,7 @@ export function makingPrivate(ctx: EngineContext) {
       if (actor.kind !== 'human') return refuse('forbidden', 'この操作は本人が画面から行ってください', { code: 'NOT_ALLOWED' })
       const found = load(member, recordId)
       if (!('row' in found)) return found
-      const { records, reader, row, parent, tasks } = found
+      const { records, reader, row, parent, tasks, others } = found
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null || Array.isArray(b)) return bad('The body must be an object')
       if (!Number.isInteger(b.expectedVersion) || (b.expectedVersion as number) < 0) return bad('expectedVersion: the version you saw', 'VERSION_REQUIRED')
@@ -209,6 +224,14 @@ export function makingPrivate(ctx: EngineContext) {
       const place = (r: RecordRow): RecordAccessRow => ({ ...r, scopeId: null, path: null, folder, personalOwner: null, members: null, memberSets: [] })
       const newPlace = place(row)
       const roleOf = (id: string) => deps.roleOf(member.companyId, id)
+      // Nobody gains the まとまり: every reader of the folder already reads it (a participant who could not
+      // see it before is refused, never shown it with its whole history).
+      if (!placeWithin(member.companyId, scopes, roleOf, newPlace, row)) {
+        return bad(MAKE_PRIVATE_REFUSALS.participantsWider.error, MAKE_PRIVATE_REFUSALS.participantsWider.code)
+      }
+      if (others.some(r => !placeWithin(member.companyId, scopes, roleOf, r, newPlace))) {
+        return conflict(MAKE_PRIVATE_REFUSALS.linkedRecordsWider.error, MAKE_PRIVATE_REFUSALS.linkedRecordsWider.code)
+      }
       // Its やること that would be seen by more people than the まとまり there.
       const wider = tasks.filter(t => !placeWithin(member.companyId, scopes, roleOf, t, newPlace))
       const within = (t: RecordRow) => placeWithin(member.companyId, scopes, roleOf, newPlace, t)

@@ -249,6 +249,31 @@ describe('afterwards: participants only, its やること too', () => {
     expect(source.forCompany(CO).records.find(t.id)?.folder).toBe('開発部/少人数')
   })
 
+  it('another record linked to it and placed by a folder (it never follows) stops it, naming nothing', () => {
+    const p = project()
+    const other = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '関係する話', fields: { assignee: 'u-alice' }, folder: '営業部' })).record
+    // A record of another kind linked to the 案件 (a sent mail, a decision…), written directly.
+    source.forCompany(CO).records.replaceLinks(other.id, [{ sourceId: other.id, name: 'related', position: 0, targetId: p.id, targetPath: null }])
+    expect(ok(engine.makePrivatePlan(m('u-mgr'), p.id)).blocked).toBe(true)
+    const r = move('u-mgr', p.id)
+    expect(code(r)).toBe('LINKED_RECORDS_WIDER')
+    expect(JSON.stringify(r)).not.toMatch(/関係する話|新製品/)
+    expect(source.forCompany(CO).records.find(p.id)?.folder).toBe('営業部')
+  })
+
+  it('a participant who could not read the 案件 before is refused (nobody gains it with its history)', () => {
+    // A company without the shared folder: 営業部 is read by its people only.
+    conn.prepare("INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('sales', ?, '営業部', 'folder', ?)").run(CO, TS)
+    rule('sales-e', 'sales', 'everyone', null, 0)
+    rule('sales-m', 'sales', 'user', 'u-mgr', 1)
+    rule('sales-a', 'sales', 'user', 'u-alice', 1)
+    const p = project()
+    expect(code(engine.makePrivatePlan(m('u-carol'), p.id))).toBe('RECORD_NOT_FOUND')
+    rule('p-c', 'p', 'user', 'u-carol', 1)
+    expect(code(move('u-mgr', p.id))).toBe('PARTICIPANTS_WIDER')
+    expect(source.forCompany(CO).records.find(p.id)?.folder).toBe('営業部')
+  })
+
   it('a members-only やること the mover reads whose list is wider stops it too (never a list turned into a folder)', () => {
     const p = project()
     ok(engine.create(m('u-mgr'), HUMAN, { type: 'task', title: '打ち合わせ', fields: { assignee: 'u-mgr' }, members: ['u-carol'], links: { bundle: p.id } }))

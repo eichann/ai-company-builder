@@ -1318,9 +1318,9 @@ new permission. Its 参加者 are that folder's readers (owners / admins always 
 
 An existing **public** 案件・プロジェクト moves into **its own new private folder** — the place a 非公開 one gets
 when it is made, with the same rights; no new permission. Only the record's place changes
-(`records.folder`, `setPlace`, as 「部署に出す」); **no file of the company folder moves** (its linked files,
-meetings and 来た連絡 stay where they are; a meeting's link to it is then hidden from the meeting's other
-readers by `linkAllowed`, public → private).
+(`records.folder`, `setPlace`, as 「部署に出す」); **no file of the company folder moves** (its linked files
+stay where they are; a members-only meeting keeps its attendees, and its link to the 案件 shows only to
+those who read the 案件 — the reader check on the linked record, `records.ts` / `record-find.ts`).
 
 - `GET /records/item/:recordId/make-private` (any member; `makePrivatePlan`) → `{ parent, tasks, people,
   blocked }`: the department folder the private folder is made in (`''` = the company root), how many linked
@@ -1348,10 +1348,18 @@ readers by `linkAllowed`, public → private).
   private folder). Any other wider one → 409 `LINKED_NOT_MOVABLE`, nothing written (its text names no task,
   count or place: the caller may not read them). Everyone the 案件 or a narrowed やること names must read the
   folder → 400 `NAMED_PERSON_CANNOT_READ`. Owner-only やること are never wider and stay owner-only.
+- **Nothing else follows, so nothing else may be wider**: every other live record linking to it that is placed
+  by a folder (送るもの — outbound mail copies a まとまり's place when made —, 決めたこと, やりとり, a やること
+  linked by another link…) must already be within the new place (`placeWithin`), else 409
+  `LINKED_RECORDS_WIDER`, nothing written. Members-only ones (a meeting's attendees) and file records are left
+  as they are. **Nobody gains the 案件**: every reader of the folder must already read it (400
+  `PARTICIPANTS_WIDER` — matters in a company without the shared folder, whose department places can be
+  read-restricted).
 - Ledger: action `make_private` with `place.folder` before / after on the 案件 (at `expectedVersion`, else
   `VERSION_CONFLICT`) and on each narrowed やること (at its current version; any mismatch rolls the whole move
   back). **Never undone** (`place.*`). The answer: `{ record, entry, narrowed }`; the `records` signal for
-  each changed record; nobody is notified. 経緯 says 「参加者だけに見えるようにしました」.
+  each changed record (it reaches the readers after the move; those who lost it catch up by the app's
+  60 s check); nobody is notified. 経緯 says 「参加者だけに見えるようにしました」.
 - **No leaks**: the plan's `blocked` says only that something linked cannot be changed by the caller (it may
   be a やること they do not read — chosen over leaving it seen by people outside the 案件); every refusal names no
   folder, task or title; the new folder's path is in the ledger, read only by its readers afterwards.
@@ -1360,7 +1368,8 @@ readers by `linkAllowed`, public → private).
   まとまり, a plugin's type, not public, version; every other folder one answer naming nothing; a
   non-participant reads neither it nor its narrowed やること, an owner-only one stays, never undone; someone
   named not a participant; a やること the mover cannot read, a members-only list that is wider, one in another
-  private folder a participant could not see — each guard mutation-checked); permission matrix rows +
+  private folder a participant could not see, one already narrower left alone; another linked record wider;
+  a participant who could not read the 案件 — each guard mutation-checked); permission matrix rows +
   `CROSS`.
 
 ## Core types (4-5, `shared/core/core-types.ts`)

@@ -746,7 +746,7 @@ only when the card's `makePrivate` is there — main asks `GET …/make-private`
 admins and the department's managers see it. `MakePrivateDialog` (records feature) asks first: 「これからは参加者
 だけが見られます。参加者は、あなたと部署の管理役、それにこの〇〇にかかわる〇〇さん…です（管理者はいつでも見られ
 ます）」, 「つながっているやること（N件）も、参加者だけに見えるようになります」, 「つながっているファイルや会議の記録は、
-今の場所のまま動きません」, 「あとから公開に戻すことは、ここからはできません」; a `blocked` plan disables the press
+今の場所のまま動きません（会議の記録は、出た人がこれまでどおり見られます）」, 「あとから公開に戻すことは、ここからはできません」; a `blocked` plan disables the press
 and says why. The press (`onMakePrivate`, composed by AppShell from `makeExistingBundlePrivate` in
 `features/tasks/api.ts`): the private folder in the plan's `parent` (`createPrivateBundleFolder`, names from
 `privateBundleFolderNames`), the plan's `people` added as participants (the folder's list kept, as
