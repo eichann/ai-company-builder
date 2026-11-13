@@ -116,6 +116,23 @@ test('a プロジェクト without a 責任者: every reader gets 責任者を�
   assert.equal(bundleActionsOf(v1, 'active', {}, 'u-sato', people), null)
 })
 
+// The app's fallback is narrower than the server's: a `who` naming `link:<link>.<field>` people (a parent
+// まとまり's 責任者, unknown to the app) never opens it, even with the record's own person field empty.
+test('who_fallback is not offered when who names a linked record\'s people (the app cannot know them)', () => {
+  const text = ['---', 'label: 小さな案件', 'version: 1', 'storage: server', 'implements: [bundle]', 'fields:',
+    '  owner: { label: 責任者, kind: person, source: server }', '  purpose: { label: なんのため, kind: text, source: server }',
+    'links:', '  parent: { label: 親, interface: bundle, cardinality: one }',
+    'states: [open, done]', 'initial: open', 'final: [done]', 'actions:',
+    '  set_owner: { label: 責任者を替える, from: [open], who: [owner, link:parent.owner], who_fallback: [anyone], args: { owner: person } }', '---', ''].join('\n')
+  const parsed = parseTypeFile('small', text)
+  assert.ok(parsed.ok, JSON.stringify(parsed))
+  assert.equal(bundleActionsOf(parsed.definition, 'open', {}, 'u-sato', people), null)
+  // Without the link entry the same type does offer it (the guard, not the type, decides).
+  const plain = parseTypeFile('small', text.replace('who: [owner, link:parent.owner]', 'who: [owner]'))
+  assert.ok(plain.ok, JSON.stringify(plain))
+  assert.deepEqual(names(bundleActionsOf(plain.definition, 'open', {}, 'u-sato', people)), { main: null, more: ['責任者を替える'] })
+})
+
 test('a business plugin\'s 案件 gets its own type\'s actions the same way; the AI\'s steps, link setters and fields without an editor are left out', () => {
   const text = ['---', 'label: 案件', 'version: 1', 'storage: server', 'implements: [bundle]', 'fields:',
     '  owner: { label: 責任者, kind: person, source: server }', '  purpose: { label: なんのため, kind: text, source: server }',

@@ -149,6 +149,16 @@ describe('who says 「そうです」', () => {
     expect(ok(await act(m('u-carol'), HUMAN, d.id, 'confirm')).record.fields.decided_by).toBe('u-carol')
   })
 
+  // Owner FB #34 (owner decision 2026-11-13): a 案件 made without a 責任者 now gets its creator, so its
+  // decisions are the creator's to confirm (no longer any reader of the meeting).
+  it('a new 案件 made without a 責任者: its creator is the 責任者 and confirms; another reader of the meeting cannot', async () => {
+    const made = ok(engine.create(m('u-alice'), HUMAN, { type: 'deal', title: '新しい案件' })).record
+    expect(made.fields.owner).toBe('u-alice')
+    const d = await aiDecision({ bundle: made.id, meeting: meeting().id })
+    expect(await act(m('u-carol'), HUMAN, d.id, 'confirm')).toMatchObject({ ok: false, kind: 'forbidden' })
+    expect(ok(await act(m('u-alice'), HUMAN, d.id, 'confirm')).record.fields.decided_by).toBe('u-alice')
+  })
+
   it('the 責任者’s delegate during an absence confirms for them', async () => {
     const d = await aiDecision({ bundle: deal('u-alice').id, meeting: meeting().id })
     expect(await act(m('u-carol'), HUMAN, d.id, 'confirm')).toMatchObject({ ok: false, kind: 'forbidden' })

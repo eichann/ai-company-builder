@@ -140,4 +140,22 @@ describe('a プロジェクト without a 責任者 (made before the fix)', () =>
     expect(engine.whoMay(m('u-carol'), p.id, ['set_owner'])).toBeNull()
     ok(await act('u-alice', p.id, 'set_owner', { owner: 'u-alice' }))
   })
+
+  // Owner decision A (2026-11-13): a 責任者 who can no longer read it (left, or taken off its private
+  // folder) counts as none, so its readers can take an abandoned one over — the server's
+  // `who_fallback` (ownPeopleOf keeps only named people who read the record). The app offers the
+  // button only when the field is empty (it cannot tell who reads what).
+  it('a 責任者 who can no longer read it counts as none; one who can keeps it closed', async () => {
+    const p = ok(engine.create(m('u-mgr'), HUMAN, { type: 'project', title: '新製品', folder: PRIVATE, fields: { owner: 'u-alice' } })).record
+    rule('p-c', 'p', 'user', 'u-carol', 1)
+    // u-alice reads it: u-carol (a participant, not a manager) may not name another.
+    expect(code(await act('u-carol', p.id, 'set_owner', { owner: 'u-carol' }))).toBe('NOT_ALLOWED')
+    expect(engine.whoMay(m('u-carol'), p.id, ['set_owner'])?.may).toEqual({ set_owner: false })
+    // u-alice taken off the private folder: the project is open to be taken over — set_owner only.
+    conn.prepare("DELETE FROM scope_rules WHERE id = 'p-a'").run()
+    expect(engine.whoMay(m('u-carol'), p.id, ['set_owner', 'finish'])?.may).toEqual({ set_owner: true, finish: false })
+    expect(code(await act('u-carol', p.id, 'finish'))).toBe('NOT_ALLOWED')
+    ok(await act('u-carol', p.id, 'set_owner', { owner: 'u-carol' }))
+    expect(fieldsOf(p.id).owner).toBe('u-carol')
+  })
 })
