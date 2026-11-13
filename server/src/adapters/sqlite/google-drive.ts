@@ -150,12 +150,16 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
         .get(companyId, userId, fileId, now) as ConfirmRow | undefined
       return r ? toConfirm(r) : null
     },
-    settleOverwriteConfirmation(id, to) {
-      return conn.prepare(`UPDATE google_drive_overwrite_confirmations SET state = ?, content = NULL WHERE company_id = ? AND id = ? AND state = 'open'`)
-        .run(to, companyId, id).changes === 1
+    moveOverwriteConfirmation(id, from, to) {
+      if (from.length === 0) return false
+      const clear = to === 'written' || to === 'declined'
+      return conn.prepare(`UPDATE google_drive_overwrite_confirmations SET state = ?${clear ? ', content = NULL' : ''}
+        WHERE company_id = ? AND id = ? AND state IN (${from.map(() => '?').join(', ')})`)
+        .run(to, companyId, id, ...from).changes === 1
     },
-    pruneOverwriteConfirmations(before) {
-      conn.prepare('DELETE FROM google_drive_overwrite_confirmations WHERE company_id = ? AND expires_at <= ?').run(companyId, before)
+    pruneOverwriteConfirmations(now, deleteBefore) {
+      conn.prepare('UPDATE google_drive_overwrite_confirmations SET content = NULL WHERE company_id = ? AND expires_at <= ? AND content IS NOT NULL').run(companyId, now)
+      conn.prepare('DELETE FROM google_drive_overwrite_confirmations WHERE company_id = ? AND expires_at <= ?').run(companyId, deleteBefore)
     },
 
     claimPut(row) {

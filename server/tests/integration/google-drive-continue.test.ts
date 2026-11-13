@@ -314,7 +314,8 @@ describe('continuing a Google document people edited (google-drive.md "Continuin
     expect([asked.status, asked.body.code], asked.text).toEqual([409, 'DRIVE_OVERWRITE_NEEDS_CONFIRMATION'])
     const c = asked.body.confirmation
     expect(c).toMatchObject({ id: expect.stringMatching(/^drive-confirm-/), fileName: '人が直す報告書', editors: ['tanaka'], commented: false })
-    expect(asked.body.error).toContain('tanakaさん')
+    // Names chosen by people in Google reach the member's card only, never the AI's text.
+    expect(asked.body.error).not.toContain('tanaka')
     expect(patches(doc.fileId)).toBe(0)
     expect(db.prepare('SELECT COUNT(*) AS n FROM google_drive_puts WHERE company_id = ? AND request_key = ?').get(CO, 'key-confirm-0001').n).toBe(0)
     expect(Buffer.from(ROW(c.id).content).toString()).toBe(content)
@@ -341,6 +342,40 @@ describe('continuing a Google document people edited (google-drive.md "Continuin
     expect([ROW(c.id).state, ROW(c.id).content]).toEqual(['written', null])
     // Pressed again: nothing more.
     expect((await press('m-sato', c.id, 'confirm')).body.code).toBe('DRIVE_CONFIRMATION_DONE')
+    expect(patches(doc.fileId)).toBe(1)
+    // The colleague's revision, accepted by the press, stays accepted: the next update with nothing changed since goes
+    // straight through (no new read, no new confirmation), and so does the one after it.
+    for (const text of ['# 三版\n', '# 四版\n']) {
+      const next = await update(token, '人が直す報告書.md', doc.fileId, text)
+      expect(next.body.data?.drivePut.state, next.text).toBe('done')
+      expect(next.body.data.continued).toBeUndefined()
+    }
+  })
+
+  it('a press being written is the press\'s: another press or a decline meanwhile is refused; a lost answer is not called written', async () => {
+    const token = await tokenFor('m-sato')
+    const doc = await putDoc(token, '# 一版\n', '書いている最中.md')
+    google.editDriveFile(doc.fileId, '# 他の人の直し\n', SOMEONE_ELSE)
+    expect((await ai(token, 'POST', '/read', { fileId: doc.fileId })).status).toBe(200)
+    const asked = await update(token, '書いている最中.md', doc.fileId, '# 二版\n')
+    const id = asked.body.confirmation.id
+    db.prepare("UPDATE google_drive_overwrite_confirmations SET state = 'writing' WHERE company_id = ? AND id = ?").run(CO, id)
+    expect((await press('m-sato', id, 'confirm')).body.code).toBe('DRIVE_CONFIRMATION_BUSY')
+    expect((await press('m-sato', id, 'decline')).body.code).toBe('DRIVE_CONFIRMATION_BUSY')
+    // A newer request of the AI does not take it either (a new one is made beside it).
+    const newer = await update(token, '書いている最中.md', doc.fileId, '# 別の版\n')
+    expect(newer.body.confirmation.id).not.toBe(id)
+    expect(ROW(id).state).toBe('writing')
+    expect(patches(doc.fileId)).toBe(0)
+    db.prepare("UPDATE google_drive_overwrite_confirmations SET state = 'open' WHERE company_id = ? AND id = ?").run(CO, id)
+    db.prepare("UPDATE google_drive_overwrite_confirmations SET state = 'declined', content = NULL WHERE company_id = ? AND id = ?").run(CO, newer.body.confirmation.id)
+    // Sent, and Google's answer lost (and not found yet): 「分からない」, never 「上書きしました」, never sent again.
+    google.faults.dropAnswerAfterSend(1)
+    google.faults.failNextFileSearches(1)
+    const lost = await press('m-sato', id, 'confirm')
+    expect(lost.body.data?.state, lost.text).toBe('unknown')
+    expect(ROW(id).state).toBe('written')
+    expect((await press('m-sato', id, 'confirm')).body.code).toBe('DRIVE_CONFIRMATION_DONE')
     expect(patches(doc.fileId)).toBe(1)
   })
 
@@ -395,7 +430,18 @@ describe('continuing a Google document people edited (google-drive.md "Continuin
     expect(patches(doc.fileId)).toBe(0)
   })
 
-  it('every other check still holds at the press: the file shared outside by itself is refused for the AI\'s content', async () => {
+  it('a file shared outside by itself: no confirmation is asked (nothing kept); shared after the ask, the press is refused and closes it', async () => {
+    const token = await tokenFor('m-sato')
+    const shared = await putDoc(token, '# 一版\n', '最初から外.md')
+    google.editDriveFile(shared.fileId, '# 他の人の直し\n', SOMEONE_ELSE)
+    expect((await ai(token, 'POST', '/read', { fileId: shared.fileId })).status).toBe(200)
+    google.shareDriveFile(shared.fileId, { type: 'anyone', role: 'reader' })
+    const refused = await update(token, '最初から外.md', shared.fileId, '# 二版\n')
+    expect(refused.body.code).toBe('DRIVE_FILE_SHARED_OUTSIDE')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM google_drive_overwrite_confirmations WHERE company_id = ? AND file_id = ?').get(CO, shared.fileId).n).toBe(0)
+  })
+
+  it('every other check still holds at the press: the file shared outside by itself is refused for the AI\'s content and closes the confirmation', async () => {
     const token = await tokenFor('m-sato')
     const doc = await putDoc(token, '# 一版\n', '外に出る.md')
     google.editDriveFile(doc.fileId, '# 他の人の直し\n', SOMEONE_ELSE)
@@ -405,5 +451,6 @@ describe('continuing a Google document people edited (google-drive.md "Continuin
     const r = await press('m-sato', asked.body.confirmation.id, 'confirm')
     expect(r.body.code).toBe('DRIVE_FILE_SHARED_OUTSIDE')
     expect(patches(doc.fileId)).toBe(0)
+    expect([ROW(asked.body.confirmation.id).state, ROW(asked.body.confirmation.id).content]).toEqual(['declined', null])
   })
 })

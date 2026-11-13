@@ -470,24 +470,34 @@ Google document that changed since its baseline — or has none — continues fr
     Every revision `me` and every comment and reply the member's own → **written at once** (`continued: 'own'`; the 11/12
     decision: the writer's own edits may be overwritten, after reading them);
   - **someone else's** revision or comment → nothing written; 409 `DRIVE_OVERWRITE_NEEDS_CONFIRMATION` with `confirmation
-    { id, fileName, editors (Google's display names, ≤ 5), commented, expiresAt }`. The request waits on the server
+    { id, fileName, editors (Google's display names, ≤ 5), commented, expiresAt }`. The names are for the member's card
+    only: people choose them in Google, so the sentence to the AI (server and app) says 「ほかの人」. The file's own outside
+    sharing is checked **before** these document checks, so no confirmation is asked (nor content kept) for a file the AI
+    may not update. The request waits on the server
     (`google_drive_overwrite_confirmations`, additive; `askBeforeOverwrite`): the content itself (fixed by its sha256), the
     request key, the read state and a sha256 of the comments as seen, for `DRIVE_OVERWRITE_CONFIRM_TTL_MS` (24 h). The same
-    request again while it waits for the same state answers the same confirmation; another state replaces it.
+    request again while it waits for the same state answers the same confirmation; another request or state replaces it (at
+    most one waits per member and file). An expired confirmation's content is removed at the next ask or press; its row
+    stays 7 days (a late press hears 「時間がたった」).
 - **The person's press** (`POST /me/google/drive/overwrite-confirmations/:id { action: confirm | decline }`, **session
   only**, the member's own row — another member's or company's id → 404 `DRIVE_CONFIRMATION_NOT_FOUND`;
-  `decideOverwrite`): `confirm` runs the whole put again with exactly the waiting content (same key, same target, every
-  check: the folder pick, outside sharing for the AI's content, `DRIVE_FILE_FIXED`, …) and writes only if the document is
-  still what was read **and** the comments are as seen (else `DRIVE_READ_AGAIN`, the row declined: the AI reads again);
-  written → the row `written`, its content removed, `continued: 'confirmed'`; pressed again → `DRIVE_CONFIRMATION_DONE`.
-  `decline` → `declined`, content removed. Past its time → `DRIVE_CONFIRMATION_EXPIRED`. The consultation's やること link
-  follows the new revision as after a put (`linkPutToRecord`, actor the member, proposed by the AI). The approvals
+  `decideOverwrite`): `confirm` first **claims** the row (`open → writing`, a compare-and-set before anything is awaited:
+  another press, a decline (`DRIVE_CONFIRMATION_BUSY`) or a newer request of the AI cannot take it meanwhile), then runs
+  the whole put again with exactly the waiting content (same key, same target, every check: the folder pick, outside
+  sharing for the AI's content, `DRIVE_FILE_FIXED`, …) and writes only if the document is still what was read **and** the
+  comments are as seen (else `DRIVE_READ_AGAIN`). Sent → `written`, content removed: `done` answers `written`
+  (`continued: 'confirmed'`); a lost answer not found yet answers `unknown` — never 「上書きしました」, never sent again.
+  Refused: Google out of reach / the put still in progress → back to `open` (may be pressed again); anything else →
+  `declined` (the AI asks anew). Pressed again after → `DRIVE_CONFIRMATION_DONE`. `decline` → `declined`, content
+  removed. Past its time → `DRIVE_CONFIRMATION_EXPIRED`. The consultation's やること link follows the new revision as
+  after a put (`linkPutToRecord`, **as the AI of that consultation**: every record check an AI's link meets applies). The approvals
   mechanism was not reused: it is built on approval records, plugin operations and an approver resolved by rule, none of
   which applies to the member's own file; this keeps the same idea (the content fixed and hashed, the press writes
   exactly that, used once).
-- **The baseline after continuing**: taken from the revision the update started from (`keepDocBaseline`'s `previous {
-  revision, continued }`): the people's revisions before it are accepted; only what came after must be the member's, so
-  the next update with nothing changed goes straight through.
+- **The baseline after an update**: (c) checks only the revisions after the one the update started from (the previous
+  baseline's, or the read one when continued): the revisions before it were vetted already (by that baseline, or read and
+  confirmed), so a colleague's revision accepted once stays accepted and later updates with nothing changed go straight
+  through. A new document: every revision, as before.
 - **Comments**: a full replace may take a comment off its words: an update of a document that has comments answers
   `commentsMayMove: true`; the tool tells the AI to say so; the card says it beforehand.
 - **Kept**: never a file the member's own put did not make; never when it changed after the read; a folder or file seen
@@ -500,6 +510,9 @@ Google document that changed since its baseline — or has none — continues fr
   says the app must be updated. The press: IPC `google:decideDriveOverwrite` (session in main); the card's refusal words
   are the app's own by code (`DRIVE_OVERWRITE_REFUSALS`). The descriptions of `drive_put` / `drive_read` and
   `DRIVE_INSTRUCTIONS` say: read, take the edits in, update the same file — never a copy.
+- **Limits**: a document longer than `DRIVE_READ_TEXT_MAX` is never read whole, so no read is kept and it cannot be
+  continued (the AI keeps being told to read). A file linked to a record keeps counting while the link exists even if
+  its linker can no longer read that record (they cannot take it off there); Google still checks their own token.
 - **Next step (not built)**: option ウ — partial edits through the Docs API (`documents.batchUpdate`), which would keep
   comments anchored and need no full replace (a new scope, `documents`, beyond `drive.file`).
 - Unverified against real Google: that `lastModifyingUser.displayName` and the comments' `author` / `replies` are answered

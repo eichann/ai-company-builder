@@ -32,9 +32,9 @@ export const DriveOverwriteCard = memo(function DriveOverwriteCard({ card }: { c
       <p className="mt-1 text-xs text-gray-700 dark:text-zinc-300">「{card.fileName}」— {DRIVE_OVERWRITE_WORDS.body}</p>
       {card.commented && <p className="mt-1 text-xs text-gray-600 dark:text-zinc-400">{DRIVE_OVERWRITE_WORDS.comments}</p>}
       {outcome && (
-        <p role={outcome.kind === 'error' ? 'alert' : 'status'}
-          className={`mt-2 flex items-center gap-1 text-xs ${outcome.kind === 'error' ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
-          {outcome.kind !== 'error' && <CheckCircle size={13} weight="bold" aria-hidden />}{outcome.text}
+        <p role={outcome.kind === 'error' || outcome.kind === 'unknown' ? 'alert' : 'status'}
+          className={`mt-2 flex items-center gap-1 text-xs ${outcome.kind === 'error' ? 'text-red-600 dark:text-red-400' : outcome.kind === 'unknown' ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
+          {(outcome.kind === 'written' || outcome.kind === 'declined') && <CheckCircle size={13} weight="bold" aria-hidden />}{outcome.text}
         </p>
       )}
       {!finished && (

@@ -95,9 +95,10 @@ googleDriveRoute.post('/me/google/drive/overwrite-confirmations/:confirmationId'
   const member = c.var.member
   const r = await googleDrive.decideOverwrite(member, c.req.param('confirmationId'), c.var.body)
   if (!r.ok) return answer(c, r)
-  const { recordId, ...decision } = r.value
+  const { recordId, conversationId, ...decision } = r.value
   if (decision.state === 'written' && typeof recordId === 'string') {
-    linkPutToRecord(member, { kind: 'human', proposedBy: 'ai' }, recordId, { drivePut: decision.drivePut, existing: false })
+    // As the AI of that consultation (it named the record): every record check an AI's link meets applies.
+    linkPutToRecord(member, { kind: 'ai', conversationId: conversationId ?? null, runId: null }, recordId, { drivePut: decision.drivePut, existing: false })
   }
   return answer(c, { ok: true, value: decision })
 })

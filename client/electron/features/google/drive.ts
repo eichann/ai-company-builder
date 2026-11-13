@@ -37,7 +37,7 @@ import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from '../
 import { RecordsApiError, type RecordTurnAccess } from '../../records/api'
 import type { ExtraRecordTools, RecordToolDescriptor } from '../../records/tools'
 import { recordToolDisplay } from '../../../shared/acb-tool-displays'
-import { driveOverwriteCardFor, driveOverwriteWho, type DriveOverwriteCard } from '../../../shared/drive-overwrite'
+import { driveOverwriteCardFor, type DriveOverwriteCard } from '../../../shared/drive-overwrite'
 import type { PathGuard } from '../ports'
 
 const CONSENT_WAIT_MS = 2 * 60 * 1000
@@ -479,7 +479,7 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
               deps.onOverwriteCard(card)
               return json({
                 state: 'waiting-for-member', code: error.code,
-                instruction: `${driveOverwriteWho(card)}の直し・コメントが入っているため、上書きするかどうかをメンバーに確かめています（アプリのカード）。メンバーが「上書きする」を押すと、この内容で上書きされます。押されるまで、置き直したり新しいファイルを作ったりしないでください。上書きすると Drive の変更履歴から元の版に戻せること、コメントが元の場所から外れることがあることも伝えてください。`,
+                instruction: `ほかの人の直し・コメントが入っているため、上書きするかどうかをメンバーに確かめています（アプリのカード）。メンバーが「上書きする」を押すと、この内容で上書きされます。押されるまで、置き直したり新しいファイルを作ったりしないでください。上書きすると Drive の変更履歴から元の版に戻せること、コメントが元の場所から外れることがあることも伝えてください。`,
               })
             }
             return json({ error: 'ほかの人の直しが入っているため、メンバーの確認が要ります。確認のカードはこのアプリでは出せません。アプリを新しくするよう伝えてください（新しいファイルは作らないでください）。', code: error.code })

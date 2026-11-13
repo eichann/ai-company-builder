@@ -257,6 +257,10 @@ interface DocComment {
 const DOC_NEEDS_READ = 'このファイルは、前に置いたあとに Google Drive で直されています。上書きする前に drive_read で今の中身を読み、直しやコメントを取り込んだ文書を作ってから、もう一度 updateFileId で上書きしてください（新しいファイルにはしないでください）。'
 const DOC_NO_BASELINE_NEEDS_READ = 'このファイルは前に置いたときの控えがなく、Google Drive で直されていないか確かめられないため、このままでは上書きしません。drive_read で今の中身を読み、直しがあれば取り込んでから、もう一度 updateFileId で上書きしてください（新しいファイルにはしないでください）。'
 const DOC_READ_AGAIN = '読んだあとにも Google Drive で直されています。もう一度 drive_read で今の中身を読み、直しを取り込んでから上書きしてください。'
+/** A press refused for one of these may be pressed again; any other refusal closes the confirmation. */
+const PRESS_AGAIN = new Set(['GOOGLE_UNAVAILABLE', 'GOOGLE_CONSENT_NEEDED', 'GOOGLE_STOPPED', 'GOOGLE_FEATURE_OFF', 'DRIVE_PUT_IN_PROGRESS'])
+/** An expired confirmation's content goes at once; its row stays this long (so a late press hears 「時間がたった」). */
+const CONFIRMATIONS_KEPT_AFTER_MS = 7 * 24 * 60 * 60 * 1000
 /** A scheduled job's run found its folder pick gone (it renews with every put; 90 days without one end it). */
 const JOB_FOLDER_LAPSED = '責任者が選んだ置き先のフォルダが使えなくなっています（90日のあいだ何も置かれなかったか、選び直しが要ります）。この回では置けません。もう一度置こうとせず、置けなかったことを報告してください。責任者が「定期の仕事」の「置き先を選び直す」で選び直すと、次の回から置けます。'
 /** The member's pick of a file lapsed (7 days without a read or a link): said so, rather than 「選んだものではありません」. */
@@ -409,12 +413,12 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
   function askBeforeOverwrite(repo: GoogleDriveRepository, member: Member, conversationId: string,
     req: Omit<DriveOverwriteConfirmationRow, 'id' | 'userId' | 'conversationId' | 'state' | 'createdAt' | 'expiresAt'>): DriveOverwriteConfirmation {
     const now = clock.now()
-    repo.pruneOverwriteConfirmations(now)
+    repo.pruneOverwriteConfirmations(now, new Date(Date.parse(now) - CONFIRMATIONS_KEPT_AFTER_MS).toISOString())
     const view = (c: DriveOverwriteConfirmationRow): DriveOverwriteConfirmation => ({ id: c.id, fileName: c.name, editors: c.editors, commented: c.commented, expiresAt: c.expiresAt })
     const waiting = repo.openOverwriteConfirmation(member.userId, req.fileId, now)
     if (waiting && waiting.requestKey === req.requestKey && waiting.conversationId === conversationId && waiting.fingerprint === req.fingerprint && waiting.revision === req.revision
       && waiting.revisionAt === req.revisionAt && waiting.commentsSeen === req.commentsSeen) return view(waiting)
-    if (waiting) repo.settleOverwriteConfirmation(waiting.id, 'declined')
+    if (waiting) repo.moveOverwriteConfirmation(waiting.id, ['open'], 'declined')
     const row: DriveOverwriteConfirmationRow = {
       ...req, id: `drive-confirm-${ids.newId()}`.replace(/[^A-Za-z0-9_-]/g, ''), userId: member.userId, conversationId, state: 'open', createdAt: now,
       expiresAt: new Date(Date.parse(now) + DRIVE_OVERWRITE_CONFIRM_TTL_MS).toISOString(),
@@ -447,9 +451,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
    */
   async function keepDocBaseline(
     companyId: string, row: Pick<DrivePutRow, 'id' | 'userId' | 'mimeType' | 'fileId' | 'state'>, uploadedAt: string | null,
-    previous: { revision: string; continued: boolean } | null, answeredAtMs: number,
+    previousRevision: string | null, answeredAtMs: number,
   ): Promise<void> {
-    const previousRevision = previous?.revision ?? null
     if (row.mimeType !== DRIVE_DOC_MIME || row.state !== 'done' || !row.fileId) return
     type Step = 'no-upload-time' | 'export-failed' | 'export-differs' | 'no-revision' | 'still-settling' | 'not-me'
       | 'base-revision-gone' | 'revision-count' | 'file-unread' | 'file-not-me' | 'outside-window'
@@ -497,12 +500,12 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     }
     const { revisions, file } = seen
 
-    // (c) Every revision, not only the new ones: a document ACB made is updated only from a baseline like this one, and
-    // the check before an update refuses any new revision, so a revision not the member's never belongs in it.
-    // A document continued after people's edits (read, and confirmed when someone else's): their revisions before the one
-    // the update started from are known and accepted; only what came after it must be the member's own.
-    const startAt = previous?.continued ? revisions.findIndex(r => r.id === previousRevision) : -1
-    if (previous?.continued && startAt < 0) return drop('base-revision-gone', ` (revisions: ${revisions.length})`)
+    // (c) A new document: every revision. An update: every revision after the one it started from — the revisions up to
+    // it were vetted already: by the previous baseline (kept only when they were all the member's, and the check before
+    // an update refuses any new revision), or, for a document continued after people's edits, read by the AI (and
+    // confirmed by the member when someone else's). So an accepted colleague's revision stays accepted for later updates.
+    const startAt = previousRevision !== null ? revisions.findIndex(r => r.id === previousRevision) : -1
+    if (previousRevision !== null && startAt < 0) return drop('base-revision-gone', ` (revisions: ${revisions.length})`)
     const foreign = revisions.slice(startAt + 1).filter(r => !r.me).length
     if (foreign > 0) return drop('not-me', ` (revisions: ${revisions.length}, not the member's: ${foreign}, the newest the member's: ${revisions[revisions.length - 1].me})`)
     const newest = revisions[revisions.length - 1]
@@ -1095,6 +1098,17 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         }
         // Someone changed it in Drive since ACB's last put: never written over.
         const changedSince = refuse('conflict', 'このファイルは、前に置いたあとに Google Drive で直されています。上書きすると直したところが消えるため、新しいファイルとして置いてください。', { code: 'DRIVE_FILE_CHANGED_SINCE' })
+        // A file can be shared outside on its own, whatever its folder says: then updating it is sending outside. Asked
+        // before a document's checks, so a confirmation is never asked (nor content kept) for a file the AI may not update.
+        if (actor.kind === 'ai') {
+          const filePerms = await folderPermissions(member.companyId, member.userId, targetId)
+          if (filePerms === null || !Array.isArray(filePerms)) {
+            return refuse('forbidden', 'このファイルを誰が見られるか確かめられないため、AI からは上書きできません。', { code: 'DRIVE_FILE_SHARING_UNKNOWN' })
+          }
+          if (driveFolderReachesOutside(filePerms, domain)) {
+            return refuse('forbidden', 'このファイルは社外の人も見られるため、AI からは上書きできません（社外に渡すのはメンバー本人の操作です）。', { code: 'DRIVE_FILE_SHARED_OUTSIDE' })
+          }
+        }
         if (form.driveMime === DRIVE_DOC_MIME) {
           // A Google document's `version` moves without any edit (real Google, 2026-11-12: opened once, nothing typed). Its
           // baseline is compared instead — text, newest revision and comments — and any doubt refuses. Never `version`.
@@ -1159,7 +1173,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
                   sha256: body.sha256 as string, content: bytes, recordId: typeof body.recordId === 'string' && body.recordId.length <= 200 ? body.recordId : null,
                   fingerprint: now, revision: newest.id as string, revisionAt: newest.at as string, commentsSeen: seen, editors: names, commented: otherComments.length > 0,
                 })
-                return refuse('conflict', `${asked.editors.length > 0 ? asked.editors.map(n => `${n}さん`).join('・') : 'ほかの人'}の直し・コメントが入っているため、上書きはメンバーの確認待ちです。アプリのカードでメンバーが「上書きする」を押すと、この内容で上書きされます。押されるまで、置き直したり新しいファイルを作ったりしないでください。`,
+                // People's names (chosen by them in Google) go to the member's card only, never into the AI's text.
+                return refuse('conflict', `ほかの人の直し・コメントが入っているため、上書きはメンバーの確認待ちです。アプリのカードでメンバーが「上書きする」を押すと、この内容で上書きされます。押されるまで、置き直したり新しいファイルを作ったりしないでください。`,
                   { code: 'DRIVE_OVERWRITE_NEEDS_CONFIRMATION', confirmation: asked })
               }
             }
@@ -1168,15 +1183,6 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           // A file with binary content: its head revision is the receipt's (it changes only with new content).
           const current = driveRevisionOf(tf.headRevisionId, tf.version)
           if (current === null || current !== target?.revisionId) return changedSince
-        }
-        if (actor.kind !== 'ai') return null
-        // A file can be shared outside on its own, whatever its folder says: then updating it is sending outside.
-        const filePerms = await folderPermissions(member.companyId, member.userId, targetId)
-        if (filePerms === null || !Array.isArray(filePerms)) {
-          return refuse('forbidden', 'このファイルを誰が見られるか確かめられないため、AI からは上書きできません。', { code: 'DRIVE_FILE_SHARING_UNKNOWN' })
-        }
-        if (driveFolderReachesOutside(filePerms, domain)) {
-          return refuse('forbidden', 'このファイルは社外の人も見られるため、AI からは上書きできません（社外に渡すのはメンバー本人の操作です）。', { code: 'DRIVE_FILE_SHARED_OUTSIDE' })
         }
         return null
       })()
@@ -1226,7 +1232,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         // An update names the revision its check started from ('' — a document continued without a baseline — matches no
         // revision and keeps none).
         await keepDocBaseline(member.companyId, { ...row, ...settled }, str(j.modifiedTime),
-          targetId === null ? null : continued && continuedFrom ? { revision: continuedFrom, continued: true } : { revision: target?.docBaseline?.revision ?? '', continued: false }, answeredAtMs)
+          targetId === null ? null : continuedFrom ?? target?.docBaseline?.revision ?? '', answeredAtMs)
         return ok({
           drivePut: putView({ ...row, ...settled }), existing: false,
           ...(targetId !== null && hasComments ? { commentsMayMove: true } : {}), ...(continued ? { continued } : {}),
@@ -1305,33 +1311,49 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
      * every other check of a put runs again. `recordId`: the consultation's やること the request named (for the route's
      * link following the new revision; never answered).
      */
-    async decideOverwrite(member: Member, id: string, body: unknown): Promise<Outcome<DriveOverwriteDecision & { recordId?: string | null }>> {
+    async decideOverwrite(member: Member, id: string, body: unknown): Promise<Outcome<DriveOverwriteDecision & { recordId?: string | null; conversationId?: string | null }>> {
       if (!isObj(body) || (body.action !== 'confirm' && body.action !== 'decline')) return refuse('bad-request', 'action must be confirm or decline')
       const repo = handle(member.companyId).googleDrive
+      repo.pruneOverwriteConfirmations(clock.now(), new Date(clock.nowMs() - CONFIRMATIONS_KEPT_AFTER_MS).toISOString())
       const row = /^drive-confirm-[A-Za-z0-9_-]{1,80}$/.test(id) ? repo.overwriteConfirmation(member.userId, id) : null
       if (!row) return refuse('not-found', 'この確かめは見つかりません。', { code: 'DRIVE_CONFIRMATION_NOT_FOUND' })
       if (row.state === 'declined') {
         return body.action === 'decline' ? ok({ state: 'declined' }) : refuse('conflict', 'この上書きは、やめにしてあります。続けるときは、AI にもう一度頼んでください。', { code: 'DRIVE_CONFIRMATION_DECLINED' })
       }
       if (row.state === 'written') return refuse('conflict', 'この上書きは、もう済んでいます。', { code: 'DRIVE_CONFIRMATION_DONE' })
+      const BUSY = refuse('conflict', 'いま上書きしているところです。', { code: 'DRIVE_CONFIRMATION_BUSY' })
       if (body.action === 'decline') {
-        repo.settleOverwriteConfirmation(row.id, 'declined')
-        return ok({ state: 'declined' })
+        // Only while nobody's press is being written (a decline never reports a write it did not stop).
+        return repo.moveOverwriteConfirmation(row.id, ['open'], 'declined') ? ok({ state: 'declined' }) : BUSY
       }
       if (clock.nowMs() >= Date.parse(row.expiresAt) || !row.content) {
         return refuse('gone', '確かめるまでに時間がたったため、上書きしませんでした。続けるときは、AI にもう一度頼んでください。', { code: 'DRIVE_CONFIRMATION_EXPIRED' })
       }
-      const put = await service.put(member, { kind: 'ai', conversationId: row.conversationId, runId: null }, {
-        folderId: row.folderId, name: row.name, kind: row.kind, as: 'google_doc', sha256: row.sha256, contentBase64: Buffer.from(row.content).toString('base64'),
-        requestKey: row.requestKey, updateFileId: row.fileId,
-      }, undefined, row)
+      // Claimed before anything is awaited: a second press, a decline or a newer request of the AI cannot take it meanwhile.
+      if (!repo.moveOverwriteConfirmation(row.id, ['open'], 'writing')) return BUSY
+      let put: Outcome<DrivePutAnswer>
+      try {
+        put = await service.put(member, { kind: 'ai', conversationId: row.conversationId, runId: null }, {
+          folderId: row.folderId, name: row.name, kind: row.kind, as: 'google_doc', sha256: row.sha256, contentBase64: Buffer.from(row.content).toString('base64'),
+          requestKey: row.requestKey, updateFileId: row.fileId,
+        }, undefined, row)
+      } catch (error) {
+        repo.moveOverwriteConfirmation(row.id, ['writing'], 'open')
+        throw error
+      }
       if (!put.ok) {
-        // Changed again while the person looked: this content is not written; the AI reads again and asks anew.
-        if (put.body.code === 'DRIVE_READ_AGAIN') repo.settleOverwriteConfirmation(row.id, 'declined')
+        // Google out of reach for a moment (or the same put still on its way): it may be pressed again. Anything else —
+        // changed again while the person looked, now shared outside, the folder gone… — closes it: the AI asks anew.
+        const again = typeof put.body.code === 'string' && PRESS_AGAIN.has(put.body.code)
+        repo.moveOverwriteConfirmation(row.id, ['writing'], again ? 'open' : 'declined')
         return put
       }
-      repo.settleOverwriteConfirmation(row.id, 'written')
-      return ok({ state: 'written', drivePut: put.value.drivePut, commentsMayMove: put.value.commentsMayMove === true, recordId: row.recordId })
+      // Sent: never sent again from here. A lost answer stays `unknown` (looked up by the put's id, as any put) — not
+      // reported as written.
+      repo.moveOverwriteConfirmation(row.id, ['writing'], 'written')
+      const p = put.value.drivePut
+      if (p.state !== 'done') return ok({ state: 'unknown', drivePut: p, recordId: null })
+      return ok({ state: 'written', drivePut: p, commentsMayMove: put.value.commentsMayMove === true, recordId: row.recordId, conversationId: row.conversationId })
     },
   }
   return service

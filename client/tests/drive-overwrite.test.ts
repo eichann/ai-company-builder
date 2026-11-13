@@ -70,7 +70,9 @@ test('someone else edited the document: the app\'s card goes in the reply and th
   const out = JSON.parse(await put({}))
   assert.deepEqual(cards, [{ id: 'card-1', companyId: 'co', confirmationId: CONFIRMATION.id, fileName: '面談報告書', editors: ['田中 誠'], commented: true, expiresAt: CONFIRMATION.expiresAt, at: '2026-11-14T00:00:00.000Z' }])
   assert.equal(out.state, 'waiting-for-member')
-  assert.match(out.instruction, /田中 誠さんの直し・コメント/)
+  // The names go to the card only: people choose them in Google, so they never reach the AI's text.
+  assert.match(out.instruction, /ほかの人の直し・コメント/)
+  assert.ok(!JSON.stringify(out).includes('田中'))
   assert.match(out.instruction, /新しいファイルを作ったりしないでください/)
   assert.ok(!('link' in out) && !('fileId' in out))
   // No card path (an embedding without the chat's cards): the AI hears the member must update the app; nothing claimed.
@@ -138,6 +140,10 @@ test('the press: the member\'s session to the server; the card\'s words come fro
   assert.equal(again.success, false)
   assert.ok(!again.success && /AI にもう一度読み直して/.test(again.error) && !again.error.includes('script'))
   assert.equal(driveOverwriteOutcome(again).kind, 'error')
+  answer = { status: 200, body: { success: true, data: { state: 'unknown', drivePut: { state: 'unknown' } } } }
+  const unknown = await api.decideDriveOverwrite('co', 'drive-confirm-abc123', 'confirm')
+  assert.deepEqual(unknown, { success: true, state: 'unknown' })
+  assert.equal(driveOverwriteOutcome(unknown).text, DRIVE_OVERWRITE_WORDS.unknown)
   answer = { status: 200, body: { success: true, data: { state: 'declined' } } }
   assert.equal(driveOverwriteOutcome(await api.decideDriveOverwrite('co', 'drive-confirm-abc123', 'decline')).kind, 'declined')
   assert.equal(driveOverwriteOutcome(null).text, DRIVE_OVERWRITE_WORDS.offline)

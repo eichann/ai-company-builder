@@ -180,6 +180,8 @@ export interface DriveOverwriteConfirmation {
 /** POST /api/companies/:id/me/google/drive/overwrite-confirmations/:id { action } (session): the member's press. */
 export type DriveOverwriteDecision =
   | { state: 'written'; drivePut: DrivePutView; commentsMayMove: boolean }
+  /** Sent, but Google's answer was lost and the file is not found yet: never sent again (looked up by the put's id). */
+  | { state: 'unknown'; drivePut: DrivePutView }
   | { state: 'declined' }
 
 /** POST /api/records-ai/google/drive/put body. */

@@ -101,7 +101,8 @@ export interface DriveOverwriteConfirmationRow {
   commentsSeen: string
   editors: string[]
   commented: boolean
-  state: 'open' | 'written' | 'declined'
+  /** `writing`: a press is being written now (claimed atomically; neither a decline nor a newer request takes it). */
+  state: 'open' | 'writing' | 'written' | 'declined'
   createdAt: string
   expiresAt: string
 }
@@ -163,10 +164,13 @@ export interface GoogleDriveRepository {
   overwriteConfirmation(userId: string, id: string): DriveOverwriteConfirmationRow | null
   /** The member's own open, unexpired confirmation for this Drive file (at most one waits per file), or null. */
   openOverwriteConfirmation(userId: string, fileId: string, now: string): DriveOverwriteConfirmationRow | null
-  /** Moves an open confirmation to `written` / `declined` and removes its content; false when it was not open. */
-  settleOverwriteConfirmation(id: string, to: 'written' | 'declined'): boolean
-  /** Removes confirmations that ended before `before` (every member). */
-  pruneOverwriteConfirmations(before: string): void
+  /**
+   * Moves a confirmation from one of `from` to `to` atomically (false when it was in none of them); its content is removed
+   * when `to` is `written` or `declined`.
+   */
+  moveOverwriteConfirmation(id: string, from: DriveOverwriteConfirmationRow['state'][], to: DriveOverwriteConfirmationRow['state']): boolean
+  /** Removes the content of every confirmation expired at `now`, and the rows that expired before `deleteBefore` (every member). */
+  pruneOverwriteConfirmations(now: string, deleteBefore: string): void
 
   /** Writes a new put in `sending` (the AI's copies its consultation's Skills, answered as `skills`; `row.skills` is ignored); when the member already has one with this request key, returns it instead. */
   claimPut(row: DrivePutRow): { claimed: true; skills: SkillUse[] | null } | { claimed: false; existing: DrivePutRow }

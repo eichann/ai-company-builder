@@ -138,6 +138,7 @@ export function createGoogleApi(deps: GoogleDeps) {
       return { success: true, state: 'written', link: typeof j.data.drivePut?.link === 'string' ? j.data.drivePut.link : null, commentsMayMove: j.data.commentsMayMove === true }
     }
     if (r.res.ok && j.data?.state === 'declined') return { success: true, state: 'declined' }
+    if (r.res.ok && j.data?.state === 'unknown') return { success: true, state: 'unknown' }
     log.warn(`[google] POST drive overwrite: answered ${r.res.status}`)
     const code = typeof j.code === 'string' ? j.code : null
     return { success: false, offline: false, code, error: (code && DRIVE_OVERWRITE_REFUSALS[code]) || googleErrorText(r.res.status, r.json) }

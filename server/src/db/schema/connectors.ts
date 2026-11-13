@@ -153,7 +153,8 @@ export const connectorSchema = `
 
     -- A put waiting for the member's 「上書きする」 (google-drive.md "Continuing a document people edited"):
     -- someone else edited the Google document; the AI's content (fixed by its sha256) waits here until the
-    -- member presses, declines or it expires; the content is removed once decided. state: open → written | declined.
+    -- member presses, declines or it expires; the content is removed once decided. state: open → writing (a press being
+    -- written; nothing else may take it) → written | open again (refused, may be pressed again) | declined; open → declined.
     CREATE TABLE IF NOT EXISTS google_drive_overwrite_confirmations (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -173,7 +174,7 @@ export const connectorSchema = `
       comments_seen TEXT NOT NULL,
       editors TEXT NOT NULL DEFAULT '[]',
       commented INTEGER NOT NULL DEFAULT 0,
-      state TEXT NOT NULL CHECK (state IN ('open', 'written', 'declined')),
+      state TEXT NOT NULL CHECK (state IN ('open', 'writing', 'written', 'declined')),
       created_at TEXT NOT NULL,
       expires_at TEXT NOT NULL
     );
