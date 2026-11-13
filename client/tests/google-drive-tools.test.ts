@@ -335,6 +335,14 @@ test('drive_read: outside text; a picked PDF saved under .personal/google-drive/
   const pdf = JSON.parse(await (await tools('read', root, { pdf: true })).t.execute('drive_read', { fileId: DOC }))
   assert.match(pdf.savedPdf, /^\.personal\/google-drive\/fake-doc-past-pr-手書き_メモ\.pdf$/)
   assert.ok(fs.readFileSync(path.join(root, pdf.savedPdf)).equals(PDF))
+  // The AI is told it reads back what its drive_put made by that fileId, without asking the member to pick it (owner
+  // decision 2026-11-13), and that HTML is only text.
+  const specs = (await tools('read', root)).t.specs
+  const d = specs.find(s => s.name === 'drive_read')!.description
+  assert.match(d, /drive_put で置いたファイルを読む（置いたファイルは、置いたときの fileId か drive_picked の putFiles の fileId で、選んでもらわずに読める/)
+  assert.match(d, /one drive_put made \(by the fileId the put returned or drive_picked's putFiles — no pick needed; never a file someone else put\)/)
+  assert.match(d, /HTML is only text, never opened or run/)
+  assert.match(specs.find(s => s.name === 'drive_picked')!.description, /putFiles: drive_read reads them back/)
 })
 
 test('drive_put: only a PDF / HTML / Markdown / text inside the company folder, never a private or left-out folder', async () => {

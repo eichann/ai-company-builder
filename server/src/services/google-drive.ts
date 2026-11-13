@@ -795,22 +795,30 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       return ok({ files: [...out.values()].sort((a, b) => b.at.localeCompare(a.at)).slice(0, OWN_FILES_LISTED) })
     },
 
-    /** POST /api/records-ai/google/drive/read { fileId } (any token): a picked file, as outside text (or a PDF's bytes). */
+    /**
+     * POST /api/records-ai/google/drive/read { fileId } (any token): the member's own live pick of a file, or a file
+     * their own put made (`putOfFile`: this member, this company, a done receipt — ACB created it, so their `drive.file`
+     * token opens it; owner decision 2026-11-13), as outside text (or a PDF's bytes). Never another member's put.
+     */
     async read(member: Member, body: unknown): Promise<Outcome<DriveReadAnswer>> {
       if (!isObj(body) || !isDriveId(body.fileId)) return refuse('bad-request', 'fileId must be a Drive id')
       const fileId = body.fileId
-      const pick = handle(member.companyId).googleDrive.pick(member.userId, fileId, clock.now())
-      if (!pick || pick.kind !== 'file') {
-        return refuse('forbidden', 'このファイルはメンバーが選んだものではありません。drive_pick_files でメンバーに選んでもらってください。', { code: 'DRIVE_NOT_PICKED' })
+      const h = handle(member.companyId).googleDrive
+      const live = h.pick(member.userId, fileId, clock.now())
+      const pick = live?.kind === 'file' ? live : null
+      const put = pick ? null : h.putOfFile(member.userId, fileId)
+      if (!pick && !put) {
+        return refuse('forbidden', 'このファイルはメンバーが選んだものでも、このメンバーの drive_put で置いたものでもありません。drive_pick_files でメンバーに選んでもらってください。', { code: 'DRIVE_NOT_PICKED' })
       }
+      const knownName = pick?.name ?? put?.name ?? ''
       const noAccess = 'このファイルを Google Drive から開けませんでした（消されたか、見られなくなった可能性があります）。'
       const m = await meta(member.companyId, member.userId, fileId)
       if (!m.ok) return googleRefusal(m, noAccess)
       const f = isObj(m.json) ? m.json : {}
       const mimeType = str(f.mimeType) ?? ''
       const how = DRIVE_READ_AS[mimeType]
-      if (!how || f.trashed === true) return refuse('bad-request', 'この種類のファイルは読めません（Google ドキュメント・スライド・スプレッドシート、PDF、テキストだけ）。', { code: 'DRIVE_TYPE_UNREADABLE' })
-      const file = { id: fileId, name: (str(f.name) ?? pick.name).normalize('NFC'), mimeType, modifiedTime: str(f.modifiedTime) }
+      if (!how || f.trashed === true) return refuse('bad-request', 'この種類のファイルは読めません（Google ドキュメント・スライド・スプレッドシート、PDF、テキスト・Markdown・CSV・HTML・JSON だけ）。', { code: 'DRIVE_TYPE_UNREADABLE' })
+      const file = { id: fileId, name: (str(f.name) ?? knownName).normalize('NFC'), mimeType, modifiedTime: str(f.modifiedTime) }
       const base = { file, header: DRIVE_TEXT_HEADER, footer: DRIVE_TEXT_FOOTER }
       if (how.how === 'download' && how.kind === 'pdf') {
         const r = await drive(member.companyId, member.userId, { method: 'GET', path: `/drive/v3/files/${fileId}`, query: { alt: 'media', supportsAllDrives: 'true' }, binary: true, operation: 'drive.files.download' })
