@@ -88,9 +88,14 @@ beforeEach(() => {
   records.insertTypeVersion({ name: 'deal', version: 1, definition: canonicalTypeJson(deal.definition), source: 'plugin', commitSha: null, createdAt: TS })
 })
 
-/** A 案件 whose 責任者 is `owner` (none = a まとまり without one). Seen by the whole company. */
+/**
+ * A 案件 whose 責任者 is `owner` (none = a まとまり without one: a create now names the creator, so its
+ * 責任者 is taken off as in one made before that — owner FB #34). Seen by the whole company.
+ */
 function deal(owner?: string) {
-  return ok(engine.create(admin(), HUMAN, { type: 'deal', title: 'サンプル物産 導入案件', ...(owner ? { fields: { owner } } : {}) })).record
+  const r = ok(engine.create(admin(), HUMAN, { type: 'deal', title: 'サンプル物産 導入案件', ...(owner ? { fields: { owner } } : {}) })).record
+  if (!owner) conn.prepare("UPDATE record_state SET fields = json_remove(fields, '$.owner') WHERE record_id = ?").run(r.id)
+  return r
 }
 
 /** A meeting whose assignee (the first to press ［AI に読ませる］) is u-bob; `members` = for its attendees only. */

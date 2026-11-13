@@ -25,9 +25,11 @@ export function BundleBody({ b, renderApproval }: { b: BundleDetailView; renderA
     <>
       <div className="grid grid-cols-3 gap-2">
         {tiles.map(([k, v]) => (
-          <div key={k} className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-zinc-800/60">
+          // `min-w-0` + `overflow-wrap: anywhere` (FB #36): a long URL in なんのため wraps inside its tile
+          // instead of running into 進み具合 (tests/ui/record-card.spec.ts `&purpose=url`).
+          <div key={k} className="min-w-0 rounded-lg bg-gray-50 px-3 py-2 dark:bg-zinc-800/60">
             <div className="text-[11px] text-gray-500">{k}</div>
-            <div className="whitespace-pre-wrap text-[13px] font-semibold leading-snug">{v}</div>
+            <div className="whitespace-pre-wrap text-[13px] font-semibold leading-snug [overflow-wrap:anywhere]">{v}</div>
           </div>
         ))}
       </div>

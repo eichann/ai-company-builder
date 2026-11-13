@@ -235,7 +235,10 @@ describe('「AI の番」', () => {
 describe('decisions', () => {
   function deal(co = 'a') {
     const customer = ok(engine.create(owner(co), HUMAN, { type: 'customer', title: '株式会社サンプル物産' })).record
-    return ok(engine.create(owner(co), HUMAN, { type: 'deal', title: 'サンプル物産 導入案件', links: { customer: customer.id } })).record
+    const d = ok(engine.create(owner(co), HUMAN, { type: 'deal', title: 'サンプル物産 導入案件', links: { customer: customer.id } })).record
+    // A 案件 without a 責任者 (as made before a create named its creator, owner FB #34).
+    conn.prepare("UPDATE record_state SET fields = json_remove(fields, '$.owner') WHERE record_id = ?").run(d.id)
+    return d
   }
   const body = (extra: Record<string, unknown> = {}) => ({ folder: '営業部', title: '対象の窓口を3つにする', why: 'チャット窓口も最初から入れたいとの要望', source: '議事録 2026-11-05', ...extra })
 

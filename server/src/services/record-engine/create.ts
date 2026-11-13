@@ -252,6 +252,12 @@ export function creating(ctx: EngineContext) {
         }
         initial = b.state
       }
+      // A まとまり always has a 責任者 (owner FB #34, 2026-11-13: one the AI made without `owner` had
+      // nobody who could end it or name one): none given → the member who creates it — the person, or
+      // the person whose AI made it. A named owner keeps the checks above (a member of this company).
+      if (def.implements.includes('bundle') && def.fields.owner?.kind === 'person' && def.fields.owner.source === 'server') {
+        fields.owner ??= member.userId
+      }
       if (def.implements.includes('request')) {
         fields.requested_by ??= member.userId
         fields.next_actor ??= fields.assignee ?? null
