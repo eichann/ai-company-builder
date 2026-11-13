@@ -142,7 +142,10 @@
  * project (束ねる種類, owner decision 2026-11-02): the core's ordinary `bundle` — what a
  * department with no business plugin's bundle kind makes (records.md "Bundle kinds"). Its name on
  * screen is the company's (`TaskSettings.bundleName`, default 「プロジェクト」); its `label` is
- * only the fallback. Anyone may create one (no service owns it).
+ * only the fallback. Anyone may create one (no service owns it). Version 2 (owner FB #34,
+ * 2026-11-13): `set_owner` has `who_fallback: [anyone]` — while no 責任者 who reads it is named
+ * (an older one the AI made without an owner), any member who reads it may name one; the other
+ * actions stay the 責任者's, an admin's or the department manager's.
  *
  * **The core never names a business plugin's type** (owner decision
  * 2026-11-01 night): what work belongs to links to the `bundle` interface
@@ -462,7 +465,7 @@ actions:
 `,
   project: `---
 label: プロジェクト
-version: 1
+version: 2
 implements: [bundle]
 storage: server
 fields:
@@ -479,7 +482,7 @@ actions:
   finish:       { label: 終える, from: [active], to: done, who: [owner, admin, dept_manager], note: optional }
   cancel:       { label: やめる, from: [active], to: cancelled, who: [owner, admin, dept_manager], note: optional }
   reopen:       { label: もう一度始める, from: [done, cancelled], to: active, who: [owner, admin, dept_manager], note: optional }
-  set_owner:    { label: 責任者を替える, from: [active], who: [owner, admin, dept_manager], args: { owner: person }, note: optional }
+  set_owner:    { label: 責任者を替える, from: [active], who: [owner, admin, dept_manager], who_fallback: [anyone], args: { owner: person }, note: optional }
   set_purpose:  { label: なんのためを書く, from: [active], who: [owner, admin, dept_manager], args: { purpose: text }, note: optional }
   set_due:      { label: 期限を変える, from: [active], who: [owner, admin, dept_manager], args: { due: date }, note: optional }
 ---

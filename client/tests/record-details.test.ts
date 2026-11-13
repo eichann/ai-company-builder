@@ -93,9 +93,44 @@ test('a プロジェクト\'s buttons: its 責任者 gets ［終える］ and �
 
 test('a プロジェクト\'s buttons are never offered to someone the type does not name (an admin or manager is the server\'s to allow)', () => {
   assert.equal(bundleActionsOf(project, 'active', { owner: 'u-abe' }, 'u-sato', people), null)
-  assert.equal(bundleActionsOf(project, 'active', {}, 'u-sato', people), null)
   assert.equal(bundleActionsOf(project, 'active', { owner: 'u-sato' }, null, people), null)
   assert.equal(bundleActionsOf(undefined, 'active', { owner: 'u-sato' }, 'u-sato', people), null)
+})
+
+// Owner FB #34 (2026-11-13): a プロジェクト the AI made without a 責任者 had no button for anyone.
+// Project v2's 責任者を替える has `who_fallback: [anyone]` (the server's whoWithFallback): with no
+// 責任者 every reader gets that one action — never 終える / やめる / the other fields.
+test('a プロジェクト without a 責任者: every reader gets 責任者を替える only (its who_fallback); once named, only the 責任者', () => {
+  for (const fields of [{}, { owner: null }, { owner: '' }, { purpose: '窓口を3つに' }] as Array<Record<string, string | null>>) {
+    const none = bundleActionsOf(project, 'active', fields, 'u-sato', people)
+    assert.deepEqual(names(none), { main: null, more: ['責任者を替える'] }, JSON.stringify(fields))
+    assert.deepEqual(none!.more[0].args.map(a => [a.name, a.kind, a.value]), [['owner', 'person', null]])
+    assert.deepEqual(none!.people.map(p => p.id), ['u-sato', 'u-abe'])
+  }
+  // Finished: nothing (set_owner is from active only; reopen stays the 責任者's).
+  assert.equal(bundleActionsOf(project, 'done', {}, 'u-sato', people), null)
+  // A 責任者 named: the fallback is gone.
+  assert.equal(bundleActionsOf(project, 'active', { owner: 'u-abe' }, 'u-sato', people), null)
+  // A type without who_fallback (project v1, as an older server sends it): nothing, as before.
+  const v1 = { ...project, actions: Object.fromEntries(Object.entries(project.actions).map(([k, a]) => [k, { ...a, whoFallback: undefined }])) }
+  assert.equal(bundleActionsOf(v1, 'active', {}, 'u-sato', people), null)
+})
+
+// The app's fallback is narrower than the server's: a `who` naming `link:<link>.<field>` people (a parent
+// まとまり's 責任者, unknown to the app) never opens it, even with the record's own person field empty.
+test('who_fallback is not offered when who names a linked record\'s people (the app cannot know them)', () => {
+  const text = ['---', 'label: 小さな案件', 'version: 1', 'storage: server', 'implements: [bundle]', 'fields:',
+    '  owner: { label: 責任者, kind: person, source: server }', '  purpose: { label: なんのため, kind: text, source: server }',
+    'links:', '  parent: { label: 親, interface: bundle, cardinality: one }',
+    'states: [open, done]', 'initial: open', 'final: [done]', 'actions:',
+    '  set_owner: { label: 責任者を替える, from: [open], who: [owner, link:parent.owner], who_fallback: [anyone], args: { owner: person } }', '---', ''].join('\n')
+  const parsed = parseTypeFile('small', text)
+  assert.ok(parsed.ok, JSON.stringify(parsed))
+  assert.equal(bundleActionsOf(parsed.definition, 'open', {}, 'u-sato', people), null)
+  // Without the link entry the same type does offer it (the guard, not the type, decides).
+  const plain = parseTypeFile('small', text.replace('who: [owner, link:parent.owner]', 'who: [owner]'))
+  assert.ok(plain.ok, JSON.stringify(plain))
+  assert.deepEqual(names(bundleActionsOf(plain.definition, 'open', {}, 'u-sato', people)), { main: null, more: ['責任者を替える'] })
 })
 
 test('a business plugin\'s 案件 gets its own type\'s actions the same way; the AI\'s steps, link setters and fields without an editor are left out', () => {

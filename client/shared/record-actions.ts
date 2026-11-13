@@ -5,7 +5,7 @@
  * (the engine's `who`); this only keeps impossible choices off the screen.
  * Pure (`client/shared`).
  */
-import { isSystemOnly, linkWhoName, type TypeDefinition } from '../../shared/core/record-types'
+import { isSystemOnly, linkPersonWho, linkWhoName, type ActionDef, type TypeDefinition } from '../../shared/core/record-types'
 
 export interface RecordActionChoice {
   action: string
@@ -41,4 +41,20 @@ export function recordActionChoices(def: TypeDefinition, state: string | null): 
  */
 export function personInWho(who: readonly string[], def: Pick<TypeDefinition, 'fields'>, fields: Readonly<Record<string, unknown>>, me: string, readsLink: (name: string) => boolean = () => false): boolean {
   return who.includes('anyone') || who.some(w => (def.fields[w]?.kind === 'person' && fields[w] === me) || (linkWhoName(w) !== null && readsLink(linkWhoName(w) as string)))
+}
+
+/**
+ * `personInWho` with the action's `who_fallback` (the server's `whoWithFallback`): the fallback
+ * entries count only while none of `who`'s person fields holds anyone (project version 2's
+ * 責任者を替える on a プロジェクト without a 責任者, owner FB #34). Narrower than the server, never
+ * wider: a `who` naming `link:<link>.<field>` people (unknown to the app) or a 責任者 who cannot
+ * read the record (the server's fallback case, unknown to the app) offers no fallback here.
+ */
+export function personInWhoOrFallback(action: Pick<ActionDef, 'whoFallback'>, who: readonly string[], def: Pick<TypeDefinition, 'fields'>, fields: Readonly<Record<string, unknown>>, me: string, readsLink?: (name: string) => boolean): boolean {
+  if (personInWho(who, def, fields, me, readsLink)) return true
+  const fallback = action.whoFallback
+  if (!fallback || fallback.length === 0) return false
+  if (who.some(w => linkPersonWho(w) !== null)) return false
+  const named = who.some(w => def.fields[w]?.kind === 'person' && typeof fields[w] === 'string' && fields[w] !== '')
+  return !named && personInWho(fallback, def, fields, me, readsLink)
 }

@@ -13,6 +13,8 @@
 // `show=<ids>` for a pasted / dropped link, `chosen=<ids>` from the member's own list), with two Drive files linked — the
 // member's own by name, someone else's as 「Google Drive のファイル」 — taken off as `unlinkTarget drive <id>@<version>`;
 // `&drive=off`: Drive not set up for the company.
+// `&owner=none`: one without a 責任者 (owner FB #34, made by the AI before the fix): only 責任者を替える (project v2's
+// who_fallback). `&purpose=url`: なんのため is a long URL (FB #36: it must wrap inside its tile).
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -53,7 +55,13 @@ const replyDef = params.get('type') === 'v4'
   ? { actions: { ...defs.get('reply_request')!.actions, close: { ...defs.get('reply_request')!.actions.close, from: ['open', 'waiting_reply'] } } }
   : defs.get('reply_request')
 // A プロジェクト: its buttons come from the real `bundleActionsOf` over the core type, as main builds them.
-let project = rec('project-0000p1', 'project', '新人研修の見直し', 'active', { owner: params.get('owner') === 'other' ? 'u-abe' : ME, purpose: '研修を3日に縮める', due: '2026-12-01' })
+const ownerParam = params.get('owner')
+// `&purpose=url`: なんのため is one long URL (FB #36: it ran into 進み具合).
+const LONG_URL = 'https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdefghijklmnopqrstuvwxyz/edit?tab=t.0#heading=h.abcdefghijkl'
+let project = rec('project-0000p1', 'project', '新人研修の見直し', 'active', {
+  ...(ownerParam === 'none' ? {} : { owner: ownerParam === 'other' ? 'u-abe' : ME }),
+  purpose: params.get('purpose') === 'url' ? `資料：${LONG_URL}` : '研修を3日に縮める', due: '2026-12-01',
+})
 const projectBefore: RecordSummary[] = []
 const driveMode = params.get('drive') !== null
 const projectCard = () => {

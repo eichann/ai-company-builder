@@ -431,7 +431,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       {(card.prepSummary || card.prepared.length > 0) && (
         <section aria-label="AI が用意したもの" className="space-y-2 rounded-xl border border-accent/30 bg-accent/5 p-3">
           <h2 className="flex items-center gap-1.5 text-[12px] font-semibold"><Sparkle size={13} weight="fill" className="text-accent" />AI が用意したもの</h2>
-          {card.prepSummary && <p className="whitespace-pre-wrap text-[12.5px] text-gray-700 dark:text-zinc-200">{card.prepSummary}</p>}
+          {card.prepSummary && <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[12.5px] text-gray-700 dark:text-zinc-200">{card.prepSummary}</p>}
           {card.prepared.map(p => <div key={p.id}>{renderPrepared(p)}</div>)}
         </section>
       )}
@@ -463,7 +463,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       {card.bundle && (record.personal || record.membersOnly) && <ShowToBundle bundle={card.bundle} busy={busy} onShow={onShowToBundle} />}
       <DueAndTags card={card} now={now} busy={busy} tagField={tagField}
         onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />
-      {card.purpose && <p className="whitespace-pre-wrap text-[13px] text-gray-600 dark:text-zinc-300"><span className="mr-1.5 text-[11px] text-gray-500">目的</span>{card.purpose}</p>}
+      {card.purpose && <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[13px] text-gray-600 dark:text-zinc-300"><span className="mr-1.5 text-[11px] text-gray-500">目的</span>{card.purpose}</p>}
       <ShareToDepartment folders={shareFolders} busy={busy} onShare={onShare} />
       {/* もとの連絡: only for a task that came from one (no read, no 「読み込んでいます」 on every task). */}
       <RecordSourcePanel record={record}>{card.fromIncoming ? renderSource(record) : null}</RecordSourcePanel>
