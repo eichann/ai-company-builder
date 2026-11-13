@@ -1,7 +1,7 @@
 import { FEATURE_OFF_DETAIL, FEATURE_OFF_NOTE } from '../../../../../shared/core/features'
 import { useState, type ReactNode } from 'react'
 import { CircleNotch } from '@phosphor-icons/react'
-import type { RecordCardView, RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
+import type { MakePrivateOffer, RecordCardView, RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
 import { CALM, ONLY_YOU } from '../../../../shared/thing-words'
 import { bundleDoneWords, meetingSeenWords, type BundleAction } from '../../../../shared/record-details'
 import { consultationLinks, type LinkedConsultation } from '../../../shared/ui/consultationLinks'
@@ -11,6 +11,7 @@ import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { SeenBy } from '../../../shared/ui/ThingIcon'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
 import { ProjectParticipants } from './ProjectParticipants'
+import { MakePrivateDialog } from './MakePrivateDialog'
 import { actOnRecord, undoRecordChange, unlinkRecord } from '../api'
 import { useRecordCard } from '../hooks/useRecordCard'
 import { AiBand, BundleBody } from './BundleBody'
@@ -48,6 +49,11 @@ interface Props {
    * automatic consultations. Not ［取り込まない］, not ［もう一度始める］.
    */
   onEnded?: (recordId: string) => void
+  /**
+   * 「非公開にする」 on a public 案件・プロジェクト the server offered it for (`card.makePrivate`, records.md "Making a
+   * 案件・プロジェクト private"): the screen makes its private folder and asks the server to move it. null = done.
+   */
+  onMakePrivate?: (bundle: { id: string; title: string; version: number; word: string }, offer: MakePrivateOffer) => Promise<string | null>
 }
 
 /** The card's parts the screen places around a meeting's own buttons and proposals. */
@@ -83,8 +89,9 @@ export interface BundleFieldContext {
  * 来た連絡's and a 案件・プロジェクト's own parts: what it is, its body, fields and 経緯 folded, the AI
  * working on it, and 「つながっているもの」.
  */
-export function RecordCard({ companyId, rootPath, recordId, renderSections, renderSource, onLoaded, renderApproval, consultations = [], onConsult, renderBundleField, notDownloadedFolderOf, renderMeeting, onEnded }: Props) {
+export function RecordCard({ companyId, rootPath, recordId, renderSections, renderSource, onLoaded, renderApproval, consultations = [], onConsult, renderBundleField, notDownloadedFolderOf, renderMeeting, onEnded, onMakePrivate }: Props) {
   const { result, reload } = useRecordCard(companyId, recordId, onLoaded)
+  const [makingPrivate, setMakingPrivate] = useState(false)
   const [notice, setNotice] = useState<{ text: string; undo: { recordId: string; version: number } | null } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -144,13 +151,16 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
   }
   // 「見るだけ」 (its feature is off, records.md "Features on and off"): nothing to press on this card.
   const viewOnly = card.featureOff === true
+  // 「非公開にする」: only where the server offered it (a public 案件 this member may make private) and the screen can do it.
+  const privateOffer = !viewOnly && onMakePrivate && card.detail?.kind === 'bundle' && card.version !== undefined ? card.makePrivate ?? null : null
+  const extra = privateOffer ? [{ label: '非公開にする', hint: '参加者だけが見られるようにします', onClick: () => setMakingPrivate(true) }] : []
   const incoming = viewOnly ? null : card.detail?.kind === 'incoming' && card.version !== undefined
     ? <IncomingActions m={card.detail} busy={busy} onAct={a => void act(a)} onUndo={() => void unsettle()}
       openReplies={card.links.filter(l => l.record?.type === 'reply_request' && !l.record.finished).length} />
     : card.detail?.kind === 'reply' && card.version !== undefined
       ? <ReplyRequestActions m={card.detail} busy={busy} onAct={a => void act(a)} />
-      : card.detail?.kind === 'bundle' && card.detail.actions && card.version !== undefined
-        ? <BundleActions actions={card.detail.actions} busy={busy} onAct={actBundle} />
+      : card.detail?.kind === 'bundle' && (card.detail.actions || extra.length > 0) && card.version !== undefined
+        ? <BundleActions actions={card.detail.actions ?? { main: null, more: [], people: [] }} busy={busy} onAct={actBundle} extra={extra} />
         : null
   const bundleLink = card.links.find(l => l.bundle && l.record)
   const field = !viewOnly && renderBundleField && (card.detail?.kind === 'meeting' || card.detail?.kind === 'incoming') && card.version !== undefined
@@ -172,9 +182,19 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
   const participants = card.privateFolder && card.participants
     ? <ProjectParticipants companyId={companyId} card={{ privateFolder: card.privateFolder, participants: card.participants, viewers: card.viewers, record: card.record }} onChanged={reload} />
     : null
-  return <CardBody participants={participants} card={card} rootPath={rootPath} incoming={incoming} renderMeeting={viewOnly ? undefined : renderMeeting} onReload={reload} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
+  const word = card.record.typeLabel || 'プロジェクト'
+  const makePrivateDialog = privateOffer && makingPrivate && onMakePrivate && card.version !== undefined
+    ? <MakePrivateDialog title={card.record.title} word={word} offer={privateOffer} onClose={() => setMakingPrivate(false)}
+      onConfirm={async () => {
+        const failure = await onMakePrivate({ id: card.record.id, title: card.record.title, version: card.version!, word }, privateOffer)
+        if (!failure) changed('参加者だけが見られるようにしました', null)
+        else reload()
+        return failure
+      }} />
+    : null
+  return <>{makePrivateDialog}<CardBody participants={participants} card={card} rootPath={rootPath} incoming={incoming} renderMeeting={viewOnly ? undefined : renderMeeting} onReload={reload} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
     field={field} notes={notes} notDownloadedFolderOf={notDownloadedFolderOf} drop={{ label: 'ファイル・フォルダ・やること・相談', accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(card.record.id, e) }, notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }} onUnlink={(link, label) => void unlink(link, label)}
-    consult={consultationLinks(consultations, onConsult && (fresh => onConsult({ id: card.record.id, title: card.record.title }, fresh)))} />
+    consult={consultationLinks(consultations, onConsult && (fresh => onConsult({ id: card.record.id, title: card.record.title }, fresh)))} /></>
 }
 
 function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink, participants }: {

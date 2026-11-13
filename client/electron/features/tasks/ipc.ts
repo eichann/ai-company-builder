@@ -389,6 +389,17 @@ export function createTasksApi(deps: TasksDeps) {
       return a?.status === 200 ? withSimilar({ success: true, recordId }, a) : failure('share to bundle', a)
     },
 
+    /**
+     * 「非公開にする」 (records.md "Making a 案件・プロジェクト private"): the 案件 into `folder`, the private folder the
+     * renderer has just made for it. Main sends only a company path; the server decides the rest.
+     */
+    async makeBundlePrivate(companyId: string, recordId: string, folder: string, expectedVersion: number): Promise<TaskWriteResult> {
+      const path = typeof folder === 'string' ? fileLinkPath(folder.normalize('NFC')) : null
+      if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !path || !Number.isInteger(expectedVersion)) return BAD_INPUT
+      const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/make-private`, { folder: path, expectedVersion })
+      return a?.status === 200 ? { success: true, recordId } : failure('make bundle private', a)
+    },
+
     async undo(companyId: string, recordId: string, version: number, expectedVersion: number): Promise<TaskWriteResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
       if (!Number.isInteger(version) || version < 2 || !Number.isInteger(expectedVersion) || expectedVersion < version) return BAD_INPUT
@@ -674,6 +685,8 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
     api.share(typeof companyId === 'string' ? companyId : '', recordId, folder, expectedVersion))
   ipc.handle('tasks:shareToBundle', (_event, companyId, recordId, expectedVersion) =>
     api.shareToBundle(typeof companyId === 'string' ? companyId : '', recordId, expectedVersion))
+  ipc.handle('tasks:makeBundlePrivate', (_event, companyId, recordId, folder, expectedVersion) =>
+    api.makeBundlePrivate(typeof companyId === 'string' ? companyId : '', recordId, folder, expectedVersion))
   ipc.handle('tasks:retryRun', (_event, companyId, runId) => api.retryRun(typeof companyId === 'string' ? companyId : '', runId))
   ipc.handle('tasks:createBundle', (_event, companyId, input) => api.createBundle(typeof companyId === 'string' ? companyId : '', input))
   ipc.handle('tasks:linkRecord', (_event, companyId, recordId, input) => api.linkRecord(typeof companyId === 'string' ? companyId : '', recordId, input, false))

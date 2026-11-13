@@ -740,6 +740,19 @@ disabled with 「非公開の〇〇は、部署の管理役か管理者に作っ
 (`ProjectParticipants.tsx` in the records feature): 「見られる人：『〇〇』の参加者（N人）」, the participants' names
 (「ほかに管理者 N人」), and for whoever the server gave the full list ［参加者を足す］ (any member of the company) and
 ×「〇〇さんを外す」 after 「…パソコンにあるこの〇〇のフォルダも消えます（同期していない変更も消えます）」.
+**「非公開にする」** on a public 案件's 「…」 (owner FB #35, `records.md` "Making a 案件・プロジェクト private"): offered
+only when the card's `makePrivate` is there — main asks `GET …/make-private` for a public まとまり (not one with
+`privateFolder`, not 「見るだけ」) and keeps a well-formed answer only (`makePrivateOfferOf`), so only owners /
+admins and the department's managers see it. `MakePrivateDialog` (records feature) asks first: 「これからは参加者
+だけが見られます。参加者は、あなたと部署の管理役、それにこの〇〇にかかわる〇〇さん…です（管理者はいつでも見られ
+ます）」, 「つながっているやること（N件）も、参加者だけに見えるようになります」, 「つながっているファイルや会議の記録は、
+今の場所のまま動きません」, 「あとから公開に戻すことは、ここからはできません」; a `blocked` plan disables the press
+and says why. The press (`onMakePrivate`, composed by AppShell from `makeExistingBundlePrivate` in
+`features/tasks/api.ts`): the private folder in the plan's `parent` (`createPrivateBundleFolder`, names from
+`privateBundleFolderNames`), the plan's `people` added as participants (the folder's list kept, as
+［参加者を足す］ does), then `tasks:makeBundlePrivate` → `POST …/make-private`. A refusal after the folder was
+made says the empty folder is left. Tests: `client/tests/bundle-make-private.test.ts`,
+`src/features/records/makePrivate.test.ts`.
 **A task seen by more people than the 案件** (the server's `WIDER_THAN_BUNDLE` on ［〇〇につなぐ］, ［変える］, the tag
 hint's ［案件につなぐ］ or a new one): the card asks 「このやることは、〇〇より多くの人に見えています。〇〇と同じ人たちだけに
 見えるようにしますか？」 — ［同じ人たちだけにする］ links again with `narrow` (no ［取り消す］: it is never undone), ［つながない］

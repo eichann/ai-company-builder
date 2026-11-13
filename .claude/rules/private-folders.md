@@ -67,7 +67,9 @@ or who can see it. So:
 - A 非公開 案件・プロジェクト (`records.md` "Private 案件・プロジェクト") is a まとまり placed exactly in its own
   private folder, made only by who may manage that folder (owner/admin, the department's managers). Its
   参加者 are the folder's readers, changed through `PUT /private-folders/:scopeId/members` from the 案件's
-  card; 見られる人 says 「『<title>』の参加者（N人）」 to its readers only.
+  card; 見られる人 says 「『<title>』の参加者（N人）」 to its readers only. An existing public one becomes one
+  through 「非公開にする」 (`records.md` "Making a 案件・プロジェクト private"): only into an empty private folder
+  directly inside its department, by the same people; every other folder → the one `FOLDER_NOT_PLACEABLE`.
 - 見られる人 (`POST /viewers`, `records.md` "Who can see it") names a private folder
   (「『<path>』を見られる人（N人）」) only to its readers: an unreadable record is left out, and a
   path inside an unreadable folder is answered as if the folder did not exist.

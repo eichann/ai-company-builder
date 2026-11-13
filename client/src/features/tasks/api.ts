@@ -7,6 +7,7 @@ import type { CalendarTodayResult } from '../../../shared/calendar'
 import type { GoogleStatusResult } from '../../../shared/google'
 import type { TaskCardResult } from '../../../shared/task-card'
 import type { TagSuggestions } from '../../../shared/tag-suggest'
+import { privateBundleFolderNames } from './model'
 import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveChoice, TaskDriveLinkOptions, TaskDriveLinkResult, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
@@ -33,14 +34,46 @@ export async function privateBundleRights(companyId: string, ports: PrivateBundl
 }
 
 /** Makes the private folder under `parent` ('' = the company root) with the first free name: its path, or the reason in words. */
-export async function createPrivateBundleFolder(companyId: string, parent: string, names: string[], ports: PrivateBundleWrites = window.electronAPI): Promise<{ path: string } | { error: string }> {
+export async function createPrivateBundleFolder(companyId: string, parent: string, names: string[], ports: ElectronPort<'createPrivateFolder'> = window.electronAPI): Promise<{ path: string; scopeId: string } | { error: string }> {
   for (const name of names) {
     const r = await ports.createPrivateFolder(companyId, { parentPath: parent, name }).catch(() => null)
-    if (r?.success) return { path: r.path }
+    if (r?.success) return { path: r.path, scopeId: r.scopeId }
     if (r?.code !== 'FOLDER_NAME_UNAVAILABLE') return { error: r?.error || 'サーバーに接続できませんでした。' }
   }
   return { error: '同じ名前のフォルダがあるため作れませんでした。名前を変えてください。' }
 }
+/**
+ * 「非公開にする」 on an existing 案件・プロジェクト (records.md "Making a 案件・プロジェクト private"): its own private
+ * folder (as 「新しい〇〇にする」 makes one), the people it names added as participants, then the move.
+ */
+export type BundlePrivateWrites = ElectronPort<'createPrivateFolder' | 'getPrivateFolderMembers' | 'setPrivateFolderMembers' | 'makeBundlePrivate'>
+
+/**
+ * Makes the 案件 `bundle` private: its private folder in `parent` (named after it), `people` added as
+ * participants (the server already made the member and the department's managers ones), then the server
+ * moves the 案件 and narrows its やること. null = done, else the reason in words. A move refused after the
+ * folder was made leaves that empty folder (as a refused 「新しい〇〇にする」 does) and says so.
+ */
+export async function makeExistingBundlePrivate(
+  companyId: string, bundle: { id: string; title: string; version: number }, offer: { parent: string; people: readonly string[] }, word: string,
+  ports: BundlePrivateWrites = window.electronAPI,
+): Promise<string | null> {
+  const made = await createPrivateBundleFolder(companyId, offer.parent, privateBundleFolderNames(bundle.title, word), ports)
+  if ('error' in made) return made.error
+  const left = `（作った非公開のフォルダ「${made.path}」は残っています）`
+  if (offer.people.length > 0) {
+    const now = await ports.getPrivateFolderMembers(companyId, made.scopeId).catch(() => null)
+    if (!now?.success) return `${now?.error || 'サーバーに接続できませんでした。'}${left}`
+    const named = now.members.filter(m => m.via === 'rule')
+    const viewers = [...new Set([...named.map(m => m.userId), ...offer.people])]
+    const editors = [...new Set([...named.filter(m => m.canWrite).map(m => m.userId), ...offer.people])]
+    const set = await ports.setPrivateFolderMembers(companyId, made.scopeId, { viewers, editors }).catch(() => null)
+    if (!set?.success) return `${set?.error || 'サーバーに接続できませんでした。'}${left}`
+  }
+  const r = await ports.makeBundlePrivate(companyId, bundle.id, made.path, bundle.version).catch(() => null)
+  return r?.success ? null : `${r?.error || 'サーバーに接続できませんでした。'}${left}`
+}
+
 /** One task's card, and the AI's proposals (案) of a meeting for 「議事録を確認する」. */
 export type TaskCardReads = ElectronPort<'getTaskCard' | 'getTaskProposals'>
 /** Linking a company file to a task, or taking the link away (the server checks both sides). */

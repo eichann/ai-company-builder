@@ -1308,11 +1308,59 @@ new permission. Its 参加者 are that folder's readers (owners / admins always 
   owners / admins and the department's managers; the app's ［参加者を足す］ / 外す, `tasks-ui.md`); taking
   someone off removes their clone by the existing mechanism (`private-folders-client.md` "Access changes").
 - Not yet: linking files inside its own folder to it (a server record still never links a private
-  folder's file); changing a 案件's 見える範囲 afterwards (part C).
+  folder's file); making a 非公開 one public again. A public one is made private by 「非公開にする」 (below).
 - Tests: `server/tests/unit/record-private-projects.test.ts` (who may make one, the AI / a task / deeper
   refused alike; a non-participant sees neither it nor its tasks nor its title in query or 見られる人; a
   participant added sees them, taken off no more; the phrase and `privateFolder`) — mutation-checked; the
   permission matrix row of `PUT …/private-folders/:scopeId/members` (who may change participants).
+
+### Making a 案件・プロジェクト private (「非公開にする」, owner FB #35 2026-11-13)
+
+An existing **public** 案件・プロジェクト moves into **its own new private folder** — the place a 非公開 one gets
+when it is made, with the same rights; no new permission. Only the record's place changes
+(`records.folder`, `setPlace`, as 「部署に出す」); **no file of the company folder moves** (its linked files,
+meetings and 来た連絡 stay where they are; a meeting's link to it is then hidden from the meeting's other
+readers by `linkAllowed`, public → private).
+
+- `GET /records/item/:recordId/make-private` (any member; `makePrivatePlan`) → `{ parent, tasks, people,
+  blocked }`: the department folder the private folder is made in (`''` = the company root), how many linked
+  やること the caller reads will be seen by the participants only (owner-only ones stay as they are), who the
+  案件 and those やること name (責任者・担当・頼んだ人… and members-only lists' people; owners / admins aside —
+  the app makes them participants), and whether some linked やること would stop the move. Refused exactly as
+  the move is (below), so the app offers 「非公開にする」 only where it would be taken.
+- `POST /records/item/:recordId/make-private { folder, expectedVersion, note? }` (`makePrivate`, **session
+  only, a person** — `NOT_ALLOWED` for the AI; no AI route). Refusals in order: missing / unreadable → the
+  missing record's 404; feature off; not a type implementing `bundle` → 400 `NOT_A_BUNDLE`; **a business
+  plugin's type** (a deal: approvals and sent mail copy its place when made and would not follow) → 400
+  `MAKE_PRIVATE_NOT_FOR_TYPE`; not public (owner-only, members-only, a file record, already in a private
+  folder) → 409 `NOT_PUBLIC`; the caller is not owner / admin or a manager of the department holding it (a
+  company-wide one: owners / admins only) → 403 `MAKE_PRIVATE_NOT_ALLOWED`. `folder` must be exactly a private
+  folder **directly inside that department** (the company root for a company-wide one), read by the caller,
+  with **no live record in it yet** (`RecordRepository.placedIn`) — a public folder, a deeper one, another
+  department's, one another 案件 is in, a missing one: the one answer 400 `FOLDER_NOT_PLACEABLE` (never names
+  or confirms a folder).
+- **Its やること** ("A task and its 案件・プロジェクト"): each live linked task (`BUNDLE_PLACED_TYPES`, its
+  `bundle` link) that would be seen by more people than the 案件 there (`placeWithin`) is **narrowed** to the
+  folder in the same transaction — only a true narrowing: the caller reads it, it is placed by a folder (a
+  members-only list is never turned into a folder), and every reader of the new place already reads it
+  (`placeWithin(newPlace, task)`: no participant gains a やること they could not see, e.g. one in another
+  private folder). Any other wider one → 409 `LINKED_NOT_MOVABLE`, nothing written (its text names no task,
+  count or place: the caller may not read them). Everyone the 案件 or a narrowed やること names must read the
+  folder → 400 `NAMED_PERSON_CANNOT_READ`. Owner-only やること are never wider and stay owner-only.
+- Ledger: action `make_private` with `place.folder` before / after on the 案件 (at `expectedVersion`, else
+  `VERSION_CONFLICT`) and on each narrowed やること (at its current version; any mismatch rolls the whole move
+  back). **Never undone** (`place.*`). The answer: `{ record, entry, narrowed }`; the `records` signal for
+  each changed record; nobody is notified. 経緯 says 「参加者だけに見えるようにしました」.
+- **No leaks**: the plan's `blocked` says only that something linked cannot be changed by the caller (it may
+  be a やること they do not read — chosen over leaving it seen by people outside the 案件); every refusal names no
+  folder, task or title; the new folder's path is in the ledger, read only by its readers afterwards.
+- Tests: `server/tests/unit/record-make-private.test.ts` (who may — owner / admin / the department's manager,
+  not a participant, another department's manager, the AI, a company-wide one only owners / admins; not a
+  まとまり, a plugin's type, not public, version; every other folder one answer naming nothing; a
+  non-participant reads neither it nor its narrowed やること, an owner-only one stays, never undone; someone
+  named not a participant; a やること the mover cannot read, a members-only list that is wider, one in another
+  private folder a participant could not see — each guard mutation-checked); permission matrix rows +
+  `CROSS`.
 
 ## Core types (4-5, `shared/core/core-types.ts`)
 

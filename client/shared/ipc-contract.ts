@@ -597,6 +597,8 @@ export interface IpcInvokeChannels {
   /** 「部署に出す」: an owner-only task shown to a department folder's readers (never undone). */
   'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
   'tasks:shareToBundle': { args: [companyId: string, recordId: string, expectedVersion: number]; result: TaskWriteResult }
+  /** 「非公開にする」: a public 案件・プロジェクト into its own new private folder (records.md "Making a 案件・プロジェクト private"). */
+  'tasks:makeBundlePrivate': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
   /** Tags in use that fit a title (AI through the company's key, else local matching); only suggestions. */
   'tasks:suggestTags': { args: [companyId: string, title: string, tagsInUse: string[]]; result: TagSuggestions }
   'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
@@ -1083,6 +1085,7 @@ export interface ElectronAPI {
   retryTaskRun: Invoke<'tasks:retryRun'>
   shareTask: Invoke<'tasks:share'>
   shareTaskToBundle: Invoke<'tasks:shareToBundle'>
+  makeBundlePrivate: Invoke<'tasks:makeBundlePrivate'>
   suggestTaskTags: Invoke<'tasks:suggestTags'>
   reconcileTaskRun: Invoke<'tasks:reconcile'>
   undoTaskAction: Invoke<'tasks:undo'>

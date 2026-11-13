@@ -17,9 +17,11 @@ interface Props {
   busy: boolean
   /** Runs one action at the card's version; null = done, else the refusal in words. */
   onAct: (action: BundleAction, input: BundleActInput) => Promise<string | null>
+  /** More entries of 「…」 that are not the type's actions (「非公開にする」), after them. */
+  extra?: Array<{ label: string; hint?: string; onClick: () => void }>
 }
 
-export function BundleActions({ actions, busy, onAct }: Props) {
+export function BundleActions({ actions, busy, onAct, extra = [] }: Props) {
   const [open, setOpen] = useState<BundleAction | null>(null)
   const [error, setError] = useState<string | null>(null)
   const press = async (a: BundleAction) => {
@@ -32,7 +34,7 @@ export function BundleActions({ actions, busy, onAct }: Props) {
   const { main, more } = actions
   return <>
     {main && <button type="button" disabled={busy} onClick={() => void press(main)} className={MAIN_BUTTON}>{main.ends && <CheckCircle size={13} weight="fill" />}{main.title}</button>}
-    <MoreMenu compact items={more.map(a => ({ label: a.title, ...(a.ends ? { hint: BUNDLE_ENDS_HINT } : {}), onClick: () => { void press(a) } }))} />
+    <MoreMenu compact items={[...more.map(a => ({ label: a.title, ...(a.ends ? { hint: BUNDLE_ENDS_HINT } : {}), onClick: () => { void press(a) } })), ...extra]} />
     {error && <p role="alert" className="basis-full text-[12px] text-red-600 dark:text-red-400">{error}</p>}
     {open && <BundleActionDialog action={open} people={actions.people} busy={busy} onClose={() => setOpen(null)} onAct={onAct} />}
   </>

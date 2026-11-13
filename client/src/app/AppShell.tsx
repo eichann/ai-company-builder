@@ -79,7 +79,7 @@ import { renderRecordSource } from './recordSource'
 import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
 import { bundlePlacesOf, companyPathOf, departmentBundleKind, listShownFor, tagCounts } from '../features/tasks/model'
 import { LinkToTaskDialog } from '../features/tasks/components/LinkToTaskDialog'
-import { linkFileToTask, linkMeetingBundle } from '../features/tasks/api'
+import { linkFileToTask, linkMeetingBundle, makeExistingBundlePrivate } from '../features/tasks/api'
 import { TaskCard } from '../features/tasks/components/TaskCard'
 import { PreparedMailCard } from '../features/chat/components/PreparedMailCard'
 import { ApprovalCard } from '../features/chat/components/ApprovalCard'
@@ -433,6 +433,12 @@ export function AppShell() {
     // A まとまり chosen from the list or the title bar: a meeting's open card reads again (its key).
     const readOnly = <div key={meetings.cardKey(recordId)}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><StepDeliverables companyId={currentCompany.id} recordId={recordId} renderPrepared={renderPrepared} renderFile={f => <FileLinkRow rootPath={rootPath} path={f.path} broken={f.broken} />} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} onEnded={recordEnded} notDownloadedFolderOf={notDownloadedFolderOf}
       renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null, taskList.reload, bundlePlaces)}
+      // 「非公開にする」 (records.md "Making a 案件・プロジェクト private"): its private folder, the people it names as participants, then the server's move.
+      onMakePrivate={async (b, offer) => {
+        const failure = await makeExistingBundlePrivate(currentCompany.id, b, { parent: offer.parent, people: offer.people.map(p => p.id) }, b.word)
+        if (!failure) taskList.reload()
+        return failure
+      }}
       renderMeeting={(r, parts) => renderMeetingPanel(currentCompany.id, r.id, { parts, members: (taskList.data?.members ?? []).filter(p => p.id !== taskList.data?.me), onConsult: m => consultAbout(m), onChanged: meetings.changed })} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {

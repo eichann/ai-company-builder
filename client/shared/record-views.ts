@@ -6,6 +6,7 @@ import type { TypeDefinition } from '../../shared/core/record-types'
 import { parseTagsValue } from '../../shared/core/record-types'
 import { BUNDLE_PART_ENDED_ACTION, OUTSIDE_TIME_ACTION, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
+import { fileLinkPath } from '../../shared/core/records'
 import type { RecordFieldValue, RecordFindHit, RecordFindHub, RecordSummary } from '../../shared/types/records'
 import type { RecordDetailView } from './record-details'
 import type { ViewersLabel } from '../../shared/types/viewers'
@@ -169,10 +170,37 @@ export interface RecordCardView {
    * who may change it (owners / admins, the department's managers).
    */
   participants?: { names: string[]; admins: number; members: PrivateFolderMember[] | null }
+  /**
+   * 「非公開にする」 (records.md "Making a 案件・プロジェクト private"): a public 案件・プロジェクト this member may
+   * make private (the server's `GET …/make-private` answered); absent everywhere else.
+   */
+  makePrivate?: MakePrivateOffer
   fields: RecordCardField[]
   history: RecordCardHistoryLine[]
   links: RecordCardLink[]
 }
+/** What 「非公開にする」 would do (the server's plan), with the people it names. */
+export interface MakePrivateOffer {
+  /** The department folder the private folder is made in ('' = the company root). */
+  parent: string
+  /** Its やること (that the member reads) that will be seen by the participants only. */
+  tasks: number
+  /** Those the 案件 and its やること name, made participants with the member (owners / admins aside). */
+  people: Array<{ id: string; name: string }>
+  /** Some linked やること cannot be changed by this member: the server would refuse. */
+  blocked: boolean
+}
+
+/** The server's plan as the card may show it; null for anything malformed (an older server sends none). */
+export function makePrivateOfferOf(data: unknown, names: Record<string, string>): MakePrivateOffer | null {
+  const d = data as { parent?: unknown; tasks?: unknown; people?: unknown; blocked?: unknown } | null
+  if (typeof d !== 'object' || d === null) return null
+  if (typeof d.parent !== 'string' || (d.parent !== '' && fileLinkPath(d.parent) !== d.parent)) return null
+  if (!Number.isInteger(d.tasks) || (d.tasks as number) < 0 || typeof d.blocked !== 'boolean') return null
+  if (!Array.isArray(d.people) || !d.people.every(p => typeof p === 'string' && p !== '')) return null
+  return { parent: d.parent, tasks: d.tasks as number, blocked: d.blocked, people: (d.people as string[]).map(id => ({ id, name: names[id] ?? 'メンバー' })) }
+}
+
 export type RecordCardResult =
   | { success: true; card: RecordCardView }
   | { success: false; offline: boolean; notFound?: boolean; error: string }
@@ -236,7 +264,9 @@ export function cardFields(r: RecordSummary, def: TypeDefinition | undefined, pe
 }
 
 const ENGINE_ACTIONS: Record<string, string> = {
-  create: '作りました', undo: '取り消しました', link_file: 'ファイルをつなぎました', unlink_file: 'ファイルを外しました',
+  create: '作りました', undo: '取り消しました',
+  // 「非公開にする」 (records.md "Making a 案件・プロジェクト private"): the 案件 and each of its narrowed やること.
+  make_private: '参加者だけに見えるようにしました', link_file: 'ファイルをつなぎました', unlink_file: 'ファイルを外しました',
   // The server clock (notifications.md "The server clock").
   [WAIT_OVER_ACTION]: '見込みの日時が過ぎたので、追いかけの番にしました',
   // The startup carry-over of a meeting's outside time (records.md "Outside time").

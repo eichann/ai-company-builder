@@ -489,6 +489,11 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         .run(companyId, params)
       conn.prepare('UPDATE record_settings SET minutes_folder = @new WHERE company_id = ? AND minutes_folder = @old').run(companyId, params)
     },
+    placedIn(folder) {
+      // At or under `folder` without LIKE (folder names may hold _ and %), as moveFolder.
+      return (conn.prepare("SELECT id FROM records WHERE company_id = ? AND removed_at IS NULL AND (folder = @f OR substr(folder, 1, length(@f) + 1) = @f || '/')")
+        .all(companyId, { f: folder }) as Array<{ id: string }>).map(r => r.id)
+    },
     replaceLinks(sourceId, links) {
       conn.prepare('DELETE FROM record_links WHERE company_id = ? AND source_id = ?').run(companyId, sourceId)
       const insert = conn.prepare('INSERT INTO record_links (company_id, source_id, name, position, target_id, target_path, created_by, target_meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
