@@ -4,7 +4,7 @@
  */
 import type Database from 'better-sqlite3'
 import { parseSkillUses } from '../../../shared/core/skill-uses'
-import type { DrivePickRow, DrivePickTicketRow, DrivePutRow, GoogleDriveRepository, PickTicketDirectory } from '../../ports/google-drive'
+import type { DriveDocRead, DriveOverwriteConfirmationRow, DrivePickRow, DrivePickTicketRow, DrivePutRow, GoogleDriveRepository, PickTicketDirectory } from '../../ports/google-drive'
 import { skillUsesJson } from './skill-uses'
 
 type PickRow = { user_id: string; file_id: string; kind: string; name: string; mime_type: string; picked_at: string; expires_at: string }
@@ -35,6 +35,26 @@ const toTicket = (r: TicketRow): DrivePickTicketRow => {
     id: r.id, userId: r.user_id, ticketHash: r.ticket_hash, mode: r.mode as DrivePickTicketRow['mode'], purpose: r.purpose === 'link' ? 'link' : 'read', maxItems: r.max_items, fileIds,
     state: r.state as DrivePickTicketRow['state'], configHandedAt: r.config_handed_at, result: r.result, createdAt: r.created_at, expiresAt: r.expires_at,
     finishedAt: r.finished_at,
+  }
+}
+
+type ConfirmRow = {
+  id: string; user_id: string; conversation_id: string; request_key: string; folder_id: string; file_id: string; name: string; kind: string; sha256: string
+  content: Buffer | null; record_id: string | null; fingerprint: string; revision: string; revision_at: string; comments_seen: string; editors: string
+  commented: number; state: string; created_at: string; expires_at: string
+}
+const CONFIRM_COLUMNS = 'id, user_id, conversation_id, request_key, folder_id, file_id, name, kind, sha256, content, record_id, fingerprint, revision, revision_at, comments_seen, editors, commented, state, created_at, expires_at'
+const toConfirm = (r: ConfirmRow): DriveOverwriteConfirmationRow => {
+  let editors: string[] = []
+  try {
+    const parsed = JSON.parse(r.editors) as unknown
+    if (Array.isArray(parsed)) editors = parsed.filter((v): v is string => typeof v === 'string')
+  } catch { /* stored by this module only */ }
+  return {
+    id: r.id, userId: r.user_id, conversationId: r.conversation_id, requestKey: r.request_key, folderId: r.folder_id, fileId: r.file_id, name: r.name,
+    kind: r.kind as DriveOverwriteConfirmationRow['kind'], sha256: r.sha256, content: r.content ? new Uint8Array(r.content) : null, recordId: r.record_id,
+    fingerprint: r.fingerprint, revision: r.revision, revisionAt: r.revision_at, commentsSeen: r.comments_seen, editors, commented: r.commented === 1,
+    state: r.state as DriveOverwriteConfirmationRow['state'], createdAt: r.created_at, expiresAt: r.expires_at,
   }
 }
 
@@ -92,6 +112,67 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
     },
     prunePicks(now) {
       conn.prepare('DELETE FROM google_drive_picks WHERE company_id = ? AND expires_at <= ?').run(companyId, now)
+    },
+    renewPick(userId, fileId, kind, expiresAt, now) {
+      conn.prepare(`UPDATE google_drive_picks SET expires_at = ? WHERE company_id = ? AND user_id = ? AND file_id = ? AND kind = ? AND expires_at > ? AND expires_at < ?`)
+        .run(expiresAt, companyId, userId, fileId, kind, now, expiresAt)
+    },
+    anyPick(userId, fileId) {
+      const r = conn.prepare(`SELECT ${PICK_COLUMNS} FROM google_drive_picks WHERE company_id = ? AND user_id = ? AND file_id = ?`).get(companyId, userId, fileId) as PickRow | undefined
+      return r ? toPick(r) : null
+    },
+
+    keepDocRead(d: DriveDocRead) {
+      conn.prepare(`INSERT INTO google_drive_doc_reads (company_id, user_id, conversation_id, file_id, fingerprint, revision, revision_at, comments_seen, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (company_id, user_id, conversation_id, file_id) DO UPDATE SET fingerprint = excluded.fingerprint, revision = excluded.revision,
+          revision_at = excluded.revision_at, comments_seen = excluded.comments_seen, read_at = excluded.read_at`)
+        .run(companyId, d.userId, d.conversationId, d.fileId, d.fingerprint, d.revision, d.revisionAt, d.commentsSeen, d.readAt)
+    },
+    docRead(userId, conversationId, fileId) {
+      const r = conn.prepare(`SELECT user_id, conversation_id, file_id, fingerprint, revision, revision_at, comments_seen, read_at FROM google_drive_doc_reads
+        WHERE company_id = ? AND user_id = ? AND conversation_id = ? AND file_id = ?`).get(companyId, userId, conversationId, fileId) as
+        { user_id: string; conversation_id: string; file_id: string; fingerprint: string; revision: string; revision_at: string; comments_seen: string; read_at: string } | undefined
+      return r ? {
+        userId: r.user_id, conversationId: r.conversation_id, fileId: r.file_id, fingerprint: r.fingerprint, revision: r.revision, revisionAt: r.revision_at,
+        commentsSeen: r.comments_seen, readAt: r.read_at,
+      } : null
+    },
+    pruneDocReads(before) {
+      conn.prepare('DELETE FROM google_drive_doc_reads WHERE company_id = ? AND read_at <= ?').run(companyId, before)
+    },
+
+    createOverwriteConfirmation(c) {
+      conn.prepare(`INSERT INTO google_drive_overwrite_confirmations (${CONFIRM_COLUMNS}, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(c.id, c.userId, c.conversationId, c.requestKey, c.folderId, c.fileId, c.name, c.kind, c.sha256, c.content ? Buffer.from(c.content) : null, c.recordId,
+          c.fingerprint, c.revision, c.revisionAt, c.commentsSeen, JSON.stringify(c.editors), c.commented ? 1 : 0, c.state, c.createdAt, c.expiresAt, companyId)
+    },
+    overwriteConfirmation(userId, id) {
+      const r = conn.prepare(`SELECT ${CONFIRM_COLUMNS} FROM google_drive_overwrite_confirmations WHERE company_id = ? AND user_id = ? AND id = ?`).get(companyId, userId, id) as ConfirmRow | undefined
+      return r ? toConfirm(r) : null
+    },
+    openOverwriteConfirmation(userId, fileId, now) {
+      const r = conn.prepare(`SELECT ${CONFIRM_COLUMNS} FROM google_drive_overwrite_confirmations
+        WHERE company_id = ? AND user_id = ? AND file_id = ? AND state = 'open' AND expires_at > ? ORDER BY created_at DESC, id LIMIT 1`)
+        .get(companyId, userId, fileId, now) as ConfirmRow | undefined
+      return r ? toConfirm(r) : null
+    },
+    moveOverwriteConfirmation(id, from, to) {
+      if (from.length === 0) return false
+      const clear = to === 'written' || to === 'declined'
+      return conn.prepare(`UPDATE google_drive_overwrite_confirmations SET state = ?${clear ? ', content = NULL' : ''}
+        WHERE company_id = ? AND id = ? AND state IN (${from.map(() => '?').join(', ')})`)
+        .run(to, companyId, id, ...from).changes === 1
+    },
+    declineOpenOverwriteConfirmations(fileId) {
+      conn.prepare("UPDATE google_drive_overwrite_confirmations SET state = 'declined', content = NULL WHERE company_id = ? AND file_id = ? AND state = 'open'").run(companyId, fileId)
+    },
+    forgetMember(userId) {
+      conn.prepare('DELETE FROM google_drive_overwrite_confirmations WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+      conn.prepare('DELETE FROM google_drive_doc_reads WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+    },
+    pruneOverwriteConfirmations(now, deleteBefore) {
+      conn.prepare('UPDATE google_drive_overwrite_confirmations SET content = NULL WHERE company_id = ? AND expires_at <= ? AND content IS NOT NULL').run(companyId, now)
+      conn.prepare('DELETE FROM google_drive_overwrite_confirmations WHERE company_id = ? AND expires_at <= ?').run(companyId, deleteBefore)
     },
 
     claimPut(row) {

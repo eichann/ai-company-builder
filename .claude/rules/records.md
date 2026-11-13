@@ -434,7 +434,9 @@ company path:
   admin, who may undo anyone's entries). Two members' files of the same name are two links.
   `linkedToFile` cannot name one (`fileLinkPath`).
 - **People only**: the member's AI gets 403 `TYPED_LINK_PERSON_ONLY` for either kind (the AI reads a
-  Drive-linked file only through `drive_read`, which needs the member's own pick or own put, and a PC file with
+  Drive-linked file only through `drive_read`, which needs the member's own pick, own put, **or a link that member made
+  themselves** — such a link keeps the file readable by their own AI with no expiry while it exists, `google-drive.md`
+  "How long a pick lasts"; another member's link gives nobody else's AI anything — and a PC file with
   its ordinary file tools in the working folder). **One exception** (owner decision 2026-11-09): the file
   the member's own Drive put just made in a consultation about the record is linked by the server, as
   the AI (`recordEngine.linkDrivePut`, only from the Google connector's put route with facts from the put

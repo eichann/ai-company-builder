@@ -7,6 +7,7 @@ import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, type PluginOperati
 import { APPROVAL_PART_TYPE, readApprovalCardRef, type ApprovalCardRef } from '../../../shared/approvals'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, readMinutesBundleChoiceCard, type MinutesBundleChoiceCard } from '../../../shared/minutes-app'
 import { MAIL_DRAFT_PART_TYPE, readMailDraftCard, type MailDraftCard } from '../../../shared/outbound-mail'
+import { DRIVE_OVERWRITE_PART_TYPE, readDriveOverwriteCard, type DriveOverwriteCard } from '../../../shared/drive-overwrite'
 import { FILE_LINKED_PART_TYPE, readFileLinkedPart, type FileLinkedPart } from '../../../shared/consultation-task'
 import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from './choiceHistory'
 import { RESTORED_TOOL_PART_TYPE, TOOL_MARKER_RE, restoredToolLine, storedToolLine, type StoredToolLine } from '../../../shared/tool-display'
@@ -37,6 +38,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   // The app's cards, in the order the tools produced them (restored in that order).
   const cardOrder: string[] = []
   const mailDrafts: MailDraftCard[] = []
+  const driveOverwrites: DriveOverwriteCard[] = []
   const linkedFiles: FileLinkedPart[] = []
   const secondOpinions: SecondOpinionRecord[] = []
   const toolLines: Record<string, StoredToolLine> = {}
@@ -61,6 +63,11 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     if (part.type === MAIL_DRAFT_PART_TYPE) {
       const card = readMailDraftCard((part as { data?: unknown }).data)
       if (card && !mailDrafts.some(c => c.id === card.id)) { mailDrafts.push(card); cardOrder.push(`mail-draft-${card.id}`) }
+      continue
+    }
+    if (part.type === DRIVE_OVERWRITE_PART_TYPE) {
+      const card = readDriveOverwriteCard((part as { data?: unknown }).data)
+      if (card && !driveOverwrites.some(c => c.id === card.id)) { driveOverwrites.push(card); cardOrder.push(`drive-overwrite-${card.id}`) }
       continue
     }
     if (part.type === FILE_LINKED_PART_TYPE) {
@@ -112,6 +119,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(minutesDealChoices.length ? { minutesDealChoices } : {}),
     ...(cardOrder.length > 1 ? { cardOrder } : {}),
     ...(mailDrafts.length ? { mailDrafts } : {}),
+    ...(driveOverwrites.length ? { driveOverwrites } : {}),
     ...(linkedFiles.length ? { linkedFiles } : {}),
     ...(secondOpinions.length ? { secondOpinions } : {}),
     ...(Object.keys(toolLines).length ? { toolLines } : {}),
@@ -170,6 +178,10 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
   for (const stored of msg.mailDrafts || []) {
     const card = readMailDraftCard(stored)
     if (card) cards.push({ type: MAIL_DRAFT_PART_TYPE, id: `mail-draft-${card.id}`, data: card })
+  }
+  for (const stored of msg.driveOverwrites || []) {
+    const card = readDriveOverwriteCard(stored)
+    if (card) cards.push({ type: DRIVE_OVERWRITE_PART_TYPE, id: `drive-overwrite-${card.id}`, data: card })
   }
   parts.push(...inCardOrder(cards, msg.cardOrder))
   for (const stored of msg.linkedFiles || []) {

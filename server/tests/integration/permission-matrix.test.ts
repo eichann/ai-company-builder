@@ -125,6 +125,7 @@ interface World {
     job: string
     /** A Google Picker pick ticket of the other company's member (google-drive.md). */
     pickTicket: string
+    driveConfirmation: string
   }
 }
 
@@ -534,6 +535,7 @@ const MATRIX: Row[] = [
   r('DELETE /api/companies/:companyId/me/google/drive/pick-tickets/:ticketId', w => ({ path: `${C(w)}/me/google/drive/pick-tickets/ticket-nosuch` }), [404, 404, 404, 404, 404, 401], 'the member\'s own ticket only'),
   r('POST /api/companies/:companyId/me/google/drive/picks', w => ({ path: `${C(w)}/me/google/drive/picks`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('GET /api/companies/:companyId/me/google/drive/files', w => ({ path: `${C(w)}/me/google/drive/files` }), MEMBERS, 'only the caller\'s own picks and puts (google-drive.test.ts)'),
+  r('POST /api/companies/:companyId/me/google/drive/overwrite-confirmations/:confirmationId', w => ({ path: `${C(w)}/me/google/drive/overwrite-confirmations/drive-confirm-nosuch`, body: { action: 'confirm' } }), [404, 404, 404, 404, 404, 401], 'the member\'s own confirmation only (google-drive-continue.test.ts)'),
   r('GET /api/records-ai/google/drive/status', () => ({ path: '/api/records-ai/google/drive/status' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/google/drive/read', () => ({ path: '/api/records-ai/google/drive/read', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/google/drive/put', () => ({ path: '/api/records-ai/google/drive/put', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
@@ -752,6 +754,7 @@ const CROSS: CrossRow[] = [
   x('DELETE /api/companies/:companyId/absences/:absenceId', (w, id) => ({ path: `${C(w)}/absences/${id}` }), w => w.other.absence),
   x('GET /api/companies/:companyId/me/google/drive/pick-tickets/:ticketId', (w, id) => ({ path: `${C(w)}/me/google/drive/pick-tickets/${id}` }), w => w.other.pickTicket),
   x('DELETE /api/companies/:companyId/me/google/drive/pick-tickets/:ticketId', (w, id) => ({ path: `${C(w)}/me/google/drive/pick-tickets/${id}` }), w => w.other.pickTicket),
+  x('POST /api/companies/:companyId/me/google/drive/overwrite-confirmations/:confirmationId', (w, id) => ({ path: `${C(w)}/me/google/drive/overwrite-confirmations/${id}`, body: { action: 'confirm' } }), w => w.other.driveConfirmation, 'drive-confirm-nosuch'),
   x('PATCH /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}`, body: { name: '乗っ取り' } }), w => w.other.group),
   x('PUT /api/companies/:companyId/groups/:groupId/members', (w, id) => ({ path: `${C(w)}/groups/${id}/members`, body: { userIds: [] } }), w => w.other.group),
   x('DELETE /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}` }), w => w.other.group),
@@ -1041,6 +1044,11 @@ async function seed(): Promise<World> {
   // A Google Picker pick ticket of the other company's member, open until far ahead.
   db.prepare("INSERT INTO google_drive_pick_tickets (id, company_id, user_id, ticket_hash, mode, max_items, file_ids, state, created_at, expires_at) VALUES ('pick-ticket-other-1', ?, ?, ?, 'folder', 1, '[]', 'open', ?, '2100-01-01T00:00:00.000Z')")
     .run(other, otherMember, 'f'.repeat(64), expires)
+  // A Google document overwrite waiting for the other company's member's press (google-drive.md "Continuing a document people edited").
+  db.prepare(`INSERT INTO google_drive_overwrite_confirmations (id, company_id, user_id, conversation_id, request_key, folder_id, file_id, name, kind, sha256, content,
+      fingerprint, revision, revision_at, comments_seen, state, created_at, expires_at)
+    VALUES ('drive-confirm-other-1', ?, ?, 'conv-other', 'key-other-0001', 'folderOther000001', 'fileOther00000001', '他社の文書', 'markdown', ?, ?, ?, 'rev-other', ?, ?, 'open', ?, '2100-01-01T00:00:00.000Z')`)
+    .run(other, otherMember, 'a'.repeat(64), Buffer.from('# 他社\n'), 'b'.repeat(64), expires, 'c'.repeat(64), expires)
   // An absence of the other company's member, current until far ahead.
   db.prepare("INSERT INTO member_absences (company_id, id, user_id, from_day, until_day, delegate_id, set_by, set_at) VALUES (?, 'absence-other-1', ?, '2000-01-01', '2100-12-31', ?, ?, ?)")
     .run(other, otherMember, USER.outsider, USER.outsider, expires)
@@ -1107,6 +1115,7 @@ async function seed(): Promise<World> {
       shelfRequest: 'shelf-request-other-1',
       job: OTHER_JOB,
       pickTicket: 'pick-ticket-other-1',
+      driveConfirmation: 'drive-confirm-other-1',
 
     },
   }

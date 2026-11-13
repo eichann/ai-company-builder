@@ -166,11 +166,44 @@ export interface DrivePutAnswer {
    */
   linkedTo?: { recordId: string }
   /**
+   * A Google document was overwritten while it had comments: a full replace may take a comment off the words it was
+   * on (google-drive.md "Continuing a document people edited"). Absent: none, or not a document's update.
+   */
+  commentsMayMove?: boolean
+  /**
+   * The document had changed in Drive since ACB's last put and the AI's text (written after reading it) replaced it:
+   * `own` — every change was the member's own; `confirmed` — someone else's, after the member pressed 「上書きする」.
+   */
+  continued?: 'own' | 'confirmed'
+  /**
    * The put is done in Drive but its file could not be linked to the named record (a record check refused it, or it
    * failed): said plainly so the AI tells the member (they can link it from the card). `code`: the refusal's code.
    */
   notLinked?: { recordId: string; code: string }
 }
+
+/**
+ * The 409 `DRIVE_OVERWRITE_NEEDS_CONFIRMATION` of a put (google-drive.md "Continuing a document people edited"): someone
+ * else edited or commented on the Google document since ACB's last put. Nothing was written; the content waits on the
+ * server until the member presses 「上書きする」 on the app's card (or `expiresAt`).
+ */
+export interface DriveOverwriteConfirmation {
+  id: string
+  /** The document's name as ACB put it (the member's own). */
+  fileName: string
+  /** Google's display names of the others whose edits or comments came since (at most 5; empty: unnamed). */
+  editors: string[]
+  /** Someone else commented (or replied) since. */
+  commented: boolean
+  expiresAt: string
+}
+
+/** POST /api/companies/:id/me/google/drive/overwrite-confirmations/:id { action } (session): the member's press. */
+export type DriveOverwriteDecision =
+  | { state: 'written'; drivePut: DrivePutView; commentsMayMove: boolean }
+  /** Sent, but Google's answer was lost and the file is not found yet: never sent again (looked up by the put's id). */
+  | { state: 'unknown'; drivePut: DrivePutView }
+  | { state: 'declined' }
 
 /** POST /api/records-ai/google/drive/put body. */
 export interface DrivePutRequest {
@@ -198,6 +231,12 @@ export interface DrivePutRequest {
    * fails the put.
    */
   recordId?: string
+  /**
+   * The app shows the card that asks the member before a Google document someone else (may have) edited is replaced
+   * (google-drive.md "Continuing a document people edited"). Absent (an app released before it): such an update is refused
+   * as before and nothing waits on the server.
+   */
+  askPerson?: boolean
 }
 
 /** One of the member's own Drive files ACB may open: a live pick of a file, or a file their put made. */

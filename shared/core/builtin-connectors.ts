@@ -76,7 +76,7 @@ export const BUILTIN_CONNECTORS = {
       // The status (its own folder and the files its puts made there), the put, and a put's receipt; never a read or a pick.
       routes: ['GET /google/drive/status', 'POST /google/drive/put', 'GET /google/drive/puts/:putId'],
       tools: ['drive_picked', 'drive_put'],
-      lapseNote: '選んだフォルダは、選んでから90日たつと選び直しが要ります（Google Drive のフォルダを ACB が使える期間）。',
+      lapseNote: '選んだフォルダは、置くたびに90日延びます。90日のあいだ何も置かれないと、選び直しが要ります（Google Drive のフォルダを ACB が使える期間）。',
       howToPut: 'できたものは、保存したファイルを drive_put で Google Drive のフォルダ（folderId: {ref}）に置きます（Markdown / HTML は as: "google_doc" で Google ドキュメントにする）。置けるのはこのフォルダだけです。前の回に作ったファイルを直すときは drive_picked で確かめ、その fileId を updateFileId に渡して上書きします（省くと新しいファイルが増えます）。置いたファイルはやることに自動でつながります。リンクは job_report の summary にも書いてください。',
       howToUpdateMadeBefore: '上の Google Drive のファイル（fileId つき）は、前回この仕事がこのフォルダに置いたものです。手順書が「更新する」「前のものを直す」などと言うときは、新しいファイルを作らずに、drive_put の updateFileId にその fileId を渡して同じファイルを上書きしてください（drive_picked にも出ています）。上書きが断られたとき（Drive で人が変えていた、など）は上書きせず、新しいファイルとして置いて、そのことを job_report の summary に書いてください。',
       isFileId: isDriveId,

@@ -425,12 +425,16 @@ reports.
   as the AI with the run's id; also in a company with the shared folder, owner decision 2026-11-13, `records.md` "Drive and PC file
   links"); a refusal (records off, the record gone…) is logged with its code and never fails
   anything. The AI's `summary` may carry the link as well.
-- **The 90-day pick** (decision 3, decision for the owner): a folder pick is never renewed by itself while a job names
-  it (that would keep ACB's permission alive with nobody looking). When the chosen place is not usable — past 90 days,
+- **The 90-day pick** (decision 3, changed by the owner 2026-11-14 「自動で接続し直す」, `google-drive.md` "How long a pick
+  lasts"): a folder pick is not renewed by the clock while a job names it, but **every put that is done into it renews
+  it for 90 days** — a run's too — so a job that delivers at least every 90 days keeps its place; 90 days without a put
+  end it. A run whose folder lapsed is told it cannot put this time and to report it (`DRIVE_FOLDER_NOT_PICKED`, never
+  「drive_pick_folder で選んでもらって」). When the chosen place is not usable — 90 days without a put,
   or no longer the person's pick — the clock makes the slot's occurrence `needs_person` `PLACE_NOT_USABLE` at once, told
   (`job_failed`, `makeOccurrences`' `placeUsable`) — **once**: a slot after one that already said so is made
   `needs_person` without a second notice — and a claim finding it so does the same (409 `JOB_PLACE_NOT_USABLE`; a
-  running one's run is ended). No warning before the 90 days end (not built: the app's place line shows the date). The
+  running one's run is ended). No warning before the 90 days end (not built — a follow-up: a recordless notice to the responsible person about a week
+before; the app's place line shows the date). The
   words of how long a place lasts are the connector's (`lapseNote`); the core's say only 「使える期間が過ぎたか、消されました」.
   An app that cannot choose a place (before 5a-3) never runs such a job (its parser refuses the turn); the acceptance
   notice and `JOB_PLACE_NEEDED` say the app must be updated. The person picks the folder again with 「受け取る」 (a re-pick renews the pick) and the

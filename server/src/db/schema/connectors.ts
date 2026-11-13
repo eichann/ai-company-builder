@@ -136,6 +136,50 @@ export const connectorSchema = `
       UNIQUE (ticket_hash)
     );
 
+    -- What the member's AI read of a Google document in a consultation (google-drive.md "Continuing a
+    -- document people edited"): the sha256 of the text export it was given and the newest revision then.
+    -- Never the text. The newest read per consultation and file.
+    CREATE TABLE IF NOT EXISTS google_drive_doc_reads (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      file_id TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      revision_at TEXT NOT NULL,
+      comments_seen TEXT NOT NULL,
+      read_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id, conversation_id, file_id)
+    );
+
+    -- A put waiting for the member's 「上書きする」 (google-drive.md "Continuing a document people edited"):
+    -- someone else edited the Google document; the AI's content (fixed by its sha256) waits here until the
+    -- member presses, declines or it expires; the content is removed once decided. state: open → writing (a press being
+    -- written; nothing else may take it) → written | open again (refused, may be pressed again) | declined; open → declined.
+    CREATE TABLE IF NOT EXISTS google_drive_overwrite_confirmations (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      request_key TEXT NOT NULL,
+      folder_id TEXT NOT NULL,
+      file_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('html', 'markdown')),
+      sha256 TEXT NOT NULL,
+      content BLOB,
+      record_id TEXT,
+      fingerprint TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      revision_at TEXT NOT NULL,
+      comments_seen TEXT NOT NULL,
+      editors TEXT NOT NULL DEFAULT '[]',
+      commented INTEGER NOT NULL DEFAULT 0,
+      state TEXT NOT NULL CHECK (state IN ('open', 'writing', 'written', 'declined')),
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+
     -- Which core connector serves a role when two could (connector-roles.md; the
     -- admin chooses once). The history is in connector_history (provider 'roles').
     CREATE TABLE IF NOT EXISTS connector_role_choices (

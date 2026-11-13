@@ -941,6 +941,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       pollMeetings: (companyId, between) => minutes.pollCompany(companyId, between),
       // 「気になる動き」 (security-alerts.md): every company, records on or off.
       securitySweep: companyId => securityAlerts.sweep(companyId),
+      // Google Drive (google-drive.md): a waiting overwrite's content goes once it expired; old reads go.
+      driveSweep: companyId => googleDrive.sweep(companyId),
       yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     }),
     permissionViews,

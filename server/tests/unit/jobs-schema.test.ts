@@ -21,6 +21,9 @@ const NEW_TABLES = ['ai_jobs', 'ai_job_versions', 'ai_job_occurrences', 'ai_job_
 const LATER_TABLES = [
   // google-drive.md "Picker and its token": the one-time pick tickets.
   'google_drive_pick_tickets',
+  // google-drive.md "Continuing a document people edited": what the AI read, and an overwrite waiting for the member's press.
+  'google_drive_doc_reads',
+  'google_drive_overwrite_confirmations',
 ]
 /**
  * Columns later builds add to a table that was there before (each an idempotent `ALTER TABLE … ADD COLUMN`, so
