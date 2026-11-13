@@ -702,7 +702,8 @@ member copied by hand, past every check. Now, **in a consultation** with the app
   the file's name, as for any put.
 - **The press** (`POST …/overwrite-confirmations/:id { action, trust? }`, session only, as for an edited document): runs
   the put again with the waiting content (`askAudience`, `askPerson`, `privateSource` as asked) and writes only while the
-  place's people are exactly those shown (`audienceSig`), else 409 `DRIVE_SHARING_CHANGED` and the card closes. An update
+  place's people are exactly those shown (`audienceSig`; fewer counts as changed too), else 409 `DRIVE_SHARING_CHANGED`
+  and the card closes. A request asked again reuses a waiting card only when it is as private as before (`privateSource`). An update
   of a Google document someone edited **and** seen outside asks once (one card with both). The answer says `update`.
 - **The card** (`DriveOverwriteCard.tsx`, `DRIVE_PUT_ASK_WORDS`, `driveAudienceLines`): 「社外の人も見られる場所に置きます」 /
   「非公開フォルダの資料を、ほかの人も見られる場所に置きます」, the domains (never addresses) or 「リンクを知っている人なら…誰でも」,

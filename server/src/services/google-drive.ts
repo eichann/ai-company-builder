@@ -467,7 +467,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     })
     const waiting = repo.openOverwriteConfirmation(member.userId, req.fileId !== null ? { fileId: req.fileId } : { requestKey: req.requestKey }, now)
     if (waiting && waiting.requestKey === req.requestKey && waiting.conversationId === conversationId && waiting.fingerprint === req.fingerprint && waiting.revision === req.revision
-      && waiting.revisionAt === req.revisionAt && waiting.commentsSeen === req.commentsSeen && waiting.audienceSig === req.audienceSig) return view(waiting)
+      && waiting.revisionAt === req.revisionAt && waiting.commentsSeen === req.commentsSeen && waiting.audienceSig === req.audienceSig
+      && waiting.privateSource === req.privateSource) return view(waiting)
     if (waiting) repo.moveOverwriteConfirmation(waiting.id, ['open'], 'declined')
     const row: DriveOverwriteConfirmationRow = {
       ...req, id: `drive-confirm-${ids.newId()}`.replace(/[^A-Za-z0-9_-]/g, ''), userId: member.userId, conversationId, state: 'open', createdAt: now,
@@ -1225,6 +1226,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         const outside = aud.anyone || aud.outsideKey !== ''
         // Exactly who: outside only for a plain file (who inside sees it never mattered), inside too for a private one.
         const sig = deps.sha256(new TextEncoder().encode(privateSource ? JSON.stringify([aud.outsideKey, aud.insideKey]) : aud.outsideKey))
+        // A press about who sees the place writes only for exactly those people — fewer too: the member saw another list.
+        if (confirmed?.audienceSig && confirmed.audienceSig !== sig) return refuse('conflict', SHARING_CHANGED, { code: 'DRIVE_SHARING_CHANGED' })
         if (privateSource) {
           if (outside) return refuse('forbidden', PRIVATE_OUTSIDE, { code: 'DRIVE_PRIVATE_SHARED_OUTSIDE' })
           if (aud.insideOthers === 0) return null

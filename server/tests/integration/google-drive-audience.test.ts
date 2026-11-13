@@ -343,6 +343,29 @@ describe('a private folder\'s file (google-drive.md "Asking before a put")', () 
     expect(google.driveFile(doc.fileId)!.content.toString()).not.toContain('二版')
   })
 
+  it('fewer people than shown at the press: nothing written either (the member saw another list)', async () => {
+    const token = await tokenFor('m-sato')
+    google.setDrivePermissions(GOOGLE_SEED.proposalsFolder, [owner(GOOGLE_SEED.member), { type: 'user', role: 'reader', emailAddress: GOOGLE_SEED.colleague }])
+    const c = (await ai(token, 'POST', '/put', pdfBody('減る.pdf', { folderId: GOOGLE_SEED.proposalsFolder, privateSource: true }))).body.confirmation
+    google.setDrivePermissions(GOOGLE_SEED.proposalsFolder, [owner(GOOGLE_SEED.member)])
+    expect((await press('m-sato', c.id, 'confirm')).body.code).toBe('DRIVE_SHARING_CHANGED')
+  })
+
+  it('the same edit asked again for a private folder\'s file is a new confirmation that stays private', async () => {
+    const token = await tokenFor('m-sato')
+    google.setDrivePermissions(GOOGLE_SEED.proposalsFolder, [owner(GOOGLE_SEED.member)])
+    const doc = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 同じ中身\n'), { name: '同じ中身.md', askAudience: true }))).body.data.drivePut
+    google.editDriveFile(doc.fileId, '# 田中さんの直し\n', GOOGLE_SEED.colleague)
+    expect((await ai(token, 'POST', '/read', { fileId: doc.fileId })).status).toBe(200)
+    const body = docBody(Buffer.from('# 二版\n'), { name: '同じ中身.md', updateFileId: doc.fileId, askAudience: true })
+    const plain = (await ai(token, 'POST', '/put', body)).body.confirmation
+    const priv = (await ai(token, 'POST', '/put', { ...body, privateSource: true })).body.confirmation
+    expect(priv.id).not.toBe(plain.id)
+    expect(ROW(priv.id).private_source).toBe(1)
+    google.setDrivePermissions(GOOGLE_SEED.proposalsFolder, [owner(GOOGLE_SEED.member), { type: 'user', role: 'reader', emailAddress: GOOGLE_SEED.colleague }])
+    expect((await press('m-sato', priv.id, 'confirm')).body.code).toBe('DRIVE_SHARING_CHANGED')
+  })
+
   it('a member leaving takes their trusted folders with them', async () => {
     const { sqliteCompanyData } = await import('../../src/adapters/sqlite/company-data')
     const repo = sqliteCompanyData(db).forCompany(CO).googleDrive
