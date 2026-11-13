@@ -366,10 +366,18 @@ arguments other than person / date / text. **Offered only as the task card decid
 `client/shared/record-actions.ts`, shared with `task-card.ts`): a person field of the record holding the member
 (the 責任者 `owner`), `anyone`, or a `link:` the server answered — never a role: an admin or a 部署の管理役 who is
 not the 責任者 sees no button although the server would allow them (the app knows no roles; never offering
-what the server refuses). Each press at the card's version, the type's words after it with ［取り消す］
+what the server refuses). **A プロジェクト without a 責任者** (owner FB #34, 2026-11-13: one the AI made before
+creates named the creator showed 責任者 「—」 and nothing to press): the type's `who_fallback` counts too
+(`personInWhoOrFallback`, the server's `whoWithFallback` narrowed to what the app knows — only while none of
+`who`'s person fields holds anyone; never with a `link:<link>.<field>` entry): project v2's 責任者を替える has
+`who_fallback: [anyone]`, so every reader gets **only 「…」 責任者を替える** (no ［終える］ / やめる / other fields);
+once named, the card is the 責任者's again. An older server's project v1 offers nothing, as before. **Long words
+wrap** (FB #36): the なんのため / 責任者 / 進み具合 tiles are `min-w-0` with `overflow-wrap: anywhere`, so a long
+URL stays in its tile (the task card's 目的 and the AI's 下ごしらえ text wrap the same way). Each press at the card's version, the type's words after it with ［取り消す］
 (`bundleDoneWords`); a refusal is said where it was pressed and the card reads again. 見るだけ (feature off):
 none. Tests: `client/tests/record-details.test.ts` (the 責任者 only, ［終える］ / 「…」, a finished one, a plugin
-type's own actions and what is left out), `tests/ui/record-card.spec.ts` (`?record=project`, `&owner=other`),
+type's own actions and what is left out, one without a 責任者), `tests/ui/record-card.spec.ts` (`?record=project`,
+`&owner=other`, `&owner=none`, `&purpose=url`),
 `tests/ui/tasks-layout.spec.ts` (the tab closes) — mutation-checked. **The AI on a record** (plan I.4, every record card; `aiOnRecord`): a run of it held or
 open → 「AI が反映しています…（あと少し）」; otherwise, when the newest change in 経緯 is the AI's,
 「AI が反映しました（11/2 09:56）」 — one line in fixed words, never the AI's step names; what it did is in

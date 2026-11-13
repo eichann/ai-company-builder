@@ -4,7 +4,7 @@
 import type { RecordSummary } from '../../shared/types/records'
 import { actionWho, type TypeDefinition } from '../../shared/core/record-types'
 import type { ViewersLabel } from '../../shared/types/viewers'
-import { personInWho, recordActionChoices } from './record-actions'
+import { personInWhoOrFallback, recordActionChoices } from './record-actions'
 
 export interface OpenLink {
   label: string
@@ -130,7 +130,8 @@ export function bundleActionsOf(def: Pick<TypeDefinition, 'actions' | 'fields' |
   const offered: BundleAction[] = recordActionChoices(def as TypeDefinition, state).flatMap(c => {
     const a = def.actions[c.action]
     if (c.links.length > 0 || (a.who.length === 1 && a.who[0] === 'ai')) return []
-    if (!personInWho(actionWho(a, fields), def, fields, me)) return []
+    // The type's `who_fallback` too (project v2: 責任者を替える on one without a 責任者, owner FB #34).
+    if (!personInWhoOrFallback(a, actionWho(a, fields), def, fields, me)) return []
     const args: BundleActionArg[] = []
     for (const [name, kind] of Object.entries(a.args)) {
       const shown = BUNDLE_ARG_KINDS[kind]

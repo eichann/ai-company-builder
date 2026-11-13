@@ -329,3 +329,43 @@ test('a プロジェクト someone else is responsible for: no button to end or 
   await expect(card.getByRole('button', { name: 'その他の操作' })).toHaveCount(0)
   expectNoPageErrors(state)
 })
+
+// Owner FB #34 (2026-11-13): a プロジェクト the AI made without a 責任者 had no button for anyone. Project v2's
+// 責任者を替える has `who_fallback: [anyone]`: every reader gets that one action (never 終える / やめる);
+// once a 責任者 is named, the card is the 責任者's as before.
+test('a プロジェクト without a 責任者: only 責任者を替える, and after naming oneself ［終える］', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { record: 'project', owner: 'none' })
+  const card = page.getByTestId('record-card')
+  const opened = page.locator('#opened')
+  await expect(card.getByRole('button', { name: '終える', exact: true })).toHaveCount(0)
+  await card.getByRole('button', { name: 'その他の操作' }).click()
+  await expect(page.getByRole('menuitem')).toHaveCount(1)
+  await page.getByRole('menuitem', { name: /責任者を替える/ }).click()
+  const owner = page.getByRole('dialog', { name: '責任者を替える' })
+  await owner.getByLabel('責任者').selectOption({ label: '自分（佐藤）' })
+  await owner.getByRole('button', { name: '責任者を替える' }).click()
+  await expect(opened).toContainText('act project-0000p1 set_owner@3 {"owner":"u-sato"}')
+  await expect(card.getByRole('button', { name: '終える', exact: true })).toBeVisible()
+  expectNoPageErrors(state)
+})
+
+// FB #36: a long URL in なんのため ran into the next tile (進み具合). It wraps inside its own tile now.
+test('a プロジェクト: a long URL in なんのため wraps inside its tile', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 800 })
+  const state = await openPreview(page, 'record-card', { record: 'project', purpose: 'url' })
+  const card = page.getByTestId('record-card')
+  await expect(card).toContainText('https://docs.google.com/document/d/')
+  const boxes = await card.evaluate(root => {
+    const label = (t: string) => [...root.querySelectorAll('div')].find(d => d.children.length === 0 && d.textContent === t)?.parentElement ?? null
+    const purpose = label('なんのため')
+    const next = label('責任者')
+    const text = purpose?.lastElementChild as HTMLElement | null
+    if (!purpose || !next || !text) return null
+    return { right: Math.max(text.getBoundingClientRect().right, purpose.getBoundingClientRect().left + purpose.scrollWidth), tileRight: purpose.getBoundingClientRect().right, nextLeft: next.getBoundingClientRect().left, overflow: text.scrollWidth - text.clientWidth }
+  })
+  expect(boxes).not.toBeNull()
+  expect(boxes!.overflow).toBeLessThanOrEqual(0)
+  expect(boxes!.right).toBeLessThanOrEqual(boxes!.tileRight + 0.5)
+  expect(boxes!.tileRight).toBeLessThanOrEqual(boxes!.nextLeft)
+  expectNoPageErrors(state)
+})
