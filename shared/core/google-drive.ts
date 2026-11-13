@@ -281,14 +281,24 @@ export function drivePickRefusedText(refused: number, why: DrivePickRefusedWhy |
 /**
  * Who sees what is put into a picked folder (owner FB 2026-11-14, said right after the pick, not only at the put):
  * `outside` — people outside the company's domain (an anyone-link, another domain, an outside person); `unknown` —
- * its sharing could not be read in full. The AI and a scheduled job cannot put into either (the put refuses).
+ * its sharing could not be read in full. A scheduled job cannot put into either; a consultation's AI asks the member before each put into an outside one (the put decides).
  */
 export type DriveFolderSharing = 'inside' | 'outside' | 'unknown'
 
 /** Said right after a folder pick that the AI cannot put into. */
-export function driveFolderSharingText(sharing: DriveFolderSharing | undefined): string | null {
-  if (sharing === 'outside') return 'このフォルダは社外の人も見られるため、AI はここに置けません（社外に渡すのは本人の操作です）。社内だけのフォルダを選び直してください。'
-  if (sharing === 'unknown') return 'このフォルダを誰が見られるか確かめられなかったため、AI はここに置けません。社内だけのフォルダを選び直してください。'
+export function driveFolderSharingText(sharing: DriveFolderSharing | undefined, who: 'ai' | 'job' = 'ai'): string | null {
+  if (sharing === 'outside') {
+    // A consultation's AI asks the member before each put there (google-drive.md "Asking before a put"); a job's run has
+    // nobody to ask.
+    return who === 'job'
+      ? 'このフォルダは社外の人も見られるため、定期の仕事はここに置けません（社外に渡すのは本人の操作です）。社内だけのフォルダを選び直してください。'
+      : 'このフォルダは社外の人も見られます。AI がここに置くときは、そのたびにメンバーに確かめます（非公開フォルダの資料は置けません）。'
+  }
+  if (sharing === 'unknown') {
+    return who === 'job'
+      ? 'このフォルダを誰が見られるか確かめられなかったため、定期の仕事はここに置けません。社内だけのフォルダを選び直してください。'
+      : 'このフォルダを誰が見られるか確かめられなかったため、AI はここに置けません。社内だけのフォルダを選び直してください。'
+  }
   return null
 }
 
@@ -523,4 +533,67 @@ export function driveFolderReachesOutside(permissions: readonly DrivePermissionL
     return true
   }
   return false
+}
+
+/**
+ * Who can see what is put in a Drive folder (or a file), as the member's card says it (google-drive.md "Asking before
+ * a put"): `anyone` — a link for anyone; `outsideDomains` — the domains outside the company that can see it (a domain
+ * permission's, or a person's / group's address's; `?` for a kind ACB does not know); `outsideKey` — exactly who outside
+ * (each address, domain, `anyone`), sorted: "the same people" is compared by it; `insideOthers` — inside the company
+ * besides the member: `domain` (everyone in the company) or how many people / groups. The member's own address
+ * (`myEmail`) counts for nobody; without it every person counts.
+ */
+export interface DriveAudience {
+  anyone: boolean
+  outsideDomains: string[]
+  outsideKey: string
+  insideOthers: 'domain' | number
+}
+
+export function driveAudience(permissions: readonly DrivePermissionLike[], domain: string, myEmail: string | null): DriveAudience {
+  const d = domain.toLowerCase()
+  const me = myEmail ? myEmail.toLowerCase() : null
+  let anyone = false
+  let insideDomain = false
+  const insideOthers = new Set<string>()
+  const outside = new Set<string>()
+  const domains = new Set<string>()
+  for (const p of permissions) {
+    const type = typeof p.type === 'string' ? p.type : ''
+    if (type === 'anyone') { anyone = true; outside.add('anyone'); continue }
+    if (type === 'domain') {
+      const pd = typeof p.domain === 'string' ? p.domain.toLowerCase() : ''
+      if (pd === d) { insideDomain = true; continue }
+      outside.add(`domain:${pd || '?'}`)
+      domains.add(pd || '?')
+      continue
+    }
+    if (type === 'user' || type === 'group') {
+      const email = typeof p.emailAddress === 'string' ? p.emailAddress.toLowerCase() : ''
+      const at = email.lastIndexOf('@')
+      const ed = at < 0 ? '' : email.slice(at + 1)
+      if (ed === d) {
+        if (email !== me) insideOthers.add(`${type}:${email}`)
+        continue
+      }
+      outside.add(`${type}:${email || '?'}`)
+      domains.add(ed || '?')
+      continue
+    }
+    outside.add(`?:${type}`)
+    domains.add('?')
+  }
+  return {
+    anyone, outsideDomains: [...domains].sort(), outsideKey: [...outside].sort().join('\n'),
+    insideOthers: insideDomain ? 'domain' : insideOthers.size,
+  }
+}
+
+/** Both at once (a folder and the file being updated in it): whoever can see either. */
+export function driveAudienceUnion(a: DriveAudience, b: DriveAudience): DriveAudience {
+  const key = [...new Set([...a.outsideKey.split('\n'), ...b.outsideKey.split('\n')].filter(Boolean))].sort().join('\n')
+  return {
+    anyone: a.anyone || b.anyone, outsideDomains: [...new Set([...a.outsideDomains, ...b.outsideDomains])].sort(), outsideKey: key,
+    insideOthers: a.insideOthers === 'domain' || b.insideOthers === 'domain' ? 'domain' : Math.max(a.insideOthers, b.insideOthers),
+  }
 }

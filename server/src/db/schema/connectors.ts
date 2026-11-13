@@ -152,10 +152,13 @@ export const connectorSchema = `
       PRIMARY KEY (company_id, user_id, conversation_id, file_id)
     );
 
-    -- A put waiting for the member's 「上書きする」 (google-drive.md "Continuing a document people edited"):
-    -- someone else edited the Google document; the AI's content (fixed by its sha256) waits here until the
-    -- member presses, declines or it expires; the content is removed once decided. state: open → writing (a press being
+    -- A put waiting for the member's press (google-drive.md "Continuing a document people edited", "Asking before a
+    -- put"): someone else edited the Google document, and / or people outside the company (or, for a private folder's
+    -- file, other people) can see where it goes. The AI's content (fixed by its sha256) waits here until the member
+    -- presses, declines or it expires; the content is removed once decided. state: open → writing (a press being
     -- written; nothing else may take it) → written | open again (refused, may be pressed again) | declined; open → declined.
+    -- The document's state (fingerprint … comments_seen) only when an edit is asked about; audience only when who sees
+    -- it is (the card's view as JSON, and audience_sig: the sha256 the press compares). file_id: an update's file.
     CREATE TABLE IF NOT EXISTS google_drive_overwrite_confirmations (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -163,21 +166,40 @@ export const connectorSchema = `
       conversation_id TEXT NOT NULL,
       request_key TEXT NOT NULL,
       folder_id TEXT NOT NULL,
-      file_id TEXT NOT NULL,
+      file_id TEXT,
       name TEXT NOT NULL,
-      kind TEXT NOT NULL CHECK (kind IN ('html', 'markdown')),
+      kind TEXT NOT NULL CHECK (kind IN ('pdf', 'html', 'markdown', 'text', 'json')),
+      as_form TEXT NOT NULL DEFAULT 'google_doc' CHECK (as_form IN ('file', 'google_doc')),
       sha256 TEXT NOT NULL,
       content BLOB,
       record_id TEXT,
-      fingerprint TEXT NOT NULL,
-      revision TEXT NOT NULL,
-      revision_at TEXT NOT NULL,
-      comments_seen TEXT NOT NULL,
+      fingerprint TEXT,
+      revision TEXT,
+      revision_at TEXT,
+      comments_seen TEXT,
       editors TEXT NOT NULL DEFAULT '[]',
       commented INTEGER NOT NULL DEFAULT 0,
+      audience TEXT,
+      audience_sig TEXT,
+      private_source INTEGER NOT NULL DEFAULT 0,
+      trust_offered INTEGER NOT NULL DEFAULT 0,
       state TEXT NOT NULL CHECK (state IN ('open', 'writing', 'written', 'declined')),
       created_at TEXT NOT NULL,
       expires_at TEXT NOT NULL
+    );
+
+    -- 「このフォルダはもう聞かない」 (google-drive.md "Asking before a put"): the member's own, per folder, for exactly the
+    -- people outside who could see it then (audience_sig); anyone else seeing it asks again. Never for a link for anyone,
+    -- a private folder's file or a scheduled job. folder_name: as Drive named it when trusted (for the settings list).
+    CREATE TABLE IF NOT EXISTS google_drive_folder_trust (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      folder_id TEXT NOT NULL,
+      folder_name TEXT NOT NULL,
+      audience_sig TEXT NOT NULL,
+      outside_domains TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id, folder_id)
     );
 
     -- Which core connector serves a role when two could (connector-roles.md; the
@@ -249,6 +271,55 @@ export function migrateDrivePutDocFingerprints(conn: Database.Database): void {
   if (!cols.has('doc_revision')) conn.exec('ALTER TABLE google_drive_puts ADD COLUMN doc_revision TEXT')
   if (!cols.has('doc_revision_at')) conn.exec('ALTER TABLE google_drive_puts ADD COLUMN doc_revision_at TEXT')
   if (!cols.has('doc_baseline_at')) conn.exec('ALTER TABLE google_drive_puts ADD COLUMN doc_baseline_at TEXT')
+}
+
+/**
+ * The waiting-put table of #689 held only a Google document's overwrite (file_id, the document's state NOT NULL, kind
+ * html / markdown). Asking before a put into a place others see (google-drive.md "Asking before a put") also waits for a
+ * new file and any kind: rebuilt once with those nullable, the kinds and the audience columns. Every startup, idempotent.
+ */
+export function migrateDrivePutConfirmations(conn: Database.Database): void {
+  const sql = (conn.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'google_drive_overwrite_confirmations'").get() as { sql: string } | undefined)?.sql
+  if (!sql || !sql.includes('file_id TEXT NOT NULL')) return
+  conn.transaction(() => {
+    conn.exec(`
+      CREATE TABLE google_drive_overwrite_confirmations_rebuilt (
+        id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        request_key TEXT NOT NULL,
+        folder_id TEXT NOT NULL,
+        file_id TEXT,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('pdf', 'html', 'markdown', 'text', 'json')),
+        as_form TEXT NOT NULL DEFAULT 'google_doc' CHECK (as_form IN ('file', 'google_doc')),
+        sha256 TEXT NOT NULL,
+        content BLOB,
+        record_id TEXT,
+        fingerprint TEXT,
+        revision TEXT,
+        revision_at TEXT,
+        comments_seen TEXT,
+        editors TEXT NOT NULL DEFAULT '[]',
+        commented INTEGER NOT NULL DEFAULT 0,
+        audience TEXT,
+        audience_sig TEXT,
+        private_source INTEGER NOT NULL DEFAULT 0,
+        trust_offered INTEGER NOT NULL DEFAULT 0,
+        state TEXT NOT NULL CHECK (state IN ('open', 'writing', 'written', 'declined')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      );
+      INSERT INTO google_drive_overwrite_confirmations_rebuilt (id, company_id, user_id, conversation_id, request_key, folder_id, file_id, name, kind,
+        sha256, content, record_id, fingerprint, revision, revision_at, comments_seen, editors, commented, state, created_at, expires_at)
+        SELECT id, company_id, user_id, conversation_id, request_key, folder_id, file_id, name, kind,
+          sha256, content, record_id, fingerprint, revision, revision_at, comments_seen, editors, commented, state, created_at, expires_at
+        FROM google_drive_overwrite_confirmations;
+      DROP TABLE google_drive_overwrite_confirmations;
+      ALTER TABLE google_drive_overwrite_confirmations_rebuilt RENAME TO google_drive_overwrite_confirmations;
+    `)
+  })()
 }
 
 /**

@@ -57,7 +57,7 @@ import type { CompanyFolderKind } from './company-folder'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { GoogleRelayResult } from './google'
-import type { DriveOverwriteDecisionResult } from './drive-overwrite'
+import type { DriveOverwriteDecisionResult, DriveTrustedFoldersResult, DriveUntrustResult } from './drive-overwrite'
 import type { SlackConnectResult, SlackFeature, SlackStatusResult } from './slack'
 import type { RecordThreadResult } from './threads'
 import type { PluginBridgeAnswer } from './plugin-bridge-ops'
@@ -802,7 +802,7 @@ export interface IpcInvokeChannels {
   // 「済んだメールを Gmail でもアーカイブする」 (google-connector.md "Archiving in Gmail"): the member's own switch, back on without a consent.
   'google:setArchive': { args: [companyId: string, on: boolean]; result: GoogleStatusResult }
   // The card's 「上書きする」 / 「やめる」 for a Google document someone else edited (google-drive.md "Continuing a document people edited").
-  'google:decideDriveOverwrite': { args: [companyId: string, confirmationId: string, action: 'confirm' | 'decline']; result: DriveOverwriteDecisionResult }
+  'google:decideDriveOverwrite': { args: [companyId: string, confirmationId: string, action: 'confirm' | 'decline', trust?: boolean]; result: DriveOverwriteDecisionResult }
   'slack:markSeen': { args: [companyId: string]; result: SlackStatusResult }
   // The card's 元のスレッド (outbound-mail.md "Replies"): read now on the server with the member's own permission.
   'threads:get': { args: [companyId: string, recordId: string]; result: RecordThreadResult }
@@ -814,6 +814,8 @@ export interface IpcInvokeChannels {
   'tasks:cancelDrivePick': { args: [companyId: string]; result: { stopped: boolean } }
   // 設定 →「Google」→「Drive で選んだものを読む・置く」: the member's own switch, back on without a consent (member-oauth.md).
   'google:setDrive': { args: [companyId: string, on: boolean]; result: GoogleStatusResult }
+  'google:driveTrustedFolders': { args: [companyId: string]; result: DriveTrustedFoldersResult }
+  'google:untrustDriveFolder': { args: [companyId: string, folderId: string]; result: DriveUntrustResult }
   // lane A ▲
   // lane B ▼
   // lane B ▲
@@ -1222,6 +1224,8 @@ export interface ElectronAPI {
   onSkillShelfChanged: Subscribe<'skillShelf:changed'>
   stopDrivePick: Invoke<'tasks:cancelDrivePick'>
   setGoogleDrive: Invoke<'google:setDrive'>
+  getDriveTrustedFolders: Invoke<'google:driveTrustedFolders'>
+  untrustDriveFolder: Invoke<'google:untrustDriveFolder'>
   // lane A ▲
   // lane B ▼
   // lane B ▲

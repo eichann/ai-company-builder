@@ -4,6 +4,7 @@
  * Every method is limited to the handle's company and takes the member.
  */
 import type { SkillUse } from '../../shared/core/skill-uses'
+import type { DrivePutAs, DrivePutKind } from '../../shared/core/google-drive'
 
 export interface DrivePickRow {
   userId: string
@@ -80,9 +81,22 @@ export interface DriveDocRead {
 }
 
 /**
- * A put that waits for the member's 「上書きする」 (google-drive.md "Continuing a document people edited"): the request as
- * the AI made it (content included, fixed by its sha256), what the document was when the AI read it, and the comments
- * seen then. `open` until pressed, declined or expired; the content is removed once it is decided.
+ * Who sees where a waiting put goes, as the member's card shows it (google-drive.md "Asking before a put"): never the
+ * addresses, only the domains outside and how many inside.
+ */
+export interface DriveConfirmAudience {
+  anyone: boolean
+  outsideDomains: string[]
+  insideOthers: 'domain' | number
+  /** The file is in a private folder on the member's PC (the app said so). */
+  privateSource: boolean
+}
+
+/**
+ * A put that waits for the member's press (google-drive.md "Continuing a document people edited", "Asking before a
+ * put"): the request as the AI made it (content included, fixed by its sha256); for an edited document what it was when
+ * the AI read it and the comments seen then (`fingerprint` … `commentsSeen`, else null); for a place others see who sees
+ * it (`audience`, `audienceSig`, else null). `open` until pressed, declined or expired; the content is removed once decided.
  */
 export interface DriveOverwriteConfirmationRow {
   id: string
@@ -90,23 +104,40 @@ export interface DriveOverwriteConfirmationRow {
   conversationId: string
   requestKey: string
   folderId: string
-  fileId: string
+  /** An update's file; null for a new file. */
+  fileId: string | null
   name: string
-  kind: 'html' | 'markdown'
+  kind: DrivePutKind
+  as: DrivePutAs
   sha256: string
   content: Uint8Array | null
   recordId: string | null
-  fingerprint: string
-  revision: string
-  revisionAt: string
+  fingerprint: string | null
+  revision: string | null
+  revisionAt: string | null
   /** sha256 of the document's comments as seen then (ids, times, deleted): one more comment afterwards asks again. */
-  commentsSeen: string
+  commentsSeen: string | null
   editors: string[]
   commented: boolean
+  audience: DriveConfirmAudience | null
+  /** sha256 of exactly who sees it (outside and inside): the press writes only while it is the same. */
+  audienceSig: string | null
+  /** 「このフォルダはもう聞かない」 may be offered (people outside only: no link for anyone, not a private folder's file). */
+  trustOffered: boolean
   /** `writing`: a press is being written now (claimed atomically; neither a decline nor a newer request takes it). */
   state: 'open' | 'writing' | 'written' | 'declined'
   createdAt: string
   expiresAt: string
+}
+
+/** 「このフォルダはもう聞かない」 (google-drive.md "Asking before a put"): for exactly the people outside who saw it then. */
+export interface DriveFolderTrust {
+  userId: string
+  folderId: string
+  folderName: string
+  audienceSig: string
+  outsideDomains: string[]
+  createdAt: string
 }
 
 /**
@@ -168,8 +199,11 @@ export interface GoogleDriveRepository {
   createOverwriteConfirmation(row: DriveOverwriteConfirmationRow): void
   /** The member's own confirmation by id (any state), or null. */
   overwriteConfirmation(userId: string, id: string): DriveOverwriteConfirmationRow | null
-  /** The member's own open, unexpired confirmation for this Drive file (at most one waits per file), or null. */
-  openOverwriteConfirmation(userId: string, fileId: string, now: string): DriveOverwriteConfirmationRow | null
+  /**
+   * The member's own open, unexpired confirmation for this Drive file (an update: at most one waits per file) or for this
+   * request (a new file: at most one per request key), or null.
+   */
+  openOverwriteConfirmation(userId: string, target: { fileId: string } | { requestKey: string }, now: string): DriveOverwriteConfirmationRow | null
   /**
    * Moves a confirmation from one of `from` to `to` atomically (false when it was in none of them); its content is removed
    * when `to` is `written` or `declined`.
@@ -177,7 +211,15 @@ export interface GoogleDriveRepository {
   moveOverwriteConfirmation(id: string, from: DriveOverwriteConfirmationRow['state'][], to: DriveOverwriteConfirmationRow['state']): boolean
   /** Declines every open confirmation for this Drive file (any put of it went through: what they were asked about is gone). */
   declineOpenOverwriteConfirmations(fileId: string): void
-  /** A member left the company: their waiting confirmations (with their content) and their reads are removed. */
+  /** The member's 「このフォルダはもう聞かない」 for this folder, or null. */
+  folderTrust(userId: string, folderId: string): DriveFolderTrust | null
+  /** Keeps (or replaces) the member's trust of a folder. */
+  trustFolder(row: DriveFolderTrust): void
+  /** Takes the member's trust of a folder away (false when there was none). */
+  untrustFolder(userId: string, folderId: string): boolean
+  /** The member's trusted folders, newest first. */
+  trustedFolders(userId: string): DriveFolderTrust[]
+  /** A member left the company: their waiting confirmations (with their content), their reads and trusted folders are removed. */
   forgetMember(userId: string): void
   /** Removes the content of every confirmation expired at `now`, and the rows that expired before `deleteBefore` (every member). */
   pruneOverwriteConfirmations(now: string, deleteBefore: string): void

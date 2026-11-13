@@ -142,8 +142,9 @@ never matches).
   even by throwing, keeps the pick with `sharing: unknown`; the ticket's result keeps `refusedWhy` and the app hears it (`picked.refusedWhy`) — the AI's tool says
   `notUsableWhy`, the card adds the sentence to 「…をつなぎました」 (or says it alone). A folder picked through a ticket is read
   for its sharing right after the pick (`permissions.list` + `driveFolderReachesOutside`, the put's own check): `sharing:
-  inside | outside | unknown` on the pick, and for `outside` / `unknown` the page, the AI (`note`) and a job's 「置き先を選んで
-  受け取る」 (refused there, `main.ts` `choosePlace`) say the AI cannot put there (`driveFolderSharingText`). The put still decides.
+  inside | outside | unknown` on the pick, and the page, the AI (`note`) and a job's 「置き先を選んで受け取る」 say it
+  (`driveFolderSharingText(sharing, 'ai' | 'job')`): `outside` — the AI asks the member before each put there ("Asking
+  before a put"), a job cannot put there (refused in `main.ts` `choosePlace`); `unknown` — neither can. The put still decides.
 - **Why a files pick is made** (`purpose`, owner decision 2026-11-14 「つなぐだけ」): `POST …/pick-tickets { mode: 'files', purpose:
   'link' }` (the card's 「Google Drive のファイルをつなぐ」, `main.ts` `pickDriveFiles`) offers **every file type** (config
   `mimeTypes: []`, the page sets no MIME filter) and keeps any file but a folder or a shortcut (`drivePickableFor`) — Word,
@@ -273,10 +274,10 @@ member's **own** rows (`DRIVE_PICK_TTL_MS`, `renewPick`):
   → a scheduled job's run: its one folder (`DRIVE_FOLDER_NOT_GRANTED`, below) → folder is a live folder pick → an
   update's file (below) → **receipt first** (`claimPut`, unique per member + requestKey; same key with
   other content 409 `DRIVE_PUT_KEY_REUSED`; done / unknown → answered as is, `existing: true`,
-  nothing sent) → folder still a folder the member can add to → **for the AI, nobody outside
-  the company's domain sees the folder** (`permissions.list` + `driveFolderReachesOutside`;
-  anyone-link, another domain, an outside person/group → 403 `DRIVE_FOLDER_SHARED_OUTSIDE`;
-  unreadable → 403 `DRIVE_FOLDER_SHARING_UNKNOWN`) → multipart upload with
+  nothing sent) → folder still a folder the member can add to → **for the AI, who sees the folder** (`permissions.list`
+  → `driveAudience`; unreadable → 403 `DRIVE_FOLDER_SHARING_UNKNOWN`): nobody outside the company's domain → on;
+  someone outside (an anyone-link, another domain, an outside person/group) → the member is asked first, or refused 403
+  `DRIVE_FOLDER_SHARED_OUTSIDE` ("Asking before a put") → multipart upload with
   `appProperties.acbPutId = <put id>`, **never retried**. 2xx → `done` with `fileId`,
   `revisionId` (`headRevisionId`, or `version:<n>` for a Google document: `driveRevisionOf`) and `link`. Lost answer / 5xx → `unknown`, looked up at once
   by `acbPutId` (found → `done`, reason `found-by-correlation`), and again on every
@@ -301,7 +302,7 @@ member's **own** rows (`DRIVE_PICK_TTL_MS`, `renewPick`):
 - Confirmation: putting into the member's **own / internal** folder they picked is not sending
   outside — the pick is the person's choice of destination, so no per-file confirmation; a
   folder visible outside the company is sending outside, which stays a person's act
-  (outbound-mail's rule), so the AI is refused.
+  (outbound-mail's rule): the AI's put waits for the member's press on the app's card ("Asking before a put").
 - S10b: inside an execution run `POST /put` goes through `keyedWrite` (Idempotency-Key);
   `outcomeOf` reads `drivePut` (unknown → the run waits for reconcile; ref kind `drive-put`,
   replay read `GET /puts/:id`).
@@ -329,9 +330,9 @@ member's **own** rows (`DRIVE_PICK_TTL_MS`, `renewPick`):
 - Tools (`createDriveTools`, on `acb_records`): `drive_pick_folder`, `drive_pick_files` (open
   the Picker for the person and wait), `drive_picked` (live picks), `drive_read`, `drive_put`, `drive_put_check`
   (act only). `drive_put` reads the local file in main: inside the consultation's company folder
-  by name and real location (`PathGuard`), no `.git` segment, not inside a private folder (a
-  nested repository on the way, or a readable private folder path — one sentence that never
-  names it), not in a folder left out on this computer, PDF / HTML / Markdown / text / JSON ≤ 10 MB with the content
+  by name and real location (`PathGuard`), no `.git` segment, a private folder's file (a
+  nested repository on the way, or a readable private folder path) only as `privateSource` ("Asking before a put"; else
+  refused with one sentence that never names it), not in a folder left out on this computer, PDF / HTML / Markdown / text / JSON ≤ 10 MB with the content
   check (Markdown a Google document unless `as: 'file'`); `requestKey = drivePutRequestKey(folder, name, sha256, { as,
   updateFileId })` (same content, folder, name, form and target → the same key: never two copies of identical
   content; a plain new file keeps the key it always had). **Whether a file is new or updated is only `updateFileId`**,
@@ -358,7 +359,8 @@ member's **own** rows (`DRIVE_PICK_TTL_MS`, `renewPick`):
   a receipt is written. After the receipt and the folder's checks, Google is asked for the file
   (`id,mimeType,trashed,parents,capabilities(canEdit)`): still there, still in that folder, still that kind, editable
   (else 403 `DRIVE_FILE_REFUSED`); **for the AI, the file's own sharing too** (a file can be shared outside by itself,
-  whatever its folder says: `DRIVE_FILE_SHARED_OUTSIDE` / `DRIVE_FILE_SHARING_UNKNOWN`). Then `PATCH
+  whatever its folder says: asked with the folder's people ("Asking before a put"), else `DRIVE_FILE_SHARED_OUTSIDE`;
+  unreadable `DRIVE_FILE_SHARING_UNKNOWN`). Then `PATCH
   /upload/drive/v3/files/<id>?uploadType=multipart` with only `appProperties.acbPutId` (the lookup after a lost answer
   finds the update by it) and the content; the name is not changed (the receipt keeps the file's). The receipt says
   `updatedFileId` (`google_drive_puts.updated_file_id`, additive `migrateDrivePutUpdates`); the same request key with
@@ -662,6 +664,54 @@ that were not kept, in one sentence). A pasted link whose files are all the memb
 When a linked Drive file is used as a decision material or an attachment, its fileId, revisionId and
 sha256 enter the record's ledger and are visible to every reader of the record; the file's name is not
 included (it stays the linker's).
+
+## Asking before a put (owner decisions 2026-11-14)
+
+Before: a folder (or a file being updated) people outside the company could see refused every put of the AI
+(`DRIVE_FOLDER_SHARED_OUTSIDE` / `DRIVE_FILE_SHARED_OUTSIDE`), and a private folder's file could never go to Drive — the
+member copied by hand, past every check. Now, **in a consultation** with the app's card, the member decides:
+
+- **Who sees the place** (`driveAudience` in `shared/core/google-drive.ts`; for an update the folder's and the file's own
+  permissions together, `driveAudienceUnion`): `anyone` (a link for anyone), `outsideDomains` (the domains of every
+  outside permission; `?` for an unknown kind), `outsideKey` (exactly who outside: each address, domain, `anyone`),
+  `insideOthers` (`domain` — the whole company — or how many people / groups besides the member; the member's own address
+  is the grant's `accountEmail`, without it everyone counts).
+- **A plain file** (`judgeAudience` in `put`): nobody outside → put as before. Someone outside → a consultation's AI whose
+  app says `askAudience: true` gets 409 `DRIVE_PUT_NEEDS_CONFIRMATION` with `confirmation { id, fileName, update, edited:
+  false, audience { anyone, outsideDomains, insideOthers, privateSource, trustOffered } }`; nothing is sent, the content
+  waits on the server (`google_drive_overwrite_confirmations`, now any kind and a new file too — rebuilt once by
+  `migrateDrivePutConfirmations`; at most one waits per file for an update, per request key for a new file). A scheduled
+  job's run (nobody to press), a token without a consultation, or an older app: refused as before.
+- **「このフォルダはもう聞かない」** (`google_drive_folder_trust`, the member's own, per folder): offered on the card only for
+  a plain file and no link for anyone (`trustOffered`); kept at the press (`trust: true`, only where it was offered) with
+  the sha256 of `outsideKey`. A put whose people outside are exactly those goes straight in; anyone else outside, or a
+  link for anyone, asks again. Never for a job (refused before the trust is looked at) or an older app. 設定 → Google
+  lists them (`GET /me/google/drive/trusted-folders`) with 「聞くように戻す」 (`DELETE …/:folderId`, 404 when none); a
+  member removed from the company loses them (`forgetMember`).
+- **A private folder's file** (`privateSource: true` — the app reads it only when it can ask, `allowPrivate`, and sends
+  it only to a server whose status says `privateSourceChecked`; else refused in the app as before, nothing sent): anyone
+  outside → 403 `DRIVE_PRIVATE_SHARED_OUTSIDE` (trusted or not, pressed or not); only the member sees the place → put at
+  once; people in the company see it → the card (never trust; the sha256 covers who inside too), and without the card or
+  in a job → 403 `DRIVE_PRIVATE_SHARED`. The server cannot see the PC's folders: it trusts the app's flag as far as the
+  member's own AI could anyway put their own file — the flag only adds checks. Private folder names never travel: only
+  the file's name, as for any put.
+- **The press** (`POST …/overwrite-confirmations/:id { action, trust? }`, session only, as for an edited document): runs
+  the put again with the waiting content (`askAudience`, `askPerson`, `privateSource` as asked) and writes only while the
+  place's people are exactly those shown (`audienceSig`), else 409 `DRIVE_SHARING_CHANGED` and the card closes. An update
+  of a Google document someone edited **and** seen outside asks once (one card with both). The answer says `update`.
+- **The card** (`DriveOverwriteCard.tsx`, `DRIVE_PUT_ASK_WORDS`, `driveAudienceLines`): 「社外の人も見られる場所に置きます」 /
+  「非公開フォルダの資料を、ほかの人も見られる場所に置きます」, the domains (never addresses) or 「リンクを知っている人なら…誰でも」,
+  how many inside for a private folder's file, ［置く］ / ［上書きする］ ［やめる］ and, where offered, the checkbox. The AI's
+  text names nobody (`state: 'waiting-for-member'`).
+- Unverified against real Google: that `permissions.list` under `drive.file` lists a shared drive's members for a folder
+  in it (if not, the put sees fewer people — `insideOthers` may read 0 for a private folder's file in a shared drive).
+- Tests: `server/tests/integration/google-drive-audience.test.ts` (older app refused; card, same request same card,
+  another member 404, the press writes exactly that once; people changed while asking; trust for exactly those people,
+  one more person or a link for anyone asks again, a forged anyone trust lets nothing through, the list and taking it
+  away; an update asks with `update: true`; an edited document seen outside asks once; a private folder's file outside
+  refused, only-me straight, company → card without trust, people inside changed while asking; leaving member's trust),
+  `job-deliverables.test.ts` (a run never asks, outside or private), `tests/unit/drive-put-confirmations-migration.test.ts`,
+  `permission-matrix.test.ts` (the two routes and their CROSS row), `client/tests/drive-put-audience.test.ts` — mutation-checked.
 
 ## Not yet
 

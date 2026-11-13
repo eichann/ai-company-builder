@@ -24,6 +24,7 @@ const LATER_TABLES = [
   // google-drive.md "Continuing a document people edited": what the AI read, and an overwrite waiting for the member's press.
   'google_drive_doc_reads',
   'google_drive_overwrite_confirmations',
+  'google_drive_folder_trust',
 ]
 /**
  * Columns later builds add to a table that was there before (each an idempotent `ALTER TABLE … ADD COLUMN`, so

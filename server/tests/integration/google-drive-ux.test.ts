@@ -303,14 +303,14 @@ describe('D / H / link only: what a pick says, and what it keeps', () => {
     expect(pageText).toContain("var aiAsked = !folder && cfg.purpose !== 'link' && only.length > 0")
   })
 
-  it('a folder seen outside the company is said right after the pick (the AI cannot put there); an internal one is not', async () => {
+  it('a folder seen outside the company is said right after the pick (the AI asks before each put there); an internal one is not', async () => {
     const outside = await pickThroughTicket('m-sato', { mode: 'folder' }, [GOOGLE_SEED.sharedOutsideFolder])
     expect(outside.state.picks).toEqual([expect.objectContaining({ id: GOOGLE_SEED.sharedOutsideFolder, sharing: 'outside' })])
-    expect(outside.result.body.data.message).toContain('社外の人も見られるため、AI はここに置けません')
+    expect(outside.result.body.data.message).toContain('社外の人も見られます。AI がここに置くときは、そのたびにメンバーに確かめます')
     const inside = await pickThroughTicket('m-sato', { mode: 'folder' }, [GOOGLE_SEED.proposalsFolder])
     expect(inside.state.picks).toEqual([expect.objectContaining({ id: GOOGLE_SEED.proposalsFolder, sharing: 'inside' })])
     expect(inside.result.body.data.message).not.toContain('社外')
-    // The put still decides (the server is the authority).
+    // The put still decides (the server is the authority): an app that cannot ask is refused.
     const token = await tokenFor('m-sato', 'act')
     expect((await ai(token, 'POST', '/put', putBody({ folderId: GOOGLE_SEED.sharedOutsideFolder }))).body.code).toBe('DRIVE_FOLDER_SHARED_OUTSIDE')
   })

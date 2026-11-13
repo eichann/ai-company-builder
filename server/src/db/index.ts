@@ -26,7 +26,7 @@ import { migrateShelfHistoryRequester, skillShelfSchema } from './schema/skill-s
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import { slackSchema } from './schema/slack'
-import { migrateDrivePickTicketPurpose, migrateDrivePutDocFingerprints, migrateDrivePutUpdates, migrateGoogleCompanyFeatures, migrateGoogleRelay } from './schema/connectors'
+import { migrateDrivePickTicketPurpose, migrateDrivePutConfirmations, migrateDrivePutDocFingerprints, migrateDrivePutUpdates, migrateGoogleCompanyFeatures, migrateGoogleRelay } from './schema/connectors'
 // lane A ▲
 // lane B ▼
 import { identitySchema } from './schema/identities'
@@ -178,6 +178,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateDrivePutDocFingerprints(conn)
   // A files pick for linking offers every file type (google-drive.md "Linking any file").
   migrateDrivePickTicketPurpose(conn)
+  // A put waiting for the member's press also for a new file of any kind (google-drive.md "Asking before a put").
+  migrateDrivePutConfirmations(conn)
   // lane A ▲
   // lane B ▼
   migrateInboxMessageSourceRef(conn)

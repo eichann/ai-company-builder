@@ -399,7 +399,7 @@ const api: ElectronAPI = {
   getGoogleRelay: (companyId: string) => invoke('google:relay', companyId),
   setGoogleRelay: (companyId: string, on: boolean) => invoke('google:setRelay', companyId, on),
   setGoogleArchive: (companyId: string, on: boolean) => invoke('google:setArchive', companyId, on),
-  decideDriveOverwrite: (companyId: string, confirmationId: string, action: 'confirm' | 'decline') => invoke('google:decideDriveOverwrite', companyId, confirmationId, action),
+  decideDriveOverwrite: (companyId: string, confirmationId: string, action: 'confirm' | 'decline', trust?: boolean) => invoke('google:decideDriveOverwrite', companyId, confirmationId, action, trust),
   markSlackSeen: (companyId: string) => invoke('slack:markSeen', companyId),
   getRecordThread: (companyId: string, recordId: string) => invoke('threads:get', companyId, recordId),
   callPluginBridge: (companyId: string, plugin: PluginPackageRef, op: string, args: unknown) => invoke('plugins:bridge', companyId, plugin, op, args),
@@ -413,6 +413,8 @@ const api: ElectronAPI = {
   onSkillShelfChanged: callback => subscribe('skillShelf:changed', callback),
   stopDrivePick: (companyId: string) => invoke('tasks:cancelDrivePick', companyId),
   setGoogleDrive: (companyId: string, on: boolean) => invoke('google:setDrive', companyId, on),
+  getDriveTrustedFolders: (companyId: string) => invoke('google:driveTrustedFolders', companyId),
+  untrustDriveFolder: (companyId: string, folderId: string) => invoke('google:untrustDriveFolder', companyId, folderId),
   // lane A ▲
   // lane B ▼
   // lane B ▲

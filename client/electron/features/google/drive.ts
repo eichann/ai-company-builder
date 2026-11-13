@@ -236,13 +236,18 @@ export interface LocalFileDeps {
    * by real location; null: none at all; absent: anywhere in the company folder (a consultation).
    */
   onlyUnder?: string | null
+  /**
+   * A private folder's file may be read for a put (google-drive.md "Asking before a put"): answered with
+   * `privateSource: true`, and the server decides where it may go. Absent: refused here (a scheduled job, an older server).
+   */
+  allowPrivate?: boolean
 }
 
 const PRIVATE_REFUSAL = 'この場所のファイルは Google Drive に置けません（限られた人だけのフォルダの中です）。'
 const JOB_AREA_REFUSAL = 'この定期の仕事が Google Drive に置けるのは、この仕事の保存場所（.personal の中の決まったフォルダ）で作ったファイルだけです。'
 
-/** The file to put, read once: the company folder only, PDF / HTML / Markdown / text, ≤ 10 MB. */
-export function readLocalFileForDrive(input: unknown, root: string, deps: LocalFileDeps): { bytes: Uint8Array; kind: DrivePutKind; name: string } | { error: string } {
+/** The file to put, read once: the company folder only, PDF / HTML / Markdown / text / JSON, ≤ 10 MB. */
+export function readLocalFileForDrive(input: unknown, root: string, deps: LocalFileDeps): { bytes: Uint8Array; kind: DrivePutKind; name: string; privateSource: boolean } | { error: string } {
   if (typeof input !== 'string' || input.trim() === '' || input.includes('\0') || input.startsWith('~')) return { error: 'ファイルの場所が正しくありません。' }
   const abs = path.resolve(root, input.trim())
   const rel = path.relative(root, abs)
@@ -259,8 +264,12 @@ export function readLocalFileForDrive(input: unknown, root: string, deps: LocalF
   const owner = deps.pathGuard.rootOf(abs)
   if (!owner || path.resolve(owner).normalize('NFC') !== path.resolve(root).normalize('NFC')) return { error: '会社フォルダの中のファイルだけを置けます。' }
   // A private folder's clone is a repository of its own inside the company folder.
+  let privateSource = false
   for (let i = 1; i < segments.length; i++) {
-    if (fs.existsSync(path.join(root, ...segments.slice(0, i), '.git'))) return { error: PRIVATE_REFUSAL }
+    if (fs.existsSync(path.join(root, ...segments.slice(0, i), '.git'))) {
+      if (!deps.allowPrivate) return { error: PRIVATE_REFUSAL }
+      privateSource = true
+    }
   }
   const key = pathKey(relSlash)
   if (deps.onlyUnder !== undefined) {
@@ -279,7 +288,10 @@ export function readLocalFileForDrive(input: unknown, root: string, deps: LocalF
     const realInside = relReal !== null && relReal !== '' && !relReal.startsWith('..') && !path.isAbsolute(relReal)
     if (!inArea || !realInside) return { error: JOB_AREA_REFUSAL }
   }
-  if ((deps.privateFolders() ?? []).some(f => isSameOrAncestorPath(pathKey(f), key))) return { error: PRIVATE_REFUSAL }
+  if ((deps.privateFolders() ?? []).some(f => isSameOrAncestorPath(pathKey(f), key))) {
+    if (!deps.allowPrivate) return { error: PRIVATE_REFUSAL }
+    privateSource = true
+  }
   let left: string[] = []
   try { left = deps.notDownloaded(root) } catch { /* unknown: the file must exist anyway */ }
   if (left.some(f => isSameOrAncestorPath(pathKey(f), key))) return { error: 'このフォルダはこのパソコンにダウンロードしていないため、置けません。' }
@@ -293,7 +305,7 @@ export function readLocalFileForDrive(input: unknown, root: string, deps: LocalF
   const bytes = new Uint8Array(fs.readFileSync(real))
   const problem = checkDrivePutContent(kind, bytes)
   if (problem) return { error: problem }
-  return { bytes, kind, name }
+  return { bytes, kind, name, privateSource }
 }
 
 /**
@@ -508,14 +520,23 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
         as: z.enum(['file', 'google_doc']).optional().describe('google_doc：Markdown / HTML を Google ドキュメントにして置く（Markdown を省いたときの既定）。file：そのまま（PDF / HTML / テキスト / JSON の既定。Markdown は .md ファイルのまま） / google_doc converts Markdown or HTML into a Google document (the default for Markdown); file puts the file as it is (the default for PDF, HTML, text and JSON; Markdown stays a .md file)'),
         updateFileId: z.string().regex(/^[A-Za-z0-9_-]{10,200}$/).optional().describe('前に drive_put で置いたファイルの fileId（drive_picked の putFiles）。渡すとそのファイルを新しい版で上書きする。同じフォルダ・同じ種類だけ / the fileId an earlier drive_put made (drive_picked\'s putFiles): that file gets this content as a new revision (same folder and kind only)'),
       }).strict(),
-      description: '会社フォルダの PDF / HTML / Markdown（.md）/ テキスト（.txt）/ JSON（.json）を、メンバーが選んだ Drive のフォルダに置く。Markdown / HTML は Google ドキュメントにもできる（as: google_doc）。JSON はいつもファイルのまま（中身が正しい JSON のときだけ）。社外の人も見られるフォルダやファイルには置けない。\n' +
+      description: '会社フォルダの PDF / HTML / Markdown（.md）/ テキスト（.txt）/ JSON（.json）を、メンバーが選んだ Drive のフォルダに置く。Markdown / HTML は Google ドキュメントにもできる（as: google_doc）。JSON はいつもファイルのまま（中身が正しい JSON のときだけ）。社外の人も見られるフォルダやファイルには、メンバーがアプリのカードで確かめてから置かれる（state: waiting-for-member のあいだは待つ）。非公開フォルダの資料は、メンバーしか見られない場所にはそのまま、社内の人が見られる場所にはメンバーの確認のあとで置け、社外の人が見られる場所には置けない。\n' +
         'Markdown をどちらで置くか：人が読んで直す文書（報告書・議事のまとめなど）は Google ドキュメント（as を省くとこれ）。メンバーが「.md で」「Markdown のまま」と言ったとき、または AI や Skill にあとで読ませる資料のときは as: file で .md ファイルのまま置く（変換しない）。.md のままでも置けるので、「.md のままでは置けません」とは言わない。迷ったらメンバーに聞く。上書きは同じ形どうしだけ（Google ドキュメントと .md ファイルは互いに上書きできない）。\n' +
         '新しいファイルになるか上書きかは updateFileId だけで決まる：updateFileId を渡さないと、いつも新しいファイルを作る（同じ名前のファイルがあっても上書きしない。中身がまったく同じものを同じ場所・同じ名前で置き直したときだけ、通信が切れたときの二重置きを防ぐために前のものを返す）。前に drive_put で置いたファイルを直すときは、その fileId を updateFileId に渡す：同じファイル（同じリンク）の新しい版になり、やることのつながりも新しい版に替わる。上書きできるのは drive_put で置いたファイルだけ（メンバーが自分で作ったファイルは上書きできない）。Google ドキュメントの上書きが「Drive で直されています」と断られたら（needsRead）、新しいファイルを作らずに、drive_read で今の中身を読み、人の直しやコメントを取り込んだ文書を作ってから、もう一度同じ updateFileId で上書きする（読んだあとにまた直されたら DRIVE_READ_AGAIN：読み直す）。ほかの人の直しやコメントがあるときは、メンバーがアプリのカードで「上書きする」を押すまで待つ（state: waiting-for-member）。答えの link と revisionId、新しいファイルか上書きか（updated）を伝える。state が done でないときは置けたと言わない。unknown のときは置き直さず、メンバーに Drive を確かめてもらう。\n' +
-        'Put a PDF / HTML / Markdown (.md) / text (.txt) / JSON (.json) file from the company folder into the Drive folder the member picked; Markdown / HTML can become a Google document (as: google_doc); JSON always stays a file (only valid JSON). Which form for Markdown: a document people read and edit (a report, meeting notes) becomes a Google document (the default when as is omitted); when the member asks for .md / Markdown as it is, or the file is material for an AI or a Skill to read later, pass as: file to keep it a .md file (not converted). Markdown can be kept as .md, so never tell the member it cannot; ask when unsure. An update keeps the form (a Google document and a .md file never overwrite each other). Never into a folder or file people outside the company can see. Whether a new file is made depends only on updateFileId: without it a NEW file is always made (a file of the same name is not overwritten; only a byte-identical repeat into the same folder under the same name returns the earlier put, against double puts after a lost connection). To change a file an earlier drive_put made, pass its fileId as updateFileId: the same file (same link) gets a new revision and the task\'s link follows it. Only files drive_put made can be updated. When updating a Google document is refused because people changed it in Drive (needsRead), do not make a new file: read it with drive_read, write a version that keeps their edits and comments, and update the same updateFileId again (DRIVE_READ_AGAIN: it changed again, read again). If someone else edited or commented, the member confirms on the app\'s card first (state: waiting-for-member) — wait for them. Report the link, revisionId and whether it was an update. Never claim success unless state is done; when unknown, do not put it again — ask the member to check Drive.',
+        'Put a PDF / HTML / Markdown (.md) / text (.txt) / JSON (.json) file from the company folder into the Drive folder the member picked; Markdown / HTML can become a Google document (as: google_doc); JSON always stays a file (only valid JSON). Which form for Markdown: a document people read and edit (a report, meeting notes) becomes a Google document (the default when as is omitted); when the member asks for .md / Markdown as it is, or the file is material for an AI or a Skill to read later, pass as: file to keep it a .md file (not converted). Markdown can be kept as .md, so never tell the member it cannot; ask when unsure. An update keeps the form (a Google document and a .md file never overwrite each other). Into a folder or file people outside the company can see only after the member confirms on the app\'s card (state: waiting-for-member — wait). A private folder\'s file goes straight where only the member sees it, after the member\'s confirmation where people in the company see it, and never where anyone outside does. Whether a new file is made depends only on updateFileId: without it a NEW file is always made (a file of the same name is not overwritten; only a byte-identical repeat into the same folder under the same name returns the earlier put, against double puts after a lost connection). To change a file an earlier drive_put made, pass its fileId as updateFileId: the same file (same link) gets a new revision and the task\'s link follows it. Only files drive_put made can be updated. When updating a Google document is refused because people changed it in Drive (needsRead), do not make a new file: read it with drive_read, write a version that keeps their edits and comments, and update the same updateFileId again (DRIVE_READ_AGAIN: it changed again, read again). If someone else edited or commented, the member confirms on the app\'s card first (state: waiting-for-member) — wait for them. Report the link, revisionId and whether it was an update. Never claim success unless state is done; when unknown, do not put it again — ask the member to check Drive.',
       run: async input => {
         if (!deps.companyRoot) return json({ error: say('この相談には会社フォルダがないため、置けません。') })
-        const file = readLocalFileForDrive(input.path, deps.companyRoot, deps.local)
+        // A consultation with the app's card may ask the member (google-drive.md "Asking before a put"); a scheduled job's
+        // run (its one area) never.
+        const canAsk = !!deps.onOverwriteCard && deps.local.onlyUnder === undefined
+        const file = readLocalFileForDrive(input.path, deps.companyRoot, { ...deps.local, allowPrivate: canAsk })
         if ('error' in file) return json({ error: say(file.error) })
+        if (file.privateSource) {
+          // Only a server that decides where a private folder's file may go gets one.
+          let checked = false
+          try { checked = ((await access.call('GET', '/google/drive/status', undefined, signal)) as DriveAiStatus).privateSourceChecked === true } catch { /* unknown: refused */ }
+          if (!checked) return json({ error: say(PRIVATE_REFUSAL) })
+        }
         // Markdown becomes a Google document unless `as: 'file'` keeps it a .md file; the other kinds stay as they are unless asked.
         const as: DrivePutAs = input.as === 'file' || input.as === 'google_doc' ? input.as : file.kind === 'markdown' ? 'google_doc' : 'file'
         if (!drivePutForm(file.kind, as)) return json({ error: `${file.kind === 'pdf' ? 'PDF' : file.kind === 'json' ? 'JSON（.json）' : 'テキスト（.txt）'} は Google ドキュメントにできません。as を省いてください。` })
@@ -550,6 +571,8 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
             ...(recordId ? { recordId } : {}),
             // This app shows the card that asks the member (an app released before it never says so: nothing waits for it).
             ...(updateFileId && deps.onOverwriteCard ? { askPerson: true } : {}),
+            ...(canAsk ? { askAudience: true } : {}),
+            ...(file.privateSource ? { privateSource: true } : {}),
           }, signal, { timeoutMs: PUT_TIMEOUT_MS }) as DrivePutAnswer
           const p = a.drivePut
           return json({
@@ -564,6 +587,18 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
           })
         } catch (error) {
           // Someone else edited the document: the member decides on the app's card; the content waits on the server.
+          // Who sees the place: the member decides on the app's card (google-drive.md "Asking before a put").
+          if (error instanceof RecordsApiError && error.code === 'DRIVE_PUT_NEEDS_CONFIRMATION') {
+            const card = driveOverwriteCardFor(error.details.confirmation, { id: (deps.newId ?? randomId)(), companyId: deps.companyId, at: (deps.now ?? (() => new Date()))().toISOString() })
+            if (card && deps.onOverwriteCard) {
+              deps.onOverwriteCard(card)
+              return json({
+                state: 'waiting-for-member', code: error.code,
+                instruction: 'この置き場所はほかの人（社外の人や、非公開の資料を見られない人）も見られるため、置くかどうかをメンバーに確かめています（アプリのカード）。メンバーが押すと、この内容で置かれます。押されるまで、置き直したり別の場所に置いたりしないでください。',
+              })
+            }
+            return json({ error: '置く前にメンバーの確認が要りますが、確認のカードを出せませんでした。社内だけのフォルダを選んでもらってください。', code: error.code })
+          }
           if (error instanceof RecordsApiError && error.code === 'DRIVE_OVERWRITE_NEEDS_CONFIRMATION') {
             const card = driveOverwriteCardFor(error.details.confirmation, { id: (deps.newId ?? randomId)(), companyId: deps.companyId, at: (deps.now ?? (() => new Date()))().toISOString() })
             if (card && deps.onOverwriteCard) {

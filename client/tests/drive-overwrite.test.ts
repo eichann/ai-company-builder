@@ -68,7 +68,7 @@ test('someone else edited the document: the app\'s card goes in the reply and th
   const cards: DriveOverwriteCard[] = []
   const put = await driveTools(NEEDS, c => cards.push(c))
   const out = JSON.parse(await put({}))
-  assert.deepEqual(cards, [{ id: 'card-1', companyId: 'co', confirmationId: CONFIRMATION.id, fileName: '面談報告書', editors: ['田中 誠'], commented: true, expiresAt: CONFIRMATION.expiresAt, at: '2026-11-14T00:00:00.000Z' }])
+  assert.deepEqual(cards, [{ id: 'card-1', companyId: 'co', confirmationId: CONFIRMATION.id, fileName: '面談報告書', editors: ['田中 誠'], commented: true, expiresAt: CONFIRMATION.expiresAt, at: '2026-11-14T00:00:00.000Z', update: true, edited: true }])
   assert.equal(out.state, 'waiting-for-member')
   // The names go to the card only: people choose them in Google, so they never reach the AI's text.
   assert.match(out.instruction, /ほかの人の直し・コメント/)
@@ -111,7 +111,7 @@ test('drive_put\'s words: a document people changed is read and updated in place
 })
 
 test('the card is kept with the message and comes back from the history; a malformed one is dropped', () => {
-  const card = { id: 'card-1', companyId: 'co', confirmationId: 'drive-confirm-abc123', fileName: '面談報告書', editors: ['田中 誠'], commented: false, expiresAt: 'e', at: 'a' }
+  const card = { id: 'card-1', companyId: 'co', confirmationId: 'drive-confirm-abc123', fileName: '面談報告書', editors: ['田中 誠'], commented: false, expiresAt: 'e', at: 'a', update: true, edited: true }
   const msg = { id: 'm1', role: 'assistant', parts: [{ type: 'text', text: '確かめてください' }, { type: DRIVE_OVERWRITE_PART_TYPE, id: 'drive-overwrite-card-1', data: card }, { type: DRIVE_OVERWRITE_PART_TYPE, data: { ...card, id: 'card-2', confirmationId: 'approval-x' } }] } as unknown as UIMessage
   const stored = uiMessageToSessionMessage(msg, new Date('2026-11-14T00:00:00.000Z'))
   assert.deepEqual(stored.driveOverwrites, [card])
@@ -119,6 +119,11 @@ test('the card is kept with the message and comes back from the history; a malfo
   assert.deepEqual(back.map(p => p.data), [card])
   assert.equal(readDriveOverwriteCard({ ...card, editors: 'x' })?.editors.length, 0)
   assert.equal(readDriveOverwriteCard({ ...card, companyId: '' }), undefined)
+  // A card stored before "Asking before a put" (no update / edited): an edited document's update, as it was.
+  const old: Record<string, unknown> = { ...card }
+  delete old.update
+  delete old.edited
+  assert.deepEqual(readDriveOverwriteCard(old), card)
 })
 
 test('the press: the member\'s session to the server; the card\'s words come from the code', async () => {

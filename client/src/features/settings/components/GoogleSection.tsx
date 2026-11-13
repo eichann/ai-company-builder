@@ -8,6 +8,7 @@ import { GOOGLE_ARCHIVE_STOP_TEXT, GOOGLE_ARCHIVE_TEXT, GOOGLE_DRIVE_OFF_TEXT, G
 import { useGoogle } from '../hooks/useGoogle'
 import { googlePermissionKey } from '../../../shared/lib/googlePermission'
 import { GoogleRelayCard } from './GoogleRelayCard'
+import { DriveTrustedFolders } from './DriveTrustedFolders'
 
 export function GoogleSection({ companyId }: { companyId: string }) {
   const { loadRef, data, error, message, busy, waiting, connect, disconnect, setArchive, setDrive } = useGoogle(companyId)
@@ -108,6 +109,7 @@ export function GoogleSection({ companyId }: { companyId: string }) {
                   <Button size="sm" variant="ghost" disabled={busy} onClick={() => void setDrive(false)}>オフにする</Button>
                 )}
               </div>
+              {view.drive === 'on' && <DriveTrustedFolders companyId={companyId} />}
             </Card>
           )}
           {/* Remounted when the permission changes (after ［許可する］ in the browser): it reads its view again. */}

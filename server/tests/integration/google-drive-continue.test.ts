@@ -461,7 +461,8 @@ describe('continuing a Google document people edited (google-drive.md "Continuin
     const asked = await update(token, '外に出る.md', doc.fileId, '# 二版\n')
     google.shareDriveFile(doc.fileId, { type: 'anyone', role: 'reader' })
     const r = await press('m-sato', asked.body.confirmation.id, 'confirm')
-    expect(r.body.code).toBe('DRIVE_FILE_SHARED_OUTSIDE')
+    // Who sees it is not what the member was shown (google-drive.md "Asking before a put").
+    expect(r.body.code).toBe('DRIVE_SHARING_CHANGED')
     expect(patches(doc.fileId)).toBe(0)
     expect([ROW(asked.body.confirmation.id).state, ROW(asked.body.confirmation.id).content]).toEqual(['declined', null])
   })

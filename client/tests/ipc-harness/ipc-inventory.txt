@@ -130,12 +130,14 @@ contract.invoke google:connect
 contract.invoke google:connectAll
 contract.invoke google:decideDriveOverwrite
 contract.invoke google:disconnect
+contract.invoke google:driveTrustedFolders
 contract.invoke google:markSeen
 contract.invoke google:relay
 contract.invoke google:setArchive
 contract.invoke google:setDrive
 contract.invoke google:setRelay
 contract.invoke google:status
+contract.invoke google:untrustDriveFolder
 contract.invoke handoff:complete
 contract.invoke handoff:get
 contract.invoke handoff:update
@@ -413,6 +415,7 @@ contract.type ElectronAPI.getCompanies = getCompanies: Invoke<'api:getCompanies'
 contract.type ElectronAPI.getConsultationTopics = getConsultationTopics: Invoke<'recordViews:topics'>
 contract.type ElectronAPI.getDefaultParentFolder = getDefaultParentFolder: Invoke<'companySetup:defaultParentFolder'>
 contract.type ElectronAPI.getDepartments = getDepartments: Invoke<'api:getDepartments'>
+contract.type ElectronAPI.getDriveTrustedFolders = getDriveTrustedFolders: Invoke<'google:driveTrustedFolders'>
 contract.type ElectronAPI.getEnvStatus = getEnvStatus: Invoke<'env:status'>
 contract.type ElectronAPI.getGoogleRelay = getGoogleRelay: Invoke<'google:relay'>
 contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:status'>
@@ -582,6 +585,7 @@ contract.type ElectronAPI.undoTaskAction = undoTaskAction: Invoke<'tasks:undo'>
 contract.type ElectronAPI.unlinkFileFromTask = unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
 contract.type ElectronAPI.unlinkRecordFromRecord = unlinkRecordFromRecord: Invoke<'tasks:unlinkRecord'>
 contract.type ElectronAPI.unlinkTargetFromTask = unlinkTargetFromTask: Invoke<'tasks:unlinkTarget'>
+contract.type ElectronAPI.untrustDriveFolder = untrustDriveFolder: Invoke<'google:untrustDriveFolder'>
 contract.type ElectronAPI.unwatchCompany = unwatchCompany: Invoke<'fs:unwatch'>
 contract.type ElectronAPI.updateEnv = updateEnv: Invoke<'env:update'>
 contract.type ElectronAPI.updateHandoff = updateHandoff: Invoke<'handoff:update'>
@@ -826,14 +830,16 @@ contract.type IpcInvokeChannels.'git:sync' = 'git:sync': { args: [repoPath: stri
 contract.type IpcInvokeChannels.'git:unsharedLargeFiles' = 'git:unsharedLargeFiles': { args: [repoPath: string]; result: { success: boolean; files: string[] } }
 contract.type IpcInvokeChannels.'google:connect' = 'google:connect': { args: [companyId: string, features: GoogleFeature[]]; result: GoogleConnectResult }
 contract.type IpcInvokeChannels.'google:connectAll' = 'google:connectAll': { args: [companyId: string]; result: GoogleConnectResult }
-contract.type IpcInvokeChannels.'google:decideDriveOverwrite' = 'google:decideDriveOverwrite': { args: [companyId: string, confirmationId: string, action: 'confirm' | 'decline']; result: DriveOverwriteDecisionResult }
+contract.type IpcInvokeChannels.'google:decideDriveOverwrite' = 'google:decideDriveOverwrite': { args: [companyId: string, confirmationId: string, action: 'confirm' | 'decline', trust?: boolean]; result: DriveOverwriteDecisionResult }
 contract.type IpcInvokeChannels.'google:disconnect' = 'google:disconnect': { args: [companyId: string]; result: GoogleStatusResult }
+contract.type IpcInvokeChannels.'google:driveTrustedFolders' = 'google:driveTrustedFolders': { args: [companyId: string]; result: DriveTrustedFoldersResult }
 contract.type IpcInvokeChannels.'google:markSeen' = 'google:markSeen': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:relay' = 'google:relay': { args: [companyId: string]; result: GoogleRelayResult }
 contract.type IpcInvokeChannels.'google:setArchive' = 'google:setArchive': { args: [companyId: string, on: boolean]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:setDrive' = 'google:setDrive': { args: [companyId: string, on: boolean]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:setRelay' = 'google:setRelay': { args: [companyId: string, on: boolean]; result: GoogleRelayResult }
 contract.type IpcInvokeChannels.'google:status' = 'google:status': { args: [companyId: string]; result: GoogleStatusResult }
+contract.type IpcInvokeChannels.'google:untrustDriveFolder' = 'google:untrustDriveFolder': { args: [companyId: string, folderId: string]; result: DriveUntrustResult }
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
@@ -1134,14 +1140,16 @@ main.handle git:sync @ features/sync/ipc.ts (repoPath: string, companyId: string
 main.handle git:unsharedLargeFiles @ features/git-history/ipc.ts (repoPath: string)
 main.handle google:connect @ features/google/ipc.ts (companyId: string, features: GoogleFeature[])
 main.handle google:connectAll @ features/google/ipc.ts (companyId: string)
-main.handle google:decideDriveOverwrite @ features/google/ipc.ts (companyId: string, confirmationId: string, action: 'confirm' | 'decline')
+main.handle google:decideDriveOverwrite @ features/google/ipc.ts (companyId: string, confirmationId: string, action: 'confirm' | 'decline', trust?: boolean)
 main.handle google:disconnect @ features/google/ipc.ts (companyId: string)
+main.handle google:driveTrustedFolders @ features/google/ipc.ts (companyId: string)
 main.handle google:markSeen @ features/google/ipc.ts (companyId: string)
 main.handle google:relay @ features/google/ipc.ts (companyId: string)
 main.handle google:setArchive @ features/google/ipc.ts (companyId: string, on: boolean)
 main.handle google:setDrive @ features/google/ipc.ts (companyId: string, on: boolean)
 main.handle google:setRelay @ features/google/ipc.ts (companyId: string, on: boolean)
 main.handle google:status @ features/google/ipc.ts (companyId: string)
+main.handle google:untrustDriveFolder @ features/google/ipc.ts (companyId: string, folderId: string)
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
@@ -1334,8 +1342,8 @@ preload createPrivateFolder -> invoke privateFolders:create($0, $1)
 preload createPrivateFolder : (companyId: string, input: CreatePrivateFolderRequest) => Promise<CreatePrivateFolderResult>
 preload createTask -> invoke tasks:create($0, $1)
 preload createTask : (companyId: string, input: TaskCreateInput) => Promise<TaskWriteResult>
-preload decideDriveOverwrite -> invoke google:decideDriveOverwrite($0, $1, $2)
-preload decideDriveOverwrite : (companyId: string, confirmationId: string, action: "confirm" | "decline") => Promise<DriveOverwriteDecisionResult>
+preload decideDriveOverwrite -> invoke google:decideDriveOverwrite($0, $1, $2, $3)
+preload decideDriveOverwrite : (companyId: string, confirmationId: string, action: "confirm" | "decline", trust?: boolean | undefined) => Promise<DriveOverwriteDecisionResult>
 preload declineMinutesBundle -> invoke minutes:noBundle($0, $1)
 preload declineMinutesBundle : (companyId: string, minutesId: string) => Promise<MinutesActionResult>
 preload deleteChatSession -> invoke chatHistory:deleteSession($0, $1)
@@ -1414,6 +1422,8 @@ preload getDefaultParentFolder -> invoke companySetup:defaultParentFolder()
 preload getDefaultParentFolder : () => Promise<{ success: boolean; folder?: string | undefined; }>
 preload getDepartments -> invoke api:getDepartments($0)
 preload getDepartments : (companyId: string) => Promise<DepartmentsResult>
+preload getDriveTrustedFolders -> invoke google:driveTrustedFolders($0)
+preload getDriveTrustedFolders : (companyId: string) => Promise<DriveTrustedFoldersResult>
 preload getEnvStatus -> invoke env:status($0)
 preload getEnvStatus : (rootPath: string) => Promise<EnvStatusResult>
 preload getGoogleRelay -> invoke google:relay($0)
@@ -1752,6 +1762,8 @@ preload unlinkRecordFromRecord -> invoke tasks:unlinkRecord($0, $1, $2)
 preload unlinkRecordFromRecord : (companyId: string, recordId: string, input: RecordLinkInput) => Promise<TaskWriteResult>
 preload unlinkTargetFromTask -> invoke tasks:unlinkTarget($0, $1, $2, $3)
 preload unlinkTargetFromTask : (companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number) => Promise<TaskWriteResult>
+preload untrustDriveFolder -> invoke google:untrustDriveFolder($0, $1)
+preload untrustDriveFolder : (companyId: string, folderId: string) => Promise<DriveUntrustResult>
 preload unwatchCompany -> invoke fs:unwatch($0)
 preload unwatchCompany : (rootPath: string) => Promise<SimpleResult>
 preload updateEnv -> invoke env:update($0, $1)

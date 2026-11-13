@@ -301,6 +301,8 @@ export interface FakeGoogle {
   driveFile(id: string): { name: string; mimeType: string; parents: string[]; content: Buffer; appProperties: Record<string, string>; createdBy: string | null; version: number; headRevisionId: string; uploadedAs: string | null; keptRevisions: string[]; modifiedTime: string; revisions: Array<{ id: string; modifiedTime: string; by: string }> } | null
   /** Someone shares this Drive file (or folder) by itself with another permission (anyone, another domain, a person). */
   shareDriveFile(id: string, permission: { type: 'user' | 'group' | 'domain' | 'anyone'; role: string; emailAddress?: string; domain?: string }): void
+  /** Who can see this Drive file (or folder) becomes exactly these permissions (its owner included). */
+  setDrivePermissions(id: string, permissions: Array<{ type: 'user' | 'group' | 'domain' | 'anyone'; role: string; emailAddress?: string; domain?: string }>): void
   /** Someone moves this Drive file into another folder (its parents become exactly that one). */
   moveDriveFile(id: string, folderId: string): void
   /** Drive answers `keepForever: false` for this file's revisions (as if it would not keep them). */
@@ -1912,6 +1914,11 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       const f = driveFiles.get(id)
       if (!f) throw new Error(`fake Google: no Drive file ${id}`)
       f.permissions = [...f.permissions, permission]
+    },
+    setDrivePermissions(id, permissions) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      f.permissions = [...permissions]
     },
     moveDriveFile(id, folderId) {
       const f = driveFiles.get(id)

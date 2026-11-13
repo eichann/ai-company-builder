@@ -361,8 +361,8 @@ registerJobsIpc(ipc, {
     if (!folder) return { ok: false, message: drivePickRefusedText(picked.refused, picked.refusedWhy) ?? '選んだフォルダを使えませんでした（追加できる権限のあるフォルダを選んでください）。' }
     // A folder seen outside the company (or not known): the job's AI could never put there — said now, not at its first run.
     // The server's put still decides (DRIVE_FOLDER_SHARED_OUTSIDE).
-    const outside = driveFolderSharingText(folder.sharing)
-    return outside ? { ok: false, message: outside.replace('AI はここに置けません', '定期の仕事はここに置けません') } : { ok: true, ref: folder.id }
+    const outside = driveFolderSharingText(folder.sharing, 'job')
+    return outside ? { ok: false, message: outside } : { ok: true, ref: folder.id }
   },
 })
 // 自分の設定 → 「受信を読む」「AI が自動で進める」 (features/work-switches): the member's own, with the session.
