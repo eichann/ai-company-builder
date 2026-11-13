@@ -49,6 +49,7 @@ import { wirePrivateFolders } from './features/private-folders/wire'
 import { wireKeyBroker } from './features/broker/wire'
 import { registerGoogleIpc } from './features/google/ipc'
 import { createDrivePicking } from './features/google/drive'
+import { driveFolderSharingText, drivePickRefusedText } from '../../shared/core/google-drive'
 import { registerCalendarIpc } from './features/calendar/ipc'
 import { registerTasksIpc } from './features/tasks/ipc'
 import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
@@ -329,9 +330,13 @@ registerTasksIpc(ipc, {
   // Tag suggestions: a Haiku model through the company's key (the broker's relay), text only.
   tagSuggest: { brokerEnv: request => brokerTokens.envFor(request), aiAllowed: () => agentControl.stop.oneShotAiAllowed() },
   // 「Google Drive のファイルをつなぐ」 (every company, owner decision 2026-11-13): the Picker flow the AI's tool uses.
-  pickDriveFiles: async (companyId, fileIds) => {
-    const r = await drivePicking.pick(companyId, 'files', undefined, { fileIds })
-    return r.ok ? { ok: true, files: r.picks.filter(p => p.kind === 'file').map(p => ({ id: p.id, name: p.name })) } : { ok: false, cancelled: r.reason === 'cancelled', message: r.message }
+  // A pick for linking offers every file type (owner decision 2026-11-14: Word, Excel, images… 「AI では中身を読めません」);
+  // what was picked but not kept is said (how many, why), never dropped silently.
+  pickDriveFiles: async (companyId, fileIds, signal) => {
+    const r = await drivePicking.pick(companyId, 'files', signal, { fileIds, purpose: 'link' })
+    if (!r.ok) return { ok: false, ended: r.reason === 'cancelled' || r.reason === 'timed-out' ? r.reason : null, message: r.message }
+    const notUsable = drivePickRefusedText(r.refused, r.refusedWhy)
+    return { ok: true, files: r.picks.filter(p => p.kind === 'file').map(p => ({ id: p.id, name: p.name })), ...(notUsable ? { notUsable } : {}) }
   },
   // …offered first from the member's own picked / put files (their names, the member's own).
   driveChoices: async companyId => (await drivePicking.ownFiles(companyId)).map(f => ({ id: f.id, name: f.name, source: f.source })),
@@ -353,7 +358,11 @@ registerJobsIpc(ipc, {
     const picked = await drivePicking.pick(companyId, 'folder')
     if (!picked.ok) return { ok: false, message: picked.message }
     const folder = picked.picks.find(p => p.kind === 'folder')
-    return folder ? { ok: true, ref: folder.id } : { ok: false, message: '選んだフォルダを使えませんでした（追加できる権限のあるフォルダを選んでください）。' }
+    if (!folder) return { ok: false, message: drivePickRefusedText(picked.refused, picked.refusedWhy) ?? '選んだフォルダを使えませんでした（追加できる権限のあるフォルダを選んでください）。' }
+    // A folder seen outside the company (or not known): the job's AI could never put there — said now, not at its first run.
+    // The server's put still decides (DRIVE_FOLDER_SHARED_OUTSIDE).
+    const outside = driveFolderSharingText(folder.sharing)
+    return outside ? { ok: false, message: outside.replace('AI はここに置けません', '定期の仕事はここに置けません') } : { ok: true, ref: folder.id }
   },
 })
 // 自分の設定 → 「受信を読む」「AI が自動で進める」 (features/work-switches): the member's own, with the session.

@@ -180,6 +180,13 @@ export function driveDocFetchesOutside(kind: DrivePutKind, text: string): boolea
 }
 
 /**
+ * Why a Google document was refused (`driveDocFetchesOutside`) and the plain way out (owner FB 2026-11-14): put the file
+ * as it is (`as: "file"`, a .md / .html file — nothing is converted or fetched), or turn plain URLs into links. Never
+ * rewritten by ACB: the AI does not strip images or styles on its own.
+ */
+export const DRIVE_DOC_REFUSED_OUTSIDE = '外を読み込むかもしれない部分（画像・スタイル・URL）があるため、Google ドキュメントにはできません。代わりに、as: "file" でファイルのまま（.md / .html のまま）置けます（Drive は何も読み込みません）。Google ドキュメントにしたいときは、外のページを [文字](URL) か <a href> のリンクだけにし、style や外の画像を外してから置き直してください（画像は data: で埋め込めます）。勝手に削らず、どちらにするかメンバーに聞いてください。'
+
+/**
  * The revision ACB pins for a Drive file: its `headRevisionId` (a file with binary content), else
  * `version:<n>` (a Google document has no head revision; its version grows with every change). Null when
  * Drive answered neither.
@@ -212,8 +219,68 @@ export const DRIVE_READ_AS: Record<string, { how: 'export'; mime: string } | { h
   'application/json': { how: 'download', kind: 'text' },
 }
 
-/** The MIME types the file Picker offers (the same list `DRIVE_READ_AS` reads). */
+/** The MIME types the file Picker offers for the AI to read (the same list `DRIVE_READ_AS` reads). */
 export const DRIVE_PICKABLE_MIMES: readonly string[] = Object.keys(DRIVE_READ_AS)
+
+/** Whether the AI can read a file of this type (`drive_read`): the types `DRIVE_READ_AS` knows. */
+export function driveAiReadable(mimeType: unknown): boolean {
+  return typeof mimeType === 'string' && Object.prototype.hasOwnProperty.call(DRIVE_READ_AS, mimeType)
+}
+
+/**
+ * Why a files pick is made (owner decision 2026-11-14, 「つなぐだけ」): `read` — for the AI to read (the Picker offers
+ * only what `drive_read` reads, as before); `link` — to link to a record (a person's 「Google Drive のファイルをつなぐ」):
+ * any file but a folder, also a type the AI cannot read (Word, Excel, an image, a zip…), kept as a pick and linked
+ * with no sha256 — 「AI では中身を読めません」, never a decision material or an attachment (`DRIVE_VERSION_NOT_FIXED`).
+ */
+export type DrivePickPurpose = 'read' | 'link'
+
+export function isDrivePickPurpose(v: unknown): v is DrivePickPurpose {
+  return v === 'read' || v === 'link'
+}
+
+/** Whether a picked file of this type may be kept for this purpose (never a folder, a shortcut or nothing). */
+export function drivePickableFor(purpose: DrivePickPurpose, mimeType: string): boolean {
+  if (purpose === 'read') return DRIVE_PICKABLE_MIMES.includes(mimeType)
+  return mimeType !== '' && mimeType !== DRIVE_FOLDER_MIME && mimeType !== 'application/vnd.google-apps.shortcut'
+}
+
+/** Why a picked id was not kept (said to the person in the browser and in the app; `drivePickRefusedText`). */
+export type DrivePickRefusal = 'gone' | 'no-access' | 'type' | 'folder' | 'shortcut' | 'not-folder' | 'cannot-add'
+export type DrivePickRefusedWhy = Partial<Record<DrivePickRefusal, number>>
+
+const REFUSAL_WORDS: Record<DrivePickRefusal, string> = {
+  gone: 'ゴミ箱に入っている',
+  'no-access': 'ACB から開けない（消されたか、見られなくなった）',
+  type: 'AI では中身を読めない種類（Word・Excel・画像など）',
+  folder: 'フォルダ（フォルダはまだつなげません）',
+  shortcut: 'ショートカット（元のファイルを選んでください）',
+  'not-folder': 'フォルダではない',
+  'cannot-add': 'ファイルを追加する権限がない',
+}
+
+/** 「2件は使えませんでした。ゴミ箱に入っている 1件・…。」 — null when nothing was refused. */
+export function drivePickRefusedText(refused: number, why: DrivePickRefusedWhy | undefined): string | null {
+  if (!Number.isInteger(refused) || refused <= 0) return null
+  const parts = (Object.keys(REFUSAL_WORDS) as DrivePickRefusal[])
+    .filter(k => typeof why?.[k] === 'number' && (why[k] as number) > 0)
+    .map(k => `${REFUSAL_WORDS[k]} ${why![k]}件`)
+  return `${refused}件は使えませんでした。${parts.length > 0 ? `${parts.join('・')}。` : ''}`
+}
+
+/**
+ * Who sees what is put into a picked folder (owner FB 2026-11-14, said right after the pick, not only at the put):
+ * `outside` — people outside the company's domain (an anyone-link, another domain, an outside person); `unknown` —
+ * its sharing could not be read in full. The AI and a scheduled job cannot put into either (the put refuses).
+ */
+export type DriveFolderSharing = 'inside' | 'outside' | 'unknown'
+
+/** Said right after a folder pick that the AI cannot put into. */
+export function driveFolderSharingText(sharing: DriveFolderSharing | undefined): string | null {
+  if (sharing === 'outside') return 'このフォルダは社外の人も見られるため、AI はここに置けません（社外に渡すのは本人の操作です）。社内だけのフォルダを選び直してください。'
+  if (sharing === 'unknown') return 'このフォルダを誰が見られるか確かめられなかったため、AI はここに置けません。社内だけのフォルダを選び直してください。'
+  return null
+}
 
 /** Text read from Drive: at most this many characters (with a notice). */
 export const DRIVE_READ_TEXT_MAX = 200_000
@@ -361,6 +428,24 @@ export function driveFileIdsFromText(raw: unknown): string[] {
     if (ids.length >= DRIVE_PICK_MAX_FILES) break
   }
   return ids
+}
+
+/**
+ * Whether pasted / dropped text holds a Google Drive **folder** address (`drive.google.com/drive/(u/<n>/)folders/<id>`,
+ * also under 共有ドライブ): a folder cannot be linked to a record yet, and the card says so instead of 「not a Drive
+ * link」. The same host rules as `driveFileIdFromLink`.
+ */
+export function hasDriveFolderLink(raw: unknown): boolean {
+  if (typeof raw !== 'string') return false
+  for (const piece of raw.slice(0, DRIVE_LINK_MAX * DRIVE_PICK_MAX_FILES).split(/\s+/)) {
+    if (piece === '' || piece.length > DRIVE_LINK_MAX) continue
+    let u: URL
+    try { u = new URL(piece) } catch { continue }
+    if (u.protocol !== 'https:' || u.username !== '' || u.password !== '' || u.port !== '' || u.hostname !== 'drive.google.com') continue
+    const id = /^\/drive\/(?:u\/\d{1,2}\/)?folders\/([^/]+)\/?$/.exec(u.pathname)?.[1]
+    if (isDriveId(id)) return true
+  }
+  return false
 }
 
 /** Ids handed to the Picker to show first: Drive ids only, once each, at most DRIVE_PICK_MAX_FILES; anything else dropped. */

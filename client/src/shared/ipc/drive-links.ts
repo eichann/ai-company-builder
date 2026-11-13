@@ -9,6 +9,14 @@ import type { TaskDriveChoice, TaskDriveLinkOptions, TaskDriveLinkResult, TaskWr
 /** A Drive file (or, without the shared folder, a PC file) taken off a record; 「Google Drive のファイルをつなぐ」. */
 export type TypedFileWrites = ElectronPort<'unlinkTargetFromTask' | 'linkDriveFilesToTask' | 'getTaskDriveChoices'>
 
+/** The card's ［やめる］ while Google's chooser is open. */
+export type DrivePickStopping = ElectronPort<'stopDrivePick'>
+
+/** Stops waiting for Google's chooser (the pick ticket is closed; nothing is linked). */
+export function stopDrivePick(companyId: string, port: DrivePickStopping = window.electronAPI) {
+  return port.stopDrivePick(companyId)
+}
+
 export function unlinkTypedFile(companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number, writes: TypedFileWrites = window.electronAPI): Promise<TaskWriteResult> {
   return writes.unlinkTargetFromTask(companyId, recordId, target, expectedVersion)
 }

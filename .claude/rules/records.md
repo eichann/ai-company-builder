@@ -404,7 +404,13 @@ company path:
   permission; the engine takes only that answer (`VerifiedDriveFile`, never a body: without it 403
   `DRIVE_NOT_PICKED`). Kept beside the row (`record_links.target_meta`, JSON, `DriveLinkMeta`):
   revision (`headRevisionId`, or `version:<n>` for a Google document), the name as picked, the sha256
-  of the content ACB read (null when it could not be read), the MIME type, when. **Every reader of the
+  of the content ACB read (null when it could not be read — also a type the AI cannot read, which a person may link since
+  owner decision 2026-11-14 「つなぐだけ」: Word, Excel, an image… — so it is never material), the MIME type, when.
+  **Checked again** (owner FB 2026-11-14): its linker linking the same Drive file again while its kept sha256 is null is
+  not 「already linked」 — `fileLinkBeforeDrive` answers `ask-drive`, the connector reads it again, and when it can be read
+  now the kept facts are replaced in place (one link; a `link_file` entry noted 「Google Drive のファイルの中身を確かめ直し
+  ました」); still unreadable → nothing changes. Only the linker (another member's re-link is `changed: false`, Google not
+  asked); the AI never (TYPED_LINK_PERSON_ONLY). Test `tests/unit/record-typed-links.test.ts`. **Every reader of the
   record gets the row** (`RecordLinkView.drive { fileId, mine }`, opened in Drive, which decides who
   may see it); **the name and the rest only the member who linked it** (`mine`) — anyone else is shown
   「Google Drive のファイル」. Owner decision (asked 2026-11-08): only the linker can be checked with

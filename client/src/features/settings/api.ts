@@ -143,6 +143,12 @@ export function setGoogleArchive(companyId: string, on: boolean, port: GoogleArc
   return port.setGoogleArchive(companyId, on)
 }
 
+/** 「Drive で選んだものを読む・置く」 off / back on (the member's own switch; no consent). */
+export type GoogleDrivePort = ElectronPort<'setGoogleDrive'>
+export function setGoogleDrive(companyId: string, on: boolean, port: GoogleDrivePort = window.electronAPI) {
+  return port.setGoogleDrive(companyId, on)
+}
+
 export type GoogleRelayPort = ElectronPort<'getGoogleRelay' | 'setGoogleRelay'>
 
 export function getGoogleRelay(companyId: string, port: GoogleRelayPort = window.electronAPI) {

@@ -225,10 +225,12 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     // Linked again through the chooser, not 取り消す (as on the task card).
     changed(`「${label}」とのつながりを外しました`, null)
   }
-  const driveRows = driveFileRows(card.driveFiles ?? [], busy, viewOnly ? undefined : (fileId, label) => void unlinkDrive(fileId, label))
+  const driveRows = driveFileRows(card.driveFiles ?? [], busy, viewOnly ? undefined : (fileId, label) => void unlinkDrive(fileId, label),
+    // 「中身を確かめ直す」: linked again, which reads it again (owner FB 2026-11-14).
+    viewOnly || !driveOn ? undefined : fileId => { void linkDrive({ fileIds: [fileId] }).then(e => { if (e) setError(e) }) })
   const driveExtra: LinkedGroupExtra | null = driveOn && !viewOnly ? {
     name: 'ファイル', kind: 'file',
-    action: <DriveLinkAction companyId={companyId} linked={(card.driveFiles ?? []).map(f => f.fileId)} busy={busy} usable={drive.usable} note={drive.note} hint={drive.hint}
+    action: <DriveLinkAction companyId={companyId} linked={(card.driveFiles ?? []).map(f => f.fileId)} busy={busy} usable={drive.usable} note={drive.note} hint={drive.hint} picking={drive.picking} onStop={drive.stop}
       onLink={chosen => linkDrive(chosen ? { chosen } : undefined)} onLinkText={linkDriveText} />,
     note: driveFilesNote(card.record.typeLabel),
   } : null

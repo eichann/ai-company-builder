@@ -13,7 +13,10 @@
 // of the member's PC (メモ.md is on this PC, 消えた.md is not), a Drive file the member linked and one someone else
 // linked; ［Google Drive のファイルをつなぐ］ logs `drive@<version>`, a link taken off `unlinkTarget <kind> <path|id>@<version>`,
 // a Drive file opened `external <url>`. `&drive=list`: the member already picked / put Drive files, offered first (one of
-// them already linked); files chosen there log `drive@<version> chosen=<ids>`.
+// them already linked); files chosen there log `drive@<version> chosen=<ids>`. `&drive=wait`: the chooser stays open until
+// ［やめる］ (logs `stopDrivePick`, then ends cancelled); `&drive=timeout`: it ends with nothing chosen in time; `&drive=notusable`:
+// one file linked, one not usable. `&drive=unchecked`: two more of the member's links — a PDF ACB could not read and a Word
+// file linked only.
 // The owner-only task links a note in a `.personal/` folder (on this Mac); ［＋ 新しいファイル］ makes one through the
 // screen's `createTodayFile` (`today <name>` in `#acted`, 「既存.md」 answers a taken name), and `file.open` is logged as `open <path>`.
 import { createRoot } from 'react-dom/client'
@@ -37,6 +40,8 @@ const done = params.get('task') === 'done'
 const withSource = params.get('source') === '1'
 const shared = params.get('shared') === '1'
 const driveList = params.get('drive') === 'list'
+/** `&drive=wait`: ends the open chooser (the card's ［やめる］). */
+let stopPicking: (() => void) | undefined
 const conflict = params.get('conflict') === '1'
 // `?task=review`: 「議事録を確認する」 with its meeting's summary, two proposals (one put away) and decisions.
 const reviewing = params.get('task') === 'review'
@@ -60,6 +65,10 @@ const typedLinks = [
   { name: 'files', direction: 'out' as const, local: { path: '営業/消えた.md' } },
   { name: 'files', direction: 'out' as const, drive: { fileId: '1AbCdEfGhIjKlMnOp', mine: true, name: 'A社 提案書（下書き）', revisionId: 'rev-1', sha256: 'a'.repeat(64) } },
   { name: 'files', direction: 'out' as const, drive: { fileId: '1ZyXwVuTsRqPoNmLk', mine: false } },
+  ...(params.get('drive') === 'unchecked' ? [
+    { name: 'files', direction: 'out' as const, drive: { fileId: '1UncheckedPdf0001', mine: true, name: '読めなかった.pdf', revisionId: 'rev-2', sha256: null, mimeType: 'application/pdf' } },
+    { name: 'files', direction: 'out' as const, drive: { fileId: '1WordFileOnly0001', mine: true, name: '見積書.docx', revisionId: 'rev-3', sha256: null, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } },
+  ] : []),
 ]
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
@@ -190,6 +199,15 @@ installElectronAPI({
     if (params.get('drive') === 'slow') await new Promise(r => setTimeout(r, 1500))
     // `?drive=cancel`: the member closes Google's chooser without choosing.
     if (params.get('drive') === 'cancel') return { success: true, recordId, linked: [] }
+    // `?drive=wait`: open until the card's ［やめる］.
+    if (params.get('drive') === 'wait') {
+      await new Promise<void>(resolve => { stopPicking = resolve })
+      return { success: true, recordId, linked: [], ended: 'cancelled' as const }
+    }
+    if (params.get('drive') === 'timeout') return { success: true, recordId, linked: [], ended: 'timed-out' as const }
+    // `&drive=unchecked`: checking 読めなかった.pdf again is refused (its pick ended): said like an unlink's refusal.
+    if (params.get('drive') === 'unchecked' && fileIds?.includes('1UncheckedPdf0001')) return { success: false, offline: false, error: 'Google Drive で選んだファイルだけをつなげます。もう一度選んでください。' }
+    if (params.get('drive') === 'notusable') return { success: true, recordId, linked: ['B社 見積'], notUsable: '1件は使えませんでした。ゴミ箱に入っている 1件。' }
     return { success: true, recordId, linked: chosen ? chosen.map(f => f.name) : ['B社 見積'] }
   },
   // `?drive=off`: the company has not set Drive up; `?drive=first`: offered, not allowed yet.
@@ -198,6 +216,7 @@ installElectronAPI({
     features: params.get('drive') === 'off' || params.get('drive') === 'first' ? ['minutes'] : ['minutes', 'drive'],
     companyFeatures: params.get('drive') === 'off' ? ['minutes', 'mail'] : ['minutes', 'mail', 'drive'],
   } as never }),
+  stopDrivePick: async () => { show('acted', 'stopDrivePick'); stopPicking?.(); return { stopped: true } },
   getTaskDriveChoices: async () => driveList ? [
     { id: '1AbCdEfGhIjKlMnOp', name: 'A社 提案書（下書き）', source: 'picked' as const },
     { id: '1PutByAiFile00001', name: 'A社 ご提案.pdf', source: 'put' as const },

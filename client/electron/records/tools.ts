@@ -950,6 +950,8 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     // A feature's tools (the inbox's) stay out while it is off, even from a provider that did not ask.
     const mine = extra.specs.filter(s => TOOL_NAME_RE.test(s.name) && !byName.has(s.name) && !owner.has(s.name) && toolAllowed(s.name, features))
     for (const s of mine) owner.set(s.name, extra)
+    // A provider with no tools on purpose may still say why (Drive not set up by the admin): its sentence only.
+    if (extra.specs.length === 0) { extraInstructions += extra.instructions; continue }
     if (mine.length === 0) continue
     extraSpecs.push(...mine)
     extraInstructions += extra.instructions

@@ -29,10 +29,10 @@ export type TaskDriveFile = LinkedDriveFile
 export { DRIVE_FILE_NEUTRAL, driveFileUrl } from './drive-links'
 
 /** Under 「ファイル」 in a company with the shared folder: company files and Drive files (owner decision 2026-11-13). */
-export const COMPANY_AND_DRIVE_FILES_NOTE = 'つながりは、このやることを見られる人みんなに見えます（Google Drive のファイルの名前は、つないだ人だけ）'
+export const COMPANY_AND_DRIVE_FILES_NOTE = 'つながりは、このやることを見られる人みんなに見えます（Google Drive のファイルの名前は、つないだ人だけ）。Drive のファイルを開けるのは Drive で共有されている人だけで、つないでも共有はされません'
 
 /** Under 「ファイル」 in a company without the shared folder: who sees what. */
-export const TYPED_FILES_NOTE = 'Google Drive のファイルは、このやることを見られる人みんなに見えます（名前は、つないだ人だけ）。このパソコンのファイルは、あなただけに見えます'
+export const TYPED_FILES_NOTE = 'Google Drive のファイルは、このやることを見られる人みんなにリンクが見えます（名前は、つないだ人だけ）。開けるのは Drive で共有されている人だけで、つないでも共有はされません。このパソコンのファイルは、あなただけに見えます'
 
 /** What a PC file's row says when it is not on this computer (moved, deleted, or another PC of the member). */
 export const LOCAL_FILE_MISSING = 'このパソコンに見つかりません（動かしたか、消したかもしれません）'

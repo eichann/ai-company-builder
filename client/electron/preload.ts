@@ -410,6 +410,8 @@ const api: ElectronAPI = {
   requestCompanySkill: (rootPath: string, skillPath: string, leaveOutOutputs: boolean) => invoke('skillShelf:requestPublish', rootPath, skillPath, leaveOutOutputs),
   openCompanySkillBackup: (rootPath: string, skillPath: string) => invoke('skillShelf:openBackup', rootPath, skillPath),
   onSkillShelfChanged: callback => subscribe('skillShelf:changed', callback),
+  stopDrivePick: (companyId: string) => invoke('tasks:cancelDrivePick', companyId),
+  setGoogleDrive: (companyId: string, on: boolean) => invoke('google:setDrive', companyId, on),
   // lane A ▲
   // lane B ▼
   // lane B ▲
