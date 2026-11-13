@@ -263,6 +263,11 @@ export interface RecordRepository {
    * folder is at or under `from`, links to files at or under it, and the minutes folder move to `to`.
    */
   moveFolder(from: string, to: string): void
+  /**
+   * Live records whose readers' folder is `folder` or under it (ids only): 「非公開にする」 takes a
+   * まとまり only into a private folder no record is in yet (records.md "Making a 案件・プロジェクト private").
+   */
+  placedIn(folder: string): string[]
   /** Links naming any of `ids` as their target. */
   linksTo(ids: string[]): RecordLinkRow[]
   replaceLinks(sourceId: string, links: RecordLinkRow[]): void

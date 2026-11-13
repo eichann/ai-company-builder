@@ -18,7 +18,7 @@ import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import type { RecordDetail, RecordFindHome, RecordFindResult, RecordQueryResult, RecordTypeView } from '../../../../shared/types/records'
 import {
-  cardFields, findHitView, historyEntries, historyLines, linkedPathOf, linkedPaths, participantsOf, RECORD_VIEWS_OFFLINE_TEXT, removableOf, summaryView,
+  cardFields, findHitView, historyEntries, historyLines, linkedPathOf, linkedPaths, makePrivateOfferOf, participantsOf, RECORD_VIEWS_OFFLINE_TEXT, removableOf, summaryView,
   type FindHomeResult, type FindResult, type RecordCardLink, type RecordCardResult, type RecordCardView, type RecordListResult,
 } from '../../../shared/record-views'
 import { bundleActionsOf, bundleDetailOf, DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
@@ -187,6 +187,11 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
       const pf = detail.privateFolder
       const own = isBundle && pf && typeof pf.scopeId === 'string' && PRIVATE_SCOPE_ID_RE.test(pf.scopeId) && typeof pf.path === 'string' && fileLinkPath(pf.path)
         ? { scopeId: pf.scopeId, path: pf.path } : null
+      // 「非公開にする」 (records.md "Making a 案件・プロジェクト private"): asked only for a public 案件 the member may
+      // still act on; the server answers only who may make it private (anyone else: nothing offered).
+      const plan = isBundle && !own && !typeIsViewOnly(detail.record.type, features)
+        ? await call(companyId, 'GET', `/records/item/${id}/make-private`) : null
+      const makePrivate = plan?.status === 200 ? makePrivateOfferOf(plan.json?.data, members) : null
       // A 案件・プロジェクト's own buttons (owner FB #30): from its type and the member's place in it.
       const bundleActions = isBundle ? bundleActionsOf(def, detail.record.state, detail.record.fields, me, members) : null
       const view = isBundle
@@ -211,6 +216,7 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
           ai: aiOnRecord(recordId, runList, entries, def, members),
           ...viewersOf(viewers, recordId),
           ...(own ? { privateFolder: own, participants: await participantsFor(companyId, own.scopeId) } : {}),
+          ...(makePrivate ? { makePrivate } : {}),
         },
       }
     },

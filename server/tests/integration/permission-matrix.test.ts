@@ -360,6 +360,9 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/records/item/:recordId/members', w => ({ path: `${C(w)}/records/item/deal-nosuch01/members`, body: { add: [], expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/records/item/:recordId/members/remove', w => ({ path: `${C(w)}/records/item/deal-nosuch01/members/remove`, body: { remove: [], expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/companies/:companyId/records/item/:recordId/members/choices', w => ({ path: `${C(w)}/records/item/deal-nosuch01/members/choices` }), [404, 404, 404, 404, 404, 401]),
+  // 「非公開にする」 (records.md "Making a 案件・プロジェクト private"): a missing record → 404 for every member.
+  r('GET /api/companies/:companyId/records/item/:recordId/make-private', w => ({ path: `${C(w)}/records/item/deal-nosuch01/make-private` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/records/item/:recordId/make-private', w => ({ path: `${C(w)}/records/item/deal-nosuch01/make-private`, body: { folder: '営業部/x', expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/records-ai/item/:recordId/file-links', () => ({ path: '/api/records-ai/item/deal-nosuch01/file-links', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/item/:recordId/file-links/remove', () => ({ path: '/api/records-ai/item/deal-nosuch01/file-links/remove', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/companies/:companyId/me/record-tokens', w => ({ path: `${C(w)}/me/record-tokens`, body: {} }), [400, 400, 400, 400, 404, 401]),
@@ -688,6 +691,8 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/records/item/:recordId/members', (w, id) => ({ path: `${C(w)}/records/item/${id}/members`, body: { add: [], expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/records/item/:recordId/members/remove', (w, id) => ({ path: `${C(w)}/records/item/${id}/members/remove`, body: { remove: [], expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('GET /api/companies/:companyId/records/item/:recordId/members/choices', (w, id) => ({ path: `${C(w)}/records/item/${id}/members/choices` }), w => w.other.record, 'deal-nosuch01'),
+  x('GET /api/companies/:companyId/records/item/:recordId/make-private', (w, id) => ({ path: `${C(w)}/records/item/${id}/make-private` }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/make-private', (w, id) => ({ path: `${C(w)}/records/item/${id}/make-private`, body: { folder: '営業部/x', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('GET /api/companies/:companyId/records/item/:recordId/versions/:version', (w, id) => ({ path: `${C(w)}/records/item/${id}/versions/1` }), w => w.other.record, 'deal-nosuch01'),
 
   x('GET /api/companies/:companyId/ai-runs/:runId', (w, id) => ({ path: `${C(w)}/ai-runs/${id}` }), w => w.other.aiRun),

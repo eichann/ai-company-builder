@@ -6,6 +6,7 @@ import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
 import type { TaskCardResult } from '../../../shared/task-card'
 import type { TagSuggestions } from '../../../shared/tag-suggest'
+import { privateBundleFolderNames } from './model'
 import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
@@ -32,14 +33,77 @@ export async function privateBundleRights(companyId: string, ports: PrivateBundl
 }
 
 /** Makes the private folder under `parent` ('' = the company root) with the first free name: its path, or the reason in words. */
-export async function createPrivateBundleFolder(companyId: string, parent: string, names: string[], ports: PrivateBundleWrites = window.electronAPI): Promise<{ path: string } | { error: string }> {
+export async function createPrivateBundleFolder(companyId: string, parent: string, names: string[], ports: ElectronPort<'createPrivateFolder'> = window.electronAPI): Promise<{ path: string; scopeId: string } | { error: string }> {
   for (const name of names) {
     const r = await ports.createPrivateFolder(companyId, { parentPath: parent, name }).catch(() => null)
-    if (r?.success) return { path: r.path }
+    if (r?.success) return { path: r.path, scopeId: r.scopeId }
     if (r?.code !== 'FOLDER_NAME_UNAVAILABLE') return { error: r?.error || 'サーバーに接続できませんでした。' }
   }
   return { error: '同じ名前のフォルダがあるため作れませんでした。名前を変えてください。' }
 }
+/**
+ * 「非公開にする」 on an existing 案件・プロジェクト (records.md "Making a 案件・プロジェクト private"): its own private
+ * folder (as 「新しい〇〇にする」 makes one), the people it names added as participants, then the move.
+ */
+export type BundlePrivateWrites = ElectronPort<'makeBundlePrivatePlan' | 'createPrivateFolder' | 'getPrivateFolderMembers' | 'setPrivateFolderMembers' | 'makeBundlePrivate' | 'getRecordCard'>
+
+/**
+ * The move's refusals (4xx with the server's code): nothing was moved. Anything else — no answer, a 5xx, a
+ * code not listed (NOT_PUBLIC: someone, maybe this very press, moved it) — is read again before acting.
+ */
+const MAKE_PRIVATE_REFUSED: ReadonlySet<string> = new Set([
+  'VERSION_CONFLICT', 'VERSION_REQUIRED', 'BAD_REQUEST', 'FOLDER_NOT_PLACEABLE', 'LINKED_NOT_MOVABLE', 'LINKED_RECORDS_WIDER',
+  'PARTICIPANTS_WIDER', 'NAMED_PERSON_CANNOT_READ', 'MAKE_PRIVATE_NOT_ALLOWED', 'MAKE_PRIVATE_NOT_FOR_TYPE', 'NOT_A_BUNDLE', 'NOT_ALLOWED',
+])
+
+const OFFLINE = 'サーバーに接続できませんでした。'
+
+/**
+ * Makes the 案件 `bundle` private. First the server's plan is asked again: refused, blocked or changed
+ * meanwhile → nothing is made. Then its private folder in the plan's department (named after it), the
+ * plan's people added as participants (the server already made the member and the department's managers
+ * ones), then the server's move. A move refused after the folder was made puts the participants back as
+ * the folder was made (the member and the managers only) and says, in words, that the empty folder is
+ * left — the app cannot delete a private folder (owners / admins do, in the admin console).
+ * null = done, else the reason in words.
+ */
+export async function makeExistingBundlePrivate(
+  companyId: string, bundle: { id: string; title: string; version: number }, word: string,
+  ports: BundlePrivateWrites = window.electronAPI,
+): Promise<string | null> {
+  const plan = await ports.makeBundlePrivatePlan(companyId, bundle.id).catch(() => null)
+  if (!plan?.success) return plan?.error || OFFLINE
+  const offer = plan.offer
+  if (offer.blocked) return `つながっているやることや記録の中に、あなたからは見える範囲を変えられないものがあるため、非公開にできません。管理者に相談してください。`
+  if (offer.version !== bundle.version) return `ほかの人が先にこの${word}を変えました。画面を開き直してから、もう一度お試しください。`
+  const made = await createPrivateBundleFolder(companyId, offer.parent, privateBundleFolderNames(bundle.title, word), ports)
+  if ('error' in made) return made.error
+  const left = (why: string, restored: boolean) => `非公開にできませんでした。${why}\n作りかけた非公開のフォルダ「${made.path}」は、中身がないまま残っています（見られるのはあなたと部署の管理役・管理者だけです）。要らなければ管理者に消してもらってください。${restored ? '' : 'このフォルダに足した人を外せなかったので、管理者に相談してください。'}`
+  const first = await ports.getPrivateFolderMembers(companyId, made.scopeId).catch(() => null)
+  if (!first?.success) return left(first?.error || OFFLINE, true)
+  const named = first.members.filter(m => m.via === 'rule')
+  const before = { viewers: named.map(m => m.userId), editors: named.filter(m => m.canWrite).map(m => m.userId) }
+  const people = offer.people.map(p => p.id)
+  const added = people.some(id => !before.viewers.includes(id))
+  if (added) {
+    const set = await ports.setPrivateFolderMembers(companyId, made.scopeId, {
+      viewers: [...new Set([...before.viewers, ...people])], editors: [...new Set([...before.editors, ...people])],
+    }).catch(() => null)
+    if (!set?.success) return left(set?.error || OFFLINE, true)
+  }
+  const r = await ports.makeBundlePrivate(companyId, bundle.id, made.path, offer.version).catch(() => null)
+  if (r?.success) return null
+  // Refused for sure (the server's own answer): nobody but who the folder was made for keeps it.
+  const takeBack = async () => !added || (await ports.setPrivateFolderMembers(companyId, made.scopeId, before).catch(() => null))?.success === true
+  if (r && MAKE_PRIVATE_REFUSED.has(r.code ?? '')) return left(r.error, await takeBack())
+  // No answer, or one that does not say: the move may have been made. Read where the 案件 is now.
+  const now = await ports.getRecordCard(companyId, bundle.id).catch(() => null)
+  if (now?.success && now.card.privateFolder?.path === made.path) return null
+  if (now?.success && !now.card.privateFolder) return left(r?.error || OFFLINE, await takeBack())
+  return `うまくいったかどうか分かりませんでした（サーバーの返事が届きませんでした）。何も変えていません。この${word}の画面を開き直して、見られる人を確かめてください。`
+}
+
+
 /** One task's card, and the AI's proposals (案) of a meeting for 「議事録を確認する」. */
 export type TaskCardReads = ElectronPort<'getTaskCard' | 'getTaskProposals'>
 /** Linking a company file to a task, or taking the link away (the server checks both sides). */

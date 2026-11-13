@@ -29,6 +29,10 @@
  *   POST    /records/item/:recordId/record-links/remove { link, target, expectedVersion, note? } remove that link
  *   POST    /records/item/:recordId/share             { folder, expectedVersion, note? } the owner shows their
  *                                                     owner-only or members-only record to a folder's readers (session only)
+ *   GET     /records/item/:recordId/make-private      what 「非公開にする」 would do (who may: the department's
+ *                                                     managers, owners / admins; a public まとまり only)
+ *   POST    /records/item/:recordId/make-private      { folder, expectedVersion, note? } the まとまり into its own new
+ *                                                     private folder, its wider やること narrowed (session only)
  *   POST    /records/item/:recordId/members           { add, expectedVersion, note? } a listed member adds members
  *                                                     to a members-only record (session only); people, groups, departments
  *   POST    /records/item/:recordId/members/remove    { remove, expectedVersion, note? } a listed member takes
@@ -214,6 +218,19 @@ recordsRoute.post('/records/item/:recordId/share', companyMember, serviceBody, a
   const place = await recordEngine.checkPlace(member, body)
   if (!place.ok) return refusal(c, place)
   return answer(c, recordEngine.share(member, humanWith(body), c.req.param('recordId'), body))
+})
+
+// 「非公開にする」 (records.md "Making a 案件・プロジェクト private"): a public まとまり into its own new private
+// folder — what it would do (the app's window), and the move. The person's own step: no AI route.
+recordsRoute.get('/records/item/:recordId/make-private', companyMember, async (c) => {
+  const member = c.var.member
+  return answer(c, recordEngine.makePrivatePlan(member, c.req.param('recordId')))
+})
+
+recordsRoute.post('/records/item/:recordId/make-private', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  const body = c.var.body
+  return answer(c, recordEngine.makePrivate(member, humanWith(body), c.req.param('recordId'), body))
 })
 
 recordsRoute.post('/records/item/:recordId/members', companyMember, serviceBody, async (c) => {

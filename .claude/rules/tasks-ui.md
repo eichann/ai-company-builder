@@ -768,6 +768,27 @@ disabled with 「非公開の〇〇は、部署の管理役か管理者に作っ
 (`ProjectParticipants.tsx` in the records feature): 「見られる人：『〇〇』の参加者（N人）」, the participants' names
 (「ほかに管理者 N人」), and for whoever the server gave the full list ［参加者を足す］ (any member of the company) and
 ×「〇〇さんを外す」 after 「…パソコンにあるこの〇〇のフォルダも消えます（同期していない変更も消えます）」.
+**「非公開にする」** on a public 案件's 「…」 (owner FB #35, `records.md` "Making a 案件・プロジェクト private"): offered
+only when the card's `makePrivate` is there — main asks `GET …/make-private` for a public まとまり (not one with
+`privateFolder`, not 「見るだけ」) and keeps a well-formed answer only (`makePrivateOfferOf`), so only owners /
+admins and the department's managers see it. `MakePrivateDialog` (records feature) asks first: 「これからは参加者
+だけが見られます。参加者は、あなたと部署の管理役、それにこの〇〇にかかわる〇〇さん…です（管理者はいつでも見られ
+ます）」, 「つながっているやること（N件）も、参加者だけに見えるようになります」, 「つながっているファイルや会議の記録は、
+今の場所のまま動きません（会議の記録は、出た人がこれまでどおり見られます）」, 「あとから公開に戻すことは、ここからはできません」; a `blocked` plan disables the press
+and says why. The press (`onMakePrivate`, composed by AppShell from `makeExistingBundlePrivate` in
+`features/tasks/api.ts`): the plan again (`tasks:makeBundlePrivatePlan`; refused, `blocked` or another
+version → nothing is made), the private folder in its `parent` (`createPrivateBundleFolder`, names from
+`privateBundleFolderNames`), its `people` added as participants (the folder's list kept, as ［参加者を足す］ does),
+then `tasks:makeBundlePrivate` → `POST …/make-private` at the plan's version. Only **a confirmed refusal** (a 4xx with
+one of the move's own codes — main passes a code only for a 4xx; `MAKE_PRIVATE_REFUSED`) is acted on at once; no
+answer, a 5xx or another code means the move may have been made, so the 案件 is read again (`getRecordCard`): in the
+new folder → done; still public → as a refusal; still unknown → nothing is changed and the person is told
+「うまくいったかどうか分かりませんでした…この〇〇の画面を開き直して、見られる人を確かめてください」. A refused move
+takes the added people off again (the list as it was made: the member and the department's managers) and
+says 「非公開にできませんでした。…作りかけた非公開のフォルダ「…」は、中身がないまま残っています…要らなければ管理者に
+消してもらってください」 (the app has no way to delete a private folder; owners / admins do it in the admin
+console). Tests: `client/tests/bundle-make-private.test.ts`,
+`src/features/records/makePrivate.test.ts`.
 **A task seen by more people than the 案件** (the server's `WIDER_THAN_BUNDLE` on ［〇〇につなぐ］, ［変える］, the tag
 hint's ［案件につなぐ］ or a new one): the card asks 「このやることは、〇〇より多くの人に見えています。〇〇と同じ人たちだけに
 見えるようにしますか？」 — ［同じ人たちだけにする］ links again with `narrow` (no ［取り消す］: it is never undone), ［つながない］

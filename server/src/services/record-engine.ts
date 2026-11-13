@@ -38,6 +38,7 @@ import { fileLinking } from './record-engine/file-links'
 import { recordLinking } from './record-engine/record-links'
 import { ledgerReading } from './record-engine/history'
 import { sharing } from './record-engine/share'
+import { makingPrivate } from './record-engine/make-private'
 import type { RecordEngineDeps } from './record-engine/types'
 import { undoing } from './record-engine/undo'
 
@@ -50,6 +51,7 @@ export { linkLedgerValue } from './record-engine/links'
 export { mayAct, NOT_VIA } from './record-engine/act'
 export { callVia } from './record-engine/types'
 export { INVITE_ACTION, REMOVE_MEMBERS_ACTION, SHARE_ACTION } from './record-engine/share'
+export { MAKE_PRIVATE_ACTION, type MakePrivatePlan } from './record-engine/make-private'
 export {
   createExternalRecordWriter, type ExternalRecordInput, type ExternalRecordResult, type ExternalRecordWriter,
 } from './record-engine/external-writer'
@@ -68,6 +70,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
     ...fileLinking(ctx),
     ...recordLinking(ctx),
     ...sharing(ctx),
+    ...makingPrivate(ctx),
     ...ledgerReading(ctx),
     /** Bound once by the plugins lane (composition/plugins.ts): the business roles' holders for `role:<name>`. */
     useRoles: ctx.useRoles,

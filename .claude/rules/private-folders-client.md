@@ -32,7 +32,8 @@ chat guards and the file-operation refusal). The renderer reaches them through
 `src/features/files/api.ts`: `PrivateFolderReads` (the member's readable folders, who may
 create where) and `PrivateFolderOutbound` (create one: the server makes its repository; only
 people, never the chat). A 非公開 案件・プロジェクト (`records.md` "Private 案件・プロジェクト") uses the same
-create from 「新しい〇〇にする」 (`src/features/tasks/api.ts` `createPrivateBundleFolder`) and changes its
+create from 「新しい〇〇にする」 and from an existing 案件's 「非公開にする」 (`src/features/tasks/api.ts`
+`createPrivateBundleFolder`, `makeExistingBundlePrivate`) and changes its
 参加者 on the 案件's card through `privateFolders:members` / `privateFolders:setMembers` (`GET` /
 `PUT …/private-folders/:scopeId[/members]`, the server decides who may; the whole list is sent with
 everyone else's editing kept, owners / admins never named: `src/features/records/participants.ts`).
