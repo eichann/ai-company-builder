@@ -108,6 +108,7 @@ const EXEMPT: Record<string, Record<string, string>> = {
   'git:listFiles': { folderPath: 'a folder inside the repository (git-search.ts normalizeSearchFolder)' },
   'git:grep': { folderPath: 'a folder inside the repository (git-search.ts normalizeSearchFolder)' },
   'git:log': { folderPath: 'a repository pathspec (a folder or one file); a private folder clone it lies in is validated before use' },
+  'google:untrustDriveFolder': { folderId: 'a Google Drive folder id (shape-checked), sent to the server; nothing on disk is touched' },
   'recordViews:forFile': { companyPath: 'a company path sent to the server (fileLinkPath-checked), never read from disk' },
   'git:setupCompanyRemote': { selectedPaths: 'department folder names to download' },
   'git:folderSizes': { folder: 'a repository folder sent to the server' },
