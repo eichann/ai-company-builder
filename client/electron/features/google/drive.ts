@@ -462,6 +462,8 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
             requestKey: drivePutRequestKey(String(input.folderId), named.name, sha256, { as, updateFileId, baseRevision }),
             ...(updateFileId ? { updateFileId } : {}),
             ...(recordId ? { recordId } : {}),
+            // This app shows the card that asks the member (an app released before it never says so: nothing waits for it).
+            ...(updateFileId && deps.onOverwriteCard ? { askPerson: true } : {}),
           }, signal, { timeoutMs: PUT_TIMEOUT_MS }) as DrivePutAnswer
           const p = a.drivePut
           return json({

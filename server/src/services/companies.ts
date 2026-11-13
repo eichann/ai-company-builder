@@ -407,6 +407,8 @@ export function createCompanyService(deps: CompanyServiceDeps) {
         companyData.forCompany(companyId).groups.forgetMember(targetUserId)
         // …and hold no business role (plugin-roles.md): a role reads student data through a connector's calls.
         companyData.forCompany(companyId).pluginRoles.forgetMember(targetUserId, clock.now(), actor.userId)
+        // …and no Google Drive overwrite waits in their name, with its content (google-drive.md).
+        companyData.forCompany(companyId).googleDrive.forgetMember(targetUserId)
         // …and no scheduled job runs in their name: each pauses, owners / admins are told (jobs.md).
         deps.onMemberLeft?.(companyId, targetUserId, actor.userId)
       })

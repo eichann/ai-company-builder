@@ -147,6 +147,7 @@ export const connectorSchema = `
       fingerprint TEXT NOT NULL,
       revision TEXT NOT NULL,
       revision_at TEXT NOT NULL,
+      comments_seen TEXT NOT NULL,
       read_at TEXT NOT NULL,
       PRIMARY KEY (company_id, user_id, conversation_id, file_id)
     );

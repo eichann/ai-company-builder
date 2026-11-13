@@ -320,8 +320,8 @@ export interface FakeGoogle {
   formatDriveFile(id: string, by?: string): void
   /** The same, merged by Docs into the newest revision (the member's own edit soon after ACB's): its id kept, its time moved. */
   formatDriveFileMerged(id: string): void
-  /** Someone comments on this Drive file (no new revision, the same text), as `by` (default `SOMEONE_ELSE`). */
-  commentOnDriveFile(id: string, by?: string): void
+  /** Someone comments on this Drive file (no new revision, the same text), as `by` (default `SOMEONE_ELSE`), saying `content`. */
+  commentOnDriveFile(id: string, by?: string, content?: string): void
   /**
    * Someone opens this Google document in the browser and closes it without typing (real Google, 2026-11-12): its
    * `version` moves, its content and revision history do not.
@@ -918,7 +918,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     /** Who changed the file last (`files.get` `lastModifyingUser`): an edit's author; a view or a comment does not change it. */
     lastBy: string
     /** Comments on the file (`comments.list`). */
-    comments: Array<{ id: string; createdTime: string; modifiedTime: string; by: string }>
+    comments: Array<{ id: string; createdTime: string; modifiedTime: string; by: string; content: string }>
     /** In the trash (`trashDriveFile`). */
     trashed?: boolean
   }
@@ -1895,11 +1895,11 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       f.version += 1
       newRevision(f, by)
     },
-    commentOnDriveFile(id, by = SOMEONE_ELSE) {
+    commentOnDriveFile(id, by = SOMEONE_ELSE, content = 'コメント') {
       const f = driveFiles.get(id)
       if (!f) throw new Error(`fake Google: no Drive file ${id}`)
       const at = iso(Math.max(now(), Date.parse(f.modifiedTime) + 1000))
-      f.comments.push({ id: `comment-${randomToken(6)}`, createdTime: at, modifiedTime: at, by })
+      f.comments.push({ id: `comment-${randomToken(6)}`, createdTime: at, modifiedTime: at, by, content })
       f.version += 1
     },
     openDriveFile(id) {

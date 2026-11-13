@@ -47,6 +47,7 @@ import type { Member } from './access'
 import type { GoogleClient, GoogleRequest, GoogleResult } from './google-client'
 import { cleanExportText } from './google-meetings'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
+import { recordReader } from './record-access'
 
 export interface GoogleDriveDeps {
   companyData: CompanyDataSource
@@ -247,10 +248,42 @@ interface DocComment {
   id: string
   at: string | null
   deleted: boolean
+  resolved: boolean
   /** The comment and every reply were written by the member's own account. */
   mine: boolean
   /** Google's display names of the others who wrote it or a reply. */
   others: string[]
+  /** What it says and the words it is on (for the AI's read; never logged), and its replies. */
+  content: string
+  quoted: string
+  byMe: boolean
+  replies: Array<{ content: string; byMe: boolean; deleted: boolean }>
+}
+
+/** At most this many comments, and this many characters each, go with a document's text to the AI. */
+const READ_COMMENTS_MAX = 50
+const READ_COMMENT_CHARS = 2000
+/** A revision of the member's within this long of someone else's revision or comment may hold their merged edit. */
+const MERGE_NEAR_MS = 5 * 60 * 1000
+/** Roles that can change a file (Drive permissions): someone holding one may have typed into the member's revision. */
+const EDIT_ROLES = new Set(['owner', 'organizer', 'fileOrganizer', 'writer'])
+
+/**
+ * A document's comments as plain text after its body, for the AI to take them in (google-drive.md "Continuing a document
+ * people edited"): who wrote each only as 「本人」 / 「ほかの人」 (people choose their names in Google), the words it is on,
+ * what it says, its replies. Inside the outside text (data, not instructions). Deleted ones are left out.
+ */
+function commentsText(comments: DocComment[]): string {
+  const live = comments.filter(c => !c.deleted)
+  if (live.length === 0) return ''
+  const who = (me: boolean) => (me ? '本人' : 'ほかの人')
+  const cut = (t: string) => (t.length > READ_COMMENT_CHARS ? `${t.slice(0, READ_COMMENT_CHARS)}…` : t)
+  const lines = [`\n\n--- このドキュメントのコメント（${live.length}件${live.length > READ_COMMENTS_MAX ? `、はじめの${READ_COMMENTS_MAX}件` : ''}） ---`]
+  for (const c of live.slice(0, READ_COMMENTS_MAX)) {
+    lines.push(`- ${who(c.byMe)}のコメント${c.resolved ? '（解決済み）' : ''}${c.quoted ? `（「${cut(c.quoted)}」に）` : ''}：${cut(c.content)}`)
+    for (const r of c.replies.filter(x => !x.deleted)) lines.push(`  - ${who(r.byMe)}の返信：${cut(r.content)}`)
+  }
+  return lines.join('\n')
 }
 
 /** The sentences of an overwrite of a Google document people changed (google-drive.md "Continuing a document people edited"). */
@@ -380,18 +413,22 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const r = await drive(companyId, userId, {
         method: 'GET', path: `/drive/v3/files/${fileId}/comments`,
         query: {
-          fields: 'nextPageToken,comments(id,modifiedTime,deleted,author(me,displayName),replies(modifiedTime,deleted,author(me,displayName)))',
+          fields: 'nextPageToken,comments(id,modifiedTime,deleted,resolved,content,quotedFileContent(value),author(me,displayName),replies(modifiedTime,deleted,content,author(me,displayName)))',
           includeDeleted: 'true', pageSize: '100', ...(pageToken ? { pageToken } : {}),
         },
         operation: 'drive.comments.list',
       })
       if (!r.ok || !isObj(r.json)) return null
       for (const c of Array.isArray(r.json.comments) ? r.json.comments.filter(isObj) : []) {
-        const writers = [c, ...(Array.isArray(c.replies) ? c.replies.filter(isObj) : [])].map(x => (isObj(x.author) ? x.author : {}))
+        const replies = Array.isArray(c.replies) ? c.replies.filter(isObj) : []
+        const writers = [c, ...replies].map(x => (isObj(x.author) ? x.author : {}))
         const others = writers.filter(a => a.me !== true)
+        const byMe = (x: Record<string, unknown>) => isObj(x.author) && x.author.me === true
         out.push({
-          id: str(c.id) ?? '', at: str(c.modifiedTime), deleted: c.deleted === true, mine: others.length === 0,
+          id: str(c.id) ?? '', at: str(c.modifiedTime), deleted: c.deleted === true, resolved: c.resolved === true, mine: others.length === 0,
           others: others.map(a => displayName(a.displayName)).filter((n): n is string => n !== null),
+          content: str(c.content) ?? '', quoted: isObj(c.quotedFileContent) ? str(c.quotedFileContent.value) ?? '' : '', byMe: byMe(c),
+          replies: replies.map(x => ({ content: str(x.content) ?? '', byMe: byMe(x), deleted: x.deleted === true })),
         })
       }
       pageToken = str(r.json.nextPageToken)
@@ -581,6 +618,18 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       rows.push({ userId: member.userId, fileId: id, kind, name, mimeType, pickedAt: now, expiresAt })
     }
     return ok({ rows, refused })
+  }
+
+  /**
+   * The member linked this Drive file to a record they can still read (google-drive.md "How long a pick lasts"): the link
+   * keeps it theirs to read. A link on a record they no longer read keeps nothing alive.
+   */
+  function linkedReadable(member: Member, fileId: string): boolean {
+    const h = handle(member.companyId)
+    const ids = h.records.driveLinkSources(member.userId, fileId)
+    if (ids.length === 0) return false
+    const reader = recordReader(member, h.scopes.listWithRules())
+    return h.records.byIds(ids).some(r => reader.record(r))
   }
 
   /** A successful read or link of a picked file renews the member's own pick for another 7 days (never anyone else's). */
@@ -844,7 +893,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const pick = live?.kind === 'file' ? live : null
       const put = pick ? null : h.putOfFile(member.userId, fileId)
       // A file the member already linked elsewhere (google-drive.md "How long a pick lasts") may be linked again.
-      const linked = !pick && !put && handle(member.companyId).records.driveLinkedBy(member.userId, fileId)
+      const linked = !pick && !put && linkedReadable(member, fileId)
       if (!pick && !put && !linked) {
         return refuse('forbidden', 'Google Drive で選んだファイルだけをつなげます。もう一度選んでください。', { code: 'DRIVE_NOT_PICKED' })
       }
@@ -868,7 +917,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           : await drive(member.companyId, member.userId, { method: 'GET', path: `/drive/v3/files/${fileId}`, query: { alt: 'media', supportsAllDrives: 'true' }, binary: true, operation: 'drive.files.download' })
         if (r.ok && r.bytes && r.bytes.byteLength <= DRIVE_READ_PDF_MAX_BYTES) sha256 = deps.sha256(r.bytes)
       }
-      renewFilePick(member, fileId)
+      // Not renewed here: only once the record step took the link (`linked`, from the route).
       return ok({ fileId, revisionId, name: (str(f.name) ?? knownName).normalize('NFC').slice(0, 300), mimeType, sha256 })
     },
 
@@ -878,6 +927,24 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
      * put, done, Drive's file id known. Its facts come from the receipt (the revision Drive answered,
      * the name as put, the sha256 of the bytes ACB uploaded); Google is not asked again. Null otherwise.
      */
+    /**
+     * The server clock's pass for this company (`server-clock.ts` `driveSweep`): a waiting overwrite's content goes once it
+     * expired (its row a week later), reads kept for continuing a document go after a week. (Expired picks stay until the
+     * next pick, so a refusal can still say the pick lapsed.)
+     */
+    sweep(companyId: string): void {
+      const repo = handle(companyId).googleDrive
+      const now = clock.now()
+      const weekAgo = new Date(clock.nowMs() - CONFIRMATIONS_KEPT_AFTER_MS).toISOString()
+      repo.pruneOverwriteConfirmations(now, weekAgo)
+      repo.pruneDocReads(weekAgo)
+    },
+
+    /** The record step took the member's link of this file (records route): their live pick of it is renewed. */
+    linked(member: Member, fileId: string): void {
+      if (isDriveId(fileId)) renewFilePick(member, fileId)
+    },
+
     putLinkable(member: Member, putId: string): DriveLinkableFile | null {
       const row = handle(member.companyId).googleDrive.put(member.userId, putId)
       if (!row || row.state !== 'done' || !row.fileId || !isDriveId(row.fileId)) return null
@@ -918,7 +985,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const pick = live?.kind === 'file' ? live : null
       const put = h.putOfFile(member.userId, fileId)
       // A file the member linked to a record stays theirs to read while the link exists (google-drive.md "How long a pick lasts").
-      const linked = !pick && !put && handle(member.companyId).records.driveLinkedBy(member.userId, fileId)
+      const linked = !pick && !put && linkedReadable(member, fileId)
       if (!pick && !put && !linked) {
         const lapsed = h.anyPick(member.userId, fileId)?.kind === 'file'
         return refuse('forbidden', lapsed ? PICK_LAPSED : 'このファイルはメンバーが選んだものでも、このメンバーの drive_put で置いたものでも、メンバーがやることにつないだものでもありません。drive_pick_files でメンバーに選んでもらってください。', { code: 'DRIVE_NOT_PICKED', ...(lapsed ? { lapsed: true } : {}) })
@@ -948,17 +1015,27 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       if (!r.ok) return googleRefusal(r, noAccess)
       let text = cleanExportText(new TextDecoder().decode(r.bytes ?? new Uint8Array()))
       const truncated = text.length > DRIVE_READ_TEXT_MAX
-      // A document the member's own put made, read whole in a consultation: what the AI read is kept (its text's sha256 and
-      // the newest revision), so an overwrite after people's edits can show it read the document as it is (google-drive.md
-      // "Continuing a document people edited"). Never the text.
-      if (put && conversationId && mimeType === DRIVE_DOC_MIME && !truncated) {
-        const revisions = await docRevisions(member.companyId, member.userId, fileId)
-        const newest = revisions?.[revisions.length - 1]
-        if (newest?.id && newest.at) {
-          h.keepDocRead({ userId: member.userId, conversationId, fileId, fingerprint: deps.sha256(new TextEncoder().encode(text)), revision: newest.id, revisionAt: newest.at, readAt: clock.now() })
+      // A document the member's own put made: its comments and replies come with its text (who wrote each only as 本人 /
+      // ほかの人), so the AI can take them in. Read whole in a consultation, what the AI read is kept (its text's sha256, the
+      // newest revision, the comments as seen), so an overwrite after people's edits can show it read the document as it is
+      // (google-drive.md "Continuing a document people edited"). Never the text. No comments readable → no read kept.
+      let comments: DocComment[] | null = null
+      if (put && mimeType === DRIVE_DOC_MIME) {
+        comments = await docComments(member.companyId, member.userId, fileId)
+        if (conversationId && !truncated && comments !== null) {
+          const revisions = await docRevisions(member.companyId, member.userId, fileId)
+          const newest = revisions?.[revisions.length - 1]
+          if (newest?.id && newest.at) {
+            h.keepDocRead({
+              userId: member.userId, conversationId, fileId, fingerprint: deps.sha256(new TextEncoder().encode(text)), revision: newest.id, revisionAt: newest.at,
+              commentsSeen: commentSignature(comments), readAt: clock.now(),
+            })
+          }
         }
       }
       if (truncated) text = text.slice(0, DRIVE_READ_TEXT_MAX) + TRUNCATED
+      if (comments) text += commentsText(comments)
+      else if (put && mimeType === DRIVE_DOC_MIME) text += '\n\n--- このドキュメントのコメントは読めませんでした（上書きの前に、もう一度読んでください） ---'
       renewFilePick(member, fileId)
       return ok({
         // 【】 → 〔〕 (outside-text.ts): the text cannot close the block, in an older app too.
@@ -1100,14 +1177,16 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         const changedSince = refuse('conflict', 'このファイルは、前に置いたあとに Google Drive で直されています。上書きすると直したところが消えるため、新しいファイルとして置いてください。', { code: 'DRIVE_FILE_CHANGED_SINCE' })
         // A file can be shared outside on its own, whatever its folder says: then updating it is sending outside. Asked
         // before a document's checks, so a confirmation is never asked (nor content kept) for a file the AI may not update.
+        let filePerms: DrivePermissionLike[] | null = null
         if (actor.kind === 'ai') {
-          const filePerms = await folderPermissions(member.companyId, member.userId, targetId)
-          if (filePerms === null || !Array.isArray(filePerms)) {
+          const perms = await folderPermissions(member.companyId, member.userId, targetId)
+          if (perms === null || !Array.isArray(perms)) {
             return refuse('forbidden', 'このファイルを誰が見られるか確かめられないため、AI からは上書きできません。', { code: 'DRIVE_FILE_SHARING_UNKNOWN' })
           }
-          if (driveFolderReachesOutside(filePerms, domain)) {
+          if (driveFolderReachesOutside(perms, domain)) {
             return refuse('forbidden', 'このファイルは社外の人も見られるため、AI からは上書きできません（社外に渡すのはメンバー本人の操作です）。', { code: 'DRIVE_FILE_SHARED_OUTSIDE' })
           }
+          filePerms = perms
         }
         if (form.driveMime === DRIVE_DOC_MIME) {
           // A Google document's `version` moves without any edit (real Google, 2026-11-12: opened once, nothing typed). Its
@@ -1128,55 +1207,80 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           const newest = revisions[revisions.length - 1]
           const since = (at: string | null, from: string) => at === null || Number.isNaN(Date.parse(at)) || Date.parse(at) >= Date.parse(from)
           const commentsSince = base ? comments.filter(c => since(c.at, base.at)) : comments
+          const seen = commentSignature(comments)
           const part = base === null ? null
             : now !== base.fingerprint ? 'text' : newest.id !== base.revision ? 'revision-id' : newest.at !== base.revisionAt ? 'revision-time'
               : commentsSince.length > 0 ? 'comment' : 'none'
-          if (part !== 'none') {
+          if (confirmed) {
+            // The member's press: the document must be exactly what was read and shown — text, newest revision, comments —
+            // whatever the baseline says now (another put may have moved the baseline to the current state meanwhile).
+            if (confirmed.fingerprint !== now || confirmed.revision !== newest.id || confirmed.revisionAt !== newest.at || confirmed.commentsSeen !== seen) {
+              return refuse('conflict', DOC_CHANGED_WHILE_ASKING, { code: 'DRIVE_READ_AGAIN', needsRead: true })
+            }
+            continuedFrom = newest.id
+            continued = 'confirmed'
+          } else if (part !== 'none') {
             // Which part differed is logged (never the file, its text or names): what real Google does is still to confirm.
             if (part !== null) log.warn(`[google-drive] document update refused: changed since the baseline (${part})`)
             // Continuing a document people changed (owner decision 2026-11-14, option ア) is a consultation's: the AI read
             // it there, and a person can be asked there. A scheduled job's run (nobody reads for it, nobody to ask) and
             // anything else keep the refusal.
             const consultation = actor.kind === 'ai' && actor.runId === null && !scope && !!actor.conversationId
-            if (!consultation && !confirmed) {
+            if (!consultation) {
               if (part === null) return notVerifiable('このファイルは前に置いたときの控えがなく')
               if (part === 'comment') return refuse('conflict', 'このファイルには、前に置いたあとにコメントが付いています。上書きするとコメントが外れるおそれがあるため、新しいファイルとして置いてください。', { code: 'DRIVE_FILE_CHANGED_SINCE' })
               return changedSince
             }
-            // What the AI read in this consultation (or what the member confirmed): it must be the document as it is now.
-            const mark = confirmed ?? h.googleDrive.docRead(member.userId, actor.conversationId as string, targetId)
+            // What the AI read in this consultation — with the comments — must be the document as it is now.
+            const mark = h.googleDrive.docRead(member.userId, actor.conversationId as string, targetId)
             if (!mark) {
               return part === null
                 ? refuse('conflict', DOC_NO_BASELINE_NEEDS_READ, { code: 'DRIVE_FILE_NOT_VERIFIABLE', needsRead: true })
                 : refuse('conflict', DOC_NEEDS_READ, { code: 'DRIVE_FILE_CHANGED_SINCE', needsRead: true })
             }
-            const seen = commentSignature(comments)
-            if (mark.fingerprint !== now || mark.revision !== newest.id || mark.revisionAt !== newest.at || (confirmed && confirmed.commentsSeen !== seen)) {
-              return refuse('conflict', confirmed ? DOC_CHANGED_WHILE_ASKING : DOC_READ_AGAIN, { code: 'DRIVE_READ_AGAIN', needsRead: true })
+            if (mark.fingerprint !== now || mark.revision !== newest.id || mark.revisionAt !== newest.at || mark.commentsSeen !== seen) {
+              return refuse('conflict', DOC_READ_AGAIN, { code: 'DRIVE_READ_AGAIN', needsRead: true })
             }
             continuedFrom = newest.id
-            if (confirmed) continued = 'confirmed'
-            else {
-              // Whose changes: the revisions after the baseline's (all of them without a baseline, or when it is gone; the
-              // newest itself when the change was merged into it), and the comments since.
-              const at = base ? revisions.findIndex(r => r.id === base.revision) : -1
-              let fresh = at >= 0 ? revisions.slice(at + 1) : revisions
-              if (fresh.length === 0) fresh = [newest]
-              const otherRevisions = fresh.filter(r => !r.me)
-              const otherComments = commentsSince.filter(c => !c.mine)
-              if (otherRevisions.length === 0 && otherComments.length === 0) continued = 'own'
-              else {
-                // Someone else's: a person decides (the app's card); the content waits on the server, fixed by its sha256.
-                const names = [...new Set([...otherRevisions.map(r => r.name), ...otherComments.flatMap(c => c.others)].filter((n): n is string => n !== null))].slice(0, 5)
-                const asked = askBeforeOverwrite(h.googleDrive, member, actor.conversationId as string, {
-                  requestKey: body.requestKey as string, folderId: row.folderId, fileId: targetId, name: target?.name ?? named.name, kind: form.kind as 'html' | 'markdown',
-                  sha256: body.sha256 as string, content: bytes, recordId: typeof body.recordId === 'string' && body.recordId.length <= 200 ? body.recordId : null,
-                  fingerprint: now, revision: newest.id as string, revisionAt: newest.at as string, commentsSeen: seen, editors: names, commented: otherComments.length > 0,
-                })
-                // People's names (chosen by them in Google) go to the member's card only, never into the AI's text.
-                return refuse('conflict', `ほかの人の直し・コメントが入っているため、上書きはメンバーの確認待ちです。アプリのカードでメンバーが「上書きする」を押すと、この内容で上書きされます。押されるまで、置き直したり新しいファイルを作ったりしないでください。`,
-                  { code: 'DRIVE_OVERWRITE_NEEDS_CONFIRMATION', confirmation: asked })
-              }
+            // Whose changes: the revisions after the baseline's (all of them without a baseline, or when it is gone; the
+            // newest itself when the change was merged into it), and the comments since.
+            const at = base ? revisions.findIndex(r => r.id === base.revision) : -1
+            let fresh = at >= 0 ? revisions.slice(at + 1) : revisions
+            // Merged: the text or the newest revision changed, yet no revision after the baseline's is listed. Only a comment
+            // added leaves the revisions as they were: nothing merged then.
+            const merged = fresh.length === 0 && (part === 'text' || part === 'revision-id' || part === 'revision-time')
+            if (merged) fresh = [newest]
+            const otherRevisions = fresh.filter(r => !r.me)
+            const otherComments = commentsSince.filter(c => !c.mine)
+            // "Only the member's own" needs more than `lastModifyingUser`: Docs merges edits made close together into one
+            // revision credited to its last editor, so a colleague's typing can hide in the member's revision. The shortcut
+            // is taken only when none of these could be: the change was merged into the newest revision; a revision of the
+            // member's lies within MERGE_NEAR_MS of someone else's revision or comment; someone else can edit the file
+            // (its permissions; unknown → someone may).
+            const othersAt = [...revisions.filter(r => !r.me).map(r => r.at), ...comments.filter(c => !c.mine).map(c => c.at)]
+              .map(t => (t ? Date.parse(t) : NaN)).filter(t => !Number.isNaN(t))
+            const near = fresh.some(r => {
+              const t = r.at ? Date.parse(r.at) : NaN
+              return Number.isNaN(t) || othersAt.some(o => Math.abs(o - t) <= MERGE_NEAR_MS)
+            })
+            const myEmail = h.connectors.grant('google', member.userId)?.accountEmail?.toLowerCase() ?? null
+            const otherEditors = filePerms === null || myEmail === null || filePerms.some(p => EDIT_ROLES.has(String(p.role))
+              && !(p.type === 'user' && typeof p.emailAddress === 'string' && p.emailAddress.toLowerCase() === myEmail))
+            if (otherRevisions.length === 0 && otherComments.length === 0 && !merged && !near && !otherEditors) continued = 'own'
+            else if (body.askPerson !== true) {
+              // An app that cannot show the card (released before it): nothing kept, the refusal it knows.
+              return refuse('conflict', 'このファイルは、前に置いたあとに Google Drive でほかの人が直したかもしれないため、このアプリからは上書きしません。アプリを新しくすると、メンバーに確かめたうえで上書きできます（それまでは新しいファイルとして置いてください）。', { code: 'DRIVE_FILE_CHANGED_SINCE' })
+            } else {
+              // Someone else's (or may be): a person decides (the app's card); the content waits on the server, fixed by its sha256.
+              const names = [...new Set([...otherRevisions.map(r => r.name), ...otherComments.flatMap(c => c.others)].filter((n): n is string => n !== null))].slice(0, 5)
+              const asked = askBeforeOverwrite(h.googleDrive, member, actor.conversationId as string, {
+                requestKey: body.requestKey as string, folderId: row.folderId, fileId: targetId, name: target?.name ?? named.name, kind: form.kind as 'html' | 'markdown',
+                sha256: body.sha256 as string, content: bytes, recordId: typeof body.recordId === 'string' && body.recordId.length <= 200 ? body.recordId : null,
+                fingerprint: now, revision: newest.id as string, revisionAt: newest.at as string, commentsSeen: seen, editors: names, commented: otherComments.length > 0,
+              })
+              // People's names (chosen by them in Google) go to the member's card only, never into the AI's text.
+              return refuse('conflict', 'ほかの人の直し・コメントが入っている（かもしれない）ため、上書きはメンバーの確認待ちです。アプリのカードでメンバーが「上書きする」を押すと、この内容で上書きされます。押されるまで、置き直したり新しいファイルを作ったりしないでください。',
+                { code: 'DRIVE_OVERWRITE_NEEDS_CONFIRMATION', confirmation: asked })
             }
           }
         } else {
@@ -1227,6 +1331,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           link: str(j.webViewLink) ?? target?.link ?? null, reason: null, finishedAt: clock.now(),
         }
         h.googleDrive.settlePut(id, settled)
+        // The document is not what any waiting card was about any more: those cards close (a press writes nothing).
+        if (targetId !== null) h.googleDrive.declineOpenOverwriteConfirmations(targetId)
         // Each put into a picked folder renews its pick (google-drive.md "How long a pick lasts"): the member's own only.
         h.googleDrive.renewPick(member.userId, row.folderId, 'folder', new Date(clock.nowMs() + DRIVE_PICK_TTL_MS.folder).toISOString(), clock.now())
         // An update names the revision its check started from ('' — a document continued without a baseline — matches no
@@ -1241,6 +1347,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       if (r.kind === 'unknown' || r.kind === 'server-error') {
         // It may be in Drive: never sent again; looked up by the put's id now and on every later read.
         h.googleDrive.settlePut(id, { state: 'unknown', fileId: null, revisionId: null, link: null, reason: 'answer-lost', finishedAt: null })
+        if (targetId !== null) h.googleDrive.declineOpenOverwriteConfirmations(targetId)
         return ok({ drivePut: putView(await reconcile(member.companyId, { ...row, state: 'unknown', reason: 'answer-lost' })), existing: false })
       }
       // Refused or not sent: nothing was made; the key is free again.

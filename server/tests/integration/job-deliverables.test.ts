@@ -421,8 +421,8 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
     google.editDriveFile(made.fileId, '# 本人が直した\n', GOOGLE_SEED.member)
     const f = google.driveFile(made.fileId)!
     const newest = f.revisions[f.revisions.length - 1]
-    db.prepare('INSERT INTO google_drive_doc_reads (company_id, user_id, conversation_id, file_id, fingerprint, revision, revision_at, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(CO, 'jd-alice', 'conv-job', made.fileId, sha(f.content), newest.id, newest.modifiedTime, new Date().toISOString())
+    db.prepare('INSERT INTO google_drive_doc_reads (company_id, user_id, conversation_id, file_id, fingerprint, revision, revision_at, comments_seen, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(CO, 'jd-alice', 'conv-job', made.fileId, sha(f.content), newest.id, newest.modifiedTime, sha(Buffer.from('[]')), new Date().toISOString())
     const next = Buffer.from('# 二回目\n')
     const r = await ai(t, 'POST', '/google/drive/put', putBody({ name: '続けない.md', updateFileId: made.fileId, sha256: sha(next), contentBase64: next.toString('base64') }))
     expect([r.status, r.body.code, r.body.needsRead]).toEqual([409, 'DRIVE_FILE_CHANGED_SINCE', undefined])

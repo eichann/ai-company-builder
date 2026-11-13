@@ -74,6 +74,8 @@ export interface DriveDocRead {
   fingerprint: string
   revision: string
   revisionAt: string
+  /** sha256 of the document's comments as handed to the AI with the text (ids, times, deleted): a comment since → read again. */
+  commentsSeen: string
   readAt: string
 }
 
@@ -158,6 +160,8 @@ export interface GoogleDriveRepository {
   keepDocRead(row: DriveDocRead): void
   /** The newest read of this document in this consultation by the member's AI, or null. */
   docRead(userId: string, conversationId: string, fileId: string): DriveDocRead | null
+  /** Removes reads kept before `before` (every member). */
+  pruneDocReads(before: string): void
 
   createOverwriteConfirmation(row: DriveOverwriteConfirmationRow): void
   /** The member's own confirmation by id (any state), or null. */
@@ -169,6 +173,10 @@ export interface GoogleDriveRepository {
    * when `to` is `written` or `declined`.
    */
   moveOverwriteConfirmation(id: string, from: DriveOverwriteConfirmationRow['state'][], to: DriveOverwriteConfirmationRow['state']): boolean
+  /** Declines every open confirmation for this Drive file (any put of it went through: what they were asked about is gone). */
+  declineOpenOverwriteConfirmations(fileId: string): void
+  /** A member left the company: their waiting confirmations (with their content) and their reads are removed. */
+  forgetMember(userId: string): void
   /** Removes the content of every confirmation expired at `now`, and the rows that expired before `deleteBefore` (every member). */
   pruneOverwriteConfirmations(now: string, deleteBefore: string): void
 

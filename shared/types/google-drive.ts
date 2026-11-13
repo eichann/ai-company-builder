@@ -210,6 +210,12 @@ export interface DrivePutRequest {
    * fails the put.
    */
   recordId?: string
+  /**
+   * The app shows the card that asks the member before a Google document someone else (may have) edited is replaced
+   * (google-drive.md "Continuing a document people edited"). Absent (an app released before it): such an update is refused
+   * as before and nothing waits on the server.
+   */
+  askPerson?: boolean
 }
 
 /** One of the member's own Drive files ACB may open: a live pick of a file, or a file their put made. */

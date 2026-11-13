@@ -462,10 +462,10 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       return conn.prepare(`SELECT 1 FROM record_ledger WHERE company_id = ? AND (attachments LIKE ? ESCAPE '\\' OR decision LIKE ? ESCAPE '\\') LIMIT 1`)
         .get(companyId, like, like) !== undefined
     },
-    driveLinkedBy(userId, fileId) {
+    driveLinkSources(userId, fileId) {
       // A link row exists only while its record does (`markRemoved` deletes them) and its link is not taken off.
-      return conn.prepare(`SELECT 1 FROM record_links WHERE company_id = ? AND target_id IS NULL AND target_path = ? AND created_by = ? AND target_meta IS NOT NULL LIMIT 1`)
-        .get(companyId, driveLinkTarget(fileId) ?? '', userId) !== undefined
+      return (conn.prepare(`SELECT DISTINCT source_id FROM record_links WHERE company_id = ? AND target_id IS NULL AND target_path = ? AND created_by = ? AND target_meta IS NOT NULL
+        ORDER BY source_id LIMIT 50`).all(companyId, driveLinkTarget(fileId) ?? '', userId) as Array<{ source_id: string }>).map(r => r.source_id)
     },
     linksFrom(ids) {
       if (ids.length === 0) return []

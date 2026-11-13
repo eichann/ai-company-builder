@@ -400,6 +400,7 @@ export interface DrivePermissionLike {
   type?: unknown
   domain?: unknown
   emailAddress?: unknown
+  role?: unknown
 }
 
 /**

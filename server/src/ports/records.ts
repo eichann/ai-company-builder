@@ -255,11 +255,11 @@ export interface RecordRepository {
    */
   driveFileFixed(fileId: string): boolean
   /**
-   * Whether this member made a live link to this Drive file on a record (`drive:<fileId>`, made by them — their AI's put
-   * link counts — with the facts kept when linked; a link brought back by an undo has none): the file stays theirs to
-   * read while the link exists (google-drive.md "How long a pick lasts").
+   * The records on which this member made a live link to this Drive file (`drive:<fileId>`, made by them — their AI's put
+   * link counts — with the facts kept when linked; a link brought back by an undo has none): while they can still read
+   * one of them, the file stays theirs to read (google-drive.md "How long a pick lasts").
    */
-  driveLinkedBy(userId: string, fileId: string): boolean
+  driveLinkSources(userId: string, fileId: string): string[]
   /** Links whose target is a file at exactly one of `paths` (company paths). */
   fileLinksTo(paths: string[]): RecordLinkRow[]
   /** Point these links (source, name, position) at another file path. */

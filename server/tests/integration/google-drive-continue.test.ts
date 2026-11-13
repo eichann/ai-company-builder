@@ -82,9 +82,11 @@ async function allow(user: string) {
 }
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
+// An update says `askPerson: true` like the current app (it can show the card); a released app before it says nothing.
 const docBody = (content: Buffer, over: Record<string, unknown> = {}) => ({
   folderId: GOOGLE_SEED.proposalsFolder, name: '報告書.md', kind: 'markdown', as: 'google_doc', sha256: sha(content),
-  contentBase64: content.toString('base64'), requestKey: `key-${randomBytes(6).toString('hex')}`, ...over,
+  contentBase64: content.toString('base64'), requestKey: `key-${randomBytes(6).toString('hex')}`,
+  ...(over.updateFileId ? { askPerson: true } : {}), ...over,
 })
 const pickRow = (user: string, fileId: string) =>
   db.prepare('SELECT * FROM google_drive_picks WHERE company_id = ? AND user_id = ? AND file_id = ?').get(CO, user, fileId) as Json
@@ -393,8 +395,18 @@ describe('continuing a Google document people edited (google-drive.md "Continuin
     const mine = await putDoc(token, '# 一版\n', '自分のコメント.md')
     google.commentOnDriveFile(mine.fileId, GOOGLE_SEED.member)
     expect((await ai(token, 'POST', '/read', { fileId: mine.fileId })).status).toBe(200)
-    const r = await update(token, '自分のコメント.md', mine.fileId, '# 二版\n')
-    expect(r.body.data).toMatchObject({ continued: 'own', commentsMayMove: true })
+    // Someone else can edit the file (its permissions name a colleague as a writer): even only the member's comment asks a
+    // person (a colleague's typing could hide in the member's revision).
+    google.shareDriveFile(mine.fileId, { type: 'user', role: 'writer', emailAddress: GOOGLE_SEED.colleague })
+    const shared = await update(token, '自分のコメント.md', mine.fileId, '# 二版\n')
+    expect(shared.body.code, JSON.stringify(shared.body).slice(0, 300)).toBe('DRIVE_OVERWRITE_NEEDS_CONFIRMATION')
+    await press('m-sato', shared.body.confirmation.id, 'decline')
+    // Nobody else can edit it (a fresh document of the member's): their own comment is theirs, written at once, with the warning.
+    const solo = await putDoc(token, '# 一版\n', '自分だけ.md')
+    google.commentOnDriveFile(solo.fileId, GOOGLE_SEED.member)
+    expect((await ai(token, 'POST', '/read', { fileId: solo.fileId })).status).toBe(200)
+    const r = await update(token, '自分だけ.md', solo.fileId, '# 二版\n')
+    expect(r.body.data, JSON.stringify(r.body).slice(0, 400)).toMatchObject({ continued: 'own', commentsMayMove: true })
   })
 
   it('changed while the person looked (an edit or a new comment): the press writes nothing and the AI must read again', async () => {
@@ -452,5 +464,102 @@ describe('continuing a Google document people edited (google-drive.md "Continuin
     expect(r.body.code).toBe('DRIVE_FILE_SHARED_OUTSIDE')
     expect(patches(doc.fileId)).toBe(0)
     expect([ROW(asked.body.confirmation.id).state, ROW(asked.body.confirmation.id).content]).toEqual(['declined', null])
+  })
+})
+
+// Second review (2026-11-14): a press always checks what was shown; comments reach the AI; a refused link renews nothing;
+// a link on a record the member no longer reads keeps nothing; an app that cannot show the card keeps nothing; retention.
+describe('second review of continuing and keeping (google-drive.md)', () => {
+  const ROW = (id: string) => db.prepare('SELECT * FROM google_drive_overwrite_confirmations WHERE company_id = ? AND id = ?').get(CO, id) as Json
+  async function putDoc(token: string, text: string, name: string) {
+    const r = await ai(token, 'POST', '/put', docBody(Buffer.from(text), { name }))
+    expect(r.body.data?.drivePut.state, r.text).toBe('done')
+    return r.body.data.drivePut as Json
+  }
+  const update = (token: string, name: string, fileId: string, text: string, over: Record<string, unknown> = {}) =>
+    ai(token, 'POST', '/put', docBody(Buffer.from(text), { name, updateFileId: fileId, ...over }))
+  const press = (user: string, id: string, action: 'confirm' | 'decline') => person(user, 'POST', `/me/google/drive/overwrite-confirmations/${id}`, { action })
+
+  it('a press checks the document as it was shown, even when the baseline moved to the newer state meanwhile', async () => {
+    const token = await tokenFor('m-sato')
+    const doc = await putDoc(token, '# 一版\n', '基準が動く.md')
+    google.editDriveFile(doc.fileId, '# 田中さんの直し\n', GOOGLE_SEED.colleague)
+    expect((await ai(token, 'POST', '/read', { fileId: doc.fileId })).status).toBe(200)
+    const asked = await update(token, '基準が動く.md', doc.fileId, '# 二版\n')
+    expect(asked.body.code).toBe('DRIVE_OVERWRITE_NEEDS_CONFIRMATION')
+    // Tanaka edits again, and another put of the file moved the baseline to exactly that newer state.
+    google.editDriveFile(doc.fileId, '# 田中さんの二度目の直し\n', GOOGLE_SEED.colleague)
+    expect((await ai(token, 'POST', '/read', { fileId: doc.fileId })).status).toBe(200)
+    const read = db.prepare('SELECT * FROM google_drive_doc_reads WHERE company_id = ? AND user_id = ? AND file_id = ?').get(CO, 'm-sato', doc.fileId) as Json
+    db.prepare('UPDATE google_drive_puts SET doc_fingerprint = ?, doc_revision = ?, doc_revision_at = ? WHERE company_id = ? AND file_id = ?')
+      .run(read.fingerprint, read.revision, read.revision_at, CO, doc.fileId)
+    const done = await press('m-sato', asked.body.confirmation.id, 'confirm')
+    expect(done.body.code, done.text).toBe('DRIVE_READ_AGAIN')
+    expect(patches(doc.fileId)).toBe(0)
+    expect(google.driveFile(doc.fileId)!.content.toString()).toBe('# 田中さんの二度目の直し\n')
+  })
+
+  it('the AI reads a document\'s comments and replies with its text, the writers only as 本人 / ほかの人', async () => {
+    const token = await tokenFor('m-sato')
+    const doc = await putDoc(token, '# 一版\n', 'コメントを読む.md')
+    google.commentOnDriveFile(doc.fileId, GOOGLE_SEED.colleague, '表の数字を直してください')
+    const r = await ai(token, 'POST', '/read', { fileId: doc.fileId })
+    expect(r.status, r.text).toBe(200)
+    expect(r.body.data.text).toContain('ほかの人のコメント')
+    expect(r.body.data.text).toContain('表の数字を直してください')
+    expect(r.body.data.text).not.toContain('tanaka')
+  })
+
+  it('an app that cannot show the card (released before it) is refused as before, and nothing waits on the server', async () => {
+    const token = await tokenFor('m-sato')
+    const doc = await putDoc(token, '# 一版\n', '古いアプリ.md')
+    google.editDriveFile(doc.fileId, '# 田中さんの直し\n', GOOGLE_SEED.colleague)
+    expect((await ai(token, 'POST', '/read', { fileId: doc.fileId })).status).toBe(200)
+    const r = await update(token, '古いアプリ.md', doc.fileId, '# 二版\n', { askPerson: undefined })
+    expect([r.status, r.body.code]).toEqual([409, 'DRIVE_FILE_CHANGED_SINCE'])
+    expect(db.prepare('SELECT COUNT(*) AS n FROM google_drive_overwrite_confirmations WHERE company_id = ? AND file_id = ?').get(CO, doc.fileId).n).toBe(0)
+  })
+
+  it('a refused link renews no pick; a link on a record the member no longer reads keeps nothing alive', async () => {
+    const token = await tokenFor('m-sato')
+    const fileId = GOOGLE_SEED.pastProposalSlides
+    setPickExpiry('m-sato', fileId, DAY)
+    const before = pickRow('m-sato', fileId).expires_at
+    const made = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '古い版でつなぐ', fields: { assignee: 'm-sato' } })
+    const stale = await person('m-sato', 'POST', `/records/item/${made.body.data.record.id}/file-links`, { target: { kind: 'drive', fileId }, expectedVersion: 99 })
+    expect(stale.status).toBeGreaterThanOrEqual(400)
+    expect(pickRow('m-sato', fileId).expires_at).toBe(before)
+    // A link of Sato's (with its facts) on a record only its owner reads: it keeps nothing alive for Sato.
+    const own = await person('m-owner', 'POST', '/records/item', { type: 'task', title: '持ち主だけ', personal: true, fields: { assignee: 'm-owner' } })
+    expect(own.status, own.text).toBe(201)
+    setPickExpiry('m-sato', GOOGLE_SEED.handNotesPdf, -DAY)
+    db.prepare(`INSERT INTO record_links (company_id, source_id, name, position, target_id, target_path, created_by, target_meta) VALUES (?, ?, 'files', 0, NULL, ?, 'm-sato', ?)`)
+      .run(CO, own.body.data.record.id, `drive:${GOOGLE_SEED.handNotesPdf}`, JSON.stringify({ revisionId: 'r1', name: 'x', sha256: 'a'.repeat(64), mimeType: 'application/pdf', linkedAt: ts() }))
+    expect((await ai(token, 'POST', '/read', { fileId: GOOGLE_SEED.handNotesPdf })).body.code).toBe('DRIVE_NOT_PICKED')
+  })
+
+  it('retention: an expired confirmation loses its content, a week later its row; reads older than a week go; a leaving member\'s rows go', async () => {
+    const { sqliteCompanyData } = await import('../../src/adapters/sqlite/company-data')
+    const repo = sqliteCompanyData(db).forCompany(CO).googleDrive
+    const token = await tokenFor('m-sato')
+    const doc = await putDoc(token, '# 一版\n', '片づけ.md')
+    google.editDriveFile(doc.fileId, '# 田中さんの直し\n', GOOGLE_SEED.colleague)
+    expect((await ai(token, 'POST', '/read', { fileId: doc.fileId })).status).toBe(200)
+    const id = (await update(token, '片づけ.md', doc.fileId, '# 二版\n')).body.confirmation.id as string
+    const now = new Date().toISOString()
+    db.prepare('UPDATE google_drive_overwrite_confirmations SET expires_at = ? WHERE company_id = ? AND id = ?').run(new Date(Date.now() - DAY).toISOString(), CO, id)
+    repo.pruneOverwriteConfirmations(now, new Date(Date.now() - 7 * DAY).toISOString())
+    expect(ROW(id).content).toBeNull()
+    db.prepare('UPDATE google_drive_overwrite_confirmations SET expires_at = ? WHERE company_id = ? AND id = ?').run(new Date(Date.now() - 8 * DAY).toISOString(), CO, id)
+    repo.pruneOverwriteConfirmations(now, new Date(Date.now() - 7 * DAY).toISOString())
+    expect(ROW(id)).toBeUndefined()
+    db.prepare('UPDATE google_drive_doc_reads SET read_at = ? WHERE company_id = ? AND file_id = ?').run(new Date(Date.now() - 8 * DAY).toISOString(), CO, doc.fileId)
+    repo.pruneDocReads(new Date(Date.now() - 7 * DAY).toISOString())
+    expect(db.prepare('SELECT COUNT(*) AS n FROM google_drive_doc_reads WHERE company_id = ? AND file_id = ?').get(CO, doc.fileId).n).toBe(0)
+    expect((await ai(token, 'POST', '/read', { fileId: doc.fileId })).status).toBe(200)
+    await update(token, '片づけ.md', doc.fileId, '# 三版\n')
+    repo.forgetMember('m-sato')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM google_drive_overwrite_confirmations WHERE company_id = ? AND user_id = ?').get(CO, 'm-sato').n).toBe(0)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM google_drive_doc_reads WHERE company_id = ? AND user_id = ?').get(CO, 'm-sato').n).toBe(0)
   })
 })

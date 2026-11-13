@@ -123,16 +123,22 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
     },
 
     keepDocRead(d: DriveDocRead) {
-      conn.prepare(`INSERT INTO google_drive_doc_reads (company_id, user_id, conversation_id, file_id, fingerprint, revision, revision_at, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      conn.prepare(`INSERT INTO google_drive_doc_reads (company_id, user_id, conversation_id, file_id, fingerprint, revision, revision_at, comments_seen, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (company_id, user_id, conversation_id, file_id) DO UPDATE SET fingerprint = excluded.fingerprint, revision = excluded.revision,
-          revision_at = excluded.revision_at, read_at = excluded.read_at`)
-        .run(companyId, d.userId, d.conversationId, d.fileId, d.fingerprint, d.revision, d.revisionAt, d.readAt)
+          revision_at = excluded.revision_at, comments_seen = excluded.comments_seen, read_at = excluded.read_at`)
+        .run(companyId, d.userId, d.conversationId, d.fileId, d.fingerprint, d.revision, d.revisionAt, d.commentsSeen, d.readAt)
     },
     docRead(userId, conversationId, fileId) {
-      const r = conn.prepare(`SELECT user_id, conversation_id, file_id, fingerprint, revision, revision_at, read_at FROM google_drive_doc_reads
+      const r = conn.prepare(`SELECT user_id, conversation_id, file_id, fingerprint, revision, revision_at, comments_seen, read_at FROM google_drive_doc_reads
         WHERE company_id = ? AND user_id = ? AND conversation_id = ? AND file_id = ?`).get(companyId, userId, conversationId, fileId) as
-        { user_id: string; conversation_id: string; file_id: string; fingerprint: string; revision: string; revision_at: string; read_at: string } | undefined
-      return r ? { userId: r.user_id, conversationId: r.conversation_id, fileId: r.file_id, fingerprint: r.fingerprint, revision: r.revision, revisionAt: r.revision_at, readAt: r.read_at } : null
+        { user_id: string; conversation_id: string; file_id: string; fingerprint: string; revision: string; revision_at: string; comments_seen: string; read_at: string } | undefined
+      return r ? {
+        userId: r.user_id, conversationId: r.conversation_id, fileId: r.file_id, fingerprint: r.fingerprint, revision: r.revision, revisionAt: r.revision_at,
+        commentsSeen: r.comments_seen, readAt: r.read_at,
+      } : null
+    },
+    pruneDocReads(before) {
+      conn.prepare('DELETE FROM google_drive_doc_reads WHERE company_id = ? AND read_at <= ?').run(companyId, before)
     },
 
     createOverwriteConfirmation(c) {
@@ -156,6 +162,13 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
       return conn.prepare(`UPDATE google_drive_overwrite_confirmations SET state = ?${clear ? ', content = NULL' : ''}
         WHERE company_id = ? AND id = ? AND state IN (${from.map(() => '?').join(', ')})`)
         .run(to, companyId, id, ...from).changes === 1
+    },
+    declineOpenOverwriteConfirmations(fileId) {
+      conn.prepare("UPDATE google_drive_overwrite_confirmations SET state = 'declined', content = NULL WHERE company_id = ? AND file_id = ? AND state = 'open'").run(companyId, fileId)
+    },
+    forgetMember(userId) {
+      conn.prepare('DELETE FROM google_drive_overwrite_confirmations WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+      conn.prepare('DELETE FROM google_drive_doc_reads WHERE company_id = ? AND user_id = ?').run(companyId, userId)
     },
     pruneOverwriteConfirmations(now, deleteBefore) {
       conn.prepare('UPDATE google_drive_overwrite_confirmations SET content = NULL WHERE company_id = ? AND expires_at <= ? AND content IS NOT NULL').run(companyId, now)

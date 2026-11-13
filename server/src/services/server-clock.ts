@@ -15,6 +15,8 @@
  * 3. erases expired content (the content store's retention, `expireContent`);
  * 4. reads each connected member's new mail into the inbox (`pollInbox`,
  *    inbox.md "Receiving": header facts and pointers, never the text);
+ * D. sweeps Google Drive's waiting overwrites and kept reads (`driveSweep`, google-drive.md "Continuing a document people
+ *    edited": a waiting content is gone once it expired), records on or off;
  * 0. looks for suspicious activity (「気になる動き」, `securitySweep`, security-alerts.md), records on or off;
  * 5. finds each member's meetings of the last days on their calendar (`pollMeetings`,
  *    minutes.md "Meetings for their attendees": ids and versions, never the minutes' text).
@@ -67,6 +69,8 @@ export interface ServerClockDeps {
   pollMeetings?: (companyId: string, between: () => Promise<void>) => Promise<number>
   /** 「気になる動き」 (security-alerts.md): the alerts written for this company. Runs whether records are on or not. */
   securitySweep?: (companyId: string) => Promise<number>
+  /** Google Drive's retention (google-drive.md): expired overwrite contents and old reads removed. Runs whether records are on or not. */
+  driveSweep?: (companyId: string) => void
   /**
    * Scheduled jobs (jobs.md "The clock"): make this company's due occurrences — fast, no content, nothing
    * outside. Run for every company first, records on or off. The number made or expired.
@@ -146,6 +150,7 @@ export function createServerClock(deps: ServerClockDeps) {
 
   async function runCompany(companyId: string, run: ClockRun) {
     if (deps.securitySweep) run.alerts += await deps.securitySweep(companyId)
+    deps.driveSweep?.(companyId)
     const handle = deps.companyData.forCompany(companyId)
     if (!handle.records.settings().enabled) return
     run.moved += moveWaitOver(companyId)

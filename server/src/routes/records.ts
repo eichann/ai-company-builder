@@ -182,7 +182,10 @@ recordsRoute.post('/records/item/:recordId/file-links', companyMember, serviceBo
     if (!before.ok || before.value !== 'ask-drive') return answer(c, before as Outcome<unknown>)
     const checked = await services.googleDrive.linkable(member, target.fileId)
     if (!checked.ok) return answer(c, checked)
-    return answer(c, recordEngine.fileLink(member, actor, c.req.param('recordId'), 'link', body, checked.value))
+    const linked = recordEngine.fileLink(member, actor, c.req.param('recordId'), 'link', body, checked.value)
+    // Only a link the record step took renews the member's pick of the file (google-drive.md "How long a pick lasts").
+    if (linked.ok && linked.value.changed) services.googleDrive.linked(member, target.fileId as string)
+    return answer(c, linked)
   }
   return answer(c, recordEngine.fileLink(member, humanWith(body), c.req.param('recordId'), 'link', body))
 })
