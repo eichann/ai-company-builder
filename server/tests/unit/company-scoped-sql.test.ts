@@ -116,6 +116,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   google_drive_picks: ['adapters/sqlite/google-drive.ts'],
   google_drive_puts: ['adapters/sqlite/google-drive.ts'],
   google_drive_pick_tickets: ['adapters/sqlite/google-drive.ts'],
+  google_drive_doc_reads: ['adapters/sqlite/google-drive.ts'],
+  google_drive_overwrite_confirmations: ['adapters/sqlite/google-drive.ts'],
   // Outbound mail (outbound-mail.md).
   outbound_mails: ['adapters/sqlite/outbound-mail.ts'],
   outbound_mail_versions: ['adapters/sqlite/outbound-mail.ts'],

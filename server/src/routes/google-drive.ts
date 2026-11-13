@@ -10,6 +10,8 @@
  *   DELETE /me/google/drive/pick-tickets/:ticketId  the app read the result (acknowledged) or stopped waiting
  *   POST   /me/google/drive/picks                   { mode, ids }  keep what the person picked (each checked with Google)
  *   GET  /me/google/drive/files                   the member's own picked / put files, with names (「つなぐ」's list)
+ *   POST   /me/google/drive/overwrite-confirmations/:id  { action: confirm | decline }  the member's press on the card that
+ *                                                  asks before the AI's text replaces a Google document someone else edited
  *
  * The member's AI (record token), mounted at /api/records-ai/google/drive:
  *   GET  /status            whether the Drive tools work now, the member's live picks
@@ -36,6 +38,7 @@ import type { Outcome } from '../services/outcome'
 import type { Member } from '../services/access'
 import { NOT_IN_STEP } from '../services/not-in-step'
 import type { RecordTokenHolder } from '../services/record-ai-tokens'
+import type { ActorInput } from '../services/record-engine/types'
 import type { DriveJobScope } from '../services/google-drive'
 import { aiActor, keyedWrite } from './record-ai-auth'
 import { refusal } from './respond'
@@ -83,6 +86,22 @@ googleDriveRoute.get('/me/google/drive/files', companyMember, async (c) => {
   return answer(c, await googleDrive.ownFiles(member))
 })
 
+/**
+ * 「上書きする」 / 「やめる」 on the card (google-drive.md "Continuing a document people edited"): a person's press, with
+ * the session only — no record token reaches it. A written update makes the consultation's やること's link follow the
+ * new revision (as a put does), as the member on the AI's proposal; a refusal there never fails the write.
+ */
+googleDriveRoute.post('/me/google/drive/overwrite-confirmations/:confirmationId', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  const r = await googleDrive.decideOverwrite(member, c.req.param('confirmationId'), c.var.body)
+  if (!r.ok) return answer(c, r)
+  const { recordId, ...decision } = r.value
+  if (decision.state === 'written' && typeof recordId === 'string') {
+    linkPutToRecord(member, { kind: 'human', proposedBy: 'ai' }, recordId, { drivePut: decision.drivePut, existing: false })
+  }
+  return answer(c, { ok: true, value: decision })
+})
+
 // ---- the member's AI (record token) ----
 
 export const googleDriveAiRoute = new Hono()
@@ -115,7 +134,7 @@ googleDriveAiRoute.post('/read', aiReads, serviceBody, async (c) => {
   // a business plugin's step, a built-in step's (also from an app too old to be route-scoped). The apps' allowlists
   // already hide drive_read from unattended runs; this is the server's own refusal.
   if (h.run) return c.json({ error: NOT_IN_STEP.error, code: NOT_IN_STEP.code }, 403)
-  return answer(c, await googleDrive.read(h.member, c.var.body))
+  return answer(c, await googleDrive.read(h.member, c.var.body, h.conversationId))
 })
 
 googleDriveAiRoute.post('/put', aiActs, serviceBody, async (c) => {
@@ -140,7 +159,7 @@ googleDriveAiRoute.post('/put', aiActs, serviceBody, async (c) => {
  * of the member's own receipt (never a body's file id), through every record check of the engine.
  * Anything refused or thrown is logged with its code only; the put stays done and is answered as is.
  */
-function linkPutToRecord(member: Member, actor: ReturnType<typeof aiActor>, recordId: string, put: DrivePutAnswer): boolean {
+function linkPutToRecord(member: Member, actor: ActorInput, recordId: string, put: DrivePutAnswer): boolean {
   if (put.existing || put.drivePut.state !== 'done') return false
   try {
     const file = googleDrive.putLinkable(member, put.drivePut.id)

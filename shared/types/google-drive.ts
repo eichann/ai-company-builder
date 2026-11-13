@@ -149,7 +149,38 @@ export interface DrivePutAnswer {
    * (no record named, a replay, a check refused it, or an older server).
    */
   linkedTo?: { recordId: string }
+  /**
+   * A Google document was overwritten while it had comments: a full replace may take a comment off the words it was
+   * on (google-drive.md "Continuing a document people edited"). Absent: none, or not a document's update.
+   */
+  commentsMayMove?: boolean
+  /**
+   * The document had changed in Drive since ACB's last put and the AI's text (written after reading it) replaced it:
+   * `own` — every change was the member's own; `confirmed` — someone else's, after the member pressed 「上書きする」.
+   */
+  continued?: 'own' | 'confirmed'
 }
+
+/**
+ * The 409 `DRIVE_OVERWRITE_NEEDS_CONFIRMATION` of a put (google-drive.md "Continuing a document people edited"): someone
+ * else edited or commented on the Google document since ACB's last put. Nothing was written; the content waits on the
+ * server until the member presses 「上書きする」 on the app's card (or `expiresAt`).
+ */
+export interface DriveOverwriteConfirmation {
+  id: string
+  /** The document's name as ACB put it (the member's own). */
+  fileName: string
+  /** Google's display names of the others whose edits or comments came since (at most 5; empty: unnamed). */
+  editors: string[]
+  /** Someone else commented (or replied) since. */
+  commented: boolean
+  expiresAt: string
+}
+
+/** POST /api/companies/:id/me/google/drive/overwrite-confirmations/:id { action } (session): the member's press. */
+export type DriveOverwriteDecision =
+  | { state: 'written'; drivePut: DrivePutView; commentsMayMove: boolean }
+  | { state: 'declined' }
 
 /** POST /api/records-ai/google/drive/put body. */
 export interface DrivePutRequest {

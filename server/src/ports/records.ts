@@ -254,6 +254,12 @@ export interface RecordRepository {
    * with its revision): such a file is never overwritten (google-drive.md "Overwriting").
    */
   driveFileFixed(fileId: string): boolean
+  /**
+   * Whether this member made a live link to this Drive file on a record (`drive:<fileId>`, made by them — their AI's put
+   * link counts — with the facts kept when linked; a link brought back by an undo has none): the file stays theirs to
+   * read while the link exists (google-drive.md "How long a pick lasts").
+   */
+  driveLinkedBy(userId: string, fileId: string): boolean
   /** Links whose target is a file at exactly one of `paths` (company paths). */
   fileLinksTo(paths: string[]): RecordLinkRow[]
   /** Point these links (source, name, position) at another file path. */

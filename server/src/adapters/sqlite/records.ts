@@ -17,6 +17,7 @@ import type {
 } from '../../ports/records'
 import { BUNDLE_PART_ENDED_ACTION, coreTypeDefinitions, DECISION_VERSION, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION, TASK_VERSION } from '../../../shared/core/core-types'
 import { canonicalTypeJson } from '../../../shared/core/record-types'
+import { driveLinkTarget } from '../../../shared/core/records'
 import { CONTENT_REF_PREFIX } from '../../../shared/core/record-contents'
 import { sqliteContentStore } from './record-contents'
 import { skillUsesJson } from './skill-uses'
@@ -460,6 +461,11 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       const like = `%"fileId":"${fileId.replace(/[\\%_]/g, ch => `\\${ch}`)}"%`
       return conn.prepare(`SELECT 1 FROM record_ledger WHERE company_id = ? AND (attachments LIKE ? ESCAPE '\\' OR decision LIKE ? ESCAPE '\\') LIMIT 1`)
         .get(companyId, like, like) !== undefined
+    },
+    driveLinkedBy(userId, fileId) {
+      // A link row exists only while its record does (`markRemoved` deletes them) and its link is not taken off.
+      return conn.prepare(`SELECT 1 FROM record_links WHERE company_id = ? AND target_id IS NULL AND target_path = ? AND created_by = ? AND target_meta IS NOT NULL LIMIT 1`)
+        .get(companyId, driveLinkTarget(fileId) ?? '', userId) !== undefined
     },
     linksFrom(ids) {
       if (ids.length === 0) return []

@@ -11,6 +11,10 @@ paths:
   - "server/tests/unit/google-drive-core.test.ts"
   - "client/electron/features/google/drive.ts"
   - "client/tests/google-drive-tools.test.ts"
+  - "server/tests/integration/google-drive-continue.test.ts"
+  - "client/shared/drive-overwrite.ts"
+  - "client/src/features/chat/components/DriveOverwriteCard.tsx"
+  - "client/tests/drive-overwrite.test.ts"
 ---
 
 # Google Drive through the Google connection (feature `drive`, `drive.file`)
@@ -175,14 +179,44 @@ Only the caller's rows: another member's names never reach them (test 「the mem
 `POST /me/google/drive/picks { mode, ids }` (session; folder: 1 id, files: ≤ 10): each id is
 opened with Google first (`drive.file` answers only for files picked for this app); a folder
 must be a folder the member can add to, a file a readable type (`DRIVE_READ_AS`); anything else
-is counted `refused`, not kept. Kept 90 days (folders) / 7 days (files); a re-pick renews.
+is counted `refused`, not kept. Kept 90 days (folders) / 7 days (files) **since last used** ("How long a pick
+lasts", below); a re-pick renews.
 The AI reads and writes **only** the member's own live picks — and the files the member's **own** puts made
-(reading them back and overwriting them: `putOfFile`, below).
+(reading them back and overwriting them: `putOfFile`, below) and the files the member **linked to a record** themselves
+(reading them only).
+
+## How long a pick lasts (owner decision 2026-11-14: 「自動で接続し直す」)
+
+The 7 / 90 days are **ACB's own policy**, not Google's: `drive.file` access stays until the member revokes the grant. A
+member who does not open ACB for a week must not lose what they set up, so the keeping follows use — and only ever the
+member's **own** rows (`DRIVE_PICK_TTL_MS`, `renewPick`):
+
+- **A file linked to a record** (`RecordRepository.driveLinkedBy`: a `drive:<fileId>` link row **made by this member** —
+  their AI's put link counts, it is made as them — with the facts kept when it was linked; a link brought back by an undo
+  has none and counts for nothing): `read` (and `linkable`, linking it again elsewhere) accept it with no pick and no
+  expiry, for as long as the link exists. Taking the link off (or the record removed: its links go) ends it, unless the
+  file is still picked or the member's own put. It is the member's deliberate choice of that file for that work; Google
+  still decides (their own token).
+- **A plain file pick slides**: every successful `read` and `linkable` of it renews the member's live pick to now + 7 days
+  (`renewFilePick`); a refused call renews nothing; an expired pick is never brought back by use (only a re-pick). 7 days
+  without a use end it; the refusal then says so (`DRIVE_NOT_PICKED` with `lapsed: true`, 「選んでから7日のあいだ使われなかった
+  ため…」) while the expired row is still there.
+- **A folder pick**: every put that is `done` renews it to now + 90 days — a consultation's and a scheduled job's run
+  alike (a job running at least every 90 days keeps its place; `jobs.md` "The 90-day pick"). A run whose folder lapsed is
+  told plainly that it cannot put this time and should report it (never to ask for `drive_pick_folder`, which it does not
+  have).
+- **Never anyone else's**: `renewPick` binds the member; another member's pick of the same file keeps its own time; a
+  link made by someone else does not let this member's AI read. Google's `drive.file` is per person anyway: another
+  member's AI still needs that member's own one-time pick.
+- Not built (follow-up): a notice to a job's responsible person about a week before its folder would lapse (a new
+  recordless notification kind); today the job's 「定期の仕事」 line shows the date and the lapse is told when it happens
+  (`PLACE_NOT_USABLE`, once).
 
 ## The AI's routes (`/api/records-ai/google/drive`, record token) and tools
 
 - `GET /status` → `{ available (Google on + Picker registered), granted, picks, puts }` — the app adds
-  the Drive tools only when available. `POST /read { fileId }`: the member's own live pick of a **file**, or a file
+  the Drive tools only when available. `POST /read { fileId }`: the member's own live pick of a **file**, a file the member
+  linked to a record ("How long a pick lasts"), or a file
   **this member's own put made** (owner decision 2026-11-13; `putOfFile`: this member, this company, a `done` receipt —
   ACB created it, so their `drive.file` token opens it without a pick; another member's put, a put in another company, a
   receipt still `sending` / `unknown` are not theirs), else 403 `DRIVE_NOT_PICKED` with nothing asked of Google.
@@ -288,9 +322,10 @@ The AI reads and writes **only** the member's own live picks — and the files t
     an inline non-image link `[text](url)` (no title, not inside another bracket); CSS (`<style>`, `style=`), `srcset`,
     `http-equiv` and Markdown reference definitions (`[ref]: …`) are refused outright. 400 `DRIVE_EXTERNAL_RESOURCE` (the
     app says so first). Refused, never rewritten; a plain URL in a report must be written as a link.
-  - **Changed in Drive since ACB's last put**: 409 `DRIVE_FILE_CHANGED_SINCE` — nothing overwritten; put a new file. A
-    file with binary content (PDF, HTML, `.md`, `.txt`): its head revision is not the latest receipt's. A Google
-    document: its text is not what it was ("A Google document's own changes" below) — never its `version`.
+  - **Changed in Drive since ACB's last put**: 409 `DRIVE_FILE_CHANGED_SINCE` — nothing overwritten. A
+    file with binary content (PDF, HTML, `.md`, `.txt`): its head revision is not the latest receipt's (put a new file). A
+    Google document: its text is not what it was ("A Google document's own changes" below) — never its `version`; in a
+    consultation the AI then reads it and continues ("Continuing a document people edited" below), `needsRead: true`.
   - **A Google document's own changes** (real Google, 2026-11-12: the owner opened an imported document once and closed
     it without typing; its 変更履歴 showed one version, the import, yet the update was refused `DRIVE_FILE_CHANGED_SINCE`):
     Drive's `version` counts every change on the server, "even those not visible to the user" (opening, post-import
@@ -357,10 +392,12 @@ The AI reads and writes **only** the member's own live picks — and the files t
       but make a revision — or, merged by Docs into the newest one, move its time: Docs merges one account's edits close
       together and ACB writes as the member, so the member's bold right after ACB's put lands in ACB's revision); no
       comment made or changed since the baseline's time (`comments.list` `startModifiedTime`, deleted ones included).
-      Different → 409 `DRIVE_FILE_CHANGED_SINCE` (a comment: its own sentence). **Fails closed** → 409
+      Different → 409 `DRIVE_FILE_CHANGED_SINCE` (a scheduled job's run; in a consultation the AI reads and continues:
+      "Continuing a document people edited"). **Fails closed** → 409
       `DRIVE_FILE_NOT_VERIFIABLE` 「…Google Drive で直されていないか確かめられないため、上書きしません。新しいファイルとして置いてください。」,
-      nothing sent: no baseline (every receipt from before this rule, a put found after a lost answer, a baseline not
-      proven), or the export, the revisions or the comments unreadable now.
+      nothing sent: the export, the revisions or the comments unreadable now. No baseline (every receipt from before this
+      rule, a put found after a lost answer, a baseline not proven): `DRIVE_FILE_NOT_VERIFIABLE` too, and in a
+      consultation the AI is told to read it first and continue.
     - `text/plain` rather than `text/markdown`: the long-standing export `drive_read` uses, and it carries no image
       addresses (an export with images names short-lived `googleusercontent` URLs that would differ every time); the
       revision covers what the text misses. Both are needed: Docs merges edits close together into one revision, so an
@@ -410,6 +447,68 @@ The AI reads and writes **only** the member's own live picks — and the files t
   document replaces its content as a new version (the Drive API documents media upload on update for Workspace
   types); the document baseline's assumptions ("A Google document's own changes": to confirm); that `keepForever` on a
   revision is answered as the fake does.
+
+## Continuing a document people edited (owner decision 2026-11-14, option ア)
+
+Before: after a person edited or commented on a document the AI put, every update was refused and the AI made a new file
+of the same name each time. Now, **in a consultation** (an AI token with no run; `put`'s `consultation`), an update of a
+Google document that changed since its baseline — or has none — continues from what the AI read:
+
+- **Read first** (`read`, `keepDocRead`, table `google_drive_doc_reads`, additive): when the AI reads a document **its
+  member's own put made**, whole (not truncated), with a consultation's token, the server keeps what it read — the sha256
+  of the text export it handed out (the same as `docFingerprint`) and the newest revision's id and `modifiedTime` — per
+  member, consultation and file (the newest read wins). Never the text.
+- **The update checks** (all with the member's own token, before anything is written; any read failing → 409
+  `DRIVE_FILE_NOT_VERIFIABLE`, as before): the text export, `revisions.list` (now with `lastModifyingUser(me,displayName)`)
+  and **every comment** (`docComments`: `includeDeleted`, author and replies' authors). Unchanged since the baseline → the
+  update as before. Otherwise:
+  - no read of this file **in this consultation** → 409 `DRIVE_FILE_CHANGED_SINCE` (no baseline: `DRIVE_FILE_NOT_VERIFIABLE`)
+    with `needsRead: true` and 「drive_read で今の中身を読み…もう一度 updateFileId で上書き（新しいファイルにはしない）」;
+  - the read is not the document now (text, newest revision id or time) → 409 `DRIVE_READ_AGAIN` 「読んだあとにも直されています」;
+  - **who changed it**: the revisions after the baseline's (all of them without a baseline or when it is gone; the newest
+    itself when a change was merged into it) and the comments made or changed since the baseline (all without one).
+    Every revision `me` and every comment and reply the member's own → **written at once** (`continued: 'own'`; the 11/12
+    decision: the writer's own edits may be overwritten, after reading them);
+  - **someone else's** revision or comment → nothing written; 409 `DRIVE_OVERWRITE_NEEDS_CONFIRMATION` with `confirmation
+    { id, fileName, editors (Google's display names, ≤ 5), commented, expiresAt }`. The request waits on the server
+    (`google_drive_overwrite_confirmations`, additive; `askBeforeOverwrite`): the content itself (fixed by its sha256), the
+    request key, the read state and a sha256 of the comments as seen, for `DRIVE_OVERWRITE_CONFIRM_TTL_MS` (24 h). The same
+    request again while it waits for the same state answers the same confirmation; another state replaces it.
+- **The person's press** (`POST /me/google/drive/overwrite-confirmations/:id { action: confirm | decline }`, **session
+  only**, the member's own row — another member's or company's id → 404 `DRIVE_CONFIRMATION_NOT_FOUND`;
+  `decideOverwrite`): `confirm` runs the whole put again with exactly the waiting content (same key, same target, every
+  check: the folder pick, outside sharing for the AI's content, `DRIVE_FILE_FIXED`, …) and writes only if the document is
+  still what was read **and** the comments are as seen (else `DRIVE_READ_AGAIN`, the row declined: the AI reads again);
+  written → the row `written`, its content removed, `continued: 'confirmed'`; pressed again → `DRIVE_CONFIRMATION_DONE`.
+  `decline` → `declined`, content removed. Past its time → `DRIVE_CONFIRMATION_EXPIRED`. The consultation's やること link
+  follows the new revision as after a put (`linkPutToRecord`, actor the member, proposed by the AI). The approvals
+  mechanism was not reused: it is built on approval records, plugin operations and an approver resolved by rule, none of
+  which applies to the member's own file; this keeps the same idea (the content fixed and hashed, the press writes
+  exactly that, used once).
+- **The baseline after continuing**: taken from the revision the update started from (`keepDocBaseline`'s `previous {
+  revision, continued }`): the people's revisions before it are accepted; only what came after must be the member's, so
+  the next update with nothing changed goes straight through.
+- **Comments**: a full replace may take a comment off its words: an update of a document that has comments answers
+  `commentsMayMove: true`; the tool tells the AI to say so; the card says it beforehand.
+- **Kept**: never a file the member's own put did not make; never when it changed after the read; a folder or file seen
+  outside the company still refused for the AI; a **scheduled job's run never continues** (nobody read it for the run,
+  nobody to ask): refused as before.
+- **The app** (`drive.ts`): on `DRIVE_OVERWRITE_NEEDS_CONFIRMATION`, `drive_put` puts the app's own card in the reply
+  (`client/shared/drive-overwrite.ts`, part `data-drive-overwrite`, kept with the message as `driveOverwrites`;
+  `DriveOverwriteCard.tsx`: 「〇〇さんの直し・コメントが入っています」「取り込んだうえで上書きします。元の版は Google Drive の
+  変更履歴から戻せます」 ［上書きする］ ［やめる］) and tells the AI to wait (`state: 'waiting-for-member'`); without a card path it
+  says the app must be updated. The press: IPC `google:decideDriveOverwrite` (session in main); the card's refusal words
+  are the app's own by code (`DRIVE_OVERWRITE_REFUSALS`). The descriptions of `drive_put` / `drive_read` and
+  `DRIVE_INSTRUCTIONS` say: read, take the edits in, update the same file — never a copy.
+- **Next step (not built)**: option ウ — partial edits through the Docs API (`documents.batchUpdate`), which would keep
+  comments anchored and need no full replace (a new scope, `documents`, beyond `drive.file`).
+- Unverified against real Google: that `lastModifyingUser.displayName` and the comments' `author` / `replies` are answered
+  under `drive.file` (if not, the card says 「ほかの人」 — the decision itself rests on `me`).
+- Tests: `server/tests/integration/google-drive-continue.test.ts` (own edits only after a read in this consultation, no
+  baseline, changed after the read, someone else's edit / comment → confirmation and the press writing exactly that
+  content once, another member / a record token cannot press, changed while asking, decline, expiry, outside sharing at
+  the press; and "How long a pick lasts") and `job-deliverables.test.ts` (a run never continues; a run's put renews its
+  folder; a lapsed folder's words) — mutation-checked; `client/tests/drive-overwrite.test.ts`.
 
 ## Markdown and text as they are (owner request 2026-11-12)
 

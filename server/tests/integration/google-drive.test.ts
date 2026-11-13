@@ -1097,7 +1097,10 @@ describe('review fixes (#678): nothing fetched from outside, a file changed in D
     const r = await refusedUpdate(token, '前の控え.md', old.fileId, 'DRIVE_FILE_NOT_VERIFIABLE', '# 前の控え\n')
     expect(r.body.error).toContain('確かめられないため')
     expect(r.body.error).not.toContain('直されています')
-    expect(r.body.error).toContain('新しいファイルとして置いてください')
+    // A consultation's AI may continue after reading it (google-drive.md "Continuing a document people edited"): it is
+    // told to read first, never to make a copy.
+    expect(r.body.error).toContain('drive_read で今の中身を読み')
+    expect(r.body.needsRead).toBe(true)
     // Drive refuses the export now (or it is too large).
     const unreadable = (await ai(token, 'POST', '/put', docBody(Buffer.from('# 読めない\n'), { name: '読めない.md' }))).body.data.drivePut
     google.faults.refuseExport(unreadable.fileId, 'exportSizeLimitExceeded')

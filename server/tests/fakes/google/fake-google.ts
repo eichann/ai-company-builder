@@ -73,6 +73,8 @@ export const FAKE_REFRESH_TOKEN_PREFIX = '1//fake-'
 export const FAKE_CODE_PREFIX = '4/fake-'
 /** Who edits a Drive file in the fake's "someone edits it" helpers unless told otherwise: not the member ACB writes as. */
 export const SOMEONE_ELSE = 'someone.else@other.example'
+/** The display name the fake gives an account (revisions' and comments' authors): the part of the address before @. */
+export const fakeDisplayName = (email: string) => email.split('@')[0]
 
 export const GOOGLE_SCOPES = {
   openid: 'openid',
@@ -318,8 +320,8 @@ export interface FakeGoogle {
   formatDriveFile(id: string, by?: string): void
   /** The same, merged by Docs into the newest revision (the member's own edit soon after ACB's): its id kept, its time moved. */
   formatDriveFileMerged(id: string): void
-  /** Someone comments on this Drive file (no new revision, the same text). */
-  commentOnDriveFile(id: string): void
+  /** Someone comments on this Drive file (no new revision, the same text), as `by` (default `SOMEONE_ELSE`). */
+  commentOnDriveFile(id: string, by?: string): void
   /**
    * Someone opens this Google document in the browser and closes it without typing (real Google, 2026-11-12): its
    * `version` moves, its content and revision history do not.
@@ -916,7 +918,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     /** Who changed the file last (`files.get` `lastModifyingUser`): an edit's author; a view or a comment does not change it. */
     lastBy: string
     /** Comments on the file (`comments.list`). */
-    comments: Array<{ id: string; createdTime: string; modifiedTime: string }>
+    comments: Array<{ id: string; createdTime: string; modifiedTime: string; by: string }>
     /** In the trash (`trashDriveFile`). */
     trashed?: boolean
   }
@@ -1136,6 +1138,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       }
     }
     const withUser = (c.req.query('fields') ?? '').includes('lastModifyingUser')
+    const withName = (c.req.query('fields') ?? '').includes('displayName')
     const end = revisionPageSize > 0 ? Math.min(f.history.length, start + revisionPageSize) : f.history.length
     const newestBefore = f.history[f.history.length - 1]
     const answer = {
@@ -1143,7 +1146,9 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       ...(end < f.history.length ? { nextPageToken: String(end) } : {}),
       revisions: f.history.slice(start, end).map(r => ({
         kind: 'drive#revision', id: r.id, modifiedTime: r.modifiedTime,
-        ...(withUser && !(newestAuthorHidden && r === f.history[f.history.length - 1]) ? { lastModifyingUser: { kind: 'drive#user', me: r.by.toLowerCase() === a.email.toLowerCase() } } : {}),
+        ...(withUser && !(newestAuthorHidden && r === f.history[f.history.length - 1]) ? { lastModifyingUser: {
+          kind: 'drive#user', me: r.by.toLowerCase() === a.email.toLowerCase(), ...(withName ? { displayName: fakeDisplayName(r.by) } : {}),
+        } } : {}),
       })),
     }
     // `settleRevisionAfterNextLists`: the list was answered in full, then Drive's processing moves the newest revision's time.
@@ -1161,7 +1166,12 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     if (!c.req.query('fields')) throw apiError(400, "The 'fields' parameter is required for this method.", 'required')
     const since = c.req.query('startModifiedTime')
     const list = f.comments.filter(x => !since || Date.parse(x.modifiedTime) >= Date.parse(since))
-    return c.json({ kind: 'drive#commentList', comments: list.map(x => ({ kind: 'drive#comment', ...x })) })
+    // The author (`me`: the bearer's account; `displayName`) when `fields` asks for it, as at Google.
+    const withAuthor = (c.req.query('fields') ?? '').includes('author')
+    return c.json({ kind: 'drive#commentList', comments: list.map(({ by, ...x }) => ({
+      kind: 'drive#comment', ...x, deleted: false, replies: [],
+      ...(withAuthor ? { author: { kind: 'drive#user', me: by.toLowerCase() === a.email.toLowerCase(), displayName: fakeDisplayName(by) } } : {}),
+    })) })
   })
 
   // revisions.update { keepForever }: binary files only (Drive keeps a Google document's revisions itself); the account
@@ -1885,11 +1895,11 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       f.version += 1
       newRevision(f, by)
     },
-    commentOnDriveFile(id) {
+    commentOnDriveFile(id, by = SOMEONE_ELSE) {
       const f = driveFiles.get(id)
       if (!f) throw new Error(`fake Google: no Drive file ${id}`)
       const at = iso(Math.max(now(), Date.parse(f.modifiedTime) + 1000))
-      f.comments.push({ id: `comment-${randomToken(6)}`, createdTime: at, modifiedTime: at })
+      f.comments.push({ id: `comment-${randomToken(6)}`, createdTime: at, modifiedTime: at, by })
       f.version += 1
     },
     openDriveFile(id) {

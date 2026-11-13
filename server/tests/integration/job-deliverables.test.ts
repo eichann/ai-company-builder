@@ -406,6 +406,36 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
     expect(updated.body.data.drivePut, updated.text).toMatchObject({ state: 'done', fileId: mine.fileId, updatedFileId: mine.fileId })
   })
 
+  it('a run\'s put renews its folder (90 days); a run never continues a document people changed; a lapsed folder is said plainly', async () => {
+    const job = await approvedJob()
+    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })
+    const run = await claim(dueOccurrence(job))
+    const t = await runToken(run.body.data.run)
+    const folderEnds = () => Date.parse((db.prepare("SELECT expires_at FROM google_drive_picks WHERE company_id = ? AND user_id = 'jd-alice' AND file_id = ?").get(CO, FOLDER) as Json).expires_at)
+    db.prepare("UPDATE google_drive_picks SET expires_at = ? WHERE company_id = ? AND user_id = 'jd-alice' AND file_id = ?").run(new Date(Date.now() + DAY).toISOString(), CO, FOLDER)
+    const made = (await ai(t, 'POST', '/google/drive/put', putBody({ name: '続けない.md' }))).body.data.drivePut
+    expect(made.state).toBe('done')
+    expect(folderEnds()).toBeGreaterThan(Date.now() + 89 * DAY)
+    // The responsible person edits it in Drive. Even with a read of it kept for the run's consultation (a run cannot read:
+    // kept here by hand, as it is now), the run does not continue: nobody read it for the run and nobody is there to ask.
+    google.editDriveFile(made.fileId, '# 本人が直した\n', GOOGLE_SEED.member)
+    const f = google.driveFile(made.fileId)!
+    const newest = f.revisions[f.revisions.length - 1]
+    db.prepare('INSERT INTO google_drive_doc_reads (company_id, user_id, conversation_id, file_id, fingerprint, revision, revision_at, read_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(CO, 'jd-alice', 'conv-job', made.fileId, sha(f.content), newest.id, newest.modifiedTime, new Date().toISOString())
+    const next = Buffer.from('# 二回目\n')
+    const r = await ai(t, 'POST', '/google/drive/put', putBody({ name: '続けない.md', updateFileId: made.fileId, sha256: sha(next), contentBase64: next.toString('base64') }))
+    expect([r.status, r.body.code, r.body.needsRead]).toEqual([409, 'DRIVE_FILE_CHANGED_SINCE', undefined])
+    expect(google.driveFile(made.fileId)!.content.toString()).toBe('# 本人が直した\n')
+    // The folder lapsed (90 days without a put): the run is told plainly to report, not to ask for a pick.
+    expirePicks()
+    const lapsed = await ai(t, 'POST', '/google/drive/put', putBody({ name: '置けない.md' }))
+    expect([lapsed.status, lapsed.body.code]).toEqual([403, 'DRIVE_FOLDER_NOT_PICKED'])
+    expect(lapsed.body.error).toContain('報告')
+    expect(lapsed.body.error).not.toContain('drive_pick_folder')
+    await pickFolder('jd-alice', FOLDER)
+  })
+
   it('a receipt of another folder is not there for a run (nothing answered, Google not asked)', async () => {
     const job = await approvedJob()
     await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })

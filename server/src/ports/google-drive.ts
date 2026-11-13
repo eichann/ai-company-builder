@@ -63,6 +63,50 @@ export interface DriveDocBaseline {
 }
 
 /**
+ * The AI read a Google document in a consultation (google-drive.md "Continuing a document people edited"): what it read —
+ * the sha256 of the text export it was given and the newest revision then. An overwrite of a document people changed
+ * needs the newest read of this consultation to be what the document is now.
+ */
+export interface DriveDocRead {
+  userId: string
+  conversationId: string
+  fileId: string
+  fingerprint: string
+  revision: string
+  revisionAt: string
+  readAt: string
+}
+
+/**
+ * A put that waits for the member's 「上書きする」 (google-drive.md "Continuing a document people edited"): the request as
+ * the AI made it (content included, fixed by its sha256), what the document was when the AI read it, and the comments
+ * seen then. `open` until pressed, declined or expired; the content is removed once it is decided.
+ */
+export interface DriveOverwriteConfirmationRow {
+  id: string
+  userId: string
+  conversationId: string
+  requestKey: string
+  folderId: string
+  fileId: string
+  name: string
+  kind: 'html' | 'markdown'
+  sha256: string
+  content: Uint8Array | null
+  recordId: string | null
+  fingerprint: string
+  revision: string
+  revisionAt: string
+  /** sha256 of the document's comments as seen then (ids, times, deleted): one more comment afterwards asks again. */
+  commentsSeen: string
+  editors: string[]
+  commented: boolean
+  state: 'open' | 'written' | 'declined'
+  createdAt: string
+  expiresAt: string
+}
+
+/**
  * A one-time pick ticket for Google Picker in the member's browser (google-drive.md "Picker and its
  * token"): only the ticket's sha256 is stored. `result` is the JSON of the picks the server kept (the
  * service writes and reads it), `error` a fixed sentence when the picking failed.
@@ -101,6 +145,28 @@ export interface GoogleDriveRepository {
   picksOfKind(userId: string, kind: DrivePickRow['kind'], now: string, limit: number): DrivePickRow[]
   /** Removes expired picks (every member). */
   prunePicks(now: string): void
+  /**
+   * Renews the member's own **live** pick of this kind to `expiresAt` (never shortens it; an expired or unknown pick
+   * stays as it is): a pick lasts since it was last used (google-drive.md "How long a pick lasts").
+   */
+  renewPick(userId: string, fileId: string, kind: DrivePickRow['kind'], expiresAt: string, now: string): void
+  /** The member's pick of this file / folder whether or not it is still live (an expired one until pruned), or null. */
+  anyPick(userId: string, fileId: string): DrivePickRow | null
+
+  /** Keeps what the AI read of a document in a consultation (the newest read replaces the one before). */
+  keepDocRead(row: DriveDocRead): void
+  /** The newest read of this document in this consultation by the member's AI, or null. */
+  docRead(userId: string, conversationId: string, fileId: string): DriveDocRead | null
+
+  createOverwriteConfirmation(row: DriveOverwriteConfirmationRow): void
+  /** The member's own confirmation by id (any state), or null. */
+  overwriteConfirmation(userId: string, id: string): DriveOverwriteConfirmationRow | null
+  /** The member's own open, unexpired confirmation for this Drive file (at most one waits per file), or null. */
+  openOverwriteConfirmation(userId: string, fileId: string, now: string): DriveOverwriteConfirmationRow | null
+  /** Moves an open confirmation to `written` / `declined` and removes its content; false when it was not open. */
+  settleOverwriteConfirmation(id: string, to: 'written' | 'declined'): boolean
+  /** Removes confirmations that ended before `before` (every member). */
+  pruneOverwriteConfirmations(before: string): void
 
   /** Writes a new put in `sending` (the AI's copies its consultation's Skills, answered as `skills`; `row.skills` is ignored); when the member already has one with this request key, returns it instead. */
   claimPut(row: DrivePutRow): { claimed: true; skills: SkillUse[] | null } | { claimed: false; existing: DrivePutRow }
