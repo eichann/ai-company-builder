@@ -116,6 +116,17 @@ test('C: drive_pick_files shows just the given Drive files; ones the AI can alre
   assert.match(await t.execute('drive_pick_files', { fileIds: ['../etc', 'x'] }), /入力が正しくありません/)
   assert.match(await t.execute('drive_pick_files', { fileIds: Array.from({ length: 11 }, (_, i) => `fake-doc-many-${String(i).padStart(4, '0')}`) }), /入力が正しくありません/)
   assert.equal(asked.length, 2)
+  // An own put beyond the list's first page is asked by its id: no chooser either.
+  const older = fakeAccess('read', c => (c.path === '/google/drive/status?fileId=fake-upload-older-0001'
+    ? status({ puts: [{ fileId: 'fake-upload-older-0001', name: '古い', mimeType: 'application/pdf', folderId: FOLDER, link: null, at: 't' }] }) : status()))
+  const o = await driveTools(older.access, { ok: true, picks: [], refused: 0 })
+  assert.equal(JSON.parse(await o.t.execute('drive_pick_files', { fileIds: ['fake-upload-older-0001'] })).alreadyUsable, true)
+  assert.equal(o.asked.length, 0)
+  // drive_picked pages with the server's whole cursor (its time and put id).
+  const cursor = `2026-11-01T00:00:59.000Z|drive-put-${'a'.repeat(36)}`
+  const paged = fakeAccess('read', () => status())
+  await (await driveTools(paged.access)).t.execute('drive_picked', { olderThan: cursor })
+  assert.equal(paged.calls.at(-1)!.path, `/google/drive/status?putsBefore=${encodeURIComponent(cursor)}`)
   // drive_picked marks what drive_read cannot read.
   const picked = JSON.parse(await t.execute('drive_picked', {}))
   assert.deepEqual(picked.picks.map((p: { readable?: boolean }) => p.readable), [undefined, false])
@@ -308,6 +319,22 @@ test('B: the card\'s ［やめる］ stops the chooser it started: the pick\'s s
   assert.deepEqual(await late.api.linkDriveFiles('co1', 'task-0000aa', 7), { success: true, recordId: 'task-0000aa', linked: [], ended: 'timed-out' })
   const failed = tasksHarness({ pickDriveFiles: async () => ({ ok: false, ended: null, message: '選んだものを確かめられませんでした。' }) })
   assert.deepEqual(await failed.api.linkDriveFiles('co1', 'task-0000aa', 7), { success: false, offline: false, error: '選んだものを確かめられませんでした。' })
+})
+
+test('B: ［やめる］ while the member\'s own files are still being looked up for a pasted link: nothing is linked, no chooser opens', async () => {
+  let answer: (v: Array<{ id: string; name: string; source: 'picked' }>) => void = () => {}
+  const picks: string[][] = []
+  const h = tasksHarness({
+    driveChoices: () => new Promise(r => { answer = r }),
+    pickDriveFiles: async (_c, ids) => { picks.push(ids); return { ok: true, files: [] } },
+  })
+  const linking = h.api.linkDriveFiles('co1', 'task-0000aa', 7, { fileIds: ['1AbCdEfGhIjKlMnOp'] })
+  await new Promise(r => setTimeout(r, 0))
+  assert.deepEqual(h.api.cancelDrivePick('co1'), { stopped: true })
+  answer([{ id: '1AbCdEfGhIjKlMnOp', name: 'A社 提案書', source: 'picked' }])
+  assert.deepEqual(await linking, { success: true, recordId: 'task-0000aa', linked: [], ended: 'cancelled' })
+  assert.deepEqual(picks, [])
+  assert.deepEqual(h.sent, [])
 })
 
 test('C / D (card): a pasted link to the member\'s own file is linked without the chooser; anything else still opens it; what was not usable is said', async () => {

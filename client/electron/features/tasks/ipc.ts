@@ -357,26 +357,31 @@ export function createTasksApi(deps: TasksDeps) {
       let listed = o.chosen === undefined ? null : driveChoicesOf(o.chosen)
       if (o.chosen !== undefined && !listed) return BAD_INPUT
       const pasted = drivePreselectIds(o.fileIds)
+      // One chooser (or own-file lookup) per company at a time; the card's ［やめる］ aborts it (`cancelDrivePick`) — also
+      // while the own files are still being looked up (registered before any wait).
+      const stop = new AbortController()
+      if (!listed) {
+        picking.get(companyId)?.abort()
+        picking.set(companyId, stop)
+      }
+      const release = () => { if (picking.get(companyId) === stop) picking.delete(companyId) }
       // A pasted link to a file that is already the member's own (a live pick or what their AI put): linked straight
       // away, no Picker (owner FB 2026-11-14). The server checks each again (`linkable`).
       if (!listed && pasted.length > 0 && deps.driveChoices) {
         let own: TaskDriveChoice[] = []
         try { own = driveChoicesOf(await deps.driveChoices(companyId)) ?? [] } catch { /* unknown: the Picker */ }
         const known = pasted.map(id => own.find(f => f.id === id))
-        if (known.every(f => f !== undefined)) listed = known as TaskDriveChoice[]
+        if (stop.signal.aborted) { release(); return { success: true, recordId, linked: [], ended: 'cancelled' } }
+        if (known.every(f => f !== undefined)) { listed = known as TaskDriveChoice[]; release() }
       }
-      if (!listed && !deps.pickDriveFiles) return { success: false, offline: false, error: 'この画面からは Google Drive を使えません。' }
+      if (!listed && !deps.pickDriveFiles) { release(); return { success: false, offline: false, error: 'この画面からは Google Drive を使えません。' } }
       let picked: Awaited<ReturnType<NonNullable<TasksDeps['pickDriveFiles']>>>
       if (listed) picked = { ok: true, files: listed }
       else {
-        // One chooser per company at a time; the card's ［やめる］ aborts it (`cancelDrivePick`).
-        picking.get(companyId)?.abort()
-        const stop = new AbortController()
-        picking.set(companyId, stop)
         try {
           picked = await deps.pickDriveFiles!(companyId, pasted, stop.signal)
         } finally {
-          if (picking.get(companyId) === stop) picking.delete(companyId)
+          release()
         }
       }
       if (!picked.ok) return picked.ended ? { success: true, recordId, linked: [], ended: picked.ended } : { success: false, offline: false, error: picked.message }

@@ -407,7 +407,11 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
     const out: Array<{ id: string; name: string; kind: 'file'; mimeType: string }> = []
     for (const id of ids) {
       const pick = s.picks.find(p => p.id === id && p.kind === 'file' && driveAiReadable(p.mimeType))
-      const put = pick ? undefined : (s.puts ?? []).find(p => p.fileId === id)
+      let put = pick ? undefined : (s.puts ?? []).find(p => p.fileId === id)
+      if (!pick && !put) {
+        // An older put beyond the list's first page: asked by its id.
+        try { put = ((await access.call('GET', `/google/drive/status?fileId=${encodeURIComponent(id)}`, undefined, signal) as DriveAiStatus).puts ?? []).find(p => p.fileId === id) } catch { /* not known: the chooser */ }
+      }
       if (pick) out.push({ id, name: pick.name, kind: 'file', mimeType: pick.mimeType })
       else if (put) out.push({ id, name: put.name, kind: 'file', mimeType: put.mimeType })
       else return null
@@ -443,7 +447,7 @@ export async function createDriveTools(access: RecordTurnAccess, deps: DriveTool
     {
       name: 'drive_picked', readOnly: true,
       schema: z.object({
-        olderThan: z.string().max(40).optional().describe('前の答えの putFilesNext：putFiles の続き（もっと前に置いたファイル） / the previous answer\'s putFilesNext: the next page of putFiles'),
+        olderThan: z.string().max(160).optional().describe('前の答えの putFilesNext：putFiles の続き（もっと前に置いたファイル） / the previous answer\'s putFilesNext: the next page of putFiles'),
       }).strict(),
       display: recordToolDisplay('drive_picked'),
       description: 'メンバーがこれまでに選んだ Drive のファイルとフォルダ（まだ使えるもの）と、drive_put でこれまでに置いたファイル（putFiles：drive_read で読み返せて、上書きできるもの）。\nThe Drive files and folders the member picked earlier that are still usable, and the files earlier drive_put calls made (putFiles: drive_read reads them back, and updateFileId may name them).',

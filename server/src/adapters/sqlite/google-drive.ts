@@ -123,9 +123,10 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
       return (conn.prepare(`SELECT ${PUT_COLUMNS} FROM (
           SELECT *, ROW_NUMBER() OVER (PARTITION BY file_id ORDER BY created_at DESC, id) AS nth FROM google_drive_puts
           WHERE company_id = ? AND user_id = ? AND state = 'done' AND file_id IS NOT NULL
-        ) WHERE nth = 1 AND (? IS NULL OR folder_id = ?) AND (? IS NULL OR created_at < ?)
+        ) WHERE nth = 1 AND (? IS NULL OR folder_id = ?) AND (? IS NULL OR created_at < ? OR (created_at = ? AND id > ?))
         ORDER BY created_at DESC, id LIMIT ?`)
-        .all(companyId, userId, opts.folderId ?? null, opts.folderId ?? null, opts.before ?? null, opts.before ?? null, opts.limit) as PutRow[]).map(toPut)
+        .all(companyId, userId, opts.folderId ?? null, opts.folderId ?? null, opts.before?.createdAt ?? null, opts.before?.createdAt ?? null, opts.before?.createdAt ?? null,
+          opts.before?.id ?? null, opts.limit) as PutRow[]).map(toPut)
     },
     runPuts(userId, runId, limit) {
       return (conn.prepare(`SELECT ${PUT_COLUMNS} FROM google_drive_puts WHERE company_id = ? AND user_id = ? AND run_id = ? AND state = 'done' AND file_id IS NOT NULL

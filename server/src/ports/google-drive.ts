@@ -112,9 +112,9 @@ export interface GoogleDriveRepository {
   /**
    * The files the member's own puts made (state done): **one row per Drive file** — its latest done put — newest first,
    * so re-putting one file many times never pushes another out of the list. `folderId`: only files whose latest put is
-   * in that folder; `before`: only those whose latest put is older than this time (the next page).
+   * in that folder; `before`: only those after this one in that order (the next page: its time and id, so ties are never skipped).
    */
-  donePutFiles(userId: string, opts: { limit: number; folderId?: string; before?: string }): DrivePutRow[]
+  donePutFiles(userId: string, opts: { limit: number; folderId?: string; before?: { createdAt: string; id: string } }): DrivePutRow[]
   /** The member's own done puts made within this execution run (a scheduled job's deliverables), oldest first. */
   runPuts(userId: string, runId: string, limit: number): DrivePutRow[]
   /** Settles a put still in `sending` / `unknown` (true when a row changed). */

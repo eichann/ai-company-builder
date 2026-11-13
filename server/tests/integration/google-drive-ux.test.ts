@@ -213,6 +213,18 @@ describe('A: a file an earlier put made stays updatable, however many puts came 
     expect((await ai(token, 'GET', '/status?putsBefore=yesterday')).body.data.puts).toHaveLength(50)
   })
 
+  it('files put in the same instant across a page boundary are never skipped (the cursor holds the time and the put id)', async () => {
+    db.prepare('DELETE FROM google_drive_puts').run()
+    const same = '2026-11-02T00:00:00.000Z'
+    for (let i = 0; i < 53; i++) receipt('m-sato', `fake-upload-tie-${String(i).padStart(4, '0')}`, { created_at: same, finished_at: same })
+    const token = await tokenFor('m-sato', 'read')
+    const first = (await ai(token, 'GET', '/status')).body.data
+    const second = (await ai(token, 'GET', `/status?putsBefore=${encodeURIComponent(first.putsNext)}`)).body.data
+    const all = [...first.puts, ...second.puts].map((p: Json) => p.fileId)
+    expect(all).toHaveLength(53)
+    expect(new Set(all).size).toBe(53)
+  })
+
   it('the app\'s 「つなぐ」 list is one entry per file too', async () => {
     db.prepare('DELETE FROM google_drive_puts').run()
     receipt('m-sato', 'fake-upload-old-report-0001')

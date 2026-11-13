@@ -207,7 +207,7 @@ The AI reads and writes **only** the member's own live picks — and the files t
   the Drive tools only when available; `reason: 'picker-not-configured'` (Google on, the admin has not registered the
   Picker): the app gives no tools and one sentence in the instructions (`DRIVE_NOT_SET_UP_INSTRUCTIONS`; `tools.ts` keeps the
   instructions of a provider with no tools on purpose). **`puts` is one entry per Drive file** (its latest done put,
-  `donePutFiles`, newest first, 50 at a time; `putsNext` → `?putsBefore=<it>` the next page) — owner FB 2026-11-14: the old
+  `donePutFiles`, newest first, 50 at a time; `putsNext` = `<createdAt>|<put id>` → `?putsBefore=<it>` the next page, ties at the boundary never skipped) — owner FB 2026-11-14: the old
   list was the member's last 30 receipts, so re-putting one file pushed every other file out and the app's pre-check then
   refused to overwrite them. `?fileId=<id>`: just that file's latest put (`putOfFile`, a job's run only in its folder),
   whatever its age — what `drive_put` asks before an overwrite (an older server ignores the query and answers the list). `POST /read { fileId }`: the member's own live pick of a **file**, or a file

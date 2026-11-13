@@ -580,7 +580,9 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       // and only the files runs of the same job made (what it may update).
       const scopedPick = scope ? h.googleDrive.pick(member.userId, scope.folderId, now) : null
       const picks = scope ? (scopedPick && scopedPick.kind === 'folder' ? [scopedPick] : []) : h.googleDrive.picks(member.userId, now, PICKS_LISTED)
-      const before = typeof query.putsBefore === 'string' && /^\d{4}-\d{2}-\d{2}T[\d:.]{8,15}Z$/.test(query.putsBefore) ? query.putsBefore : undefined
+      // The cursor is the last row's time and put id (`<createdAt>|<id>`): files put in the same instant are never skipped.
+      const cursor = typeof query.putsBefore === 'string' ? /^(\d{4}-\d{2}-\d{2}T[\d:.]{8,15}Z)\|(drive-put-[A-Za-z0-9_-]{1,80})$/.exec(query.putsBefore) : null
+      const before = cursor ? { createdAt: cursor[1], id: cursor[2] } : undefined
       let rows: DrivePutRow[]
       let next: string | undefined
       if (query.fileId !== undefined) {
@@ -591,7 +593,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         rows = h.googleDrive.donePutFiles(member.userId, { limit: PUT_FILES_LISTED + 1, ...(scope ? { folderId: scope.folderId } : {}), ...(before ? { before } : {}) })
         if (rows.length > PUT_FILES_LISTED) {
           rows = rows.slice(0, PUT_FILES_LISTED)
-          next = rows[rows.length - 1].createdAt
+          next = `${rows[rows.length - 1].createdAt}|${rows[rows.length - 1].id}`
         }
       }
       const puts: DriveUpdatableFile[] = []
