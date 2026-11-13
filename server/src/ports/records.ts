@@ -90,8 +90,7 @@ export interface RecordLinkRow {
 }
 
 /**
- * What ACB kept of a Google Drive file when a member linked it (records.md "File links without the
- * shared folder"): the revision it was at, its name as picked (shown to the linker only), the sha256
+ * What ACB kept of a Google Drive file when a member linked it (records.md "Drive and PC file links"): the revision it was at, its name as picked (shown to the linker only), the sha256
  * of the content ACB read then (null when ACB could not read it), its MIME type and when.
  */
 export interface DriveLinkMeta {

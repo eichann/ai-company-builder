@@ -19,6 +19,13 @@ import { BundleActions, type BundleActInput } from './BundleActions'
 import { linkRows, meetingOpenRows, type NotDownloadedFolderOf } from './linkRows'
 import { IncomingActions, IncomingBody, IncomingLine, MeetingLine, MeetingOutputs, MeetingSummary, OpenButton, ReplyRequestActions } from './RecordDetails'
 import { RecordMarks } from './RecordRows'
+import { useDriveLinking } from '../../../shared/hooks/useDriveLinking'
+import { DriveLinkAction } from '../../../shared/ui/DriveLinkAction'
+import { driveFileRows } from '../../../shared/ui/driveFileRows'
+import { unlinkTypedFile } from '../../../shared/ipc/drive-links'
+import { droppedText, driveFilesNote, mayCarryLink } from '../../../../shared/drive-links'
+import type { TaskDriveLinkOptions } from '../../../../shared/tasks'
+import type { LinkedGroupExtra, LinkedRow } from '../../../shared/ui/LinkedColumn'
 
 interface Props {
   companyId: string
@@ -97,6 +104,9 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
   const [busy, setBusy] = useState(false)
   // A file, folder, record or consultation dropped on 「つながっているもの」 is linked (owner decision 2026-11-03).
   const linkDrop = useLinkDrop({ companyId, rootPath, targetWord: result?.success ? result.card.record.typeLabel : '記録', onChanged: reload })
+  // A 案件・プロジェクト with a file link: ［Google Drive のファイルをつなぐ］ as on the task card (owner decision 2026-11-13).
+  const driveOn = result?.success === true && result.card.driveLink === true
+  const drive = useDriveLinking(companyId, driveOn)
   if (result === null) {
     return <div className="h-full flex items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />{CALM.loading}</div>
   }
@@ -179,6 +189,49 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
       </p>
     )}
   </>
+  // Google Drive files (records.md "Drive and PC file links"): the member's own list or Google's chooser, a pasted /
+  // dropped link opening the chooser on that file; each linked at the version the previous one moved to.
+  const linkDrive = async (options?: TaskDriveLinkOptions): Promise<string | null> => {
+    if (card.version === undefined) return null
+    setBusy(true)
+    setError(null)
+    let r: Awaited<ReturnType<typeof drive.link>>
+    try {
+      r = await drive.link(card.record.id, card.version, options)
+    } finally {
+      setBusy(false)
+    }
+    if (r.done) changed(r.done, null)
+    else reload()
+    return r.error
+  }
+  const linkDriveText = (text: string) => {
+    // While the chooser is open (busy), another link would open a second chooser window.
+    if (busy) return
+    const read = drive.fromText(text)
+    if ('options' in read) void linkDrive(read.options).then(e => { if (e) setError(e) })
+    else setError(read.error)
+  }
+  const unlinkDrive = async (fileId: string, label: string) => {
+    if (card.version === undefined) return
+    setBusy(true)
+    let r: Awaited<ReturnType<typeof unlinkTypedFile>>
+    try {
+      r = await unlinkTypedFile(companyId, card.record.id, { kind: 'drive', fileId }, card.version)
+    } finally {
+      setBusy(false)
+    }
+    if (!r.success) { setError(r.error); reload(); return }
+    // Linked again through the chooser, not 取り消す (as on the task card).
+    changed(`「${label}」とのつながりを外しました`, null)
+  }
+  const driveRows = driveFileRows(card.driveFiles ?? [], busy, viewOnly ? undefined : (fileId, label) => void unlinkDrive(fileId, label))
+  const driveExtra: LinkedGroupExtra | null = driveOn && !viewOnly ? {
+    name: 'ファイル', kind: 'file',
+    action: <DriveLinkAction companyId={companyId} linked={(card.driveFiles ?? []).map(f => f.fileId)} busy={busy} usable={drive.usable} note={drive.note} hint={drive.hint}
+      onLink={chosen => linkDrive(chosen ? { chosen } : undefined)} onLinkText={linkDriveText} />,
+    note: driveFilesNote(card.record.typeLabel),
+  } : null
   const participants = card.privateFolder && card.participants
     ? <ProjectParticipants companyId={companyId} card={{ privateFolder: card.privateFolder, participants: card.participants, viewers: card.viewers, record: card.record }} onChanged={reload} />
     : null
@@ -193,11 +246,19 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
       }} />
     : null
   return <>{makePrivateDialog}<CardBody participants={participants} card={card} rootPath={rootPath} incoming={incoming} renderMeeting={viewOnly ? undefined : renderMeeting} onReload={reload} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
-    field={field} notes={notes} notDownloadedFolderOf={notDownloadedFolderOf} drop={{ label: 'ファイル・フォルダ・やること・相談', accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(card.record.id, e) }, notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }} onUnlink={(link, label) => void unlink(link, label)}
+    field={field} notes={notes} notDownloadedFolderOf={notDownloadedFolderOf} driveRows={driveRows} driveExtra={driveExtra}
+    drop={{ label: `ファイル・フォルダ・${driveExtra ? 'Drive のリンク・' : ''}やること・相談`,
+      // A Drive link dragged from the browser is linked too, where the card offers Drive.
+      accepts: e => linkDrop.accepts(e) || (!!driveExtra && !busy && mayCarryLink(e.dataTransfer)),
+      onDrop: e => { if (linkDrop.accepts(e) || !driveExtra) linkDrop.drop(card.record.id, e); else linkDriveText(droppedText(e.dataTransfer)) },
+      notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }} onUnlink={(link, label) => void unlink(link, label)}
     consult={consultationLinks(consultations, onConsult && (fresh => onConsult({ id: card.record.id, title: card.record.title }, fresh)))} /></>
 }
 
-function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink, participants }: {
+function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink, participants, driveRows, driveExtra }: {
+  /** Linked Google Drive files' rows, and ［Google Drive のファイルをつなぐ］ where the card offers it. */
+  driveRows: LinkedRow[]
+  driveExtra: LinkedGroupExtra | null
   /** A 非公開 案件・プロジェクト's 参加者 (`ProjectParticipants`). */
   participants?: ReactNode
   drop: LinkedDrop
@@ -245,7 +306,7 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
   const rows = [...linkRows(card.links, rootPath, notDownloadedFolderOf).filter(r => !shownAtHead.has(r.key)).map(r => ({
     ...(turns.has(r.key) ? { ...r, sub: turns.get(r.key) ?? undefined } : r),
     ...(removable.has(r.key) ? { menu: [{ label: 'つながりを外す', hint: '相手の記録は消えません', onClick: () => onUnlink(removable.get(r.key)!, r.label) }] } : {}),
-  })), ...(detail?.kind === 'meeting' ? meetingOpenRows(detail) : []), ...consult.rows]
+  })), ...driveRows, ...(detail?.kind === 'meeting' ? meetingOpenRows(detail) : []), ...consult.rows]
   // A meeting's chip says the AI has read it: the band stays only while the AI works.
   const ai = detail?.kind === 'meeting' && !card.ai?.working ? null : card.ai
   return (
@@ -254,7 +315,7 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
       top={card.featureOff || ai ? <>{card.featureOff && <FeatureOffBand />}{ai && <AiBand ai={ai} onShowHistory={() => setHistoryOpen(true)} />}</> : null}
       bottomLast={detail?.kind === 'meeting'}
       bottom={<><HistoryFold lines={card.history} open={historyOpen} onToggle={setHistoryOpen} /><FieldsFold fields={card.fields} /></>}
-      links={<LinkedColumn rows={rows} notice={notes} drop={drop} extras={consult.extra ? [consult.extra] : []} first={record.thing === 'bundle' ? 'task' : undefined} />}>
+      links={<LinkedColumn rows={rows} notice={notes} drop={drop} extras={[...(driveExtra ? [driveExtra] : []), ...(consult.extra ? [consult.extra] : [])]} first={record.thing === 'bundle' ? 'task' : undefined} />}>
       {detail?.kind !== 'meeting' && field}
       {body}
       {source}

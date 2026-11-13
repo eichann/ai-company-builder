@@ -5,7 +5,7 @@ import { actionWho, INTERFACES, isSystemOnly, linkPersonWho, linkWhoName, OK_FIE
 import { ROLE_WHO_PREFIX } from '../../../shared/core/plugin-roles'
 import type { LedgerAttachment, LedgerChange, LedgerDecision, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { driveLinkTarget, fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
-import { DRIVE_VERSION_NOT_FIXED, FILE_LINK_KIND_NOT_HERE, LOCAL_FILE_NOT_SHARED } from '../../../shared/core/company-folder'
+import { DRIVE_VERSION_NOT_FIXED, LOCAL_FILE_NOT_SHARED } from '../../../shared/core/company-folder'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordFileRepo } from '../../ports/record-files'
 import type { RecordLinkRow, RecordRepository, RecordRow } from '../../ports/records'
@@ -325,13 +325,11 @@ export function acting(ctx: EngineContext) {
         const noFolder = fileLinksUnavailable(deps.hasCompanyFolder, member.companyId)
         const linked = records.linksFrom([row.id]).filter(l => l.targetPath !== null && action.attach.includes(l.name))
         for (const a of b.attachments as Array<Record<string, unknown>>) {
-          // A company without the shared folder hands over a Drive file the record links, at the
-          // revision and fingerprint kept when it was linked; a file of one PC never (records.md
-          // "File links without the shared folder").
+          // A Drive file the record links (any company, owner decision 2026-11-13), at the revision and
+          // fingerprint kept when it was linked; a file of one PC never (records.md "Drive and PC file links").
           if (a?.target !== undefined) {
             const t = a.target as Record<string, unknown> | null
             if (t?.kind === 'local') return bad(LOCAL_FILE_NOT_SHARED.error, LOCAL_FILE_NOT_SHARED.code)
-            if (!noFolder) return conflict(FILE_LINK_KIND_NOT_HERE.error, FILE_LINK_KIND_NOT_HERE.code)
             const target = t?.kind === 'drive' ? driveLinkTarget(t.fileId) : null
             const link = target ? linked.find(l => l.name === a.link && l.targetPath === target) : undefined
             if (!link) return bad('attachments: { link, target: { kind: drive, fileId } } of Drive files this record links', 'BAD_ATTACHMENT')
@@ -373,9 +371,8 @@ export function acting(ctx: EngineContext) {
             const v = r ? (records.states([r.id])[0]?.version ?? 0) : 0
             if (!r || m.version > v) return bad('materials: a record you can read, at a version it has had', 'BAD_MATERIAL')
           } else if (m.kind === 'drive') {
-            // A Drive file the record links (a company without the shared folder), fixed at the
+            // A Drive file the record links (any company, owner decision 2026-11-13), fixed at the
             // revision and fingerprint kept when it was linked.
-            if (!fileLinksUnavailable(deps.hasCompanyFolder, member.companyId)) return conflict(FILE_LINK_KIND_NOT_HERE.error, FILE_LINK_KIND_NOT_HERE.code)
             const link = linksNow.find(l => l.targetPath !== null && l.targetPath === driveLinkTarget(m.fileId))
             if (!link) return bad('materials: a Drive file this record links', 'BAD_MATERIAL')
             if (!link.drive?.revisionId || !link.drive.sha256) return bad(DRIVE_VERSION_NOT_FIXED.error, DRIVE_VERSION_NOT_FIXED.code)

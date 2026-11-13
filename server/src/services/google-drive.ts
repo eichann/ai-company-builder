@@ -71,8 +71,7 @@ export interface GoogleDriveDeps {
 }
 
 /**
- * A picked file checked for linking it to a record (records.md "File links without the shared
- * folder"): its revision when linked, its name as picked, its type and the sha256 of the content ACB
+ * A picked file checked for linking it to a record (records.md "Drive and PC file links"): its revision when linked, its name as picked, its type and the sha256 of the content ACB
  * read (export or download, as `read` does; null when it could not be read). Nothing of it is logged.
  */
 export interface DriveLinkableFile {
@@ -137,6 +136,23 @@ function failedError(raw: string | null): string {
 const NO_CONSENT = 'Google Drive を使う許可がまだありません。アプリが Google の画面を開くので、メンバーに「許可」を押してもらってください（Drive は、メンバーが選んだファイルとフォルダだけを使います）。'
 
 /** A Google call that did not give a usable answer → the member-facing refusal. */
+const NAMED_ENTITIES: Record<string, string> = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", nbsp: ' ' }
+const codePoint = (n: number) => (Number.isInteger(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : '')
+/**
+ * HTML and JSON can spell words as escapes (`&#x3010;`, `\u0049gnore`): a copy with them decoded, for the
+ * instruction-like flags only — the text handed to the AI stays as read. Null for any other type.
+ */
+function decodedForFlags(text: string, mimeType: string): string | null {
+  if (mimeType === 'text/html') {
+    return text
+      .replace(/&#x([0-9a-f]{1,6});?/gi, (_, h: string) => codePoint(parseInt(h, 16)))
+      .replace(/&#(\d{1,7});?/g, (_, d: string) => codePoint(Number(d)))
+      .replace(/&(lt|gt|amp|quot|apos|nbsp);/gi, (_, n: string) => NAMED_ENTITIES[n.toLowerCase()] ?? '')
+  }
+  if (mimeType === 'application/json') return text.replace(/\\u([0-9a-fA-F]{4})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)))
+  return null
+}
+
 function googleRefusal(r: Extract<GoogleResult, { ok: false }>, noAccess: string): Outcome<never> {
   if (r.kind === 'not-sent') {
     if (['no-grant', 'grant-revoked', 'grant-stopped', 'scope-not-granted', 'token-refused'].includes(r.reason)) {
@@ -722,7 +738,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
 
     /**
      * A file the member picked, checked for linking it to a record (session only; the records route
-     * asks it before the engine links, records.md "File links without the shared folder"). Only the
+     * asks it before the engine links, records.md "Drive and PC file links"). Only the
      * member's own live pick of a file, or a file their own put made (done), opened with their own
      * `drive.file` token — never anyone else's, never to look at a file someone else linked. The revision is Drive's `headRevisionId`
      * (a binary file) or `version:<n>` (a Google document, which has no head revision); the sha256 is
@@ -764,7 +780,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
 
     /**
      * The file a put of this member made, to link it to the consultation's record right after the put
-     * (records.md "File links without the shared folder"): the receipt is the proof — the member's own
+     * (records.md "Drive and PC file links"): the receipt is the proof — the member's own
      * put, done, Drive's file id known. Its facts come from the receipt (the revision Drive answered,
      * the name as put, the sha256 of the bytes ACB uploaded); Google is not asked again. Null otherwise.
      */
@@ -795,22 +811,30 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       return ok({ files: [...out.values()].sort((a, b) => b.at.localeCompare(a.at)).slice(0, OWN_FILES_LISTED) })
     },
 
-    /** POST /api/records-ai/google/drive/read { fileId } (any token): a picked file, as outside text (or a PDF's bytes). */
+    /**
+     * POST /api/records-ai/google/drive/read { fileId } (any token): the member's own live pick of a file, or a file
+     * their own put made (`putOfFile`: this member, this company, a done receipt — ACB created it, so their `drive.file`
+     * token opens it; owner decision 2026-11-13), as outside text (or a PDF's bytes). Never another member's put.
+     */
     async read(member: Member, body: unknown): Promise<Outcome<DriveReadAnswer>> {
       if (!isObj(body) || !isDriveId(body.fileId)) return refuse('bad-request', 'fileId must be a Drive id')
       const fileId = body.fileId
-      const pick = handle(member.companyId).googleDrive.pick(member.userId, fileId, clock.now())
-      if (!pick || pick.kind !== 'file') {
-        return refuse('forbidden', 'このファイルはメンバーが選んだものではありません。drive_pick_files でメンバーに選んでもらってください。', { code: 'DRIVE_NOT_PICKED' })
+      const h = handle(member.companyId).googleDrive
+      const live = h.pick(member.userId, fileId, clock.now())
+      const pick = live?.kind === 'file' ? live : null
+      const put = pick ? null : h.putOfFile(member.userId, fileId)
+      if (!pick && !put) {
+        return refuse('forbidden', 'このファイルはメンバーが選んだものでも、このメンバーの drive_put で置いたものでもありません。drive_pick_files でメンバーに選んでもらってください。', { code: 'DRIVE_NOT_PICKED' })
       }
+      const knownName = pick?.name ?? put?.name ?? ''
       const noAccess = 'このファイルを Google Drive から開けませんでした（消されたか、見られなくなった可能性があります）。'
       const m = await meta(member.companyId, member.userId, fileId)
       if (!m.ok) return googleRefusal(m, noAccess)
       const f = isObj(m.json) ? m.json : {}
       const mimeType = str(f.mimeType) ?? ''
       const how = DRIVE_READ_AS[mimeType]
-      if (!how || f.trashed === true) return refuse('bad-request', 'この種類のファイルは読めません（Google ドキュメント・スライド・スプレッドシート、PDF、テキストだけ）。', { code: 'DRIVE_TYPE_UNREADABLE' })
-      const file = { id: fileId, name: (str(f.name) ?? pick.name).normalize('NFC'), mimeType, modifiedTime: str(f.modifiedTime) }
+      if (!how || f.trashed === true) return refuse('bad-request', 'この種類のファイルは読めません（Google ドキュメント・スライド・スプレッドシート、PDF、テキスト・Markdown・CSV・HTML・JSON だけ）。', { code: 'DRIVE_TYPE_UNREADABLE' })
+      const file = { id: fileId, name: (str(f.name) ?? knownName).normalize('NFC'), mimeType, modifiedTime: str(f.modifiedTime) }
       const base = { file, header: DRIVE_TEXT_HEADER, footer: DRIVE_TEXT_FOOTER }
       if (how.how === 'download' && how.kind === 'pdf') {
         const r = await drive(member.companyId, member.userId, { method: 'GET', path: `/drive/v3/files/${fileId}`, query: { alt: 'media', supportsAllDrives: 'true' }, binary: true, operation: 'drive.files.download' })
@@ -830,7 +854,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       return ok({
         // 【】 → 〔〕 (outside-text.ts): the text cannot close the block, in an older app too.
         ...base, text: neutralizeOutsideText(text), truncated, pdfBase64: null,
-        instructionLike: outsideTextFlags(text).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
+        instructionLike: [...new Set([...outsideTextFlags(text), ...outsideTextFlags(decodedForFlags(text, mimeType) ?? '')])]
+          .map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
       })
     },
 

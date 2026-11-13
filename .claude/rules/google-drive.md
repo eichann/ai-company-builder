@@ -176,15 +176,29 @@ Only the caller's rows: another member's names never reach them (test 「the mem
 opened with Google first (`drive.file` answers only for files picked for this app); a folder
 must be a folder the member can add to, a file a readable type (`DRIVE_READ_AS`); anything else
 is counted `refused`, not kept. Kept 90 days (folders) / 7 days (files); a re-pick renews.
-The AI reads and writes **only** the member's own live picks.
+The AI reads and writes **only** the member's own live picks — and the files the member's **own** puts made
+(reading them back and overwriting them: `putOfFile`, below).
 
 ## The AI's routes (`/api/records-ai/google/drive`, record token) and tools
 
-- `GET /status` → `{ available (Google on + Picker registered), granted, picks }` — the app adds
-  the Drive tools only when available. `POST /read { fileId }` (picked file only, else 403
-  `DRIVE_NOT_PICKED`): Docs / Slides → text/plain export, Sheets → text/csv, text files as is,
-  marked as outside text — Markdown as `text/markdown` (ACB's own puts) or `text/x-markdown` (what Drive has reported
-  for an uploaded `.md`) — (`DRIVE_TEXT_HEADER` / `FOOTER`, `instructionLike` from `outsideTextFlags`;
+- `GET /status` → `{ available (Google on + Picker registered), granted, picks, puts }` — the app adds
+  the Drive tools only when available. `POST /read { fileId }`: the member's own live pick of a **file**, or a file
+  **this member's own put made** (owner decision 2026-11-13; `putOfFile`: this member, this company, a `done` receipt —
+  ACB created it, so their `drive.file` token opens it without a pick; another member's put, a put in another company, a
+  receipt still `sending` / `unknown` are not theirs), else 403 `DRIVE_NOT_PICKED` with nothing asked of Google.
+  **A consultation's only**: a token bound to any run (a scheduled job's, a business plugin's step, a built-in step's —
+  also from an app too old to be route-scoped) gets 403 `NOT_IN_STEP` in the route, whatever the run's own route scope
+  says (defence in depth: the apps' allowlists already hide `drive_read` from unattended runs). Read
+  with the member's own token; a file trashed or gone answers as a picked one does (`DRIVE_TYPE_UNREADABLE` /
+  `DRIVE_NO_ACCESS`). Read only: nothing written to Drive, nothing of the content kept or logged. An own put is outside
+  text like any picked file (people may have edited it in Drive since). Docs / Slides → text/plain export, Sheets →
+  text/csv, text files as is, marked as outside text — Markdown as `text/markdown` (ACB's own puts) or `text/x-markdown`
+  (what Drive has reported for an uploaded `.md`); HTML (`text/html`) and JSON (`application/json`) as text too (owner
+  decision 2026-11-13: an AI reads back the HTML viewer it put) — characters only, never rendered or run; their
+  `instructionLike` flags are also computed on a copy with HTML entities / JSON `\u` escapes decoded (`decodedForFlags`;
+  the text returned stays as read) — so they are
+  pickable as well (`DRIVE_PICKABLE_MIMES` = the keys of `DRIVE_READ_AS`; `linkable`'s sha256 now covers them too) —
+  (`DRIVE_TEXT_HEADER` / `FOOTER`, `instructionLike` from `outsideTextFlags`;
   the text's `【】` → `〔〕`, server and app, `shared/core/outside-text.ts`), ≤ 200 000
   characters; a PDF (≤ 10 MB) as base64 — the app saves it at
   `.personal/google-drive/<id16>-<name>.pdf` (never synced) and returns the path.
@@ -212,7 +226,7 @@ The AI reads and writes **only** the member's own live picks.
   `VerifiedDriveFile` from **the member's own receipt** (fileId, revision, the name as put, the sha256 of
   the bytes uploaded — Google is not asked again; no body's file id is ever taken), and
   `recordEngine.linkDrivePut` runs every record check of `fileLink` (records on, readable, a type the AI
-  may act on, a company without the shared folder, not linked already) at the version current now, as
+  may act on, not linked already — in every company, owner decision 2026-11-13) at the version current now, as
   the AI (the one Drive link the AI may make). Answered as `linkedTo: { recordId }`; any refusal or
   error is logged with its code only and **never fails the put**. The tool says the file was linked.
   The server cannot tell which record the consultation is about (topics live on the PC): it trusts the
@@ -237,7 +251,8 @@ The AI reads and writes **only** the member's own live picks.
   and the tool's description says so in both languages (incident 2026-11-10: the AI told a member that the same name
   would not duplicate): without it every edited file is a new Drive file (and a new link); with it, the same file gets
   a new revision. `drive_picked` lists `putFiles` (the status's `puts`: the member's own done puts, once per file, newest
-  first — what `updateFileId` may name). Unattended runs see none of these tools (their allowlists) — except a
+  first — what `updateFileId` may name, and what `drive_read` reads back without a pick; the descriptions of
+  `drive_read`, `drive_picked`, `drive_pick_files` and `DRIVE_INSTRUCTIONS` say so). Unattended runs see none of these tools (their allowlists) — except a
   scheduled job's run with a deliverable place, which gets `drive_picked` and `drive_put` only (`jobs.md`). After a
   job's 「もう一度」, the retried run's turn resolves an earlier run's put id to its file (`madeFile`: the member's own
   done receipt, written by one of the occurrence's runs, whose recorded folder is the job's chosen one → `{ id: fileId,
@@ -424,10 +439,10 @@ The AI reads and writes **only** the member's own live picks.
   `keepForever` before an overwrite and its refusal, changed since, a picked `.md` read (both MIME types); app
   (`google-drive-tools.test.ts`): `as: 'file'` keeps a `.md`, a `.txt` never a document, the description's guidance.
 
-## Linked to a record (a company without the shared folder; `records.md` "File links without the shared folder")
+## Linked to a record (every company, owner decision 2026-11-13; `records.md` "Drive and PC file links")
 
 `linkable(member, fileId)` — asked only by the records session route `POST …/file-links { target: {
-kind: 'drive', fileId } }`, only for a company without the shared folder, and only **after every record
+kind: 'drive', fileId } }`, in a company with or without the shared folder, and only **after every record
 check passed** (`recordEngine.fileLinkBeforeDrive`: records on, the record exists and is readable, the
 body, the version, not linked already; a refusal there asks Google nothing): the member's own live
 pick of a file, or a file **their own** put made (`putOfFile`: ACB created it, so `drive.file` opens it;
@@ -435,7 +450,7 @@ another member's put is not theirs) (else 403 `DRIVE_NOT_PICKED`, nothing asked 
 token (`id,name,mimeType,trashed,headRevisionId,version`), then the content read as `read` does
 (export / download, ≤ 10 MB) only to compute its sha256 — nothing of it kept or logged. Never called
 for anyone but the member linking, never to look at a file someone else linked: other readers get
-the row without its name and open it in Drive. The app's 「Google Drive のファイルをつなぐ」 first offers
+the row without its name and open it in Drive. The app's 「Google Drive のファイルをつなぐ」 (on every company's task card and 案件・プロジェクト card) first offers
 the member's own files (`createDrivePicking().ownFiles` → `tasks:driveChoices`; `tasks-ui.md` "Linking
 files"; `tasks:linkDriveFiles(…, { chosen })` links them without the Picker) and otherwise is this
 connector's Picker flow (`createDrivePicking().pick(companyId, 'files')`, composed in `main.ts` into
@@ -446,7 +461,7 @@ Picker). The card's button is off with
 `google:status`; stopped by the operator or the server not ready → the app's usual `GOOGLE_UNAVAILABLE_TEXT`
 instead), says before the first press that Google will ask, for the chosen files only, and ignores a
 pasted / dropped link — and does not open its own list — while the chooser is already open (no second window).
-The AI reads a linked file only with `drive_read` (its member's own picks).
+The AI reads a linked file only with `drive_read` (its member's own picks and puts).
 When a linked Drive file is used as a decision material or an attachment, its fileId, revisionId and
 sha256 enter the record's ledger and are visible to every reader of the record; the file's name is not
 included (it stays the linker's).
@@ -461,6 +476,9 @@ Box: its own `deliveryPlaces` kind, `connector-roles.md`).
 
 `server/tests/integration/google-drive.test.ts` (fake Google, practice redirect; 「a picked file linked to a record」, including 「every record check comes first」; 「a put in a consultation about a task」: the receipt's facts, the AI as the actor, the name to the linker only, a replay never links again, a failed record check keeps the put done, the own-files list and another member's refusal; 「Google documents and overwriting」: HTML / Markdown as a document and every other form refused, an update keeps the id and link with a new version and is never sent twice, the key reused with another target, not the member's own put / another folder / another kind / another member — refused before Google is asked, a file moved away or shared outside by itself refused with nothing sent, a lost answer found, the task's link following the newest revision; the document baseline: kept after real Google's post-import move (file +4 s, its one revision +3 s, as observed after settling) and an untouched document updated again and again; not kept when a time is outside the 60 s window after the upload or before it (the file's or the newest revision's; a time not in RFC 3339 UTC form), the newest revision keeps moving (`still-settling`), a second new revision (even the member's own), an import merged into the revision before or the previous baseline's revision gone, the newest revision's or the file's time still moving (the read limit and the time budget), the quiet period (a move after it is seen; half of it is not enough) and the gap between reads (real-time moves), the merged colleague-then-member edit documented as the accepted residual, or any revision is not the member's (also under the member's own newer one, on a later page, without its author) or the file's last modifier is not, or a later page is unreadable; each dropped step and each refused part logged with nothing of the file and a malformed time as `unusual`, a later time on the same revision refused — mutation-checked (each of (a)–(e), the quiet period and half of it, the gap, the budget, the read limit, the file's time in the agreement, the observed time kept); not reachable, kept as defence: an
 update's `fileId` taken from the receipt rather than Google's answer, and the link following only a changed revision) and
+「HTML and JSON are read as text; the AI reads back its own puts without a pick」 (mutation-checked: HTML / JSON in
+`DRIVE_READ_AS` (read, pick, the Picker config), the own-put branch, `putOfFile`'s member, company and `done` filters, a
+folder pick is not a file) and
 `server/tests/integration/job-deliverables.test.ts` (a job's run: `jobs.md`) and
 `server/tests/unit/google-drive-core.test.ts` (the link parser: Google's hosts only, look-alikes,
 other schemes, folders, bad ids refused); `client/tests/google-drive-tools.test.ts`;

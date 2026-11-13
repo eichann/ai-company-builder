@@ -196,6 +196,8 @@ export function driveRevisionOf(head: unknown, version: unknown): string | null 
 /**
  * What a picked file is read as: Google's own files exported as text, a PDF as the file, plain text as is. Markdown
  * appears as `text/markdown` (what ACB's own puts say) or `text/x-markdown` (what Drive has reported for an uploaded `.md`).
+ * HTML and JSON are text too (owner decision 2026-11-13: an AI reads back the HTML viewer it put): returned as outside
+ * text like any other — never rendered, never run.
  */
 export const DRIVE_READ_AS: Record<string, { how: 'export'; mime: string } | { how: 'download'; kind: 'pdf' | 'text' }> = {
   'application/vnd.google-apps.document': { how: 'export', mime: 'text/plain' },
@@ -206,6 +208,8 @@ export const DRIVE_READ_AS: Record<string, { how: 'export'; mime: string } | { h
   'text/markdown': { how: 'download', kind: 'text' },
   'text/x-markdown': { how: 'download', kind: 'text' },
   'text/csv': { how: 'download', kind: 'text' },
+  'text/html': { how: 'download', kind: 'text' },
+  'application/json': { how: 'download', kind: 'text' },
 }
 
 /** The MIME types the file Picker offers (the same list `DRIVE_READ_AS` reads). */

@@ -353,21 +353,3 @@ export function linkCandidates(files: readonly string[]): Array<{ path: string; 
   }
   return [...[...folders].sort().map(path => ({ path, folder: true })), ...files.map(path => ({ path, folder: false }))]
 }
-
-// ---------------------------------------------------------------------------
-// A Drive link pasted or dropped on a card (a company without the shared folder).
-
-/** A paste or a drop that holds no Drive file address. */
-export const NOT_A_DRIVE_LINK = 'Google Drive のファイルのリンクではないため、つなげません。'
-/** After the chooser opened on a pasted / dropped link ended with nothing chosen: why it may have been empty. */
-export const DRIVE_LINK_EMPTY_HINT = '選ぶ画面にファイルが出てこないときは、そのリンクのファイルをあなたが見られるか、読める種類（Google ドキュメント・スプレッドシート・スライド・PDF・テキスト）かを確かめてください。'
-
-/** A drag that may carry an address (a link from the browser); the text is read only on the drop. */
-export function mayCarryLink(data: Pick<DataTransfer, 'types'> | null): boolean {
-  return !!data && Array.from(data.types).includes('text/uri-list')
-}
-
-/** The text a drop carries: the address list and the plain text (either may hold the link). */
-export function droppedText(data: Pick<DataTransfer, 'getData'>): string {
-  return `${data.getData('text/uri-list')}\n${data.getData('text/plain')}`
-}

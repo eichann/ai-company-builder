@@ -72,7 +72,7 @@ const toRecord = (r: Row): RecordRow => ({
   members: membersOf(r.members_json), ...withSets(r.sets_json), title: r.title, summary: r.summary, createdAt: r.created_at, updatedAt: r.updated_at, removedAt: r.removed_at,
 })
 type LinkRow = { source_id: string; name: string; position: number; target_id: string | null; target_path: string | null; created_by: string | null; target_meta: string | null }
-/** A Drive link's kept facts (records.md "File links without the shared folder"); anything unreadable is none. */
+/** A Drive link's kept facts (records.md "Drive and PC file links"); anything unreadable is none. */
 function driveMetaOf(text: string | null): DriveLinkMeta | null {
   if (!text) return null
   try {

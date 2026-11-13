@@ -4,6 +4,7 @@
  * is offered from the type definition and the member's place in the record (assignee, requester,
  * OK-giver); the server's engine still decides every action. Pure.
  */
+import { linkedDriveFileOf, type LinkedDriveFile } from './drive-links'
 import { WAIT_OVER, waitCameBack } from '../../shared/core/core-types'
 import { actionWho, parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
@@ -18,30 +19,23 @@ import {
 
 /**
  * A file of the member's own PC linked to the task (a company without the shared folder; records.md
- * "File links without the shared folder"): `path` inside their working folder. The server answers it
+ * "Drive and PC file links"): `path` inside their working folder. The server answers it
  * to its owner alone, so a card that has one is that member's.
  */
 export interface TaskLocalFile { path: string }
 
-/**
- * A Google Drive file linked to the task: every reader gets the row; `name` only for the member who
- * linked it (`mine`) — anyone else sees 「Google Drive のファイル」 and Drive decides who may open it.
- */
-export interface TaskDriveFile { fileId: string; mine: boolean; name: string | null }
+/** A Google Drive file linked to the task (`drive-links.ts`, shared with the 案件・プロジェクト card). */
+export type TaskDriveFile = LinkedDriveFile
+export { DRIVE_FILE_NEUTRAL, driveFileUrl } from './drive-links'
+
+/** Under 「ファイル」 in a company with the shared folder: company files and Drive files (owner decision 2026-11-13). */
+export const COMPANY_AND_DRIVE_FILES_NOTE = 'つながりは、このやることを見られる人みんなに見えます（Google Drive のファイルの名前は、つないだ人だけ）'
 
 /** Under 「ファイル」 in a company without the shared folder: who sees what. */
 export const TYPED_FILES_NOTE = 'Google Drive のファイルは、このやることを見られる人みんなに見えます（名前は、つないだ人だけ）。このパソコンのファイルは、あなただけに見えます'
 
 /** What a PC file's row says when it is not on this computer (moved, deleted, or another PC of the member). */
 export const LOCAL_FILE_MISSING = 'このパソコンに見つかりません（動かしたか、消したかもしれません）'
-
-/** What a Drive file's row says when its name is not the member's to see. */
-export const DRIVE_FILE_NEUTRAL = 'Google Drive のファイル'
-
-/** Drive's own page for a file (opened in the member's browser; Drive decides who may see it). */
-export function driveFileUrl(fileId: string): string {
-  return `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/view`
-}
 
 export interface TaskCardArg {
   name: string
@@ -135,7 +129,7 @@ export interface TaskCardData {
   files: LinkedPath[]
   /** A company without the shared folder: the member's own PC files linked here (theirs alone). */
   localFiles: TaskLocalFile[]
-  /** A company without the shared folder: Drive files linked here. */
+  /** Drive files linked here (every company, owner decision 2026-11-13). */
   driveFiles: TaskDriveFile[]
   links: RecordCardLink[]
   history: RecordCardHistoryLine[]
@@ -300,10 +294,8 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
   const driveFiles: TaskDriveFile[] = []
   for (const l of src.detail.links) {
     if (l.direction === 'out' && l.local && typeof l.local.path === 'string') { localFiles.push({ path: l.local.path }); continue }
-    if (l.direction === 'out' && l.drive && typeof l.drive.fileId === 'string') {
-      driveFiles.push({ fileId: l.drive.fileId, mine: l.drive.mine === true, name: l.drive.mine === true && typeof l.drive.name === 'string' ? l.drive.name : null })
-      continue
-    }
+    const drive = linkedDriveFileOf(l)
+    if (drive) { driveFiles.push(drive); continue }
     if (l.path !== undefined) {
       if (l.direction === 'out') files.push(linkedPathOf({ ...l, path: l.path }, src.cannotOpen))
       continue

@@ -1,6 +1,6 @@
 /**
  * A link into a `.personal/` folder, and a link to a file of a member's PC (`local:`), is its maker's
- * alone (records.md "Links into .personal/", "File links without the shared folder"): the ledger
+ * alone (records.md "Links into .personal/", "Drive and PC file links"): the ledger
  * keeps a file link's whole target list (`links.<name>`, a JSON array of targets), so 経緯 and a
  * replay leave out those targets someone else linked — and an entry that then says nothing (another
  * member's 「ファイルをつなぎました」 of such a file) is left out too. The same scrub keeps them out of

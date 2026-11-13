@@ -328,7 +328,7 @@ export interface RecordLinkInput {
   narrow?: boolean
 }
 
-/** A typed file link's target as the renderer names it (records.md "File links without the shared folder"). */
+/** A typed file link's target as the renderer names it (records.md "Drive and PC file links"). */
 export type TypedFileTarget = { kind: 'local'; path: string } | { kind: 'drive'; fileId: string }
 
 /**

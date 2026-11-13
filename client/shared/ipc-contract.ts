@@ -583,7 +583,7 @@ export interface IpcInvokeChannels {
   /** A company file or folder linked to a task (`companyPath`: inside the company folder, e.g. `営業/見積.xlsx`). */
   'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
   'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
-  /** A company without the shared folder: a file of the member's PC or a Drive file taken off a task. */
+  /** A Drive file (every company) or a file of the member's PC (without the shared folder) taken off a task. */
   'tasks:unlinkTarget': { args: [companyId: string, recordId: string, target: TypedFileTarget, expectedVersion: number]; result: TaskWriteResult }
   /**
    * 「Google Drive のファイルをつなぐ」: Google Picker, then each picked file linked to the task.

@@ -689,26 +689,31 @@ folder not downloaded; the chooser `LinkToTaskDialog` lists the member's open ta
 file or folder dropped on a task row or a card's 「つながっているもの」 ("Dropping links" below), and the
 card's 「＋ファイル・フォルダをつなぐ」 (the company's file names on this computer, `git:listFiles`, and
 every folder above them: `linkCandidates`, `model.ts`). **A company without the shared folder**
-(`folderKind: none`, owner 2026-11-07/08; server `records.md` "File links without the shared folder"):
+(`folderKind: none`, owner 2026-11-07/08; server `records.md` "Drive and PC file links"):
 company paths are refused, so the card has neither ［＋ファイル・フォルダをつなぐ］ nor ［新しいファイル］
 (`TaskCard` `sharedFolder`, from AppShell's `companyHasSharedFolder`; test `tests/ui/skill-layout.spec.ts`
-「a task card in a git / none company」). Instead its 「ファイル」 group (`typedFiles`, `TYPED_FILES_NOTE`)
-offers **［Google Drive のファイルをつなぐ］** (`DriveLinkAction.tsx` + `DriveFiles.tsx`; owner decisions
-2026-11-09): pressed, it first offers the member's own Drive files (`tasks:driveChoices` → the connector's
+「a task card in a git / none company」), and its 「ファイル」 note is `TYPED_FILES_NOTE` (PC files are the member's
+alone). **In every company** (owner decision 2026-11-13) the 「ファイル」 group (`typedFiles`, always given;
+`typedFiles.localFiles` = no shared folder) offers **［Google Drive のファイルをつなぐ］** — in a company with the
+shared folder beside ［＋ファイル・フォルダをつなぐ］, with the note `COMPANY_AND_DRIVE_FILES_NOTE`, a tree file
+dropped there stays a company path and nothing of this PC is offered. The button (`src/shared/ui/DriveLinkAction.tsx` +
+`DriveFiles.tsx`, the hook `src/shared/hooks/useDriveLinking.ts`, the port `src/shared/ipc/drive-links.ts`, the rows
+`src/shared/ui/driveFileRows.ts`, the words and drag helpers `client/shared/drive-links.ts` — ACB foundation, shared
+with the 案件・プロジェクト card below; owner decisions 2026-11-09): pressed, it first offers the member's own Drive files (`tasks:driveChoices` → the connector's
 `GET /me/google/drive/files`: their live picks and what their AI put, by name — theirs only) to tick one or
 several, those already linked marked 「つないであります」 and not choosable, ［つなぐ］ and ［Google Drive から探す］;
 with none listed the Picker opens at once. `tasks:linkDriveFiles(companyId, recordId, version, options?)`,
 `TaskDriveLinkOptions`: `{ chosen }` — the ticked files (main checks the ids, ≤ 30), no Picker; `{ fileIds }`
 — a Drive link **pasted** into the box under the button or **dragged from the browser** onto
-「つながっているもの」 (`mayCarryLink` / `droppedText` in `model.ts`): straight to the Picker showing just that
+「つながっているもの」 (`mayCarryLink` / `droppedText`): straight to the Picker showing just that
 file (`google-drive.md`; the bare id array of an unreleased build is read as `fileIds`); neither — the
 Picker as it opens. Then each is linked at the version the previous link moved to; 「「…」をつなぎました」.
 Anything pasted that is not a Drive file link says 「Google Drive のファイルのリンクではないため、つなげません。」;
 when the Picker opened on a pasted / dropped link ends with nothing chosen (it may have shown no file:
 not visible to the member, or a type ACB cannot read), a quiet line under the box says what to check
-(`DRIVE_LINK_EMPTY_HINT`, `model.ts`) until the next action — never after a plain Picker's cancel;
+(`DRIVE_LINK_EMPTY_HINT`) until the next action — never after a plain Picker's cancel;
 the button (list included) is off with a plain note while Drive is not set up for the company, and says
-before the first press that Google will ask (`useDriveLinkSetup`, `driveLinkView`); while the Picker is open
+before the first press that Google will ask (`useDriveLinking`, `driveLinkView`); while the Picker is open
 (busy) neither the list nor a pasted link starts another. A file the consultation's AI put into Drive is
 linked by the server already (`google-drive.md`). It lists
 `card.localFiles` — files of the member's own PC, each with the small 「あなただけ」 (`data-only-you`;
@@ -721,9 +726,24 @@ row is linked as the member's own** (`useLinkDrop` `localFiles`, `DroppedThing.l
 （あなただけに見えます）」), and the drop zone says 「このパソコンのファイル（あなただけ）」. Tests:
 `client/tests/typed-file-links.test.ts`, `tests/ui/task-card.spec.ts` (`?kind=none`; `&drive=list`: 「the
 member's own Drive files offered first」; 「a company with the
-shared folder: no Drive button, a dropped file stays a company file」; 「…a pasted or dropped Drive link…」;
+shared folder: the Drive button beside company files; a dropped tree file stays a company file, a dropped Drive
+link opens the chooser」; 「…a pasted or dropped Drive link…」;
 `&drive=cancel`: 「…explains why it may be empty; a plain cancel does not」) — mutation-checked. Each linked file's
 「…」 offers 「つながりを外す」, then 「「<name>」とのつながりを外しました［取り消す］」 (取り消す links it again).
+
+**The 案件・プロジェクト card links Drive files too** (owner decision 2026-11-13; `RecordCard`): `recordViews:card`
+answers `driveFiles` (`linkedDriveFileOf`: the name only where the server marked the link the member's) — never a path
+row — and `driveLink` for a bundle type with exactly one file link (the core プロジェクト's `files`; the server takes
+it without a link name), its feature on. With `driveLink` the 「ファイル」 group offers the same ［Google Drive のファイルを
+つなぐ］ (own list, Google's chooser, a pasted link; off with the plain note while Drive is not set up), the drop zone also
+takes a Drive link from the browser (「ファイル・フォルダ・Drive のリンク・やること・相談」), with the note
+`driveFilesNote(<kind>)`; a linked file's row is the member's by name or 「Google Drive のファイル」, opened in Drive,
+「…」→「つながりを外す」 (`tasks:unlinkTarget` — the `tasks:` channels take any record id; no 取り消す, as on the task
+card). No Google status is read for a card without `driveLink` (a meeting, a 来た連絡). A PC file is never shown there.
+Tests: `client/tests/record-card-links.test.ts` (the list, names only the linker's, `driveLink` only for a bundle with
+exactly one file link and its feature on: none for a bundle type with no file link or two, a non-bundle type with
+one (a やること), a meeting, a feature turned off — each condition mutation-checked), `tests/ui/record-card.spec.ts` 「a プロジェクト links Google Drive
+files…」 / 「…has no Drive button」.
 
 **Links between records** (owner 2026-11-02; server `records.md` "Linking records later"): each row
 of 「つながっているもの」 whose link the server did not mark `fixed` (where the task came from — もとの

@@ -9,6 +9,10 @@
 // `&off=1`: the record's feature is turned off (「使う機能」): the card is 「見るだけ」.
 // `?record=project`: a プロジェクト whose 責任者 is the member (owner FB #30): ［終える］, 「…」 ［やめる］ and the fields,
 // each moving it as the server would (`act …` lines, with args / note); `&owner=other`: someone else's (nothing to press).
+// `&drive=1` (owner decision 2026-11-13): its type's file link offers ［Google Drive のファイルをつなぐ］ (`drive@<version>`,
+// `show=<ids>` for a pasted / dropped link, `chosen=<ids>` from the member's own list), with two Drive files linked — the
+// member's own by name, someone else's as 「Google Drive のファイル」 — taken off as `unlinkTarget drive <id>@<version>`;
+// `&drive=off`: Drive not set up for the company.
 // `&owner=none`: one without a 責任者 (owner FB #34, made by the AI before the fix): only 責任者を替える (project v2's
 // who_fallback). `&purpose=url`: なんのため is a long URL (FB #36: it must wrap inside its tile).
 import { createRoot } from 'react-dom/client'
@@ -59,9 +63,11 @@ let project = rec('project-0000p1', 'project', '新人研修の見直し', 'acti
   purpose: params.get('purpose') === 'url' ? `資料：${LONG_URL}` : '研修を3日に縮める', due: '2026-12-01',
 })
 const projectBefore: RecordSummary[] = []
+const driveMode = params.get('drive') !== null
 const projectCard = () => {
   const actions = bundleActionsOf(defs.get('project'), project.state, project.fields, ME, people)
-  return { record: view(project), version: project.version, detail: { ...bundleDetailOf(project, [], ME, people), ...(actions ? { actions } : {}) }, fields: [], history: [], links: [], viewers: { kind: 'department' as const, text: '営業部のみんな', count: 4 } }
+  return { record: view(project), version: project.version, detail: { ...bundleDetailOf(project, [], ME, people), ...(actions ? { actions } : {}) }, fields: [], history: [], links: [], viewers: { kind: 'department' as const, text: '営業部のみんな', count: 4 },
+    ...(driveMode ? { driveLink: true as const, driveFiles: [{ fileId: '1ProjDocMine0001', mine: true, name: '研修の進め方（作業中）' }, { fileId: '1ProjDocOther001', mine: false, name: null }] } : {}) }
 }
 const replyCard = () => ({ record: view(reply), version: reply.version, detail: recordDetailOf(reply, people, ME, replyDef) ?? undefined, fields: [], history: [], links: [], viewers: { kind: 'only-you' as const, text: 'あなただけ', count: 1 } })
 
@@ -162,6 +168,20 @@ installElectronAPI({
   getBundleChoices: async () => ({ success: true, bundles: [{ id: 'project-000011', title: 'A社 研修導入の相談（去年）', typeLabel: 'プロジェクト' }, { id: 'project-000012', title: 'B社 新人研修', typeLabel: 'プロジェクト' }] }),
   createBundle: async (_c, input) => { say(`create ${input.type} ${input.title} folder=${input.folder ?? ''} counterpart=${input.counterpart ?? ''}`); return { success: true, recordId: 'project-0000nn' } },
   linkMinutesBundle: async (_c, meetingId, bundleId) => { say(`linkMeeting ${meetingId}=${bundleId}`); return { success: true } },
+  linkDriveFilesToTask: async (_c, recordId, version, options) => {
+    const { fileIds, chosen } = options ?? {}
+    say(`drive ${recordId}@${version}${fileIds?.length ? ` show=${fileIds.join('+')}` : ''}${chosen ? ` chosen=${chosen.map(f => f.id).join(',')}` : ''}`)
+    return { success: true, recordId, linked: chosen ? chosen.map(f => f.name) : ['研修の資料'] }
+  },
+  unlinkTargetFromTask: async (_c, recordId, target, version) => {
+    say(`unlinkTarget ${recordId} ${target.kind} ${target.kind === 'drive' ? target.fileId : target.path}@${version}`)
+    return { success: true, recordId, entryVersion: version + 1 }
+  },
+  getTaskDriveChoices: async () => [{ id: '1PickedEarlier001', name: '去年の研修資料.pdf', source: 'picked' as const }],
+  getGoogleStatus: async () => ({ success: true, data: {
+    available: true, reason: null, connected: true, status: 'active', googleEmail: 'me@div.example', domain: 'div.example', practice: false, featuresOff: [], seen: [],
+    features: ['minutes', 'drive'], companyFeatures: params.get('drive') === 'off' ? ['minutes'] : ['minutes', 'drive'],
+  } as never }),
   linkRecordToRecord: async (_c, recordId, input) => { say(`link ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
 })
 function say(line: string) { opened.push(line); document.getElementById('opened')!.textContent = opened.join('\n') }
