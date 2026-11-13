@@ -26,7 +26,7 @@ export type ActorKind = 'human' | 'ai' | 'external'
 
 /**
  * A file attached to an action: the version handed over (0.18-1) — a company file at a commit, or
- * (a company without the shared folder) a Google Drive file linked to the record, at the revision
+ * (every company, owner decision 2026-11-13) a Google Drive file linked to the record, at the revision
  * and with the fingerprint of the content ACB read when it was linked.
  */
 export type LedgerAttachment =

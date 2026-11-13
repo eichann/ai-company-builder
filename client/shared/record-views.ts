@@ -2,6 +2,7 @@
 // hits, the one read-only card a record opens in, and the records linked to a file.
 // Main builds these from the server's answers (the server already left out what the
 // member may not read); the renderer only draws them. Pure: types and wording.
+import type { LinkedDriveFile } from './drive-links'
 import type { TypeDefinition } from '../../shared/core/record-types'
 import { parseTagsValue } from '../../shared/core/record-types'
 import { BUNDLE_PART_ENDED_ACTION, OUTSIDE_TIME_ACTION, WAIT_OVER_ACTION } from '../../shared/core/core-types'
@@ -172,6 +173,13 @@ export interface RecordCardView {
   fields: RecordCardField[]
   history: RecordCardHistoryLine[]
   links: RecordCardLink[]
+  /** Google Drive files linked to it (records.md "Drive and PC file links"): the name only for who linked it. */
+  driveFiles?: LinkedDriveFile[]
+  /**
+   * A 案件・プロジェクト whose type has one file link (the core プロジェクト's `files`), its feature on:
+   * ［Google Drive のファイルをつなぐ］ is offered (owner decision 2026-11-13; the server decides each link).
+   */
+  driveLink?: true
 }
 export type RecordCardResult =
   | { success: true; card: RecordCardView }

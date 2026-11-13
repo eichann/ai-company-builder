@@ -54,8 +54,9 @@ export interface RecordEngineDeps {
    * Does the company have its shared folder (services/company-folder.ts)? Without one a path on a
    * member's PC means nothing to anyone else: new company-path links, attached file versions and
    * file materials are refused (409 NO_COMPANY_FOLDER); such a company links a Drive file or an
-   * owner-only file of the member's PC instead ("File links without the shared folder"), which a
-   * company with the folder refuses (409 FILE_LINK_KIND_NOT_HERE). Absent → yes.
+   * owner-only file of the member's PC instead ("Drive and PC file links"). A Drive file
+   * is linked in every company; a PC file a company with the folder refuses (409
+   * FILE_LINK_KIND_NOT_HERE). Absent → yes.
    */
   hasCompanyFolder?: (companyId: string) => boolean
   /** Digests an output's item key into its id (minutes.md "Outputs made once"); absent → by title only. */
@@ -104,8 +105,7 @@ export interface RecordEngineDeps {
 }
 
 /**
- * A Google Drive file the Google connector checked for the linking member (records.md "File links
- * without the shared folder"): one of their own live picks, opened with their own `drive.file`
+ * A Google Drive file the Google connector checked for the linking member (records.md "Drive and PC file links"): one of their own live picks, opened with their own `drive.file`
  * token, its revision, name, type and the sha256 of the content ACB read (null when it could not).
  * Only the route hands it over (services/google-drive.ts `linkable`), never a request body.
  */

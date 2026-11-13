@@ -145,7 +145,7 @@ export interface DrivePutAnswer {
   existing: boolean
   /**
    * The request named a record (`recordId`, the consultation's やること) and this put's new file was
-   * linked to it now (records.md "File links without the shared folder"). Absent: nothing was linked
+   * linked to it now (records.md "Drive and PC file links"). Absent: nothing was linked
    * (no record named, a replay, a check refused it, or an older server).
    */
   linkedTo?: { recordId: string }

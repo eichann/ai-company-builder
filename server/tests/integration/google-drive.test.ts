@@ -244,7 +244,7 @@ describe('the AI reads picked files only', () => {
   })
 })
 
-describe('a picked file linked to a record (a company without the shared folder, records.md)', () => {
+describe('a picked file linked to a record (records.md "Drive and PC file links")', () => {
   const linkDrive = (user: string, recordId: string, fileId: string, expectedVersion: number) =>
     person(user, 'POST', `/records/item/${recordId}/file-links`, { target: { kind: 'drive', fileId }, expectedVersion })
   const driveLinks = async (user: string, recordId: string) =>
@@ -308,12 +308,31 @@ describe('a picked file linked to a record (a company without the shared folder,
     }
   })
 
-  it('a company with the shared folder refuses it without asking Google', async () => {
-    const made = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '別の件', fields: { assignee: 'm-sato' } })
+  it('a company with the shared folder links it too (owner decision 2026-11-13): the same pick check, the name for the linker only; a PC file refused without asking Google', async () => {
+    const made = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '別の件', fields: { assignee: 'm-tanaka' } })
+    const id = made.body.data.record.id as string
     const calls = google.requests.length
-    const r = await linkDrive('m-sato', made.body.data.record.id, GOOGLE_SEED.handNotesPdf, 1)
-    expect([r.status, r.body.code]).toEqual([409, 'FILE_LINK_KIND_NOT_HERE'])
+    const pc = await person('m-sato', 'POST', `/records/item/${id}/file-links`, { target: { kind: 'local', path: '営業部/メモ.md' }, expectedVersion: 1 })
+    expect([pc.status, pc.body.code]).toEqual([409, 'FILE_LINK_KIND_NOT_HERE'])
+    // Tanaka did not pick it: refused, nothing asked of Google.
+    const notHis = await linkDrive('m-tanaka', id, GOOGLE_SEED.handNotesPdf, 1)
+    expect([notHis.status, notHis.body.code]).toEqual([403, 'DRIVE_NOT_PICKED'])
+    // Every record check still comes first here: a missing record or a stale version asks Google nothing.
+    const missing = await linkDrive('m-sato', 'task-0000000000000000', GOOGLE_SEED.handNotesPdf, 1)
+    expect([missing.status, missing.body.code]).toEqual([404, 'RECORD_NOT_FOUND'])
+    const stale = await linkDrive('m-sato', id, GOOGLE_SEED.handNotesPdf, 7)
+    expect([stale.status, stale.body.code]).toEqual([409, 'VERSION_CONFLICT'])
     expect(google.requests.length).toBe(calls)
+
+    const r = await linkDrive('m-sato', id, GOOGLE_SEED.handNotesPdf, 1)
+    expect(r.status, r.text).toBe(200)
+    const mine = await driveLinks('m-sato', id)
+    expect(mine).toEqual([expect.objectContaining({ fileId: GOOGLE_SEED.handNotesPdf, mine: true, name: '手書きメモ.pdf', revisionId: expect.stringMatching(/^rev-/), sha256: expect.stringMatching(/^[0-9a-f]{64}$/) })])
+    const after = google.requests.length
+    const his = await person('m-tanaka', 'GET', `/records/item/${id}`)
+    expect((his.body.data.links as Json[]).filter(l => l.drive).map(l => l.drive)).toEqual([{ fileId: GOOGLE_SEED.handNotesPdf, mine: false }])
+    expect(his.text).not.toContain('手書きメモ')
+    expect(google.requests.length).toBe(after)
   })
 })
 
@@ -439,7 +458,7 @@ describe('the AI puts a PDF / HTML into a picked folder', () => {
   })
 })
 
-describe('a put in a consultation about a task: its file is linked to the task (records.md "File links without the shared folder")', () => {
+describe('a put in a consultation about a task: its file is linked to the task (records.md "Drive and PC file links")', () => {
   const driveLinks = async (user: string, recordId: string) =>
     ((await person(user, 'GET', `/records/item/${recordId}`)).body.data.links as Json[]).filter(l => l.drive).map(l => l.drive)
   const withoutFolder = async (fn: () => Promise<void>) => {
@@ -493,7 +512,7 @@ describe('a put in a consultation about a task: its file is linked to the task (
     expect(await driveLinks('m-sato', id)).toEqual([])
   }))
 
-  it('a record check that fails links nothing and the put stays done: unreadable, missing, a company with the shared folder, none named', async () => {
+  it('a record check that fails links nothing and the put stays done: unreadable, missing, none named; a company with the shared folder links it', async () => {
     await withoutFolder(async () => {
       const hidden = await task('m-tanaka', '田中さんだけ', { personal: true })
       const token = await tokenFor('m-sato', 'act')
@@ -505,13 +524,13 @@ describe('a put in a consultation about a task: its file is linked to the task (
       }
       expect(await driveLinks('m-tanaka', hidden)).toEqual([])
     })
-    // The shared folder: Drive links are not this company's kind of link.
+    // The shared folder: the put's file is linked there too (owner decision 2026-11-13), as the AI.
     const id = await task('m-sato', '共有フォルダのある会社')
     const token = await tokenFor('m-sato', 'act')
     const r = await ai(token, 'POST', '/put', { ...putBody({ name: '共有フォルダあり.pdf' }), recordId: id })
     expect(r.body.data.drivePut.state).toBe('done')
-    expect(r.body.data.linkedTo).toBeUndefined()
-    expect(await driveLinks('m-sato', id)).toEqual([])
+    expect(r.body.data.linkedTo).toEqual({ recordId: id })
+    expect(await driveLinks('m-sato', id)).toEqual([expect.objectContaining({ fileId: r.body.data.drivePut.fileId, mine: true, name: '共有フォルダあり.pdf' })])
     // No record named: the put as before.
     const plain = await ai(token, 'POST', '/put', putBody({ name: 'つなぎ先なし.pdf' }))
     expect(plain.body.data.drivePut.state).toBe('done')

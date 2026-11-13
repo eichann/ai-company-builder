@@ -25,7 +25,7 @@ export interface LinkDropOptions {
   /** Something was linked or put back (the card / the list reads again). */
   onChanged?: () => void
   /**
-   * A company without the shared folder (records.md "File links without the shared folder"): a
+   * A company without the shared folder (records.md "Drive and PC file links"): a
    * dropped file of the working folder is linked as the member's own (`local`, seen by them alone).
    */
   localFiles?: boolean

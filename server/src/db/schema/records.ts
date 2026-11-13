@@ -291,8 +291,7 @@ export function migrateMeetingAutoSeries(conn: Database.Database): void {
 export function migrateRecordLinkCreator(conn: Database.Database): void {
   const cols = new Set((conn.prepare(`PRAGMA table_info(record_links)`).all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('created_by')) conn.exec(`ALTER TABLE record_links ADD COLUMN created_by TEXT`)
-  // A Drive link's revision, name as picked, fingerprint and time (records.md "File links without
-  // the shared folder", 2026-11-08): JSON, null for every other link. Additive and nullable.
+  // A Drive link's revision, name as picked, fingerprint and time (records.md "Drive and PC file links", 2026-11-08): JSON, null for every other link. Additive and nullable.
   if (!cols.has('target_meta')) conn.exec(`ALTER TABLE record_links ADD COLUMN target_meta TEXT`)
 }
 

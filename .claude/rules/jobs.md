@@ -421,8 +421,9 @@ reports.
   run's S10b operation `drive-put` — once per file, the receipt's facts) is linked to the occurrence's やること. A place
   that lapsed while the run worked does not stop its finish (the work is done; what was put is linked); the next
   occurrence goes to a person (`recordEngine.linkDrivePut`,
-  as the AI with the run's id); a refusal (a company with the shared folder has no Drive links, records off…) is logged
-  with its code and never fails anything. In a company with the shared folder the AI's `summary` carries the link.
+  as the AI with the run's id; also in a company with the shared folder, owner decision 2026-11-13, `records.md` "Drive and PC file
+  links"); a refusal (records off, the record gone…) is logged with its code and never fails
+  anything. The AI's `summary` may carry the link as well.
 - **The 90-day pick** (decision 3, decision for the owner): a folder pick is never renewed by itself while a job names
   it (that would keep ACB's permission alive with nobody looking). When the chosen place is not usable — past 90 days,
   or no longer the person's pick — the clock makes the slot's occurrence `needs_person` `PLACE_NOT_USABLE` at once, told
@@ -855,7 +856,8 @@ membership can fail).
   kind, the member's own live pick — not someone else's, not unknown —, none for a version without one; the name to
   the responsible person only; the claim's turn names it; the run's token reaches the place's routes only with a place,
   never a read; a put into another picked folder refused with nothing sent; the status shows only its folder; a body's
-  `recordId` never linked; the finish links the put to its やること; a pause refuses the next call; past 90 days: the
+  `recordId` never linked; the finish links the put to its やること — also in a company with the shared folder, only
+  that run's own receipts (not a consultation's put, not an earlier run's); a pause refuses the next call; past 90 days: the
   claim and the clock make it `needs_person` `PLACE_NOT_USABLE`, told, and choosing again makes the next one run;
   「もう一度」 after a put: the responsible person's turn names the Drive file (id, name) and the retried run updates it,
   the owner's view and press name none of it; made, updated and pressed again it is one entry, also against the cap of

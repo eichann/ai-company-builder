@@ -22,6 +22,7 @@ import {
   type FindHomeResult, type FindResult, type RecordCardLink, type RecordCardResult, type RecordCardView, type RecordListResult,
 } from '../../../shared/record-views'
 import { bundleActionsOf, bundleDetailOf, DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
+import { linkedDriveFileOf } from '../../../shared/drive-links'
 import { PRIVATE_SCOPE_ID_RE, type MyPrivateFolder, type PrivateFolderMember } from '../../../shared/private-folder-ui'
 import type { AiRunView } from '../../../../shared/types/ai-runs'
 import type { ViewersAnswer, ViewersLabel } from '../../../../shared/types/viewers'
@@ -168,7 +169,9 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
       const paths = linkedPaths(detail.links)
       const gaps = paths.length > 0 ? await call(companyId, 'POST', '/viewers', { linked: { record: recordId, paths } }) : null
       const cannotOpen = gaps?.status === 200 ? (gaps.json?.data as { cannotOpen?: unknown } | undefined)?.cannotOpen : undefined
-      const links: RecordCardLink[] = detail.links.map(l => {
+      // Drive files (records.md "Drive and PC file links"): their own list, never a path row; a PC file is not on this card.
+      const driveFiles = detail.links.flatMap(l => { const d = linkedDriveFileOf(l); return d ? [d] : [] })
+      const links: RecordCardLink[] = detail.links.filter(l => !l.drive && !l.local).map(l => {
         // Only this record's own link names say something; another record's link to it says nothing more than its kind.
         const label = l.direction === 'out' ? def?.links[l.name]?.label ?? l.name : ''
         const removable = removableOf(detail.record, l)
@@ -177,6 +180,9 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
           : { label, ...linkedPathOf({ ...l, path: l.path as string }, cannotOpen) }
       })
       const isBundle = def?.implements.includes('bundle') ?? false
+      // ［Google Drive のファイルをつなぐ］ on a 案件・プロジェクト whose type has exactly one file link (the server takes
+      // it without a link name), its feature on (owner decision 2026-11-13).
+      const driveLink = isBundle && !typeIsViewOnly(detail.record.type, features) && Object.values(def?.links ?? {}).filter(l => l.target === 'file').length === 1
       // A 非公開 案件: only a well-formed scope id and a company path (an older server sends none).
       const pf = detail.privateFolder
       const own = isBundle && pf && typeof pf.scopeId === 'string' && PRIVATE_SCOPE_ID_RE.test(pf.scopeId) && typeof pf.path === 'string' && fileLinkPath(pf.path)
@@ -200,6 +206,8 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
           fields: cardFields(rest, def, members),
           history: historyLines(entries, def, members),
           links,
+          ...(driveFiles.length > 0 ? { driveFiles } : {}),
+          ...(driveLink ? { driveLink: true as const } : {}),
           ai: aiOnRecord(recordId, runList, entries, def, members),
           ...viewersOf(viewers, recordId),
           ...(own ? { privateFolder: own, participants: await participantsFor(companyId, own.scopeId) } : {}),

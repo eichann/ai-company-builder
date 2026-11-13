@@ -49,7 +49,7 @@ export function undoing(ctx: EngineContext) {
       const ledger = records.ledger(row.id)
       const found = ledger.find(e => e.version === b.version)
       // An entry that linked or took off another member's `.personal/` or PC file is not there for
-      // this member (records.md "File links without the shared folder"): the same answer as a
+      // this member (records.md "Drive and PC file links"): the same answer as a
       // version that does not exist, so undoing cannot tell it existed nor take it away.
       const seen = personalPathsSeen(member.userId, row, ledger, records.linksFrom([row.id]))
       const target = found && !changesUnseenTarget(found, seen) ? found : undefined

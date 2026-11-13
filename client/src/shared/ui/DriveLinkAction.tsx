@@ -1,14 +1,15 @@
-// The card's ［Google Drive のファイルをつなぐ］ (a company without the shared folder) and the box a
+// ACB foundation: a card's ［Google Drive のファイルをつなぐ］ — the task card (tasks) and the 案件・プロジェクト card
+// (records), every company (owner decision 2026-11-13) — and the box a
 // Drive link is pasted into. The button first offers the member's own picked / put files (DriveFiles),
 // else Google's own file chooser, where the member's 「選択」 is the pick (google-drive.md); a pasted link
 // goes straight to that chooser and only decides what it shows first.
 import { useState } from 'react'
-import type { TaskDriveChoice } from '../../../../shared/tasks'
+import type { TaskDriveChoice } from '../../../shared/tasks'
 import { DriveFiles } from './DriveFiles'
 
 export function DriveLinkAction({ companyId, linked, busy, usable, note, hint, onLink, onLinkText }: {
   companyId: string
-  /** Drive files already linked to this task. */
+  /** Drive files already linked to this record. */
   linked: readonly string[]
   busy: boolean
   /** False when the company has not set Drive up: the button is off and `note` says who can. */
@@ -39,3 +40,4 @@ export function DriveLinkAction({ companyId, linked, busy, usable, note, hint, o
     </div>
   )
 }
+

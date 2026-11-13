@@ -421,6 +421,36 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
     expect(google.requests.length).toBe(calls)
   })
 
+  // Owner decision 2026-11-13 (records.md "Drive and PC file links"): Drive links in every company, so a company with the
+  // shared folder links the run's puts too — still only this run's own receipts. (A shelf Skill needs a company without
+  // the folder to claim, so the company's kind is switched for the finish only: the link reads it then.)
+  it('a company with the shared folder: the finish links only this run\'s own puts to its やること', async () => {
+    const job = await approvedJob()
+    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })
+    const consultation = (await as('jd-alice', 'POST', '/me/record-tokens', { conversationId: 'conv-plain-2', agent: 'claude-code', scope: 'act' })).body.data.token as string
+    const theirs = (await ai(consultation, 'POST', '/google/drive/put', putBody({ name: '相談で置いた.md' }))).body.data.drivePut
+    const earlier = await claim(dueOccurrence(job))
+    const t0 = await runToken(earlier.body.data.run)
+    const before = (await ai(t0, 'POST', '/google/drive/put', putBody({ name: '前の回.md' }))).body.data.drivePut
+    await finishWith(earlier.body.data.run, '前の回')
+    const occ = dueOccurrence(job)
+    const run = await claim(occ)
+    const token = await runToken(run.body.data.run)
+    const mine = (await ai(token, 'POST', '/google/drive/put', putBody({ name: 'この回.md' }))).body.data.drivePut
+    expect(mine.state).toBe('done')
+    db.prepare("UPDATE companies SET folder_kind = 'git' WHERE id = ?").run(CO)
+    try {
+      expect((await finishWith(run.body.data.run, 'この回')).status).toBe(200)
+      const { occurrenceTaskId } = await import('../../../shared/core/jobs')
+      const linked = await driveLinksOf(occurrenceTaskId(occ))
+      expect(linked).toEqual([mine.fileId])
+      expect(linked).not.toContain(theirs.fileId)
+      expect(linked).not.toContain(before.fileId)
+    } finally {
+      db.prepare("UPDATE companies SET folder_kind = 'none' WHERE id = ?").run(CO)
+    }
+  })
+
   it('a repeat of an earlier put (nothing uploaded again) is still linked to this run\'s やること; a pick that lapsed mid-run still links what was put', async () => {
     const job = await approvedJob()
     await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })

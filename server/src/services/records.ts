@@ -310,8 +310,7 @@ export function waitingFor(records: RecordRepository, userIds: string[], old: Re
 }
 
 /**
- * A Drive or PC-file link as `viewerId` may see it (records.md "File links without the shared
- * folder"), or null: a PC file only to its owner; a Drive file to every reader of the record, its
+ * A Drive or PC-file link as `viewerId` may see it (records.md "Drive and PC file links"), or null: a PC file only to its owner; a Drive file to every reader of the record, its
  * name and what ACB read only to the member who linked it.
  */
 export function typedLinkView(viewerId: string, source: { personalOwner: string | null }, l: RecordLinkRow): Pick<RecordLinkView, 'local' | 'drive'> | null {
@@ -657,7 +656,7 @@ export function createRecordService(deps: RecordServiceDeps) {
         if (l.targetPath !== null) {
           const kind = fileLinkKind(l.targetPath)
           if (kind === 'company-path') { if (reader.file(l.targetPath) && fileLinkShown(member.userId, row, l)) links.push({ name: l.name, direction: 'out', path: l.targetPath, fixed: fixed(row, l.name) }); continue }
-          // A Drive file or a file of a member's PC (records.md "File links without the shared folder").
+          // A Drive file or a file of a member's PC (records.md "Drive and PC file links").
           const typed = typedLinkView(member.userId, row, l)
           if (typed) links.push({ name: l.name, direction: 'out', typed, fixed: fixed(row, l.name) })
           continue

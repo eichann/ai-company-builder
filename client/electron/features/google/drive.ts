@@ -321,7 +321,7 @@ export interface DriveToolsDeps {
   local: LocalFileDeps
   /**
    * The やること the consultation is about (its topic), read at each put: the server then links the put
-   * file to it (records.md "File links without the shared folder"). The app's, never the AI's input.
+   * file to it (records.md "Drive and PC file links"). The app's, never the AI's input.
    */
   topicTask?: () => string | null
 }

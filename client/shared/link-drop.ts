@@ -16,7 +16,7 @@ import { thingName } from './thing-words'
 /**
  * What was dropped: a record, or a file / folder of the company folder. `local: true` (a company
  * without the shared folder): a file of the member's own working folder, linked as theirs alone
- * (records.md "File links without the shared folder").
+ * (records.md "Drive and PC file links").
  */
 export type DroppedThing = { kind: 'record'; id: string } | { kind: 'path'; path: string; local?: true }
 

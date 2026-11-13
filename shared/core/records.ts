@@ -149,7 +149,7 @@ export function isPersonalPath(companyPath: string): boolean {
 }
 
 /**
- * The kinds of a record's file link (records.md "File links without the shared folder", owner
+ * The kinds of a record's file link (records.md "Drive and PC file links", owner
  * decision 2026-11-08). A link's target is stored as one string (`record_links.target_path`, the
  * ledger's `links.<name>` arrays):
  *
