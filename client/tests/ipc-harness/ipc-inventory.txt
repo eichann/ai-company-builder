@@ -128,6 +128,7 @@ contract.invoke git:sync
 contract.invoke git:unsharedLargeFiles
 contract.invoke google:connect
 contract.invoke google:connectAll
+contract.invoke google:decideDriveOverwrite
 contract.invoke google:disconnect
 contract.invoke google:markSeen
 contract.invoke google:relay
@@ -370,6 +371,7 @@ contract.type ElectronAPI.createDirectory = createDirectory: Invoke<'fs:createDi
 contract.type ElectronAPI.createFile = createFile: Invoke<'fs:createFile'>
 contract.type ElectronAPI.createPrivateFolder = createPrivateFolder: Invoke<'privateFolders:create'>
 contract.type ElectronAPI.createTask = createTask: Invoke<'tasks:create'>
+contract.type ElectronAPI.decideDriveOverwrite = decideDriveOverwrite: Invoke<'google:decideDriveOverwrite'>
 contract.type ElectronAPI.declineMinutesBundle = declineMinutesBundle: Invoke<'minutes:noBundle'>
 contract.type ElectronAPI.deleteChatSession = deleteChatSession: Invoke<'chatHistory:deleteSession'>
 contract.type ElectronAPI.deleteItem = deleteItem: Invoke<'fs:delete'>
@@ -820,6 +822,7 @@ contract.type IpcInvokeChannels.'git:sync' = 'git:sync': { args: [repoPath: stri
 contract.type IpcInvokeChannels.'git:unsharedLargeFiles' = 'git:unsharedLargeFiles': { args: [repoPath: string]; result: { success: boolean; files: string[] } }
 contract.type IpcInvokeChannels.'google:connect' = 'google:connect': { args: [companyId: string, features: GoogleFeature[]]; result: GoogleConnectResult }
 contract.type IpcInvokeChannels.'google:connectAll' = 'google:connectAll': { args: [companyId: string]; result: GoogleConnectResult }
+contract.type IpcInvokeChannels.'google:decideDriveOverwrite' = 'google:decideDriveOverwrite': { args: [companyId: string, confirmationId: string, action: 'confirm' | 'decline']; result: DriveOverwriteDecisionResult }
 contract.type IpcInvokeChannels.'google:disconnect' = 'google:disconnect': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:markSeen' = 'google:markSeen': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:relay' = 'google:relay': { args: [companyId: string]; result: GoogleRelayResult }
@@ -1125,6 +1128,7 @@ main.handle git:sync @ features/sync/ipc.ts (repoPath: string, companyId: string
 main.handle git:unsharedLargeFiles @ features/git-history/ipc.ts (repoPath: string)
 main.handle google:connect @ features/google/ipc.ts (companyId: string, features: GoogleFeature[])
 main.handle google:connectAll @ features/google/ipc.ts (companyId: string)
+main.handle google:decideDriveOverwrite @ features/google/ipc.ts (companyId: string, confirmationId: string, action: 'confirm' | 'decline')
 main.handle google:disconnect @ features/google/ipc.ts (companyId: string)
 main.handle google:markSeen @ features/google/ipc.ts (companyId: string)
 main.handle google:relay @ features/google/ipc.ts (companyId: string)
@@ -1322,6 +1326,8 @@ preload createPrivateFolder -> invoke privateFolders:create($0, $1)
 preload createPrivateFolder : (companyId: string, input: CreatePrivateFolderRequest) => Promise<CreatePrivateFolderResult>
 preload createTask -> invoke tasks:create($0, $1)
 preload createTask : (companyId: string, input: TaskCreateInput) => Promise<TaskWriteResult>
+preload decideDriveOverwrite -> invoke google:decideDriveOverwrite($0, $1, $2)
+preload decideDriveOverwrite : (companyId: string, confirmationId: string, action: "confirm" | "decline") => Promise<DriveOverwriteDecisionResult>
 preload declineMinutesBundle -> invoke minutes:noBundle($0, $1)
 preload declineMinutesBundle : (companyId: string, minutesId: string) => Promise<MinutesActionResult>
 preload deleteChatSession -> invoke chatHistory:deleteSession($0, $1)

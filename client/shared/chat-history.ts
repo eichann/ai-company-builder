@@ -6,6 +6,7 @@ import type { ReviewRecord } from './review-request'
 import type { PluginOperationCard } from './plugin-operations'
 import type { ApprovalCardRef } from './approvals'
 import type { MinutesBundleChoiceCard } from './minutes-app'
+import type { DriveOverwriteCard } from './drive-overwrite'
 import type { MailDraftCard } from './outbound-mail'
 import type { StoredToolLine } from './tool-display'
 import type { AppInstruction } from './app-instruction'
@@ -40,6 +41,8 @@ export interface ChatSession {
     cardOrder?: string[]
     /** Mail drafts the AI made in this reply, drawn by the app with 「確かめて送る」 (outbound-mail.ts); shown after its text. */
     mailDrafts?: MailDraftCard[]
+    /** 「〇〇さんの直しが入っています」 cards in this reply: 「上書きする」 / 「やめる」 for a Google document (drive-overwrite.ts). */
+    driveOverwrites?: DriveOverwriteCard[]
     /** Files the AI made in this reply that the app linked to the consultation's task (consultation-task.ts): one line each. */
     linkedFiles?: FileLinkedPart[]
     /** 「もう一方の AI に聞く」: the other AI's answers in this reply, shown as folded quotes after its text (agents/second-opinion.ts). */

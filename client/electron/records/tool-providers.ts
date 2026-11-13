@@ -11,6 +11,7 @@ import type { PrivateFolderGuards } from '../features/private-folders/guards'
 import { notDownloadedFolders } from '../sync/not-downloaded'
 import type { RecordToolProvider } from './tools'
 import type { JobWriteArea } from '../../shared/ai-turn-steps/job'
+import type { DriveOverwriteCard } from '../../shared/drive-overwrite'
 
 export interface RecordToolProviderDeps {
   /** Google Drive (google-drive.md): only where the app can show Google Picker. */
@@ -33,6 +34,8 @@ export interface RecordToolTurn {
   conversationId?: string
   /** The やること the consultation is about now (read at each use; null without one). */
   topicTask?: () => string | null
+  /** A Drive put waiting for the member's 「上書きする」: the app's own card for the reply (google-drive.md). */
+  onDriveOverwrite?: (card: DriveOverwriteCard) => void
 }
 
 export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordToolTurn): RecordToolProvider[] {
@@ -47,7 +50,7 @@ export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordTo
     const bound = !!turn.conversationId && (deps.runBound?.(turn.companyId, turn.conversationId) === true || (deps.jobReport?.(turn.conversationId) ?? null) !== null)
     const onlyUnder = area === null ? (bound ? null : undefined) : 'nowhere' in area ? null : `${area.place}/.personal/${area.folder}`
     providers.push((access, signal) => createDriveTools(access, {
-      picking: drivePicking, companyId: turn.companyId, companyRoot: turn.companyRoot, topicTask: turn.topicTask,
+      picking: drivePicking, companyId: turn.companyId, companyRoot: turn.companyRoot, topicTask: turn.topicTask, onOverwriteCard: turn.onDriveOverwrite,
       local: { pathGuard: paths, notDownloaded: notDownloadedFolders, privateFolders: () => deps.privateFolders.readable(turn.companyId), onlyUnder },
     }, signal))
   }

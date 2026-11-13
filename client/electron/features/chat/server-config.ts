@@ -182,12 +182,12 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         instructions: companyFilesInstructions(notDownloaded),
       }
     },
-    createRecordTools: async ({ companyId, conversationId, agent, actions, requireRun, companyRoot, department, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
+    createRecordTools: async ({ companyId, conversationId, agent, actions, requireRun, companyRoot, department, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, onDriveOverwrite }, signal) => {
       const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read', ...(requireRun ? { requireRun } : {}) })
       // Connectors' tools ride on the same token (records/tool-providers.ts: Google Drive, …).
       // A Drive put in a consultation about a やること is linked to it by the server (google-drive.md).
       const topicTask = () => taskTopicOf(deps.history.get(companyId, conversationId))
-      const toolProviders = recordToolProviders(deps, { companyId, companyRoot: companyRoot ?? null, topicTask, conversationId })
+      const toolProviders = recordToolProviders(deps, { companyId, companyRoot: companyRoot ?? null, topicTask, conversationId, onDriveOverwrite })
       const onRecordChanged = deps.recordsChanged ? () => deps.recordsChanged?.(companyId) : undefined
       // A task the AI makes in a consultation without a topic becomes its topic (consultation-task.ts).
       const onRecordCreated = (made: { id: unknown; type: unknown }) => {

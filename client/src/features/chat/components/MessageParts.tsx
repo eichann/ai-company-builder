@@ -14,6 +14,8 @@ import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard } from '../../../..
 import { MAIL_DRAFT_PART_TYPE, readMailDraftCard } from '../../../../shared/outbound-mail'
 import { FILE_LINKED_PART_TYPE, fileLinkedLine, readFileLinkedPart } from '../../../../shared/consultation-task'
 import { MailDraftCard } from './MailDraftCard'
+import { DRIVE_OVERWRITE_PART_TYPE, readDriveOverwriteCard } from '../../../../shared/drive-overwrite'
+import { DriveOverwriteCard } from './DriveOverwriteCard'
 import { PluginOperationCard } from './PluginOperationCard'
 import { APPROVAL_PART_TYPE, readApprovalCardRef } from '../../../../shared/approvals'
 import { ApprovalCard } from './ApprovalCard'
@@ -142,6 +144,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === MAIL_DRAFT_PART_TYPE) {
           const card = readMailDraftCard((part as { data?: unknown }).data)
           return card ? <MailDraftCard key={item.key} card={card} /> : null
+        }
+        if (part.type === DRIVE_OVERWRITE_PART_TYPE) {
+          const card = readDriveOverwriteCard((part as { data?: unknown }).data)
+          return card ? <DriveOverwriteCard key={item.key} card={card} /> : null
         }
         if (part.type === FILE_LINKED_PART_TYPE) {
           const linked = readFileLinkedPart((part as { data?: unknown }).data)

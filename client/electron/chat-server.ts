@@ -12,6 +12,7 @@ import { PLUGIN_OPERATION_PART_TYPE, type PluginOperationCard } from '../shared/
 import { APPROVAL_PART_TYPE, type ApprovalCardRef } from '../shared/approvals'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, type MinutesBundleChoiceCard } from '../shared/minutes-app'
 import { MAIL_DRAFT_PART_TYPE, type MailDraftCard } from '../shared/outbound-mail'
+import { DRIVE_OVERWRITE_PART_TYPE, type DriveOverwriteCard } from '../shared/drive-overwrite'
 import type { WebResearchTools } from './web-research/tools'
 import { createSecondOpinionBudget, createSecondOpinionTools, secondOpinionTurn } from './agents/second-opinion'
 import type { SecondOpinionRequest, SecondOpinionResult } from './agents/second-opinion-runner'
@@ -96,7 +97,7 @@ export interface ChatServerConfig extends AgentHost {
    * folder under `<department>/.personal/` its writes are held to this turn; null = an ordinary one.
    */
   stepWriteArea?: (companyId: string, conversationId: string) => Promise<string | WriteArea | null>
-  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; requireRun?: boolean; companyRoot?: string; department?: string | null; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; requireRun?: boolean; companyRoot?: string; department?: string | null; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void; onDriveOverwrite?: (card: DriveOverwriteCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * The consultation's topic as stored (chat history): the task its new files are linked to
    * (consultation-task.ts). Read at each new file, so a task the AI made earlier in the turn counts.
@@ -502,6 +503,8 @@ export async function startChatServer(config: ChatServerConfig) {
         onBundleChoice: card => injector.push({ type: MINUTES_BUNDLE_CHOICE_PART_TYPE, id: `minutes-deal-${card.id}`, data: card }),
         // A mail draft (mail_draft_*) becomes the app-drawn card with 「確かめて送る」 (outbound-mail.ts).
         onMailDraft: card => injector.push({ type: MAIL_DRAFT_PART_TYPE, id: `mail-draft-${card.id}`, data: card }),
+        // A Google document someone else edited: 「上書きする」 / 「やめる」 is the person's, on the app's own card (drive-overwrite.ts).
+        onDriveOverwrite: card => injector.push({ type: DRIVE_OVERWRITE_PART_TYPE, id: `drive-overwrite-${card.id}`, data: card }),
       }, c.req.raw.signal)).catch(() => null) ?? undefined
       : undefined
     // A scheduled job's run whose run is gone (taken away just now): no turn at all.

@@ -4,7 +4,9 @@
 //   google:relay and google:setRelay (「スプレッドシートを中継で使う」: the member's view and own records,
 //   and 「やめる」 / turning it back on without a new consent; google-connector.md "The relay"),
 //   google:setArchive (「済んだメールを Gmail でもアーカイブする」: the member's own switch, sends only
-//   `{ feature: 'inbox_archive', on }`; google-connector.md "Archiving in Gmail")
+//   `{ feature: 'inbox_archive', on }`; google-connector.md "Archiving in Gmail"),
+//   google:decideDriveOverwrite (the card's 「上書きする」 / 「やめる」 for a Google document someone else edited:
+//   the person's press with the session; google-drive.md "Continuing a document people edited")
 // The server holds everything (the permission, sealed); the app holds no token
 // at all. google:connect asks the server for the sign-in page's URL and opens
 // it in the system browser itself — the URL (with its one-time state) never
@@ -14,6 +16,7 @@
 
 import { GOOGLE_OFFLINE_TEXT, googleErrorText, isGoogleSignInUrl, type GoogleConnectResult, type GoogleFeature, type GoogleRelayResult, type GoogleStatusResult, type MyGoogle, type MyGoogleRelay } from '../../../shared/google'
 import { GOOGLE_FEATURES } from '../../../../shared/core/google'
+import { DRIVE_OVERWRITE_REFUSALS, type DriveOverwriteDecisionResult } from '../../../shared/drive-overwrite'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { DesktopShell } from '../ports'
 
@@ -123,6 +126,21 @@ export function createGoogleApi(deps: GoogleDeps) {
     relay: relayView,
     setRelay,
     setArchive,
+    decideDriveOverwrite,
+  }
+
+  /** The person's 「上書きする」 / 「やめる」 (session only): the server writes exactly the content that waited, or closes it. */
+  async function decideDriveOverwrite(companyId: string, confirmationId: string, action: 'confirm' | 'decline'): Promise<DriveOverwriteDecisionResult> {
+    const r = await send(companyId, 'POST', `/drive/overwrite-confirmations/${encodeURIComponent(confirmationId)}`, { action })
+    if (!r) return { ...offline, code: null }
+    const j = (r.json ?? {}) as { data?: { state?: unknown; drivePut?: { link?: unknown }; commentsMayMove?: unknown }; code?: unknown }
+    if (r.res.ok && j.data?.state === 'written') {
+      return { success: true, state: 'written', link: typeof j.data.drivePut?.link === 'string' ? j.data.drivePut.link : null, commentsMayMove: j.data.commentsMayMove === true }
+    }
+    if (r.res.ok && j.data?.state === 'declined') return { success: true, state: 'declined' }
+    log.warn(`[google] POST drive overwrite: answered ${r.res.status}`)
+    const code = typeof j.code === 'string' ? j.code : null
+    return { success: false, offline: false, code, error: (code && DRIVE_OVERWRITE_REFUSALS[code]) || googleErrorText(r.res.status, r.json) }
   }
 }
 
@@ -160,6 +178,11 @@ export function registerGoogleIpc(ipc: IpcRegistrar, deps: GoogleDeps): ReturnTy
   ipc.handle('google:setArchive', async (_, companyId: string, on: boolean) => {
     if (typeof companyId !== 'string' || !companyId || typeof on !== 'boolean') return invalid
     return api.setArchive(companyId, on)
+  })
+  ipc.handle('google:decideDriveOverwrite', async (_, companyId: string, confirmationId: string, action: 'confirm' | 'decline') => {
+    if (typeof companyId !== 'string' || !companyId || typeof confirmationId !== 'string' || !/^drive-confirm-[A-Za-z0-9_-]{1,80}$/.test(confirmationId)
+      || (action !== 'confirm' && action !== 'decline')) return { ...invalid, code: null }
+    return api.decideDriveOverwrite(companyId, confirmationId, action)
   })
   return api
 }
