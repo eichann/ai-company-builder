@@ -328,7 +328,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
   async function meta(companyId: string, userId: string, fileId: string): Promise<Extract<GoogleResult, { ok: true }> | Extract<GoogleResult, { ok: false }>> {
     return drive(companyId, userId, {
       method: 'GET', path: `/drive/v3/files/${fileId}`,
-      query: { fields: 'id,name,mimeType,trashed,modifiedTime,capabilities(canAddChildren)', supportsAllDrives: 'true' },
+      query: { fields: 'id,name,mimeType,trashed,modifiedTime,driveId,capabilities(canAddChildren)', supportsAllDrives: 'true' },
       operation: 'drive.files.get',
     })
   }
@@ -1224,7 +1224,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const judgeAudience = (aud: DriveAudience, fileOutside: boolean): Outcome<never> | AudienceAsk | null => {
         const outside = aud.anyone || aud.outsideKey !== ''
         // Exactly who: outside only for a plain file (who inside sees it never mattered), inside too for a private one.
-        const sig = deps.sha256(new TextEncoder().encode(privateSource ? JSON.stringify([aud.outsideKey, aud.insideOthers]) : aud.outsideKey))
+        const sig = deps.sha256(new TextEncoder().encode(privateSource ? JSON.stringify([aud.outsideKey, aud.insideKey]) : aud.outsideKey))
         if (privateSource) {
           if (outside) return refuse('forbidden', PRIVATE_OUTSIDE, { code: 'DRIVE_PRIVATE_SHARED_OUTSIDE' })
           if (aud.insideOthers === 0) return null
@@ -1250,7 +1250,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         const asked = askBeforeOverwrite(h.googleDrive, member, actor.conversationId as string, {
           requestKey: body.requestKey as string, folderId: row.folderId, fileId: targetId, name: target?.name ?? named.name, kind: form.kind, as: form.as,
           sha256: body.sha256 as string, content: bytes, recordId, fingerprint: null, revision: null, revisionAt: null, commentsSeen: null, editors: [], commented: false,
-          audience: ask.view, audienceSig: ask.sig, trustOffered: ask.trustOffered,
+          audience: ask.view, audienceSig: ask.sig, trustOffered: ask.trustOffered, privateSource,
         })
         return refuse('conflict', AUDIENCE_WAITING, { code: 'DRIVE_PUT_NEEDS_CONFIRMATION', confirmation: asked })
       }
@@ -1272,6 +1272,9 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
             return refuse('forbidden', 'このフォルダを誰が見られるか確かめられないため、AI からは置けません。メンバー本人が Google Drive に置いてください。', { code: 'DRIVE_FOLDER_SHARING_UNKNOWN' })
           }
           audience = driveAudience(perms, domain, myEmail)
+          // A shared drive's members may not all be listed under drive.file (unverified on real Google): for a private
+          // folder's file, a folder in a shared drive counts as seen by others — the member is asked, never skipped.
+          if (privateSource && typeof f.driveId === 'string' && f.driveId !== '' && audience.insideOthers === 0) audience = { ...audience, insideOthers: 1, insideKey: `shared-drive:${f.driveId}` }
         }
         if (targetId === null) {
           const judged = audience ? judgeAudience(audience, false) : null
@@ -1396,7 +1399,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
                 requestKey: body.requestKey as string, folderId: row.folderId, fileId: targetId, name: target?.name ?? named.name, kind: form.kind, as: form.as,
                 sha256: body.sha256 as string, content: bytes, recordId,
                 fingerprint: now, revision: newest.id as string, revisionAt: newest.at as string, commentsSeen: seen, editors: names, commented: otherComments.length > 0,
-                audience: ask?.view ?? null, audienceSig: ask?.sig ?? null, trustOffered: ask?.trustOffered ?? false,
+                audience: ask?.view ?? null, audienceSig: ask?.sig ?? null, trustOffered: ask?.trustOffered ?? false, privateSource,
               })
               // People's names (chosen by them in Google) go to the member's card only, never into the AI's text.
               return refuse('conflict', 'ほかの人の直し・コメントが入っている（かもしれない）ため、上書きはメンバーの確認待ちです。アプリのカードでメンバーが「上書きする」を押すと、この内容で上書きされます。押されるまで、置き直したり新しいファイルを作ったりしないでください。',
@@ -1564,7 +1567,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         put = await service.put(member, { kind: 'ai', conversationId: row.conversationId, runId: null }, {
           folderId: row.folderId, name: row.name, kind: row.kind, as: row.as, sha256: row.sha256, contentBase64: Buffer.from(row.content).toString('base64'),
           requestKey: row.requestKey, ...(row.fileId !== null ? { updateFileId: row.fileId } : {}), askPerson: true, askAudience: true,
-          ...(row.audience?.privateSource ? { privateSource: true } : {}),
+          ...(row.privateSource ? { privateSource: true } : {}),
         }, undefined, row)
       } catch (error) {
         repo.moveOverwriteConfirmation(row.id, ['writing'], 'open')

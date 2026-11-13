@@ -124,6 +124,8 @@ export interface DriveOverwriteConfirmationRow {
   audienceSig: string | null
   /** 「このフォルダはもう聞かない」 may be offered (people outside only: no link for anyone, not a private folder's file). */
   trustOffered: boolean
+  /** The file is a private folder's (the app said so): kept for every waiting put, so the press checks it again. */
+  privateSource: boolean
   /** `writing`: a press is being written now (claimed atomically; neither a decline nor a newer request takes it). */
   state: 'open' | 'writing' | 'written' | 'declined'
   createdAt: string

@@ -540,7 +540,8 @@ export function driveFolderReachesOutside(permissions: readonly DrivePermissionL
  * a put"): `anyone` — a link for anyone; `outsideDomains` — the domains outside the company that can see it (a domain
  * permission's, or a person's / group's address's; `?` for a kind ACB does not know); `outsideKey` — exactly who outside
  * (each address, domain, `anyone`), sorted: "the same people" is compared by it; `insideOthers` — inside the company
- * besides the member: `domain` (everyone in the company) or how many people / groups. The member's own address
+ * besides the member: `domain` (everyone in the company) or how many people / groups; `insideKey` — exactly who inside
+ * (each address, `domain`), sorted: what a private folder's file compares (a count can stay the same while people change). The member's own address
  * (`myEmail`) counts for nobody; without it every person counts.
  */
 export interface DriveAudience {
@@ -548,6 +549,7 @@ export interface DriveAudience {
   outsideDomains: string[]
   outsideKey: string
   insideOthers: 'domain' | number
+  insideKey: string
 }
 
 export function driveAudience(permissions: readonly DrivePermissionLike[], domain: string, myEmail: string | null): DriveAudience {
@@ -586,14 +588,17 @@ export function driveAudience(permissions: readonly DrivePermissionLike[], domai
   return {
     anyone, outsideDomains: [...domains].sort(), outsideKey: [...outside].sort().join('\n'),
     insideOthers: insideDomain ? 'domain' : insideOthers.size,
+    insideKey: [...insideOthers, ...(insideDomain ? ['domain'] : [])].sort().join('\n'),
   }
 }
 
 /** Both at once (a folder and the file being updated in it): whoever can see either. */
 export function driveAudienceUnion(a: DriveAudience, b: DriveAudience): DriveAudience {
-  const key = [...new Set([...a.outsideKey.split('\n'), ...b.outsideKey.split('\n')].filter(Boolean))].sort().join('\n')
+  const merge = (x: string, y: string) => [...new Set([...x.split('\n'), ...y.split('\n')].filter(Boolean))].sort().join('\n')
+  const insideKey = merge(a.insideKey, b.insideKey)
+  const people = insideKey.split('\n').filter(k => k !== '' && k !== 'domain').length
   return {
-    anyone: a.anyone || b.anyone, outsideDomains: [...new Set([...a.outsideDomains, ...b.outsideDomains])].sort(), outsideKey: key,
-    insideOthers: a.insideOthers === 'domain' || b.insideOthers === 'domain' ? 'domain' : Math.max(a.insideOthers, b.insideOthers),
+    anyone: a.anyone || b.anyone, outsideDomains: [...new Set([...a.outsideDomains, ...b.outsideDomains])].sort(), outsideKey: merge(a.outsideKey, b.outsideKey),
+    insideOthers: a.insideOthers === 'domain' || b.insideOthers === 'domain' ? 'domain' : people, insideKey,
   }
 }

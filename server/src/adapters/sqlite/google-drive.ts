@@ -64,7 +64,7 @@ const toConfirm = (r: ConfirmRow): DriveOverwriteConfirmationRow => ({
   kind: r.kind as DriveOverwriteConfirmationRow['kind'], as: r.as_form === 'file' ? 'file' : 'google_doc', sha256: r.sha256,
   content: r.content ? new Uint8Array(r.content) : null, recordId: r.record_id,
   fingerprint: r.fingerprint, revision: r.revision, revisionAt: r.revision_at, commentsSeen: r.comments_seen, editors: stringsOf(r.editors), commented: r.commented === 1,
-  audience: audienceOf(r), audienceSig: r.audience_sig, trustOffered: r.trust_offered === 1,
+  audience: audienceOf(r), audienceSig: r.audience_sig, trustOffered: r.trust_offered === 1, privateSource: r.private_source === 1,
   state: r.state as DriveOverwriteConfirmationRow['state'], createdAt: r.created_at, expiresAt: r.expires_at,
 })
 type TrustRow = { user_id: string; folder_id: string; folder_name: string; audience_sig: string; outside_domains: string; created_at: string }
@@ -160,7 +160,7 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
       conn.prepare(`INSERT INTO google_drive_overwrite_confirmations (${CONFIRM_COLUMNS}, company_id) VALUES (${Array(26).fill('?').join(', ')})`)
         .run(c.id, c.userId, c.conversationId, c.requestKey, c.folderId, c.fileId, c.name, c.kind, c.as, c.sha256, c.content ? Buffer.from(c.content) : null, c.recordId,
           c.fingerprint, c.revision, c.revisionAt, c.commentsSeen, JSON.stringify(c.editors), c.commented ? 1 : 0, audience, c.audienceSig,
-          c.audience?.privateSource ? 1 : 0, c.trustOffered ? 1 : 0, c.state, c.createdAt, c.expiresAt, companyId)
+          c.privateSource || c.audience?.privateSource ? 1 : 0, c.trustOffered ? 1 : 0, c.state, c.createdAt, c.expiresAt, companyId)
     },
     overwriteConfirmation(userId, id) {
       const r = conn.prepare(`SELECT ${CONFIRM_COLUMNS} FROM google_drive_overwrite_confirmations WHERE company_id = ? AND user_id = ? AND id = ?`).get(companyId, userId, id) as ConfirmRow | undefined

@@ -675,7 +675,8 @@ member copied by hand, past every check. Now, **in a consultation** with the app
   permissions together, `driveAudienceUnion`): `anyone` (a link for anyone), `outsideDomains` (the domains of every
   outside permission; `?` for an unknown kind), `outsideKey` (exactly who outside: each address, domain, `anyone`),
   `insideOthers` (`domain` — the whole company — or how many people / groups besides the member; the member's own address
-  is the grant's `accountEmail`, without it everyone counts).
+  is the grant's `accountEmail`, without it everyone counts) and `insideKey` (exactly who inside: a count can stay the
+  same while the people change — Codex, 2026-11-14).
 - **A plain file** (`judgeAudience` in `put`): nobody outside → put as before. Someone outside → a consultation's AI whose
   app says `askAudience: true` gets 409 `DRIVE_PUT_NEEDS_CONFIRMATION` with `confirmation { id, fileName, update, edited:
   false, audience { anyone, outsideDomains, insideOthers, privateSource, trustOffered } }`; nothing is sent, the content
@@ -691,9 +692,13 @@ member copied by hand, past every check. Now, **in a consultation** with the app
 - **A private folder's file** (`privateSource: true` — the app reads it only when it can ask, `allowPrivate`, and sends
   it only to a server whose status says `privateSourceChecked`; else refused in the app as before, nothing sent): anyone
   outside → 403 `DRIVE_PRIVATE_SHARED_OUTSIDE` (trusted or not, pressed or not); only the member sees the place → put at
-  once; people in the company see it → the card (never trust; the sha256 covers who inside too), and without the card or
-  in a job → 403 `DRIVE_PRIVATE_SHARED`. The server cannot see the PC's folders: it trusts the app's flag as far as the
-  member's own AI could anyway put their own file — the flag only adds checks. Private folder names never travel: only
+  once; people in the company see it → the card (never trust; the sha256 covers exactly who inside, `insideKey`), and
+  without the card or in a job → 403 `DRIVE_PRIVATE_SHARED`. A folder in a shared drive (`driveId`) counts as seen by
+  others for a private folder's file (its members may not be listed under `drive.file`): always the card. The flag is kept
+  on **every** waiting put (`private_source`), also one asked only for someone's edit, so the press checks it again. The server cannot see the PC's folders: it trusts the app's flag as far as the
+  member's own AI could anyway put their own file — the flag only adds checks. (Not closed here, as before this rule: the
+  AI's own file tools can copy a private folder's file to a plain place, and that copy is a plain file. The record token
+  stays in main; the AI never writes the request body.) Private folder names never travel: only
   the file's name, as for any put.
 - **The press** (`POST …/overwrite-confirmations/:id { action, trust? }`, session only, as for an edited document): runs
   the put again with the waiting content (`askAudience`, `askPerson`, `privateSource` as asked) and writes only while the
@@ -704,12 +709,14 @@ member copied by hand, past every check. Now, **in a consultation** with the app
   how many inside for a private folder's file, ［置く］ / ［上書きする］ ［やめる］ and, where offered, the checkbox. The AI's
   text names nobody (`state: 'waiting-for-member'`).
 - Unverified against real Google: that `permissions.list` under `drive.file` lists a shared drive's members for a folder
-  in it (if not, the put sees fewer people — `insideOthers` may read 0 for a private folder's file in a shared drive).
+  in it (if not, a plain file's put sees fewer people; a private folder's file asks anyway, above).
 - Tests: `server/tests/integration/google-drive-audience.test.ts` (older app refused; card, same request same card,
   another member 404, the press writes exactly that once; people changed while asking; trust for exactly those people,
   one more person or a link for anyone asks again, a forged anyone trust lets nothing through, the list and taking it
   away; an update asks with `update: true`; an edited document seen outside asks once; a private folder's file outside
-  refused, only-me straight, company → card without trust, people inside changed while asking; leaving member's trust),
+  refused, only-me straight, company → card without trust, people inside changed while asking — also the same count with
+  someone else —, a shared drive always asks, a document asked only for an edit stays private at the press; leaving
+  member's trust),
   `job-deliverables.test.ts` (a run never asks, outside or private), `tests/unit/drive-put-confirmations-migration.test.ts`,
   `permission-matrix.test.ts` (the two routes and their CROSS row), `client/tests/drive-put-audience.test.ts` — mutation-checked.
 

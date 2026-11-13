@@ -293,6 +293,17 @@ describe('a private folder\'s file (google-drive.md "Asking before a put")', () 
     expect((await ai(token, 'POST', '/put', pdfBody('ふつう.pdf', { folderId: GOOGLE_SEED.proposalsFolder }))).body.data?.drivePut.state).toBe('done')
   })
 
+  it('a folder in a shared drive (its members may not be listed): a private folder\'s file always asks', async () => {
+    const token = await tokenFor('m-sato')
+    google.setDrivePermissions(GOOGLE_SEED.proposalsFolder, [owner(GOOGLE_SEED.member)])
+    google.setDriveSharedDrive(GOOGLE_SEED.proposalsFolder, 'fake-shared-drive-0001')
+    const r = await ai(token, 'POST', '/put', pdfBody('共有ドライブ.pdf', { folderId: GOOGLE_SEED.proposalsFolder, privateSource: true }))
+    expect(r.body.code, r.text).toBe('DRIVE_PUT_NEEDS_CONFIRMATION')
+    // A plain file there goes in as before.
+    expect((await ai(token, 'POST', '/put', pdfBody('共有ドライブふつう.pdf', { folderId: GOOGLE_SEED.proposalsFolder }))).body.data?.drivePut.state).toBe('done')
+    google.setDriveSharedDrive(GOOGLE_SEED.proposalsFolder, null)
+  })
+
   it('who in the company sees it changes while the member looks: nothing written', async () => {
     const token = await tokenFor('m-sato')
     google.setDrivePermissions(GOOGLE_SEED.proposalsFolder, [owner(GOOGLE_SEED.member), { type: 'domain', role: 'reader', domain: GOOGLE_SEED.internalDomain }])
@@ -301,6 +312,35 @@ describe('a private folder\'s file (google-drive.md "Asking before a put")', () 
     const before = uploads()
     expect((await press('m-sato', c.id, 'confirm')).body.code).toBe('DRIVE_SHARING_CHANGED')
     expect(uploads()).toBe(before)
+  })
+
+  it('the same number of people but someone else inside: nothing written (people are compared, not counted)', async () => {
+    const token = await tokenFor('m-sato')
+    google.setDrivePermissions(GOOGLE_SEED.proposalsFolder, [owner(GOOGLE_SEED.member), { type: 'user', role: 'reader', emailAddress: GOOGLE_SEED.colleague }])
+    const c = (await ai(token, 'POST', '/put', pdfBody('入れ替わる.pdf', { folderId: GOOGLE_SEED.proposalsFolder, privateSource: true }))).body.confirmation
+    expect(c.audience.insideOthers).toBe(1)
+    google.setDrivePermissions(GOOGLE_SEED.proposalsFolder, [owner(GOOGLE_SEED.member), { type: 'user', role: 'reader', emailAddress: 'yoshida@div.example' }])
+    const before = uploads()
+    expect((await press('m-sato', c.id, 'confirm')).body.code).toBe('DRIVE_SHARING_CHANGED')
+    expect(uploads()).toBe(before)
+  })
+
+  it('a private folder\'s document asked about only for someone\'s edit keeps being private at the press: shared meanwhile → nothing written', async () => {
+    const token = await tokenFor('m-sato')
+    google.setDrivePermissions(GOOGLE_SEED.proposalsFolder, [owner(GOOGLE_SEED.member)])
+    const made = await ai(token, 'POST', '/put', docBody(Buffer.from('# 非公開の報告\n'), { name: '非公開の報告.md', privateSource: true, askAudience: true }))
+    const doc = made.body.data?.drivePut
+    expect(doc?.state, made.text).toBe('done')
+    google.editDriveFile(doc.fileId, '# 田中さんの直し\n', GOOGLE_SEED.colleague)
+    expect((await ai(token, 'POST', '/read', { fileId: doc.fileId })).status).toBe(200)
+    const asked = await ai(token, 'POST', '/put', docBody(Buffer.from('# 二版\n'), { name: '非公開の報告.md', updateFileId: doc.fileId, privateSource: true, askAudience: true }))
+    expect(asked.body.code, asked.text).toBe('DRIVE_OVERWRITE_NEEDS_CONFIRMATION')
+    expect(asked.body.confirmation.audience).toBeUndefined()
+    expect(ROW(asked.body.confirmation.id).private_source).toBe(1)
+    google.setDrivePermissions(GOOGLE_SEED.proposalsFolder, [owner(GOOGLE_SEED.member), { type: 'domain', role: 'reader', domain: GOOGLE_SEED.internalDomain }])
+    const r = await press('m-sato', asked.body.confirmation.id, 'confirm')
+    expect(r.body.code, r.text).toBe('DRIVE_SHARING_CHANGED')
+    expect(google.driveFile(doc.fileId)!.content.toString()).not.toContain('二版')
   })
 
   it('a member leaving takes their trusted folders with them', async () => {
