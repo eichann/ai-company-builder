@@ -41,7 +41,7 @@ test('only links not marked fixed can be taken off, each from the record that ho
 // A 案件・プロジェクト's Drive files (owner decision 2026-11-13, records.md "Drive and PC file links"): their own list
 // (the name only where the server marked them the member's), never a path row; ［Google Drive のファイルをつなぐ］ only
 // for a bundle type with exactly one file link, its feature on.
-test('a プロジェクト: Drive files as their own list (names only the linker\'s), never a path row; the Drive button only for a bundle type with one file link, its feature on', async () => {
+test('a プロジェクト: Drive files as their own list (names only the linker\'s), never a path row; the Drive button only for a bundle type with exactly one file link (not none, not two; not a non-bundle type with one), its feature on', async () => {
   const { coreTypeDefinitions } = await import('../../shared/core/core-types')
   const types = coreTypeDefinitions().map(d => ({ definition: d }))
   const project = {
@@ -54,12 +54,25 @@ test('a プロジェクト: Drive files as their own list (names only the linker
     ],
   }
   const meeting = { record: { ...summary('meeting-0000aa', 'meeting', 5), state: 'read' }, links: [] }
+  // A bundle type with no file link, one with two (the server would need a link name), and a non-bundle type with
+  // exactly one (a やること: its own card offers Drive, the record card does not).
+  const def = types.find(t => t.definition.name === 'project')!.definition
+  const { files, ...noFiles } = def.links
+  types.push({ definition: { ...def, name: 'campaign', links: noFiles } })
+  types.push({ definition: { ...def, name: 'program', links: { ...def.links, drafts: { ...files } } } })
+  const others: Record<string, unknown> = {
+    'campaign-0000c1': { record: { ...summary('campaign-0000c1', 'campaign', 2), state: 'active' }, links: [] },
+    'program-0000g1': { record: { ...summary('program-0000g1', 'program', 2), state: 'active' }, links: [] },
+    'task-0000t1': { record: { ...summary('task-0000t1', 'task', 2), state: 'todo' }, links: [] },
+  }
   const apiWith = (features: unknown) => createRecordViewsApi({
     baseUrl: () => 'https://acb.test', cookies: () => ['session=abc'], log: { warn: () => {} },
     fetch: (async (url: string) => {
       const path = new URL(url).pathname
       if (path.endsWith('/records/item/project-0000p1')) return new Response(JSON.stringify({ data: project }), { status: 200 })
       if (path.endsWith('/records/item/meeting-0000aa')) return new Response(JSON.stringify({ data: meeting }), { status: 200 })
+      const other = Object.keys(others).find(id => path.endsWith(`/records/item/${id}`))
+      if (other) return new Response(JSON.stringify({ data: others[other] }), { status: 200 })
       if (path.endsWith('/records/types')) return new Response(JSON.stringify({ data: { types, features } }), { status: 200 })
       return new Response(JSON.stringify({ data: { entries: [], runs: [] } }), { status: 200 })
     }) as unknown as typeof fetch,
@@ -73,8 +86,11 @@ test('a プロジェクト: Drive files as their own list (names only the linker
     { fileId: '1Other0000000001', mine: false, name: null },
   ])
   assert.deepEqual(r.card.links, [])
-  const m = await apiWith(undefined).card('co1', 'meeting-0000aa')
-  assert.ok(m.success && m.card.driveLink === undefined)
+  for (const id of ['meeting-0000aa', ...Object.keys(others)]) {
+    const c = await apiWith(undefined).card('co1', id)
+    assert.ok(c.success, id)
+    assert.equal(c.success && c.card.driveLink, undefined, id)
+  }
   // Its feature turned off (「見るだけ」): nothing offered.
   const off = await apiWith({ projects: false }).card('co1', 'project-0000p1')
   assert.ok(off.success && off.card.driveLink === undefined)

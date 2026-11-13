@@ -733,7 +733,8 @@ takes a Drive link from the browser (「ファイル・フォルダ・Drive の�
 「…」→「つながりを外す」 (`tasks:unlinkTarget` — the `tasks:` channels take any record id; no 取り消す, as on the task
 card). No Google status is read for a card without `driveLink` (a meeting, a 来た連絡). A PC file is never shown there.
 Tests: `client/tests/record-card-links.test.ts` (the list, names only the linker's, `driveLink` only for a bundle with
-one file link and its feature on — mutation-checked), `tests/ui/record-card.spec.ts` 「a プロジェクト links Google Drive
+exactly one file link and its feature on: none for a bundle type with no file link or two, a non-bundle type with
+one (a やること), a meeting, a feature turned off — each condition mutation-checked), `tests/ui/record-card.spec.ts` 「a プロジェクト links Google Drive
 files…」 / 「…has no Drive button」.
 
 **Links between records** (owner 2026-11-02; server `records.md` "Linking records later"): each row

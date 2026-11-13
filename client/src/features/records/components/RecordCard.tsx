@@ -185,8 +185,12 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     if (card.version === undefined) return null
     setBusy(true)
     setError(null)
-    const r = await drive.link(card.record.id, card.version, options)
-    setBusy(false)
+    let r: Awaited<ReturnType<typeof drive.link>>
+    try {
+      r = await drive.link(card.record.id, card.version, options)
+    } finally {
+      setBusy(false)
+    }
     if (r.done) changed(r.done, null)
     else reload()
     return r.error
@@ -201,8 +205,12 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
   const unlinkDrive = async (fileId: string, label: string) => {
     if (card.version === undefined) return
     setBusy(true)
-    const r = await unlinkTypedFile(companyId, card.record.id, { kind: 'drive', fileId }, card.version)
-    setBusy(false)
+    let r: Awaited<ReturnType<typeof unlinkTypedFile>>
+    try {
+      r = await unlinkTypedFile(companyId, card.record.id, { kind: 'drive', fileId }, card.version)
+    } finally {
+      setBusy(false)
+    }
     if (!r.success) { setError(r.error); reload(); return }
     // Linked again through the chooser, not 取り消す (as on the task card).
     changed(`「${label}」とのつながりを外しました`, null)
