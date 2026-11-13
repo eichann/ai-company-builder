@@ -744,7 +744,15 @@ describe('Markdown and text as they are (google-drive.md "Markdown and text as t
     const txt = await ai(token, 'POST', '/put', { ...putBody({ name: 'メモ.txt' }, TXT), kind: 'text' })
     expect(txt.body.data.drivePut).toMatchObject({ state: 'done', name: 'メモ.txt', mimeType: 'text/plain' })
     expect(google.driveFile(txt.body.data.drivePut.fileId)!.mimeType).toBe('text/plain')
+    // JSON as is (owner request 2026-11-14): kept as uploaded, application/json; never a document; only valid JSON.
+    const JSON_BYTES = Buffer.from('{"version": "acb-asis-v0", "rev": 2}\n')
+    const js = await ai(token, 'POST', '/put', { ...putBody({ name: '就活_asis.json' }, JSON_BYTES), kind: 'json' })
+    expect(js.body.data?.drivePut, js.text).toMatchObject({ state: 'done', name: '就活_asis.json', mimeType: 'application/json' })
+    expect(google.driveFile(js.body.data.drivePut.fileId)!.content.equals(JSON_BYTES)).toBe(true)
     const before = google.uploads().length
+    expect((await ai(token, 'POST', '/put', { ...putBody({ name: '壊れ.json' }, Buffer.from('{"rev": 2,')), kind: 'json' })).body.code).toBe('DRIVE_CONTENT_REFUSED')
+    expect((await ai(token, 'POST', '/put', { ...putBody({ name: '就活_asis' }, JSON_BYTES), kind: 'json', as: 'google_doc' })).body.code).toBe('DRIVE_TYPE_REFUSED')
+    expect((await ai(token, 'POST', '/put', { ...putBody({ name: '就活.txt' }, JSON_BYTES), kind: 'json' })).body.code).toBe('DRIVE_NAME_REFUSED')
     expect((await ai(token, 'POST', '/put', mdBody({ name: '営業の型.txt' }))).body.code).toBe('DRIVE_NAME_REFUSED')
     expect((await ai(token, 'POST', '/put', { ...putBody({ name: 'メモ.md' }, TXT), kind: 'text' })).body.code).toBe('DRIVE_NAME_REFUSED')
     expect((await ai(token, 'POST', '/put', { ...putBody({ name: 'メモ.txt' }, Buffer.from([0x41, 0x00])), kind: 'text' })).body.code).toBe('DRIVE_CONTENT_REFUSED')
