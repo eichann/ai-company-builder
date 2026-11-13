@@ -34,6 +34,7 @@ export const DRIVE_PUT_TYPES = {
   html: 'text/html',
   markdown: 'text/markdown',
   text: 'text/plain',
+  json: 'application/json',
 } as const
 export type DrivePutKind = keyof typeof DRIVE_PUT_TYPES
 
@@ -43,7 +44,7 @@ export const DRIVE_DOC_MIME = 'application/vnd.google-apps.document'
 /** How a put lands in Drive: the file as it is (`file`), or converted into a Google document (`google_doc`). */
 export type DrivePutAs = 'file' | 'google_doc'
 
-/** The forms a put may take (owner decisions 2026-11-11: a Google document from HTML or Markdown; 2026-11-12: Markdown / text as is). */
+/** The forms a put may take (owner decisions 2026-11-11: a Google document from HTML or Markdown; 2026-11-12: Markdown / text as is; 2026-11-14: JSON as is). */
 export interface DrivePutForm {
   kind: DrivePutKind
   as: DrivePutAs
@@ -54,13 +55,13 @@ export interface DrivePutForm {
 }
 
 /**
- * What a put sends and what Drive keeps: every kind as a file (PDF, HTML, Markdown `.md`, text `.txt`, kept as
+ * What a put sends and what Drive keeps: every kind as a file (PDF, HTML, Markdown `.md`, text `.txt`, JSON `.json`, kept as
  * uploaded — Drive converts nothing), HTML or Markdown as a Google document (`as` absent = `file`). Null for anything
  * else (a PDF or text converted, an unknown kind or form).
  */
 export function drivePutForm(kind: unknown, as: unknown): DrivePutForm | null {
   const a = as === undefined ? 'file' : as
-  if (a === 'file' && (kind === 'pdf' || kind === 'html' || kind === 'markdown' || kind === 'text')) return { kind, as: a, uploadMime: DRIVE_PUT_TYPES[kind], driveMime: DRIVE_PUT_TYPES[kind] }
+  if (a === 'file' && (kind === 'pdf' || kind === 'html' || kind === 'markdown' || kind === 'text' || kind === 'json')) return { kind, as: a, uploadMime: DRIVE_PUT_TYPES[kind], driveMime: DRIVE_PUT_TYPES[kind] }
   if (a === 'google_doc' && (kind === 'html' || kind === 'markdown')) return { kind, as: a, uploadMime: DRIVE_PUT_TYPES[kind], driveMime: DRIVE_DOC_MIME }
   return null
 }
@@ -70,7 +71,7 @@ export const DRIVE_PUT_MAX_BYTES = 10 * 1024 * 1024
 /** A file name in Drive: at most this many characters. */
 export const DRIVE_NAME_MAX = 200
 
-/** The kind a file name's extension stands for, or null (anything but .pdf / .html / .htm / .md / .markdown / .txt). */
+/** The kind a file name's extension stands for, or null (anything but .pdf / .html / .htm / .md / .markdown / .txt / .json). */
 export function drivePutKindOf(name: string): DrivePutKind | null {
   const m = /\.([A-Za-z]{2,8})$/.exec(name)
   const ext = m?.[1]?.toLowerCase()
@@ -78,10 +79,11 @@ export function drivePutKindOf(name: string): DrivePutKind | null {
   if (ext === 'html' || ext === 'htm') return 'html'
   if (ext === 'md' || ext === 'markdown') return 'markdown'
   if (ext === 'txt') return 'text'
+  if (ext === 'json') return 'json'
   return null
 }
 
-/** The MIME type of an allowed kind (`application/pdf`, `text/html`, `text/markdown`, `text/plain`); null for anything else. */
+/** The MIME type of an allowed kind (`application/pdf`, `text/html`, `text/markdown`, `text/plain`, `application/json`); null for anything else. */
 export function drivePutMimeOf(kind: unknown): string | null {
   return typeof kind === 'string' && Object.prototype.hasOwnProperty.call(DRIVE_PUT_TYPES, kind) ? DRIVE_PUT_TYPES[kind as DrivePutKind] : null
 }
@@ -99,13 +101,13 @@ export function checkDriveFileName(raw: unknown, kind: DrivePutKind, as: DrivePu
   // eslint-disable-next-line no-control-regex
   if (name === '' || /[\u0000-\u001f\u007f/\\]/.test(name) || name === '.' || name === '..') return { error: 'ファイル名の形が正しくありません。' }
   if ([...name].length > DRIVE_NAME_MAX) return { error: `ファイル名は ${DRIVE_NAME_MAX} 文字までです。` }
-  if (as === 'file' && drivePutKindOf(name) !== kind) return { error: 'ファイル名の拡張子が中身の種類（PDF / HTML / Markdown / テキスト）と合っていません。' }
+  if (as === 'file' && drivePutKindOf(name) !== kind) return { error: 'ファイル名の拡張子が中身の種類（PDF / HTML / Markdown / テキスト / JSON）と合っていません。' }
   return { name }
 }
 
 /**
  * The content really is what its kind says: a PDF starts with `%PDF-`; HTML, Markdown and text are UTF-8
- * text without NUL. Null when fine, else why not.
+ * text without NUL; JSON is that and parses as JSON. Null when fine, else why not.
  */
 export function checkDrivePutContent(kind: DrivePutKind, bytes: Uint8Array): string | null {
   if (bytes.byteLength === 0) return 'ファイルが空です。'
@@ -114,12 +116,20 @@ export function checkDrivePutContent(kind: DrivePutKind, bytes: Uint8Array): str
     const head = [0x25, 0x50, 0x44, 0x46, 0x2d] // %PDF-
     return head.every((b, i) => bytes[i] === b) ? null : 'PDF ではないファイルです。'
   }
-  const what = kind === 'markdown' ? 'Markdown' : kind === 'text' ? 'テキスト' : 'HTML'
+  const what = kind === 'markdown' ? 'Markdown' : kind === 'text' ? 'テキスト' : kind === 'json' ? 'JSON' : 'HTML'
   if (bytes.includes(0)) return `${what} ではないファイルです。`
+  let text: string
   try {
-    new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
   } catch {
     return `${what} は UTF-8 の文字で書かれている必要があります。`
+  }
+  if (kind === 'json') {
+    try {
+      JSON.parse(text.replace(/^\uFEFF/, ''))
+    } catch {
+      return 'JSON として正しくない形です（書きかけや壊れた JSON は置けません）。'
+    }
   }
   return null
 }

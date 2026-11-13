@@ -49,6 +49,14 @@ describe('what may be put', () => {
     expect(checkDrivePutContent('html', enc('<p>提案</p>'))).toBeNull()
     expect(checkDrivePutContent('html', new Uint8Array([0x3c, 0x00, 0x3e]))).not.toBeNull()
     expect(checkDrivePutContent('html', new Uint8Array([0xff, 0xfe, 0x3c]))).not.toBeNull()
+    // JSON (owner request 2026-11-14): UTF-8 that parses as JSON; a half-written or broken one is refused.
+    expect(drivePutKindOf('業務_asis.json')).toBe('json')
+    expect(checkDrivePutContent('json', enc('{"rev": 2, "名前": "就活"}'))).toBeNull()
+    expect(checkDrivePutContent('json', enc('\uFEFF[1, 2]'))).toBeNull()
+    expect(checkDrivePutContent('json', enc('{"rev": 2,'))).toMatch(/JSON として正しくない/)
+    expect(checkDrivePutContent('json', enc('not json'))).not.toBeNull()
+    expect(drivePutForm('json', 'file')).toMatchObject({ uploadMime: 'application/json', driveMime: 'application/json' })
+    expect(drivePutForm('json', 'google_doc')).toBeNull()
     expect(checkDrivePutContent('pdf', new Uint8Array())).not.toBeNull()
   })
 

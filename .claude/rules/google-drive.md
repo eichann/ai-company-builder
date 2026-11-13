@@ -266,10 +266,10 @@ member's **own** rows (`DRIVE_PICK_TTL_MS`, `renewPick`):
   the text's `【】` → `〔〕`, server and app, `shared/core/outside-text.ts`), ≤ 200 000
   characters; a PDF (≤ 10 MB) as base64 — the app saves it at
   `.personal/google-drive/<id16>-<name>.pdf` (never synced) and returns the path.
-- `POST /put` (act token) `{ folderId, name, kind: pdf|html|markdown|text, as?: file|google_doc, sha256, contentBase64,
+- `POST /put` (act token) `{ folderId, name, kind: pdf|html|markdown|text|json, as?: file|google_doc, sha256, contentBase64,
   requestKey, updateFileId?, recordId? }`: checks in order: form allowlist (`drivePutForm`: a PDF / HTML / Markdown /
-  text as a file, HTML / Markdown as a Google document — nothing else) → name (one segment; a file keeps the kind's extension, a
-  document none) → key / sha / `updateFileId` shapes → size → sha256 matches → content (`%PDF-`, UTF-8 without NUL)
+  text / JSON as a file, HTML / Markdown as a Google document — nothing else) → name (one segment; a file keeps the kind's extension, a
+  document none) → key / sha / `updateFileId` shapes → size → sha256 matches → content (`%PDF-`, UTF-8 without NUL; JSON also parses)
   → a scheduled job's run: its one folder (`DRIVE_FOLDER_NOT_GRANTED`, below) → folder is a live folder pick → an
   update's file (below) → **receipt first** (`claimPut`, unique per member + requestKey; same key with
   other content 409 `DRIVE_PUT_KEY_REUSED`; done / unknown → answered as is, `existing: true`,
@@ -331,7 +331,7 @@ member's **own** rows (`DRIVE_PICK_TTL_MS`, `renewPick`):
   (act only). `drive_put` reads the local file in main: inside the consultation's company folder
   by name and real location (`PathGuard`), no `.git` segment, not inside a private folder (a
   nested repository on the way, or a readable private folder path — one sentence that never
-  names it), not in a folder left out on this computer, PDF / HTML / Markdown / text ≤ 10 MB with the content
+  names it), not in a folder left out on this computer, PDF / HTML / Markdown / text / JSON ≤ 10 MB with the content
   check (Markdown a Google document unless `as: 'file'`); `requestKey = drivePutRequestKey(folder, name, sha256, { as,
   updateFileId })` (same content, folder, name, form and target → the same key: never two copies of identical
   content; a plain new file keeps the key it always had). **Whether a file is new or updated is only `updateFileId`**,
@@ -598,12 +598,16 @@ Google document that changed since its baseline — or has none — continues fr
   comments read as 本人 / ほかの人, an older app refused with nothing kept, a refused link renews nothing, retention) and `job-deliverables.test.ts` (a run never continues; a run's put renews its
   folder; a lapsed folder's words) — mutation-checked; `client/tests/drive-overwrite.test.ts`.
 
-## Markdown and text as they are (owner request 2026-11-12)
+## Markdown and text as they are (owner request 2026-11-12; JSON 2026-11-14)
 
 - `kind: 'markdown', as: 'file'` puts a `.md` file (`text/markdown`), `kind: 'text'` a `.txt` file (`text/plain`;
   never a Google document) — uploaded with that MIME type in the metadata, so Drive converts nothing. The name keeps the
   kind's extension (`.md` / `.markdown`, `.txt`). Every other put check holds: the picked folder, a job's one folder
   (`DRIVE_FOLDER_NOT_GRANTED`), the outside-sharing refusals, the size and content checks (UTF-8 without NUL).
+- `kind: 'json'` puts a `.json` file (`application/json`), only as a file (`as: 'google_doc'` → `DRIVE_TYPE_REFUSED`), and
+  only when the content parses as JSON (a leading BOM allowed; a half-written or broken one → `DRIVE_CONTENT_REFUSED`,
+  「JSON として正しくない形です」). Asked for by the owner for definitions a Skill keeps (e.g. `business-shape`'s
+  `_asis.json`); reading JSON was already allowed. Overwriting, revisions and the outside-resource rule are as for `.txt`.
 - **Which form** (the tool's description and `DRIVE_INSTRUCTIONS`, both languages): Markdown without `as` is a Google
   document (a report people read and edit; the app sends `as: 'google_doc'`); the AI passes `as: 'file'` when the member
   asks for `.md` / Markdown as it is, or the file is material for an AI or a Skill to read later, and never says a `.md`
@@ -621,10 +625,10 @@ Google document that changed since its baseline — or has none — continues fr
 - Unverified against real Google: that Drive keeps the metadata's `text/markdown` as the file's `mimeType` (if it
   reported another type, an overwrite would be refused `DRIVE_FILE_REFUSED` — the safe side).
 - Staging: the fake's seed has a `text/x-markdown` file (`GOOGLE_SEED.salesNotesMd`, 「営業の型.md」) to pick and read.
-- Test (`google-drive.test.ts` 「Markdown and text as they are」, mutation-checked): a `.md` / `.txt` put as is, names and
+- Test (`google-drive.test.ts` 「Markdown and text as they are」, mutation-checked): a `.md` / `.txt` / `.json` put as is (a broken JSON refused), names and
   content refused, the same folder rules, kind mismatch both ways (and text onto `.md`) refused before Google is asked,
   `keepForever` before an overwrite and its refusal, changed since, a picked `.md` read (both MIME types); app
-  (`google-drive-tools.test.ts`): `as: 'file'` keeps a `.md`, a `.txt` never a document, the description's guidance.
+  (`google-drive-tools.test.ts`): `as: 'file'` keeps a `.md`, a `.txt` / `.json` never a document, a broken `.json` not sent, the description's guidance; `google-drive-core.test.ts`: JSON's kind, content and form.
 
 ## Linked to a record (every company, owner decision 2026-11-13; `records.md` "Drive and PC file links")
 

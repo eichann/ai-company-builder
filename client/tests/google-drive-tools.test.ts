@@ -424,6 +424,11 @@ test('drive_put: Markdown a Google document unless as: file keeps it a .md file;
   assert.ok(typeof JSON.parse(await t.execute('drive_put', { path: '営業部/.personal/メモ.txt', folderId: FOLDER, as: 'google_doc' })).error === 'string')
   fs.writeFileSync(path.join(root, '営業部', '.personal', '壊れた.txt'), Buffer.from([0x41, 0x00, 0x42]))
   assert.match(JSON.parse(await t.execute('drive_put', { path: '営業部/.personal/壊れた.txt', folderId: FOLDER })).error, /テキスト ではない/)
+  // JSON (owner request 2026-11-14): a .json file as is; never a Google document; a broken one is not sent.
+  fs.writeFileSync(path.join(root, '営業部', '.personal', '就活_asis.json'), '{"rev": 2}\n')
+  fs.writeFileSync(path.join(root, '営業部', '.personal', '書きかけ.json'), '{"rev": 2,')
+  assert.match(JSON.parse(await t.execute('drive_put', { path: '営業部/.personal/書きかけ.json', folderId: FOLDER })).error, /JSON として正しくない/)
+  assert.match(JSON.parse(await t.execute('drive_put', { path: '営業部/.personal/就活_asis.json', folderId: FOLDER, as: 'google_doc' })).error, /JSON（\.json） は Google ドキュメントにできません/)
   assert.equal(sent().length, 4)
   const descr = t.specs.find(s => s.name === 'drive_put')!.description
   // The AI is told .md can be kept as it is, and when (the member asks, or material for an AI / a Skill).
@@ -434,6 +439,8 @@ test('drive_put: Markdown a Google document unless as: file keeps it a .md file;
   assert.equal(sent()[4].updateFileId, 'fake-upload-1')
   assert.notEqual(sent()[4].requestKey, sent()[0].requestKey)
   assert.equal(upd.state, 'done')
+  await t.execute('drive_put', { path: '営業部/.personal/就活_asis.json', folderId: FOLDER })
+  assert.deepEqual([sent()[5].kind, 'as' in sent()[5], sent()[5].name], ['json', false, '就活_asis.json'])
   assert.equal(JSON.parse(await t.execute('drive_put', { path: '営業部/ご提案.pdf', folderId: FOLDER, updateFileId: '../x' })).error, '入力が正しくありません。')
   // The description is honest about when a new file is made (the 11/10 incident) and how to update one.
   const d = t.specs.find(s => s.name === 'drive_put')!.description

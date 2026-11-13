@@ -1115,7 +1115,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       if (!isObj(body)) return refuse('bad-request', 'Body must be a JSON object')
       if (!isDriveId(body.folderId)) return refuse('bad-request', 'folderId must be a Drive id')
       const form = drivePutForm(body.kind, body.as)
-      if (!form) return refuse('bad-request', 'Google Drive に置けるのは PDF・HTML・Markdown（.md）・テキスト（.txt）のファイル（そのまま）、または Google ドキュメントにする HTML と Markdown だけです。', { code: 'DRIVE_TYPE_REFUSED' })
+      if (!form) return refuse('bad-request', 'Google Drive に置けるのは PDF・HTML・Markdown（.md）・テキスト（.txt）・JSON（.json）のファイル（そのまま）、または Google ドキュメントにする HTML と Markdown だけです。', { code: 'DRIVE_TYPE_REFUSED' })
       const named = checkDriveFileName(body.name, form.kind, form.as)
       if ('error' in named) return refuse('bad-request', named.error, { code: 'DRIVE_NAME_REFUSED' })
       if (typeof body.requestKey !== 'string' || !REQUEST_KEY_RE.test(body.requestKey)) return refuse('bad-request', 'requestKey is 8–100 letters, digits, . _ : -')
