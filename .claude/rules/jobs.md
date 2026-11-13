@@ -402,7 +402,7 @@ reports.
   parser takes it only of the grant's own connector and kind. The route ceiling is widened narrowly: only a grant with a
   `deliverTo` reaches its connector's declared routes (`GET /google/drive/status`, `POST /google/drive/put`,
   `GET /google/drive/puts/:putId` — never a read, the file list or a pick), checked by `jobRunRouteAllowed` at every
-  call; the app gives the run only `drive_picked` and `drive_put` (`jobToolAccess(…, deliverTo)`) and its first message
+  call (and `POST /read` refuses any run-bound token by itself, `google-drive.md`); the app gives the run only `drive_picked` and `drive_put` (`jobToolAccess(…, deliverTo)`) and its first message
   says where (`jobDeliveryHowTo`). **The connector's route checks the folder at every call**: `routes/google-drive.ts`
   `jobScope` asks `jobRuns.deliveryPlace(member, runId)` (the run holds its occurrence, the job runnable as pinned, the
   accepted place) and the put refuses any other folder (403 `DRIVE_FOLDER_NOT_GRANTED`, nothing sent) — an update

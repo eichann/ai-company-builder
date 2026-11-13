@@ -303,6 +303,10 @@ export interface FakeGoogle {
   moveDriveFile(id: string, folderId: string): void
   /** Drive answers `keepForever: false` for this file's revisions (as if it would not keep them). */
   refuseKeepForever(id: string): void
+  /** Someone moves this Drive file to the trash (`files.get` answers `trashed: true`). */
+  trashDriveFile(id: string): void
+  /** Someone deletes this Drive file for good (every call about it answers 404). */
+  deleteDriveFile(id: string): void
   /** Someone edits this Drive file in Drive itself (a new revision / version, not ACB's), as `by` (default `SOMEONE_ELSE`). */
   editDriveFile(id: string, content: string, by?: string): void
   /**
@@ -913,6 +917,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     lastBy: string
     /** Comments on the file (`comments.list`). */
     comments: Array<{ id: string; createdTime: string; modifiedTime: string }>
+    /** In the trash (`trashDriveFile`). */
+    trashed?: boolean
   }
   /** A change of the file's content or look: a new head revision in its history and a later `modifiedTime`. */
   function newRevision(f: LiveDriveFile, by: string): void {
@@ -991,7 +997,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   }
 
   const driveFileOut = (f: LiveDriveFile, viewer: string): Record<string, unknown> => ({
-    kind: 'drive#file', id: f.id, name: f.name, mimeType: f.mimeType, trashed: false, parents: f.parents, modifiedTime: f.modifiedTime,
+    kind: 'drive#file', id: f.id, name: f.name, mimeType: f.mimeType, trashed: f.trashed === true, parents: f.parents, modifiedTime: f.modifiedTime,
     lastModifyingUser: { kind: 'drive#user', me: f.lastBy.toLowerCase() === viewer.toLowerCase() },
     // Drive's file version (int64 as a string): every file has one, Google documents too.
     version: String(f.version),
@@ -1031,7 +1037,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     const q = c.req.query('q') ?? ''
     const m = /^appProperties has \{ key='([A-Za-z0-9_-]+)' and value='([A-Za-z0-9_-]+)' \} and trashed = false$/.exec(q)
     if (!m) throw apiError(400, 'Invalid Value', 'invalid', { location: 'q', locationType: 'parameter' })
-    const hits = [...driveFiles.values()].filter(f => f.appProperties[m[1]] === m[2]).filter(f => {
+    const hits = [...driveFiles.values()].filter(f => f.appProperties[m[1]] === m[2] && f.trashed !== true).filter(f => {
       try { visibleDriveFile(a, f.id); return true } catch { return false }
     })
     return c.json({ kind: 'drive#fileList', files: hits.map(f => selectFields(driveFileOut(f, a.email), 'id,headRevisionId,version,webViewLink')) })
@@ -1839,6 +1845,16 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       } : null
     },
     refuseKeepForever(id) { keepRefused.add(id) },
+    trashDriveFile(id) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      f.trashed = true
+    },
+    deleteDriveFile(id) {
+      driveFiles.delete(id)
+      const at = uploadOrder.indexOf(id)
+      if (at >= 0) uploadOrder.splice(at, 1)
+    },
     editDriveFile(id, content, by = SOMEONE_ELSE) {
       const f = driveFiles.get(id)
       if (!f) throw new Error(`fake Google: no Drive file ${id}`)
