@@ -526,7 +526,10 @@ Google document that changed since its baseline — or has none — continues fr
     to its last editor): not when the change was merged into the newest revision (text or newest revision changed with no
     new revision listed; a comment alone is not a merge), not when a revision of the member's lies within `MERGE_NEAR_MS` of
     someone else's revision or comment, and not when anyone else can edit the file (its permissions; unreadable → someone
-    may). Any of these → the person is asked, as for someone else's change;
+    may). Any of these → the person is asked, as for someone else's change. **Accepted residual** (Codex, 2026-11-14):
+    a colleague's typing merged into a revision credited to the member, after which the colleague lost edit access, passes
+    every check (permissions are today's, not history's). The AI has read the current text — that typing included — and
+    takes it in, and the earlier version stays in 変更履歴; only the press is skipped;
   - **an older app** (it does not send `askPerson: true`, so it cannot show the card): nothing kept, 409
     `DRIVE_FILE_CHANGED_SINCE` with 「アプリを新しくすると、メンバーに確かめたうえで上書きできます」;
   - **someone else's** revision or comment → nothing written; 409 `DRIVE_OVERWRITE_NEEDS_CONFIRMATION` with `confirmation
@@ -567,7 +570,8 @@ Google document that changed since its baseline — or has none — continues fr
   (`client/shared/drive-overwrite.ts`, part `data-drive-overwrite`, kept with the message as `driveOverwrites`;
   `DriveOverwriteCard.tsx`: 「〇〇さんの直し・コメントが入っています」「取り込んだうえで上書きします。元の版は Google Drive の
   変更履歴から戻せます」 ［上書きする］ ［やめる］) and tells the AI to wait (`state: 'waiting-for-member'`); without a card path it
-  says the app must be updated. The press: IPC `google:decideDriveOverwrite` (session in main); the card's refusal words
+  says the app must be updated. The press: IPC `google:decideDriveOverwrite` (session in main; a written press whose
+  やること link was refused answers `notLinked` and the card says 「やることにはつなげませんでした」); the card's refusal words
   are the app's own by code (`DRIVE_OVERWRITE_REFUSALS`). The descriptions of `drive_put` / `drive_read` and
   `DRIVE_INSTRUCTIONS` say: read, take the edits in, update the same file — never a copy.
 - **What the AI reads**: `drive_read` of a document adds its comments after the text (`commentsText`: who only as 「本人」 /
@@ -589,7 +593,8 @@ Google document that changed since its baseline — or has none — continues fr
 - Tests: `server/tests/integration/google-drive-continue.test.ts` (own edits only after a read in this consultation, no
   baseline, changed after the read, someone else's edit / comment → confirmation and the press writing exactly that
   content once, another member / a record token cannot press, changed while asking, decline, expiry, outside sharing at
-  the press; and "How long a pick lasts"; the second review: the press checks the snapshot when the baseline moved,
+  the press; and "How long a pick lasts"; the second review: a press that writes but cannot link the やること answers
+  `notLinked` (the card says so), the press checks the snapshot when the baseline moved,
   comments read as 本人 / ほかの人, an older app refused with nothing kept, a refused link renews nothing, retention) and `job-deliverables.test.ts` (a run never continues; a run's put renews its
   folder; a lapsed folder's words) — mutation-checked; `client/tests/drive-overwrite.test.ts`.
 

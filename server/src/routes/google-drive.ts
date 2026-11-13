@@ -89,7 +89,7 @@ googleDriveRoute.get('/me/google/drive/files', companyMember, async (c) => {
 /**
  * 「上書きする」 / 「やめる」 on the card (google-drive.md "Continuing a document people edited"): a person's press, with
  * the session only — no record token reaches it. A written update makes the consultation's やること's link follow the
- * new revision (as a put does), as the member on the AI's proposal; a refusal there never fails the write.
+ * new revision (as a put does), as the member on the AI's proposal; a refusal there never fails the write (`notLinked`).
  */
 googleDriveRoute.post('/me/google/drive/overwrite-confirmations/:confirmationId', companyMember, serviceBody, async (c) => {
   const member = c.var.member
@@ -97,8 +97,10 @@ googleDriveRoute.post('/me/google/drive/overwrite-confirmations/:confirmationId'
   if (!r.ok) return answer(c, r)
   const { recordId, conversationId, ...decision } = r.value
   if (decision.state === 'written' && typeof recordId === 'string') {
-    // As the AI of that consultation (it named the record): every record check an AI's link meets applies.
-    linkPutToRecord(member, { kind: 'ai', conversationId: conversationId ?? null, runId: null }, recordId, { drivePut: decision.drivePut, existing: false })
+    // As the AI of that consultation (it named the record): every record check an AI's link meets applies. A refusal
+    // there is said on the card (`notLinked`), never only a log line.
+    const linked = linkPutToRecord(member, { kind: 'ai', conversationId: conversationId ?? null, runId: null }, recordId, { drivePut: decision.drivePut, existing: false })
+    if (linked !== null && linked !== true) return answer(c, { ok: true, value: { ...decision, notLinked: { recordId, code: linked.code } } })
   }
   return answer(c, { ok: true, value: decision })
 })

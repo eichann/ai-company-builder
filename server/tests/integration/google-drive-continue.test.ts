@@ -538,6 +538,20 @@ describe('second review of continuing and keeping (google-drive.md)', () => {
     expect((await ai(token, 'POST', '/read', { fileId: GOOGLE_SEED.handNotesPdf })).body.code).toBe('DRIVE_NOT_PICKED')
   })
 
+  it('a press that writes but cannot link the やること says so (notLinked), never only a log line', async () => {
+    const token = await tokenFor('m-sato')
+    const hidden = await person('m-owner', 'POST', '/records/item', { type: 'task', title: '持ち主だけの準備', personal: true, fields: { assignee: 'm-owner' } })
+    expect(hidden.status, hidden.text).toBe(201)
+    const doc = await putDoc(token, '# 一版\n', 'つなげない.md')
+    google.editDriveFile(doc.fileId, '# 田中さんの直し\n', GOOGLE_SEED.colleague)
+    expect((await ai(token, 'POST', '/read', { fileId: doc.fileId })).status).toBe(200)
+    const asked = await update(token, 'つなげない.md', doc.fileId, '# 二版\n', { recordId: hidden.body.data.record.id })
+    expect(asked.body.code, asked.text).toBe('DRIVE_OVERWRITE_NEEDS_CONFIRMATION')
+    const done = await press('m-sato', asked.body.confirmation.id, 'confirm')
+    expect(done.body.data?.state, done.text).toBe('written')
+    expect(done.body.data.notLinked).toMatchObject({ recordId: hidden.body.data.record.id })
+  })
+
   it('retention: an expired confirmation loses its content, a week later its row; reads older than a week go; a leaving member\'s rows go', async () => {
     const { sqliteCompanyData } = await import('../../src/adapters/sqlite/company-data')
     const repo = sqliteCompanyData(db).forCompany(CO).googleDrive

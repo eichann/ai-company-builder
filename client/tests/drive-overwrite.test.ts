@@ -135,6 +135,11 @@ test('the press: the member\'s session to the server; the card\'s words come fro
   assert.deepEqual(written, { success: true, state: 'written', link: 'https://docs.google.com/document/d/x/edit', commentsMayMove: true })
   assert.deepEqual(seen[0], { url: 'https://acb.example.jp/api/companies/co/me/google/drive/overwrite-confirmations/drive-confirm-abc123', method: 'POST', cookie: SESSION, body: '{"action":"confirm"}' })
   assert.equal(driveOverwriteOutcome(written).text, `${DRIVE_OVERWRITE_WORDS.written}${DRIVE_OVERWRITE_WORDS.comments}`)
+  // Written in Drive but not linked to the やること: the card says so (never only a server log line).
+  answer = { status: 200, body: { success: true, data: { state: 'written', drivePut: { link: null }, notLinked: { recordId: 'r', code: 'FORBIDDEN' } } } }
+  const unlinked = await api.decideDriveOverwrite('co', 'drive-confirm-abc123', 'confirm')
+  assert.ok(unlinked.success && unlinked.state === 'written' && unlinked.notLinked === true)
+  assert.match(driveOverwriteOutcome(unlinked).text, /つなげませんでした/)
   answer = { status: 409, body: { error: 'サーバーの文<script>', code: 'DRIVE_READ_AGAIN' } }
   const again = await api.decideDriveOverwrite('co', 'drive-confirm-abc123', 'confirm')
   assert.equal(again.success, false)

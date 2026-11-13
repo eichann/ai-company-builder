@@ -59,6 +59,7 @@ export const DRIVE_OVERWRITE_WORDS = {
   decline: 'やめる',
   writing: '上書きしています…',
   written: '上書きしました。',
+  notLinked: 'この相談のやることにはつなげませんでした。カードの「Google Drive のファイルをつなぐ」からつないでください。',
   declined: 'やめました。上書きしていません。',
   unknown: '上書きできたか分かりません（Google の答えが届きませんでした）。Google Drive で確かめてください（送り直しはしません）。',
   offline: 'サーバーに接続できないため、いまは上書きできません（オフラインの可能性があります）。',
@@ -87,7 +88,7 @@ export const DRIVE_OVERWRITE_REFUSALS: Record<string, string> = {
 
 /** The answer of `google:decideDriveOverwrite` (made with the member's session in main). */
 export type DriveOverwriteDecisionResult =
-  | { success: true; state: 'written'; link: string | null; commentsMayMove: boolean }
+  | { success: true; state: 'written'; link: string | null; commentsMayMove: boolean; notLinked?: boolean }
   | { success: true; state: 'unknown' }
   | { success: true; state: 'declined' }
   | { success: false; offline: boolean; code: string | null; error: string }
@@ -100,5 +101,6 @@ export function driveOverwriteOutcome(result: DriveOverwriteDecisionResult | nul
   if (!result.success) return { kind: 'error', text: result.offline ? DRIVE_OVERWRITE_WORDS.offline : result.error }
   if (result.state === 'declined') return { kind: 'declined', text: DRIVE_OVERWRITE_WORDS.declined }
   if (result.state === 'unknown') return { kind: 'unknown', text: DRIVE_OVERWRITE_WORDS.unknown }
-  return { kind: 'written', text: result.commentsMayMove ? `${DRIVE_OVERWRITE_WORDS.written}${DRIVE_OVERWRITE_WORDS.comments}` : DRIVE_OVERWRITE_WORDS.written }
+  const text = DRIVE_OVERWRITE_WORDS.written + (result.commentsMayMove ? DRIVE_OVERWRITE_WORDS.comments : '') + (result.notLinked ? DRIVE_OVERWRITE_WORDS.notLinked : '')
+  return { kind: 'written', text }
 }

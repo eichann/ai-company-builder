@@ -141,9 +141,9 @@ export function createGoogleApi(deps: GoogleDeps) {
   async function decideDriveOverwrite(companyId: string, confirmationId: string, action: 'confirm' | 'decline'): Promise<DriveOverwriteDecisionResult> {
     const r = await send(companyId, 'POST', `/drive/overwrite-confirmations/${encodeURIComponent(confirmationId)}`, { action })
     if (!r) return { ...offline, code: null }
-    const j = (r.json ?? {}) as { data?: { state?: unknown; drivePut?: { link?: unknown }; commentsMayMove?: unknown }; code?: unknown }
+    const j = (r.json ?? {}) as { data?: { state?: unknown; drivePut?: { link?: unknown }; commentsMayMove?: unknown; notLinked?: unknown }; code?: unknown }
     if (r.res.ok && j.data?.state === 'written') {
-      return { success: true, state: 'written', link: typeof j.data.drivePut?.link === 'string' ? j.data.drivePut.link : null, commentsMayMove: j.data.commentsMayMove === true }
+      return { success: true, state: 'written', link: typeof j.data.drivePut?.link === 'string' ? j.data.drivePut.link : null, commentsMayMove: j.data.commentsMayMove === true, ...(j.data.notLinked ? { notLinked: true } : {}) }
     }
     if (r.res.ok && j.data?.state === 'declined') return { success: true, state: 'declined' }
     if (r.res.ok && j.data?.state === 'unknown') return { success: true, state: 'unknown' }
