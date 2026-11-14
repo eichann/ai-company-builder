@@ -285,8 +285,8 @@ export function linkMinutesBundle(companyId: string, minutesId: string, bundleId
 /** 「上書きする」 / 「やめる」 on the card for a Google document someone else edited: the person's press, with their session. */
 export type DriveOverwriteWrites = ElectronPort<'decideDriveOverwrite'>
 
-export function decideDriveOverwrite(companyId: string, confirmationId: string, action: 'confirm' | 'decline', writes: DriveOverwriteWrites = window.electronAPI) {
-  return writes.decideDriveOverwrite(companyId, confirmationId, action)
+export function decideDriveOverwrite(companyId: string, confirmationId: string, action: 'confirm' | 'decline', trust = false, writes: DriveOverwriteWrites = window.electronAPI) {
+  return writes.decideDriveOverwrite(companyId, confirmationId, action, trust)
 }
 
 /** 「まとまりはない（社内の会議など）」 from the consultation's card. */

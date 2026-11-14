@@ -301,6 +301,10 @@ export interface FakeGoogle {
   driveFile(id: string): { name: string; mimeType: string; parents: string[]; content: Buffer; appProperties: Record<string, string>; createdBy: string | null; version: number; headRevisionId: string; uploadedAs: string | null; keptRevisions: string[]; modifiedTime: string; revisions: Array<{ id: string; modifiedTime: string; by: string }> } | null
   /** Someone shares this Drive file (or folder) by itself with another permission (anyone, another domain, a person). */
   shareDriveFile(id: string, permission: { type: 'user' | 'group' | 'domain' | 'anyone'; role: string; emailAddress?: string; domain?: string }): void
+  /** This Drive file (or folder) is in a shared drive (Drive answers its `driveId`), or no longer (null). */
+  setDriveSharedDrive(id: string, driveId: string | null): void
+  /** Who can see this Drive file (or folder) becomes exactly these permissions (its owner included). */
+  setDrivePermissions(id: string, permissions: Array<{ type: 'user' | 'group' | 'domain' | 'anyone'; role: string; emailAddress?: string; domain?: string }>): void
   /** Someone moves this Drive file into another folder (its parents become exactly that one). */
   moveDriveFile(id: string, folderId: string): void
   /** Drive answers `keepForever: false` for this file's revisions (as if it would not keep them). */
@@ -998,6 +1002,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     return f
   }
 
+  /** Files and folders a test put in a shared drive (`setDriveSharedDrive`): Drive answers their `driveId`. */
+  const sharedDriveOf = new Map<string, string>()
   const driveFileOut = (f: LiveDriveFile, viewer: string): Record<string, unknown> => ({
     kind: 'drive#file', id: f.id, name: f.name, mimeType: f.mimeType, trashed: f.trashed === true, parents: f.parents, modifiedTime: f.modifiedTime,
     lastModifyingUser: { kind: 'drive#user', me: f.lastBy.toLowerCase() === viewer.toLowerCase() },
@@ -1005,6 +1011,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     version: String(f.version),
     webViewLink: f.mimeType === DOC_MIME ? `https://docs.google.com/document/d/${f.id}/edit` : `https://drive.google.com/file/d/${f.id}/view`, appProperties: f.appProperties,
     ...(f.mimeType.startsWith('application/vnd.google-apps.') ? {} : { headRevisionId: f.headRevisionId, size: String(f.content.byteLength) }),
+    ...(sharedDriveOf.has(f.id) ? { driveId: sharedDriveOf.get(f.id) } : {}),
     capabilities: {
       canAddChildren: f.mimeType === 'application/vnd.google-apps.folder' && (f.writers ?? [f.owner]).some(w => w.toLowerCase() === viewer.toLowerCase()),
       canEdit: (f.writers ?? [f.owner]).some(w => w.toLowerCase() === viewer.toLowerCase()),
@@ -1912,6 +1919,15 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       const f = driveFiles.get(id)
       if (!f) throw new Error(`fake Google: no Drive file ${id}`)
       f.permissions = [...f.permissions, permission]
+    },
+    setDriveSharedDrive(id, driveId) {
+      if (driveId === null) sharedDriveOf.delete(id)
+      else sharedDriveOf.set(id, driveId)
+    },
+    setDrivePermissions(id, permissions) {
+      const f = driveFiles.get(id)
+      if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+      f.permissions = [...permissions]
     },
     moveDriveFile(id, folderId) {
       const f = driveFiles.get(id)

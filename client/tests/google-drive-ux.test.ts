@@ -151,7 +151,7 @@ test('D / H: what was not usable is counted with its reasons; a folder seen outs
   const out = JSON.parse(await t.execute('drive_pick_folder', {}))
   assert.equal(out.notUsable, 2)
   assert.match(out.notUsableWhy, /2件は使えませんでした。ゴミ箱に入っている 1件・AI では中身を読めない種類/)
-  assert.match(out.note, /社外の人も見られるため、AI はここに置けません/)
+  assert.match(out.note, /社外の人も見られます。AI がここに置くときは、そのたびにメンバーに確かめます/)
   assert.equal(drivePickRefusedText(0, {}), null)
   // Nothing usable: ask the member, do not reopen at once.
   const none = await driveTools(access, { ok: true, picks: [], refused: 1, refusedWhy: { 'no-access': 1 } })

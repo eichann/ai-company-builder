@@ -34,15 +34,15 @@
 import { GOOGLE_SCOPE } from '../../shared/core/google'
 import {
   checkDriveFileName, checkDrivePutContent, DRIVE_DOC_MIME, DRIVE_OVERWRITE_CONFIRM_TTL_MS, DRIVE_DOC_REFUSED_OUTSIDE, drivePickableFor, drivePickRefusedText, driveFolderSharingText, isDrivePickPurpose, type DriveFolderSharing, type DrivePickPurpose, type DrivePickRefusedWhy, DRIVE_FOLDER_MIME, DRIVE_PICK_MAX_FILES, DRIVE_PICK_SAVING_GRACE_MS, DRIVE_PICK_TICKET_KEPT_AFTER_MS, DRIVE_PICK_TICKETS_OPEN_MAX, DRIVE_PICK_TICKET_TTL_MS, DRIVE_PICK_TTL_MS, drivePreselectIds, isDrivePickTicket, DRIVE_PICKABLE_MIMES, DRIVE_PUT_MAX_BYTES, DRIVE_READ_AS,
-  DRIVE_READ_PDF_MAX_BYTES, DRIVE_READ_TEXT_MAX, DRIVE_TEXT_FOOTER, DRIVE_TEXT_HEADER, driveDocFetchesOutside, driveFolderReachesOutside, drivePutForm, driveRevisionOf, isDriveId, isDrivePickMode,
+  DRIVE_READ_PDF_MAX_BYTES, DRIVE_READ_TEXT_MAX, DRIVE_TEXT_FOOTER, DRIVE_TEXT_HEADER, driveAudience, driveAudienceUnion, type DriveAudience, driveDocFetchesOutside, driveFolderReachesOutside, drivePutForm, driveRevisionOf, isDriveId, isDrivePickMode,
   type DrivePermissionLike,
 } from '../../shared/core/google-drive'
 import { INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
 import { neutralizeOutsideText, outsideTextFlags } from '../../shared/core/outside-text'
-import type { DriveAiStatus, DriveOverwriteConfirmation, DriveOverwriteDecision, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerPageConfig, DrivePickTicketStarted, DrivePickTicketState, DrivePicksResult, DrivePutAnswer, DrivePutView, DriveReadAnswer, DriveUpdatableFile } from '../../shared/types/google-drive'
+import type { DriveAiStatus, DriveOverwriteConfirmation, DriveOverwriteDecision, DriveTrustedFolder, DriveOwnFile, DriveOwnFiles, DrivePick, DrivePickerPageConfig, DrivePickTicketStarted, DrivePickTicketState, DrivePicksResult, DrivePutAnswer, DrivePutView, DriveReadAnswer, DriveUpdatableFile } from '../../shared/types/google-drive'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
-import type { DriveDocBaseline, DriveOverwriteConfirmationRow, DrivePickRow, DrivePutRow, GoogleDriveRepository, PickTicketDirectory } from '../ports/google-drive'
+import type { DriveConfirmAudience, DriveDocBaseline, DriveOverwriteConfirmationRow, DrivePickRow, DrivePutRow, GoogleDriveRepository, PickTicketDirectory } from '../ports/google-drive'
 import type { Member } from './access'
 import type { GoogleClient, GoogleRequest, GoogleResult } from './google-client'
 import { cleanExportText } from './google-meetings'
@@ -302,6 +302,11 @@ const CONFIRMATIONS_KEPT_AFTER_MS = 7 * 24 * 60 * 60 * 1000
 const JOB_FOLDER_LAPSED = '責任者が選んだ置き先のフォルダが使えなくなっています（90日のあいだ何も置かれなかったか、選び直しが要ります）。この回では置けません。もう一度置こうとせず、置けなかったことを報告してください。責任者が「定期の仕事」の「置き先を選び直す」で選び直すと、次の回から置けます。'
 /** The member's pick of a file lapsed (7 days without a read or a link): said so, rather than 「選んだものではありません」. */
 const PICK_LAPSED = 'メンバーがこのファイルを選んでから7日のあいだ使われなかったため、読めなくなりました（やることにつないだファイルは期限なしで読めます）。drive_pick_files でもう一度選んでもらってください。'
+/** Asking before a put into a place others see (google-drive.md "Asking before a put"): the sentences. */
+const AUDIENCE_WAITING = 'この置き場所はほかの人（社外の人や、非公開の資料を見られない人）も見られるため、置くのはメンバーの確認待ちです。アプリのカードでメンバーが押すと、この内容で置かれます。押されるまで、置き直したり別の場所に置いたりしないでください。'
+const PRIVATE_OUTSIDE = 'このファイルは非公開フォルダの資料のため、社外の人も見られる場所には置けません。本人しか見られないフォルダか、社内の人だけが見られるフォルダを選んでもらってください。'
+const PRIVATE_NOBODY_TO_ASK = '非公開フォルダの資料は、ほかの人も見られる場所には、メンバーが確かめないと置けません。本人しか見られないフォルダを選んでもらってください。'
+const SHARING_CHANGED = '確かめてもらっている間に、この置き場所を見られる人が変わりました。置いていません。AI にもう一度頼んでください。'
 const DOC_CHANGED_WHILE_ASKING = '確かめてもらっている間に、Google Drive でさらに直されたかコメントが付きました。上書きしませんでした。AI にもう一度読み直してもらってください。'
 
 export function createGoogleDriveService(deps: GoogleDriveDeps) {
@@ -323,7 +328,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
   async function meta(companyId: string, userId: string, fileId: string): Promise<Extract<GoogleResult, { ok: true }> | Extract<GoogleResult, { ok: false }>> {
     return drive(companyId, userId, {
       method: 'GET', path: `/drive/v3/files/${fileId}`,
-      query: { fields: 'id,name,mimeType,trashed,modifiedTime,capabilities(canAddChildren)', supportsAllDrives: 'true' },
+      query: { fields: 'id,name,mimeType,trashed,modifiedTime,driveId,capabilities(canAddChildren)', supportsAllDrives: 'true' },
       operation: 'drive.files.get',
     })
   }
@@ -446,19 +451,24 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
     deps.sha256(new TextEncoder().encode(JSON.stringify(comments.map(c => [c.id, c.at, c.deleted]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))))))
 
   /**
-   * Keeps the put that waits for the member's 「上書きする」 (google-drive.md "Continuing a document people edited") and
-   * answers what the app's card shows. At most one waits per file (the content of each is kept, so their number stays
-   * bounded): the same request asked again while one waits for the same state of the document answers that one; another
-   * request or state replaces it (the earlier one is declined, its content removed).
+   * Keeps the put that waits for the member's press (google-drive.md "Continuing a document people edited", "Asking
+   * before a put") and answers what the app's card shows. At most one waits per file (an update) or per request (a new
+   * file) — the content of each is kept, so their number stays bounded: the same request asked again while one waits for
+   * the same state of the document and the same people seeing it answers that one; another request or state replaces it
+   * (the earlier one is declined, its content removed).
    */
   function askBeforeOverwrite(repo: GoogleDriveRepository, member: Member, conversationId: string,
     req: Omit<DriveOverwriteConfirmationRow, 'id' | 'userId' | 'conversationId' | 'state' | 'createdAt' | 'expiresAt'>): DriveOverwriteConfirmation {
     const now = clock.now()
     repo.pruneOverwriteConfirmations(now, new Date(Date.parse(now) - CONFIRMATIONS_KEPT_AFTER_MS).toISOString())
-    const view = (c: DriveOverwriteConfirmationRow): DriveOverwriteConfirmation => ({ id: c.id, fileName: c.name, editors: c.editors, commented: c.commented, expiresAt: c.expiresAt })
-    const waiting = repo.openOverwriteConfirmation(member.userId, req.fileId, now)
+    const view = (c: DriveOverwriteConfirmationRow): DriveOverwriteConfirmation => ({
+      id: c.id, fileName: c.name, editors: c.editors, commented: c.commented, expiresAt: c.expiresAt, update: c.fileId !== null, edited: c.fingerprint !== null,
+      ...(c.audience ? { audience: { ...c.audience, trustOffered: c.trustOffered } } : {}),
+    })
+    const waiting = repo.openOverwriteConfirmation(member.userId, req.fileId !== null ? { fileId: req.fileId } : { requestKey: req.requestKey }, now)
     if (waiting && waiting.requestKey === req.requestKey && waiting.conversationId === conversationId && waiting.fingerprint === req.fingerprint && waiting.revision === req.revision
-      && waiting.revisionAt === req.revisionAt && waiting.commentsSeen === req.commentsSeen) return view(waiting)
+      && waiting.revisionAt === req.revisionAt && waiting.commentsSeen === req.commentsSeen && waiting.audienceSig === req.audienceSig
+      && waiting.privateSource === req.privateSource) return view(waiting)
     if (waiting) repo.moveOverwriteConfirmation(waiting.id, ['open'], 'declined')
     const row: DriveOverwriteConfirmationRow = {
       ...req, id: `drive-confirm-${ids.newId()}`.replace(/[^A-Za-z0-9_-]/g, ''), userId: member.userId, conversationId, state: 'open', createdAt: now,
@@ -757,6 +767,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         puts,
         ...(next ? { putsNext: next } : {}),
         ...(pickerMissing ? { reason: 'picker-not-configured' as const } : {}),
+        // The app may send a private folder's file (`privateSource`): this server decides where it may go.
+        privateSourceChecked: true,
       })
     },
 
@@ -1202,6 +1214,51 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       let continued: 'own' | 'confirmed' | undefined
       /** The newest revision the continued update started from (the read one): its baseline is taken from there. */
       let continuedFrom: string | null = null
+      // Who sees the place (google-drive.md "Asking before a put"): a consultation's AI asks the member before a put where
+      // people outside the company — or, for a private folder's file, anyone but the member — can see it.
+      const myEmail = h.connectors.grant('google', member.userId)?.accountEmail?.toLowerCase() ?? null
+      const privateSource = body.privateSource === true
+      const consultation = actor.kind === 'ai' && actor.runId === null && !scope && !!actor.conversationId
+      const recordId = typeof body.recordId === 'string' && body.recordId.length <= 200 ? body.recordId : null
+      type AudienceAsk = { view: DriveConfirmAudience; sig: string; trustOffered: boolean }
+      /** Nothing to ask (null), a refusal, or the member's press (the place's people, their sha256, whether trust may be offered). */
+      const judgeAudience = (aud: DriveAudience, fileOutside: boolean): Outcome<never> | AudienceAsk | null => {
+        const outside = aud.anyone || aud.outsideKey !== ''
+        // Exactly who: outside only for a plain file (who inside sees it never mattered), inside too for a private one.
+        const sig = deps.sha256(new TextEncoder().encode(privateSource ? JSON.stringify([aud.outsideKey, aud.insideKey]) : aud.outsideKey))
+        // A press about who sees the place writes only for exactly those people — fewer too: the member saw another list.
+        if (confirmed?.audienceSig && confirmed.audienceSig !== sig) return refuse('conflict', SHARING_CHANGED, { code: 'DRIVE_SHARING_CHANGED' })
+        if (privateSource) {
+          if (outside) return refuse('forbidden', PRIVATE_OUTSIDE, { code: 'DRIVE_PRIVATE_SHARED_OUTSIDE' })
+          if (aud.insideOthers === 0) return null
+          if (!consultation || body.askAudience !== true) return refuse('forbidden', PRIVATE_NOBODY_TO_ASK, { code: 'DRIVE_PRIVATE_SHARED' })
+        } else {
+          if (!outside) return null
+          // A scheduled job's run (nobody to ask) or an app without the card: refused as before.
+          if (!consultation || body.askAudience !== true) {
+            return fileOutside
+              ? refuse('forbidden', 'このファイルは社外の人も見られるため、AI からは上書きできません（社外に渡すのはメンバー本人の操作です）。', { code: 'DRIVE_FILE_SHARED_OUTSIDE' })
+              : refuse('forbidden', 'このフォルダは社外の人も見られるため、AI からは置けません（社外に渡すのはメンバー本人の操作です）。社内だけのフォルダを選んでもらうか、メンバー本人が置いてください。', { code: 'DRIVE_FOLDER_SHARED_OUTSIDE' })
+          }
+          // 「このフォルダはもう聞かない」 for exactly these people outside (never a link for anyone).
+          if (!aud.anyone && h.googleDrive.folderTrust(member.userId, row.folderId)?.audienceSig === sig) return null
+        }
+        // The member's press: written only while the same people see it.
+        if (confirmed) return confirmed.audienceSig === sig ? null : refuse('conflict', SHARING_CHANGED, { code: 'DRIVE_SHARING_CHANGED' })
+        return { view: { anyone: aud.anyone, outsideDomains: aud.outsideDomains, insideOthers: aud.insideOthers, privateSource }, sig, trustOffered: !privateSource && !aud.anyone }
+      }
+      const isAsk = (v: Outcome<never> | AudienceAsk | null): v is AudienceAsk => v !== null && 'sig' in v
+      /** The put waits for the member's press (the app's card): nothing sent, the content kept on the server. */
+      const askAudience = (ask: AudienceAsk): Outcome<never> => {
+        const asked = askBeforeOverwrite(h.googleDrive, member, actor.conversationId as string, {
+          requestKey: body.requestKey as string, folderId: row.folderId, fileId: targetId, name: target?.name ?? named.name, kind: form.kind, as: form.as,
+          sha256: body.sha256 as string, content: bytes, recordId, fingerprint: null, revision: null, revisionAt: null, commentsSeen: null, editors: [], commented: false,
+          audience: ask.view, audienceSig: ask.sig, trustOffered: ask.trustOffered, privateSource,
+        })
+        return refuse('conflict', AUDIENCE_WAITING, { code: 'DRIVE_PUT_NEEDS_CONFIRMATION', confirmation: asked })
+      }
+      /** Who sees an update's place is asked together with the document's edits (one card), or on its own at the end. */
+      let pendingAsk: AudienceAsk | null = null
       const refusedBefore = await (async (): Promise<Outcome<never> | null> => {
         const m = await meta(member.companyId, member.userId, row.folderId)
         if (!m.ok) return googleRefusal(m, 'この置き場所を Google Drive で開けませんでした（消されたか、見られなくなった可能性があります）。')
@@ -1211,16 +1268,21 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         }
         const domain = h.connectors.client()?.domain
         if (!domain) return refuse('forbidden', STOPPED, { code: 'GOOGLE_STOPPED' })
+        let audience: DriveAudience | null = null
         if (actor.kind === 'ai') {
           const perms = await folderPermissions(member.companyId, member.userId, row.folderId)
           if (perms === null || !Array.isArray(perms)) {
             return refuse('forbidden', 'このフォルダを誰が見られるか確かめられないため、AI からは置けません。メンバー本人が Google Drive に置いてください。', { code: 'DRIVE_FOLDER_SHARING_UNKNOWN' })
           }
-          if (driveFolderReachesOutside(perms, domain)) {
-            return refuse('forbidden', 'このフォルダは社外の人も見られるため、AI からは置けません（社外に渡すのはメンバー本人の操作です）。社内だけのフォルダを選んでもらうか、メンバー本人が置いてください。', { code: 'DRIVE_FOLDER_SHARED_OUTSIDE' })
-          }
+          audience = driveAudience(perms, domain, myEmail)
+          // A shared drive's members may not all be listed under drive.file (unverified on real Google): for a private
+          // folder's file, a folder in a shared drive counts as seen by others — the member is asked, never skipped.
+          if (privateSource && typeof f.driveId === 'string' && f.driveId !== '' && audience.insideOthers === 0) audience = { ...audience, insideOthers: 1, insideKey: `shared-drive:${f.driveId}` }
         }
-        if (targetId === null) return null
+        if (targetId === null) {
+          const judged = audience ? judgeAudience(audience, false) : null
+          return isAsk(judged) ? askAudience(judged) : judged
+        }
         const fileRefused = 'このファイルは上書きできません（消されたか、別の場所に移されたか、直す権限がありません）。新しいファイルとして置いてください。'
         const t = await drive(member.companyId, member.userId, {
           method: 'GET', path: `/drive/v3/files/${targetId}`,
@@ -1243,10 +1305,10 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           if (perms === null || !Array.isArray(perms)) {
             return refuse('forbidden', 'このファイルを誰が見られるか確かめられないため、AI からは上書きできません。', { code: 'DRIVE_FILE_SHARING_UNKNOWN' })
           }
-          if (driveFolderReachesOutside(perms, domain)) {
-            return refuse('forbidden', 'このファイルは社外の人も見られるため、AI からは上書きできません（社外に渡すのはメンバー本人の操作です）。', { code: 'DRIVE_FILE_SHARED_OUTSIDE' })
-          }
           filePerms = perms
+          const judged = judgeAudience(driveAudienceUnion(audience as DriveAudience, driveAudience(perms, domain, myEmail)), driveFolderReachesOutside(perms, domain))
+          if (judged !== null && !isAsk(judged)) return judged
+          pendingAsk = judged
         }
         if (form.driveMime === DRIVE_DOC_MIME) {
           // A Google document's `version` moves without any edit (real Google, 2026-11-12: opened once, nothing typed). Its
@@ -1271,7 +1333,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           const part = base === null ? null
             : now !== base.fingerprint ? 'text' : newest.id !== base.revision ? 'revision-id' : newest.at !== base.revisionAt ? 'revision-time'
               : commentsSince.length > 0 ? 'comment' : 'none'
-          if (confirmed) {
+          if (confirmed && confirmed.fingerprint !== null) {
             // The member's press: the document must be exactly what was read and shown — text, newest revision, comments —
             // whatever the baseline says now (another put may have moved the baseline to the current state meanwhile).
             if (confirmed.fingerprint !== now || confirmed.revision !== newest.id || confirmed.revisionAt !== newest.at || confirmed.commentsSeen !== seen) {
@@ -1333,10 +1395,14 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
             } else {
               // Someone else's (or may be): a person decides (the app's card); the content waits on the server, fixed by its sha256.
               const names = [...new Set([...otherRevisions.map(r => r.name), ...otherComments.flatMap(c => c.others)].filter((n): n is string => n !== null))].slice(0, 5)
+              // Who sees the place, when that is asked too: on the same card.
+              const ask = pendingAsk as AudienceAsk | null
+              pendingAsk = null
               const asked = askBeforeOverwrite(h.googleDrive, member, actor.conversationId as string, {
-                requestKey: body.requestKey as string, folderId: row.folderId, fileId: targetId, name: target?.name ?? named.name, kind: form.kind as 'html' | 'markdown',
-                sha256: body.sha256 as string, content: bytes, recordId: typeof body.recordId === 'string' && body.recordId.length <= 200 ? body.recordId : null,
+                requestKey: body.requestKey as string, folderId: row.folderId, fileId: targetId, name: target?.name ?? named.name, kind: form.kind, as: form.as,
+                sha256: body.sha256 as string, content: bytes, recordId,
                 fingerprint: now, revision: newest.id as string, revisionAt: newest.at as string, commentsSeen: seen, editors: names, commented: otherComments.length > 0,
+                audience: ask?.view ?? null, audienceSig: ask?.sig ?? null, trustOffered: ask?.trustOffered ?? false, privateSource,
               })
               // People's names (chosen by them in Google) go to the member's card only, never into the AI's text.
               return refuse('conflict', 'ほかの人の直し・コメントが入っている（かもしれない）ため、上書きはメンバーの確認待ちです。アプリのカードでメンバーが「上書きする」を押すと、この内容で上書きされます。押されるまで、置き直したり新しいファイルを作ったりしないでください。',
@@ -1348,7 +1414,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
           const current = driveRevisionOf(tf.headRevisionId, tf.version)
           if (current === null || current !== target?.revisionId) return changedSince
         }
-        return null
+        return pendingAsk ? askAudience(pendingAsk) : null
       })()
       if (refusedBefore) {
         h.googleDrive.dropPut(id)
@@ -1480,6 +1546,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
      */
     async decideOverwrite(member: Member, id: string, body: unknown): Promise<Outcome<DriveOverwriteDecision & { recordId?: string | null; conversationId?: string | null }>> {
       if (!isObj(body) || (body.action !== 'confirm' && body.action !== 'decline')) return refuse('bad-request', 'action must be confirm or decline')
+      if (body.trust !== undefined && typeof body.trust !== 'boolean') return refuse('bad-request', 'trust must be a boolean')
       const repo = handle(member.companyId).googleDrive
       repo.pruneOverwriteConfirmations(clock.now(), new Date(clock.nowMs() - CONFIRMATIONS_KEPT_AFTER_MS).toISOString())
       const row = /^drive-confirm-[A-Za-z0-9_-]{1,80}$/.test(id) ? repo.overwriteConfirmation(member.userId, id) : null
@@ -1501,8 +1568,9 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       let put: Outcome<DrivePutAnswer>
       try {
         put = await service.put(member, { kind: 'ai', conversationId: row.conversationId, runId: null }, {
-          folderId: row.folderId, name: row.name, kind: row.kind, as: 'google_doc', sha256: row.sha256, contentBase64: Buffer.from(row.content).toString('base64'),
-          requestKey: row.requestKey, updateFileId: row.fileId,
+          folderId: row.folderId, name: row.name, kind: row.kind, as: row.as, sha256: row.sha256, contentBase64: Buffer.from(row.content).toString('base64'),
+          requestKey: row.requestKey, ...(row.fileId !== null ? { updateFileId: row.fileId } : {}), askPerson: true, askAudience: true,
+          ...(row.privateSource ? { privateSource: true } : {}),
         }, undefined, row)
       } catch (error) {
         repo.moveOverwriteConfirmation(row.id, ['writing'], 'open')
@@ -1518,9 +1586,32 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       // Sent: never sent again from here. A lost answer stays `unknown` (looked up by the put's id, as any put) — not
       // reported as written.
       repo.moveOverwriteConfirmation(row.id, ['writing'], 'written')
+      // 「このフォルダはもう聞かない」: only where the card offered it, for exactly the people outside who saw it then.
+      if (body.trust === true && row.trustOffered && row.audienceSig && row.audience) {
+        const pick = repo.pick(member.userId, row.folderId, clock.now())
+        repo.trustFolder({
+          userId: member.userId, folderId: row.folderId, folderName: pick?.name ?? put.value.drivePut.folderName ?? '', audienceSig: row.audienceSig,
+          outsideDomains: row.audience.outsideDomains, createdAt: clock.now(),
+        })
+      }
       const p = put.value.drivePut
       if (p.state !== 'done') return ok({ state: 'unknown', drivePut: p, recordId: null })
-      return ok({ state: 'written', drivePut: p, commentsMayMove: put.value.commentsMayMove === true, recordId: row.recordId, conversationId: row.conversationId })
+      return ok({ state: 'written', drivePut: p, commentsMayMove: put.value.commentsMayMove === true, update: row.fileId !== null, recordId: row.recordId, conversationId: row.conversationId })
+    },
+
+    /** GET …/me/google/drive/trusted-folders (session): the member's own 「このフォルダはもう聞かない」 folders. */
+    trustedFolders(member: Member): Outcome<{ folders: DriveTrustedFolder[] }> {
+      const folders = handle(member.companyId).googleDrive.trustedFolders(member.userId)
+        .map(t => ({ folderId: t.folderId, folderName: t.folderName, outsideDomains: t.outsideDomains, createdAt: t.createdAt }))
+      return ok({ folders })
+    },
+
+    /** DELETE …/me/google/drive/trusted-folders/:folderId (session): asks again before every put there. */
+    untrustFolder(member: Member, folderId: string): Outcome<{ removed: true }> {
+      if (!isDriveId(folderId)) return refuse('bad-request', 'folderId must be a Drive id')
+      return handle(member.companyId).googleDrive.untrustFolder(member.userId, folderId)
+        ? ok({ removed: true })
+        : refuse('not-found', 'このフォルダは「もう聞かない」になっていません。', { code: 'DRIVE_TRUST_NOT_FOUND' })
     },
   }
   return service

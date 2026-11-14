@@ -11,7 +11,10 @@
  *   POST   /me/google/drive/picks                   { mode, ids }  keep what the person picked (each checked with Google)
  *   GET  /me/google/drive/files                   the member's own picked / put files, with names (「つなぐ」's list)
  *   POST   /me/google/drive/overwrite-confirmations/:id  { action: confirm | decline }  the member's press on the card that
- *                                                  asks before the AI's text replaces a Google document someone else edited
+ *                                                  asks before the AI's text replaces a Google document someone else edited,
+ *                                                  or before a put where others see it (`trust`: 「このフォルダはもう聞かない」)
+ *   GET    /me/google/drive/trusted-folders         the member's own 「このフォルダはもう聞かない」 folders
+ *   DELETE /me/google/drive/trusted-folders/:folderId  asks again before every put there
  *
  * The member's AI (record token), mounted at /api/records-ai/google/drive:
  *   GET  /status            whether the Drive tools work now, the member's live picks
@@ -85,6 +88,10 @@ googleDriveRoute.get('/me/google/drive/files', companyMember, async (c) => {
   const member = c.var.member
   return answer(c, await googleDrive.ownFiles(member))
 })
+
+// 「このフォルダはもう聞かない」 (google-drive.md "Asking before a put"): the member's own list, and taking one away.
+googleDriveRoute.get('/me/google/drive/trusted-folders', companyMember, (c) => answer(c, googleDrive.trustedFolders(c.var.member)))
+googleDriveRoute.delete('/me/google/drive/trusted-folders/:folderId', companyMember, (c) => answer(c, googleDrive.untrustFolder(c.var.member, c.req.param('folderId'))))
 
 /**
  * 「上書きする」 / 「やめる」 on the card (google-drive.md "Continuing a document people edited"): a person's press, with

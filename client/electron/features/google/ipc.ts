@@ -5,8 +5,11 @@
 //   and 「やめる」 / turning it back on without a new consent; google-connector.md "The relay"),
 //   google:setArchive (「済んだメールを Gmail でもアーカイブする」: the member's own switch, sends only
 //   `{ feature: 'inbox_archive', on }`; google-connector.md "Archiving in Gmail"),
-//   google:decideDriveOverwrite (the card's 「上書きする」 / 「やめる」 for a Google document someone else edited:
+//   google:decideDriveOverwrite (the card's 「上書きする」 / 「置く」 / 「やめる」 — and 「このフォルダはもう聞かない」 — for a
+//   Google document someone else edited or a place others see:
 //   the person's press with the session; google-drive.md "Continuing a document people edited")
+//   google:driveTrustedFolders / google:untrustDriveFolder (設定 → Google 「このフォルダはもう聞かない」 list and
+//   ［聞くように戻す］, session only; google-drive.md "Asking before a put"),
 //   google:setDrive (「Drive で選んだものを読む・置く」: the member's own switch, sends only `{ feature: 'drive', on }`;
 //   member-oauth.md "Feature toggles inside a grant")
 // The server holds everything (the permission, sealed); the app holds no token
@@ -18,7 +21,8 @@
 
 import { GOOGLE_OFFLINE_TEXT, googleErrorText, isGoogleSignInUrl, type GoogleConnectResult, type GoogleFeature, type GoogleRelayResult, type GoogleStatusResult, type MyGoogle, type MyGoogleRelay } from '../../../shared/google'
 import { GOOGLE_FEATURES } from '../../../../shared/core/google'
-import { DRIVE_OVERWRITE_REFUSALS, type DriveOverwriteDecisionResult } from '../../../shared/drive-overwrite'
+import { DRIVE_OVERWRITE_REFUSALS, type DriveOverwriteDecisionResult, type DriveTrustedFoldersResult, type DriveUntrustResult } from '../../../shared/drive-overwrite'
+import type { DriveTrustedFolder } from '../../../../shared/types/google-drive'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { DesktopShell } from '../ports'
 
@@ -135,11 +139,42 @@ export function createGoogleApi(deps: GoogleDeps) {
     setArchive,
     decideDriveOverwrite,
     setDrive,
+    driveTrustedFolders,
+    untrustDriveFolder,
   }
 
-  /** The person's 「上書きする」 / 「やめる」 (session only): the server writes exactly the content that waited, or closes it. */
-  async function decideDriveOverwrite(companyId: string, confirmationId: string, action: 'confirm' | 'decline'): Promise<DriveOverwriteDecisionResult> {
-    const r = await send(companyId, 'POST', `/drive/overwrite-confirmations/${encodeURIComponent(confirmationId)}`, { action })
+  /** 「このフォルダはもう聞かない」 folders: the member's own (session). */
+  async function driveTrustedFolders(companyId: string): Promise<DriveTrustedFoldersResult> {
+    const r = await send(companyId, 'GET', '/drive/trusted-folders')
+    if (!r) return offline
+    const folders = (r.json as { data?: { folders?: unknown } } | null)?.data?.folders
+    if (r.res.ok && Array.isArray(folders)) {
+      return {
+        success: true,
+        folders: folders.filter((f): f is DriveTrustedFolder => !!f && typeof f === 'object' && typeof (f as DriveTrustedFolder).folderId === 'string'
+          && typeof (f as DriveTrustedFolder).folderName === 'string' && Array.isArray((f as DriveTrustedFolder).outsideDomains) && typeof (f as DriveTrustedFolder).createdAt === 'string'),
+      }
+    }
+    log.warn(`[google] GET drive trusted folders: answered ${r.res.status}`)
+    return { success: false, offline: false, error: googleErrorText(r.res.status, r.json) }
+  }
+
+  /** Asks again before every put into this folder. */
+  async function untrustDriveFolder(companyId: string, folderId: string): Promise<DriveUntrustResult> {
+    const r = await send(companyId, 'DELETE', `/drive/trusted-folders/${encodeURIComponent(folderId)}`)
+    if (!r) return offline
+    // Already gone counts as done: the folder asks again either way.
+    if (r.res.ok || r.res.status === 404) return { success: true }
+    log.warn(`[google] DELETE drive trusted folder: answered ${r.res.status}`)
+    return { success: false, offline: false, error: googleErrorText(r.res.status, r.json) }
+  }
+
+  /**
+   * The person's 「上書きする」 / 「置く」 / 「やめる」 (session only): the server writes exactly the content that waited, or
+   * closes it. `trust`: 「このフォルダはもう聞かない」 ticked (the server keeps it only where the card offered it).
+   */
+  async function decideDriveOverwrite(companyId: string, confirmationId: string, action: 'confirm' | 'decline', trust = false): Promise<DriveOverwriteDecisionResult> {
+    const r = await send(companyId, 'POST', `/drive/overwrite-confirmations/${encodeURIComponent(confirmationId)}`, { action, ...(trust && action === 'confirm' ? { trust: true } : {}) })
     if (!r) return { ...offline, code: null }
     const j = (r.json ?? {}) as { data?: { state?: unknown; drivePut?: { link?: unknown }; commentsMayMove?: unknown; notLinked?: unknown }; code?: unknown }
     if (r.res.ok && j.data?.state === 'written') {
@@ -188,10 +223,18 @@ export function registerGoogleIpc(ipc: IpcRegistrar, deps: GoogleDeps): ReturnTy
     if (typeof companyId !== 'string' || !companyId || typeof on !== 'boolean') return invalid
     return api.setArchive(companyId, on)
   })
-  ipc.handle('google:decideDriveOverwrite', async (_, companyId: string, confirmationId: string, action: 'confirm' | 'decline') => {
+  ipc.handle('google:decideDriveOverwrite', async (_, companyId: string, confirmationId: string, action: 'confirm' | 'decline', trust?: boolean) => {
     if (typeof companyId !== 'string' || !companyId || typeof confirmationId !== 'string' || !/^drive-confirm-[A-Za-z0-9_-]{1,80}$/.test(confirmationId)
-      || (action !== 'confirm' && action !== 'decline')) return { ...invalid, code: null }
-    return api.decideDriveOverwrite(companyId, confirmationId, action)
+      || (action !== 'confirm' && action !== 'decline') || (trust !== undefined && typeof trust !== 'boolean')) return { ...invalid, code: null }
+    return api.decideDriveOverwrite(companyId, confirmationId, action, trust === true)
+  })
+  ipc.handle('google:driveTrustedFolders', async (_, companyId: string) => {
+    if (typeof companyId !== 'string' || !companyId) return invalid
+    return api.driveTrustedFolders(companyId)
+  })
+  ipc.handle('google:untrustDriveFolder', async (_, companyId: string, folderId: string) => {
+    if (typeof companyId !== 'string' || !companyId || typeof folderId !== 'string' || !/^[A-Za-z0-9_-]{10,200}$/.test(folderId)) return invalid
+    return api.untrustDriveFolder(companyId, folderId)
   })
   ipc.handle('google:setDrive', async (_, companyId: string, on: boolean) => {
     if (typeof companyId !== 'string' || !companyId || typeof on !== 'boolean') return invalid

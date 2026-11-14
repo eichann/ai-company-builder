@@ -1,9 +1,10 @@
-import type { DriveOverwriteConfirmation } from '../../shared/types/google-drive'
+import type { DriveOverwriteConfirmation, DriveTrustedFolder } from '../../shared/types/google-drive'
 
 /**
  * The chat's card that asks before the AI's text replaces a Google document someone else edited
- * (`.claude/rules/google-drive.md` "Continuing a document people edited", owner decision 2026-11-14): when
- * `drive_put` answers `DRIVE_OVERWRITE_NEEDS_CONFIRMATION`, main adds this card to the reply; it is stored with the
+ * (`.claude/rules/google-drive.md` "Continuing a document people edited", owner decision 2026-11-14), or before a put
+ * where people outside the company — or, for a private folder's file, other people — see it ("Asking before a put"): when
+ * `drive_put` answers `DRIVE_OVERWRITE_NEEDS_CONFIRMATION` / `DRIVE_PUT_NEEDS_CONFIRMATION`, main adds this card to the reply; it is stored with the
  * message (`driveOverwrites`). The card is drawn by the app — never by the AI's text — and its two buttons are the
  * person's own, through IPC with the member's session (`google:decideDriveOverwrite`): 「上書きする」 writes exactly the
  * content that waits on the server, 「やめる」 closes it. Names come from Google (the member's own Drive).
@@ -21,6 +22,32 @@ export interface DriveOverwriteCard {
   commented: boolean
   expiresAt: string
   at: string
+  /** An update of a file ACB put (false: a new file). A card stored before this field is an update. */
+  update: boolean
+  /** Someone else's edit or comment is asked about (false: only who sees the place). A card stored before this field: true. */
+  edited: boolean
+  /** Who sees where it goes, when that is asked (google-drive.md "Asking before a put"). */
+  audience?: DriveCardAudience
+}
+
+/** The card's view of who sees the place: the domains outside (never addresses), a link for anyone, how many inside. */
+export interface DriveCardAudience {
+  anyone: boolean
+  outsideDomains: string[]
+  insideOthers: 'domain' | number
+  privateSource: boolean
+  trustOffered: boolean
+}
+
+const DOMAIN_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+|\?)$/
+
+function readAudience(v: unknown): DriveCardAudience | undefined {
+  if (!v || typeof v !== 'object') return undefined
+  const a = v as Record<string, unknown>
+  const inside = a.insideOthers === 'domain' ? 'domain' : typeof a.insideOthers === 'number' && Number.isInteger(a.insideOthers) && a.insideOthers >= 0 && a.insideOthers < 100_000 ? a.insideOthers : undefined
+  if (inside === undefined) return undefined
+  const domains = Array.isArray(a.outsideDomains) ? a.outsideDomains.filter((d): d is string => typeof d === 'string' && d.length <= 253 && DOMAIN_RE.test(d)).slice(0, 10) : []
+  return { anyone: a.anyone === true, outsideDomains: domains, insideOthers: inside, privateSource: a.privateSource === true, trustOffered: a.trustOffered === true && a.anyone !== true && a.privateSource !== true }
 }
 
 const CONFIRMATION_ID_RE = /^drive-confirm-[A-Za-z0-9_-]{1,80}$/
@@ -33,9 +60,10 @@ export function readDriveOverwriteCard(data: unknown): DriveOverwriteCard | unde
   if (!str(d.id, 200) || !str(d.companyId, 200) || !str(d.confirmationId, 100) || !CONFIRMATION_ID_RE.test(d.confirmationId)
     || !str(d.fileName, 300) || !str(d.expiresAt, 40) || !str(d.at, 40)) return undefined
   const editors = Array.isArray(d.editors) ? d.editors.filter((n): n is string => str(n, 60)).slice(0, 5) : []
+  const audience = readAudience(d.audience)
   return {
     id: d.id, companyId: d.companyId, confirmationId: d.confirmationId, fileName: d.fileName, editors, commented: d.commented === true,
-    expiresAt: d.expiresAt, at: d.at,
+    expiresAt: d.expiresAt, at: d.at, update: d.update !== false, edited: d.edited !== false || !audience, ...(audience ? { audience } : {}),
   }
 }
 
@@ -43,7 +71,7 @@ export function readDriveOverwriteCard(data: unknown): DriveOverwriteCard | unde
 export function driveOverwriteCardFor(confirmation: unknown, ctx: { id: string; companyId: string; at: string }): DriveOverwriteCard | null {
   if (!confirmation || typeof confirmation !== 'object') return null
   const c = confirmation as Partial<DriveOverwriteConfirmation>
-  return readDriveOverwriteCard({ ...ctx, confirmationId: c.id, fileName: c.fileName, editors: c.editors, commented: c.commented, expiresAt: c.expiresAt }) ?? null
+  return readDriveOverwriteCard({ ...ctx, confirmationId: c.id, fileName: c.fileName, editors: c.editors, commented: c.commented, expiresAt: c.expiresAt, update: c.update, edited: c.edited, audience: c.audience }) ?? null
 }
 
 /** 「田中さん・鈴木さんの直し・コメント」 — whose changes are in (「ほかの人」 when Google named nobody). */
@@ -65,6 +93,35 @@ export const DRIVE_OVERWRITE_WORDS = {
   offline: 'サーバーに接続できないため、いまは上書きできません（オフラインの可能性があります）。',
 } as const
 
+/**
+ * The words of a card that asks about who sees the place (google-drive.md "Asking before a put"). An update of a document
+ * someone edited says DRIVE_OVERWRITE_WORDS' title first and these lines after it.
+ */
+export const DRIVE_PUT_ASK_WORDS = {
+  title: (card: Pick<DriveOverwriteCard, 'update' | 'audience'>) => card.audience?.privateSource
+    ? `非公開フォルダの資料を、ほかの人も見られる場所に${card.update ? '上書きします' : '置きます'}`
+    : `社外の人も見られる場所に${card.update ? '上書きします' : '置きます'}`,
+  body: 'AI が作ったこの中身だけを置きます（押したあとに中身が変わることはありません）。',
+  confirm: (card: Pick<DriveOverwriteCard, 'update'>) => (card.update ? '上書きする' : '置く'),
+  writing: (card: Pick<DriveOverwriteCard, 'update'>) => (card.update ? '上書きしています…' : '置いています…'),
+  written: '置きました。',
+  declined: 'やめました。置いていません。',
+  unknown: '置けたか分かりません（Google の答えが届きませんでした）。Google Drive で確かめてください（送り直しはしません）。',
+  trust: 'このフォルダはもう聞かない（いまと同じ社外の人だけが見られる間）',
+} as const
+
+/** 「〇〇 の人も見られます」 — who sees the place, in the card's words (never an address). */
+export function driveAudienceLines(a: DriveCardAudience): string[] {
+  const lines: string[] = []
+  if (a.privateSource) lines.push('限られた人だけのフォルダ（非公開フォルダ）の中のファイルです。')
+  if (a.anyone) lines.push('リンクを知っている人なら、インターネット上の誰でも見られます。')
+  const named = a.outsideDomains.filter(d => d !== '?')
+  if (named.length > 0) lines.push(`社外の人（${named.join('・')} の人）も見られます。`)
+  if (a.outsideDomains.includes('?')) lines.push('ほかにも社外の人が見られる設定があります。')
+  if (a.privateSource) lines.push(a.insideOthers === 'domain' ? '社内の全員が見られます。' : `あなたのほかに、社内の ${a.insideOthers} 人（グループを含む）が見られます。`)
+  return lines
+}
+
 /** What the card says for the server's refusals of a press (built from the code: the server's own text never reaches the screen). */
 export const DRIVE_OVERWRITE_REFUSALS: Record<string, string> = {
   DRIVE_READ_AGAIN: '確かめている間に、Google Drive でさらに直されたかコメントが付きました。上書きしていません。AI にもう一度読み直してもらってください。',
@@ -78,6 +135,10 @@ export const DRIVE_OVERWRITE_REFUSALS: Record<string, string> = {
   DRIVE_FOLDER_SHARED_OUTSIDE: 'このフォルダは社外の人も見られるようになったため、上書きしていません。',
   DRIVE_FOLDER_SHARING_UNKNOWN: 'このフォルダを誰が見られるか確かめられないため、上書きしていません。',
   DRIVE_FOLDER_NOT_PICKED: '置き場所のフォルダが使えなくなっています。AI にもう一度頼んでください。',
+  DRIVE_SHARING_CHANGED: '確かめている間に、この置き場所を見られる人が変わりました。置いていません。AI にもう一度頼んでください。',
+  DRIVE_PRIVATE_SHARED_OUTSIDE: '非公開フォルダの資料は、社外の人も見られる場所には置けません。置いていません。',
+  DRIVE_OVERWRITE_NEEDS_CONFIRMATION: '確かめている間に Google Drive で直されたため、確かめ直しが要ります。置いていません。AI にもう一度頼んでください。',
+  DRIVE_PUT_NEEDS_CONFIRMATION: '確かめ直しが要ります。置いていません。AI にもう一度頼んでください。',
   DRIVE_FILE_REFUSED: 'このファイルは上書きできません（消されたか、移されたか、直す権限がありません）。',
   DRIVE_FILE_FIXED: 'このファイルは決めたことや添付の根拠として記録されているため、上書きしません。',
   DRIVE_FILE_NOT_VERIFIABLE: 'Google Drive で直されていないか確かめられないため、上書きしていません。少し待ってからもう一度お試しください。',
@@ -93,14 +154,19 @@ export type DriveOverwriteDecisionResult =
   | { success: true; state: 'declined' }
   | { success: false; offline: boolean; code: string | null; error: string }
 
+/** 「このフォルダはもう聞かない」 folders (設定 → Google), read with the member's session. */
+export type DriveTrustedFoldersResult = { success: true; folders: DriveTrustedFolder[] } | { success: false; offline: boolean; error: string }
+export type DriveUntrustResult = { success: true } | { success: false; offline: boolean; error: string }
+
 /** What the card shows after a press: written / declined (the buttons go), or a refusal (they stay; the person may try again). */
 export type DriveOverwriteOutcome = { kind: 'written' | 'unknown' | 'declined' | 'error'; text: string }
 
-export function driveOverwriteOutcome(result: DriveOverwriteDecisionResult | null | undefined): DriveOverwriteOutcome {
+/** `update: false` (a new file's card) says 置く instead of 上書き. */
+export function driveOverwriteOutcome(result: DriveOverwriteDecisionResult | null | undefined, update = true): DriveOverwriteOutcome {
   if (!result) return { kind: 'error', text: DRIVE_OVERWRITE_WORDS.offline }
   if (!result.success) return { kind: 'error', text: result.offline ? DRIVE_OVERWRITE_WORDS.offline : result.error }
-  if (result.state === 'declined') return { kind: 'declined', text: DRIVE_OVERWRITE_WORDS.declined }
-  if (result.state === 'unknown') return { kind: 'unknown', text: DRIVE_OVERWRITE_WORDS.unknown }
-  const text = DRIVE_OVERWRITE_WORDS.written + (result.commentsMayMove ? DRIVE_OVERWRITE_WORDS.comments : '') + (result.notLinked ? DRIVE_OVERWRITE_WORDS.notLinked : '')
+  if (result.state === 'declined') return { kind: 'declined', text: update ? DRIVE_OVERWRITE_WORDS.declined : DRIVE_PUT_ASK_WORDS.declined }
+  if (result.state === 'unknown') return { kind: 'unknown', text: update ? DRIVE_OVERWRITE_WORDS.unknown : DRIVE_PUT_ASK_WORDS.unknown }
+  const text = (update ? DRIVE_OVERWRITE_WORDS.written : DRIVE_PUT_ASK_WORDS.written) + (result.commentsMayMove ? DRIVE_OVERWRITE_WORDS.comments : '') + (result.notLinked ? DRIVE_OVERWRITE_WORDS.notLinked : '')
   return { kind: 'written', text }
 }

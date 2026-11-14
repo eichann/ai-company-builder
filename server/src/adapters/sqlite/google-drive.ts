@@ -4,7 +4,7 @@
  */
 import type Database from 'better-sqlite3'
 import { parseSkillUses } from '../../../shared/core/skill-uses'
-import type { DriveDocRead, DriveOverwriteConfirmationRow, DrivePickRow, DrivePickTicketRow, DrivePutRow, GoogleDriveRepository, PickTicketDirectory } from '../../ports/google-drive'
+import type { DriveConfirmAudience, DriveDocRead, DriveFolderTrust, DriveOverwriteConfirmationRow, DrivePickRow, DrivePickTicketRow, DrivePutRow, GoogleDriveRepository, PickTicketDirectory } from '../../ports/google-drive'
 import { skillUsesJson } from './skill-uses'
 
 type PickRow = { user_id: string; file_id: string; kind: string; name: string; mime_type: string; picked_at: string; expires_at: string }
@@ -39,24 +39,38 @@ const toTicket = (r: TicketRow): DrivePickTicketRow => {
 }
 
 type ConfirmRow = {
-  id: string; user_id: string; conversation_id: string; request_key: string; folder_id: string; file_id: string; name: string; kind: string; sha256: string
-  content: Buffer | null; record_id: string | null; fingerprint: string; revision: string; revision_at: string; comments_seen: string; editors: string
-  commented: number; state: string; created_at: string; expires_at: string
+  id: string; user_id: string; conversation_id: string; request_key: string; folder_id: string; file_id: string | null; name: string; kind: string
+  as_form: string; sha256: string; content: Buffer | null; record_id: string | null; fingerprint: string | null; revision: string | null
+  revision_at: string | null; comments_seen: string | null; editors: string; commented: number; audience: string | null; audience_sig: string | null
+  private_source: number; trust_offered: number; state: string; created_at: string; expires_at: string
 }
-const CONFIRM_COLUMNS = 'id, user_id, conversation_id, request_key, folder_id, file_id, name, kind, sha256, content, record_id, fingerprint, revision, revision_at, comments_seen, editors, commented, state, created_at, expires_at'
-const toConfirm = (r: ConfirmRow): DriveOverwriteConfirmationRow => {
-  let editors: string[] = []
+const CONFIRM_COLUMNS = 'id, user_id, conversation_id, request_key, folder_id, file_id, name, kind, as_form, sha256, content, record_id, fingerprint, revision, revision_at, comments_seen, editors, commented, audience, audience_sig, private_source, trust_offered, state, created_at, expires_at'
+const stringsOf = (json: string | null): string[] => {
   try {
-    const parsed = JSON.parse(r.editors) as unknown
-    if (Array.isArray(parsed)) editors = parsed.filter((v): v is string => typeof v === 'string')
-  } catch { /* stored by this module only */ }
-  return {
-    id: r.id, userId: r.user_id, conversationId: r.conversation_id, requestKey: r.request_key, folderId: r.folder_id, fileId: r.file_id, name: r.name,
-    kind: r.kind as DriveOverwriteConfirmationRow['kind'], sha256: r.sha256, content: r.content ? new Uint8Array(r.content) : null, recordId: r.record_id,
-    fingerprint: r.fingerprint, revision: r.revision, revisionAt: r.revision_at, commentsSeen: r.comments_seen, editors, commented: r.commented === 1,
-    state: r.state as DriveOverwriteConfirmationRow['state'], createdAt: r.created_at, expiresAt: r.expires_at,
-  }
+    const parsed = JSON.parse(json ?? '[]') as unknown
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : []
+  } catch { return [] /* stored by this module only */ }
 }
+const audienceOf = (r: ConfirmRow): DriveConfirmAudience | null => {
+  if (r.audience === null) return null
+  try {
+    const a = JSON.parse(r.audience) as { anyone?: unknown; outsideDomains?: unknown; insideOthers?: unknown }
+    const inside = a.insideOthers === 'domain' ? 'domain' : typeof a.insideOthers === 'number' && Number.isInteger(a.insideOthers) && a.insideOthers >= 0 ? a.insideOthers : 'domain'
+    return { anyone: a.anyone === true, outsideDomains: stringsOf(JSON.stringify(a.outsideDomains ?? [])), insideOthers: inside, privateSource: r.private_source === 1 }
+  } catch { return null }
+}
+const toConfirm = (r: ConfirmRow): DriveOverwriteConfirmationRow => ({
+  id: r.id, userId: r.user_id, conversationId: r.conversation_id, requestKey: r.request_key, folderId: r.folder_id, fileId: r.file_id, name: r.name,
+  kind: r.kind as DriveOverwriteConfirmationRow['kind'], as: r.as_form === 'file' ? 'file' : 'google_doc', sha256: r.sha256,
+  content: r.content ? new Uint8Array(r.content) : null, recordId: r.record_id,
+  fingerprint: r.fingerprint, revision: r.revision, revisionAt: r.revision_at, commentsSeen: r.comments_seen, editors: stringsOf(r.editors), commented: r.commented === 1,
+  audience: audienceOf(r), audienceSig: r.audience_sig, trustOffered: r.trust_offered === 1, privateSource: r.private_source === 1,
+  state: r.state as DriveOverwriteConfirmationRow['state'], createdAt: r.created_at, expiresAt: r.expires_at,
+})
+type TrustRow = { user_id: string; folder_id: string; folder_name: string; audience_sig: string; outside_domains: string; created_at: string }
+const toTrust = (r: TrustRow): DriveFolderTrust => ({
+  userId: r.user_id, folderId: r.folder_id, folderName: r.folder_name, audienceSig: r.audience_sig, outsideDomains: stringsOf(r.outside_domains), createdAt: r.created_at,
+})
 
 const PICK_COLUMNS = 'user_id, file_id, kind, name, mime_type, picked_at, expires_at'
 const PUT_COLUMNS = 'id, user_id, request_key, actor_kind, conversation_id, run_id, folder_id, folder_name, name, mime_type, bytes, sha256, state, file_id, revision_id, link, reason, created_at, finished_at, skills, updated_file_id, doc_fingerprint, doc_revision, doc_revision_at, doc_baseline_at'
@@ -142,18 +156,21 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
     },
 
     createOverwriteConfirmation(c) {
-      conn.prepare(`INSERT INTO google_drive_overwrite_confirmations (${CONFIRM_COLUMNS}, company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(c.id, c.userId, c.conversationId, c.requestKey, c.folderId, c.fileId, c.name, c.kind, c.sha256, c.content ? Buffer.from(c.content) : null, c.recordId,
-          c.fingerprint, c.revision, c.revisionAt, c.commentsSeen, JSON.stringify(c.editors), c.commented ? 1 : 0, c.state, c.createdAt, c.expiresAt, companyId)
+      const audience = c.audience ? JSON.stringify({ anyone: c.audience.anyone, outsideDomains: c.audience.outsideDomains, insideOthers: c.audience.insideOthers }) : null
+      conn.prepare(`INSERT INTO google_drive_overwrite_confirmations (${CONFIRM_COLUMNS}, company_id) VALUES (${Array(26).fill('?').join(', ')})`)
+        .run(c.id, c.userId, c.conversationId, c.requestKey, c.folderId, c.fileId, c.name, c.kind, c.as, c.sha256, c.content ? Buffer.from(c.content) : null, c.recordId,
+          c.fingerprint, c.revision, c.revisionAt, c.commentsSeen, JSON.stringify(c.editors), c.commented ? 1 : 0, audience, c.audienceSig,
+          c.privateSource || c.audience?.privateSource ? 1 : 0, c.trustOffered ? 1 : 0, c.state, c.createdAt, c.expiresAt, companyId)
     },
     overwriteConfirmation(userId, id) {
       const r = conn.prepare(`SELECT ${CONFIRM_COLUMNS} FROM google_drive_overwrite_confirmations WHERE company_id = ? AND user_id = ? AND id = ?`).get(companyId, userId, id) as ConfirmRow | undefined
       return r ? toConfirm(r) : null
     },
-    openOverwriteConfirmation(userId, fileId, now) {
+    openOverwriteConfirmation(userId, target, now) {
+      const where = 'fileId' in target ? 'file_id = ?' : 'file_id IS NULL AND request_key = ?'
       const r = conn.prepare(`SELECT ${CONFIRM_COLUMNS} FROM google_drive_overwrite_confirmations
-        WHERE company_id = ? AND user_id = ? AND file_id = ? AND state = 'open' AND expires_at > ? ORDER BY created_at DESC, id LIMIT 1`)
-        .get(companyId, userId, fileId, now) as ConfirmRow | undefined
+        WHERE company_id = ? AND user_id = ? AND ${where} AND state = 'open' AND expires_at > ? ORDER BY created_at DESC, id LIMIT 1`)
+        .get(companyId, userId, 'fileId' in target ? target.fileId : target.requestKey, now) as ConfirmRow | undefined
       return r ? toConfirm(r) : null
     },
     moveOverwriteConfirmation(id, from, to) {
@@ -166,8 +183,27 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
     declineOpenOverwriteConfirmations(fileId) {
       conn.prepare("UPDATE google_drive_overwrite_confirmations SET state = 'declined', content = NULL WHERE company_id = ? AND file_id = ? AND state = 'open'").run(companyId, fileId)
     },
+    folderTrust(userId, folderId) {
+      const r = conn.prepare('SELECT user_id, folder_id, folder_name, audience_sig, outside_domains, created_at FROM google_drive_folder_trust WHERE company_id = ? AND user_id = ? AND folder_id = ?')
+        .get(companyId, userId, folderId) as TrustRow | undefined
+      return r ? toTrust(r) : null
+    },
+    trustFolder(t) {
+      conn.prepare(`INSERT INTO google_drive_folder_trust (company_id, user_id, folder_id, folder_name, audience_sig, outside_domains, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (company_id, user_id, folder_id) DO UPDATE SET folder_name = excluded.folder_name, audience_sig = excluded.audience_sig,
+          outside_domains = excluded.outside_domains, created_at = excluded.created_at`)
+        .run(companyId, t.userId, t.folderId, t.folderName, t.audienceSig, JSON.stringify(t.outsideDomains), t.createdAt)
+    },
+    untrustFolder(userId, folderId) {
+      return conn.prepare('DELETE FROM google_drive_folder_trust WHERE company_id = ? AND user_id = ? AND folder_id = ?').run(companyId, userId, folderId).changes > 0
+    },
+    trustedFolders(userId) {
+      return (conn.prepare('SELECT user_id, folder_id, folder_name, audience_sig, outside_domains, created_at FROM google_drive_folder_trust WHERE company_id = ? AND user_id = ? ORDER BY created_at DESC, folder_id LIMIT 200')
+        .all(companyId, userId) as TrustRow[]).map(toTrust)
+    },
     forgetMember(userId) {
       conn.prepare('DELETE FROM google_drive_overwrite_confirmations WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+      conn.prepare('DELETE FROM google_drive_folder_trust WHERE company_id = ? AND user_id = ?').run(companyId, userId)
       conn.prepare('DELETE FROM google_drive_doc_reads WHERE company_id = ? AND user_id = ?').run(companyId, userId)
     },
     pruneOverwriteConfirmations(now, deleteBefore) {

@@ -427,6 +427,15 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
     const r = await ai(t, 'POST', '/google/drive/put', putBody({ name: '続けない.md', updateFileId: made.fileId, sha256: sha(next), contentBase64: next.toString('base64') }))
     expect([r.status, r.body.code, r.body.needsRead]).toEqual([409, 'DRIVE_FILE_CHANGED_SINCE', undefined])
     expect(google.driveFile(made.fileId)!.content.toString()).toBe('# 本人が直した\n')
+    // People outside come to see the folder: a run never asks (nobody to press) — even saying it could, and even for a
+    // private folder's file (google-drive.md "Asking before a put").
+    google.shareDriveFile(FOLDER, { type: 'user', role: 'reader', emailAddress: GOOGLE_SEED.customerSuzuki })
+    const outside = await ai(t, 'POST', '/google/drive/put', putBody({ name: '外に見える.md', askAudience: true }))
+    expect([outside.status, outside.body.code]).toEqual([403, 'DRIVE_FOLDER_SHARED_OUTSIDE'])
+    google.setDrivePermissions(FOLDER, [{ type: 'user', role: 'owner', emailAddress: GOOGLE_SEED.member }, { type: 'domain', role: 'reader', domain: GOOGLE_SEED.internalDomain }])
+    const priv = await ai(t, 'POST', '/google/drive/put', putBody({ name: '非公開.md', askAudience: true, privateSource: true }))
+    expect([priv.status, priv.body.code]).toEqual([403, 'DRIVE_PRIVATE_SHARED'])
+    expect(db.prepare('SELECT COUNT(*) AS n FROM google_drive_overwrite_confirmations WHERE company_id = ?').get(CO).n).toBe(0)
     // The folder lapsed (90 days without a put): the run is told plainly to report, not to ask for a pick.
     expirePicks()
     const lapsed = await ai(t, 'POST', '/google/drive/put', putBody({ name: '置けない.md' }))

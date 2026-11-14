@@ -96,6 +96,18 @@ export interface DriveAiStatus {
   putsNext?: string
   /** Why `available` is false when the company's Google is on but the admin has not registered the Picker. */
   reason?: 'picker-not-configured'
+  /** This server checks who sees the place for a private folder's file (`privateSource`). Absent: an older server — the app never sends one. */
+  privateSourceChecked?: boolean
+}
+
+/** One of the member's 「このフォルダはもう聞かない」 folders (GET …/me/google/drive/trusted-folders). */
+export interface DriveTrustedFolder {
+  folderId: string
+  /** As Drive named it when trusted. */
+  folderName: string
+  /** The domains outside the company that could see it then. */
+  outsideDomains: string[]
+  createdAt: string
 }
 
 /** A file one of the member's own puts made (the latest put of it): `drive_put` may update it as a new revision. */
@@ -196,11 +208,21 @@ export interface DriveOverwriteConfirmation {
   /** Someone else commented (or replied) since. */
   commented: boolean
   expiresAt: string
+  /** An update of a file ACB put (false: a new file). Absent from an older server: an update. */
+  update?: boolean
+  /** Someone else's edit or comment is what is asked about (false: only who sees the place). Absent from an older server: true. */
+  edited?: boolean
+  /**
+   * Who sees where it goes, when that is what is asked (google-drive.md "Asking before a put"): the domains outside the
+   * company (never addresses), a link for anyone, how many inside besides the member, and whether the file is a private
+   * folder's. `trustOffered`: the card may offer 「このフォルダはもう聞かない」.
+   */
+  audience?: { anyone: boolean; outsideDomains: string[]; insideOthers: 'domain' | number; privateSource: boolean; trustOffered: boolean }
 }
 
 /** POST /api/companies/:id/me/google/drive/overwrite-confirmations/:id { action } (session): the member's press. */
 export type DriveOverwriteDecision =
-  | { state: 'written'; drivePut: DrivePutView; commentsMayMove: boolean }
+  | { state: 'written'; drivePut: DrivePutView; commentsMayMove: boolean; /** An update (false: a new file). Absent from an older server. */ update?: boolean }
   /** Sent, but Google's answer was lost and the file is not found yet: never sent again (looked up by the put's id). */
   | { state: 'unknown'; drivePut: DrivePutView }
   | { state: 'declined' }
@@ -237,6 +259,17 @@ export interface DrivePutRequest {
    * as before and nothing waits on the server.
    */
   askPerson?: boolean
+  /**
+   * The app shows the card that asks before a put into a place others see (google-drive.md "Asking before a put"). Absent
+   * (an older app): a place outside is refused as before.
+   */
+  askAudience?: boolean
+  /**
+   * The file is in a private folder on the member's PC (only sent with `askAudience`, and only to a server whose status
+   * says `privateSourceChecked`): it goes only where the member alone sees it, or after the member's press where people
+   * inside the company see it — never outside.
+   */
+  privateSource?: boolean
 }
 
 /** One of the member's own Drive files ACB may open: a live pick of a file, or a file their put made. */

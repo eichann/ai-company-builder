@@ -149,6 +149,15 @@ export function setGoogleDrive(companyId: string, on: boolean, port: GoogleDrive
   return port.setGoogleDrive(companyId, on)
 }
 
+/** 「このフォルダはもう聞かない」 folders: the member's own list, and ［聞くように戻す］ (google-drive.md "Asking before a put"). */
+export type DriveTrustPort = ElectronPort<'getDriveTrustedFolders' | 'untrustDriveFolder'>
+export function getDriveTrustedFolders(companyId: string, port: DriveTrustPort = window.electronAPI) {
+  return port.getDriveTrustedFolders(companyId)
+}
+export function untrustDriveFolder(companyId: string, folderId: string, port: DriveTrustPort = window.electronAPI) {
+  return port.untrustDriveFolder(companyId, folderId)
+}
+
 export type GoogleRelayPort = ElectronPort<'getGoogleRelay' | 'setGoogleRelay'>
 
 export function getGoogleRelay(companyId: string, port: GoogleRelayPort = window.electronAPI) {
