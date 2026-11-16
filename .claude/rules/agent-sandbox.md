@@ -169,8 +169,9 @@ company's `rootPath`), so the sandbox applies there exactly as for a git company
 - A refused host / read: the PostToolUseFailure hook returns `additionalContext` with
   `blockedHostMessage(host)` = 「会社の設定で、この宛先（host）には接続できません。必要なら管理者に許可を依頼してください。」
   (or the read sentence) for the AI to relay; the event is `blocked` (S2).
-- A command refused writing a Skill file (an `Operation not permitted` line of the error names a
-  path under `.claude/skills/` or `.agents/skills/`, none under the home folder or `~`): the hook's
+- A command refused writing a Skill file (every `Operation not permitted` line of the error names
+  one path, inside the company folder — the write guard's `root`, relative paths from the command's
+  `cwd`, no `.` / `..` / `~` — under `.claude/skills/<name>/` or `.agents/skills/<name>/`): the hook's
   `additionalContext` is `skillWriteRefusalContext` instead — not the
   company refusing; use Edit / Write, which the write guard judges and explains (owner decision
   2026-11-16: the AI told an owner it could not change their own private Skill after a python write

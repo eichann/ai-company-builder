@@ -355,7 +355,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         if (enforced && sandbox && input.hook_event_name === 'PostToolUseFailure') {
           const read = sandboxConcern(sandbox.resolved, String(input.tool_name), input.tool_input, sandbox.home) === 'read'
           const violation = parseSandboxViolation(input.error)
-          const context = sandboxRefusalContext(violation, read) ?? skillWriteRefusalContext(String(input.tool_name), input.error, violation, sandbox.home)
+          const context = sandboxRefusalContext(violation, read) ?? skillWriteRefusalContext(String(input.tool_name), input.error, violation, writeGuard && { root: writeGuard.root, cwd: typeof input.cwd === 'string' && input.cwd ? input.cwd : workingDirectory })
           if (context) return { continue: true, hookSpecificOutput: { hookEventName: 'PostToolUseFailure', additionalContext: context } }
         }
         return { continue: true }

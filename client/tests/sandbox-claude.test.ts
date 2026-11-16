@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 import type { claudeCode } from 'ai-sdk-provider-claude-code'
 import { createClaudeConnection, type ClaudeConnectionConfig } from '../electron/agents/claude'
 import type { TurnSandbox } from '../electron/agents/connection'
+import type { WriteGuard } from '../electron/write-guard'
 import { SANDBOX_MESSAGES, decideTurnSandbox, resolveSandbox, sandboxPlatform } from '../shared/agents/sandbox-policy'
 import { AGENTS } from '../shared/agents/registry'
 
@@ -121,28 +122,35 @@ test('a host the sandbox refused: the AI is told the company\'s sentence to rela
   assert.equal(other.hookSpecificOutput, undefined)
 })
 
-test('a command refused writing a Skill file: the AI is sent to Edit / Write, not told it lacks the right', async () => {
+test('a command refused writing a Skill file in the company folder: the AI is sent to Edit / Write, not told it lacks the right', async () => {
   const calls: Options[] = []
   const connection = createClaudeConnection(base, fakeFactory(() => 'exit 0', calls))
-  await text(connection.createChatModel({ appSessionId: 's1', sandbox: enforce() }))
-  const hook = calls[0].hooks.PostToolUseFailure[0].hooks[0]
-  const failed = (command: string, error: string) =>
-    hook({ hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_use_id: 'w', tool_input: { command }, error })
+  const writeGuard = { root: COMPANY, getAccess: () => undefined } as unknown as WriteGuard
+  await text(connection.createChatModel({ appSessionId: 's1', sandbox: enforce(), writeGuard }))
+  await text(connection.createChatModel({ appSessionId: 's2', sandbox: enforce() }))
+  const failed = (command: string, error: string, call = 0) =>
+    calls[call].hooks.PostToolUseFailure[0].hooks[0]({ hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_use_id: 'w', tool_input: { command }, error, cwd: COMPANY })
   const sent = [
-    ['python3 -I - .claude/skills/x/SKILL.md', "PermissionError: [Errno 1] Operation not permitted: '.claude/skills/x/SKILL.md'"],
-    ['cp a.html "会社/.claude/skills/x/a.html"', 'cp: 会社/.claude/skills/x/a.html: Operation not permitted'],
-    ['echo x > .agents/skills/x/SKILL.md', 'bash: .agents/skills/x/SKILL.md: Operation not permitted'],
+    ['python3 -I - .claude/skills/x/SKILL.md', 'Traceback (most recent call last):\n  File "<stdin>", line 9, in <module>\nPermissionError: [Errno 1] Operation not permitted: \'.claude/skills/x/SKILL.md\''], // the case seen
+    ['cp a.html "$C/.claude/skills/x/a.html"', `cp: ${COMPANY}/.claude/skills/x/a.html: Operation not permitted`],
+    ['echo x > .agents/skills/x/SKILL.md', 'bash: line 1: .agents/skills/x/SKILL.md: Operation not permitted'],
+    ['cp a 営業/.claude/skills/x/a', 'cp: 営業/.claude/skills/x/a: Operation not permitted'],
   ]
   for (const [command, error] of sent) assert.match((await failed(command, error)).hookSpecificOutput.additionalContext, /use the Edit or Write tool/, command)
   const unchanged = [
     ['cp a b', 'cp: b: Operation not permitted'], // elsewhere
-    ['cp .claude/skills/x/SKILL.md /protected/out', 'cp: /protected/out: Operation not permitted'], // the refused path is not the Skill
     ['python3 .claude/skills/x/run.py', 'Traceback (most recent call last):\n  File ".claude/skills/x/run.py", line 3\nPermissionError: [Errno 1] Operation not permitted: \'/protected/out\''], // a Skill's tool writing elsewhere
     ['cp a .claude/settings.json', 'cp: .claude/settings.json: Operation not permitted'], // agent config, not a Skill
     ['cp a ~/.claude/skills/x/a', `cp: ${HOME}/.claude/skills/x/a: Operation not permitted`], // the member's own folder
+    ['cp a x', 'cp: ~/.claude/skills/x/a: Operation not permitted'], // the home folder, unexpanded
+    ['cp a x', 'cp: /Users/other1/Documents/AI Company Builder/acme/.claude/skills/x/a: Operation not permitted'], // another company folder
+    ['cp a .claude/skills/../../x', 'cp: .claude/skills/../../x: Operation not permitted'], // climbs out
+    ['python3 m.py', "PermissionError: [Errno 1] Operation not permitted: '/protected/a' -> '.claude/skills/x/a'"], // two paths: unclear
+    ['sh m.sh', 'cp: .claude/skills/x/a: Operation not permitted\ncp: .claude/settings.json: Operation not permitted'], // mixed
     ['cp a .claude/skills/x/a', 'cp: .claude/skills/x/a: No such file or directory'], // not the sandbox
   ]
   for (const [command, error] of unchanged) assert.equal((await failed(command, error)).hookSpecificOutput, undefined, command)
+  assert.equal((await failed('cp a .claude/skills/x/a', 'cp: .claude/skills/x/a: Operation not permitted', 1)).hookSpecificOutput, undefined, 'no company folder known')
 })
 
 test('the app enforces only where the agent can: Claude Code on macOS / Linux, never on Windows', () => {
