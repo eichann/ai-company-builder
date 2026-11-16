@@ -372,6 +372,21 @@ Commands you run are sandboxed by the company: they can reach only the hosts the
 /** Claude Code's text when `failIfUnavailable` stopped it (strings of CLI 2.1.314). */
 export const CLAUDE_SANDBOX_UNAVAILABLE_RE = /failIfUnavailable|sandbox_required_unavailable|sandbox unavailable/i
 
+/**
+ * A command that wrote into `.claude/` or `.agents/` and got `Operation not permitted`:
+ * Claude Code's sandbox keeps commands out of `.claude/` whatever the member may
+ * change. Without this the AI read it as the company's refusal (and the
+ * instructions above forbid "another tool"), so it told an owner it could not
+ * change their own private Skill (2026-11-16). Edit / Write are judged by the
+ * write guard, which explains a real refusal (chat-write-guard.md "Skill files").
+ */
+export function agentFolderWriteContext(toolName: string, toolInput: unknown, violation: SandboxViolation | undefined): string | undefined {
+  if (toolName !== 'Bash' || !violation?.notPermitted || violation.hosts.length || violation.read) return undefined
+  const command = (toolInput as { command?: unknown } | undefined)?.command
+  if (typeof command !== 'string' || !/(?:^|[\s'"`=/])\.(?:claude|agents)\//.test(command)) return undefined
+  return 'This is not the company refusing: commands cannot write into .claude/ or .agents/ under the sandbox. To create or change a Skill or other file there, use the Edit or Write tool instead (this is allowed; it is not a way around the sandbox). The app decides whether this member may change that file and explains a refusal. Do not tell the user they lack the right because of this command.'
+}
+
 /** For the AI after a refused command (Claude's PostToolUseFailure `additionalContext`). */
 export function sandboxRefusalContext(violation: SandboxViolation | undefined, concernRead: boolean): string | undefined {
   if (!violation) return undefined

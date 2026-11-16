@@ -121,6 +121,20 @@ test('a host the sandbox refused: the AI is told the company\'s sentence to rela
   assert.equal(other.hookSpecificOutput, undefined)
 })
 
+test('a command refused writing into .claude/: the AI is sent to Edit / Write, not told it lacks the right', async () => {
+  const calls: Options[] = []
+  const connection = createClaudeConnection(base, fakeFactory(() => 'exit 0', calls))
+  await text(connection.createChatModel({ appSessionId: 's1', sandbox: enforce() }))
+  const hook = calls[0].hooks.PostToolUseFailure[0].hooks[0]
+  const failed = (command: string, error = "PermissionError: [Errno 1] Operation not permitted: '.claude/skills/x/SKILL.md'") =>
+    hook({ hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_use_id: 'w', tool_input: { command }, error })
+  for (const command of ['python3 -I - .claude/skills/x/SKILL.md', 'cp a.html "会社/.claude/skills/x/a.html"', 'echo x > .agents/skills/x/SKILL.md']) {
+    assert.match((await failed(command)).hookSpecificOutput.additionalContext, /use the Edit or Write tool/, command)
+  }
+  assert.equal((await failed('cp a b', 'cp: b: Operation not permitted')).hookSpecificOutput, undefined, 'elsewhere: unchanged')
+  assert.equal((await failed('cp a .claude/skills/x/a', 'cp: No such file or directory')).hookSpecificOutput, undefined, 'not the sandbox')
+})
+
 test('the app enforces only where the agent can: Claude Code on macOS / Linux, never on Windows', () => {
   assert.equal(AGENTS['claude-code'].capabilities.sandbox, true)
   assert.equal(sandboxPlatform('darwin'), true)
