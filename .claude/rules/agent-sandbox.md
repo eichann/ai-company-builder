@@ -169,8 +169,9 @@ company's `rootPath`), so the sandbox applies there exactly as for a git company
 - A refused host / read: the PostToolUseFailure hook returns `additionalContext` with
   `blockedHostMessage(host)` = 「会社の設定で、この宛先（host）には接続できません。必要なら管理者に許可を依頼してください。」
   (or the read sentence) for the AI to relay; the event is `blocked` (S2).
-- A command refused writing into `.claude/` / `.agents/` (`Operation not permitted`, the command
-  names such a path): the hook's `additionalContext` is `agentFolderWriteContext` instead — not the
+- A command refused writing a Skill file (an `Operation not permitted` line of the error names a
+  path under `.claude/skills/` or `.agents/skills/`, none under the home folder or `~`): the hook's
+  `additionalContext` is `skillWriteRefusalContext` instead — not the
   company refusing; use Edit / Write, which the write guard judges and explains (owner decision
   2026-11-16: the AI told an owner it could not change their own private Skill after a python write
   got EPERM). Test: `client/tests/sandbox-claude.test.ts`. Codex has no such hook; its system prompt
