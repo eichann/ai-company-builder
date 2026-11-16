@@ -169,6 +169,15 @@ company's `rootPath`), so the sandbox applies there exactly as for a git company
 - A refused host / read: the PostToolUseFailure hook returns `additionalContext` with
   `blockedHostMessage(host)` = 「会社の設定で、この宛先（host）には接続できません。必要なら管理者に許可を依頼してください。」
   (or the read sentence) for the AI to relay; the event is `blocked` (S2).
+- A command refused writing a Skill file (every `Operation not permitted` line of the error names
+  one path, inside the company folder — the write guard's `root`, relative paths from the command's
+  `cwd`, no `.` / `..` / `~` — under `.claude/skills/<name>/` or `.agents/skills/<name>/`, also after
+  following links: `realPathOf`, the write guard's own resolution): the hook's
+  `additionalContext` is `skillWriteRefusalContext` instead — commands cannot write Skill files;
+  if that was the aim, use Edit / Write, which the write guard judges and explains (owner decision
+  2026-11-16: the AI told an owner it could not change their own private Skill after a python write
+  got EPERM). Test: `client/tests/sandbox-claude.test.ts`. Codex has no such hook; its system prompt
+  carries `skillFileInstruction` (`chat-write-guard.md`).
 - Verified on this Mac (CLI 2.1.314, Haiku, Jamf developer managed settings present, the
   scratch company's `.claude/settings.json` trying to disable the sandbox, allow example.org /
   example.com and re-open `~/.ssh`): api.github.com 200; example.org refused (curl 56, logged

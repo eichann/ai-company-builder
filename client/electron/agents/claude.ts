@@ -16,7 +16,7 @@ import type { AgentConnection, AgentEvent, AgentHostConfig } from './connection'
 import { fromClaudeRateLimitInfo } from '../../shared/rate-limits'
 import { agentProgressFromSdkMessage } from '../../shared/agent-progress'
 import type { PermissionMode } from '../../shared/permission-mode'
-import { decideReservedWrite, decideToolWrite } from '../write-guard'
+import { decideReservedWrite, decideToolWrite, realPathOf } from '../write-guard'
 import { decidePrivateWrite, noteToolInput, noteToolResult, privateConfirmMessage, recordPrivateConsent } from '../private-read-guard'
 import { answerAskUserQuestion } from './choice-tools'
 import { CLAUDE_CHOICE_TOOL } from '../../shared/choice-prompt'
@@ -27,7 +27,7 @@ import { createDeniedCallWatcher, recordCanUseTool, recordPreToolUse, recordTool
 import { withoutBrokerEnv } from '../../shared/broker-env'
 import { categorizeTool } from '../../shared/agent-events'
 import { AGENT_STOP_MESSAGES } from '../../shared/agent-stop'
-import { CLAUDE_SANDBOX_UNAVAILABLE_RE, SANDBOX_MESSAGES, claudeSandboxOptions, parseSandboxViolation, sandboxConcern, sandboxRefusalContext } from '../../shared/agents/sandbox-policy'
+import { CLAUDE_SANDBOX_UNAVAILABLE_RE, SANDBOX_MESSAGES, claudeSandboxOptions, parseSandboxViolation, skillWriteRefusalContext, sandboxConcern, sandboxRefusalContext } from '../../shared/agents/sandbox-policy'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
 
@@ -354,7 +354,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // A command the sandbox refused: the AI relays the company's sentence instead of retrying.
         if (enforced && sandbox && input.hook_event_name === 'PostToolUseFailure') {
           const read = sandboxConcern(sandbox.resolved, String(input.tool_name), input.tool_input, sandbox.home) === 'read'
-          const context = sandboxRefusalContext(parseSandboxViolation(input.error), read)
+          const violation = parseSandboxViolation(input.error)
+          const context = sandboxRefusalContext(violation, read) ?? skillWriteRefusalContext(String(input.tool_name), input.error, violation, writeGuard && { root: writeGuard.root, cwd: typeof input.cwd === 'string' && input.cwd ? input.cwd : workingDirectory, realPath: realPathOf })
           if (context) return { continue: true, hookSpecificOutput: { hookEventName: 'PostToolUseFailure', additionalContext: context } }
         }
         return { continue: true }

@@ -140,19 +140,30 @@ export interface WriteGuard {
   getShelfPaths?: () => readonly string[]
 }
 
+/** Where an absolute path really lands, links followed (its nearest existing folder's real path + the rest); undefined when unknown. */
+export function realPathOf(target: string): string | undefined {
+  try {
+    let existing = target
+    const rest: string[] = []
+    while (!existsSync(existing)) {
+      const parent = path.dirname(existing)
+      if (parent === existing) return undefined
+      rest.unshift(path.basename(existing))
+      existing = parent
+    }
+    return path.join(realpathSync(existing), ...rest)
+  } catch {
+    return undefined
+  }
+}
+
 /** Where a path really lands, relative to the company folder's real path ('/'-separated); null when outside it or unknown. */
 function realRelativePath(root: string, target: string, cwd?: string): string | null {
   try {
     const realRoot = realpathSync(root)
-    let existing = path.resolve(cwd && path.isAbsolute(cwd) ? cwd : root, target)
-    const rest: string[] = []
-    while (!existsSync(existing)) {
-      const parent = path.dirname(existing)
-      if (parent === existing) return null
-      rest.unshift(path.basename(existing))
-      existing = parent
-    }
-    const rel = path.relative(realRoot, path.join(realpathSync(existing), ...rest))
+    const real = realPathOf(path.resolve(cwd && path.isAbsolute(cwd) ? cwd : root, target))
+    if (real === undefined) return null
+    const rel = path.relative(realRoot, real)
     if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null
     return rel.split(path.sep).join('/').normalize('NFC')
   } catch {

@@ -372,6 +372,42 @@ Commands you run are sandboxed by the company: they can reach only the hosts the
 /** Claude Code's text when `failIfUnavailable` stopped it (strings of CLI 2.1.314). */
 export const CLAUDE_SANDBOX_UNAVAILABLE_RE = /failIfUnavailable|sandbox_required_unavailable|sandbox unavailable/i
 
+/**
+ * The path one `Operation not permitted` line names (python's `…: 'p'` ending the line — a
+ * rename's `'a' -> 'b'` names two and gives none —, or cp / a shell's `p: Operation…`);
+ * undefined when unclear.
+ */
+function refusedPathOf(line: string): string | undefined {
+  return /Operation not permitted: '([^']+)'\s*$/.exec(line)?.[1] ?? /(?:^|:\s)([^:]+): Operation not permitted/.exec(line)?.[1]?.trim()
+}
+
+/**
+ * A command refused writing a Skill file in the company folder: Claude Code's sandbox
+ * keeps commands out of `.claude/` whatever the member may change. Without this the AI
+ * read it as the company's refusal (and the instructions above forbid "another tool"),
+ * so it told an owner it could not change their own private Skill (2026-11-16). Only
+ * when every refused path the error names is a Skill file inside the company folder
+ * (`root`; a relative path from the command's `cwd`, no `.` / `..` / `~`), also after
+ * following links (`realPath`: a link inside a Skill folder may point anywhere):
+ * settings, hooks, the home folder and anything unclear keep the usual handling. The
+ * text is conditional ("if you were writing"): an EPERM line does not prove a write. Edit / Write are
+ * judged by the write guard, which explains a real refusal (chat-write-guard.md "Skill files").
+ */
+export function skillWriteRefusalContext(toolName: string, error: unknown, violation: SandboxViolation | undefined, place: { root: string; cwd: string; realPath: (path: string) => string | undefined } | undefined): string | undefined {
+  if (toolName !== 'Bash' || !place || !violation?.notPermitted || violation.hosts.length || violation.read || typeof error !== 'string') return undefined
+  const root = trimSlash(place.root)
+  const skillUnder = (top: string | undefined, full: string | undefined) =>
+    !!top && !!full && full.startsWith(`${top}/`) && /(?:^|\/)\.(?:claude|agents)\/skills\/[^/]+\/./.test(full.slice(top.length + 1))
+  const inCompanySkill = (path: string | undefined) => {
+    if (!path || path.startsWith('~') || path.split('/').some(part => part === '.' || part === '..')) return false
+    const full = path.startsWith('/') ? path : `${trimSlash(place.cwd)}/${path}`
+    return skillUnder(root, full) && skillUnder(place.realPath(root), place.realPath(full))
+  }
+  const refused = error.split('\n').filter(line => /Operation not permitted/.test(line)).map(refusedPathOf)
+  if (refused.length === 0 || !refused.every(inCompanySkill)) return undefined
+  return 'Under the sandbox, commands cannot write Skill files (.claude/skills/, .agents/skills/), whatever the member may change. If this command was creating or changing a Skill file in the company folder, use the Edit or Write tool for it instead: that is the intended way, not a way around the sandbox, and the app decides whether this member may change that Skill and explains a refusal. Do not tell the user they lack the right only because this command failed.'
+}
+
 /** For the AI after a refused command (Claude's PostToolUseFailure `additionalContext`). */
 export function sandboxRefusalContext(violation: SandboxViolation | undefined, concernRead: boolean): string | undefined {
   if (!violation) return undefined
