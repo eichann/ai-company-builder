@@ -193,6 +193,17 @@ export function externalRepositoryInstruction(companyRootPath?: string): string 
 }
 
 /**
+ * Skill files are written with the agent's file tools: its command sandbox keeps
+ * shell commands out of `.claude/` (Claude Code's own rule, observed 2026-11-16: a
+ * python write → EPERM), and the AI then told an owner it had no right to change
+ * their own private Skill. The file tools are judged by the write guard
+ * (chat-write-guard.md "Skill files"), whose refusal says why.
+ */
+export function skillFileInstruction(): string {
+  return '【Skill のファイル】Skill のファイル（.claude/skills/ や .agents/skills/ の中）を作る・直すときは、コマンド（cp・mv・python・sed・リダイレクトなど）ではなく、ファイルを書く道具（Claude Code なら Edit / Write）を使ってください。コマンドからは、守りの囲いで .claude/ の中に書き込めないことがあります。ファイルを書く道具で書けるかどうかはアプリが判断し、断るときは理由を表示します。コマンドで書けなかっただけで「権限がない」とユーザーに伝えないでください。'
+}
+
+/**
  * The host for one consultation's turn (records.md "Which Skill"): every tool
  * event still goes to the host's own `onToolEvent`, and a Skill the AI loaded
  * (`skillLoadedBy`) is also handed to `onSkillUsed` with the consultation's
@@ -365,6 +376,7 @@ export async function startChatServer(config: ChatServerConfig) {
         finalSystemPrompt = `あなたの作業ディレクトリは「${workingDirectory}」です。\nファイル操作はこのディレクトリ内で行ってください。\n日本語で回答してください。`
         finalSystemPrompt += `\n\n【重要】スクリーンショット、テスト結果、一時ファイル、設定ファイル（.playwright/, test-results/ 等）など、ユーザーのコンテンツではない生成物は必ず「.workspace/」ディレクトリ内に出力してください。.workspace/ が存在しない場合は作成してください。作業ディレクトリのルートを汚さないでください。`
         finalSystemPrompt += `\n\n${externalRepositoryInstruction(companyRootPath)}`
+        finalSystemPrompt += `\n\n${skillFileInstruction()}`
         if (activeDepartment) {
           finalSystemPrompt += `\n\n現在ユーザーが閲覧中の部署: 「${activeDepartment.name}」（フォルダ: ${activeDepartment.folder}/）\nユーザーの質問やファイル操作は、特に指定がなければこの部署のフォルダ内が対象です。`
         } else {

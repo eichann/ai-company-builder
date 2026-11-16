@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { bashWriteTargets, decideToolWrite, defaultCloneDir, gitCloneTargets, isInstructionFile, mayChangeInstructionFile, type InstructionAuthority, type WriteGuard } from '../electron/write-guard'
-import { externalRepositoryInstruction } from '../electron/chat-server'
+import { externalRepositoryInstruction, skillFileInstruction } from '../electron/chat-server'
 import { createClaudeConnection, type ClaudeConnectionConfig } from '../electron/agents/claude'
 import type { WriteAccess } from '../shared/write-access'
 import type { claudeCode } from 'ai-sdk-provider-claude-code'
@@ -311,4 +311,10 @@ test('agent config: a member\'s AI is stopped before writing anything an agent l
 test('the chat instructions tell the AI where external repositories go', () => {
   assert.match(externalRepositoryInstruction('/Users/me/会社/'), /「\/Users\/me\/会社\/\.workspace\/」の中に置いてください/)
   assert.match(externalRepositoryInstruction(), /会社フォルダ直下の「\.workspace\/」/)
+})
+
+test('the chat instructions send Skill edits through the file tools, not commands', () => {
+  // The command sandbox keeps the shell out of .claude/; the AI took that for a missing right.
+  assert.match(skillFileInstruction(), /Edit \/ Write/)
+  assert.match(skillFileInstruction(), /「権限がない」とユーザーに伝えないでください/)
 })

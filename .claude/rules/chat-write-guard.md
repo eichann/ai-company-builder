@@ -92,7 +92,10 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
   `.workspace/`, `.personal/` nor a skill this member keeps private (`getPrivateSkills`: the lines of
   `.git/info/exclude`) is judged, since none of them is shared. The app's own file operations ask
   the same rule (`files-and-editor.md`). Tests: `client/tests/write-guard.test.ts`,
-  `client/tests/skill-file-refusal.test.ts`.
+  `client/tests/skill-file-refusal.test.ts`. A native agent's system prompt says to write Skill
+  files with its file tools (`skillFileInstruction`, owner decision 2026-11-16): its command
+  sandbox keeps the shell out of `.claude/` (a python write → EPERM), and the AI took that for a
+  missing right and told an owner it could not change their own private Skill.
 - The company map (`records.md`): `.acb/types/` (type definitions) only for owners/admins
   (unknown authority never blocks; the push checker's rule), guard reason `type-definition`; and
   `decideRecordEdit` refuses Write / Edit / MultiEdit (and the api-key mode's writeFile) that put
