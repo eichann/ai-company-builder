@@ -5,6 +5,9 @@
  * app never enforces (Windows).
  */
 import { test } from 'node:test'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import assert from 'node:assert/strict'
 import type { claudeCode } from 'ai-sdk-provider-claude-code'
 import { createClaudeConnection, type ClaudeConnectionConfig } from '../electron/agents/claude'
@@ -151,6 +154,26 @@ test('a command refused writing a Skill file in the company folder: the AI is se
   ]
   for (const [command, error] of unchanged) assert.equal((await failed(command, error)).hookSpecificOutput, undefined, command)
   assert.equal((await failed('cp a .claude/skills/x/a', 'cp: .claude/skills/x/a: Operation not permitted', 1)).hookSpecificOutput, undefined, 'no company folder known')
+})
+
+test('a Skill path that a link takes out of the company folder keeps the usual handling', async () => {
+  const top = mkdtempSync(path.join(tmpdir(), 'acb-skill-link-'))
+  try {
+    const company = path.join(top, 'company')
+    mkdirSync(path.join(company, '.claude/skills/x'), { recursive: true })
+    mkdirSync(path.join(top, 'outside'))
+    symlinkSync(path.join(top, 'outside'), path.join(company, '.claude/skills/x/link'))
+    const calls: Options[] = []
+    const connection = createClaudeConnection(base, fakeFactory(() => 'exit 0', calls))
+    await text(connection.createChatModel({ appSessionId: 'l1', sandbox: enforce(), writeGuard: { root: company, getAccess: () => undefined } as unknown as WriteGuard }))
+    const failed = (target: string) => calls[0].hooks.PostToolUseFailure[0].hooks[0]({
+      hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_use_id: 'w', tool_input: { command: `cp a ${target}` }, error: `cp: ${target}: Operation not permitted`, cwd: company,
+    })
+    assert.match((await failed('.claude/skills/x/SKILL.md')).hookSpecificOutput.additionalContext, /use the Edit or Write tool/)
+    assert.equal((await failed('.claude/skills/x/link/settings.json')).hookSpecificOutput, undefined)
+  } finally {
+    rmSync(top, { recursive: true, force: true })
+  }
 })
 
 test('the app enforces only where the agent can: Claude Code on macOS / Linux, never on Windows', () => {

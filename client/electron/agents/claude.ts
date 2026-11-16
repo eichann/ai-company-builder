@@ -16,7 +16,7 @@ import type { AgentConnection, AgentEvent, AgentHostConfig } from './connection'
 import { fromClaudeRateLimitInfo } from '../../shared/rate-limits'
 import { agentProgressFromSdkMessage } from '../../shared/agent-progress'
 import type { PermissionMode } from '../../shared/permission-mode'
-import { decideReservedWrite, decideToolWrite } from '../write-guard'
+import { decideReservedWrite, decideToolWrite, realPathOf } from '../write-guard'
 import { decidePrivateWrite, noteToolInput, noteToolResult, privateConfirmMessage, recordPrivateConsent } from '../private-read-guard'
 import { answerAskUserQuestion } from './choice-tools'
 import { CLAUDE_CHOICE_TOOL } from '../../shared/choice-prompt'
@@ -355,7 +355,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         if (enforced && sandbox && input.hook_event_name === 'PostToolUseFailure') {
           const read = sandboxConcern(sandbox.resolved, String(input.tool_name), input.tool_input, sandbox.home) === 'read'
           const violation = parseSandboxViolation(input.error)
-          const context = sandboxRefusalContext(violation, read) ?? skillWriteRefusalContext(String(input.tool_name), input.error, violation, writeGuard && { root: writeGuard.root, cwd: typeof input.cwd === 'string' && input.cwd ? input.cwd : workingDirectory })
+          const context = sandboxRefusalContext(violation, read) ?? skillWriteRefusalContext(String(input.tool_name), input.error, violation, writeGuard && { root: writeGuard.root, cwd: typeof input.cwd === 'string' && input.cwd ? input.cwd : workingDirectory, realPath: realPathOf })
           if (context) return { continue: true, hookSpecificOutput: { hookEventName: 'PostToolUseFailure', additionalContext: context } }
         }
         return { continue: true }
