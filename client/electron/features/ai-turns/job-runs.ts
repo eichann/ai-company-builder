@@ -53,6 +53,8 @@ export interface JobRunDeps {
   /** Stop the consultation's AI now (main's chat turns), saying why in its reply. */
   stopTurn: (conversationId: string) => void
   now?: () => number
+  /** A steady clock in ms (`performance.now`): what no change of the PC's clock moves. */
+  monotonic?: () => number
   log?: Pick<Console, 'warn'>
 }
 
@@ -96,14 +98,32 @@ interface Held {
 
 export function createJobRuns(deps: JobRunDeps) {
   const now = deps.now ?? Date.now
+  const monotonic = deps.monotonic ?? (() => performance.now())
   const log = deps.log ?? console
+  const keyOf = (companyId: string, occurrenceId: string) => `${companyId}\n${occurrenceId}`
   /** The member's turns as last listed, per company. */
   const listed = new Map<string, Map<string, QueuedJobTurn>>()
-  /** When this PC first got each listed occurrence from the server (this PC's clock), by company and occurrence. */
+  /**
+   * When this PC first got each listed occurrence from the server, by company and occurrence: on the steady clock
+   * (`monotonic`), which no change of the PC's clock moves. Forgotten once it is off the list.
+   */
   const firstListed = new Map<string, number>()
+  /**
+   * That arrival on this PC's clock **as it is set now** (`listedAt`): a clock set back or forward since moves it
+   * alike, so a fetch made after the correction is judged in the same frame — and one stamped before a clock set back
+   * lies in this PC's future, which `gitCheckPoint` does not trust (one more fetch is needed).
+   */
+  const listedAt = (key: string): number => {
+    const at = firstListed.get(key)
+    return at === undefined ? now() : now() - (monotonic() - at)
+  }
+  /** Off this app's list (finished, taken, given up): its arrival is forgotten too, so a later listing starts anew. */
+  const unlist = (companyId: string, occurrenceId: string) => {
+    listed.get(companyId)?.delete(occurrenceId)
+    firstListed.delete(keyOf(companyId, occurrenceId))
+  }
   /** Runs this app holds, by consultation. */
   const byConversation = new Map<string, Held>()
-  const keyOf = (companyId: string, occurrenceId: string) => `${companyId}\n${occurrenceId}`
   const byOccurrence = new Map<string, string>()
 
   function forget(conversationId: string) {
@@ -141,7 +161,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const turns = r?.status === 200 ? parseJobTurns(r.data) : null
       if (turns === null) return [...(listed.get(companyId)?.values() ?? [])]
       // The first arrival is kept: the earliest moment this PC knows the window had ended on the server.
-      const arrived = now()
+      const arrived = monotonic()
       const ids = new Set(turns.map(t => t.occurrenceId))
       for (const id of listed.get(companyId)?.keys() ?? []) if (!ids.has(id)) firstListed.delete(keyOf(companyId, id))
       for (const id of ids) if (!firstListed.has(keyOf(companyId, id))) firstListed.set(keyOf(companyId, id), arrived)
@@ -165,8 +185,7 @@ export function createJobRuns(deps: JobRunDeps) {
       // claim names the commit the check looks up to (the next occurrence starts after it).
       let point: { commit: string | null } | null = null
       if (listedTurn.check.kind === 'new_files') {
-        const listedAt = firstListed.get(keyOf(companyId, occurrenceId)) ?? now()
-        const p = await deps.checkPoint(companyRoot, listedTurn.check.path, listedAt).catch(() => null)
+        const p = await deps.checkPoint(companyRoot, listedTurn.check.path, listedAt(keyOf(companyId, occurrenceId))).catch(() => null)
         if (p === 'not-synced') return { claimed: false, reason: 'unavailable', retryAfterMs: NOT_SYNCED_RETRY_MS }
         point = p
       }
@@ -182,7 +201,7 @@ export function createJobRuns(deps: JobRunDeps) {
       // The turn as the claim answered it (the meetings found are only there): the server's, not the list's.
       const turn = parseJobTurn(data?.turn)
       if (!run || typeof run.id !== 'string' || typeof run.generation !== 'number') {
-        listed.get(companyId)?.delete(occurrenceId)
+        unlist(companyId, occurrenceId)
         return { claimed: false, reason: 'taken' }
       }
       const key = keyOf(companyId, occurrenceId)
@@ -215,7 +234,7 @@ export function createJobRuns(deps: JobRunDeps) {
       if ((found.kind === 'files' ? found.files.length : found.meetings.length) === 0) {
         const r = await deps.finishRun(companyId, occurrenceId, null, { jobResult: 'nothing' })
         if (!r || r.status >= 300) log.warn(`[jobs] finish (nothing): answered ${r?.status ?? 'nothing'}`)
-        listed.get(companyId)?.delete(occurrenceId)
+        unlist(companyId, occurrenceId)
         return { claimed: false, reason: 'taken' }
       }
       const procedure = turn.procedure.source === 'company_skill'
@@ -289,7 +308,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const h = conversationId ? byConversation.get(conversationId) : undefined
       if (!h || !conversationId) return { outcome: 'unknown' }
       forget(conversationId)
-      listed.get(companyId)?.delete(occurrenceId)
+      unlist(companyId, occurrenceId)
       // Finished at its report: done when the server made the やること; refused (paused, stopped, the time) → the
       // person looks and the consultation stays open.
       if (h.reported !== null) return { outcome: h.reported === 'done' ? 'done' : 'failed' }
@@ -312,16 +331,18 @@ const SKIP = new Set(['.git', '.backups', '.workspace', '.personal', 'node_modul
 
 /** Whether this PC's clock is known to be within `JOB_CLOCK_TOLERANCE_MS` of the server's (its whole range). */
 export function clockTrusted(offset: ClockOffset | null): offset is ClockOffset {
-  return offset !== null && Number.isFinite(offset.min) && Number.isFinite(offset.max) && offset.min <= offset.max
-    && Math.max(Math.abs(offset.min), Math.abs(offset.max)) <= JOB_CLOCK_TOLERANCE_MS
+  // NaN and ±Infinity fail the comparisons below by themselves.
+  return offset !== null && offset.min <= offset.max && Math.max(Math.abs(offset.min), Math.abs(offset.max)) <= JOB_CLOCK_TOLERANCE_MS
 }
 
 /**
  * Files changed under `place` in [since, until) — the server's instants — in a working folder (no shared company
  * folder), by their modification time. This PC's clock stamped that time, so it is read on the server's clock through
  * `offset` and a file counts whenever it may fall in the window (the measured range widens it: never missed for the
- * request's travel time; one on the edge may be seen by two occurrences). `root` is the working folder (validated by
- * the caller); null when the place is not on this PC or the clocks are not known to agree (`clockTrusted`).
+ * request's travel time; one on the edge may be seen by two occurrences). The start is moved back by a further
+ * `JOB_CLOCK_TOLERANCE_MS`: a file stamped while this PC's clock was off by less than that, and corrected since, is
+ * shown to two occurrences rather than to none. `root` is the working folder (validated by the caller); null when the
+ * place is not on this PC or the clocks are not known to agree (`clockTrusted`).
  */
 export async function newFilesByTime(root: string, place: string, since: string, until: string, offset: ClockOffset | null): Promise<string[] | null> {
   if (!clockTrusted(offset)) return null
@@ -329,7 +350,7 @@ export async function newFilesByTime(root: string, place: string, since: string,
   if (found === null) return null
   const start = found.real
   // On this PC's clock: a file stamped m was written at a server time within [m + min, m + max].
-  const sinceMs = Date.parse(since) - offset.max
+  const sinceMs = Date.parse(since) - offset.max - JOB_CLOCK_TOLERANCE_MS
   const untilMs = Date.parse(until) - offset.min
   const out: string[] = []
   const walk = async (dir: string, rel: string, depth: number): Promise<void> => {

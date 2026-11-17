@@ -14,7 +14,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, utimesSync, 
 import os from 'node:os'
 import path from 'node:path'
 import { createAiTurnClaims } from '../electron/features/ai-turns/claims'
-import { gitCheckPoint, newFilesByGit, newFilesByTime } from '../electron/features/ai-turns/job-runs'
+import { JOB_CLOCK_TOLERANCE_MS, gitCheckPoint, newFilesByGit, newFilesByTime } from '../electron/features/ai-turns/job-runs'
 import { createRecordsApi } from '../electron/records/api'
 import { createRunRegistry } from '../electron/records/runs'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
@@ -417,6 +417,8 @@ test('new files in the shared folder: by what is reachable, never by commit date
     assert.equal(await gitCheckPoint(git, root, '人事部/面談', Date.now() + 3_600_000), 'not-synced')
     // A fetch stamped in this PC's future (its clock set back since): not trusted as fresh, never `nothing` on it.
     assert.equal(await gitCheckPoint(git, root, '人事部/面談', listedLongAgo, Date.now() - 3_600_000), 'not-synced')
+    // No known listing time: not judged fresh.
+    assert.equal(await gitCheckPoint(git, root, '人事部/面談', Number.NaN), 'not-synced')
     assert.equal(await gitCheckPoint(git, root, '人事部/ない', listedLongAgo), null)
     assert.equal(await gitCheckPoint(git, root, '../x', listedLongAgo), null)
     // A link at the place itself, or above it (committed by someone), is never followed, nor its repository used.
@@ -458,26 +460,43 @@ test('new files in a working folder (no git): by their time, within the window',
 test('new files in a working folder are read on the server\'s clock: a PC clock off by minutes misses nothing, and an unknown or far-off one checks nothing', async () => {
   const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-clock-')))
   try {
-    mkdirSync(path.join(work, '人事部', '面談'), { recursive: true })
-    const file = path.join(work, '人事部', '面談', '佐藤.txt')
-    writeFileSync(file, 'a')
-    // This PC's clock is 4 minutes behind the server's: the file was written at 10:02 on the server, stamped 09:58 here.
-    const stamped = new Date('2026-11-11T09:58:00.000Z')
-    utimesSync(file, stamped, stamped)
-    const behind = { min: 4 * 60_000 - 300, max: 4 * 60_000 }
-    // The occurrence's window on the server [10:00, 11:00): the file is in it (by the PC's own time it would not be).
-    assert.deepEqual(await newFilesByTime(work, '人事部/面談', '2026-11-11T10:00:00.000Z', '2026-11-11T11:00:00.000Z', behind), ['人事部/面談/佐藤.txt'])
-    assert.deepEqual(await newFilesByTime(work, '人事部/面談', '2026-11-11T10:00:00.000Z', '2026-11-11T11:00:00.000Z', { min: 0, max: 0 }), [])
-    // …and it is not counted again in the window before it [09:00, 10:00).
-    assert.deepEqual(await newFilesByTime(work, '人事部/面談', '2026-11-11T09:00:00.000Z', '2026-11-11T10:00:00.000Z', behind), [])
-    // The clock 4 minutes ahead: a file stamped 10:01 here was written at 09:57 on the server — the earlier window's.
-    const ahead = { min: -4 * 60_000, max: -4 * 60_000 + 300 }
-    const later = new Date('2026-11-11T10:01:00.000Z')
-    utimesSync(file, later, later)
-    assert.deepEqual(await newFilesByTime(work, '人事部/面談', '2026-11-11T09:00:00.000Z', '2026-11-11T10:00:00.000Z', ahead), ['人事部/面談/佐藤.txt'])
-    // The difference unknown, further off than JOB_CLOCK_TOLERANCE_MS, or too uncertain: no answer at all (never `[]`).
-    for (const offset of [null, { min: 6 * 60_000, max: 6 * 60_000 }, { min: -6 * 60_000, max: -6 * 60_000 }, { min: 0, max: 6 * 60_000 }, { min: Number.NaN, max: 0 }]) {
-      assert.equal(await newFilesByTime(work, '人事部/面談', '2026-11-11T09:00:00.000Z', '2026-11-11T11:00:00.000Z', offset), null, JSON.stringify(offset))
+    const dir = path.join(work, '人事部', '面談')
+    mkdirSync(dir, { recursive: true })
+    const at = (name: string, iso: string | number) => {
+      writeFileSync(path.join(dir, name), name)
+      const t = new Date(iso)
+      utimesSync(path.join(dir, name), t, t)
+    }
+    const files = () => newFilesByTime(work, '人事部/面談', '2026-11-11T10:00:00.000Z', '2026-11-11T11:00:00.000Z', offset)
+    let offset: { min: number; max: number } | null = null
+    const S = Date.parse('2026-11-11T10:00:00.000Z')
+    const U = Date.parse('2026-11-11T11:00:00.000Z')
+    // This PC's clock 4 minutes ahead of the server's: written at 10:58 on the server, stamped 11:02 here — in the
+    // window [10:00, 11:00) on the server's clock, outside it by the PC's own time (it would be missed).
+    at('ahead.txt', '2026-11-11T11:02:00.000Z')
+    offset = { min: -4 * 60_000, max: -4 * 60_000 + 300 }
+    assert.deepEqual(await files(), ['人事部/面談/ahead.txt'])
+    offset = { min: 0, max: 0 }
+    assert.deepEqual(await files(), [])
+    rmSync(path.join(dir, 'ahead.txt'))
+    // The measured range widens the window, never narrows it: with ±10 s, the end moves 10 s later and the start
+    // 10 s (+ the tolerance) earlier — files just inside those edges count, files beyond them do not.
+    offset = { min: -10_000, max: 10_000 }
+    at('start-in.txt', S - JOB_CLOCK_TOLERANCE_MS - 7_000)
+    at('start-out.txt', S - JOB_CLOCK_TOLERANCE_MS - 13_000)
+    at('end-in.txt', U + 5_000)
+    at('end-out.txt', U + 15_000)
+    assert.deepEqual((await files())?.sort(), ['人事部/面談/end-in.txt', '人事部/面談/start-in.txt'])
+    for (const f of ['start-in.txt', 'start-out.txt', 'end-in.txt', 'end-out.txt']) rmSync(path.join(dir, f))
+    // A file stamped while this PC's clock was up to the tolerance off, corrected since: seen (maybe twice), never missed.
+    at('corrected.txt', S - 4 * 60_000)
+    offset = { min: 0, max: 0 }
+    assert.deepEqual(await files(), ['人事部/面談/corrected.txt'])
+    // The difference unknown, further off than JOB_CLOCK_TOLERANCE_MS, too uncertain or not a range: no answer at all
+    // (never `[]`).
+    for (const o of [null, { min: 6 * 60_000, max: 6 * 60_000 }, { min: -6 * 60_000, max: -6 * 60_000 }, { min: 0, max: 6 * 60_000 }, { min: Number.NaN, max: 0 }, { min: 1_000, max: -1_000 }]) {
+      offset = o
+      assert.equal(await files(), null, JSON.stringify(o))
     }
   } finally {
     rmSync(work, { recursive: true, force: true })
@@ -576,13 +595,15 @@ test('the shared folder\'s "synced?" is judged against when the server listed th
   await claims.jobTurns(COMPANY)
   assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'unavailable', retryAfterMs: 30_000 })
   assert.equal(asked.length, 1)
-  assert.ok(asked[0] >= before && asked[0] <= after, `${asked[0]} in [${before}, ${after}]`)
+  // (a few ms either way: the wall clock and the steady clock tick apart)
+  assert.ok(asked[0] >= before - 5 && asked[0] <= after + 5, `${asked[0]} in [${before}, ${after}]`)
 })
 
 test('a working folder\'s check runs only on a clock known to agree with the server\'s: unknown or far off → given back, never `nothing`', async () => {
+  const untils: string[] = []
   const working = (offsets: unknown[]) => ({
     readShelfSkill: async () => null, checkPoint: async () => ({ commit: null }),
-    newFiles: async (_r: string | null, _p: string, w: { offset: unknown }) => { offsets.push(w.offset); return [] }, stopTurn: () => {},
+    newFiles: async (_r: string | null, _p: string, w: { offset: unknown; until: string }) => { offsets.push(w.offset); untils.push(w.until); return [] }, stopTurn: () => {},
   })
   for (const opts of [{ serverAheadMs: 10 * 60_000 }, { serverAheadMs: -10 * 60_000 }, { noServerTime: true }]) {
     const server = fakeServer(opts)
@@ -601,7 +622,48 @@ test('a working folder\'s check runs only on a clock known to agree with the ser
   assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00002'), { claimed: false, reason: 'taken' })
   assert.equal(offsets.length, 1)
   assert.ok(offsets[0].min <= 2 * 60_000 + 50 && offsets[0].max >= 2 * 60_000 - 50 && offsets[0].max - offsets[0].min < 5_000, JSON.stringify(offsets[0]))
+  // An older server names no window end (no `checkUntil`): it is the server's now, not this PC's.
+  assert.ok(Math.abs(Date.parse(untils[0]) - (Date.now() + 2 * 60_000)) < 5_000, untils[0])
   assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'done', jobResult: 'nothing' }])
+})
+
+test('this PC\'s clock set back after the listing: a fetch made since still counts (no wait for the clock to catch up); one made before it lies in the future and does not', async () => {
+  const server = fakeServer()
+  const asked: number[] = []
+  let wall = Date.parse('2026-11-11T10:00:00.000Z')
+  let steady = 1_000
+  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async (_r: string | null, _p: string, listedAt: number) => { asked.push(listedAt); return 'not-synced' as const }, newFiles: async () => [], stopTurn: () => {}, now: () => wall, monotonic: () => steady } })
+  await claims.jobTurns(COMPANY)
+  // A minute later the clock is corrected 30 minutes back.
+  steady += 60_000
+  wall = Date.parse('2026-11-11T09:31:00.000Z')
+  await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
+  // The listing, on the clock as now set: 09:30 — a fetch at 09:31 is after it (with the old baseline, 10:00, no fetch
+  // would count for half an hour).
+  assert.deepEqual(asked, [Date.parse('2026-11-11T09:30:00.000Z')])
+  // Set forward instead: the listing moves forward with it, so a fetch stamped before the jump never counts as after it.
+  steady += 60_000
+  wall = Date.parse('2026-11-11T11:00:00.000Z')
+  await claims.claim(COMPANY, OCC, 1, 'conv-job-00002')
+  assert.deepEqual(asked.at(-1), Date.parse('2026-11-11T10:58:00.000Z'))
+})
+
+test('an occurrence this app took off its list (finished `nothing`) is forgotten: listed again, its listing time starts anew', async () => {
+  const server = fakeServer()
+  const asked: number[] = []
+  let wall = Date.parse('2026-11-11T10:00:00.000Z')
+  let steady = 1_000
+  let point: 'not-synced' | { commit: string } = { commit: 'c'.repeat(40) }
+  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async (_r: string | null, _p: string, listedAt: number) => { asked.push(listedAt); return point }, newFiles: async () => [], stopTurn: () => {}, now: () => wall, monotonic: () => steady } })
+  await claims.jobTurns(COMPANY)
+  assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'taken' })
+  // The server lists it again later (e.g. 「もう一度」): only a fetch after this listing counts.
+  steady += 600_000
+  wall += 600_000
+  point = 'not-synced'
+  await claims.jobTurns(COMPANY)
+  await claims.claim(COMPANY, OCC, 1, 'conv-job-00002')
+  assert.deepEqual(asked, [Date.parse('2026-11-11T10:00:00.000Z'), Date.parse('2026-11-11T10:10:00.000Z')])
 })
 
 test('the time limit\'s clock difference never counts the answer\'s travel as the server being behind (the AI stops on time)', async () => {

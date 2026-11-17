@@ -478,8 +478,11 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   (`FETCH_HEAD`'s time against the arrival of the first `GET /me/job-turns` answer naming it, both stamped by **this
   PC's clock**: the server lists an occurrence only once its time has come, so that arrival is after the window's end
   on the server's clock whatever the two clocks say; never `FETCH_HEAD`'s time against `checkUntil`, which compared the
-  PC's clock with the server's — Codex review 2026-11-18; a `FETCH_HEAD` stamped in this PC's future means its clock
-  was set back and is not trusted) **and** the server's tip (`@{upstream}`, else `FETCH_HEAD`) in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or a
+  PC's clock with the server's — Codex review 2026-11-18. The arrival is kept on the steady clock (`performance.now`)
+  and read on the PC's clock as it is set at the check, so a clock set back or forward since moves it alike: a fetch
+  made after the correction counts at once, and one stamped before a clock set back lies in this PC's future and is
+  not trusted — one more fetch is needed. Forgotten when the occurrence leaves this app's list, however it leaves:
+  listed again, it starts anew) **and** the server's tip (`@{upstream}`, else `FETCH_HEAD`) in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or a
   sync stopped on a conflict leaves it out) — else nothing is claimed and it is asked again after `NOT_SYNCED_RETRY_MS`
   (30 s; `retryAfterMs` on the answer), never `nothing` on a guess. **Not a start** (`ai-turns.md`): it does not use
   up the runner's pass, and its hidden consultation, which never ran, is deleted. Then `POST /job-run-claims` with `checks` and `checkedCommit` (this PC's `HEAD` in the place's repository;
@@ -492,7 +495,9 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   working folder (no git): by modification time in [`checkSince`, `checkUntil`) (`newFilesByTime`) — the server's
   instants, so the file times (this PC's clock) are read through the clock difference measured at the claim (the
   server's `run.updatedAt` against the request's departure and the answer's arrival: a range, and a file counts when
-  it may fall in the window, so the travel time never hides one). Only while that difference is known and within
+  it may fall in the window, so the travel time never hides one; the start is moved back by a further
+  `JOB_CLOCK_TOLERANCE_MS`, so a file stamped while the clock was off by less than that and corrected since is seen —
+  possibly by two occurrences — rather than missed). Only while that difference is known and within
   `JOB_CLOCK_TOLERANCE_MS` (5 min, range included): unknown (no `updatedAt`) or further off → **no check**, the run is
   finished `temporary` `CLOCK_NOT_TRUSTED` (retried by the server, then a person is told) — never `nothing` on a
   clock's say-so (a clock that far off may also have been set differently when the files were written). **The place is
@@ -840,7 +845,8 @@ membership can fail).
   taken away while preparing → nothing starts and no ceiling; the server's clock for the deadline, the answer's travel
   not counted; "synced?" judged against the first listing's arrival, a `FETCH_HEAD` from the future not trusted; a
   working folder's files read on the server's clock, an unknown or far-off clock → `CLOCK_NOT_TRUSTED`, never
-  `nothing` — 8 mutations, each fails; 「自動で進める」 off →
+  `nothing`, the window widened the right way, a clock set back after the listing, an occurrence taken off the list
+  forgotten — 16 mutations, each fails; 「自動で進める」 off →
   no claim; the queue never hands a job early); `src/features/chat/aiTurns.test.ts` (a job after the records, outside
   their daily limit and failures in a row); `admin/tests/jobs.test.tsx` (the PC form through the
   shared parser; the meeting check names the minutes route). Mutation check: 12 + 5 server and 24 + 14 client
