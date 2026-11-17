@@ -661,12 +661,12 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     const actor = { id: member.userId, kind: 'human' as const, source: null }
     if (result.ok) {
       const gmailId = isObj(result.json) && typeof result.json.id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(result.json.id) ? result.json.id : null
-      handle.outbound.finishSend(sendId, 'sent', null, gmailId, at)
+      if (!handle.outbound.finishSend(sendId, 'sent', null, gmailId, at)) return lateAnswer(member, d.mail, MAIL_UNKNOWN_TEXT)
       const threadId = isObj(result.json) && typeof result.json.threadId === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(result.json.threadId) ? result.json.threadId : null
       return finishSent(member, d.mail, d.recordVersion, at, gmailId, content.to.concat(content.cc), actor, sendId, { threadId, waitDay }, resendNote(gate.reason))
     }
     if (result.kind === 'not-sent' || result.kind === 'refused' || result.kind === 'rate-limited') {
-      handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.googleReason ?? result.reason, null, at)
+      if (!handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.googleReason ?? result.reason, null, at)) return lateAnswer(member, d.mail, MAIL_UNKNOWN_TEXT)
       if (result.kind === 'not-sent' && ['no-grant', 'grant-revoked', 'grant-stopped', 'scope-not-granted'].includes(result.reason)) {
         return refuse('conflict', 'メールを送るには、Google で「メールを送る許可」が要ります。', { code: 'GOOGLE_CONSENT_NEEDED', needsGoogleConsent: 'mail' })
       }
@@ -675,7 +675,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       return refuse('conflict', 'Gmail が受け付けませんでした。何も送っていません。', { code: 'SEND_REFUSED', ...(result.googleReason ? { googleReason: result.googleReason } : {}) })
     }
     // A lost answer or a 5xx: it may have been sent. Never re-sent; the person checks Gmail.
-    handle.outbound.finishSend(sendId, 'unknown', result.googleReason ?? result.reason, null, at)
+    if (!handle.outbound.finishSend(sendId, 'unknown', result.googleReason ?? result.reason, null, at)) return lateAnswer(member, d.mail, MAIL_UNKNOWN_TEXT)
     // The choice is kept: 「送られていた」 later starts the waiting as a confirmed send would.
     const moved = writer.transition(member.companyId, {
       recordId: d.mail.messageId, action: 'send_unknown', expectedVersion: d.recordVersion, to: 'unknown', actor, ...(waitDay ? { fields: { reply_wait_until: waitDay } } : {}),
@@ -770,11 +770,11 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     const at = deps.clock.now()
     const actor = { id: member.userId, kind: 'human' as const, source: null }
     if (result.ok) {
-      handle.outbound.finishSend(sendId, 'sent', null, result.ts, at)
+      if (!handle.outbound.finishSend(sendId, 'sent', null, result.ts, at)) return lateAnswer(member, d.mail, CHAT_UNKNOWN_TEXT)
       return finishChatSent(member, d.mail, d.recordVersion, at, result.ts, ref, actor, resendNote(gate.reason))
     }
     if (result.kind === 'not-sent' || result.kind === 'refused' || result.kind === 'rate-limited') {
-      handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.reason, null, at)
+      if (!handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.reason, null, at)) return lateAnswer(member, d.mail, CHAT_UNKNOWN_TEXT)
       if (result.kind === 'not-sent' && ['no-grant', 'grant-revoked', 'grant-stopped', 'scope-not-granted'].includes(result.reason)) {
         return refuse('conflict', SLACK_CONSENT, { code: 'SLACK_CONSENT_NEEDED', needsSlackConsent: 'reply' })
       }
@@ -783,11 +783,21 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       return refuse('conflict', 'Slack が受け付けませんでした。何も送っていません。', { code: 'SEND_REFUSED' })
     }
     // A lost answer or a 5xx: it may have been posted. Never re-sent; the person looks at the thread.
-    handle.outbound.finishSend(sendId, 'unknown', result.reason, null, at)
+    if (!handle.outbound.finishSend(sendId, 'unknown', result.reason, null, at)) return lateAnswer(member, d.mail, CHAT_UNKNOWN_TEXT)
     const moved = writer.transition(member.companyId, { recordId: d.mail.messageId, action: 'send_unknown', expectedVersion: d.recordVersion, to: 'unknown', actor, ...(gate.reason ? { note: resendNote(gate.reason)! } : {}) })
     if (!moved.ok) logError('outbound-mail', 'unknown state not recorded', undefined, { message: d.mail.messageId, reason: moved.reason })
     const view = viewOf(member.companyId, d.mail, d.mail.messageId)
     return view ? ok({ outcome: 'unknown', draft: view, message: CHAT_UNKNOWN_TEXT }) : notFound()
+  }
+
+  /**
+   * The answer came after the clock had made this send `unknown` (outbound-mail.md "A send left half-done"): nothing
+   * more is done — no state, no receipt, no waiting; the person decides with 送られていた／送られていなかった.
+   */
+  function lateAnswer(member: Member, mail: OutboundMailRow, message: string): Outcome<MailSendAnswer> {
+    logError('outbound-mail', 'answer came after the send was made unknown', undefined, { message: mail.messageId })
+    const view = viewOf(member.companyId, mail, mail.messageId)
+    return view ? ok({ outcome: 'unknown', draft: view, message }) : notFound()
   }
 
   function finishChatSent(member: Member, mail: OutboundMailRow, recordVersion: number, at: string, ts: string | null, ref: { channelId: string; threadTs: string }, actor: { id: string; kind: 'human'; source: null }, note: string | null = null): Outcome<MailSendAnswer> {

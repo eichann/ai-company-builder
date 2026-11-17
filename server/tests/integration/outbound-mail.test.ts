@@ -552,6 +552,36 @@ describe('a send left half-done (outbound-mail.md "A send left half-done")', () 
     expect(sentCount()).toBe(sent)
   })
 
+  it('an answer that comes after the clock made the send `unknown` changes nothing: no sent state, no やりとり; the person decides', async () => {
+    const made = await person('m-sato', 'POST', '/outbound', {
+      bundleId, toRefs: [(await ai(token, 'POST', '/outbound-recipients', { bundleId })).body.data.recipients.find((x: Json) => x.source === 'hubspot').ref],
+      subject: '遅れて返ってきた答え', body: '本文です',
+    })
+    expect(made.status, made.text).toBe(201)
+    const d = made.body.data.draft
+    const interactions = () => (db.prepare("SELECT COUNT(*) AS n FROM records WHERE company_id = ? AND type = 'interaction'").get(CO) as Json).n
+    const before = interactions()
+    const sending = () => db.prepare("SELECT id FROM outbound_sends WHERE company_id = ? AND message_id = ? AND outcome = 'sending'").get(CO, d.id) as Json
+    google.faults.delayMs = 400
+    try {
+      const pending = person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash })
+      // The send row is written; Gmail has not answered yet. The clock finds it (as if 16 minutes had passed).
+      for (let i = 0; i < 200 && !sending(); i++) await new Promise(r => setTimeout(r, 25))
+      expect(sending()).toBeTruthy()
+      db.prepare('UPDATE outbound_sends SET started_at = ? WHERE company_id = ? AND id = ?').run(new Date(Date.now() - 16 * 60_000).toISOString(), CO, sending().id)
+      expect(services.outboundMail.settleInterrupted(CO)).toBe(1)
+      const r = await pending
+      expect(r.status, r.text).toBe(200)
+      expect(r.body.data.outcome).toBe('unknown')
+    } finally {
+      google.faults.delayMs = 0
+    }
+    // Gmail did take it, but ACB records nothing as sent on its own: the record stays unknown, no receipt is made.
+    expect(stateOf(d.id).state).toBe('unknown')
+    expect(interactions()).toBe(before)
+    expect(db.prepare('SELECT outcome, reason FROM outbound_sends WHERE company_id = ? AND message_id = ?').all(CO, d.id)).toEqual([{ outcome: 'unknown', reason: 'interrupted' }])
+    expect((await person('m-sato', 'POST', `/outbound/${d.id}/resolve`, { sent: true })).body.data.draft.state).toBe('sent')
+  })
 })
 
 describe('返事を待つ: a new mail we send first waits for their answer (outbound-mail.md "Waiting for their answer")', () => {

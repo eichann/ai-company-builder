@@ -145,8 +145,8 @@ export function sqliteOutboundMailRepository(conn: Database.Database, companyId:
       })()
     },
     finishSend(id, outcome, reason, providerMessageId, at) {
-      conn.prepare("UPDATE outbound_sends SET outcome = ?, reason = ?, provider_message_id = ?, finished_at = ? WHERE company_id = ? AND id = ? AND outcome = 'sending'")
-        .run(outcome, reason, providerMessageId, at, companyId, id)
+      return conn.prepare("UPDATE outbound_sends SET outcome = ?, reason = ?, provider_message_id = ?, finished_at = ? WHERE company_id = ? AND id = ? AND outcome = 'sending'")
+        .run(outcome, reason, providerMessageId, at, companyId, id).changes > 0
     },
     lastSend(messageId) {
       const r = conn.prepare(`SELECT ${SEND_COLUMNS} FROM outbound_sends WHERE company_id = ? AND message_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1`)

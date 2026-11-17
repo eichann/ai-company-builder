@@ -105,7 +105,11 @@ export interface OutboundMailRepository {
    * same draft is `sending` or `unknown` (then false, nothing written).
    */
   startSend(row: OutboundSendRow): boolean
-  finishSend(id: string, outcome: Exclude<OutboundSendOutcome, 'sending'>, reason: string | null, providerMessageId: string | null, at: string): void
+  /**
+   * Settles a send still `sending`; false when it no longer is (the clock made it `unknown` meanwhile: a late answer
+   * changes nothing — outbound-mail.md "A send left half-done").
+   */
+  finishSend(id: string, outcome: Exclude<OutboundSendOutcome, 'sending'>, reason: string | null, providerMessageId: string | null, at: string): boolean
   /** The latest send of a draft. */
   lastSend(messageId: string): OutboundSendRow | null
   /**

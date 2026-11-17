@@ -148,11 +148,14 @@ stops in between (a crash, a deploy, a restore of the database) leaves it `sendi
   (`resolve`), as for a lost answer. **Never re-sent**, and nothing is asked of Gmail. Both channels (mail, Slack reply).
 - Record first, then the row: a stop between them is finished by the next pass (the record already `unknown`). A record
   that cannot move (someone changed it, records / the feature off) is left for the next pass.
-- A late answer of a send already made `unknown` changes nothing (`finishSend` only settles `sending`); the person decides.
+- A late answer of a send already made `unknown` changes nothing: `finishSend` settles only `sending` and returns
+  false, and the send then answers `unknown` (`lateAnswer`) without moving the record, a receipt (やりとり), the retention
+  clock or a waiting — both channels; the person decides.
   The 「返事を待つ」 day chosen at that send is not kept (it was never written): 送られていた starts no waiting.
 - Test: `outbound-mail.test.ts` 「a send left half-done」 (before: no way out; after the clock's pass: `unknown`, the
-  ledger's clock entry, a send within the bound untouched, nothing sent, a second pass changes nothing, 送られていた) —
-  mutation-checked: the bound, the record move, the row, the clock's wiring.
+  ledger's clock entry, a send within the bound untouched, nothing sent, a second pass changes nothing, 送られていた; an
+  answer arriving after the clock's pass makes no sent state and no やりとり) — mutation-checked: the bound, the record
+  move, the row, the clock's wiring, the late-answer gate (mail; the Slack reply's gate is the same code shape, untested).
 
 ## One send per source (owner decision 2026-11-06, design 「出どころの枠」 §10 order 1)
 
