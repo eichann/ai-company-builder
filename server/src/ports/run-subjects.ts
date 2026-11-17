@@ -33,6 +33,11 @@ export interface RunSubject {
   readonly checks?: readonly string[]
   /** Only on a PC job's claim (B PR 5a-2): the commit the app's `new_files` check looks up to (40 / 64 hex). */
   readonly checkedCommit?: string
+  /**
+   * Only on a PC job's claim (stage 4-0): the occurrence kinds the claiming app runs (`time`, `event`); the resolver
+   * refuses an occurrence of another kind. Absent: `time` only (every app before 4-0).
+   */
+  readonly kinds?: readonly string[]
 }
 
 /** The member a run is claimed for (services/access.ts `Member`). */

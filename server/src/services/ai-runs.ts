@@ -36,7 +36,7 @@ import { aiTurnRouteScopeApplies } from '../lib/client-version'
 import { notInStep } from './not-in-step'
 import type { PluginStepProcedurePin } from '../../shared/core/plugins'
 import { RECORD_ID_RE } from '../../shared/core/records'
-import { JOB_PC_STEP, isOccurrenceId } from '../../shared/core/jobs'
+import { JOB_PC_STEP, isOccurrenceId, parseJobOccurrenceKinds } from '../../shared/core/jobs'
 import type { AiRunView } from '../../shared/types/ai-runs'
 import type { AgentStopPolicy, AgentStopToolKind } from '../../shared/types/agent-stop'
 import type { AiRunEventRow, AiRunOperationRow, AiRunRepository, AiRunRow } from '../ports/ai-runs'
@@ -369,18 +369,21 @@ export function createAiRunService(deps: AiRunDeps) {
      * app claims a PC job's occurrence — the same run core as a record's claim (the emergency stop's 503 first,
      * generations, one open run per subject, fencing), with step `job-procedure`. Whether it is theirs to run
      * now is the occurrence's resolver (services/job-runs.ts), which also refuses one whose check kind is not
-     * among `checks` (B PR 5a-2: what this app can run; absent = none).
+     * among `checks` (B PR 5a-2: what this app can run; absent = none), and one whose kind is not among `kinds`
+     * (stage 4-0: the occurrence kinds this app runs; absent = `time` only, every app before it).
      */
     async claimOccurrence(member: Member, body: unknown, appBuild?: string | null): Promise<Outcome<{ run: AiRunView; created: boolean }>> {
       if (!isObj(body)) return refuse('bad-request', 'Body must be a JSON object')
       const { occurrenceId, deviceId, conversationId, checks, checkedCommit } = body
-      if (!Object.keys(body).every(k => ['occurrenceId', 'deviceId', 'conversationId', 'checks', 'checkedCommit'].includes(k))) return refuse('bad-request', 'Body is { occurrenceId, deviceId, conversationId, checks, checkedCommit? }')
+      if (!Object.keys(body).every(k => ['occurrenceId', 'deviceId', 'conversationId', 'checks', 'checkedCommit', 'kinds'].includes(k))) return refuse('bad-request', 'Body is { occurrenceId, deviceId, conversationId, checks, checkedCommit?, kinds? }')
+      const kinds = parseJobOccurrenceKinds(body.kinds)
+      if (kinds === null) return refuse('bad-request', 'kinds is a list of occurrence kinds')
       if (checkedCommit !== undefined && (typeof checkedCommit !== 'string' || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(checkedCommit))) return refuse('bad-request', 'checkedCommit is a commit id')
       if (!isOccurrenceId(occurrenceId)) return refuse('bad-request', 'occurrenceId is an occurrence id')
       if (checks !== undefined && (!Array.isArray(checks) || checks.length > 10 || !checks.every(k => typeof k === 'string' && /^[a-z_]{1,40}$/.test(k)))) return refuse('bad-request', 'checks is a list of check kinds')
       if (typeof deviceId !== 'string' || !DEVICE_ID_RE.test(deviceId)) return refuse('bad-request', 'deviceId is 8–100 letters, digits, _ or -')
       if (!shortText(conversationId, 200)) return refuse('bad-request', 'conversationId is required (1–200 characters)')
-      return claimSubject(member, { kind: 'occurrence', id: occurrenceId, checks: (checks as string[] | undefined) ?? [], ...(typeof checkedCommit === 'string' ? { checkedCommit } : {}) }, JOB_PC_STEP, deviceId, conversationId, appBuild, { pluginVersion: null, stepsVersion: null })
+      return claimSubject(member, { kind: 'occurrence', id: occurrenceId, checks: (checks as string[] | undefined) ?? [], kinds, ...(typeof checkedCommit === 'string' ? { checkedCommit } : {}) }, JOB_PC_STEP, deviceId, conversationId, appBuild, { pluginVersion: null, stepsVersion: null })
     },
 
     /** POST …/ai-runs/:runId/renew { generation } — the holder extends its claim. */

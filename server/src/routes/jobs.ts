@@ -17,7 +17,8 @@
  *   POST /jobs/:jobId/occurrences/:occurrenceId/retry                      owner/admin: 「もう一度」 (B PR 5b, services/job-retry.ts)
  *   POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile  owner/admin { done }: its run's unknown outside result
  */
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
+import { JOB_SCHEMAS_HEADER, parseJobOccurrenceKinds, parseJobSchemasHeader } from '../../shared/core/jobs'
 import { services } from '../composition'
 import { refusal } from './respond'
 import { companyMember, serviceBody } from './guards'
@@ -25,14 +26,17 @@ import { companyMember, serviceBody } from './guards'
 export const jobsRoute = new Hono()
 const { jobs, jobRuns, jobRetry, aiRuns } = services
 
+/** The definition schemas the caller reads (jobs.md "Shapes this build does not know"; absent = schema 1). */
+const reads = (c: Context) => parseJobSchemasHeader(c.req.header(JOB_SCHEMAS_HEADER))
+
 jobsRoute.get('/jobs', companyMember, async (c) => {
-  const result = jobs.list(c.var.member)
+  const result = jobs.list(c.var.member, reads(c))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
 jobsRoute.get('/jobs/:jobId', companyMember, async (c) => {
-  const result = jobs.get(c.var.member, c.req.param('jobId'))
+  const result = jobs.get(c.var.member, c.req.param('jobId'), reads(c))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
@@ -56,37 +60,37 @@ jobsRoute.post('/jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile
 })
 
 jobsRoute.post('/jobs', companyMember, serviceBody, async (c) => {
-  const result = await jobs.create(c.var.member, c.var.body)
+  const result = await jobs.create(c.var.member, c.var.body, reads(c))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value }, 201)
 })
 
 jobsRoute.put('/jobs/:jobId', companyMember, serviceBody, async (c) => {
-  const result = await jobs.update(c.var.member, c.req.param('jobId'), c.var.body)
+  const result = await jobs.update(c.var.member, c.req.param('jobId'), c.var.body, reads(c))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
 jobsRoute.post('/jobs/:jobId/approve', companyMember, serviceBody, async (c) => {
-  const result = await jobs.approve(c.var.member, c.req.param('jobId'), c.var.body)
+  const result = await jobs.approve(c.var.member, c.req.param('jobId'), c.var.body, reads(c))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
 jobsRoute.post('/jobs/:jobId/pause', companyMember, async (c) => {
-  const result = jobs.pause(c.var.member, c.req.param('jobId'))
+  const result = jobs.pause(c.var.member, c.req.param('jobId'), reads(c))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
 jobsRoute.post('/jobs/:jobId/resume', companyMember, async (c) => {
-  const result = await jobs.resume(c.var.member, c.req.param('jobId'))
+  const result = await jobs.resume(c.var.member, c.req.param('jobId'), reads(c))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
 jobsRoute.post('/me/jobs/:jobId/accept', companyMember, serviceBody, async (c) => {
-  const result = await jobs.accept(c.var.member, c.req.param('jobId'), c.var.body)
+  const result = await jobs.accept(c.var.member, c.req.param('jobId'), c.var.body, reads(c))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
@@ -98,7 +102,10 @@ jobsRoute.put('/jobs-stop', companyMember, serviceBody, async (c) => {
 })
 
 jobsRoute.get('/me/job-turns', companyMember, async (c) => {
-  const result = jobRuns.turns(c.var.member)
+  // The occurrence kinds the app runs (`?kinds=time,event`; absent = time, every app before stage 4-0).
+  const kinds = parseJobOccurrenceKinds(c.req.query('kinds'))
+  if (kinds === null) return c.json({ error: 'kinds is a list of occurrence kinds', code: 'BAD_REQUEST' }, 400)
+  const result = jobRuns.turns(c.var.member, kinds)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })

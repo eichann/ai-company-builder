@@ -19,7 +19,7 @@
  *   (notice `job_paused`), in the same transaction as the change.
  */
 import {
-  JOB_ACTOR, JOB_SYSTEM_PAUSE_REASONS, isJobId, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, newJobId, parseJobAcceptedPlace,
+  JOB_ACTOR, JOB_NEEDS_NEWER_SCREEN, JOB_SCHEMAS, JOB_SYSTEM_PAUSE_REASONS, isJobId, storedJobDefinition, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, newJobId, parseJobAcceptedPlace,
   parseJobDefinition, type JobDefinition, type JobDeliveryPlace, type JobPauseReason,
 } from '../../shared/core/jobs'
 import type { JobList, JobOccurrenceView, JobState, JobVersionView, JobView, JobWaiting } from '../../shared/types/jobs'
@@ -57,6 +57,12 @@ const NOT_RESPONSIBLE = () => refuse('forbidden', 'この定期の仕事を止�
 const RETIRED = () => refuse('conflict', 'この定期の仕事はもう使われていません。', { code: 'JOB_RETIRED' })
 const PLACE_NEEDED = () => refuse('conflict', 'この定期の仕事は、できたものを置く先を責任者が受け取るときに選びます。アプリを新しくしてから、「設定」→「仕事」→「定期の仕事」の「置き先を選んで受け取る」で選んでください。', { code: 'JOB_PLACE_NEEDED' })
 const PLACE_NOT_USABLE = () => refuse('conflict', '選んだ置き先を使えません（選んでから時間がたったか、消されました）。もう一度選んでください。', { code: 'JOB_PLACE_NOT_USABLE' })
+/** A version of a shape this server build does not know (a newer build wrote it): never approved, accepted or resumed here. */
+const SCHEMA_UNKNOWN = () => refuse('conflict', 'この定期の仕事は新しい版のサーバーで作られたため、このサーバーでは扱えません。', { code: 'JOB_SCHEMA_UNKNOWN' })
+/** A version of a shape the calling screen did not say it can read (`JOB_SCHEMAS_HEADER`): never approved, accepted or edited from it. */
+const NEEDS_NEWER_SCREEN = () => refuse('conflict', `${JOB_NEEDS_NEWER_SCREEN}。`, { code: 'JOB_NEEDS_NEWER_SCREEN' })
+/** What a client reads when it names no schemas (every screen before stage 4-0). */
+const SCHEMA_1_ONLY: readonly number[] = [1]
 
 export interface JobServiceDeps {
   companyData: CompanyDataSource
@@ -100,6 +106,8 @@ export interface JobServiceDeps {
    * sent back, by whom, whether the button works now and why not. Bound late (built after this service). Absent → nothing.
    */
   occurrenceRetry?: (companyId: string, occ: JobOccurrenceRow) => Partial<JobOccurrenceView>
+  /** The definition schemas this server reads (jobs.md "Shapes this build does not know"). Absent → `JOB_SCHEMAS`; tests name a newer one. */
+  knownSchemas?: readonly number[]
 }
 
 /** An occurrence as `GET /jobs/:jobId/occurrences` answers it to anyone who sees the job: slots, states and codes only. */
@@ -117,14 +125,20 @@ export function createJobService(deps: JobServiceDeps) {
   const { companyData, memberships, transactions, clock, ids } = deps
   const jobsOf = (companyId: string) => companyData.forCompany(companyId).jobs
 
-  const definitionOf = (v: JobVersionRow): JobDefinition => JSON.parse(v.definition) as JobDefinition
+  const known = deps.knownSchemas ?? JOB_SCHEMAS
+  /** The stored definition, or null when this server does not know its shape (never read as if it did). */
+  const definitionOf = (v: JobVersionRow): JobDefinition | null => storedJobDefinition(v, known)
+  /** The definition as a client that reads `reads` may get it: null when either this server or that client does not know its shape. */
+  const shownTo = (v: JobVersionRow, reads: readonly number[]): JobDefinition | null => (reads.includes(v.schema) ? definitionOf(v) : null)
 
   /**
    * May `userId` (role `role`) read every place the definition names, now? A Skill pinned from the shelf
    * names its place too (B PR 5a): one at a place they do not read counts as a place they cannot read (a
    * Skill gone from the shelf is the Skill check's, `skillPinned`).
    */
-  function readsAll(handle: CompanyData, userId: string, role: string, definition: JobDefinition): boolean {
+  function readsAll(handle: CompanyData, userId: string, role: string, definition: JobDefinition | null): boolean {
+    // A shape this server does not know names places it cannot list: never "reads all" (fails closed).
+    if (definition === null) return false
     const reader = recordReader({ companyId: handle.companyId, userId, role }, handle.scopes.listWithRules())
     if (!jobDefinitionPaths(definition).every(p => reader.file(p))) return false
     const procedure = definition.run.kind === 'procedure' ? definition.run.procedure : null
@@ -136,8 +150,8 @@ export function createJobService(deps: JobServiceDeps) {
    * Does what the version names fit the person's rights now (design memo §4-3)? They read every place
    * it names, and may write where its deliverables go (`writes.place`).
    */
-  function fitsRights(handle: CompanyData, userId: string, role: string, definition: JobDefinition): boolean {
-    if (!readsAll(handle, userId, role, definition)) return false
+  function fitsRights(handle: CompanyData, userId: string, role: string, definition: JobDefinition | null): boolean {
+    if (definition === null || !readsAll(handle, userId, role, definition)) return false
     if (definition.grant.writes.area !== 'deliverable') return true
     const scopes = handle.scopes.listWithRules()
     const perms: PermissionRepository = { getMemberRole: () => role, listScopes: () => scopes }
@@ -145,7 +159,8 @@ export function createJobService(deps: JobServiceDeps) {
   }
 
   /** The responsible person is a member and the version fits their rights now (design memo §4-3). */
-  function withinRights(handle: CompanyData, definition: JobDefinition): Outcome<void> {
+  function withinRights(handle: CompanyData, definition: JobDefinition | null): Outcome<void> {
+    if (definition === null) return SCHEMA_UNKNOWN()
     const role = memberships.roleOf(handle.companyId, definition.actingUser)
     if (role === null) return OWNER_NOT_MEMBER()
     if (!fitsRights(handle, definition.actingUser, role, definition)) return GRANT_EXCEEDS()
@@ -211,10 +226,12 @@ export function createJobService(deps: JobServiceDeps) {
    * When it runs, for the screens (PR 4): the approved version's trigger (else the newest's) — a trigger
    * names no place, so it is answered with the job —, the approved trigger's next slot, the newest occurrence.
    */
-  function whenOf(handle: CompanyData, job: JobRow): Pick<JobView, 'trigger' | 'placement' | 'nextSlot' | 'lastOccurrence'> {
+  function whenOf(handle: CompanyData, job: JobRow, reads: readonly number[]): Pick<JobView, 'trigger' | 'placement' | 'nextSlot' | 'lastOccurrence' | 'needsUpdate'> {
     const approved = job.approvedVersion === null ? null : handle.jobs.version(job.id, job.approvedVersion)
     const shown = approved ?? handle.jobs.version(job.id, job.latestVersion)
-    const definition = shown ? definitionOf(shown) : null
+    // A shape the client (or this server) does not read: no trigger at all — an older screen would read it as a
+    // time of day (`trigger.at`) and fail — and `needsUpdate` for the screens that know the word.
+    const definition = shown ? shownTo(shown, reads) : null
     let nextSlot: string | null = null
     if (approved && definition && job.state !== 'retired' && deps.timeZoneOf && deps.holidaysOf) {
       nextSlot = nextJobSlot(definition.trigger, companyNow(clock.nowMs(), deps.timeZoneOf(handle.companyId)), deps.holidaysOf(handle.companyId))
@@ -222,6 +239,7 @@ export function createJobService(deps: JobServiceDeps) {
     const last = handle.jobs.occurrences(job.id, 1)[0] ?? null
     return {
       ...(definition ? { trigger: definition.trigger, placement: definition.placement } : {}),
+      ...(shown && !definition ? { needsUpdate: true as const } : {}),
       nextSlot,
       lastOccurrence: last ? { dueSlot: last.dueSlot, state: last.state, outcomeCode: last.outcomeCode } : null,
     }
@@ -242,7 +260,8 @@ export function createJobService(deps: JobServiceDeps) {
       // Never more than the job's own name shows (the newest version's places, `nameFor`): the places of both versions.
       const nameShown = hasFullAccess(member.role)
         || (readsAll(handle, member.userId, member.role, definition) && latest !== null && readsAll(handle, member.userId, member.role, definitionOf(latest)))
-      approvedView = { responsibleUserId: approved.actingUserId, name: nameShown ? definition.name : HIDDEN_JOB_NAME }
+      // A shape this server does not know: its name is the job's (owners / admins), else the neutral one.
+      approvedView = { responsibleUserId: approved.actingUserId, name: !nameShown ? HIDDEN_JOB_NAME : definition ? definition.name : job.name }
     }
     const accepted = consentAccepted(handle, job)
     return {
@@ -263,7 +282,7 @@ export function createJobService(deps: JobServiceDeps) {
     return latest !== null && readsAll(handle, member.userId, member.role, definitionOf(latest)) ? job.name : HIDDEN_JOB_NAME
   }
 
-  function view(member: Member, handle: CompanyData, job: JobRow, withVersions: boolean): JobView {
+  function view(member: Member, handle: CompanyData, job: JobRow, withVersions: boolean, reads: readonly number[] = SCHEMA_1_ONLY): JobView {
     const full = hasFullAccess(member.role)
     // The name shown is the newest version's (`ai_jobs.name`). A responsible person who is not owner/admin
     // gets it only while they read every place that version names — an admin may have named the job after
@@ -272,7 +291,7 @@ export function createJobService(deps: JobServiceDeps) {
       id: job.id, name: nameFor(member, handle, job), state: job.state, actingUserId: job.actingUserId, latestVersion: job.latestVersion,
       approvedVersion: job.approvedVersion, accepted: consentAccepted(handle, job), pausedReason: job.pausedReason,
       waiting: waitingOf(handle, job, handle.jobs.stopped()), createdBy: job.createdBy, createdAt: job.createdAt, updatedAt: job.updatedAt,
-      ...whenOf(handle, job),
+      ...whenOf(handle, job, reads),
       ...forViewer(member, handle, job),
       deliverTo: placeView(member, handle, job),
     }
@@ -282,9 +301,14 @@ export function createJobService(deps: JobServiceDeps) {
         // A responsible person who is not owner/admin sees a version's definition only while they read
         // every place it names (a draft may name one they cannot: its name is not theirs to learn).
         const shown = full || readsAll(handle, member.userId, member.role, definition)
+        // A shape the client does not read (or this server does not know) goes without its definition: an older
+        // screen would fail on it (jobs.md "Shapes this build does not know").
+        const readable = shownTo(v, reads) !== null
         return {
           // Hidden: the fingerprints too (a sha256 of a known shape lets someone test guesses of a place's name).
-          version: v.version, fingerprint: shown ? v.fingerprint : null, consentFingerprint: shown ? v.consentFingerprint : null, definition: shown ? definition : null,
+          version: v.version, fingerprint: shown ? v.fingerprint : null, consentFingerprint: shown ? v.consentFingerprint : null,
+          definition: shown && readable ? definition : null,
+          ...(readable ? {} : { needsUpdate: true as const }),
           createdBy: v.createdBy, createdAt: v.createdAt, approvedBy: v.approvedBy, approvedAt: v.approvedAt, acceptedBy: v.acceptedBy, acceptedAt: v.acceptedAt,
         }
       })
@@ -355,7 +379,7 @@ export function createJobService(deps: JobServiceDeps) {
    */
   function placeView(member: Member, handle: CompanyData, job: JobRow): JobView['deliverTo'] {
     const shownVersion = job.approvedVersion === null ? handle.jobs.version(job.id, job.latestVersion) : handle.jobs.version(job.id, job.approvedVersion)
-    const wanted = shownVersion ? definitionOf(shownVersion).grant.deliverTo : undefined
+    const wanted = shownVersion ? definitionOf(shownVersion)?.grant.deliverTo : undefined
     if (!wanted) return null
     const chosen = job.acceptedPlace && job.acceptedPlace.connector === wanted.connector && job.acceptedPlace.kind === wanted.kind ? job.acceptedPlace : null
     const responsible = responsibleOf(handle, job)
@@ -390,22 +414,22 @@ export function createJobService(deps: JobServiceDeps) {
 
   return {
     /** `GET /jobs`: owner/admin every job; anyone else the jobs they are responsible for. */
-    list(member: Member): Outcome<JobList> {
+    list(member: Member, reads: readonly number[] = SCHEMA_1_ONLY): Outcome<JobList> {
       const handle = companyData.forCompany(member.companyId)
       const full = hasFullAccess(member.role)
       const rows = full ? handle.jobs.list() : handle.jobs.listFor(member.userId)
-      return ok({ stopped: handle.jobs.stopped(), canManage: full, jobs: rows.map(j => view(member, handle, j, false)) })
+      return ok({ stopped: handle.jobs.stopped(), canManage: full, jobs: rows.map(j => view(member, handle, j, false, reads)) })
     },
 
     /** `GET /jobs/:jobId`: with every version, newest first. */
-    get(member: Member, jobId: string): Outcome<JobView> {
+    get(member: Member, jobId: string, reads: readonly number[] = SCHEMA_1_ONLY): Outcome<JobView> {
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
-      return ok(view(member, found.handle, found.job, true))
+      return ok(view(member, found.handle, found.job, true, reads))
     },
 
     /** `POST /jobs { definition }` (owner/admin): a draft with its first version. */
-    async create(member: Member, body: unknown): Promise<Outcome<JobView>> {
+    async create(member: Member, body: unknown, reads: readonly number[] = SCHEMA_1_ONLY): Promise<Outcome<JobView>> {
       if (!hasFullAccess(member.role)) return refuse('forbidden', JOBS_FORBIDDEN)
       const parsed = await definitionFrom(member.companyId, body)
       if (!parsed.ok) return parsed
@@ -418,15 +442,18 @@ export function createJobService(deps: JobServiceDeps) {
         approvedFingerprint: null, acceptedVersion: null, acceptedConsent: null, acceptedPlace: null, pausedReason: null, pausedBy: null, pausedAt: null,
         createdBy: member.userId, createdAt: at, updatedAt: at,
       }, versionRow(id, 1, definition, canonical, member.userId, at))
-      return ok(view(member, handle, handle.jobs.find(id) as JobRow, true))
+      return ok(view(member, handle, handle.jobs.find(id) as JobRow, true, reads))
     },
 
     /** `PUT /jobs/:jobId { definition }` (owner/admin): a new version; the approved one keeps running as it was. */
-    async update(member: Member, jobId: string, body: unknown): Promise<Outcome<JobView & { changed: boolean }>> {
+    async update(member: Member, jobId: string, body: unknown, reads: readonly number[] = SCHEMA_1_ONLY): Promise<Outcome<JobView & { changed: boolean }>> {
       if (!hasFullAccess(member.role)) return refuse('forbidden', JOBS_FORBIDDEN)
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
       if (found.job.state === 'retired') return RETIRED()
+      // A screen that cannot show the newest version never writes over it (it was shown an empty form).
+      const newest = found.handle.jobs.version(jobId, found.job.latestVersion)
+      if (newest && !reads.includes(newest.schema)) return NEEDS_NEWER_SCREEN()
       const parsed = await definitionFrom(member.companyId, body)
       if (!parsed.ok) return parsed
       const { definition, canonical } = parsed.value
@@ -438,11 +465,11 @@ export function createJobService(deps: JobServiceDeps) {
         handle.jobs.addVersion(versionRow(jobId, job.latestVersion + 1, definition, canonical, member.userId, clock.now()), clock.now())
         return true
       })
-      return ok({ ...view(member, handle, handle.jobs.find(jobId) as JobRow, true), changed })
+      return ok({ ...view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads), changed })
     },
 
     /** `POST /jobs/:jobId/approve { version, fingerprint? }` (owner/admin). */
-    async approve(member: Member, jobId: string, body: unknown): Promise<Outcome<JobView>> {
+    async approve(member: Member, jobId: string, body: unknown, reads: readonly number[] = SCHEMA_1_ONLY): Promise<Outcome<JobView>> {
       if (!hasFullAccess(member.role)) return refuse('forbidden', JOBS_FORBIDDEN)
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
@@ -454,6 +481,8 @@ export function createJobService(deps: JobServiceDeps) {
       if (b.fingerprint !== null && b.fingerprint !== v.fingerprint) return FINGERPRINT_CHANGED()
       if (found.job.state === 'retired') return RETIRED()
       const definition = definitionOf(v)
+      if (definition === null) return SCHEMA_UNKNOWN()
+      if (!reads.includes(v.schema)) return NEEDS_NEWER_SCREEN()
       const skill = await skillPinned(member.companyId, definition)
       if (!skill.ok) return skill
       let told = false
@@ -478,7 +507,7 @@ export function createJobService(deps: JobServiceDeps) {
       if (!result.ok) return result
       // The app re-reads at once (a bare signal; never fails the approval).
       if (told) { try { deps.noticesChanged?.(member.companyId, [v.actingUserId]) } catch { /* their own check catches up */ } }
-      return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true))
+      return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads))
     },
 
     /**
@@ -487,7 +516,7 @@ export function createJobService(deps: JobServiceDeps) {
      * them and usable now (their own live pick: `places.live`) — kept with the acceptance; any other version takes
      * none. Accepting again with another place replaces it (how an expired folder pick is chosen again).
      */
-    async accept(member: Member, jobId: string, body: unknown): Promise<Outcome<JobView>> {
+    async accept(member: Member, jobId: string, body: unknown, reads: readonly number[] = SCHEMA_1_ONLY): Promise<Outcome<JobView>> {
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
       const b = versionBody(body, true)
@@ -498,16 +527,20 @@ export function createJobService(deps: JobServiceDeps) {
       if (v.actingUserId !== member.userId) return refuse('forbidden', 'この定期の仕事の責任者だけが受け取れます。', { code: 'JOB_NOT_RESPONSIBLE' })
       if (b.fingerprint !== null && b.fingerprint !== v.fingerprint) return FINGERPRINT_CHANGED()
       if (job.approvedVersion !== v.version) return refuse('conflict', 'まだ承認されていない版は受け取れません。', { code: 'JOB_NOT_APPROVED' })
-      const wanted = definitionOf(v).grant.deliverTo
+      const definition = definitionOf(v)
+      if (definition === null) return SCHEMA_UNKNOWN()
+      // What is accepted is what the screen showed: one that cannot show this shape never accepts it.
+      if (!reads.includes(v.schema)) return NEEDS_NEWER_SCREEN()
+      const wanted = definition.grant.deliverTo
       if (!wanted && b.place !== undefined) return BAD_BODY('{ version, fingerprint? } (this job has no place to choose)')
       const place = wanted ? parseJobAcceptedPlace(b.place, wanted) : null
       if (wanted && b.place !== undefined && !place) return BAD_BODY('{ version, fingerprint?, place: { connector, kind, ref } }')
       if (wanted && !place) return PLACE_NEEDED()
       // What is accepted must still be what was pinned: a Skill deleted or changed since refuses it.
-      const skill = await skillPinned(member.companyId, definitionOf(v))
+      const skill = await skillPinned(member.companyId, definition)
       if (!skill.ok) return skill
       const result = transactions.run((): Outcome<void> => {
-        const rights = withinRights(handle, definitionOf(v))
+        const rights = withinRights(handle, definition)
         if (!rights.ok) return rights
         // The place must be theirs and usable now (their own live pick): the run later puts only there.
         if (place && !deps.places?.live(member.companyId, member.userId, place)) return PLACE_NOT_USABLE()
@@ -515,11 +548,11 @@ export function createJobService(deps: JobServiceDeps) {
         return ok(undefined)
       })
       if (!result.ok) return result
-      return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true))
+      return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads))
     },
 
     /** `POST /jobs/:jobId/pause`: owner/admin (`ADMIN`), or the responsible person (`BY_RESPONSIBLE`). */
-    pause(member: Member, jobId: string): Outcome<JobView> {
+    pause(member: Member, jobId: string, reads: readonly number[] = SCHEMA_1_ONLY): Outcome<JobView> {
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
       const { handle, job } = found
@@ -534,18 +567,18 @@ export function createJobService(deps: JobServiceDeps) {
           deps.occurrenceHolds?.holdDue(member.companyId, jobId, 'JOB_PAUSED')
         })
       }
-      return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true))
+      return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads))
     },
 
     /**
      * `POST /jobs/:jobId/resume`: owner/admin any pause (an approved version's responsible person and
      * rights checked again); the responsible person only a pause they made themselves.
      */
-    async resume(member: Member, jobId: string): Promise<Outcome<JobView>> {
+    async resume(member: Member, jobId: string, reads: readonly number[] = SCHEMA_1_ONLY): Promise<Outcome<JobView>> {
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
       const { handle, job } = found
-      if (job.state !== 'paused') return ok(view(member, handle, job, true))
+      if (job.state !== 'paused') return ok(view(member, handle, job, true, reads))
       // A non-admin resumes only a pause they made themselves, while still the approved version's
       // responsible person (someone a later draft names may see the job, not lift another's pause).
       if (!hasFullAccess(member.role)
@@ -554,7 +587,10 @@ export function createJobService(deps: JobServiceDeps) {
       }
       if (job.approvedVersion !== null) {
         const approved = handle.jobs.version(jobId, job.approvedVersion) as JobVersionRow
-        const skill = await skillPinned(member.companyId, definitionOf(approved))
+        // Rights and the Skill cannot be checked on a shape this server does not know: it stays paused here.
+        const definition = definitionOf(approved)
+        if (definition === null) return SCHEMA_UNKNOWN()
+        const skill = await skillPinned(member.companyId, definition)
         if (!skill.ok) return skill
       }
       const result = transactions.run((): Outcome<void> => {
@@ -570,7 +606,7 @@ export function createJobService(deps: JobServiceDeps) {
         return ok(undefined)
       })
       if (!result.ok) return result
-      return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true))
+      return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads))
     },
 
     /** `PUT /jobs-stop { stopped }` (owner/admin): 「定期の仕事をすべて止める」 (owner decision D8). */
@@ -612,7 +648,9 @@ export function createJobService(deps: JobServiceDeps) {
         if (job.state === 'paused' && JOB_SYSTEM_PAUSE_REASONS.includes(job.pausedReason as JobPauseReason)) return false
         const v = handle.jobs.version(job.id, job.approvedVersion)
         if (!v || v.actingUserId !== userId) return false
-        return !fitsRights(handle, userId, role, definitionOf(v))
+        // A shape this server does not know never runs here anyway: not paused for a reason it cannot judge.
+        const definition = definitionOf(v)
+        return definition !== null && !fitsRights(handle, userId, role, definition)
       })
       pauseFor(companyId, lost, 'OWNER_RIGHTS_CHANGED', actorId)
     },
@@ -640,6 +678,8 @@ export function createJobService(deps: JobServiceDeps) {
     runnerRefusal(companyId: string, version: JobVersionRow): 'OWNER_LEFT' | 'OWNER_RIGHTS_CHANGED' | null {
       const handle = companyData.forCompany(companyId)
       const definition = definitionOf(version)
+      // Every runner skips a shape it does not know before asking; here it fails closed all the same.
+      if (definition === null) return 'OWNER_RIGHTS_CHANGED'
       const role = memberships.roleOf(companyId, definition.actingUser)
       if (role === null) return 'OWNER_LEFT'
       return fitsRights(handle, definition.actingUser, role, definition) ? null : 'OWNER_RIGHTS_CHANGED'
@@ -652,6 +692,7 @@ export function createJobService(deps: JobServiceDeps) {
      */
     pinnedSkillKept(companyId: string, version: JobVersionRow): boolean {
       const definition = definitionOf(version)
+      if (definition === null) return false
       if (definition.run.kind !== 'procedure' || definition.run.procedure.source !== 'shelf_skill') return true
       const role = memberships.roleOf(companyId, definition.actingUser)
       const found = role === null ? null : deps.shelfSkill?.({ companyId, userId: definition.actingUser, role }, definition.run.procedure.item, definition.run.procedure.fingerprint)
@@ -694,7 +735,7 @@ export function createJobService(deps: JobServiceDeps) {
       return {
         name: nameFor(member, found.handle, found.job), contentChanged: before !== null && before.actingUserId === member.userId,
         // The place outside is chosen in the app's 「受け取る」 (a build before it cannot: the notice says to update).
-        choosesPlace: definitionOf(v).grant.deliverTo !== undefined,
+        choosesPlace: definitionOf(v)?.grant.deliverTo !== undefined,
       }
     },
 

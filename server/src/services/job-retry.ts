@@ -25,7 +25,7 @@
  * Anyone else: 403 before anything; an occurrence of another job or company, or none: the one 404 `JOB_NOT_FOUND`.
  */
 import {
-  JOB_PC_STEP, JOB_RETRY_MAX, JOB_RETRY_STATES, isJobId, isOccurrenceId, jobRetryExpiresAt,
+  JOB_PC_STEP, JOB_RETRY_MAX, JOB_RETRY_STATES, isJobId, isOccurrenceId, jobRetryExpiresAt, storedJobDefinition,
   type JobDefinition, type JobDeliveryPlace, type JobRetryBlock,
 } from '../../shared/core/jobs'
 import { jobRetryBlockText } from '../../shared/core/job-words'
@@ -64,7 +64,8 @@ export interface JobRetryDeps {
 const NOT_FOUND = () => refuse('not-found', '定期の仕事が見つかりません。', { code: 'JOB_NOT_FOUND' })
 const BLOCKED = (why: JobRetryBlock) => refuse('conflict', jobRetryBlockText(why), { code: why })
 
-const definitionOf = (v: JobVersionRow): JobDefinition => JSON.parse(v.definition) as JobDefinition
+/** The stored definition, or null for a shape this build does not know (jobs.md "Shapes this build does not know"): never run. */
+const definitionOf = (v: JobVersionRow): JobDefinition | null => storedJobDefinition(v)
 
 interface Found { handle: CompanyData; job: JobRow; occ: JobOccurrenceRow; version: JobVersionRow | null }
 
@@ -128,6 +129,8 @@ export function createJobRetry(deps: JobRetryDeps) {
     if (handle.jobs.occurrences(job.id, 1)[0]?.id !== occ.id) return 'NOT_LATEST'
     if (!version || job.approvedVersion !== occ.jobVersion) return 'JOB_VERSION_CHANGED'
     const definition = definitionOf(version)
+    // A shape this build does not know: never sent back here (nothing could check or run it).
+    if (definition === null) return 'JOB_SCHEMA_UNKNOWN'
     // A later slot has arrived even when the clock has not made its occurrence yet (it will, within minutes).
     const latest = deps.slotsOf?.(handle.companyId, definition).latest ?? null
     if (latest !== null && latest > occ.dueSlot) return 'NOT_LATEST'
@@ -195,7 +198,7 @@ export function createJobRetry(deps: JobRetryDeps) {
           if (why) return BLOCKED(why)
           const { handle, occ } = f
           const at = new Date(nowMs).toISOString()
-          const expiresAt = newDeadline(f, definitionOf(f.version as JobVersionRow), nowMs) as string
+          const expiresAt = newDeadline(f, definitionOf(f.version as JobVersionRow) as JobDefinition, nowMs) as string
           const run = occ.runId ? handle.aiRuns.byId(occ.runId) : null
           if (run && !closeRun(handle, run, at)) throw new Refused(BLOCKED('NOT_RETRYABLE'))
           if (!handle.jobs.retryOccurrence(occ.id, JOB_RETRY_STATES, expiresAt, member.userId, at)) throw new Refused(BLOCKED('NOT_RETRYABLE'))

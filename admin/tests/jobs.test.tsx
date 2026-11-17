@@ -10,7 +10,7 @@ import JobsRoute from '@/app/companies/[id]/jobs/page'
 import { NAV_ITEMS } from '@/components/app/app-shell'
 import { approvedText } from '@/components/jobs/job-dialogs'
 import type { JobView } from '@/lib/api'
-import { DELIVERY_PLACE_CHOICES, definitionFromForm, emptyJobForm, formFromDefinition, jobProblemText } from '@/lib/jobs'
+import { DELIVERY_PLACE_CHOICES, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, jobProblemText, needsNewerScreen } from '@/lib/jobs'
 import { jobConsentCanonical, type JobDefinition } from '../../shared/core/jobs'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok } from './fixtures'
@@ -359,5 +359,77 @@ describe('「もう一度」 (B PR 5b)', () => {
     const dialog = await screen.findByRole('dialog')
     await userEvent.click(within(dialog).getByRole('button', { name: 'はい' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([{ done: false }]))
+  })
+})
+
+// Stage 4-0 (jobs.md "Shapes this build does not know"): a job of a newer definition shape (event-triggered jobs, 4a)
+// never crashes this console, is never edited or approved from it, and the console says what to do.
+describe('a definition of a shape this console does not read', () => {
+  const event = { ...def(), schema: 2, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done' } } as unknown as JobDefinition
+
+  it('every job request says which shapes this console reads', async () => {
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [jobView()] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    await screen.findByRole('listitem', { name: '週の報告' })
+    const job = calls.find((c) => c.url.endsWith('/jobs'))!
+    expect(job.headers['X-ACB-Job-Schemas']).toBe('1')
+  })
+
+  it('the list says 「画面を新しくしてください」 instead of a time, offers no edit, and a trigger of an unknown shape never crashes it', async () => {
+    const newer = jobView({ trigger: undefined, placement: undefined, needsUpdate: true })
+    const odd = jobView({ id: 'job.' + 'e'.repeat(32), name: '変わった仕事', trigger: event.trigger })
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [newer, odd] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    expect(row).toHaveTextContent('この画面では編集できません。画面を新しくしてください')
+    expect(within(row).getByRole('button', { name: '直す' })).toBeDisabled()
+    const oddRow = screen.getByRole('listitem', { name: '変わった仕事' })
+    expect(oddRow).not.toHaveTextContent('いつ：')
+  })
+
+  it('the approval shows the sentence and approves nothing', async () => {
+    const pending = jobView({ latestVersion: 2, approvedVersion: 1 })
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [pending] }) },
+      [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...pending, versions: [{ ...version(2, def(), 'c2'), definition: null, needsUpdate: true }, version(1, def(), 'c1')] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    await userEvent.click(within(row).getByRole('button', { name: '承認する' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('この画面では編集できません。画面を新しくしてください')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '承認する' })).toBeDisabled()
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+
+  it('editing a job whose newest version is of an unknown shape: the sentence, never an empty form that would write over it', async () => {
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [jobView()] }) },
+      // A newer server that sent the definition anyway: this console still does not read it.
+      [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...jobView(), versions: [version(1, event, 'c1')] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    await userEvent.click(within(row).getByRole('button', { name: '直す' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('この画面では編集できません。画面を新しくしてください')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '保存' })).toBeNull()
+  })
+
+  it('editableDefinition: a known shape as it came; a newer one, or one the server marked, never', () => {
+    expect(editableDefinition({ definition: def() })).toEqual(def())
+    expect(editableDefinition({ definition: event })).toBeNull()
+    expect(editableDefinition({ definition: def(), needsUpdate: true })).toBeNull()
+    // A definition hidden from a non-admin is not "too new".
+    expect(needsNewerScreen({ definition: null })).toBe(false)
+    expect(needsNewerScreen({ definition: event })).toBe(true)
   })
 })

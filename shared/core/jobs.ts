@@ -501,6 +501,75 @@ export function jobConsentCanonical(definition: JobDefinition): string {
   return canonicalJson({ actingUser: definition.actingUser, run: definition.run, placement: definition.placement, grant: definition.grant })
 }
 
+/**
+ * Reading a stored version (jobs.md "Shapes this build does not know", stage 4-0): its definition when its
+ * `schema` is one `known` lists (by default this build's `JOB_SCHEMAS`) and the stored text says the same schema;
+ * null otherwise — a newer shape (a later build wrote it, then the server was rolled back), or a text that is not
+ * a definition. A null definition is never run, retried, claimed, approved or accepted, and never crashes a reader.
+ * A known schema is returned exactly as stored (schema 1 byte for byte as before).
+ */
+export function storedJobDefinition(v: { schema: number; definition: string }, known: readonly number[] = JOB_SCHEMAS): JobDefinition | null {
+  if (!known.includes(v.schema)) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(v.definition)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object' || (parsed as { schema?: unknown }).schema !== v.schema) return null
+  return parsed as JobDefinition
+}
+
+/**
+ * The header a client sends on job requests to say which definition schemas it can show and edit
+ * (`X-ACB-Job-Schemas: 1,2`). Without it — every admin console and app before stage 4-0, and a tab left
+ * open from then — the client reads schema 1 only: the server answers a newer version without its definition
+ * (`needsUpdate`) and refuses to approve, accept or edit it from that client.
+ */
+export const JOB_SCHEMAS_HEADER = 'X-ACB-Job-Schemas'
+
+/** The schemas a client announced (`JOB_SCHEMAS_HEADER`); schema 1 always (every client reads it), anything unreadable ignored. */
+export function parseJobSchemasHeader(value: string | null | undefined): number[] {
+  const announced = (value ?? '').split(',').map(s => s.trim()).filter(s => /^[1-9][0-9]{0,2}$/.test(s)).map(Number)
+  return [...new Set([1, ...announced])].sort((a, b) => a - b)
+}
+
+/** What a screen says where a job's definition is of a shape it cannot show (the admin console, stage 4-0). */
+export const JOB_NEEDS_NEWER_SCREEN = 'この画面では編集できません。画面を新しくしてください'
+
+/** A definition as an answer carried it, when this build knows its shape (the admin console); else null. */
+export function knownJobDefinition(d: unknown): JobDefinition | null {
+  if (!d || typeof d !== 'object') return null
+  if (!(JOB_SCHEMAS as readonly unknown[]).includes((d as { schema?: unknown }).schema)) return null
+  return isKnownJobTrigger((d as { trigger?: unknown }).trigger) ? d as JobDefinition : null
+}
+
+/** A trigger of a shape this build knows (a time of day, every day / week / month). */
+export function isKnownJobTrigger(t: unknown): t is JobTrigger {
+  if (!t || typeof t !== 'object') return false
+  const { every, at } = t as { every?: unknown; at?: unknown }
+  return (every === 'day' || every === 'week' || every === 'month') && typeof at === 'string' && /^\d{2}:\d{2}$/.test(at)
+}
+
+/**
+ * The kind of an occurrence (stage 4-0): `time` — made by the clock for a slot (every occurrence today); `event` —
+ * made for a ledger event by event-triggered jobs (stage 4a; its `due_slot` is `ev:<delivery number>`, owner memo
+ * §10-2). A PC claims an occurrence only of a kind its app names (`kinds` on the claim, `?kinds=` on the turn list); an
+ * app that names none runs `time` only — every app today, which therefore sends nothing new (a server before 4-0
+ * refuses an unknown key in the claim's body). The app that runs events (4a) names `time,event`.
+ */
+export type JobOccurrenceKind = 'time' | 'event'
+export function jobOccurrenceKind(dueSlot: string): JobOccurrenceKind {
+  return dueSlot.startsWith('ev:') ? 'event' : 'time'
+}
+/** The kinds a claim or a turn list asked for: `time` when none are named (an app before stage 4-0); null = not a list of kinds. */
+export function parseJobOccurrenceKinds(value: unknown): JobOccurrenceKind[] | null {
+  if (value === undefined || value === null) return ['time']
+  const list = typeof value === 'string' ? value.split(',').map(s => s.trim()).filter(Boolean) : value
+  if (!Array.isArray(list) || list.length > 10 || !list.every(k => typeof k === 'string' && /^[a-z_]{1,20}$/.test(k))) return null
+  return [...new Set(list.filter((k): k is JobOccurrenceKind => k === 'time' || k === 'event'))]
+}
+
 /** Every company path a definition names (what the responsible person must be able to read). */
 export function jobDefinitionPaths(definition: JobDefinition): string[] {
   const paths = [...definition.grant.reads.paths]
@@ -562,6 +631,8 @@ export const JOB_RETRY_STATES: readonly JobOccurrenceState[] = ['needs_person', 
 export const JOB_RETRY_BLOCKS = [
   'NOT_RETRYABLE', 'NOT_LATEST', 'JOB_PAUSED', 'JOB_STOPPED', 'AI_STOPPED', 'JOB_VERSION_CHANGED', 'JOB_NOT_ACCEPTED',
   'JOB_GRANT_EXCEEDS', 'JOB_SKILL_MISSING', 'JOB_PLACE_NOT_USABLE', 'JOB_RESULT_UNKNOWN', 'RETRY_LIMIT', 'NEXT_SLOT_SOON',
+  // Stage 4-0: the version is of a shape this server build does not know (a newer build wrote it).
+  'JOB_SCHEMA_UNKNOWN',
 ] as const
 
 /**

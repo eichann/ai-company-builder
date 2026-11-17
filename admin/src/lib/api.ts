@@ -1482,25 +1482,32 @@ export const minutesApi = {
 export type { JobList, JobOccurrenceView, JobRetryResult, JobVersionView, JobView, JobWaiting } from '../../../shared/types/jobs'
 export type { JobDefinition } from '../../../shared/core/jobs'
 
-import type { JobDefinition } from '../../../shared/core/jobs'
+import { JOB_SCHEMAS, JOB_SCHEMAS_HEADER, type JobDefinition } from '../../../shared/core/jobs'
+
+/**
+ * Every job request says which definition shapes this console reads (jobs.md "Shapes this build does not know"):
+ * the server answers a newer one without its definition and refuses to approve, accept or edit it from here. A
+ * console from before this header (a tab left open) is treated as reading schema 1 only.
+ */
+const JOB_READS = { headers: { [JOB_SCHEMAS_HEADER]: JOB_SCHEMAS.join(',') } }
 
 export const jobsApi = {
-  list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/jobs`, jobListSchema),
-  get: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}`, jobSchema),
+  list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/jobs`, jobListSchema, JOB_READS),
+  get: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}`, jobSchema, JOB_READS),
   occurrences: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/occurrences`, jobOccurrencesSchema),
   create: (companyId: string, definition: JobDefinition) =>
-    getData(`/api/companies/${enc(companyId)}/jobs`, jobSchema, { method: 'POST', body: { definition } }),
+    getData(`/api/companies/${enc(companyId)}/jobs`, jobSchema, { ...JOB_READS, method: 'POST', body: { definition } }),
   /** A new version (the approved one keeps running until this one is approved). */
   update: (companyId: string, jobId: string, definition: JobDefinition) =>
-    getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}`, jobUpdatedSchema, { method: 'PUT', body: { definition } }),
+    getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}`, jobUpdatedSchema, { ...JOB_READS, method: 'PUT', body: { definition } }),
   /** `fingerprint`: the version as shown — the server refuses when it is not that version any more. */
   approve: (companyId: string, jobId: string, version: number, fingerprint: string) =>
-    getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/approve`, jobSchema, { method: 'POST', body: { version, fingerprint } }),
+    getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/approve`, jobSchema, { ...JOB_READS, method: 'POST', body: { version, fingerprint } }),
   /** The caller's own acceptance (they are the version's responsible person): an owner/admin approving their own job. */
   accept: (companyId: string, jobId: string, version: number, fingerprint: string) =>
-    getData(`/api/companies/${enc(companyId)}/me/jobs/${enc(jobId)}/accept`, jobSchema, { method: 'POST', body: { version, fingerprint } }),
-  pause: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/pause`, jobSchema, { method: 'POST' }),
-  resume: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/resume`, jobSchema, { method: 'POST' }),
+    getData(`/api/companies/${enc(companyId)}/me/jobs/${enc(jobId)}/accept`, jobSchema, { ...JOB_READS, method: 'POST', body: { version, fingerprint } }),
+  pause: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/pause`, jobSchema, { ...JOB_READS, method: 'POST' }),
+  resume: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/resume`, jobSchema, { ...JOB_READS, method: 'POST' }),
   setStopped: (companyId: string, stopped: boolean) =>
     getData(`/api/companies/${enc(companyId)}/jobs-stop`, jobsStopSchema, { method: 'PUT', body: { stopped } }),
   /** 「もう一度」: the occurrence back to its turn with a new deadline (the server checks everything again). */

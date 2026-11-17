@@ -16,10 +16,10 @@ import { useCompany } from '@/lib/company-context'
 import { PcJobFields } from './pc-job-fields'
 import { describeError } from '@/lib/errors'
 import {
-  JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, definitionFromForm, emptyJobForm, formFromDefinition, jobProblemText, type JobForm,
+  JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, jobProblemText, needsNewerScreen, type JobForm,
 } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
-import type { JobDefinition, JobWeekday } from '../../../../shared/core/jobs'
+import { JOB_NEEDS_NEWER_SCREEN, type JobDefinition, type JobWeekday } from '../../../../shared/core/jobs'
 import {
   jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobTriggerText,
 } from '../../../../shared/core/job-words'
@@ -38,7 +38,10 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
 }) {
   const { companyId } = useCompany()
   const detail = useQuery(job ? `job:${companyId}:${job.id}` : null, () => jobsApi.get(companyId, job!.id))
-  const newest = detail.data?.versions?.[0]?.definition ?? null
+  const newestVersion = detail.data?.versions?.[0] ?? null
+  const newest = editableDefinition(newestVersion)
+  // A shape this console does not read: never an empty form that would write over it (the server refuses it too).
+  const tooNew = needsNewerScreen(newestVersion)
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
@@ -50,6 +53,8 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
         </DialogHeader>
         {job && !detail.data ? (
           detail.error ? <p role="alert" className="text-sm text-destructive">{describeError(detail.error)}</p> : <ListSkeleton rows={3} />
+        ) : tooNew ? (
+          <p role="note" className="text-sm">{JOB_NEEDS_NEWER_SCREEN}</p>
         ) : (
           <JobFormFields
             key={job?.id ?? 'new'}
@@ -240,7 +245,8 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
   const [problem, setProblem] = useState<string | null>(null)
   const versions: JobVersionView[] = detail.data?.versions ?? []
   const newest = versions[0] ?? null
-  const definition = newest?.definition ?? null
+  const definition = editableDefinition(newest)
+  const tooNew = needsNewerScreen(newest)
   // The server's own rule: the newest version's consent is the accepted one (else a new 受け取る is needed).
   const mustAccept = detail.data?.latestConsentAccepted !== true
   const who = definition ? personName(members.find((m) => m.userId === definition.actingUser)) : ''
@@ -249,7 +255,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
   const placeOutside = definition?.grant.deliverTo !== undefined
 
   const approve = async () => {
-    if (!newest?.fingerprint) return
+    if (!newest?.fingerprint || tooNew) return
     setBusy(true)
     setProblem(null)
     try {
@@ -284,6 +290,8 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
         </DialogHeader>
         {!detail.data ? (
           detail.error ? <p role="alert" className="text-sm text-destructive">{describeError(detail.error)}</p> : <ListSkeleton rows={4} />
+        ) : tooNew ? (
+          <p role="note" className="text-sm">{JOB_NEEDS_NEWER_SCREEN}</p>
         ) : definition ? (
           <div className="space-y-3">
             <JobVersionWords definition={definition} members={members} />
@@ -301,7 +309,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
         {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={busy}>キャンセル</Button>
-          <Button onClick={() => void approve()} disabled={busy || !newest?.fingerprint}>承認する</Button>
+          <Button onClick={() => void approve()} disabled={busy || !newest?.fingerprint || tooNew}>承認する</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
