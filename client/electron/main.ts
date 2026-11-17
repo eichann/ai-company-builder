@@ -437,15 +437,15 @@ const aiTurnClaims = createAiTurnClaims({
       const file = got.ok ? got.files.find(f => f.path === 'SKILL.md') : undefined
       return file ? Buffer.from(file.bytes).toString('utf8') : null
     },
-    checkPoint: async (companyRoot, place, until) => {
+    checkPoint: async (companyRoot, place, listedAt) => {
       if (!companyRoot) return null
       const root = allowedRoots.validate(companyRoot)
-      return workingFolders.has(root) ? { commit: null } : gitCheckPoint(jobGit, root, place, until)
+      return workingFolders.has(root) ? { commit: null } : gitCheckPoint(jobGit, root, place, listedAt)
     },
     newFiles: async (companyRoot, place, window) => {
       if (!companyRoot) return null
       const root = allowedRoots.validate(companyRoot)
-      if (workingFolders.has(root)) return newFilesByTime(root, place, window.since, window.until)
+      if (workingFolders.has(root)) return newFilesByTime(root, place, window.since, window.until, window.offset)
       return window.upto ? newFilesByGit(jobGit, root, place, { since: window.since, sinceCommit: window.sinceCommit, upto: window.upto }) : null
     },
     stopTurn: conversationId => { chatTurns?.abort(info => info.appSessionId === conversationId, 'job-ended') },

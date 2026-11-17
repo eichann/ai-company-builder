@@ -38,19 +38,37 @@ export interface JobRunDeps {
   readShelfSkill: (companyId: string, item: string, skill: string, version: string) => Promise<string | null>
   /**
    * Before a `new_files` claim: whether this PC has what the server has, and the commit the check looks up to
-   * (null in a working folder: no git). null: the place is not on this PC; `not-synced`: not yet.
+   * (null in a working folder: no git). `listedAt`: this PC's time when the server's list carrying the occurrence
+   * first arrived — the window had ended on the server by then (it lists only occurrences whose time has come), so
+   * a fetch after it, judged on this same PC's clock, holds everything up to the window's end. null: the place is
+   * not on this PC; `not-synced`: not yet.
    */
-  checkPoint: (companyRoot: string | null, place: string, until: string) => Promise<{ commit: string | null } | null | 'not-synced'>
+  checkPoint: (companyRoot: string | null, place: string, listedAt: number) => Promise<{ commit: string | null } | null | 'not-synced'>
   /**
    * Files (company paths) added under `place`: after `sinceCommit` up to `upto` in the shared folder (by date after
-   * `since` when no commit is known), in [since, until) by time in a working folder. null when this PC cannot tell.
+   * `since` when no commit is known), in [since, until) by time in a working folder — the server's instants, read
+   * through `offset` (the server's clock minus this PC's, measured at the claim). null when this PC cannot tell.
    */
-  newFiles: (companyRoot: string | null, place: string, window: { since: string; until: string; sinceCommit: string | null; upto: string | null }) => Promise<string[] | null | 'not-synced'>
+  newFiles: (companyRoot: string | null, place: string, window: { since: string; until: string; sinceCommit: string | null; upto: string | null; offset: ClockOffset | null }) => Promise<string[] | null | 'not-synced'>
   /** Stop the consultation's AI now (main's chat turns), saying why in its reply. */
   stopTurn: (conversationId: string) => void
   now?: () => number
   log?: Pick<Console, 'warn'>
 }
+
+/**
+ * The server's clock minus this PC's, as a range: the server stamped its claim answer (`run.updatedAt`) somewhere
+ * between the request leaving and its answer arriving here, so the true difference lies in [min, max].
+ */
+export interface ClockOffset { min: number; max: number }
+
+/**
+ * A working folder's check (files by their modification time, which this PC's clock stamped) runs only while this
+ * PC's clock is known to be within this of the server's: further off, it may also have been set differently when
+ * the files were written, and a missed file would end the occurrence as `nothing` — so the run is given back
+ * (`temporary` `CLOCK_NOT_TRUSTED`: retried, then a person is told) instead.
+ */
+export const JOB_CLOCK_TOLERANCE_MS = 5 * 60_000
 
 /** A place not synced yet: asked again after this (the app syncs by itself meanwhile); no start is counted. */
 export const NOT_SYNCED_RETRY_MS = 30_000
@@ -81,6 +99,8 @@ export function createJobRuns(deps: JobRunDeps) {
   const log = deps.log ?? console
   /** The member's turns as last listed, per company. */
   const listed = new Map<string, Map<string, QueuedJobTurn>>()
+  /** When this PC first got each listed occurrence from the server (this PC's clock), by company and occurrence. */
+  const firstListed = new Map<string, number>()
   /** Runs this app holds, by consultation. */
   const byConversation = new Map<string, Held>()
   const keyOf = (companyId: string, occurrenceId: string) => `${companyId}\n${occurrenceId}`
@@ -94,13 +114,17 @@ export function createJobRuns(deps: JobRunDeps) {
     byOccurrence.delete(keyOf(h.companyId, h.occurrenceId))
   }
 
-  async function findings(turn: QueuedJobTurn, companyRoot: string | null, point: { commit: string | null } | null): Promise<JobFound | null | 'not-synced'> {
+  async function findings(turn: QueuedJobTurn, companyRoot: string | null, point: { commit: string | null } | null, offset: ClockOffset | null): Promise<JobFound | null | 'not-synced' | 'clock'> {
     if (turn.check.kind === 'new_meetings') return { kind: 'meetings', meetings: turn.meetings ?? [] }
     if (turn.check.kind === 'new_files') {
       if (point === null) return null
-      // The window ends at the occurrence's own time (an older server: now); a re-claim looks up to its first commit.
-      const until = turn.checkUntil ?? new Date(now()).toISOString()
-      const window = { since: turn.checkSince, until, sinceCommit: turn.sinceCommit ?? null, upto: turn.checkedCommit ?? point.commit }
+      // A working folder (no commit): files by this PC's clock, so it must be known to agree with the server's —
+      // unknown or too far off, no check is made (never `nothing` on a clock's say-so).
+      if (point.commit === null && !clockTrusted(offset)) return 'clock'
+      // The window ends at the occurrence's own time (an older server: the server's now); a re-claim looks up to its
+      // first commit.
+      const until = turn.checkUntil ?? new Date(now() + (offset?.min ?? 0)).toISOString()
+      const window = { since: turn.checkSince, until, sinceCommit: turn.sinceCommit ?? null, upto: turn.checkedCommit ?? point.commit, offset }
       const files = await deps.newFiles(companyRoot, turn.check.path, window).catch(() => null)
       return files === null || files === 'not-synced' ? files : { kind: 'files', files }
     }
@@ -116,6 +140,11 @@ export function createJobRuns(deps: JobRunDeps) {
       const r = await deps.session(companyId, 'GET', '/me/job-turns')
       const turns = r?.status === 200 ? parseJobTurns(r.data) : null
       if (turns === null) return [...(listed.get(companyId)?.values() ?? [])]
+      // The first arrival is kept: the earliest moment this PC knows the window had ended on the server.
+      const arrived = now()
+      const ids = new Set(turns.map(t => t.occurrenceId))
+      for (const id of listed.get(companyId)?.keys() ?? []) if (!ids.has(id)) firstListed.delete(keyOf(companyId, id))
+      for (const id of ids) if (!firstListed.has(keyOf(companyId, id))) firstListed.set(keyOf(companyId, id), arrived)
       listed.set(companyId, new Map(turns.map(t => [t.occurrenceId, t])))
       return turns
     },
@@ -136,10 +165,12 @@ export function createJobRuns(deps: JobRunDeps) {
       // claim names the commit the check looks up to (the next occurrence starts after it).
       let point: { commit: string | null } | null = null
       if (listedTurn.check.kind === 'new_files') {
-        const p = await deps.checkPoint(companyRoot, listedTurn.check.path, listedTurn.checkUntil ?? new Date(now()).toISOString()).catch(() => null)
+        const listedAt = firstListed.get(keyOf(companyId, occurrenceId)) ?? now()
+        const p = await deps.checkPoint(companyRoot, listedTurn.check.path, listedAt).catch(() => null)
         if (p === 'not-synced') return { claimed: false, reason: 'unavailable', retryAfterMs: NOT_SYNCED_RETRY_MS }
         point = p
       }
+      const sentAt = now()
       const answer = await deps.session(companyId, 'POST', '/job-run-claims', {
         occurrenceId, deviceId: deps.deviceId, conversationId, checks: [...JOB_PC_CHECK_KINDS], ...(point?.commit ? { checkedCommit: point.commit } : {}),
       })
@@ -156,6 +187,10 @@ export function createJobRuns(deps: JobRunDeps) {
       }
       const key = keyOf(companyId, occurrenceId)
       const claimedAt = now()
+      // The server's clock against this PC's, from the claim's own stamp (made between sending and the answer).
+      const serverMs = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? Date.parse(v) : null)
+      const serverNow = serverMs(run.updatedAt)
+      const offset: ClockOffset | null = serverNow !== null ? { min: serverNow - claimedAt, max: serverNow - sentAt } : null
       const held: Held = { companyId, occurrenceId, runId: run.id, access: { allowsRecordTool: () => false, builtinTools: [] }, area: { nowhere: true, reads: [] }, reported: null, timedOut: false, lost: false, timer: null }
       // Taken away by the server (a pause, the company's stop, the time limit, another PC): the AI stops here too.
       deps.hold(companyId, occurrenceId, conversationId, { id: run.id, generation: run.generation }, () => {
@@ -168,8 +203,10 @@ export function createJobRuns(deps: JobRunDeps) {
       }
       if (!turn || turn.occurrenceId !== occurrenceId) return giveUp({ class: 'bad-input', code: 'TURN_NOT_READABLE' })
       // The check, before any AI (D6).
-      const found = await findings(turn, companyRoot, point)
+      const found = await findings(turn, companyRoot, point, offset)
       if (found === null) return giveUp({ class: 'bad-input', code: 'CHECK_NOT_POSSIBLE' })
+      // This PC's clock not known to agree with the server's: tried again later (a person is told if it stays so).
+      if (found === 'clock') return giveUp({ class: 'temporary', code: 'CLOCK_NOT_TRUSTED' })
       // Not synced since the window's end: a colleague's file may not be here yet — never `nothing` on a guess.
       if (found === 'not-synced') {
         await deps.finishRun(companyId, occurrenceId, { class: 'temporary', code: 'NOT_SYNCED' })
@@ -187,11 +224,10 @@ export function createJobRuns(deps: JobRunDeps) {
       // Not on this PC yet (not synced, the shelf unreachable): tried again later.
       if (procedure === null) return giveUp({ class: 'temporary', code: 'PROCEDURE_NOT_HERE' })
       // The approved minutes count from the run's first claim, on the server's clock; on this PC's clock that is
-      // shifted by how far the two differ (the claim's own time on the server vs here).
-      const serverMs = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? Date.parse(v) : null)
+      // shifted by how far the two differ — taken at the request's departure (`offset.max`), so the answer's travel
+      // time never moves the end later.
       const started = serverMs(run.createdAt)
-      const serverNow = serverMs(run.updatedAt)
-      const skew = serverNow !== null ? claimedAt - serverNow : 0
+      const skew = offset !== null ? -offset.max : 0
       const deadlineMs = (started ?? claimedAt - skew) + skew + turn.grant.limits.minutes * 60_000
       const left = deadlineMs - JOB_STOP_BEFORE_MS - now()
       if (left <= 0) return giveUp({ class: 'bad-input', code: 'TIME_LIMIT' })
@@ -274,17 +310,27 @@ export type JobRuns = ReturnType<typeof createJobRuns>
 const NEW_FILES_MAX = 200
 const SKIP = new Set(['.git', '.backups', '.workspace', '.personal', 'node_modules'])
 
+/** Whether this PC's clock is known to be within `JOB_CLOCK_TOLERANCE_MS` of the server's (its whole range). */
+export function clockTrusted(offset: ClockOffset | null): offset is ClockOffset {
+  return offset !== null && Number.isFinite(offset.min) && Number.isFinite(offset.max) && offset.min <= offset.max
+    && Math.max(Math.abs(offset.min), Math.abs(offset.max)) <= JOB_CLOCK_TOLERANCE_MS
+}
+
 /**
- * Files changed under `place` after `since`, in a working folder (no shared company folder): by their
- * modification time. `root` is the working folder (validated by the caller); null when the place is not
- * on this PC.
+ * Files changed under `place` in [since, until) — the server's instants — in a working folder (no shared company
+ * folder), by their modification time. This PC's clock stamped that time, so it is read on the server's clock through
+ * `offset` and a file counts whenever it may fall in the window (the measured range widens it: never missed for the
+ * request's travel time; one on the edge may be seen by two occurrences). `root` is the working folder (validated by
+ * the caller); null when the place is not on this PC or the clocks are not known to agree (`clockTrusted`).
  */
-export async function newFilesByTime(root: string, place: string, since: string, until: string): Promise<string[] | null> {
+export async function newFilesByTime(root: string, place: string, since: string, until: string, offset: ClockOffset | null): Promise<string[] | null> {
+  if (!clockTrusted(offset)) return null
   const found = await placeOnDisk(root, place)
   if (found === null) return null
   const start = found.real
-  const sinceMs = Date.parse(since)
-  const untilMs = Date.parse(until)
+  // On this PC's clock: a file stamped m was written at a server time within [m + min, m + max].
+  const sinceMs = Date.parse(since) - offset.max
+  const untilMs = Date.parse(until) - offset.min
   const out: string[] = []
   const walk = async (dir: string, rel: string, depth: number): Promise<void> => {
     if (out.length >= NEW_FILES_MAX || depth > 10) return
@@ -305,6 +351,8 @@ export async function newFilesByTime(root: string, place: string, since: string,
 }
 
 type Git = (cwd: string, args: string[]) => Promise<string>
+/** A file's time a little after "now" (the file system's rounding): still this PC's present, not its future. */
+const FUTURE_SLACK_MS = 2_000
 const COMMIT_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
 
 /** The place's repository (the company's, or a private folder's clone above it), found by its on-disk spelling. */
@@ -324,17 +372,19 @@ async function repoOf(root: string, place: string): Promise<{ repo: string; relI
 }
 
 /**
- * Before a `new_files` check in the shared folder is claimed: this PC has what the server has — fetched since the
- * window's end (`FETCH_HEAD`'s time) **and** the server's tip in `HEAD` (`merge-base --is-ancestor`: a fetch-only
- * path or a sync stopped on a conflict leaves it out) — and the commit it will look up to (`HEAD`). `not-synced`:
- * tried later, never `nothing` on a guess. null: the place is not on this PC (not downloaded, a link).
+ * Before a `new_files` check in the shared folder is claimed: this PC has what the server has — fetched after the
+ * server listed the occurrence (`FETCH_HEAD`'s time against `listedAt`: both stamped by this PC's clock, so a clock
+ * set ahead of or behind the server's moves both alike; a `FETCH_HEAD` from this PC's future means its clock was set
+ * back since, and is not trusted) **and** the server's tip in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or
+ * a sync stopped on a conflict leaves it out) — and the commit it will look up to (`HEAD`). `not-synced`: tried
+ * later, never `nothing` on a guess. null: the place is not on this PC (not downloaded, a link).
  */
-export async function gitCheckPoint(git: Git, root: string, place: string, until: string): Promise<{ commit: string } | null | 'not-synced'> {
+export async function gitCheckPoint(git: Git, root: string, place: string, listedAt: number, nowMs: number = Date.now()): Promise<{ commit: string } | null | 'not-synced'> {
   const r = await repoOf(root, place)
   if (!r) return null
   const fetchHead = await git(r.repo, ['rev-parse', '--git-path', 'FETCH_HEAD']).then(p => p.trim()).catch(() => null)
   const fetched = fetchHead ? await stat(path.resolve(r.repo, fetchHead)).catch(() => null) : null
-  if (!fetched || fetched.mtimeMs < Date.parse(until)) return 'not-synced'
+  if (!fetched || !Number.isFinite(listedAt) || fetched.mtimeMs < listedAt || fetched.mtimeMs > nowMs + FUTURE_SLACK_MS) return 'not-synced'
   const tip = await git(r.repo, ['rev-parse', '--verify', '-q', '@{upstream}']).then(t => t.trim()).catch(() => null)
     ?? await git(r.repo, ['rev-parse', '--verify', '-q', 'FETCH_HEAD']).then(t => t.trim()).catch(() => null)
   if (!tip) return 'not-synced'

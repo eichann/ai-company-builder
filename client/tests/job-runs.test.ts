@@ -37,7 +37,7 @@ const turn = (over: Record<string, unknown> = {}) => ({
   checkSince: '2026-11-10T00:00:00.000Z', procedure: { source: 'company_skill', skill: 'interview-report', fingerprint: 'b'.repeat(40) }, grant: GRANT, ...over,
 })
 
-function fakeServer(opts: { claim?: number; claimCode?: string; renew?: number; finish?: number; createdAt?: string; serverNow?: string; autoRun?: boolean; turnOver?: Record<string, unknown> } = {}) {
+function fakeServer(opts: { claim?: number; claimCode?: string; renew?: number; finish?: number; createdAt?: string; serverNow?: string; serverAheadMs?: number; noServerTime?: boolean; claimAnswerDelayMs?: number; autoRun?: boolean; turnOver?: Record<string, unknown> } = {}) {
   const calls: Array<{ method: string; path: string; body: Record<string, unknown> }> = []
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -51,8 +51,10 @@ function fakeServer(opts: { claim?: number; claimCode?: string; renew?: number; 
     if (p === '/me/work-switches') return json(404, { code: 'NOT_FOUND' })
     if (p === '/job-run-claims') {
       if (opts.claim && opts.claim !== 201) return json(opts.claim, { code: opts.claimCode ?? 'RUN_CLAIMED' })
-      const serverNow = opts.serverNow ?? new Date().toISOString()
-      return json(201, { data: { run: { id: 'run-j1', generation: 1, createdAt: opts.createdAt ?? serverNow, updatedAt: serverNow }, turn: turn({ state: 'running', ...opts.turnOver }) } })
+      const serverNow = opts.serverNow ?? new Date(Date.now() + (opts.serverAheadMs ?? 0)).toISOString()
+      if (opts.claimAnswerDelayMs) await new Promise(resolve => setTimeout(resolve, opts.claimAnswerDelayMs))
+      const stamps = opts.noServerTime ? {} : { createdAt: opts.createdAt ?? serverNow, updatedAt: serverNow }
+      return json(201, { data: { run: { id: 'run-j1', generation: 1, ...stamps }, turn: turn({ state: 'running', ...opts.turnOver }) } })
     }
     if (p === '/ai-runs/run-j1/renew') return json(opts.renew ?? 200, {})
     if (p === '/ai-runs/run-j1/finish') return json(opts.finish ?? 200, opts.finish ? { code: 'RUN_SUPERSEDED' } : { data: {} })
@@ -395,36 +397,39 @@ test('new files in the shared folder: by what is reachable, never by commit date
     run(tmp, ['clone', '-q', '-b', 'main', server, root])
     run(root, ['pull', '-q'])
     const longAgo = '2026-01-01T00:00:00.000Z'
-    const first = await gitCheckPoint(git, root, '人事部/面談', longAgo)
+    const listedLongAgo = Date.parse(longAgo)
+    const first = await gitCheckPoint(git, root, '人事部/面談', listedLongAgo)
     assert.ok(first && first !== 'not-synced')
     // Made offline long ago, reaching the server only now: still new after the previous occurrence's commit.
     commit('人事部/面談/late.txt', '2026-01-02T00:00:00Z')
     commit('営業部/other.txt')
     // Fetched but not in HEAD (a fetch-only path, a sync stopped on a conflict): not yet, never `nothing`.
     run(root, ['fetch', '-q'])
-    assert.equal(await gitCheckPoint(git, root, '人事部/面談', longAgo), 'not-synced')
+    assert.equal(await gitCheckPoint(git, root, '人事部/面談', listedLongAgo), 'not-synced')
     run(root, ['merge', '-q', '--ff-only', '@{upstream}'])
-    const second = await gitCheckPoint(git, root, '人事部/面談', longAgo)
+    const second = await gitCheckPoint(git, root, '人事部/面談', listedLongAgo)
     assert.ok(second && second !== 'not-synced')
     assert.deepEqual(await newFilesByGit(git, root, '人事部/面談', { since: '2026-06-01T00:00:00.000Z', sinceCommit: first.commit, upto: second.commit }), ['人事部/面談/late.txt'])
     // Nothing added between the same commits; a commit this PC does not have is "not yet".
     assert.deepEqual(await newFilesByGit(git, root, '人事部/面談', { since: longAgo, sinceCommit: second.commit, upto: second.commit }), [])
     assert.equal(await newFilesByGit(git, root, '人事部/面談', { since: longAgo, sinceCommit: null, upto: 'f'.repeat(40) }), 'not-synced')
-    // Not fetched since the window's end: not yet.
-    assert.equal(await gitCheckPoint(git, root, '人事部/面談', new Date(Date.now() + 3_600_000).toISOString()), 'not-synced')
-    assert.equal(await gitCheckPoint(git, root, '人事部/ない', longAgo), null)
-    assert.equal(await gitCheckPoint(git, root, '../x', longAgo), null)
+    // Not fetched since the server listed the occurrence (both on this PC's clock): not yet.
+    assert.equal(await gitCheckPoint(git, root, '人事部/面談', Date.now() + 3_600_000), 'not-synced')
+    // A fetch stamped in this PC's future (its clock set back since): not trusted as fresh, never `nothing` on it.
+    assert.equal(await gitCheckPoint(git, root, '人事部/面談', listedLongAgo, Date.now() - 3_600_000), 'not-synced')
+    assert.equal(await gitCheckPoint(git, root, '人事部/ない', listedLongAgo), null)
+    assert.equal(await gitCheckPoint(git, root, '../x', listedLongAgo), null)
     // A link at the place itself, or above it (committed by someone), is never followed, nor its repository used.
     const outside = path.join(tmp, 'outside')
     mkdirSync(path.join(outside, '他社'), { recursive: true })
     writeFileSync(path.join(outside, '他社', '秘密.txt'), 'x')
     run(outside, ['init', '-q'])
     symlinkSync(path.join(outside, '他社'), path.join(root, '営業部', '受付'))
-    assert.equal(await gitCheckPoint(git, root, '営業部/受付', longAgo), null)
+    assert.equal(await gitCheckPoint(git, root, '営業部/受付', listedLongAgo), null)
     assert.equal(await newFilesByGit(git, root, '営業部/受付', { since: longAgo, sinceCommit: null, upto: second.commit }), null)
-    assert.equal(await newFilesByTime(root, '営業部/受付', longAgo, new Date().toISOString()), null)
+    assert.equal(await newFilesByTime(root, '営業部/受付', longAgo, new Date().toISOString(), { min: 0, max: 0 }), null)
     symlinkSync(outside, path.join(root, 'リンク'))
-    assert.equal(await newFilesByTime(root, 'リンク/他社', longAgo, new Date().toISOString()), null)
+    assert.equal(await newFilesByTime(root, 'リンク/他社', longAgo, new Date().toISOString(), { min: 0, max: 0 }), null)
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }
@@ -441,9 +446,39 @@ test('new files in a working folder (no git): by their time, within the window',
     const old = new Date('2026-01-01T00:00:00Z')
     utimesSync(path.join(work, '人事部', '面談', 'a.txt'), old, old)
     const until = new Date(Date.now() + 60_000).toISOString()
-    assert.deepEqual(await newFilesByTime(work, '人事部/面談', since, until), ['人事部/面談/b.txt'])
-    assert.deepEqual(await newFilesByTime(work, '人事部/面談', since, '2026-06-02T00:00:00.000Z'), [])
-    assert.equal(await newFilesByTime(work, '人事部/ない', since, until), null)
+    const same = { min: 0, max: 0 }
+    assert.deepEqual(await newFilesByTime(work, '人事部/面談', since, until, same), ['人事部/面談/b.txt'])
+    assert.deepEqual(await newFilesByTime(work, '人事部/面談', since, '2026-06-02T00:00:00.000Z', same), [])
+    assert.equal(await newFilesByTime(work, '人事部/ない', since, until, same), null)
+  } finally {
+    rmSync(work, { recursive: true, force: true })
+  }
+})
+
+test('new files in a working folder are read on the server\'s clock: a PC clock off by minutes misses nothing, and an unknown or far-off one checks nothing', async () => {
+  const work = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'acb-job-clock-')))
+  try {
+    mkdirSync(path.join(work, '人事部', '面談'), { recursive: true })
+    const file = path.join(work, '人事部', '面談', '佐藤.txt')
+    writeFileSync(file, 'a')
+    // This PC's clock is 4 minutes behind the server's: the file was written at 10:02 on the server, stamped 09:58 here.
+    const stamped = new Date('2026-11-11T09:58:00.000Z')
+    utimesSync(file, stamped, stamped)
+    const behind = { min: 4 * 60_000 - 300, max: 4 * 60_000 }
+    // The occurrence's window on the server [10:00, 11:00): the file is in it (by the PC's own time it would not be).
+    assert.deepEqual(await newFilesByTime(work, '人事部/面談', '2026-11-11T10:00:00.000Z', '2026-11-11T11:00:00.000Z', behind), ['人事部/面談/佐藤.txt'])
+    assert.deepEqual(await newFilesByTime(work, '人事部/面談', '2026-11-11T10:00:00.000Z', '2026-11-11T11:00:00.000Z', { min: 0, max: 0 }), [])
+    // …and it is not counted again in the window before it [09:00, 10:00).
+    assert.deepEqual(await newFilesByTime(work, '人事部/面談', '2026-11-11T09:00:00.000Z', '2026-11-11T10:00:00.000Z', behind), [])
+    // The clock 4 minutes ahead: a file stamped 10:01 here was written at 09:57 on the server — the earlier window's.
+    const ahead = { min: -4 * 60_000, max: -4 * 60_000 + 300 }
+    const later = new Date('2026-11-11T10:01:00.000Z')
+    utimesSync(file, later, later)
+    assert.deepEqual(await newFilesByTime(work, '人事部/面談', '2026-11-11T09:00:00.000Z', '2026-11-11T10:00:00.000Z', ahead), ['人事部/面談/佐藤.txt'])
+    // The difference unknown, further off than JOB_CLOCK_TOLERANCE_MS, or too uncertain: no answer at all (never `[]`).
+    for (const offset of [null, { min: 6 * 60_000, max: 6 * 60_000 }, { min: -6 * 60_000, max: -6 * 60_000 }, { min: 0, max: 6 * 60_000 }, { min: Number.NaN, max: 0 }]) {
+      assert.equal(await newFilesByTime(work, '人事部/面談', '2026-11-11T09:00:00.000Z', '2026-11-11T11:00:00.000Z', offset), null, JSON.stringify(offset))
+    }
   } finally {
     rmSync(work, { recursive: true, force: true })
   }
@@ -527,4 +562,56 @@ test('the chat server never runs a job\'s turn without its run: the token is ask
   } finally {
     server.server.close()
   }
+})
+
+test('the shared folder\'s "synced?" is judged against when the server listed the occurrence (this PC\'s clock both sides), never the window\'s end on the server\'s clock', async () => {
+  const server = fakeServer()
+  const asked: number[] = []
+  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async (_root: string | null, _place: string, listedAt: number) => { asked.push(listedAt); return 'not-synced' as const }, newFiles: async () => [], stopTurn: () => {} } })
+  const before = Date.now()
+  await claims.jobTurns(COMPANY)
+  const after = Date.now()
+  await new Promise(resolve => setTimeout(resolve, 30))
+  // Listed again later: the first arrival is what counts (the window had ended on the server by then).
+  await claims.jobTurns(COMPANY)
+  assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'unavailable', retryAfterMs: 30_000 })
+  assert.equal(asked.length, 1)
+  assert.ok(asked[0] >= before && asked[0] <= after, `${asked[0]} in [${before}, ${after}]`)
+})
+
+test('a working folder\'s check runs only on a clock known to agree with the server\'s: unknown or far off → given back, never `nothing`', async () => {
+  const working = (offsets: unknown[]) => ({
+    readShelfSkill: async () => null, checkPoint: async () => ({ commit: null }),
+    newFiles: async (_r: string | null, _p: string, w: { offset: unknown }) => { offsets.push(w.offset); return [] }, stopTurn: () => {},
+  })
+  for (const opts of [{ serverAheadMs: 10 * 60_000 }, { serverAheadMs: -10 * 60_000 }, { noServerTime: true }]) {
+    const server = fakeServer(opts)
+    const offsets: unknown[] = []
+    const { claims } = claimsFor(server, { jobs: working(offsets) })
+    await claims.jobTurns(COMPANY)
+    assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'unavailable' })
+    assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'failed', failure: { class: 'temporary', code: 'CLOCK_NOT_TRUSTED' } }], JSON.stringify(opts))
+    assert.deepEqual(offsets, [], 'no check is made on that clock')
+  }
+  // Two minutes apart: the check runs with the measured difference (and nothing found is `nothing`, as usual).
+  const server = fakeServer({ serverAheadMs: 2 * 60_000 })
+  const offsets: Array<{ min: number; max: number }> = []
+  const { claims } = claimsFor(server, { jobs: working(offsets) })
+  await claims.jobTurns(COMPANY)
+  assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00002'), { claimed: false, reason: 'taken' })
+  assert.equal(offsets.length, 1)
+  assert.ok(offsets[0].min <= 2 * 60_000 + 50 && offsets[0].max >= 2 * 60_000 - 50 && offsets[0].max - offsets[0].min < 5_000, JSON.stringify(offsets[0]))
+  assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'done', jobResult: 'nothing' }])
+})
+
+test('the time limit\'s clock difference never counts the answer\'s travel as the server being behind (the AI stops on time)', async () => {
+  // The run started 29 minutes less 1.6 s before the server stamped the claim (30 approved, stopped 1 min before):
+  // 1.6 s were left then. The answer takes 1 s to arrive — that second is gone too, never added back.
+  const server = fakeServer({ createdAt: new Date(Date.now() - 29 * 60_000 + 1_600).toISOString(), claimAnswerDelayMs: 1_000 })
+  const { claims, stopped } = claimsFor(server)
+  await claims.jobTurns(COMPANY)
+  assert.ok((await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')).claimed)
+  await new Promise(resolve => setTimeout(resolve, 1_100))
+  assert.deepEqual(stopped, ['conv-job-00001'])
+  await claims.settle(COMPANY, OCC)
 })
