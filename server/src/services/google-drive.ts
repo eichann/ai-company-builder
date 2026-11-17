@@ -69,6 +69,12 @@ export interface GoogleDriveDeps {
   memberOf(companyId: string, userId: string): Member | null
   /** Which company a pick ticket (by its sha256) belongs to: the control plane's lookup. */
   pickTickets: PickTicketDirectory
+  /**
+   * The execution run's fence at the write (services/ai-runs.ts `writeFence`): asked for the AI's put inside a run
+   * right before each outside write leaves (`beforeSend`), so a stop or a re-claim during the folder / sharing
+   * lookups sends nothing. Absent → not asked.
+   */
+  runFence?: (member: Member, run: { id: string; generation: number }) => Refusal | null
 }
 
 /**
@@ -97,6 +103,8 @@ export interface DriveActor {
   kind: 'ai' | 'person'
   conversationId: string | null
   runId: string | null
+  /** The run's generation the AI's token is bound to (from the token): with it the run is fenced before the upload. */
+  runGeneration?: number | null
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -1421,14 +1429,27 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         return refusedBefore
       }
 
+      // The run's fence (records.md "Execution runs"): the token was checked before the lookups above were awaited; it
+      // is checked again by the Google client right before each write below leaves, after its own awaits (the token).
+      const fence: { refused: Refusal | null } = { refused: null }
+      const runStillHolds = () => {
+        if (actor.kind !== 'ai' || !actor.runId || typeof actor.runGeneration !== 'number' || !deps.runFence) return true
+        fence.refused = deps.runFence(member, { id: actor.runId, generation: actor.runGeneration })
+        return fence.refused === null
+      }
+
       // The revision a record may point to stays in Drive: a file's head revision is kept forever before it is replaced
       // (Drive drops old revisions of binary files after 30 days / 100 revisions). A Google document's revisions cannot
       // be kept that way (Drive keeps them itself); a document a decision rests on is never overwritten (above).
       if (target && target.revisionId && !target.revisionId.startsWith('version:')) {
         const kept = await drive(member.companyId, member.userId, {
           method: 'PATCH', path: `/drive/v3/files/${targetId}/revisions/${encodeURIComponent(target.revisionId)}`,
-          query: { fields: 'id,keepForever' }, body: { keepForever: true }, operation: 'drive.revisions.keep',
+          query: { fields: 'id,keepForever' }, body: { keepForever: true }, operation: 'drive.revisions.keep', beforeSend: runStillHolds,
         })
+        if (fence.refused) {
+          h.googleDrive.dropPut(id)
+          return fence.refused
+        }
         if (!kept.ok || !(isObj(kept.json) && kept.json.keepForever === true)) {
           h.googleDrive.dropPut(id)
           return refuse('conflict', '今の版を Google Drive に残せなかったため、上書きしませんでした。新しいファイルとして置いてください。', { code: 'DRIVE_REVISION_NOT_KEPT' })
@@ -1440,14 +1461,19 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         ? await drive(member.companyId, member.userId, {
           method: 'PATCH', path: `/upload/drive/v3/files/${targetId}`,
           query: { uploadType: 'multipart', supportsAllDrives: 'true', fields },
-          rawBody: multipart(id, { appProperties: { acbPutId: id } }, form.uploadMime, bytes), operation: 'drive.files.update',
+          rawBody: multipart(id, { appProperties: { acbPutId: id } }, form.uploadMime, bytes), operation: 'drive.files.update', beforeSend: runStillHolds,
         })
         : await drive(member.companyId, member.userId, {
           method: 'POST', path: '/upload/drive/v3/files',
           query: { uploadType: 'multipart', supportsAllDrives: 'true', fields },
           rawBody: multipart(id, { name: named.name, parents: [row.folderId], mimeType: form.driveMime, appProperties: { acbPutId: id } }, form.uploadMime, bytes),
-          operation: 'drive.files.create',
+          operation: 'drive.files.create', beforeSend: runStillHolds,
         })
+      if (fence.refused) {
+        // Nothing left ACB: the receipt goes, the key is free (a 4xx; keyed never marks it unknown).
+        h.googleDrive.dropPut(id)
+        return fence.refused
+      }
       const answeredAtMs = performance.now()
       if (r.ok) {
         const j = isObj(r.json) ? r.json : {}

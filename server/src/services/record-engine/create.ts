@@ -16,7 +16,7 @@ import { DEFAULT_TASK_SETTINGS, replyTarget } from '../../../shared/core/task-se
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
-import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, fileLinksUnavailable, FOLDER_NOT_PLACEABLE, featureOffRefusal, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, fileLinksUnavailable, FOLDER_NOT_PLACEABLE, featureOffRefusal, LINK_TARGET_NOT_FOUND, runFenceRefusal, TYPE_CREATED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { checkValue, provenance } from './values'
 import { MEETING_OUTPUT_KEY_MAX } from '../../../shared/core/meeting-outputs'
@@ -391,7 +391,10 @@ export function creating(ctx: EngineContext) {
         actorSource: actor.source ?? null, at, note: '', changes, attachments: [], decision: null, isDecision: false,
         typeVersion: def.version, reversesVersion: null, ...provenance(actor),
       }
-      transactions.run(() => {
+      const fenced = transactions.run(() => {
+        // The run's fence again, in the write's transaction (the route awaited the place check since the token's).
+        const refusal = runFenceRefusal(deps, member, actor)
+        if (refusal) return refusal
         records.upsert({
           id, type: def.name, typeVersion: def.version, scopeId: null, path: null, folder, personalOwner, members,
           title: b.title as string, summary: typeof b.summary === 'string' ? b.summary : '', createdAt: at, updatedAt: at, removedAt: null,
@@ -401,7 +404,9 @@ export function creating(ctx: EngineContext) {
         records.replaceLinks(id, links)
         if (!records.writeState({ recordId: id, state: initial, fields: JSON.stringify(fields), version: 1, updatedAt: at }, 0)) throw new Error('record id taken')
         records.appendLedger(entry)
+        return null
       })
+      if (fenced) return fenced
       // While it is the AI's turn nobody is told: the person hears when the AI hands it over. A proposal (案) tells nobody either.
       if (initial === null || !noTurnStates(def).has(initial)) tell(member, [fields.next_actor, fields.assignee], { type: def.name, entry, fields })
       else changed(member.companyId, id)

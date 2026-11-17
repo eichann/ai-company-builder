@@ -2,7 +2,9 @@
 import { SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
 import { NO_COMPANY_FOLDER_FILE_LINK } from '../../../shared/core/company-folder'
 import { FEATURE_OFF } from '../../../shared/core/features'
-import { refuse } from '../outcome'
+import { refuse, type Refusal } from '../outcome'
+import type { Member } from '../access'
+import type { ActorInput, RecordEngineDeps } from './types'
 
 export const conflict = (error: string, code: string, extra: Record<string, unknown> = {}) => refuse('conflict', error, { code, ...extra })
 
@@ -71,4 +73,13 @@ export function fileLinksUnavailable(hasCompanyFolder: ((companyId: string) => b
  */
 export function featureOffRefusal(featureOff: ((companyId: string, type: string) => boolean) | undefined, companyId: string, type: string) {
   return featureOff && featureOff(companyId, type) ? conflict(FEATURE_OFF.error, FEATURE_OFF.code) : null
+}
+
+/**
+ * The execution run's fence at the write (records.md "Execution runs"): only for the AI acting with a token bound to
+ * a run. Called inside the write's transaction, after every await of the operation.
+ */
+export function runFenceRefusal(deps: Pick<RecordEngineDeps, 'runFence'>, member: Member, actor: ActorInput): Refusal | null {
+  if (actor.kind !== 'ai' || !actor.runId || typeof actor.runGeneration !== 'number' || !deps.runFence) return null
+  return deps.runFence(member, { id: actor.runId, generation: actor.runGeneration })
 }

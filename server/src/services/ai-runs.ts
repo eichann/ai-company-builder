@@ -197,10 +197,18 @@ export function createAiRunService(deps: AiRunDeps) {
     return r.update(after, { generation: before.generation, state: before.state })
   }
 
-  /** Fencing: a run-bound token's calls go through only while its generation is the run's and the run is claimed. */
+  /** The claim is still held: running, at this generation, and its lease not run out (server time). */
+  const held = (run: AiRunRow, generation: number, nowMs: number) =>
+    run.state === 'running' && run.generation === generation && run.claimExpiresAt !== null && Date.parse(run.claimExpiresAt) > nowMs
+
+  /**
+   * Fencing: a run-bound token's calls go through only while its generation is the run's, the run is claimed and its
+   * lease has not run out — an expired step is not refused merely because nobody re-claimed it yet: another step of
+   * the same record may already hold a live claim (`liveOtherStep` ignores expired ones).
+   */
   function fence(companyId: string, userId: string, runId: string, generation: number): boolean {
     const run = repo(companyId).byId(runId)
-    return run !== null && run.userId === userId && run.state === 'running' && run.generation === generation
+    return run !== null && run.userId === userId && held(run, generation, clock.nowMs())
   }
 
   /** What a person's 「もう一度」 leaves: claimable, the failure forgotten; the run's operations (idempotency keys) stay. */
@@ -382,7 +390,9 @@ export function createAiRunService(deps: AiRunDeps) {
       const generation = generationOf(body)
       if (generation === null) return refuse('bad-request', 'generation is a whole number ≥ 1')
       const { r, run } = own
-      if (run.state !== 'running' || run.generation !== generation) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
+      // A lease that ran out is not extended: meanwhile another step of the record may have claimed it (the app
+      // stops this run on the 409; claiming again raises the generation).
+      if (!held(run, generation, clock.nowMs())) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
       // Not refused while stopped: the run's token is (`runStopped`). A lease left to run out would let another
       // PC or step claim the record the moment the stop is released, while this PC still holds the run.
       const at = clock.nowMs()
@@ -535,13 +545,28 @@ export function createAiRunService(deps: AiRunDeps) {
       // A record token works on records: a record's run binds one, and of the other kinds only a run whose
       // every call the subject scopes (a PC job's, B PR 5a: `routeRefusal`); another is a missing run here.
       if (own.run.subject.kind !== 'record' && !subjects.bindsTokens?.(liveRun(own.run))) return refuse('not-found', RUN_NOT_FOUND.error, { code: RUN_NOT_FOUND.code })
-      if (own.run.state !== 'running' || own.run.generation !== generation || own.run.conversationId !== conversationId) {
+      if (!held(own.run, generation, clock.nowMs()) || own.run.conversationId !== conversationId) {
         return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
       }
       return ok({ runId: own.run.id, generation })
     },
 
     fence,
+
+    /**
+     * The fence again at the moment of a write (records.md "Execution runs": "Fenced at the write"): called in the
+     * same synchronous stretch as the write — inside its transaction, or right before an outside call leaves, after
+     * every await — so a stop, a re-claim or a lease that ran out while the request awaited stops the write. The
+     * token check (`authenticate`) ran before those awaits. 409 `RUN_SUPERSEDED` (the run moved on) or 403
+     * `AI_STOPPED` (the whole AI stopped for the member, the company's stop included): both 4xx, so a keyed
+     * operation is freed (nothing happened), never left `unknown`.
+     */
+    writeFence(member: Member, run: { id: string; generation: number }): Refusal | null {
+      const row = repo(member.companyId).byId(run.id)
+      if (!row || row.userId !== member.userId || !held(row, run.generation, clock.nowMs())) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
+      if (deps.aiStops(member).all) return refuse('forbidden', AI_RUN_STOPPED.error, { code: AI_RUN_STOPPED.code })
+      return null
+    },
 
     /**
      * The whole AI is stopped for this member (the company's or theirs): a run-bound token reaches nothing
@@ -591,6 +616,10 @@ export function createAiRunService(deps: AiRunDeps) {
       const fingerprint = deps.tokenDigest.digest(requestText(request.method, request.path, request.body))
       const r = repo(caller.companyId)
       const at = clock.now()
+      // While another operation of this run has an unknown result, no new side effect starts (a replay of a done key
+      // still answers): the AI redoing the same work with a slightly different request is a new key, and a second
+      // send of what may already have happened must wait for a person's reconciliation (records.md "Execution runs").
+      const otherUnknown = () => r.operations(caller.runId).some(o => o.state === 'unknown' && o.key !== key)
       const started = transactions.run((): KeyedAnswer | null => {
         if (!fence(caller.companyId, caller.userId, caller.runId, caller.generation)) return refusal(409, RUN_SUPERSEDED.error, RUN_SUPERSEDED.code)
         const existing = r.operation(caller.runId, key)
@@ -602,10 +631,12 @@ export function createAiRunService(deps: AiRunDeps) {
           }
           if (existing.state === 'in_progress') return refusal(409, 'この操作はまだ答えを待っています', 'OPERATION_IN_PROGRESS')
           if (existing.state === 'unknown') return refusal(409, RUN_NEEDS_RECONCILE.error, 'OPERATION_RESULT_UNKNOWN')
+          if (otherUnknown()) return refusal(409, RUN_NEEDS_RECONCILE.error, RUN_NEEDS_RECONCILE.code)
           // not_done (a person said it did not happen): it may run again.
           r.updateOperation(caller.runId, key, ['not_done'], { state: 'in_progress', generation: caller.generation, reconciledBy: null }, at)
           return null
         }
+        if (otherUnknown()) return refusal(409, RUN_NEEDS_RECONCILE.error, RUN_NEEDS_RECONCILE.code)
         const inserted = r.insertOperation({
           runId: caller.runId, key, fingerprint, kind, state: 'in_progress', generation: caller.generation, refKind: null, refId: null,
           status: null, reconciledBy: null, createdAt: at, updatedAt: at,

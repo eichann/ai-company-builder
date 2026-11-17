@@ -12,7 +12,10 @@
  *   reused for another request;
  * - an outside result that is unknown (a lost answer, or still in flight when
  *   the claim was taken over) blocks resuming until a person reconciles it,
- *   and the key is not run again;
+ *   and the key is not run again; while one is, no other key of the run starts;
+ * - the fence is asked again at the write (a lease run out, another generation, a stop pressed
+ *   while the request awaited): nothing written, the key freed; an expired step cannot write
+ *   beside another step's live claim, and its renew is refused;
  * - each failure class goes to its own place; none goes back to 「AI の番」
  *   without a person (temporary: only after its wait);
  * - the ledger says who caused a change: a person, their AI in a
@@ -305,6 +308,112 @@ describe('「結果が分からない」 blocks resuming until reconciled', () =
     expect((await claim('u-bob', id, 'device-aaaa')).status).toBe(200)
     await services.aiRuns.keyed({ ...caller, generation: 2 }, 'k1', { method: 'POST', path: '/x', body: {} }, 'plugin-operation', async () => { sends++; return { status: 200, body: {} } })
     expect(sends).toBe(2)
+  })
+})
+
+describe('the fence again at the write (records.md "Execution runs": "Fenced at the write")', () => {
+  const bob = { companyId: CO, userId: 'u-bob', role: 'member' as const }
+  const owner = { companyId: CO, userId: 'u-owner', role: 'owner' as const }
+  const aiOf = (run: { id: string }, generation = 1) => ({ kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-x', runId: run.id, runGeneration: generation })
+  const opRows = (runId: string) => db.prepare('SELECT key, state FROM ai_run_operations WHERE company_id = ? AND run_id = ?').all(CO, runId) as Array<{ key: string; state: string }>
+
+  it('a create whose place check was awaited while the lease ran out or the AI was stopped writes nothing, and its key is free (not unknown)', async () => {
+    const id = await preparingTask('待っている間に期限切れ')
+    const a = (await claim('u-bob', id, 'device-aaaa')).body.data.run
+    const token = await runToken('u-bob', a)
+    const real = services.recordEngine.checkPlace.bind(services.recordEngine)
+    /** While the route awaits the place check (after the token was checked), `meanwhile` happens. */
+    const during = async (meanwhile: () => void, title: string, key: string) => {
+      const spy = vi.spyOn(services.recordEngine, 'checkPlace').mockImplementation(async (member, body, byAi) => { meanwhile(); return real(member, body, byAi) })
+      try { return await ai(token, 'POST', '/item', { type: 'task', title, fields: { assignee: 'u-bob' } }, key) } finally { spy.mockRestore() }
+    }
+    const count = (title: string) => (db.prepare('SELECT COUNT(*) AS n FROM records WHERE company_id = ? AND title = ?').get(CO, title) as { n: number }).n
+
+    let release = () => {}
+    const stopped = await during(() => {
+      const s = services.agentStops.stop(owner, { userId: 'u-bob' })
+      release = () => { for (const x of s.ok ? s.value.active : []) services.agentStops.release(owner, x.id) }
+    }, '止められた後に作る', 'create-after-stop')
+    release()
+    expect(stopped).toMatchObject({ status: 403, body: { code: 'AI_STOPPED' } })
+    expect(count('止められた後に作る')).toBe(0)
+
+    const expired = await during(() => later(6 * MINUTE), '期限切れの後に作る', 'create-after-expiry')
+    expect(expired).toMatchObject({ status: 409, body: { code: 'RUN_SUPERSEDED' } })
+    expect(count('期限切れの後に作る')).toBe(0)
+    // Both refusals are 4xx: the keys are free, nothing waits for a person.
+    expect(opRows(a.id)).toEqual([])
+  })
+
+  it('an action, a create or a file link of the AI in a run: refused at the write once the lease ran out or the run moved on, or while the AI is stopped; nothing in the ledger', async () => {
+    const id = await preparingTask('書く直前に確かめる')
+    const run = (await claim('u-bob', id, 'device-aaaa')).body.data.run
+    const tags = (actor: ReturnType<typeof aiOf>, version = 1) => services.recordEngine.act(bob, actor, id, 'set_tags', { expectedVersion: version, args: { tags: ['直前'] } })
+    const create = (actor: ReturnType<typeof aiOf>) => services.recordEngine.createByAi(bob, actor, { type: 'task', title: '直前に作る', fields: { assignee: 'u-bob' } })
+    const link = (actor: ReturnType<typeof aiOf>) => services.recordEngine.fileLink(bob, actor, id, 'link', { path: '直前/メモ.md', expectedVersion: 1 })
+    const before = await ledger(id)
+
+    // A generation that is not the run's (another PC claimed it).
+    expect(await tags(aiOf(run, 2))).toMatchObject({ ok: false, body: { code: 'RUN_SUPERSEDED' } })
+    expect(create(aiOf(run, 2))).toMatchObject({ ok: false, body: { code: 'RUN_SUPERSEDED' } })
+    expect(link(aiOf(run, 2))).toMatchObject({ ok: false, body: { code: 'RUN_SUPERSEDED' } })
+    // The member's whole AI stopped (the company's stop included): 403, so a keyed operation is freed, never unknown.
+    const stopped = services.agentStops.stop(owner, { userId: 'u-bob' })
+    try {
+      expect(await tags(aiOf(run))).toMatchObject({ ok: false, kind: 'forbidden', body: { code: 'AI_STOPPED' } })
+      expect(create(aiOf(run))).toMatchObject({ ok: false, kind: 'forbidden', body: { code: 'AI_STOPPED' } })
+      expect(link(aiOf(run))).toMatchObject({ ok: false, kind: 'forbidden', body: { code: 'AI_STOPPED' } })
+    } finally { for (const s of stopped.ok ? stopped.value.active : []) services.agentStops.release(owner, s.id) }
+    // The lease ran out, nobody re-claimed yet.
+    later(6 * MINUTE)
+    expect(await tags(aiOf(run))).toMatchObject({ ok: false, body: { code: 'RUN_SUPERSEDED' } })
+    expect(create(aiOf(run))).toMatchObject({ ok: false, body: { code: 'RUN_SUPERSEDED' } })
+    expect(link(aiOf(run))).toMatchObject({ ok: false, body: { code: 'RUN_SUPERSEDED' } })
+    expect(await ledger(id)).toEqual(before)
+    expect((db.prepare("SELECT COUNT(*) AS n FROM records WHERE company_id = ? AND title = '直前に作る'").get(CO) as { n: number }).n).toBe(0)
+
+    // Claimed again by this PC: the new generation writes; a consultation (no run) and a person are never fenced.
+    const again = (await claim('u-bob', id, 'device-aaaa')).body.data.run
+    expect(await tags(aiOf(again, again.generation))).toMatchObject({ ok: true })
+    expect(await services.recordEngine.act(bob, { kind: 'ai', source: 'claude-code', conversationId: 'c', runId: null }, id, 'set_tags', { expectedVersion: 2, args: { tags: ['相談'] } })).toMatchObject({ ok: true })
+  })
+
+  it('an expired step cannot write while another step of the same record holds a live claim (its token and its renew are refused too)', async () => {
+    const id = await preparingTask('期限切れの手順と新しい手順')
+    const a = (await claim('u-bob', id, 'device-aaaa')).body.data.run
+    const tokenA = await runToken('u-bob', a)
+    later(6 * MINUTE)
+    // Another step of the record claims (the expired one does not block it).
+    expect((await session('u-bob', 'POST', '/ai-run-claims', { recordId: id, step: 'task-other', deviceId: 'device-bbbb', conversationId: 'conv-other' })).status).toBe(201)
+    const before = await ledger(id)
+    expect(await ai(tokenA, 'POST', `/item/${id}/actions/set_tags`, { expectedVersion: 1, args: { tags: ['古い手順'] } })).toMatchObject({ status: 409, body: { code: 'RUN_SUPERSEDED' } })
+    expect(await ai(tokenA, 'GET', `/item/${id}`)).toMatchObject({ status: 409, body: { code: 'RUN_SUPERSEDED' } })
+    expect(await session('u-bob', 'POST', `/ai-runs/${a.id}/renew`, { generation: 1 })).toMatchObject({ status: 409, body: { code: 'RUN_SUPERSEDED' } })
+    // Nor can it get a fresh token bound to the run.
+    expect((await session('u-bob', 'POST', '/me/record-tokens', { conversationId: a.conversationId, agent: 'claude-code', scope: 'act', run: { id: a.id, generation: 1 } })).body.code).toBe('RUN_SUPERSEDED')
+    expect(await ledger(id)).toEqual(before)
+  })
+})
+
+describe('an operation of unknown result holds every new outside operation of its run', () => {
+  it('another key is refused (nothing sent) until a person reconciles; a done key still answers its replay', async () => {
+    const id = await preparingTask('結果が分からない間は次を送らない')
+    const run = (await claim('u-bob', id, 'device-aaaa')).body.data.run
+    const caller = { companyId: CO, userId: 'u-bob', runId: run.id, generation: 1 }
+    let sends = 0
+    const send = (key: string, status = 200) => services.aiRuns.keyed(caller, key, { method: 'POST', path: `/x/${key}`, body: {} }, 'plugin-operation', async () => { sends++; return { status, body: {} } })
+    expect((await send('done-1')).status).toBe(200)
+    expect((await send('lost-1', 502)).status).toBe(502)
+    expect(sends).toBe(2)
+    // A slightly different request is a new key: refused, nothing sent.
+    expect(await send('retry-differently')).toMatchObject({ status: 409, body: { code: 'RUN_NEEDS_RECONCILE' } })
+    expect(sends).toBe(2)
+    expect(await send('done-1')).toMatchObject({ status: 200, body: { data: { replayed: true } } })
+    expect(sends).toBe(2)
+    // A person looked: it did not happen. New operations go on.
+    expect((await session('u-bob', 'POST', `/ai-runs/${run.id}/operations/lost-1/reconcile`, { done: false })).status).toBe(200)
+    expect((await send('retry-differently')).status).toBe(200)
+    expect(sends).toBe(3)
   })
 })
 

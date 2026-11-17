@@ -20,7 +20,7 @@ import { BUNDLE_PLACED_TYPES, bundleLinkName, placeWithin, WIDER_THAN_BUNDLE } f
 import { linkAllowed, type RecordReader } from '../record-access'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
-import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict, fileLinksUnavailable, OK_BY_CANNOT_READ, featureOffRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict, fileLinksUnavailable, OK_BY_CANNOT_READ, featureOffRefusal, runFenceRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import { callVia, type ActorInput } from './types'
 import { checkValue, NOTE_MAX, OK_REQUIRED, parseMaterials, parseOkStatement, provenance, REF_RE } from './values'
 
@@ -450,11 +450,15 @@ export function acting(ctx: EngineContext) {
       const expected = b.expectedVersion as number
       if (expected !== current.version) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: current.version })
       const written = transactions.run(() => {
+        // The run's fence again, after the awaits above (attached files): a stop or a re-claim meanwhile writes nothing.
+        const fenced = runFenceRefusal(deps, member, actor)
+        if (fenced) return fenced
         if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(nextFields), version: entry.version, updatedAt: at }, expected)) return false
         if (nextLinks) records.replaceLinks(row.id, nextLinks)
         records.appendLedger(entry)
         return true
       })
+      if (written !== true && written !== false) return written
       if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
 
       // Duty 4: tell whom the action names (and whose turn it now is).

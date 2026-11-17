@@ -91,6 +91,12 @@ export interface GoogleRequest {
    * per relayed call with its conversation, refusals included), so this client adds none.
    */
   recordedByCaller?: boolean
+  /**
+   * The caller's last check, right before the call leaves (after every switch and the access token, nothing awaited
+   * in between): false → not sent (`call-not-allowed`). A Drive put inside an execution run fences the run here
+   * (google-drive.md), so a stop or a re-claim during the token's refresh still stops the upload.
+   */
+  beforeSend?: () => boolean
 }
 
 export type GoogleResult =
@@ -461,6 +467,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
         if ('stop' in token) return notSent(token.stop)
         if ('failure' in token) return { ok: false, kind: 'not-sent', reason: token.failure }
 
+        if (req.beforeSend && !req.beforeSend()) return notSent('call-not-allowed')
         const headers: Record<string, string> = { authorization: `Bearer ${token.token}`, accept: 'application/json', 'accept-encoding': 'identity' }
         if (body) { headers['content-type'] = contentType; headers['content-length'] = String(body.byteLength) }
         const sent = await deps.upstream.send({

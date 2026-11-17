@@ -1646,8 +1646,24 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
 - **Fencing**: `POST /me/record-tokens { …, run: { id, generation } }` binds the AI's token to
   the run (only the member's own run, claimed now at that generation for that consultation, else
   409 `RUN_SUPERSEDED`). `recordAiTokens.authenticate` refuses every call of a bound token once
-  the run's generation moved on or it is no longer running (409 `RUN_SUPERSEDED`): a PC whose
-  claim was taken over writes nothing. Renew / finish of an older generation: the same 409.
+  the run's generation moved on, it is no longer running **or its lease ran out** (409
+  `RUN_SUPERSEDED`; `fence`): a PC whose claim was taken over writes nothing, and neither does a
+  step whose lease expired while another step of the same record claimed it (`liveOtherStep`
+  ignores expired claims). Renew / finish of an older generation: the same 409; a renew after the
+  lease ran out too (the app stops the run on it; claiming again raises the generation). Binding
+  a token needs a live lease as well.
+- **Fenced at the write** (2026-11-18, adversarial review): the token check runs before the
+  request's awaits (the body, the place check, attached files, Drive's folder and sharing
+  lookups), so the fence is asked again **in the same synchronous stretch as the write**
+  (`aiRuns.writeFence`: running, the same generation, the lease not run out, the member's whole AI
+  not stopped — the company's stop included): inside the record engine's write transaction for
+  the AI's create, action and file link (`runFenceRefusal`, `record-engine/refusals.ts`;
+  `RecordEngineDeps.runFence`; the actor carries the token's `runGeneration`), and in the Google
+  client right before a Drive put's write leaves, after the access token (`GoogleRequest.beforeSend`,
+  `google-drive.md`). Refusals are 4xx — 409 `RUN_SUPERSEDED`, 403 `AI_STOPPED` — so the
+  operation's key is freed, never left `unknown`. What already left ACB cannot be called back.
+  Not yet fenced at the write (the token check only): the service writer's paths (decisions,
+  minutes' まとまり), mail drafts and a plugin operation's outside write.
 - **Idempotency key per outside operation**: with a run-bound token, the creates and outside
   operations of `/api/records-ai` (`POST /item`, `/decisions`, a plugin's write or create, `POST
   /outbound`, `PUT /outbound/:id`; a plugin read needs none) require an `Idempotency-Key` header
@@ -1665,7 +1681,11 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   finish — even `done` — goes there, 「もう一度」 is refused, and the key answers 409
   `OPERATION_RESULT_UNKNOWN`. A person reconciles (`…/reconcile { done }`, after looking in the
   outside system): done → the key answers as done from then on; not done → the key may run
-  again; with nothing unknown left the run is `open` again. A late answer settles it too. The run's own member
+  again; with nothing unknown left the run is `open` again. A late answer settles it too. While
+  one operation of a run is unknown, **every new keyed operation of that run** (another key: the
+  AI redoing the work with a slightly different request) is refused, nothing run (409
+  `RUN_NEEDS_RECONCILE`); a done key still answers its replay, and reads go on (owner's safe side,
+  2026-11-18: a second send of what may already have happened waits for a person). The run's own member
   reconciles; a scheduled job's occurrence run also an owner / admin, on the occurrence (`reconcileFor`, `jobs.md` "「もう一度」").
 - **Failures go to their own place** (`failureDestination`): temporary → `retry_later` (5, 10,
   20 … ≤ 60 min; after `AI_RUN_TEMPORARY_LIMIT` (3) in a row → `waiting_person`, code
@@ -1708,10 +1728,15 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   reads only the member's own open run of that step, to keep one `refused_stopped` event for it once per
   generation (`ai-turns.md` "Each state change of a run is kept"); while the whole AI is stopped
   for the member, every call of a run-bound token answers the same (`authenticate`, after the fence).
-  Renew, finish, retry and reconcile are never refused.
+  Renew (of a live lease), finish, retry and reconcile are never refused. A stop pressed while a
+  request awaited refuses its write there (403 `AI_STOPPED`, "Fenced at the write").
 - Test: `server/tests/integration/ai-runs.test.ts` (the emergency stop: company-wide, one member,
   the kinds, the run's token, renew — mutation-checked; two devices → one claim; the older
-  generation refused and nothing written after a re-claim; the same key → one effect, no key
+  generation refused and nothing written after a re-claim; "the fence again at the write" — a
+  create whose place check was awaited while the lease ran out or the AI was stopped, an action,
+  a create and a file link refused at the write, an expired step beside another step's live claim,
+  its renew and a new token refused; "an operation of unknown result holds every new outside
+  operation" (`google-drive.test.ts` "inside an execution run" for the put); the same key → one effect, no key
   refused, a key never reused; in flight at a re-claim / a lost answer → no resume and no second
   send until reconciled; each failure class's place; the ledger's cause; which procedure each run
   entry used, unchanged by a later re-claim, none on a person's or consultation's entry, a plugin
