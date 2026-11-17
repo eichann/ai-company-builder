@@ -100,7 +100,7 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
 
   return (
     <div ref={root} className="relative flex items-center gap-1">
-      <button
+      {!state.bellOnly && <button
         type="button"
         onClick={() => toggle('turn')}
         className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs text-amber-800 hover:bg-amber-500/25 dark:text-amber-300"
@@ -108,7 +108,7 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
         aria-expanded={open === 'turn'}
       >
         あなたの番 <b className="tabular-nums">{turnTotal}</b>
-      </button>
+      </button>}
       <button type="button" onClick={() => toggle('bell')} className={ICON_BUTTON} title="起きたこと（読むだけ）" aria-label={notices.unread > 0 ? `起きたこと（未読 ${notices.unread} 件）` : '起きたこと'} aria-expanded={open === 'bell'}>
         <Bell size={18} />
         {notices.unread > 0 && <span data-testid="notices-unread-dot" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />}

@@ -76,6 +76,16 @@ describe('AI の緊急停止', () => {
     expect(within(screen.getByRole('list', { name: 'いま止めているもの' })).getByText('田中 太郎さんのコマンドの実行')).toBeInTheDocument()
   })
 
+  it('the stop a restore made says so, not 「管理者」 (deployment.md "After a restore")', async () => {
+    stubApi(ownerCapabilities, {
+      [`GET ${base}/agent-stops`]: { body: ok({ ...empty, active: [stopOf({ stoppedBy: 'acb:restore', stoppedByName: null, reason: 'バックアップから戻したため' })] }) },
+    })
+    renderPage()
+    const list = await screen.findByRole('list', { name: 'いま止めているもの' })
+    expect(within(list).getByText(/バックアップから戻したとき（自動） が停止/)).toBeInTheDocument()
+    expect(within(list).queryByText(/管理者 が停止/)).toBeNull()
+  })
+
   it('the default is everyone and the whole AI', async () => {
     const calls = stubApi(ownerCapabilities, { [`POST ${base}/agent-stops`]: { body: ok({ ...empty, active: [stopOf({})] }) } })
     renderPage()

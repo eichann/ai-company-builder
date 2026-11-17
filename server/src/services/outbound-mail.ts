@@ -32,6 +32,7 @@
  *
  * Never logged: subjects, bodies, addresses (only ids and fixed words).
  */
+import { CLOCK_ACTOR } from '../../shared/core/core-types'
 import { CONTENT_HASH_RE } from '../../shared/core/fixed-content'
 import {
   ATTACHMENT_LIMITS, attachmentListProblems, looksLikePdf, sanitizeAttachmentName, SHA256_HEX_RE, type MailAttachment,
@@ -70,6 +71,15 @@ import { fieldsOf, mailThreadIdOf, threadPointerOf, type ThreadPointer } from '.
 export const MAIL_BODY_RETENTION_DAYS = 30
 const DAY_MS = 24 * 60 * 60 * 1000
 const CLEANUP_CHUNK = 500
+/**
+ * A send still `sending` this long after it started was cut off by a stopped process (a crash, a restart, a restore)
+ * between its send row and its result: the server clock makes it `unknown` so the person can say whether it left
+ * (outbound-mail.md "A send left half-done"). Far above any live send (each Google / Slack call waits ≤ 30 s for its
+ * answer's start); a late answer after it is never a resend and the person still decides.
+ */
+export const SEND_INTERRUPTED_AFTER_MS = 15 * 60_000
+/** The 経緯 note of a send the clock found cut off. */
+export const SEND_INTERRUPTED_NOTE = '送っている途中でサーバーが止まったため、届いたか分かりません'
 
 export const MAIL_NOT_FOUND = { error: 'メールの下書きが見つかりません', code: 'MAIL_NOT_FOUND' }
 export const MAIL_UNKNOWN_TEXT = '届いたか分かりません。Gmail の送信済みを確かめてください。'
@@ -640,7 +650,10 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
         ...(content.reply ? { inReplyTo: content.reply.inReplyTo, references: content.reply.references } : {}),
         ...(fileBytes.length > 0 ? { attachments: fileBytes } : {}),
       }))
-      const options = fileBytes.length > 0 ? { upload: true } : content.reply ? { threadId: content.reply.threadId } : undefined
+      // Right before it leaves (after any token refresh): still this send's `sending` row — not made `unknown` by the
+      // clock meanwhile (outbound-mail.md "A send left half-done"), so a cut-off send is never sent after all.
+      const stillSending = () => handle.outbound.lastSend(d.mail.messageId)?.id === sendId && handle.outbound.lastSend(d.mail.messageId)?.outcome === 'sending'
+      const options = fileBytes.length > 0 ? { upload: true, beforeSend: stillSending } : content.reply ? { threadId: content.reply.threadId, beforeSend: stillSending } : { beforeSend: stillSending }
       result = await deps.mail.send(member.companyId, member.userId, raw, options)
     } catch (err) {
       // Whether it left is not known (the build cannot fail for a stored version; a throw in the call can be after sending).
@@ -651,12 +664,12 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     const actor = { id: member.userId, kind: 'human' as const, source: null }
     if (result.ok) {
       const gmailId = isObj(result.json) && typeof result.json.id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(result.json.id) ? result.json.id : null
-      handle.outbound.finishSend(sendId, 'sent', null, gmailId, at)
+      if (!handle.outbound.finishSend(sendId, 'sent', null, gmailId, at)) return lateAnswer(member, d.mail, MAIL_UNKNOWN_TEXT)
       const threadId = isObj(result.json) && typeof result.json.threadId === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(result.json.threadId) ? result.json.threadId : null
       return finishSent(member, d.mail, d.recordVersion, at, gmailId, content.to.concat(content.cc), actor, sendId, { threadId, waitDay }, resendNote(gate.reason))
     }
     if (result.kind === 'not-sent' || result.kind === 'refused' || result.kind === 'rate-limited') {
-      handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.googleReason ?? result.reason, null, at)
+      if (!handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.googleReason ?? result.reason, null, at)) return lateAnswer(member, d.mail, MAIL_UNKNOWN_TEXT)
       if (result.kind === 'not-sent' && ['no-grant', 'grant-revoked', 'grant-stopped', 'scope-not-granted'].includes(result.reason)) {
         return refuse('conflict', 'メールを送るには、Google で「メールを送る許可」が要ります。', { code: 'GOOGLE_CONSENT_NEEDED', needsGoogleConsent: 'mail' })
       }
@@ -665,7 +678,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       return refuse('conflict', 'Gmail が受け付けませんでした。何も送っていません。', { code: 'SEND_REFUSED', ...(result.googleReason ? { googleReason: result.googleReason } : {}) })
     }
     // A lost answer or a 5xx: it may have been sent. Never re-sent; the person checks Gmail.
-    handle.outbound.finishSend(sendId, 'unknown', result.googleReason ?? result.reason, null, at)
+    if (!handle.outbound.finishSend(sendId, 'unknown', result.googleReason ?? result.reason, null, at)) return lateAnswer(member, d.mail, MAIL_UNKNOWN_TEXT)
     // The choice is kept: 「送られていた」 later starts the waiting as a confirmed send would.
     const moved = writer.transition(member.companyId, {
       recordId: d.mail.messageId, action: 'send_unknown', expectedVersion: d.recordVersion, to: 'unknown', actor, ...(waitDay ? { fields: { reply_wait_until: waitDay } } : {}),
@@ -760,11 +773,11 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     const at = deps.clock.now()
     const actor = { id: member.userId, kind: 'human' as const, source: null }
     if (result.ok) {
-      handle.outbound.finishSend(sendId, 'sent', null, result.ts, at)
+      if (!handle.outbound.finishSend(sendId, 'sent', null, result.ts, at)) return lateAnswer(member, d.mail, CHAT_UNKNOWN_TEXT)
       return finishChatSent(member, d.mail, d.recordVersion, at, result.ts, ref, actor, resendNote(gate.reason))
     }
     if (result.kind === 'not-sent' || result.kind === 'refused' || result.kind === 'rate-limited') {
-      handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.reason, null, at)
+      if (!handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.reason, null, at)) return lateAnswer(member, d.mail, CHAT_UNKNOWN_TEXT)
       if (result.kind === 'not-sent' && ['no-grant', 'grant-revoked', 'grant-stopped', 'scope-not-granted'].includes(result.reason)) {
         return refuse('conflict', SLACK_CONSENT, { code: 'SLACK_CONSENT_NEEDED', needsSlackConsent: 'reply' })
       }
@@ -773,11 +786,21 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       return refuse('conflict', 'Slack が受け付けませんでした。何も送っていません。', { code: 'SEND_REFUSED' })
     }
     // A lost answer or a 5xx: it may have been posted. Never re-sent; the person looks at the thread.
-    handle.outbound.finishSend(sendId, 'unknown', result.reason, null, at)
+    if (!handle.outbound.finishSend(sendId, 'unknown', result.reason, null, at)) return lateAnswer(member, d.mail, CHAT_UNKNOWN_TEXT)
     const moved = writer.transition(member.companyId, { recordId: d.mail.messageId, action: 'send_unknown', expectedVersion: d.recordVersion, to: 'unknown', actor, ...(gate.reason ? { note: resendNote(gate.reason)! } : {}) })
     if (!moved.ok) logError('outbound-mail', 'unknown state not recorded', undefined, { message: d.mail.messageId, reason: moved.reason })
     const view = viewOf(member.companyId, d.mail, d.mail.messageId)
     return view ? ok({ outcome: 'unknown', draft: view, message: CHAT_UNKNOWN_TEXT }) : notFound()
+  }
+
+  /**
+   * The answer came after the clock had made this send `unknown` (outbound-mail.md "A send left half-done"): nothing
+   * more is done — no state, no receipt, no waiting; the person decides with 送られていた／送られていなかった.
+   */
+  function lateAnswer(member: Member, mail: OutboundMailRow, message: string): Outcome<MailSendAnswer> {
+    logError('outbound-mail', 'answer came after the send was made unknown', undefined, { message: mail.messageId })
+    const view = viewOf(member.companyId, mail, mail.messageId)
+    return view ? ok({ outcome: 'unknown', draft: view, message }) : notFound()
   }
 
   function finishChatSent(member: Member, mail: OutboundMailRow, recordVersion: number, at: string, ts: string | null, ref: { channelId: string; threadTs: string }, actor: { id: string; kind: 'human'; source: null }, note: string | null = null): Outcome<MailSendAnswer> {
@@ -1283,6 +1306,36 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       handle.outbound.setFinished(d.mail.messageId, at)
       dropUnsentFiles(member.companyId, d.mail.messageId, at)
       return draftAnswer(member, d.mail)
+    },
+
+    /**
+     * The server clock (outbound-mail.md "A send left half-done"): each send of this company left `sending` for
+     * longer than `SEND_INTERRUPTED_AFTER_MS` → `unknown`, its record `draft` → `unknown` (action `send_unknown`,
+     * the clock as actor) — so the person's 「送られていた／送られていなかった」 (`resolve`) applies. Nothing is
+     * sent or re-sent. The record first, then the send row: a stop in between is finished by the next run.
+     * Returns the sends settled.
+     */
+    settleInterrupted(companyId: string): number {
+      const handle = companyData.forCompany(companyId)
+      if (!handle.records.settings().enabled) return 0
+      const cutoff = new Date(deps.clock.nowMs() - SEND_INTERRUPTED_AFTER_MS).toISOString()
+      let settled = 0
+      const waiting = new Map<string, number>()
+      for (const send of handle.outbound.sendingBefore(cutoff, CLEANUP_CHUNK)) {
+        const s = handle.records.states([send.messageId])[0]
+        if (s && s.state === 'draft') {
+          const moved = writer.transition(companyId, {
+            recordId: send.messageId, action: 'send_unknown', expectedVersion: s.version, to: 'unknown', actor: { ...CLOCK_ACTOR }, note: SEND_INTERRUPTED_NOTE,
+          })
+          // Someone changed it meanwhile, or the feature is off: the next run looks again (one log line per reason and pass).
+          if (!moved.ok) { waiting.set(moved.reason, (waiting.get(moved.reason) ?? 0) + 1); continue }
+        }
+        // Moved now, already `unknown`, or a record that is gone / no longer a draft (nobody can answer for it): the row
+        // leaves `sending` either way, so it is never looked at again and newer ones are always reached.
+        if (handle.outbound.interruptSend(send.id, deps.clock.now())) settled++
+      }
+      for (const [reason, count] of waiting) logError('outbound-mail', 'interrupted sends not moved to unknown yet', undefined, { companyId, reason, count })
+      return settled
     },
 
     /**

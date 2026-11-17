@@ -218,6 +218,10 @@ and starting the runner. It reads no content and calls nothing outside.
   it `due`. A slot from before the pause that no clock had reached yet is held too (the safe side).
 - The runner's own stop / pause checks stay for a stop written without holding (a build before 3b,
   rolled back to and forward again).
+- **After a restore** (`deployment.md` "After a restore"): `restorePause.pauseAfterRestore` sets the company's stop
+  (`updated_by` `acb:restore`) and holds what is due or running, as the stop does — so a slot whose occurrence the
+  restore took away is made `held` again, never run twice, also after an owner lifts the stop. Test:
+  `restore-pause.test.ts`, `job-runs.test.ts` 「after a restore」.
 
 ## The runner (3b, `createJobRunner` + `runOccurrence`)
 

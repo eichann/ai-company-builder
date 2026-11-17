@@ -431,6 +431,33 @@ describe('the AI puts a PDF / HTML into a picked folder', () => {
     expect((await ai(tanaka, 'GET', `/puts/${r.body.data.drivePut.id}`)).status).toBe(404)
   })
 
+  it('a put left `sending` by a stopped process: after 15 minutes the sweep makes it unknown, then it is found by the put id — never sent twice', async () => {
+    const token = await tokenFor('m-sato', 'act')
+    // The file reached Drive, then the process stopped before the answer was kept: the receipt is still `sending`.
+    const body = putBody({ name: '途中で止まった.pdf' })
+    const r = await ai(token, 'POST', '/put', body)
+    expect(r.status, r.text).toBe(200)
+    const put = r.body.data.drivePut
+    const longAgo = new Date(Date.now() - 16 * 60_000).toISOString()
+    db.prepare("UPDATE google_drive_puts SET state = 'sending', file_id = NULL, revision_id = NULL, link = NULL, finished_at = NULL, created_at = ? WHERE company_id = ? AND id = ?").run(longAgo, CO, put.id)
+    const fresh = await ai(token, 'POST', '/put', putBody({ name: 'いま置いている途中.pdf' }))
+    db.prepare("UPDATE google_drive_puts SET state = 'sending', file_id = NULL, revision_id = NULL, link = NULL, finished_at = NULL, created_at = ? WHERE company_id = ? AND id = ?")
+      .run(new Date(Date.now() - 60_000).toISOString(), CO, fresh.body.data.drivePut.id)
+    const uploads = google.uploads().length
+    // Before: the same request is answered 「いま置いているところ」 for ever.
+    expect((await ai(token, 'POST', '/put', body)).body.code).toBe('DRIVE_PUT_IN_PROGRESS')
+    const { services } = await import('../../src/composition')
+    services.googleDrive.sweep(CO)
+    expect(db.prepare('SELECT state, reason FROM google_drive_puts WHERE company_id = ? AND id = ?').get(CO, put.id)).toEqual({ state: 'unknown', reason: 'interrupted' })
+    // One still within the bound may still be on its way: left alone.
+    expect(db.prepare('SELECT state FROM google_drive_puts WHERE company_id = ? AND id = ?').get(CO, fresh.body.data.drivePut.id).state).toBe('sending')
+    // The same request now looks it up by the put's id: found, nothing uploaded again.
+    const again = await ai(token, 'POST', '/put', body)
+    expect(again.body.data).toMatchObject({ existing: true, drivePut: { id: put.id, state: 'done', reason: 'found-by-correlation', fileId: put.fileId } })
+    expect(google.uploads()).toHaveLength(uploads)
+    db.prepare("UPDATE google_drive_puts SET state = 'unknown' WHERE company_id = ? AND id = ?").run(CO, fresh.body.data.drivePut.id)
+  })
+
   it('the company switch off: refused, nothing uploaded', async () => {
     const token = await tokenFor('m-sato', 'act')
     const before = google.uploads().length

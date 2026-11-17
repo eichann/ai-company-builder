@@ -221,6 +221,41 @@ describe('per-company export and restore', () => {
     conn.close()
   })
 
+  it('the restore command leaves the company\'s automatic work stopped and tells its owner (deployment.md "After a restore")', () => {
+    const dataDir = join(work, 'cli-data')
+    // As in the api container (the command runs there): the server's settings, here practice values.
+    const env = { ...process.env, DATA_DIR: dataDir, REPOS_DIR: join(dataDir, 'repos'), NODE_ENV: 'test', AUTH_SECRET: randomBytes(32).toString('base64') }
+    const run = (...args: string[]) => execFileSync(process.execPath, ['--import', 'tsx', 'src/cli/company-archive.ts', ...args], { env, encoding: 'utf8' })
+    // An archive taken while the AI ran (no stop in it), so the restore's own stop shows.
+    const fresh = join(work, 'archive-cli')
+    db.prepare("UPDATE agent_stops SET released_at = ?, released_by = 'x' WHERE company_id = ?").run(new Date().toISOString(), co.A)
+    return archive.exportCompany({ conn: db, reposDir, companyId: co.A, outDir: fresh }).then(() => {
+      expect(run('restore', fresh)).toContain(`Company ${co.A}: scheduled jobs stopped, the AI stopped, 1 owner(s) / admin(s) told.`)
+      const conn = new Database(join(dataDir, 'app.sqlite'), { readonly: true })
+      try {
+        expect(conn.prepare('SELECT stopped, updated_by FROM ai_job_settings WHERE company_id = ?').get(co.A)).toEqual({ stopped: 1, updated_by: 'acb:restore' })
+        expect(conn.prepare('SELECT COUNT(*) AS n FROM agent_stops WHERE company_id = ? AND user_id IS NULL AND tool IS NULL AND released_at IS NULL').get(co.A)).toEqual({ n: 1 })
+        expect(conn.prepare("SELECT user_id FROM notifications WHERE company_id = ? AND kind = 'company_restored'").all(co.A)).toEqual([{ user_id: 'ar-owner-A' }])
+      } finally {
+        conn.close()
+      }
+      // A whole-server restore: the same for every company, the stop not added twice.
+      expect(run('pause-after-restore', '--all')).toContain(`Company ${co.A}: scheduled jobs stopped, the AI was already stopped`)
+      // Without the server's settings the command stops before writing anything (never a restored company left running).
+      const bare = join(work, 'cli-bare')
+      const { AUTH_SECRET: _omitted, ...withoutSecret } = env
+      void _omitted
+      expect(() => execFileSync(process.execPath, ['--import', 'tsx', 'src/cli/company-archive.ts', 'restore', fresh],
+        { env: { ...withoutSecret, DATA_DIR: bare, REPOS_DIR: join(bare, 'repos') }, encoding: 'utf8', stdio: 'pipe' })).toThrow()
+      const empty = new Database(join(bare, 'app.sqlite'), { readonly: true })
+      try {
+        expect(empty.prepare('SELECT COUNT(*) AS n FROM companies').get()).toEqual({ n: 0 })
+      } finally {
+        empty.close()
+      }
+    })
+  })
+
   it('refuses to write over an existing archive directory', async () => {
     await expect(archive.exportCompany({ conn: db, reposDir, companyId: co.A, outDir: out })).rejects.toThrow(/already exists/)
   })

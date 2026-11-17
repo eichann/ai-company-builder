@@ -160,7 +160,14 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
         // Off line or an older server: keep what was shown.
         if (!turn || !notices) return
         if (turn.status !== 200 || notices.status !== 200) {
-          if (turn.status === 404 && notices.status === 200) { publish(companyId, NO_NOTICES); return } // records off
+          if (turn.status === 404 && notices.status === 200) {
+            // Records off: nothing of a record — only the company's own notices (a restore), with the bell alone.
+            const list = noticeListOf(notices.body?.data)
+            if (!list || list.items.length === 0) { publish(companyId, NO_NOTICES); return }
+            if (companyId === current) notifyDesktop(companyId, [], list.items)
+            publish(companyId, { available: true, bellOnly: true, myTurn: { total: 0, items: [] }, notices: list })
+            return
+          }
           if (notices.status !== 404) log.warn(`[notifications] answered ${turn.status} / ${notices.status}`)
           return
         }

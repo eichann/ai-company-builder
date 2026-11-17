@@ -145,13 +145,21 @@ export function sqliteOutboundMailRepository(conn: Database.Database, companyId:
       })()
     },
     finishSend(id, outcome, reason, providerMessageId, at) {
-      conn.prepare("UPDATE outbound_sends SET outcome = ?, reason = ?, provider_message_id = ?, finished_at = ? WHERE company_id = ? AND id = ? AND outcome = 'sending'")
-        .run(outcome, reason, providerMessageId, at, companyId, id)
+      return conn.prepare("UPDATE outbound_sends SET outcome = ?, reason = ?, provider_message_id = ?, finished_at = ? WHERE company_id = ? AND id = ? AND outcome = 'sending'")
+        .run(outcome, reason, providerMessageId, at, companyId, id).changes > 0
     },
     lastSend(messageId) {
       const r = conn.prepare(`SELECT ${SEND_COLUMNS} FROM outbound_sends WHERE company_id = ? AND message_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1`)
         .get(companyId, messageId) as SendRow | undefined
       return r ? toSend(r) : null
+    },
+    sendingBefore(before, limit) {
+      return (conn.prepare(`SELECT ${SEND_COLUMNS} FROM outbound_sends WHERE company_id = ? AND outcome = 'sending' AND started_at <= ?
+        ORDER BY started_at, rowid LIMIT ?`).all(companyId, before, limit) as SendRow[]).map(toSend)
+    },
+    interruptSend(id, at) {
+      return conn.prepare("UPDATE outbound_sends SET outcome = 'unknown', reason = 'interrupted', finished_at = ? WHERE company_id = ? AND id = ? AND outcome = 'sending'")
+        .run(at, companyId, id).changes > 0
     },
     resolveSend(id, outcome, at) {
       conn.prepare("UPDATE outbound_sends SET outcome = ?, reason = 'resolved-by-person', finished_at = ? WHERE company_id = ? AND id = ? AND outcome = 'unknown'")

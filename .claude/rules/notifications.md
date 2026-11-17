@@ -66,6 +66,13 @@ a plugin can never draw a notice (§2-2).
   `job_paused` (「定期の仕事「…」を止めました：…」, on by default, recordless like the morning summary: a scheduled
   job paused because its responsible person left or lost rights, to every owner / admin; key
   `job_paused:<job>:<reason>:<at>`; shown only while the reader is owner / admin — `jobs.md`),
+  `company_restored` (「会社のデータをバックアップから戻したため、定期の仕事と AI を止めました。…」, on by default,
+  recordless: written by `restorePause` after a restore to every owner / admin, key `company_restored:<at>`; shown only
+  while the reader is owner / admin; opening it opens nothing; a Mac notification while unread — `deployment.md`
+  "After a restore"). **Also with records off**: `GET /me/notifications` then answers `available: false` with only
+  these company notices (never a record's), and the app's watcher, seeing `/records/my-turn` 404, shows the bell alone
+  (`NoticesState.bellOnly`, no 「あなたの番」) when there is one, else nothing as before (`restore-pause.test.ts`,
+  `client/tests/notifications.test.ts`),
   `job_expired` / `job_skipped` / `job_failed` (on by default, recordless: an occurrence of a scheduled job
   whose time ran out, skipped because its responsible person was absent, or whose やること could not be
   made — to the responsible person and the job's creator while an owner / admin; key
