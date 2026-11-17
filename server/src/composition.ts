@@ -409,6 +409,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       return replyTarget(receivedAt, s.reply, s.companyHolidays.map(h => h.date)).date
     },
     featureOff: typeOff,
+    // The execution run's fence at the write (records.md "Execution runs"; built below, called only after construction).
+    runFence: (member, run) => aiRuns.writeFence(member, run),
   })
 
   // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,
@@ -623,6 +625,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     pickTickets: sqlitePickTicketDirectory(conn),
     docTiming: () => driveDocTiming(),
     // The practice Google serves a stand-in Picker script on staging (tests/fakes/google).
+    // The execution run's fence right before a put leaves (google-drive.md; built below, called only after construction).
+    runFence: (member, run) => aiRuns.writeFence(member, run),
     pickerScriptOrigin: practiceGoogle
       ? `${practiceGoogle.target.protocol}//${practiceGoogle.target.hostname === 'host.docker.internal' ? 'localhost' : practiceGoogle.target.hostname}:${practiceGoogle.target.port}`
       : 'https://apis.google.com',

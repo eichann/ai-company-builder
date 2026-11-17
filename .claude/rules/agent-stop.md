@@ -75,8 +75,12 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
     `recordAiTokens.authenticate` after the fence, before any handler — so no write and no idempotency key is
     taken; the run keeps a `refused_stopped` event once per generation, as does the member's own waiting run
     of a refused claim: `ai-turns.md` "Each state change of a run is kept"); the company-wide whole-AI stop already answers 403 `ACB_STOPPED` there first ("Who is acting" in
-    `records.md`). The fence itself looks only at state + generation, never the lease's time, and a take-over
-    claim is refused during a stop, so the lease bounds nothing here. A **kind** stop does not refuse the
+    `records.md`). The fence also refuses a run whose lease ran out (`records.md` "Fencing"), and a take-over
+    claim is refused during a stop. **At the write** the stop is asked again (`aiRuns.writeFence`,
+    `records.md` "Fenced at the write"): a stop pressed while the request awaited (a place check, Drive's
+    lookups) refuses the record write or the Drive upload with **403** `AI_STOPPED` — a 4xx there, so the
+    operation's idempotency key is freed rather than marked unknown (a 5xx inside a keyed write means
+    「結果が分からない」). A **kind** stop does not refuse the
     token: a run's record calls are ACB's own tools (`stoppedKind`: app tools stop only with the whole AI),
     `write` / `web` name tools on the PC that the server never sees, and a connector's read already checks
     `mcp-external` / `web` itself (above); the route table (`shared/core/ai-turn-routes.ts`) does not say
@@ -84,7 +88,7 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
     started before an `mcp-external` stop is not refused by the server — the app that follows the stop
     refuses that kind in the turn). A consultation's token (no run) is unchanged: someone is present and the
     app stops the conversation.
-  - **Renew is not refused**: the lease keeps being extended while stopped, so the PC that holds the run keeps
+  - **Renew is not refused** (while the lease is live; one that already ran out is not extended, stop or not): the lease keeps being extended while stopped, so the PC that holds the run keeps
     it and nobody else (another PC, another step of the record) can claim the record the moment the stop is
     released. Finish, retry and reconcile are never refused (they end or give back). Fencing and the keys are
     unchanged.

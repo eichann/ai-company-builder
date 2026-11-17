@@ -15,7 +15,7 @@ import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS } from './links'
-import { bad, conflict, FILE_NOT_LINKABLE, fileLinksUnavailable, featureOffRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
+import { bad, conflict, FILE_NOT_LINKABLE, fileLinksUnavailable, featureOffRefusal, runFenceRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import { personalPathsSeen, scrubLedger } from './personal-links'
 import type { ActorInput, VerifiedDriveFile } from './types'
 import { NOTE_MAX, provenance } from './values'
@@ -144,11 +144,15 @@ export function fileLinking(ctx: EngineContext) {
       attachments: [], decision: null, isDecision: false, typeVersion: row.typeVersion, reversesVersion: null, ...provenance(actor),
     }
     const written = transactions.run(() => {
+      // The run's fence again, in the write's transaction (the route awaited the body since the token's check).
+      const fenced = runFenceRefusal(deps, member, actor)
+      if (fenced) return fenced
       if (!records.writeState({ recordId: row.id, state: current.state, fields: JSON.stringify(current.fields), version: entry.version, updatedAt: at }, expected)) return false
       records.replaceLinks(row.id, nextLinks)
       records.appendLedger(entry)
       return true
     })
+    if (written !== true && written !== false) return written
     if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
     changed(member.companyId, row.id)
     // The answer's entry as this member may see it: others' own-only targets left out of before / after.

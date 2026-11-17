@@ -155,7 +155,7 @@ googleDriveAiRoute.post('/put', aiActs, serviceBody, async (c) => {
   const scope = jobScope(c, h)
   if (scope instanceof Response) return scope
   return keyedWrite(c, h, 'drive-put', body, async () => {
-    const put = await googleDrive.put(h.member, { kind: 'ai', conversationId: actor.conversationId, runId: actor.runId }, body, scope)
+    const put = await googleDrive.put(h.member, { kind: 'ai', conversationId: actor.conversationId, runId: actor.runId, runGeneration: actor.runGeneration }, body, scope)
     if (!put.ok) return answer(c, put)
     // A job's run links its puts to the やること its finish makes (jobs.md), never to a record its body names.
     const recordId = scope ? undefined : (body as { recordId?: unknown } | null)?.recordId

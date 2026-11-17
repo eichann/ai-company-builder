@@ -305,7 +305,13 @@ member's **own** rows (`DRIVE_PICK_TTL_MS`, `renewPick`):
   (outbound-mail's rule): the AI's put waits for the member's press on the app's card ("Asking before a put").
 - S10b: inside an execution run `POST /put` goes through `keyedWrite` (Idempotency-Key);
   `outcomeOf` reads `drivePut` (unknown → the run waits for reconcile; ref kind `drive-put`,
-  replay read `GET /puts/:id`).
+  replay read `GET /puts/:id`). The run is fenced again right before each write leaves (the
+  revision kept, the upload): `GoogleRequest.beforeSend` asks `aiRuns.writeFence` after the
+  client's own awaits (switches, access token), so a re-claim, a lease that ran out or a stop
+  during the folder / sharing lookups sends nothing — the receipt is dropped and the answer is a
+  4xx (`RUN_SUPERSEDED` / `AI_STOPPED`; records.md "Fenced at the write"). Test:
+  `google-drive.test.ts` "inside an execution run" (a new file, and an overwrite fenced before its
+  revision is kept and before the new revision is sent; mutation-checked).
 - **What the tools say** (owner FB 2026-11-14, each with its test in `client/tests/google-drive-ux.test.ts`):
   - `drive_pick_files { fileIds? }` (≤ 10 Drive ids, `drivePreselectIds`): the Picker shows just those (`pick(…, { fileIds
     })`); ids that are already the member's live readable picks or own puts open nothing (`alreadyUsable: true`).
