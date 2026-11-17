@@ -20,6 +20,7 @@
  */
 import type Database from 'better-sqlite3'
 import type { ArchivedRows, CompanyRowsExport } from '../../ports/company-data'
+import { restoreLedgerSequence } from './record-ledger-write'
 
 type Conn = Database.Database
 
@@ -133,6 +134,9 @@ export function restoreCompanyRows(conn: Conn, companyId: string, tables: Archiv
       }
       counts[table] = rows.length
     }
+    // The ledger's delivery numbers came back as they were (an ordinary column, never renumbered); the
+    // counter now stands above every one of them (records.md "Delivery order").
+    restoreLedgerSequence(conn, companyId)
     const broken = conn.prepare(`PRAGMA foreign_key_check`).all()
     if (broken.length > 0) throw new Error(`restored rows break ${broken.length} foreign key(s); nothing was written`)
   })()

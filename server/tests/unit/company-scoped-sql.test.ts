@@ -76,7 +76,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   record_state: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
   record_index_heads: ['adapters/sqlite/records.ts'],
   record_index_problems: ['adapters/sqlite/records.ts'],
-  record_ledger: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
+  record_ledger: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts', 'adapters/sqlite/record-ledger-write.ts'],
+  record_ledger_seq: ['adapters/sqlite/record-ledger-write.ts'],
   record_ai_tokens: ['adapters/sqlite/records.ts'],
   // The content store (records.md "The content store"): written through the records adapter, erased by the eraser.
   record_contents: ['adapters/sqlite/record-contents.ts'],

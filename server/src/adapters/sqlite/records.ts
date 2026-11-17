@@ -8,7 +8,7 @@
  */
 import type Database from 'better-sqlite3'
 import { parseAiRunProcedure } from '../../../shared/core/ai-runs'
-import type { ExternalReceipt, LedgerEntry, LedgerVia } from '../../../shared/core/record-ledger'
+import { ledgerOriginOf, type ExternalReceipt, type LedgerEntry, type LedgerVia } from '../../../shared/core/record-ledger'
 import { parseSkillUses } from '../../../shared/core/skill-uses'
 import type {
   DriveLinkMeta, RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordMemberSet, RecordProblemRow, RecordRepoKey, RecordRepository,
@@ -21,6 +21,7 @@ import { driveLinkTarget } from '../../../shared/core/records'
 import { CONTENT_REF_PREFIX } from '../../../shared/core/record-contents'
 import { sqliteContentStore } from './record-contents'
 import { skillUsesJson } from './skill-uses'
+import { insertLedgerRow, insertMigrationLedgerRow } from './record-ledger-write'
 
 /**
  * Members-only records (「この人たちだけ」, records.md "Members-only records"): marked by this value
@@ -199,16 +200,17 @@ export function migrateCompanyOutsideTimes(conn: Database.Database, companyId: s
       UPDATE record_state SET fields = json_set(fields, '$.occurred_at', ?), version = version + 1, updated_at = ?
       WHERE company_id = ? AND record_id = ? AND version = ?
     `)
-    const entry = conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at,
-        note, changes, attachments, is_decision, type_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '[]', 0, 2)`)
     // The record now holds what version 2 asks (the index row says which version it was made under).
     const version2 = conn.prepare(`UPDATE records SET type_version = 2 WHERE company_id = ? AND id = ? AND (type_version IS NULL OR type_version < 2)`)
     let moved = 0
     for (const r of rows) {
       if (write.run(r.meeting_at, at, companyId, r.record_id, r.version).changes !== 1) continue
       version2.run(companyId, r.record_id)
-      entry.run(companyId, r.record_id, r.version + 1, OUTSIDE_TIME_ACTION, r.state, r.state, MIGRATION_ACTOR.id, MIGRATION_ACTOR.kind,
-        MIGRATION_ACTOR.source, at, JSON.stringify([{ field: 'occurred_at', before: null, after: r.meeting_at }]))
+      insertMigrationLedgerRow(conn, companyId, {
+        recordId: r.record_id, version: r.version + 1, action: OUTSIDE_TIME_ACTION, fromState: r.state, toState: r.state, actorId: MIGRATION_ACTOR.id,
+        actorKind: MIGRATION_ACTOR.kind, actorSource: MIGRATION_ACTOR.source, at,
+        changes: JSON.stringify([{ field: 'occurred_at', before: null, after: r.meeting_at }]), typeVersion: 2,
+      })
       moved++
     }
     return moved
@@ -230,15 +232,16 @@ export function migrateCompanyBundleParts(conn: Database.Database, companyId: st
       WHERE s.company_id = ? AND r.type = 'meeting' AND s.state IN ('bundle_waiting', 'bundle_working')
     `).all(companyId) as Array<{ record_id: string; state: string; version: number }>
     const write = conn.prepare(`UPDATE record_state SET state = 'read', version = version + 1, updated_at = ? WHERE company_id = ? AND record_id = ? AND version = ?`)
-    const entry = conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at,
-        note, changes, attachments, is_decision, type_version) VALUES (?, ?, ?, ?, ?, 'read', ?, ?, ?, ?, '', ?, '[]', 0, 4)`)
     const version4 = conn.prepare(`UPDATE records SET type_version = 4 WHERE company_id = ? AND id = ? AND (type_version IS NULL OR type_version < 4)`)
     let moved = 0
     for (const r of rows) {
       if (write.run(at, companyId, r.record_id, r.version).changes !== 1) continue
       version4.run(companyId, r.record_id)
-      entry.run(companyId, r.record_id, r.version + 1, BUNDLE_PART_ENDED_ACTION, r.state, MIGRATION_ACTOR.id, MIGRATION_ACTOR.kind, MIGRATION_ACTOR.source, at,
-        JSON.stringify([{ field: 'state', before: r.state, after: 'read' }]))
+      insertMigrationLedgerRow(conn, companyId, {
+        recordId: r.record_id, version: r.version + 1, action: BUNDLE_PART_ENDED_ACTION, fromState: r.state, toState: 'read', actorId: MIGRATION_ACTOR.id,
+        actorKind: MIGRATION_ACTOR.kind, actorSource: MIGRATION_ACTOR.source, at,
+        changes: JSON.stringify([{ field: 'state', before: r.state, after: 'read' }]), typeVersion: 4,
+      })
       moved++
     }
     return moved
@@ -555,14 +558,17 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       // An entry written in an execution run copies the run's procedure as it is now (records.md
       // "Which procedure"): a later re-claim never changes what an earlier entry says.
       // The AI's entry copies the Skills its consultation had used by now (records.md "Which Skill").
-      conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note,
-          changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id, procedure, skills, via)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT procedure FROM ai_runs WHERE company_id = ? AND id = ?), ?, ?)`)
-        .run(companyId, e.recordId, e.version, e.action, e.fromState, e.toState, e.actorId, e.actorKind, e.actorSource, e.at, e.note,
-          JSON.stringify(e.changes), JSON.stringify(e.attachments), e.decision ? JSON.stringify(e.decision) : null, e.isDecision ? 1 : 0,
-          e.typeVersion, e.reversesVersion, e.proposedBy, e.conversationId, e.receipt ? JSON.stringify(e.receipt) : null, e.onBehalfOf ?? null, e.runId ?? null,
-          companyId, e.runId ?? null, e.actorKind === 'ai' ? skillUsesJson(conn, companyId, e.actorId, e.conversationId) : null,
-          e.via ? JSON.stringify({ plugin: e.via.plugin, version: e.via.version }) : null)
+      // Its delivery number and origin mark: record-ledger-write.ts (records.md "Delivery order").
+      insertLedgerRow(conn, companyId, {
+        recordId: e.recordId, version: e.version, action: e.action, fromState: e.fromState, toState: e.toState, actorId: e.actorId,
+        actorKind: e.actorKind, actorSource: e.actorSource, at: e.at, note: e.note, changes: JSON.stringify(e.changes),
+        attachments: JSON.stringify(e.attachments), decision: e.decision ? JSON.stringify(e.decision) : null, isDecision: e.isDecision ? 1 : 0,
+        typeVersion: e.typeVersion, reversesVersion: e.reversesVersion, proposedBy: e.proposedBy, conversationId: e.conversationId,
+        receipt: e.receipt ? JSON.stringify(e.receipt) : null, onBehalfOf: e.onBehalfOf ?? null, runId: e.runId ?? null,
+        skills: e.actorKind === 'ai' ? skillUsesJson(conn, companyId, e.actorId, e.conversationId) : null,
+        via: e.via ? JSON.stringify({ plugin: e.via.plugin, version: e.via.version }) : null,
+        origin: ledgerOriginOf(e.actorId),
+      })
       b.flush(e.at)
     },
 
