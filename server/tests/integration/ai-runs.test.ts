@@ -378,6 +378,16 @@ describe('the fence again at the write (records.md "Execution runs": "Fenced at 
     expect(await services.recordEngine.act(bob, { kind: 'ai', source: 'claude-code', conversationId: 'c', runId: null }, id, 'set_tags', { expectedVersion: 2, args: { tags: ['相談'] } })).toMatchObject({ ok: true })
   })
 
+  it('the write fence holds only for the run’s own member', async () => {
+    const id = await preparingTask('ほかの人の実行では書けない')
+    const run = (await claim('u-bob', id, 'device-aaaa')).body.data.run
+    const carol = { companyId: CO, userId: 'u-carol', role: 'member' as const }
+    expect(services.aiRuns.writeFence(bob, { id: run.id, generation: 1 })).toBeNull()
+    expect(services.aiRuns.writeFence(carol, { id: run.id, generation: 1 })).toMatchObject({ ok: false, body: { code: 'RUN_SUPERSEDED' } })
+    // Another company's member naming the run's id finds nothing either.
+    expect(services.aiRuns.writeFence({ companyId: OTHER, userId: 'u-bob', role: 'member' }, { id: run.id, generation: 1 })).toMatchObject({ ok: false, body: { code: 'RUN_SUPERSEDED' } })
+  })
+
   it('an expired step cannot write while another step of the same record holds a live claim (its token and its renew are refused too)', async () => {
     const id = await preparingTask('期限切れの手順と新しい手順')
     const a = (await claim('u-bob', id, 'device-aaaa')).body.data.run
@@ -413,6 +423,24 @@ describe('an operation of unknown result holds every new outside operation of it
     // A person looked: it did not happen. New operations go on.
     expect((await session('u-bob', 'POST', `/ai-runs/${run.id}/operations/lost-1/reconcile`, { done: false })).status).toBe(200)
     expect((await send('retry-differently')).status).toBe(200)
+    expect(sends).toBe(3)
+  })
+
+  it('a key confirmed not done is not run again while another operation of the run is unknown', async () => {
+    const id = await preparingTask('確かめた後でも、ほかが分からない間は送らない')
+    const run = (await claim('u-bob', id, 'device-aaaa')).body.data.run
+    const caller = { companyId: CO, userId: 'u-bob', runId: run.id, generation: 1 }
+    let sends = 0
+    const send = (key: string, status = 200) => services.aiRuns.keyed(caller, key, { method: 'POST', path: `/x/${key}`, body: {} }, 'plugin-operation', async () => { sends++; return { status, body: {} } })
+    expect((await send('first', 502)).status).toBe(502)
+    // Reconciled as not done while nothing else is unknown, then another operation's answer is lost.
+    expect((await session('u-bob', 'POST', `/ai-runs/${run.id}/operations/first/reconcile`, { done: false })).status).toBe(200)
+    expect((await send('second', 502)).status).toBe(502)
+    expect(sends).toBe(2)
+    expect(await send('first')).toMatchObject({ status: 409, body: { code: 'RUN_NEEDS_RECONCILE' } })
+    expect(sends).toBe(2)
+    expect((await session('u-bob', 'POST', `/ai-runs/${run.id}/operations/second/reconcile`, { done: true })).status).toBe(200)
+    expect((await send('first')).status).toBe(200)
     expect(sends).toBe(3)
   })
 })

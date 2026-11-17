@@ -454,21 +454,24 @@ describe('the AI puts a PDF / HTML into a picked folder', () => {
       VALUES (?, ?, 'record', 'task-0000000000000001', 'task-prep', 'm-sato', 'running', 1, 'device-drive', 'conv-drive', ?, 0, ?, ?)`).run(CO, runId, new Date(Date.now() + 5 * 60_000).toISOString(), at, at)
     const actor = { kind: 'ai' as const, conversationId: 'conv-drive', runId, runGeneration: 1 }
     const receipts = () => db.prepare('SELECT COUNT(*) AS n FROM google_drive_puts WHERE company_id = ? AND run_id = ?').get(CO, runId).n
-    /** While the put asks Drive who sees the folder (after the token's check), `meanwhile` happens. */
-    const during = async (meanwhile: () => void, name: string) => {
+    /** While the put makes the Google call `operation` (by default: who sees the folder, after the token's check), `meanwhile` happens first. */
+    const during = async (meanwhile: () => void, name: string, operation = 'drive.permissions.list', body: Record<string, unknown> = putBody({ name })) => {
       const real = services.googleClient.request.bind(services.googleClient)
+      let seen = false
       const spy = vi.spyOn(services.googleClient, 'request').mockImplementation(async (companyId, userId, req) => {
-        if (req.operation === 'drive.permissions.list') meanwhile()
+        if (req.operation === operation && !seen) { seen = true; meanwhile() }
         return real(companyId, userId, req)
       })
-      try { return await services.googleDrive.put(member, actor, putBody({ name })) } finally { spy.mockRestore() }
+      try { return await services.googleDrive.put(member, actor, body) } finally { spy.mockRestore() }
     }
+    const reclaim = () => db.prepare('UPDATE ai_runs SET generation = 2 WHERE company_id = ? AND id = ?').run(CO, runId)
+    const giveBack = () => db.prepare('UPDATE ai_runs SET generation = 1 WHERE company_id = ? AND id = ?').run(CO, runId)
     const before = google.uploads().length
 
     // Another PC re-claimed the run (its generation moved on).
-    const reclaimed = await during(() => db.prepare('UPDATE ai_runs SET generation = 2 WHERE company_id = ? AND id = ?').run(CO, runId), '引き受け直された.pdf')
+    const reclaimed = await during(reclaim, '引き受け直された.pdf')
     expect(reclaimed).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'RUN_SUPERSEDED' } })
-    db.prepare('UPDATE ai_runs SET generation = 1 WHERE company_id = ? AND id = ?').run(CO, runId)
+    giveBack()
     // The lease ran out (another step of the record may claim it now).
     const lease = db.prepare('SELECT claim_expires_at AS e FROM ai_runs WHERE company_id = ? AND id = ?').get(CO, runId).e
     const expired = await during(() => db.prepare('UPDATE ai_runs SET claim_expires_at = ? WHERE company_id = ? AND id = ?').run(new Date(Date.now() - 1000).toISOString(), CO, runId), '期限切れ.pdf')
@@ -492,6 +495,26 @@ describe('the AI puts a PDF / HTML into a picked folder', () => {
     const done = await during(() => undefined, '続けてよい.pdf')
     expect(done).toMatchObject({ ok: true, value: { drivePut: { state: 'done' } } })
     expect(google.uploads()).toHaveLength(before + 1)
+
+    // Overwriting that PDF: re-claimed right before its revision is kept forever → nothing kept, nothing overwritten;
+    // re-claimed right before the new revision is sent → nothing overwritten.
+    const made = (done as Json).value.drivePut
+    const next = Buffer.from('%PDF-1.7\n% 二版\n%%EOF\n')
+    const update = () => putBody({ name: '続けてよい.pdf', updateFileId: made.fileId, sha256: sha(next), contentBase64: next.toString('base64') })
+    const beforeKeep = await during(reclaim, '続けてよい.pdf', 'drive.revisions.keep', update())
+    giveBack()
+    expect(beforeKeep).toMatchObject({ ok: false, body: { code: 'RUN_SUPERSEDED' } })
+    expect(google.driveFile(made.fileId)!.keptRevisions).toEqual([])
+    expect(google.driveFile(made.fileId)!.content.equals(PDF)).toBe(true)
+    const beforeUpdate = await during(reclaim, '続けてよい.pdf', 'drive.files.update', update())
+    giveBack()
+    expect(beforeUpdate).toMatchObject({ ok: false, body: { code: 'RUN_SUPERSEDED' } })
+    expect(google.driveFile(made.fileId)!.content.equals(PDF)).toBe(true)
+    expect(google.driveFile(made.fileId)!.version).toBe(1)
+    expect(receipts()).toBe(1)
+    // Still held: the overwrite goes through.
+    expect(await during(() => undefined, '続けてよい.pdf', 'drive.files.update', update())).toMatchObject({ ok: true, value: { drivePut: { state: 'done' } } })
+    expect(google.driveFile(made.fileId)!.content.equals(next)).toBe(true)
   })
 
   it('no access or refresh token in any other answer, log line or table; no file content in a log', async () => {

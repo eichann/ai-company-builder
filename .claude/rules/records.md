@@ -1735,8 +1735,9 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   generation refused and nothing written after a re-claim; "the fence again at the write" — a
   create whose place check was awaited while the lease ran out or the AI was stopped, an action,
   a create and a file link refused at the write, an expired step beside another step's live claim,
-  its renew and a new token refused; "an operation of unknown result holds every new outside
-  operation" (`google-drive.test.ts` "inside an execution run" for the put); the same key → one effect, no key
+  its renew and a new token refused, the fence only for the run's own member; "an operation of
+  unknown result holds every new outside operation" (a new key, and a key a person said did not
+  happen) (`google-drive.test.ts` "inside an execution run" for the put); the same key → one effect, no key
   refused, a key never reused; in flight at a re-claim / a lost answer → no resume and no second
   send until reconciled; each failure class's place; the ledger's cause; which procedure each run
   entry used, unchanged by a later re-claim, none on a person's or consultation's entry, a plugin
