@@ -26,6 +26,15 @@ export function stopWho(entry: Pick<AgentStopEntry, 'userId' | 'userName' | 'use
   return `${entry.userName || entry.userEmail || '（退出したメンバー）'}さん`
 }
 
+/**
+ * Who made the stop, in a sentence part: the person's name, 「バックアップから戻したとき（自動）」 for the stop the
+ * server's restore made (`stoppedBy` `acb:restore`, deployment.md "After a restore"), else 「管理者」.
+ */
+export function stopBy(entry: Pick<AgentStopEntry, 'stoppedBy' | 'stoppedByName'>): string {
+  if (entry.stoppedBy === 'acb:restore') return 'バックアップから戻したとき（自動）'
+  return entry.stoppedByName ?? '管理者'
+}
+
 /** What a stop stops: 「AI のすべて」 / 「コマンドの実行」. */
 export function stopWhat(tool: AgentStopToolKind | null): string {
   return tool === null ? 'AI のすべて' : STOP_TOOL_LABELS[tool]

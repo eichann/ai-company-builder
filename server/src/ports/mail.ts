@@ -116,7 +116,11 @@ export interface MailSender {
    * `upload`: the message carries attachments and goes as bytes through the provider's
    * upload way (Gmail's media upload); without it, exactly the plain send as before.
    */
-  send(companyId: string, userId: string, raw: string, options?: { threadId?: string; upload?: boolean }): Promise<MailSendResult>
+  /**
+   * `beforeSend`: asked right before the message leaves (after the token's refresh, in the same synchronous step as
+   * the request); false → nothing is sent (`not-sent`, `call-not-allowed`). outbound-mail.md "A send left half-done".
+   */
+  send(companyId: string, userId: string, raw: string, options?: { threadId?: string; upload?: boolean; beforeSend?: () => boolean }): Promise<MailSendResult>
 }
 
 /**

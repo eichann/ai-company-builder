@@ -367,6 +367,15 @@ export const AI_CHANGES_NAMED = 3
 export function createNotificationService(deps: NotificationServiceDeps) {
   const { companyData, clock } = deps
 
+  /** `company_restored` as the bell shows it (also while records are off); a Mac notification while unread. */
+  function restoredItem(r: NotificationRow): NotificationItem {
+    const read = r.readAt !== null
+    return {
+      id: r.id, kind: 'company_restored', recordId: '', recordType: '', recordTitle: '', version: 0, text: COMPANY_RESTORED_TEXT, createdAt: r.createdAt, read,
+      ...(read ? {} : { desktop: { title: '会社のデータをバックアップから戻しました', body: '定期の仕事と AI を止めています。確かめてから元に戻してください' } }),
+    }
+  }
+
   function kindsOf(handle: CompanyData, userId: string): Record<NotificationKind, boolean> {
     const kinds = { ...NOTIFICATION_DEFAULTS }
     const raw = handle.notifications.settings(userId)
@@ -907,7 +916,14 @@ export function createNotificationService(deps: NotificationServiceDeps) {
     /** `GET /me/notifications`: the member's notices they may see now, newest first. */
     list(member: Member): Outcome<NotificationList> {
       const handle = companyData.forCompany(member.companyId)
-      if (!handle.records.settings().enabled) return ok({ available: false, unread: 0, items: [] })
+      // Records off: only the company's own notices (a restore: deployment.md "After a restore"), never a record's.
+      if (!handle.records.settings().enabled) {
+        const kinds = kindsOf(handle, member.userId)
+        const rows = handle.notifications.list(member.userId, ROWS_READ)
+          .filter(r => isNotificationKind(r.kind) && kinds[r.kind] && r.kind === 'company_restored' && r.recordId === '' && hasFullAccess(member.role))
+        const items = rows.slice(0, NOTIFICATION_LIST_MAX).map(r => restoredItem(r))
+        return ok({ available: false, unread: rows.filter(r => r.readAt === null).length, items })
+      }
       const reader = recordReader(member, handle.scopes.listWithRules())
       computeDue(member, handle, reader)
       handle.notifications.prune(member.userId, new Date(clock.nowMs() - NOTIFICATION_KEEP_DAYS * 86_400_000).toISOString())
@@ -973,9 +989,7 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           const why = job.reason === 'OWNER_LEFT' ? '責任者が会社を離れました。新しい責任者を決めてください' : '責任者の権限が変わり、仕事の範囲に足りなくなりました'
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text: `定期の仕事「${job.name}」を止めました：${why}`, createdAt: r.createdAt, read }
         }
-        if (r.kind === 'company_restored') {
-          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text: COMPANY_RESTORED_TEXT, createdAt: r.createdAt, read }
-        }
+        if (r.kind === 'company_restored') return restoredItem(r)
         if (r.kind === 'job_accept_needed') {
           const job = acceptNotice(r) as { name: string; contentChanged: boolean; choosesPlace?: boolean }
           const base = job.contentChanged

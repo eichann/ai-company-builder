@@ -64,7 +64,7 @@ async function main(argv: string[]): Promise<number> {
     }
     const rows = Object.values(result.counts).reduce((a, b) => a + b, 0)
     console.log(`Restored company ${result.companyId}: ${rows} rows, ${result.repos.length} repositories into ${DATA_DIR}.`)
-    pauseAfterRestore(pause, [result.companyId])
+    if (!pauseAfterRestore(pause, [result.companyId])) return 1
     console.log('Start the server once so it configures the repositories.')
     return 0
   }
@@ -76,8 +76,7 @@ async function main(argv: string[]): Promise<number> {
     const all = sqliteCompanyRepository(db).allIds()
     const ids = args[0] === '--all' ? all : all.filter(id => id === args[0])
     if (ids.length === 0) { console.error(args[0] === '--all' ? 'No company in this database.' : 'No such company in this database.'); return 1 }
-    pauseAfterRestore(pause, ids)
-    return 0
+    return pauseAfterRestore(pause, ids) ? 0 : 1
   }
   console.error('Usage:\n  company-archive.ts export <companyId> <new archive dir>\n  company-archive.ts restore <archive dir>\n  company-archive.ts pause-after-restore <companyId> | --all')
   return 2
@@ -89,12 +88,22 @@ async function restorePauseFor(db: import('better-sqlite3').Database): Promise<R
   return createServices(db).restorePause
 }
 
-/** Scheduled jobs and the AI stopped for each company, its owners / admins told. */
-function pauseAfterRestore(restorePause: RestorePause, companyIds: string[]): void {
+/**
+ * Scheduled jobs and the AI stopped for each company, its owners / admins told. A company that could not be stopped
+ * is named with the exact command to run before the server starts; false when any failed.
+ */
+function pauseAfterRestore(restorePause: RestorePause, companyIds: string[]): boolean {
+  let allStopped = true
   for (const companyId of companyIds) {
-    const r = restorePause.pauseAfterRestore(companyId)
-    console.log(`Company ${companyId}: scheduled jobs stopped, the AI ${r.aiStopAdded ? 'stopped' : 'was already stopped'}, ${r.told} owner(s) / admin(s) told. Check outside results before resuming.`)
+    try {
+      const r = restorePause.pauseAfterRestore(companyId)
+      console.log(`Company ${companyId}: scheduled jobs stopped, the AI ${r.aiStopAdded ? 'stopped' : 'was already stopped'}, ${r.told} owner(s) / admin(s) told. Check outside results before resuming.`)
+    } catch (err) {
+      allStopped = false
+      console.error(`Company ${companyId}: its data is restored but its automatic work could NOT be stopped (${err instanceof Error ? err.name : 'error'}). Before starting the server, run:\n  node --import tsx src/cli/company-archive.ts pause-after-restore ${companyId}`)
+    }
   }
+  return allStopped
 }
 
 main(process.argv.slice(2)).then(code => { process.exitCode = code }, (err: unknown) => {

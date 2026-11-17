@@ -650,7 +650,10 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
         ...(content.reply ? { inReplyTo: content.reply.inReplyTo, references: content.reply.references } : {}),
         ...(fileBytes.length > 0 ? { attachments: fileBytes } : {}),
       }))
-      const options = fileBytes.length > 0 ? { upload: true } : content.reply ? { threadId: content.reply.threadId } : undefined
+      // Right before it leaves (after any token refresh): still this send's `sending` row — not made `unknown` by the
+      // clock meanwhile (outbound-mail.md "A send left half-done"), so a cut-off send is never sent after all.
+      const stillSending = () => handle.outbound.lastSend(d.mail.messageId)?.id === sendId && handle.outbound.lastSend(d.mail.messageId)?.outcome === 'sending'
+      const options = fileBytes.length > 0 ? { upload: true, beforeSend: stillSending } : content.reply ? { threadId: content.reply.threadId, beforeSend: stillSending } : { beforeSend: stillSending }
       result = await deps.mail.send(member.companyId, member.userId, raw, options)
     } catch (err) {
       // Whether it left is not known (the build cannot fail for a stored version; a throw in the call can be after sending).
@@ -1317,18 +1320,21 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       if (!handle.records.settings().enabled) return 0
       const cutoff = new Date(deps.clock.nowMs() - SEND_INTERRUPTED_AFTER_MS).toISOString()
       let settled = 0
+      const waiting = new Map<string, number>()
       for (const send of handle.outbound.sendingBefore(cutoff, CLEANUP_CHUNK)) {
         const s = handle.records.states([send.messageId])[0]
-        if (!s || s.state === null) continue
-        if (s.state === 'draft') {
+        if (s && s.state === 'draft') {
           const moved = writer.transition(companyId, {
             recordId: send.messageId, action: 'send_unknown', expectedVersion: s.version, to: 'unknown', actor: { ...CLOCK_ACTOR }, note: SEND_INTERRUPTED_NOTE,
           })
-          // Someone changed it meanwhile, or records / the feature are off: the next run looks again.
-          if (!moved.ok) { logError('outbound-mail', 'interrupted send not moved to unknown', undefined, { message: send.messageId, reason: moved.reason }); continue }
-        } else if (s.state !== 'unknown') continue
+          // Someone changed it meanwhile, or the feature is off: the next run looks again (one log line per reason and pass).
+          if (!moved.ok) { waiting.set(moved.reason, (waiting.get(moved.reason) ?? 0) + 1); continue }
+        }
+        // Moved now, already `unknown`, or a record that is gone / no longer a draft (nobody can answer for it): the row
+        // leaves `sending` either way, so it is never looked at again and newer ones are always reached.
         if (handle.outbound.interruptSend(send.id, deps.clock.now())) settled++
       }
+      for (const [reason, count] of waiting) logError('outbound-mail', 'interrupted sends not moved to unknown yet', undefined, { companyId, reason, count })
       return settled
     },
 

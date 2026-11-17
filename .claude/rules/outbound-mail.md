@@ -148,19 +148,26 @@ stops in between (a crash, a deploy, a restore of the database) leaves it `sendi
   (`resolve`), as for a lost answer. **Never re-sent**, and nothing is asked of Gmail. Both channels (mail, Slack reply).
 - Record first, then the row: a stop between them is finished by the next pass (the record already `unknown`). A record
   that cannot move (someone changed it, records / the feature off) is left for the next pass.
+- **Never sent after it was made `unknown`**: the 15 minutes bound only the time to an answer's start of each call,
+  not a token refresh or a body read, so the mail send asks `beforeSend` (`MailSender.send` option → the Google
+  client's check right before the request leaves, after any token refresh): still this send's `sending` row, else
+  nothing leaves (`not-sent`, and the send answers `unknown`). The Slack reply has no refresh before its post.
 - A late answer of a send already made `unknown` changes nothing: `finishSend` settles only `sending` and returns
   false, and the send then answers `unknown` (`lateAnswer`) without moving the record, a receipt (やりとり), the retention
   clock or a waiting — both channels; the person decides.
 - Like any `unknown` send (a lost answer), one made `unknown` here no longer counts for "One send per source"
   (`sendsForSource` reads `sending` / `sent`): another member's draft on the same source is not stopped by it. Kept
   as is (the 「…が送りました」 sentence would be wrong for a send nobody knows went out); a decision for the owner.
-- A `sending` row whose record cannot be moved (gone, or neither `draft` nor `unknown`) stays and is looked at again
-  each pass (at most 500 per company and pass, oldest first).
+- A `sending` row whose record is gone or no longer a draft (nobody can answer for it) is made `unknown` too, so it
+  never stays in the way of newer ones (500 per company and pass, oldest first); one whose record cannot move yet
+  (changed meanwhile, the feature off) waits for the next pass, logged once per reason and pass.
   The 「返事を待つ」 day chosen at that send is not kept (it was never written): 送られていた starts no waiting.
 - Test: `outbound-mail.test.ts` 「a send left half-done」 (before: no way out; after the clock's pass: `unknown`, the
   ledger's clock entry, a send within the bound untouched, nothing sent, a second pass changes nothing, 送られていた; an
-  answer arriving after the clock's pass makes no sent state and no やりとり) — mutation-checked: the bound, the record
-  move, the row, the clock's wiring, the late-answer gate (mail; the Slack reply's gate is the same code shape, untested).
+  answer arriving after the clock's pass makes no sent state and no やりとり; cut off during the token's refresh → never
+  leaves; a discarded draft's row leaves `sending`) — mutation-checked: the bound, the record move, the row, the clock's
+  wiring, the late-answer gate, the pre-send check and its pass-through in `google-mail.ts`, the orphaned row (mail;
+  the Slack reply's gate is the same code shape, untested).
 
 ## One send per source (owner decision 2026-11-06, design 「出どころの枠」 §10 order 1)
 

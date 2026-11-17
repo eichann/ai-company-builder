@@ -178,6 +178,24 @@ describe('after a restore', () => {
     expect(demoted.ok && demoted.value.items).toEqual([])
   })
 
+  it('with records turned off the owners / admins still get the notice (and nothing of a record); members do not', () => {
+    db.prepare('UPDATE record_settings SET enabled = 0 WHERE company_id = ?').run(CO)
+    try {
+      restorePause.pauseAfterRestore(CO)
+      const bell = services.notifications.list(owner)
+      expect(bell.ok && bell.value).toMatchObject({ available: false, unread: 1, items: [{ kind: 'company_restored', text: COMPANY_RESTORED_TEXT, desktop: expect.any(Object) }] })
+      const members = services.notifications.list(alice)
+      expect(members.ok && members.value).toEqual({ available: false, unread: 0, items: [] })
+      // Read: no Mac notification again, still listed.
+      expect(services.notifications.markRead(owner, { all: true }).ok).toBe(true)
+      const after = services.notifications.list(owner)
+      expect(after.ok && after.value).toMatchObject({ unread: 0, items: [{ kind: 'company_restored', read: true }] })
+      expect(after.ok && after.value.items[0].desktop).toBeUndefined()
+    } finally {
+      db.prepare('UPDATE record_settings SET enabled = 1 WHERE company_id = ?').run(CO)
+    }
+  })
+
   it('composition wires it: the jobs stopped and the AI stopped through the server\'s own services', () => {
     services.restorePause.pauseAfterRestore(CO)
     expect(companyData.forCompany(CO).jobs.stopped()).toBe(true)

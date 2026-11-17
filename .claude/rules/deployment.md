@@ -231,6 +231,10 @@ checking the outside services: 「定期の仕事」 →「動かせるように
 admin console); lifting the jobs stop holds the slot that passed meanwhile, so nothing from before runs.
 
 - **One company** (`company-archive.ts restore`): done by the command right after the rows and repositories are in.
+  Should stopping a company fail after its data is in, the command exits 1 naming the exact
+  `pause-after-restore <companyId>` to run before starting the server.
+- The admin console's stop page says 「バックアップから戻したとき（自動） が停止」 for such a stop (`admin/src/lib/agent-stop.ts`
+  `stopBy`; `admin/tests/agent-stop.test.tsx`).
 - **The whole server from a backup** (no startup hook can tell a restored database from a server that was simply
   down, so this is a step of the procedure, never automatic): stop `api` first; put back `data/` (the databases
   **and** `data/repos/` from the same snapshot — a database newer or older than its repositories is not

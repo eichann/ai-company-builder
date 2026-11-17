@@ -245,6 +245,31 @@ test('records off: no title bar parts; refusals of bad input', async () => {
   assert.deepEqual(await watcher.markRead('../x', 'all'), { success: false, error: '入力が正しくありません。' })
 })
 
+test('records off but the company was restored: the bell alone carries the notice (deployment.md "After a restore")', async () => {
+  const restored = { id: 'n-restored', kind: 'company_restored', recordId: '', recordType: '', recordTitle: '', version: 0, text: '会社のデータをバックアップから戻したため…', createdAt: '2026-11-01T00:00:00Z', read: false, desktop: { title: '会社のデータをバックアップから戻しました', body: '確かめてください' } }
+  let notices: unknown = { available: false, unread: 0, items: [] }
+  const shown: string[] = []
+  const watcher = createNotificationsWatcher({
+    baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], onChanged: () => {}, desktopNotify: title => shown.push(title),
+    fetch: (async (url: string) => (url.endsWith('/records/my-turn')
+      ? Response.json({ error: 'off' }, { status: 404 })
+      : Response.json({ success: true, data: notices }))) as unknown as typeof fetch,
+    log: quiet, setInterval: () => 0, clearInterval: () => {},
+  })
+  await watcher.watch('co')
+  assert.deepEqual(watcher.state('co'), NO_NOTICES)
+  notices = { available: false, unread: 1, items: [restored] }
+  watcher.signal('co')
+  await tick(); await tick()
+  const state = watcher.state('co')
+  assert.equal(state.available, true)
+  assert.equal(state.bellOnly, true)
+  assert.deepEqual(state.myTurn, { total: 0, items: [] })
+  assert.deepEqual(state.notices.items.map(i => i.kind), ['company_restored'])
+  assert.deepEqual(shown, ['会社のデータをバックアップから戻しました'])
+  watcher.stop()
+})
+
 test('a department without the task list still gets its meetings: a まとまり to choose and received minutes, waiting only when the AI will not read them', () => {
   const item = (id: string, over: Partial<TaskListItem>): TaskListItem => ({
     id, type: 'meeting', typeLabel: '会議', title: id, state: 'received', stateLabel: null, version: 2, due: null, tags: [], turn: 'ai',
