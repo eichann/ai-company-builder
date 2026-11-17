@@ -196,7 +196,11 @@ DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <
 
   Rows go in one transaction, parents first, with foreign keys checked at the end. Repositories
   created before a failure are removed. `agent_events.seq` is renumbered (in order), so a
-  restore next to other companies cannot collide. Start the server once afterwards: startup
+  restore next to other companies cannot collide. The ledger's delivery numbers
+  (`record_ledger.delivery_seq`, per company, an ordinary column) and their counter
+  (`record_ledger_seq`) come back **unchanged** — never renumbered — and the counter is then set
+  above every stored number (`restoreLedgerSequence`, `records.md` "Delivery order"); an archive
+  from before has none (NULL: never events). Start the server once afterwards: startup
   configures the restored repositories and their hook.
 - Export while the server runs is consistent for the rows (one read transaction). A push that
   lands between the rows and the bundles is in the bundle but not in the rows' view; for an
@@ -205,6 +209,20 @@ DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <
   restore, re-apply the erasure log (`records.md` "Erasing: the operator's runbook").
 - Deleting a company is designed but not a command (needs the retention promise first); the
   steps are in the CLI's header comment.
+
+## Rolling back production (stage 4-0 is the oldest version to go back to)
+
+**Once event-triggered jobs (stage 4a) are in production, never roll production back to a version older than
+stage 4-0** (`feat/stage4-0-ledger-seq`; owner decision ⑩, memo 「出来事で動く定期の仕事」 §10-7). Why: 4a writes job
+versions of `schema: 2`, event occurrences (`ev:` slots) and reads the ledger by delivery number. 4-0 is the first
+build that (a) never runs, claims, retries, approves or edits a definition of a shape it does not know
+(`jobs.md` "Shapes this build does not know"), (b) numbers every ledger row in its transaction, and (c) keeps those
+numbers through an archive. A build before 4-0 reads a `schema: 2` definition as if it were schema 1 (its clock
+treats an unknown trigger as monthly, its admin console fails on `trigger.at`), and writes ledger rows without
+numbers that 4a then never sees as events. The admin console is deployed with the server (same compose, same
+commit); an admin tab left open from before 4-0 only gets definitions it can read (no header = schema 1). Rolling
+back between 4-0 and 4a, or forward, is fine. Rolling back the desktop app is fine (it claims time occurrences
+only unless it names `event`).
 
 ## CI
 

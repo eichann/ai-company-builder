@@ -38,6 +38,8 @@ paths:
   - "client/tests/viewers-ipc.test.ts"
   - "server/src/ports/record-files.ts"
   - "server/src/adapters/sqlite/records.ts"
+  - "server/src/adapters/sqlite/record-ledger-write.ts"
+  - "server/tests/unit/record-ledger-delivery.test.ts"
   - "server/src/adapters/record-files.ts"
   - "server/src/lib/record-files.ts"
   - "server/tests/unit/record-*.test.ts"
@@ -1616,6 +1618,34 @@ clock's, a separate service writing through the service writer: `notifications.m
   summary, optional folder (not inside a private folder, except a task's 案件・プロジェクト's own: "A
   task and its 案件・プロジェクト"), server fields, links; the id is
   `<type>-<16 hex>`; `requested_by` defaults to the creator and `next_actor` to the assignee.
+
+### Delivery order (stage 4-0 of event-triggered jobs, owner memo 「出来事で動く定期の仕事」 §3-1 / §10-3)
+
+Event-triggered jobs (stage 4a) read the ledger "after number N". A ledger time (`at`) is no order: it is taken
+before the write, and a migration writes many rows with one time — a reader by time misses a row written later
+with an earlier time. So every row now carries a **delivery number**:
+
+- `record_ledger.delivery_seq` (INTEGER, nullable, additive: `migrateRecordLedgerDelivery`) — per company, taken
+  from `record_ledger_seq (company_id, next_seq)` **in the insert's own transaction**, growing, never reused
+  (unique index `(company_id, delivery_seq)` where not null). An ordinary column, **not** `INTEGER PRIMARY KEY`, so a
+  company archive keeps it (`agent_events.seq`, the rowid, is renumbered on restore; this is not).
+- **One writer**: `adapters/sqlite/record-ledger-write.ts` is the only module that inserts into `record_ledger`
+  (`insertLedgerRow` for the engine's `appendLedger` — create, act, file / record links, share, undo, the service
+  and external writers —, `insertMigrationLedgerRow` for the startup migrations "Outside time" and "A まとまり chosen
+  later", which name only the columns that existed then). A new write path goes through it.
+- **Origin mark** `record_ledger.origin` (`LEDGER_ORIGINS`, `shared/core/record-ledger.ts`): `migration` (a startup
+  migration's row), `system` (any other `acb:` actor: the server clock, a scheduled job's operation), null for an
+  ordinary change (a person, their AI, a run under them, an outside system). `restore` is reserved: a restore writes
+  no rows of its own; restored rows keep their number and mark. Stage 4a never treats a marked row as an event.
+- Rows from before (and rows an older build writes after a rollback) have no number: **never events**, never
+  renumbered; the counter just carries on.
+- Restore (`deployment.md` "One company: export and restore"): the rows' numbers and the counter come back as they
+  were; then `restoreLedgerSequence` puts the counter at least one above every stored number (never lowered). An
+  archive from before has NULL numbers and no counter row (the first write takes 1).
+- Test: `server/tests/unit/record-ledger-delivery.test.ts` (a source scan: no other module inserts into the table;
+  every write path numbers its row per company in insert order; the marks; old rows NULL, counter carrying on; the
+  unique index; restore with, without and with a higher counter, and an archive from before) — each guard
+  mutation-checked.
 
 ## Execution runs (stage 2 S10b, owner decision 2026-11-01)
 
