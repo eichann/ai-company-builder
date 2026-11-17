@@ -17,7 +17,7 @@ import { migrateNotificationsForUser, notificationSchema } from './schema/notifi
 import { migrateOutboundAttachments, migrateOutboundSendSources, outboundMailSchema } from './schema/outbound-mail'
 import { migrateDepartmentRuleSubject, migrateGroupRuleSubject, migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
-import { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewerSets, migrateRecordViewers, recordSchema } from './schema/records'
+import { migrateMeetingAutoSeries, migrateRecordLedgerDelivery, migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewerSets, migrateRecordViewers, recordSchema } from './schema/records'
 import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 import { securityAlertSchema } from './schema/security-alerts'
@@ -41,7 +41,7 @@ import { pluginRoleSchema } from './schema/plugin-roles'
 export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
 export { migrateDepartmentRuleSubject, migrateGroupRuleSubject, migrateRuleAndManagerCompanies } from './schema/permissions'
 export { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables } from './schema/plugins'
-export { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewerSets, migrateRecordViewers } from './schema/records'
+export { migrateMeetingAutoSeries, migrateRecordLedgerDelivery, migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewerSets, migrateRecordViewers } from './schema/records'
 export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateOutboundAttachments, migrateOutboundSendSources } from './schema/outbound-mail'
@@ -119,6 +119,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateInvitationClaims(conn)
   migrateCompanyFolderKind(conn)
   migrateRecordLedgerProvenance(conn)
+  // The ledger's delivery numbers and origin marks (records.md "Delivery order"); before any migration writes a ledger row.
+  migrateRecordLedgerDelivery(conn)
   migrateRecordPersonalOwner(conn)
   migrateRecordLinkCreator(conn)
   // Members-only records (records.md "Members-only records").

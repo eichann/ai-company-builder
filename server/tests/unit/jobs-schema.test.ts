@@ -25,6 +25,13 @@ const LATER_TABLES = [
   'google_drive_doc_reads',
   'google_drive_overwrite_confirmations',
   'google_drive_folder_trust',
+  // records.md "Delivery order": the per-company counter of the ledger's delivery numbers.
+  'record_ledger_seq',
+]
+/** Indexes later builds add on a table that was there before. */
+const LATER_INDEXES = [
+  // records.md "Delivery order": a delivery number once per company.
+  'idx_record_ledger_delivery',
 ]
 /**
  * Columns later builds add to a table that was there before (each an idempotent `ALTER TABLE … ADD COLUMN`, so
@@ -33,6 +40,8 @@ const LATER_TABLES = [
 const LATER_COLUMNS: Record<string, string[]> = {
   // google-drive.md "Overwriting": the file a put gave a new revision; "A Google document's own changes": its baseline.
   google_drive_puts: ['updated_file_id TEXT', 'doc_fingerprint TEXT', 'doc_revision TEXT', 'doc_revision_at TEXT', 'doc_baseline_at TEXT'],
+  // records.md "Delivery order": each row's delivery number and origin mark.
+  record_ledger: ['delivery_seq INTEGER', 'origin TEXT'],
 }
 
 const objects = (conn: Database.Database) => (conn.prepare(`SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name`).all() as Array<{ type: string; name: string; tbl_name: string; sql: string | null }>)
@@ -65,7 +74,7 @@ describe('the job tables are additive', () => {
     initDatabase(conn)
     expect(objects(conn)).toEqual(once)
     for (const o of before) expect(once, o.name).toContainEqual(o)
-    const added = once.filter(o => !before.some(b => b.name === o.name))
+    const added = once.filter(o => !before.some(b => b.name === o.name) && !LATER_INDEXES.includes(o.name))
     expect([...new Set(added.map(o => o.tbl_name))].sort()).toEqual([...NEW_TABLES, ...LATER_TABLES].sort())
     // A new database: the same objects.
     const fresh = new Database(':memory:')

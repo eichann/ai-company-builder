@@ -189,6 +189,27 @@ export function migrateRecordLedgerProvenance(conn: Database.Database): void {
 }
 
 /**
+ * The ledger's delivery order (records.md "Delivery order", stage 4-0 of event-triggered jobs): a per-company
+ * number on every row written from now on (`delivery_seq`, taken from `record_ledger_seq` in the row's own
+ * transaction by adapters/sqlite/record-ledger-write.ts) and the row's origin mark (`origin`: migration /
+ * system / restore, null = an ordinary change). Additive and nullable: an older build keeps inserting rows
+ * without them (NULL: never an event) and every existing row stays NULL. The number is an ordinary column,
+ * not the rowid, so a company archive restores it unchanged.
+ */
+export function migrateRecordLedgerDelivery(conn: Database.Database): void {
+  const cols = new Set((conn.prepare(`PRAGMA table_info(record_ledger)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('delivery_seq')) conn.exec(`ALTER TABLE record_ledger ADD COLUMN delivery_seq INTEGER`)
+  if (!cols.has('origin')) conn.exec(`ALTER TABLE record_ledger ADD COLUMN origin TEXT`)
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS record_ledger_seq (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      next_seq INTEGER NOT NULL CHECK (next_seq >= 1)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_record_ledger_delivery ON record_ledger(company_id, delivery_seq) WHERE delivery_seq IS NOT NULL;
+  `)
+}
+
+/**
  * Owner-only records (records.md "Owner-only records", owner decision 2026-11-01): the one
  * member who may see a record, nobody else (owners and admins included). Additive and
  * nullable: every existing row stays null, so what each member sees today does not change.

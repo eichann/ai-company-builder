@@ -22,6 +22,8 @@ paths:
   - "client/electron/features/ai-turns/job-report-tool.ts"
   - "client/tests/job-runs.test.ts"
   - "server/src/services/job-retry.ts"
+  - "server/src/services/ai-runs.ts"
+  - "admin/src/lib/api.ts"
 ---
 
 # Scheduled jobs (定期の仕事, B 「実行を記録から分ける」)
@@ -748,6 +750,43 @@ POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }  
   「自動で進める」; the deadline counted again; still one やること); otherwise 「「もう一度」はできません：…」; who pressed it
   and when; what earlier runs made (「前回すでに…作っています。」, also in the confirmation); an unknown outside result as
   「メールの下書きが作られたか分かりません…」 with ［作られていた］［作られていなかった］ (asked first).
+
+## Shapes this build does not know (stage 4-0 of event-triggered jobs, owner memo §3-11 / §10-7 / §11)
+
+Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 4a wrote such versions (a rollback,
+`deployment.md` "Rolling back production"), and an admin tab or an app from before stays open. So:
+
+- **Every read of a stored version is schema-checked** (`storedJobDefinition`, `shared/core/jobs.ts`): its
+  definition only when its `schema` column is one this build knows (`JOB_SCHEMAS`, today `[1]`) and the stored text
+  says the same schema; else null. A null definition is **never** made into an occurrence by the clock, run by the
+  server's runner (left `due`, not even taken into the batch), listed or claimed by a PC (the one 404), sent back by
+  「もう一度」 (`JOB_SCHEMA_UNKNOWN`), approved, accepted or resumed (409 `JOB_SCHEMA_UNKNOWN`), and a job whose newest
+  version is one is not edited (a new version over it: 409 `JOB_SCHEMA_UNKNOWN`, whatever the screen reads); a role change does not
+  pause it for a reason this build cannot judge. A running one's deadline is not read; its expiry still applies (the
+  clock ends it `expired` then, as for any occurrence).
+  Schema 1 is read exactly as stored.
+- **A client gets a definition only in a shape it announced**: header `X-ACB-Job-Schemas` (`JOB_SCHEMAS_HEADER`,
+  `parseJobSchemasHeader`: schema 1 always, the rest as named; none = schema 1 — every admin console and app before
+  4-0, and a tab left open). A version of another shape (or one this server does not know) is answered without its
+  definition and with `needsUpdate: true` (`JobVersionView`); the job's view drops `trigger` / `placement` and says
+  `needsUpdate` when the version it shows is one (an older admin calls `trigger.at.split`). Approving, accepting it
+  or editing a job whose newest version is one, from that client: 409 `JOB_NEEDS_NEWER_SCREEN` (what a screen
+  cannot show, it must not write over or consent to). The admin console (`admin/src/lib/api.ts` `JOB_READS`) sends
+  the header on every job call; the desktop app sends none (it reads schema 1; 4a's app will name 2).
+- **The admin console** never builds a form or words from a definition it does not know (`editableDefinition`,
+  `needsNewerScreen`, `knownJobDefinition`, `isKnownJobTrigger`): the list, the edit form and the approval say
+  「この画面では編集できません。画面を新しくしてください」 (`JOB_NEEDS_NEWER_SCREEN`), 直す and 承認する are off.
+- **Occurrence kinds** (`jobOccurrenceKind`: `ev:<delivery number>` slots are `event`, 4a; everything today is
+  `time`): a claim names the kinds its app runs (`kinds`, additive; absent = `time`) and `GET /me/job-turns?kinds=`
+  lists only those — an app before 4a is never handed an event occurrence (409 `JOB_KIND_NOT_SUPPORTED` on a claim).
+  Kinds this build does not know are left out; a list naming none it knows (or an empty one) is 400.
+  Today's app sends neither (a server before 4-0 refuses an unknown key in the claim body).
+- Test: `server/tests/integration/job-schemas.test.ts` (stored-version reader; the clock, the runner and its batch,
+  the PC's list and claim, 「もう一度」, approve / accept / resume, list and detail without a crash, a role change;
+  the client gate with a later server as fixture (`knownSchemas: [1, 2]`) — approve, accept, edit, list, detail;
+  schema 1 byte for byte with any header; kinds on turns and claims) and `admin/tests/jobs.test.tsx` "a definition of
+  a shape this console does not read" — each guard mutation-checked (the form's own `editableDefinition` is covered by
+  the dialog's `needsNewerScreen` check before it, so removing it alone changes nothing).
 
 ## Tests (each guard mutation-checked, with the exceptions named)
 

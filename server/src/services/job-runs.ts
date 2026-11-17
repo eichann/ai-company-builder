@@ -32,7 +32,7 @@
  *   ends its run (`holdDue` → `endPcRun`), so nothing comes back after a resume.
  */
 import {
-  JOB_ACTOR, JOB_MADE_BEFORE_LISTED, JOB_PC_STEP, isOccurrenceId, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult,
+  JOB_ACTOR, JOB_MADE_BEFORE_LISTED, JOB_PC_STEP, isOccurrenceId, jobOccurrenceKind, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult, storedJobDefinition,
   type JobDefinition, type JobDeliveryPlace, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
 import type { JobMadeBefore, JobMeetingView, JobTurnView } from '../../shared/types/jobs'
@@ -101,10 +101,13 @@ const REFUSALS: Record<string, () => Refusal> = {
 }
 /** The claiming app cannot run this occurrence's check (an older app, or one that does not know a newer check). */
 const CHECK_NOT_SUPPORTED = () => conflict('JOB_CHECK_NOT_SUPPORTED', 'このアプリでは、この定期の仕事を動かせません。アプリを新しくしてください。')
+/** The claiming app does not run this occurrence's kind (stage 4-0: an app before event-triggered jobs claims time occurrences only). */
+const KIND_NOT_SUPPORTED = () => conflict('JOB_KIND_NOT_SUPPORTED', 'このアプリでは、この定期の仕事を動かせません。アプリを新しくしてください。')
 /** How many of a company's waiting occurrences the turn list looks at (at most one `due` per job). */
 const TURN_SCAN_LIMIT = 10_000
 
-const definitionOf = (v: JobVersionRow): JobDefinition => JSON.parse(v.definition) as JobDefinition
+/** The stored definition, or null for a shape this build does not know (jobs.md "Shapes this build does not know"): never run. */
+const definitionOf = (v: JobVersionRow): JobDefinition | null => storedJobDefinition(v)
 
 /** Why an occurrence is not the caller's to run now (a short reason; `null`: it is). */
 type Why = keyof typeof REFUSALS | 'GONE'
@@ -129,7 +132,8 @@ export function createJobRuns(deps: JobRunDeps) {
     const version = handle.jobs.version(occ.jobId, occ.jobVersion)
     if (!job || !version || version.actingUserId !== member.userId) return null
     const definition = definitionOf(version)
-    if (definition.placement !== 'a' || definition.run.kind !== 'procedure') return null
+    // A shape this build does not know is nobody's turn here: never listed, claimed or run (the one 404).
+    if (definition === null || definition.placement !== 'a' || definition.run.kind !== 'procedure') return null
     return { handle, occ, job, version, definition }
   }
 
@@ -329,6 +333,8 @@ export function createJobRuns(deps: JobRunDeps) {
       if (subject.kind !== 'occurrence' || step !== JOB_PC_STEP) return NOT_FOUND()
       const f = own(member, subject.id)
       if (!f) return NOT_FOUND()
+      // An app that does not run this kind of occurrence never claims it (stage 4-0: absent = time only).
+      if (!(subject.kinds ?? ['time']).includes(jobOccurrenceKind(f.occ.dueSlot))) return KIND_NOT_SUPPORTED()
       // An app that cannot run this check never claims it (B PR 5a-2); nothing is written for it.
       if (!subject.checks?.includes(f.definition.check.kind)) return CHECK_NOT_SUPPORTED()
       const why = whyNot(f, clock.nowMs())
@@ -471,11 +477,13 @@ export function createJobRuns(deps: JobRunDeps) {
      * what the app needs to run it — the check, since when new files count, the pinned procedure and the
      * grant. Nothing is changed here; an occurrence that is not theirs to run now is left out.
      */
-    turns(member: Member): Outcome<{ turns: JobTurnView[] }> {
+    turns(member: Member, kinds: readonly string[] = ['time']): Outcome<{ turns: JobTurnView[] }> {
       const handle = companyData.forCompany(member.companyId)
       const nowMs = clock.nowMs()
       const turns: JobTurnView[] = []
       for (const occ of [...handle.jobs.dueOccurrences(TURN_SCAN_LIMIT), ...handle.jobs.runningOccurrences(TURN_SCAN_LIMIT)]) {
+        // Only the kinds the app runs (stage 4-0: absent = time): an older app is never handed an event occurrence.
+        if (!kinds.includes(jobOccurrenceKind(occ.dueSlot))) continue
         const f = own(member, occ.id)
         if (!f || whyNot(f, nowMs) !== null) continue
         // A running one only while its run may be claimed again (lease over, given back, retried later).

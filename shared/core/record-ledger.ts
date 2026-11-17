@@ -157,6 +157,22 @@ export function ledgerCause(entry: Pick<LedgerEntry, 'actorKind' | 'actorId' | '
   return entry.actorId.startsWith(SYSTEM_ACTOR_PREFIX) ? 'system' : 'outside'
 }
 
+/**
+ * Where a ledger row came from when it is not an ordinary change (records.md "Delivery order", stage 4-0):
+ * `migration` — a startup migration's direct write (`acb:migration`); `system` — the server's own actors (the
+ * clock, a scheduled job's operation: any `acb:` actor); `restore` — reserved for rows a restore itself would
+ * write (none today: restored rows keep what they had). A row with none (null) is an ordinary change by a
+ * person, an AI or an outside system. Event-triggered jobs (stage 4a) never treat a marked row as an event.
+ */
+export const LEDGER_ORIGINS = ['migration', 'system', 'restore'] as const
+export type LedgerOrigin = typeof LEDGER_ORIGINS[number]
+
+/** The mark a row written by `actorId` carries: the migration actor's `migration`, any other `acb:` actor's `system`, else none. */
+export function ledgerOriginOf(actorId: string): LedgerOrigin | null {
+  if (actorId === 'acb:migration') return 'migration'
+  return actorId.startsWith(SYSTEM_ACTOR_PREFIX) ? 'system' : null
+}
+
 /** Evidence of an exchange with an outside system, kept on the ledger entry it explains. */
 export interface ExternalReceipt {
   /** The plugin and the version / fingerprint of its package used. */

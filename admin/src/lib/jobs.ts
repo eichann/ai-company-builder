@@ -8,7 +8,7 @@
  * parser check the rest.
  */
 import {
-  JOB_MINUTES_ROUTE, JOB_NAME_MAX, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
+  JOB_MINUTES_ROUTE, JOB_NAME_MAX, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
   type JobDefinition, type JobDefinitionResult, type JobGrant, type JobWeekday,
 } from '../../../shared/core/jobs'
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
@@ -99,6 +99,21 @@ export function emptyJobForm(actingUser: string): JobForm {
 
 const lines = (text: string) => [...new Set(text.split('\n').map(l => l.normalize('NFC').trim()).filter(Boolean))]
 const words = (text: string) => [...new Set(text.normalize('NFC').split(/[、,\s]+/).map(w => w.trim()).filter(Boolean))]
+
+/**
+ * The definition of a version as this console may show and edit it, or null when it must not (jobs.md "Shapes this
+ * build does not know"): the server said this console cannot read its shape (`needsUpdate`), or what came is not a
+ * shape this console knows (a newer server that ignored the header). The screen then says `JOB_NEEDS_NEWER_SCREEN`.
+ */
+export function editableDefinition(v: { definition: JobDefinition | null; needsUpdate?: true } | null | undefined): JobDefinition | null {
+  if (!v || v.needsUpdate) return null
+  return knownJobDefinition(v.definition)
+}
+
+/** The version must not be shown or edited here (see `editableDefinition`); a hidden one (`definition` null for a non-admin) is not that. */
+export function needsNewerScreen(v: { definition: JobDefinition | null; needsUpdate?: true } | null | undefined): boolean {
+  return !!v && (v.needsUpdate === true || (v.definition !== null && knownJobDefinition(v.definition) === null))
+}
 
 /** The form for a version. */
 export function formFromDefinition(d: JobDefinition): JobForm {

@@ -18,6 +18,7 @@ import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
 import { jobOccurrenceText, jobRunsText, jobSlotText, jobTriggerText } from '../../../../shared/core/job-words'
+import { JOB_NEEDS_NEWER_SCREEN, isKnownJobTrigger } from '../../../../shared/core/jobs'
 import { JobApproveDialog, JobFormDialog } from './job-dialogs'
 import { JobOccurrences } from './job-occurrences'
 
@@ -133,7 +134,7 @@ export function JobsPage() {
                       </p>
                       <p className="text-sm text-muted-foreground">
                         責任者：{personName(byId.get(runsAs))}
-                        {job.trigger && <>　いつ：{jobTriggerText(job.trigger)}</>}
+                        {job.needsUpdate ? <>　{JOB_NEEDS_NEWER_SCREEN}</> : isKnownJobTrigger(job.trigger) && <>　いつ：{jobTriggerText(job.trigger)}</>}
                       </p>
                       <p className="text-sm">{jobRunsText(job.waiting, job.pausedReason, job.placement)}</p>
                       {newerDraft && (
@@ -151,7 +152,7 @@ export function JobsPage() {
                       {job.state !== 'retired' && (job.approvedVersion === null || newerDraft) && (
                         <Button size="sm" onClick={() => setApproving(job)}>承認する</Button>
                       )}
-                      <Button variant="outline" size="sm" onClick={() => setEditing({ job })} disabled={!members.data || job.state === 'retired'}>直す</Button>
+                      <Button variant="outline" size="sm" onClick={() => setEditing({ job })} disabled={!members.data || job.state === 'retired' || job.needsUpdate === true}>直す</Button>
                       {job.state === 'paused' ? (
                         <Button variant="outline" size="sm" onClick={() => void act('再開しました', () => jobsApi.resume(companyId, job.id))}>再開する</Button>
                       ) : job.state !== 'retired' ? (

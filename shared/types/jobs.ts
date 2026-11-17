@@ -13,8 +13,13 @@
  *   PUT  /jobs-stop { stopped }       owner/admin: 「定期の仕事をすべて止める」
  *   GET  /jobs/:jobId/occurrences     the same people as GET /jobs/:jobId: its occurrences (回), newest first (PR 3b)
  *   GET  /me/job-turns                the caller's PC-job occurrences to claim now (PR 5a)
- *   POST /job-run-claims { occurrenceId, deviceId, conversationId, checks, checkedCommit? }   claim one (PR 5a; 503 AI_STOPPED while stopped;
- *                                     409 JOB_CHECK_NOT_SUPPORTED when `checks` — the check kinds the app runs — lacks it, 5a-2)
+ *   POST /job-run-claims { occurrenceId, deviceId, conversationId, checks, checkedCommit?, kinds? }   claim one (PR 5a; 503 AI_STOPPED while stopped;
+ *                                     409 JOB_CHECK_NOT_SUPPORTED when `checks` — the check kinds the app runs — lacks it, 5a-2;
+ *                                     409 JOB_KIND_NOT_SUPPORTED when `kinds` — the occurrence kinds it runs, absent = time — lacks it, 4-0)
+ *   GET  /me/job-turns?kinds=time     (4-0) only occurrences of those kinds (absent = time)
+ *   Job reads and writes take the header X-ACB-Job-Schemas (`JOB_SCHEMAS_HEADER`, 4-0): the definition schemas the
+ *   caller reads; absent = schema 1 only (a newer version comes with `needsUpdate` and no definition, and is refused
+ *   to approve, accept or edit from that caller: 409 JOB_NEEDS_NEWER_SCREEN).
  *   POST /jobs/:jobId/occurrences/:occurrenceId/retry                       owner/admin: 「もう一度」 (PR 5b)
  *   POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }   owner/admin: an outside
  *                                     operation of its run whose result was unknown happened or not (PR 5b)
@@ -33,8 +38,14 @@ export interface JobVersionView {
   fingerprint: string | null
   /** `sha256:<hex>` of what the responsible person accepts (`jobConsentCanonical`); null whenever `definition` is hidden. */
   consentFingerprint: string | null
-  /** null for a viewer who is not owner/admin when a place it names is not one they read now. */
+  /** null for a viewer who is not owner/admin when a place it names is not one they read now, and with `needsUpdate`. */
   definition: JobDefinition | null
+  /**
+   * Stage 4-0: the version is of a shape the caller did not say it can read (`JOB_SCHEMAS_HEADER`) or this server does
+   * not know — answered without its definition; the screen says 「この画面では編集できません。画面を新しくしてください」.
+   * Absent otherwise (and from a server before 4-0).
+   */
+  needsUpdate?: true
   createdBy: string
   createdAt: string
   approvedBy: string | null
@@ -65,6 +76,8 @@ export interface JobView {
    * Absent from a server before PR 4.
    */
   trigger?: JobTrigger
+  /** Stage 4-0: the version shown (approved, else newest) is of a shape the caller cannot read: no `trigger` / `placement` then. */
+  needsUpdate?: true
   /** Where the version `trigger` is from runs (`e` the server, `a` the responsible person's PC). Absent before PR 4. */
   placement?: JobPlacement
   /**

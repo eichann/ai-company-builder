@@ -177,6 +177,7 @@ const RETRY_BLOCK_WORDS: Record<string, string> = {
   JOB_RESULT_UNKNOWN: '外への操作（メールの下書きなど）が済んだか分からないものがあります。先に確かめてください',
   RETRY_LIMIT: 'この回はもう3回「もう一度」をしました。次の回を待つか、仕事の内容を見直してください',
   NEXT_SLOT_SOON: '次の回が近いため、もう一度はできません（次の回が動きます）',
+  JOB_SCHEMA_UNKNOWN: 'この定期の仕事は新しい版のサーバーで作られたため、このサーバーでは「もう一度」できません',
 }
 
 /** Why 「もう一度」 cannot be pressed now, in plain words (`JOB_RETRY_BLOCKS`). */

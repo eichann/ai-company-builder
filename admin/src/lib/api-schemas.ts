@@ -368,6 +368,8 @@ const jobShape = {
   approved: z.optional(z.nullable(z.looseObject({}))), latestConsentAccepted: z.optional(z.boolean()), you: z.optional(z.looseObject({})),
   // A deliverable place outside (jobs.md): absent from an older server.
   deliverTo: z.optional(z.nullable(z.looseObject({}))),
+  // Stage 4-0: the version shown is of a shape this console does not read (absent from an older server).
+  needsUpdate: z.optional(z.literal(true)),
 }
 export const jobSchema = topLevel<JobView>(jobShape)
 export const jobUpdatedSchema = topLevel<JobView & { changed: boolean }>({ ...jobShape, changed: z.boolean() })

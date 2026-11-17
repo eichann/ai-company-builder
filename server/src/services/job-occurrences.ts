@@ -32,7 +32,7 @@
  */
 import { addBusinessDays } from '../../shared/core/business-days'
 import {
-  JOB_ACTOR, JOB_ON_TIME_MS, JOB_SERVER_STEP, newOccurrenceId, occurrenceTaskId,
+  JOB_ACTOR, JOB_ON_TIME_MS, JOB_SERVER_STEP, newOccurrenceId, occurrenceTaskId, storedJobDefinition,
   type JobDefinition, type JobDeliveryPlace, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
 import { latestJobSlot } from '../../shared/core/job-schedule'
@@ -91,7 +91,8 @@ class TaskNotCreated extends Error {
   constructor() { super('task not created'); this.name = 'TaskNotCreated' }
 }
 
-const definitionOf = (v: JobVersionRow): JobDefinition => JSON.parse(v.definition) as JobDefinition
+/** The stored definition, or null for a shape this build does not know (jobs.md "Shapes this build does not know"): never run. */
+const definitionOf = (v: JobVersionRow): JobDefinition | null => storedJobDefinition(v)
 
 /**
  * A PC run's hard deadline (B PR 5a): its first claim — the run's creation, which renewals and re-claims never
@@ -170,7 +171,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     const version = handle.jobs.version(job.id, job.approvedVersion)
     if (!version || version.approvedAt === null) return null
     const definition = definitionOf(version)
-    if (definition.placement !== 'e' && definition.placement !== 'a') return null
+    // A shape this build does not know (a newer build approved it, then the server was rolled back): no occurrence.
+    if (definition === null || (definition.placement !== 'e' && definition.placement !== 'a')) return null
     const zone = deps.timeZoneOf(companyId)
     const slot = latestJobSlot(definition.trigger, companyNow(nowMs, zone), deps.holidaysOf(companyId))
     if (slot === null) return null
@@ -240,7 +242,9 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     for (const occ of handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT)) {
       const run = occ.runId ? handle.aiRuns.byId(occ.runId) : null
       const version = handle.jobs.version(occ.jobId, occ.jobVersion)
-      const overdue = run !== null && version !== null && nowMs >= pcRunDeadlineMs(run, definitionOf(version))
+      const pinned = version ? definitionOf(version) : null
+      // A shape this build does not know has no deadline it can read: only its expiry applies here.
+      const overdue = run !== null && pinned !== null && nowMs >= pcRunDeadlineMs(run, pinned)
       const expired = nowMs >= Date.parse(occ.expiresAt)
       const job = handle.jobs.find(occ.jobId)
       const acting = version?.actingUserId ?? null
@@ -327,7 +331,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         if (clock.nowMs() >= Date.parse(occ.expiresAt)) return end('expired', 'EXPIRED', 'job_expired', job, acting)
         if (!job || !version) return end('held', 'JOB_VERSION_CHANGED', null, job, acting)
         const definition = definitionOf(version)
-        if (definition.placement !== 'e' || definition.run.kind !== 'operation') return null
+        // Not run, not changed: a shape this build does not know is left as it is (its own build runs it).
+        if (definition === null || definition.placement !== 'e' || definition.run.kind !== 'operation') return null
         // Stopped after it was made: held, nothing made (D8; a pause holds it too, also on resume).
         if (handle.jobs.stopped()) return end('held', 'COMPANY_STOPPED', null, job, acting)
         if (job.state !== 'active') return end('held', 'JOB_PAUSED', null, job, acting)
@@ -434,12 +439,13 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
       const key = `${o.jobId}\n${o.jobVersion}`
       if (!placement.has(key)) {
         const v = handle.jobs.version(o.jobId, o.jobVersion)
-        placement.set(key, v ? definitionOf(v).placement : null)
+        placement.set(key, v ? definitionOf(v)?.placement ?? 'unknown' : null)
       }
       return placement.get(key)
     }
-    // A version gone (never: versions are append-only) is left to runOccurrence, which holds it.
-    return handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT).filter(o => placementOf(o) !== 'a').slice(0, limit)
+    // A version gone (never: versions are append-only) is left to runOccurrence, which holds it. A shape this build
+    // does not know never takes a place in the batch (it would be skipped there every time).
+    return handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT).filter(o => placementOf(o) !== 'a' && placementOf(o) !== 'unknown').slice(0, limit)
   }
 
   /**
