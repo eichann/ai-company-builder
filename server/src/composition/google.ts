@@ -158,9 +158,9 @@ export function wireGoogle(deps: GoogleWiringDeps) {
     memberOf: (companyId, userId) => access.memberOf(companyId, userId),
     pickTickets: sqlitePickTicketDirectory(conn),
     docTiming: () => driveDocTiming(),
-    // The practice Google serves a stand-in Picker script on staging (tests/fakes/google).
     // The execution run's fence right before a put leaves (google-drive.md; built later in composition.ts, called only after construction).
     runFence: deps.runFence,
+    // The practice Google serves a stand-in Picker script on staging (tests/fakes/google).
     pickerScriptOrigin: practiceGoogle
       ? `${practiceGoogle.target.protocol}//${practiceGoogle.target.hostname === 'host.docker.internal' ? 'localhost' : practiceGoogle.target.hostname}:${practiceGoogle.target.port}`
       : 'https://apis.google.com',
