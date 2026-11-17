@@ -729,7 +729,8 @@ ever. The server clock's `driveSweep` (`googleDrive.sweep`, every company, recor
 `sending` for more than `PUT_INTERRUPTED_AFTER_MS` (15 minutes) `unknown` (reason `interrupted`); from then on it is
 looked up by its `acbPutId` on the next repeat or `GET /puts/:putId` like any lost answer (found → `done`
 `found-by-correlation`) — **never re-sent**. S10b's `outcomeOf` already counts `sending` as unknown. A late answer still
-settles it (`settlePut` takes `sending` or `unknown`). A waiting overwrite left `writing` is not touched: its press answers
+settles it (`settlePut` takes `sending` or `unknown`); a late refusal does not remove it (`dropPut` removes only
+`sending`), so it stays `unknown` — nothing is uploaded twice. A waiting overwrite left `writing` is not touched: its press answers
 `DRIVE_CONFIRMATION_BUSY` until it is pruned (the AI asks anew); the put underneath is the receipt above.
 Test: `google-drive.test.ts` 「a put left `sending` by a stopped process」 (before: in progress; after: unknown, found,
 nothing uploaded again; a receipt within the bound untouched) — mutation-checked: the sweep's call, the bound.

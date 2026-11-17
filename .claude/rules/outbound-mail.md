@@ -151,6 +151,11 @@ stops in between (a crash, a deploy, a restore of the database) leaves it `sendi
 - A late answer of a send already made `unknown` changes nothing: `finishSend` settles only `sending` and returns
   false, and the send then answers `unknown` (`lateAnswer`) without moving the record, a receipt (やりとり), the retention
   clock or a waiting — both channels; the person decides.
+- Like any `unknown` send (a lost answer), one made `unknown` here no longer counts for "One send per source"
+  (`sendsForSource` reads `sending` / `sent`): another member's draft on the same source is not stopped by it. Kept
+  as is (the 「…が送りました」 sentence would be wrong for a send nobody knows went out); a decision for the owner.
+- A `sending` row whose record cannot be moved (gone, or neither `draft` nor `unknown`) stays and is looked at again
+  each pass (at most 500 per company and pass, oldest first).
   The 「返事を待つ」 day chosen at that send is not kept (it was never written): 送られていた starts no waiting.
 - Test: `outbound-mail.test.ts` 「a send left half-done」 (before: no way out; after the clock's pass: `unknown`, the
   ledger's clock entry, a send within the bound untouched, nothing sent, a second pass changes nothing, 送られていた; an

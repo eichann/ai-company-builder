@@ -241,6 +241,18 @@ describe('per-company export and restore', () => {
       }
       // A whole-server restore: the same for every company, the stop not added twice.
       expect(run('pause-after-restore', '--all')).toContain(`Company ${co.A}: scheduled jobs stopped, the AI was already stopped`)
+      // Without the server's settings the command stops before writing anything (never a restored company left running).
+      const bare = join(work, 'cli-bare')
+      const { AUTH_SECRET: _omitted, ...withoutSecret } = env
+      void _omitted
+      expect(() => execFileSync(process.execPath, ['--import', 'tsx', 'src/cli/company-archive.ts', 'restore', fresh],
+        { env: { ...withoutSecret, DATA_DIR: bare, REPOS_DIR: join(bare, 'repos') }, encoding: 'utf8', stdio: 'pipe' })).toThrow()
+      const empty = new Database(join(bare, 'app.sqlite'), { readonly: true })
+      try {
+        expect(empty.prepare('SELECT COUNT(*) AS n FROM companies').get()).toEqual({ n: 0 })
+      } finally {
+        empty.close()
+      }
     })
   })
 

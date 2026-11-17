@@ -168,8 +168,9 @@ through the company handle). Test: `server/tests/integration/company-archive.tes
 docker compose run --rm --no-deps -v /srv/acb-archives:/archives api \
   node --import tsx src/cli/company-archive.ts export <companyId> /archives/<name>
 # restore into a scratch / empty server (refuses if the company or its repositories exist there);
-# leaves the company's jobs and AI stopped ("After a restore" below)
-DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <archive dir>
+# leaves the company's jobs and AI stopped ("After a restore" below), so it needs the api's settings
+# (AUTH_SECRET …): without them it stops before writing anything
+DATA_DIR=/tmp/acb-scratch AUTH_SECRET=… node --import tsx src/cli/company-archive.ts restore <archive dir>
 ```
 
 - The archive (dirs 0700, files 0600) holds:
@@ -244,7 +245,7 @@ admin console); lifting the jobs stop holds the slot that passed meanwhile, so n
 - Test: `restore-pause.test.ts` (a slot that ran before the copy is never run again, also after the stop is lifted;
   the whole AI stopped once; owners / admins told, members not), `job-runs.test.ts` 「after a restore」 (a running PC
   occurrence held, its run ended), `company-archive.test.ts` 「the restore command…」 (the CLI's restore and
-  `pause-after-restore --all`) — each mutation-checked.
+  `pause-after-restore --all`; without the api's settings nothing is written) — each mutation-checked.
 
 ## CI
 
