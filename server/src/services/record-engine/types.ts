@@ -6,6 +6,7 @@ import type { TokenDigest } from '../../ports/key-broker'
 import type { RecordFileWriter } from '../../ports/record-files'
 import type { Transactions } from '../../ports/transactions'
 import type { Member } from '../access'
+import type { Refusal } from '../outcome'
 import type { AcceptanceQuestion } from '../task-acceptance'
 
 /**
@@ -102,6 +103,12 @@ export interface RecordEngineDeps {
    * or link change runs on it (409 FEATURE_OFF); reading is unchanged. Absent → never.
    */
   featureOff?: (companyId: string, type: string) => boolean
+  /**
+   * The execution run's fence at the write (services/ai-runs.ts `writeFence`; records.md "Execution runs"): asked
+   * inside the write's transaction for an AI actor bound to a run (`runId` + `runGeneration`), so a stop, a re-claim
+   * or a lease that ran out during the request's awaits writes nothing. Absent → not asked.
+   */
+  runFence?: (member: Member, run: { id: string; generation: number }) => Refusal | null
 }
 
 /**
@@ -142,6 +149,12 @@ export interface ActorInput {
   proposedBy?: 'ai' | null
   /** For the AI: the execution run its token is bound to (S10b; from the token, never the body). */
   runId?: string | null
+  /**
+   * For the AI: the generation of that run its token is bound to (from the token, never the body). Only with it is
+   * the run fenced again at the write (`runFence`); a server service naming a run it already ended (a put-back after
+   * a failed run) passes none.
+   */
+  runGeneration?: number | null
   /**
    * For a person: the plugin screen the call came through (its bridge, plan 4b B6;
    * services/plugin-bridge.ts sets it, never a body). The action's `via` must

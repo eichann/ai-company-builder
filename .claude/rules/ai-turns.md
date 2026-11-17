@@ -319,7 +319,10 @@ The execution state lives on the server; the AI still runs only here.
   (a retry, or another PC redoing the step) gets the same key, and the server answers what the
   first one made; the API reads that back (`replayReadPath`: the draft, record, approval or
   plugin operation) so the tools see the same answer, never a second effect.
-- **Renewal**: every minute while the run is held (`renewEveryMs`); a 409 (taken over) stops it.
+- **Renewal**: every minute while the run is held (`renewEveryMs`); a 409 (taken over, or the lease
+  already ran out — a PC asleep longer than 5 minutes) stops it. A run-bound token whose lease ran
+  out is refused too, and every record write and Drive upload asks the fence again right at the
+  write (`records.md` "Fenced at the write").
 - **The server's emergency stop** (`agent-stop.md` "Runs with no person present"): the server
   refuses a claim with 503 `AI_STOPPED` while the member's AI (or a `write` / `web` / `mcp-external`
   kind) is stopped, and every call of the run's token while the whole AI is stopped for the member;
