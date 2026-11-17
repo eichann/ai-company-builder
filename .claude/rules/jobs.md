@@ -474,8 +474,17 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
 - **Claim** (`claims.ts` → `job-runs.ts`): main's refusals first, with no server call (`not-allowed`): main window,
   the emergency stop, an agent without `recordActions`, the stop policy not confirmed, the member's 「自動で進める」 off
   (read now; a job has no person who asked). For `new_files` in the shared folder, **before the claim**
-  (`gitCheckPoint`): this PC must have what the server has — fetched since `checkUntil` (`FETCH_HEAD`'s time) **and**
-  the server's tip (`@{upstream}`, else `FETCH_HEAD`) in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or a
+  (`gitCheckPoint`): this PC must have what the server has — **fetched after the server listed the occurrence, told
+  without any clock**: at the occurrence's first check (always after the server listed it, which it does only once its
+  time has come) the app takes `FETCH_HEAD`'s identity (`gitFetchMark`: device, inode, size, modification and change
+  times to the nanosecond; `none` when never fetched) and keeps it; a check counts as synced only when the identity
+  has changed since (git rewrites `FETCH_HEAD` on every fetch, also one that brings nothing new). So the first check
+  always waits for the next fetch (the automatic 受け取る, `sync.md`). No mark (it could not be taken), the same
+  identity, or `FETCH_HEAD` gone → not synced; a mark that could not be taken is not kept (the next check takes it);
+  forgotten when the occurrence leaves this app's list, however it leaves (listed again, a new mark). Timestamps were
+  tried first and each failed a Codex review (2026-11-18): `FETCH_HEAD`'s time against `checkUntil` compared the PC's
+  clock with the server's; against the listing's arrival, a clock set back after the listing either kept every fresh
+  fetch waiting or — rebased or reset — let a fetch from before the listing through once the clock caught up **and** the server's tip (`@{upstream}`, else `FETCH_HEAD`) in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or a
   sync stopped on a conflict leaves it out) — else nothing is claimed and it is asked again after `NOT_SYNCED_RETRY_MS`
   (30 s; `retryAfterMs` on the answer), never `nothing` on a guess. **Not a start** (`ai-turns.md`): it does not use
   up the runner's pass, and its hidden consultation, which never ran, is deleted. Then `POST /job-run-claims` with `checks` and `checkedCommit` (this PC's `HEAD` in the place's repository;
@@ -485,7 +494,15 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   reaches the server late is still new; `sinceCommit` is the previous occurrence's commit; unknown here or none — the
   first occurrence, a build before it — the dates after `checkSince` decide), in the innermost repository (a private
   folder's clone, found from the place's on-disk spelling); a commit not on this PC → `temporary` `NOT_SYNCED`. In a
-  working folder (no git): by modification time in [`checkSince`, `checkUntil`) (`newFilesByTime`). **The place is
+  working folder (no git): by modification time in [`checkSince`, `checkUntil`) (`newFilesByTime`) — the server's
+  instants, so the file times (this PC's clock) are read through the clock difference measured at the claim (the
+  server's `run.updatedAt` against the request's departure and the answer's arrival: a range, and a file counts when
+  it may fall in the window, so the travel time never hides one; the start is moved back by a further
+  `JOB_CLOCK_TOLERANCE_MS`, so a file stamped while the clock was off by less than that and corrected since is seen —
+  possibly by two occurrences — rather than missed). Only while that difference is known and within
+  `JOB_CLOCK_TOLERANCE_MS` (5 min, range included): unknown (no `updatedAt`) or further off → **no check**, the run is
+  finished `temporary` `CLOCK_NOT_TRUSTED` (retried by the server, then a person is told) — never `nothing` on a
+  clock's say-so (a clock that far off may also have been set differently when the files were written). **The place is
   followed only when no link is on the way** (`placeOnDisk`: its real location is exactly the place inside the company
   folder's real location, compared as the disk folds names, `diskKey`) — a link committed at the place or above it
   never lists another folder's files or uses another repository. A place not on this PC (not downloaded, a link) →
@@ -519,7 +536,8 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   decides that).
 - **Time and the server**: main stops the AI `JOB_STOP_BEFORE_MS` (1 min) before the approved minutes from the run's
   first claim (`run.createdAt`, on the server's clock: shifted by the difference between the claim's `updatedAt` and
-  this PC's time) end — not started at all with less left —, through the chat turns' `abort` with
+  this PC's time **when the claim was sent** — so the answer's travel never moves the end later; the server refuses
+  every call after the deadline anyway) end — not started at all with less left —, through the chat turns' `abort` with
   reason `job-ended` (the reply says 「※ 定期の仕事の時間が来たか、仕事が止められたため、AI を止めました。」); settle then
   finishes `bad-input` `TIME_LIMIT` (→ `needs_person` `RUN_FAILED`, told). A renew answered 409 (a pause, the
   company's stop, the deadline, another PC) stops the AI the same way and settle gives the run back (`RUN_LOST`; the
@@ -826,7 +844,12 @@ membership can fail).
   quoted; the tool ceiling; the procedure not here; no report → retried, never `nothing` from the AI; the time limit
   and the renew's 409 stop the AI; the write and read areas, a link cannot lead out; new files by git's history
   (added only, within the window) and by time; a link at or above the place never followed; not synced → given back;
-  taken away while preparing → nothing starts and no ceiling; the server's clock for the deadline; 「自動で進める」 off →
+  taken away while preparing → nothing starts and no ceiling; the server's clock for the deadline, the answer's travel
+  not counted; "synced?" by `FETCH_HEAD`'s identity against the mark (Codex's case: no fetch since the mark is never
+  synced, whatever times the file carries; a fetch bringing nothing new counts; never fetched → the first fetch counts;
+  no mark, `FETCH_HEAD` gone → not synced; the mark taken once and kept, not kept when it could not be taken, a new
+  one after the occurrence left the list); a working folder's files read on the server's clock, an unknown or far-off
+  clock → `CLOCK_NOT_TRUSTED`, never `nothing`, the window widened the right way — 17 mutations, each fails; 「自動で進める」 off →
   no claim; the queue never hands a job early); `src/features/chat/aiTurns.test.ts` (a job after the records, outside
   their daily limit and failures in a row); `admin/tests/jobs.test.tsx` (the PC form through the
   shared parser; the meeting check names the minutes route). Mutation check: 12 + 5 server and 24 + 14 client
