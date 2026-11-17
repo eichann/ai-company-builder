@@ -21,6 +21,8 @@ paths:
   - "server/src/adapters/company-archive.ts"
   - "server/src/adapters/sqlite/company-archive.ts"
   - "server/tests/integration/company-archive.test.ts"
+  - "server/src/services/restore-pause.ts"
+  - "server/tests/integration/restore-pause.test.ts"
   - ".env.example"
   - "staging/**"
   - "server/tests/unit/staging-kit.test.ts"
@@ -165,7 +167,8 @@ through the company handle). Test: `server/tests/integration/company-archive.tes
 # export (reads the server's DATA_DIR / REPOS_DIR; the archive dir must not exist yet)
 docker compose run --rm --no-deps -v /srv/acb-archives:/archives api \
   node --import tsx src/cli/company-archive.ts export <companyId> /archives/<name>
-# restore into a scratch / empty server (refuses if the company or its repositories exist there)
+# restore into a scratch / empty server (refuses if the company or its repositories exist there);
+# leaves the company's jobs and AI stopped ("After a restore" below)
 DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <archive dir>
 ```
 
@@ -205,6 +208,43 @@ DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <
   restore, re-apply the erasure log (`records.md` "Erasing: the operator's runbook").
 - Deleting a company is designed but not a command (needs the retention promise first); the
   steps are in the CLI's header comment.
+
+## After a restore: automatic work stays stopped
+
+A database put back from a copy (an archive, or the whole server's backup) no longer knows what was done outside
+after the copy was taken — an occurrence of a scheduled job, an AI run's operation key, a Drive put's receipt, a mail
+sent. UNIQUE keys protect only rows that exist, so the same slot or operation could be made and sent again.
+Code: `services/restore-pause.ts` (`restorePause.pauseAfterRestore`, the operator's CLI only; no route). For each
+restored company, in one transaction:
+
+- 「定期の仕事をすべて止める」 on (`ai_job_settings`, `updated_by` `acb:restore`) and what is due or running held
+  (`COMPANY_STOPPED`, `jobs.md` "Held"; a running PC run ended);
+- the company-wide emergency stop of the whole AI (`agent_stops`, `stopped_by` `acb:restore`, a reason saying what to
+  check; not added again when one is in force): the server refuses AI runs' claims and tokens and the relay
+  (`agent-stop.md`). Members cannot use the AI until it is released (owner decision on the safe side, see the PR);
+- the notice `company_restored` to every owner / admin (`notifications.md`).
+
+A person's own send is not stopped. Sends and Drive puts the copy holds as `sending` are settled by the server clock
+(`outbound-mail.md` "A send left half-done", `google-drive.md` "A put left half-done"). Owners / admins resume after
+checking the outside services: 「定期の仕事」 →「動かせるようにする」 and 「AI の緊急停止」 → release (both in the
+admin console); lifting the jobs stop holds the slot that passed meanwhile, so nothing from before runs.
+
+- **One company** (`company-archive.ts restore`): done by the command right after the rows and repositories are in.
+- **The whole server from a backup** (no startup hook can tell a restored database from a server that was simply
+  down, so this is a step of the procedure, never automatic): stop `api` first; put back `data/` (the databases
+  **and** `data/repos/` from the same snapshot — a database newer or older than its repositories is not
+  supported); then, before starting `api`:
+
+  ```bash
+  docker compose run --rm --no-deps api node --import tsx src/cli/company-archive.ts pause-after-restore --all
+  ```
+
+  then `docker compose up -d api`, re-apply the erasure log (`records.md`), and tell the owners / admins. The
+  command needs the api's settings (`AUTH_SECRET` …), which `docker compose run` gives it.
+- Test: `restore-pause.test.ts` (a slot that ran before the copy is never run again, also after the stop is lifted;
+  the whole AI stopped once; owners / admins told, members not), `job-runs.test.ts` 「after a restore」 (a running PC
+  occurrence held, its run ended), `company-archive.test.ts` 「the restore command…」 (the CLI's restore and
+  `pause-after-restore --all`) — each mutation-checked.
 
 ## CI
 

@@ -394,6 +394,23 @@ describe('the grant at every call', () => {
     expect(tasksOf()).toEqual([])
   })
 
+  it('after a restore (restore-pause.ts): a running occurrence is held and its run ended; lifting both stops brings nothing back', async () => {
+    const { occ } = await runnable()
+    const run = (await claim(occ)).body.data.run
+    const token = await tokenFor(run)
+    services.restorePause.pauseAfterRestore(CO)
+    expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'COMPANY_STOPPED' })
+    expect(runOf(run.id).state).toBe('waiting_person')
+    // An owner checked the outside results and lifted both stops: the run stays ended.
+    services.jobs.setStopped(owner(), { stopped: false })
+    const stops = services.agentStops.get(owner())
+    for (const s of stops.ok ? stops.value.active : []) services.agentStops.release(owner(), s.id)
+    expect(services.agentStops.companyStopped(CO)).toBe(false)
+    expect(await ai(token, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 409, body: { code: 'RUN_SUPERSEDED' } })
+    expect((await finish(run, { outcome: 'done', jobResult: { title: '報告書の下書き' } })).status).toBe(409)
+    expect(tasksOf()).toEqual([])
+  })
+
   it('a stop or a pause written without holding (an older build) still refuses the next call, the re-claim and the finish', async () => {
     const { occ } = await runnable()
     const run = (await claim(occ)).body.data.run

@@ -5,11 +5,17 @@
  *
  *   node --import tsx src/cli/company-archive.ts export <companyId> <new archive dir>
  *   node --import tsx src/cli/company-archive.ts restore <archive dir>
+ *   node --import tsx src/cli/company-archive.ts pause-after-restore <companyId> | --all
  *
- * Both use DATA_DIR / REPOS_DIR as the server does. Restore into an empty or
+ * All use DATA_DIR / REPOS_DIR as the server does. Restore into an empty or
  * scratch DATA_DIR (it refuses when the company or one of its repositories
  * already exists there); start the server on it once afterwards so startup
  * configures the restored repositories and their hook.
+ *
+ * A restored company's automatic work stays stopped (services/restore-pause.ts,
+ * deployment.md "After a restore"): `restore` stops its scheduled jobs and its
+ * AI and tells its owners / admins. After restoring the whole server from a
+ * backup, run `pause-after-restore --all` (the api stopped) before starting it.
  *
  * Deleting a company is designed but deliberately NOT a command (owner gate
  * "1社だけ渡して消す"; it needs the customer agreement on retention first):
@@ -53,11 +59,33 @@ async function main(argv: string[]): Promise<number> {
       return 1
     }
     const rows = Object.values(result.counts).reduce((a, b) => a + b, 0)
-    console.log(`Restored company ${result.companyId}: ${rows} rows, ${result.repos.length} repositories into ${DATA_DIR}. Start the server once so it configures the repositories.`)
+    console.log(`Restored company ${result.companyId}: ${rows} rows, ${result.repos.length} repositories into ${DATA_DIR}.`)
+    await pauseAfterRestore(db, [result.companyId])
+    console.log('Start the server once so it configures the repositories.')
     return 0
   }
-  console.error('Usage:\n  company-archive.ts export <companyId> <new archive dir>\n  company-archive.ts restore <archive dir>')
+  if (command === 'pause-after-restore' && args.length === 1) {
+    const { db, initDatabase } = await import('../db')
+    initDatabase(db)
+    const { sqliteCompanyRepository } = await import('../adapters/sqlite/companies')
+    const all = sqliteCompanyRepository(db).allIds()
+    const ids = args[0] === '--all' ? all : all.filter(id => id === args[0])
+    if (ids.length === 0) { console.error(args[0] === '--all' ? 'No company in this database.' : 'No such company in this database.'); return 1 }
+    await pauseAfterRestore(db, ids)
+    return 0
+  }
+  console.error('Usage:\n  company-archive.ts export <companyId> <new archive dir>\n  company-archive.ts restore <archive dir>\n  company-archive.ts pause-after-restore <companyId> | --all')
   return 2
+}
+
+/** Scheduled jobs and the AI stopped for each company, its owners / admins told (services/restore-pause.ts). */
+async function pauseAfterRestore(db: import('better-sqlite3').Database, companyIds: string[]): Promise<void> {
+  const { createServices } = await import('../composition')
+  const { restorePause } = createServices(db)
+  for (const companyId of companyIds) {
+    const r = restorePause.pauseAfterRestore(companyId)
+    console.log(`Company ${companyId}: scheduled jobs stopped, the AI ${r.aiStopAdded ? 'stopped' : 'was already stopped'}, ${r.told} owner(s) / admin(s) told. Check outside results before resuming.`)
+  }
 }
 
 main(process.argv.slice(2)).then(code => { process.exitCode = code }, (err: unknown) => {
