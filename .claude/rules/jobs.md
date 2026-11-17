@@ -478,10 +478,13 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   (`FETCH_HEAD`'s time against the arrival of the first `GET /me/job-turns` answer naming it, both stamped by **this
   PC's clock**: the server lists an occurrence only once its time has come, so that arrival is after the window's end
   on the server's clock whatever the two clocks say; never `FETCH_HEAD`'s time against `checkUntil`, which compared the
-  PC's clock with the server's — Codex review 2026-11-18. The arrival is kept on the steady clock (`performance.now`)
-  and read on the PC's clock as it is set at the check, so a clock set back or forward since moves it alike: a fetch
-  made after the correction counts at once, and one stamped before a clock set back lies in this PC's future and is
-  not trusted — one more fetch is needed. Forgotten when the occurrence leaves this app's list, however it leaves:
+  PC's clock with the server's — Codex review 2026-11-18. The arrival is kept on the PC's clock and on the steady clock
+  (`performance.now`); when the PC's clock was changed since (the time each says has passed differs by more than
+  `CLOCK_JUMP_MS`, 2 s — set back, set forward, or a sleep the steady clock did not count), the arrival becomes the
+  moment that was noticed, kept from then on: only a fetch made after the change counts. Moving the arrival back with
+  the clock instead let an old fetch through (fetched 09:59, listed 10:00, set back five minutes ten minutes later →
+  09:55; Codex review 2026-11-18); keeping it unchanged would refuse every fresh fetch until the clock caught up.
+  Forgotten when the occurrence leaves this app's list, however it leaves:
   listed again, it starts anew) **and** the server's tip (`@{upstream}`, else `FETCH_HEAD`) in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or a
   sync stopped on a conflict leaves it out) — else nothing is claimed and it is asked again after `NOT_SYNCED_RETRY_MS`
   (30 s; `retryAfterMs` on the answer), never `nothing` on a guess. **Not a start** (`ai-turns.md`): it does not use
@@ -845,8 +848,8 @@ membership can fail).
   taken away while preparing → nothing starts and no ceiling; the server's clock for the deadline, the answer's travel
   not counted; "synced?" judged against the first listing's arrival, a `FETCH_HEAD` from the future not trusted; a
   working folder's files read on the server's clock, an unknown or far-off clock → `CLOCK_NOT_TRUSTED`, never
-  `nothing`, the window widened the right way, a clock set back after the listing, an occurrence taken off the list
-  forgotten — 16 mutations, each fails; 「自動で進める」 off →
+  `nothing`, the window widened the right way, a clock changed after the listing (Codex's set-back case, set back
+  far, set forward), an occurrence taken off the list forgotten — 18 mutations, each fails; 「自動で進める」 off →
   no claim; the queue never hands a job early); `src/features/chat/aiTurns.test.ts` (a job after the records, outside
   their daily limit and failures in a row); `admin/tests/jobs.test.tsx` (the PC form through the
   shared parser; the meeting check names the minutes route). Mutation check: 12 + 5 server and 24 + 14 client

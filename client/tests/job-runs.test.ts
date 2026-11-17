@@ -627,25 +627,58 @@ test('a working folder\'s check runs only on a clock known to agree with the ser
   assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'done', jobResult: 'nothing' }])
 })
 
-test('this PC\'s clock set back after the listing: a fetch made since still counts (no wait for the clock to catch up); one made before it lies in the future and does not', async () => {
-  const server = fakeServer()
-  const asked: number[] = []
-  let wall = Date.parse('2026-11-11T10:00:00.000Z')
-  let steady = 1_000
-  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async (_r: string | null, _p: string, listedAt: number) => { asked.push(listedAt); return 'not-synced' as const }, newFiles: async () => [], stopTurn: () => {}, now: () => wall, monotonic: () => steady } })
-  await claims.jobTurns(COMPANY)
-  // A minute later the clock is corrected 30 minutes back.
-  steady += 60_000
-  wall = Date.parse('2026-11-11T09:31:00.000Z')
-  await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
-  // The listing, on the clock as now set: 09:30 — a fetch at 09:31 is after it (with the old baseline, 10:00, no fetch
-  // would count for half an hour).
-  assert.deepEqual(asked, [Date.parse('2026-11-11T09:30:00.000Z')])
-  // Set forward instead: the listing moves forward with it, so a fetch stamped before the jump never counts as after it.
-  steady += 60_000
-  wall = Date.parse('2026-11-11T11:00:00.000Z')
-  await claims.claim(COMPANY, OCC, 1, 'conv-job-00002')
-  assert.deepEqual(asked.at(-1), Date.parse('2026-11-11T10:58:00.000Z'))
+test('this PC\'s clock changed after the listing: only a fetch made after the change counts — an old fetch never passes, and a fresh one is not kept waiting for the clock', async () => {
+  const at = (hhmm: string) => Date.parse(`2026-11-11T${hhmm}:00.000Z`)
+  const world = () => {
+    const server = fakeServer()
+    const asked: number[] = []
+    const clock = { wall: at('10:00'), steady: 1_000 }
+    const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async (_r: string | null, _p: string, listedAt: number) => { asked.push(listedAt); return 'not-synced' as const }, newFiles: async () => [], stopTurn: () => {}, now: () => clock.wall, monotonic: () => clock.steady } })
+    return { claims, asked, clock }
+  }
+  // No change: the first arrival is the baseline.
+  {
+    const { claims, asked, clock } = world()
+    await claims.jobTurns(COMPANY)
+    clock.steady += 600_000
+    clock.wall = at('10:10')
+    await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
+    assert.deepEqual(asked, [at('10:00')])
+  }
+  // Codex's case: fetched 09:59, listed 10:00, ten minutes later the clock is set back five → 10:05. The 09:59 fetch
+  // must not count (a baseline moved back with the clock, 09:55, would let it through and end the run as `nothing`).
+  {
+    const { claims, asked, clock } = world()
+    await claims.jobTurns(COMPANY)
+    clock.steady += 600_000
+    clock.wall = at('10:05')
+    await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
+    assert.deepEqual(asked, [at('10:05')])
+    assert.ok(asked[0] > at('09:59'))
+    // The new baseline is kept: a minute later, a fetch after 10:05 counts.
+    clock.steady += 60_000
+    clock.wall = at('10:06')
+    await claims.claim(COMPANY, OCC, 1, 'conv-job-00002')
+    assert.deepEqual(asked.at(-1), at('10:05'))
+  }
+  // Set back 30 minutes: a fetch made after the change counts at once (with 10:00 kept, none would for half an hour).
+  {
+    const { claims, asked, clock } = world()
+    await claims.jobTurns(COMPANY)
+    clock.steady += 60_000
+    clock.wall = at('09:31')
+    await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
+    assert.deepEqual(asked, [at('09:31')])
+  }
+  // Set forward: a fetch stamped before the jump never counts as after it.
+  {
+    const { claims, asked, clock } = world()
+    await claims.jobTurns(COMPANY)
+    clock.steady += 60_000
+    clock.wall = at('11:00')
+    await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
+    assert.deepEqual(asked, [at('11:00')])
+  }
 })
 
 test('an occurrence this app took off its list (finished `nothing`) is forgotten: listed again, its listing time starts anew', async () => {

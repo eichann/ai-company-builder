@@ -72,6 +72,12 @@ export interface ClockOffset { min: number; max: number }
  */
 export const JOB_CLOCK_TOLERANCE_MS = 5 * 60_000
 
+/**
+ * How far this PC's clock may drift from the steady clock between an occurrence's listing and its check before it
+ * counts as changed (set back or forward) — then only a fetch after the change counts.
+ */
+export const CLOCK_JUMP_MS = 2_000
+
 /** A place not synced yet: asked again after this (the app syncs by itself meanwhile); no start is counted. */
 export const NOT_SYNCED_RETRY_MS = 30_000
 /** An earlier occurrence of the job still runs (409 `JOB_EARLIER_RUNNING`, jobs.md "Never side by side"): asked again after this. */
@@ -104,18 +110,27 @@ export function createJobRuns(deps: JobRunDeps) {
   /** The member's turns as last listed, per company. */
   const listed = new Map<string, Map<string, QueuedJobTurn>>()
   /**
-   * When this PC first got each listed occurrence from the server, by company and occurrence: on the steady clock
-   * (`monotonic`), which no change of the PC's clock moves. Forgotten once it is off the list.
+   * When this PC first got each listed occurrence from the server, by company and occurrence: on this PC's clock
+   * (`wall`) and on the steady clock (`steady`, which no change of the PC's clock moves). Forgotten once it is off the
+   * list.
    */
-  const firstListed = new Map<string, number>()
+  const firstListed = new Map<string, { wall: number; steady: number }>()
   /**
-   * That arrival on this PC's clock **as it is set now** (`listedAt`): a clock set back or forward since moves it
-   * alike, so a fetch made after the correction is judged in the same frame — and one stamped before a clock set back
-   * lies in this PC's future, which `gitCheckPoint` does not trust (one more fetch is needed).
+   * That arrival on this PC's clock (`listedAt`). When the PC's clock was changed since (its time passed differs from
+   * the steady clock's by more than `CLOCK_JUMP_MS`), a fetch stamped before the change cannot be placed against the
+   * arrival any more — set back, an old fetch could look newer than a rebased arrival — so the arrival becomes the
+   * moment the change was noticed: only a fetch made after it counts (never `nothing` on doubt).
    */
   const listedAt = (key: string): number => {
     const at = firstListed.get(key)
-    return at === undefined ? now() : now() - (monotonic() - at)
+    if (at === undefined) return now()
+    const wall = now()
+    const steady = monotonic()
+    if (Math.abs((wall - at.wall) - (steady - at.steady)) > CLOCK_JUMP_MS) {
+      firstListed.set(key, { wall, steady })
+      return wall
+    }
+    return at.wall
   }
   /** Off this app's list (finished, taken, given up): its arrival is forgotten too, so a later listing starts anew. */
   const unlist = (companyId: string, occurrenceId: string) => {
@@ -161,7 +176,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const turns = r?.status === 200 ? parseJobTurns(r.data) : null
       if (turns === null) return [...(listed.get(companyId)?.values() ?? [])]
       // The first arrival is kept: the earliest moment this PC knows the window had ended on the server.
-      const arrived = monotonic()
+      const arrived = { wall: now(), steady: monotonic() }
       const ids = new Set(turns.map(t => t.occurrenceId))
       for (const id of listed.get(companyId)?.keys() ?? []) if (!ids.has(id)) firstListed.delete(keyOf(companyId, id))
       for (const id of ids) if (!firstListed.has(keyOf(companyId, id))) firstListed.set(keyOf(companyId, id), arrived)
