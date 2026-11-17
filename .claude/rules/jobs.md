@@ -474,18 +474,17 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
 - **Claim** (`claims.ts` → `job-runs.ts`): main's refusals first, with no server call (`not-allowed`): main window,
   the emergency stop, an agent without `recordActions`, the stop policy not confirmed, the member's 「自動で進める」 off
   (read now; a job has no person who asked). For `new_files` in the shared folder, **before the claim**
-  (`gitCheckPoint`): this PC must have what the server has — fetched after the server first listed the occurrence
-  (`FETCH_HEAD`'s time against the arrival of the first `GET /me/job-turns` answer naming it, both stamped by **this
-  PC's clock**: the server lists an occurrence only once its time has come, so that arrival is after the window's end
-  on the server's clock whatever the two clocks say; never `FETCH_HEAD`'s time against `checkUntil`, which compared the
-  PC's clock with the server's — Codex review 2026-11-18. The arrival is kept on the PC's clock and on the steady clock
-  (`performance.now`); when the PC's clock was changed since (the time each says has passed differs by more than
-  `CLOCK_JUMP_MS`, 2 s — set back, set forward, or a sleep the steady clock did not count), the arrival becomes the
-  moment that was noticed, kept from then on: only a fetch made after the change counts. Moving the arrival back with
-  the clock instead let an old fetch through (fetched 09:59, listed 10:00, set back five minutes ten minutes later →
-  09:55; Codex review 2026-11-18); keeping it unchanged would refuse every fresh fetch until the clock caught up.
-  Forgotten when the occurrence leaves this app's list, however it leaves:
-  listed again, it starts anew) **and** the server's tip (`@{upstream}`, else `FETCH_HEAD`) in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or a
+  (`gitCheckPoint`): this PC must have what the server has — **fetched after the server listed the occurrence, told
+  without any clock**: at the occurrence's first check (always after the server listed it, which it does only once its
+  time has come) the app takes `FETCH_HEAD`'s identity (`gitFetchMark`: device, inode, size, modification and change
+  times to the nanosecond; `none` when never fetched) and keeps it; a check counts as synced only when the identity
+  has changed since (git rewrites `FETCH_HEAD` on every fetch, also one that brings nothing new). So the first check
+  always waits for the next fetch (the automatic 受け取る, `sync.md`). No mark (it could not be taken), the same
+  identity, or `FETCH_HEAD` gone → not synced; a mark that could not be taken is not kept (the next check takes it);
+  forgotten when the occurrence leaves this app's list, however it leaves (listed again, a new mark). Timestamps were
+  tried first and each failed a Codex review (2026-11-18): `FETCH_HEAD`'s time against `checkUntil` compared the PC's
+  clock with the server's; against the listing's arrival, a clock set back after the listing either kept every fresh
+  fetch waiting or — rebased or reset — let a fetch from before the listing through once the clock caught up **and** the server's tip (`@{upstream}`, else `FETCH_HEAD`) in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or a
   sync stopped on a conflict leaves it out) — else nothing is claimed and it is asked again after `NOT_SYNCED_RETRY_MS`
   (30 s; `retryAfterMs` on the answer), never `nothing` on a guess. **Not a start** (`ai-turns.md`): it does not use
   up the runner's pass, and its hidden consultation, which never ran, is deleted. Then `POST /job-run-claims` with `checks` and `checkedCommit` (this PC's `HEAD` in the place's repository;
@@ -846,10 +845,11 @@ membership can fail).
   and the renew's 409 stop the AI; the write and read areas, a link cannot lead out; new files by git's history
   (added only, within the window) and by time; a link at or above the place never followed; not synced → given back;
   taken away while preparing → nothing starts and no ceiling; the server's clock for the deadline, the answer's travel
-  not counted; "synced?" judged against the first listing's arrival, a `FETCH_HEAD` from the future not trusted; a
-  working folder's files read on the server's clock, an unknown or far-off clock → `CLOCK_NOT_TRUSTED`, never
-  `nothing`, the window widened the right way, a clock changed after the listing (Codex's set-back case, set back
-  far, set forward), an occurrence taken off the list forgotten — 18 mutations, each fails; 「自動で進める」 off →
+  not counted; "synced?" by `FETCH_HEAD`'s identity against the mark (Codex's case: no fetch since the mark is never
+  synced, whatever times the file carries; a fetch bringing nothing new counts; never fetched → the first fetch counts;
+  no mark, `FETCH_HEAD` gone → not synced; the mark taken once and kept, not kept when it could not be taken, a new
+  one after the occurrence left the list); a working folder's files read on the server's clock, an unknown or far-off
+  clock → `CLOCK_NOT_TRUSTED`, never `nothing`, the window widened the right way — 17 mutations, each fails; 「自動で進める」 off →
   no claim; the queue never hands a job early); `src/features/chat/aiTurns.test.ts` (a job after the records, outside
   their daily limit and failures in a row); `admin/tests/jobs.test.tsx` (the PC form through the
   shared parser; the meeting check names the minutes route). Mutation check: 12 + 5 server and 24 + 14 client

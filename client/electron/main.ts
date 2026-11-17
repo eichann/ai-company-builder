@@ -63,7 +63,7 @@ import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
 import { createMeetingsApi } from './features/minutes/meetings'
 import { createAiTurnClaims } from './features/ai-turns/claims'
-import { gitCheckPoint, newFilesByGit, newFilesByTime } from './features/ai-turns/job-runs'
+import { gitCheckPoint, gitFetchMark, newFilesByGit, newFilesByTime } from './features/ai-turns/job-runs'
 import { createRunRegistry } from './records/runs'
 import { registerAiTurnsIpc } from './features/ai-turns/ipc'
 import { createNotificationsWatcher } from './features/notifications/watcher'
@@ -437,10 +437,15 @@ const aiTurnClaims = createAiTurnClaims({
       const file = got.ok ? got.files.find(f => f.path === 'SKILL.md') : undefined
       return file ? Buffer.from(file.bytes).toString('utf8') : null
     },
-    checkPoint: async (companyRoot, place, listedAt) => {
+    fetchMark: async (companyRoot, place) => {
       if (!companyRoot) return null
       const root = allowedRoots.validate(companyRoot)
-      return workingFolders.has(root) ? { commit: null } : gitCheckPoint(jobGit, root, place, listedAt)
+      return workingFolders.has(root) ? null : gitFetchMark(jobGit, root, place)
+    },
+    checkPoint: async (companyRoot, place, mark) => {
+      if (!companyRoot) return null
+      const root = allowedRoots.validate(companyRoot)
+      return workingFolders.has(root) ? { commit: null } : gitCheckPoint(jobGit, root, place, mark)
     },
     newFiles: async (companyRoot, place, window) => {
       if (!companyRoot) return null

@@ -37,13 +37,17 @@ export interface JobRunDeps {
   /** A shelf Skill's SKILL.md at the pinned version, fetched and checked against it; null = not readable. */
   readShelfSkill: (companyId: string, item: string, skill: string, version: string) => Promise<string | null>
   /**
-   * Before a `new_files` claim: whether this PC has what the server has, and the commit the check looks up to
-   * (null in a working folder: no git). `listedAt`: this PC's time when the server's list carrying the occurrence
-   * first arrived — the window had ended on the server by then (it lists only occurrences whose time has come), so
-   * a fetch after it, judged on this same PC's clock, holds everything up to the window's end. null: the place is
-   * not on this PC; `not-synced`: not yet.
+   * The identity of the last fetch of the place's repository now (`gitFetchMark`: `FETCH_HEAD`, rewritten by every
+   * fetch); null when it cannot be told (a working folder, the place not here, an error).
    */
-  checkPoint: (companyRoot: string | null, place: string, listedAt: number) => Promise<{ commit: string | null } | null | 'not-synced'>
+  fetchMark: (companyRoot: string | null, place: string) => Promise<string | null>
+  /**
+   * Before a `new_files` claim: whether this PC has what the server has, and the commit the check looks up to
+   * (null in a working folder: no git). `mark`: the fetch identity taken once the server had listed the occurrence
+   * (it lists only occurrences whose time has come) — a fetch since then, told by that identity changing and never by
+   * any clock, holds everything up to the window's end. null: the place is not on this PC; `not-synced`: not yet.
+   */
+  checkPoint: (companyRoot: string | null, place: string, mark: string | null) => Promise<{ commit: string | null } | null | 'not-synced'>
   /**
    * Files (company paths) added under `place`: after `sinceCommit` up to `upto` in the shared folder (by date after
    * `since` when no commit is known), in [since, until) by time in a working folder — the server's instants, read
@@ -53,8 +57,6 @@ export interface JobRunDeps {
   /** Stop the consultation's AI now (main's chat turns), saying why in its reply. */
   stopTurn: (conversationId: string) => void
   now?: () => number
-  /** A steady clock in ms (`performance.now`): what no change of the PC's clock moves. */
-  monotonic?: () => number
   log?: Pick<Console, 'warn'>
 }
 
@@ -71,12 +73,6 @@ export interface ClockOffset { min: number; max: number }
  * (`temporary` `CLOCK_NOT_TRUSTED`: retried, then a person is told) instead.
  */
 export const JOB_CLOCK_TOLERANCE_MS = 5 * 60_000
-
-/**
- * How far this PC's clock may drift from the steady clock between an occurrence's listing and its check before it
- * counts as changed (set back or forward) — then only a fetch after the change counts.
- */
-export const CLOCK_JUMP_MS = 2_000
 
 /** A place not synced yet: asked again after this (the app syncs by itself meanwhile); no start is counted. */
 export const NOT_SYNCED_RETRY_MS = 30_000
@@ -104,38 +100,21 @@ interface Held {
 
 export function createJobRuns(deps: JobRunDeps) {
   const now = deps.now ?? Date.now
-  const monotonic = deps.monotonic ?? (() => performance.now())
   const log = deps.log ?? console
   const keyOf = (companyId: string, occurrenceId: string) => `${companyId}\n${occurrenceId}`
   /** The member's turns as last listed, per company. */
   const listed = new Map<string, Map<string, QueuedJobTurn>>()
   /**
-   * When this PC first got each listed occurrence from the server, by company and occurrence: on this PC's clock
-   * (`wall`) and on the steady clock (`steady`, which no change of the PC's clock moves). Forgotten once it is off the
-   * list.
+   * The fetch identity (`fetchMark`) taken at an occurrence's first `new_files` check, after the server listed it, by
+   * company and occurrence: the check counts as synced only once it has changed (a fetch since). No clock is read —
+   * a PC's clock set back or forward can neither make an old fetch pass nor keep a new one waiting. Forgotten once
+   * the occurrence is off the list.
    */
-  const firstListed = new Map<string, { wall: number; steady: number }>()
-  /**
-   * That arrival on this PC's clock (`listedAt`). When the PC's clock was changed since (its time passed differs from
-   * the steady clock's by more than `CLOCK_JUMP_MS`), a fetch stamped before the change cannot be placed against the
-   * arrival any more — set back, an old fetch could look newer than a rebased arrival — so the arrival becomes the
-   * moment the change was noticed: only a fetch made after it counts (never `nothing` on doubt).
-   */
-  const listedAt = (key: string): number => {
-    const at = firstListed.get(key)
-    if (at === undefined) return now()
-    const wall = now()
-    const steady = monotonic()
-    if (Math.abs((wall - at.wall) - (steady - at.steady)) > CLOCK_JUMP_MS) {
-      firstListed.set(key, { wall, steady })
-      return wall
-    }
-    return at.wall
-  }
-  /** Off this app's list (finished, taken, given up): its arrival is forgotten too, so a later listing starts anew. */
+  const fetchMarks = new Map<string, string>()
+  /** Off this app's list (finished, taken, given up): its mark is forgotten too, so a later listing starts anew. */
   const unlist = (companyId: string, occurrenceId: string) => {
     listed.get(companyId)?.delete(occurrenceId)
-    firstListed.delete(keyOf(companyId, occurrenceId))
+    fetchMarks.delete(keyOf(companyId, occurrenceId))
   }
   /** Runs this app holds, by consultation. */
   const byConversation = new Map<string, Held>()
@@ -175,11 +154,8 @@ export function createJobRuns(deps: JobRunDeps) {
       const r = await deps.session(companyId, 'GET', '/me/job-turns')
       const turns = r?.status === 200 ? parseJobTurns(r.data) : null
       if (turns === null) return [...(listed.get(companyId)?.values() ?? [])]
-      // The first arrival is kept: the earliest moment this PC knows the window had ended on the server.
-      const arrived = { wall: now(), steady: monotonic() }
       const ids = new Set(turns.map(t => t.occurrenceId))
-      for (const id of listed.get(companyId)?.keys() ?? []) if (!ids.has(id)) firstListed.delete(keyOf(companyId, id))
-      for (const id of ids) if (!firstListed.has(keyOf(companyId, id))) firstListed.set(keyOf(companyId, id), arrived)
+      for (const id of listed.get(companyId)?.keys() ?? []) if (!ids.has(id)) fetchMarks.delete(keyOf(companyId, id))
       listed.set(companyId, new Map(turns.map(t => [t.occurrenceId, t])))
       return turns
     },
@@ -200,7 +176,14 @@ export function createJobRuns(deps: JobRunDeps) {
       // claim names the commit the check looks up to (the next occurrence starts after it).
       let point: { commit: string | null } | null = null
       if (listedTurn.check.kind === 'new_files') {
-        const p = await deps.checkPoint(companyRoot, listedTurn.check.path, listedAt(keyOf(companyId, occurrenceId))).catch(() => null)
+        // The mark is taken once, at the first check — after the server listed the occurrence, so a fetch after it
+        // holds everything up to the window's end. That first check is therefore never synced: it waits for a fetch.
+        const key = keyOf(companyId, occurrenceId)
+        if (!fetchMarks.has(key)) {
+          const mark = await deps.fetchMark(companyRoot, listedTurn.check.path).catch(() => null)
+          if (mark !== null) fetchMarks.set(key, mark)
+        }
+        const p = await deps.checkPoint(companyRoot, listedTurn.check.path, fetchMarks.get(key) ?? null).catch(() => null)
         if (p === 'not-synced') return { claimed: false, reason: 'unavailable', retryAfterMs: NOT_SYNCED_RETRY_MS }
         point = p
       }
@@ -387,8 +370,6 @@ export async function newFilesByTime(root: string, place: string, since: string,
 }
 
 type Git = (cwd: string, args: string[]) => Promise<string>
-/** A file's time a little after "now" (the file system's rounding): still this PC's present, not its future. */
-const FUTURE_SLACK_MS = 2_000
 const COMMIT_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
 
 /** The place's repository (the company's, or a private folder's clone above it), found by its on-disk spelling. */
@@ -407,20 +388,44 @@ async function repoOf(root: string, place: string): Promise<{ repo: string; relI
   }
 }
 
+/** No `FETCH_HEAD` yet (never fetched): any fetch after this mark changes it. */
+const NEVER_FETCHED = 'none'
+
 /**
- * Before a `new_files` check in the shared folder is claimed: this PC has what the server has — fetched after the
- * server listed the occurrence (`FETCH_HEAD`'s time against `listedAt`: both stamped by this PC's clock, so a clock
- * set ahead of or behind the server's moves both alike; a `FETCH_HEAD` from this PC's future means its clock was set
- * back since, and is not trusted) **and** the server's tip in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or
- * a sync stopped on a conflict leaves it out) — and the commit it will look up to (`HEAD`). `not-synced`: tried
- * later, never `nothing` on a guess. null: the place is not on this PC (not downloaded, a link).
+ * `FETCH_HEAD`'s identity in the repository: device, inode, size and its times to the nanosecond. git rewrites the
+ * file on every fetch — also one that brings nothing new —, so any fetch changes it; it is only ever compared for
+ * equality, never against a clock. `NEVER_FETCHED` when there is none; null when it cannot be read.
  */
-export async function gitCheckPoint(git: Git, root: string, place: string, listedAt: number, nowMs: number = Date.now()): Promise<{ commit: string } | null | 'not-synced'> {
+async function fetchHeadMark(git: Git, repo: string): Promise<string | null> {
+  const fetchHead = await git(repo, ['rev-parse', '--git-path', 'FETCH_HEAD']).then(p => p.trim()).catch(() => null)
+  if (!fetchHead) return null
+  try {
+    const s = await stat(path.resolve(repo, fetchHead), { bigint: true })
+    return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'ENOENT' ? NEVER_FETCHED : null
+  }
+}
+
+/** The place's repository's fetch identity now (`fetchHeadMark`); null when the place is not on this PC or unreadable. */
+export async function gitFetchMark(git: Git, root: string, place: string): Promise<string | null> {
+  const r = await repoOf(root, place)
+  return r ? fetchHeadMark(git, r.repo) : null
+}
+
+/**
+ * Before a `new_files` check in the shared folder is claimed: this PC has what the server has — fetched since `mark`
+ * was taken (after the server listed the occurrence): `FETCH_HEAD`'s identity differs from it — no clock is read, so
+ * a PC clock set back or forward can neither make an old fetch pass nor hold a new one back; no mark (unknown) is
+ * never synced — **and** the server's tip in `HEAD` (`merge-base --is-ancestor`: a fetch-only path or a sync stopped
+ * on a conflict leaves it out) — and the commit it will look up to (`HEAD`). `not-synced`: tried later, never
+ * `nothing` on a guess. null: the place is not on this PC (not downloaded, a link).
+ */
+export async function gitCheckPoint(git: Git, root: string, place: string, mark: string | null): Promise<{ commit: string } | null | 'not-synced'> {
   const r = await repoOf(root, place)
   if (!r) return null
-  const fetchHead = await git(r.repo, ['rev-parse', '--git-path', 'FETCH_HEAD']).then(p => p.trim()).catch(() => null)
-  const fetched = fetchHead ? await stat(path.resolve(r.repo, fetchHead)).catch(() => null) : null
-  if (!fetched || !Number.isFinite(listedAt) || fetched.mtimeMs < listedAt || fetched.mtimeMs > nowMs + FUTURE_SLACK_MS) return 'not-synced'
+  const current = await fetchHeadMark(git, r.repo)
+  if (mark === null || current === null || current === NEVER_FETCHED || current === mark) return 'not-synced'
   const tip = await git(r.repo, ['rev-parse', '--verify', '-q', '@{upstream}']).then(t => t.trim()).catch(() => null)
     ?? await git(r.repo, ['rev-parse', '--verify', '-q', 'FETCH_HEAD']).then(t => t.trim()).catch(() => null)
   if (!tip) return 'not-synced'

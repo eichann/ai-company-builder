@@ -14,7 +14,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, utimesSync, 
 import os from 'node:os'
 import path from 'node:path'
 import { createAiTurnClaims } from '../electron/features/ai-turns/claims'
-import { JOB_CLOCK_TOLERANCE_MS, gitCheckPoint, newFilesByGit, newFilesByTime } from '../electron/features/ai-turns/job-runs'
+import { JOB_CLOCK_TOLERANCE_MS, gitCheckPoint, gitFetchMark, newFilesByGit, newFilesByTime } from '../electron/features/ai-turns/job-runs'
 import { createRecordsApi } from '../electron/records/api'
 import { createRunRegistry } from '../electron/records/runs'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
@@ -71,7 +71,7 @@ function claimsFor(server: ReturnType<typeof fakeServer>, over: Record<string, u
     ...base, records: createRecordsApi({ ...base, fetch: server.fetch, runOf: runs.runOf }), runs, deviceId: 'device-job-1',
     renewEveryMs: 3_600_000, fetch: server.fetch, agent: () => 'claude-code', windowOpen: () => true, aiAllowed: () => true, stopPolicyConfirmed: async () => true,
     log: { warn: () => {} }, readProcedure: async () => '# 面談の報告書\n文字起こしから下書きを作る。\n',
-    jobs: { readShelfSkill: async () => null, checkPoint: async () => ({ commit: 'c'.repeat(40) }), newFiles: async () => ['人事部/面談/2026-11-10_佐藤.txt'], stopTurn: (c: string) => { stopped.push(c) } } as NonNullable<Parameters<typeof createAiTurnClaims>[0]['jobs']>,
+    jobs: { readShelfSkill: async () => null, fetchMark: async () => 'mark-0', checkPoint: async () => ({ commit: 'c'.repeat(40) }), newFiles: async () => ['人事部/面談/2026-11-10_佐藤.txt'], stopTurn: (c: string) => { stopped.push(c) } } as NonNullable<Parameters<typeof createAiTurnClaims>[0]['jobs']>,
     ...over,
   })
   return { claims, stopped, runs }
@@ -220,7 +220,7 @@ test('nothing reaches the server while this PC may not run AI unattended', async
 
 test('the claim names the checks this app runs; nothing new → finished `nothing`, no message, no AI', async () => {
   const server = fakeServer()
-  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async () => ({ commit: 'c'.repeat(40) }), newFiles: async () => [], stopTurn: () => {} } })
+  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, fetchMark: async () => 'mark-0', checkPoint: async () => ({ commit: 'c'.repeat(40) }), newFiles: async () => [], stopTurn: () => {} } })
   await claims.jobTurns(COMPANY)
   const r = await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
   assert.deepEqual(r, { claimed: false, reason: 'taken' })
@@ -397,37 +397,60 @@ test('new files in the shared folder: by what is reachable, never by commit date
     run(tmp, ['clone', '-q', '-b', 'main', server, root])
     run(root, ['pull', '-q'])
     const longAgo = '2026-01-01T00:00:00.000Z'
-    const listedLongAgo = Date.parse(longAgo)
-    const first = await gitCheckPoint(git, root, '人事部/面談', listedLongAgo)
+    const P = '人事部/面談'
+    // Codex's case, without any clock: fetched (09:59), then the occurrence listed and its mark taken (10:00); no
+    // fetch since → never synced, whatever times the file carries or the PC's clock says later (set ahead or back).
+    const fetchHead = path.join(root, '.git', 'FETCH_HEAD')
+    let mark = await gitFetchMark(git, root, P)
+    assert.ok(mark)
+    assert.equal(await gitCheckPoint(git, root, P, mark), 'not-synced')
+    for (const t of [new Date(Date.now() + 3_600_000), new Date(Date.now() - 3_600_000)]) {
+      utimesSync(fetchHead, t, t)
+      mark = await gitFetchMark(git, root, P)
+      assert.equal(await gitCheckPoint(git, root, P, mark), 'not-synced', t.toISOString())
+    }
+    // No mark (it could not be taken): never synced.
+    assert.equal(await gitCheckPoint(git, root, P, null), 'not-synced')
+    // A fetch after the mark that brings nothing new still counts (git rewrites FETCH_HEAD every time).
+    run(root, ['fetch', '-q'])
+    const first = await gitCheckPoint(git, root, P, mark)
     assert.ok(first && first !== 'not-synced')
     // Made offline long ago, reaching the server only now: still new after the previous occurrence's commit.
     commit('人事部/面談/late.txt', '2026-01-02T00:00:00Z')
     commit('営業部/other.txt')
+    mark = await gitFetchMark(git, root, P)
     // Fetched but not in HEAD (a fetch-only path, a sync stopped on a conflict): not yet, never `nothing`.
     run(root, ['fetch', '-q'])
-    assert.equal(await gitCheckPoint(git, root, '人事部/面談', listedLongAgo), 'not-synced')
+    assert.equal(await gitCheckPoint(git, root, P, mark), 'not-synced')
     run(root, ['merge', '-q', '--ff-only', '@{upstream}'])
-    const second = await gitCheckPoint(git, root, '人事部/面談', listedLongAgo)
+    const second = await gitCheckPoint(git, root, P, mark)
     assert.ok(second && second !== 'not-synced')
+    // Never fetched when the mark was taken (a fresh clone has no FETCH_HEAD): the first fetch after it counts.
+    const fresh = path.join(tmp, 'fresh')
+    run(tmp, ['clone', '-q', '-b', 'main', server, fresh])
+    const none = await gitFetchMark(git, fresh, P)
+    assert.ok(none)
+    assert.equal(await gitCheckPoint(git, fresh, P, none), 'not-synced')
+    run(fresh, ['fetch', '-q'])
+    assert.ok(typeof (await gitCheckPoint(git, fresh, P, none)) === 'object')
     assert.deepEqual(await newFilesByGit(git, root, '人事部/面談', { since: '2026-06-01T00:00:00.000Z', sinceCommit: first.commit, upto: second.commit }), ['人事部/面談/late.txt'])
     // Nothing added between the same commits; a commit this PC does not have is "not yet".
     assert.deepEqual(await newFilesByGit(git, root, '人事部/面談', { since: longAgo, sinceCommit: second.commit, upto: second.commit }), [])
     assert.equal(await newFilesByGit(git, root, '人事部/面談', { since: longAgo, sinceCommit: null, upto: 'f'.repeat(40) }), 'not-synced')
-    // Not fetched since the server listed the occurrence (both on this PC's clock): not yet.
-    assert.equal(await gitCheckPoint(git, root, '人事部/面談', Date.now() + 3_600_000), 'not-synced')
-    // A fetch stamped in this PC's future (its clock set back since): not trusted as fresh, never `nothing` on it.
-    assert.equal(await gitCheckPoint(git, root, '人事部/面談', listedLongAgo, Date.now() - 3_600_000), 'not-synced')
-    // No known listing time: not judged fresh.
-    assert.equal(await gitCheckPoint(git, root, '人事部/面談', Number.NaN), 'not-synced')
-    assert.equal(await gitCheckPoint(git, root, '人事部/ない', listedLongAgo), null)
-    assert.equal(await gitCheckPoint(git, root, '../x', listedLongAgo), null)
+    assert.equal(await gitCheckPoint(git, root, '人事部/ない', mark), null)
+    assert.equal(await gitCheckPoint(git, root, '../x', mark), null)
+    assert.equal(await gitFetchMark(git, root, '人事部/ない'), null)
+    // FETCH_HEAD gone since the mark (removed, not a fetch): not synced.
+    mark = await gitFetchMark(git, root, P)
+    rmSync(fetchHead)
+    assert.equal(await gitCheckPoint(git, root, P, mark), 'not-synced')
     // A link at the place itself, or above it (committed by someone), is never followed, nor its repository used.
     const outside = path.join(tmp, 'outside')
     mkdirSync(path.join(outside, '他社'), { recursive: true })
     writeFileSync(path.join(outside, '他社', '秘密.txt'), 'x')
     run(outside, ['init', '-q'])
     symlinkSync(path.join(outside, '他社'), path.join(root, '営業部', '受付'))
-    assert.equal(await gitCheckPoint(git, root, '営業部/受付', listedLongAgo), null)
+    assert.equal(await gitCheckPoint(git, root, '営業部/受付', mark), null)
     assert.equal(await newFilesByGit(git, root, '営業部/受付', { since: longAgo, sinceCommit: null, upto: second.commit }), null)
     assert.equal(await newFilesByTime(root, '営業部/受付', longAgo, new Date().toISOString(), { min: 0, max: 0 }), null)
     symlinkSync(outside, path.join(root, 'リンク'))
@@ -529,14 +552,14 @@ test('the runner\'s queue: an occurrence runs as a job (never as a record\'s ste
 
 test('not synced: nothing is claimed (tried later); a commit not here after the claim: given back, never `nothing`', async () => {
   const before = fakeServer()
-  const { claims } = claimsFor(before, { jobs: { readShelfSkill: async () => null, checkPoint: async () => 'not-synced' as const, newFiles: async () => [], stopTurn: () => {} } })
+  const { claims } = claimsFor(before, { jobs: { readShelfSkill: async () => null, fetchMark: async () => 'mark-0', checkPoint: async () => 'not-synced' as const, newFiles: async () => [], stopTurn: () => {} } })
   await claims.jobTurns(COMPANY)
   // Asked again a little later (no start counted: the runner's pass cap is for runs, not for waiting on a sync).
   assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'unavailable', retryAfterMs: 30_000 })
   assert.equal(before.calls.some(c => c.path === '/job-run-claims'), false)
 
   const server = fakeServer()
-  const second = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async () => ({ commit: 'c'.repeat(40) }), newFiles: async () => 'not-synced' as const, stopTurn: () => {} } }).claims
+  const second = claimsFor(server, { jobs: { readShelfSkill: async () => null, fetchMark: async () => 'mark-0', checkPoint: async () => ({ commit: 'c'.repeat(40) }), newFiles: async () => 'not-synced' as const, stopTurn: () => {} } }).claims
   await second.jobTurns(COMPANY)
   assert.deepEqual(await second.claim(COMPANY, OCC, 1, 'conv-job-00002'), { claimed: false, reason: 'unavailable', retryAfterMs: 30_000 })
   assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'failed', failure: { class: 'temporary', code: 'NOT_SYNCED' } }])
@@ -583,26 +606,10 @@ test('the chat server never runs a job\'s turn without its run: the token is ask
   }
 })
 
-test('the shared folder\'s "synced?" is judged against when the server listed the occurrence (this PC\'s clock both sides), never the window\'s end on the server\'s clock', async () => {
-  const server = fakeServer()
-  const asked: number[] = []
-  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async (_root: string | null, _place: string, listedAt: number) => { asked.push(listedAt); return 'not-synced' as const }, newFiles: async () => [], stopTurn: () => {} } })
-  const before = Date.now()
-  await claims.jobTurns(COMPANY)
-  const after = Date.now()
-  await new Promise(resolve => setTimeout(resolve, 30))
-  // Listed again later: the first arrival is what counts (the window had ended on the server by then).
-  await claims.jobTurns(COMPANY)
-  assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'unavailable', retryAfterMs: 30_000 })
-  assert.equal(asked.length, 1)
-  // (a few ms either way: the wall clock and the steady clock tick apart)
-  assert.ok(asked[0] >= before - 5 && asked[0] <= after + 5, `${asked[0]} in [${before}, ${after}]`)
-})
-
 test('a working folder\'s check runs only on a clock known to agree with the server\'s: unknown or far off → given back, never `nothing`', async () => {
   const untils: string[] = []
   const working = (offsets: unknown[]) => ({
-    readShelfSkill: async () => null, checkPoint: async () => ({ commit: null }),
+    readShelfSkill: async () => null, fetchMark: async () => 'mark-0', checkPoint: async () => ({ commit: null }),
     newFiles: async (_r: string | null, _p: string, w: { offset: unknown; until: string }) => { offsets.push(w.offset); untils.push(w.until); return [] }, stopTurn: () => {},
   })
   for (const opts of [{ serverAheadMs: 10 * 60_000 }, { serverAheadMs: -10 * 60_000 }, { noServerTime: true }]) {
@@ -627,76 +634,44 @@ test('a working folder\'s check runs only on a clock known to agree with the ser
   assert.deepEqual(finishes(server), [{ generation: 1, outcome: 'done', jobResult: 'nothing' }])
 })
 
-test('this PC\'s clock changed after the listing: only a fetch made after the change counts — an old fetch never passes, and a fresh one is not kept waiting for the clock', async () => {
-  const at = (hhmm: string) => Date.parse(`2026-11-11T${hhmm}:00.000Z`)
-  const world = () => {
-    const server = fakeServer()
-    const asked: number[] = []
-    const clock = { wall: at('10:00'), steady: 1_000 }
-    const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async (_r: string | null, _p: string, listedAt: number) => { asked.push(listedAt); return 'not-synced' as const }, newFiles: async () => [], stopTurn: () => {}, now: () => clock.wall, monotonic: () => clock.steady } })
-    return { claims, asked, clock }
-  }
-  // No change: the first arrival is the baseline.
-  {
-    const { claims, asked, clock } = world()
-    await claims.jobTurns(COMPANY)
-    clock.steady += 600_000
-    clock.wall = at('10:10')
-    await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
-    assert.deepEqual(asked, [at('10:00')])
-  }
-  // Codex's case: fetched 09:59, listed 10:00, ten minutes later the clock is set back five → 10:05. The 09:59 fetch
-  // must not count (a baseline moved back with the clock, 09:55, would let it through and end the run as `nothing`).
-  {
-    const { claims, asked, clock } = world()
-    await claims.jobTurns(COMPANY)
-    clock.steady += 600_000
-    clock.wall = at('10:05')
-    await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
-    assert.deepEqual(asked, [at('10:05')])
-    assert.ok(asked[0] > at('09:59'))
-    // The new baseline is kept: a minute later, a fetch after 10:05 counts.
-    clock.steady += 60_000
-    clock.wall = at('10:06')
-    await claims.claim(COMPANY, OCC, 1, 'conv-job-00002')
-    assert.deepEqual(asked.at(-1), at('10:05'))
-  }
-  // Set back 30 minutes: a fetch made after the change counts at once (with 10:00 kept, none would for half an hour).
-  {
-    const { claims, asked, clock } = world()
-    await claims.jobTurns(COMPANY)
-    clock.steady += 60_000
-    clock.wall = at('09:31')
-    await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
-    assert.deepEqual(asked, [at('09:31')])
-  }
-  // Set forward: a fetch stamped before the jump never counts as after it.
-  {
-    const { claims, asked, clock } = world()
-    await claims.jobTurns(COMPANY)
-    clock.steady += 60_000
-    clock.wall = at('11:00')
-    await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
-    assert.deepEqual(asked, [at('11:00')])
-  }
+test('the shared folder\'s "synced?" mark is taken once, at the first check after the server listed the occurrence, and kept — never retaken by a later check', async () => {
+  const server = fakeServer()
+  const marks: Array<string | null> = []
+  let taken = 0
+  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, fetchMark: async () => `mark-${++taken}`, checkPoint: async (_r: string | null, _p: string, mark: string | null) => { marks.push(mark); return 'not-synced' as const }, newFiles: async () => [], stopTurn: () => {} } })
+  await claims.jobTurns(COMPANY)
+  assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'unavailable', retryAfterMs: 30_000 })
+  // Listed again and checked again: still the first mark (a later one would hide the fetches made in between).
+  await claims.jobTurns(COMPANY)
+  await claims.claim(COMPANY, OCC, 1, 'conv-job-00002')
+  assert.deepEqual(marks, ['mark-1', 'mark-1'])
 })
 
-test('an occurrence this app took off its list (finished `nothing`) is forgotten: listed again, its listing time starts anew', async () => {
+test('a mark that could not be taken is not kept: that check is never synced, and the next one takes it', async () => {
   const server = fakeServer()
-  const asked: number[] = []
-  let wall = Date.parse('2026-11-11T10:00:00.000Z')
-  let steady = 1_000
+  const marks: Array<string | null> = []
+  const answers: Array<string | null> = [null, 'mark-2']
+  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, fetchMark: async () => (answers.length > 0 ? answers.shift()! : 'mark-x'), checkPoint: async (_r: string | null, _p: string, mark: string | null) => { marks.push(mark); return 'not-synced' as const }, newFiles: async () => [], stopTurn: () => {} } })
+  await claims.jobTurns(COMPANY)
+  await claims.claim(COMPANY, OCC, 1, 'conv-job-00001')
+  await claims.claim(COMPANY, OCC, 1, 'conv-job-00002')
+  await claims.claim(COMPANY, OCC, 1, 'conv-job-00003')
+  assert.deepEqual(marks, [null, 'mark-2', 'mark-2'])
+})
+
+test('an occurrence this app took off its list (finished `nothing`) is forgotten: listed again, a new mark is taken', async () => {
+  const server = fakeServer()
+  const marks: Array<string | null> = []
+  let taken = 0
   let point: 'not-synced' | { commit: string } = { commit: 'c'.repeat(40) }
-  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, checkPoint: async (_r: string | null, _p: string, listedAt: number) => { asked.push(listedAt); return point }, newFiles: async () => [], stopTurn: () => {}, now: () => wall, monotonic: () => steady } })
+  const { claims } = claimsFor(server, { jobs: { readShelfSkill: async () => null, fetchMark: async () => `mark-${++taken}`, checkPoint: async (_r: string | null, _p: string, mark: string | null) => { marks.push(mark); return point }, newFiles: async () => [], stopTurn: () => {} } })
   await claims.jobTurns(COMPANY)
   assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-job-00001'), { claimed: false, reason: 'taken' })
   // The server lists it again later (e.g. 「もう一度」): only a fetch after this listing counts.
-  steady += 600_000
-  wall += 600_000
   point = 'not-synced'
   await claims.jobTurns(COMPANY)
   await claims.claim(COMPANY, OCC, 1, 'conv-job-00002')
-  assert.deepEqual(asked, [Date.parse('2026-11-11T10:00:00.000Z'), Date.parse('2026-11-11T10:10:00.000Z')])
+  assert.deepEqual(marks, ['mark-1', 'mark-2'])
 })
 
 test('the time limit\'s clock difference never counts the answer\'s travel as the server being behind (the AI stops on time)', async () => {
