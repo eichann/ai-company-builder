@@ -306,6 +306,12 @@ const DOC_READ_AGAIN = '読んだあとにも Google Drive で直されていま
 const PRESS_AGAIN = new Set(['GOOGLE_UNAVAILABLE', 'GOOGLE_CONSENT_NEEDED', 'GOOGLE_STOPPED', 'GOOGLE_FEATURE_OFF', 'DRIVE_PUT_IN_PROGRESS'])
 /** An expired confirmation's content goes at once; its row stays this long (so a late press hears 「時間がたった」). */
 const CONFIRMATIONS_KEPT_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+/**
+ * A put still `sending` this long after its receipt was cut off by a stopped process (google-drive.md "A put left
+ * half-done"): the sweep makes it `unknown`, so it is looked up by its id like a lost answer instead of answering
+ * 「いま置いているところ」 for ever. Far above a live put (each Google call waits ≤ 30 s for its answer's start).
+ */
+export const PUT_INTERRUPTED_AFTER_MS = 15 * 60_000
 /** A scheduled job's run found its folder pick gone (it renews with every put; 90 days without one end it). */
 const JOB_FOLDER_LAPSED = '責任者が選んだ置き先のフォルダが使えなくなっています（90日のあいだ何も置かれなかったか、選び直しが要ります）。この回では置けません。もう一度置こうとせず、置けなかったことを報告してください。責任者が「定期の仕事」の「置き先を選び直す」で選び直すと、次の回から置けます。'
 /** The member's pick of a file lapsed (7 days without a read or a link): said so, rather than 「選んだものではありません」. */
@@ -1008,8 +1014,9 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
      */
     /**
      * The server clock's pass for this company (`server-clock.ts` `driveSweep`): a waiting overwrite's content goes once it
-     * expired (its row a week later), reads kept for continuing a document go after a week. (Expired picks stay until the
-     * next pick, so a refusal can still say the pick lapsed.)
+     * expired (its row a week later), reads kept for continuing a document go after a week, and a put a stopped process
+     * left `sending` becomes `unknown` (`PUT_INTERRUPTED_AFTER_MS`). (Expired picks stay until the next pick, so a refusal
+     * can still say the pick lapsed.)
      */
     sweep(companyId: string): void {
       const repo = handle(companyId).googleDrive
@@ -1017,6 +1024,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const weekAgo = new Date(clock.nowMs() - CONFIRMATIONS_KEPT_AFTER_MS).toISOString()
       repo.pruneOverwriteConfirmations(now, weekAgo)
       repo.pruneDocReads(weekAgo)
+      repo.interruptPuts(new Date(clock.nowMs() - PUT_INTERRUPTED_AFTER_MS).toISOString())
     },
 
     /** The record step took the member's link of this file (records route): their live pick of it is renewed. */

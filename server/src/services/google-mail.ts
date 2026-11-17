@@ -390,13 +390,14 @@ export function createGoogleMail(deps: GoogleMailDeps): MailReader & MailSender 
         return request(companyId, userId, {
           api: 'gmail', method: 'POST', path: GMAIL_UPLOAD_SEND_PATH, query: { uploadType: 'media' },
           rawBody: { contentType: 'message/rfc822', bytes: new Uint8Array(Buffer.from(raw, 'base64url')) },
-          scope: GOOGLE_SCOPE.gmailSend, operation: 'gmail.send.attachments',
+          scope: GOOGLE_SCOPE.gmailSend, operation: 'gmail.send.attachments', ...(options.beforeSend ? { beforeSend: options.beforeSend } : {}),
         })
       }
       const threadId = options?.threadId && ID_RE.test(options.threadId) ? options.threadId : null
       return request(companyId, userId, {
         api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send',
         body: threadId ? { raw, threadId } : { raw }, scope: GOOGLE_SCOPE.gmailSend, operation: threadId ? 'gmail.send.reply' : 'gmail.send',
+        ...(options?.beforeSend ? { beforeSend: options.beforeSend } : {}),
       })
     },
   }

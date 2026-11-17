@@ -130,7 +130,7 @@ test('a chosen place no longer usable asks the member to choose again; a usable 
 
 test('a job\'s notice opens 「定期の仕事」 only for the acceptance ask; an occurrence notice (also to the creator) opens nothing', () => {
   assert.equal(jobNoticeTarget('job_accept_needed'), 'jobs')
-  for (const kind of ['job_expired', 'job_skipped', 'job_failed', 'job_paused']) assert.equal(jobNoticeTarget(kind), 'none')
+  for (const kind of ['job_expired', 'job_skipped', 'job_failed', 'job_paused', 'company_restored']) assert.equal(jobNoticeTarget(kind), 'none')
   assert.equal(jobNoticeTarget('morning_summary'), null)
 })
 

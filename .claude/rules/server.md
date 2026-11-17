@@ -713,7 +713,8 @@ Started once per process by `index.ts` (never by `composition.ts`, which tests i
 unref'd: the AI action log's retention (daily), outbound mail bodies' retention (daily) and the
 **server clock** (`services/server-clock.ts`, every 5 minutes; `notifications.md` "The server
 clock"; it also runs 「気になる動き」's sweep, `security-alerts.md`, and makes scheduled jobs' occurrences, then
-starts their runner without awaiting it, `jobs.md` "The clock"). A new time-based job goes into the server clock rather than a timer of its own, and
+starts their runner without awaiting it, `jobs.md` "The clock"; and settles sends / Drive puts a stopped process left
+`sending`: `outbound-mail.md` "A send left half-done", `google-drive.md` "A put left half-done"). A new time-based job goes into the server clock rather than a timer of its own, and
 keeps its rules: never runs the AI, writes records only through the engine's writers, takes
 each company through its own handle with a per-company limit and a yield between companies,
 refuses to overlap itself, and derives everything from stored rows (a restart or a second run

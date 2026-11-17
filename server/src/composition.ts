@@ -90,6 +90,7 @@ import { companyTimeToUtc, createJobOccurrences, createJobRunner } from './servi
 import { latestJobSlot, nextJobSlot } from '../shared/core/job-schedule'
 import { companySkillTree } from './lib/skill-trees'
 import { createServerClock } from './services/server-clock'
+import { createRestorePause } from './services/restore-pause'
 import { createSecurityAlertService } from './services/security-alerts'
 import { createTaskAcceptance } from './services/task-acceptance'
 import { logError } from './lib/error-log'
@@ -873,6 +874,15 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
   })
 
+  // After a restore (deployment.md "After a restore"): jobs and the AI stopped, owners / admins told. The operator's
+  // CLI only (cli/company-archive.ts); no route calls it.
+  const restorePause = createRestorePause({
+    ...repos, ...shared,
+    holdDue: companyId => jobOccurrences.holdDue(companyId, null, 'COMPANY_STOPPED'),
+    stopsChanged: companyId => agentPolicy.announce(companyId),
+    noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
+  })
+
   // 「気になる動き」 (security-alerts.md): the clock's sweep, git-http's download counter, sign-in (app.ts).
   const securityAlerts = createSecurityAlertService({
     ...repos, ...shared,
@@ -890,6 +900,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ...pluginsLane,
     access,
     outboundMail,
+    restorePause,
     googleClient,
     googleConnector,
     googleDrive,
@@ -947,6 +958,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       securitySweep: companyId => securityAlerts.sweep(companyId),
       // Google Drive (google-drive.md): a waiting overwrite's content goes once it expired; old reads go.
       driveSweep: companyId => googleDrive.sweep(companyId),
+      // A mail / Slack reply left `sending` by a stopped process → unknown, for its person (outbound-mail.md).
+      interruptedSends: companyId => outboundMail.settleInterrupted(companyId),
       yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     }),
     permissionViews,

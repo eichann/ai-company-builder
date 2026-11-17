@@ -261,6 +261,10 @@ export function sqliteGoogleDriveRepository(conn: Database.Database, companyId: 
     dropPut(id) {
       conn.prepare(`DELETE FROM google_drive_puts WHERE company_id = ? AND id = ? AND state = 'sending'`).run(companyId, id)
     },
+    interruptPuts(before) {
+      return conn.prepare(`UPDATE google_drive_puts SET state = 'unknown', reason = 'interrupted' WHERE company_id = ? AND state = 'sending' AND created_at <= ?`)
+        .run(companyId, before).changes
+    },
 
     createPickTicket(t) {
       conn.prepare(`INSERT INTO google_drive_pick_tickets (id, company_id, user_id, ticket_hash, mode, purpose, max_items, file_ids, state, config_handed_at, result, created_at, expires_at, finished_at)

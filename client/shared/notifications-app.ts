@@ -69,6 +69,11 @@ export function turnGroups(items: readonly TurnItem[]): TurnGroup[] {
 export interface NoticesState {
   /** false: the company's records are off (or nothing could be read yet) — no title bar parts. */
   available: boolean
+  /**
+   * Records are off but the company has notices of its own (`company_restored`, deployment.md "After a restore"):
+   * the bell only, no 「あなたの番」.
+   */
+  bellOnly?: true
   /** This week's turn (`thisWeeksTurn`): what the title bar lists and counts. */
   myTurn: { total: number; items: TurnItem[]; resting?: number }
   notices: NotificationList

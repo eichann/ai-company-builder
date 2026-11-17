@@ -44,12 +44,18 @@ import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { NotificationRow } from '../ports/notifications'
 import type { RecordAccessRow, RecordRow } from '../ports/records'
 import type { AbsenceCover } from '../../shared/core/absences'
-import type { Member } from './access'
+import { hasFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import { recordReader } from './record-access'
 import type { RecordChange } from './record-engine'
 import { currentTypes } from './record-index'
 import { waitingFor } from './records'
+
+/**
+ * `company_restored` (deployment.md "After a restore"): what an owner / admin reads after the company's data was
+ * put back from a backup. Plain words: what was stopped, what to check, how to resume.
+ */
+export const COMPANY_RESTORED_TEXT = '会社のデータをバックアップから戻したため、定期の仕事と AI を止めました。戻す前にもう済んでいた仕事（送ったメール・Google Drive に置いたファイル・HubSpot への書き込みなど）がないか確かめてから、管理画面で「定期の仕事」と「AI の緊急停止」を元に戻してください'
 
 export interface NotificationServiceDeps {
   companyData: CompanyDataSource
@@ -360,6 +366,15 @@ export const AI_CHANGES_NAMED = 3
 
 export function createNotificationService(deps: NotificationServiceDeps) {
   const { companyData, clock } = deps
+
+  /** `company_restored` as the bell shows it (also while records are off); a Mac notification while unread. */
+  function restoredItem(r: NotificationRow): NotificationItem {
+    const read = r.readAt !== null
+    return {
+      id: r.id, kind: 'company_restored', recordId: '', recordType: '', recordTitle: '', version: 0, text: COMPANY_RESTORED_TEXT, createdAt: r.createdAt, read,
+      ...(read ? {} : { desktop: { title: '会社のデータをバックアップから戻しました', body: '定期の仕事と AI を止めています。確かめてから元に戻してください' } }),
+    }
+  }
 
   function kindsOf(handle: CompanyData, userId: string): Record<NotificationKind, boolean> {
     const kinds = { ...NOTIFICATION_DEFAULTS }
@@ -901,7 +916,14 @@ export function createNotificationService(deps: NotificationServiceDeps) {
     /** `GET /me/notifications`: the member's notices they may see now, newest first. */
     list(member: Member): Outcome<NotificationList> {
       const handle = companyData.forCompany(member.companyId)
-      if (!handle.records.settings().enabled) return ok({ available: false, unread: 0, items: [] })
+      // Records off: only the company's own notices (a restore: deployment.md "After a restore"), never a record's.
+      if (!handle.records.settings().enabled) {
+        const kinds = kindsOf(handle, member.userId)
+        const rows = handle.notifications.list(member.userId, ROWS_READ)
+          .filter(r => isNotificationKind(r.kind) && kinds[r.kind] && r.kind === 'company_restored' && r.recordId === '' && hasFullAccess(member.role))
+        const items = rows.slice(0, NOTIFICATION_LIST_MAX).map(r => restoredItem(r))
+        return ok({ available: false, unread: rows.filter(r => r.readAt === null).length, items })
+      }
       const reader = recordReader(member, handle.scopes.listWithRules())
       computeDue(member, handle, reader)
       handle.notifications.prune(member.userId, new Date(clock.nowMs() - NOTIFICATION_KEEP_DAYS * 86_400_000).toISOString())
@@ -930,6 +952,8 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const visible = rows.filter(r => {
         if (r.kind === 'job_paused') return r.recordId === '' && jobNotice(r) !== null
         if (r.kind === 'job_accept_needed') return r.recordId === '' && acceptNotice(r) !== null
+        // After a restore (deployment.md): only while the member is an owner / admin (they alone can resume).
+        if (r.kind === 'company_restored') return r.recordId === '' && hasFullAccess(member.role)
         if (jobOccurrenceKinds.has(r.kind)) return r.recordId === '' && occurrenceNotice(r) !== null
         if (recordless.has(r.kind)) return r.recordId === ''
         const rec = recs.get(r.recordId)
@@ -965,6 +989,7 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           const why = job.reason === 'OWNER_LEFT' ? '責任者が会社を離れました。新しい責任者を決めてください' : '責任者の権限が変わり、仕事の範囲に足りなくなりました'
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text: `定期の仕事「${job.name}」を止めました：${why}`, createdAt: r.createdAt, read }
         }
+        if (r.kind === 'company_restored') return restoredItem(r)
         if (r.kind === 'job_accept_needed') {
           const job = acceptNotice(r) as { name: string; contentChanged: boolean; choosesPlace?: boolean }
           const base = job.contentChanged

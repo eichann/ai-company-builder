@@ -12,7 +12,7 @@ import { AdvancedCrumb } from '@/components/advanced/crumb'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { agentStopApi, keyBrokerApi, type AgentStopEntry, type AgentStopView } from '@/lib/api'
-import { STOP_LIMITS, stopScopeLabel } from '@/lib/agent-stop'
+import { STOP_LIMITS, stopBy, stopScopeLabel } from '@/lib/agent-stop'
 import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
@@ -93,7 +93,7 @@ function ActiveCard({ view, onChanged }: { view: AgentStopView; onChanged: (next
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{stopScopeLabel(s)}</p>
                 <p className="text-xs text-muted-foreground">
-                  {formatDateTime(s.stoppedAt)} に {s.stoppedByName ?? '管理者'} が停止{s.reason ? `・理由: ${s.reason}` : ''}
+                  {formatDateTime(s.stoppedAt)} に {stopBy(s)} が停止{s.reason ? `・理由: ${s.reason}` : ''}
                 </p>
               </div>
               <Button variant="outline" size="sm" onClick={() => setReleasing(s)}>
@@ -216,7 +216,7 @@ function HistoryCard({ history }: { history: AgentStopEntry[] }) {
             <li key={s.id} className="px-5 py-3">
               <p className="font-medium">{stopScopeLabel(s)}</p>
               <p className="text-xs text-muted-foreground">
-                {formatDateTime(s.stoppedAt)} {s.stoppedByName ?? '管理者'} が停止{s.reason ? `（理由: ${s.reason}）` : ''}
+                {formatDateTime(s.stoppedAt)} {stopBy(s)} が停止{s.reason ? `（理由: ${s.reason}）` : ''}
                 {s.releasedAt ? ` → ${formatDateTime(s.releasedAt)} ${s.releasedByName ?? '管理者'} が解除` : ' → 停止中'}
               </p>
             </li>

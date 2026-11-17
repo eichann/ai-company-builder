@@ -243,6 +243,12 @@ export interface GoogleDriveRepository {
   settlePut(id: string, fields: Pick<DrivePutRow, 'state' | 'fileId' | 'revisionId' | 'link' | 'reason' | 'finishedAt'>): boolean
   /** Removes a put still in `sending` (refused: nothing was made; its key is free again). */
   dropPut(id: string): void
+  /**
+   * Every put of the company still `sending` that was made at or before `before` → `unknown` (reason `interrupted`):
+   * a stopped process left it between its receipt and its answer. Looked up by its id like any unknown put; never
+   * re-sent. The number changed.
+   */
+  interruptPuts(before: string): number
   /** Keeps a done put's document baseline (read right after the put). */
   setDocBaseline(id: string, baseline: DriveDocBaseline): void
 
