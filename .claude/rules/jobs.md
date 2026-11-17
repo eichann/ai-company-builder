@@ -185,7 +185,7 @@ and starting the runner. It reads no content and calls nothing outside.
   December on that day, not a month late). The
   slot text `YYYY-MM-DDTHH:MM` is the occurrence's identity; `companyTimeToUtc` gives `due_at`, and
   `expires_at` = `due_at` + `missed.expiresAfterMinutes`. The zone is `DEFAULT_COMPANY_TIME_ZONE` (one
-  place in `composition.ts`), kept on the row.
+  place in `composition/jobs.ts` `wireJobOccurrences`), kept on the row.
 - **Which jobs**: approved, `active` or `paused`, placement `e` and (since 5a-2, with the app that claims them)
   `a`. Only the **newest slot at or before now**, and never one before the approved version's `approved_at`. An
   unclaimed PC occurrence (the app closed, 自動で進める off) expires at `expires_at` and is told, as any other.
@@ -204,7 +204,7 @@ and starting the runner. It reads no content and calls nothing outside.
 ## Held: a pause or the company's stop (3b)
 
 「再開しても動かさない」 holds whatever happens between clock runs, in the pause's / stop's own transaction
-(`JobServiceDeps.occurrenceHolds`, bound in `composition.ts` to `jobOccurrences.holdDue` /
+(`JobServiceDeps.occurrenceHolds`, bound in `composition.ts` (`wireJobs`) to `jobOccurrences.holdDue` /
 `holdPassedSlot`):
 
 - **When it begins** — `POST /jobs/:jobId/pause`, a pause the server makes (`OWNER_LEFT`,
@@ -381,7 +381,7 @@ reports.
   kinds a built-in connector declares (`BUILTIN_CONNECTORS[…].deliveryPlaces`, `connector-roles.md`: Google's
   `drive_folder`, its words, routes, tools and one sentence for the run). The core names no service: `jobs.ts` reads the
   declaration (`jobDeliveryRoutes`, `jobDeliveryTools`, `jobDeliveryLabel`, `jobDeliveryHowTo`); the server asks the
-  connector through `composition.ts` `deliveryPlaces` (`live`, `linkToTask`). `writes` stays the PC's deliverable
+  connector through `deliveryPlaces` (`live`, `linkToTask`; built in `composition/google.ts`). `writes` stays the PC's deliverable
   folder: what goes outside is made there first (`grant.deliverTo.NEEDS_DELIVERABLE`). The ledger's `kind: 'drive'`
   file links are unchanged.
 - **Who picks the folder** (`chosenBy: 'responsible'`): the responsible person, **when accepting**. Under `drive.file`

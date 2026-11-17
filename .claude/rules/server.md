@@ -150,6 +150,16 @@ markers `// lane A ▼` … `// lane C ▲` (the ▲ lines keep the blocks apart
 A lane adds lines only right under its own `▼`, never moves or removes a marker, and keeps its
 tables in its own `db/schema/<lane file>.ts` (idempotent migrations, no numbers).
 
+Feature parts of the root, outside the lanes, each called once from `createServices` at the
+place its services were built before (the order of construction stays the root's; what is
+built later is passed in as a closure, called only after construction):
+`composition/google.ts` (`wireGoogle`: the Google client, member OAuth, the connector, the
+relay, Drive, a job's `deliveryPlaces`), `composition/meetings.ts` (`wireMeetings`: minutes,
+the meeting link of approvals, 「今日の予定」), `composition/outbound-mail.ts`
+(`wireOutboundMail`), `composition/jobs.ts` (`wireJobs`: the Skill shelf and job definitions;
+`wireJobRetry`; `wireJobOccurrences`: occurrences and the runner). `composition/shared.ts`
+types the `shared` deps they take.
+
 ## Company handle (「会社つきの手形」, multi-tenant foundation 案 A, 2026-10-31)
 
 One SQLite database holds every company; cross-company access is made impossible by
