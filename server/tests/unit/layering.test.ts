@@ -95,7 +95,7 @@ describe('server layering', () => {
   it('only the composition root imports adapters', () => {
     for (const file of tsFiles(SRC)) {
       const rel = relative(SRC, file)
-      // composition/*.ts: the lanes' parts of the composition root (server.md "Lane markers").
+      // composition/*.ts: the lanes' and features' parts of the composition root (server.md "Lane markers").
       // cli/: operator commands run on their own (e.g. generate-broker-kek.ts), each its own composition root.
       // db/index.ts: only the adapters in DB_INDEX_ADAPTERS (next test).
       if (rel === 'composition.ts' || /^composition\/[^/]+\.ts$/.test(rel) || rel === 'db/index.ts' || rel.startsWith('adapters/') || rel.startsWith('cli/')) continue
