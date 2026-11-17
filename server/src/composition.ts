@@ -943,6 +943,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       securitySweep: companyId => securityAlerts.sweep(companyId),
       // Google Drive (google-drive.md): a waiting overwrite's content goes once it expired; old reads go.
       driveSweep: companyId => googleDrive.sweep(companyId),
+      // A mail / Slack reply left `sending` by a stopped process → unknown, for its person (outbound-mail.md).
+      interruptedSends: companyId => outboundMail.settleInterrupted(companyId),
       yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     }),
     permissionViews,

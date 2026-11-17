@@ -32,6 +32,7 @@
  *
  * Never logged: subjects, bodies, addresses (only ids and fixed words).
  */
+import { CLOCK_ACTOR } from '../../shared/core/core-types'
 import { CONTENT_HASH_RE } from '../../shared/core/fixed-content'
 import {
   ATTACHMENT_LIMITS, attachmentListProblems, looksLikePdf, sanitizeAttachmentName, SHA256_HEX_RE, type MailAttachment,
@@ -70,6 +71,15 @@ import { fieldsOf, mailThreadIdOf, threadPointerOf, type ThreadPointer } from '.
 export const MAIL_BODY_RETENTION_DAYS = 30
 const DAY_MS = 24 * 60 * 60 * 1000
 const CLEANUP_CHUNK = 500
+/**
+ * A send still `sending` this long after it started was cut off by a stopped process (a crash, a restart, a restore)
+ * between its send row and its result: the server clock makes it `unknown` so the person can say whether it left
+ * (outbound-mail.md "A send left half-done"). Far above any live send (each Google / Slack call waits ≤ 30 s for its
+ * answer's start); a late answer after it is never a resend and the person still decides.
+ */
+export const SEND_INTERRUPTED_AFTER_MS = 15 * 60_000
+/** The 経緯 note of a send the clock found cut off. */
+export const SEND_INTERRUPTED_NOTE = '送っている途中でサーバーが止まったため、届いたか分かりません'
 
 export const MAIL_NOT_FOUND = { error: 'メールの下書きが見つかりません', code: 'MAIL_NOT_FOUND' }
 export const MAIL_UNKNOWN_TEXT = '届いたか分かりません。Gmail の送信済みを確かめてください。'
@@ -1283,6 +1293,33 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       handle.outbound.setFinished(d.mail.messageId, at)
       dropUnsentFiles(member.companyId, d.mail.messageId, at)
       return draftAnswer(member, d.mail)
+    },
+
+    /**
+     * The server clock (outbound-mail.md "A send left half-done"): each send of this company left `sending` for
+     * longer than `SEND_INTERRUPTED_AFTER_MS` → `unknown`, its record `draft` → `unknown` (action `send_unknown`,
+     * the clock as actor) — so the person's 「送られていた／送られていなかった」 (`resolve`) applies. Nothing is
+     * sent or re-sent. The record first, then the send row: a stop in between is finished by the next run.
+     * Returns the sends settled.
+     */
+    settleInterrupted(companyId: string): number {
+      const handle = companyData.forCompany(companyId)
+      if (!handle.records.settings().enabled) return 0
+      const cutoff = new Date(deps.clock.nowMs() - SEND_INTERRUPTED_AFTER_MS).toISOString()
+      let settled = 0
+      for (const send of handle.outbound.sendingBefore(cutoff, CLEANUP_CHUNK)) {
+        const s = handle.records.states([send.messageId])[0]
+        if (!s || s.state === null) continue
+        if (s.state === 'draft') {
+          const moved = writer.transition(companyId, {
+            recordId: send.messageId, action: 'send_unknown', expectedVersion: s.version, to: 'unknown', actor: { ...CLOCK_ACTOR }, note: SEND_INTERRUPTED_NOTE,
+          })
+          // Someone changed it meanwhile, or records / the feature are off: the next run looks again.
+          if (!moved.ok) { logError('outbound-mail', 'interrupted send not moved to unknown', undefined, { message: send.messageId, reason: moved.reason }); continue }
+        } else if (s.state !== 'unknown') continue
+        if (handle.outbound.interruptSend(send.id, deps.clock.now())) settled++
+      }
+      return settled
     },
 
     /**

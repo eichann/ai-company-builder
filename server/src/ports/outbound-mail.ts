@@ -108,6 +108,13 @@ export interface OutboundMailRepository {
   finishSend(id: string, outcome: Exclude<OutboundSendOutcome, 'sending'>, reason: string | null, providerMessageId: string | null, at: string): void
   /** The latest send of a draft. */
   lastSend(messageId: string): OutboundSendRow | null
+  /**
+   * Sends still `sending` that started at or before `before`, oldest first (at most `limit`): a send whose
+   * process stopped between the send row and its result (outbound-mail.md "A send left half-done").
+   */
+  sendingBefore(before: string, limit: number): OutboundSendRow[]
+  /** A send left `sending` → `unknown` (reason `interrupted`); false when it is no longer `sending`. Never re-sent. */
+  interruptSend(id: string, at: string): boolean
   /** Settles an `unknown` send (the person said whether it was sent). */
   resolveSend(id: string, outcome: 'sent' | 'not-sent', at: string): void
   /**

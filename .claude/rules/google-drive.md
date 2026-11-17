@@ -721,6 +721,19 @@ member copied by hand, past every check. Now, **in a consultation** with the app
   `job-deliverables.test.ts` (a run never asks, outside or private), `tests/unit/drive-put-confirmations-migration.test.ts`,
   `permission-matrix.test.ts` (the two routes and their CROSS row), `client/tests/drive-put-audience.test.ts` — mutation-checked.
 
+## A put left half-done
+
+A put's receipt is `sending` from `claimPut` until Google's answer is kept. A process that stops in between (a crash, a
+restart, a restore) leaves it `sending`, and the same request (the same key) would answer `DRIVE_PUT_IN_PROGRESS` for
+ever. The server clock's `driveSweep` (`googleDrive.sweep`, every company, records on or off) makes every receipt
+`sending` for more than `PUT_INTERRUPTED_AFTER_MS` (15 minutes) `unknown` (reason `interrupted`); from then on it is
+looked up by its `acbPutId` on the next repeat or `GET /puts/:putId` like any lost answer (found → `done`
+`found-by-correlation`) — **never re-sent**. S10b's `outcomeOf` already counts `sending` as unknown. A late answer still
+settles it (`settlePut` takes `sending` or `unknown`). A waiting overwrite left `writing` is not touched: its press answers
+`DRIVE_CONFIRMATION_BUSY` until it is pruned (the AI asks anew); the put underneath is the receipt above.
+Test: `google-drive.test.ts` 「a put left `sending` by a stopped process」 (before: in progress; after: unknown, found,
+nothing uploaded again; a receipt within the bound untouched) — mutation-checked: the sweep's call, the bound.
+
 ## Not yet
 
 A person-side put (session route + card), a record ledger entry linking a put to a まとまり (a put in a consultation about a

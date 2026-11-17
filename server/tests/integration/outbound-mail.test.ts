@@ -504,6 +504,56 @@ describe('retention (fake clock)', () => {
   })
 })
 
+describe('a send left half-done (outbound-mail.md "A send left half-done")', () => {
+  let token: string
+  beforeAll(async () => { token = await tokenFor('m-sato') })
+
+  it('a send left `sending` by a stopped process: the clock makes it `unknown` after 15 minutes, never re-sent; the person settles it', async () => {
+    const made = await person('m-sato', 'POST', '/outbound', {
+      bundleId, toRefs: [(await ai(token, 'POST', '/outbound-recipients', { bundleId })).body.data.recipients.find((x: Json) => x.source === 'hubspot').ref],
+      subject: '途中で止まった送信', body: '本文です',
+    })
+    expect(made.status, made.text).toBe(201)
+    const d = made.body.data.draft
+    const fresh = await person('m-sato', 'POST', '/outbound', {
+      bundleId, toRefs: [(await ai(token, 'POST', '/outbound-recipients', { bundleId })).body.data.recipients.find((x: Json) => x.source === 'hubspot').ref],
+      subject: 'いま送っている途中', body: '本文です',
+    })
+    const f = fresh.body.data.draft
+    // The process stopped right after the send row (outbound-mail.md step 5): nothing reached Gmail's answer.
+    const sent = sentCount()
+    const leftAt = new Date(Date.now() - 16 * 60_000).toISOString()
+    const insert = db.prepare("INSERT INTO outbound_sends (company_id, id, message_id, version, hash, by_user, started_at, outcome) VALUES (?, ?, ?, 1, ?, 'm-sato', ?, 'sending')")
+    insert.run(CO, 'send-left-behind', d.id, d.hash, leftAt)
+    insert.run(CO, 'send-still-going', f.id, f.hash, new Date(Date.now() - 60_000).toISOString())
+    // Before: no way out — sending again is refused, and the person's answer wants `unknown`.
+    expect((await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash })).body.code).toBe('SEND_IN_PROGRESS')
+    expect((await person('m-sato', 'POST', `/outbound/${d.id}/resolve`, { sent: true })).body.code).toBe('NOT_UNKNOWN')
+    // The server clock's pass (wired in composition.ts).
+    const run = await services.serverClock.runOnce()
+    expect(run.interrupted).toBe(1)
+    expect(stateOf(d.id).state).toBe('unknown')
+    expect(db.prepare('SELECT outcome, reason FROM outbound_sends WHERE company_id = ? AND id = ?').get(CO, 'send-left-behind')).toEqual({ outcome: 'unknown', reason: 'interrupted' })
+    const entry = db.prepare("SELECT action, actor_id FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version DESC LIMIT 1").get(CO, d.id) as Json
+    expect(entry).toEqual({ action: 'send_unknown', actor_id: 'acb:clock' })
+    // One still within the bound is left alone (it may still be on its way).
+    expect(stateOf(f.id).state).toBe('draft')
+    expect((db.prepare('SELECT outcome FROM outbound_sends WHERE company_id = ? AND id = ?').get(CO, 'send-still-going') as Json).outcome).toBe('sending')
+    // Nothing was sent by it; a second pass changes nothing more.
+    expect(sentCount()).toBe(sent)
+    expect(services.outboundMail.settleInterrupted(CO)).toBe(0)
+    // The card shows 「届いたか分かりません」; pressing send again still sends nothing.
+    expect((await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash })).body.code).toBe('NOT_DRAFT')
+    expect(sentCount()).toBe(sent)
+    // The person answers: 「送られていた」.
+    const settled = await person('m-sato', 'POST', `/outbound/${d.id}/resolve`, { sent: true })
+    expect(settled.status, settled.text).toBe(200)
+    expect(settled.body.data.draft.state).toBe('sent')
+    expect(sentCount()).toBe(sent)
+  })
+
+})
+
 describe('返事を待つ: a new mail we send first waits for their answer (outbound-mail.md "Waiting for their answer")', () => {
   let token: string
   let hubRef: string
