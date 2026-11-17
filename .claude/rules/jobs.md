@@ -756,8 +756,10 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   definition only when its `schema` column is one this build knows (`JOB_SCHEMAS`, today `[1]`) and the stored text
   says the same schema; else null. A null definition is **never** made into an occurrence by the clock, run by the
   server's runner (left `due`, not even taken into the batch), listed or claimed by a PC (the one 404), sent back by
-  「もう一度」 (`JOB_SCHEMA_UNKNOWN`), approved, accepted or resumed (409 `JOB_SCHEMA_UNKNOWN`); a role change does not
-  pause it for a reason this build cannot judge. A running one's deadline is not read (its expiry still applies).
+  「もう一度」 (`JOB_SCHEMA_UNKNOWN`), approved, accepted or resumed (409 `JOB_SCHEMA_UNKNOWN`), and a job whose newest
+  version is one is not edited (a new version over it: 409 `JOB_SCHEMA_UNKNOWN`, whatever the screen reads); a role change does not
+  pause it for a reason this build cannot judge. A running one's deadline is not read; its expiry still applies (the
+  clock ends it `expired` then, as for any occurrence).
   Schema 1 is read exactly as stored.
 - **A client gets a definition only in a shape it announced**: header `X-ACB-Job-Schemas` (`JOB_SCHEMAS_HEADER`,
   `parseJobSchemasHeader`: schema 1 always, the rest as named; none = schema 1 — every admin console and app before
@@ -773,6 +775,7 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
 - **Occurrence kinds** (`jobOccurrenceKind`: `ev:<delivery number>` slots are `event`, 4a; everything today is
   `time`): a claim names the kinds its app runs (`kinds`, additive; absent = `time`) and `GET /me/job-turns?kinds=`
   lists only those — an app before 4a is never handed an event occurrence (409 `JOB_KIND_NOT_SUPPORTED` on a claim).
+  Kinds this build does not know are left out; a list naming none it knows (or an empty one) is 400.
   Today's app sends neither (a server before 4-0 refuses an unknown key in the claim body).
 - Test: `server/tests/integration/job-schemas.test.ts` (stored-version reader; the clock, the runner and its batch,
   the PC's list and claim, 「もう一度」, approve / accept / resume, list and detail without a crash, a role change;

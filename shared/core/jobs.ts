@@ -564,10 +564,12 @@ export function jobOccurrenceKind(dueSlot: string): JobOccurrenceKind {
 }
 /** The kinds a claim or a turn list asked for: `time` when none are named (an app before stage 4-0); null = not a list of kinds. */
 export function parseJobOccurrenceKinds(value: unknown): JobOccurrenceKind[] | null {
-  if (value === undefined || value === null) return ['time']
+  if (value === undefined || value === null || value === '') return ['time']
   const list = typeof value === 'string' ? value.split(',').map(s => s.trim()).filter(Boolean) : value
   if (!Array.isArray(list) || list.length > 10 || !list.every(k => typeof k === 'string' && /^[a-z_]{1,20}$/.test(k))) return null
-  return [...new Set(list.filter((k): k is JobOccurrenceKind => k === 'time' || k === 'event'))]
+  // Kinds this build does not know are left out; naming none it knows is a mistake, never "nothing to claim".
+  const known = [...new Set(list.filter((k): k is JobOccurrenceKind => k === 'time' || k === 'event'))]
+  return known.length > 0 ? known : null
 }
 
 /** Every company path a definition names (what the responsible person must be able to read). */

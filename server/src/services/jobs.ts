@@ -453,6 +453,8 @@ export function createJobService(deps: JobServiceDeps) {
       if (found.job.state === 'retired') return RETIRED()
       // A screen that cannot show the newest version never writes over it (it was shown an empty form).
       const newest = found.handle.jobs.version(jobId, found.job.latestVersion)
+      // Nor does a server that cannot read it (rolled back after a newer build wrote it), whatever the screen says it reads.
+      if (newest && definitionOf(newest) === null) return SCHEMA_UNKNOWN()
       if (newest && !reads.includes(newest.schema)) return NEEDS_NEWER_SCREEN()
       const parsed = await definitionFrom(member.companyId, body)
       if (!parsed.ok) return parsed
