@@ -13,7 +13,7 @@
  *   refused (`JOB_NEEDS_NEWER_SCREEN`); schema 1 is answered exactly as stored;
  * - a PC claims an occurrence only of a kind its app says it runs (absent = `time`, every app today);
  * - an event occurrence (4a's `ev:` slot) does not exist on this build (stage 4-0.1): not listed, counted, told,
- *   retried, reconciled, run, claimed or expired.
+ *   retried, reconciled, run, claimed or expired; a pause or stop holds a waiting one (the one write allowed).
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 
@@ -44,7 +44,7 @@ import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import { randomIds } from '../../src/adapters/system'
 import { hashCanonical } from '../../src/lib/content-hash'
 import { canonicalJson } from '../../../shared/core/fixed-content'
-import { isEventOccurrenceSlot, jobConsentCanonical, parseJobOccurrenceKinds, parseJobSchemasHeader, storedJobDefinition, type JobDefinition } from '../../../shared/core/jobs'
+import { isEventOccurrenceSlot, JOB_PC_STEP, jobConsentCanonical, parseJobOccurrenceKinds, parseJobSchemasHeader, storedJobDefinition, type JobDefinition } from '../../../shared/core/jobs'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
@@ -164,7 +164,7 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
-  for (const t of ['ai_job_occurrences', 'ai_job_versions', 'ai_jobs', 'notifications', 'ai_job_settings']) db.prepare(`DELETE FROM ${t} WHERE company_id = ?`).run(CO)
+  for (const t of ['ai_job_occurrences', 'ai_job_versions', 'ai_jobs', 'notifications', 'ai_job_settings', 'agent_stops']) db.prepare(`DELETE FROM ${t} WHERE company_id = ?`).run(CO)
   db.prepare("DELETE FROM ai_runs WHERE company_id = ? AND subject_kind = 'occurrence'").run(CO)
 })
 
@@ -384,16 +384,65 @@ describe('an event occurrence (stage 4a) does not exist on this build', () => {
     expect(noticeRows(due) + noticeRows(running)).toBe(0)
   })
 
-  it('the runner never runs it, a pause never touches it, a PC never lists or claims it', async () => {
+  it('the runner never runs it', async () => {
     const job = await approvedJob(serverJob())
     const due = eventOccurrence(job, 'due')
     const o = occurrences()
     expect(o.dueIds(CO)).toEqual([])
     expect(o.runOccurrence(CO, due)).toBeNull()
     expect(o.runDue(CO)).toBe(0)
-    expect(await call('js-owner', 'POST', `/jobs/${job}/pause`)).toMatchObject({ status: 200 })
     expect(occOf(due)).toMatchObject({ state: 'due', outcome_code: null, run_id: null })
-    expect(noticeRows(due)).toBe(0)
+  })
+
+  it('a pause, the company stop and a restore hold a waiting one (back on 4a it never runs), still hidden and untold', async () => {
+    const job = await approvedJob(serverJob())
+    const other = await approvedJob(serverJob({ name: '別の仕事' }))
+    const paused = eventOccurrence(job, 'due')
+    const otherDue = eventOccurrence(other, 'due')
+    const done = eventOccurrence(job, 'done')
+    expect(await call('js-owner', 'POST', `/jobs/${job}/pause`)).toMatchObject({ status: 200 })
+    expect(occOf(paused)).toMatchObject({ state: 'held', outcome_code: 'JOB_PAUSED', run_id: null })
+    // Only that job's waiting ones; a finished one keeps its state.
+    expect(occOf(otherDue)).toMatchObject({ state: 'due', outcome_code: null })
+    expect(occOf(done)).toMatchObject({ state: 'done' })
+    expect((await call('js-owner', 'GET', `/jobs/${job}/occurrences`)).body.data.occurrences).toEqual([])
+    expect(await call('js-owner', 'PUT', '/jobs-stop', { stopped: true })).toMatchObject({ status: 200 })
+    expect(occOf(otherDue)).toMatchObject({ state: 'held', outcome_code: 'COMPANY_STOPPED' })
+    expect(await call('js-owner', 'PUT', '/jobs-stop', { stopped: false })).toMatchObject({ status: 200 })
+    const afterRestore = eventOccurrence(other, 'due')
+    services.restorePause.pauseAfterRestore(CO)
+    expect(occOf(afterRestore)).toMatchObject({ state: 'held', outcome_code: 'COMPANY_STOPPED' })
+    expect(noticeRows(paused) + noticeRows(otherDue) + noticeRows(afterRestore)).toBe(0)
+  })
+
+  it('a PC run on one is a missing run: no get, renew, finish, retry or reconcile', async () => {
+    const job = await approvedJob(pcJob(publishSkill()))
+    const ev = eventOccurrence(job, 'running')
+    const time = dueOccurrence(job, 1)
+    const at = new Date().toISOString()
+    const runOf = (occ: string) => {
+      const id = `run-${occ.slice(-8)}`
+      companyData.forCompany(CO).aiRuns.insert({
+        id, subject: { kind: 'occurrence', id: occ }, step: JOB_PC_STEP, userId: 'js-alice', state: 'running', generation: 1, deviceId: 'device-alice-1',
+        conversationId: 'conv-ev', claimExpiresAt: new Date(Date.now() + 10 * MINUTE).toISOString(), failureClass: null, failureCode: null, retryAt: null,
+        attempts: 0, pluginVersion: null, stepsVersion: null, procedure: null, createdAt: at, updatedAt: at, closedAt: null,
+      })
+      return id
+    }
+    const evRun = runOf(ev)
+    // The same run on a time occurrence answers (the refusal is about the event occurrence, not the run).
+    expect(await call('js-alice', 'GET', `/ai-runs/${runOf(time)}`)).toMatchObject({ status: 200 })
+    const missing = 'run-does-not-exist'
+    for (const [method, path, body] of [
+      ['GET', '', undefined], ['POST', '/renew', { generation: 1 }], ['POST', '/finish', { generation: 1, outcome: 'done' }],
+      ['POST', '/retry', undefined], ['POST', '/operations/k/reconcile', { done: true }],
+    ] as const) {
+      const none = await call('js-alice', method, `/ai-runs/${missing}${path}`, body)
+      expect(none.status).toBe(404)
+      expect(await call('js-alice', method, `/ai-runs/${evRun}${path}`, body)).toEqual(none)
+    }
+    expect(db.prepare('SELECT state, claim_expires_at FROM ai_runs WHERE company_id = ? AND id = ?').get(CO, evRun)).toMatchObject({ state: 'running' })
+    expect(occOf(ev)).toMatchObject({ state: 'running' })
   })
 
   it('「もう一度」 and reconcile answer exactly as for an occurrence that does not exist', async () => {
@@ -427,6 +476,12 @@ describe('an event occurrence (stage 4a) does not exist on this build', () => {
     const fresh = 'occ.eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
     expect(repo.insertOccurrence({ id: fresh, jobId: job, jobVersion: 1, dueSlot: 'ev:7', timeZone: 'Asia/Tokyo', dueAt: at, expiresAt: at, state: 'due', runId: null, outcomeCode: null, createdAt: at, updatedAt: at })).toBe(false)
     expect(occOf(fresh)).toBeUndefined()
+    // The one write allowed: a waiting event occurrence held; a time one is not its business (holdDue moves those itself).
+    const evDue = eventOccurrence(job, 'due')
+    const timeDue = dueOccurrence(job, 1)
+    repo.holdEventOccurrences(null, 'JOB_PAUSED', at)
+    expect(occOf(evDue)).toMatchObject({ state: 'held', outcome_code: 'JOB_PAUSED' })
+    expect(occOf(timeDue)).toMatchObject({ state: 'due', outcome_code: null })
     expect(isEventOccurrenceSlot('ev:7')).toBe(true)
     expect(isEventOccurrenceSlot('2026-11-10T09:00')).toBe(false)
   })

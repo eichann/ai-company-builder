@@ -30,7 +30,8 @@ const OCCURRENCE_COLUMNS = 'id, job_id, job_version, due_slot, time_zone, due_at
 const OCCURRENCE_READ = `${OCCURRENCE_COLUMNS}, checked_until, checked_commit, retries, retried_by, retried_at`
 /**
  * Stage 4-0.1 (jobs.md "Event occurrences do not exist on this build", `isEventOccurrenceSlot`): an event
- * occurrence (stage 4a's `ev:<delivery number>` slot) is not read, counted, moved, sent back or written here. 4a
+ * occurrence (stage 4a's `ev:<delivery number>` slot) is not read, counted, moved, sent back or written here (one
+ * exception: `holdEventOccurrences`, a pause holding a waiting one). 4a
  * shows one only to people who read its source record — a check this build cannot make. Built from the core's
  * prefix (it has no `%` / `_`; `substr` compares exactly, unlike `LIKE`).
  */
@@ -170,6 +171,11 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
           retries = retries + 1, retried_by = ?, retried_at = ?, updated_at = ?
           WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?)) AND ${NOT_EVENT}`)
         .run(expiresAt, by, at, at, companyId, occurrenceId, JSON.stringify(from)).changes === 1
+    },
+    holdEventOccurrences(jobId, code, at) {
+      conn.prepare(`UPDATE ai_job_occurrences SET state = 'held', outcome_code = ?, updated_at = ?
+          WHERE company_id = ? AND state = 'due' AND NOT (${NOT_EVENT}) AND (? IS NULL OR job_id = ?)`)
+        .run(code, at, companyId, jobId, jobId)
     },
     moveOccurrence(occurrenceId, from, to, change, at) {
       const runId = change.runId === undefined ? null : change.runId
