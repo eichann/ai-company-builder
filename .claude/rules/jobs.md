@@ -781,10 +781,30 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   lists only those — an app before 4a is never handed an event occurrence (409 `JOB_KIND_NOT_SUPPORTED` on a claim).
   Kinds this build does not know are left out; a list naming none it knows (or an empty one) is 400.
   Today's app sends neither (a server before 4-0 refuses an unknown key in the claim body).
+- **Event occurrences do not exist on this build** (stage 4-0.1, the rollback floor after 4a; deployment.md "Rolling
+  back production"). 4a shows an event occurrence (`ev:<delivery number>` slot) only to people who read its source
+  record, a check this build cannot make. So one rule (`isEventOccurrenceSlot` / `EVENT_OCCURRENCE_SLOT_PREFIX`,
+  `shared/core/jobs.ts`), applied by the job repository (`adapters/sqlite/jobs.ts` `NOT_EVENT`) to **every**
+  occurrence method: `occurrence`, `occurrences`, `dueOccurrences`, `runningOccurrences` never return one,
+  `moveOccurrence` / `retryOccurrence` never change one, `insertOccurrence` never writes one. **One write is
+  allowed**: `holdEventOccurrences` — a pause, the company's stop and a restore's stop (`holdDue`) move the job's
+  (or every job's) event occurrences still `due` to `held` with the same code, so a return to 4a never runs one that
+  waited before the pause; it answers nothing about them. (`isHiddenOccurrence` is a yes / no used only so `ownRun`
+  can refuse a PC run on one.) Hence, for owners and admins too: not in
+  `GET /jobs/:jobId/occurrences` (filtered before the limit) nor a job's `lastOccurrence` (no `ev:` slot in any
+  answer), no notice made for one and an existing one (4a's) not shown or counted, 「もう一度」 and reconcile the same
+  404 as a missing id, never run by the server's runner, never listed or claimed by a PC (404, whatever `kinds`
+  says — so naming `event` adds nothing here), a PC run on one a missing run (`ai-runs.ts` `ownRun`: get, renew,
+  finish, retry, reconcile, token binding → 404 `RUN_NOT_FOUND`), and its expiry left alone (no notice; 4a settles it
+  with its reader check when rolled forward). The kinds check above is therefore unreachable on this build (kept
+  for 4a).
+  **4a must lift this rule where it applies its own reader check** (PR #700 rebased onto it).
 - Test: `server/tests/integration/job-schemas.test.ts` (stored-version reader; the clock, the runner and its batch,
   the PC's list and claim, 「もう一度」, approve / accept / resume, list and detail without a crash, a role change;
   the client gate with a later server as fixture (`knownSchemas: [1, 2]`) — approve, accept, edit, list, detail;
-  schema 1 byte for byte with any header; kinds on turns and claims) and `admin/tests/jobs.test.tsx` "a definition of
+  schema 1 byte for byte with any header; kinds on turns and claims; "an event occurrence (stage 4a) does not exist on
+  this build" — each repository method's filter, the insert refusal, the helper, the hold (its call in `holdDue`, its
+  job / `due` / event-only conditions) and `ownRun`'s refusal mutation-checked one at a time) and `admin/tests/jobs.test.tsx` "a definition of
   a shape this console does not read" — each guard mutation-checked (the form's own `editableDefinition` is covered by
   the dialog's `needsNewerScreen` check before it, so removing it alone changes nothing).
 

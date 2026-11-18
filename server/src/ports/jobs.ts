@@ -101,6 +101,10 @@ export interface JobRepository {
   stopped(): boolean
   setStopped(stopped: boolean, by: string, at: string): void
 
+  // Every occurrence method below acts as if an event occurrence (stage 4a's `ev:` slot, `isEventOccurrenceSlot`)
+  // did not exist: none is read, listed, moved, sent back or inserted (stage 4-0.1, jobs.md) — except
+  // `holdEventOccurrences`, the one write that may touch one (a pause / stop holds it; nothing becomes visible), and
+  // `isHiddenOccurrence`, a yes/no used only to refuse.
   /** Insert an occurrence unless its (job, slot) is there already (`UNIQUE`): false = it was (nothing written). */
   insertOccurrence(row: JobOccurrenceRow): boolean
   occurrence(occurrenceId: string): JobOccurrenceRow | null
@@ -121,4 +125,15 @@ export interface JobRepository {
    */
   retryOccurrence(occurrenceId: string, from: readonly JobOccurrenceState[], expiresAt: string, by: string, at: string): boolean
   moveOccurrence(occurrenceId: string, from: readonly JobOccurrenceState[], to: JobOccurrenceState, change: { runId?: string | null; outcomeCode: string | null; checkedUntil?: string; checkedCommit?: string | null }, at: string): boolean
+  /**
+   * Stage 4-0.1: a pause or the company's stop (restore's included) holds the job's (null: every job's) event
+   * occurrences still `due` — `held` with `code` — so that returning to 4a never runs one that waited before the pause.
+   * The only write that touches an event occurrence; it returns nothing about them (they stay hidden).
+   */
+  holdEventOccurrences(jobId: string | null, code: string, at: string): void
+  /**
+   * Stage 4-0.1: whether this id is an event occurrence (hidden here) — only so that a refusal can treat a PC run on
+   * one as a missing run (`ai-runs.ts` `ownRun`). Nothing else of it is read.
+   */
+  isHiddenOccurrence(occurrenceId: string): boolean
 }

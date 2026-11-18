@@ -400,11 +400,13 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
    * A pause or the company's stop begins (in the caller's transaction, jobs.md "Held"): every occurrence of
    * the job (null: of every job of the company) still `due` is `held` — it never runs, also not after resuming.
    * One a PC is running (B PR 5a) is `held` too and its run ended (`endPcRun`): its token, renew and finish are
-   * refused from now on, and resuming or lifting the stop brings neither back.
+   * refused from now on, and resuming or lifting the stop brings neither back. A waiting event occurrence (stage 4a,
+   * hidden on this build) is held too, so a return to 4a never runs one that waited before the pause (stage 4-0.1).
    */
   function holdDue(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void {
     const handle = companyData.forCompany(companyId)
     const at = clock.now()
+    handle.jobs.holdEventOccurrences(jobId, code, at)
     for (const occ of handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT)) {
       if (jobId === null || occ.jobId === jobId) handle.jobs.moveOccurrence(occ.id, ['due'], 'held', { outcomeCode: code }, at)
     }
