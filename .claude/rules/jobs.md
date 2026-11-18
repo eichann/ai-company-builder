@@ -136,15 +136,17 @@ PUT  /jobs-stop { stopped }         owner/admin
   提案する」 ⑦): an owner/admin who approves a job they are themselves the responsible person of has approved it as an
   admin only; their consent to it running with their rights is their own 「受け取る」 afterwards, checked like any
   acceptance (responsible person, approved version, fingerprint, rights, Skill, place, the consent canonical). Until then
-  it is `NOT_ACCEPTED` and nothing runs (held, as for anyone). The server holds the split: an acceptance by **that
-  version's own approver** (`approved_by`) is refused (409 `JOB_ACCEPT_SEPARATELY`, 「承認はできました。…「受け取る」を別に
-  押してください（この画面は古いため、画面を新しくしてください）」, `JOB_ACCEPT_SEPARATELY` in `shared/core/jobs.ts`) unless
-  the request says its 「受け取る」 is a press of its own — header `X-ACB-Job-Accept: separate` (`JOB_ACCEPT_HEADER`,
+  it is `NOT_ACCEPTED` and nothing runs (held, as for anyone). The server holds the split: **an acceptance is refused**,
+  as the last check before the write (409 `JOB_ACCEPT_SEPARATELY`, 「承認はできました。…「受け取る」を別に押してください（この画面は
+  古いため、画面を新しくしてください）」, `JOB_ACCEPT_SEPARATELY` in `shared/core/jobs.ts`), unless the request says its
+  「受け取る」 is a press of its own — header `X-ACB-Job-Accept: separate` (`JOB_ACCEPT_HEADER`,
   sent by the admin console's 受け取る and every job call of the desktop app) — or comes from the desktop app
   (`X-ACB-Client-Version`: every released app's 受け取る always was its own press). An admin console from before the split
   (a tab left open) approved and then accepted with the same press without the header: its approval stays, its
   acceptance is refused and shown as 「承認しましたが、受け取れませんでした」 with that sentence. An older server ignores the
-  header. A responsible person who did not approve the version (the usual case) is not affected. **Not** split: an event
+  header. Not judged by who approved: `approved_by` keeps a version's first approver, so an old tab re-approving a version
+  someone else approved first would pass such a check (independent review of #702); no caller but the old console's
+  approval press sends neither header. **Not** split: an event
   job's 「見張るやることを選び直す」 (`POST /me/jobs/:jobId/watch`), where the responsible person alone chooses the next
   watched やること and no admin approval is involved ("Event-triggered jobs").
 - **A Skill from the shelf** (PR 5a, owner decision: companies without the shared folder must work too): in a
@@ -960,13 +962,14 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
 - Two presses (owner decision 2026-11-18): `server/tests/integration/jobs.test.ts` "approving one's own job is not
   accepting it" (approved, `NOT_ACCEPTED`, `mustAccept`; an acceptance without the header or with another value refused
   `JOB_ACCEPT_SEPARATELY`; the separate one still the responsible person's only, the fingerprint checked, then accepted)
-  and "the desktop app's 受け取る" (`X-ACB-Client-Version` alone goes through); "PR 4" the self-approver's notice;
+  "an old admin tab re-approving a version someone else approved first", and "the desktop app's 受け取る"
+  (`X-ACB-Client-Version` alone goes through); "PR 4" the self-approver's notice;
   `job-occurrences.test.ts` "an owner approving their own job does not run it" (held `NOT_ACCEPTED`, runs after the
   separate press); `job-events.test.ts` "an admin approving their own event job" (no watch until the separate press);
   `admin/tests/jobs.test.tsx` "approving one's own job is not accepting it" and the place-outside row;
   `client/tests/jobs-ipc.test.ts` (the header on every job call). Mutation-checked: the service's guard, the route's
   header value, the app-caller allowance, the route always allowing, the notice's old self-approver exclusion, the admin's
-  header, its approval accepting again, the row's button and its place-outside exclusion — each fails a test. The accept
+  header, its approval accepting again, the guard narrowed to the version's approver (the re-approval test), the row's button and its place-outside exclusion — each fails a test. The accept
   dialog's own `placeOutside` check is behind the row's (it is never opened for such a job), so removing it alone
   changes nothing.
 

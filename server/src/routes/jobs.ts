@@ -36,7 +36,7 @@ const appCaller = (c: Context) => typeof c.req.header('X-ACB-Client-Version') ==
 /**
  * The caller's 「受け取る」 is a press of its own, not part of an approval's (owner decision 2026-11-18): a screen that
  * says so (`X-ACB-Job-Accept: separate`), or the desktop app, whose 「受け取る」 always was its own press. An admin
- * console from before the split sends neither — its acceptance by the approver themself is refused.
+ * console from before the split sends neither (its only acceptance was part of an approval's press) — refused.
  */
 const separatePress = (c: Context) => c.req.header(JOB_ACCEPT_HEADER) === JOB_ACCEPT_SEPARATE || appCaller(c)
 

@@ -123,7 +123,7 @@ async function runnable(co = CO, overrides: Record<string, unknown> = {}): Promi
   const job = made.value.id
   const approved = await services.jobs.approve(owner(co), job, { version: 1 })
   if (!approved.ok) throw new Error(JSON.stringify(approved.body))
-  const accepted = await services.jobs.accept(alice(co), job, { version: 1 })
+  const accepted = await services.jobs.accept(alice(co), job, { version: 1 }, undefined, true)
   if (!accepted.ok) throw new Error(JSON.stringify(accepted.body))
   return { job, occ: dueOccurrence(job, co) }
 }

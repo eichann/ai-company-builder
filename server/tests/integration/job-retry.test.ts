@@ -106,7 +106,7 @@ async function approvedJob(co = CO, opts: { grant?: Record<string, unknown>; acc
   const approved = await services.jobs.approve(owner(co), made.value.id, { version: 1 })
   if (!approved.ok) throw new Error(JSON.stringify(approved.body))
   if (opts.accept !== false) {
-    const accepted = await services.jobs.accept(alice(co), made.value.id, { version: 1 })
+    const accepted = await services.jobs.accept(alice(co), made.value.id, { version: 1 }, undefined, true)
     if (!accepted.ok) throw new Error(JSON.stringify(accepted.body))
   }
   return made.value.id
@@ -414,7 +414,7 @@ describe('the press', () => {
     const made = await services.jobs.create(owner(), { definition: serverJob() })
     if (!made.ok) throw new Error(JSON.stringify(made.body))
     expect((await services.jobs.approve(owner(), made.value.id, { version: 1 })).ok).toBe(true)
-    expect((await services.jobs.accept(alice(), made.value.id, { version: 1 })).ok).toBe(true)
+    expect((await services.jobs.accept(alice(), made.value.id, { version: 1 }, undefined, true)).ok).toBe(true)
     const occ = occurrence(made.value.id, 'due')
     const runner = createJobOccurrences({
       companyData, transactions: sqliteTransactions(db), clock, ids: randomIds,
@@ -433,7 +433,7 @@ describe('the press', () => {
     const made = await services.jobs.create(owner(), { definition: serverJob() })
     if (!made.ok) throw new Error(JSON.stringify(made.body))
     expect((await services.jobs.approve(owner(), made.value.id, { version: 1 })).ok).toBe(true)
-    expect((await services.jobs.accept(alice(), made.value.id, { version: 1 })).ok).toBe(true)
+    expect((await services.jobs.accept(alice(), made.value.id, { version: 1 }, undefined, true)).ok).toBe(true)
     const occ = occurrence(made.value.id, 'needs_person', { outcome: 'TASK_NOT_CREATED' })
     expect(await retry('jy-owner', made.value.id, occ)).toMatchObject({ status: 200 })
     expect(Date.parse(occOf(occ).expires_at)).toBe(Date.now() + 60 * MINUTE)

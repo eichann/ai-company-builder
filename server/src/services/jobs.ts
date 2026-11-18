@@ -72,8 +72,8 @@ const TRIGGER_NOT_ALLOWED = (problems: string[]) => refuse('conflict', 'きっ�
 const NOT_RESPONSIBLE_TO_REWATCH = () => refuse('forbidden', '見張るやることを選び直せるのは、この仕事の責任者だけです。', { code: 'JOB_NOT_RESPONSIBLE' })
 const DRAFT_WAITING = () => refuse('conflict', '管理者が内容を直している途中のため、いまは選び直せません。管理者に確かめてください。', { code: 'JOB_DRAFT_WAITING' })
 /**
- * An acceptance by the version's own approver from a screen whose 「受け取る」 is not its own press (an admin console
- * from before the split, owner decision 2026-11-18): approving never consents for oneself; the approval stays.
+ * An acceptance from a screen whose 「受け取る」 is not its own press (an admin console from before the split, which
+ * accepted with the approval's press; owner decision 2026-11-18): approving never consents for oneself; the approval stays.
  */
 const ACCEPT_SEPARATELY = () => refuse('conflict', `${JOB_ACCEPT_SEPARATELY}。`, { code: 'JOB_ACCEPT_SEPARATELY' })
 const NOT_EVENT_JOB = () => refuse('conflict', 'この定期の仕事は、出来事で動く仕事ではありません。', { code: 'JOB_NOT_EVENT' })
@@ -620,8 +620,8 @@ export function createJobService(deps: JobServiceDeps) {
      * them and usable now (their own live pick: `places.live`) — kept with the acceptance; any other version takes
      * none. Accepting again with another place replaces it (how an expired folder pick is chosen again).
      * `separatePress`: the client's 「受け取る」 is a press of its own (`JOB_ACCEPT_HEADER`, or the desktop app); without
-     * it, the version's own approver is refused (`JOB_ACCEPT_SEPARATELY`: an old admin console accepting with the
-     * approval's press) — approving and accepting are two presses, also for the same person (owner decision 2026-11-18).
+     * it the acceptance is refused (`JOB_ACCEPT_SEPARATELY`: an old admin console accepting with the approval's press) —
+     * approving and accepting are two presses, also for the same person (owner decision 2026-11-18).
      */
     async accept(member: Member, jobId: string, body: unknown, reads: readonly number[] = SCHEMA_1_ONLY, separatePress = false): Promise<Outcome<JobView>> {
       const found = visibleJob(member, jobId)
@@ -634,7 +634,6 @@ export function createJobService(deps: JobServiceDeps) {
       if (v.actingUserId !== member.userId) return refuse('forbidden', 'この定期の仕事の責任者だけが受け取れます。', { code: 'JOB_NOT_RESPONSIBLE' })
       if (b.fingerprint !== null && b.fingerprint !== v.fingerprint) return FINGERPRINT_CHANGED()
       if (job.approvedVersion !== v.version) return refuse('conflict', 'まだ承認されていない版は受け取れません。', { code: 'JOB_NOT_APPROVED' })
-      if (!separatePress && v.approvedBy === member.userId) return ACCEPT_SEPARATELY()
       const definition = definitionOf(v)
       if (definition === null) return SCHEMA_UNKNOWN()
       // What is accepted is what the screen showed: one that cannot show this shape never accepts it.
@@ -649,6 +648,10 @@ export function createJobService(deps: JobServiceDeps) {
       if (!skill.ok) return skill
       const problems = triggerProblems(handle, definition, null)
       if (problems.length > 0) return TRIGGER_NOT_ALLOWED(problems)
+      // Last of the checks, so a screen still learns what else is wrong: only a press of its own accepts. Not by who
+      // approved (`approved_by` keeps the first approver: an old tab re-approving a version someone else approved
+      // would pass) — no caller but an old admin console's approval press sends neither the header nor an app build.
+      if (!separatePress) return ACCEPT_SEPARATELY()
       const told = new Set<string>()
       const result = transactions.run((): Outcome<void> => {
         const rights = withinRights(handle, definition)

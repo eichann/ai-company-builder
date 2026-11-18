@@ -86,7 +86,7 @@ async function weeklyJob(): Promise<string> {
   } })
   if (!made.ok) throw new Error(JSON.stringify(made.body))
   expect((await jobService.approve(owner, made.value.id, { version: 1 })).ok).toBe(true)
-  expect((await jobService.accept(alice, made.value.id, { version: 1 })).ok).toBe(true)
+  expect((await jobService.accept(alice, made.value.id, { version: 1 }, undefined, true)).ok).toBe(true)
   return made.value.id
 }
 
