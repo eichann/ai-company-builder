@@ -40,6 +40,7 @@ import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import { randomIds, systemClock } from '../../src/adapters/system'
+import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE } from '../../shared/core/jobs'
 
 const app = new Hono()
 app.route('/api/companies/:companyId', jobsRoute)
@@ -52,9 +53,12 @@ const TS = '2026-11-11T00:00:00.000Z'
 type Json = any
 
 async function as(user: string, method: string, path: string, body?: unknown, company = CO) {
+  return asWith(user, method, path, body, {}, company)
+}
+async function asWith(user: string, method: string, path: string, body: unknown, headers: Record<string, string>, company = CO) {
   currentUser.id = user
   const res = await app.request(`/api/companies/${company}${path}`, {
-    method, headers: { 'Content-Type': 'application/json' }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    method, headers: { 'Content-Type': 'application/json', ...headers }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
   return { status: res.status, body: await res.json().catch(() => null) as Json }
 }
@@ -215,6 +219,39 @@ describe('the responsible person accepts', () => {
     expect(byOwner.status).toBe(403)
     expect(jobRow(job.id).accepted_consent).toBeNull()
     const r = await as('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    expect(r.status).toBe(200)
+    expect(r.body.data).toMatchObject({ accepted: true, waiting: null })
+  })
+
+  it('approving one\'s own job is not accepting it: two presses, the second checked as any acceptance', async () => {
+    const def = operationJob('u-admin', '自分で承認する仕事')
+    const job = await created(def)
+    const approvedOwn = await as('u-admin', 'POST', `/jobs/${job.id}/approve`, { version: 1 })
+    expect(approvedOwn.status).toBe(200)
+    // Approved, not accepted: it does not run, and the server says it waits for their own 受け取る.
+    expect(approvedOwn.body.data).toMatchObject({ approvedVersion: 1, accepted: false, waiting: 'NOT_ACCEPTED', you: { mustAccept: true } })
+    expect(jobRow(job.id).accepted_consent).toBeNull()
+    // An admin console from before the split accepts with the approval's press (no header): refused, nothing accepted.
+    const combined = await as('u-admin', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    expect(combined).toMatchObject({ status: 409, body: { code: 'JOB_ACCEPT_SEPARATELY' } })
+    expect(combined.body.error).toContain('「受け取る」を別に押してください')
+    // A header that does not say the press is its own does not either.
+    expect((await asWith('u-admin', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, { [JOB_ACCEPT_HEADER]: 'yes' })).body.code).toBe('JOB_ACCEPT_SEPARATELY')
+    expect(jobRow(job.id).accepted_consent).toBeNull()
+    // Their own 受け取る, a press of its own: still only the version's responsible person, the version's fingerprint.
+    const separate = { [JOB_ACCEPT_HEADER]: JOB_ACCEPT_SEPARATE }
+    expect((await asWith('u-owner', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, separate)).status).toBe(403)
+    expect((await asWith('u-admin', 'POST', `/me/jobs/${job.id}/accept`, { version: 1, fingerprint: `sha256:${'0'.repeat(64)}` }, separate)).body.code).toBe('JOB_VERSION_FINGERPRINT')
+    const accepted = await asWith('u-admin', 'POST', `/me/jobs/${job.id}/accept`, { version: 1, fingerprint: job.versions[0].fingerprint }, separate)
+    expect(accepted.status).toBe(200)
+    expect(accepted.body.data).toMatchObject({ accepted: true, waiting: null, you: { mustAccept: false } })
+    expect(jobRow(job.id).accepted_consent).not.toBeNull()
+  })
+
+  it('the desktop app\'s 受け取る was always a press of its own: its acceptance by the approver themself goes through', async () => {
+    const job = await created(operationJob('u-dan', 'アプリで受け取る仕事'))
+    await as('u-dan', 'POST', `/jobs/${job.id}/approve`, { version: 1 })
+    const r = await asWith('u-dan', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, { 'X-ACB-Client-Version': '0.9.0+abc1234.20261101' })
     expect(r.status).toBe(200)
     expect(r.body.data).toMatchObject({ accepted: true, waiting: null })
   })
@@ -547,10 +584,14 @@ describe('PR 4: 「受け取りが要ります」 and what the screens read', ()
     expect(await bellTexts('u-alice')).toContain('あなたが責任者の定期の仕事「週報のやること（改）」の内容が変わりました。確かめて「受け取る」を押してください（受け取るまで動きません）')
   })
 
-  it('the approver who is the responsible person is not told; someone no longer responsible no longer sees it', async () => {
+  it('the approver who is the responsible person is told too (approving is not accepting); someone no longer responsible no longer sees it', async () => {
     const mine = await created(operationJob('u-admin', '自分の仕事'))
     await as('u-admin', 'POST', `/jobs/${mine.id}/approve`, { version: 1 })
-    expect(acceptNotices('u-admin').filter(n => n.dedupe_key.includes(mine.id))).toEqual([])
+    expect(acceptNotices('u-admin').filter(n => n.dedupe_key.includes(mine.id)).map(n => n.dedupe_key)).toEqual([`job_accept_needed:${mine.id}:1`])
+    expect(await bellTexts('u-admin')).toContain(asked('自分の仕事'))
+    // Their own separate 受け取る: the ask is gone.
+    await asWith('u-admin', 'POST', `/me/jobs/${mine.id}/accept`, { version: 1 }, { [JOB_ACCEPT_HEADER]: JOB_ACCEPT_SEPARATE })
+    expect(await bellTexts('u-admin')).not.toContain(asked('自分の仕事'))
     const def = operationJob('u-bob', '引き継ぐ仕事')
     const job = await approved(def)
     expect(await bellTexts('u-bob')).toContain(asked('引き継ぐ仕事'))

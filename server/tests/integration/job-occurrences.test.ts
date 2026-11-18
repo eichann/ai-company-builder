@@ -493,6 +493,25 @@ describe('held, skipped and paused: nothing made', () => {
     expect(tasksOf()).toEqual([])
   })
 
+  it('an owner approving their own job does not run it: held until their own separate 受け取る, then it runs', async () => {
+    const made = await jobService.create(owner(), { definition: weekly({ name: '自分の週報', actingUser: 'u-owner' }) })
+    if (!made.ok) throw new Error(JSON.stringify(made.body))
+    const job = made.value.id
+    expect((await jobService.approve(owner(), job, { version: 1 })).ok).toBe(true)
+    nowMs = jst('2026-11-16T09:02')
+    occ.makeOccurrences(CO)
+    occ.runDue(CO)
+    expect(occurrencesOf(job).map(o => [o.state, o.outcome_code])).toEqual([['held', 'NOT_ACCEPTED']])
+    // An acceptance that is part of the approval's press (an old admin console) is refused; one of its own is not.
+    const combined = await jobService.accept(owner(), job, { version: 1 })
+    expect(!combined.ok && combined.body.code).toBe('JOB_ACCEPT_SEPARATELY')
+    expect((await jobService.accept(owner(), job, { version: 1 }, undefined, true)).ok).toBe(true)
+    nowMs = jst('2026-11-23T09:02')
+    occ.makeOccurrences(CO)
+    occ.runDue(CO)
+    expect(occurrencesOf(job).map(o => o.state)).toEqual(['held', 'done'])
+  })
+
   it('another version approved after it was made: held, not run as pinned', async () => {
     const job = await runnableJob()
     nowMs = jst('2026-11-16T09:02')

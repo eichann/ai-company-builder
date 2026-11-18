@@ -1,6 +1,7 @@
 // 「定期の仕事」 (jobs.md "The screens", PR 4): the form makes only the server's operation (no AI powers)
 // through the shared parser; editing a name or a time keeps what the responsible person accepted; approval
-// sends the version shown and says whether they must accept again; the company-wide stop asks first;
+// sends the version shown and says whether they must accept again — and never accepts with the same press, also for
+// one's own job (its 受け取る is a press of its own); the company-wide stop asks first;
 // occurrences are told in plain words; anyone but owners / admins is not offered the page.
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -163,24 +164,40 @@ describe('the page', () => {
     expect(calls.some((c) => c.url.includes('/me/jobs/'))).toBe(false)
   })
 
-  it('approving one\'s own job also accepts it in one\'s own name, with the version shown', async () => {
+  it('approving one\'s own job is not accepting it: 承認する sends the approval only; 受け取る is a press of its own', async () => {
     const mine = jobView({ actingUserId: 'u_owner', approvedVersion: null, accepted: false, state: 'draft', waiting: 'NOT_APPROVED' })
+    const approvedMine = { ...mine, approvedVersion: 1, state: 'active', waiting: 'NOT_ACCEPTED', you: { named: true, controls: true, mustAccept: true } }
     const { calls } = mockApi({
       ...companyRoutes(),
       [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [mine] }) },
       [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...mine, versions: [version(1, def({ actingUser: 'u_owner' }), 'c1')] }) },
-      [`POST ${base}/jobs/${JOB_ID}/approve`]: { body: ok({ ...mine, approvedVersion: 1, state: 'active', waiting: 'NOT_ACCEPTED' }) },
-      [`POST ${base}/me/jobs/${JOB_ID}/accept`]: { body: ok({ ...mine, approvedVersion: 1, accepted: true, state: 'active', waiting: null }) },
+      [`POST ${base}/jobs/${JOB_ID}/approve`]: { body: ok(approvedMine) },
+      [`POST ${base}/me/jobs/${JOB_ID}/accept`]: { body: ok({ ...approvedMine, accepted: true, waiting: null, you: { named: true, controls: true, mustAccept: false } }) },
     })
     renderInCompany(<JobsRoute />)
     await userEvent.click(within(await screen.findByRole('listitem', { name: '週の報告' })).getByRole('button', { name: '承認する' }))
     const dialog = await screen.findByRole('dialog')
-    expect(await within(dialog).findByRole('note')).toHaveTextContent('あなたが責任者です')
+    expect(await within(dialog).findByRole('note')).toHaveTextContent('あなたの権限で動かすことへの同意（「受け取る」）は、承認とは別に押します')
     await userEvent.click(within(dialog).getByRole('button', { name: '承認する' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    // The approval only: nothing is accepted with the same press.
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.url.replace(base, ''))).toEqual([`/jobs/${JOB_ID}/approve`])
+    // The list says it waits for their own 受け取る and offers it as its own button.
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    expect(within(row).getByRole('status')).toHaveTextContent('「責任者として受け取る」を押すまで動きません')
+    await userEvent.click(within(row).getByRole('button', { name: '責任者として受け取る' }))
+    const accepting = await screen.findByRole('dialog')
+    expect(within(accepting).getByText('責任者として、この仕事をあなたの権限で動かすことに同意します。承認とは別の操作です。')).toBeInTheDocument()
+    expect(await within(accepting).findByRole('note')).toHaveTextContent('あなたの名前と権限で動きます')
+    await userEvent.click(within(accepting).getByRole('button', { name: '受け取る' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => [c.url.replace(base, ''), c.body])).toEqual([
       [`/jobs/${JOB_ID}/approve`, { version: 1, fingerprint: 'sha256:v1' }],
       [`/me/jobs/${JOB_ID}/accept`, { version: 1, fingerprint: 'sha256:v1' }],
     ]))
+    // Said to the server as a press of its own (it refuses the approver's acceptance without it).
+    expect(calls.find((c) => c.url.includes('/accept'))!.headers['X-ACB-Job-Accept']).toBe('separate')
+    expect(calls.find((c) => c.url.endsWith('/approve'))!.headers['X-ACB-Job-Accept']).toBeUndefined()
+    await waitFor(() => expect(within(screen.getByRole('listitem', { name: '週の報告' })).queryByRole('button', { name: '責任者として受け取る' })).not.toBeInTheDocument())
   })
 
   it('one\'s own job that puts into a place outside: approved only — the place is chosen in one\'s app when accepting', async () => {
@@ -198,7 +215,12 @@ describe('the page', () => {
       ...companyRoutes(),
       [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [mine] }) },
       [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...mine, versions: [version(1, placed, 'c1')] }) },
-      [`POST ${base}/jobs/${JOB_ID}/approve`]: { body: ok({ ...mine, approvedVersion: 1, state: 'active', waiting: 'NOT_ACCEPTED' }) },
+      [`POST ${base}/jobs/${JOB_ID}/approve`]: {
+        body: ok({
+          ...mine, approvedVersion: 1, state: 'active', waiting: 'NOT_ACCEPTED', you: { named: true, controls: true, mustAccept: true },
+          deliverTo: { connector: 'google', kind: 'drive_folder', label: 'Google Drive のフォルダ', chosen: false, usable: false, name: null, expiresAt: null },
+        }),
+      },
     })
     renderInCompany(<JobsRoute />)
     await userEvent.click(within(await screen.findByRole('listitem', { name: '週の報告' })).getByRole('button', { name: '承認する' }))
@@ -208,6 +230,10 @@ describe('the page', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '承認する' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => c.url.replace(base, ''))).toEqual([`/jobs/${JOB_ID}/approve`]))
     expect(calls.some((c) => c.url.includes('/me/jobs/'))).toBe(false)
+    // Accepted in the app (where the place is chosen): the list says so and offers no 受け取る here.
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    await waitFor(() => expect(within(row).getByRole('status')).toHaveTextContent('アプリの「設定」→「仕事」→「定期の仕事」で置き先を選んで受け取るまで動きません'))
+    expect(within(row).queryByRole('button', { name: '責任者として受け取る' })).not.toBeInTheDocument()
   })
 
   it('back to the accepted consent (v1 A accepted, v2 B not accepted, v3 A): the server\'s answer decides — no new acceptance asked', async () => {
@@ -234,6 +260,8 @@ describe('the page', () => {
     expect(approvedText(3, after({ waiting: 'NOT_ACCEPTED' }), '田中 太郎')).toBe('第3版を承認しました。田中 太郎さんの受け取りを待ちます')
     expect(approvedText(3, after({ waiting: 'PAUSED', state: 'paused', pausedReason: 'ADMIN' }), '田中 太郎')).toBe('第3版を承認しました。いまは「管理者が止めました」です')
     expect(approvedText(3, after({ waiting: null, placement: 'a' }), '田中 太郎')).toContain('責任者のアプリが開いていて')
+    // The approver is the responsible person: it waits for their own 受け取る, said as such.
+    expect(approvedText(3, after({ waiting: 'NOT_ACCEPTED' }), null)).toBe('第3版を承認しました。まだ動きません。あなたが「受け取る」を押すと動き始めます')
   })
 
   it('the list names who it runs as now (the approved version\'s person) and the next version\'s person apart; a PC job says it needs the app', async () => {

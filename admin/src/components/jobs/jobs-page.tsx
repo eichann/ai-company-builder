@@ -19,7 +19,7 @@ import { describeError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
 import { JOB_CHAIN_STOPPED_ASK, jobOccurrenceText, jobRunsText, jobSlotText, jobTriggerText } from '../../../../shared/core/job-words'
 import { JOB_NEEDS_NEWER_SCREEN, isKnownJobTrigger } from '../../../../shared/core/jobs'
-import { JobApproveDialog, JobFormDialog } from './job-dialogs'
+import { JobAcceptDialog, JobApproveDialog, JobFormDialog } from './job-dialogs'
 import { JobOccurrences } from './job-occurrences'
 
 export const JOBS_INTRO =
@@ -45,6 +45,7 @@ export function JobsPage() {
   const members = useQuery(isAdmin ? `members:${companyId}` : null, () => companiesApi.getMembers(companyId))
   const [editing, setEditing] = useState<{ job: JobView | null } | null>(null)
   const [approving, setApproving] = useState<JobView | null>(null)
+  const [accepting, setAccepting] = useState<JobView | null>(null)
   const [historyOf, setHistoryOf] = useState<string | null>(null)
   const [confirmStop, setConfirmStop] = useState(false)
 
@@ -143,6 +144,13 @@ export function JobsPage() {
                           {job.chainStopped.why}。{JOB_CHAIN_STOPPED_ASK}（責任者がアプリで選ぶか、「直す」で見張るやることを選びます）
                         </p>
                       )}
+                      {job.you?.mustAccept === true && (
+                        <p role="status" className="text-sm">
+                          {job.deliverTo
+                            ? 'あなたが責任者です。あなたのアプリの「設定」→「仕事」→「定期の仕事」で置き先を選んで受け取るまで動きません。'
+                            : 'あなたが責任者です。内容を確かめて「責任者として受け取る」を押すまで動きません。'}
+                        </p>
+                      )}
                       {newerDraft && (
                         <p className="text-xs text-muted-foreground">
                           新しい版（第{job.latestVersion}版）が承認待ちです。承認するまでは第{job.approvedVersion}版のとおりに動きます。
@@ -157,6 +165,10 @@ export function JobsPage() {
                     <div className="flex shrink-0 flex-wrap gap-2">
                       {job.state !== 'retired' && (job.approvedVersion === null || newerDraft) && (
                         <Button size="sm" onClick={() => setApproving(job)}>承認する</Button>
+                      )}
+                      {/* The viewer is its responsible person and has not accepted it (the server's `you`): their own press. */}
+                      {job.you?.mustAccept === true && !job.deliverTo && (
+                        <Button size="sm" variant="secondary" onClick={() => setAccepting(job)}>責任者として受け取る</Button>
                       )}
                       <Button variant="outline" size="sm" onClick={() => setEditing({ job })} disabled={!members.data || job.state === 'retired' || job.needsUpdate === true}>直す</Button>
                       {job.state === 'paused' ? (
@@ -193,6 +205,14 @@ export function JobsPage() {
           myUserId={user?.id ?? null}
           onClose={() => setApproving(null)}
           onApproved={(next) => replace(next)}
+        />
+      )}
+      {accepting && (
+        <JobAcceptDialog
+          job={accepting}
+          members={memberList}
+          onClose={() => setAccepting(null)}
+          onAccepted={(next) => replace(next)}
         />
       )}
       <ConfirmDialog

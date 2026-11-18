@@ -1483,7 +1483,7 @@ export const minutesApi = {
 export type { JobList, JobOccurrenceView, JobRetryResult, JobVersionView, JobView, JobWaiting } from '../../../shared/types/jobs'
 export type { JobDefinition } from '../../../shared/core/jobs'
 
-import { JOB_SCHEMAS, JOB_SCHEMAS_HEADER, type JobDefinition } from '../../../shared/core/jobs'
+import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE, JOB_SCHEMAS, JOB_SCHEMAS_HEADER, type JobDefinition } from '../../../shared/core/jobs'
 
 /** The states of a やること an event job may start watching from (not finished: it can still reach the state watched). */
 export const JOB_START_STATES = ['todo', 'in_progress', 'review', 'waiting', 'awaiting_acceptance', 'declined'] as const
@@ -1509,9 +1509,14 @@ export const jobsApi = {
   /** `fingerprint`: the version as shown — the server refuses when it is not that version any more. */
   approve: (companyId: string, jobId: string, version: number, fingerprint: string) =>
     getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/approve`, jobSchema, { ...JOB_READS, method: 'POST', body: { version, fingerprint } }),
-  /** The caller's own acceptance (they are the version's responsible person): an owner/admin approving their own job. */
+  /**
+   * The caller's own acceptance (they are the version's responsible person), from its own 「受け取る」 press — never
+   * the approval's: the header says so, and the server refuses the version's own approver without it (jobs.md).
+   */
   accept: (companyId: string, jobId: string, version: number, fingerprint: string) =>
-    getData(`/api/companies/${enc(companyId)}/me/jobs/${enc(jobId)}/accept`, jobSchema, { ...JOB_READS, method: 'POST', body: { version, fingerprint } }),
+    getData(`/api/companies/${enc(companyId)}/me/jobs/${enc(jobId)}/accept`, jobSchema, {
+      headers: { ...JOB_READS.headers, [JOB_ACCEPT_HEADER]: JOB_ACCEPT_SEPARATE }, method: 'POST', body: { version, fingerprint },
+    }),
   pause: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/pause`, jobSchema, { ...JOB_READS, method: 'POST' }),
   resume: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/resume`, jobSchema, { ...JOB_READS, method: 'POST' }),
   setStopped: (companyId: string, stopped: boolean) =>

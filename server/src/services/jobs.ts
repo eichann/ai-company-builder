@@ -19,7 +19,7 @@
  *   (notice `job_paused`), in the same transaction as the change.
  */
 import {
-  JOB_ACTOR, JOB_NEEDS_NEWER_SCREEN, JOB_SCHEMAS, JOB_SYSTEM_PAUSE_REASONS, isJobId, isRecordTrigger, isTimeTrigger, storedJobDefinition, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, newJobId, parseJobAcceptedPlace,
+  JOB_ACCEPT_SEPARATELY, JOB_ACTOR, JOB_NEEDS_NEWER_SCREEN, JOB_SCHEMAS, JOB_SYSTEM_PAUSE_REASONS, isJobId, isRecordTrigger, isTimeTrigger, storedJobDefinition, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, newJobId, parseJobAcceptedPlace,
   parseJobDefinition, type JobDefinition, type JobDeliveryPlace, type JobPauseReason,
 } from '../../shared/core/jobs'
 import type { JobList, JobOccurrenceView, JobState, JobVersionView, JobView, JobWaiting } from '../../shared/types/jobs'
@@ -71,6 +71,11 @@ const NEEDS_NARROWING = () => refuse('bad-request', '出来事で動く定期の
 const TRIGGER_NOT_ALLOWED = (problems: string[]) => refuse('conflict', 'きっかけにした出来事は、いまの会社の設定では使えません（「AI の番」の状態か、最初のやることが見つからないなど）。選び直してください。', { code: 'JOB_TRIGGER_NOT_ALLOWED', problems })
 const NOT_RESPONSIBLE_TO_REWATCH = () => refuse('forbidden', '見張るやることを選び直せるのは、この仕事の責任者だけです。', { code: 'JOB_NOT_RESPONSIBLE' })
 const DRAFT_WAITING = () => refuse('conflict', '管理者が内容を直している途中のため、いまは選び直せません。管理者に確かめてください。', { code: 'JOB_DRAFT_WAITING' })
+/**
+ * An acceptance by the version's own approver from a screen whose 「受け取る」 is not its own press (an admin console
+ * from before the split, owner decision 2026-11-18): approving never consents for oneself; the approval stays.
+ */
+const ACCEPT_SEPARATELY = () => refuse('conflict', `${JOB_ACCEPT_SEPARATELY}。`, { code: 'JOB_ACCEPT_SEPARATELY' })
 const NOT_EVENT_JOB = () => refuse('conflict', 'この定期の仕事は、出来事で動く仕事ではありません。', { code: 'JOB_NOT_EVENT' })
 /** What a client reads when it names no schemas (every screen before stage 4-0). */
 const SCHEMA_1_ONLY: readonly number[] = [1]
@@ -593,8 +598,9 @@ export function createJobService(deps: JobServiceDeps) {
         const at = clock.now()
         handle.jobs.approve(jobId, v.version, v.fingerprint, member.userId, at, state)
         // 「受け取りが要ります」 (jobs.md "The acceptance notice"): the responsible person, when this version's
-        // consent is not the one they accepted — never the approver themself (they see it on the screen).
-        if (v.consentFingerprint !== job.acceptedConsent && v.actingUserId !== member.userId) {
+        // consent is not the one they accepted — also when they approved it themself: approving is not accepting
+        // (owner decision 2026-11-18), and the ask stays until their own 「受け取る」.
+        if (v.consentFingerprint !== job.acceptedConsent) {
           told = handle.notifications.insert([{
             id: ids.newId(), userId: v.actingUserId, kind: 'job_accept_needed', recordId: '', recordVersion: 0, action: '', actorId: member.userId, actorKind: 'human',
             dedupeKey: `job_accept_needed:${jobId}:${v.version}`, createdAt: at, readAt: null,
@@ -613,8 +619,11 @@ export function createJobService(deps: JobServiceDeps) {
      * their own name. A version whose grant names a deliverable place outside needs `place` — that place, chosen by
      * them and usable now (their own live pick: `places.live`) — kept with the acceptance; any other version takes
      * none. Accepting again with another place replaces it (how an expired folder pick is chosen again).
+     * `separatePress`: the client's 「受け取る」 is a press of its own (`JOB_ACCEPT_HEADER`, or the desktop app); without
+     * it, the version's own approver is refused (`JOB_ACCEPT_SEPARATELY`: an old admin console accepting with the
+     * approval's press) — approving and accepting are two presses, also for the same person (owner decision 2026-11-18).
      */
-    async accept(member: Member, jobId: string, body: unknown, reads: readonly number[] = SCHEMA_1_ONLY): Promise<Outcome<JobView>> {
+    async accept(member: Member, jobId: string, body: unknown, reads: readonly number[] = SCHEMA_1_ONLY, separatePress = false): Promise<Outcome<JobView>> {
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
       const b = versionBody(body, true)
@@ -625,6 +634,7 @@ export function createJobService(deps: JobServiceDeps) {
       if (v.actingUserId !== member.userId) return refuse('forbidden', 'この定期の仕事の責任者だけが受け取れます。', { code: 'JOB_NOT_RESPONSIBLE' })
       if (b.fingerprint !== null && b.fingerprint !== v.fingerprint) return FINGERPRINT_CHANGED()
       if (job.approvedVersion !== v.version) return refuse('conflict', 'まだ承認されていない版は受け取れません。', { code: 'JOB_NOT_APPROVED' })
+      if (!separatePress && v.approvedBy === member.userId) return ACCEPT_SEPARATELY()
       const definition = definitionOf(v)
       if (definition === null) return SCHEMA_UNKNOWN()
       // What is accepted is what the screen showed: one that cannot show this shape never accepts it.

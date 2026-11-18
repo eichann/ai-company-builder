@@ -23,6 +23,10 @@ paths:
 
 # Approval requests with fixed content (承認のお願い, milestone 4 G6)
 
+Not to be confused with a scheduled job's 承認 (`jobs.md`): there an owner/admin's approval never consents for the
+responsible person, also when they are the same person — their 「受け取る」 is a press of its own (owner decision
+2026-11-18, `jobs.md` "Approving is not accepting").
+
 Owner design 「節目4 議事録・お礼メール・承認」 §1-7, §3-2, §3-4, §4-3, §4-5, §9 q1 / q3, §11. A
 plugin operation whose policy is `prior` is not refused: a person approves what the AI (or the
 member) asked, and the core runs it. Approving is a person's act through their session only.

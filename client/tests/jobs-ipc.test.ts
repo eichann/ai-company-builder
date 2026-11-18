@@ -178,4 +178,7 @@ test('every job call says which definition shapes this app shows (1 and 2)', asy
   await jobs.mine('c1')
   await jobs.pause('c1', J1)
   assert.ok(headers.length === 2 && headers.every(h => h['X-ACB-Job-Schemas'] === '1,2'))
+  // The app's 受け取る is always a press of its own (owner decision 2026-11-18): said on every job call, so the server
+  // never takes it for an approval's (it refuses the approver's acceptance without it).
+  assert.ok(headers.every(h => h['X-ACB-Job-Accept'] === 'separate'))
 })

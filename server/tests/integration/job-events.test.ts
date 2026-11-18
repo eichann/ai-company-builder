@@ -254,6 +254,21 @@ describe('the watched record (the narrowing every event trigger needs)', () => {
     expect(occurrencesOf(job)).toEqual([expect.objectContaining({ state: 'done', event_record_id: start })])
   })
 
+  it('an admin approving their own event job does not start its watch: only their own separate 受け取る does', async () => {
+    const admin = m('u-admin', 'admin')
+    const start = ok(services.recordEngine.create(admin, HUMAN, { type: 'task', title: '自分の報告', fields: { assignee: 'u-admin' } })).record.id
+    const made = ok(await jobs.create(owner(), { definition: chain(start, { actingUser: 'u-admin' }) }, READS_2))
+    expect(ok(await jobs.approve(admin, made.id, { version: 1 }, READS_2))).toMatchObject({ accepted: false, waiting: 'NOT_ACCEPTED' })
+    // The acceptance an old admin console sends with the approval's press is refused: nothing is watched yet.
+    expect(await jobs.accept(admin, made.id, { version: 1 }, READS_2)).toMatchObject({ ok: false, body: { code: 'JOB_ACCEPT_SEPARATELY' } })
+    expect(cursorOf(made.id)).toBeUndefined()
+    ok(await jobs.accept(admin, made.id, { version: 1 }, READS_2, true))
+    expect(cursorOf(made.id)).toMatchObject({ watch_record_id: start })
+    await complete(start, admin)
+    expect(tick()).toBe(1)
+    expect(occurrencesOf(made.id)).toEqual([expect.objectContaining({ state: 'done', event_record_id: start })])
+  })
+
   it('completed, undone and completed again before any tick: one occurrence', async () => {
     const start = task('すぐに取り消して完了')
     const job = await runnableJob(chain(start, {}, { followMadeTask: false }))
