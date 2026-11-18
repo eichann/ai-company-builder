@@ -457,6 +457,15 @@ describe('an event job', () => {
     expect(pc.ok).toBe(false)
   })
 
+  it('editing keeps a source state the form does not offer: a name change never widens what it watches (Codex review)', () => {
+    const before = eventDef({ from: 'review' })
+    const again = definitionFromForm({ ...formFromDefinition(before), name: '名前だけ変える' })
+    expect(again.ok).toBe(true)
+    if (!again.ok) return
+    expect(again.definition.trigger).toEqual(before.trigger)
+    expect(jobConsentCanonical(again.definition)).toBe(jobConsentCanonical(before))
+  })
+
   it('creating one: the responsible person\'s open やること are offered (the server\'s reader), and what is sent watches the one chosen', async () => {
     const { calls } = mockApi({
       ...companyRoutes(),

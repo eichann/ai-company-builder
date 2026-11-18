@@ -25,6 +25,11 @@ export interface JobForm {
   when: 'time' | 'event'
   /** `event`: the state watched for (a state of a やること). */
   eventTo: string
+  /**
+   * `event`: the state it must come from ('' = any). The form offers no choice of it, but keeps what a version has:
+   * an edit never widens a trigger it read (Codex review of #700).
+   */
+  eventFrom: string
   /** `event`: the やること watched first (its id; chosen from a list of the responsible person's open やること). */
   startRecord: string
   /** `event`: after it made a やること, watch that one next (a chain); else once only. */
@@ -100,7 +105,7 @@ const RECORD_READ_ROUTES = ['GET /my-turn', 'POST /query', 'GET /item/:recordId'
 
 export function emptyJobForm(actingUser: string): JobForm {
   return {
-    name: '', actingUser, kind: 'task', when: 'time', eventTo: 'done', startRecord: '', followMadeTask: true, every: 'week', hour: '09', minute: '00', businessDaysOnly: true, weekday: 'mon', businessDaysBefore: 0,
+    name: '', actingUser, kind: 'task', when: 'time', eventTo: 'done', eventFrom: '', startRecord: '', followMadeTask: true, every: 'week', hour: '09', minute: '00', businessDaysOnly: true, weekday: 'mon', businessDaysBefore: 0,
     monthDay: 1, ifHoliday: 'before', taskTitle: '', dueBusinessDays: 1, missedPolicy: 'latest_only', expiresAfterMinutes: 720,
     limits: NEW_JOB_LIMITS,
     skillName: '', shelfItem: '', checkKind: 'new_files', checkPath: '', titleWords: '', readPaths: '', readRecords: true, mailDrafts: false, writePlace: '', writeFolder: '',
@@ -132,7 +137,7 @@ export function formFromDefinition(d: JobDefinition): JobForm {
   if (isRecordTrigger(d.trigger)) {
     // An event job (stage 4a): the server's operation only.
     return {
-      ...base, name: d.name, when: 'event', eventTo: d.trigger.to, startRecord: d.trigger.startRecord, followMadeTask: d.trigger.followMadeTask,
+      ...base, name: d.name, when: 'event', eventTo: d.trigger.to, eventFrom: d.trigger.from ?? '', startRecord: d.trigger.startRecord, followMadeTask: d.trigger.followMadeTask,
       missedPolicy: d.missed.policy, expiresAfterMinutes: d.missed.expiresAfterMinutes, limits: d.grant.limits,
       ...(d.run.kind === 'operation' ? { kind: 'task' as const, taskTitle: d.run.title, dueBusinessDays: d.run.dueBusinessDays } : {}),
     }
@@ -195,7 +200,10 @@ export function definitionFromForm(f: JobForm, shelfSkillName?: string): JobDefi
     if (!f.startRecord) return { ok: false, problems: ['trigger.startRecord.REQUIRED'] }
     return parseJobDefinition({
       schema: 2, name: f.name.normalize('NFC').trim(), actingUser: f.actingUser,
-      trigger: { kind: 'record', type: 'task', event: 'state', to: f.eventTo, assignee: 'responsible', startRecord: f.startRecord, followMadeTask: f.followMadeTask },
+      trigger: {
+        kind: 'record', type: 'task', event: 'state', to: f.eventTo, ...(f.eventFrom ? { from: f.eventFrom } : {}),
+        assignee: 'responsible', startRecord: f.startRecord, followMadeTask: f.followMadeTask,
+      },
       missed: { policy: f.missedPolicy, expiresAfterMinutes: f.expiresAfterMinutes },
       check: { kind: 'none' },
       run: { kind: 'operation', operation: 'create_task', title: f.taskTitle.normalize('NFC').trim(), dueBusinessDays: f.dueBusinessDays },
