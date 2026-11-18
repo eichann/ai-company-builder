@@ -457,6 +457,42 @@ describe('Google relay: the request itself', () => {
     expect((await services.googleRelay.setMemberStopped(owner, 'r-sato', { stopped: false })).ok).toBe(true)
   })
 
+  // The key broker checks the AI emergency stop only before it hands the call to the relay; a stop
+  // pressed while a write's body arrives is caught only by the relay's own check (agent-stop.md
+  // "The key broker"; the composed `companyStopped`, composition/google.ts).
+  it('the AI emergency stop (whole company) pressed while the body is still arriving applies to that call', async () => {
+    const { token } = await tokenFor('r-sato')
+    const owner = { companyId: CO, userId: 'r-owner', role: 'owner' }
+    const chunk = new TextEncoder().encode(JSON.stringify({ values: [['late-after-ai-stop']] }))
+    let pulled = false
+    let stopIds: string[] = []
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (pulled) { controller.close(); return }
+        pulled = true
+        const view = services.agentStops.stop(owner, {})
+        expect(view.ok).toBe(true)
+        stopIds = view.value.active.map((s: Json) => s.id)
+        controller.enqueue(chunk)
+      },
+    })
+    const sheetsWrites = () => fake.requests.filter(r => r.method === 'PUT' && r.path.startsWith('/v4/spreadsheets/')).length
+    const before = sheetsWrites()
+    currentUser.id = null
+    try {
+      const res = await app.request(`${PUBLIC}/api/broker/google/sheets${values(PRACTICE, '案件!A1')}?valueInputOption=RAW`, {
+        method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body, duplex: 'half',
+      } as RequestInit)
+      expect(res.status).toBe(403)
+      expect(JSON.parse(await res.text()).error.code).toBe('ACB_STOPPED')
+      expect(sheetsWrites()).toBe(before)
+      expect(rows()[0][0]).not.toBe('late-after-ai-stop')
+    } finally {
+      for (const id of stopIds) services.agentStops.release(owner, id)
+    }
+    expect((await script(token!, 'GET', values(PRACTICE, '案件!A1'))).status).toBe(200)
+  })
+
   it('the broker token never reaches Google (also when sent as ?key=)', async () => {
     const { token } = await tokenFor('r-sato')
     const from = fake.requests.length

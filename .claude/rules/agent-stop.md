@@ -55,7 +55,11 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   forwarded, recorded `stopped`; a release restores it. Narrower stops (a member, a tool kind)
   leave the relay alone; 「すべての鍵を止める」 stays separate. One optional dependency
   (`BrokerRelayDeps.companyStopped`, composed in `composition.ts`), one check after the token is
-  validated. Test `server/tests/integration/broker-stop.test.ts` (mutation-checked).
+  validated. Test `server/tests/integration/broker-stop.test.ts` (mutation-checked). The Google relay (a
+  person relay) checks it again itself, before the body and right before the call leaves (`GoogleRelayDeps.companyStopped`,
+  composed in `composition/google.ts`): a stop pressed while a write's body arrives applies to that call — test
+  `google-relay.test.ts` 「the AI emergency stop (whole company) pressed while the body is still arriving…」
+  (mutation-checked through the composition).
 - **A connector's declared reads** (`services/plugin-calls.ts`, `plugins.md` "Contract 3"): an AI's read is
   refused, and ended before its next attempt, by the company's or the member's stop of the whole AI and by a
   stop of the `mcp-external` or `web` kind (`policyFor`), since it reaches a service outside. Test
