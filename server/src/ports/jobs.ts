@@ -101,6 +101,8 @@ export interface JobRepository {
   stopped(): boolean
   setStopped(stopped: boolean, by: string, at: string): void
 
+  // Every occurrence method below acts as if an event occurrence (stage 4a's `ev:` slot, `isEventOccurrenceSlot`)
+  // did not exist: none is read, listed, moved, sent back or inserted (stage 4-0.1, jobs.md).
   /** Insert an occurrence unless its (job, slot) is there already (`UNIQUE`): false = it was (nothing written). */
   insertOccurrence(row: JobOccurrenceRow): boolean
   occurrence(occurrenceId: string): JobOccurrenceRow | null

@@ -255,10 +255,15 @@ admin console); lifting the jobs stop holds the slot that passed meanwhile, so n
   occurrence held, its run ended), `company-archive.test.ts` 「the restore command…」 (the CLI's restore and
   `pause-after-restore --all`; without the api's settings nothing is written) — each mutation-checked.
 
-## Rolling back production (stage 4-0 is the oldest version to go back to)
+## Rolling back production (stage 4-0.1 is the oldest version to go back to)
 
 **Once event-triggered jobs (stage 4a) are in production, never roll production back to a version older than
-stage 4-0** (`feat/stage4-0-ledger-seq`; owner decision ⑩, memo 「出来事で動く定期の仕事」 §10-7). Why: 4a writes job
+stage 4-0.1** (`fix/stage4-0-1-hide-event-occurrences`, on top of 4-0 `feat/stage4-0-ledger-seq`; owner decision ⑩,
+memo 「出来事で動く定期の仕事」 §10-7). 4-0 alone is no longer enough: it would show 4a's event occurrences (readable only
+by people who read their source record) to owners and admins — in the occurrence list, as a job's last occurrence,
+with `ev:<n>` printed as the slot — and tell the responsible person and the creator when one expires, without the
+reader check. 4-0.1 treats every event occurrence as nonexistent (`jobs.md` "Event occurrences do not exist on this
+build"). The rest of this section is why 4-0 itself was needed. Why: 4a writes job
 versions of `schema: 2`, event occurrences (`ev:` slots) and reads the ledger by delivery number. 4-0 is the first
 build that (a) never runs, claims, retries, approves or edits a definition of a shape it does not know
 (`jobs.md` "Shapes this build does not know"), (b) numbers every ledger row in its transaction, and (c) keeps those
@@ -266,7 +271,8 @@ numbers through an archive. A build before 4-0 reads a `schema: 2` definition as
 treats an unknown trigger as monthly, its admin console fails on `trigger.at`), and writes ledger rows without
 numbers that 4a then never sees as events. The admin console is deployed with the server (same compose, same
 commit); an admin tab left open from before 4-0 only gets definitions it can read (no header = schema 1). Rolling
-back between 4-0 and 4a, or forward, is fine. Rolling back the desktop app is fine (it claims time occurrences
+back between 4-0.1 and 4a, or forward, is fine (an event occurrence left `due` stays as it was on 4-0.1 and 4a
+settles it when rolled forward). Rolling back the desktop app is fine (it claims time occurrences
 only unless it names `event`).
 
 ## CI

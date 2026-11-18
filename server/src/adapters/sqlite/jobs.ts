@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { JobDeliveryPlace, JobPauseReason } from '../../../shared/core/jobs'
+import { EVENT_OCCURRENCE_SLOT_PREFIX, isEventOccurrenceSlot, type JobDeliveryPlace, type JobPauseReason } from '../../../shared/core/jobs'
 import type { JobState } from '../../../shared/types/jobs'
 import type { JobOccurrenceRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
 
@@ -28,6 +28,13 @@ interface OccurrenceDbRow {
 }
 const OCCURRENCE_COLUMNS = 'id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, run_id, outcome_code, created_at, updated_at'
 const OCCURRENCE_READ = `${OCCURRENCE_COLUMNS}, checked_until, checked_commit, retries, retried_by, retried_at`
+/**
+ * Stage 4-0.1 (jobs.md "Event occurrences do not exist on this build", `isEventOccurrenceSlot`): an event
+ * occurrence (stage 4a's `ev:<delivery number>` slot) is not read, counted, moved, sent back or written here. 4a
+ * shows one only to people who read its source record — a check this build cannot make. Built from the core's
+ * prefix (it has no `%` / `_`; `substr` compares exactly, unlike `LIKE`).
+ */
+const NOT_EVENT = `substr(due_slot, 1, ${EVENT_OCCURRENCE_SLOT_PREFIX.length}) <> '${EVENT_OCCURRENCE_SLOT_PREFIX}'`
 const occurrenceOf = (r: OccurrenceDbRow): JobOccurrenceRow => ({
   id: r.id, jobId: r.job_id, jobVersion: r.job_version, dueSlot: r.due_slot, timeZone: r.time_zone, dueAt: r.due_at, expiresAt: r.expires_at,
   state: r.state as JobOccurrenceRow['state'], runId: r.run_id, outcomeCode: r.outcome_code, checkedUntil: r.checked_until, checkedCommit: r.checked_commit, retries: r.retries, retriedBy: r.retried_by, retriedAt: r.retried_at,
@@ -137,30 +144,31 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
     },
 
     insertOccurrence(o) {
+      if (isEventOccurrenceSlot(o.dueSlot)) return false
       return conn.prepare(`INSERT OR IGNORE INTO ai_job_occurrences (company_id, ${OCCURRENCE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(companyId, o.id, o.jobId, o.jobVersion, o.dueSlot, o.timeZone, o.dueAt, o.expiresAt, o.state, o.runId, o.outcomeCode, o.createdAt, o.updatedAt)
         .changes === 1
     },
     occurrence(occurrenceId) {
-      const r = conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND id = ?`).get(companyId, occurrenceId) as OccurrenceDbRow | undefined
+      const r = conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND id = ? AND ${NOT_EVENT}`).get(companyId, occurrenceId) as OccurrenceDbRow | undefined
       return r ? occurrenceOf(r) : null
     },
     occurrences(jobId, limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? ORDER BY due_slot DESC, id LIMIT ?`)
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND ${NOT_EVENT} ORDER BY due_slot DESC, id LIMIT ?`)
         .all(companyId, jobId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     dueOccurrences(limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'due' ORDER BY due_at, id LIMIT ?`)
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'due' AND ${NOT_EVENT} ORDER BY due_at, id LIMIT ?`)
         .all(companyId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     runningOccurrences(limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' ORDER BY due_at, id LIMIT ?`)
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' AND ${NOT_EVENT} ORDER BY due_at, id LIMIT ?`)
         .all(companyId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     retryOccurrence(occurrenceId, from, expiresAt, by, at) {
       return conn.prepare(`UPDATE ai_job_occurrences SET state = 'due', outcome_code = NULL, run_id = NULL, expires_at = ?,
           retries = retries + 1, retried_by = ?, retried_at = ?, updated_at = ?
-          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?))`)
+          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?)) AND ${NOT_EVENT}`)
         .run(expiresAt, by, at, at, companyId, occurrenceId, JSON.stringify(from)).changes === 1
     },
     moveOccurrence(occurrenceId, from, to, change, at) {
@@ -168,7 +176,7 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       // checked_until / checked_commit are set once (the first claim) and never moved afterwards.
       return conn.prepare(`UPDATE ai_job_occurrences SET state = ?, outcome_code = ?, run_id = CASE WHEN ? THEN ? ELSE run_id END,
           checked_until = COALESCE(checked_until, ?), checked_commit = CASE WHEN checked_until IS NULL THEN ? ELSE checked_commit END, updated_at = ?
-          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?))`)
+          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?)) AND ${NOT_EVENT}`)
         .run(to, change.outcomeCode, change.runId === undefined ? 0 : 1, runId, change.checkedUntil ?? null, change.checkedCommit ?? null, at, companyId, occurrenceId, JSON.stringify(from)).changes === 1
     },
   }
