@@ -258,6 +258,11 @@ compare-and-set and ledger), and writes notices.
   first), a yield to the event loop between companies, each company through its own handle; one
   company's failure is logged (error name only) and the others run.
 
+- `job_chain_stopped` (stage 4a, `jobs.md` "Event-triggered jobs" "A stopped chain"): an event job's chain stopped (the
+  day's limit included: its one notice) — to its responsible person and the job's creator while an owner / admin, once per
+  stop, recordless; the cause is built when read (a record-side one in full only for a reader of the record). An
+  occurrence notice of an event occurrence reaches only those who read its record (and is shown only while they do).
+
 ## The push signal
 
 `PUSH_EVENT_KINDS` (`shared/types/agent-stop.ts`) gained `notifications`: kind + a fresh version

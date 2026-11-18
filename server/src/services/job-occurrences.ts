@@ -32,7 +32,7 @@
  */
 import { addBusinessDays } from '../../shared/core/business-days'
 import {
-  JOB_ACTOR, JOB_ON_TIME_MS, JOB_SERVER_STEP, newOccurrenceId, occurrenceTaskId, storedJobDefinition,
+  JOB_ACTOR, JOB_ON_TIME_MS, JOB_SERVER_STEP, isEventOccurrenceSlot, isRecordTrigger, isTimeTrigger, newOccurrenceId, occurrenceTaskId, storedJobDefinition,
   type JobDefinition, type JobDeliveryPlace, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
 import { latestJobSlot } from '../../shared/core/job-schedule'
@@ -46,6 +46,7 @@ import { hasFullAccess } from './access'
 import type { JobService } from './jobs'
 import { companyNow } from './notifications'
 import type { ServiceCreateInput, ServiceRecordWriter } from './record-engine'
+import { createJobEvents, eventShown, type AiStepStates } from './job-events'
 
 /** Per company and run: occurrences the runner takes at most. */
 export const JOB_RUNNER_LIMIT = 50
@@ -74,6 +75,8 @@ export interface JobOccurrenceDeps {
    * usable now (a Drive folder pick within its 90 days), answered by its connector. Absent → never usable.
    */
   placeUsable?: (companyId: string, userId: string, place: JobDeliveryPlace) => boolean
+  /** Event-triggered jobs (stage 4a): a business plugin step's states that run as 「AI の番」 (never an event's state, ⑧). */
+  aiStepStates?: AiStepStates
 }
 
 /** Company time `YYYY-MM-DDTHH:MM` in `timeZone` → the UTC instant (ISO). Two passes settle a zone's offset. */
@@ -126,12 +129,19 @@ export function endPcRun(handle: CompanyData, runId: string | null, code: string
 export function createJobOccurrences(deps: JobOccurrenceDeps) {
   const { companyData, transactions, clock, ids } = deps
   const log = deps.log ?? ((message: string) => console.log(message))
+  // Event-triggered jobs (stage 4a, services/job-events.ts): the scan the clock runs, the checks before acting.
+  const events = createJobEvents({ transactions, clock, ids, roleOf: deps.roleOf, timeZoneOf: deps.timeZoneOf, aiStepStates: deps.aiStepStates, log })
 
   /** Write an occurrence notice for the responsible person and the job's creator (if owner / admin now), in the caller's transaction. */
   function notice(companyId: string, handle: CompanyData, kind: NotificationKind, occ: JobOccurrenceRow, job: JobRow | null, actingUserId: string | null, told: Set<string>) {
     const to = new Set<string>()
     if (actingUserId && deps.roleOf(companyId, actingUserId) !== null) to.add(actingUserId)
     if (job) { const role = deps.roleOf(companyId, job.createdBy); if (role !== null && hasFullAccess(role)) to.add(job.createdBy) }
+    // An event occurrence (stage 4a, ⑥): only someone who reads its record now — never an owner / admin who does not.
+    for (const userId of [...to]) {
+      const role = deps.roleOf(companyId, userId)
+      if (role === null || !eventShown(handle, { companyId, userId, role }, occ)) to.delete(userId)
+    }
     if (to.size === 0) return
     const at = clock.now()
     // As written now (every caller moved it first, in this transaction): its press count and its reason.
@@ -173,6 +183,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     const definition = definitionOf(version)
     // A shape this build does not know (a newer build approved it, then the server was rolled back): no occurrence.
     if (definition === null || (definition.placement !== 'e' && definition.placement !== 'a')) return null
+    // An event-triggered job has no slots: its occurrences come from the ledger (`events.scan`).
+    if (!isTimeTrigger(definition.trigger)) return null
     const zone = deps.timeZoneOf(companyId)
     const slot = latestJobSlot(definition.trigger, companyNow(nowMs, zone), deps.holidaysOf(companyId))
     if (slot === null) return null
@@ -232,6 +244,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         }
       })
     }
+    // Event-triggered jobs (stage 4a): what happened since each one's cursor, bounded per tick.
+    changed += events.scan(handle, stopped, told)
     // A PC's run (B PR 5a), in this order:
     // - past its hard deadline (first claim + approved minutes; renewing never moves it) → the run ended,
     //   `needs_person` `TIME_LIMIT`, told — also while its app still holds and renews it;
@@ -286,16 +300,21 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         changed++
         const job = handle.jobs.find(occ.jobId)
         notice(companyId, handle, 'job_expired', occ, job, handle.jobs.version(occ.jobId, occ.jobVersion)?.actingUserId ?? null, told)
+        if (occ.eventRecordId) events.chainStopped(handle, occ.jobId, 'EXPIRED', occ.eventRecordId, told)
       })
     }
     tell(companyId, told)
     return changed
   }
 
+  /** The company day an occurrence is for: its slot's, or (an event's) the day its event happened, in company time. */
+  const dayOf = (occ: JobOccurrenceRow): string =>
+    occ.eventSeq !== null && occ.eventSeq !== undefined ? companyNow(Date.parse(occ.dueAt), occ.timeZone).slice(0, 10) : occ.dueSlot.slice(0, 10)
+
   /** The やること an occurrence makes (owner-only for the responsible person: the job's words reach nobody else). */
   function taskInput(companyId: string, occ: JobOccurrenceRow, definition: JobDefinition, runId: string): ServiceCreateInput | null {
     if (definition.run.kind !== 'operation') return null
-    const day = occ.dueSlot.slice(0, 10)
+    const day = dayOf(occ)
     const due = definition.run.dueBusinessDays === null ? null : definition.run.dueBusinessDays === 0 ? day : addBusinessDays(day, definition.run.dueBusinessDays, deps.holidaysOf(companyId))
     return {
       type: 'task', id: occurrenceTaskId(occ.id), title: definition.run.title, personalOwner: definition.actingUser,
@@ -323,6 +342,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         const end = (to: JobOccurrenceState, code: JobOutcomeCode, kind: NotificationKind | null, job: JobRow | null, acting: string | null): JobOccurrenceState | null => {
           if (!handle.jobs.moveOccurrence(occ.id, ['due'], to, { outcomeCode: code }, at)) return null
           if (kind) notice(companyId, handle, kind, occ, job, acting, told)
+          // An event occurrence that did not make its やること stops its job's chain (owner decision ①).
+          if (occ.eventRecordId && job) events.chainStopped(handle, job.id, code, occ.eventRecordId, told)
           return to
         }
         const job = handle.jobs.find(occ.jobId)
@@ -341,14 +362,23 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         if (job.approvedVersion !== occ.jobVersion) return end('held', 'JOB_VERSION_CHANGED', null, job, acting)
         // The responsible person's rights now, with the pinned version (like approval): else the job pauses (3a's notice).
         const refusal = deps.jobs.runnerRefusal(companyId, version)
+        // An event occurrence (its `ev:` slot; one with no record, never written by 4a, is skipped by the recheck).
+        const event = isEventOccurrenceSlot(occ.dueSlot)
+        // An event occurrence (⑥): only it is skipped — the job is not paused for what one record's occurrence found.
+        if (refusal && event) return end('skipped', refusal, null, job, acting)
         if (refusal) {
           // The occurrence first (its own code), then the pause (which holds the job's other due ones).
           const held = end('held', refusal, null, job, acting)
           deps.jobs.pauseBySystem(companyId, job.id, refusal)
           return held
         }
+        // An event occurrence, right before it acts (⑤ ⑥ ⑧): its record, its assignee, the AI's turn — skipped, not told.
+        if (event) {
+          const why = events.recheck(handle, occ, definition)
+          if (why) return end('skipped', why, null, job, acting)
+        }
         // Absent that day (D5): nobody runs it for them.
-        const day = occ.dueSlot.slice(0, 10)
+        const day = dayOf(occ)
         if (handle.tasks.absencesFrom(day).some(a => a.userId === definition.actingUser && a.from <= day && day <= a.until)) {
           return end('skipped', 'OWNER_ABSENT', 'job_skipped', job, acting)
         }
@@ -374,6 +404,13 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         // Rolled back whole: no run, no key, no やること; the occurrence is then marked below.
         if (!made.ok) throw new TaskNotCreated()
         runs.updateOperation(runId, key, ['in_progress'], { state: 'done', refKind: 'record', refId: made.record.id }, at)
+        // An event job that follows what it made (stage 4a): this やること is the record it watches next — set here, by the
+        // server, in the same transaction (a duplicate, a tag or an edit of anything never moves it). Either way a chain
+        // that had stopped on this record goes on (it ran after 「もう一度」).
+        if (event && occ.eventRecordId) {
+          if (isRecordTrigger(definition.trigger) && definition.trigger.followMadeTask) handle.jobs.moveWatch(job.id, occ.eventRecordId, made.record.id, at)
+          else handle.jobs.clearChainStop(job.id, occ.eventRecordId)
+        }
         if (!runs.update({ ...run, state: 'done', updatedAt: at, closedAt: at }, { generation: 1, state: 'running' })) throw new Error('run changed')
         runs.appendEvent({ runId, event: 'finished', generation: 1, stateAfter: 'done', code: 'DONE', at })
         if (!handle.jobs.moveOccurrence(occ.id, ['due'], 'done', { runId, outcomeCode: null }, at)) throw new Error('occurrence changed')
@@ -389,6 +426,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         const occ = handle.jobs.occurrence(occurrenceId)
         if (!occ || !handle.jobs.moveOccurrence(occ.id, ['due'], 'needs_person', { outcomeCode: 'TASK_NOT_CREATED' }, clock.now())) return null
         notice(companyId, handle, 'job_failed', occ, handle.jobs.find(occ.jobId), handle.jobs.version(occ.jobId, occ.jobVersion)?.actingUserId ?? null, told)
+        // Its やること was not made: the chain stops there too (owner decision ①; Codex review of #700).
+        if (occ.eventRecordId) events.chainStopped(handle, occ.jobId, 'TASK_NOT_CREATED', occ.eventRecordId, told)
         return 'needs_person' as const
       })
     }
@@ -400,16 +439,24 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
    * A pause or the company's stop begins (in the caller's transaction, jobs.md "Held"): every occurrence of
    * the job (null: of every job of the company) still `due` is `held` — it never runs, also not after resuming.
    * One a PC is running (B PR 5a) is `held` too and its run ended (`endPcRun`): its token, renew and finish are
-   * refused from now on, and resuming or lifting the stop brings neither back. A waiting event occurrence (stage 4a,
-   * hidden on this build) is held too, so a return to 4a never runs one that waited before the pause (stage 4-0.1).
+   * refused from now on, and resuming or lifting the stop brings neither back. A waiting event occurrence (stage 4a) is
+   * held like any other and its chain stops (owner decision ①); `holdEventOccurrences` (stage 4-0.1) catches any beyond
+   * the loop's limit.
    */
   function holdDue(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void {
     const handle = companyData.forCompany(companyId)
     const at = clock.now()
-    handle.jobs.holdEventOccurrences(jobId, code, at)
+    // Event-triggered jobs (stage 4a, ③): what happens from now until it ends never runs (a gap from this delivery number).
+    handle.jobs.openEventGap(jobId, ids.newId(), at)
+    const told = new Set<string>()
     for (const occ of handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT)) {
-      if (jobId === null || occ.jobId === jobId) handle.jobs.moveOccurrence(occ.id, ['due'], 'held', { outcomeCode: code }, at)
+      if (jobId !== null && occ.jobId !== jobId) continue
+      // A held event occurrence never runs: its chain stops (owner decision ①).
+      if (handle.jobs.moveOccurrence(occ.id, ['due'], 'held', { outcomeCode: code }, at) && occ.eventRecordId) events.chainStopped(handle, occ.jobId, code, occ.eventRecordId, told)
     }
+    // Any event occurrence still waiting beyond that loop's limit is held too (stage 4-0.1's write).
+    handle.jobs.holdEventOccurrences(jobId, code, at)
+    tell(companyId, told)
     for (const occ of handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT)) {
       if (jobId !== null && occ.jobId !== jobId) continue
       if (handle.jobs.moveOccurrence(occ.id, ['running'], 'held', { outcomeCode: code }, at)) endPcRun(handle, occ.runId, code, at)
@@ -424,6 +471,13 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
   function holdPassedSlot(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void {
     const handle = companyData.forCompany(companyId)
     const nowMs = clock.nowMs()
+    // The gap it opened ends here: events after now run again, those before it never (③). None open: the pause or the
+    // stop was made by a build before 4a (a rollback, deployment.md) — nothing from before now runs (Codex review of #700).
+    if (handle.jobs.closeEventGaps(jobId, clock.now()) === 0) {
+      const told = new Set<string>()
+      events.dropUntilNow(handle, jobId, 'PAUSED_EVENT', told)
+      tell(companyId, told)
+    }
     for (const job of jobId === null ? handle.jobs.list() : [handle.jobs.find(jobId)].filter((j): j is JobRow => j !== null)) {
       const latest = latestSlotOf(companyId, handle, job, nowMs)
       if (latest) handle.jobs.insertOccurrence(newRow(job, latest, 'held', code))

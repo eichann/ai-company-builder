@@ -24,8 +24,12 @@ import { isValidSkillName } from './names'
 import { PLUGIN_STEP_TOOLS } from './plugin-flow-declaration'
 import { RECORD_ID_RE } from './records'
 
-/** The definition shapes this build reads. */
-export const JOB_SCHEMAS = [1] as const
+/**
+ * The definition shapes this build reads: `1` — a time of day (`JobTimeTrigger`); `2` (stage 4a of event-triggered
+ * jobs) — a record's event (`JobRecordTrigger`). A schema-2 version is made only by a client that announced it reads
+ * schema 2 (`JOB_SCHEMAS_HEADER`): the admin console and the app of 4a.
+ */
+export const JOB_SCHEMAS = [1, 2] as const
 export type JobSchema = typeof JOB_SCHEMAS[number]
 
 /** A job's state: a draft until first approved; paused / retired keep it from running. */
@@ -75,10 +79,55 @@ export type JobWeekday = typeof JOB_WEEKDAYS[number]
  * - `month`: day `day` (1–28, or `last`) at `at`; a day that is not a business day stays, or moves to the
  *   business day before / after (`ifHoliday`).
  */
-export type JobTrigger =
+export type JobTimeTrigger =
   | { every: 'day'; at: string; businessDaysOnly: boolean }
   | { every: 'week'; weekday: JobWeekday; at: string; businessDaysBefore: number }
   | { every: 'month'; day: number | 'last'; at: string; ifHoliday: 'as_is' | 'before' | 'after' }
+
+/**
+ * Schema 2 (stage 4a of event-triggered jobs, owner memo 「出来事で動く定期の仕事」 §3-11 / §10-9): **one watched record**
+ * entered state `to` (from `from` when given; only a real change: the state before and after differ).
+ *
+ * - **What is watched** (owner decision 2026-11-18, after a Codex review — else 「自分が担当のやることが完了したら」 fires on
+ *   every task): a record the server keeps per job (the *watch target*), never matched by a title. It starts at
+ *   `startRecord`, the record the person saving the job and the responsible person both read (the responsible person
+ *   accepts it: the trigger is part of the consent); with `followMadeTask` the やること an occurrence makes becomes the
+ *   next target (set by the server in the same transaction — a duplicate, a tag, an edit or a re-creation never moves
+ *   it); replacing it is a new version the responsible person accepts. Each target fires once (an undo and a second
+ *   completion of the same record make nothing more).
+ * - `assignee: 'responsible'`: the target's assignee is the responsible person at the event (its ledger version) and
+ *   right before the job acts — whoever completed it (the requester, the checker…). Their reading it is checked then too.
+ * - What is never an event (a migration's or the server's own row, a run's row, an outside system's) is
+ *   `ledgerRowIsEvent`; a person's later change of a record a job made counts like any other.
+ */
+export interface JobRecordTrigger {
+  kind: 'record'
+  type: string
+  event: 'state'
+  to: string
+  from?: string
+  assignee: 'responsible'
+  startRecord: string
+  followMadeTask: boolean
+}
+
+export type JobTrigger = JobTimeTrigger | JobRecordTrigger
+
+/** A trigger of schema 2 (a record's event). */
+export function isRecordTrigger(t: unknown): t is JobRecordTrigger {
+  return !!t && typeof t === 'object' && (t as { kind?: unknown }).kind === 'record'
+}
+
+/**
+ * Stage 4a: the record types an event-triggered job may watch, and the states of each it may name (`to` / `from`).
+ * Only a やること for now (owner decision ⑤: 「自分が担当のやることが完了したら、次のやることを自分に作る」). Never the AI's
+ * turn (`preparing`) or a proposal (`proposed`, `dismissed`): the AI's turn is refused anyway (⑧, checked again by the
+ * server against the company's types and business plugins), and a proposal is nobody's turn.
+ */
+export const JOB_EVENT_STATES: Readonly<Record<string, readonly string[]>> = {
+  task: ['todo', 'in_progress', 'review', 'waiting', 'done', 'cancelled', 'declined', 'awaiting_acceptance'],
+}
+export const JOB_EVENT_TYPES: readonly string[] = Object.keys(JOB_EVENT_STATES)
 
 /**
  * What is checked first, without the AI (owner decision D6: the clock alone never runs the AI).
@@ -233,8 +282,35 @@ function uniqueStrings(v: unknown, allowed: (s: string) => boolean, max: number)
   return [...(v as string[])]
 }
 
-function parseTrigger(v: unknown, problems: string[]): JobTrigger | null {
+function parseRecordTrigger(v: Obj, problems: string[]): JobRecordTrigger | null {
+  const has = (k: string) => Object.prototype.hasOwnProperty.call(v, k)
+  // Never without its watched record: refused with its own code (the server says it in plain words).
+  if (!has('startRecord')) { problems.push('trigger.startRecord.REQUIRED'); return null }
+  if (!keysExactly(v, ['kind', 'type', 'event', 'to', 'assignee', 'startRecord', 'followMadeTask', ...(has('from') ? ['from'] : [])], 'trigger', problems)) return null
+  const start = problems.length
+  const states = typeof v.type === 'string' && Object.prototype.hasOwnProperty.call(JOB_EVENT_STATES, v.type) ? JOB_EVENT_STATES[v.type] : null
+  if (!states) problems.push('trigger.type.BAD')
+  // Only a state reached (a record made is never one existing record to watch).
+  if (v.event !== 'state') problems.push('trigger.event.BAD')
+  if (v.assignee !== 'responsible') problems.push('trigger.assignee.BAD')
+  if (typeof v.to !== 'string' || (states !== null && !states.includes(v.to))) problems.push('trigger.to.BAD')
+  if (has('from') && (typeof v.from !== 'string' || (states !== null && !states.includes(v.from)) || v.from === v.to)) problems.push('trigger.from.BAD')
+  if (typeof v.startRecord !== 'string' || !RECORD_ID_RE.test(v.startRecord) || !v.startRecord.startsWith(`${String(v.type)}-`)) problems.push('trigger.startRecord.BAD')
+  if (typeof v.followMadeTask !== 'boolean') problems.push('trigger.followMadeTask.BAD')
+  if (problems.length > start) return null
+  return {
+    kind: 'record', type: v.type as string, event: 'state', to: v.to as string, ...(has('from') ? { from: v.from as string } : {}),
+    assignee: 'responsible', startRecord: v.startRecord as string, followMadeTask: v.followMadeTask as boolean,
+  }
+}
+
+function parseTrigger(v: unknown, schema: unknown, problems: string[]): JobTrigger | null {
   if (!isObj(v)) { problems.push('trigger.BAD'); return null }
+  // Schema 2 is a record's event, and only that; schema 1 a time of day, and only that.
+  if (schema === 2) {
+    if (v.kind !== 'record') { problems.push('trigger.kind.BAD'); return null }
+    return parseRecordTrigger(v, problems)
+  }
   if (v.every === 'day') {
     if (!keysExactly(v, ['every', 'at', 'businessDaysOnly'], 'trigger', problems)) return null
     if (typeof v.at !== 'string' || !AT_RE.test(v.at)) problems.push('trigger.at.BAD')
@@ -459,7 +535,7 @@ export function parseJobDefinition(input: unknown): JobDefinitionResult {
   // eslint-disable-next-line no-control-regex
   if (name.length === 0 || name.length > JOB_NAME_MAX || /[\u0000-\u001f\u007f]/.test(name) || name !== input.name) problems.push('name.BAD')
   if (typeof input.actingUser !== 'string' || !USER_ID_RE.test(input.actingUser)) problems.push('actingUser.BAD')
-  const trigger = parseTrigger(input.trigger, problems)
+  const trigger = parseTrigger(input.trigger, input.schema, problems)
   const check = parseCheck(input.check, problems)
   const run = parseRun(input.run, problems)
   if (!(JOB_PLACEMENTS as readonly unknown[]).includes(input.placement)) problems.push('placement.BAD')
@@ -483,6 +559,8 @@ export function parseJobDefinition(input: unknown): JobDefinitionResult {
   if (check.kind === 'new_files' && !grant.reads.paths.includes(check.path)) problems.push('check.path.NOT_IN_READS')
   // Reading the meetings' minutes is a power the responsible person accepts (the grant), not the check alone.
   if (check.kind === 'new_meetings' && !grant.routes.includes(JOB_MINUTES_ROUTE)) problems.push('check.NEEDS_MINUTES_ROUTE')
+  // Stage 4a: an event runs only the server's operation (no AI; the PC's AI for events is 4b, with its own check).
+  if (isRecordTrigger(trigger) && run.kind !== 'operation') problems.push('trigger.EVENT_SERVER_ONLY')
   if (problems.length > 0) return { ok: false, problems }
   return { ok: true, definition: { schema: input.schema as JobSchema, name, actingUser: input.actingUser as string, trigger, check, run, placement, missed, grant } }
 }
@@ -498,7 +576,13 @@ export function jobDefinitionCanonical(definition: JobDefinition): string {
  * policy, the check changed) needs no new acceptance; any change to it does.
  */
 export function jobConsentCanonical(definition: JobDefinition): string {
-  return canonicalJson({ actingUser: definition.actingUser, run: definition.run, placement: definition.placement, grant: definition.grant })
+  // Schema 1: byte for byte what it always was (a time job's name or time change needs no new acceptance).
+  if (!isRecordTrigger(definition.trigger)) {
+    return canonicalJson({ actingUser: definition.actingUser, run: definition.run, placement: definition.placement, grant: definition.grant })
+  }
+  // An event job (stage 4a, owner memo §10-5): what it watches is part of what the responsible person accepts — a
+  // job never turns to watching something else without a new 受け取る.
+  return canonicalJson({ actingUser: definition.actingUser, run: definition.run, placement: definition.placement, grant: definition.grant, trigger: definition.trigger })
 }
 
 /**
@@ -536,6 +620,8 @@ export function parseJobSchemasHeader(value: string | null | undefined): number[
 
 /** What a screen says where a job's definition is of a shape it cannot show (the admin console, stage 4-0). */
 export const JOB_NEEDS_NEWER_SCREEN = 'この画面では編集できません。画面を新しくしてください'
+/** The same refusal to the desktop app (stage 4a): there the app must be updated, not a screen reloaded. */
+export const JOB_NEEDS_NEWER_APP = 'このアプリでは扱えない定期の仕事です。アプリを新しくしてください'
 
 /** A definition as an answer carried it, when this build knows its shape (the admin console); else null. */
 export function knownJobDefinition(d: unknown): JobDefinition | null {
@@ -544,8 +630,15 @@ export function knownJobDefinition(d: unknown): JobDefinition | null {
   return isKnownJobTrigger((d as { trigger?: unknown }).trigger) ? d as JobDefinition : null
 }
 
-/** A trigger of a shape this build knows (a time of day, every day / week / month). */
+/** A trigger of a shape this build knows: a time of day (every day / week / month) or, since 4a, a record's event. */
 export function isKnownJobTrigger(t: unknown): t is JobTrigger {
+  if (!t || typeof t !== 'object') return false
+  if (isRecordTrigger(t)) return JOB_EVENT_TYPES.includes(t.type) && t.event === 'state' && typeof t.to === 'string'
+  return isTimeTrigger(t)
+}
+
+/** A trigger that is a time of day (schema 1). */
+export function isTimeTrigger(t: unknown): t is JobTimeTrigger {
   if (!t || typeof t !== 'object') return false
   const { every, at } = t as { every?: unknown; at?: unknown }
   return (every === 'day' || every === 'week' || every === 'month') && typeof at === 'string' && /^\d{2}:\d{2}$/.test(at)
@@ -574,6 +667,70 @@ export const EVENT_OCCURRENCE_SLOT_PREFIX = 'ev:'
  */
 export function isEventOccurrenceSlot(dueSlot: string): boolean {
   return dueSlot.startsWith(EVENT_OCCURRENCE_SLOT_PREFIX)
+}
+/**
+ * Why an event job's chain of watched records stopped (owner decision ①, 2026-11-18): the scan's own — `DAY_LIMIT` (the
+ * day's limit), `PAUSED_EVENT` (it came while the job or the company was stopped, or while an older build ran),
+ * `VERSION_EVENT` (it came while a new content waited for its 受け取る) — or the code its occurrence ended with
+ * (`JOB_OUTCOME_CODES`). Record-side causes (`JOB_CHAIN_RECORD_CODES`) are said in full only to someone who reads the
+ * record now.
+ */
+export const JOB_CHAIN_RECORD_CODES: readonly string[] = ['EVENT_NOT_ASSIGNEE', 'EVENT_RECORD_GONE', 'EVENT_AI_TURN', 'EVENT_NOT_WATCHED']
+
+/** An event occurrence's slot (stage 4a): `ev:<delivery number>`, one per job and event; never shown in an answer. */
+export function eventDueSlot(deliverySeq: number): string {
+  if (!Number.isSafeInteger(deliverySeq) || deliverySeq < 1) throw new Error('eventDueSlot: needs a delivery number')
+  return `ev:${deliverySeq}`
+}
+
+/**
+ * A ledger row as the event scan sees it (stage 4a, owner memo §3-4 / §12 ②): its delivery number, the record's type,
+ * the change (action, the state before and after), who (`actorKind`, `actorId`), `runId` and the origin mark.
+ */
+export interface LedgerEventRow {
+  seq: number
+  recordId: string
+  version: number
+  type: string
+  action: string
+  fromState: string | null
+  toState: string | null
+  actorKind: string
+  actorId: string
+  runId: string | null
+  origin: string | null
+  /** A person's call through a business plugin's screen (the ledger's `via`, JSON), or null. */
+  via: string | null
+  at: string
+}
+
+/**
+ * Whether a ledger row may be an event at all (owner decision ②). Never: a row with an origin mark (a startup
+ * migration's; the server's own actors' — the clock, a job's operation, the inbox's intake); a row written in an
+ * execution run (`runId`: a scheduled job's run, on the server or a PC, or an 「AI の番」 — a business plugin's step, the
+ * inbox's judgement; the origin mark alone is not enough: a PC run's row has none); a row of an outside actor
+ * (`external`: a connector plugin's import, the minutes intake — stage 4-0's decision 7). A person's change counts, and
+ * so does their AI's in their own consultation (`ai` with no run).
+ */
+export function ledgerRowIsEvent(row: Pick<LedgerEventRow, 'origin' | 'runId' | 'actorKind'> & { via?: string | null }): boolean {
+  if (row.origin !== null) return false
+  if (row.runId !== null) return false
+  // A change written through a business plugin's screen (owner decision ②, 2026-11-18): its code and a person's press
+  // cannot be told apart, so it is never an event.
+  if (row.via !== undefined && row.via !== null) return false
+  return row.actorKind === 'human' || row.actorKind === 'ai'
+}
+
+/**
+ * Whether the row is the change the trigger watches for: its type, a real change of state into `to` (from `from` when
+ * named — never a row whose state did not change). Which record (the watch target), its assignee and the responsible
+ * person's reading are the server's (they need the job and the record).
+ */
+export function triggerMatches(trigger: JobRecordTrigger, row: Pick<LedgerEventRow, 'type' | 'fromState' | 'toState'>): boolean {
+  if (row.type !== trigger.type) return false
+  if (row.fromState === null || row.toState === null || row.fromState === row.toState) return false
+  if (row.toState !== trigger.to) return false
+  return trigger.from === undefined || row.fromState === trigger.from
 }
 /** The kinds a claim or a turn list asked for: `time` when none are named (an app before stage 4-0); null = not a list of kinds. */
 export function parseJobOccurrenceKinds(value: unknown): JobOccurrenceKind[] | null {
@@ -624,6 +781,11 @@ export const JOB_OUTCOME_CODES = [
   'JOB_PAUSED', 'COMPANY_STOPPED', 'NOT_ACCEPTED', 'JOB_VERSION_CHANGED', 'OWNER_LEFT', 'OWNER_RIGHTS_CHANGED',
   'OWNER_ABSENT', 'SUPERSEDED', 'MISSED', 'EXPIRED', 'RECORDS_OFF', 'TASK_NOT_CREATED', 'RUN_FAILED', 'TIME_LIMIT', 'RESULT_UNKNOWN',
   'PLACE_NOT_USABLE',
+  // Stage 4a, an event occurrence skipped right before it acted (not told: owner memo §3-7 / §10-1): its record is not
+  // there for the responsible person any more (gone, or no longer theirs to read — the occurrence is then hidden from
+  // them too), its assignee is someone else now, its state is now the AI's turn (owner decision ⑧), or the job watches
+  // another record now (a new start record accepted since).
+  'EVENT_RECORD_GONE', 'EVENT_NOT_ASSIGNEE', 'EVENT_AI_TURN', 'EVENT_NOT_WATCHED',
 ] as const
 export type JobOutcomeCode = typeof JOB_OUTCOME_CODES[number]
 

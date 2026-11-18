@@ -271,13 +271,17 @@ numbers through an archive. A build before 4-0 reads a `schema: 2` definition as
 treats an unknown trigger as monthly, its admin console fails on `trigger.at`), and writes ledger rows without
 numbers that 4a then never sees as events. The admin console is deployed with the server (same compose, same
 commit); an admin tab left open from before 4-0 only gets definitions it can read (no header = schema 1). Rolling
-back between 4-0.1 and 4a, or forward, works, with one thing to check: 4-0.1 does not keep 4a's paused stretches
-(`ai_job_event_gaps`). A pause, the company's stop or a restore on 4-0.1 holds the event occurrences already
-waiting (`holdEventOccurrences`), but events that happen while 4-0.1 runs are not recorded as falling inside a pause —
-so after returning to 4a, **the responsible person of each event job paused (or stopped) during the rollback
-should check it before resuming** (4a may act on events from that stretch). An event occurrence left `due` and not
-paused stays as it was on 4-0.1 and 4a settles it when rolled forward. Rolling back the desktop app is fine (it claims time occurrences
-only unless it names `event`).
+back between 4-0.1 and 4a, or forward, works. 4-0.1 does not keep 4a's paused stretches (`ai_job_event_gaps`): a
+pause, the company's stop or a restore there holds the event occurrences already waiting (`holdEventOccurrences`) but
+records no stretch. 4a finds such a pause or stop when rolled forward (a resume or a lift that closes no gap, or a job /
+stop row another build wrote — the cursor's stamps, `jobs.md` "Event-triggered jobs") and treats the event jobs it touched
+as having seen everything up to then: nothing from that stretch runs, and a watched やること completed in it shows the
+job's chain as stopped (the responsible person chooses the next one). An event occurrence left `due` and not paused
+stays as it was on 4-0.1 and 4a settles it (with its reader check) when rolled forward. Rolling back the desktop app is
+fine (it claims time occurrences only unless it names `event`; an app before 4a cannot accept an event job and is told
+to update itself). 4a's tables (`ai_job_event_cursors`, `ai_job_event_gaps`, the event columns of `ai_job_occurrences`)
+are additive and travel in a company archive like every `company_id` table; the stop a restore sets
+(`pauseAfterRestore`) opens the company's event gap, so nothing that happens until an owner lifts it runs afterwards.
 
 ## CI
 

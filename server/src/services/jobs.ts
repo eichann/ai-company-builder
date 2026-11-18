@@ -19,7 +19,7 @@
  *   (notice `job_paused`), in the same transaction as the change.
  */
 import {
-  JOB_ACTOR, JOB_NEEDS_NEWER_SCREEN, JOB_SCHEMAS, JOB_SYSTEM_PAUSE_REASONS, isJobId, storedJobDefinition, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, newJobId, parseJobAcceptedPlace,
+  JOB_ACTOR, JOB_NEEDS_NEWER_SCREEN, JOB_SCHEMAS, JOB_SYSTEM_PAUSE_REASONS, isJobId, isRecordTrigger, isTimeTrigger, storedJobDefinition, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, newJobId, parseJobAcceptedPlace,
   parseJobDefinition, type JobDefinition, type JobDeliveryPlace, type JobPauseReason,
 } from '../../shared/core/jobs'
 import type { JobList, JobOccurrenceView, JobState, JobVersionView, JobView, JobWaiting } from '../../shared/types/jobs'
@@ -31,10 +31,14 @@ import type { Transactions } from '../ports/transactions'
 import { hashCanonical } from '../lib/content-hash'
 import { hasFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
-import { recordReader } from './record-access'
+import { recordReader, type RecordReader } from './record-access'
 import { resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
 import { nextJobSlot } from '../../shared/core/job-schedule'
+import { jobChainStopText } from '../../shared/core/job-words'
+import { RECORD_ID_RE } from '../../shared/core/records'
 import { companyNow } from './notifications'
+import { createJobEvents, eventShown, recordTriggerProblems, shownSlot, type AiStepStates } from './job-events'
+import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 
 export const JOBS_FORBIDDEN = 'Only owners and admins can manage scheduled jobs'
 /** A job's name for a responsible person who cannot read every place its newest version names. */
@@ -61,6 +65,13 @@ const PLACE_NOT_USABLE = () => refuse('conflict', '選んだ置き先を使え�
 const SCHEMA_UNKNOWN = () => refuse('conflict', 'この定期の仕事は新しい版のサーバーで作られたため、このサーバーでは扱えません。', { code: 'JOB_SCHEMA_UNKNOWN' })
 /** A version of a shape the calling screen did not say it can read (`JOB_SCHEMAS_HEADER`): never approved, accepted or edited from it. */
 const NEEDS_NEWER_SCREEN = () => refuse('conflict', `${JOB_NEEDS_NEWER_SCREEN}。`, { code: 'JOB_NEEDS_NEWER_SCREEN' })
+/** An event trigger without its narrowing (owner decision 2026-11-18): refused in plain words. */
+const NEEDS_NARROWING = () => refuse('bad-request', '出来事で動く定期の仕事には、見張るやること（1件）を選んでください。すべてのやることを見張ることはできません。', { code: 'BAD_JOB_DEFINITION', problems: ['trigger.startRecord.REQUIRED'] })
+/** A record trigger the company's types, its business plugins or the start record do not allow (stage 4a); codes only, never a name. */
+const TRIGGER_NOT_ALLOWED = (problems: string[]) => refuse('conflict', 'きっかけにした出来事は、いまの会社の設定では使えません（「AI の番」の状態か、最初のやることが見つからないなど）。選び直してください。', { code: 'JOB_TRIGGER_NOT_ALLOWED', problems })
+const NOT_RESPONSIBLE_TO_REWATCH = () => refuse('forbidden', '見張るやることを選び直せるのは、この仕事の責任者だけです。', { code: 'JOB_NOT_RESPONSIBLE' })
+const DRAFT_WAITING = () => refuse('conflict', '管理者が内容を直している途中のため、いまは選び直せません。管理者に確かめてください。', { code: 'JOB_DRAFT_WAITING' })
+const NOT_EVENT_JOB = () => refuse('conflict', 'この定期の仕事は、出来事で動く仕事ではありません。', { code: 'JOB_NOT_EVENT' })
 /** What a client reads when it names no schemas (every screen before stage 4-0). */
 const SCHEMA_1_ONLY: readonly number[] = [1]
 
@@ -108,15 +119,28 @@ export interface JobServiceDeps {
   occurrenceRetry?: (companyId: string, occ: JobOccurrenceRow) => Partial<JobOccurrenceView>
   /** The definition schemas this server reads (jobs.md "Shapes this build does not know"). Absent → `JOB_SCHEMAS`; tests name a newer one. */
   knownSchemas?: readonly number[]
+  /** Event-triggered jobs (stage 4a): a business plugin step's states that run as 「AI の番」 (never a trigger's, ⑧). Absent → none. */
+  aiStepStates?: AiStepStates
 }
 
-/** An occurrence as `GET /jobs/:jobId/occurrences` answers it to anyone who sees the job: slots, states and codes only. */
+/**
+ * An occurrence as `GET /jobs/:jobId/occurrences` answers it to anyone who sees the job: slots, states and codes only.
+ * An event occurrence (stage 4a) says `kind: 'event'` and its event's time as the slot — never its delivery number, its
+ * record or anything of it (and it reaches only someone who reads that record: `eventShown`).
+ */
 export function occurrenceView(o: JobOccurrenceRow): JobOccurrenceView {
   return {
-    id: o.id, jobVersion: o.jobVersion, dueSlot: o.dueSlot, timeZone: o.timeZone, dueAt: o.dueAt, expiresAt: o.expiresAt,
+    id: o.id, jobVersion: o.jobVersion, dueSlot: shownSlot(o), timeZone: o.timeZone, dueAt: o.dueAt, expiresAt: o.expiresAt,
     state: o.state, outcomeCode: o.outcomeCode, ran: o.runId !== null, updatedAt: o.updatedAt,
+    ...(o.eventSeq !== null && o.eventSeq !== undefined ? { kind: 'event' as const } : {}),
   }
 }
+
+/**
+ * How many of a job's event records (newest first) a look checks the viewer reads (stage 4a). Event occurrences of older
+ * records are left out (fails closed). The work is the same whatever the viewer may read: never a measure of what is hidden.
+ */
+export const EVENT_RECORDS_CHECKED = 2000
 
 const sha256 = hashCanonical
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -126,6 +150,11 @@ export function createJobService(deps: JobServiceDeps) {
   const jobsOf = (companyId: string) => companyData.forCompany(companyId).jobs
 
   const known = deps.knownSchemas ?? JOB_SCHEMAS
+  // Event-triggered jobs' own rules where this service moves a cursor (an acceptance): job-events.ts.
+  const events = createJobEvents({
+    transactions, clock, ids, roleOf: (companyId, userId) => memberships.roleOf(companyId, userId),
+    timeZoneOf: deps.timeZoneOf ?? (() => DEFAULT_COMPANY_TIME_ZONE), aiStepStates: deps.aiStepStates,
+  })
   /** The stored definition, or null when this server does not know its shape (never read as if it did). */
   const definitionOf = (v: JobVersionRow): JobDefinition | null => storedJobDefinition(v, known)
   /** The definition as a client that reads `reads` may get it: null when either this server or that client does not know its shape. */
@@ -144,6 +173,54 @@ export function createJobService(deps: JobServiceDeps) {
     const procedure = definition.run.kind === 'procedure' ? definition.run.procedure : null
     if (procedure?.source !== 'shelf_skill') return true
     return deps.shelfSkill?.({ companyId: handle.companyId, userId, role }, procedure.item)?.readable !== false
+  }
+
+  /**
+   * Stage 4a: may `member` see a version naming a start record (`trigger.startRecord`)? Only while they read it now —
+   * owners and admins too: a record id they cannot read is not theirs to learn (⑥). Any other version: yes.
+   */
+  function readsStart(handle: CompanyData, member: Member, definition: JobDefinition | null): boolean {
+    const start = definition && isRecordTrigger(definition.trigger) ? definition.trigger.startRecord : undefined
+    return start === undefined || eventShown(handle, member, { eventRecordId: start })
+  }
+
+  /** The company's own checks of a record trigger (job-events.ts): who must read its start record — `who` and the responsible person. */
+  function triggerProblems(handle: CompanyData, definition: JobDefinition, who: Member | null): string[] {
+    if (!isRecordTrigger(definition.trigger)) return []
+    const role = memberships.roleOf(handle.companyId, definition.actingUser)
+    const readers: Member[] = [...(who ? [who] : []), ...(role !== null ? [{ companyId: handle.companyId, userId: definition.actingUser, role }] : [])]
+    return recordTriggerProblems(handle, deps.aiStepStates, definition.trigger, readers)
+  }
+
+  /**
+   * An event job's stopped chain as the viewer may read it (owner decision ①): its cause in plain words — a record-side
+   * cause in full, with the record's title, only when the viewer reads that record now (else 「見張っていたやることの都合で
+   * 止まりました」), computed when read; null while it goes on. Nothing for a job that is not an event job.
+   */
+  function chainOf(member: Member, handle: CompanyData, job: JobRow, reader: RecordReader): Pick<JobView, 'chainStopped'> {
+    const stop = handle.jobs.eventCursor(job.id)?.chainStop ?? null
+    const approved = job.approvedVersion === null ? null : handle.jobs.version(job.id, job.approvedVersion)
+    const definition = approved ? definitionOf(approved) : null
+    if (!definition || !isRecordTrigger(definition.trigger)) return {}
+    if (!stop) return { chainStopped: null }
+    const row = handle.records.byIds([stop.record])[0]
+    const title = row && row.removedAt === null && reader.record(row) ? row.title : null
+    return { chainStopped: { why: jobChainStopText(stop.code, { runsPerDay: definition.grant.limits.runsPerDay, record: title }) } }
+  }
+
+  /** The member's record reader for one request (the company's rules read once). */
+  const readerOf = (member: Member, handle: CompanyData): RecordReader => recordReader(member, handle.scopes.listWithRules())
+
+  /**
+   * The viewer's newest occurrences of the job, newest first, at most `limit`: an event one they may not see is not
+   * there (⑥). The job's event records (at most `EVENT_RECORDS_CHECKED`, newest first) are read in one batch and checked
+   * with one reader, then SQL leaves the others out **before** the limit: what someone else's record made never pushes a
+   * visible one out (or in), and the work does not depend on how many are hidden.
+   */
+  function shownOccurrences(member: Member, handle: CompanyData, jobId: string, limit: number, reader: RecordReader = readerOf(member, handle)): JobOccurrenceRow[] {
+    const records = handle.jobs.eventRecordsOf(jobId, EVENT_RECORDS_CHECKED)
+    const readable = records.length === 0 ? [] : handle.records.byIds(records).filter(r => r.removedAt === null && reader.record(r)).map(r => r.id)
+    return handle.jobs.occurrencesOf(jobId, readable, limit)
   }
 
   /**
@@ -226,22 +303,26 @@ export function createJobService(deps: JobServiceDeps) {
    * When it runs, for the screens (PR 4): the approved version's trigger (else the newest's) — a trigger
    * names no place, so it is answered with the job —, the approved trigger's next slot, the newest occurrence.
    */
-  function whenOf(handle: CompanyData, job: JobRow, reads: readonly number[]): Pick<JobView, 'trigger' | 'placement' | 'nextSlot' | 'lastOccurrence' | 'needsUpdate'> {
+  function whenOf(member: Member, handle: CompanyData, job: JobRow, reads: readonly number[], reader: RecordReader): Pick<JobView, 'trigger' | 'placement' | 'nextSlot' | 'lastOccurrence' | 'needsUpdate'> {
     const approved = job.approvedVersion === null ? null : handle.jobs.version(job.id, job.approvedVersion)
     const shown = approved ?? handle.jobs.version(job.id, job.latestVersion)
     // A shape the client (or this server) does not read: no trigger at all — an older screen would read it as a
     // time of day (`trigger.at`) and fail — and `needsUpdate` for the screens that know the word.
     const definition = shown ? shownTo(shown, reads) : null
     let nextSlot: string | null = null
-    if (approved && definition && job.state !== 'retired' && deps.timeZoneOf && deps.holidaysOf) {
+    // An event job has no next slot (stage 4a): its occurrences come when something happens.
+    if (approved && definition && isTimeTrigger(definition.trigger) && job.state !== 'retired' && deps.timeZoneOf && deps.holidaysOf) {
       nextSlot = nextJobSlot(definition.trigger, companyNow(clock.nowMs(), deps.timeZoneOf(handle.companyId)), deps.holidaysOf(handle.companyId))
     }
-    const last = handle.jobs.occurrences(job.id, 1)[0] ?? null
+    // The newest the viewer may see (⑥): what someone else's record made is not there for them.
+    const last = shownOccurrences(member, handle, job.id, 1, reader)[0] ?? null
+    // A start record the viewer cannot read is not named to them (⑥): no trigger at all then, as for a hidden definition.
+    const triggerShown = definition !== null && readsStart(handle, member, definition)
     return {
-      ...(definition ? { trigger: definition.trigger, placement: definition.placement } : {}),
+      ...(definition && triggerShown ? { trigger: definition.trigger, placement: definition.placement } : {}),
       ...(shown && !definition ? { needsUpdate: true as const } : {}),
       nextSlot,
-      lastOccurrence: last ? { dueSlot: last.dueSlot, state: last.state, outcomeCode: last.outcomeCode } : null,
+      lastOccurrence: last ? { dueSlot: shownSlot(last), state: last.state, outcomeCode: last.outcomeCode, ...(last.eventSeq != null ? { kind: 'event' as const } : {}) } : null,
     }
   }
 
@@ -282,7 +363,7 @@ export function createJobService(deps: JobServiceDeps) {
     return latest !== null && readsAll(handle, member.userId, member.role, definitionOf(latest)) ? job.name : HIDDEN_JOB_NAME
   }
 
-  function view(member: Member, handle: CompanyData, job: JobRow, withVersions: boolean, reads: readonly number[] = SCHEMA_1_ONLY): JobView {
+  function view(member: Member, handle: CompanyData, job: JobRow, withVersions: boolean, reads: readonly number[] = SCHEMA_1_ONLY, reader: RecordReader = readerOf(member, handle)): JobView {
     const full = hasFullAccess(member.role)
     // The name shown is the newest version's (`ai_jobs.name`). A responsible person who is not owner/admin
     // gets it only while they read every place that version names — an admin may have named the job after
@@ -291,16 +372,18 @@ export function createJobService(deps: JobServiceDeps) {
       id: job.id, name: nameFor(member, handle, job), state: job.state, actingUserId: job.actingUserId, latestVersion: job.latestVersion,
       approvedVersion: job.approvedVersion, accepted: consentAccepted(handle, job), pausedReason: job.pausedReason,
       waiting: waitingOf(handle, job, handle.jobs.stopped()), createdBy: job.createdBy, createdAt: job.createdAt, updatedAt: job.updatedAt,
-      ...whenOf(handle, job, reads),
+      ...whenOf(member, handle, job, reads, reader),
       ...forViewer(member, handle, job),
       deliverTo: placeView(member, handle, job),
+      ...chainOf(member, handle, job, reader),
     }
     if (withVersions) {
       out.versions = handle.jobs.versions(job.id).map((v): JobVersionView => {
         const definition = definitionOf(v)
         // A responsible person who is not owner/admin sees a version's definition only while they read
         // every place it names (a draft may name one they cannot: its name is not theirs to learn).
-        const shown = full || readsAll(handle, member.userId, member.role, definition)
+        // A start record the viewer cannot read (stage 4a): the version is hidden from them, owners and admins too (⑥).
+        const shown = (full || readsAll(handle, member.userId, member.role, definition)) && readsStart(handle, member, definition)
         // A shape the client does not read (or this server does not know) goes without its definition: an older
         // screen would fail on it (jobs.md "Shapes this build does not know").
         const readable = shownTo(v, reads) !== null
@@ -345,6 +428,7 @@ export function createJobService(deps: JobServiceDeps) {
       }
     }
     const parsed = parseJobDefinition(input)
+    if (!parsed.ok && parsed.problems.includes('trigger.startRecord.REQUIRED')) return NEEDS_NARROWING()
     if (!parsed.ok) {
       // Everything else was right and only the Skill is not the company's: say that, not "bad definition".
       if (tree === null && parsed.problems.every(p => p === 'run.procedure.fingerprint.BAD' || p === 'run.procedure.skill.BAD') && parsed.problems.includes('run.procedure.fingerprint.BAD')) return missing()
@@ -418,7 +502,9 @@ export function createJobService(deps: JobServiceDeps) {
       const handle = companyData.forCompany(member.companyId)
       const full = hasFullAccess(member.role)
       const rows = full ? handle.jobs.list() : handle.jobs.listFor(member.userId)
-      return ok({ stopped: handle.jobs.stopped(), canManage: full, jobs: rows.map(j => view(member, handle, j, false, reads)) })
+      // One reader for the whole answer (the company's rules read once).
+      const reader = readerOf(member, handle)
+      return ok({ stopped: handle.jobs.stopped(), canManage: full, jobs: rows.map(j => view(member, handle, j, false, reads, reader)) })
     },
 
     /** `GET /jobs/:jobId`: with every version, newest first. */
@@ -435,6 +521,10 @@ export function createJobService(deps: JobServiceDeps) {
       if (!parsed.ok) return parsed
       const { definition, canonical } = parsed.value
       const handle = companyData.forCompany(member.companyId)
+      // A shape the screen did not say it reads is never made from it (stage 4a: schema 2 from a 4a client only).
+      if (!reads.includes(definition.schema)) return NEEDS_NEWER_SCREEN()
+      const problems = triggerProblems(handle, definition, member)
+      if (problems.length > 0) return BAD_DEFINITION(problems)
       const at = clock.now()
       const id = newJobId(ids.newId().replace(/-/g, '').toLowerCase())
       handle.jobs.create({
@@ -460,6 +550,9 @@ export function createJobService(deps: JobServiceDeps) {
       if (!parsed.ok) return parsed
       const { definition, canonical } = parsed.value
       const { handle } = found
+      if (!reads.includes(definition.schema)) return NEEDS_NEWER_SCREEN()
+      const problems = triggerProblems(handle, definition, member)
+      if (problems.length > 0) return BAD_DEFINITION(problems)
       const changed = transactions.run(() => {
         const job = handle.jobs.find(jobId) as JobRow
         const latest = handle.jobs.version(jobId, job.latestVersion)
@@ -487,6 +580,9 @@ export function createJobService(deps: JobServiceDeps) {
       if (!reads.includes(v.schema)) return NEEDS_NEWER_SCREEN()
       const skill = await skillPinned(member.companyId, definition)
       if (!skill.ok) return skill
+      // Stage 4a: the trigger again (a business plugin installed since may run that state as the AI's turn, ⑧).
+      const problems = triggerProblems(handle, definition, member)
+      if (problems.length > 0) return TRIGGER_NOT_ALLOWED(problems)
       let told = false
       const result = transactions.run((): Outcome<void> => {
         // Checked again inside the write: the membership or the rules may have changed meanwhile.
@@ -541,15 +637,27 @@ export function createJobService(deps: JobServiceDeps) {
       // What is accepted must still be what was pinned: a Skill deleted or changed since refuses it.
       const skill = await skillPinned(member.companyId, definition)
       if (!skill.ok) return skill
+      const problems = triggerProblems(handle, definition, null)
+      if (problems.length > 0) return TRIGGER_NOT_ALLOWED(problems)
+      const told = new Set<string>()
       const result = transactions.run((): Outcome<void> => {
         const rights = withinRights(handle, definition)
         if (!rights.ok) return rights
         // The place must be theirs and usable now (their own live pick): the run later puts only there.
         if (place && !deps.places?.live(member.companyId, member.userId, place)) return PLACE_NOT_USABLE()
-        handle.jobs.accept(jobId, v.version, v.consentFingerprint, member.userId, clock.now(), place)
+        const at = clock.now()
+        // Accepting the same consent again changes nothing of what an event job has seen (Codex review of #700).
+        const again = handle.jobs.find(jobId)?.acceptedConsent === v.consentFingerprint && handle.jobs.eventCursor(jobId) !== null
+        // A new consent accepted before the clock looked: what the watched record did meanwhile never runs, and when it
+        // reached the watched state the chain stops (`VERSION_EVENT`, owner decision ①; Codex review of #700).
+        if (isRecordTrigger(definition.trigger) && !again && handle.jobs.eventCursor(jobId) !== null) events.dropUntilNow(handle, jobId, 'VERSION_EVENT', told)
+        handle.jobs.accept(jobId, v.version, v.consentFingerprint, member.userId, at, place)
+        // An event job (stage 4a) looks at what happens from its acceptance on — never back in time.
+        if (isRecordTrigger(definition.trigger) && !again) handle.jobs.startEventCursor(jobId, definition.trigger.startRecord, at)
         return ok(undefined)
       })
       if (!result.ok) return result
+      if (told.size > 0) { try { deps.noticesChanged?.(member.companyId, [...told]) } catch { /* their own check catches up */ } }
       return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads))
     },
 
@@ -667,7 +775,8 @@ export function createJobService(deps: JobServiceDeps) {
       // 「もう一度」 (B PR 5b): whether it works now and why not, only for those who may press it (owner / admin).
       const retry = hasFullAccess(member.role) ? deps.occurrenceRetry : undefined
       return ok({
-        occurrences: found.handle.jobs.occurrences(jobId, OCCURRENCES_LISTED)
+        // Only what the viewer may see (⑥): an event occurrence of a record they cannot read is not there, owners and admins too.
+        occurrences: shownOccurrences(member, found.handle, jobId, OCCURRENCES_LISTED)
           .map((o): JobOccurrenceView => ({ ...occurrenceView(o), ...(retry ? retry(member.companyId, o) : {}) })),
       })
     },
@@ -718,8 +827,75 @@ export function createJobService(deps: JobServiceDeps) {
       const found = visibleJob(member, jobId)
       if (!found) return null
       const occ = found.handle.jobs.occurrence(occurrenceId)
-      if (!occ || occ.jobId !== jobId) return null
-      return { name: nameFor(member, found.handle, found.job), dueSlot: occ.dueSlot, outcomeCode: occ.outcomeCode }
+      if (!occ || occ.jobId !== jobId || !eventShown(found.handle, member, occ)) return null
+      return { name: nameFor(member, found.handle, found.job), dueSlot: shownSlot(occ), outcomeCode: occ.outcomeCode }
+    },
+
+    /** Whether the member may see this occurrence of a job they see (⑥: an event one only while they read its record). */
+    occurrenceShown(member: Member, occ: JobOccurrenceRow): boolean {
+      return eventShown(companyData.forCompany(member.companyId), member, occ)
+    },
+
+    /**
+     * 「止まっています」 (`job_chain_stopped`, owner decision ①)'s words for the member now: the job's name and the cause as
+     * they may read it — only while they see the job and that very stop (`at`) still stands; else null.
+     */
+    chainStopNotice(member: Member, jobId: string, at: string): { name: string; why: string } | null {
+      const found = visibleJob(member, jobId)
+      if (!found || found.handle.jobs.eventCursor(jobId)?.chainStop?.at !== at) return null
+      const chain = chainOf(member, found.handle, found.job, readerOf(member, found.handle)).chainStopped
+      return chain ? { name: nameFor(member, found.handle, found.job), why: chain.why } : null
+    },
+
+    /**
+     * `POST /me/jobs/:jobId/watch { version, recordId }` (owner decision ①): the responsible person chooses the next
+     * watched やること themselves. A new version that differs from the approved one only in its start record, approved and
+     * accepted by that one press (the trigger is part of what they accept; nobody else's consent is involved) — the
+     * record checked as any start record (they read it, a やること, not 「AI の番」). Only the approved version's
+     * responsible person, only on the version shown (`version`), and not while a newer draft waits for approval.
+     */
+    async rewatch(member: Member, jobId: string, body: unknown, reads: readonly number[] = SCHEMA_1_ONLY): Promise<Outcome<JobView>> {
+      const found = visibleJob(member, jobId)
+      if (!found) return NOT_FOUND()
+      const b = isObject(body) && Object.keys(body).every(k => k === 'version' || k === 'recordId') ? body : null
+      if (!b || typeof b.version !== 'number' || !Number.isInteger(b.version) || typeof b.recordId !== 'string' || !RECORD_ID_RE.test(b.recordId)) {
+        return BAD_BODY('{ version, recordId }')
+      }
+      const { handle, job } = found
+      if (!controls(handle, job, member.userId)) return NOT_RESPONSIBLE_TO_REWATCH()
+      if (job.state === 'retired') return RETIRED()
+      if (job.approvedVersion !== b.version) return FINGERPRINT_CHANGED()
+      if (job.latestVersion !== job.approvedVersion) return DRAFT_WAITING()
+      const approved = handle.jobs.version(jobId, job.approvedVersion) as JobVersionRow
+      const definition = definitionOf(approved)
+      if (definition === null) return SCHEMA_UNKNOWN()
+      if (!reads.includes(approved.schema)) return NEEDS_NEWER_SCREEN()
+      if (!isRecordTrigger(definition.trigger)) return NOT_EVENT_JOB()
+      const parsed = parseJobDefinition({ ...definition, trigger: { ...definition.trigger, startRecord: b.recordId } })
+      if (!parsed.ok) return BAD_DEFINITION(parsed.problems)
+      const next = parsed.definition
+      const problems = triggerProblems(handle, next, member)
+      if (problems.length > 0) return BAD_DEFINITION(problems)
+      const result = transactions.run((): Outcome<void> => {
+        const rights = withinRights(handle, next)
+        if (!rights.ok) return rights
+        const current = handle.jobs.find(jobId) as JobRow
+        if (current.latestVersion !== b.version || current.approvedVersion !== b.version) return FINGERPRINT_CHANGED()
+        const at = clock.now()
+        const canonical = jobDefinitionCanonical(next)
+        const row = versionRow(jobId, current.latestVersion + 1, next, canonical, member.userId, at)
+        handle.jobs.addVersion(row, at)
+        handle.jobs.approve(jobId, row.version, row.fingerprint, member.userId, at, current.state)
+        handle.jobs.accept(jobId, row.version, row.consentFingerprint, member.userId, at, current.acceptedPlace)
+        // The record chosen: the watch starts over there, the stop is gone — also when it is the start record it began
+        // from (an explicit choice is never the chain's position kept; Codex review of #700).
+        // A job its responsible person never accepted has no cursor yet: this press starts it (Codex review of #700).
+        handle.jobs.startEventCursor(jobId, b.recordId as string, at)
+        handle.jobs.restartWatch(jobId, b.recordId as string, at)
+        return ok(undefined)
+      })
+      if (!result.ok) return result
+      return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads))
     },
 
     /**

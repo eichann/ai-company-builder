@@ -286,6 +286,24 @@ export function createPluginStepService(deps: PluginStepDeps) {
     stepSkills,
 
     /**
+     * The states of `type` where a business plugin's step runs as 「AI の番」 now — an `ai_turn` step, or a `start: person`
+     * step the company starts by itself — of every enabled contract-2 business plugin (a stopped version counts too: the
+     * safe side). An event-triggered job never watches one (jobs.md "Event-triggered jobs", owner decision ⑧).
+     */
+    aiStepStates(companyId: string, type: string): ReadonlySet<string> {
+      const states = new Set<string>()
+      for (const i of companyData.forCompany(companyId).plugins.installs()) {
+        if (!i.enabled) continue
+        const m = shelf.find(companyId, i.pluginId, i.version)?.pkg.manifest
+        if (!m || m.role !== 'business' || m.contract < PLUGIN_CONTRACT_V2) continue
+        for (const [name, step] of Object.entries(m.steps)) {
+          if (step.for.type === type && (step.start === 'ai_turn' || startsByItself(companyId, i.pluginId, name, step))) states.add(step.for.state)
+        }
+      }
+      return states
+    },
+
+    /**
      * After a meeting became `read`, or its まとまり was chosen after the reading (the record
      * engine's after-act, plan C5; the minutes service's link): its まとまり moves to
      * a business plugin's `ai_turn` step, so that step (e.g. 「会議を案件に反映する」) becomes the

@@ -73,6 +73,8 @@ export interface NotificationServiceDeps {
    * job now. Absent → never shown.
    */
   jobOccurrenceNoticeOf?: (member: Member, jobId: string, occurrenceId: string) => { name: string; dueSlot: string; outcomeCode: string | null } | null
+  /** 「止まっています」 (`job_chain_stopped`, stage 4a ①): the job's name and the cause as the member may read it, while that stop stands; else null. */
+  jobChainStoppedOf?: (member: Member, jobId: string, at: string) => { name: string; why: string } | null
   /**
    * 「受け取りが要ります」 (`job_accept_needed`, jobs.md "The acceptance notice"): the job's name while the
    * version still waits for this member's acceptance, else null (not shown). Absent → never shown.
@@ -949,7 +951,13 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         return /^[1-9][0-9]{0,8}$/.test(version) ? deps.jobAcceptNoticeOf?.(member, jobId, Number(version)) ?? null : null
       }
       const jobOccurrenceKinds = new Set<string>(JOB_OCCURRENCE_NOTIFICATION_KINDS)
+      // An event job's stopped chain: `job_chain_stopped:<job id>:<at>` (the time has `:` in it: the rest of the key).
+      const chainStopped = (r: NotificationRow) => {
+        const [, jobId = '', ...rest] = (r.dedupeKey ?? '').split(':')
+        return deps.jobChainStoppedOf?.(member, jobId, rest.join(':')) ?? null
+      }
       const visible = rows.filter(r => {
+        if (r.kind === 'job_chain_stopped') return r.recordId === '' && chainStopped(r) !== null
         if (r.kind === 'job_paused') return r.recordId === '' && jobNotice(r) !== null
         if (r.kind === 'job_accept_needed') return r.recordId === '' && acceptNotice(r) !== null
         // After a restore (deployment.md): only while the member is an owner / admin (they alone can resume).
@@ -990,6 +998,11 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text: `定期の仕事「${job.name}」を止めました：${why}`, createdAt: r.createdAt, read }
         }
         if (r.kind === 'company_restored') return restoredItem(r)
+        if (r.kind === 'job_chain_stopped') {
+          const job = chainStopped(r) as { name: string; why: string }
+          const text = `定期の仕事「${job.name}」が止まっています（${job.why}）。次に見張るやることを選び直してください`
+          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
+        }
         if (r.kind === 'job_accept_needed') {
           const job = acceptNotice(r) as { name: string; contentChanged: boolean; choosesPlace?: boolean }
           const base = job.contentChanged

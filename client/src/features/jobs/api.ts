@@ -8,7 +8,9 @@ export type JobsReads = ElectronPort<'getMyJobs'>
 /** Their occurrences this PC may run now (the AI turn runner's queue; main remembers them for the claim). */
 export type JobTurnReads = ElectronPort<'listJobTurns'>
 /** The member's own acts on them: accepting, pausing, resuming (kept on the server). */
-export type JobsWrites = ElectronPort<'acceptJob' | 'pauseJob' | 'resumeJob'>
+export type JobsWrites = ElectronPort<'acceptJob' | 'pauseJob' | 'resumeJob' | 'rewatchJob'>
+/** An event job's next watched やること: the member's own open ones (stage 4a ①). */
+export type WatchReads = ElectronPort<'getWatchChoices'>
 
 export function getMyJobs(companyId: string, reads: JobsReads = window.electronAPI) {
   return reads.getMyJobs(companyId)
@@ -29,4 +31,12 @@ export function pauseJob(companyId: string, jobId: string, writes: JobsWrites = 
 
 export function resumeJob(companyId: string, jobId: string, writes: JobsWrites = window.electronAPI) {
   return writes.resumeJob(companyId, jobId)
+}
+
+export function getWatchChoices(companyId: string, text: string, reads: WatchReads = window.electronAPI) {
+  return reads.getWatchChoices(companyId, text)
+}
+
+export function rewatchJob(companyId: string, jobId: string, version: number, recordId: string, writes: JobsWrites = window.electronAPI) {
+  return writes.rewatchJob(companyId, jobId, version, recordId)
 }

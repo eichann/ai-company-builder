@@ -10,6 +10,7 @@
  *   POST /jobs/:jobId/approve          owner/admin { version, fingerprint? }
  *   POST /jobs/:jobId/pause | resume   owner/admin; the responsible person for their own
  *   POST /me/jobs/:jobId/accept        the version's responsible person { version, fingerprint? }
+ *   POST /me/jobs/:jobId/watch         the responsible person of an event job: the next watched やること { version, recordId } (4a)
  *   PUT  /jobs-stop { stopped }        owner/admin: 「定期の仕事をすべて止める」 (its own segment: server.md "Route paths")
  *   GET  /me/job-turns                 the caller's PC-job occurrences they may claim now (B PR 5a, services/job-runs.ts)
  *   POST /job-run-claims               the responsible person's app claims one { occurrenceId, deviceId, conversationId }
@@ -18,9 +19,9 @@
  *   POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile  owner/admin { done }: its run's unknown outside result
  */
 import { Hono, type Context } from 'hono'
-import { JOB_SCHEMAS_HEADER, parseJobOccurrenceKinds, parseJobSchemasHeader } from '../../shared/core/jobs'
+import { JOB_NEEDS_NEWER_APP, JOB_SCHEMAS_HEADER, parseJobOccurrenceKinds, parseJobSchemasHeader } from '../../shared/core/jobs'
 import { services } from '../composition'
-import { refusal } from './respond'
+import { refusal as respondRefusal } from './respond'
 import { companyMember, serviceBody } from './guards'
 
 export const jobsRoute = new Hono()
@@ -28,6 +29,16 @@ const { jobs, jobRuns, jobRetry, aiRuns } = services
 
 /** The definition schemas the caller reads (jobs.md "Shapes this build does not know"; absent = schema 1). */
 const reads = (c: Context) => parseJobSchemasHeader(c.req.header(JOB_SCHEMAS_HEADER))
+
+/**
+ * A refusal as the caller reads it: the desktop app (every build sends `X-ACB-Client-Version`) is told to update the
+ * app, not to reload a screen (stage 4a; the code stays `JOB_NEEDS_NEWER_SCREEN`).
+ */
+const refusal: typeof respondRefusal = (c, r) => {
+  const appCaller = typeof c.req.header('X-ACB-Client-Version') === 'string'
+  if (appCaller && r.body.code === 'JOB_NEEDS_NEWER_SCREEN') return respondRefusal(c, { ...r, body: { ...r.body, error: `${JOB_NEEDS_NEWER_APP}。` } })
+  return respondRefusal(c, r)
+}
 
 jobsRoute.get('/jobs', companyMember, async (c) => {
   const result = jobs.list(c.var.member, reads(c))
@@ -91,6 +102,13 @@ jobsRoute.post('/jobs/:jobId/resume', companyMember, async (c) => {
 
 jobsRoute.post('/me/jobs/:jobId/accept', companyMember, serviceBody, async (c) => {
   const result = await jobs.accept(c.var.member, c.req.param('jobId'), c.var.body, reads(c))
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+// Stage 4a, owner decision ①: the responsible person chooses the next watched やること of their event job.
+jobsRoute.post('/me/jobs/:jobId/watch', companyMember, serviceBody, async (c) => {
+  const result = await jobs.rewatch(c.var.member, c.req.param('jobId'), c.var.body, reads(c))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })

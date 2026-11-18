@@ -6,12 +6,45 @@
  * Words only: no rule is decided here (the parser is `jobs.ts`, the slots `job-schedule.ts`). Pure
  * (server/tests/unit/core-purity.test.ts).
  */
-import { JOB_MINUTES_ROUTE, jobDeliveryLabel, type JobCheck, type JobDefinition, type JobGrant, type JobMissed, type JobOccurrenceState, type JobPauseReason, type JobRun, type JobTrigger, type JobWeekday } from './jobs'
+import { JOB_MINUTES_ROUTE, isRecordTrigger, jobDeliveryLabel, type JobCheck, type JobRecordTrigger, type JobDefinition, type JobGrant, type JobMissed, type JobOccurrenceState, type JobPauseReason, type JobRun, type JobTrigger, type JobWeekday } from './jobs'
 
 const WEEKDAY_WORDS: Record<JobWeekday, string> = { mon: '月曜', tue: '火曜', wed: '水曜', thu: '木曜', fri: '金曜', sat: '土曜', sun: '日曜' }
 
-/** 「毎週火曜の1営業日前 09:00」, 「毎営業日 09:00」, 「毎月末日 09:00（休みの日なら前の営業日）」. */
+/** The record types an event-triggered job may watch, as people call them (stage 4a). */
+const EVENT_TYPE_WORDS: Record<string, string> = { task: 'やること' }
+/** Their states, in the words the app's screens use (client/shared/thing-words.ts). */
+const EVENT_STATE_WORDS: Record<string, Record<string, string>> = {
+  task: {
+    todo: '未着手', in_progress: '進めている', review: '確かめてもらっている', waiting: '返事待ち', done: '完了',
+    cancelled: 'アーカイブ済み', declined: '受けられないと返した', awaiting_acceptance: '引き受け待ち',
+  },
+}
+
+/** A state of a type an event-triggered job may watch, in plain words (the name itself for one this build does not know). */
+export function jobEventStateText(type: string, state: string): string {
+  return EVENT_STATE_WORDS[type]?.[state] ?? state
+}
+
+/**
+ * 「見張っているやること（責任者が担当）が「完了」になったとき（次は、この仕事が作ったやることを見張ります）」 (stage 4a). Never the
+ * watched record's title: who reads the sentence may not read it.
+ */
+export function jobRecordTriggerText(trigger: JobRecordTrigger): string {
+  const what = `見張っている${EVENT_TYPE_WORDS[trigger.type] ?? trigger.type}（責任者が担当）`
+  const to = `「${jobEventStateText(trigger.type, trigger.to)}」`
+  const when = trigger.from ? `${what}が「${jobEventStateText(trigger.type, trigger.from)}」から${to}になったとき` : `${what}が${to}になったとき`
+  return trigger.followMadeTask ? `${when}（そのあとは、この仕事が作ったやることを見張ります）` : `${when}（1回だけ）`
+}
+
+/**
+ * What an event-triggered job never runs for (owner decision ②, the memo's 「制約として画面と例に書く」): shown with its
+ * trigger on every screen that shows one.
+ */
+export const JOB_EVENT_NOTE = '見張るのは選んだやること1つだけです（名前を変えても同じもの）。人（と、その人の相談の中の AI）が変えたときに動きます。定期の仕事や「AI の番」が変えたとき、業務の画面から変えたとき、取り込みで入ったときは動きません。同じやることで動くのは1回だけ、止めている間の出来事は再開しても動きません'
+
+/** 「毎週火曜の1営業日前 09:00」, 「毎営業日 09:00」, 「毎月末日 09:00（休みの日なら前の営業日）」; an event: `jobRecordTriggerText`. */
 export function jobTriggerText(trigger: JobTrigger): string {
+  if (isRecordTrigger(trigger)) return jobRecordTriggerText(trigger)
   if (trigger.every === 'day') return `${trigger.businessDaysOnly ? '毎営業日' : '毎日'} ${trigger.at}`
   if (trigger.every === 'week') {
     const day = WEEKDAY_WORDS[trigger.weekday]
@@ -42,9 +75,10 @@ export function jobCheckText(check: JobCheck): string | null {
   return null
 }
 
-/** A missed occurrence (the server was down at that time). */
-export function jobMissedText(missed: JobMissed): string {
+/** A missed occurrence (the server was down at that time). An event's occurrence: when it expires. */
+export function jobMissedText(missed: JobMissed, trigger?: JobTrigger): string {
   const within = jobMinutesText(missed.expiresAfterMinutes)
+  if (trigger && isRecordTrigger(trigger)) return `出来事のあと${within}のうちに動けなかったときは見送ります`
   return missed.policy === 'latest_only'
     ? `時間に動けなかったときは、${within}以内なら一番新しい回だけ動きます`
     : `時間に動けなかった回は見送ります（${within}で期限切れ）`
@@ -70,7 +104,7 @@ const TOOL_WORDS: Record<string, string> = {
  * What the grant lets a run do, line by line — the part the responsible person accepts with who runs it
  * and what (`jobConsentCanonical`). Places are named as written: only shown to someone who reads them.
  */
-export function jobGrantLines(grant: JobGrant): string[] {
+export function jobGrantLines(grant: JobGrant, trigger?: JobTrigger): string[] {
   const lines: string[] = []
   for (const t of grant.tools) lines.push(`道具：${TOOL_WORDS[t] ?? t}`)
   if (grant.reads.paths.length > 0) lines.push(`読む場所：${grant.reads.paths.map(p => `「${p}」`).join('・')}`)
@@ -81,7 +115,10 @@ export function jobGrantLines(grant: JobGrant): string[] {
   if (grant.routes.includes(JOB_MINUTES_ROUTE)) lines.push('議事録：確かめで見つかった、責任者が出た会議のものだけ読む')
   if (grant.routes.length > 0) lines.push(`使える操作：${grant.routes.length}種類`)
   lines.push(grant.outbound === 'draft_only' ? '外に送るもの：下書きまで（送るのは人）' : '外に送るもの：なし')
-  lines.push(`上限：1回 ${jobMinutesText(grant.limits.minutes)}・1日 ${grant.limits.runsPerDay}回`)
+  // An event job (stage 4a): the day's limit is kept (company time); what comes beyond it is not run.
+  lines.push(trigger && isRecordTrigger(trigger)
+    ? `上限：1日 ${grant.limits.runsPerDay}回まで（超えた出来事は動かさず、責任者に知らせます）`
+    : `上限：1回 ${jobMinutesText(grant.limits.minutes)}・1日 ${grant.limits.runsPerDay}回`)
   return lines
 }
 
@@ -139,7 +176,36 @@ const OUTCOME_WORDS: Record<string, string> = {
   TIME_LIMIT: '承認された時間を過ぎたため AI を止めました。人が確かめる必要があります',
   RESULT_UNKNOWN: '外への操作が済んだか分からないまま時間が来ました。人が確かめる必要があります',
   PLACE_NOT_USABLE: '責任者が選んだ置き先が使えなくなっていました（使える期間が過ぎたか、消されました）。責任者が「受け取る」から選び直してください',
+  EVENT_RECORD_GONE: 'きっかけの記録が見られなくなっていたため見送りました',
+  EVENT_NOT_ASSIGNEE: 'きっかけの記録の担当が、責任者ではなくなっていたため見送りました',
+  EVENT_AI_TURN: 'きっかけの記録が「AI の番」の状態になっていたため見送りました',
+  EVENT_NOT_WATCHED: '見張るやることが変わったため、この回は見送りました',
 }
+
+/**
+ * Why an event job's chain stopped, in plain words (owner decision ①). `record`: the watched record's title when the
+ * viewer reads it now, else null — then a record-side cause is only 「見張っていたやることの都合で止まりました」.
+ */
+export function jobChainStopText(code: string, opts: { runsPerDay: number | null; record: string | null }): string {
+  const named = opts.record !== null ? `「${opts.record}」` : ''
+  switch (code) {
+    case 'DAY_LIMIT': return `1日の上限（${opts.runsPerDay ?? '決められた'}回）を超えたため、止まりました`
+    case 'OWNER_ABSENT': return '責任者が不在の日に完了したため、止まりました'
+    case 'PAUSED_EVENT': case 'JOB_PAUSED': case 'COMPANY_STOPPED': return '一時停止している間に完了したため、止まりました'
+    case 'VERSION_EVENT': case 'JOB_VERSION_CHANGED': case 'NOT_ACCEPTED': return '仕事の内容が変わったため、止まりました'
+    case 'EXPIRED': return '期限までに動けなかったため、止まりました'
+    case 'RECORDS_OFF': case 'TASK_NOT_CREATED': return '次のやることを作れなかったため、止まりました'
+    case 'OWNER_LEFT': case 'OWNER_RIGHTS_CHANGED': return '責任者がこの仕事を続けられなくなったため、止まりました'
+  }
+  if (opts.record === null) return '見張っていたやることの都合で止まりました'
+  if (code === 'EVENT_NOT_ASSIGNEE') return `見張っていたやること${named}の担当が責任者でなくなったため、止まりました`
+  if (code === 'EVENT_RECORD_GONE') return `責任者が見張っていたやること${named}を見られなくなったため、止まりました`
+  if (code === 'EVENT_AI_TURN') return `見張っていたやること${named}が「AI の番」の状態だったため、止まりました`
+  return `見張っていたやること${named}の都合で止まりました`
+}
+
+/** What a stopped chain asks of the responsible person. */
+export const JOB_CHAIN_STOPPED_ASK = '止まっています。次に見張るやることを選び直してください'
 
 const STATE_WORDS: Record<JobOccurrenceState, string> = {
   due: 'これから動きます',

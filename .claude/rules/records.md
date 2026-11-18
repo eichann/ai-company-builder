@@ -1636,7 +1636,12 @@ with an earlier time. So every row now carries a **delivery number**:
 - **Origin mark** `record_ledger.origin` (`LEDGER_ORIGINS`, `shared/core/record-ledger.ts`): `migration` (a startup
   migration's row), `system` (any other `acb:` actor: the server clock, a scheduled job's operation), null for an
   ordinary change (a person, their AI, a run under them, an outside system). `restore` is reserved: a restore writes
-  no rows of its own; restored rows keep their number and mark. Stage 4a never treats a marked row as an event.
+  no rows of its own; restored rows keep their number and mark. Stage 4a never treats a marked row as an event —
+  **but the mark alone does not make a row a person's change**: a row written in an execution run (a scheduled job's
+  run on a PC, an 「AI の番」) has no mark and carries `run_id`, and an outside actor's row (a plugin's import, the minutes
+  intake) has none either; event-triggered jobs exclude those by `run_id` and actor kind, and a person's change written
+  through a business plugin's screen (`via`) as well — its code and a press cannot be told apart (`jobs.md`
+  "Event-triggered jobs").
 - Rows from before (and rows an older build writes after a rollback) have no number: **never events**, never
   renumbered; the counter just carries on.
 - Restore (`deployment.md` "One company: export and restore"): the rows' numbers and the counter come back as they

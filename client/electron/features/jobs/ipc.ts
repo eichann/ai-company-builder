@@ -7,8 +7,9 @@
 //   jobs:pause    pause a job they run
 //   jobs:resume   resume a pause they made
 
-import { JOBS_OFFLINE_TEXT, JOBS_SERVER_TOO_OLD_TEXT, type JobActionResult, type JobsFailure, type MyJob, type MyJobsResult } from '../../../shared/jobs'
-import { isJobId, type JobDeliveryPlace } from '../../../../shared/core/jobs'
+import { JOBS_OFFLINE_TEXT, JOBS_SERVER_TOO_OLD_TEXT, type JobActionResult, type JobsFailure, type MyJob, type MyJobsResult, type WatchChoicesResult } from '../../../shared/jobs'
+import { JOB_SCHEMAS, JOB_SCHEMAS_HEADER, isJobId, type JobDeliveryPlace } from '../../../../shared/core/jobs'
+import { RECORD_ID_RE } from '../../../../shared/core/records'
 import type { JobView } from '../../../../shared/types/jobs'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
@@ -32,6 +33,10 @@ const BAD_INPUT: JobsFailure = { success: false, offline: false, code: 'BAD_REQU
 const OFFLINE: JobsFailure = { success: false, offline: true, code: null, error: JOBS_OFFLINE_TEXT }
 /** At most this many jobs waiting for the member's acceptance are read in detail per look (a handful in practice). */
 const MAX_DETAILS = 50
+/** The open states of a やること an event job may watch next (the server checks the record again). */
+const WATCH_STATES = ['todo', 'in_progress', 'review', 'waiting', 'awaiting_acceptance', 'declined']
+/** How many of them are offered at once (searched by name). */
+const WATCH_CHOICES = 50
 
 type Answer = { status: number; json: Record<string, unknown> | null }
 
@@ -39,14 +44,15 @@ export function createJobsApi(deps: JobsDeps) {
   const doFetch = deps.fetch ?? fetch
   const log = deps.log ?? console
 
-  async function call(path: string, method: 'GET' | 'POST', body?: unknown): Promise<Answer | null> {
-    const base = deps.baseUrl().replace(/\/+$/, '')
+  async function call(path: string, method: 'GET' | 'POST', body?: unknown, root = ''): Promise<Answer | null> {
+    const base = deps.baseUrl().replace(/\/+$/, '') + root
     const cookies = deps.cookies()
     if (!base || cookies.length === 0) return null
     try {
       const res = await doFetch(`${base}/api${path}`, {
         method, redirect: 'error', signal: AbortSignal.timeout(deps.timeoutMs ?? 15_000),
-        headers: { Cookie: cookies.join('; '), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+        // The definition shapes this app shows (jobs.md "Shapes this build does not know"): since stage 4a, event jobs too.
+        headers: { Cookie: cookies.join('; '), [JOB_SCHEMAS_HEADER]: JOB_SCHEMAS.join(','), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       })
       return { status: res.status, json: (await res.json().catch(() => null)) as Record<string, unknown> | null }
@@ -82,6 +88,8 @@ export function createJobsApi(deps: JobsDeps) {
       id: job.id, name: job.approved?.name ?? job.name, state: job.state, waiting: job.waiting, pausedReason: job.pausedReason,
       trigger: job.trigger ?? null, placement: job.placement ?? null, nextSlot: job.nextSlot ?? null, toAccept: null, controls: job.you.controls,
       deliverTo: d ? { label: d.label, chosen: d.chosen, usable: d.usable, name: d.name, expiresAt: d.expiresAt } : null,
+      chainStopped: job.chainStopped && typeof job.chainStopped.why === 'string' ? { why: job.chainStopped.why } : null,
+      approvedVersion: typeof job.approvedVersion === 'number' ? job.approvedVersion : null,
     }
   }
 
@@ -145,6 +153,29 @@ export function createJobsApi(deps: JobsDeps) {
       }
       return act('accept', companyId, jobId, id => `/me/jobs/${id}/accept`, { version, fingerprint, ...(place ? { place } : {}) })
     },
+    /** The member's own open やること they may watch next (by name), as the server's reader lets them see. */
+    async watchChoices(companyId: unknown, text: unknown): Promise<WatchChoicesResult> {
+      if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId) || typeof text !== 'string' || text.length > 100) return BAD_INPUT
+      const me = await call('/me', 'GET')
+      const id = (me?.json?.data as { id?: unknown } | undefined)?.id
+      if (!ok(me) || typeof id !== 'string') return failure('me', me)
+      const q = await call(`${company(companyId)}/records/query`, 'POST', {
+        type: 'task', state: WATCH_STATES, fields: { assignee: id }, limit: WATCH_CHOICES, ...(text.trim() ? { text: text.trim() } : {}),
+      })
+      if (!ok(q)) return failure('watch choices', q)
+      const data = q.json!.data as { total?: unknown; records?: unknown }
+      const records = Array.isArray(data.records) ? data.records as Array<{ id?: unknown; title?: unknown }> : []
+      return {
+        success: true, total: typeof data.total === 'number' ? data.total : records.length,
+        choices: records.filter(r => typeof r.id === 'string' && RECORD_ID_RE.test(r.id) && typeof r.title === 'string').map(r => ({ id: r.id as string, title: r.title as string })),
+      }
+    },
+    /** Watch this やること next (the server checks the member, the version and the record). */
+    async rewatch(companyId: unknown, jobId: unknown, version: unknown, recordId: unknown): Promise<JobActionResult> {
+      if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) return BAD_INPUT
+      if (typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
+      return act('rewatch', companyId, jobId, id => `/me/jobs/${id}/watch`, { version, recordId })
+    },
     pause: (companyId: unknown, jobId: unknown) => act('pause', companyId, jobId, id => `/jobs/${id}/pause`),
     resume: (companyId: unknown, jobId: unknown) => act('resume', companyId, jobId, id => `/jobs/${id}/resume`),
   }
@@ -156,4 +187,6 @@ export function registerJobsIpc(ipc: IpcRegistrar, deps: JobsDeps) {
   ipc.handle('jobs:accept', (_event, companyId, jobId, version, fingerprint) => api.accept(companyId, jobId, version, fingerprint))
   ipc.handle('jobs:pause', (_event, companyId, jobId) => api.pause(companyId, jobId))
   ipc.handle('jobs:resume', (_event, companyId, jobId) => api.resume(companyId, jobId))
+  ipc.handle('jobs:watchChoices', (_event, companyId, text) => api.watchChoices(companyId, text))
+  ipc.handle('jobs:rewatch', (_event, companyId, jobId, version, recordId) => api.rewatch(companyId, jobId, version, recordId))
 }

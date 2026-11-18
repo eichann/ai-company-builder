@@ -21,6 +21,7 @@ import type {
   SandboxImpact,
 } from '../../../shared/types/agent-events'
 import type { AgentSandboxView } from '../../../shared/types/agent-sandbox'
+import type { RecordQueryResult } from '../../../shared/types/records'
 import type { AgentStopView } from '../../../shared/types/agent-stop'
 import type { FeaturesView } from '../../../shared/types/features'
 import type { CoreConnectorsView } from '../../../shared/types/core-connectors'
@@ -370,12 +371,16 @@ const jobShape = {
   deliverTo: z.optional(z.nullable(z.looseObject({}))),
   // Stage 4-0: the version shown is of a shape this console does not read (absent from an older server).
   needsUpdate: z.optional(z.literal(true)),
+  // Stage 4a ①: an event job's stopped chain, worded for this viewer (absent from an older server).
+  chainStopped: z.optional(z.nullable(z.looseObject({}))),
 }
 export const jobSchema = topLevel<JobView>(jobShape)
 export const jobUpdatedSchema = topLevel<JobView & { changed: boolean }>({ ...jobShape, changed: z.boolean() })
 export const jobListSchema = topLevel<JobList>({ stopped: z.boolean(), canManage: z.boolean(), jobs: z.array(z.unknown()) })
 export const jobOccurrencesSchema = topLevel<{ occurrences: JobOccurrenceView[] }>({ occurrences: z.array(z.unknown()) })
 export const jobsStopSchema = topLevel<{ stopped: boolean }>({ stopped: z.boolean() })
+// An event-triggered job's start record (jobs.md "Event-triggered jobs"): the records the admin reads, from the query.
+export const jobStartChoicesSchema = topLevel<RecordQueryResult>({ total: z.number(), records: z.array(z.unknown()) })
 // 「もう一度」 (jobs.md, B PR 5b)
 export const jobRetrySchema = topLevel<JobRetryResult>({ occurrence: obj })
 export const jobReconcileSchema = topLevel<{ occurrenceId: string }>({ occurrenceId: str })

@@ -10,7 +10,7 @@
  * company time and a slot back to an instant.
  */
 import { addDays, dayOfWeek, isBusinessDay, nextBusinessDay, previousBusinessDay } from './business-days'
-import type { JobTrigger, JobWeekday } from './jobs'
+import type { JobTimeTrigger, JobWeekday } from './jobs'
 
 /** Days looked back / ahead for a slot: more than a month and a week's business days either way. */
 const LOOK_BACK_DAYS = 70
@@ -25,7 +25,7 @@ function lastDayOfMonth(year: number, month: number): number {
 }
 
 /** The slot dates (YYYY-MM-DD) of `trigger` from `from` to `to` (both inclusive), sorted, each once. */
-export function jobSlotDates(trigger: JobTrigger, from: string, to: string, companyHolidays: Iterable<string> = []): string[] {
+export function jobSlotDates(trigger: JobTimeTrigger, from: string, to: string, companyHolidays: Iterable<string> = []): string[] {
   const own = new Set(companyHolidays)
   const out = new Set<string>()
   if (trigger.every === 'day') {
@@ -66,7 +66,7 @@ export function jobSlotDates(trigger: JobTrigger, from: string, to: string, comp
  * The newest slot at or before `nowLocal` (company time, `YYYY-MM-DDTHH:MM`), or null when none lies
  * in the last `LOOK_BACK_DAYS` days.
  */
-export function latestJobSlot(trigger: JobTrigger, nowLocal: string, companyHolidays: Iterable<string> = []): string | null {
+export function latestJobSlot(trigger: JobTimeTrigger, nowLocal: string, companyHolidays: Iterable<string> = []): string | null {
   const today = nowLocal.slice(0, 10)
   const slots = jobSlotDates(trigger, addDays(today, -LOOK_BACK_DAYS), today, companyHolidays).map(d => `${d}T${trigger.at}`)
   const past = slots.filter(s => s <= nowLocal)
@@ -74,7 +74,7 @@ export function latestJobSlot(trigger: JobTrigger, nowLocal: string, companyHoli
 }
 
 /** The first slot after `nowLocal` (company time), or null when none lies in the next `LOOK_AHEAD_DAYS` days. */
-export function nextJobSlot(trigger: JobTrigger, nowLocal: string, companyHolidays: Iterable<string> = []): string | null {
+export function nextJobSlot(trigger: JobTimeTrigger, nowLocal: string, companyHolidays: Iterable<string> = []): string | null {
   const today = nowLocal.slice(0, 10)
   return jobSlotDates(trigger, today, addDays(today, LOOK_AHEAD_DAYS), companyHolidays).map(d => `${d}T${trigger.at}`).find(s => s > nowLocal) ?? null
 }

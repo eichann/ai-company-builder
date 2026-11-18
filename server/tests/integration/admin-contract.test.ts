@@ -836,6 +836,9 @@ describe('the admin console\'s requests do what the admin means on the server', 
     expect(row('SELECT stopped FROM ai_job_settings WHERE company_id = ?', CO).stopped).toBe(1)
     await A.jobsApi.setStopped(CO, false)
     expect(row('SELECT stopped FROM ai_job_settings WHERE company_id = ?', CO).stopped).toBe(0)
+    // An event job's first watched やること (stage 4a): the records query, answered in its shape.
+    const choices = await A.jobsApi.startChoices(CO, USERS.owner)
+    expect(Array.isArray(choices.records)).toBe(true)
   })
 
   it('an invitation gets the role and expiry the admin chose', async () => {

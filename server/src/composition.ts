@@ -308,11 +308,14 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     places: { live: (companyId, userId, place) => deliveryPlaces.live(companyId, userId, place) },
     // 「もう一度」 on an owner / admin's occurrence view (jobs.md "「もう一度」"); bound late (built below).
     occurrenceRetry: (companyId, occ) => jobRetry.viewOf(companyId, occ),
+    // Event-triggered jobs (jobs.md): the states a business plugin runs as 「AI の番」 (never a trigger's); built below.
+    aiStepStates: (companyId, type) => pluginsLane.pluginSteps.aiStepStates(companyId, type),
   })
   const notifications = createNotificationService({
     ...shared,
     jobNoticeOf: (member, jobId) => jobs.noticeJob(member, jobId),
     jobOccurrenceNoticeOf: (member, jobId, occurrenceId) => jobs.occurrenceNotice(member, jobId, occurrenceId),
+    jobChainStoppedOf: (member, jobId, at) => jobs.chainStopNotice(member, jobId, at),
     jobAcceptNoticeOf: (member, jobId, version) => jobs.acceptNotice(member, jobId, version),
     coverOf: (companyId, userId) => absences.coverOf(companyId, userId),
     managersOf: (companyId, userId) => absences.managersOf(companyId, userId),
@@ -656,6 +659,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     shared, companies: repos.companies, jobs, serviceRecords, push, taskSettings,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     placeUsable: (companyId, userId, place) => deliveryPlaces.live(companyId, userId, place) !== null,
+    aiStepStates: (companyId, type) => pluginsLane.pluginSteps.aiStepStates(companyId, type),
   })
 
   // After a restore (deployment.md "After a restore"): jobs and the AI stopped, owners / admins told. The operator's

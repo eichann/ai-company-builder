@@ -47,7 +47,7 @@ export interface JobRetryDeps {
   transactions: Transactions
   clock: Clock
   roleOf: (companyId: string, userId: string) => string | null
-  jobs: Pick<JobService, 'runnerRefusal' | 'pinnedSkillKept'>
+  jobs: Pick<JobService, 'runnerRefusal' | 'pinnedSkillKept' | 'occurrenceShown'>
   /** The emergency stop in force for a member (agent-stops.ts `policyFor`), as a claim reads it. */
   aiStops: (member: Member) => AgentStopPolicy
   /** The responsible person's chosen deliverable place is usable now (its connector answers). Absent → never. */
@@ -104,6 +104,8 @@ export function createJobRetry(deps: JobRetryDeps) {
     const job = handle.jobs.find(jobId)
     const occ = job ? handle.jobs.occurrence(occurrenceId) : null
     if (!job || !occ || occ.jobId !== job.id) return null
+    // An event occurrence of a record the member cannot read does not exist for them (stage 4a, ⑥): the same 404.
+    if (!deps.jobs.occurrenceShown(member, occ)) return null
     return { handle, job, occ, version: handle.jobs.version(job.id, occ.jobVersion) }
   }
 
@@ -125,15 +127,19 @@ export function createJobRetry(deps: JobRetryDeps) {
     if (!JOB_RETRY_STATES.includes(occ.state)) return 'NOT_RETRYABLE'
     if ((occ.retries ?? 0) >= JOB_RETRY_MAX) return 'RETRY_LIMIT'
     // A later occurrence already came: its check started where the last one that ran stopped, so it looked at this
-    // window too — running this one again would hand the same files or meetings to a second run.
-    if (handle.jobs.occurrences(job.id, 1)[0]?.id !== occ.id) return 'NOT_LATEST'
+    // window too — running this one again would hand the same files or meetings to a second run. An event occurrence
+    // (stage 4a) stands alone: no window, no later slot.
+    const event = occ.eventSeq !== null && occ.eventSeq !== undefined
+    // The newest time occurrence only (`occurrencesOf` with no records): an event occurrence — maybe of a record this
+    // viewer cannot read — never decides the answer (review of #700).
+    if (!event && handle.jobs.occurrencesOf(job.id, [], 1)[0]?.id !== occ.id) return 'NOT_LATEST'
     if (!version || job.approvedVersion !== occ.jobVersion) return 'JOB_VERSION_CHANGED'
     const definition = definitionOf(version)
     // A shape this build does not know: never sent back here (nothing could check or run it).
     if (definition === null) return 'JOB_SCHEMA_UNKNOWN'
     // A later slot has arrived even when the clock has not made its occurrence yet (it will, within minutes).
     const latest = deps.slotsOf?.(handle.companyId, definition).latest ?? null
-    if (latest !== null && latest > occ.dueSlot) return 'NOT_LATEST'
+    if (!event && latest !== null && latest > occ.dueSlot) return 'NOT_LATEST'
     if (newDeadline(f, definition, nowMs) === null) return 'NEXT_SLOT_SOON'
     if (handle.jobs.stopped()) return 'JOB_STOPPED'
     if (job.state !== 'active') return 'JOB_PAUSED'

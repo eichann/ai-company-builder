@@ -87,7 +87,7 @@ export interface JobView {
    */
   nextSlot?: string | null
   /** The newest occurrence (slot, state, code only), or null. Absent before PR 4. */
-  lastOccurrence?: { dueSlot: string; state: JobOccurrenceState; outcomeCode: string | null } | null
+  lastOccurrence?: { dueSlot: string; state: JobOccurrenceState; outcomeCode: string | null; kind?: 'event' } | null
   /**
    * The approved version (PR 4): its responsible person and its name — 「定期の仕事」 for a non-admin who cannot
    * read every place that version names. null: none approved. Absent before PR 4.
@@ -109,6 +109,12 @@ export interface JobView {
    * their own pick), null for anyone else. null: none. Absent from an older server.
    */
   deliverTo?: { connector: string; kind: string; label: string; chosen: boolean; usable: boolean; name: string | null; expiresAt: string | null } | null
+  /**
+   * Stage 4a, owner decision ①: an event job whose chain of watched records stopped — why, in the viewer's own words (a
+   * record-side cause in full only when they read that record now). null: not stopped (or not an event job). Absent
+   * from an older server. The responsible person chooses the next watched やること (`POST /me/jobs/:jobId/watch`).
+   */
+  chainStopped?: { why: string } | null
   /** Present on GET /jobs/:jobId (newest first). */
   versions?: JobVersionView[]
 }
@@ -126,7 +132,10 @@ export interface JobOccurrenceView {
   id: string
   /** The approved version it was made for (its run is pinned to it). */
   jobVersion: number
-  /** Company time, `YYYY-MM-DDTHH:MM`. */
+  /**
+   * Company time, `YYYY-MM-DDTHH:MM`: the slot; for an event occurrence (`kind: 'event'`, stage 4a) the time of its
+   * event in company time — never its delivery number (owner memo §11: no answer carries it).
+   */
   dueSlot: string
   timeZone: string
   dueAt: string
@@ -137,6 +146,11 @@ export interface JobOccurrenceView {
   /** Whether a run did its work (state `done`). */
   ran: boolean
   updatedAt: string
+  /**
+   * Stage 4a: `event` for an occurrence made by a record's event (absent for a time slot, and from an older server).
+   * Shown only to someone who reads that record now (owners and admins included); for anyone else it does not exist.
+   */
+  kind?: 'event'
   /**
    * 「もう一度」 (PR 5b), answered to owners / admins only (absent for anyone else, and from an older server): `retries`
    * how often it was sent back, `retriedBy` / `retriedAt` the last press; `retry` only on a `needs_person` /

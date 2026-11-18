@@ -42,6 +42,67 @@ export function migrateJobAcceptedPlace(conn: Database.Database): void {
   if (!cols.has('accepted_place')) conn.exec('ALTER TABLE ai_jobs ADD COLUMN accepted_place TEXT')
 }
 
+/**
+ * Stage 4a, event-triggered jobs (jobs.md "Event-triggered jobs"; owner memo 「出来事で動く定期の仕事」). Additive: a
+ * build before it (4-0, the oldest one production may go back to) neither reads nor writes any of it.
+ *
+ * - On an occurrence: the event it was made for — `event_seq` (the ledger's delivery number; one occurrence per job and
+ *   event: the partial unique index, beside `UNIQUE (company, job, due_slot)` whose `due_slot` is `ev:<seq>`),
+ *   `event_record_id` / `event_version` (the record and its ledger version: who may see the occurrence is who reads
+ *   that record now), `event_day` (the company's day it was made: the day's limit counts these).
+ * - `ai_job_event_cursors`: per job, the delivery number its scan has looked at up to (`seen_seq`), set when its
+ *   responsible person accepts (never back in time) and moved in the transaction that makes its occurrences; and its
+ *   **watch target** — the one record it watches (`watch_record_id`, server-managed: the accepted `startRecord`
+ *   (`watch_start`), then, with `followMadeTask`, the やること an occurrence made), and whether that target fired already
+ *   (`watch_fired`: each target makes one occurrence, however often it is completed again); and what this build last
+ *   wrote of the job and of the company's stop (`job_stamp` = `ai_jobs.updated_at`, `stop_stamp` = `ai_job_settings.
+ *   updated_at`): a build before 4a (the rollback build, 4-0) pauses and stops without gaps, and a difference tells the
+ *   scan to look at nothing from before (jobs.md "Event-triggered jobs", Codex review of #700); and, when the chain of
+ *   watched records stopped (owner decision ①), why (`chain_stop_code`), on which record (`chain_stop_record`: who may
+ *   read the cause in full is who reads it) and when (`chain_stop_at`, the notice's key) — cleared when the watch moves.
+ * - `ai_job_event_gaps`: the stretches no event of a job runs in (a pause; `job_key` '' = the company's stop):
+ *   delivery numbers in (`from_seq`, `until_seq`], `until_seq` NULL while it lasts. Several per job (owner decision ③).
+ *   Its id is the server's own (TEXT), never a rowid: a company archive restores it beside other companies.
+ */
+export function migrateJobEvents(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(ai_job_occurrences)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('event_seq')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN event_seq INTEGER')
+  if (!cols.has('event_record_id')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN event_record_id TEXT')
+  if (!cols.has('event_version')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN event_version INTEGER')
+  if (!cols.has('event_day')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN event_day TEXT')
+  conn.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_job_occurrences_event ON ai_job_occurrences(company_id, job_id, event_seq) WHERE event_seq IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_ai_job_occurrences_event_day ON ai_job_occurrences(company_id, job_id, event_day) WHERE event_day IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS ai_job_event_cursors (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      job_id TEXT NOT NULL,
+      seen_seq INTEGER NOT NULL CHECK (seen_seq >= 0),
+      watch_record_id TEXT NOT NULL,
+      watch_start TEXT NOT NULL,
+      watch_fired INTEGER NOT NULL DEFAULT 0 CHECK (watch_fired IN (0, 1)),
+      job_stamp TEXT NOT NULL DEFAULT '',
+      stop_stamp TEXT NOT NULL DEFAULT '',
+      chain_stop_code TEXT,
+      chain_stop_record TEXT,
+      chain_stop_at TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, job_id),
+      FOREIGN KEY (company_id, job_id) REFERENCES ai_jobs(company_id, id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS ai_job_event_gaps (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      job_key TEXT NOT NULL,
+      from_seq INTEGER NOT NULL CHECK (from_seq >= 0),
+      until_seq INTEGER CHECK (until_seq IS NULL OR until_seq >= from_seq),
+      opened_at TEXT NOT NULL,
+      closed_at TEXT,
+      PRIMARY KEY (company_id, id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_job_event_gaps_job ON ai_job_event_gaps(company_id, job_key);
+  `)
+}
+
 export const jobSchema = `
     -- A job (behind the company handle, ports/jobs.ts). acting_user_id: the responsible person of the
     -- newest version (whom it runs as: owner decision D3). approved_version / approved_fingerprint: the

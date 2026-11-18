@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
-import { EVENT_OCCURRENCE_SLOT_PREFIX, isEventOccurrenceSlot, type JobDeliveryPlace, type JobPauseReason } from '../../../shared/core/jobs'
+import { EVENT_OCCURRENCE_SLOT_PREFIX, type JobDeliveryPlace, type JobPauseReason, type LedgerEventRow } from '../../../shared/core/jobs'
 import type { JobState } from '../../../shared/types/jobs'
-import type { JobOccurrenceRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
+import type { JobEventCursor, JobEventGap, JobOccurrenceRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
 
 interface JobDbRow {
   id: string; name: string; state: string; acting_user_id: string; latest_version: number
@@ -25,20 +25,30 @@ interface OccurrenceDbRow {
   id: string; job_id: string; job_version: number; due_slot: string; time_zone: string; due_at: string; expires_at: string
   state: string; run_id: string | null; outcome_code: string | null; checked_until: string | null; checked_commit: string | null; created_at: string; updated_at: string
   retries: number; retried_by: string | null; retried_at: string | null
+  event_seq: number | null; event_record_id: string | null; event_version: number | null; event_day: string | null
 }
 const OCCURRENCE_COLUMNS = 'id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, run_id, outcome_code, created_at, updated_at'
-const OCCURRENCE_READ = `${OCCURRENCE_COLUMNS}, checked_until, checked_commit, retries, retried_by, retried_at`
+const OCCURRENCE_READ = `${OCCURRENCE_COLUMNS}, checked_until, checked_commit, retries, retried_by, retried_at, event_seq, event_record_id, event_version, event_day`
 /**
- * Stage 4-0.1 (jobs.md "Event occurrences do not exist on this build", `isEventOccurrenceSlot`): an event
- * occurrence (stage 4a's `ev:<delivery number>` slot) is not read, counted, moved, sent back or written here (one
- * exception: `holdEventOccurrences`, a pause holding a waiting one; `isHiddenOccurrence` answers yes / no for a refusal). 4a
- * shows one only to people who read its source record — a check this build cannot make. Built from the core's
+ * Newest first, by when each came: a time slot by its time (`due_at`; a job of time slots only reads exactly as it did,
+ * newest slot first), an event one by when it was made (`created_at`: a scan only ever moves forward), so a job whose
+ * trigger changed shows its newest occurrence first whichever kind it is (Codex review of #700); events made together
+ * by their delivery number (a number: never `ev:9` after `ev:10` as text).
+ */
+const OCCURRENCE_ORDER = `CASE WHEN event_seq IS NULL THEN due_at ELSE created_at END DESC, COALESCE(event_seq, -1) DESC, due_slot DESC, id`
+/**
+ * An event occurrence (`ev:<delivery number>` slot, `isEventOccurrenceSlot`). Stage 4-0.1 (the rollback floor) left every
+ * one out of this repository: it cannot check who reads its source record. **4a reads and writes them here** — the
+ * clock, the runner and 「もう一度」 need them — and every answer to a person applies its own reader check instead
+ * (`eventShown`, `shownOccurrences` / `occurrencesOf`, the notices; jobs.md "Event-triggered jobs"). Kept from 4-0.1:
+ * `isHiddenOccurrence` (a PC run on one is a missing run: 4a has none) and `holdEventOccurrences`. Built from the core's
  * prefix (it has no `%` / `_`; `substr` compares exactly, unlike `LIKE`).
  */
 const NOT_EVENT = `substr(due_slot, 1, ${EVENT_OCCURRENCE_SLOT_PREFIX.length}) <> '${EVENT_OCCURRENCE_SLOT_PREFIX}'`
 const occurrenceOf = (r: OccurrenceDbRow): JobOccurrenceRow => ({
   id: r.id, jobId: r.job_id, jobVersion: r.job_version, dueSlot: r.due_slot, timeZone: r.time_zone, dueAt: r.due_at, expiresAt: r.expires_at,
   state: r.state as JobOccurrenceRow['state'], runId: r.run_id, outcomeCode: r.outcome_code, checkedUntil: r.checked_until, checkedCommit: r.checked_commit, retries: r.retries, retriedBy: r.retried_by, retriedAt: r.retried_at,
+  eventSeq: r.event_seq, eventRecordId: r.event_record_id, eventVersion: r.event_version, eventDay: r.event_day,
   createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
@@ -71,6 +81,23 @@ const versionOf = (r: VersionDbRow): JobVersionRow => ({
  * a version's definition (the table's trigger would refuse it anyway).
  */
 export function sqliteJobRepository(conn: Database.Database, companyId: string): JobRepository {
+  // The newest delivery number given (records.md "Delivery order": the counter holds the next one), 0 when none yet.
+  // What this build writes of a job or of the company's stop is stamped on the event cursors (none when the job has
+  // none): a write that is not stamped is a build before 4a's (jobs.md "Event-triggered jobs"). A cursor takes the new
+  // stamp only when it held the one before this write — one that already differs (an older build wrote since) keeps the
+  // difference until its own scan has looked at nothing from then (Codex review of #700).
+  const jobUpdatedAt = (jobId: string): string =>
+    (conn.prepare(`SELECT updated_at FROM ai_jobs WHERE company_id = ? AND id = ?`).get(companyId, jobId) as { updated_at: string } | undefined)?.updated_at ?? ''
+  const stopUpdatedAt = (): string =>
+    (conn.prepare(`SELECT updated_at FROM ai_job_settings WHERE company_id = ?`).get(companyId) as { updated_at: string } | undefined)?.updated_at ?? ''
+  const stampJob = (jobId: string, before: string) => conn.prepare(`UPDATE ai_job_event_cursors SET job_stamp = ? WHERE company_id = ? AND job_id = ? AND job_stamp = ?`)
+    .run(jobUpdatedAt(jobId), companyId, jobId, before)
+  const stampStop = (before: string) => conn.prepare(`UPDATE ai_job_event_cursors SET stop_stamp = ? WHERE company_id = ? AND stop_stamp = ?`)
+    .run(stopUpdatedAt(), companyId, before)
+  const seqNow = (): number => {
+    const r = conn.prepare(`SELECT next_seq FROM record_ledger_seq WHERE company_id = ?`).get(companyId) as { next_seq: number } | undefined
+    return r ? r.next_seq - 1 : 0
+  }
   const insertVersion = (v: JobVersionRow) => {
     conn.prepare(`INSERT INTO ai_job_versions (company_id, ${VERSION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)`)
       .run(companyId, v.jobId, v.version, v.schema, v.definition, v.fingerprint, v.consentFingerprint, v.actingUserId, v.createdBy, v.createdAt)
@@ -101,8 +128,10 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       conn.transaction(() => {
         insertVersion(v)
         const name = (JSON.parse(v.definition) as { name: string }).name
+        const before = jobUpdatedAt(v.jobId)
         conn.prepare(`UPDATE ai_jobs SET latest_version = ?, name = ?, acting_user_id = ?, updated_at = ? WHERE company_id = ? AND id = ?`)
           .run(v.version, name, v.actingUserId, at, companyId, v.jobId)
+        stampJob(v.jobId, before)
       })()
     },
     versions(jobId) {
@@ -116,60 +145,83 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
     },
     approve(jobId, version, fingerprint, by, at, state) {
       conn.transaction(() => {
+        const before = jobUpdatedAt(jobId)
         conn.prepare(`UPDATE ai_jobs SET approved_version = ?, approved_fingerprint = ?, state = ?, updated_at = ? WHERE company_id = ? AND id = ?`)
           .run(version, fingerprint, state, at, companyId, jobId)
         conn.prepare(`UPDATE ai_job_versions SET approved_by = ?, approved_at = ? WHERE company_id = ? AND job_id = ? AND version = ? AND approved_at IS NULL`)
           .run(by, at, companyId, jobId, version)
+        stampJob(jobId, before)
       })()
     },
     accept(jobId, version, consentFingerprint, by, at, place) {
       conn.transaction(() => {
+        const before = jobUpdatedAt(jobId)
         conn.prepare(`UPDATE ai_jobs SET accepted_version = ?, accepted_consent = ?, accepted_place = ?, updated_at = ? WHERE company_id = ? AND id = ?`)
           .run(version, consentFingerprint, place ? JSON.stringify({ connector: place.connector, kind: place.kind, ref: place.ref }) : null, at, companyId, jobId)
         conn.prepare(`UPDATE ai_job_versions SET accepted_by = ?, accepted_at = ? WHERE company_id = ? AND job_id = ? AND version = ? AND accepted_at IS NULL`)
           .run(by, at, companyId, jobId, version)
+        stampJob(jobId, before)
       })()
     },
     setState(jobId, state, reason, by, at) {
-      conn.prepare(`UPDATE ai_jobs SET state = ?, paused_reason = ?, paused_by = ?, paused_at = ?, updated_at = ? WHERE company_id = ? AND id = ?`)
-        .run(state, reason, reason === null ? null : by, reason === null ? null : at, at, companyId, jobId)
+      conn.transaction(() => {
+        const before = jobUpdatedAt(jobId)
+        conn.prepare(`UPDATE ai_jobs SET state = ?, paused_reason = ?, paused_by = ?, paused_at = ?, updated_at = ? WHERE company_id = ? AND id = ?`)
+          .run(state, reason, reason === null ? null : by, reason === null ? null : at, at, companyId, jobId)
+        stampJob(jobId, before)
+      })()
     },
     stopped() {
       const r = conn.prepare(`SELECT stopped FROM ai_job_settings WHERE company_id = ?`).get(companyId) as { stopped: number } | undefined
       return r?.stopped === 1
     },
     setStopped(stopped, by, at) {
-      conn.prepare(`INSERT INTO ai_job_settings (company_id, stopped, updated_by, updated_at) VALUES (?, ?, ?, ?)
-        ON CONFLICT(company_id) DO UPDATE SET stopped = excluded.stopped, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
-        .run(companyId, stopped ? 1 : 0, by, at)
+      conn.transaction(() => {
+        const before = stopUpdatedAt()
+        conn.prepare(`INSERT INTO ai_job_settings (company_id, stopped, updated_by, updated_at) VALUES (?, ?, ?, ?)
+          ON CONFLICT(company_id) DO UPDATE SET stopped = excluded.stopped, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+          .run(companyId, stopped ? 1 : 0, by, at)
+        stampStop(before)
+      })()
+    },
+    stopStamp() {
+      return stopUpdatedAt()
     },
 
     insertOccurrence(o) {
-      if (isEventOccurrenceSlot(o.dueSlot)) return false
-      return conn.prepare(`INSERT OR IGNORE INTO ai_job_occurrences (company_id, ${OCCURRENCE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(companyId, o.id, o.jobId, o.jobVersion, o.dueSlot, o.timeZone, o.dueAt, o.expiresAt, o.state, o.runId, o.outcomeCode, o.createdAt, o.updatedAt)
+      // A time slot names no event (its columns stay NULL, as an older build writes it).
+      if (o.eventSeq === undefined || o.eventSeq === null) {
+        return conn.prepare(`INSERT OR IGNORE INTO ai_job_occurrences (company_id, ${OCCURRENCE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(companyId, o.id, o.jobId, o.jobVersion, o.dueSlot, o.timeZone, o.dueAt, o.expiresAt, o.state, o.runId, o.outcomeCode, o.createdAt, o.updatedAt)
+          .changes === 1
+      }
+      return conn.prepare(`INSERT OR IGNORE INTO ai_job_occurrences (company_id, ${OCCURRENCE_COLUMNS}, event_seq, event_record_id, event_version, event_day)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(companyId, o.id, o.jobId, o.jobVersion, o.dueSlot, o.timeZone, o.dueAt, o.expiresAt, o.state, o.runId, o.outcomeCode, o.createdAt, o.updatedAt,
+          o.eventSeq, o.eventRecordId ?? null, o.eventVersion ?? null, o.eventDay ?? null)
         .changes === 1
     },
     occurrence(occurrenceId) {
-      const r = conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND id = ? AND ${NOT_EVENT}`).get(companyId, occurrenceId) as OccurrenceDbRow | undefined
+      const r = conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND id = ?`).get(companyId, occurrenceId) as OccurrenceDbRow | undefined
       return r ? occurrenceOf(r) : null
     },
-    occurrences(jobId, limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND ${NOT_EVENT} ORDER BY due_slot DESC, id LIMIT ?`)
-        .all(companyId, jobId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
+    occurrences(jobId, limit, offset = 0) {
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?
+          ORDER BY ${OCCURRENCE_ORDER} LIMIT ? OFFSET ?`)
+        .all(companyId, jobId, limit, offset) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     dueOccurrences(limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'due' AND ${NOT_EVENT} ORDER BY due_at, id LIMIT ?`)
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'due' ORDER BY due_at, id LIMIT ?`)
         .all(companyId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     runningOccurrences(limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' AND ${NOT_EVENT} ORDER BY due_at, id LIMIT ?`)
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' ORDER BY due_at, id LIMIT ?`)
         .all(companyId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     retryOccurrence(occurrenceId, from, expiresAt, by, at) {
       return conn.prepare(`UPDATE ai_job_occurrences SET state = 'due', outcome_code = NULL, run_id = NULL, expires_at = ?,
           retries = retries + 1, retried_by = ?, retried_at = ?, updated_at = ?
-          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?)) AND ${NOT_EVENT}`)
+          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?))`)
         .run(expiresAt, by, at, at, companyId, occurrenceId, JSON.stringify(from)).changes === 1
     },
     holdEventOccurrences(jobId, code, at) {
@@ -185,8 +237,128 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       // checked_until / checked_commit are set once (the first claim) and never moved afterwards.
       return conn.prepare(`UPDATE ai_job_occurrences SET state = ?, outcome_code = ?, run_id = CASE WHEN ? THEN ? ELSE run_id END,
           checked_until = COALESCE(checked_until, ?), checked_commit = CASE WHEN checked_until IS NULL THEN ? ELSE checked_commit END, updated_at = ?
-          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?)) AND ${NOT_EVENT}`)
+          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?))`)
         .run(to, change.outcomeCode, change.runId === undefined ? 0 : 1, runId, change.checkedUntil ?? null, change.checkedCommit ?? null, at, companyId, occurrenceId, JSON.stringify(from)).changes === 1
+    },
+
+    ledgerSeqNow() {
+      return seqNow()
+    },
+    watchedEvents(recordId, afterSeq, upToSeq, limit) {
+      // Delivery order (records.md "Delivery order"): a row written later with an earlier time is never passed by. The
+      // ledger's key starts (company, record): one record's rows are found without reading anyone else's.
+      const rows = conn.prepare(`SELECT l.delivery_seq AS seq, l.record_id, l.version, r.type, l.action, l.from_state, l.to_state, l.actor_kind, l.actor_id,
+          l.run_id, l.origin, l.via, l.at
+          FROM record_ledger l JOIN records r ON r.company_id = l.company_id AND r.id = l.record_id
+          WHERE l.company_id = ? AND l.record_id = ? AND l.delivery_seq IS NOT NULL AND l.delivery_seq > ? AND l.delivery_seq <= ?
+          ORDER BY l.delivery_seq LIMIT ?`)
+        .all(companyId, recordId, afterSeq, upToSeq, limit) as Array<{
+          seq: number; record_id: string; version: number; type: string; action: string; from_state: string | null; to_state: string | null
+          actor_kind: string; actor_id: string; run_id: string | null; origin: string | null; via: string | null; at: string
+        }>
+      return rows.map((r): LedgerEventRow => ({
+        seq: r.seq, recordId: r.record_id, version: r.version, type: r.type, action: r.action, fromState: r.from_state, toState: r.to_state,
+        actorKind: r.actor_kind, actorId: r.actor_id, runId: r.run_id, origin: r.origin, via: r.via, at: r.at,
+      }))
+    },
+    eventRecordsOf(jobId, limit) {
+      return (conn.prepare(`SELECT event_record_id AS id FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_record_id IS NOT NULL
+          GROUP BY event_record_id ORDER BY MAX(event_seq) DESC LIMIT ?`).all(companyId, jobId, limit) as Array<{ id: string }>).map(r => r.id)
+    },
+    occurrencesOf(jobId, records, limit) {
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?
+          AND ((event_record_id IS NULL AND ${NOT_EVENT}) OR event_record_id IN (SELECT value FROM json_each(?)))
+          ORDER BY ${OCCURRENCE_ORDER} LIMIT ?`)
+        .all(companyId, jobId, JSON.stringify(records), limit) as OccurrenceDbRow[]).map(occurrenceOf)
+    },
+    eventCursor(jobId) {
+      const r = conn.prepare(`SELECT seen_seq, watch_record_id, watch_start, watch_fired, job_stamp, stop_stamp, chain_stop_code, chain_stop_record, chain_stop_at
+          FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?`)
+        .get(companyId, jobId) as {
+          seen_seq: number; watch_record_id: string; watch_start: string; watch_fired: number; job_stamp: string; stop_stamp: string
+          chain_stop_code: string | null; chain_stop_record: string | null; chain_stop_at: string | null
+        } | undefined
+      return r ? ({
+        seen: r.seen_seq, watch: r.watch_record_id, start: r.watch_start, fired: r.watch_fired === 1, jobStamp: r.job_stamp, stopStamp: r.stop_stamp,
+        chainStop: r.chain_stop_code !== null && r.chain_stop_record !== null && r.chain_stop_at !== null ? { code: r.chain_stop_code, record: r.chain_stop_record, at: r.chain_stop_at } : null,
+      } satisfies JobEventCursor) : null
+    },
+    startEventCursor(jobId, startRecord, at) {
+      // A new start record (a version the responsible person accepted) starts the watch over; the same one keeps where the chain is.
+      conn.prepare(`INSERT INTO ai_job_event_cursors (company_id, job_id, seen_seq, watch_record_id, watch_start, watch_fired, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?)
+          ON CONFLICT(company_id, job_id) DO UPDATE SET seen_seq = MAX(seen_seq, excluded.seen_seq),
+            watch_record_id = CASE WHEN watch_start = excluded.watch_start THEN watch_record_id ELSE excluded.watch_record_id END,
+            watch_fired = CASE WHEN watch_start = excluded.watch_start THEN watch_fired ELSE 0 END,
+            chain_stop_code = CASE WHEN watch_start = excluded.watch_start THEN chain_stop_code ELSE NULL END,
+            chain_stop_record = CASE WHEN watch_start = excluded.watch_start THEN chain_stop_record ELSE NULL END,
+            chain_stop_at = CASE WHEN watch_start = excluded.watch_start THEN chain_stop_at ELSE NULL END,
+            watch_start = excluded.watch_start, updated_at = excluded.updated_at`)
+        .run(companyId, jobId, seqNow(), startRecord, startRecord, at)
+      // Its cursor is at now: it takes what is written now — this job's only (another job keeps its own difference).
+      conn.prepare(`UPDATE ai_job_event_cursors SET job_stamp = ?, stop_stamp = ? WHERE company_id = ? AND job_id = ?`)
+        .run(jobUpdatedAt(jobId), stopUpdatedAt(), companyId, jobId)
+    },
+    restartWatch(jobId, recordId, at) {
+      conn.prepare(`UPDATE ai_job_event_cursors SET seen_seq = MAX(seen_seq, ?), watch_record_id = ?, watch_start = ?, watch_fired = 0,
+          chain_stop_code = NULL, chain_stop_record = NULL, chain_stop_at = NULL, job_stamp = ?, stop_stamp = ?, updated_at = ?
+          WHERE company_id = ? AND job_id = ?`).run(seqNow(), recordId, recordId, jobUpdatedAt(jobId), stopUpdatedAt(), at, companyId, jobId)
+    },
+    markWatchFired(jobId, recordId, at) {
+      return conn.prepare(`UPDATE ai_job_event_cursors SET watch_fired = 1, updated_at = ? WHERE company_id = ? AND job_id = ? AND watch_record_id = ? AND watch_fired = 0`)
+        .run(at, companyId, jobId, recordId).changes === 1
+    },
+    moveWatch(jobId, from, to, at) {
+      return conn.prepare(`UPDATE ai_job_event_cursors SET watch_record_id = ?, watch_fired = 0, chain_stop_code = NULL, chain_stop_record = NULL, chain_stop_at = NULL,
+          updated_at = ? WHERE company_id = ? AND job_id = ? AND watch_record_id = ?`)
+        .run(to, at, companyId, jobId, from).changes === 1
+    },
+    stopChain(jobId, code, recordId, at) {
+      // Only the chain of the record watched now: an occurrence left from an earlier watch (a new start record chosen
+      // since) never stops the new one (Codex review of #700).
+      return conn.prepare(`UPDATE ai_job_event_cursors SET chain_stop_code = ?, chain_stop_record = ?, chain_stop_at = ?
+          WHERE company_id = ? AND job_id = ? AND watch_record_id = ? AND chain_stop_code IS NULL`).run(code, recordId, at, companyId, jobId, recordId).changes === 1
+    },
+    clearChainStop(jobId, recordId) {
+      conn.prepare(`UPDATE ai_job_event_cursors SET chain_stop_code = NULL, chain_stop_record = NULL, chain_stop_at = NULL
+          WHERE company_id = ? AND job_id = ? AND chain_stop_record = ?`).run(companyId, jobId, recordId)
+    },
+    moveEventCursor(jobId, from, to, at) {
+      return conn.prepare(`UPDATE ai_job_event_cursors SET seen_seq = ?, updated_at = ? WHERE company_id = ? AND job_id = ? AND seen_seq = ?`)
+        .run(to, at, companyId, jobId, from).changes === 1
+    },
+    eventGaps(jobId) {
+      return (conn.prepare(`SELECT from_seq, until_seq FROM ai_job_event_gaps WHERE company_id = ? AND job_key IN (?, '')`)
+        .all(companyId, jobId) as Array<{ from_seq: number; until_seq: number | null }>)
+        .map((g): JobEventGap => ({ from: g.from_seq, until: g.until_seq }))
+    },
+    openGapKeys(jobId) {
+      return (conn.prepare(`SELECT DISTINCT job_key FROM ai_job_event_gaps WHERE company_id = ? AND job_key IN (?, '') AND until_seq IS NULL`)
+        .all(companyId, jobId) as Array<{ job_key: string }>).map(r => r.job_key)
+    },
+    openEventGap(jobId, id, at) {
+      const key = jobId ?? ''
+      conn.prepare(`INSERT INTO ai_job_event_gaps (company_id, id, job_key, from_seq, until_seq, opened_at, closed_at)
+          SELECT ?, ?, ?, ?, NULL, ?, NULL WHERE NOT EXISTS (SELECT 1 FROM ai_job_event_gaps WHERE company_id = ? AND job_key = ? AND until_seq IS NULL)`)
+        .run(companyId, id, key, seqNow(), at, companyId, key)
+    },
+    closeEventGaps(jobId, at, untilSeq) {
+      return conn.prepare(`UPDATE ai_job_event_gaps SET until_seq = MAX(from_seq, ?), closed_at = ? WHERE company_id = ? AND job_key = ? AND until_seq IS NULL`)
+        .run(untilSeq ?? seqNow(), at, companyId, jobId ?? '').changes
+    },
+    resyncEventCursors(jobId, at) {
+      conn.transaction(() => {
+        conn.prepare(`UPDATE ai_job_event_cursors SET seen_seq = MAX(seen_seq, ?), updated_at = ? WHERE company_id = ? AND (? IS NULL OR job_id = ?)`)
+          .run(seqNow(), at, companyId, jobId, jobId)
+        conn.prepare(`UPDATE ai_job_event_cursors SET job_stamp = COALESCE((SELECT j.updated_at FROM ai_jobs j WHERE j.company_id = ai_job_event_cursors.company_id
+            AND j.id = ai_job_event_cursors.job_id), job_stamp) WHERE company_id = ? AND (? IS NULL OR job_id = ?)`).run(companyId, jobId, jobId)
+        // Only the cursors moved here take the stop's stamp: another job still has to find an older build's stop itself.
+        conn.prepare(`UPDATE ai_job_event_cursors SET stop_stamp = COALESCE((SELECT updated_at FROM ai_job_settings WHERE company_id = ?), '')
+            WHERE company_id = ? AND (? IS NULL OR job_id = ?)`).run(companyId, companyId, jobId, jobId)
+      })()
+    },
+    eventOccurrencesOn(jobId, day) {
+      return (conn.prepare(`SELECT COUNT(*) AS n FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_day = ?`)
+        .get(companyId, jobId, day) as { n: number }).n
     },
   }
 }

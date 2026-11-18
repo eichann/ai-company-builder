@@ -1,6 +1,6 @@
 /**
  * Shapes this build does not know (jobs.md "Shapes this build does not know", stage 4-0 of event-triggered jobs;
- * owner memo 「出来事で動く定期の仕事」 §3-11, §10-7, §11). Event-triggered jobs (4a) store `schema: 2`; production
+ * owner memo 「出来事で動く定期の仕事」 §3-11, §10-7, §11). Event-triggered jobs (4a) store `schema: 2`, which this build knows; the tests stand in a later `schema: 3` for what a newer build may store. Production
  * may be rolled back to 4-0 after that, and an admin tab or an app from before stays open. None of them may run,
  * retry, claim, approve, accept or edit what it does not understand, and none may crash on it.
  *
@@ -88,8 +88,8 @@ function pcJob(item: string): Json {
     grant: { tools: ['records'], creates: ['task'], routes: ['GET /minutes/:recordId/text'], reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 30, runsPerDay: 1 } },
   }
 }
-/** The same job in the shape a later build (4a) stores: `schema: 2`, a trigger of its own. */
-const asSchema2 = (d: Json): Json => ({ ...d, schema: 2, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done' } })
+/** The same job in the shape a build after this one would store (`schema: 3`, a trigger of its own): a shape this server does not know. */
+const asSchema2 = (d: Json): Json => ({ ...d, schema: 3, trigger: { kind: 'future', when: 'something' } })
 
 /** Made, approved, accepted (schema 1). */
 async function approvedJob(definition: Json): Promise<string> {
@@ -104,7 +104,7 @@ async function approvedJob(definition: Json): Promise<string> {
 }
 
 /**
- * Version 2 of the job written as a later build would (schema 2), approved and accepted, the job active: what a
+ * Version 2 of the job written as a later build would (schema 3), approved and accepted, the job active: what a
  * server rolled back to this build finds in its database.
  */
 function storeSchema2(job: string, definition: Json, opts: { approve?: boolean } = {}) {
@@ -113,7 +113,7 @@ function storeSchema2(job: string, definition: Json, opts: { approve?: boolean }
   const at = new Date().toISOString()
   const approve = opts.approve !== false
   db.prepare(`INSERT INTO ai_job_versions (company_id, job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at,
-      approved_by, approved_at, accepted_by, accepted_at) VALUES (?, ?, 2, 2, ?, ?, ?, 'js-alice', 'js-owner', ?, ?, ?, ?, ?)`)
+      approved_by, approved_at, accepted_by, accepted_at) VALUES (?, ?, 2, 3, ?, ?, ?, 'js-alice', 'js-owner', ?, ?, ?, ?, ?)`)
     .run(CO, job, text, hashCanonical(text), consent, new Date(Date.now() - 3 * 24 * 60 * MINUTE).toISOString(),
       approve ? 'js-owner' : null, approve ? new Date(Date.now() - 3 * 24 * 60 * MINUTE).toISOString() : null, approve ? 'js-alice' : null, approve ? at : null)
   if (approve) {
@@ -169,10 +169,10 @@ beforeEach(() => {
 })
 
 describe('a stored version of a shape this server does not know', () => {
-  it('is read as nothing: the parser of stored versions knows schema 1 only, exactly as stored', () => {
+  it('is read as nothing: the parser of stored versions knows schemas 1 and 2 only, exactly as stored', () => {
     const d = serverJob()
     expect(storedJobDefinition({ schema: 1, definition: canonicalJson(d) })).toEqual(d)
-    expect(storedJobDefinition({ schema: 2, definition: canonicalJson(asSchema2(d)) })).toBeNull()
+    expect(storedJobDefinition({ schema: 3, definition: canonicalJson(asSchema2(d)) })).toBeNull()
     // The column and the text must agree; a text that is no definition is nothing too.
     expect(storedJobDefinition({ schema: 1, definition: canonicalJson(asSchema2(d)) })).toBeNull()
     expect(storedJobDefinition({ schema: 1, definition: 'not json' })).toBeNull()
@@ -221,15 +221,15 @@ describe('a stored version of a shape this server does not know', () => {
     const job = await approvedJob(serverJob())
     storeSchema2(job, asSchema2(serverJob()), { approve: false })
     expect(await call('js-owner', 'POST', `/jobs/${job}/approve`, { version: 2 })).toMatchObject({ status: 409, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
-    // Nor written over, even by a screen that says it reads schema 2: this server cannot read what it would replace.
-    expect(await call('js-owner', 'PUT', `/jobs/${job}`, { definition: serverJob({ name: '上書き' }) }, { 'X-ACB-Job-Schemas': '1,2' })).toMatchObject({ status: 409, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
+    // Nor written over, even by a screen that says it reads schema 3: this server cannot read what it would replace.
+    expect(await call('js-owner', 'PUT', `/jobs/${job}`, { definition: serverJob({ name: '上書き' }) }, { 'X-ACB-Job-Schemas': '1,2,3' })).toMatchObject({ status: 409, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
     expect(db.prepare('SELECT latest_version FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, job)).toEqual({ latest_version: 2 })
     storeSchema2Approved(job)
     expect(await call('js-alice', 'POST', `/me/jobs/${job}/accept`, { version: 2 })).toMatchObject({ status: 409, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
     expect(await call('js-owner', 'POST', `/jobs/${job}/pause`)).toMatchObject({ status: 200 })
     expect(await call('js-owner', 'POST', `/jobs/${job}/resume`)).toMatchObject({ status: 409, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
-    // An admin announcing schema 2 still gets no definition: this server cannot vouch for a shape it does not know.
-    for (const headers of [{}, { 'X-ACB-Job-Schemas': '1,2' }]) {
+    // An admin announcing schema 3 still gets no definition: this server cannot vouch for a shape it does not know.
+    for (const headers of [{}, { 'X-ACB-Job-Schemas': '1,2,3' }]) {
       const list = await call('js-owner', 'GET', '/jobs', undefined, headers)
       expect(list.status).toBe(200)
       const view = list.body.data.jobs.find((j: Json) => j.id === job)
@@ -259,10 +259,10 @@ function storeSchema2Approved(job: string) {
 }
 
 describe('a definition goes to a client only in a shape it announced', () => {
-  /** A server of a later build (it knows schema 2), with the same rules (a fixture: no schema 2 exists in this build). */
+  /** A server of a later build (it knows schema 3), with the same rules (a fixture: no schema 3 exists in this build). */
   const later = () => createJobService({
     companyData, memberships: sqliteMembershipRepository(db), transactions: sqliteTransactions(db), clock, ids: randomIds,
-    skillTree: async () => null, hasCompanyFolder: () => false, knownSchemas: [1, 2],
+    skillTree: async () => null, hasCompanyFolder: () => false, knownSchemas: [1, 2, 3],
   })
 
   it('the header is read as schema 1 plus what it names; nothing readable means schema 1', () => {
@@ -277,26 +277,26 @@ describe('a definition goes to a client only in a shape it announced', () => {
     const s = later()
     const old = s.get(owner(), job)
     expect(old.ok && old.value.versions?.[0]).toMatchObject({ version: 2, definition: null, needsUpdate: true })
-    const newer = s.get(owner(), job, [1, 2])
-    expect(newer.ok && newer.value.versions?.[0]).toMatchObject({ version: 2, definition: { schema: 2 } })
+    const newer = s.get(owner(), job, [1, 2, 3])
+    expect(newer.ok && newer.value.versions?.[0]).toMatchObject({ version: 2, definition: { schema: 3 } })
     expect(newer.ok && newer.value.versions?.[0].needsUpdate).toBeUndefined()
     expect(await s.approve(owner(), job, { version: 2 })).toMatchObject({ ok: false, body: { code: 'JOB_NEEDS_NEWER_SCREEN' } })
     expect(await s.update(owner(), job, { definition: serverJob({ name: '上書き' }) })).toMatchObject({ ok: false, body: { code: 'JOB_NEEDS_NEWER_SCREEN' } })
     expect(db.prepare('SELECT latest_version FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, job)).toEqual({ latest_version: 2 })
-    expect(await s.approve(owner(), job, { version: 2 }, [1, 2])).toMatchObject({ ok: true })
+    expect(await s.approve(owner(), job, { version: 2 }, [1, 2, 3])).toMatchObject({ ok: true })
     // Approved now: its trigger is not handed to an older screen (it would read `trigger.at`), the acceptance not taken from one.
     const listed = s.list(owner())
     const view = listed.ok ? listed.value.jobs.find(j => j.id === job) : null
     expect(view).toMatchObject({ needsUpdate: true })
     expect(view?.trigger).toBeUndefined()
     expect(await s.accept(alice(), job, { version: 2 })).toMatchObject({ ok: false, body: { code: 'JOB_NEEDS_NEWER_SCREEN' } })
-    expect(await s.accept(alice(), job, { version: 2 }, [1, 2])).toMatchObject({ ok: true })
+    expect(await s.accept(alice(), job, { version: 2 }, [1, 2, 3])).toMatchObject({ ok: true })
   })
 
   it('schema 1 is answered exactly as stored, header or not (byte for byte as before)', async () => {
     const job = await approvedJob(serverJob())
     const stored = (db.prepare('SELECT definition FROM ai_job_versions WHERE company_id = ? AND job_id = ? AND version = 1').get(CO, job) as Json).definition
-    for (const headers of [{}, { 'X-ACB-Job-Schemas': '1' }, { 'X-ACB-Job-Schemas': '1,2' }]) {
+    for (const headers of [{}, { 'X-ACB-Job-Schemas': '1' }, { 'X-ACB-Job-Schemas': '1,2,3' }]) {
       const one = await call('js-owner', 'GET', `/jobs/${job}`, undefined, headers)
       expect(canonicalJson(one.body.data.versions[0].definition)).toBe(stored)
       expect(one.body.data.versions[0].needsUpdate).toBeUndefined()
@@ -307,12 +307,11 @@ describe('a definition goes to a client only in a shape it announced', () => {
 })
 
 describe('a PC claims only the kinds of occurrence its app runs', () => {
-  it('apps list and claim time occurrences as before, with or without kinds; an event one is never handed out (it does not exist here)', async () => {
+  it('apps list and claim time occurrences as before, with or without kinds; an event one is never handed to a PC (4a runs them on the server)', async () => {
     const job = await approvedJob(pcJob(publishSkill()))
     const time = dueOccurrence(job, 1)
     const event = dueOccurrence(job, 1, 'ev:42')
     expect((await call('js-alice', 'GET', '/me/job-turns')).body.data.turns.map((t: Json) => t.occurrenceId)).toEqual([time])
-    // Stage 4-0.1: naming `event` adds nothing on this build ("Event occurrences do not exist on this build").
     expect((await call('js-alice', 'GET', '/me/job-turns?kinds=time,event')).body.data.turns.map((t: Json) => t.occurrenceId)).toEqual([time])
     expect(await call('js-alice', 'GET', '/me/job-turns?kinds=Time!')).toMatchObject({ status: 400 })
     const body = (occurrenceId: string, extra: Record<string, unknown> = {}) => ({ occurrenceId, deviceId: 'device-alice-1', conversationId: `conv-${occurrenceId}`, checks: ['new_files', 'new_meetings'], ...extra })
@@ -330,94 +329,101 @@ describe('a PC claims only the kinds of occurrence its app runs', () => {
 })
 
 /**
- * Stage 4-0.1 (jobs.md "Event occurrences do not exist on this build"): 4a stores event occurrences (`ev:<delivery
- * number>` slots) that only readers of their source record may see. After a rollback to this build they must be as
- * if they were not there — for owners and admins too — because this build cannot check the record.
+ * Stage 4-0.1 left every event occurrence (`ev:<delivery number>` slot) out of the job repository: it cannot check who reads
+ * its source record. 4a (jobs.md "Event occurrences on the rollback floor") reads them there and applies its own reader
+ * check wherever an answer reaches a person: a reader of the record sees one, anyone else — owners and admins included —
+ * does not; an `ev:` slot that names no record is seen by nobody (fails closed).
  */
-describe('an event occurrence (stage 4a) does not exist on this build', () => {
+describe('4-0.1\'s event occurrences as 4a reads them', () => {
   const PAST = () => new Date(Date.now() - 60 * MINUTE).toISOString()
-  /** An event occurrence in `state`, its slot sorting before every time slot (`ev:` > `2026-…`). */
-  function eventOccurrence(job: string, state: string, opts: { expired?: boolean; seq?: number } = {}): string {
-    const id = dueOccurrence(job, 1, `ev:${opts.seq ?? 900 + slot}`)
-    db.prepare('UPDATE ai_job_occurrences SET state = ?, expires_at = COALESCE(?, expires_at) WHERE company_id = ? AND id = ?')
-      .run(state, opts.expired ? PAST() : null, CO, id)
+  /** Alice's own やること (owner-only): she reads it, the owner and the admin do not. */
+  const alicesTask = (title = 'アリスだけのやること') => {
+    const r = services.recordEngine.create(alice() as Json, { kind: 'human' }, { type: 'task', title, personal: true, fields: { assignee: 'js-alice' } })
+    if (!r.ok) throw new Error(JSON.stringify(r.body))
+    return r.value.record.id
+  }
+  /** An event occurrence in `state`, of `record` (none: an `ev:` slot that names no record). */
+  function eventOccurrence(job: string, state: string, opts: { expired?: boolean; record?: string | null } = {}): string {
+    const seq = 900 + slot
+    const id = dueOccurrence(job, 1, `ev:${seq}`)
+    db.prepare('UPDATE ai_job_occurrences SET state = ?, expires_at = COALESCE(?, expires_at), event_seq = ?, event_record_id = ?, event_version = 1 WHERE company_id = ? AND id = ?')
+      .run(state, opts.expired ? PAST() : null, seq, opts.record ?? null, CO, id)
     return id
   }
-  const noticeRows = (occ: string) => (db.prepare('SELECT user_id FROM notifications WHERE company_id = ? AND dedupe_key LIKE ?').all(CO, `%:${occ}:%`) as Json[]).length
+  const noticeRows = (occ: string, user: string) => (db.prepare('SELECT user_id FROM notifications WHERE company_id = ? AND user_id = ? AND dedupe_key LIKE ?').all(CO, user, `%:${occ}:%`) as Json[]).length
   const missing = 'occ.ffffffffffffffffffffffffffffffff'
 
-  it('is not listed, not the job\'s last occurrence, and no answer carries an `ev:` slot (owner and admin alike)', async () => {
+  it('listed for a reader of its record only; owner and admin get exactly the time occurrences; no answer carries `ev:`', async () => {
     const job = await approvedJob(serverJob())
     const time = dueOccurrence(job, 1, '2026-11-10T09:00')
     db.prepare("UPDATE ai_job_occurrences SET state = 'done' WHERE company_id = ? AND id = ?").run(CO, time)
-    for (const state of ['due', 'running', 'done', 'skipped', 'needs_person', 'expired']) eventOccurrence(job, state)
+    const record = alicesTask()
+    const hers = ['due', 'done', 'skipped', 'needs_person', 'expired'].map(state => eventOccurrence(job, state, { record }))
+    const nobodys = eventOccurrence(job, 'done', { record: null })
     for (const user of ['js-owner', 'js-admin']) {
       const listed = await call(user, 'GET', `/jobs/${job}/occurrences`)
-      expect(listed.status).toBe(200)
       expect(listed.body.data.occurrences.map((o: Json) => o.id)).toEqual([time])
       const jobs = await call(user, 'GET', '/jobs')
       expect(jobs.body.data.jobs.find((j: Json) => j.id === job).lastOccurrence).toMatchObject({ dueSlot: '2026-11-10T09:00', state: 'done' })
       expect(JSON.stringify([listed.body, jobs.body, (await call(user, 'GET', `/jobs/${job}`)).body])).not.toContain('ev:')
     }
+    const forAlice = await call('js-alice', 'GET', `/jobs/${job}/occurrences`)
+    expect(forAlice.body.data.occurrences.map((o: Json) => o.id).sort()).toEqual([...hers, time].sort())
+    expect(forAlice.body.data.occurrences.map((o: Json) => o.id)).not.toContain(nobodys)
+    expect(JSON.stringify(forAlice.body)).not.toContain('ev:')
   })
 
-  it('a notice written for it (by 4a) is not shown or counted, and the clock writes none when it runs out of time', async () => {
+  it('its notices reach and are shown to a reader only; the clock tells only her when it runs out of time', async () => {
     const job = await approvedJob(serverJob())
-    const due = eventOccurrence(job, 'due', { expired: true })
-    const running = eventOccurrence(job, 'running', { expired: true })
-    const failed = eventOccurrence(job, 'needs_person')
-    const before = services.notifications.list(owner() as Json)
+    const record = alicesTask()
+    const due = eventOccurrence(job, 'due', { expired: true, record })
+    const failed = eventOccurrence(job, 'needs_person', { record })
     const at = new Date().toISOString()
     companyData.forCompany(CO).notifications.insert(['js-owner', 'js-alice'].map((userId, n) => ({
       id: `n-ev-${n}-${failed}`, userId, kind: 'job_failed', recordId: '', recordVersion: 0, action: '', actorId: null, actorKind: null,
       dedupeKey: `job_failed:${job}:${failed}:0:RUN_FAILED`, createdAt: at, readAt: null,
     })))
-    for (const m of [owner(), alice()]) {
-      const bell = services.notifications.list(m as Json)
-      expect(bell.ok && bell.value.items.filter((i: Json) => i.kind === 'job_failed')).toEqual([])
-      if (m.userId === 'js-owner') expect(bell.ok && bell.value.unread).toBe(before.ok && before.value.unread)
-    }
+    const shown = (m: Json) => { const bell = services.notifications.list(m); return bell.ok ? bell.value.items.filter((i: Json) => i.kind === 'job_failed').length : -1 }
+    expect(shown(owner())).toBe(0)
+    expect(shown(alice())).toBe(1)
     occurrences().makeOccurrences(CO)
-    // Left as it was (4a, rolled forward again, settles it with its reader check), and nobody told.
-    expect(occOf(due)).toMatchObject({ state: 'due', outcome_code: null })
-    expect(occOf(running)).toMatchObject({ state: 'running', outcome_code: null })
-    expect(noticeRows(due) + noticeRows(running)).toBe(0)
+    expect(occOf(due)).toMatchObject({ state: 'expired', outcome_code: 'EXPIRED' })
+    expect(noticeRows(due, 'js-alice')).toBe(1)
+    expect(noticeRows(due, 'js-owner')).toBe(0)
   })
 
-  it('the runner never runs it', async () => {
+  it('the runner runs it only as 4a does: one that names no record is skipped, nothing made', async () => {
     const job = await approvedJob(serverJob())
-    const due = eventOccurrence(job, 'due')
+    const nobodys = eventOccurrence(job, 'due', { record: null })
     const o = occurrences()
-    expect(o.dueIds(CO)).toEqual([])
-    expect(o.runOccurrence(CO, due)).toBeNull()
-    expect(o.runDue(CO)).toBe(0)
-    expect(occOf(due)).toMatchObject({ state: 'due', outcome_code: null, run_id: null })
+    expect(o.runOccurrence(CO, nobodys)).toBe('skipped')
+    expect(occOf(nobodys)).toMatchObject({ state: 'skipped', outcome_code: 'EVENT_RECORD_GONE', run_id: null })
   })
 
-  it('a pause, the company stop and a restore hold a waiting one (back on 4a it never runs), still hidden and untold', async () => {
+  it('a pause, the company stop and a restore hold a waiting one (it never runs after), seen by nobody who does not read it', async () => {
     const job = await approvedJob(serverJob())
     const other = await approvedJob(serverJob({ name: '別の仕事' }))
-    const paused = eventOccurrence(job, 'due')
-    const otherDue = eventOccurrence(other, 'due')
-    const done = eventOccurrence(job, 'done')
+    const record = alicesTask()
+    const paused = eventOccurrence(job, 'due', { record })
+    const otherDue = eventOccurrence(other, 'due', { record })
+    const done = eventOccurrence(job, 'done', { record })
     expect(await call('js-owner', 'POST', `/jobs/${job}/pause`)).toMatchObject({ status: 200 })
     expect(occOf(paused)).toMatchObject({ state: 'held', outcome_code: 'JOB_PAUSED', run_id: null })
-    // Only that job's waiting ones; a finished one keeps its state.
     expect(occOf(otherDue)).toMatchObject({ state: 'due', outcome_code: null })
     expect(occOf(done)).toMatchObject({ state: 'done' })
     expect((await call('js-owner', 'GET', `/jobs/${job}/occurrences`)).body.data.occurrences).toEqual([])
     expect(await call('js-owner', 'PUT', '/jobs-stop', { stopped: true })).toMatchObject({ status: 200 })
     expect(occOf(otherDue)).toMatchObject({ state: 'held', outcome_code: 'COMPANY_STOPPED' })
     expect(await call('js-owner', 'PUT', '/jobs-stop', { stopped: false })).toMatchObject({ status: 200 })
-    const afterRestore = eventOccurrence(other, 'due')
+    const afterRestore = eventOccurrence(other, 'due', { record })
     services.restorePause.pauseAfterRestore(CO)
     expect(occOf(afterRestore)).toMatchObject({ state: 'held', outcome_code: 'COMPANY_STOPPED' })
-    expect(noticeRows(paused) + noticeRows(otherDue) + noticeRows(afterRestore)).toBe(0)
+    for (const occ of [paused, otherDue, afterRestore]) expect(noticeRows(occ, 'js-owner')).toBe(0)
   })
 
-  it('a PC run on one is a missing run: no get, renew, finish, retry or reconcile', async () => {
+  it('a PC run on one is a missing run: no get, renew, finish, retry or reconcile (4a runs every event occurrence on the server)', async () => {
     const job = await approvedJob(pcJob(publishSkill()))
-    const ev = eventOccurrence(job, 'running')
+    const ev = eventOccurrence(job, 'running', { record: null })
     const time = dueOccurrence(job, 1)
     const at = new Date().toISOString()
     const runOf = (occ: string) => {
@@ -430,58 +436,49 @@ describe('an event occurrence (stage 4a) does not exist on this build', () => {
       return id
     }
     const evRun = runOf(ev)
-    // The same run on a time occurrence answers (the refusal is about the event occurrence, not the run).
     expect(await call('js-alice', 'GET', `/ai-runs/${runOf(time)}`)).toMatchObject({ status: 200 })
-    const missing = 'run-does-not-exist'
+    const none = 'run-does-not-exist'
     for (const [method, path, body] of [
       ['GET', '', undefined], ['POST', '/renew', { generation: 1 }], ['POST', '/finish', { generation: 1, outcome: 'done' }],
       ['POST', '/retry', undefined], ['POST', '/operations/k/reconcile', { done: true }],
     ] as const) {
-      const none = await call('js-alice', method, `/ai-runs/${missing}${path}`, body)
-      expect(none.status).toBe(404)
-      expect(await call('js-alice', method, `/ai-runs/${evRun}${path}`, body)).toEqual(none)
+      const answer = await call('js-alice', method, `/ai-runs/${none}${path}`, body)
+      expect(answer.status).toBe(404)
+      expect(await call('js-alice', method, `/ai-runs/${evRun}${path}`, body)).toEqual(answer)
     }
-    expect(db.prepare('SELECT state, claim_expires_at FROM ai_runs WHERE company_id = ? AND id = ?').get(CO, evRun)).toMatchObject({ state: 'running' })
-    expect(occOf(ev)).toMatchObject({ state: 'running' })
+    expect(db.prepare('SELECT state FROM ai_runs WHERE company_id = ? AND id = ?').get(CO, evRun)).toMatchObject({ state: 'running' })
   })
 
-  it('「もう一度」 and reconcile answer exactly as for an occurrence that does not exist', async () => {
+  it('「もう一度」 and reconcile answer a non-reader (owner, admin) exactly as for an occurrence that does not exist', async () => {
     const job = await approvedJob(serverJob())
-    const ev = eventOccurrence(job, 'needs_person')
-    for (const user of ['js-owner', 'js-admin']) {
-      const retryMissing = await call(user, 'POST', `/jobs/${job}/occurrences/${missing}/retry`)
-      expect(retryMissing.status).toBe(404)
-      expect(await call(user, 'POST', `/jobs/${job}/occurrences/${ev}/retry`)).toEqual(retryMissing)
-      const reconcileMissing = await call(user, 'POST', `/jobs/${job}/occurrences/${missing}/operations/create_task/reconcile`, { done: true })
-      expect(reconcileMissing.status).toBe(404)
-      expect(await call(user, 'POST', `/jobs/${job}/occurrences/${ev}/operations/create_task/reconcile`, { done: true })).toEqual(reconcileMissing)
+    const record = alicesTask()
+    for (const ev of [eventOccurrence(job, 'needs_person', { record }), eventOccurrence(job, 'needs_person', { record: null })]) {
+      for (const user of ['js-owner', 'js-admin']) {
+        const retryMissing = await call(user, 'POST', `/jobs/${job}/occurrences/${missing}/retry`)
+        expect(retryMissing.status).toBe(404)
+        expect(await call(user, 'POST', `/jobs/${job}/occurrences/${ev}/retry`)).toEqual(retryMissing)
+        const reconcileMissing = await call(user, 'POST', `/jobs/${job}/occurrences/${missing}/operations/create_task/reconcile`, { done: true })
+        expect(await call(user, 'POST', `/jobs/${job}/occurrences/${ev}/operations/create_task/reconcile`, { done: true })).toEqual(reconcileMissing)
+      }
+      expect(occOf(ev)).toMatchObject({ state: 'needs_person' })
     }
-    expect(occOf(ev)).toMatchObject({ state: 'needs_person' })
   })
 
-  it('the job repository neither reads, moves, sends back nor inserts one (every method)', async () => {
+  it('the job repository reads, moves and writes them (4a lifts 4-0.1\'s rule there); the hold of 4-0.1 still holds a waiting one', async () => {
     const job = await approvedJob(serverJob())
-    const ev = eventOccurrence(job, 'needs_person')
-    const running = eventOccurrence(job, 'running')
+    const ev = eventOccurrence(job, 'needs_person', { record: null })
     const repo = companyData.forCompany(CO).jobs
-    expect(repo.occurrence(ev)).toBeNull()
-    expect(repo.occurrences(job, 100)).toEqual([])
-    expect(repo.runningOccurrences(100)).toEqual([])
-    expect(repo.dueOccurrences(100)).toEqual([])
+    expect(repo.occurrence(ev)).toMatchObject({ id: ev, dueSlot: expect.stringMatching(/^ev:/) })
+    expect(repo.occurrences(job, 100).map(o => o.id)).toContain(ev)
     const at = new Date().toISOString()
-    expect(repo.moveOccurrence(running, ['running'], 'expired', { outcomeCode: 'EXPIRED' }, at)).toBe(false)
-    expect(repo.retryOccurrence(ev, ['needs_person'], new Date(Date.now() + 60 * MINUTE).toISOString(), 'js-owner', at)).toBe(false)
-    expect(occOf(running)).toMatchObject({ state: 'running', outcome_code: null })
-    expect(db.prepare('SELECT state, retries FROM ai_job_occurrences WHERE company_id = ? AND id = ?').get(CO, ev)).toEqual({ state: 'needs_person', retries: 0 })
     const fresh = 'occ.eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
-    expect(repo.insertOccurrence({ id: fresh, jobId: job, jobVersion: 1, dueSlot: 'ev:7', timeZone: 'Asia/Tokyo', dueAt: at, expiresAt: at, state: 'due', runId: null, outcomeCode: null, createdAt: at, updatedAt: at })).toBe(false)
-    expect(occOf(fresh)).toBeUndefined()
-    // The one write allowed: a waiting event occurrence held; a time one is not its business (holdDue moves those itself).
-    const evDue = eventOccurrence(job, 'due')
+    expect(repo.insertOccurrence({ id: fresh, jobId: job, jobVersion: 1, dueSlot: 'ev:7', timeZone: 'Asia/Tokyo', dueAt: at, expiresAt: at, state: 'due', runId: null, outcomeCode: null, createdAt: at, updatedAt: at, eventSeq: 7, eventRecordId: null, eventVersion: 1, eventDay: '2026-11-18' })).toBe(true)
+    expect(repo.dueOccurrences(100).map(o => o.id)).toContain(fresh)
     const timeDue = dueOccurrence(job, 1)
     repo.holdEventOccurrences(null, 'JOB_PAUSED', at)
-    expect(occOf(evDue)).toMatchObject({ state: 'held', outcome_code: 'JOB_PAUSED' })
+    expect(occOf(fresh)).toMatchObject({ state: 'held', outcome_code: 'JOB_PAUSED' })
     expect(occOf(timeDue)).toMatchObject({ state: 'due', outcome_code: null })
+    expect(repo.isHiddenOccurrence(fresh)).toBe(true)
     expect(isEventOccurrenceSlot('ev:7')).toBe(true)
     expect(isEventOccurrenceSlot('2026-11-10T09:00')).toBe(false)
   })

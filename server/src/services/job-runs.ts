@@ -32,7 +32,7 @@
  *   ends its run (`holdDue` → `endPcRun`), so nothing comes back after a resume.
  */
 import {
-  JOB_ACTOR, JOB_MADE_BEFORE_LISTED, JOB_PC_STEP, isOccurrenceId, jobOccurrenceKind, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult, storedJobDefinition,
+  JOB_ACTOR, JOB_MADE_BEFORE_LISTED, JOB_PC_STEP, isEventOccurrenceSlot, isOccurrenceId, jobOccurrenceKind, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult, storedJobDefinition,
   type JobDefinition, type JobDeliveryPlace, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
 import type { JobMadeBefore, JobMeetingView, JobTurnView } from '../../shared/types/jobs'
@@ -127,7 +127,8 @@ export function createJobRuns(deps: JobRunDeps) {
     if (!isOccurrenceId(occurrenceId)) return null
     const handle = companyData.forCompany(member.companyId)
     const occ = handle.jobs.occurrence(occurrenceId)
-    if (!occ) return null
+    // An event occurrence is never a PC's in 4a (the server runs every one; 4b brings the PC's): the one 404, as on 4-0.1.
+    if (!occ || isEventOccurrenceSlot(occ.dueSlot)) return null
     const job = handle.jobs.find(occ.jobId)
     const version = handle.jobs.version(occ.jobId, occ.jobVersion)
     if (!job || !version || version.actingUserId !== member.userId) return null
@@ -483,7 +484,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const turns: JobTurnView[] = []
       for (const occ of [...handle.jobs.dueOccurrences(TURN_SCAN_LIMIT), ...handle.jobs.runningOccurrences(TURN_SCAN_LIMIT)]) {
         // Only the kinds the app runs (stage 4-0: absent = time): an older app is never handed an event occurrence.
-        if (!kinds.includes(jobOccurrenceKind(occ.dueSlot))) continue
+        if (!kinds.includes(jobOccurrenceKind(occ.dueSlot)) || isEventOccurrenceSlot(occ.dueSlot)) continue
         const f = own(member, occ.id)
         if (!f || whyNot(f, nowMs) !== null) continue
         // A running one only while its run may be claimed again (lease over, given back, retried later).
