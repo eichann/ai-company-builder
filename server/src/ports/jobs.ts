@@ -177,7 +177,7 @@ export interface JobRepository {
   markWatchFired(jobId: string, recordId: string, at: string): boolean
   /** The next record to watch (`followMadeTask`): only while `from` is still the watched one (false = it was not: nothing written). Ends a chain stop. */
   moveWatch(jobId: string, from: string, to: string, at: string): boolean
-  /** The chain stopped (owner decision ①): false when it had stopped already (one notice per stop). */
+  /** The chain stopped (owner decision ①) on `recordId`, the one watched now: false when it had stopped already (one notice per stop) or another record is watched. */
   stopChain(jobId: string, code: string, recordId: string, at: string): boolean
   /** The chain goes on after all (the occurrence it stopped on ran, after 「もう一度」): only a stop on `recordId`. */
   clearChainStop(jobId: string, recordId: string): void

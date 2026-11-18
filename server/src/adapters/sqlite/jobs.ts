@@ -291,8 +291,10 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         .run(to, at, companyId, jobId, from).changes === 1
     },
     stopChain(jobId, code, recordId, at) {
+      // Only the chain of the record watched now: an occurrence left from an earlier watch (a new start record chosen
+      // since) never stops the new one (Codex review of #700).
       return conn.prepare(`UPDATE ai_job_event_cursors SET chain_stop_code = ?, chain_stop_record = ?, chain_stop_at = ?
-          WHERE company_id = ? AND job_id = ? AND chain_stop_code IS NULL`).run(code, recordId, at, companyId, jobId).changes === 1
+          WHERE company_id = ? AND job_id = ? AND watch_record_id = ? AND chain_stop_code IS NULL`).run(code, recordId, at, companyId, jobId, recordId).changes === 1
     },
     clearChainStop(jobId, recordId) {
       conn.prepare(`UPDATE ai_job_event_cursors SET chain_stop_code = NULL, chain_stop_record = NULL, chain_stop_at = NULL

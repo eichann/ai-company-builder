@@ -93,8 +93,8 @@ function jobServiceOf(knownSchemas?: number[]): JobService {
   })
 }
 const jobs = jobServiceOf()
-const occurrencesService = (data: typeof companyData = companyData, log?: (line: string) => void): JobOccurrences => createJobOccurrences({
-  companyData: data, transactions, clock, ids: randomIds, timeZoneOf: () => 'Asia/Tokyo', holidaysOf: () => [], roleOf, jobs, writer, aiStepStates,
+const occurrencesService = (data: typeof companyData = companyData, log?: (line: string) => void, w: Pick<ServiceRecordWriter, 'check' | 'create'> = writer): JobOccurrences => createJobOccurrences({
+  companyData: data, transactions, clock, ids: randomIds, timeZoneOf: () => 'Asia/Tokyo', holidaysOf: () => [], roleOf, jobs, writer: w, aiStepStates,
   ...(log ? { log } : {}),
 })
 /** The company data as another server would see it, with the jobs repository's methods wrapped (a fault, a race). */
@@ -858,6 +858,29 @@ describe('① a stopped chain', () => {
     // A newer draft of the admin waiting: not over it.
     ok(await jobs.update(owner(), job, { definition: chain(next, { name: '管理者の直し' }) }, READS_2))
     expect(await call('u-alice', 'POST', `/me/jobs/${job}/watch`, { version: 2, recordId: start }, S2)).toMatchObject({ status: 409, body: { code: 'JOB_DRAFT_WAITING' } })
+  })
+
+  it('its やること refused by the writer after its check (rolled back): the chain stops all the same', async () => {
+    const start = task('作れなかった')
+    const job = await runnableJob(chain(start))
+    await complete(start)
+    occ = occurrencesService(companyData, undefined, { check: writer.check, create: () => ({ ok: false, reason: 'stale' }) as Json })
+    tick()
+    expect(occurrencesOf(job)).toEqual([expect.objectContaining({ state: 'needs_person', outcome_code: 'TASK_NOT_CREATED' })])
+    expect(await stoppedFor('u-alice', job)).toEqual({ why: expect.stringMatching(/次のやることを作れなかったため/) })
+  })
+
+  it('an occurrence left from an earlier watch never stops the newly chosen one', async () => {
+    const start = task('前の見張り・古い回')
+    const job = await runnableJob(chain(start))
+    await complete(start)
+    occ.makeOccurrences(CO)
+    const next = task('新しく選んだ')
+    expect((await call('u-alice', 'POST', `/me/jobs/${job}/watch`, { version: 1, recordId: next }, S2)).status).toBe(200)
+    occ.runDue(CO)
+    expect(occurrencesOf(job)).toEqual([expect.objectContaining({ state: 'held', outcome_code: 'JOB_VERSION_CHANGED' })])
+    expect(await stoppedFor('u-alice', job)).toBeNull()
+    expect(notices('u-alice', 'member')).toEqual([])
   })
 
   it('a notice speaks of its own stop only: after choosing again and stopping again, one notice', async () => {

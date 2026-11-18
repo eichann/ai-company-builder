@@ -425,6 +425,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         const occ = handle.jobs.occurrence(occurrenceId)
         if (!occ || !handle.jobs.moveOccurrence(occ.id, ['due'], 'needs_person', { outcomeCode: 'TASK_NOT_CREATED' }, clock.now())) return null
         notice(companyId, handle, 'job_failed', occ, handle.jobs.find(occ.jobId), handle.jobs.version(occ.jobId, occ.jobVersion)?.actingUserId ?? null, told)
+        // Its やること was not made: the chain stops there too (owner decision ①; Codex review of #700).
+        if (occ.eventRecordId) events.chainStopped(handle, occ.jobId, 'TASK_NOT_CREATED', occ.eventRecordId, told)
         return 'needs_person' as const
       })
     }
