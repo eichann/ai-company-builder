@@ -579,7 +579,7 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
     try {
       const { noon, slot: today } = atNoon()
       const job = await approvedJob()
-      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)).ok).toBe(true)
       const occ = todaysOccurrence(job, noon, today)
       expirePicks()
       expect((await claim(occ)).body.code).toBe('JOB_PLACE_NOT_USABLE')
