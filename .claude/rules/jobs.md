@@ -789,7 +789,8 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   `moveOccurrence` / `retryOccurrence` never change one, `insertOccurrence` never writes one. **One write is
   allowed**: `holdEventOccurrences` — a pause, the company's stop and a restore's stop (`holdDue`) move the job's
   (or every job's) event occurrences still `due` to `held` with the same code, so a return to 4a never runs one that
-  waited before the pause; it answers nothing about them. Hence, for owners and admins too: not in
+  waited before the pause; it answers nothing about them. (`isHiddenOccurrence` is a yes / no used only so `ownRun`
+  can refuse a PC run on one.) Hence, for owners and admins too: not in
   `GET /jobs/:jobId/occurrences` (filtered before the limit) nor a job's `lastOccurrence` (no `ev:` slot in any
   answer), no notice made for one and an existing one (4a's) not shown or counted, 「もう一度」 and reconcile the same
   404 as a missing id, never run by the server's runner, never listed or claimed by a PC (404, whatever `kinds`

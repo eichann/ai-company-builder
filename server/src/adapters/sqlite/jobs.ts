@@ -31,7 +31,7 @@ const OCCURRENCE_READ = `${OCCURRENCE_COLUMNS}, checked_until, checked_commit, r
 /**
  * Stage 4-0.1 (jobs.md "Event occurrences do not exist on this build", `isEventOccurrenceSlot`): an event
  * occurrence (stage 4a's `ev:<delivery number>` slot) is not read, counted, moved, sent back or written here (one
- * exception: `holdEventOccurrences`, a pause holding a waiting one). 4a
+ * exception: `holdEventOccurrences`, a pause holding a waiting one; `isHiddenOccurrence` answers yes / no for a refusal). 4a
  * shows one only to people who read its source record — a check this build cannot make. Built from the core's
  * prefix (it has no `%` / `_`; `substr` compares exactly, unlike `LIKE`).
  */
@@ -176,6 +176,9 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       conn.prepare(`UPDATE ai_job_occurrences SET state = 'held', outcome_code = ?, updated_at = ?
           WHERE company_id = ? AND state = 'due' AND NOT (${NOT_EVENT}) AND (? IS NULL OR job_id = ?)`)
         .run(code, at, companyId, jobId, jobId)
+    },
+    isHiddenOccurrence(occurrenceId) {
+      return conn.prepare(`SELECT 1 FROM ai_job_occurrences WHERE company_id = ? AND id = ? AND NOT (${NOT_EVENT})`).get(companyId, occurrenceId) !== undefined
     },
     moveOccurrence(occurrenceId, from, to, change, at) {
       const runId = change.runId === undefined ? null : change.runId
