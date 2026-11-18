@@ -31,7 +31,7 @@ import type { Transactions } from '../ports/transactions'
 import { hashCanonical } from '../lib/content-hash'
 import { hasFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
-import { recordReader } from './record-access'
+import { recordReader, type RecordReader } from './record-access'
 import { resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
 import { nextJobSlot } from '../../shared/core/job-schedule'
 import { companyNow } from './notifications'
@@ -130,8 +130,11 @@ export function occurrenceView(o: JobOccurrenceRow): JobOccurrenceView {
   }
 }
 
-/** How many occurrences a look reads at a time while it leaves out the ones the viewer may not see (stage 4a). */
-const OCCURRENCE_PAGE = 200
+/**
+ * How many of a job's event records (newest first) a look checks the viewer reads (stage 4a). Event occurrences of older
+ * records are left out (fails closed). The work is the same whatever the viewer may read: never a measure of what is hidden.
+ */
+export const EVENT_RECORDS_CHECKED = 2000
 
 const sha256 = hashCanonical
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -178,16 +181,19 @@ export function createJobService(deps: JobServiceDeps) {
     return recordTriggerProblems(handle, deps.aiStepStates, definition.trigger, readers)
   }
 
-  /** The viewer's newest occurrences of the job, newest first, at most `limit`: an event one they may not see is not there (⑥). */
-  function shownOccurrences(member: Member, handle: CompanyData, jobId: string, limit: number): JobOccurrenceRow[] {
-    const out: JobOccurrenceRow[] = []
-    // Left out before the limit, page by page: what someone else's record made never pushes a visible one out (or in).
-    for (let offset = 0; out.length < limit; offset += OCCURRENCE_PAGE) {
-      const page = handle.jobs.occurrences(jobId, OCCURRENCE_PAGE, offset)
-      for (const o of page) if (out.length < limit && eventShown(handle, member, o)) out.push(o)
-      if (page.length < OCCURRENCE_PAGE) break
-    }
-    return out
+  /** The member's record reader for one request (the company's rules read once). */
+  const readerOf = (member: Member, handle: CompanyData): RecordReader => recordReader(member, handle.scopes.listWithRules())
+
+  /**
+   * The viewer's newest occurrences of the job, newest first, at most `limit`: an event one they may not see is not
+   * there (⑥). The job's event records (at most `EVENT_RECORDS_CHECKED`, newest first) are read in one batch and checked
+   * with one reader, then SQL leaves the others out **before** the limit: what someone else's record made never pushes a
+   * visible one out (or in), and the work does not depend on how many are hidden.
+   */
+  function shownOccurrences(member: Member, handle: CompanyData, jobId: string, limit: number, reader: RecordReader = readerOf(member, handle)): JobOccurrenceRow[] {
+    const records = handle.jobs.eventRecordsOf(jobId, EVENT_RECORDS_CHECKED)
+    const readable = records.length === 0 ? [] : handle.records.byIds(records).filter(r => r.removedAt === null && reader.record(r)).map(r => r.id)
+    return handle.jobs.occurrencesOf(jobId, readable, limit)
   }
 
   /**
@@ -270,7 +276,7 @@ export function createJobService(deps: JobServiceDeps) {
    * When it runs, for the screens (PR 4): the approved version's trigger (else the newest's) — a trigger
    * names no place, so it is answered with the job —, the approved trigger's next slot, the newest occurrence.
    */
-  function whenOf(member: Member, handle: CompanyData, job: JobRow, reads: readonly number[]): Pick<JobView, 'trigger' | 'placement' | 'nextSlot' | 'lastOccurrence' | 'needsUpdate'> {
+  function whenOf(member: Member, handle: CompanyData, job: JobRow, reads: readonly number[], reader: RecordReader): Pick<JobView, 'trigger' | 'placement' | 'nextSlot' | 'lastOccurrence' | 'needsUpdate'> {
     const approved = job.approvedVersion === null ? null : handle.jobs.version(job.id, job.approvedVersion)
     const shown = approved ?? handle.jobs.version(job.id, job.latestVersion)
     // A shape the client (or this server) does not read: no trigger at all — an older screen would read it as a
@@ -282,7 +288,7 @@ export function createJobService(deps: JobServiceDeps) {
       nextSlot = nextJobSlot(definition.trigger, companyNow(clock.nowMs(), deps.timeZoneOf(handle.companyId)), deps.holidaysOf(handle.companyId))
     }
     // The newest the viewer may see (⑥): what someone else's record made is not there for them.
-    const last = shownOccurrences(member, handle, job.id, 1)[0] ?? null
+    const last = shownOccurrences(member, handle, job.id, 1, reader)[0] ?? null
     // A start record the viewer cannot read is not named to them (⑥): no trigger at all then, as for a hidden definition.
     const triggerShown = definition !== null && readsStart(handle, member, definition)
     return {
@@ -330,7 +336,7 @@ export function createJobService(deps: JobServiceDeps) {
     return latest !== null && readsAll(handle, member.userId, member.role, definitionOf(latest)) ? job.name : HIDDEN_JOB_NAME
   }
 
-  function view(member: Member, handle: CompanyData, job: JobRow, withVersions: boolean, reads: readonly number[] = SCHEMA_1_ONLY): JobView {
+  function view(member: Member, handle: CompanyData, job: JobRow, withVersions: boolean, reads: readonly number[] = SCHEMA_1_ONLY, reader: RecordReader = readerOf(member, handle)): JobView {
     const full = hasFullAccess(member.role)
     // The name shown is the newest version's (`ai_jobs.name`). A responsible person who is not owner/admin
     // gets it only while they read every place that version names — an admin may have named the job after
@@ -339,7 +345,7 @@ export function createJobService(deps: JobServiceDeps) {
       id: job.id, name: nameFor(member, handle, job), state: job.state, actingUserId: job.actingUserId, latestVersion: job.latestVersion,
       approvedVersion: job.approvedVersion, accepted: consentAccepted(handle, job), pausedReason: job.pausedReason,
       waiting: waitingOf(handle, job, handle.jobs.stopped()), createdBy: job.createdBy, createdAt: job.createdAt, updatedAt: job.updatedAt,
-      ...whenOf(member, handle, job, reads),
+      ...whenOf(member, handle, job, reads, reader),
       ...forViewer(member, handle, job),
       deliverTo: placeView(member, handle, job),
     }
@@ -468,7 +474,9 @@ export function createJobService(deps: JobServiceDeps) {
       const handle = companyData.forCompany(member.companyId)
       const full = hasFullAccess(member.role)
       const rows = full ? handle.jobs.list() : handle.jobs.listFor(member.userId)
-      return ok({ stopped: handle.jobs.stopped(), canManage: full, jobs: rows.map(j => view(member, handle, j, false, reads)) })
+      // One reader for the whole answer (the company's rules read once).
+      const reader = readerOf(member, handle)
+      return ok({ stopped: handle.jobs.stopped(), canManage: full, jobs: rows.map(j => view(member, handle, j, false, reads, reader)) })
     },
 
     /** `GET /jobs/:jobId`: with every version, newest first. */

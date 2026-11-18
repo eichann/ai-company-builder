@@ -3,10 +3,11 @@
  * 「出来事で動く定期の仕事」 §3 / §10 / §11 / §12). **No AI here**: an event makes an occurrence, and the server's runner
  * makes its やること (services/job-occurrences.ts) as for a time slot.
  *
- * - **The scan** (`scan`, run by the clock inside `makeOccurrences`): each approved, active, accepted event job reads
- *   the ledger after its own cursor **by delivery number** (records.md "Delivery order": a row written later with an
- *   earlier time is never passed by), at most `EVENT_ROWS_PER_TICK` rows per company and tick — the rest next tick, from
- *   the cursor. An occurrence (`due_slot` `ev:<seq>`, one per job and event: `UNIQUE`) and the cursor's move are one
+ * - **The scan** (`scan`, run by the clock inside `makeOccurrences`): each approved, active, accepted event job reads,
+ *   on its own, the ledger rows **of its watched record** after its own cursor **by delivery number** (records.md
+ *   "Delivery order": a row written later with an earlier time is never passed by), at most `EVENT_ROWS_PER_TICK` per
+ *   tick — the rest next tick, from the cursor; with nothing more of that record, the cursor moves up to now. A job
+ *   that fails or was paused long never holds another back. An occurrence (`due_slot` `ev:<seq>`, one per job and event: `UNIQUE`) and the cursor's move are one
  *   transaction (compare-and-set on the cursor), so a crash, a second tick or a restart neither misses nor doubles one.
  * - **What is never an event** (`ledgerRowIsEvent`, `triggerMatches` in shared/core/jobs.ts): a marked row (migration,
  *   the server's own actors), a run's row (`run_id`: a job's run, an AI turn), an outside actor's row (a plugin's
@@ -31,7 +32,7 @@ import { aiTurnStates } from '../../shared/core/record-types'
 import { replayRecordState } from '../../shared/core/record-ledger'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData } from '../ports/company-data'
-import type { JobEventCursor, JobOccurrenceRow, JobRow, JobVersionRow } from '../ports/jobs'
+import type { JobOccurrenceRow, JobRow } from '../ports/jobs'
 import type { Transactions } from '../ports/transactions'
 import type { Member } from './access'
 import { companyNow } from './notifications'
@@ -129,6 +130,8 @@ export function recordTriggerProblems(handle: CompanyData, aiStepStates: AiStepS
 export function createJobEvents(deps: JobEventDeps) {
   const { transactions, clock, ids } = deps
   const log = deps.log ?? ((message: string) => console.log(message))
+  /** Jobs whose scan failed last time: logged once while it keeps failing. */
+  const failing = new Set<string>()
 
   const memberOf = (companyId: string, userId: string): Member | null => {
     const role = deps.roleOf(companyId, userId)
@@ -182,74 +185,86 @@ export function createJobEvents(deps: JobEventDeps) {
     const companyId = handle.companyId
     const nowMs = clock.nowMs()
     const stamp = clock.now()
-    const work: Array<{ job: JobRow; version: JobVersionRow; definition: JobDefinition; trigger: JobRecordTrigger; cursor: number; at: JobEventCursor }> = []
-    for (const job of handle.jobs.list()) {
-      if (job.approvedVersion === null || (job.state !== 'active' && job.state !== 'paused')) continue
-      const version = handle.jobs.version(job.id, job.approvedVersion)
-      const definition = version ? storedJobDefinition(version) : null
-      if (!version || !definition || !isRecordTrigger(definition.trigger)) continue
-      const at = handle.jobs.eventCursor(job.id)
-      // Never accepted as an event job: nothing to look at (its acceptance starts the cursor at "now").
-      if (at === null) continue
-      // Paused, or the company's stop: nothing now; the gap opened then keeps what happens meanwhile from running later.
-      if (job.state !== 'active' || stopped) continue
-      // Another consent approved and not accepted yet: what happens before its 受け取る never runs.
-      if (job.acceptedConsent === null || job.acceptedConsent !== version.consentFingerprint) {
-        transactions.run(() => handle.jobs.startEventCursor(job.id, at.start, stamp))
-        continue
-      }
-      work.push({ job, version, definition, trigger: definition.trigger, cursor: at.seen, at })
-    }
-    if (work.length === 0) return 0
-    const rows = handle.jobs.ledgerEvents(Math.min(...work.map(w => w.cursor)), EVENT_ROWS_PER_TICK)
-    if (rows.length === 0) return 0
-    const last = rows[rows.length - 1].seq
     const zone = deps.timeZoneOf(companyId)
     const day = companyNow(nowMs, zone).slice(0, 10)
     let made = 0
-    for (const w of work) {
-      if (last <= w.cursor) continue
-      const gaps = handle.jobs.eventGaps(w.job.id)
-      const inGap = (seq: number) => gaps.some(g => seq > g.from && (g.until === null || seq <= g.until))
+    for (const job of handle.jobs.list()) {
+      if (job.approvedVersion === null || (job.state !== 'active' && job.state !== 'paused')) continue
+      // Each job on its own (review of #700): one that fails — or one paused for long — never holds another back.
       try {
-        made += transactions.run((): number => {
-          let n = 0
-          let limited = false
-          let today = handle.jobs.eventOccurrencesOn(w.job.id, day)
-          // The one record watched, once (an undo and a second completion of it make nothing more).
-          let fired = w.at.fired
-          for (const row of rows) {
-            if (fired || row.recordId !== w.at.watch) continue
-            if (row.seq <= w.cursor || inGap(row.seq)) continue
-            if (!ledgerRowIsEvent(row) || !triggerMatches(w.trigger, row) || !applies(handle, w.definition, w.trigger, row)) continue
-            // The day's limit (company time): what comes beyond it is not made (and the job never pauses for it).
-            if (today >= w.definition.grant.limits.runsPerDay) { limited = true; handle.jobs.markWatchFired(w.job.id, row.recordId, stamp); fired = true; continue }
-            const occurrenceAt = new Date(nowMs).toISOString()
-            const inserted = handle.jobs.insertOccurrence({
-              id: `occ.${ids.newId().replace(/-/g, '').toLowerCase().slice(0, 32).padEnd(32, '0')}`,
-              jobId: w.job.id, jobVersion: w.version.version, dueSlot: eventDueSlot(row.seq), timeZone: zone,
-              dueAt: new Date(Date.parse(row.at)).toISOString(),
-              // Its time to run counts from now (the event may have been read late), never from the event.
-              expiresAt: new Date(nowMs + w.definition.missed.expiresAfterMinutes * 60_000).toISOString(),
-              state: 'due', runId: null, outcomeCode: null, createdAt: occurrenceAt, updatedAt: occurrenceAt,
-              eventSeq: row.seq, eventRecordId: row.recordId, eventVersion: row.version, eventDay: day,
-            })
-            if (inserted) { n++; today++ }
-            // Fired whether made or not (one already there is this very event): the target makes nothing more.
-            handle.jobs.markWatchFired(w.job.id, row.recordId, stamp)
-            fired = true
-          }
-          // In the same transaction as what it made: never past an event it did not look at, never twice over one.
-          if (!handle.jobs.moveEventCursor(w.job.id, w.cursor, last, stamp)) throw new CursorMoved()
-          if (limited) toldLimited(handle, w.job, w.definition, day, told)
-          return n
-        })
+        made += scanJob(handle, job, stopped, { nowMs, stamp, zone, day }, told)
+        failing.delete(job.id)
       } catch (error) {
-        // Another clock moved it first (two servers): it made what it made; nothing of this pass was kept.
-        if (!(error instanceof CursorMoved)) log(`[job-events] company ${companyId} job scan failed: ${error instanceof Error ? error.name : 'unknown error'}`)
+        // Another clock moved its cursor first (two servers): nothing of this pass was kept. Anything else: logged once
+        // while it keeps failing (error name only), and the next tick tries again.
+        if (!(error instanceof CursorMoved) && !failing.has(job.id)) {
+          failing.add(job.id)
+          log(`[job-events] company ${companyId} job ${job.id} scan failed: ${error instanceof Error ? error.name : 'unknown error'}`)
+        }
       }
     }
     return made
+  }
+
+  /**
+   * One event job's part of a tick, in one transaction: the ledger rows **of its watched record only** (by delivery
+   * number, after its cursor; at most `EVENT_ROWS_PER_TICK`), what they make, and the cursor's move — to the last row
+   * read when there may be more, else to the company's newest delivery number (nothing else can concern this job: it
+   * watches one record, and the runner moves the watch only after this tick).
+   */
+  function scanJob(handle: CompanyData, job: JobRow, stopped: boolean, t: { nowMs: number; stamp: string; zone: string; day: string }, told: Set<string>): number {
+    const version = handle.jobs.version(job.id, job.approvedVersion as number)
+    const definition = version ? storedJobDefinition(version) : null
+    if (!version || !definition || !isRecordTrigger(definition.trigger)) return 0
+    const trigger = definition.trigger
+    const at = handle.jobs.eventCursor(job.id)
+    // Never accepted as an event job: nothing to look at (its acceptance starts the cursor at "now").
+    if (at === null) return 0
+    // Paused, or the company's stop: nothing now; the gap opened then keeps what happens meanwhile from running later.
+    if (job.state !== 'active' || stopped) return 0
+    // Another consent approved and not accepted yet: what happens before its 受け取る never runs.
+    if (job.acceptedConsent === null || job.acceptedConsent !== version.consentFingerprint) {
+      transactions.run(() => handle.jobs.startEventCursor(job.id, at.start, t.stamp))
+      return 0
+    }
+    return transactions.run((): number => {
+      const newest = handle.jobs.ledgerSeqNow()
+      if (newest <= at.seen) return 0
+      const rows = handle.jobs.watchedEvents(at.watch, at.seen, newest, EVENT_ROWS_PER_TICK)
+      const gaps = handle.jobs.eventGaps(job.id)
+      const inGap = (seq: number) => gaps.some(g => seq > g.from && (g.until === null || seq <= g.until))
+      let n = 0
+      let limited = false
+      let today = handle.jobs.eventOccurrencesOn(job.id, t.day)
+      // The one record watched, once (an undo and a second completion of it make nothing more).
+      let fired = at.fired
+      for (const row of rows) {
+        if (fired || inGap(row.seq)) continue
+        if (!ledgerRowIsEvent(row) || !triggerMatches(trigger, row) || !applies(handle, definition, trigger, row)) continue
+        // The day's limit (company time): what comes beyond it is not made (and the job never pauses for it).
+        if (today >= definition.grant.limits.runsPerDay) { limited = true; handle.jobs.markWatchFired(job.id, row.recordId, t.stamp); fired = true; continue }
+        const occurrenceAt = new Date(t.nowMs).toISOString()
+        const inserted = handle.jobs.insertOccurrence({
+          id: `occ.${ids.newId().replace(/-/g, '').toLowerCase().slice(0, 32).padEnd(32, '0')}`,
+          jobId: job.id, jobVersion: version.version, dueSlot: eventDueSlot(row.seq), timeZone: t.zone,
+          dueAt: new Date(Date.parse(row.at)).toISOString(),
+          // Its time to run counts from now (the event may have been read late), never from the event.
+          expiresAt: new Date(t.nowMs + definition.missed.expiresAfterMinutes * 60_000).toISOString(),
+          state: 'due', runId: null, outcomeCode: null, createdAt: occurrenceAt, updatedAt: occurrenceAt,
+          eventSeq: row.seq, eventRecordId: row.recordId, eventVersion: row.version, eventDay: t.day,
+        })
+        if (inserted) { n++; today++ }
+        // Fired whether made or not (one already there is this very event): the target makes nothing more.
+        handle.jobs.markWatchFired(job.id, row.recordId, t.stamp)
+        fired = true
+      }
+      // More rows of the record than one tick reads: on from the last one next tick. Else up to now.
+      const to = rows.length >= EVENT_ROWS_PER_TICK ? rows[rows.length - 1].seq : newest
+      // In the same transaction as what it made: never past an event it did not look at, never back over one.
+      if (!handle.jobs.moveEventCursor(job.id, at.seen, to, t.stamp)) throw new CursorMoved()
+      if (limited) toldLimited(handle, job, definition, t.day, told)
+      return n
+    })
   }
 
   return { scan, recheck }

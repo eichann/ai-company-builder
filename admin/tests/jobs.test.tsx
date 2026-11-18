@@ -484,10 +484,32 @@ describe('an event job', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.endsWith('/jobs'))).toHaveLength(1))
     const query = calls.find((c) => c.url.endsWith('/records/query'))!
-    expect(query.body).toMatchObject({ type: 'task', fields: { assignee: 'u_member' } })
+    expect(query.body).toMatchObject({ type: 'task', fields: { assignee: 'u_member' }, offset: 0 })
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/jobs'))!
     expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2')
     expect((post.body as { definition: JobDefinition }).definition).toMatchObject({ schema: 2, trigger: { startRecord: START, to: 'done', followMadeTask: true } })
+  })
+
+  it('the start list is searched by name and paged (never only the first 50)', async () => {
+    const page = (offset: number) => Array.from({ length: 50 }, (_, i) => ({ id: `task-${String(offset + i).padStart(16, '0')}`, type: 'task', title: `やること${offset + i}` }))
+    // The fixture answers the page the last query asked for (the call is kept before the answer is made).
+    const holder: { calls: Array<{ body: unknown }> } = { calls: [] }
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [] }) },
+      [`POST ${base}/records/query`]: () => ({ body: ok({ total: 120, records: page((holder.calls.at(-1)!.body as { offset: number }).offset) }) }),
+    })
+    holder.calls = calls
+    renderInCompany(<JobsRoute />)
+    await userEvent.click(await screen.findByRole('button', { name: '定期の仕事を作る' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'いつ動くか' }), 'event')
+    expect(await within(dialog).findByText(/120件中 1〜50件/)).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: '次へ' }))
+    expect(await within(dialog).findByRole('option', { name: 'やること50' })).toBeInTheDocument()
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '見張るやることを名前で探す' }), '提案')
+    await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/records/query')).at(-1)!.body).toMatchObject({ text: '提案', offset: 0 }))
+    expect(calls.filter((c) => c.url.endsWith('/records/query')).some((c) => (c.body as { offset: number }).offset === 50)).toBe(true)
   })
 
   it('the list and the approval say what it watches in plain words (never the record\'s title), and what it never runs for', async () => {

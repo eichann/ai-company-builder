@@ -29,6 +29,13 @@ interface OccurrenceDbRow {
 }
 const OCCURRENCE_COLUMNS = 'id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, run_id, outcome_code, created_at, updated_at'
 const OCCURRENCE_READ = `${OCCURRENCE_COLUMNS}, checked_until, checked_commit, retries, retried_by, retried_at, event_seq, event_record_id, event_version, event_day`
+/**
+ * Newest first, by when each came: a time slot by its time (`due_at`; a job of time slots only reads exactly as it did,
+ * newest slot first), an event one by when it was made (`created_at`: a scan only ever moves forward), so a job whose
+ * trigger changed shows its newest occurrence first whichever kind it is (Codex review of #700); events made together
+ * by their delivery number (a number: never `ev:9` after `ev:10` as text).
+ */
+const OCCURRENCE_ORDER = `CASE WHEN event_seq IS NULL THEN due_at ELSE created_at END DESC, COALESCE(event_seq, -1) DESC, due_slot DESC, id`
 const occurrenceOf = (r: OccurrenceDbRow): JobOccurrenceRow => ({
   id: r.id, jobId: r.job_id, jobVersion: r.job_version, dueSlot: r.due_slot, timeZone: r.time_zone, dueAt: r.due_at, expiresAt: r.expires_at,
   state: r.state as JobOccurrenceRow['state'], runId: r.run_id, outcomeCode: r.outcome_code, checkedUntil: r.checked_until, checkedCommit: r.checked_commit, retries: r.retries, retriedBy: r.retried_by, retriedAt: r.retried_at,
@@ -161,10 +168,8 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       return r ? occurrenceOf(r) : null
     },
     occurrences(jobId, limit, offset = 0) {
-      // Events by their delivery number (a number: never `ev:9` after `ev:10` as text), before the time slots (newest
-      // slot first, as before): a job of time slots only reads exactly as it did.
       return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?
-          ORDER BY COALESCE(event_seq, -1) DESC, due_slot DESC, id LIMIT ? OFFSET ?`)
+          ORDER BY ${OCCURRENCE_ORDER} LIMIT ? OFFSET ?`)
         .all(companyId, jobId, limit, offset) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     dueOccurrences(limit) {
@@ -193,13 +198,15 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
     ledgerSeqNow() {
       return seqNow()
     },
-    ledgerEvents(afterSeq, limit) {
-      // Delivery order (records.md "Delivery order"): a row written later with an earlier time is never passed by.
+    watchedEvents(recordId, afterSeq, upToSeq, limit) {
+      // Delivery order (records.md "Delivery order"): a row written later with an earlier time is never passed by. The
+      // ledger's key starts (company, record): one record's rows are found without reading anyone else's.
       const rows = conn.prepare(`SELECT l.delivery_seq AS seq, l.record_id, l.version, r.type, l.action, l.from_state, l.to_state, l.actor_kind, l.actor_id,
           l.run_id, l.origin, l.at
           FROM record_ledger l JOIN records r ON r.company_id = l.company_id AND r.id = l.record_id
-          WHERE l.company_id = ? AND l.delivery_seq IS NOT NULL AND l.delivery_seq > ? ORDER BY l.delivery_seq LIMIT ?`)
-        .all(companyId, afterSeq, limit) as Array<{
+          WHERE l.company_id = ? AND l.record_id = ? AND l.delivery_seq IS NOT NULL AND l.delivery_seq > ? AND l.delivery_seq <= ?
+          ORDER BY l.delivery_seq LIMIT ?`)
+        .all(companyId, recordId, afterSeq, upToSeq, limit) as Array<{
           seq: number; record_id: string; version: number; type: string; action: string; from_state: string | null; to_state: string | null
           actor_kind: string; actor_id: string; run_id: string | null; origin: string | null; at: string
         }>
@@ -207,6 +214,16 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         seq: r.seq, recordId: r.record_id, version: r.version, type: r.type, action: r.action, fromState: r.from_state, toState: r.to_state,
         actorKind: r.actor_kind, actorId: r.actor_id, runId: r.run_id, origin: r.origin, at: r.at,
       }))
+    },
+    eventRecordsOf(jobId, limit) {
+      return (conn.prepare(`SELECT event_record_id AS id FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_record_id IS NOT NULL
+          GROUP BY event_record_id ORDER BY MAX(event_seq) DESC LIMIT ?`).all(companyId, jobId, limit) as Array<{ id: string }>).map(r => r.id)
+    },
+    occurrencesOf(jobId, records, limit) {
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?
+          AND (event_record_id IS NULL OR event_record_id IN (SELECT value FROM json_each(?)))
+          ORDER BY ${OCCURRENCE_ORDER} LIMIT ?`)
+        .all(companyId, jobId, JSON.stringify(records), limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     eventCursor(jobId) {
       const r = conn.prepare(`SELECT seen_seq, watch_record_id, watch_start, watch_fired FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?`)

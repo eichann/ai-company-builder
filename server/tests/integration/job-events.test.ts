@@ -93,9 +93,20 @@ function jobServiceOf(knownSchemas?: number[]): JobService {
   })
 }
 const jobs = jobServiceOf()
-const occurrencesService = (): JobOccurrences => createJobOccurrences({
-  companyData, transactions, clock, ids: randomIds, timeZoneOf: () => 'Asia/Tokyo', holidaysOf: () => [], roleOf, jobs, writer, aiStepStates,
+const occurrencesService = (data: typeof companyData = companyData, log?: (line: string) => void): JobOccurrences => createJobOccurrences({
+  companyData: data, transactions, clock, ids: randomIds, timeZoneOf: () => 'Asia/Tokyo', holidaysOf: () => [], roleOf, jobs, writer, aiStepStates,
+  ...(log ? { log } : {}),
 })
+/** The company data as another server would see it, with the jobs repository's methods wrapped (a fault, a race). */
+function wrapJobs(wrap: (jobs: ReturnType<typeof companyData.forCompany>['jobs']) => Partial<ReturnType<typeof companyData.forCompany>['jobs']>): typeof companyData {
+  return {
+    ...companyData,
+    forCompany: (co: string) => {
+      const handle = companyData.forCompany(co)
+      return { ...handle, jobs: { ...handle.jobs, ...wrap(handle.jobs) } }
+    },
+  }
+}
 let occ: JobOccurrences
 
 const m = (userId: string, role: string, co = CO) => ({ companyId: co, userId, role })
@@ -504,19 +515,104 @@ describe('(5) paused or stopped', () => {
 })
 
 describe('(6) many rows and the day\'s limit', () => {
-  it('one tick reads a bounded number of rows; the next goes on from there', async () => {
+  it('one tick reads a bounded number of the watched record\'s rows; the next goes on from there', async () => {
     const start = task('たくさんの後ろ')
     const job = await runnableJob(chain(start))
-    const filler = task('一括で変わる')
-    const v = versionOf(filler)
+    // Hundreds of changes of the watched record itself (a bulk edit), then its completion.
+    const v = versionOf(start)
     transactions.run(() => {
-      for (let i = 1; i <= EVENT_ROWS_PER_TICK + 200; i++) insertLedgerRow(db, CO, ledgerRow(filler, v + i, 'todo', 'todo', { action: 'set_tags', changes: '[]' }))
+      for (let i = 1; i <= EVENT_ROWS_PER_TICK + 200; i++) insertLedgerRow(db, CO, ledgerRow(start, v + i, 'todo', 'todo', { action: 'set_tags', changes: '[]' }))
+      db.prepare('UPDATE record_state SET version = ? WHERE company_id = ? AND record_id = ?').run(v + EVENT_ROWS_PER_TICK + 200, CO, start)
     })
     await complete(start)
     const from = cursorOf(job).seen_seq
     expect(tick()).toBe(0)
     expect(cursorOf(job).seen_seq).toBe(from + EVENT_ROWS_PER_TICK)
     expect(tick()).toBe(1)
+  })
+
+  it('rows of other records move the cursor up to now at once; a job paused while thousands came delays no other job', async () => {
+    const paused = task('長く止める')
+    const pausedJob = await runnableJob(chain(paused, { name: '長く止める' }))
+    ok(jobs.pause(owner(), pausedJob))
+    const busy = task('ほかで大量に変わる')
+    const v = versionOf(busy)
+    transactions.run(() => {
+      for (let i = 1; i <= 3000; i++) insertLedgerRow(db, CO, ledgerRow(busy, v + i, 'todo', 'todo', { action: 'set_tags', changes: '[]' }))
+      db.prepare('UPDATE record_state SET version = ? WHERE company_id = ? AND record_id = ?').run(v + 3000, CO, busy)
+    })
+    ok(await jobs.resume(owner(), pausedJob))
+    const start = task('すぐに動くはず')
+    const job = await runnableJob(chain(start, { name: 'もう一つ' }))
+    await complete(start)
+    expect(tick()).toBe(1)
+    expect(occurrencesOf(job)).toHaveLength(1)
+    // The resumed job's cursor is at now too: nothing of other records is ever read for it again.
+    expect(cursorOf(pausedJob).seen_seq).toBe(cursorOf(job).seen_seq)
+  })
+
+  it('a job whose scan throws holds no other job back, and is logged once while it keeps failing', async () => {
+    const broken = task('壊れた仕事')
+    const brokenJob = await runnableJob(chain(broken, { name: '壊れた' }))
+    const start = task('動く仕事')
+    const job = await runnableJob(chain(start, { name: '動く' }))
+    const lines: string[] = []
+    occ = occurrencesService(wrapJobs(j => ({
+      eventCursor: (id: string) => { if (id === brokenJob) throw new TypeError('broken'); return j.eventCursor(id) },
+    })), line => lines.push(line))
+    await complete(broken)
+    await complete(start)
+    expect(tick()).toBe(1)
+    expect(occurrencesOf(job)).toHaveLength(1)
+    tick()
+    expect(lines.filter(l => l.includes(brokenJob))).toHaveLength(1)
+    expect(lines.join('\n')).not.toContain('壊れた')
+  })
+
+  it('two clocks at once: a pass whose cursor another clock moved meanwhile keeps nothing; the next does it once', async () => {
+    const start = task('二つの時計')
+    const job = await runnableJob(chain(start))
+    let raced = false
+    occ = occurrencesService(wrapJobs(j => ({
+      watchedEvents: (...a: Parameters<typeof j.watchedEvents>) => {
+        const rows = j.watchedEvents(...a)
+        // Meanwhile another server's clock moved the cursor (it made what it made).
+        if (!raced) { raced = true; db.prepare('UPDATE ai_job_event_cursors SET seen_seq = seen_seq + 1 WHERE company_id = ? AND job_id = ?').run(CO, job) }
+        return rows
+      },
+    })))
+    await complete(start)
+    expect(occ.makeOccurrences(CO)).toBe(0)
+    expect(occurrencesOf(job)).toEqual([])
+    expect(occ.makeOccurrences(CO)).toBe(1)
+    expect(occurrencesOf(job)).toHaveLength(1)
+  })
+
+  it('a target skipped for the day\'s limit is done with: undone and completed again the next day, still nothing', async () => {
+    const start = task('上限で見送られた')
+    const job = await runnableJob(chain(start, { grant: { ...chain('x').grant, limits: { minutes: 5, runsPerDay: 1 } } }))
+    // Today's one occurrence is used already (another target of the job earlier today).
+    db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at,
+      event_seq, event_record_id, event_day) VALUES (?, ?, ?, 1, 'ev:1', 'Asia/Tokyo', ?, ?, 'done', ?, ?, 1, 'task-0000000000000001', '2026-11-18')`)
+      .run(CO, `occ.${'f'.repeat(32)}`, job, clock.now(), clock.now(), clock.now(), clock.now())
+    await complete(start)
+    expect(tick()).toBe(0)
+    nowMs += 24 * 60 * 60_000
+    await reopen(start)
+    await complete(start)
+    expect(tick()).toBe(0)
+    expect(occurrencesOf(job).filter((o: Json) => o.event_record_id === start)).toEqual([])
+  })
+
+  it('the limit\'s notice is shown to the responsible person only (a row someone else has says nothing)', async () => {
+    const start = task('上限の知らせ')
+    const job = await runnableJob(chain(start))
+    for (const user of ['u-alice', 'u-owner']) {
+      db.prepare(`INSERT INTO notifications (id, company_id, user_id, kind, record_id, record_version, action, actor_id, actor_kind, dedupe_key, created_at, read_at)
+        VALUES (?, ?, ?, 'job_events_skipped', '', 0, '', NULL, NULL, ?, ?, NULL)`).run(`n-${user}`, CO, user, `job_events_skipped:${job}:2026-11-18`, clock.now())
+    }
+    expect(ok(services.notifications.list(alice())).items.some(i => i.kind === 'job_events_skipped')).toBe(true)
+    expect(ok(services.notifications.list(owner())).items.some(i => i.kind === 'job_events_skipped')).toBe(false)
   })
 
   it('beyond the day\'s limit nothing is made, the responsible person is told once without a count, the job keeps running', async () => {
@@ -536,6 +632,62 @@ describe('(6) many rows and the day\'s limit', () => {
     expect(text).not.toMatch(/[0-9０-９]+件/)
     // Nobody else hears of it.
     expect(ok(services.notifications.list(owner())).items.some(i => i.kind === 'job_events_skipped')).toBe(false)
+  })
+})
+
+describe('the watched record across versions, and the order of a job\'s occurrences', () => {
+  it('accepting again with the same start record keeps the chain where it is (the start record does not fire again)', async () => {
+    const start = task('同じ始まり')
+    const job = await runnableJob(chain(start))
+    await complete(start)
+    tick()
+    const [made] = madeTasks(job)
+    // A new title: alice accepts again, the start record is the same.
+    ok(await jobs.update(owner(), job, { definition: chain(start, { run: { ...chain('x').run, title: '題だけ変える' } }) }, READS_2))
+    ok(await jobs.approve(owner(), job, { version: 2 }, READS_2))
+    ok(await jobs.accept(alice(), job, { version: 2 }, READS_2))
+    expect(cursorOf(job)).toMatchObject({ watch_record_id: made.id })
+    await reopen(start)
+    await complete(start)
+    expect(tick()).toBe(0)
+    await complete(made.id)
+    expect(tick()).toBe(1)
+  })
+
+  it('an occurrence whose record is no longer the one watched is skipped (a defence: only the runner moves the watch, after it acted)', async () => {
+    const start = task('前の見張り先')
+    const job = await runnableJob(chain(start))
+    await complete(start)
+    occ.makeOccurrences(CO)
+    db.prepare("UPDATE ai_job_event_cursors SET watch_record_id = 'task-0000000000000002' WHERE company_id = ? AND job_id = ?").run(CO, job)
+    occ.runDue(CO)
+    expect(occurrencesOf(job)).toEqual([expect.objectContaining({ state: 'skipped', outcome_code: 'EVENT_NOT_WATCHED' })])
+  })
+
+  it('acceptance checks the trigger again (a state a business plugin now runs as 「AI の番」)', async () => {
+    const start = task('受け取る前に変わる')
+    const made = ok(await jobs.create(owner(), { definition: chain(start, {}, { to: 'review' }) }, READS_2))
+    ok(await jobs.approve(owner(), made.id, { version: 1 }, READS_2))
+    aiSteps = { task: ['review'] }
+    expect(await jobs.accept(alice(), made.id, { version: 1 }, READS_2)).toMatchObject({ ok: false, body: { code: 'JOB_TRIGGER_NOT_ALLOWED' } })
+    expect(cursorOf(made.id)).toBeUndefined()
+  })
+
+  it('newest first: events by delivery number (ev:10 before ev:9), and a time slot that came later before older events', async () => {
+    const start = task('並び')
+    const job = await runnableJob(chain(start))
+    const insert = (id: string, slot: string, dueAt: string, createdAt: string, seq: number | null) => db.prepare(`INSERT INTO ai_job_occurrences
+      (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at, event_seq, event_record_id, event_day)
+      VALUES (?, ?, ?, 1, ?, 'Asia/Tokyo', ?, ?, 'done', ?, ?, ?, ?, ?)`).run(CO, id, job, slot, dueAt, dueAt, createdAt, createdAt, seq, seq === null ? null : start, seq === null ? null : '2026-11-18')
+    const occId = (n: number) => `occ.${n.toString(16).padStart(32, '0')}`
+    insert(occId(9), 'ev:9', '2026-11-18T01:00:00.000Z', '2026-11-18T01:05:00.000Z', 9)
+    insert(occId(10), 'ev:10', '2026-11-18T00:59:00.000Z', '2026-11-18T01:05:00.000Z', 10)
+    expect(companyData.forCompany(CO).jobs.occurrences(job, 2).map(o => o.id)).toEqual([occId(10), occId(9)])
+    // The trigger changed to a time of day later: its newer slot comes first, also for the job's last occurrence.
+    insert(occId(11), '2026-11-19T09:00', '2026-11-19T00:00:00.000Z', '2026-11-19T00:00:00.000Z', null)
+    expect(companyData.forCompany(CO).jobs.occurrences(job, 3).map(o => o.id)).toEqual([occId(11), occId(10), occId(9)])
+    const view = await call('u-owner', 'GET', `/jobs/${job}`, undefined, { 'X-ACB-Job-Schemas': '1,2' })
+    expect(view.body.data.lastOccurrence.dueSlot).toBe('2026-11-19T09:00')
   })
 })
 

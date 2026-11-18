@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { jobsApi, skillShelfApi, type JobVersionView, type JobView, type Member } from '@/lib/api'
+import { JOB_START_PAGE, jobsApi, skillShelfApi, type JobVersionView, type JobView, type Member } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import { PcJobFields } from './pc-job-fields'
 import { describeError } from '@/lib/errors'
@@ -106,8 +106,13 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
   const set = <K extends keyof JobForm>(k: K, v: JobForm[K]) => setF((prev) => ({ ...prev, [k]: v }))
   // An event job's first watched やること: the responsible person's open ones that this console's user reads (the server
   // checks again that both of them read it).
-  const starts = useQuery(f.when === 'event' ? `job-starts:${companyId}:${f.actingUser}` : null, () => jobsApi.startChoices(companyId, f.actingUser))
+  // Searched by name and paged (a member may have many open やること).
+  const [startText, setStartText] = useState('')
+  const [startOffset, setStartOffset] = useState(0)
+  const starts = useQuery(f.when === 'event' ? `job-starts:${companyId}:${f.actingUser}:${startText.trim()}:${startOffset}` : null,
+    () => jobsApi.startChoices(companyId, f.actingUser, startText, startOffset))
   const startRecords = (starts.data?.records ?? []) as Array<{ id: string; title: string }>
+  const startTotal = starts.data?.total ?? 0
   const expiry = JOB_EXPIRY_CHOICES.some((c) => c.minutes === f.expiresAfterMinutes)
     ? JOB_EXPIRY_CHOICES
     : [...JOB_EXPIRY_CHOICES, { minutes: f.expiresAfterMinutes, label: `${f.expiresAfterMinutes}分` }]
@@ -147,12 +152,21 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
       {f.when === 'event' ? (
         <>
           <Row label="見張るやること（責任者が担当のもの）">
+            <Input aria-label="見張るやることを名前で探す" value={startText} placeholder="名前で探す"
+              onChange={(e) => { setStartText(e.target.value); setStartOffset(0) }} />
             <select aria-label="見張るやること" className={SELECT} value={f.startRecord} onChange={(e) => set('startRecord', e.target.value)}>
               <option value="">選んでください</option>
               {f.startRecord && !startRecords.some((r) => r.id === f.startRecord) && <option value={f.startRecord}>いま選ばれているやること</option>}
               {startRecords.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
             </select>
             {starts.data && startRecords.length === 0 && <span className="text-muted-foreground">責任者が担当の、まだ終わっていないやることがありません（あなたが見られるもの）</span>}
+            {startTotal > JOB_START_PAGE && (
+              <span className="flex items-center gap-2 text-muted-foreground">
+                {startTotal}件中 {startOffset + 1}〜{Math.min(startOffset + JOB_START_PAGE, startTotal)}件
+                <Button type="button" variant="outline" size="sm" disabled={startOffset === 0} onClick={() => setStartOffset(Math.max(0, startOffset - JOB_START_PAGE))}>前へ</Button>
+                <Button type="button" variant="outline" size="sm" disabled={startOffset + JOB_START_PAGE >= startTotal} onClick={() => setStartOffset(startOffset + JOB_START_PAGE)}>次へ</Button>
+              </span>
+            )}
           </Row>
           <Row label="きっかけ">
             <select aria-label="きっかけ" className={SELECT} value={f.eventTo} onChange={(e) => set('eventTo', e.target.value)}>

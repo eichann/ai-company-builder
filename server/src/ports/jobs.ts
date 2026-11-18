@@ -122,7 +122,10 @@ export interface JobRepository {
   /** Insert an occurrence unless its (job, slot) is there already (`UNIQUE`): false = it was (nothing written). */
   insertOccurrence(row: JobOccurrenceRow): boolean
   occurrence(occurrenceId: string): JobOccurrenceRow | null
-  /** A job's occurrences, newest first (events by delivery number, newest first, before time slots, newest slot first), from `offset`. */
+  /**
+   * A job's occurrences, newest first, from `offset`: by when each came — a time slot by its time, an event one by when
+   * it was made (a job whose trigger changed has both) — and events of one moment by delivery number.
+   */
   occurrences(jobId: string, limit: number, offset?: number): JobOccurrenceRow[]
   /** Occurrences in `due`, oldest due first (every job of the company). */
   dueOccurrences(limit: number): JobOccurrenceRow[]
@@ -143,8 +146,18 @@ export interface JobRepository {
   // Stage 4a, event-triggered jobs (jobs.md "Event-triggered jobs").
   /** The company's newest delivery number given so far (0: none): where a cursor or a gap starts "now". */
   ledgerSeqNow(): number
-  /** Ledger rows with a delivery number after `afterSeq`, in delivery order, at most `limit` (with their record's type). */
-  ledgerEvents(afterSeq: number, limit: number): LedgerEventRow[]
+  /**
+   * One record's ledger rows with a delivery number in (`afterSeq`, `upToSeq`], in delivery order, at most `limit`
+   * (with the record's type): what a job watching that record looks at (indexed by the record).
+   */
+  watchedEvents(recordId: string, afterSeq: number, upToSeq: number, limit: number): LedgerEventRow[]
+  /** The job's distinct event records, newest event first, at most `limit` (who may see its occurrences is who reads them). */
+  eventRecordsOf(jobId: string, limit: number): string[]
+  /**
+   * The job's newest occurrences (the order of `occurrences`), at most `limit`: every time slot, and the event ones of
+   * `records` only — leaving the others out in SQL, before the limit.
+   */
+  occurrencesOf(jobId: string, records: readonly string[], limit: number): JobOccurrenceRow[]
   /** Where the job's scan has looked up to and what it watches, or null: never accepted as an event job. */
   eventCursor(jobId: string): JobEventCursor | null
   /**

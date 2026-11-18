@@ -818,9 +818,13 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   `trigger.startRecord.NOT_FOUND`, for missing / unreadable: an answer never tells them apart); a viewer who does not
   read it gets the version without definition, fingerprints and trigger — owners and admins too (`readsStart`). The admin
   console offers the responsible person's open やること the admin reads (`POST /records/query`, `jobsApi.startChoices`).
-- **The scan** (`scan`, inside `makeOccurrences`, every company, each tick): per approved, active, accepted event job,
-  ledger rows **after its cursor by delivery number** (`ledgerEvents`, records.md "Delivery order"; never by `at`), at
-  most `EVENT_ROWS_PER_TICK` (500) per company and tick — the rest next tick from the cursor. The occurrence
+- **The scan** (`scan`, inside `makeOccurrences`, every company, each tick): **each** approved, active, accepted event job
+  on its own (`scanJob`, its own transaction and `try`: a job that throws is logged once while it keeps failing and holds
+  no other back; a job paused for long delays nobody), reading **only its watched record's** ledger rows after its cursor
+  **by delivery number** (`watchedEvents`, indexed by the record; records.md "Delivery order"; never by `at`), at most
+  `EVENT_ROWS_PER_TICK` (500) per job and tick — the rest next tick from the cursor; with nothing more of that record the
+  cursor moves straight up to the company's newest number (nothing else concerns the job: the runner moves the watch only
+  after the tick). The occurrence
   (`due_slot` `ev:<seq>`, `due_at` the event's time, `expires_at` from now, `event_seq` / `event_record_id` /
   `event_version` / `event_day`) and the cursor's move are one transaction (compare-and-set on the cursor); `UNIQUE
   (company, job, due_slot)` and the partial unique `(company, job, event_seq)` make one per event over two ticks or a
@@ -850,10 +854,17 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
 - **Who sees an event occurrence** (⑥, `eventShown`): only someone who reads its record now — owners and admins too.
   `GET /jobs/:jobId/occurrences` leaves the others out **before** the limit (page by page), the job's `lastOccurrence` is
   the newest the viewer may see, a notice is written only to those who read it then and shown only while they still do,
-  「もう一度」 / reconcile answer the same 404. Answers never carry `ev:<seq>`: `dueSlot` is the event's time in company
+  「もう一度」 / reconcile answer the same 404. The list's check is one batch per request (`shownOccurrences`: the job's
+  event records, newest first, at most `EVENT_RECORDS_CHECKED` (2000), read with one reader; SQL then leaves the others
+  out before the limit — `occurrencesOf`), so the work never depends on how many are hidden; event occurrences of older
+  records are left out (fails closed). Answers never carry `ev:<seq>`: `dueSlot` is the event's time in company
   time, with `kind: 'event'`. An event job has no `nextSlot`; 「もう一度」 of an event occurrence has no slot rule
   (`NOT_LATEST` / `NEXT_SLOT_SOON` do not apply).
-- **Screens**: the admin form's 「いつ動くか」 → 「見張っているやることが終わったときなどに」: 見張るやること (a list), きっかけ (a state),
+- **Order of a job's occurrences** (`OCCURRENCE_ORDER`, adapters/sqlite/jobs.ts): newest first by when each came — a time
+  slot by its `due_at`, an event one by when it was made — and events made together by delivery number (numerically: never
+  `ev:9` after `ev:10`), so a job whose trigger changed shows its newest occurrence first and 「もう一度」's `NOT_LATEST` sees
+  the right one. A job of time slots only reads exactly as before.
+- **Screens**: the admin form's 「いつ動くか」 → 「見張っているやることが終わったときなどに」: 見張るやること (a list searched by name and paged, `JOB_START_PAGE` 50 at a time), きっかけ (a state),
   「作ったやることも続けて見張る」, 1日の上限; the words are `job-words.ts` (`jobRecordTriggerText` — never the record's title
   —, `JOB_EVENT_NOTE`, the grant's day-limit line, the expiry line). The app shows the same sentences in 「受け取る」.
 - **Rolling back**: to 4-0 is safe (`deployment.md` "Rolling back production"); 4-0 reads schema 2 as nothing. A `due`
@@ -863,9 +874,14 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   duplicate, someone's tag, rename, undo and complete again, a missing target refused, the start record's readers, ⑧, ⑤,
   a new consent not accepted, the consent), `jobs-definition.test.ts` "an event trigger", `job-schemas.test.ts` (now with a
   later `schema: 3` as the unknown shape), `admin/tests/jobs.test.tsx` "an event job", `client/tests/jobs-ipc.test.ts`
-  (the header), `admin-contract.test.ts` (`startChoices`). Mutation check: 42 guards removed or inverted one at a time;
-  each fails its test file except two pairs where each alone suffices — the origin-mark check (every marked row is also an
-  `external` actor's) and the `ev:<seq>` slot (the partial unique index on `event_seq` stops a second occurrence too).
+  (the header), `admin-contract.test.ts` (`startChoices`). After the review of #700 also: a job paused while thousands of
+  rows came delays no other, a job that throws holds none back (logged once), two clocks (a pass whose cursor moved keeps
+  nothing), re-accepting the same start record keeps the chain, a limit-skipped target never fires later, the
+  still-watched recheck, the order of a mixed history, acceptance's trigger check, the limit notice shown to the
+  responsible person only, the start list's search and pages. Mutation check: 51 guards removed or inverted one at a time
+  (`job-events.test.ts` + `jobs-definition.test.ts`); each fails except the `ev:<seq>` slot, which the partial unique
+  index on `event_seq` also guards (each alone suffices). The still-watched recheck is a defence (only the runner moves
+  the watch, after acting); its test sets the watch directly.
 
 ## Tests (each guard mutation-checked, with the exceptions named)
 
