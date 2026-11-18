@@ -135,7 +135,7 @@ async function runnableJob(definition: Json, co = CO): Promise<string> {
   if (!made.ok) throw new Error(JSON.stringify(made.body))
   const approved = await jobs.approve(owner(co), made.value.id, { version: 1 }, READS_2)
   if (!approved.ok) throw new Error(JSON.stringify(approved.body))
-  const accepted = await jobs.accept(alice(co), made.value.id, { version: 1 }, READS_2)
+  const accepted = await jobs.accept(alice(co), made.value.id, { version: 1 }, READS_2, true)
   if (!accepted.ok) throw new Error(JSON.stringify(accepted.body))
   return made.value.id
 }
@@ -252,6 +252,21 @@ describe('the watched record (the narrowing every event trigger needs)', () => {
     await complete(start, alice())
     expect(tick()).toBe(0)
     expect(occurrencesOf(job)).toEqual([expect.objectContaining({ state: 'done', event_record_id: start })])
+  })
+
+  it('an admin approving their own event job does not start its watch: only their own separate 受け取る does', async () => {
+    const admin = m('u-admin', 'admin')
+    const start = ok(services.recordEngine.create(admin, HUMAN, { type: 'task', title: '自分の報告', fields: { assignee: 'u-admin' } })).record.id
+    const made = ok(await jobs.create(owner(), { definition: chain(start, { actingUser: 'u-admin' }) }, READS_2))
+    expect(ok(await jobs.approve(admin, made.id, { version: 1 }, READS_2))).toMatchObject({ accepted: false, waiting: 'NOT_ACCEPTED' })
+    // The acceptance an old admin console sends with the approval's press is refused: nothing is watched yet.
+    expect(await jobs.accept(admin, made.id, { version: 1 }, READS_2)).toMatchObject({ ok: false, body: { code: 'JOB_ACCEPT_SEPARATELY' } })
+    expect(cursorOf(made.id)).toBeUndefined()
+    ok(await jobs.accept(admin, made.id, { version: 1 }, READS_2, true))
+    expect(cursorOf(made.id)).toMatchObject({ watch_record_id: start })
+    await complete(start, admin)
+    expect(tick()).toBe(1)
+    expect(occurrencesOf(made.id)).toEqual([expect.objectContaining({ state: 'done', event_record_id: start })])
   })
 
   it('completed, undone and completed again before any tick: one occurrence', async () => {
@@ -497,7 +512,7 @@ describe('(5) paused or stopped', () => {
     ok(await jobs.approve(owner(), job, { version: 2 }, READS_2))
     await complete(start)
     expect(tick()).toBe(0)
-    ok(await jobs.accept(alice(), job, { version: 2 }, READS_2))
+    ok(await jobs.accept(alice(), job, { version: 2 }, READS_2, true))
     expect(tick()).toBe(0)
     expect(occurrencesOf(job)).toEqual([])
   })
@@ -582,7 +597,7 @@ describe('(5) paused or stopped', () => {
     const start = task('二度受け取る')
     const job = await runnableJob(chain(start))
     await complete(start)
-    ok(await jobs.accept(alice(), job, { version: 1 }, READS_2))
+    ok(await jobs.accept(alice(), job, { version: 1 }, READS_2, true))
     expect(tick()).toBe(1)
   })
 
@@ -725,7 +740,7 @@ describe('the watched record across versions, and the order of a job\'s occurren
     // A new title: alice accepts again, the start record is the same.
     ok(await jobs.update(owner(), job, { definition: chain(start, { run: { ...chain('x').run, title: '題だけ変える' } }) }, READS_2))
     ok(await jobs.approve(owner(), job, { version: 2 }, READS_2))
-    ok(await jobs.accept(alice(), job, { version: 2 }, READS_2))
+    ok(await jobs.accept(alice(), job, { version: 2 }, READS_2, true))
     expect(cursorOf(job)).toMatchObject({ watch_record_id: made.id })
     await reopen(start)
     await complete(start)
@@ -749,7 +764,7 @@ describe('the watched record across versions, and the order of a job\'s occurren
     const made = ok(await jobs.create(owner(), { definition: chain(start, {}, { to: 'review' }) }, READS_2))
     ok(await jobs.approve(owner(), made.id, { version: 1 }, READS_2))
     aiSteps = { task: ['review'] }
-    expect(await jobs.accept(alice(), made.id, { version: 1 }, READS_2)).toMatchObject({ ok: false, body: { code: 'JOB_TRIGGER_NOT_ALLOWED' } })
+    expect(await jobs.accept(alice(), made.id, { version: 1 }, READS_2, true)).toMatchObject({ ok: false, body: { code: 'JOB_TRIGGER_NOT_ALLOWED' } })
     expect(cursorOf(made.id)).toBeUndefined()
   })
 
@@ -838,7 +853,7 @@ describe('① a stopped chain', () => {
     ok(await jobs.update(owner(), job, { definition: chain(start, { run: { ...chain('x').run, title: '別の題・先に受け取る' } }) }, READS_2))
     ok(await jobs.approve(owner(), job, { version: 2 }, READS_2))
     await complete(start)
-    ok(await jobs.accept(alice(), job, { version: 2 }, READS_2))
+    ok(await jobs.accept(alice(), job, { version: 2 }, READS_2, true))
     expect(tick()).toBe(0)
     await expectStopped(job, /仕事の内容が変わったため/)
   })

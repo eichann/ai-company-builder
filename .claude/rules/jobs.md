@@ -110,7 +110,8 @@ GET  /jobs/:jobId                   the same people, with every version (newest 
 POST /jobs { definition }           owner/admin → 201 (draft, version 1)
 PUT  /jobs/:jobId { definition }    owner/admin → a new version (same definition: changed false); the approved one stays
 POST /jobs/:jobId/approve { version, fingerprint? }     owner/admin
-POST /me/jobs/:jobId/accept { version, fingerprint? }   the version's responsible person only, an approved version only
+POST /me/jobs/:jobId/accept { version, fingerprint? }   the version's responsible person only, an approved version only,
+                                                        its own press (X-ACB-Job-Accept: separate, or the desktop app)
 POST /jobs/:jobId/pause | resume    owner/admin; the responsible person their own (resume: only their own pause)
 PUT  /jobs-stop { stopped }         owner/admin
 ```
@@ -131,6 +132,23 @@ PUT  /jobs-stop { stopped }         owner/admin
   `JOB_SKILL_MISSING` / `JOB_SKILL_CHANGED`: make a new version). A `fingerprint` that is not the
   version's → 409 `JOB_VERSION_FINGERPRINT`. **Acceptance and every resume of an approved job run the
   same rights and Skill checks.**
+- **Approving is not accepting — two presses, also for the same person** (owner decision 2026-11-18, memo 「AI が自動化を
+  提案する」 ⑦): an owner/admin who approves a job they are themselves the responsible person of has approved it as an
+  admin only; their consent to it running with their rights is their own 「受け取る」 afterwards, checked like any
+  acceptance (responsible person, approved version, fingerprint, rights, Skill, place, the consent canonical). Until then
+  it is `NOT_ACCEPTED` and nothing runs (held, as for anyone). The server holds the split: **an acceptance is refused**,
+  as the last check before the write (409 `JOB_ACCEPT_SEPARATELY`, 「承認はできました。…「受け取る」を別に押してください（この画面は
+  古いため、画面を新しくしてください）」, `JOB_ACCEPT_SEPARATELY` in `shared/core/jobs.ts`), unless the request says its
+  「受け取る」 is a press of its own — header `X-ACB-Job-Accept: separate` (`JOB_ACCEPT_HEADER`,
+  sent by the admin console's 受け取る and every job call of the desktop app) — or comes from the desktop app
+  (`X-ACB-Client-Version`: every released app's 受け取る always was its own press). An admin console from before the split
+  (a tab left open) approved and then accepted with the same press without the header: its approval stays, its
+  acceptance is refused and shown as 「承認しましたが、受け取れませんでした」 with that sentence. An older server ignores the
+  header. Not judged by who approved: `approved_by` keeps a version's first approver, so an old tab re-approving a version
+  someone else approved first would pass such a check (independent review of #702); no caller but the old console's
+  approval press sends neither header. **Not** split: an event
+  job's 「見張るやることを選び直す」 (`POST /me/jobs/:jobId/watch`), where the responsible person alone chooses the next
+  watched やること and no admin approval is involved ("Event-triggered jobs").
 - **A Skill from the shelf** (PR 5a, owner decision: companies without the shared folder must work too): in a
   company without the shared folder a procedure names `{ source: 'shelf_skill', item }` and the server fills
   `skill` and `fingerprint` from the shelf (`services/skill-shelf.ts` `jobSkill`, the shelf's own read check:
@@ -396,8 +414,8 @@ reports.
   naming none takes none (400). Kept on the job (`ai_jobs.accepted_place`, additive `migrateJobAcceptedPlace`); accepting
   again with another place replaces it. The place is part of the consent (`jobConsentCanonical` covers the grant), so a
   version that adds, removes or changes the kind asks for a new acceptance; the folder itself is the person's own choice.
-  An owner/admin approving their own such job does **not** accept it with the same press (the admin console has no
-  Picker): the dialog says to choose it in the app.
+  An owner/admin approving their own such job accepts it in the app (the admin console has no Picker, so its
+  「責任者として受け取る」 is not offered for such a job): the dialog and the list say to choose it there.
 - **What the person sees**: `JobView.deliverTo` (`label`, `chosen`, `usable`; the folder's `name` and `expiresAt` only
   to the responsible person — a Drive folder's name is theirs, owners / admins see neither); the grant's words say
   「できたものを置く先：Google Drive のフォルダ（責任者が受け取るときに選ぶ1か所だけ…）」. The app's 「受け取る」 reads the job
@@ -614,9 +632,15 @@ sentences the admin approved.
     （責任者のアプリが開いていて「自動で進める」が入っているときに動きます）」, badge 「PC で動きます」).
   - **Approval** shows the newest version's words and sends its `fingerprint` (the server refuses another).
     It says whether the responsible person must accept again from `latestConsentAccepted`, and its message
-    afterwards comes from the answer (`approvedText`: 受け取り待ち, or what `jobRunsText` says now). **Approving one's own job also accepts it** in the approver's own
-    name (`POST /me/jobs/:jobId/accept` with the same version and fingerprint; the dialog says so before
-    the press) — the server would not tell them (below).
+    afterwards comes from the answer (`approvedText`: 受け取り待ち, or what `jobRunsText` says now). **Approving one's own
+    job never accepts it** (owner decision 2026-11-18, "Approving is not accepting" above): the dialog says before the
+    press that the approval is an admin's and the consent to run it with their rights is pressed separately
+    (`JOB_OWN_APPROVAL_NOTE`), and the message afterwards says it does not run until their 「受け取る」.
+  - **The owner/admin's own 「受け取る」**: a row whose `you.mustAccept` is true says 「あなたが責任者です。…「責任者として
+    受け取る」を押すまで動きません」 and offers 「責任者として受け取る」 (`JobAcceptDialog`): the approved version's words,
+    「責任者として、この仕事をあなたの権限で動かすことに同意します。承認とは別の操作です。」, one 受け取る that sends that
+    version and its fingerprint with `X-ACB-Job-Accept: separate` (`jobsApi.accept`). A job that puts into a place outside is
+    not accepted here (no Picker): the row says to choose the place in the app.
 - **The app** — Settings → 仕事 → 「定期の仕事」 (`client/src/features/jobs/`, IPC `jobs:mine` / `accept` /
   `pause` / `resume`, `client/electron/features/jobs/ipc.ts`, with the member's session): `jobs:mine` reads
   `GET /jobs` and keeps, **first**, the jobs the server says are the member's (`you`: named, controls or
@@ -639,7 +663,8 @@ sentences the admin approved.
 `job_accept_needed` (「定期の仕事「…」の責任者になりました。内容を確かめて「受け取る」を押してください（受け取るまで動きません）」,
 or, when they had accepted an earlier version as its responsible person, 「あなたが責任者の定期の仕事「…」の内容が
 変わりました。確かめて「受け取る」を押してください…」; recordless, on by default): written in the approval's transaction to the approved version's responsible
-person when its consent is not the one accepted — **never the approver themself** — key
+person when its consent is not the one accepted — **also when they approved it themself** (approving is not
+accepting, owner decision 2026-11-18; before, the self-approver was never told) — key
 `job_accept_needed:<job>:<version>` (once per version), then the bare `notifications` push to them. Built
 when read (`jobs.acceptNotice`): shown only while that version is still the approved one, the reader is
 its responsible person and has not accepted it, the job not retired — so an old ask (accepted, handed to
@@ -934,6 +959,20 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
 
 ## Tests (each guard mutation-checked, with the exceptions named)
 
+- Two presses (owner decision 2026-11-18): `server/tests/integration/jobs.test.ts` "approving one's own job is not
+  accepting it" (approved, `NOT_ACCEPTED`, `mustAccept`; an acceptance without the header or with another value refused
+  `JOB_ACCEPT_SEPARATELY`; the separate one still the responsible person's only, the fingerprint checked, then accepted)
+  "an old admin tab re-approving a version someone else approved first", and "the desktop app's 受け取る"
+  (`X-ACB-Client-Version` alone goes through); "PR 4" the self-approver's notice;
+  `job-occurrences.test.ts` "an owner approving their own job does not run it" (held `NOT_ACCEPTED`, runs after the
+  separate press); `job-events.test.ts` "an admin approving their own event job" (no watch until the separate press);
+  `admin/tests/jobs.test.tsx` "approving one's own job is not accepting it" and the place-outside row;
+  `client/tests/jobs-ipc.test.ts` (the header on every job call). Mutation-checked: the service's guard, the route's
+  header value, the app-caller allowance, the route always allowing, the notice's old self-approver exclusion, the admin's
+  header, its approval accepting again, the guard narrowed to the version's approver (the re-approval test), the row's button and its place-outside exclusion — each fails a test. The accept
+  dialog's own `placeOutside` check is behind the row's (it is never opened for such a job), so removing it alone
+  changes nothing.
+
 3b's guards were each removed or inverted alone and the test file failed — except: the runner's early
 "still `due`" exit (the compare-and-set and the task id each still stop a second やること), `latest_only`
 (by construction: only the newest slot is ever computed, covered by "missed slots" but not a line to
@@ -972,7 +1011,7 @@ membership can fail).
   1 January moved back to 31 December found on that day (`latestJobSlot` at 12-31 09:05, `nextJobSlot`
   from 12-20).
 - `server/tests/integration/jobs.test.ts` "PR 4" — the acceptance notice to the responsible person only,
-  once per version, not for a consent already accepted, never the self-approver, gone once accepted /
+  once per version, not for a consent already accepted, the self-approver too (gone after their own 受け取る), gone once accepted /
   handed over / superseded by a newer approved version, the neutral name; a view's trigger, next slot and
   last occurrence (the approved trigger, not a newer draft's). `acceptNotice`'s responsible-person check
   survives its mutation: a notice row is only ever written to that person, and someone no longer
@@ -987,7 +1026,8 @@ membership can fail).
 - `admin/tests/jobs.test.tsx` — the form makes the operation only and the parser accepts it; editing a name
   or time keeps the consent; a PC job through the same parser (5a-2); approval sends the version shown and its fingerprint,
   says whether acceptance is needed from the server's answer (also back to an accepted consent), does not
-  accept for someone else, accepts one's own, and says what will happen; the list's 責任者 is the approved
+  accept for someone else, never accepts one's own with the approval's press — its 「責任者として受け取る」 is a
+  press of its own, sent with `X-ACB-Job-Accept: separate`, not offered for a place outside — and says what will happen; the list's 責任者 is the approved
   version's and a PC job says it needs the app; the stop asks first; a pause reason and occurrences in words;
   nobody else reads the page.
 - `server/tests/integration/job-runs.test.ts` (PR 5a) — the turns and the claim the responsible person's

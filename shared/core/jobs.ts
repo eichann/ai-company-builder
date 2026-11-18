@@ -618,6 +618,19 @@ export function parseJobSchemasHeader(value: string | null | undefined): number[
   return [...new Set([1, ...announced])].sort((a, b) => a - b)
 }
 
+/**
+ * Approving and accepting are two presses (owner decision 2026-11-18, memo 「AI が自動化を提案する」 ⑦): an
+ * owner/admin approving a job they are themselves responsible for has not consented to it running with their
+ * rights. A client whose 「受け取る」 is its own press says so on the acceptance (`X-ACB-Job-Accept: separate`). An
+ * admin console from before it made the acceptance part of the approval's press, so the server refuses an
+ * acceptance by that version's own approver without it (`JOB_ACCEPT_SEPARATELY`) — unless it comes from the desktop
+ * app, whose 「受け取る」 always was a press of its own. An older server ignores the header.
+ */
+export const JOB_ACCEPT_HEADER = 'X-ACB-Job-Accept'
+export const JOB_ACCEPT_SEPARATE = 'separate'
+/** What an approver who pressed only 承認する is told when an old screen tried to accept with the same press. */
+export const JOB_ACCEPT_SEPARATELY = '承認はできました。この仕事をあなたの権限で動かすには、内容を確かめてから「受け取る」を別に押してください（この画面は古いため、画面を新しくしてください）'
+
 /** What a screen says where a job's definition is of a shape it cannot show (the admin console, stage 4-0). */
 export const JOB_NEEDS_NEWER_SCREEN = 'この画面では編集できません。画面を新しくしてください'
 /** The same refusal to the desktop app (stage 4a): there the app must be updated, not a screen reloaded. */

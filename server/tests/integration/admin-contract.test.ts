@@ -25,6 +25,7 @@ import { dirname, join, resolve } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { loadTypeShapes, type TypeShapes } from '../helpers/type-shape'
+import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE } from '../../shared/core/jobs'
 
 const currentUser = vi.hoisted(() => ({ id: 'ac-owner' as string | null }))
 
@@ -175,6 +176,8 @@ const knownSeen = new Set<string>()
 async function call(user: string | null, method: string, path: string, body?: unknown): Promise<{ status: number; json: Loose }> {
   currentUser.id = user
   const init: RequestInit = { method, headers: {} }
+  // The console's 受け取る says it is a press of its own, as `jobsApi.accept` does (jobs.md "Approving is not accepting").
+  if (/\/me\/jobs\/[^/]+\/accept$/.test(path)) (init.headers as Record<string, string>)[JOB_ACCEPT_HEADER] = JOB_ACCEPT_SEPARATE
   if (body !== undefined) {
     init.body = JSON.stringify(body)
     ;(init.headers as Record<string, string>)['Content-Type'] = 'application/json'

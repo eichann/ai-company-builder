@@ -198,22 +198,22 @@ afterAll(async () => {
 describe('accepting a job that puts into a place outside', () => {
   it('needs the place: of its connector and kind, the responsible person\'s own live pick; the name only to them', async () => {
     const job = await approvedJob()
-    expect((await services.jobs.accept(alice(), job, { version: 1 })).body.code).toBe('JOB_PLACE_NEEDED')
-    expect((await services.jobs.accept(alice(), job, { version: 1, place: { connector: 'google', kind: 'drive_file', ref: FOLDER } })).body.code).toBe('BAD_REQUEST')
-    expect((await services.jobs.accept(alice(), job, { version: 1, place: { connector: 'onedrive', kind: 'drive_folder', ref: FOLDER } })).body.code).toBe('BAD_REQUEST')
+    expect((await services.jobs.accept(alice(), job, { version: 1 }, undefined, true)).body.code).toBe('JOB_PLACE_NEEDED')
+    expect((await services.jobs.accept(alice(), job, { version: 1, place: { connector: 'google', kind: 'drive_file', ref: FOLDER } }, undefined, true)).body.code).toBe('BAD_REQUEST')
+    expect((await services.jobs.accept(alice(), job, { version: 1, place: { connector: 'onedrive', kind: 'drive_folder', ref: FOLDER } }, undefined, true)).body.code).toBe('BAD_REQUEST')
     // Not her pick: a folder she never picked, a picked file, a folder only someone else picked.
-    expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: 'fake-folder-not-picked-0001' } })).body.code).toBe('JOB_PLACE_NOT_USABLE')
+    expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: 'fake-folder-not-picked-0001' } }, undefined, true)).body.code).toBe('JOB_PLACE_NOT_USABLE')
     db.prepare('INSERT INTO google_drive_picks (company_id, user_id, file_id, kind, name, mime_type, picked_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(CO, 'jd-bob', 'fake-folder-bobs-only-0001', 'folder', '田中さんのフォルダ', 'application/vnd.google-apps.folder', new Date().toISOString(), new Date(Date.now() + DAY).toISOString())
-    expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: 'fake-folder-bobs-only-0001' } })).body.code).toBe('JOB_PLACE_NOT_USABLE')
+    expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: 'fake-folder-bobs-only-0001' } }, undefined, true)).body.code).toBe('JOB_PLACE_NOT_USABLE')
     // A file she picked is not a folder.
     google.pick(CLIENT_ID, EMAILS['jd-alice'], [GOOGLE_SEED.pastProposalDoc])
     expect((await as('jd-alice', 'POST', '/me/google/drive/picks', { mode: 'files', ids: [GOOGLE_SEED.pastProposalDoc] })).body.data.picks).toHaveLength(1)
-    expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: GOOGLE_SEED.pastProposalDoc } })).body.code).toBe('JOB_PLACE_NOT_USABLE')
+    expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: GOOGLE_SEED.pastProposalDoc } }, undefined, true)).body.code).toBe('JOB_PLACE_NOT_USABLE')
     expect((await services.jobs.get(alice(), job)).value.accepted).toBe(false)
     // The acceptance notice says the place is chosen there (an older app cannot: it says to update).
     expect(services.jobs.acceptNotice(alice(), job, 1)).toMatchObject({ choosesPlace: true })
-    const ok = await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })
+    const ok = await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)
     expect(ok.ok, JSON.stringify(ok.body)).toBe(true)
     expect(ok.value.deliverTo).toMatchObject({ ...PLACE, label: 'Google Drive のフォルダ', chosen: true, usable: true, name: '提案書' })
     // An owner sees that a place was chosen and is usable, never its name.
@@ -224,14 +224,14 @@ describe('accepting a job that puts into a place outside', () => {
     const plain = await services.jobs.create(owner(), { definition: withoutPlace(skill()) })
     expect(plain.ok, JSON.stringify(plain.body)).toBe(true)
     await services.jobs.approve(owner(), plain.value.id, { version: 1 })
-    expect((await services.jobs.accept(alice(), plain.value.id, { version: 1, place: { ...PLACE, ref: FOLDER } })).body.code).toBe('BAD_REQUEST')
+    expect((await services.jobs.accept(alice(), plain.value.id, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)).body.code).toBe('BAD_REQUEST')
   })
 })
 
 describe('the run puts only into the folder chosen', () => {
   it('the claim names the place; its token reaches the place\'s routes only, puts there only, and never reads', async () => {
     const job = await approvedJob()
-    expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+    expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)).ok).toBe(true)
     const occ = dueOccurrence(job)
     const c = await claim(occ)
     expect(c.status, c.text).toBe(201)
@@ -275,7 +275,7 @@ describe('the run puts only into the folder chosen', () => {
     const plain = await services.jobs.create(owner(), { definition: withoutPlace(skill()) })
     const job = plain.value.id
     await services.jobs.approve(owner(), job, { version: 1 })
-    expect((await services.jobs.accept(alice(), job, { version: 1 })).ok).toBe(true)
+    expect((await services.jobs.accept(alice(), job, { version: 1 }, undefined, true)).ok).toBe(true)
     const c = await claim(dueOccurrence(job))
     const token = await runToken(c.body.data.run)
     for (const [method, path, body] of [['GET', '/google/drive/status', undefined], ['POST', '/google/drive/put', putBody()]] as const) {
@@ -283,7 +283,7 @@ describe('the run puts only into the folder chosen', () => {
     }
     // With a place, paused: the next call is refused.
     const placed = await approvedJob()
-    await services.jobs.accept(alice(), placed, { version: 1, place: { ...PLACE, ref: FOLDER } })
+    await services.jobs.accept(alice(), placed, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)
     const c2 = await claim(dueOccurrence(placed))
     const t2 = await runToken(c2.body.data.run)
     expect((await ai(t2, 'GET', '/google/drive/status')).status).toBe(200)
@@ -297,7 +297,7 @@ describe('the run puts only into the folder chosen', () => {
 describe('a folder pick past its 90 days (decision: never renewed by itself; a person chooses again)', () => {
   it('the claim sends the occurrence to a person and tells; choosing the folder again with 「受け取る」 makes the next one run', async () => {
     const job = await approvedJob()
-    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })
+    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)
     expirePicks()
     try {
       expect((await services.jobs.get(alice(), job)).value.deliverTo).toMatchObject({ chosen: true, usable: false, name: null })
@@ -309,11 +309,11 @@ describe('a folder pick past its 90 days (decision: never renewed by itself; a p
       const told = db.prepare("SELECT user_id FROM notifications WHERE company_id = ? AND kind = 'job_failed' AND dedupe_key LIKE ?").all(CO, `%${occ}%`) as Json[]
       expect(told.map(n => n.user_id).sort()).toEqual(['jd-alice', 'jd-owner'])
       // Re-accepting with the stale folder is refused; picking it again (the Picker) renews it.
-      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).body.code).toBe('JOB_PLACE_NOT_USABLE')
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)).body.code).toBe('JOB_PLACE_NOT_USABLE')
     } finally {
       await pickFolder('jd-alice', FOLDER)
     }
-    expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+    expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)).ok).toBe(true)
     expect((await claim(dueOccurrence(job))).status).toBe(201)
   })
 
@@ -322,7 +322,7 @@ describe('a folder pick past its 90 days (decision: never renewed by itself; a p
     try {
       vi.setSystemTime(new Date('2026-11-20T00:00:00.000Z'))
       const job = await approvedJob()
-      await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })
+      await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)
       vi.setSystemTime(new Date('2026-11-21T01:00:00.000Z'))
       // The composed server clock (composition.ts → wireJobOccurrences' `placeUsable`), not a hand-built one: the
       // wiring between the occurrences and the connector's live place is what is protected here.
@@ -356,7 +356,7 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
 
   it('updates only what runs of the same job put; never a consultation\'s file in that folder', async () => {
     const job = await approvedJob()
-    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })
+    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)
     // A consultation (no run) put a file into the same folder.
     const consultation = await (async () => {
       const r = await as('jd-alice', 'POST', '/me/record-tokens', { conversationId: 'conv-plain', agent: 'claude-code', scope: 'act' })
@@ -387,7 +387,7 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
     expect(google.requests.length).toBe(calls)
     // Another job of hers, into the same folder: never this job's file to update (nor listed for it).
     const other = await approvedJob()
-    await services.jobs.accept(alice(), other, { version: 1, place: { ...PLACE, ref: FOLDER } })
+    await services.jobs.accept(alice(), other, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)
     const otherRun = await claim(dueOccurrence(other))
     const t3 = await runToken(otherRun.body.data.run)
     expect((await ai(t3, 'GET', '/google/drive/status')).body.data.puts.map((p: Json) => p.fileId)).not.toContain(mine.fileId)
@@ -400,7 +400,7 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
 
   it('a run\'s put renews its folder (90 days); a run never continues a document people changed; a lapsed folder is said plainly', async () => {
     const job = await approvedJob()
-    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })
+    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)
     const run = await claim(dueOccurrence(job))
     const t = await runToken(run.body.data.run)
     const folderEnds = () => Date.parse((db.prepare("SELECT expires_at FROM google_drive_picks WHERE company_id = ? AND user_id = 'jd-alice' AND file_id = ?").get(CO, FOLDER) as Json).expires_at)
@@ -439,7 +439,7 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
 
   it('a receipt of another folder is not there for a run (nothing answered, Google not asked)', async () => {
     const job = await approvedJob()
-    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })
+    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)
     db.prepare(`INSERT INTO google_drive_puts (id, company_id, user_id, request_key, actor_kind, conversation_id, run_id, folder_id, folder_name, name, mime_type, bytes, sha256, state,
       file_id, revision_id, link, reason, created_at, finished_at) VALUES ('drive-put-elsewhere-0001', ?, 'jd-alice', 'key-elsewhere-01', 'ai', NULL, NULL, 'fake-folder-elsewhere-0001',
       '経理のフォルダ', '予算.pdf', 'application/pdf', 1, ?, 'unknown', NULL, NULL, NULL, 'answer-lost', ?, NULL)`).run(CO, 'a'.repeat(64), new Date().toISOString())
@@ -457,7 +457,7 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
   // the folder to claim, so the company's kind is switched for the finish only: the link reads it then.)
   it('a company with the shared folder: the finish links only this run\'s own puts to its やること', async () => {
     const job = await approvedJob()
-    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })
+    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)
     const consultation = (await as('jd-alice', 'POST', '/me/record-tokens', { conversationId: 'conv-plain-2', agent: 'claude-code', scope: 'act' })).body.data.token as string
     const theirs = (await ai(consultation, 'POST', '/google/drive/put', putBody({ name: '相談で置いた.md' }))).body.data.drivePut
     const earlier = await claim(dueOccurrence(job))
@@ -484,7 +484,7 @@ describe('review fixes (#678): a run sees and changes only its own job\'s files 
 
   it('a repeat of an earlier put (nothing uploaded again) is still linked to this run\'s やること; a pick that lapsed mid-run still links what was put', async () => {
     const job = await approvedJob()
-    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })
+    await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)
     const body = putBody({ name: '同じ報告.md' })
     const first = await claim(dueOccurrence(job))
     const t1 = await runToken(first.body.data.run)
@@ -534,7 +534,7 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
     try {
       const { noon, slot: today } = atNoon()
       const job = await approvedJob()
-      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)).ok).toBe(true)
       const occ = todaysOccurrence(job, noon, today)
       // The first run puts its weekly report, then fails: a person looks.
       const first = await claim(occ)
@@ -602,7 +602,7 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
     try {
       const { noon, slot: today } = atNoon()
       const job = await approvedJob()
-      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)).ok).toBe(true)
       const occ = todaysOccurrence(job, noon, today)
       const first = await claim(occ)
       const t1 = await runToken(first.body.data.run)
@@ -634,7 +634,7 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
     try {
       const { noon, slot: today } = atNoon()
       const job = await approvedJob()
-      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)).ok).toBe(true)
       // A consultation (no run) put the very same file first.
       const consultation = (await as('jd-alice', 'POST', '/me/record-tokens', { conversationId: 'conv-plain-2', agent: 'claude-code', scope: 'act' })).body.data.token as string
       const body = putBody({ name: '相談で置いた.md' })
@@ -660,7 +660,7 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
       const { noon, slot: today } = atNoon()
       // Another job of hers, into the same folder, put the very same file first (its receipt carries its run's id).
       const other = await approvedJob()
-      expect((await services.jobs.accept(alice(), other, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      expect((await services.jobs.accept(alice(), other, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)).ok).toBe(true)
       const otherRun = await claim(todaysOccurrence(other, noon, today))
       expect(otherRun.status, otherRun.text).toBe(201)
       const body = putBody({ name: '別の仕事の.md' })
@@ -669,7 +669,7 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
       expect((db.prepare('SELECT run_id FROM google_drive_puts WHERE company_id = ? AND id = ?').get(CO, theirs.id) as Json).run_id).toBe(otherRun.body.data.run.id)
       vi.setSystemTime(noon + 60_000)
       const job = await approvedJob()
-      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)).ok).toBe(true)
       const occ = todaysOccurrence(job, noon, today)
       const first = await claim(occ)
       expect(first.status, first.text).toBe(201)
@@ -689,7 +689,7 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
     try {
       const { noon, slot: today } = atNoon()
       const job = await approvedJob()
-      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } }, undefined, true)).ok).toBe(true)
       const occ = todaysOccurrence(job, noon, today)
       const run = (await claim(occ)).body.data.run
       // An operation of the run naming her own done receipt in another folder (not the job's place).

@@ -1,7 +1,8 @@
 'use client'
 
 // 「定期の仕事」's dialogs (jobs.md "The screens"): the form that makes a version, the approval that shows
-// exactly the version approved (and whether its responsible person must accept again). The occurrences are
+// exactly the version approved (and whether its responsible person must accept again), and an owner/admin's own
+// 「受け取る」 as the responsible person — a press of its own, never part of the approval. The occurrences are
 // job-occurrences.tsx. The definition is checked by the shared parser before it is sent; the server decides.
 import { useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
@@ -292,7 +293,11 @@ export function JobVersionWords({ definition, members }: { definition: JobDefini
   )
 }
 
-/** Approve the newest version, showing exactly it (sent back with its fingerprint: the server refuses another). */
+/**
+ * Approve the newest version, showing exactly it (sent back with its fingerprint: the server refuses another).
+ * Approving is never accepting (owner decision 2026-11-18): also when the approver is the responsible person, their
+ * consent to run it with their rights is its own press afterwards (`JobAcceptDialog`).
+ */
 export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }: {
   job: JobView
   members: Member[]
@@ -312,7 +317,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
   const mustAccept = detail.data?.latestConsentAccepted !== true
   const who = definition ? personName(members.find((m) => m.userId === definition.actingUser)) : ''
   const own = definition !== null && definition.actingUser === myUserId
-  // A place outside is chosen by the responsible person in their app when accepting: never here, also not for oneself.
+  // A place outside is chosen by the responsible person in their app when accepting: never here.
   const placeOutside = definition?.grant.deliverTo !== undefined
 
   const approve = async () => {
@@ -320,20 +325,9 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
     setBusy(true)
     setProblem(null)
     try {
-      let next = await jobsApi.approve(companyId, job.id, newest.version, newest.fingerprint)
+      const next = await jobsApi.approve(companyId, job.id, newest.version, newest.fingerprint)
       onApproved(next)
-      // Their own job: the approver accepts it in their own name with the same press (the note says so).
-      if (own && mustAccept && !placeOutside) {
-        try {
-          next = await jobsApi.accept(companyId, job.id, newest.version, newest.fingerprint)
-          onApproved(next)
-        } catch (err) {
-          toast.error('承認しましたが、受け取れませんでした', { description: describeError(err) })
-          onClose()
-          return
-        }
-      }
-      toast.success(approvedText(newest.version, next, who))
+      toast.success(approvedText(newest.version, next, own ? null : who))
       onClose()
     } catch (err) {
       setProblem(describeError(err))
@@ -357,10 +351,12 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
           <div className="space-y-3">
             <JobVersionWords definition={definition} members={members} />
             <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm" role="note">
-              {own && placeOutside
-                ? 'あなたが責任者です。できたものを置く先は、承認したあとにあなたのアプリの「設定」→「仕事」→「定期の仕事」で選んで受け取ってください（それまで動きません）。'
+              {own && !mustAccept
+                ? 'あなたは責任者として、この内容（だれの権限で・何を・どこで）をすでに受け取っています。承認すると、受け取り直しなしでこの版に切り替わります。'
+                : own && placeOutside
+                ? `あなたが責任者です。${JOB_OWN_APPROVAL_NOTE}できたものを置く先は、承認したあとにあなたのアプリの「設定」→「仕事」→「定期の仕事」で選んで受け取ってください。`
                 : own
-                ? 'あなたが責任者です。承認すると、あなたの名前で受け取ったことにもなります。'
+                ? `あなたが責任者です。${JOB_OWN_APPROVAL_NOTE}承認したあと、この画面の「受け取る」を押してください。`
                 : mustAccept
                   ? `承認したあと、${who}さんが内容を確かめて「受け取る」を押すまで動きません（${who}さんに知らせが届きます）。`
                   : `${who}さんは、この内容（だれの権限で・何を・どこで）をすでに受け取っています。承認すると、受け取り直しなしでこの版に切り替わります。`}
@@ -377,8 +373,88 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
   )
 }
 
-/** What the approval did, from the job as the server answered it (it may still not run: paused, stopped, a PC job). */
-export function approvedText(version: number, after: JobView, who: string): string {
-  if (after.waiting === 'NOT_ACCEPTED') return `第${version}版を承認しました。${who}さんの受け取りを待ちます`
+/** What the approval note says when the approver is the responsible person: approving does not consent for them. */
+export const JOB_OWN_APPROVAL_NOTE = '承認は、管理者として内容を認めることです。あなたの権限で動かすことへの同意（「受け取る」）は、承認とは別に押します。受け取るまで動きません。'
+
+/**
+ * The responsible person's own 「受け取る」 for an owner/admin (`you.mustAccept`): the approved version's words, then
+ * one press that consents to it running with their rights — never part of an approval (owner decision 2026-11-18).
+ * A job that puts into a place outside is accepted in the app, where that place is chosen; it is not offered here.
+ */
+export function JobAcceptDialog({ job, members, onClose, onAccepted }: {
+  job: JobView
+  members: Member[]
+  onClose: () => void
+  onAccepted: (next: JobView) => void
+}) {
+  const { companyId } = useCompany()
+  const detail = useQuery(`job:${companyId}:${job.id}`, () => jobsApi.get(companyId, job.id))
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string | null>(null)
+  const version = (detail.data?.versions ?? []).find((v) => v.version === job.approvedVersion) ?? null
+  const definition = editableDefinition(version)
+  const tooNew = needsNewerScreen(version)
+  const placeOutside = definition?.grant.deliverTo !== undefined
+
+  const accept = async () => {
+    if (!version?.fingerprint || tooNew || placeOutside) return
+    setBusy(true)
+    setProblem(null)
+    try {
+      const next = await jobsApi.accept(companyId, job.id, version.version, version.fingerprint)
+      onAccepted(next)
+      toast.success(acceptedText(version.version, next))
+      onClose()
+    } catch (err) {
+      setProblem(describeError(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && !busy && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{version ? `第${version.version}版を受け取りますか？` : '受け取る'}</DialogTitle>
+          <DialogDescription>責任者として、この仕事をあなたの権限で動かすことに同意します。承認とは別の操作です。</DialogDescription>
+        </DialogHeader>
+        {!detail.data ? (
+          detail.error ? <p role="alert" className="text-sm text-destructive">{describeError(detail.error)}</p> : <ListSkeleton rows={4} />
+        ) : tooNew ? (
+          <p role="note" className="text-sm">{JOB_NEEDS_NEWER_SCREEN}</p>
+        ) : definition ? (
+          <div className="space-y-3">
+            <JobVersionWords definition={definition} members={members} />
+            <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm" role="note">
+              {placeOutside
+                ? 'できたものを置く先を選んで受け取るので、あなたのアプリの「設定」→「仕事」→「定期の仕事」で受け取ってください。'
+                : '受け取ると、この内容のとおりにあなたの名前と権限で動きます。違うところがあれば、受け取らずに直してください。'}
+            </p>
+          </div>
+        ) : null}
+        {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>キャンセル</Button>
+          <Button onClick={() => void accept()} disabled={busy || !version?.fingerprint || tooNew || placeOutside}>受け取る</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * What the approval did, from the job as the server answered it (it may still not run: paused, stopped, a PC job).
+ * `who` null: the approver is the responsible person — it waits for their own 「受け取る」.
+ */
+export function approvedText(version: number, after: JobView, who: string | null): string {
+  if (after.waiting === 'NOT_ACCEPTED') {
+    return who === null ? `第${version}版を承認しました。まだ動きません。あなたが「受け取る」を押すと動き始めます` : `第${version}版を承認しました。${who}さんの受け取りを待ちます`
+  }
   return `第${version}版を承認しました。いまは「${jobRunsText(after.waiting, after.pausedReason, after.placement)}」です`
+}
+
+/** What the acceptance did, from the job as the server answered it. */
+export function acceptedText(version: number, after: JobView): string {
+  return `第${version}版を受け取りました。いまは「${jobRunsText(after.waiting, after.pausedReason, after.placement)}」です`
 }

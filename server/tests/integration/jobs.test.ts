@@ -40,6 +40,7 @@ import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import { randomIds, systemClock } from '../../src/adapters/system'
+import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE } from '../../shared/core/jobs'
 
 const app = new Hono()
 app.route('/api/companies/:companyId', jobsRoute)
@@ -51,10 +52,15 @@ const TS = '2026-11-11T00:00:00.000Z'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any
 
+/** A 「受け取る」 pressed on its own (the admin console's and the app's: `X-ACB-Job-Accept: separate`). */
+const SEPARATE = { [JOB_ACCEPT_HEADER]: JOB_ACCEPT_SEPARATE }
 async function as(user: string, method: string, path: string, body?: unknown, company = CO) {
+  return asWith(user, method, path, body, {}, company)
+}
+async function asWith(user: string, method: string, path: string, body: unknown, headers: Record<string, string>, company = CO) {
   currentUser.id = user
   const res = await app.request(`/api/companies/${company}${path}`, {
-    method, headers: { 'Content-Type': 'application/json' }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    method, headers: { 'Content-Type': 'application/json', ...headers }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
   return { status: res.status, body: await res.json().catch(() => null) as Json }
 }
@@ -160,7 +166,7 @@ describe('who may do what with a scheduled job', () => {
     expect(other.status).toBe(404)
     expect(other.body).toEqual(missing.body)
     for (const action of ['pause', 'resume']) expect((await as('u-bob', 'POST', `/jobs/${alices.id}/${action}`)).status).toBe(404)
-    expect((await as('u-bob', 'POST', `/me/jobs/${alices.id}/accept`, { version: 1 })).status).toBe(404)
+    expect((await asWith('u-bob', 'POST', `/me/jobs/${alices.id}/accept`, { version: 1 }, SEPARATE)).status).toBe(404)
     // The owner sees every job.
     expect((await as('u-owner', 'GET', '/jobs')).body.data.jobs.map((j: Json) => j.id)).toEqual(expect.arrayContaining([bobs.id, alices.id]))
   })
@@ -209,12 +215,55 @@ describe('versions are append-only and approval is pinned', () => {
 describe('the responsible person accepts', () => {
   it('only the version\'s responsible person accepts, only an approved version, and the job then waits for nothing', async () => {
     const job = await created(operationJob('u-bob', '受け取り'))
-    expect((await as('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })).body.code).toBe('JOB_NOT_APPROVED')
+    expect((await asWith('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, SEPARATE)).body.code).toBe('JOB_NOT_APPROVED')
     await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 1 })
-    const byOwner = await as('u-owner', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    const byOwner = await asWith('u-owner', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, SEPARATE)
     expect(byOwner.status).toBe(403)
     expect(jobRow(job.id).accepted_consent).toBeNull()
-    const r = await as('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    const r = await asWith('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, SEPARATE)
+    expect(r.status).toBe(200)
+    expect(r.body.data).toMatchObject({ accepted: true, waiting: null })
+  })
+
+  it('approving one\'s own job is not accepting it: two presses, the second checked as any acceptance', async () => {
+    const def = operationJob('u-admin', '自分で承認する仕事')
+    const job = await created(def)
+    const approvedOwn = await as('u-admin', 'POST', `/jobs/${job.id}/approve`, { version: 1 })
+    expect(approvedOwn.status).toBe(200)
+    // Approved, not accepted: it does not run, and the server says it waits for their own 受け取る.
+    expect(approvedOwn.body.data).toMatchObject({ approvedVersion: 1, accepted: false, waiting: 'NOT_ACCEPTED', you: { mustAccept: true } })
+    expect(jobRow(job.id).accepted_consent).toBeNull()
+    // An admin console from before the split accepts with the approval's press (no header): refused, nothing accepted.
+    const combined = await as('u-admin', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    expect(combined).toMatchObject({ status: 409, body: { code: 'JOB_ACCEPT_SEPARATELY' } })
+    expect(combined.body.error).toContain('「受け取る」を別に押してください')
+    // A header that does not say the press is its own does not either.
+    expect((await asWith('u-admin', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, { [JOB_ACCEPT_HEADER]: 'yes' })).body.code).toBe('JOB_ACCEPT_SEPARATELY')
+    expect(jobRow(job.id).accepted_consent).toBeNull()
+    // Their own 受け取る, a press of its own: still only the version's responsible person, the version's fingerprint.
+    const separate = { [JOB_ACCEPT_HEADER]: JOB_ACCEPT_SEPARATE }
+    expect((await asWith('u-owner', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, separate)).status).toBe(403)
+    expect((await asWith('u-admin', 'POST', `/me/jobs/${job.id}/accept`, { version: 1, fingerprint: `sha256:${'0'.repeat(64)}` }, separate)).body.code).toBe('JOB_VERSION_FINGERPRINT')
+    const accepted = await asWith('u-admin', 'POST', `/me/jobs/${job.id}/accept`, { version: 1, fingerprint: job.versions[0].fingerprint }, separate)
+    expect(accepted.status).toBe(200)
+    expect(accepted.body.data).toMatchObject({ accepted: true, waiting: null, you: { mustAccept: false } })
+    expect(jobRow(job.id).accepted_consent).not.toBeNull()
+  })
+
+  it('an old admin tab re-approving a version someone else approved first still cannot accept with that press', async () => {
+    // The owner approved it first (approved_by stays theirs); the responsible admin's old tab approves it again, then
+    // sends its acceptance without the header: refused whoever approved first.
+    const job = await approved(operationJob('u-boss', '先に承認された仕事'))
+    expect((await as('u-boss', 'POST', `/jobs/${job.id}/approve`, { version: 1 })).status).toBe(200)
+    expect((await as('u-boss', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })).body.code).toBe('JOB_ACCEPT_SEPARATELY')
+    expect(jobRow(job.id).accepted_consent).toBeNull()
+    expect((await asWith('u-boss', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, SEPARATE)).status).toBe(200)
+  })
+
+  it('the desktop app\'s 受け取る was always a press of its own: its acceptance by the approver themself goes through', async () => {
+    const job = await created(operationJob('u-dan', 'アプリで受け取る仕事'))
+    await as('u-dan', 'POST', `/jobs/${job.id}/approve`, { version: 1 })
+    const r = await asWith('u-dan', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, { 'X-ACB-Client-Version': '0.9.0+abc1234.20261101' })
     expect(r.status).toBe(200)
     expect(r.body.data).toMatchObject({ accepted: true, waiting: null })
   })
@@ -222,7 +271,7 @@ describe('the responsible person accepts', () => {
   it('a new version needs acceptance again only when who, what runs, where or the grant changed', async () => {
     const def = operationJob('u-bob', '受け取り直し')
     const job = await approved(def)
-    await as('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    await asWith('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, SEPARATE)
     // A new name and time: approved, still accepted.
     await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, name: '名前だけ変えた', trigger: { ...def.trigger, at: '10:00' } } })
     const renamed = await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 2 })
@@ -233,12 +282,12 @@ describe('the responsible person accepts', () => {
     expect(wider.body.data).toMatchObject({ approvedVersion: 3, accepted: false, waiting: 'NOT_ACCEPTED' })
     // Another responsible person: the earlier one's acceptance does not carry over.
     await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, actingUser: 'u-alice' } })
-    await as('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 3 })
+    await asWith('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 3 }, SEPARATE)
     const handed = await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 4 })
     expect(handed.body.data).toMatchObject({ approvedVersion: 4, accepted: false, waiting: 'NOT_ACCEPTED' })
     // bob is no longer its responsible person: the job is not his to see.
-    expect((await as('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 4 })).status).toBe(404)
-    expect((await as('u-alice', 'POST', `/me/jobs/${job.id}/accept`, { version: 4 })).body.data.accepted).toBe(true)
+    expect((await asWith('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 4 }, SEPARATE)).status).toBe(404)
+    expect((await asWith('u-alice', 'POST', `/me/jobs/${job.id}/accept`, { version: 4 }, SEPARATE)).body.data.accepted).toBe(true)
   })
 })
 
@@ -378,12 +427,12 @@ describe('review fixes (Codex on #669)', () => {
     const id = made.value.id
     if (!(await jobsWithSkill('tree-a').approve(owner, id, { version: 1 })).ok) throw new Error('approve')
     const alice = { companyId: CO, userId: 'u-alice', role: 'member' }
-    const missing = await jobsWithSkill(null).accept(alice, id, { version: 1 })
+    const missing = await jobsWithSkill(null).accept(alice, id, { version: 1 }, undefined, true)
     expect(!missing.ok && missing.body.code).toBe('JOB_SKILL_MISSING')
-    const changed = await jobsWithSkill('tree-b').accept(alice, id, { version: 1 })
+    const changed = await jobsWithSkill('tree-b').accept(alice, id, { version: 1 }, undefined, true)
     expect(!changed.ok && changed.body.code).toBe('JOB_SKILL_CHANGED')
     expect(jobRow(id).accepted_consent).toBeNull()
-    expect((await jobsWithSkill('tree-a').accept(alice, id, { version: 1 })).ok).toBe(true)
+    expect((await jobsWithSkill('tree-a').accept(alice, id, { version: 1 }, undefined, true)).ok).toBe(true)
     // Paused by an admin, then the Skill changes: the admin's resume is refused, the job stays paused.
     jobsWithSkill('tree-a').pause(owner, id)
     const resumeChanged = await jobsWithSkill('tree-b').resume(owner, id)
@@ -409,7 +458,7 @@ describe('independent review fixes on #669', () => {
     if (!(await jobsWithSkill('tree-a').approve(owner, made.value.id, { version: 1 })).ok) throw new Error('approve')
     db.prepare("UPDATE scope_rules SET can_read = 0 WHERE company_id = ? AND id = 'carol-c'").run(CO)
     try {
-      const r = await jobsWithSkill('tree-a').accept({ companyId: CO, userId: 'u-carol', role: 'member' }, made.value.id, { version: 1 })
+      const r = await jobsWithSkill('tree-a').accept({ companyId: CO, userId: 'u-carol', role: 'member' }, made.value.id, { version: 1 }, undefined, true)
       expect(!r.ok && r.body.code).toBe('JOB_GRANT_EXCEEDS')
       expect(jobRow(made.value.id).accepted_consent).toBeNull()
     } finally {
@@ -419,7 +468,7 @@ describe('independent review fixes on #669', () => {
 
   it('acceptance with a fingerprint that is not the version\'s is refused', async () => {
     const job = await approved(operationJob('u-bob', '受け取りの指紋'))
-    const r = await as('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1, fingerprint: `sha256:${'0'.repeat(64)}` })
+    const r = await asWith('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1, fingerprint: `sha256:${'0'.repeat(64)}` }, SEPARATE)
     expect(r.status).toBe(409)
     expect(r.body.code).toBe('JOB_VERSION_FINGERPRINT')
     expect(jobRow(job.id).accepted_consent).toBeNull()
@@ -502,7 +551,7 @@ describe('pause, resume and the company\'s stop', () => {
 
   it('「定期の仕事をすべて止める」: every job of the company waits, and only this company\'s', async () => {
     const job = await approved(operationJob('u-bob', '会社で止める'))
-    await as('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    await asWith('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, SEPARATE)
     expect((await as('u-owner', 'PUT', '/jobs-stop', { stopped: 'yes' })).status).toBe(400)
     expect((await as('u-owner', 'PUT', '/jobs-stop', { stopped: true })).status).toBe(200)
     const list = await as('u-owner', 'GET', '/jobs')
@@ -534,7 +583,7 @@ describe('PR 4: 「受け取りが要ります」 and what the screens read', ()
     await jobsWithSkill('tree-a').approve(owner, job.id, { version: 1 })
     expect(acceptNotices('u-alice').filter(n => n.dedupe_key.includes(job.id))).toHaveLength(1)
     // Accepted: nothing asks any more, so the bell no longer shows it.
-    expect((await as('u-alice', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })).status).toBe(200)
+    expect((await asWith('u-alice', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, SEPARATE)).status).toBe(200)
     expect(await bellTexts('u-alice')).not.toContain(asked('週報のやること'))
     // A new version that keeps the consent needs no acceptance: nobody is told.
     await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, name: '週報のやること（改）' } })
@@ -547,10 +596,14 @@ describe('PR 4: 「受け取りが要ります」 and what the screens read', ()
     expect(await bellTexts('u-alice')).toContain('あなたが責任者の定期の仕事「週報のやること（改）」の内容が変わりました。確かめて「受け取る」を押してください（受け取るまで動きません）')
   })
 
-  it('the approver who is the responsible person is not told; someone no longer responsible no longer sees it', async () => {
+  it('the approver who is the responsible person is told too (approving is not accepting); someone no longer responsible no longer sees it', async () => {
     const mine = await created(operationJob('u-admin', '自分の仕事'))
     await as('u-admin', 'POST', `/jobs/${mine.id}/approve`, { version: 1 })
-    expect(acceptNotices('u-admin').filter(n => n.dedupe_key.includes(mine.id))).toEqual([])
+    expect(acceptNotices('u-admin').filter(n => n.dedupe_key.includes(mine.id)).map(n => n.dedupe_key)).toEqual([`job_accept_needed:${mine.id}:1`])
+    expect(await bellTexts('u-admin')).toContain(asked('自分の仕事'))
+    // Their own separate 受け取る: the ask is gone.
+    await asWith('u-admin', 'POST', `/me/jobs/${mine.id}/accept`, { version: 1 }, { [JOB_ACCEPT_HEADER]: JOB_ACCEPT_SEPARATE })
+    expect(await bellTexts('u-admin')).not.toContain(asked('自分の仕事'))
     const def = operationJob('u-bob', '引き継ぐ仕事')
     const job = await approved(def)
     expect(await bellTexts('u-bob')).toContain(asked('引き継ぐ仕事'))
@@ -586,7 +639,7 @@ describe('PR 4: 「受け取りが要ります」 and what the screens read', ()
     const def = operationJob('u-alice', '戻す仕事')
     const job = await approved(def)
     expect((await as('u-alice', 'GET', `/jobs/${job.id}`)).body.data.you).toEqual({ named: true, controls: true, mustAccept: true })
-    await as('u-alice', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    await asWith('u-alice', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, SEPARATE)
     await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, grant: { ...def.grant, limits: { minutes: 7, runsPerDay: 1 } } } })
     expect((await as('u-owner', 'GET', `/jobs/${job.id}`)).body.data.latestConsentAccepted).toBe(false)
     await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 2 })
@@ -602,7 +655,7 @@ describe('PR 4: 「受け取りが要ります」 and what the screens read', ()
   it('a new version for the same responsible person says its content changed, not that they became responsible', async () => {
     const def = operationJob('u-alice', '中身が変わる仕事')
     const job = await approved(def)
-    await as('u-alice', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    await asWith('u-alice', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, SEPARATE)
     await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, grant: { ...def.grant, limits: { minutes: 8, runsPerDay: 1 } } } })
     await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 2 })
     const texts = await bellTexts('u-alice')
@@ -613,7 +666,7 @@ describe('PR 4: 「受け取りが要ります」 and what the screens read', ()
   it('handed to someone else, the new responsible person is told they became it, not that the content changed', async () => {
     const def = operationJob('u-bob', '引き継ぎの知らせ')
     const job = await approved(def)
-    await as('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 })
+    await asWith('u-bob', 'POST', `/me/jobs/${job.id}/accept`, { version: 1 }, SEPARATE)
     await as('u-owner', 'PUT', `/jobs/${job.id}`, { definition: { ...def, actingUser: 'u-alice' } })
     await as('u-owner', 'POST', `/jobs/${job.id}/approve`, { version: 2 })
     const texts = await bellTexts('u-alice')

@@ -123,7 +123,7 @@ async function runnableJob(definition: Json = weekly(), co = CO, accept = true):
   const approved = await jobService.approve(owner(co), id, { version: 1 })
   if (!approved.ok) throw new Error(JSON.stringify(approved.body))
   if (accept) {
-    const ok = await jobService.accept(alice(co), id, { version: 1 })
+    const ok = await jobService.accept(alice(co), id, { version: 1 }, undefined, true)
     if (!ok.ok) throw new Error(JSON.stringify(ok.body))
   }
   return id
@@ -493,6 +493,25 @@ describe('held, skipped and paused: nothing made', () => {
     expect(tasksOf()).toEqual([])
   })
 
+  it('an owner approving their own job does not run it: held until their own separate 受け取る, then it runs', async () => {
+    const made = await jobService.create(owner(), { definition: weekly({ name: '自分の週報', actingUser: 'u-owner' }) })
+    if (!made.ok) throw new Error(JSON.stringify(made.body))
+    const job = made.value.id
+    expect((await jobService.approve(owner(), job, { version: 1 })).ok).toBe(true)
+    nowMs = jst('2026-11-16T09:02')
+    occ.makeOccurrences(CO)
+    occ.runDue(CO)
+    expect(occurrencesOf(job).map(o => [o.state, o.outcome_code])).toEqual([['held', 'NOT_ACCEPTED']])
+    // An acceptance that is part of the approval's press (an old admin console) is refused; one of its own is not.
+    const combined = await jobService.accept(owner(), job, { version: 1 })
+    expect(!combined.ok && combined.body.code).toBe('JOB_ACCEPT_SEPARATELY')
+    expect((await jobService.accept(owner(), job, { version: 1 }, undefined, true)).ok).toBe(true)
+    nowMs = jst('2026-11-23T09:02')
+    occ.makeOccurrences(CO)
+    occ.runDue(CO)
+    expect(occurrencesOf(job).map(o => o.state)).toEqual(['held', 'done'])
+  })
+
   it('another version approved after it was made: held, not run as pinned', async () => {
     const job = await runnableJob()
     nowMs = jst('2026-11-16T09:02')
@@ -612,7 +631,7 @@ describe('the runner', () => {
     if (!made.ok) throw new Error(JSON.stringify(made.body))
     const job = made.value.id
     expect((await pcJobs.approve(owner(), job, { version: 1 })).ok).toBe(true)
-    expect((await pcJobs.accept(alice(), job, { version: 1 })).ok).toBe(true)
+    expect((await pcJobs.accept(alice(), job, { version: 1 }, undefined, true)).ok).toBe(true)
     db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at)
       VALUES (?, ?, ?, 1, '2026-11-16T09:00', 'Asia/Tokyo', '2026-11-16T00:00:00.000Z', '2026-11-17T00:00:00.000Z', 'due', ?, ?)`).run(CO, `occ.${'c'.repeat(32)}`, job, TS, TS)
     nowMs = jst('2026-11-16T09:02')

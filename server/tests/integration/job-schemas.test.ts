@@ -98,7 +98,7 @@ async function approvedJob(definition: Json): Promise<string> {
   const job = made.value.id
   const approved = await services.jobs.approve(owner(), job, { version: 1 })
   if (!approved.ok) throw new Error(JSON.stringify(approved.body))
-  const accepted = await services.jobs.accept(alice(), job, { version: 1 })
+  const accepted = await services.jobs.accept(alice(), job, { version: 1 }, undefined, true)
   if (!accepted.ok) throw new Error(JSON.stringify(accepted.body))
   return job
 }
@@ -289,8 +289,8 @@ describe('a definition goes to a client only in a shape it announced', () => {
     const view = listed.ok ? listed.value.jobs.find(j => j.id === job) : null
     expect(view).toMatchObject({ needsUpdate: true })
     expect(view?.trigger).toBeUndefined()
-    expect(await s.accept(alice(), job, { version: 2 })).toMatchObject({ ok: false, body: { code: 'JOB_NEEDS_NEWER_SCREEN' } })
-    expect(await s.accept(alice(), job, { version: 2 }, [1, 2, 3])).toMatchObject({ ok: true })
+    expect(await s.accept(alice(), job, { version: 2 }, undefined, true)).toMatchObject({ ok: false, body: { code: 'JOB_NEEDS_NEWER_SCREEN' } })
+    expect(await s.accept(alice(), job, { version: 2 }, [1, 2, 3], true)).toMatchObject({ ok: true })
   })
 
   it('schema 1 is answered exactly as stored, header or not (byte for byte as before)', async () => {
