@@ -1073,7 +1073,10 @@ membership can fail).
   never a read; a put into another picked folder refused with nothing sent; the status shows only its folder; a body's
   `recordId` never linked; the finish links the put to its やること — also in a company with the shared folder, only
   that run's own receipts (not a consultation's put, not an earlier run's); a pause refuses the next call; past 90 days: the
-  claim and the clock make it `needs_person` `PLACE_NOT_USABLE`, told, and choosing again makes the next one run;
+  claim and the clock make it `needs_person` `PLACE_NOT_USABLE`, told, and choosing again makes the next one run — the
+  clock through the composed `services.serverClock` (`wireJobOccurrences`' `placeUsable`); 「もう一度」 refused
+  (`JOB_PLACE_NOT_USABLE`) while the place is not usable and pressed once it is chosen again, through the composed route
+  (`wireJobRetry`'s `placeUsable`);
   「もう一度」 after a put: the responsible person's turn names the Drive file (id, name) and the retried run updates it,
   the owner's view and press name none of it; made, updated and pressed again it is one entry, also against the cap of
   20 (no `madeBeforeTotal`); a receipt of another folder, not done, or a consultation's receipt a run was answered with

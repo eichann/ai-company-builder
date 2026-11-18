@@ -272,7 +272,9 @@ grant** — never a key, never a service account — so every switch above appli
   longer than what is left gets `ACB_TOKEN_INVALID` (a gap shared with every broker service).
 - Test: `tests/integration/google-relay.test.ts` (each deletion form and unlisted call refused with
   nothing sent and the sheet unchanged; no permission / 「やめる」 / service off / Google off /
-  company stop / member stop / cap refused with nothing sent; another member's token acts as that
+  company stop / member stop / cap refused with nothing sent; the AI emergency stop and a relay stop pressed while a
+  write's body arrives refuse that call (the AI one is the relay's own composed `companyStopped`: the broker checks it
+  only before handing over); another member's token acts as that
   member (Google refuses their write to Sato's sheet); another company never reaches a grant here;
   records for admins and the member's own only; no cell content, broker token or Google token in
   any table, answer or log line; asked only by name; B-H1: an outsider's sheet and a shared-drive

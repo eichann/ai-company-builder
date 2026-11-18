@@ -49,7 +49,7 @@ const OTHER_FOLDER = GOOGLE_SEED.sharedOutsideFolder
 const DAY = 24 * 60 * 60_000
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let app: any, db: any, services: any, createJobOccurrences: any
+let app: any, db: any, services: any
 let google: FakeGoogle
 let googleServer: ServerType
 let kekDir: string
@@ -160,7 +160,6 @@ beforeAll(async () => {
   dbModule.initDatabase()
   db = dbModule.db
   services = (await import('../../src/composition')).services
-  createJobOccurrences = (await import('../../src/services/job-occurrences')).createJobOccurrences
   const { Hono } = await import('hono')
   app = new Hono()
   app.route('/api/companies', (await import('../../src/routes/companies')).companiesRoute)
@@ -325,30 +324,23 @@ describe('a folder pick past its 90 days (decision: never renewed by itself; a p
       const job = await approvedJob()
       await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })
       vi.setSystemTime(new Date('2026-11-21T01:00:00.000Z'))
-      const { sqliteCompanyData } = await import('../../src/adapters/sqlite/company-data')
-      const { sqliteTransactions } = await import('../../src/adapters/sqlite/transactions')
-      const { sqliteMembershipRepository } = await import('../../src/adapters/sqlite/memberships')
-      const { randomIds } = await import('../../src/adapters/system')
-      const occurrences = createJobOccurrences({
-        companyData: sqliteCompanyData(db), transactions: sqliteTransactions(db), clock: { now: () => new Date().toISOString(), nowMs: () => Date.now() }, ids: randomIds,
-        timeZoneOf: () => 'Asia/Tokyo', holidaysOf: () => [], roleOf: (co: string, user: string) => sqliteMembershipRepository(db).roleOf(co, user),
-        jobs: services.jobs, writer: { check: () => null, create: () => { throw new Error('unused') } }, log: () => {},
-        placeUsable: (co: string, user: string, place: Json) => services.googleDrive.folderPlace(co, user, place.ref) !== null,
-      })
+      // The composed server clock (composition.ts → wireJobOccurrences' `placeUsable`), not a hand-built one: the
+      // wiring between the occurrences and the connector's live place is what is protected here.
+      const tick = async () => { await services.serverClock.runOnce() }
       const made = () => db.prepare('SELECT state, outcome_code FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?').all(CO, job) as Json[]
       // Usable: due, as before.
-      occurrences.makeOccurrences(CO)
+      await tick()
       expect(made()).toEqual([{ state: 'due', outcome_code: null }])
       db.prepare('DELETE FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?').run(CO, job)
       expirePicks()
-      occurrences.makeOccurrences(CO)
+      await tick()
       expect(made()).toEqual([{ state: 'needs_person', outcome_code: 'PLACE_NOT_USABLE' }])
       const told = () => (db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND kind = 'job_failed' AND dedupe_key LIKE ?").get(CO, `%${job}%`) as Json).n as number
       const once = told()
       expect(once).toBeGreaterThan(0)
       // The next slot, still not usable: made needs_person again, but nobody is told twice for the same cause.
       vi.setSystemTime(new Date('2026-11-22T01:00:00.000Z'))
-      occurrences.makeOccurrences(CO)
+      await tick()
       expect(made().map((o: Json) => o.outcome_code)).toEqual(['PLACE_NOT_USABLE', 'PLACE_NOT_USABLE'])
       expect(told()).toBe(once)
     } finally {
@@ -579,6 +571,30 @@ describe('「もう一度」 after a run put a file (staging 2026-11-12: the ret
       expect(again.madeBeforeTotal).toBeUndefined()
     } finally {
       vi.useRealTimers()
+    }
+  })
+
+  // Through the composed 「もう一度」 (composition.ts → wireJobRetry's `placeUsable`): the connector's live place decides.
+  it('is refused while the chosen folder is no longer usable (JOB_PLACE_NOT_USABLE), and works once it is chosen again', async () => {
+    try {
+      const { noon, slot: today } = atNoon()
+      const job = await approvedJob()
+      expect((await services.jobs.accept(alice(), job, { version: 1, place: { ...PLACE, ref: FOLDER } })).ok).toBe(true)
+      const occ = todaysOccurrence(job, noon, today)
+      expirePicks()
+      expect((await claim(occ)).body.code).toBe('JOB_PLACE_NOT_USABLE')
+      expect(occOf(occ)).toEqual({ state: 'needs_person', outcome_code: 'PLACE_NOT_USABLE' })
+      vi.setSystemTime(noon + 60_000)
+      const refused = await as('jd-owner', 'POST', `/jobs/${job}/occurrences/${occ}/retry`)
+      expect([refused.status, refused.body.code], refused.text).toEqual([409, 'JOB_PLACE_NOT_USABLE'])
+      expect(occOf(occ)).toEqual({ state: 'needs_person', outcome_code: 'PLACE_NOT_USABLE' })
+      await pickFolder('jd-alice', FOLDER)
+      const pressed = await as('jd-owner', 'POST', `/jobs/${job}/occurrences/${occ}/retry`)
+      expect(pressed.status, pressed.text).toBe(200)
+      expect(occOf(occ)).toMatchObject({ state: 'due' })
+    } finally {
+      vi.useRealTimers()
+      await pickFolder('jd-alice', FOLDER)
     }
   })
 
