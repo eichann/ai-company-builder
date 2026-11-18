@@ -54,7 +54,10 @@ export function migrateJobAcceptedPlace(conn: Database.Database): void {
  *   responsible person accepts (never back in time) and moved in the transaction that makes its occurrences; and its
  *   **watch target** — the one record it watches (`watch_record_id`, server-managed: the accepted `startRecord`
  *   (`watch_start`), then, with `followMadeTask`, the やること an occurrence made), and whether that target fired already
- *   (`watch_fired`: each target makes one occurrence, however often it is completed again).
+ *   (`watch_fired`: each target makes one occurrence, however often it is completed again); and what this build last
+ *   wrote of the job and of the company's stop (`job_stamp` = `ai_jobs.updated_at`, `stop_stamp` = `ai_job_settings.
+ *   updated_at`): a build before 4a (the rollback build, 4-0) pauses and stops without gaps, and a difference tells the
+ *   scan to look at nothing from before (jobs.md "Event-triggered jobs", Codex review of #700).
  * - `ai_job_event_gaps`: the stretches no event of a job runs in (a pause; `job_key` '' = the company's stop):
  *   delivery numbers in (`from_seq`, `until_seq`], `until_seq` NULL while it lasts. Several per job (owner decision ③).
  *   Its id is the server's own (TEXT), never a rowid: a company archive restores it beside other companies.
@@ -75,6 +78,8 @@ export function migrateJobEvents(conn: Database.Database): void {
       watch_record_id TEXT NOT NULL,
       watch_start TEXT NOT NULL,
       watch_fired INTEGER NOT NULL DEFAULT 0 CHECK (watch_fired IN (0, 1)),
+      job_stamp TEXT NOT NULL DEFAULT '',
+      stop_stamp TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL,
       PRIMARY KEY (company_id, job_id),
       FOREIGN KEY (company_id, job_id) REFERENCES ai_jobs(company_id, id) ON DELETE CASCADE

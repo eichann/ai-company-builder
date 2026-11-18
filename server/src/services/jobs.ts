@@ -617,9 +617,11 @@ export function createJobService(deps: JobServiceDeps) {
         // The place must be theirs and usable now (their own live pick): the run later puts only there.
         if (place && !deps.places?.live(member.companyId, member.userId, place)) return PLACE_NOT_USABLE()
         const at = clock.now()
+        // Accepting the same consent again changes nothing of what an event job has seen (Codex review of #700).
+        const again = handle.jobs.find(jobId)?.acceptedConsent === v.consentFingerprint && handle.jobs.eventCursor(jobId) !== null
         handle.jobs.accept(jobId, v.version, v.consentFingerprint, member.userId, at, place)
         // An event job (stage 4a) looks at what happens from its acceptance on — never back in time.
-        if (isRecordTrigger(definition.trigger)) handle.jobs.startEventCursor(jobId, definition.trigger.startRecord, at)
+        if (isRecordTrigger(definition.trigger) && !again) handle.jobs.startEventCursor(jobId, definition.trigger.startRecord, at)
         return ok(undefined)
       })
       if (!result.ok) return result

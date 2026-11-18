@@ -457,9 +457,11 @@ describe('(5) paused or stopped', () => {
     const before = task('止める前に完了')
     const job = await runnableJob(chain(before, {}, { followMadeTask: false }))
     await complete(before) // no tick yet
+    nowMs += 60_000
     expect(ok(jobs.pause(owner(), job))).toMatchObject({ state: 'paused' })
     // A tick while paused looks at nothing: what came before is still there after the resume.
     expect(tick()).toBe(0)
+    nowMs += 60_000
     ok(await jobs.resume(owner(), job))
     expect(tick()).toBe(1)
     expect(occurrencesOf(job)).toEqual([expect.objectContaining({ state: 'done' })])
@@ -492,6 +494,45 @@ describe('(5) paused or stopped', () => {
     ok(await jobs.accept(alice(), job, { version: 2 }, READS_2))
     expect(tick()).toBe(0)
     expect(occurrencesOf(job)).toEqual([])
+  })
+
+  it('a pause or a stop made by the build before 4a (a rollback: no gap) never lets what happened meanwhile run', async () => {
+    const older = (sql: string, ...args: unknown[]) => { nowMs += 60_000; db.prepare(sql).run(...args) }
+    // Paused and resumed, both by the older build.
+    const a = task('前の版で止めて再開')
+    const jobA = await runnableJob(chain(a, { name: 'A' }))
+    older("UPDATE ai_jobs SET state = 'paused', paused_reason = 'ADMIN', updated_at = ? WHERE company_id = ? AND id = ?", clock.now(), CO, jobA)
+    await complete(a)
+    older("UPDATE ai_jobs SET state = 'active', paused_reason = NULL, updated_at = ? WHERE company_id = ? AND id = ?", clock.now(), CO, jobA)
+    // Paused by the older build, resumed by this one.
+    const b = task('前の版で止めてこの版で再開')
+    const jobB = await runnableJob(chain(b, { name: 'B' }))
+    older("UPDATE ai_jobs SET state = 'paused', paused_reason = 'ADMIN', updated_at = ? WHERE company_id = ? AND id = ?", clock.now(), CO, jobB)
+    await complete(b)
+    ok(await jobs.resume(owner(), jobB))
+    expect(tick()).toBe(0)
+    // The company's stop, set and lifted by the older build.
+    const c = task('前の版で全部止めた')
+    const jobC = await runnableJob(chain(c, { name: 'C' }))
+    older("INSERT INTO ai_job_settings (company_id, stopped, updated_by, updated_at) VALUES (?, 1, 'u-owner', ?) ON CONFLICT(company_id) DO UPDATE SET stopped = 1, updated_at = excluded.updated_at", CO, clock.now())
+    await complete(c)
+    older('UPDATE ai_job_settings SET stopped = 0, updated_at = ? WHERE company_id = ?', clock.now(), CO)
+    expect(tick()).toBe(0)
+    for (const job of [jobA, jobB, jobC]) expect(occurrencesOf(job)).toEqual([])
+    // After that, this build's own events run as always.
+    const d = task('そのあと')
+    const jobD = await runnableJob(chain(d, { name: 'D' }))
+    await complete(d)
+    expect(tick()).toBe(1)
+    expect(occurrencesOf(jobD)).toHaveLength(1)
+  })
+
+  it('accepting the same version again loses nothing that happened before', async () => {
+    const start = task('二度受け取る')
+    const job = await runnableJob(chain(start))
+    await complete(start)
+    ok(await jobs.accept(alice(), job, { version: 1 }, READS_2))
+    expect(tick()).toBe(1)
   })
 
   it('two pauses keep both stretches; the company\'s stop is one too', async () => {

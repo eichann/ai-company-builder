@@ -455,8 +455,9 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
   function holdPassedSlot(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void {
     const handle = companyData.forCompany(companyId)
     const nowMs = clock.nowMs()
-    // The gap it opened ends here: events after now run again, those before it never (③).
-    handle.jobs.closeEventGaps(jobId, clock.now())
+    // The gap it opened ends here: events after now run again, those before it never (③). None open: the pause or the
+    // stop was made by a build before 4a (a rollback, deployment.md) — nothing from before now runs (Codex review of #700).
+    if (handle.jobs.closeEventGaps(jobId, clock.now()) === 0) handle.jobs.resyncEventCursors(jobId, clock.now())
     for (const job of jobId === null ? handle.jobs.list() : [handle.jobs.find(jobId)].filter((j): j is JobRow => j !== null)) {
       const latest = latestSlotOf(companyId, handle, job, nowMs)
       if (latest) handle.jobs.insertOccurrence(newRow(job, latest, 'held', code))

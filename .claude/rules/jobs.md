@@ -845,6 +845,12 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
 - **Paused / stopped** (③): `holdDue` opens a gap (`ai_job_event_gaps`, from the delivery number then; `job_key` '' =
   the company's stop, also after a restore) and `holdPassedSlot` closes it; several per job. The scan looks at nothing
   while paused or stopped; afterwards rows inside a gap never run, rows before the pause that were not looked at yet do.
+  **A pause or a stop the rollback build (4-0) made has no gap** (Codex review of #700): a resume or a lift that closes no
+  gap moves the cursor to now (`resyncEventCursors`), and one made and lifted entirely there is found by the stamps —
+  every write this build makes to `ai_jobs` / `ai_job_settings` copies their `updated_at` onto the cursor (`job_stamp`,
+  `stop_stamp`); a difference at the scan means another build wrote it, and the cursor moves to now (logged). Safe side:
+  what happened before then never runs. Accepting the same consent again moves nothing (`startEventCursor` only for a new
+  consent or a first cursor).
   A `due` event occurrence is held by the pause like any other.
 - **The day's limit** (⑦ ⑨): occurrences made per job and company day (`event_day`, company time) up to
   `grant.limits.runsPerDay`; beyond it nothing is made (the target counts as fired), the job is never paused for it, and

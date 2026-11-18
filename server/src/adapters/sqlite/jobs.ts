@@ -73,6 +73,12 @@ const versionOf = (r: VersionDbRow): JobVersionRow => ({
  */
 export function sqliteJobRepository(conn: Database.Database, companyId: string): JobRepository {
   // The newest delivery number given (records.md "Delivery order": the counter holds the next one), 0 when none yet.
+  // What this build writes of a job or of the company's stop is stamped on the event cursors (none when the job has
+  // none): a write that is not stamped is a build before 4a's (jobs.md "Event-triggered jobs").
+  const stampJob = (jobId: string) => conn.prepare(`UPDATE ai_job_event_cursors SET job_stamp = (SELECT updated_at FROM ai_jobs WHERE company_id = ? AND id = ?)
+      WHERE company_id = ? AND job_id = ?`).run(companyId, jobId, companyId, jobId)
+  const stampStop = () => conn.prepare(`UPDATE ai_job_event_cursors SET stop_stamp = COALESCE((SELECT updated_at FROM ai_job_settings WHERE company_id = ?), '')
+      WHERE company_id = ?`).run(companyId, companyId)
   const seqNow = (): number => {
     const r = conn.prepare(`SELECT next_seq FROM record_ledger_seq WHERE company_id = ?`).get(companyId) as { next_seq: number } | undefined
     return r ? r.next_seq - 1 : 0
@@ -109,6 +115,7 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         const name = (JSON.parse(v.definition) as { name: string }).name
         conn.prepare(`UPDATE ai_jobs SET latest_version = ?, name = ?, acting_user_id = ?, updated_at = ? WHERE company_id = ? AND id = ?`)
           .run(v.version, name, v.actingUserId, at, companyId, v.jobId)
+        stampJob(v.jobId)
       })()
     },
     versions(jobId) {
@@ -126,6 +133,7 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
           .run(version, fingerprint, state, at, companyId, jobId)
         conn.prepare(`UPDATE ai_job_versions SET approved_by = ?, approved_at = ? WHERE company_id = ? AND job_id = ? AND version = ? AND approved_at IS NULL`)
           .run(by, at, companyId, jobId, version)
+        stampJob(jobId)
       })()
     },
     accept(jobId, version, consentFingerprint, by, at, place) {
@@ -134,20 +142,31 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
           .run(version, consentFingerprint, place ? JSON.stringify({ connector: place.connector, kind: place.kind, ref: place.ref }) : null, at, companyId, jobId)
         conn.prepare(`UPDATE ai_job_versions SET accepted_by = ?, accepted_at = ? WHERE company_id = ? AND job_id = ? AND version = ? AND accepted_at IS NULL`)
           .run(by, at, companyId, jobId, version)
+        stampJob(jobId)
       })()
     },
     setState(jobId, state, reason, by, at) {
-      conn.prepare(`UPDATE ai_jobs SET state = ?, paused_reason = ?, paused_by = ?, paused_at = ?, updated_at = ? WHERE company_id = ? AND id = ?`)
-        .run(state, reason, reason === null ? null : by, reason === null ? null : at, at, companyId, jobId)
+      conn.transaction(() => {
+        conn.prepare(`UPDATE ai_jobs SET state = ?, paused_reason = ?, paused_by = ?, paused_at = ?, updated_at = ? WHERE company_id = ? AND id = ?`)
+          .run(state, reason, reason === null ? null : by, reason === null ? null : at, at, companyId, jobId)
+        stampJob(jobId)
+      })()
     },
     stopped() {
       const r = conn.prepare(`SELECT stopped FROM ai_job_settings WHERE company_id = ?`).get(companyId) as { stopped: number } | undefined
       return r?.stopped === 1
     },
     setStopped(stopped, by, at) {
-      conn.prepare(`INSERT INTO ai_job_settings (company_id, stopped, updated_by, updated_at) VALUES (?, ?, ?, ?)
-        ON CONFLICT(company_id) DO UPDATE SET stopped = excluded.stopped, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
-        .run(companyId, stopped ? 1 : 0, by, at)
+      conn.transaction(() => {
+        conn.prepare(`INSERT INTO ai_job_settings (company_id, stopped, updated_by, updated_at) VALUES (?, ?, ?, ?)
+          ON CONFLICT(company_id) DO UPDATE SET stopped = excluded.stopped, updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+          .run(companyId, stopped ? 1 : 0, by, at)
+        stampStop()
+      })()
+    },
+    stopStamp() {
+      const r = conn.prepare(`SELECT updated_at FROM ai_job_settings WHERE company_id = ?`).get(companyId) as { updated_at: string } | undefined
+      return r?.updated_at ?? ''
     },
 
     insertOccurrence(o) {
@@ -226,9 +245,9 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         .all(companyId, jobId, JSON.stringify(records), limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     eventCursor(jobId) {
-      const r = conn.prepare(`SELECT seen_seq, watch_record_id, watch_start, watch_fired FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?`)
-        .get(companyId, jobId) as { seen_seq: number; watch_record_id: string; watch_start: string; watch_fired: number } | undefined
-      return r ? ({ seen: r.seen_seq, watch: r.watch_record_id, start: r.watch_start, fired: r.watch_fired === 1 } satisfies JobEventCursor) : null
+      const r = conn.prepare(`SELECT seen_seq, watch_record_id, watch_start, watch_fired, job_stamp, stop_stamp FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?`)
+        .get(companyId, jobId) as { seen_seq: number; watch_record_id: string; watch_start: string; watch_fired: number; job_stamp: string; stop_stamp: string } | undefined
+      return r ? ({ seen: r.seen_seq, watch: r.watch_record_id, start: r.watch_start, fired: r.watch_fired === 1, jobStamp: r.job_stamp, stopStamp: r.stop_stamp } satisfies JobEventCursor) : null
     },
     startEventCursor(jobId, startRecord, at) {
       // A new start record (a version the responsible person accepted) starts the watch over; the same one keeps where the chain is.
@@ -238,6 +257,8 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
             watch_fired = CASE WHEN watch_start = excluded.watch_start THEN watch_fired ELSE 0 END,
             watch_start = excluded.watch_start, updated_at = excluded.updated_at`)
         .run(companyId, jobId, seqNow(), startRecord, startRecord, at)
+      stampJob(jobId)
+      stampStop()
     },
     markWatchFired(jobId, recordId, at) {
       return conn.prepare(`UPDATE ai_job_event_cursors SET watch_fired = 1, updated_at = ? WHERE company_id = ? AND job_id = ? AND watch_record_id = ? AND watch_fired = 0`)
@@ -263,8 +284,17 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         .run(companyId, id, key, seqNow(), at, companyId, key)
     },
     closeEventGaps(jobId, at) {
-      conn.prepare(`UPDATE ai_job_event_gaps SET until_seq = MAX(from_seq, ?), closed_at = ? WHERE company_id = ? AND job_key = ? AND until_seq IS NULL`)
-        .run(seqNow(), at, companyId, jobId ?? '')
+      return conn.prepare(`UPDATE ai_job_event_gaps SET until_seq = MAX(from_seq, ?), closed_at = ? WHERE company_id = ? AND job_key = ? AND until_seq IS NULL`)
+        .run(seqNow(), at, companyId, jobId ?? '').changes
+    },
+    resyncEventCursors(jobId, at) {
+      conn.transaction(() => {
+        conn.prepare(`UPDATE ai_job_event_cursors SET seen_seq = MAX(seen_seq, ?), updated_at = ? WHERE company_id = ? AND (? IS NULL OR job_id = ?)`)
+          .run(seqNow(), at, companyId, jobId, jobId)
+        conn.prepare(`UPDATE ai_job_event_cursors SET job_stamp = COALESCE((SELECT j.updated_at FROM ai_jobs j WHERE j.company_id = ai_job_event_cursors.company_id
+            AND j.id = ai_job_event_cursors.job_id), job_stamp) WHERE company_id = ? AND (? IS NULL OR job_id = ?)`).run(companyId, jobId, jobId)
+        stampStop()
+      })()
     },
     eventOccurrencesOn(jobId, day) {
       return (conn.prepare(`SELECT COUNT(*) AS n FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_day = ?`)

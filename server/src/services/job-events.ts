@@ -222,6 +222,13 @@ export function createJobEvents(deps: JobEventDeps) {
     if (at === null) return 0
     // Paused, or the company's stop: nothing now; the gap opened then keeps what happens meanwhile from running later.
     if (job.state !== 'active' || stopped) return 0
+    // The job or the company's stop was written by a build before 4a (a rollback: it pauses and stops without gaps):
+    // nothing from before now runs (the safe side, Codex review of #700).
+    if (job.updatedAt !== at.jobStamp || handle.jobs.stopStamp() !== at.stopStamp) {
+      transactions.run(() => handle.jobs.resyncEventCursors(job.id, t.stamp))
+      log(`[job-events] company ${handle.companyId} job ${job.id}: changed by an older build; events before now are not run`)
+      return 0
+    }
     // Another consent approved and not accepted yet: what happens before its 受け取る never runs.
     if (job.acceptedConsent === null || job.acceptedConsent !== version.consentFingerprint) {
       transactions.run(() => handle.jobs.startEventCursor(job.id, at.start, t.stamp))

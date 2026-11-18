@@ -270,7 +270,9 @@ back between 4-0 and 4a, or forward, is fine. Rolling back the desktop app is fi
 only unless it names `event`; an app before 4a cannot accept an event job and is told to update itself). 4a's tables
 (`ai_job_event_cursors`, `ai_job_event_gaps`, the event columns of `ai_job_occurrences`) are additive and travel in a
 company archive like every `company_id` table; the stop a restore sets (`pauseAfterRestore`) opens the company's event
-gap, so nothing that happens until an owner lifts it runs afterwards (`jobs.md` "Event-triggered jobs").
+gap, so nothing that happens until an owner lifts it runs afterwards (`jobs.md` "Event-triggered jobs"). A pause or a
+stop made while production ran 4-0 opens no gap; after rolling forward, 4a treats the event jobs it touched as having seen
+everything up to then (nothing from that time runs).
 
 ## CI
 

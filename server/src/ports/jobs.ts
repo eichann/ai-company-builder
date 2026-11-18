@@ -95,7 +95,11 @@ export interface JobEventGap { from: number; until: number | null }
  * `watch` the one record it watches now (server-managed), `start` the accepted start record it began from, `fired`
  * whether `watch` made its occurrence already.
  */
-export interface JobEventCursor { seen: number; watch: string; start: string; fired: boolean }
+export interface JobEventCursor {
+  seen: number; watch: string; start: string; fired: boolean
+  /** What this build last wrote of the job (`ai_jobs.updated_at`) and of the company's stop (`ai_job_settings.updated_at`, '' = none). */
+  jobStamp: string; stopStamp: string
+}
 
 export interface JobRepository {
   /** Every job of the company, newest first. */
@@ -175,8 +179,15 @@ export interface JobRepository {
   eventGaps(jobId: string): JobEventGap[]
   /** A pause (`jobId`) or the company's stop (null) begins: a gap from the newest delivery number now, unless one is open. */
   openEventGap(jobId: string | null, id: string, at: string): void
-  /** It ends: every open gap of the job (null: of the company's stop) ends at the newest delivery number now. */
-  closeEventGaps(jobId: string | null, at: string): void
+  /** It ends: every open gap of the job (null: of the company's stop) ends at the newest delivery number now. How many ended. */
+  closeEventGaps(jobId: string | null, at: string): number
+  /**
+   * Look at nothing from before now (the job's cursor; null: every event job's of the company): a pause or a stop a build
+   * before 4a made has no gap, so nothing that happened since the cursor may run. The stamps take what is written now.
+   */
+  resyncEventCursors(jobId: string | null, at: string): void
+  /** When the company's stop was last written (`ai_job_settings.updated_at`), '' when never. */
+  stopStamp(): string
   /** How many event occurrences of the job were made on the company's `day`. */
   eventOccurrencesOn(jobId: string, day: string): number
 }
