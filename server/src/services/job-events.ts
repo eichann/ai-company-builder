@@ -25,7 +25,7 @@
  * - **Who sees an event occurrence** (⑥, `eventShown`): only someone who reads its record now — owners and admins too.
  */
 import {
-  eventDueSlot, isRecordTrigger, ledgerRowIsEvent, storedJobDefinition, triggerMatches,
+  eventDueSlot, isEventOccurrenceSlot, isRecordTrigger, ledgerRowIsEvent, storedJobDefinition, triggerMatches,
   type JobDefinition, type JobOutcomeCode, type JobRecordTrigger, type LedgerEventRow,
 } from '../../shared/core/jobs'
 import { aiTurnStates } from '../../shared/core/record-types'
@@ -77,9 +77,12 @@ function readableRow(handle: CompanyData, member: Member, recordId: string) {
   return recordReader(member, handle.scopes.listWithRules()).record(row) ? row : null
 }
 
-/** Whether the viewer may see this occurrence at all (⑥): a time slot always; an event one only while they read its record. */
-export function eventShown(handle: CompanyData, member: Member, occ: Pick<JobOccurrenceRow, 'eventRecordId'>): boolean {
-  if (!occ.eventRecordId) return true
+/**
+ * Whether the viewer may see this occurrence at all (⑥): a time slot always; an event one only while they read its
+ * record — and an `ev:` slot that names no record (never written by 4a) by nobody (fails closed, as 4-0.1 did).
+ */
+export function eventShown(handle: CompanyData, member: Member, occ: { eventRecordId?: string | null; dueSlot?: string }): boolean {
+  if (!occ.eventRecordId) return !isEventOccurrenceSlot(occ.dueSlot ?? '')
   return readableRow(handle, member, occ.eventRecordId) !== null
 }
 

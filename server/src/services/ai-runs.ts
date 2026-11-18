@@ -183,6 +183,11 @@ export function createAiRunService(deps: AiRunDeps) {
     const r = repo(member.companyId)
     const run = typeof runId === 'string' && runId.length <= 100 ? r.byId(runId) : null
     if (!run || run.userId !== member.userId) return refuse('not-found', RUN_NOT_FOUND.error, { code: RUN_NOT_FOUND.code })
+    // A job occurrence's run on an event occurrence (stage 4-0.1, jobs.md "Event occurrences do not exist on this
+    // build") is a missing run too: no get, renew, finish, retry, reconcile or token binding.
+    if (run.subject.kind === 'occurrence' && companyData.forCompany(member.companyId).jobs.isHiddenOccurrence(run.subject.id)) {
+      return refuse('not-found', RUN_NOT_FOUND.error, { code: RUN_NOT_FOUND.code })
+    }
     return { r, run }
   }
 

@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import type { JobDeliveryPlace, JobPauseReason, LedgerEventRow } from '../../../shared/core/jobs'
+import { EVENT_OCCURRENCE_SLOT_PREFIX, type JobDeliveryPlace, type JobPauseReason, type LedgerEventRow } from '../../../shared/core/jobs'
 import type { JobState } from '../../../shared/types/jobs'
 import type { JobEventCursor, JobEventGap, JobOccurrenceRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
 
@@ -36,6 +36,15 @@ const OCCURRENCE_READ = `${OCCURRENCE_COLUMNS}, checked_until, checked_commit, r
  * by their delivery number (a number: never `ev:9` after `ev:10` as text).
  */
 const OCCURRENCE_ORDER = `CASE WHEN event_seq IS NULL THEN due_at ELSE created_at END DESC, COALESCE(event_seq, -1) DESC, due_slot DESC, id`
+/**
+ * An event occurrence (`ev:<delivery number>` slot, `isEventOccurrenceSlot`). Stage 4-0.1 (the rollback floor) left every
+ * one out of this repository: it cannot check who reads its source record. **4a reads and writes them here** — the
+ * clock, the runner and 「もう一度」 need them — and every answer to a person applies its own reader check instead
+ * (`eventShown`, `shownOccurrences` / `occurrencesOf`, the notices; jobs.md "Event-triggered jobs"). Kept from 4-0.1:
+ * `isHiddenOccurrence` (a PC run on one is a missing run: 4a has none) and `holdEventOccurrences`. Built from the core's
+ * prefix (it has no `%` / `_`; `substr` compares exactly, unlike `LIKE`).
+ */
+const NOT_EVENT = `substr(due_slot, 1, ${EVENT_OCCURRENCE_SLOT_PREFIX.length}) <> '${EVENT_OCCURRENCE_SLOT_PREFIX}'`
 const occurrenceOf = (r: OccurrenceDbRow): JobOccurrenceRow => ({
   id: r.id, jobId: r.job_id, jobVersion: r.job_version, dueSlot: r.due_slot, timeZone: r.time_zone, dueAt: r.due_at, expiresAt: r.expires_at,
   state: r.state as JobOccurrenceRow['state'], runId: r.run_id, outcomeCode: r.outcome_code, checkedUntil: r.checked_until, checkedCommit: r.checked_commit, retries: r.retries, retriedBy: r.retried_by, retriedAt: r.retried_at,
@@ -215,6 +224,14 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
           WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?))`)
         .run(expiresAt, by, at, at, companyId, occurrenceId, JSON.stringify(from)).changes === 1
     },
+    holdEventOccurrences(jobId, code, at) {
+      conn.prepare(`UPDATE ai_job_occurrences SET state = 'held', outcome_code = ?, updated_at = ?
+          WHERE company_id = ? AND state = 'due' AND NOT (${NOT_EVENT}) AND (? IS NULL OR job_id = ?)`)
+        .run(code, at, companyId, jobId, jobId)
+    },
+    isHiddenOccurrence(occurrenceId) {
+      return conn.prepare(`SELECT 1 FROM ai_job_occurrences WHERE company_id = ? AND id = ? AND NOT (${NOT_EVENT})`).get(companyId, occurrenceId) !== undefined
+    },
     moveOccurrence(occurrenceId, from, to, change, at) {
       const runId = change.runId === undefined ? null : change.runId
       // checked_until / checked_commit are set once (the first claim) and never moved afterwards.
@@ -250,7 +267,7 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
     },
     occurrencesOf(jobId, records, limit) {
       return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?
-          AND (event_record_id IS NULL OR event_record_id IN (SELECT value FROM json_each(?)))
+          AND ((event_record_id IS NULL AND ${NOT_EVENT}) OR event_record_id IN (SELECT value FROM json_each(?)))
           ORDER BY ${OCCURRENCE_ORDER} LIMIT ?`)
         .all(companyId, jobId, JSON.stringify(records), limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },

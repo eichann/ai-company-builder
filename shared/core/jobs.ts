@@ -649,11 +649,24 @@ export function isTimeTrigger(t: unknown): t is JobTimeTrigger {
  * made for a ledger event by event-triggered jobs (stage 4a; its `due_slot` is `ev:<delivery number>`, owner memo
  * §10-2). A PC claims an occurrence only of a kind its app names (`kinds` on the claim, `?kinds=` on the turn list); an
  * app that names none runs `time` only — every app today, which therefore sends nothing new (a server before 4-0
- * refuses an unknown key in the claim's body). The app that runs events (4a) names `time,event`.
+ * refuses an unknown key in the claim's body). The app that runs events (4a) names `time,event`. On this build no
+ * event occurrence exists (`isEventOccurrenceSlot` below), so naming `event` adds nothing here.
  */
 export type JobOccurrenceKind = 'time' | 'event'
 export function jobOccurrenceKind(dueSlot: string): JobOccurrenceKind {
-  return dueSlot.startsWith('ev:') ? 'event' : 'time'
+  return isEventOccurrenceSlot(dueSlot) ? 'event' : 'time'
+}
+
+/** The `due_slot` prefix of an event occurrence (stage 4a, `ev:<delivery number>`). */
+export const EVENT_OCCURRENCE_SLOT_PREFIX = 'ev:'
+/**
+ * An event occurrence's slot (stage 4a). **This build treats such an occurrence as nonexistent everywhere** (stage
+ * 4-0.1, jobs.md "Event occurrences do not exist on this build"): 4a shows one only to people who read its source
+ * record, a check this build cannot make — so after a rollback from 4a it must not list, count, tell, retry, run,
+ * claim or expire one. The job repository (adapters/sqlite/jobs.ts) applies this rule to every read and write.
+ */
+export function isEventOccurrenceSlot(dueSlot: string): boolean {
+  return dueSlot.startsWith(EVENT_OCCURRENCE_SLOT_PREFIX)
 }
 /**
  * Why an event job's chain of watched records stopped (owner decision ①, 2026-11-18): the scan's own — `DAY_LIMIT` (the

@@ -32,7 +32,7 @@
  */
 import { addBusinessDays } from '../../shared/core/business-days'
 import {
-  JOB_ACTOR, JOB_ON_TIME_MS, JOB_SERVER_STEP, isRecordTrigger, isTimeTrigger, newOccurrenceId, occurrenceTaskId, storedJobDefinition,
+  JOB_ACTOR, JOB_ON_TIME_MS, JOB_SERVER_STEP, isEventOccurrenceSlot, isRecordTrigger, isTimeTrigger, newOccurrenceId, occurrenceTaskId, storedJobDefinition,
   type JobDefinition, type JobDeliveryPlace, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
 import { latestJobSlot } from '../../shared/core/job-schedule'
@@ -362,7 +362,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         if (job.approvedVersion !== occ.jobVersion) return end('held', 'JOB_VERSION_CHANGED', null, job, acting)
         // The responsible person's rights now, with the pinned version (like approval): else the job pauses (3a's notice).
         const refusal = deps.jobs.runnerRefusal(companyId, version)
-        const event = occ.eventSeq !== null && occ.eventSeq !== undefined
+        // An event occurrence (its `ev:` slot; one with no record, never written by 4a, is skipped by the recheck).
+        const event = isEventOccurrenceSlot(occ.dueSlot)
         // An event occurrence (⑥): only it is skipped — the job is not paused for what one record's occurrence found.
         if (refusal && event) return end('skipped', refusal, null, job, acting)
         if (refusal) {
@@ -438,7 +439,9 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
    * A pause or the company's stop begins (in the caller's transaction, jobs.md "Held"): every occurrence of
    * the job (null: of every job of the company) still `due` is `held` — it never runs, also not after resuming.
    * One a PC is running (B PR 5a) is `held` too and its run ended (`endPcRun`): its token, renew and finish are
-   * refused from now on, and resuming or lifting the stop brings neither back.
+   * refused from now on, and resuming or lifting the stop brings neither back. A waiting event occurrence (stage 4a) is
+   * held like any other and its chain stops (owner decision ①); `holdEventOccurrences` (stage 4-0.1) catches any beyond
+   * the loop's limit.
    */
   function holdDue(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void {
     const handle = companyData.forCompany(companyId)
@@ -451,6 +454,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
       // A held event occurrence never runs: its chain stops (owner decision ①).
       if (handle.jobs.moveOccurrence(occ.id, ['due'], 'held', { outcomeCode: code }, at) && occ.eventRecordId) events.chainStopped(handle, occ.jobId, code, occ.eventRecordId, told)
     }
+    // Any event occurrence still waiting beyond that loop's limit is held too (stage 4-0.1's write).
+    handle.jobs.holdEventOccurrences(jobId, code, at)
     tell(companyId, told)
     for (const occ of handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT)) {
       if (jobId !== null && occ.jobId !== jobId) continue

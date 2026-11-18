@@ -787,10 +787,27 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   Kinds this build does not know are left out; a list naming none it knows (or an empty one) is 400.
   The app sends neither, also after 4a: every event occurrence of 4a is the server's (placement `e`); the PC's AI for
   events (4b) names `event`.
+- **Event occurrences on the rollback floor (stage 4-0.1)**. 4-0.1 (deployment.md "Rolling back production") cannot
+  check who reads an event occurrence's source record, so its job repository leaves every one out (`occurrence`,
+  `occurrences`, `dueOccurrences`, `runningOccurrences`, `moveOccurrence`, `retryOccurrence`, `insertOccurrence`;
+  `NOT_EVENT`, `isEventOccurrenceSlot`), except `holdEventOccurrences` (a pause holds the waiting ones) and
+  `isHiddenOccurrence` (a PC run on one is a missing run, `ai-runs.ts` `ownRun`). **4a lifts that rule in the
+  repository** — its clock, runner and 「もう一度」 need event occurrences — and applies its own reader check wherever an
+  answer reaches a person (`eventShown`: the occurrence list via `occurrencesOf`, a job's `lastOccurrence`, the
+  notices' recipients and words, 「もう一度」 / reconcile's 404; "Event-triggered jobs" below). Kept from 4-0.1:
+  `isHiddenOccurrence` (4a runs every event occurrence on the server: none has a PC run) and `holdEventOccurrences`
+  (`holdDue` calls it after its own loop, which holds the waiting event occurrences and stops their chains). A PC never
+  lists or claims an event occurrence in 4a (`job-runs.ts` `own` and the turn list: the one 404), and an `ev:` slot
+  naming no record is seen by nobody (`eventShown` fails closed; the runner skips it `EVENT_RECORD_GONE`). Test:
+  `job-schemas.test.ts` "4-0.1's event occurrences as 4a reads them" — each reader path, the record-less slot, the PC
+  refusal and the repository mutation-checked; the turn list's own event check (also stopped by `own`) and the hold
+  after `holdDue`'s loop (a net beyond its limit) each alone add nothing a test can see.
 - Test: `server/tests/integration/job-schemas.test.ts` (stored-version reader; the clock, the runner and its batch,
   the PC's list and claim, 「もう一度」, approve / accept / resume, list and detail without a crash, a role change;
-  the client gate with a later server as fixture (`knownSchemas: [1, 2]`) — approve, accept, edit, list, detail;
-  schema 1 byte for byte with any header; kinds on turns and claims) and `admin/tests/jobs.test.tsx` "a definition of
+  the client gate with a later server as fixture (`knownSchemas: [1, 2, 3]`, schema 3 standing in for a shape after 4a) —
+  approve, accept, edit, list, detail; schema 1 byte for byte with any header; kinds on turns and claims; 4-0.1's event
+  occurrences as 4a reads them — readers see them, non-readers (owners and admins included) do not, the hold, `ownRun`'s
+  refusal) and `admin/tests/jobs.test.tsx` "a definition of
   a shape this console does not read" — each guard mutation-checked (the form's own `editableDefinition` is covered by
   the dialog's `needsNewerScreen` check before it, so removing it alone changes nothing).
 
