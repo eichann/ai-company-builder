@@ -511,14 +511,18 @@ describe('(5) paused or stopped', () => {
     await complete(b)
     ok(await jobs.resume(owner(), jobB))
     expect(tick()).toBe(0)
-    // The company's stop, set and lifted by the older build.
+    // The company's stop, set and lifted by the older build: every event job finds it, not only the first one scanned.
     const c = task('前の版で全部止めた')
     const jobC = await runnableJob(chain(c, { name: 'C' }))
+    const c2 = task('前の版で全部止めた・二つめ')
+    const jobC2 = await runnableJob(chain(c2, { name: 'C2' }))
     older("INSERT INTO ai_job_settings (company_id, stopped, updated_by, updated_at) VALUES (?, 1, 'u-owner', ?) ON CONFLICT(company_id) DO UPDATE SET stopped = 1, updated_at = excluded.updated_at", CO, clock.now())
     await complete(c)
+    await complete(c2)
     older('UPDATE ai_job_settings SET stopped = 0, updated_at = ? WHERE company_id = ?', clock.now(), CO)
     expect(tick()).toBe(0)
-    for (const job of [jobA, jobB, jobC]) expect(occurrencesOf(job)).toEqual([])
+    expect(tick()).toBe(0)
+    for (const job of [jobA, jobB, jobC, jobC2]) expect(occurrencesOf(job)).toEqual([])
     // After that, this build's own events run as always.
     const d = task('そのあと')
     const jobD = await runnableJob(chain(d, { name: 'D' }))

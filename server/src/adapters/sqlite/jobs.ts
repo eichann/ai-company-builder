@@ -293,7 +293,9 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
           .run(seqNow(), at, companyId, jobId, jobId)
         conn.prepare(`UPDATE ai_job_event_cursors SET job_stamp = COALESCE((SELECT j.updated_at FROM ai_jobs j WHERE j.company_id = ai_job_event_cursors.company_id
             AND j.id = ai_job_event_cursors.job_id), job_stamp) WHERE company_id = ? AND (? IS NULL OR job_id = ?)`).run(companyId, jobId, jobId)
-        stampStop()
+        // Only the cursors moved here take the stop's stamp: another job still has to find an older build's stop itself.
+        conn.prepare(`UPDATE ai_job_event_cursors SET stop_stamp = COALESCE((SELECT updated_at FROM ai_job_settings WHERE company_id = ?), '')
+            WHERE company_id = ? AND (? IS NULL OR job_id = ?)`).run(companyId, companyId, jobId, jobId)
       })()
     },
     eventOccurrencesOn(jobId, day) {
