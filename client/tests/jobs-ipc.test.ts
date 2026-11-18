@@ -142,3 +142,17 @@ test('an older server that does not say who the member is to a job is reported a
   assert.equal(r.success === false && r.code, 'SERVER_TOO_OLD')
   assert.match(r.success === false ? r.error : '', /サーバーの更新が必要です/)
 })
+
+// Stage 4a (jobs.md "Event-triggered jobs"): the app shows event jobs, so it says it reads schema 2 on every job call —
+// a server answers an app that does not say so without the definition (and refuses its 受け取る: 「アプリを新しく」).
+test('every job call says which definition shapes this app shows (1 and 2)', async () => {
+  const headers: Array<Record<string, string>> = []
+  const fetch = (async (_url: string, init: RequestInit) => {
+    headers.push(init.headers as Record<string, string>)
+    return new Response(JSON.stringify({ success: true, data: { stopped: false, canManage: false, jobs: [] } }), { status: 200 })
+  }) as typeof globalThis.fetch
+  const jobs = createJobsApi({ baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], fetch, log: { warn() {} } })
+  await jobs.mine('c1')
+  await jobs.pause('c1', J1)
+  assert.ok(headers.length === 2 && headers.every(h => h['X-ACB-Job-Schemas'] === '1,2'))
+})

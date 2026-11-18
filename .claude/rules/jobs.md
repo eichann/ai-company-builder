@@ -22,6 +22,7 @@ paths:
   - "client/electron/features/ai-turns/job-report-tool.ts"
   - "client/tests/job-runs.test.ts"
   - "server/src/services/job-retry.ts"
+  - "server/src/services/job-events.ts"
   - "server/src/services/ai-runs.ts"
   - "admin/src/lib/api.ts"
 ---
@@ -557,7 +558,8 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   (`jobOutcome`); Claude's usage limit still pauses everything. Each occurrence is tried at most twice a day on this PC
   (`MAX_ATTEMPTS_PER_RECORD`) — per press of 「もう一度」 (`attemptKey`, 5b). A claim that wins after the runner gave up waiting (`START_TIMEOUT_MS`) is settled at
   once (records too), instead of a run held with no AI.
-- **Not enforced (decision)**: `grant.limits.runsPerDay` (one occurrence per slot; a retried run is the same one).
+- **Not enforced for time jobs (decision)**: `grant.limits.runsPerDay` (one occurrence per slot; a retried run is the same
+  one). An event job's day limit is enforced ("Event-triggered jobs" below).
 - **Known limit (decision)**: a member invited to a meeting **after** its record was made (「招待する」, or the calendar
   adding them later) is never found by a later meeting check — the window counts when the record was made.
 - **An unknown outside result** (`RESULT_UNKNOWN`, decision for the owner): a job's run reaches outside only by a
@@ -757,7 +759,7 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
 `deployment.md` "Rolling back production"), and an admin tab or an app from before stays open. So:
 
 - **Every read of a stored version is schema-checked** (`storedJobDefinition`, `shared/core/jobs.ts`): its
-  definition only when its `schema` column is one this build knows (`JOB_SCHEMAS`, today `[1]`) and the stored text
+  definition only when its `schema` column is one this build knows (`JOB_SCHEMAS`, `[1, 2]` since 4a) and the stored text
   says the same schema; else null. A null definition is **never** made into an occurrence by the clock, run by the
   server's runner (left `due`, not even taken into the batch), listed or claimed by a PC (the one 404), sent back by
   「もう一度」 (`JOB_SCHEMA_UNKNOWN`), approved, accepted or resumed (409 `JOB_SCHEMA_UNKNOWN`), and a job whose newest
@@ -772,7 +774,10 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   `needsUpdate` when the version it shows is one (an older admin calls `trigger.at.split`). Approving, accepting it
   or editing a job whose newest version is one, from that client: 409 `JOB_NEEDS_NEWER_SCREEN` (what a screen
   cannot show, it must not write over or consent to). The admin console (`admin/src/lib/api.ts` `JOB_READS`) sends
-  the header on every job call; the desktop app sends none (it reads schema 1; 4a's app will name 2).
+  the header on every job call; since 4a so does the desktop app (`client/electron/features/jobs/ipc.ts`, `1,2`). An app
+  before it gets an event job without its definition and its 受け取る is refused — the same code, but the app (a request
+  carrying `X-ACB-Client-Version`) is told 「…アプリを新しくしてください」 (`JOB_NEEDS_NEWER_APP`, `routes/jobs.ts`), a screen
+  「画面を新しくしてください」.
 - **The admin console** never builds a form or words from a definition it does not know (`editableDefinition`,
   `needsNewerScreen`, `knownJobDefinition`, `isKnownJobTrigger`): the list, the edit form and the approval say
   「この画面では編集できません。画面を新しくしてください」 (`JOB_NEEDS_NEWER_SCREEN`), 直す and 承認する are off.
@@ -780,13 +785,87 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   `time`): a claim names the kinds its app runs (`kinds`, additive; absent = `time`) and `GET /me/job-turns?kinds=`
   lists only those — an app before 4a is never handed an event occurrence (409 `JOB_KIND_NOT_SUPPORTED` on a claim).
   Kinds this build does not know are left out; a list naming none it knows (or an empty one) is 400.
-  Today's app sends neither (a server before 4-0 refuses an unknown key in the claim body).
+  The app sends neither, also after 4a: every event occurrence of 4a is the server's (placement `e`); the PC's AI for
+  events (4b) names `event`.
 - Test: `server/tests/integration/job-schemas.test.ts` (stored-version reader; the clock, the runner and its batch,
   the PC's list and claim, 「もう一度」, approve / accept / resume, list and detail without a crash, a role change;
   the client gate with a later server as fixture (`knownSchemas: [1, 2]`) — approve, accept, edit, list, detail;
   schema 1 byte for byte with any header; kinds on turns and claims) and `admin/tests/jobs.test.tsx` "a definition of
   a shape this console does not read" — each guard mutation-checked (the form's own `editableDefinition` is covered by
   the dialog's `needsNewerScreen` check before it, so removing it alone changes nothing).
+
+## Event-triggered jobs (stage 4a, owner memo 「出来事で動く定期の仕事」 §3 / §10 / §11 / §12, the watched-record narrowing of 2026-11-18)
+
+**No AI** (4a): an event makes an occurrence and the server's runner makes the responsible person's やること, as for a
+time slot. Code: `services/job-events.ts` (the scan, the checks), `job-occurrences.ts` (the clock calls the scan, the runner
+acts), `jobs.ts` (save, approve, accept, what each viewer sees).
+
+- **The definition** (`schema: 2`, `JobRecordTrigger`; schema 1 keeps time triggers only, schema 2 record triggers only):
+  `{ kind: 'record', type: 'task', event: 'state', to, from?, assignee: 'responsible', startRecord, followMadeTask }`.
+  Only `task` and its non-AI, non-proposal states (`JOB_EVENT_STATES`); `run` must be the server's operation
+  (`trigger.EVENT_SERVER_ONLY`). Made only by a client announcing schema 2 (409 `JOB_NEEDS_NEWER_SCREEN` otherwise).
+- **One watched record, never "every task of the person"** (owner decision 2026-11-18 after a Codex review): the job
+  watches the record the server keeps in `ai_job_event_cursors.watch_record_id` — it starts at `startRecord` (required:
+  a trigger without it is 400 `BAD_JOB_DEFINITION` `trigger.startRecord.REQUIRED` with a plain sentence) and, with
+  `followMadeTask`, moves to the やること its occurrence made, **set by the runner in the same transaction**
+  (`moveWatch`); no tag, edit, duplicate or re-creation moves it, and a title is never compared (a rename still counts).
+  Replacing it is a new version the responsible person accepts (the trigger is in the consent; `startEventCursor`
+  restarts the watch when the accepted start record differs). **Each target fires once** (`watch_fired`): an undo and a
+  second completion of it make nothing more (also when the day's limit skipped it). `assignee: 'responsible'` is checked
+  on the record (its assignee at the event's version and right before acting), not on who completed it (the requester
+  and the checker may).
+- **The start record**: read by whoever saves it **and** by the responsible person (one problem code,
+  `trigger.startRecord.NOT_FOUND`, for missing / unreadable: an answer never tells them apart); a viewer who does not
+  read it gets the version without definition, fingerprints and trigger — owners and admins too (`readsStart`). The admin
+  console offers the responsible person's open やること the admin reads (`POST /records/query`, `jobsApi.startChoices`).
+- **The scan** (`scan`, inside `makeOccurrences`, every company, each tick): per approved, active, accepted event job,
+  ledger rows **after its cursor by delivery number** (`ledgerEvents`, records.md "Delivery order"; never by `at`), at
+  most `EVENT_ROWS_PER_TICK` (500) per company and tick — the rest next tick from the cursor. The occurrence
+  (`due_slot` `ev:<seq>`, `due_at` the event's time, `expires_at` from now, `event_seq` / `event_record_id` /
+  `event_version` / `event_day`) and the cursor's move are one transaction (compare-and-set on the cursor); `UNIQUE
+  (company, job, due_slot)` and the partial unique `(company, job, event_seq)` make one per event over two ticks or a
+  restart. The cursor starts at acceptance (the newest delivery number then: never back in time); a version with a new
+  consent approved and not accepted moves it to now each tick (what happens before its 受け取る never runs).
+- **Never an event** (`ledgerRowIsEvent`, `triggerMatches`): a row with an origin mark (migration, any `acb:` actor), a
+  row with `run_id` (a job's run, an AI turn — **the origin mark alone is not enough**: a PC run's or an AI turn's row has
+  none), an `external` actor's row (a plugin's import, the minutes intake, the inbox — stage 4-0's decision 7), a row
+  whose state did not change. A person's change counts, and so does their own consultation AI's (`ai` with no run); a
+  person's completion of a やること a job made counts like any other. Also not: the responsible person cannot read the
+  record now, its assignee then was someone else, its state then is 「AI の番」 (⑧: the type's own AI-only states or a
+  business plugin's `ai_turn` / auto-started step, `plugin-steps.ts` `aiStepStates`).
+- **Right before acting** (`recheck`, the runner): the responsible person still reads it, its assignee is them now, it is
+  still the watched record, its state then is not 「AI の番」 now — else `skipped` `EVENT_RECORD_GONE` /
+  `EVENT_NOT_ASSIGNEE` / `EVENT_NOT_WATCHED` / `EVENT_AI_TURN`, told to nobody. **A refusal of the responsible person's
+  rights skips the occurrence only; an event job is never paused for it** (⑥). Not advanced: the source record (④).
+  The やること's due counts from the event's company day.
+- **Paused / stopped** (③): `holdDue` opens a gap (`ai_job_event_gaps`, from the delivery number then; `job_key` '' =
+  the company's stop, also after a restore) and `holdPassedSlot` closes it; several per job. The scan looks at nothing
+  while paused or stopped; afterwards rows inside a gap never run, rows before the pause that were not looked at yet do.
+  A `due` event occurrence is held by the pause like any other.
+- **The day's limit** (⑦ ⑨): occurrences made per job and company day (`event_day`, company time) up to
+  `grant.limits.runsPerDay`; beyond it nothing is made (the target counts as fired), the job is never paused for it, and
+  the responsible person alone is told once that day, without a count (`job_events_skipped`, key
+  `job_events_skipped:<job>:<day>`, text built when read while they are its responsible person). 「もう一度」 makes no
+  occurrence, so it never counts.
+- **Who sees an event occurrence** (⑥, `eventShown`): only someone who reads its record now — owners and admins too.
+  `GET /jobs/:jobId/occurrences` leaves the others out **before** the limit (page by page), the job's `lastOccurrence` is
+  the newest the viewer may see, a notice is written only to those who read it then and shown only while they still do,
+  「もう一度」 / reconcile answer the same 404. Answers never carry `ev:<seq>`: `dueSlot` is the event's time in company
+  time, with `kind: 'event'`. An event job has no `nextSlot`; 「もう一度」 of an event occurrence has no slot rule
+  (`NOT_LATEST` / `NEXT_SLOT_SOON` do not apply).
+- **Screens**: the admin form's 「いつ動くか」 → 「見張っているやることが終わったときなどに」: 見張るやること (a list), きっかけ (a state),
+  「作ったやることも続けて見張る」, 1日の上限; the words are `job-words.ts` (`jobRecordTriggerText` — never the record's title
+  —, `JOB_EVENT_NOTE`, the grant's day-limit line, the expiry line). The app shows the same sentences in 「受け取る」.
+- **Rolling back**: to 4-0 is safe (`deployment.md` "Rolling back production"); 4-0 reads schema 2 as nothing. A `due`
+  event occurrence left behind expires there and 4-0 tells its responsible person and the creator without this
+  section's reader check (known; event occurrences are due for minutes only — the runner takes them right after the clock).
+- Test: `server/tests/integration/job-events.test.ts` (the memo's 4a tests 1–9 and the narrowing: unrelated task,
+  duplicate, someone's tag, rename, undo and complete again, a missing target refused, the start record's readers, ⑧, ⑤,
+  a new consent not accepted, the consent), `jobs-definition.test.ts` "an event trigger", `job-schemas.test.ts` (now with a
+  later `schema: 3` as the unknown shape), `admin/tests/jobs.test.tsx` "an event job", `client/tests/jobs-ipc.test.ts`
+  (the header), `admin-contract.test.ts` (`startChoices`). Mutation check: 42 guards removed or inverted one at a time;
+  each fails its test file except two pairs where each alone suffices — the origin-mark check (every marked row is also an
+  `external` actor's) and the `ev:<seq>` slot (the partial unique index on `event_seq` stops a second occurrence too).
 
 ## Tests (each guard mutation-checked, with the exceptions named)
 

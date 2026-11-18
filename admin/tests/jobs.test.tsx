@@ -365,7 +365,7 @@ describe('「もう一度」 (B PR 5b)', () => {
 // Stage 4-0 (jobs.md "Shapes this build does not know"): a job of a newer definition shape (event-triggered jobs, 4a)
 // never crashes this console, is never edited or approved from it, and the console says what to do.
 describe('a definition of a shape this console does not read', () => {
-  const event = { ...def(), schema: 2, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done' } } as unknown as JobDefinition
+  const event = { ...def(), schema: 3, trigger: { kind: 'future', when: 'something' } } as unknown as JobDefinition
 
   it('every job request says which shapes this console reads', async () => {
     const { calls } = mockApi({
@@ -375,7 +375,7 @@ describe('a definition of a shape this console does not read', () => {
     renderInCompany(<JobsRoute />)
     await screen.findByRole('listitem', { name: '週の報告' })
     const job = calls.find((c) => c.url.endsWith('/jobs'))!
-    expect(job.headers['X-ACB-Job-Schemas']).toBe('1')
+    expect(job.headers['X-ACB-Job-Schemas']).toBe('1,2')
   })
 
   it('the list says 「画面を新しくしてください」 instead of a time, offers no edit, and a trigger of an unknown shape never crashes it', async () => {
@@ -431,5 +431,70 @@ describe('a definition of a shape this console does not read', () => {
     // A definition hidden from a non-admin is not "too new".
     expect(needsNewerScreen({ definition: null })).toBe(false)
     expect(needsNewerScreen({ definition: event })).toBe(true)
+  })
+})
+
+// Stage 4a (jobs.md "Event-triggered jobs"): an event job watches one やること of the responsible person.
+describe('an event job', () => {
+  const START = 'task-0123456789abcdef'
+  const eventDef = (over: Record<string, unknown> = {}): JobDefinition => ({
+    ...def(), schema: 2,
+    trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: START, followMadeTask: true, ...over },
+  }) as JobDefinition
+
+  it('the form makes schema 2 with the watched やること and reads back the same; without one it says so plainly', () => {
+    const form = { ...emptyJobForm('u_member'), name: '次のやること', taskTitle: '次を書く', when: 'event' as const, startRecord: START, limits: { minutes: 5, runsPerDay: 3 } }
+    const parsed = definitionFromForm(form)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.definition).toMatchObject({ schema: 2, placement: 'e', trigger: eventDef().trigger, grant: { limits: { runsPerDay: 3 } } })
+    expect(formFromDefinition(parsed.definition)).toMatchObject({ when: 'event', startRecord: START, eventTo: 'done', followMadeTask: true, taskTitle: '次を書く' })
+    const none = definitionFromForm({ ...form, startRecord: '' })
+    expect(none.ok).toBe(false)
+    if (!none.ok) expect(jobProblemText(none.problems)).toMatch(/見張るやることを1つ選んでください/)
+    // An event runs no AI yet.
+    const pc = definitionFromForm({ ...form, kind: 'pc' })
+    expect(pc.ok).toBe(false)
+  })
+
+  it('creating one: the responsible person\'s open やること are offered (the server\'s reader), and what is sent watches the one chosen', async () => {
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [] }) },
+      [`POST ${base}/records/query`]: { body: ok({ total: 1, records: [{ id: START, type: 'task', title: '提案書を出す' }] }) },
+      [`POST ${base}/jobs`]: { status: 201, body: ok(jobView({ approvedVersion: null, state: 'draft', waiting: 'NOT_APPROVED', trigger: eventDef().trigger })) },
+    })
+    renderInCompany(<JobsRoute />)
+    await userEvent.click(await screen.findByRole('button', { name: '定期の仕事を作る' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '名前' }), '次のやること')
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: '責任者' }), 'u_member')
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'いつ動くか' }), 'event')
+    await userEvent.selectOptions(await within(dialog).findByRole('combobox', { name: '見張るやること' }), await within(dialog).findByRole('option', { name: '提案書を出す' }))
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '作るやること' }), '次を書く')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.endsWith('/jobs'))).toHaveLength(1))
+    const query = calls.find((c) => c.url.endsWith('/records/query'))!
+    expect(query.body).toMatchObject({ type: 'task', fields: { assignee: 'u_member' } })
+    const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/jobs'))!
+    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2')
+    expect((post.body as { definition: JobDefinition }).definition).toMatchObject({ schema: 2, trigger: { startRecord: START, to: 'done', followMadeTask: true } })
+  })
+
+  it('the list and the approval say what it watches in plain words (never the record\'s title), and what it never runs for', async () => {
+    const pending = jobView({ approvedVersion: null, state: 'draft', waiting: 'NOT_APPROVED', trigger: eventDef().trigger, nextSlot: null, lastOccurrence: null })
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [pending] }) },
+      [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...pending, versions: [version(1, eventDef(), 'c1')] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    expect(row).toHaveTextContent('見張っているやること（責任者が担当）が「完了」になったとき')
+    await userEvent.click(within(row).getByRole('button', { name: '承認する' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText(/「AI の番」が変えたとき/)).toBeInTheDocument()
+    expect(dialog).toHaveTextContent('上限：1日 2回まで（超えた出来事は動かさず、責任者に知らせます）')
+    expect(within(dialog).getByRole('button', { name: '承認する' })).toBeEnabled()
   })
 })

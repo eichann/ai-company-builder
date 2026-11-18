@@ -4,8 +4,9 @@
 import { SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
 import {
-  jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobSlotText, jobTriggerText,
+  JOB_EVENT_NOTE, jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobSlotText, jobTriggerText,
 } from '../../../../../shared/core/job-words'
+import { isRecordTrigger } from '../../../../../shared/core/jobs'
 import { useMyJobs } from '../hooks/useMyJobs'
 import { placeLine } from '../model'
 
@@ -36,11 +37,12 @@ export function JobsSection({ companyId }: { companyId: string }) {
                 <>
                   <ul aria-label={`「${job.name}」の内容`} className="space-y-1 text-[13px] text-zinc-700 dark:text-zinc-200">
                     <li>いつ：{jobTriggerText(job.toAccept.definition.trigger)}</li>
+                    {isRecordTrigger(job.toAccept.definition.trigger) && <li>{JOB_EVENT_NOTE}</li>}
                     <li>すること：{jobRunText(job.toAccept.definition.run)}</li>
                     {jobCheckText(job.toAccept.definition.check) && <li>{jobCheckText(job.toAccept.definition.check)}</li>}
                     <li>だれの権限で：あなた（動く場所：{jobPlacementText(job.toAccept.definition.placement)}）</li>
-                    {jobGrantLines(job.toAccept.definition.grant).map(l => <li key={l}>{l}</li>)}
-                    <li>{jobMissedText(job.toAccept.definition.missed)}</li>
+                    {jobGrantLines(job.toAccept.definition.grant, job.toAccept.definition.trigger).map(l => <li key={l}>{l}</li>)}
+                    <li>{jobMissedText(job.toAccept.definition.missed, job.toAccept.definition.trigger)}</li>
                   </ul>
                   <div className="flex items-center gap-2">
                     <Button size="sm" variant="primary" disabled={busy || !job.toAccept.fingerprint} onClick={() => void accept(job)}>

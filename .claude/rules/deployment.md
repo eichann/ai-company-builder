@@ -267,7 +267,10 @@ treats an unknown trigger as monthly, its admin console fails on `trigger.at`), 
 numbers that 4a then never sees as events. The admin console is deployed with the server (same compose, same
 commit); an admin tab left open from before 4-0 only gets definitions it can read (no header = schema 1). Rolling
 back between 4-0 and 4a, or forward, is fine. Rolling back the desktop app is fine (it claims time occurrences
-only unless it names `event`).
+only unless it names `event`; an app before 4a cannot accept an event job and is told to update itself). 4a's tables
+(`ai_job_event_cursors`, `ai_job_event_gaps`, the event columns of `ai_job_occurrences`) are additive and travel in a
+company archive like every `company_id` table; the stop a restore sets (`pauseAfterRestore`) opens the company's event
+gap, so nothing that happens until an owner lifts it runs afterwards (`jobs.md` "Event-triggered jobs").
 
 ## CI
 

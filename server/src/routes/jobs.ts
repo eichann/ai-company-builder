@@ -18,9 +18,9 @@
  *   POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile  owner/admin { done }: its run's unknown outside result
  */
 import { Hono, type Context } from 'hono'
-import { JOB_SCHEMAS_HEADER, parseJobOccurrenceKinds, parseJobSchemasHeader } from '../../shared/core/jobs'
+import { JOB_NEEDS_NEWER_APP, JOB_SCHEMAS_HEADER, parseJobOccurrenceKinds, parseJobSchemasHeader } from '../../shared/core/jobs'
 import { services } from '../composition'
-import { refusal } from './respond'
+import { refusal as respondRefusal } from './respond'
 import { companyMember, serviceBody } from './guards'
 
 export const jobsRoute = new Hono()
@@ -28,6 +28,16 @@ const { jobs, jobRuns, jobRetry, aiRuns } = services
 
 /** The definition schemas the caller reads (jobs.md "Shapes this build does not know"; absent = schema 1). */
 const reads = (c: Context) => parseJobSchemasHeader(c.req.header(JOB_SCHEMAS_HEADER))
+
+/**
+ * A refusal as the caller reads it: the desktop app (every build sends `X-ACB-Client-Version`) is told to update the
+ * app, not to reload a screen (stage 4a; the code stays `JOB_NEEDS_NEWER_SCREEN`).
+ */
+const refusal: typeof respondRefusal = (c, r) => {
+  const appCaller = typeof c.req.header('X-ACB-Client-Version') === 'string'
+  if (appCaller && r.body.code === 'JOB_NEEDS_NEWER_SCREEN') return respondRefusal(c, { ...r, body: { ...r.body, error: `${JOB_NEEDS_NEWER_APP}。` } })
+  return respondRefusal(c, r)
+}
 
 jobsRoute.get('/jobs', companyMember, async (c) => {
   const result = jobs.list(c.var.member, reads(c))

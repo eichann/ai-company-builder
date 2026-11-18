@@ -74,6 +74,11 @@ export interface NotificationServiceDeps {
    */
   jobOccurrenceNoticeOf?: (member: Member, jobId: string, occurrenceId: string) => { name: string; dueSlot: string; outcomeCode: string | null } | null
   /**
+   * 「上限を超えたので、いくつかの出来事を見送りました」 (`job_events_skipped`, stage 4a): the job's name while the member is its
+   * responsible person (they alone are told), else null. Absent → never shown.
+   */
+  jobEventsSkippedOf?: (member: Member, jobId: string) => { name: string } | null
+  /**
    * 「受け取りが要ります」 (`job_accept_needed`, jobs.md "The acceptance notice"): the job's name while the
    * version still waits for this member's acceptance, else null (not shown). Absent → never shown.
    */
@@ -949,7 +954,13 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         return /^[1-9][0-9]{0,8}$/.test(version) ? deps.jobAcceptNoticeOf?.(member, jobId, Number(version)) ?? null : null
       }
       const jobOccurrenceKinds = new Set<string>(JOB_OCCURRENCE_NOTIFICATION_KINDS)
+      // An event job's day limit reached: `job_events_skipped:<job id>:<day>`, shown only to its responsible person.
+      const eventsSkipped = (r: NotificationRow) => {
+        const [, jobId = ''] = (r.dedupeKey ?? '').split(':')
+        return deps.jobEventsSkippedOf?.(member, jobId) ?? null
+      }
       const visible = rows.filter(r => {
+        if (r.kind === 'job_events_skipped') return r.recordId === '' && eventsSkipped(r) !== null
         if (r.kind === 'job_paused') return r.recordId === '' && jobNotice(r) !== null
         if (r.kind === 'job_accept_needed') return r.recordId === '' && acceptNotice(r) !== null
         // After a restore (deployment.md): only while the member is an owner / admin (they alone can resume).
@@ -990,6 +1001,12 @@ export function createNotificationService(deps: NotificationServiceDeps) {
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text: `定期の仕事「${job.name}」を止めました：${why}`, createdAt: r.createdAt, read }
         }
         if (r.kind === 'company_restored') return restoredItem(r)
+        if (r.kind === 'job_events_skipped') {
+          const job = eventsSkipped(r) as { name: string }
+          // No count and nothing of which (owner decision ⑨).
+          const text = `定期の仕事「${job.name}」は1日の上限を超えたため、いくつかの出来事を見送りました（上限は管理者が決めています）`
+          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
+        }
         if (r.kind === 'job_accept_needed') {
           const job = acceptNotice(r) as { name: string; contentChanged: boolean; choosesPlace?: boolean }
           const base = job.contentChanged

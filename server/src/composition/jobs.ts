@@ -14,6 +14,7 @@
  */
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import { latestJobSlot, nextJobSlot } from '../../shared/core/job-schedule'
+import { isTimeTrigger } from '../../shared/core/jobs'
 import { sha256Bytes } from '../adapters/system'
 import { companySkillTree } from '../lib/skill-trees'
 import type { CompanyRepository } from '../ports/companies'
@@ -45,6 +46,8 @@ export interface JobsWiringDeps<R extends { memberships: MembershipRepository }>
   places: NonNullable<JobServiceDeps['places']>
   /** 「もう一度」 on an occurrence view (built later: `wireJobRetry`). */
   occurrenceRetry: NonNullable<JobServiceDeps['occurrenceRetry']>
+  /** Event-triggered jobs: a business plugin step's 「AI の番」 states (built later: the plugins' lane). */
+  aiStepStates: NonNullable<JobServiceDeps['aiStepStates']>
 }
 
 export function wireJobs<R extends { memberships: MembershipRepository }>(deps: JobsWiringDeps<R>) {
@@ -76,6 +79,7 @@ export function wireJobs<R extends { memberships: MembershipRepository }>(deps: 
     places: deps.places,
     // 「もう一度」 on an owner / admin's occurrence view (jobs.md "「もう一度」"); bound late (built later).
     occurrenceRetry: deps.occurrenceRetry,
+    aiStepStates: deps.aiStepStates,
   })
 
   return { skillShelf, jobs }
@@ -104,6 +108,8 @@ export function wireJobRetry(deps: JobRetryWiringDeps) {
     reconcileFor: (companyId, runId, key, done, by) => aiRuns.reconcileFor(companyId, runId, key, done, by),
     // The clock's own slots (its zone and days off): the newest at or before now, and the next one.
     slotsOf: (companyId, definition) => {
+      // An event job has no slots (stage 4a): each of its occurrences stands alone.
+      if (!isTimeTrigger(definition.trigger)) return { latest: null, nextAt: null }
       const now = companyNow(shared.clock.nowMs(), DEFAULT_COMPANY_TIME_ZONE)
       const holidays = taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date)
       const next = nextJobSlot(definition.trigger, now, holidays)
@@ -125,6 +131,8 @@ export interface JobOccurrencesWiringDeps {
   taskSettings: Pick<TaskSettingsService, 'settingsOf'>
   /** A deliverable place outside is usable now (its connector answers; composition/google.ts). */
   placeUsable: NonNullable<JobOccurrenceDeps['placeUsable']>
+  /** Event-triggered jobs: a business plugin step's 「AI の番」 states (the plugins' lane). */
+  aiStepStates: NonNullable<JobOccurrenceDeps['aiStepStates']>
 }
 
 export function wireJobOccurrences(deps: JobOccurrencesWiringDeps) {
@@ -142,6 +150,7 @@ export function wireJobOccurrences(deps: JobOccurrencesWiringDeps) {
     writer: serviceRecords,
     // A deliverable place no longer usable (a folder pick past its 90 days) sends the occurrence to a person at its slot.
     placeUsable: deps.placeUsable,
+    aiStepStates: deps.aiStepStates,
     noticesChanged: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
   })
   const jobRunner = createJobRunner({

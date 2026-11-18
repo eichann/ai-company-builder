@@ -19,13 +19,15 @@ import {
   JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, jobProblemText, needsNewerScreen, type JobForm,
 } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
-import { JOB_NEEDS_NEWER_SCREEN, type JobDefinition, type JobWeekday } from '../../../../shared/core/jobs'
+import { JOB_NEEDS_NEWER_SCREEN, isRecordTrigger, type JobDefinition, type JobWeekday } from '../../../../shared/core/jobs'
 import {
-  jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobTriggerText,
+  JOB_EVENT_NOTE, jobCheckText, jobEventStateText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobTriggerText,
 } from '../../../../shared/core/job-words'
 
 const personName = (m: { name: string | null; email: string | null } | undefined) => (m ? m.name || m.email || '名前未設定' : 'もういない人')
 const SELECT = 'rounded-md border bg-background px-2 py-1 text-sm'
+/** The states an event job may watch for (a やること), first the one the owner chose to start with (owner decision ⑤). */
+const EVENT_STATES = ['done', 'review', 'waiting', 'in_progress', 'cancelled'] as const
 const WEEKDAYS: Array<[JobWeekday, string]> = [['mon', '月曜'], ['tue', '火曜'], ['wed', '水曜'], ['thu', '木曜'], ['fri', '金曜'], ['sat', '土曜'], ['sun', '日曜']]
 
 /** Make a job (`job` null) or a new version of it. */
@@ -102,6 +104,10 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const set = <K extends keyof JobForm>(k: K, v: JobForm[K]) => setF((prev) => ({ ...prev, [k]: v }))
+  // An event job's first watched やること: the responsible person's open ones that this console's user reads (the server
+  // checks again that both of them read it).
+  const starts = useQuery(f.when === 'event' ? `job-starts:${companyId}:${f.actingUser}` : null, () => jobsApi.startChoices(companyId, f.actingUser))
+  const startRecords = (starts.data?.records ?? []) as Array<{ id: string; title: string }>
   const expiry = JOB_EXPIRY_CHOICES.some((c) => c.minutes === f.expiresAfterMinutes)
     ? JOB_EXPIRY_CHOICES
     : [...JOB_EXPIRY_CHOICES, { minutes: f.expiresAfterMinutes, label: `${f.expiresAfterMinutes}分` }]
@@ -131,6 +137,40 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
           {members.map((m) => <option key={m.userId} value={m.userId}>{personName(m)}</option>)}
         </select>
       </Row>
+      <Row label="いつ動くか">
+        <select aria-label="いつ動くか" className={SELECT} value={f.when}
+          onChange={(e) => setF((prev) => ({ ...prev, when: e.target.value as JobForm['when'], kind: e.target.value === 'event' ? 'task' : prev.kind }))}>
+          <option value="time">決まった時間に</option>
+          <option value="event">見張っているやることが終わったときなどに（出来事で）</option>
+        </select>
+      </Row>
+      {f.when === 'event' ? (
+        <>
+          <Row label="見張るやること（責任者が担当のもの）">
+            <select aria-label="見張るやること" className={SELECT} value={f.startRecord} onChange={(e) => set('startRecord', e.target.value)}>
+              <option value="">選んでください</option>
+              {f.startRecord && !startRecords.some((r) => r.id === f.startRecord) && <option value={f.startRecord}>いま選ばれているやること</option>}
+              {startRecords.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
+            </select>
+            {starts.data && startRecords.length === 0 && <span className="text-muted-foreground">責任者が担当の、まだ終わっていないやることがありません（あなたが見られるもの）</span>}
+          </Row>
+          <Row label="きっかけ">
+            <select aria-label="きっかけ" className={SELECT} value={f.eventTo} onChange={(e) => set('eventTo', e.target.value)}>
+              {EVENT_STATES.map((s) => <option key={s} value={s}>「{jobEventStateText('task', s)}」になったとき</option>)}
+            </select>
+            <label className="flex items-center gap-1">
+              <input type="checkbox" checked={f.followMadeTask} onChange={(e) => set('followMadeTask', e.target.checked)} />
+              作ったやることも続けて見張る（終わるたびに次を作る）
+            </label>
+          </Row>
+          <Row label="1日の上限">
+            <select aria-label="1日の上限" className={SELECT} value={f.limits.runsPerDay} onChange={(e) => set('limits', { ...f.limits, runsPerDay: Number(e.target.value) })}>
+              {[1, 2, 3, 5, 10, 24].map((n) => <option key={n} value={n}>1日 {n}回まで</option>)}
+            </select>
+          </Row>
+          <p className="text-xs text-muted-foreground">{JOB_EVENT_NOTE}</p>
+        </>
+      ) : (
       <Row label="いつ">
         <select aria-label="くり返し" className={SELECT} value={f.every} onChange={(e) => set('every', e.target.value as JobForm['every'])}>
           <option value="day">毎日</option>
@@ -174,8 +214,9 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
           {JOB_MINUTES.map((m) => <option key={m} value={m}>{m}分</option>)}
         </select>
       </Row>
+      )}
       <Row label="すること">
-        <select aria-label="すること" className={SELECT} value={f.kind}
+        <select aria-label="すること" className={SELECT} value={f.kind} disabled={f.when === 'event'}
           onChange={(e) => setF((prev) => ({ ...prev, kind: e.target.value as JobForm['kind'], limits: e.target.value === 'pc' ? { ...prev.limits, minutes: Math.max(prev.limits.minutes, 15) } : prev.limits }))}>
           <option value="task">やることを作る（サーバーで。AI は使いません）</option>
           <option value="pc">Skill を責任者の PC の AI で動かす</option>
@@ -195,10 +236,12 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
         <PcJobFields f={f} set={set} hasCompanyFolder={hasCompanyFolder} shelfSkills={shelfSkills} />
       )}
       <Row label="時間に動けなかったとき（サーバーが止まっていたなど）">
+        {f.when === 'time' && (
         <select aria-label="動けなかったとき" className={SELECT} value={f.missedPolicy} onChange={(e) => set('missedPolicy', e.target.value as JobForm['missedPolicy'])}>
           <option value="latest_only">あとから一番新しい回だけ動かす</option>
           <option value="skip">見送る</option>
         </select>
+        )}
         <select aria-label="期限切れまで" className={SELECT} value={f.expiresAfterMinutes} onChange={(e) => set('expiresAfterMinutes', Number(e.target.value))}>
           {expiry.map((c) => <option key={c.minutes} value={c.minutes}>{c.label}で期限切れ</option>)}
         </select>
@@ -220,13 +263,13 @@ export function JobVersionWords({ definition, members }: { definition: JobDefini
     <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1.5 text-sm">
       <dt className="text-muted-foreground">名前</dt><dd>{definition.name}</dd>
       <dt className="text-muted-foreground">責任者</dt><dd>{personName(who)}（この人の権限で動きます）</dd>
-      <dt className="text-muted-foreground">いつ</dt><dd>{jobTriggerText(definition.trigger)}</dd>
+      <dt className="text-muted-foreground">いつ</dt><dd>{jobTriggerText(definition.trigger)}{isRecordTrigger(definition.trigger) && <span className="block text-xs text-muted-foreground">{JOB_EVENT_NOTE}</span>}</dd>
       <dt className="text-muted-foreground">すること</dt><dd>{jobRunText(definition.run)}</dd>
       {check && (<><dt className="text-muted-foreground">確かめること</dt><dd>{check}</dd></>)}
       <dt className="text-muted-foreground">動く場所</dt><dd>{jobPlacementText(definition.placement)}</dd>
       <dt className="text-muted-foreground">できること</dt>
-      <dd><ul className="list-disc pl-4">{jobGrantLines(definition.grant).map((l) => <li key={l}>{l}</li>)}</ul></dd>
-      <dt className="text-muted-foreground">動けないとき</dt><dd>{jobMissedText(definition.missed)}</dd>
+      <dd><ul className="list-disc pl-4">{jobGrantLines(definition.grant, definition.trigger).map((l) => <li key={l}>{l}</li>)}</ul></dd>
+      <dt className="text-muted-foreground">動けないとき</dt><dd>{jobMissedText(definition.missed, definition.trigger)}</dd>
     </dl>
   )
 }

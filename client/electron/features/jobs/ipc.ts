@@ -8,7 +8,7 @@
 //   jobs:resume   resume a pause they made
 
 import { JOBS_OFFLINE_TEXT, JOBS_SERVER_TOO_OLD_TEXT, type JobActionResult, type JobsFailure, type MyJob, type MyJobsResult } from '../../../shared/jobs'
-import { isJobId, type JobDeliveryPlace } from '../../../../shared/core/jobs'
+import { JOB_SCHEMAS, JOB_SCHEMAS_HEADER, isJobId, type JobDeliveryPlace } from '../../../../shared/core/jobs'
 import type { JobView } from '../../../../shared/types/jobs'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
@@ -46,7 +46,8 @@ export function createJobsApi(deps: JobsDeps) {
     try {
       const res = await doFetch(`${base}/api${path}`, {
         method, redirect: 'error', signal: AbortSignal.timeout(deps.timeoutMs ?? 15_000),
-        headers: { Cookie: cookies.join('; '), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+        // The definition shapes this app shows (jobs.md "Shapes this build does not know"): since stage 4a, event jobs too.
+        headers: { Cookie: cookies.join('; '), [JOB_SCHEMAS_HEADER]: JOB_SCHEMAS.join(','), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       })
       return { status: res.status, json: (await res.json().catch(() => null)) as Record<string, unknown> | null }

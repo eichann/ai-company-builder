@@ -5,7 +5,7 @@
  * version's definition (and a trigger refuses it), only one that adds a version and ones that mark a
  * version approved / accepted once.
  */
-import type { JobDeliveryPlace, JobOccurrenceState, JobPauseReason, JobState } from '../../shared/core/jobs'
+import type { JobDeliveryPlace, JobOccurrenceState, JobPauseReason, JobState, LedgerEventRow } from '../../shared/core/jobs'
 
 export interface JobRow {
   id: string
@@ -75,9 +75,27 @@ export interface JobOccurrenceRow {
   retries?: number
   retriedBy?: string | null
   retriedAt?: string | null
+  /**
+   * Stage 4a, an event occurrence (`due_slot` `ev:<seq>`): the ledger's delivery number of its event, the record and
+   * its version then, and the company's day it was made (the day's limit counts these). Absent / null: a time slot.
+   */
+  eventSeq?: number | null
+  eventRecordId?: string | null
+  eventVersion?: number | null
+  eventDay?: string | null
   createdAt: string
   updatedAt: string
 }
+
+/** A stretch no event of a job runs in (stage 4a): delivery numbers in (`from`, `until`]; `until` null while it lasts. */
+export interface JobEventGap { from: number; until: number | null }
+
+/**
+ * An event job's place in the ledger and what it watches (stage 4a): `seen` the delivery number looked at up to;
+ * `watch` the one record it watches now (server-managed), `start` the accepted start record it began from, `fired`
+ * whether `watch` made its occurrence already.
+ */
+export interface JobEventCursor { seen: number; watch: string; start: string; fired: boolean }
 
 export interface JobRepository {
   /** Every job of the company, newest first. */
@@ -104,8 +122,8 @@ export interface JobRepository {
   /** Insert an occurrence unless its (job, slot) is there already (`UNIQUE`): false = it was (nothing written). */
   insertOccurrence(row: JobOccurrenceRow): boolean
   occurrence(occurrenceId: string): JobOccurrenceRow | null
-  /** A job's occurrences, newest slot first. */
-  occurrences(jobId: string, limit: number): JobOccurrenceRow[]
+  /** A job's occurrences, newest first (events by delivery number, newest first, before time slots, newest slot first), from `offset`. */
+  occurrences(jobId: string, limit: number, offset?: number): JobOccurrenceRow[]
   /** Occurrences in `due`, oldest due first (every job of the company). */
   dueOccurrences(limit: number): JobOccurrenceRow[]
   /** Occurrences in `running` (a PC's run holds them, B PR 5a), oldest due first (every job of the company). */
@@ -121,4 +139,31 @@ export interface JobRepository {
    */
   retryOccurrence(occurrenceId: string, from: readonly JobOccurrenceState[], expiresAt: string, by: string, at: string): boolean
   moveOccurrence(occurrenceId: string, from: readonly JobOccurrenceState[], to: JobOccurrenceState, change: { runId?: string | null; outcomeCode: string | null; checkedUntil?: string; checkedCommit?: string | null }, at: string): boolean
+
+  // Stage 4a, event-triggered jobs (jobs.md "Event-triggered jobs").
+  /** The company's newest delivery number given so far (0: none): where a cursor or a gap starts "now". */
+  ledgerSeqNow(): number
+  /** Ledger rows with a delivery number after `afterSeq`, in delivery order, at most `limit` (with their record's type). */
+  ledgerEvents(afterSeq: number, limit: number): LedgerEventRow[]
+  /** Where the job's scan has looked up to and what it watches, or null: never accepted as an event job. */
+  eventCursor(jobId: string): JobEventCursor | null
+  /**
+   * The responsible person accepted a version watching `startRecord`: the cursor at the company's newest delivery
+   * number (never moved back) — and, when that start record is not the one it began from, the watch starts over there.
+   */
+  startEventCursor(jobId: string, startRecord: string, at: string): void
+  /** Move the cursor from `from` to `to` (compare-and-set): false = it was not at `from` (nothing written). */
+  moveEventCursor(jobId: string, from: number, to: number, at: string): boolean
+  /** The watched record made its occurrence: it fires no more (compare-and-set on the record; false = it was not, or fired). */
+  markWatchFired(jobId: string, recordId: string, at: string): boolean
+  /** The next record to watch (`followMadeTask`): only while `from` is still the watched one (false = it was not: nothing written). */
+  moveWatch(jobId: string, from: string, to: string, at: string): boolean
+  /** The job's gaps and the company's (its stops), in any order. */
+  eventGaps(jobId: string): JobEventGap[]
+  /** A pause (`jobId`) or the company's stop (null) begins: a gap from the newest delivery number now, unless one is open. */
+  openEventGap(jobId: string | null, id: string, at: string): void
+  /** It ends: every open gap of the job (null: of the company's stop) ends at the newest delivery number now. */
+  closeEventGaps(jobId: string | null, at: string): void
+  /** How many event occurrences of the job were made on the company's `day`. */
+  eventOccurrencesOn(jobId: string, day: string): number
 }

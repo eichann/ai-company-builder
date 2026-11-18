@@ -86,6 +86,7 @@ import {
   groupDeletedSchema,
   jobListSchema,
   jobOccurrencesSchema,
+  jobStartChoicesSchema,
   jobSchema,
   jobsStopSchema,
   jobRetrySchema,
@@ -1484,6 +1485,9 @@ export type { JobDefinition } from '../../../shared/core/jobs'
 
 import { JOB_SCHEMAS, JOB_SCHEMAS_HEADER, type JobDefinition } from '../../../shared/core/jobs'
 
+/** The states of a やること an event job may start watching from (not finished: it can still reach the state watched). */
+export const JOB_START_STATES = ['todo', 'in_progress', 'review', 'waiting', 'awaiting_acceptance', 'declined'] as const
+
 /**
  * Every job request says which definition shapes this console reads (jobs.md "Shapes this build does not know"):
  * the server answers a newer one without its definition and refuses to approve, accept or edit it from here. A
@@ -1510,6 +1514,14 @@ export const jobsApi = {
   resume: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/resume`, jobSchema, { ...JOB_READS, method: 'POST' }),
   setStopped: (companyId: string, stopped: boolean) =>
     getData(`/api/companies/${enc(companyId)}/jobs-stop`, jobsStopSchema, { method: 'PUT', body: { stopped } }),
+  /**
+   * The open やること of a member that this console's user reads (the server's own reader filters): what an event job may
+   * watch first (jobs.md "Event-triggered jobs"). The server checks again that both of them read it.
+   */
+  startChoices: (companyId: string, assignee: string) =>
+    getData(`/api/companies/${enc(companyId)}/records/query`, jobStartChoicesSchema, {
+      method: 'POST', body: { type: 'task', state: [...JOB_START_STATES], fields: { assignee }, limit: 50 },
+    }),
   /** 「もう一度」: the occurrence back to its turn with a new deadline (the server checks everything again). */
   retryOccurrence: (companyId: string, jobId: string, occurrenceId: string) =>
     getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/occurrences/${enc(occurrenceId)}/retry`, jobRetrySchema, { method: 'POST' }),

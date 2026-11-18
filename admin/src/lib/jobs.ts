@@ -8,7 +8,7 @@
  * parser check the rest.
  */
 import {
-  JOB_MINUTES_ROUTE, JOB_NAME_MAX, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
+  JOB_MINUTES_ROUTE, JOB_NAME_MAX, isRecordTrigger, knownJobDefinition, JOB_OUTBOUND_ROUTES, JOB_TASK_TITLE_MAX, JOB_TITLE_WORDS_MAX, parseJobDefinition,
   type JobDefinition, type JobDefinitionResult, type JobGrant, type JobWeekday,
 } from '../../../shared/core/jobs'
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
@@ -18,6 +18,17 @@ export interface JobForm {
   actingUser: string
   /** `task`: the server makes a やること (no AI). `pc`: a Skill runs on the responsible person's PC. */
   kind: 'task' | 'pc'
+  /**
+   * When it runs: at a time (`time`, schema 1), or (stage 4a, schema 2) when the one watched やること of the responsible
+   * person reaches a state (`event`; only with `task` — an event runs no AI yet).
+   */
+  when: 'time' | 'event'
+  /** `event`: the state watched for (a state of a やること). */
+  eventTo: string
+  /** `event`: the やること watched first (its id; chosen from a list of the responsible person's open やること). */
+  startRecord: string
+  /** `event`: after it made a やること, watch that one next (a chain); else once only. */
+  followMadeTask: boolean
   every: 'day' | 'week' | 'month'
   hour: string
   minute: string
@@ -89,7 +100,7 @@ const RECORD_READ_ROUTES = ['GET /my-turn', 'POST /query', 'GET /item/:recordId'
 
 export function emptyJobForm(actingUser: string): JobForm {
   return {
-    name: '', actingUser, kind: 'task', every: 'week', hour: '09', minute: '00', businessDaysOnly: true, weekday: 'mon', businessDaysBefore: 0,
+    name: '', actingUser, kind: 'task', when: 'time', eventTo: 'done', startRecord: '', followMadeTask: true, every: 'week', hour: '09', minute: '00', businessDaysOnly: true, weekday: 'mon', businessDaysBefore: 0,
     monthDay: 1, ifHoliday: 'before', taskTitle: '', dueBusinessDays: 1, missedPolicy: 'latest_only', expiresAfterMinutes: 720,
     limits: NEW_JOB_LIMITS,
     skillName: '', shelfItem: '', checkKind: 'new_files', checkPath: '', titleWords: '', readPaths: '', readRecords: true, mailDrafts: false, writePlace: '', writeFolder: '',
@@ -117,8 +128,16 @@ export function needsNewerScreen(v: { definition: JobDefinition | null; needsUpd
 
 /** The form for a version. */
 export function formFromDefinition(d: JobDefinition): JobForm {
-  const [hour, minute] = d.trigger.at.split(':')
   const base = emptyJobForm(d.actingUser)
+  if (isRecordTrigger(d.trigger)) {
+    // An event job (stage 4a): the server's operation only.
+    return {
+      ...base, name: d.name, when: 'event', eventTo: d.trigger.to, startRecord: d.trigger.startRecord, followMadeTask: d.trigger.followMadeTask,
+      missedPolicy: d.missed.policy, expiresAfterMinutes: d.missed.expiresAfterMinutes, limits: d.grant.limits,
+      ...(d.run.kind === 'operation' ? { kind: 'task' as const, taskTitle: d.run.title, dueBusinessDays: d.run.dueBusinessDays } : {}),
+    }
+  }
+  const [hour, minute] = d.trigger.at.split(':')
   const t = d.trigger
   const common: JobForm = {
     ...base,
@@ -170,6 +189,20 @@ function pcGrant(f: JobForm): JobGrant {
  * goes with a placeholder fingerprint: the server reads the pinned one (and a shelf Skill's name) itself.
  */
 export function definitionFromForm(f: JobForm, shelfSkillName?: string): JobDefinitionResult {
+  if (f.when === 'event') {
+    // Stage 4a: the server makes a やること when the watched one reaches the state (schema 2; no AI).
+    if (f.kind !== 'task') return { ok: false, problems: ['trigger.EVENT_SERVER_ONLY'] }
+    if (!f.startRecord) return { ok: false, problems: ['trigger.startRecord.REQUIRED'] }
+    return parseJobDefinition({
+      schema: 2, name: f.name.normalize('NFC').trim(), actingUser: f.actingUser,
+      trigger: { kind: 'record', type: 'task', event: 'state', to: f.eventTo, assignee: 'responsible', startRecord: f.startRecord, followMadeTask: f.followMadeTask },
+      missed: { policy: f.missedPolicy, expiresAfterMinutes: f.expiresAfterMinutes },
+      check: { kind: 'none' },
+      run: { kind: 'operation', operation: 'create_task', title: f.taskTitle.normalize('NFC').trim(), dueBusinessDays: f.dueBusinessDays },
+      placement: 'e',
+      grant: { tools: [], creates: ['task'], routes: [], reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: f.limits },
+    })
+  }
   const at = `${f.hour}:${f.minute}`
   const trigger = f.every === 'day'
     ? { every: 'day', at, businessDaysOnly: f.businessDaysOnly }
@@ -206,6 +239,11 @@ export function jobProblemText(problems: string[]): string {
   if (problems.includes('name.BAD')) return `名前を入れてください（${JOB_NAME_MAX}文字まで、改行なし）。`
   if (problems.includes('run.title.BAD')) return `作るやることの名前を入れてください（${JOB_TASK_TITLE_MAX}文字まで、改行なし）。`
   if (problems.includes('actingUser.BAD') || problems.includes('actingUser.NOT_MEMBER')) return '責任者を選んでください（この会社のメンバー）。'
+  if (problems.includes('trigger.startRecord.REQUIRED') || problems.includes('trigger.startRecord.BAD')) return '見張るやることを1つ選んでください（責任者が担当の、まだ終わっていないやること）。'
+  if (problems.includes('trigger.startRecord.NOT_FOUND')) return '選んだやることが見つかりません。あなたと責任者の両方が見られる、責任者が担当のやることを選んでください。'
+  if (problems.includes('trigger.to.AI_TURN')) return 'その状態は「AI の番」で使われているため、きっかけにできません。ほかの状態を選んでください。'
+  if (problems.includes('trigger.EVENT_SERVER_ONLY')) return '出来事で動かせるのは「やることを作る」だけです（AI で動かすのは、まだできません）。'
+  if (problems.some(p => p.startsWith('trigger.'))) return 'きっかけを選び直してください。'
   if (problems.some(p => p.startsWith('run.procedure'))) return '手順にする Skill を選んでください（Skill のフォルダ名は半角の英小文字・数字・- _）。'
   if (problems.includes('check.path.BAD') || problems.includes('check.path.NOT_IN_READS')) return '新しいファイルを確かめる場所を、会社のフォルダの中の場所で入れてください（例：営業部/面談）。'
   if (problems.includes('check.titleWords.BAD')) return `会議の名前に含む言葉は${JOB_TITLE_WORDS_MAX}つまで、1つ40文字までにしてください。`

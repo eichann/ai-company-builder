@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   JOB_GRANT_TOOLS, OCCURRENCE_ID_RE, isOccurrenceId, jobRunRouteAllowed, jobDefinitionPaths, jobConsentCanonical, jobDefinitionCanonical, jobDeliveryTools, newJobId, newOccurrenceId,
-  parseJobAcceptedPlace, parseJobDefinition, type JobDefinition,
+  ledgerRowIsEvent, parseJobAcceptedPlace, parseJobDefinition, triggerMatches, type JobDefinition, type JobRecordTrigger,
 } from '../../shared/core/jobs'
 import { RECORD_ID_RE, newRecordId } from '../../shared/core/records'
 
@@ -255,5 +255,50 @@ describe('a deliverable place outside (owner decision 2026-11-11: connector + pl
     for (const route of ['POST /google/drive/read', 'GET /google/drive/files', 'POST /google/drive/picks']) expect(jobRunRouteAllowed(with_, route), route).toBe(false)
     expect(jobDeliveryTools(with_)).toEqual(['drive_picked', 'drive_put'])
     expect(jobDeliveryTools(without)).toEqual([])
+  })
+})
+
+// Stage 4a (jobs.md "Event-triggered jobs"): schema 2 is a watched record's change, and only that.
+describe('an event trigger (schema 2)', () => {
+  const eventJob = (trigger: Record<string, unknown> = {}): Record<string, unknown> => ({
+    ...serverJob(), schema: 2, name: '次のやること',
+    trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: 'task-0123456789abcdef', followMadeTask: true, ...trigger },
+  })
+
+  it('a watched record, a state of the type, the responsible person as assignee — each required, with codes only', () => {
+    expect(parsed(eventJob()).trigger).toEqual({ kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: 'task-0123456789abcdef', followMadeTask: true })
+    const noTarget = { ...(eventJob().trigger as Record<string, unknown>) }
+    delete noTarget.startRecord
+    expect(problems({ ...eventJob(), trigger: noTarget })).toEqual(['trigger.startRecord.REQUIRED'])
+    expect(problems(eventJob({ startRecord: 'meeting-0123456789abcdef' }))).toEqual(['trigger.startRecord.BAD'])
+    expect(problems(eventJob({ to: 'preparing' }))).toEqual(['trigger.to.BAD'])
+    expect(problems(eventJob({ type: 'meeting' }))).toContain('trigger.type.BAD')
+    expect(problems(eventJob({ event: 'created' }))).toEqual(['trigger.event.BAD'])
+    expect(problems(eventJob({ assignee: 'anyone' }))).toEqual(['trigger.assignee.BAD'])
+    expect(problems(eventJob({ from: 'done' }))).toEqual(['trigger.from.BAD'])
+    expect(problems(eventJob({ followMadeTask: 'yes' }))).toEqual(['trigger.followMadeTask.BAD'])
+    expect(problems(eventJob({ title: '完了' }))).toEqual(['trigger.UNKNOWN_KEY'])
+  })
+
+  it('schema 1 takes no record trigger, schema 2 no time; an event runs the server operation only (4a)', () => {
+    expect(problems({ ...serverJob(), trigger: eventJob().trigger })).toEqual(['trigger.every.BAD'])
+    expect(problems({ ...eventJob(), trigger: serverJob().trigger })).toEqual(['trigger.kind.BAD'])
+    expect(problems({ ...pcJob(), schema: 2, trigger: eventJob().trigger })).toEqual(['trigger.EVENT_SERVER_ONLY'])
+  })
+
+  it('what is never an event, and what the trigger watches for', () => {
+    const row = { origin: null, runId: null, actorKind: 'human' }
+    expect(ledgerRowIsEvent(row)).toBe(true)
+    expect(ledgerRowIsEvent({ ...row, actorKind: 'ai' })).toBe(true)
+    expect(ledgerRowIsEvent({ ...row, origin: 'migration' })).toBe(false)
+    expect(ledgerRowIsEvent({ ...row, origin: 'system' })).toBe(false)
+    expect(ledgerRowIsEvent({ ...row, actorKind: 'ai', runId: 'run-1' })).toBe(false)
+    expect(ledgerRowIsEvent({ ...row, actorKind: 'external' })).toBe(false)
+    const t = parsed(eventJob({ from: 'todo' })).trigger as JobRecordTrigger
+    expect(triggerMatches(t, { type: 'task', fromState: 'todo', toState: 'done' })).toBe(true)
+    expect(triggerMatches(t, { type: 'task', fromState: 'review', toState: 'done' })).toBe(false)
+    expect(triggerMatches(t, { type: 'task', fromState: 'done', toState: 'done' })).toBe(false)
+    expect(triggerMatches(t, { type: 'meeting', fromState: 'todo', toState: 'done' })).toBe(false)
+    expect(triggerMatches(t, { type: 'task', fromState: 'todo', toState: 'cancelled' })).toBe(false)
   })
 })

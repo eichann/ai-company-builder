@@ -56,6 +56,6 @@ export type JobActionResult = { success: true } | JobsFailure
 export function jobNoticeTarget(kind: string): 'jobs' | 'none' | null {
   if (kind === 'job_accept_needed') return 'jobs'
   // `company_restored` (deployment.md "After a restore"): about the jobs and the AI stopped; its text says what to check.
-  if (kind === 'job_expired' || kind === 'job_skipped' || kind === 'job_failed' || kind === 'job_paused' || kind === 'company_restored') return 'none'
+  if (kind === 'job_expired' || kind === 'job_skipped' || kind === 'job_failed' || kind === 'job_events_skipped' || kind === 'job_paused' || kind === 'company_restored') return 'none'
   return null
 }
