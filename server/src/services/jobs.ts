@@ -37,7 +37,8 @@ import { nextJobSlot } from '../../shared/core/job-schedule'
 import { jobChainStopText } from '../../shared/core/job-words'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import { companyNow } from './notifications'
-import { eventShown, recordTriggerProblems, shownSlot, type AiStepStates } from './job-events'
+import { createJobEvents, eventShown, recordTriggerProblems, shownSlot, type AiStepStates } from './job-events'
+import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 
 export const JOBS_FORBIDDEN = 'Only owners and admins can manage scheduled jobs'
 /** A job's name for a responsible person who cannot read every place its newest version names. */
@@ -149,6 +150,11 @@ export function createJobService(deps: JobServiceDeps) {
   const jobsOf = (companyId: string) => companyData.forCompany(companyId).jobs
 
   const known = deps.knownSchemas ?? JOB_SCHEMAS
+  // Event-triggered jobs' own rules where this service moves a cursor (an acceptance): job-events.ts.
+  const events = createJobEvents({
+    transactions, clock, ids, roleOf: (companyId, userId) => memberships.roleOf(companyId, userId),
+    timeZoneOf: deps.timeZoneOf ?? (() => DEFAULT_COMPANY_TIME_ZONE), aiStepStates: deps.aiStepStates,
+  })
   /** The stored definition, or null when this server does not know its shape (never read as if it did). */
   const definitionOf = (v: JobVersionRow): JobDefinition | null => storedJobDefinition(v, known)
   /** The definition as a client that reads `reads` may get it: null when either this server or that client does not know its shape. */
@@ -633,6 +639,7 @@ export function createJobService(deps: JobServiceDeps) {
       if (!skill.ok) return skill
       const problems = triggerProblems(handle, definition, null)
       if (problems.length > 0) return TRIGGER_NOT_ALLOWED(problems)
+      const told = new Set<string>()
       const result = transactions.run((): Outcome<void> => {
         const rights = withinRights(handle, definition)
         if (!rights.ok) return rights
@@ -641,12 +648,16 @@ export function createJobService(deps: JobServiceDeps) {
         const at = clock.now()
         // Accepting the same consent again changes nothing of what an event job has seen (Codex review of #700).
         const again = handle.jobs.find(jobId)?.acceptedConsent === v.consentFingerprint && handle.jobs.eventCursor(jobId) !== null
+        // A new consent accepted before the clock looked: what the watched record did meanwhile never runs, and when it
+        // reached the watched state the chain stops (`VERSION_EVENT`, owner decision ①; Codex review of #700).
+        if (isRecordTrigger(definition.trigger) && !again && handle.jobs.eventCursor(jobId) !== null) events.dropUntilNow(handle, jobId, 'VERSION_EVENT', told)
         handle.jobs.accept(jobId, v.version, v.consentFingerprint, member.userId, at, place)
         // An event job (stage 4a) looks at what happens from its acceptance on — never back in time.
         if (isRecordTrigger(definition.trigger) && !again) handle.jobs.startEventCursor(jobId, definition.trigger.startRecord, at)
         return ok(undefined)
       })
       if (!result.ok) return result
+      if (told.size > 0) { try { deps.noticesChanged?.(member.companyId, [...told]) } catch { /* their own check catches up */ } }
       return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads))
     },
 
@@ -886,8 +897,9 @@ export function createJobService(deps: JobServiceDeps) {
         handle.jobs.addVersion(row, at)
         handle.jobs.approve(jobId, row.version, row.fingerprint, member.userId, at, current.state)
         handle.jobs.accept(jobId, row.version, row.consentFingerprint, member.userId, at, current.acceptedPlace)
-        // A new start record: the watch starts over there, the stop is gone.
-        handle.jobs.startEventCursor(jobId, b.recordId as string, at)
+        // The record chosen: the watch starts over there, the stop is gone — also when it is the start record it began
+        // from (an explicit choice is never the chain's position kept; Codex review of #700).
+        handle.jobs.restartWatch(jobId, b.recordId as string, at)
         return ok(undefined)
       })
       if (!result.ok) return result

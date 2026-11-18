@@ -889,7 +889,9 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   やること**: `POST /me/jobs/:jobId/watch { version, recordId }` (the approved version's responsible person only; the
   version shown; not while a newer draft waits; the record checked as any start record) adds a version that differs only
   in `startRecord`, approved and accepted by that one press (`approved_by` = them: the change is of what they alone
-  consented to), and the watch starts over there. The app's 「定期の仕事」 shows the stop and 「見張るやることを選び直す」
+  consented to), and the watch starts over there (`restartWatch` — also when it is the start record it began from).
+  Accepting a new consent first checks what the watched record did since the cursor (`dropUntilNow`, `VERSION_EVENT`),
+  so a completion between approval and acceptance stops the chain even before the clock looked. The app's 「定期の仕事」 shows the stop and 「見張るやることを選び直す」
   (`jobs:watchChoices` — their own open やること by name — and `jobs:rewatch`); the admin list shows it (an admin may also
   「直す」 the start record; the responsible person then accepts).
 - **Who sees an event occurrence** (⑥, `eventShown`): only someone who reads its record now — owners and admins too.

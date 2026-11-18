@@ -175,6 +175,11 @@ export interface JobRepository {
    * number (never moved back) — and, when that start record is not the one it began from, the watch starts over there.
    */
   startEventCursor(jobId: string, startRecord: string, at: string): void
+  /**
+   * The responsible person chose `recordId` to watch (owner decision ①): the watch starts over there — whatever was
+   * watched — the stop is gone, and the cursor is at now (what happened before is never looked at).
+   */
+  restartWatch(jobId: string, recordId: string, at: string): void
   /** Move the cursor from `from` to `to` (compare-and-set): false = it was not at `from` (nothing written). */
   moveEventCursor(jobId: string, from: number, to: number, at: string): boolean
   /** The watched record made its occurrence: it fires no more (compare-and-set on the record; false = it was not, or fired). */

@@ -298,6 +298,11 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       conn.prepare(`UPDATE ai_job_event_cursors SET job_stamp = ?, stop_stamp = ? WHERE company_id = ? AND job_id = ?`)
         .run(jobUpdatedAt(jobId), stopUpdatedAt(), companyId, jobId)
     },
+    restartWatch(jobId, recordId, at) {
+      conn.prepare(`UPDATE ai_job_event_cursors SET seen_seq = MAX(seen_seq, ?), watch_record_id = ?, watch_start = ?, watch_fired = 0,
+          chain_stop_code = NULL, chain_stop_record = NULL, chain_stop_at = NULL, job_stamp = ?, stop_stamp = ?, updated_at = ?
+          WHERE company_id = ? AND job_id = ?`).run(seqNow(), recordId, recordId, jobUpdatedAt(jobId), stopUpdatedAt(), at, companyId, jobId)
+    },
     markWatchFired(jobId, recordId, at) {
       return conn.prepare(`UPDATE ai_job_event_cursors SET watch_fired = 1, updated_at = ? WHERE company_id = ? AND job_id = ? AND watch_record_id = ? AND watch_fired = 0`)
         .run(at, companyId, jobId, recordId).changes === 1

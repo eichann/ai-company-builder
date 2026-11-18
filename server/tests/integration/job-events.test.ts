@@ -806,6 +806,37 @@ describe('① a stopped chain', () => {
     await expectStopped(job, /仕事の内容が変わったため/)
   })
 
+  it('completed while a new content waited, and accepted before the clock looked: still stopped', async () => {
+    const start = task('受け取りが先')
+    const job = await runnableJob(chain(start))
+    ok(await jobs.update(owner(), job, { definition: chain(start, { run: { ...chain('x').run, title: '別の題・先に受け取る' } }) }, READS_2))
+    ok(await jobs.approve(owner(), job, { version: 2 }, READS_2))
+    await complete(start)
+    ok(await jobs.accept(alice(), job, { version: 2 }, READS_2))
+    expect(tick()).toBe(0)
+    await expectStopped(job, /仕事の内容が変わったため/)
+  })
+
+  it('choosing the start record it began from again starts the watch over there (never the chain\'s old position)', async () => {
+    const start = task('はじめのやること')
+    const job = await runnableJob(chain(start))
+    await complete(start)
+    tick()
+    const [made] = madeTasks(job)
+    ok(jobs.pause(owner(), job))
+    await complete(made.id)
+    ok(await jobs.resume(owner(), job))
+    tick()
+    expect(await stoppedFor('u-alice', job)).not.toBeNull()
+    await reopen(start)
+    nowMs += 60_000
+    expect((await call('u-alice', 'POST', `/me/jobs/${job}/watch`, { version: 1, recordId: start }, S2)).status).toBe(200)
+    expect(cursorOf(job)).toMatchObject({ watch_record_id: start, watch_fired: 0 })
+    expect(await stoppedFor('u-alice', job)).toBeNull()
+    await complete(start)
+    expect(tick()).toBe(1)
+  })
+
   it('its occurrence expired', async () => {
     const start = task('期限切れ')
     const job = await runnableJob(chain(start))
