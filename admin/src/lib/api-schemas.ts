@@ -371,6 +371,8 @@ const jobShape = {
   deliverTo: z.optional(z.nullable(z.looseObject({}))),
   // Stage 4-0: the version shown is of a shape this console does not read (absent from an older server).
   needsUpdate: z.optional(z.literal(true)),
+  // Stage 4a ①: an event job's stopped chain, worded for this viewer (absent from an older server).
+  chainStopped: z.optional(z.nullable(z.looseObject({}))),
 }
 export const jobSchema = topLevel<JobView>(jobShape)
 export const jobUpdatedSchema = topLevel<JobView & { changed: boolean }>({ ...jobShape, changed: z.boolean() })

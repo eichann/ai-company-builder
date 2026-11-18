@@ -109,6 +109,12 @@ export interface JobView {
    * their own pick), null for anyone else. null: none. Absent from an older server.
    */
   deliverTo?: { connector: string; kind: string; label: string; chosen: boolean; usable: boolean; name: string | null; expiresAt: string | null } | null
+  /**
+   * Stage 4a, owner decision ①: an event job whose chain of watched records stopped — why, in the viewer's own words (a
+   * record-side cause in full only when they read that record now). null: not stopped (or not an event job). Absent
+   * from an older server. The responsible person chooses the next watched やること (`POST /me/jobs/:jobId/watch`).
+   */
+  chainStopped?: { why: string } | null
   /** Present on GET /jobs/:jobId (newest first). */
   versions?: JobVersionView[]
 }

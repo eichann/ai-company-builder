@@ -1,7 +1,7 @@
 // 「定期の仕事」: the jobs the member is responsible for, as the server sees them, and their own acts on them.
 import { useCallback, useRef, useState } from 'react'
 import type { JobActionResult, MyJob } from '../../../../shared/jobs'
-import { acceptJob, getMyJobs, pauseJob, resumeJob } from '../api'
+import { acceptJob, getMyJobs, pauseJob, resumeJob, rewatchJob } from '../api'
 import { acceptedText, runsLine } from '../model'
 
 export function useMyJobs(companyId: string) {
@@ -47,5 +47,11 @@ export function useMyJobs(companyId: string) {
   const pause = useCallback((job: MyJob) => run(job.id, () => pauseJob(companyId, job.id), () => '止めました。止めている間の回は動きません。'), [companyId, run])
   const resume = useCallback((job: MyJob) => run(job.id, () => resumeJob(companyId, job.id), after => `再開しました。${after ? runsLine(after) : ''}`), [companyId, run])
 
-  return { loadRef, jobs, error, message, busy, accept, pause, resume }
+  /** Stage 4a ①: watch this やること next (the member's own press). */
+  const rewatch = useCallback((job: MyJob, recordId: string) => {
+    if (job.approvedVersion === null) return Promise.resolve()
+    return run(job.id, () => rewatchJob(companyId, job.id, job.approvedVersion as number, recordId), () => '見張るやることを選び直しました。次はこのやることが終わったときに動きます。')
+  }, [companyId, run])
+
+  return { loadRef, jobs, error, message, busy, accept, pause, resume, rewatch }
 }

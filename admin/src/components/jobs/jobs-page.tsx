@@ -17,7 +17,7 @@ import { useAuth } from '@/lib/auth-context'
 import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
-import { jobOccurrenceText, jobRunsText, jobSlotText, jobTriggerText } from '../../../../shared/core/job-words'
+import { JOB_CHAIN_STOPPED_ASK, jobOccurrenceText, jobRunsText, jobSlotText, jobTriggerText } from '../../../../shared/core/job-words'
 import { JOB_NEEDS_NEWER_SCREEN, isKnownJobTrigger } from '../../../../shared/core/jobs'
 import { JobApproveDialog, JobFormDialog } from './job-dialogs'
 import { JobOccurrences } from './job-occurrences'
@@ -137,6 +137,12 @@ export function JobsPage() {
                         {job.needsUpdate ? <>　{JOB_NEEDS_NEWER_SCREEN}</> : isKnownJobTrigger(job.trigger) && <>　いつ：{jobTriggerText(job.trigger)}</>}
                       </p>
                       <p className="text-sm">{jobRunsText(job.waiting, job.pausedReason, job.placement)}</p>
+                      {/* An event job's chain that stopped (owner decision ①): its cause as the server words it for this viewer. */}
+                      {job.chainStopped && (
+                        <p role="status" className="text-sm text-destructive">
+                          {job.chainStopped.why}。{JOB_CHAIN_STOPPED_ASK}（責任者がアプリで選ぶか、「直す」で見張るやることを選びます）
+                        </p>
+                      )}
                       {newerDraft && (
                         <p className="text-xs text-muted-foreground">
                           新しい版（第{job.latestVersion}版）が承認待ちです。承認するまでは第{job.approvedVersion}版のとおりに動きます。

@@ -832,8 +832,9 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   consent approved and not accepted moves it to now each tick (what happens before its 受け取る never runs).
 - **Never an event** (`ledgerRowIsEvent`, `triggerMatches`): a row with an origin mark (migration, any `acb:` actor), a
   row with `run_id` (a job's run, an AI turn — **the origin mark alone is not enough**: a PC run's or an AI turn's row has
-  none), an `external` actor's row (a plugin's import, the minutes intake, the inbox — stage 4-0's decision 7), a row
-  whose state did not change. A person's change counts, and so does their own consultation AI's (`ai` with no run); a
+  none), an `external` actor's row (a plugin's import, the minutes intake, the inbox — stage 4-0's decision 7), **a row
+  written through a business plugin's screen** (`via`, `plugin-bridge.ts`: a person's press and the plugin's code cannot
+  be told apart; owner decision ②, 2026-11-18), a row whose state did not change. A person's change counts, and so does their own consultation AI's (`ai` with no run); a
   person's completion of a やること a job made counts like any other. Also not: the responsible person cannot read the
   record now, its assignee then was someone else, its state then is 「AI の番」 (⑧: the type's own AI-only states or a
   business plugin's `ai_turn` / auto-started step, `plugin-steps.ts` `aiStepStates`).
@@ -857,6 +858,23 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   the responsible person alone is told once that day, without a count (`job_events_skipped`, key
   `job_events_skipped:<job>:<day>`, text built when read while they are its responsible person). 「もう一度」 makes no
   occurrence, so it never counts.
+- **A stopped chain** (owner decision ①, 2026-11-18): when the watched record's turn cannot go on — the day's limit
+  (`DAY_LIMIT`), reached while paused / stopped / an older build ran (`PAUSED_EVENT`), while a new content waited for its
+  受け取る (`VERSION_EVENT`), or its occurrence ended without its やること (held, skipped — absent, assignee changed,
+  unreadable, 「AI の番」 —, expired, needs a person) — the cursor keeps why, on which record and when
+  (`chain_stop_code` / `_record` / `_at`, `stopChain`: once per stop), and the responsible person and the job's creator
+  (while an owner / admin) are told once (`job_chain_stopped`, recordless, key `job_chain_stopped:<job>:<at>`, shown while
+  that very stop stands). `JobView.chainStopped { why }` and the notice word the cause **when read, per viewer**
+  (`jobChainStopText`): job-side causes for anyone who sees the job; a record-side cause in full, with the record's title,
+  only to someone who reads that record now — anyone else (an admin who does not read an owner-only やること included) gets
+  「見張っていたやることの都合で止まりました」; nothing of the record is stored in a notice. The chain goes on again when the
+  watch moves (the runner) or when a 「もう一度」 makes its やること; else **the responsible person chooses the next watched
+  やること**: `POST /me/jobs/:jobId/watch { version, recordId }` (the approved version's responsible person only; the
+  version shown; not while a newer draft waits; the record checked as any start record) adds a version that differs only
+  in `startRecord`, approved and accepted by that one press (`approved_by` = them: the change is of what they alone
+  consented to), and the watch starts over there. The app's 「定期の仕事」 shows the stop and 「見張るやることを選び直す」
+  (`jobs:watchChoices` — their own open やること by name — and `jobs:rewatch`); the admin list shows it (an admin may also
+  「直す」 the start record; the responsible person then accepts).
 - **Who sees an event occurrence** (⑥, `eventShown`): only someone who reads its record now — owners and admins too.
   `GET /jobs/:jobId/occurrences` leaves the others out **before** the limit (page by page), the job's `lastOccurrence` is
   the newest the viewer may see, a notice is written only to those who read it then and shown only while they still do,

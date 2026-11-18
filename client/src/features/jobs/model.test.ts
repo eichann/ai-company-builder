@@ -7,7 +7,7 @@ import { acceptedText, placeLine } from './model'
 
 const job = (over: Partial<MyJob>): MyJob => ({
   id: 'job.' + '1'.repeat(32), name: '日報', state: 'active', waiting: null, pausedReason: null, trigger: null, placement: 'e',
-  nextSlot: null, toAccept: null, controls: true, deliverTo: null, ...over,
+  nextSlot: null, toAccept: null, controls: true, deliverTo: null, chainStopped: null, approvedVersion: 1, ...over,
 })
 
 test('「次の回から動きます」 only when the job now runs', () => {

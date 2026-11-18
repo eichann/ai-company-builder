@@ -34,6 +34,8 @@ import { ok, refuse, type Outcome } from './outcome'
 import { recordReader, type RecordReader } from './record-access'
 import { resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
 import { nextJobSlot } from '../../shared/core/job-schedule'
+import { jobChainStopText } from '../../shared/core/job-words'
+import { RECORD_ID_RE } from '../../shared/core/records'
 import { companyNow } from './notifications'
 import { eventShown, recordTriggerProblems, shownSlot, type AiStepStates } from './job-events'
 
@@ -66,6 +68,9 @@ const NEEDS_NEWER_SCREEN = () => refuse('conflict', `${JOB_NEEDS_NEWER_SCREEN}�
 const NEEDS_NARROWING = () => refuse('bad-request', '出来事で動く定期の仕事には、見張るやること（1件）を選んでください。すべてのやることを見張ることはできません。', { code: 'BAD_JOB_DEFINITION', problems: ['trigger.startRecord.REQUIRED'] })
 /** A record trigger the company's types, its business plugins or the start record do not allow (stage 4a); codes only, never a name. */
 const TRIGGER_NOT_ALLOWED = (problems: string[]) => refuse('conflict', 'きっかけにした出来事は、いまの会社の設定では使えません（「AI の番」の状態か、最初のやることが見つからないなど）。選び直してください。', { code: 'JOB_TRIGGER_NOT_ALLOWED', problems })
+const NOT_RESPONSIBLE_TO_REWATCH = () => refuse('forbidden', '見張るやることを選び直せるのは、この仕事の責任者だけです。', { code: 'JOB_NOT_RESPONSIBLE' })
+const DRAFT_WAITING = () => refuse('conflict', '管理者が内容を直している途中のため、いまは選び直せません。管理者に確かめてください。', { code: 'JOB_DRAFT_WAITING' })
+const NOT_EVENT_JOB = () => refuse('conflict', 'この定期の仕事は、出来事で動く仕事ではありません。', { code: 'JOB_NOT_EVENT' })
 /** What a client reads when it names no schemas (every screen before stage 4-0). */
 const SCHEMA_1_ONLY: readonly number[] = [1]
 
@@ -179,6 +184,22 @@ export function createJobService(deps: JobServiceDeps) {
     const role = memberships.roleOf(handle.companyId, definition.actingUser)
     const readers: Member[] = [...(who ? [who] : []), ...(role !== null ? [{ companyId: handle.companyId, userId: definition.actingUser, role }] : [])]
     return recordTriggerProblems(handle, deps.aiStepStates, definition.trigger, readers)
+  }
+
+  /**
+   * An event job's stopped chain as the viewer may read it (owner decision ①): its cause in plain words — a record-side
+   * cause in full, with the record's title, only when the viewer reads that record now (else 「見張っていたやることの都合で
+   * 止まりました」), computed when read; null while it goes on. Nothing for a job that is not an event job.
+   */
+  function chainOf(member: Member, handle: CompanyData, job: JobRow, reader: RecordReader): Pick<JobView, 'chainStopped'> {
+    const stop = handle.jobs.eventCursor(job.id)?.chainStop ?? null
+    const approved = job.approvedVersion === null ? null : handle.jobs.version(job.id, job.approvedVersion)
+    const definition = approved ? definitionOf(approved) : null
+    if (!definition || !isRecordTrigger(definition.trigger)) return {}
+    if (!stop) return { chainStopped: null }
+    const row = handle.records.byIds([stop.record])[0]
+    const title = row && row.removedAt === null && reader.record(row) ? row.title : null
+    return { chainStopped: { why: jobChainStopText(stop.code, { runsPerDay: definition.grant.limits.runsPerDay, record: title }) } }
   }
 
   /** The member's record reader for one request (the company's rules read once). */
@@ -348,6 +369,7 @@ export function createJobService(deps: JobServiceDeps) {
       ...whenOf(member, handle, job, reads, reader),
       ...forViewer(member, handle, job),
       deliverTo: placeView(member, handle, job),
+      ...chainOf(member, handle, job, reader),
     }
     if (withVersions) {
       out.versions = handle.jobs.versions(job.id).map((v): JobVersionView => {
@@ -811,6 +833,65 @@ export function createJobService(deps: JobServiceDeps) {
       const found = visibleJob(member, jobId)
       if (!found || responsibleOf(found.handle, found.job) !== member.userId) return null
       return { name: nameFor(member, found.handle, found.job) }
+    },
+
+    /**
+     * 「止まっています」 (`job_chain_stopped`, owner decision ①)'s words for the member now: the job's name and the cause as
+     * they may read it — only while they see the job and that very stop (`at`) still stands; else null.
+     */
+    chainStopNotice(member: Member, jobId: string, at: string): { name: string; why: string } | null {
+      const found = visibleJob(member, jobId)
+      if (!found || found.handle.jobs.eventCursor(jobId)?.chainStop?.at !== at) return null
+      const chain = chainOf(member, found.handle, found.job, readerOf(member, found.handle)).chainStopped
+      return chain ? { name: nameFor(member, found.handle, found.job), why: chain.why } : null
+    },
+
+    /**
+     * `POST /me/jobs/:jobId/watch { version, recordId }` (owner decision ①): the responsible person chooses the next
+     * watched やること themselves. A new version that differs from the approved one only in its start record, approved and
+     * accepted by that one press (the trigger is part of what they accept; nobody else's consent is involved) — the
+     * record checked as any start record (they read it, a やること, not 「AI の番」). Only the approved version's
+     * responsible person, only on the version shown (`version`), and not while a newer draft waits for approval.
+     */
+    async rewatch(member: Member, jobId: string, body: unknown, reads: readonly number[] = SCHEMA_1_ONLY): Promise<Outcome<JobView>> {
+      const found = visibleJob(member, jobId)
+      if (!found) return NOT_FOUND()
+      const b = isObject(body) && Object.keys(body).every(k => k === 'version' || k === 'recordId') ? body : null
+      if (!b || typeof b.version !== 'number' || !Number.isInteger(b.version) || typeof b.recordId !== 'string' || !RECORD_ID_RE.test(b.recordId)) {
+        return BAD_BODY('{ version, recordId }')
+      }
+      const { handle, job } = found
+      if (!controls(handle, job, member.userId)) return NOT_RESPONSIBLE_TO_REWATCH()
+      if (job.state === 'retired') return RETIRED()
+      if (job.approvedVersion !== b.version) return FINGERPRINT_CHANGED()
+      if (job.latestVersion !== job.approvedVersion) return DRAFT_WAITING()
+      const approved = handle.jobs.version(jobId, job.approvedVersion) as JobVersionRow
+      const definition = definitionOf(approved)
+      if (definition === null) return SCHEMA_UNKNOWN()
+      if (!reads.includes(approved.schema)) return NEEDS_NEWER_SCREEN()
+      if (!isRecordTrigger(definition.trigger)) return NOT_EVENT_JOB()
+      const parsed = parseJobDefinition({ ...definition, trigger: { ...definition.trigger, startRecord: b.recordId } })
+      if (!parsed.ok) return BAD_DEFINITION(parsed.problems)
+      const next = parsed.definition
+      const problems = triggerProblems(handle, next, member)
+      if (problems.length > 0) return BAD_DEFINITION(problems)
+      const result = transactions.run((): Outcome<void> => {
+        const rights = withinRights(handle, next)
+        if (!rights.ok) return rights
+        const current = handle.jobs.find(jobId) as JobRow
+        if (current.latestVersion !== b.version || current.approvedVersion !== b.version) return FINGERPRINT_CHANGED()
+        const at = clock.now()
+        const canonical = jobDefinitionCanonical(next)
+        const row = versionRow(jobId, current.latestVersion + 1, next, canonical, member.userId, at)
+        handle.jobs.addVersion(row, at)
+        handle.jobs.approve(jobId, row.version, row.fingerprint, member.userId, at, current.state)
+        handle.jobs.accept(jobId, row.version, row.consentFingerprint, member.userId, at, current.acceptedPlace)
+        // A new start record: the watch starts over there, the stop is gone.
+        handle.jobs.startEventCursor(jobId, b.recordId as string, at)
+        return ok(undefined)
+      })
+      if (!result.ok) return result
+      return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads))
     },
 
     /**

@@ -300,6 +300,7 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         changed++
         const job = handle.jobs.find(occ.jobId)
         notice(companyId, handle, 'job_expired', occ, job, handle.jobs.version(occ.jobId, occ.jobVersion)?.actingUserId ?? null, told)
+        if (occ.eventRecordId) events.chainStopped(handle, occ.jobId, 'EXPIRED', occ.eventRecordId, told)
       })
     }
     tell(companyId, told)
@@ -341,6 +342,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         const end = (to: JobOccurrenceState, code: JobOutcomeCode, kind: NotificationKind | null, job: JobRow | null, acting: string | null): JobOccurrenceState | null => {
           if (!handle.jobs.moveOccurrence(occ.id, ['due'], to, { outcomeCode: code }, at)) return null
           if (kind) notice(companyId, handle, kind, occ, job, acting, told)
+          // An event occurrence that did not make its やること stops its job's chain (owner decision ①).
+          if (occ.eventRecordId && job) events.chainStopped(handle, job.id, code, occ.eventRecordId, told)
           return to
         }
         const job = handle.jobs.find(occ.jobId)
@@ -401,9 +404,11 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         if (!made.ok) throw new TaskNotCreated()
         runs.updateOperation(runId, key, ['in_progress'], { state: 'done', refKind: 'record', refId: made.record.id }, at)
         // An event job that follows what it made (stage 4a): this やること is the record it watches next — set here, by the
-        // server, in the same transaction (a duplicate, a tag or an edit of anything never moves it).
-        if (event && isRecordTrigger(definition.trigger) && definition.trigger.followMadeTask && occ.eventRecordId) {
-          handle.jobs.moveWatch(job.id, occ.eventRecordId, made.record.id, at)
+        // server, in the same transaction (a duplicate, a tag or an edit of anything never moves it). Either way a chain
+        // that had stopped on this record goes on (it ran after 「もう一度」).
+        if (event && occ.eventRecordId) {
+          if (isRecordTrigger(definition.trigger) && definition.trigger.followMadeTask) handle.jobs.moveWatch(job.id, occ.eventRecordId, made.record.id, at)
+          else handle.jobs.clearChainStop(job.id, occ.eventRecordId)
         }
         if (!runs.update({ ...run, state: 'done', updatedAt: at, closedAt: at }, { generation: 1, state: 'running' })) throw new Error('run changed')
         runs.appendEvent({ runId, event: 'finished', generation: 1, stateAfter: 'done', code: 'DONE', at })
@@ -438,9 +443,13 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     const at = clock.now()
     // Event-triggered jobs (stage 4a, ③): what happens from now until it ends never runs (a gap from this delivery number).
     handle.jobs.openEventGap(jobId, ids.newId(), at)
+    const told = new Set<string>()
     for (const occ of handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT)) {
-      if (jobId === null || occ.jobId === jobId) handle.jobs.moveOccurrence(occ.id, ['due'], 'held', { outcomeCode: code }, at)
+      if (jobId !== null && occ.jobId !== jobId) continue
+      // A held event occurrence never runs: its chain stops (owner decision ①).
+      if (handle.jobs.moveOccurrence(occ.id, ['due'], 'held', { outcomeCode: code }, at) && occ.eventRecordId) events.chainStopped(handle, occ.jobId, code, occ.eventRecordId, told)
     }
+    tell(companyId, told)
     for (const occ of handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT)) {
       if (jobId !== null && occ.jobId !== jobId) continue
       if (handle.jobs.moveOccurrence(occ.id, ['running'], 'held', { outcomeCode: code }, at)) endPcRun(handle, occ.runId, code, at)
@@ -457,7 +466,11 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     const nowMs = clock.nowMs()
     // The gap it opened ends here: events after now run again, those before it never (③). None open: the pause or the
     // stop was made by a build before 4a (a rollback, deployment.md) — nothing from before now runs (Codex review of #700).
-    if (handle.jobs.closeEventGaps(jobId, clock.now()) === 0) handle.jobs.resyncEventCursors(jobId, clock.now())
+    if (handle.jobs.closeEventGaps(jobId, clock.now()) === 0) {
+      const told = new Set<string>()
+      events.dropUntilNow(handle, jobId, 'PAUSED_EVENT', told)
+      tell(companyId, told)
+    }
     for (const job of jobId === null ? handle.jobs.list() : [handle.jobs.find(jobId)].filter((j): j is JobRow => j !== null)) {
       const latest = latestSlotOf(companyId, handle, job, nowMs)
       if (latest) handle.jobs.insertOccurrence(newRow(job, latest, 'held', code))

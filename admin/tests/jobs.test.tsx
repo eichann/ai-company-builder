@@ -532,6 +532,16 @@ describe('an event job', () => {
     await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/records/query')).at(-1)!.body).toMatchObject({ fields: { assignee: 'u_owner' }, offset: 0 }))
   })
 
+  it('a stopped chain is said on the list with the server\'s words for this viewer and what to do', async () => {
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [jobView({ trigger: eventDef().trigger, nextSlot: null, chainStopped: { why: '見張っていたやることの都合で止まりました' } })] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    expect(within(row).getByRole('status')).toHaveTextContent('見張っていたやることの都合で止まりました。止まっています。次に見張るやることを選び直してください')
+  })
+
   it('the list and the approval say what it watches in plain words (never the record\'s title), and what it never runs for', async () => {
     const pending = jobView({ approvedVersion: null, state: 'draft', waiting: 'NOT_APPROVED', trigger: eventDef().trigger, nextSlot: null, lastOccurrence: null })
     mockApi({

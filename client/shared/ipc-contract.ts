@@ -37,7 +37,7 @@ import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './g
 import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
-import type { JobActionResult, MyJobsResult } from './jobs'
+import type { JobActionResult, MyJobsResult, WatchChoicesResult } from './jobs'
 import type { QueuedJobTurn } from './ai-turn-steps/job'
 import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
 import type { ViewersQuery, ViewersResult } from './viewers'
@@ -555,6 +555,10 @@ export interface IpcInvokeChannels {
   'jobs:accept': { args: [companyId: string, jobId: string, version: number, fingerprint: string]; result: JobActionResult }
   'jobs:pause': { args: [companyId: string, jobId: string]; result: JobActionResult }
   'jobs:resume': { args: [companyId: string, jobId: string]; result: JobActionResult }
+  /** Stage 4a ①: the member's open やること they may watch next (searched by name), for a stopped event job. */
+  'jobs:watchChoices': { args: [companyId: string, text: string]; result: WatchChoicesResult }
+  /** Stage 4a ①: watch this やること next (the member's own press: a new version they approve and accept at once). */
+  'jobs:rewatch': { args: [companyId: string, jobId: string, version: number, recordId: string]; result: JobActionResult }
   // 自分の設定 → 「受信を読む」「AI が自動で進める」: the member's own switches, with their session.
   /** The member's switches (+ the company's 使ってよいか / 初めの値). */
   'workSwitches:get': { args: [companyId: string]; result: WorkSwitchesResult }
@@ -1071,6 +1075,8 @@ export interface ElectronAPI {
   acceptJob: Invoke<'jobs:accept'>
   pauseJob: Invoke<'jobs:pause'>
   resumeJob: Invoke<'jobs:resume'>
+  getWatchChoices: Invoke<'jobs:watchChoices'>
+  rewatchJob: Invoke<'jobs:rewatch'>
   // 自分の設定 → 「受信を読む」「AI が自動で進める」.
   getWorkSwitches: Invoke<'workSwitches:get'>
   setWorkSwitch: Invoke<'workSwitches:set'>

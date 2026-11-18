@@ -143,6 +143,29 @@ test('an older server that does not say who the member is to a job is reported a
   assert.match(r.success === false ? r.error : '', /サーバーの更新が必要です/)
 })
 
+// Stage 4a ① (jobs.md "Event-triggered jobs"): the next watched やること of a stopped event job is one of the member's
+// own open ones (by the server's reader), and 「これを見張る」 sends exactly the version shown and the record chosen.
+test('a stopped chain: the member\'s own open やること are offered by name, and the choice goes to the job\'s watch', async () => {
+  const calls: Array<{ method: string; url: string; body?: unknown }> = []
+  const fetch = (async (url: string, init: RequestInit) => {
+    calls.push({ method: init.method ?? 'GET', url, body: init.body ? JSON.parse(init.body as string) : undefined })
+    const data = url.endsWith('/api/me') ? { id: 'u-me' }
+      : url.endsWith('/records/query') ? { total: 1, records: [{ id: 'task-0123456789abcdef', title: '次の一歩' }, { id: '../x', title: 'bad' }] }
+        : { ok: true }
+    return new Response(JSON.stringify({ success: true, data }), { status: 200 })
+  }) as typeof globalThis.fetch
+  const jobs = createJobsApi({ baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], fetch, log: { warn() {} } })
+  const r = await jobs.watchChoices('c1', ' 一歩 ')
+  assert.deepEqual(r, { success: true, total: 1, choices: [{ id: 'task-0123456789abcdef', title: '次の一歩' }] })
+  assert.deepEqual(calls[1].body, { type: 'task', state: ['todo', 'in_progress', 'review', 'waiting', 'awaiting_acceptance', 'declined'], fields: { assignee: 'u-me' }, limit: 50, text: '一歩' })
+  assert.ok((await jobs.rewatch('c1', J1, 2, 'task-0123456789abcdef')).success)
+  assert.deepEqual(calls.at(-1), { method: 'POST', url: `https://acb.example/api/companies/c1/me/jobs/${J1}/watch`, body: { version: 2, recordId: 'task-0123456789abcdef' } })
+  // Renderer values never reach the path or the server unchecked.
+  assert.equal((await jobs.rewatch('c1', J1, 2, '../../x')).success, false)
+  assert.equal((await jobs.rewatch('c1', '../job', 2, 'task-0123456789abcdef')).success, false)
+  assert.equal(calls.length, 3)
+})
+
 // Stage 4a (jobs.md "Event-triggered jobs"): the app shows event jobs, so it says it reads schema 2 on every job call —
 // a server answers an app that does not say so without the definition (and refuses its 受け取る: 「アプリを新しく」).
 test('every job call says which definition shapes this app shows (1 and 2)', async () => {

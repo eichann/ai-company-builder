@@ -145,6 +145,8 @@ contract.invoke jobs:accept
 contract.invoke jobs:mine
 contract.invoke jobs:pause
 contract.invoke jobs:resume
+contract.invoke jobs:rewatch
+contract.invoke jobs:watchChoices
 contract.invoke minutes:arrivals
 contract.invoke minutes:autoSeries
 contract.invoke minutes:bundleQuestion
@@ -449,6 +451,7 @@ contract.type ElectronAPI.getTaskDriveChoices = getTaskDriveChoices: Invoke<'tas
 contract.type ElectronAPI.getTaskList = getTaskList: Invoke<'tasks:list'>
 contract.type ElectronAPI.getTaskProposals = getTaskProposals: Invoke<'tasks:proposals'>
 contract.type ElectronAPI.getViewers = getViewers: Invoke<'viewers:get'>
+contract.type ElectronAPI.getWatchChoices = getWatchChoices: Invoke<'jobs:watchChoices'>
 contract.type ElectronAPI.getWorkSwitches = getWorkSwitches: Invoke<'workSwitches:get'>
 contract.type ElectronAPI.getWriteAccess = getWriteAccess: Invoke<'writeAccess:get'>
 contract.type ElectronAPI.gitAutoSync = gitAutoSync: Invoke<'git:autoSync'>
@@ -541,6 +544,7 @@ contract.type ElectronAPI.restoreCompanySkill = restoreCompanySkill: Invoke<'ski
 contract.type ElectronAPI.resumeJob = resumeJob: Invoke<'jobs:resume'>
 contract.type ElectronAPI.retryAiTurn = retryAiTurn: Invoke<'aiTurns:retry'>
 contract.type ElectronAPI.retryTaskRun = retryTaskRun: Invoke<'tasks:retryRun'>
+contract.type ElectronAPI.rewatchJob = rewatchJob: Invoke<'jobs:rewatch'>
 contract.type ElectronAPI.sameAsApproval = sameAsApproval: Invoke<'approvals:sameAs'>
 contract.type ElectronAPI.saveChatSession = saveChatSession: Invoke<'chatHistory:saveSession'>
 contract.type ElectronAPI.saveOwnBrokerKey = saveOwnBrokerKey: Invoke<'brokerKeys:save'>
@@ -847,6 +851,8 @@ contract.type IpcInvokeChannels.'jobs:accept' = 'jobs:accept': { args: [companyI
 contract.type IpcInvokeChannels.'jobs:mine' = 'jobs:mine': { args: [companyId: string]; result: MyJobsResult }
 contract.type IpcInvokeChannels.'jobs:pause' = 'jobs:pause': { args: [companyId: string, jobId: string]; result: JobActionResult }
 contract.type IpcInvokeChannels.'jobs:resume' = 'jobs:resume': { args: [companyId: string, jobId: string]; result: JobActionResult }
+contract.type IpcInvokeChannels.'jobs:rewatch' = 'jobs:rewatch': { args: [companyId: string, jobId: string, version: number, recordId: string]; result: JobActionResult }
+contract.type IpcInvokeChannels.'jobs:watchChoices' = 'jobs:watchChoices': { args: [companyId: string, text: string]; result: WatchChoicesResult }
 contract.type IpcInvokeChannels.'minutes:arrivals' = 'minutes:arrivals': { args: [companyId: string]; result: MeetingArrivalsResult }
 contract.type IpcInvokeChannels.'minutes:autoSeries' = 'minutes:autoSeries': { args: [companyId: string, meetingId: string, auto: boolean]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:bundleQuestion' = 'minutes:bundleQuestion': { args: [companyId: string, minutesId: string]; result: MeetingBundleQuestionResult }
@@ -1157,6 +1163,8 @@ main.handle jobs:accept @ features/jobs/ipc.ts (companyId, jobId, version, finge
 main.handle jobs:mine @ features/jobs/ipc.ts (companyId)
 main.handle jobs:pause @ features/jobs/ipc.ts (companyId, jobId)
 main.handle jobs:resume @ features/jobs/ipc.ts (companyId, jobId)
+main.handle jobs:rewatch @ features/jobs/ipc.ts (companyId, jobId, version, recordId)
+main.handle jobs:watchChoices @ features/jobs/ipc.ts (companyId, text)
 main.handle minutes:arrivals @ features/minutes/ipc.ts (companyId)
 main.handle minutes:autoSeries @ features/minutes/ipc.ts (companyId, meetingId, auto)
 main.handle minutes:bundleQuestion @ features/minutes/ipc.ts (companyId, minutesId)
@@ -1490,6 +1498,8 @@ preload getTaskProposals -> invoke tasks:proposals($0, $1)
 preload getTaskProposals : (companyId: string, meetingId: string) => Promise<TaskProposalsResult>
 preload getViewers -> invoke viewers:get($0, $1)
 preload getViewers : (companyId: string, query: ViewersQuery) => Promise<ViewersResult>
+preload getWatchChoices -> invoke jobs:watchChoices($0, $1)
+preload getWatchChoices : (companyId: string, text: string) => Promise<WatchChoicesResult>
 preload getWorkSwitches -> invoke workSwitches:get($0)
 preload getWorkSwitches : (companyId: string) => Promise<WorkSwitchesResult>
 preload getWriteAccess -> invoke writeAccess:get($0, $1)
@@ -1674,6 +1684,8 @@ preload retryAiTurn -> invoke aiTurns:retry($0, $1)
 preload retryAiTurn : (companyId: string, recordId: string) => Promise<{ ok: boolean; }>
 preload retryTaskRun -> invoke tasks:retryRun($0, $1)
 preload retryTaskRun : (companyId: string, runId: string) => Promise<TaskWriteResult>
+preload rewatchJob -> invoke jobs:rewatch($0, $1, $2, $3)
+preload rewatchJob : (companyId: string, jobId: string, version: number, recordId: string) => Promise<JobActionResult>
 preload sameAsApproval -> invoke approvals:sameAs($0, $1, $2, $3)
 preload sameAsApproval : (companyId: string, approvalId: string, recordId: string, linkMeeting: boolean) => Promise<ApprovalResult>
 preload saveChatSession -> invoke chatHistory:saveSession($0, $1)

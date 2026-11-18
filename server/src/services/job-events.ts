@@ -39,8 +39,10 @@ import { companyNow } from './notifications'
 import { recordReader } from './record-access'
 import { currentTypes } from './record-index'
 
-/** Ledger rows the scan reads per company and clock tick (the rest next tick, from the cursors). */
+/** Ledger rows of a watched record the scan reads per job and clock tick (the rest next tick, from the cursor). */
 export const EVENT_ROWS_PER_TICK = 500
+/** How many of a watched record's rows a skipped stretch (an older build's pause, a content not accepted) is checked over. */
+const DROPPED_ROWS_CHECKED = 5000
 
 /** The states where it is the AI's turn for a type, from the business plugins' steps (plugin-steps.ts). */
 export type AiStepStates = (companyId: string, type: string) => ReadonlySet<string>
@@ -167,6 +169,51 @@ export function createJobEvents(deps: JobEventDeps) {
     return null
   }
 
+  /**
+   * The chain of watched records stopped (owner decision ①): kept on the cursor with why and on which record, and — once
+   * per stop — the responsible person and the job's creator (while an owner / admin) are told, naming only the job (the
+   * cause is built when read: a record-side one in full only for someone who reads the record). In the caller's
+   * transaction.
+   */
+  function chainStopped(handle: CompanyData, jobId: string, code: string, recordId: string, told: Set<string>): void {
+    const at = clock.now()
+    if (!handle.jobs.stopChain(jobId, code, recordId, at)) return
+    const job = handle.jobs.find(jobId)
+    if (!job) return
+    const version = job.approvedVersion === null ? null : handle.jobs.version(jobId, job.approvedVersion)
+    const to = new Set<string>()
+    if (version && deps.roleOf(handle.companyId, version.actingUserId) !== null) to.add(version.actingUserId)
+    const creatorRole = deps.roleOf(handle.companyId, job.createdBy)
+    if (creatorRole === 'owner' || creatorRole === 'admin') to.add(job.createdBy)
+    const written = handle.notifications.insert([...to].map(userId => ({
+      id: ids.newId(), userId, kind: 'job_chain_stopped' as const, recordId: '', recordVersion: 0, action: '', actorId: null, actorKind: null,
+      dedupeKey: `job_chain_stopped:${jobId}:${at}`, createdAt: at, readAt: null,
+    })))
+    if (written.length > 0) for (const u of to) told.add(u)
+  }
+
+  /**
+   * What happened to the watched record since the cursor is never run (a pause or a stop an older build made, a new
+   * content not accepted yet): when it reached the watched state meanwhile, the chain stops for `code`. Then the cursor
+   * is at now. `jobId` null: every event job of the company. In the caller's transaction.
+   */
+  function dropUntilNow(handle: CompanyData, jobId: string | null, code: string, told: Set<string>): void {
+    for (const job of jobId === null ? handle.jobs.list() : [handle.jobs.find(jobId)].filter((j): j is JobRow => j !== null)) {
+      const cursor = handle.jobs.eventCursor(job.id)
+      const version = job.approvedVersion === null ? null : handle.jobs.version(job.id, job.approvedVersion)
+      const definition = version ? storedJobDefinition(version) : null
+      if (cursor && definition && isRecordTrigger(definition.trigger) && !cursor.fired) {
+        const rows = handle.jobs.watchedEvents(cursor.watch, cursor.seen, handle.jobs.ledgerSeqNow(), DROPPED_ROWS_CHECKED)
+        const trigger = definition.trigger
+        if (rows.some(row => ledgerRowIsEvent(row) && triggerMatches(trigger, row) && applies(handle, definition, trigger, row))) {
+          handle.jobs.markWatchFired(job.id, cursor.watch, clock.now())
+          chainStopped(handle, job.id, code, cursor.watch, told)
+        }
+      }
+      handle.jobs.resyncEventCursors(job.id, clock.now())
+    }
+  }
+
   /** The day's limit was reached: the responsible person is told once that day, without a count (⑨). */
   function toldLimited(handle: CompanyData, job: JobRow, definition: JobDefinition, day: string, told: Set<string>) {
     if (deps.roleOf(handle.companyId, definition.actingUser) === null) return
@@ -225,13 +272,13 @@ export function createJobEvents(deps: JobEventDeps) {
     // The job or the company's stop was written by a build before 4a (a rollback: it pauses and stops without gaps):
     // nothing from before now runs (the safe side, Codex review of #700).
     if (job.updatedAt !== at.jobStamp || handle.jobs.stopStamp() !== at.stopStamp) {
-      transactions.run(() => handle.jobs.resyncEventCursors(job.id, t.stamp))
+      transactions.run(() => dropUntilNow(handle, job.id, 'PAUSED_EVENT', told))
       log(`[job-events] company ${handle.companyId} job ${job.id}: changed by an older build; events before now are not run`)
       return 0
     }
     // Another consent approved and not accepted yet: what happens before its 受け取る never runs.
     if (job.acceptedConsent === null || job.acceptedConsent !== version.consentFingerprint) {
-      transactions.run(() => handle.jobs.startEventCursor(job.id, at.start, t.stamp))
+      transactions.run(() => dropUntilNow(handle, job.id, 'VERSION_EVENT', told))
       return 0
     }
     return transactions.run((): number => {
@@ -246,10 +293,16 @@ export function createJobEvents(deps: JobEventDeps) {
       // The one record watched, once (an undo and a second completion of it make nothing more).
       let fired = at.fired
       for (const row of rows) {
-        if (fired || inGap(row.seq)) continue
+        if (fired) continue
         if (!ledgerRowIsEvent(row) || !triggerMatches(trigger, row) || !applies(handle, definition, trigger, row)) continue
-        // The day's limit (company time): what comes beyond it is not made (and the job never pauses for it).
-        if (today >= definition.grant.limits.runsPerDay) { limited = true; handle.jobs.markWatchFired(job.id, row.recordId, t.stamp); fired = true; continue }
+        // Reached while paused or stopped (③): never runs — the chain stops there, and says so (①).
+        if (inGap(row.seq)) { handle.jobs.markWatchFired(job.id, row.recordId, t.stamp); fired = true; chainStopped(handle, job.id, 'PAUSED_EVENT', row.recordId, told); continue }
+        // The day's limit (company time): what comes beyond it is not made (and the job never pauses for it); the chain stops.
+        if (today >= definition.grant.limits.runsPerDay) {
+          limited = true; handle.jobs.markWatchFired(job.id, row.recordId, t.stamp); fired = true
+          chainStopped(handle, job.id, 'DAY_LIMIT', row.recordId, told)
+          continue
+        }
         const occurrenceAt = new Date(t.nowMs).toISOString()
         const inserted = handle.jobs.insertOccurrence({
           id: `occ.${ids.newId().replace(/-/g, '').toLowerCase().slice(0, 32).padEnd(32, '0')}`,
@@ -274,7 +327,7 @@ export function createJobEvents(deps: JobEventDeps) {
     })
   }
 
-  return { scan, recheck }
+  return { scan, recheck, chainStopped, dropUntilNow }
 }
 
 export type JobEvents = ReturnType<typeof createJobEvents>

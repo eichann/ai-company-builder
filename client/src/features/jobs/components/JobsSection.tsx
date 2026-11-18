@@ -3,15 +3,16 @@
 // sentences are the ones the admin approved (shared/core/job-words.ts); the server decides everything.
 import { SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
+import { RewatchPicker } from './RewatchPicker'
 import {
-  JOB_EVENT_NOTE, jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobSlotText, jobTriggerText,
+  JOB_CHAIN_STOPPED_ASK, JOB_EVENT_NOTE, jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobSlotText, jobTriggerText,
 } from '../../../../../shared/core/job-words'
 import { isRecordTrigger } from '../../../../../shared/core/jobs'
 import { useMyJobs } from '../hooks/useMyJobs'
 import { placeLine } from '../model'
 
 export function JobsSection({ companyId }: { companyId: string }) {
-  const { loadRef, jobs, error, message, busy, accept, pause, resume } = useMyJobs(companyId)
+  const { loadRef, jobs, error, message, busy, accept, pause, resume, rewatch } = useMyJobs(companyId)
   const waiting = jobs?.filter(j => j.toAccept) ?? []
   const others = jobs?.filter(j => !j.toAccept) ?? []
 
@@ -69,6 +70,12 @@ export function JobsSection({ companyId }: { companyId: string }) {
                     <span className="text-zinc-600 dark:text-zinc-300">{jobRunsText(job.waiting, job.pausedReason, job.placement)}</span>
                     {job.nextSlot && job.waiting === null && job.placement !== 'a' && <span className="text-zinc-500">次は {jobSlotText(job.nextSlot)}</span>}
                     {placeLine(job) && <span className="w-full text-[12px] text-zinc-500">{placeLine(job)}</span>}
+                    {job.chainStopped && (
+                      <span role="status" className="w-full text-[12px] text-red-600 dark:text-red-400">{job.chainStopped.why}。{JOB_CHAIN_STOPPED_ASK}</span>
+                    )}
+                    {job.chainStopped && job.controls && job.approvedVersion !== null && (
+                      <RewatchPicker companyId={companyId} busy={busy} onPick={recordId => void rewatch(job, recordId)} />
+                    )}
                     {job.controls && job.state === 'active' && (
                       <Button size="sm" variant="ghost" className="ml-auto" disabled={busy} onClick={() => void pause(job)}>止める</Button>
                     )}

@@ -99,6 +99,8 @@ export interface JobEventCursor {
   seen: number; watch: string; start: string; fired: boolean
   /** What this build last wrote of the job (`ai_jobs.updated_at`) and of the company's stop (`ai_job_settings.updated_at`, '' = none). */
   jobStamp: string; stopStamp: string
+  /** The chain of watched records stopped (owner decision ①): why, on which record, when; null while it goes on. */
+  chainStop: { code: string; record: string; at: string } | null
 }
 
 export interface JobRepository {
@@ -173,8 +175,12 @@ export interface JobRepository {
   moveEventCursor(jobId: string, from: number, to: number, at: string): boolean
   /** The watched record made its occurrence: it fires no more (compare-and-set on the record; false = it was not, or fired). */
   markWatchFired(jobId: string, recordId: string, at: string): boolean
-  /** The next record to watch (`followMadeTask`): only while `from` is still the watched one (false = it was not: nothing written). */
+  /** The next record to watch (`followMadeTask`): only while `from` is still the watched one (false = it was not: nothing written). Ends a chain stop. */
   moveWatch(jobId: string, from: string, to: string, at: string): boolean
+  /** The chain stopped (owner decision ①): false when it had stopped already (one notice per stop). */
+  stopChain(jobId: string, code: string, recordId: string, at: string): boolean
+  /** The chain goes on after all (the occurrence it stopped on ran, after 「もう一度」): only a stop on `recordId`. */
+  clearChainStop(jobId: string, recordId: string): void
   /** The job's gaps and the company's (its stops), in any order. */
   eventGaps(jobId: string): JobEventGap[]
   /** A pause (`jobId`) or the company's stop (null) begins: a gap from the newest delivery number now, unless one is open. */

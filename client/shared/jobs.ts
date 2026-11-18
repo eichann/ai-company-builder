@@ -38,7 +38,17 @@ export interface MyJob {
   deliverTo: { label: string; chosen: boolean; usable: boolean; name: string | null; expiresAt: string | null } | null
   /** The member runs it (the approved version names them): they may pause it, and resume their own pause. */
   controls: boolean
+  /**
+   * Stage 4a ①: an event job whose chain of watched records stopped — why, as the server words it for the member. null:
+   * it goes on, or it is not an event job. The member (its responsible person) chooses the next watched やること.
+   */
+  chainStopped: { why: string } | null
+  /** The approved version's number (the one 「選び直す」 acts on), or null. */
+  approvedVersion: number | null
 }
+
+/** `jobs:watchChoices`: the member's open やること (title only), the first page of what matches. */
+export type WatchChoicesResult = { success: true; choices: Array<{ id: string; title: string }>; total: number } | JobsFailure
 
 export type JobsFailure = { success: false; offline: boolean; code: string | null; error: string }
 
@@ -54,7 +64,8 @@ export type JobActionResult = { success: true } | JobsFailure
  * null: not a job's notice.
  */
 export function jobNoticeTarget(kind: string): 'jobs' | 'none' | null {
-  if (kind === 'job_accept_needed') return 'jobs'
+  // A stopped chain (stage 4a): the responsible person chooses the next watched やること there.
+  if (kind === 'job_accept_needed' || kind === 'job_chain_stopped') return 'jobs'
   // `company_restored` (deployment.md "After a restore"): about the jobs and the AI stopped; its text says what to check.
   if (kind === 'job_expired' || kind === 'job_skipped' || kind === 'job_failed' || kind === 'job_events_skipped' || kind === 'job_paused' || kind === 'company_restored') return 'none'
   return null

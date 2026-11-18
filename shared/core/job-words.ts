@@ -40,7 +40,7 @@ export function jobRecordTriggerText(trigger: JobRecordTrigger): string {
  * What an event-triggered job never runs for (owner decision ②, the memo's 「制約として画面と例に書く」): shown with its
  * trigger on every screen that shows one.
  */
-export const JOB_EVENT_NOTE = '見張るのは選んだやること1つだけです（名前を変えても同じもの）。人（と、その人の相談の中の AI）が変えたときに動きます。定期の仕事や「AI の番」が変えたとき、取り込みで入ったときは動きません。同じやることで動くのは1回だけ、止めている間の出来事は再開しても動きません'
+export const JOB_EVENT_NOTE = '見張るのは選んだやること1つだけです（名前を変えても同じもの）。人（と、その人の相談の中の AI）が変えたときに動きます。定期の仕事や「AI の番」が変えたとき、業務の画面から変えたとき、取り込みで入ったときは動きません。同じやることで動くのは1回だけ、止めている間の出来事は再開しても動きません'
 
 /** 「毎週火曜の1営業日前 09:00」, 「毎営業日 09:00」, 「毎月末日 09:00（休みの日なら前の営業日）」; an event: `jobRecordTriggerText`. */
 export function jobTriggerText(trigger: JobTrigger): string {
@@ -181,6 +181,31 @@ const OUTCOME_WORDS: Record<string, string> = {
   EVENT_AI_TURN: 'きっかけの記録が「AI の番」の状態になっていたため見送りました',
   EVENT_NOT_WATCHED: '見張るやることが変わったため、この回は見送りました',
 }
+
+/**
+ * Why an event job's chain stopped, in plain words (owner decision ①). `record`: the watched record's title when the
+ * viewer reads it now, else null — then a record-side cause is only 「見張っていたやることの都合で止まりました」.
+ */
+export function jobChainStopText(code: string, opts: { runsPerDay: number | null; record: string | null }): string {
+  const named = opts.record !== null ? `「${opts.record}」` : ''
+  switch (code) {
+    case 'DAY_LIMIT': return `1日の上限（${opts.runsPerDay ?? '決められた'}回）を超えたため、止まりました`
+    case 'OWNER_ABSENT': return '責任者が不在の日に完了したため、止まりました'
+    case 'PAUSED_EVENT': case 'JOB_PAUSED': case 'COMPANY_STOPPED': return '一時停止している間に完了したため、止まりました'
+    case 'VERSION_EVENT': case 'JOB_VERSION_CHANGED': case 'NOT_ACCEPTED': return '仕事の内容が変わったため、止まりました'
+    case 'EXPIRED': return '期限までに動けなかったため、止まりました'
+    case 'RECORDS_OFF': case 'TASK_NOT_CREATED': return '次のやることを作れなかったため、止まりました'
+    case 'OWNER_LEFT': case 'OWNER_RIGHTS_CHANGED': return '責任者がこの仕事を続けられなくなったため、止まりました'
+  }
+  if (opts.record === null) return '見張っていたやることの都合で止まりました'
+  if (code === 'EVENT_NOT_ASSIGNEE') return `見張っていたやること${named}の担当が責任者でなくなったため、止まりました`
+  if (code === 'EVENT_RECORD_GONE') return `責任者が見張っていたやること${named}を見られなくなったため、止まりました`
+  if (code === 'EVENT_AI_TURN') return `見張っていたやること${named}が「AI の番」の状態だったため、止まりました`
+  return `見張っていたやること${named}の都合で止まりました`
+}
+
+/** What a stopped chain asks of the responsible person. */
+export const JOB_CHAIN_STOPPED_ASK = '止まっています。次に見張るやることを選び直してください'
 
 const STATE_WORDS: Record<JobOccurrenceState, string> = {
   due: 'これから動きます',

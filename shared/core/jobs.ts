@@ -655,6 +655,15 @@ export type JobOccurrenceKind = 'time' | 'event'
 export function jobOccurrenceKind(dueSlot: string): JobOccurrenceKind {
   return dueSlot.startsWith('ev:') ? 'event' : 'time'
 }
+/**
+ * Why an event job's chain of watched records stopped (owner decision ①, 2026-11-18): the scan's own — `DAY_LIMIT` (the
+ * day's limit), `PAUSED_EVENT` (it came while the job or the company was stopped, or while an older build ran),
+ * `VERSION_EVENT` (it came while a new content waited for its 受け取る) — or the code its occurrence ended with
+ * (`JOB_OUTCOME_CODES`). Record-side causes (`JOB_CHAIN_RECORD_CODES`) are said in full only to someone who reads the
+ * record now.
+ */
+export const JOB_CHAIN_RECORD_CODES: readonly string[] = ['EVENT_NOT_ASSIGNEE', 'EVENT_RECORD_GONE', 'EVENT_AI_TURN', 'EVENT_NOT_WATCHED']
+
 /** An event occurrence's slot (stage 4a): `ev:<delivery number>`, one per job and event; never shown in an answer. */
 export function eventDueSlot(deliverySeq: number): string {
   if (!Number.isSafeInteger(deliverySeq) || deliverySeq < 1) throw new Error('eventDueSlot: needs a delivery number')
@@ -677,6 +686,8 @@ export interface LedgerEventRow {
   actorId: string
   runId: string | null
   origin: string | null
+  /** A person's call through a business plugin's screen (the ledger's `via`, JSON), or null. */
+  via: string | null
   at: string
 }
 
@@ -688,9 +699,12 @@ export interface LedgerEventRow {
  * (`external`: a connector plugin's import, the minutes intake — stage 4-0's decision 7). A person's change counts, and
  * so does their AI's in their own consultation (`ai` with no run).
  */
-export function ledgerRowIsEvent(row: Pick<LedgerEventRow, 'origin' | 'runId' | 'actorKind'>): boolean {
+export function ledgerRowIsEvent(row: Pick<LedgerEventRow, 'origin' | 'runId' | 'actorKind'> & { via?: string | null }): boolean {
   if (row.origin !== null) return false
   if (row.runId !== null) return false
+  // A change written through a business plugin's screen (owner decision ②, 2026-11-18): its code and a person's press
+  // cannot be told apart, so it is never an event.
+  if (row.via !== undefined && row.via !== null) return false
   return row.actorKind === 'human' || row.actorKind === 'ai'
 }
 

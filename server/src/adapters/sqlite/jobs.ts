@@ -231,17 +231,17 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       // Delivery order (records.md "Delivery order"): a row written later with an earlier time is never passed by. The
       // ledger's key starts (company, record): one record's rows are found without reading anyone else's.
       const rows = conn.prepare(`SELECT l.delivery_seq AS seq, l.record_id, l.version, r.type, l.action, l.from_state, l.to_state, l.actor_kind, l.actor_id,
-          l.run_id, l.origin, l.at
+          l.run_id, l.origin, l.via, l.at
           FROM record_ledger l JOIN records r ON r.company_id = l.company_id AND r.id = l.record_id
           WHERE l.company_id = ? AND l.record_id = ? AND l.delivery_seq IS NOT NULL AND l.delivery_seq > ? AND l.delivery_seq <= ?
           ORDER BY l.delivery_seq LIMIT ?`)
         .all(companyId, recordId, afterSeq, upToSeq, limit) as Array<{
           seq: number; record_id: string; version: number; type: string; action: string; from_state: string | null; to_state: string | null
-          actor_kind: string; actor_id: string; run_id: string | null; origin: string | null; at: string
+          actor_kind: string; actor_id: string; run_id: string | null; origin: string | null; via: string | null; at: string
         }>
       return rows.map((r): LedgerEventRow => ({
         seq: r.seq, recordId: r.record_id, version: r.version, type: r.type, action: r.action, fromState: r.from_state, toState: r.to_state,
-        actorKind: r.actor_kind, actorId: r.actor_id, runId: r.run_id, origin: r.origin, at: r.at,
+        actorKind: r.actor_kind, actorId: r.actor_id, runId: r.run_id, origin: r.origin, via: r.via, at: r.at,
       }))
     },
     eventRecordsOf(jobId, limit) {
@@ -255,9 +255,16 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         .all(companyId, jobId, JSON.stringify(records), limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     eventCursor(jobId) {
-      const r = conn.prepare(`SELECT seen_seq, watch_record_id, watch_start, watch_fired, job_stamp, stop_stamp FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?`)
-        .get(companyId, jobId) as { seen_seq: number; watch_record_id: string; watch_start: string; watch_fired: number; job_stamp: string; stop_stamp: string } | undefined
-      return r ? ({ seen: r.seen_seq, watch: r.watch_record_id, start: r.watch_start, fired: r.watch_fired === 1, jobStamp: r.job_stamp, stopStamp: r.stop_stamp } satisfies JobEventCursor) : null
+      const r = conn.prepare(`SELECT seen_seq, watch_record_id, watch_start, watch_fired, job_stamp, stop_stamp, chain_stop_code, chain_stop_record, chain_stop_at
+          FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?`)
+        .get(companyId, jobId) as {
+          seen_seq: number; watch_record_id: string; watch_start: string; watch_fired: number; job_stamp: string; stop_stamp: string
+          chain_stop_code: string | null; chain_stop_record: string | null; chain_stop_at: string | null
+        } | undefined
+      return r ? ({
+        seen: r.seen_seq, watch: r.watch_record_id, start: r.watch_start, fired: r.watch_fired === 1, jobStamp: r.job_stamp, stopStamp: r.stop_stamp,
+        chainStop: r.chain_stop_code !== null && r.chain_stop_record !== null && r.chain_stop_at !== null ? { code: r.chain_stop_code, record: r.chain_stop_record, at: r.chain_stop_at } : null,
+      } satisfies JobEventCursor) : null
     },
     startEventCursor(jobId, startRecord, at) {
       // A new start record (a version the responsible person accepted) starts the watch over; the same one keeps where the chain is.
@@ -265,6 +272,9 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
           ON CONFLICT(company_id, job_id) DO UPDATE SET seen_seq = MAX(seen_seq, excluded.seen_seq),
             watch_record_id = CASE WHEN watch_start = excluded.watch_start THEN watch_record_id ELSE excluded.watch_record_id END,
             watch_fired = CASE WHEN watch_start = excluded.watch_start THEN watch_fired ELSE 0 END,
+            chain_stop_code = CASE WHEN watch_start = excluded.watch_start THEN chain_stop_code ELSE NULL END,
+            chain_stop_record = CASE WHEN watch_start = excluded.watch_start THEN chain_stop_record ELSE NULL END,
+            chain_stop_at = CASE WHEN watch_start = excluded.watch_start THEN chain_stop_at ELSE NULL END,
             watch_start = excluded.watch_start, updated_at = excluded.updated_at`)
         .run(companyId, jobId, seqNow(), startRecord, startRecord, at)
       // Its cursor is at now: it takes what is written now — this job's only (another job keeps its own difference).
@@ -276,8 +286,17 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         .run(at, companyId, jobId, recordId).changes === 1
     },
     moveWatch(jobId, from, to, at) {
-      return conn.prepare(`UPDATE ai_job_event_cursors SET watch_record_id = ?, watch_fired = 0, updated_at = ? WHERE company_id = ? AND job_id = ? AND watch_record_id = ?`)
+      return conn.prepare(`UPDATE ai_job_event_cursors SET watch_record_id = ?, watch_fired = 0, chain_stop_code = NULL, chain_stop_record = NULL, chain_stop_at = NULL,
+          updated_at = ? WHERE company_id = ? AND job_id = ? AND watch_record_id = ?`)
         .run(to, at, companyId, jobId, from).changes === 1
+    },
+    stopChain(jobId, code, recordId, at) {
+      return conn.prepare(`UPDATE ai_job_event_cursors SET chain_stop_code = ?, chain_stop_record = ?, chain_stop_at = ?
+          WHERE company_id = ? AND job_id = ? AND chain_stop_code IS NULL`).run(code, recordId, at, companyId, jobId).changes === 1
+    },
+    clearChainStop(jobId, recordId) {
+      conn.prepare(`UPDATE ai_job_event_cursors SET chain_stop_code = NULL, chain_stop_record = NULL, chain_stop_at = NULL
+          WHERE company_id = ? AND job_id = ? AND chain_stop_record = ?`).run(companyId, jobId, recordId)
     },
     moveEventCursor(jobId, from, to, at) {
       return conn.prepare(`UPDATE ai_job_event_cursors SET seen_seq = ?, updated_at = ? WHERE company_id = ? AND job_id = ? AND seen_seq = ?`)

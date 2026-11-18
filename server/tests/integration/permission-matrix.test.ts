@@ -215,6 +215,7 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/jobs/:jobId/pause', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}/pause` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/jobs/:jobId/resume', w => ({ path: `${C(w)}/jobs/${NO_SUCH_JOB}/resume` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/me/jobs/:jobId/accept', w => ({ path: `${C(w)}/me/jobs/${NO_SUCH_JOB}/accept`, body: { version: 1 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/me/jobs/:jobId/watch', w => ({ path: `${C(w)}/me/jobs/${NO_SUCH_JOB}/watch`, body: { version: 1, recordId: 'task-0000000000000000' } }), [404, 404, 404, 404, 404, 401]),
   r('PUT /api/companies/:companyId/jobs-stop', w => ({ path: `${C(w)}/jobs-stop`, body: {} }), [400, 400, 403, 403, 404, 401], 'no stopped'),
   // A PC job's claim (B PR 5a): any member lists their own turns (none here) and may claim (body first: 400).
   r('GET /api/companies/:companyId/me/job-turns', w => ({ path: `${C(w)}/me/job-turns` }), MEMBERS),
@@ -771,6 +772,7 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/jobs/:jobId/pause', (w, id) => ({ path: `${C(w)}/jobs/${id}/pause` }), w => w.other.job, NO_SUCH_JOB),
   x('POST /api/companies/:companyId/jobs/:jobId/resume', (w, id) => ({ path: `${C(w)}/jobs/${id}/resume` }), w => w.other.job, NO_SUCH_JOB),
   x('POST /api/companies/:companyId/me/jobs/:jobId/accept', (w, id) => ({ path: `${C(w)}/me/jobs/${id}/accept`, body: { version: 1 } }), w => w.other.job, NO_SUCH_JOB),
+  x('POST /api/companies/:companyId/me/jobs/:jobId/watch', (w, id) => ({ path: `${C(w)}/me/jobs/${id}/watch`, body: { version: 1, recordId: 'task-0000000000000000' } }), w => w.other.job, NO_SUCH_JOB),
   x('GET /api/companies/:companyId/skill-shelf/:itemId/versions', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/versions` }), w => w.other.shelfItem),
   x('GET /api/companies/:companyId/skill-shelf/:itemId/versions/:version', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/versions/${'a'.repeat(64)}` }), w => w.other.shelfItem),
   x('POST /api/companies/:companyId/skill-shelf/:itemId/restore', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/restore`, body: { version: 'a'.repeat(64), expectedVersion: null } }), w => w.other.shelfItem),
