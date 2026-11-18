@@ -512,6 +512,26 @@ describe('an event job', () => {
     expect(calls.filter((c) => c.url.endsWith('/records/query')).some((c) => (c.body as { offset: number }).offset === 50)).toBe(true)
   })
 
+  it('another responsible person\'s list starts at its first page', async () => {
+    const page = (offset: number) => Array.from({ length: 50 }, (_, i) => ({ id: `task-${String(offset + i).padStart(16, '0')}`, type: 'task', title: `やること${offset + i}` }))
+    const holder: { calls: Array<{ body: unknown }> } = { calls: [] }
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [] }) },
+      [`POST ${base}/records/query`]: () => ({ body: ok({ total: 120, records: page((holder.calls.at(-1)!.body as { offset: number }).offset) }) }),
+    })
+    holder.calls = calls
+    renderInCompany(<JobsRoute />)
+    await userEvent.click(await screen.findByRole('button', { name: '定期の仕事を作る' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: '責任者' }), 'u_member')
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'いつ動くか' }), 'event')
+    await userEvent.click(await within(dialog).findByRole('button', { name: '次へ' }))
+    await waitFor(() => expect((calls.filter((c) => c.url.endsWith('/records/query')).at(-1)!.body as { offset: number }).offset).toBe(50))
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: '責任者' }), 'u_owner')
+    await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/records/query')).at(-1)!.body).toMatchObject({ fields: { assignee: 'u_owner' }, offset: 0 }))
+  })
+
   it('the list and the approval say what it watches in plain words (never the record\'s title), and what it never runs for', async () => {
     const pending = jobView({ approvedVersion: null, state: 'draft', waiting: 'NOT_APPROVED', trigger: eventDef().trigger, nextSlot: null, lastOccurrence: null })
     mockApi({

@@ -520,6 +520,13 @@ describe('(5) paused or stopped', () => {
     await complete(c)
     await complete(c2)
     older('UPDATE ai_job_settings SET stopped = 0, updated_at = ? WHERE company_id = ?', clock.now(), CO)
+    // This build writes before any scan — another job accepted, the company stopped and lifted again: the older stop is still found.
+    const other = task('ほかの仕事を受け取る')
+    await runnableJob(chain(other, { name: '別' }))
+    nowMs += 60_000
+    ok(jobs.setStopped(owner(), { stopped: true }))
+    nowMs += 60_000
+    ok(jobs.setStopped(owner(), { stopped: false }))
     expect(tick()).toBe(0)
     expect(tick()).toBe(0)
     for (const job of [jobA, jobB, jobC, jobC2]) expect(occurrencesOf(job)).toEqual([])

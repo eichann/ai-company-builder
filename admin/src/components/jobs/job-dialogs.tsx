@@ -109,6 +109,9 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
   // Searched by name and paged (a member may have many open やること).
   const [startText, setStartText] = useState('')
   const [startOffset, setStartOffset] = useState(0)
+  // Another responsible person: their list starts at its first page (Codex review of #700).
+  const [startFor, setStartFor] = useState(f.actingUser)
+  if (startFor !== f.actingUser) { setStartFor(f.actingUser); setStartOffset(0) }
   const starts = useQuery(f.when === 'event' ? `job-starts:${companyId}:${f.actingUser}:${startText.trim()}:${startOffset}` : null,
     () => jobsApi.startChoices(companyId, f.actingUser, startText, startOffset))
   const startRecords = (starts.data?.records ?? []) as Array<{ id: string; title: string }>
