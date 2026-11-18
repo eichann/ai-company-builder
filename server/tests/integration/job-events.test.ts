@@ -387,13 +387,17 @@ describe('(2) the record no longer the responsible person\'s to read', () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE kind IN ('job_expired', 'job_skipped', 'job_failed', 'job_paused')").get()).toEqual({ n: 0 })
   })
 
-  it('at the event: nothing made', async () => {
+  it('at the event: nothing made; the chain stops — its cause in full for a reader of the record (the owner), plain for alice who no longer reads it', async () => {
     const start = task('二人だけのやること', { members: ['u-owner'] })
     const job = await runnableJob(chain(start))
     await complete(start)
     db.prepare("DELETE FROM record_viewers WHERE company_id = ? AND record_id = ? AND user_id = 'u-alice'").run(CO, start)
     expect(tick()).toBe(0)
     expect(occurrencesOf(job)).toEqual([])
+    const S = { 'X-ACB-Job-Schemas': '1,2' }
+    expect((await call('u-owner', 'GET', `/jobs/${job}`, undefined, S)).body.data.chainStopped).toEqual({ why: '責任者が見張っていたやること「二人だけのやること」を見られなくなったため、止まりました' })
+    expect((await call('u-alice', 'GET', `/jobs/${job}`, undefined, S)).body.data.chainStopped).toEqual({ why: '見張っていたやることの都合で止まりました' })
+    expect(JSON.stringify(ok(services.notifications.list(alice())).items)).not.toContain('二人だけ')
   })
 })
 
@@ -540,6 +544,40 @@ describe('(5) paused or stopped', () => {
     expect(occurrencesOf(jobD)).toHaveLength(1)
   })
 
+  it('A: paused here, resumed on the older build, back here: the stale gap ends; a re-pick and its completion make the やること', async () => {
+    const start = task('往復の前')
+    const job = await runnableJob(chain(start))
+    nowMs += 60_000
+    ok(jobs.pause(owner(), job))
+    await complete(start)
+    // The older build resumes it (no gap closed, no stamp).
+    nowMs += 60_000
+    db.prepare("UPDATE ai_jobs SET state = 'active', paused_reason = NULL, paused_by = NULL, paused_at = NULL, updated_at = ? WHERE company_id = ? AND id = ?").run(clock.now(), CO, job)
+    expect(tick()).toBe(0)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM ai_job_event_gaps WHERE company_id = ? AND until_seq IS NULL').get(CO)).toEqual({ n: 0 })
+    const next = task('往復のあと')
+    nowMs += 60_000
+    expect((await call('u-alice', 'POST', `/me/jobs/${job}/watch`, { version: 1, recordId: next }, { 'X-ACB-Job-Schemas': '1,2' })).status).toBe(200)
+    await complete(next)
+    expect(tick()).toBe(1)
+    expect(madeTasks(job)).toHaveLength(1)
+  })
+
+  it('B: the company stopped here, lifted on the older build, back here: a new job works', async () => {
+    const before = task('会社の往復の前')
+    await runnableJob(chain(before, { name: '前から' }))
+    nowMs += 60_000
+    ok(jobs.setStopped(owner(), { stopped: true }))
+    nowMs += 60_000
+    db.prepare('UPDATE ai_job_settings SET stopped = 0, updated_at = ? WHERE company_id = ?').run(clock.now(), CO)
+    // No tick in between: the new job finds the company's stale gap itself.
+    const start = task('会社の往復のあと')
+    const job = await runnableJob(chain(start, { name: '新しい仕事' }))
+    await complete(start)
+    expect(tick()).toBe(1)
+    expect(occurrencesOf(job)).toEqual([expect.objectContaining({ state: 'done' })])
+  })
+
   it('accepting the same version again loses nothing that happened before', async () => {
     const start = task('二度受け取る')
     const job = await runnableJob(chain(start))
@@ -658,18 +696,7 @@ describe('(6) many rows and the day\'s limit', () => {
     expect(occurrencesOf(job).filter((o: Json) => o.event_record_id === start)).toEqual([])
   })
 
-  it('the limit\'s notice is shown to the responsible person only (a row someone else has says nothing)', async () => {
-    const start = task('上限の知らせ')
-    const job = await runnableJob(chain(start))
-    for (const user of ['u-alice', 'u-owner']) {
-      db.prepare(`INSERT INTO notifications (id, company_id, user_id, kind, record_id, record_version, action, actor_id, actor_kind, dedupe_key, created_at, read_at)
-        VALUES (?, ?, ?, 'job_events_skipped', '', 0, '', NULL, NULL, ?, ?, NULL)`).run(`n-${user}`, CO, user, `job_events_skipped:${job}:2026-11-18`, clock.now())
-    }
-    expect(ok(services.notifications.list(alice())).items.some(i => i.kind === 'job_events_skipped')).toBe(true)
-    expect(ok(services.notifications.list(owner())).items.some(i => i.kind === 'job_events_skipped')).toBe(false)
-  })
-
-  it('beyond the day\'s limit nothing is made, the responsible person is told once without a count, the job keeps running', async () => {
+  it('beyond the day\'s limit nothing is made, the job keeps running, and one notice says the chain stopped for the limit', async () => {
     const start = task('上限の始まり')
     const job = await runnableJob(chain(start, { grant: { ...chain('x').grant, limits: { minutes: 5, runsPerDay: 1 } } }))
     await complete(start)
@@ -679,13 +706,12 @@ describe('(6) many rows and the day\'s limit', () => {
     expect(tick()).toBe(0)
     expect(occurrencesOf(job)).toHaveLength(1)
     expect(jobState(job)).toBe('active')
-    const told = db.prepare("SELECT user_id FROM notifications WHERE kind = 'job_events_skipped'").all()
-    expect(told).toEqual([{ user_id: 'u-alice' }])
-    const text = ok(services.notifications.list(alice())).items.find(i => i.kind === 'job_events_skipped')?.text ?? ''
-    expect(text).toContain('いくつかの出来事を見送りました')
-    expect(text).not.toMatch(/[0-9０-９]+件/)
-    // Nobody else hears of it.
-    expect(ok(services.notifications.list(owner())).items.some(i => i.kind === 'job_events_skipped')).toBe(false)
+    // One notice each (owner decision): the chain's stop, the limit its cause — nothing else of the jobs.
+    const told = db.prepare("SELECT user_id, kind FROM notifications WHERE kind GLOB 'job_*' AND kind <> 'job_accept_needed' ORDER BY user_id").all()
+    expect(told).toEqual([{ user_id: 'u-alice', kind: 'job_chain_stopped' }, { user_id: 'u-owner', kind: 'job_chain_stopped' }])
+    const text = ok(services.notifications.list(alice())).items.find(i => i.kind === 'job_chain_stopped')?.text ?? ''
+    expect(text).toContain('1日の上限（1回）を超えたため')
+    expect(ok(services.notifications.list(bob())).items.some(i => i.kind === 'job_chain_stopped')).toBe(false)
   })
 })
 
@@ -925,6 +951,30 @@ describe('① a stopped chain', () => {
     expect(notices('u-alice', 'member')).toEqual([])
   })
 
+  it('「もう一度」 on a time occurrence answers the same whether an event occurrence the viewer cannot read came after it', async () => {
+    const timeJob = await runnableJob({ ...chain('task-0000000000000009'), schema: 1, name: '時刻の仕事', trigger: { every: 'day', at: '09:00', businessDaysOnly: false } })
+    const at = clock.now()
+    db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, outcome_code, created_at, updated_at)
+      VALUES (?, ?, ?, 1, '2026-11-18T09:00', 'Asia/Tokyo', ?, ?, 'needs_person', 'TASK_NOT_CREATED', ?, ?)`).run(CO, `occ.${'1'.repeat(32)}`, timeJob, at, at, at, at)
+    const retry = createJobRetry({ companyData, transactions, clock, roleOf, jobs, aiStops: () => ({ stopped: false }) as Json, reconcileFor: () => ({ ok: false }) as Json })
+    const viewed = () => retry.viewOf(CO, companyData.forCompany(CO).jobs.occurrence(`occ.${'1'.repeat(32)}`)!)
+    const before = viewed()
+    const hers = task('アリスだけ・あとから', { personal: true })
+    nowMs += 60_000
+    db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at,
+      event_seq, event_record_id, event_version, event_day) VALUES (?, ?, ?, 1, 'ev:99999', 'Asia/Tokyo', ?, ?, 'done', ?, ?, 99999, ?, 1, '2026-11-18')`)
+      .run(CO, `occ.${'2'.repeat(32)}`, timeJob, clock.now(), clock.now(), clock.now(), clock.now(), hers)
+    expect(viewed()).toEqual(before)
+  })
+
+  it('a screen that does not read schema 2 cannot choose one (it was never shown the job)', async () => {
+    const start = task('古い画面から選ぶ')
+    const job = await runnableJob(chain(start))
+    const next = task('選ぼうとした')
+    expect(await call('u-alice', 'POST', `/me/jobs/${job}/watch`, { version: 1, recordId: next })).toMatchObject({ status: 409, body: { code: 'JOB_NEEDS_NEWER_SCREEN' } })
+    expect(cursorOf(job)).toMatchObject({ watch_record_id: start })
+  })
+
   it('a notice speaks of its own stop only: after choosing again and stopping again, one notice', async () => {
     const start = task('二度止まる')
     const job = await runnableJob(chain(start, {}, { followMadeTask: false }))
@@ -1055,12 +1105,31 @@ describe('⑧ the AI\'s turn, ⑤ the assignee', () => {
     expect(occurrencesOf(job)).toEqual([])
   })
 
-  it('the assignee: someone else\'s at the event makes nothing; changed before acting → skipped', async () => {
+  it('the assignee: someone else\'s at the event makes nothing and stops the chain (its cause); changed before acting → skipped', async () => {
     const bobs = task('ボブの担当', { fields: { assignee: 'u-bob' } })
     const job = await runnableJob(chain(bobs))
     await complete(bobs, bob())
     expect(tick()).toBe(0)
     expect(occurrencesOf(job)).toEqual([])
+    expect((await call('u-alice', 'GET', `/jobs/${job}`, undefined, { 'X-ACB-Job-Schemas': '1,2' })).body.data.chainStopped)
+      .toEqual({ why: '見張っていたやること「ボブの担当」の担当が責任者でなくなったため、止まりました' })
+    // Alice's own やること whose assignee became bob: the owner (the creator), who does not read it, gets the plain words only.
+    const mine = task('アリスの次・担当が変わる')
+    const job3 = await runnableJob(chain(mine, { name: '三つめ' }))
+    await complete(mine)
+    tick()
+    const [made] = madeTasks(job3)
+    db.prepare("UPDATE records SET title = 'アリスだけの続き' WHERE company_id = ? AND id = ?").run(CO, made.id)
+    const v = versionOf(made.id)
+    transactions.run(() => {
+      db.prepare("UPDATE record_state SET state = 'done', version = version + 2 WHERE company_id = ? AND record_id = ?").run(CO, made.id)
+      insertLedgerRow(db, CO, ledgerRow(made.id, v + 1, 'todo', 'todo', { action: 'assign', changes: JSON.stringify([{ field: 'assignee', before: 'u-alice', after: 'u-bob' }]) }))
+      insertLedgerRow(db, CO, ledgerRow(made.id, v + 2, 'todo', 'done'))
+    })
+    expect(tick()).toBe(0)
+    expect((await call('u-owner', 'GET', `/jobs/${job3}`, undefined, { 'X-ACB-Job-Schemas': '1,2' })).body.data.chainStopped).toEqual({ why: '見張っていたやることの都合で止まりました' })
+    expect((await call('u-alice', 'GET', `/jobs/${job3}`, undefined, { 'X-ACB-Job-Schemas': '1,2' })).body.data.chainStopped).toEqual({ why: expect.stringContaining('アリスだけの続き') })
+    expect(JSON.stringify(ok(services.notifications.list(owner())).items)).not.toContain('アリスだけ')
 
     const start = task('あとで担当が変わる')
     const job2 = await runnableJob(chain(start, { name: '担当' }))

@@ -863,7 +863,10 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
 - **Paused / stopped** (③): `holdDue` opens a gap (`ai_job_event_gaps`, from the delivery number then; `job_key` '' =
   the company's stop, also after a restore) and `holdPassedSlot` closes it; several per job. The scan looks at nothing
   while paused or stopped; afterwards rows inside a gap never run, rows before the pause that were not looked at yet do.
-  **A pause or a stop the rollback build (4-0) made has no gap** (Codex review of #700): a resume or a lift that closes no
+  **A gap still open while the job runs** was lifted by an older build (a round trip: paused here, resumed there): on a
+  job whose stamps differ it ends now and nothing from it runs; on a job made since (its stamps match: it began looking
+  after the lift) the company's stale gap ends where that job began, so its own events run (review of #700).
+  **A pause or a stop the rollback build (4-0 / 4-0.1) made has no gap** (Codex review of #700): a resume or a lift that closes no
   gap moves the cursor to now (`resyncEventCursors`), and one made and lifted entirely there is found by the stamps —
   every write this build makes to `ai_jobs` / `ai_job_settings` copies their `updated_at` onto the cursor (`job_stamp`,
   `stop_stamp`); a difference at the scan means another build wrote it, and the cursor moves to now (logged). Safe side:
@@ -871,13 +874,14 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   consent or a first cursor).
   A `due` event occurrence is held by the pause like any other.
 - **The day's limit** (⑦ ⑨): occurrences made per job and company day (`event_day`, company time) up to
-  `grant.limits.runsPerDay`; beyond it nothing is made (the target counts as fired), the job is never paused for it, and
-  the responsible person alone is told once that day, without a count (`job_events_skipped`, key
-  `job_events_skipped:<job>:<day>`, text built when read while they are its responsible person). 「もう一度」 makes no
-  occurrence, so it never counts.
+  `grant.limits.runsPerDay`; beyond it nothing is made (the target counts as fired) and the job is never paused for it:
+  the chain stops, and its one notice (`job_chain_stopped`, below) says the limit was the cause (owner decision: one
+  notice, no other kind). 「もう一度」 makes no occurrence, so it never counts.
 - **A stopped chain** (owner decision ①, 2026-11-18): when the watched record's turn cannot go on — the day's limit
   (`DAY_LIMIT`), reached while paused / stopped / an older build ran (`PAUSED_EVENT`), while a new content waited for its
-  受け取る (`VERSION_EVENT`), or its occurrence ended without its やること (held, skipped — absent, assignee changed,
+  受け取る (`VERSION_EVENT`), reached the watched state **at the event** while unreadable for the responsible person, with
+  someone else as assignee, or in 「AI の番」 (`EVENT_RECORD_GONE` / `EVENT_NOT_ASSIGNEE` / `EVENT_AI_TURN` — never a silent
+  skip), or its occurrence ended without its やること (held, skipped — absent, assignee changed,
   unreadable, 「AI の番」 —, expired, needs a person) — the cursor keeps why, on which record and when
   (`chain_stop_code` / `_record` / `_at`, `stopChain`: once per stop), and the responsible person and the job's creator
   (while an owner / admin) are told once (`job_chain_stopped`, recordless, key `job_chain_stopped:<job>:<at>`, shown while
@@ -906,7 +910,9 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
 - **Order of a job's occurrences** (`OCCURRENCE_ORDER`, adapters/sqlite/jobs.ts): newest first by when each came — a time
   slot by its `due_at`, an event one by when it was made — and events made together by delivery number (numerically: never
   `ev:9` after `ev:10`), so a job whose trigger changed shows its newest occurrence first and 「もう一度」's `NOT_LATEST` sees
-  the right one. A job of time slots only reads exactly as before.
+  the right one. A job of time slots only reads exactly as before. 「もう一度」's `NOT_LATEST` compares with the newest **time**
+  occurrence only (`occurrencesOf(job, [], 1)`): an event occurrence — maybe of a record the viewer cannot read — never
+  changes the answer (review of #700).
 - **Screens**: the admin form's 「いつ動くか」 → 「見張っているやることが終わったときなどに」: 見張るやること (a list searched by name and paged, `JOB_START_PAGE` 50 at a time), きっかけ (a state),
   「作ったやることも続けて見張る」, 1日の上限; the words are `job-words.ts` (`jobRecordTriggerText` — never the record's title
   —, `JOB_EVENT_NOTE`, the grant's day-limit line, the expiry line). The app shows the same sentences in 「受け取る」.

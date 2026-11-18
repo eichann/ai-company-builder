@@ -190,12 +190,17 @@ export interface JobRepository {
   stopChain(jobId: string, code: string, recordId: string, at: string): boolean
   /** The chain goes on after all (the occurrence it stopped on ran, after 「もう一度」): only a stop on `recordId`. */
   clearChainStop(jobId: string, recordId: string): void
+  /** Which gaps are open now: the job's (`jobId` as given) and / or the company's stop's (''). */
+  openGapKeys(jobId: string): string[]
   /** The job's gaps and the company's (its stops), in any order. */
   eventGaps(jobId: string): JobEventGap[]
   /** A pause (`jobId`) or the company's stop (null) begins: a gap from the newest delivery number now, unless one is open. */
   openEventGap(jobId: string | null, id: string, at: string): void
-  /** It ends: every open gap of the job (null: of the company's stop) ends at the newest delivery number now. How many ended. */
-  closeEventGaps(jobId: string | null, at: string): number
+  /**
+   * It ends: every open gap of the job (null: of the company's stop) ends at the newest delivery number now — or at
+   * `untilSeq` (never before where it began). How many ended.
+   */
+  closeEventGaps(jobId: string | null, at: string, untilSeq?: number): number
   /**
    * Look at nothing from before now (the job's cursor; null: every event job's of the company): a pause or a stop a build
    * before 4a made has no gap, so nothing that happened since the cursor may run. The stamps take what is written now.

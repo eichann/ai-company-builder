@@ -315,7 +315,6 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ...shared,
     jobNoticeOf: (member, jobId) => jobs.noticeJob(member, jobId),
     jobOccurrenceNoticeOf: (member, jobId, occurrenceId) => jobs.occurrenceNotice(member, jobId, occurrenceId),
-    jobEventsSkippedOf: (member, jobId) => jobs.eventsSkippedNotice(member, jobId),
     jobChainStoppedOf: (member, jobId, at) => jobs.chainStopNotice(member, jobId, at),
     jobAcceptNoticeOf: (member, jobId, version) => jobs.acceptNotice(member, jobId, version),
     coverOf: (companyId, userId) => absences.coverOf(companyId, userId),

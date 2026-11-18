@@ -130,7 +130,9 @@ export function createJobRetry(deps: JobRetryDeps) {
     // window too — running this one again would hand the same files or meetings to a second run. An event occurrence
     // (stage 4a) stands alone: no window, no later slot.
     const event = occ.eventSeq !== null && occ.eventSeq !== undefined
-    if (!event && handle.jobs.occurrences(job.id, 1)[0]?.id !== occ.id) return 'NOT_LATEST'
+    // The newest time occurrence only (`occurrencesOf` with no records): an event occurrence — maybe of a record this
+    // viewer cannot read — never decides the answer (review of #700).
+    if (!event && handle.jobs.occurrencesOf(job.id, [], 1)[0]?.id !== occ.id) return 'NOT_LATEST'
     if (!version || job.approvedVersion !== occ.jobVersion) return 'JOB_VERSION_CHANGED'
     const definition = definitionOf(version)
     // A shape this build does not know: never sent back here (nothing could check or run it).

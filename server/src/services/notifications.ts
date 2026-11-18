@@ -73,11 +73,6 @@ export interface NotificationServiceDeps {
    * job now. Absent → never shown.
    */
   jobOccurrenceNoticeOf?: (member: Member, jobId: string, occurrenceId: string) => { name: string; dueSlot: string; outcomeCode: string | null } | null
-  /**
-   * 「上限を超えたので、いくつかの出来事を見送りました」 (`job_events_skipped`, stage 4a): the job's name while the member is its
-   * responsible person (they alone are told), else null. Absent → never shown.
-   */
-  jobEventsSkippedOf?: (member: Member, jobId: string) => { name: string } | null
   /** 「止まっています」 (`job_chain_stopped`, stage 4a ①): the job's name and the cause as the member may read it, while that stop stands; else null. */
   jobChainStoppedOf?: (member: Member, jobId: string, at: string) => { name: string; why: string } | null
   /**
@@ -956,18 +951,12 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         return /^[1-9][0-9]{0,8}$/.test(version) ? deps.jobAcceptNoticeOf?.(member, jobId, Number(version)) ?? null : null
       }
       const jobOccurrenceKinds = new Set<string>(JOB_OCCURRENCE_NOTIFICATION_KINDS)
-      // An event job's day limit reached: `job_events_skipped:<job id>:<day>`, shown only to its responsible person.
-      const eventsSkipped = (r: NotificationRow) => {
-        const [, jobId = ''] = (r.dedupeKey ?? '').split(':')
-        return deps.jobEventsSkippedOf?.(member, jobId) ?? null
-      }
       // An event job's stopped chain: `job_chain_stopped:<job id>:<at>` (the time has `:` in it: the rest of the key).
       const chainStopped = (r: NotificationRow) => {
         const [, jobId = '', ...rest] = (r.dedupeKey ?? '').split(':')
         return deps.jobChainStoppedOf?.(member, jobId, rest.join(':')) ?? null
       }
       const visible = rows.filter(r => {
-        if (r.kind === 'job_events_skipped') return r.recordId === '' && eventsSkipped(r) !== null
         if (r.kind === 'job_chain_stopped') return r.recordId === '' && chainStopped(r) !== null
         if (r.kind === 'job_paused') return r.recordId === '' && jobNotice(r) !== null
         if (r.kind === 'job_accept_needed') return r.recordId === '' && acceptNotice(r) !== null
@@ -1012,12 +1001,6 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         if (r.kind === 'job_chain_stopped') {
           const job = chainStopped(r) as { name: string; why: string }
           const text = `定期の仕事「${job.name}」が止まっています（${job.why}）。次に見張るやることを選び直してください`
-          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
-        }
-        if (r.kind === 'job_events_skipped') {
-          const job = eventsSkipped(r) as { name: string }
-          // No count and nothing of which (owner decision ⑨).
-          const text = `定期の仕事「${job.name}」は1日の上限を超えたため、いくつかの出来事を見送りました（上限は管理者が決めています）`
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
         }
         if (r.kind === 'job_accept_needed') {

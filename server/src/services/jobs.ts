@@ -837,16 +837,6 @@ export function createJobService(deps: JobServiceDeps) {
     },
 
     /**
-     * 「上限を超えたので、いくつかの出来事を見送りました」 (`job_events_skipped`, stage 4a)'s job name for the member now, or
-     * null: only its approved version's responsible person, while they see the job.
-     */
-    eventsSkippedNotice(member: Member, jobId: string): { name: string } | null {
-      const found = visibleJob(member, jobId)
-      if (!found || responsibleOf(found.handle, found.job) !== member.userId) return null
-      return { name: nameFor(member, found.handle, found.job) }
-    },
-
-    /**
      * 「止まっています」 (`job_chain_stopped`, owner decision ①)'s words for the member now: the job's name and the cause as
      * they may read it — only while they see the job and that very stop (`at`) still stands; else null.
      */

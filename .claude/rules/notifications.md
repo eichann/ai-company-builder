@@ -258,10 +258,10 @@ compare-and-set and ledger), and writes notices.
   first), a yield to the event loop between companies, each company through its own handle; one
   company's failure is logged (error name only) and the others run.
 
-- `job_events_skipped` (stage 4a, `jobs.md` "Event-triggered jobs"): an event job reached its day's limit — to its
-  responsible person only, once per job and company day, recordless, no count (「定期の仕事「…」は1日の上限を超えたため、いくつかの
-  出来事を見送りました」); shown only while the reader is its responsible person. An occurrence notice of an event occurrence
-  reaches only those who read its record (and is shown only while they do).
+- `job_chain_stopped` (stage 4a, `jobs.md` "Event-triggered jobs" "A stopped chain"): an event job's chain stopped (the
+  day's limit included: its one notice) — to its responsible person and the job's creator while an owner / admin, once per
+  stop, recordless; the cause is built when read (a record-side one in full only for a reader of the record). An
+  occurrence notice of an event occurrence reaches only those who read its record (and is shown only while they do).
 
 ## The push signal
 

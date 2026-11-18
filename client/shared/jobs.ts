@@ -67,6 +67,6 @@ export function jobNoticeTarget(kind: string): 'jobs' | 'none' | null {
   // A stopped chain (stage 4a): the responsible person chooses the next watched やること there.
   if (kind === 'job_accept_needed' || kind === 'job_chain_stopped') return 'jobs'
   // `company_restored` (deployment.md "After a restore"): about the jobs and the AI stopped; its text says what to check.
-  if (kind === 'job_expired' || kind === 'job_skipped' || kind === 'job_failed' || kind === 'job_events_skipped' || kind === 'job_paused' || kind === 'company_restored') return 'none'
+  if (kind === 'job_expired' || kind === 'job_skipped' || kind === 'job_failed' || kind === 'job_paused' || kind === 'company_restored') return 'none'
   return null
 }

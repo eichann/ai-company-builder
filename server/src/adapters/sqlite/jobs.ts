@@ -331,15 +331,19 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         .all(companyId, jobId) as Array<{ from_seq: number; until_seq: number | null }>)
         .map((g): JobEventGap => ({ from: g.from_seq, until: g.until_seq }))
     },
+    openGapKeys(jobId) {
+      return (conn.prepare(`SELECT DISTINCT job_key FROM ai_job_event_gaps WHERE company_id = ? AND job_key IN (?, '') AND until_seq IS NULL`)
+        .all(companyId, jobId) as Array<{ job_key: string }>).map(r => r.job_key)
+    },
     openEventGap(jobId, id, at) {
       const key = jobId ?? ''
       conn.prepare(`INSERT INTO ai_job_event_gaps (company_id, id, job_key, from_seq, until_seq, opened_at, closed_at)
           SELECT ?, ?, ?, ?, NULL, ?, NULL WHERE NOT EXISTS (SELECT 1 FROM ai_job_event_gaps WHERE company_id = ? AND job_key = ? AND until_seq IS NULL)`)
         .run(companyId, id, key, seqNow(), at, companyId, key)
     },
-    closeEventGaps(jobId, at) {
+    closeEventGaps(jobId, at, untilSeq) {
       return conn.prepare(`UPDATE ai_job_event_gaps SET until_seq = MAX(from_seq, ?), closed_at = ? WHERE company_id = ? AND job_key = ? AND until_seq IS NULL`)
-        .run(seqNow(), at, companyId, jobId ?? '').changes
+        .run(untilSeq ?? seqNow(), at, companyId, jobId ?? '').changes
     },
     resyncEventCursors(jobId, at) {
       conn.transaction(() => {

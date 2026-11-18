@@ -72,12 +72,8 @@ export const NOTIFICATION_KINDS = [
   'job_expired',
   'job_skipped',
   'job_failed',
-  // Stage 4a: an event-triggered job reached its day's limit (company time) and left some events unrun (owner decision
-  // ⑨: no count, nothing about which). To its responsible person only, once per job and day; about no record. An app
-  // released before it drops a notice with no record and only counts it as unread.
-  'job_events_skipped',
-  // Stage 4a, owner decision ①: an event job's chain of watched records stopped (the day's limit, an absence, a pause,
-  // a change…). To its responsible person and the job's creator while an owner / admin, once per stop; about no record:
+  // Stage 4a, owner decision ①: an event job's chain of watched records stopped (the day's limit — its one notice —, an
+  // absence, a pause, a change…). To its responsible person and the job's creator while an owner / admin, once per stop; about no record:
   // the cause is built when read (a record-side cause in full only for someone who reads the record).
   'job_chain_stopped',
   // A version of a scheduled job was approved that its responsible person must accept (jobs.md "The
@@ -128,7 +124,6 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   job_expired: '定期の仕事の回が、期限までに動かなかった',
   job_skipped: '定期の仕事の回を、責任者の不在で見送った',
   job_failed: '定期の仕事の回が、うまくできなかった',
-  job_events_skipped: '出来事で動く定期の仕事が、1日の上限を超えて見送った',
   job_chain_stopped: '出来事で動く定期の仕事が止まり、見張るやることの選び直しが要る',
   job_accept_needed: 'あなたが責任者の定期の仕事が承認され、受け取りが要る',
   company_restored: '会社のデータをバックアップから戻したため、自動の仕事を止めた（管理者だけ）',
@@ -169,7 +164,6 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   job_expired: true,
   job_skipped: true,
   job_failed: true,
-  job_events_skipped: true,
   job_chain_stopped: true,
   job_accept_needed: true,
   company_restored: true,
@@ -188,7 +182,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
  */
 export const UNDOABLE_NOTIFICATION_KINDS: readonly NotificationKind[] = ['replied_done', 'mail_left_inbox', 'mail_archived']
 
-export const RECORDLESS_NOTIFICATION_KINDS: readonly NotificationKind[] = ['morning_summary', 'job_paused', 'job_expired', 'job_skipped', 'job_failed', 'job_events_skipped', 'job_chain_stopped', 'job_accept_needed', 'company_restored']
+export const RECORDLESS_NOTIFICATION_KINDS: readonly NotificationKind[] = ['morning_summary', 'job_paused', 'job_expired', 'job_skipped', 'job_failed', 'job_chain_stopped', 'job_accept_needed', 'company_restored']
 
 /** A scheduled job's occurrence notices (jobs.md "Notices"): key `<kind>:<job id>:<occurrence id>`. */
 export const JOB_OCCURRENCE_NOTIFICATION_KINDS: readonly NotificationKind[] = ['job_expired', 'job_skipped', 'job_failed']
