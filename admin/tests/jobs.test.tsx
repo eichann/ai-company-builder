@@ -528,8 +528,11 @@ describe('an event job', () => {
     await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'いつ動くか' }), 'event')
     await userEvent.click(await within(dialog).findByRole('button', { name: '次へ' }))
     await waitFor(() => expect((calls.filter((c) => c.url.endsWith('/records/query')).at(-1)!.body as { offset: number }).offset).toBe(50))
+    await userEvent.selectOptions(await within(dialog).findByRole('combobox', { name: '見張るやること' }), 'task-0000000000000050')
     await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: '責任者' }), 'u_owner')
     await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/records/query')).at(-1)!.body).toMatchObject({ fields: { assignee: 'u_owner' }, offset: 0 }))
+    // The previous person's やること is not kept as the choice.
+    expect((within(dialog).getByRole('combobox', { name: '見張るやること' }) as HTMLSelectElement).value).toBe('')
   })
 
   it('a stopped chain is said on the list with the server\'s words for this viewer and what to do', async () => {

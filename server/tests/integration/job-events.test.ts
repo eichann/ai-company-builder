@@ -817,6 +817,17 @@ describe('① a stopped chain', () => {
     await expectStopped(job, /仕事の内容が変わったため/)
   })
 
+  it('choosing one on a job its responsible person had not accepted yet starts its watch (it runs)', async () => {
+    const start = task('まだ受け取っていない')
+    const made = ok(await jobs.create(owner(), { definition: chain(start) }, READS_2))
+    ok(await jobs.approve(owner(), made.id, { version: 1 }, READS_2))
+    const next = task('受け取りと一緒に選ぶ')
+    expect((await call('u-alice', 'POST', `/me/jobs/${made.id}/watch`, { version: 1, recordId: next }, S2)).status).toBe(200)
+    expect(cursorOf(made.id)).toMatchObject({ watch_record_id: next })
+    await complete(next)
+    expect(tick()).toBe(1)
+  })
+
   it('choosing the start record it began from again starts the watch over there (never the chain\'s old position)', async () => {
     const start = task('はじめのやること')
     const job = await runnableJob(chain(start))

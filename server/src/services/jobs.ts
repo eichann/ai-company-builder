@@ -899,6 +899,8 @@ export function createJobService(deps: JobServiceDeps) {
         handle.jobs.accept(jobId, row.version, row.consentFingerprint, member.userId, at, current.acceptedPlace)
         // The record chosen: the watch starts over there, the stop is gone — also when it is the start record it began
         // from (an explicit choice is never the chain's position kept; Codex review of #700).
+        // A job its responsible person never accepted has no cursor yet: this press starts it (Codex review of #700).
+        handle.jobs.startEventCursor(jobId, b.recordId as string, at)
         handle.jobs.restartWatch(jobId, b.recordId as string, at)
         return ok(undefined)
       })
