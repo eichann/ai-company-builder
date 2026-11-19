@@ -2,6 +2,7 @@ contract.events agent-interaction:closed
 contract.events agent-interaction:request
 contract.events app:closeRequested
 contract.events appCommand:request
+contract.events browser:changed
 contract.events chat-server:info
 contract.events chatHistory:changed
 contract.events chatWindow:changed
@@ -55,6 +56,9 @@ contract.invoke brokerKeys:delete
 contract.invoke brokerKeys:list
 contract.invoke brokerKeys:moveFromEnv
 contract.invoke brokerKeys:save
+contract.invoke browser:clearLogin
+contract.invoke browser:open
+contract.invoke browser:sites
 contract.invoke calendar:today
 contract.invoke chat-server:getInfo
 contract.invoke chatHistory:deleteSession
@@ -370,6 +374,7 @@ contract.type ElectronAPI.callPluginBridge = callPluginBridge: Invoke<'plugins:b
 contract.type ElectronAPI.cancelClaudeSignIn = cancelClaudeSignIn: Invoke<'claudeSignIn:cancel'>
 contract.type ElectronAPI.checkMinutes = checkMinutes: Invoke<'minutes:check'>
 contract.type ElectronAPI.claimAiTurn = claimAiTurn: Invoke<'aiTurns:claim'>
+contract.type ElectronAPI.clearBrowserLogin = clearBrowserLogin: Invoke<'browser:clearLogin'>
 contract.type ElectronAPI.closeChatWindows = closeChatWindows: Invoke<'chatWindow:closeAll'>
 contract.type ElectronAPI.completeHandoffTurn = completeHandoffTurn: Invoke<'handoff:complete'>
 contract.type ElectronAPI.connectGoogle = connectGoogle: Invoke<'google:connect'>
@@ -410,6 +415,7 @@ contract.type ElectronAPI.getApproval = getApproval: Invoke<'approvals:get'>
 contract.type ElectronAPI.getArchivedTasks = getArchivedTasks: Invoke<'tasks:archived'>
 contract.type ElectronAPI.getAuthMode = getAuthMode: Invoke<'config:getAuthMode'>
 contract.type ElectronAPI.getAutoTurnSettings = getAutoTurnSettings: Invoke<'aiTurns:settings'>
+contract.type ElectronAPI.getBrowserSites = getBrowserSites: Invoke<'browser:sites'>
 contract.type ElectronAPI.getBundleChoices = getBundleChoices: Invoke<'tasks:bundles'>
 contract.type ElectronAPI.getBundleKinds = getBundleKinds: Invoke<'tasks:bundleKinds'>
 contract.type ElectronAPI.getCalendarToday = getCalendarToday: Invoke<'calendar:today'>
@@ -498,6 +504,7 @@ contract.type ElectronAPI.moveItem = moveItem: Invoke<'fs:move'>
 contract.type ElectronAPI.onAgentInteraction = onAgentInteraction: Subscribe<'agent-interaction:request'>
 contract.type ElectronAPI.onAgentInteractionClosed = onAgentInteractionClosed: Subscribe<'agent-interaction:closed'>
 contract.type ElectronAPI.onAppCommandRequest = onAppCommandRequest: Subscribe<'appCommand:request'>
+contract.type ElectronAPI.onBrowserChanged = onBrowserChanged: Subscribe<'browser:changed'>
 contract.type ElectronAPI.onChatHistoryChanged = onChatHistoryChanged: Subscribe<'chatHistory:changed'>
 contract.type ElectronAPI.onChatServerInfo = onChatServerInfo: Subscribe<'chat-server:info'>
 contract.type ElectronAPI.onChatWindowsChanged = onChatWindowsChanged: Subscribe<'chatWindow:changed'>
@@ -516,6 +523,7 @@ contract.type ElectronAPI.onSkillShelfChanged = onSkillShelfChanged: Subscribe<'
 contract.type ElectronAPI.onSparseProgress = onSparseProgress: Subscribe<'sparse:progress'>
 contract.type ElectronAPI.onToolApprovalRequest = onToolApprovalRequest: Subscribe<'tool-approval-request'>
 contract.type ElectronAPI.onWriteAccessChanged = onWriteAccessChanged: Subscribe<'writeAccess:changed'>
+contract.type ElectronAPI.openBrowserSite = openBrowserSite: Invoke<'browser:open'>
 contract.type ElectronAPI.openChatWindow = openChatWindow: Invoke<'chatWindow:open'>
 contract.type ElectronAPI.openClaudeSignInPage = openClaudeSignInPage: Invoke<'claudeSignIn:openPage'>
 contract.type ElectronAPI.openCompanySkillBackup = openCompanySkillBackup: Invoke<'skillShelf:openBackup'>
@@ -715,6 +723,7 @@ contract.type IpcEventChannels.'agent-interaction:closed' = 'agent-interaction:c
 contract.type IpcEventChannels.'agent-interaction:request' = 'agent-interaction:request': [request: AgentInteractionRequest]
 contract.type IpcEventChannels.'app:closeRequested' = 'app:closeRequested': []
 contract.type IpcEventChannels.'appCommand:request' = 'appCommand:request': [request: AppCommandRequest]
+contract.type IpcEventChannels.'browser:changed' = 'browser:changed': [change: { companyId: string }]
 contract.type IpcEventChannels.'chat-server:info' = 'chat-server:info': [info: ChatServerInfo]
 contract.type IpcEventChannels.'chatHistory:changed' = 'chatHistory:changed': [data: ChatHistoryChange]
 contract.type IpcEventChannels.'chatWindow:changed' = 'chatWindow:changed': [change: ChatWindowsChange]
@@ -769,6 +778,9 @@ contract.type IpcInvokeChannels.'brokerKeys:delete' = 'brokerKeys:delete': { arg
 contract.type IpcInvokeChannels.'brokerKeys:list' = 'brokerKeys:list': { args: [companyId: string]; result: OwnKeysResult }
 contract.type IpcInvokeChannels.'brokerKeys:moveFromEnv' = 'brokerKeys:moveFromEnv': { args: [companyId: string, rootPath: string, name: string]; result: OwnKeyMoveResult }
 contract.type IpcInvokeChannels.'brokerKeys:save' = 'brokerKeys:save': { args: [companyId: string, service: string, secret: string, displayName?: string]; result: OwnKeysResult }
+contract.type IpcInvokeChannels.'browser:clearLogin' = 'browser:clearLogin': { args: [companyId: string, host: string]; result: BrowserActionResult }
+contract.type IpcInvokeChannels.'browser:open' = 'browser:open': { args: [companyId: string, host: string]; result: BrowserActionResult }
+contract.type IpcInvokeChannels.'browser:sites' = 'browser:sites': { args: [companyId: string]; result: BrowserSitesResult }
 contract.type IpcInvokeChannels.'calendar:today' = 'calendar:today': { args: [companyId: string, options?: CalendarTodayOptions]; result: CalendarTodayResult }
 contract.type IpcInvokeChannels.'chat-server:getInfo' = 'chat-server:getInfo': { args: []; result: ChatServerInfo | null }
 contract.type IpcInvokeChannels.'chatHistory:deleteSession' = 'chatHistory:deleteSession': { args: [companyId: string, sessionId: string]; result: boolean }
@@ -1084,6 +1096,9 @@ main.handle brokerKeys:delete @ features/broker/ipc.ts (companyId: string, servi
 main.handle brokerKeys:list @ features/broker/ipc.ts (companyId: string)
 main.handle brokerKeys:moveFromEnv @ features/broker/ipc.ts (companyId: string, rootPath: string, name: string)
 main.handle brokerKeys:save @ features/broker/ipc.ts (companyId: string, service: string, secret: string, displayName?: string)
+main.handle browser:clearLogin @ features/browser/ipc.ts (companyId, host)
+main.handle browser:open @ features/browser/ipc.ts (companyId, host)
+main.handle browser:sites @ features/browser/ipc.ts (companyId)
 main.handle calendar:today @ features/calendar/ipc.ts (companyId: string, options?: CalendarTodayOptions)
 main.handle chat-server:getInfo @ main.ts ()
 main.handle chatHistory:deleteSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string)
@@ -1291,6 +1306,7 @@ main.on fs:startDrag @ features/fs/ipc.ts (filePath: string)
 main.send agent-interaction:${event} @ main.ts
 main.send app:closeRequested @ main.ts
 main.send appCommand:request @ features/app-commands/ipc.ts
+main.send browser:changed @ main.ts
 main.send chat-server:info @ main.ts
 main.send chatHistory:changed @ features/chat-history/ipc.ts
 main.send chatWindow:changed @ features/chat-windows/ipc.ts
@@ -1340,6 +1356,8 @@ preload checkMinutes -> invoke minutes:check($0)
 preload checkMinutes : (companyId: string) => Promise<MinutesActionResult>
 preload claimAiTurn -> invoke aiTurns:claim($0, $1, $2, $3, $4)
 preload claimAiTurn : (companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string | undefined) => Promise<AiTurnClaimResult>
+preload clearBrowserLogin -> invoke browser:clearLogin($0, $1)
+preload clearBrowserLogin : (companyId: string, host: string) => Promise<BrowserActionResult>
 preload closeChatWindows -> invoke chatWindow:closeAll()
 preload closeChatWindows : () => Promise<void>
 preload completeHandoffTurn -> invoke handoff:complete($0, $1, $2)
@@ -1420,6 +1438,8 @@ preload getAuthMode -> invoke config:getAuthMode()
 preload getAuthMode : () => Promise<AuthMode>
 preload getAutoTurnSettings -> invoke aiTurns:settings($0)
 preload getAutoTurnSettings : (companyId: string) => Promise<AutoTurnSettings>
+preload getBrowserSites -> invoke browser:sites($0)
+preload getBrowserSites : (companyId: string) => Promise<BrowserSitesResult>
 preload getBundleChoices -> invoke tasks:bundles($0)
 preload getBundleChoices : (companyId: string) => Promise<BundleChoicesResult>
 preload getBundleKinds -> invoke tasks:bundleKinds($0)
@@ -1596,6 +1616,8 @@ preload onAgentInteractionClosed -> on agent-interaction:closed(<fn>) ; removeLi
 preload onAgentInteractionClosed : (callback: (request: AgentInteractionRequest) => void) => () => void
 preload onAppCommandRequest -> on appCommand:request(<fn>) ; removeListener appCommand:request(<fn>)
 preload onAppCommandRequest : (callback: (request: AppCommandRequest) => void) => () => void
+preload onBrowserChanged -> on browser:changed(<fn>) ; removeListener browser:changed(<fn>)
+preload onBrowserChanged : (callback: (change: { companyId: string; }) => void) => () => void
 preload onChatHistoryChanged -> on chatHistory:changed(<fn>) ; removeListener chatHistory:changed(<fn>)
 preload onChatHistoryChanged : (callback: (data: ChatHistoryChange) => void) => () => void
 preload onChatServerInfo -> on chat-server:info(<fn>) ; removeListener chat-server:info(<fn>)
@@ -1632,6 +1654,8 @@ preload onToolApprovalRequest -> on tool-approval-request(<fn>) ; removeListener
 preload onToolApprovalRequest : (callback: (data: ToolApprovalRequest) => void) => () => void
 preload onWriteAccessChanged -> on writeAccess:changed(<fn>) ; removeListener writeAccess:changed(<fn>)
 preload onWriteAccessChanged : (callback: (data: { companyId: string; access: WriteAccess; }) => void) => () => void
+preload openBrowserSite -> invoke browser:open($0, $1)
+preload openBrowserSite : (companyId: string, host: string) => Promise<BrowserActionResult>
 preload openChatWindow -> invoke chatWindow:open($0, $1)
 preload openChatWindow : (sessionId: string, request: ChatWindowOpenRequest) => Promise<ChatWindowOpenResult>
 preload openClaudeSignInPage -> invoke claudeSignIn:openPage()

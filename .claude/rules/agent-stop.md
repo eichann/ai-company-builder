@@ -213,6 +213,9 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   an approval; Codex — a stopped kind's approval is declined without asking, one that starts
   anyway (`item/started`) ends the turn (`turn/interrupt` + the sentence); API key — inside the
   tools. Every refusal is logged with decision `stopped` (M1: 「AI の停止中のため拒否」).
+- 「ブラウザ操作」 (`agent-browser.md`): a window the member operates is not closed by a stop (their own
+  browsing); in the AI's (`ai`) mode every write is refused while a whole-AI, `web` or `mcp-external`
+  stop is in force (`browserAiStopped`, checked per request; test `client/tests/browser-window.test.ts`).
 - Limits: an AI started outside ACB is not stopped (MDM, phase 2); an older app does not know
   the stop (the admin count); a Claude command already running is cut when the turn stops;
   Codex's interrupt may lag; a stop of one member or one tool kind leaves the AI outside

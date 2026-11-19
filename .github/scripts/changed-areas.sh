@@ -64,7 +64,8 @@ CLIENT=(
 # Client tests that stay on macOS (.github/scripts/client-tests.mjs, list
 # MACOS) and the two Swift tests: the POSIX spawn wrappers, the recursive
 # watcher, the file-system guards that differ on a case- and
-# normalization-insensitive volume, the voice helpers.
+# normalization-insensitive volume, the voice helpers, the browser window in a real Electron
+# (its harness is a separate process, so check-areas cannot follow it: listed here).
 # ipc-fs.test.ts drives the whole main process through the IPC harness, so
 # any client/electron/ change runs it; renderer-only changes do not.
 CLIENT_MAC=(
@@ -73,6 +74,7 @@ CLIENT_MAC=(
   client/tests/company-watcher.test.ts client/tests/ipc-fs.test.ts
   client/tests/permission-mode.test.ts client/tests/sandbox-claude.test.ts
   client/tests/voice-helper.test.ts client/tests/voice-polisher.test.ts client/tests/voice-probe.test.ts
+  client/tests/browser-window-electron.test.ts client/tests/browser-window-harness/
   client/tests/ipc-harness/ ':(glob)client/tsconfig*.json' client/package.json shared/
   .github/scripts/client-tests.mjs
 )

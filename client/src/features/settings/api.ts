@@ -230,3 +230,24 @@ export function getWorkSwitches(companyId: string, reads: WorkSwitchReads = wind
 export function setWorkSwitch(companyId: string, which: 'readIncoming' | 'autoRun', on: boolean, writes: WorkSwitchWrites = window.electronAPI) {
   return writes.setWorkSwitch(companyId, which, on)
 }
+
+/** 「ブラウザ操作」: the sites the member may open now, and hearing that they changed. */
+export type BrowserSiteReads = ElectronPort<'getBrowserSites' | 'onBrowserChanged'>
+/** 「開いてログイン」 and 「ログインを消す」: a window on this computer and the site's login kept there. */
+export type BrowserSiteActions = ElectronPort<'openBrowserSite' | 'clearBrowserLogin'>
+
+export function getBrowserSites(companyId: string, reads: BrowserSiteReads = window.electronAPI) {
+  return reads.getBrowserSites(companyId)
+}
+
+export function onBrowserChanged(listener: (change: { companyId: string }) => void, reads: BrowserSiteReads = window.electronAPI) {
+  return reads.onBrowserChanged(listener)
+}
+
+export function openBrowserSite(companyId: string, host: string, actions: BrowserSiteActions = window.electronAPI) {
+  return actions.openBrowserSite(companyId, host)
+}
+
+export function clearBrowserLogin(companyId: string, host: string, actions: BrowserSiteActions = window.electronAPI) {
+  return actions.clearBrowserLogin(companyId, host)
+}

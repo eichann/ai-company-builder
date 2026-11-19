@@ -22,10 +22,11 @@ runs:
         node-version: 20
         cache: pnpm
 
-    # CI never launches Electron: typecheck uses the bundled .d.ts and the
-    # client tests run under plain Node via tsx. Since Electron 42 the
-    # `electron` package downloads its binary only on first use (not in
-    # postinstall), so the install fetches no binary.
+    # Typecheck uses the bundled .d.ts and the client tests run under plain
+    # Node via tsx. Since Electron 42 the `electron` package downloads its
+    # binary only on first use (not in postinstall), so the install fetches no
+    # binary; the one test that launches Electron (browser-window-electron,
+    # macOS half only) downloads it when it asks for the binary's path.
     - name: Install dependencies
       shell: bash
       run: pnpm install --frozen-lockfile

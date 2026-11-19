@@ -119,7 +119,8 @@ company's `rootPath`), so the sandbox applies there exactly as for a git company
 - The app reads its policy per chat turn: `services/agent-policy-store.ts` (`GET
   /me/agent-policy`, 3 s budget, ETag; the sandbox part memory only — a failed refresh keeps the
   last answer, a policy never received (or one that does not validate) = off this turn, logged;
-  the stop part is also kept on disk, `agent-stop.md`).
+  the stop part is also kept on disk, `agent-stop.md`; the `browser` part never runs on the last
+  answer: `onRefreshFailed` turns it off, `agent-browser.md`).
   `features/chat/server-config.ts` `getAgentSandbox` adds this computer's facts (home, userData,
   `PATH` folders, the server's host); `chat-server.ts` → `decideTurnSandbox(settings, host,
   capabilities.sandbox)` → the request's `sandbox` (`TurnSandbox`, `agents/connection.ts`).

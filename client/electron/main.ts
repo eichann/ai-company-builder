@@ -94,6 +94,12 @@ import { servePluginFiles } from './electron-adapter'
 // lane B ▼
 // lane B ▲
 // lane C ▼
+import { createBrowserWindowShell } from './browser-window'
+import { createBrowserController, loginStorageFor } from './features/browser/controller'
+import { createKeptLogins } from './features/browser/logins'
+import { registerBrowserIpc } from './features/browser/ipc'
+import { agentCan } from '../shared/agents/registry'
+import { sandboxPlatform } from '../shared/agents/sandbox-policy'
 import { createProcedureReader } from './features/ai-turns/procedures'
 import { createPersonStepBinder, registerPluginStepsIpc } from './features/plugin-steps/ipc'
 import { createStepWriteAreas } from './features/plugin-steps/write-areas'
@@ -537,6 +543,24 @@ registerPluginStepsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies
 // Where a step's run or consultation may write: its deliverable folder (plugin-steps.md).
 const stepWriteAreas = createStepWriteAreas({ baseUrl: getServerApiUrl, cookies: session.cookies, automatic: conversationId => aiTurnClaims.pluginStepWriteArea(conversationId) })
 const bindPersonStep = createPersonStepBinder({ baseUrl: getServerApiUrl, cookies: session.cookies })
+// 「ブラウザ操作」 (agent-browser.md "The app's window"): the member opens a site the company allowed in a
+// window of its own and logs in there; the AI is not connected yet. Only a valid policy answer opens anything.
+const browser = createBrowserController({
+  shell: createBrowserWindowShell(),
+  logins: createKeptLogins(() => path.join(userDataDir(), 'browser-logins.json')),
+  userId: session.userId,
+  storageFor: mode => loginStorageFor(mode, { platformSandbox: sandboxPlatform(process.platform), agentSandbox: agentCan(config.authMode(), 'sandbox') }),
+  onChanged: companyId => appWindow.send('browser:changed', { companyId }),
+})
+agentControl.policy.onPolicy((companyId, policy) => browser.policyAnswered(companyId, policy))
+agentControl.policy.onRefreshFailed(companyId => browser.policyFailed(companyId))
+registerBrowserIpc(ipc, {
+  browser,
+  // The main window's own page only: not a consultation window, not a frame inside the page.
+  fromMainWindow: event => mainWindowHost.isWindow(event.sender.id) && !!event.senderFrame && event.senderFrame.frameTreeNodeId === event.sender.mainFrame.frameTreeNodeId,
+  refresh: companyId => agentControl.policy.refresh(companyId),
+  watch: companyId => agentControl.watchSignals(companyId),
+})
 // lane C ▲
 
 registerAuthIpc(ipc, {
@@ -553,8 +577,13 @@ registerAuthIpc(ipc, {
     pushSignals.stop()
     // Another account must not find this one's consultations on screen.
     chatWindows.closeAll()
+    // …nor this one's site logins (「ブラウザ操作」).
+    browser.signedOut()
   },
-  onSignedIn: () => agentControl.eventSender.sessionStarted(),
+  onSignedIn: userId => {
+    agentControl.eventSender.sessionStarted()
+    browser.signedIn(userId)
+  },
 })
 
 // The sync button, automatic sync and the history views (features/sync, features/git-history).
