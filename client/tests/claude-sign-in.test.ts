@@ -4,7 +4,7 @@
 import { EventEmitter } from 'node:events'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { claudeAccountNotice, readClaudeAuthStatus, signInPageUrl } from '../shared/claude-sign-in'
+import { claudeAccountNotice, claudeSignInSupported, readClaudeAuthStatus, signInPageUrl } from '../shared/claude-sign-in'
 import { createClaudeSignIn, type ClaudeSignInDeps, type SignInChild } from '../electron/services/claude-sign-in'
 
 const SIGNED_IN_TEAM = JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', email: 'someone@example.com', orgName: 'Example', subscriptionType: 'team' })
@@ -97,8 +97,15 @@ describe('the sign-in page address', () => {
 })
 
 describe('checking the sign-in', () => {
+  it('the floor is the CLI whose auth status no longer signs the member out (2.1.317)', () => {
+    assert.equal(claudeSignInSupported('2.1.316 (Claude Code)'), false)
+    assert.equal(claudeSignInSupported('2.1.317 (Claude Code)'), true)
+    assert.equal(claudeSignInSupported('3.0.0 (Claude Code)'), true)
+    assert.equal(claudeSignInSupported(''), false)
+  })
+
   it('runs no auth command on a CLI older than the floor (keeps today\'s behaviour)', async () => {
-    const { service, spawned } = world({ version: '2.1.300 (Claude Code)' })
+    const { service, spawned } = world({ version: '2.1.316 (Claude Code)' })
     assert.deepEqual(await service.check(), { signIn: { state: 'unknown' }, signInSupported: false })
     assert.equal(spawned.length, 0)
   })
@@ -197,7 +204,7 @@ describe('signing in', () => {
   it('not installed or too old: no login is started', async () => {
     const missing = world({ cli: null })
     assert.equal((await missing.service.start()).outcome, 'not-installed')
-    const old = world({ version: '2.1.40 (Claude Code)' })
+    const old = world({ version: '2.1.200 (Claude Code)' })
     assert.equal((await old.service.start()).outcome, 'outdated')
     assert.equal(missing.spawned.length + old.spawned.length, 0)
   })

@@ -7,9 +7,11 @@
 import { compareCliVersions, parseCliVersion } from './agents/cli-version'
 
 /**
- * The oldest CLI whose `auth status` / `auth login` the app runs. `auth` came in
- * 2.1.41, but before 2.1.317 a short command could leave a half-saved token
- * refresh behind and sign the member out; older CLIs keep today's behaviour.
+ * The oldest CLI whose `auth status` / `auth login` the app runs. The commands
+ * exist since 2.1.41, but the CLI's changelog fixes sign-outs caused by them in
+ * 2.1.301 (a short command exiting mid token refresh) and 2.1.317 (`auth status`
+ * exiting before a slow refresh was saved). The app checks on every chat start,
+ * so it waits for 2.1.317; older CLIs keep today's behaviour (no check, no button).
  */
 export const CLAUDE_SIGN_IN_MIN_VERSION = '2.1.317'
 
