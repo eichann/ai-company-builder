@@ -165,6 +165,8 @@ export function combineUse(business: PluginPackage, connector: PluginManifest): 
   const errors: string[] = []
   if (b.role !== 'business' || !uses) return { ok: false, errors: [`「${b.label}」は、つなぎ先を使いません`] }
   if (connector.role !== 'connector' || connector.id !== uses.connector.id) return { ok: false, errors: [`「${b.label}」が使うつなぎ先は ${uses.connector.id} です`] }
+  // A browser connector is a contract only so far: no business plugin uses one (plugins.md "Browser connectors").
+  if (connector.browser) return { ok: false, errors: [`「${connector.label}」はブラウザのつなぎ先です。業務のプラグインからはまだ使えません`] }
   if (comparePluginVersions(connector.version, uses.connector.minVersion) < 0) {
     return { ok: false, errors: [`「${b.label}」には「${connector.label}」${uses.connector.minVersion} 以上が要ります（いまは ${connector.version}）`] }
   }

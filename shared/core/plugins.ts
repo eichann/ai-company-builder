@@ -60,6 +60,7 @@
  *   plugin-declaration-rules.ts      strict reading helpers, forbidden keys, type names without a layer, path templates
  *   plugin-manifest.ts               parsePluginManifest (common keys, then the role's part)
  *   plugin-connector-declaration.ts  a connector's part: destination, calls, operations
+ *   plugin-browser-declaration.ts    a browser connector's part: the site, its operation types, matchDeclaredWrite (contract only)
  *   plugin-business-declaration.ts   a business plugin's part: types, `connector`, its use, field policy defaults
  *   plugin-call-declaration.ts       contract 3: a connector's calls, how it is called, events, polls; a business plugin's use of them
  *   plugin-call-answer.ts            contract 3: what is kept of a call's answer (the `returns` allow-list, outside text)
@@ -98,6 +99,13 @@ export { BUSINESS_V3_KEYS, CONNECTOR_V3_KEYS } from './plugin-call-declaration'
 export { CALL_CURSOR_RE, CALL_OUTSIDE_FOOTER, CALL_OUTSIDE_HEADER, CALL_TEXT_MAX, citeLink, keepDeclared, LOGGED_POINTERS_MAX, pointersOf, type KeptEntry, type KeptValue } from './plugin-call-answer'
 export { TYPE_LAYER_WORDS, checkPluginPathTemplate, typeNameLayerProblem } from './plugin-declaration-rules'
 export { parsePluginManifest } from './plugin-manifest'
+export {
+  BROWSER_ADAPTER_RE, BROWSER_BODY_ENCODINGS, BROWSER_DECLARATION_LIMITS, BROWSER_EFFECTS, BROWSER_FIELD_KINDS, BROWSER_WRITE_METHODS,
+  browserOperationsAllowed, browserPlanProblem, matchDeclaredWrite,
+  type BrowserBodyEncoding, type BrowserBodyValue, type BrowserDeclarationUse, type BrowserFieldKind, type BrowserOperation,
+  type BrowserOperationRefusal, type BrowserPlanValues, type BrowserWrite, type BrowserWriteMatch, type BrowserWriteMethod,
+  type BrowserWriteMismatch, type BrowserWriteRequest, type PluginBrowser,
+} from './plugin-browser-declaration'
 export { combineUse, validatePluginPackage } from './plugin-package'
 export {
   DEFAULT_APPROVERS, MAPPING_IMPORT_MAX, MAPPING_SECTIONS, checkMappingAgainstProperties, parsePluginMapping,

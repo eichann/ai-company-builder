@@ -91,6 +91,20 @@ describe('plugin shelf', () => {
     expect(refused['with-mapping@0.1.0']).toContain('読み替え表（mapping.yaml）は置けません')
   })
 
+  it('refuses a browser connector for now: it is a contract only, so no company can install it or hand it to an app', async () => {
+    put('sample-crm', 'sample-crm@0.1.0')
+    mkdirSync(join(root, 'lstep@0.1.0'))
+    writeFileSync(join(root, 'lstep@0.1.0/plugin.yaml'), [
+      'id: lstep', 'version: 0.1.0', 'label: Lステップ', 'contract: 1', 'browser:', '  host: manager.linestep.net', '  operations:',
+      '    read_reminder:', '      label: リマインダを読む', '      effect: read', '      adapter: lstep.read_reminder', '      target: { reminder: id }', '',
+    ].join('\n'))
+    const shelf = createPluginShelf(diskPluginShelf(root))
+    const result = await shelf.load()
+    expect(result.loaded).toEqual(['sample-crm@0.1.0'])
+    expect(result.refused).toEqual([{ dir: 'lstep@0.1.0', reason: 'a browser connector (browser) is not used yet' }])
+    expect(shelf.find('any-company', 'lstep', '0.1.0')).toBeNull()
+  })
+
   it('a changed file changes the fingerprint (of the package it is in)', async () => {
     put('sample-sales', 'sample-sales@0.1.0')
     put('sample-crm-sales', 'sample-crm-sales@0.1.0')

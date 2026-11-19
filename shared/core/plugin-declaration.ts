@@ -7,6 +7,7 @@
  */
 import { AI_RUN_FAILURE_CLASSES, type AiRunFailureClass } from './ai-runs'
 import { isMoneyField, type ActionVia, type NoteRule, type TypeDefinition } from './record-types'
+import type { PluginBrowser } from './plugin-browser-declaration'
 
 /**
  * Who may run a plugin operation, besides the record type's person fields
@@ -70,7 +71,8 @@ export type PluginKind = 'official' | 'company'
 /**
  * A connector talks to one outside system and owns no type; a business plugin
  * owns types and talks to the outside only through a connector it names.
- * Decided by the declaration: one with a `service` is a connector.
+ * Decided by the declaration: one with a `service` (an API connector) or a
+ * `browser` (a browser connector, plugin-browser-declaration.ts) is a connector.
  */
 export type PluginRole = 'connector' | 'business'
 /** Per-field write policy (0.21): write at once (undoable) / only after a person approves / never. */
@@ -574,6 +576,13 @@ export interface PluginManifest {
    * Absent: none.
    */
   notificationSenders?: string[]
+  /**
+   * A browser connector (`browser` in plugin.yaml, plugin-browser-declaration.ts): the site the
+   * AI operates in the app's browser window and its operation types. Absent on every other
+   * package; such a connector has no service, base_url, objects or operations. Contract only:
+   * the shelf refuses it for now (plugins.md "Browser connectors (contract only)").
+   */
+  browser?: PluginBrowser
   /** Contract 2, business plugins only (empty / null otherwise). */
   roles: Record<string, PluginRoleDeclaration>
   settings: Record<string, PluginSetting>

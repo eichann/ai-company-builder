@@ -1,9 +1,11 @@
 /**
  * Reading `plugin.yaml` (`parsePluginManifest`): the keys common to both
- * roles, then a connector's part (`plugin-connector-declaration.ts`) or a
- * business plugin's (`plugin-business-declaration.ts`), chosen by whether it
- * names a `service`. Type-dependent checks are in `plugin-package.ts`.
+ * roles, then a connector's part (`plugin-connector-declaration.ts`), a
+ * browser connector's (`plugin-browser-declaration.ts`) or a business
+ * plugin's (`plugin-business-declaration.ts`), chosen by whether it names a
+ * `service`, a `browser` or neither. Type-dependent checks are in `plugin-package.ts`.
  */
+import { BROWSER_KEY, parseBrowserConnector } from './plugin-browser-declaration'
 import { BUSINESS_KEYS, NOT_IN_BUSINESS, parseBusiness } from './plugin-business-declaration'
 import { BUSINESS_V3_KEYS, CONNECTOR_V3_KEYS } from './plugin-call-declaration'
 import { CONNECTOR_KEYS, NOT_IN_CONNECTOR, parseConnector } from './plugin-connector-declaration'
@@ -24,8 +26,10 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
   if (!isYamlMap(raw)) return { ok: false, errors: ['宣言は「項目名: 値」の形で書いてください'] }
   const errors: string[] = []
   const err = (m: string) => { if (errors.length < 50) errors.push(m) }
-  // One with a service connects; one without owns types (owner decision 2026-11-01).
-  const role: PluginRole = raw.service === undefined ? 'business' : 'connector'
+  // One with a service connects; one without owns types (owner decision 2026-11-01). One with
+  // `browser` operates a site in the app's browser window (a browser connector, 2026-11-20).
+  const browser = raw[BROWSER_KEY] !== undefined
+  const role: PluginRole = raw.service === undefined && !browser ? 'business' : 'connector'
   const contract = typeof raw.contract === 'number' && PLUGIN_CONTRACTS.includes(raw.contract) ? raw.contract : null
   // Contract 2's flow keys: a business plugin's, and only when it says contract 2 (contract 1 stays exactly as it was).
   const flowReasons: Record<string, string> = Object.fromEntries(FLOW_KEYS.map(k => [k, role === 'connector'
@@ -37,7 +41,14 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
   const v3Reasons: Record<string, string> = Object.fromEntries([...CONNECTOR_V3_KEYS, ...BUSINESS_V3_KEYS].map(k => [k, role === 'business' && !BUSINESS_V3_KEYS.includes(k)
     ? `「${k}」はつなぎ先のプラグイン（service のあるもの）だけに書けます`
     : `「${k}」は contract: ${PLUGIN_CONTRACT_V3} の包みだけに書けます`]))
-  if (role === 'connector') unknownKeys('', raw, [...COMMON_KEYS, ...CONNECTOR_KEYS, ...(atV3 ? CONNECTOR_V3_KEYS : [])], err, { ...flowReasons, ...v3Reasons, ...NOT_IN_CONNECTOR })
+  if (browser) {
+    // A browser connector is nothing of an API connector or a business plugin: every such key is refused with the reason.
+    const notHere = [...CONNECTOR_KEYS, ...CONNECTOR_V3_KEYS, ...BUSINESS_KEYS, ...BUSINESS_V3_KEYS, ...FLOW_KEYS, ...Object.keys(NOT_IN_CONNECTOR)]
+    const reasons = Object.fromEntries(notHere.map(k => [k, k === 'service'
+      ? 'service（API のつなぎ先）と browser（ブラウザのつなぎ先）は一緒に書けません'
+      : `「${k}」はブラウザのつなぎ先（browser のあるもの）には書けません`]))
+    unknownKeys('', raw, [...COMMON_KEYS, BROWSER_KEY], err, reasons)
+  } else if (role === 'connector') unknownKeys('', raw, [...COMMON_KEYS, ...CONNECTOR_KEYS, ...(atV3 ? CONNECTOR_V3_KEYS : [])], err, { ...flowReasons, ...v3Reasons, ...NOT_IN_CONNECTOR })
   else unknownKeys('', raw, [...COMMON_KEYS, ...BUSINESS_KEYS, ...flowAllowed, ...(atV3 ? BUSINESS_V3_KEYS : [])], err, { ...flowReasons, ...v3Reasons, ...NOT_IN_BUSINESS })
 
   const id = raw.id
@@ -62,7 +73,7 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
     id: id as string, label: raw.label as string, version: raw.version as string, kind: kind as PluginKind, contract: contract ?? PLUGIN_CONTRACT,
     description: typeof raw.description === 'string' ? raw.description : null, availableTo,
   }
-  const parsed = role === 'connector' ? parseConnector(raw, err, common) : parseBusiness(raw, err, common)
+  const parsed = browser ? parseBrowserConnector(raw, err, common) : role === 'connector' ? parseConnector(raw, err, common) : parseBusiness(raw, err, common)
   const value = flowAllowed.length > 0 ? { ...parsed, ...parseFlow(raw, err) } : parsed
   return errors.length > 0 ? { ok: false, errors } : { ok: true, value }
 }

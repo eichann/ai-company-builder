@@ -1,6 +1,7 @@
 ---
 paths:
   - "shared/core/browser-operation.ts"
+  - "shared/core/plugin-browser-declaration.ts"
   - "shared/types/agent-browser.ts"
   - "server/src/routes/agent-browser.ts"
   - "server/src/services/agent-browser.ts"
@@ -64,8 +65,11 @@ only through per-site operation types (later PRs), never by free clicking. Owner
 
 ## Not yet (later PRs)
 
-The desktop app does nothing with `browser` yet: no browser window, no operation types, no login
-storage. Those PRs must treat a missing or unreadable `browser` as off. Until then the admin page
+The desktop app does nothing with `browser` yet: no browser window, no operation runner, no login
+storage. The operation types' declaration is fixed (`plugins.md` "Browser connectors (contract
+only)", `shared/core/plugin-browser-declaration.ts`: a connector plugin with `browser`, its types,
+`matchDeclaredWrite`, `browserOperationsAllowed` against this setting), but the shelf refuses such a
+package until the runner and its reviewed adapters ship. Those PRs must treat a missing or unreadable `browser` as off. Until then the admin page
 says so next to the mode choice (`BROWSER_NOT_YET_NOTE`, 「アプリ側の機能は準備中です…」); the PR
 that ships the app side removes that note (and its assertion in `admin/tests/agent-browser.test.tsx`).
 

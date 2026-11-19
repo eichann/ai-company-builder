@@ -20,6 +20,9 @@
  * hubspot@0.2.0): an install of one shows `not-on-shelf` until a new version
  * is chosen.
  *
+ * A browser connector (`browser`, plugins.md "Browser connectors (contract
+ * only)") passes the declaration's rules but is refused here for now.
+ *
  * Contract 2 (plan C1): the package's `steps/` and `ui/` are checked with the
  * declaration, its fingerprint is v2 (`shared/core/plugin-fingerprint.ts`;
  * contract 1 keeps v1, so existing installs keep matching), and its signature
@@ -78,6 +81,9 @@ export function createPluginShelf(source: PluginShelfSource): PluginShelf {
         const checked = validatePluginPackage({ manifest: files.manifest, types: files.types, mapping: files.mapping, steps: files.steps, ui: files.ui })
         if (!checked.ok) { refused.push({ dir: files.dir, reason: checked.errors.slice(0, 3).join(' / ') }); continue }
         const m = checked.value.manifest
+        // A browser connector is a contract only so far (plugins.md "Browser connectors"): never on the
+        // shelf, so no company can install it and nothing hands it to an app.
+        if (m.browser) { refused.push({ dir: files.dir, reason: 'a browser connector (browser) is not used yet' }); continue }
         if (files.dir !== `${m.id}@${m.version}`) { refused.push({ dir: files.dir, reason: `the folder must be named ${m.id}@${m.version}` }); continue }
         let signature: PluginSignature | null = null
         if (files.signature !== null) {
