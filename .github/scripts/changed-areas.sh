@@ -50,6 +50,7 @@ SYNC=(
   shared/core/write-access.ts shared/core/yaml-lite.ts
   shared/core/connector-roles.ts shared/core/names.ts shared/core/plugin-step-runs.ts
   shared/core/skill-autorun.ts shared/core/skill-shelf.ts shared/core/secret-patterns.ts
+  shared/core/client-version.ts
   shared/types/private-folders.ts shared/package.json shared/tsconfig.json
   .github/scripts/sync-shard.mjs
 )
