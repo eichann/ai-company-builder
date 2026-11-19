@@ -104,7 +104,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
     `changed` after each POST that writes (`/records/query` and `/viewers` only read), the
     renderer's reload after a press asks `tasks:list(companyId, { fresh: true })` and the calendar's
     read after a Google permission change `calendar:today(companyId, { fresh: true })`.
-    `useTaskList` applies only its newest read's answer (`src/shared/lib/latestOnly.ts`). A look whose
+    `useTaskList` never takes an answer older than the one shown (`src/features/tasks/listAnswers.ts`:
+    newer answers are always taken, so a stream of overlapping reads never freezes the list). A look whose
     shared answer was discarded (a sign-out) still runs the look asked meanwhile (the watcher's and
     checker's `again`). Sign-out drops the push signals still waiting (`pushSignals.stop()`).
   - **The signal chain is cut**: a change of the notices alone (`notifications:changed`) is the
@@ -115,7 +116,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
     checker also when the minutes permission came or went (the banner re-reads). Each keeps its 「もう 1 回」 (`again`) loop.
   - Tests: `client/tests/shared-reads.test.ts`, `client/tests/turn-reads-sharing.test.ts`,
     `src/features/tasks/api.test.ts`, `src/features/minutes/api.test.ts`,
-    `src/shared/lib/latestOnly.test.ts` (mutation-checked).
+    `src/features/tasks/listAnswers.test.ts` (mutation-checked).
   - Not here (later stages, separate review): long-lived caches, the 60 s policy check, claims and
     leases, writes, intervals and background throttling are unchanged.
 - `electron/electron-adapter.ts` — Electron's implementations of the ports (`DesktopShell`,
