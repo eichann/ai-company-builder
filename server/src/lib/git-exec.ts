@@ -10,8 +10,9 @@
  * Environment: this process's, then GIT_TERMINAL_PROMPT=0 (git must never
  * wait for credentials), then `env` on top.
  */
-import { execFile, spawn } from 'child_process'
+import { execFile, spawn, type ChildProcess } from 'child_process'
 import { promisify } from 'util'
+import { requestOperations } from './request-log'
 
 const execFileAsync = promisify(execFile)
 
@@ -41,11 +42,23 @@ export class GitTimeoutError extends Error {
 
 const GIT_MAX_BUFFER = 512 * 1024 * 1024
 
+/**
+ * Counts a git process's running time as the request's `git=` (server.md
+ * "Request log"): from spawn until it exits or fails to start. For every git
+ * this process spawns (here, lib/company-files.ts, git-http's http-backend).
+ */
+export function timeGitProcess(child: ChildProcess): void {
+  const end = requestOperations.start('git')
+  child.once('close', end)
+  child.once('error', end)
+}
+
 export async function gitAsync(args: string[], opts: GitAsyncOptions = {}): Promise<string> {
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', ...(opts.env ?? {}) }
   const maxBuffer = opts.maxBuffer ?? GIT_MAX_BUFFER
   if (opts.timeoutMs !== undefined) return gitWithWatchdog(args, env, opts.input, opts.timeoutMs, maxBuffer)
   const child = execFileAsync('git', args, { encoding: 'utf8', maxBuffer, env })
+  timeGitProcess(child.child)
   if (opts.input !== undefined) {
     child.child.stdin?.end(opts.input)
   }
@@ -60,6 +73,7 @@ export async function gitAsync(args: string[], opts: GitAsyncOptions = {}): Prom
 export async function gitBufferAsync(args: string[], input?: string, maxBuffer = GIT_MAX_BUFFER): Promise<Buffer> {
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
   const child = execFileAsync('git', args, { encoding: 'buffer', maxBuffer, env })
+  timeGitProcess(child.child)
   if (input !== undefined) child.child.stdin?.end(input)
   const { stdout } = await child
   return stdout
@@ -82,6 +96,7 @@ function gitWithWatchdog(
   const ownGroup = process.platform !== 'win32'
   return new Promise<string>((resolve, reject) => {
     const child = spawn('git', args, { env, detached: ownGroup, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+    timeGitProcess(child)
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
     let size = 0

@@ -30,6 +30,9 @@ import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
 import { httpsUpstream } from './adapters/upstream-https'
 import { practiceUpstream } from './adapters/upstream-practice'
+import { timedUpstream } from './adapters/upstream-timed'
+import { timeSqliteCalls } from './adapters/sqlite/timing'
+import { requestOperations } from './lib/request-log'
 import { diskPluginShelf } from './adapters/plugin-shelf'
 import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, PLUGINS_DIR, PRACTICE_UPSTREAMS, operatorUserIds, publicUrl, type PracticeUpstreams } from './lib/config'
 import type { BrokerCipherState } from './ports/key-broker'
@@ -202,7 +205,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // Staging only: HubSpot's connections may go to the fake HubSpot (never in production: lib/config.ts).
   const practice = options.practiceUpstreams ?? PRACTICE_UPSTREAMS
   const practiceList = practice.state === 'on' ? practice.upstreams : []
-  const upstream = practiceUpstream(options.upstream ?? httpsUpstream(), practiceList)
+  // Timed for the request log's `ext=` (server.md "Request log").
+  const upstream = timedUpstream(practiceUpstream(options.upstream ?? httpsUpstream(), practiceList), requestOperations)
   // The key check needs the company's generic services and exceptions (keyBroker); keyBroker asks it before saving.
   let keyCheck: BrokerKeyCheckService | null = null
   const keyBroker = createKeyBrokerService({
@@ -831,5 +835,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
 }
 
 export type Services = ReturnType<typeof createServices>
+
+// Every SQLite connection of the process reports its time for the request log's `db=` (server.md "Request log").
+timeSqliteCalls(requestOperations)
 
 export const services: Services = createServices(db)

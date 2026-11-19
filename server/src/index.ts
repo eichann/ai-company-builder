@@ -8,6 +8,7 @@ import { scheduleAgentEventRetention } from './lib/agent-event-retention'
 import { scheduleMailBodyRetention } from './lib/mail-body-retention'
 import { scheduleAccessLogRetention } from './lib/plugin-access-log-retention'
 import { scheduleServerClock } from './lib/server-clock-schedule'
+import { startLoadLog } from './lib/load-log'
 import { services } from './composition'
 import { CLOCK_INTERVAL_MS } from './services/server-clock'
 import { PRACTICE_UPSTREAMS } from './lib/config'
@@ -128,3 +129,6 @@ scheduleAccessLogRetention(() => services.pluginCalls.cleanupAccessLog())
 void services.indexCompaniesWithoutFolder()
 // The server clock (notifications.md "The server clock"): one per server process; it never runs the AI.
 scheduleServerClock(() => services.serverClock.runOnce(), { intervalMs: CLOCK_INTERVAL_MS })
+// One `[load]` line a minute: event-loop delay, CPU, requests, memory, db / git / ext time
+// (lib/load-log.ts, server.md "Request log"). Its timer is unref'd.
+startLoadLog()

@@ -27,7 +27,7 @@
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { StringDecoder } from 'string_decoder'
-import { gitAsync } from './git-exec'
+import { gitAsync, timeGitProcess } from './git-exec'
 import {
   canReadPrivateScope,
   isSameOrAncestorPath,
@@ -342,6 +342,7 @@ interface BlobLines {
 export function readBlobLines(repo: string, oid: string, opts: ReadOptions, timeoutMs = 15_000): Promise<BlobLines> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', ['-C', repo, 'cat-file', 'blob', oid], { env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
+    timeGitProcess(child)
     const decoder = new StringDecoder('utf8')
     const lines: string[] = []
     let bytes = 0
@@ -623,6 +624,7 @@ function grepTarget(view: CompanyFilesView, target: GrepTarget, opts: SearchOpti
       ...(target.pathspec ? [`:(literal)${target.pathspec}`] : []),
     ]
     const child = spawn('git', args, { env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: opts.regex ? UTF8_LOCALE : 'C' } })
+    timeGitProcess(child)
     const decoder = new StringDecoder('utf8')
     const revPrefix = `${target.commit}:`
     let buffer = ''
