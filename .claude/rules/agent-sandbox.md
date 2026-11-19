@@ -103,7 +103,7 @@ company's `rootPath`), so the sandbox applies there exactly as for a git company
   ...setting, mode: their override or the company's, source: 'member' | 'company' } }`, ETag =
   version, `If-None-Match` → 304. The emergency stop (M2) adds `stop` to the same answer and
   version (`services/agent-policy.ts`, `agent-stop.md`), and plan C2 the business plugins' packages the
-  app keeps (`plugins`, `plugins.md` "Handing packages to the app"), and whether the other AI may be asked (`secondOpinion`, `chat-and-agents.md` 「もう一方の AI に聞く」) — one policy fetch for the app, not one
+  app keeps (`plugins`, `plugins.md` "Handing packages to the app"), and whether the other AI may be asked (`secondOpinion`, `chat-and-agents.md` 「もう一方の AI に聞く」), and the member's 「ブラウザ操作」 (`browser`, `agent-browser.md`) — one policy fetch for the app, not one
   per feature; a sandbox change is announced on the push channel (`/me/events`). Overrides of people who left are not shown and do
   not apply (nobody else asks for their policy).
 - Admin 「AI の囲い」 (`admin/src/app/companies/[id]/advanced/ai-safety/sandbox/page.tsx`, 「詳しい設定 › AI の安全」 for

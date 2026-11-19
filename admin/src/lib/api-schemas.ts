@@ -21,6 +21,7 @@ import type {
   SandboxImpact,
 } from '../../../shared/types/agent-events'
 import type { AgentSandboxView } from '../../../shared/types/agent-sandbox'
+import type { AgentBrowserView } from '../../../shared/types/agent-browser'
 import type { RecordQueryResult } from '../../../shared/types/records'
 import type { AgentStopView } from '../../../shared/types/agent-stop'
 import type { FeaturesView } from '../../../shared/types/features'
@@ -333,6 +334,10 @@ export const sandboxImpactSchema = topLevel<SandboxImpact>({
 })
 export const agentSandboxSchema = topLevel<AgentSandboxView>({
   settings: obj, defaultAllowedDomains: list, overrides: list, updatedAt: nullableStr, updatedBy: nullableStr, history: list,
+})
+// 「ブラウザ操作」 (shared/types/agent-browser.ts)
+export const agentBrowserSchema = topLevel<AgentBrowserView>({
+  settings: obj, overrides: list, updatedAt: nullableStr, updatedBy: nullableStr, history: list,
 })
 export const agentStopSchema = topLevel<AgentStopView>({ active: list, history: list, unsupported: list, keys: obj })
 

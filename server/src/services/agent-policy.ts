@@ -1,7 +1,7 @@
 /**
  * The policy a member's app follows (`GET /me/agent-policy`): the AI sandbox
  * (agent-sandbox.ts), the emergency stop (agent-stops.ts), whether the other AI
- * may be asked (second-opinion-setting.ts) and the business
+ * may be asked (second-opinion-setting.ts), 「ブラウザ操作」 (agent-browser.ts) and the business
  * plugins' packages the app keeps (plan C2, plugin-distribution.ts) in one
  * answer, with one version (also its ETag). `announce` sends a company's
  * members their new version over the push channel (push-channel.ts).
@@ -15,6 +15,7 @@
 import type { AgentPolicy } from '../../shared/types/agent-sandbox'
 import type { DistributedPlugin } from '../../shared/types/plugins'
 import type { TokenDigest } from '../ports/key-broker'
+import type { AgentBrowserService } from './agent-browser'
 import type { AgentSandboxService } from './agent-sandbox'
 import type { AgentStopService } from './agent-stops'
 import type { Member } from './access'
@@ -23,6 +24,7 @@ import type { SecondOpinionSettingService } from './second-opinion-setting'
 
 export interface AgentPolicyDeps {
   agentSandbox: Pick<AgentSandboxService, 'policyFor'>
+  agentBrowser: Pick<AgentBrowserService, 'policyFor'>
   agentStops: Pick<AgentStopService, 'policyFor'>
   secondOpinion: Pick<SecondOpinionSettingService, 'allowedFor'>
   digest: TokenDigest
@@ -44,7 +46,8 @@ export function createAgentPolicyService(deps: AgentPolicyDeps) {
     const sandbox = deps.agentSandbox.policyFor(as)
     const stop = deps.agentStops.policyFor(as)
     const secondOpinion = { allowed: deps.secondOpinion.allowedFor(member.companyId) }
-    const parts = plugins ? { sandbox, stop, secondOpinion, plugins } : { sandbox, stop, secondOpinion }
+    const browser = deps.agentBrowser.policyFor(member)
+    const parts = plugins ? { sandbox, stop, secondOpinion, browser, plugins } : { sandbox, stop, secondOpinion, browser }
     const version = deps.digest.digest(JSON.stringify(parts)).slice(0, 32)
     return { version, ...parts }
   }
@@ -55,7 +58,7 @@ export function createAgentPolicyService(deps: AgentPolicyDeps) {
     async policyFor(member: Pick<Member, 'companyId' | 'userId'>): Promise<AgentPolicy> {
       return compose(member, await pluginsOf(member.companyId))
     },
-    /** After any change to a company's sandbox, stops, second-opinion setting or plugins. */
+    /** After any change to a company's sandbox, browser operation, stops, second-opinion setting or plugins. */
     announce(companyId: string): void {
       pluginsOf(companyId)
         .then(plugins => deps.push.announce(companyId, userId => compose({ companyId, userId }, plugins).version))

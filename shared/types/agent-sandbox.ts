@@ -4,6 +4,7 @@
  * (validation, defaults) are in shared/core/agent-sandbox.ts.
  */
 import type { AgentSandboxMode, AgentSandboxSettings } from '../core/agent-sandbox'
+import type { AgentBrowserPolicy } from './agent-browser'
 import type { AgentStopPolicy } from './agent-stop'
 import type { DistributedPlugin } from './plugins'
 import type { SecondOpinionPolicy } from './second-opinion'
@@ -71,4 +72,9 @@ export interface AgentPolicy {
    * unreadable: the app treats it as not allowed.
    */
   secondOpinion?: SecondOpinionPolicy
+  /**
+   * 「ブラウザ操作」 for this member (agent-browser.ts, `.claude/rules/agent-browser.md`).
+   * Absent from an older server: the app treats it as off.
+   */
+  browser?: AgentBrowserPolicy
 }
