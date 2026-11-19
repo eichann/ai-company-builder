@@ -484,10 +484,10 @@ test.describe('a long restored conversation', () => {
   })
 })
 
-test('not signed in: 「設定を開く」 on the setup screen opens the agent settings, and closing them returns to it', async ({ page }) => {
+test('not signed in: 「ほかの AI を選ぶ（設定）」 on the setup screen opens the agent settings, and closing them returns to it', async ({ page }) => {
   await openPreview(page, 'chat-header', { auth: 'none' })
-  const openSettings = page.getByRole('button', { name: '設定を開く' })
-  await expect(page.getByText('Claude Code にログインしていません')).toBeVisible()
+  const openSettings = page.getByRole('button', { name: 'ほかの AI を選ぶ（設定）' })
+  await expect(page.getByText('Claude へのログインが必要です').first()).toBeVisible()
   const settings = page.getByRole('dialog', { name: '相談の設定' })
   await expect(settings).toHaveCount(0)
   await openSettings.click()
@@ -496,6 +496,18 @@ test('not signed in: 「設定を開く」 on the setup screen opens the agent s
   await settings.getByRole('button', { name: '✕' }).click()
   await expect(settings).toHaveCount(0)
   await expect(openSettings).toBeVisible()
+})
+
+test('not signed in: 「Claude にログインする」 signs in where the chat runs, and the chat opens without a terminal', async ({ page }) => {
+  await openPreview(page, 'chat-header', { auth: 'none' })
+  await expect(page.getByText('ターミナル')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Claude にログインする' }).click()
+  await expect(page.getByText('Claude へのログインが必要です')).toHaveCount(0)
+  const calls = await page.evaluate(() => (window as unknown as { __acbSignIn: { statusRoots: unknown[]; startRoots: unknown[] } }).__acbSignIn)
+  // The sign-in is checked and started in the chat's own folder (its project settings count).
+  expect(calls.startRoots).toHaveLength(1)
+  expect(calls.startRoots[0]).toBeTruthy()
+  expect(calls.statusRoots.every(root => root === calls.startRoots[0])).toBe(true)
 })
 
 test('editing a message resends it like a normal send: saved first without the later messages, its file references kept', async ({ page }) => {

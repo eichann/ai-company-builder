@@ -21,6 +21,11 @@ export type HandoffOutbound = ElectronPort<'updateHandoff' | 'completeHandoffTur
  * and signed in, the permission mode, the API key's status (never the key).
  */
 export type AgentSetupReads = ElectronPort<'getAuthMode' | 'getClaudeCodeStatus' | 'hasApiKey' | 'getApiKeyStatus' | 'getPermissionMode'>
+/**
+ * Signing in to the member's own Claude Code: starts the official CLI's sign-in, which
+ * opens Anthropic's page in the browser. The CLI keeps the login; nothing comes back but the outcome.
+ */
+export type ClaudeSignInOutbound = ElectronPort<'startClaudeSignIn' | 'cancelClaudeSignIn' | 'openClaudeSignInPage'>
 /** Checking Codex: starts the member's Codex, which asks their ChatGPT account and model list. */
 export type CodexStatusOutbound = ElectronPort<'getCodexStatus'>
 /** Changing this computer's AI setup: which AI the chat uses, what it may do without asking. */
@@ -103,8 +108,22 @@ export function getAuthMode(reads: AgentSetupReads = window.electronAPI) {
   return reads.getAuthMode()
 }
 
-export function getClaudeCodeStatus(reads: AgentSetupReads = window.electronAPI) {
-  return reads.getClaudeCodeStatus()
+/** `root`: the folder the chat runs in (its project settings count); without it the sign-in is unknown. */
+export function getClaudeCodeStatus(root: string | undefined, reads: AgentSetupReads = window.electronAPI) {
+  return reads.getClaudeCodeStatus(root)
+}
+
+export function startClaudeSignIn(root: string | undefined, outbound: ClaudeSignInOutbound = window.electronAPI) {
+  return outbound.startClaudeSignIn(root)
+}
+
+export function cancelClaudeSignIn(outbound: ClaudeSignInOutbound = window.electronAPI) {
+  return outbound.cancelClaudeSignIn()
+}
+
+/** Opens the sign-in page again when the browser did not open; main keeps its address. */
+export function openClaudeSignInPage(outbound: ClaudeSignInOutbound = window.electronAPI) {
+  return outbound.openClaudeSignInPage()
 }
 
 export function isApiKeySaved(reads: AgentSetupReads = window.electronAPI) {

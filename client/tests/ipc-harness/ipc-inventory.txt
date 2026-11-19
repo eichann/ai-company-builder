@@ -70,6 +70,9 @@ contract.invoke chatWindow:list
 contract.invoke chatWindow:open
 contract.invoke chatWindow:openFile
 contract.invoke chatWindow:reportStatus
+contract.invoke claudeSignIn:cancel
+contract.invoke claudeSignIn:openPage
+contract.invoke claudeSignIn:start
 contract.invoke codex:status
 contract.invoke companySetup:defaultParentFolder
 contract.invoke companySetup:myDepartments
@@ -296,6 +299,8 @@ contract.type ClaudeCodeStatus.available = available: boolean
 contract.type ClaudeCodeStatus.checkedAt = checkedAt: number
 contract.type ClaudeCodeStatus.cliPath = cliPath: string | null
 contract.type ClaudeCodeStatus.error = error: string | null
+contract.type ClaudeCodeStatus.signIn = signIn?: ClaudeSignIn
+contract.type ClaudeCodeStatus.signInSupported = signInSupported?: boolean
 contract.type ClaudeCodeStatus.version = version: string | null
 contract.type CompaniesResult = export interface CompaniesResult { }
 contract.type CompaniesResult.data = data?: CompanyInfo[]
@@ -362,6 +367,7 @@ contract.type ElectronAPI.backupList = backupList: Invoke<'backup:list'>
 contract.type ElectronAPI.backupOpenFolder = backupOpenFolder: Invoke<'backup:openFolder'>
 contract.type ElectronAPI.backupRestore = backupRestore: Invoke<'backup:restore'>
 contract.type ElectronAPI.callPluginBridge = callPluginBridge: Invoke<'plugins:bridge'>
+contract.type ElectronAPI.cancelClaudeSignIn = cancelClaudeSignIn: Invoke<'claudeSignIn:cancel'>
 contract.type ElectronAPI.checkMinutes = checkMinutes: Invoke<'minutes:check'>
 contract.type ElectronAPI.claimAiTurn = claimAiTurn: Invoke<'aiTurns:claim'>
 contract.type ElectronAPI.closeChatWindows = closeChatWindows: Invoke<'chatWindow:closeAll'>
@@ -511,6 +517,7 @@ contract.type ElectronAPI.onSparseProgress = onSparseProgress: Subscribe<'sparse
 contract.type ElectronAPI.onToolApprovalRequest = onToolApprovalRequest: Subscribe<'tool-approval-request'>
 contract.type ElectronAPI.onWriteAccessChanged = onWriteAccessChanged: Subscribe<'writeAccess:changed'>
 contract.type ElectronAPI.openChatWindow = openChatWindow: Invoke<'chatWindow:open'>
+contract.type ElectronAPI.openClaudeSignInPage = openClaudeSignInPage: Invoke<'claudeSignIn:openPage'>
 contract.type ElectronAPI.openCompanySkillBackup = openCompanySkillBackup: Invoke<'skillShelf:openBackup'>
 contract.type ElectronAPI.openExternal = openExternal: Invoke<'shell:openExternal'>
 contract.type ElectronAPI.openFileInMainWindow = openFileInMainWindow: Invoke<'chatWindow:openFile'>
@@ -577,6 +584,7 @@ contract.type ElectronAPI.skipMinutes = skipMinutes: Invoke<'minutes:skip'>
 contract.type ElectronAPI.sparseGetExclusions = sparseGetExclusions: Invoke<'git:sparseGetExclusions'>
 contract.type ElectronAPI.sparseSetExclusions = sparseSetExclusions: Invoke<'git:sparseSetExclusions'>
 contract.type ElectronAPI.sparseUncommittedChanges = sparseUncommittedChanges: Invoke<'git:sparseUncommittedChanges'>
+contract.type ElectronAPI.startClaudeSignIn = startClaudeSignIn: Invoke<'claudeSignIn:start'>
 contract.type ElectronAPI.startDrag = startDrag: (...args: SendArgs<'fs:startDrag'>) => void
 contract.type ElectronAPI.startPersonStep = startPersonStep: Invoke<'pluginSteps:start'>
 contract.type ElectronAPI.startTool = startTool: Invoke<'tools:start'>
@@ -776,6 +784,9 @@ contract.type IpcInvokeChannels.'chatWindow:list' = 'chatWindow:list': { args: [
 contract.type IpcInvokeChannels.'chatWindow:open' = 'chatWindow:open': { args: [sessionId: string, request: ChatWindowOpenRequest]; result: ChatWindowOpenResult }
 contract.type IpcInvokeChannels.'chatWindow:openFile' = 'chatWindow:openFile': { args: [filePath: string]; result: ChatWindowOpenFileResult }
 contract.type IpcInvokeChannels.'chatWindow:reportStatus' = 'chatWindow:reportStatus': { args: [status: ChatWindowStatus]; result: boolean }
+contract.type IpcInvokeChannels.'claudeSignIn:cancel' = 'claudeSignIn:cancel': { args: []; result: boolean }
+contract.type IpcInvokeChannels.'claudeSignIn:openPage' = 'claudeSignIn:openPage': { args: []; result: boolean }
+contract.type IpcInvokeChannels.'claudeSignIn:start' = 'claudeSignIn:start': { args: [root?: string]; result: ClaudeSignInResult }
 contract.type IpcInvokeChannels.'codex:status' = 'codex:status': { args: []; result: CodexStatus }
 contract.type IpcInvokeChannels.'companySetup:defaultParentFolder' = 'companySetup:defaultParentFolder': { args: []; result: { success: boolean; folder?: string } }
 contract.type IpcInvokeChannels.'companySetup:myDepartments' = 'companySetup:myDepartments': { args: [companyId: string]; result: { success: boolean; departmentIds?: string[] } }
@@ -783,7 +794,7 @@ contract.type IpcInvokeChannels.'companySetup:openWorkingFolder' = 'companySetup
 contract.type IpcInvokeChannels.'config:getAgentEnvPassthrough' = 'config:getAgentEnvPassthrough': { args: []; result: string[] }
 contract.type IpcInvokeChannels.'config:getApiKeyStatus' = 'config:getApiKeyStatus': { args: []; result: ApiKeyStatus }
 contract.type IpcInvokeChannels.'config:getAuthMode' = 'config:getAuthMode': { args: []; result: AuthMode }
-contract.type IpcInvokeChannels.'config:getClaudeCodeStatus' = 'config:getClaudeCodeStatus': { args: []; result: ClaudeCodeStatus }
+contract.type IpcInvokeChannels.'config:getClaudeCodeStatus' = 'config:getClaudeCodeStatus': { args: [root?: string]; result: ClaudeCodeStatus }
 contract.type IpcInvokeChannels.'config:getPermissionMode' = 'config:getPermissionMode': { args: []; result: PermissionMode }
 contract.type IpcInvokeChannels.'config:getServerUrl' = 'config:getServerUrl': { args: []; result: string | null }
 contract.type IpcInvokeChannels.'config:hasApiKey' = 'config:hasApiKey': { args: []; result: boolean }
@@ -1088,6 +1099,9 @@ main.handle chatWindow:list @ features/chat-windows/ipc.ts ()
 main.handle chatWindow:open @ features/chat-windows/ipc.ts (sessionId: string, request: unknown)
 main.handle chatWindow:openFile @ features/chat-windows/ipc.ts (filePath: string)
 main.handle chatWindow:reportStatus @ features/chat-windows/ipc.ts (status: unknown)
+main.handle claudeSignIn:cancel @ features/settings/ipc.ts ()
+main.handle claudeSignIn:openPage @ features/settings/ipc.ts ()
+main.handle claudeSignIn:start @ features/settings/ipc.ts (root?: string)
 main.handle codex:status @ features/settings/ipc.ts ()
 main.handle companySetup:defaultParentFolder @ features/company-setup/ipc.ts ()
 main.handle companySetup:myDepartments @ features/company-setup/ipc.ts (companyId: string)
@@ -1095,7 +1109,7 @@ main.handle companySetup:openWorkingFolder @ features/company-setup/ipc.ts (fold
 main.handle config:getAgentEnvPassthrough @ features/settings/ipc.ts ()
 main.handle config:getApiKeyStatus @ features/settings/ipc.ts ()
 main.handle config:getAuthMode @ features/settings/ipc.ts ()
-main.handle config:getClaudeCodeStatus @ features/settings/ipc.ts ()
+main.handle config:getClaudeCodeStatus @ features/settings/ipc.ts (root?: string)
 main.handle config:getPermissionMode @ features/settings/ipc.ts ()
 main.handle config:getServerUrl @ features/settings/ipc.ts ()
 main.handle config:hasApiKey @ features/settings/ipc.ts ()
@@ -1320,6 +1334,8 @@ preload backupRestore -> invoke backup:restore($0, $1, $2)
 preload backupRestore : (repoPath: string, backupId: string, filePath: string) => Promise<BackupRestoreResult>
 preload callPluginBridge -> invoke plugins:bridge($0, $1, $2, $3)
 preload callPluginBridge : (companyId: string, plugin: PluginPackageRef, op: string, args: unknown) => Promise<PluginBridgeAnswer>
+preload cancelClaudeSignIn -> invoke claudeSignIn:cancel()
+preload cancelClaudeSignIn : () => Promise<boolean>
 preload checkMinutes -> invoke minutes:check($0)
 preload checkMinutes : (companyId: string) => Promise<MinutesActionResult>
 preload claimAiTurn -> invoke aiTurns:claim($0, $1, $2, $3, $4)
@@ -1418,8 +1434,8 @@ preload getChatSessionSummaries -> invoke chatHistory:getSummaries($0)
 preload getChatSessionSummaries : (companyId: string) => Promise<ChatSessionSummary[]>
 preload getChatWindowContext -> invoke chatWindow:getContext()
 preload getChatWindowContext : () => Promise<ChatWindowContext | null>
-preload getClaudeCodeStatus -> invoke config:getClaudeCodeStatus()
-preload getClaudeCodeStatus : () => Promise<ClaudeCodeStatus>
+preload getClaudeCodeStatus -> invoke config:getClaudeCodeStatus($0)
+preload getClaudeCodeStatus : (root?: string | undefined) => Promise<ClaudeCodeStatus>
 preload getCodexStatus -> invoke codex:status()
 preload getCodexStatus : () => Promise<CodexStatus>
 preload getCompanies -> invoke api:getCompanies()
@@ -1618,6 +1634,8 @@ preload onWriteAccessChanged -> on writeAccess:changed(<fn>) ; removeListener wr
 preload onWriteAccessChanged : (callback: (data: { companyId: string; access: WriteAccess; }) => void) => () => void
 preload openChatWindow -> invoke chatWindow:open($0, $1)
 preload openChatWindow : (sessionId: string, request: ChatWindowOpenRequest) => Promise<ChatWindowOpenResult>
+preload openClaudeSignInPage -> invoke claudeSignIn:openPage()
+preload openClaudeSignInPage : () => Promise<boolean>
 preload openCompanySkillBackup -> invoke skillShelf:openBackup($0, $1)
 preload openCompanySkillBackup : (rootPath: string, skillPath: string) => Promise<SimpleResult>
 preload openExternal -> invoke shell:openExternal($0)
@@ -1750,6 +1768,8 @@ preload sparseSetExclusions -> invoke git:sparseSetExclusions($0, $1)
 preload sparseSetExclusions : (repoPath: string, excluded: string[]) => Promise<SparseSetExclusionsResult>
 preload sparseUncommittedChanges -> invoke git:sparseUncommittedChanges($0, $1)
 preload sparseUncommittedChanges : (repoPath: string, folders: string[]) => Promise<SparseUncommittedChangesResult>
+preload startClaudeSignIn -> invoke claudeSignIn:start($0)
+preload startClaudeSignIn : (root?: string | undefined) => Promise<ClaudeSignInResult>
 preload startDrag -> send fs:startDrag($0)
 preload startDrag : (filePath: string) => void
 preload startPersonStep -> invoke pluginSteps:start($0, $1, $2, $3, $4)

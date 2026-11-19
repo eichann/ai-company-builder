@@ -28,7 +28,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
 - `electron/features/<domain>/ipc.ts` — one module per IPC domain exporting
   `register<Domain>Ipc(ipc: IpcRegistrar, deps)`. Dependencies are injected (like sync's
   `SyncDeps`): the allowed-roots `PathGuard`, the `WindowPort` for events, the `DesktopShell`
-  (`features/ports.ts`), services, stores. Domains: `settings` (config:*, codex:status), `env`,
+  (`features/ports.ts`), services, stores. Domains: `settings` (config:*, codex:status, claudeSignIn:* — `chat-and-agents.md` "Signing in to Claude Code"), `env`,
   `backups`, `auth` (auth:*, api:*), `chat-history` (chatHistory:*, handoff:*),
   `agent-interactions` (tool approvals), `fs` (fs:*, dialog:selectDirectory,
   editor:backupBeforeOverwrite; company watchers in `fs/watchers.ts`), `git-history`
@@ -71,7 +71,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
 - `electron/services/` — shared state as explicit objects instead of module variables:
   `config-store.ts` (config.json, cached, written atomically), `api-key-store.ts` (the API key,
   encrypted through the shell's `SecretBox`; main decrypts it only where it is used), `shell-env.ts` (PATH / env for spawned processes; AI processes get it cut down by `agents/agent-env.ts`),
-  `claude-cli.ts` (the member's `claude`, status cached 30 s), `session.ts` (server session
+  `claude-cli.ts` (the member's `claude`, status cached 30 s), `claude-sign-in.ts` (its own
+  `auth status` / `auth login`, never the login itself), `session.ts` (server session
   cookies, memory only; every server client and git's token read them here), `app-git.ts` (every
   git the app runs: bundled-or-system binary, `GIT_ASKPASS` token, the guarded
   `sync/git-factory.ts` configuration), `commit-messages.ts` (sync's AI commit message), and

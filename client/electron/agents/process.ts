@@ -5,7 +5,7 @@ import { agentEnv } from './agent-env'
 // and no /bin/sh or /dev/fd, so the macOS FD-closing shell wrapper does not
 // apply — we spawn directly. A native claude.exe spawns directly (and handles
 // install paths containing spaces); a claude.cmd/.bat must go through cmd.exe.
-function spawnOnWindows(opts: { command: string; args: string[]; cwd?: string; env?: Record<string, string | undefined>; signal?: AbortSignal }) {
+function spawnOnWindows(opts: SpawnInput) {
   const isBatch = /\.(cmd|bat)$/i.test(opts.command)
   let file = opts.command
   let args = opts.args
@@ -20,7 +20,7 @@ function spawnOnWindows(opts: { command: string; args: string[]; cwd?: string; e
     args = ['/d', '/s', '/c', quoted]
     extra.windowsVerbatimArguments = true
   }
-  console.log('[agent-process] spawning (win32):', opts.command, opts.args?.slice(0, 3))
+  if (!opts.quiet) console.log('[agent-process] spawning (win32):', opts.command, opts.args?.slice(0, 3))
   const child = nodeSpawn(file, args, {
     cwd: opts.cwd,
     env: opts.env,
@@ -29,9 +29,41 @@ function spawnOnWindows(opts: { command: string; args: string[]; cwd?: string; e
     windowsHide: true,
     ...extra,
   })
+  logOrDrain(child, opts.quiet)
+  return child
+}
+
+interface SpawnInput {
+  command: string
+  args: string[]
+  cwd?: string
+  env?: Record<string, string | undefined>
+  signal?: AbortSignal
+  /** Never log the child's stderr (it is still read, so the child cannot block on a full pipe). */
+  quiet?: boolean
+}
+
+function logOrDrain(child: ReturnType<typeof nodeSpawn>, quiet: boolean | undefined) {
+  if (quiet) {
+    child.on('error', () => {})
+    child.stderr?.resume()
+    return
+  }
   child.on('error', (err) => console.error('[agent-process] child process error:', err))
   child.stderr?.on('data', (data: Buffer) => console.error('[agent-process] stderr:', data.toString()))
-  return child
+}
+
+/**
+ * Stops a child started here. On Windows a `.cmd` runs under cmd.exe, so the whole tree is
+ * ended with taskkill; elsewhere the child is the CLI itself (`exec` in the wrapper).
+ */
+export function killAgentProcess(child: ReturnType<typeof nodeSpawn>, signal: NodeJS.Signals = 'SIGTERM') {
+  if (process.platform === 'win32' && child.pid) {
+    const killer = nodeSpawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+    killer.on('error', () => child.kill(signal))
+    return
+  }
+  child.kill(signal)
 }
 
 // Spawn helper for Claude Code CLI that works around Electron's FD inheritance issues (EBADF on posix_spawn).
@@ -39,8 +71,8 @@ function spawnOnWindows(opts: { command: string; args: string[]; cwd?: string; e
 // Every AI process starts here (Claude Code via the SDK's spawnClaudeCodeProcess, Codex
 // app-server, hand-off writers), so this is where its environment is cut down to the
 // allowlist (agent-env.ts) — after the SDK and the provider have merged in process.env.
-export function spawnAgentProcess(input: { command: string; args: string[]; cwd?: string; env?: Record<string, string | undefined>; signal?: AbortSignal }) {
-  const opts = { ...input, env: agentEnv(input.env ?? process.env) }
+export function spawnAgentProcess(input: SpawnInput) {
+  const opts: SpawnInput = { ...input, env: agentEnv(input.env ?? process.env) }
   if (process.platform === 'win32') return spawnOnWindows(opts)
   for (const fd of [0, 1, 2]) {
     try { fs.fstatSync(fd) }
@@ -62,8 +94,7 @@ export function spawnAgentProcess(input: { command: string; args: string[]; cwd?
     windowsHide: true,
     ...(process.getuid ? { uid: process.getuid() } : {}),
   })
-  child.on('error', (err) => console.error('[agent-process] child process error:', err))
-  child.stderr?.on('data', (data: Buffer) => console.error('[agent-process] stderr:', data.toString()))
+  logOrDrain(child, opts.quiet)
   return child
 }
 

@@ -14,6 +14,11 @@ paths:
   - "client/electron/features/chat/**"
   - "client/electron/features/agent-interactions/**"
   - "client/electron/services/claude-cli.ts"
+  - "client/electron/services/claude-sign-in.ts"
+  - "client/shared/claude-sign-in.ts"
+  - "client/src/features/chat/components/ClaudeSignInCard.tsx"
+  - "client/src/features/chat/claudeSetup.ts"
+  - "client/tests/claude-sign-in.test.ts"
   - "client/electron/services/agent-events.ts"
   - "client/tests/agent-events.test.ts"
   - "client/tests/agent-tool-events.test.ts"
@@ -221,6 +226,53 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
 - 「AI の囲い」 (`agent-sandbox.md`): under the company's `enforce`, the chat passes the SDK
   `sandbox` option (strictAllowlist, no unsandboxed commands, denied places, the company's
   hosts) and `Read(...)` denies in the same flag settings; registry `capabilities.sandbox`.
+
+## Signing in to Claude Code (no terminal, 計画 §12-5 #18)
+
+Members have no terminal. The chat's setup screen (`ChatAuthGate.tsx`, and the Claude card in
+`ChatAuthSettings.tsx`) is `ClaudeSignInCard.tsx`: install guidance (Anthropic's page) when the
+CLI is missing, 「Claude にログインする」 when the CLI says nobody is signed in.
+
+- **The app never touches the login** (Anthropic's terms; owner's terms note): it runs the
+  official CLI's own `claude auth login` (Anthropic's page opens in the browser; the CLI keeps the
+  login) and reads `claude auth status --json` (`services/claude-sign-in.ts`). No credentials file
+  or keychain item is read; of the status only `loggedIn` and the account kind (`team` /
+  `enterprise` / `personal` / `other`) leave that file — never the address or organisation. The
+  login's output is never logged (spawned with `quiet`: `spawnAgentProcess` drains stderr instead
+  of logging it); the sign-in page address (Anthropic's hosts only, taken only once fully printed,
+  `signInPageUrl`) stays in main, the renderer can only ask main to open it again
+  (`claudeSignIn:openPage`).
+- **Today's members are never stopped by it.** Only the CLI's own `loggedIn: false` (first-party)
+  makes the chat ask to sign in (`config:getClaudeCodeStatus` → `authenticated: false`); an
+  unreadable answer, Bedrock / Vertex, a timeout, or a CLI older than `CLAUDE_SIGN_IN_MIN_VERSION`
+  (2.1.317: the commands exist since 2.1.41, but the CLI's changelog fixes sign-outs caused by
+  short commands such as `auth status` in 2.1.301 and 2.1.317) is
+  `unknown` → the chat opens as before. The chat server's own check stays binary-only.
+- **Asked where the chat runs.** The check and the sign-in run with `cwd` = the chat's working
+  folder (`departmentPath` or the company root, validated against the allowed roots): the chat runs
+  Claude Code there with project settings, and a project `.claude/settings.json` (Bedrock,
+  `apiKeyHelper`, `ANTHROPIC_AUTH_TOKEN` / `BASE_URL`) changes the answer (from `/` such a member
+  read as signed out). No folder, or one outside the company folders → `unknown`, nothing started.
+  The gate is `withSignIn` (main) + `claudeCodeReady` (renderer).
+- A slow `auth status` (15 s) answers `unknown` but the CLI is left to finish (stopping it could cut
+  a token refresh — the sign-out the floor avoids); only one stuck for 2 minutes is stopped.
+- **One sign-in for the whole app** (any window, any company joins the running one); already
+  signed in → nothing is started; success is what `auth status` says afterwards, not the exit code
+  (exit 0 with an unreadable answer is `unverified`: the card rechecks and the chat's own rule decides);
+  やめる / 10 minutes / quitting stop the CLI (SIGTERM, then SIGKILL; Windows: `taskkill /T /F`, a
+  `.cmd` runs under cmd.exe — `killAgentProcess`; quitting also stops status checks still running);
+  a CLI gone since it was found (exit 127) reads as not installed; the page address is read from
+  stdout and stderr (never logged). Every end is a plain
+  sentence with a retry (`claudeSignInMessage`). A personal account gets a notice, never a block.
+- Not built (owner decisions): installing Claude Code from the app, switching accounts (logout),
+  checking that the account is the company's Team organisation, Codex's `codex login`.
+- Owner decisions 2026-11-19: asking `auth status` is fine (to be confirmed with Anthropic's Team
+  support alongside the terms check); missing CLI → Anthropic's install page only (company Macs get
+  it through Jamf); no check of which organisation; Codex in a later PR. The company's Team signs in
+  with Google (no SSO), so `auth login`'s default is right.
+- Test: `client/tests/claude-sign-in.test.ts` (mutation-checked), `src/features/chat/claudeSetup.test.ts`,
+  `tests/agent-env.test.ts` (quiet spawn), `tests/ipc-path-guard.test.ts` (the folder),
+  `tests/ui/chat-panel.spec.ts` 「not signed in: …」.
 
 ## Choice prompts (the AI asks, the member picks)
 

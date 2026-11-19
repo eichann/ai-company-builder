@@ -40,7 +40,8 @@ import { useTabArrangement } from '../src/features/editor/hooks/useTabArrangemen
 //                  files (editing and resending a message)
 //   ?turn=manual   the reply streams only what window.__acbChat sends (the
 //                  Playwright UI tests drive it: tests/ui/chat-panel.spec.ts)
-//   ?auth=none     Claude Code is not signed in: the setup screen (設定を開く)
+//   ?auth=none     Claude Code is not signed in: the setup screen; 「Claude にログインする」 signs in
+//                  (window.__acbSignIn: the folders the sign-in was checked / started in)
 //   ?storage=keep  keep localStorage across reloads (remembered folded groups)
 //   ?panes=2       two chat panes side by side (左の欄 = pane `chat`, 右の欄 = `right`)
 //   ?autoturn=1    the main pane gets one received minutes record as 「AI の番」: the runner claims it
@@ -75,7 +76,9 @@ const TOPICS: Record<string, ConsultationTopic> = {
   'task-0000aa': { own: { id: 'task-0000aa', title: '見積書を作り直す', thing: 'task', typeLabel: null, kindName: 'やること' }, bundle: DEAL },
   'deal-0000bb': { own: null, bundle: DEAL },
 }
-const signedOut = params.get('auth') === 'none'
+let signedOut = params.get('auth') === 'none'
+const signInCalls = { statusRoots: [] as Array<string | undefined>, startRoots: [] as Array<string | undefined> }
+;(window as unknown as { __acbSignIn: typeof signInCalls }).__acbSignIn = signInCalls
 
 const CODE_SAMPLES: Array<[string, string]> = [
   ['ts', 'interface Quote { id: string; total: number }\nexport const sum = (qs: Quote[]) => qs.reduce((n, q) => n + q.total, 0)'],
@@ -181,9 +184,19 @@ installElectronAPI({
   listChatWindows: async () => [],
   onChatWindowsChanged: windowChanges.subscribe,
   getChatServerInfo: async () => ({ port: PORT, authToken: 'preview' }),
-  getClaudeCodeStatus: async () => signedOut
-    ? ({ available: false, authenticated: false, cliPath: null, version: null, error: 'Claude Code にログインしていません', checkedAt: now }) as never
-    : ({ available: true, authenticated: true, cliPath: '/usr/local/bin/claude', version: '2.1.304', error: null, checkedAt: now }),
+  getClaudeCodeStatus: async (root) => {
+    signInCalls.statusRoots.push(root)
+    return signedOut
+      ? { available: true, authenticated: false, cliPath: '/usr/local/bin/claude', version: 'installed', error: null, checkedAt: now, signIn: { state: 'signed-out' }, signInSupported: true }
+      : { available: true, authenticated: true, cliPath: '/usr/local/bin/claude', version: '2.1.304', error: null, checkedAt: now, signIn: { state: 'signed-in', account: 'team' }, signInSupported: true }
+  },
+  startClaudeSignIn: async (root) => {
+    signInCalls.startRoots.push(root)
+    signedOut = false
+    return { outcome: 'signed-in', message: 'Claude にログインできました。', signIn: { state: 'signed-in', account: 'team' } }
+  },
+  cancelClaudeSignIn: async () => false,
+  openClaudeSignInPage: async () => false,
   getAuthMode: async () => agent,
   hasApiKey: async () => false,
   getCodexStatus: async () => ({ available: true, authenticated: true, models: [{ id: 'gpt-5.5-codex', label: 'GPT-5.5-Codex', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', isDefault: true }] }) as CodexStatus,
