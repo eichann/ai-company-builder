@@ -26,7 +26,7 @@ import {
   browserOperationsAllowed, combineUse, matchDeclaredWrite, parsePluginManifest, validatePluginPackage,
   type BrowserOperation, type BrowserPlanValues, type BrowserWriteRequest, type PluginManifest,
 } from '../../../shared/core/plugins'
-import type { BrowserOperationSettings } from '../../../shared/core/browser-operation'
+import { levelAllows, type BrowserOperationEffect, type BrowserOperationSettings } from '../../../shared/core/browser-operation'
 
 const FIXTURES = join(__dirname, '../fixtures/plugins')
 const fixture = (pkg: string, file: string) => readFileSync(join(FIXTURES, pkg, file), 'utf8')
@@ -155,6 +155,12 @@ describe('a browser connector declaration', () => {
     expect(errorsOf(edit('    reminder_step_template:\n', '    ReminderStep:\n'))).toContain('操作の名前「ReminderStep」')
     expect(errorsOf(edit('      label: リマインダを読む\n', `      label: "${'あ'.repeat(61)}"\n`))).toContain('label は 60 文字まで')
     expect(errorsOf(edit('      label: リマインダを読む\n', '      label: "読む\\u0007"\n'))).toContain('label は 60 文字まで')
+    // Bidirectional and zero-width characters make text read differently from what it is.
+    for (const ch of ['\\u200b', '\\u200f', '\\u202e', '\\u2066', '\\u061c', '\\ufeff']) {
+      expect(errorsOf(edit('      label: リマインダを読む\n', `      label: "読${ch}む"\n`)), ch).toContain('label は 60 文字まで')
+      expect(errorsOf(edit('      shared: 全部の回で共有のリマインダです。前の回の人にも届きます。\n', `      shared: "前の回${ch}"\n`)), ch).toContain('shared は 200 文字まで')
+      expect(errorsOf(edit('    label: LINE アカウント\n', `    label: "LINE${ch}"\n`)), ch).toContain('account の label')
+    }
     expect(errorsOf(edit('      shared: 全部の回で共有のリマインダです。前の回の人にも届きます。\n', `      shared: "${'あ'.repeat(201)}"\n`))).toContain('shared は 200 文字まで')
     expect(errorsOf(edit('      adapter: lstep.read_reminder\n', '      adapter: lstep\n'))).toContain('adapter は「サイト.操作」')
     expect(errorsOf(edit('      adapter: lstep.read_reminder\n', '      adapter: "../evil.js"\n'))).toContain('adapter は「サイト.操作」')
@@ -176,6 +182,9 @@ describe('a browser connector declaration', () => {
 `, '')
     expect(errorsOf(noWrites)).toContain('操作「remove_step」の writes')
     expect(errorsOf(edit('      effect: delete\n', '      effect: remove\n'))).toContain('effect は read / write / delete')
+    // A deletion always gets the confirmation right before it.
+    expect(errorsOf(edit('      adapter: lstep.remove_step\n      irreversible: true\n', '      adapter: lstep.remove_step\n'))).toContain('irreversible: true を書いてください')
+    expect(errorsOf(edit('      adapter: lstep.remove_step\n      irreversible: true\n', '      adapter: lstep.remove_step\n      irreversible: false\n'))).toContain('irreversible: true を書いてください')
     expect(errorsOf(edit('      target:\n        reminder: id\n    remove_step', '    remove_step'))).toContain('target（何を変えるか）')
     expect(errorsOf(edit('      change:\n        template: id\n', '      change:\n        template: id\n        step: text\n'))).toContain('target と change の両方')
   })
@@ -201,6 +210,10 @@ describe('a browser connector declaration', () => {
     expect(errorsOf(noTarget)).toContain('target の項目を1つ以上')
     expect(errorsOf(edit('ignore_body: [_token, _lm_user_id]', 'ignore_body: [_token, mode]'))).toContain('body にもあります')
     expect(errorsOf(edit('ignore_body: [_token, _lm_user_id]', 'ignore_body: [_token, _token]'))).toContain('2回あります')
+    // A method override is never declared, in the body or as an ignored field.
+    expect(errorsOf(edit('mode: replace', '_method: PUT'))).toContain('「_method」は書けません')
+    expect(errorsOf(edit('mode: replace', '_METHOD: PUT'))).toContain('「_METHOD」は書けません')
+    expect(errorsOf(edit('ignore_body: [_token, _lm_user_id]', 'ignore_body: [_token, _Method]'))).toContain('「_Method」は書けません')
     expect(errorsOf(edit('          encoding: json\n', '          encoding: xml\n'))).toContain('encoding は form か json')
   })
 
@@ -220,21 +233,37 @@ describe('matchDeclaredWrite: only the declared write with the approved values g
   const op = (): BrowserOperation => parse(LSTEP).browser!.operations.reminder_step_template
   const plan: BrowserPlanValues = { target: { reminder: '12', step: '345' }, change: { template: '678' } }
   const request = (over: Partial<BrowserWriteRequest> = {}): BrowserWriteRequest => ({
-    method: 'POST', path: '/line/episode/step/pack/template', encoding: 'form',
+    method: 'POST', path: '/line/episode/step/pack/template', query: [], headers: { 'content-type': 'application/x-www-form-urlencoded' }, encoding: 'form',
     body: [['_token', 'csrf'], ['content_id', '345'], ['template_id', '678'], ['pack_id', '12'], ['mode', 'replace']],
     ...over,
   })
 
-  it('the exact request passes (in any key order, as pairs or an object)', () => {
+  it('the exact request passes (in any key order)', () => {
     expect(matchDeclaredWrite(op(), plan, request())).toEqual({ match: true, write: 0 })
-    expect(matchDeclaredWrite(op(), plan, request({ body: { mode: 'replace', pack_id: '12', template_id: '678', content_id: '345' } }))).toEqual({ match: true, write: 0 })
+    expect(matchDeclaredWrite(op(), plan, request({ body: [['mode', 'replace'], ['pack_id', '12'], ['template_id', '678'], ['content_id', '345']] }))).toEqual({ match: true, write: 0 })
+  })
+
+  it('a query string is refused (no declared write has one)', () => {
+    expect(matchDeclaredWrite(op(), plan, request({ query: [['all', '1']] }))).toMatchObject({ match: false, reason: 'query' })
+    expect(matchDeclaredWrite(op(), plan, request({ query: [['_token', 'x']] }))).toMatchObject({ match: false, reason: 'query' })
+    expect(matchDeclaredWrite(op(), plan, request({ query: undefined as unknown as [] }))).toMatchObject({ match: false, reason: 'query' })
+  })
+
+  it('a method override, by header or by a _method key, is refused', () => {
+    for (const h of ['X-HTTP-Method-Override', 'x-http-method', 'X-Method-Override']) {
+      expect(matchDeclaredWrite(op(), plan, request({ headers: { [h]: 'DELETE' } })), h).toMatchObject({ match: false, reason: 'method-override' })
+    }
+    const body = request().body as Array<[string, string]>
+    expect(matchDeclaredWrite(op(), plan, request({ body: [...body, ['_method', 'DELETE']] }))).toMatchObject({ match: false, reason: 'method-override' })
+    expect(matchDeclaredWrite(op(), plan, request({ body: [...body, ['_METHOD', 'DELETE']] }))).toMatchObject({ match: false, reason: 'method-override' })
   })
 
   it('another method, path or encoding is not a declared write', () => {
     expect(matchDeclaredWrite(op(), plan, request({ method: 'PUT' }))).toMatchObject({ match: false, reason: 'not-declared' })
     expect(matchDeclaredWrite(op(), plan, request({ method: 'post' }))).toMatchObject({ match: false, reason: 'not-declared' })
     expect(matchDeclaredWrite(op(), plan, request({ path: '/line/episode/step/pack/template/' }))).toMatchObject({ match: false, reason: 'not-declared' })
-    expect(matchDeclaredWrite(op(), plan, request({ path: '/line/episode/step/pack/template?all=1' }))).toMatchObject({ match: false, reason: 'not-declared' })
+    // The raw path, not decoded: an encoded spelling of the declared path is another path.
+    expect(matchDeclaredWrite(op(), plan, request({ path: '/line/episode/step/pack/%74emplate' }))).toMatchObject({ match: false, reason: 'not-declared' })
     expect(matchDeclaredWrite(op(), plan, request({ path: '/line/broadcast' }))).toMatchObject({ match: false, reason: 'not-declared' })
     expect(matchDeclaredWrite(op(), plan, request({ encoding: 'json' }))).toMatchObject({ match: false, reason: 'encoding' })
   })
@@ -262,8 +291,24 @@ describe('matchDeclaredWrite: only the declared write with the approved values g
     expect(matchDeclaredWrite(op(), plan, request({ body: body.filter(([k]) => k !== '_token') }))).toEqual({ match: true, write: 0 })
   })
 
-  it('a value that is not a string never matches', () => {
-    expect(matchDeclaredWrite(op(), plan, request({ body: { content_id: 345, template_id: '678', pack_id: '12', mode: 'replace' } as unknown as Record<string, string> }))).toEqual({ match: false, reason: 'wrong-value', key: 'content_id' })
+  it('a body that is not pairs of strings is refused, in an ignored field too', () => {
+    const body = request().body as Array<[string, string]>
+    const odd = (b: unknown) => request({ body: b as Array<[string, string]> })
+    // A JSON body handed as an object (it may have lost a repeated key) is not accepted: pairs only.
+    expect(matchDeclaredWrite(op(), plan, odd({ content_id: '345', template_id: '678', pack_id: '12', mode: 'replace' }))).toMatchObject({ match: false, reason: 'body-shape' })
+    expect(matchDeclaredWrite(op(), plan, odd(body.map(([k, v]) => [k, k === 'content_id' ? 345 : v])))).toMatchObject({ match: false, reason: 'body-shape' })
+    for (const bad of [1, ['a'], { a: 1 }, null, true]) {
+      expect(matchDeclaredWrite(op(), plan, odd([...body, ['_lm_user_id', bad]])), JSON.stringify(bad)).toMatchObject({ match: false, reason: 'body-shape' })
+    }
+    expect(matchDeclaredWrite(op(), plan, odd([...body, ['_lm_user_id']]))).toMatchObject({ match: false, reason: 'body-shape' })
+    expect(matchDeclaredWrite(op(), plan, odd([...body, ['_lm_user_id', 'a', 'b']]))).toMatchObject({ match: false, reason: 'body-shape' })
+  })
+
+  it('a JSON body repeating a key is refused like a form', () => {
+    const json = parse(LSTEP).browser!.operations.remove_step
+    const req = (body: Array<[string, string]>): BrowserWriteRequest => ({ method: 'DELETE', path: '/line/episode/step', query: [], headers: {}, encoding: 'json', body })
+    expect(matchDeclaredWrite(json, { target: { step: '7' }, change: {} }, req([['id', '7']]))).toEqual({ match: true, write: 0 })
+    expect(matchDeclaredWrite(json, { target: { step: '7' }, change: {} }, req([['id', '7'], ['id', '8']]))).toEqual({ match: false, reason: 'repeated-key', key: 'id' })
   })
 
   it("the plan must fit the type: exactly its fields, each of its kind", () => {
@@ -282,6 +327,17 @@ describe('matchDeclaredWrite: only the declared write with the approved values g
     expect(matchDeclaredWrite(text, { ...plan, change: { template: '件名\n本文' } }, req('件名\n本文'))).toEqual({ match: true, write: 0 })
     expect(matchDeclaredWrite(text, { ...plan, change: { template: 'a\u0000b' } }, req('a\u0000b'))).toMatchObject({ match: false, reason: 'plan' })
     expect(matchDeclaredWrite(text, { ...plan, change: { template: 'x'.repeat(2001) } }, req('x'.repeat(2001)))).toMatchObject({ match: false, reason: 'plan' })
+    expect(matchDeclaredWrite(text, { ...plan, change: { template: '' } }, req(''))).toMatchObject({ match: false, reason: 'plan' })
+    for (const ch of ['\u200b', '\u202e', '\u2067', '\u061c', '\ufeff']) {
+      expect(matchDeclaredWrite(text, { ...plan, change: { template: `a${ch}b` } }, req(`a${ch}b`)), ch).toMatchObject({ match: false, reason: 'plan' })
+    }
+    // A change text may carry surrounding spaces; a target text may not (one thing, one spelling).
+    expect(matchDeclaredWrite(text, { ...plan, change: { template: ' 件名 ' } }, req(' 件名 '))).toEqual({ match: true, write: 0 })
+    const byName = parse(edit('        step: id\n      change:', '        step: text\n      change:')).browser!.operations.reminder_step_template
+    const reqStep = (step: string) => request({ body: [['content_id', step], ['template_id', '678'], ['pack_id', '12'], ['mode', 'replace']] })
+    expect(matchDeclaredWrite(byName, { ...plan, target: { reminder: '12', step: '段1' } }, reqStep('段1'))).toEqual({ match: true, write: 0 })
+    expect(matchDeclaredWrite(byName, { ...plan, target: { reminder: '12', step: ' 段1' } }, reqStep(' 段1'))).toMatchObject({ match: false, reason: 'plan' })
+    expect(matchDeclaredWrite(byName, { ...plan, target: { reminder: '12', step: '段1\n' } }, reqStep('段1\n'))).toMatchObject({ match: false, reason: 'plan' })
   })
 
   it('with two writes on one path, the one that fits passes', () => {
@@ -326,6 +382,15 @@ describe('browserOperationsAllowed: the company setting decides which types may 
     expect(missing.usable).toEqual([])
     expect(missing.missingAssetHosts).toEqual(['profile.line-scdn.net'])
     expect(missing.refused.every(x => x.reason === 'asset-host-not-allowed')).toBe(true)
+  })
+})
+
+describe('levelAllows', () => {
+  it('an effect or level it does not know is never allowed', () => {
+    expect(levelAllows('delete', 'write')).toBe(true)
+    expect(levelAllows('write', 'delete')).toBe(false)
+    expect(levelAllows('delete', 'broadcast' as BrowserOperationEffect)).toBe(false)
+    expect(levelAllows('everything' as 'delete', 'read')).toBe(false)
   })
 })
 

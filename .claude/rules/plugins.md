@@ -573,7 +573,7 @@ browser:
       effect: write                          # read | write | delete (the site's level caps it: levelAllows)
       adapter: lstep.reminder_step_template  # ^[a-z0-9_]+\.[a-z0-9_]+$ (the app checks it exists)
       shared: 全部の回で共有のリマインダです。前の回の人にも届きます。   # optional note, ≤ 200: a warning, blocks nothing
-      irreversible: false                    # true: one more confirmation right before the step (never on a read)
+      irreversible: false                    # true: one more confirmation right before the step (never on a read; required on a delete)
       target: { reminder: id, step: id }     # what identifies the thing; never empty; id | text, ≤ 10
       change: { template: id }               # the values the plan sets (none on a read)
       writes:                                # 1–5 on write / delete, none on a read
@@ -581,7 +581,7 @@ browser:
           path: /line/episode/step/pack/template   # fixed: no scheme, host, query, fragment, placeholder, // or ..
           encoding: form                     # form (default) | json (a flat object)
           body: { content_id: "{step}", template_id: "{template}", pack_id: "{reminder}", mode: replace }
-          ignore_body: [_token, _lm_user_id] # keys that may come with any value (CSRF / session), ≤ 10
+          ignore_body: [_token, _lm_user_id] # keys that may come with any value (CSRF / session), ≤ 10; never _method
 ```
 
 - **A browser connector is `browser` and the common keys only** (role `connector`, `PluginManifest.browser`;
@@ -591,15 +591,36 @@ browser:
 - **A body value** is a literal (one line, ≤ 200, no `{` `}`) or exactly one `{name}` of the type's
   target / change — never text around a placeholder. Each write names at least one target field,
   and every target and change field appears in some write: the runner holds each request to the plan.
+  `_method` (any case) is refused as a body key and in `ignore_body` (a method override).
+- **Plain text** (`label`, `shared`, the account's `label`, literals, a plan's `text`) has no control
+  characters, bidirectional marks / overrides / isolates or zero-width characters (U+061C,
+  U+200B–U+200F, U+202A–U+202E, U+2066–U+2069, U+FEFF).
+- **`ignore_body` is trusted**: whatever it names passes with any value. A reviewer checks that each
+  entry is a CSRF / session field and nothing that changes what the request does.
+- **`effect: delete` requires `irreversible: true`** (the person confirms right before the deletion).
 - **`matchDeclaredWrite(operation, plan, request)`** — the guard that stops an approved save from
   becoming a broadcast. The plan must fit the type (`browserPlanProblem`: exactly its fields; `id` =
-  `^[A-Za-z0-9_-]{1,64}$`, `text` ≤ 2000 without control characters but newline / tab), then:
-  exact method and path (the runner passes the path without its query), the request's encoding
-  (from its Content-Type; anything else refused before) equal to the write's, every declared body key
-  present with its literal or the plan's value, no other key but that write's `ignore_body`, no
-  repeated key, every value a string. Answers `{ match, write }` or the reason (`plan`,
-  `not-declared`, `encoding`, `repeated-key`, `missing-key`, `wrong-value`, `extra-key`) with the
-  declared key name — never a value.
+  `^[A-Za-z0-9_-]{1,64}$`, `text` 1–2000 characters without control, bidirectional or zero-width
+  characters but newline / tab, a target's `text` without leading or trailing whitespace), then: no
+  method-override header (`X-HTTP-Method-Override`, `X-HTTP-Method`, `X-Method-Override`, any case)
+  or `_method` body key; exact method and **raw on-the-wire path** (no percent-decoding or
+  normalization; the path without its query); **no query** (no declared write has one yet); the body
+  as **ordered string pairs for both encodings** (anything else — an object, a number, an array, a
+  missing value, in an ignored field too — is `body-shape`); the request's encoding equal to the
+  write's; every declared body key present with its literal or the plan's value, no other key but that
+  write's `ignore_body`, no repeated key. Answers `{ match: true, write }` or the reason (`plan`,
+  `method-override`, `not-declared`, `query`, `body-shape`, `encoding`, `repeated-key`, `missing-key`,
+  `wrong-value`, `extra-key`) with the key name — never a value.
+- **The runner's side** (later PRs; this module keeps no state):
+  - every request to the operated host that is not GET / HEAD goes through `matchDeclaredWrite`;
+    WSS to the operated host is refused unless an operation type declares it (none can yet);
+  - it reads the encoding from Content-Type and refuses anything but form / JSON or a charset other
+    than utf-8; it parses JSON with duplicate-key detection into pairs (`JSON.parse` keeps only the
+    last copy) and refuses a JSON body that is not one flat object of strings;
+  - it lets **each declared write of an approved step through at most once**, counted by the
+    returned `write` index (a replay of the same request is refused);
+  - the adapter confirms the target is **one existing item** before the write (an id like `0` or
+    `-1` is never "all").
 - **`browserOperationsAllowed(browser, settings)`**: the company's setting (`browser-operation.ts`) on,
   the operated host one of its sites, every declared asset host among that site's, each type's effect
   within the site's level; the rest come back with `off` / `site-not-allowed` /
@@ -610,7 +631,7 @@ browser:
   does not know `browser` (an unknown key: unusable). The app's runner, its adapters and the plan /
   approval flow are later PRs.
 - Test: `server/tests/unit/plugin-browser-declaration.test.ts` (the example, every refusal, every
-  mismatch reason, `ignore_body`, the setting), `plugin-shelf.test.ts` (refused on the shelf) — each
+  mismatch reason, `ignore_body`, the setting, `levelAllows` with an unknown effect), `plugin-shelf.test.ts` (refused on the shelf) — each
   guard mutation-checked.
 
 ## Handing packages to the app (plan C2 「配る道」)

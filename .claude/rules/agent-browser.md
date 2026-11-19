@@ -23,7 +23,7 @@ only through per-site operation types (later PRs), never by free clicking. Owner
   and the exact hosts its pages load parts from (GET of scripts, styles, fonts, images only);
   every other request is refused. No `*.` wildcards.
 - **Per-site operation types.** A site's level (見るだけ / 入力・保存まで / 削除も) caps what an
-  operation type may do there (`levelAllows`).
+  operation type may do there (`levelAllows`; an effect it does not know is never allowed).
 - **The login is kept on disk only when the member's AI sandbox is `enforce`**
   (`browserLoginStorage`): otherwise the chat AI's commands could read the app's data, so the
   login stays in memory and is gone when the app quits.
@@ -69,7 +69,11 @@ The desktop app does nothing with `browser` yet: no browser window, no operation
 storage. The operation types' declaration is fixed (`plugins.md` "Browser connectors (contract
 only)", `shared/core/plugin-browser-declaration.ts`: a connector plugin with `browser`, its types,
 `matchDeclaredWrite`, `browserOperationsAllowed` against this setting), but the shelf refuses such a
-package until the runner and its reviewed adapters ship. Those PRs must treat a missing or unreadable `browser` as off. Until then the admin page
+package until the runner and its reviewed adapters ship. The runner's contract is there too: every
+request to the operated host that is not GET / HEAD goes through `matchDeclaredWrite` (and each
+declared write of an approved step passes at most once); WSS to the operated host is refused unless
+an operation type declares it (none can yet), although `decideBrowserRequest` lets the window open
+it. Those PRs must treat a missing or unreadable `browser` as off. Until then the admin page
 says so next to the mode choice (`BROWSER_NOT_YET_NOTE`, 「アプリ側の機能は準備中です…」); the PR
 that ships the app side removes that note (and its assertion in `admin/tests/agent-browser.test.tsx`).
 

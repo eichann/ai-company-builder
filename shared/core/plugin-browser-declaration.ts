@@ -61,15 +61,19 @@ export const BROWSER_NAME_RE = /^[a-z][a-z0-9_]{0,39}$/
 export const BROWSER_ADAPTER_RE = /^[a-z0-9_]+\.[a-z0-9_]+$/
 /** A body field's name as a site's form sends it (`content_id`, `data[title]`, `_token`). */
 export const BROWSER_BODY_KEY_RE = /^[A-Za-z0-9_][A-Za-z0-9_.[\]-]{0,99}$/
+/** A body key that makes some frameworks treat a POST as another method (Rails, Laravel): never declared, never let through. */
+export const isMethodOverrideKey = (key: string): boolean => key.toLowerCase() === '_method'
+/** Headers that make some servers treat a request as another method: a request carrying one is refused. */
+export const METHOD_OVERRIDE_HEADERS: readonly string[] = ['x-http-method-override', 'x-http-method', 'x-method-override']
 /** A plan's `id` value: digits or a plain ASCII token. */
 export const BROWSER_ID_VALUE_RE = /^[A-Za-z0-9_-]{1,64}$/
 const PATH_RE = /^\/[A-Za-z0-9/_.~-]{0,299}$/
 const PLACEHOLDER_RE = /^\{([a-z][a-z0-9_]{0,39})\}$/
-// Control characters and the bidirectional overrides that make text read differently from what it is.
+// Control characters, bidirectional marks / overrides / isolates and zero-width characters: text that reads differently from what it is.
 // eslint-disable-next-line no-control-regex
-const UNSAFE_TEXT_RE = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/
+const UNSAFE_TEXT_RE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/
 // eslint-disable-next-line no-control-regex
-const UNSAFE_MULTILINE_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/
+const UNSAFE_MULTILINE_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/
 
 /** A body value: a fixed literal, or exactly one plan field (`{name}`). */
 export type BrowserBodyValue = { literal: string } | { field: string }
@@ -157,6 +161,7 @@ function parseWrite(where: string, raw: YamlValue, effect: BrowserOperationEffec
     if (Object.keys(rawBody).length > BROWSER_DECLARATION_LIMITS.bodyKeys) { err(`${where}の body は ${BROWSER_DECLARATION_LIMITS.bodyKeys} 項目までです`); ok = false }
     for (const [key, value] of Object.entries(rawBody)) {
       if (!BROWSER_BODY_KEY_RE.test(key)) { err(`${where}の body の項目名「${key}」が正しくありません`); ok = false; continue }
+      if (isMethodOverrideKey(key)) { err(`${where}の body に「${key}」は書けません（送り方を変える項目です）`); ok = false; continue }
       if (typeof value !== 'string') { err(`${where}の body の「${key}」は文字で書いてください（"1" のように引用符で囲む）`); ok = false; continue }
       const placeholder = PLACEHOLDER_RE.exec(value)
       if (placeholder) {
@@ -180,7 +185,8 @@ function parseWrite(where: string, raw: YamlValue, effect: BrowserOperationEffec
       err(`${where}の ignore_body は項目名の並びです（${BROWSER_DECLARATION_LIMITS.ignoreBody} 個まで）`); ok = false
     } else {
       for (const k of list as string[]) {
-        if (ignoreBody.includes(k)) { err(`${where}の ignore_body に「${k}」が2回あります`); ok = false }
+        if (isMethodOverrideKey(k)) { err(`${where}の ignore_body に「${k}」は書けません（送り方を変える項目です）`); ok = false }
+        else if (ignoreBody.includes(k)) { err(`${where}の ignore_body に「${k}」が2回あります`); ok = false }
         else if (isYamlMap(rawBody) && own(rawBody, k)) { err(`${where}の ignore_body の「${k}」は body にもあります`); ok = false }
         else ignoreBody.push(k)
       }
@@ -209,6 +215,8 @@ function parseOperation(name: string, raw: YamlValue, err: (m: string) => void):
   const irreversible = raw.irreversible ?? false
   if (typeof irreversible !== 'boolean') e(`${where}の irreversible は true か false です`)
   else if (irreversible && effect === 'read') e(`${where}: 読むだけの操作に irreversible は書けません`)
+  // A deletion cannot be taken back: the person always confirms right before it.
+  else if (!irreversible && effect === 'delete') e(`${where}: 消す操作（effect: delete）には irreversible: true を書いてください`)
 
   const target = parseFields(`${where}の target`, raw.target, e)
   const change = parseFields(`${where}の change`, raw.change, e)
@@ -306,10 +314,12 @@ export interface BrowserPlanValues {
   change: Readonly<Record<string, string>>
 }
 
-function valueProblem(kind: BrowserFieldKind, v: unknown): boolean {
+function valueProblem(kind: BrowserFieldKind, v: unknown, isTarget: boolean): boolean {
   if (typeof v !== 'string') return true
   if (kind === 'id') return !BROWSER_ID_VALUE_RE.test(v)
-  return v.length > BROWSER_DECLARATION_LIMITS.textValue || UNSAFE_MULTILINE_RE.test(v)
+  if (v.length === 0 || v.length > BROWSER_DECLARATION_LIMITS.textValue || UNSAFE_MULTILINE_RE.test(v)) return true
+  // A target names one thing: spaces around it would make two spellings of the same name.
+  return isTarget && v.trim() !== v
 }
 
 /** Why a plan's values do not fit the operation type (exactly its fields, each of its kind), or null. */
@@ -320,25 +330,39 @@ export function browserPlanProblem(operation: BrowserOperation, plan: BrowserPla
     for (const k of Object.keys(given)) if (!own(declared, k)) return `${part} の「${k}」はこの操作にありません`
     for (const [k, kind] of Object.entries(declared)) {
       if (!own(given, k)) return `${part} の「${k}」がありません`
-      if (valueProblem(kind, given[k])) return `${part} の「${k}」の値が ${kind} の形ではありません`
+      if (valueProblem(kind, given[k], part === 'target')) return `${part} の「${k}」の値が ${kind} の形ではありません`
     }
   }
   return null
 }
 
-/** A write request as the runner intercepted it (CDP Fetch): the path without query, the body parsed by its encoding. */
+/**
+ * A write request as the runner intercepted it (CDP Fetch). The runner, not this
+ * module, refuses before asking: a Content-Type other than form / JSON or with a
+ * charset other than utf-8; a JSON body that is not one flat object, or that
+ * repeats a key (parsed with duplicate detection: `JSON.parse` would keep only
+ * the last copy).
+ */
 export interface BrowserWriteRequest {
   method: string
+  /** The raw on-the-wire path, without its query: no percent-decoding, no normalization. */
   path: string
-  /** From the request's Content-Type; anything that is neither is refused before this is asked. */
+  /** The query as sent, in order, as pairs (empty: none). No declared write has a query yet. */
+  query: ReadonlyArray<readonly [string, string]>
+  /** The request's headers (at least those a server may read as another method); names in any case. */
+  headers: Readonly<Record<string, string>>
+  /** From the request's Content-Type. */
   encoding: BrowserBodyEncoding
-  /** In order as sent, a repeated key included (a form may repeat one), or a parsed flat object. */
-  body: ReadonlyArray<readonly [string, string]> | Readonly<Record<string, string>>
+  /** The body as pairs in the order sent, for both encodings, a repeated key included. */
+  body: ReadonlyArray<readonly [string, string]>
 }
 
 export type BrowserWriteMismatch =
   | 'plan' // the plan's values do not fit the type
+  | 'method-override' // an X-HTTP-Method-Override-like header or a `_method` body key
   | 'not-declared' // no declared write with this method and path
+  | 'query' // a query string (none is declared)
+  | 'body-shape' // the body is not pairs of strings (a number, an array, an object anywhere)
   | 'encoding'
   | 'repeated-key'
   | 'missing-key'
@@ -347,7 +371,7 @@ export type BrowserWriteMismatch =
 
 export type BrowserWriteMatch = { match: true; write: number } | { match: false; reason: BrowserWriteMismatch; key?: string }
 
-function checkOne(write: BrowserWrite, plan: BrowserPlanValues, request: BrowserWriteRequest, sent: Map<string, string>): BrowserWriteMatch | null {
+function checkOne(write: BrowserWrite, plan: BrowserPlanValues, request: BrowserWriteRequest, sent: ReadonlyMap<string, string>): BrowserWriteMatch | null {
   if (request.encoding !== write.encoding) return { match: false, reason: 'encoding' }
   for (const [key, value] of Object.entries(write.body)) {
     if (!sent.has(key)) return { match: false, reason: 'missing-key', key }
@@ -362,24 +386,33 @@ function checkOne(write: BrowserWrite, plan: BrowserPlanValues, request: Browser
 
 /**
  * Is this request one of the writes the operation type declares, carrying
- * exactly the approved plan's values? Exact method and path; every declared
+ * exactly the approved plan's values? No method-override header or `_method`
+ * key; exact method and raw path; no query; a body of string pairs only (a
+ * value that is not a string refuses, in an ignored field too); every declared
  * body key present with its literal or its plan value; no other key but the
- * declared `ignore_body` ones; a repeated key refuses (a server may read either
- * copy). Anything else is a refusal with its reason (and the body key, a
- * declared name — never a value).
+ * write's `ignore_body`; a repeated key refuses (a server may read either copy).
+ * Anything else is a refusal with its reason (and the body key, a declared or
+ * sent name, never a value).
+ *
+ * The runner calls this for every request to the operated host that is not GET
+ * / HEAD, and lets each declared write of an approved step through at most once:
+ * `write` is the index it counts by (no state here).
  */
 export function matchDeclaredWrite(operation: BrowserOperation, plan: BrowserPlanValues, request: BrowserWriteRequest): BrowserWriteMatch {
   if (browserPlanProblem(operation, plan)) return { match: false, reason: 'plan' }
+  const headers = request.headers && typeof request.headers === 'object' ? Object.keys(request.headers) : []
+  if (headers.some(h => METHOD_OVERRIDE_HEADERS.includes(h.toLowerCase()))) return { match: false, reason: 'method-override' }
   const candidates = operation.writes.map((w, i) => [w, i] as const).filter(([w]) => w.method === request.method && w.path === request.path)
   if (candidates.length === 0) return { match: false, reason: 'not-declared' }
-  const entries: ReadonlyArray<readonly [string, unknown]> = Array.isArray(request.body)
-    ? request.body as ReadonlyArray<readonly [string, string]>
-    : request.body && typeof request.body === 'object' ? Object.entries(request.body) : []
+  if (!Array.isArray(request.query) || request.query.length > 0) return { match: false, reason: 'query' }
+  if (!Array.isArray(request.body)) return { match: false, reason: 'body-shape' }
   const sent = new Map<string, string>()
-  for (const [k, v] of entries) {
+  for (const pair of request.body as ReadonlyArray<unknown>) {
+    if (!Array.isArray(pair) || pair.length !== 2 || typeof pair[0] !== 'string' || typeof pair[1] !== 'string') return { match: false, reason: 'body-shape' }
+    const [k, v] = pair as [string, string]
+    if (isMethodOverrideKey(k)) return { match: false, reason: 'method-override', key: k }
     if (sent.has(k)) return { match: false, reason: 'repeated-key', key: k }
-    // A value that is not a string (a JSON number, an object) never equals a declared one.
-    sent.set(k, typeof v === 'string' ? v : '\u0000not-a-string')
+    sent.set(k, v)
   }
   let first: BrowserWriteMatch | null = null
   for (const [write, index] of candidates) {

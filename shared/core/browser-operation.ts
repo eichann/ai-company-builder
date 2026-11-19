@@ -96,7 +96,10 @@ export function parseBrowserOperationSettings(input: unknown): { value: BrowserO
 
 /** May an operation type with this effect run on a site at this level? */
 export function levelAllows(level: BrowserOperationLevel, effect: BrowserOperationEffect): boolean {
-  return BROWSER_OPERATION_LEVELS.indexOf(level) >= BROWSER_OPERATION_LEVELS.indexOf(effect)
+  const l = BROWSER_OPERATION_LEVELS.indexOf(level)
+  const e = BROWSER_OPERATION_LEVELS.indexOf(effect)
+  // An unknown effect (a newer declaration) is never allowed; an unknown level (-1) is below every effect.
+  return e >= 0 && l >= e
 }
 
 /** The request facts the browser window's one request hook knows (Electron's `resourceType` names). */

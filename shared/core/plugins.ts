@@ -101,7 +101,7 @@ export { TYPE_LAYER_WORDS, checkPluginPathTemplate, typeNameLayerProblem } from 
 export { parsePluginManifest } from './plugin-manifest'
 export {
   BROWSER_ADAPTER_RE, BROWSER_BODY_ENCODINGS, BROWSER_DECLARATION_LIMITS, BROWSER_EFFECTS, BROWSER_FIELD_KINDS, BROWSER_WRITE_METHODS,
-  browserOperationsAllowed, browserPlanProblem, matchDeclaredWrite,
+  METHOD_OVERRIDE_HEADERS, browserOperationsAllowed, browserPlanProblem, isMethodOverrideKey, matchDeclaredWrite,
   type BrowserBodyEncoding, type BrowserBodyValue, type BrowserDeclarationUse, type BrowserFieldKind, type BrowserOperation,
   type BrowserOperationRefusal, type BrowserPlanValues, type BrowserWrite, type BrowserWriteMatch, type BrowserWriteMethod,
   type BrowserWriteMismatch, type BrowserWriteRequest, type PluginBrowser,
