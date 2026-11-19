@@ -24,6 +24,7 @@ import type { HandoffCompletion, HandoffView } from './handoff'
 import type { AgentInteractionRequest, AgentInteractionResponse } from './agent-interaction'
 import type { ChatWindowContext, ChatWindowFileRequest, ChatWindowInfo, ChatWindowOpenFileResult, ChatWindowOpenRequest, ChatWindowOpenResult, ChatWindowStatus, ChatWindowsChange } from './chat-windows'
 import type { AuthMode, CodexStatus } from './agent'
+import type { ClaudeSignIn, ClaudeSignInResult } from './claude-sign-in'
 import type { VoiceCapabilities, VoiceDeviceList, VoiceEvent, VoiceInputAPI } from './voice-input'
 import type { VoicePromptSettings } from './voice-prompt'
 import type { ChatHistoryChange, ChatMetadataPatch, ChatSaveReceipt, ChatSession, ChatSessionSummary } from './chat-history'
@@ -446,6 +447,10 @@ export interface ClaudeCodeStatus {
   version: string | null
   error: string | null
   checkedAt: number
+  /** What the CLI's own `auth status` says (claude-sign-in.ts); absent when not installed. */
+  signIn?: ClaudeSignIn
+  /** The CLI is new enough for the app to start its sign-in. */
+  signInSupported?: boolean
 }
 
 export interface ServerUrlValidation { valid: boolean; error?: string; serverName?: string; version?: string }
@@ -744,6 +749,9 @@ export interface IpcInvokeChannels {
   'config:getAuthMode': { args: []; result: AuthMode }
   'config:setAuthMode': { args: [mode: AuthMode]; result: boolean }
   'config:getClaudeCodeStatus': { args: []; result: ClaudeCodeStatus }
+  'claudeSignIn:start': { args: []; result: ClaudeSignInResult }
+  'claudeSignIn:cancel': { args: []; result: boolean }
+  'claudeSignIn:openPage': { args: []; result: boolean }
   'config:getPermissionMode': { args: []; result: PermissionMode }
   'config:setPermissionMode': { args: [mode: PermissionMode]; result: boolean }
   'config:getServerUrl': { args: []; result: string | null }
@@ -997,6 +1005,9 @@ export interface ElectronAPI {
   getAuthMode: Invoke<'config:getAuthMode'>
   setAuthMode: Invoke<'config:setAuthMode'>
   getClaudeCodeStatus: Invoke<'config:getClaudeCodeStatus'>
+  startClaudeSignIn: Invoke<'claudeSignIn:start'>
+  cancelClaudeSignIn: Invoke<'claudeSignIn:cancel'>
+  openClaudeSignInPage: Invoke<'claudeSignIn:openPage'>
   getPermissionMode: Invoke<'config:getPermissionMode'>
   setPermissionMode: Invoke<'config:setPermissionMode'>
 

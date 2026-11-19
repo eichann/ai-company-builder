@@ -1,6 +1,7 @@
 import { CODEX_LOGIN_HELP } from '../../../../shared/agent'
 import type { AuthMode, CodexStatus } from '../../../../shared/agent'
-import type { ApiKeyStatus } from '../../../../shared/ipc-contract'
+import type { ApiKeyStatus, ClaudeCodeStatus } from '../../../../shared/ipc-contract'
+import { ClaudeSignInCard } from './ClaudeSignInCard'
 import { DEFAULT_PERMISSION_MODE, type PermissionMode } from '../../../../shared/permission-mode'
 import { VoiceShortcutSettings } from '../../voice/components/VoiceShortcutSettings'
 import { getApiKeyStatus, getCodexStatus, getPermissionMode, saveApiKey, saveAuthMode, savePermissionMode } from '../api'
@@ -16,10 +17,12 @@ interface AuthSettingsProps {
   authMode: AuthMode
   claudeCodeAvailable: boolean
   claudeCodeError?: string | null
+  claudeStatus: ClaudeCodeStatus | null
+  onRecheck: () => void
   onClose: () => void
 }
 
-export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCodeError, onClose }: AuthSettingsProps) {
+export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeStatus, onRecheck, onClose }: AuthSettingsProps) {
   const { t } = useTranslation()
   const [authMode, setAuthMode] = useState<AuthMode>(initialAuthMode)
   const [codexStatus, setCodexStatus] = useState<CodexStatus | null>(null)
@@ -232,27 +235,8 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
           </div>
         )}
 
-        {/* Claude Code Setup Instructions */}
-        {authMode === 'claude-code' && !claudeCodeAvailable && (
-          <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 animate-fade-in">
-            {claudeCodeError ? (
-              <>
-                <p className="text-xs font-medium text-amber-400 mb-2">{claudeCodeError}</p>
-                <div className="mt-2 pt-2 border-t border-amber-500/20">
-                  <p className="text-[11px] text-ink-muted">{t('chatSettings.setupRequired')}</p>
-                </div>
-              </>
-            ) : (
-              <p className="text-xs font-medium text-amber-400 mb-2">{t('chatSettings.setupRequired')}</p>
-            )}
-            <ol className="list-decimal list-inside space-y-1 text-xs text-ink-muted mt-2">
-              <li>{t('chatSettings.setupStep1')}</li>
-              <li><code className="bg-black/30 px-1.5 py-0.5 rounded font-mono text-[11px]">{t('chatSettings.setupStep2')}</code></li>
-              <li><code className="bg-black/30 px-1.5 py-0.5 rounded font-mono text-[11px]">{t('chatSettings.setupStep3')}</code></li>
-              <li>{t('chatSettings.setupStep4')}</li>
-            </ol>
-          </div>
-        )}
+        {/* Claude Code: install guidance, the browser sign-in, or a notice about the account */}
+        {authMode === 'claude-code' && <ClaudeSignInCard status={claudeStatus} onRecheck={onRecheck} />}
 
         {/* Permission Mode Toggle (Claude Code mode only) */}
         {authMode === 'claude-code' && claudeCodeAvailable && (

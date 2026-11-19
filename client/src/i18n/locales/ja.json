@@ -135,7 +135,7 @@
     "selectMethod": "認証方法を選択",
     "claudeMax": "Claude Max / Pro",
     "claudeMaxDesc": "CLI認証を使用（推奨）",
-    "cliNotFound": "CLI未検出",
+    "cliNotFound": "準備が必要です",
     "apiKey": "API キー",
     "apiKeyDesc": "Anthropic APIキーを使用",
     "apiKeyPlaceholder": "sk-ant-...",

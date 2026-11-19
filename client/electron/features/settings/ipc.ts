@@ -10,6 +10,7 @@ import { normalizePassthroughNames, refusedPassthroughNames } from '../../agents
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { ApiKeyStore } from '../../services/api-key-store'
 import type { ClaudeCli } from '../../services/claude-cli'
+import type { ClaudeSignInService } from '../../services/claude-sign-in'
 import type { ConfigStore } from '../../services/config-store'
 
 export interface SettingsDeps {
@@ -17,6 +18,8 @@ export interface SettingsDeps {
   /** The encrypted API key (status and save only reach the renderer). */
   apiKey: Pick<ApiKeyStore, 'status' | 'save'>
   claudeCli: ClaudeCli
+  /** The member's own `claude auth status` / `claude auth login` (services/claude-sign-in.ts). */
+  claudeSignIn: ClaudeSignInService
   /** Codex CLI presence and login (agents/codex.ts). */
   codexStatus: () => Promise<CodexStatus>
 }
@@ -45,9 +48,18 @@ export function registerSettingsIpc(ipc: IpcRegistrar, deps: SettingsDeps): void
     return true
   })
 
-  ipc.handle('config:getClaudeCodeStatus', () => {
-    return deps.claudeCli.status(true) // force refresh when explicitly requested
+  ipc.handle('config:getClaudeCodeStatus', async () => {
+    const installed = deps.claudeCli.status(true) // force refresh when explicitly requested
+    if (!installed.available) return installed
+    const { signIn, signInSupported } = await deps.claudeSignIn.check()
+    // Only the CLI's plain "signed out" stops the chat; an unknown answer keeps today's behaviour.
+    return { ...installed, authenticated: signIn.state !== 'signed-out', signIn, signInSupported }
   })
+
+  // 「Claude にログインする」: the official CLI's own sign-in; one at a time for the whole app.
+  ipc.handle('claudeSignIn:start', () => deps.claudeSignIn.start())
+  ipc.handle('claudeSignIn:cancel', () => deps.claudeSignIn.cancel())
+  ipc.handle('claudeSignIn:openPage', () => deps.claudeSignIn.openPage())
 
   ipc.handle('config:getPermissionMode', () => {
     return normalizePermissionMode(config.load().permissionMode)

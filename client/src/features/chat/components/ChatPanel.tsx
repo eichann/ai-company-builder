@@ -179,6 +179,8 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
         authMode={authMode}
         claudeCodeAvailable={auth.claudeCodeAvailable}
         claudeCodeError={auth.claudeCodeError}
+        claudeStatus={auth.claudeStatus}
+        onRecheck={auth.recheck}
         onClose={() => {
           setShowSettings(false)
           auth.recheck()
@@ -192,7 +194,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
       <div className="h-full relative flex flex-col">
         {aiTurnNotice}
         <div className={showSettings ? 'min-h-0 flex-1 invisible' : 'min-h-0 flex-1'}>
-          <ChatSetupNeeded claudeCodeAvailable={auth.claudeCodeAvailable} claudeCodeError={auth.claudeCodeError} onOpenSettings={openSettings} />
+          <ChatSetupNeeded claudeSetupShown={auth.claudeSetupShown} claudeStatus={auth.claudeStatus} onRecheck={auth.recheck} claudeCodeAvailable={auth.claudeCodeAvailable} claudeCodeError={auth.claudeCodeError} onOpenSettings={openSettings} />
         </div>
         {settingsOverlay}
       </div>

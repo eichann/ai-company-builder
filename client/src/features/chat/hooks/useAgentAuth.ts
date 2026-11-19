@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import type { AuthMode, CodexStatus } from '../../../../shared/agent'
+import type { ClaudeCodeStatus } from '../../../../shared/ipc-contract'
 import { getAuthMode, getClaudeCodeStatus, getCodexStatus, isApiKeySaved } from '../api'
 
 /**
@@ -15,6 +16,7 @@ export function useAgentAuth() {
   const [codexStatus, setCodexStatus] = useState<CodexStatus>({ available: false, authenticated: false, models: [] })
   const [claudeCodeAvailable, setClaudeCodeAvailable] = useState(false)
   const [claudeCodeError, setClaudeCodeError] = useState<string | null>(null)
+  const [claudeStatus, setClaudeStatus] = useState<ClaudeCodeStatus | null>(null)
   const [isChecking, setIsChecking] = useState(true)
 
   async function checkAuth(background = false) {
@@ -29,6 +31,7 @@ export function useAgentAuth() {
       const ccAvailable = ccStatus.available && ccStatus.authenticated
       setClaudeCodeAvailable(ccAvailable)
       setClaudeCodeError(ccStatus.error)
+      setClaudeStatus(ccStatus)
       setAuthMode(savedAuthMode)
 
       if (savedAuthMode === 'codex') {
@@ -53,5 +56,5 @@ export function useAgentAuth() {
     checkAuth()
   }
 
-  return { isReady, isChecking, authMode, codexStatus, claudeCodeAvailable, claudeCodeError, recheck: () => checkAuth(true) }
+  return { isReady, isChecking, authMode, codexStatus, claudeCodeAvailable, claudeCodeError, claudeStatus, claudeSetupShown: authMode === 'claude-code', recheck: () => checkAuth(true) }
 }

@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { GearSix, Lightning, CircleNotch } from '@phosphor-icons/react'
+import type { ClaudeCodeStatus } from '../../../../shared/ipc-contract'
+import { ClaudeSignInCard } from './ClaudeSignInCard'
 
 /** While the agent's sign-in (and the chat server) are being checked. */
 export function ChatAuthChecking() {
@@ -16,9 +18,29 @@ export function ChatAuthChecking() {
   )
 }
 
+interface SetupNeededProps {
+  /** The chosen AI is Claude Code: its install and sign-in are done here (useAgentAuth). */
+  claudeSetupShown: boolean
+  claudeStatus: ClaudeCodeStatus | null
+  claudeCodeAvailable: boolean
+  claudeCodeError: string | null
+  onOpenSettings: () => void
+  onRecheck: () => void
+}
+
 /** The chosen agent cannot start: what is missing, and the way to the settings. */
-export function ChatSetupNeeded({ claudeCodeAvailable, claudeCodeError, onOpenSettings }: { claudeCodeAvailable: boolean; claudeCodeError: string | null; onOpenSettings: () => void }) {
+export function ChatSetupNeeded({ claudeSetupShown, claudeStatus, claudeCodeAvailable, claudeCodeError, onOpenSettings, onRecheck }: SetupNeededProps) {
   const { t } = useTranslation()
+  if (claudeSetupShown) {
+    // Claude Code: everything happens here (install guidance, the browser sign-in); no terminal.
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-4 p-8 text-center">
+        <h3 className="text-lg font-medium text-ink">AI に相談する準備</h3>
+        <div className="w-full max-w-[360px]"><ClaudeSignInCard status={claudeStatus} onRecheck={onRecheck} /></div>
+        <button type="button" onClick={onOpenSettings} className="text-xs text-ink-muted hover:text-ink">ほかの AI を選ぶ（設定）</button>
+      </div>
+    )
+  }
   return (
     <div className="h-full flex flex-col items-center justify-center p-8 text-center">
       <div className="w-16 h-16 rounded-2xl bg-surface-elevated border border-white/[0.06] flex items-center justify-center mb-6 shadow-glass">

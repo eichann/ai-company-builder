@@ -21,7 +21,10 @@ import { createConfigStore } from './services/config-store'
 import { createApiKeyStore } from './services/api-key-store'
 import { createShellEnvironment } from './services/shell-env'
 import { configureAgentEnv } from './agents/agent-env'
+import { readCliVersionOutput } from './agents/codex-version'
+import { spawnAgentProcess } from './agents/process'
 import { createClaudeCli } from './services/claude-cli'
+import { createClaudeSignIn } from './services/claude-sign-in'
 import { createAppPages, createBroadcastPort, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, receiveAppLinks, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
 import { diskFiles, registerChatWindowsIpc } from './features/chat-windows/ipc'
 import { createSession } from './services/session'
@@ -231,7 +234,16 @@ const appCommands = registerAppCommandsIpc(ipc, {
 const conversationWindows = createBroadcastPort(() => [mainWindowHost.window(), ...chatWindowShell.windows()])
 
 registerEnvIpc(ipc, { paths: allowedRoots })
-registerSettingsIpc(ipc, { config, apiKey, claudeCli, codexStatus: () => getCodexStatus(shellEnv.env()) })
+// 「Claude にログインする」 starts the member's own `claude auth login`; the CLI keeps the login.
+const claudeSignIn = createClaudeSignIn({
+  cliPath: () => claudeCli.status().cliPath,
+  env: () => shellEnv.env(),
+  readVersion: (cli, env) => readCliVersionOutput(cli, env),
+  spawn: (cli, args, env) => spawnAgentProcess({ command: cli, args, env }),
+  openExternal: url => desktopShell.openExternal(url),
+})
+lifecycle.beforeQuit(() => claudeSignIn.stop())
+registerSettingsIpc(ipc, { config, apiKey, claudeCli, claudeSignIn, codexStatus: () => getCodexStatus(shellEnv.env()) })
 
 // A question belongs to the window that showed its conversation when it was asked (its owner).
 const agentInteractions = new AgentInteractions((owner, event, request) => {

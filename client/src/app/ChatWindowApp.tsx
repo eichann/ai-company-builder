@@ -50,6 +50,7 @@ function ChatWindowChat({ context }: { context: ChatWindowContext }) {
   const settingsOverlay = showSettings && (
     <div role="dialog" aria-label="相談の設定" className="absolute inset-0 z-10">
       <AuthSettings authMode={auth.authMode} claudeCodeAvailable={auth.claudeCodeAvailable} claudeCodeError={auth.claudeCodeError}
+        claudeStatus={auth.claudeStatus} onRecheck={auth.recheck}
         onClose={() => { setShowSettings(false); auth.recheck() }} />
     </div>
   )
@@ -73,7 +74,7 @@ function ChatWindowChat({ context }: { context: ChatWindowContext }) {
               sidebarOpen={false}
               initialSessionId={context.sessionId}
             />
-          : <ChatSetupNeeded claudeCodeAvailable={auth.claudeCodeAvailable} claudeCodeError={auth.claudeCodeError} onOpenSettings={openSettings} />}
+          : <ChatSetupNeeded claudeSetupShown={auth.claudeSetupShown} claudeStatus={auth.claudeStatus} onRecheck={auth.recheck} claudeCodeAvailable={auth.claudeCodeAvailable} claudeCodeError={auth.claudeCodeError} onOpenSettings={openSettings} />}
       </div>
       {settingsOverlay}
       {fileNotice.notice && (

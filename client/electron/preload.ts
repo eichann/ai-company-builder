@@ -321,6 +321,9 @@ const api: ElectronAPI = {
   getAuthMode: () => invoke('config:getAuthMode'),
   setAuthMode: (mode: 'claude-code' | 'codex' | 'api-key') => invoke('config:setAuthMode', mode),
   getClaudeCodeStatus: () => invoke('config:getClaudeCodeStatus'),
+  startClaudeSignIn: () => invoke('claudeSignIn:start'),
+  cancelClaudeSignIn: () => invoke('claudeSignIn:cancel'),
+  openClaudeSignInPage: () => invoke('claudeSignIn:openPage'),
   getPermissionMode: () => invoke('config:getPermissionMode'),
   setPermissionMode: (mode: PermissionMode) =>
     invoke('config:setPermissionMode', mode),
