@@ -16,6 +16,9 @@ export interface CalendarDeps {
   log?: Pick<Console, 'warn'>
 }
 
+/** `today`: the read shared between the task list and 「確かめること」 (main.ts, `services/calendar-today-reads.ts`). */
+export type CalendarIpcDeps = CalendarDeps & { today?: (companyId: string) => Promise<CalendarTodayResult> }
+
 const offline = { success: false, offline: true, error: CALENDAR_OFFLINE_TEXT } as const
 const invalid = { success: false, offline: false, error: '入力が正しくありません。' } as const
 
@@ -45,10 +48,10 @@ export function createCalendarApi(deps: CalendarDeps) {
   }
 }
 
-export function registerCalendarIpc(ipc: IpcRegistrar, deps: CalendarDeps): void {
-  const api = createCalendarApi(deps)
+export function registerCalendarIpc(ipc: IpcRegistrar, deps: CalendarIpcDeps): void {
+  const today = deps.today ?? createCalendarApi(deps).today
   ipc.handle('calendar:today', async (_, companyId: string) => {
     if (typeof companyId !== 'string' || !companyId || companyId.length > 200) return invalid
-    return api.today(companyId)
+    return today(companyId)
   })
 }

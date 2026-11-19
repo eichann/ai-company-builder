@@ -1,6 +1,7 @@
 // The task list's re-read signal (tasks-ui.md "Renderer"). Guards: a record the member's own AI
 // wrote (`records:changed`, sent by main at once) re-reads the list without waiting for the
-// 2-minute look; another company's signal does not; leaving stops both subscriptions.
+// 2-minute look; another company's signal does not; a change of the notices alone does not (one
+// records signal used to re-read the list twice); leaving stops the subscription.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { onTasksMayHaveChanged, type TaskReads } from './api'
@@ -16,16 +17,17 @@ function channels() {
   return { reads, emit, listeners }
 }
 
-test('the list re-reads when a record of its company changed (the member\'s own AI, or a push signal) and on notices; never for another company', () => {
+test('the list re-reads when a record of its company changed (the member\'s own AI, a push signal, a turn main found changed); never for another company, never for notices alone', () => {
   const { reads, emit, listeners } = channels()
   let count = 0
   const stop = onTasksMayHaveChanged('co-a', () => { count++ }, reads)
   emit('records', 'co-a')
   assert.equal(count, 1)
+  // notifications:changed is the title bar's: when 「あなたの番」 changed main sends records:changed itself.
   emit('notifications', 'co-a')
-  assert.equal(count, 2)
+  assert.equal(count, 1)
   emit('records', 'co-b')
-  assert.equal(count, 2)
+  assert.equal(count, 1)
   stop()
   assert.equal(listeners.records.size + listeners.notifications.size, 0)
 })

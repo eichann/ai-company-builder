@@ -16,12 +16,21 @@ import type { DesktopTarget, NoticesActionResult, NoticesState, TurnItem } from 
 import { desktopNoticesOf, NO_NOTICES, NOTICES_OFFLINE_TEXT, thisWeeksTurn, turnItemKey } from '../../../shared/notifications-app'
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { turnTiming } from '../../../../shared/core/turn-timing'
+import type { MyTurnReads } from '../../services/turn-reads'
 
 export interface NotificationsWatcherDeps {
   baseUrl: () => string
   cookies: () => string[]
   /** This company's state may have changed: the renderer re-reads it (main.ts sends notifications:changed). */
   onChanged: (companyId: string) => void
+  /**
+   * 「あなたの番」 changed and nothing had told the app yet (a look on the 5-minute timer, a
+   * `notifications` signal alone): main tells the task list (records:changed). Not called for a
+   * look a records signal started — that signal already told it — nor for the first look.
+   */
+  onTurnChanged?: (companyId: string) => void
+  /** `GET /records/my-turn` shared with the task list (main.ts); absent → asked here. */
+  myTurn?: MyTurnReads
   /** Keep the company's push channel open, so its signals arrive. */
   watchSignals?: (companyId: string) => void
   /** A Mac notification (the shell's); a click brings the app's window forward (and opens `target`). */
@@ -102,7 +111,8 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
   const known = new Map<string, NoticesState>()
   /** Per company: the turn items already seen (null until the first answer). */
   const seenTurn = new Map<string, Set<string>>()
-  const refreshing = new Map<string, { again: boolean }>()
+  /** A look running per company: `again` = asked once more meanwhile; `untold` = one of the askers was not a records signal. */
+  const refreshing = new Map<string, { again: boolean; untold: boolean }>()
 
   async function call(companyId: string, method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<Answer | null> {
     const base = deps.baseUrl().replace(/\/+$/, '')
@@ -120,10 +130,19 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
     }
   }
 
-  function publish(companyId: string, next: NoticesState) {
+  function publishState(companyId: string, next: NoticesState, untold: boolean) {
     const before = known.get(companyId)
     known.set(companyId, next)
     if (JSON.stringify(before) !== JSON.stringify(next)) deps.onChanged(companyId)
+    if (untold && before !== undefined && JSON.stringify(before.myTurn) !== JSON.stringify(next.myTurn)) deps.onTurnChanged?.(companyId)
+  }
+
+  /** The member's turn: the shared read when main gave one ('discarded': asked for another session or server). */
+  async function myTurn(companyId: string): Promise<Answer | null | 'discarded'> {
+    if (!deps.myTurn) return call(companyId, 'GET', '/records/my-turn')
+    const shared = await deps.myTurn.myTurn(companyId)
+    if (shared.discarded) return 'discarded'
+    return shared.value ? { status: shared.value.status, body: shared.value.json } : null
   }
 
   let shown: Set<string> | null = null
@@ -148,24 +167,30 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
     }
   }
 
-  async function refresh(companyId: string): Promise<void> {
+  /** `told`: a records signal started it, and the task list has been told already. */
+  async function refresh(companyId: string, told = false): Promise<void> {
     const running = refreshing.get(companyId)
-    if (running) { running.again = true; return }
-    const state = { again: false }
+    if (running) { running.again = true; if (!told) running.untold = true; return }
+    const state = { again: false, untold: !told }
     refreshing.set(companyId, state)
     try {
       do {
         state.again = false
-        const [turn, notices] = await Promise.all([call(companyId, 'GET', '/records/my-turn'), call(companyId, 'GET', '/me/notifications')])
+        const untold = state.untold
+        state.untold = false
+        const [turn, notices] = await Promise.all([myTurn(companyId), call(companyId, 'GET', '/me/notifications')])
+        // Asked for another session or server than now (signed out meanwhile): nothing is shown or notified.
+        if (turn === 'discarded') return
+        const publish = (next: NoticesState) => publishState(companyId, next, untold)
         // Off line or an older server: keep what was shown.
         if (!turn || !notices) return
         if (turn.status !== 200 || notices.status !== 200) {
           if (turn.status === 404 && notices.status === 200) {
             // Records off: nothing of a record — only the company's own notices (a restore), with the bell alone.
             const list = noticeListOf(notices.body?.data)
-            if (!list || list.items.length === 0) { publish(companyId, NO_NOTICES); return }
+            if (!list || list.items.length === 0) { publish(NO_NOTICES); return }
             if (companyId === current) notifyDesktop(companyId, [], list.items)
-            publish(companyId, { available: true, bellOnly: true, myTurn: { total: 0, items: [] }, notices: list })
+            publish({ available: true, bellOnly: true, myTurn: { total: 0, items: [] }, notices: list })
             return
           }
           if (notices.status !== 404) log.warn(`[notifications] answered ${turn.status} / ${notices.status}`)
@@ -177,7 +202,7 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
         const list = noticeListOf(notices.body?.data)
         if (!list) return
         if (companyId === current) notifyDesktop(companyId, items, list.items)
-        publish(companyId, {
+        publish({
           available: list.available,
           myTurn: thisWeeksTurn(items, typeof data?.total === 'number' ? data.total : items.length),
           notices: list,
@@ -205,9 +230,12 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
       return known.get(companyId) ?? NO_NOTICES
     },
 
-    /** A push signal (no content): ask the server again for the company on screen. */
-    signal(companyId: string): void {
-      if (companyId === current) void refresh(companyId)
+    /**
+     * A push signal (no content): ask the server again for the company on screen. `told`: a
+     * records signal, which main has already passed on to the task list.
+     */
+    signal(companyId: string, told = false): void {
+      if (companyId === current) void refresh(companyId, told)
     },
 
     async markRead(companyId: string, ids: string[] | 'all'): Promise<NoticesActionResult> {

@@ -931,7 +931,7 @@ contract.type IpcInvokeChannels.'tasks:dropLink' = 'tasks:dropLink': { args: [co
 contract.type IpcInvokeChannels.'tasks:linkDriveFiles' = 'tasks:linkDriveFiles': { args: [companyId: string, recordId: string, expectedVersion: number, options?: TaskDriveLinkOptions]; result: TaskDriveLinkResult }
 contract.type IpcInvokeChannels.'tasks:linkFile' = 'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:linkRecord' = 'tasks:linkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
-contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId: string]; result: TaskListResult }
+contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId: string, options?: TaskListOptions]; result: TaskListResult }
 contract.type IpcInvokeChannels.'tasks:makeBundlePrivate' = 'tasks:makeBundlePrivate': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:makeBundlePrivatePlan' = 'tasks:makeBundlePrivatePlan': { args: [companyId: string, recordId: string]; result: MakePrivatePlanResult }
 contract.type IpcInvokeChannels.'tasks:proposals' = 'tasks:proposals': { args: [companyId: string, meetingId: string]; result: TaskProposalsResult }
@@ -1243,7 +1243,7 @@ main.handle tasks:dropLink @ features/tasks/ipc.ts (companyId, targetId, dropped
 main.handle tasks:linkDriveFiles @ features/tasks/ipc.ts (companyId, recordId, expectedVersion, options)
 main.handle tasks:linkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
 main.handle tasks:linkRecord @ features/tasks/ipc.ts (companyId, recordId, input)
-main.handle tasks:list @ features/tasks/ipc.ts (companyId)
+main.handle tasks:list @ features/tasks/ipc.ts (companyId, options)
 main.handle tasks:makeBundlePrivate @ features/tasks/ipc.ts (companyId, recordId, folder, expectedVersion)
 main.handle tasks:makeBundlePrivatePlan @ features/tasks/ipc.ts (companyId, recordId)
 main.handle tasks:proposals @ features/tasks/ipc.ts (companyId, meetingId)
@@ -1492,8 +1492,8 @@ preload getTaskCard -> invoke tasks:card($0, $1)
 preload getTaskCard : (companyId: string, recordId: string) => Promise<TaskCardResult>
 preload getTaskDriveChoices -> invoke tasks:driveChoices($0)
 preload getTaskDriveChoices : (companyId: string) => Promise<TaskDriveChoice[]>
-preload getTaskList -> invoke tasks:list($0)
-preload getTaskList : (companyId: string) => Promise<TaskListResult>
+preload getTaskList -> invoke tasks:list($0, $1)
+preload getTaskList : (companyId: string, options?: TaskListOptions | undefined) => Promise<TaskListResult>
 preload getTaskProposals -> invoke tasks:proposals($0, $1)
 preload getTaskProposals : (companyId: string, meetingId: string) => Promise<TaskProposalsResult>
 preload getViewers -> invoke viewers:get($0, $1)

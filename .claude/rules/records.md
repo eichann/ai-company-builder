@@ -1989,7 +1989,8 @@ complete and idempotent; the immutability trigger — mutation-checked).
 - Commands (E1, `commands.md`): `records.runAction` (class outbound) for the screens to come;
   `client/shared/record-actions.ts` `recordActionChoices` lists the actions that can start from a
   record's state. The push channel's `records` event reaches the app's `onRecords` listener
-  (`wireAgentControl`), which only re-asks for received minutes (`minutes.md` "The app").
+  (`wireAgentControl`), which only makes the app ask again, once per burst (`minutes.md` "The app",
+  `ipc-and-main-process.md` "Shared reads").
 - A business plugin's use of its connector becomes tools on the same server (`corporate-sales__update_deal`, named by the business plugin; writes
   only with an `act` token) and an update's outcome a card in the reply: `plugins.md` "The app".
 - Not done (TODO): the plugin-SDK and admin-API surfaces of the same definitions (stages 5 / 7);

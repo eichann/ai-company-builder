@@ -266,6 +266,9 @@ export interface TaskListData {
   decisionsToConfirm?: Array<{ id: string; title: string }>
 }
 
+/** `fresh`: the read after the member's own change, which never joins a read that began before it. */
+export interface TaskListOptions { fresh?: boolean }
+
 export type TaskListResult =
   | { success: true; data: TaskListData }
   | { success: false; offline: boolean; error: string }

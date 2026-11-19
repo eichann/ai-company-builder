@@ -54,6 +54,7 @@ import {
   type ArchivedTasksResult, type SimilarItem, type BundleChoicesResult, type BundleCreateInput, type BundleKindsAnswer, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
 } from '../../../shared/tasks'
 import type { IpcRegistrar } from '../../ipc/registrar'
+import type { AiTurnReads, MyTurnReads } from '../../services/turn-reads'
 import { createTagSuggester, type TagSuggestDeps } from './tag-suggest'
 
 /** Only a working-folder path or a well-formed Drive id ever reaches the server. */
@@ -102,7 +103,17 @@ export interface TasksDeps {
    * main.ts): their live picks and the files their AI put, names included (their own). Absent → none.
    */
   driveChoices?: (companyId: string) => Promise<TaskDriveChoice[]>
+  /**
+   * 「あなたの番」 and 「AI の番」 shared with the title bar's watcher and the received minutes
+   * (main.ts, `services/turn-reads.ts`); absent → asked here.
+   */
+  turns?: MyTurnReads & AiTurnReads
+  /** Something of the company changed by the member's own write here: shared reads on their way are not joined. */
+  changed?: (companyId: string) => void
 }
+
+/** POSTs that only read: they change nothing on the server. */
+const READ_ONLY_POSTS = /^\/(?:records\/query|viewers)$/
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
 const ACTION = /^[a-z][a-z0-9_]{0,39}$/
@@ -154,8 +165,19 @@ export function createTasksApi(deps: TasksDeps) {
     }
   }
   const base = () => deps.baseUrl().replace(/\/+$/, '')
-  const call = (companyId: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<Answer> =>
-    base() ? request(`${base()}/api/companies/${encodeURIComponent(companyId)}${path}`, method, body) : Promise.resolve(null)
+  async function call(companyId: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<Answer> {
+    if (!base()) return null
+    const answer = await request(`${base()}/api/companies/${encodeURIComponent(companyId)}${path}`, method, body)
+    // A write (answered or not: it may have reached the server) makes the next shared read a fresh one.
+    if (method === 'POST' && !READ_ONLY_POSTS.test(path)) deps.changed?.(companyId)
+    return answer
+  }
+  /** A shared turn read (else this module's own); a read asked by another session or server than now is not used. */
+  async function turn(companyId: string, which: 'myTurn' | 'aiTurn'): Promise<Answer | 'discarded'> {
+    if (!deps.turns) return call(companyId, 'GET', which === 'myTurn' ? '/records/my-turn' : '/records/ai-turn')
+    const shared = await deps.turns[which](companyId)
+    return shared.discarded ? 'discarded' : shared.value
+  }
 
   async function myId(): Promise<string | null> {
     const cookies = deps.cookies().join('; ')
@@ -538,14 +560,19 @@ export function createTasksApi(deps: TasksDeps) {
       return a?.status === 200 ? { success: true, recordId: '' } : failure('reconcile', a)
     },
 
-    async list(companyId: string): Promise<TaskListResult> {
+    /**
+     * `fresh`: read after the member's own change (the renderer's reload after a press): never
+     * joins a read that began before it.
+     */
+    async list(companyId: string, options?: { fresh?: boolean }): Promise<TaskListResult> {
       if (!COMPANY.test(companyId)) return { success: false, offline: false, error: '入力が正しくありません。' }
+      if (options?.fresh === true) deps.changed?.(companyId)
       const id = await myId()
       if (!id) return { success: false, offline: true, error: TASKS_OFFLINE_TEXT }
       const since = new Date(dayWindow(now(), DEFAULT_COMPANY_TIME_ZONE).from).toISOString()
-      const [myTurn, aiTurn, asked, doneMine, doneAsked, types, names, settings, questions, kinds, settled] = await Promise.all([
-        call(companyId, 'GET', '/records/my-turn'),
-        call(companyId, 'GET', '/records/ai-turn'),
+      const [sharedMyTurn, sharedAiTurn, asked, doneMine, doneAsked, types, names, settings, questions, kinds, settled] = await Promise.all([
+        turn(companyId, 'myTurn'),
+        turn(companyId, 'aiTurn'),
         call(companyId, 'POST', '/records/query', { type: 'task', state: [...OPEN_TASK_STATES], fields: { requested_by: id }, limit: 200 }),
         call(companyId, 'POST', '/records/query', { type: 'task', finishedSince: since, fields: { assignee: id }, limit: 100 }),
         call(companyId, 'POST', '/records/query', { type: 'task', finishedSince: since, fields: { requested_by: id }, limit: 100 }),
@@ -559,6 +586,10 @@ export function createTasksApi(deps: TasksDeps) {
         // 来た連絡 the member closed with 「済んだ」 today (interaction 6's settled_by: never what the AI judged).
         call(companyId, 'POST', '/records/query', { type: MESSAGE_TYPE, finishedSince: since, fields: { settled_by: id }, limit: 100 }),
       ])
+      // Answered for another session or server than now (signed out, switched): never shown.
+      if (sharedMyTurn === 'discarded' || sharedAiTurn === 'discarded') return { success: false, offline: true, error: TASKS_OFFLINE_TEXT }
+      const myTurn = sharedMyTurn
+      const aiTurn = sharedAiTurn
       if (myTurn?.status === 404 && myTurn.json?.code === 'RECORDS_DISABLED') {
         return { success: true, data: { available: false, listDepartmentIds: null, items: [] } }
       }
@@ -718,7 +749,8 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   const api = createTasksApi(deps)
   const tags = createTagSuggester(deps.tagSuggest ?? { brokerEnv: async () => ({}) })
   ipc.handle('tasks:suggestTags', (_event, companyId, title, inUse) => tags.suggest(typeof companyId === 'string' ? companyId : '', title, inUse))
-  ipc.handle('tasks:list', (_event, companyId) => api.list(typeof companyId === 'string' ? companyId : ''))
+  ipc.handle('tasks:list', (_event, companyId, options) =>
+    api.list(typeof companyId === 'string' ? companyId : '', { fresh: (options as { fresh?: unknown } | undefined)?.fresh === true }))
   ipc.handle('tasks:archived', (_event, companyId, cursor) => api.archived(typeof companyId === 'string' ? companyId : '', cursor))
   ipc.handle('tasks:create', (_event, companyId, input) => api.create(typeof companyId === 'string' ? companyId : '', input))
   ipc.handle('tasks:act', (_event, companyId, recordId, input) => api.act(typeof companyId === 'string' ? companyId : '', recordId, input))

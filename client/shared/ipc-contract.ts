@@ -46,7 +46,7 @@ import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { FindHomeResult, FindResult, MakePrivatePlanResult, RecordCardResult, RecordListResult } from './record-views'
 import type { ConsultationTopicsResult } from './consultation-topics'
 import type { CalendarTodayResult } from './calendar'
-import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveChoice, TaskDriveLinkOptions, TaskDriveLinkResult, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from './tasks'
+import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveChoice, TaskDriveLinkOptions, TaskDriveLinkResult, TaskListOptions, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from './tasks'
 import type { DroppedThing, DropLinkResult } from './link-drop'
 import type { TagSuggestions } from './tag-suggest'
 import type { TaskCardResult } from './task-card'
@@ -572,7 +572,7 @@ export interface IpcInvokeChannels {
   /** Not being able to read the calendar is an empty list with a reason (`data.reason`), not a failure. */
   'calendar:today': { args: [companyId: string]; result: CalendarTodayResult }
   // The task list (tasks.ts): read and changed with the member's session in main; the server decides who may.
-  'tasks:list': { args: [companyId: string]; result: TaskListResult }
+  'tasks:list': { args: [companyId: string, options?: TaskListOptions]; result: TaskListResult }
   /** The folded 「アーカイブ」: archived tasks, newest first, 20 per call from `cursor` (start: 0 / 0). */
   'tasks:archived': { args: [companyId: string, cursor: ArchiveCursor]; result: ArchivedTasksResult }
   /** The list's one line: a task of the member's own (only they see it). */

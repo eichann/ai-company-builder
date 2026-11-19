@@ -55,7 +55,7 @@ export function declineMeetingBundle(companyId: string, meetingId: string, write
 
 // Meetings for their attendees (minutes.md "Meetings for their attendees"): the banner and the card.
 /** The member's meetings of the last days, one meeting for its card, and when they may have changed. */
-export type MeetingReads = ElectronPort<'getMeetingArrivals' | 'getMeetingCardState' | 'onMinutesChanged' | 'onRecordsChanged' | 'onNotificationsChanged'>
+export type MeetingReads = ElectronPort<'getMeetingArrivals' | 'getMeetingCardState' | 'onRecordsChanged'>
 /** ［AI に読ませる］［読まない］ and its 取り消す, 「次から自動で読む」: change the shared meeting (the server tells its people). */
 export type MeetingWrites = ElectronPort<'requestMeetingReading' | 'skipMeetingReading' | 'undoTaskAction' | 'setMeetingAutoSeries'>
 /** 「許可をし直す」: Google's page opens in the browser, as the settings' button does. */
@@ -73,11 +73,13 @@ export async function getMeetingCardState(companyId: string, meetingId: string, 
   return (await reads.getMeetingCardState(companyId, meetingId)) ?? { success: false, error: '' }
 }
 
-/** The meetings may have changed: the received minutes, the push channel's records signal, or a notice. */
+/**
+ * The meetings may have changed: `records:changed` — once per burst of the push channel's records
+ * signals, and when main's received-minutes look found a change no signal had told (so
+ * `minutes:changed` and `notifications:changed` would only say the same thing again).
+ */
 export function onMeetingsMayHaveChanged(companyId: string, listener: () => void, reads: MeetingReads = window.electronAPI): () => void {
-  const mine = (change: { companyId: string }) => { if (change.companyId === companyId) listener() }
-  const stops = [reads.onMinutesChanged(mine), reads.onRecordsChanged?.(mine), reads.onNotificationsChanged(mine)]
-  return () => { for (const stop of stops) stop?.() }
+  return reads.onRecordsChanged?.((change: { companyId: string }) => { if (change.companyId === companyId) listener() }) ?? (() => {})
 }
 
 export async function requestMeetingReading(companyId: string, meetingId: string, expectedVersion: number, writes: MeetingWrites = window.electronAPI): Promise<MeetingPressResult> {
