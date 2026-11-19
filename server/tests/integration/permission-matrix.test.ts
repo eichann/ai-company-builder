@@ -285,6 +285,10 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/agent-sandbox', w => ({ path: `${C(w)}/agent-sandbox` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/agent-sandbox', w => ({ path: `${C(w)}/agent-sandbox`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/agent-sandbox/overrides/:userId', w => ({ path: `${C(w)}/agent-sandbox/overrides/${USER.member}`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+  // 「ブラウザ操作」 (agent-browser.md): owner/admin, like the sandbox.
+  r('GET /api/companies/:companyId/agent-browser', w => ({ path: `${C(w)}/agent-browser` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/agent-browser', w => ({ path: `${C(w)}/agent-browser`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/agent-browser/overrides/:userId', w => ({ path: `${C(w)}/agent-browser/overrides/${USER.member}`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   // 「もう一方の AI に聞く」 (chat-and-agents.md "Asking the other AI"): owner/admin, like the other AI settings.
   r('GET /api/companies/:companyId/second-opinion', w => ({ path: `${C(w)}/second-opinion` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/second-opinion', w => ({ path: `${C(w)}/second-opinion`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
@@ -676,6 +680,7 @@ const CROSS: CrossRow[] = [
   x('PUT /api/companies/:companyId/members/:userId/role', (w, id) => ({ path: `${C(w)}/members/${id}/role`, body: { role: 'admin' } }), w => w.other.member, 'pm-nobody'),
   x('DELETE /api/companies/:companyId/members/:userId', (w, id) => ({ path: `${C(w)}/members/${id}` }), w => w.other.member, 'pm-nobody'),
   x('PUT /api/companies/:companyId/agent-sandbox/overrides/:userId', (w, id) => ({ path: `${C(w)}/agent-sandbox/overrides/${id}`, body: { mode: 'off' } }), w => w.other.member, 'pm-nobody'),
+  x('PUT /api/companies/:companyId/agent-browser/overrides/:userId', (w, id) => ({ path: `${C(w)}/agent-browser/overrides/${id}`, body: { mode: 'on' } }), w => w.other.member, 'pm-nobody'),
   x('DELETE /api/companies/:companyId/agent-stops/:stopId', (w, id) => ({ path: `${C(w)}/agent-stops/${id}` }), w => w.other.stop),
 
   x('PUT /api/companies/:companyId/broker/keys/:keyId/secret', (w, id) => ({ path: `${C(w)}/broker/keys/${id}/secret`, body: { secret: 'fake-test-key-NOT-REAL-cross-0123456789' } }), w => w.other.key),

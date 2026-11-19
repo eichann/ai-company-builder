@@ -17,6 +17,7 @@ import { sqliteClientActivityRepository } from './adapters/sqlite/client-activit
 import { sqlitePushRejectionRepository } from './adapters/sqlite/push-rejections'
 import { sqliteAgentEventRepository, sqliteAgentEventSettingsRepository } from './adapters/sqlite/agent-events'
 import { sqliteAgentSandboxRepository } from './adapters/sqlite/agent-sandbox'
+import { sqliteAgentBrowserRepository } from './adapters/sqlite/agent-browser'
 import { sqliteAgentStopRepository } from './adapters/sqlite/agent-stops'
 import { sqliteBrokerTokenRepository, sqliteKeyBrokerRepository } from './adapters/sqlite/key-broker'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
@@ -52,6 +53,7 @@ import { createPrivateFolderService } from './services/private-folders'
 import { createCompanyScopeService } from './services/company-scopes'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
+import { createAgentBrowserService } from './services/agent-browser'
 import { createTaskSettingsService } from './services/task-settings'
 import { createFeatureService } from './services/features'
 import { noticeTurnedOff } from '../shared/core/features'
@@ -177,6 +179,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     agentEvents: sqliteAgentEventRepository(conn),
     agentEventSettings: sqliteAgentEventSettingsRepository(conn),
     agentSandbox: sqliteAgentSandboxRepository(conn),
+    agentBrowser: sqliteAgentBrowserRepository(conn),
     agentStops: sqliteAgentStopRepository(conn),
     brokerKeys: sqliteKeyBrokerRepository(conn),
     brokerTokens: sqliteBrokerTokenRepository(conn),
@@ -224,6 +227,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // The emergency stop (M2) and the push channel that announces policy changes.
   const push = createPushChannel()
   const agentSandbox = createAgentSandboxService({ ...repos, ...shared })
+  // 「ブラウザ操作」 (agent-browser.md): kept here, handed to the apps in their policy.
+  const agentBrowser = createAgentBrowserService({ ...repos, ...shared })
   const agentStops = createAgentStopService({
     ...repos, ...shared,
     brokerEnabled: () => brokerVault.status().enabled,
@@ -231,7 +236,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   })
   // 「もう一方の AI に聞く」: kept here, handed to the apps in their policy (chat-and-agents.md).
   const secondOpinion = createSecondOpinionSettingService(shared)
-  const agentPolicy = createAgentPolicyService({ agentSandbox, agentStops, secondOpinion, digest: sha256TokenDigest, push })
+  const agentPolicy = createAgentPolicyService({ agentSandbox, agentBrowser, agentStops, secondOpinion, digest: sha256TokenDigest, push })
   const brokerTokens = createBrokerTokenService({
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
     // With several company keys, the one a plugin's connection uses (bound below).
@@ -776,6 +781,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyFolders,
     agentEvents,
     agentSandbox,
+    agentBrowser,
     agentStops,
     agentPolicy,
     secondOpinion,

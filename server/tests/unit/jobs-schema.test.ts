@@ -30,6 +30,10 @@ const LATER_TABLES = [
   // jobs.md "Event-triggered jobs" (stage 4a): each job's cursor and watch target, and the stretches nothing runs in.
   'ai_job_event_cursors',
   'ai_job_event_gaps',
+  // agent-browser.md 「ブラウザ操作」: the company setting, members' own modes and the history.
+  'agent_browser_settings',
+  'agent_browser_overrides',
+  'agent_browser_history',
 ]
 /** Indexes later builds add on a table that was there before. */
 const LATER_INDEXES = [

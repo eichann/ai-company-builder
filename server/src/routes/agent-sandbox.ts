@@ -7,8 +7,9 @@
  *   PUT  /agent-sandbox                       the whole setting (owner/admin)
  *   PUT  /agent-sandbox/overrides/:userId     { mode: off|observe|enforce|null } (owner/admin)
  *   GET  /me/agent-policy                     any member: the policy their app's AI follows —
- *                                             the sandbox and the emergency stop (M2,
- *                                             routes/agent-stops.ts) — (ETag = version,
+ *                                             the sandbox, the emergency stop (M2,
+ *                                             routes/agent-stops.ts), 「ブラウザ操作」
+ *                                             (routes/agent-browser.ts)… — (ETag = version,
  *                                             If-None-Match → 304). A change is announced
  *                                             on the push channel (/me/events).
  *

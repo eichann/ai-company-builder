@@ -5,7 +5,7 @@ import { CaretRight, LockSimple } from '@phosphor-icons/react'
 
 import { EmptyState, PageHeader } from '@/components/app/states'
 import { Badge } from '@/components/ui/badge'
-import { agentEventsApi, agentSandboxApi, featuresApi, inboxSettingsApi, keyBrokerApi, recordSettingsApi, secondOpinionApi, taskSettingsApi } from '@/lib/api'
+import { agentBrowserApi, agentEventsApi, agentSandboxApi, featuresApi, inboxSettingsApi, keyBrokerApi, recordSettingsApi, secondOpinionApi, taskSettingsApi } from '@/lib/api'
 import { ADVANCED_SECTIONS, aiSafetyChanged, calendarChanged, featuresChanged, inboxChanged, workChanged, type AdvancedSection } from '@/lib/advanced'
 import { useCompany } from '@/lib/company-context'
 import { useQuery } from '@/lib/use-query'
@@ -25,6 +25,7 @@ export default function AdvancedSettingsPage() {
   const events = useQuery(on('agent-events-settings'), () => agentEventsApi.settings(companyId))
   const broker = useQuery(on('broker'), () => keyBrokerApi.get(companyId))
   const secondOpinion = useQuery(on('second-opinion'), () => secondOpinionApi.get(companyId))
+  const browser = useQuery(on('agent-browser'), () => agentBrowserApi.get(companyId))
 
   if (role !== null && !isAdmin) {
     return (
@@ -42,9 +43,15 @@ export default function AdvancedSettingsPage() {
     calendar: tasks.data ? calendarChanged(tasks.data.settings) : null,
     inbox: inbox.data ? inboxChanged(inbox.data.settings) : null,
     'ai-safety':
-      sandbox.loading || events.loading || broker.loading || secondOpinion.loading
+      sandbox.loading || events.loading || broker.loading || secondOpinion.loading || browser.loading
         ? null
-        : aiSafetyChanged({ sandbox: sandbox.data, eventsUpdatedAt: events.data?.updatedAt ?? null, broker: broker.data, secondOpinion: secondOpinion.data }),
+        : aiSafetyChanged({
+            sandbox: sandbox.data,
+            eventsUpdatedAt: events.data?.updatedAt ?? null,
+            broker: broker.data,
+            secondOpinion: secondOpinion.data,
+            browser: browser.data,
+          }),
     info: false,
   }
 

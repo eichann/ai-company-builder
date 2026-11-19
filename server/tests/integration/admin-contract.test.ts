@@ -77,6 +77,7 @@ const TYPES: Record<string, string> = {
   AgentEventRetentionPreview: 'AgentEventRetentionPreview',
   AgentEventViewers: 'AgentEventViewers',
   AgentSandbox: 'AgentSandboxView',
+  AgentBrowser: 'AgentBrowserView',
   AgentStops: 'AgentStopView',
   SecondOpinion: 'SecondOpinionView',
   SecurityAlerts: 'SecurityAlertsView',
@@ -270,6 +271,7 @@ beforeAll(async () => {
   const { invitationsRoute } = await import('../../src/routes/invitations')
   const { agentEventsRoute } = await import('../../src/routes/agent-events')
   const { agentSandboxRoute } = await import('../../src/routes/agent-sandbox')
+  const { agentBrowserRoute } = await import('../../src/routes/agent-browser')
   const { secondOpinionRoute } = await import('../../src/routes/second-opinion')
   const { taskSettingsRoute } = await import('../../src/routes/task-settings')
   const { inboxRoute } = await import('../../src/routes/inbox')
@@ -292,6 +294,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', privateFoldersRoute)
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
+  app.route('/api/companies/:companyId', agentBrowserRoute)
   app.route('/api/companies/:companyId', secondOpinionRoute)
   app.route('/api/companies/:companyId', taskSettingsRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/admin-home')).adminHomeRoute)
@@ -442,6 +445,14 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('AgentSandbox', USERS.owner, 'GET', `${base}/agent-sandbox`)
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox`, { mode: 'observe', allowedDomains: ['api.github.com'], deniedReadPaths: ['~/x'], onUnavailable: 'record-only' })
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox/overrides/${USERS.member}`, { mode: 'enforce' })
+  })
+
+  it('「ブラウザ操作」', async () => {
+    await expectShape('AgentBrowser', USERS.owner, 'GET', `${base}/agent-browser`)
+    await expectShape('AgentBrowser', USERS.owner, 'PUT', `${base}/agent-browser`, {
+      mode: 'on', sites: [{ host: 'crm.example.com', level: 'write', assetHosts: ['cdn.example.net'] }],
+    })
+    await expectShape('AgentBrowser', USERS.owner, 'PUT', `${base}/agent-browser/overrides/${USERS.member}`, { mode: 'off' })
   })
 
   it('「もう一方の AI に聞く」', async () => {

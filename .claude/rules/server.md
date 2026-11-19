@@ -281,6 +281,9 @@ GET  /api/config                                  setup state (no auth)
                               GET|PUT /agent-sandbox, PUT /agent-sandbox/overrides/:userId,
                               GET /me/agent-policy                            agent-sandbox.ts
                                                                 (「AI の囲い」: agent-sandbox.md)
+                              GET|PUT /agent-browser, PUT /agent-browser/overrides/:userId
+                                                                             agent-browser.ts
+                                                                (「ブラウザ操作」: agent-browser.md)
                               GET|PUT /second-opinion                         second-opinion.ts
                                                                 (もう一方の AI に聞く: chat-and-agents.md)
                               GET /security-alerts, PUT /security-alerts/settings (owner/admin)

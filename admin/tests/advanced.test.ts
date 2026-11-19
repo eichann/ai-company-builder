@@ -6,6 +6,7 @@ import { aiSafetyChanged, calendarChanged, inboxChanged, workChanged } from '@/l
 import { DEFAULT_AGENT_SANDBOX_SETTINGS } from '../../shared/core/agent-sandbox'
 import { defaultIntakeSettings } from '../../shared/core/intake-settings'
 import { defaultTaskSettings } from '../../shared/core/task-settings'
+import type { AgentBrowserView } from '../../shared/types/agent-browser'
 import type { AgentSandboxView } from '../../shared/types/agent-sandbox'
 
 const sandbox = (over: Partial<AgentSandboxView> = {}): AgentSandboxView => ({
@@ -47,10 +48,16 @@ describe('「初期値のまま」 or 「変えています」', () => {
   it('AI の安全: the sandbox as it starts (host order aside) is unchanged; a mode, a member override or the log settings are changes', () => {
     expect(aiSafetyChanged({ sandbox: sandbox(), eventsUpdatedAt: null, broker: null })).toBe(false)
     expect(aiSafetyChanged({ sandbox: sandbox({ settings: { ...DEFAULT_AGENT_SANDBOX_SETTINGS, mode: 'observe' } }) })).toBe(true)
-    expect(aiSafetyChanged({ sandbox: sandbox({ overrides: [{ userId: 'u_member' }] as unknown as AgentSandboxView['overrides'] }) })).toBe(true)
+    expect(aiSafetyChanged({ sandbox: sandbox({ overrides: [{ userId: 'u_member', name: null, email: null, mode: 'enforce', updatedAt: '2026-11-01T00:00:00.000Z' }] }) })).toBe(true)
     expect(aiSafetyChanged({ eventsUpdatedAt: '2026-11-01T00:00:00.000Z' })).toBe(true)
     // 「もう一方の AI に聞く」 starts as 「聞かない」: allowing it is a change.
     expect(aiSafetyChanged({ sandbox: sandbox(), secondOpinion: { allowed: false, updatedAt: null, updatedByName: null } })).toBe(false)
     expect(aiSafetyChanged({ sandbox: sandbox(), secondOpinion: { allowed: true, updatedAt: null, updatedByName: null } })).toBe(true)
+    // 「ブラウザ操作」 starts as 「使わない」 with no sites: turning it on, a site or a member's own mode is a change.
+    const browser = (over: Partial<AgentBrowserView> = {}): AgentBrowserView => ({ settings: { mode: 'off', sites: [] }, overrides: [], updatedAt: null, updatedBy: null, history: [], ...over })
+    expect(aiSafetyChanged({ sandbox: sandbox(), browser: browser() })).toBe(false)
+    expect(aiSafetyChanged({ sandbox: sandbox(), browser: browser({ settings: { mode: 'on', sites: [] } }) })).toBe(true)
+    expect(aiSafetyChanged({ sandbox: sandbox(), browser: browser({ settings: { mode: 'off', sites: [{ host: 'crm.example.com', level: 'read', assetHosts: [] }] } }) })).toBe(true)
+    expect(aiSafetyChanged({ sandbox: sandbox(), browser: browser({ overrides: [{ userId: 'u_member', name: null, email: null, mode: 'on', updatedAt: '2026-11-20T00:00:00.000Z' }] }) })).toBe(true)
   })
 })

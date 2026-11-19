@@ -18,6 +18,7 @@ import {
   agentEventSummarySchema,
   agentEventViewersSchema,
   agentSandboxSchema,
+  agentBrowserSchema,
   agentStopSchema,
   recordSettingsSchema,
   secondOpinionSchema,
@@ -815,6 +816,24 @@ export const agentSandboxApi = {
   /** A member's own mode (staged rollout); null = follow the company again. */
   setOverride: (companyId: string, userId: string, mode: AgentSandboxMode | null) =>
     getData(`/api/companies/${enc(companyId)}/agent-sandbox/overrides/${enc(userId)}`, agentSandboxSchema, { method: 'PUT', body: { mode } }),
+}
+
+// ---------------------------------------------------------------------------
+// 「ブラウザ操作」 (agent-browser.md): shapes from shared/types/agent-browser.ts. Owners/admins.
+// ---------------------------------------------------------------------------
+
+export type { AgentBrowserChange, AgentBrowserOverride, AgentBrowserView } from '../../../shared/types/agent-browser'
+export type { BrowserOperationLevel, BrowserOperationMode, BrowserOperationSettings } from '../../../shared/core/browser-operation'
+
+import type { BrowserOperationMode, BrowserOperationSettings } from '../../../shared/core/browser-operation'
+
+export const agentBrowserApi = {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/agent-browser`, agentBrowserSchema),
+  update: (companyId: string, settings: BrowserOperationSettings) =>
+    getData(`/api/companies/${enc(companyId)}/agent-browser`, agentBrowserSchema, { method: 'PUT', body: settings }),
+  /** A member's own mode; null = follow the company again. */
+  setOverride: (companyId: string, userId: string, mode: BrowserOperationMode | null) =>
+    getData(`/api/companies/${enc(companyId)}/agent-browser/overrides/${enc(userId)}`, agentBrowserSchema, { method: 'PUT', body: { mode } }),
 }
 
 // ---------------------------------------------------------------------------

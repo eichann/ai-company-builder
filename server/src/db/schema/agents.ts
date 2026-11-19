@@ -1,7 +1,8 @@
 import type Database from 'better-sqlite3'
 
 /**
- * The AI action log, the AI sandbox setting and the emergency stop (agent-events.md, agent-sandbox.md, agent-stop.md).
+ * The AI action log, the AI sandbox setting, the browser-operation setting and the emergency stop
+ * (agent-events.md, agent-sandbox.md, agent-browser.md, agent-stop.md).
  * Part of the one schema run by db/index.ts initDatabase (tables before every migration).
  */
 export const agentSchema = `
@@ -91,6 +92,32 @@ export const agentSchema = `
       change TEXT NOT NULL
     );
 
+    -- The browser-operation setting per company (「ブラウザ操作」, agent-browser.md; defaults
+    -- = off, no sites, while no row exists), the members whose mode differs, and every change.
+    CREATE TABLE IF NOT EXISTS agent_browser_settings (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      settings TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_browser_overrides (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK (mode IN ('off', 'on')),
+      updated_at TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_browser_history (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      changed_at TEXT NOT NULL,
+      changed_by TEXT NOT NULL,
+      change TEXT NOT NULL
+    );
+
     -- The emergency stop (monitoring M2, .claude/rules/agent-stop.md): one row per
     -- stop an owner/admin made. user_id NULL = everyone; tool NULL = the whole AI
     -- (else command / write / web / mcp-external). released_at NULL = in force.
@@ -123,6 +150,7 @@ export const agentSchema = `
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_conversation_at ON agent_events(company_id, conversation_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_event_settings_history_company ON agent_event_settings_history(company_id, changed_at);
     CREATE INDEX IF NOT EXISTS idx_agent_sandbox_history_company ON agent_sandbox_history(company_id, changed_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_browser_history_company ON agent_browser_history(company_id, changed_at);
     CREATE INDEX IF NOT EXISTS idx_agent_stops_company ON agent_stops(company_id, released_at, stopped_at);
 `
 

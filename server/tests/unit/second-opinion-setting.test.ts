@@ -98,6 +98,7 @@ describe('the member\'s policy', () => {
     addCompany('old')
     const policy = createAgentPolicyService({
       agentSandbox: { policyFor: () => ({ mode: 'off', allowedDomains: [], deniedReadPaths: [], onUnavailable: 'record-only', source: 'company' }) },
+      agentBrowser: { policyFor: () => ({ mode: 'off', sites: [], source: 'company' }) },
       agentStops: { policyFor: () => ({ all: false, tools: [] }) },
       secondOpinion: service,
       digest: { digest: (s: string) => createHash('sha256').update(s).digest('hex') },
