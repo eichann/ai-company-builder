@@ -141,10 +141,21 @@ describe('「ブラウザ操作」', () => {
     expect((await call('br-owner', 'GET', `${BASE}/agent-browser`)).json.data.overrides).toEqual([])
     expect((await call('br-leaver', 'GET', `${BASE}/me/agent-policy`)).status).toBe(404)
     // … and are invited back later.
-    const later = new Date(Date.now() + 1000).toISOString()
+    await new Promise(resolve => setTimeout(resolve, 5))
+    const later = ts()
     db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('m-br-leaver-2', 'br-leaver', CO, 'member', later, later)
     expect((await policyOf('br-leaver')).browser).toEqual({ ...on, mode: 'off', source: 'company' })
     expect((await call('br-owner', 'GET', `${BASE}/agent-browser`)).json.data.overrides).toEqual([])
+    // 「会社と同じ」 for them removes the old row and records nothing (nothing changed for anyone).
+    const historyBefore = (await call('br-owner', 'GET', `${BASE}/agent-browser`)).json.data.history.length
+    const cleared = await call('br-owner', 'PUT', `${BASE}/agent-browser/overrides/br-leaver`, { mode: null })
+    expect(cleared.status).toBe(200)
+    expect(cleared.json.data.history).toHaveLength(historyBefore)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM agent_browser_overrides WHERE company_id = ? AND user_id = ?').get(CO, 'br-leaver')).toEqual({ n: 0 })
+    // A mode set for them now is theirs, and recorded.
+    const set = await call('br-owner', 'PUT', `${BASE}/agent-browser/overrides/br-leaver`, { mode: 'on' })
+    expect(set.json.data.history).toHaveLength(historyBefore + 1)
+    expect((await policyOf('br-leaver')).browser).toMatchObject({ mode: 'on', source: 'member' })
   })
 
   it('a change of the setting or of an override is announced on the push channel with the new version', async () => {

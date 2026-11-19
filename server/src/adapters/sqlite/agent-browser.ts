@@ -43,7 +43,7 @@ export function sqliteAgentBrowserRepository(conn: Database.Database): AgentBrow
         } else {
           conn.prepare('DELETE FROM agent_browser_overrides WHERE company_id = ? AND user_id = ?').run(companyId, userId)
         }
-        addHistory(companyId, change)
+        if (change) addHistory(companyId, change)
       })()
     },
     history(companyId, limit) {

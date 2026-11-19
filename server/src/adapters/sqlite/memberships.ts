@@ -10,6 +10,13 @@ export function sqliteMembershipRepository(conn: Database.Database): MembershipR
       return row ? row.role : null
     },
 
+    joinedAt(companyId, userId) {
+      const row = conn.prepare(`
+        SELECT created_at FROM memberships WHERE user_id = ? AND company_id = ?
+      `).get(userId, companyId) as { created_at: string } | undefined
+      return row ? row.created_at : null
+    },
+
     listByCompany(companyId) {
       return conn.prepare(`
         SELECT m.id, m.user_id, m.company_id, m.role, m.created_at

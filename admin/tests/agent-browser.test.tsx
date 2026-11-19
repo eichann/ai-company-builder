@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import AiSafetyPage from '@/app/companies/[id]/advanced/ai-safety/page'
 import AgentBrowserPage from '@/app/companies/[id]/advanced/ai-safety/browser/page'
-import { BROWSER_INTRO, BROWSER_LEVEL_LABELS, BROWSER_LOGIN_NOTE, BROWSER_MODE_LABELS } from '@/lib/agent-browser'
+import { BROWSER_INTRO, BROWSER_LEVEL_LABELS, BROWSER_LOGIN_NOTE, BROWSER_MODE_LABELS, BROWSER_NOT_YET_NOTE } from '@/lib/agent-browser'
 import type { AgentBrowserView, Capabilities } from '@/lib/api'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok, ownerCapabilities } from './fixtures'
@@ -60,6 +60,8 @@ describe('ブラウザ操作', () => {
     renderInCompany(<AgentBrowserPage />)
     expect(await screen.findByText(BROWSER_INTRO)).toBeInTheDocument()
     expect(await screen.findByText(BROWSER_LOGIN_NOTE)).toBeInTheDocument()
+    // The app does nothing with it yet: said next to the choice.
+    expect(screen.getByText(BROWSER_NOT_YET_NOTE)).toBeInTheDocument()
     expect(screen.getByRole('radio', { name: new RegExp(`^${BROWSER_MODE_LABELS.off}`) })).toBeChecked()
     expect(screen.getByText('まだサイトはありません。')).toBeInTheDocument()
   })

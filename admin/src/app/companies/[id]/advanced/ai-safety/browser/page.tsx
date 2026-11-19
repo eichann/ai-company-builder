@@ -30,6 +30,7 @@ import {
   BROWSER_MODES,
   BROWSER_MODE_HELP,
   BROWSER_MODE_LABELS,
+  BROWSER_NOT_YET_NOTE,
   BROWSER_SITES_HELP,
   BROWSER_SITE_LIMIT,
   BROWSER_TITLE,
@@ -124,6 +125,7 @@ function SettingsForm({ saved, onSaved }: { saved: AgentBrowserView; onSaved: (n
             会社全体
           </CardTitle>
           <CardDescription>メンバーごとに変える場合は、下の「メンバーごとの動作」で指定します。</CardDescription>
+          <p className="text-sm font-medium text-foreground">{BROWSER_NOT_YET_NOTE}</p>
         </CardHeader>
         <div role="radiogroup" aria-label="会社全体" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
           {BROWSER_MODES.map((m) => (

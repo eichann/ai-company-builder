@@ -18,6 +18,8 @@ export interface NewMembership {
 export interface MembershipRepository {
   /** The user's role in the company, or null when they are not a member. */
   roleOf(companyId: string, userId: string): string | null
+  /** When the user's current membership began (created_at), or null when they are not a member. */
+  joinedAt(companyId: string, userId: string): string | null
   /** Every member of the company, oldest membership first. */
   listByCompany(companyId: string): MembershipRow[]
   /** The companies the user belongs to (「気になる動き」's sign-in alerts go to each). */

@@ -51,7 +51,8 @@ only through per-site operation types (later PRs), never by free clicking. Owner
 - An override applies only when it was set while the person is a member this time (its
   `updatedAt` ≥ the membership's `created_at`): someone who left and was invited back starts
   from the company's mode, and the admin page does not list the old row. Setting a mode for them
-  again replaces it.
+  again replaces it (recorded); 「会社と同じ」 removes it without a history row (nothing changed for
+  anyone). The join time is one row: `MembershipRepository.joinedAt`.
 - Admin 「ブラウザ操作」 (`admin/src/app/companies/[id]/advanced/ai-safety/browser/page.tsx`,
   「詳しい設定 › AI の安全」, owner/admin): 会社全体 (使わない / 使う), サイトの一覧 (操作するサイト,
   段階, 画面の部品を取る先 one per line; add / remove; invalid lines, a duplicate site or the
@@ -64,7 +65,9 @@ only through per-site operation types (later PRs), never by free clicking. Owner
 ## Not yet (later PRs)
 
 The desktop app does nothing with `browser` yet: no browser window, no operation types, no login
-storage. Those PRs must treat a missing or unreadable `browser` as off.
+storage. Those PRs must treat a missing or unreadable `browser` as off. Until then the admin page
+says so next to the mode choice (`BROWSER_NOT_YET_NOTE`, 「アプリ側の機能は準備中です…」); the PR
+that ships the app side removes that note (and its assertion in `admin/tests/agent-browser.test.tsx`).
 
 Tests: `server/tests/integration/agent-browser.test.ts` (owner/admin only, refusals of a
 wildcard / duplicate / operated host as a parts host / unknown level, no row = off, an unchanged

@@ -62,8 +62,8 @@ export function createAgentBrowserService(deps: AgentBrowserDeps) {
    * Whether an override still applies: its mode is known and it was set while the person is a
    * member this time (memberships' created_at; a member who left and came back starts over).
    */
-  function applies(override: StoredAgentBrowserOverride, joinedAt: string | undefined): boolean {
-    return isMode(override.mode) && joinedAt !== undefined && override.updatedAt >= joinedAt
+  function applies(override: StoredAgentBrowserOverride, joinedAt: string | null | undefined): boolean {
+    return isMode(override.mode) && typeof joinedAt === 'string' && override.updatedAt >= joinedAt
   }
 
   function view(companyId: string): AgentBrowserView {
@@ -105,8 +105,7 @@ export function createAgentBrowserService(deps: AgentBrowserDeps) {
   function overrideOf(companyId: string, userId: string): BrowserOperationMode | null {
     const own = agentBrowser.override(companyId, userId)
     if (!own) return null
-    const joinedAt = memberships.listByCompany(companyId).find(m => m.user_id === userId)?.created_at
-    return applies(own, joinedAt) ? own.mode as BrowserOperationMode : null
+    return applies(own, memberships.joinedAt(companyId, userId)) ? own.mode as BrowserOperationMode : null
   }
 
   return {
@@ -150,7 +149,10 @@ export function createAgentBrowserService(deps: AgentBrowserDeps) {
       const before = overrideOf(member.companyId, userId)
       // A stale row (from before the person left) is replaced or removed even when `before` reads null.
       const stale = before === null && agentBrowser.override(member.companyId, userId) !== null
-      if (before !== mode || stale) {
+      if (stale && mode === null) {
+        // Nothing changes for anyone (it already did not apply): drop the row, record nothing.
+        agentBrowser.saveOverride(member.companyId, userId, null, null)
+      } else if (before !== mode || stale) {
         const at = clock.now()
         agentBrowser.saveOverride(
           member.companyId,

@@ -33,8 +33,11 @@ export interface AgentBrowserRepository {
   save(companyId: string, stored: StoredAgentBrowser, change: AgentBrowserChangeRow): void
   overrides(companyId: string): StoredAgentBrowserOverride[]
   override(companyId: string, userId: string): StoredAgentBrowserOverride | null
-  /** Set (a value) or remove (null) one member's override, with its history row. */
-  saveOverride(companyId: string, userId: string, value: StoredAgentBrowserOverride | null, change: AgentBrowserChangeRow): void
+  /**
+   * Set (a value) or remove (null) one member's override, with its history row (null only when
+   * removing a row that no longer applied: nothing changed for anyone).
+   */
+  saveOverride(companyId: string, userId: string, value: StoredAgentBrowserOverride | null, change: AgentBrowserChangeRow | null): void
   /** Newest first. */
   history(companyId: string, limit: number): AgentBrowserChangeRow[]
 }

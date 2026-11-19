@@ -18,6 +18,9 @@ export const BROWSER_TITLE = 'ブラウザ操作'
 export const BROWSER_INTRO =
   'AI への相談の中で、AI が会社の決めたサイトを操作できるようにします。AI が触れるのは下の一覧のサイトだけで、サイトごとに用意された決まった操作の手順だけを使います（自由にクリックして回ることはしません）。'
 
+/** Shown by the mode choice until the app side ships (then removed: agent-browser.md). */
+export const BROWSER_NOT_YET_NOTE = 'アプリ側の機能は準備中です。今「使う」にしても、まだ何も変わりません。'
+
 export const BROWSER_MODES: BrowserOperationMode[] = ['off', 'on']
 
 export const BROWSER_MODE_LABELS: Record<BrowserOperationMode, string> = {
