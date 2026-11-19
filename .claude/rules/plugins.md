@@ -6,6 +6,7 @@ paths:
   - "shared/core/plugin-*.ts"
   - "shared/core/upstream-path.ts"
   - "server/tests/unit/plugins.test.ts"
+  - "server/tests/unit/plugin-browser-declaration.test.ts"
   - "server/tests/fixtures/plugins/**"
   - "shared/types/plugins.ts"
   - "server/src/ports/plugins.ts"
@@ -134,7 +135,8 @@ The dependency points one way: **business → connector**. (#372's first cut had
 - **Never reused or inherited** across slightly different work (owner): another kind of sales
   gets its own business plugin, copying a type is fine. The core keeps only generic links (a
   link's target is a label, `records.md`).
-- The role is not a key: a declaration with `service` is a connector (`PluginManifest.role`).
+- The role is not a key: a declaration with `service` is a connector (`PluginManifest.role`); one with
+  `browser` is a browser connector ("Browser connectors (contract only)").
 - Old shapes: `hubspot@0.1.x` (types of its own) and `hubspot@0.2.0` (`maps_to`, record types,
   `who`) are refused on the shelf with the reason; an install of one shows `not-on-shelf` and every
   business plugin using it `connector-missing` until an owner / admin chooses a current version.
@@ -547,6 +549,90 @@ GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
   `FAKE_PORTAL_ALIASES`); without it the fake stands in for the fixture's made-up host.
 - Test: `tests/unit/plugin-contract-v3.test.ts` with `fixtures/plugins/sample-portal` and
   `sample-portal-care`.
+
+## Browser connectors (contract only; `plugin-browser-declaration.ts`, 2026-11-20)
+
+A third kind of connector for 「ブラウザ操作」 (`agent-browser.md`): the chat AI operates an
+admin-approved site in the app's browser window **only through per-site operation types**, never
+free clicking. Still data only: what reads the page per type is a reviewed **adapter shipped in the
+app** (later PR), named by `adapter`; the declaration fixes what a plan names and the only write
+requests a type may send.
+
+```yaml
+id: lstep
+version: 0.1.0
+label: Lステップ
+contract: 1
+browser:
+  host: manager.linestep.net                 # exact (normalizeBrowserHost, the very spelling), no *.
+  asset_hosts: [d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net]   # exact, never the operated host
+  account: { label: LINE アカウント }          # required once a type writes: a plan is bound to one account
+  operations:
+    reminder_step_template:                  # ^[a-z][a-z0-9_]*$, ≤ 30 types
+      label: リマインダの段のテンプレートを付け替える   # one line, ≤ 60
+      effect: write                          # read | write | delete (the site's level caps it: levelAllows)
+      adapter: lstep.reminder_step_template  # ^[a-z0-9_]+\.[a-z0-9_]+$ (the app checks it exists)
+      shared: 全部の回で共有のリマインダです。前の回の人にも届きます。   # optional note, ≤ 200: a warning, blocks nothing
+      irreversible: false                    # true: one more confirmation right before the step (never on a read; required on a delete)
+      target: { reminder: id, step: id }     # what identifies the thing; never empty; id | text, ≤ 10
+      change: { template: id }               # the values the plan sets (none on a read)
+      writes:                                # 1–5 on write / delete, none on a read
+        - method: POST                       # POST | PUT | PATCH; DELETE only on effect: delete; never GET
+          path: /line/episode/step/pack/template   # fixed: no scheme, host, query, fragment, placeholder, // or ..
+          encoding: form                     # form (default) | json (a flat object)
+          body: { content_id: "{step}", template_id: "{template}", pack_id: "{reminder}", mode: replace }
+          ignore_body: [_token, _lm_user_id] # keys that may come with any value (CSRF / session), ≤ 10; never _method
+```
+
+- **A browser connector is `browser` and the common keys only** (role `connector`, `PluginManifest.browser`;
+  `service` empty). `service` with `browser` is refused; every API connector, business, contract-3 or
+  flow key is refused with 「ブラウザのつなぎ先には書けません」. Unknown keys at every level make it
+  unusable, as everywhere.
+- **A body value** is a literal (one line, ≤ 200, no `{` `}`) or exactly one `{name}` of the type's
+  target / change — never text around a placeholder. Each write names at least one target field,
+  and every target and change field appears in some write: the runner holds each request to the plan.
+  `_method` (any case) is refused as a body key and in `ignore_body` (a method override).
+- **Plain text** (`label`, `shared`, the account's `label`, literals, a plan's `text`) has no control
+  characters, bidirectional marks / overrides / isolates or zero-width characters (U+061C,
+  U+200B–U+200F, U+202A–U+202E, U+2066–U+2069, U+FEFF).
+- **`ignore_body` is trusted**: whatever it names passes with any value. A reviewer checks that each
+  entry is a CSRF / session field and nothing that changes what the request does.
+- **`effect: delete` requires `irreversible: true`** (the person confirms right before the deletion).
+- **`matchDeclaredWrite(operation, plan, request)`** — the guard that stops an approved save from
+  becoming a broadcast. The plan must fit the type (`browserPlanProblem`: exactly its fields; `id` =
+  `^[A-Za-z0-9_-]{1,64}$`, `text` 1–2000 characters without control, bidirectional or zero-width
+  characters but newline / tab, a target's `text` without leading or trailing whitespace), then: no
+  method-override header (`X-HTTP-Method-Override`, `X-HTTP-Method`, `X-Method-Override`, any case)
+  or `_method` body key; exact method and **raw on-the-wire path** (no percent-decoding or
+  normalization; the path without its query); **no query** (no declared write has one yet); the body
+  as **ordered string pairs for both encodings** (anything else — an object, a number, an array, a
+  missing value, in an ignored field too — is `body-shape`); the request's encoding equal to the
+  write's; every declared body key present with its literal or the plan's value, no other key but that
+  write's `ignore_body`, no repeated key. Answers `{ match: true, write }` or the reason (`plan`,
+  `method-override`, `not-declared`, `query`, `body-shape`, `encoding`, `repeated-key`, `missing-key`,
+  `wrong-value`, `extra-key`) with the key name — never a value.
+- **The runner's side** (later PRs; this module keeps no state):
+  - every request to the operated host that is not GET / HEAD goes through `matchDeclaredWrite`;
+    WSS to the operated host is refused unless an operation type declares it (none can yet);
+  - it reads the encoding from Content-Type and refuses anything but form / JSON or a charset other
+    than utf-8; it parses JSON with duplicate-key detection into pairs (`JSON.parse` keeps only the
+    last copy) and refuses a JSON body that is not one flat object of strings;
+  - it lets **each declared write of an approved step through at most once**, counted by the
+    returned `write` index (a replay of the same request is refused);
+  - the adapter confirms the target is **one existing item** before the write (an id like `0` or
+    `-1` is never "all").
+- **`browserOperationsAllowed(browser, settings)`**: the company's setting (`browser-operation.ts`) on,
+  the operated host one of its sites, every declared asset host among that site's, each type's effect
+  within the site's level; the rest come back with `off` / `site-not-allowed` /
+  `asset-host-not-allowed` (+ `missingAssetHosts`) / `level`.
+- **Not used yet**: the shelf refuses a package with `browser` (「a browser connector (browser) is not
+  used yet」, `services/plugin-shelf.ts`), so no company installs it, `pluginsFor` never lists it and no
+  app fetches it; `combineUse` refuses one, so no business plugin uses it. A released app's older parser
+  does not know `browser` (an unknown key: unusable). The app's runner, its adapters and the plan /
+  approval flow are later PRs.
+- Test: `server/tests/unit/plugin-browser-declaration.test.ts` (the example, every refusal, every
+  mismatch reason, `ignore_body`, the setting, `levelAllows` with an unknown effect), `plugin-shelf.test.ts` (refused on the shelf) — each
+  guard mutation-checked.
 
 ## Handing packages to the app (plan C2 「配る道」)
 
