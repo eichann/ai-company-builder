@@ -73,7 +73,9 @@ export function signInPageUrl(output: string): string | undefined {
     const finished = control >= 0 || match.index + match[0].length < output.length
     if (!finished) continue
     let url: URL
-    try { url = new URL(control >= 0 ? match[0].slice(0, control) : match[0]) } catch { continue }
+    // Sentence punctuation after the address (「…visit: URL.」) is not part of it.
+    const address = (control >= 0 ? match[0].slice(0, control) : match[0]).replace(/[.,;:!?)\]}]+$/, '')
+    try { url = new URL(address) } catch { continue }
     if (url.protocol !== 'https:' || url.username || url.password || url.port) continue
     const host = url.hostname.toLowerCase()
     if (SIGN_IN_HOSTS.has(host)) return url.toString()

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { AuthMode, CodexStatus } from '../../../../shared/agent'
 import type { ClaudeCodeStatus } from '../../../../shared/ipc-contract'
+import { claudeCodeReady } from '../claudeSetup'
 import { getAuthMode, getClaudeCodeStatus, getCodexStatus, isApiKeySaved } from '../api'
 
 /**
@@ -10,7 +11,7 @@ import { getAuthMode, getClaudeCodeStatus, getCodexStatus, isApiKeySaved } from 
  * ChatGPT login + live catalog, API key). Codex keeps the chat mounted even
  * when signed out, so drafts survive; the panel explains what is missing.
  */
-export function useAgentAuth() {
+export function useAgentAuth(root: string | undefined) {
   const [isReady, setIsReady] = useState(false)
   const [authMode, setAuthMode] = useState<AuthMode>('claude-code')
   const [codexStatus, setCodexStatus] = useState<CodexStatus>({ available: false, authenticated: false, models: [] })
@@ -23,12 +24,12 @@ export function useAgentAuth() {
     if (!background) setIsChecking(true)
     try {
       const [ccStatus, savedAuthMode, hasApiKey] = await Promise.all([
-        getClaudeCodeStatus(),
+        getClaudeCodeStatus(root),
         getAuthMode(),
         isApiKeySaved(),
       ])
 
-      const ccAvailable = ccStatus.available && ccStatus.authenticated
+      const ccAvailable = claudeCodeReady(ccStatus)
       setClaudeCodeAvailable(ccAvailable)
       setClaudeCodeError(ccStatus.error)
       setClaudeStatus(ccStatus)
@@ -56,5 +57,5 @@ export function useAgentAuth() {
     checkAuth()
   }
 
-  return { isReady, isChecking, authMode, codexStatus, claudeCodeAvailable, claudeCodeError, claudeStatus, claudeSetupShown: authMode === 'claude-code', recheck: () => checkAuth(true) }
+  return { isReady, isChecking, authMode, codexStatus, claudeCodeAvailable, claudeCodeError, claudeStatus, claudeSetupShown: authMode === 'claude-code', root, recheck: () => checkAuth(true) }
 }

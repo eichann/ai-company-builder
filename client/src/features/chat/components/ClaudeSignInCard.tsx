@@ -9,7 +9,7 @@ import { claudeSetupStep, CLAUDE_SETUP_GUIDE_URL } from '../claudeSetup'
  * Getting Claude Code ready without a terminal: install guidance when it is missing, and
  * 「Claude にログインする」, which starts the official CLI's own sign-in in the browser.
  */
-export function ClaudeSignInCard({ status, onRecheck }: { status: ClaudeCodeStatus | null; onRecheck: () => void }) {
+export function ClaudeSignInCard({ status, root, onRecheck }: { status: ClaudeCodeStatus | null; root: string | undefined; onRecheck: () => void }) {
   const [waiting, setWaiting] = useState(false)
   const [result, setResult] = useState<ClaudeSignInResult | null>(null)
   const [pageMissing, setPageMissing] = useState(false)
@@ -21,7 +21,7 @@ export function ClaudeSignInCard({ status, onRecheck }: { status: ClaudeCodeStat
     setResult(null)
     setPageMissing(false)
     try {
-      const answer = await startClaudeSignIn()
+      const answer = await startClaudeSignIn(root)
       setResult(answer)
       // Unverified: the chat's own check decides (an unreadable answer opens it, as before).
       if (answer.outcome === 'signed-in' || answer.outcome === 'unverified') onRecheck()

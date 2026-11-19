@@ -4,6 +4,11 @@ import type { ClaudeCodeStatus } from '../../../shared/ipc-contract'
 /** Anthropic's own install page (the app does not install Claude Code itself). */
 export const CLAUDE_SETUP_GUIDE_URL = 'https://code.claude.com/docs/en/setup'
 
+/** The chat may start with Claude Code (main's `authenticated` is false only for a plain sign-out). */
+export function claudeCodeReady(status: ClaudeCodeStatus): boolean {
+  return status.available && status.authenticated
+}
+
 export type ClaudeSetupStep = 'checking' | 'install' | 'sign-in' | 'ready'
 
 /**

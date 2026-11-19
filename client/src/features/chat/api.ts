@@ -108,12 +108,13 @@ export function getAuthMode(reads: AgentSetupReads = window.electronAPI) {
   return reads.getAuthMode()
 }
 
-export function getClaudeCodeStatus(reads: AgentSetupReads = window.electronAPI) {
-  return reads.getClaudeCodeStatus()
+/** `root`: the folder the chat runs in (its project settings count); without it the sign-in is unknown. */
+export function getClaudeCodeStatus(root: string | undefined, reads: AgentSetupReads = window.electronAPI) {
+  return reads.getClaudeCodeStatus(root)
 }
 
-export function startClaudeSignIn(outbound: ClaudeSignInOutbound = window.electronAPI) {
-  return outbound.startClaudeSignIn()
+export function startClaudeSignIn(root: string | undefined, outbound: ClaudeSignInOutbound = window.electronAPI) {
+  return outbound.startClaudeSignIn(root)
 }
 
 export function cancelClaudeSignIn(outbound: ClaudeSignInOutbound = window.electronAPI) {

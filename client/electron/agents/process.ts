@@ -53,6 +53,19 @@ function logOrDrain(child: ReturnType<typeof nodeSpawn>, quiet: boolean | undefi
   child.stderr?.on('data', (data: Buffer) => console.error('[agent-process] stderr:', data.toString()))
 }
 
+/**
+ * Stops a child started here. On Windows a `.cmd` runs under cmd.exe, so the whole tree is
+ * ended with taskkill; elsewhere the child is the CLI itself (`exec` in the wrapper).
+ */
+export function killAgentProcess(child: ReturnType<typeof nodeSpawn>, signal: NodeJS.Signals = 'SIGTERM') {
+  if (process.platform === 'win32' && child.pid) {
+    const killer = nodeSpawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+    killer.on('error', () => child.kill(signal))
+    return
+  }
+  child.kill(signal)
+}
+
 // Spawn helper for Claude Code CLI that works around Electron's FD inheritance issues (EBADF on posix_spawn).
 // Repair standard FDs, force fork+exec, and close inherited Chromium FDs before exec.
 // Every AI process starts here (Claude Code via the SDK's spawnClaudeCodeProcess, Codex

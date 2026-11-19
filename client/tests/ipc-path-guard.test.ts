@@ -78,6 +78,9 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'backup:openFolder': { args: [IN], paths: [0] },
   'skills:list': { args: [IN, '', 'd'], paths: [0] },
   'skills:publish': { args: [IN, 'x/.claude/skills/s/'], paths: [0] },
+  // The folder Claude Code's sign-in is checked / started in; outside → no folder (unknown, nothing started).
+  'config:getClaudeCodeStatus': { args: [IN], paths: [0] },
+  'claudeSignIn:start': { args: [IN], paths: [0] },
   'skills:makePrivate': { args: [IN, 'x/.claude/skills/s/'], paths: [0] },
   'skills:toggleNurturing': { args: [IN_FILE, true], paths: [0] },
   'tools:start': { args: [IN, 'dev'], paths: [0] },

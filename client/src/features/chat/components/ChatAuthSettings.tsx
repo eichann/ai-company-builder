@@ -18,11 +18,12 @@ interface AuthSettingsProps {
   claudeCodeAvailable: boolean
   claudeCodeError?: string | null
   claudeStatus: ClaudeCodeStatus | null
+  claudeRoot: string | undefined
   onRecheck: () => void
   onClose: () => void
 }
 
-export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeStatus, onRecheck, onClose }: AuthSettingsProps) {
+export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeStatus, claudeRoot, onRecheck, onClose }: AuthSettingsProps) {
   const { t } = useTranslation()
   const [authMode, setAuthMode] = useState<AuthMode>(initialAuthMode)
   const [codexStatus, setCodexStatus] = useState<CodexStatus | null>(null)
@@ -236,7 +237,7 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
         )}
 
         {/* Claude Code: install guidance, the browser sign-in, or a notice about the account */}
-        {authMode === 'claude-code' && <ClaudeSignInCard status={claudeStatus} onRecheck={onRecheck} />}
+        {authMode === 'claude-code' && <ClaudeSignInCard status={claudeStatus} root={claudeRoot} onRecheck={onRecheck} />}
 
         {/* Permission Mode Toggle (Claude Code mode only) */}
         {authMode === 'claude-code' && claudeCodeAvailable && (

@@ -22,6 +22,8 @@ interface SetupNeededProps {
   /** The chosen AI is Claude Code: its install and sign-in are done here (useAgentAuth). */
   claudeSetupShown: boolean
   claudeStatus: ClaudeCodeStatus | null
+  /** The folder the chat runs in, where Claude Code's sign-in is checked and started. */
+  claudeRoot: string | undefined
   claudeCodeAvailable: boolean
   claudeCodeError: string | null
   onOpenSettings: () => void
@@ -29,14 +31,14 @@ interface SetupNeededProps {
 }
 
 /** The chosen agent cannot start: what is missing, and the way to the settings. */
-export function ChatSetupNeeded({ claudeSetupShown, claudeStatus, claudeCodeAvailable, claudeCodeError, onOpenSettings, onRecheck }: SetupNeededProps) {
+export function ChatSetupNeeded({ claudeSetupShown, claudeStatus, claudeRoot, claudeCodeAvailable, claudeCodeError, onOpenSettings, onRecheck }: SetupNeededProps) {
   const { t } = useTranslation()
   if (claudeSetupShown) {
     // Claude Code: everything happens here (install guidance, the browser sign-in); no terminal.
     return (
       <div className="h-full flex flex-col items-center justify-center gap-4 p-8 text-center">
         <h3 className="text-lg font-medium text-ink">AI に相談する準備</h3>
-        <div className="w-full max-w-[360px]"><ClaudeSignInCard status={claudeStatus} onRecheck={onRecheck} /></div>
+        <div className="w-full max-w-[360px]"><ClaudeSignInCard status={claudeStatus} root={claudeRoot} onRecheck={onRecheck} /></div>
         <button type="button" onClick={onOpenSettings} className="text-xs text-ink-muted hover:text-ink">ほかの AI を選ぶ（設定）</button>
       </div>
     )

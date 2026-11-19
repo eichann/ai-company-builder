@@ -748,8 +748,8 @@ export interface IpcInvokeChannels {
   'codex:status': { args: []; result: CodexStatus }
   'config:getAuthMode': { args: []; result: AuthMode }
   'config:setAuthMode': { args: [mode: AuthMode]; result: boolean }
-  'config:getClaudeCodeStatus': { args: []; result: ClaudeCodeStatus }
-  'claudeSignIn:start': { args: []; result: ClaudeSignInResult }
+  'config:getClaudeCodeStatus': { args: [root?: string]; result: ClaudeCodeStatus }
+  'claudeSignIn:start': { args: [root?: string]; result: ClaudeSignInResult }
   'claudeSignIn:cancel': { args: []; result: boolean }
   'claudeSignIn:openPage': { args: []; result: boolean }
   'config:getPermissionMode': { args: []; result: PermissionMode }

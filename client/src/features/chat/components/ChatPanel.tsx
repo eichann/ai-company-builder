@@ -73,7 +73,8 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
 
-  const auth = useAgentAuth()
+  // The chat's working folder (ChatConversation: departmentPath || the company root).
+  const auth = useAgentAuth(departmentPath || currentCompany?.rootPath)
   const { isReady, isChecking, authMode, codexStatus } = auth
 
   const { tabs, activeTabId, setActiveTabId, createNewTab, openBackgroundTab, openSession, detachSession, closeTab, tabCallbacks } = useChatTabs(currentCompany?.id ?? '', paneId, t('chat.newChat'))
@@ -180,6 +181,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
         claudeCodeAvailable={auth.claudeCodeAvailable}
         claudeCodeError={auth.claudeCodeError}
         claudeStatus={auth.claudeStatus}
+        claudeRoot={auth.root}
         onRecheck={auth.recheck}
         onClose={() => {
           setShowSettings(false)
@@ -194,7 +196,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
       <div className="h-full relative flex flex-col">
         {aiTurnNotice}
         <div className={showSettings ? 'min-h-0 flex-1 invisible' : 'min-h-0 flex-1'}>
-          <ChatSetupNeeded claudeSetupShown={auth.claudeSetupShown} claudeStatus={auth.claudeStatus} onRecheck={auth.recheck} claudeCodeAvailable={auth.claudeCodeAvailable} claudeCodeError={auth.claudeCodeError} onOpenSettings={openSettings} />
+          <ChatSetupNeeded claudeSetupShown={auth.claudeSetupShown} claudeStatus={auth.claudeStatus} claudeRoot={auth.root} onRecheck={auth.recheck} claudeCodeAvailable={auth.claudeCodeAvailable} claudeCodeError={auth.claudeCodeError} onOpenSettings={openSettings} />
         </div>
         {settingsOverlay}
       </div>

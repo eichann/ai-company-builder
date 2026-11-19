@@ -248,10 +248,21 @@ CLI is missing, 「Claude にログインする」 when the CLI says nobody is s
   (2.1.317: the commands exist since 2.1.41, but the CLI's changelog fixes sign-outs caused by
   short commands such as `auth status` in 2.1.301 and 2.1.317) is
   `unknown` → the chat opens as before. The chat server's own check stays binary-only.
+- **Asked where the chat runs.** The check and the sign-in run with `cwd` = the chat's working
+  folder (`departmentPath` or the company root, validated against the allowed roots): the chat runs
+  Claude Code there with project settings, and a project `.claude/settings.json` (Bedrock,
+  `apiKeyHelper`, `ANTHROPIC_AUTH_TOKEN` / `BASE_URL`) changes the answer (from `/` such a member
+  read as signed out). No folder, or one outside the company folders → `unknown`, nothing started.
+  The gate is `withSignIn` (main) + `claudeCodeReady` (renderer).
+- A slow `auth status` (15 s) answers `unknown` but the CLI is left to finish (stopping it could cut
+  a token refresh — the sign-out the floor avoids); only one stuck for 2 minutes is stopped.
 - **One sign-in for the whole app** (any window, any company joins the running one); already
   signed in → nothing is started; success is what `auth status` says afterwards, not the exit code
   (exit 0 with an unreadable answer is `unverified`: the card rechecks and the chat's own rule decides);
-  やめる / 10 minutes / quitting stop the CLI (SIGTERM, then SIGKILL) and every end is a plain
+  やめる / 10 minutes / quitting stop the CLI (SIGTERM, then SIGKILL; Windows: `taskkill /T /F`, a
+  `.cmd` runs under cmd.exe — `killAgentProcess`; quitting also stops status checks still running);
+  a CLI gone since it was found (exit 127) reads as not installed; the page address is read from
+  stdout and stderr (never logged). Every end is a plain
   sentence with a retry (`claudeSignInMessage`). A personal account gets a notice, never a block.
 - Not built (owner decisions): installing Claude Code from the app, switching accounts (logout),
   checking that the account is the company's Team organisation, Codex's `codex login`.
@@ -260,7 +271,8 @@ CLI is missing, 「Claude にログインする」 when the CLI says nobody is s
   it through Jamf); no check of which organisation; Codex in a later PR. The company's Team signs in
   with Google (no SSO), so `auth login`'s default is right.
 - Test: `client/tests/claude-sign-in.test.ts` (mutation-checked), `src/features/chat/claudeSetup.test.ts`,
-  `tests/agent-env.test.ts` (quiet spawn).
+  `tests/agent-env.test.ts` (quiet spawn), `tests/ipc-path-guard.test.ts` (the folder),
+  `tests/ui/chat-panel.spec.ts` 「not signed in: …」.
 
 ## Choice prompts (the AI asks, the member picks)
 

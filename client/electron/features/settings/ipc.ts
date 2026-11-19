@@ -10,7 +10,8 @@ import { normalizePassthroughNames, refusedPassthroughNames } from '../../agents
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { ApiKeyStore } from '../../services/api-key-store'
 import type { ClaudeCli } from '../../services/claude-cli'
-import type { ClaudeSignInService } from '../../services/claude-sign-in'
+import { withSignIn, type ClaudeSignInService } from '../../services/claude-sign-in'
+import type { PathGuard } from '../ports'
 import type { ConfigStore } from '../../services/config-store'
 
 export interface SettingsDeps {
@@ -20,6 +21,8 @@ export interface SettingsDeps {
   claudeCli: ClaudeCli
   /** The member's own `claude auth status` / `claude auth login` (services/claude-sign-in.ts). */
   claudeSignIn: ClaudeSignInService
+  /** The chat's folder the sign-in is checked in must be a company folder (allowed roots). */
+  paths: PathGuard
   /** Codex CLI presence and login (agents/codex.ts). */
   codexStatus: () => Promise<CodexStatus>
 }
@@ -48,16 +51,22 @@ export function registerSettingsIpc(ipc: IpcRegistrar, deps: SettingsDeps): void
     return true
   })
 
-  ipc.handle('config:getClaudeCodeStatus', async () => {
+  // The folder the chat runs Claude Code in (its project settings may sign it in another way);
+  // anything not a company folder is no folder, and then the answer is unknown (never blocks).
+  const chatFolder = (root: unknown): string | undefined => {
+    if (typeof root !== 'string' || !root) return undefined
+    try { return deps.paths.validate(root) } catch { return undefined }
+  }
+
+  ipc.handle('config:getClaudeCodeStatus', async (_, root?: string) => {
     const installed = deps.claudeCli.status(true) // force refresh when explicitly requested
     if (!installed.available) return installed
-    const { signIn, signInSupported } = await deps.claudeSignIn.check()
-    // Only the CLI's plain "signed out" stops the chat; an unknown answer keeps today's behaviour.
-    return { ...installed, authenticated: signIn.state !== 'signed-out', signIn, signInSupported }
+    const folder = chatFolder(root)
+    return withSignIn(installed, await deps.claudeSignIn.check(folder))
   })
 
   // 「Claude にログインする」: the official CLI's own sign-in; one at a time for the whole app.
-  ipc.handle('claudeSignIn:start', () => deps.claudeSignIn.start())
+  ipc.handle('claudeSignIn:start', (_, root?: string) => deps.claudeSignIn.start(chatFolder(root)))
   ipc.handle('claudeSignIn:cancel', () => deps.claudeSignIn.cancel())
   ipc.handle('claudeSignIn:openPage', () => deps.claudeSignIn.openPage())
 

@@ -22,7 +22,7 @@ import { createApiKeyStore } from './services/api-key-store'
 import { createShellEnvironment } from './services/shell-env'
 import { configureAgentEnv } from './agents/agent-env'
 import { readCliVersionOutput } from './agents/codex-version'
-import { spawnAgentProcess } from './agents/process'
+import { killAgentProcess, spawnAgentProcess } from './agents/process'
 import { createClaudeCli } from './services/claude-cli'
 import { createClaudeSignIn } from './services/claude-sign-in'
 import { createAppPages, createBroadcastPort, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, receiveAppLinks, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
@@ -240,11 +240,12 @@ const claudeSignIn = createClaudeSignIn({
   env: () => shellEnv.env(),
   readVersion: (cli, env) => readCliVersionOutput(cli, env),
   // quiet: the CLI's sign-in output is never logged.
-  spawn: (cli, args, env) => spawnAgentProcess({ command: cli, args, env, quiet: true }),
+  spawn: (cli, args, env, cwd) => spawnAgentProcess({ command: cli, args, env, cwd, quiet: true }),
+  kill: (child, signal) => killAgentProcess(child as ReturnType<typeof spawnAgentProcess>, signal),
   openExternal: url => desktopShell.openExternal(url),
 })
 lifecycle.beforeQuit(() => claudeSignIn.stop())
-registerSettingsIpc(ipc, { config, apiKey, claudeCli, claudeSignIn, codexStatus: () => getCodexStatus(shellEnv.env()) })
+registerSettingsIpc(ipc, { config, apiKey, claudeCli, claudeSignIn, paths: allowedRoots, codexStatus: () => getCodexStatus(shellEnv.env()) })
 
 // A question belongs to the window that showed its conversation when it was asked (its owner).
 const agentInteractions = new AgentInteractions((owner, event, request) => {
