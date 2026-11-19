@@ -1,7 +1,8 @@
 // Which task-list answers the screen takes (useTaskList → nextListState). Guards: an answer older
 // than the one shown never replaces it (a completed task does not come back); under a stream of
 // overlapping reads every newer answer is still taken (the list never freezes); a failed newest
-// read does not cost an older good answer; another company's answer starts over.
+// read does not cost an older good answer; a late answer of the company left behind never hides
+// the list of the company now shown, while a newer read of another company replaces it.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { nextListState, type TaskListState } from './listAnswers'
@@ -35,9 +36,17 @@ test('the newest read failing does not cost an older good answer that lands afte
   assert.equal(s.error, null)
 })
 
-test('another company\'s answer replaces the list whatever its number (its own reads start over)', () => {
-  let s = nextListState(empty, 'co', 5, list('A'))
-  s = nextListState(s, 'co-b', 4, list('B'))
+test('A → B: A\'s read answering after B\'s list is shown never replaces it; a newer read of another company does', () => {
+  // A's read (5) on its way, the member switches to B, B's read (6) is shown, then A's answer lands.
+  let s = nextListState(empty, 'co-b', 6, list('B'))
+  s = nextListState(s, 'co-a', 5, list('A (late)'))
   assert.equal(s.companyId, 'co-b')
   assert.equal(shownOf(s), 'B')
+  s = nextListState(s, 'co-a', 7, list('A'))
+  assert.equal(s.companyId, 'co-a')
+  assert.equal(shownOf(s), 'A')
+  // Another company's failure shows no list of the one before.
+  s = nextListState(s, 'co-b', 8, { success: false, offline: true, error: 'つながりません' })
+  assert.equal(s.companyId, 'co-b')
+  assert.equal(s.data, null)
 })

@@ -13,12 +13,13 @@ export interface TaskListState {
   shown: number
 }
 
-/** `ticket`: the read's number, counted up as reads begin. */
+/** `ticket`: the read's number, counted up as reads begin (one count for every company, so a late answer of the company left behind is older too). */
 export function nextListState(state: TaskListState, companyId: string, ticket: number, answer: TaskListResult): TaskListState {
   const sameCompany = state.companyId === companyId
-  // An answer older than what is shown never replaces it (nor its error: the shown data is newer).
-  if (sameCompany && ticket <= state.shown) return state
+  // An answer older than what is shown never replaces it (nor its error: the shown data is newer) —
+  // also one of the company shown before (it would hide this company's list).
+  if (ticket <= state.shown) return state
   if (answer.success) return { companyId, data: answer.data, error: null, shown: ticket }
   // A failed read keeps the last good list; a later-arriving older success may still replace it.
-  return { companyId, data: sameCompany ? state.data : null, error: answer.error, shown: sameCompany ? state.shown : 0 }
+  return { companyId, data: sameCompany ? state.data : null, error: answer.error, shown: state.shown }
 }

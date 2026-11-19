@@ -113,7 +113,8 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
 - `useTaskList` (in AppShell): read at mount, on `records:changed` for the company
   (`onTasksMayHaveChanged`, `src/features/tasks/api.ts`), every 2 minutes and after the member's own
   change (`reload` asks `tasks:list` with `{ fresh: true }`: never a read main began before the
-  change); an answer older than the one shown is never taken (`listAnswers.ts` `nextListState`), so a
+  change); an answer older than the one shown is never taken (`listAnswers.ts` `nextListState`; reads are
+  numbered across companies, so a late answer of the company left behind never hides the new one's), so a
   slower older look never puts back what a press changed, while every newer answer is (no freeze under
   a stream of signals). `notifications:changed` no longer re-reads it (one records signal read the list twice):
   main sends `records:changed` itself when the title bar's watcher or the received-minutes checker
