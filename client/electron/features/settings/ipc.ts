@@ -59,9 +59,10 @@ export function registerSettingsIpc(ipc: IpcRegistrar, deps: SettingsDeps): void
   }
 
   ipc.handle('config:getClaudeCodeStatus', async (_, root?: string) => {
+    // The folder is judged first, whatever the CLI's state (no path from the renderer goes unchecked).
+    const folder = chatFolder(root)
     const installed = deps.claudeCli.status(true) // force refresh when explicitly requested
     if (!installed.available) return installed
-    const folder = chatFolder(root)
     return withSignIn(installed, await deps.claudeSignIn.check(folder))
   })
 
