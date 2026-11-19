@@ -58,6 +58,23 @@ test('a change while a read is on its way: whoever asks afterwards gets one more
   assert.deepEqual(await after2, { discarded: false, value: 'after the change' })
 })
 
+test('a stream of changes while a read is on its way queues one more read, not one per change (no backlog before the member\'s own read)', async () => {
+  const reads = createInFlightReads(() => 'server|session')
+  const r = slowRead()
+  const first = reads.read('co-a', 'list', r.run)
+  const waiting: Array<Promise<unknown>> = []
+  for (let i = 0; i < 5; i++) {
+    reads.changed('co-a')
+    waiting.push(reads.read('co-a', 'list', r.run))
+  }
+  r.runs[0].resolve('old')
+  await first
+  await tick()
+  assert.equal(r.runs.length, 2, 'one read after the first, shared by every later asker')
+  r.runs[1].resolve('new')
+  for (const w of waiting) assert.deepEqual(await w, { discarded: false, value: 'new' })
+})
+
 test('an answer that arrives after sign-out, another sign-in or a server change is discarded — for everyone who waited on it', async () => {
   let scope = 'server-1|session-1'
   const reads = createInFlightReads(() => scope)

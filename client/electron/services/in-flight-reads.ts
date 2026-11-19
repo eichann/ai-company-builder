@@ -10,6 +10,8 @@
 //   write). A read already on its way is then too old for anyone who asks afterwards: they get a
 //   read of their own, started once the old one has settled (so answers keep their order and the
 //   older one can never land after the newer). Callers that joined before the change keep theirs.
+//   A read still waiting to start has seen no answer yet, so later changes join it rather than
+//   queueing another one behind it (no backlog under a stream of changes).
 // - There is no abort: one caller giving up never cancels the request for the others (each read
 //   carries its own timeout).
 
@@ -24,6 +26,8 @@ export interface InFlightReads {
 
 interface Flight {
   generation: number
+  /** false while it waits for the read before it: it has asked the server nothing yet. */
+  started: boolean
   /** Settles (never rejects) when the read is over: what a later read of the same key waits for. */
   done: Promise<void>
   answer: Promise<SharedRead<unknown>>
@@ -40,11 +44,17 @@ export function createInFlightReads(scope: () => string): InFlightReads {
       const generation = generations.get(group) ?? 0
       const id = `${startScope}\u0000${group}\u0000${key}`
       const before = flights.get(id)
-      if (before && before.generation === generation) return before.answer as Promise<SharedRead<V>>
+      if (before && (before.generation === generation || !before.started)) {
+        // Not started yet: it will read after this change too.
+        before.generation = generation
+        return before.answer as Promise<SharedRead<V>>
+      }
       // A change happened since the read on its way began: one more read, after that one.
-      const start = before ? before.done.then(run) : run()
+      const flight = { generation, started: !before } as Flight
+      const start = before ? before.done.then(() => { flight.started = true; return run() }) : run()
       const answer = start.then((value): SharedRead<V> => (scope() === startScope ? { discarded: false, value } : { discarded: true }))
-      const flight: Flight = { generation, answer, done: answer.then(() => {}, () => {}) }
+      flight.answer = answer
+      flight.done = answer.then(() => {}, () => {})
       flights.set(id, flight)
       void flight.done.then(() => { if (flights.get(id) === flight) flights.delete(id) })
       return answer
