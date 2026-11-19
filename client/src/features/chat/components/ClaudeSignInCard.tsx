@@ -23,7 +23,8 @@ export function ClaudeSignInCard({ status, onRecheck }: { status: ClaudeCodeStat
     try {
       const answer = await startClaudeSignIn()
       setResult(answer)
-      if (answer.outcome === 'signed-in') onRecheck()
+      // Unverified: the chat's own check decides (an unreadable answer opens it, as before).
+      if (answer.outcome === 'signed-in' || answer.outcome === 'unverified') onRecheck()
     } catch {
       setResult({ outcome: 'failed', message: 'ログインを始められませんでした。もう一度お試しください。' })
     } finally {

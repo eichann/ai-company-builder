@@ -90,6 +90,8 @@ describe('reading claude auth status', () => {
 describe('the sign-in page address', () => {
   it('is taken only from Anthropic\'s own hosts', () => {
     assert.equal(signInPageUrl(`If the browser didn't open, visit: ${PAGE}\n`), PAGE)
+    // A terminal hyperlink (OSC 8) around the address.
+    assert.equal(signInPageUrl(`visit: \x1b]8;;${PAGE}\x07${PAGE}\x1b]8;;\x07\n`), PAGE)
     for (const other of ['https://claude.ai.evil.example/x', 'http://claude.ai/x', 'https://user:pw@claude.ai/x', 'https://claude.ai:8443/x', 'https://example.com/claude.ai']) {
       assert.equal(signInPageUrl(`visit: ${other}`), undefined, other)
     }
@@ -136,6 +138,12 @@ describe('signing in', () => {
     const second = notReally.service.start()
     ;(await notReally.nextLogin()).answer('', 0)
     assert.equal((await second).outcome, 'still-signed-out')
+
+    // Exit 0 but the CLI's answer afterwards cannot be read: not reported as signed in.
+    const unread = world({ statuses: [SIGNED_OUT, 'not json'] })
+    const third = unread.service.start()
+    ;(await unread.nextLogin()).answer('', 0)
+    assert.equal((await third).outcome, 'unverified')
   })
 
   it('two windows or two companies pressing at once share one login', async () => {
@@ -214,7 +222,11 @@ describe('signing in', () => {
     assert.equal(await service.openPage(), false)
     const pending = service.start()
     const login = await nextLogin()
-    ;(login.stdout as EventEmitter).emit('data', Buffer.from(`Opening browser to sign in…\nIf the browser didn't open, visit: ${PAGE}\n`))
+    // The address arrives in two chunks: the first half is never taken for the page.
+    const cut = PAGE.indexOf('?')
+    ;(login.stdout as EventEmitter).emit('data', Buffer.from(`Opening browser to sign in…\nIf the browser didn't open, visit: ${PAGE.slice(0, cut)}`))
+    assert.equal(await service.openPage(), false)
+    ;(login.stdout as EventEmitter).emit('data', Buffer.from(`${PAGE.slice(cut)}\n`))
     assert.equal(await service.openPage(), true)
     assert.deepEqual(opened, [PAGE])
     service.cancel()

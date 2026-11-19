@@ -238,21 +238,29 @@ CLI is missing, 「Claude にログインする」 when the CLI says nobody is s
   login) and reads `claude auth status --json` (`services/claude-sign-in.ts`). No credentials file
   or keychain item is read; of the status only `loggedIn` and the account kind (`team` /
   `enterprise` / `personal` / `other`) leave that file — never the address or organisation. The
-  login's output is never logged; the sign-in page address (Anthropic's hosts only,
+  login's output is never logged (spawned with `quiet`: `spawnAgentProcess` drains stderr instead
+  of logging it); the sign-in page address (Anthropic's hosts only, taken only once fully printed,
   `signInPageUrl`) stays in main, the renderer can only ask main to open it again
   (`claudeSignIn:openPage`).
 - **Today's members are never stopped by it.** Only the CLI's own `loggedIn: false` (first-party)
   makes the chat ask to sign in (`config:getClaudeCodeStatus` → `authenticated: false`); an
   unreadable answer, Bedrock / Vertex, a timeout, or a CLI older than `CLAUDE_SIGN_IN_MIN_VERSION`
-  (2.1.317: earlier `auth status` could leave a half-saved refresh and sign the member out) is
+  (2.1.317: the commands exist since 2.1.41, but the CLI's changelog fixes sign-outs caused by
+  short commands such as `auth status` in 2.1.301 and 2.1.317) is
   `unknown` → the chat opens as before. The chat server's own check stays binary-only.
 - **One sign-in for the whole app** (any window, any company joins the running one); already
-  signed in → nothing is started; success is what `auth status` says afterwards, not the exit code;
+  signed in → nothing is started; success is what `auth status` says afterwards, not the exit code
+  (exit 0 with an unreadable answer is `unverified`: the card rechecks and the chat's own rule decides);
   やめる / 10 minutes / quitting stop the CLI (SIGTERM, then SIGKILL) and every end is a plain
   sentence with a retry (`claudeSignInMessage`). A personal account gets a notice, never a block.
 - Not built (owner decisions): installing Claude Code from the app, switching accounts (logout),
   checking that the account is the company's Team organisation, Codex's `codex login`.
-- Test: `client/tests/claude-sign-in.test.ts` (mutation-checked), `src/features/chat/claudeSetup.test.ts`.
+- Owner decisions 2026-11-19: asking `auth status` is fine (to be confirmed with Anthropic's Team
+  support alongside the terms check); missing CLI → Anthropic's install page only (company Macs get
+  it through Jamf); no check of which organisation; Codex in a later PR. The company's Team signs in
+  with Google (no SSO), so `auth login`'s default is right.
+- Test: `client/tests/claude-sign-in.test.ts` (mutation-checked), `src/features/chat/claudeSetup.test.ts`,
+  `tests/agent-env.test.ts` (quiet spawn).
 
 ## Choice prompts (the AI asks, the member picks)
 

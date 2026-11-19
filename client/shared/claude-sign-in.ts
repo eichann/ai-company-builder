@@ -67,13 +67,26 @@ export function claudeSignInSupported(versionOutput: string): boolean {
  */
 export function signInPageUrl(output: string): string | undefined {
   for (const match of output.matchAll(/https:\/\/[^\s"'<>]+/g)) {
+    // Only an address the CLI has finished printing: a chunk may end mid-address, and a
+    // terminal hyperlink wraps it in escape sequences (control characters end it too).
+    const control = firstControl(match[0])
+    const finished = control >= 0 || match.index + match[0].length < output.length
+    if (!finished) continue
     let url: URL
-    try { url = new URL(match[0]) } catch { continue }
+    try { url = new URL(control >= 0 ? match[0].slice(0, control) : match[0]) } catch { continue }
     if (url.protocol !== 'https:' || url.username || url.password || url.port) continue
     const host = url.hostname.toLowerCase()
     if (SIGN_IN_HOSTS.has(host)) return url.toString()
   }
   return undefined
+}
+
+function firstControl(text: string): number {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (code < 0x20 || code === 0x7f) return i
+  }
+  return -1
 }
 
 const SIGN_IN_HOSTS = new Set(['claude.ai', 'claude.com', 'platform.claude.com', 'console.anthropic.com'])
@@ -84,6 +97,7 @@ export type ClaudeSignInOutcome =
   | 'timed-out'
   | 'failed'
   | 'still-signed-out'
+  | 'unverified'
   | 'not-installed'
   | 'outdated'
 
@@ -100,6 +114,7 @@ export function claudeSignInMessage(outcome: ClaudeSignInOutcome): string {
     case 'cancelled': return 'ログインを途中でやめました。もう一度「Claude にログインする」を押すと、やり直せます。'
     case 'timed-out': return 'ログインが終わらないまま時間がたったため、いったん止めました。インターネットにつながっているか確かめてから、もう一度お試しください。'
     case 'failed': return 'ログインできませんでした。インターネットにつながっているか確かめてから、もう一度お試しください。'
+    case 'unverified': return 'ログインが終わったかどうか確かめられませんでした。「もう一度確かめる」を押してください。'
     case 'still-signed-out': return 'ブラウザでのログインが終わっていないようです。もう一度「Claude にログインする」を押してください。'
     case 'not-installed': return 'このパソコンに Claude Code が見つかりません。入れてから「もう一度確かめる」を押してください。'
     case 'outdated': return 'このパソコンの Claude Code が古いため、アプリからログインできません。Claude Code を新しくしてから、もう一度お試しください。'

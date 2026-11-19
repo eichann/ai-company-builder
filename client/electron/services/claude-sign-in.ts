@@ -142,7 +142,8 @@ export function createClaudeSignIn(deps: ClaudeSignInDeps): ClaudeSignInService 
     if (exit !== 0) return result('failed')
     // Success is what the CLI reports afterwards, not the exit code alone.
     const after = await runStatus(cli, env)
-    return after.state === 'signed-out' ? result('still-signed-out', after) : result('signed-in', after)
+    if (after.state === 'signed-in') return result('signed-in', after)
+    return after.state === 'signed-out' ? result('still-signed-out', after) : result('unverified', after)
   }
 
   async function begin(entry: RunningSignIn, stopped: StopReason): Promise<ClaudeSignInResult> {

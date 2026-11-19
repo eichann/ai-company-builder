@@ -239,7 +239,8 @@ const claudeSignIn = createClaudeSignIn({
   cliPath: () => claudeCli.status().cliPath,
   env: () => shellEnv.env(),
   readVersion: (cli, env) => readCliVersionOutput(cli, env),
-  spawn: (cli, args, env) => spawnAgentProcess({ command: cli, args, env }),
+  // quiet: the CLI's sign-in output is never logged.
+  spawn: (cli, args, env) => spawnAgentProcess({ command: cli, args, env, quiet: true }),
   openExternal: url => desktopShell.openExternal(url),
 })
 lifecycle.beforeQuit(() => claudeSignIn.stop())

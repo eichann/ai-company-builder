@@ -155,6 +155,26 @@ test('spawnAgentProcess: the child never sees a planted secret, from the caller 
   fs.rmSync(dir, { recursive: true, force: true })
 })
 
+test('spawnAgentProcess quiet: a child\'s stderr (the Claude sign-in\'s output) never reaches the log', { skip: !posix }, async () => {
+  configureAgentEnv({ passthroughNames: () => [], log: () => {} })
+  const logged: string[] = []
+  const original = console.error
+  console.error = (...args: unknown[]) => { logged.push(args.map(String).join(' ')) }
+  try {
+    const run = async (quiet: boolean) => {
+      const child = spawnAgentProcess({ command: '/bin/sh', args: ['-c', 'echo planted-sign-in-output >&2'], quiet })
+      await new Promise(resolve => child.on('close', resolve))
+    }
+    await run(true)
+    assert.ok(!logged.some(line => line.includes('planted-sign-in-output')))
+    // The same child without quiet is logged: the check above can see a leak.
+    await run(false)
+    assert.ok(logged.some(line => line.includes('planted-sign-in-output')))
+  } finally {
+    console.error = original
+  }
+})
+
 test('Claude Code chat through the real provider and SDK: the CLI gets no planted secret', { skip: !posix }, async () => {
   configureAgentEnv({ passthroughNames: () => [], log: () => {} })
   const dir = scratch()
