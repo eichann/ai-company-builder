@@ -12,6 +12,7 @@
  *   write-access.ts       evaluating GET /me/write-access for a path (the app)
  *   client-version.ts     desktop-app build identity: parsing and ordering
  *   agent-sandbox.ts      the company's AI sandbox setting (「AI の囲い」): shape, validation
+ *   browser-operation.ts  the company's browser-operation setting (「ブラウザ操作」): sites, request rule, login storage
  *   key-broker.ts         the API key broker (「API キー」): services, rules, input validation
  *   yaml-lite.ts          the strict YAML subset of type definitions and record files
  *   record-types.ts       type definitions (.acb/types/<name>.md): parse, validate, compare versions
@@ -52,6 +53,7 @@ export * from './instruction-files'
 export * from './write-access'
 export * from './client-version'
 export * from './agent-sandbox'
+export * from './browser-operation'
 export * from './key-broker'
 export * from './yaml-lite'
 export * from './record-types'
