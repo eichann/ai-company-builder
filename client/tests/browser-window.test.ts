@@ -1,8 +1,8 @@
 /**
  * 「ブラウザ操作」 in the app (agent-browser.md "The app's window"), the parts that need no browser:
- * the window's request and navigation rules, the `ai`-mode write gate's decision, which policy
- * answers open, close and clear what, where a login is kept, and who may ask over IPC. The same
- * guards inside a real Electron: browser-window-electron.test.ts.
+ * the window's request, navigation, proxy and header rules, the `ai`-mode write gate's decision,
+ * which policy answers open, close and clear what, the login in memory only, and who may ask over
+ * IPC. The same guards inside a real Electron: browser-window-electron.test.ts.
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -12,15 +12,15 @@ import path from 'node:path'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
 import type { AgentPolicy } from '../../shared/types/agent-sandbox'
 import {
-  browserAiStopped, decideAiWrite, decideWindowRequest, hostForLog, navigationAllowed,
+  browserAiStopped, browserProxyScript, browserResponseHeaders, decideAiWrite, decideWindowRequest, hostForLog, navigationAllowed,
   type BrowserWindowState,
 } from '../shared/browser-operation'
 import {
-  browserPartition, createBrowserController, loginStorageFor,
-  type BrowserShell, type BrowserWindowSpec, type LoginStorage,
+  browserPartition, createBrowserController,
+  type BrowserShell, type BrowserWindowSpec,
 } from '../electron/features/browser/controller'
-import { createKeptLogins } from '../electron/features/browser/logins'
-import { registerBrowserIpc } from '../electron/features/browser/ipc'
+import { removeLeftoverBrowserPartitions } from '../electron/features/browser/leftovers'
+import { isMainFrameSender, registerBrowserIpc } from '../electron/features/browser/ipc'
 import { createAgentPolicyStore } from '../electron/services/agent-policy-store'
 import type { IpcInvokeEvent, IpcRegistrar } from '../electron/ipc/registrar'
 
@@ -92,35 +92,64 @@ test('a refusal is logged by host only, never with its path or query', () => {
   assert.equal(hostForLog('not a url ?secret'), '(unreadable)')
 })
 
+
+test('every connection of the window not to the site\'s hosts goes to the refusing proxy', () => {
+  const find = new Function(`${browserProxyScript(site, 4321)}; return FindProxyForURL`)() as (url: string, host: string) => string
+  assert.equal(find('https://manager.example.net/x', 'manager.example.net'), 'DIRECT')
+  assert.equal(find('https://manager.example.net./x', 'MANAGER.example.net.'), 'DIRECT')
+  assert.equal(find('https://cdn.example.net/a.js', 'cdn.example.net'), 'DIRECT')
+  for (const host of ['evil.example.org', 'example.net', 'x.manager.example.net', 'manager.example.net.evil.org', '127.0.0.1', '']) {
+    assert.equal(find(`https://${host}/`, host), 'PROXY 127.0.0.1:4321', host)
+  }
+  assert.throws(() => browserProxyScript(site, 0))
+})
+
+test('a response never registers a reporting endpoint, and a page turns off DNS prefetching', () => {
+  const headers = { 'Report-To': ['{"group":"g"}'], NEL: ['{}'], 'reporting-endpoints': ['e="https://evil.example.org"'], 'X-DNS-Prefetch-Control': ['on'], 'Content-Type': ['text/html'] }
+  assert.deepEqual(browserResponseHeaders(headers, 'mainFrame'), { 'Content-Type': ['text/html'], 'X-DNS-Prefetch-Control': ['off'] })
+  assert.deepEqual(browserResponseHeaders(headers, 'subFrame')['X-DNS-Prefetch-Control'], ['off'])
+  assert.deepEqual(browserResponseHeaders(headers, 'xhr'), { 'Content-Type': ['text/html'] })
+})
+
 // ---------------------------------------------------------------------------
-// Where a login is kept
+// The login lives in memory only
 // ---------------------------------------------------------------------------
 
-test('the login is kept on disk only when the sandbox is 「囲う」 and really runs here', () => {
-  const here = { platformSandbox: true, agentSandbox: true }
-  assert.equal(loginStorageFor('enforce', here), 'disk')
-  assert.equal(loginStorageFor('observe', here), 'memory')
-  assert.equal(loginStorageFor('off', here), 'memory')
-  assert.equal(loginStorageFor('enforce', { ...here, platformSandbox: false }), 'memory', 'Windows records only')
-  assert.equal(loginStorageFor('enforce', { ...here, agentSandbox: false }), 'memory', 'the API-key agent runs enforce as observe')
-  assert.match(browserPartition('u', 'c', 'a.example.net', 'disk'), /^persist:acb-browser-[0-9a-f]{32}$/)
-  assert.doesNotMatch(browserPartition('u', 'c', 'a.example.net', 'memory'), /^persist:/)
-  assert.notEqual(browserPartition('u', 'c', 'a.example.net', 'disk'), browserPartition('u2', 'c', 'a.example.net', 'disk'), 'one session per account')
-  assert.notEqual(browserPartition('u', 'c', 'a.example.net', 'disk'), browserPartition('u', 'c2', 'a.example.net', 'disk'), 'one session per company')
+test('a window\'s session is always in memory, one per account, company and site', () => {
+  assert.match(browserPartition('u', 'c', 'a.example.net'), /^acb-browser-[0-9a-f]{32}$/)
+  assert.notEqual(browserPartition('u', 'c', 'a.example.net'), browserPartition('u2', 'c', 'a.example.net'))
+  assert.notEqual(browserPartition('u', 'c', 'a.example.net'), browserPartition('u', 'c2', 'a.example.net'))
+  assert.notEqual(browserPartition('u', 'c', 'a.example.net'), browserPartition('u', 'c', 'b.example.net'))
+})
+
+test('a browser session an earlier build kept on disk is removed at start; nothing else is touched', () => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-browser-start-'))
+  const partitions = path.join(userData, 'Partitions')
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-browser-outside-'))
+  fs.mkdirSync(path.join(partitions, 'acb-browser-0123456789abcdef0123456789abcdef', 'Network'), { recursive: true })
+  fs.writeFileSync(path.join(partitions, 'acb-browser-0123456789abcdef0123456789abcdef', 'Network', 'Cookies'), 'sid=1')
+  fs.mkdirSync(path.join(partitions, 'ACB-Browser-old'))
+  fs.mkdirSync(path.join(partitions, 'something-else'))
+  fs.writeFileSync(path.join(outside, 'keep.txt'), 'x')
+  fs.symlinkSync(outside, path.join(partitions, 'acb-browser-link'))
+  assert.equal(removeLeftoverBrowserPartitions(userData, { warn() {} }), 2)
+  assert.deepEqual(fs.readdirSync(partitions).sort(), ['acb-browser-link', 'something-else'])
+  assert.ok(fs.existsSync(path.join(outside, 'keep.txt')), 'a link is never followed')
+  assert.equal(removeLeftoverBrowserPartitions(path.join(userData, 'none'), { warn() {} }), 0)
 })
 
 // ---------------------------------------------------------------------------
 // The controller: policy → open / close / clear
 // ---------------------------------------------------------------------------
 
-const policy = (browser: unknown, sandboxMode: 'off' | 'observe' | 'enforce' = 'enforce'): AgentPolicy =>
-  ({ version: 'v', sandbox: { mode: sandboxMode, allowedDomains: [], deniedReadPaths: [], onUnavailable: 'record-only', source: 'company' }, ...(browser ? { browser } : {}) }) as AgentPolicy
+const policy = (browser: unknown): AgentPolicy =>
+  ({ version: 'v', sandbox: { mode: 'enforce', allowedDomains: [], deniedReadPaths: [], onUnavailable: 'record-only', source: 'company' }, ...(browser ? { browser } : {}) }) as AgentPolicy
 const on = (sites: BrowserSiteSetting[] = [site]) => ({ mode: 'on', sites, source: 'company' })
 
-function world() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-browser-'))
+function world(options: { clearFails?: boolean; slow?: boolean } = {}) {
   const opened: Array<BrowserWindowSpec & { closed: boolean; site: BrowserSiteSetting }> = []
   const cleared: string[] = []
+  let releaseClear: () => void = () => {}
   const shell: BrowserShell = {
     open(spec) {
       const entry = { ...spec, closed: false }
@@ -131,18 +160,16 @@ function world() {
         updateSite(next) { entry.site = next },
       }
     },
-    async clearPartition(partition) { cleared.push(partition) },
+    clearPartition(partition) {
+      if (options.clearFails) return Promise.reject(new Error('busy'))
+      if (options.slow) return new Promise<void>(resolve => { releaseClear = () => { cleared.push(partition); resolve() } })
+      cleared.push(partition)
+      return Promise.resolve()
+    },
   }
   let user: string | null = 'user-1'
-  const logins = createKeptLogins(() => path.join(dir, 'browser-logins.json'), { warn() {} })
-  const changed: string[] = []
-  const browser = createBrowserController({
-    shell, logins, userId: () => user,
-    storageFor: mode => loginStorageFor(mode, { platformSandbox: true, agentSandbox: true }) as LoginStorage,
-    onChanged: c => changed.push(c),
-    log: { warn() {} },
-  })
-  return { browser, opened, cleared, logins, changed, setUser: (u: string | null) => { user = u }, dir }
+  const browser = createBrowserController({ shell, userId: () => user, log: { warn() {} } })
+  return { browser, opened, cleared, setUser: (u: string | null) => { user = u }, release: () => releaseClear() }
 }
 
 test('nothing opens before a valid answer, for an older server without `browser`, or when it is off', () => {
@@ -173,11 +200,12 @@ test('the host the renderer names opens only when the current policy lists it ex
   assert.equal(w.browser.open('c2', site.host).ok, false, 'another company\'s policy is not this one')
   assert.equal(w.browser.open('c1', site.host).ok, true)
   assert.equal(w.opened.length, 1)
+  assert.doesNotMatch(w.opened[0].partition, /^persist:/, 'the login lives in memory only')
   assert.equal(w.browser.open('c1', site.host).ok, true, 'a second press focuses the same window')
   assert.equal(w.opened.length, 1)
 })
 
-test('a failed refresh closes the windows and opens nothing until a valid answer; the login stays', () => {
+test('a failed refresh closes the windows and opens nothing until a valid answer', () => {
   const w = world()
   w.browser.policyAnswered('c1', policy(on()))
   w.browser.open('c1', site.host)
@@ -185,11 +213,9 @@ test('a failed refresh closes the windows and opens nothing until a valid answer
   assert.equal(w.opened[0].closed, true)
   assert.deepEqual(w.browser.sites('c1'), { sites: [] })
   assert.equal(w.browser.open('c1', site.host).ok, false)
-  assert.deepEqual(w.cleared, [], 'unknown is not "removed": the login is cleared only by a valid answer')
-  assert.equal(w.logins.all().length, 1)
 })
 
-test('a site removed or the mode turned off closes its window and clears its login', () => {
+test('a site removed or the mode turned off closes its window and clears its login', async () => {
   const w = world()
   const other: BrowserSiteSetting = { host: 'other.example.net', level: 'read', assetHosts: [] }
   w.browser.policyAnswered('c1', policy(on([site, other])))
@@ -198,11 +224,12 @@ test('a site removed or the mode turned off closes its window and clears its log
   w.browser.policyAnswered('c1', policy(on([other])))
   assert.equal(w.opened[0].closed, true)
   assert.equal(w.opened[1].closed, false)
-  assert.ok(w.cleared.includes(w.opened[0].partition))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(w.cleared, [w.opened[0].partition])
   w.browser.policyAnswered('c1', policy({ mode: 'off', sites: [other], source: 'company' }))
+  await new Promise(resolve => setImmediate(resolve))
   assert.equal(w.opened[1].closed, true)
-  assert.ok(w.cleared.includes(w.opened[1].partition))
-  assert.deepEqual(w.logins.all(), [])
+  assert.deepEqual(w.cleared, [w.opened[0].partition, w.opened[1].partition])
 })
 
 test('a changed site (its asset hosts) reaches the open window at once', () => {
@@ -215,67 +242,49 @@ test('a changed site (its asset hosts) reaches the open window at once', () => {
   assert.equal(w.opened[0].closed, false)
 })
 
-test('the sandbox leaving 「囲う」 closes a window keeping its login on disk and clears every kept login of the company', () => {
-  const w = world()
-  const other: BrowserSiteSetting = { host: 'other.example.net', level: 'read', assetHosts: [] }
-  w.browser.policyAnswered('c1', policy(on([site, other])))
-  w.browser.open('c1', site.host)
-  assert.match(w.opened[0].partition, /^persist:/)
-  // A login kept from an earlier run, no window this run.
-  w.logins.record({ partition: browserPartition('user-1', 'c1', other.host, 'disk'), userId: 'user-1', companyId: 'c1', host: other.host })
-  w.browser.policyAnswered('c1', policy(on([site, other]), 'observe'))
-  assert.equal(w.opened[0].closed, true)
-  assert.ok(w.cleared.includes(w.opened[0].partition))
-  assert.ok(w.cleared.includes(browserPartition('user-1', 'c1', other.host, 'disk')))
-  assert.deepEqual(w.logins.all(), [])
-  w.browser.open('c1', site.host)
-  assert.doesNotMatch(w.opened[1].partition, /^persist:/, 'now in memory')
-})
-
-test('signing out closes every window and clears every login; another account clears the others\' kept logins', () => {
+test('signing out closes every window and clears every login; another account clears the others\'', async () => {
   const w = world()
   w.browser.policyAnswered('c1', policy(on()))
   w.browser.open('c1', site.host)
-  // The sandbox went off: the disk window closed; the next one keeps its login in memory.
-  w.browser.policyAnswered('c1', policy(on(), 'off'))
-  w.browser.open('c1', site.host)
-  assert.doesNotMatch(w.opened[1].partition, /^persist:/)
-  w.cleared.length = 0
   w.browser.signedOut()
-  assert.ok(w.opened.every(o => o.closed))
-  assert.deepEqual(w.logins.all(), [])
-  assert.deepEqual(w.cleared, [w.opened[1].partition], 'the login kept in memory is cleared too')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(w.opened[0].closed, true)
+  assert.deepEqual(w.cleared, [w.opened[0].partition])
   assert.equal(w.browser.open('c1', site.host).ok, false, 'the old policy is gone with the account')
 
-  // A kept login of user-1 from an earlier run; user-2 signs in.
-  const kept = browserPartition('user-1', 'c1', site.host, 'disk')
-  w.logins.record({ partition: kept, userId: 'user-1', companyId: 'c1', host: site.host })
-  w.setUser('user-2')
+  w.browser.policyAnswered('c1', policy(on()))
+  w.browser.open('c1', site.host)
   w.cleared.length = 0
+  w.setUser('user-2')
   w.browser.signedIn('user-2')
-  assert.deepEqual(w.cleared, [kept])
-  assert.deepEqual(w.logins.all(), [])
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(w.opened[1].closed, true)
+  assert.deepEqual(w.cleared, [w.opened[1].partition])
 })
 
-test('「ログインを消す」 closes the window and clears both kinds of login of that site only', () => {
+test('「ログインを消す」 answers only once the login is cleared, and says so when it could not be', async () => {
   const w = world()
   w.browser.policyAnswered('c1', policy(on()))
   w.browser.open('c1', site.host)
-  assert.equal(w.browser.clearLogin('c1', 'evil.example.org').ok, false)
-  assert.equal(w.browser.clearLogin('c1', site.host).ok, true)
+  assert.equal((await w.browser.clearLogin('c1', 'evil.example.org')).ok, false)
+  assert.deepEqual(await w.browser.clearLogin('c1', site.host), { ok: true })
   assert.equal(w.opened[0].closed, true)
-  assert.deepEqual(w.cleared.sort(), [browserPartition('user-1', 'c1', site.host, 'disk'), browserPartition('user-1', 'c1', site.host, 'memory')].sort())
-})
+  assert.deepEqual(w.cleared, [browserPartition('user-1', 'c1', site.host)])
 
-test('an edited list of kept logins never names another session to clear', () => {
-  const w = world()
-  fs.writeFileSync(path.join(w.dir, 'browser-logins.json'), JSON.stringify({ logins: [
-    { partition: '', userId: 'user-1', companyId: 'c1', host: 'a' },
-    { partition: 'persist:main', userId: 'user-1', companyId: 'c1', host: 'a' },
-    { partition: 'persist:acb-browser-zz', userId: 'user-1', companyId: 'c1', host: 'a' },
-  ] }))
-  w.browser.signedOut()
-  assert.deepEqual(w.cleared, [])
+  const slow = world({ slow: true })
+  slow.browser.policyAnswered('c1', policy(on()))
+  let settled = false
+  const pending = slow.browser.clearLogin('c1', site.host).then(r => { settled = true; return r })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(settled, false, 'not before the session is cleared')
+  slow.release()
+  assert.deepEqual(await pending, { ok: true })
+
+  const failing = world({ clearFails: true })
+  failing.browser.policyAnswered('c1', policy(on()))
+  const answer = await failing.browser.clearLogin('c1', site.host)
+  assert.equal(answer.ok, false)
+  assert.match(answer.ok ? '' : answer.message, /消せませんでした/)
 })
 
 // ---------------------------------------------------------------------------
@@ -313,23 +322,37 @@ test('every refresh that brings no valid answer is reported as failed (never a s
 // IPC: who may ask
 // ---------------------------------------------------------------------------
 
-test('only the main window\'s own page may list, open or clear; the host is checked by the controller', async () => {
+test('the sender check accepts only the main window\'s main frame', () => {
+  const isMain = (id: number) => id === 1
+  const event = (id: number, frame: number | null, main: number | null) => ({
+    sender: { id, mainFrame: main === null ? null : { frameTreeNodeId: main } },
+    senderFrame: frame === null ? null : { frameTreeNodeId: frame },
+  })
+  assert.equal(isMainFrameSender(event(1, 7, 7), isMain), true)
+  assert.equal(isMainFrameSender(event(1, 8, 7), isMain), false, 'a frame inside the page')
+  assert.equal(isMainFrameSender(event(2, 7, 7), isMain), false, 'a consultation window')
+  assert.equal(isMainFrameSender(event(1, null, 7), isMain), false, 'a frame already gone')
+  assert.equal(isMainFrameSender(event(1, 7, null), isMain), false)
+})
+
+test('only the main window\'s own page may list, open or clear; an opened window follows the policy', async () => {
   const handlers = new Map<string, (event: IpcInvokeEvent, ...args: unknown[]) => unknown>()
   const ipc = { handle: (channel: string, handler: (event: IpcInvokeEvent, ...args: unknown[]) => unknown) => { handlers.set(channel, handler) }, on() {} } as unknown as IpcRegistrar
   const asked: string[] = []
+  const watched: string[] = []
   const browser = {
-    sites: () => ({ sites: [{ host: site.host, loginKept: true }] }),
+    sites: () => ({ sites: [{ host: site.host }] }),
     open: (_c: string, host: string) => { asked.push(`open ${host}`); return { ok: true as const } },
-    clearLogin: (_c: string, host: string) => { asked.push(`clear ${host}`); return { ok: true as const } },
+    clearLogin: async (_c: string, host: string) => { asked.push(`clear ${host}`); return { ok: true as const } },
   }
-  registerBrowserIpc(ipc, { browser, fromMainWindow: event => event.sender.id === 1, refresh: async () => undefined, watch: () => {} })
+  registerBrowserIpc(ipc, { browser, fromMainWindow: event => event.sender.id === 1, refresh: async () => undefined, watch: c => { watched.push(c) } })
   const from = (id: number) => ({ sender: { id, isDestroyed: () => false, send() {} } })
   assert.deepEqual(await handlers.get('browser:sites')!(from(2), 'c1'), { sites: [] })
   assert.equal((await handlers.get('browser:open')!(from(2), 'c1', site.host) as { ok: boolean }).ok, false)
   assert.equal((await handlers.get('browser:clearLogin')!(from(2), 'c1', site.host) as { ok: boolean }).ok, false)
   assert.equal((await handlers.get('browser:open')!(from(1), 'c1', 42) as { ok: boolean }).ok, false)
-  assert.deepEqual(asked, [])
-  assert.deepEqual(await handlers.get('browser:sites')!(from(1), 'c1'), { sites: [{ host: site.host, loginKept: true }] })
-  await handlers.get('browser:open')!(from(1), 'c1', site.host)
+  assert.deepEqual([asked, watched], [[], []])
+  await handlers.get('browser:open')!(from(1), 'c2', site.host)
   assert.deepEqual(asked, [`open ${site.host}`])
+  assert.deepEqual(watched, ['c2'], 'a window opened without the settings page still hears policy changes')
 })

@@ -45,6 +45,13 @@ interface Result {
   afterClose: unknown
   cookiesAfter: number
   hits: Hit[]
+  evilConnections: number
+  udpPackets: number
+  partitionInMemory: boolean
+  partitionFolders: string[]
+  aiWorker: unknown
+  clicksNotRun: string[]
+  urlDuringClicks: string
 }
 
 function freePort(): Promise<number> {
@@ -74,13 +81,13 @@ before(async () => {
   if (!canRun) return
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-browser-window-'))
   makeCertificate(dir)
-  const port = await freePort()
+  const ports = [await freePort(), await freePort(), await freePort()]
   // The `electron` package names its binary (downloaded on first use since Electron 42).
   const electron = createRequire(import.meta.url)('electron') as string
   const output = await new Promise<string>((resolve, reject) => {
     const child = spawn(electron, [path.join(clientDir, 'tests/browser-window-harness/main.ts')], {
       cwd: clientDir,
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '', NODE_OPTIONS: '--import tsx', BROWSER_TEST_DIR: dir, BROWSER_TEST_PORT: String(port) },
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '', NODE_OPTIONS: '--import tsx', BROWSER_TEST_DIR: dir, BROWSER_TEST_PORTS: ports.join(',') },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let out = ''
@@ -104,8 +111,21 @@ test('nothing a page or a click does reaches a host the site does not list', { s
   // fetch, XHR, image, beacon, WebSocket, iframe, a redirect to it, window.open, a target=_blank
   // link, a javascript: link, a plain link, a download from it.
   assert.deepEqual(hitsTo('evil.test'), [])
+  assert.deepEqual(result.clicksNotRun, [], 'every click ran on the operated page (none led it away)')
+  assert.equal(result.urlDuringClicks, 'https://op.test/')
   assert.equal(result.urlAfterClicks, 'https://op.test/')
   assert.equal(result.windowsAfterClicks, 1, 'no popup window was made')
+})
+
+test('what the request hook cannot see goes nowhere either: preconnect, reports, WebRTC (STUN, TURN)', { skip }, () => {
+  // Not even a TCP connection to evil.test (a preconnect, a NEL report, TURN over TCP open one).
+  assert.equal(result.evilConnections, 0)
+  assert.equal(result.udpPackets, 0, 'no STUN datagram')
+})
+
+test('the login lives in memory only: no session folder on disk', { skip }, () => {
+  assert.equal(result.partitionInMemory, true)
+  assert.deepEqual(result.partitionFolders.filter(name => /^acb-browser-/i.test(name)), [])
 })
 
 test('the window itself refuses popups, navigations and frames off the operated host (not only the request hook)', { skip }, () => {
@@ -152,6 +172,9 @@ test('in ai mode no write reaches the operated host without an approving step; r
   // Only the member's own (human mode) writes and the one approved write arrived: no beacon, form, XHR, WebSocket.
   assert.deepEqual(writes.map(h => `${h.method} ${h.path} ${h.body}`), ['POST /human-save h', 'POST /ai-ok approved', 'POST /human-again h'])
   assert.equal(hitsTo('op.test').some(h => h.method === 'UPGRADE'), false)
+  // A dedicated worker's write and the writes sent as the page goes away are refused too.
+  assert.equal(result.aiWorker, 'refused')
+  assert.equal(hitsTo('op.test').some(h => ['/ai-worker', '/ai-keepalive', '/ai-unload-beacon', '/ai-form', '/ai-beacon'].includes(h.path)), false)
 })
 
 test('in ai mode an approved write goes out; another write, a method override or a stopped AI does not', { skip }, () => {
@@ -161,8 +184,8 @@ test('in ai mode an approved write goes out; another write, a method override or
   assert.equal(result.aiStopped, 'refused')
 })
 
-test('a closed window\'s session reaches nowhere, and clearing removes its login', { skip }, () => {
-  assert.equal(result.closed, true)
+test('a window the app closes cannot be kept open by the page, and its session then reaches nowhere; clearing removes its login', { skip }, () => {
+  assert.equal(result.closed, true, 'a beforeunload handler did not keep it open')
   assert.equal(result.afterClose, 'refused')
   assert.equal(result.cookiesBefore, 1)
   assert.equal(result.cookiesAfter, 0)

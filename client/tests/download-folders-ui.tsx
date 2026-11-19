@@ -113,11 +113,11 @@ const tree = (dir: string, depth: number, max: number): TreeNode[] =>
 Object.assign(window, {
   electronAPI: {
     gitBinaryStatus: async () => ({ bundled: true, binary: 'bundled' }),
-    // 「ブラウザ操作」: `?browser=kept|memory` gives the member one site (else the company has it off).
-    getBrowserSites: async () => ({ sites: params.get('browser') ? [{ host: 'manager.example.net', loginKept: params.get('browser') === 'kept' }] : [] }),
+    // 「ブラウザ操作」: `?browser=1` gives the member one site (else the company has it off); `?browser=clearFails` fails 「ログインを消す」.
+    getBrowserSites: async () => ({ sites: params.get('browser') ? [{ host: 'manager.example.net' }] : [] }),
     onBrowserChanged: () => () => {},
     openBrowserSite: async (_companyId: string, host: string) => { (window as unknown as { browserOpened: string[] }).browserOpened = [...((window as unknown as { browserOpened?: string[] }).browserOpened ?? []), host]; return { ok: true } },
-    clearBrowserLogin: async () => ({ ok: true }),
+    clearBrowserLogin: async () => (params.get('browser') === 'clearFails' ? { ok: false, message: 'ログインを消せませんでした。もう一度お試しください。' } : { ok: true }),
     // 自分の設定 → 「Google で許可する」 opens the Google section: offline here, it says so.
     getGoogleStatus: async () => ({ success: false, offline: true, error: 'サーバーにつながりませんでした。' }),
     getWorkSwitches: async () => ({ success: true, switches: mySwitches() }),

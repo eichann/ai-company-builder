@@ -95,11 +95,9 @@ import { servePluginFiles } from './electron-adapter'
 // lane B ▲
 // lane C ▼
 import { createBrowserWindowShell } from './browser-window'
-import { createBrowserController, loginStorageFor } from './features/browser/controller'
-import { createKeptLogins } from './features/browser/logins'
-import { registerBrowserIpc } from './features/browser/ipc'
-import { agentCan } from '../shared/agents/registry'
-import { sandboxPlatform } from '../shared/agents/sandbox-policy'
+import { createBrowserController } from './features/browser/controller'
+import { removeLeftoverBrowserPartitions } from './features/browser/leftovers'
+import { isMainFrameSender, registerBrowserIpc } from './features/browser/ipc'
 import { createProcedureReader } from './features/ai-turns/procedures'
 import { createPersonStepBinder, registerPluginStepsIpc } from './features/plugin-steps/ipc'
 import { createStepWriteAreas } from './features/plugin-steps/write-areas'
@@ -545,11 +543,11 @@ const stepWriteAreas = createStepWriteAreas({ baseUrl: getServerApiUrl, cookies:
 const bindPersonStep = createPersonStepBinder({ baseUrl: getServerApiUrl, cookies: session.cookies })
 // 「ブラウザ操作」 (agent-browser.md "The app's window"): the member opens a site the company allowed in a
 // window of its own and logs in there; the AI is not connected yet. Only a valid policy answer opens anything.
+// Its login lives in memory only: a browser session an earlier build kept on disk goes first.
+removeLeftoverBrowserPartitions(userDataDir())
 const browser = createBrowserController({
   shell: createBrowserWindowShell(),
-  logins: createKeptLogins(() => path.join(userDataDir(), 'browser-logins.json')),
   userId: session.userId,
-  storageFor: mode => loginStorageFor(mode, { platformSandbox: sandboxPlatform(process.platform), agentSandbox: agentCan(config.authMode(), 'sandbox') }),
   onChanged: companyId => appWindow.send('browser:changed', { companyId }),
 })
 agentControl.policy.onPolicy((companyId, policy) => browser.policyAnswered(companyId, policy))
@@ -557,7 +555,7 @@ agentControl.policy.onRefreshFailed(companyId => browser.policyFailed(companyId)
 registerBrowserIpc(ipc, {
   browser,
   // The main window's own page only: not a consultation window, not a frame inside the page.
-  fromMainWindow: event => mainWindowHost.isWindow(event.sender.id) && !!event.senderFrame && event.senderFrame.frameTreeNodeId === event.sender.mainFrame.frameTreeNodeId,
+  fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
   refresh: companyId => agentControl.policy.refresh(companyId),
   watch: companyId => agentControl.watchSignals(companyId),
 })

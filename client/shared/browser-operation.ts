@@ -15,11 +15,9 @@ import type { AgentStopPolicy } from '../../shared/types/agent-stop'
 // IPC payloads (browser:sites / browser:open / browser:clearLogin)
 // ---------------------------------------------------------------------------
 
-/** One site the member may open, as the settings show it. */
+/** One site the member may open, as the settings show it (its login lives in memory only). */
 export interface BrowserSiteView {
   host: string
-  /** True: the login is kept after the app quits (the member's AI sandbox is 「囲う」). */
-  loginKept: boolean
 }
 
 /** The member's sites now: empty when 「ブラウザ操作」 is off, unknown or the policy could not be read. */
@@ -38,6 +36,7 @@ export const BROWSER_WORDS = {
   clearLogin: 'ログインを消す',
   cleared: 'このサイトのログインを消しました。',
   none: 'いま開けるサイトはありません。',
+  clearFailed: 'ログインを消せませんでした。もう一度お試しください。',
   notAllowed: 'このサイトは、いまは開けません。会社の設定が変わった可能性があります。',
 } as const
 
@@ -101,6 +100,42 @@ export function navigationAllowed(site: BrowserSiteSetting, url: string, mainFra
   try { parsed = new URL(url) } catch { return false }
   if (parsed.protocol !== 'https:' || parsed.port !== '' || parsed.username || parsed.password) return false
   return normalizeBrowserHost(parsed.hostname) === site.host
+}
+
+/**
+ * The window's session proxy (a PAC script): the site's hosts go DIRECT, everything else to the
+ * shell's own refusing proxy on 127.0.0.1 (`refusePort`). It reaches what the request hook cannot
+ * see — preconnect, the Reporting API / NEL, WebRTC's TCP — since every connection of the session
+ * asks the proxy. Hosts are the setting's (`normalizeBrowserHost`: [a-z0-9.-]) and are embedded as
+ * JSON, so the script is data, never the setting's code.
+ */
+export function browserProxyScript(site: BrowserSiteSetting, refusePort: number): string {
+  if (!Number.isInteger(refusePort) || refusePort <= 0 || refusePort > 65535) throw new Error('bad refusing proxy port')
+  const hosts = [site.host, ...site.assetHosts].map(h => normalizeBrowserHost(h)).filter((h): h is string => !!h)
+  return `var DIRECT_HOSTS = ${JSON.stringify(hosts)};
+function FindProxyForURL(url, host) {
+  host = String(host).toLowerCase();
+  if (host.charAt(host.length - 1) === '.') host = host.slice(0, -1);
+  for (var i = 0; i < DIRECT_HOSTS.length; i++) if (DIRECT_HOSTS[i] === host) return 'DIRECT';
+  return 'PROXY 127.0.0.1:${refusePort}';
+}`
+}
+
+/** Response headers that register a reporting endpoint (Reporting API, NEL): never kept. */
+const REPORTING_HEADERS = new Set(['report-to', 'reporting-endpoints', 'nel'])
+
+/**
+ * A response's headers as the window receives them: no reporting endpoint headers, and a document
+ * (a frame's page) gets `X-DNS-Prefetch-Control: off`, so the page's links are not looked up ahead.
+ */
+export function browserResponseHeaders(headers: Record<string, string[]>, resourceType: string): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const [name, value] of Object.entries(headers)) {
+    if (REPORTING_HEADERS.has(name.toLowerCase()) || name.toLowerCase() === 'x-dns-prefetch-control') continue
+    out[name] = value
+  }
+  if (resourceType === 'mainFrame' || resourceType === 'subFrame') out['X-DNS-Prefetch-Control'] = ['off']
+  return out
 }
 
 /** The host to name in a log line about a refused address: never its path, query or body. */

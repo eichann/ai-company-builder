@@ -16,9 +16,12 @@ import type { BrowserSiteSetting } from '../../../shared/core/browser-operation'
 import { startSites } from './sites'
 
 const dir = process.env.BROWSER_TEST_DIR!
-const port = Number(process.env.BROWSER_TEST_PORT)
+const [port, evilPort, udpPort] = (process.env.BROWSER_TEST_PORTS ?? '').split(',').map(Number)
 const TRUSTED = ['op.test', 'assets.test', 'evil.test']
-app.commandLine.appendSwitch('host-rules', [...TRUSTED, 'untrusted.test'].map(h => `MAP ${h} 127.0.0.1:${port}`).join(', '))
+app.commandLine.appendSwitch('host-rules', [
+  ...['op.test', 'assets.test', 'untrusted.test'].map(h => `MAP ${h} 127.0.0.1:${port}`),
+  `MAP evil.test 127.0.0.1:${evilPort}`,
+].join(', '))
 app.setPath('userData', path.join(dir, 'userData'))
 app.setPath('downloads', path.join(dir, 'downloads'))
 fs.mkdirSync(path.join(dir, 'downloads'), { recursive: true })
@@ -47,25 +50,31 @@ function loaded(win: BrowserShellWindow): Promise<void> {
 }
 
 async function run() {
-  const sites = await startSites(dir, port)
+  const sites = await startSites(dir, { site: port, evil: evilPort, udp: udpPort })
   const refusalLog: string[] = []
   const shell = createBrowserWindowShell({ show: false, log: { warn: line => { refusalLog.push(String(line)) } } })
   const site: BrowserSiteSetting = { host: 'op.test', level: 'write', assetHosts: ['assets.test'] }
-  const partition = browserPartition('user-1', 'company-1', 'op.test', 'disk')
+  const partition = browserPartition('user-1', 'company-1', 'op.test')
+  result.partitionInMemory = !partition.startsWith('persist:')
   trustTestCertificate(partition)
   let closed = false
   const win = shell.open({ partition, site, onClosed: () => { closed = true } })
   const page = win.webContents
   await loaded(win)
   await wait(1500)
-  const js = (code: string) => page.executeJavaScript(code, true)
+  const js = (code: string) => page.executeJavaScript(code, true).catch((error: unknown) => { throw new Error(`${String(error)} in: ${code.slice(0, 80)}`) })
 
   // The member clicks every way out (a user gesture each).
+  // A click that cannot run (the page was left) is recorded, and the run goes on to count what leaked.
+  const clicksNotRun: string[] = []
   for (const id of ['popup', 'js', 'nav', 'redirect-nav', 'download', 'download-evil']) {
-    await js(`document.getElementById('${id}').click()`)
+    await js(`document.getElementById('${id}').click()`).catch(() => { clicksNotRun.push(id) })
     await wait(400)
   }
-  await js(`window.open('https://evil.test/window-open'); 1`)
+  await js(`window.open('https://evil.test/window-open'); 1`).catch(() => { clicksNotRun.push('window.open') })
+  result.clicksNotRun = clicksNotRun
+  result.urlDuringClicks = page.getURL()
+  if (clicksNotRun.length > 0) { await page.loadURL('https://op.test/').catch(() => {}); await wait(500) }
   result.notificationPermission = await js(`Notification.requestPermission()`)
   result.geolocation = await js(`new Promise(r => navigator.geolocation.getCurrentPosition(() => r('granted'), e => r('denied:' + e.code)))`)
   result.assetScriptRan = await js(`window.assetScript === true`)
@@ -95,6 +104,15 @@ async function run() {
   // The refused form left an error page: back to the site (a read, allowed in `ai` mode).
   await page.loadURL('https://op.test/').catch(() => {})
   await wait(500)
+  // A dedicated worker's write is the page's too: the gate sees it.
+  result.aiWorker = await js(`new Promise(r => { const w = new Worker('/worker.js'); w.onmessage = e => r(e.data); w.onerror = () => r('no worker') })`)
+  // Writes sent while the page goes away (keepalive fetch, beacon on pagehide / unload).
+  await js(`addEventListener('pagehide', () => {
+    fetch('/ai-keepalive', { method: 'POST', body: 'k', keepalive: true }).catch(() => {})
+    navigator.sendBeacon('/ai-unload-beacon', 'b')
+  }); 1`)
+  await page.loadURL('https://op.test/').catch(() => {})
+  await wait(1000)
 
   // An approved step: only the write its decider says yes to goes out.
   await win.setMode('ai', { stopped: () => false, decide: write => write.url === 'https://op.test/ai-ok' && write.body === 'approved' })
@@ -111,6 +129,9 @@ async function run() {
   await js(`document.cookie = 'sid=1; Secure; Max-Age=3600'; localStorage.setItem('k', 'v'); 1`)
   const ses = session.fromPartition(partition)
   result.cookiesBefore = (await ses.cookies.get({})).length
+  result.partitionFolders = fs.existsSync(path.join(dir, 'userData', 'Partitions')) ? fs.readdirSync(path.join(dir, 'userData', 'Partitions')) : []
+  // The page tries to keep its window open (the member already clicked in it, so the handler counts).
+  await js(`addEventListener('beforeunload', e => { e.preventDefault(); e.returnValue = '' }); 1`)
   win.close()
   await wait(500)
   result.closed = closed
@@ -121,7 +142,7 @@ async function run() {
   result.cookiesAfter = (await ses.cookies.get({})).length
 
   // A certificate the system does not trust is refused, never bypassed.
-  const untrusted = browserPartition('user-1', 'company-1', 'untrusted.test', 'memory')
+  const untrusted = browserPartition('user-1', 'company-1', 'untrusted.test')
   trustTestCertificate(untrusted)
   const other = shell.open({ partition: untrusted, site: { host: 'untrusted.test', level: 'read', assetHosts: [] }, onClosed: () => {} })
   await loaded(other)
@@ -129,7 +150,11 @@ async function run() {
   result.untrustedUrl = other.webContents.getURL()
   other.close()
 
+  // Late arrivals (reports are sent after a delay): give them a moment.
+  await wait(2000)
   result.hits = sites.hits
+  result.evilConnections = sites.evilConnections
+  result.udpPackets = sites.udpPackets
   sites.close()
   console.log(`RESULT ${JSON.stringify(result)}`)
   app.quit()

@@ -3,17 +3,21 @@
 // Electron. Kept apart from electron-adapter.ts because it is one security surface of its own,
 // tested in a real Electron (tests/browser-window-electron.test.ts loads exactly this file).
 //
-// A window shows one admin-approved site, in a session of its own, with nothing of the app in
-// reach: no preload, no IPC, sandboxed. Its session has ONE request hook (Electron keeps only the
-// last `onBeforeRequest` listener, so it is installed here and nowhere else) deciding every
-// request with the site's rule; popups, downloads, permissions, navigations off the operated host
-// and certificate errors are refused, and nothing is handed to the system browser or another app.
-// In `ai` mode (PR 5's runner) every write to the operated host is paused through DevTools Fetch
-// and goes out only when the injected decider says yes.
+// A window shows one admin-approved site, in an in-memory session of its own, with nothing of the
+// app in reach: no preload, no IPC, sandboxed. Its session has ONE request hook and ONE response
+// header hook (Electron keeps only the last listener of each, so they are installed here and
+// nowhere else) and a proxy that sends every connection not to the site's hosts to a local
+// refusing proxy (what the request hook cannot see: preconnect, reporting, WebRTC's TCP). Popups,
+// downloads, permissions, client certificates, navigations off the operated host and certificate
+// errors are refused, and nothing is handed to the system browser or another app. In `ai` mode
+// (PR 5's runner) every write to the operated host is paused through DevTools Fetch and goes out
+// only when the injected decider says yes.
+import net from 'node:net'
 import { BrowserWindow, session, type Session, type WebContents } from 'electron'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
 import {
-  BROWSER_WORDS, createRefusalTally, decideAiWrite, decideWindowRequest, hostForLog, isReadMethod, navigationAllowed,
+  BROWSER_WORDS, browserProxyScript, browserResponseHeaders, createRefusalTally, decideAiWrite, decideWindowRequest,
+  hostForLog, isReadMethod, navigationAllowed,
   type BrowserWindowMode, type BrowserWindowState, type BrowserWriteAttempt, type BrowserWriteDecider,
 } from '../shared/browser-operation'
 import type { BrowserShell, BrowserWindowHandle, BrowserWindowSpec } from './features/browser/controller'
@@ -39,9 +43,30 @@ interface SessionState extends BrowserWindowState {
 
 const REFUSAL_LOG_MS = 10_000
 
+/**
+ * The proxy every connection to a host the site does not list is sent to: on 127.0.0.1, it answers
+ * 403 to whatever it is asked and closes, so nothing goes further (a closed port could let a client
+ * try another way).
+ */
+function startRefusingProxy(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer(socket => {
+      socket.on('error', () => {})
+      socket.once('data', () => socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'))
+      socket.setTimeout(5_000, () => socket.destroy())
+    })
+    server.on('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      server.unref()
+      resolve((server.address() as net.AddressInfo).port)
+    })
+  })
+}
+
 export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>; show?: boolean } = {}): BrowserShell & { open(spec: BrowserWindowSpec): BrowserShellWindow } {
   const log = options.log ?? console
   const states = new Map<string, SessionState>()
+  let refusingProxy: Promise<number> | null = null
 
   const flush = (state: SessionState) => {
     if (state.flushTimer) { clearTimeout(state.flushTimer); state.flushTimer = null }
@@ -50,6 +75,14 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
   const refuse = (state: SessionState, host: string, reason: string) => {
     state.tally.add(host, reason)
     state.flushTimer ??= setTimeout(() => flush(state), REFUSAL_LOG_MS)
+  }
+
+  /** Points the session's proxy at the site's hosts (DIRECT) and the refusing proxy (the rest). */
+  async function routeOnly(ses: Session, site: BrowserSiteSetting) {
+    refusingProxy ??= startRefusingProxy()
+    const port = await refusingProxy
+    const script = browserProxyScript(site, port)
+    await ses.setProxy({ mode: 'pac_script', pacScript: `data:application/x-ns-proxy-autoconfig;base64,${Buffer.from(script).toString('base64')}` })
   }
 
   /** The partition's session with its guards, installed once per session (also one only cleared). */
@@ -70,6 +103,10 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       if (!decision.allow) refuse(created, hostForLog(details.url), decision.reason)
       callback({ cancel: !decision.allow })
     })
+    // The one response header hook: no reporting endpoints, no DNS prefetch of a page's links.
+    ses.webRequest.onHeadersReceived((details, callback) => {
+      callback({ responseHeaders: browserResponseHeaders(details.responseHeaders ?? {}, details.resourceType) })
+    })
     ses.on('will-download', (event, item) => {
       event.preventDefault()
       refuse(created, hostForLog(item.getURL()), 'download')
@@ -86,6 +123,8 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
 
   function guardContents(contents: WebContents, state: SessionState) {
     const allowed = (url: string, mainFrame: boolean) => !!state.site && navigationAllowed(state.site, url, mainFrame)
+    // WebRTC never sends UDP itself; its TCP goes through the session's proxy (refused off the site).
+    contents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp')
     contents.setWindowOpenHandler(({ url }) => {
       refuse(state, hostForLog(url), 'popup')
       return { action: 'deny' }
@@ -106,6 +145,13 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       event.preventDefault()
       callback(false)
       refuse(state, hostForLog(url), 'certificate')
+    })
+    // Never a client certificate of this computer.
+    contents.on('select-client-certificate', (event, url, _list, callback) => {
+      event.preventDefault()
+      // No certificate = the request goes on without one (the app-level event types it optional).
+      ;(callback as (certificate?: unknown) => void)()
+      refuse(state, hostForLog(url), 'client-certificate')
     })
     // HTTP authentication prompts and webviews are not offered.
     contents.on('login', (event, _details, _authInfo, callback) => { event.preventDefault(); callback() })
@@ -128,6 +174,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       const request = params.request as { url: string; method: string; headers?: Record<string, string>; postData?: string; postDataEntries?: Array<{ bytes?: string }> }
       let allow = true
       if (!isReadMethod(request.method)) {
+        // An upload or a large body has no postData here: `body` is then undefined and the decider must refuse it.
         const write: BrowserWriteAttempt = {
           method: request.method, url: request.url, headers: request.headers ?? {},
           body: request.postData ?? (request.postDataEntries ? request.postDataEntries.map(e => Buffer.from(e.bytes ?? '', 'base64').toString('utf8')).join('') : undefined),
@@ -185,13 +232,12 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       state.site = spec.site
       state.mode = 'human'
       state.aiGateReady = false
-      const title = `${BROWSER_WORDS.section} — ${spec.site.host}`
       const win = new BrowserWindow({
         width: 1200,
         height: 860,
         minWidth: 480,
         minHeight: 400,
-        title,
+        title: `${BROWSER_WORDS.section} — ${spec.site.host}`,
         show: false,
         // Never the app pages' preferences (they carry the app's preload): nothing of the app here.
         webPreferences: {
@@ -215,20 +261,30 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       state.contentsId = contentsId
       guardContents(contents, state)
       const setMode = createAiGate(contents, state)
+      const revoke = () => {
+        if (state.contentsId !== contentsId) return
+        state.site = null
+        state.mode = 'human'
+        state.aiGateReady = false
+        state.contentsId = null
+      }
       // The title always names the site, whatever the page calls itself.
       win.on('page-title-updated', event => event.preventDefault())
       if (options.show !== false) win.once('ready-to-show', () => win.show())
       win.on('closed', () => {
-        if (state.contentsId === contentsId) {
-          state.site = null
-          state.mode = 'human'
-          state.aiGateReady = false
-          state.contentsId = null
-        }
+        revoke()
         flush(state)
         spec.onClosed()
       })
-      void win.loadURL(`https://${spec.site.host}/`).catch(() => { /* refused or offline: the window says so */ })
+      // Nothing loads before the session's connections are routed: the site's hosts or the refusing proxy.
+      void routeOnly(ses, spec.site).then(
+        () => { if (!win.isDestroyed() && state.contentsId === contentsId) return win.loadURL(`https://${spec.site.host}/`) },
+        error => {
+          log.warn(`[browser] the window's connections could not be limited; not opened (${error instanceof Error ? error.message : 'unknown'})`)
+          revoke()
+          if (!win.isDestroyed()) win.destroy()
+        },
+      ).catch(() => { /* refused or offline: the window says so */ })
       return {
         webContents: contents,
         focus() {
@@ -237,8 +293,21 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
           win.show()
           win.focus()
         },
-        close() { if (!win.isDestroyed()) win.close() },
-        updateSite(site: BrowserSiteSetting) { if (state.contentsId === contentsId) state.site = site },
+        // The app closes it: the session refuses everything at once, and no page handler
+        // (beforeunload) can keep the window open.
+        close() {
+          revoke()
+          if (!win.isDestroyed()) win.destroy()
+        },
+        updateSite(site: BrowserSiteSetting) {
+          if (state.contentsId !== contentsId) return
+          state.site = site
+          void routeOnly(ses, site).catch(() => {
+            log.warn('[browser] the window\'s connections could not be limited to the changed site; closed')
+            revoke()
+            if (!win.isDestroyed()) win.destroy()
+          })
+        },
         setMode,
       }
     },

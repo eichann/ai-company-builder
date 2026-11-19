@@ -14,6 +14,7 @@ paths:
   - "client/shared/browser-operation.ts"
   - "client/electron/browser-window.ts"
   - "client/electron/features/browser/**"
+  - "client/tests/ui/browser-settings.spec.ts"
   - "client/src/features/settings/components/BrowserSection.tsx"
   - "client/src/features/settings/hooks/useBrowserSites.ts"
   - "client/tests/browser-window.test.ts"
@@ -32,9 +33,9 @@ only through per-site operation types (later PRs), never by free clicking. Owner
   every other request is refused. No `*.` wildcards.
 - **Per-site operation types.** A site's level (見るだけ / 入力・保存まで / 削除も) caps what an
   operation type may do there (`levelAllows`; an effect it does not know is never allowed).
-- **The login is kept on disk only when the member's AI sandbox is `enforce`**
-  (`browserLoginStorage`): otherwise the chat AI's commands could read the app's data, so the
-  login stays in memory and is gone when the app quits.
+- **The login stays in memory** and is gone when the app quits (PR 4, safe side; "Not yet": the
+  owner's rule `browserLoginStorage` — on disk only for a member whose AI sandbox is `enforce` — waits
+  until it can be bound to every AI turn on the PC being enclosed).
 - **Default off.** No row = `DEFAULT_BROWSER_OPERATION_SETTINGS` (off, no sites); an older server
   sends no `browser` in the policy and the app treats that as off.
 
@@ -75,92 +76,120 @@ only through per-site operation types (later PRs), never by free clicking. Owner
 
 A member whose policy is on with at least one site sees Settings → 「ブラウザ操作」 (group 「AI と連携」;
 the item is not there otherwise): each site with 「開いてログイン」 and 「ログインを消す」, and
-「AI はまだこの窓を操作しません。」 (+ 「アプリを開き直すと、もう一度ログインが必要です。」 when the login is
-not kept). Words: `BROWSER_WORDS` (`client/shared/browser-operation.ts`).
+「AI はまだこの窓を操作しません。 アプリを開き直すと、もう一度ログインが必要です。」. Words: `BROWSER_WORDS`
+(`client/shared/browser-operation.ts`).
 
 - **Pieces.** `client/shared/browser-operation.ts` (pure: the IPC payloads, `decideWindowRequest`,
-  `navigationAllowed`, `decideAiWrite`, `browserAiStopped`, `hostForLog`, `createRefusalTally`);
-  `client/electron/browser-window.ts` (shell layer, the only Electron code: the window, its session's
-  guards, the `ai`-mode gate, `clearPartition`); `client/electron/features/browser/` (`controller.ts`:
-  which policy answer opens, closes and clears what; `logins.ts`: `<userData>/browser-logins.json`, the
-  logins kept on disk; `ipc.ts`); wired in `main.ts` (lane C) on the policy store's `onPolicy` /
-  `onRefreshFailed`, sign-out and sign-in. Renderer: `src/features/settings/components/BrowserSection.tsx`,
-  `hooks/useBrowserSites.ts`, `api.ts`.
+  `navigationAllowed`, `browserProxyScript`, `browserResponseHeaders`, `decideAiWrite`,
+  `browserAiStopped`, `hostForLog`, `createRefusalTally`); `client/electron/browser-window.ts` (shell
+  layer, the only Electron code: the window, its session's guards, the refusing proxy, the `ai`-mode
+  gate, `clearPartition`); `client/electron/features/browser/` (`controller.ts`: which policy answer
+  opens, closes and clears what; `leftovers.ts`; `ipc.ts` with `isMainFrameSender`); wired in
+  `main.ts` (lane C) on the policy store's `onPolicy` / `onRefreshFailed`, sign-out and sign-in.
+  Renderer: `src/features/settings/components/BrowserSection.tsx`, `hooks/useBrowserSites.ts`, `api.ts`.
+- **The login lives in memory only** (coordinator decision after review, safe side): every window's
+  session is `acb-browser-<sha256(user, company, host)[0..32]>`, never `persist:`, gone when the app
+  quits. At start, before any browser session exists, `removeLeftoverBrowserPartitions` deletes every
+  `<userData>/Partitions/acb-browser-*` folder (an earlier build's, or a later one rolled back; real
+  folders only, a link is never followed). Disk logins: "Not yet" below.
 - **Only a valid answer opens anything.** `agent-policy-store.ts` validates `browser`
   (`parseBrowserPolicy`, shared rules; invalid = left out = off) and reports every refresh without a
   valid answer (`onRefreshFailed`: no server, an error status, an answer that does not validate, a
   network failure). Unlike the sandbox part, the browser never runs on the last answer: a failure =
-  off until the next valid answer, the company's windows close (their logins stay — unknown is not
-  "removed"). `browser:sites` asks the server first (≤ 5 s) and watches the company's push channel,
-  so a change reaches open windows (and the 60 s check runs).
-- **One window per account × company × site**, its own session: partition
-  `persist:acb-browser-<sha256(user, company, host)[0..32]>` when the login is kept on disk, else
-  `acb-browser-mem-<…>` (memory, gone when the app quits). On disk only when `loginStorageFor`: the
-  member's sandbox is `enforce` (`browserLoginStorage`) **and** really runs here — `sandboxPlatform`
-  and the current agent's `capabilities.sandbox` (the API-key agent runs `enforce` as observe and has
-  a command tool), re-decided at every policy answer (also at each chat turn's refresh).
+  off until the next valid answer, the company's windows close (the memory login stays until the app
+  quits). `browser:sites` asks the server first (≤ 5 s); `browser:sites` and `browser:open` watch the
+  company's push channel, so a change reaches open windows (and the 60 s check runs).
 - **Close and clear.** A valid answer that drops the site or turns the mode off closes its window and
-  clears its login (disk and memory); one whose storage left disk closes the windows keeping a login on
-  disk and clears every kept login of that account × company (also those from an earlier run, read from
-  `browser-logins.json`, whose entries must be `persist:acb-browser-<32 hex>`: an edited file never names
-  another session). Sign-out closes every window and clears every login; a sign-in as another account
-  clears the others'. 「ログインを消す」 closes the window and clears both partitions of that site.
-  Clearing = `clearStorageData` (cookies, local storage, IndexedDB, service workers, cache storage…),
-  `clearCache`, `clearAuthCache`, `clearData`. A changed site (its asset hosts) reaches the open
-  window at once (`updateSite`).
+  clears its login; sign-out closes every window and clears every login; a sign-in as another account
+  clears the others'. 「ログインを消す」 closes the window and answers only once the session is cleared
+  (`clearFailed` 「ログインを消せませんでした。…」 otherwise). Clearing = `clearStorageData` (cookies, local
+  storage, IndexedDB, service workers, cache storage…), `clearCache`, `clearAuthCache`, `clearData`. A
+  changed site (its asset hosts) reaches the open window at once (`updateSite`: the rules and the proxy).
+  **The app's close cannot be cancelled by the page**: the session's permission is revoked first (the
+  request hook then refuses everything) and the window is destroyed (no `beforeunload`).
 - **The window** (`browser-window.ts`): never the app pages' web preferences — no preload, `sandbox`,
   `contextIsolation`, no Node (also in workers / subframes), `webviewTag: false`, no plugins,
   `navigateOnDragDrop: false`; the title always names the site. Its session has **one**
-  `onBeforeRequest` (Electron keeps only the last listener: installed once per session in `guarded`,
-  nowhere else), deciding with `decideWindowRequest` (the site's `decideBrowserRequest`; with no window
-  open — a service worker left running — it refuses everything). Popups denied
-  (`setWindowOpenHandler`), downloads cancelled (`will-download`), every permission request and check
-  denied (also devices), `will-frame-navigate` (every frame, the main one included) and `will-redirect`
-  only to https on the operated host (`navigationAllowed`; a subframe may be `about:blank` /
-  `about:srcdoc`), certificate errors refused (`callback(false)`, no bypass; production code never sets
-  a certificate check), HTTP auth prompts and webviews refused. Nothing is handed to the system browser
-  or another app: `keepAppPageInWindow` / `webLinkForBrowser` are the app pages' and are not used here.
-  Refusals are logged per host and reason (`[browser] refused N request(s) to <host> (<reason>)`, every
-  10 s and when the window closes), never an address's path, query or a body.
+  `onBeforeRequest` and **one** `onHeadersReceived` (Electron keeps only the last listener of each:
+  installed once per session in `guarded`, nowhere else). The request hook decides with
+  `decideWindowRequest` (the site's `decideBrowserRequest`; with no window open — a service worker left
+  running — it refuses everything); the header hook drops `Report-To` / `NEL` / `Reporting-Endpoints`
+  and gives every document `X-DNS-Prefetch-Control: off`. Popups denied (`setWindowOpenHandler`),
+  downloads cancelled (`will-download`), every permission request and check denied (also devices), no
+  client certificate ever sent (`select-client-certificate` → none), `will-frame-navigate` (every frame,
+  the main one included) and `will-redirect` only to https on the operated host (`navigationAllowed`; a
+  subframe may be `about:blank` / `about:srcdoc`), certificate errors refused (`callback(false)`, no
+  bypass; production code never sets a certificate check), HTTP auth prompts and webviews refused.
+  Nothing is handed to the system browser or another app: `keepAppPageInWindow` / `webLinkForBrowser`
+  are the app pages' and are not used here. Refusals are logged per host and reason
+  (`[browser] refused N request(s) to <host> (<reason>)`, every 10 s and when the window closes), never
+  an address's path, query or a body.
+- **What the request hook cannot see** (verified on Electron 45: without these, a preconnect, a
+  `<link rel=preload>`, a NEL report, STUN and TURN reached a host the site does not list): the session's
+  proxy is a PAC script (`browserProxyScript`) sending the site's hosts DIRECT and every other connection
+  to the shell's own refusing proxy on 127.0.0.1 (answers 403 to anything, then closes); nothing loads
+  before it is set, and a window whose proxy cannot be set is destroyed. WebRTC:
+  `setWebRTCIPHandlingPolicy('disable_non_proxied_udp')` (no UDP; its TCP goes through that proxy).
 - **The `ai`-mode write gate** (built and tested now so PR 5's runner plugs into it; nothing switches a
   real window to `ai` yet): `setMode('ai', { decide, stopped })`. After the first page load (attaching
   to an empty window hangs) it attaches `webContents.debugger` and `Fetch.enable` for every request; a
   write (not GET / HEAD) goes on only when `decideAiWrite` says so: https on the operated host, the AI
   not stopped, no method-override header, and the approved step's decider says yes (none = refused; a
-  decider that throws = refused). Verified on Electron 45: the request hook runs **before** Fetch, so the
-  hook cannot rely on the gate's verdict; instead in `ai` mode it refuses a write to the operated host
-  before the gate is attached (or after it detached) and one from outside the window's page (no
-  `webContentsId` of the window: a service worker, which the page's Fetch does not see; a dedicated
-  worker's requests are seen), and refuses WSS to the operated host. `setMode('human')` detaches.
+  decider that throws = refused). **PR 5's decider must refuse a write whose `body` is undefined**: an
+  upload or a large body has no `postData` in Fetch. Verified on Electron 45: the request hook runs
+  **before** Fetch, so the hook cannot rely on the gate's verdict; instead in `ai` mode it refuses a
+  write to the operated host before the gate is attached (or after it detached) and one from outside
+  the window's page (no `webContentsId` of the window: a service worker, which the page's Fetch does
+  not see), and refuses WSS to the operated host. A dedicated worker's write, and a keepalive fetch or
+  beacon sent on `pagehide`, are seen and refused (tested). `setMode('human')` detaches.
 - **Emergency stop (decision, safe side):** the stop is about the AI, so it does not close a window the
   member operates (`human` mode: their own browsing, as in their own browser). In `ai` mode every write
   is refused while a whole-AI stop or a `web` / `mcp-external` stop is in force (`browserAiStopped`, as
   for a connector's read), checked per request; PR 5 passes `stopped: () => browserAiStopped(policy.stop(companyId))`.
 - **IPC** (`browser:sites`, `browser:open`, `browser:clearLogin`; event `browser:changed`): only the main
-  window's main frame (`fromMainWindow`: `mainWindowHost.isWindow` and `senderFrame` = the main frame);
+  window's main frame (`isMainFrameSender`: the main window, and `senderFrame` = its main frame);
   the host is only a name — main opens or clears only a site its current valid policy lists, exactly.
+- **Remaining limits** (not closed, or not testable here): DNS — a page's links are not prefetched
+  (`X-DNS-Prefetch-Control: off`) and other hosts' connections go to the refusing proxy, but a name the
+  page makes Chromium resolve otherwise may still reach the system's DNS resolver (not testable with
+  `host-rules`); WebRTC over TCP to a **loopback** address goes direct (Chromium always bypasses proxies
+  for loopback; it reaches only this computer); the client-certificate refusal is untested (Chromium
+  asks only when the system store holds a matching certificate); the header stripping, the refusing
+  proxy's own server (vs. a closed port) and revoking before `destroy` are second layers no test can
+  tell apart from the first (mutation survivors, each kept on purpose).
 
-Tests: `client/tests/browser-window.test.ts` (the request, navigation and gate rules, the stop, the log
-by host, where a login is kept and the partition names, nothing before a valid answer / for an older
-server / when off, an invalid `browser` = off, the host checked exactly and per company, a failed
-refresh closes windows and keeps logins, a removed site or mode off closes and clears, a changed site
-reaches the window, leaving 「囲う」 closes disk windows and clears kept logins, sign-out / another
-account, 「ログインを消す」, an edited logins file, every failed refresh reported, IPC from the main window
-only) and `client/tests/browser-window-electron.test.ts` (a real Electron 45 window against local HTTPS
-sites through `tests/browser-window-harness/`: fetch / XHR / image / beacon / WebSocket / iframe /
-redirect / window.open / target=_blank / `javascript:` link / link / download to a host not listed get
-0 requests and no popup window; the window's own refusals of popup, navigation and frames are logged;
-an asset host gets only GET of its script, style and image (no fetch, frame or POST); no
-`electronAPI` / `require` / `process` in the page, permissions denied, no download saved, http
-refused; in `human` mode the member's writes go out; in `ai` mode fetch / XHR / beacon / form / WSS
-writes are refused without an approving step, reads pass, the approved write goes out and another
-write, a method override or a stopped AI do not; a closed window's session reaches nowhere; clearing
-removes the cookie; an untrusted certificate is never bypassed; the log carries hosts and reasons
-only). It runs on macOS (CI "Client tests 2/2 (macOS)", `client-tests.mjs` `MACOS`) and skips without
-a display. `client/tests/ui/browser-settings.spec.ts` (preview `download-folders-ui.html?browser=…`):
-no item without a site, the notes, 「開いてログイン」 / 「ログインを消す」. Each guard mutation-checked.
+Tests: `client/tests/browser-window.test.ts` (the request, navigation, proxy, header and gate rules, the
+stop, the log by host, memory-only partition names, leftover session folders removed at start and a link
+never followed, nothing before a valid answer / for an older server / when off, an invalid `browser` =
+off, the host checked exactly and per company, a failed refresh closes windows, a removed site or mode
+off closes and clears, a changed site reaches the window, sign-out / another account, 「ログインを消す」
+answers after the clear and says so when it failed, every failed refresh reported, the sender check, IPC
+from the main window only, an opened window watched) and `client/tests/browser-window-electron.test.ts`
+(a real Electron 45 window against local HTTPS sites through `tests/browser-window-harness/`: fetch / XHR
+/ image / beacon / WebSocket / iframe / redirect / window.open / target=_blank / `javascript:` link / link
+/ download to a host not listed get 0 requests and no popup window, and every click runs on the operated
+page; no TCP connection at all reaches that host (preconnect, preload, NEL / reporting, TURN) and no STUN
+datagram leaves; no session folder on disk; the window's own refusals of popup, navigation and frames are
+logged; an asset host gets only GET of its script, style and image (no fetch, frame or POST); no
+`electronAPI` / `require` / `process` in the page, permissions denied, no download saved, http refused;
+in `human` mode the member's writes go out; in `ai` mode fetch / XHR / beacon / form / WSS / a dedicated
+worker's / keepalive and beacon on `pagehide` writes are refused without an approving step, reads pass,
+the approved write goes out and another write, a method override or a stopped AI do not; a window the app
+closes is gone although its page cancels `beforeunload`, and its session then reaches nowhere; clearing
+removes the cookie; an untrusted certificate is never bypassed; the log carries hosts and reasons only).
+It runs on macOS (CI "Client tests 2/2 (macOS)", `client-tests.mjs` `MACOS`) and skips without a display.
+`client/tests/ui/browser-settings.spec.ts` (preview `download-folders-ui.html?browser=…`): no item
+without a site, the notes, 「開いてログイン」, 「ログインを消す」 and its failure. Each guard mutation-checked
+(survivors above).
 
 ## Not yet (later PRs)
+
+**Keeping a login on disk** (`browserLoginStorage`, kept in `shared/core` for that PR): deferred until
+it can be bound to "every AI turn on this PC is enclosed". Reviews of PR 4 found that a member's
+`enforce` alone does not guarantee it: when the sandbox cannot start, `record-only` re-runs the turn
+unenclosed (`agents/claude.ts`, `agents/codex.ts`); another company opened in the same app (the company
+switcher) or a conversation with another agent (the API key's `executeCommand`, no sandbox) runs AI
+turns against the same userData unenclosed; and a refused policy refresh (403) would keep the login.
 
 The AI does not operate the window yet: no operation runner, no adapters, nothing switches a window to
 `ai` mode. The operation types' declaration is fixed (`plugins.md` "Browser connectors (contract
