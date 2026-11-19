@@ -84,7 +84,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
     request, per scope (server × session cookies: a sign-out or a new sign-in is another scope) ×
     group (company) × key (the question). `changed(company)` (a push signal at receipt, the member's
     own write) makes a read on its way too old for whoever asks next: they get one more read, started
-    after it settled (answers keep their order, A → B → A never goes back). An answer whose scope
+    after it settled (answers keep their order, A → B → A never goes back); further changes before
+    it starts join that one (no backlog). An answer whose scope
     changed while it ran is `discarded` for everyone who waited on it. Nothing is kept once a read
     settled (no cache); no abort, so one caller leaving never cancels another's read.
   - `bounded-coalescer.ts`: a burst of signals per key handled once, `windowMs` after the **first**
