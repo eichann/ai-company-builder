@@ -124,7 +124,10 @@ describe('request log', () => {
     const id = res.headers.get('X-Request-Id')
     expect(id).toMatch(/^[0-9a-f-]{36}$/)
     const line = printed.find(l => l.startsWith('[http] '))!
-    expect(line).toMatch(new RegExp(`^\\[http\\] ${id} GET /api/companies/:companyId/files/search ${res.status} \\d+ms company=${co} user=${OWNER}$`))
+    // db= (time inside SQLite) always; git= when a git process ran (server.md "Request log").
+    expect(line).toMatch(new RegExp(`^\\[http\\] ${id} GET /api/companies/:companyId/files/search ${res.status} \\d+ms db=\\d+\\.\\d\\d( git=\\d+\\.\\d\\d)? company=${co} user=${OWNER}$`))
+    // The app's SQLite connection is timed (composition.ts): the membership check alone takes some.
+    expect(Number(/ db=([0-9.]+) /.exec(line)![1])).toBeGreaterThan(0)
 
     // A response the handler built itself (git over HTTP) carries the id too.
     printed.length = 0

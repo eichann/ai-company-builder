@@ -19,6 +19,7 @@ import {
   privateRepoPath,
 } from '../lib/private-folders'
 import { logError } from '../lib/error-log'
+import { timeGitProcess } from '../lib/git-exec'
 import { ownCredential } from './guard-tags'
 
 /** git sends the member's session token as the Basic-auth password (accounts.bySessionToken), not a cookie. */
@@ -156,6 +157,7 @@ async function handleGitCgi(
     env: cgiEnv,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
+  timeGitProcess(cgi)
 
   // Stream request body into CGI stdin. Buffering the whole body would put
   // multi-GB push payloads onto the Node heap and trigger OOM on small hosts.

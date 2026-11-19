@@ -692,6 +692,29 @@ support can find a member's request. The user id is noted by whoever authenticat
 belongs in the per-company, access-controlled records (`agent_events`, `broker_history`,
 `push_rejections`…), not in this log.
 
+Where the time went (2026-11-19, stage 0 of reducing the apps' polling): after `<ms>ms` the line
+carries `db=<ms>` always and `git=<ms>` / `ext=<ms>` when used (two decimals), and `app=<build>`
+last when `X-ACB-Client-Version` parses as a build (`parseClientVersion`; any other value is left
+out). Each is the **union** of that request's operations of the kind (overlapping ones — two git
+processes, a statement inside a transaction — count once), not exclusive time: `db` = inside
+better-sqlite3 (prepare, run / get / all / iterate, exec, pragma, whole transaction functions;
+synchronous, so also time the event loop was blocked), `git` = a git process of the request
+running (`timeGitProcess` in `lib/git-exec.ts`: gitAsync, company-files' spawns, git-http's
+http-backend; still running when the line is written counts until then), `ext` = waiting for
+another service's response headers (`adapters/upstream-timed.ts` around the relay's
+`UpstreamClient`). The I/O boundaries report into the `OperationMetrics` port
+(`ports/operation-metrics.ts`: a fixed category, start and end only), implemented by
+`requestOperations` in `lib/request-log.ts` (the request is found through its
+`AsyncLocalStorage`, so another request's time is never added) and wired in `composition.ts`
+(`timeSqliteCalls` patches better-sqlite3's prototypes once, so every connection — app, auth, the
+accounts adapter's — is timed and no repository or service knows). Overhead: ~0.1 µs per
+SQLite call. Once a minute `index.ts` starts `lib/load-log.ts`'s line (unref'd timer, never from
+`composition.ts`): `[load] <s>s req= cpu=<%> loop_p50= loop_p99= loop_max= rss=<MB> db= git= ext=`
+— the event loop's lateness beyond its 10 ms timer (`monitorEventLoopDelay`), the process's CPU
+over the period, request lines written, and the server-wide union of each kind (requests and
+timers). Numbers and fixed words only. Tests: `tests/unit/request-timing.test.ts`,
+`tests/unit/load-log.test.ts`, the line's shape in `tests/integration/request-log.test.ts`.
+
 Errors are logged with `logError(tag, fixed sentence, err, ids)` (`lib/error-log.ts`), never
 `console.error(…, err)`: a git error's message is its command line and stderr (paths, private
 folder names, the push checker's rejections). The line holds the sentence, the error's kind
