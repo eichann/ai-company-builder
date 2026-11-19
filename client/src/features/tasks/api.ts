@@ -127,8 +127,8 @@ export type TaskRunWrites = ElectronPort<'retryTaskRun' | 'reconcileTaskRun'>
  * (no permission, the connection off) is `success: true` with an empty list and
  * `data.reason`; `success: false` only when the server could not answer.
  */
-export function getCalendarToday(companyId: string, reads: CalendarReads = window.electronAPI): Promise<CalendarTodayResult> {
-  return reads.getCalendarToday(companyId)
+export function getCalendarToday(companyId: string, reads: CalendarReads = window.electronAPI, options?: { fresh?: boolean }): Promise<CalendarTodayResult> {
+  return options?.fresh ? reads.getCalendarToday(companyId, { fresh: true }) : reads.getCalendarToday(companyId)
 }
 
 /** `fresh`: after the member's own change — main never answers it with a read that began before. */

@@ -10,6 +10,9 @@ export type CalendarTodayResult =
   | { success: true; data: CalendarToday }
   | { success: false; offline: boolean; error: string }
 
+/** `fresh`: read after something that changes the answer (the Google permission): never a read begun before it. */
+export interface CalendarTodayOptions { fresh?: boolean }
+
 export const CALENDAR_OFFLINE_TEXT = 'サーバーに接続できませんでした。時間をおいてもう一度お試しください。'
 
 /** A refusal as plain Japanese, from the status only (never the server's text). */

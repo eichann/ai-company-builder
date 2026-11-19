@@ -535,6 +535,8 @@ registerAuthIpc(ipc, {
     companyFilesApi.clear()
     minutes.stop()
     notices.stop()
+    // Signals still waiting were the previous account's.
+    pushSignals.stop()
     // Another account must not find this one's consultations on screen.
     chatWindows.closeAll()
   },

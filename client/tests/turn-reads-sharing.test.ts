@@ -33,15 +33,17 @@ function fakeServer() {
   let myTurn: unknown[] = []
   let notices: unknown[] = []
   let aiTurn: unknown[] = []
+  let granted = true
+  let calendarEvents = 0
   const answer = (method: string, path: string): unknown => {
     if (path === '/api/me') return { data: { id: 'u1' } }
     const p = path.replace(/^\/api\/companies\/co/, '')
     if (p === '/records/my-turn') return { data: { records: myTurn, total: myTurn.length } }
     if (p === '/records/ai-turn') return { data: { records: aiTurn } }
     if (p === '/me/notifications') return { data: { available: true, unread: notices.length, items: notices } }
-    if (p === '/me/google') return { data: { connected: true, features: ['minutes'] } }
+    if (p === '/me/google') return { data: { connected: granted, features: granted ? ['minutes'] : [] } }
     if (p === '/me/minutes/check') return { data: { checked: true, stale: [] } }
-    if (p === '/me/calendar/today') return { data: { date: '2026-11-19', timeZone: 'Asia/Tokyo', events: [], reason: null } }
+    if (p === '/me/calendar/today') return { data: { date: '2026-11-19', timeZone: 'Asia/Tokyo', events: [], reason: calendarEvents ? null : 'not-connected' } }
     if (p === '/records/query') return { data: { records: [] } }
     if (p === '/records/types') return { data: { types: [] } }
     if (p === '/members') return { data: [] }
@@ -67,7 +69,9 @@ function fakeServer() {
     count: (path: string, method = 'GET') => asked.filter(a => a.path === path && a.method === method).length,
     hold: (path: string) => { holding.add(path) },
     release: (path: string) => { holding.delete(path); for (const r of held.get(path) ?? []) r(); held.delete(path) },
-    set: (v: { myTurn?: unknown[]; notices?: unknown[]; aiTurn?: unknown[] }) => {
+    set: (v: { myTurn?: unknown[]; notices?: unknown[]; aiTurn?: unknown[]; granted?: boolean; calendarAllowed?: boolean }) => {
+      if (v.granted !== undefined) granted = v.granted
+      if (v.calendarAllowed !== undefined) calendarEvents = v.calendarAllowed ? 1 : 0
       if (v.myTurn) myTurn = v.myTurn
       if (v.notices) notices = v.notices
       if (v.aiTurn) aiTurn = v.aiTurn
@@ -96,7 +100,7 @@ function app() {
     setInterval: fn => { timers.push(fn); return timers.length }, clearInterval: () => {},
   })
   const calendar = createCalendarTodayReads({ reads, read: createCalendarApi({ baseUrl: () => BASE, cookies: () => cookies, fetch: server.fetch, log: quiet }).today })
-  return { server, reads, tasks, watcher, minutes, calendar, told, timers, signOut: () => { cookies = [] } }
+  return { server, reads, tasks, watcher, minutes, calendar, told, timers, signOut: () => { cookies = [] }, signIn: (c: string[]) => { cookies = c } }
 }
 
 test('the task list and the title bar asking at the same moment: one my-turn request; the list and the received minutes: one ai-turn request', async () => {
@@ -235,4 +239,59 @@ test('the received minutes found changed by a check (no records signal) tell the
   a.server.set({ aiTurn: [] })
   await a.minutes.checkNow('co')
   assert.equal(a.told.aiTurn, 1)
+})
+
+test('a look whose answer was discarded at a sign-out still runs the look the next account asked meanwhile (あなたの番 and the received minutes are not left empty)', async () => {
+  const a = app()
+  await a.watcher.watch('co')
+  await a.minutes.watch('co')
+  a.server.hold('/records/my-turn')
+  a.server.hold('/records/ai-turn')
+  // X's looks are on their way…
+  a.watcher.signal('co', true)
+  a.minutes.recordsSignal('co')
+  await tick()
+  // …X signs out, Y signs in and the app watches the company again.
+  a.signOut()
+  a.watcher.stop()
+  a.minutes.stop()
+  a.signIn(['s=Y'])
+  a.server.set({ myTurn: [task('yyyy', 'Y さんのやること')], aiTurn: [{ id: 'meeting-yyyyyy12', type: 'meeting', title: 'Y さんの会議', state: 'received', version: 1, fields: {} }] })
+  void a.watcher.watch('co')
+  void a.minutes.watch('co')
+  await tick()
+  a.server.release('/records/my-turn')
+  a.server.release('/records/ai-turn')
+  await tick(30)
+  assert.deepEqual(a.watcher.state('co').myTurn.items.map(i => i.title), ['Y さんのやること'])
+  assert.deepEqual((await a.minutes.notices('co')).notices.map(n => n.title), ['Y さんの会議'])
+})
+
+test('today\'s calendar read again after the Google permission changed is fresh: never the read begun before the change', async () => {
+  const a = app()
+  a.server.hold('/me/calendar/today')
+  const before = a.calendar.today('co')
+  await tick()
+  a.server.set({ calendarAllowed: true })
+  const after = a.calendar.today('co', { fresh: true })
+  await tick()
+  a.server.release('/me/calendar/today')
+  await before
+  const r = await after
+  assert.equal(a.server.count('/me/calendar/today'), 2)
+  assert.ok(r.success && r.data.reason === null, 'the answer after the permission came')
+})
+
+test('the minutes permission coming or going tells the banner and the list (records:changed), as minutes:changed did', async () => {
+  const a = app()
+  await a.minutes.watch('co')
+  assert.equal(a.told.aiTurn, 0)
+  a.server.set({ granted: false })
+  await a.minutes.checkNow('co')
+  assert.equal(a.told.aiTurn, 1)
+  await a.minutes.checkNow('co')
+  assert.equal(a.told.aiTurn, 1, 'still off: nothing new')
+  a.server.set({ granted: true })
+  await a.minutes.checkNow('co')
+  assert.equal(a.told.aiTurn, 2)
 })

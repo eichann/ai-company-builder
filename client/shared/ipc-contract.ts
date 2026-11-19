@@ -45,7 +45,7 @@ import type { InviteSet, MeetingArrivalsResult, MeetingBundleQuestionResult, Mee
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { FindHomeResult, FindResult, MakePrivatePlanResult, RecordCardResult, RecordListResult } from './record-views'
 import type { ConsultationTopicsResult } from './consultation-topics'
-import type { CalendarTodayResult } from './calendar'
+import type { CalendarTodayOptions, CalendarTodayResult } from './calendar'
 import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveChoice, TaskDriveLinkOptions, TaskDriveLinkResult, TaskListOptions, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from './tasks'
 import type { DroppedThing, DropLinkResult } from './link-drop'
 import type { TagSuggestions } from './tag-suggest'
@@ -570,7 +570,7 @@ export interface IpcInvokeChannels {
   'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
   // 「今日の予定」 (calendar.md): the member's own meetings today, read by the server now (nothing stored).
   /** Not being able to read the calendar is an empty list with a reason (`data.reason`), not a failure. */
-  'calendar:today': { args: [companyId: string]; result: CalendarTodayResult }
+  'calendar:today': { args: [companyId: string, options?: CalendarTodayOptions]; result: CalendarTodayResult }
   // The task list (tasks.ts): read and changed with the member's session in main; the server decides who may.
   'tasks:list': { args: [companyId: string, options?: TaskListOptions]; result: TaskListResult }
   /** The folded 「アーカイブ」: archived tasks, newest first, 20 per call from `cursor` (start: 0 / 0). */

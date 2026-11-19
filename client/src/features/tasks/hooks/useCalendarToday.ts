@@ -13,14 +13,16 @@ const REFRESH_MS = 10 * 60_000
  */
 export function useCalendarToday(companyId: string | undefined): CalendarToday | null {
   const [state, setState] = useState<{ companyId: string | undefined; today: CalendarToday | null }>({ companyId, today: null })
-  const load = useCallback(() => {
+  const read = useCallback((fresh: boolean) => {
     if (!companyId) return
-    void getCalendarToday(companyId).then(r => { if (r?.success) setState({ companyId, today: r.data }) }, () => {})
+    void getCalendarToday(companyId, undefined, fresh ? { fresh: true } : undefined).then(r => { if (r?.success) setState({ companyId, today: r.data }) }, () => {})
   }, [companyId])
+  const load = useCallback(() => read(false), [read])
   // The first read through useIpcEvent with nothing to listen to: the renderer's effect count is capped.
   const once = useCallback((listener: (payload: undefined) => void) => { listener(undefined) }, [])
   useIpcEvent(once, load, !!companyId)
-  useIpcEvent(googlePermission.subscribe, changed => { if (changed === companyId) load() }, !!companyId)
+  // The permission changed: a fresh read (main never answers it with a read begun before the change).
+  useIpcEvent(googlePermission.subscribe, changed => { if (changed === companyId) read(true) }, !!companyId)
   useInterval(load, companyId ? REFRESH_MS : null)
   return state.companyId === companyId ? state.today : null
 }

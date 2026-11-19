@@ -40,39 +40,38 @@ test('two consumers asking the same question at the same moment share one reques
   assert.equal(r.runs.length, 4)
 })
 
-test('a change while a read is on its way: whoever asks afterwards gets one more read, started after the first settled, never the older answer', async () => {
+test('a change while a read is on its way: whoever asks afterwards gets a read of their own at once (never waiting behind the older one), shared among them', async () => {
   const reads = createInFlightReads(() => 'server|session')
   const r = slowRead()
   const before = reads.read('co-a', 'my-turn', r.run)
   reads.changed('co-a')
   const after1 = reads.read('co-a', 'my-turn', r.run)
   const after2 = reads.read('co-a', 'my-turn', r.run)
-  await tick()
-  assert.equal(r.runs.length, 1, 'the second read waits for the first one (answers keep their order)')
-  r.runs[0].resolve('before the change')
-  assert.deepEqual(await before, { discarded: false, value: 'before the change' })
-  await tick()
-  assert.equal(r.runs.length, 2, 'one more read, shared by both who asked after the change')
+  assert.equal(r.runs.length, 2, 'the read after the change starts at once, one for both who asked after it')
   r.runs[1].resolve('after the change')
   assert.deepEqual(await after1, { discarded: false, value: 'after the change' })
   assert.deepEqual(await after2, { discarded: false, value: 'after the change' })
+  r.runs[0].resolve('before the change')
+  // The older read settled last: who waited on it gets the newer answer, never the older one.
+  assert.deepEqual(await before, { discarded: false, value: 'after the change' })
 })
 
-test('a stream of changes while a read is on its way queues one more read, not one per change (no backlog before the member\'s own read)', async () => {
+test('the older read settling first is answered as it was (it was right when asked); nothing is kept once all have settled', async () => {
   const reads = createInFlightReads(() => 'server|session')
   const r = slowRead()
-  const first = reads.read('co-a', 'list', r.run)
-  const waiting: Array<Promise<unknown>> = []
-  for (let i = 0; i < 5; i++) {
-    reads.changed('co-a')
-    waiting.push(reads.read('co-a', 'list', r.run))
-  }
-  r.runs[0].resolve('old')
-  await first
+  const before = reads.read('co-a', 'my-turn', r.run)
+  reads.changed('co-a')
+  const after = reads.read('co-a', 'my-turn', r.run)
+  r.runs[0].resolve('before the change')
+  assert.deepEqual(await before, { discarded: false, value: 'before the change' })
+  r.runs[1].resolve('after the change')
+  assert.deepEqual(await after, { discarded: false, value: 'after the change' })
   await tick()
-  assert.equal(r.runs.length, 2, 'one read after the first, shared by every later asker')
-  r.runs[1].resolve('new')
-  for (const w of waiting) assert.deepEqual(await w, { discarded: false, value: 'new' })
+  const next = slowRead()
+  const again = reads.read('co-a', 'my-turn', next.run)
+  assert.equal(next.runs.length, 1, 'asked again, not answered from memory')
+  next.runs[0].resolve('later')
+  assert.deepEqual(await again, { discarded: false, value: 'later' })
 })
 
 test('an answer that arrives after sign-out, another sign-in or a server change is discarded — for everyone who waited on it', async () => {
@@ -95,7 +94,7 @@ test('an answer that arrives after sign-out, another sign-in or a server change 
   assert.deepEqual(await old, { discarded: true })
 })
 
-test('A → B → A: the read for A asked again after a change lands after the earlier one, so A never goes back to the older answer', async () => {
+test('A → B → A: the read for A asked again after a change wins even when the earlier one answers last, so A never goes back to the older answer', async () => {
   const reads = createInFlightReads(() => 'server|session')
   const r = slowRead()
   const shown: string[] = []
@@ -103,12 +102,11 @@ test('A → B → A: the read for A asked again after a change lands after the e
   void reads.read('co-b', 'list', r.run)
   reads.changed('co-a')
   const second = reads.read('co-a', 'list', r.run).then(x => { if (!x.discarded) shown.push(x.value) })
-  r.runs[0].resolve('A (old)')
-  await first
-  await tick()
   r.runs[2].resolve('A (new)')
   await second
-  assert.deepEqual(shown, ['A (old)', 'A (new)'])
+  r.runs[0].resolve('A (old)')
+  await first
+  assert.deepEqual(shown, ['A (new)', 'A (new)'])
 })
 
 test('a burst of signals for one company is handled once, within the window from the first; a steady stream is still handled every window (no starvation)', () => {
@@ -165,4 +163,18 @@ test('push signals: the change is marked at once, a burst of records + notificat
   assert.deepEqual(events, ['changed co-a', 'changed co-a', 'changed co-a', 'changed co-b'], 'marked before any wait')
   for (const fn of timers.splice(0)) fn()
   assert.deepEqual(events.slice(4), ['records co-a', 'notices co-b'])
+})
+
+test('sign-out: push signals still waiting are dropped, never handled for the next account', () => {
+  const timers: Array<{ fn: () => void; cancelled?: boolean }> = []
+  const handled: string[] = []
+  const fanout = createPushSignalFanout({
+    windowMs: 250, changed: () => {}, records: c => handled.push(c), noticesOnly: c => handled.push(c),
+    setTimeout: fn => { const t = { fn }; timers.push(t); return t },
+    clearTimeout: h => { (h as { cancelled?: boolean }).cancelled = true },
+  })
+  fanout.records('co-a')
+  fanout.stop()
+  for (const t of timers) if (!t.cancelled) t.fn()
+  assert.deepEqual(handled, [])
 })

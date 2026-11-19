@@ -179,8 +179,9 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
         const untold = state.untold
         state.untold = false
         const [turn, notices] = await Promise.all([myTurn(companyId), call(companyId, 'GET', '/me/notifications')])
-        // Asked for another session or server than now (signed out meanwhile): nothing is shown or notified.
-        if (turn === 'discarded') return
+        // Asked for another session or server than now (signed out meanwhile): nothing is shown or
+        // notified, but a look asked meanwhile (the next account's watch) still runs.
+        if (turn === 'discarded') continue
         const publish = (next: NoticesState) => publishState(companyId, next, untold)
         // Off line or an older server: keep what was shown.
         if (!turn || !notices) return

@@ -761,7 +761,7 @@ contract.type IpcInvokeChannels.'brokerKeys:delete' = 'brokerKeys:delete': { arg
 contract.type IpcInvokeChannels.'brokerKeys:list' = 'brokerKeys:list': { args: [companyId: string]; result: OwnKeysResult }
 contract.type IpcInvokeChannels.'brokerKeys:moveFromEnv' = 'brokerKeys:moveFromEnv': { args: [companyId: string, rootPath: string, name: string]; result: OwnKeyMoveResult }
 contract.type IpcInvokeChannels.'brokerKeys:save' = 'brokerKeys:save': { args: [companyId: string, service: string, secret: string, displayName?: string]; result: OwnKeysResult }
-contract.type IpcInvokeChannels.'calendar:today' = 'calendar:today': { args: [companyId: string]; result: CalendarTodayResult }
+contract.type IpcInvokeChannels.'calendar:today' = 'calendar:today': { args: [companyId: string, options?: CalendarTodayOptions]; result: CalendarTodayResult }
 contract.type IpcInvokeChannels.'chat-server:getInfo' = 'chat-server:getInfo': { args: []; result: ChatServerInfo | null }
 contract.type IpcInvokeChannels.'chatHistory:deleteSession' = 'chatHistory:deleteSession': { args: [companyId: string, sessionId: string]; result: boolean }
 contract.type IpcInvokeChannels.'chatHistory:getSession' = 'chatHistory:getSession': { args: [companyId: string, sessionId: string]; result: ChatSession | null }
@@ -1073,7 +1073,7 @@ main.handle brokerKeys:delete @ features/broker/ipc.ts (companyId: string, servi
 main.handle brokerKeys:list @ features/broker/ipc.ts (companyId: string)
 main.handle brokerKeys:moveFromEnv @ features/broker/ipc.ts (companyId: string, rootPath: string, name: string)
 main.handle brokerKeys:save @ features/broker/ipc.ts (companyId: string, service: string, secret: string, displayName?: string)
-main.handle calendar:today @ features/calendar/ipc.ts (companyId: string)
+main.handle calendar:today @ features/calendar/ipc.ts (companyId: string, options?: CalendarTodayOptions)
 main.handle chat-server:getInfo @ main.ts ()
 main.handle chatHistory:deleteSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string)
 main.handle chatHistory:getSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string)
@@ -1408,8 +1408,8 @@ preload getBundleChoices -> invoke tasks:bundles($0)
 preload getBundleChoices : (companyId: string) => Promise<BundleChoicesResult>
 preload getBundleKinds -> invoke tasks:bundleKinds($0)
 preload getBundleKinds : (companyId: string) => Promise<BundleKindsAnswer>
-preload getCalendarToday -> invoke calendar:today($0)
-preload getCalendarToday : (companyId: string) => Promise<CalendarTodayResult>
+preload getCalendarToday -> invoke calendar:today($0, $1)
+preload getCalendarToday : (companyId: string, options?: CalendarTodayOptions | undefined) => Promise<CalendarTodayResult>
 preload getChatServerInfo -> invoke chat-server:getInfo()
 preload getChatServerInfo : () => Promise<ChatServerInfo | null>
 preload getChatSession -> invoke chatHistory:getSession($0, $1)

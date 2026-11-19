@@ -9,6 +9,7 @@ import type {
   SendArgs, SendChannel, SyncArgs, SyncChannel, SyncResult,
 } from '../shared/ipc-contract'
 import type { VoiceInputAPI } from '../shared/voice-input'
+import type { CalendarTodayOptions } from '../shared/calendar'
 import type { ChatMetadataPatch, ChatSaveReceipt, ChatSession } from '../shared/chat-history'
 import type { HandoffCompletion } from '../shared/handoff'
 import type { AgentInteractionResponse } from '../shared/agent-interaction'
@@ -170,7 +171,7 @@ const api: ElectronAPI = {
   getViewers: (companyId: string, query: ViewersQuery) => invoke('viewers:get', companyId, query),
   recreatePluginOperation: (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string) =>
     invoke('pluginOperations:recreate', companyId, pluginId, operationId, confirm, conversationId),
-  getCalendarToday: (companyId: string) => invoke('calendar:today', companyId),
+  getCalendarToday: (companyId: string, options?: CalendarTodayOptions) => invoke('calendar:today', companyId, options),
   getTaskList: (companyId: string, options?: TaskListOptions) => invoke('tasks:list', companyId, options),
   getArchivedTasks: (companyId: string, cursor: ArchiveCursor) => invoke('tasks:archived', companyId, cursor),
   createTask: (companyId: string, input: TaskCreateInput) => invoke('tasks:create', companyId, input),

@@ -20,8 +20,9 @@ export interface MinutesCheckerDeps {
   onChanged: (companyId: string) => void
   /**
    * The received minutes changed and nothing had told the app yet (a check, the timer, a look
-   * after a press): main tells the task list (records:changed). Not for a look a records signal
-   * started — that signal already told it — nor for the first look.
+   * after a press), or the grant came or went: main tells the task list and the banner
+   * (records:changed). Not for a look a records signal started — that signal already told it —
+   * nor for the first look.
    */
   onAiTurnChanged?: (companyId: string) => void
   /** `GET /records/ai-turn` shared with the task list (main.ts); absent → asked here. */
@@ -115,6 +116,8 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
     const before = known.get(companyId)
     known.set(companyId, next)
     if (JSON.stringify(before) !== JSON.stringify(next)) deps.onChanged(companyId)
+    // The grant came or went: the meetings shown elsewhere (the banner) are read again, as before.
+    if (before !== undefined && before.available !== next.available) deps.onAiTurnChanged?.(companyId)
   }
 
   /** Ask the server for the member's received minutes (「AI の番」 of type meeting). `told`: a records signal started it. */
@@ -129,8 +132,9 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
         const untold = state.untold
         state.untold = false
         const r = await aiTurn(companyId)
-        // Asked for another session or server than now (signed out meanwhile): nothing is shown.
-        if (r === 'discarded') return
+        // Asked for another session or server than now (signed out meanwhile): nothing is shown, but
+        // a look asked meanwhile (the next account's watch) still runs.
+        if (r === 'discarded') continue
         if (!r || r.status !== 200) {
           // Off line, records off, an older server: keep what was shown.
           if (r) log.warn(`[minutes] ai-turn: answered ${r.status}`)

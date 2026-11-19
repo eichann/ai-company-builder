@@ -6,7 +6,7 @@
 // renderer gets the server's CalendarToday or a sentence built from the status
 // only. Logged: the status, never a title.
 
-import { CALENDAR_OFFLINE_TEXT, calendarErrorText, isCalendarToday, type CalendarTodayResult } from '../../../shared/calendar'
+import { CALENDAR_OFFLINE_TEXT, calendarErrorText, isCalendarToday, type CalendarTodayOptions, type CalendarTodayResult } from '../../../shared/calendar'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
 export interface CalendarDeps {
@@ -17,7 +17,7 @@ export interface CalendarDeps {
 }
 
 /** `today`: the read shared between the task list and 「確かめること」 (main.ts, `services/calendar-today-reads.ts`). */
-export type CalendarIpcDeps = CalendarDeps & { today?: (companyId: string) => Promise<CalendarTodayResult> }
+export type CalendarIpcDeps = CalendarDeps & { today?: (companyId: string, options?: CalendarTodayOptions) => Promise<CalendarTodayResult> }
 
 const offline = { success: false, offline: true, error: CALENDAR_OFFLINE_TEXT } as const
 const invalid = { success: false, offline: false, error: '入力が正しくありません。' } as const
@@ -50,8 +50,8 @@ export function createCalendarApi(deps: CalendarDeps) {
 
 export function registerCalendarIpc(ipc: IpcRegistrar, deps: CalendarIpcDeps): void {
   const today = deps.today ?? createCalendarApi(deps).today
-  ipc.handle('calendar:today', async (_, companyId: string) => {
+  ipc.handle('calendar:today', async (_, companyId: string, options?: CalendarTodayOptions) => {
     if (typeof companyId !== 'string' || !companyId || companyId.length > 200) return invalid
-    return today(companyId)
+    return today(companyId, { fresh: options?.fresh === true })
   })
 }
