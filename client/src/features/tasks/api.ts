@@ -12,7 +12,7 @@ import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCre
 /** Reading the member's own meetings today (no attendee address ever comes back). */
 export type CalendarReads = ElectronPort<'getCalendarToday'>
 /** Reading the list, and hearing that the member's turn, notices or records may have changed. */
-export type TaskReads = ElectronPort<'getTaskList' | 'onNotificationsChanged' | 'onRecordsChanged'>
+export type TaskReads = ElectronPort<'getTaskList' | 'onRecordsChanged'>
 /** Changing shared state on the server (a new task, an action on one). */
 export type TaskWrites = ElectronPort<'createTask' | 'actOnTask' | 'undoTaskAction'>
 /** Setting or taking off a link between two records (the server decides which links may change). */
@@ -127,12 +127,13 @@ export type TaskRunWrites = ElectronPort<'retryTaskRun' | 'reconcileTaskRun'>
  * (no permission, the connection off) is `success: true` with an empty list and
  * `data.reason`; `success: false` only when the server could not answer.
  */
-export function getCalendarToday(companyId: string, reads: CalendarReads = window.electronAPI): Promise<CalendarTodayResult> {
-  return reads.getCalendarToday(companyId)
+export function getCalendarToday(companyId: string, reads: CalendarReads = window.electronAPI, options?: { fresh?: boolean }): Promise<CalendarTodayResult> {
+  return options?.fresh ? reads.getCalendarToday(companyId, { fresh: true }) : reads.getCalendarToday(companyId)
 }
 
-export function getTaskList(companyId: string, reads: TaskReads = window.electronAPI): Promise<TaskListResult> {
-  return reads.getTaskList(companyId)
+/** `fresh`: after the member's own change — main never answers it with a read that began before. */
+export function getTaskList(companyId: string, reads: TaskReads = window.electronAPI, options?: { fresh?: boolean }): Promise<TaskListResult> {
+  return options?.fresh ? reads.getTaskList(companyId, { fresh: true }) : reads.getTaskList(companyId)
 }
 
 /** The folded 「アーカイブ」: archived tasks, newest first, one page (20) from `cursor`. */
@@ -143,14 +144,14 @@ export function getArchivedTasks(companyId: string, cursor: ArchiveCursor, reads
 }
 
 /**
- * `listener` hears that this company's 「あなたの番」, notices or records may have changed (the
- * title bar keeps main watching; `records:changed` comes at once when the member's own AI wrote a
- * record, and on every records signal of the push channel). This only listens.
+ * `listener` hears that this company's records — and so 「あなたの番」 — may have changed:
+ * `records:changed` comes at once when the member's own AI wrote a record, once per burst of the
+ * push channel's records signals, and when main's own look (the title bar's watcher, the received
+ * minutes) found the turn changed without a signal. A change of the notices alone
+ * (`notifications:changed`) is the title bar's and never re-reads the list. This only listens.
  */
 export function onTasksMayHaveChanged(companyId: string, listener: () => void, reads: TaskReads = window.electronAPI): () => void {
-  const mine = (change: { companyId: string }) => { if (change.companyId === companyId) listener() }
-  const stops = [reads.onNotificationsChanged(mine), reads.onRecordsChanged?.(mine)]
-  return () => { for (const stop of stops) stop?.() }
+  return reads.onRecordsChanged?.((change: { companyId: string }) => { if (change.companyId === companyId) listener() }) ?? (() => {})
 }
 
 export function createTask(companyId: string, input: TaskCreateInput, writes: TaskWrites = window.electronAPI): Promise<TaskWriteResult> {

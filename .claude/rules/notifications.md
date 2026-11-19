@@ -296,9 +296,15 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   Cookie header — at `notifications:watch`, every 5 minutes, and on a `records` or `notifications`
   signal for that company (`agent-push-channel.ts` `onNotifications`, wired in `main.ts`). IPC
   (`features/notifications/ipc.ts`): `notifications:watch` / `state` / `markRead` / `settings` /
-  `setSetting`, event `notifications:changed`. A `records` signal also sends `records:changed`
-  (the task list re-reads, `tasks-ui.md`); so does the member's own AI writing a record in this
-  app, which also asks this watcher again at once. Sign-out and quit forget everything.
+  `setSetting`, event `notifications:changed` (the title bar's only: the task list does not listen).
+  Signals come once per burst (`push-signal-fanout.ts`, ≤ 250 ms after the first). A `records`
+  signal also sends `records:changed` (the task list re-reads, `tasks-ui.md`); so does the member's
+  own AI writing a record in this app, which also asks this watcher again at once. When the
+  watcher's own look (the 5-minute timer, a `notifications` signal alone) finds 「あなたの番」 changed,
+  it tells the list (`onTurnChanged` → `records:changed`); never for the notices alone or the first
+  look. `/records/my-turn` is read through the shared `MyTurnReads` (one request with the task list
+  at the same moment; an answer that arrives after sign-out is discarded); the 「もう 1 回」 loop stays
+  (`ipc-and-main-process.md` "Shared reads"). Sign-out and quit forget everything.
 - **Mac notifications (E-27)** only for an approval request, an item new in 「あなたの番」, or a
   notice the server marks fresh (`desktop`, above) — `desktopNoticesOf` in
   `client/shared/notifications-app.ts`: a fresh notice is shown **also on the first look** (the

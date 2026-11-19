@@ -336,13 +336,15 @@ or the decision service stops calling it, or another module uses the older per-m
   arrival's series / by when listed, `review` = `reviewOf` once read), `minutes:requestReading` /
   `minutes:skipReading` (at the version shown; 403 `MINUTES_NO_ACCESS` → `MEETING_NO_ACCESS_TEXT`
   「…ほかの参加者が［AI に読ませる］を押すと、その人の AI が読めます。」, `noAccess: true`; a request
-  accepted re-reads the received minutes at once, `onReadRequested` → `minutes.recordsSignal`),
+  accepted re-reads the received minutes at once, `onReadRequested` → `minutes.recheck`, a fresh read),
   `minutes:autoSeries`, `minutes:invite` (`POST /records/item/:id/members`, any members-only record;
   member ids checked, de-duplicated; groups / departments sent as `{ subjectType, subjectId }`) and
   `minutes:inviteChoices` (`GET …/members/choices`: what the dialog may offer besides people). Malformed ids never reach a URL.
 - **The banner** (`src/features/minutes/components/MeetingBanners.tsx`, the words in `model.ts`
   `meetingBanner`): at the top of やること (`useMinutesSlots` `banners()`, placed by AppShell above `TaskListPanel`; `useMeetingArrivals`: at
-  mount, on `minutes:changed` / `records:changed` / `notifications:changed`, every 2 minutes, after a
+  mount, on `records:changed` (once per change: `minutes:changed` / `notifications:changed` caused
+  by the same change no longer re-read it; main sends `records:changed` when the checker's own look
+  found the received minutes changed, `onAiTurnChanged`), every 2 minutes, after a
   press). **It never takes the pane** (first discovery brings many meetings at once, 2026-11-05): one
   block of at most 45% of the pane with the heading 「議事録が届きました」 and `MEETING_ROWS_SHOWN` (2)
   one-line rows (`meetingRowWords` 「<title>・今日 12:00」, cut with the whole text as the tooltip, small
@@ -678,11 +680,13 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   readings back itself; for an older server each `stale` id still in `reading` is put back with the
   type's `retry` at its current version), then the notices are read from
   `GET /records/ai-turn` (type `meeting`, state `received`: id, title, `meeting_at`, version —
-  never text). Main sends `minutes:changed { companyId }` when they change; the renderer re-reads
+  never text; through the shared `AiTurnReads`, one request with the task list at the same moment;
+  a POST here marks the change, so the look after a press is fresh). Main sends `minutes:changed { companyId }` when they change, and `records:changed` when a look no records signal started found them changed; the renderer re-reads
   `minutes:notices`.
 - **The records signal** (push channel, `agent-stop.md`): `wireAgentControl`'s `onRecords` →
-  `recordsSignal(companyId)`, which only re-reads the received minutes, for the company being
-  watched and only while the grant was seen. The signal's content is never used.
+  (once per burst, `push-signal-fanout.ts`) `recordsSignal(companyId)`, which only re-reads the
+  received minutes, for the company being watched and only while the grant was seen. The signal's
+  content is never used.
 - **No banner** (S11, owner decision 2026-11-01): the 「議事録が届きました」 notice under the
   department bar is gone. A received record is a row of the task list's 「AI の番」 (the `ai-turn`
   answer), with the automatic runner's state; while the AI has not started it, the row offers

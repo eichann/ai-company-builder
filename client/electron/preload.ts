@@ -9,6 +9,7 @@ import type {
   SendArgs, SendChannel, SyncArgs, SyncChannel, SyncResult,
 } from '../shared/ipc-contract'
 import type { VoiceInputAPI } from '../shared/voice-input'
+import type { CalendarTodayOptions } from '../shared/calendar'
 import type { ChatMetadataPatch, ChatSaveReceipt, ChatSession } from '../shared/chat-history'
 import type { HandoffCompletion } from '../shared/handoff'
 import type { AgentInteractionResponse } from '../shared/agent-interaction'
@@ -20,7 +21,7 @@ import type { AbsenceAddInput } from '../shared/absences'
 import type { WorkSwitch } from '../shared/work-switches'
 import type { ViewersQuery } from '../shared/viewers'
 import type { InviteSet } from '../shared/minutes-app'
-import type { ArchiveCursor, BundleCreateInput, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveLinkOptions, TypedFileTarget } from '../shared/tasks'
+import type { ArchiveCursor, BundleCreateInput, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveLinkOptions, TaskListOptions, TypedFileTarget } from '../shared/tasks'
 import type { DroppedThing } from '../shared/link-drop'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
@@ -170,8 +171,8 @@ const api: ElectronAPI = {
   getViewers: (companyId: string, query: ViewersQuery) => invoke('viewers:get', companyId, query),
   recreatePluginOperation: (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string) =>
     invoke('pluginOperations:recreate', companyId, pluginId, operationId, confirm, conversationId),
-  getCalendarToday: (companyId: string) => invoke('calendar:today', companyId),
-  getTaskList: (companyId: string) => invoke('tasks:list', companyId),
+  getCalendarToday: (companyId: string, options?: CalendarTodayOptions) => invoke('calendar:today', companyId, options),
+  getTaskList: (companyId: string, options?: TaskListOptions) => invoke('tasks:list', companyId, options),
   getArchivedTasks: (companyId: string, cursor: ArchiveCursor) => invoke('tasks:archived', companyId, cursor),
   createTask: (companyId: string, input: TaskCreateInput) => invoke('tasks:create', companyId, input),
   actOnTask: (companyId: string, recordId: string, input: TaskActInput) => invoke('tasks:act', companyId, recordId, input),

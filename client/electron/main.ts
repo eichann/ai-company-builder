@@ -25,6 +25,10 @@ import { createClaudeCli } from './services/claude-cli'
 import { createAppPages, createBroadcastPort, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, receiveAppLinks, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
 import { diskFiles, registerChatWindowsIpc } from './features/chat-windows/ipc'
 import { createSession } from './services/session'
+import { createInFlightReads } from './services/in-flight-reads'
+import { createPushSignalFanout } from './services/push-signal-fanout'
+import { createTurnReads } from './services/turn-reads'
+import { createCalendarTodayReads } from './services/calendar-today-reads'
 import { registerAuthIpc } from './features/auth/ipc'
 import { wireChatHistory } from './features/chat-history/wire'
 import { createToolApprovals, registerAgentInteractionsIpc } from './features/agent-interactions/ipc'
@@ -50,7 +54,7 @@ import { wireKeyBroker } from './features/broker/wire'
 import { registerGoogleIpc } from './features/google/ipc'
 import { createDrivePicking } from './features/google/drive'
 import { driveFolderSharingText, drivePickRefusedText } from '../../shared/core/google-drive'
-import { registerCalendarIpc } from './features/calendar/ipc'
+import { createCalendarApi, registerCalendarIpc } from './features/calendar/ipc'
 import { registerTasksIpc } from './features/tasks/ipc'
 import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import { registerRecordViewsIpc } from './features/record-views/ipc'
@@ -251,14 +255,29 @@ console.log(`[client-identity] build ${BUILD_INFO.version} (built ${BUILD_INFO.b
 // The member's session with the server (cookies, in memory only).
 const session = createSession()
 
-// The AI policy, the emergency stop (M2) and the AI action log (M1): features/agent-control.
-// Set once 「議事録が届きました」 exists (below): a records signal only makes it ask the server again.
+// Reads asked at the same moment share one request (services/in-flight-reads.ts; ipc-and-main-process.md
+// "Shared reads"): per server × session (a sign-in or sign-out is another one) × company × question.
+const inFlightReads = createInFlightReads(() => `${getServerApiUrl()}\n${session.cookies().join('; ')}`)
+// 「あなたの番」 / 「AI の番」 for the task list, the title bar's watcher and the received minutes.
+const turnReads = createTurnReads({ baseUrl: getServerApiUrl, cookies: session.cookies, reads: inFlightReads })
+// The push channel's records / notifications signals of one company, handled once per burst (at most
+// SIGNAL_WINDOW_MS later; the change itself is marked at once). Never the stop policy: its own path in agent-control.
+const SIGNAL_WINDOW_MS = 250
 let recordsSignal: (companyId: string) => void = () => {}
 let noticesSignal: (companyId: string) => void = () => {}
+const pushSignals = createPushSignalFanout({
+  windowMs: SIGNAL_WINDOW_MS,
+  changed: companyId => inFlightReads.changed(companyId),
+  records: companyId => recordsSignal(companyId),
+  noticesOnly: companyId => noticesSignal(companyId),
+})
+lifecycle.beforeQuit(() => pushSignals.stop())
+
+// The AI policy, the emergency stop (M2) and the AI action log (M1): features/agent-control.
 const agentControl = wireAgentControl({
   serverUrl: getServerApiUrl, session, userDataDir, home: os.homedir(), turns: () => chatTurns, lifecycle,
-  onRecords: companyId => recordsSignal(companyId),
-  onNotifications: companyId => noticesSignal(companyId),
+  onRecords: companyId => pushSignals.records(companyId),
+  onNotifications: companyId => pushSignals.notifications(companyId),
   onPluginsChanged: companyId => appWindow.send('plugins:changed', { companyId }),
 })
 // 「議事録が届きました」 (features/minutes): checked with the session here, only while Google may read minutes.
@@ -266,13 +285,17 @@ const minutes = createMinutesChecker({
   baseUrl: getServerApiUrl,
   cookies: session.cookies,
   onChanged: companyId => appWindow.send('minutes:changed', { companyId }),
+  // Found without a signal (a check, the timer, a press): the task list hears it once.
+  onAiTurnChanged: companyId => appWindow.send('records:changed', { companyId }),
+  aiTurn: turnReads,
+  changed: companyId => inFlightReads.changed(companyId),
   watchSignals: companyId => agentControl.watchSignals(companyId),
 })
 lifecycle.beforeQuit(() => minutes.stop())
 registerMinutesIpc(ipc, minutes, createMeetingsApi({
   baseUrl: getServerApiUrl, cookies: session.cookies,
   // ［AI に読ませる］ accepted: the runner's queue (received minutes) is read again at once.
-  onReadRequested: companyId => minutes.recordsSignal(companyId),
+  onReadRequested: companyId => minutes.recheck(companyId),
 }))
 // The title bar's 「あなたの番」 and bell (features/notifications): read with the session here; a Mac
 // notification only for an approval request, a new item in あなたの番 or a fresh notice the server marks (E-27).
@@ -280,6 +303,9 @@ const notices = createNotificationsWatcher({
   baseUrl: getServerApiUrl,
   cookies: session.cookies,
   onChanged: companyId => appWindow.send('notifications:changed', { companyId }),
+  // 「あなたの番」 changed and no records signal had told the task list: it hears it once (records:changed).
+  onTurnChanged: companyId => appWindow.send('records:changed', { companyId }),
+  myTurn: turnReads,
   watchSignals: companyId => agentControl.watchSignals(companyId),
   // A click brings the window forward; the morning's 「今日のあなたの番」 also opens the task list.
   desktopNotify: (title, body, click) => desktopShell.notify(title, body, () => {
@@ -288,11 +314,16 @@ const notices = createNotificationsWatcher({
   }),
   shownNotices: fileShownStore(path.join(userDataDir(), 'notices-shown.json')),
 })
-// The task list re-reads on any records signal (others' changes reaching this member), and at once
-// when the member's own AI wrote a record here (recordsChangedHere, given to the chat below).
-recordsSignal = companyId => { minutes.recordsSignal(companyId); notices.signal(companyId); appWindow.send('records:changed', { companyId }) }
-const recordsChangedHere = (companyId: string) => { notices.signal(companyId); appWindow.send('records:changed', { companyId }) }
+// The task list re-reads on records signals (others' changes reaching this member; one burst = once), and
+// at once when the member's own AI wrote a record here (recordsChangedHere, given to the chat below). A
+// `notifications` signal alone only re-reads the title bar (it tells the list itself when 「あなたの番」 changed).
+recordsSignal = companyId => { minutes.recordsSignal(companyId); notices.signal(companyId, true); appWindow.send('records:changed', { companyId }) }
 noticesSignal = companyId => notices.signal(companyId)
+const recordsChangedHere = (companyId: string) => {
+  inFlightReads.changed(companyId)
+  notices.signal(companyId, true)
+  appWindow.send('records:changed', { companyId })
+}
 lifecycle.beforeQuit(() => notices.stop())
 registerNotificationsIpc(ipc, notices)
 
@@ -323,10 +354,14 @@ const googleApi = registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: se
 // ticket; Google needs a signed-in browser); the session stays here and waits for the result.
 const drivePicking = createDrivePicking({ baseUrl: getServerApiUrl, cookies: session.cookies, openBrowser: url => desktopShell.openExternal(url), google: googleApi })
 // 「今日の予定」 (features/calendar): the member's own meetings today, read by the server with the session here.
-registerCalendarIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// Asked once when the task list and 「確かめること」 ask at the same moment.
+const calendarToday = createCalendarTodayReads({ reads: inFlightReads, read: createCalendarApi({ baseUrl: getServerApiUrl, cookies: session.cookies }).today })
+registerCalendarIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, today: calendarToday.today })
 // The task list (features/tasks): read and changed with the session here; the server decides who may.
 registerTasksIpc(ipc, {
   baseUrl: getServerApiUrl, cookies: session.cookies,
+  turns: turnReads,
+  changed: companyId => inFlightReads.changed(companyId),
   // Tag suggestions: a Haiku model through the company's key (the broker's relay), text only.
   tagSuggest: { brokerEnv: request => brokerTokens.envFor(request), aiAllowed: () => agentControl.stop.oneShotAiAllowed() },
   // 「Google Drive のファイルをつなぐ」 (every company, owner decision 2026-11-13): the Picker flow the AI's tool uses.
@@ -427,7 +462,7 @@ const aiTurnClaims = createAiTurnClaims({
   // This app instance (per launch): the server's claim holder.
   deviceId: `app-${randomUUID()}`,
   // Another PC (or a person) moved the record on: read the notices again rather than in 10 minutes.
-  recordMovedOn: companyId => minutes.recordsSignal(companyId),
+  recordMovedOn: companyId => minutes.recheck(companyId),
   readProcedure: readPluginProcedure,
   // 定期の仕事 on this PC (jobs.md "The app's runner"): a shelf Skill's pinned version, checked; new files of a
   // place (a working folder by time, the shared folder by git's history); its AI stopped before the time runs out.
@@ -500,6 +535,8 @@ registerAuthIpc(ipc, {
     companyFilesApi.clear()
     minutes.stop()
     notices.stop()
+    // Signals still waiting were the previous account's.
+    pushSignals.stop()
     // Another account must not find this one's consultations on screen.
     chatWindows.closeAll()
   },

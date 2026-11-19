@@ -110,12 +110,20 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   A card mounted again (its tab switched back to) starts from the card it showed last and reads
   again (owner FB #14; `useShown`, `records.md` "What was shown comes back at once"); the list never
   remounts (it lives in AppShell, the left panels stay mounted), so it needs no cache.
-- `useTaskList` (in AppShell): read at mount, on `notifications:changed` and `records:changed` for
-  the company (`onTasksMayHaveChanged`, `src/features/tasks/api.ts`), every 2 minutes and after the
-  member's own change. `records:changed` (no content) is sent by main **at once when the member's
+- `useTaskList` (in AppShell): read at mount, on `records:changed` for the company
+  (`onTasksMayHaveChanged`, `src/features/tasks/api.ts`), every 2 minutes and after the member's own
+  change (`reload` asks `tasks:list` with `{ fresh: true }`: never a read main began before the
+  change); an answer older than the one shown is never taken (`listAnswers.ts` `nextListState`; reads are
+  numbered across companies, so a late answer of the company left behind never hides the new one's), so a
+  slower older look never puts back what a press changed, while every newer answer is (no freeze under
+  a stream of signals). `notifications:changed` no longer re-reads it (one records signal read the list twice):
+  main sends `records:changed` itself when the title bar's watcher or the received-minutes checker
+  found 「あなたの番」 / 「AI の番」 changed without a records signal, and main shares `my-turn` /
+  `ai-turn` with them (`ipc-and-main-process.md` "Shared reads"). `records:changed` (no content) is sent by main **at once when the member's
   own consultation AI wrote a record** in this app (a record tool's write the server accepted:
   `RecordToolsOptions.onRecordChanged` → `server-config.ts` `recordsChanged` → main, which also
-  asks the title bar's 「あなたの番」 again) and on every `records` push signal (others' changes that
+  asks the title bar's 「あなたの番」 again) and once per burst of `records` push signals (at most
+  250 ms after the first; others' changes that
   reach this member — every change to a record the member reads, named on it or not,
   `notifications.md` "The push signal"; 「かもしれない運転」). Tests: `client/tests/records-tools.test.ts` (a write tells,
   a look-up or refusal does not), `src/features/tasks/api.test.ts`.

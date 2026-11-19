@@ -11,12 +11,24 @@
 
 import type { MeetingBundleQuestionResult, MinutesActionResult, MinutesNotice, MinutesNoticesResult } from '../../../shared/minutes-app'
 import { MINUTES_OFFLINE_TEXT } from '../../../shared/minutes-app'
+import type { AiTurnReads } from '../../services/turn-reads'
 
 export interface MinutesCheckerDeps {
   baseUrl: () => string
   cookies: () => string[]
   /** The notices of this company may have changed: the renderer re-reads them (main.ts sends minutes:changed). */
   onChanged: (companyId: string) => void
+  /**
+   * The received minutes changed and nothing had told the app yet (a check, the timer, a look
+   * after a press), or the grant came or went: main tells the task list and the banner
+   * (records:changed). Not for a look a records signal started — that signal already told it —
+   * nor for the first look.
+   */
+  onAiTurnChanged?: (companyId: string) => void
+  /** `GET /records/ai-turn` shared with the task list (main.ts); absent → asked here. */
+  aiTurn?: AiTurnReads
+  /** The member changed something here (a press): shared reads on their way are not joined. */
+  changed?: (companyId: string) => void
   /** Keep the company's push channel open, so its records signals arrive. */
   watchSignals?: (companyId: string) => void
   fetch?: typeof fetch
@@ -62,7 +74,8 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
   let timer: unknown = null
   /** Per company: allowed (grant) and the received minutes, as last asked. */
   const known = new Map<string, MinutesNoticesResult>()
-  const refreshing = new Map<string, { again: boolean }>()
+  /** A look running per company: `again` = asked once more meanwhile; `untold` = one of the askers was not a records signal. */
+  const refreshing = new Map<string, { again: boolean; untold: boolean }>()
   const checking = new Set<string>()
 
   async function call(companyId: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<Answer | null> {
@@ -78,7 +91,18 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
       return { status: res.status, body: await res.json().catch(() => null) as Answer['body'] }
     } catch {
       return null
+    } finally {
+      // A write (answered or not) makes the next shared read a fresh one.
+      if (method === 'POST') deps.changed?.(companyId)
     }
+  }
+
+  /** The AI's turn: the shared read when main gave one ('discarded': asked for another session or server). */
+  async function aiTurn(companyId: string): Promise<Answer | null | 'discarded'> {
+    if (!deps.aiTurn) return call(companyId, 'GET', '/records/ai-turn')
+    const shared = await deps.aiTurn.aiTurn(companyId)
+    if (shared.discarded) return 'discarded'
+    return shared.value ? { status: shared.value.status, body: shared.value.json } : null
   }
 
   /** Whether the member has allowed Google to read their calendar and minutes (any failure: no). */
@@ -92,18 +116,25 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
     const before = known.get(companyId)
     known.set(companyId, next)
     if (JSON.stringify(before) !== JSON.stringify(next)) deps.onChanged(companyId)
+    // The grant came or went: the meetings shown elsewhere (the banner) are read again, as before.
+    if (before !== undefined && before.available !== next.available) deps.onAiTurnChanged?.(companyId)
   }
 
-  /** Ask the server for the member's received minutes (「AI の番」 of type meeting). */
-  async function refresh(companyId: string): Promise<void> {
+  /** Ask the server for the member's received minutes (「AI の番」 of type meeting). `told`: a records signal started it. */
+  async function refresh(companyId: string, told = false): Promise<void> {
     const running = refreshing.get(companyId)
-    if (running) { running.again = true; return }
-    const state = { again: false }
+    if (running) { running.again = true; if (!told) running.untold = true; return }
+    const state = { again: false, untold: !told }
     refreshing.set(companyId, state)
     try {
       do {
         state.again = false
-        const r = await call(companyId, 'GET', '/records/ai-turn')
+        const untold = state.untold
+        state.untold = false
+        const r = await aiTurn(companyId)
+        // Asked for another session or server than now (signed out meanwhile): nothing is shown, but
+        // a look asked meanwhile (the next account's watch) still runs.
+        if (r === 'discarded') continue
         if (!r || r.status !== 200) {
           // Off line, records off, an older server: keep what was shown.
           if (r) log.warn(`[minutes] ai-turn: answered ${r.status}`)
@@ -111,7 +142,9 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
         }
         const records = (r.body?.data as { records?: unknown[] } | undefined)?.records ?? []
         const notices = records.map(noticeOf).filter((n): n is MinutesNotice => n !== null)
+        const before = known.get(companyId)
         publish(companyId, { available: true, notices })
+        if (untold && before?.available === true && JSON.stringify(before.notices) !== JSON.stringify(notices)) deps.onAiTurnChanged?.(companyId)
       } while (state.again)
     } finally {
       refreshing.delete(companyId)
@@ -194,6 +227,16 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
      */
     recordsSignal(companyId: string): void {
       if (companyId !== current || known.get(companyId)?.available !== true) return
+      void refresh(companyId, true)
+    },
+
+    /**
+     * Something moved on that no signal has told the app about (［AI に読ませる］ accepted, a claim
+     * that found the record moved on): read the received minutes again, after that change.
+     */
+    recheck(companyId: string): void {
+      if (companyId !== current || known.get(companyId)?.available !== true) return
+      deps.changed?.(companyId)
       void refresh(companyId)
     },
 

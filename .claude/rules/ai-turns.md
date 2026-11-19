@@ -204,7 +204,7 @@ turns").
   `taken`, never tried again at that version). A record no longer in the claim's from-state
   (`claim.from`: meeting → `received`) is `taken` without claiming a run. When the record
   moved on (that, or a conflict at the start) main re-reads the notices at once
-  (`recordMovedOn` → `minutes.recordsSignal`), so this PC stops showing 「AI が読み取る予定です」.
+  (`recordMovedOn` → `minutes.recheck`, a fresh read), so this PC stops showing 「AI が読み取る予定です」.
   Answers `{ claimed: true, version }` (the version after the start). The ledger records it as the AI's, pointing at the consultation.
   Refused without a call to the server (`not-allowed`): an agent without `recordActions` (Codex,
   the API key), a closed main window, the emergency stop (`oneShotAiAllowed`), **a stop policy the

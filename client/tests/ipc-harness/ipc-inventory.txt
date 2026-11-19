@@ -761,7 +761,7 @@ contract.type IpcInvokeChannels.'brokerKeys:delete' = 'brokerKeys:delete': { arg
 contract.type IpcInvokeChannels.'brokerKeys:list' = 'brokerKeys:list': { args: [companyId: string]; result: OwnKeysResult }
 contract.type IpcInvokeChannels.'brokerKeys:moveFromEnv' = 'brokerKeys:moveFromEnv': { args: [companyId: string, rootPath: string, name: string]; result: OwnKeyMoveResult }
 contract.type IpcInvokeChannels.'brokerKeys:save' = 'brokerKeys:save': { args: [companyId: string, service: string, secret: string, displayName?: string]; result: OwnKeysResult }
-contract.type IpcInvokeChannels.'calendar:today' = 'calendar:today': { args: [companyId: string]; result: CalendarTodayResult }
+contract.type IpcInvokeChannels.'calendar:today' = 'calendar:today': { args: [companyId: string, options?: CalendarTodayOptions]; result: CalendarTodayResult }
 contract.type IpcInvokeChannels.'chat-server:getInfo' = 'chat-server:getInfo': { args: []; result: ChatServerInfo | null }
 contract.type IpcInvokeChannels.'chatHistory:deleteSession' = 'chatHistory:deleteSession': { args: [companyId: string, sessionId: string]; result: boolean }
 contract.type IpcInvokeChannels.'chatHistory:getSession' = 'chatHistory:getSession': { args: [companyId: string, sessionId: string]; result: ChatSession | null }
@@ -931,7 +931,7 @@ contract.type IpcInvokeChannels.'tasks:dropLink' = 'tasks:dropLink': { args: [co
 contract.type IpcInvokeChannels.'tasks:linkDriveFiles' = 'tasks:linkDriveFiles': { args: [companyId: string, recordId: string, expectedVersion: number, options?: TaskDriveLinkOptions]; result: TaskDriveLinkResult }
 contract.type IpcInvokeChannels.'tasks:linkFile' = 'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:linkRecord' = 'tasks:linkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
-contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId: string]; result: TaskListResult }
+contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId: string, options?: TaskListOptions]; result: TaskListResult }
 contract.type IpcInvokeChannels.'tasks:makeBundlePrivate' = 'tasks:makeBundlePrivate': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:makeBundlePrivatePlan' = 'tasks:makeBundlePrivatePlan': { args: [companyId: string, recordId: string]; result: MakePrivatePlanResult }
 contract.type IpcInvokeChannels.'tasks:proposals' = 'tasks:proposals': { args: [companyId: string, meetingId: string]; result: TaskProposalsResult }
@@ -1073,7 +1073,7 @@ main.handle brokerKeys:delete @ features/broker/ipc.ts (companyId: string, servi
 main.handle brokerKeys:list @ features/broker/ipc.ts (companyId: string)
 main.handle brokerKeys:moveFromEnv @ features/broker/ipc.ts (companyId: string, rootPath: string, name: string)
 main.handle brokerKeys:save @ features/broker/ipc.ts (companyId: string, service: string, secret: string, displayName?: string)
-main.handle calendar:today @ features/calendar/ipc.ts (companyId: string)
+main.handle calendar:today @ features/calendar/ipc.ts (companyId: string, options?: CalendarTodayOptions)
 main.handle chat-server:getInfo @ main.ts ()
 main.handle chatHistory:deleteSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string)
 main.handle chatHistory:getSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string)
@@ -1243,7 +1243,7 @@ main.handle tasks:dropLink @ features/tasks/ipc.ts (companyId, targetId, dropped
 main.handle tasks:linkDriveFiles @ features/tasks/ipc.ts (companyId, recordId, expectedVersion, options)
 main.handle tasks:linkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
 main.handle tasks:linkRecord @ features/tasks/ipc.ts (companyId, recordId, input)
-main.handle tasks:list @ features/tasks/ipc.ts (companyId)
+main.handle tasks:list @ features/tasks/ipc.ts (companyId, options)
 main.handle tasks:makeBundlePrivate @ features/tasks/ipc.ts (companyId, recordId, folder, expectedVersion)
 main.handle tasks:makeBundlePrivatePlan @ features/tasks/ipc.ts (companyId, recordId)
 main.handle tasks:proposals @ features/tasks/ipc.ts (companyId, meetingId)
@@ -1408,8 +1408,8 @@ preload getBundleChoices -> invoke tasks:bundles($0)
 preload getBundleChoices : (companyId: string) => Promise<BundleChoicesResult>
 preload getBundleKinds -> invoke tasks:bundleKinds($0)
 preload getBundleKinds : (companyId: string) => Promise<BundleKindsAnswer>
-preload getCalendarToday -> invoke calendar:today($0)
-preload getCalendarToday : (companyId: string) => Promise<CalendarTodayResult>
+preload getCalendarToday -> invoke calendar:today($0, $1)
+preload getCalendarToday : (companyId: string, options?: CalendarTodayOptions | undefined) => Promise<CalendarTodayResult>
 preload getChatServerInfo -> invoke chat-server:getInfo()
 preload getChatServerInfo : () => Promise<ChatServerInfo | null>
 preload getChatSession -> invoke chatHistory:getSession($0, $1)
@@ -1492,8 +1492,8 @@ preload getTaskCard -> invoke tasks:card($0, $1)
 preload getTaskCard : (companyId: string, recordId: string) => Promise<TaskCardResult>
 preload getTaskDriveChoices -> invoke tasks:driveChoices($0)
 preload getTaskDriveChoices : (companyId: string) => Promise<TaskDriveChoice[]>
-preload getTaskList -> invoke tasks:list($0)
-preload getTaskList : (companyId: string) => Promise<TaskListResult>
+preload getTaskList -> invoke tasks:list($0, $1)
+preload getTaskList : (companyId: string, options?: TaskListOptions | undefined) => Promise<TaskListResult>
 preload getTaskProposals -> invoke tasks:proposals($0, $1)
 preload getTaskProposals : (companyId: string, meetingId: string) => Promise<TaskProposalsResult>
 preload getViewers -> invoke viewers:get($0, $1)

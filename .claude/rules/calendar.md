@@ -72,7 +72,10 @@ Attendee addresses and names never leave `google-calendar.ts`: the answer has a 
   (which stays in main) → the server's `CalendarToday` as is (`isCalendarToday` checks the shape;
   a malformed answer is a failure), or `{ success: false, offline, error }` with a sentence from
   the status only (`calendarErrorText`, `client/shared/calendar.ts`), never the server's text.
-  Logged: the status only.
+  Logged: the status only. Main registers it through `CalendarTodayReads`
+  (`services/calendar-today-reads.ts`): the task list and 「確かめること」 asking at the same moment
+  share one request; nothing is kept after it. The read after a Google permission change asks
+  `calendar:today(companyId, { fresh: true })` (never answered by a read begun before the change).
 - Renderer: `client/src/features/tasks/api.ts` `getCalendarToday(companyId, reads)` (port
   `CalendarReads = ElectronPort<'getCalendarToday'>`), for the task list (S7b): today's meetings mixed into it (`tasks-ui.md`); read again at once when the app sees the
   member's Google permission change (`src/shared/lib/googlePermission.ts`).
