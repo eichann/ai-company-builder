@@ -113,7 +113,8 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
 - `useTaskList` (in AppShell): read at mount, on `records:changed` for the company
   (`onTasksMayHaveChanged`, `src/features/tasks/api.ts`), every 2 minutes and after the member's own
   change (`reload` asks `tasks:list` with `{ fresh: true }`: never a read main began before the
-  change). `notifications:changed` no longer re-reads it (one records signal read the list twice):
+  change); only the newest read's answer is applied (`latestOnly`), so a slower older look never puts
+  back what a press changed. `notifications:changed` no longer re-reads it (one records signal read the list twice):
   main sends `records:changed` itself when the title bar's watcher or the received-minutes checker
   found 「あなたの番」 / 「AI の番」 changed without a records signal, and main shares `my-turn` /
   `ai-turn` with them (`ipc-and-main-process.md` "Shared reads"). `records:changed` (no content) is sent by main **at once when the member's

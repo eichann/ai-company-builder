@@ -83,9 +83,10 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   - `in-flight-reads.ts` `createInFlightReads(scope)`: identical reads at the same moment share one
     request, per scope (server × session cookies: a sign-out or a new sign-in is another scope) ×
     group (company) × key (the question). `changed(company)` (a push signal at receipt, the member's
-    own write) makes a read on its way too old for whoever asks next: they get one more read, started
-    after it settled (answers keep their order, A → B → A never goes back); further changes before
-    it starts join that one (no backlog). An answer whose scope
+    own write) makes a read on its way too old for whoever asks next: they get a read of their own,
+    started at once (nobody waits behind the older one). Reads of one question are numbered: an
+    older read that settles after a newer one answers its callers with the newer answer, so nobody
+    goes back (A → B → A included). An answer whose scope
     changed while it ran is `discarded` for everyone who waited on it. Nothing is kept once a read
     settled (no cache); no abort, so one caller leaving never cancels another's read.
   - `bounded-coalescer.ts`: a burst of signals per key handled once, `windowMs` after the **first**
@@ -100,16 +101,21 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
     `calendar-today-reads.ts` (`CalendarTodayReads`: the task list and 「確かめること」, around the
     calendar feature's own read). The features keep their own request when none is given.
   - **After the member's own write the read is fresh**: `tasks` and the minutes checker call
-    `changed` after each POST that writes (`/records/query` and `/viewers` only read), and the
-    renderer's reload after a press asks `tasks:list(companyId, { fresh: true })`.
+    `changed` after each POST that writes (`/records/query` and `/viewers` only read), the
+    renderer's reload after a press asks `tasks:list(companyId, { fresh: true })` and the calendar's
+    read after a Google permission change `calendar:today(companyId, { fresh: true })`.
+    `useTaskList` applies only its newest read's answer (`src/shared/lib/latestOnly.ts`). A look whose
+    shared answer was discarded (a sign-out) still runs the look asked meanwhile (the watcher's and
+    checker's `again`). Sign-out drops the push signals still waiting (`pushSignals.stop()`).
   - **The signal chain is cut**: a change of the notices alone (`notifications:changed`) is the
     title bar's; the task list, the task card and the 議事録 banner listen to `records:changed` only.
     The watcher (`onTurnChanged`) and the checker (`onAiTurnChanged`) send `records:changed` when
     their own look (timer, check, a notifications signal alone, a press) found 「あなたの番」 / 「AI の
-    番」 changed and no records signal had told the list already (not on the first look). Each
-    keeps its 「もう 1 回」 (`again`) loop.
+    番」 changed and no records signal had told the list already (not on the first look); the
+    checker also when the minutes permission came or went (the banner re-reads). Each keeps its 「もう 1 回」 (`again`) loop.
   - Tests: `client/tests/shared-reads.test.ts`, `client/tests/turn-reads-sharing.test.ts`,
-    `src/features/tasks/api.test.ts`, `src/features/minutes/api.test.ts` (mutation-checked).
+    `src/features/tasks/api.test.ts`, `src/features/minutes/api.test.ts`,
+    `src/shared/lib/latestOnly.test.ts` (mutation-checked).
   - Not here (later stages, separate review): long-lived caches, the 60 s policy check, claims and
     leases, writes, intervals and background throttling are unchanged.
 - `electron/electron-adapter.ts` — Electron's implementations of the ports (`DesktopShell`,
