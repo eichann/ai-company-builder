@@ -55,7 +55,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `notifications` (notifications:watch / state / markRead / settings / setSetting and the event
   `notifications:changed`: the title bar's 「あなたの番」 and bell, `notifications.md`), `absences`
   (absences:get / add / remove: the member's own absences and delegate, with the session;
-  `records.md` "Absence and the delegate"), `jobs` (jobs:mine / accept / pause / resume: the
+  `records.md` "Absence and the delegate"), `browser` (browser:sites / open / clearLogin and the event
+  `browser:changed`: Settings → 「ブラウザ操作」, main window's main frame only, the host checked against
+  the current policy; the window itself is the shell's `browser-window.ts`, `agent-browser.md`), `jobs` (jobs:mine / accept / pause / resume: the
   scheduled jobs the member is responsible for, with the session; `jobs.md` "The screens"), `ai-turns`
   (aiTurns:settings / claim / settle: the automatic 「AI の番」's claim by version and settle, main
   window only; the run itself is a hidden consultation in the renderer, `ai-turns.md`). `tasks`
@@ -128,7 +130,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
 - `main.ts` (~320 lines) — the composition root: creates services and stores in dependency
   order, calls each `register…Ipc` / `wire…`, owns the app lifecycle, `app:closeResponse` and
   `chat-server:getInfo`, starts voice input and the chat server in `app.whenReady`.
-- Shell layer = `main.ts`, `preload.ts`, `electron-adapter.ts`, `voice-input.ts`: the only files
+- Shell layer = `main.ts`, `preload.ts`, `electron-adapter.ts`, `voice-input.ts`, `browser-window.ts`
+  (「ブラウザ操作」's window: one security surface of its own, kept apart so its real-Electron test loads
+  exactly it; `agent-browser.md`): the only files
   that import Electron, i.e. what another desktop shell (Tauri) would replace. ESLint
   `no-restricted-imports` forbids `electron` in `features/**`, `services/**`, `ipc/**`;
   `client/tests/architecture-boundaries.test.ts` checks the same over the whole tree, plus the
@@ -163,6 +167,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   window. Only the main frame: the PDF preview's iframe is Chromium's own viewer. The main window alone adds
   `backgroundThrottling: false` (the automatic 「AI の番」 runs there while it is behind or
   minimized, `ai-turns.md`). Tests: `tests/ipc-window-links.test.ts`, `tests/ipc-chat-windows.test.ts`.
+  「ブラウザ操作」's window is not an app window: its own preferences (no preload), session and guards, and
+  it never hands a link to the member's browser (`browser-window.ts`, `agent-browser.md`).
 - **Web permissions are default deny.** Electron grants every Chromium permission request
   (camera / microphone, notifications, clipboard, USB, …) when no handler is set.
   `guardEverySession` (`electron-adapter.ts`, called from `main.ts` before ready) installs a

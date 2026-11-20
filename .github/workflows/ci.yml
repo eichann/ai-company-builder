@@ -110,7 +110,8 @@ jobs:
     # through /bin/sh, which is bash on macOS and dash on Ubuntu (dash fails on
     # multi-digit fds: a known Linux-only bug; Linux is not a shipped
     # platform); recursive fs.watch is FSEvents; the file-system guards assert
-    # the case- and normalization-insensitive volume. Plus the AVFoundation
+    # the case- and normalization-insensitive volume; the 「ブラウザ操作」 window
+    # runs in a real Electron (a window needs a display). Plus the AVFoundation
     # Swift tests. Runs when what those files load changes (area clientmac:
     # client/electron/, client/shared/, shared/, the Swift sources, ...), not
     # for renderer-only changes. Part of the required check
@@ -122,6 +123,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/setup
+      # browser-window-electron.test.ts launches the real Electron: fetch its binary first, so a
+      # failed download shows here rather than as a test failure (the package downloads on first use).
+      - name: Fetch the Electron binary
+        working-directory: client
+        run: npx --no install-electron
       - name: Node tests (the macOS list)
         run: node .github/scripts/client-tests.mjs macos
       # Built without -O so Swift's assert() stays active.

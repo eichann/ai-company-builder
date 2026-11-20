@@ -68,6 +68,7 @@ import type { PluginScreensResult } from './plugin-screens'
 // lane B ▼
 // lane B ▲
 // lane C ▼
+import type { BrowserActionResult, BrowserSitesResult } from './browser-operation'
 import type { SkillShelfMark, SkillShelfRequestInfo, SkillShelfRestoreResult, SkillShelfSendResult } from './skill-shelf'
 import type { PluginStepButton, PluginStepContinuation, PluginStepContinueResult, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
 import type { StepDeliverablesView } from './step-deliverables'
@@ -832,6 +833,12 @@ export interface IpcInvokeChannels {
   // lane B ▼
   // lane B ▲
   // lane C ▼
+  /** 「ブラウザ操作」: the member's sites now (empty when off, unknown or unreadable; main window only). */
+  'browser:sites': { args: [companyId: string]; result: BrowserSitesResult }
+  /** 「開いてログイン」: the site's window, only for a site of the current policy (main window only). */
+  'browser:open': { args: [companyId: string, host: string]; result: BrowserActionResult }
+  /** 「ログインを消す」: the site's window closes and its login is cleared (main window only). */
+  'browser:clearLogin': { args: [companyId: string, host: string]; result: BrowserActionResult }
   /** The member's records at a business plugin's ai_turn step (C5, plugin-steps.md); main remembers them for the claim. */
   'aiTurns:pluginTurns': { args: [companyId: string]; result: QueuedPluginStep[] }
   /** The `start: person` steps at a record's state (its card's buttons). */
@@ -901,6 +908,8 @@ export interface IpcEventChannels {
   // lane B ▼
   // lane B ▲
   // lane C ▼
+  /** The member's 「ブラウザ操作」 sites of a company may have changed: ask `browser:sites` again. */
+  'browser:changed': [change: { companyId: string }]
   // lane C ▲
 }
 
@@ -1247,6 +1256,10 @@ export interface ElectronAPI {
   // lane B ▼
   // lane B ▲
   // lane C ▼
+  getBrowserSites: Invoke<'browser:sites'>
+  openBrowserSite: Invoke<'browser:open'>
+  clearBrowserLogin: Invoke<'browser:clearLogin'>
+  onBrowserChanged: Subscribe<'browser:changed'>
   listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
   listPersonSteps: Invoke<'pluginSteps:onRecord'>
   startPersonStep: Invoke<'pluginSteps:start'>

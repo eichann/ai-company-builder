@@ -12,10 +12,12 @@ import { ConnectToolsScreen } from './ConnectToolsScreen'
 import { AbsenceSection } from '../../absences/components/AbsenceSection'
 import { JobsSection } from '../../jobs/components/JobsSection'
 import { MySwitchesSection } from './MySwitchesSection'
+import { BrowserSection } from './BrowserSection'
+import { useBrowserSites } from '../hooks/useBrowserSites'
 import { LegacyKeysNote, MoveEnvKeysCard } from './MoveEnvKeysCard'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo, SlackLogo, UserSwitch, UserCircle, CalendarCheck, PlugsConnected } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo, SlackLogo, UserSwitch, UserCircle, CalendarCheck, PlugsConnected, Globe } from '@phosphor-icons/react'
 import { useAppStore } from '../../../stores/appStore'
 import { useDepartments } from '../../../shared/hooks/useDepartments'
 import { AGENT_LOG_NOTICE_TEXT, SANDBOX_NOTICE_TEXT } from '../../../shared/lib/agentLogNotice'
@@ -42,7 +44,7 @@ interface SettingsPanelProps {
   mineRows?: ReactNode
 }
 
-export type TabType = 'mine' | 'sync' | 'autosync' | 'gitignore' | 'tools' | 'ownkeys' | 'google' | 'slack' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions' | 'absences' | 'jobs'
+export type TabType = 'mine' | 'sync' | 'autosync' | 'gitignore' | 'tools' | 'ownkeys' | 'google' | 'slack' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions' | 'absences' | 'jobs' | 'browser'
 
 const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; icon: ReactNode }> }> = [
   {
@@ -66,6 +68,7 @@ const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; ico
       { id: 'ownkeys', label: '自分の鍵', icon: <LockKey size={16} /> },
       { id: 'google', label: 'Google', icon: <GoogleLogo size={16} /> },
       { id: 'slack', label: 'Slack', icon: <SlackLogo size={16} /> },
+      { id: 'browser', label: 'ブラウザ操作', icon: <Globe size={16} /> },
       { id: 'apikeys', label: 'APIキー（このPC）', icon: <Key size={16} /> },
       { id: 'advanced', label: '環境変数（.env）', icon: <Code size={16} /> },
       { id: 'aienv', label: 'AIに渡す環境変数', icon: <ShieldCheck size={16} /> },
@@ -92,8 +95,10 @@ const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; ico
  * downloaded, so the 同期 group (download choices with folder sizes, automatic sync,
  * .gitignore) is not offered.
  */
-function settingsGroupsFor(sharedFolder: boolean): typeof NAV {
-  return sharedFolder ? NAV : NAV.filter(group => group.group !== '同期')
+function settingsGroupsFor(sharedFolder: boolean, browserSites: boolean): typeof NAV {
+  const groups = sharedFolder ? NAV : NAV.filter(group => group.group !== '同期')
+  // 「ブラウザ操作」 only while the member's policy is on with at least one site.
+  return browserSites ? groups : groups.map(group => ({ ...group, items: group.items.filter(item => item.id !== 'browser') }))
 }
 
 const INPUT = 'h-9 rounded-lg border border-zinc-200 bg-white px-3 text-[13px] text-zinc-900 placeholder:text-zinc-400 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-indigo-400/60'
@@ -103,6 +108,7 @@ const CODE = 'rounded bg-zinc-100 px-1 py-px font-mono text-[12px] text-zinc-700
 export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mineRows }: SettingsPanelProps) {
   const { currentCompany } = useAppStore()
   const { departments } = useDepartments(currentCompany?.id)
+  const browser = useBrowserSites(currentCompany?.id)
   const [gitBinaryStatus, setGitBinaryStatus] = useState<{ bundled: boolean; binary: string } | null>(null)
   const [activeTab, setActiveTab] = useState<TabType>(initialTab)
   // Saved .env values never reach the renderer: only their status, plus what is typed here.
@@ -312,13 +318,13 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
         className="flex h-[min(760px,92vh)] w-[min(1040px,96vw)] overflow-hidden rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-2xl outline-none dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-100"
       >
         {/* Section nav */}
-        <nav aria-label="設定の項目" className="flex w-60 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50/80 px-3 py-5 dark:border-white/[0.06] dark:bg-zinc-950/40">
+        <nav ref={browser.loadRef} aria-label="設定の項目" className="flex w-60 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50/80 px-3 py-5 dark:border-white/[0.06] dark:bg-zinc-950/40">
           <div className="px-2.5 pb-4">
             <p className="text-[15px] font-semibold tracking-tight">設定</p>
             <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400" title={currentCompany.rootPath}>{currentCompany.name}</p>
           </div>
           <div className="min-h-0 space-y-5 overflow-y-auto">
-            {settingsGroupsFor(companyHasSharedFolder(currentCompany)).map(group => (
+            {settingsGroupsFor(companyHasSharedFolder(currentCompany), browser.sites.length > 0).map(group => (
               <div key={group.group}>
                 <p className="px-2.5 pb-1.5 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">{group.group}</p>
                 <ul className="space-y-0.5">
@@ -386,6 +392,8 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
               <ConnectToolsScreen key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'google' ? (
               <GoogleSection key={currentCompany.id} companyId={currentCompany.id} />
+            ) : activeTab === 'browser' ? (
+              <BrowserSection key={currentCompany.id} companyId={currentCompany.id} sites={browser.sites} />
             ) : activeTab === 'slack' ? (
               <SlackSection key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'mine' ? (

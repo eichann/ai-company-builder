@@ -9,6 +9,9 @@
  *   stays off for that turn (logged).
  * - 「もう一方の AI に聞く」 (`secondOpinion`): memory only; allowed only when the last answer
  *   says `allowed: true` (no answer / an older server = not allowed, `secondOpinionAllowed`).
+ * - 「ブラウザ操作」 (`browser`, agent-browser.md): memory only; validated with the shared rules
+ *   (absent or invalid = off). Its users also hear `onRefreshFailed`: a refresh that did not
+ *   bring a valid answer must not leave a browser window open on an older "on".
  * - Stop: the last stop part received is also kept on disk per account and
  *   company (`<dir>/<user>/<company>.json`, 0600), so a restart while offline
  *   still knows it. Never received (no answer, an older server without `stop`)
@@ -24,6 +27,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseAgentSandboxSettings } from '../../../shared/core/agent-sandbox'
+import { parseBrowserOperationSettings } from '../../../shared/core/browser-operation'
+import type { AgentBrowserPolicy } from '../../../shared/types/agent-browser'
 import type { AgentPolicy, AgentSandboxPolicy } from '../../../shared/types/agent-sandbox'
 import type { SecondOpinionPolicy } from '../../../shared/types/second-opinion'
 import { AGENT_STOP_SUPPORT_HEADER, parseAgentStopPolicy, type AgentStopPolicy } from '../../shared/agent-stop'
@@ -63,6 +68,11 @@ export interface AgentPolicyStore {
    */
   onPolicy(listener: (companyId: string, policy: AgentPolicy) => void): void
   /**
+   * Called when a refresh ended without a valid answer (no server, an error status, an answer
+   * that does not validate, no answer at all). The cached policy is still served to the others.
+   */
+  onRefreshFailed(listener: (companyId: string) => void): void
+  /**
    * The server answered this company's policy with its stop part in this app run, for this
    * account, at most `ms` ago (a stop restored from disk never counts; a clock that went back
    * counts as not confirmed).
@@ -91,7 +101,16 @@ export function parseAgentPolicy(data: unknown): AgentPolicy | undefined {
   const plugins = parseDistributedPlugins((value as { plugins?: unknown }).plugins)
   // 「もう一方の AI に聞く」: only an explicit `allowed: true` is kept; anything else = not allowed.
   const secondOpinion = parseSecondOpinionPolicy((value as { secondOpinion?: unknown }).secondOpinion)
-  return { version: value.version, sandbox: policy, ...(stop ? { stop } : {}), ...(plugins ? { plugins } : {}), ...(secondOpinion ? { secondOpinion } : {}) }
+  // 「ブラウザ操作」: absent (an older server) or not valid = left out, which the app reads as off.
+  const browser = parseBrowserPolicy((value as { browser?: unknown }).browser)
+  return { version: value.version, sandbox: policy, ...(stop ? { stop } : {}), ...(plugins ? { plugins } : {}), ...(secondOpinion ? { secondOpinion } : {}), ...(browser ? { browser } : {}) }
+}
+
+/** The policy's `browser` part checked with the shared rules, or undefined (= off). */
+export function parseBrowserPolicy(value: unknown): AgentBrowserPolicy | undefined {
+  const parsed = parseBrowserOperationSettings(value)
+  if ('error' in parsed) return undefined
+  return { ...parsed.value, source: (value as { source?: unknown }).source === 'member' ? 'member' : 'company' }
 }
 
 /** The policy's `secondOpinion` part, or undefined when absent or not a boolean (= not allowed). */
@@ -121,6 +140,14 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
   const doFetch = deps.fetch ?? fetch
   const listeners: Array<(companyId: string, stop: AgentStopPolicy | undefined) => void> = []
   const policyListeners: Array<(companyId: string, policy: AgentPolicy) => void> = []
+  const failedListeners: Array<(companyId: string) => void> = []
+  const failed = (companyId: string) => {
+    for (const listener of failedListeners) {
+      try { listener(companyId) } catch (error) {
+        log.warn(`[agent-policy] ${companyId}: a failure listener failed (${error instanceof Error ? error.message : 'unknown'})`)
+      }
+    }
+  }
   const answered = (companyId: string, policy: AgentPolicy) => {
     for (const listener of policyListeners) {
       try { listener(companyId, policy) } catch (error) {
@@ -185,7 +212,7 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
   async function load(companyId: string): Promise<AgentPolicy | undefined> {
     const base = deps.baseUrl()
     const cached = cache.get(companyId)
-    if (!base) return cached
+    if (!base) { failed(companyId); return cached }
     const keep = cached ? 'keeping the last policy' : 'unknown, the AI sandbox stays off this turn'
     try {
       const headers: Record<string, string> = { Cookie: deps.cookies().join('; '), [AGENT_STOP_SUPPORT_HEADER]: '1' }
@@ -196,11 +223,13 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
       if (res.status === 304) {
         confirm(companyId, cached)
         if (cached) answered(companyId, cached)
+        else failed(companyId)
         return cached
       }
       if (!res.ok) {
         // 404 from an older server that has no policy yet: the same as "off".
         log.warn(`[agent-policy] ${companyId}: HTTP ${res.status}; ${keep}`)
+        failed(companyId)
         return cached
       }
       const data = (await res.json() as { data?: unknown })?.data
@@ -213,6 +242,7 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
           receivedStop(companyId, stop)
           confirmed.set(keyOf(companyId), now())
         }
+        failed(companyId)
         return cached
       }
       cache.set(companyId, policy)
@@ -222,6 +252,7 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
       return policy
     } catch (error) {
       log.warn(`[agent-policy] ${companyId}: ${error instanceof Error ? error.message : 'request failed'}; ${keep}`)
+      failed(companyId)
       return cached
     }
   }
@@ -261,6 +292,7 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
     },
     onStopChange(listener) { listeners.push(listener) },
     onPolicy(listener) { policyListeners.push(listener) },
+    onRefreshFailed(listener) { failedListeners.push(listener) },
     confirmedWithin(companyId, ms) {
       const at = confirmed.get(keyOf(companyId))
       if (at === undefined) return false

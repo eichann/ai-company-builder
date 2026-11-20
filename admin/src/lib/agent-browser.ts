@@ -18,8 +18,8 @@ export const BROWSER_TITLE = 'ブラウザ操作'
 export const BROWSER_INTRO =
   'AI への相談の中で、AI が会社の決めたサイトを操作できるようにします。AI が触れるのは下の一覧のサイトだけで、サイトごとに用意された決まった操作の手順だけを使います（自由にクリックして回ることはしません）。'
 
-/** Shown by the mode choice until the app side ships (then removed: agent-browser.md). */
-export const BROWSER_NOT_YET_NOTE = 'アプリ側の機能は準備中です。今「使う」にしても、まだ何も変わりません。'
+/** Shown by the mode choice until the AI operates sites (then removed: agent-browser.md). */
+export const BROWSER_NOT_YET_NOTE = '今「使う」にすると、メンバーはアプリの設定から一覧のサイトを開いてログインできます。AI がサイトを操作する機能は準備中です。'
 
 export const BROWSER_MODES: BrowserOperationMode[] = ['off', 'on']
 
@@ -51,7 +51,7 @@ export const BROWSER_SITES_HELP =
   '「操作するサイト」は AI が操作するサイトのアドレス（例: crm.example.com）です。「画面の部品を取る先」は、そのサイトの画面を表示するのに必要な部品（画像・文字の形・見た目の設定など）を読み込む先で、1行に1つ書きます。部品を取る先からは読み込むだけで、そこで何かを操作することはありません。'
 
 export const BROWSER_LOGIN_NOTE =
-  'サイトへのログインは、「AI の囲い」が「囲う」になっているメンバーの PC にだけ保存されます。それ以外のメンバーは、アプリを起動し直すたびにログインし直します（AI が実行するコマンドからログイン情報を読まれないようにするためです）。'
+  'サイトへのログインは PC に保存されません。メンバーはアプリを起動し直すたびにログインし直します（AI が実行するコマンドからログイン情報を読まれないようにするためです）。'
 
 export const BROWSER_HOST_RULE = '「*」・IP アドレス・localhost・https:// やパスは書けません'
 
