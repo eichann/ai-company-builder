@@ -1,12 +1,12 @@
 import { SERVICE_MADE_TYPES, SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE_TRANSITIONS, serviceTransitionAllowed } from '../../../shared/core/core-types'
-import { findPrivateScope } from '../../../shared/core/permissions'
+import { findPrivateScope, type ScopeWithRules } from '../../../shared/core/permissions'
 import { normalizeRepoPath } from '../../../shared/core/paths'
 import type { TypeDefinition } from '../../../shared/core/record-types'
 import { SYSTEM_ACTOR_PREFIX, type LedgerChange, type LedgerEntry, type LedgerValue, type LedgerVia } from '../../../shared/core/record-ledger'
 import { newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordAccessRow, RecordLinkRow, RecordMemberSet } from '../../ports/records'
-import { recordReader } from '../record-access'
+import { listedUserIds, recordReader } from '../record-access'
 import { currentTypes } from '../record-index'
 import { recordSummaries } from '../records'
 import { interfaceLinkMisses } from './links'
@@ -138,6 +138,54 @@ export function placeOfRow(row: Pick<RecordAccessRow, 'folder' | 'personalOwner'
   if (row.personalOwner !== null) return { personalOwner: row.personalOwner }
   if (row.members !== null) return { members: row.members, ...(row.memberSets && row.memberSets.length > 0 ? { memberSets: row.memberSets } : {}) }
   return { folder: row.folder }
+}
+
+/**
+ * The place of a record made for `rows` (the まとまり, meeting, 連絡, やること… it links to) when one of
+ * them is owner-only or members-only — never seen by more people than any of them (records.md
+ * "Other records made for a まとまり"): owner-only → owner-only for `creator`, who must be that owner
+ * (else `refused`); members-only → that list (one: as written, its groups too — `placeOfRow`;
+ * several: who is on all of them now, as people, like several meetings' lists), which must include
+ * `creator` (else `refused`). `null` when none is restricted: the caller places it by folder as before.
+ */
+export function restrictedPlaceOf(
+  rows: readonly (Pick<RecordAccessRow, 'folder' | 'personalOwner' | 'members' | 'memberSets'> | null | undefined)[], creator: string,
+): ServicePlace | 'refused' | null {
+  const restricted = rows.filter((r): r is Pick<RecordAccessRow, 'folder' | 'personalOwner' | 'members' | 'memberSets'> => !!r && (r.personalOwner !== null || r.members !== null))
+  if (restricted.length === 0) return null
+  const owners = restricted.filter(r => r.personalOwner !== null)
+  if (owners.length > 0) {
+    if (owners.some(r => r.personalOwner !== creator)) return 'refused'
+    if (restricted.some(r => r.personalOwner === null && !listedUserIds(r).includes(creator))) return 'refused'
+    return { personalOwner: creator }
+  }
+  if (restricted.length === 1) return listedUserIds(restricted[0]).includes(creator) ? placeOfRow(restricted[0]) : 'refused'
+  const lists = restricted.map(r => listedUserIds(r))
+  const common = lists.slice(1).reduce<string[]>((acc, list) => acc.filter(id => list.includes(id)), [...lists[0]])
+  return common.includes(creator) ? { members: common } : 'refused'
+}
+
+/**
+ * With a members-only place from `restrictedPlaceOf`: does everyone on that list (as it is now) read every
+ * other source that is placed by a folder (or company-wide)? A record made from a members-only まとまり and
+ * an 経理部 approval / やること is read only by people who read both — when someone on the list does not read
+ * such a source, the caller refuses (the safe side: nobody is dropped from the list quietly). Owner-only
+ * places pass: their one reader read every source to link it.
+ */
+export function listReadsSources(
+  companyId: string, scopes: ScopeWithRules[], roleOf: (userId: string) => string | null, place: ServicePlace,
+  rows: readonly (RecordAccessRow | null | undefined)[],
+): boolean {
+  if (!('members' in place)) return true
+  const people = listedUserIds({ members: place.members, memberSets: place.memberSets ?? [] })
+  const placed = rows.filter((r): r is RecordAccessRow => !!r && r.personalOwner === null && r.members === null)
+  return people.every(userId => {
+    const role = roleOf(userId)
+    // Not a member of the company (any more): reads nothing through any route, so widens nothing.
+    if (role === null) return true
+    const reader = recordReader({ companyId, userId, role }, scopes)
+    return placed.every(r => reader.record(r))
+  })
 }
 
 /**

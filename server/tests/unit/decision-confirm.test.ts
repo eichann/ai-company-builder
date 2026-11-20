@@ -12,6 +12,8 @@
  *   without a meeting, whoever recorded it; never the AI;
  * - a members-only meeting's decision is never widened: a 責任者 who cannot read it cannot confirm, the
  *   meeting's people decide, the card is told who cannot read it (only a reader of the まとまり is told);
+ * - a decision for a まとまり shown to a list is that list's too (with the meeting's: who is on both), so an
+ *   attendee not on the まとまり's list never reads it;
  * - 違う (reject) needs no note while unconfirmed; 取り消す of a confirmed one does;
  * - an unconfirmed decision carries `proposalNotice` wherever the AI reads it, a confirmed one not;
  * - `said_by` / `objection`: outside text kept on one line with brackets neutralized, choices checked;
@@ -75,7 +77,7 @@ beforeEach(() => {
   engine = createRecordEngine({ ...base, files: { appendHistoryLine: async () => true, fileAtCommit: async () => false }, managedFolders: () => [], actsFor: (_c: string, userId: string) => covering[userId] ?? [] })
   service = createRecordService({ companyData: source, clock, indexer: { schedule: async () => {} }, whoMay: (member, id, actions) => engine.whoMay(member, id, actions) })
   writer = createServiceRecordWriter(base)
-  decisions = createDecisionService({ companyData: source, writer, ids, tokenDigest: { digest: (t: string) => createHash('sha256').update(t).digest('hex') } })
+  decisions = createDecisionService({ companyData: source, writer, ids, roleOf, tokenDigest: { digest: (t: string) => createHash('sha256').update(t).digest('hex') } })
   conn.prepare("INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES ('a', 'a', 'a', 'u-owner', ?, ?)").run(TS, TS)
   conn.prepare("INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('a-root', 'a', '', 'company', ?)").run(TS)
   conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-root-r', 'a-root', 'everyone', NULL, 1, 1, ?)").run(TS)
@@ -214,9 +216,22 @@ describe('a meeting for its attendees: never widened', () => {
     expect(ok(await act(m('u-alice'), HUMAN, d.id, 'confirm')).record.state).toBe('confirmed')
   })
 
+  it('a decision for a まとまり shown to a list is that list’s too: an attendee not on it never reads it', async () => {
+    const listed = ok(engine.create(m('u-alice'), HUMAN, { type: 'project', title: '非公開のプロジェクト', members: ['u-alice', 'u-bob'], fields: { owner: 'u-alice' } }))
+    const d = await aiDecision({ bundle: listed.record.id, meeting: meeting(['u-bob', 'u-mallory']).id }, {}, null)
+    expect(source.forCompany('a').records.find(d.id)).toMatchObject({ folder: null, members: ['u-bob'] })
+    expect(await service.get(m('u-mallory'), d.id)).toMatchObject({ ok: false, kind: 'not-found' })
+    // u-bob, on both lists, decides (the 責任者 u-alice did not attend), and is told she cannot read it.
+    expect(ok(await service.get(m('u-bob'), d.id)).decisionChecks?.[d.id]).toEqual({ may: { confirm: true, reject: true, retract: false }, responsible: [], cannotRead: ['u-alice'] })
+  })
+
   it('the 責任者 is named only to someone who reads the まとまり', async () => {
-    // A プロジェクト only u-alice and u-bob see (the core まとまり; its 責任者 is its `owner`).
-    const secret = ok(engine.create(m('u-alice'), HUMAN, { type: 'project', title: '非公開のプロジェクト', members: ['u-alice', 'u-bob'], fields: { owner: 'u-alice' } }))
+    // A プロジェクト in 営業部, which u-mallory may not read (the core まとまり; its 責任者 is its `owner`).
+    conn.prepare("INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('a-sales-s', 'a', '営業部', 'folder', ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-sales-m', 'a-sales-s', 'user', 'u-mallory', 0, 0, ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-sales-e', 'a-sales-s', 'everyone', NULL, 1, 1, ?)").run(TS)
+    const secret = ok(engine.create(m('u-alice'), HUMAN, { type: 'project', title: '営業部のプロジェクト', folder: '営業部', fields: { owner: 'u-alice' } }))
+    expect(await service.get(m('u-mallory'), secret.record.id)).toMatchObject({ ok: false, kind: 'not-found' })
     const d = await aiDecision({ bundle: secret.record.id, meeting: meeting(['u-bob', 'u-mallory']).id }, {}, null)
     expect(ok(await service.get(m('u-mallory'), d.id)).decisionChecks?.[d.id]).toEqual({ may: { confirm: true, reject: true, retract: false }, responsible: [], cannotRead: [] })
     expect(ok(await service.get(m('u-bob'), d.id)).decisionChecks?.[d.id]?.cannotRead).toEqual(['u-alice'])

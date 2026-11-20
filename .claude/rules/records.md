@@ -1026,7 +1026,10 @@ unchanged. Column added by `migrateRecordPersonalOwner` (nullable, no data migra
   plugin's type — any type with a stored `plugin` version (deal, customer: other records take
   their readers from them; 400 `PERSONAL_NOT_FOR_TYPE`); an assignee other than the creator
   cannot read it (400 `ASSIGNEE_CANNOT_READ`). The summary carries `personal: true` (only the
-  owner ever sees it). Service-written records are never owner-only.
+  owner ever sees it). A service writes an owner-only record only where it says whose
+  (`personalOwner`): the inbox's record of a member's own mail (`inbox.ts`, `inbox.md`), a scheduled
+  job's やること for its acting member (`job-runs.ts`, `job-occurrences.ts`, `jobs.md`), and a 決めたこと or
+  mail draft made for an owner-only まとまり ("Other records made for a まとまり").
 - **Links**: a record link on the generic create must name a live record the creator reads, else
   400 `LINK_TARGET_NOT_FOUND` — the same answer for a missing id, someone's owner-only record and
   an unreadable private one (this check is new with owner-only records; before, any id was stored).
@@ -1100,10 +1103,11 @@ owner-only one, before every role or folder rule).
   decisions: `DECISION_PLACE_REFUSED`, and `folder` may be left out). The AI's meeting outputs get
   this too (`aiPlacement` leaves meeting outputs alone). With an explicit `members` the AI may only
   narrow: everyone listed must be on the meeting's list or named by the record (400
-  `MEMBERS_NOT_IN_MEETING`); a person may widen (it is their act). Only meetings are inherited from:
-  a record linking someone's owner-only record stays where it was put (an established pattern,
-  "Owner-only records": the link is hidden from the others); the mail service places by its source
-  instead (below).
+  `MEMBERS_NOT_IN_MEETING`); a person may widen (it is their act). The generic create inherits from
+  meetings only: a record linking someone's owner-only record stays where it was put (an established
+  pattern, "Owner-only records": the link is hidden from the others); the mail service places by its
+  source instead (below), and a 決めたこと or mail draft made for an owner-only / members-only まとまり
+  takes its place ("Other records made for a まとまり").
 - **Invite** 「招待する」: `POST /records/item/:recordId/members { add, expectedVersion, note? }`
   (contract `InviteRecordMembersRequest`), **session only**. Any listed member (nobody else finds it:
   404 `RECORD_NOT_FOUND`); not members-only → 409 `NOT_MEMBERS_ONLY`; each a member (400
@@ -1119,10 +1123,11 @@ owner-only one, before every role or folder rule).
   sharing is the listed member's own act, and the ledger must be accurate, so `place.members`
   before keeps the previous list.
 - **Places copied from a record** go through `placeOfRow` (`record-engine/service-writer.ts`:
-  folder | owner | members) — the mail draft (an owner-only / members-only 連絡, meeting or やること
-  keeps its place whatever the まとまり), the sent mail's やりとり (with or without 「返事を待つ」 when the
-  mail's record is restricted; `outbound-mail.ts`) and the inbox's 返事のお願い (`inbox.ts`). Copying
-  `folder` alone would place it company-wide.
+  folder | owner | members) — the sent mail's やりとり (with or without 「返事を待つ」 when the mail's
+  record is restricted; `outbound-mail.ts`) and the inbox's 返事のお願い (`inbox.ts`) — or, from several
+  records, `restrictedPlaceOf` (same file): the mail draft (an owner-only / members-only 連絡, meeting,
+  やること or まとまり keeps its place whatever the others' folders) and the 決めたこと ("Other records made
+  for a まとまり"). Copying `folder` alone would place it company-wide.
 - **Elsewhere**: the inbox joins a message to a members-only やりとり's thread only when it reached
   someone on the list (`inbox.md`); a members-only (or owner-only) meeting, or one inside a private
   folder or a read-restricted place, is not named in the note of its まとまり's step move
@@ -1310,6 +1315,47 @@ Words on screen: 見える範囲 / 見られる人, never 置き場所.
   案件」 with ［変える］ (`tasks-ui.md`).
 - **No leaks**: a まとまり the member cannot read answers as missing everywhere (`BAD_LINK`, the create's
   link check run first), and every refusal above names no place or title.
+- **Other records made for a まとまり** (2026-11-20; before, both were placed by a department folder or
+  company-wide and leaked an owner-only / members-only まとまり's 決めたこと and mails): a 決めたこと
+  (`decisions.ts`, its `bundle` or `approval` link) and a mail draft (`outbound-mail.ts`, its `bundleId`,
+  or its meeting / 連絡 / やること) whose source is owner-only or members-only is placed by
+  `restrictedPlaceOf` (`record-engine/service-writer.ts`) over every source it links: owner-only → owner-only
+  for the member making it, who must be that owner; a list → that list as written (one), or who is on all
+  of them now as people (several — a members-only meeting and a members-only まとまり); the member must be
+  on it. Else refused (decisions 400 `DECISION_PLACE_REFUSED`, mail 400 `MAIL_PLACE_REFUSED`, each with its
+  own Japanese sentence; only possible when a source changed meanwhile, since the member reads every
+  source). **A list and a source placed by a folder** (a members-only まとまり with an 経理部 approval or
+  やること; a members-only meeting / 連絡 / やること with an 経理部 まとまり): everyone on the list now must read
+  every such source (`listReadsSources`, same file, each listed person's own `recordReader`), else refused
+  (decisions `DECISION_PLACE_REFUSED`, mail `MAIL_PLACE_REFUSED`, each its own sentence naming neither
+  the record nor the people) — never a list quietly shortened. **Linked later**: a 決めたこと linked to an
+  owner-only / members-only まとまり through `record-links` must already be within it (`placeWithin`), else
+  400 `WIDER_THAN_BUNDLE` (`DECISION_WIDER_THAN_BUNDLE`, `record-links.ts`; never narrowed there: its
+  readers may have read it). People the record names must read it there (the service writer's `assignee-cannot-read`). A
+  `folder` given for such a decision is not used (the AI copies the meeting's folder) and none is needed;
+  a decision of a public まとまり still needs its department folder, as before. What the mail sends later
+  (its やりとり, 返事のお願い) follows the draft (`placeOfRow`). Not changed: approvals (placed by a
+  business plugin's record, never owner-only or members-only: `PERSONAL_NOT_FOR_TYPE`), the minutes'
+  review task (its meeting's list, by the writer), the inbox's records (owner-only by their owner, or
+  their 連絡's place), a job's やること (its acting member's alone), and the generic create of a type other
+  than `task` linking such a まとまり (the established pattern above: it stays where it was put, the link
+  hidden). Tests: `server/tests/integration/bundle-place-leaks.test.ts` (through the real routes, a
+  person's session and the AI's token, in a company without the shared folder: anyone else gets a missing
+  record's answer on the detail and the history, and no query, text search, 探す, 「あなたの番」 or 見られる人
+  shows it; a public まとまり's decision unchanged), `record-members.test.ts` (the sent mail's やりとり,
+  several lists, `restrictedPlaceOf`'s refusals, a list with an 経理部 approval / やること / まとまり refused,
+  a wider decision linked later refused), `decision-confirm.test.ts` (an attendee not on the まとまり's list
+  never reads its decision) — each guard mutation-checked.
+  - **At creation only**: the place is copied when the record is made. Narrowing the まとまり later (「見る人を
+    減らす」 `removeMembers`, 「部署に出す」 of an owner-only one) does not follow to the decisions and mails made
+    from it — the same as its やること (whose list is also copied). Who reads them afterwards is their own
+    list.
+  - **Open owner decisions** (2026-11-20 review; the safe side is what the code does now): (a) a meeting's
+    output for a members-only まとまり is read by who is on both lists (the meeting's attendees and the
+    まとまり's), while a やること made from the meeting keeps its own rule (meeting list + the people it names,
+    then `WIDER_THAN_BUNDLE` for the まとまり) — should the two be the same?; (b) someone invited to the
+    まとまり later (「招待する」) does not see the decisions and mails made before (each keeps its own list) —
+    should an invitation offer to add them too?
 - Tests: `server/tests/unit/record-bundle-place.test.ts` (the default department, inherit on create, an
   owner-only task stays owner-only, wider refused or narrowed, named people kept, set_bundle, the share
   to the まとまり's folder for a linked task of a reader only, no name to a non-reader, the route's first
@@ -2209,7 +2255,9 @@ existing one: `minutes.md` "Outputs made once"; a person's key with a meeting li
   write, not a private folder nor inside one (q14), and inside every linked server record's
   folder. The folder decides who reads the decision (those who can read it, like every server
   record). Every refusal is 400 `DECISION_PLACE_REFUSED` with the same words, never naming the
-  place.
+  place. A decision linked to an owner-only / members-only まとまり or approval takes its place
+  instead (no folder needed, a given one not used: "Other records made for a まとまり"); one linked
+  to a members-only meeting takes the meeting's list ("Members-only records").
 - Names are allowed (the old `NAME_IN_DECISION` refusal protected the repository's history, which
   a server record does not have; visibility is by the reader's permissions).
 - Links: readable records of this company of the link's type — `bundle`: of any type implementing

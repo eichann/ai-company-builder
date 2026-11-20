@@ -59,7 +59,7 @@ import { logError } from '../lib/error-log'
 import type { Member } from './access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 import { recordReader } from './record-access'
-import { placeOfRow, type ActorInput, type ServicePlace, type ServiceRecordWriter, type ServiceWriteFailed } from './record-engine'
+import { listReadsSources, placeOfRow, restrictedPlaceOf, type ActorInput, type ServicePlace, type ServiceRecordWriter, type ServiceWriteFailed } from './record-engine'
 import { currentTypes } from './record-index'
 import { RECORDS_DISABLED } from './records'
 import { findMeetingOutput } from './meeting-outputs'
@@ -81,6 +81,10 @@ export const SEND_INTERRUPTED_AFTER_MS = 15 * 60_000
 /** The 経緯 note of a send the clock found cut off. */
 export const SEND_INTERRUPTED_NOTE = '送っている途中でサーバーが止まったため、届いたか分かりません'
 
+/** A draft is seen by no more people than its sources; its author is not among them (a source changed meanwhile). */
+const MAIL_NARROWER_PLACE_REFUSED = 'この下書きは、もとの記録を見られる人だけに見えるように作ります。あなたはその中に入っていないため作れません。'
+/** A list-only draft that also comes from a record some of that list cannot read (names neither). */
+const MAIL_LIST_WIDER_REFUSED = 'もとの記録の中に、この下書きを見る人たちの一部が見られないものがあるため、下書きを作れません。どの記録についてのメールかを見直してください。'
 export const MAIL_NOT_FOUND = { error: 'メールの下書きが見つかりません', code: 'MAIL_NOT_FOUND' }
 export const MAIL_UNKNOWN_TEXT = '届いたか分かりません。Gmail の送信済みを確かめてください。'
 /**
@@ -106,6 +110,8 @@ export interface OutboundMailDeps {
   ids: IdGenerator
   transactions: Transactions
   writer: ServiceRecordWriter
+  /** A member's role (null: not a member) — who on a draft's list reads its other sources. */
+  roleOf: (companyId: string, userId: string) => string | null
   payloads: MailPayloadStore
   /**
    * 「使う機能」 受信の振り分け・返事のお願い is on for the company (records.md "Features on and off"):
@@ -889,18 +895,29 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
   }
 
   /**
-   * Who may see the draft's record: an owner-only or members-only 連絡's / meeting's / やること's mail
-   * stays theirs, whatever its まとまり (the mail carries their content; a まとまり's folder would widen
-   * it); else the まとまり's / meeting's / 連絡's / やること's folder.
+   * Who may see the draft's record: when its 連絡, meeting, やること or まとまり is owner-only or
+   * members-only, no more people than see it (`restrictedPlaceOf`: the owner's, the list — with several,
+   * who is on all of them), whatever folder the others have (the mail carries their content; a folder
+   * would widen it — a まとまり shown to its owner or a list only included, records.md "Other records made
+   * for a まとまり"); else the まとまり's / meeting's / 連絡's / やること's folder. `refused`: the author is
+   * not among them (only when a record changed meanwhile).
    */
-  function placeOf(ctx: { meeting: RecordRow | null; bundle: RecordRow | null; interaction: RecordRow | null; task?: RecordRow | null }): ServicePlace {
-    for (const r of [ctx.interaction, ctx.meeting, ctx.task]) if (r && restricted(r)) return placeOfRow(r)
+  function placeOf(member: Member, ctx: { meeting: RecordRow | null; bundle: RecordRow | null; interaction: RecordRow | null; task?: RecordRow | null }): ServicePlace | 'refused' {
+    const restricted = restrictedPlaceOf([ctx.interaction, ctx.meeting, ctx.task, ctx.bundle], member.userId)
+    if (restricted !== null) return restricted
     return { folder: ctx.bundle?.folder ?? ctx.meeting?.folder ?? ctx.interaction?.folder ?? ctx.task?.folder ?? null }
   }
 
-  /** Owner-only or members-only: what is made from it keeps its place (records.md "Members-only records"). */
-  function restricted(r: RecordRow): boolean {
-    return r.personalOwner !== null || r.members !== null
+  /** The draft's place, or the one refusal when the author is not among the people who see its sources. */
+  function draftPlace(member: Member, ctx: Parameters<typeof placeOf>[1]): ServicePlace | Refusal {
+    const place = placeOf(member, ctx)
+    if (place === 'refused') return refuse('bad-request', MAIL_NARROWER_PLACE_REFUSED, { code: 'MAIL_PLACE_REFUSED' })
+    // A list, and another source placed by a folder (an 経理部 やること): everyone on the list must read it too.
+    const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
+    if (!listReadsSources(member.companyId, scopes, u => deps.roleOf(member.companyId, u), place, [ctx.interaction, ctx.meeting, ctx.task, ctx.bundle])) {
+      return refuse('bad-request', MAIL_LIST_WIDER_REFUSED, { code: 'MAIL_PLACE_REFUSED' })
+    }
+    return place
   }
 
   const linksOf = (ctx: { meetingId: string | null; bundleId: string | null; interactionId: string | null; taskId?: string | null }) => ({
@@ -929,12 +946,14 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     const at = deps.clock.now()
     const handle = companyData.forCompany(member.companyId)
     const mail: OutboundMailRow = { messageId, authorId: member.userId, fromEmail: from, meetingId: ctx.meetingId, bundleId: ctx.bundleId, createdAt: at, finishedAt: null, bodyDeletedAt: null }
+    const place = draftPlace(member, ctx)
+    if ('ok' in place) return place
     const made = tryWrite(() => {
       const fixed = deps.payloads.fix(member.companyId, KIND, messageId, checked.canonical)
       if (!fixed || fixed.version !== 1) throw new WriteFailed({ ok: false, reason: 'exists' })
       const r = writer.create(member.companyId, {
         type: 'outbound_message', id: messageId, title: CHAT_REPLY_TITLE,
-        ...placeOf(ctx),
+        ...place,
         fields: { requested_by: member.userId, assignee: member.userId, subject: '', payload_hash: fixed.hash, payload_version: 1, channel: 'slack', slack_thread: `${ref.channelId}:${ref.threadTs}` },
         links: linksOf(ctx),
         actor: { id: member.userId, ...actor, source: actor.source ?? null },
@@ -1082,13 +1101,15 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       const at = deps.clock.now()
       // The content (its hash goes into the record), the record and the rows: all or nothing.
       const mail: OutboundMailRow = { messageId, authorId: member.userId, fromEmail: from, meetingId: ctx.meetingId, bundleId: ctx.bundleId, createdAt: at, finishedAt: null, bodyDeletedAt: null }
+      const place = draftPlace(member, ctx)
+      if ('ok' in place) return place
       const made = tryWrite(() => {
         const fixed = deps.payloads.fix(member.companyId, KIND, messageId, checked.canonical)
         if (!fixed || fixed.version !== 1) throw new WriteFailed({ ok: false, reason: 'exists' })
         const hash = fixed.hash
         const r = writer.create(member.companyId, {
         type: 'outbound_message', id: messageId, title: titleOf(checked.subject),
-        ...placeOf(ctx),
+        ...place,
         fields: {
           requested_by: member.userId, assignee: member.userId, subject: checked.subject, payload_hash: hash, payload_version: 1, channel: 'email',
           // The AI's mark only for a new mail (a reply's waiting is its 返事のお願い's).
