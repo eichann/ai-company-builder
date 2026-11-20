@@ -240,8 +240,11 @@ function parseOperation(name: string, raw: YamlValue, err: (m: string) => void):
       })
       if (writes.length === list.length) {
         const used = new Set(writes.flatMap(w => Object.values(w.body).flatMap(v => 'field' in v ? [v.field] : [])))
-        // Every plan field reaches a request: what the plan names is what the runner can hold the request to.
-        for (const n of fields) if (!used.has(n)) e(`${where}の「${n}」は writes のどの body にも入っていません`)
+        // Every change field reaches a request: what the plan sets is what the runner holds the request to.
+        // A target field may stay out of the requests (the site's request names the step, not its
+        // reminder): the app's adapter confirms the whole target on the page before any write, and
+        // each write still names at least one target field (agent-browser.md "The runner").
+        for (const n of Object.keys(change)) if (!used.has(n)) e(`${where}の「${n}」は writes のどの body にも入っていません`)
       }
     }
   }

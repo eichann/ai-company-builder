@@ -52,6 +52,7 @@ interface Result {
   aiWorker: unknown
   clicksNotRun: string[]
   urlDuringClicks: string
+  runner: Record<string, unknown>
 }
 
 function freePort(): Promise<number> {
@@ -168,7 +169,8 @@ test('in ai mode no write reaches the operated host without an approving step; r
   assert.equal(w.xhr, 'refused')
   assert.equal(w.websocket, 'refused')
   assert.equal(w.read, 200)
-  const writes = hitsTo('op.test').filter(h => h.method !== 'GET')
+  // (The runner's own writes, to /line/…, are the next tests'.)
+  const writes = hitsTo('op.test').filter(h => h.method !== 'GET' && !h.path.startsWith('/line/'))
   // Only the member's own (human mode) writes and the one approved write arrived: no beacon, form, XHR, WebSocket.
   assert.deepEqual(writes.map(h => `${h.method} ${h.path} ${h.body}`), ['POST /human-save h', 'POST /ai-ok approved', 'POST /human-again h'])
   assert.equal(hitsTo('op.test').some(h => h.method === 'UPGRADE'), false)
@@ -194,4 +196,68 @@ test('a window the app closes cannot be kept open by the page, and its session t
 
 test('a certificate the system does not trust is refused, never bypassed', { skip }, () => {
   assert.deepEqual(hitsTo('untrusted.test'), [])
+})
+
+// ---------------------------------------------------------------------------
+// The operation runner on a Lステップ-like site (agent-browser.md "The runner")
+// ---------------------------------------------------------------------------
+
+const WRITE_PATH = '/line/episode/step/pack/template'
+const writesOfRuns = () => hitsTo('op.test').filter(h => h.method === 'POST' && h.path.startsWith('/line/'))
+const idsOf = (body: string) => { const f = new URLSearchParams(body); return `${f.get('content_id')}/${f.get('template_id')}` }
+
+test('a run sends exactly one write with the planned ids through the member\'s login, and the page confirms it', { skip }, () => {
+  const r = result.runner
+  assert.deepEqual(r.happy, { outcome: 'succeeded' })
+  assert.deepEqual(r.stepAfterHappy, ['300', '301'])
+  const happy = writesOfRuns().filter(h => idsOf(h.body) === '201/301')
+  assert.equal(happy.length, 1, 'one POST, the runner\'s')
+  assert.equal(happy[0].path, WRITE_PATH)
+  assert.deepEqual([...new URLSearchParams(happy[0].body).keys()].sort(), ['_lm_user_id', '_token', 'content_id', 'template_id'])
+})
+
+test('while a run operates, the page\'s own write (fetch, XHR, a timer\'s autosave, a tampered form) and undeclared reads reach nothing', { skip }, () => {
+  const r = result.runner
+  assert.deepEqual(r.attack, { fetch: 'refused', xhr: 'refused', undeclaredRead: 'refused' })
+  // Only the runner's writes ever reached the site: no autosave, no form with the changed hidden field.
+  assert.deepEqual(writesOfRuns().map(h => `${h.path} ${idsOf(h.body)}`), [
+    `${WRITE_PATH} 201/301`, `${WRITE_PATH} 201/999`, `${WRITE_PATH} 201/304`,
+  ])
+  assert.equal(hitsTo('op.test').some(h => h.path === '/line/autosave' || h.path === '/line/autosave-state'), false)
+})
+
+test('a run stops before writing for another LINE account or an emergency stop during the run', { skip }, () => {
+  const r = result.runner
+  assert.deepEqual(r.wrongAccount, { outcome: 'stopped', reason: 'account-mismatch' })
+  assert.deepEqual(r.stoppedMidRun, { outcome: 'stopped', reason: 'stopped' })
+  assert.equal(writesOfRuns().some(h => ['201/302', '201/303'].includes(idsOf(h.body))), false)
+})
+
+test('a write whose answer is lost is unknown and never sent again', { skip }, () => {
+  const r = result.runner
+  assert.deepEqual(r.lost, { outcome: 'unknown', reason: 'no-answer' })
+  assert.deepEqual(r.lostAgain, { outcome: 'refused', reason: 'already-ran' })
+  assert.equal(writesOfRuns().filter(h => idsOf(h.body) === '201/999').length, 1)
+  assert.deepEqual(r.records, [
+    'plan-a:pending', 'plan-a:sent', 'plan-a:succeeded', 'plan-b:pending', 'plan-b:failed',
+    'plan-c:pending', 'plan-c:failed', 'plan-d:pending', 'plan-d:sent', 'plan-d:unknown',
+  ])
+})
+
+test('the run\'s gate on the real window: only the armed write with the plan\'s values, once; only declared reads', { skip }, () => {
+  const r = result.runner
+  assert.equal(r.gateReady, true)
+  assert.equal(r.notArmed, 'refused')
+  assert.equal(r.otherStep, 'refused')
+  assert.equal(r.otherTemplate, 'refused')
+  assert.equal(r.extraKey, 'refused')
+  assert.equal(r.armedWrite, 302)
+  assert.equal(r.secondSend, 'refused')
+  assert.equal(r.undeclaredRead, 'refused')
+  assert.equal(r.declaredRead, 200)
+  assert.equal(r.pageUndeclaredRead, 'refused')
+  assert.equal(r.pageDeclaredRead, 200)
+  assert.deepEqual(r.gateRefusals, ['not-armed', 'wrong-value', 'wrong-value', 'extra-key', 'not-armed', 'undeclared-read'])
+  assert.equal(hitsTo('op.test').some(h => h.path === '/line/episode/show/102'), false)
+  assert.equal(writesOfRuns().some(h => ['202/304', '201/305'].includes(idsOf(h.body))), false)
 })

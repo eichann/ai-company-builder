@@ -53,7 +53,9 @@ test('in ai mode no WebSocket to the operated host, and no write the gate cannot
   // A write from outside the window's page (a service worker) never passes the gate.
   assert.deepEqual(decideWindowRequest(ai, req('https://manager.example.net/save', 'POST', 'xhr', false)), { allow: false, reason: 'ai-unchecked-write' })
   assert.equal(decideWindowRequest(ai, req('https://manager.example.net/save', 'POST')).allow, true, 'the gate decides this one')
-  assert.equal(decideWindowRequest(ai, req('https://manager.example.net/list', 'GET', 'xhr', false)).allow, true, 'reads pass')
+  assert.equal(decideWindowRequest(ai, req('https://manager.example.net/list', 'GET', 'xhr')).allow, true, 'the page\'s reads pass the hook (the gate decides them)')
+  // Nothing from outside the page, reads included, without a run's gate (browser-runner.test.ts).
+  assert.deepEqual(decideWindowRequest(ai, req('https://manager.example.net/list', 'GET', 'xhr', false)), { allow: false, reason: 'ai-outside' })
 })
 
 test('a frame navigates only to https on the operated host; nothing else is handed anywhere', () => {
@@ -158,6 +160,7 @@ function world(options: { clearFails?: boolean; slow?: boolean } = {}) {
         focus() {},
         close() { entry.closed = true; spec.onClosed() },
         updateSite(next) { entry.site = next },
+        run: { enterAi: async () => true, leaveAi: async () => {}, request: async () => ({ status: 200, body: '' }), closed: () => entry.closed },
       }
     },
     clearPartition(partition) {
@@ -171,6 +174,23 @@ function world(options: { clearFails?: boolean; slow?: boolean } = {}) {
   const browser = createBrowserController({ shell, userId: () => user, log: { warn() {} } })
   return { browser, opened, cleared, setUser: (u: string | null) => { user = u }, release: () => releaseClear() }
 }
+
+test('a run finds only the signed-in member\'s open window of a site their current valid policy lists', () => {
+  const w = world()
+  w.browser.policyAnswered('c1', policy(on()))
+  assert.equal(w.browser.runWindow('c1', site.host), null, 'not opened yet: the member opens it and logs in first')
+  w.browser.open('c1', site.host)
+  assert.ok(w.browser.runWindow('c1', site.host))
+  assert.deepEqual(w.browser.siteNow('c1', site.host), site)
+  w.browser.policyAnswered('c2', policy(on()))
+  assert.equal(w.browser.runWindow('c2', site.host), null, 'another company\'s window of the same site')
+  w.setUser('user-2')
+  assert.equal(w.browser.runWindow('c1', site.host), null, 'another account')
+  w.setUser('user-1')
+  w.browser.policyFailed('c1')
+  assert.equal(w.browser.runWindow('c1', site.host), null, 'no valid answer')
+  assert.equal(w.browser.siteNow('c1', site.host), null)
+})
 
 test('nothing opens before a valid answer, for an older server without `browser`, or when it is off', () => {
   const w = world()

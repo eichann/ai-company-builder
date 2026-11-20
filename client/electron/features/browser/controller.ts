@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
 import type { AgentPolicy } from '../../../../shared/types/agent-sandbox'
 import { BROWSER_WORDS, type BrowserActionResult, type BrowserSitesResult } from '../../../shared/browser-operation'
+import type { BrowserRunSurface } from '../../../shared/browser-runner'
 
 export interface BrowserWindowSpec {
   partition: string
@@ -26,6 +27,8 @@ export interface BrowserWindowHandle {
   close(): void
   /** The site's setting changed (its asset hosts): the window's rules read the new one at once. */
   updateSite(site: BrowserSiteSetting): void
+  /** What an operation run uses (agent-browser.md "The runner"); the shell's window always has it. */
+  run?: BrowserRunSurface
 }
 
 /** What the shell provides (electron/browser-window.ts). */
@@ -157,6 +160,19 @@ export function createBrowserController(deps: BrowserControllerDeps) {
         if (win.userId === user && win.companyId === companyId && win.host === host) closeWindow(win)
       }
       return (await clear(browserPartition(user, companyId, host))) ? { ok: true } : { ok: false, message: BROWSER_WORDS.clearFailed }
+    },
+
+    /** The site as the signed-in member's current valid policy lists it, or null (the runner's check before each step). */
+    siteNow(companyId: string, host: string): BrowserSiteSetting | null {
+      return sitesOf(companyId)?.find(s => s.host === host) ?? null
+    },
+
+    /** The signed-in member's open window of a site their current policy lists (the runner's), or null. */
+    runWindow(companyId: string, host: string): BrowserRunSurface | null {
+      const user = deps.userId()
+      if (!user || !sitesOf(companyId)?.some(s => s.host === host)) return null
+      const win = [...windows.values()].find(w => w.userId === user && w.companyId === companyId && w.host === host)
+      return win?.handle.run ?? null
     },
 
     /** Sign-out: every window closes and every login is cleared. */

@@ -205,6 +205,11 @@ describe('a browser connector declaration', () => {
     expect(errorsOf(edit('template_id: "{template}"', 'template_id: "t-{template}"'))).toContain('決まった文字か {名前} ひとつだけ')
     expect(errorsOf(edit('mode: replace', 'mode: 1'))).toContain('文字で書いてください')
     expect(errorsOf(edit(', template_id: "{template}"', ''))).toContain('「template」は writes のどの body にも入っていません')
+    // A target field may stay out of the request (Lステップ's request names the step, not its
+    // reminder): the app's adapter confirms the whole target before the write.
+    const reminderOnlyRead = parse(edit(', pack_id: "{reminder}"', '')).browser!.operations.reminder_step_template
+    expect(reminderOnlyRead.target).toEqual({ reminder: 'id', step: 'id' })
+    expect(reminderOnlyRead.writes[0].body.pack_id).toBeUndefined()
     // Only change fields and literals: the request would fit any target.
     const noTarget = edit('body: { content_id: "{step}", template_id: "{template}", pack_id: "{reminder}", mode: replace }', 'body: { template_id: "{template}" }')
     expect(errorsOf(noTarget)).toContain('target の項目を1つ以上')
