@@ -56,7 +56,7 @@ export {
   createExternalRecordWriter, type ExternalRecordInput, type ExternalRecordResult, type ExternalRecordWriter,
 } from './record-engine/external-writer'
 export {
-  createServiceRecordWriter, placeOfRow, type ServiceActor, type ServicePlace, type ServiceCreateInput, type ServiceRecordWriter, type ServiceTransitionInput,
+  createServiceRecordWriter, placeOfRow, restrictedPlaceOf, type ServiceActor, type ServicePlace, type ServiceCreateInput, type ServiceRecordWriter, type ServiceTransitionInput,
   type ServiceWriteFailed, type ServiceWriteFailure, type ServiceWriteResult,
 } from './record-engine/service-writer'
 

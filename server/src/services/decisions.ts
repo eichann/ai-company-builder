@@ -7,7 +7,9 @@
  *
  * Rules (design §3-3, §9 q14):
  * - the place is a department folder the member may write, never a private
- *   folder nor inside one, and never wider than a linked record's folder;
+ *   folder nor inside one, and never wider than a linked record's folder; for an
+ *   owner-only / members-only まとまり (or approval) it is that record's place
+ *   instead (its owner, its list), whatever folder was given;
  *   every refusal of a place says the same words and never names it. The
  *   folder decides who may read the decision (those who can read it);
  * - links name a まとまり (`bundle`: any type implementing it), the meeting and
@@ -44,7 +46,7 @@ import { slotQuote } from '../../shared/core/source-slot-candidates'
 import { neutralizeOutsideText } from '../../shared/core/outside-text'
 import { decideSlot, slotScope } from './source-slot-candidates'
 import { recordReader } from './record-access'
-import { ASSIGNEE_CANNOT_READ, type ActorInput, type ServiceRecordWriter } from './record-engine'
+import { ASSIGNEE_CANNOT_READ, restrictedPlaceOf, type ActorInput, type ServiceRecordWriter } from './record-engine'
 import { currentTypes } from './record-index'
 import { RECORDS_DISABLED, recordSummaries } from './records'
 
@@ -63,6 +65,15 @@ export interface DecisionServiceDeps {
 /** Says nothing about the place (a private folder's name or existence never leaks). */
 export const DECISION_PLACE_REFUSED = {
   error: 'この場所には決めたことを残せません。書き込める部署のフォルダを選んでください。',
+  code: 'DECISION_PLACE_REFUSED',
+}
+
+/**
+ * A decision for an owner-only / members-only まとまり is seen only by the people who see it; the
+ * member is not one of them (only possible when the まとまり changed meanwhile).
+ */
+export const DECISION_NARROWER_PLACE_REFUSED = {
+  error: 'この決めたことは、つながっている案件・プロジェクトを見られる人だけに見えるように残します。あなたはその中に入っていないため残せません。',
   code: 'DECISION_PLACE_REFUSED',
 }
 
@@ -96,7 +107,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
   return {
     /**
      * Record a decision: `{ folder, title, why, source, links?: { bundle?, meeting?, approval? },
-     * important?, exception?, key? }` (`exception`: 例外（この件だけ）, never a precedent; no `folder` — and none allowed — from a members-only meeting). The person's own call (session) or their AI's (record token, `actor.kind: ai`).
+     * important?, exception?, key? }` (`exception`: 例外（この件だけ）, never a precedent; no `folder` — and none allowed — from a members-only meeting; none needed, and any given not used, for an owner-only / members-only まとまり or approval: its place is taken). The person's own call (session) or their AI's (record token, `actor.kind: ai`).
      */
     async record(member: Member, actor: ActorInput, body: unknown): Promise<Outcome<{ record: RecordSummary; created: boolean; reused?: true; note?: string }>> {
       const handle = companyData.forCompany(member.companyId)
@@ -154,7 +165,15 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       // From a members-only meeting (records.md "Members-only records"): the meeting's members read
       // it — the service writer inherits the list, and refuses a folder with it (bad-place below).
       const fromListedMeeting = linked.some(r => r.type === 'meeting' && r.members !== null)
-      if (!fromListedMeeting && typeof b.folder !== 'string') return bad('folder: a department folder')
+      // For an owner-only / members-only まとまり (or approval): seen by no more people than it
+      // (records.md "Other records made for a まとまり") — its owner's, or its list (with every other
+      // restricted link: who is on all of them). A folder given is not its place then (the AI copies the
+      // meeting's folder): the narrower place is taken, never the folder.
+      const restricted = linked.some(r => r.type !== 'meeting' && (r.personalOwner !== null || r.members !== null))
+        ? restrictedPlaceOf(linked, member.userId)
+        : null
+      if (restricted === 'refused') return bad(DECISION_NARROWER_PLACE_REFUSED.error, DECISION_NARROWER_PLACE_REFUSED.code)
+      if (!restricted && !fromListedMeeting && typeof b.folder !== 'string') return bad('folder: a department folder')
 
       // The place: a department folder the member may write, not private, not wider than a linked record.
       // Its readers are the decision's readers.
@@ -173,7 +192,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
         ? newRecordId('decision', deps.tokenDigest.digest(`decision-key:${key}`).slice(0, 24))
         : newRecordId('decision', deps.ids.newToken().slice(0, 16))
       const folder = department?.folder ?? null
-      const placeOk = fromListedMeeting || (folder !== null
+      const placeOk = restricted !== null || fromListedMeeting || (folder !== null
         && !findPrivateScope(scopes, folder)
         && resolveAccess(member.companyId, member.userId, folder, perms).write
         && linked.every(r => r.folder === null || isSameOrAncestorPath(r.folder, folder)))
@@ -208,7 +227,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       const owner: LedgerValue = links.meeting ? null : member.userId
       const input = {
         // The summary is what text search reads: the start of why.
-        type: 'decision', id, title, summary: why.slice(0, SUMMARY_MAX), folder,
+        type: 'decision', id, title, summary: why.slice(0, SUMMARY_MAX), ...(restricted ?? { folder }),
         fields: {
           // 決めた人 is whoever confirms it (the engine, `confirm`): nobody yet.
           recorded_by: actor.kind === 'ai' ? 'ai' : 'human', important: b.important === true, exception: b.exception === true, decided_by: null,

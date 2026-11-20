@@ -30,7 +30,7 @@ import { sqliteMembershipRepository } from '../../src/adapters/sqlite/membership
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import type { CompanyDataSource } from '../../src/ports/company-data'
 import { ensureCoreTypes } from '../../src/services/record-index'
-import { createRecordEngine, createServiceRecordWriter, type ActorInput, type RecordEngine, type ServiceRecordWriter } from '../../src/services/record-engine'
+import { createRecordEngine, createServiceRecordWriter, restrictedPlaceOf, type ActorInput, type RecordEngine, type ServiceRecordWriter } from '../../src/services/record-engine'
 import { createRecordService, type RecordService } from '../../src/services/records'
 import { createRecordFind, type RecordFind } from '../../src/services/record-find'
 import { createViewersService, type ViewersService } from '../../src/services/viewers'
@@ -369,6 +369,51 @@ describe('creating one', () => {
     const to = ok(await mail.recipients(m('u-alice'), { taskId: task.id })).recipients.find(r => r.source === 'member')!.ref
     const draft = ok(await mail.create(m('u-alice'), AI, { taskId: task.id, toRefs: [to], subject: '内定のご連絡', body: 'よろしくお願いします。' })).draft
     expect(source.forCompany('a').records.byIds([draft.id])[0]).toMatchObject({ folder: null, members: ['u-alice', 'u-bob'] })
+  })
+
+  it('a mail of an owner-only / members-only まとまり alone: the draft and the sent mail’s やりとり keep its place', async () => {
+    const own = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '転職', personal: true })).record
+    const listed = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '買収', members: ['u-bob'] })).record
+    for (const [b, place] of [[own, { personalOwner: 'u-alice', members: null }], [listed, { personalOwner: null, members: ['u-alice', 'u-bob'] }]] as const) {
+      const to = ok(await mail.recipients(m('u-alice'), { bundleId: b.id })).recipients.find(r => r.source === 'member')!.ref
+      const draft = ok(await mail.create(m('u-alice'), AI, { bundleId: b.id, toRefs: [to], subject: `${b.title}のご相談`, body: 'よろしくお願いします。' })).draft
+      expect(source.forCompany('a').records.byIds([draft.id])[0]).toMatchObject({ folder: null, ...place })
+      expect(ok(await mail.send(m('u-alice'), draft.id, { hash: draft.hash }))).toMatchObject({ outcome: 'sent' })
+      const records = source.forCompany('a').records
+      const receipt = records.candidates({ types: ['interaction'] }, 50).find(r => records.linksFrom([r.id]).some(l => l.name === 'bundle' && l.targetId === b.id))
+      expect(receipt).toMatchObject({ folder: null, ...place })
+      for (const who of OUTSIDERS) {
+        expect(ok(service.query(m(who), { type: 'outbound_message' })).records.map(r => r.id)).not.toContain(draft.id)
+        expect(ok(service.query(m(who), { type: 'interaction' })).records.map(r => r.id)).not.toContain(receipt!.id)
+      }
+    }
+  })
+
+  it('a mail and a decision of a members-only meeting and a members-only まとまり: who is on both lists', async () => {
+    const mt = meeting(['u-alice', 'u-bob'])
+    const b = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '採用', members: ['u-carol'] })).record
+    const d = ok(await decisions.record(m('u-alice'), AI, { title: '採用は見送る', why: '予算がないため', source: '面談', links: { meeting: mt.id, bundle: b.id } }))
+    expect(source.forCompany('a').records.find(d.record.id)).toMatchObject({ folder: null, personalOwner: null, members: ['u-alice'] })
+    const to = ok(await mail.recipients(m('u-alice'), { meetingId: mt.id, bundleId: b.id })).recipients.find(r => r.email === 'tanaka@client.example')!.ref
+    const draft = ok(await mail.create(m('u-alice'), AI, { meetingId: mt.id, bundleId: b.id, toRefs: [to], subject: '採用のご連絡', body: '見送りとなりました。' })).draft
+    expect(source.forCompany('a').records.byIds([draft.id])[0]).toMatchObject({ folder: null, members: ['u-alice'] })
+    for (const who of ['u-bob', 'u-carol']) {
+      expect(await service.get(m(who), d.record.id)).toMatchObject({ ok: false, body: { code: 'RECORD_NOT_FOUND' } })
+      expect(await service.get(m(who), draft.id)).toMatchObject({ ok: false, body: { code: 'RECORD_NOT_FOUND' } })
+    }
+  })
+
+  it('restrictedPlaceOf: never wider than any restricted source, and never a place its creator is not in', () => {
+    const row = (p: { folder?: string | null; personalOwner?: string | null; members?: string[] | null }) => ({ folder: null, personalOwner: null, members: null, ...p })
+    expect(restrictedPlaceOf([row({ folder: '営業部' }), null], 'u-alice')).toBeNull()
+    expect(restrictedPlaceOf([row({ folder: '営業部' }), row({ personalOwner: 'u-alice' })], 'u-alice')).toEqual({ personalOwner: 'u-alice' })
+    expect(restrictedPlaceOf([row({ personalOwner: 'u-bob' })], 'u-alice')).toBe('refused')
+    expect(restrictedPlaceOf([row({ personalOwner: 'u-alice' }), row({ members: ['u-bob'] })], 'u-alice')).toBe('refused')
+    expect(restrictedPlaceOf([row({ personalOwner: 'u-alice' }), row({ members: ['u-alice', 'u-bob'] })], 'u-alice')).toEqual({ personalOwner: 'u-alice' })
+    expect(restrictedPlaceOf([row({ members: ['u-bob', 'u-carol'] })], 'u-alice')).toBe('refused')
+    expect(restrictedPlaceOf([row({ members: ['u-alice', 'u-bob'] }), row({ folder: '営業部' })], 'u-alice')).toEqual({ members: ['u-alice', 'u-bob'] })
+    expect(restrictedPlaceOf([row({ members: ['u-alice', 'u-bob'] }), row({ members: ['u-alice', 'u-carol'] })], 'u-alice')).toEqual({ members: ['u-alice'] })
+    expect(restrictedPlaceOf([row({ members: ['u-alice', 'u-bob'] }), row({ members: ['u-bob'] })], 'u-alice')).toBe('refused')
   })
 
   it('the AI’s records_create with members keeps the list as said (no defaults added)', () => {

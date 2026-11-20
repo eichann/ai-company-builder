@@ -71,8 +71,12 @@ of the company went to (`outbound.sentDomains()`).
 
 - Record `outbound_message` (「送るもの」, version 5; server only, `records.md`), created / changed
   only through the service writer; folder = the まとまり's (else the meeting's, the 連絡's, the
-  task's) folder — but an owner-only or members-only 連絡 / meeting / task keeps its own place
-  whatever the まとまり (`placeOf` → `placeOfRow`, `records.md` "Members-only records");
+  task's) folder — but when the 連絡, meeting, task **or まとまり** is owner-only or members-only the
+  draft is seen by no more people than it (`placeOf` → `restrictedPlaceOf`, `records.md` "Other
+  records made for a まとまり"): owner-only → the author's alone, a list → that list (several lists:
+  who is on all of them now), whatever folder the others have — so a draft made only from an
+  owner-only / members-only まとまり (`bundleId`) is never company-wide (it was, until 2026-11-20); the
+  author not among them → 400 `MAIL_PLACE_REFUSED` (only possible when a source changed meanwhile);
   `requested_by` / `assignee` = the author; fields `subject`, `payload_hash`, `payload_version`,
   `channel: email` | `slack` (one type for every channel; Slack replies: "Replies" below),
   `slack_thread`, `expects_reply`, `reply_wait_until` ("Waiting for their answer"); links
@@ -88,6 +92,11 @@ of the company went to (`outbound.sentDomains()`).
   up to 3 PDFs on a new mail ("Attachments" below).
 - Only the author sees or changes a draft: anyone else, another company's id or a missing one
   answer the same 404 `MAIL_NOT_FOUND`. A stale `expectedVersion` → 409 `VERSION_CONFLICT`.
+- Tests of the draft's place: `server/tests/integration/bundle-place-leaks.test.ts` (a draft of an
+  owner-only / members-only まとまり by a person and by the AI: anyone else gets a missing record on the
+  detail and its history and finds it in no query, 探す, 「あなたの番」 or 見られる人),
+  `server/tests/unit/record-members.test.ts` (the sent mail's やりとり keeps that place; a members-only
+  meeting and a members-only まとまり → who is on both; `restrictedPlaceOf`) — mutation-checked.
 
 ## Sending (`POST /outbound/:id/send { hash }`, a person's session only)
 
@@ -249,8 +258,8 @@ the card without the server keeping it.
   **Nothing of a thread is stored or logged** (test: marked texts in no table, no log line).
 - **A reply draft**: `POST /outbound { interactionId, … }` (session or the AI's token). The
   interaction must be readable; its まとまり is taken along; link `interaction`. Place: an
-  owner-only / members-only 連絡's reply keeps that place, else the まとまり's / meeting's / 連絡's
-  folder. No thread pointer → 409 `THREAD_UNKNOWN`.
+  owner-only / members-only 連絡's (or まとまり's) reply keeps that place (as every draft, above), else
+  the まとまり's / meeting's / 連絡's folder. No thread pointer → 409 `THREAD_UNKNOWN`.
   - Mail: recipients from the thread (source `thread` 「スレッドの相手」: From / To / CC of its
     messages in the member's own mailbox, the member left out; re-read before sending like every
     source); the reply headers are fixed with the draft (`MailReplyHeaders` in the canonical
