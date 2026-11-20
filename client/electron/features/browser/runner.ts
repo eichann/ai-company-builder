@@ -11,12 +11,13 @@
 // sent again by itself) → back to `human` mode. Every step's state is kept on this PC before the
 // send, so a plan once started never runs twice, not even after a crash.
 import {
-  browserOperationsAllowed, browserPlanProblem,
+  browserOperationsAllowed, browserPlanProblem, targetFieldsOutsideWrites,
   type BrowserPlanValues, type PluginBrowser,
 } from '../../../../shared/core/plugin-browser-declaration'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
 import {
-  createRunGate, declaredWriteBody, encodeForm, FORM_CONTENT_TYPE, parseBrowserRunPlan, sameTargetState,
+  BROWSER_PLAN_MAX_AHEAD_MS, createRunGate, declaredWriteBody, encodeForm, FORM_CONTENT_TYPE, isBrowserRunReason, parseBrowserRunPlan, sameTargetState,
+  type BrowserRunReason,
   type BrowserOperationAdapter, type BrowserPageRead, type BrowserRunPlan, type BrowserRunResult, type BrowserRunSurface,
   type BrowserStepRecord, type BrowserTargetState,
 } from '../../../shared/browser-runner'
@@ -54,7 +55,7 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
   const runningPlans = new Set<string>()
 
   async function run(planId: string): Promise<BrowserRunResult> {
-    const refused = (reason: string): BrowserRunResult => ({ outcome: 'refused', reason })
+    const refused = (reason: BrowserRunReason): BrowserRunResult => ({ outcome: 'refused', reason })
     if (runningPlans.has(planId)) return refused('already-running')
     let raw: unknown
     try { raw = await deps.approvedPlan(planId) } catch { return refused('no-plan') }
@@ -76,15 +77,17 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
     if (!connector.account) return refused('connector')
     const adapter = deps.adapter(operation.adapter)
     if (!adapter || adapter.id !== operation.adapter) return refused('unknown-adapter')
+    // A target field no write carries is held only by the adapter's check on the page.
+    if (targetFieldsOutsideWrites(operation).some(f => !adapter.confirmsTarget.includes(f))) return refused('target-unconfirmed')
     const values: BrowserPlanValues = { target: plan.target, change: plan.change }
     if (browserPlanProblem(operation, values)) return refused('plan')
     const readPaths = adapter.readPaths(values)
     if (readPaths.length === 0) return refused('plan')
 
-    const why = (): string | null => {
+    const why = (): BrowserRunReason | null => {
       if (deps.stopped(plan.companyId)) return 'stopped'
       if (!allowedNow(connector, plan, deps.site(plan.companyId, connector.host))) return 'policy'
-      if (deps.now() >= plan.expiresAt) return 'expired'
+      if (deps.now() >= plan.expiresAt || deps.now() - plan.approvedAt > BROWSER_PLAN_MAX_AHEAD_MS) return 'expired'
       return null
     }
     const before = why()
@@ -94,7 +97,7 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
     const windowKey = `${plan.companyId}\0${connector.host}`
     if (busyWindows.has(windowKey)) return refused('busy')
 
-    const record = (state: BrowserStepRecord['state'], reason?: string) =>
+    const record = (state: BrowserStepRecord['state'], reason?: BrowserRunReason) =>
       deps.records.put({ planId, operation: plan.operation, step: 0, state, ...(reason ? { reason } : {}), at: deps.now() })
     try { record('pending') } catch { return refused('records-unavailable') }
 
@@ -104,13 +107,14 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
       host: connector.host, operation, values, readPaths,
       stopped: () => why() !== null || surface.closed(),
     })
-    const stop = (reason: string): BrowserRunResult => {
-      try { record('failed', `not-sent:${reason}`) } catch { /* nothing was sent either way */ }
+    // `failed` without a `sent` before it: nothing went out.
+    const stop = (reason: BrowserRunReason): BrowserRunResult => {
+      try { record('failed', reason) } catch { /* nothing was sent either way */ }
       return { outcome: 'stopped', reason }
     }
     try {
       if (!(await surface.enterAi(gate.hooks))) return stop('window-not-ready')
-      const abort = () => why() ?? (surface.closed() ? 'window-closed' : null)
+      const abort = (): BrowserRunReason | null => why() ?? (surface.closed() ? 'window-closed' : null)
       let reason = abort()
       if (reason) return stop(reason)
 
@@ -125,21 +129,26 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
       const body = encodeForm(declaredWriteBody(operation, 0, values, view.view.ignored))
       try { record('sent') } catch { return stop('records-unavailable') }
       gate.arm(0)
-      let answered = true
+      let status: number | null = null
       try {
-        await surface.request({ method: operation.writes[0].method, path: operation.writes[0].path, contentType: FORM_CONTENT_TYPE, body })
+        status = (await surface.request({ method: operation.writes[0].method, path: operation.writes[0].path, contentType: FORM_CONTENT_TYPE, body })).status
       } catch {
-        answered = false
+        status = null
       } finally {
         gate.disarm()
       }
-      if (!answered) return settle('unknown', gate.sent(0) ? 'no-answer' : 'not-confirmed-sent')
+      if (status === null) return settle('unknown', gate.sent(0) ? 'no-answer' : 'not-confirmed-sent')
 
       const afterRead = await readView(surface, adapter, values, readPaths)
       if ('failed' in afterRead || !afterRead.view.state) return settle('unknown', 'reread-failed')
       const expected = adapter.after(plan.before, values)
       if (sameTargetState(afterRead.view.state, expected)) return settle('succeeded')
-      if (sameTargetState(afterRead.view.state, plan.before)) return settle('failed', 'unchanged')
+      if (sameTargetState(afterRead.view.state, plan.before)) {
+        // Nothing found before and nothing after: the page may not be read the way we think (unknown).
+        if (Object.values(plan.before).every(list => list.length === 0)) return settle('unknown', 'empty-state')
+        // `failed` only when the site said no (419, 422…) and nothing changed.
+        return status >= 400 && status < 500 ? settle('failed', 'refused-by-site') : settle('unknown', 'unchanged-unrefused')
+      }
       return settle('unknown', 'other-state')
     } catch (error) {
       log.warn(`[browser] a run ended unexpectedly (${error instanceof Error ? error.name : 'unknown'})`)
@@ -150,10 +159,10 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
       runningPlans.delete(planId)
     }
 
-    function settle(state: 'succeeded' | 'failed' | 'unknown', reason?: string): BrowserRunResult {
+    function settle(state: 'succeeded' | 'failed' | 'unknown', reason?: BrowserRunReason): BrowserRunResult {
       try { record(state, reason) } catch { log.warn('[browser] a run\'s result could not be kept') }
       if (state === 'succeeded') return { outcome: 'succeeded' }
-      return { outcome: state, reason: reason ?? state }
+      return { outcome: state, reason: reason ?? 'error' }
     }
   }
 
@@ -181,12 +190,13 @@ async function readView(surface: BrowserRunSurface, adapter: BrowserOperationAda
 }
 
 /** Why the page does not allow the write the person approved, or null. */
-function checkBefore(view: ReturnType<BrowserOperationAdapter['view']>, plan: BrowserRunPlan): string | null {
+function checkBefore(view: ReturnType<BrowserOperationAdapter['view']>, plan: BrowserRunPlan): BrowserRunReason | null {
   if (view.account === null) return 'account-unknown'
   if (view.account !== plan.account) return 'account-mismatch'
   if (!view.state) return 'target-missing'
   if (!sameTargetState(view.state, plan.before as BrowserTargetState)) return 'before-changed'
-  if (view.problem) return view.problem
+  // The adapter's word is kept only when it is one of ours (never its text).
+  if (view.problem) return isBrowserRunReason(view.problem) ? view.problem : 'adapter-problem'
   return null
 }
 

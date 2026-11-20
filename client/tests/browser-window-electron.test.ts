@@ -241,7 +241,21 @@ test('a write whose answer is lost is unknown and never sent again', { skip }, (
   assert.deepEqual(r.records, [
     'plan-a:pending', 'plan-a:sent', 'plan-a:succeeded', 'plan-b:pending', 'plan-b:failed',
     'plan-c:pending', 'plan-c:failed', 'plan-d:pending', 'plan-d:sent', 'plan-d:unknown',
+    'plan-e:pending', 'plan-e:failed',
   ])
+})
+
+test('an answer over the size the runner reads is refused whole, never read cut short', { skip }, () => {
+  assert.deepEqual(result.runner.oversize, { outcome: 'stopped', reason: 'read-failed' })
+  assert.equal(writesOfRuns().some(h => idsOf(h.body) === '201/305'), false)
+})
+
+test('a write carries the cookies of its own address and leaves nothing behind: one write session, cleared', { skip }, () => {
+  const r = result.runner
+  // The site refuses the write without the cookie scoped to its path (the happy path above succeeded).
+  assert.deepEqual(r.happy, { outcome: 'succeeded' })
+  assert.equal(r.writeSessionCookies, 0)
+  assert.equal(r.writeSessionsCreated, 1)
 })
 
 test('the run\'s gate on the real window: only the armed write with the plan\'s values, once; only declared reads', { skip }, () => {

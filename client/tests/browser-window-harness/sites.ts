@@ -131,7 +131,15 @@ export async function startSites(certDir: string, ports: { site: number; evil: n
           res.end(lstepPage(state.lstep))
           return
         }
+        if (req.method === 'GET' && url === '/line/episode/show/103') {
+          // Over the runner's 5 MiB: what a cut-short read would see first is padding only.
+          res.setHeader('content-type', 'text/html; charset=utf-8')
+          res.end(`<!-- ${'x'.repeat(6 * 1024 * 1024)} -->${lstepPage(state.lstep)}`)
+          return
+        }
         if (req.method === 'POST' && url === '/line/episode/step/pack/template') {
+          // The write needs the cookie scoped to its own path, too.
+          if (!/(^|;\s*)wp=1(;|$)/.test(req.headers.cookie ?? '')) { res.writeHead(401); res.end(); return }
           const form = new URLSearchParams(body)
           const step = form.get('content_id') ?? ''
           if (form.get('_token') !== 'tok' || !state.lstep[step]) { res.writeHead(419); res.end(); return }

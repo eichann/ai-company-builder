@@ -77,7 +77,9 @@ test('a run reads only its adapter\'s declared paths; the page\'s parts load, no
   assert.deepEqual(gate.hooks.sessionRequest({ method: 'GET', url: `${url(READ)}?all=1` }), { allow: false, reason: 'query' })
   assert.deepEqual(gate.hooks.sessionRequest({ method: 'GET', url: url(READ), body: 'x' }), { allow: false, reason: 'read-body' })
   // The page's own reads.
-  assert.equal(gate.hooks.pageRead({ url: url('/js/app.js?v=3'), resourceType: 'Script' }), true)
+  assert.equal(gate.hooks.pageRead({ url: url('/js/app.js'), resourceType: 'Script' }), true)
+  assert.equal(gate.hooks.pageRead({ url: url('/js/app.js?v=3'), resourceType: 'Script' }), false, 'a part with a query (a GET with parameters) does not load')
+  assert.equal(gate.hooks.pageRead({ url: url('/delete?id=1'), resourceType: 'Image' }), false)
   assert.equal(gate.hooks.pageRead({ url: url('/img/a.png'), resourceType: 'Image' }), true)
   assert.equal(gate.hooks.pageRead({ url: url(READ), resourceType: 'Document' }), true)
   assert.equal(gate.hooks.pageRead({ url: url('/api/autosave'), resourceType: 'XHR' }), false)
@@ -125,7 +127,7 @@ test('the page\'s reads in a run follow the run\'s read rule on the operated hos
 const NOW = 1_800_000_000_000
 const planInput = (over: Record<string, unknown> = {}) => ({
   planId: 'plan-1', companyId: 'c1', connector: { id: 'lstep', version: '0.1.0' }, operation: 'reminder_step_add_template',
-  account: 'ACC1', target: values.target, change: values.change, before: { templates: ['300'] }, expiresAt: NOW + 60_000, ...over,
+  account: 'ACC1', target: values.target, change: values.change, before: { templates: ['300'] }, approvedAt: NOW - 1000, expiresAt: NOW + 60_000, ...over,
 })
 
 test('a plan is taken only in its exact shape, unexpired and never valid for more than a day', () => {
@@ -137,6 +139,10 @@ test('a plan is taken only in its exact shape, unexpired and never valid for mor
   assert.deepEqual(parseBrowserRunPlan(planInput({ before: { templates: ['<script>'] } }), NOW), { error: 'before' })
   assert.deepEqual(parseBrowserRunPlan(planInput({ target: { reminder: 1 } }), NOW), { error: 'target' })
   assert.deepEqual(parseBrowserRunPlan(planInput({ connector: { id: 'lstep', version: 'latest' } }), NOW), { error: 'connector' })
+  // Approved more than a day ago: never, whatever its expiry says; approved "in the future": not a plan.
+  assert.deepEqual(parseBrowserRunPlan(planInput({ approvedAt: NOW - 24 * 3600_000 - 1 }), NOW), { error: 'expired' })
+  assert.deepEqual(parseBrowserRunPlan(planInput({ approvedAt: NOW + 3600_000 }), NOW), { error: 'approvedAt' })
+  assert.deepEqual(parseBrowserRunPlan(planInput({ approvedAt: undefined }), NOW), { error: 'approvedAt' })
 })
 
 // ---------------------------------------------------------------------------
@@ -164,6 +170,22 @@ test('Lステップ\'s adapter reads the step\'s templates, the account and the 
   // The step is not on this reminder's page (step 2010 is not step 201).
   assert.equal(adapter.view(values, read(lstepPage({ steps: { 202: ['300'] } }))).state, null)
   assert.equal(adapter.view(values, read(lstepPage({ steps: { 2010: [] } }))).state, null)
+  // The step's box must be an id attribute in the markup, exactly once: not in a comment, a script, a
+  // text area or another attribute, never twice.
+  const box = (html: string) => adapter.view(values, read(`<input type="hidden" name="_token" value="tok"><span data-account-id="ACC1"></span>${html}`)).state
+  assert.deepEqual(box('<div id="templateStep201"></div>'), { templates: [] })
+  assert.equal(box('<!-- <div id="templateStep201"></div> -->'), null)
+  assert.equal(box('<script>const x = \'<div id="templateStep201">\'</script>'), null)
+  assert.equal(box('<textarea><div id="templateStep201"></div></textarea>'), null)
+  assert.equal(box('<div data-id="templateStep201"></div>'), null)
+  assert.equal(box('<div id="templateStep201"></div><p id="templateStep201"></p>'), null)
+  // Every slot in the box is this reminder's and this step's; a slot of the step outside its box is not the page we think.
+  assert.equal(box('<div id="templateStep201"><a onclick="openModal(999, 201, 1, 300, 1)"></a></div>'), null)
+  assert.equal(box('<div id="templateStep201"><a onclick="openModal(101, 202, 1, 300, 1)"></a></div>'), null)
+  assert.equal(box('<div id="templateStep201"></div><div id="templateStep202"><a onclick="openModal(101, 201, 1, 300, 1)"></a></div>'), null)
+  // A call in a script or a comment is not a slot.
+  assert.deepEqual(box('<div id="templateStep201"><!-- openModal(101, 201, 1, 300, 1) --></div>'), { templates: [] })
+  assert.deepEqual(box('<div id="templateStep201"><a onclick="openModal(101, 201, 1, 300, 1)"></a></div>'), { templates: ['300'] })
   // A slot of the step under another reminder: not what we think it is.
   assert.equal(adapter.view(values, read(lstepPage({ reminder: '999', steps: { 201: ['300'] } }))).state, null)
   for (const bad of [{ ...values, target: { reminder: '101', step: '0' } }, { ...values, change: { template: '-1' } }]) {
@@ -202,8 +224,9 @@ interface FakeSite {
   onRead?: () => void
   /** The POST's answer is lost (applied or not). */
   lose?: 'applied' | 'not-applied'
-  /** The write is refused by the site (nothing changes). */
+  /** The write is refused by the site (nothing changes): the status it answers (default 422). */
   reject?: boolean
+  rejectStatus?: number
 }
 
 function fakeSurface(site: FakeSite) {
@@ -224,7 +247,8 @@ function fakeSurface(site: FakeSite) {
       const form = new URLSearchParams(body)
       if (site.lose === 'applied') site.steps[form.get('content_id')!].push(form.get('template_id')!)
       if (site.lose) throw new Error('connection reset')
-      if (!site.reject) site.steps[form.get('content_id')!].push(form.get('template_id')!)
+      if (site.reject) return { status: site.rejectStatus ?? 422, body: '' }
+      site.steps[form.get('content_id')!].push(form.get('template_id')!)
       return { status: 302, body: '' }
     },
     closed: () => closed,
@@ -307,6 +331,28 @@ test('a plan that expires during the run stops before the write', async () => {
   assert.deepEqual(h.site.posts, [])
 })
 
+test('a plan approved more than a day ago stops before the write, whatever its expiry', async () => {
+  let now = NOW
+  const h = harness({ deps: { now: () => now }, plan: { approvedAt: NOW - 24 * 3600_000 + 1000 } })
+  h.site.onRead = () => { now = NOW + 2000 }
+  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'stopped', reason: 'expired' })
+  assert.deepEqual(h.site.posts, [])
+})
+
+test('a target field no write carries must be one the adapter confirms on the page', async () => {
+  const lax = { ...adapter, confirmsTarget: ['step'] }
+  const h = harness({ deps: { adapter: () => lax } })
+  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'refused', reason: 'target-unconfirmed' })
+  assert.deepEqual(h.site.posts, [])
+})
+
+test('a step record carries our fixed words only, never an adapter\'s text', async () => {
+  const chatty = { ...adapter, view: (v: typeof values, r: Parameters<typeof adapter.view>[1]) => ({ ...adapter.view(v, r), problem: 'token ACC1 tok' }) }
+  const h = harness({ deps: { adapter: () => chatty } })
+  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'stopped', reason: 'adapter-problem' })
+  assert.equal(h.records.at(-1)?.reason, 'adapter-problem')
+})
+
 test('nothing starts for an expired plan, a stopped AI, a site not allowed, an unknown adapter or a type that needs more', async () => {
   assert.deepEqual(await harness({ plan: { expiresAt: NOW - 1 } }).runner.run('plan-1'), { outcome: 'refused', reason: 'expired' })
   const stopped = harness(); stopped.stop()
@@ -335,9 +381,17 @@ test('nothing is sent when the step\'s state cannot be kept first', async () => 
   assert.deepEqual(second.site.posts, [], 'the "sent" mark comes before the send')
 })
 
-test('after the send the page decides: unchanged = failed, another state = unknown', async () => {
+test('after the send: failed only when the site refused it (4xx) and nothing changed; anything else not planned = unknown', async () => {
   const rejected = harness({ site: { reject: true } })
-  assert.deepEqual(await rejected.runner.run('plan-1'), { outcome: 'failed', reason: 'unchanged' })
+  assert.deepEqual(await rejected.runner.run('plan-1'), { outcome: 'failed', reason: 'refused-by-site' })
+  // Answered "fine" (302, 200) or a 5xx, yet nothing to see: not known to have failed.
+  for (const status of [200, 302, 500]) {
+    const quiet = harness({ site: { reject: true, rejectStatus: status } })
+    assert.deepEqual(await quiet.runner.run('plan-1'), { outcome: 'unknown', reason: 'unchanged-unrefused' }, String(status))
+  }
+  // No slot before and none after: the page may not be read the way we think.
+  const empty = harness({ site: { reject: true, steps: { 201: [] } }, plan: { before: { templates: [] } } })
+  assert.deepEqual(await empty.runner.run('plan-1'), { outcome: 'unknown', reason: 'empty-state' })
   const lostNotApplied = harness({ site: { lose: 'not-applied' } })
   assert.equal((await lostNotApplied.runner.run('plan-1')).outcome, 'unknown', 'no answer is never read as "not done"')
   const other = harness()
@@ -380,7 +434,7 @@ test('the run record survives a restart and an unreadable one refuses every run'
     assert.equal(records.has('plan-1'), false)
     records.put({ planId: 'plan-1', operation: 'reminder_step_add_template', step: 0, state: 'sent', at: NOW })
     assert.equal(createBrowserRunRecords(file, { warn: () => {} }).has('plan-1'), true, 'after a restart')
-    assert.throws(() => records.put({ planId: 'plan-2', operation: 'x', step: 0, state: 'sent', reason: 'ACC1 template 301', at: NOW }), 'no values')
+    assert.throws(() => records.put({ planId: 'plan-2', operation: 'x', step: 0, state: 'sent', reason: 'ACC1 template 301' as never, at: NOW }), 'no values')
     fs.writeFileSync(file, '{oops')
     const broken = createBrowserRunRecords(file, { warn: () => {} })
     assert.equal(broken.has('plan-9'), true)
@@ -404,10 +458,19 @@ function sourceFiles(dir: string): string[] {
 
 test('nothing in the app can start a run yet: no module imports the runner, no IPC channel or preload method reaches it', () => {
   const app = [...sourceFiles(path.join(clientDir, 'electron')), ...sourceFiles(path.join(clientDir, 'src')), ...sourceFiles(path.join(clientDir, 'shared'))]
-  const runnerFile = path.join(clientDir, 'electron/features/browser/runner.ts')
-  const importers = app.filter(f => f !== runnerFile && /features\/browser\/runner['"]|from '\.\/runner'/.test(fs.readFileSync(f, 'utf8')))
-  assert.deepEqual(importers.map(f => path.relative(clientDir, f)), ['electron/features/browser/run-records.ts'], 'only its own record store (a type)')
+  const rel = (f: string) => path.relative(clientDir, f)
+  const mentioning = (re: RegExp) => app.filter(f => re.test(fs.readFileSync(f, 'utf8'))).map(rel).sort()
+  // Nothing outside features/browser names the runner module, however it is written.
+  assert.deepEqual(mentioning(/browser\/runner(\.js|\.ts)?['"]/).filter(f => !f.startsWith('electron/features/browser/')), [])
+  // Inside it, only its own record store, and only for a type.
+  const inside = app.filter(f => rel(f).startsWith('electron/features/browser/') && rel(f) !== 'electron/features/browser/runner.ts'
+    && /from ['"]\.\/runner(\.js|\.ts)?['"]/.test(fs.readFileSync(f, 'utf8'))).map(rel)
+  assert.deepEqual(inside, ['electron/features/browser/run-records.ts'])
   assert.match(fs.readFileSync(path.join(clientDir, 'electron/features/browser/run-records.ts'), 'utf8'), /import type \{ BrowserRunRecords \} from '\.\/runner'/)
+  assert.deepEqual(mentioning(/\bcreateBrowserRunner\b/), ['electron/features/browser/runner.ts'])
+  // Only the controller hands out a window to run in; only the runner (and the window that defines it) enters ai mode for a run.
+  assert.deepEqual(mentioning(/\brunWindow\b/), ['electron/features/browser/controller.ts'])
+  assert.deepEqual(mentioning(/\benterAi\b/), ['electron/browser-window.ts', 'electron/features/browser/runner.ts', 'shared/browser-runner.ts'])
   // The browser's IPC is exactly the member's three buttons and the change event.
   const inventory = fs.readFileSync(path.join(clientDir, 'tests/ipc-harness/ipc-inventory.txt'), 'utf8').split('\n')
   assert.deepEqual(inventory.filter(l => /^(main\.handle|main\.on|contract\.invoke|contract\.send|contract\.sync|contract\.events) browser:/.test(l)).map(l => l.split(' ')[1]).sort(),

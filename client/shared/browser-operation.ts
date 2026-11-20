@@ -138,6 +138,14 @@ function FindProxyForURL(url, host) {
 }`
 }
 
+/**
+ * The session a window's run writes through (`browser-window.ts`): one per window session, in memory,
+ * named after it (so it is an `acb-browser-*` partition too).
+ */
+export function browserWritePartition(partition: string): string {
+  return `${partition}-write`
+}
+
 /** Response headers that register a reporting endpoint (Reporting API, NEL): never kept. */
 const REPORTING_HEADERS = new Set(['report-to', 'reporting-endpoints', 'nel'])
 

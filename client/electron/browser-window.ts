@@ -14,12 +14,11 @@
 // injected decider says yes (a run's never does), a read of the operated host only when the run's
 // read rule says so. A run's own requests go through the session (`run.request`), never the page,
 // and pass the request hook only when the run's gate says yes (agent-browser.md "The runner").
-import { randomUUID } from 'node:crypto'
 import net from 'node:net'
 import { BrowserWindow, net as electronNet, session, type Session, type WebContents } from 'electron'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
 import {
-  BROWSER_WORDS, browserProxyScript, browserResponseHeaders, createRefusalTally, decideAiRead, decideAiWrite, decideWindowRequest,
+  BROWSER_WORDS, browserProxyScript, browserWritePartition, browserResponseHeaders, createRefusalTally, decideAiRead, decideAiWrite, decideWindowRequest,
   hostForLog, isReadMethod, navigationAllowed,
   type BrowserReadDecider, type BrowserWindowMode, type BrowserWindowState, type BrowserWriteAttempt, type BrowserWriteDecider,
 } from '../shared/browser-operation'
@@ -60,7 +59,12 @@ function sendOnce(ses: Session, r: { method: string; url: string; contentType?: 
     request.on('response', response => {
       const chunks: Buffer[] = []
       let size = 0
-      response.on('data', chunk => { size += chunk.length; if (size <= RUN_ANSWER_MAX) chunks.push(chunk) })
+      // An answer larger than any page the adapter reads is refused whole (never read cut short).
+      response.on('data', chunk => {
+        size += chunk.length
+        if (size > RUN_ANSWER_MAX) finish(() => { request.abort(); reject(new Error('answer too large')) })
+        else chunks.push(chunk)
+      })
       response.on('end', () => finish(() => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') })))
       response.on('error', () => finish(() => reject(new Error('answer cut off'))))
     })
@@ -344,12 +348,22 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
           // A write goes on a connection of its own (agent-browser.md "The runner"): Chromium resends a
           // request whose reused keep-alive connection dropped before the answer — below the request
           // hook, so the gate's "once" never sees it (verified on Electron 45: one lost answer reached
-          // the site 12 times). A fresh in-memory session has no idle connection to reuse; it carries
-          // the window's login (its cookies for the site), the site's proxy rule and ONE request hook,
-          // the run's gate; it is cleared and its connections closed right after.
+          // the site 12 times). The window's write session (one per window session, in memory: it does
+          // not pile up) has its connections closed and its storage cleared before and after each
+          // write, so it never holds an idle connection to reuse; it carries the window's login (the
+          // cookies for the write's own address, path-scoped ones included), the site's proxy rule and
+          // ONE request hook, the run's gate (Electron keeps the last one: replaced each write). What
+          // the site sets in its answer (Set-Cookie) is not carried back to the window (decision: the
+          // runner re-reads with the window's own login; a rotated cookie stays the window's).
           const outside = state.outside
           if (!outside) throw new Error('no run')
-          const once = session.fromPartition(`acb-browser-write-${randomUUID()}`)
+          const once = session.fromPartition(browserWritePartition(spec.partition))
+          const wipe = async () => {
+            await once.closeAllConnections().catch(() => {})
+            await once.clearStorageData().catch(() => {})
+            await once.clearCache().catch(() => {})
+          }
+          await wipe()
           try {
             once.webRequest.onBeforeRequest((details, callback) => {
               let allow = false
@@ -360,7 +374,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
             once.setPermissionRequestHandler((_c, _p, callback) => callback(false))
             once.setPermissionCheckHandler(() => false)
             await routeOnly(once, site)
-            for (const c of await ses.cookies.get({ url: `https://${site.host}/` })) {
+            for (const c of await ses.cookies.get({ url })) {
               await once.cookies.set({
                 url: `https://${site.host}${c.path ?? '/'}`, name: c.name, value: c.value, path: c.path,
                 ...(c.hostOnly ? {} : { domain: c.domain }), secure: c.secure, httpOnly: c.httpOnly,
@@ -369,9 +383,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
             }
             return await sendOnce(once, { method, url, contentType, body })
           } finally {
-            void once.closeAllConnections().catch(() => {})
-            void once.clearStorageData().catch(() => {})
-            void once.clearCache().catch(() => {})
+            await wipe()
           }
         },
         closed,

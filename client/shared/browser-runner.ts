@@ -34,6 +34,8 @@ export interface BrowserRunPlan {
   target: Readonly<Record<string, string>>
   change: Readonly<Record<string, string>>
   before: BrowserTargetState
+  /** Epoch ms when a person approved it: a plan approved more than a day ago never runs, whatever its expiry. */
+  approvedAt: number
   /** Epoch ms; a plan runs only before it, and never more than a day ahead. */
   expiresAt: number
 }
@@ -43,6 +45,8 @@ const PLAN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 const CONNECTOR_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 const VERSION_RE = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/
 const STATE_LIMITS = { keys: 10, entries: 500 } as const
+/** A clock a minute ahead of ours is not a plan "approved in the future". */
+const CLOCK_SKEW_MS = 60_000
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const own = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k)
@@ -71,7 +75,7 @@ export function parseTargetState(v: unknown): BrowserTargetState | null {
 /** A plan as the provider handed it, checked field by field (its values against the type come later). */
 export function parseBrowserRunPlan(input: unknown, now: number): { value: BrowserRunPlan } | { error: string } {
   if (!isRecord(input)) return { error: 'plan' }
-  const { planId, companyId, connector, operation, account, target, change, before, expiresAt } = input
+  const { planId, companyId, connector, operation, account, target, change, before, approvedAt, expiresAt } = input
   if (typeof planId !== 'string' || !PLAN_ID_RE.test(planId)) return { error: 'planId' }
   if (typeof companyId !== 'string' || companyId.length === 0 || companyId.length > 200) return { error: 'companyId' }
   if (!isRecord(connector) || typeof connector.id !== 'string' || !CONNECTOR_ID_RE.test(connector.id)
@@ -87,7 +91,9 @@ export function parseBrowserRunPlan(input: unknown, now: number): { value: Brows
   if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return { error: 'expiresAt' }
   if (expiresAt <= now) return { error: 'expired' }
   if (expiresAt > now + BROWSER_PLAN_MAX_AHEAD_MS) return { error: 'expiresAt' }
-  return { value: { planId, companyId, connector: { id: connector.id, version: connector.version }, operation, account, target: t, change: c, before: b, expiresAt } }
+  if (typeof approvedAt !== 'number' || !Number.isFinite(approvedAt) || approvedAt > now + CLOCK_SKEW_MS) return { error: 'approvedAt' }
+  if (now - approvedAt > BROWSER_PLAN_MAX_AHEAD_MS) return { error: 'expired' }
+  return { value: { planId, companyId, connector: { id: connector.id, version: connector.version }, operation, account, target: t, change: c, before: b, approvedAt, expiresAt } }
 }
 
 /** The same lists with the same entries (order inside a list ignored: a page may list them in any order). */
@@ -126,6 +132,12 @@ export interface BrowserAdapterView {
 export interface BrowserOperationAdapter {
   /** `<site>.<operation>`, as the declaration's `adapter` names it. */
   readonly id: string
+  /**
+   * The target fields this adapter confirms on the page before any write (agent-browser.md "The
+   * runner"). A target field that no declared write carries must be one of these, or the runner
+   * refuses the plan: nothing else would hold the request to it.
+   */
+  readonly confirmsTarget: readonly string[]
   /** The exact paths (no query) the adapter reads for these values: the only reads a run allows besides the page's parts. */
   readPaths(values: BrowserPlanValues): string[]
   view(values: BrowserPlanValues, reads: readonly BrowserPageRead[]): BrowserAdapterView
@@ -229,8 +241,9 @@ export function createRunGate(options: {
       try { parsedHost = new URL(read.url).hostname } catch { return false }
       // Another host is the request hook's (asset hosts: GET of parts only).
       if (parsedHost !== host) return true
-      if (PAGE_PART_TYPES.has(read.resourceType)) return true
       const at = splitUrl(read.url, host)
+      // A part on the operated host loads only without a query (a GET with parameters may do something).
+      if (PAGE_PART_TYPES.has(read.resourceType)) return !!at && !at.query
       return !!at && !at.query && readPaths.includes(at.path)
     },
     sessionRequest(request) {
@@ -294,27 +307,42 @@ export function declaredWriteBody(operation: BrowserOperation, index: number, va
 /** One step's state, kept on this PC (ids and reasons only, never a value). */
 export type BrowserStepState = 'pending' | 'sent' | 'succeeded' | 'failed' | 'unknown'
 
+/** The only reason words a step record or a result carries (never an adapter's or a site's text). */
+export const BROWSER_RUN_REASONS = [
+  // before anything starts
+  'already-running', 'no-plan', 'plan', 'expired', 'already-ran', 'connector', 'operation', 'not-supported',
+  'unknown-adapter', 'target-unconfirmed', 'stopped', 'policy', 'no-window', 'busy', 'records-unavailable',
+  // started, nothing sent
+  'window-not-ready', 'window-closed', 'read-failed', 'account-unknown', 'account-mismatch', 'target-missing',
+  'before-changed', 'csrf-missing', 'adapter-problem',
+  // sent
+  'refused-by-site', 'no-answer', 'not-confirmed-sent', 'reread-failed', 'unchanged-unrefused', 'empty-state',
+  'other-state', 'error',
+] as const
+export type BrowserRunReason = typeof BROWSER_RUN_REASONS[number]
+export const isBrowserRunReason = (v: unknown): v is BrowserRunReason => (BROWSER_RUN_REASONS as readonly unknown[]).includes(v)
+
 export interface BrowserStepRecord {
   planId: string
   operation: string
   step: number
   state: BrowserStepState
-  /** A fixed reason word, never a value of the site or the plan. */
-  reason?: string
+  /** A fixed reason word (`BROWSER_RUN_REASONS`), never a value of the site or the plan. */
+  reason?: BrowserRunReason
   at: number
 }
 
 export type BrowserRunResult =
   /** Nothing started, nothing sent (the plan, the setting, the window, the type). */
-  | { outcome: 'refused'; reason: string }
+  | { outcome: 'refused'; reason: BrowserRunReason }
   /** Started, stopped before anything was sent. */
-  | { outcome: 'stopped'; reason: string }
+  | { outcome: 'stopped'; reason: BrowserRunReason }
   /** Sent, and the page shows exactly the planned change. */
   | { outcome: 'succeeded' }
-  /** Sent, and the page shows the state from before: nothing changed. */
-  | { outcome: 'failed'; reason: string }
+  /** Sent, the site answered it with a refusal (4xx) and the page shows the state from before. */
+  | { outcome: 'failed'; reason: BrowserRunReason }
   /** Sent (or maybe sent) and the result cannot be told: never sent again by itself. */
-  | { outcome: 'unknown'; reason: string }
+  | { outcome: 'unknown'; reason: BrowserRunReason }
 
 export const BROWSER_RUN_WORDS = {
   succeeded: '変更しました。',

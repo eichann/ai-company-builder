@@ -242,8 +242,9 @@ function parseOperation(name: string, raw: YamlValue, err: (m: string) => void):
         const used = new Set(writes.flatMap(w => Object.values(w.body).flatMap(v => 'field' in v ? [v.field] : [])))
         // Every change field reaches a request: what the plan sets is what the runner holds the request to.
         // A target field may stay out of the requests (the site's request names the step, not its
-        // reminder): the app's adapter confirms the whole target on the page before any write, and
-        // each write still names at least one target field (agent-browser.md "The runner").
+        // reminder) only when the type's adapter confirms it on the page before any write: the app's
+        // runner refuses a plan otherwise (`targetFieldsOutsideWrites`, agent-browser.md "The runner").
+        // Each write still names at least one target field.
         for (const n of Object.keys(change)) if (!used.has(n)) e(`${where}の「${n}」は writes のどの body にも入っていません`)
       }
     }
@@ -323,6 +324,16 @@ function valueProblem(kind: BrowserFieldKind, v: unknown, isTarget: boolean): bo
   if (v.length === 0 || v.length > BROWSER_DECLARATION_LIMITS.textValue || UNSAFE_MULTILINE_RE.test(v)) return true
   // A target names one thing: spaces around it would make two spellings of the same name.
   return isTarget && v.trim() !== v
+}
+
+/**
+ * The type's target fields no declared write carries. Nothing in a request holds the request to
+ * them, so the app's runner runs such a type only when its adapter confirms each of them on the
+ * page before writing (the adapter's `confirmsTarget`); `matchDeclaredWrite` alone never covers them.
+ */
+export function targetFieldsOutsideWrites(operation: BrowserOperation): string[] {
+  const used = new Set(operation.writes.flatMap(w => Object.values(w.body).flatMap(v => 'field' in v ? [v.field] : [])))
+  return Object.keys(operation.target).filter(n => !used.has(n))
 }
 
 /** Why a plan's values do not fit the operation type (exactly its fields, each of its kind), or null. */

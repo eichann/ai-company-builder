@@ -4,7 +4,7 @@
 // write may have gone out). A file that exists but cannot be read refuses every run (fails closed).
 import fs from 'node:fs'
 import path from 'node:path'
-import { BROWSER_PLAN_MAX_AHEAD_MS, type BrowserStepRecord, type BrowserStepState } from '../../../shared/browser-runner'
+import { BROWSER_PLAN_MAX_AHEAD_MS, isBrowserRunReason, type BrowserStepRecord, type BrowserStepState } from '../../../shared/browser-runner'
 import type { BrowserRunRecords } from './runner'
 
 // A plan runs at most a day after it was made: records older than two days can no longer stop a run.
@@ -17,7 +17,7 @@ function valid(r: unknown): r is BrowserStepRecord {
   const x = r as Record<string, unknown>
   return typeof x.planId === 'string' && WORD.test(x.planId) && typeof x.operation === 'string' && WORD.test(x.operation)
     && Number.isInteger(x.step) && STATES.includes(x.state as BrowserStepState)
-    && (x.reason === undefined || (typeof x.reason === 'string' && WORD.test(x.reason))) && typeof x.at === 'number'
+    && (x.reason === undefined || isBrowserRunReason(x.reason)) && typeof x.at === 'number'
 }
 
 export function createBrowserRunRecords(file: string, log: Pick<Console, 'warn'> = console): BrowserRunRecords & { all(): readonly BrowserStepRecord[] } {

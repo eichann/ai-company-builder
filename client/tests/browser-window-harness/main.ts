@@ -16,6 +16,7 @@ import { createBrowserRunner } from '../../electron/features/browser/runner'
 import type { BrowserSiteSetting } from '../../../shared/core/browser-operation'
 import { createBrowserAdapterRegistry, createBundledBrowserConnectors } from '../../shared/browser-adapters'
 import { LSTEP_DECLARATION } from '../../shared/browser-adapters/lstep'
+import { browserWritePartition } from '../../shared/browser-operation'
 import { createRunGate, encodeForm, FORM_CONTENT_TYPE, type BrowserRunSurface, type BrowserStepRecord } from '../../shared/browser-runner'
 import { startSites, type Sites } from './sites'
 
@@ -39,9 +40,13 @@ const trustTestCertificate = (partition: string) => {
 }
 
 // A run's write gets a fresh session of its own (browser-window.ts): it trusts the test certificate too.
-app.on('session-created', created => created.setCertificateVerifyProc((request, callback) => {
-  callback(TRUSTED.includes(request.hostname) && request.certificate.fingerprint === fingerprint ? 0 : -3)
-}))
+let sessionsCreated = 0
+app.on('session-created', created => {
+  sessionsCreated++
+  created.setCertificateVerifyProc((request, callback) => {
+    callback(TRUSTED.includes(request.hostname) && request.certificate.fingerprint === fingerprint ? 0 : -3)
+  })
+})
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const result: Record<string, unknown> = {}
@@ -134,7 +139,7 @@ async function run() {
   await win.setMode('human')
   result.humanAgain = await js(`fetch('/human-again', { method: 'POST', body: 'h' }).then(r => r.status, () => 'refused')`)
 
-  result.runner = await runnerScenarios(win, site, sites, js)
+  result.runner = await runnerScenarios(win, site, sites, js, partition)
 
   // The login: a cookie and storage of the site, then cleared.
   await js(`document.cookie = 'sid=1; Secure; Max-Age=3600'; localStorage.setItem('k', 'v'); 1`)
@@ -176,10 +181,13 @@ async function run() {
  * is logged in (a cookie) and shows the reminder page; the runner works through the window's session
  * while the page tries everything it can.
  */
-async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting, sites: Sites, js: (code: string) => Promise<unknown>) {
+async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting, sites: Sites, js: (code: string) => Promise<unknown>, partition: string) {
   const out: Record<string, unknown> = {}
   const page = win.webContents
   await js(`document.cookie = 'sid=1; Secure; Max-Age=3600'; 1`)
+  // A cookie scoped to the write's own path: the site needs it on the write.
+  await page.session.cookies.set({ url: 'https://op.test/line/episode/step/pack', name: 'wp', value: '1', path: '/line/episode/step/pack', secure: true, httpOnly: true })
+  const sessionsBefore = sessionsCreated
   await page.loadURL('https://op.test/line/episode/show/101')
   await wait(300)
   // The bundled Lステップ declaration with the test hosts in place of the real ones.
@@ -203,7 +211,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
     plans[planId] = {
       planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.1.0' }, operation: 'reminder_step_add_template',
       account: 'ACC1', target: { reminder: '101', step: '201' }, change: { template: '301' }, before: { templates: ['300'] },
-      expiresAt: Date.now() + 120_000, ...over,
+      approvedAt: Date.now() - 1000, expiresAt: Date.now() + 120_000, ...over,
     }
   }
   const runner = createBrowserRunner({
@@ -223,6 +231,8 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   }
   out.happy = await runner.run('plan-a')
   out.stepAfterHappy = [...sites.lstep['201']]
+  // The write's session holds nothing of the login once the write is done.
+  out.writeSessionCookies = (await session.fromPartition(browserWritePartition(partition)).cookies.get({})).length
   // Another LINE account shown on the page than the plan's.
   plan('plan-b', { account: 'ACC2', change: { template: '302' }, before: { templates: ['300', '301'] } })
   out.wrongAccount = await runner.run('plan-b')
@@ -235,6 +245,9 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   plan('plan-d', { change: { template: '999' }, before: { templates: ['300', '301'] } })
   out.lost = await runner.run('plan-d')
   out.lostAgain = await runner.run('plan-d')
+  // A page over the size the runner reads is refused whole, never read cut short.
+  plan('plan-e', { target: { reminder: '103', step: '201' }, change: { template: '305' } })
+  out.oversize = await runner.run('plan-e')
   out.records = records.map(r => `${r.planId}:${r.state}`)
 
   // The gate itself on the real window: an armed write of step 201 / template 304.
@@ -263,6 +276,9 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   out.pageDeclaredRead = await js(`fetch('/line/episode/show/101').then(r => r.status, () => 'refused')`)
   await win.run.leaveAi()
   out.gateRefusals = [...gate.refusals()]
+  // Every write of every run went through one write session (they do not pile up).
+  out.writeSessionsCreated = sessionsCreated - sessionsBefore
+  await page.session.cookies.remove('https://op.test/line/episode/step/pack', 'wp')
   // Back to the site's start page for the rest of the harness.
   await page.loadURL('https://op.test/').catch(() => {})
   await wait(300)

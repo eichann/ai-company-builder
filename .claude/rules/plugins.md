@@ -592,8 +592,11 @@ browser:
   target / change — never text around a placeholder. Each write names at least one target field,
   and every **change** field appears in some write: the runner holds each request to the plan. A
   target field may stay out of the requests (2026-11-20, Lステップ: the request names the step, not its
-  reminder) — the app's adapter confirms the whole target on the page before any write (a step not
-  on its reminder's page is no target).
+  reminder) **only when the type's adapter confirms it on the page**: the parser cannot know adapters,
+  so the app's runner refuses a plan whose type has a target field in no write that its adapter does
+  not list in `confirmsTarget` (`targetFieldsOutsideWrites`; `agent-browser.md` "The runner").
+  `matchDeclaredWrite` never covers such a field, and no page-side write is decided by it: during a
+  run the window refuses every write of the page (`decide: () => false`).
   `_method` (any case) is refused as a body key and in `ignore_body` (a method override).
 - **Plain text** (`label`, `shared`, the account's `label`, literals, a plan's `text`) has no control
   characters, bidirectional marks / overrides / isolates or zero-width characters (U+061C,
