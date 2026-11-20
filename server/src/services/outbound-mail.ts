@@ -59,7 +59,7 @@ import { logError } from '../lib/error-log'
 import type { Member } from './access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 import { recordReader } from './record-access'
-import { placeOfRow, restrictedPlaceOf, type ActorInput, type ServicePlace, type ServiceRecordWriter, type ServiceWriteFailed } from './record-engine'
+import { listReadsSources, placeOfRow, restrictedPlaceOf, type ActorInput, type ServicePlace, type ServiceRecordWriter, type ServiceWriteFailed } from './record-engine'
 import { currentTypes } from './record-index'
 import { RECORDS_DISABLED } from './records'
 import { findMeetingOutput } from './meeting-outputs'
@@ -83,6 +83,8 @@ export const SEND_INTERRUPTED_NOTE = '送っている途中でサーバーが止
 
 /** A draft is seen by no more people than its sources; its author is not among them (a source changed meanwhile). */
 const MAIL_NARROWER_PLACE_REFUSED = 'この下書きは、もとの記録を見られる人だけに見えるように作ります。あなたはその中に入っていないため作れません。'
+/** A list-only draft that also comes from a record some of that list cannot read (names neither). */
+const MAIL_LIST_WIDER_REFUSED = 'もとの記録の中に、この下書きを見る人たちの一部が見られないものがあるため、下書きを作れません。どの記録についてのメールかを見直してください。'
 export const MAIL_NOT_FOUND = { error: 'メールの下書きが見つかりません', code: 'MAIL_NOT_FOUND' }
 export const MAIL_UNKNOWN_TEXT = '届いたか分かりません。Gmail の送信済みを確かめてください。'
 /**
@@ -108,6 +110,8 @@ export interface OutboundMailDeps {
   ids: IdGenerator
   transactions: Transactions
   writer: ServiceRecordWriter
+  /** A member's role (null: not a member) — who on a draft's list reads its other sources. */
+  roleOf: (companyId: string, userId: string) => string | null
   payloads: MailPayloadStore
   /**
    * 「使う機能」 受信の振り分け・返事のお願い is on for the company (records.md "Features on and off"):
@@ -907,7 +911,13 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
   /** The draft's place, or the one refusal when the author is not among the people who see its sources. */
   function draftPlace(member: Member, ctx: Parameters<typeof placeOf>[1]): ServicePlace | Refusal {
     const place = placeOf(member, ctx)
-    return place === 'refused' ? refuse('bad-request', MAIL_NARROWER_PLACE_REFUSED, { code: 'MAIL_PLACE_REFUSED' }) : place
+    if (place === 'refused') return refuse('bad-request', MAIL_NARROWER_PLACE_REFUSED, { code: 'MAIL_PLACE_REFUSED' })
+    // A list, and another source placed by a folder (an 経理部 やること): everyone on the list must read it too.
+    const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
+    if (!listReadsSources(member.companyId, scopes, u => deps.roleOf(member.companyId, u), place, [ctx.interaction, ctx.meeting, ctx.task, ctx.bundle])) {
+      return refuse('bad-request', MAIL_LIST_WIDER_REFUSED, { code: 'MAIL_PLACE_REFUSED' })
+    }
+    return place
   }
 
   const linksOf = (ctx: { meetingId: string | null; bundleId: string | null; interactionId: string | null; taskId?: string | null }) => ({

@@ -411,6 +411,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     enabled: featureOn('decisions'),
     writer: serviceRecords,
     tokenDigest: sha256TokenDigest,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
   })
 
   // Connector plugins (milestone 3): the shelf is shared and read only; installs are behind the company handle.

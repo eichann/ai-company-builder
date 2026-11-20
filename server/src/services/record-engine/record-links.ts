@@ -25,6 +25,12 @@ import { listLedgerValue } from './members'
 /** A link that says where the record came from (`origin: true`): history, never changed by hand. */
 export const LINK_IS_ORIGIN = { error: 'このつながりは、この記録がどこから来たかを表すので外せません', code: 'LINK_IS_ORIGIN' } as const
 
+/** A 決めたこと seen by more people than the owner-only / members-only まとまり it would be linked to. */
+export const DECISION_WIDER_THAN_BUNDLE = {
+  error: 'この決めたことは、つなぐ案件・プロジェクトより多くの人に見えているため、つなげません。限られた人だけの案件・プロジェクトには、そこで記録した決めたことだけをつなげます。',
+  code: 'WIDER_THAN_BUNDLE',
+} as const
+
 export function recordLinking(ctx: EngineContext) {
   const { deps, companyData, transactions, clock, open, canRead, stateOf, summaryOf, changed } = ctx
   return {
@@ -111,6 +117,15 @@ export function recordLinking(ctx: EngineContext) {
           const place = { ...row, ...narrowTo, members: null }
           const named = Object.entries(current.fields).filter(([f, v]) => def.fields[f]?.kind === 'person' && typeof v === 'string' && v !== '')
           if (named.some(([, v]) => !canRead(member.companyId, v as string, place))) return bad(NAMED_PERSON_CANNOT_READ.error, NAMED_PERSON_CANNOT_READ.code)
+        }
+      }
+      // A 決めたこと linked later to an owner-only / members-only まとまり (records.md "Other records made for a
+      // まとまり"): one made for it takes its place, so one seen by more people is not linked (never narrowed here:
+      // its readers may already have read it).
+      if (targetRow && row.type === 'decision' && (targetRow.personalOwner !== null || targetRow.members !== null)) {
+        const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
+        if (!placeWithin(member.companyId, scopes, id => deps.roleOf(member.companyId, id), row, targetRow)) {
+          return bad(DECISION_WIDER_THAN_BUNDLE.error, DECISION_WIDER_THAN_BUNDLE.code)
         }
       }
       const expected = b.expectedVersion as number

@@ -46,7 +46,7 @@ import { slotQuote } from '../../shared/core/source-slot-candidates'
 import { neutralizeOutsideText } from '../../shared/core/outside-text'
 import { decideSlot, slotScope } from './source-slot-candidates'
 import { recordReader } from './record-access'
-import { ASSIGNEE_CANNOT_READ, restrictedPlaceOf, type ActorInput, type ServiceRecordWriter } from './record-engine'
+import { ASSIGNEE_CANNOT_READ, listReadsSources, restrictedPlaceOf, type ActorInput, type ServiceRecordWriter } from './record-engine'
 import { currentTypes } from './record-index'
 import { RECORDS_DISABLED, recordSummaries } from './records'
 
@@ -55,6 +55,8 @@ export interface DecisionServiceDeps {
   writer: ServiceRecordWriter
   tokenDigest: TokenDigest
   ids: IdGenerator
+  /** A member's role (null: not a member) — who on a list reads the decision's other sources. */
+  roleOf: (companyId: string, userId: string) => string | null
   /**
    * 「使う機能」 決めたこと is on (records.md "Features on and off"). Off: nothing is recorded,
    * by a person or the AI (409 FEATURE_OFF); earlier decisions stay readable. Absent → on.
@@ -74,6 +76,15 @@ export const DECISION_PLACE_REFUSED = {
  */
 export const DECISION_NARROWER_PLACE_REFUSED = {
   error: 'この決めたことは、つながっている案件・プロジェクトを見られる人だけに見えるように残します。あなたはその中に入っていないため残せません。',
+  code: 'DECISION_PLACE_REFUSED',
+}
+
+/**
+ * A decision for a members-only まとまり also linked to a record some of that list cannot read (an approval of
+ * another department): it would show that record's matter to them. Names neither the record nor the people.
+ */
+export const DECISION_LIST_WIDER_REFUSED = {
+  error: 'つないだ記録の中に、この案件・プロジェクトを見られる人の一部が見られないものがあるため、決めたことを残せません。つなぐ記録を見直してください。',
   code: 'DECISION_PLACE_REFUSED',
 }
 
@@ -173,6 +184,10 @@ export function createDecisionService(deps: DecisionServiceDeps) {
         ? restrictedPlaceOf(linked, member.userId)
         : null
       if (restricted === 'refused') return bad(DECISION_NARROWER_PLACE_REFUSED.error, DECISION_NARROWER_PLACE_REFUSED.code)
+      // A list, and another source placed by a folder (an 経理部 approval): everyone on the list must read it too.
+      if (restricted && !listReadsSources(member.companyId, handle.scopes.listWithRules(), u => deps.roleOf(member.companyId, u), restricted, linked)) {
+        return bad(DECISION_LIST_WIDER_REFUSED.error, DECISION_LIST_WIDER_REFUSED.code)
+      }
       if (!restricted && !fromListedMeeting && typeof b.folder !== 'string') return bad('folder: a department folder')
 
       // The place: a department folder the member may write, not private, not wider than a linked record.

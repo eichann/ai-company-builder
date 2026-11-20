@@ -48,6 +48,7 @@ export function wireOutboundMail(deps: OutboundMailWiringDeps) {
     ...shared,
     slots: sourceSlots,
     writer: serviceRecords,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     payloads: fixedPayloads,
     digest: text => sha256TokenDigest.digest(text),
     digestBytes: sha256Bytes,

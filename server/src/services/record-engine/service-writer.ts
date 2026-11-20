@@ -1,5 +1,5 @@
 import { SERVICE_MADE_TYPES, SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE_TRANSITIONS, serviceTransitionAllowed } from '../../../shared/core/core-types'
-import { findPrivateScope } from '../../../shared/core/permissions'
+import { findPrivateScope, type ScopeWithRules } from '../../../shared/core/permissions'
 import { normalizeRepoPath } from '../../../shared/core/paths'
 import type { TypeDefinition } from '../../../shared/core/record-types'
 import { SYSTEM_ACTOR_PREFIX, type LedgerChange, type LedgerEntry, type LedgerValue, type LedgerVia } from '../../../shared/core/record-ledger'
@@ -163,6 +163,29 @@ export function restrictedPlaceOf(
   const lists = restricted.map(r => listedUserIds(r))
   const common = lists.slice(1).reduce<string[]>((acc, list) => acc.filter(id => list.includes(id)), [...lists[0]])
   return common.includes(creator) ? { members: common } : 'refused'
+}
+
+/**
+ * With a members-only place from `restrictedPlaceOf`: does everyone on that list (as it is now) read every
+ * other source that is placed by a folder (or company-wide)? A record made from a members-only まとまり and
+ * an 経理部 approval / やること is read only by people who read both — when someone on the list does not read
+ * such a source, the caller refuses (the safe side: nobody is dropped from the list quietly). Owner-only
+ * places pass: their one reader read every source to link it.
+ */
+export function listReadsSources(
+  companyId: string, scopes: ScopeWithRules[], roleOf: (userId: string) => string | null, place: ServicePlace,
+  rows: readonly (RecordAccessRow | null | undefined)[],
+): boolean {
+  if (!('members' in place)) return true
+  const people = listedUserIds({ members: place.members, memberSets: place.memberSets ?? [] })
+  const placed = rows.filter((r): r is RecordAccessRow => !!r && r.personalOwner === null && r.members === null)
+  return people.every(userId => {
+    const role = roleOf(userId)
+    // Not a member of the company (any more): reads nothing through any route, so widens nothing.
+    if (role === null) return true
+    const reader = recordReader({ companyId, userId, role }, scopes)
+    return placed.every(r => reader.record(r))
+  })
 }
 
 /**

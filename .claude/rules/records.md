@@ -1324,7 +1324,14 @@ Words on screen: 見える範囲 / 見られる人, never 置き場所.
   of them now as people (several — a members-only meeting and a members-only まとまり); the member must be
   on it. Else refused (decisions 400 `DECISION_PLACE_REFUSED`, mail 400 `MAIL_PLACE_REFUSED`, each with its
   own Japanese sentence; only possible when a source changed meanwhile, since the member reads every
-  source). People the record names must read it there (the service writer's `assignee-cannot-read`). A
+  source). **A list and a source placed by a folder** (a members-only まとまり with an 経理部 approval or
+  やること; a members-only meeting / 連絡 / やること with an 経理部 まとまり): everyone on the list now must read
+  every such source (`listReadsSources`, same file, each listed person's own `recordReader`), else refused
+  (decisions `DECISION_PLACE_REFUSED`, mail `MAIL_PLACE_REFUSED`, each its own sentence naming neither
+  the record nor the people) — never a list quietly shortened. **Linked later**: a 決めたこと linked to an
+  owner-only / members-only まとまり through `record-links` must already be within it (`placeWithin`), else
+  400 `WIDER_THAN_BUNDLE` (`DECISION_WIDER_THAN_BUNDLE`, `record-links.ts`; never narrowed there: its
+  readers may have read it). People the record names must read it there (the service writer's `assignee-cannot-read`). A
   `folder` given for such a decision is not used (the AI copies the meeting's folder) and none is needed;
   a decision of a public まとまり still needs its department folder, as before. What the mail sends later
   (its やりとり, 返事のお願い) follows the draft (`placeOfRow`). Not changed: approvals (placed by a
@@ -1336,8 +1343,19 @@ Words on screen: 見える範囲 / 見られる人, never 置き場所.
   person's session and the AI's token, in a company without the shared folder: anyone else gets a missing
   record's answer on the detail and the history, and no query, text search, 探す, 「あなたの番」 or 見られる人
   shows it; a public まとまり's decision unchanged), `record-members.test.ts` (the sent mail's やりとり,
-  several lists, `restrictedPlaceOf`'s refusals), `decision-confirm.test.ts` (an attendee not on the
-  まとまり's list never reads its decision) — each guard mutation-checked.
+  several lists, `restrictedPlaceOf`'s refusals, a list with an 経理部 approval / やること / まとまり refused,
+  a wider decision linked later refused), `decision-confirm.test.ts` (an attendee not on the まとまり's list
+  never reads its decision) — each guard mutation-checked.
+  - **At creation only**: the place is copied when the record is made. Narrowing the まとまり later (「見る人を
+    減らす」 `removeMembers`, 「部署に出す」 of an owner-only one) does not follow to the decisions and mails made
+    from it — the same as its やること (whose list is also copied). Who reads them afterwards is their own
+    list.
+  - **Open owner decisions** (2026-11-20 review; the safe side is what the code does now): (a) a meeting's
+    output for a members-only まとまり is read by who is on both lists (the meeting's attendees and the
+    まとまり's), while a やること made from the meeting keeps its own rule (meeting list + the people it names,
+    then `WIDER_THAN_BUNDLE` for the まとまり) — should the two be the same?; (b) someone invited to the
+    まとまり later (「招待する」) does not see the decisions and mails made before (each keeps its own list) —
+    should an invitation offer to add them too?
 - Tests: `server/tests/unit/record-bundle-place.test.ts` (the default department, inherit on create, an
   owner-only task stays owner-only, wider refused or narrowed, named people kept, set_bundle, the share
   to the まとまり's folder for a linked task of a reader only, no name to a non-reader, the route's first

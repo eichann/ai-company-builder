@@ -144,9 +144,9 @@ beforeEach(() => {
     accounts: { byIds: (list: string[]) => new Map(list.map(id => [id, { name: NAMES[id] ?? null, email: `${id}@acme.example` }])) } as never,
   })
   const tokenDigest = { digest: (t: string) => createHash('sha256').update(t).digest('hex') }
-  decisions = createDecisionService({ companyData: source, writer, ids, tokenDigest } as never)
+  decisions = createDecisionService({ companyData: source, writer, ids, tokenDigest, roleOf } as never)
   mail = createOutboundMailService({
-    companyData: source, transactions, clock, ids, writer,
+    companyData: source, transactions, clock, ids, writer, roleOf,
     payloads: createFixedPayloads({ companyData: source, clock }),
     digest: t => createHash('sha256').update(t).digest('hex'),
     members: co => (PEOPLE[co] ?? []).map(u => ({ userId: u, email: `${u}@acme.example`, name: NAMES[u] ?? null })),
@@ -401,6 +401,64 @@ describe('creating one', () => {
       expect(await service.get(m(who), d.record.id)).toMatchObject({ ok: false, body: { code: 'RECORD_NOT_FOUND' } })
       expect(await service.get(m(who), draft.id)).toMatchObject({ ok: false, body: { code: 'RECORD_NOT_FOUND' } })
     }
+  })
+
+  /** 経理部: everyone reads it but u-bob. */
+  function accounting() {
+    conn.prepare("INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('a-acc', 'a', '経理部', 'folder', ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-acc-e', 'a-acc', 'everyone', NULL, 1, 1, ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-acc-b', 'a-acc', 'user', 'u-bob', 0, 0, ?)").run(TS)
+  }
+
+  it('a decision for a members-only まとまり and a record someone on its list cannot read (an 経理部 approval) is refused', async () => {
+    accounting()
+    const b = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '採用', members: ['u-bob'] })).record
+    const approval = (folder: string) => {
+      const r = writer.create('a', {
+        type: 'approval', title: '予算の承認', folder, fields: { assignee: 'u-alice', operation: 'x.update', payload_hash: 'sha256:aa', payload_version: 1 },
+        actor: { id: 'u-alice', kind: 'human', source: null },
+      })
+      if (!r.ok) throw new Error(r.reason)
+      return r.record
+    }
+    const refused = await decisions.record(m('u-alice'), HUMAN, { title: '予算を増やす', why: '採用のため', source: '会議', links: { bundle: b.id, approval: approval('経理部').id } })
+    expect(refused).toMatchObject({ ok: false, body: { code: 'DECISION_PLACE_REFUSED' } })
+    expect(JSON.stringify(refused)).not.toContain('経理部')
+    expect(ok(service.query(m('u-bob'), { type: 'decision' })).total).toBe(0)
+    // Everyone on the list reads the approval: made, on the list.
+    const d = ok(await decisions.record(m('u-alice'), HUMAN, { title: '予算を増やす', why: '採用のため', source: '会議', links: { bundle: b.id, approval: approval('営業部').id } }))
+    expect(source.forCompany('a').records.find(d.record.id)).toMatchObject({ folder: null, members: ['u-alice', 'u-bob'] })
+  })
+
+  it('a mail of a members-only source and a source someone on its list cannot read is refused, both ways round', async () => {
+    accounting()
+    const listedBundle = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '採用', members: ['u-bob'] })).record
+    const accTask = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '経費の精算', folder: '経理部' })).record
+    const accBundle = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '決算', folder: '経理部' })).record
+    // The older combination: a members-only meeting (u-alice, u-bob) and an 経理部 まとまり.
+    const mt = meeting()
+    for (const ctx of [{ bundleId: listedBundle.id, taskId: accTask.id }, { meetingId: mt.id, bundleId: accBundle.id }]) {
+      const to = ok(await mail.recipients(m('u-alice'), ctx)).recipients.find(r => r.source === 'member' || r.source === 'calendar')!.ref
+      const r = await mail.create(m('u-alice'), AI, { ...ctx, toRefs: [to], subject: '精算のご相談', body: 'よろしくお願いします。' })
+      expect(r).toMatchObject({ ok: false, body: { code: 'MAIL_PLACE_REFUSED' } })
+      expect(JSON.stringify(r)).not.toContain('経理部')
+    }
+    expect(source.forCompany('a').records.candidates({ types: ['outbound_message'] }, 10)).toEqual([])
+  })
+
+  it('a wider decision is not linked later to an owner-only / members-only まとまり; one within it is', async () => {
+    const own = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '転職', personal: true })).record
+    const listed = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '買収', members: ['u-bob'] })).record
+    const wide = ok(await decisions.record(m('u-alice'), HUMAN, { folder: '営業部', title: '方針', why: '理由', source: '会議' })).record
+    for (const b of [own, listed]) {
+      expect(engine.recordLink(m('u-alice'), HUMAN, wide.id, 'link', { link: 'bundle', target: b.id, expectedVersion: 1 }))
+        .toMatchObject({ ok: false, body: { code: 'WIDER_THAN_BUNDLE' } })
+    }
+    expect(source.forCompany('a').records.linksFrom([wide.id])).toEqual([])
+    // Made for the list, then linked to the other list's まとまり it is within: linked.
+    const listed2 = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '買収2', members: ['u-bob'] })).record
+    const within = ok(await decisions.record(m('u-alice'), HUMAN, { title: '方針', why: '理由', source: '会議', links: { bundle: listed.id } })).record
+    expect(ok(engine.recordLink(m('u-alice'), HUMAN, within.id, 'link', { link: 'bundle', target: listed2.id, expectedVersion: 1 })).changed).toBe(true)
   })
 
   it('restrictedPlaceOf: never wider than any restricted source, and never a place its creator is not in', () => {

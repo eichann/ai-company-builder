@@ -77,7 +77,7 @@ beforeEach(() => {
   engine = createRecordEngine({ ...base, files: { appendHistoryLine: async () => true, fileAtCommit: async () => false }, managedFolders: () => [], actsFor: (_c: string, userId: string) => covering[userId] ?? [] })
   service = createRecordService({ companyData: source, clock, indexer: { schedule: async () => {} }, whoMay: (member, id, actions) => engine.whoMay(member, id, actions) })
   writer = createServiceRecordWriter(base)
-  decisions = createDecisionService({ companyData: source, writer, ids, tokenDigest: { digest: (t: string) => createHash('sha256').update(t).digest('hex') } })
+  decisions = createDecisionService({ companyData: source, writer, ids, roleOf, tokenDigest: { digest: (t: string) => createHash('sha256').update(t).digest('hex') } })
   conn.prepare("INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES ('a', 'a', 'a', 'u-owner', ?, ?)").run(TS, TS)
   conn.prepare("INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('a-root', 'a', '', 'company', ?)").run(TS)
   conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-root-r', 'a-root', 'everyone', NULL, 1, 1, ?)").run(TS)
