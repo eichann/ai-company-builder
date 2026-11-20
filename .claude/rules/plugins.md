@@ -555,8 +555,8 @@ GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
 A third kind of connector for 「ブラウザ操作」 (`agent-browser.md`): the chat AI operates an
 admin-approved site in the app's browser window **only through per-site operation types**, never
 free clicking. Still data only: what reads the page per type is a reviewed **adapter shipped in the
-app** (later PR), named by `adapter`; the declaration fixes what a plan names and the only write
-requests a type may send.
+app** (`client/shared/browser-adapters/`, `agent-browser.md` "The runner"), named by `adapter`; the
+declaration fixes what a plan names and the only write requests a type may send.
 
 ```yaml
 id: lstep
@@ -580,7 +580,7 @@ browser:
         - method: POST                       # POST | PUT | PATCH; DELETE only on effect: delete; never GET
           path: /line/episode/step/pack/template   # fixed: no scheme, host, query, fragment, placeholder, // or ..
           encoding: form                     # form (default) | json (a flat object)
-          body: { content_id: "{step}", template_id: "{template}", pack_id: "{reminder}", mode: replace }
+          body: { content_id: "{step}", template_id: "{template}" }   # the site's real form names the step only
           ignore_body: [_token, _lm_user_id] # keys that may come with any value (CSRF / session), ≤ 10; never _method
 ```
 
@@ -590,7 +590,13 @@ browser:
   unusable, as everywhere.
 - **A body value** is a literal (one line, ≤ 200, no `{` `}`) or exactly one `{name}` of the type's
   target / change — never text around a placeholder. Each write names at least one target field,
-  and every target and change field appears in some write: the runner holds each request to the plan.
+  and every **change** field appears in some write: the runner holds each request to the plan. A
+  target field may stay out of the requests (2026-11-20, Lステップ: the request names the step, not its
+  reminder) **only when the type's adapter confirms it on the page**: the parser cannot know adapters,
+  so the app's runner refuses a plan whose type has a target field in no write that its adapter does
+  not list in `confirmsTarget` (`targetFieldsOutsideWrites`; `agent-browser.md` "The runner").
+  `matchDeclaredWrite` never covers such a field, and no page-side write is decided by it: during a
+  run the window refuses every write of the page (`decide: () => false`).
   `_method` (any case) is refused as a body key and in `ignore_body` (a method override).
 - **Plain text** (`label`, `shared`, the account's `label`, literals, a plan's `text`) has no control
   characters, bidirectional marks / overrides / isolates or zero-width characters (U+061C,
@@ -611,7 +617,7 @@ browser:
   write's `ignore_body`, no repeated key. Answers `{ match: true, write }` or the reason (`plan`,
   `method-override`, `not-declared`, `query`, `body-shape`, `encoding`, `repeated-key`, `missing-key`,
   `wrong-value`, `extra-key`) with the key name — never a value.
-- **The runner's side** (later PRs; this module keeps no state):
+- **The runner's side** (`agent-browser.md` "The runner"; this module keeps no state):
   - every request to the operated host that is not GET / HEAD goes through `matchDeclaredWrite`;
     WSS to the operated host is refused unless an operation type declares it (none can yet);
   - it reads the encoding from Content-Type and refuses anything but form / JSON or a charset other
@@ -625,11 +631,13 @@ browser:
   the operated host one of its sites, every declared asset host among that site's, each type's effect
   within the site's level; the rest come back with `off` / `site-not-allowed` /
   `asset-host-not-allowed` (+ `missingAssetHosts`) / `level`.
-- **Not used yet**: the shelf refuses a package with `browser` (「a browser connector (browser) is not
+- **Not on the shelf yet**: the shelf refuses a package with `browser` (「a browser connector (browser) is not
   used yet」, `services/plugin-shelf.ts`), so no company installs it, `pluginsFor` never lists it and no
   app fetches it; `combineUse` refuses one, so no business plugin uses it. A released app's older parser
-  does not know `browser` (an unknown key: unusable). The app's runner, its adapters and the plan /
-  approval flow are later PRs.
+  does not know `browser` (an unknown key: unusable). The first declaration (`lstep@0.1.0`, 「リマインダの段に
+  テンプレートを足す」) ships **inside the app** with its adapter (`client/shared/browser-adapters/lstep.ts`),
+  parsed by `parsePluginManifest`; the runner exists but nothing starts it, and the plan / approval
+  flow is a later PR.
 - Test: `server/tests/unit/plugin-browser-declaration.test.ts` (the example, every refusal, every
   mismatch reason, `ignore_body`, the setting, `levelAllows` with an unknown effect), `plugin-shelf.test.ts` (refused on the shelf) — each
   guard mutation-checked.

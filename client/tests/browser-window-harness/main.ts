@@ -12,8 +12,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createBrowserWindowShell, type BrowserShellWindow } from '../../electron/browser-window'
 import { browserPartition } from '../../electron/features/browser/controller'
+import { createBrowserRunner } from '../../electron/features/browser/runner'
 import type { BrowserSiteSetting } from '../../../shared/core/browser-operation'
-import { startSites } from './sites'
+import { createBrowserAdapterRegistry, createBundledBrowserConnectors } from '../../shared/browser-adapters'
+import { LSTEP_DECLARATION } from '../../shared/browser-adapters/lstep'
+import { browserWritePartition } from '../../shared/browser-operation'
+import { createRunGate, encodeForm, FORM_CONTENT_TYPE, type BrowserRunSurface, type BrowserStepRecord } from '../../shared/browser-runner'
+import { startSites, type Sites } from './sites'
 
 const dir = process.env.BROWSER_TEST_DIR!
 const [port, evilPort, udpPort] = (process.env.BROWSER_TEST_PORTS ?? '').split(',').map(Number)
@@ -33,6 +38,15 @@ const trustTestCertificate = (partition: string) => {
     callback(TRUSTED.includes(request.hostname) && request.certificate.fingerprint === fingerprint ? 0 : -3)
   })
 }
+
+// A run's write gets a fresh session of its own (browser-window.ts): it trusts the test certificate too.
+let sessionsCreated = 0
+app.on('session-created', created => {
+  sessionsCreated++
+  created.setCertificateVerifyProc((request, callback) => {
+    callback(TRUSTED.includes(request.hostname) && request.certificate.fingerprint === fingerprint ? 0 : -3)
+  })
+})
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const result: Record<string, unknown> = {}
@@ -125,6 +139,8 @@ async function run() {
   await win.setMode('human')
   result.humanAgain = await js(`fetch('/human-again', { method: 'POST', body: 'h' }).then(r => r.status, () => 'refused')`)
 
+  result.runner = await runnerScenarios(win, site, sites, js, partition)
+
   // The login: a cookie and storage of the site, then cleared.
   await js(`document.cookie = 'sid=1; Secure; Max-Age=3600'; localStorage.setItem('k', 'v'); 1`)
   const ses = session.fromPartition(partition)
@@ -158,6 +174,115 @@ async function run() {
   sites.close()
   console.log(`RESULT ${JSON.stringify(result)}`)
   app.quit()
+}
+
+/**
+ * The operation runner (agent-browser.md "The runner") on a Lステップ-like site (sites.ts): the member
+ * is logged in (a cookie) and shows the reminder page; the runner works through the window's session
+ * while the page tries everything it can.
+ */
+async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting, sites: Sites, js: (code: string) => Promise<unknown>, partition: string) {
+  const out: Record<string, unknown> = {}
+  const page = win.webContents
+  await js(`document.cookie = 'sid=1; Secure; Max-Age=3600'; 1`)
+  // A cookie scoped to the write's own path: the site needs it on the write.
+  await page.session.cookies.set({ url: 'https://op.test/line/episode/step/pack', name: 'wp', value: '1', path: '/line/episode/step/pack', secure: true, httpOnly: true })
+  const sessionsBefore = sessionsCreated
+  await page.loadURL('https://op.test/line/episode/show/101')
+  await wait(300)
+  // The bundled Lステップ declaration with the test hosts in place of the real ones.
+  const text = LSTEP_DECLARATION.replace('host: manager.linestep.net', 'host: op.test')
+    .replace('[d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net]', '[assets.test]')
+  const connector = createBundledBrowserConnectors([text])
+  const adapters = createBrowserAdapterRegistry({ lstepAccount: html => /data-account-id="([^"]+)"/.exec(html)?.[1] ?? null })
+  const records: BrowserStepRecord[] = []
+  let stopped = false
+  let beforeRead: (() => Promise<void>) | null = null
+  // The window as the runner gets it; the harness may act once, right before the run's first read.
+  const surface: BrowserRunSurface = {
+    ...win.run,
+    async request(r) {
+      if (r.method === 'GET' && beforeRead) { const act = beforeRead; beforeRead = null; await act() }
+      return win.run.request(r)
+    },
+  }
+  const plans: Record<string, Record<string, unknown>> = {}
+  const plan = (planId: string, over: Record<string, unknown>) => {
+    plans[planId] = {
+      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.1.0' }, operation: 'reminder_step_add_template',
+      account: 'ACC1', target: { reminder: '101', step: '201' }, change: { template: '301' }, before: { templates: ['300'] },
+      approvedAt: Date.now() - 1000, expiresAt: Date.now() + 120_000, ...over,
+    }
+  }
+  const runner = createBrowserRunner({
+    approvedPlan: async id => plans[id] ?? null,
+    connector, adapter: id => adapters.get(id), site: () => site, stopped: () => stopped,
+    window: () => surface,
+    records: { has: id => records.some(r => r.planId === id), put: r => { records.push(r) } },
+    now: () => Date.now(),
+  })
+
+  // The happy path, while the page sends the same write, a timer's autosave, an undeclared read and a
+  // tampered form.
+  plan('plan-a', {})
+  beforeRead = async () => {
+    out.attack = await js('window.__attack()')
+    await wait(1500)
+  }
+  out.happy = await runner.run('plan-a')
+  out.stepAfterHappy = [...sites.lstep['201']]
+  // The write's session holds nothing of the login once the write is done.
+  out.writeSessionCookies = (await session.fromPartition(browserWritePartition(partition)).cookies.get({})).length
+  // Another LINE account shown on the page than the plan's.
+  plan('plan-b', { account: 'ACC2', change: { template: '302' }, before: { templates: ['300', '301'] } })
+  out.wrongAccount = await runner.run('plan-b')
+  // The emergency stop arrives during the run (right before its first read).
+  plan('plan-c', { change: { template: '303' }, before: { templates: ['300', '301'] } })
+  beforeRead = async () => { stopped = true }
+  out.stoppedMidRun = await runner.run('plan-c')
+  stopped = false
+  // The answer to the write is lost: unknown, and the same plan never runs again.
+  plan('plan-d', { change: { template: '999' }, before: { templates: ['300', '301'] } })
+  out.lost = await runner.run('plan-d')
+  out.lostAgain = await runner.run('plan-d')
+  // A page over the size the runner reads is refused whole, never read cut short.
+  plan('plan-e', { target: { reminder: '103', step: '201' }, change: { template: '305' } })
+  out.oversize = await runner.run('plan-e')
+  out.records = records.map(r => `${r.planId}:${r.state}`)
+
+  // The gate itself on the real window: an armed write of step 201 / template 304.
+  await page.loadURL('https://op.test/line/episode/show/101').catch(() => {})
+  await wait(300)
+  const gate = createRunGate({
+    host: 'op.test', operation: connector('lstep', '0.1.0')!.operations.reminder_step_add_template,
+    values: { target: { reminder: '101', step: '201' }, change: { template: '304' } },
+    readPaths: ['/line/episode/show/101'], stopped: () => false,
+  })
+  out.gateReady = await win.run.enterAi(gate.hooks)
+  const send = (pairs: Record<string, string>) => win.run.request({
+    method: 'POST', path: '/line/episode/step/pack/template', contentType: FORM_CONTENT_TYPE,
+    body: encodeForm(Object.entries({ content_id: '201', template_id: '304', _token: 'tok', _lm_user_id: 'u1', ...pairs })),
+  }).then(r => r.status, () => 'refused')
+  out.notArmed = await send({})
+  gate.arm(0)
+  out.otherStep = await send({ content_id: '202' })
+  out.otherTemplate = await send({ template_id: '305' })
+  out.extraKey = await send({ broadcast: '1' })
+  out.armedWrite = await send({})
+  out.secondSend = await send({})
+  out.undeclaredRead = await win.run.request({ method: 'GET', path: '/line/episode/show/102' }).then(r => r.status, () => 'refused')
+  out.declaredRead = await win.run.request({ method: 'GET', path: '/line/episode/show/101' }).then(r => r.status, () => 'refused')
+  out.pageUndeclaredRead = await js(`fetch('/line/autosave-state').then(r => r.status, () => 'refused')`)
+  out.pageDeclaredRead = await js(`fetch('/line/episode/show/101').then(r => r.status, () => 'refused')`)
+  await win.run.leaveAi()
+  out.gateRefusals = [...gate.refusals()]
+  // Every write of every run went through one write session (they do not pile up).
+  out.writeSessionsCreated = sessionsCreated - sessionsBefore
+  await page.session.cookies.remove('https://op.test/line/episode/step/pack', 'wp')
+  // Back to the site's start page for the rest of the harness.
+  await page.loadURL('https://op.test/').catch(() => {})
+  await wait(300)
+  return out
 }
 
 // Closing the test's windows must not end the run (the app's own main.ts keeps running likewise).

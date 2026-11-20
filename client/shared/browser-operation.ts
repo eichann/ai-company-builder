@@ -10,6 +10,7 @@ import {
 } from '../../shared/core/browser-operation'
 import { METHOD_OVERRIDE_HEADERS } from '../../shared/core/plugin-browser-declaration'
 import type { AgentStopPolicy } from '../../shared/types/agent-stop'
+import type { BrowserGateDecision, BrowserPageReadAttempt, BrowserSessionRequest } from './browser-runner'
 
 // ---------------------------------------------------------------------------
 // IPC payloads (browser:sites / browser:open / browser:clearLogin)
@@ -56,14 +57,21 @@ export interface BrowserWindowState {
   mode: BrowserWindowMode
   /** `ai` mode: the write gate (DevTools Fetch interception) is attached and sees the window's requests. */
   aiGateReady: boolean
+  /**
+   * `ai` mode during a run: the run's decision on a request to the operated host from outside the
+   * page (the runner's own, through the session). None = every such request refused in `ai` mode.
+   */
+  outside?: ((request: BrowserSessionRequest) => BrowserGateDecision) | null
 }
 
 export interface BrowserWindowRequest extends BrowserRequest {
   /** The request came from this window's own page (its webContents), not a service worker or another context. */
   fromWindow: boolean
+  /** The body as the network sees it (plain bytes only; undefined for a file, a blob or none). */
+  body?: string
 }
 
-export type BrowserWindowRefusal = BrowserRequestRefusal | 'closed' | 'ai-websocket' | 'ai-unchecked-write'
+export type BrowserWindowRefusal = BrowserRequestRefusal | 'closed' | 'ai-websocket' | 'ai-unchecked-write' | 'ai-outside'
 export type BrowserWindowDecision = { allow: true } | { allow: false; reason: BrowserWindowRefusal }
 
 const READ_METHODS = new Set(['GET', 'HEAD'])
@@ -72,9 +80,11 @@ export const isReadMethod = (method: string): boolean => READ_METHODS.has(method
 /**
  * Every request of a browser window's session passes here (the session's one
  * `onBeforeRequest`). The site's rule (`decideBrowserRequest`) first; then in
- * `ai` mode no WebSocket to the operated host (no operation type declares one)
- * and no write the gate cannot see: before the gate is attached, or from
- * outside the window's page (a service worker is not in the gate's view).
+ * `ai` mode no WebSocket to the operated host (no operation type declares one);
+ * from outside the window's page (a service worker, the runner's own read) no
+ * write at all and a read only when the run's gate says yes (`outside`: a
+ * service worker's GET is not in the page gate's view); and no write of the
+ * page the gate cannot see (before the gate is attached).
  */
 export function decideWindowRequest(state: BrowserWindowState, request: BrowserWindowRequest): BrowserWindowDecision {
   if (!state.site) return { allow: false, reason: 'closed' }
@@ -82,7 +92,14 @@ export function decideWindowRequest(state: BrowserWindowState, request: BrowserW
   if (!decided.allow) return decided
   if (state.mode === 'ai' && decided.use === 'operate') {
     if (request.resourceType === 'webSocket' || /^wss:/i.test(request.url)) return { allow: false, reason: 'ai-websocket' }
-    if (!isReadMethod(request.method) && (!request.fromWindow || !state.aiGateReady)) return { allow: false, reason: 'ai-unchecked-write' }
+    if (!request.fromWindow) {
+      // A run's write goes on a session of its own (browser-window.ts), never through this one.
+      if (!isReadMethod(request.method)) return { allow: false, reason: 'ai-unchecked-write' }
+      let outside: BrowserGateDecision = { allow: false, reason: 'none' }
+      try { if (state.outside) outside = state.outside({ method: request.method, url: request.url, body: request.body }) } catch { /* refused */ }
+      return outside.allow ? { allow: true } : { allow: false, reason: 'ai-outside' }
+    }
+    if (!isReadMethod(request.method) && !state.aiGateReady) return { allow: false, reason: 'ai-unchecked-write' }
   }
   return { allow: true }
 }
@@ -119,6 +136,14 @@ function FindProxyForURL(url, host) {
   for (var i = 0; i < DIRECT_HOSTS.length; i++) if (DIRECT_HOSTS[i] === host) return 'DIRECT';
   return 'PROXY 127.0.0.1:${refusePort}';
 }`
+}
+
+/**
+ * The session a window's run writes through (`browser-window.ts`): one per window session, in memory,
+ * named after it (so it is an `acb-browser-*` partition too).
+ */
+export function browserWritePartition(partition: string): string {
+  return `${partition}-write`
 }
 
 /** Response headers that register a reporting endpoint (Reporting API, NEL): never kept. */
@@ -171,6 +196,21 @@ export function createRefusalTally() {
 // ---------------------------------------------------------------------------
 // The `ai`-mode write gate
 // ---------------------------------------------------------------------------
+
+/**
+ * Says yes to a read of the window's own page in `ai` mode during a run (the run's `pageRead`:
+ * the page's parts, else a declared read path). None = every read passes, as outside a run.
+ */
+export type BrowserReadDecider = (read: BrowserPageReadAttempt) => boolean
+
+/** The gate for one read (GET / HEAD) of the window's page in `ai` mode; reads of other hosts are the request hook's. */
+export function decideAiRead(site: BrowserSiteSetting, read: BrowserPageReadAttempt, decider: BrowserReadDecider | undefined): boolean {
+  if (!decider) return true
+  let host: string | undefined
+  try { host = normalizeBrowserHost(new URL(read.url).hostname) } catch { return false }
+  if (host !== site.host) return true
+  try { return decider(read) === true } catch { return false }
+}
 
 /** A write the window's page is about to send to the operated host, as the gate sees it. */
 export interface BrowserWriteAttempt {

@@ -48,10 +48,52 @@ const page = (udpPort: number) => `<!doctype html><meta charset="utf-8"><title>o
   } catch {}
 </script>`
 
+/**
+ * A Lステップ-like reminder page (agent-browser.md "The runner"), in the shapes captured on the
+ * real site: per message slot `openModal(<reminder>, <step>, <hole>, <template>, <type>)`, the step's
+ * block `templateStep<step>`, hidden `_token` / `_lm_user_id`; the account in the header. Its script
+ * tries everything a page could do while the AI operates (`__attack`): the same write by fetch and
+ * XHR, an autosave on a timer, a read the run did not declare, and a form whose hidden fields it
+ * changes and submits.
+ */
+const lstepPage = (steps: Record<string, string[]>) => {
+  let hole = 700
+  return `<!doctype html><meta charset="utf-8"><title>reminder</title>
+<header><span class="account" data-account-id="ACC1">LINE ACC1</span></header>
+<input type="hidden" name="_token" value="tok"><input type="hidden" name="_lm_user_id" value="u1">
+${Object.entries(steps).map(([step, templates]) => `<div id="templateStep${step}">${templates.map(t => `<a onclick="openModal(101, ${step}, ${hole++}, ${t}, 1)">m</a>`).join('')}</div>`).join('\n')}
+<form id="add" method="post" action="/line/episode/step/pack/template">
+<input type="hidden" name="content_id" value="201"><input type="hidden" name="template_id" value="301">
+<input type="hidden" name="_token" value="tok"><input type="hidden" name="_lm_user_id" value="u1"></form>
+<script>
+window.__attack = async () => {
+  const body = 'content_id=201&template_id=301&_token=tok&_lm_user_id=u1'
+  const form = { 'content-type': 'application/x-www-form-urlencoded' }
+  const r = {}
+  r.fetch = await fetch('/line/episode/step/pack/template', { method: 'POST', headers: form, body }).then(x => x.status, () => 'refused')
+  r.xhr = await new Promise(res => { const x = new XMLHttpRequest(); x.open('POST', '/line/episode/step/pack/template'); x.setRequestHeader('content-type', form['content-type']); x.onload = () => res(x.status); x.onerror = () => res('refused'); x.send(body) })
+  r.undeclaredRead = await fetch('/line/autosave-state').then(x => x.status, () => 'refused')
+  // An autosave on a timer, for the second the AI operates before its own read (it stops by itself,
+  // so it does not go on into the member's own browsing afterwards).
+  const timer = setInterval(() => {
+    fetch('/line/episode/step/pack/template', { method: 'POST', headers: form, body }).catch(() => {})
+    fetch('/line/autosave', { method: 'POST', body: 'a=1' }).catch(() => {})
+  }, 100)
+  setTimeout(() => clearInterval(timer), 1000)
+  // Hidden fields changed, then the form sent (after the timer had its turns).
+  document.querySelector('#add [name=content_id]').value = '999'
+  setTimeout(() => document.getElementById('add').submit(), 600)
+  return r
+}
+</script>`
+}
+
 const WORKER = `fetch('/ai-worker', { method: 'POST', body: 'w' }).then(r => postMessage(r.status), () => postMessage('refused'))`
 
 export interface Sites {
   hits: Hit[]
+  /** The Lステップ-like site's state: step → attached template ids. */
+  lstep: Record<string, string[]>
   /** TCP connections that reached evil.test's server (with or without an HTTP request). */
   evilConnections: number
   /** UDP datagrams that reached the STUN stand-in. */
@@ -61,7 +103,7 @@ export interface Sites {
 
 export async function startSites(certDir: string, ports: { site: number; evil: number; udp: number }): Promise<Sites> {
   const tls = { key: fs.readFileSync(path.join(certDir, 'key.pem')), cert: fs.readFileSync(path.join(certDir, 'cert.pem')) }
-  const state: Sites = { hits: [], evilConnections: 0, udpPackets: 0, close: () => {} }
+  const state: Sites = { hits: [], lstep: { 201: ['300'], 202: [] }, evilConnections: 0, udpPackets: 0, close: () => {} }
   const record = (req: import('node:http').IncomingMessage, body: string) =>
     state.hits.push({ host: (req.headers.host ?? '').split(':')[0], method: req.method ?? '', path: req.url ?? '/', body })
 
@@ -79,6 +121,36 @@ export async function startSites(certDir: string, ports: { site: number; evil: n
         res.setHeader('NEL', JSON.stringify({ report_to: 'g', max_age: 3600, success_fraction: 1, failure_fraction: 1 }))
         res.setHeader('Reporting-Endpoints', 'e="https://evil.test/report2"')
         res.end(page(ports.udp))
+        return
+      }
+      if (host === 'op.test' && url.startsWith('/line/')) {
+        // Logged in = the window's cookie; otherwise the login page, as a real site would.
+        if (!/(^|;\s*)sid=1(;|$)/.test(req.headers.cookie ?? '')) { res.writeHead(302, { location: '/login' }); res.end(); return }
+        if (req.method === 'GET' && url === '/line/episode/show/101') {
+          res.setHeader('content-type', 'text/html; charset=utf-8')
+          res.end(lstepPage(state.lstep))
+          return
+        }
+        if (req.method === 'GET' && url === '/line/episode/show/103') {
+          // Over the runner's 5 MiB: what a cut-short read would see first is padding only.
+          res.setHeader('content-type', 'text/html; charset=utf-8')
+          res.end(`<!-- ${'x'.repeat(6 * 1024 * 1024)} -->${lstepPage(state.lstep)}`)
+          return
+        }
+        if (req.method === 'POST' && url === '/line/episode/step/pack/template') {
+          // The write needs the cookie scoped to its own path, too.
+          if (!/(^|;\s*)wp=1(;|$)/.test(req.headers.cookie ?? '')) { res.writeHead(401); res.end(); return }
+          const form = new URLSearchParams(body)
+          const step = form.get('content_id') ?? ''
+          if (form.get('_token') !== 'tok' || !state.lstep[step]) { res.writeHead(419); res.end(); return }
+          state.lstep[step].push(form.get('template_id') ?? '')
+          // Template 999: applied, then the answer is lost.
+          if (form.get('template_id') === '999') { req.socket.destroy(); return }
+          res.writeHead(302, { location: '/line/episode/show/101' })
+          res.end()
+          return
+        }
+        res.end('ok')
         return
       }
       if (url === '/worker.js') { res.setHeader('content-type', 'text/javascript'); res.end(WORKER); return }

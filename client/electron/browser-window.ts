@@ -10,21 +10,26 @@
 // refusing proxy (what the request hook cannot see: preconnect, reporting, WebRTC's TCP). Popups,
 // downloads, permissions, client certificates, navigations off the operated host and certificate
 // errors are refused, and nothing is handed to the system browser or another app. In `ai` mode
-// (PR 5's runner) every write to the operated host is paused through DevTools Fetch and goes out
-// only when the injected decider says yes.
+// every request of the page is paused through DevTools Fetch: a write goes out only when the
+// injected decider says yes (a run's never does), a read of the operated host only when the run's
+// read rule says so. A run's own requests go through the session (`run.request`), never the page,
+// and pass the request hook only when the run's gate says yes (agent-browser.md "The runner").
 import net from 'node:net'
-import { BrowserWindow, session, type Session, type WebContents } from 'electron'
+import { BrowserWindow, net as electronNet, session, type Session, type WebContents } from 'electron'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
 import {
-  BROWSER_WORDS, browserProxyScript, browserResponseHeaders, createRefusalTally, decideAiWrite, decideWindowRequest,
+  BROWSER_WORDS, browserProxyScript, browserWritePartition, browserResponseHeaders, createRefusalTally, decideAiRead, decideAiWrite, decideWindowRequest,
   hostForLog, isReadMethod, navigationAllowed,
-  type BrowserWindowMode, type BrowserWindowState, type BrowserWriteAttempt, type BrowserWriteDecider,
+  type BrowserReadDecider, type BrowserWindowMode, type BrowserWindowState, type BrowserWriteAttempt, type BrowserWriteDecider,
 } from '../shared/browser-operation'
+import type { BrowserRunSurface } from '../shared/browser-runner'
 import type { BrowserShell, BrowserWindowHandle, BrowserWindowSpec } from './features/browser/controller'
 
 /** What `ai` mode needs: the approved step's decider (none = no write) and the emergency stop. */
 export interface BrowserAiGate {
   decide?: BrowserWriteDecider
+  /** A run's read rule for the page's reads of the operated host (none: reads pass). */
+  decideRead?: BrowserReadDecider
   stopped: () => boolean
 }
 
@@ -32,6 +37,49 @@ export interface BrowserShellWindow extends BrowserWindowHandle {
   readonly webContents: WebContents
   /** `human` (default) or `ai` with its gate; the gate attaches after the first page load. */
   setMode(mode: BrowserWindowMode, gate?: BrowserAiGate): Promise<void>
+  run: BrowserRunSurface
+}
+
+const RUN_REQUEST_MS = 30_000
+const RUN_ANSWER_MAX = 5 * 1024 * 1024
+
+/**
+ * One request through a session, its answer or a rejection (no answer). A redirect is an answer: its
+ * status is returned and it is not followed (a redirect after a save points back at a page; reading
+ * it is the runner's own, declared read).
+ */
+function sendOnce(ses: Session, r: { method: string; url: string; contentType?: string; body?: string }): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const request = electronNet.request({ method: r.method, url: r.url, session: ses, credentials: 'include', redirect: 'manual', cache: 'no-store' })
+    let done = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (fn: () => void) => { if (!done) { done = true; clearTimeout(timer); fn() } }
+    timer = setTimeout(() => finish(() => { request.abort(); reject(new Error('no answer in time')) }), RUN_REQUEST_MS)
+    request.on('redirect', status => finish(() => { request.abort(); resolve({ status, body: '' }) }))
+    request.on('response', response => {
+      const chunks: Buffer[] = []
+      let size = 0
+      // An answer larger than any page the adapter reads is refused whole (never read cut short).
+      response.on('data', chunk => {
+        size += chunk.length
+        if (size > RUN_ANSWER_MAX) finish(() => { request.abort(); reject(new Error('answer too large')) })
+        else chunks.push(chunk)
+      })
+      response.on('end', () => finish(() => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') })))
+      response.on('error', () => finish(() => reject(new Error('answer cut off'))))
+    })
+    request.on('error', () => finish(() => reject(new Error('no answer'))))
+    request.on('abort', () => finish(() => reject(new Error('aborted'))))
+    if (r.contentType) request.setHeader('content-type', r.contentType)
+    request.end(r.body)
+  })
+}
+
+/** The body Chromium hands the request hook: plain bytes only (a file or a blob = unknown). */
+function uploadBody(data: Electron.UploadData[] | undefined): string | undefined {
+  if (!data || data.length === 0) return undefined
+  if (data.some(d => d.file !== undefined || d.blobUUID !== undefined || !d.bytes)) return undefined
+  return Buffer.concat(data.map(d => d.bytes)).toString('utf8')
 }
 
 interface SessionState extends BrowserWindowState {
@@ -90,7 +138,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
     const ses = session.fromPartition(partition)
     let state = states.get(partition)
     if (state) return { ses, state }
-    const created: SessionState = { site: null, mode: 'human', aiGateReady: false, contentsId: null, tally: createRefusalTally(), flushTimer: null }
+    const created: SessionState = { site: null, mode: 'human', aiGateReady: false, outside: null, contentsId: null, tally: createRefusalTally(), flushTimer: null }
     states.set(partition, created)
     state = created
     // The one request hook of this session. With no window (site null) it refuses everything:
@@ -99,6 +147,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       const decision = decideWindowRequest(created, {
         url: details.url, method: details.method, resourceType: details.resourceType,
         fromWindow: details.webContentsId !== undefined && details.webContentsId === created.contentsId,
+        body: uploadBody(details.uploadData),
       })
       if (!decision.allow) refuse(created, hostForLog(details.url), decision.reason)
       callback({ cancel: !decision.allow })
@@ -173,7 +222,13 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       const requestId = params.requestId as string
       const request = params.request as { url: string; method: string; headers?: Record<string, string>; postData?: string; postDataEntries?: Array<{ bytes?: string }> }
       let allow = true
-      if (!isReadMethod(request.method)) {
+      if (isReadMethod(request.method)) {
+        // A run's read rule: the page's parts, else only a declared read path.
+        if (state.site && state.mode === 'ai' && gate?.decideRead) {
+          allow = decideAiRead(state.site, { url: request.url, resourceType: String(params.resourceType ?? '') }, gate.decideRead)
+          if (!allow) refuse(state, hostForLog(request.url), 'ai-read')
+        }
+      } else {
         // An upload or a large body has no postData here: `body` is then undefined and the decider must refuse it.
         const write: BrowserWriteAttempt = {
           method: request.method, url: request.url, headers: request.headers ?? {},
@@ -214,6 +269,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       }
       state.mode = 'human'
       state.aiGateReady = false
+      state.outside = null
       gate = null
       pendingAttach = false
       const dbg = contents.debugger
@@ -232,6 +288,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       state.site = spec.site
       state.mode = 'human'
       state.aiGateReady = false
+      state.outside = null
       const win = new BrowserWindow({
         width: 1200,
         height: 860,
@@ -266,7 +323,70 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
         state.site = null
         state.mode = 'human'
         state.aiGateReady = false
+        state.outside = null
         state.contentsId = null
+      }
+      const closed = () => state.contentsId !== contentsId || win.isDestroyed() || !state.site
+      const run: BrowserRunSurface = {
+        async enterAi(hooks) {
+          if (closed()) return false
+          // The run's gate on requests from outside the page (its own), then the page's gate.
+          state.outside = hooks.sessionRequest
+          await setMode('ai', { decide: () => false, decideRead: hooks.pageRead, stopped: hooks.stopped })
+          return !closed() && state.mode === 'ai' && state.aiGateReady
+        },
+        async leaveAi() {
+          state.outside = null
+          if (state.contentsId === contentsId) await setMode('human')
+        },
+        // Through the window's session (its login), never the page: no script of the page sees or changes it.
+        async request({ method, path, contentType, body }) {
+          if (closed() || !path.startsWith('/')) throw new Error('window closed')
+          const site = state.site!
+          const url = `https://${site.host}${path}`
+          if (isReadMethod(method)) return sendOnce(ses, { method, url, contentType, body })
+          // A write goes on a connection of its own (agent-browser.md "The runner"): Chromium resends a
+          // request whose reused keep-alive connection dropped before the answer — below the request
+          // hook, so the gate's "once" never sees it (verified on Electron 45: one lost answer reached
+          // the site 12 times). The window's write session (one per window session, in memory: it does
+          // not pile up) has its connections closed and its storage cleared before and after each
+          // write, so it never holds an idle connection to reuse; it carries the window's login (the
+          // cookies for the write's own address, path-scoped ones included), the site's proxy rule and
+          // ONE request hook, the run's gate (Electron keeps the last one: replaced each write). What
+          // the site sets in its answer (Set-Cookie) is not carried back to the window (decision: the
+          // runner re-reads with the window's own login; a rotated cookie stays the window's).
+          const outside = state.outside
+          if (!outside) throw new Error('no run')
+          const once = session.fromPartition(browserWritePartition(spec.partition))
+          const wipe = async () => {
+            await once.closeAllConnections().catch(() => {})
+            await once.clearStorageData().catch(() => {})
+            await once.clearCache().catch(() => {})
+          }
+          await wipe()
+          try {
+            once.webRequest.onBeforeRequest((details, callback) => {
+              let allow = false
+              try { allow = state.mode === 'ai' && details.url === url && outside({ method: details.method, url: details.url, body: uploadBody(details.uploadData) }).allow } catch { allow = false }
+              if (!allow) refuse(state, hostForLog(details.url), 'ai-write-session')
+              callback({ cancel: !allow })
+            })
+            once.setPermissionRequestHandler((_c, _p, callback) => callback(false))
+            once.setPermissionCheckHandler(() => false)
+            await routeOnly(once, site)
+            for (const c of await ses.cookies.get({ url })) {
+              await once.cookies.set({
+                url: `https://${site.host}${c.path ?? '/'}`, name: c.name, value: c.value, path: c.path,
+                ...(c.hostOnly ? {} : { domain: c.domain }), secure: c.secure, httpOnly: c.httpOnly,
+                ...(c.expirationDate ? { expirationDate: c.expirationDate } : {}), sameSite: c.sameSite,
+              })
+            }
+            return await sendOnce(once, { method, url, contentType, body })
+          } finally {
+            await wipe()
+          }
+        },
+        closed,
       }
       // The title always names the site, whatever the page calls itself.
       win.on('page-title-updated', event => event.preventDefault())
@@ -309,6 +429,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
           })
         },
         setMode,
+        run,
       }
     },
 

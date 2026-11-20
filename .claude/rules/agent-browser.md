@@ -12,6 +12,9 @@ paths:
   - "admin/src/lib/agent-browser.ts"
   - "admin/tests/agent-browser.test.tsx"
   - "client/shared/browser-operation.ts"
+  - "client/shared/browser-runner.ts"
+  - "client/shared/browser-adapters/**"
+  - "client/tests/browser-runner.test.ts"
   - "client/electron/browser-window.ts"
   - "client/electron/features/browser/**"
   - "client/tests/ui/browser-settings.spec.ts"
@@ -80,7 +83,7 @@ the item is not there otherwise): each site with 「開いてログイン」 and
 (`client/shared/browser-operation.ts`).
 
 - **Pieces.** `client/shared/browser-operation.ts` (pure: the IPC payloads, `decideWindowRequest`,
-  `navigationAllowed`, `browserProxyScript`, `browserResponseHeaders`, `decideAiWrite`,
+  `navigationAllowed`, `browserProxyScript`, `browserResponseHeaders`, `decideAiWrite`, `decideAiRead`,
   `browserAiStopped`, `hostForLog`, `createRefusalTally`); `client/electron/browser-window.ts` (shell
   layer, the only Electron code: the window, its session's guards, the refusing proxy, the `ai`-mode
   gate, `clearPartition`); `client/electron/features/browser/` (`controller.ts`: which policy answer
@@ -130,22 +133,24 @@ the item is not there otherwise): each site with 「開いてログイン」 and
   to the shell's own refusing proxy on 127.0.0.1 (answers 403 to anything, then closes); nothing loads
   before it is set, and a window whose proxy cannot be set is destroyed. WebRTC:
   `setWebRTCIPHandlingPolicy('disable_non_proxied_udp')` (no UDP; its TCP goes through that proxy).
-- **The `ai`-mode write gate** (built and tested now so PR 5's runner plugs into it; nothing switches a
-  real window to `ai` yet): `setMode('ai', { decide, stopped })`. After the first page load (attaching
+- **The `ai`-mode write gate** (the runner below switches a window to `ai`; nothing in the app starts a
+  run yet): `setMode('ai', { decide, decideRead?, stopped })`. After the first page load (attaching
   to an empty window hangs) it attaches `webContents.debugger` and `Fetch.enable` for every request; a
   write (not GET / HEAD) goes on only when `decideAiWrite` says so: https on the operated host, the AI
   not stopped, no method-override header, and the approved step's decider says yes (none = refused; a
   decider that throws = refused). **PR 5's decider must refuse a write whose `body` is undefined**: an
   upload or a large body has no `postData` in Fetch. Verified on Electron 45: the request hook runs
   **before** Fetch, so the hook cannot rely on the gate's verdict; instead in `ai` mode it refuses a
-  write to the operated host before the gate is attached (or after it detached) and one from outside
-  the window's page (no `webContentsId` of the window: a service worker, which the page's Fetch does
-  not see), and refuses WSS to the operated host. A dedicated worker's write, and a keepalive fetch or
+  write to the operated host before the gate is attached (or after it detached), refuses every write
+  from outside the window's page (no `webContentsId` of the window: a service worker, which the page's
+  Fetch does not see) and every read from there unless a run's gate says yes (`outside`, below), and
+  refuses WSS to the operated host. A dedicated worker's write, and a keepalive fetch or
   beacon sent on `pagehide`, are seen and refused (tested). `setMode('human')` detaches.
 - **Emergency stop (decision, safe side):** the stop is about the AI, so it does not close a window the
   member operates (`human` mode: their own browsing, as in their own browser). In `ai` mode every write
   is refused while a whole-AI stop or a `web` / `mcp-external` stop is in force (`browserAiStopped`, as
-  for a connector's read), checked per request; PR 5 passes `stopped: () => browserAiStopped(policy.stop(companyId))`.
+  for a connector's read), checked per request; the runner's `stopped` dependency is meant to be
+  `browserAiStopped(policy.stop(companyId))` when it is wired.
 - **IPC** (`browser:sites`, `browser:open`, `browser:clearLogin`; event `browser:changed`): only the main
   window's main frame (`isMainFrameSender`: the main window, and `senderFrame` = its main frame);
   the host is only a name — main opens or clears only a site its current valid policy lists, exactly.
@@ -182,6 +187,135 @@ It runs on macOS (CI "Client tests 2/2 (macOS)", `client-tests.mjs` `MACOS`) and
 without a site, the notes, 「開いてログイン」, 「ログインを消す」 and its failure. Each guard mutation-checked
 (survivors above).
 
+## The runner (PR 5a: built and tested; the AI cannot reach it)
+
+Owner plan 2026-11-20: every automated operation goes through one gate; only per-site operation types
+(a reviewed adapter in the app + the connector's declaration); the AI's entry stays **closed**: nothing
+in the app imports `features/browser/runner.ts` (no IPC channel, preload method, chat tool or agent;
+`browser-runner.test.ts` 「nothing in the app can start a run yet」 checks the importers, the IPC
+inventory and the agents / chat server / renderer). PR 6 adds the approval (the plan provider).
+
+- **Pieces.** `client/shared/browser-runner.ts` (pure: the plan `parseBrowserRunPlan`, `createRunGate`,
+  the adapter interface, `BrowserRunSurface`, the step record, `BROWSER_RUN_WORDS`);
+  `client/shared/browser-adapters/` (the registry by adapter id — an id not there is never run — and the
+  bundled declarations); `client/electron/features/browser/runner.ts` (`createBrowserRunner`: the steps,
+  no Electron), `run-records.ts` (the step record on disk); the window's `run` surface in
+  `browser-window.ts`; `controller.ts` `siteNow` / `runWindow` (what the runner's deps will be).
+- **A plan** (from an injected `approvedPlan(planId)`): `planId`, `companyId`, connector `{ id, version }`
+  (exact), `operation`, `account` (the outside account's id as the adapter reads it), `target`, `change`,
+  `before` (the target's state the person saw: named lists of ids only), `approvedAt` (a plan approved
+  more than a day ago never runs, whatever its expiry; one "approved" over a minute in the future is
+  refused), `expiresAt` (never more than a day ahead). Its values must fit the type (`browserPlanProblem`).
+  **Single use is only per PC here**: the step record lives on this computer, so the same plan could
+  run once on each PC of the member. **PR 6 must make a plan single-use on the server** (claimed once,
+  as `ai_runs` / approvals are) before anything hands plans to the runner.
+- **One run**, refusing with nothing sent at each check: the plan; the step record (a plan with any
+  record never runs again — also one cut off by a crash); the connector declaration at that version; the
+  operation (this PR: one form write, not irreversible); the adapter (`adapter.id` must equal the
+  declaration's); **every target field no declared write carries is one the adapter confirms on the
+  page** (`targetFieldsOutsideWrites` ⊆ `adapter.confirmsTarget`, else `target-unconfirmed`); the
+  company's setting now (`browserOperationsAllowed` against the site the member's
+  current valid policy lists: on, asset hosts, level); the AI stop; the member's open window; one run
+  per window. Then `pending` is kept, the window enters `ai` mode with the run's gate (true only once
+  DevTools Fetch sees the page), the adapter's declared reads are made, and the run **stops before
+  writing** for: an account that cannot be read (`account-unknown`) or is not the plan's
+  (`account-mismatch`), a target that is not exactly one existing item, a state other than `before`,
+  a missing CSRF field, a stop / setting change / expiry / closed window since (also checked by the
+  gate per request). Then `sent` is kept (**before** the send; not kept = not sent), the one declared
+  write is armed and sent, and the page is read again: the planned state = `succeeded`; **`failed` only
+  when the site answered the write with a 4xx (419, 422…) and the page shows `before`**; everything
+  else — another state, `before` after a 2xx / 3xx / 5xx (`unchanged-unrefused`), no slot before and
+  none after (`empty-state`: the adapter may not read the real page as we think), no answer, no
+  re-read — is **`unknown` (結果が分からない), never sent again** by the runner. The window always goes
+  back to `human`. Every reason is a word of `BROWSER_RUN_REASONS`; an adapter's `problem` that is not
+  one becomes `adapter-problem` (an adapter's or a site's text never reaches a record or a result).
+- **The gate** (`createRunGate`, the one rule for every request of a run): the page's own writes are
+  refused for the whole run (the window's write decider says no; a page's fetch / XHR / timer / form of
+  the very same write included); the page's reads of the operated host pass only for its parts
+  (`Script`, `Stylesheet`, `Image`, `Font`, **without a query**: a GET with parameters may do
+  something) or a declared read path without a query (**read strictness, decision**: a navigation,
+  XHR or fetch elsewhere on the operated host is refused during a run, so a site that changes things on
+  a GET cannot be driven by the page meanwhile; a part with a cache-busting `?v=` does not load while
+  the AI operates — the page may look incomplete for those seconds; a part's GET without a query that
+  has side effects is the remaining limit); requests from outside the page: a GET / HEAD
+  only on a declared read path, no query, no body; a write only while armed, with a body the gate could
+  read (undefined = an upload / blob: refused), no query, through `matchDeclaredWrite` (exact method,
+  raw path, the plan's values, no other key but `ignore_body`, no repeated key or `_method`), in
+  declared order, **at most once**; nothing while stopped. The runner sends the write from main
+  through the window's login, never through the page (`run.request`): the page's script cannot see,
+  change or answer it, and its hidden fields play no part (the body is built from the declaration,
+  the plan and the CSRF value the adapter read in the server's HTML).
+- **A write gets a connection of its own** (verified on Electron 45): Chromium **resends a request whose
+  reused keep-alive connection dropped before the answer**, below the request hook — one lost answer
+  reached the test site 12 times through the window's session. So each write goes through the window's
+  **write session** (`browserWritePartition`: `<window partition>-write`, in memory, one per window
+  session — they do not pile up): its connections closed and its storage cleared (awaited) **before and
+  after** every write, so it never holds an idle connection to reuse; the cookies **for the write's own
+  address** copied in (path-scoped ones included), the site's proxy rule, ONE request hook asking the
+  same run gate (Electron keeps the last listener: set per write). A first connection that drops is not
+  resent. What the site sets in the write's answer (`Set-Cookie`) is **not** carried back to the window
+  (decision: the runner re-reads with the window's own login; a rotated cookie stays as the window had
+  it). In the window's session, a write from outside the page is always refused. Redirects are not
+  followed (`net.request`, `redirect: 'manual'`: a 3xx is an answer; `ses.fetch` with `manual` rejects
+  instead, so it is not used). An answer over 5 MiB is refused whole (`answer too large`): a read cut
+  short is a failed read, never parsed.
+- **Automatic retries that remain** (not closed): the fresh connection stops Chromium's resend after a
+  dropped keep-alive connection, but Chromium still retries a request on its own where the protocol
+  says the server did not process it — HTTP/2 `REFUSED_STREAM` or a `GOAWAY` naming a later stream, and
+  similar for HTTP/3 / QUIC. The site's own failure to keep that promise could apply a write twice;
+  the page's re-read would then show another state (`unknown`), never `succeeded`.
+- **The step record** (`run-records.ts`, `<file>` given by its user; nothing wires it yet): plan id,
+  operation name, step, `pending` / `sent` / `succeeded` / `failed` / `unknown`, a fixed reason word,
+  a time — never an account, a template, a token or any other value (refused). Kept two days (a plan
+  lives at most one). A file that exists but cannot be read refuses every run.
+- **The first type: 「リマインダの段にテンプレートを足す」** (`lstep.reminder_step_add_template`,
+  `client/shared/browser-adapters/lstep.ts`). The declaration ships **with the app**
+  (`BUNDLED_BROWSER_DECLARATIONS`, `lstep@0.1.0`, parsed by the core's `parsePluginManifest` like any
+  package): the shelf still refuses browser connectors, and the adapter that reads for it is the app's
+  anyway. Effect `write`, target `{ reminder, step }`, change `{ template }`, one write `POST
+  /line/episode/step/pack/template` form `{ content_id: {step}, template_id: {template} }`, `ignore_body:
+  [_token, _lm_user_id]`, account required, the `shared` note (共有のリマインダ). The adapter
+  (`confirmsTarget: [reminder, step]`) reads `GET /line/episode/show/<reminder>`, without its
+  `<script>`, `<textarea>` and comments (`markupOnly`): `id="templateStep<step>"` must stand **exactly
+  once as an attribute of a tag** (not a longer id, not another attribute); the step's box runs from
+  there to the next `id="templateStep…"`; **every** `openModal(<reminder>, <step>, <hole>, <template>,
+  <type>)` in the box must name this reminder and this step, and none of this step may stand outside
+  the box (else no target). The state is the box's template ids; after = one more of the planned
+  template. Ids are positive integers (never `0` / `-1`). `_token` / `_lm_user_id` are taken from
+  hidden inputs of the markup (`_token` also `meta[name=csrf-token]`), one value each, plain token
+  characters; none → `csrf-missing`, no write. (Whether the real page has its slots in `onclick`
+  attributes, as captured, rather than in a script is not verified beyond the capture: if not, the
+  state reads empty and the run stops with `before-changed` or ends `empty-state`, never `failed`.)
+- **The account binding is not confirmed on the real site.** Where Lステップ's page names the logged-in
+  LINE account in a stable way was not verified; the adapter takes an injected reader
+  (`createBrowserAdapterRegistry({ lstepAccount })`) and the app's default `UNCONFIRMED_ACCOUNT` reads
+  nothing, so a real run always stops with `account-unknown` before writing until someone confirms
+  the marker on the real page (test objects only) and sets the reader.
+
+Tests: `client/tests/browser-runner.test.ts` (the gate: not armed, another step / template, an extra /
+repeated / `_method` key, no body, a query, http / another host, an undeclared method, a second send,
+a stop; declared reads only, the page's parts without a query; the window's outside rule and read
+rule; the plan's shape, expiry, `approvedAt` and one-day limits; the adapter's box (exactly one id
+attribute, not in a comment / script / text area, slots of this reminder and step only, none outside)
+/ ids / token and the unconfirmed account; the bundled declaration and an unknown adapter; the runner:
+success with exactly one write, never twice even after a lost answer, wrong / unknown account,
+missing target, changed state, a target field neither written nor confirmed, a stop, a policy change,
+an expiry and an old approval during the run, refusals before anything starts, nothing sent unless the
+record was kept first, `failed` only after a 4xx and unchanged, `empty-state`, fixed reason words, one
+run per window; the record on disk and fail-closed; the closed AI entry: no module outside
+`features/browser` names the runner, only the controller has `runWindow`, only the runner enters ai
+mode) and `client/tests/browser-window-electron.test.ts` with a
+Lステップ-like site in `tests/browser-window-harness/sites.ts` (exactly one POST with the planned ids
+and the page confirms it; while the run operates the page's fetch, XHR, timer autosave, tampered form
+and undeclared read reach nothing; another LINE account and a stop during the run send nothing; a lost
+answer reaches the site exactly once and the plan never runs again; an answer over 5 MiB is a failed
+read; the write needs a cookie scoped to its own path and leaves nothing in its session, one write
+session for every write; on the real window the armed write alone, once, another step / template /
+extra key refused, undeclared reads refused for the runner and the page). Each guard mutation-checked;
+kept on purpose: awaiting the write session's clear after the write (Chromium queues it before any later
+read, so no test can tell; it is also cleared before each write) and `runWindow`'s policy check (the
+controller already closes a window whose site leaves the policy).
+
 ## Not yet (later PRs)
 
 **Keeping a login on disk** (`browserLoginStorage`, kept in `shared/core` for that PR): deferred until
@@ -191,17 +325,17 @@ unenclosed (`agents/claude.ts`, `agents/codex.ts`); another company opened in th
 switcher) or a conversation with another agent (the API key's `executeCommand`, no sandbox) runs AI
 turns against the same userData unenclosed; and a refused policy refresh (403) would keep the login.
 
-The AI does not operate the window yet: no operation runner, no adapters, nothing switches a window to
-`ai` mode. The operation types' declaration is fixed (`plugins.md` "Browser connectors (contract
-only)", `shared/core/plugin-browser-declaration.ts`: a connector plugin with `browser`, its types,
-`matchDeclaredWrite`, `browserOperationsAllowed` against this setting), but the shelf refuses such a
-package until the runner and its reviewed adapters ship. The runner's contract is there too: every
-request to the operated host that is not GET / HEAD goes through `matchDeclaredWrite` (and each
-declared write of an approved step passes at most once); WSS to the operated host is refused unless
-an operation type declares it (none can yet; the window's `ai` mode refuses it). Until then the admin
-page says next to the mode choice what 「使う」 does today (`BROWSER_NOT_YET_NOTE`: members open and log
-in, the AI part is being prepared); the PR that lets the AI operate removes that note (and its
-assertion in `admin/tests/agent-browser.test.tsx`).
+The AI does not operate the window yet: the runner and the first type exist (above) but nothing
+starts a run. Still to come: the plan and its approval (PR 6: the `approvedPlan` provider, the
+person's confirmation, `irreversible` types), wiring the runner in `main.ts` (deps: `controller.siteNow`
+/ `runWindow`, `browserAiStopped(policy.stop(companyId))`, `createBrowserRunRecords(<userData>/…)`,
+`createBundledBrowserConnectors()`, the adapter registry), the swap (add + remove with `_method=DELETE`
+— `matchDeclaredWrite` refuses `_method` today, so that needs a contract decision), landing routes, a
+recording helper, JSON writes, types with more than one write, confirming Lステップ's account marker,
+the shelf handing out browser connectors. WSS to the operated host stays refused (no type declares
+one). Until the AI operates, the admin page says next to the mode choice what 「使う」 does today
+(`BROWSER_NOT_YET_NOTE`); the PR that lets the AI operate removes that note (and its assertion in
+`admin/tests/agent-browser.test.tsx`).
 
 Tests: `server/tests/integration/agent-browser.test.ts` (owner/admin only, refusals of a
 wildcard / duplicate / operated host as a parts host / unknown level, no row = off, an unchanged
