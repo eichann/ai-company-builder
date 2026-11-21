@@ -916,7 +916,11 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   「見張っていたやることの都合で止まりました」; nothing of the record is stored in a notice. The chain goes on again when the
   watch moves (the runner) or when a 「もう一度」 makes its やること; else **the responsible person chooses the next watched
   やること**: `POST /me/jobs/:jobId/watch { version, recordId }` (the approved version's responsible person only; the
-  version shown; not while a newer draft waits; the record checked as any start record) adds a version that differs only
+  version shown; not while a newer draft waits; **only on top of content they have accepted** — an approved version
+  whose consent is not the accepted one is 409 `JOB_NOT_ACCEPTED` 「…先に内容を確かめて「受け取る」を押してから…」, checked in
+  the write's transaction, because this press also accepts and would otherwise consent to what they never saw (stage
+  4b-0, `job-events.test.ts` 「…had not accepted yet is refused」 / 「a new content approved but not accepted…」); the record
+  checked as any start record) adds a version that differs only
   in `startRecord`, approved and accepted by that one press (`approved_by` = them: the change is of what they alone
   consented to), and the watch starts over there (`restartWatch` — also when it is the start record it began from).
   Accepting a new consent first checks what the watched record did since the cursor (`dropUntilNow`, `VERSION_EVENT`),

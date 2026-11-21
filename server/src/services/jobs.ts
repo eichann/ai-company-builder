@@ -71,6 +71,7 @@ const NEEDS_NARROWING = () => refuse('bad-request', '出来事で動く定期の
 const TRIGGER_NOT_ALLOWED = (problems: string[]) => refuse('conflict', 'きっかけにした出来事は、いまの会社の設定では使えません（「AI の番」の状態か、最初のやることが見つからないなど）。選び直してください。', { code: 'JOB_TRIGGER_NOT_ALLOWED', problems })
 const NOT_RESPONSIBLE_TO_REWATCH = () => refuse('forbidden', '見張るやることを選び直せるのは、この仕事の責任者だけです。', { code: 'JOB_NOT_RESPONSIBLE' })
 const DRAFT_WAITING = () => refuse('conflict', '管理者が内容を直している途中のため、いまは選び直せません。管理者に確かめてください。', { code: 'JOB_DRAFT_WAITING' })
+const ACCEPT_BEFORE_REWATCH = () => refuse('conflict', 'この仕事の新しい内容をまだ受け取っていません。先に内容を確かめて「受け取る」を押してから、見張るやることを選び直してください。', { code: 'JOB_NOT_ACCEPTED' })
 /**
  * An acceptance from a screen whose 「受け取る」 is not its own press (an admin console from before the split, which
  * accepted with the approval's press; owner decision 2026-11-18): approving never consents for oneself; the approval stays.
@@ -865,7 +866,8 @@ export function createJobService(deps: JobServiceDeps) {
      * watched やること themselves. A new version that differs from the approved one only in its start record, approved and
      * accepted by that one press (the trigger is part of what they accept; nobody else's consent is involved) — the
      * record checked as any start record (they read it, a やること, not 「AI の番」). Only the approved version's
-     * responsible person, only on the version shown (`version`), and not while a newer draft waits for approval.
+     * responsible person, only on the version shown (`version`), not while a newer draft waits for approval, and only on
+     * top of a consent they have accepted (the press accepts the new version: never what they did not see, stage 4b-0).
      */
     async rewatch(member: Member, jobId: string, body: unknown, reads: readonly number[] = SCHEMA_1_ONLY): Promise<Outcome<JobView>> {
       const found = visibleJob(member, jobId)
@@ -894,6 +896,9 @@ export function createJobService(deps: JobServiceDeps) {
         if (!rights.ok) return rights
         const current = handle.jobs.find(jobId) as JobRow
         if (current.latestVersion !== b.version || current.approvedVersion !== b.version) return FINGERPRINT_CHANGED()
+        // A rewatch approves and accepts in one press: only on top of content the person has accepted already, else it
+        // would accept what they never saw (an AI grant, a place). The app normally offers no picker then; the server decides.
+        if (!consentAccepted(handle, current)) return ACCEPT_BEFORE_REWATCH()
         const at = clock.now()
         const canonical = jobDefinitionCanonical(next)
         const row = versionRow(jobId, current.latestVersion + 1, next, canonical, member.userId, at)
@@ -902,7 +907,7 @@ export function createJobService(deps: JobServiceDeps) {
         handle.jobs.accept(jobId, row.version, row.consentFingerprint, member.userId, at, current.acceptedPlace)
         // The record chosen: the watch starts over there, the stop is gone — also when it is the start record it began
         // from (an explicit choice is never the chain's position kept; Codex review of #700).
-        // A job its responsible person never accepted has no cursor yet: this press starts it (Codex review of #700).
+        // Kept as a defence: an accepted job always has its cursor (acceptance starts it), so this starts nothing new.
         handle.jobs.startEventCursor(jobId, b.recordId as string, at)
         handle.jobs.restartWatch(jobId, b.recordId as string, at)
         return ok(undefined)
