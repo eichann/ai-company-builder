@@ -230,6 +230,8 @@ test('a JSON answer is parsed strictly before a reader sees it: a key written tw
   assert.deepEqual(Object.keys(odd), ['__proto__', 'constructor'])
   // Through the reader: the repeated id refuses the whole answer.
   assert.deepEqual(readJson('lstep.reminder_folders', '{"data":[{"id":29529,"id":1,"name":"a"}]}'), { items: [], complete: false })
+  // A name of only spaces / zero-width / bidi marks cannot tell the entry apart: dropped, list incomplete.
+  assert.deepEqual(readJson('lstep.reminder_folders', { data: [{ id: 29529, name: '\u200b\u202e ' }] }), { items: [], complete: false })
 })
 
 test('Lステップ\'s folder lists hand on ids with their names only; 「未分類」 (id 0) is not selectable and the list then says it is not whole', () => {

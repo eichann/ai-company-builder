@@ -84,7 +84,8 @@ function listReader(rule: ListRule): BrowserJsonExploreReader {
         const o = jsonObject(entry)
         const id = idOf(jsonField(o, 'id'))
         const name = jsonField(o, 'name')
-        if (!id || typeof name !== 'string' || name.trim() === '') { complete = false; continue }
+        // A name that is empty once spaces, zero-width and bidi marks are removed cannot tell the entry apart.
+        if (!id || typeof name !== 'string' || name.replace(/[\s\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '') === '') { complete = false; continue }
         if (folder !== undefined) {
           const named = foldersOf(o)
           if (named.length === 0 || named.some(g => idOf(g) !== folder)) { complete = false; continue }
