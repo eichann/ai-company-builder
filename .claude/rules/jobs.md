@@ -818,7 +818,10 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   `job_accept_needed` is not shown (`acceptNotice`). **Only stopping reaches it**: a pause, the company's stop and a
   restore (`holdDue`) hold every frozen `due` / `running` one of the job (company) — `holdFrozen`, **no limit** — and end
   its run (`endPcRun`: an operation in flight becomes unknown and the run waits for reconciliation); nothing is told and
-  no chain is stopped (the later build reads them as held). Test: `job-rollback-floor.test.ts` (F1–F4).
+  no chain is stopped (the later build reads them as held). Test: `job-rollback-floor.test.ts` (F1–F4; F10 the screens
+  of a later server; F11 a database as 4b-1 leaves it, `tests/fixtures/stage4b1-shaped-jobs.sql`: nothing leaks or runs,
+  the stop holds, what 4b-1 reads on return — versions, watch, receipts, notices, known outcomes, its own column —
+  unchanged). Mutation check: 18 guards of this bullet, each fails a test.
 - **A client gets a definition only in a shape it announced**: header `X-ACB-Job-Schemas` (`JOB_SCHEMAS_HEADER`,
   `parseJobSchemasHeader`: schema 1 always, the rest as named; none = schema 1 — every admin console and app before
   4-0, and a tab left open). A version of another shape (or one this server does not know) is answered without its
@@ -998,9 +1001,11 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
 - **Screens**: the admin form's 「いつ動くか」 → 「見張っているやることが終わったときなどに」: 見張るやること (a list searched by name and paged, `JOB_START_PAGE` 50 at a time), きっかけ (a state),
   「作ったやることも続けて見張る」, 1日の上限; the words are `job-words.ts` (`jobRecordTriggerText` — never the record's title
   —, `JOB_EVENT_NOTE`, the grant's day-limit line, the expiry line). The app shows the same sentences in 「受け取る」.
-- **Rolling back**: to 4-0 is safe (`deployment.md` "Rolling back production"); 4-0 reads schema 2 as nothing. A `due`
-  event occurrence left behind expires there and 4-0 tells its responsible person and the creator without this
-  section's reader check (known; event occurrences are due for minutes only — the runner takes them right after the clock).
+- **Rolling back**: once 4b-0.5 is in production, never below it (`deployment.md` "Rolling back production", owner D8):
+  4b-0.5 freezes 4b-1's shapes ("Shapes this build does not know"), reconciles held occurrences without resuming them and
+  keeps watch generations. Between 4-0.1 and 4a (before 4b-0.5 shipped): 4-0 reads schema 2 as nothing; a `due` event
+  occurrence left behind expires there and 4-0 tells its responsible person and the creator without this section's reader
+  check (known; event occurrences are due for minutes only — the runner takes them right after the clock).
 - Test: `server/tests/integration/job-events.test.ts` (the memo's 4a tests 1–9 and the narrowing: unrelated task,
   duplicate, someone's tag, rename, undo and complete again, a missing target refused, the start record's readers, ⑧, ⑤,
   a new consent not accepted, the consent), `jobs-definition.test.ts` "an event trigger", `job-schemas.test.ts` (now with a

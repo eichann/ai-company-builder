@@ -4,12 +4,14 @@
  * (`schema: 3`, an event job run by the responsible person's PC AI) and their occurrences, runs, notices. Such an
  * occurrence is **frozen** here: never shown, counted, told, expired, run, claimed, retried or reconciled — left out in
  * SQL before every limit — and only a pause, the company's stop or a restore reaches it (held, its run ended, nothing
- * told, no chain stopped). The memo's tests F1–F4 (and F5 / F6, F10, F11 further down as the PR grows).
+ * told, no chain stopped). The memo's tests F1–F4, F10 and F11 (F5 / F6: job-runs.test.ts; F7–F9: job-events.test.ts and
+ * tests/unit/job-watch-generations.test.ts; the screens' own side of F10: admin / client job-screen-schemas tests).
  *
  * Guards (each mutation-checked, the results in the commit message): the repository's frozen filter on each read and
  * move, `holdFrozen` and its call in `holdDue`, `holdDue`'s exhaustive batches, the version view's fingerprints, the
  * acceptance notice.
  */
+import { readFileSync } from 'fs'
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 
 const currentUser = vi.hoisted(() => ({ id: null as string | null }))
@@ -30,6 +32,7 @@ import { aiRunsRoute } from '../../src/routes/ai-runs'
 import { jobsRoute } from '../../src/routes/jobs'
 import { services } from '../../src/composition'
 import { createJobOccurrences } from '../../src/services/job-occurrences'
+import { createJobService } from '../../src/services/jobs'
 import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
@@ -389,5 +392,116 @@ describe('F4: a pause, the company stop and a restore hold frozen ones and end t
     const told = db.prepare("SELECT kind FROM notifications WHERE company_id = ?").all(CO) as Json[]
     expect(told.filter(n => n.kind !== 'company_restored').length).toBe(before)
     expect(chainStop(job)).toBeNull()
+  })
+})
+
+describe('F10: screens that do not show a shape cannot edit, approve or accept it', () => {
+  /** A server of a later build (its core reads schema 3: 4b-1), with the same rules. */
+  const laterServer = () => createJobService({
+    companyData, memberships: sqliteMembershipRepository(db), transactions: sqliteTransactions(db), clock, ids: randomIds,
+    skillTree: async () => null, hasCompanyFolder: () => false, knownSchemas: [1, 2, 3],
+  })
+  it('an old tab (schema 1) and a rebuilt screen that shows 1 and 2 only are both refused; the version is not handed to them', async () => {
+    const job = await approvedJob()
+    const text = canonicalJson(as4b1(serverJob()))
+    db.prepare(`INSERT INTO ai_job_versions (company_id, job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at)
+      VALUES (?, ?, 2, 3, ?, ?, ?, 'rf-alice', 'rf-owner', ?)`).run(CO, job, text, hashCanonical(text), hashCanonical(jobConsentCanonical(as4b1(serverJob()))), past())
+    db.prepare('UPDATE ai_jobs SET latest_version = 2 WHERE company_id = ? AND id = ?').run(CO, job)
+    const s = laterServer()
+    for (const reads of [[1], [1, 2]]) {
+      const seen = s.get(owner() as Json, job, reads)
+      expect(seen.ok && seen.value.versions?.[0]).toMatchObject({ version: 2, definition: null, needsUpdate: true })
+      expect(await s.approve(owner() as Json, job, { version: 2 }, reads)).toMatchObject({ ok: false, body: { code: 'JOB_NEEDS_NEWER_SCREEN' } })
+      expect(await s.update(owner() as Json, job, { definition: serverJob({ name: '上書き' }) }, reads)).toMatchObject({ ok: false, body: { code: 'JOB_NEEDS_NEWER_SCREEN' } })
+    }
+    // Approved meanwhile (by a screen of the later build).
+    db.prepare("UPDATE ai_job_versions SET approved_by = 'rf-owner', approved_at = ? WHERE company_id = ? AND job_id = ? AND version = 2").run(past(), CO, job)
+    db.prepare("UPDATE ai_jobs SET approved_version = 2, approved_fingerprint = ? WHERE company_id = ? AND id = ?").run(hashCanonical(text), CO, job)
+    for (const reads of [[1], [1, 2]]) {
+      expect(await s.accept(alice() as Json, job, { version: 2 }, reads, true)).toMatchObject({ ok: false, body: { code: 'JOB_NEEDS_NEWER_SCREEN' } })
+    }
+    expect(db.prepare('SELECT accepted_version FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, job)).toEqual({ accepted_version: 1 })
+  })
+})
+
+/**
+ * F11 (owner memo §8): a database as a 4b-1 build leaves it (tests/fixtures/stage4b1-shaped-jobs.sql), run through this
+ * build's code — nothing leaks, nothing runs, a stop still holds, the data a reconciliation and 4b-1 need stays as 4b-1
+ * wrote it. (Running 4b-1 again on it is 4b-1's own test; this build's part is to leave it intact.)
+ */
+describe('F11: a database as 4b-1 leaves it, under this build', () => {
+  const FIXTURE = readFileSync(new URL('../fixtures/stage4b1-shaped-jobs.sql', import.meta.url), 'utf8')
+  const JOB = 'job.4b100000000000000000000000000001'
+  const O = (n: number) => `occ.4b10000000000000000000000000000${n}`
+  function load(): string {
+    const cols = new Set((db.prepare('PRAGMA table_info(ai_job_occurrences)').all() as Json[]).map(c => c.name))
+    // A column 4b-1 might add: this build never names it, and keeps what it holds.
+    if (!cols.has('ai_claim_deadline')) db.exec('ALTER TABLE ai_job_occurrences ADD COLUMN ai_claim_deadline TEXT')
+    db.prepare("DELETE FROM google_drive_puts WHERE company_id = ? AND id = 'drive-put-4b1-0'").run(CO)
+    const rec = alicesTask()
+    const sql = FIXTURE.replaceAll('{{CO}}', CO).replaceAll('{{ALICE}}', 'rf-alice').replaceAll('{{OWNER}}', 'rf-owner').replaceAll('{{REC}}', rec)
+      .replaceAll('{{NOW}}', new Date().toISOString()).replaceAll('{{PAST}}', past(2 * 24 * 60)).replaceAll('{{LATER}}', later(10))
+    db.exec(sql)
+    return rec
+  }
+  /** Everything 4b-1 wrote, but the occurrences' and runs' state (what a stop may change). */
+  const intact = () => ({
+    versions: db.prepare('SELECT * FROM ai_job_versions WHERE company_id = ? AND job_id = ? ORDER BY version').all(CO, JOB),
+    job: db.prepare('SELECT * FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, JOB),
+    // The stamps are the protocol between builds (what this build last wrote of the job and the stop): a stop here stamps it.
+    cursor: db.prepare(`SELECT seen_seq, watch_record_id, watch_start, watch_fired, watch_generation, chain_stop_code, chain_stop_record, chain_stop_at
+      FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?`).get(CO, JOB),
+    occurrences: db.prepare(`SELECT id, job_version, due_slot, run_id, retries, retried_by, event_seq, event_record_id, event_version, watch_generation, ai_claim_deadline
+      FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? ORDER BY id`).all(CO, JOB),
+    puts: db.prepare("SELECT * FROM google_drive_puts WHERE company_id = ? AND id = 'drive-put-4b1-0'").get(CO),
+    notices: db.prepare("SELECT id, user_id, kind, dedupe_key, read_at FROM notifications WHERE company_id = ? AND id LIKE 'n-4b1-%' ORDER BY id").all(CO),
+    doneOps: db.prepare("SELECT * FROM ai_run_operations WHERE company_id = ? AND state IN ('done', 'unknown') AND key IN ('drive-0', 'draft-1') ORDER BY key").all(CO),
+  })
+  const states = () => (db.prepare('SELECT id, state, outcome_code FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? ORDER BY id').all(CO, JOB) as Json[])
+    .map(o => `${o.id.slice(-1)}:${o.state}:${o.outcome_code ?? ''}`)
+
+  it('nothing leaks, nothing runs, the stop holds, and what 4b-1 needs to go on stays as it wrote it', async () => {
+    load()
+    const before = intact()
+    expect(states()).toEqual(['1:running:', '2:due:', '3:needs_person:RESULT_UNKNOWN', '4:held:JOB_PAUSED', '5:done:'])
+
+    // Nothing leaks: no occurrence, last occurrence, fingerprint, stopped chain or notice of it — to anyone.
+    for (const user of ['rf-owner', 'rf-admin', 'rf-alice']) {
+      expect((await call(user, 'GET', `/jobs/${JOB}/occurrences`)).body.data.occurrences).toEqual([])
+      const one = (await call(user, 'GET', `/jobs/${JOB}`)).body.data
+      expect(one.lastOccurrence).toBeNull()
+      expect(one.chainStopped).toBeUndefined()
+      expect(one.versions.find((v: Json) => v.version === 2)).toMatchObject({ definition: null, fingerprint: null, consentFingerprint: null })
+    }
+    for (const m of [owner(), alice(), { companyId: CO, userId: 'rf-admin', role: 'admin' }]) {
+      const bell = services.notifications.list(m as Json)
+      expect(bell.ok && bell.value.items.filter((i: Json) => i.kind.startsWith('job_'))).toEqual([])
+    }
+
+    // Nothing runs: the clock, the runner, the PC's list and claim, the running run's renew and its token's reach.
+    const o = occurrences()
+    o.makeOccurrences(CO)
+    o.runDue(CO)
+    expect((await call('rf-alice', 'GET', '/me/job-turns?kinds=time,event')).body.data.turns).toEqual([])
+    expect(await call('rf-alice', 'POST', '/job-run-claims', { occurrenceId: O(2), deviceId: 'device-alice-1', conversationId: 'c', checks: ['new_files', 'new_meetings'], kinds: ['time', 'event'] })).toMatchObject({ status: 404 })
+    expect(await call('rf-alice', 'POST', '/ai-runs/run-4b1-running/renew', { generation: 1 })).toMatchObject({ status: 404 })
+    for (const user of ['rf-owner', 'rf-admin']) {
+      expect(await call(user, 'POST', `/jobs/${JOB}/occurrences/${O(3)}/retry`)).toMatchObject({ status: 404 })
+      expect(await call(user, 'POST', `/jobs/${JOB}/occurrences/${O(3)}/operations/draft-1/reconcile`, { done: true })).toMatchObject({ status: 404 })
+    }
+    expect(states()).toEqual(['1:running:', '2:due:', '3:needs_person:RESULT_UNKNOWN', '4:held:JOB_PAUSED', '5:done:'])
+    expect(runOf('run-4b1-running')).toMatchObject({ state: 'running' })
+    expect(intact()).toEqual(before)
+
+    // The company stop holds what waits or runs, ends the run (what was in flight now waits for reconciliation), tells nobody.
+    expect(await call('rf-owner', 'PUT', '/jobs-stop', { stopped: true })).toMatchObject({ status: 200 })
+    expect(states()).toEqual(['1:held:COMPANY_STOPPED', '2:held:COMPANY_STOPPED', '3:needs_person:RESULT_UNKNOWN', '4:held:JOB_PAUSED', '5:done:'])
+    expect(runOf('run-4b1-running')).toMatchObject({ state: 'waiting_reconcile', failure_code: 'COMPANY_STOPPED', device_id: null })
+    expect(db.prepare("SELECT state, reconciled_by FROM ai_run_operations WHERE company_id = ? AND run_id = 'run-4b1-running' AND key = 'drive-1'").get(CO)).toEqual({ state: 'unknown', reconciled_by: null })
+    expect(runOf('run-4b1-unknown')).toMatchObject({ state: 'waiting_reconcile' })
+    expect(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND id NOT LIKE 'n-4b1-%' AND kind <> 'job_accept_needed'").get(CO)).toEqual({ n: 0 })
+    // What 4b-1 reads on return: its versions, the watch (generation and stop), the receipts, its notices, the known
+    // outcomes of operations and its own column — unchanged; the running one held with its put to reconcile (§4-1).
+    expect(intact()).toEqual(before)
   })
 })
