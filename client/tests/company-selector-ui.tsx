@@ -10,6 +10,7 @@
 //   ?mine=d1,d2              the departments the member belongs to (所属); none by default
 //   ?create=no|yes           the server's canCreateCompany for this account (absent by default: an older server)
 //   ?kind=none               阿部商店 has no shared company folder (folderKind none); ?working=fail main refuses its folder
+//   ?theme=dark              dark mode
 //   ?choose=c2               switched to from the title bar (appStore companyToChoose): 山田工務店 starts chosen
 // Calls the page made are in window.__acbCompany.calls; the opened company is
 // shown under 「開いた会社」.
@@ -23,6 +24,7 @@ import type { CompanyInfo, DepartmentInfo, DirectoryEntry } from '../shared/ipc-
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
+if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const calls: unknown[][] = []
 const progress = emitter<{ repoPath: string; receivedBytes: number }>()
 let finishSetup: (() => void) | null = null

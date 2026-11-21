@@ -16,9 +16,9 @@ const pages = fs.readdirSync(path.join(path.dirname(fileURLToPath(import.meta.ur
   .map(name => name.replace(/-ui\.html$/, ''))
   .sort()
 // Pages that read ?theme=dark.
-const themed = new Set(['chat-composer', 'chat-header', 'chat-window', 'choice-prompt', 'doc-review', 'download-folders', 'editor-tabs', 'private-folders', 'search-panel', 'voice-prompt'])
+const themed = new Set(['chat-composer', 'chat-header', 'chat-window', 'choice-prompt', 'company-selector', 'doc-review', 'download-folders', 'editor-tabs', 'file-tree', 'keep-work', 'private-folders', 'search-panel', 'sign-in', 'voice-prompt'])
 // Pages whose light theme a spec of their own already opens.
-const specified = new Set(['broker-key-card', 'chat-composer', 'chat-header', 'chat-window', 'choice-prompt', 'company-selector', 'doc-review', 'download-folders', 'editor-tabs', 'file-tree', 'plugin-frame', 'plugin-slots', 'private-folders', 'search-panel', 'skill-layout', 'tool-rows'])
+const specified = new Set(['broker-key-card', 'chat-composer', 'chat-header', 'chat-window', 'choice-prompt', 'company-selector', 'doc-review', 'download-folders', 'editor-tabs', 'file-tree', 'plugin-frame', 'plugin-slots', 'private-folders', 'search-panel', 'sign-in', 'skill-layout', 'tool-rows'])
 
 for (const name of pages) {
   const themes = [...(specified.has(name) ? [] : ['light' as const]), ...(themed.has(name) ? ['dark' as const] : [])]

@@ -65,9 +65,9 @@ export function InputDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-md p-4 bg-sidebar-bg border border-border rounded-lg shadow-xl">
-        <h3 className="text-lg font-medium text-text-primary mb-4">{title}</h3>
+    <div className="fixed inset-0 z-dialog flex items-center justify-center bg-scrim">
+      <div className="w-full max-w-md p-4 bg-surface-raised text-text border border-[color:var(--color-border)] rounded-control shadow-dialog">
+        <h3 className="text-lg font-medium text-text mb-4">{title}</h3>
         <form onSubmit={handleSubmit}>
           <input
             ref={inputRef}
@@ -76,24 +76,24 @@ export function InputDialog({
             onChange={(e) => setValue(e.target.value)}
             placeholder={placeholder}
             aria-invalid={error ? true : undefined}
-            className="w-full px-3 py-2 bg-editor-bg border border-border rounded-md text-text-primary placeholder-text-secondary focus:outline-none focus:border-accent"
+            className="w-full px-3 py-2 bg-[var(--color-surface)] border border-border-control rounded-md text-text placeholder:text-text-subtle focus:outline-none focus:border-focus-border"
           />
           {children}
           {error && (
-            <p role="alert" className="mt-2 text-xs text-red-500 dark:text-red-400 whitespace-pre-line">{error}</p>
+            <p role="alert" className="mt-2 text-xs text-danger-text whitespace-pre-line">{error}</p>
           )}
           <div className="flex justify-end gap-2 mt-4">
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-activitybar-bg rounded-md transition-colors"
+              className="px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-surface-sunken rounded-md transition-colors"
             >
               キャンセル
             </button>
             <button
               type="submit"
               disabled={!value.trim() || busy}
-              className="px-4 py-2 text-sm bg-accent hover:bg-accent/80 disabled:bg-accent/50 disabled:cursor-not-allowed text-white rounded-md transition-colors"
+              className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover disabled:opacity-disabled disabled:cursor-not-allowed text-on-primary rounded-md transition-colors"
             >
               {confirmText}
             </button>
