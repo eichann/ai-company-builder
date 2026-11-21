@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { LockSimple, PencilSimple, SignOut } from '@phosphor-icons/react'
+import { PencilSimple, ShieldSlash, SignOut } from '@phosphor-icons/react'
 
 import { ConfirmByTypingDialog } from '@/components/app/confirm-by-typing'
 import { EmptyState, PageHeader } from '@/components/app/states'
@@ -43,7 +43,7 @@ export default function SettingsPage() {
       <>
         <AdvancedCrumb />
         <PageHeader title="会社の情報" />
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       </>
     )
   }

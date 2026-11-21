@@ -56,7 +56,7 @@ export function PrivateFolderPanel({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="truncate text-base font-semibold">{name} の設定</h2>
-            <Badge variant="brand">
+            <Badge variant="selected">
               <LockSimple weight="fill" />
               非公開
             </Badge>

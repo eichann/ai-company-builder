@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { Eye, Info, LockSimple, User, UserCircle, UsersThree, X } from '@phosphor-icons/react'
+import { Eye, LockSimple, User, UserCircle, UsersThree, X } from '@phosphor-icons/react'
 
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { EditorPicker } from '@/components/permissions/editor-picker'
@@ -10,6 +10,7 @@ import { EffectivePreview } from '@/components/permissions/effective-preview'
 import { OutdatedClientsDialog, useOutdatedClients } from '@/components/permissions/outdated-clients-dialog'
 import { SubfolderPicker } from '@/components/permissions/subfolder-picker'
 import { Badge } from '@/components/ui/badge'
+import { Callout } from '@/components/ui/callout'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
@@ -269,7 +270,7 @@ export function ScopeEditor({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="truncate text-base font-semibold">{node.name} の設定</h2>
-            {saved.draft.mode === 'inherit' ? <Badge variant="outline">継承</Badge> : <Badge variant="brand">個別の設定</Badge>}
+            {saved.draft.mode === 'inherit' ? <Badge variant="outline">継承</Badge> : <Badge variant="selected">個別の設定</Badge>}
           </div>
           <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{isRoot ? '会社のフォルダ全体' : node.path}</p>
         </div>
@@ -288,12 +289,11 @@ export function ScopeEditor({
           <legend className="mb-2 text-sm font-medium">編集できる人</legend>
 
           {saved.custom && (
-            <p className="flex gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs">
-              <Info size={16} className="mt-px shrink-0 text-warning" />
+            <Callout variant="warning">
               <span>
                 ここには以前の画面で作った細かい設定（{ownRules.map((r) => `${subjectName(r, members, departmentLookup)}: ${r.canWrite ? '編集できる' : '閲覧のみ'}`).join('、')}）があります。下の選択で保存すると置き換わります。
               </span>
-            </p>
+            </Callout>
           )}
 
           {!isRoot && (

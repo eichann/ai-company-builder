@@ -1,6 +1,6 @@
 'use client'
 
-import { LockSimple } from '@phosphor-icons/react'
+import { ShieldSlash } from '@phosphor-icons/react'
 
 import { MeetingDuplicatesSection } from '@/components/advanced/meeting-duplicates'
 import { EmptyState, PageHeader } from '@/components/app/states'
@@ -15,7 +15,7 @@ export default function MeetingDuplicatesPage() {
     <>
       <PageHeader title={TITLE} />
       {role !== null && !isAdmin ? (
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       ) : (
         isAdmin && <MeetingDuplicatesSection />
       )}

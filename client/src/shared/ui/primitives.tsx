@@ -3,7 +3,7 @@
 // colours only for state, light and dark). Tailwind + Phosphor, like the rest of the
 // renderer.
 import { forwardRef, type ReactNode, type ButtonHTMLAttributes } from 'react'
-import { Check, Minus, Info, WarningCircle, WifiSlash } from '@phosphor-icons/react'
+import { Check, CheckCircle, Hourglass, Info, Lock, Minus, Pause, PauseCircle, Sparkle, WarningCircle, WarningOctagon, WifiSlash, type Icon } from '@phosphor-icons/react'
 import { PRIMARY_ACTION } from './buttonStyles'
 
 export function SectionHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
@@ -50,26 +50,87 @@ export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLBut
   )
 })
 
-type CalloutTone = 'info' | 'warning' | 'error' | 'offline'
+// Callouts (design-system.md "Callouts and status badges (P2b, done)"): one box per meaning, drawn
+// only from its token set (text, bg, border, icon) — no free opacities, no palette colours. The
+// three stopped states are separate (owner decision 2026-11-21): `paused` stopped by a person
+// (grey, 「止めています」 + who / when), `failed` stopped by a failure (red, 「止まりました」 + reason
+// and fix), `awaiting` awaiting approval (amber). Amber is warning and awaiting only; `offline` is
+// information (grey) with its own icon.
+export type CalloutTone = 'info' | 'warning' | 'danger' | 'success' | 'offline' | 'paused' | 'failed' | 'awaiting'
 
 const CALLOUT: Record<CalloutTone, { box: string; icon: ReactNode }> = {
-  info: { box: 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-zinc-300', icon: <Info size={16} className="text-zinc-400" /> },
-  warning: { box: 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-400/20 dark:bg-amber-400/[0.07] dark:text-amber-200', icon: <WarningCircle size={16} weight="fill" className="text-amber-500" /> },
-  error: { box: 'border-red-200 bg-red-50 text-red-800 dark:border-red-400/20 dark:bg-red-400/[0.07] dark:text-red-200', icon: <WarningCircle size={16} weight="fill" className="text-red-500" /> },
-  offline: { box: 'border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-zinc-300', icon: <WifiSlash size={16} className="text-zinc-500" /> },
+  info: { box: 'border-info-border bg-info-bg text-info-text', icon: <Info size={16} className="text-info-icon" /> },
+  warning: { box: 'border-warning-border bg-warning-bg text-warning-text', icon: <WarningCircle size={16} weight="fill" className="text-warning-icon" /> },
+  danger: { box: 'border-danger-border bg-danger-bg text-danger-text', icon: <WarningCircle size={16} weight="fill" className="text-danger-icon" /> },
+  success: { box: 'border-success-border bg-success-bg text-success-text', icon: <CheckCircle size={16} weight="fill" className="text-success-icon" /> },
+  offline: { box: 'border-info-border bg-info-bg text-info-text', icon: <WifiSlash size={16} className="text-info-icon" /> },
+  paused: { box: 'border-paused-border bg-paused-bg text-paused-text', icon: <PauseCircle size={16} weight="fill" className="text-paused-icon" /> },
+  failed: { box: 'border-failed-border bg-failed-bg text-failed-text', icon: <WarningOctagon size={16} weight="fill" className="text-failed-icon" /> },
+  awaiting: { box: 'border-awaiting-border bg-awaiting-bg text-awaiting-text', icon: <Hourglass size={16} weight="fill" className="text-awaiting-icon" /> },
 }
 
-export function Callout({ tone = 'info', title, children, action, role }: { tone?: CalloutTone; title?: ReactNode; children?: ReactNode; action?: ReactNode; role?: 'alert' | 'status' }) {
+export function Callout({ tone = 'info', title, children, action, role, className = '' }: { tone?: CalloutTone; title?: ReactNode; children?: ReactNode; action?: ReactNode; role?: 'alert' | 'status'; className?: string }) {
   const s = CALLOUT[tone]
   return (
-    <div role={role ?? (tone === 'error' ? 'alert' : undefined)} className={`flex items-start gap-2.5 rounded-lg border px-3.5 py-3 text-[13px] leading-relaxed ${s.box}`}>
-      <span className="mt-0.5 shrink-0">{s.icon}</span>
+    <div role={role ?? (tone === 'danger' || tone === 'failed' ? 'alert' : undefined)} data-callout={tone} className={`flex items-start gap-2.5 rounded-control border p-callout text-body ${s.box} ${className}`}>
+      <span className="mt-0.5 shrink-0" aria-hidden>{s.icon}</span>
       <div className="min-w-0 flex-1">
-        {title && <p className="font-medium">{title}</p>}
-        {children && <div className={title ? 'mt-0.5 opacity-90' : ''}>{children}</div>}
+        {title && <p className="font-strong">{title}</p>}
+        {children && <div className={title ? 'mt-0.5' : ''}>{children}</div>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>
+  )
+}
+
+// Status badges: a small mark that cannot be pressed (a chip that can be pressed is a button).
+// Corner `small` (4px); the set's bg / border / text and its icon colour.
+export type StatusBadgeVariant = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'paused' | 'failed' | 'awaiting' | 'ai' | 'selected' | 'readonly'
+
+const BADGE: Record<StatusBadgeVariant, { box: string; icon: string }> = {
+  neutral: { box: 'border-transparent bg-surface-sunken text-text-muted', icon: 'text-text-muted' },
+  info: { box: 'border-info-border bg-info-bg text-info-text', icon: 'text-info-icon' },
+  success: { box: 'border-success-border bg-success-bg text-success-text', icon: 'text-success-icon' },
+  warning: { box: 'border-warning-border bg-warning-bg text-warning-text', icon: 'text-warning-icon' },
+  danger: { box: 'border-danger-border bg-danger-bg text-danger-text', icon: 'text-danger-icon' },
+  paused: { box: 'border-paused-border bg-paused-bg text-paused-text', icon: 'text-paused-icon' },
+  failed: { box: 'border-failed-border bg-failed-bg text-failed-text', icon: 'text-failed-icon' },
+  awaiting: { box: 'border-awaiting-border bg-awaiting-bg text-awaiting-text', icon: 'text-awaiting-icon' },
+  ai: { box: 'border-ai-border bg-ai-bg text-ai-text', icon: 'text-ai-icon' },
+  selected: { box: 'border-selected-border bg-selected-bg text-selected-text', icon: 'text-selected-icon' },
+  readonly: { box: 'border-readonly-border bg-readonly-bg text-readonly-text', icon: 'text-readonly-icon' },
+}
+
+/** Default icons: the three stopped states differ in more than colour; 閲覧のみ keeps its padlock. */
+const BADGE_ICON: Partial<Record<StatusBadgeVariant, Icon>> = {
+  paused: Pause, failed: WarningOctagon, awaiting: Hourglass, readonly: Lock, ai: Sparkle,
+}
+
+export function StatusBadge({ variant = 'neutral', icon, children, title, compact = false, className = '' }: {
+  variant?: StatusBadgeVariant
+  /** Another icon, or null for none. */
+  icon?: Icon | null
+  children: ReactNode
+  title?: string
+  /** Inside a dense row (the file tree): no fixed height, narrower padding. */
+  compact?: boolean
+  className?: string
+}) {
+  const s = BADGE[variant]
+  const Glyph = icon === undefined ? BADGE_ICON[variant] : icon
+  return (
+    <span data-badge={variant} title={title}
+      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-small border text-caption ${compact ? 'px-1' : 'h-[var(--size-badge)] px-badge-x'} ${s.box} ${className}`}>
+      {Glyph && <Glyph size={compact ? 9 : 11} weight="bold" aria-hidden className={s.icon} />}
+      {children}
+    </span>
+  )
+}
+
+/** The one new-item mark (owner decision 2026-11-21): a primary dot; its word is the image's name for screen readers. */
+export function NewDot({ label = '新着', className = '', testId }: { label?: string; className?: string; testId?: string }) {
+  return (
+    <span data-new-dot data-testid={testId} role="img" aria-label={label} title={label} className={`inline-block size-[var(--size-dot)] shrink-0 rounded-full bg-unread ${className}`} />
   )
 }
 

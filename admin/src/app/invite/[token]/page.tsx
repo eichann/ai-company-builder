@@ -13,6 +13,7 @@ import { AppWindow, CheckCircle, DownloadSimple, LinkBreak } from '@phosphor-ico
 import { AuthLayout } from '@/components/app/brand'
 import { FullPageLoading } from '@/components/app/states'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -185,9 +186,9 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
 
   const info = invitation.data
   const errorBox = error && (
-    <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+    <Callout variant="danger">
       {error}
-    </p>
+    </Callout>
   )
 
   // 1. 招待リンク

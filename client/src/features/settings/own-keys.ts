@@ -5,7 +5,8 @@
 import { chooseBrokerKeySource } from '../../../../shared/core/key-broker'
 import { ENV_KEY_SERVICES, OWN_KEY_BLOCKED_TEXT, type MyBrokerKeys, type MyBrokerService } from '../../../shared/broker-keys'
 
-export type OwnKeyTone = 'ok' | 'warn' | 'none'
+// `paused`: an admin stopped the key (a person stopped it: grey, design-system.md P2b).
+export type OwnKeyTone = 'ok' | 'warn' | 'paused' | 'none'
 
 export interface OwnKeyRow {
   /** 「会社の鍵」, 「自分の鍵」, 「未設定」 … */
@@ -36,7 +37,7 @@ export function ownKeyRow(s: MyBrokerService): OwnKeyRow {
   }
   if (used === 'user') return { status: `自分の鍵（末尾 ${s.key!.last4}）`, tone: 'ok', detail: 'この鍵はあなただけが使えます。', canRegister }
   if (s.key && s.key.status === 'disabled') {
-    return { status: '自分の鍵（停止中）', tone: 'warn', detail: '管理者がこの鍵を止めています。管理者に相談してください。', canRegister }
+    return { status: '自分の鍵（管理者が止めています）', tone: 'paused', detail: '管理者がこの鍵を止めています。管理者に相談してください。', canRegister }
   }
   if (s.key && !s.ownKey.allowed) {
     return { status: '自分の鍵（使われません）', tone: 'warn', detail: OWN_KEY_BLOCKED_TEXT[s.ownKey.reason], canRegister }

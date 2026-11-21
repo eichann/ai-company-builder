@@ -303,7 +303,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
               {outdated.canForce ? '' : '先にアプリを更新してもらうか、管理者に作成を依頼してください。'}
             </Callout>
           )}
-          {error && <Callout tone={error === OFFLINE_REASON ? 'offline' : 'error'}>{error}</Callout>}
+          {error && <Callout tone={error === OFFLINE_REASON ? 'offline' : 'danger'}>{error}</Callout>}
         </div>
 
         <div className="flex justify-end gap-2 border-t border-zinc-100 px-5 py-3 dark:border-white/[0.06]">

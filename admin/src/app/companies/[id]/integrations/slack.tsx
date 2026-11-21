@@ -15,6 +15,7 @@ import { Copy, SlackLogo } from '@phosphor-icons/react'
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { ErrorState, ListSkeleton } from '@/components/app/states'
 import { Badge } from '@/components/ui/badge'
+import { Callout } from '@/components/ui/callout'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -79,8 +80,9 @@ export function SlackSection({ companyId, nameOf }: { companyId: string; nameOf:
 
 function SlackBadge({ view }: { view: SlackAdminView }) {
   if (!view.configured) return <Badge variant="outline">まだつないでいません</Badge>
-  if (view.operatorStopped) return <Badge variant="outline">止まっています</Badge>
-  return view.enabled ? <Badge>動いています</Badge> : <Badge variant="outline">オフ</Badge>
+  // The operator (運用担当者) stopped it: stopped by a person (grey, 「止めています」).
+  if (view.operatorStopped) return <Badge variant="paused">止めています</Badge>
+  return view.enabled ? <Badge variant="success">動いています</Badge> : <Badge variant="outline">オフ</Badge>
 }
 
 function CopyLine({ value, label, testId }: { value: string; label: string; testId: string }) {
@@ -151,15 +153,15 @@ function SlackBody({ companyId, view, onView, nameOf }: {
   return (
     <>
       {view.practice && (
-        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        <Callout variant="warning">
           練習用の Slack につながっています。本物のシークレットやボットの鍵は登録できません（練習用の値だけ）。
-        </p>
+        </Callout>
       )}
       {view.operatorStopped && (
-        <p className="rounded-md border px-3 py-2 text-sm">運用担当者が Slack を止めています。止めている間は、誰も使えません。</p>
+        <Callout variant="paused" role="status">運用担当者が Slack を止めています。止めている間は、誰も使えません。</Callout>
       )}
       {!view.vaultEnabled && (
-        <p className="rounded-md border px-3 py-2 text-sm">サーバーに鍵の金庫が用意されていないため、登録できません。運用担当者に確かめてください。</p>
+        <Callout variant="warning">サーバーに鍵の金庫が用意されていないため、登録できません。運用担当者に確かめてください。</Callout>
       )}
 
       <section className="space-y-2">
@@ -234,7 +236,7 @@ function SlackBody({ companyId, view, onView, nameOf }: {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant={g.status === 'active' ? 'default' : 'outline'}>{GRANT_STATUS_TEXT[g.status]}</Badge>
+                  <Badge variant={g.status === 'active' ? 'success' : 'outline'}>{GRANT_STATUS_TEXT[g.status]}</Badge>
                   {g.status === 'active' && <Button variant="outline" size="sm" onClick={() => setStopping(g)}>止める</Button>}
                 </div>
               </li>

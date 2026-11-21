@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState } from 'react'
 import { toast } from 'sonner'
-import { CalendarBlank, CheckCircle, ChatCircleText, Database, EnvelopeSimple, Handshake, Info, ListChecks, LockSimple, Robot, Target, Trash, UsersThree } from '@phosphor-icons/react'
+import { CalendarBlank, ChatCircleText, CheckCircle, Database, EnvelopeSimple, Handshake, Info, ListChecks, Robot, ShieldSlash, Target, Trash, UsersThree } from '@phosphor-icons/react'
 
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { RadioCard } from '@/components/app/radio-card'
@@ -74,7 +74,7 @@ export function TaskSettingsPage({ part }: { part: TaskSettingsPart }) {
       <>
         <AdvancedCrumb />
         <PageHeader title={title} />
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       </>
     )
   }
@@ -246,7 +246,7 @@ function HolidaysCheckedCard() {
     }
   }
   return (
-    <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-sm">
+    <div role="status" className="flex flex-wrap items-center gap-3 rounded-control border border-info-border bg-info-bg px-4 py-3 text-sm">
       {checked ? (
         <span className="flex items-center gap-2 text-success">
           <CheckCircle size={16} weight="fill" />

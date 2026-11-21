@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useRef, useState } from 'react'
-import { Buildings, CaretDown, CaretRight, Folder, Info, LockSimple, Plus, ShieldCheck } from '@phosphor-icons/react'
+import { Buildings, CaretDown, CaretRight, Folder, Info, LockSimple, Plus, ShieldCheck, ShieldSlash } from '@phosphor-icons/react'
 
 import { DepartmentIcon } from '@/components/app/department-icon'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -30,9 +30,9 @@ import { useQuery } from '@/lib/use-query'
 import { SkillEditorsCard } from './skill-editors-card'
 import { cn } from '@/lib/utils'
 
-const SUMMARY_BADGE: Record<EffectiveSummary, 'success' | 'warning' | 'brand'> = {
+const SUMMARY_BADGE: Record<EffectiveSummary, 'success' | 'warning' | 'selected'> = {
   'everyone-rw': 'success',
-  'everyone-r': 'brand',
+  'everyone-r': 'selected',
   restricted: 'warning',
 }
 
@@ -199,7 +199,7 @@ export function PermissionsView() {
         </div>
       ) : isForbidden(permissions.error) ? (
         <EmptyState
-          icon={LockSimple}
+          icon={ShieldSlash}
           title="権限を確認できるのは、オーナー・管理者と部署の管理役です"
           description="変更が必要なときは、管理者か部署の管理役に依頼してください。"
         />
@@ -393,7 +393,7 @@ function TreeRow({
           <span className={cn('min-w-0 flex-1 truncate text-sm', kind !== 'folder' && 'font-medium')}>{name}</span>
           {node.missing && <span className="shrink-0 text-xs text-warning">見つかりません</span>}
           {isPrivate ? (
-            <Badge variant="brand" className="shrink-0">
+            <Badge variant="selected" className="shrink-0">
               非公開
             </Badge>
           ) : inherited ? (

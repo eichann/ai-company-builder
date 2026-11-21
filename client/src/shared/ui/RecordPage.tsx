@@ -7,6 +7,7 @@ import { useIsNarrowerThan } from '../hooks/useIsNarrowerThan'
 import type { ThingKind } from '../../../shared/thing-words'
 import { ThingIcon } from './ThingIcon'
 import { PRIMARY_ACTION } from './buttonStyles'
+import { StatusBadge, type StatusBadgeVariant } from './primitives'
 
 /**
  * The one layout every record opens in (新しい画面のデモ A–C): the kind and its state as small
@@ -62,14 +63,10 @@ export function RecordPage({ testId, kind, name, chips, seenBy, top, title, acti
   )
 }
 
-const CHIP = {
-  gray: 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-zinc-300',
-  accent: 'bg-accent/10 text-accent',
-  amber: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-  green: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-}
+// A record's status mark (not pressable): the status badge, by meaning (design-system.md P2b).
+const CHIP = { gray: 'neutral', accent: 'selected', amber: 'warning', green: 'success' } as const satisfies Record<string, StatusBadgeVariant>
 export function Chip({ children, tone = 'gray' }: { children: ReactNode; tone?: keyof typeof CHIP }) {
-  return <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${CHIP[tone]}`}>{children}</span>
+  return <StatusBadge variant={CHIP[tone]} icon={null}>{children}</StatusBadge>
 }
 
 export const MAIN_BUTTON = `inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-medium ${PRIMARY_ACTION}`

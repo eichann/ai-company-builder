@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ChatsCircle, LockSimple } from '@phosphor-icons/react'
+import { ChatsCircle, ShieldSlash } from '@phosphor-icons/react'
 
 import { AdvancedCrumb } from '@/components/advanced/crumb'
 import { RadioCard } from '@/components/app/radio-card'
@@ -31,7 +31,7 @@ export default function SecondOpinionPage() {
       <>
         <AdvancedCrumb aiSafety />
         <PageHeader title={TITLE} />
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       </>
     )
   }
@@ -56,7 +56,7 @@ export default function SecondOpinionPage() {
       <PageHeader title={TITLE} />
       <div className="-mt-2 mb-6 max-w-3xl space-y-2 text-sm text-muted-foreground">
         <p>
-          メンバーが AI への相談の中で「Codex はどう言ってる？」のように名前を書いたときだけ、もう一方の AI（Claude Code と Codex）に読むだけで聞きます。
+          メンバーが AI への相談の中で「Codex はどう言ってる？」のように名前を書いたときだけ、もう一方の AI（Claude Code と Codex）に閲覧のみで聞きます。
           <strong className="font-medium text-foreground">会社の中身がもう一方の会社にも渡ります。</strong>
         </p>
         <p>どちらか一方の AI の会社とだけ契約しているときは、「聞かない」のままにしてください。</p>
@@ -86,7 +86,7 @@ export default function SecondOpinionPage() {
                 checked={view.data.allowed}
                 onSelect={() => void choose(true)}
                 label="聞いてよい"
-                help="名前を書いたときだけ、もう一方の AI に読むだけで聞きます。会社の中身がもう一方の会社にも渡ります。"
+                help="名前を書いたときだけ、もう一方の AI に閲覧のみで聞きます。会社の中身がもう一方の会社にも渡ります。"
               />
             </div>
           </Card>

@@ -33,6 +33,16 @@ export const PROBLEM_TEXT: Record<PluginProblem, string> = {
  */
 export const CONNECTOR_PROBLEMS: readonly PluginProblem[] = ['connector-missing', 'connector-stopped', 'connector-mismatch', 'no-key', 'key-stopped', 'key-destination']
 
+/**
+ * The list's badge splits 「止まっている」 by meaning (owner decision 2026-11-21, design-system.md P2b):
+ * a person stopped it (the operator, a stopped key) → grey 「止めています」; something needs fixing
+ * (a version, a key, the mapping) → red 「止まりました」. The rest (`connector-stopped`: off or
+ * stopped, `auto-not-acknowledged`, `no-connector`, `not-a-business`) is not clear from the code
+ * and keeps 「止まっています」 until the owner decides.
+ */
+export const STOPPED_BY_PERSON: readonly PluginProblem[] = ['stopped', 'key-stopped']
+export const STOPPED_BY_FAILURE: readonly PluginProblem[] = ['not-on-shelf', 'package-changed', 'no-key', 'key-destination', 'mapping-invalid', 'connector-missing', 'connector-mismatch']
+
 /** What a business says while its exchange with the outside service is stopped (e.g. 「HubSpot との行き来は止まっています」). */
 export const connectionStopped = (label: string) => `${label} との行き来は止まっています`
 
@@ -118,7 +128,7 @@ export function integrationRefusal(code: string | undefined, body: Record<string
 /** How a field is written back, as the table offers it. */
 export type WriteChoice = 'read' | 'prior' | 'auto'
 export const WRITE_CHOICE_LABELS: Record<WriteChoice, string> = {
-  read: '書き戻さない（読むだけ）',
+  read: '書き戻さない（閲覧のみ）',
   prior: '承認してから書き戻す',
   auto: '自動で書き戻す',
 }

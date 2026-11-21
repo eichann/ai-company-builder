@@ -1,5 +1,5 @@
 import { useState, type DragEvent } from 'react'
-import { ArrowBendUpRight, ChatCircleDots, Check, CircleNotch, Clock, Eye, Robot, User, VideoCamera, Warning } from '@phosphor-icons/react'
+import { ArrowBendUpRight, ChatCircleDots, Check, CircleNotch, Clock, Eye, Robot, User, VideoCamera, Warning, WarningOctagon } from '@phosphor-icons/react'
 import { NEXT_STEP, ONLY_YOU, thingKindOf, type ThingKind } from '../../../../shared/thing-words'
 import { SeenBy, ThingIcon } from '../../../shared/ui/ThingIcon'
 import type { AiTurnItemState, AiTurnItemView } from '../../../../shared/ai-turns'
@@ -86,7 +86,8 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
     >
       <span className="mt-[2px] shrink-0">
         {item.turn === 'ai' && !done ? (ai?.state === 'running' ? <CircleNotch size={15} className="animate-spin text-accent" aria-label="AI が進めています" />
-          : ai?.state === 'failed' || ai?.state === 'not-allowed' ? <Warning size={15} className="text-amber-500" aria-label="止まっています" />
+          : ai?.state === 'failed' ? <WarningOctagon size={15} weight="fill" className="text-failed-icon" aria-label="AI が止まりました" />
+          : ai?.state === 'not-allowed' ? <Warning size={15} className="text-warning-icon" aria-label={AI_STATE_WORDS['not-allowed']} />
             : <Robot size={15} className="text-accent" aria-label="AI の番" />)
           : onFinish ? (
             <button type="button" disabled={busy} onClick={onFinish} title={boxWord} aria-label={`「${item.title}」を${boxWord}`}

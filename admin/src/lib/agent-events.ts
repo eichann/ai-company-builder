@@ -51,7 +51,7 @@ export type DecisionTone = 'neutral' | 'allowed' | 'denied'
 export const DECISION_LABELS: Record<ToolDecision, { label: string; description: string; tone: DecisionTone }> = {
   'auto-allowed': {
     label: 'アプリが自動で許可',
-    description: '読むだけの操作やアプリの道具など、確認しなくてよいものとしてアプリが通しました。',
+    description: '閲覧のみの操作やアプリの道具など、確認しなくてよいものとしてアプリが通しました。',
     tone: 'neutral',
   },
   'member-allowed': { label: '本人が許可', description: 'アプリが確認を求め、メンバー本人が許可しました。', tone: 'allowed' },

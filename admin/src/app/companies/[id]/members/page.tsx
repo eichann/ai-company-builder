@@ -23,6 +23,7 @@ import { ConfirmByTypingDialog } from '@/components/app/confirm-by-typing'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
+import { Callout } from '@/components/ui/callout'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
@@ -268,7 +269,7 @@ export default function MembersPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={r.member.role === 'member' ? 'outline' : r.member.role === 'owner' ? 'default' : 'brand'}>
+                      <Badge variant={r.member.role === 'member' ? 'outline' : r.member.role === 'owner' ? 'neutral' : 'selected'}>
                         {roleLabel(r.member.role)}
                       </Badge>
                     </TableCell>
@@ -622,7 +623,7 @@ function InviteForm({ companyId, hasCompanyFolder, departments, onCreated, onDon
                 key={d.id}
                 type="button"
                 size="sm"
-                variant={picked.has(d.id) ? 'default' : 'outline'}
+                variant={picked.has(d.id) ? 'selected' : 'outline'}
                 aria-pressed={picked.has(d.id)}
                 onClick={() => toggle(d.id)}
               >
@@ -834,14 +835,14 @@ function RoleForm({
         <p className="text-xs text-muted-foreground">{role === 'member' && !hasCompanyFolder ? NO_FOLDER_WORDS.memberRoleDescription : ROLE_DESCRIPTIONS[role]}</p>
       </div>
       {lastOwner && (
-        <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
+        <Callout variant="warning">
           この会社のオーナーは{isSelf ? 'あなた' : `${row.name} さん`}だけです。役割を変えるには、先にほかのメンバーをオーナーにしてください。
-        </p>
+        </Callout>
       )}
       {losingOwnership && (
-        <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
+        <Callout variant="warning">
           あなた自身がオーナーではなくなります。役割の変更は、ほかのオーナーにしかできなくなります。
-        </p>
+        </Callout>
       )}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>

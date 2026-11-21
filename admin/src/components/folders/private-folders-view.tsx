@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { DotsThree, Eye, Info, LockSimple, MagnifyingGlass, PencilSimple, Plus, Users } from '@phosphor-icons/react'
+import { DotsThree, Eye, Info, LockSimple, MagnifyingGlass, PencilSimple, Plus, ShieldSlash, Users } from '@phosphor-icons/react'
 
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { FOLDERS_DESCRIPTION, FOLDERS_TITLE, FolderTabs } from '@/components/folders/folder-tabs'
@@ -92,7 +92,7 @@ export function PrivateFoldersView() {
         <ListSkeleton rows={3} />
       ) : isForbidden(folders.error) ? (
         <EmptyState
-          icon={LockSimple}
+          icon={ShieldSlash}
           title="非公開フォルダを扱えるのは、オーナー・管理者と部署の管理役です"
           description="非公開のフォルダが必要なときは、管理者か部署の管理役に依頼してください。"
         />

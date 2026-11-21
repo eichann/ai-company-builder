@@ -331,7 +331,7 @@ export function FileTreePanel({
       )}
 
       {dropWarning && (
-        <div className="absolute bottom-2 left-2 right-2 px-3 py-2 rounded-md bg-red-500/10 border border-red-500/30 text-xs text-red-400 whitespace-pre-wrap">
+        <div className="absolute bottom-2 left-2 right-2 px-3 py-2 rounded-control bg-danger-bg border border-danger-border text-xs text-danger-text whitespace-pre-wrap">
           {dropWarning}
         </div>
       )}

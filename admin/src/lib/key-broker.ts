@@ -266,7 +266,7 @@ export function brokerChangeLines(c: BrokerChangeDetail, names: Names): string[]
       return lines
     }
     case 'read-only':
-      return [`${c.service}: 中継 → ${c.after ? '読むだけ' : '読み書き'}`]
+      return [`${c.service}: 中継 → ${c.after ? '閲覧のみ' : '読み書き'}`]
     case 'default-key':
       return [defaultKeyLine(c)]
     case 'settings': {

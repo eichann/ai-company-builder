@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowCounterClockwise, Barricade, ClockCounterClockwise, Globe, FolderLock, LockSimple, UserSwitch } from '@phosphor-icons/react'
+import { ArrowCounterClockwise, Barricade, ClockCounterClockwise, FolderLock, Globe, ShieldSlash, UserSwitch } from '@phosphor-icons/react'
 
 import { ImpactCard } from '@/components/agent-sandbox/impact-card'
 import { RadioCard } from '@/components/app/radio-card'
@@ -50,7 +50,7 @@ export default function AgentSandboxPage() {
       <>
         <AdvancedCrumb aiSafety />
         <PageHeader title={TITLE} />
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       </>
     )
   }

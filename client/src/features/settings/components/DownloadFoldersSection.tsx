@@ -366,7 +366,7 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
               </div>
             ) : loadError ? (
               <div className="p-3">
-                <Callout tone="error" title="フォルダの一覧を読み込めませんでした" action={<Button size="sm" onClick={() => void loadRoot()}>再読み込み</Button>}>
+                <Callout tone="danger" title="フォルダの一覧を読み込めませんでした" action={<Button size="sm" onClick={() => void loadRoot()}>再読み込み</Button>}>
                   {loadError}
                 </Callout>
               </div>

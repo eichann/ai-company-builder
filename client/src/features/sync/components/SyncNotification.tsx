@@ -21,10 +21,10 @@ export function SyncNotification({ notice, onDismiss, onShowBackups }: Props) {
       <div className={`
         rounded-lg shadow-lg border p-4
         ${notice.type === 'success'
-          ? 'bg-green-500/10 border-green-500/30 text-green-400'
+          ? 'bg-success-bg border-success-border text-success-text'
           : notice.type === 'warning'
-          ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-          : 'bg-red-500/10 border-red-500/30 text-red-400'
+          ? 'bg-warning-bg border-warning-border text-warning-text'
+          : 'bg-danger-bg border-danger-border text-danger-text'
         }
       `}>
         <div className="flex items-start gap-3">

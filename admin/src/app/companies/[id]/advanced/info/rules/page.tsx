@@ -2,18 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import {
-  CaretDown,
-  CaretRight,
-  CheckCircle,
-  Key,
-  LockSimple,
-  Lightning,
-  PencilSimpleSlash,
-  UserFocus,
-  WindowsLogo,
-  Wrench,
-} from '@phosphor-icons/react'
+import { CaretDown, CaretRight, CheckCircle, Key, Lightning, PencilSimpleSlash, ShieldSlash, UserFocus, WindowsLogo, Wrench } from '@phosphor-icons/react'
 import type { Icon } from '@phosphor-icons/react'
 
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -107,7 +96,7 @@ export default function SecurityPage() {
       <>
         <AdvancedCrumb />
         <PageHeader title="組み込みのルールと止められた同期" />
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       </>
     )
   }
@@ -301,7 +290,7 @@ function RejectionRow({ rejection: r }: { rejection: PushRejectionRecord }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="text-sm font-medium">{name}</span>
-            <Badge variant={explained ? 'destructive' : 'outline'}>{rejectionShortLabel(r.marker)}</Badge>
+            <Badge variant={explained ? 'danger' : 'outline'}>{rejectionShortLabel(r.marker)}</Badge>
             <span className="text-xs text-muted-foreground" title={formatDateTime(r.createdAt)}>
               {formatRelative(r.createdAt)}
             </span>
