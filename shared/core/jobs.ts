@@ -595,6 +595,8 @@ export function parseJobDefinition(input: unknown): JobDefinitionResult {
   if (input.schema === 3 && run.kind !== 'procedure') problems.push('run.EVENT_PC_ONLY')
   if (input.schema === 3 && check.kind !== 'source_record') problems.push('check.EVENT_NEEDS_SOURCE_RECORD')
   if (check.kind === 'source_record' && input.schema !== 3) problems.push('check.SOURCE_RECORD_EVENTS_ONLY')
+  // An event run must finish with its one やること (it may never finish 'nothing'): without `task` it could only run out its time.
+  if (input.schema === 3 && !grant.creates.includes('task')) problems.push('grant.creates.EVENT_NEEDS_TASK')
   if (problems.length > 0) return { ok: false, problems }
   return { ok: true, definition: { schema: input.schema as JobSchema, name, actingUser: input.actingUser as string, trigger, check, run, placement, missed, grant } }
 }

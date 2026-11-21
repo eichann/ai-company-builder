@@ -1104,7 +1104,8 @@ and やること. Stopping the AI on the PC when the server cannot be reached (a
   (`TIME_LIMIT`), a reconcile wait out of time (`RESULT_UNKNOWN`), the clock's expiry of a running one (`EXPIRED`), a
   finish to a person (`RUN_FAILED`), a pause / the stop holding a running one. **A finish `nothing` is refused** for an
   event run (400 `JOB_EVENT_NOTHING_REFUSED`, the whole finish rolled back, the run still running — as `JOB_RESULT_REQUIRED`):
-  whether it is still needed is the server's conditions' to say, never the AI's (coordinator decision 2026-11-22). A
+  whether it is still needed is the server's conditions' to say, never the AI's (coordinator decision 2026-11-22); so a
+  schema-3 grant must create `task` (`grant.creates.EVENT_NEEDS_TASK`, Codex review of 4b-1: else no finish could succeed). A
   done finish moves the watch to the やること it made (`followMadeTask`) or lets a stopped chain go on (`eventEnded`), in
   the finish's transaction, its own generation only — as the server's runner does.
 - **Never side by side**: a `due` event occurrence waits (409 `JOB_EARLIER_RUNNING`, nothing written, nothing told) while

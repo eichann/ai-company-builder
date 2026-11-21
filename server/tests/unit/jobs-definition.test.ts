@@ -322,7 +322,9 @@ describe('an event run by the PC AI (schema 3, stage 4b-1, owner memo 「段4b �
     expect(problems(eventPcJob({ check: pcJob().check }))).toEqual(['check.EVENT_NEEDS_SOURCE_RECORD'])
     // The source-record check is schema 3's alone: a time job (schema 1) or a server event job (schema 2) never takes it.
     expect(problems({ ...pcJob(), check: { kind: 'source_record', doneMark: 'none' } })).toEqual(['check.SOURCE_RECORD_EVENTS_ONLY'])
-    expect(problems({ ...pcJob(), schema: 2, trigger, check: { kind: 'source_record', doneMark: 'none' } })).toContain('check.SOURCE_RECORD_EVENTS_ONLY')
+    expect(problems({ ...pcJob(), schema: 2, trigger, check: { kind: 'source_record', doneMark: 'none' } })).toContain('check.SOURCE_RECORD_EVENTS_ONLY')    // An event run must finish with its one やること (never 'nothing'): a grant without `task` could only run out its time.
+    const g = (eventPcJob().grant as Record<string, unknown>)
+    expect(problems(eventPcJob({ grant: { ...g, creates: [] } }))).toEqual(['grant.creates.EVENT_NEEDS_TASK'])
   })
 
   it('what the responsible person accepts includes the trigger and the check (its done mark); schema 2 and 1 unchanged', () => {
