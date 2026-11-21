@@ -227,15 +227,15 @@ describe('仕事の進め方: the records switch', () => {
     const puts = () => calls.filter((c) => c.method === 'PUT' && c.url.endsWith('/records/settings'))
 
     await userEvent.click(toggle)
-    let dialog = await screen.findByRole('dialog')
+    let dialog = await screen.findByRole('alertdialog')
     expect(within(dialog).getByText('オフにすると、アプリからやることなどが見えなくなります。記録は消えません。')).toBeInTheDocument()
     await userEvent.click(within(dialog).getByRole('button', { name: 'キャンセル' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(puts()).toEqual([])
     expect(toggle).toHaveAttribute('aria-checked', 'true')
 
     await userEvent.click(toggle)
-    dialog = await screen.findByRole('dialog')
+    dialog = await screen.findByRole('alertdialog')
     await userEvent.click(within(dialog).getByRole('button', { name: 'オフにする' }))
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'))
     expect(puts().map((c) => c.body)).toEqual([{ enabled: false }])

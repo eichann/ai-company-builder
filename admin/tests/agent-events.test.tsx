@@ -401,7 +401,7 @@ describe('settings', () => {
     await userEvent.click(screen.getByRole('radio', { name: '30日' }))
     expect(screen.getByText('保存期間: 180日 → 30日')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    const dialog = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('alertdialog')
     expect(dialog).toHaveTextContent('30日より前')
     expect(dialog).toHaveTextContent('記録 12 件が消えます。よろしいですか？')
     expect(calls.some((c) => c.method === 'PUT')).toBe(false)

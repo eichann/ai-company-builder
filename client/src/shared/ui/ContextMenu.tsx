@@ -73,7 +73,7 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
             disabled={item.disabled}
             className={`w-full flex items-center justify-between px-3 py-1.5 text-sm transition-colors
               ${item.disabled ? 'text-text-secondary cursor-not-allowed' : ''}
-              ${item.danger && !item.disabled ? 'text-red-400 hover:bg-red-500/10' : ''}
+              ${item.danger && !item.disabled ? 'text-danger-text hover:bg-danger-bg-hover' : ''}
               ${!item.danger && !item.disabled ? 'text-text-primary hover:bg-activitybar-bg' : ''}
             `}
           >

@@ -149,6 +149,37 @@ fine), `color-opacity` (`bg-warning/10`).
   or record an exception.
 - Layout values (`w-[420px]`, `grid-cols-[…]`, `max-h-[60vh]`) are findings until there are
   layout tokens; record a real one-off with `design-lint-allow`.
+## Danger actions and the confirm dialog (P1a, done)
+
+- **One red**: the app's `Button variant="danger"` (`client/src/shared/ui/primitives.tsx`), the
+  `ConfirmDialog` danger button, the danger items of `ContextMenu` / `MoreMenu`, and the admin's
+  `Button variant="destructive"` / `DropdownMenuItem variant="destructive"` use the `danger` set
+  (`bg-danger text-on-danger hover:bg-danger-hover`, menu items `text-danger-text`,
+  `danger-bg-hover`). No amber, rose or `red-*` for a danger action; amber is warning only.
+- **App `ConfirmDialog`** (`client/src/shared/ui/ConfirmDialog.tsx`): `role="alertdialog"` when
+  `danger`, else `dialog`; `aria-modal`, labelled by the title and described by the message.
+  Focus starts on 「やめる」 for `danger`, on the main action otherwise, and on the dialog itself
+  with `confirmOnEnter={false}` (a dialog that can open while the member types: no stray key
+  answers it). Tab / Shift+Tab wrap inside; Esc cancels and does not reach what is underneath;
+  a scrim click neither closes it nor takes focus out; **nothing listens for Enter on the
+  document** (Enter presses the focused button only: a key typed elsewhere, an IME conversion's
+  included, never confirms). What protects someone **typing when the dialog opens** is
+  `confirmOnEnter={false}` (focus on the dialog itself), not the missing document listener: a
+  default dialog takes focus on a button, so the next real Enter presses it — every dialog that can
+  open while the member types, or from an input's Enter keydown, must pass `confirmOnEnter={false}`.
+  Focus returns to the opener; with dialogs stacked only the top one holds focus. Known gap: the
+  app's document-level shortcuts (⌘K, ⌘P, ⌘⇧C) still fire while a dialog is open, and a palette
+  they open loses its focus back to the dialog (the shortcut system should skip keys while an
+  `aria-modal` dialog is open; later PR). Habit change: on a danger confirm, Enter now cancels
+  (focus on 「やめる」) where it used to confirm (file tree Delete → Enter, chat sidebar).
+  Guarded by `client/tests/ui/confirm-dialog.spec.ts` (`tests/confirm-dialog-ui.html`), with
+  `keep-work.spec.ts` / `editor-panel.spec.ts` for Enter on `confirmOnEnter={false}`.
+- **Admin `ConfirmDialog`** (`admin/src/components/app/confirm-dialog.tsx`, Radix): the same rules
+  (Radix gives Tab and Esc); `destructive` (still the default) is an `alertdialog` that a scrim
+  click does not close, focus starts on キャンセル, otherwise on the main action; focus returns to
+  the opener although callers open it without a Radix trigger. `admin/tests/confirm-dialog.test.tsx`.
+- The hand-made dialogs keep their own frames until the dialog-frame PR (P2).
+
 ## Order of the next PRs (from the proposal)
 
 - **P1**: danger vs ordinary actions and the confirm dialog (red only for delete / remove; focus,
