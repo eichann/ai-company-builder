@@ -14,6 +14,9 @@
  *   and parses it with the core's parser, so the server and the app read the same text.
  * - `factsVersion`: `BROWSER_FACTS_VERSION` (shared/core/browser-plans.ts); every type's declared
  *   facts must be known to that version's schema for its checker, or the script refuses.
+ * - A new row is written `pending` (design memo §33.5): listed, but the server accepts no plan for it
+ *   (`BROWSER_TYPE_NOT_APPROVED`) until a reviewed edit makes it `approved` — with `minAppVersion`
+ *   set to the first app build that carries everything the combination needs.
  * - A row the files no longer give is kept as it is (an app already released may carry that code);
  *   retiring one is a reviewed edit of its `status` to `retired`. `minAppVersion` starts null (no
  *   gate beyond the hashes) and may be set by hand; both are kept when the script runs again.
@@ -42,7 +45,7 @@ export interface ApprovedRow {
   checkerHash: string
   factsVersion: number
   minAppVersion: string | null
-  status: 'approved' | 'retired'
+  status: 'pending' | 'approved' | 'retired'
   declaration: string
 }
 
@@ -85,7 +88,7 @@ export async function currentRows(connectorsDir = CONNECTORS_DIR): Promise<Appro
       }
       rows.push({
         connector: parsed.value.id, version: parsed.value.version, declarationHash: declarationHash(text), checkerHash,
-        factsVersion: BROWSER_FACTS_VERSION, minAppVersion: null, status: 'approved', declaration: text,
+        factsVersion: BROWSER_FACTS_VERSION, minAppVersion: null, status: 'pending', declaration: text,
       })
     }
   }

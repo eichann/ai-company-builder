@@ -59,11 +59,13 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
 - `client/shared/agents/registry.ts` (pure; main, renderer and tests import it): per agent id
   (`claude-code` / `codex` / `api-key`; `AuthMode` is an alias of `AgentId`) → labels, models
   (id, label, efforts, context, exact CLI string), defaults (Opus 5.5 + medium), the model per
-  job (`tasks`: chat / title / commitMessage / voice / handoff / webReader / secondOpinion), `askNames` (how a
+  job (`tasks`: chat / title / commitMessage / voice / handoff / webReader / secondOpinion / browserOperator), `askNames` (how a
   member names the agent in a message: 「Codex」「コーデックス」, 「Claude」「クロード」) and `capabilities`
   (ownsConversation, steering, promptSuggestions, choicePrompts, subagentProgress, rateLimits,
   imageInput, companyFilesMcp, references, writeGuard, privateReadGuard, handoff, oneShotText,
-  webReader, secondOpinion, commitMessageFallback, privateFolderCommitMessages, liveModelCatalog), and
+  webReader, secondOpinion, browserOperator — 「ブラウザ操作」's operator, Claude Code only, with its CLI floor
+  `browserOperatorCli`, `agent-browser.md` "The operator and the preview" —, commitMessageFallback,
+  privateFolderCommitMessages, liveModelCatalog), and
   `minCliVersion` (Codex: the oldest CLI the app starts, checked with `--version` before a chat
   turn and in the settings check — `agent-sandbox.md`).
 - **Every model id lives there.** `client/tests/agent-registry.test.ts` pins today's strings and

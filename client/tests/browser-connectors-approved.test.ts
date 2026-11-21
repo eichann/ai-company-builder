@@ -43,6 +43,8 @@ test('a new checker hash is a new row next to the old one; a changed declaration
   const count = (JSON.parse(existing) as { combinations: unknown[] }).combinations.length
   const newChecker = JSON.parse(mergeApproved(existing, [{ ...row, checkerHash: `sha256:${'0'.repeat(64)}` }])) as { combinations: unknown[] }
   assert.equal(newChecker.combinations.length, count + 1)
+  // A new row is listed `pending`: the server accepts no plan for it until a reviewed edit approves it (design memo §33.5).
+  assert.equal((newChecker.combinations as Array<{ checkerHash: string; status: string }>).find(r => r.checkerHash === `sha256:${'0'.repeat(64)}`)?.status, 'pending')
   const text = row.declaration.replace('label: リマインダの段にテンプレートを足す', 'label: 段にテンプレートを足す')
   assert.throws(() => mergeApproved(existing, [{ ...row, declaration: text, declarationHash: declarationHash(text) }]), /raise the version/)
 })

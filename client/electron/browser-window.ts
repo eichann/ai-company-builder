@@ -12,18 +12,24 @@
 // errors are refused, and nothing is handed to the system browser or another app. In `ai` mode
 // every request of the page is paused through DevTools Fetch: a write goes out only when the
 // injected decider says yes (a run's never does), a read of the operated host only when the run's
-// read rule says so. A run's own requests go through the session (`run.request`), never the page,
-// and pass the request hook only when the run's gate says yes (agent-browser.md "The runner").
+// read rule says so. Main's own requests (a run's, the preview's) never go through the page nor this
+// session: page-less sessions of their own, the read session and the write session, one request at
+// a time each with the window's login (features/browser/read-session.ts; agent-browser.md "The
+// operator and the preview"); in `ai` mode the window's session refuses every request from outside
+// its page.
 import net from 'node:net'
 import { BrowserWindow, net as electronNet, session, type Session, type WebContents } from 'electron'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
+import { BROWSER_PATH_RE } from '../../shared/core/plugin-browser-declaration'
+import { checkUpstreamPath } from '../../shared/core/upstream-path'
 import {
-  BROWSER_WORDS, browserProxyScript, browserWritePartition, browserResponseHeaders, createRefusalTally, decideAiRead, decideAiWrite, decideWindowRequest,
+  BROWSER_WORDS, browserProxyScript, browserReadPartition, browserWritePartition, browserResponseHeaders, createRefusalTally, decideAiRead, decideAiWrite, decideWindowRequest,
   hostForLog, isReadMethod, navigationAllowed,
   type BrowserReadDecider, type BrowserWindowMode, type BrowserWindowState, type BrowserWriteAttempt, type BrowserWriteDecider,
 } from '../shared/browser-operation'
-import type { BrowserRunSurface } from '../shared/browser-runner'
+import type { BrowserGateDecision, BrowserPreviewSurface, BrowserRunSurface, BrowserSessionRequest } from '../shared/browser-runner'
 import type { BrowserShell, BrowserWindowHandle, BrowserWindowSpec } from './features/browser/controller'
+import { createSessionLanes, exactRead, throughSession, type PagelessSession } from './features/browser/read-session'
 
 /** What `ai` mode needs: the approved step's decider (none = no write) and the emergency stop. */
 export interface BrowserAiGate {
@@ -38,6 +44,7 @@ export interface BrowserShellWindow extends BrowserWindowHandle {
   /** `human` (default) or `ai` with its gate; the gate attaches after the first page load. */
   setMode(mode: BrowserWindowMode, gate?: BrowserAiGate): Promise<void>
   run: BrowserRunSurface
+  preview: BrowserPreviewSurface
 }
 
 const RUN_REQUEST_MS = 30_000
@@ -48,12 +55,14 @@ const RUN_ANSWER_MAX = 5 * 1024 * 1024
  * status is returned and it is not followed (a redirect after a save points back at a page; reading
  * it is the runner's own, declared read).
  */
-function sendOnce(ses: Session, r: { method: string; url: string; contentType?: string; body?: string }): Promise<{ status: number; body: string }> {
+function sendOnce(ses: Session, r: { method: string; url: string; contentType?: string; body?: string }, signal?: AbortSignal): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const request = electronNet.request({ method: r.method, url: r.url, session: ses, credentials: 'include', redirect: 'manual', cache: 'no-store' })
     let done = false
     let timer: ReturnType<typeof setTimeout> | undefined
-    const finish = (fn: () => void) => { if (!done) { done = true; clearTimeout(timer); fn() } }
+    const finish = (fn: () => void) => { if (!done) { done = true; clearTimeout(timer); signal?.removeEventListener('abort', onAbort); fn() } }
+    function onAbort() { finish(() => { request.abort(); reject(new Error('aborted')) }) }
+    signal?.addEventListener('abort', onAbort, { once: true })
     timer = setTimeout(() => finish(() => { request.abort(); reject(new Error('no answer in time')) }), RUN_REQUEST_MS)
     request.on('redirect', status => finish(() => { request.abort(); resolve({ status, body: '' }) }))
     request.on('response', response => {
@@ -115,6 +124,8 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
   const log = options.log ?? console
   const states = new Map<string, SessionState>()
   let refusingProxy: Promise<number> | null = null
+  /** One lane per page-less session name, for the whole app run (a reopened window's too). */
+  const lanes = createSessionLanes()
 
   const flush = (state: SessionState) => {
     if (state.flushTimer) { clearTimeout(state.flushTimer); state.flushTimer = null }
@@ -138,7 +149,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
     const ses = session.fromPartition(partition)
     let state = states.get(partition)
     if (state) return { ses, state }
-    const created: SessionState = { site: null, mode: 'human', aiGateReady: false, outside: null, contentsId: null, tally: createRefusalTally(), flushTimer: null }
+    const created: SessionState = { site: null, mode: 'human', aiGateReady: false, contentsId: null, tally: createRefusalTally(), flushTimer: null }
     states.set(partition, created)
     state = created
     // The one request hook of this session. With no window (site null) it refuses everything:
@@ -168,6 +179,47 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
     ses.setPermissionCheckHandler(() => false)
     ses.setDevicePermissionHandler(() => false)
     return { ses, state }
+  }
+
+  const wipeSession = async (ses: Session) => {
+    await ses.closeAllConnections().catch(() => {})
+    await ses.clearStorageData().catch(() => {})
+    await ses.clearCache().catch(() => {})
+  }
+
+  /**
+   * A page-less session of a window (its read or write session): its one request hook is set per
+   * request (Electron keeps the last listener; the lane runs one request at a time), the site's proxy
+   * rule, every permission refused, the window's cookies for exactly the request's address copied in.
+   */
+  function pageless(partition: string, windowSession: Session, state: SessionState, label: string): PagelessSession {
+    const ses = session.fromPartition(partition)
+    return {
+      wipe: () => wipeSession(ses),
+      async guard(allow: (request: BrowserSessionRequest) => boolean) {
+        ses.webRequest.onBeforeRequest((details, callback) => {
+          let ok = false
+          try { ok = allow({ method: details.method, url: details.url, body: uploadBody(details.uploadData) }) === true } catch { ok = false }
+          if (!ok) refuse(state, hostForLog(details.url), label)
+          callback({ cancel: !ok })
+        })
+        ses.setPermissionRequestHandler((_c, _p, callback) => callback(false))
+        ses.setPermissionCheckHandler(() => false)
+        if (!state.site) throw new Error('window closed')
+        await routeOnly(ses, state.site)
+      },
+      async copyCookies(url: string) {
+        const host = new URL(url).hostname
+        for (const c of await windowSession.cookies.get({ url })) {
+          await ses.cookies.set({
+            url: `https://${host}${c.path ?? '/'}`, name: c.name, value: c.value, path: c.path,
+            ...(c.hostOnly ? {} : { domain: c.domain }), secure: c.secure, httpOnly: c.httpOnly,
+            ...(c.expirationDate ? { expirationDate: c.expirationDate } : {}), sameSite: c.sameSite,
+          })
+        }
+      },
+      send: (request, signal) => sendOnce(ses, request, signal),
+    }
   }
 
   function guardContents(contents: WebContents, state: SessionState) {
@@ -269,7 +321,6 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       }
       state.mode = 'human'
       state.aiGateReady = false
-      state.outside = null
       gate = null
       pendingAttach = false
       const dbg = contents.debugger
@@ -288,7 +339,6 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       state.site = spec.site
       state.mode = 'human'
       state.aiGateReady = false
-      state.outside = null
       const win = new BrowserWindow({
         width: 1200,
         height: 860,
@@ -318,33 +368,45 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       state.contentsId = contentsId
       guardContents(contents, state)
       const setMode = createAiGate(contents, state)
+      // The run's gate for its own requests (read and write sessions); none outside a run.
+      let runGate: ((request: BrowserSessionRequest) => BrowserGateDecision) | null = null
+      const readKey = browserReadPartition(spec.partition)
+      const writeKey = browserWritePartition(spec.partition)
+      const reads = pageless(readKey, ses, state, 'read-session')
+      const writes = pageless(writeKey, ses, state, 'ai-write-session')
       const revoke = () => {
         if (state.contentsId !== contentsId) return
         state.site = null
         state.mode = 'human'
         state.aiGateReady = false
-        state.outside = null
         state.contentsId = null
+        runGate = null
       }
       const closed = () => state.contentsId !== contentsId || win.isDestroyed() || !state.site
       const run: BrowserRunSurface = {
         async enterAi(hooks) {
           if (closed()) return false
-          // The run's gate on requests from outside the page (its own), then the page's gate.
-          state.outside = hooks.sessionRequest
+          // The run's gate on its own requests (through the read and write sessions), then the page's gate.
+          runGate = hooks.sessionRequest
           await setMode('ai', { decide: () => false, decideRead: hooks.pageRead, stopped: hooks.stopped })
           return !closed() && state.mode === 'ai' && state.aiGateReady
         },
         async leaveAi() {
-          state.outside = null
+          runGate = null
           if (state.contentsId === contentsId) await setMode('human')
         },
-        // Through the window's session (its login), never the page: no script of the page sees or changes it.
+        // Never through the page nor the window's session: no script of the page sees, changes or answers it.
         async request({ method, path, contentType, body }) {
           if (closed() || !path.startsWith('/')) throw new Error('window closed')
-          const site = state.site!
-          const url = `https://${site.host}${path}`
-          if (isReadMethod(method)) return sendOnce(ses, { method, url, contentType, body })
+          const gate = runGate
+          if (!gate) throw new Error('no run')
+          const url = `https://${state.site!.host}${path}`
+          // This window's own run only: the session's window is still this one and in `ai` mode.
+          const asks = (r: BrowserSessionRequest) => state.contentsId === contentsId && state.mode === 'ai' && r.url === url && gate(r).allow
+          const open = () => !closed()
+          // A read through the read session (page-less: a worker of the page cannot ask the same path
+          // and have its answer taken for main's, design memo §33 2-4).
+          if (isReadMethod(method)) return throughSession(lanes, readKey, reads, { method, url }, asks, undefined, open)
           // A write goes on a connection of its own (agent-browser.md "The runner"): Chromium resends a
           // request whose reused keep-alive connection dropped before the answer — below the request
           // hook, so the gate's "once" never sees it (verified on Electron 45: one lost answer reached
@@ -355,36 +417,18 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
           // ONE request hook, the run's gate (Electron keeps the last one: replaced each write). What
           // the site sets in its answer (Set-Cookie) is not carried back to the window (decision: the
           // runner re-reads with the window's own login; a rotated cookie stays the window's).
-          const outside = state.outside
-          if (!outside) throw new Error('no run')
-          const once = session.fromPartition(browserWritePartition(spec.partition))
-          const wipe = async () => {
-            await once.closeAllConnections().catch(() => {})
-            await once.clearStorageData().catch(() => {})
-            await once.clearCache().catch(() => {})
-          }
-          await wipe()
-          try {
-            once.webRequest.onBeforeRequest((details, callback) => {
-              let allow = false
-              try { allow = state.mode === 'ai' && details.url === url && outside({ method: details.method, url: details.url, body: uploadBody(details.uploadData) }).allow } catch { allow = false }
-              if (!allow) refuse(state, hostForLog(details.url), 'ai-write-session')
-              callback({ cancel: !allow })
-            })
-            once.setPermissionRequestHandler((_c, _p, callback) => callback(false))
-            once.setPermissionCheckHandler(() => false)
-            await routeOnly(once, site)
-            for (const c of await ses.cookies.get({ url })) {
-              await once.cookies.set({
-                url: `https://${site.host}${c.path ?? '/'}`, name: c.name, value: c.value, path: c.path,
-                ...(c.hostOnly ? {} : { domain: c.domain }), secure: c.secure, httpOnly: c.httpOnly,
-                ...(c.expirationDate ? { expirationDate: c.expirationDate } : {}), sameSite: c.sameSite,
-              })
-            }
-            return await sendOnce(once, { method, url, contentType, body })
-          } finally {
-            await wipe()
-          }
+          return throughSession(lanes, writeKey, writes, { method, url, contentType, body }, asks, undefined, open)
+        },
+        closed,
+      }
+      // The preview reads through the read session only: the window keeps its mode, page and the
+      // member's typing (design memo §33 2-4); only exactly that path, GET, no query.
+      const preview: BrowserPreviewSurface = {
+        async read(path, signal) {
+          // A fixed path only: no query, fragment, `..` or `//` (the preview builds it from the declaration).
+          if (closed() || !BROWSER_PATH_RE.test(path) || !checkUpstreamPath(path)) throw new Error('window closed')
+          const url = `https://${state.site!.host}${path}`
+          return throughSession(lanes, readKey, reads, { method: 'GET', url }, exactRead(url), signal, () => !closed())
         },
         closed,
       }
@@ -430,6 +474,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
         },
         setMode,
         run,
+        preview,
       }
     },
 
@@ -439,6 +484,10 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       await ses.clearCache()
       await ses.clearAuthCache()
       await ses.clearData()
+      // Its page-less sessions are empty between requests; cleared again after the one running, if any.
+      for (const name of [browserReadPartition(partition), browserWritePartition(partition)]) {
+        await lanes.run(name, () => wipeSession(session.fromPartition(name)))
+      }
     },
   }
 }

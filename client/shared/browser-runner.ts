@@ -153,6 +153,69 @@ export interface BrowserChecker {
 }
 
 // ---------------------------------------------------------------------------
+// The preview's readers (design memo §33 2-2 / 2-3; a site's live in client/connectors/<site>/)
+// ---------------------------------------------------------------------------
+
+/** What a reader asks the page for: elements by tag, exact id, id pattern or an attribute's presence. */
+export interface BrowserPageQuery {
+  tag?: string
+  id?: string
+  /** Tested against the whole id (anchor it). */
+  idPattern?: RegExp
+  /** The element carries this attribute (any value). */
+  hasAttribute?: string
+}
+
+/**
+ * One element of a page as the core lets a reader see it (client/shared/browser-page.ts): only
+ * what a person could see — nothing inside `hidden`, `aria-hidden="true"`, `<template>`,
+ * `<noscript>`, `<script>`, `<style>`, comments or an inline `display:none` / `visibility:hidden`
+ * — and every rule (an attribute written twice, an id used twice) applied by the core, which then
+ * marks the read incomplete. A reader never sees the HTML itself.
+ */
+export interface BrowserPageElement {
+  readonly tag: string
+  /** The element's id, or null (none). An element whose id stands twice is never shown to a reader. */
+  readonly id: string | null
+  /** An attribute's value, or null (none). An element with an attribute written twice is never shown. */
+  attr(name: string): string | null
+  /** The element's visible text, whitespace folded (a label: the core cleans and cuts it). */
+  text(): string
+  /** Matching elements inside this one (visible ones only), in document order. */
+  find(query: BrowserPageQuery): BrowserPageElement[]
+}
+
+/** A page as a reader sees it: the visible tree under the body. */
+export interface BrowserPageView {
+  find(query: BrowserPageQuery): BrowserPageElement[]
+  /** Exactly one visible element matches, or null — and the read is marked incomplete. */
+  one(query: BrowserPageQuery): BrowserPageElement | null
+  /** Marks this read as not read whole (an expected part missing or ambiguous). */
+  incomplete(): void
+}
+
+/** One item a reader took out: a declared field's id (`value`), its visible label, and declared extras. */
+export interface BrowserExploreItem {
+  field: string
+  value: string
+  label?: string
+  extra?: Readonly<Record<string, string>>
+}
+
+/**
+ * A reviewed reader of one kind of page for the preview: from the declared region of the page,
+ * the declared fields only. Choosing among them is the operator AI's; nothing else of the page
+ * reaches it (design memo §33 2-3). `fields` and `extra` are the only names its items may carry.
+ */
+export interface BrowserExploreReader {
+  /** `<site>.<thing>`, as a declaration's `explore.<name>.reader` names it. */
+  readonly id: string
+  readonly fields: readonly string[]
+  readonly extra: readonly string[]
+  read(values: Readonly<Record<string, string>>, page: BrowserPageView): { items: BrowserExploreItem[]; complete: boolean }
+}
+
+// ---------------------------------------------------------------------------
 // The gate of one run
 // ---------------------------------------------------------------------------
 
@@ -186,8 +249,22 @@ export interface BrowserRunSurface {
   /** `ai` mode with the run's gate; true only once the gate sees every request of the page. */
   enterAi(hooks: BrowserRunGateHooks): Promise<boolean>
   leaveAi(): Promise<void>
-  /** A request through the window's session (its login), never through the page; rejects = no answer. */
+  /**
+   * A request with the window's login, never through the page nor the window's session: a read
+   * through the window's read session, a write through its write session (page-less, one request
+   * at a time each, agent-browser.md "The operator and the preview"); rejects = no answer.
+   */
   request(request: { method: string; path: string; contentType?: string; body?: string }): Promise<{ status: number; body: string }>
+  closed(): boolean
+}
+
+/**
+ * The window as the preview uses it: reads through its page-less read session with the window's
+ * login (only GET of exactly that path), the window itself untouched — not switched to `ai`, its
+ * page and the member's typing left alone (design memo §33 2-4).
+ */
+export interface BrowserPreviewSurface {
+  read(path: string, signal?: AbortSignal): Promise<{ status: number; body: string }>
   closed(): boolean
 }
 
@@ -317,7 +394,7 @@ export type BrowserStepState = 'pending' | 'sent' | 'succeeded' | 'failed' | 'un
 /** The only reason words a step record or a result carries (never a checker's or a site's text). */
 export const BROWSER_RUN_REASONS = [
   // before anything starts
-  'already-running', 'no-plan', 'plan', 'expired', 'already-ran', 'connector', 'operation', 'not-supported',
+  'off', 'already-running', 'no-plan', 'plan', 'expired', 'already-ran', 'connector', 'operation', 'not-supported',
   'unknown-checker', 'target-unconfirmed', 'stopped', 'policy', 'no-window', 'busy', 'records-unavailable',
   // started, nothing sent
   'window-not-ready', 'window-closed', 'read-failed', 'account-unknown', 'account-mismatch', 'target-missing',

@@ -17,7 +17,7 @@ import type { BrowserSiteSetting } from '../../../shared/core/browser-operation'
 import { createBrowserCheckerRegistry, createBrowserConnectors } from '../../shared/browser-checkers'
 import { lstepConnector } from '../../connectors/lstep'
 import { LSTEP_DECLARATION } from '../../connectors/lstep/declaration'
-import { browserWritePartition } from '../../shared/browser-operation'
+import { browserReadPartition, browserWritePartition } from '../../shared/browser-operation'
 import { createRunGate, encodeForm, FORM_CONTENT_TYPE, type BrowserRunSurface, type BrowserStepRecord } from '../../shared/browser-runner'
 import { startSites, type Sites } from './sites'
 
@@ -210,12 +210,13 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   const plans: Record<string, Record<string, unknown>> = {}
   const plan = (planId: string, over: Record<string, unknown>) => {
     plans[planId] = {
-      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.2.0' }, operation: 'reminder_step_add_template',
+      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.3.0' }, operation: 'reminder_step_add_template',
       account: 'ACC1', target: { reminder: '101', step: '201' }, change: { template: '301' }, before: { templates: ['300'] },
       approvedAt: Date.now() - 1000, expiresAt: Date.now() + 120_000, ...over,
     }
   }
   const runner = createBrowserRunner({
+    aiSwitch: () => true,
     approvedPlan: async id => plans[id] ?? null,
     connector, checker: id => checkers.get(id), site: () => site, stopped: () => stopped,
     window: () => surface,
@@ -234,6 +235,15 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   out.stepAfterHappy = [...sites.lstep['201']]
   // The write's session holds nothing of the login once the write is done.
   out.writeSessionCookies = (await session.fromPartition(browserWritePartition(partition)).cookies.get({})).length
+  out.readSessionCookies = (await session.fromPartition(browserReadPartition(partition)).cookies.get({})).length
+  // The preview reads with the member's login through the read session and leaves the window alone:
+  // what the member is typing in the page stays.
+  await js(`(() => { const i = document.createElement('input'); i.id = '__typing'; i.value = '入力中'; document.body.append(i); return 1 })()`)
+  const previewHits = sites.hits.length
+  out.previewRead = await win.preview.read('/line/episode/show/101').then(r => r.status, () => 'refused')
+  out.previewReachedSite = sites.hits.slice(previewHits).filter(h => h.path === '/line/episode/show/101').length
+  out.typingAfterPreview = await js(`document.getElementById('__typing')?.value ?? null`)
+  out.readSessionCookiesAfterPreview = (await session.fromPartition(browserReadPartition(partition)).cookies.get({})).length
   // Another LINE account shown on the page than the plan's.
   plan('plan-b', { account: 'ACC2', change: { template: '302' }, before: { templates: ['300', '301'] } })
   out.wrongAccount = await runner.run('plan-b')
@@ -255,7 +265,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   await page.loadURL('https://op.test/line/episode/show/101').catch(() => {})
   await wait(300)
   const gate = createRunGate({
-    host: 'op.test', operation: connector('lstep', '0.2.0')!.operations.reminder_step_add_template,
+    host: 'op.test', operation: connector('lstep', '0.3.0')!.operations.reminder_step_add_template,
     values: { target: { reminder: '101', step: '201' }, change: { template: '304' } },
     readPaths: ['/line/episode/show/101'], stopped: () => false,
   })
@@ -277,7 +287,8 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   out.pageDeclaredRead = await js(`fetch('/line/episode/show/101').then(r => r.status, () => 'refused')`)
   await win.run.leaveAi()
   out.gateRefusals = [...gate.refusals()]
-  // Every write of every run went through one write session (they do not pile up).
+  // Every read and write of every run went through the window's one read and one write session, made
+  // with the window: the runs make none (they do not pile up).
   out.writeSessionsCreated = sessionsCreated - sessionsBefore
   await page.session.cookies.remove('https://op.test/line/episode/step/pack', 'wp')
   // Back to the site's start page for the rest of the harness.

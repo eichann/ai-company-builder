@@ -90,26 +90,21 @@ test('a run reads only its checker\'s declared paths; the page\'s parts load, no
   assert.equal(gate.hooks.pageRead({ url: 'https://d1nhtjid4lgi9y.cloudfront.net/a.css', resourceType: 'Stylesheet' }), true, 'another host is the request hook\'s')
 })
 
-test('in ai mode the window lets nothing from outside its page reach the operated host unless the run\'s gate says so', () => {
+test('in ai mode the window\'s session lets nothing from outside its page reach the operated host — not even main\'s own declared read path (main reads through a page-less session); in human mode the member\'s browsing is untouched', () => {
   const site: BrowserSiteSetting = { host: HOST, level: 'write', assetHosts: [] }
   const ai: BrowserWindowState = { site, mode: 'ai', aiGateReady: true }
   const req = (method: string, p: string, fromWindow: boolean, body?: string) => ({ url: url(p), method, resourceType: 'xhr', fromWindow, body })
-  // A service worker's read or write: no run, no way.
+  // A service worker's read of the very path main reads, or its write: refused (design memo §33 2-4).
   assert.deepEqual(decideWindowRequest(ai, req('GET', READ, false)), { allow: false, reason: 'ai-outside' })
+  assert.deepEqual(decideWindowRequest(ai, req('HEAD', READ, false)), { allow: false, reason: 'ai-outside' })
   assert.deepEqual(decideWindowRequest(ai, req('POST', WRITE, false, planned())), { allow: false, reason: 'ai-unchecked-write' })
-  const gate = gateOf()
-  const run: BrowserWindowState = { ...ai, outside: gate.hooks.sessionRequest }
-  assert.deepEqual(decideWindowRequest(run, req('GET', READ, false)), { allow: true })
-  assert.deepEqual(decideWindowRequest(run, req('GET', '/other', false)), { allow: false, reason: 'ai-outside' })
-  // A write from outside the page never goes through the window's session, armed or not (a run's
-  // write has a session of its own: browser-window.ts).
-  gate.arm(0)
-  assert.deepEqual(decideWindowRequest(run, req('POST', WRITE, false, planned())), { allow: false, reason: 'ai-unchecked-write' })
-  assert.equal(gate.sent(0), false)
-  // A decider that throws refuses.
-  assert.equal(decideWindowRequest({ ...ai, outside: () => { throw new Error('x') } }, req('GET', READ, false)).allow, false)
-  // In human mode nothing of this applies (the member's own browsing).
-  assert.equal(decideWindowRequest({ site, mode: 'human', aiGateReady: false }, req('GET', '/other', false)).allow, true)
+  // The page's own read of that path is the page gate's (the run's read rule), not refused here.
+  assert.deepEqual(decideWindowRequest(ai, req('GET', READ, true)), { allow: true })
+  // In human mode the site's rule alone: the member's own page and its worker reach the site.
+  const human: BrowserWindowState = { site, mode: 'human', aiGateReady: false }
+  assert.equal(decideWindowRequest(human, req('GET', READ, false)).allow, true)
+  assert.equal(decideWindowRequest(human, req('GET', '/other', false)).allow, true)
+  assert.equal(decideWindowRequest(human, req('POST', WRITE, false, planned())).allow, true)
 })
 
 test('the page\'s reads in a run follow the run\'s read rule on the operated host only', () => {
@@ -128,7 +123,7 @@ test('the page\'s reads in a run follow the run\'s read rule on the operated hos
 
 const NOW = 1_800_000_000_000
 const planInput = (over: Record<string, unknown> = {}) => ({
-  planId: 'plan-1', companyId: 'c1', connector: { id: 'lstep', version: '0.2.0' }, operation: 'reminder_step_add_template',
+  planId: 'plan-1', companyId: 'c1', connector: { id: 'lstep', version: '0.3.0' }, operation: 'reminder_step_add_template',
   account: 'ACC1', target: values.target, change: values.change, before: { templates: ['300'] }, approvedAt: NOW - 1000, expiresAt: NOW + 60_000, ...over,
 })
 
@@ -201,13 +196,33 @@ test('Lステップ\'s checker reads the step\'s templates, the account and the 
   assert.equal(checker.view(values, read(lstepPage({ steps: { 201: [] }, token: ['a', 'b'] }))).problem, 'csrf-missing')
 })
 
-test('the app\'s own Lステップ checker reads no account until the real page\'s marker is confirmed: a run stops before writing', () => {
-  const view = checkers().get(LSTEP_REMINDER_STEP_CHECKER)!.view(values, read(lstepPage({ steps: { 201: [] } })))
-  assert.equal(view.account, null)
+test('the app\'s own Lステップ checker reads the account from the page\'s lm-account-id meta: one value, else none (a run then stops before writing)', () => {
+  const account = (head: string) => checkers().get(LSTEP_REMINDER_STEP_CHECKER)!.view(values, read(`<html><head>${head}</head><body>${lstepPage({ steps: { 201: [] } })}</body></html>`)).account
+  assert.equal(account('<meta name="lm-account-id" content="5550001">'), '5550001')
+  assert.equal(account('<meta content="5550001" name="lm-account-id">'), '5550001')
+  // The same value twice is one account; two different values are none.
+  assert.equal(account('<meta name="lm-account-id" content="5550001"><meta name="lm-account-id" content="5550001">'), '5550001')
+  assert.equal(account('<meta name="lm-account-id" content="5550001"><meta name="lm-account-id" content="5550002">'), null)
+  // Missing, empty, not a positive integer, or only inside a comment or a script: none.
+  assert.equal(account(''), null)
+  assert.equal(account('<meta name="lm-account-id" content="">'), null)
+  assert.equal(account('<meta name="lm-account-id" content="0">'), null)
+  assert.equal(account('<meta name="lm-account-id" content="all">'), null)
+  assert.equal(account('<!-- <meta name="lm-account-id" content="5550001"> -->'), null)
+  assert.equal(account('<script>"<meta name=\\"lm-account-id\\" content=\\"5550001\\">"</script>'), null)
+  // Only real markup: not spelled inside an attribute value, a style, a noscript or a template.
+  assert.equal(account(`<div title='<meta name="lm-account-id" content="5550001">'></div>`), null)
+  assert.equal(account(`<div title='a>b <meta name="lm-account-id" content="5550001">'></div>`), null, 'a > inside a quoted value does not end the tag')
+  assert.equal(account(`<meta name="lm-account-id" content="5550001"><div title='<meta name="lm-account-id" content="999">'></div>`), '5550001')
+  assert.equal(account('<style>/* <meta name="lm-account-id" content="5550001"> */</style>'), null)
+  assert.equal(account('<noscript><meta name="lm-account-id" content="5550001"></noscript>'), null)
+  assert.equal(account('<template><meta name="lm-account-id" content="5550001"></template>'), null)
+  // A meta of another name is not the account.
+  assert.equal(account('<meta name="lm-account" content="5550001">'), null)
 })
 
 test('the bundled declaration passes the core\'s checks, names a reviewed checker, and an unknown checker id is never run', () => {
-  const bundled = connectors('lstep', '0.2.0')
+  const bundled = connectors('lstep', '0.3.0')
   assert.ok(bundled)
   assert.equal(bundled.host, HOST)
   assert.deepEqual(operation.writes, [{ method: 'POST', path: WRITE, encoding: 'form', body: { content_id: { field: 'step' }, template_id: { field: 'template' } }, ignoreBody: ['_token', '_lm_user_id'] }])
@@ -270,6 +285,7 @@ function harness(o: { plan?: Record<string, unknown>; site?: Partial<FakeSite>; 
   let stopped = false
   let policy: BrowserSiteSetting | null = { host: HOST, level: 'write', assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }
   const runner = createBrowserRunner({
+    aiSwitch: () => true,
     approvedPlan: async id => (id === 'plan-1' ? planInput(o.plan) : null),
     connector: connectors,
     checker: id => checkers(accountReader).get(id),
@@ -428,12 +444,27 @@ test('after the send: failed only when the site refused it (4xx) and nothing cha
   assert.deepEqual(await other.runner.run('plan-1'), { outcome: 'unknown', reason: 'other-state' })
 })
 
+test('with the build\'s switch (off in 6b) a run is refused at once: no plan asked, no window touched, nothing read or sent', async () => {
+  let asked = 0
+  const h = harness()
+  const runner = createBrowserRunner({
+    approvedPlan: async () => { asked++; return planInput() },
+    connector: connectors, checker: id => checkers(accountReader).get(id), site: () => { asked++; return null },
+    stopped: () => false, window: () => { asked++; return h.fake.surface },
+    records: { has: () => { asked++; return false }, put: () => { asked++ } }, now: () => NOW,
+  })
+  assert.deepEqual(await runner.run('plan-1'), { outcome: 'refused', reason: 'off' })
+  assert.equal(asked, 0)
+  assert.deepEqual(h.site.posts, [])
+})
+
 test('one run per window at a time', async () => {
   let release: () => void = () => {}
   const h = harness({ plan: {} })
   const slowPlans: Record<string, unknown> = { 'plan-1': planInput(), 'plan-2': planInput({ planId: 'plan-2' }) }
   const gate = new Promise<void>(r => { release = r })
   const runner = createBrowserRunner({
+    aiSwitch: () => true,
     approvedPlan: async id => slowPlans[id],
     connector: connectors,
     checker: id => checkers(accountReader).get(id),

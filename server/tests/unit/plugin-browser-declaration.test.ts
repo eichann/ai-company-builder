@@ -27,6 +27,7 @@ import {
   type BrowserOperation, type BrowserPlanValues, type BrowserWriteRequest, type PluginManifest,
 } from '../../../shared/core/plugins'
 import { levelAllows, type BrowserOperationEffect, type BrowserOperationSettings } from '../../../shared/core/browser-operation'
+import { explorePath } from '../../../shared/core/plugin-browser-declaration'
 
 const FIXTURES = join(__dirname, '../fixtures/plugins')
 const fixture = (pkg: string, file: string) => readFileSync(join(FIXTURES, pkg, file), 'utf8')
@@ -467,5 +468,52 @@ describe('no business plugin uses a browser connector yet', () => {
     const r = combineUse(business.value, parse(LSTEP))
     expect(r.ok).toBe(false)
     expect(r.ok ? '' : r.errors.join()).toContain('ブラウザのつなぎ先')
+  })
+})
+
+describe('the preview\'s declared reads (explore, design memo §33 2-2)', () => {
+  const EXPLORE = `  explore:
+    reminders:
+      label: リマインダの一覧
+      path: /line/episode
+      reader: lstep.reminder_list
+      no_side_effects: reviewed
+    reminder:
+      label: リマインダの中身
+      path: "/line/episode/show/{reminder}"
+      reader: lstep.reminder_steps
+      no_side_effects: reviewed
+`
+  const withExplore = (explore: string) => `${LSTEP}${explore}`
+
+  it('parses each read with its path, its {name}s, its reviewed reader; none declared is none', () => {
+    expect(parse(LSTEP).browser!.explore).toEqual({})
+    expect(parse(withExplore(EXPLORE)).browser!.explore).toEqual({
+      reminders: { label: 'リマインダの一覧', path: '/line/episode', placeholders: [], reader: 'lstep.reminder_list' },
+      reminder: { label: 'リマインダの中身', path: '/line/episode/show/{reminder}', placeholders: ['reminder'], reader: 'lstep.reminder_steps' },
+    })
+  })
+
+  it('refuses a read without the reviewed "no side effects" mark, with a query, another host, a template inside a segment, .. or //, a repeated {name}, an unknown key or a bad reader', () => {
+    const one = (lines: string) => withExplore(`  explore:\n    r:\n${lines}`)
+    const base = { label: '      label: 読む\n', path: '      path: /a/b\n', reader: '      reader: site.thing\n', mark: '      no_side_effects: reviewed\n' }
+    const build = (over: Partial<typeof base> & { extra?: string }) => one(`${over.label ?? base.label}${over.path ?? base.path}${over.reader ?? base.reader}${over.mark ?? base.mark}${over.extra ?? ''}`)
+    expect(errorsOf(build({}))).toBe('')
+    expect(errorsOf(build({ mark: '' }))).toMatch(/no_side_effects: reviewed/)
+    expect(errorsOf(build({ mark: '      no_side_effects: true\n' }))).toMatch(/no_side_effects: reviewed/)
+    for (const path of ['/a?b=1', '/a#x', 'https://evil.example/a', '/a/x{id}', '/a/{id}{id2}', '/a/../b', '/a//b', 'a/b', '/a/{id}/{id}', '/a/{Bad}', '/a/%2e%2e']) {
+      expect(errorsOf(build({ path: `      path: "${path}"\n` })), path).not.toBe('')
+    }
+    expect(errorsOf(build({ reader: '      reader: thing\n' }))).toMatch(/reader/)
+    expect(errorsOf(build({ extra: '      query: { group: "{id}" }\n' }))).not.toBe('')
+  })
+
+  it('fills a path only with plain ids for exactly its {name}s', () => {
+    const read = parse(withExplore(EXPLORE)).browser!.explore.reminder
+    expect(explorePath(read, { reminder: '1904672' })).toBe('/line/episode/show/1904672')
+    expect(explorePath(read, {})).toBeNull()
+    expect(explorePath(read, { reminder: '1', step: '2' })).toBeNull()
+    for (const bad of ['../x', '1/2', '1?x=2', 'a b', '%2e%2e', '']) expect(explorePath(read, { reminder: bad }), bad).toBeNull()
+    expect(explorePath(parse(withExplore(EXPLORE)).browser!.explore.reminders, {})).toBe('/line/episode')
   })
 })

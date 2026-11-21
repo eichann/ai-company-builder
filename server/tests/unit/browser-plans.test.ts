@@ -35,7 +35,8 @@ const owner: Member = { companyId: CO, userId: 'u-owner', role: 'owner' }
 const admin: Member = { companyId: CO, userId: 'u-admin', role: 'admin' }
 const alice: Member = { companyId: CO, userId: 'u-alice', role: 'member' }
 const bob: Member = { companyId: CO, userId: 'u-bob', role: 'member' }
-const APPROVED: ApprovedCombinationRow = fileBrowserConnectorCatalog().combinations()[0]
+// The current Lステップ row (written `pending` until a reviewed edit approves it, design memo §33.5), as approved.
+const APPROVED: ApprovedCombinationRow = { ...fileBrowserConnectorCatalog().combinations().find(r => r.status !== 'retired')!, status: 'approved' }
 const OP = 'reminder_step_add_template'
 const SITE = { host: 'manager.linestep.net', level: 'write' as const, assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }
 
@@ -150,6 +151,9 @@ describe('registering a plan', () => {
     expect(code(svc.register(alice, input({ connector: { id: 'lstep', version: '0.0.1' } }), undefined))).toBe('BROWSER_TYPE_NOT_APPROVED')
     rows = [{ ...APPROVED, status: 'retired' }]; build()
     expect(code(svc.register(alice, input(), undefined))).toBe('BROWSER_TYPE_RETIRED')
+    // A row listed but not yet approved (design memo §33.5) accepts nothing.
+    rows = [{ ...APPROVED, status: 'pending' }]; build()
+    expect(code(svc.register(alice, input(), undefined))).toBe('BROWSER_TYPE_NOT_APPROVED')
     // A row whose declaration is not the one its hash names is not a combination at all.
     rows = [{ ...APPROVED, declaration: APPROVED.declaration.replace('delivers: none', 'delivers: unknown') }]; build()
     expect(code(svc.register(alice, input(), undefined))).toBe('BROWSER_TYPE_NOT_APPROVED')
