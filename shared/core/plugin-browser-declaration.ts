@@ -58,6 +58,7 @@ export const BROWSER_DECLARATION_LIMITS = {
   expect: 5,
   idValue: 64,
   textValue: 2000,
+  facts: 20,
 } as const
 
 /** Operation, target and change names. */
@@ -72,13 +73,34 @@ export const isMethodOverrideKey = (key: string): boolean => key.toLowerCase() =
 export const METHOD_OVERRIDE_HEADERS: readonly string[] = ['x-http-method-override', 'x-http-method', 'x-method-override']
 /** A plan's `id` value: digits or a plain ASCII token. */
 export const BROWSER_ID_VALUE_RE = /^[A-Za-z0-9_-]{1,64}$/
-const PATH_RE = /^\/[A-Za-z0-9/_.~-]{0,299}$/
+/** A fixed path on the operated host (a write's `path`, a fact's `source`). */
+export const BROWSER_PATH_RE = /^\/[A-Za-z0-9/_.~-]{0,299}$/
+const PATH_RE = BROWSER_PATH_RE
 const PLACEHOLDER_RE = /^\{([a-z][a-z0-9_]{0,39})\}$/
 // Control characters, bidirectional marks / overrides / isolates and zero-width characters: text that reads differently from what it is.
 // eslint-disable-next-line no-control-regex
 const UNSAFE_TEXT_RE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/
 // eslint-disable-next-line no-control-regex
 const UNSAFE_MULTILINE_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/
+
+/** Plain text within `max` characters: one line, or (multiline) newline / tab allowed; no control, bidirectional or zero-width characters. */
+export function isPlainBrowserText(v: unknown, max: number, multiline = false): v is string {
+  return typeof v === 'string' && v.length > 0 && v.length <= max && !(multiline ? UNSAFE_MULTILINE_RE : UNSAFE_TEXT_RE).test(v)
+}
+
+/**
+ * Whether a type's write reaches people at once (design memo §30.6): `none` — nothing is delivered by
+ * the write itself; `immediate` — it sends to people right away; `unknown` — nobody could say. The
+ * first version runs only `none` (`browserFirstVersionProblem`).
+ */
+export type BrowserDelivers = 'none' | 'immediate' | 'unknown'
+export const BROWSER_DELIVERS: readonly BrowserDelivers[] = ['none', 'immediate', 'unknown']
+
+/** A fact the type's checker reads before a plan (design memo §30.6): required = no plan without it; complete = it must have been read whole. */
+export interface BrowserFactRule {
+  required: boolean
+  complete: boolean
+}
 
 /** A body value: a fixed literal, or exactly one plan field (`{name}`). */
 export type BrowserBodyValue = { literal: string } | { field: string }
@@ -121,6 +143,16 @@ export interface BrowserOperation {
   writes: BrowserWrite[]
   /** What the target must show after the writes (none for a read). */
   expect: BrowserExpectation[]
+  /**
+   * The kind of thing a plan of this type marks as being worked on (`<site>.<thing>`, design memo
+   * §30.5): the server's target lock key is built from it and the type's target fields. Required on a
+   * write / delete; none on a read.
+   */
+  lock: { kind: string } | null
+  /** Whether the write reaches people at once (required). */
+  delivers: BrowserDelivers
+  /** The facts its checker reads for a plan, by name (shared/core/browser-facts.ts holds their shapes). */
+  facts: Record<string, BrowserFactRule>
 }
 
 export interface PluginBrowser {
@@ -220,7 +252,7 @@ function parseOperation(name: string, raw: YamlValue, err: (m: string) => void):
   // Before 2026-11-21 a type named the code that read it per operation; now one checker per thing.
   if (own(raw, 'adapter')) e(`${where}の adapter は checker に変わりました（ページで確かめる部品の名前）`)
   unknownKeys(`${where}: `, Object.fromEntries(Object.entries(raw).filter(([k]) => k !== 'adapter')),
-    ['label', 'effect', 'checker', 'shared', 'irreversible', 'target', 'change', 'writes', 'expect'], err)
+    ['label', 'effect', 'checker', 'shared', 'irreversible', 'target', 'change', 'writes', 'expect', 'lock', 'delivers', 'facts'], err)
   const label = plainText(raw.label, BROWSER_DECLARATION_LIMITS.label)
   if (!label) e(`${where}の label は ${BROWSER_DECLARATION_LIMITS.label} 文字までの1行で書いてください`)
   const effect = raw.effect
@@ -242,6 +274,25 @@ function parseOperation(name: string, raw: YamlValue, err: (m: string) => void):
   const change = parseFields(`${where}の change`, raw.change, e)
   if (Object.keys(target).length === 0) e(`${where}の target（何を変えるか）を1つ以上書いてください`)
   for (const n of Object.keys(change)) if (own(target, n)) e(`${where}: 「${n}」が target と change の両方にあります`)
+
+  const delivers = raw.delivers
+  if (!(BROWSER_DELIVERS as readonly unknown[]).includes(delivers)) e(`${where}の delivers（すぐ人に届くか）は none / immediate / unknown のどれかを書いてください`)
+  const facts = parseFacts(`${where}の facts`, raw.facts, e)
+  let lock: BrowserOperation['lock'] = null
+  if (effect === 'read') {
+    if (raw.lock !== undefined) e(`${where}: 読むだけの操作に lock は書けません`)
+  } else {
+    const l = raw.lock
+    if (!isYamlMap(l)) e(`${where}の lock（作業中の印の種類）は { kind: サイト.もの } の形で書いてください`)
+    else {
+      unknownKeys(`${where}の lock: `, l, ['kind'], e)
+      const kind = l.kind
+      if (typeof kind !== 'string' || kind.length > BROWSER_DECLARATION_LIMITS.checker || !BROWSER_CHECKER_RE.test(kind)) e(`${where}の lock の kind は「サイト.もの」の名前です（英小文字・数字・_）`)
+      else lock = { kind }
+    }
+    // A plan that changes something is bound to the outside account its checker read (design memo §31.3).
+    if (!facts.account?.required) e(`${where}の facts に account（required: true）を書いてください（どのアカウントの操作か）`)
+  }
 
   const writes: BrowserWrite[] = []
   const expect: BrowserExpectation[] = []
@@ -273,7 +324,30 @@ function parseOperation(name: string, raw: YamlValue, err: (m: string) => void):
     }
   }
   if (failed) return null
-  return { label: label as string, effect: effect as BrowserOperationEffect, checker: checker as string, shared, irreversible: irreversible as boolean, target, change, writes, expect }
+  return {
+    label: label as string, effect: effect as BrowserOperationEffect, checker: checker as string, shared, irreversible: irreversible as boolean,
+    target, change, writes, expect, lock, delivers: delivers as BrowserDelivers, facts,
+  }
+}
+
+/** `facts`: `{ <name>: { required: true|false, complete?: true|false } }` — nothing else. */
+function parseFacts(where: string, raw: YamlValue | undefined, err: (m: string) => void): Record<string, BrowserFactRule> {
+  const out: Record<string, BrowserFactRule> = {}
+  if (raw === undefined) return out
+  if (!isYamlMap(raw)) { err(`${where}は「名前: { required: true か false, complete: true か false }」の形で書いてください`); return out }
+  const entries = Object.entries(raw)
+  if (entries.length > BROWSER_DECLARATION_LIMITS.facts) err(`${where}は ${BROWSER_DECLARATION_LIMITS.facts} 個までです`)
+  for (const [name, rule] of entries) {
+    if (!BROWSER_NAME_RE.test(name)) { err(`${where}の名前「${name}」は英小文字・数字・_ で書いてください`); continue }
+    if (!isYamlMap(rule)) { err(`${where}の「${name}」は { required: true か false } の形で書いてください`); continue }
+    unknownKeys(`${where}の「${name}」: `, rule, ['required', 'complete'], err)
+    const required = rule.required
+    const complete = rule.complete ?? false
+    if (typeof required !== 'boolean') { err(`${where}の「${name}」の required は true か false です`); continue }
+    if (typeof complete !== 'boolean') { err(`${where}の「${name}」の complete は true か false です`); continue }
+    out[name] = { required, complete }
+  }
+  return out
 }
 
 /** `expect`: 1–5 of `{ list, add: "{field}" }` or `{ list, remove: "{field}" }` — nothing else (no condition, no computation). */
@@ -350,6 +424,20 @@ export function parseBrowserConnector(raw: { [k: string]: YamlValue }, err: (m: 
     ...common, role: 'connector', service: '', baseUrl: { host: '', basePath: '' }, scopes: [], operationScopes: {},
     types: [], objects: {}, operations: {}, fieldPolicyDefaults: {}, uses: null, accountInfo: null, ...noFlow(), browser,
   }
+}
+
+/**
+ * Why the first version of plans (design memo §30.6, 6a) does not run this type, or null: only a type
+ * that delivers nothing at once (`delivers: none`), is not irreversible, sends exactly one write and
+ * does not delete. Asked by the server at every step of a plan (register, approve, claim, permit).
+ */
+export function browserFirstVersionProblem(operation: BrowserOperation): string | null {
+  if (operation.effect === 'delete') return 'この操作は消す操作なので、まだ任せられません'
+  if (operation.irreversible) return 'この操作は取り消せない操作なので、まだ任せられません'
+  if (operation.delivers !== 'none') return 'この操作はすぐ人に届く（または届くか分からない）ので、まだ任せられません'
+  if (operation.writes.length !== 1) return 'この操作は書き込みが1つではないので、まだ任せられません'
+  if (!operation.lock) return 'この操作には作業中の印（lock）がないので、任せられません'
+  return null
 }
 
 // ---------------------------------------------------------------------------

@@ -5,11 +5,10 @@
  * rules are tested under Node and the real-Electron test checks the wiring.
  */
 import {
-  decideBrowserRequest, normalizeBrowserHost,
+  browserAiStopped, decideBrowserRequest, normalizeBrowserHost,
   type BrowserRequest, type BrowserRequestRefusal, type BrowserSiteSetting,
 } from '../../shared/core/browser-operation'
 import { METHOD_OVERRIDE_HEADERS } from '../../shared/core/plugin-browser-declaration'
-import type { AgentStopPolicy } from '../../shared/types/agent-stop'
 import type { BrowserGateDecision, BrowserPageReadAttempt, BrowserSessionRequest } from './browser-runner'
 
 // ---------------------------------------------------------------------------
@@ -230,14 +229,8 @@ export type BrowserWriteDecider = (write: BrowserWriteAttempt) => boolean | Prom
 export type AiWriteRefusal = 'host' | 'stopped' | 'method-override' | 'no-step' | 'decider-refused' | 'decider-failed'
 export type AiWriteDecision = { allow: true } | { allow: false; reason: AiWriteRefusal }
 
-/**
- * The AI's operation of a site stops with the emergency stop of the whole AI and with a stop of
- * the `web` or `mcp-external` kind (it reaches a service outside, as a connector's read does).
- * Undefined (never received) stops nothing, as everywhere else (agent-stop.md).
- */
-export function browserAiStopped(stop: AgentStopPolicy | undefined): boolean {
-  return !!stop && (stop.all || stop.tools.includes('web') || stop.tools.includes('mcp-external'))
-}
+/** The one rule of which stops stop the AI's browser operation (shared with the server's plans: shared/core/browser-operation.ts). */
+export { browserAiStopped }
 
 /**
  * The gate for one request of a window in `ai` mode. Reads (GET / HEAD) pass

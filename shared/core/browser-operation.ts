@@ -144,3 +144,13 @@ export function decideBrowserRequest(site: BrowserSiteSetting, request: BrowserR
 export function browserLoginStorage(sandboxMode: AgentSandboxMode): 'disk' | 'memory' {
   return sandboxMode === 'enforce' ? 'disk' : 'memory'
 }
+
+/**
+ * The AI's operation of a site stops with the emergency stop of the whole AI and with a stop of
+ * the `web` or `mcp-external` kind (it reaches a service outside, as a connector's read does).
+ * Undefined (never received) stops nothing, as everywhere else (agent-stop.md). One rule for the
+ * app's window and runner and the server's plans (agent-browser.md).
+ */
+export function browserAiStopped(stop: { all: boolean; tools: readonly string[] } | undefined): boolean {
+  return !!stop && (stop.all || stop.tools.includes('web') || stop.tools.includes('mcp-external'))
+}

@@ -127,6 +127,9 @@ interface World {
     pickTicket: string
     driveConfirmation: string
     trustedFolder: string
+    /** A 「ブラウザ操作」 plan of the other company's member, approved, and its permitted execution (agent-browser.md). */
+    browserPlan: string
+    browserExecution: string
   }
 }
 
@@ -146,9 +149,13 @@ const ALL_SIGNED_IN: Expect = [200, 200, 200, 200, 200, 401]
 const MEMBERS: Expect = [200, 200, 200, 200, 404, 401]
 
 const NO_SUCH_JOB = `job.${'0'.repeat(32)}`
+const NO_SUCH_PLAN = `bp_${'0'.repeat(32)}`
+const NO_SUCH_EXECUTION = `bx_${'0'.repeat(32)}`
 const OTHER_JOB = `job.${'e'.repeat(32)}`
 const NO_SUCH_OCC = `occ.${'0'.repeat(32)}`
 const OTHER_OCC = `occ.${'b'.repeat(32)}`
+const OTHER_PLAN = `bp_${'e'.repeat(32)}`
+const OTHER_EXECUTION = `bx_${'e'.repeat(32)}`
 
 const MATRIX: Row[] = [
   // Public
@@ -639,6 +646,20 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/me/plugin-steps/consultations', w => ({ path: `${C(w)}/me/plugin-steps/consultations`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('GET /api/companies/:companyId/me/plugin-steps/consultations/:conversationId', w => ({ path: `${C(w)}/me/plugin-steps/consultations/conv-none` }), MEMBERS),
   r('POST /api/companies/:companyId/me/plugin-steps/records/:recordId/:pluginId/:step/start', w => ({ path: `${C(w)}/me/plugin-steps/records/deal-nosuch01/no-such-plugin/work/start`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  // 「ブラウザ操作」 plans (agent-browser.md "Plans, executions, permits and locks"): a person's session; a plan and
+  // its execution are their member's own (anyone else's is one that does not exist); grants are owner/admin's;
+  // the report takes the execution's secret, never a session.
+  r('POST /api/companies/:companyId/browser-plans', w => ({ path: `${C(w)}/browser-plans`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/browser-plans/:planId', w => ({ path: `${C(w)}/browser-plans/${NO_SUCH_PLAN}` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-plans/:planId/approve', w => ({ path: `${C(w)}/browser-plans/${NO_SUCH_PLAN}/approve`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-plans/:planId/cancel', w => ({ path: `${C(w)}/browser-plans/${NO_SUCH_PLAN}/cancel` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-plans/:planId/claim', w => ({ path: `${C(w)}/browser-plans/${NO_SUCH_PLAN}/claim` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-executions/:executionId/send-permit', w => ({ path: `${C(w)}/browser-executions/${NO_SUCH_EXECUTION}/send-permit` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/browser-executions/:executionId/confirm', w => ({ path: `${C(w)}/browser-executions/${NO_SUCH_EXECUTION}/confirm`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/companies/:companyId/browser-executions-waiting', w => ({ path: `${C(w)}/browser-executions-waiting` }), MEMBERS),
+  r('GET /api/companies/:companyId/browser-type-grants', w => ({ path: `${C(w)}/browser-type-grants` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/browser-type-grants/:userId', w => ({ path: `${C(w)}/browser-type-grants/${USER.member}`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+  r('POST /api/browser-executions/report', () => ({ path: '/api/browser-executions/report', body: { result: 'succeeded' } }), [401, 401, 401, 401, 401, 401], 'the execution secret, never a session'),
   // lane C ▲
 ]
 
@@ -815,6 +836,13 @@ const CROSS: CrossRow[] = [
   x('PUT /api/companies/:companyId/plugins/:pluginId/step-settings/:step', (w, id) => ({ path: `${C(w)}/plugins/${id}/step-settings/work`, body: { autoStart: false } }), w => w.other.plugin, 'no-such-plugin'),
   x('GET /api/companies/:companyId/me/plugin-steps/records/:recordId', (w, id) => ({ path: `${C(w)}/me/plugin-steps/records/${id}` }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/me/plugin-steps/records/:recordId/:pluginId/:step/start', (w, id) => ({ path: `${C(w)}/me/plugin-steps/records/${id}/other-sales/work/start`, body: {} }), w => w.other.record, 'deal-nosuch01'),
+  x('GET /api/companies/:companyId/browser-plans/:planId', (w, id) => ({ path: `${C(w)}/browser-plans/${id}` }), w => w.other.browserPlan, NO_SUCH_PLAN),
+  x('POST /api/companies/:companyId/browser-plans/:planId/approve', (w, id) => ({ path: `${C(w)}/browser-plans/${id}/approve`, body: { contentHash: `sha256:${'a'.repeat(64)}` } }), w => w.other.browserPlan, NO_SUCH_PLAN),
+  x('POST /api/companies/:companyId/browser-plans/:planId/cancel', (w, id) => ({ path: `${C(w)}/browser-plans/${id}/cancel` }), w => w.other.browserPlan, NO_SUCH_PLAN),
+  x('POST /api/companies/:companyId/browser-plans/:planId/claim', (w, id) => ({ path: `${C(w)}/browser-plans/${id}/claim` }), w => w.other.browserPlan, NO_SUCH_PLAN),
+  x('POST /api/companies/:companyId/browser-executions/:executionId/send-permit', (w, id) => ({ path: `${C(w)}/browser-executions/${id}/send-permit` }), w => w.other.browserExecution, NO_SUCH_EXECUTION),
+  x('POST /api/companies/:companyId/browser-executions/:executionId/confirm', (w, id) => ({ path: `${C(w)}/browser-executions/${id}/confirm`, body: { result: 'done' } }), w => w.other.browserExecution, NO_SUCH_EXECUTION),
+  x('PUT /api/companies/:companyId/browser-type-grants/:userId', (w, id) => ({ path: `${C(w)}/browser-type-grants/${id}`, body: { connector: 'lstep', operation: 'reminder_step_add_template', declarationHash: `sha256:${'a'.repeat(64)}`, allowed: true } }), w => w.other.member, 'pm-nobody'),
   // lane C ▲
 ]
 
@@ -1076,6 +1104,14 @@ async function seed(): Promise<World> {
     VALUES (?, 'run-other-1', 'deal-other001', 'task-prep', ?, 'waiting_reconcile', 1, ?, ?)`).run(other, otherMember, expires, expires)
   db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, created_at, updated_at)
     VALUES (?, 'run-other-1', 'k1', 'f', 'plugin-operation', 'unknown', 1, ?, ?)`).run(other, expires, expires)
+  // A 「ブラウザ操作」 plan of the other company's member, claimed, and its permitted execution holding its target
+  // (rows as adapters/sqlite/browser-plans.ts writes them).
+  db.prepare(`INSERT INTO browser_plans (company_id, id, user_id, connector_id, connector_version, operation, declaration_hash, checker_hash, facts_version,
+    account, content, content_hash, state, created_at, expires_at, approved_at) VALUES (?, ?, ?, 'lstep', '0.2.0', 'reminder_step_add_template', ?, ?, 1, 'acc1', '{}', ?, 'claimed', ?, '2100-01-01T00:00:00.000Z', ?)`)
+    .run(other, OTHER_PLAN, otherMember, `sha256:${'a'.repeat(64)}`, `sha256:${'b'.repeat(64)}`, `sha256:${'c'.repeat(64)}`, expires, expires)
+  db.prepare(`INSERT INTO browser_executions (company_id, id, plan_id, user_id, secret_hash, lock_key, state, claimed_at, permitted_at)
+    VALUES (?, ?, ?, ?, ?, 'lock-other', 'permitted', ?, ?)`).run(other, OTHER_EXECUTION, OTHER_PLAN, otherMember, 'd'.repeat(64), expires, expires)
+  db.prepare("INSERT INTO browser_target_locks (company_id, lock_key, execution_id, created_at) VALUES (?, 'lock-other', ?, ?)").run(other, OTHER_EXECUTION, expires)
   // A Skill on the other company's shelf, published (rows as adapters/sqlite/skill-shelf.ts writes them).
   db.prepare(`INSERT INTO shelf_items (id, company_id, kind, department_id, name, current_version, created_at, created_by, changed_at, changed_by)
     VALUES ('shelf-other-1', ?, 'skill', NULL, 'other-skill', ?, ?, ?, ?, ?)`).run(other, 'a'.repeat(64), expires, otherMember, expires, otherMember)
@@ -1131,6 +1167,8 @@ async function seed(): Promise<World> {
       pickTicket: 'pick-ticket-other-1',
       driveConfirmation: 'drive-confirm-other-1',
       trustedFolder: 'folderOtherTrusted01',
+      browserPlan: OTHER_PLAN,
+      browserExecution: OTHER_EXECUTION,
 
     },
   }

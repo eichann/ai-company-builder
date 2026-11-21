@@ -215,7 +215,8 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   never in the `services` routes see); git-http passes a Member to `services.companyScopes`.
   Handle repositories are built only by `company-data.ts`.
 - The control plane outside handles: the companies registry, memberships, accounts, and lookups
-  that find the company — an invitation by token (`InvitationTokenLookup`:
+  that find the company — a browser execution by its secret's hash (`BrowserExecutionLookup`, the
+  report: `agent-browser.md`), an invitation by token (`InvitationTokenLookup`:
   `findByToken`, `claimForSignup`, which returns the company; everything after uses that
   company's handle) and a key-broker token by hash. A Google Picker pick ticket is found the same way, by its
   sha256 (`sqlitePickTicketDirectory`, `google-drive.md`). The OAuth `state` names its company and is
@@ -284,6 +285,12 @@ GET  /api/config                                  setup state (no auth)
                               GET|PUT /agent-browser, PUT /agent-browser/overrides/:userId
                                                                              agent-browser.ts
                                                                 (「ブラウザ操作」: agent-browser.md)
+                              POST /browser-plans, GET /browser-plans/:planId,
+                              POST /browser-plans/:planId/approve | cancel | claim,
+                              POST /browser-executions/:executionId/send-permit | confirm,
+                              GET /browser-executions-waiting, GET /browser-type-grants,
+                              PUT /browser-type-grants/:userId (owner/admin)  browser-plans.ts
+                                                                (plans: agent-browser.md "Plans, executions, permits and locks")
                               GET|PUT /second-opinion                         second-opinion.ts
                                                                 (もう一方の AI に聞く: chat-and-agents.md)
                               GET /security-alerts, PUT /security-alerts/settings (owner/admin)
@@ -364,6 +371,8 @@ GET  /api/config                                  setup state (no auth)
                               (drafts only: no send, no download) — the AI's
                               routes (record token instead of a session; records.md) records-ai.ts
                                                                 (company map: records.md)
+/api                          POST /browser-executions/report — a browser execution's report; its
+                              secret (header) instead of a session            browser-plans.ts
 /api/broker                   GET|POST|PUT|PATCH|DELETE /:service/* — the key broker's relay
                               (token instead of a session; key-broker.md)      broker-relay.ts
 /api/git                      GET /repos/:companyId → { companyId, httpsUrl }  git.ts

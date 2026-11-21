@@ -45,6 +45,8 @@ browser:
       label: リマインダの段のテンプレートを付け替える
       effect: write
       checker: lstep.reminder_step_template
+      lock: { kind: lstep.reminder_step }
+      delivers: none
       shared: 全部の回で共有のリマインダです。前の回の人にも届きます。
       irreversible: false
       target:
@@ -59,9 +61,13 @@ browser:
           ignore_body: [_token, _lm_user_id]
       expect:
         - { list: templates, add: "{template}" }
+      facts:
+        account: { required: true }
+        state: { required: true, complete: true }
     read_reminder:
       label: リマインダを読む
       effect: read
+      delivers: none
       checker: lstep.read_reminder
       target:
         reminder: id
@@ -70,6 +76,10 @@ browser:
       effect: delete
       checker: lstep.remove_step
       irreversible: true
+      lock: { kind: lstep.step }
+      delivers: unknown
+      facts:
+        account: { required: true }
       target:
         step: id
       writes:
@@ -276,7 +286,7 @@ describe('a browser connector declaration', () => {
   })
 
   it('counts are capped', () => {
-    const many = Array.from({ length: 31 }, (_, i) => `    r${i}:\n      label: 読む\n      effect: read\n      checker: lstep.r${i}\n      target: { a: id }\n`).join('')
+    const many = Array.from({ length: 31 }, (_, i) => `    r${i}:\n      label: 読む\n      effect: read\n      checker: lstep.r${i}\n      delivers: none\n      target: { a: id }\n`).join('')
     expect(errorsOf(`id: lstep\nversion: 0.1.0\nlabel: L\ncontract: 1\nbrowser:\n  host: manager.linestep.net\n  operations:\n${many}`)).toContain('operations は 30 個まで')
     const fields = Array.from({ length: 11 }, (_, i) => `f${i}: id`).join(', ')
     expect(errorsOf(edit('      target:\n        reminder: id\n    remove_step', `      target: { ${fields} }\n    remove_step`))).toContain('10 個まで')
