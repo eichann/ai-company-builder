@@ -231,7 +231,9 @@ and starting the runner. It reads no content and calls nothing outside.
   still `due` becomes `held` (`JOB_PAUSED` / `COMPANY_STOPPED`) — and one a PC is **running** (PR 5a) too,
   its run ended in the same transaction (`endPcRun`: `waiting_person` with that code, no holder), so its
   token (fenced: 409 `RUN_SUPERSEDED`), renew and finish are refused at once and a resume or lifting the stop
-  brings nothing back (the occurrence stays `held`; a 「もう一度」 of the ended run claims nothing).
+  brings nothing back (the occurrence stays `held`; a 「もう一度」 of the ended run claims nothing). **Every one**
+  (stage 4b-0.5): batch after batch of the job's own (`dueOccurrences` / `runningOccurrences` with the job), until none
+  is left — before, the first 10,000 only — and the frozen ones too ("Shapes this build does not know").
 - **When it ends** — a resume, `PUT /jobs-stop { stopped: false }` (only when it was on): the newest slot
   at or before now, if not made yet (no clock ran meanwhile), is written `held`, so the clock never makes
   it `due`. A slot from before the pause that no clock had reached yet is held too (the safe side).
@@ -785,13 +787,26 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
 
 - **Every read of a stored version is schema-checked** (`storedJobDefinition`, `shared/core/jobs.ts`): its
   definition only when its `schema` column is one this build knows (`JOB_SCHEMAS`, `[1, 2]` since 4a) and the stored text
-  says the same schema; else null. A null definition is **never** made into an occurrence by the clock, run by the
-  server's runner (left `due`, not even taken into the batch), listed or claimed by a PC (the one 404), sent back by
-  「もう一度」 (`JOB_SCHEMA_UNKNOWN`), approved, accepted or resumed (409 `JOB_SCHEMA_UNKNOWN`), and a job whose newest
-  version is one is not edited (a new version over it: 409 `JOB_SCHEMA_UNKNOWN`, whatever the screen reads); a role change does not
-  pause it for a reason this build cannot judge. A running one's deadline is not read; its expiry still applies (the
-  clock ends it `expired` then, as for any occurrence).
-  Schema 1 is read exactly as stored.
+  says the same schema; else null. A null definition is **never** made into an occurrence by the clock, approved,
+  accepted or resumed (409 `JOB_SCHEMA_UNKNOWN`), and a job whose newest version is one is not edited (a new version over
+  it: 409 `JOB_SCHEMA_UNKNOWN`, whatever the screen reads); a role change does not pause it for a reason this build
+  cannot judge. Its occurrences are **frozen** (next bullet). Schema 1 is read exactly as stored.
+- **Frozen occurrences** (stage 4b-0.5, the rollback floor: owner memo 「段4b 設計メモ」 第4版 §5-1 / §5-2): an occurrence
+  pinned to a version of a shape this build does not know (a later build — 4b-1's PC AI on events, `schema: 3` — made
+  it) does not exist for this build. The job repository leaves it out **in SQL, before every limit** (`KNOWN` in
+  `adapters/sqlite/jobs.ts`: the pinned version's `schema` in `JOB_SCHEMAS` and its text saying the same schema —
+  `occurrence`, `occurrences`, `dueOccurrences`, `runningOccurrences`, `occurrencesOf`, `eventRecordsOf`,
+  `moveOccurrence`, `retryOccurrence`), so it is not listed or counted (`GET …/occurrences`, `lastOccurrence`), no notice
+  of it is shown — also one written before (the bell's `occurrenceNotice` finds no occurrence) — or written, the clock
+  neither expires nor ends it (**changed from 4-0**: its expiry no longer applies here; its own build decides when it
+  comes back), the server's runner and the PC's list never see it (no batch place taken: 10,000 frozen ones ahead of a
+  known one hold nothing up), a claim, 「もう一度」 and reconcile answer the one 404 `JOB_NOT_FOUND`, and a PC run on one
+  is a missing run (`isHiddenOccurrence` → `ai-runs.ts` `ownRun`). A version of such a shape is answered with
+  `fingerprint` / `consentFingerprint` null to everyone, owners and admins included (`view`), and its
+  `job_accept_needed` is not shown (`acceptNotice`). **Only stopping reaches it**: a pause, the company's stop and a
+  restore (`holdDue`) hold every frozen `due` / `running` one of the job (company) — `holdFrozen`, **no limit** — and end
+  its run (`endPcRun`: an operation in flight becomes unknown and the run waits for reconciliation); nothing is told and
+  no chain is stopped (the later build reads them as held). Test: `job-rollback-floor.test.ts` (F1–F4).
 - **A client gets a definition only in a shape it announced**: header `X-ACB-Job-Schemas` (`JOB_SCHEMAS_HEADER`,
   `parseJobSchemasHeader`: schema 1 always, the rest as named; none = schema 1 — every admin console and app before
   4-0, and a tab left open). A version of another shape (or one this server does not know) is answered without its

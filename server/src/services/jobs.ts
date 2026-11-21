@@ -389,7 +389,9 @@ export function createJobService(deps: JobServiceDeps) {
         // A responsible person who is not owner/admin sees a version's definition only while they read
         // every place it names (a draft may name one they cannot: its name is not theirs to learn).
         // A start record the viewer cannot read (stage 4a): the version is hidden from them, owners and admins too (⑥).
-        const shown = (full || readsAll(handle, member.userId, member.role, definition)) && readsStart(handle, member, definition)
+        // A shape this server does not know (stage 4b-0.5): nobody, owners and admins included, gets its fingerprints —
+        // a sha256 of a shape another build reads lets someone test guesses, and nothing here could vouch for it.
+        const shown = definition !== null && (full || readsAll(handle, member.userId, member.role, definition)) && readsStart(handle, member, definition)
         // A shape the client does not read (or this server does not know) goes without its definition: an older
         // screen would fail on it (jobs.md "Shapes this build does not know").
         const readable = shownTo(v, reads) !== null
@@ -926,6 +928,9 @@ export function createJobService(deps: JobServiceDeps) {
       if (!found || found.job.approvedVersion !== version || found.job.state === 'retired') return null
       const v = found.handle.jobs.version(jobId, version)
       if (!v || v.actingUserId !== member.userId || consentAccepted(found.handle, found.job)) return null
+      // A shape this server does not know (stage 4b-0.5, a later build asked it): not shown, also when written before —
+      // its own build shows it again (nothing here could be accepted anyway).
+      if (definitionOf(v) === null) return null
       // They had accepted an earlier version as its responsible person: what changed is the content, not who.
       const before = found.job.acceptedVersion === null ? null : found.handle.jobs.version(jobId, found.job.acceptedVersion)
       return {

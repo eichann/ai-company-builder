@@ -204,7 +204,7 @@ describe('a stored version of a shape this server does not know', () => {
     expect(occOf(occ)).toMatchObject({ state: 'due', run_id: null })
   })
 
-  it('「もう一度」 is refused with its own reason', async () => {
+  it('「もう一度」 answers exactly as for an occurrence that does not exist (stage 4b-0.5: frozen)', async () => {
     const job = await approvedJob(serverJob())
     storeSchema2(job, asSchema2(serverJob()))
     const occ = dueOccurrence(job, 2)
@@ -213,7 +213,8 @@ describe('a stored version of a shape this server does not know', () => {
       companyData, transactions: sqliteTransactions(db), clock, jobs: services.jobs, roleOf, aiStops: () => ({ all: false, tools: [] }),
       reconcileFor: () => { throw new Error('unused') },
     })
-    expect(retry.retry(owner(), job, occ)).toMatchObject({ ok: false, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
+    expect(retry.retry(owner(), job, occ)).toEqual(retry.retry(owner(), job, 'occ.ffffffffffffffffffffffffffffffff'))
+    expect(retry.retry(owner(), job, occ)).toMatchObject({ ok: false, body: { code: 'JOB_NOT_FOUND' } })
     expect(occOf(occ)).toMatchObject({ state: 'needs_person' })
   })
 

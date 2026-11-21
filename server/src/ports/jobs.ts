@@ -125,10 +125,11 @@ export interface JobRepository {
   stopped(): boolean
   setStopped(stopped: boolean, by: string, at: string): void
 
-  // Every occurrence method below acts as if an event occurrence (stage 4a's `ev:` slot, `isEventOccurrenceSlot`)
-  // did not exist: none is read, listed, moved, sent back or inserted (stage 4-0.1, jobs.md) — except
-  // `holdEventOccurrences`, the one write that may touch one (a pause / stop holds it; nothing becomes visible), and
-  // `isHiddenOccurrence`, a yes/no used only to refuse.
+  // Every occurrence method below acts as if a **frozen** occurrence did not exist (stage 4b-0.5, the rollback floor:
+  // pinned to a version of a shape this build does not know — a later build made it): none is read, listed, counted,
+  // moved or sent back, and the limits count only the others. Exceptions: `holdFrozen` (a pause / stop / restore holds
+  // every one, without a limit) and `isHiddenOccurrence`, a yes/no used only to refuse. (Event occurrences, which
+  // stage 4-0.1 left out the same way, are read here since 4a: every answer to a person checks their record.)
   /** Insert an occurrence unless its (job, slot) is there already (`UNIQUE`): false = it was (nothing written). */
   insertOccurrence(row: JobOccurrenceRow): boolean
   occurrence(occurrenceId: string): JobOccurrenceRow | null
@@ -137,10 +138,16 @@ export interface JobRepository {
    * it was made (a job whose trigger changed has both) — and events of one moment by delivery number.
    */
   occurrences(jobId: string, limit: number, offset?: number): JobOccurrenceRow[]
-  /** Occurrences in `due`, oldest due first (every job of the company). */
-  dueOccurrences(limit: number): JobOccurrenceRow[]
-  /** Occurrences in `running` (a PC's run holds them, B PR 5a), oldest due first (every job of the company). */
-  runningOccurrences(limit: number): JobOccurrenceRow[]
+  /** Occurrences in `due`, oldest due first (every job of the company, or `jobId`'s only). */
+  dueOccurrences(limit: number, jobId?: string | null): JobOccurrenceRow[]
+  /** Occurrences in `running` (a PC's run holds them, B PR 5a), oldest due first (every job of the company, or `jobId`'s only). */
+  runningOccurrences(limit: number, jobId?: string | null): JobOccurrenceRow[]
+  /**
+   * Stage 4b-0.5: a pause, the company's stop or a restore holds every frozen occurrence of the job (null: of every job)
+   * still `due` or `running` — `held` with `code`, **no limit** — and answers the runs of those that were running, for
+   * the caller to end. Nothing else: no notice, no watch stopped (a later build reads them again).
+   */
+  holdFrozen(jobId: string | null, code: string, at: string): string[]
   /**
    * Move an occurrence from one of `from` to `to` (compare-and-set): false = it was no longer in
    * `from` (someone else moved it first; nothing written).
@@ -219,7 +226,8 @@ export interface JobRepository {
   holdEventOccurrences(jobId: string | null, code: string, at: string): void
   /**
    * Stage 4-0.1: whether this id is an event occurrence — only so that a refusal can treat a PC run on one as a missing
-   * run (`ai-runs.ts` `ownRun`; 4a runs every event occurrence on the server, so none has a PC run).
+   * run (`ai-runs.ts` `ownRun`; 4a runs every event occurrence on the server, so none has a PC run). Stage 4b-0.5: a
+   * frozen occurrence too (a later build's PC run on it is a missing run here).
    */
   isHiddenOccurrence(occurrenceId: string): boolean
 }

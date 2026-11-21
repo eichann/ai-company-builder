@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { EVENT_OCCURRENCE_SLOT_PREFIX, type JobDeliveryPlace, type JobPauseReason, type LedgerEventRow } from '../../../shared/core/jobs'
+import { EVENT_OCCURRENCE_SLOT_PREFIX, JOB_SCHEMAS, type JobDeliveryPlace, type JobPauseReason, type LedgerEventRow } from '../../../shared/core/jobs'
 import type { JobState } from '../../../shared/types/jobs'
 import type { JobEventCursor, JobEventGap, JobOccurrenceRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
 
@@ -45,6 +45,19 @@ const OCCURRENCE_ORDER = `CASE WHEN event_seq IS NULL THEN due_at ELSE created_a
  * prefix (it has no `%` / `_`; `substr` compares exactly, unlike `LIKE`).
  */
 const NOT_EVENT = `substr(due_slot, 1, ${EVENT_OCCURRENCE_SLOT_PREFIX.length}) <> '${EVENT_OCCURRENCE_SLOT_PREFIX}'`
+/**
+ * Stage 4b-0.5 (the rollback floor, jobs.md "Shapes this build does not know"): an occurrence is **frozen** when the
+ * version it is pinned to is of a shape this build does not know — its `schema` column not in `JOB_SCHEMAS`, or a
+ * stored text that does not say the same schema (`storedJobDefinition` reads such a version as nothing). A later
+ * build wrote it; this one neither shows, counts, tells, expires, runs, claims, retries nor reconciles it: every
+ * read and move below leaves it out **in SQL, before any limit**, so frozen rows never take a batch's place. Only a
+ * pause / the company's stop / a restore reaches them (`holdFrozen`). The schemas are this build's constant (built
+ * from the core's list: digits only).
+ */
+const KNOWN_SCHEMAS_SQL = JOB_SCHEMAS.map(n => String(Number(n))).join(', ')
+const known = (table: string) => `EXISTS (SELECT 1 FROM ai_job_versions v WHERE v.company_id = ${table}.company_id AND v.job_id = ${table}.job_id
+  AND v.version = ${table}.job_version AND v.schema IN (${KNOWN_SCHEMAS_SQL}) AND json_valid(v.definition) AND json_extract(v.definition, '$.schema') = v.schema)`
+const KNOWN = known('ai_job_occurrences')
 const occurrenceOf = (r: OccurrenceDbRow): JobOccurrenceRow => ({
   id: r.id, jobId: r.job_id, jobVersion: r.job_version, dueSlot: r.due_slot, timeZone: r.time_zone, dueAt: r.due_at, expiresAt: r.expires_at,
   state: r.state as JobOccurrenceRow['state'], runId: r.run_id, outcomeCode: r.outcome_code, checkedUntil: r.checked_until, checkedCommit: r.checked_commit, retries: r.retries, retriedBy: r.retried_by, retriedAt: r.retried_at,
@@ -202,26 +215,36 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         .changes === 1
     },
     occurrence(occurrenceId) {
-      const r = conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND id = ?`).get(companyId, occurrenceId) as OccurrenceDbRow | undefined
+      const r = conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND id = ? AND ${KNOWN}`).get(companyId, occurrenceId) as OccurrenceDbRow | undefined
       return r ? occurrenceOf(r) : null
     },
     occurrences(jobId, limit, offset = 0) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND ${KNOWN}
           ORDER BY ${OCCURRENCE_ORDER} LIMIT ? OFFSET ?`)
         .all(companyId, jobId, limit, offset) as OccurrenceDbRow[]).map(occurrenceOf)
     },
-    dueOccurrences(limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'due' ORDER BY due_at, id LIMIT ?`)
-        .all(companyId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
+    dueOccurrences(limit, jobId = null) {
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'due' AND (? IS NULL OR job_id = ?) AND ${KNOWN}
+          ORDER BY due_at, id LIMIT ?`)
+        .all(companyId, jobId, jobId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
-    runningOccurrences(limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' ORDER BY due_at, id LIMIT ?`)
-        .all(companyId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
+    runningOccurrences(limit, jobId = null) {
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' AND (? IS NULL OR job_id = ?) AND ${KNOWN}
+          ORDER BY due_at, id LIMIT ?`)
+        .all(companyId, jobId, jobId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
+    },
+    holdFrozen(jobId, code, at) {
+      // Every one, no limit (a stop must reach all of them): the runs of the running ones are returned for the caller to end.
+      const runs = (conn.prepare(`SELECT run_id FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' AND (? IS NULL OR job_id = ?) AND NOT (${KNOWN})
+          AND run_id IS NOT NULL`).all(companyId, jobId, jobId) as Array<{ run_id: string }>).map(r => r.run_id)
+      conn.prepare(`UPDATE ai_job_occurrences SET state = 'held', outcome_code = ?, updated_at = ?
+          WHERE company_id = ? AND state IN ('due', 'running') AND (? IS NULL OR job_id = ?) AND NOT (${KNOWN})`).run(code, at, companyId, jobId, jobId)
+      return runs
     },
     retryOccurrence(occurrenceId, from, expiresAt, by, at) {
       return conn.prepare(`UPDATE ai_job_occurrences SET state = 'due', outcome_code = NULL, run_id = NULL, expires_at = ?,
           retries = retries + 1, retried_by = ?, retried_at = ?, updated_at = ?
-          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?))`)
+          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?)) AND ${KNOWN}`)
         .run(expiresAt, by, at, at, companyId, occurrenceId, JSON.stringify(from)).changes === 1
     },
     holdEventOccurrences(jobId, code, at) {
@@ -230,14 +253,14 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         .run(code, at, companyId, jobId, jobId)
     },
     isHiddenOccurrence(occurrenceId) {
-      return conn.prepare(`SELECT 1 FROM ai_job_occurrences WHERE company_id = ? AND id = ? AND NOT (${NOT_EVENT})`).get(companyId, occurrenceId) !== undefined
+      return conn.prepare(`SELECT 1 FROM ai_job_occurrences WHERE company_id = ? AND id = ? AND (NOT (${NOT_EVENT}) OR NOT (${KNOWN}))`).get(companyId, occurrenceId) !== undefined
     },
     moveOccurrence(occurrenceId, from, to, change, at) {
       const runId = change.runId === undefined ? null : change.runId
       // checked_until / checked_commit are set once (the first claim) and never moved afterwards.
       return conn.prepare(`UPDATE ai_job_occurrences SET state = ?, outcome_code = ?, run_id = CASE WHEN ? THEN ? ELSE run_id END,
           checked_until = COALESCE(checked_until, ?), checked_commit = CASE WHEN checked_until IS NULL THEN ? ELSE checked_commit END, updated_at = ?
-          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?))`)
+          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?)) AND ${KNOWN}`)
         .run(to, change.outcomeCode, change.runId === undefined ? 0 : 1, runId, change.checkedUntil ?? null, change.checkedCommit ?? null, at, companyId, occurrenceId, JSON.stringify(from)).changes === 1
     },
 
@@ -262,11 +285,11 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       }))
     },
     eventRecordsOf(jobId, limit) {
-      return (conn.prepare(`SELECT event_record_id AS id FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_record_id IS NOT NULL
+      return (conn.prepare(`SELECT event_record_id AS id FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_record_id IS NOT NULL AND ${KNOWN}
           GROUP BY event_record_id ORDER BY MAX(event_seq) DESC LIMIT ?`).all(companyId, jobId, limit) as Array<{ id: string }>).map(r => r.id)
     },
     occurrencesOf(jobId, records, limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND ${KNOWN}
           AND ((event_record_id IS NULL AND ${NOT_EVENT}) OR event_record_id IN (SELECT value FROM json_each(?)))
           ORDER BY ${OCCURRENCE_ORDER} LIMIT ?`)
         .all(companyId, jobId, JSON.stringify(records), limit) as OccurrenceDbRow[]).map(occurrenceOf)
