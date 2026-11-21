@@ -333,6 +333,112 @@ describe('S1: a condition that fails after the claim ends the run — at the nex
   })
 })
 
+describe('S1 (each condition on its own, at the renew or a call)', () => {
+  it('C1 written by another build (no hold): the company’s stop, a pause, another version, a consent not accepted — held at the renew', async () => {
+    const cases: Array<[string, (job: string) => void]> = [
+      ['COMPANY_STOPPED', () => { db.prepare('INSERT INTO ai_job_settings (company_id, stopped, updated_by, updated_at) VALUES (?, 1, ?, ?)').run(CO, 'ej-owner', new Date().toISOString()) }],
+      ['JOB_PAUSED', job => { db.prepare("UPDATE ai_jobs SET state = 'paused', paused_reason = 'ADMIN' WHERE company_id = ? AND id = ?").run(CO, job) }],
+      ['JOB_VERSION_CHANGED', job => { db.prepare('UPDATE ai_jobs SET approved_version = 2 WHERE company_id = ? AND id = ?').run(CO, job) }],
+      ['NOT_ACCEPTED', job => { db.prepare("UPDATE ai_jobs SET accepted_consent = 'sha256:other' WHERE company_id = ? AND id = ?").run(CO, job) }],
+    ]
+    for (const [code, change] of cases) {
+      db.prepare('DELETE FROM ai_job_settings').run()
+      const { job, occ } = await eventOccurrence()
+      const run = (await claim(occ)).body.data.run
+      change(job)
+      expect(await renew(run), code).toMatchObject({ status: 409, body: { reason: code } })
+      expect(occOf(occ), code).toMatchObject({ state: 'held', outcome_code: code })
+      expect(runOf(run.id).state).toBe('waiting_person')
+    }
+    db.prepare('DELETE FROM ai_job_settings').run()
+  })
+
+  it('C3: the record no longer alice’s to read — the next call ends it; the claim and the run answer as missing (404)', async () => {
+    const { occ, start } = await eventOccurrence()
+    const run = (await claim(occ)).body.data.run
+    const token = await tokenFor(run)
+    expect((await as('ej-alice', 'GET', `/ai-runs/${run.id}`)).status).toBe(200)
+    db.prepare("UPDATE records SET personal_owner = 'ej-bob' WHERE company_id = ? AND id = ?").run(CO, start)
+    // The run is a missing run for her now (⑥), and the next call of its token ends it.
+    expect(await as('ej-alice', 'GET', `/ai-runs/${run.id}`)).toMatchObject({ status: 404, body: { code: 'RUN_NOT_FOUND' } })
+    expect(await ai(token, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 403, body: { code: 'NOT_IN_STEP' } })
+    expect(occOf(occ)).toMatchObject({ state: 'skipped', outcome_code: 'EVENT_RECORD_GONE' })
+
+    const waiting = await eventOccurrence()
+    db.prepare("UPDATE records SET personal_owner = 'ej-bob' WHERE company_id = ? AND id = ?").run(CO, waiting.start)
+    expect(await claim(waiting.occ)).toMatchObject({ status: 404, body: { code: 'JOB_NOT_FOUND' } })
+    expect(occOf(waiting.occ)).toMatchObject({ state: 'skipped', outcome_code: 'EVENT_RECORD_GONE', run_id: null })
+  })
+
+  it('C8: another occurrence of the watch moved it on (a new generation) — this one ends, and stops nothing of the new watch', async () => {
+    const { job, occ, start } = await eventOccurrence({ check: { kind: 'source_record', doneMark: 'none' } })
+    const run = (await claim(occ)).body.data.run
+    // A second occurrence of the same watch (as two events of one watch would leave them), waiting behind the first.
+    const first = companyData.forCompany(CO).jobs.occurrence(occ)!
+    const other = 'occ.dddddddddddddddddddddddddddddddd'
+    const at = new Date().toISOString()
+    db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at,
+      event_seq, event_record_id, event_version, event_day, watch_generation) VALUES (?, ?, ?, 1, 'ev:999998', 'Asia/Tokyo', ?, ?, 'due', ?, ?, 999998, ?, ?, ?, ?)`)
+      .run(CO, other, job, at, new Date(Date.now() + 60 * MINUTE).toISOString(), at, at, start, first.eventVersion, first.eventDay, first.watchGeneration)
+    // The first finishes with its やること: the watch follows it (a new generation).
+    expect((await finish(run, { outcome: 'done', jobResult: { title: '報告書' } })).status).toBe(200)
+    const watch = cursorOf(job)
+    expect(watch.watch_generation).toBeGreaterThan(first.watchGeneration as number)
+    expect(await claim(other, { device: 'device-alice-2' })).toMatchObject({ status: 409, body: { reason: 'EVENT_NOT_WATCHED' } })
+    expect(occOf(other)).toMatchObject({ state: 'skipped', outcome_code: 'EVENT_NOT_WATCHED' })
+    expect(cursorOf(job)).toEqual(watch)
+  })
+
+  it('choosing the watched やること again while it runs approves a new version: the run ends held (JOB_VERSION_CHANGED)', async () => {
+    const { job, occ } = await eventOccurrence()
+    const run = (await claim(occ)).body.data.run
+    const token = await tokenFor(run)
+    const next = task('次の面談')
+    ok(await services.jobs.rewatch(alice(), job, { version: 1, recordId: next }, READS_3))
+    expect(await ai(token, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 403, body: { code: 'NOT_IN_STEP' } })
+    expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'JOB_VERSION_CHANGED' })
+    expect(cursorOf(job)).toMatchObject({ watch_record_id: next, chain_stop_code: null })
+  })
+
+  it('the deadline at a renew; a run that failed for a person, or finished with nothing, stops the chain', async () => {
+    const late = await eventOccurrence()
+    const run = (await claim(late.occ)).body.data.run
+    // Its app kept renewing (the lease is alive): the approved minutes still end it.
+    db.prepare('UPDATE ai_runs SET claim_expires_at = ? WHERE company_id = ? AND id = ?').run(new Date(Date.now() + 60 * MINUTE).toISOString(), CO, run.id)
+    vi.setSystemTime(Date.now() + 31 * MINUTE)
+    try {
+      expect(await renew(run)).toMatchObject({ status: 409, body: { code: 'JOB_TIME_LIMIT' } })
+    } finally {
+      vi.setSystemTime(Date.now() - 31 * MINUTE)
+    }
+    expect(occOf(late.occ)).toMatchObject({ state: 'needs_person', outcome_code: 'TIME_LIMIT' })
+    expect(cursorOf(late.job)).toMatchObject({ chain_stop_code: 'TIME_LIMIT' })
+
+    const failed = await eventOccurrence()
+    const run2 = (await claim(failed.occ)).body.data.run
+    expect((await finish(run2, { outcome: 'failed', failure: { class: 'bad-input', code: 'CHECK_NOT_POSSIBLE' } })).status).toBe(200)
+    expect(occOf(failed.occ)).toMatchObject({ state: 'needs_person', outcome_code: 'RUN_FAILED' })
+    expect(cursorOf(failed.job)).toMatchObject({ chain_stop_code: 'RUN_FAILED' })
+
+    const nothing = await eventOccurrence()
+    const run3 = (await claim(nothing.occ)).body.data.run
+    expect((await finish(run3, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
+    expect(occOf(nothing.occ)).toMatchObject({ state: 'nothing' })
+    expect(cursorOf(nothing.job)).toMatchObject({ chain_stop_code: 'TASK_NOT_CREATED' })
+  })
+
+  it('a running one past its expiry with nobody holding it: expired, told, and its chain stops', async () => {
+    const { job, occ } = await eventOccurrence()
+    const run = (await claim(occ)).body.data.run
+    const past = new Date(Date.now() - MINUTE).toISOString()
+    db.prepare('UPDATE ai_job_occurrences SET expires_at = ? WHERE company_id = ? AND id = ?').run(past, CO, occ)
+    db.prepare('UPDATE ai_runs SET claim_expires_at = ? WHERE company_id = ? AND id = ?').run(past, CO, run.id)
+    tick()
+    expect(occOf(occ)).toMatchObject({ state: 'expired' })
+    expect(cursorOf(job)).toMatchObject({ chain_stop_code: 'EXPIRED' })
+  })
+})
+
 describe('S2–S4: how it ends (owner memo §4-4)', () => {
   it('S2: nothing made outside, no longer needed → no occurrence notice; the stopped chain told once, to alice', async () => {
     const { occ, start } = await eventOccurrence()

@@ -487,7 +487,7 @@ export function createJobRuns(deps: JobRunDeps) {
       if (result === 'nothing') {
         f.handle.jobs.moveOccurrence(f.occ.id, ['running'], 'nothing', { outcomeCode: null }, at)
         // Nothing made: an event occurrence's chain cannot follow it, and stops (stage 4b-1).
-        if (f.event) toTell.set(run.id, { companyId: f.handle.companyId, userIds: deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, null, 'RUN_FAILED') ?? [] })
+        if (f.event) toTell.set(run.id, { companyId: f.handle.companyId, userIds: deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, null, 'TASK_NOT_CREATED') ?? [] })
         return null
       }
       if (!f.definition.grant.creates.includes('task')) return refuse('bad-request', 'この定期の仕事はやることを作れません。', { code: 'JOB_TASK_NOT_GRANTED' })
