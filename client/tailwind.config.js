@@ -1,7 +1,11 @@
 import typography from '@tailwindcss/typography'
+// The design tokens' semantic class names (bg-surface-raised, text-text-muted, text-body, …), added
+// next to the names below without changing them (.claude/rules/design-system.md).
+import designTokens from '../shared/design-tokens/tailwind-bridge.app.cjs'
 
 /** @type {import('tailwindcss').Config} */
 export default {
+  presets: [designTokens],
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",

@@ -31,8 +31,9 @@ export default function RootLayout({
 }>) {
   return (
     // next-themes sets the `dark` class before hydration; the mismatch on
-    // <html> is expected.
-    <html lang="ja" suppressHydrationWarning>
+    // <html> is expected. data-density: the admin's "comfortable" density of the design tokens
+    // (14px body, 36px controls; .claude/rules/design-system.md).
+    <html lang="ja" data-density="comfortable" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <TooltipProvider>

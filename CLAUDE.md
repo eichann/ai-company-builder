@@ -29,7 +29,8 @@ client/   Electron desktop app (renderer on Vite, port 5173).
   src/                 React renderer: app/, features/<name>/, shared/ (ui, hooks, lib, ipc),
                        stores/ (renderer-structure rule)
   tests/               node tests (*.test.ts), sync-harness/ + sync/, ui/ (Playwright), perf/
-shared/   core/ = the one copy of path, name and permission rules; types/ = API contracts
+shared/   core/ = the one copy of path, name and permission rules; types/ = API contracts;
+          design-tokens/ = the design tokens (tokens.json → CSS + Tailwind bridges) and design lint
 data/     SQLite databases and repositories at runtime (gitignored)
 ```
 
@@ -39,7 +40,7 @@ private-folders-client, chat-and-agents, chat-ui-and-history, chat-write-guard, 
 web-research, tasks, tasks-ui, agent-sandbox, agent-browser, plugins, outbound-mail, member-oauth, agent-events, agent-stop, ipc-and-main-process, files-and-editor, renderer-structure,
 commands, server, security-alerts, records, notifications, google-connector, minutes, calendar,
 connector-roles, inbox, slack-connector, identity, plugin-steps, plugin-roles, plugin-frame,
-shared-core, testing, deployment
+shared-core, design-system, testing, deployment
 (all in `.claude/rules/`). If you change an area without having opened its files yet, read the
 matching rule file first.
 
@@ -153,6 +154,9 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
 
 - TypeScript everywhere. User-facing text is Japanese, written for non-engineers (no Git terms);
   code, comments, identifiers and commit messages are English.
+- UI styling uses the design tokens' semantic names (`bg-surface-raised`, `text-text-muted`,
+  `text-body`, `rounded-control`, …); no new raw colours, arbitrary values or off-scale steps — the
+  design lint's baseline only shrinks. → `design-system.md`
 - Department folder names may contain Japanese; skill folder/file names are ASCII
   `^[a-z0-9][a-z0-9_-]*$`. Both rules live in `shared/core/names.ts`.
 - Paths are compared as NFC with only A–Z case-folded (`pathKey` in `shared/core/paths.ts`),

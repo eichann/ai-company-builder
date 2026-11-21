@@ -444,3 +444,11 @@ jobs:
       # or a PR could skip a test it affects (the files to add are printed).
       - name: CI area lists cover what the tests load
         run: node .github/scripts/check-areas.mjs
+      # Design tokens (.claude/rules/design-system.md): the generated CSS and Tailwind bridges match
+      # tokens.json and its colour pairs meet WCAG AA; the design lint's per-file findings in
+      # client/src and admin/src match design-lint-baseline.txt (more fails, and so does fewer
+      # without lowering the baseline). Whole tree, every run: a few seconds.
+      - name: Design tokens and design lint (ratchet)
+        run: |
+          node shared/design-tokens/build.mjs --check
+          node shared/design-tokens/design-lint.mjs
