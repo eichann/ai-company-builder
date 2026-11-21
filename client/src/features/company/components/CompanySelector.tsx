@@ -117,35 +117,35 @@ export function CompanySelector() {
 
   if (list.isLoading || opening) {
     return (
-      <div className="h-full bg-editor-bg flex flex-col items-center justify-center gap-4">
-        <SpinnerGap size={48} className="animate-spin text-accent" />
-        {opening && <p className="text-text-secondary">{opening}を準備しています</p>}
+      <div className="h-full bg-[var(--color-surface)] flex flex-col items-center justify-center gap-4">
+        <SpinnerGap size={48} className="animate-spin text-primary" />
+        {opening && <p className="text-text-muted">{opening}を準備しています</p>}
       </div>
     )
   }
 
   return (
-    <div className="h-full bg-editor-bg flex items-center justify-center">
+    <div className="h-full bg-[var(--color-surface)] flex items-center justify-center">
       <div className="w-full max-w-xl p-8">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
-              <span className="text-accent font-medium">
+            <div className="w-10 h-10 rounded-full bg-selected-bg-hover flex items-center justify-center">
+              <span className="text-selected-text font-medium">
                 {user?.name?.[0] || user?.email?.[0] || '?'}
               </span>
             </div>
             <div>
-              <div className="text-text-primary font-medium">
+              <div className="text-text font-medium">
                 {user?.name || user?.email}
               </div>
               {user?.name && (
-                <div className="text-sm text-text-secondary">{user.email}</div>
+                <div className="text-sm text-text-muted">{user.email}</div>
               )}
             </div>
           </div>
           <button
             onClick={() => signOut()}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-sidebar-bg transition-colors"
+            className="flex items-center gap-2 px-3 py-2 rounded-control text-text-muted hover:text-text hover:bg-bg transition-colors"
           >
             <SignOut size={18} />
             <span className="text-sm">ログアウト</span>

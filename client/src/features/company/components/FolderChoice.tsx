@@ -21,7 +21,7 @@ export function FolderChoice({ company, withoutSharedFolder = false, error, isPr
         作業フォルダを選択してください
       </ScreenHeading>
 
-      {withoutSharedFolder && <div className="space-y-1 text-sm text-text-secondary">
+      {withoutSharedFolder && <div className="space-y-1 text-sm text-text-muted">
         <p>{WORKING_FOLDER_NOTE}</p>
         <p data-working-folder-backup>{WORKING_FOLDER_BACKUP_NOTE}</p>
       </div>}
@@ -32,14 +32,14 @@ export function FolderChoice({ company, withoutSharedFolder = false, error, isPr
         <ChoiceButton
           onClick={onOpenExisting}
           disabled={isPreparing}
-          icon={<FolderOpen size={20} className="text-accent" />}
+          icon={<FolderOpen size={20} className="text-primary" />}
           title="既存のフォルダを開く"
           detail="すでにある作業フォルダを選択"
         />
         <ChoiceButton
           onClick={onCreateNew}
           dashed
-          icon={<CloudArrowDown size={20} className="text-accent" />}
+          icon={<CloudArrowDown size={20} className="text-primary" />}
           title="新しく作成"
           detail="新しいフォルダを作成してセットアップ"
         />
@@ -73,30 +73,30 @@ export function NewFolderChoice({ company, error, parentFolder, isPreparing, onP
       <div className="space-y-4">
         <button
           onClick={onPickParent}
-          className={`w-full text-left p-4 rounded-lg border transition-colors ${
+          className={`w-full text-left p-4 rounded-control border transition-colors ${
             parentFolder
-              ? 'border-accent bg-accent/10'
-              : 'border-border hover:border-accent/50'
+              ? 'border-primary bg-selected-bg'
+              : 'border-[color:var(--color-border)] hover:border-selected-border'
           }`}
         >
           <div className="flex items-center gap-3">
-            <FolderOpen size={24} className="text-accent" />
+            <FolderOpen size={24} className="text-primary" />
             <div className="flex-1 min-w-0">
-              <div className="font-medium text-text-primary">
+              <div className="font-medium text-text">
                 {parentFolder ? 'フォルダを選択済み' : 'フォルダを選択'}
               </div>
-              <div className="text-sm text-text-secondary truncate">
+              <div className="text-sm text-text-muted truncate">
                 {parentFolder || '作業フォルダの親ディレクトリを選択...'}
               </div>
             </div>
-            {parentFolder && <Check size={20} className="text-accent" />}
+            {parentFolder && <Check size={20} className="text-primary" />}
           </div>
         </button>
 
         {parentFolder && (
-          <div className="p-3 rounded-lg bg-sidebar-bg text-sm">
-            <div className="text-text-secondary mb-1">作成されるフォルダ:</div>
-            <div className="text-text-primary font-mono">
+          <div className="p-3 rounded-control bg-bg text-sm">
+            <div className="text-text-muted mb-1">作成されるフォルダ:</div>
+            <div className="text-text font-mono">
               {parentFolder}/{company.name}
             </div>
           </div>

@@ -7,6 +7,7 @@
 // window.__acbCalls  every write the tree asked for, as [method, ...args]
 // window.__acbSelected  the paths onSelectFile received, in order
 // ?tasks=off  the company shows no task list: no 「やることにつなぐ…」
+// ?theme=dark  dark mode (the menu and the name dialog follow it)
 // 営業部/議事録/会議の録画.mp4 is over 100 MB: sync keeps it on this computer
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -17,6 +18,8 @@ import { useAuthStore } from '../src/stores/authStore'
 import { FileTreePanel } from '../src/features/files/components/FileTreePanel'
 import { installElectronAPI } from './ui/fixtures/electron-api'
 import type { MyPrivateFolder } from '../shared/private-folder-ui'
+
+if (new URLSearchParams(location.search).get('theme') === 'dark') document.documentElement.classList.add('dark')
 
 const ROOT = '/Users/demo/会社'
 const DEPT = `${ROOT}/営業部`

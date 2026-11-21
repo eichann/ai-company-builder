@@ -7,7 +7,7 @@ import { useDismiss } from '../../../shared/hooks/useDismiss'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import type { SwitchQuestion } from '../hooks/useCompanySwitch'
 
-const NAME_CLASS = 'text-sm font-medium text-gray-700 dark:text-zinc-200'
+const NAME_CLASS = 'text-sm font-medium text-text'
 
 const QUESTIONS: Record<SwitchQuestion, { title: string; message: string; confirmText: string; cancelText: string; danger: boolean }> = {
   sync: {
@@ -47,7 +47,7 @@ export function CompanySwitcher({ companyName, shown, targets, onSwitch, questio
 
   return (
     <div className="flex items-center gap-3">
-      <House size={18} className="text-gray-500 dark:text-zinc-400" />
+      <House size={18} className="text-text-muted" />
       {!shown ? <span className={NAME_CLASS}>{companyName}</span> : (
         <div ref={setBox} className="relative">
           <button
@@ -56,21 +56,21 @@ export function CompanySwitcher({ companyName, shown, targets, onSwitch, questio
             aria-haspopup="menu"
             aria-expanded={open}
             title="会社を切り替える"
-            className={`${NAME_CLASS} flex items-center gap-1 rounded-md px-1.5 py-0.5 -mx-1.5 hover:bg-gray-100 dark:hover:bg-zinc-800`}
+            className={`${NAME_CLASS} flex items-center gap-1 rounded-md px-1.5 py-0.5 -mx-1.5 hover:bg-surface-sunken`}
           >
             {companyName}
-            <CaretDown size={12} className="text-gray-500 dark:text-zinc-400" />
+            <CaretDown size={12} className="text-text-muted" />
           </button>
           {open && (
-            <div role="menu" aria-label="会社を切り替える" className="absolute left-0 top-full z-50 mt-1 min-w-56 rounded-lg border border-gray-200 bg-white py-1 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-              <p className="px-3 py-1.5 text-xs text-gray-500 dark:text-zinc-400">ほかの会社を開く</p>
+            <div role="menu" aria-label="会社を切り替える" className="absolute left-0 top-full z-menu mt-1 min-w-56 rounded-control border border-[color:var(--color-border)] bg-surface-raised py-1 text-sm shadow-pop">
+              <p className="px-3 py-1.5 text-xs text-text-muted">ほかの会社を開く</p>
               {targets.map(company => (
                 <button
                   key={company.id}
                   type="button"
                   role="menuitem"
                   onClick={() => { setOpen(false); onSwitch(company) }}
-                  className="block w-full px-3 py-1.5 text-left text-gray-700 hover:bg-gray-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  className="block w-full px-3 py-1.5 text-left text-text hover:bg-surface-sunken"
                 >
                   {company.name}
                 </button>
@@ -80,10 +80,10 @@ export function CompanySwitcher({ companyName, shown, targets, onSwitch, questio
         </div>
       )}
       {waitingForSync && (
-        <span role="status" className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-zinc-400">
+        <span role="status" className="flex items-center gap-1.5 text-xs text-text-muted">
           <SpinnerGap size={14} className="animate-spin" />
           同期が終わったら会社を切り替えます
-          <button type="button" onClick={onStopWaiting} className="underline hover:text-gray-700 dark:hover:text-zinc-200">やめる</button>
+          <button type="button" onClick={onStopWaiting} className="underline hover:text-text">やめる</button>
         </span>
       )}
       <ConfirmDialog

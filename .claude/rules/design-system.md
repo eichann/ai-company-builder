@@ -180,6 +180,41 @@ fine), `color-opacity` (`bg-warning/10`).
   the opener although callers open it without a Radix trigger. `admin/tests/confirm-dialog.test.tsx`.
 - The hand-made dialogs keep their own frames until the dialog-frame PR (P2).
 
+## Dark-mode readability (P1b, done)
+
+- **These screens follow the theme** (they stayed white, or always dark, before): `ContextMenu`,
+  `InputDialog`, the company selector family (`features/company/components/*`: selector, empty
+  state, folder / department choice, setup progress, the title bar's `CompanySwitcher` menu),
+  `LoginScreen`, `ServerSetupScreen` (and its invitation-link offer), the chat's loading and
+  setup boxes (`ChatAuthGate`), and `NewSkillWizard` (was always dark).
+- **How the old names were replaced there** (only in these files; the old Tailwind names keep
+  their fixed values for the other screens): `editor-bg` (page) → `bg-[var(--color-surface)]`
+  (the semantic `surface`; the bridge has no `bg-surface` class because the app's `surface` name
+  is taken), `sidebar-bg` → `bg-bg` (inputs and the grey secondary buttons on a page; menus and
+  dialogs → `bg-surface-raised`), `activitybar-bg` hover → `bg-surface-sunken`, `border-border` →
+  `border-[color:var(--color-border)]` (inputs: `border-border-control`), `text-primary` / `ink`
+  → `text-text`, `text-secondary` / `ink-muted` → `text-text-muted`, placeholders →
+  `text-text-subtle`, `focus:border-accent` → `focus:border-focus-border`, `accent/10` / `/20`
+  (icon tiles, picked rows) → `selected-bg` / `selected-bg-hover`, red / green boxes → the
+  `danger` / `success` sets, overlays → `bg-scrim`, `z-dialog` / `z-menu`, `shadow-dialog` /
+  `shadow-pop`, `rounded-lg` → `rounded-control` (same 8px). Blue accent buttons → `bg-primary
+  hover:bg-primary-hover text-on-primary`, `disabled:opacity-disabled`. Type sizes are untouched
+  (P3). The setup progress' step circles (`bg-zinc-700` / `bg-green-500`) read in both themes
+  and wait for the status PR (P2). The skill wizard's department colour stays (data).
+- **Guarded by** `client/tests/ui/dark-readability.spec.ts`: for each screen, in dark mode (the
+  `dark` class on `<html>`) the surface behind the main text has relative luminance < 0.05 and
+  the text contrast is ≥ 4.5:1; in light mode the surface stays > 0.8 with the same contrast.
+  Computed colours, not class names or pixels. Preview pages: `file-tree-ui` (menu, name dialog),
+  `company-selector-ui`, `skill-layout-ui` (switcher, chat loading box), `keep-work-ui` (wizard)
+  and `sign-in-ui` (login, server setup; new), each reading `?theme=dark`.
+- **Still on the old fixed tokens** (light in dark, or dark text on a dark surface; next screens
+  to move): `App.tsx` (start-up `bg-editor-bg`), `SyncPreviewDialog`, `DiffViewer`
+  (`sidebar-bg`, `activitybar-bg`, `border-border`, `text-primary` / `text-secondary`),
+  `TabGroupParts` (`text-text-secondary`), the chat's `AgentInteractionCard`,
+  `ChatAuthSettings`, `ChatMessageList`, `ChatConversation`, `ClaudeSignInCard`, `MessageParts`
+  (`ink`, `ink-muted`, `ink-faint`, `surface-elevated`) and `ComposerAttachments`
+  (`border-border`).
+
 ## Order of the next PRs (from the proposal)
 
 - **P1**: danger vs ordinary actions and the confirm dialog (red only for delete / remove; focus,

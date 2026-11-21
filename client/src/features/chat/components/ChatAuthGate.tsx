@@ -9,11 +9,11 @@ export function ChatAuthChecking() {
   return (
     <div className="h-full flex flex-col items-center justify-center p-8">
       <div className="relative">
-        <div className="w-12 h-12 rounded-2xl bg-surface-elevated border border-white/[0.06] flex items-center justify-center">
-          <CircleNotch size={20} className="text-accent animate-spin" />
+        <div className="w-12 h-12 rounded-2xl bg-surface-raised border border-[color:var(--color-border)] flex items-center justify-center">
+          <CircleNotch size={20} className="text-primary animate-spin" />
         </div>
       </div>
-      <p className="mt-4 text-sm text-ink-muted">{t('auth.checkingAuth')}</p>
+      <p className="mt-4 text-sm text-text-muted">{t('auth.checkingAuth')}</p>
     </div>
   )
 }
@@ -37,21 +37,21 @@ export function ChatSetupNeeded({ claudeSetupShown, claudeStatus, claudeRoot, cl
     // Claude Code: everything happens here (install guidance, the browser sign-in); no terminal.
     return (
       <div className="h-full flex flex-col items-center justify-center gap-4 p-8 text-center">
-        <h3 className="text-lg font-medium text-ink">AI に相談する準備</h3>
+        <h3 className="text-lg font-medium text-text">AI に相談する準備</h3>
         <div className="w-full max-w-[360px]"><ClaudeSignInCard status={claudeStatus} root={claudeRoot} onRecheck={onRecheck} /></div>
-        <button type="button" onClick={onOpenSettings} className="text-xs text-ink-muted hover:text-ink">ほかの AI を選ぶ（設定）</button>
+        <button type="button" onClick={onOpenSettings} className="text-xs text-text-muted hover:text-text">ほかの AI を選ぶ（設定）</button>
       </div>
     )
   }
   return (
     <div className="h-full flex flex-col items-center justify-center p-8 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-surface-elevated border border-white/[0.06] flex items-center justify-center mb-6 shadow-glass">
-        <Lightning size={28} weight="fill" className="text-accent" />
+      <div className="w-16 h-16 rounded-2xl bg-surface-raised border border-[color:var(--color-border)] flex items-center justify-center mb-6 shadow-glass">
+        <Lightning size={28} weight="fill" className="text-primary" />
       </div>
-      <h3 className="text-lg font-medium text-ink mb-2">
+      <h3 className="text-lg font-medium text-text mb-2">
         {t('auth.setupAssistant')}
       </h3>
-      <p className="text-sm text-ink-muted mb-6 max-w-[240px]">
+      <p className="text-sm text-text-muted mb-6 max-w-[240px]">
         {claudeCodeAvailable
           ? t('auth.connectOptions')
           : t('auth.apiKeyRequired')}
@@ -65,8 +65,8 @@ export function ChatSetupNeeded({ claudeSetupShown, claudeStatus, claudeRoot, cl
         onClick={onOpenSettings}
         className="
           flex items-center gap-2
-          bg-accent hover:bg-accent/90
-          text-white text-sm font-medium
+          bg-primary hover:bg-primary-hover
+          text-on-primary text-sm font-medium
           rounded-xl px-5 py-2.5
           transition-all duration-200
           hover:shadow-glow hover:scale-[1.02]
