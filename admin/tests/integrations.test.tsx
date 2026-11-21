@@ -424,7 +424,7 @@ describe('つなぎ先 and the business using it, each on its own (owner decisio
     renderInCompany(<IntegrationsPage />)
     await userEvent.click(await screen.findByRole('button', { name: '取り込む' }))
     await userEvent.click(await screen.findByRole('button', { name: '新しいつなぎ先として始める' }))
-    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '新しく始める' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '新しく始める' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/plugins/hubspot/connection/renew'))).toBe(true))
     expect(calls.some((c) => c.url.endsWith('/plugins/corporate-sales/connection/renew'))).toBe(false)
   })
@@ -559,7 +559,7 @@ describe('つなぎ先 → Google', () => {
     // 「止める」 asks first, then stops that member only.
     const row = screen.getByTestId('google-grant-u_member')
     await userEvent.click(within(row).getByRole('button', { name: '止める' }))
-    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '止める' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '止める' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.url === `${base}/google/grants/u_member`)).toBe(true))
     expect(await screen.findByText('止めました')).toBeInTheDocument()
 
@@ -644,7 +644,7 @@ describe('つなぎ先 → Slack', () => {
 
     const row = screen.getByTestId('slack-grant-u_member')
     await userEvent.click(within(row).getByRole('button', { name: '止める' }))
-    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '止める' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '止める' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.url === `${base}/slack/grants/u_member`)).toBe(true))
   })
 })

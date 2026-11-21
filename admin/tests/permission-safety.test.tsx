@@ -107,7 +107,7 @@ async function restrictContracts() {
   const chips = await screen.findByRole('list', { name: '編集できる人' })
   await userEvent.click(within(chips).getByRole('button', { name: '田中 太郎を外す' }))
   await userEvent.click(screen.getByRole('button', { name: '保存' }))
-  const confirm = await screen.findByRole('dialog')
+  const confirm = await screen.findByRole('alertdialog')
   await userEvent.click(within(confirm).getByRole('button', { name: '保存する' }))
 }
 
@@ -241,7 +241,7 @@ describe('rules whose folder is missing (orphanedScopes)', () => {
     renderInCompany(<PermissionsPage />)
     const card = await screen.findByRole('region', { name: title })
     await userEvent.click(within(card).getByRole('button', { name: 'ルールを削除' }))
-    const dialog = await screen.findByRole('dialog', { name: 'ルールを削除しますか？' })
+    const dialog = await screen.findByRole('alertdialog', { name: 'ルールを削除しますか？' })
     expect(calls.some((c) => c.method === 'DELETE')).toBe(false)
     await userEvent.click(within(dialog).getByRole('button', { name: 'ルールを削除' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.url)).toEqual([`${base}/permissions/scopes/s_old/rules`]))
@@ -261,7 +261,7 @@ describe('rules whose folder is missing (orphanedScopes)', () => {
     renderInCompany(<PermissionsPage />)
     const card = await screen.findByRole('region', { name: title })
     await userEvent.click(within(card).getByRole('button', { name: 'ルールを削除' }))
-    await userEvent.click(within(await screen.findByRole('dialog', { name: 'ルールを削除しますか？' })).getByRole('button', { name: 'ルールを削除' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog', { name: 'ルールを削除しますか？' })).getByRole('button', { name: 'ルールを削除' }))
     const outdated = await screen.findByRole('dialog', { name: /アプリの更新が必要なメンバーがいます/ })
     await userEvent.click(within(outdated).getByRole('button', { name: 'それでも保存する' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.url).at(-1)).toBe(`${base}/permissions/scopes/s_old/rules?force=true`))

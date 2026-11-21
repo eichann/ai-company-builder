@@ -77,11 +77,11 @@ admin/src/components/skill-shelf/shelf-requests.tsx arbitrary-value=1 color-opac
 admin/src/components/skill-shelf/skill-shelf-page.tsx color-opacity=1 radius-scale=2 type-scale=9
 admin/src/components/ui/avatar.tsx color-literal=4 type-scale=1
 admin/src/components/ui/badge.tsx color-opacity=8 radius-scale=1 type-scale=1
-admin/src/components/ui/button.tsx arbitrary-value=2 color-opacity=7 opacity-scale=1 radius-scale=1 shadow-scale=3 type-scale=1
+admin/src/components/ui/button.tsx arbitrary-value=2 color-opacity=5 opacity-scale=1 radius-scale=1 shadow-scale=3 type-scale=1
 admin/src/components/ui/card.tsx arbitrary-value=2 radius-scale=1 shadow-scale=1 type-scale=2
 admin/src/components/ui/command.tsx arbitrary-value=1 opacity-scale=3 radius-scale=3 type-scale=4
 admin/src/components/ui/dialog.tsx arbitrary-value=8 color-opacity=1 opacity-scale=1 radius-scale=2 shadow-scale=1 type-scale=2 white-black=1 z-index=2
-admin/src/components/ui/dropdown-menu.tsx arbitrary-value=1 color-opacity=1 opacity-scale=3 radius-scale=4 shadow-scale=1 type-scale=4 z-index=1
+admin/src/components/ui/dropdown-menu.tsx arbitrary-value=1 opacity-scale=3 radius-scale=4 shadow-scale=1 type-scale=4 z-index=1
 admin/src/components/ui/input.tsx arbitrary-value=2 color-opacity=3 opacity-scale=1 radius-scale=1 shadow-scale=1 type-scale=1
 admin/src/components/ui/label.tsx opacity-scale=2 type-scale=1
 admin/src/components/ui/popover.tsx radius-scale=1 shadow-scale=1 z-index=1
@@ -251,8 +251,7 @@ client/src/features/workspace/components/DepartmentBar.tsx palette-color=15 type
 client/src/features/workspace/components/DepartmentTabs.tsx opacity-scale=1 palette-color=19 radius-scale=2 shadow-scale=3 type-scale=2 white-black=7
 client/src/features/workspace/components/LeftPanelTabs.tsx arbitrary-value=7 palette-color=10 white-black=1 z-index=1
 client/src/features/workspace/components/ResizeHandle.tsx palette-color=1
-client/src/shared/ui/ConfirmDialog.tsx color-opacity=1 palette-color=8 radius-scale=3 shadow-scale=1 type-scale=4 white-black=4 z-index=1
-client/src/shared/ui/ContextMenu.tsx arbitrary-value=1 palette-color=2 radius-scale=1 shadow-scale=1 type-scale=2 z-index=1
+client/src/shared/ui/ContextMenu.tsx arbitrary-value=1 radius-scale=1 shadow-scale=1 type-scale=2 z-index=1
 client/src/shared/ui/DiffViewer.tsx arbitrary-value=13 color-opacity=3 palette-color=7 radius-scale=2 shadow-scale=1 type-scale=4 white-black=1
 client/src/shared/ui/DriveFiles.tsx arbitrary-value=8 opacity-scale=3 palette-color=16 radius-scale=5 white-black=1
 client/src/shared/ui/DriveLinkAction.tsx arbitrary-value=5 palette-color=11 radius-scale=2
@@ -260,9 +259,9 @@ client/src/shared/ui/HoverTooltip.tsx arbitrary-value=1 z-index=1
 client/src/shared/ui/InputDialog.tsx color-opacity=2 palette-color=2 radius-scale=4 shadow-scale=1 type-scale=4 white-black=2 z-index=1
 client/src/shared/ui/LinkDropNotice.tsx arbitrary-value=4 color-opacity=5 opacity-scale=3 palette-color=10 radius-scale=5 white-black=1
 client/src/shared/ui/LinkedColumn.tsx arbitrary-value=10 color-opacity=1 palette-color=17 radius-scale=3
-client/src/shared/ui/MoreMenu.tsx arbitrary-value=4 palette-color=19 radius-scale=4 shadow-scale=1 white-black=2 z-index=1
+client/src/shared/ui/MoreMenu.tsx arbitrary-value=4 palette-color=17 radius-scale=4 shadow-scale=1 white-black=2 z-index=1
 client/src/shared/ui/ReadOnlyBadge.tsx arbitrary-value=2 palette-color=4 radius-scale=1
 client/src/shared/ui/RecordPage.tsx arbitrary-value=11 color-opacity=2 opacity-scale=2 palette-color=34 radius-scale=3 white-black=2
 client/src/shared/ui/ThingIcon.tsx arbitrary-value=2 palette-color=35
 client/src/shared/ui/consultationLinks.tsx arbitrary-value=2 color-opacity=1 palette-color=4 radius-scale=2
-client/src/shared/ui/primitives.tsx arbitrary-value=11 opacity-scale=2 palette-color=76 radius-scale=3 shadow-scale=1 type-scale=1 white-black=26
+client/src/shared/ui/primitives.tsx arbitrary-value=11 opacity-scale=2 palette-color=71 radius-scale=3 shadow-scale=1 type-scale=1 white-black=25
