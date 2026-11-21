@@ -39,7 +39,7 @@ export function CreateCompanyForm({ onCreated, onBack }: {
       <ErrorNotice error={error} />
 
       <div>
-        <label className="block text-sm text-text-secondary mb-2">
+        <label className="block text-sm text-text-muted mb-2">
           会社名
         </label>
         <input
@@ -47,7 +47,7 @@ export function CreateCompanyForm({ onCreated, onBack }: {
           value={name}
           onChange={e => setName(e.target.value)}
           placeholder="例: 株式会社サンプル"
-          className="w-full bg-sidebar-bg border border-border rounded-lg px-4 py-3 text-text-primary placeholder-text-secondary focus:outline-none focus:border-accent"
+          className="w-full bg-bg border border-border-control rounded-control px-4 py-3 text-text placeholder:text-text-subtle focus:outline-none focus:border-focus-border"
           autoFocus
         />
       </div>

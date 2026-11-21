@@ -4,6 +4,7 @@
 //   ?view=preview  the sync preview (real useSync + SyncPreviewDialog): 「元に戻す」 and the 作業メモ
 //   ?view=backups  the backup history: 復元
 //   ?view=skills   新しいスキル / コピー (real useSkillsTab + the two dialogs)
+//   ?theme=dark    dark mode
 //
 // window.__acbCalls  every write asked for, as [method, ...args]
 // window.__acbFail   names of the calls that fail next (a spec adds them)
@@ -18,6 +19,8 @@ import { BackupHistorySlideOver } from '../src/features/sync/components/BackupHi
 import { NewSkillWizard } from '../src/features/skills/components/NewSkillWizard'
 import { CopySkillModal } from '../src/features/skills/components/CopySkillModal'
 import { installElectronAPI } from './ui/fixtures/electron-api'
+
+if (new URLSearchParams(location.search).get('theme') === 'dark') document.documentElement.classList.add('dark')
 
 const ROOT = '/Users/demo/会社'
 const calls: unknown[][] = []

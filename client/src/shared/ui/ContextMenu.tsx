@@ -55,12 +55,12 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 min-w-[160px] py-1 bg-sidebar-bg border border-border rounded-lg shadow-xl"
+      className="fixed z-menu min-w-[160px] py-1 bg-surface-raised text-text border border-[color:var(--color-border)] rounded-control shadow-pop"
       style={{ left: adjustedPosition.x, top: adjustedPosition.y }}
     >
       {items.map((item, index) =>
         item.divider ? (
-          <div key={index} className="my-1 border-t border-border" />
+          <div key={index} className="my-1 border-t border-[color:var(--color-border)]" />
         ) : (
           <button
             key={index}
@@ -72,9 +72,9 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
             }}
             disabled={item.disabled}
             className={`w-full flex items-center justify-between px-3 py-1.5 text-sm transition-colors
-              ${item.disabled ? 'text-text-secondary cursor-not-allowed' : ''}
+              ${item.disabled ? 'text-disabled-text cursor-not-allowed' : ''}
               ${item.danger && !item.disabled ? 'text-danger-text hover:bg-danger-bg-hover' : ''}
-              ${!item.danger && !item.disabled ? 'text-text-primary hover:bg-activitybar-bg' : ''}
+              ${!item.danger && !item.disabled ? 'text-text hover:bg-surface-sunken' : ''}
             `}
           >
             <span className="flex items-center gap-2">
@@ -82,7 +82,7 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
               {item.label}
             </span>
             {item.shortcut && (
-              <span className="text-xs text-text-secondary ml-4">{item.shortcut}</span>
+              <span className="text-xs text-text-muted ml-4">{item.shortcut}</span>
             )}
           </button>
         )

@@ -15,19 +15,19 @@ export function SetupProgress({ kind, step, error, receivedBytes, onBack }: {
   return (
     <div className="space-y-8">
       <div className="text-center">
-        <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-accent/10 flex items-center justify-center">
+        <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-selected-bg flex items-center justify-center">
           {step === 'done' ? (
-            <CheckCircle size={40} className="text-green-400" weight="fill" />
+            <CheckCircle size={40} className="text-success-text" weight="fill" />
           ) : (
-            <SpinnerGap size={40} className="animate-spin text-accent" />
+            <SpinnerGap size={40} className="animate-spin text-primary" />
           )}
         </div>
-        <h1 className="text-2xl font-bold text-text-primary mb-2">
+        <h1 className="text-2xl font-bold text-text mb-2">
           {step === 'done'
             ? (reopen ? '準備完了' : 'セットアップ完了')
             : (reopen ? 'フォルダを開いています...' : 'セットアップ中...')}
         </h1>
-        <p className="text-text-secondary">
+        <p className="text-text-muted">
           {step === 'done'
             ? '準備が整いました'
             : kind === 'firstSetup'
@@ -37,9 +37,9 @@ export function SetupProgress({ kind, step, error, receivedBytes, onBack }: {
       </div>
 
       {error && (
-        <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+        <div className="p-3 rounded-control bg-danger-bg border border-danger-border text-danger-text text-sm">
           {error}
-          <button onClick={onBack} className="block mt-2 text-accent hover:underline">
+          <button onClick={onBack} className="block mt-2 text-link hover:underline">
             戻る
           </button>
         </div>
@@ -75,11 +75,11 @@ function StepRow({ active, finished, idleIcon, title, detail }: {
   detail: string
 }) {
   return (
-    <div className={`flex items-center gap-3 p-3 rounded-lg ${
-      active ? 'bg-accent/10 border border-accent/30' : 'bg-sidebar-bg'
+    <div className={`flex items-center gap-3 p-3 rounded-control ${
+      active ? 'bg-selected-bg border border-selected-border' : 'bg-bg'
     }`}>
       <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-        active ? 'bg-accent' : finished ? 'bg-green-500' : 'bg-zinc-700'
+        active ? 'bg-primary' : finished ? 'bg-green-500' : 'bg-zinc-700'
       }`}>
         {active ? (
           <SpinnerGap size={16} className="animate-spin text-white" />
@@ -88,8 +88,8 @@ function StepRow({ active, finished, idleIcon, title, detail }: {
         ) : idleIcon}
       </div>
       <div>
-        <div className="text-text-primary font-medium">{title}</div>
-        <div className="text-sm text-text-secondary">{detail}</div>
+        <div className="text-text font-medium">{title}</div>
+        <div className="text-sm text-text-muted">{detail}</div>
       </div>
     </div>
   )

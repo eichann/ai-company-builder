@@ -23,14 +23,14 @@ export function CompanyList({ companies, error, canCreate, onSelect, onCreate }:
           <ChoiceButton
             key={company.id}
             onClick={() => onSelect(company)}
-            icon={<Buildings size={20} className="text-accent" weight="duotone" />}
+            icon={<Buildings size={20} className="text-primary" weight="duotone" />}
             title={company.name}
             detail={company.role === 'owner' ? 'オーナー' : 'メンバー'}
           />
         ))}
 
         {companies.length === 0 && (
-          <div className="text-center py-8 text-text-secondary">
+          <div className="text-center py-8 text-text-muted">
             {canCreate
               ? 'まだ会社がありません。新しく作成してください。'
               : 'まだ会社に参加していません。会社に参加するには、届いた招待リンクを開いてください。招待が届いていない場合は、会社の管理者かサービスの運用担当者にお問い合わせください。'}
@@ -42,7 +42,7 @@ export function CompanyList({ companies, error, canCreate, onSelect, onCreate }:
             onClick={onCreate}
             dashed
             arrow={false}
-            icon={<Plus size={20} className="text-accent" />}
+            icon={<Plus size={20} className="text-primary" />}
             title="新しい会社を作成"
             detail="AIエージェントと一緒に働く会社を作りましょう"
           />

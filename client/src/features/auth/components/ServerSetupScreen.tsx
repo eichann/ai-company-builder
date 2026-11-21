@@ -88,24 +88,24 @@ export function ServerSetupScreen({ onComplete }: Props) {
   if (offer) {
     const host = new URL(offer).host
     return (
-      <div ref={watchOffer} className="h-full bg-editor-bg flex items-center justify-center">
+      <div ref={watchOffer} className="h-full bg-[var(--color-surface)] flex items-center justify-center">
         <div className="w-full max-w-md p-8 space-y-5" data-app-link-offer>
           <div className="text-center">
-            <Buildings size={56} className="mx-auto mb-3 text-accent" weight="duotone" />
-            <h1 className="text-xl font-bold text-text-primary mb-1">招待のリンクから開きました</h1>
-            <p className="text-text-secondary text-sm">次の会社のサーバーにつなぎます。</p>
+            <Buildings size={56} className="mx-auto mb-3 text-primary" weight="duotone" />
+            <h1 className="text-xl font-bold text-text mb-1">招待のリンクから開きました</h1>
+            <p className="text-text-muted text-sm">次の会社のサーバーにつなぎます。</p>
           </div>
-          <div className="rounded-lg border border-border bg-sidebar-bg p-4 text-center">
-            <div className="text-lg font-semibold text-text-primary break-all" aria-label="つなぐサーバー">{host}</div>
-            <div className="mt-1 text-xs text-text-secondary break-all">{offer}</div>
+          <div className="rounded-control border border-[color:var(--color-border)] bg-bg p-4 text-center">
+            <div className="text-lg font-semibold text-text break-all" aria-label="つなぐサーバー">{host}</div>
+            <div className="mt-1 text-xs text-text-muted break-all">{offer}</div>
           </div>
-          <p className="text-xs text-text-secondary">
+          <p className="text-xs text-text-muted">
             招待のメールのページで［アプリを開く］を押したときだけ、［つなぐ］を押してください。心当たりがないときは［つながない］を押してください。
           </p>
           {offerError && (
-            <div role="alert" className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-              <WarningCircle size={20} className="text-red-400 flex-shrink-0" />
-              <span className="text-sm text-red-400">{offerError}</span>
+            <div role="alert" className="flex items-center gap-2 p-3 rounded-control bg-danger-bg border border-danger-border">
+              <WarningCircle size={20} className="text-danger-text flex-shrink-0" />
+              <span className="text-sm text-danger-text">{offerError}</span>
             </div>
           )}
           <div className="flex gap-3">
@@ -113,7 +113,7 @@ export function ServerSetupScreen({ onComplete }: Props) {
               type="button"
               onClick={() => void declineOffer()}
               disabled={offerBusy}
-              className="flex-1 rounded-lg border border-border px-4 py-3 text-text-secondary hover:text-text-primary"
+              className="flex-1 rounded-control border border-[color:var(--color-border)] px-4 py-3 text-text-muted hover:text-text"
             >
               つながない
             </button>
@@ -121,7 +121,7 @@ export function ServerSetupScreen({ onComplete }: Props) {
               type="button"
               onClick={() => void acceptOffer()}
               disabled={offerBusy}
-              className="flex-1 flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 disabled:bg-accent/50 text-white rounded-lg px-4 py-3 font-medium"
+              className="flex-1 flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-disabled text-on-primary rounded-control px-4 py-3 font-medium"
             >
               {offerBusy ? <SpinnerGap size={20} className="animate-spin" /> : <>つなぐ<ArrowRight size={20} /></>}
             </button>
@@ -132,60 +132,60 @@ export function ServerSetupScreen({ onComplete }: Props) {
   }
 
   return (
-    <div ref={watchOffer} className="h-full bg-editor-bg flex items-center justify-center">
+    <div ref={watchOffer} className="h-full bg-[var(--color-surface)] flex items-center justify-center">
       <div className="w-full max-w-md p-8">
         <div className="text-center mb-8">
-          <Buildings size={64} className="mx-auto mb-4 text-accent" weight="duotone" />
-          <h1 className="text-2xl font-bold text-text-primary mb-2">
+          <Buildings size={64} className="mx-auto mb-4 text-primary" weight="duotone" />
+          <h1 className="text-2xl font-bold text-text mb-2">
             AI Company Builder
           </h1>
-          <p className="text-text-secondary">
+          <p className="text-text-muted">
             接続先サーバーのURLを入力してください
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm text-text-secondary mb-2">
+            <label className="block text-sm text-text-muted mb-2">
               サーバーURL
             </label>
             <div className="relative">
               <Globe
                 size={20}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
               />
               <input
                 type="text"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="https://example.com"
-                className="w-full bg-sidebar-bg border border-border rounded-lg pl-10 pr-4 py-3 text-text-primary placeholder-text-secondary focus:outline-none focus:border-accent"
+                className="w-full bg-bg border border-border-control rounded-control pl-10 pr-4 py-3 text-text placeholder:text-text-subtle focus:outline-none focus:border-focus-border"
                 autoFocus
               />
             </div>
-            <p className="mt-2 text-xs text-text-secondary">
+            <p className="mt-2 text-xs text-text-muted">
               招待のメールのページで［アプリを開く］を押すと、アドレスは自動で入ります。そうでないときは、管理者から共有されたサーバーのURLを入力してください
             </p>
           </div>
 
           {error && (
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-              <WarningCircle size={20} className="text-red-400 flex-shrink-0" />
-              <span className="text-sm text-red-400">{error}</span>
+            <div className="flex items-center gap-2 p-3 rounded-control bg-danger-bg border border-danger-border">
+              <WarningCircle size={20} className="text-danger-text flex-shrink-0" />
+              <span className="text-sm text-danger-text">{error}</span>
             </div>
           )}
 
           {validated && (
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-              <CheckCircle size={20} className="text-green-400 flex-shrink-0" />
-              <span className="text-sm text-green-400">接続確認完了</span>
+            <div className="flex items-center gap-2 p-3 rounded-control bg-success-bg border border-success-border">
+              <CheckCircle size={20} className="text-success-text flex-shrink-0" />
+              <span className="text-sm text-success-text">接続確認完了</span>
             </div>
           )}
 
           <button
             type="submit"
             disabled={isValidating || !url.trim() || validated}
-            className="w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 disabled:bg-accent/50 disabled:cursor-not-allowed text-white rounded-lg px-4 py-3 transition-colors font-medium"
+            className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-disabled disabled:cursor-not-allowed text-on-primary rounded-control px-4 py-3 transition-colors font-medium"
           >
             {isValidating ? (
               <SpinnerGap size={20} className="animate-spin" />

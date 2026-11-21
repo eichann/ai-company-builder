@@ -90,7 +90,7 @@ live, how screens use them, and what CI holds.
   `admin/tests/design-tokens-bridge.test.ts` holds every shadcn variable and `--radius` to the
   value the admin had before the tokens, light and dark (its `TODAY` table).
   Names already taken keep their old meaning until their screens move: in the app `surface`
-  (`bg-surface` = #fff in both themes) and `border` (#e0e0e0); `accent`, `ink`, `text-primary`,
+  (`bg-surface` = #fff in both themes) and `border` (#e0e0e0); `accent`, `ink`, `text-primary` (the class `text-text-primary`; not the semantic `text-primary`, which is the primary blue),
   `sidebar-bg`, … stay as they are. In the admin, every shadcn colour except light `--card` /
   `--popover` keeps today's value (`ADMIN_SHADCN` in `build.mjs`: `keep` and a `later:` comment
   naming its token), and `--font-sans` stays Geist. Dropping a `keep` is a visible change: do it
@@ -179,6 +179,58 @@ fine), `color-opacity` (`bg-warning/10`).
   click does not close, focus starts on キャンセル, otherwise on the main action; focus returns to
   the opener although callers open it without a Radix trigger. `admin/tests/confirm-dialog.test.tsx`.
 - The hand-made dialogs keep their own frames until the dialog-frame PR (P2).
+
+## Dark-mode readability (P1b, done)
+
+- **These screens follow the theme** (they stayed white, or always dark, before): `ContextMenu`,
+  `InputDialog`, the company selector family (`features/company/components/*`: selector, empty
+  state, folder / department choice, setup progress, the title bar's `CompanySwitcher` menu),
+  `LoginScreen`, `ServerSetupScreen` (and its invitation-link offer), the chat's loading and
+  setup boxes (`ChatAuthGate`), and `NewSkillWizard` (was always dark).
+- **How the old names were replaced there** (only in these files; the old Tailwind names keep
+  their fixed values for the other screens): `editor-bg` (page) → `bg-[var(--color-surface)]`
+  (the semantic `surface`; the bridge has no `bg-surface` class because the app's `surface` name
+  is taken), `sidebar-bg` → `bg-bg` (inputs and the grey secondary buttons on a page; menus and
+  dialogs → `bg-surface-raised`), `activitybar-bg` hover → `bg-surface-sunken`, `border-border` →
+  `border-[color:var(--color-border)]` (inputs: `border-border-control`), the classes
+  `text-text-primary` / `text-ink` → `text-text` (bare `text-primary` is now the primary blue: use
+  it only for blue icons), `text-text-secondary` / `text-ink-muted` → `text-text-muted`,
+  placeholders → `text-text-subtle`, `focus:border-accent` → `focus:border-focus-border`, `accent/10` / `/20`
+  (icon tiles, picked rows) → `selected-bg` / `selected-bg-hover`, red / green boxes → the
+  `danger` / `success` sets, overlays → `bg-scrim`, `z-dialog` / `z-menu`, `shadow-dialog` /
+  `shadow-pop`, `rounded-lg` → `rounded-control` (same 8px). Blue accent buttons → `bg-primary
+  hover:bg-primary-hover text-on-primary`, `disabled:opacity-disabled`. Type sizes are untouched
+  (P3). The setup progress' step circles (`bg-zinc-700` / `bg-green-500`) read in both themes
+  and wait for the status PR (P2). The skill wizard's department colour stays (data).
+- **What changed in light mode** (everything else is the same value): menus (`ContextMenu`, the
+  name dialog) #f8f8f8 → white (`surface-raised`); inputs and the grey secondary buttons #f8f8f8 →
+  #fafafa (`bg`; the page itself stays white); main text #1d1c1d → #18181b; secondary text #616061
+  → #52525b; placeholders #616061 → zinc-500; lines #e0e0e0 → #e4e4e7, input borders → #d4d4d8
+  (`border-control`); error text red-400 → red-700 and success green-400 → emerald-700 (their
+  boxes the `-bg` / `-border` of the set); the dialog scrim 50 % → 45 % and the menu / dialog
+  shadows → `shadow-pop` / `shadow-dialog`; a disabled blue button fades as a whole (opacity 0.5,
+  its spinner included) instead of a paler blue fill; the skill wizard's hint box amber → info
+  (grey: it is information, and amber is for warnings); the skill wizard's inputs now show the
+  `focus-ring` colour (was Tailwind's default blue ring). The skill wizard itself is light in light
+  mode (it was always dark).
+- **Layering**: `ContextMenu` and the company switcher menu moved from `z-50` to `z-menu` (60),
+  which ties with the hand-made `z-[60]` overlays (toasts, banners): between equals the page order
+  decides. Acceptable because a menu closes on the next click; the overlays move to `z-toast` /
+  `z-overlay` in P2.
+- **Guarded by** `client/tests/ui/dark-readability.spec.ts`: for each screen, in dark mode (the
+  `dark` class on `<html>`) the surface behind the main text has relative luminance < 0.05 and
+  the text contrast is ≥ 4.5:1; in light mode the surface stays > 0.8 with the same contrast.
+  Computed colours, not class names or pixels. Preview pages: `file-tree-ui` (menu, name dialog),
+  `company-selector-ui`, `skill-layout-ui` (switcher; the chat loading box's own surface, its
+  label sits on the chat pane, not moved here), `keep-work-ui` (wizard, a step not yet reached)
+  and `sign-in-ui` (login, server setup; new), each reading `?theme=dark`.
+- **Still on the old fixed tokens** (light in dark, or dark text on a dark surface; next screens
+  to move): `App.tsx` (start-up `bg-editor-bg`), `SyncPreviewDialog`, `DiffViewer`
+  (`sidebar-bg`, `activitybar-bg`, `border-border`, `text-primary` / `text-secondary`),
+  `TabGroupParts` (`text-text-secondary`), the chat's `AgentInteractionCard`,
+  `ChatAuthSettings`, `ChatMessageList`, `ChatConversation`, `ClaudeSignInCard`, `MessageParts`
+  (`ink`, `ink-muted`, `ink-faint`, `surface-elevated`) and `ComposerAttachments`
+  (`border-border`).
 
 ## Order of the next PRs (from the proposal)
 

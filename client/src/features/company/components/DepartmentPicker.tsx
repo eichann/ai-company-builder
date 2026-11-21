@@ -38,23 +38,23 @@ export function DepartmentPicker({ departments, onBack, onDownload }: {
               key={dept.id}
               onClick={() => toggle(dept.folder)}
               aria-pressed={isPicked}
-              className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${
-                isPicked ? 'border-accent bg-accent/10' : 'border-border hover:border-accent/50'
+              className={`w-full flex items-center gap-3 p-3 rounded-control border transition-colors text-left ${
+                isPicked ? 'border-primary bg-selected-bg' : 'border-[color:var(--color-border)] hover:border-selected-border'
               }`}
             >
               <div className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${
-                isPicked ? 'bg-accent border-accent' : 'border-border'
+                isPicked ? 'bg-primary border-primary' : 'border-[color:var(--color-border)]'
               }`}>
-                {isPicked && <Check size={14} className="text-white" weight="bold" />}
+                {isPicked && <Check size={14} className="text-on-primary" weight="bold" />}
               </div>
-              <span className="flex-1 text-text-primary">{dept.name}</span>
-              <span className="text-xs text-text-secondary font-mono">{dept.folder}/</span>
+              <span className="flex-1 text-text">{dept.name}</span>
+              <span className="text-xs text-text-muted font-mono">{dept.folder}/</span>
             </button>
           )
         })}
       </div>
 
-      <p className="text-xs text-text-secondary">
+      <p className="text-xs text-text-muted">
         全社で共有しているファイル（スキルなど）は常にダウンロードされます。部署を選ばない場合は、すべての部署をダウンロードします。
       </p>
 
@@ -64,7 +64,7 @@ export function DepartmentPicker({ departments, onBack, onDownload }: {
         </button>
         <button
           onClick={() => onDownload(departments.map(d => d.folder).filter(f => picked.has(f)))}
-          className="flex-1 flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 text-white rounded-lg px-4 py-3 transition-colors"
+          className="flex-1 flex items-center justify-center gap-2 bg-primary hover:bg-primary-hover text-on-primary rounded-control px-4 py-3 transition-colors"
         >
           {picked.size > 0
             ? `選んだ部署をダウンロード（${picked.size}）`
