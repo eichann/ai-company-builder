@@ -6,6 +6,12 @@
 //   client/shared/            pure: imports only itself and the repository's
 //                             shared/ (no packages, no Node, no Electron);
 //                             listed folders may use one listed package
+//   connectors/<site>/        a site's browser checkers and declaration
+//                             (agent-browser.md "The checker"): import only
+//                             themselves, client/shared/browser-runner (types)
+//                             and the repository's shared/core; imported only
+//                             by the composition root (electron/main.ts) and
+//                             tests — the browser core knows no site
 //   electron/features|services|ipc/
 //                             never import Electron (the shell injects it)
 //   electron/agents/          the agents; never import the shell, features,
@@ -117,6 +123,32 @@ const CLIENT_SHARED_PACKAGES: Record<string, { pkg: string; reason: string }> = 
 const clientSharedMayImport = (t: string, file: string) =>
   t.startsWith('shared/') || t.startsWith('../shared/')
   || Object.entries(CLIENT_SHARED_PACKAGES).some(([dir, { pkg }]) => rel(file).startsWith(dir) && t === `pkg:${pkg}`)
+
+/** What a connector file may import: its own site's folder, the checker's types, the repository's shared/core. */
+function connectorMayImport(t: string, file: string, typeOnly: boolean): boolean {
+  const site = rel(file).split('/').slice(0, 2).join('/')
+  if (t.startsWith(`${site}/`)) return true
+  if (t.startsWith('../shared/core/')) return true
+  return typeOnly && t === 'shared/browser-runner'
+}
+
+test('the browser core knows no site: a connector imports only its own folder, the checker\'s types and shared/core, and only main.ts imports a connector', () => {
+  const connectors = sourceFiles(join(CLIENT, 'connectors'))
+  assert.ok(connectors.length > 0)
+  const out: string[] = []
+  for (const file of connectors) {
+    for (const { spec, typeOnly } of importStatementsIn(readFileSync(file, 'utf8'))) {
+      if (!connectorMayImport(target(file, spec), file, typeOnly)) out.push(`${rel(file)}: ${spec}`)
+    }
+  }
+  assert.deepEqual(out, [], 'a site\'s checker reads pages it is handed; everything else is the core\'s (agent-browser.md "The checker")')
+  const app = ['electron', 'src', 'shared'].flatMap(d => sourceFiles(join(CLIENT, d)))
+  const importers = app.filter(f => importsOf(f).some(spec => target(f, spec).startsWith('connectors/'))).map(rel)
+  assert.deepEqual(importers.filter(f => f !== 'electron/main.ts'), [], 'hand a site\'s checkers and declaration in from the composition root')
+  // Self-tests: another site's folder and a value from the core's runner are not allowed.
+  assert.equal(connectorMayImport('connectors/other/x', join(CLIENT, 'connectors/lstep/a.ts'), false), false)
+  assert.equal(connectorMayImport('shared/browser-runner', join(CLIENT, 'connectors/lstep/a.ts'), false), false)
+})
 
 test('client/shared imports only itself and the repository shared/', () => {
   const files = sourceFiles(join(CLIENT, 'shared'))

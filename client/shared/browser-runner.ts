@@ -1,11 +1,13 @@
 /**
  * The operation runner of 「ブラウザ操作」 (agent-browser.md "The runner"): the approved plan's shape,
- * the one gate every request of a run passes (`createRunGate`), what an adapter is, and the words.
+ * the one gate every request of a run passes (`createRunGate`), what a checker is, and the words.
  * Pure (no Node, DOM or Electron): the runner (electron/features/browser/runner.ts) drives it, the
  * shell's window (electron/browser-window.ts) asks it per request.
  *
  * Owner decisions 2026-11-20: every automated operation goes through this gate; only per-site
- * operation types (a reviewed adapter in the app + the connector's declaration), never free clicking.
+ * operation types, never free clicking. 2026-11-21 (design memo §24): a type is data (the
+ * connector's declaration: its writes and what the target must show after them); the only site
+ * code is a checker (below), handed in by the composition root — this module names no site.
  */
 import {
   BROWSER_ID_VALUE_RE, BROWSER_NAME_RE, matchDeclaredWrite,
@@ -16,7 +18,7 @@ import {
 // The approved plan
 // ---------------------------------------------------------------------------
 
-/** What an adapter reads of a target: named lists of ids only (never a text of the site). */
+/** What a checker reads of a target: named lists of ids only (never a text of the site). */
 export type BrowserTargetState = Readonly<Record<string, readonly string[]>>
 
 /**
@@ -29,7 +31,7 @@ export interface BrowserRunPlan {
   companyId: string
   connector: { id: string; version: string }
   operation: string
-  /** The outside account's id as the adapter reads it from the page. */
+  /** The outside account's id as the checker reads it from the page. */
   account: string
   target: Readonly<Record<string, string>>
   change: Readonly<Record<string, string>>
@@ -109,16 +111,16 @@ export function sameTargetState(a: BrowserTargetState, b: BrowserTargetState): b
 }
 
 // ---------------------------------------------------------------------------
-// Adapters (reviewed, shipped in the app: client/shared/browser-adapters/)
+// Checkers (reviewed; a site's live in client/connectors/<site>/, agent-browser.md "The checker")
 // ---------------------------------------------------------------------------
 
-/** One page the runner read for the adapter (GET of a declared read path, the window's login). */
+/** One page the runner read for the checker (GET of a declared read path, the window's login). */
 export interface BrowserPageRead {
   path: string
   body: string
 }
 
-export interface BrowserAdapterView {
+export interface BrowserCheckerView {
   /** The outside account the page shows (null: it cannot be told: the run stops before any write). */
   account: string | null
   /** The target's state, or null when the target is not exactly one existing item. */
@@ -129,20 +131,25 @@ export interface BrowserAdapterView {
   problem?: string
 }
 
-export interface BrowserOperationAdapter {
-  /** `<site>.<operation>`, as the declaration's `adapter` names it. */
+/**
+ * Reads, right before and after a write, only what the request itself does not carry: that the
+ * target is exactly one existing item (of the planned parent), the outside account, the state, and
+ * the CSRF / session values. Exploring the page and planning are the AI's; guarding is this, never
+ * the AI's (a page can tell the AI anything). What the state must be afterwards is the operation's
+ * `expect` (`expectedAfter`), not the checker's: one checker serves every operation on its thing.
+ */
+export interface BrowserChecker {
+  /** `<site>.<thing>`, as a declaration's `checker` names it. */
   readonly id: string
   /**
-   * The target fields this adapter confirms on the page before any write (agent-browser.md "The
-   * runner"). A target field that no declared write carries must be one of these, or the runner
-   * refuses the plan: nothing else would hold the request to it.
+   * The target fields this checker confirms on the page before any write. A target field that no
+   * declared write carries must be one of these, or the runner refuses the plan: nothing else would
+   * hold the request to it.
    */
-  readonly confirmsTarget: readonly string[]
-  /** The exact paths (no query) the adapter reads for these values: the only reads a run allows besides the page's parts. */
+  readonly confirms: readonly string[]
+  /** The exact paths (no query) the checker reads for these values: the only reads a run allows besides the page's parts. */
   readPaths(values: BrowserPlanValues): string[]
-  view(values: BrowserPlanValues, reads: readonly BrowserPageRead[]): BrowserAdapterView
-  /** The state the target must show after the write. */
-  after(before: BrowserTargetState, values: BrowserPlanValues): BrowserTargetState
+  view(values: BrowserPlanValues, reads: readonly BrowserPageRead[]): BrowserCheckerView
 }
 
 // ---------------------------------------------------------------------------
@@ -307,14 +314,14 @@ export function declaredWriteBody(operation: BrowserOperation, index: number, va
 /** One step's state, kept on this PC (ids and reasons only, never a value). */
 export type BrowserStepState = 'pending' | 'sent' | 'succeeded' | 'failed' | 'unknown'
 
-/** The only reason words a step record or a result carries (never an adapter's or a site's text). */
+/** The only reason words a step record or a result carries (never a checker's or a site's text). */
 export const BROWSER_RUN_REASONS = [
   // before anything starts
   'already-running', 'no-plan', 'plan', 'expired', 'already-ran', 'connector', 'operation', 'not-supported',
-  'unknown-adapter', 'target-unconfirmed', 'stopped', 'policy', 'no-window', 'busy', 'records-unavailable',
+  'unknown-checker', 'target-unconfirmed', 'stopped', 'policy', 'no-window', 'busy', 'records-unavailable',
   // started, nothing sent
   'window-not-ready', 'window-closed', 'read-failed', 'account-unknown', 'account-mismatch', 'target-missing',
-  'before-changed', 'csrf-missing', 'adapter-problem',
+  'before-changed', 'csrf-missing', 'checker-problem', 'cannot-come-true',
   // sent
   'refused-by-site', 'no-answer', 'not-confirmed-sent', 'reread-failed', 'unchanged-unrefused', 'empty-state',
   'other-state', 'error',

@@ -1,6 +1,6 @@
 /**
  * 「ブラウザ操作」's operation runner (agent-browser.md "The runner"), the parts that need no browser:
- * the run's gate (which request of a run may go out), the approved plan, Lステップ's adapter and its
+ * the run's gate (which request of a run may go out), the approved plan, Lステップ's checker and its
  * bundled declaration, the runner's steps against a fake window, the per-step record, and that the AI
  * cannot reach a run in this version. The same gate inside a real Electron window:
  * browser-window-electron.test.ts.
@@ -18,8 +18,10 @@ import {
   type BrowserRunGateHooks, type BrowserRunSurface, type BrowserStepRecord,
 } from '../shared/browser-runner'
 import { decideAiRead, decideWindowRequest, type BrowserWindowState } from '../shared/browser-operation'
-import { createBrowserAdapterRegistry, createBundledBrowserConnectors, parseBrowserDeclaration } from '../shared/browser-adapters'
-import { createLstepAddTemplateAdapter, LSTEP_ADD_TEMPLATE_ADAPTER, LSTEP_DECLARATION } from '../shared/browser-adapters/lstep'
+import { createBrowserCheckerRegistry, createBrowserConnectors, parseBrowserDeclaration } from '../shared/browser-checkers'
+import { lstepConnector } from '../connectors/lstep'
+import { LSTEP_DECLARATION } from '../connectors/lstep/declaration'
+import { createLstepReminderStepChecker, LSTEP_REMINDER_STEP_CHECKER } from '../connectors/lstep/reminder-step'
 import { createBrowserRunner, type BrowserRunnerDeps } from '../electron/features/browser/runner'
 import { createBrowserRunRecords } from '../electron/features/browser/run-records'
 
@@ -69,7 +71,7 @@ test('the gate refuses every write while the AI is stopped, armed or not', () =>
   assert.equal(gate.sent(0), false)
 })
 
-test('a run reads only its adapter\'s declared paths; the page\'s parts load, nothing else of the operated host', () => {
+test('a run reads only its checker\'s declared paths; the page\'s parts load, nothing else of the operated host', () => {
   const gate = gateOf()
   assert.deepEqual(gate.hooks.sessionRequest({ method: 'GET', url: url(READ) }), { allow: true })
   assert.deepEqual(gate.hooks.sessionRequest({ method: 'GET', url: url('/line/episode/show/102') }), { allow: false, reason: 'undeclared-read' })
@@ -126,7 +128,7 @@ test('the page\'s reads in a run follow the run\'s read rule on the operated hos
 
 const NOW = 1_800_000_000_000
 const planInput = (over: Record<string, unknown> = {}) => ({
-  planId: 'plan-1', companyId: 'c1', connector: { id: 'lstep', version: '0.1.0' }, operation: 'reminder_step_add_template',
+  planId: 'plan-1', companyId: 'c1', connector: { id: 'lstep', version: '0.2.0' }, operation: 'reminder_step_add_template',
   account: 'ACC1', target: values.target, change: values.change, before: { templates: ['300'] }, approvedAt: NOW - 1000, expiresAt: NOW + 60_000, ...over,
 })
 
@@ -146,7 +148,7 @@ test('a plan is taken only in its exact shape, unexpired and never valid for mor
 })
 
 // ---------------------------------------------------------------------------
-// Lステップ's adapter and its bundled declaration
+// Lステップ's checker and its bundled declaration
 // ---------------------------------------------------------------------------
 
 /** A reminder page in the shapes captured on the real site (values made up). */
@@ -160,19 +162,22 @@ ${Object.entries(o.steps).map(([step, templates]) => `<div id="templateStep${ste
 ${templates.map(t => `<a onclick="openModal(${reminder}, ${step}, ${hole++}, ${t}, 1)">msg</a>`).join('\n')}</div>`).join('\n')}</html>`
 }
 const accountReader = (html: string) => /data-account-id="([^"]+)"/.exec(html)?.[1] ?? null
-const adapter = createLstepAddTemplateAdapter(accountReader)
+const checker = createLstepReminderStepChecker(accountReader)
+/** What the composition root hands the runner: Lステップ's declaration and checkers. */
+const connectors = createBrowserConnectors([lstepConnector().declaration])
+const checkers = (account?: (html: string) => string | null) => createBrowserCheckerRegistry(lstepConnector({ account }).checkers)
 const read = (body: string) => [{ path: READ, body }]
 
-test('Lステップ\'s adapter reads the step\'s templates, the account and the CSRF token; a step elsewhere or an id like 0 is no target', () => {
-  assert.deepEqual(adapter.readPaths(values), [READ])
-  const view = adapter.view(values, read(lstepPage({ steps: { 201: ['300'], 2010: ['900'], 202: ['301'] } })))
+test('Lステップ\'s checker reads the step\'s templates, the account and the CSRF token; a step elsewhere or an id like 0 is no target', () => {
+  assert.deepEqual(checker.readPaths(values), [READ])
+  const view = checker.view(values, read(lstepPage({ steps: { 201: ['300'], 2010: ['900'], 202: ['301'] } })))
   assert.deepEqual(view, { account: 'ACC1', state: { templates: ['300'] }, ignored: { _token: 'tok', _lm_user_id: 'u1' }, problem: undefined })
   // The step is not on this reminder's page (step 2010 is not step 201).
-  assert.equal(adapter.view(values, read(lstepPage({ steps: { 202: ['300'] } }))).state, null)
-  assert.equal(adapter.view(values, read(lstepPage({ steps: { 2010: [] } }))).state, null)
+  assert.equal(checker.view(values, read(lstepPage({ steps: { 202: ['300'] } }))).state, null)
+  assert.equal(checker.view(values, read(lstepPage({ steps: { 2010: [] } }))).state, null)
   // The step's box must be an id attribute in the markup, exactly once: not in a comment, a script, a
   // text area or another attribute, never twice.
-  const box = (html: string) => adapter.view(values, read(`<input type="hidden" name="_token" value="tok"><span data-account-id="ACC1"></span>${html}`)).state
+  const box = (html: string) => checker.view(values, read(`<input type="hidden" name="_token" value="tok"><span data-account-id="ACC1"></span>${html}`)).state
   assert.deepEqual(box('<div id="templateStep201"></div>'), { templates: [] })
   assert.equal(box('<!-- <div id="templateStep201"></div> -->'), null)
   assert.equal(box('<script>const x = \'<div id="templateStep201">\'</script>'), null)
@@ -187,29 +192,30 @@ test('Lステップ\'s adapter reads the step\'s templates, the account and the 
   assert.deepEqual(box('<div id="templateStep201"><!-- openModal(101, 201, 1, 300, 1) --></div>'), { templates: [] })
   assert.deepEqual(box('<div id="templateStep201"><a onclick="openModal(101, 201, 1, 300, 1)"></a></div>'), { templates: ['300'] })
   // A slot of the step under another reminder: not what we think it is.
-  assert.equal(adapter.view(values, read(lstepPage({ reminder: '999', steps: { 201: ['300'] } }))).state, null)
+  assert.equal(checker.view(values, read(lstepPage({ reminder: '999', steps: { 201: ['300'] } }))).state, null)
   for (const bad of [{ ...values, target: { reminder: '101', step: '0' } }, { ...values, change: { template: '-1' } }]) {
-    assert.equal(adapter.view(bad, read(lstepPage({ steps: { 0: [], 201: [] } }))).state, null)
+    assert.equal(checker.view(bad, read(lstepPage({ steps: { 0: [], 201: [] } }))).state, null)
   }
   // Two different tokens: none taken, the write cannot be made.
-  assert.equal(adapter.view(values, read(lstepPage({ steps: { 201: [] }, token: ['a', 'b'] }))).problem, 'csrf-missing')
-  assert.deepEqual(adapter.after({ templates: ['300'] }, values), { templates: ['300', '301'] })
+  assert.equal(checker.view(values, read(lstepPage({ steps: { 201: [] }, token: ['a', 'b'] }))).problem, 'csrf-missing')
 })
 
-test('the app\'s own Lステップ adapter reads no account until the real page\'s marker is confirmed: a run stops before writing', () => {
-  const registry = createBrowserAdapterRegistry()
-  const view = registry.get(LSTEP_ADD_TEMPLATE_ADAPTER)!.view(values, read(lstepPage({ steps: { 201: [] } })))
+test('the app\'s own Lステップ checker reads no account until the real page\'s marker is confirmed: a run stops before writing', () => {
+  const view = checkers().get(LSTEP_REMINDER_STEP_CHECKER)!.view(values, read(lstepPage({ steps: { 201: [] } })))
   assert.equal(view.account, null)
 })
 
-test('the bundled declaration passes the core\'s checks, names a reviewed adapter, and an unknown adapter id is never run', () => {
-  const bundled = createBundledBrowserConnectors()('lstep', '0.1.0')
+test('the bundled declaration passes the core\'s checks, names a reviewed checker, and an unknown checker id is never run', () => {
+  const bundled = connectors('lstep', '0.2.0')
   assert.ok(bundled)
   assert.equal(bundled.host, HOST)
   assert.deepEqual(operation.writes, [{ method: 'POST', path: WRITE, encoding: 'form', body: { content_id: { field: 'step' }, template_id: { field: 'template' } }, ignoreBody: ['_token', '_lm_user_id'] }])
-  assert.ok(createBrowserAdapterRegistry().get(operation.adapter))
-  assert.equal(createBrowserAdapterRegistry().get('lstep.remove_everything'), undefined)
-  assert.equal(createBundledBrowserConnectors()('lstep', '0.1.1'), null)
+  assert.deepEqual(operation.expect, [{ list: 'templates', change: 'add', field: 'template' }])
+  assert.ok(checkers().get(operation.checker))
+  assert.equal(checkers().get('lstep.remove_everything'), undefined)
+  assert.equal(connectors('lstep', '0.1.0'), null)
+  // Two checkers with one id: a run must never pick one of two readers.
+  assert.throws(() => createBrowserCheckerRegistry([checker, checker]))
 })
 
 // ---------------------------------------------------------------------------
@@ -264,8 +270,8 @@ function harness(o: { plan?: Record<string, unknown>; site?: Partial<FakeSite>; 
   let policy: BrowserSiteSetting | null = { host: HOST, level: 'write', assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }
   const runner = createBrowserRunner({
     approvedPlan: async id => (id === 'plan-1' ? planInput(o.plan) : null),
-    connector: createBundledBrowserConnectors(),
-    adapter: id => createBrowserAdapterRegistry({ lstepAccount: accountReader }).get(id),
+    connector: connectors,
+    checker: id => checkers(accountReader).get(id),
     site: () => policy,
     stopped: () => stopped,
     window: () => fake.surface,
@@ -300,7 +306,7 @@ test('a plan that started once never runs again (also after its answer was lost)
 test('the wrong account, an account that cannot be read, a missing target or a changed state stop before any write', async () => {
   const cases: Array<[Parameters<typeof harness>[0], string]> = [
     [{ site: { account: 'ACC2' } }, 'account-mismatch'],
-    [{ deps: { adapter: id => createBrowserAdapterRegistry().get(id) } }, 'account-unknown'],
+    [{ deps: { checker: id => checkers().get(id) } }, 'account-unknown'],
     [{ site: { steps: { 202: [] } } }, 'target-missing'],
     [{ site: { steps: { 201: ['300', '305'] } } }, 'before-changed'],
   ]
@@ -339,21 +345,21 @@ test('a plan approved more than a day ago stops before the write, whatever its e
   assert.deepEqual(h.site.posts, [])
 })
 
-test('a target field no write carries must be one the adapter confirms on the page', async () => {
-  const lax = { ...adapter, confirmsTarget: ['step'] }
-  const h = harness({ deps: { adapter: () => lax } })
+test('a target field no write carries must be one the checker confirms on the page', async () => {
+  const lax = { ...checker, confirms: ['step'] }
+  const h = harness({ deps: { checker: () => lax } })
   assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'refused', reason: 'target-unconfirmed' })
   assert.deepEqual(h.site.posts, [])
 })
 
-test('a step record carries our fixed words only, never an adapter\'s text', async () => {
-  const chatty = { ...adapter, view: (v: typeof values, r: Parameters<typeof adapter.view>[1]) => ({ ...adapter.view(v, r), problem: 'token ACC1 tok' }) }
-  const h = harness({ deps: { adapter: () => chatty } })
-  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'stopped', reason: 'adapter-problem' })
-  assert.equal(h.records.at(-1)?.reason, 'adapter-problem')
+test('a step record carries our fixed words only, never a checker\'s text', async () => {
+  const chatty = { ...checker, view: (v: typeof values, r: Parameters<typeof checker.view>[1]) => ({ ...checker.view(v, r), problem: 'token ACC1 tok' }) }
+  const h = harness({ deps: { checker: () => chatty } })
+  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'stopped', reason: 'checker-problem' })
+  assert.equal(h.records.at(-1)?.reason, 'checker-problem')
 })
 
-test('nothing starts for an expired plan, a stopped AI, a site not allowed, an unknown adapter or a type that needs more', async () => {
+test('nothing starts for an expired plan, a stopped AI, a site not allowed, an unknown checker or a type that needs more', async () => {
   assert.deepEqual(await harness({ plan: { expiresAt: NOW - 1 } }).runner.run('plan-1'), { outcome: 'refused', reason: 'expired' })
   const stopped = harness(); stopped.stop()
   assert.deepEqual(await stopped.runner.run('plan-1'), { outcome: 'refused', reason: 'stopped' })
@@ -361,14 +367,27 @@ test('nothing starts for an expired plan, a stopped AI, a site not allowed, an u
   assert.deepEqual(await off.runner.run('plan-1'), { outcome: 'refused', reason: 'policy' })
   const readOnly = harness({ deps: { site: () => ({ host: HOST, level: 'read', assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }) } })
   assert.deepEqual(await readOnly.runner.run('plan-1'), { outcome: 'refused', reason: 'policy' }, 'the site\'s level is 見るだけ')
-  assert.deepEqual(await harness({ deps: { adapter: () => undefined } }).runner.run('plan-1'), { outcome: 'refused', reason: 'unknown-adapter' })
-  const otherAdapter: PluginBrowser = { ...declaration.browser, operations: { reminder_step_add_template: { ...operation, adapter: 'lstep.something_else' } } }
-  assert.deepEqual(await harness({ deps: { connector: () => otherAdapter } }).runner.run('plan-1'), { outcome: 'refused', reason: 'unknown-adapter' })
-  // A registry answering with an adapter made for another type is not that type's adapter.
-  assert.deepEqual(await harness({ deps: { connector: () => otherAdapter, adapter: () => adapter } }).runner.run('plan-1'), { outcome: 'refused', reason: 'unknown-adapter' })
+  assert.deepEqual(await harness({ deps: { checker: () => undefined } }).runner.run('plan-1'), { outcome: 'refused', reason: 'unknown-checker' })
+  const otherChecker: PluginBrowser = { ...declaration.browser, operations: { reminder_step_add_template: { ...operation, checker: 'lstep.something_else' } } }
+  assert.deepEqual(await harness({ deps: { connector: () => otherChecker } }).runner.run('plan-1'), { outcome: 'refused', reason: 'unknown-checker' })
+  // A registry answering with a checker made for another type is not that type's checker.
+  assert.deepEqual(await harness({ deps: { connector: () => otherChecker, checker: () => checker } }).runner.run('plan-1'), { outcome: 'refused', reason: 'unknown-checker' })
   assert.deepEqual(await harness({ plan: { change: { template: '301', extra: '1' } } }).runner.run('plan-1'), { outcome: 'refused', reason: 'plan' })
   assert.deepEqual(await harness({ deps: { window: () => null } }).runner.run('plan-1'), { outcome: 'refused', reason: 'no-window' })
   assert.deepEqual(await harness().runner.run('plan-2'), { outcome: 'refused', reason: 'no-plan' })
+})
+
+test('the page must end as the type\'s expect says: a removal of something the person did not see there never starts', async () => {
+  // The same site and checker; the declaration says the step loses the template instead of gaining it.
+  const removing: PluginBrowser = { ...declaration.browser, operations: { reminder_step_add_template: { ...operation, expect: [{ list: 'templates', change: 'remove', field: 'template' }] } } }
+  const h = harness({ deps: { connector: () => removing } })
+  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'refused', reason: 'cannot-come-true' })
+  assert.deepEqual(h.site.posts, [], 'nothing sent')
+  assert.deepEqual(h.fake.calls, [], 'the window never left the member\'s mode')
+  // With the template there before, the run goes ahead and judges the page by the declaration: the
+  // fake site adds it (a second copy), which is not what this type expects.
+  const seen = harness({ deps: { connector: () => removing }, plan: { before: { templates: ['300', '301'] } }, site: { steps: { 201: ['300', '301'] } } })
+  assert.deepEqual(await seen.runner.run('plan-1'), { outcome: 'unknown', reason: 'other-state' })
 })
 
 test('nothing is sent when the step\'s state cannot be kept first', async () => {
@@ -407,8 +426,8 @@ test('one run per window at a time', async () => {
   const gate = new Promise<void>(r => { release = r })
   const runner = createBrowserRunner({
     approvedPlan: async id => slowPlans[id],
-    connector: createBundledBrowserConnectors(),
-    adapter: id => createBrowserAdapterRegistry({ lstepAccount: accountReader }).get(id),
+    connector: connectors,
+    checker: id => checkers(accountReader).get(id),
     site: () => ({ host: HOST, level: 'write', assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }),
     stopped: () => false,
     window: () => ({ ...h.fake.surface, enterAi: async hooks => { await gate; return h.fake.surface.enterAi(hooks) } }),
@@ -457,7 +476,7 @@ function sourceFiles(dir: string): string[] {
 }
 
 test('nothing in the app can start a run yet: no module imports the runner, no IPC channel or preload method reaches it', () => {
-  const app = [...sourceFiles(path.join(clientDir, 'electron')), ...sourceFiles(path.join(clientDir, 'src')), ...sourceFiles(path.join(clientDir, 'shared'))]
+  const app = [...sourceFiles(path.join(clientDir, 'electron')), ...sourceFiles(path.join(clientDir, 'src')), ...sourceFiles(path.join(clientDir, 'shared')), ...sourceFiles(path.join(clientDir, 'connectors'))]
   const rel = (f: string) => path.relative(clientDir, f)
   const mentioning = (re: RegExp) => app.filter(f => re.test(fs.readFileSync(f, 'utf8'))).map(rel).sort()
   // Nothing outside features/browser names the runner module, however it is written.

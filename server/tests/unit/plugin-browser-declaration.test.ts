@@ -23,7 +23,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 import {
-  browserOperationsAllowed, combineUse, matchDeclaredWrite, parsePluginManifest, validatePluginPackage,
+  browserOperationsAllowed, combineUse, expectedAfter, matchDeclaredWrite, parsePluginManifest, validatePluginPackage,
   type BrowserOperation, type BrowserPlanValues, type BrowserWriteRequest, type PluginManifest,
 } from '../../../shared/core/plugins'
 import { levelAllows, type BrowserOperationEffect, type BrowserOperationSettings } from '../../../shared/core/browser-operation'
@@ -44,7 +44,7 @@ browser:
     reminder_step_template:
       label: リマインダの段のテンプレートを付け替える
       effect: write
-      adapter: lstep.reminder_step_template
+      checker: lstep.reminder_step_template
       shared: 全部の回で共有のリマインダです。前の回の人にも届きます。
       irreversible: false
       target:
@@ -57,16 +57,18 @@ browser:
           path: /line/episode/step/pack/template
           body: { content_id: "{step}", template_id: "{template}", pack_id: "{reminder}", mode: replace }
           ignore_body: [_token, _lm_user_id]
+      expect:
+        - { list: templates, add: "{template}" }
     read_reminder:
       label: リマインダを読む
       effect: read
-      adapter: lstep.read_reminder
+      checker: lstep.read_reminder
       target:
         reminder: id
     remove_step:
       label: リマインダの段を消す
       effect: delete
-      adapter: lstep.remove_step
+      checker: lstep.remove_step
       irreversible: true
       target:
         step: id
@@ -75,6 +77,8 @@ browser:
           path: /line/episode/step
           encoding: json
           body: { id: "{step}" }
+      expect:
+        - { list: steps, remove: "{step}" }
 `
 
 function parse(text: string): PluginManifest {
@@ -104,7 +108,7 @@ describe('a browser connector declaration', () => {
     expect(b.assetHosts).toEqual(['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'])
     expect(b.account).toEqual({ label: 'LINE アカウント' })
     const op = b.operations.reminder_step_template
-    expect(op).toMatchObject({ effect: 'write', adapter: 'lstep.reminder_step_template', irreversible: false, shared: '全部の回で共有のリマインダです。前の回の人にも届きます。' })
+    expect(op).toMatchObject({ effect: 'write', checker: 'lstep.reminder_step_template', irreversible: false, shared: '全部の回で共有のリマインダです。前の回の人にも届きます。' })
     expect(op.target).toEqual({ reminder: 'id', step: 'id' })
     expect(op.writes).toEqual([{
       method: 'POST', path: '/line/episode/step/pack/template', encoding: 'form',
@@ -151,7 +155,7 @@ describe('a browser connector declaration', () => {
     expect(errorsOf(edit('profile.line-scdn.net]', 'd1nhtjid4lgi9y.cloudfront.net]'))).toContain('2回あります')
   })
 
-  it('names, labels, notes and the adapter are plain and bounded', () => {
+  it('names, labels, notes and the checker are plain and bounded', () => {
     expect(errorsOf(edit('    reminder_step_template:\n', '    ReminderStep:\n'))).toContain('操作の名前「ReminderStep」')
     expect(errorsOf(edit('      label: リマインダを読む\n', `      label: "${'あ'.repeat(61)}"\n`))).toContain('label は 60 文字まで')
     expect(errorsOf(edit('      label: リマインダを読む\n', '      label: "読む\\u0007"\n'))).toContain('label は 60 文字まで')
@@ -162,18 +166,20 @@ describe('a browser connector declaration', () => {
       expect(errorsOf(edit('    label: LINE アカウント\n', `    label: "LINE${ch}"\n`)), ch).toContain('account の label')
     }
     expect(errorsOf(edit('      shared: 全部の回で共有のリマインダです。前の回の人にも届きます。\n', `      shared: "${'あ'.repeat(201)}"\n`))).toContain('shared は 200 文字まで')
-    expect(errorsOf(edit('      adapter: lstep.read_reminder\n', '      adapter: lstep\n'))).toContain('adapter は「サイト.操作」')
-    expect(errorsOf(edit('      adapter: lstep.read_reminder\n', '      adapter: "../evil.js"\n'))).toContain('adapter は「サイト.操作」')
+    expect(errorsOf(edit('      checker: lstep.read_reminder\n', '      checker: lstep\n'))).toContain('checker は「サイト.確かめるもの」')
+    expect(errorsOf(edit('      checker: lstep.read_reminder\n', '      checker: "../evil.js"\n'))).toContain('checker は「サイト.確かめるもの」')
+    // The key of 2026-11-20 says what replaced it.
+    expect(errorsOf(edit('      checker: lstep.read_reminder\n', '      adapter: lstep.read_reminder\n'))).toContain('adapter は checker に変わりました')
     expect(errorsOf(edit('        step: id\n      change:', '        step: number\n      change:'))).toContain('id か text')
     expect(errorsOf(edit('        step: id\n      change:', '        Step: id\n      change:'))).toContain('名前「Step」')
   })
 
   it('a read writes nothing; a write or delete names its writes; irreversible only where something changes', () => {
-    const readWithWrites = edit('      adapter: lstep.read_reminder\n      target:\n        reminder: id\n',
-      '      adapter: lstep.read_reminder\n      target:\n        reminder: id\n      writes:\n        - method: POST\n          path: /a\n          body: { a: "{reminder}" }\n')
+    const readWithWrites = edit('      checker: lstep.read_reminder\n      target:\n        reminder: id\n',
+      '      checker: lstep.read_reminder\n      target:\n        reminder: id\n      writes:\n        - method: POST\n          path: /a\n          body: { a: "{reminder}" }\n')
     expect(errorsOf(readWithWrites)).toContain('読むだけの操作に writes は書けません')
-    expect(errorsOf(edit('      adapter: lstep.read_reminder\n', '      adapter: lstep.read_reminder\n      change: { x: id }\n'))).toContain('読むだけの操作に change は書けません')
-    expect(errorsOf(edit('      adapter: lstep.read_reminder\n', '      adapter: lstep.read_reminder\n      irreversible: true\n'))).toContain('irreversible は書けません')
+    expect(errorsOf(edit('      checker: lstep.read_reminder\n', '      checker: lstep.read_reminder\n      change: { x: id }\n'))).toContain('読むだけの操作に change は書けません')
+    expect(errorsOf(edit('      checker: lstep.read_reminder\n', '      checker: lstep.read_reminder\n      irreversible: true\n'))).toContain('irreversible は書けません')
     const noWrites = edit(`      writes:
         - method: DELETE
           path: /line/episode/step
@@ -183,8 +189,8 @@ describe('a browser connector declaration', () => {
     expect(errorsOf(noWrites)).toContain('操作「remove_step」の writes')
     expect(errorsOf(edit('      effect: delete\n', '      effect: remove\n'))).toContain('effect は read / write / delete')
     // A deletion always gets the confirmation right before it.
-    expect(errorsOf(edit('      adapter: lstep.remove_step\n      irreversible: true\n', '      adapter: lstep.remove_step\n'))).toContain('irreversible: true を書いてください')
-    expect(errorsOf(edit('      adapter: lstep.remove_step\n      irreversible: true\n', '      adapter: lstep.remove_step\n      irreversible: false\n'))).toContain('irreversible: true を書いてください')
+    expect(errorsOf(edit('      checker: lstep.remove_step\n      irreversible: true\n', '      checker: lstep.remove_step\n'))).toContain('irreversible: true を書いてください')
+    expect(errorsOf(edit('      checker: lstep.remove_step\n      irreversible: true\n', '      checker: lstep.remove_step\n      irreversible: false\n'))).toContain('irreversible: true を書いてください')
     expect(errorsOf(edit('      target:\n        reminder: id\n    remove_step', '    remove_step'))).toContain('target（何を変えるか）')
     expect(errorsOf(edit('      change:\n        template: id\n', '      change:\n        template: id\n        step: text\n'))).toContain('target と change の両方')
   })
@@ -206,7 +212,7 @@ describe('a browser connector declaration', () => {
     expect(errorsOf(edit('mode: replace', 'mode: 1'))).toContain('文字で書いてください')
     expect(errorsOf(edit(', template_id: "{template}"', ''))).toContain('「template」は writes のどの body にも入っていません')
     // A target field may stay out of the request (Lステップ's request names the step, not its
-    // reminder): the app's adapter confirms the whole target before the write.
+    // reminder): the app's checker confirms the whole target before the write.
     const reminderOnlyRead = parse(edit(', pack_id: "{reminder}"', '')).browser!.operations.reminder_step_template
     expect(reminderOnlyRead.target).toEqual({ reminder: 'id', step: 'id' })
     expect(reminderOnlyRead.writes[0].body.pack_id).toBeUndefined()
@@ -222,12 +228,55 @@ describe('a browser connector declaration', () => {
     expect(errorsOf(edit('          encoding: json\n', '          encoding: xml\n'))).toContain('encoding は form か json')
   })
 
+  it('what a type must leave behind is closed choices: added to or removed from a list, by one plan field', () => {
+    const op = parse(LSTEP).browser!
+    expect(op.operations.reminder_step_template.expect).toEqual([{ list: 'templates', change: 'add', field: 'template' }])
+    expect(op.operations.remove_step.expect).toEqual([{ list: 'steps', change: 'remove', field: 'step' }])
+    expect(op.operations.read_reminder.expect).toEqual([])
+    const addLine = '      expect:\n        - { list: templates, add: "{template}" }\n'
+    // A type that changes something says what the page must show afterwards: the runner judges by it.
+    expect(errorsOf(edit(addLine, ''))).toContain('操作「reminder_step_template」の expect')
+    expect(errorsOf(edit(addLine, '      expect: []\n'))).toContain('1〜5 個')
+    expect(errorsOf(edit('      checker: lstep.read_reminder\n', '      checker: lstep.read_reminder\n      expect:\n        - { list: a, add: "{reminder}" }\n'))).toContain('読むだけの操作に expect は書けません')
+    // No computation, condition or text around a field: exactly one of add / remove, one whole plan field.
+    for (const [bad, why] of [
+      ['{ list: templates, add: "{template}", remove: "{template}" }', 'add か remove のどちらか1つ'],
+      ['{ list: templates }', 'add か remove のどちらか1つ'],
+      ['{ list: templates, add: "{tmpl}" }', 'target か change の {名前} ひとつ'],
+      ['{ list: templates, add: "t-{template}" }', 'target か change の {名前} ひとつ'],
+      ['{ list: templates, add: "301" }', 'target か change の {名前} ひとつ'],
+      ['{ list: Templates, add: "{template}" }', 'list は英小文字'],
+      ['{ list: templates, add: "{template}", when: "{step}" }', 'when'],
+    ] as const) {
+      expect(errorsOf(edit(addLine, `      expect:\n        - ${bad}\n`)), bad).toContain(why)
+    }
+    const six = Array.from({ length: 6 }, () => '        - { list: templates, add: "{template}" }\n').join('')
+    expect(errorsOf(edit(addLine, `      expect:\n${six}`))).toContain('1〜5 個')
+  })
+
+  it('expectedAfter applies the expectations to the state the person saw; a removal of what is not there cannot come true', () => {
+    const ops = parse(LSTEP).browser!.operations
+    const values = { target: { reminder: '101', step: '201' }, change: { template: '301' } }
+    expect(expectedAfter({ templates: ['300'] }, ops.reminder_step_template, values)).toEqual({ templates: ['300', '301'] })
+    // A list the page did not have yet starts empty; other lists stay as they were.
+    expect(expectedAfter({ other: ['1'] }, ops.reminder_step_template, values)).toEqual({ other: ['1'], templates: ['301'] })
+    // A removal takes one copy; the state the person saw is not changed.
+    const before = { steps: ['201', '201', '202'] }
+    expect(expectedAfter(before, ops.remove_step, { target: { step: '201' }, change: {} })).toEqual({ steps: ['201', '202'] })
+    expect(before).toEqual({ steps: ['201', '201', '202'] })
+    expect(expectedAfter({ steps: ['202'] }, ops.remove_step, { target: { step: '201' }, change: {} })).toBeNull()
+    expect(expectedAfter({}, ops.remove_step, { target: { step: '201' }, change: {} })).toBeNull()
+    // A replacement is one of each, in order.
+    const swap = { ...ops.reminder_step_template, expect: [{ list: 'templates', change: 'add' as const, field: 'template' }, { list: 'templates', change: 'remove' as const, field: 'step' }] }
+    expect(expectedAfter({ templates: ['201'] }, swap, values)).toEqual({ templates: ['301'] })
+  })
+
   it('a type that writes needs the account the plan is bound to', () => {
     expect(errorsOf(edit('  account:\n    label: LINE アカウント\n', ''))).toContain('browser の account')
   })
 
   it('counts are capped', () => {
-    const many = Array.from({ length: 31 }, (_, i) => `    r${i}:\n      label: 読む\n      effect: read\n      adapter: lstep.r${i}\n      target: { a: id }\n`).join('')
+    const many = Array.from({ length: 31 }, (_, i) => `    r${i}:\n      label: 読む\n      effect: read\n      checker: lstep.r${i}\n      target: { a: id }\n`).join('')
     expect(errorsOf(`id: lstep\nversion: 0.1.0\nlabel: L\ncontract: 1\nbrowser:\n  host: manager.linestep.net\n  operations:\n${many}`)).toContain('operations は 30 個まで')
     const fields = Array.from({ length: 11 }, (_, i) => `f${i}: id`).join(', ')
     expect(errorsOf(edit('      target:\n        reminder: id\n    remove_step', `      target: { ${fields} }\n    remove_step`))).toContain('10 個まで')

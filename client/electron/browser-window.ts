@@ -59,7 +59,7 @@ function sendOnce(ses: Session, r: { method: string; url: string; contentType?: 
     request.on('response', response => {
       const chunks: Buffer[] = []
       let size = 0
-      // An answer larger than any page the adapter reads is refused whole (never read cut short).
+      // An answer larger than any page a checker reads is refused whole (never read cut short).
       response.on('data', chunk => {
         size += chunk.length
         if (size > RUN_ANSWER_MAX) finish(() => { request.abort(); reject(new Error('answer too large')) })

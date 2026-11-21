@@ -14,8 +14,9 @@ import { createBrowserWindowShell, type BrowserShellWindow } from '../../electro
 import { browserPartition } from '../../electron/features/browser/controller'
 import { createBrowserRunner } from '../../electron/features/browser/runner'
 import type { BrowserSiteSetting } from '../../../shared/core/browser-operation'
-import { createBrowserAdapterRegistry, createBundledBrowserConnectors } from '../../shared/browser-adapters'
-import { LSTEP_DECLARATION } from '../../shared/browser-adapters/lstep'
+import { createBrowserCheckerRegistry, createBrowserConnectors } from '../../shared/browser-checkers'
+import { lstepConnector } from '../../connectors/lstep'
+import { LSTEP_DECLARATION } from '../../connectors/lstep/declaration'
 import { browserWritePartition } from '../../shared/browser-operation'
 import { createRunGate, encodeForm, FORM_CONTENT_TYPE, type BrowserRunSurface, type BrowserStepRecord } from '../../shared/browser-runner'
 import { startSites, type Sites } from './sites'
@@ -193,8 +194,8 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   // The bundled Lステップ declaration with the test hosts in place of the real ones.
   const text = LSTEP_DECLARATION.replace('host: manager.linestep.net', 'host: op.test')
     .replace('[d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net]', '[assets.test]')
-  const connector = createBundledBrowserConnectors([text])
-  const adapters = createBrowserAdapterRegistry({ lstepAccount: html => /data-account-id="([^"]+)"/.exec(html)?.[1] ?? null })
+  const connector = createBrowserConnectors([text])
+  const checkers = createBrowserCheckerRegistry(lstepConnector({ account: html => /data-account-id="([^"]+)"/.exec(html)?.[1] ?? null }).checkers)
   const records: BrowserStepRecord[] = []
   let stopped = false
   let beforeRead: (() => Promise<void>) | null = null
@@ -209,14 +210,14 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   const plans: Record<string, Record<string, unknown>> = {}
   const plan = (planId: string, over: Record<string, unknown>) => {
     plans[planId] = {
-      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.1.0' }, operation: 'reminder_step_add_template',
+      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.2.0' }, operation: 'reminder_step_add_template',
       account: 'ACC1', target: { reminder: '101', step: '201' }, change: { template: '301' }, before: { templates: ['300'] },
       approvedAt: Date.now() - 1000, expiresAt: Date.now() + 120_000, ...over,
     }
   }
   const runner = createBrowserRunner({
     approvedPlan: async id => plans[id] ?? null,
-    connector, adapter: id => adapters.get(id), site: () => site, stopped: () => stopped,
+    connector, checker: id => checkers.get(id), site: () => site, stopped: () => stopped,
     window: () => surface,
     records: { has: id => records.some(r => r.planId === id), put: r => { records.push(r) } },
     now: () => Date.now(),
@@ -254,7 +255,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   await page.loadURL('https://op.test/line/episode/show/101').catch(() => {})
   await wait(300)
   const gate = createRunGate({
-    host: 'op.test', operation: connector('lstep', '0.1.0')!.operations.reminder_step_add_template,
+    host: 'op.test', operation: connector('lstep', '0.2.0')!.operations.reminder_step_add_template,
     values: { target: { reminder: '101', step: '201' }, change: { template: '304' } },
     readPaths: ['/line/episode/show/101'], stopped: () => false,
   })
