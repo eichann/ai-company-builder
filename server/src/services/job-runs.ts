@@ -32,7 +32,7 @@
  *   ends its run (`holdDue` → `endPcRun`), so nothing comes back after a resume.
  */
 import {
-  JOB_ACTOR, JOB_MADE_BEFORE_LISTED, JOB_PC_STEP, isEventOccurrenceSlot, isOccurrenceId, jobOccurrenceKind, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult, storedJobDefinition,
+  JOB_ACTOR, JOB_MADE_BEFORE_LISTED, JOB_PC_STEP, isOccurrenceId, jobOccurrenceKind, jobRunRouteAllowed, occurrenceTaskId, parseJobRunResult, storedJobDefinition,
   type JobDefinition, type JobDeliveryPlace, type JobOccurrenceState, type JobOutcomeCode,
 } from '../../shared/core/jobs'
 import type { JobMadeBefore, JobMeetingView, JobTurnView } from '../../shared/types/jobs'
@@ -42,7 +42,8 @@ import type { JobOccurrenceRow, JobRow, JobVersionRow } from '../ports/jobs'
 import type { RunSubjectLiveRun, RunSubjectMember, RunSubjects } from '../ports/run-subjects'
 import type { Transactions } from '../ports/transactions'
 import type { Member } from './access'
-import { endPcRun, pcRunDeadlineMs, type JobOccurrences } from './job-occurrences'
+import { endPcRun, isEventPcOccurrence, pcRunDeadlineMs, type JobOccurrences } from './job-occurrences'
+import { eventShown, shownSlot } from './job-events'
 import { madeBefore } from './job-retry'
 import type { JobService } from './jobs'
 import { notInStep } from './not-in-step'
@@ -55,6 +56,12 @@ export interface JobRunDeps {
   clock: Clock
   jobs: Pick<JobService, 'runnerRefusal' | 'pauseBySystem' | 'pinnedSkillKept' | 'nameOf'>
   notices: Pick<JobOccurrences, 'writeNotice' | 'tell'>
+  /**
+   * Event occurrences run by the PC (schema 3, stage 4b-1): their conditions (`eventCondition`), ending one whose condition
+   * failed (`endEvent`), and what its end does to its watch (`eventEnded`) — the occurrences' service (bound late).
+   * Absent → no event occurrence is ever the PC's to run (fails closed).
+   */
+  eventRuns?: Pick<JobOccurrences, 'eventCondition' | 'endEvent' | 'eventEnded'>
   writer: Pick<ServiceRecordWriter, 'check' | 'create'>
   /**
    * The meetings the member attended with a time in [since, until), oldest first (`minutes.attendedSince`:
@@ -84,7 +91,7 @@ export interface JobRunDeps {
 export const JOB_MEETINGS_PER_RUN = 10
 
 const NOT_FOUND = () => refuse('not-found', '定期の仕事が見つかりません。', { code: 'JOB_NOT_FOUND' })
-const conflict = (code: string, error: string) => refuse('conflict', error, { code })
+const conflict = (code: string, error: string, extra: Record<string, unknown> = {}) => refuse('conflict', error, { code, ...extra })
 const GONE = () => conflict('JOB_TURN_GONE', 'この回はもう動かせません。')
 const REFUSALS: Record<string, () => Refusal> = {
   EXPIRED: () => conflict('JOB_TURN_EXPIRED', 'この回は期限が過ぎました。'),
@@ -109,10 +116,14 @@ const TURN_SCAN_LIMIT = 10_000
 /** The stored definition, or null for a shape this build does not know (jobs.md "Shapes this build does not know"): never run. */
 const definitionOf = (v: JobVersionRow): JobDefinition | null => storedJobDefinition(v)
 
-/** Why an occurrence is not the caller's to run now (a short reason; `null`: it is). */
-type Why = keyof typeof REFUSALS | 'GONE'
+/** Why an occurrence is not the caller's to run now (a short reason; `null`: it is). `EVENT`: an event condition failed (`code`). */
+type Why = keyof typeof REFUSALS | 'GONE' | 'EVENT'
 
-interface Found { handle: CompanyData; occ: JobOccurrenceRow; job: JobRow; version: JobVersionRow; definition: JobDefinition }
+/** `event`: an event occurrence run by the PC (schema 3, stage 4b-1) — its conditions are the source record's too. */
+interface Found { handle: CompanyData; occ: JobOccurrenceRow; job: JobRow; version: JobVersionRow; definition: JobDefinition; event: boolean }
+
+/** An event condition that failed, as a claim, a call, a renew or a finish answers it (409; the app stops its AI on it). */
+const EVENT_ENDED = (code: JobOutcomeCode) => conflict('JOB_EVENT_ENDED', 'この回は続けられなくなったため、終わりました。', { reason: code })
 
 export function createJobRuns(deps: JobRunDeps) {
   const { companyData, transactions, clock } = deps
@@ -127,16 +138,27 @@ export function createJobRuns(deps: JobRunDeps) {
     if (!isOccurrenceId(occurrenceId)) return null
     const handle = companyData.forCompany(member.companyId)
     const occ = handle.jobs.occurrence(occurrenceId)
-    // An event occurrence is never a PC's in 4a (the server runs every one; 4b brings the PC's): the one 404, as on 4-0.1.
-    if (!occ || isEventOccurrenceSlot(occ.dueSlot)) return null
+    if (!occ) return null
     const job = handle.jobs.find(occ.jobId)
     const version = handle.jobs.version(occ.jobId, occ.jobVersion)
     if (!job || !version || version.actingUserId !== member.userId) return null
     const definition = definitionOf(version)
     // A shape this build does not know is nobody's turn here: never listed, claimed or run (the one 404).
     if (definition === null || definition.placement !== 'a' || definition.run.kind !== 'procedure') return null
-    return { handle, occ, job, version, definition }
+    // An event occurrence is the PC's only as schema 3 pins it (stage 4b-1: its source-record check), and only while the
+    // conditions can be checked here (`eventRuns`); one of 4a (the server's operation) never reaches here (placement `e`).
+    const event = occ.eventRecordId !== null && occ.eventRecordId !== undefined
+    if (event && (!isEventPcOccurrence(occ, definition) || !deps.eventRuns)) return null
+    if (!event && occ.dueSlot.startsWith('ev:')) return null
+    return { handle, occ, job, version, definition, event }
   }
+
+  /** Whether the member may see the occurrence at all (⑥): an event one only while they read its record now. */
+  const seen = (member: RunSubjectMember, f: Found): boolean => !f.event || eventShown(f.handle, member, f.occ)
+
+  /** The event conditions now (stage 4b-1), or null: `absentToo` before a run starts (D5). */
+  const eventWhy = (f: Found, absentToo: boolean): JobOutcomeCode | null =>
+    deps.eventRuns ? deps.eventRuns.eventCondition(f.handle, f.occ, absentToo) : 'JOB_VERSION_CHANGED'
 
   /** Whether the job may still run this occurrence's version now (the claim, every call and the finish ask). */
   function runnable(f: Found): Why | null {
@@ -156,26 +178,47 @@ export function createJobRuns(deps: JobRunDeps) {
   }
 
   /** Whose turn: everything a claim needs, without changing anything. */
-  function whyNot(f: Found, nowMs: number): Why | null {
-    if (f.occ.state !== 'due' && f.occ.state !== 'running') return 'GONE'
+  function whyNot(f: Found, nowMs: number): { why: Why; code?: JobOutcomeCode } | null {
+    if (f.occ.state !== 'due' && f.occ.state !== 'running') return { why: 'GONE' }
     // An earlier occurrence of the job still running (a 「もう一度」, or a run held past the next slot): this one waits,
     // so the two never run side by side — its check starts where the earlier one stops, once it has (nothing written).
-    if (f.occ.state === 'due' && f.handle.jobs.occurrences(f.job.id, 50).some(o => o.dueSlot < f.occ.dueSlot && o.state === 'running')) return 'EARLIER_RUNNING'
-    if (overdue(f, nowMs)) return 'TIME_LIMIT'
-    if (nowMs >= Date.parse(f.occ.expiresAt)) return 'EXPIRED'
-    const why = runnable(f)
-    if (why) return why
+    // An event occurrence (stage 4b-1) waits while **any other** occurrence of the job runs — every one, no limit and no
+    // slot order (an `ev:` slot is a delivery number, never a time to compare as text); itself is never counted.
+    if (f.occ.state === 'due' && (f.event
+      ? f.handle.jobs.otherRunning(f.job.id, f.occ.id)
+      : f.handle.jobs.occurrences(f.job.id, 50).some(o => o.dueSlot < f.occ.dueSlot && o.state === 'running'))) return { why: 'EARLIER_RUNNING' }
+    if (overdue(f, nowMs)) return { why: 'TIME_LIMIT' }
+    if (nowMs >= Date.parse(f.occ.expiresAt)) return { why: 'EXPIRED' }
+    if (f.event) {
+      // C1–C9 (and D5 before it starts), the source record's included: never the time job's pause for lost rights (⑥).
+      const code = eventWhy(f, f.occ.state === 'due')
+      if (code) return { why: 'EVENT', code }
+    } else {
+      const why = runnable(f)
+      if (why) return { why }
+    }
     const day = f.occ.dueSlot.slice(0, 10)
-    // D5: nobody runs it for them — and an absent person's own PC does not either (as the server's runner).
-    if (f.occ.state === 'due' && f.handle.tasks.absencesFrom(day).some(a => a.userId === f.definition.actingUser && a.from <= day && day <= a.until)) return 'OWNER_ABSENT'
-    if (!deps.jobs.pinnedSkillKept(f.handle.companyId, f.version)) return 'SKILL_MISSING'
+    // D5: nobody runs it for them — and an absent person's own PC does not either (as the server's runner). An event
+    // occurrence's day is its event's (checked with its conditions above): never the `ev:` slot read as a date.
+    if (!f.event && f.occ.state === 'due' && f.handle.tasks.absencesFrom(day).some(a => a.userId === f.definition.actingUser && a.from <= day && day <= a.until)) return { why: 'OWNER_ABSENT' }
+    if (!deps.jobs.pinnedSkillKept(f.handle.companyId, f.version)) return { why: 'SKILL_MISSING' }
     // A deliverable place outside: the one the responsible person chose must still be usable (decision: an expired
     // Drive folder pick is never renewed by itself — the occurrence goes to a person, who chooses it again).
     if (f.definition.grant.deliverTo) {
       const place = placeOf(f)
-      if (!place || !deps.places?.live(f.handle.companyId, f.definition.actingUser, place)) return 'PLACE_NOT_USABLE'
+      if (!place || !deps.places?.live(f.handle.companyId, f.definition.actingUser, place)) return { why: 'PLACE_NOT_USABLE' }
     }
     return null
+  }
+
+  /** Whether the job still runs this occurrence now (every call, the finish, the place): its event conditions, or the time job's. */
+  function stillRuns(f: Found): { why: Why; code?: JobOutcomeCode } | null {
+    if (f.event) {
+      const code = eventWhy(f, false)
+      return code ? { why: 'EVENT', code } : null
+    }
+    const why = runnable(f)
+    return why ? { why } : null
   }
 
   /** The place the responsible person chose for this version's deliverables (its connector and kind), or null. */
@@ -197,7 +240,9 @@ export function createJobRuns(deps: JobRunDeps) {
    * admins told (`job_paused`); absent → skipped and told; another version approved → held; past the run's
    * hard deadline → `needs_person` `TIME_LIMIT`, told. A running occurrence's run is ended with it (`endPcRun`).
    */
-  function record(f: Found, why: Why): void {
+  function record(f: Found, why: Why, code?: JobOutcomeCode): void {
+    // An event occurrence (stage 4b-1): a failed condition ends it (and its run) by the event rules; the deadline as any.
+    if (f.event && why === 'EVENT' && code) { deps.eventRuns?.endEvent(f.handle.companyId, f.occ.id, code); return }
     let told: string[] = []
     transactions.run(() => {
       const at = clock.now()
@@ -209,11 +254,14 @@ export function createJobRuns(deps: JobRunDeps) {
         if (f.handle.jobs.moveOccurrence(f.occ.id, ['running'], 'needs_person', { outcomeCode: 'TIME_LIMIT' }, at)) {
           told = deps.notices.writeNotice(f.handle.companyId, 'job_failed', f.occ)
           endPcRun(f.handle, f.occ.runId, 'TIME_LIMIT', at)
+          // An event occurrence's chain stops there (stage 4b-1).
+          if (f.event) told = [...told, ...(deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, null, 'TIME_LIMIT') ?? [])]
         }
       } else if (why === 'PLACE_NOT_USABLE') {
         // A person chooses the place again (「受け取る」); nothing ran, or what runs ends here.
         told = end(f, ['due', 'running'], 'needs_person', 'PLACE_NOT_USABLE', 'job_failed')
         if (f.occ.state === 'running') endPcRun(f.handle, f.occ.runId, 'PLACE_NOT_USABLE', at)
+        if (f.event && told !== null) told = [...told, ...(deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, null, 'PLACE_NOT_USABLE') ?? [])]
       } else if (why === 'OWNER_ABSENT') told = end(f, ['due'], 'skipped', 'OWNER_ABSENT', 'job_skipped')
       else if (why === 'JOB_VERSION_CHANGED') end(f, ['due'], 'held', 'JOB_VERSION_CHANGED', null)
     })
@@ -225,12 +273,15 @@ export function createJobRuns(deps: JobRunDeps) {
    * (`checkedUntil`, else its `dueAt` — a build before 5a-2), else the approval.
    */
   function checkSince(f: Found): string {
+    // An event occurrence looks at its own record, not at a window after the previous occurrence (its event's time).
+    if (f.event) return f.occ.dueAt
     const before = f.handle.jobs.occurrences(f.job.id, 50).find(o => o.dueSlot < f.occ.dueSlot && (o.state === 'done' || o.state === 'nothing'))
     return before ? (before.checkedUntil ?? before.dueAt) : (f.version.approvedAt ?? f.version.createdAt)
   }
 
   /** The commit the previous occurrence that ran looked up to (its `new_files` check in the shared folder), or null. */
   function sinceCommit(f: Found): string | null {
+    if (f.event) return null
     const before = f.handle.jobs.occurrences(f.job.id, 50).find(o => o.dueSlot < f.occ.dueSlot && (o.state === 'done' || o.state === 'nothing'))
     return before?.checkedCommit ?? null
   }
@@ -317,7 +368,10 @@ export function createJobRuns(deps: JobRunDeps) {
     if (d.run.kind !== 'procedure') throw new Error('not a PC job')
     return {
       occurrenceId: f.occ.id, jobId: f.job.id, jobVersion: f.occ.jobVersion, fingerprint: f.version.fingerprint,
-      name: deps.jobs.nameOf(member, f.job.id) ?? '定期の仕事', dueSlot: f.occ.dueSlot, dueAt: f.occ.dueAt, expiresAt: f.occ.expiresAt,
+      // An event occurrence's slot is its event's time in company time, never its delivery number (§11).
+      name: deps.jobs.nameOf(member, f.job.id) ?? '定期の仕事', dueSlot: shownSlot(f.occ), dueAt: f.occ.dueAt, expiresAt: f.occ.expiresAt,
+      // Stage 4b-1: the record the event happened to (the responsible person reads it: else it is not their turn).
+      ...(f.event ? { kind: 'event' as const, source: { recordId: f.occ.eventRecordId as string } } : {}),
       state: f.occ.state as 'due' | 'running', check: d.check, checkSince: checkSince(f), checkUntil: checkUntil(f, member),
       ...(d.check.kind === 'new_files' ? { sinceCommit: sinceCommit(f), checkedCommit: f.occ.checkedCommit ?? null } : {}),
       procedure: d.run.procedure, grant: d.grant,
@@ -338,11 +392,17 @@ export function createJobRuns(deps: JobRunDeps) {
       if (!(subject.kinds ?? ['time']).includes(jobOccurrenceKind(f.occ.dueSlot))) return KIND_NOT_SUPPORTED()
       // An app that cannot run this check never claims it (B PR 5a-2); nothing is written for it.
       if (!subject.checks?.includes(f.definition.check.kind)) return CHECK_NOT_SUPPORTED()
-      const why = whyNot(f, clock.nowMs())
-      if (why === 'GONE') return GONE()
-      if (why) {
-        record(f, why)
-        return REFUSALS[why]()
+      // An event occurrence of a record the caller cannot read now does not exist for them (⑥): the same 404 — and it is
+      // ended (C3), so it waits for nobody.
+      if (!seen(member, f)) {
+        if (f.occ.state === 'due' || f.occ.state === 'running') record(f, 'EVENT', 'EVENT_RECORD_GONE')
+        return NOT_FOUND()
+      }
+      const found = whyNot(f, clock.nowMs())
+      if (found?.why === 'GONE') return GONE()
+      if (found) {
+        record(f, found.why, found.code)
+        return found.why === 'EVENT' ? EVENT_ENDED(found.code as JobOutcomeCode) : REFUSALS[found.why as keyof typeof REFUSALS]()
       }
       return ok({ pin: null, job: { id: f.job.id, version: f.occ.jobVersion, fingerprint: f.version.fingerprint } })
     },
@@ -369,10 +429,18 @@ export function createJobRuns(deps: JobRunDeps) {
         record(f, 'TIME_LIMIT')
         return REFUSALS.TIME_LIMIT()
       }
+      // An event occurrence (stage 4b-1): its conditions again — failed, the run ends, nothing is made (whatever it reports).
+      if (f.event) {
+        const code = eventWhy(f, false)
+        if (code) {
+          record(f, 'EVENT', code)
+          return EVENT_ENDED(code)
+        }
+      }
       // The one やること checked before anything is written (as the server's runner does): refused → the run
       // ended, `needs_person` with that code, told — never left running.
       const result = body.outcome === 'done' ? parseJobRunResult(body.jobResult) : null
-      if (result === null || result === 'nothing' || !f.definition.grant.creates.includes('task') || runnable(f)) return null
+      if (result === null || result === 'nothing' || !f.definition.grant.creates.includes('task') || stillRuns(f)) return null
       const refused = deps.writer.check(f.handle.companyId, taskInput(f, run.id, result))
       if (!refused) return null
       const code: JobOutcomeCode = refused.reason === 'records-off' ? 'RECORDS_OFF' : 'TASK_NOT_CREATED'
@@ -380,6 +448,7 @@ export function createJobRuns(deps: JobRunDeps) {
       transactions.run(() => {
         told = end(f, ['running'], 'needs_person', code, 'job_failed')
         endPcRun(f.handle, run.id, code, clock.now())
+        if (f.event) told = [...told, ...(deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, null, code) ?? [])]
       })
       deps.notices.tell(f.handle.companyId, told)
       return refuse('conflict', 'やることを作れませんでした。人が確かめる必要があります。', { code: code === 'RECORDS_OFF' ? 'RECORDS_DISABLED' : 'JOB_TASK_NOT_CREATED' })
@@ -392,22 +461,33 @@ export function createJobRuns(deps: JobRunDeps) {
       if (!f) return null
       if (run.state === 'waiting_person' || run.state === 'waiting_setup') {
         const told = end(f, ['running'], 'needs_person', 'RUN_FAILED', 'job_failed')
-        toTell.set(run.id, { companyId: f.handle.companyId, userIds: told })
+        // An event occurrence ended without its やること: its chain stops (stage 4b-1).
+        const stopped = f.event && told !== null ? deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, null, 'RUN_FAILED') ?? [] : []
+        toTell.set(run.id, { companyId: f.handle.companyId, userIds: [...told, ...stopped] })
         return null
       }
       if (run.state !== 'done') return null
       const result = parseJobRunResult(body.jobResult)
       if (result === null) return refuse('bad-request', 'jobResult is "nothing" or { title, summary? }', { code: 'JOB_RESULT_REQUIRED' })
-      // Checked again: what changed while it ran makes nothing (the occurrence is held with its reason).
-      const why = runnable(f)
-      if (why) {
-        end(f, ['running'], 'held', why as JobOutcomeCode, null)
-        if (why === 'OWNER_RIGHTS_CHANGED') deps.jobs.pauseBySystem(f.handle.companyId, f.job.id, 'OWNER_RIGHTS_CHANGED')
-        return null
+      // Checked again: what changed while it ran makes nothing (the occurrence is held with its reason). An event
+      // occurrence's conditions were checked by `beforeFinish` in the same synchronous stretch: a failure here is a race —
+      // the whole finish rolls back (nothing made), and the next call, renew or the clock ends it.
+      if (f.event) {
+        const code = eventWhy(f, false)
+        if (code) return EVENT_ENDED(code)
+      } else {
+        const why = runnable(f)
+        if (why) {
+          end(f, ['running'], 'held', why as JobOutcomeCode, null)
+          if (why === 'OWNER_RIGHTS_CHANGED') deps.jobs.pauseBySystem(f.handle.companyId, f.job.id, 'OWNER_RIGHTS_CHANGED')
+          return null
+        }
       }
       const at = clock.now()
       if (result === 'nothing') {
         f.handle.jobs.moveOccurrence(f.occ.id, ['running'], 'nothing', { outcomeCode: null }, at)
+        // Nothing made: an event occurrence's chain cannot follow it, and stops (stage 4b-1).
+        if (f.event) toTell.set(run.id, { companyId: f.handle.companyId, userIds: deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, null, 'RUN_FAILED') ?? [] })
         return null
       }
       if (!f.definition.grant.creates.includes('task')) return refuse('bad-request', 'この定期の仕事はやることを作れません。', { code: 'JOB_TASK_NOT_GRANTED' })
@@ -425,6 +505,9 @@ export function createJobRuns(deps: JobRunDeps) {
       if (!made.ok) return refuse('conflict', 'やることを作れませんでした。', { code: made.reason === 'records-off' ? 'RECORDS_DISABLED' : 'JOB_TASK_NOT_CREATED' })
       runs.updateOperation(run.id, key, ['in_progress'], { state: 'done', refKind: 'record', refId: made.record.id }, at)
       if (!f.handle.jobs.moveOccurrence(f.occ.id, ['running'], 'done', { outcomeCode: null }, at)) return GONE()
+      // An event occurrence (stage 4b-1): the watch follows the やること it made (or a stopped chain goes on), as the
+      // server's runner does — in the finish's transaction, its own watch only.
+      if (f.event) deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, made.record.id, 'DONE')
       return null
     },
 
@@ -437,14 +520,46 @@ export function createJobRuns(deps: JobRunDeps) {
         record(f, 'TIME_LIMIT')
         return notInStep()
       }
-      const why = runnable(f)
-      if (why) {
-        if (why === 'OWNER_RIGHTS_CHANGED') record(f, why)
+      const found = stillRuns(f)
+      if (found) {
+        // An event occurrence's failed condition ends it at this very call (stage 4b-1); the time job's lost rights pause it.
+        if (found.why === 'EVENT' || found.why === 'OWNER_RIGHTS_CHANGED') record(f, found.why, found.code)
         return notInStep()
       }
       // The minutes route only for a meeting this occurrence's check finds now (the grant names the route too).
       const meetingFound = () => typeof params.recordId === 'string' && meetingsFor(f, member).some(m => m.id === params.recordId)
       return jobRunRouteAllowed(f.definition.grant, route, meetingFound) ? null : notInStep()
+    },
+
+    /**
+     * A renew of a PC job's run (stage 4b-1, owner memo §5-2 「毎分の延長」): an event occurrence's conditions and its
+     * deadline again — failed, the run is ended here and the renew refused (409: the app stops its AI). A time job's renew
+     * is as before (its pause / stop ended the run already).
+     */
+    renewRefusal(member, run) {
+      if (run.step !== JOB_PC_STEP) return null
+      const f = held(member, run)
+      if (!f || !f.event) return null
+      if (overdue(f, clock.nowMs())) {
+        record(f, 'TIME_LIMIT')
+        return REFUSALS.TIME_LIMIT()
+      }
+      const code = eventWhy(f, false)
+      if (!code) return null
+      record(f, 'EVENT', code)
+      return EVENT_ENDED(code)
+    },
+
+    /**
+     * Whether a run of an occurrence is a missing run for the member (`ai-runs.ts` `ownRun`): a frozen occurrence's (a later
+     * build's shape), and an event occurrence's unless it is a PC's of schema 3 whose record the member reads now (⑥;
+     * stage 4-0.1 / 4a hid every one: none had a PC run).
+     */
+    hides(member, run) {
+      const handle = companyData.forCompany(member.companyId)
+      if (!handle.jobs.isHiddenOccurrence(run.subject.id)) return false
+      const f = own(member, run.subject.id)
+      return !(f && f.event && seen(member, f))
     },
 
     bindsTokens(run: RunSubjectLiveRun) {
@@ -484,9 +599,10 @@ export function createJobRuns(deps: JobRunDeps) {
       const turns: JobTurnView[] = []
       for (const occ of [...handle.jobs.dueOccurrences(TURN_SCAN_LIMIT), ...handle.jobs.runningOccurrences(TURN_SCAN_LIMIT)]) {
         // Only the kinds the app runs (stage 4-0: absent = time): an older app is never handed an event occurrence.
-        if (!kinds.includes(jobOccurrenceKind(occ.dueSlot)) || isEventOccurrenceSlot(occ.dueSlot)) continue
+        if (!kinds.includes(jobOccurrenceKind(occ.dueSlot))) continue
         const f = own(member, occ.id)
-        if (!f || whyNot(f, nowMs) !== null) continue
+        // An event occurrence only while they read its record (⑥) and its conditions hold (nothing is written here).
+        if (!f || !seen(member, f) || whyNot(f, nowMs) !== null) continue
         // A running one only while its run may be claimed again (lease over, given back, retried later).
         if (f.occ.state === 'running') {
           const r = f.occ.runId ? handle.aiRuns.byId(f.occ.runId) : null
@@ -510,7 +626,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const run = companyData.forCompany(member.companyId).aiRuns.byId(runId)
       if (!run || run.userId !== member.userId || run.step !== JOB_PC_STEP || run.subject.kind !== 'occurrence') return null
       const f = held(member, { id: run.id, subject: run.subject, step: run.step, userId: run.userId, state: run.state })
-      if (!f || runnable(f)) return null
+      if (!f || stillRuns(f)) return null
       return placeOf(f)
     },
 
@@ -537,7 +653,7 @@ export function createJobRuns(deps: JobRunDeps) {
     /** The turn of the occurrence a claim just took (the claim's answer, with the meetings its check found), or null. */
     turnOf(member: Member, occurrenceId: string): JobTurnView | null {
       const f = own(member, occurrenceId)
-      if (!f) return null
+      if (!f || !seen(member, f)) return null
       const turn = turnView(member, f)
       return f.definition.check.kind === 'new_meetings' ? { ...turn, meetings: meetingsFor(f, member) } : turn
     },

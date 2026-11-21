@@ -226,6 +226,8 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/jobs-stop', w => ({ path: `${C(w)}/jobs-stop`, body: {} }), [400, 400, 403, 403, 404, 401], 'no stopped'),
   // A PC job's claim (B PR 5a): any member lists their own turns (none here) and may claim (body first: 400).
   r('GET /api/companies/:companyId/me/job-turns', w => ({ path: `${C(w)}/me/job-turns` }), MEMBERS),
+  // Stage 4b-1 (D11): the event PC occurrences the caller ran as responsible person — every member, their own only.
+  r('GET /api/companies/:companyId/me/job-occurrences', w => ({ path: `${C(w)}/me/job-occurrences` }), MEMBERS),
   r('POST /api/companies/:companyId/job-run-claims', w => ({ path: `${C(w)}/job-run-claims`, body: {} }), [400, 400, 400, 400, 404, 401], 'no occurrence'),
   // Department membership (所属する部署): any member reads; owner/admin and the department's own managers change it
   r('GET /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members` }), MEMBERS),

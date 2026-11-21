@@ -167,6 +167,18 @@ export interface JobOccurrenceView {
   madeBefore?: Array<{ kind: string; count: number }>
 }
 
+/**
+ * `GET /me/job-occurrences` (stage 4b-1, owner memo 「段4b 設計メモ」 D11): an event occurrence run by the PC that the
+ * caller ran as its pinned version's responsible person — also after the job was handed to someone else — while they
+ * read its record. `jobId` to press on it (`…/occurrences/:id/retry | …/reconcile`), `name` the name of the version they
+ * ran (「定期の仕事」 when it names a place they cannot read now); never the job's newer versions. The 「もう一度」 fields
+ * are those their rights cover.
+ */
+export interface MyJobOccurrenceView extends JobOccurrenceView {
+  jobId: string
+  name: string
+}
+
 /** An outside operation an earlier run of the occurrence is known to have done: its kind and what it made (no body). */
 export interface JobMadeBefore {
   kind: string
@@ -205,6 +217,12 @@ export interface JobTurnView {
   expiresAt: string
   /** `due`, or `running` when its run may be claimed again (the lease ran out, retried later). */
   state: 'due' | 'running'
+  /**
+   * Stage 4b-1: `event` for an event occurrence run by the PC (schema 3) — its `dueSlot` is the event's time — with the
+   * record the event happened to (`source`, a record the responsible person reads now). Absent: a time slot.
+   */
+  kind?: 'event'
+  source?: { recordId: string }
   check: JobCheck
   /** ISO instant: a file changed after it is new for `new_files`. */
   checkSince: string

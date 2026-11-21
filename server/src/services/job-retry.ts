@@ -22,7 +22,16 @@
  *   handed to the next run's turn so its AI does not make them again blindly.
  * - **Reconcile** (`reconcile`): an owner / admin says whether one of its run's unknown operations happened — the run
  *   core's reconciliation (`aiRuns.reconcileFor`), recorded with their id (`reconciled_by`), in one transaction.
- * Anyone else: 403 before anything; an occurrence of another job or company, or none: the one 404 `JOB_NOT_FOUND`.
+ * - **Who** (stage 4b-1, owner memo 「段4b 設計メモ」 §4-3 / D11, Codex review 4 #2 / #3): an owner / admin who sees the
+ *   occurrence (an event one only while they read its record); and, for an event occurrence run by the PC (schema 3),
+ *   **the pinned version's responsible person** while they read its record — they may reconcile what their own run
+ *   sent and ask for 「もう一度」 — and **the job's current responsible person** may ask for 「もう一度」 (`rightsOf`). Being
+ *   allowed to ask is not being able to run: an occurrence stays pinned to its version and that version's responsible
+ *   person, so after another version was approved (a hand-over included) the press answers `JOB_VERSION_CHANGED` and
+ *   never moves whose rights run it. The pinned person finds their occurrences, also after a hand-over, through
+ *   `GET /me/job-occurrences` (`mine`), which shows no version of the job but the one they ran.
+ * Anyone else (a member with no such right, whatever the ids): 403 `JOBS_FORBIDDEN`; for an owner / admin an occurrence
+ * of another job or company, or none, or one they may not see: the one 404 `JOB_NOT_FOUND`.
  */
 import {
   JOB_PC_STEP, JOB_RECONCILE_STATES, JOB_RETRY_MAX, JOB_RETRY_STATES, isJobId, isOccurrenceId, jobRetryExpiresAt, storedJobDefinition,
@@ -31,7 +40,7 @@ import {
 import { jobRetryBlockText } from '../../shared/core/job-words'
 import type { AgentStopPolicy } from '../../shared/types/agent-stop'
 import type { AiRunView } from '../../shared/types/ai-runs'
-import type { JobMadeBefore, JobOccurrenceView } from '../../shared/types/jobs'
+import type { JobMadeBefore, JobOccurrenceView, MyJobOccurrenceView } from '../../shared/types/jobs'
 import type { AiRunRow } from '../ports/ai-runs'
 import type { Clock } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
@@ -39,7 +48,9 @@ import type { JobOccurrenceRow, JobRow, JobVersionRow } from '../ports/jobs'
 import type { Transactions } from '../ports/transactions'
 import { hasFullAccess, type Member } from './access'
 import { unattendedRunStopped } from './ai-runs'
-import { JOBS_FORBIDDEN, occurrenceView, type JobService } from './jobs'
+import { EVENT_RECORDS_CHECKED, JOBS_FORBIDDEN, OCCURRENCES_LISTED, occurrenceView, type JobService } from './jobs'
+import { eventShown } from './job-events'
+import { recordReader } from './record-access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 
 export interface JobRetryDeps {
@@ -47,7 +58,7 @@ export interface JobRetryDeps {
   transactions: Transactions
   clock: Clock
   roleOf: (companyId: string, userId: string) => string | null
-  jobs: Pick<JobService, 'runnerRefusal' | 'pinnedSkillKept' | 'occurrenceShown'>
+  jobs: Pick<JobService, 'runnerRefusal' | 'pinnedSkillKept' | 'occurrenceShown' | 'pinnedNameOf'>
   /** The emergency stop in force for a member (agent-stops.ts `policyFor`), as a claim reads it. */
   aiStops: (member: Member) => AgentStopPolicy
   /** The responsible person's chosen deliverable place is usable now (its connector answers). Absent → never. */
@@ -57,11 +68,24 @@ export interface JobRetryDeps {
    * `YYYY-MM-DDTHH:MM`, made or not), `nextAt` the next one (UTC ISO). Absent → neither (no slot rule applies).
    */
   slotsOf?: (companyId: string, definition: JobDefinition) => { latest: string | null; nextAt: string | null }
+  /**
+   * An event occurrence run by the PC (stage 4b-1): its conditions now (services/job-occurrences.ts `eventCondition`), bound
+   * late. Absent → such an occurrence is never sent back (fails closed).
+   */
+  eventCondition?: (handle: CompanyData, occ: JobOccurrenceRow, absentToo: boolean) => string | null
   /** The run core's reconciliation for a run the caller does not hold (services/ai-runs.ts `reconcileFor`). */
   reconcileFor: (companyId: string, runId: string, key: string, done: boolean, byUserId: string) => Outcome<{ run: AiRunView }>
 }
 
 const NOT_FOUND = () => refuse('not-found', '定期の仕事が見つかりません。', { code: 'JOB_NOT_FOUND' })
+const FORBIDDEN = () => refuse('forbidden', JOBS_FORBIDDEN)
+/** What a member may do with an occurrence (D11): nothing, ask for 「もう一度」, say what its run's outside operation did. */
+interface Rights { retry: boolean; reconcile: boolean }
+const NO_RIGHTS: Rights = { retry: false, reconcile: false }
+
+/** An event occurrence run by the PC (schema 3, stage 4b-1): the only kind whose responsible person presses here. */
+const eventPc = (occ: JobOccurrenceRow, definition: JobDefinition | null): boolean =>
+  !!occ.eventRecordId && definition !== null && definition.placement === 'a' && definition.check.kind === 'source_record'
 const BLOCKED = (why: JobRetryBlock) => refuse('conflict', jobRetryBlockText(why), { code: why })
 
 /** The stored definition, or null for a shape this build does not know (jobs.md "Shapes this build does not know"): never run. */
@@ -107,6 +131,22 @@ export function createJobRetry(deps: JobRetryDeps) {
     // An event occurrence of a record the member cannot read does not exist for them (stage 4a, ⑥): the same 404.
     if (!deps.jobs.occurrenceShown(member, occ)) return null
     return { handle, job, occ, version: handle.jobs.version(job.id, occ.jobVersion) }
+  }
+
+  /**
+   * What the member may do with this occurrence they see (`find`: an event one only while they read its record): an owner
+   * / admin everything; for an event occurrence run by the PC, its pinned version's responsible person may reconcile and
+   * ask for 「もう一度」, the job's current responsible person may ask for 「もう一度」 (whether it runs is `blockOf`'s:
+   * pinned to its version, so another approved version answers `JOB_VERSION_CHANGED`). Anyone else nothing.
+   */
+  function rightsOf(member: Member, f: Found): Rights {
+    if (hasFullAccess(member.role)) return { retry: true, reconcile: true }
+    const definition = f.version ? definitionOf(f.version) : null
+    if (!f.version || !eventPc(f.occ, definition)) return NO_RIGHTS
+    const pinned = f.version.actingUserId === member.userId
+    const approved = f.job.approvedVersion === null ? null : f.handle.jobs.version(f.job.id, f.job.approvedVersion)
+    const current = approved?.actingUserId === member.userId
+    return { retry: pinned || current, reconcile: pinned }
   }
 
   /** The operations of the occurrence's run whose outside result nobody knows (in flight counts: it may have happened). */
@@ -158,11 +198,37 @@ export function createJobRetry(deps: JobRetryDeps) {
       if (!usable) return 'JOB_PLACE_NOT_USABLE'
     }
     if (unknownOperations(handle, occ).length > 0) return 'JOB_RESULT_UNKNOWN'
+    // An event occurrence run by the PC (stage 4b-1, owner memo §4-2): the conditions that must hold all along — the
+    // source record still asking for it, records on — checked now; its deadline is the press's own (not checked here).
+    // Refused, nothing changes (the state, the deadline and the count stay).
+    if (eventPc(occ, definition)) {
+      const code = deps.eventCondition ? deps.eventCondition(handle, occ, false) : 'SOURCE_CHANGED'
+      if (code === 'RECORDS_OFF') return 'RECORDS_OFF'
+      if (code === 'OWNER_LEFT' || code === 'OWNER_RIGHTS_CHANGED') return 'JOB_GRANT_EXCEEDS'
+      if (code !== null) return 'SOURCE_CHANGED'
+    }
     return null
   }
 
-  /** What an owner / admin's occurrence view adds (`JobOccurrenceView`'s 「もう一度」 fields). */
-  function viewOf(companyId: string, occ: JobOccurrenceRow): Pick<JobOccurrenceView, 'retries' | 'retriedBy' | 'retriedAt' | 'retry' | 'unknownOperations' | 'madeBefore'> {
+  type RetryFields = Pick<JobOccurrenceView, 'retries' | 'retriedBy' | 'retriedAt' | 'retry' | 'unknownOperations' | 'madeBefore'>
+
+  /**
+   * What an occurrence view adds for this member (`JobOccurrenceView`'s 「もう一度」 fields): only what their rights cover
+   * (`rightsOf`) — none for someone who may do nothing (a responsible person of a time job, as before).
+   */
+  function viewFor(member: Member, occ: JobOccurrenceRow): Partial<RetryFields> {
+    const handle = companyData.forCompany(member.companyId)
+    const job = handle.jobs.find(occ.jobId)
+    if (!job) return {}
+    const rights = rightsOf(member, { handle, job, occ, version: handle.jobs.version(job.id, occ.jobVersion) })
+    if (!rights.retry && !rights.reconcile) return {}
+    const all = viewOf(member.companyId, occ)
+    // Someone who may reconcile but not ask for 「もう一度」 sees what is unknown, not the button's answer.
+    return rights.retry ? all : { retries: all.retries, retriedBy: all.retriedBy, retriedAt: all.retriedAt, ...(all.unknownOperations ? { unknownOperations: all.unknownOperations } : {}) }
+  }
+
+  /** The 「もう一度」 fields of an occurrence (`viewFor` decides who gets them). */
+  function viewOf(companyId: string, occ: JobOccurrenceRow): RetryFields {
     const base = { retries: occ.retries ?? 0, retriedBy: occ.retriedBy ?? null, retriedAt: occ.retriedAt ?? null }
     if (!JOB_RECONCILE_STATES.includes(occ.state)) return base
     const handle = companyData.forCompany(companyId)
@@ -192,15 +258,39 @@ export function createJobRetry(deps: JobRetryDeps) {
 
   return {
     viewOf,
+    viewFor,
+
+    /**
+     * `GET /me/job-occurrences` (stage 4b-1, D11, Codex review 4 #3): the event occurrences run by the PC whose pinned
+     * version names the member as responsible person — also after the job was handed to someone else — that they read
+     * now (⑥: checked in one batch, left out in SQL before the limit), newest first, ≤ 100, with what they may do
+     * (`viewFor`). Each names its job (an id) and the name of the version they ran (`HIDDEN_JOB_NAME` when it names a
+     * place they cannot read now): never the job's newer versions.
+     */
+    mine(member: Member): Outcome<{ occurrences: MyJobOccurrenceView[] }> {
+      const handle = companyData.forCompany(member.companyId)
+      const reader = recordReader(member, handle.scopes.listWithRules())
+      const records = handle.jobs.eventRecordsPinnedTo(member.userId, EVENT_RECORDS_CHECKED)
+      const readable = records.length === 0 ? [] : handle.records.byIds(records).filter(r => r.removedAt === null && reader.record(r)).map(r => r.id)
+      const out: MyJobOccurrenceView[] = []
+      for (const occ of handle.jobs.occurrencesPinnedTo(member.userId, readable, OCCURRENCES_LISTED)) {
+        const version = handle.jobs.version(occ.jobId, occ.jobVersion)
+        if (!version || !eventPc(occ, definitionOf(version)) || !eventShown(handle, member, occ)) continue
+        out.push({ ...occurrenceView(occ), jobId: occ.jobId, name: deps.jobs.pinnedNameOf(member, version), ...viewFor(member, occ) })
+      }
+      return ok({ occurrences: out })
+    },
 
     /** POST /jobs/:jobId/occurrences/:occurrenceId/retry — 「もう一度」. */
     retry(member: Member, jobId: string, occurrenceId: string): Outcome<{ occurrence: JobOccurrenceView }> {
-      if (!hasFullAccess(member.role)) return refuse('forbidden', JOBS_FORBIDDEN)
+      const full = hasFullAccess(member.role)
       try {
         return transactions.run((): Outcome<{ occurrence: JobOccurrenceView }> => {
           // Read and checked inside the write's transaction: a clock run or a claim in between cannot slip past it.
           const f = find(member, jobId, occurrenceId)
-          if (!f) return NOT_FOUND()
+          // A member with no right here gets one answer whatever the ids (D11): nothing tells which occurrence exists.
+          if (!f) return full ? NOT_FOUND() : FORBIDDEN()
+          if (!rightsOf(member, f).retry) return FORBIDDEN()
           const nowMs = clock.nowMs()
           const why = blockOf(f, nowMs)
           if (why) return BLOCKED(why)
@@ -211,7 +301,7 @@ export function createJobRetry(deps: JobRetryDeps) {
           if (run && !closeRun(handle, run, at)) throw new Refused(BLOCKED('NOT_RETRYABLE'))
           if (!handle.jobs.retryOccurrence(occ.id, JOB_RETRY_STATES, expiresAt, member.userId, at)) throw new Refused(BLOCKED('NOT_RETRYABLE'))
           const after = handle.jobs.occurrence(occ.id) as JobOccurrenceRow
-          return ok({ occurrence: { ...occurrenceView(after), ...viewOf(handle.companyId, after) } })
+          return ok({ occurrence: { ...occurrenceView(after), ...viewFor(member, after) } })
         })
       } catch (e) {
         if (e instanceof Refused) return e.refusal
@@ -221,9 +311,10 @@ export function createJobRetry(deps: JobRetryDeps) {
 
     /** POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done } — an owner / admin settles an unknown result. */
     reconcile(member: Member, jobId: string, occurrenceId: string, key: string, body: unknown): Outcome<{ occurrenceId: string }> {
-      if (!hasFullAccess(member.role)) return refuse('forbidden', JOBS_FORBIDDEN)
       const f = find(member, jobId, occurrenceId)
-      if (!f) return NOT_FOUND()
+      if (!f) return hasFullAccess(member.role) ? NOT_FOUND() : FORBIDDEN()
+      // Only someone who may say what happened (D11): an owner / admin, or the pinned version's responsible person.
+      if (!rightsOf(member, f).reconcile) return FORBIDDEN()
       const done = typeof body === 'object' && body !== null ? (body as { done?: unknown }).done : undefined
       if (typeof done !== 'boolean') return refuse('bad-request', 'done is true or false')
       // Only an occurrence a person looks at now (a running one's run is still its app's to finish) — or one held while

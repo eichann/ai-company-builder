@@ -104,6 +104,12 @@ export function runSubjectsByKind(byKind: { record: RunSubjects<Refusal>; occurr
       const s = of(run.subject.kind)
       return s?.routeRefusal ? s.routeRefusal(member, run, route, params) : notInStep()
     },
+    renewRefusal(member, run) { return of(run.subject.kind)?.renewRefusal?.(member, run) ?? null },
+    hides(member, run) {
+      if (run.subject.kind === 'record') return false
+      // A run of a kind with no resolver (or one that says nothing) shows nothing it cannot vouch for.
+      return of(run.subject.kind)?.hides?.(member, run) ?? true
+    },
     bindsTokens(run) {
       if (run.subject.kind === 'record') return true
       return of(run.subject.kind)?.bindsTokens?.(run) ?? false

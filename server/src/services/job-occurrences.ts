@@ -46,7 +46,8 @@ import { hasFullAccess } from './access'
 import type { JobService } from './jobs'
 import { companyNow } from './notifications'
 import type { ServiceCreateInput, ServiceRecordWriter } from './record-engine'
-import { createJobEvents, eventShown, type AiStepStates } from './job-events'
+import { aiTurnState, createJobEvents, eventShown, type AiStepStates } from './job-events'
+import { madeBefore } from './job-retry'
 
 /** Per company and run: occurrences the runner takes at most. */
 export const JOB_RUNNER_LIMIT = 50
@@ -123,6 +124,31 @@ export function endPcRun(handle: CompanyData, runId: string | null, code: string
     : { ...run, state: 'waiting_person', deviceId: null, claimExpiresAt: null, failureClass: 'bad-input', failureCode: code, retryAt: null, updatedAt: at }
   if (handle.aiRuns.update(ended, { generation: run.generation, state: run.state })) {
     handle.aiRuns.appendEvent({ runId: run.id, event: 'finished', generation: run.generation, stateAfter: ended.state, code, at })
+  }
+}
+
+/**
+ * An event occurrence run by the responsible person's PC (schema 3, stage 4b-1, jobs.md "Event jobs on the PC"): an event
+ * occurrence pinned to a PC procedure with the source-record check. Its conditions (C1–C9, owner memo 「段4b 設計メモ」 §5-2)
+ * are checked at the list, the claim, every call, every renew, the finish and by the clock (`eventCondition`).
+ */
+export function isEventPcOccurrence(occ: Pick<JobOccurrenceRow, 'eventRecordId'>, definition: JobDefinition | null): definition is JobDefinition {
+  return !!occ.eventRecordId && definition !== null && definition.placement === 'a' && definition.check.kind === 'source_record'
+}
+
+/** Where an event PC occurrence goes when a condition fails and its run made nothing outside (owner memo §4-4). */
+function eventEndState(code: JobOutcomeCode): { to: JobOccurrenceState; notice: NotificationKind | null } {
+  switch (code) {
+    // C1: as a time occurrence — held, not told (a pause / the stop / another version / not accepted).
+    case 'COMPANY_STOPPED': case 'JOB_PAUSED': case 'JOB_VERSION_CHANGED': case 'NOT_ACCEPTED': return { to: 'held', notice: null }
+    // C4 / C9: no longer needed — nothing, not told (only the stopped chain is: D4).
+    case 'EVENT_NOT_NEEDED': case 'EVENT_DONE_MARK': return { to: 'nothing', notice: null }
+    // C7: records off — a person looks (told).
+    case 'RECORDS_OFF': return { to: 'needs_person', notice: 'job_failed' }
+    // D5: absent that day — skipped and told, as every occurrence.
+    case 'OWNER_ABSENT': return { to: 'skipped', notice: 'job_skipped' }
+    // C2 / C3 / C5 / C6 / C8: skipped, not told (4a's own rule) — and the job is never paused for it (⑥).
+    default: return { to: 'skipped', notice: null }
   }
 }
 
@@ -264,7 +290,9 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     // - waiting for a person to reconcile an outside operation, and out of time (deadline or expiry) →
     //   `needs_person` `RESULT_UNKNOWN`, told; the run stays where it is for that person;
     // - stopped without finishing (the app closed, retried later, given back) and past its expiry → `expired`, told.
-    // A run someone holds within its deadline finishes as it will.
+    // A run someone holds within its deadline finishes as it will — unless it is an event occurrence whose conditions failed
+    // (stage 4b-1): ended now, whether or not its app renews.
+    changed += endFailedEvents(companyId, handle, handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT), told)
     for (const occ of handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT)) {
       const run = occ.runId ? handle.aiRuns.byId(occ.runId) : null
       const version = handle.jobs.version(occ.jobId, occ.jobVersion)
@@ -281,6 +309,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
           if (!handle.jobs.moveOccurrence(occ.id, ['running'], 'needs_person', { outcomeCode: 'RESULT_UNKNOWN' }, clock.now())) return
           changed++
           notice(companyId, handle, 'job_failed', occ, job, acting, told)
+          // An event occurrence that ends without its やること stops its watch's chain (stage 4b-1).
+          if (occ.eventRecordId && ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, 'RESULT_UNKNOWN', occ.eventRecordId, told)
         })
         continue
       }
@@ -291,6 +321,7 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
           endPcRun(handle, occ.runId, 'TIME_LIMIT', at)
           changed++
           notice(companyId, handle, 'job_failed', occ, job, acting, told)
+          if (occ.eventRecordId && ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, 'TIME_LIMIT', occ.eventRecordId, told)
         })
         continue
       }
@@ -303,8 +334,11 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         endPcRun(handle, occ.runId, 'EXPIRED', at)
         changed++
         notice(companyId, handle, 'job_expired', occ, job, acting, told)
+        if (occ.eventRecordId && ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, 'EXPIRED', occ.eventRecordId, told)
       })
     }
+    // A waiting event occurrence of the PC whose conditions failed (stage 4b-1) ends now rather than at its expiry.
+    changed += endFailedEvents(companyId, handle, handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT).filter(o => nowMs < Date.parse(o.expiresAt)), told)
     // A `due` occurrence whose time ran out (the runner, or a PC, could not take it): expired, and said so. Never a frozen
     // one (stage 4b-0.5: the repository does not answer it) — its own build decides when it comes back.
     for (const occ of handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT)) {
@@ -478,19 +512,21 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     }
     // Any event occurrence still waiting is held too (stage 4-0.1's write; kept as a net).
     handle.jobs.holdEventOccurrences(jobId, code, at)
-    tell(companyId, told)
     for (let batch = handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT, jobId); batch.length > 0; batch = handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT, jobId)) {
       let moved = 0
       for (const occ of batch) {
         if (!handle.jobs.moveOccurrence(occ.id, ['running'], 'held', { outcomeCode: code }, at)) continue
         moved++
         endPcRun(handle, occ.runId, code, at)
+        // A running event occurrence (the PC's, stage 4b-1) held: its chain stops as a waiting one's does.
+        if (occ.eventRecordId && ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, code, occ.eventRecordId, told)
       }
       if (moved === 0) break
     }
     // Frozen ones (stage 4b-0.5: a later build's shape) are held as well, all of them, and their runs ended — nothing else:
     // no notice, no chain stopped (a later build reads them again, as held).
     for (const runId of handle.jobs.holdFrozen(jobId, code, at)) endPcRun(handle, runId, code, at)
+    tell(companyId, told)
   }
 
   /**
@@ -547,9 +583,136 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     return [...told]
   }
 
+  /** The responsible person as a member now, or null (left the company). */
+  const memberOf = (companyId: string, userId: string) => {
+    const role = deps.roleOf(companyId, userId)
+    return role === null ? null : { companyId, userId, role }
+  }
+
+  /**
+   * Why an event occurrence run by the PC must not run (go on running) now, or null — its conditions (owner memo
+   * 「段4b 設計メモ」 §5-2), in this order: C1 the job runs as pinned (the company's stop, a pause, another version, the
+   * consent accepted); C7 records on; C2 the responsible person a member with the pinned version's rights (an event job is
+   * never paused for it, ⑥: the occurrence alone ends); C3 its record theirs to read now; C8 still the watch it was made
+   * for (its generation); C4 the record still in the trigger's state; C5 its assignee them; C6 that state not 「AI の番」
+   * now (a business plugin installed since); C9 no done mark (`file_linked`: a file linked from the record). `absentToo`:
+   * also D5 (absent on the event's day) — asked before a run starts, not while it runs. Reads only.
+   */
+  function eventCondition(handle: CompanyData, occ: JobOccurrenceRow, absentToo: boolean): JobOutcomeCode | null {
+    const job = handle.jobs.find(occ.jobId)
+    const version = job ? handle.jobs.version(occ.jobId, occ.jobVersion) : null
+    const definition = version ? definitionOf(version) : null
+    if (!job || !version || !isEventPcOccurrence(occ, definition) || !isRecordTrigger(definition.trigger)) return 'JOB_VERSION_CHANGED'
+    if (handle.jobs.stopped()) return 'COMPANY_STOPPED'
+    if (job.state !== 'active') return 'JOB_PAUSED'
+    if (job.approvedVersion !== occ.jobVersion) return 'JOB_VERSION_CHANGED'
+    if (!accepted(job, version)) return 'NOT_ACCEPTED'
+    if (!handle.records.settings().enabled) return 'RECORDS_OFF'
+    const refusal = deps.jobs.runnerRefusal(handle.companyId, version)
+    if (refusal) return refusal
+    const responsible = memberOf(handle.companyId, definition.actingUser)
+    const recordId = occ.eventRecordId as string
+    if (!responsible || !eventShown(handle, responsible, occ)) return 'EVENT_RECORD_GONE'
+    if (!ownsWatch(handle, occ)) return 'EVENT_NOT_WATCHED'
+    const state = handle.records.states([recordId])[0]
+    let fields: Record<string, unknown> = {}
+    try { fields = state ? JSON.parse(state.fields) as Record<string, unknown> : {} } catch { fields = {} }
+    if (!state || state.state !== definition.trigger.to) return 'EVENT_NOT_NEEDED'
+    if (fields.assignee !== definition.actingUser) return 'EVENT_NOT_ASSIGNEE'
+    if (aiTurnState(handle, deps.aiStepStates, definition.trigger.type, state.state)) return 'EVENT_AI_TURN'
+    if (definition.check.kind === 'source_record' && definition.check.doneMark === 'file_linked'
+      && handle.records.linksFrom([recordId]).some(l => l.targetPath !== null)) return 'EVENT_DONE_MARK'
+    if (absentToo) {
+      const day = dayOf(occ)
+      if (handle.tasks.absencesFrom(day).some(a => a.userId === definition.actingUser && a.from <= day && day <= a.until)) return 'OWNER_ABSENT'
+    }
+    return null
+  }
+
+  /**
+   * End an event occurrence run by the PC because `code` failed (in the caller's transaction): its run ended first
+   * (`endPcRun`: its tokens fenced at once, an operation in flight made unknown), then the occurrence (owner memo §4-4) —
+   * with an outside result nobody knows, `needs_person` `RESULT_UNKNOWN` (its run waits for reconciliation); with
+   * something made outside that is known (this run's or an earlier one's), `needs_person` `MADE_THEN_STOPPED`; else as the
+   * condition says (`eventEndState`). Told as that says; the watch's chain stops (only this watch's, D7's recipients).
+   * C1 holds whatever was made (as a pause does; a held one is reconciled on the occurrence). The members told.
+   */
+  function endEventIn(handle: CompanyData, occ: JobOccurrenceRow, code: JobOutcomeCode, told: Set<string>): boolean {
+    const at = clock.now()
+    const from: JobOccurrenceState[] = ['due', 'running']
+    if (!from.includes(occ.state)) return false
+    if (occ.state === 'running') endPcRun(handle, occ.runId, code, at)
+    const plain = eventEndState(code)
+    let to = plain.to
+    let outcome = code
+    let kind = plain.notice
+    if (to !== 'held') {
+      const unknown = occ.runId !== null && handle.aiRuns.operations(occ.runId).some(o => o.state === 'unknown' || o.state === 'in_progress')
+      if (unknown) { to = 'needs_person'; outcome = 'RESULT_UNKNOWN'; kind = 'job_failed' }
+      else if (madeBefore(handle, occ.id).length > 0) { to = 'needs_person'; outcome = 'MADE_THEN_STOPPED'; kind = 'job_failed' }
+    }
+    if (!handle.jobs.moveOccurrence(occ.id, from, to, { outcomeCode: outcome }, at)) return false
+    const job = handle.jobs.find(occ.jobId)
+    if (kind) notice(handle.companyId, handle, kind, occ, job, handle.jobs.version(occ.jobId, occ.jobVersion)?.actingUserId ?? null, told)
+    if (occ.eventRecordId && ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, code, occ.eventRecordId, told)
+    return true
+  }
+
+  /** `endEventIn` in its own transaction, the members told after it. */
+  function endEvent(companyId: string, occurrenceId: string, code: JobOutcomeCode): void {
+    const handle = companyData.forCompany(companyId)
+    const told = new Set<string>()
+    transactions.run(() => {
+      const occ = handle.jobs.occurrence(occurrenceId)
+      if (occ) endEventIn(handle, occ, code, told)
+    })
+    tell(companyId, told)
+  }
+
+  /**
+   * An event occurrence of its watch ended (in the caller's transaction, stage 4b-1): `made` — its やること, which the watch
+   * follows (`followMadeTask`) or which lets a stopped chain go on, as the server's runner does; null — it ended without
+   * one (`nothing`, a person needed, the deadline), so the chain stops for `code`. Only its own watch (its generation).
+   * The members told.
+   */
+  function eventEnded(companyId: string, occ: JobOccurrenceRow, made: string | null, code: string): string[] {
+    const handle = companyData.forCompany(companyId)
+    const told = new Set<string>()
+    if (!occ.eventRecordId) return []
+    if (made === null) {
+      if (ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, code, occ.eventRecordId, told)
+      return [...told]
+    }
+    const version = handle.jobs.version(occ.jobId, occ.jobVersion)
+    const definition = version ? definitionOf(version) : null
+    if (definition && isRecordTrigger(definition.trigger) && definition.trigger.followMadeTask) handle.jobs.moveWatch(occ.jobId, occ.eventRecordId, made, clock.now(), occ.watchGeneration ?? null)
+    else handle.jobs.clearChainStop(occ.jobId, occ.eventRecordId, occ.watchGeneration ?? null)
+    return []
+  }
+
+  /** The clock's look at the event occurrences the PC runs (stage 4b-1): one whose condition failed is ended now, so a run nobody renews stops too. */
+  function endFailedEvents(companyId: string, handle: CompanyData, occs: JobOccurrenceRow[], told: Set<string>): number {
+    let ended = 0
+    for (const occ of occs) {
+      if (!occ.eventRecordId) continue
+      const version = handle.jobs.version(occ.jobId, occ.jobVersion)
+      if (!isEventPcOccurrence(occ, version ? definitionOf(version) : null)) continue
+      const code = eventCondition(handle, occ, occ.state === 'due')
+      if (!code) continue
+      transactions.run(() => {
+        const now = handle.jobs.occurrence(occ.id)
+        if (now && endEventIn(handle, now, code, told)) ended++
+      })
+    }
+    return ended
+  }
+
   return {
     makeOccurrences,
     runOccurrence,
+    eventCondition,
+    endEvent,
+    eventEnded,
     holdDue,
     holdPassedSlot,
     writeNotice,

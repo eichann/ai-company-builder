@@ -22,7 +22,7 @@ import type { MembershipRepository } from '../ports/memberships'
 import type { AgentStopService } from '../services/agent-stops'
 import type { AiRunService } from '../services/ai-runs'
 import { companyTimeToUtc, createJobOccurrences, createJobRunner, type JobOccurrenceDeps } from '../services/job-occurrences'
-import { createJobRetry } from '../services/job-retry'
+import { createJobRetry, type JobRetryDeps } from '../services/job-retry'
 import { createJobService, type JobService, type JobServiceDeps } from '../services/jobs'
 import { companyNow } from '../services/notifications'
 import type { PermissionViewService } from '../services/permission-views'
@@ -94,6 +94,8 @@ export interface JobRetryWiringDeps {
   taskSettings: Pick<TaskSettingsService, 'settingsOf'>
   /** A deliverable place outside is usable now (its connector answers; composition/google.ts). */
   placeUsable: NonNullable<JobOccurrenceDeps['placeUsable']>
+  /** An event occurrence run by the PC: its conditions now (the occurrences' service, built later). */
+  eventCondition: NonNullable<JobRetryDeps['eventCondition']>
 }
 
 export function wireJobRetry(deps: JobRetryWiringDeps) {
@@ -105,6 +107,7 @@ export function wireJobRetry(deps: JobRetryWiringDeps) {
     roleOf: deps.roleOf,
     aiStops: member => agentStops.policyFor(member),
     placeUsable: deps.placeUsable,
+    eventCondition: deps.eventCondition,
     reconcileFor: (companyId, runId, key, done, by) => aiRuns.reconcileFor(companyId, runId, key, done, by),
     // The clock's own slots (its zone and days off): the newest at or before now, and the next one.
     slotsOf: (companyId, definition) => {

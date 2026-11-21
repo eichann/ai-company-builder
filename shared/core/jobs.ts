@@ -873,6 +873,10 @@ export const JOB_RETRY_BLOCKS = [
   'JOB_GRANT_EXCEEDS', 'JOB_SKILL_MISSING', 'JOB_PLACE_NOT_USABLE', 'JOB_RESULT_UNKNOWN', 'RETRY_LIMIT', 'NEXT_SLOT_SOON',
   // Stage 4-0: the version is of a shape this server build does not know (a newer build wrote it).
   'JOB_SCHEMA_UNKNOWN',
+  // Stage 4b-1, an event occurrence run by the PC (owner memo 「段4b 設計メモ」 §4-2): its source record no longer asks for it
+  // (not in the trigger's state, another assignee, unreadable for the responsible person, 「AI の番」, another watch, the
+  // done mark) — or the company's records are off (C7).
+  'SOURCE_CHANGED', 'RECORDS_OFF',
 ] as const
 
 /**

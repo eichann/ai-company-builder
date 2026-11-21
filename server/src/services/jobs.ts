@@ -119,10 +119,11 @@ export interface JobServiceDeps {
    */
   places?: { live(companyId: string, userId: string, place: JobDeliveryPlace): { name: string; expiresAt: string } | null }
   /**
-   * 「もう一度」 (B PR 5b, services/job-retry.ts `viewOf`): what an owner / admin's occurrence view adds — how often it was
-   * sent back, by whom, whether the button works now and why not. Bound late (built after this service). Absent → nothing.
+   * 「もう一度」 (B PR 5b, services/job-retry.ts `viewFor`): what an occurrence view adds for this member — how often it was
+   * sent back, by whom, whether the button works now and why not, what is unknown — only what their rights cover (an
+   * owner / admin; since stage 4b-1 an event PC occurrence's responsible person, D11). Bound late. Absent → nothing.
    */
-  occurrenceRetry?: (companyId: string, occ: JobOccurrenceRow) => Partial<JobOccurrenceView>
+  occurrenceRetry?: (member: Member, occ: JobOccurrenceRow) => Partial<JobOccurrenceView>
   /** The definition schemas this server reads (jobs.md "Shapes this build does not know"). Absent → `JOB_SCHEMAS`; tests name a newer one. */
   knownSchemas?: readonly number[]
   /** Event-triggered jobs (stage 4a): a business plugin step's states that run as 「AI の番」 (never a trigger's, ⑧). Absent → none. */
@@ -517,6 +518,41 @@ export function createJobService(deps: JobServiceDeps) {
     if (told) { try { deps.noticesChanged?.(companyId, admins) } catch { /* their own check catches up */ } }
   }
 
+  /**
+   * What 「見張るやることを選び直す」 needs now (owner decision ①; stage 4b-1 asks it twice — before the Skill is read and inside
+   * the write's transaction): the job still theirs to control (the approved version's responsible person), not retired,
+   * `version` its approved and newest version (no draft waiting), a shape this server and the screen read, an event job;
+   * the new version (only the start record differs) parses, and the record is a start record both the member and the
+   * responsible person read (they are one person) — for a job run by the PC (schema 3) also one whose assignee is them now.
+   */
+  function rewatchChecks(member: Member, handle: CompanyData, jobId: string, version: number, recordId: string, reads: readonly number[]): Outcome<{ next: JobDefinition; current: JobRow }> {
+    const current = handle.jobs.find(jobId)
+    if (!current) return NOT_FOUND()
+    if (!controls(handle, current, member.userId)) return NOT_RESPONSIBLE_TO_REWATCH()
+    if (current.state === 'retired') return RETIRED()
+    if (current.approvedVersion !== version) return FINGERPRINT_CHANGED()
+    if (current.latestVersion !== current.approvedVersion) return DRAFT_WAITING()
+    const approved = handle.jobs.version(jobId, current.approvedVersion) as JobVersionRow
+    const definition = definitionOf(approved)
+    if (definition === null) return SCHEMA_UNKNOWN()
+    if (!reads.includes(approved.schema)) return NEEDS_NEWER_SCREEN()
+    if (!isRecordTrigger(definition.trigger)) return NOT_EVENT_JOB()
+    const parsed = parseJobDefinition({ ...definition, trigger: { ...definition.trigger, startRecord: recordId } })
+    if (!parsed.ok) return BAD_DEFINITION(parsed.problems)
+    const next = parsed.definition
+    const problems = triggerProblems(handle, next, member)
+    if (problems.length > 0) return BAD_DEFINITION(problems)
+    // Schema 3 (stage 4b-1): the AI acts on that やること as its assignee's — the one it is watched for (C5) — so one whose
+    // assignee is someone else is refused as a start record that is not there (one code, never telling why).
+    if (next.schema === 3) {
+      const state = handle.records.states([recordId])[0]
+      let assignee: unknown = null
+      try { assignee = state ? (JSON.parse(state.fields) as Record<string, unknown>).assignee : null } catch { assignee = null }
+      if (assignee !== next.actingUser) return BAD_DEFINITION(['trigger.startRecord.NOT_FOUND'])
+    }
+    return ok({ next, current })
+  }
+
   return {
     /** `GET /jobs`: owner/admin every job; anyone else the jobs they are responsible for. */
     list(member: Member, reads: readonly number[] = SCHEMA_1_ONLY): Outcome<JobList> {
@@ -803,12 +839,13 @@ export function createJobService(deps: JobServiceDeps) {
     occurrences(member: Member, jobId: string): Outcome<{ occurrences: JobOccurrenceView[] }> {
       const found = visibleJob(member, jobId)
       if (!found) return NOT_FOUND()
-      // 「もう一度」 (B PR 5b): whether it works now and why not, only for those who may press it (owner / admin).
-      const retry = hasFullAccess(member.role) ? deps.occurrenceRetry : undefined
+      // 「もう一度」 (B PR 5b): whether it works now and why not, only for those who may press it (owner / admin; since
+      // stage 4b-1 also an event PC occurrence's responsible person, D11 — `viewFor` decides).
+      const retry = deps.occurrenceRetry
       return ok({
         // Only what the viewer may see (⑥): an event occurrence of a record they cannot read is not there, owners and admins too.
         occurrences: shownOccurrences(member, found.handle, jobId, OCCURRENCES_LISTED)
-          .map((o): JobOccurrenceView => ({ ...occurrenceView(o), ...(retry ? retry(member.companyId, o) : {}) })),
+          .map((o): JobOccurrenceView => ({ ...occurrenceView(o), ...(retry ? retry(member, o) : {}) })),
       })
     },
 
@@ -839,6 +876,16 @@ export function createJobService(deps: JobServiceDeps) {
       const role = memberships.roleOf(companyId, definition.actingUser)
       const found = role === null ? null : deps.shelfSkill?.({ companyId, userId: definition.actingUser, role }, definition.run.procedure.item, definition.run.procedure.fingerprint)
       return !!found && found.readable && found.kept
+    },
+
+    /**
+     * The name of one version as the member may read it (stage 4b-1, `GET /me/job-occurrences`): that version's own name
+     * while they read every place it names, else `HIDDEN_JOB_NAME` — never the job's newer name or versions.
+     */
+    pinnedNameOf(member: Member, version: JobVersionRow): string {
+      const handle = companyData.forCompany(member.companyId)
+      const definition = definitionOf(version)
+      return definition !== null && (hasFullAccess(member.role) || readsAll(handle, member.userId, member.role, definition)) ? definition.name : HIDDEN_JOB_NAME
     },
 
     /** The job's name for the member (`nameFor`: 「定期の仕事」 unless they read every place the newest version names), or null when they may not see the job. */
@@ -894,29 +941,34 @@ export function createJobService(deps: JobServiceDeps) {
       if (!b || typeof b.version !== 'number' || !Number.isInteger(b.version) || typeof b.recordId !== 'string' || !RECORD_ID_RE.test(b.recordId)) {
         return BAD_BODY('{ version, recordId }')
       }
-      const { handle, job } = found
-      if (!controls(handle, job, member.userId)) return NOT_RESPONSIBLE_TO_REWATCH()
-      if (job.state === 'retired') return RETIRED()
-      if (job.approvedVersion !== b.version) return FINGERPRINT_CHANGED()
-      if (job.latestVersion !== job.approvedVersion) return DRAFT_WAITING()
-      const approved = handle.jobs.version(jobId, job.approvedVersion) as JobVersionRow
-      const definition = definitionOf(approved)
-      if (definition === null) return SCHEMA_UNKNOWN()
-      if (!reads.includes(approved.schema)) return NEEDS_NEWER_SCREEN()
-      if (!isRecordTrigger(definition.trigger)) return NOT_EVENT_JOB()
-      const parsed = parseJobDefinition({ ...definition, trigger: { ...definition.trigger, startRecord: b.recordId } })
-      if (!parsed.ok) return BAD_DEFINITION(parsed.problems)
-      const next = parsed.definition
-      const problems = triggerProblems(handle, next, member)
-      if (problems.length > 0) return BAD_DEFINITION(problems)
+      const { handle } = found
+      const version = b.version
+      const recordId = b.recordId
+      const pre = rewatchChecks(member, handle, jobId, version, recordId, reads)
+      if (!pre.ok) return pre
+      // An event job run by the PC (schema 3, stage 4b-1): its pinned Skill must still be what was pinned (the press
+      // approves and accepts a new version of it) — read asynchronously, so everything that can change meanwhile is
+      // checked again inside the write's transaction below (owner memo §6 「選び直しの残り」).
+      const skill = await skillPinned(member.companyId, pre.value.next)
+      if (!skill.ok) return skill
       const result = transactions.run((): Outcome<void> => {
+        // Again, now: still the job's responsible person, not retired, the version shown, no draft waiting, the record
+        // theirs to read (and the responsible person's: the same person), its assignee them (schema 3), a member with the rights.
+        const again = rewatchChecks(member, handle, jobId, version, recordId, reads)
+        if (!again.ok) return again
+        const { next, current } = again.value
         const rights = withinRights(handle, next)
         if (!rights.ok) return rights
-        const current = handle.jobs.find(jobId) as JobRow
-        if (current.latestVersion !== b.version || current.approvedVersion !== b.version) return FINGERPRINT_CHANGED()
         // A rewatch approves and accepts in one press: only on top of content the person has accepted already, else it
         // would accept what they never saw (an AI grant, a place). The app normally offers no picker then; the server decides.
         if (!consentAccepted(handle, current)) return ACCEPT_BEFORE_REWATCH()
+        // The place outside the version names must still be theirs and usable (stage 4b-1): the press accepts it again.
+        if (next.grant.deliverTo) {
+          const chosen = current.acceptedPlace
+          const usable = !!chosen && chosen.connector === next.grant.deliverTo.connector && chosen.kind === next.grant.deliverTo.kind
+            && deps.places?.live(member.companyId, next.actingUser, chosen) != null
+          if (!usable) return PLACE_NOT_USABLE()
+        }
         const at = clock.now()
         const canonical = jobDefinitionCanonical(next)
         const row = versionRow(jobId, current.latestVersion + 1, next, canonical, member.userId, at)
@@ -926,8 +978,8 @@ export function createJobService(deps: JobServiceDeps) {
         // The record chosen: the watch starts over there, the stop is gone — also when it is the start record it began
         // from (an explicit choice is never the chain's position kept; Codex review of #700).
         // Kept as a defence: an accepted job always has its cursor (acceptance starts it), so this starts nothing new.
-        handle.jobs.startEventCursor(jobId, b.recordId as string, at)
-        handle.jobs.restartWatch(jobId, b.recordId as string, at)
+        handle.jobs.startEventCursor(jobId, recordId, at)
+        handle.jobs.restartWatch(jobId, recordId, at)
         return ok(undefined)
       })
       if (!result.ok) return result

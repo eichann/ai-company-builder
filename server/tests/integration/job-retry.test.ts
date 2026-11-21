@@ -330,10 +330,11 @@ describe('the press', () => {
     // The deadline: its 1440 minutes from the press, but a run claimed then must end (30 minutes) before the next slot.
     expect(Date.parse(after.expires_at)).toBe(NEXT_SLOT - 30 * MINUTE)
     expect(Date.parse(after.retried_at)).toBe(pressedAt)
-    // The old run is closed for good: its own 「もう一度」 gives nothing back.
+    // The old run is closed for good: its own 「もう一度」 gives nothing back (since stage 4b-1 a job's run has no run-level
+    // 「もう一度」 at all: the occurrence's is the only one, D11).
     expect(runOf(first.id)).toMatchObject({ state: 'done', closed_at: expect.any(String) })
     expect(db.prepare("SELECT code FROM ai_run_events WHERE company_id = ? AND run_id = ? ORDER BY seq DESC LIMIT 1").get(CO, first.id)).toEqual({ code: 'RETRIED' })
-    expect(await as('jy-alice', 'POST', `/ai-runs/${first.id}/retry`)).toMatchObject({ status: 409, body: { code: 'RUN_DONE' } })
+    expect(await as('jy-alice', 'POST', `/ai-runs/${first.id}/retry`)).toMatchObject({ status: 404, body: { code: 'RUN_NOT_FOUND' } })
     // Alice's app sees it again (with the count, so it is tried again today) and claims it as a new run.
     const turns = (await as('jy-alice', 'GET', '/me/job-turns')).body.data.turns
     expect(turns).toEqual([expect.objectContaining({ occurrenceId: occ, state: 'due', retries: 1 })])

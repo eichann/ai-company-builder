@@ -329,7 +329,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     // A deliverable place outside (jobs.md): its connector answers; bound late (built below).
     places: { live: (companyId, userId, place) => deliveryPlaces.live(companyId, userId, place) },
     // 「もう一度」 on an owner / admin's occurrence view (jobs.md "「もう一度」"); bound late (built below).
-    occurrenceRetry: (companyId, occ) => jobRetry.viewOf(companyId, occ),
+    occurrenceRetry: (member, occ) => jobRetry.viewFor(member, occ),
     // Event-triggered jobs (jobs.md): the states a business plugin runs as 「AI の番」 (never a trigger's); built below.
     aiStepStates: (companyId, type) => pluginsLane.pluginSteps.aiStepStates(companyId, type),
   })
@@ -595,6 +595,12 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       writeNotice: (companyId, kind, occ) => jobOccurrences.writeNotice(companyId, kind, occ),
       tell: (companyId, userIds) => jobOccurrences.tell(companyId, userIds),
     },
+    // Event occurrences run by the PC (stage 4b-1): their conditions and their end, the occurrences' (bound late).
+    eventRuns: {
+      eventCondition: (handle, occ, absentToo) => jobOccurrences.eventCondition(handle, occ, absentToo),
+      endEvent: (companyId, occurrenceId, code) => jobOccurrences.endEvent(companyId, occurrenceId, code),
+      eventEnded: (companyId, occ, made, code) => jobOccurrences.eventEnded(companyId, occ, made, code),
+    },
   })
   const aiRuns = createAiRunService({
     ...shared, tokenDigest: sha256TokenDigest, subjects: runSubjectsByKind({ record: runSubjects, occurrence: jobRuns.subjects }),
@@ -606,6 +612,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     shared, jobs, agentStops, aiRuns, taskSettings,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     placeUsable: (companyId, userId, place) => deliveryPlaces.live(companyId, userId, place) !== null,
+    // Bound late: the occurrences' service is built below (called only after construction).
+    eventCondition: (handle, occ, absentToo) => jobOccurrences.eventCondition(handle, occ, absentToo),
   })
 
   // The parallel lanes (A connectors, B inbox, C plugins) wire their services in their own files
@@ -848,6 +856,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     jobs,
     jobRuns,
     jobRetry,
+    // The clock's part of scheduled jobs (jobs.md "The clock"): reached by the server clock; named here for the tests.
+    jobOccurrences,
     notifications,
     decisions,
     meetingOutputs,

@@ -234,6 +234,22 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
           ORDER BY due_at, id LIMIT ?`)
         .all(companyId, jobId, jobId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
+    otherRunning(jobId, exceptId) {
+      return conn.prepare(`SELECT 1 FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND state = 'running' AND id <> ? AND ${KNOWN} LIMIT 1`)
+        .get(companyId, jobId, exceptId) !== undefined
+    },
+    eventRecordsPinnedTo(userId, limit) {
+      return (conn.prepare(`SELECT o.event_record_id AS id FROM ai_job_occurrences o JOIN ai_job_versions v
+          ON v.company_id = o.company_id AND v.job_id = o.job_id AND v.version = o.job_version
+          WHERE o.company_id = ? AND v.acting_user_id = ? AND o.event_record_id IS NOT NULL AND ${known('o')}
+          GROUP BY o.event_record_id ORDER BY MAX(o.event_seq) DESC LIMIT ?`).all(companyId, userId, limit) as Array<{ id: string }>).map(r => r.id)
+    },
+    occurrencesPinnedTo(userId, records, limit) {
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ.split(', ').map(c => `o.${c.trim()}`).join(', ')} FROM ai_job_occurrences o JOIN ai_job_versions v
+          ON v.company_id = o.company_id AND v.job_id = o.job_id AND v.version = o.job_version
+          WHERE o.company_id = ? AND v.acting_user_id = ? AND o.event_record_id IN (SELECT value FROM json_each(?)) AND ${known('o')}
+          ORDER BY o.created_at DESC, o.event_seq DESC, o.id LIMIT ?`).all(companyId, userId, JSON.stringify(records), limit) as OccurrenceDbRow[]).map(occurrenceOf)
+    },
     holdFrozen(jobId, code, at) {
       // Every one, no limit (a stop must reach all of them): the runs of the running ones are returned for the caller to end.
       const runs = (conn.prepare(`SELECT run_id FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' AND (? IS NULL OR job_id = ?) AND NOT (${KNOWN})
