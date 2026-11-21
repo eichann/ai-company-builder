@@ -469,6 +469,9 @@ export function createJobRuns(deps: JobRunDeps) {
       if (run.state !== 'done') return null
       const result = parseJobRunResult(body.jobResult)
       if (result === null) return refuse('bad-request', 'jobResult is "nothing" or { title, summary? }', { code: 'JOB_RESULT_REQUIRED' })
+      // An event occurrence (stage 4b-1): whether it is still needed is the server's conditions' to say, never the AI's —
+      // `nothing` is refused and the whole finish rolls back (the run stays running, as for a missing result).
+      if (f.event && result === 'nothing') return refuse('bad-request', 'この定期の仕事の回は「することがない」で終われません（要るかどうかはサーバーが確かめます）。', { code: 'JOB_EVENT_NOTHING_REFUSED' })
       // Checked again: what changed while it ran makes nothing (the occurrence is held with its reason). An event
       // occurrence's conditions were checked by `beforeFinish` in the same synchronous stretch: a failure here is a race —
       // the whole finish rolls back (nothing made), and the next call, renew or the clock ends it.
@@ -486,8 +489,6 @@ export function createJobRuns(deps: JobRunDeps) {
       const at = clock.now()
       if (result === 'nothing') {
         f.handle.jobs.moveOccurrence(f.occ.id, ['running'], 'nothing', { outcomeCode: null }, at)
-        // Nothing made: an event occurrence's chain cannot follow it, and stops (stage 4b-1).
-        if (f.event) toTell.set(run.id, { companyId: f.handle.companyId, userIds: deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, null, 'TASK_NOT_CREATED') ?? [] })
         return null
       }
       if (!f.definition.grant.creates.includes('task')) return refuse('bad-request', 'この定期の仕事はやることを作れません。', { code: 'JOB_TASK_NOT_GRANTED' })

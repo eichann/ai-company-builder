@@ -409,7 +409,7 @@ describe('S1 (each condition on its own, at the renew or a call)', () => {
     expect(cursorOf(job)).toMatchObject({ watch_record_id: next, chain_stop_code: null })
   })
 
-  it('the deadline at a renew; a run that failed for a person, or finished with nothing, stops the chain', async () => {
+  it('the deadline at a renew; a run that failed for a person stops the chain', async () => {
     const late = await eventOccurrence()
     const run = (await claim(late.occ)).body.data.run
     // Its app kept renewing (the lease is alive): the approved minutes still end it.
@@ -429,11 +429,18 @@ describe('S1 (each condition on its own, at the renew or a call)', () => {
     expect(occOf(failed.occ)).toMatchObject({ state: 'needs_person', outcome_code: 'RUN_FAILED' })
     expect(cursorOf(failed.job)).toMatchObject({ chain_stop_code: 'RUN_FAILED' })
 
-    const nothing = await eventOccurrence()
-    const run3 = (await claim(nothing.occ)).body.data.run
-    expect((await finish(run3, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
-    expect(occOf(nothing.occ)).toMatchObject({ state: 'nothing' })
-    expect(cursorOf(nothing.job)).toMatchObject({ chain_stop_code: 'TASK_NOT_CREATED' })
+  })
+
+  it('the AI never decides `nothing` for an event run: 400 JOB_EVENT_NOTHING_REFUSED, the run and occurrence unchanged', async () => {
+    const { job, occ } = await eventOccurrence()
+    const run = (await claim(occ)).body.data.run
+    expect(await finish(run, { outcome: 'done', jobResult: 'nothing' })).toMatchObject({ status: 400, body: { code: 'JOB_EVENT_NOTHING_REFUSED' } })
+    expect(runOf(run.id)).toMatchObject({ state: 'running', closed_at: null })
+    expect(occOf(occ)).toMatchObject({ state: 'running', run_id: run.id })
+    expect(cursorOf(job)).toMatchObject({ chain_stop_code: null })
+    // Its real finish still goes through.
+    expect((await finish(run, { outcome: 'done', jobResult: { title: '報告書' } })).status).toBe(200)
+    expect(occOf(occ)).toMatchObject({ state: 'done' })
   })
 
   it('a running one past its expiry with nobody holding it: expired, told, and its chain stops', async () => {
@@ -691,8 +698,8 @@ describe('S8: another running occurrence of the job — wait only', () => {
       // Its own re-claim (the same occurrence running) is not "another".
       const again = await claim(occ)
       expect(again).toMatchObject({ status: 200 })
-      // Finished (`nothing`: the watch stays this generation, so the other is still its watch's), the other may go.
-      expect((await finish(again.body.data.run, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
+      // Ended (for a person: the watch stays this generation, so the other is still its watch's), the other may go.
+      expect((await finish(again.body.data.run, { outcome: 'failed', failure: { class: 'bad-input', code: 'CHECK_NOT_POSSIBLE' } })).status).toBe(200)
       expect(await claim(other, { device: 'device-alice-2' })).toMatchObject({ status: 201 })
     }
   })

@@ -1102,7 +1102,9 @@ and やること. Stopping the AI on the PC when the server cannot be reached (a
   C1 holds whatever was made (as a pause does; a held occurrence is reconciled on the occurrence, 4b-0.5). Every end
   without its やること stops this watch's chain once (`job_chain_stopped`, D7's recipients) — also the deadline
   (`TIME_LIMIT`), a reconcile wait out of time (`RESULT_UNKNOWN`), the clock's expiry of a running one (`EXPIRED`), a
-  finish to a person (`RUN_FAILED`), a finish `nothing` (`TASK_NOT_CREATED`), a pause / the stop holding a running one. A
+  finish to a person (`RUN_FAILED`), a pause / the stop holding a running one. **A finish `nothing` is refused** for an
+  event run (400 `JOB_EVENT_NOTHING_REFUSED`, the whole finish rolled back, the run still running — as `JOB_RESULT_REQUIRED`):
+  whether it is still needed is the server's conditions' to say, never the AI's (coordinator decision 2026-11-22). A
   done finish moves the watch to the やること it made (`followMadeTask`) or lets a stopped chain go on (`eventEnded`), in
   the finish's transaction, its own generation only — as the server's runner does.
 - **Never side by side**: a `due` event occurrence waits (409 `JOB_EARLIER_RUNNING`, nothing written, nothing told) while
