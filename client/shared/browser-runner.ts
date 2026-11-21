@@ -219,17 +219,29 @@ export interface BrowserExploreReader {
 export type BrowserJsonValue = null | boolean | number | string | readonly BrowserJsonValue[] | { readonly [key: string]: BrowserJsonValue }
 
 /**
+ * Where one answer of a paginated list stands, as the answer says it (`current_page`, `last_page`,
+ * `total`). A reader only reports it: which page is read next — if any — is the app's decision
+ * (preview.ts, the declaration's `pages`), never the reader's or the operator's.
+ */
+export interface BrowserListPage {
+  current: number
+  last: number
+  total: number
+}
+
+/**
  * A reviewed reader of a JSON answer the site's own pages use (agent-browser.md "The checker": prefer
  * stable sources). It gets the answer parsed strictly — never the text — and hands back declared
  * fields only, as an HTML reader does; the core cleans them the same way (`runJsonExploreReader`).
- * An answer it does not recognise is `complete: false`, never a guess.
+ * An answer it does not recognise is `complete: false`, never a guess. A paginated answer also
+ * reports where it stands (`page`); `complete` then speaks of this answer's entries only.
  */
 export interface BrowserJsonExploreReader {
   readonly id: string
   readonly answer: 'json'
   readonly fields: readonly string[]
   readonly extra: readonly string[]
-  read(values: Readonly<Record<string, string>>, json: BrowserJsonValue): { items: BrowserExploreItem[]; complete: boolean }
+  read(values: Readonly<Record<string, string>>, json: BrowserJsonValue): { items: BrowserExploreItem[]; complete: boolean; page?: BrowserListPage }
 }
 
 /** Any reviewed preview reader: of a page (HTML) or of a JSON answer. */

@@ -210,7 +210,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   const plans: Record<string, Record<string, unknown>> = {}
   const plan = (planId: string, over: Record<string, unknown>) => {
     plans[planId] = {
-      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.4.0' }, operation: 'reminder_step_add_template',
+      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.5.0' }, operation: 'reminder_step_add_template',
       account: 'ACC1', target: { reminder: '101', step: '201' }, change: { template: '301' }, before: { templates: ['300'] },
       approvedAt: Date.now() - 1000, expiresAt: Date.now() + 120_000, ...over,
     }
@@ -242,7 +242,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   const previewHits = sites.hits.length
   out.previewRead = await win.preview.read('/line/episode/show/101').then(r => r.status, () => 'refused')
   out.previewReachedSite = sites.hits.slice(previewHits).filter(h => h.path === '/line/episode/show/101').length
-  // A declared read with a query (Lステップ 0.4.0's reminders): exactly that address reaches the site;
+  // A declared read with a query (Lステップ's reminders, page 1): exactly that address reaches the site;
   // one no declared read can have (percent-encoded) is refused before anything is sent.
   const queryHits = sites.hits.length
   out.previewQueryRead = await win.preview.read('/api/episodes?group=29529&page=1').then(r => r.status, () => 'refused')
@@ -271,7 +271,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   await page.loadURL('https://op.test/line/episode/show/101').catch(() => {})
   await wait(300)
   const gate = createRunGate({
-    host: 'op.test', operation: connector('lstep', '0.4.0')!.operations.reminder_step_add_template,
+    host: 'op.test', operation: connector('lstep', '0.5.0')!.operations.reminder_step_add_template,
     values: { target: { reminder: '101', step: '201' }, change: { template: '304' } },
     readPaths: ['/line/episode/show/101'], stopped: () => false,
   })

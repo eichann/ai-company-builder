@@ -9,16 +9,24 @@
 // this request) — main reads it through the window's page-less read session and runs the site's
 // reviewed reader over it —, a candidate (its ids likewise; fitting the type), or a stop. Nothing is
 // registered here (6b-2): the candidate comes back to the caller.
-import { browserOperationsAllowed, type BrowserOperation, type PluginBrowser } from '../../../../shared/core/plugin-browser-declaration'
+//
+// A paginated read (`pages` in the declaration, design memo §38): the operator asks for the read once;
+// main reads page 1, then — only when the reader reports a `last_page` within the declared `max` —
+// pages 2..last_page in order, each address built from the declaration with main's own page number
+// (`explorePath`), and hands the operator one merged list that never names a page (`readPages`).
+import {
+  BROWSER_DECLARATION_LIMITS, browserOperationsAllowed, explorePath,
+  type BrowserExploreRead, type BrowserOperation, type PluginBrowser,
+} from '../../../../shared/core/plugin-browser-declaration'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
 import type { BrowserHtmlDocument } from '../../../shared/browser-page'
 import { runExploreReader } from '../../../shared/browser-page'
-import { runJsonExploreReader } from '../../../shared/browser-json'
+import { runJsonExploreReader, type BrowserJsonExploreResult } from '../../../shared/browser-json'
 import {
   BROWSER_OPERATOR_LIMITS, operatorMaterial, parseOperatorAnswer, previewProblem, seenValues,
   type BrowserOperatorFailure, type BrowserOperatorPage, type BrowserOperatorRequest, type BrowserOperatorStopReason,
 } from '../../../shared/browser-operator'
-import type { BrowserPreviewReader, BrowserPreviewSurface } from '../../../shared/browser-runner'
+import type { BrowserExploreItem, BrowserJsonExploreReader, BrowserPreviewReader, BrowserPreviewSurface } from '../../../shared/browser-runner'
 import type { BrowserAiSwitch } from './ai-switch'
 
 /** The CLI fixed for a request (agents/claude-browser-operator.ts `BrowserOperatorCli`). */
@@ -81,6 +89,66 @@ export type BrowserPreviewResult =
 
 const OK_READ = 200
 
+/** A paginated read's merged list: at most this many items (10 pages of 50, design memo §38). */
+export const BROWSER_PAGED_ITEMS = BROWSER_DECLARATION_LIMITS.explorePages * 50
+
+type PageRead = (address: string, page: number) => Promise<{ status: number; body: string } | 'failed' | 'stop'>
+
+/**
+ * One declared JSON read, its pages merged (design memo §38). A read without `pages` is one answer: if
+ * its reader reports where it stands, whole only as its only page (`current_page` 1, `last_page` 1).
+ * With `pages`, page 1 is the operator's read (`firstAddress`, built from the declaration); pages
+ * 2..last are main's: only when page 1 reports `last_page` ≤ the declared `max`, in order, each address
+ * `explorePath(read, values, n)`. It stops, incomplete, keeping the pages before, on: a failed later
+ * page, a page that does not report where it stands, a `current_page` other than the one asked, a
+ * `last_page` or `total` that changed since page 1, an id seen twice in this read. A list that cannot
+ * be known to fit — page 1 not saying where it stands, more than `max` pages or `BROWSER_PAGED_ITEMS`
+ * items — offers nothing (nothing of it is chosen from). All pages read whole: complete only when the
+ * count is the reported `total`. `'stop'` from `fetch`: the request ended (context, cancel, time).
+ */
+export async function readPages(
+  read: BrowserExploreRead, values: Readonly<Record<string, string>>, firstAddress: string,
+  reader: BrowserJsonExploreReader, fetch: PageRead,
+): Promise<{ items: BrowserExploreItem[]; complete: boolean } | 'failed' | 'stop'> {
+  if (!read.pages) {
+    const page = await fetch(firstAddress, 1)
+    if (page === 'stop' || page === 'failed') return page
+    if (page.status !== OK_READ) return 'failed'
+    const result = runJsonExploreReader(reader, values, page.body)
+    const only = !result.page || (result.page.current === 1 && result.page.last === 1)
+    return { items: result.items, complete: result.complete && only }
+  }
+  const max = read.pages.max
+  const items: BrowserExploreItem[] = []
+  const seen = new Set<string>()
+  let first: { last: number; total: number } | null = null
+  let whole = true
+  for (let n = 1; ; n++) {
+    const address = n === 1 ? firstAddress : explorePath(read, values, n)
+    if (!address) return { items, complete: false }
+    const page = await fetch(address, n)
+    if (page === 'stop') return 'stop'
+    // Page 1 failing is the read failing (as any read); a later page only ends the list, incomplete.
+    if (page === 'failed' || page.status !== OK_READ) return n === 1 ? 'failed' : { items, complete: false }
+    const result: BrowserJsonExploreResult = runJsonExploreReader(reader, values, page.body)
+    const at = result.page
+    if (!at) return { items, complete: false }
+    if (at.current !== n) return { items, complete: false }
+    if (!first) {
+      // Too long to read whole: nothing of it is offered.
+      if (at.last > max) return { items: [], complete: false }
+      first = { last: at.last, total: at.total }
+    } else if (at.last !== first.last || at.total !== first.total) return { items, complete: false }
+    const keys = result.items.map(item => `${item.field}\n${item.value}`)
+    if (keys.some(k => seen.has(k)) || new Set(keys).size !== keys.length) return { items, complete: false }
+    if (items.length + result.items.length > BROWSER_PAGED_ITEMS) return { items: [], complete: false }
+    for (const k of keys) seen.add(k)
+    items.push(...result.items)
+    whole &&= result.complete
+    if (n >= first.last) return { items, complete: whole && items.length === first.total }
+  }
+}
+
 export async function runBrowserPreview(request: BrowserPreviewRequest, deps: BrowserPreviewDeps): Promise<BrowserPreviewResult> {
   // The switch first (design memo §33.3): off = return at once.
   if (!deps.aiSwitch()) return { outcome: 'refused', reason: 'off' }
@@ -92,8 +160,12 @@ export async function runBrowserPreview(request: BrowserPreviewRequest, deps: Br
   const operation: BrowserOperation | undefined = Object.prototype.hasOwnProperty.call(connector.operations, request.operation)
     ? connector.operations[request.operation] : undefined
   if (!operation || operation.effect === 'read') return refused('operation')
-  // Every declared read needs its reviewed reader, or the type is not previewed at all.
-  if (Object.keys(connector.explore).length === 0 || Object.values(connector.explore).some(r => !deps.reader(r.reader))) return refused('connector')
+  // Every declared read needs its reviewed reader, or the type is not previewed at all; a paginated
+  // read's reader must be a JSON one (only it reports where a page stands).
+  if (Object.keys(connector.explore).length === 0 || Object.values(connector.explore).some(r => {
+    const reader = deps.reader(r.reader)
+    return !reader || (r.pages !== undefined && !('answer' in reader))
+  })) return refused('connector')
   // A type its declared reads can never complete (no read to start from, an id field no reader takes
   // out) fails closed here, before anything is read or started.
   if (previewProblem(operation, connector.explore, id => deps.reader(id)?.fields)) return refused('not-previewable')
@@ -133,17 +205,36 @@ export async function runBrowserPreview(request: BrowserPreviewRequest, deps: Br
     if (answer.do === 'stop') return { outcome: 'stopped', why: answer.why, question: answer.question }
     if (answer.do === 'candidate') return { outcome: 'candidate', target: answer.target, change: answer.change, explanation: answer.explanation }
 
-    let page: { status: number; body: string }
-    try { page = await firstWindow.read(answer.path, request.signal) } catch { return failed(request.signal.aborted ? 'cancelled' : 'read-failed') }
-    if (!current()) return failed(request.signal.aborted ? 'cancelled' : 'context-changed')
-    // A redirect (logged out), an error page: nothing to read the items from.
-    if (page.status !== OK_READ) return failed('read-failed')
-    const reader = deps.reader(connector.explore[answer.read].reader) as BrowserPreviewReader
-    // A JSON reader gets the answer parsed strictly; a page reader the page as the core shows it.
-    const { items, complete } = 'answer' in reader
-      ? runJsonExploreReader(reader, answer.values, page.body)
-      : runExploreReader(reader, answer.values, deps.parse(page.body))
-    pages.push({ read: answer.read, values: answer.values, items, complete })
+    const declared = connector.explore[answer.read]
+    const reader = deps.reader(declared.reader) as BrowserPreviewReader
+    let stop: BrowserPreviewResult | null = null
+    const fetch: PageRead = async (address, n) => {
+      // Main's own later pages stay within the request's 4 minutes.
+      if (n > 1 && deps.now() >= deadline) { stop = failed('timeout'); return 'stop' }
+      let page: { status: number; body: string }
+      try { page = await firstWindow.read(address, request.signal) } catch {
+        if (request.signal.aborted) { stop = failed('cancelled'); return 'stop' }
+        if (!current()) { stop = failed('context-changed'); return 'stop' }
+        return 'failed'
+      }
+      if (!current()) { stop = failed(request.signal.aborted ? 'cancelled' : 'context-changed'); return 'stop' }
+      return page
+    }
+    let read: { items: BrowserExploreItem[]; complete: boolean }
+    if ('answer' in reader) {
+      // A JSON reader gets each answer parsed strictly; a paginated read is read page by page by main.
+      const got = await readPages(declared, answer.values, answer.path, reader, fetch)
+      if (got === 'stop') return stop ?? failed('context-changed')
+      // A redirect (logged out), an error page: nothing to read the items from.
+      if (got === 'failed') return failed('read-failed')
+      read = got
+    } else {
+      const page = await fetch(answer.path, 1)
+      if (page === 'stop') return stop ?? failed('context-changed')
+      if (page === 'failed' || page.status !== OK_READ) return failed('read-failed')
+      read = runExploreReader(reader, answer.values, deps.parse(page.body))
+    }
+    pages.push({ read: answer.read, values: answer.values, items: read.items, complete: read.complete })
   }
   return failed('rounds')
 }

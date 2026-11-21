@@ -123,22 +123,24 @@ const box = (step: string, slots: string[], text = `当日 09:00 に送信`) =>
 const reminderPage = (body: string) => `<!doctype html><html><head><meta name="lm-account-id" content="5550001"><meta name="csrf-token" content="tok"></head>
 <body><input type="hidden" name="_token" value="tok"><script>window.__state = { step: 777, template: 888 }</script>${body}</body></html>`
 
-test('Lステップ\'s declaration 0.4.0 declares its reads — folders, lists with their exact queries, the reminder page — each reviewed, with its reader', () => {
-  const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.4.0')
+test('Lステップ\'s declaration 0.5.0 declares its reads — folders, paginated lists with their exact queries, the reminder page — each reviewed, with its reader', () => {
+  const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.5.0')
   assert.ok(browser)
   assert.deepEqual(browser.explore, {
     reminder_folders: { label: 'リマインダのフォルダの一覧', path: '/api/episode-groups', placeholders: [], reader: 'lstep.reminder_folders' },
     reminders: {
-      label: 'フォルダの中のリマインダ（1ページ目）', path: '/api/episodes', placeholders: ['group'], reader: 'lstep.reminders',
-      query: [{ name: 'group', field: 'group' }, { name: 'page', value: '1' }],
+      label: 'フォルダの中のリマインダ', path: '/api/episodes', placeholders: ['group'], reader: 'lstep.reminders',
+      query: [{ name: 'group', field: 'group' }], pages: { param: 'page', max: 10 },
     },
     template_folders: { label: 'テンプレートのフォルダの一覧', path: '/api/template-groups', placeholders: [], reader: 'lstep.template_folders' },
     templates: {
-      label: 'フォルダの中のテンプレート（1ページ目）', path: '/api/templates', placeholders: ['template_group'], reader: 'lstep.templates',
-      query: [{ name: 'group', field: 'template_group' }, { name: 'page', value: '1' }],
+      label: 'フォルダの中のテンプレート', path: '/api/templates', placeholders: ['template_group'], reader: 'lstep.templates',
+      query: [{ name: 'group', field: 'template_group' }], pages: { param: 'page', max: 10 },
     },
     reminder: { label: 'リマインダの中身（段の一覧）', path: '/line/episode/show/{reminder}', placeholders: ['reminder'], reader: reader.id },
   })
+  // Every paginated read's reader is a JSON one (only it reports where a page stands).
+  for (const r of Object.values(browser.explore).filter(r => r.pages)) assert.ok(lstep.readers.some(x => x.id === r.reader && 'answer' in x), r.reader)
   // Every declared read has its reader in the connector folder, and nothing else is handed in.
   assert.deepEqual(Object.values(browser.explore).map(r => r.reader).sort(), lstep.readers.map(r => r.id).sort())
   assert.equal(browser.operations.reminder_step_add_template.delivers, 'none', 'no scheduled type until its meaning is known (design memo §34)')
@@ -245,21 +247,43 @@ test('Lステップ\'s folder lists hand on ids with their names only; 「未分
   }
 })
 
-test('Lステップ\'s reminders and templates: only entries of the asked folder, only from a page that says it is the only one; anything else is incomplete', () => {
+test('Lステップ\'s reminders and templates: only entries of the asked folder; each page reports where it stands and nothing more; anything else is incomplete', () => {
   const reminders = readJson('lstep.reminders', page1([reminderEntry(1904672, 'テスト用リマインダ')]), { group: '29529' })
-  assert.deepEqual(reminders, { items: [{ field: 'reminder', value: '1904672', label: 'テスト用リマインダ' }], complete: true })
-  // A second page exists: page 1's entries, but not whole.
-  assert.equal(readJson('lstep.reminders', page1([reminderEntry(1, 'a')], 2), { group: '29529' }).complete, false)
+  assert.deepEqual(reminders, { items: [{ field: 'reminder', value: '1904672', label: 'テスト用リマインダ' }], complete: true, page: { current: 1, last: 1, total: 1 } })
+  // A second page exists: this page's entries, whole, and where it stands — reading on is the app's (preview.ts).
+  assert.deepEqual(readJson('lstep.reminders', { ...page1([reminderEntry(1, 'a')], 2), total: 51 }, { group: '29529' }).page, { current: 1, last: 2, total: 51 })
+  assert.deepEqual(readJson('lstep.reminders', { ...page1([reminderEntry(1, 'a')], 2), current_page: 2 }, { group: '29529' }).page, { current: 2, last: 2, total: 1 })
   // The folder filter did not apply (an entry of another folder, one whose two folder ids differ, one naming none): left out, not whole.
   const mixed = readJson('lstep.reminders', page1([reminderEntry(1, 'a'), reminderEntry(2, 'b', 777), { ...reminderEntry(3, 'c'), group_id: 777 }, { id: 4, name: 'd' }]), { group: '29529' })
-  assert.deepEqual(mixed, { items: [{ field: 'reminder', value: '1', label: 'a' }], complete: false })
-  // Without the page fields it is not known to be whole.
-  assert.equal(readJson('lstep.reminders', { data: [reminderEntry(1, 'a')] }, { group: '29529' }).complete, false)
+  assert.deepEqual(mixed, { items: [{ field: 'reminder', value: '1', label: 'a' }], complete: false, page: { current: 1, last: 1, total: 4 } })
+  // Without the page fields (any one of the three) it is not known where it stands: no page, not whole.
+  assert.deepEqual(readJson('lstep.reminders', { data: [reminderEntry(1, 'a')] }, { group: '29529' }), { items: [{ field: 'reminder', value: '1', label: 'a' }], complete: false })
+  for (const key of ['current_page', 'last_page', 'total']) {
+    const r = readJson('lstep.reminders', { ...page1([reminderEntry(1, 'a')]), [key]: '1' }, { group: '29529' })
+    assert.equal(r.complete, false, key)
+    assert.equal(r.page, undefined, key)
+  }
   // An id that is not a positive integer, a missing name.
-  assert.deepEqual(readJson('lstep.reminders', page1([{ ...reminderEntry(1, 'a'), id: 0 }, { ...reminderEntry(2, 'b'), id: '2 OR 1' }, { ...reminderEntry(5, 'e'), name: '' }]), { group: '29529' }), { items: [], complete: false })
+  assert.deepEqual(readJson('lstep.reminders', page1([{ ...reminderEntry(1, 'a'), id: 0 }, { ...reminderEntry(2, 'b'), id: '2 OR 1' }, { ...reminderEntry(5, 'e'), name: '' }]), { group: '29529' }), { items: [], complete: false, page: { current: 1, last: 1, total: 3 } })
   // Templates: the body is never handed on — the id and the name only.
   const templates = readJson('lstep.templates', page1([templateEntry(293574012, 'テンプレA'), templateEntry(293574090, 'テンプレB'), templateEntry(5, 'よそ', 42)]), { template_group: '1085812' })
-  assert.deepEqual(templates, { items: [{ field: 'template', value: '293574012', label: 'テンプレA' }, { field: 'template', value: '293574090', label: 'テンプレB' }], complete: false })
+  assert.deepEqual(templates, { items: [{ field: 'template', value: '293574012', label: 'テンプレA' }, { field: 'template', value: '293574090', label: 'テンプレB' }], complete: false, page: { current: 1, last: 1, total: 3 } })
   assert.equal(JSON.stringify(templates).includes('IGNORE'), false)
   assert.equal(readJson('lstep.templates', page1([templateEntry(1, 'a')]), { template_group: '1085812' }).complete, true)
+})
+
+test('a page report reaches the app only as whole numbers that fit together (current and last from 1, current ≤ last, total from 0); otherwise it is dropped and the read is incomplete', () => {
+  const reporting = (page: unknown): BrowserJsonExploreReader => ({
+    id: 't.list', answer: 'json', fields: ['x'], extra: [],
+    read: () => ({ items: [{ field: 'x', value: '1' }], complete: true, page: page as never }),
+  })
+  const run = (page: unknown) => runJsonExploreReader(reporting(page), {}, '{}')
+  assert.deepEqual(run({ current: 2, last: 3, total: 120 }), { items: [{ field: 'x', value: '1' }], complete: true, page: { current: 2, last: 3, total: 120 } })
+  assert.deepEqual(run({ current: 1, last: 1, total: 0 }).page, { current: 1, last: 1, total: 0 })
+  for (const bad of [{ current: 0, last: 1, total: 1 }, { current: 1, last: 0, total: 0 }, { current: 3, last: 2, total: 1 }, { current: 1, last: 1, total: -1 },
+    { current: 1.5, last: 2, total: 1 }, { current: 1, last: 2 ** 60, total: 1 }, { current: '1', last: 1, total: 1 }, null, 'page']) {
+    const r = run(bad)
+    assert.equal(r.page, undefined, JSON.stringify(bad))
+    assert.equal(r.complete, false, JSON.stringify(bad))
+  }
 })
