@@ -1,0 +1,416 @@
+{
+ "root-v1": {
+  "signed": "{\n \"_type\": \"acb-root\",\n \"version\": 1,\n \"expires\": \"2027-11-21T00:00:00Z\",\n \"keys\": {\n  \"test-root-1\": \"AAAAC3NzaC1lZDI1NTE5AAAAIElDedHW2IH7Ps2DIpqnjRme0bgNzveu4T6ySnfKS38I\",\n  \"test-root-2\": \"AAAAC3NzaC1lZDI1NTE5AAAAIIvoHWUkIUoA+Lp4JqtgjeKcHHuFqyiN5lGzz69/nHPv\",\n  \"test-root-3\": \"AAAAC3NzaC1lZDI1NTE5AAAAIBsTBUAk/r3U0l3mgCjMG8SZmAucXEt/tB8F41Z04FPg\",\n  \"test-targets-a\": \"AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBBbKTDhJ3/TeoMjR777Xx/XsAX8ccaJj148G8f+eeGKDf+0R8ti1u7F4GOKDWTWV98DlZ0Qm0RX+yc7uc9ZOtko=\",\n  \"test-fresh-a\": \"AAAAC3NzaC1lZDI1NTE5AAAAIAwAchMgvrXmESSb/qWgps0dZ2yK2yicfseeTUnQCUH2\",\n  \"test-fresh-emergency\": \"AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBHXbIzeMGYoS2xImiaxvJnjCCvyX3sNl/y/rxYLV4g3UlW8Pg6zyNliTbY/ugak/y9Wk1r0xq820telkjeuCvm0=\"\n },\n \"roles\": {\n  \"root\": {\n   \"keys\": [\n    \"test-root-1\",\n    \"test-root-2\",\n    \"test-root-3\"\n   ],\n   \"threshold\": 2\n  },\n  \"targets\": {\n   \"keys\": [\n    \"test-targets-a\"\n   ],\n   \"threshold\": 1\n  },\n  \"freshness\": {\n   \"keys\": [\n    \"test-fresh-a\",\n    \"test-fresh-emergency\"\n   ],\n   \"threshold\": 1\n  }\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-root-1",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgSUN50dbYgfs+zYMimqeNGZ7RuA\n3O967hPrJKd8pLfwgAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABA8fPReDplZW4N7UIQNF0LIdIYbwjCCqHl0DKbr9mNW7kpIyfxGHYcrX\nHPfgIjhMofoiz3dz7DW6HYm7uQV9BqBQ==\n-----END SSH SIGNATURE-----\n"
+   },
+   {
+    "key_id": "test-root-2",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgi+gdZSQhSgD4ungmq2CN4pwce4\nWrKI3mUbPPr3+cc+8AAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAS1iz7UGdMykdh071OeHEPZgvS3ScVGu2VCX2um76P134jV0ur+eX8O\nLJrnCdALldXyIjEAHJkl1uF7pPsfF3AQ==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "root-v2": {
+  "signed": "{\n \"_type\": \"acb-root\",\n \"version\": 2,\n \"expires\": \"2026-11-01T00:00:00Z\",\n \"keys\": {\n  \"test-root-1\": \"AAAAC3NzaC1lZDI1NTE5AAAAIElDedHW2IH7Ps2DIpqnjRme0bgNzveu4T6ySnfKS38I\",\n  \"test-root-2\": \"AAAAC3NzaC1lZDI1NTE5AAAAIIvoHWUkIUoA+Lp4JqtgjeKcHHuFqyiN5lGzz69/nHPv\",\n  \"test-root-3\": \"AAAAC3NzaC1lZDI1NTE5AAAAIBsTBUAk/r3U0l3mgCjMG8SZmAucXEt/tB8F41Z04FPg\",\n  \"test-targets-b\": \"AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBCum1TJsDEXkWFTN6r8b/ItIvsBLqDZ7zLBAcDSd2VO3O8t+iL+uryX9vZiIx30A8PCqKkYdnFM8z1hmNbebvtI=\",\n  \"test-fresh-b\": \"AAAAC3NzaC1lZDI1NTE5AAAAIE6hyk5LJSki85Kzfv6W4yX6KpanRbYTTfPfc9k5U4KH\"\n },\n \"roles\": {\n  \"root\": {\n   \"keys\": [\n    \"test-root-1\",\n    \"test-root-2\",\n    \"test-root-3\"\n   ],\n   \"threshold\": 2\n  },\n  \"targets\": {\n   \"keys\": [\n    \"test-targets-b\"\n   ],\n   \"threshold\": 1\n  },\n  \"freshness\": {\n   \"keys\": [\n    \"test-fresh-b\"\n   ],\n   \"threshold\": 1\n  }\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-root-1",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgSUN50dbYgfs+zYMimqeNGZ7RuA\n3O967hPrJKd8pLfwgAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAKqk2vX8GD+eG2zXoHLidwZHU2T2TgxHy3SnWil3nco8sUf7Ql0qJ4p\nLScIDbYXw7WwIBa7kfbBvUS4J6fZX/AQ==\n-----END SSH SIGNATURE-----\n"
+   },
+   {
+    "key_id": "test-root-3",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgGxMFQCT+vdTSXeaAKMwbxJmYC5\nxcS3+0HwXjVnTgU+AAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABA6xauExTxCP0s8dY/JmLScoma9OEOc+gBj3pNHUbxz1jgymYPNMNCZH\n0m3KKCltTwLKSoUQpzpANMIegkS4rgBQ==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "root-v2-conflict": {
+  "signed": "{\n \"_type\": \"acb-root\",\n \"version\": 2,\n \"expires\": \"2026-10-30T00:00:00Z\",\n \"keys\": {\n  \"test-root-1\": \"AAAAC3NzaC1lZDI1NTE5AAAAIElDedHW2IH7Ps2DIpqnjRme0bgNzveu4T6ySnfKS38I\",\n  \"test-root-2\": \"AAAAC3NzaC1lZDI1NTE5AAAAIIvoHWUkIUoA+Lp4JqtgjeKcHHuFqyiN5lGzz69/nHPv\",\n  \"test-root-3\": \"AAAAC3NzaC1lZDI1NTE5AAAAIBsTBUAk/r3U0l3mgCjMG8SZmAucXEt/tB8F41Z04FPg\",\n  \"test-targets-b\": \"AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBCum1TJsDEXkWFTN6r8b/ItIvsBLqDZ7zLBAcDSd2VO3O8t+iL+uryX9vZiIx30A8PCqKkYdnFM8z1hmNbebvtI=\",\n  \"test-fresh-b\": \"AAAAC3NzaC1lZDI1NTE5AAAAIE6hyk5LJSki85Kzfv6W4yX6KpanRbYTTfPfc9k5U4KH\"\n },\n \"roles\": {\n  \"root\": {\n   \"keys\": [\n    \"test-root-1\",\n    \"test-root-2\",\n    \"test-root-3\"\n   ],\n   \"threshold\": 2\n  },\n  \"targets\": {\n   \"keys\": [\n    \"test-targets-b\"\n   ],\n   \"threshold\": 1\n  },\n  \"freshness\": {\n   \"keys\": [\n    \"test-fresh-b\"\n   ],\n   \"threshold\": 1\n  }\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-root-2",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgi+gdZSQhSgD4ungmq2CN4pwce4\nWrKI3mUbPPr3+cc+8AAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAhGxrhLUjqKNJ1TLIk8+I6Lp4ulDXvuaEsty3mjK5IqmcwavCgIQA1F\nLCaHFLO4CalLI6bzePzs6Z6NYswKDPCw==\n-----END SSH SIGNATURE-----\n"
+   },
+   {
+    "key_id": "test-root-3",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgGxMFQCT+vdTSXeaAKMwbxJmYC5\nxcS3+0HwXjVnTgU+AAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAaoGUECKCUelcPhqd+Mss5OGjG1hAJ8blT1f8KRxw0sigq4pBqzVgzP\nzh9pNh1EJO1jlrbG6rUWI+OQ9EqUXdAQ==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "root-v2-noise": {
+  "signed": "{\n \"_type\": \"acb-root\",\n \"version\": 2,\n \"expires\": \"2026-10-29T00:00:00Z\",\n \"keys\": {\n  \"test-root-1\": \"AAAAC3NzaC1lZDI1NTE5AAAAIElDedHW2IH7Ps2DIpqnjRme0bgNzveu4T6ySnfKS38I\",\n  \"test-root-2\": \"AAAAC3NzaC1lZDI1NTE5AAAAIIvoHWUkIUoA+Lp4JqtgjeKcHHuFqyiN5lGzz69/nHPv\",\n  \"test-root-3\": \"AAAAC3NzaC1lZDI1NTE5AAAAIBsTBUAk/r3U0l3mgCjMG8SZmAucXEt/tB8F41Z04FPg\",\n  \"test-targets-b\": \"AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBCum1TJsDEXkWFTN6r8b/ItIvsBLqDZ7zLBAcDSd2VO3O8t+iL+uryX9vZiIx30A8PCqKkYdnFM8z1hmNbebvtI=\",\n  \"test-fresh-b\": \"AAAAC3NzaC1lZDI1NTE5AAAAIE6hyk5LJSki85Kzfv6W4yX6KpanRbYTTfPfc9k5U4KH\"\n },\n \"roles\": {\n  \"root\": {\n   \"keys\": [\n    \"test-root-1\",\n    \"test-root-2\",\n    \"test-root-3\"\n   ],\n   \"threshold\": 2\n  },\n  \"targets\": {\n   \"keys\": [\n    \"test-targets-b\"\n   ],\n   \"threshold\": 1\n  },\n  \"freshness\": {\n   \"keys\": [\n    \"test-fresh-b\"\n   ],\n   \"threshold\": 1\n  }\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-root-1",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgSUN50dbYgfs+zYMimqeNGZ7RuA\n3O967hPrJKd8pLfwgAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAJHUdmuSaP5xlyMPxGqQBhfwjBsJ9DldLr/iE00V5YbgdDcgiUvqAKV\nM/F7JQ4dBZFY91pzAsq/dRuWM68somDw==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "root-v2-one-key": {
+  "signed": "{\n \"_type\": \"acb-root\",\n \"version\": 2,\n \"expires\": \"2026-11-01T00:00:00Z\",\n \"keys\": {\n  \"test-root-1\": \"AAAAC3NzaC1lZDI1NTE5AAAAIElDedHW2IH7Ps2DIpqnjRme0bgNzveu4T6ySnfKS38I\",\n  \"test-root-2\": \"AAAAC3NzaC1lZDI1NTE5AAAAIIvoHWUkIUoA+Lp4JqtgjeKcHHuFqyiN5lGzz69/nHPv\",\n  \"test-root-3\": \"AAAAC3NzaC1lZDI1NTE5AAAAIBsTBUAk/r3U0l3mgCjMG8SZmAucXEt/tB8F41Z04FPg\",\n  \"test-targets-b\": \"AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBCum1TJsDEXkWFTN6r8b/ItIvsBLqDZ7zLBAcDSd2VO3O8t+iL+uryX9vZiIx30A8PCqKkYdnFM8z1hmNbebvtI=\",\n  \"test-fresh-b\": \"AAAAC3NzaC1lZDI1NTE5AAAAIE6hyk5LJSki85Kzfv6W4yX6KpanRbYTTfPfc9k5U4KH\"\n },\n \"roles\": {\n  \"root\": {\n   \"keys\": [\n    \"test-root-1\",\n    \"test-root-2\",\n    \"test-root-3\"\n   ],\n   \"threshold\": 2\n  },\n  \"targets\": {\n   \"keys\": [\n    \"test-targets-b\"\n   ],\n   \"threshold\": 1\n  },\n  \"freshness\": {\n   \"keys\": [\n    \"test-fresh-b\"\n   ],\n   \"threshold\": 1\n  }\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-root-1",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgSUN50dbYgfs+zYMimqeNGZ7RuA\n3O967hPrJKd8pLfwgAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAKqk2vX8GD+eG2zXoHLidwZHU2T2TgxHy3SnWil3nco8sUf7Ql0qJ4p\nLScIDbYXw7WwIBa7kfbBvUS4J6fZX/AQ==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "root-v2-by-targets-key": {
+  "signed": "{\n \"_type\": \"acb-root\",\n \"version\": 2,\n \"expires\": \"2026-11-01T00:00:00Z\",\n \"keys\": {\n  \"test-root-1\": \"AAAAC3NzaC1lZDI1NTE5AAAAIElDedHW2IH7Ps2DIpqnjRme0bgNzveu4T6ySnfKS38I\",\n  \"test-root-2\": \"AAAAC3NzaC1lZDI1NTE5AAAAIIvoHWUkIUoA+Lp4JqtgjeKcHHuFqyiN5lGzz69/nHPv\",\n  \"test-root-3\": \"AAAAC3NzaC1lZDI1NTE5AAAAIBsTBUAk/r3U0l3mgCjMG8SZmAucXEt/tB8F41Z04FPg\",\n  \"test-targets-b\": \"AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBCum1TJsDEXkWFTN6r8b/ItIvsBLqDZ7zLBAcDSd2VO3O8t+iL+uryX9vZiIx30A8PCqKkYdnFM8z1hmNbebvtI=\",\n  \"test-fresh-b\": \"AAAAC3NzaC1lZDI1NTE5AAAAIE6hyk5LJSki85Kzfv6W4yX6KpanRbYTTfPfc9k5U4KH\"\n },\n \"roles\": {\n  \"root\": {\n   \"keys\": [\n    \"test-root-1\",\n    \"test-root-2\",\n    \"test-root-3\"\n   ],\n   \"threshold\": 2\n  },\n  \"targets\": {\n   \"keys\": [\n    \"test-targets-b\"\n   ],\n   \"threshold\": 1\n  },\n  \"freshness\": {\n   \"keys\": [\n    \"test-fresh-b\"\n   ],\n   \"threshold\": 1\n  }\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAAthY2Itcm9vdC12MQAAAAAAAAAGc2hhNTEyAAAAZQAAABNlY2\nRzYS1zaGEyLW5pc3RwMjU2AAAASgAAACEA+flceQ4BdPjpaS+wkLLVwd+J/kv/S5MyEfyO\nJZQSiT4AAAAhAKgabojuyeJfC8i04Y9fzjZAF85wyP2i1lhrGQbBMvmP\n-----END SSH SIGNATURE-----\n"
+   },
+   {
+    "key_id": "test-root-2",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAAthY2Itcm9vdC12MQAAAAAAAAAGc2hhNTEyAAAAZQAAABNlY2\nRzYS1zaGEyLW5pc3RwMjU2AAAASgAAACEA23wfCefa+yR0iE42MIM34g9m5veGsn8FEXcn\nN59Dw0IAAAAhAORQ7DFFcMn04YK9Po6fXznMAcZNTXLliRgS+0eZF1gs\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "root-v3": {
+  "signed": "{\n \"_type\": \"acb-root\",\n \"version\": 3,\n \"expires\": \"2027-11-21T00:00:00Z\",\n \"keys\": {\n  \"test-root-1\": \"AAAAC3NzaC1lZDI1NTE5AAAAIElDedHW2IH7Ps2DIpqnjRme0bgNzveu4T6ySnfKS38I\",\n  \"test-root-4\": \"AAAAC3NzaC1lZDI1NTE5AAAAII6Kv1h9kSaVNmRrxIot9D95fRr9TgdpmCIDZ0fLHF19\",\n  \"test-root-5\": \"AAAAC3NzaC1lZDI1NTE5AAAAIJHn1pPY50+j+sc3p8cHKjJXkhy1vN119WmAk1sXu1z6\",\n  \"test-targets-b\": \"AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBCum1TJsDEXkWFTN6r8b/ItIvsBLqDZ7zLBAcDSd2VO3O8t+iL+uryX9vZiIx30A8PCqKkYdnFM8z1hmNbebvtI=\",\n  \"test-fresh-b\": \"AAAAC3NzaC1lZDI1NTE5AAAAIE6hyk5LJSki85Kzfv6W4yX6KpanRbYTTfPfc9k5U4KH\"\n },\n \"roles\": {\n  \"root\": {\n   \"keys\": [\n    \"test-root-1\",\n    \"test-root-4\",\n    \"test-root-5\"\n   ],\n   \"threshold\": 2\n  },\n  \"targets\": {\n   \"keys\": [\n    \"test-targets-b\"\n   ],\n   \"threshold\": 1\n  },\n  \"freshness\": {\n   \"keys\": [\n    \"test-fresh-b\"\n   ],\n   \"threshold\": 1\n  }\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-root-1",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgSUN50dbYgfs+zYMimqeNGZ7RuA\n3O967hPrJKd8pLfwgAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAss8NBKmM3dIkRP8r05EG3c/ExZZxi3W0bUCqiop8WX8hUrHwZ0WWOr\nLx2dIiuMJQQYDzQEuXvMjC4iYa6Vj0Bw==\n-----END SSH SIGNATURE-----\n"
+   },
+   {
+    "key_id": "test-root-2",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgi+gdZSQhSgD4ungmq2CN4pwce4\nWrKI3mUbPPr3+cc+8AAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAPTLm5YgFoomnGr45wgBQJc8ULpkYEYA6cSvoE2/9eol/BOL35TGcXJ\nF6361F1Gs6UduVa89Fu0IgwEPp2adLCQ==\n-----END SSH SIGNATURE-----\n"
+   },
+   {
+    "key_id": "test-root-4",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgjoq/WH2RJpU2ZGvEii30P3l9Gv\n1OB2mYIgNnR8scXX0AAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAL62AVLQTxNxPhN0fC8iVThXhij/C/5aBRNNKR4frwCfcR0RTPAucC2\noblUPxkmP2hbFB1vLZtaST+xyb5JadCg==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "root-v3-old-keys-only": {
+  "signed": "{\n \"_type\": \"acb-root\",\n \"version\": 3,\n \"expires\": \"2027-11-21T00:00:00Z\",\n \"keys\": {\n  \"test-root-1\": \"AAAAC3NzaC1lZDI1NTE5AAAAIElDedHW2IH7Ps2DIpqnjRme0bgNzveu4T6ySnfKS38I\",\n  \"test-root-4\": \"AAAAC3NzaC1lZDI1NTE5AAAAII6Kv1h9kSaVNmRrxIot9D95fRr9TgdpmCIDZ0fLHF19\",\n  \"test-root-5\": \"AAAAC3NzaC1lZDI1NTE5AAAAIJHn1pPY50+j+sc3p8cHKjJXkhy1vN119WmAk1sXu1z6\",\n  \"test-targets-b\": \"AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBCum1TJsDEXkWFTN6r8b/ItIvsBLqDZ7zLBAcDSd2VO3O8t+iL+uryX9vZiIx30A8PCqKkYdnFM8z1hmNbebvtI=\",\n  \"test-fresh-b\": \"AAAAC3NzaC1lZDI1NTE5AAAAIE6hyk5LJSki85Kzfv6W4yX6KpanRbYTTfPfc9k5U4KH\"\n },\n \"roles\": {\n  \"root\": {\n   \"keys\": [\n    \"test-root-1\",\n    \"test-root-4\",\n    \"test-root-5\"\n   ],\n   \"threshold\": 2\n  },\n  \"targets\": {\n   \"keys\": [\n    \"test-targets-b\"\n   ],\n   \"threshold\": 1\n  },\n  \"freshness\": {\n   \"keys\": [\n    \"test-fresh-b\"\n   ],\n   \"threshold\": 1\n  }\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-root-2",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgi+gdZSQhSgD4ungmq2CN4pwce4\nWrKI3mUbPPr3+cc+8AAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAPTLm5YgFoomnGr45wgBQJc8ULpkYEYA6cSvoE2/9eol/BOL35TGcXJ\nF6361F1Gs6UduVa89Fu0IgwEPp2adLCQ==\n-----END SSH SIGNATURE-----\n"
+   },
+   {
+    "key_id": "test-root-3",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgGxMFQCT+vdTSXeaAKMwbxJmYC5\nxcS3+0HwXjVnTgU+AAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAEsDTvOY9ncK6wLX1+LYxtWn7MYIkIfs8UAnW2LXpelJgCY4F2TsyfI\nA5d9txZ0aJo5PmvIABjMNL+5hOqFLGAg==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "root-v3-new-keys-only": {
+  "signed": "{\n \"_type\": \"acb-root\",\n \"version\": 3,\n \"expires\": \"2027-11-21T00:00:00Z\",\n \"keys\": {\n  \"test-root-1\": \"AAAAC3NzaC1lZDI1NTE5AAAAIElDedHW2IH7Ps2DIpqnjRme0bgNzveu4T6ySnfKS38I\",\n  \"test-root-4\": \"AAAAC3NzaC1lZDI1NTE5AAAAII6Kv1h9kSaVNmRrxIot9D95fRr9TgdpmCIDZ0fLHF19\",\n  \"test-root-5\": \"AAAAC3NzaC1lZDI1NTE5AAAAIJHn1pPY50+j+sc3p8cHKjJXkhy1vN119WmAk1sXu1z6\",\n  \"test-targets-b\": \"AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBCum1TJsDEXkWFTN6r8b/ItIvsBLqDZ7zLBAcDSd2VO3O8t+iL+uryX9vZiIx30A8PCqKkYdnFM8z1hmNbebvtI=\",\n  \"test-fresh-b\": \"AAAAC3NzaC1lZDI1NTE5AAAAIE6hyk5LJSki85Kzfv6W4yX6KpanRbYTTfPfc9k5U4KH\"\n },\n \"roles\": {\n  \"root\": {\n   \"keys\": [\n    \"test-root-1\",\n    \"test-root-4\",\n    \"test-root-5\"\n   ],\n   \"threshold\": 2\n  },\n  \"targets\": {\n   \"keys\": [\n    \"test-targets-b\"\n   ],\n   \"threshold\": 1\n  },\n  \"freshness\": {\n   \"keys\": [\n    \"test-fresh-b\"\n   ],\n   \"threshold\": 1\n  }\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-root-4",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgjoq/WH2RJpU2ZGvEii30P3l9Gv\n1OB2mYIgNnR8scXX0AAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAL62AVLQTxNxPhN0fC8iVThXhij/C/5aBRNNKR4frwCfcR0RTPAucC2\noblUPxkmP2hbFB1vLZtaST+xyb5JadCg==\n-----END SSH SIGNATURE-----\n"
+   },
+   {
+    "key_id": "test-root-5",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgkefWk9jnT6P6xzenxwcqMleSHL\nW83XX1aYCTWxe7XPoAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAHftVJSBZ8ZK+qSKt01sbS9RH3JPY/Lo2ip7DzmT6n2RlRd2an/JvQc\n3rATUhYRprDH9Qqx/vWsLPiBPzuA+/Dg==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "one-key-two-ids": {
+  "signed": "{\"any\":\"json\"}",
+  "signatures": [
+   {
+    "key_id": "test-root-1",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgSUN50dbYgfs+zYMimqeNGZ7RuA\n3O967hPrJKd8pLfwgAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABATXqRR6zvLEJYJmDeLR/qK2vuifutxcwForxpgTwpu+FT1gU/HlfkaR\n/7GjmcXwcuduGAI811cIPgqR5fDtqfDQ==\n-----END SSH SIGNATURE-----\n"
+   },
+   {
+    "key_id": "test-root-1-again",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgSUN50dbYgfs+zYMimqeNGZ7RuA\n3O967hPrJKd8pLfwgAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABATXqRR6zvLEJYJmDeLR/qK2vuifutxcwForxpgTwpu+FT1gU/HlfkaR\n/7GjmcXwcuduGAI811cIPgqR5fDtqfDQ==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v5": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 5,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZAAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASQAAACEA7Z7OZW9Lt8wwlrHOdkxrSSySc9BkGHv0\nFNVMaIMmftcAAAAgJJGYVkRN8YnVpbyQkeqPrOJ3Ef474vTrMcFtT0caK9U=\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v5-wrong-key": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 5,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEK6bVMmwMReRYVM3qvxv8i0i+wEuoNnvMsEBwNJ3ZU7c7y36Iv66vJf29mIjHfQDw8Koq\nRh2cUzzPWGY1t5u+0gAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZQAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASgAAACEA1VdPKgEa9D65gmajxwRDokyrN/YZ/TLQ\nOvdk/I0NS1kAAAAhALjPWSMFZ090E6558KRe17274TuKIPTyn1jiHZlNviWx\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v5-root-ns": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 5,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAAthY2Itcm9vdC12MQAAAAAAAAAGc2hhNTEyAAAAZAAAABNlY2\nRzYS1zaGEyLW5pc3RwMjU2AAAASQAAACBc0Thhdbk1zEhwUDEfyHzJGr7amefLDJOdCMkK\nR5Dx2QAAACEAvDR0/bMQhrLFtxmYFSEIGYw0iLbZjQtoxcNV5Sds9P8=\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v5-by-fresh-key": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 5,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-fresh-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgDAByEyC+teYRJJv+paCmzR1nbI\nrbKJx+x55NSdAJQfYAAAAOYWNiLXRhcmdldHMtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAAL\nc3NoLWVkMjU1MTkAAABAgpZVqI7czuPLjTeWyeonW+mYgde3lQUyaGPrZD+5LfyNo40JOE\nBUOFsKTg/clH0FZN+EEoYgV9vW9AqDpUb5AA==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c2-v5": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c2\",\n \"server\": \"https://acb.example\",\n \"version\": 5,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAYwAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASAAAACAhWcQIlB3O0aoicca0FSelEQ/lzysEcgA3\nrzJ6qfnccgAAACBc73NMt4sr9qjdUK+RkIbw3kRdeJ3eMygk6jUE1sRT6w==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v5-staging": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://staging.example\",\n \"version\": 5,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZAAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASQAAACEAsGvTL5R5aGoPyAJE6KSjyy50RRKLFdJ3\nLi4Eirxjuj4AAAAgaLfZPnLnhsVzhYyZrs3xCnUSsMX95/H39X7U1IGlAJY=\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v4-staging": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://staging.example\",\n \"version\": 4,\n \"issued\": \"2026-11-20T00:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZAAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASQAAACEA/2V+3Ln/Ou0gevk8m7YDdSmMt7ug3E5o\noHD6kmmKHyUAAAAgSRfsmJmdVyfdfRimKHpFGSrqKQxr012eg6R2seV4oFw=\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v4": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 4,\n \"issued\": \"2026-11-20T00:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZQAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASgAAACEA2bhk3YKQ5gmSSRwscqp/0FN2Dkb7+OMQ\nNs9TZDkScycAAAAhAL5iZnysX+VJUtY/RO0l2a0DMqSEE1KuHnumNAyZXy1K\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v5-other-content": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 5,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZAAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASQAAACEAkaSq51s2Tr4nzFm3/cEpK52UGKnypXZj\nXr5mBpxayeoAAAAgJdY8NCtiy2u/fdJf9e5oh43h30aSZfWkhK/OVDbdmmo=\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v6": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 6,\n \"issued\": \"2026-11-21T06:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAYwAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASAAAACA/RH6gfgeYmv9Yj+Javj4TOeCL2K4R+yc+\nsxUOXi/+LwAAACA3P2er4/RcKxzYtMLoJ2mDQt09LHZbPODNjYP/kagQ4w==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v6-future": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 6,\n \"issued\": \"2026-11-21T12:11:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZAAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASQAAACEA6ThNDusbGF3yQfmY6WYbOyxhNqnB72YA\nbrVekOfDLG4AAAAgCo96icmrbNS2FBjj72db71HQMrnNu3AxxzLqHlHd6vA=\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v6-overlong": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 6,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2027-03-21T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAYwAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASAAAACAK3aQPUnIIr7yZyWh4+RItaJ0w/TkTjrMD\nWDVXMt43uwAAACAURFH+zKQKiNgrdn060ec6wXn6bCLko7YNav4efC7Jbg==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v1006": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 1006,\n \"issued\": \"2026-11-21T06:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAYwAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASAAAACAhfBapCfMUFTlk71jtEIgfQXcVTAj+HW1+\nYzoh6SuhcwAAACAp0/86fd75c5FNqH56kXuXIbQixV2RSuLSLS7vhbg/4Q==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v1005": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 1005,\n \"issued\": \"2026-11-21T06:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZAAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASQAAACBgTuUY4nMq4ozOzFy/s2XtycT5OkFKWchJ\nzcUgidvqEAAAACEA1xEGzvGGWZVsVeIVrHJYOdlE+AQuAjlVrUIHcGLynUQ=\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-huge": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 2147483647,\n \"issued\": \"2026-11-21T06:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZAAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASQAAACEArKbCA4xO/GRiFv8IGmh7//EX6M5oTJwy\nWcaqSD3Sj/sAAAAgfN6I8GRqeisv6U4Z+NEhwlUWvpjnwIX6VVfvJRHlSF0=\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v7-issued-back": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 7,\n \"issued\": \"2026-11-19T00:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZAAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASQAAACB5Geuf2gEeqhR4mnvd58GBZpm7Z4esaXof\nhMd3br3DKwAAACEAgu2tk8Cup5+rkhTdjhPiIpr8OIZ922KyIFvI4QgOIZI=\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-duplicate": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 6,\n \"issued\": \"2026-11-21T06:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZQAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASgAAACEArnn7NttfK74WBatzGZ2wIFjNbj8ASs0P\nJ57s71sEpAIAAAAhAPdfU2QAIC0uBvGLntC49GwzKxXmkFcdJGnUkvWdUlgY\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-extra-key": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 6,\n \"issued\": \"2026-11-21T06:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n },\n \"note\": \"x\"\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZQAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASgAAACEAqNaA1/6JsghBZho+4D4waPelzmUmoIbL\nCTdid/+torYAAAAhAP5SzlAgKZf1178CzClWXs5Shz8wXJdO/0IFrGKvEHOn\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v6-tb": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 6,\n \"issued\": \"2026-11-21T06:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-b",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEK6bVMmwMReRYVM3qvxv8i0i+wEuoNnvMsEBwNJ3ZU7c7y36Iv66vJf29mIjHfQDw8Koq\nRh2cUzzPWGY1t5u+0gAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZAAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASQAAACAkX8nrhgriRQlt538Odyv5ITvGo3aStX/2\nxlIUr6ZyMgAAACEAvDchiUp6DKOtYCaijVLCbb79gF0AJMNSuu4eq43lqkI=\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "t-c1-v5-tb": {
+  "signed": "{\n \"_type\": \"acb-targets\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 5,\n \"issued\": \"2026-11-21T03:00:00Z\",\n \"expires\": \"2027-01-20T00:00:00Z\",\n \"packages\": [\n  {\n   \"id\": \"lstep\",\n   \"version\": \"0.3.0\",\n   \"fingerprint\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"lstep@0.3.0\",\n   \"min_app_version\": \"1.40.0\",\n   \"checker_api\": 1,\n   \"facts_version\": 1,\n   \"ui_bridge\": null\n  },\n  {\n   \"id\": \"kuro-ops\",\n   \"version\": \"1.0.0\",\n   \"fingerprint\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\n   \"commit\": \"c0ffee0000000000000000000000000000000000\",\n   \"tag\": \"kuro-ops@1.0.0\",\n   \"ui_bridge\": 1\n  }\n ],\n \"floors\": {\n  \"lstep\": \"0.3.0\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-b",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEK6bVMmwMReRYVM3qvxv8i0i+wEuoNnvMsEBwNJ3ZU7c7y36Iv66vJf29mIjHfQDw8Koq\nRh2cUzzPWGY1t5u+0gAAAA5hY2ItdGFyZ2V0cy12MQAAAAAAAAAGc2hhNTEyAAAAZQAAAB\nNlY2RzYS1zaGEyLW5pc3RwMjU2AAAASgAAACEAuU6ODe+gloEzjfM96Al/B3WKxS6wO/da\nOVUSC5/FQ64AAAAhAP6LZmA05b5F/ngMbooN4ZzcaJq1HaB4X1tVCCFJ/Yy6\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "f-c1-v5": {
+  "signed": "{\n \"_type\": \"acb-freshness\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 1,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2026-11-24T00:00:00Z\",\n \"targets\": {\n  \"version\": 5,\n  \"sha256\": \"06701c7936722b64c4e01bf202c41a568211c5a51c1af1160b8905c2df0307be\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-fresh-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgDAByEyC+teYRJJv+paCmzR1nbI\nrbKJx+x55NSdAJQfYAAAAQYWNiLWZyZXNobmVzcy12MQAAAAAAAAAGc2hhNTEyAAAAUwAA\nAAtzc2gtZWQyNTUxOQAAAEBeTuHqEM393Qc0j6mXRGM94c0zpXDGWOvix+YJbTYN5w33za\nwmdXrxzN+tAlUqNOwcHzdB1CXNlGpVJ5RtFmIP\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "f-c1-v5-n2": {
+  "signed": "{\n \"_type\": \"acb-freshness\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 2,\n \"issued\": \"2026-11-21T06:00:00Z\",\n \"expires\": \"2026-11-24T00:00:00Z\",\n \"targets\": {\n  \"version\": 5,\n  \"sha256\": \"06701c7936722b64c4e01bf202c41a568211c5a51c1af1160b8905c2df0307be\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-fresh-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgDAByEyC+teYRJJv+paCmzR1nbI\nrbKJx+x55NSdAJQfYAAAAQYWNiLWZyZXNobmVzcy12MQAAAAAAAAAGc2hhNTEyAAAAUwAA\nAAtzc2gtZWQyNTUxOQAAAEBCuA057MGSJC6/9NJED3Ba324UmpagSbX/CL8tkrUgi+MltF\na7ScW3nEK6jC3VDfeBRM/p8RjVoXPvXtun7WsF\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "f-c1-v5-emergency": {
+  "signed": "{\n \"_type\": \"acb-freshness\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 1,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2026-11-24T00:00:00Z\",\n \"targets\": {\n  \"version\": 5,\n  \"sha256\": \"06701c7936722b64c4e01bf202c41a568211c5a51c1af1160b8905c2df0307be\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-fresh-emergency",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEddsjN4wZihLbEiaJrG8meMIK/Jfew2X/L+vFgtXiDdSVbw+DrPI2WJNtj+6BqT/L1aTW\nvTGrzbS16WSN64K+bQAAABBhY2ItZnJlc2huZXNzLXYxAAAAAAAAAAZzaGE1MTIAAABjAA\nAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAABIAAAAIARUkgq8F/BrVD5x+pKFt0Z1hh9vVpKE\n342a0zbKxxmhAAAAIExaj6tX7nC+7cGzfGGD5O5KVDzVQjDLc+R3UQZ7Qjpe\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "f-c1-for-v4": {
+  "signed": "{\n \"_type\": \"acb-freshness\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 1,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2026-11-24T00:00:00Z\",\n \"targets\": {\n  \"version\": 4,\n  \"sha256\": \"3b140da59f43c6d7a89504ebdd6ee8309370f7b6c3bf542b811ae5cb72864df7\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-fresh-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgDAByEyC+teYRJJv+paCmzR1nbI\nrbKJx+x55NSdAJQfYAAAAQYWNiLWZyZXNobmVzcy12MQAAAAAAAAAGc2hhNTEyAAAAUwAA\nAAtzc2gtZWQyNTUxOQAAAEDVInXqnqNXnzE3tsL8S5VeB58ijj6JpxVaXWmPuFBAv8dPCA\nIB0EUPNF6Y4OGjMTr6veiSTcR3IjfS5CLFSAcJ\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "f-c1-long": {
+  "signed": "{\n \"_type\": \"acb-freshness\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 1,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2026-11-24T00:01:00Z\",\n \"targets\": {\n  \"version\": 5,\n  \"sha256\": \"06701c7936722b64c4e01bf202c41a568211c5a51c1af1160b8905c2df0307be\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-fresh-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgDAByEyC+teYRJJv+paCmzR1nbI\nrbKJx+x55NSdAJQfYAAAAQYWNiLWZyZXNobmVzcy12MQAAAAAAAAAGc2hhNTEyAAAAUwAA\nAAtzc2gtZWQyNTUxOQAAAEBATL/LY7AdeOm5j0gqIjO6j0CkIYSRBxSbDZ0mda68XG/yzF\nQFN/2dmIKTkTXZ+7t+/zYvqj+4Nm1/CveovLEF\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "f-c1-by-targets-key": {
+  "signed": "{\n \"_type\": \"acb-freshness\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 1,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2026-11-24T00:00:00Z\",\n \"targets\": {\n  \"version\": 5,\n  \"sha256\": \"06701c7936722b64c4e01bf202c41a568211c5a51c1af1160b8905c2df0307be\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-targets-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAAGgAAAATZWNkc2Etc2hhMi1uaXN0cDI1NgAAAAhuaXN0cDI1NgAAAE\nEEFspMOEnf9N6gyNHvvtfH9ewBfxxxomPXjwbx/554YoN/7RHy2LW7sXgY4oNZNZX3wOVn\nRCbRFf7Jzu5z1k62SgAAABBhY2ItZnJlc2huZXNzLXYxAAAAAAAAAAZzaGE1MTIAAABkAA\nAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAABJAAAAIHaV5BcQAnCtHW1jwBXriFAfZL6ND45A\nXK9gebJgEDmbAAAAIQDgd+dkCO7WoQEqrWbAtIjeAqt8p4caKQkvdEZYW1Rjcw==\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "f-c2": {
+  "signed": "{\n \"_type\": \"acb-freshness\",\n \"scope\": \"company:c2\",\n \"server\": \"https://acb.example\",\n \"version\": 1,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2026-11-24T00:00:00Z\",\n \"targets\": {\n  \"version\": 5,\n  \"sha256\": \"06701c7936722b64c4e01bf202c41a568211c5a51c1af1160b8905c2df0307be\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-fresh-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgDAByEyC+teYRJJv+paCmzR1nbI\nrbKJx+x55NSdAJQfYAAAAQYWNiLWZyZXNobmVzcy12MQAAAAAAAAAGc2hhNTEyAAAAUwAA\nAAtzc2gtZWQyNTUxOQAAAED8EsHuMWpc3KeZPOlSSsMdRTycYeKmcCP6Rtl9Zzrfa0UcZZ\n9j0OdxPjCddkL0qeAFJFP++aQ/z8PkpI8xvi4F\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "f-c1-staging": {
+  "signed": "{\n \"_type\": \"acb-freshness\",\n \"scope\": \"company:c1\",\n \"server\": \"https://staging.example\",\n \"version\": 1,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2026-11-24T00:00:00Z\",\n \"targets\": {\n  \"version\": 5,\n  \"sha256\": \"06701c7936722b64c4e01bf202c41a568211c5a51c1af1160b8905c2df0307be\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-fresh-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgDAByEyC+teYRJJv+paCmzR1nbI\nrbKJx+x55NSdAJQfYAAAAQYWNiLWZyZXNobmVzcy12MQAAAAAAAAAGc2hhNTEyAAAAUwAA\nAAtzc2gtZWQyNTUxOQAAAEDwtTdUiY9jWFp0yUhP0yohuxMjw22GFwkhLqxgEgW6gAvqSj\nzkUN5V4dDTDvMPZwBqYKGVyVSL9cbkhAiVAb4N\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "f-c1-adds-package": {
+  "signed": "{\n \"_type\": \"acb-freshness\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 1,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2026-11-24T00:00:00Z\",\n \"targets\": {\n  \"version\": 5,\n  \"sha256\": \"06701c7936722b64c4e01bf202c41a568211c5a51c1af1160b8905c2df0307be\"\n },\n \"packages\": [\n  {\n   \"id\": \"evil\",\n   \"version\": \"9.9.9\",\n   \"fingerprint\": \"0000000000000000000000000000000000000000000000000000000000000000\"\n  }\n ]\n}",
+  "signatures": [
+   {
+    "key_id": "test-fresh-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgDAByEyC+teYRJJv+paCmzR1nbI\nrbKJx+x55NSdAJQfYAAAAQYWNiLWZyZXNobmVzcy12MQAAAAAAAAAGc2hhNTEyAAAAUwAA\nAAtzc2gtZWQyNTUxOQAAAEAz2OqHwZmBl3nKVjnINHcGoIHxQHxdeo1TcguQ0dkaEJp6Xm\nV4BSS4Ab5Y2dx9mimTjWLTPPkL04HF9GMYhEsI\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "f-c1-v6": {
+  "signed": "{\n \"_type\": \"acb-freshness\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 2,\n \"issued\": \"2026-11-21T06:00:00Z\",\n \"expires\": \"2026-11-24T00:00:00Z\",\n \"targets\": {\n  \"version\": 6,\n  \"sha256\": \"dd97e98e8b81f43ba061ec8b2866b9eb2e060a2d6c95ecaec40ced3195b801ed\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-fresh-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgDAByEyC+teYRJJv+paCmzR1nbI\nrbKJx+x55NSdAJQfYAAAAQYWNiLWZyZXNobmVzcy12MQAAAAAAAAAGc2hhNTEyAAAAUwAA\nAAtzc2gtZWQyNTUxOQAAAEDUJ2TQVjuK/Z6RXtTGef/dBMIGRut5Oiw2Q4M2hsj+cfBS+Z\ncYSoAuQf5PicQuJ9+UhdA1zscQkOpW9457vWMK\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "f-c1-v6-tb-fresh-b": {
+  "signed": "{\n \"_type\": \"acb-freshness\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 1,\n \"issued\": \"2026-11-21T00:00:00Z\",\n \"expires\": \"2026-11-24T00:00:00Z\",\n \"targets\": {\n  \"version\": 6,\n  \"sha256\": \"dd97e98e8b81f43ba061ec8b2866b9eb2e060a2d6c95ecaec40ced3195b801ed\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-fresh-b",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgTqHKTkslKSLzkrN+/pbjJfoqlq\ndFthNN899z2TlTgocAAAAQYWNiLWZyZXNobmVzcy12MQAAAAAAAAAGc2hhNTEyAAAAUwAA\nAAtzc2gtZWQyNTUxOQAAAEAaN5aFWSVzim+LJkO0XZIwIl2IjWDaqCrnkAjinBkrwhjl+5\nYveg/piXh2KWiTfMNV0K1+bp0AVHLmSzAjywQK\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ },
+ "f-c1-v6-tb-fresh-a": {
+  "signed": "{\n \"_type\": \"acb-freshness\",\n \"scope\": \"company:c1\",\n \"server\": \"https://acb.example\",\n \"version\": 3,\n \"issued\": \"2026-11-21T07:00:00Z\",\n \"expires\": \"2026-11-24T00:00:00Z\",\n \"targets\": {\n  \"version\": 6,\n  \"sha256\": \"dd97e98e8b81f43ba061ec8b2866b9eb2e060a2d6c95ecaec40ced3195b801ed\"\n }\n}",
+  "signatures": [
+   {
+    "key_id": "test-fresh-a",
+    "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgDAByEyC+teYRJJv+paCmzR1nbI\nrbKJx+x55NSdAJQfYAAAAQYWNiLWZyZXNobmVzcy12MQAAAAAAAAAGc2hhNTEyAAAAUwAA\nAAtzc2gtZWQyNTUxOQAAAEDzOH5vfOylDOHXv/7tbmvDQSFkDH9l6n5OPHtNKFWQ8XyJer\n6t9EIvcgamdSjkZ6dmTXyFCkmsAzc8CwByHLoB\n-----END SSH SIGNATURE-----\n"
+   }
+  ]
+ }
+}
