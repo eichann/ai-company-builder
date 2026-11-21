@@ -353,6 +353,15 @@ describe('S1 (each condition on its own, at the renew or a call)', () => {
     db.prepare('DELETE FROM ai_job_settings').run()
   })
 
+  it('C1 holds whatever its run made (as a pause does): never MADE_THEN_STOPPED', async () => {
+    const { job, occ } = await eventOccurrence()
+    const run = (await claim(occ)).body.data.run
+    operation(run.id, 'put-1', 'done')
+    db.prepare('UPDATE ai_jobs SET approved_version = 2 WHERE company_id = ? AND id = ?').run(CO, job)
+    expect((await renew(run)).status).toBe(409)
+    expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'JOB_VERSION_CHANGED' })
+  })
+
   it('C3: the record no longer alice’s to read — the next call ends it; the claim and the run answer as missing (404)', async () => {
     const { occ, start } = await eventOccurrence()
     const run = (await claim(occ)).body.data.run
@@ -570,6 +579,13 @@ describe('S5 / S6: reconciling and 「もう一度」 — who (D11)', () => {
     expect(await retry('ej-bob', job, occ)).toMatchObject({ status: 409, body: { code: 'JOB_VERSION_CHANGED' } })
     expect(await reconcile('ej-bob', job, occ)).toMatchObject({ status: 403 })
     expect((await as('ej-bob', 'GET', '/me/job-occurrences')).body.data.occurrences).toEqual([])
+    // Bob's own occurrence of the same record (version 2 names him) is his; alice's stays hers alone.
+    const at = new Date().toISOString()
+    db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at,
+      event_seq, event_record_id, event_version, event_day) VALUES (?, 'occ.eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', ?, 2, 'ev:999997', 'Asia/Tokyo', ?, ?, 'nothing', ?, ?, 999997, ?, 1, '2026-11-22')`)
+      .run(CO, job, at, at, at, at, start)
+    expect((await as('ej-bob', 'GET', '/me/job-occurrences')).body.data.occurrences.map((o: Json) => o.id)).toEqual(['occ.eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'])
+    expect((await as('ej-alice', 'GET', '/me/job-occurrences')).body.data.occurrences.map((o: Json) => o.id)).toEqual([occ])
     expect(occOf(occ)).toMatchObject({ state: 'needs_person', retries: 0 })
     expect(run.id).toBeTruthy()
   })
@@ -791,6 +807,8 @@ describe('S10: rights too narrow for the grant — the occurrence alone is skipp
     expect(occOf(occ)).toMatchObject({ state: 'skipped', outcome_code: 'OWNER_RIGHTS_CHANGED' })
     expect(jobOf(made.job)).toMatchObject({ state: 'active', paused_reason: null })
     expect(notices('job_paused')).toEqual([])
+    // Skipped for a record-side reason: no occurrence notice (4a's rule).
+    expect(occurrenceNotices()).toEqual([])
   })
 })
 

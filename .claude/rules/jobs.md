@@ -39,7 +39,8 @@ the notice 「受け取りが要ります」. PR 5a: the PC's (a) claim and the 
 server, and a Skill pinned from the Skill shelf. PR 5a-2: the clock makes PC occurrences, the app runs them ("The app's
 runner"), the meeting check ("The meeting check"), and the admin form makes PC jobs. PR 5a-3: a deliverable place
 outside ("A deliverable place outside": a Drive folder the responsible person picks). PR 5b: 「もう一度」 ("「もう一度」"
-below).**
+below). Event-triggered jobs: 4a (server only), 4b-0.5 (the rollback floor), 4b-1 (the server side of the PC's AI on events,
+"Event jobs on the PC").**
 
 ## Tables (`server/src/db/schema/jobs.ts`, handle `jobs`, `ports/jobs.ts`, `adapters/sqlite/jobs.ts`)
 
@@ -102,7 +103,12 @@ versions the shape (a later shape is `schema: 2`; stored versions are never re-r
   `outbound_draft` ⇔ `draft_only`, a procedure's `creates` needs `records`). Paths: company paths,
   never the root, `..`, `\`, `.personal` / `.backups` / `.workspace`.
 - `jobConsentCanonical`: who (`actingUser`), `run`, `placement`, `grant` — what the responsible person
-  accepts (D4). A name, trigger, check or missed policy change needs no new acceptance.
+  accepts (D4). A name, trigger, check or missed policy change needs no new acceptance. An event job adds its trigger
+  (schema 2) and, run by the PC (schema 3), its trigger and its check (the done mark decides when the AI is called).
+- Schema 3 (stage 4b-1, "Event jobs on the PC"): a record trigger, a procedure on the PC, and the check
+  `source_record { doneMark: none | file_linked }` — that check is schema 3's alone (`check.SOURCE_RECORD_EVENTS_ONLY`), a
+  schema-3 run is a procedure (`run.EVENT_PC_ONLY`) checked by it (`check.EVENT_NEEDS_SOURCE_RECORD`); schema 2 stays the
+  server's operation (`trigger.EVENT_SERVER_ONLY`).
 
 ## API (`routes/jobs.ts` → `services/jobs.ts`, contract `shared/types/jobs.ts`)
 
@@ -322,7 +328,8 @@ idempotency keys, failure places, reconcile and the emergency stop are the run c
 ```
 GET  /me/job-turns                                          the caller's PC-job occurrences to claim now (JobTurnView)
 POST /job-run-claims { occurrenceId, deviceId, conversationId, checks }   → 201 { run, created, turn } (200 on a re-claim)
-POST /ai-runs/:runId/renew | finish | retry | …/reconcile        as for any run; finish takes `jobResult` (below)
+POST /ai-runs/:runId/renew | finish                         as for any run; finish takes `jobResult` (below)
+POST /ai-runs/:runId/retry | …/reconcile                    a job's run: 404 RUN_NOT_FOUND (stage 4b-1, D11: on the occurrence only)
 ```
 
 - **Whose turn** (the list leaves out, the claim refuses, in this order): an occurrence of a placement-`a`
@@ -684,6 +691,7 @@ version names a place they cannot read → 「定期の仕事」).
 ```
 POST /jobs/:jobId/occurrences/:occurrenceId/retry                          owner/admin → { occurrence: JobOccurrenceView }
 POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }   owner/admin → { occurrenceId }
+GET  /me/job-occurrences                                                   any member: the event PC occurrences they ran (4b-1)
 ```
 
 - **On the occurrence, not the run** (unlike `POST /ai-runs/:runId/retry`, the run's own member's): an occurrence may
@@ -771,7 +779,8 @@ POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }  
   `…/reconcile`); otherwise it stays `waiting_reconcile` (stopped: its token fenced, renew refused), a held occurrence
   stays held (a resume runs nothing; 「もう一度」 stays `NOT_RETRYABLE`), and a `needs_person` / `expired` one runs again
   only by 「もう一度」. A frozen occurrence (a later build's shape) is the one 404 here; back on its build it can be
-  reconciled the same way. Who: owner / admin, as today (the responsible person's own part, D11, is 4b-1). The admin
+  reconciled the same way. Who: owner / admin, and since 4b-1 for an event PC occurrence its pinned responsible person
+  ("Event jobs on the PC" "Who reconciles and presses"). The admin
   console asks them to have the responsible person look first (an owner / admin cannot see the person's drafts). The
   in-flight mark and the answer are one transaction. Test: `job-runs.test.ts` "a held occurrence whose run waits for
   reconciliation" (F5 / F6).
@@ -779,7 +788,8 @@ POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }  
   `retries`, `retriedBy`, `retriedAt`, and on a `needs_person` / `expired` one `retry` (`{ allowed: true }` or
   `{ allowed: false, why }`), `unknownOperations` (key and kind only) and `madeBefore` (kinds and counts); on a `held` one
   `unknownOperations` only (stage 4b-0.5: the admin console's ［作られていた］［作られていなかった］ then show for it, no
-  ［もう一度］). The responsible person's view has none.
+  ［もう一度］). The responsible person's view of a time job has none; of an event PC occurrence, what their rights cover
+  (4b-1, `viewFor`).
 - **Told again, in its own words**: an occurrence notice's key is `<kind>:<job>:<occurrence>:<retries>:<code>`, read
   from the occurrence as written in that transaction — a second failure after a press is told once more, and the bell
   words an older notice by the code it was written with (a press clears the occurrence's own code); a key without a code
@@ -837,8 +847,11 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   **A screen announces what it can show, edit and accept, never what the shared parser reads** (stage 4b-0.5, owner memo
   §5-1): `ADMIN_JOB_SCHEMAS` (`admin/src/lib/jobs.ts`; also asked by `editableDefinition` / `needsNewerScreen`, so a
   form is never built from a shape the core reads but the form cannot) and `APP_JOB_SCHEMAS` (`client/shared/jobs.ts`;
-  the 受け取る shows a definition only of such a shape, `appReadsJobDefinition`) — both `[1, 2]` now. When a later core
-  reads `schema: 3` (4b-1), the screens keep announcing `1,2` until their forms and words handle it. Tests
+  the 受け取る shows a definition only of such a shape, `appReadsJobDefinition`) — both `[1, 2]` now. The core reads
+  `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`); the screens keep announcing `1,2` until their forms and words handle it
+  (4b-2 the app, 4b-3 the admin console). The server's tests of "a shape this build does not know" stand in `schema: 4`
+  since then (`job-schemas.test.ts`, `job-rollback-floor.test.ts` reads the frozen 4b-1 fixture's version one shape later;
+  the floor build runs it as written). Tests
   `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading schema 3; every announced schema
   round-trips through the form) and `client/tests/job-screen-schemas.test.ts` (every announced schema has its words). An app
   before it gets an event job without its definition and its 受け取る is refused — the same code, but the app (a request
@@ -1044,6 +1057,99 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   (`job-events.test.ts` + `jobs-definition.test.ts`); each fails except the `ev:<seq>` slot, which the partial unique
   index on `event_seq` also guards (each alone suffices). The still-watched recheck is a defence (only the runner moves
   the watch, after acting); its test sets the watch directly.
+
+## Event jobs on the PC (stage 4b-1, owner memo 「段4b 設計メモ」 第4版 §4 / §6, D2–D12; Codex review 4 #2 / #3)
+
+The server side of 「見張っているやることが完了したら、責任者の PC の AI が会社の Skill を動かす」. **4b-1 promises server-side
+effects only**: a failed condition ends the run, fences its tokens and refuses every later call, outside operation, finish
+and やること. Stopping the AI on the PC when the server cannot be reached (an authorisation deadline, stopping on 404 /
+403) is the app's, 4b-2. No screen makes such a job yet (4b-3); the screens announce `1,2`.
+
+- **What runs** (`schema: 3`, D2): the event of 4a (one watched record, `followMadeTask`, each target once, the scan, the
+  day's limit, gaps, generations — "Event-triggered jobs") makes the occurrence; the responsible person's app claims it
+  (`POST /job-run-claims`), as a time PC job, with every rule of "The PC's claim" (the grant at every call, the hard
+  deadline, the one やること at the finish, a place outside) plus the ones below. The server's runner never takes it
+  (placement `a`). `missed.expiresAfterMinutes` is how long it waits for the app (D6: one day is the admin form's default,
+  `JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES`).
+- **Old apps never run it** (two locks, §7): a claim must name the kind `event` (`kinds`; `GET /me/job-turns?kinds=event`) and
+  the check `source_record` (`checks`). `JOB_EVENT_CHECK_KINDS` is kept out of `JOB_PC_CHECK_KINDS`, which every app build
+  sends, so a rebuilt app of today never names it (`JOB_KIND_NOT_SUPPORTED` / `JOB_CHECK_NOT_SUPPORTED`, nothing written).
+  A screen announcing `1,2` gets no definition, and its create / approve / accept is `JOB_NEEDS_NEWER_SCREEN` (the app is
+  told to update).
+- **The turn** (`JobTurnView`): `kind: 'event'`, `source: { recordId }` (the record the event happened to), `dueSlot` the
+  event's time in company time (never `ev:<seq>`); `checkSince` / `checkUntil` are its `dueAt` (no window: it looks at
+  its own record).
+- **The conditions** (`job-occurrences.ts` `eventCondition`, owner memo §5-2), in this order: C1 the job runs as pinned
+  (the company's stop, a pause, the approved version, the consent accepted); C7 records on; C2 the responsible person a
+  member with the pinned version's rights (`runnerRefusal`); C3 the record theirs to read now (`eventShown`); C8 still
+  the watch it was made for (`ownsWatch`: its generation, the watched record); C4 the record still in the trigger's
+  `to` state; C5 its assignee them; C6 that state not 「AI の番」 now (a business plugin's step since: `aiTurnState`); C9 no
+  done mark (`file_linked`: a link from the record with a target path — a company file or a `drive:` file; the server
+  reads links only). Before a run starts (the list and a `due` claim) also D5: absent on the event's company day (never
+  the `ev:` slot read as a date).
+- **Where they are checked**: the list (left out, nothing written), the claim (`resolve`), every call of the run's token
+  (`routeRefusal`), every renew (the run subject's new `renewRefusal`, asked by `ai-runs.ts` `renew` after its lease
+  check: the app renews every minute), the finish (`beforeFinish`; `finishing` refuses a race and rolls back), and the
+  clock (`makeOccurrences` → `endFailedEvents`, for running ones and for waiting ones not yet expired — a run nobody
+  renews ends too). A failure answers 409 `JOB_EVENT_ENDED` with `reason` (the code) — a call 403 `NOT_IN_STEP` — and
+  ends it (`endEventIn`, one transaction).
+- **How it ends** (§4-4, D4 + D9): the run first (`endPcRun`: tokens fenced, an operation in flight made `unknown`); then
+  the occurrence — an outside operation whose result nobody knows → `needs_person` `RESULT_UNKNOWN`, told (`job_failed`),
+  the run `waiting_reconcile`; something made outside that is known (this run's or an earlier run's, `madeBefore`) →
+  `needs_person` `MADE_THEN_STOPPED`, told; else by the condition (`eventEndState`): C1 `held` (as a pause; never told),
+  C4 / C9 `nothing` (no longer needed; not told), C7 `needs_person` `RECORDS_OFF` (told), D5 `skipped` `OWNER_ABSENT` (told),
+  C2 / C3 / C5 / C6 / C8 `skipped` (not told; **an event job is never paused for the responsible person's rights**, ⑥).
+  C1 holds whatever was made (as a pause does; a held occurrence is reconciled on the occurrence, 4b-0.5). Every end
+  without its やること stops this watch's chain once (`job_chain_stopped`, D7's recipients) — also the deadline
+  (`TIME_LIMIT`), a reconcile wait out of time (`RESULT_UNKNOWN`), the clock's expiry of a running one (`EXPIRED`), a
+  finish to a person (`RUN_FAILED`), a finish `nothing` (`TASK_NOT_CREATED`), a pause / the stop holding a running one. A
+  done finish moves the watch to the やること it made (`followMadeTask`) or lets a stopped chain go on (`eventEnded`), in
+  the finish's transaction, its own generation only — as the server's runner does.
+- **Never side by side**: a `due` event occurrence waits (409 `JOB_EARLIER_RUNNING`, nothing written, nothing told) while
+  **any other** occurrence of the job is `running` — `otherRunning`, one `EXISTS` without a limit or a slot comparison
+  (time occurrences keep 5b's earlier-slot rule). The occurrence itself is never counted.
+- **A run on it** (`ai-runs.ts` `ownRun` asks the subject's new `hides`): a frozen occurrence's run and an event
+  occurrence's run are missing runs, except a schema-3 one whose record the member reads now (⑥) — get, renew, finish,
+  token binding. The run-level 「もう一度」 and reconcile (`POST /ai-runs/:runId/retry`, `…/operations/:key/reconcile`) answer
+  404 `RUN_NOT_FOUND` for **every** job's run, time ones too (D11: the occurrence's are the only ones; no released app
+  used them for a job's run — `aiTurns:retry` does nothing for an occurrence, `ai-turns.md`).
+- **Who reconciles and presses** (D11 table, `job-retry.ts` `rightsOf`; Codex review 4 #2 / #3): an owner / admin who
+  sees the occurrence (an event one only while they read its record: else the one 404); for an event PC occurrence also
+  **its pinned version's responsible person** while they read its record (reconcile, and ask for 「もう一度」) and **the
+  job's current responsible person** (ask for 「もう一度」). **Allowed to ask is not able to run**: an occurrence stays
+  pinned to its version and that version's responsible person, so after another version was approved — a hand-over
+  included — the press answers 409 `JOB_VERSION_CHANGED`, whoever asks; it never moves whose rights run it. A member
+  without such a right gets 403 `JOBS_FORBIDDEN` whatever the ids (missing, unreadable, someone else's: one answer).
+  Time jobs: owner / admin only, as before. The views (`GET /jobs/:jobId/occurrences`, `viewFor`) carry the 「もう一度」
+  fields only to someone whose rights cover them (a reconcile-only person: what is unknown, not the button).
+- **Finding one's own after a hand-over** (`GET /me/job-occurrences`, `jobRetry.mine`): every member; the event PC
+  occurrences pinned to a version naming them (`eventRecordsPinnedTo` / `occurrencesPinnedTo`: their records checked in one
+  batch, the rest left out in SQL before the limit of 100), with `jobId` and the name of **the version they ran**
+  (`jobs.pinnedNameOf`: 「定期の仕事」 when it names a place they cannot read) — never the job's newer versions or name.
+- **「もう一度」 of an event PC occurrence** (§4-2): `blockOf` as for any, plus its conditions now (`eventCondition` without
+  D5): C7 → `RECORDS_OFF`, C2 → `JOB_GRANT_EXCEEDS`, any other → `SOURCE_CHANGED` — refused without changing the state, the
+  deadline or the count. Its deadline is the press's own (after an expiry or the time limit it is pressed as usual).
+- **Choosing the watched やること again** (`rewatch`, §6 「選び直しの残り」): before the write it checks the pinned Skill
+  (`skillPinned`, asynchronous: a shelf Skill whose current version moved → `JOB_SKILL_CHANGED`), then **everything that
+  can change meanwhile is checked again inside the write's transaction** (`rewatchChecks`: still the approved version's
+  responsible person, not retired, the version shown and no draft waiting, the record a start record both read, for
+  schema 3 its assignee them — else `trigger.startRecord.NOT_FOUND`, one code —; then membership and rights, the consent
+  accepted, a place outside still theirs and usable → `JOB_PLACE_NOT_USABLE`).
+- **Rolling back** to 4b-0.5 (the floor, D8): schema-3 versions and their occurrences are frozen there (not shown, run,
+  told or expired; a stop holds them and ends their runs; reconciled again here). F11's cross-build run (the floor's code
+  on a database 4b-1 wrote) is a CI job of its own (not in this repository's workflow yet).
+- Test: `server/tests/integration/job-event-runs.test.ts` (S1–S10 of §8, the compatibility rows of §7, D5),
+  `jobs-definition.test.ts` "an event run by the PC AI (schema 3)", `job-words.test.ts` (every new code has words),
+  `job-runs.test.ts` / `job-retry.test.ts` (the closed run-level routes), permission matrix row `GET /me/job-occurrences`.
+  Mutation check: 84 guards removed or inverted one at a time (the core parser and consent, `job-runs.ts`, the renew
+  and hide hooks and the closed routes in `ai-runs.ts` / `run-subjects.ts`, `eventCondition` / `endEventIn` /
+  `eventEnded` and the clock's and `holdDue`'s chain stops in `job-occurrences.ts`, `otherRunning` and the pinned queries,
+  `rightsOf` / `mine` / `blockOf` in `job-retry.ts`, `pinnedNameOf`, the rewatch's re-checks); 79 fail a test. Not alone:
+  the list's and `turnOf`'s reader check (`seen`: the responsible person is the reader, so C3 in the conditions refuses the
+  same), `mine`'s two reader checks (the readable-records batch and `eventShown`: each alone suffices), and the clock
+  leaving an expired waiting one to its expiry instead of the conditions (an ordering choice: expired and told, as any).
+  Not reachable: `finishing`'s event re-check (`beforeFinish` checked in the same synchronous stretch: a race only), the
+  self-exclusion in `otherRunning` (only a `due` one asks, never running itself), `own`'s fail-closed without `eventRuns`.
 
 ## Tests (each guard mutation-checked, with the exceptions named)
 

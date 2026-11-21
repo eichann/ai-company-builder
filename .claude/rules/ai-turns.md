@@ -533,7 +533,8 @@ occurrence id (`occ.…`, never a record id) to `job-runs.ts` after the same ref
 `recordActions`, the stop policy confirmed); `claims.ts` hands it its session, `hold` (renew; a 409 also calls the
 job's `onLost`, which stops its AI) and `finishRun` (a job's done carries `jobResult`). Its ceiling is asked by the
 chat server like a business plugin step's (`pluginStepTools` → `jobTools`), its write area and read places through
-`stepWriteArea`; `aiTurns:retry` gives nothing back for an occurrence (its 「もう一度」 is the server's, 5b). Records'
+`stepWriteArea`; `aiTurns:retry` gives nothing back for an occurrence (its 「もう一度」 is the server's, 5b; since stage
+4b-1 the server answers a job's run-level `…/retry` and `…/reconcile` 404, `jobs.md` "Event jobs on the PC"). Records'
 steps, their claims, settles and tests are unchanged. In the rules (`aiTurns.ts`) a job comes after the
 records, neither counts toward nor waits for their daily limit, and its failures are not theirs (`jobOutcome`: only
 Claude's usage limit). For every kind — **a behaviour change for records too** (B PR 5a-2) — a claim that wins after
