@@ -554,9 +554,13 @@ GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
 
 A third kind of connector for 「ブラウザ操作」 (`agent-browser.md`): the chat AI operates an
 admin-approved site in the app's browser window **only through per-site operation types**, never
-free clicking. Still data only: what reads the page per type is a reviewed **adapter shipped in the
-app** (`client/shared/browser-adapters/`, `agent-browser.md` "The runner"), named by `adapter`; the
-declaration fixes what a plan names and the only write requests a type may send.
+free clicking. Still data only (owner decision 2026-11-21, design memo §24): what confirms the target,
+the account and the state on the page is a reviewed **checker** (today in the app,
+`client/connectors/<site>/`, handed to the core by the composition root; `agent-browser.md` "The
+checker"), named by `checker`; the declaration fixes what a plan names, the only write requests a
+type may send and what the target must show afterwards (`expect`). Planned (design memo §25): checkers
+run isolated and signed and come with their declaration from the shelf — "a package is data only"
+becomes "the declaration is data only; a program is only a signed checker in an isolated place".
 
 ```yaml
 id: lstep
@@ -571,7 +575,7 @@ browser:
     reminder_step_template:                  # ^[a-z][a-z0-9_]*$, ≤ 30 types
       label: リマインダの段のテンプレートを付け替える   # one line, ≤ 60
       effect: write                          # read | write | delete (the site's level caps it: levelAllows)
-      adapter: lstep.reminder_step_template  # ^[a-z0-9_]+\.[a-z0-9_]+$ (the app checks it exists)
+      checker: lstep.reminder_step           # ^[a-z0-9_]+\.[a-z0-9_]+$ (the app checks it exists); `adapter` is refused with that reason
       shared: 全部の回で共有のリマインダです。前の回の人にも届きます。   # optional note, ≤ 200: a warning, blocks nothing
       irreversible: false                    # true: one more confirmation right before the step (never on a read; required on a delete)
       target: { reminder: id, step: id }     # what identifies the thing; never empty; id | text, ≤ 10
@@ -582,6 +586,8 @@ browser:
           encoding: form                     # form (default) | json (a flat object)
           body: { content_id: "{step}", template_id: "{template}" }   # the site's real form names the step only
           ignore_body: [_token, _lm_user_id] # keys that may come with any value (CSRF / session), ≤ 10; never _method
+      expect:                                # 1–5 on write / delete, none on a read
+        - { list: templates, add: "{template}" }   # or remove: "{name}"; exactly one, one whole plan field
 ```
 
 - **A browser connector is `browser` and the common keys only** (role `connector`, `PluginManifest.browser`;
@@ -592,12 +598,20 @@ browser:
   target / change — never text around a placeholder. Each write names at least one target field,
   and every **change** field appears in some write: the runner holds each request to the plan. A
   target field may stay out of the requests (2026-11-20, Lステップ: the request names the step, not its
-  reminder) **only when the type's adapter confirms it on the page**: the parser cannot know adapters,
-  so the app's runner refuses a plan whose type has a target field in no write that its adapter does
-  not list in `confirmsTarget` (`targetFieldsOutsideWrites`; `agent-browser.md` "The runner").
+  reminder) **only when the type's checker confirms it on the page**: the parser cannot know checkers,
+  so the app's runner refuses a plan whose type has a target field in no write that its checker does
+  not list in `confirms` (`targetFieldsOutsideWrites`; `agent-browser.md` "The runner").
   `matchDeclaredWrite` never covers such a field, and no page-side write is decided by it: during a
   run the window refuses every write of the page (`decide: () => false`).
   `_method` (any case) is refused as a body key and in `ignore_body` (a method override).
+- **`expect`** (what the target must show after the writes; required on write / delete, refused on a
+  read): 1–5 entries, each `{ list, add: "{name}" }` or `{ list, remove: "{name}" }` — `list` a plain
+  name, the value exactly one field of the type's target / change. Three shapes only (something
+  added, removed, or one of each: a replacement), closed choices with no condition or computation
+  (owner rule §8-1); a change they cannot say belongs in the checker, never in a new key.
+  `expectedAfter(before, operation, values)` applies them in order to the state the person saw (a
+  removal takes one copy; one of a value the list does not hold → null, and the runner stops before
+  writing).
 - **Plain text** (`label`, `shared`, the account's `label`, literals, a plan's `text`) has no control
   characters, bidirectional marks / overrides / isolates or zero-width characters (U+061C,
   U+200B–U+200F, U+202A–U+202E, U+2066–U+2069, U+FEFF).
@@ -634,12 +648,12 @@ browser:
 - **Not on the shelf yet**: the shelf refuses a package with `browser` (「a browser connector (browser) is not
   used yet」, `services/plugin-shelf.ts`), so no company installs it, `pluginsFor` never lists it and no
   app fetches it; `combineUse` refuses one, so no business plugin uses it. A released app's older parser
-  does not know `browser` (an unknown key: unusable). The first declaration (`lstep@0.1.0`, 「リマインダの段に
-  テンプレートを足す」) ships **inside the app** with its adapter (`client/shared/browser-adapters/lstep.ts`),
+  does not know `browser` (an unknown key: unusable). The first declaration (`lstep@0.2.0`, 「リマインダの段に
+  テンプレートを足す」) ships **inside the app** with its checker (`client/connectors/lstep/`),
   parsed by `parsePluginManifest`; the runner exists but nothing starts it, and the plan / approval
   flow is a later PR.
 - Test: `server/tests/unit/plugin-browser-declaration.test.ts` (the example, every refusal, every
-  mismatch reason, `ignore_body`, the setting, `levelAllows` with an unknown effect), `plugin-shelf.test.ts` (refused on the shelf) — each
+  mismatch reason, `ignore_body`, `expect` and `expectedAfter`, the setting, `levelAllows` with an unknown effect), `plugin-shelf.test.ts` (refused on the shelf) — each
   guard mutation-checked.
 
 ## Handing packages to the app (plan C2 「配る道」)

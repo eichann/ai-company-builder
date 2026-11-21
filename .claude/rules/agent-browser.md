@@ -13,7 +13,8 @@ paths:
   - "admin/tests/agent-browser.test.tsx"
   - "client/shared/browser-operation.ts"
   - "client/shared/browser-runner.ts"
-  - "client/shared/browser-adapters/**"
+  - "client/shared/browser-checkers.ts"
+  - "client/connectors/**"
   - "client/tests/browser-runner.test.ts"
   - "client/electron/browser-window.ts"
   - "client/electron/features/browser/**"
@@ -34,8 +35,17 @@ only through per-site operation types (later PRs), never by free clicking. Owner
 - **Admin-approved sites only.** Each site has one host the AI operates (writes go only there)
   and the exact hosts its pages load parts from (GET of scripts, styles, fonts, images only);
   every other request is refused. No `*.` wildcards.
-- **Per-site operation types.** A site's level (見るだけ / 入力・保存まで / 削除も) caps what an
-  operation type may do there (`levelAllows`; an effect it does not know is never allowed).
+- **Per-site operation types, split in two (owner decision 2026-11-21, design memo §24).** An
+  operation type is **data** (the connector's declaration: what is sent, `writes`, and what the
+  target must show afterwards, `expect`); the only code per site is a **checker** ("The checker"):
+  a small reviewed reader that confirms, right before and after the write, the facts the request
+  itself does not carry — the target is exactly one existing item of the planned parent, the
+  logged-in outside account, the state before / after — and reads the CSRF value. **Exploring the
+  page and building a plan is the AI's** (nothing of that is code); **guarding is the checker's**,
+  never the AI's (a page can tell the AI anything). A checker that cannot read stops the run before
+  writing: a changed site costs availability, never a wrong write. A site's level (見るだけ /
+  入力・保存まで / 削除も) caps what an operation type may do there (`levelAllows`; an effect it does
+  not know is never allowed).
 - **The login stays in memory** and is gone when the app quits (PR 4, safe side; "Not yet": the
   owner's rule `browserLoginStorage` — on disk only for a member whose AI sandbox is `enforce` — waits
   until it can be bound to every AI turn on the PC being enclosed).
@@ -190,19 +200,29 @@ without a site, the notes, 「開いてログイン」, 「ログインを消す
 ## The runner (PR 5a: built and tested; the AI cannot reach it)
 
 Owner plan 2026-11-20: every automated operation goes through one gate; only per-site operation types
-(a reviewed adapter in the app + the connector's declaration); the AI's entry stays **closed**: nothing
+(the connector's declaration + a reviewed checker, "The checker"); the AI's entry stays **closed**: nothing
 in the app imports `features/browser/runner.ts` (no IPC channel, preload method, chat tool or agent;
 `browser-runner.test.ts` 「nothing in the app can start a run yet」 checks the importers, the IPC
 inventory and the agents / chat server / renderer). PR 6 adds the approval (the plan provider).
 
 - **Pieces.** `client/shared/browser-runner.ts` (pure: the plan `parseBrowserRunPlan`, `createRunGate`,
-  the adapter interface, `BrowserRunSurface`, the step record, `BROWSER_RUN_WORDS`);
-  `client/shared/browser-adapters/` (the registry by adapter id — an id not there is never run — and the
-  bundled declarations); `client/electron/features/browser/runner.ts` (`createBrowserRunner`: the steps,
-  no Electron), `run-records.ts` (the step record on disk); the window's `run` surface in
-  `browser-window.ts`; `controller.ts` `siteNow` / `runWindow` (what the runner's deps will be).
+  the checker interface `BrowserChecker`, `BrowserRunSurface`, the step record, `BROWSER_RUN_WORDS`);
+  `client/shared/browser-checkers.ts` (`createBrowserCheckerRegistry` over the checkers it is **given**
+  — an id not given is never run, two with one id refused — `createBrowserConnectors` over the
+  declaration texts it is given, `parseBrowserDeclaration`); `client/electron/features/browser/runner.ts`
+  (`createBrowserRunner`: the steps, no Electron), `run-records.ts` (the step record on disk); the
+  window's `run` surface in `browser-window.ts`; `controller.ts` `siteNow` / `runWindow` (what the
+  runner's deps will be). `shared/core/plugin-browser-declaration.ts` `expectedAfter` (the state after).
+- **Site code lives outside the core** (owner decision 2026-11-21, design memo §24): `client/connectors/<site>/`
+  holds a site's checkers and its bundled declaration (`client/connectors/lstep/`: `reminder-step.ts`,
+  `declaration.ts`, `index.ts` `lstepConnector({ account })`). A connector folder imports only itself,
+  the checker's **types** from `client/shared/browser-runner.ts` and the repository's `shared/core`;
+  nothing in `client/electron`, `client/src` or `client/shared` but `electron/main.ts` imports a
+  connector (`architecture-boundaries.test.ts` 「the browser core knows no site」; `client/tsconfig.json`
+  includes `connectors`). It is a stand-in until checkers run isolated and signed, handed out with
+  their declaration from the shelf (design memo §25): moving a site out is moving its folder.
 - **A plan** (from an injected `approvedPlan(planId)`): `planId`, `companyId`, connector `{ id, version }`
-  (exact), `operation`, `account` (the outside account's id as the adapter reads it), `target`, `change`,
+  (exact), `operation`, `account` (the outside account's id as the checker reads it), `target`, `change`,
   `before` (the target's state the person saw: named lists of ids only), `approvedAt` (a plan approved
   more than a day ago never runs, whatever its expiry; one "approved" over a minute in the future is
   refused), `expiresAt` (never more than a day ahead). Its values must fit the type (`browserPlanProblem`).
@@ -211,24 +231,29 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   as `ai_runs` / approvals are) before anything hands plans to the runner.
 - **One run**, refusing with nothing sent at each check: the plan; the step record (a plan with any
   record never runs again — also one cut off by a crash); the connector declaration at that version; the
-  operation (this PR: one form write, not irreversible); the adapter (`adapter.id` must equal the
-  declaration's); **every target field no declared write carries is one the adapter confirms on the
-  page** (`targetFieldsOutsideWrites` ⊆ `adapter.confirmsTarget`, else `target-unconfirmed`); the
+  operation (this PR: one form write, not irreversible); the checker (`checker.id` must equal the
+  declaration's `checker`, else `unknown-checker`); **every target field no declared write carries is
+  one the checker confirms on the page** (`targetFieldsOutsideWrites` ⊆ `checker.confirms`, else
+  `target-unconfirmed`); the plan's values (`browserPlanProblem`); **what the page must show afterwards**
+  (`expectedAfter(before, operation, values)`: the declaration's `expect` applied to the state the person
+  saw; a removal of something `before` does not hold cannot come true → `cannot-come-true`; a page that
+  would look the same afterwards — a value added and taken away again — cannot tell a done write from a
+  refused one → `no-visible-change`, never run); the
   company's setting now (`browserOperationsAllowed` against the site the member's
   current valid policy lists: on, asset hosts, level); the AI stop; the member's open window; one run
   per window. Then `pending` is kept, the window enters `ai` mode with the run's gate (true only once
-  DevTools Fetch sees the page), the adapter's declared reads are made, and the run **stops before
+  DevTools Fetch sees the page), the checker's declared reads are made, and the run **stops before
   writing** for: an account that cannot be read (`account-unknown`) or is not the plan's
   (`account-mismatch`), a target that is not exactly one existing item, a state other than `before`,
   a missing CSRF field, a stop / setting change / expiry / closed window since (also checked by the
   gate per request). Then `sent` is kept (**before** the send; not kept = not sent), the one declared
-  write is armed and sent, and the page is read again: the planned state = `succeeded`; **`failed` only
+  write is armed and sent, and the page is read again: the state `expectedAfter` gave = `succeeded`; **`failed` only
   when the site answered the write with a 4xx (419, 422…) and the page shows `before`**; everything
   else — another state, `before` after a 2xx / 3xx / 5xx (`unchanged-unrefused`), no slot before and
-  none after (`empty-state`: the adapter may not read the real page as we think), no answer, no
+  none after (`empty-state`: the checker may not read the real page as we think), no answer, no
   re-read — is **`unknown` (結果が分からない), never sent again** by the runner. The window always goes
-  back to `human`. Every reason is a word of `BROWSER_RUN_REASONS`; an adapter's `problem` that is not
-  one becomes `adapter-problem` (an adapter's or a site's text never reaches a record or a result).
+  back to `human`. Every reason is a word of `BROWSER_RUN_REASONS`; a checker's `problem` that is not
+  one becomes `checker-problem` (a checker's or a site's text never reaches a record or a result).
 - **The gate** (`createRunGate`, the one rule for every request of a run): the page's own writes are
   refused for the whole run (the window's write decider says no; a page's fetch / XHR / timer / form of
   the very same write included); the page's reads of the operated host pass only for its parts
@@ -244,7 +269,7 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   declared order, **at most once**; nothing while stopped. The runner sends the write from main
   through the window's login, never through the page (`run.request`): the page's script cannot see,
   change or answer it, and its hidden fields play no part (the body is built from the declaration,
-  the plan and the CSRF value the adapter read in the server's HTML).
+  the plan and the CSRF value the checker read in the server's HTML).
 - **A write gets a connection of its own** (verified on Electron 45): Chromium **resends a request whose
   reused keep-alive connection dropped before the answer**, below the request hook — one lost answer
   reached the test site 12 times through the window's session. So each write goes through the window's
@@ -268,36 +293,50 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   operation name, step, `pending` / `sent` / `succeeded` / `failed` / `unknown`, a fixed reason word,
   a time — never an account, a template, a token or any other value (refused). Kept two days (a plan
   lives at most one). A file that exists but cannot be read refuses every run.
-- **The first type: 「リマインダの段にテンプレートを足す」** (`lstep.reminder_step_add_template`,
-  `client/shared/browser-adapters/lstep.ts`). The declaration ships **with the app**
-  (`BUNDLED_BROWSER_DECLARATIONS`, `lstep@0.1.0`, parsed by the core's `parsePluginManifest` like any
-  package): the shelf still refuses browser connectors, and the adapter that reads for it is the app's
-  anyway. Effect `write`, target `{ reminder, step }`, change `{ template }`, one write `POST
-  /line/episode/step/pack/template` form `{ content_id: {step}, template_id: {template} }`, `ignore_body:
-  [_token, _lm_user_id]`, account required, the `shared` note (共有のリマインダ). The adapter
-  (`confirmsTarget: [reminder, step]`) reads `GET /line/episode/show/<reminder>`, without its
+- **The checker** (`BrowserChecker`, design memo §24): `id` (`<site>.<thing>`, named by a declaration's
+  `checker`), `confirms` (the target fields it confirms on the page), `readPaths(values)` (the exact
+  paths, no query, it reads), `view(values, reads)` → `{ account, state, ignored, problem }`. It has
+  **no "after"**: what the target must show after the writes is the operation's `expect`, computed by
+  the core. One checker serves every operation on its thing. It reads only the facts the request does
+  not carry (the target is one existing item of the planned parent, the account, the state as named
+  lists of ids, the `ignore_body` values); nothing else of the page is code — exploring and planning
+  are the AI's. **Prefer stable sources** for a new checker: a JSON answer the page itself uses or a
+  fixed id marker over the layout of the HTML; a site whose request names the whole target needs no
+  target check. What the person approves (`before`) is the state the checker read, not what the AI said.
+- **Lステップ** (`client/connectors/lstep/`): the declaration `lstep@0.2.0` (`declaration.ts`, bundled
+  until the shelf hands browser connectors out; parsed by the core's `parsePluginManifest` like any
+  package) with one type, **「リマインダの段にテンプレートを足す」** (`reminder_step_add_template`): effect
+  `write`, checker `lstep.reminder_step`, target `{ reminder, step }`, change `{ template }`, one write
+  `POST /line/episode/step/pack/template` form `{ content_id: {step}, template_id: {template} }`,
+  `ignore_body: [_token, _lm_user_id]`, `expect: [{ list: templates, add: "{template}" }]`, account
+  required, the `shared` note (共有のリマインダ). Another operation on a step's templates is a new entry
+  there, not new code. The checker `lstep.reminder_step` (`reminder-step.ts`, `confirms: [reminder,
+  step]`) reads `GET /line/episode/show/<reminder>`, without its
   `<script>`, `<textarea>` and comments (`markupOnly`): `id="templateStep<step>"` must stand **exactly
   once as an attribute of a tag** (not a longer id, not another attribute); the step's box runs from
   there to the next `id="templateStep…"`; **every** `openModal(<reminder>, <step>, <hole>, <template>,
   <type>)` in the box must name this reminder and this step, and none of this step may stand outside
-  the box (else no target). The state is the box's template ids; after = one more of the planned
-  template. Ids are positive integers (never `0` / `-1`). `_token` / `_lm_user_id` are taken from
+  the box (else no target). The state is the box's template ids (`templates`). Every id of the plan
+  (each target and change field, so a later operation's extra id too) is a positive integer (never `0` / `-1`). `_token` / `_lm_user_id` are taken from
   hidden inputs of the markup (`_token` also `meta[name=csrf-token]`), one value each, plain token
   characters; none → `csrf-missing`, no write. (Whether the real page has its slots in `onclick`
   attributes, as captured, rather than in a script is not verified beyond the capture: if not, the
   state reads empty and the run stops with `before-changed` or ends `empty-state`, never `failed`.)
 - **The account binding is not confirmed on the real site.** Where Lステップ's page names the logged-in
-  LINE account in a stable way was not verified; the adapter takes an injected reader
-  (`createBrowserAdapterRegistry({ lstepAccount })`) and the app's default `UNCONFIRMED_ACCOUNT` reads
+  LINE account in a stable way was not verified; the checker takes an injected reader
+  (`lstepConnector({ account })`) and the default `UNCONFIRMED_ACCOUNT` reads
   nothing, so a real run always stops with `account-unknown` before writing until someone confirms
   the marker on the real page (test objects only) and sets the reader.
 
 Tests: `client/tests/browser-runner.test.ts` (the gate: not armed, another step / template, an extra /
 repeated / `_method` key, no body, a query, http / another host, an undeclared method, a second send,
 a stop; declared reads only, the page's parts without a query; the window's outside rule and read
-rule; the plan's shape, expiry, `approvedAt` and one-day limits; the adapter's box (exactly one id
+rule; the plan's shape, expiry, `approvedAt` and one-day limits; the checker's box (exactly one id
 attribute, not in a comment / script / text area, slots of this reminder and step only, none outside)
-/ ids / token and the unconfirmed account; the bundled declaration and an unknown adapter; the runner:
+/ ids / token and the unconfirmed account; the bundled declaration, its `expect`, an unknown checker and
+two checkers with one id; the runner: judged by the type's `expect` (a removal of what was not there
+never starts, `cannot-come-true`; nor one whose page would look the same, `no-visible-change`; a page
+that ends otherwise is `other-state`);
 success with exactly one write, never twice even after a lost answer, wrong / unknown account,
 missing target, changed state, a target field neither written nor confirmed, a stop, a policy change,
 an expiry and an old approval during the run, refusals before anything starts, nothing sent unless the
@@ -329,8 +368,17 @@ The AI does not operate the window yet: the runner and the first type exist (abo
 starts a run. Still to come: the plan and its approval (PR 6: the `approvedPlan` provider, the
 person's confirmation, `irreversible` types), wiring the runner in `main.ts` (deps: `controller.siteNow`
 / `runWindow`, `browserAiStopped(policy.stop(companyId))`, `createBrowserRunRecords(<userData>/…)`,
-`createBundledBrowserConnectors()`, the adapter registry), the swap (add + remove with `_method=DELETE`
-— `matchDeclaredWrite` refuses `_method` today, so that needs a contract decision), landing routes, a
+`lstepConnector()`'s declaration and checkers through `createBrowserConnectors` /
+`createBrowserCheckerRegistry`), **the method override and the swap** (design memo §24: a write may
+declare `method: DELETE` / `PATCH` with `override: form_field`, sent as POST with `_method=<method>` in the
+body; `matchDeclaredWrite` would then match the effective method and the declared `_method` pair, still
+refusing `_method` from anything else and every override header; an effective DELETE needs `effect:
+delete` and `irreversible: true`; then the swap is a declaration only — add then remove, `expect` add +
+remove, target `{ reminder, step, hole }`, the checker confirming the hole is the step's and holds
+`old`; a run cut between its two writes is partly done, never resent or rolled back), **checkers run
+isolated and signed** and handed out with their declarations from the shelf (design memo §25: a
+JavaScript engine without network, files or clock, limits on time and memory; only checkers div signed;
+the package's `signature.yaml` verified first), landing routes, a
 recording helper, JSON writes, types with more than one write, confirming Lステップ's account marker,
 the shelf handing out browser connectors. WSS to the operated host stays refused (no type declares
 one). Until the AI operates, the admin page says next to the mode choice what 「使う」 does today

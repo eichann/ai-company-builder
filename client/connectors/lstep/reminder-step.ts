@@ -1,53 +1,27 @@
 /**
- * Lステップ's reviewed adapter and its connector declaration, bundled with the app
- * (agent-browser.md "The runner"). The shelf still refuses browser connectors, so this
- * declaration does not come through it: it ships in the app, next to the adapter that reads for it.
+ * Lステップ's checker of a reminder's step (agent-browser.md "The checker", design memo §24): it
+ * confirms only what the site's request does not carry — the step is one of the planned reminder's
+ * (the request names the step alone), the logged-in LINE account, the step's templates before and
+ * after — and reads the CSRF / session values. Every operation on a step's templates uses it; what
+ * the step must show afterwards is the operation's `expect` in the declaration (./declaration.ts).
  *
  * What the page shows (captured on test objects only, 2026-11-20):
  * - `GET /line/episode/show/<reminder>`: per message slot of a step
  *   `openModal(<reminder>, <step>, <hole>, <template id>, <type>)` — the 4th argument is the attached
  *   template; a step's block carries `templateStep<step>`.
- * - Adding a template to a step: `POST /line/episode/step/pack/template`, a form with
- *   `_token=<csrf>&_lm_user_id=<session>&content_id=<step>&template_id=<template>`; afterwards the
- *   step shows one more `openModal(...)` with that template and a new hole.
  *
  * NOT CONFIRMED on the real site: where the page names the logged-in LINE account in a stable way,
  * and exactly where `_token` / `_lm_user_id` sit in the page. The account is read by an injected
- * reader; the app's default reads nothing (`UNCONFIRMED_ACCOUNT`), so a real run stops before any
- * write ("account-unknown") until someone confirms the reader against the real page.
+ * reader; the default reads nothing (`UNCONFIRMED_ACCOUNT`), so a real run stops before any write
+ * ("account-unknown") until someone confirms the reader against the real page.
+ *
+ * Site code: imported only by the composition root (and tests), never by the core
+ * (architecture-boundaries.test.ts 「the browser core knows no site」).
  */
 import type { BrowserPlanValues } from '../../../shared/core/plugin-browser-declaration'
-import type { BrowserAdapterView, BrowserOperationAdapter, BrowserPageRead, BrowserTargetState } from '../browser-runner'
+import type { BrowserChecker, BrowserCheckerView, BrowserPageRead } from '../../shared/browser-runner'
 
-export const LSTEP_ADD_TEMPLATE_ADAPTER = 'lstep.reminder_step_add_template'
-
-/** The declaration (`plugins.md` "Browser connectors"): parsed and checked by the core like any package. */
-export const LSTEP_DECLARATION = `id: lstep
-version: 0.1.0
-label: Lステップ
-contract: 1
-browser:
-  host: manager.linestep.net
-  asset_hosts: [d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net]
-  account:
-    label: LINE アカウント
-  operations:
-    reminder_step_add_template:
-      label: リマインダの段にテンプレートを足す
-      effect: write
-      adapter: ${LSTEP_ADD_TEMPLATE_ADAPTER}
-      shared: 全部の回で共有のリマインダです。前の回の人にも届きます。
-      target:
-        reminder: id
-        step: id
-      change:
-        template: id
-      writes:
-        - method: POST
-          path: /line/episode/step/pack/template
-          body: { content_id: "{step}", template_id: "{template}" }
-          ignore_body: [_token, _lm_user_id]
-`
+export const LSTEP_REMINDER_STEP_CHECKER = 'lstep.reminder_step'
 
 /** Reads the logged-in outside account's id from the page (null: cannot tell). */
 export type AccountReader = (html: string) => string | null
@@ -109,18 +83,18 @@ function fieldValue(html: string, name: string): string | null {
   return FIELD_VALUE.test(v) ? v : null
 }
 
-export function createLstepAddTemplateAdapter(readAccount: AccountReader): BrowserOperationAdapter {
-  const ids = (values: BrowserPlanValues) => ({ reminder: values.target.reminder, step: values.target.step, template: values.change.template })
+export function createLstepReminderStepChecker(readAccount: AccountReader): BrowserChecker {
+  const ids = (values: BrowserPlanValues) => ({ reminder: values.target.reminder, step: values.target.step })
   return {
-    id: LSTEP_ADD_TEMPLATE_ADAPTER,
+    id: LSTEP_REMINDER_STEP_CHECKER,
     // The write names the step only; the reminder is confirmed here: the step's box is on the reminder's page.
-    confirmsTarget: ['reminder', 'step'],
+    confirms: ['reminder', 'step'],
     readPaths(values) {
       const { reminder } = ids(values)
       return POSITIVE_ID.test(reminder ?? '') ? [`/line/episode/show/${reminder}`] : []
     },
-    view(values, reads: readonly BrowserPageRead[]): BrowserAdapterView {
-      const { reminder, step, template } = ids(values)
+    view(values, reads: readonly BrowserPageRead[]): BrowserCheckerView {
+      const { reminder, step } = ids(values)
       const page = reads.find(r => r.path === `/line/episode/show/${reminder}`)
       if (!page) return { account: null, state: null, ignored: {}, problem: 'not-read' }
       let account: string | null = null
@@ -133,7 +107,9 @@ export function createLstepAddTemplateAdapter(readAccount: AccountReader): Brows
       if (user) ignored._lm_user_id = user
       const problem = token ? undefined : 'csrf-missing'
       const none = { account, state: null, ignored, problem }
-      if (![reminder, step, template].every(v => POSITIVE_ID.test(v ?? ''))) return none
+      // Every id of the plan — each target field (a later type's `hole` too) and each change field —
+      // is a positive integer: never `0`, `-1` or "all", whichever operation uses this checker.
+      if (![reminder, step, ...Object.values(values.target), ...Object.values(values.change)].every(v => POSITIVE_ID.test(v ?? ''))) return none
       // The step is one of this reminder's: its box (`id="templateStep<step>"`, exactly once, as an
       // attribute in the markup) is on the reminder's page.
       const starts = stepBoxStarts(markup, step)
@@ -151,9 +127,6 @@ export function createLstepAddTemplateAdapter(readAccount: AccountReader): Brows
         if (inBox) templates.push(m[4])
       }
       return { account, state: { templates: templates.sort() }, ignored, problem }
-    },
-    after(before: BrowserTargetState, values) {
-      return { templates: [...(before.templates ?? []), ids(values).template].sort() }
     },
   }
 }

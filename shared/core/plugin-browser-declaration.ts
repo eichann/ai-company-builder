@@ -4,11 +4,15 @@
  * chat AI may operate in the app's browser window, and the operation types it
  * may run there — never free clicking.
  *
- * Still data only. An operation type names a reviewed adapter shipped in the
- * app (`adapter`, checked to exist by the app) that reads the target and its
- * current value from the page; the declaration fixes what the plan names
- * (`target`, `change`) and the only write requests the type may send
- * (`writes`: method, path and body fields, each a literal or one plan field).
+ * Still data only (owner decision 2026-11-21, design memo §24). An operation
+ * type names a reviewed **checker** (`checker`, handed to the app's runner,
+ * agent-browser.md "The checker") that confirms on the page only what the
+ * request does not carry — the target is one existing item, the outside
+ * account, the state before and after; the declaration fixes what the plan
+ * names (`target`, `change`), the only write requests the type may send
+ * (`writes`: method, path and body fields, each a literal or one plan field)
+ * and what the target must show afterwards (`expect`: something added,
+ * removed, or both — closed choices, computed here by `expectedAfter`).
  * The runner lets a write through only when `matchDeclaredWrite` says it is
  * one of them with exactly the approved plan's values — the guard that stops
  * an approved save from becoming something else (a broadcast).
@@ -50,15 +54,16 @@ export const BROWSER_DECLARATION_LIMITS = {
   shared: 200,
   path: 300,
   literal: 200,
-  adapter: 80,
+  checker: 80,
+  expect: 5,
   idValue: 64,
   textValue: 2000,
 } as const
 
 /** Operation, target and change names. */
 export const BROWSER_NAME_RE = /^[a-z][a-z0-9_]{0,39}$/
-/** A reviewed adapter shipped in the app: `<site>.<operation>`. */
-export const BROWSER_ADAPTER_RE = /^[a-z0-9_]+\.[a-z0-9_]+$/
+/** A reviewed checker: `<site>.<thing it reads>` (one checker serves every operation on that thing). */
+export const BROWSER_CHECKER_RE = /^[a-z0-9_]+\.[a-z0-9_]+$/
 /** A body field's name as a site's form sends it (`content_id`, `data[title]`, `_token`). */
 export const BROWSER_BODY_KEY_RE = /^[A-Za-z0-9_][A-Za-z0-9_.[\]-]{0,99}$/
 /** A body key that makes some frameworks treat a POST as another method (Rails, Laravel): never declared, never let through. */
@@ -89,11 +94,21 @@ export interface BrowserWrite {
   ignoreBody: string[]
 }
 
+/**
+ * One change the target must show after the writes: `value` (the plan's `field`) added to, or
+ * removed from, the state's list `list` (design memo §24: only these; a replacement is one of each).
+ */
+export interface BrowserExpectation {
+  list: string
+  change: 'add' | 'remove'
+  field: string
+}
+
 export interface BrowserOperation {
   label: string
   effect: BrowserOperationEffect
-  /** The reviewed adapter in the app that reads (and confirms) this type: `<site>.<operation>`. */
-  adapter: string
+  /** The reviewed checker that confirms the target, the account and the state: `<site>.<thing>`. */
+  checker: string
   /** A note shown on plans that use it (「前の回の人にも届きます」): a warning, nothing blocked. */
   shared: string | null
   /** True: the person confirms once more right before this step. */
@@ -104,6 +119,8 @@ export interface BrowserOperation {
   change: Record<string, BrowserFieldKind>
   /** The only write requests this type may send (none for a read). */
   writes: BrowserWrite[]
+  /** What the target must show after the writes (none for a read). */
+  expect: BrowserExpectation[]
 }
 
 export interface PluginBrowser {
@@ -198,15 +215,18 @@ function parseWrite(where: string, raw: YamlValue, effect: BrowserOperationEffec
 function parseOperation(name: string, raw: YamlValue, err: (m: string) => void): BrowserOperation | null {
   const where = `操作「${name}」`
   if (!isYamlMap(raw)) { err(`${where}は { … } の形で書いてください`); return null }
-  unknownKeys(`${where}: `, raw, ['label', 'effect', 'adapter', 'shared', 'irreversible', 'target', 'change', 'writes'], err)
   let failed = false
   const e = (m: string) => { failed = true; err(m) }
+  // Before 2026-11-21 a type named the code that read it per operation; now one checker per thing.
+  if (own(raw, 'adapter')) e(`${where}の adapter は checker に変わりました（ページで確かめる部品の名前）`)
+  unknownKeys(`${where}: `, Object.fromEntries(Object.entries(raw).filter(([k]) => k !== 'adapter')),
+    ['label', 'effect', 'checker', 'shared', 'irreversible', 'target', 'change', 'writes', 'expect'], err)
   const label = plainText(raw.label, BROWSER_DECLARATION_LIMITS.label)
   if (!label) e(`${where}の label は ${BROWSER_DECLARATION_LIMITS.label} 文字までの1行で書いてください`)
   const effect = raw.effect
   if (!(BROWSER_EFFECTS as readonly unknown[]).includes(effect)) { e(`${where}の effect は read / write / delete のどれかです`); return null }
-  const adapter = raw.adapter
-  if (typeof adapter !== 'string' || adapter.length > BROWSER_DECLARATION_LIMITS.adapter || !BROWSER_ADAPTER_RE.test(adapter)) e(`${where}の adapter は「サイト.操作」の名前です（英小文字・数字・_）`)
+  const checker = raw.checker
+  if (typeof checker !== 'string' || checker.length > BROWSER_DECLARATION_LIMITS.checker || !BROWSER_CHECKER_RE.test(checker)) e(`${where}の checker は「サイト.確かめるもの」の名前です（英小文字・数字・_）`)
   let shared: string | null = null
   if (raw.shared !== undefined) {
     shared = plainText(raw.shared, BROWSER_DECLARATION_LIMITS.shared)
@@ -224,10 +244,13 @@ function parseOperation(name: string, raw: YamlValue, err: (m: string) => void):
   for (const n of Object.keys(change)) if (own(target, n)) e(`${where}: 「${n}」が target と change の両方にあります`)
 
   const writes: BrowserWrite[] = []
+  const expect: BrowserExpectation[] = []
   if (effect === 'read') {
     if (raw.change !== undefined) e(`${where}: 読むだけの操作に change は書けません`)
     if (raw.writes !== undefined) e(`${where}: 読むだけの操作に writes は書けません`)
+    if (raw.expect !== undefined) e(`${where}: 読むだけの操作に expect は書けません`)
   } else {
+    expect.push(...parseExpect(`${where}の expect`, raw.expect, new Set([...Object.keys(target), ...Object.keys(change)]), e))
     const list = raw.writes
     if (!Array.isArray(list) || list.length === 0 || list.length > BROWSER_DECLARATION_LIMITS.writes) {
       e(`${where}の writes（送ってよい書き込み）を1〜${BROWSER_DECLARATION_LIMITS.writes} 個書いてください`)
@@ -242,7 +265,7 @@ function parseOperation(name: string, raw: YamlValue, err: (m: string) => void):
         const used = new Set(writes.flatMap(w => Object.values(w.body).flatMap(v => 'field' in v ? [v.field] : [])))
         // Every change field reaches a request: what the plan sets is what the runner holds the request to.
         // A target field may stay out of the requests (the site's request names the step, not its
-        // reminder) only when the type's adapter confirms it on the page before any write: the app's
+        // reminder) only when the type's checker confirms it on the page before any write: the app's
         // runner refuses a plan otherwise (`targetFieldsOutsideWrites`, agent-browser.md "The runner").
         // Each write still names at least one target field.
         for (const n of Object.keys(change)) if (!used.has(n)) e(`${where}の「${n}」は writes のどの body にも入っていません`)
@@ -250,7 +273,28 @@ function parseOperation(name: string, raw: YamlValue, err: (m: string) => void):
     }
   }
   if (failed) return null
-  return { label: label as string, effect: effect as BrowserOperationEffect, adapter: adapter as string, shared, irreversible: irreversible as boolean, target, change, writes }
+  return { label: label as string, effect: effect as BrowserOperationEffect, checker: checker as string, shared, irreversible: irreversible as boolean, target, change, writes, expect }
+}
+
+/** `expect`: 1–5 of `{ list, add: "{field}" }` or `{ list, remove: "{field}" }` — nothing else (no condition, no computation). */
+function parseExpect(where: string, raw: YamlValue | undefined, fields: ReadonlySet<string>, err: (m: string) => void): BrowserExpectation[] {
+  const shape = `${where}（送ったあとどうなっているべきか）は { list: 名前, add: "{項目}" } か { list: 名前, remove: "{項目}" } の並びで、1〜${BROWSER_DECLARATION_LIMITS.expect} 個書いてください`
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > BROWSER_DECLARATION_LIMITS.expect) { err(shape); return [] }
+  const out: BrowserExpectation[] = []
+  raw.forEach((entry, i) => {
+    const at = `${where} ${i + 1} 番目`
+    if (!isYamlMap(entry)) { err(shape); return }
+    unknownKeys(`${at}: `, entry, ['list', 'add', 'remove'], err)
+    const { list } = entry
+    if (typeof list !== 'string' || !BROWSER_NAME_RE.test(list)) { err(`${at}の list は英小文字・数字・_ の名前です`); return }
+    const kinds = (['add', 'remove'] as const).filter(k => entry[k] !== undefined)
+    if (kinds.length !== 1) { err(`${at}は add か remove のどちらか1つを書いてください`); return }
+    const value = entry[kinds[0]]
+    const placeholder = typeof value === 'string' ? PLACEHOLDER_RE.exec(value) : null
+    if (!placeholder || !fields.has(placeholder[1])) { err(`${at}の ${kinds[0]} は target か change の {名前} ひとつです`); return }
+    out.push({ list, change: kinds[0], field: placeholder[1] })
+  })
+  return out.length === raw.length ? out : []
 }
 
 /** The `browser` map: the site and its operation types. */
@@ -328,12 +372,36 @@ function valueProblem(kind: BrowserFieldKind, v: unknown, isTarget: boolean): bo
 
 /**
  * The type's target fields no declared write carries. Nothing in a request holds the request to
- * them, so the app's runner runs such a type only when its adapter confirms each of them on the
- * page before writing (the adapter's `confirmsTarget`); `matchDeclaredWrite` alone never covers them.
+ * them, so the app's runner runs such a type only when its checker confirms each of them on the
+ * page before writing (the checker's `confirms`); `matchDeclaredWrite` alone never covers them.
  */
 export function targetFieldsOutsideWrites(operation: BrowserOperation): string[] {
   const used = new Set(operation.writes.flatMap(w => Object.values(w.body).flatMap(v => 'field' in v ? [v.field] : [])))
   return Object.keys(operation.target).filter(n => !used.has(n))
+}
+
+/**
+ * The state the target must show after the type's writes (design memo §24): `before` with each
+ * expectation applied in order — the plan's value added to its list, or one copy of it removed.
+ * Null when a removal names a value its list does not hold (the expectation cannot come true: the
+ * runner stops before writing). Order inside a list is not kept (pages list in any order).
+ */
+export function expectedAfter(
+  before: Readonly<Record<string, readonly string[]>>, operation: BrowserOperation, values: BrowserPlanValues,
+): Record<string, string[]> | null {
+  const after: Record<string, string[]> = Object.fromEntries(Object.entries(before).map(([k, list]) => [k, [...list]]))
+  for (const { list, change, field } of operation.expect) {
+    const value = own(values.target, field) ? values.target[field] : own(values.change, field) ? values.change[field] : undefined
+    if (value === undefined) return null
+    const current = own(after, list) ? after[list] : (after[list] = [])
+    if (change === 'add') current.push(value)
+    else {
+      const at = current.indexOf(value)
+      if (at < 0) return null
+      current.splice(at, 1)
+    }
+  }
+  return after
 }
 
 /** Why a plan's values do not fit the operation type (exactly its fields, each of its kind), or null. */

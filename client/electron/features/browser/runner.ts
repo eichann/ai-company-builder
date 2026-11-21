@@ -5,20 +5,20 @@
 // chat, IPC and agents cannot start a run; tests/browser-runner.test.ts proves it).
 //
 // One run: the plan and its type are checked → the window goes to `ai` mode with the run's gate →
-// the adapter reads the target (account, existence, the state the person approved) → the one
-// declared write is armed and sent through the window's session → the page is read again: the planned
-// change = succeeded, the state from before = failed, anything else or no answer = unknown (never
+// the checker reads the target (account, existence, the state the person approved) → the one
+// declared write is armed and sent through the window's session → the page is read again: the state
+// the operation's `expect` gives (`expectedAfter`) = succeeded, the state from before = failed, anything else or no answer = unknown (never
 // sent again by itself) → back to `human` mode. Every step's state is kept on this PC before the
 // send, so a plan once started never runs twice, not even after a crash.
 import {
-  browserOperationsAllowed, browserPlanProblem, targetFieldsOutsideWrites,
+  browserOperationsAllowed, browserPlanProblem, expectedAfter, targetFieldsOutsideWrites,
   type BrowserPlanValues, type PluginBrowser,
 } from '../../../../shared/core/plugin-browser-declaration'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
 import {
   BROWSER_PLAN_MAX_AHEAD_MS, createRunGate, declaredWriteBody, encodeForm, FORM_CONTENT_TYPE, isBrowserRunReason, parseBrowserRunPlan, sameTargetState,
   type BrowserRunReason,
-  type BrowserOperationAdapter, type BrowserPageRead, type BrowserRunPlan, type BrowserRunResult, type BrowserRunSurface,
+  type BrowserChecker, type BrowserPageRead, type BrowserRunPlan, type BrowserRunResult, type BrowserRunSurface,
   type BrowserStepRecord, type BrowserTargetState,
 } from '../../../shared/browser-runner'
 
@@ -33,9 +33,10 @@ export interface BrowserRunRecords {
 export interface BrowserRunnerDeps {
   /** The approved plan (PR 6 adds the approval); null = none. */
   approvedPlan(planId: string): Promise<unknown>
-  /** The connector declaration at exactly this id and version (bundled with the app for now). */
+  /** The connector declaration at exactly this id and version (bundled with the app for now: client/connectors/). */
   connector(id: string, version: string): PluginBrowser | null
-  adapter(id: string): BrowserOperationAdapter | undefined
+  /** The reviewed checker of this id (handed in by the composition root; none = the type never runs). */
+  checker(id: string): BrowserChecker | undefined
   /** The site as the member's current valid policy lists it (null: off, not listed, unknown). */
   site(companyId: string, host: string): BrowserSiteSetting | null
   /** The emergency stop for the company's AI (`browserAiStopped`). */
@@ -75,13 +76,19 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
     // A deletion asks once more right before it: not before the approval flow exists.
     if (operation.irreversible) return refused('not-supported')
     if (!connector.account) return refused('connector')
-    const adapter = deps.adapter(operation.adapter)
-    if (!adapter || adapter.id !== operation.adapter) return refused('unknown-adapter')
-    // A target field no write carries is held only by the adapter's check on the page.
-    if (targetFieldsOutsideWrites(operation).some(f => !adapter.confirmsTarget.includes(f))) return refused('target-unconfirmed')
+    const checker = deps.checker(operation.checker)
+    if (!checker || checker.id !== operation.checker) return refused('unknown-checker')
+    // A target field no write carries is held only by the checker's look at the page.
+    if (targetFieldsOutsideWrites(operation).some(f => !checker.confirms.includes(f))) return refused('target-unconfirmed')
     const values: BrowserPlanValues = { target: plan.target, change: plan.change }
     if (browserPlanProblem(operation, values)) return refused('plan')
-    const readPaths = adapter.readPaths(values)
+    // What the page must show afterwards; a removal of something the person did not see there cannot come true.
+    const expected = expectedAfter(plan.before, operation, values)
+    if (!expected) return refused('cannot-come-true')
+    // A page that must look the same afterwards (a value added and taken away again) cannot tell a
+    // write that happened from one the site refused: never claim success on it.
+    if (sameTargetState(expected, plan.before)) return refused('no-visible-change')
+    const readPaths = checker.readPaths(values)
     if (readPaths.length === 0) return refused('plan')
 
     const why = (): BrowserRunReason | null => {
@@ -118,7 +125,7 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
       let reason = abort()
       if (reason) return stop(reason)
 
-      const view = await readView(surface, adapter, values, readPaths)
+      const view = await readView(surface, checker, values, readPaths)
       // A read the gate refused because the AI was stopped or the setting changed says so.
       if ('failed' in view) return stop(abort() ?? 'read-failed')
       reason = checkBefore(view.view, plan)
@@ -139,9 +146,8 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
       }
       if (status === null) return settle('unknown', gate.sent(0) ? 'no-answer' : 'not-confirmed-sent')
 
-      const afterRead = await readView(surface, adapter, values, readPaths)
+      const afterRead = await readView(surface, checker, values, readPaths)
       if ('failed' in afterRead || !afterRead.view.state) return settle('unknown', 'reread-failed')
-      const expected = adapter.after(plan.before, values)
       if (sameTargetState(afterRead.view.state, expected)) return settle('succeeded')
       if (sameTargetState(afterRead.view.state, plan.before)) {
         // Nothing found before and nothing after: the page may not be read the way we think (unknown).
@@ -177,7 +183,7 @@ function allowedNow(connector: PluginBrowser, plan: BrowserRunPlan, site: Browse
   return browserOperationsAllowed(connector, { mode: 'on', sites: [site] }).usable.includes(plan.operation)
 }
 
-async function readView(surface: BrowserRunSurface, adapter: BrowserOperationAdapter, values: BrowserPlanValues, paths: readonly string[]) {
+async function readView(surface: BrowserRunSurface, checker: BrowserChecker, values: BrowserPlanValues, paths: readonly string[]) {
   const reads: BrowserPageRead[] = []
   for (const path of paths) {
     let answer: { status: number; body: string }
@@ -186,17 +192,17 @@ async function readView(surface: BrowserRunSurface, adapter: BrowserOperationAda
     if (answer.status !== OK_READ) return { failed: true as const }
     reads.push({ path, body: answer.body })
   }
-  return { view: adapter.view(values, reads) }
+  return { view: checker.view(values, reads) }
 }
 
 /** Why the page does not allow the write the person approved, or null. */
-function checkBefore(view: ReturnType<BrowserOperationAdapter['view']>, plan: BrowserRunPlan): BrowserRunReason | null {
+function checkBefore(view: ReturnType<BrowserChecker['view']>, plan: BrowserRunPlan): BrowserRunReason | null {
   if (view.account === null) return 'account-unknown'
   if (view.account !== plan.account) return 'account-mismatch'
   if (!view.state) return 'target-missing'
   if (!sameTargetState(view.state, plan.before as BrowserTargetState)) return 'before-changed'
-  // The adapter's word is kept only when it is one of ours (never its text).
-  if (view.problem) return isBrowserRunReason(view.problem) ? view.problem : 'adapter-problem'
+  // The checker's word is kept only when it is one of ours (never its text).
+  if (view.problem) return isBrowserRunReason(view.problem) ? view.problem : 'checker-problem'
   return null
 }
 

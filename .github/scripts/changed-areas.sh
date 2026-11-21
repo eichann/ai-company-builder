@@ -69,7 +69,7 @@ CLIENT=(
 # ipc-fs.test.ts drives the whole main process through the IPC harness, so
 # any client/electron/ change runs it; renderer-only changes do not.
 CLIENT_MAC=(
-  client/electron/ client/shared/ client/native/ ':(glob)client/tests/*.swift'
+  client/electron/ client/shared/ client/connectors/ client/native/ ':(glob)client/tests/*.swift'
   client/tests/agent-env.test.ts client/tests/commit-message.test.ts client/tests/disk-key.test.ts
   client/tests/company-watcher.test.ts client/tests/ipc-fs.test.ts
   client/tests/permission-mode.test.ts client/tests/sandbox-claude.test.ts

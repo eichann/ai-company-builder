@@ -100,9 +100,9 @@ export { CALL_CURSOR_RE, CALL_OUTSIDE_FOOTER, CALL_OUTSIDE_HEADER, CALL_TEXT_MAX
 export { TYPE_LAYER_WORDS, checkPluginPathTemplate, typeNameLayerProblem } from './plugin-declaration-rules'
 export { parsePluginManifest } from './plugin-manifest'
 export {
-  BROWSER_ADAPTER_RE, BROWSER_BODY_ENCODINGS, BROWSER_DECLARATION_LIMITS, BROWSER_EFFECTS, BROWSER_FIELD_KINDS, BROWSER_WRITE_METHODS,
-  METHOD_OVERRIDE_HEADERS, browserOperationsAllowed, browserPlanProblem, isMethodOverrideKey, matchDeclaredWrite,
-  type BrowserBodyEncoding, type BrowserBodyValue, type BrowserDeclarationUse, type BrowserFieldKind, type BrowserOperation,
+  BROWSER_BODY_ENCODINGS, BROWSER_CHECKER_RE, BROWSER_DECLARATION_LIMITS, BROWSER_EFFECTS, BROWSER_FIELD_KINDS, BROWSER_WRITE_METHODS,
+  METHOD_OVERRIDE_HEADERS, browserOperationsAllowed, browserPlanProblem, expectedAfter, isMethodOverrideKey, matchDeclaredWrite,
+  type BrowserBodyEncoding, type BrowserBodyValue, type BrowserDeclarationUse, type BrowserExpectation, type BrowserFieldKind, type BrowserOperation,
   type BrowserOperationRefusal, type BrowserPlanValues, type BrowserWrite, type BrowserWriteMatch, type BrowserWriteMethod,
   type BrowserWriteMismatch, type BrowserWriteRequest, type PluginBrowser,
 } from './plugin-browser-declaration'

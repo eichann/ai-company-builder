@@ -96,7 +96,7 @@ describe('plugin shelf', () => {
     mkdirSync(join(root, 'lstep@0.1.0'))
     writeFileSync(join(root, 'lstep@0.1.0/plugin.yaml'), [
       'id: lstep', 'version: 0.1.0', 'label: Lステップ', 'contract: 1', 'browser:', '  host: manager.linestep.net', '  operations:',
-      '    read_reminder:', '      label: リマインダを読む', '      effect: read', '      adapter: lstep.read_reminder', '      target: { reminder: id }', '',
+      '    read_reminder:', '      label: リマインダを読む', '      effect: read', '      checker: lstep.read_reminder', '      target: { reminder: id }', '',
     ].join('\n'))
     const shelf = createPluginShelf(diskPluginShelf(root))
     const result = await shelf.load()

@@ -22,7 +22,7 @@ if [ $? -ne 0 ]; then
 fi
 
 case "$rel" in
-  client/electron/*|client/shared/*|client/src/*)
+  client/electron/*|client/shared/*|client/src/*|client/connectors/*)
     out=$(cd "$root/client" && npx --no-install tsx --test tests/architecture-boundaries.test.ts 2>&1)
     if [ $? -ne 0 ]; then
       printf 'Module boundary check failed after editing %s (client/tests/architecture-boundaries.test.ts; reasons in CLAUDE.md "Principles"):\n%s\n' \
