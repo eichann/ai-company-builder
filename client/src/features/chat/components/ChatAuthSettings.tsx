@@ -287,7 +287,7 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
             disabled:cursor-not-allowed
             text-sm font-medium
             transition-all duration-200
-            hover:shadow-glow
+            enabled:hover:shadow-glow
             ${PRIMARY_ACTION}
           `}
         >

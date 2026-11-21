@@ -200,7 +200,7 @@ export const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
             disabled:cursor-not-allowed
             flex items-center justify-center
             transition-all duration-200
-            hover:shadow-glow hover:scale-[1.02]
+            enabled:hover:shadow-glow enabled:hover:scale-[1.02]
             active:scale-[0.98]
             ${PRIMARY_ACTION}
           `}

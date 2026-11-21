@@ -85,6 +85,8 @@ for (const theme of ['light', 'dark'] as const) {
       const fill = await background(anyway)
       expect(fill).not.toBe(await token(page, 'danger'))
       expect(fill).not.toBe(await token(page, 'primary'))
+      // The dialog keeps exactly one primary: 「非公開フォルダを作成」.
+      expect(await background(dialog.getByRole('button', { name: '非公開フォルダを作成' }))).toBe(await token(page, 'primary'))
     })
   })
 }

@@ -5,5 +5,5 @@
 // caller keeps its own size and shape (sizes move in P3). Not for links (`link`), selected rows
 // or chips (`selected-*`), counts and new-item dots (`unread`) or AI marks (`ai-*`).
 export const PRIMARY_ACTION =
-  'bg-primary text-on-primary hover:bg-primary-hover active:bg-primary-active disabled:opacity-disabled ' +
+  'bg-primary text-on-primary enabled:hover:bg-primary-hover enabled:active:bg-primary-active disabled:opacity-disabled disabled:cursor-not-allowed ' +
   'focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring focus-visible:ring-offset-focus focus-visible:ring-offset-bg'
