@@ -905,11 +905,17 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   gives 4a's data generation 1 and pins it on an occurrence only when its provenance is certain — the watch fired, its
   chain is not stopped, and the job's **one** occurrence of the watched record is still `due` / `running` (F8) — never
   from which pending one is newest (`watch_fired` is also set without an occurrence, and the newest may have ended while
-  an older one waits); a watch that fired, is not stopped and has no occurrence of its own is an **orphan**: stopped once
-  (`WATCH_RESET`, 「仕組みの入れ替えのため、止まりました」) and its responsible person (not the creator: whether they read the
-  record cannot be judged there, D7) told once, so they choose again (F9). Tests: `job-events.test.ts` "watch
+  an older one waits) — or, for a chain **stopped by its own occurrence** (the stop on the watched record, the job's one
+  occurrence of it `needs_person` / `expired` with that very code, of the approved version: a restarted watch is always a
+  new version, and no firing without an occurrence writes those codes), that occurrence, so its 「もう一度」 still lets the
+  chain go on (independent review). A watch that fired, is not stopped and has no occurrence of its own is an **orphan**
+  — for a job that follows what it made (`followMadeTask`; one that does not ends after its one firing, its occurrence
+  done being its normal end, and is left as it is): stopped once (`WATCH_RESET`, 「仕組みの入れ替えのため、止まりました」) and its
+  responsible person (not the creator: whether they read the record cannot be judged there, D7) told once, so they
+  choose again (F9). Tests: `job-events.test.ts` "watch
   generations", `tests/unit/job-watch-generations.test.ts` (on `tests/fixtures/app-schema-before-watch-generations.sql`).
-  Mutation check: 25 mutations, 22 fail a test; not alone: the `ownsWatch` null-generation check (a cursor always has
+  Mutation check: 25 mutations, 22 fail a test (and 8 more after the independent review — the follow-only orphan, the
+  own-occurrence pin and each of its six conditions — all fail); not alone: the `ownsWatch` null-generation check (a cursor always has
   a generation once the migration ran, so the comparison alone refuses) and the migration's schema check on the column
   and on the text (each alone suffices, as in `storedJobDefinition`; both removed together fails).
 - **The start record**: read by whoever saves it **and** by the responsible person (one problem code,

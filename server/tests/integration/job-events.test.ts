@@ -1333,13 +1333,35 @@ describe('watch generations (stage 4b-0.5, F7–F9)', () => {
     db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at,
       event_seq, event_record_id, event_version, event_day) SELECT company_id, ?, job_id, job_version, 'ev:99998', time_zone, due_at, expires_at, 'done', created_at, updated_at,
       99998, event_record_id, event_version, event_day FROM ai_job_occurrences WHERE company_id = ? AND id = ?`).run(`occ.${'8'.repeat(32)}`, CO, older.id)
+    // Its chain stopped on that record meanwhile (the day's limit), as 4a could leave it.
+    db.prepare(`UPDATE ai_job_event_cursors SET watch_generation = NULL, chain_stop_code = 'DAY_LIMIT', chain_stop_record = watch_record_id, chain_stop_at = ?
+      WHERE company_id = ? AND job_id = ?`).run(clock.now(), CO, job)
+    db.prepare('UPDATE ai_job_occurrences SET watch_generation = NULL WHERE company_id = ? AND job_id = ?').run(CO, job)
+    migrateJobWatchGenerations(db)
+    expect(genOf(older.id)).toBeNull()
+    occ.runDue(CO)
+    expect(occurrencesOf(job).find(x => x.id === older.id)).toMatchObject({ state: 'done' })
+    expect(watchOf(job)).toMatchObject({ w: start, stop: 'DAY_LIMIT' })
+  })
+
+  it('F8: a chain stopped by its own expired occurrence before the migration still goes on once 「もう一度」 runs it', async () => {
+    const start = task('期限切れから再開')
+    const job = await runnableJob(chain(start))
+    await complete(start)
+    occ.makeOccurrences(CO)
+    const [o] = occurrencesOf(job)
+    nowMs += 1441 * 60_000
+    occ.makeOccurrences(CO)
+    expect(watchOf(job)).toMatchObject({ stop: 'EXPIRED' })
     db.prepare('UPDATE ai_job_event_cursors SET watch_generation = NULL WHERE company_id = ? AND job_id = ?').run(CO, job)
     db.prepare('UPDATE ai_job_occurrences SET watch_generation = NULL WHERE company_id = ? AND job_id = ?').run(CO, job)
     migrateJobWatchGenerations(db)
-    expect(watchOf(job)).toMatchObject({ stop: 'WATCH_RESET' })
+    expect(genOf(o.id)).toBe(1)
+    const retry = createJobRetry({ companyData, transactions, clock, roleOf, jobs, aiStops: () => ({ stopped: false }) as Json, reconcileFor: () => ({ ok: false }) as Json })
+    expect(retry.retry(owner(), job, o.id)).toMatchObject({ ok: true })
     occ.runDue(CO)
-    expect(occurrencesOf(job).find(x => x.id === older.id)).toMatchObject({ state: 'done' })
-    expect(watchOf(job)).toMatchObject({ w: start, stop: 'WATCH_RESET' })
+    expect(occurrencesOf(job)[0]).toMatchObject({ state: 'done' })
+    expect(watchOf(job)).toMatchObject({ w: madeTasks(job)[0].id, stop: null })
   })
 
   it('F9: an orphaned watch is stopped once, only its responsible person is told, and choosing the next one works', async () => {

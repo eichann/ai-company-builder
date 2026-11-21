@@ -383,6 +383,7 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
             WHERE company_id = ? AND (? IS NULL OR job_id = ?)`).run(companyId, companyId, jobId, jobId)
       })()
     },
+    // Frozen occurrences (a later build's shape) count toward the day's limit too: the safe side (fewer runs, never more).
     eventOccurrencesOn(jobId, day) {
       return (conn.prepare(`SELECT COUNT(*) AS n FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_day = ?`)
         .get(companyId, jobId, day) as { n: number }).n

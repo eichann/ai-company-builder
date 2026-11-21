@@ -126,7 +126,12 @@ export function migrateJobEvents(conn: Database.Database): void {
  * its own now is an **orphan** — its chain is stopped once (`WATCH_RESET`, 「仕組みの入れ替えのため、止まりました」) and the
  * approved version's responsible person (while a member) is told once (`job_chain_stopped`; the job's creator is not:
  * whether they read the record cannot be judged here, D7), so they choose the next watched やること. Only for a job whose
- * approved version is an event job of this build's shape (schema 2) that is not retired.
+ * approved version is an event job of this build's shape (schema 2) that **follows what it made** (`followMadeTask`; one
+ * that does not ends after its one firing — its occurrence done is its normal end, never an orphan) and is not retired.
+ * One more certain case (independent review): a chain stopped **by its own occurrence** — the stop on the watched record,
+ * the job's one occurrence of it needing a person or expired with that very code, of the approved version (every watch
+ * started over is a new version; no firing without an occurrence writes those codes) — gets the generation, so its
+ * 「もう一度」 still lets the chain go on.
  * Test: tests/unit/job-watch-generations.test.ts (on the frozen database before it), job-events.test.ts.
  */
 export function migrateJobWatchGenerations(conn: Database.Database): void {
@@ -136,22 +141,27 @@ export function migrateJobWatchGenerations(conn: Database.Database): void {
   const companies = conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>
   for (const { id: companyId } of companies) {
     conn.transaction(() => {
-      const cursors = conn.prepare(`SELECT job_id, watch_record_id, watch_fired, chain_stop_code FROM ai_job_event_cursors WHERE company_id = ? AND watch_generation IS NULL`)
-        .all(companyId) as Array<{ job_id: string; watch_record_id: string; watch_fired: number; chain_stop_code: string | null }>
+      const cursors = conn.prepare(`SELECT job_id, watch_record_id, watch_fired, chain_stop_code, chain_stop_record FROM ai_job_event_cursors
+          WHERE company_id = ? AND watch_generation IS NULL`)
+        .all(companyId) as Array<{ job_id: string; watch_record_id: string; watch_fired: number; chain_stop_code: string | null; chain_stop_record: string | null }>
       for (const c of cursors) {
-        const live = c.watch_fired === 1 && c.chain_stop_code === null
-        const mine = live
-          ? conn.prepare(`SELECT id, state FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_record_id = ?`).all(companyId, c.job_id, c.watch_record_id) as Array<{ id: string; state: string }>
+        const pin = (id: string) => conn.prepare(`UPDATE ai_job_occurrences SET watch_generation = 1 WHERE company_id = ? AND id = ? AND watch_generation IS NULL`).run(companyId, id)
+        // The approved version, when it is a 4a event job (this build's shape): who to tell, and whether it follows what it made.
+        const job = conn.prepare(`SELECT j.state, j.approved_version, v.acting_user_id, json_extract(v.definition, '$.trigger.followMadeTask') AS follows
+            FROM ai_jobs j JOIN ai_job_versions v ON v.company_id = j.company_id AND v.job_id = j.id
+            AND v.version = j.approved_version WHERE j.company_id = ? AND j.id = ? AND v.schema = 2 AND json_valid(v.definition)
+            AND json_extract(v.definition, '$.schema') = 2 AND json_extract(v.definition, '$.trigger.kind') = 'record'`)
+          .get(companyId, c.job_id) as { state: string; approved_version: number; acting_user_id: string; follows: number | null } | undefined
+        const mine = c.watch_fired === 1
+          ? conn.prepare(`SELECT id, state, outcome_code, job_version FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_record_id = ?`)
+            .all(companyId, c.job_id, c.watch_record_id) as Array<{ id: string; state: string; outcome_code: string | null; job_version: number }>
           : []
-        if (mine.length === 1 && (mine[0].state === 'due' || mine[0].state === 'running')) {
-          conn.prepare(`UPDATE ai_job_occurrences SET watch_generation = 1 WHERE company_id = ? AND id = ? AND watch_generation IS NULL`).run(companyId, mine[0].id)
-        } else if (live) {
-          // An orphan: stopped once, its responsible person told once — for an event job of this build's shape only.
-          const job = conn.prepare(`SELECT j.state, v.acting_user_id FROM ai_jobs j JOIN ai_job_versions v ON v.company_id = j.company_id AND v.job_id = j.id
-              AND v.version = j.approved_version WHERE j.company_id = ? AND j.id = ? AND v.schema = 2 AND json_valid(v.definition)
-              AND json_extract(v.definition, '$.schema') = 2 AND json_extract(v.definition, '$.trigger.kind') = 'record'`)
-            .get(companyId, c.job_id) as { state: string; acting_user_id: string } | undefined
-          if (job && job.state !== 'retired') {
+        const one = mine.length === 1 ? mine[0] : null
+        if (c.chain_stop_code === null) {
+          if (one && (one.state === 'due' || one.state === 'running')) pin(one.id)
+          else if (c.watch_fired === 1 && job && job.state !== 'retired' && job.follows === 1) {
+            // An orphan of a job that follows what it made (only such a chain goes on; one that does not follow ends after
+            // its one firing — its occurrence done is its normal end): stopped once, its responsible person told once.
             const at = new Date().toISOString()
             conn.prepare(`UPDATE ai_job_event_cursors SET chain_stop_code = 'WATCH_RESET', chain_stop_record = watch_record_id, chain_stop_at = ?
                 WHERE company_id = ? AND job_id = ? AND chain_stop_code IS NULL`).run(at, companyId, c.job_id)
@@ -161,6 +171,12 @@ export function migrateJobWatchGenerations(conn: Database.Database): void {
                   VALUES (?, ?, ?, 'job_chain_stopped', '', 0, '', NULL, NULL, ?, ?, NULL)`).run(companyId, randomUUID(), job.acting_user_id, `job_chain_stopped:${c.job_id}:${at}`, at)
             }
           }
+        } else if (one && c.chain_stop_record === c.watch_record_id && one.outcome_code === c.chain_stop_code
+          && (one.state === 'needs_person' || one.state === 'expired') && job && one.job_version === job.approved_version) {
+          // Stopped by its own occurrence, which 「もう一度」 may still run (needs a person / expired, of the approved version —
+          // every watch started over is a new version, so an earlier watch's occurrence is never of it; and no firing
+          // without an occurrence writes these codes): it is the watch's, so its success lets the chain go on, as in 4a.
+          pin(one.id)
         }
         conn.prepare(`UPDATE ai_job_event_cursors SET watch_generation = 1 WHERE company_id = ? AND job_id = ? AND watch_generation IS NULL`).run(companyId, c.job_id)
       }

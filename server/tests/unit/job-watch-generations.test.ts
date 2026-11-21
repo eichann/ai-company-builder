@@ -35,9 +35,9 @@ function frozen(): Database.Database {
 let n = 0
 const hex = () => (++n).toString(16).padStart(32, '0')
 /** A 4a event job (schema 2) approved for `acting`, with its cursor watching `watch`. */
-function eventJob(conn: Database.Database, opts: { watch: string; fired: boolean; stop?: string | null; acting?: string; state?: string; schema?: number }): string {
+function eventJob(conn: Database.Database, opts: { watch: string; fired: boolean; stop?: string | null; acting?: string; state?: string; schema?: number; follows?: boolean }): string {
   const job = `job.${hex()}`
-  const definition = JSON.stringify({ schema: opts.schema ?? 2, name: '次のやること', actingUser: opts.acting ?? 'u-alice', trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: opts.watch, followMadeTask: true } })
+  const definition = JSON.stringify({ schema: opts.schema ?? 2, name: '次のやること', actingUser: opts.acting ?? 'u-alice', trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: opts.watch, followMadeTask: opts.follows ?? true } })
   conn.prepare(`INSERT INTO ai_jobs (company_id, id, name, state, acting_user_id, latest_version, approved_version, approved_fingerprint, accepted_version, accepted_consent, created_by, created_at, updated_at)
     VALUES (?, ?, '次のやること', ?, ?, 1, 1, 'f', 1, 'c', 'u-owner', ?, ?)`).run(CO, job, opts.state ?? 'active', opts.acting ?? 'u-alice', TS, TS)
   conn.prepare(`INSERT INTO ai_job_versions (company_id, job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at, approved_by, approved_at)
@@ -46,10 +46,10 @@ function eventJob(conn: Database.Database, opts: { watch: string; fired: boolean
     VALUES (?, ?, 10, ?, ?, ?, ?, ?, ?, ?)`).run(CO, job, opts.watch, opts.watch, opts.fired ? 1 : 0, opts.stop ?? null, opts.stop ? opts.watch : null, opts.stop ? TS : null, TS)
   return job
 }
-function eventOccurrence(conn: Database.Database, job: string, record: string, state: string, seq: number): string {
+function eventOccurrence(conn: Database.Database, job: string, record: string, state: string, seq: number, code: string | null = null): string {
   const id = `occ.${hex()}`
-  conn.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at, event_seq, event_record_id, event_version, event_day)
-    VALUES (?, ?, ?, 1, ?, 'Asia/Tokyo', ?, ?, ?, ?, ?, ?, ?, 1, '2026-11-20')`).run(CO, id, job, `ev:${seq}`, TS, TS, state, TS, TS, seq, record)
+  conn.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, outcome_code, created_at, updated_at, event_seq, event_record_id, event_version, event_day)
+    VALUES (?, ?, ?, 1, ?, 'Asia/Tokyo', ?, ?, ?, ?, ?, ?, ?, ?, 1, '2026-11-20')`).run(CO, id, job, `ev:${seq}`, TS, TS, state, code, TS, TS, seq, record)
   return id
 }
 const genOf = (conn: Database.Database, occ: string) => (conn.prepare('SELECT watch_generation AS g FROM ai_job_occurrences WHERE company_id = ? AND id = ?').get(CO, occ) as { g: number | null }).g
@@ -174,5 +174,59 @@ describe('an orphaned watch is stopped once and its responsible person told once
       expect(cursorOf(conn, j)).toEqual({ g: 1, stop: null, record: null })
       expect(told(conn, j)).toEqual([])
     }
+  })
+})
+
+describe('a job that does not follow what it made ends after its one firing (independent review)', () => {
+  it('fired, its occurrence done, nothing stopped: its normal end — not stopped, nobody told', () => {
+    const conn = frozen()
+    const job = eventJob(conn, { watch: 'task-a', fired: true, follows: false })
+    const done = eventOccurrence(conn, job, 'task-a', 'done', 1)
+    const none = eventJob(conn, { watch: 'task-b', fired: true, follows: false })
+    initDatabase(conn)
+    expect(genOf(conn, done)).toBeNull()
+    for (const j of [job, none]) {
+      expect(cursorOf(conn, j)).toEqual({ g: 1, stop: null, record: null })
+      expect(told(conn, j)).toEqual([])
+    }
+  })
+})
+
+describe('a chain stopped by its own occurrence keeps it, so its 「もう一度」 lets the chain go on (independent review)', () => {
+  it('the one occurrence of the watched record, needing a person or expired with the stop’s code, of the approved version', () => {
+    const conn = frozen()
+    const expired = eventJob(conn, { watch: 'task-a', fired: true, stop: 'EXPIRED' })
+    const e = eventOccurrence(conn, expired, 'task-a', 'expired', 1, 'EXPIRED')
+    const failed = eventJob(conn, { watch: 'task-b', fired: true, stop: 'TASK_NOT_CREATED' })
+    const f = eventOccurrence(conn, failed, 'task-b', 'needs_person', 2, 'TASK_NOT_CREATED')
+    initDatabase(conn)
+    expect(genOf(conn, e)).toBe(1)
+    expect(genOf(conn, f)).toBe(1)
+    expect(cursorOf(conn, expired)).toEqual({ g: 1, stop: 'EXPIRED', record: 'task-a' })
+    expect(told(conn, expired)).toEqual([])
+  })
+
+  it('not when the code differs, the occurrence is held, there are two, the stop is on another record, or its version is not the approved one', () => {
+    const conn = frozen()
+    const cases: string[] = []
+    const otherCode = eventJob(conn, { watch: 'task-a', fired: true, stop: 'PAUSED_EVENT' })
+    cases.push(eventOccurrence(conn, otherCode, 'task-a', 'expired', 1, 'EXPIRED'))
+    const held = eventJob(conn, { watch: 'task-b', fired: true, stop: 'JOB_PAUSED' })
+    cases.push(eventOccurrence(conn, held, 'task-b', 'held', 2, 'JOB_PAUSED'))
+    const two = eventJob(conn, { watch: 'task-c', fired: true, stop: 'EXPIRED' })
+    cases.push(eventOccurrence(conn, two, 'task-c', 'expired', 3, 'EXPIRED'), eventOccurrence(conn, two, 'task-c', 'done', 4))
+    const elsewhere = eventJob(conn, { watch: 'task-d', fired: true, stop: 'EXPIRED' })
+    conn.prepare("UPDATE ai_job_event_cursors SET chain_stop_record = 'task-old' WHERE company_id = ? AND job_id = ?").run(CO, elsewhere)
+    cases.push(eventOccurrence(conn, elsewhere, 'task-d', 'expired', 5, 'EXPIRED'))
+    const oldVersion = eventJob(conn, { watch: 'task-e', fired: true, stop: 'EXPIRED' })
+    const o = eventOccurrence(conn, oldVersion, 'task-e', 'expired', 6, 'EXPIRED')
+    conn.prepare(`INSERT INTO ai_job_versions (company_id, job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at, approved_by, approved_at)
+      SELECT company_id, job_id, 2, schema, definition, 'f2', consent_fingerprint, acting_user_id, created_by, created_at, approved_by, approved_at FROM ai_job_versions WHERE company_id = ? AND job_id = ?`).run(CO, oldVersion)
+    conn.prepare('UPDATE ai_jobs SET latest_version = 2, approved_version = 2 WHERE company_id = ? AND id = ?').run(CO, oldVersion)
+    cases.push(o)
+    const notFired = eventJob(conn, { watch: 'task-f', fired: false, stop: 'EXPIRED' })
+    cases.push(eventOccurrence(conn, notFired, 'task-f', 'expired', 7, 'EXPIRED'))
+    initDatabase(conn)
+    for (const id of cases) expect(genOf(conn, id), id).toBeNull()
   })
 })
