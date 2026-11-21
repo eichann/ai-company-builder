@@ -175,9 +175,11 @@ export function createJobEvents(deps: JobEventDeps) {
 
   /**
    * The chain of watched records stopped (owner decision ①): kept on the cursor with why and on which record, and — once
-   * per stop — the responsible person and the job's creator (while an owner / admin) are told, naming only the job (the
-   * cause is built when read: a record-side one in full only for someone who reads the record). In the caller's
-   * transaction.
+   * per stop — the responsible person is told (always: they choose the next watched やること — the owner-approved exception
+   * to ⑥, D7 = A) and the job's creator only while an owner / admin **who reads that record now** (every stop is
+   * record-side: it happened because the record reached the watched state; for anyone else it does not exist, as an
+   * event occurrence of a record they cannot read). The notice names only the job; its cause is built when read
+   * (`jobs.chainStopNotice`, which checks the reader again). In the caller's transaction.
    */
   function chainStopped(handle: CompanyData, jobId: string, code: string, recordId: string, told: Set<string>): void {
     const at = clock.now()
@@ -187,8 +189,8 @@ export function createJobEvents(deps: JobEventDeps) {
     const version = job.approvedVersion === null ? null : handle.jobs.version(jobId, job.approvedVersion)
     const to = new Set<string>()
     if (version && deps.roleOf(handle.companyId, version.actingUserId) !== null) to.add(version.actingUserId)
-    const creatorRole = deps.roleOf(handle.companyId, job.createdBy)
-    if (creatorRole === 'owner' || creatorRole === 'admin') to.add(job.createdBy)
+    const creator = memberOf(handle.companyId, job.createdBy)
+    if (creator && (creator.role === 'owner' || creator.role === 'admin') && readableRow(handle, creator, recordId) !== null) to.add(job.createdBy)
     const written = handle.notifications.insert([...to].map(userId => ({
       id: ids.newId(), userId, kind: 'job_chain_stopped' as const, recordId: '', recordVersion: 0, action: '', actorId: null, actorKind: null,
       dedupeKey: `job_chain_stopped:${jobId}:${at}`, createdAt: at, readAt: null,
