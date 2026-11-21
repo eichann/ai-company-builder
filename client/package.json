@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vite",
     "dev:no-spellcheck": "ELECTRON_DISABLE_SPELLCHECK=1 vite",
-    "build": "node scripts/build-speech.mjs && tsc && vite build && node scripts/check-preloads.mjs && electron-builder",
+    "build": "npx tsx scripts/check-trust-root.ts && node scripts/build-speech.mjs && tsc && vite build && node scripts/check-preloads.mjs && electron-builder",
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -48,7 +48,7 @@
     "asarUnpack": [
       "node_modules/dugite/git/**"
     ],
-    "beforePack": "./scripts/universal-git.mjs",
+    "beforePack": "./scripts/before-pack.mjs",
     "mac": {
       "category": "public.app-category.productivity",
       "target": [

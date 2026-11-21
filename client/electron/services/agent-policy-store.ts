@@ -103,7 +103,10 @@ export function parseAgentPolicy(data: unknown): AgentPolicy | undefined {
   const secondOpinion = parseSecondOpinionPolicy((value as { secondOpinion?: unknown }).secondOpinion)
   // 「ブラウザ操作」: absent (an older server) or not valid = left out, which the app reads as off.
   const browser = parseBrowserPolicy((value as { browser?: unknown }).browser)
-  return { version: value.version, sandbox: policy, ...(stop ? { stop } : {}), ...(plugins ? { plugins } : {}), ...(secondOpinion ? { secondOpinion } : {}), ...(browser ? { browser } : {}) }
+  // Plugin trust's marker (plugin-trust.md "P2"): a short hex digest only; anything else is left out.
+  const rawTrust = (value as { pluginTrust?: unknown }).pluginTrust
+  const pluginTrust = typeof rawTrust === 'string' && /^[0-9a-f]{1,64}$/.test(rawTrust) ? rawTrust : undefined
+  return { version: value.version, sandbox: policy, ...(stop ? { stop } : {}), ...(plugins ? { plugins } : {}), ...(secondOpinion ? { secondOpinion } : {}), ...(browser ? { browser } : {}), ...(pluginTrust ? { pluginTrust } : {}) }
 }
 
 /** The policy's `browser` part checked with the shared rules, or undefined (= off). */

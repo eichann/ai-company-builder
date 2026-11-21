@@ -285,6 +285,8 @@ function packageProblem(p: unknown, i: number): string | null {
 const scopeOk = (scope: unknown): scope is string =>
   typeof scope === 'string' && scope.startsWith('company:') && COMPANY_ID_RE.test(scope.slice('company:'.length))
 const serverOk = (server: unknown): server is string => typeof server === 'string' && server.length <= 200 && SERVER_RE.test(server)
+/** A server as the signed documents name it: `http(s)://host[:port]`, nothing after (no path, no trailing slash). */
+export const isTrustServer = serverOk
 
 /** A company's list, shape only (closed at every level: a key this app does not know refuses the list). */
 export function parseTargets(value: unknown): { ok: true; document: TargetsDocument } | { ok: false; problem: string } {

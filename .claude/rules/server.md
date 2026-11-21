@@ -341,7 +341,9 @@ GET  /api/config                                  setup state (no auth)
                               PUT …/mapping, POST …/mapping/restore, POST …/mapping/check, POST …/import,
                               POST …/connection/renew,
                               POST …/records/:recordId/operations/:operation,
-                              GET …/operations/:operationId (+ POST /undo, /reconcile)  plugins.ts
+                              GET …/operations/:operationId (+ POST /undo, /reconcile),
+                              GET /plugin-trust (any member: own company's signed lists,
+                              plugin-trust.md "P2")                                       plugins.ts
                                                                 (つなぎ先のプラグイン: plugins.md)
                               GET /google, PUT /google/client, PUT /google/enabled,
                               DELETE /google/grants/:userId,

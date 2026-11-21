@@ -17,6 +17,9 @@ import type { PluginStepRuns } from '../services/run-subjects'
 import type { ApprovalRoleHolders } from '../services/approvals'
 import { createPluginRunGate } from '../services/plugin-ai-tools'
 import { createPluginDistribution } from '../services/plugin-distribution'
+import { createPluginTrustService } from '../services/plugin-trust'
+import { diskPluginTrustFiles } from '../adapters/plugin-trust-files'
+import { nodePluginTrustCrypto } from '../adapters/plugin-trust-crypto'
 import { createPluginRoleService } from '../services/plugin-roles'
 import { parsePluginRunStep, type OperationRoleHolds, type RunStepOf } from '../services/plugin-operation-checks'
 import { createPluginStepService } from '../services/plugin-steps'
@@ -30,7 +33,13 @@ export interface PluginsLaneDeps {
   companyData: CompanyDataSource
   clock: Clock
   pluginShelf: PluginShelf
-  agentPolicy: Pick<AgentPolicyService, 'usePlugins'>
+  agentPolicy: Pick<AgentPolicyService, 'usePlugins' | 'usePluginTrust'>
+  /** The shelf's folder (`PLUGINS_DIR`): its `trust/` holds the signed lists (plugin-trust.md "P2"). */
+  pluginsDir: string | null
+  /** This server's public URL as the signed documents name it (lib/config.ts `publicUrl`). */
+  publicUrl: () => string
+  /** The clock plugin trust judges times with (tests pass their own; default the lane's clock). */
+  pluginTrustNow?: () => number
   recordEngine: {
     useRoles(r: RoleHolders): void
     useAfterAction(f: AfterActionListener): void
@@ -69,6 +78,13 @@ export function wirePluginsLane(deps: PluginsLaneDeps) {
     companyData: deps.companyData, shelf: deps.pluginShelf, pinnedVersions: (companyId, pluginId) => pluginSteps.pinnedVersions(companyId, pluginId),
   })
   deps.agentPolicy.usePlugins(pluginDistribution)
+  // Plugin trust P2: each company's signed list and freshness document from <PLUGINS_DIR>/trust/,
+  // checked with the core's rules and handed only to that company's members (nothing enforced yet).
+  const pluginTrust = createPluginTrustService({
+    files: diskPluginTrustFiles(deps.pluginsDir), crypto: nodePluginTrustCrypto,
+    clock: { nowMs: deps.pluginTrustNow ?? (() => deps.clock.nowMs()) }, publicUrl: deps.publicUrl,
+  })
+  deps.agentPolicy.usePluginTrust(pluginTrust)
   // C3 「役割」: the one resolution of business roles' holders, for the engine's `who` and the approvers.
   const pluginRoles = createPluginRoleService({
     companyData: deps.companyData, clock: deps.clock, shelf: deps.pluginShelf,
@@ -83,5 +99,5 @@ export function wirePluginsLane(deps: PluginsLaneDeps) {
   // C4 「業務×操作の関所」: a step's run uses only the connector roles its step declares
   // (its operations are gated in plugin-operation-checks.ts, through the plugins service).
   const pluginRunGate = createPluginRunGate({ companyData: deps.companyData, shelf: deps.pluginShelf, runStepOf })
-  return { pluginDistribution, pluginRoles, pluginRunGate, pluginSteps }
+  return { pluginDistribution, pluginRoles, pluginRunGate, pluginSteps, pluginTrust }
 }

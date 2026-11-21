@@ -51,6 +51,8 @@ describe('plugin shelf', () => {
     rmSync(join(root, 'linked@0.1.0/mapping.yaml'))
     symlinkSync(elsewhere, join(root, 'linked@0.1.0/mapping.yaml'))
     mkdirSync(join(root, 'Not A Package'))
+    // The operator's signed lists (plugin-trust.md "P2") live beside the packages and are not one.
+    mkdirSync(join(root, 'trust', 'root'), { recursive: true })
 
     const shelf = createPluginShelf(diskPluginShelf(root))
     const result = await shelf.load()

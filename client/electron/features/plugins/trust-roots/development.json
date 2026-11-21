@@ -1,0 +1,13 @@
+{
+ "signed": "{\n \"_type\": \"acb-root\",\n \"version\": 1,\n \"expires\": \"2036-01-01T00:00:00Z\",\n \"keys\": {\n  \"dev-root-1\": \"AAAAC3NzaC1lZDI1NTE5AAAAIJcFcvZqbCYWAIQ9FOR3cIaZ9V90SBLLdigM1zUCQiJy\",\n  \"dev-root-2\": \"AAAAC3NzaC1lZDI1NTE5AAAAIL2aFY/vW6Afd9E/G0fHeyUcZyl9G2/gjKWXfD0cGklp\",\n  \"dev-root-3\": \"AAAAC3NzaC1lZDI1NTE5AAAAICqWB6Ds6tLLUa6EWId+iAoUcTlRVKa2fBc1uesy5db+\",\n  \"dev-fresh-1\": \"AAAAC3NzaC1lZDI1NTE5AAAAIFV3jT5+JrDLNW/AA73oTvzw0+3ZxoRIgAIMqKzZc8Ig\",\n  \"dev-targets-1\": \"AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBHFPb4mmzjJl04lasS7Xt/KNl3dYrflr4Krv+KV0Xt+Ue7rg5Mohm7DpQ1vJbDFqKJVSdn7jqaca25/ZhkpVp6Y=\"\n },\n \"roles\": {\n  \"root\": {\n   \"keys\": [\n    \"dev-root-1\",\n    \"dev-root-2\",\n    \"dev-root-3\"\n   ],\n   \"threshold\": 2\n  },\n  \"targets\": {\n   \"keys\": [\n    \"dev-targets-1\"\n   ],\n   \"threshold\": 1\n  },\n  \"freshness\": {\n   \"keys\": [\n    \"dev-fresh-1\"\n   ],\n   \"threshold\": 1\n  }\n }\n}",
+ "signatures": [
+  {
+   "key_id": "dev-root-1",
+   "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAglwVy9mpsJhYAhD0U5Hdwhpn1X3\nRIEst2KAzXNQJCInIAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABALDfljWAmmNlMGaYTcQKQuYzLX9nkOAz6C1RTCzZFw+mhMKye1kKd5I\nfBulHaCYqyoSynTiqBe/UXqrWpm3h/CQ==\n-----END SSH SIGNATURE-----\n"
+  },
+  {
+   "key_id": "dev-root-2",
+   "sig": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgvZoVj+9boB930T8bR8d7JRxnKX\n0bb+CMpZd8PRwaSWkAAAALYWNiLXJvb3QtdjEAAAAAAAAABnNoYTUxMgAAAFMAAAALc3No\nLWVkMjU1MTkAAABAK94B53/7xpE27y3dr9jvKm2KZgpSOMIwODTKwfhPtKlRFsb7riHOKl\n7T97v5KHbNCQxCbFXBCLuJuTAlb7+7CA==\n-----END SSH SIGNATURE-----\n"
+  }
+ ]
+}

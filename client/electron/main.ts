@@ -37,6 +37,7 @@ import { wireChatHistory } from './features/chat-history/wire'
 import { createToolApprovals, registerAgentInteractionsIpc } from './features/agent-interactions/ipc'
 import { requestFromOwner } from './features/agent-interactions/owner'
 import { wireAgentControl } from './features/agent-control/wire'
+import { wirePluginTrust } from './features/plugins/trust-wire'
 import { registerSettingsIpc } from './features/settings/ipc'
 import { registerAppLinkIpc } from './features/app-link/ipc'
 import { APP_LINK_SCHEME, appLinkInArgs } from './features/app-link/link'
@@ -297,6 +298,8 @@ const agentControl = wireAgentControl({
   onRecords: companyId => pushSignals.records(companyId),
   onNotifications: companyId => pushSignals.notifications(companyId),
   onPluginsChanged: companyId => appWindow.send('plugins:changed', { companyId }),
+  // Plugin trust P2: the signed lists, kept under <userData>/trust; nothing enforced yet (plugin-trust.md).
+  pluginTrust: wirePluginTrust({ userDataDir, serverUrl: getServerApiUrl, session, packaged: app.isPackaged }),
 })
 // 「議事録が届きました」 (features/minutes): checked with the session here, only while Google may read minutes.
 const minutes = createMinutesChecker({

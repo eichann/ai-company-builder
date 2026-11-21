@@ -1,0 +1,3 @@
+{
+ "placeholder": "The production root does not exist yet. The owner makes it with the offline root keys (.claude/rules/plugin-trust.md \"Owner steps\"); until then a release build refuses to be made (client/scripts/check-trust-root.ts)."
+}
