@@ -30,7 +30,7 @@ import {
 } from '../../shared/core/plugin-browser-declaration'
 import { parsePluginManifest } from '../../shared/core/plugins'
 import type {
-  BrowserClaim, BrowserExecutionView, BrowserPermit, BrowserPlanView, BrowserReportAnswer, BrowserTypeGrantsView, BrowserWaitingItem,
+  BrowserClaim, BrowserExecutionView, BrowserPermit, BrowserPlanView, BrowserReportAnswer, BrowserTypeGrantsView, BrowserWaitingPage,
 } from '../../shared/types/browser-plans'
 import type { AccountDirectory } from '../ports/accounts'
 import type {
@@ -96,6 +96,19 @@ export const BROWSER_PLAN_WORDS = {
 } as const
 
 const W = BROWSER_PLAN_WORDS
+/** Rows per page of the waiting list (lifecycle work has no limit: `executionsIn` without a page). */
+export const WAITING_PAGE = 100
+/** Why a claimed execution became void when the permit's checks refused (the refusal's code → the reason kept). */
+const GATE_VOID_REASONS: Record<string, string> = {
+  BROWSER_AI_STOPPED: 'stopped',
+  BROWSER_NOT_ALLOWED: 'setting',
+  BROWSER_TYPE_NOT_GRANTED: 'not-granted',
+  BROWSER_TYPE_RETIRED: 'retired',
+  BROWSER_TYPE_NOT_APPROVED: 'not-approved',
+  BROWSER_APP_TOO_OLD: 'app-too-old',
+  BROWSER_OPERATION_NOT_YET: 'not-yet',
+  BROWSER_UNKNOWN_OPERATION: 'unknown-operation',
+}
 const PLAN_ID_RE = /^bp_[0-9a-f]{32}$/
 const EXEC_ID_RE = /^bx_[0-9a-f]{32}$/
 const HASH_RE = /^sha256:[0-9a-f]{64}$/
@@ -495,7 +508,12 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
         if (exec.state !== 'claimed') return refuse('conflict', W.executionClosed, { code: 'BROWSER_EXECUTION_CLOSED' })
         const plan = repo.plan(exec.planId) as BrowserPlanRow
         const passed = gate(member, keyOf(plan), plan.operation, appVersion)
-        if (!passed.ok) return passed
+        if (!passed.ok) {
+          // A stop, a changed setting, a revoked grant, a retired combination or a too-old app ends this
+          // execution (design memo §30.4: claimed → void): lifting it later never revives the same secret.
+          finish(member.companyId, exec, 'void', { voidReason: GATE_VOID_REASONS[String(passed.body.code)] ?? 'refused' }, now)
+          return passed
+        }
         if (repo.lockHolder(exec.lockKey) !== exec.id) return refuse('conflict', W.executionClosed, { code: 'BROWSER_EXECUTION_CLOSED' })
         if (!repo.setExecutionState(exec.id, 'claimed', 'permitted', { permittedAt: iso(now) })) return refuse('conflict', W.permitUsed, { code: 'BROWSER_PERMIT_USED' })
         return ok({ permittedAt: iso(now), validMs: BROWSER_PLAN_TIMES.permit })
@@ -586,16 +604,22 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
       })
     },
 
-    /** GET /browser-executions-waiting 「確かめ待ち」: the member's own; an owner / admin also everyone else's. */
-    waiting(member: Member): Outcome<BrowserWaitingItem[]> {
+    /**
+     * GET /browser-executions-waiting?after=<executionId> 「確かめ待ち」: the member's own; an owner / admin
+     * also everyone else's. A page of open executions (oldest claim first); `next` continues it.
+     */
+    waiting(member: Member, after?: string): Outcome<BrowserWaitingPage> {
+      if (after !== undefined && !EXEC_ID_RE.test(after)) return refuse('bad-request', W.badPlan, { code: 'BROWSER_BAD_CURSOR' })
       return transactions.run(() => {
         const now = clock.nowMs()
         const repo = plans(member.companyId)
         const full = hasFullAccess(member.role)
-        const open = repo.executionsIn(['claimed', 'permitted', 'unknown'], full ? undefined : member.userId)
+        const page = repo.executionsIn(['claimed', 'permitted', 'unknown'], full ? undefined : member.userId, { limit: WAITING_PAGE, after })
+        const next = page.length === WAITING_PAGE ? page[page.length - 1].id : null
+        const open = page
           .map(e => settleExecution(member.companyId, e, now))
           .filter(e => e.state === 'permitted' || e.state === 'unknown')
-        return ok(open.map(exec => {
+        return ok({ next, items: open.map(exec => {
           const plan = repo.plan(exec.planId) as BrowserPlanRow
           const content = contentOf(plan)
           const operation = findCombination(keyOf(plan))?.browser.operations[plan.operation]
@@ -609,7 +633,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
             permittedAt: exec.permittedAt, confirmableAt: confirmable === null ? null : iso(confirmable),
             canConfirm: exec.state === 'unknown' && confirmable !== null && now >= confirmable && (mine || forOthers),
           }
-        }))
+        }) })
       })
     },
 

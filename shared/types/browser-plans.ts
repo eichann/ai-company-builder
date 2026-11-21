@@ -105,6 +105,12 @@ export interface BrowserWaitingItem {
   canConfirm: boolean
 }
 
+/** GET /browser-executions-waiting: one page; `next` is the `after` of the next page (null: the last). */
+export interface BrowserWaitingPage {
+  items: BrowserWaitingItem[]
+  next: string | null
+}
+
 /** GET /browser-type-grants (owner/admin): the approved operation types and who may use them. */
 export interface BrowserTypeGrantsView {
   types: Array<{ connector: string; version: string; declarationHash: string; operation: string; label: string }>

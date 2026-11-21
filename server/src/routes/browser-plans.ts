@@ -12,7 +12,7 @@
  *   POST /browser-plans/:planId/claim                     once: the execution, its secret, the fixed plan
  *   POST /browser-executions/:executionId/send-permit     X-ACB-Browser-Execution: <secret>; once, 5 s
  *   POST /browser-executions/:executionId/confirm         { result: done | not_done } 済んでいた / されていなかった
- *   GET  /browser-executions-waiting                      「確かめ待ち」
+ *   GET  /browser-executions-waiting?after=               「確かめ待ち」, a page at a time
  *   GET  /browser-type-grants                             owner/admin: types and who may use them
  *   PUT  /browser-type-grants/:userId                     owner/admin: { connector, operation, declarationHash, allowed }
  * Mounted at /api:
@@ -69,7 +69,7 @@ browserPlansRoute.post('/browser-executions/:executionId/confirm', companyMember
 })
 
 browserPlansRoute.get('/browser-executions-waiting', companyMember, (c) => {
-  const r = browserPlans.waiting(c.var.member)
+  const r = browserPlans.waiting(c.var.member, c.req.query('after'))
   return r.ok ? c.json({ success: true, data: r.value }) : refusal(c, r)
 })
 

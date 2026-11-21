@@ -75,8 +75,12 @@ export interface BrowserPlanRepository {
   insertExecution(row: BrowserExecutionRow): void
   execution(executionId: string): BrowserExecutionRow | null
   executionOfPlan(planId: string): BrowserExecutionRow | null
-  /** Executions in any of these states (the company's; of one member when given). */
-  executionsIn(states: readonly BrowserExecutionState[], userId?: string): BrowserExecutionRow[]
+  /**
+   * Executions in any of these states (the company's; of one member when given), oldest claim first.
+   * No limit unless `page` is given: lifecycle work (leaving the company) must see every row. A page
+   * (the waiting list) is `limit` rows after the execution `after` (by claim time, then id).
+   */
+  executionsIn(states: readonly BrowserExecutionState[], userId?: string, page?: { limit: number; after?: string }): BrowserExecutionRow[]
   /** Compare-and-set: only from `from`. True when the row changed. */
   setExecutionState(executionId: string, from: BrowserExecutionState, to: BrowserExecutionState, change: BrowserExecutionChange): boolean
 

@@ -23,7 +23,7 @@ import { fileBrowserConnectorCatalog } from '../../src/adapters/browser-connecto
 import { sha256TokenDigest } from '../../src/adapters/system'
 import { hashCanonical } from '../../src/lib/content-hash'
 import { createBrowserPlanService, type BrowserPlanService } from '../../src/services/browser-plans'
-import type { ApprovedCombinationRow } from '../../src/ports/browser-plans'
+import type { ApprovedCombinationRow, BrowserPlanRepository } from '../../src/ports/browser-plans'
 import type { CompanyDataSource } from '../../src/ports/company-data'
 import type { BrowserOperationSettings } from '../../../shared/core/browser-operation'
 import type { Member } from '../../src/services/access'
@@ -134,7 +134,13 @@ describe('registering a plan', () => {
     expect(p.facts.shared_with.value).toEqual({ count: 1, items: ['第1回'] })
     expect(p.sharedNote).toContain('共有のリマインダ')
     // The content never changes in the table (trigger).
-    expect(() => conn.prepare("UPDATE browser_plans SET content = '{}' WHERE id = ?").run(p.id)).toThrow(/never changes/)
+    // Nor any column authorisation or the lock key reads.
+    for (const [column, v] of [['content', '{}'], ['id', 'bp_x'], ['user_id', 'u-bob'], ['connector_id', 'other'], ['connector_version', '9.9.9'], ['operation', 'other'],
+      ['declaration_hash', 'x'], ['checker_hash', 'x'], ['facts_version', 2], ['account', 'acc2'], ['content_hash', 'x'], ['created_at', 'x'], ['expires_at', 'x']] as const) {
+      expect(() => conn.prepare(`UPDATE browser_plans SET ${column} = ? WHERE id = ?`).run(v, p.id), column).toThrow(/never changes/)
+    }
+    // The state may move.
+    expect(conn.prepare("UPDATE browser_plans SET state = 'closed' WHERE id = ?").run(p.id).changes).toBe(1)
   })
 
   it('refuses a combination not approved (another checker, declaration or facts version) and a retired one', () => {
@@ -346,7 +352,7 @@ describe('the send permit', () => {
     expect(code(svc.permit({ ...alice, companyId: OTHER_CO }, claim.executionId, claim.secret, undefined))).toBe('BROWSER_EXECUTION_NOT_FOUND')
   })
 
-  it('is refused after 2 minutes without one, or when the stop, the setting, the grant or the combination changed since the claim — nothing becomes permitted', () => {
+  it('is refused after 2 minutes without one; a stop, a changed setting, a revoked grant, a retired combination or a too-old app ends the execution for good', () => {
     const late = claimed()
     now += 120_000
     expect(code(svc.permit(alice, late.claim.executionId, late.claim.secret, undefined))).toBe('BROWSER_EXECUTION_CLOSED')
@@ -356,14 +362,24 @@ describe('the send permit', () => {
       [() => { policy = { mode: 'off', sites: [SITE] } }, () => { policy = { mode: 'on', sites: [SITE] } }, 'BROWSER_NOT_ALLOWED'],
       [() => grant(alice, false), () => grant(alice), 'BROWSER_TYPE_NOT_GRANTED'],
       [() => { rows = [{ ...APPROVED, status: 'retired' }]; build() }, () => { rows = [APPROVED]; build() }, 'BROWSER_TYPE_RETIRED'],
+      [() => { rows = [{ ...APPROVED, minAppVersion: '0.0.2' }]; build() }, () => { rows = [APPROVED]; build() }, 'BROWSER_APP_TOO_OLD'],
     ]
+    const reasons: string[] = []
     for (const [i, [change, undo, expected]] of changes.entries()) {
       const c = claimed(alice, { reminder: String(20 + i), step: '22' })
+      const key = lockKeyOf(c.claim.executionId)
       change()
       expect(code(svc.permit(alice, c.claim.executionId, c.claim.secret, undefined)), expected).toBe(expected)
+      // Void at once, its target let go; lifting the cause never revives the same secret.
+      expect(lockHolder(key), expected).toBeNull()
       undo()
-      expect(execState(alice, c.plan.id)).toBe('claimed')
+      expect(code(svc.permit(alice, c.claim.executionId, c.claim.secret, undefined)), expected).toBe('BROWSER_EXECUTION_CLOSED')
+      const view = value(svc.get(alice, c.plan.id))
+      expect(view.state).toBe('done')
+      expect(view.execution?.state).toBe('void')
+      reasons.push(view.execution?.voidReason as string)
     }
+    expect(reasons).toEqual(['stopped', 'setting', 'not-granted', 'retired', 'app-too-old'])
   })
 
   it('an execution that does not hold its target lock gets no permit', () => {
@@ -511,13 +527,13 @@ describe('「確かめた」 (済んでいた / されていなかった)', () =
     const a = permitted()
     claimed(alice, { reminder: '60', step: '22' })
     const b = permitted(bob, { reminder: '61', step: '22' })
-    expect(value(svc.waiting(alice)).map(i => [i.executionId, i.state, i.canConfirm])).toEqual([[a.claim.executionId, 'permitted', false]])
+    expect(value(svc.waiting(alice)).items.map(i => [i.executionId, i.state, i.canConfirm])).toEqual([[a.claim.executionId, 'permitted', false]])
     now += 35_000
-    expect(value(svc.waiting(alice)).map(i => [i.state, i.canConfirm])).toEqual([['unknown', true]])
-    const forAdmin = value(svc.waiting(admin))
+    expect(value(svc.waiting(alice)).items.map(i => [i.state, i.canConfirm])).toEqual([['unknown', true]])
+    const forAdmin = value(svc.waiting(admin)).items
     expect(forAdmin.map(i => i.executionId).sort()).toEqual([a.claim.executionId, b.claim.executionId].sort())
     expect(forAdmin.every(i => !i.canConfirm)).toBe(true)
-    expect(value(svc.waiting(bob)).map(i => i.executionId)).toEqual([b.claim.executionId])
+    expect(value(svc.waiting(bob)).items.map(i => i.executionId)).toEqual([b.claim.executionId])
   })
 })
 
@@ -544,6 +560,48 @@ describe('leaving the company', () => {
   })
 })
 
+function seedOpen(count: number, state: 'claimed' | 'permitted') {
+  const insertPlan = conn.prepare(`INSERT INTO browser_plans (company_id, id, user_id, connector_id, connector_version, operation, declaration_hash, checker_hash,
+    facts_version, account, content, content_hash, state, created_at, expires_at) VALUES (?, ?, ?, 'lstep', ?, ?, ?, ?, 1, 'acc1', ?, 'h', 'claimed', ?, ?)`)
+  const insertExec = conn.prepare(`INSERT INTO browser_executions (company_id, id, plan_id, user_id, secret_hash, lock_key, state, claimed_at, permitted_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+  const insertLock = conn.prepare('INSERT INTO browser_target_locks (company_id, lock_key, execution_id, created_at) VALUES (?, ?, ?, ?)')
+  const content = JSON.stringify({ target: { reminder: '1', step: '2' } })
+  conn.transaction(() => {
+    for (let i = 0; i < count; i++) {
+      const plan = `bp_${String(i).padStart(32, '0')}`
+      const exec = `bx_${String(i).padStart(32, '0')}`
+      insertPlan.run(CO, plan, alice.userId, APPROVED.version, OP, APPROVED.declarationHash, APPROVED.checkerHash, content, iso(now), iso(now + 3_600_000))
+      insertExec.run(CO, exec, plan, alice.userId, `hash-${i}`, `lock-${i}`, state, iso(now + i), state === 'permitted' ? iso(now + i) : null)
+      insertLock.run(CO, `lock-${i}`, exec, iso(now))
+    }
+  })()
+}
+
+describe('many executions', () => {
+  it('leaving makes every claimed execution of the member void, however many (no page limit in lifecycle work)', () => {
+    seedOpen(520, 'claimed')
+    leave(CO, alice.userId)
+    expect(conn.prepare("SELECT COUNT(*) AS n FROM browser_executions WHERE company_id = ? AND state = 'claimed'").get(CO)).toEqual({ n: 0 })
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM browser_target_locks WHERE company_id = ?').get(CO)).toEqual({ n: 0 })
+  })
+
+  it('the waiting list comes a page at a time, and the pages together hold every open execution', () => {
+    seedOpen(250, 'permitted')
+    const seen: string[] = []
+    let after: string | undefined
+    for (let pages = 0; pages < 10; pages++) {
+      const page = value(svc.waiting(alice, after))
+      seen.push(...page.items.map(i => i.executionId))
+      if (!page.next) break
+      after = page.next
+    }
+    expect(seen).toHaveLength(250)
+    expect(new Set(seen).size).toBe(250)
+    expect(code(svc.waiting(alice, '../x'))).toBe('BROWSER_BAD_CURSOR')
+  })
+})
+
 describe('compare-and-set', () => {
   it('a state change from a state the row no longer has changes nothing', () => {
     const p = draft()
@@ -557,11 +615,56 @@ describe('compare-and-set', () => {
     expect(repo.setExecutionState(c.claim.executionId, 'claimed', 'void', { voidReason: 'expired' })).toBe(false)
   })
 
-  it('two permits for one execution at the same moment: exactly one is given', async () => {
+  /**
+   * Another request changes the row between the service's read and its write (what a database that
+   * is not synchronous would allow): the service's own compare-and-set must lose.
+   */
+  function racing(on: 'setPlanState' | 'setExecutionState', before: (repo: BrowserPlanRepository) => void) {
+    const real = data
+    const repoOf = (companyId: string): BrowserPlanRepository => {
+      const repo = real.forCompany(companyId).browserPlans
+      let raced = false
+      return {
+        ...repo,
+        [on]: (...args: unknown[]) => {
+          if (!raced) { raced = true; before(repo) }
+          return (repo[on] as (...a: unknown[]) => boolean)(...args)
+        },
+      }
+    }
+    const wrapped: CompanyDataSource = { forCompany: companyId => ({ ...real.forCompany(companyId), browserPlans: repoOf(companyId) }) }
+    svc = createBrowserPlanService({
+      companyData: wrapped, transactions: sqliteTransactions(conn), clock: { now: () => iso(now), nowMs: () => now },
+      ids: { newId: () => randomBytes(8).toString('hex'), newToken: () => randomBytes(32).toString('hex') },
+      tokenDigest: sha256TokenDigest, catalog: { combinations: () => rows }, executionLookup: sqliteBrowserExecutionLookup(conn),
+      memberships: sqliteMembershipRepository(conn), accounts: { byIds: () => new Map() } as never,
+      browserPolicy: () => policy, aiStops: () => stops, log: { warn: () => {} },
+    })
+  }
+
+  it('a permit that loses its compare-and-set to another permit is not given', () => {
     const c = claimed()
-    const both = await Promise.all([0, 1].map(() => Promise.resolve().then(() => svc.permit(alice, c.claim.executionId, c.claim.secret, undefined))))
-    expect(both.filter(r => r.ok)).toHaveLength(1)
-    expect(both.map(code).sort()).toEqual(['BROWSER_PERMIT_USED', 'ok'])
+    racing('setExecutionState', repo => { repo.setExecutionState(c.claim.executionId, 'claimed', 'permitted', { permittedAt: iso(now) }) })
+    expect(code(svc.permit(alice, c.claim.executionId, c.claim.secret, undefined))).toBe('BROWSER_PERMIT_USED')
+  })
+
+  it('a claim that loses its compare-and-set to another claim gives no execution and no secret', () => {
+    const p = approved()
+    racing('setPlanState', repo => { repo.setPlanState(p.id, 'approved', 'claimed', {}) })
+    expect(code(svc.claim(alice, p.id, undefined))).toBe('BROWSER_PLAN_NOT_APPROVED')
+    expect((conn.prepare('SELECT COUNT(*) AS n FROM browser_executions').get() as { n: number }).n).toBe(0)
+  })
+})
+
+describe('the reports\' log', () => {
+  it('no report is deleted while its company exists; deleting the company still takes them', () => {
+    const c = permitted()
+    value(svc.report(c.claim.secret, { result: 'succeeded' }))
+    expect(() => conn.prepare('DELETE FROM browser_execution_reports WHERE company_id = ?').run(CO)).toThrow(/append-only/)
+    expect(() => conn.prepare("UPDATE browser_execution_reports SET outcome = 'same' WHERE company_id = ?").run(CO)).toThrow(/append-only/)
+    conn.pragma('foreign_keys = ON')
+    conn.prepare('DELETE FROM companies WHERE id = ?').run(CO)
+    expect((conn.prepare('SELECT COUNT(*) AS n FROM browser_execution_reports').get() as { n: number }).n).toBe(0)
   })
 })
 

@@ -5,8 +5,8 @@
  * never reads them.
  */
 export const browserPlanSchema = `
-    -- A plan (design memo §30.3): its fixed content (canonical JSON) and hash, never changed
-    -- (trigger below); state draft → approved → claimed → done, or closed. Times are the server's.
+    -- A plan (design memo §30.3): its fixed content (canonical JSON) and hash, and every column
+    -- authorisation or the lock key reads, never changed (trigger below); state draft → approved → claimed → done, or closed. Times are the server's.
     CREATE TABLE IF NOT EXISTS browser_plans (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
       id TEXT NOT NULL,
@@ -30,9 +30,11 @@ export const browserPlanSchema = `
     );
     CREATE INDEX IF NOT EXISTS idx_browser_plans_user ON browser_plans(company_id, user_id, state);
     CREATE TRIGGER IF NOT EXISTS browser_plans_fixed BEFORE UPDATE ON browser_plans
-      WHEN NEW.content IS NOT OLD.content OR NEW.content_hash IS NOT OLD.content_hash OR NEW.user_id IS NOT OLD.user_id
-        OR NEW.company_id IS NOT OLD.company_id OR NEW.declaration_hash IS NOT OLD.declaration_hash OR NEW.checker_hash IS NOT OLD.checker_hash
-        OR NEW.account IS NOT OLD.account OR NEW.created_at IS NOT OLD.created_at OR NEW.expires_at IS NOT OLD.expires_at
+      WHEN NEW.id IS NOT OLD.id OR NEW.company_id IS NOT OLD.company_id OR NEW.user_id IS NOT OLD.user_id
+        OR NEW.connector_id IS NOT OLD.connector_id OR NEW.connector_version IS NOT OLD.connector_version OR NEW.operation IS NOT OLD.operation
+        OR NEW.declaration_hash IS NOT OLD.declaration_hash OR NEW.checker_hash IS NOT OLD.checker_hash OR NEW.facts_version IS NOT OLD.facts_version
+        OR NEW.account IS NOT OLD.account OR NEW.content IS NOT OLD.content OR NEW.content_hash IS NOT OLD.content_hash
+        OR NEW.created_at IS NOT OLD.created_at OR NEW.expires_at IS NOT OLD.expires_at
     BEGIN
       SELECT RAISE(ABORT, 'a browser plan''s fixed content never changes');
     END;
@@ -75,6 +77,12 @@ export const browserPlanSchema = `
       FOREIGN KEY (company_id, execution_id) REFERENCES browser_executions(company_id, id) ON DELETE CASCADE
     );
     CREATE TRIGGER IF NOT EXISTS browser_execution_reports_append_only BEFORE UPDATE ON browser_execution_reports
+    BEGIN
+      SELECT RAISE(ABORT, 'browser execution reports are append-only');
+    END;
+    -- No row goes while its company exists (deleting the company still cascades).
+    CREATE TRIGGER IF NOT EXISTS browser_execution_reports_no_delete BEFORE DELETE ON browser_execution_reports
+      WHEN EXISTS (SELECT 1 FROM companies WHERE id = OLD.company_id)
     BEGIN
       SELECT RAISE(ABORT, 'browser execution reports are append-only');
     END;

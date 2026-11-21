@@ -122,7 +122,7 @@ describe('「ブラウザ操作」 plans over HTTP', () => {
     expect((db.prepare('SELECT state, close_reason FROM browser_plans WHERE id = ?').get(draft.json.data.id))).toEqual({ state: 'closed', close_reason: 'left' })
     expect((await call('bp-owner', 'GET', `${BASE}/browser-type-grants`)).json.data.grants.map((g: Json) => g.userId)).toEqual(['bp-alice'])
     const waiting = await call('bp-owner', 'GET', `${BASE}/browser-executions-waiting`)
-    expect(waiting.json.data.map((i: Json) => [i.executionId, i.state])).toEqual([[claim.executionId, 'permitted']])
+    expect(waiting.json.data.items.map((i: Json) => [i.executionId, i.state])).toEqual([[claim.executionId, 'permitted']])
     // Too early to say, even for the owner.
     expect((await call('bp-owner', 'POST', `${BASE}/browser-executions/${claim.executionId}/confirm`, { result: 'done' })).json.code).toBe('BROWSER_TOO_EARLY')
     // The app's report after they left: unknown is taken (records only), the state moves only as the table says.

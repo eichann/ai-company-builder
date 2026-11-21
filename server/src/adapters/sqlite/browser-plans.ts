@@ -87,13 +87,18 @@ export function sqliteBrowserPlanRepository(conn: Database.Database, companyId: 
       const r = conn.prepare(`SELECT ${EXEC_COLUMNS} FROM browser_executions WHERE company_id = ? AND plan_id = ?`).get(companyId, planId) as ExecDbRow | undefined
       return r ? toExec(r) : null
     },
-    executionsIn(states, userId) {
-      const rows = userId === undefined
-        ? conn.prepare(`SELECT ${EXEC_COLUMNS} FROM browser_executions WHERE company_id = ? AND state IN (SELECT value FROM json_each(?)) ORDER BY claimed_at, id LIMIT 500`)
-          .all(companyId, JSON.stringify(states))
-        : conn.prepare(`SELECT ${EXEC_COLUMNS} FROM browser_executions WHERE company_id = ? AND user_id = ? AND state IN (SELECT value FROM json_each(?)) ORDER BY claimed_at, id LIMIT 500`)
-          .all(companyId, userId, JSON.stringify(states))
-      return (rows as ExecDbRow[]).map(toExec)
+    executionsIn(states, userId, page) {
+      const where = ['state IN (SELECT value FROM json_each(?))']
+      const values: unknown[] = [companyId, JSON.stringify(states)]
+      if (userId !== undefined) { where.push('user_id = ?'); values.push(userId) }
+      if (page?.after !== undefined) {
+        where.push('(claimed_at, id) > (SELECT claimed_at, id FROM browser_executions WHERE company_id = ? AND id = ?)')
+        values.push(companyId, page.after)
+      }
+      const limit = page ? ' LIMIT ?' : ''
+      if (page) values.push(page.limit)
+      return (conn.prepare(`SELECT ${EXEC_COLUMNS} FROM browser_executions WHERE company_id = ? AND ${where.join(' AND ')} ORDER BY claimed_at, id${limit}`)
+        .all(...values) as ExecDbRow[]).map(toExec)
     },
     setExecutionState(executionId, from, to, change) {
       const s = sets(change, EXEC_CHANGE)

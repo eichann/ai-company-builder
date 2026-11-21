@@ -411,11 +411,13 @@ send → report; 6c turns it on for the owner's PC).
   file once at start (`/app/shared` in the image); a missing file accepts no plan. The app's checker
   hash is the app's own word (a modified app is outside what this protects, §29.4).
 - **Tables** (all behind the company handle, `company_id = ?` in every statement): `browser_plans`
-  (the fixed content as canonical JSON + `content_hash`, never changed: trigger `browser_plans_fixed`;
-  state, close reason, times), `browser_executions` (one per plan: unique index; `secret_hash`,
+  (the fixed content as canonical JSON + `content_hash`; trigger `browser_plans_fixed` refuses any change
+  of the id, company, member, connector, version, operation, combination hashes, facts version,
+  account, content, hash or times — only the state and its times move), `browser_executions` (one per plan: unique index; `secret_hash`,
   `lock_key`, state, `claimed_at` / `permitted_at` / `settled_at`, `void_reason`, `confirmed_by`),
-  `browser_execution_reports` (every report, append-only: result, a fixed reason word, `outcome`
-  applied / same / recorded / conflict, the state before), `browser_target_locks` (company × key →
+  `browser_execution_reports` (every report, append-only — no UPDATE, no DELETE while its company
+  exists; deleting the company still cascades: result, a fixed reason word, `outcome` applied / same /
+  recorded / conflict, the state before), `browser_target_locks` (company × key →
   execution), `browser_type_grants` (member × connector × operation × **declaration hash**: a
   changed declaration needs a new grant).
 - **Routes** (`/api/companies/:companyId`, `companyMember` — a person's session; no record-token
@@ -423,8 +425,8 @@ send → report; 6c turns it on for the owner's PC).
   `POST …/approve { contentHash }`, `POST …/cancel`, `POST …/claim` (answers `{ executionId, secret,
   plan }` once, `Cache-Control: no-store`), `POST /browser-executions/:executionId/send-permit`
   (`X-ACB-Browser-Execution: <secret>`), `POST /browser-executions/:executionId/confirm { result:
-  done | not_done }`, `GET /browser-executions-waiting` (「確かめ待ち」; its own segment for the
-  RegExpRouter), `GET /browser-type-grants`, `PUT /browser-type-grants/:userId { connector, operation,
+  done | not_done }`, `GET /browser-executions-waiting?after=` (「確かめ待ち」, 100 open executions a page,
+  oldest claim first, `{ items, next }`; its own segment for the RegExpRouter), `GET /browser-type-grants`, `PUT /browser-type-grants/:userId { connector, operation,
   declarationHash, allowed }` (owner/admin: `BROWSER_PLAN_WORDS.manageForbidden`). And `POST
   /api/browser-executions/report { result, reason? }` with the secret alone (`ownCredential`; 401
   without it): the member may have left. A plan and an execution are their member's own: anyone
@@ -458,7 +460,11 @@ send → report; 6c turns it on for the owner's PC).
   `draft` / `approved` → `closed` by cancel (`cancelled`), by the hour (`expired`, an hour from
   creation by the server's clock — approval does not extend it) or by leaving (`left`).
 - **Execution states** (§30.4 with §31.1–2): `claimed` (no permit: nothing sent) → permit →
-  `permitted`, or → `void` by cancel, 2 minutes without a permit, the plan's hour, or leaving;
+  `permitted`, or → `void` by cancel (`cancelled`), 2 minutes without a permit or the plan's hour
+  (`expired`), leaving (`left`), or **a permit the checks refuse** — the AI stop (`stopped`), the
+  setting off / the site removed / its level no longer allowing (`setting`), the grant revoked
+  (`not-granted`), the combination retired or no longer approved (`retired` / `not-approved`), the app
+  below `minAppVersion` (`app-too-old`): lifting the cause later never revives that secret;
   `permitted` → report `succeeded` / `failed` (**only** "the app stopped before sending", the first
   version's one failure) / `unknown`, or `unknown` at permit + 5 s + 30 s without a report — a stop, a
   revoked grant or a time-out never make it `void` (it may have been sent); `unknown` → a report
@@ -474,8 +480,8 @@ send → report; 6c turns it on for the owner's PC).
   `plan` is what `parseBrowserRunPlan` takes (`before` = the state fact).
 - **Permit** (§29.3, §30.1): the member's own execution and its secret (else 404), then in one
   transaction: time-outs, state `claimed` (`BROWSER_PERMIT_USED` after a permit — asking again is
-  never a new permit; `BROWSER_EXECUTION_CLOSED` when void), the plan's checks again, this execution
-  holds its lock, `claimed → permitted` with the server's wall-clock time. Answer `{ permittedAt,
+  never a new permit; `BROWSER_EXECUTION_CLOSED` when void), the plan's checks again (a refusal makes
+  the execution `void` and lets its target go, in the same transaction), this execution holds its lock, `claimed → permitted` with the server's wall-clock time. Answer `{ permittedAt,
   validMs: 5000 }`: the app sends only within 5 s (6b: counted from just before it asked, both
   clocks).
 - **Report**: `permitted` → the result; `unknown` + `succeeded` → `succeeded`, + `failed` → kept,
@@ -495,8 +501,9 @@ send → report; 6c turns it on for the owner's PC).
   part). Taken with the claim, held through `permitted` and `unknown`, released only on a final state
   and only by its execution (`DELETE … AND execution_id = ?`). Another plan for the same target can be
   made and approved, not claimed.
-- **Leaving the company** (§31.1, `companies.removeMember` → `onMemberLeft`): draft / approved plans
-  close (`left`), a claimed execution becomes void (its lock goes), permitted / unknown ones stay with
+- **Leaving the company** (§31.1, `companies.removeMember` → `onMemberLeft`, inside the removal's
+  transaction, over **every** row — lifecycle work never pages; only the waiting list does): draft /
+  approved plans close (`left`), a claimed execution becomes void (its lock goes), permitted / unknown ones stay with
   their lock (an owner / admin confirms them; the app's report still counts), the grants go.
   Invited back, nothing returns (grants also count only from the current membership).
 - **Remaining limits** (said, not closed): the app's checker hash is self-reported (§29.4); the
@@ -506,8 +513,10 @@ send → report; 6c turns it on for the owner's PC).
   one version exists).
 
 Tests: `server/tests/unit/browser-plans.test.ts` (every row of both state tables, the time-outs on
-touch, claim / permit / confirm once, two permits at once, compare-and-set on stale state, the
-permit's checks after the claim, the lock: busy, released by a timed-out claim, only by its holder,
+touch, claim / permit / confirm once, the service's own compare-and-set losing to a row changed
+between its read and its write (claim and permit), compare-and-set on stale state, a refused permit
+voids the execution for good (stop, setting, grant, retired, app version), leaving with 520 claimed
+executions, the waiting list's pages, the fixed columns and the reports' log, the lock: busy, released by a timed-out claim, only by its holder,
 across members; reports: late, duplicate, contradicting, without a permit, after a confirm, a bad
 secret; confirm timing, the clock behind, admins after leaving / 24 h; leaving; unknown, retired,
 mismatching and too-old combinations; facts missing / unknown / incomplete / stale / contradicting;
@@ -517,9 +526,7 @@ the first version's rule, each fact's shape, unknown / empty / 0, the lock key, 
 and uncached and only in its header, the report without a session, the real member removal),
 `client/tests/browser-connectors-approved.test.ts`, permission matrix rows + `CROSS`,
 `company-scoped-sql.test.ts` (`HANDLE_TABLES`, the lookup), `jobs-schema.test.ts` (additive tables).
-Each guard mutation-checked; kept on purpose: the claim's and the permit's own compare-and-set
-(the state was read a moment earlier in the same synchronous transaction, so no test can make it
-lose today; it holds once the repository is no longer synchronous).
+Each guard mutation-checked.
 
 ## Not yet (later PRs)
 
