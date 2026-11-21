@@ -71,6 +71,7 @@ const NEEDS_NARROWING = () => refuse('bad-request', '出来事で動く定期の
 const TRIGGER_NOT_ALLOWED = (problems: string[]) => refuse('conflict', 'きっかけにした出来事は、いまの会社の設定では使えません（「AI の番」の状態か、最初のやることが見つからないなど）。選び直してください。', { code: 'JOB_TRIGGER_NOT_ALLOWED', problems })
 const NOT_RESPONSIBLE_TO_REWATCH = () => refuse('forbidden', '見張るやることを選び直せるのは、この仕事の責任者だけです。', { code: 'JOB_NOT_RESPONSIBLE' })
 const DRAFT_WAITING = () => refuse('conflict', '管理者が内容を直している途中のため、いまは選び直せません。管理者に確かめてください。', { code: 'JOB_DRAFT_WAITING' })
+const ACCEPT_BEFORE_REWATCH = () => refuse('conflict', 'この仕事の新しい内容をまだ受け取っていません。先に内容を確かめて「受け取る」を押してから、見張るやることを選び直してください。', { code: 'JOB_NOT_ACCEPTED' })
 /**
  * An acceptance from a screen whose 「受け取る」 is not its own press (an admin console from before the split, which
  * accepted with the approval's press; owner decision 2026-11-18): approving never consents for oneself; the approval stays.
@@ -894,6 +895,9 @@ export function createJobService(deps: JobServiceDeps) {
         if (!rights.ok) return rights
         const current = handle.jobs.find(jobId) as JobRow
         if (current.latestVersion !== b.version || current.approvedVersion !== b.version) return FINGERPRINT_CHANGED()
+        // A rewatch approves and accepts in one press: only on top of content the person has accepted already, else it
+        // would accept what they never saw (an AI grant, a place). The app offers no picker then; the server decides.
+        if (!consentAccepted(handle, current)) return ACCEPT_BEFORE_REWATCH()
         const at = clock.now()
         const canonical = jobDefinitionCanonical(next)
         const row = versionRow(jobId, current.latestVersion + 1, next, canonical, member.userId, at)

@@ -858,15 +858,36 @@ describe('① a stopped chain', () => {
     await expectStopped(job, /仕事の内容が変わったため/)
   })
 
-  it('choosing one on a job its responsible person had not accepted yet starts its watch (it runs)', async () => {
+  // A rewatch approves and accepts in one press: never on top of content the person has not accepted (4b-0).
+  it('choosing one on a job its responsible person had not accepted yet is refused, and nothing starts', async () => {
     const start = task('まだ受け取っていない')
     const made = ok(await jobs.create(owner(), { definition: chain(start) }, READS_2))
     ok(await jobs.approve(owner(), made.id, { version: 1 }, READS_2))
-    const next = task('受け取りと一緒に選ぶ')
-    expect((await call('u-alice', 'POST', `/me/jobs/${made.id}/watch`, { version: 1, recordId: next }, S2)).status).toBe(200)
-    expect(cursorOf(made.id)).toMatchObject({ watch_record_id: next })
+    const next = task('受け取りの代わりに選ぶ')
+    expect(await call('u-alice', 'POST', `/me/jobs/${made.id}/watch`, { version: 1, recordId: next }, S2)).toMatchObject({ status: 409, body: { code: 'JOB_NOT_ACCEPTED' } })
+    expect(cursorOf(made.id)).toBeUndefined()
+    expect(ok(await jobs.get(alice(), made.id, READS_2)).approvedVersion).toBe(1)
     await complete(next)
-    expect(tick()).toBe(1)
+    expect(tick()).toBe(0)
+    // Accepted with its own press, the same choice goes through.
+    ok(await jobs.accept(alice(), made.id, { version: 1 }, READS_2, true))
+    expect((await call('u-alice', 'POST', `/me/jobs/${made.id}/watch`, { version: 1, recordId: task('受け取ってから選ぶ') }, S2)).status).toBe(200)
+  })
+
+  it('a new content approved but not accepted yet is never accepted by choosing the next やること', async () => {
+    const start = task('前の内容は受け取り済み')
+    const job = await runnableJob(chain(start))
+    ok(await jobs.update(owner(), job, { definition: chain(start, { run: { ...chain('x').run, title: '管理者が変えた題' } }) }, READS_2))
+    ok(await jobs.approve(owner(), job, { version: 2 }, READS_2))
+    await complete(start)
+    tick()
+    await expectStopped(job, /仕事の内容が変わったため/)
+    const next = task('選び直しで受け取らせない')
+    expect(await call('u-alice', 'POST', `/me/jobs/${job}/watch`, { version: 2, recordId: next }, S2)).toMatchObject({ status: 409, body: { code: 'JOB_NOT_ACCEPTED' } })
+    const view = ok(await jobs.get(alice(), job, READS_2))
+    expect(view).toMatchObject({ approvedVersion: 2, latestConsentAccepted: false })
+    await complete(next)
+    expect(tick()).toBe(0)
   })
 
   it('choosing the start record it began from again starts the watch over there (never the chain\'s old position)', async () => {
