@@ -85,6 +85,9 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
     // What the page must show afterwards; a removal of something the person did not see there cannot come true.
     const expected = expectedAfter(plan.before, operation, values)
     if (!expected) return refused('cannot-come-true')
+    // A page that must look the same afterwards (a value added and taken away again) cannot tell a
+    // write that happened from one the site refused: never claim success on it.
+    if (sameTargetState(expected, plan.before)) return refused('no-visible-change')
     const readPaths = checker.readPaths(values)
     if (readPaths.length === 0) return refused('plan')
 

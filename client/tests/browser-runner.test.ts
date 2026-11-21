@@ -390,6 +390,14 @@ test('the page must end as the type\'s expect says: a removal of something the p
   assert.deepEqual(await seen.runner.run('plan-1'), { outcome: 'unknown', reason: 'other-state' })
 })
 
+test('a type whose page would look the same afterwards never runs: a refused write could not be told from a done one', async () => {
+  // Added and taken away again: `expectedAfter` equals what the person saw, so a 422 with nothing changed would read as success.
+  const same: PluginBrowser = { ...declaration.browser, operations: { reminder_step_add_template: { ...operation, expect: [{ list: 'templates', change: 'add', field: 'template' }, { list: 'templates', change: 'remove', field: 'template' }] } } }
+  const h = harness({ deps: { connector: () => same }, site: { reject: true } })
+  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'refused', reason: 'no-visible-change' })
+  assert.deepEqual(h.site.posts, [], 'nothing sent')
+})
+
 test('nothing is sent when the step\'s state cannot be kept first', async () => {
   const h = harness({ deps: { records: { has: () => false, put: () => { throw new Error('disk full') } } } })
   assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'refused', reason: 'records-unavailable' })

@@ -236,7 +236,9 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   one the checker confirms on the page** (`targetFieldsOutsideWrites` ⊆ `checker.confirms`, else
   `target-unconfirmed`); the plan's values (`browserPlanProblem`); **what the page must show afterwards**
   (`expectedAfter(before, operation, values)`: the declaration's `expect` applied to the state the person
-  saw; a removal of something `before` does not hold cannot come true → `cannot-come-true`); the
+  saw; a removal of something `before` does not hold cannot come true → `cannot-come-true`; a page that
+  would look the same afterwards — a value added and taken away again — cannot tell a done write from a
+  refused one → `no-visible-change`, never run); the
   company's setting now (`browserOperationsAllowed` against the site the member's
   current valid policy lists: on, asset hosts, level); the AI stop; the member's open window; one run
   per window. Then `pending` is kept, the window enters `ai` mode with the run's gate (true only once
@@ -333,7 +335,8 @@ rule; the plan's shape, expiry, `approvedAt` and one-day limits; the checker's b
 attribute, not in a comment / script / text area, slots of this reminder and step only, none outside)
 / ids / token and the unconfirmed account; the bundled declaration, its `expect`, an unknown checker and
 two checkers with one id; the runner: judged by the type's `expect` (a removal of what was not there
-never starts, `cannot-come-true`; a page that ends otherwise is `other-state`);
+never starts, `cannot-come-true`; nor one whose page would look the same, `no-visible-change`; a page
+that ends otherwise is `other-state`);
 success with exactly one write, never twice even after a lost answer, wrong / unknown account,
 missing target, changed state, a target field neither written nor confirmed, a stop, a policy change,
 an expiry and an old approval during the run, refusals before anything starts, nothing sent unless the

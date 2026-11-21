@@ -321,7 +321,7 @@ export const BROWSER_RUN_REASONS = [
   'unknown-checker', 'target-unconfirmed', 'stopped', 'policy', 'no-window', 'busy', 'records-unavailable',
   // started, nothing sent
   'window-not-ready', 'window-closed', 'read-failed', 'account-unknown', 'account-mismatch', 'target-missing',
-  'before-changed', 'csrf-missing', 'checker-problem', 'cannot-come-true',
+  'before-changed', 'csrf-missing', 'checker-problem', 'cannot-come-true', 'no-visible-change',
   // sent
   'refused-by-site', 'no-answer', 'not-confirmed-sent', 'reread-failed', 'unchanged-unrefused', 'empty-state',
   'other-state', 'error',
