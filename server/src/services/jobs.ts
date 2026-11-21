@@ -209,18 +209,22 @@ export function createJobService(deps: JobServiceDeps) {
   }
 
   /**
-   * An event job's stopped chain as the viewer may read it (owner decision ①): its cause in plain words — a record-side
-   * cause in full, with the record's title, only when the viewer reads that record now (else 「見張っていたやることの都合で
-   * 止まりました」), computed when read; null while it goes on. Nothing for a job that is not an event job.
+   * An event job's stopped chain as the viewer may read it (owner decision ①, D7 = A), computed when read; null while it
+   * goes on. Every stop is record-side (it happened because the watched record reached the watched state), so it is
+   * there only for someone who reads that record now — its cause in full, with the record's title — and for the approved
+   * version's responsible person, who must choose the next watched やること (the owner-approved exception to ⑥): when
+   * they do not read it now, only 「見張っていたやることの都合で止まりました」. For anyone else null, exactly as a chain that
+   * goes on (an owner / admin who does not read an owner-only やること included). Nothing for a job that is not an event job.
    */
   function chainOf(member: Member, handle: CompanyData, job: JobRow, reader: RecordReader): Pick<JobView, 'chainStopped'> {
     const stop = handle.jobs.eventCursor(job.id)?.chainStop ?? null
     const approved = job.approvedVersion === null ? null : handle.jobs.version(job.id, job.approvedVersion)
     const definition = approved ? definitionOf(approved) : null
-    if (!definition || !isRecordTrigger(definition.trigger)) return {}
+    if (!approved || !definition || !isRecordTrigger(definition.trigger)) return {}
     if (!stop) return { chainStopped: null }
     const row = handle.records.byIds([stop.record])[0]
     const title = row && row.removedAt === null && reader.record(row) ? row.title : null
+    if (title === null && approved.actingUserId !== member.userId) return { chainStopped: null }
     return { chainStopped: { why: jobChainStopText(stop.code, { runsPerDay: definition.grant.limits.runsPerDay, record: title }) } }
   }
 
@@ -865,7 +869,8 @@ export function createJobService(deps: JobServiceDeps) {
 
     /**
      * 「止まっています」 (`job_chain_stopped`, owner decision ①)'s words for the member now: the job's name and the cause as
-     * they may read it — only while they see the job and that very stop (`at`) still stands; else null.
+     * they may read it — only while they see the job, that very stop (`at`) still stands and it is theirs to see now
+     * (`chainOf`: a reader of its record, or the responsible person — D7); else null.
      */
     chainStopNotice(member: Member, jobId: string, at: string): { name: string; why: string } | null {
       const found = visibleJob(member, jobId)

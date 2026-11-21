@@ -174,6 +174,12 @@ const HANDLE_TABLES: Record<string, string[]> = {
   plugin_role_assignments: ['adapters/sqlite/plugin-roles.ts'],
   plugin_role_overrides: ['adapters/sqlite/plugin-roles.ts'],
   plugin_role_history: ['adapters/sqlite/plugin-roles.ts'],
+  // 「ブラウザ操作」 plans (agent-browser.md "Plans, executions, permits and locks").
+  browser_plans: ['adapters/sqlite/browser-plans.ts'],
+  browser_executions: ['adapters/sqlite/browser-plans.ts'],
+  browser_execution_reports: ['adapters/sqlite/browser-plans.ts'],
+  browser_target_locks: ['adapters/sqlite/browser-plans.ts'],
+  browser_type_grants: ['adapters/sqlite/browser-plans.ts'],
   // lane C ▲
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
@@ -194,6 +200,7 @@ const HANDLE_FACTORIES = [
   // lane C ▼
   'sqlitePluginStepRepository',
   'sqlitePluginRoleRepository',
+  'sqliteBrowserPlanRepository',
   // lane C ▲
 ]
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'
@@ -208,6 +215,9 @@ const UNSCOPED: Record<string, Array<[sql: string, reason: string]>> = {
     ['SELECT ${COLUMNS} FROM agent_events WHERE ${w.sql}${cursor} ORDER BY at DESC, seq DESC LIMIT ?', BUILT_WHERE],
     ["SELECT strftime('%Y-%m-%d', at, ?) AS day, user_id, category, ${denied} AS denied, COUNT(*) AS n FROM agent_events WHERE ${w.sql} GROUP BY day, user_id, category, denied ORDER BY day ASC, user_id ASC, category ASC", BUILT_WHERE],
     ['SELECT DISTINCT company_id FROM agent_events', 'the retention job lists the companies it then prunes one at a time (ids only)'],
+  ],
+  'adapters/sqlite/browser-plans.ts': [
+    ['SELECT company_id, id FROM browser_executions WHERE secret_hash = ?', 'a browser execution\'s report brings only its secret: this lookup by the secret\'s hash is what finds the company (control plane)'],
   ],
   'adapters/sqlite/google-drive.ts': [
     ['SELECT company_id FROM google_drive_pick_tickets WHERE ticket_hash = ?', BY_TOKEN],

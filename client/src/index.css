@@ -1,3 +1,7 @@
+/* Design tokens (CSS variables only; .claude/rules/design-system.md). Before @tailwind. */
+@import '../../shared/design-tokens/primitives.css';
+@import '../../shared/design-tokens/theme.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

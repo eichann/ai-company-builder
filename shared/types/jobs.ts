@@ -113,6 +113,7 @@ export interface JobView {
    * Stage 4a, owner decision ①: an event job whose chain of watched records stopped — why, in the viewer's own words (a
    * record-side cause in full only when they read that record now). null: not stopped (or not an event job). Absent
    * from an older server. The responsible person chooses the next watched やること (`POST /me/jobs/:jobId/watch`).
+   * Stage 4b-0.2 (D7 = A): null for anyone but the responsible person who does not read the stop's record now.
    */
   chainStopped?: { why: string } | null
   /** Present on GET /jobs/:jobId (newest first). */

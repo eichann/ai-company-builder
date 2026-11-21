@@ -289,7 +289,7 @@ describe('the page', () => {
     renderInCompany(<JobsRoute />)
     await userEvent.click(await screen.findByRole('button', { name: 'すべて止める' }))
     expect(calls.some((c) => c.method === 'PUT')).toBe(false)
-    const dialog = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('alertdialog')
     await userEvent.click(within(dialog).getByRole('button', { name: 'すべて止める' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([{ stopped: true }]))
   })

@@ -2,6 +2,20 @@
 paths:
   - "shared/core/browser-operation.ts"
   - "shared/core/plugin-browser-declaration.ts"
+  - "shared/core/browser-plans.ts"
+  - "shared/types/browser-plans.ts"
+  - "shared/browser-connectors/**"
+  - "client/scripts/browser-connectors.ts"
+  - "client/tests/browser-connectors-approved.test.ts"
+  - "server/src/routes/browser-plans.ts"
+  - "server/src/services/browser-plans.ts"
+  - "server/src/ports/browser-plans.ts"
+  - "server/src/adapters/sqlite/browser-plans.ts"
+  - "server/src/adapters/browser-connector-catalog.ts"
+  - "server/src/db/schema/browser-plans.ts"
+  - "server/tests/unit/browser-plans.test.ts"
+  - "server/tests/unit/browser-plan-rules.test.ts"
+  - "server/tests/integration/browser-plans.test.ts"
   - "shared/types/agent-browser.ts"
   - "server/src/routes/agent-browser.ts"
   - "server/src/services/agent-browser.ts"
@@ -227,8 +241,9 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   more than a day ago never runs, whatever its expiry; one "approved" over a minute in the future is
   refused), `expiresAt` (never more than a day ahead). Its values must fit the type (`browserPlanProblem`).
   **Single use is only per PC here**: the step record lives on this computer, so the same plan could
-  run once on each PC of the member. **PR 6 must make a plan single-use on the server** (claimed once,
-  as `ai_runs` / approvals are) before anything hands plans to the runner.
+  run once on each PC of the member. The server's plans (6a, "Plans, executions, permits and locks")
+  make a plan single-use on the server (claimed once, a permit per send); 6b must hand the runner only
+  a claimed plan and ask for the permit right before the write.
 - **One run**, refusing with nothing sent at each check: the plan; the step record (a plan with any
   record never runs again — also one cut off by a crash); the connector declaration at that version; the
   operation (this PR: one form write, not irreversible); the checker (`checker.id` must equal the
@@ -306,7 +321,10 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
 - **Lステップ** (`client/connectors/lstep/`): the declaration `lstep@0.2.0` (`declaration.ts`, bundled
   until the shelf hands browser connectors out; parsed by the core's `parsePluginManifest` like any
   package) with one type, **「リマインダの段にテンプレートを足す」** (`reminder_step_add_template`): effect
-  `write`, checker `lstep.reminder_step`, target `{ reminder, step }`, change `{ template }`, one write
+  `write`, checker `lstep.reminder_step`, `lock: { kind: lstep.reminder_step }`, `delivers: none`
+  (adding a template sends nothing by itself; the step goes out on the reminder's schedule), the facts
+  of design memo §31.3 (`account`, `step_parent`, `names` required; `state`, `template_bodies`,
+  `shared_with` required and complete), target `{ reminder, step }`, change `{ template }`, one write
   `POST /line/episode/step/pack/template` form `{ content_id: {step}, template_id: {template} }`,
   `ignore_body: [_token, _lm_user_id]`, `expect: [{ list: templates, add: "{template}" }]`, account
   required, the `shared` note (共有のリマインダ). Another operation on a step's templates is a new entry
@@ -355,6 +373,161 @@ kept on purpose: awaiting the write session's clear after the write (Chromium qu
 read, so no test can tell; it is also cleared before each write) and `runWindow`'s policy check (the
 controller already closes a window whose site leaves the policy).
 
+## Plans, executions, permits and locks (PR 6a: the server side; nothing in the app calls it yet)
+
+The server half of the plan and its approval (internal design memo §27–§31; §30 + §31 are the
+contract). A plan is fixed on the server, approved by its member, claimed **once**, and every
+send asks the server for a permit right before it; the server is the authority. Nothing in the
+app calls these routes in 6a (6b wires the operator AI, the preview read, the card, claim → permit →
+send → report; 6c turns it on for the owner's PC).
+
+- **Pieces.** `shared/core/browser-plans.ts` (pure: the fact shape `BrowserFact` and its checks
+  `browserFactShapeProblem` / `browserFactsProblem` / `browserFactsDeclarationProblem`, one schema per
+  facts version and checker — `BROWSER_FACT_SCHEMAS`, version 1 = `lstep.reminder_step` —,
+  `browserLockKey`, the states, `BROWSER_PLAN_TIMES`); the declaration's `lock` / `delivers` /
+  `facts` and `browserFirstVersionProblem` (`plugin-browser-declaration.ts`, `plugins.md` "Browser
+  connectors"); `browserAiStopped` moved to `shared/core/browser-operation.ts` (the app re-exports
+  it). Server: `routes/browser-plans.ts` → `services/browser-plans.ts` → the handle's `browserPlans`
+  (`ports/browser-plans.ts`, `adapters/sqlite/browser-plans.ts`, tables in
+  `db/schema/browser-plans.ts`), the control-plane `BrowserExecutionLookup` (an execution's company by
+  its secret's hash, listed in `company-scoped-sql.test.ts` like a key-broker token) and the
+  `BrowserConnectorCatalog` (`adapters/browser-connector-catalog.ts`). API shapes:
+  `shared/types/browser-plans.ts`.
+- **Approved combinations** (§30.7): `shared/browser-connectors/approved.json`, one row per
+  `{ connector, version, declarationHash, checkerHash, factsVersion, minAppVersion, status, declaration }`,
+  written by `client/scripts/browser-connectors.ts` (`cd client && npx tsx scripts/browser-connectors.ts`,
+  `--check`). `checkerHash` = the whole site folder `client/connectors/<site>/` (every file but
+  `.DS_Store`: sha256 per file, the listing in name order, sha256 of it — `pluginFingerprintV2`);
+  `declarationHash` = `sha256:` of the declaration text, **and the text itself is in the row**: the
+  server reads declarations only from this file (never from `client/`, which `server/src` may not
+  import), re-hashes each and parses it with the core's parser (a row that does not match its hash
+  or does not parse is left out, logged). Each site's `declaration.ts` exports `DECLARATIONS`. Every
+  declared fact must be known to the current facts version's schema for its checker, or the script
+  refuses; a version whose declaration changed is refused (raise the version). Rows the files no
+  longer give are kept (an older app may carry that code); retiring is a reviewed edit of `status` to
+  `retired`; `minAppVersion` starts null and may be set by hand (`X-ACB-Client-Version` then must be
+  at least it). `client/tests/browser-connectors-approved.test.ts` fails when the file is not what
+  the script writes (CI's client tests run on any `client/` or `shared/` change). The server reads the
+  file once at start (`/app/shared` in the image); a missing file accepts no plan. The app's checker
+  hash is the app's own word (a modified app is outside what this protects, §29.4).
+- **Tables** (all behind the company handle, `company_id = ?` in every statement): `browser_plans`
+  (the fixed content as canonical JSON + `content_hash`; trigger `browser_plans_fixed` refuses any change
+  of the id, company, member, connector, version, operation, combination hashes, facts version,
+  account, content, hash or times — only the state and its times move), `browser_executions` (one per plan: unique index; `secret_hash`,
+  `lock_key`, state, `claimed_at` / `permitted_at` / `settled_at`, `void_reason`, `confirmed_by`),
+  `browser_execution_reports` (every report, append-only — no UPDATE, no DELETE while its company
+  exists; deleting the company still cascades: result, a fixed reason word, `outcome` applied / same /
+  recorded / conflict, the state before), `browser_target_locks` (company × key →
+  execution), `browser_type_grants` (member × connector × operation × **declaration hash**: a
+  changed declaration needs a new grant).
+- **Routes** (`/api/companies/:companyId`, `companyMember` — a person's session; no record-token
+  route exists): `POST /browser-plans` (candidate + facts → draft, 201), `GET /browser-plans/:planId`,
+  `POST …/approve { contentHash }`, `POST …/cancel`, `POST …/claim` (answers `{ executionId, secret,
+  plan }` once, `Cache-Control: no-store`), `POST /browser-executions/:executionId/send-permit`
+  (`X-ACB-Browser-Execution: <secret>`), `POST /browser-executions/:executionId/confirm { result:
+  done | not_done }`, `GET /browser-executions-waiting?after=` (「確かめ待ち」, 100 open executions a page,
+  oldest claim first, `{ items, next }`; its own segment for the RegExpRouter), `GET /browser-type-grants`, `PUT /browser-type-grants/:userId { connector, operation,
+  declarationHash, allowed }` (owner/admin: `BROWSER_PLAN_WORDS.manageForbidden`). And `POST
+  /api/browser-executions/report { result, reason? }` with the secret alone (`ownCredential`; 401
+  without it): the member may have left. A plan and an execution are their member's own: anyone
+  else's — and another company's — is the same 404 as one that does not exist (owners/admins too,
+  except confirm below).
+- **The checks** at register, approve, claim and permit (`gate`, in this order): the combination
+  (connector, version, declaration hash, checker hash, facts version) is in the catalog
+  (`BROWSER_TYPE_NOT_APPROVED`) and not retired (`BROWSER_TYPE_RETIRED`), the app at least
+  `minAppVersion` (`BROWSER_APP_TOO_OLD`), the operation exists, **the first version's rule**
+  (`browserFirstVersionProblem`: `delivers: none`, not irreversible, exactly one write, not delete,
+  a lock kind — `BROWSER_OPERATION_NOT_YET`), the member's browser setting (company mode with their
+  override, `browserOperationsAllowed`: site and level — `BROWSER_NOT_ALLOWED`), the AI stop
+  (`browserAiStopped` of the member's stops: whole AI, `web`, `mcp-external` — `BROWSER_AI_STOPPED`),
+  the member's grant given while they are a member this time (`BROWSER_TYPE_NOT_GRANTED`). Report,
+  confirm and the lists never ask them: a retired combination, a stop or a revoked grant never stop
+  the clean-up. Sentences: `BROWSER_PLAN_WORDS` (plain Japanese).
+- **Register**: strict body (`connector`, `operation`, the three combination fields, `target`,
+  `change`, `facts`, optional `explanation` ≤ 2000 and `conversationId`); the values fit the type
+  (`browserPlanProblem`); **the facts** (§31.3): only facts the type declares, each `{ status, value?,
+  complete?, readAt, source }` and nothing else, every `required` one `known` with a value its
+  schema accepts, every `complete` one `complete === true`, then the checks across facts and values
+  (`lstep.reminder_step`: `step_parent.reminder` = `target.reminder`; the bodies of the added
+  template and of every template on the step are there) — `BROWSER_FACTS_REFUSED` with the reason;
+  every `readAt` within the last 10 minutes and at most 1 minute ahead (`BROWSER_FACTS_STALE`); the
+  account is the `account` fact's id, `before` the `state` fact; `expectedAfter` must be possible
+  (`BROWSER_CANNOT_COME_TRUE`). Unknown, an empty list and 0 are different answers. The fixed content
+  (company, member, conversation, combination, operation, account, target, change, facts,
+  explanation, created / expires) is hashed by the server (`canonicalJson`, `hashCanonical`).
+- **Plan states** (§30.3): `draft` → approve (the hash the person saw, else `CONTENT_CHANGED`;
+  compare-and-set) → `approved` → claim → `claimed` → `done` when its execution is final;
+  `draft` / `approved` → `closed` by cancel (`cancelled`), by the hour (`expired`, an hour from
+  creation by the server's clock — approval does not extend it) or by leaving (`left`).
+- **Execution states** (§30.4 with §31.1–2): `claimed` (no permit: nothing sent) → permit →
+  `permitted`, or → `void` by cancel (`cancelled`), 2 minutes without a permit or the plan's hour
+  (`expired`), leaving (`left`), or **a permit the checks refuse** — the AI stop (`stopped`), the
+  setting off / the site removed / its level no longer allowing (`setting`), the grant revoked
+  (`not-granted`), the combination retired or no longer approved (`retired` / `not-approved`), the app
+  below `minAppVersion` (`app-too-old`): lifting the cause later never revives that secret;
+  `permitted` → report `succeeded` / `failed` (**only** "the app stopped before sending", the first
+  version's one failure) / `unknown`, or `unknown` at permit + 5 s + 30 s without a report — a stop, a
+  revoked grant or a time-out never make it `void` (it may have been sent); `unknown` → a report
+  `succeeded` (the secret proves it; a late, sure success) or a person's confirm (`confirmed_done` /
+  `confirmed_not_done`). `succeeded`, `failed`, `confirmed_*`, `void` are final: the lock goes (only
+  the one this execution holds) and the plan is `done`. Every change is a compare-and-set on the
+  state; **time-outs are judged on every touch** (get, the list, claim — the target's holder first —,
+  permit, report, confirm), not by a timer.
+- **Claim** (once per plan, ever): in one transaction the plan's checks, the target lock (a holder
+  that timed out is settled first; held → `BROWSER_TARGET_BUSY`, nothing changed), the execution
+  with a new 256-bit secret whose sha256 alone is stored, the plan `approved → claimed`. A second
+  claim (a lost answer, another PC) gets `BROWSER_PLAN_NOT_APPROVED`, never a secret. The answer's
+  `plan` is what `parseBrowserRunPlan` takes (`before` = the state fact).
+- **Permit** (§29.3, §30.1): the member's own execution and its secret (else 404), then in one
+  transaction: time-outs, state `claimed` (`BROWSER_PERMIT_USED` after a permit — asking again is
+  never a new permit; `BROWSER_EXECUTION_CLOSED` when void), the plan's checks again (a refusal makes
+  the execution `void` and lets its target go, in the same transaction), this execution holds its lock, `claimed → permitted` with the server's wall-clock time. Answer `{ permittedAt,
+  validMs: 5000 }`: the app sends only within 5 s (6b: counted from just before it asked, both
+  clocks).
+- **Report**: `permitted` → the result; `unknown` + `succeeded` → `succeeded`, + `failed` → kept,
+  unchanged (`recorded`), + `unknown` → `same`; a final state: the same answer `same`, a non-
+  contradicting one `recorded`, a contradicting one (`succeeded` vs `failed` / `confirmed_not_done`,
+  `failed` vs `succeeded` / `confirmed_done`) 409 `BROWSER_REPORT_CONFLICT`, kept as `conflict`;
+  `claimed` / `void` (no permit, nothing sent) → 409, kept. Never "who is a member now": the secret
+  decides.
+- **Confirm** 「済んでいた / されていなかった」: the plan's member; an owner / admin only once the member
+  left or 24 hours after the permit (`BROWSER_CONFIRM_NOT_YET`); others 404. Refused while the
+  server's clock reads before the permit (`BROWSER_CLOCK_BACKWARDS`) and before permit + 5 s + 30 s
+  (`BROWSER_TOO_EARLY`); `claimed` / `void` → `BROWSER_NOT_PERMITTED`; once only
+  (`BROWSER_ALREADY_SETTLED`). After it a report never changes the result.
+- **Target lock** (§30.5): `browserLockKey` — the canonical JSON of `{ company, host, account, kind,
+  fields: [[name, value]…] by name }` from the approved declaration's `lock.kind` and target fields
+  and the plan's values (built by the server, never sent by the app; the type's version plays no
+  part). Taken with the claim, held through `permitted` and `unknown`, released only on a final state
+  and only by its execution (`DELETE … AND execution_id = ?`). Another plan for the same target can be
+  made and approved, not claimed.
+- **Leaving the company** (§31.1, `companies.removeMember` → `onMemberLeft`, inside the removal's
+  transaction, over **every** row — lifecycle work never pages; only the waiting list does): draft /
+  approved plans close (`left`), a claimed execution becomes void (its lock goes), permitted / unknown ones stay with
+  their lock (an owner / admin confirms them; the app's report still counts), the grants go.
+  Invited back, nothing returns (grants also count only from the current membership).
+- **Remaining limits** (said, not closed): the app's checker hash is self-reported (§29.4); the
+  stretch between the app's last clock check and the request leaving (§30.1); a site already
+  processing a send; a parent / child target (§28.A); a version that changes `lock.kind` or the
+  target fields while an execution is open is not held back yet (§30.5's compatibility rule: today
+  one version exists).
+
+Tests: `server/tests/unit/browser-plans.test.ts` (every row of both state tables, the time-outs on
+touch, claim / permit / confirm once, the service's own compare-and-set losing to a row changed
+between its read and its write (claim and permit), compare-and-set on stale state, a refused permit
+voids the execution for good (stop, setting, grant, retired, app version), leaving with 520 claimed
+executions, the waiting list's pages, the fixed columns and the reports' log, the lock: busy, released by a timed-out claim, only by its holder,
+across members; reports: late, duplicate, contradicting, without a permit, after a confirm, a bad
+secret; confirm timing, the clock behind, admins after leaving / 24 h; leaving; unknown, retired,
+mismatching and too-old combinations; facts missing / unknown / incomplete / stale / contradicting;
+grants), `server/tests/unit/browser-plan-rules.test.ts` (the declaration's new keys and refusals,
+the first version's rule, each fact's shape, unknown / empty / 0, the lock key, the stop),
+`server/tests/integration/browser-plans.test.ts` (over HTTP: grants owner/admin only, the secret once
+and uncached and only in its header, the report without a session, the real member removal),
+`client/tests/browser-connectors-approved.test.ts`, permission matrix rows + `CROSS`,
+`company-scoped-sql.test.ts` (`HANDLE_TABLES`, the lookup), `jobs-schema.test.ts` (additive tables).
+Each guard mutation-checked.
+
 ## Not yet (later PRs)
 
 **Keeping a login on disk** (`browserLoginStorage`, kept in `shared/core` for that PR): deferred until
@@ -364,9 +537,15 @@ unenclosed (`agents/claude.ts`, `agents/codex.ts`); another company opened in th
 switcher) or a conversation with another agent (the API key's `executeCommand`, no sandbox) runs AI
 turns against the same userData unenclosed; and a refused policy refresh (403) would keep the login.
 
-The AI does not operate the window yet: the runner and the first type exist (above) but nothing
-starts a run. Still to come: the plan and its approval (PR 6: the `approvedPlan` provider, the
-person's confirmation, `irreversible` types), wiring the runner in `main.ts` (deps: `controller.siteNow`
+The AI does not operate the window yet: the runner, the first type and the server's plans (6a,
+above) exist but nothing starts a run. Still to come: **6b** — the operator AI (its own start, only
+the tools the app gives), the preview read that makes the facts (where `account`, `step_parent`,
+`names`, `template_bodies` and `shared_with` are read on the real site is confirmed with the owner's
+login), register / the approval card / claim → permit → send → report from main with the context
+check and both clocks (design memo §30.1–2), the post-send judgement (§29.6) and `failed` only when
+stopped before sending, and how the app knows its own checker hash; **6c** — the `browser_request`
+tool for the chat AI, on the owner's PC only; `irreversible` types and more than one write (refused
+by the first version's rule today); wiring the runner in `main.ts` (deps: `controller.siteNow`
 / `runWindow`, `browserAiStopped(policy.stop(companyId))`, `createBrowserRunRecords(<userData>/…)`,
 `lstepConnector()`'s declaration and checkers through `createBrowserConnectors` /
 `createBrowserCheckerRegistry`), **the method override and the swap** (design memo §24: a write may

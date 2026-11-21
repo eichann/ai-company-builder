@@ -184,10 +184,13 @@ const OUTCOME_WORDS: Record<string, string> = {
 
 /**
  * Why an event job's chain stopped, in plain words (owner decision ①). `record`: the watched record's title when the
- * viewer reads it now, else null — then a record-side cause is only 「見張っていたやることの都合で止まりました」.
+ * viewer reads it now, else null — then only 「見張っていたやることの都合で止まりました」, whatever the cause: every stop is
+ * record-side (even the day's limit or an absence says the record reached the watched state, D7), and only the
+ * responsible person is shown a stop of a record they do not read (`jobs.ts` `chainOf`).
  */
 export function jobChainStopText(code: string, opts: { runsPerDay: number | null; record: string | null }): string {
-  const named = opts.record !== null ? `「${opts.record}」` : ''
+  if (opts.record === null) return '見張っていたやることの都合で止まりました'
+  const named = `「${opts.record}」`
   switch (code) {
     case 'DAY_LIMIT': return `1日の上限（${opts.runsPerDay ?? '決められた'}回）を超えたため、止まりました`
     case 'OWNER_ABSENT': return '責任者が不在の日に完了したため、止まりました'
@@ -198,7 +201,6 @@ export function jobChainStopText(code: string, opts: { runsPerDay: number | null
     case 'OWNER_LEFT': case 'OWNER_RIGHTS_CHANGED': return '責任者がこの仕事を続けられなくなったため、止まりました'
     case 'WATCH_RESET': return '仕組みの入れ替えのため、止まりました'
   }
-  if (opts.record === null) return '見張っていたやることの都合で止まりました'
   if (code === 'EVENT_NOT_ASSIGNEE') return `見張っていたやること${named}の担当が責任者でなくなったため、止まりました`
   if (code === 'EVENT_RECORD_GONE') return `責任者が見張っていたやること${named}を見られなくなったため、止まりました`
   if (code === 'EVENT_AI_TURN') return `見張っていたやること${named}が「AI の番」の状態だったため、止まりました`

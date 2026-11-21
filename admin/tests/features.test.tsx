@@ -70,15 +70,15 @@ describe('使う機能', () => {
     const toggle = await screen.findByRole('switch', { name: FEATURE_WORDS.meetings.name })
 
     await userEvent.click(toggle)
-    let dialog = await screen.findByRole('dialog')
+    let dialog = await screen.findByRole('alertdialog')
     expect(within(dialog).getByText(FEATURE_OFF_CONFIRM)).toBeInTheDocument()
     await userEvent.click(within(dialog).getByRole('button', { name: 'キャンセル' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(puts(calls)).toEqual([])
     expect(toggle).toHaveAttribute('aria-checked', 'true')
 
     await userEvent.click(toggle)
-    dialog = await screen.findByRole('dialog')
+    dialog = await screen.findByRole('alertdialog')
     await userEvent.click(within(dialog).getByRole('button', { name: 'オフにする' }))
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'))
     expect(puts(calls)).toEqual([{ feature: 'meetings', on: false }])

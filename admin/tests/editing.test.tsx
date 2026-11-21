@@ -122,7 +122,7 @@ describe('権限', () => {
     expect(puts(calls)).toEqual([])
 
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
-    const dialog = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('alertdialog')
     expect(within(dialog).getByText('1人が編集できなくなります')).toBeInTheDocument()
     expect(within(dialog).getByText('山田 次郎')).toBeInTheDocument()
     expect(puts(calls)).toEqual([])
@@ -165,6 +165,8 @@ describe('権限', () => {
     await userEvent.click(option('上の階層と同じ'))
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(puts(calls)).toEqual([{ path: '営業部/契約書', rules: [] }]))
+    // No confirm of either kind (a destructive alertdialog or an ordinary dialog) appeared.
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 

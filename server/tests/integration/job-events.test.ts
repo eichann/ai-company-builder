@@ -18,7 +18,9 @@
  * - (8) a run's row (a job's, an AI turn's) makes nothing; the person's own consultation AI's change does;
  * - (9) one occurrence per event over two ticks and a restart;
  * - ⑧ a state a business plugin runs as 「AI の番」: refused when saved, made nothing at the event, skipped before acting;
- *   ⑤ the assignee checked at the event and right before acting.
+ *   ⑤ the assignee checked at the event and right before acting;
+ * - D7 = A (stage 4b-0.2): a stopped chain exists only for someone who reads its record now (written, worded and shown
+ *   only to them, checked again when read) and for the responsible person (plain words when they do not read it).
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 
@@ -318,10 +320,11 @@ describe('(1) an event occurrence of a record the viewer cannot read does not ex
         list: list.status === 200 ? list.body.data.occurrences.map((o: Json) => [o.id, o.state, o.dueSlot]) : list,
         last: view.status === 200 ? view.body.data.lastOccurrence : view,
         updatedAt: view.status === 200 ? view.body.data.updatedAt : null,
-        jobs: listed.body.data.jobs.map((j: Json) => [j.id, j.lastOccurrence, j.waiting, j.state]),
-        // A stopped chain is told to the creator on purpose (owner decision ①, naming only the job: "the chain" tests
-        // below); everything else must be the same.
-        bell: bell.ok ? bell.value.items.filter(i => i.kind !== 'job_chain_stopped').map(i => [i.kind, i.text]) : bell,
+        jobs: listed.body.data.jobs.map((j: Json) => [j.id, j.lastOccurrence, j.waiting, j.state, j.chainStopped]),
+        chainStopped: view.status === 200 ? view.body.data.chainStopped : null,
+        // The chain stops too (its occurrence expired without its やること): of a record they do not read, so not told
+        // either (D7 = A).
+        bell: bell.ok ? [bell.value.unread, bell.value.items.map(i => [i.kind, i.text])] : bell,
       }
     }
     return out
@@ -723,7 +726,9 @@ describe('(6) many rows and the day\'s limit', () => {
     expect(jobState(job)).toBe('active')
     // One notice each (owner decision): the chain's stop, the limit its cause — nothing else of the jobs.
     const told = db.prepare("SELECT user_id, kind FROM notifications WHERE kind GLOB 'job_*' AND kind <> 'job_accept_needed' ORDER BY user_id").all()
-    expect(told).toEqual([{ user_id: 'u-alice', kind: 'job_chain_stopped' }, { user_id: 'u-owner', kind: 'job_chain_stopped' }])
+    // The limit was reached on alice's own (owner-only) やること: the owner, the job's creator, does not read it — the stop
+    // does not exist for them (D7 = A).
+    expect(told).toEqual([{ user_id: 'u-alice', kind: 'job_chain_stopped' }])
     const text = ok(services.notifications.list(alice())).items.find(i => i.kind === 'job_chain_stopped')?.text ?? ''
     expect(text).toContain('1日の上限（1回）を超えたため')
     expect(ok(services.notifications.list(bob())).items.some(i => i.kind === 'job_chain_stopped')).toBe(false)
@@ -935,7 +940,7 @@ describe('① a stopped chain', () => {
     await expectStopped(job, /期限までに動けなかったため/)
   })
 
-  it('a record-side cause is said in full (with the title) only to someone who reads the record; an admin who does not gets the plain sentence', async () => {
+  it('a record-side cause is said in full (with the title) to someone who reads the record; an admin who does not is not shown the stop at all', async () => {
     const start = task('みんなのやること')
     const job = await runnableJob(chain(start))
     await complete(start)
@@ -948,11 +953,10 @@ describe('① a stopped chain', () => {
     occ.runDue(CO)
     expect(await stoppedFor('u-alice', job)).toEqual({ why: '見張っていたやること「アリスだけの次の一歩」の担当が責任者でなくなったため、止まりました' })
     expect(notices('u-alice', 'member')).toEqual([expect.stringContaining('アリスだけの次の一歩')])
-    // The owner (the job's creator) does not read alice's own やること: the plain sentence, nothing of the record.
-    expect(await stoppedFor('u-owner', job)).toEqual({ why: '見張っていたやることの都合で止まりました' })
-    expect(notices('u-owner', 'owner')).toEqual([expect.stringContaining('見張っていたやることの都合で止まりました')])
+    // The owner (the job's creator) does not read alice's own やること: no stop, no notice — as if it went on.
+    expect(await stoppedFor('u-owner', job)).toBeNull()
+    expect(notices('u-owner', 'owner')).toEqual([])
     expect(JSON.stringify(await call('u-owner', 'GET', `/jobs/${job}`, undefined, S2))).not.toContain('アリスだけ')
-    expect(JSON.stringify(notices('u-owner', 'owner'))).not.toContain('アリスだけ')
   })
 
   it('the responsible person chooses the next watched やること (one press): the chain goes on; nobody else may, nor while a draft waits', async () => {
@@ -1065,6 +1069,138 @@ describe('① a stopped chain', () => {
 })
 
 // Owner decision ② (2026-11-18): a change written through a business plugin's screen is never an event.
+// Stage 4b-0.2, owner decision D7 = A (2026-11-21): every chain stop is record-side (it happened because the watched record
+// reached the watched state — even the day's limit says so), so for anyone who does not read that record now it does not
+// exist, exactly like an event occurrence of it (⑥). The responsible person alone is always told (they choose the next
+// watched やること): plain words when they do not read it.
+describe('D7 = A: a stopped chain of a record the viewer cannot read', () => {
+  const S2 = { 'X-ACB-Job-Schemas': '1,2' }
+  const admin = () => m('u-admin', 'admin')
+  /** Everything a viewer could learn a stop from: their rows, unread count, bell, the job's view in the detail and the list. */
+  async function seenBy(who: { userId: string; role: string }, job: string) {
+    const bell = ok(services.notifications.list(m(who.userId, who.role)))
+    const detail = await call(who.userId, 'GET', `/jobs/${job}`, undefined, S2)
+    const listed = await call(who.userId, 'GET', '/jobs', undefined, S2)
+    return {
+      rows: db.prepare("SELECT kind FROM notifications WHERE company_id = ? AND user_id = ? AND kind = 'job_chain_stopped'").all(CO, who.userId),
+      unread: bell.unread,
+      bell: bell.items.map(i => [i.kind, i.text]),
+      detail: detail.body.data.chainStopped,
+      listed: listed.body.data.jobs.find((j: Json) => j.id === job)?.chainStopped,
+    }
+  }
+  const pushedTo: string[][] = []
+  beforeEach(() => {
+    pushedTo.length = 0
+    occ = createJobOccurrences({
+      companyData, transactions, clock, ids: randomIds, timeZoneOf: () => 'Asia/Tokyo', holidaysOf: () => [], roleOf, jobs, writer, aiStepStates,
+      noticesChanged: (_co, users) => { pushedTo.push([...users].sort()) },
+    })
+  })
+
+  it('a non-reader admin — the creator and another admin: no row, no unread count, no push, no chainStopped; before and after are the same', async () => {
+    const start = task('上限・みんなのやること')
+    const job = await runnableJob(chain(start, { grant: { ...chain('x').grant, limits: { minutes: 5, runsPerDay: 1 } } }))
+    await complete(start)
+    tick()
+    // The next watched one is alice's own (owner-only) やること; its completion is beyond the day's limit.
+    const [made] = madeTasks(job)
+    await complete(made.id)
+    const before = { owner: await seenBy(owner(), job), admin: await seenBy(admin(), job) }
+    pushedTo.length = 0
+    expect(tick()).toBe(0)
+    // The chain did stop: the responsible person is told (and pushed to), with the cause in full (she reads it).
+    expect(await seenBy(alice(), job)).toMatchObject({ detail: { why: expect.stringContaining('1日の上限（1回）を超えたため') } })
+    expect(pushedTo).toEqual([['u-alice']])
+    expect({ owner: await seenBy(owner(), job), admin: await seenBy(admin(), job) }).toEqual(before)
+    expect(before.owner.detail).toBeNull()
+  })
+
+  it('a reader admin: the creator is told the full cause; another admin who reads it sees it on the job (no notice)', async () => {
+    const start = task('止めている間・みんなの')
+    const job = await runnableJob(chain(start))
+    ok(jobs.pause(owner(), job))
+    await complete(start)
+    ok(await jobs.resume(owner(), job))
+    pushedTo.length = 0
+    tick()
+    const why = '一時停止している間に完了したため、止まりました'
+    expect(await seenBy(owner(), job)).toMatchObject({ rows: [{ kind: 'job_chain_stopped' }], unread: 1, detail: { why }, listed: { why } })
+    expect((await seenBy(owner(), job)).bell).toEqual([['job_chain_stopped', expect.stringContaining(why)]])
+    expect(await seenBy(admin(), job)).toMatchObject({ rows: [], detail: { why }, listed: { why } })
+    expect(pushedTo).toEqual([['u-alice', 'u-owner']])
+  })
+
+  it('the responsible person who no longer reads the record is still told — in plain words only, whatever the cause', async () => {
+    const start = task('二人だけ・止めている間', { members: ['u-owner'] })
+    const job = await runnableJob(chain(start))
+    ok(jobs.pause(owner(), job))
+    await complete(start)
+    db.prepare("DELETE FROM record_viewers WHERE company_id = ? AND record_id = ? AND user_id = 'u-alice'").run(CO, start)
+    ok(await jobs.resume(owner(), job))
+    tick()
+    const hers = await seenBy(alice(), job)
+    expect(hers).toMatchObject({ rows: [{ kind: 'job_chain_stopped' }], unread: 1, detail: { why: '見張っていたやることの都合で止まりました' } })
+    expect(hers.bell).toEqual([['job_chain_stopped', expect.stringContaining('見張っていたやることの都合で止まりました')]])
+    expect(JSON.stringify(hers)).not.toContain('一時停止')
+    // The owner reads it: the cause in full.
+    expect(await seenBy(owner(), job)).toMatchObject({ detail: { why: '一時停止している間に完了したため、止まりました' } })
+  })
+
+  it('checked again when read: an admin who read the record when told and lost it since no longer sees the notice or the stop', async () => {
+    // Taken off a members-only list.
+    const listed = task('二人だけ・あとで外れる', { members: ['u-owner'] })
+    const job = await runnableJob(chain(listed))
+    ok(jobs.pause(owner(), job))
+    await complete(listed)
+    ok(await jobs.resume(owner(), job))
+    tick()
+    expect(await seenBy(owner(), job)).toMatchObject({ unread: 1, detail: { why: expect.any(String) } })
+    db.prepare("DELETE FROM record_viewers WHERE company_id = ? AND record_id = ? AND user_id = 'u-owner'").run(CO, listed)
+    expect(await seenBy(owner(), job)).toMatchObject({ unread: 0, bell: [], detail: null, listed: null })
+    // The record made owner-only (alice's) after the stop.
+    db.prepare('DELETE FROM notifications').run()
+    const open = task('あとでアリスだけになる')
+    const job2 = await runnableJob(chain(open, { name: '二つめ' }))
+    ok(jobs.pause(owner(), job2))
+    await complete(open)
+    ok(await jobs.resume(owner(), job2))
+    tick()
+    expect(await seenBy(admin(), job2)).toMatchObject({ detail: { why: expect.any(String) } })
+    expect(await seenBy(owner(), job2)).toMatchObject({ unread: 1 })
+    db.prepare("UPDATE records SET personal_owner = 'u-alice' WHERE company_id = ? AND id = ?").run(CO, open)
+    expect(await seenBy(owner(), job2)).toMatchObject({ unread: 0, bell: [], detail: null })
+    expect(await seenBy(admin(), job2)).toMatchObject({ detail: null, listed: null })
+    // Alice, the responsible person, still sees it.
+    expect(await seenBy(alice(), job2)).toMatchObject({ unread: 1, detail: { why: expect.stringContaining('一時停止している間') } })
+    // A creator demoted to member after being told: the notice is gone (they no longer see the job at all).
+    db.prepare('DELETE FROM notifications').run()
+    const third = task('三つめ・作った人が外れる')
+    const job3 = await runnableJob(chain(third, { name: '三つめ' }))
+    ok(jobs.pause(owner(), job3))
+    await complete(third)
+    ok(await jobs.resume(owner(), job3))
+    tick()
+    expect(ok(services.notifications.list(owner())).unread).toBe(1)
+    db.prepare("UPDATE memberships SET role = 'member' WHERE company_id = ? AND user_id = 'u-owner'").run(CO)
+    expect(ok(services.notifications.list(m('u-owner', 'member')))).toMatchObject({ unread: 0, items: [] })
+    db.prepare("UPDATE memberships SET role = 'owner' WHERE company_id = ? AND user_id = 'u-owner'").run(CO)
+  })
+
+  it('a record removed after the stop: nobody but the responsible person sees it (plain words)', async () => {
+    const start = task('あとで消える')
+    const job = await runnableJob(chain(start))
+    ok(jobs.pause(owner(), job))
+    await complete(start)
+    ok(await jobs.resume(owner(), job))
+    tick()
+    db.prepare('UPDATE records SET removed_at = ? WHERE company_id = ? AND id = ?').run(clock.now(), CO, start)
+    expect(await seenBy(owner(), job)).toMatchObject({ unread: 0, bell: [], detail: null, listed: null })
+    expect(await seenBy(admin(), job)).toMatchObject({ detail: null, listed: null })
+    expect(await seenBy(alice(), job)).toMatchObject({ unread: 1, detail: { why: '見張っていたやることの都合で止まりました' } })
+  })
+})
+
 describe('② a business plugin\'s screen', () => {
   it('a person\'s change through a plugin screen (`via`) makes nothing', async () => {
     const start = task('業務の画面から')
@@ -1164,7 +1300,7 @@ describe('⑧ the AI\'s turn, ⑤ the assignee', () => {
     expect(occurrencesOf(job)).toEqual([])
     expect((await call('u-alice', 'GET', `/jobs/${job}`, undefined, { 'X-ACB-Job-Schemas': '1,2' })).body.data.chainStopped)
       .toEqual({ why: '見張っていたやること「ボブの担当」の担当が責任者でなくなったため、止まりました' })
-    // Alice's own やること whose assignee became bob: the owner (the creator), who does not read it, gets the plain words only.
+    // Alice's own やること whose assignee became bob: the owner (the creator), who does not read it, is not shown the stop (D7 = A).
     const mine = task('アリスの次・担当が変わる')
     const job3 = await runnableJob(chain(mine, { name: '三つめ' }))
     await complete(mine)
@@ -1178,7 +1314,7 @@ describe('⑧ the AI\'s turn, ⑤ the assignee', () => {
       insertLedgerRow(db, CO, ledgerRow(made.id, v + 2, 'todo', 'done'))
     })
     expect(tick()).toBe(0)
-    expect((await call('u-owner', 'GET', `/jobs/${job3}`, undefined, { 'X-ACB-Job-Schemas': '1,2' })).body.data.chainStopped).toEqual({ why: '見張っていたやることの都合で止まりました' })
+    expect((await call('u-owner', 'GET', `/jobs/${job3}`, undefined, { 'X-ACB-Job-Schemas': '1,2' })).body.data.chainStopped).toBeNull()
     expect((await call('u-alice', 'GET', `/jobs/${job3}`, undefined, { 'X-ACB-Job-Schemas': '1,2' })).body.data.chainStopped).toEqual({ why: expect.stringContaining('アリスだけの続き') })
     expect(JSON.stringify(ok(services.notifications.list(owner())).items)).not.toContain('アリスだけ')
 

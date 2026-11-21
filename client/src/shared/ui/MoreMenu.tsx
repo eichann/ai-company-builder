@@ -48,7 +48,7 @@ export function MoreMenu({ items, label = 'その他の操作', compact, align =
               onClick={e => { e.stopPropagation(); setOpen(false); i.onClick() }}
               className="w-full rounded-md px-2.5 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-zinc-700"
             >
-              <span className={`flex items-center gap-1.5 text-[12.5px] ${i.danger ? 'text-rose-600 dark:text-rose-400' : 'text-gray-800 dark:text-zinc-100'}`}>{i.icon}{i.label}{i.checked && <Check size={13} weight="bold" className="ml-auto text-accent" />}</span>
+              <span className={`flex items-center gap-1.5 text-[12.5px] ${i.danger ? 'text-danger-text' : 'text-gray-800 dark:text-zinc-100'}`}>{i.icon}{i.label}{i.checked && <Check size={13} weight="bold" className="ml-auto text-accent" />}</span>
               {i.hint && <span className="block text-[10.5px] leading-snug text-gray-500 dark:text-zinc-400">{i.hint}</span>}
             </button>
           ))}

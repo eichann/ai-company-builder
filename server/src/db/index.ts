@@ -36,6 +36,7 @@ import { migrateRecordLedgerVia } from './schema/plugin-bridge'
 // lane C ▼
 import { pluginStepSchema } from './schema/plugin-steps'
 import { pluginRoleSchema } from './schema/plugin-roles'
+import { browserPlanSchema } from './schema/browser-plans'
 // lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
@@ -105,6 +106,8 @@ const SCHEMA = [
   // lane C ▼
   pluginStepSchema,
   pluginRoleSchema,
+  // 「ブラウザ操作」 plans (agent-browser.md "Plans, executions, permits and locks").
+  browserPlanSchema,
   // lane C ▲
 ]
 

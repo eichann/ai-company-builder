@@ -259,8 +259,10 @@ compare-and-set and ledger), and writes notices.
   company's failure is logged (error name only) and the others run.
 
 - `job_chain_stopped` (stage 4a, `jobs.md` "Event-triggered jobs" "A stopped chain"): an event job's chain stopped (the
-  day's limit included: its one notice) — to its responsible person and the job's creator while an owner / admin, once per
-  stop, recordless; the cause is built when read (a record-side one in full only for a reader of the record). An
+  day's limit included: its one notice) — to its responsible person (always; plain words when they do not read the
+  watched record) and to the job's creator only while an owner / admin who reads that record at that moment; once per
+  stop, recordless; built when read and shown to anyone but the responsible person only while they still read the record
+  (stage 4b-0.2, D7 = A: every stop is record-side; a non-reader gets no row, count or push). An
   occurrence notice of an event occurrence reaches only those who read its record (and is shown only while they do).
 
 ## The push signal

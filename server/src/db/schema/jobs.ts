@@ -59,8 +59,8 @@ export function migrateJobAcceptedPlace(conn: Database.Database): void {
  *   wrote of the job and of the company's stop (`job_stamp` = `ai_jobs.updated_at`, `stop_stamp` = `ai_job_settings.
  *   updated_at`): a build before 4a (the rollback build, 4-0) pauses and stops without gaps, and a difference tells the
  *   scan to look at nothing from before (jobs.md "Event-triggered jobs", Codex review of #700); and, when the chain of
- *   watched records stopped (owner decision ①), why (`chain_stop_code`), on which record (`chain_stop_record`: who may
- *   read the cause in full is who reads it) and when (`chain_stop_at`, the notice's key) — cleared when the watch moves.
+ *   watched records stopped (owner decision ①), why (`chain_stop_code`), on which record (`chain_stop_record`: the stop
+ *   exists only for who reads it, and for the responsible person — D7) and when (`chain_stop_at`, the notice's key) — cleared when the watch moves.
  * - `ai_job_event_gaps`: the stretches no event of a job runs in (a pause; `job_key` '' = the company's stop):
  *   delivery numbers in (`from_seq`, `until_seq`], `until_seq` NULL while it lasts. Several per job (owner decision ③).
  *   Its id is the server's own (TEXT), never a rowid: a company archive restores it beside other companies.

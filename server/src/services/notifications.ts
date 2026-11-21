@@ -73,7 +73,7 @@ export interface NotificationServiceDeps {
    * job now. Absent → never shown.
    */
   jobOccurrenceNoticeOf?: (member: Member, jobId: string, occurrenceId: string) => { name: string; dueSlot: string; outcomeCode: string | null } | null
-  /** 「止まっています」 (`job_chain_stopped`, stage 4a ①): the job's name and the cause as the member may read it, while that stop stands; else null. */
+  /** 「止まっています」 (`job_chain_stopped`, stage 4a ①): the job's name and the cause as the member may read it, while that stop stands; else null — also for anyone but the responsible person who does not read the stop's record now (D7 = A). */
   jobChainStoppedOf?: (member: Member, jobId: string, at: string) => { name: string; why: string } | null
   /**
    * 「受け取りが要ります」 (`job_accept_needed`, jobs.md "The acceptance notice"): the job's name while the
