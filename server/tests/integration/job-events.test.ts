@@ -36,7 +36,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { Hono } from 'hono'
-import { db, initDatabase } from '../../src/db'
+import { db, initDatabase, migrateJobWatchGenerations } from '../../src/db'
 import { jobsRoute } from '../../src/routes/jobs'
 import { services } from '../../src/composition'
 import { createJobService, type JobService } from '../../src/services/jobs'
@@ -1336,5 +1336,189 @@ describe('the consent', () => {
     const b = chain('task-bbbbbbbbbbbbbbbb') as JobDefinition
     expect(jobConsentCanonical(a)).not.toBe(jobConsentCanonical(b))
     expect(jobConsentCanonical({ ...a, name: '別の名前' })).toBe(jobConsentCanonical(a))
+  })
+})
+
+/**
+ * Watch generations (stage 4b-0.5, owner memo 「段4b 設計メモ」 第4版 §5-3 with Codex's 4th review #1): an occurrence moves,
+ * stops or clears only the watch it was made for. F7: the same record chosen again, the earlier watch's occurrence ending
+ * — expired, held, failed — never stops or moves the new watch. F8 / F9: what the startup migration leaves (a certain
+ * occurrence goes on as before; an uncertain one moves nothing; an orphaned watch is stopped once, its responsible person
+ * told, and choosing again works). The migration's own cases: tests/unit/job-watch-generations.test.ts.
+ */
+describe('watch generations (stage 4b-0.5, F7–F9)', () => {
+  const watchOf = (job: string) => db.prepare(`SELECT watch_record_id AS w, watch_fired AS f, watch_generation AS g, chain_stop_code AS stop
+    FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?`).get(CO, job) as Json
+  const genOf = (id: string) => (db.prepare('SELECT watch_generation AS g FROM ai_job_occurrences WHERE company_id = ? AND id = ?').get(CO, id) as Json).g
+  const stopNotices = (user: string, role: string) => ok(services.notifications.list(m(user, role))).items.filter(i => i.kind === 'job_chain_stopped').map(i => i.text)
+  const approvedOf = (job: string) => (db.prepare('SELECT approved_version AS v FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, job) as Json).v
+
+  /** A chain whose watched record fired (its occurrence made, not run yet), then the same record chosen again. */
+  async function rewatchedSame(): Promise<{ job: string; start: string; old: string; gen: number }> {
+    const start = task('同じやることを選び直す')
+    const job = await runnableJob(chain(start))
+    await complete(start)
+    expect(occ.makeOccurrences(CO)).toBe(1)
+    const old = occurrencesOf(job)[0].id
+    const was = watchOf(job)
+    expect(genOf(old)).toBe(was.g)
+    ok(await jobs.rewatch(alice(), job, { version: approvedOf(job), recordId: start }, READS_2))
+    const now = watchOf(job)
+    expect(now).toMatchObject({ w: start, f: 0, stop: null })
+    expect(now.g).toBeGreaterThan(was.g)
+    return { job, start, old, gen: now.g }
+  }
+
+  it('F7: the earlier watch’s occurrence held (another version) or expired stops nothing; the new watch then goes on', async () => {
+    const held = await rewatchedSame()
+    occ.runDue(CO)
+    expect(occurrencesOf(held.job)[0]).toMatchObject({ state: 'held', outcome_code: 'JOB_VERSION_CHANGED' })
+    expect(watchOf(held.job)).toMatchObject({ w: held.start, f: 0, g: held.gen, stop: null })
+
+    const expired = await rewatchedSame()
+    nowMs += 1441 * 60_000
+    occ.makeOccurrences(CO)
+    expect(occurrencesOf(expired.job)[0]).toMatchObject({ state: 'expired' })
+    expect(watchOf(expired.job)).toMatchObject({ w: expired.start, f: 0, g: expired.gen, stop: null })
+    expect(stopNotices('u-alice', 'member')).toEqual([])
+
+    // The new watch: the record completed again makes its occurrence of this generation, which moves the watch on.
+    await reopen(expired.start)
+    await complete(expired.start)
+    tick()
+    const made = occurrencesOf(expired.job).find(o => o.state === 'done')
+    expect(made).toBeDefined()
+    expect(genOf(made.id)).toBe(expired.gen)
+    expect(watchOf(expired.job).w).toBe(madeTasks(expired.job).at(-1).id)
+  })
+
+  it('F7: a pause holding the earlier watch’s occurrence stops nothing', async () => {
+    const { job, start, gen } = await rewatchedSame()
+    ok(jobs.pause(owner(), job))
+    expect(occurrencesOf(job)[0]).toMatchObject({ state: 'held', outcome_code: 'JOB_PAUSED' })
+    expect(watchOf(job)).toMatchObject({ w: start, g: gen, stop: null })
+  })
+
+  it('F7: the start record changed and changed back (two acceptances): the first watch’s occurrence stops nothing', async () => {
+    const a = task('最初の見張り')
+    const b = task('次の見張り')
+    const job = await runnableJob(chain(a))
+    await complete(a)
+    occ.makeOccurrences(CO)
+    const first = watchOf(job).g
+    for (const [version, start] of [[2, b], [3, a]] as const) {
+      ok(await jobs.update(owner(), job, { definition: chain(start) }, READS_2))
+      ok(await jobs.approve(owner(), job, { version }, READS_2))
+      ok(await jobs.accept(alice(), job, { version }, READS_2, true))
+    }
+    expect(watchOf(job)).toMatchObject({ w: a, f: 0, stop: null })
+    expect(watchOf(job).g).toBeGreaterThan(first)
+    occ.runDue(CO)
+    expect(occurrencesOf(job)[0]).toMatchObject({ state: 'held', outcome_code: 'JOB_VERSION_CHANGED' })
+    expect(watchOf(job)).toMatchObject({ w: a, stop: null })
+  })
+
+  it('F7: the earlier watch’s occurrence that could not make its やること stops nothing', async () => {
+    const { job, start, old, gen } = await rewatchedSame()
+    // Its own version again approved (an edge a migration leaves too): it runs, and the writer refuses.
+    db.prepare('UPDATE ai_job_occurrences SET job_version = ? WHERE company_id = ? AND id = ?').run(approvedOf(job), CO, old)
+    occ = occurrencesService(companyData, undefined, { check: () => null, create: () => ({ ok: false, reason: 'refused' }) as Json })
+    occ.runDue(CO)
+    expect(occurrencesOf(job)[0]).toMatchObject({ state: 'needs_person', outcome_code: 'TASK_NOT_CREATED' })
+    expect(watchOf(job)).toMatchObject({ w: start, g: gen, stop: null })
+  })
+
+  it('F8: after the migration, the certain occurrence goes on as before (its completion moves the watch); an uncertain one moves nothing', async () => {
+    const start = task('移行の前に完了')
+    const job = await runnableJob(chain(start))
+    await complete(start)
+    occ.makeOccurrences(CO)
+    const [o] = occurrencesOf(job)
+    // As 4a left it: no generation anywhere.
+    db.prepare('UPDATE ai_job_event_cursors SET watch_generation = NULL WHERE company_id = ? AND job_id = ?').run(CO, job)
+    db.prepare('UPDATE ai_job_occurrences SET watch_generation = NULL WHERE company_id = ? AND job_id = ?').run(CO, job)
+    migrateJobWatchGenerations(db)
+    expect(genOf(o.id)).toBe(1)
+    occ.runDue(CO)
+    expect(watchOf(job)).toMatchObject({ w: madeTasks(job)[0].id, f: 0, g: 2, stop: null })
+
+    // Uncertain: two occurrences of the watched record (an older one waiting, a newer one done) — the older one runs and moves nothing.
+    const start2 = task('二つの回')
+    const job2 = await runnableJob(chain(start2, { name: '二つ' }))
+    await complete(start2)
+    occ.makeOccurrences(CO)
+    const [older] = occurrencesOf(job2)
+    db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at,
+      event_seq, event_record_id, event_version, event_day) SELECT company_id, ?, job_id, job_version, 'ev:99999', time_zone, due_at, expires_at, 'done', created_at, updated_at,
+      99999, event_record_id, event_version, event_day FROM ai_job_occurrences WHERE company_id = ? AND id = ?`).run(`occ.${'9'.repeat(32)}`, CO, older.id)
+    db.prepare('UPDATE ai_job_event_cursors SET watch_generation = NULL WHERE company_id = ? AND job_id = ?').run(CO, job2)
+    db.prepare('UPDATE ai_job_occurrences SET watch_generation = NULL WHERE company_id = ? AND job_id = ?').run(CO, job2)
+    migrateJobWatchGenerations(db)
+    expect(genOf(older.id)).toBeNull()
+    occ.runDue(CO)
+    expect(occurrencesOf(job2).find(x => x.id === older.id)).toMatchObject({ state: 'done' })
+    expect(watchOf(job2)).toMatchObject({ w: start2, stop: 'WATCH_RESET' })
+  })
+
+  it('F8: an uncertain occurrence of a job that does not follow what it made clears no stop either', async () => {
+    const start = task('続けて見張らない')
+    const job = await runnableJob(chain(start, { name: '一回だけ' }, { followMadeTask: false }))
+    await complete(start)
+    occ.makeOccurrences(CO)
+    const [older] = occurrencesOf(job)
+    db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at,
+      event_seq, event_record_id, event_version, event_day) SELECT company_id, ?, job_id, job_version, 'ev:99998', time_zone, due_at, expires_at, 'done', created_at, updated_at,
+      99998, event_record_id, event_version, event_day FROM ai_job_occurrences WHERE company_id = ? AND id = ?`).run(`occ.${'8'.repeat(32)}`, CO, older.id)
+    // Its chain stopped on that record meanwhile (the day's limit), as 4a could leave it.
+    db.prepare(`UPDATE ai_job_event_cursors SET watch_generation = NULL, chain_stop_code = 'DAY_LIMIT', chain_stop_record = watch_record_id, chain_stop_at = ?
+      WHERE company_id = ? AND job_id = ?`).run(clock.now(), CO, job)
+    db.prepare('UPDATE ai_job_occurrences SET watch_generation = NULL WHERE company_id = ? AND job_id = ?').run(CO, job)
+    migrateJobWatchGenerations(db)
+    expect(genOf(older.id)).toBeNull()
+    occ.runDue(CO)
+    expect(occurrencesOf(job).find(x => x.id === older.id)).toMatchObject({ state: 'done' })
+    expect(watchOf(job)).toMatchObject({ w: start, stop: 'DAY_LIMIT' })
+  })
+
+  it('F8: a chain stopped by its own expired occurrence before the migration still goes on once 「もう一度」 runs it', async () => {
+    const start = task('期限切れから再開')
+    const job = await runnableJob(chain(start))
+    await complete(start)
+    occ.makeOccurrences(CO)
+    const [o] = occurrencesOf(job)
+    nowMs += 1441 * 60_000
+    occ.makeOccurrences(CO)
+    expect(watchOf(job)).toMatchObject({ stop: 'EXPIRED' })
+    db.prepare('UPDATE ai_job_event_cursors SET watch_generation = NULL WHERE company_id = ? AND job_id = ?').run(CO, job)
+    db.prepare('UPDATE ai_job_occurrences SET watch_generation = NULL WHERE company_id = ? AND job_id = ?').run(CO, job)
+    migrateJobWatchGenerations(db)
+    expect(genOf(o.id)).toBe(1)
+    const retry = createJobRetry({ companyData, transactions, clock, roleOf, jobs, aiStops: () => ({ stopped: false }) as Json, reconcileFor: () => ({ ok: false }) as Json })
+    expect(retry.retry(owner(), job, o.id)).toMatchObject({ ok: true })
+    occ.runDue(CO)
+    expect(occurrencesOf(job)[0]).toMatchObject({ state: 'done' })
+    expect(watchOf(job)).toMatchObject({ w: madeTasks(job)[0].id, stop: null })
+  })
+
+  it('F9: an orphaned watch is stopped once, only its responsible person is told, and choosing the next one works', async () => {
+    const start = task('止まったことが消された')
+    const job = await runnableJob(chain(start))
+    // As 4a's bug could leave it: fired, no occurrence of its own, the stop cleared.
+    db.prepare('UPDATE ai_job_event_cursors SET watch_fired = 1, watch_generation = NULL WHERE company_id = ? AND job_id = ?').run(CO, job)
+    migrateJobWatchGenerations(db)
+    migrateJobWatchGenerations(db)
+    expect(watchOf(job)).toMatchObject({ w: start, stop: 'WATCH_RESET', g: 1 })
+    expect(stopNotices('u-alice', 'member')).toEqual([expect.stringContaining('仕組みの入れ替えのため、止まりました')])
+    expect(stopNotices('u-owner', 'owner')).toEqual([])
+    expect((await call('u-alice', 'GET', `/jobs/${job}`, undefined, { 'X-ACB-Job-Schemas': '1,2' })).body.data.chainStopped).toEqual({ why: expect.stringContaining('仕組みの入れ替え') })
+    // She chooses the next one: the stop is gone and its completion runs.
+    const next = task('次に見張る')
+    ok(await jobs.rewatch(alice(), job, { version: approvedOf(job), recordId: next }, READS_2))
+    expect(watchOf(job)).toMatchObject({ w: next, f: 0, stop: null })
+    expect(watchOf(job).g).toBeGreaterThan(1)
+    await complete(next)
+    tick()
+    expect(madeTasks(job)).toHaveLength(1)
+    expect(watchOf(job).w).toBe(madeTasks(job)[0].id)
   })
 })

@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { EVENT_OCCURRENCE_SLOT_PREFIX, type JobDeliveryPlace, type JobPauseReason, type LedgerEventRow } from '../../../shared/core/jobs'
+import { EVENT_OCCURRENCE_SLOT_PREFIX, JOB_SCHEMAS, type JobDeliveryPlace, type JobPauseReason, type LedgerEventRow } from '../../../shared/core/jobs'
 import type { JobState } from '../../../shared/types/jobs'
 import type { JobEventCursor, JobEventGap, JobOccurrenceRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
 
@@ -26,9 +26,10 @@ interface OccurrenceDbRow {
   state: string; run_id: string | null; outcome_code: string | null; checked_until: string | null; checked_commit: string | null; created_at: string; updated_at: string
   retries: number; retried_by: string | null; retried_at: string | null
   event_seq: number | null; event_record_id: string | null; event_version: number | null; event_day: string | null
+  watch_generation: number | null
 }
 const OCCURRENCE_COLUMNS = 'id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, run_id, outcome_code, created_at, updated_at'
-const OCCURRENCE_READ = `${OCCURRENCE_COLUMNS}, checked_until, checked_commit, retries, retried_by, retried_at, event_seq, event_record_id, event_version, event_day`
+const OCCURRENCE_READ = `${OCCURRENCE_COLUMNS}, checked_until, checked_commit, retries, retried_by, retried_at, event_seq, event_record_id, event_version, event_day, watch_generation`
 /**
  * Newest first, by when each came: a time slot by its time (`due_at`; a job of time slots only reads exactly as it did,
  * newest slot first), an event one by when it was made (`created_at`: a scan only ever moves forward), so a job whose
@@ -45,10 +46,23 @@ const OCCURRENCE_ORDER = `CASE WHEN event_seq IS NULL THEN due_at ELSE created_a
  * prefix (it has no `%` / `_`; `substr` compares exactly, unlike `LIKE`).
  */
 const NOT_EVENT = `substr(due_slot, 1, ${EVENT_OCCURRENCE_SLOT_PREFIX.length}) <> '${EVENT_OCCURRENCE_SLOT_PREFIX}'`
+/**
+ * Stage 4b-0.5 (the rollback floor, jobs.md "Shapes this build does not know"): an occurrence is **frozen** when the
+ * version it is pinned to is of a shape this build does not know — its `schema` column not in `JOB_SCHEMAS`, or a
+ * stored text that does not say the same schema (`storedJobDefinition` reads such a version as nothing). A later
+ * build wrote it; this one neither shows, counts, tells, expires, runs, claims, retries nor reconciles it: every
+ * read and move below leaves it out **in SQL, before any limit**, so frozen rows never take a batch's place. Only a
+ * pause / the company's stop / a restore reaches them (`holdFrozen`). The schemas are this build's constant (built
+ * from the core's list: digits only).
+ */
+const KNOWN_SCHEMAS_SQL = JOB_SCHEMAS.map(n => String(Number(n))).join(', ')
+const known = (table: string) => `EXISTS (SELECT 1 FROM ai_job_versions v WHERE v.company_id = ${table}.company_id AND v.job_id = ${table}.job_id
+  AND v.version = ${table}.job_version AND v.schema IN (${KNOWN_SCHEMAS_SQL}) AND json_valid(v.definition) AND json_extract(v.definition, '$.schema') = v.schema)`
+const KNOWN = known('ai_job_occurrences')
 const occurrenceOf = (r: OccurrenceDbRow): JobOccurrenceRow => ({
   id: r.id, jobId: r.job_id, jobVersion: r.job_version, dueSlot: r.due_slot, timeZone: r.time_zone, dueAt: r.due_at, expiresAt: r.expires_at,
   state: r.state as JobOccurrenceRow['state'], runId: r.run_id, outcomeCode: r.outcome_code, checkedUntil: r.checked_until, checkedCommit: r.checked_commit, retries: r.retries, retriedBy: r.retried_by, retriedAt: r.retried_at,
-  eventSeq: r.event_seq, eventRecordId: r.event_record_id, eventVersion: r.event_version, eventDay: r.event_day,
+  eventSeq: r.event_seq, eventRecordId: r.event_record_id, eventVersion: r.event_version, eventDay: r.event_day, watchGeneration: r.watch_generation,
   createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
@@ -195,33 +209,43 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
           .run(companyId, o.id, o.jobId, o.jobVersion, o.dueSlot, o.timeZone, o.dueAt, o.expiresAt, o.state, o.runId, o.outcomeCode, o.createdAt, o.updatedAt)
           .changes === 1
       }
-      return conn.prepare(`INSERT OR IGNORE INTO ai_job_occurrences (company_id, ${OCCURRENCE_COLUMNS}, event_seq, event_record_id, event_version, event_day)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      return conn.prepare(`INSERT OR IGNORE INTO ai_job_occurrences (company_id, ${OCCURRENCE_COLUMNS}, event_seq, event_record_id, event_version, event_day, watch_generation)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(companyId, o.id, o.jobId, o.jobVersion, o.dueSlot, o.timeZone, o.dueAt, o.expiresAt, o.state, o.runId, o.outcomeCode, o.createdAt, o.updatedAt,
-          o.eventSeq, o.eventRecordId ?? null, o.eventVersion ?? null, o.eventDay ?? null)
+          o.eventSeq, o.eventRecordId ?? null, o.eventVersion ?? null, o.eventDay ?? null, o.watchGeneration ?? null)
         .changes === 1
     },
     occurrence(occurrenceId) {
-      const r = conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND id = ?`).get(companyId, occurrenceId) as OccurrenceDbRow | undefined
+      const r = conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND id = ? AND ${KNOWN}`).get(companyId, occurrenceId) as OccurrenceDbRow | undefined
       return r ? occurrenceOf(r) : null
     },
     occurrences(jobId, limit, offset = 0) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND ${KNOWN}
           ORDER BY ${OCCURRENCE_ORDER} LIMIT ? OFFSET ?`)
         .all(companyId, jobId, limit, offset) as OccurrenceDbRow[]).map(occurrenceOf)
     },
-    dueOccurrences(limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'due' ORDER BY due_at, id LIMIT ?`)
-        .all(companyId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
+    dueOccurrences(limit, jobId = null) {
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'due' AND (? IS NULL OR job_id = ?) AND ${KNOWN}
+          ORDER BY due_at, id LIMIT ?`)
+        .all(companyId, jobId, jobId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
-    runningOccurrences(limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' ORDER BY due_at, id LIMIT ?`)
-        .all(companyId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
+    runningOccurrences(limit, jobId = null) {
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' AND (? IS NULL OR job_id = ?) AND ${KNOWN}
+          ORDER BY due_at, id LIMIT ?`)
+        .all(companyId, jobId, jobId, limit) as OccurrenceDbRow[]).map(occurrenceOf)
+    },
+    holdFrozen(jobId, code, at) {
+      // Every one, no limit (a stop must reach all of them): the runs of the running ones are returned for the caller to end.
+      const runs = (conn.prepare(`SELECT run_id FROM ai_job_occurrences WHERE company_id = ? AND state = 'running' AND (? IS NULL OR job_id = ?) AND NOT (${KNOWN})
+          AND run_id IS NOT NULL`).all(companyId, jobId, jobId) as Array<{ run_id: string }>).map(r => r.run_id)
+      conn.prepare(`UPDATE ai_job_occurrences SET state = 'held', outcome_code = ?, updated_at = ?
+          WHERE company_id = ? AND state IN ('due', 'running') AND (? IS NULL OR job_id = ?) AND NOT (${KNOWN})`).run(code, at, companyId, jobId, jobId)
+      return runs
     },
     retryOccurrence(occurrenceId, from, expiresAt, by, at) {
       return conn.prepare(`UPDATE ai_job_occurrences SET state = 'due', outcome_code = NULL, run_id = NULL, expires_at = ?,
           retries = retries + 1, retried_by = ?, retried_at = ?, updated_at = ?
-          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?))`)
+          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?)) AND ${KNOWN}`)
         .run(expiresAt, by, at, at, companyId, occurrenceId, JSON.stringify(from)).changes === 1
     },
     holdEventOccurrences(jobId, code, at) {
@@ -230,14 +254,14 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         .run(code, at, companyId, jobId, jobId)
     },
     isHiddenOccurrence(occurrenceId) {
-      return conn.prepare(`SELECT 1 FROM ai_job_occurrences WHERE company_id = ? AND id = ? AND NOT (${NOT_EVENT})`).get(companyId, occurrenceId) !== undefined
+      return conn.prepare(`SELECT 1 FROM ai_job_occurrences WHERE company_id = ? AND id = ? AND (NOT (${NOT_EVENT}) OR NOT (${KNOWN}))`).get(companyId, occurrenceId) !== undefined
     },
     moveOccurrence(occurrenceId, from, to, change, at) {
       const runId = change.runId === undefined ? null : change.runId
       // checked_until / checked_commit are set once (the first claim) and never moved afterwards.
       return conn.prepare(`UPDATE ai_job_occurrences SET state = ?, outcome_code = ?, run_id = CASE WHEN ? THEN ? ELSE run_id END,
           checked_until = COALESCE(checked_until, ?), checked_commit = CASE WHEN checked_until IS NULL THEN ? ELSE checked_commit END, updated_at = ?
-          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?))`)
+          WHERE company_id = ? AND id = ? AND state IN (SELECT value FROM json_each(?)) AND ${KNOWN}`)
         .run(to, change.outcomeCode, change.runId === undefined ? 0 : 1, runId, change.checkedUntil ?? null, change.checkedCommit ?? null, at, companyId, occurrenceId, JSON.stringify(from)).changes === 1
     },
 
@@ -262,31 +286,34 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       }))
     },
     eventRecordsOf(jobId, limit) {
-      return (conn.prepare(`SELECT event_record_id AS id FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_record_id IS NOT NULL
+      return (conn.prepare(`SELECT event_record_id AS id FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_record_id IS NOT NULL AND ${KNOWN}
           GROUP BY event_record_id ORDER BY MAX(event_seq) DESC LIMIT ?`).all(companyId, jobId, limit) as Array<{ id: string }>).map(r => r.id)
     },
     occurrencesOf(jobId, records, limit) {
-      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?
+      return (conn.prepare(`SELECT ${OCCURRENCE_READ} FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND ${KNOWN}
           AND ((event_record_id IS NULL AND ${NOT_EVENT}) OR event_record_id IN (SELECT value FROM json_each(?)))
           ORDER BY ${OCCURRENCE_ORDER} LIMIT ?`)
         .all(companyId, jobId, JSON.stringify(records), limit) as OccurrenceDbRow[]).map(occurrenceOf)
     },
     eventCursor(jobId) {
-      const r = conn.prepare(`SELECT seen_seq, watch_record_id, watch_start, watch_fired, job_stamp, stop_stamp, chain_stop_code, chain_stop_record, chain_stop_at
-          FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?`)
+      const r = conn.prepare(`SELECT seen_seq, watch_record_id, watch_start, watch_fired, job_stamp, stop_stamp, chain_stop_code, chain_stop_record, chain_stop_at,
+          watch_generation FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?`)
         .get(companyId, jobId) as {
           seen_seq: number; watch_record_id: string; watch_start: string; watch_fired: number; job_stamp: string; stop_stamp: string
-          chain_stop_code: string | null; chain_stop_record: string | null; chain_stop_at: string | null
+          chain_stop_code: string | null; chain_stop_record: string | null; chain_stop_at: string | null; watch_generation: number | null
         } | undefined
       return r ? ({
         seen: r.seen_seq, watch: r.watch_record_id, start: r.watch_start, fired: r.watch_fired === 1, jobStamp: r.job_stamp, stopStamp: r.stop_stamp,
         chainStop: r.chain_stop_code !== null && r.chain_stop_record !== null && r.chain_stop_at !== null ? { code: r.chain_stop_code, record: r.chain_stop_record, at: r.chain_stop_at } : null,
+        generation: r.watch_generation,
       } satisfies JobEventCursor) : null
     },
     startEventCursor(jobId, startRecord, at) {
       // A new start record (a version the responsible person accepted) starts the watch over; the same one keeps where the chain is.
-      conn.prepare(`INSERT INTO ai_job_event_cursors (company_id, job_id, seen_seq, watch_record_id, watch_start, watch_fired, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?)
+      // A new watch is a new generation (stage 4b-0.5): an occurrence of the earlier watch never moves or stops this one.
+      conn.prepare(`INSERT INTO ai_job_event_cursors (company_id, job_id, seen_seq, watch_record_id, watch_start, watch_fired, updated_at, watch_generation) VALUES (?, ?, ?, ?, ?, 0, ?, 1)
           ON CONFLICT(company_id, job_id) DO UPDATE SET seen_seq = MAX(seen_seq, excluded.seen_seq),
+            watch_generation = CASE WHEN watch_start = excluded.watch_start THEN watch_generation ELSE COALESCE(watch_generation, 0) + 1 END,
             watch_record_id = CASE WHEN watch_start = excluded.watch_start THEN watch_record_id ELSE excluded.watch_record_id END,
             watch_fired = CASE WHEN watch_start = excluded.watch_start THEN watch_fired ELSE 0 END,
             chain_stop_code = CASE WHEN watch_start = excluded.watch_start THEN chain_stop_code ELSE NULL END,
@@ -300,17 +327,17 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
     },
     restartWatch(jobId, recordId, at) {
       conn.prepare(`UPDATE ai_job_event_cursors SET seen_seq = MAX(seen_seq, ?), watch_record_id = ?, watch_start = ?, watch_fired = 0,
-          chain_stop_code = NULL, chain_stop_record = NULL, chain_stop_at = NULL, job_stamp = ?, stop_stamp = ?, updated_at = ?
+          watch_generation = COALESCE(watch_generation, 0) + 1, chain_stop_code = NULL, chain_stop_record = NULL, chain_stop_at = NULL, job_stamp = ?, stop_stamp = ?, updated_at = ?
           WHERE company_id = ? AND job_id = ?`).run(seqNow(), recordId, recordId, jobUpdatedAt(jobId), stopUpdatedAt(), at, companyId, jobId)
     },
     markWatchFired(jobId, recordId, at) {
       return conn.prepare(`UPDATE ai_job_event_cursors SET watch_fired = 1, updated_at = ? WHERE company_id = ? AND job_id = ? AND watch_record_id = ? AND watch_fired = 0`)
         .run(at, companyId, jobId, recordId).changes === 1
     },
-    moveWatch(jobId, from, to, at) {
+    moveWatch(jobId, from, to, at, generation) {
       return conn.prepare(`UPDATE ai_job_event_cursors SET watch_record_id = ?, watch_fired = 0, chain_stop_code = NULL, chain_stop_record = NULL, chain_stop_at = NULL,
-          updated_at = ? WHERE company_id = ? AND job_id = ? AND watch_record_id = ?`)
-        .run(to, at, companyId, jobId, from).changes === 1
+          watch_generation = watch_generation + 1, updated_at = ? WHERE company_id = ? AND job_id = ? AND watch_record_id = ? AND watch_generation = ?`)
+        .run(to, at, companyId, jobId, from, generation).changes === 1
     },
     stopChain(jobId, code, recordId, at) {
       // Only the chain of the record watched now: an occurrence left from an earlier watch (a new start record chosen
@@ -318,9 +345,9 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       return conn.prepare(`UPDATE ai_job_event_cursors SET chain_stop_code = ?, chain_stop_record = ?, chain_stop_at = ?
           WHERE company_id = ? AND job_id = ? AND watch_record_id = ? AND chain_stop_code IS NULL`).run(code, recordId, at, companyId, jobId, recordId).changes === 1
     },
-    clearChainStop(jobId, recordId) {
+    clearChainStop(jobId, recordId, generation) {
       conn.prepare(`UPDATE ai_job_event_cursors SET chain_stop_code = NULL, chain_stop_record = NULL, chain_stop_at = NULL
-          WHERE company_id = ? AND job_id = ? AND chain_stop_record = ?`).run(companyId, jobId, recordId)
+          WHERE company_id = ? AND job_id = ? AND chain_stop_record = ? AND watch_generation = ?`).run(companyId, jobId, recordId, generation)
     },
     moveEventCursor(jobId, from, to, at) {
       return conn.prepare(`UPDATE ai_job_event_cursors SET seen_seq = ?, updated_at = ? WHERE company_id = ? AND job_id = ? AND seen_seq = ?`)
@@ -356,6 +383,7 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
             WHERE company_id = ? AND (? IS NULL OR job_id = ?)`).run(companyId, companyId, jobId, jobId)
       })()
     },
+    // Frozen occurrences (a later build's shape) count toward the day's limit too: the safe side (fewer runs, never more).
     eventOccurrencesOn(jobId, day) {
       return (conn.prepare(`SELECT COUNT(*) AS n FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_day = ?`)
         .get(companyId, jobId, day) as { n: number }).n

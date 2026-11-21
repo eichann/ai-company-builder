@@ -199,6 +199,7 @@ export function jobChainStopText(code: string, opts: { runsPerDay: number | null
     case 'EXPIRED': return '期限までに動けなかったため、止まりました'
     case 'RECORDS_OFF': case 'TASK_NOT_CREATED': return '次のやることを作れなかったため、止まりました'
     case 'OWNER_LEFT': case 'OWNER_RIGHTS_CHANGED': return '責任者がこの仕事を続けられなくなったため、止まりました'
+    case 'WATCH_RESET': return '仕組みの入れ替えのため、止まりました'
   }
   if (code === 'EVENT_NOT_ASSIGNEE') return `見張っていたやること${named}の担当が責任者でなくなったため、止まりました`
   if (code === 'EVENT_RECORD_GONE') return `責任者が見張っていたやること${named}を見られなくなったため、止まりました`

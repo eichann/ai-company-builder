@@ -1502,7 +1502,8 @@ export const minutesApi = {
 export type { JobList, JobOccurrenceView, JobRetryResult, JobVersionView, JobView, JobWaiting } from '../../../shared/types/jobs'
 export type { JobDefinition } from '../../../shared/core/jobs'
 
-import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE, JOB_SCHEMAS, JOB_SCHEMAS_HEADER, type JobDefinition } from '../../../shared/core/jobs'
+import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE, JOB_SCHEMAS_HEADER, type JobDefinition } from '../../../shared/core/jobs'
+import { ADMIN_JOB_SCHEMAS } from './jobs'
 
 /** The states of a やること an event job may start watching from (not finished: it can still reach the state watched). */
 export const JOB_START_STATES = ['todo', 'in_progress', 'review', 'waiting', 'awaiting_acceptance', 'declined'] as const
@@ -1512,9 +1513,10 @@ export const JOB_START_PAGE = 50
 /**
  * Every job request says which definition shapes this console reads (jobs.md "Shapes this build does not know"):
  * the server answers a newer one without its definition and refuses to approve, accept or edit it from here. A
- * console from before this header (a tab left open) is treated as reading schema 1 only.
+ * console from before this header (a tab left open) is treated as reading schema 1 only. What this console's form
+ * round-trips (`ADMIN_JOB_SCHEMAS`, stage 4b-0.5), never what the shared parser reads.
  */
-const JOB_READS = { headers: { [JOB_SCHEMAS_HEADER]: JOB_SCHEMAS.join(',') } }
+const JOB_READS = { headers: { [JOB_SCHEMAS_HEADER]: ADMIN_JOB_SCHEMAS.join(',') } }
 
 export const jobsApi = {
   list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/jobs`, jobListSchema, JOB_READS),

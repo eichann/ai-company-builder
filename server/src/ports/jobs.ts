@@ -83,6 +83,11 @@ export interface JobOccurrenceRow {
   eventRecordId?: string | null
   eventVersion?: number | null
   eventDay?: string | null
+  /**
+   * Stage 4b-0.5: the watch (`JobEventCursor.generation`) an event occurrence was made for. Only an occurrence of the
+   * watch now moves, stops or clears it; null / absent (a time slot, or a watch not known) never does.
+   */
+  watchGeneration?: number | null
   createdAt: string
   updatedAt: string
 }
@@ -101,6 +106,8 @@ export interface JobEventCursor {
   jobStamp: string; stopStamp: string
   /** The chain of watched records stopped (owner decision ①): why, on which record, when; null while it goes on. */
   chainStop: { code: string; record: string; at: string } | null
+  /** Stage 4b-0.5: which watch this is (+ 1 each time it starts over or moves); null only before the startup migration. */
+  generation: number | null
 }
 
 export interface JobRepository {
@@ -125,10 +132,11 @@ export interface JobRepository {
   stopped(): boolean
   setStopped(stopped: boolean, by: string, at: string): void
 
-  // Every occurrence method below acts as if an event occurrence (stage 4a's `ev:` slot, `isEventOccurrenceSlot`)
-  // did not exist: none is read, listed, moved, sent back or inserted (stage 4-0.1, jobs.md) — except
-  // `holdEventOccurrences`, the one write that may touch one (a pause / stop holds it; nothing becomes visible), and
-  // `isHiddenOccurrence`, a yes/no used only to refuse.
+  // Every occurrence method below acts as if a **frozen** occurrence did not exist (stage 4b-0.5, the rollback floor:
+  // pinned to a version of a shape this build does not know — a later build made it): none is read, listed, counted,
+  // moved or sent back, and the limits count only the others. Exceptions: `holdFrozen` (a pause / stop / restore holds
+  // every one, without a limit) and `isHiddenOccurrence`, a yes/no used only to refuse. (Event occurrences, which
+  // stage 4-0.1 left out the same way, are read here since 4a: every answer to a person checks their record.)
   /** Insert an occurrence unless its (job, slot) is there already (`UNIQUE`): false = it was (nothing written). */
   insertOccurrence(row: JobOccurrenceRow): boolean
   occurrence(occurrenceId: string): JobOccurrenceRow | null
@@ -137,10 +145,16 @@ export interface JobRepository {
    * it was made (a job whose trigger changed has both) — and events of one moment by delivery number.
    */
   occurrences(jobId: string, limit: number, offset?: number): JobOccurrenceRow[]
-  /** Occurrences in `due`, oldest due first (every job of the company). */
-  dueOccurrences(limit: number): JobOccurrenceRow[]
-  /** Occurrences in `running` (a PC's run holds them, B PR 5a), oldest due first (every job of the company). */
-  runningOccurrences(limit: number): JobOccurrenceRow[]
+  /** Occurrences in `due`, oldest due first (every job of the company, or `jobId`'s only). */
+  dueOccurrences(limit: number, jobId?: string | null): JobOccurrenceRow[]
+  /** Occurrences in `running` (a PC's run holds them, B PR 5a), oldest due first (every job of the company, or `jobId`'s only). */
+  runningOccurrences(limit: number, jobId?: string | null): JobOccurrenceRow[]
+  /**
+   * Stage 4b-0.5: a pause, the company's stop or a restore holds every frozen occurrence of the job (null: of every job)
+   * still `due` or `running` — `held` with `code`, **no limit** — and answers the runs of those that were running, for
+   * the caller to end. Nothing else: no notice, no watch stopped (a later build reads them again).
+   */
+  holdFrozen(jobId: string | null, code: string, at: string): string[]
   /**
    * Move an occurrence from one of `from` to `to` (compare-and-set): false = it was no longer in
    * `from` (someone else moved it first; nothing written).
@@ -184,12 +198,15 @@ export interface JobRepository {
   moveEventCursor(jobId: string, from: number, to: number, at: string): boolean
   /** The watched record made its occurrence: it fires no more (compare-and-set on the record; false = it was not, or fired). */
   markWatchFired(jobId: string, recordId: string, at: string): boolean
-  /** The next record to watch (`followMadeTask`): only while `from` is still the watched one (false = it was not: nothing written). Ends a chain stop. */
-  moveWatch(jobId: string, from: string, to: string, at: string): boolean
+  /**
+   * The next record to watch (`followMadeTask`): only while `from` is still the watched one **of `generation`** — the
+   * occurrence's own watch (false = it was not: nothing written; null never matches). Ends a chain stop; a new generation.
+   */
+  moveWatch(jobId: string, from: string, to: string, at: string, generation: number | null): boolean
   /** The chain stopped (owner decision ①) on `recordId`, the one watched now: false when it had stopped already (one notice per stop) or another record is watched. */
   stopChain(jobId: string, code: string, recordId: string, at: string): boolean
-  /** The chain goes on after all (the occurrence it stopped on ran, after 「もう一度」): only a stop on `recordId`. */
-  clearChainStop(jobId: string, recordId: string): void
+  /** The chain goes on after all (the occurrence it stopped on ran, after 「もう一度」): only a stop on `recordId`, of the watch `generation` (null: none). */
+  clearChainStop(jobId: string, recordId: string, generation: number | null): void
   /** Which gaps are open now: the job's (`jobId` as given) and / or the company's stop's (''). */
   openGapKeys(jobId: string): string[]
   /** The job's gaps and the company's (its stops), in any order. */
@@ -219,7 +236,8 @@ export interface JobRepository {
   holdEventOccurrences(jobId: string | null, code: string, at: string): void
   /**
    * Stage 4-0.1: whether this id is an event occurrence — only so that a refusal can treat a PC run on one as a missing
-   * run (`ai-runs.ts` `ownRun`; 4a runs every event occurrence on the server, so none has a PC run).
+   * run (`ai-runs.ts` `ownRun`; 4a runs every event occurrence on the server, so none has a PC run). Stage 4b-0.5: a
+   * frozen occurrence too (a later build's PC run on it is a missing run here).
    */
   isHiddenOccurrence(occurrenceId: string): boolean
 }

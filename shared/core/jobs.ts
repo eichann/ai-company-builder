@@ -808,6 +808,13 @@ export type JobOutcomeCode = typeof JOB_OUTCOME_CODES[number]
  * occurrence decided it on purpose), `held` (a pause or the stop said not to run it), nor one that ran.
  */
 export const JOB_RETRY_STATES: readonly JobOccurrenceState[] = ['needs_person', 'expired']
+/**
+ * Reconciling an unknown outside result of an occurrence's run (stage 4b-0.5, owner memo 「段4b 設計メモ」 §4-1): the
+ * states 「もう一度」 takes, and `held` — a pause, the company's stop or a restore ended its run while an outside
+ * operation was in flight (a Drive put, a draft), so a person must still be able to say whether it happened.
+ * Reconciling never resumes anything: a held occurrence stays held, and its run stays stopped.
+ */
+export const JOB_RECONCILE_STATES: readonly JobOccurrenceState[] = [...JOB_RETRY_STATES, 'held']
 
 /**
  * Why 「もう一度」 cannot be pressed on an occurrence now (the API's codes; the words are job-words.ts

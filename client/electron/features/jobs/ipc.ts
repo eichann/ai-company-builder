@@ -7,8 +7,8 @@
 //   jobs:pause    pause a job they run
 //   jobs:resume   resume a pause they made
 
-import { JOBS_OFFLINE_TEXT, JOBS_SERVER_TOO_OLD_TEXT, type JobActionResult, type JobsFailure, type MyJob, type MyJobsResult, type WatchChoicesResult } from '../../../shared/jobs'
-import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE, JOB_SCHEMAS, JOB_SCHEMAS_HEADER, isJobId, type JobDeliveryPlace } from '../../../../shared/core/jobs'
+import { APP_JOB_SCHEMAS, JOBS_OFFLINE_TEXT, JOBS_SERVER_TOO_OLD_TEXT, appReadsJobDefinition, type JobActionResult, type JobsFailure, type MyJob, type MyJobsResult, type WatchChoicesResult } from '../../../shared/jobs'
+import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE, JOB_SCHEMAS_HEADER, isJobId, type JobDeliveryPlace } from '../../../../shared/core/jobs'
 import { RECORD_ID_RE } from '../../../../shared/core/records'
 import type { JobView } from '../../../../shared/types/jobs'
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -51,10 +51,11 @@ export function createJobsApi(deps: JobsDeps) {
     try {
       const res = await doFetch(`${base}/api${path}`, {
         method, redirect: 'error', signal: AbortSignal.timeout(deps.timeoutMs ?? 15_000),
-        // The definition shapes this app shows (jobs.md "Shapes this build does not know"): since stage 4a, event jobs too.
+        // The definition shapes this app shows (jobs.md "Shapes this build does not know"): since stage 4a, event jobs too;
+        // what this app shows (`APP_JOB_SCHEMAS`, stage 4b-0.5), never what the shared parser reads.
         // Its 受け取る is always a press of its own, never an approval's (`JOB_ACCEPT_HEADER`; read on acceptance only).
         headers: {
-          Cookie: cookies.join('; '), [JOB_SCHEMAS_HEADER]: JOB_SCHEMAS.join(','), [JOB_ACCEPT_HEADER]: JOB_ACCEPT_SEPARATE,
+          Cookie: cookies.join('; '), [JOB_SCHEMAS_HEADER]: APP_JOB_SCHEMAS.join(','), [JOB_ACCEPT_HEADER]: JOB_ACCEPT_SEPARATE,
           ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -103,7 +104,8 @@ export function createJobsApi(deps: JobsDeps) {
   /** What waits for the member's 「受け取る」: the approved version as the server shows it to them (its definition may be hidden). */
   function toAccept(detail: JobView, why: 'accept' | 'place'): MyJob['toAccept'] {
     const v = detail.versions?.find(x => x.version === detail.approvedVersion)
-    return v ? { version: v.version, fingerprint: v.fingerprint, definition: v.definition, why } : null
+    // A shape this app does not show (a server that ignored the header) is shown as one it cannot show (stage 4b-0.5).
+    return v ? { version: v.version, fingerprint: v.fingerprint, definition: appReadsJobDefinition(v.definition), why } : null
   }
 
   async function act(what: string, companyId: unknown, jobId: unknown, path: (id: string) => string, body?: unknown): Promise<JobActionResult> {

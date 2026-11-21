@@ -62,7 +62,9 @@ New tables only (additive; `CREATE … IF NOT EXISTS`, nothing else changes):
   (due / running / done / nothing / needs_person / skipped / expired / held), `run_id`, `outcome_code`, and (5a-2, additive: `migrateJobOccurrenceCheckedUntil`) `checked_until` — where its check
   stopped looking, set once at the first claim (`moveOccurrence`'s `checkedUntil`, `COALESCE`: never moved), and
   `checked_commit` — the commit a `new_files` check in the shared folder looked up to (the app's, with that claim),
-  and (5b, additive: `migrateJobOccurrenceRetries`) `retries` (0 = never), `retried_by`, `retried_at` — 「もう一度」.
+  and (5b, additive: `migrateJobOccurrenceRetries`) `retries` (0 = never), `retried_by`, `retried_at` — 「もう一度」, and
+  (4b-0.5, additive: `migrateJobWatchGenerations`) `watch_generation` — the watch an event occurrence was made for
+  ("Event-triggered jobs" "Watch generations").
   Written by the clock and the runner (3b, below).
 - `ai_job_settings`: 「定期の仕事をすべて止める」 (`stopped`; no row = not stopped).
 
@@ -130,7 +132,11 @@ PUT  /jobs-stop { stopped }         owner/admin
   folders) — and may **write** where the deliverables go (`writes.place`, `resolveAccess`); otherwise 409
   `JOB_GRANT_EXCEEDS`, naming no place. A pinned Skill is still the company's at that tree (409
   `JOB_SKILL_MISSING` / `JOB_SKILL_CHANGED`: make a new version). A `fingerprint` that is not the
-  version's → 409 `JOB_VERSION_FINGERPRINT`. **Acceptance and every resume of an approved job run the
+  version's → 409 `JOB_VERSION_FINGERPRINT` — compared only where the caller's view shows the fingerprint
+  (`fingerprintShown`, stage 4b-0.5, independent review): a shape this server does not know answers
+  `JOB_SCHEMA_UNKNOWN` **before** the comparison, and a version hidden from the caller (a place or start record they
+  cannot read) never compares it — its other refusal comes whatever was sent, so a guess never tells the hidden sha256
+  (approve and accept alike; `job-rollback-floor.test.ts` F1). **Acceptance and every resume of an approved job run the
   same rights and Skill checks.**
 - **Approving is not accepting — two presses, also for the same person** (owner decision 2026-11-18, memo 「AI が自動化を
   提案する」 ⑦): an owner/admin who approves a job they are themselves the responsible person of has approved it as an
@@ -231,7 +237,9 @@ and starting the runner. It reads no content and calls nothing outside.
   still `due` becomes `held` (`JOB_PAUSED` / `COMPANY_STOPPED`) — and one a PC is **running** (PR 5a) too,
   its run ended in the same transaction (`endPcRun`: `waiting_person` with that code, no holder), so its
   token (fenced: 409 `RUN_SUPERSEDED`), renew and finish are refused at once and a resume or lifting the stop
-  brings nothing back (the occurrence stays `held`; a 「もう一度」 of the ended run claims nothing).
+  brings nothing back (the occurrence stays `held`; a 「もう一度」 of the ended run claims nothing). **Every one**
+  (stage 4b-0.5): batch after batch of the job's own (`dueOccurrences` / `runningOccurrences` with the job), until none
+  is left — before, the first 10,000 only — and the frozen ones too ("Shapes this build does not know").
 - **When it ends** — a resume, `PUT /jobs-stop { stopped: false }` (only when it was on): the newest slot
   at or before now, if not made yet (no clock ran meanwhile), is written `held`, so the clock never makes
   it `due`. A slot from before the pause that no clock had reached yet is held too (the safe side).
@@ -752,16 +760,26 @@ POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }  
   (`DRIVE_FILE_NOT_THIS_JOB`), `DRIVE_FILE_CHANGED_SINCE`, `DRIVE_FILE_NOT_VERIFIABLE` (a Google document whose state since its put
   cannot be proven — e.g. every document put before that rule: the first run after it writes a new file), `keepForever` /
   `DRIVE_FILE_FIXED` (`google-drive.md`).
-- **Reconcile** (`reconcile`): only on a `needs_person` / `expired` occurrence (else 409 `NOT_RETRYABLE`), the body
-  `{ done: boolean }` (400), an operation of its PC run whose result is unknown (else 404 `OPERATION_NOT_FOUND`; one
-  still marked in flight on a run that no longer runs is made `unknown` first, as a finish does — never stuck); the
-  run core's reconciliation (`aiRuns.reconcileFor`, shared with `reconcile`: `reconciled_by` = the owner / admin, a run
-  `waiting_reconcile` with nothing unknown left → `open`). The admin console asks them to have the responsible person
-  look first (an owner / admin cannot see the person's drafts). The in-flight mark and the answer are one transaction.
+- **Reconcile** (`reconcile`): only on a `needs_person` / `expired` / **`held`** occurrence (`JOB_RECONCILE_STATES`, else
+  409 `NOT_RETRYABLE`; `held` since stage 4b-0.5, owner memo 「段4b 設計メモ」 §4-1: a pause / the company's stop / a restore
+  that ended a run while a Drive put or a draft was in flight left it held with its run `waiting_reconcile`, and before
+  nobody could record what happened — today's time jobs too), the body `{ done: boolean }` (400), an operation of its PC
+  run whose result is unknown (else 404 `OPERATION_NOT_FOUND`; one still marked in flight on a run that no longer runs is
+  made `unknown` first, as a finish does — never stuck); the run core's reconciliation (`aiRuns.reconcileFor`, shared
+  with `reconcile`: `reconciled_by` = the owner / admin). **Reconciling never resumes**: a job's run waiting for it goes
+  back to `open` only while its occurrence is `running` (`ai-runs.ts` `mayGoOn`, also on the run's own
+  `…/reconcile`); otherwise it stays `waiting_reconcile` (stopped: its token fenced, renew refused), a held occurrence
+  stays held (a resume runs nothing; 「もう一度」 stays `NOT_RETRYABLE`), and a `needs_person` / `expired` one runs again
+  only by 「もう一度」. A frozen occurrence (a later build's shape) is the one 404 here; back on its build it can be
+  reconciled the same way. Who: owner / admin, as today (the responsible person's own part, D11, is 4b-1). The admin
+  console asks them to have the responsible person look first (an owner / admin cannot see the person's drafts). The
+  in-flight mark and the answer are one transaction. Test: `job-runs.test.ts` "a held occurrence whose run waits for
+  reconciliation" (F5 / F6).
 - **The view** (`GET /jobs/:jobId/occurrences`, owners / admins only, `JobServiceDeps.occurrenceRetry` → `viewOf`):
   `retries`, `retriedBy`, `retriedAt`, and on a `needs_person` / `expired` one `retry` (`{ allowed: true }` or
-  `{ allowed: false, why }`), `unknownOperations` (key and kind only) and `madeBefore` (kinds and counts). The responsible
-  person's view has none.
+  `{ allowed: false, why }`), `unknownOperations` (key and kind only) and `madeBefore` (kinds and counts); on a `held` one
+  `unknownOperations` only (stage 4b-0.5: the admin console's ［作られていた］［作られていなかった］ then show for it, no
+  ［もう一度］). The responsible person's view has none.
 - **Told again, in its own words**: an occurrence notice's key is `<kind>:<job>:<occurrence>:<retries>:<code>`, read
   from the occurrence as written in that transaction — a second failure after a press is told once more, and the bell
   words an older notice by the code it was written with (a press clears the occurrence's own code); a key without a code
@@ -785,13 +803,29 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
 
 - **Every read of a stored version is schema-checked** (`storedJobDefinition`, `shared/core/jobs.ts`): its
   definition only when its `schema` column is one this build knows (`JOB_SCHEMAS`, `[1, 2]` since 4a) and the stored text
-  says the same schema; else null. A null definition is **never** made into an occurrence by the clock, run by the
-  server's runner (left `due`, not even taken into the batch), listed or claimed by a PC (the one 404), sent back by
-  「もう一度」 (`JOB_SCHEMA_UNKNOWN`), approved, accepted or resumed (409 `JOB_SCHEMA_UNKNOWN`), and a job whose newest
-  version is one is not edited (a new version over it: 409 `JOB_SCHEMA_UNKNOWN`, whatever the screen reads); a role change does not
-  pause it for a reason this build cannot judge. A running one's deadline is not read; its expiry still applies (the
-  clock ends it `expired` then, as for any occurrence).
-  Schema 1 is read exactly as stored.
+  says the same schema; else null. A null definition is **never** made into an occurrence by the clock, approved,
+  accepted or resumed (409 `JOB_SCHEMA_UNKNOWN`), and a job whose newest version is one is not edited (a new version over
+  it: 409 `JOB_SCHEMA_UNKNOWN`, whatever the screen reads); a role change does not pause it for a reason this build
+  cannot judge. Its occurrences are **frozen** (next bullet). Schema 1 is read exactly as stored.
+- **Frozen occurrences** (stage 4b-0.5, the rollback floor: owner memo 「段4b 設計メモ」 第4版 §5-1 / §5-2): an occurrence
+  pinned to a version of a shape this build does not know (a later build — 4b-1's PC AI on events, `schema: 3` — made
+  it) does not exist for this build. The job repository leaves it out **in SQL, before every limit** (`KNOWN` in
+  `adapters/sqlite/jobs.ts`: the pinned version's `schema` in `JOB_SCHEMAS` and its text saying the same schema —
+  `occurrence`, `occurrences`, `dueOccurrences`, `runningOccurrences`, `occurrencesOf`, `eventRecordsOf`,
+  `moveOccurrence`, `retryOccurrence`), so it is not listed or counted (`GET …/occurrences`, `lastOccurrence`), no notice
+  of it is shown — also one written before (the bell's `occurrenceNotice` finds no occurrence) — or written, the clock
+  neither expires nor ends it (**changed from 4-0**: its expiry no longer applies here; its own build decides when it
+  comes back), the server's runner and the PC's list never see it (no batch place taken: 10,000 frozen ones ahead of a
+  known one hold nothing up), a claim, 「もう一度」 and reconcile answer the one 404 `JOB_NOT_FOUND`, and a PC run on one
+  is a missing run (`isHiddenOccurrence` → `ai-runs.ts` `ownRun`). A version of such a shape is answered with
+  `fingerprint` / `consentFingerprint` null to everyone, owners and admins included (`view`), and its
+  `job_accept_needed` is not shown (`acceptNotice`). **Only stopping reaches it**: a pause, the company's stop and a
+  restore (`holdDue`) hold every frozen `due` / `running` one of the job (company) — `holdFrozen`, **no limit** — and end
+  its run (`endPcRun`: an operation in flight becomes unknown and the run waits for reconciliation); nothing is told and
+  no chain is stopped (the later build reads them as held). Test: `job-rollback-floor.test.ts` (F1–F4; F10 the screens
+  of a later server; F11 a database as 4b-1 leaves it, `tests/fixtures/stage4b1-shaped-jobs.sql`: nothing leaks or runs,
+  the stop holds, what 4b-1 reads on return — versions, watch, receipts, notices, known outcomes, its own column —
+  unchanged). Mutation check: 18 guards of this bullet, each fails a test.
 - **A client gets a definition only in a shape it announced**: header `X-ACB-Job-Schemas` (`JOB_SCHEMAS_HEADER`,
   `parseJobSchemasHeader`: schema 1 always, the rest as named; none = schema 1 — every admin console and app before
   4-0, and a tab left open). A version of another shape (or one this server does not know) is answered without its
@@ -799,7 +833,14 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   `needsUpdate` when the version it shows is one (an older admin calls `trigger.at.split`). Approving, accepting it
   or editing a job whose newest version is one, from that client: 409 `JOB_NEEDS_NEWER_SCREEN` (what a screen
   cannot show, it must not write over or consent to). The admin console (`admin/src/lib/api.ts` `JOB_READS`) sends
-  the header on every job call; since 4a so does the desktop app (`client/electron/features/jobs/ipc.ts`, `1,2`). An app
+  the header on every job call; since 4a so does the desktop app (`client/electron/features/jobs/ipc.ts`, `1,2`).
+  **A screen announces what it can show, edit and accept, never what the shared parser reads** (stage 4b-0.5, owner memo
+  §5-1): `ADMIN_JOB_SCHEMAS` (`admin/src/lib/jobs.ts`; also asked by `editableDefinition` / `needsNewerScreen`, so a
+  form is never built from a shape the core reads but the form cannot) and `APP_JOB_SCHEMAS` (`client/shared/jobs.ts`;
+  the 受け取る shows a definition only of such a shape, `appReadsJobDefinition`) — both `[1, 2]` now. When a later core
+  reads `schema: 3` (4b-1), the screens keep announcing `1,2` until their forms and words handle it. Tests
+  `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading schema 3; every announced schema
+  round-trips through the form) and `client/tests/job-screen-schemas.test.ts` (every announced schema has its words). An app
   before it gets an event job without its definition and its 受け取る is refused — the same code, but the app (a request
   carrying `X-ACB-Client-Version`) is told 「…アプリを新しくしてください」 (`JOB_NEEDS_NEWER_APP`, `routes/jobs.ts`), a screen
   「画面を新しくしてください」.
@@ -856,6 +897,31 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   second completion of it make nothing more (also when the day's limit skipped it). `assignee: 'responsible'` is checked
   on the record (its assignee at the event's version and right before acting), not on who completed it (the requester
   and the checker may).
+- **Watch generations** (stage 4b-0.5, owner memo 「段4b 設計メモ」 第4版 §5-3 with Codex's 4th review #1): the cursor's
+  `watch_generation` says which watch it is — 1 when first watched, + 1 each time the watch starts over (`restartWatch`,
+  `startEventCursor` on a new start record) or moves (`moveWatch`) — and an event occurrence pins the generation it was
+  made for (`ai_job_occurrences.watch_generation`, the scan). **Only an occurrence of the watch now moves, stops or clears
+  it** (`moveWatch` / `clearChainStop` take its generation in SQL; the chain-stopping paths — the clock's expiry, the
+  runner's held / skipped / needs-person, a refused やること, `holdDue` — ask `ownsWatch`): the same record chosen again,
+  an occurrence of the earlier watch that expires, is held (its version is no longer the approved one), fails or runs
+  stops and moves nothing (F7). A NULL generation (a time occurrence, or one the migration could not place) is
+  **isolated**. The startup migration (`migrateJobWatchGenerations`, additive, only cursors without a generation)
+  gives 4a's data generation 1 and pins it on an occurrence only when its provenance is certain — the watch fired, its
+  chain is not stopped, and the job's **one** occurrence of the watched record is still `due` / `running` (F8) — never
+  from which pending one is newest (`watch_fired` is also set without an occurrence, and the newest may have ended while
+  an older one waits) — or, for a chain **stopped by its own occurrence** (the stop on the watched record, the job's one
+  occurrence of it `needs_person` / `expired` with that very code, of the approved version: a restarted watch is always a
+  new version, and no firing without an occurrence writes those codes), that occurrence, so its 「もう一度」 still lets the
+  chain go on (independent review). A watch that fired, is not stopped and has no occurrence of its own is an **orphan**
+  — for a job that follows what it made (`followMadeTask`; one that does not ends after its one firing, its occurrence
+  done being its normal end, and is left as it is): stopped once (`WATCH_RESET`, 「仕組みの入れ替えのため、止まりました」) and its
+  responsible person (not the creator: whether they read the record cannot be judged there, D7) told once, so they
+  choose again (F9). Tests: `job-events.test.ts` "watch
+  generations", `tests/unit/job-watch-generations.test.ts` (on `tests/fixtures/app-schema-before-watch-generations.sql`).
+  Mutation check: 25 mutations, 22 fail a test (and 8 more after the independent review — the follow-only orphan, the
+  own-occurrence pin and each of its six conditions — all fail); not alone: the `ownsWatch` null-generation check (a cursor always has
+  a generation once the migration ran, so the comparison alone refuses) and the migration's schema check on the column
+  and on the text (each alone suffices, as in `storedJobDefinition`; both removed together fails).
 - **The start record**: read by whoever saves it **and** by the responsible person (one problem code,
   `trigger.startRecord.NOT_FOUND`, for missing / unreadable: an answer never tells them apart); a viewer who does not
   read it gets the version without definition, fingerprints and trigger — owners and admins too (`readsStart`). The admin
@@ -956,9 +1022,11 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
 - **Screens**: the admin form's 「いつ動くか」 → 「見張っているやることが終わったときなどに」: 見張るやること (a list searched by name and paged, `JOB_START_PAGE` 50 at a time), きっかけ (a state),
   「作ったやることも続けて見張る」, 1日の上限; the words are `job-words.ts` (`jobRecordTriggerText` — never the record's title
   —, `JOB_EVENT_NOTE`, the grant's day-limit line, the expiry line). The app shows the same sentences in 「受け取る」.
-- **Rolling back**: to 4-0 is safe (`deployment.md` "Rolling back production"); 4-0 reads schema 2 as nothing. A `due`
-  event occurrence left behind expires there and 4-0 tells its responsible person and the creator without this
-  section's reader check (known; event occurrences are due for minutes only — the runner takes them right after the clock).
+- **Rolling back**: once 4b-0.5 is in production, never below it (`deployment.md` "Rolling back production", owner D8):
+  4b-0.5 freezes 4b-1's shapes ("Shapes this build does not know"), reconciles held occurrences without resuming them and
+  keeps watch generations. Between 4-0.1 and 4a (before 4b-0.5 shipped): 4-0 reads schema 2 as nothing; a `due` event
+  occurrence left behind expires there and 4-0 tells its responsible person and the creator without this section's reader
+  check (known; event occurrences are due for minutes only — the runner takes them right after the clock).
 - Test: `server/tests/integration/job-events.test.ts` (the memo's 4a tests 1–9 and the narrowing: unrelated task,
   duplicate, someone's tag, rename, undo and complete again, a missing target refused, the start record's readers, ⑧, ⑤,
   a new consent not accepted, the consent), `jobs-definition.test.ts` "an event trigger", `job-schemas.test.ts` (now with a

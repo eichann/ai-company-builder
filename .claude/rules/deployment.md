@@ -255,7 +255,29 @@ admin console); lifting the jobs stop holds the slot that passed meanwhile, so n
   occurrence held, its run ended), `company-archive.test.ts` 「the restore command…」 (the CLI's restore and
   `pause-after-restore --all`; without the api's settings nothing is written) — each mutation-checked.
 
-## Rolling back production (stage 4-0.1 is the oldest version to go back to)
+## Rolling back production (stage 4b-0.5 is the oldest version to go back to, once shipped)
+
+**Once 4b-0.5 (the rollback floor of event jobs run by the PC's AI, branch `feat/stage4b-05-rollback-floor`, owner memo
+「段4b 設計メモ」 第4版 §5, decision D8) is in production, never roll production back below it** — not to 4a, 4-0.1 or
+4-0 (the floor is the pinned release that includes 4b-0.2's fix of who sees a stopped chain). Why: 4b-1 writes job
+versions of `schema: 3` (an event job the responsible person's PC AI runs), their occurrences, PC runs with Drive puts or
+drafts in flight, and watch generations. Only 4b-0.5 and later (a) **freeze** an occurrence of a shape they do not know
+— not shown, counted, told, expired, run, claimed, retried or reconciled, left out in SQL before every limit, and only a
+pause / the company's stop / a restore holds it and ends its run, telling nobody (`jobs.md` "Shapes this build does not
+know"); 4a would expire such an occurrence and tell people about it without 4b's checks, and its clock and runner limits
+could be filled by frozen rows; (b) let a held occurrence's unknown outside result be reconciled without resuming
+anything (`jobs.md` "「もう一度」" "Reconcile") — a build before leaves a run that a stop ended mid-put with no way to
+record what happened; (c) keep **watch generations** (`jobs.md` "Event-triggered jobs"): a build before them lets an
+earlier watch's occurrence stop or move a watch chosen again on the same record; (d) announce, in the admin console and
+the app, only the shapes their screens show (`ADMIN_JOB_SCHEMAS` / `APP_JOB_SCHEMAS`), so a newer core never hands an old
+screen a definition to approve or accept. Rolling back between 4b-0.5 and 4b-1, or forward, works: 4b-0.5 changes
+nothing 4b-1 needs except holding what a stop holds (F11: `server/tests/integration/job-rollback-floor.test.ts` on
+`server/tests/fixtures/stage4b1-shaped-jobs.sql`); the watch-generation migration only reads cursors that have no
+generation, so a cursor 4b-1 wrote is never re-judged. Rolling back the desktop app below 4b-2 is the app's own matter
+(memo §7: it never claims an event occurrence and stops renewing; the server's deadline ends the run). Everything below
+was the previous floor's reasoning and still holds for builds older than 4b-0.5.
+
+### The previous floor (stage 4-0.1)
 
 **Once event-triggered jobs (stage 4a) are in production, never roll production back to a version older than
 stage 4-0.1** (`fix/stage4-0-1-hide-event-occurrences`, on top of 4-0 `feat/stage4-0-ledger-seq`; owner decision ⑩,

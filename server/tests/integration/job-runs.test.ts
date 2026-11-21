@@ -727,6 +727,62 @@ describe('a run waiting for a person to reconcile an outside operation', () => {
   })
 })
 
+/**
+ * Stage 4b-0.5 (owner memo 「段4b 設計メモ」 §4-1, F5 / F6): a pause / the company's stop that ended a run while a Drive put or
+ * a draft was in flight leaves the occurrence held and the run waiting for reconciliation. It can be reconciled — what
+ * the put or draft did is recorded — and **nothing resumes**: the run stays stopped, its old token stays refused, resuming
+ * the job runs nothing. Today's time jobs (F6) and, on the later build, event jobs (F5) alike.
+ */
+describe('a held occurrence whose run waits for reconciliation (stage 4b-0.5, F5 / F6)', () => {
+  const inFlight = (runId: string, key = 'drive-1') => {
+    const at = new Date().toISOString()
+    db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, created_at, updated_at)
+      VALUES (?, ?, ?, 'f', 'drive-put', 'in_progress', 1, ?, ?)`).run(CO, runId, key, at, at)
+  }
+  const opOf = (runId: string, key = 'drive-1') => db.prepare('SELECT state, reconciled_by FROM ai_run_operations WHERE company_id = ? AND run_id = ? AND key = ?').get(CO, runId, key) as Json
+
+  it('an owner / admin reconciles it on the occurrence; the run stays stopped, the old token refused, resuming runs nothing', async () => {
+    const { job, occ } = await runnable()
+    const run = (await claim(occ)).body.data.run
+    const token = await tokenFor(run)
+    inFlight(run.id)
+    expect(services.jobs.pause(owner(), job).ok).toBe(true)
+    expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'JOB_PAUSED' })
+    expect(runOf(run.id)).toMatchObject({ state: 'waiting_reconcile' })
+    // The owner's view offers it (never 「もう一度」: held is not sent back); the responsible member may not reconcile here.
+    const listed = (await as('jr-owner', 'GET', `/jobs/${job}/occurrences`)).body.data.occurrences.find((o: Json) => o.id === occ)
+    expect(listed).toMatchObject({ unknownOperations: [{ key: 'drive-1', kind: 'drive-put' }] })
+    expect(listed.retry).toBeUndefined()
+    expect((await as('jr-alice', 'POST', `/jobs/${job}/occurrences/${occ}/operations/drive-1/reconcile`, { done: true })).status).toBe(403)
+    expect(await as('jr-owner', 'POST', `/jobs/${job}/occurrences/${occ}/operations/drive-1/reconcile`, { done: true })).toMatchObject({ status: 200, body: { data: { occurrenceId: occ } } })
+    expect(opOf(run.id)).toEqual({ state: 'done', reconciled_by: 'jr-owner' })
+    // Recorded, and nothing goes on.
+    expect(runOf(run.id)).toMatchObject({ state: 'waiting_reconcile' })
+    expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'JOB_PAUSED' })
+    expect(await ai(token, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 409, body: { code: 'RUN_SUPERSEDED' } })
+    expect((await as('jr-alice', 'POST', `/ai-runs/${run.id}/renew`, { generation: run.generation })).status).toBe(409)
+    expect((await services.jobs.resume(owner(), job)).ok).toBe(true)
+    expect(occOf(occ)).toMatchObject({ state: 'held' })
+    expect((await as('jr-alice', 'GET', '/me/job-turns')).body.data.turns.map((t: Json) => t.occurrenceId)).not.toContain(occ)
+    expect(await claim(occ, 'jr-alice', 'device-alice-2')).toMatchObject({ status: 409, body: { code: 'JOB_TURN_GONE' } })
+    expect(await as('jr-owner', 'POST', `/jobs/${job}/occurrences/${occ}/retry`)).toMatchObject({ status: 409, body: { code: 'NOT_RETRYABLE' } })
+    expect(tasksOf()).toEqual([])
+  })
+
+  it('the run’s own member reconciling it on the run (the company’s stop) does not reopen it either', async () => {
+    const { occ } = await runnable()
+    const run = (await claim(occ)).body.data.run
+    inFlight(run.id, 'draft-9')
+    services.jobs.setStopped(owner(), { stopped: true })
+    expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'COMPANY_STOPPED' })
+    expect((await as('jr-alice', 'POST', `/ai-runs/${run.id}/operations/draft-9/reconcile`, { done: false })).status).toBe(200)
+    expect(opOf(run.id, 'draft-9')).toMatchObject({ state: 'not_done' })
+    expect(runOf(run.id)).toMatchObject({ state: 'waiting_reconcile' })
+    services.jobs.setStopped(owner(), { stopped: false })
+    expect(await claim(occ, 'jr-alice', 'device-alice-2')).toMatchObject({ status: 409, body: { code: 'JOB_TURN_GONE' } })
+  })
+})
+
 describe('the app says which checks it runs (B PR 5a-2)', () => {
   it('a claim that does not name the occurrence’s check (an older app, or a newer check) is refused and nothing is written', async () => {
     const { occ } = await runnable()

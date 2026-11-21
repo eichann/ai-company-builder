@@ -161,6 +161,18 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     try { deps.noticesChanged?.(companyId, [...told]) } catch { /* the apps' own check catches up */ }
   }
 
+  /**
+   * Whether an event occurrence belongs to its job's watch **now** (stage 4b-0.5, watch generations): made for this very
+   * watch (`watchGeneration`, pinned when made) and that watch still on its record. One of an earlier watch — the same
+   * record watched again (「選び直す」), or one whose watch the startup migration could not prove — stops no chain when it
+   * ends (and moves or clears nothing: `moveWatch` / `clearChainStop` take its generation).
+   */
+  const ownsWatch = (handle: CompanyData, occ: JobOccurrenceRow): boolean => {
+    if (!occ.eventRecordId || occ.watchGeneration === null || occ.watchGeneration === undefined) return false
+    const cursor = handle.jobs.eventCursor(occ.jobId)
+    return cursor !== null && cursor.generation === occ.watchGeneration && cursor.watch === occ.eventRecordId
+  }
+
   /** The approved version's responsible person accepted that version's consent. */
   const accepted = (job: JobRow, version: JobVersionRow) => job.acceptedConsent !== null && job.acceptedConsent === version.consentFingerprint
   /** The place the responsible person chose for the version's deliverables is theirs and usable now (job-runs.ts checks it again at the claim). */
@@ -257,7 +269,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
       const run = occ.runId ? handle.aiRuns.byId(occ.runId) : null
       const version = handle.jobs.version(occ.jobId, occ.jobVersion)
       const pinned = version ? definitionOf(version) : null
-      // A shape this build does not know has no deadline it can read: only its expiry applies here.
+      // A shape this build does not know never comes here (stage 4b-0.5: frozen, left out by the repository before the
+      // limit — never expired, ended or told by this build); `pinned` null is a defence only.
       const overdue = run !== null && pinned !== null && nowMs >= pcRunDeadlineMs(run, pinned)
       const expired = nowMs >= Date.parse(occ.expiresAt)
       const job = handle.jobs.find(occ.jobId)
@@ -292,7 +305,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         notice(companyId, handle, 'job_expired', occ, job, acting, told)
       })
     }
-    // A `due` occurrence whose time ran out (the runner, or a PC, could not take it): expired, and said so.
+    // A `due` occurrence whose time ran out (the runner, or a PC, could not take it): expired, and said so. Never a frozen
+    // one (stage 4b-0.5: the repository does not answer it) — its own build decides when it comes back.
     for (const occ of handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT)) {
       if (nowMs < Date.parse(occ.expiresAt)) continue
       transactions.run(() => {
@@ -300,7 +314,7 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         changed++
         const job = handle.jobs.find(occ.jobId)
         notice(companyId, handle, 'job_expired', occ, job, handle.jobs.version(occ.jobId, occ.jobVersion)?.actingUserId ?? null, told)
-        if (occ.eventRecordId) events.chainStopped(handle, occ.jobId, 'EXPIRED', occ.eventRecordId, told)
+        if (occ.eventRecordId && ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, 'EXPIRED', occ.eventRecordId, told)
       })
     }
     tell(companyId, told)
@@ -343,7 +357,7 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
           if (!handle.jobs.moveOccurrence(occ.id, ['due'], to, { outcomeCode: code }, at)) return null
           if (kind) notice(companyId, handle, kind, occ, job, acting, told)
           // An event occurrence that did not make its やること stops its job's chain (owner decision ①).
-          if (occ.eventRecordId && job) events.chainStopped(handle, job.id, code, occ.eventRecordId, told)
+          if (occ.eventRecordId && job && ownsWatch(handle, occ)) events.chainStopped(handle, job.id, code, occ.eventRecordId, told)
           return to
         }
         const job = handle.jobs.find(occ.jobId)
@@ -408,8 +422,9 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         // server, in the same transaction (a duplicate, a tag or an edit of anything never moves it). Either way a chain
         // that had stopped on this record goes on (it ran after 「もう一度」).
         if (event && occ.eventRecordId) {
-          if (isRecordTrigger(definition.trigger) && definition.trigger.followMadeTask) handle.jobs.moveWatch(job.id, occ.eventRecordId, made.record.id, at)
-          else handle.jobs.clearChainStop(job.id, occ.eventRecordId)
+          // Only its own watch (stage 4b-0.5: the generation it was made for; an earlier watch's occurrence moves nothing).
+          if (isRecordTrigger(definition.trigger) && definition.trigger.followMadeTask) handle.jobs.moveWatch(job.id, occ.eventRecordId, made.record.id, at, occ.watchGeneration ?? null)
+          else handle.jobs.clearChainStop(job.id, occ.eventRecordId, occ.watchGeneration ?? null)
         }
         if (!runs.update({ ...run, state: 'done', updatedAt: at, closedAt: at }, { generation: 1, state: 'running' })) throw new Error('run changed')
         runs.appendEvent({ runId, event: 'finished', generation: 1, stateAfter: 'done', code: 'DONE', at })
@@ -427,7 +442,7 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         if (!occ || !handle.jobs.moveOccurrence(occ.id, ['due'], 'needs_person', { outcomeCode: 'TASK_NOT_CREATED' }, clock.now())) return null
         notice(companyId, handle, 'job_failed', occ, handle.jobs.find(occ.jobId), handle.jobs.version(occ.jobId, occ.jobVersion)?.actingUserId ?? null, told)
         // Its やること was not made: the chain stops there too (owner decision ①; Codex review of #700).
-        if (occ.eventRecordId) events.chainStopped(handle, occ.jobId, 'TASK_NOT_CREATED', occ.eventRecordId, told)
+        if (occ.eventRecordId && ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, 'TASK_NOT_CREATED', occ.eventRecordId, told)
         return 'needs_person' as const
       })
     }
@@ -440,8 +455,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
    * the job (null: of every job of the company) still `due` is `held` — it never runs, also not after resuming.
    * One a PC is running (B PR 5a) is `held` too and its run ended (`endPcRun`): its token, renew and finish are
    * refused from now on, and resuming or lifting the stop brings neither back. A waiting event occurrence (stage 4a) is
-   * held like any other and its chain stops (owner decision ①); `holdEventOccurrences` (stage 4-0.1) catches any beyond
-   * the loop's limit.
+   * held like any other and its chain stops (owner decision ①). Every one, without a limit (stage 4b-0.5), and a frozen
+   * one (a later build's shape) too — held, its run ended, nothing told (`holdFrozen`).
    */
   function holdDue(companyId: string, jobId: string | null, code: 'JOB_PAUSED' | 'COMPANY_STOPPED'): void {
     const handle = companyData.forCompany(companyId)
@@ -449,18 +464,33 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     // Event-triggered jobs (stage 4a, ③): what happens from now until it ends never runs (a gap from this delivery number).
     handle.jobs.openEventGap(jobId, ids.newId(), at)
     const told = new Set<string>()
-    for (const occ of handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT)) {
-      if (jobId !== null && occ.jobId !== jobId) continue
-      // A held event occurrence never runs: its chain stops (owner decision ①).
-      if (handle.jobs.moveOccurrence(occ.id, ['due'], 'held', { outcomeCode: code }, at) && occ.eventRecordId) events.chainStopped(handle, occ.jobId, code, occ.eventRecordId, told)
+    // Every one, not the first `OPEN_SCAN_LIMIT` (stage 4b-0.5): batch after batch of the job's own (SQL keeps to the job),
+    // until none is left waiting — a moved one leaves `due`, so the next batch is the rest.
+    for (let batch = handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT, jobId); batch.length > 0; batch = handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT, jobId)) {
+      let moved = 0
+      for (const occ of batch) {
+        if (!handle.jobs.moveOccurrence(occ.id, ['due'], 'held', { outcomeCode: code }, at)) continue
+        moved++
+        // A held event occurrence never runs: its chain stops (owner decision ①).
+        if (occ.eventRecordId && ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, code, occ.eventRecordId, told)
+      }
+      if (moved === 0) break
     }
-    // Any event occurrence still waiting beyond that loop's limit is held too (stage 4-0.1's write).
+    // Any event occurrence still waiting is held too (stage 4-0.1's write; kept as a net).
     handle.jobs.holdEventOccurrences(jobId, code, at)
     tell(companyId, told)
-    for (const occ of handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT)) {
-      if (jobId !== null && occ.jobId !== jobId) continue
-      if (handle.jobs.moveOccurrence(occ.id, ['running'], 'held', { outcomeCode: code }, at)) endPcRun(handle, occ.runId, code, at)
+    for (let batch = handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT, jobId); batch.length > 0; batch = handle.jobs.runningOccurrences(OPEN_SCAN_LIMIT, jobId)) {
+      let moved = 0
+      for (const occ of batch) {
+        if (!handle.jobs.moveOccurrence(occ.id, ['running'], 'held', { outcomeCode: code }, at)) continue
+        moved++
+        endPcRun(handle, occ.runId, code, at)
+      }
+      if (moved === 0) break
     }
+    // Frozen ones (stage 4b-0.5: a later build's shape) are held as well, all of them, and their runs ended — nothing else:
+    // no notice, no chain stopped (a later build reads them again, as held).
+    for (const runId of handle.jobs.holdFrozen(jobId, code, at)) endPcRun(handle, runId, code, at)
   }
 
   /**
@@ -500,7 +530,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
       return placement.get(key)
     }
     // A version gone (never: versions are append-only) is left to runOccurrence, which holds it. A shape this build
-    // does not know never takes a place in the batch (it would be skipped there every time).
+    // does not know never takes a place in the batch: the repository leaves it out before the limit (stage 4b-0.5,
+    // frozen); the `unknown` filter here is a defence only.
     return handle.jobs.dueOccurrences(OPEN_SCAN_LIMIT).filter(o => placementOf(o) !== 'a' && placementOf(o) !== 'unknown').slice(0, limit)
   }
 

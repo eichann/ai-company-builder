@@ -321,6 +321,8 @@ export function createJobEvents(deps: JobEventDeps) {
           expiresAt: new Date(t.nowMs + definition.missed.expiresAfterMinutes * 60_000).toISOString(),
           state: 'due', runId: null, outcomeCode: null, createdAt: occurrenceAt, updatedAt: occurrenceAt,
           eventSeq: row.seq, eventRecordId: row.recordId, eventVersion: row.version, eventDay: t.day,
+          // The watch it is made for (stage 4b-0.5): only it may move, stop or clear that watch when it ends.
+          watchGeneration: at.generation,
         })
         if (inserted) { n++; today++ }
         // Fired whether made or not (one already there is this very event): the target makes nothing more.

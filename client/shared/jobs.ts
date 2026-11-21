@@ -1,4 +1,4 @@
-import type { JobDefinition, JobPauseReason, JobPlacement, JobState, JobTrigger } from '../../shared/core/jobs'
+import { knownJobDefinition, type JobDefinition, type JobPauseReason, type JobPlacement, type JobState, type JobTrigger } from '../../shared/core/jobs'
 import type { JobWaiting } from '../../shared/types/jobs'
 
 /**
@@ -6,6 +6,21 @@ import type { JobWaiting } from '../../shared/types/jobs'
  * person of, read with their session in main (IPC `jobs:*`) — what waits for their 「受け取る」 and their
  * own pause / resume. The server decides every rule (who accepts, which pause is theirs to lift).
  */
+
+/**
+ * The definition shapes **this app** shows and accepts in 「定期の仕事」 (stage 4b-0.5, owner memo 「段4b 設計メモ」 §5-1): what
+ * every job request announces (`X-ACB-Job-Schemas`, `electron/features/jobs/ipc.ts`), never the shared parser's
+ * `JOB_SCHEMAS` — a later core may read a shape (4b-1's `schema: 3`) before this app can show it, and the server must
+ * then neither hand it its definition nor take its 受け取る. Each one's words are checked by
+ * `client/tests/job-screen-schemas.test.ts`.
+ */
+export const APP_JOB_SCHEMAS: readonly number[] = [1, 2]
+
+/** A definition this app shows: a shape the core knows and this app announces; anything else is shown as hidden. */
+export function appReadsJobDefinition(d: unknown): JobDefinition | null {
+  const known = knownJobDefinition(d)
+  return known !== null && APP_JOB_SCHEMAS.includes(known.schema) ? known : null
+}
 
 /** The server answers jobs without who the member is to them (a build before PR 4): nothing can be shown honestly. */
 export const JOBS_SERVER_TOO_OLD_TEXT = 'サーバーの更新が必要です。会社のサーバーが新しくなると、ここに定期の仕事が出ます。'
