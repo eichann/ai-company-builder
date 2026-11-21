@@ -118,12 +118,41 @@ test('a chunk whose window is no longer the one open when its turn comes sends n
   assert.equal(sessions.of(key).cookies.size, 0)
 })
 
-test('a preview read lets through exactly its own address: GET, no query, no body', () => {
+test('a preview read lets through exactly its own address: GET, no added query, no body', () => {
   const rule = exactRead(URL_A)
   assert.equal(rule({ method: 'GET', url: URL_A }), true)
   assert.equal(rule({ method: 'HEAD', url: URL_A }), false)
   assert.equal(rule({ method: 'POST', url: URL_A, body: 'a=1' }), false)
   assert.equal(rule({ method: 'GET', url: `${URL_A}/b` }), false)
+  assert.equal(rule({ method: 'GET', url: `${URL_A}?x=1` }), false, 'a query the read does not declare')
   assert.equal(rule({ method: 'GET', url: 'https://shop.example.net/elsewhere' }), false, 'a redirect\'s target or a page\'s part')
-  assert.equal(exactRead(`${URL_A}?x=1`)({ method: 'GET', url: `${URL_A}?x=1` }), false)
+})
+
+test('a declared read with a query lets through exactly the built address: no extra, reordered, changed, encoded or repeated parameter', () => {
+  const built = 'https://shop.example.net/api/episodes?group=29529&page=1'
+  const rule = exactRead(built)
+  assert.equal(rule({ method: 'GET', url: built }), true)
+  for (const url of [
+    `${built}&x=1`, // an extra parameter
+    'https://shop.example.net/api/episodes?page=1&group=29529', // reordered
+    'https://shop.example.net/api/episodes?group=29530&page=1', // another value
+    'https://shop.example.net/api/episodes?group=%32%39%35%32%39&page=1', // the same value, percent-encoded
+    'https://shop.example.net/api/episodes?Group=29529&page=1', // another spelling of the name
+    `${built}&page=2`, // a second page
+    'https://shop.example.net/api/episodes?group=29529', // a parameter missing
+    'https://shop.example.net/api/episodes', // no query
+    `${built}#x`,
+  ]) assert.equal(rule({ method: 'GET', url }), false, url)
+  assert.equal(rule({ method: 'POST', url: built, body: 'a=1' }), false)
+  // An address no declared read can have is never let through, even when asked for exactly.
+  for (const url of [
+    'https://shop.example.net/api/episodes?group=%32',
+    'https://shop.example.net/api/episodes?group=1&group=2',
+    'https://shop.example.net/api/episodes?group=1&GROUP=2',
+    'https://shop.example.net/api/episodes?',
+    'https://shop.example.net/api/episodes?_method=DELETE',
+    'https://shop.example.net/api/episodes?q=a+b',
+    'https://shop.example.net/api/episodes?a=1&b=2&c=3&d=4&e=5&f=6',
+    'https://shop.example.net/a/../b',
+  ]) assert.equal(exactRead(url)({ method: 'GET', url }), false, url)
 })

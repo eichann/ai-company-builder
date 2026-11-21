@@ -215,6 +215,26 @@ export interface BrowserExploreReader {
   read(values: Readonly<Record<string, string>>, page: BrowserPageView): { items: BrowserExploreItem[]; complete: boolean }
 }
 
+/** A JSON answer as a reader gets it: parsed strictly (client/shared/browser-json.ts), objects without a prototype. */
+export type BrowserJsonValue = null | boolean | number | string | readonly BrowserJsonValue[] | { readonly [key: string]: BrowserJsonValue }
+
+/**
+ * A reviewed reader of a JSON answer the site's own pages use (agent-browser.md "The checker": prefer
+ * stable sources). It gets the answer parsed strictly — never the text — and hands back declared
+ * fields only, as an HTML reader does; the core cleans them the same way (`runJsonExploreReader`).
+ * An answer it does not recognise is `complete: false`, never a guess.
+ */
+export interface BrowserJsonExploreReader {
+  readonly id: string
+  readonly answer: 'json'
+  readonly fields: readonly string[]
+  readonly extra: readonly string[]
+  read(values: Readonly<Record<string, string>>, json: BrowserJsonValue): { items: BrowserExploreItem[]; complete: boolean }
+}
+
+/** Any reviewed preview reader: of a page (HTML) or of a JSON answer. */
+export type BrowserPreviewReader = BrowserExploreReader | BrowserJsonExploreReader
+
 // ---------------------------------------------------------------------------
 // The gate of one run
 // ---------------------------------------------------------------------------
@@ -260,11 +280,12 @@ export interface BrowserRunSurface {
 
 /**
  * The window as the preview uses it: reads through its page-less read session with the window's
- * login (only GET of exactly that path), the window itself untouched — not switched to `ai`, its
- * page and the member's typing left alone (design memo §33 2-4).
+ * login (only GET of exactly that address: the path, and a declared read's query when it has one),
+ * the window itself untouched — not switched to `ai`, its page and the member's typing left alone
+ * (design memo §33 2-4).
  */
 export interface BrowserPreviewSurface {
-  read(path: string, signal?: AbortSignal): Promise<{ status: number; body: string }>
+  read(address: string, signal?: AbortSignal): Promise<{ status: number; body: string }>
   closed(): boolean
 }
 

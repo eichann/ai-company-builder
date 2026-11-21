@@ -264,6 +264,10 @@ test('main reads through the window\'s page-less read session with the member\'s
   assert.equal(r.readSessionCookies, 0)
   assert.equal(r.previewRead, 200, 'the login (a cookie the site needs) was carried')
   assert.equal(r.previewReachedSite, 1)
+  // A declared read's query reaches the site exactly as built; an encoded one is never sent.
+  assert.equal(r.previewQueryRead, 200)
+  assert.equal(r.previewEncodedRead, 'refused')
+  assert.deepEqual(r.previewQueryPaths, ['/api/episodes?group=29529&page=1'])
   assert.equal(r.typingAfterPreview, '入力中')
   assert.equal(r.readSessionCookiesAfterPreview, 0)
 })

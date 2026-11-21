@@ -14,6 +14,7 @@
 // the chunk still finishes its clean-up before the lane goes on, so an old clean-up never clears a
 // newer read's cookies or connection. (A new partition per request is not used: Electron keeps a
 // session for the whole app run, so they would pile up.)
+import { exploreAddressProblem } from '../../../../shared/core/plugin-browser-declaration'
 import type { BrowserSessionRequest } from '../../../shared/browser-runner'
 
 export interface SessionRequest {
@@ -97,7 +98,14 @@ export function throughSession(
   })
 }
 
-/** A read's rule: exactly this address, GET, no body (a query is never part of a read path). */
+/**
+ * A preview read's rule: GET of exactly this address — the path and the whole query string compared
+ * byte for byte with what was built from the declaration (`explorePath`: the parameters' order, their
+ * spelling, nothing more, nothing encoded otherwise) —, no body, no fragment, and an address a declared
+ * read can have at all (`exploreAddressProblem`: no query unless it is plain `name=value` pairs).
+ */
 export function exactRead(url: string): (request: BrowserSessionRequest) => boolean {
-  return r => r.method.toUpperCase() === 'GET' && r.url === url && !r.body && !/[?#]/.test(r.url)
+  const address = /^https:\/\/[^/?#]+(\/[^#]*)$/.exec(url)?.[1]
+  const fits = address !== undefined && exploreAddressProblem(address) === null
+  return r => fits && r.method.toUpperCase() === 'GET' && r.url === url && !r.body
 }

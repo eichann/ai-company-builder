@@ -181,7 +181,20 @@ export function runExploreReader(reader: BrowserExploreReader, values: Readonly<
   const { view, complete } = createPageView(doc)
   let raw: { items: BrowserExploreItem[]; complete: boolean }
   try { raw = reader.read(values, view) } catch { return { items: [], complete: false } }
-  let whole = raw?.complete === true && complete()
+  return keepReaderItems(reader, raw, complete())
+}
+
+/**
+ * What any reader (of a page or of a JSON answer) may hand on: its declared fields with plain ids,
+ * cleaned labels, its declared extras, at most 300 items; anything else is left out and the read is
+ * incomplete. `sourceWhole`: the source's own rules held (the page view's, the JSON parse's).
+ */
+export function keepReaderItems(
+  reader: { readonly fields: readonly string[]; readonly extra: readonly string[] },
+  raw: { items: BrowserExploreItem[]; complete: boolean } | undefined,
+  sourceWhole: boolean,
+): BrowserExploreResult {
+  let whole = raw?.complete === true && sourceWhole
   const items: BrowserExploreItem[] = []
   for (const item of Array.isArray(raw?.items) ? raw.items : []) {
     if (items.length >= BROWSER_PAGE_LIMITS.items) { whole = false; break }
