@@ -162,8 +162,16 @@ fine), `color-opacity` (`bg-warning/10`).
   with `confirmOnEnter={false}` (a dialog that can open while the member types: no stray key
   answers it). Tab / Shift+Tab wrap inside; Esc cancels and does not reach what is underneath;
   a scrim click neither closes it nor takes focus out; **nothing listens for Enter on the
-  document** (Enter presses the focused button only, so an IME conversion's Enter elsewhere never
-  confirms); focus returns to the opener; with dialogs stacked only the top one holds focus.
+  document** (Enter presses the focused button only: a key typed elsewhere, an IME conversion's
+  included, never confirms). What protects someone **typing when the dialog opens** is
+  `confirmOnEnter={false}` (focus on the dialog itself), not the missing document listener: a
+  default dialog takes focus on a button, so the next real Enter presses it — every dialog that can
+  open while the member types, or from an input's Enter keydown, must pass `confirmOnEnter={false}`.
+  Focus returns to the opener; with dialogs stacked only the top one holds focus. Known gap: the
+  app's document-level shortcuts (⌘K, ⌘P, ⌘⇧C) still fire while a dialog is open, and a palette
+  they open loses its focus back to the dialog (the shortcut system should skip keys while an
+  `aria-modal` dialog is open; later PR). Habit change: on a danger confirm, Enter now cancels
+  (focus on 「やめる」) where it used to confirm (file tree Delete → Enter, chat sidebar).
   Guarded by `client/tests/ui/confirm-dialog.spec.ts` (`tests/confirm-dialog-ui.html`), with
   `keep-work.spec.ts` / `editor-panel.spec.ts` for Enter on `confirmOnEnter={false}`.
 - **Admin `ConfirmDialog`** (`admin/src/components/app/confirm-dialog.tsx`, Radix): the same rules

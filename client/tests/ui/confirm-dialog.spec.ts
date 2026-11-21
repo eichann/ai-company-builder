@@ -69,7 +69,7 @@ test('Esc cancels', async ({ page }) => {
   expect(await answers(page)).toEqual(['danger:cancel'])
 })
 
-test('an Enter typed elsewhere never confirms: not during an IME conversion, not when the dialog opens while typing', async ({ page }) => {
+test('no Enter listener on the document confirms (a key typed elsewhere, IME included); a dialog that opens while typing (confirmOnEnter=false) ignores the next Enter', async ({ page }) => {
   await openPreview(page, 'confirm-dialog')
   const box = page.getByRole('textbox', { name: '相談の入力欄' })
   await box.click()
