@@ -72,6 +72,10 @@ export function jobCheckText(check: JobCheck): string | null {
     const words = check.titleWords.length > 0 ? `（名前に${check.titleWords.map(w => `「${w}」`).join('か')}を含むもの）` : ''
     return `前の回のあとに責任者が出た会議${words}があるときだけ動きます`
   }
+  if (check.kind === 'source_record') {
+    const mark = check.doneMark === 'file_linked' ? '。そのやることにファイルがもうつながっていれば、AI は動きません' : ''
+    return `見張っているやることが今もその状態で、担当が責任者のままのときだけ、AI が動きます（途中で変わったら止めます）${mark}`
+  }
   return null
 }
 
@@ -180,6 +184,9 @@ const OUTCOME_WORDS: Record<string, string> = {
   EVENT_NOT_ASSIGNEE: 'きっかけの記録の担当が、責任者ではなくなっていたため見送りました',
   EVENT_AI_TURN: 'きっかけの記録が「AI の番」の状態になっていたため見送りました',
   EVENT_NOT_WATCHED: '見張るやることが変わったため、この回は見送りました',
+  EVENT_NOT_NEEDED: 'きっかけのやることがその状態ではなくなったため、AI を動かしませんでした',
+  EVENT_DONE_MARK: 'きっかけのやることにファイルがもうつながっていたため、AI を動かしませんでした',
+  MADE_THEN_STOPPED: '途中で続けられなくなりましたが、外にすでに作ったものがあります。人が確かめる必要があります',
 }
 
 /**
@@ -200,7 +207,11 @@ export function jobChainStopText(code: string, opts: { runsPerDay: number | null
     case 'RECORDS_OFF': case 'TASK_NOT_CREATED': return '次のやることを作れなかったため、止まりました'
     case 'OWNER_LEFT': case 'OWNER_RIGHTS_CHANGED': return '責任者がこの仕事を続けられなくなったため、止まりました'
     case 'WATCH_RESET': return '仕組みの入れ替えのため、止まりました'
+    case 'TIME_LIMIT': case 'RUN_FAILED': case 'RESULT_UNKNOWN': case 'MADE_THEN_STOPPED': case 'PLACE_NOT_USABLE':
+      return 'AI がこの回を終えられなかったため、止まりました'
   }
+  if (code === 'EVENT_NOT_NEEDED') return `見張っていたやること${named}がその状態でなくなったため、止まりました`
+  if (code === 'EVENT_DONE_MARK') return `見張っていたやること${named}にファイルがもうつながっていたため、止まりました`
   if (code === 'EVENT_NOT_ASSIGNEE') return `見張っていたやること${named}の担当が責任者でなくなったため、止まりました`
   if (code === 'EVENT_RECORD_GONE') return `責任者が見張っていたやること${named}を見られなくなったため、止まりました`
   if (code === 'EVENT_AI_TURN') return `見張っていたやること${named}が「AI の番」の状態だったため、止まりました`

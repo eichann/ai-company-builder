@@ -302,3 +302,38 @@ describe('an event trigger (schema 2)', () => {
     expect(triggerMatches(t, { type: 'task', fromState: 'todo', toState: 'cancelled' })).toBe(false)
   })
 })
+
+describe('an event run by the PC AI (schema 3, stage 4b-1, owner memo 「段4b 設計メモ」 D2 / D3)', () => {
+  const trigger = { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: 'task-0123456789abcdef', followMadeTask: true }
+  const eventPcJob = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    ...pcJob(), schema: 3, trigger, check: { kind: 'source_record', doneMark: 'file_linked' }, ...overrides,
+  })
+
+  it('a record trigger, a procedure on the PC and the source-record check with its done mark — each required', () => {
+    const d = parsed(eventPcJob())
+    expect(d.check).toEqual({ kind: 'source_record', doneMark: 'file_linked' })
+    expect(parsed(eventPcJob({ check: { kind: 'source_record', doneMark: 'none' } })).check).toEqual({ kind: 'source_record', doneMark: 'none' })
+    expect(problems(eventPcJob({ check: { kind: 'source_record', doneMark: 'drive_file' } }))).toEqual(['check.doneMark.BAD'])
+    expect(problems(eventPcJob({ check: { kind: 'source_record' } }))).toEqual(['check.doneMark.MISSING'])
+    // Schema 3 is an event's only: a time of day is refused.
+    expect(problems(eventPcJob({ trigger: pcJob().trigger }))).toEqual(['trigger.kind.BAD'])
+    // The PC's AI only (the server's operation is schema 2's), and the source-record check only.
+    expect(problems({ ...serverJob(), schema: 3, trigger, check: { kind: 'source_record', doneMark: 'none' } })).toContain('run.EVENT_PC_ONLY')
+    expect(problems(eventPcJob({ check: pcJob().check }))).toEqual(['check.EVENT_NEEDS_SOURCE_RECORD'])
+    // The source-record check is schema 3's alone: a time job (schema 1) or a server event job (schema 2) never takes it.
+    expect(problems({ ...pcJob(), check: { kind: 'source_record', doneMark: 'none' } })).toEqual(['check.SOURCE_RECORD_EVENTS_ONLY'])
+    expect(problems({ ...pcJob(), schema: 2, trigger, check: { kind: 'source_record', doneMark: 'none' } })).toContain('check.SOURCE_RECORD_EVENTS_ONLY')
+  })
+
+  it('what the responsible person accepts includes the trigger and the check (its done mark); schema 2 and 1 unchanged', () => {
+    const base = parsed(eventPcJob())
+    const consent = jobConsentCanonical(base)
+    expect(jobConsentCanonical(parsed(eventPcJob({ check: { kind: 'source_record', doneMark: 'none' } })))).not.toBe(consent)
+    expect(jobConsentCanonical(parsed(eventPcJob({ trigger: { ...trigger, to: 'review' } })))).not.toBe(consent)
+    expect(jobConsentCanonical(parsed(eventPcJob({ name: '別の名前' })))).toBe(consent)
+    // Schema 2's consent is byte for byte what 4a stored (no `check` in it).
+    const server2 = parsed({ ...serverJob(), schema: 2, trigger })
+    expect(JSON.parse(jobConsentCanonical(server2))).not.toHaveProperty('check')
+    expect(JSON.parse(jobConsentCanonical(parsed(pcJob())))).not.toHaveProperty('check')
+  })
+})

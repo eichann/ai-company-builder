@@ -1,6 +1,6 @@
 /**
  * Shapes this build does not know (jobs.md "Shapes this build does not know", stage 4-0 of event-triggered jobs;
- * owner memo 「出来事で動く定期の仕事」 §3-11, §10-7, §11). Event-triggered jobs (4a) store `schema: 2`, which this build knows; the tests stand in a later `schema: 3` for what a newer build may store. Production
+ * owner memo 「出来事で動く定期の仕事」 §3-11, §10-7, §11). Event-triggered jobs (4a) store `schema: 2`, which this build knows; the tests stand in a later `schema: 4` for what a newer build may store (since stage 4b-1 this build knows schema 3). Production
  * may be rolled back to 4-0 after that, and an admin tab or an app from before stays open. None of them may run,
  * retry, claim, approve, accept or edit what it does not understand, and none may crash on it.
  *
@@ -88,8 +88,8 @@ function pcJob(item: string): Json {
     grant: { tools: ['records'], creates: ['task'], routes: ['GET /minutes/:recordId/text'], reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 30, runsPerDay: 1 } },
   }
 }
-/** The same job in the shape a build after this one would store (`schema: 3`, a trigger of its own): a shape this server does not know. */
-const asSchema2 = (d: Json): Json => ({ ...d, schema: 3, trigger: { kind: 'future', when: 'something' } })
+/** The same job in the shape a build after this one would store (`schema: 4`, a trigger of its own): a shape this server does not know. */
+const asSchema2 = (d: Json): Json => ({ ...d, schema: 4, trigger: { kind: 'future', when: 'something' } })
 
 /** Made, approved, accepted (schema 1). */
 async function approvedJob(definition: Json): Promise<string> {
@@ -104,7 +104,7 @@ async function approvedJob(definition: Json): Promise<string> {
 }
 
 /**
- * Version 2 of the job written as a later build would (schema 3), approved and accepted, the job active: what a
+ * Version 2 of the job written as a later build would (schema 4), approved and accepted, the job active: what a
  * server rolled back to this build finds in its database.
  */
 function storeSchema2(job: string, definition: Json, opts: { approve?: boolean } = {}) {
@@ -113,7 +113,7 @@ function storeSchema2(job: string, definition: Json, opts: { approve?: boolean }
   const at = new Date().toISOString()
   const approve = opts.approve !== false
   db.prepare(`INSERT INTO ai_job_versions (company_id, job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at,
-      approved_by, approved_at, accepted_by, accepted_at) VALUES (?, ?, 2, 3, ?, ?, ?, 'js-alice', 'js-owner', ?, ?, ?, ?, ?)`)
+      approved_by, approved_at, accepted_by, accepted_at) VALUES (?, ?, 2, 4, ?, ?, ?, 'js-alice', 'js-owner', ?, ?, ?, ?, ?)`)
     .run(CO, job, text, hashCanonical(text), consent, new Date(Date.now() - 3 * 24 * 60 * MINUTE).toISOString(),
       approve ? 'js-owner' : null, approve ? new Date(Date.now() - 3 * 24 * 60 * MINUTE).toISOString() : null, approve ? 'js-alice' : null, approve ? at : null)
   if (approve) {
@@ -169,10 +169,10 @@ beforeEach(() => {
 })
 
 describe('a stored version of a shape this server does not know', () => {
-  it('is read as nothing: the parser of stored versions knows schemas 1 and 2 only, exactly as stored', () => {
+  it('is read as nothing: the parser of stored versions knows schemas 1, 2 and 3 only, exactly as stored', () => {
     const d = serverJob()
     expect(storedJobDefinition({ schema: 1, definition: canonicalJson(d) })).toEqual(d)
-    expect(storedJobDefinition({ schema: 3, definition: canonicalJson(asSchema2(d)) })).toBeNull()
+    expect(storedJobDefinition({ schema: 4, definition: canonicalJson(asSchema2(d)) })).toBeNull()
     // The column and the text must agree; a text that is no definition is nothing too.
     expect(storedJobDefinition({ schema: 1, definition: canonicalJson(asSchema2(d)) })).toBeNull()
     expect(storedJobDefinition({ schema: 1, definition: 'not json' })).toBeNull()
@@ -222,15 +222,15 @@ describe('a stored version of a shape this server does not know', () => {
     const job = await approvedJob(serverJob())
     storeSchema2(job, asSchema2(serverJob()), { approve: false })
     expect(await call('js-owner', 'POST', `/jobs/${job}/approve`, { version: 2 })).toMatchObject({ status: 409, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
-    // Nor written over, even by a screen that says it reads schema 3: this server cannot read what it would replace.
-    expect(await call('js-owner', 'PUT', `/jobs/${job}`, { definition: serverJob({ name: '上書き' }) }, { 'X-ACB-Job-Schemas': '1,2,3' })).toMatchObject({ status: 409, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
+    // Nor written over, even by a screen that says it reads schema 4: this server cannot read what it would replace.
+    expect(await call('js-owner', 'PUT', `/jobs/${job}`, { definition: serverJob({ name: '上書き' }) }, { 'X-ACB-Job-Schemas': '1,2,3,4' })).toMatchObject({ status: 409, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
     expect(db.prepare('SELECT latest_version FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, job)).toEqual({ latest_version: 2 })
     storeSchema2Approved(job)
     expect(await call('js-alice', 'POST', `/me/jobs/${job}/accept`, { version: 2 })).toMatchObject({ status: 409, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
     expect(await call('js-owner', 'POST', `/jobs/${job}/pause`)).toMatchObject({ status: 200 })
     expect(await call('js-owner', 'POST', `/jobs/${job}/resume`)).toMatchObject({ status: 409, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
-    // An admin announcing schema 3 still gets no definition: this server cannot vouch for a shape it does not know.
-    for (const headers of [{}, { 'X-ACB-Job-Schemas': '1,2,3' }]) {
+    // An admin announcing schema 4 still gets no definition: this server cannot vouch for a shape it does not know.
+    for (const headers of [{}, { 'X-ACB-Job-Schemas': '1,2,3,4' }]) {
       const list = await call('js-owner', 'GET', '/jobs', undefined, headers)
       expect(list.status).toBe(200)
       const view = list.body.data.jobs.find((j: Json) => j.id === job)
@@ -260,10 +260,10 @@ function storeSchema2Approved(job: string) {
 }
 
 describe('a definition goes to a client only in a shape it announced', () => {
-  /** A server of a later build (it knows schema 3), with the same rules (a fixture: no schema 3 exists in this build). */
+  /** A server of a later build (it knows schema 4), with the same rules (a fixture: no schema 4 exists in this build). */
   const later = () => createJobService({
     companyData, memberships: sqliteMembershipRepository(db), transactions: sqliteTransactions(db), clock, ids: randomIds,
-    skillTree: async () => null, hasCompanyFolder: () => false, knownSchemas: [1, 2, 3],
+    skillTree: async () => null, hasCompanyFolder: () => false, knownSchemas: [1, 2, 3, 4],
   })
 
   it('the header is read as schema 1 plus what it names; nothing readable means schema 1', () => {
@@ -278,26 +278,26 @@ describe('a definition goes to a client only in a shape it announced', () => {
     const s = later()
     const old = s.get(owner(), job)
     expect(old.ok && old.value.versions?.[0]).toMatchObject({ version: 2, definition: null, needsUpdate: true })
-    const newer = s.get(owner(), job, [1, 2, 3])
-    expect(newer.ok && newer.value.versions?.[0]).toMatchObject({ version: 2, definition: { schema: 3 } })
+    const newer = s.get(owner(), job, [1, 2, 3, 4])
+    expect(newer.ok && newer.value.versions?.[0]).toMatchObject({ version: 2, definition: { schema: 4 } })
     expect(newer.ok && newer.value.versions?.[0].needsUpdate).toBeUndefined()
     expect(await s.approve(owner(), job, { version: 2 })).toMatchObject({ ok: false, body: { code: 'JOB_NEEDS_NEWER_SCREEN' } })
     expect(await s.update(owner(), job, { definition: serverJob({ name: '上書き' }) })).toMatchObject({ ok: false, body: { code: 'JOB_NEEDS_NEWER_SCREEN' } })
     expect(db.prepare('SELECT latest_version FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, job)).toEqual({ latest_version: 2 })
-    expect(await s.approve(owner(), job, { version: 2 }, [1, 2, 3])).toMatchObject({ ok: true })
+    expect(await s.approve(owner(), job, { version: 2 }, [1, 2, 3, 4])).toMatchObject({ ok: true })
     // Approved now: its trigger is not handed to an older screen (it would read `trigger.at`), the acceptance not taken from one.
     const listed = s.list(owner())
     const view = listed.ok ? listed.value.jobs.find(j => j.id === job) : null
     expect(view).toMatchObject({ needsUpdate: true })
     expect(view?.trigger).toBeUndefined()
     expect(await s.accept(alice(), job, { version: 2 }, undefined, true)).toMatchObject({ ok: false, body: { code: 'JOB_NEEDS_NEWER_SCREEN' } })
-    expect(await s.accept(alice(), job, { version: 2 }, [1, 2, 3], true)).toMatchObject({ ok: true })
+    expect(await s.accept(alice(), job, { version: 2 }, [1, 2, 3, 4], true)).toMatchObject({ ok: true })
   })
 
   it('schema 1 is answered exactly as stored, header or not (byte for byte as before)', async () => {
     const job = await approvedJob(serverJob())
     const stored = (db.prepare('SELECT definition FROM ai_job_versions WHERE company_id = ? AND job_id = ? AND version = 1').get(CO, job) as Json).definition
-    for (const headers of [{}, { 'X-ACB-Job-Schemas': '1' }, { 'X-ACB-Job-Schemas': '1,2,3' }]) {
+    for (const headers of [{}, { 'X-ACB-Job-Schemas': '1' }, { 'X-ACB-Job-Schemas': '1,2,3,4' }]) {
       const one = await call('js-owner', 'GET', `/jobs/${job}`, undefined, headers)
       expect(canonicalJson(one.body.data.versions[0].definition)).toBe(stored)
       expect(one.body.data.versions[0].needsUpdate).toBeUndefined()
