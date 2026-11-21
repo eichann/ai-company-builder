@@ -18,7 +18,8 @@ const postcss = require(require.resolve('postcss', { paths: [path.dirname(requir
 const tokensDir = path.resolve(__dirname, '../../shared/design-tokens')
 const read = (f: string) => fs.readFileSync(path.join(tokensDir, f), 'utf8')
 
-/** What the admin showed before the design tokens (admin/src/app/globals.css on 2026-11-21). */
+/** What the admin showed before the design tokens (admin/src/app/globals.css on 2026-11-21), and
+ *  the values a component PR changed on purpose since (each marked). */
 const TODAY: Record<string, [light: string, dark: string]> = {
   radius: ['0.5rem', '0.5rem'],
   background: ['oklch(0.99 0 0)', 'oklch(0.16 0.004 286)'],
@@ -27,8 +28,9 @@ const TODAY: Record<string, [light: string, dark: string]> = {
   'card-foreground': ['oklch(0.21 0.006 285.9)', 'oklch(0.96 0 0)'],
   popover: ['oklch(1 0 0)', 'oklch(0.21 0.006 286)'],
   'popover-foreground': ['oklch(0.21 0.006 285.9)', 'oklch(0.96 0 0)'],
-  primary: ['oklch(0.21 0.006 285.9)', 'oklch(0.94 0 0)'],
-  'primary-foreground': ['oklch(0.985 0 0)', 'oklch(0.21 0.006 285.9)'],
+  // P2a (owner decision 2): the black primary became the primary blue, white text on it.
+  primary: ['#1264a3', '#1b71b8'],
+  'primary-foreground': ['#ffffff', '#ffffff'],
   secondary: ['oklch(0.967 0.001 286.4)', 'oklch(0.26 0.006 286)'],
   'secondary-foreground': ['oklch(0.21 0.006 285.9)', 'oklch(0.96 0 0)'],
   muted: ['oklch(0.967 0.001 286.4)', 'oklch(0.24 0.006 286)'],

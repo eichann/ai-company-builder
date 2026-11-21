@@ -4,6 +4,7 @@ import type { ReviewRecord } from '../../../../shared/review-request'
 import { useAppStore } from '../../../stores/appStore'
 import { runCommand, useCommandAvailable } from '../../../shared/commands/commands'
 import { ReviewActionsContext } from '../review-context'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 /**
  * 「確認をお願いします」: the AI asked the member to look at its work and
@@ -39,7 +40,7 @@ export const ReviewRequestCard = memo(function ReviewRequestCard({ record }: { r
         <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-gray-800 dark:text-zinc-200">{record.points.map(point => <li key={point}>{point}</li>)}</ul>
       </>}
       {pending && <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={actions.confirm} className="rounded-lg bg-accent px-3 py-1.5 text-xs text-white hover:bg-accent/90">この内容で進めて</button>
+        <button type="button" onClick={actions.confirm} className={`rounded-lg px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>この内容で進めて</button>
         <button type="button" onClick={actions.requestChanges} className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">直してほしい</button>
         <span className="text-[11px] text-gray-500">直してほしいところは、下の欄に書いて送ってください</span>
       </div>}

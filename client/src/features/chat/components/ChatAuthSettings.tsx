@@ -8,6 +8,7 @@ import { getApiKeyStatus, getCodexStatus, getPermissionMode, saveApiKey, saveAut
 import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { GearSix, Check, Lightning, CaretDown } from '@phosphor-icons/react'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 // ============================================================================
 // Auth Settings Component
@@ -281,14 +282,14 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
         <button
           onClick={handleSave}
           disabled={saving || (authMode === 'api-key' && !apiKey.trim() && !apiKeyStatus?.set) || (authMode === 'codex' && (checkingCodex || !codexStatus?.authenticated || !codexStatus.models.length))}
-          className="
+          className={`
             w-full py-3 rounded-xl
-            bg-accent hover:bg-accent/90
-            disabled:bg-ink-faint disabled:cursor-not-allowed
-            text-white text-sm font-medium
+            disabled:cursor-not-allowed
+            text-sm font-medium
             transition-all duration-200
-            hover:shadow-glow
-          "
+            enabled:hover:shadow-glow
+            ${PRIMARY_ACTION}
+          `}
         >
           {saving ? t('common.saving') : t('common.save')}
         </button>

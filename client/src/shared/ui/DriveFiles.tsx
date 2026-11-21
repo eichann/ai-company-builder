@@ -5,6 +5,7 @@ import { FileText, GoogleDriveLogo, Plus } from '@phosphor-icons/react'
 import type { TaskDriveChoice } from '../../../shared/tasks'
 import { useDismiss } from '../hooks/useDismiss'
 import { getDriveChoices } from '../ipc/drive-links'
+import { PRIMARY_ACTION } from './buttonStyles'
 
 interface Props {
   companyId: string
@@ -80,7 +81,7 @@ export function DriveFiles({ companyId, linked, busy, usable, onLink }: Props) {
           </ul>
           <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 px-2 py-1 dark:border-zinc-700">
             <button type="button" disabled={busy || picked.length === 0} onClick={() => void run(picked)}
-              className="rounded bg-accent px-2 py-0.5 text-[11.5px] text-white disabled:opacity-50">つなぐ</button>
+              className={`rounded px-2 py-0.5 text-[11.5px] ${PRIMARY_ACTION}`}>つなぐ</button>
             <button type="button" disabled={busy} onClick={() => void run()}
               className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-[11.5px] dark:border-zinc-600"><GoogleDriveLogo size={11} />Google Drive から探す</button>
           </div>

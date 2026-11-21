@@ -9,6 +9,7 @@ import { CommentPopover } from '../../doc-review/components/CommentPopover'
 import { MarkdownDiffView, type MarkdownDiffViewHandle } from '../../doc-review/components/MarkdownDiffView'
 import type { EditorReview } from '../hooks/useEditorReview'
 import { MarkdownPreview } from './MarkdownPreview'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 interface Props {
   paneId: string
@@ -120,7 +121,7 @@ export function MarkdownPreviewPane({
           {!review.isReviewing && (
             <button
               onClick={onEdit}
-              className="absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent text-white shadow-lg hover:bg-accent/90 transition-colors"
+              className={`absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium shadow-lg transition-colors ${PRIMARY_ACTION}`}
             >
               <PencilSimple size={12} />
               編集

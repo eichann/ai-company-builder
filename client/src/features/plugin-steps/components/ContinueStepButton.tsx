@@ -4,6 +4,7 @@ import { CONTINUE_LABEL } from '../../../../shared/ai-turn-steps/plugin'
 import { runCommand } from '../../../shared/commands/commands'
 import { continueStep } from '../api'
 import { useStepContinuation } from '../hooks/useStepContinuation'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 interface Props {
   companyId: string
@@ -38,7 +39,7 @@ export function ContinueStepButton({ companyId, rootPath, recordId }: Props) {
     <section aria-label={CONTINUE_LABEL} className="flex flex-wrap items-center gap-2 px-5 pt-5 text-xs">
       <span className="text-gray-600 dark:text-zinc-300">AI が「{continuation.label}」を準備しました。</span>
       <button type="button" disabled={busy} onClick={() => void go()}
-        className="inline-flex items-center gap-1 rounded bg-accent px-2.5 py-1 text-white hover:opacity-90 disabled:opacity-50">
+        className={`inline-flex items-center gap-1 rounded px-2.5 py-1 ${PRIMARY_ACTION}`}>
         {CONTINUE_LABEL}<ArrowRight size={11} />
       </button>
       {error && <p role="alert" className="w-full text-red-600 dark:text-red-400">{error}</p>}

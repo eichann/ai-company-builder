@@ -92,11 +92,11 @@ live, how screens use them, and what CI holds.
   Names already taken keep their old meaning until their screens move: in the app `surface`
   (`bg-surface` = #fff in both themes) and `border` (#e0e0e0); `accent`, `ink`, `text-primary` (the class `text-text-primary`; not the semantic `text-primary`, which is the primary blue),
   `sidebar-bg`, … stay as they are. In the admin, every shadcn colour except light `--card` /
-  `--popover` keeps today's value (`ADMIN_SHADCN` in `build.mjs`: `keep` and a `later:` comment
-  naming its token), and `--font-sans` stays Geist. Dropping a `keep` is a visible change: do it
-  in the PR of that component and update `TODAY` there (owner decisions 2 black primary buttons →
-  primary, 6 admin font → system font, 7 admin radius 8px; the admin's `rounded-md` 6px, shadcn
-  `accent` = sunken).
+  `--popover` and `--primary` / `--primary-foreground` (P2a) keeps today's value (`ADMIN_SHADCN`
+  in `build.mjs`: `keep` and a `later:` comment naming its token), and `--font-sans` stays Geist.
+  Dropping a `keep` is a visible change: do it in the PR of that component and update `TODAY`
+  there, marked (owner decisions 6 admin font → system font, 7 admin radius 8px; the admin's
+  `rounded-md` 6px, shadcn `accent` = sunken).
 - Do not change what an existing Tailwind name means (`text-sm`, `rounded-lg`, `accent`) to reach
   a token: move the screen to the semantic name instead.
 
@@ -231,6 +231,66 @@ fine), `color-opacity` (`bg-warning/10`).
   `ChatAuthSettings`, `ChatMessageList`, `ChatConversation`, `ClaudeSignInCard`, `MessageParts`
   (`ink`, `ink-muted`, `ink-faint`, `surface-elevated`) and `ComposerAttachments`
   (`border-border`).
+
+## Primary actions (P2a, done)
+
+- **One primary colour** (owner decisions 1 and 2, 2026-11-21): the one button of a screen, card or
+  dialog that does what the member came to do is the `primary` set — `#1264a3` (dark `#1b71b8`),
+  `on-primary` text, `primary-hover`, `primary-active`, the `focus-ring`, and the disabled fade
+  `opacity-disabled`. The four colours before (the old `accent` blue, indigo, `blue-600`, black
+  `zinc-900`) are gone from primary buttons.
+- **App**: `PRIMARY_ACTION` (`client/src/shared/ui/buttonStyles.ts`) holds exactly those colour
+  classes; a caller keeps its own size and shape (sizes move in P3). Used by `Button
+  variant="primary"` (`primitives.tsx`, was black; every variant's focus ring is now
+  `ring-focus-ring` with a `bg` offset, was indigo), `RecordPage`'s `MAIN_BUTTON` (task card,
+  record pages, the tasks and records dialogs), `MailDraftCard`'s `PRIMARY` (was `blue-600`),
+  `SkillDetailPanel` (was `blue-600`), `AgentLogNotice` (was indigo), and the hand-made `bg-accent`
+  main actions: chat send buttons (`CodeMirrorChatInput`, `LegacyTextareaChatInput`: disabled now
+  fades instead of turning grey), `ChatAuthSettings` save, `ChatSidebar` 「AIに相談する」,
+  `ChoicePrompt` 「回答する」, `AgentInteractionCard`, `ToolApprovalBanner`, `ReviewRequestCard`,
+  `BrokerKeyNeededCard`, `ClaudeSignInCard`, `HandoffControl`, `VoiceInputControl`,
+  `TopicSwitchAsk`, `ChatMessageList` resend, `MarkdownPreviewPane` 編集, `SyncPreviewDialog`
+  同期, `ContinueStepButton`, `TaskRow` accept, `ShareToDepartment`, `ShowToBundle`, `DriveFiles`
+  つなぐ, `LinkDropNotice`, `ReviewSidePanel`. `ConfirmDialog`'s main action was already the set
+  (P1a). A new primary button uses `Button variant="primary"` or `PRIMARY_ACTION`, never a colour
+  of its own.
+- **Proceed anyway is not danger**: 「.backups に保存して進める」 (`DownloadFoldersSection`, the
+  confirm's main action: nothing is lost) is primary; 「それでも作成する」 (`NewFolderDialog`, inside
+  the warning callout, beside the dialog's own primary 「非公開フォルダを作成」) is an ordinary
+  (secondary) button — one primary per dialog. Red stays for delete / remove (P1a).
+- **Admin**: shadcn `--primary` / `--primary-foreground` are the tokens (`ADMIN_SHADCN` keeps
+  dropped; `TODAY` marks them), so everything reading them turned blue: `Button` default (now
+  `hover:bg-primary-hover active:bg-primary-active`, and every variant `rounded-control` 8px; height
+  36px stays by density), the ordinary `ConfirmDialog`, `Badge variant="default"` (owner role,
+  「動いています」 / active grants: moves to `success` in the status-badge PR), the invite steps'
+  current step, the brand mark (`brand.tsx`, `app-shell.tsx`, `permissions-view.tsx` tile), the
+  "on" switches (`features-page`, `task-settings-page`) and checked boxes
+  (`member-checklist`, `groups-page`, `department-members-dialog`, `place-readers-dialog`) — the
+  proposal's table gives "on" the primary colour (`primary`: 主ボタン・オン・件数), so they stay —
+  and the input text selection. The tooltip moved to `bg-toast text-on-toast` so it stays dark
+  (it read `--primary` only to be the inverse surface). Filter toggles that use `variant="default"`
+  for "picked" (members page department filter, google-relay 「全員」 / names) are selected states
+  drawn as primary until the selected-state PR.
+- **Guarded by** `client/tests/ui/primary-actions.spec.ts` (light and dark: the shared Button with
+  hover, an ordinary confirm, the task card's main action, the mail card, and the two proceed
+  buttons not danger; computed colours against the `--color-*-rgb` tokens on `<html>`; preview
+  pages `confirm-dialog-ui`, `task-card-ui` and `mail-draft-card-ui` read `?theme=dark`) and
+  `admin/tests/primary-action.test.tsx` (the CSS Tailwind 4 generates for the rendered Button /
+  confirm, resolved through the token files in light and dark).
+- **Still `accent` in the app** (later PRs, by meaning; the bridge keeps `accent` = #1264a3 in both
+  themes until they are gone): links and text buttons (`text-accent`, `hover:text-accent` ~120
+  uses: `ChatMessageList`, `TaskRow`, `QuickAdd`, `FoundRows`, `ChatHeader`, …) → `link`; selected
+  rows, chips and tabs (`bg-accent/10` `/20` `/5` `/15`, `border-accent`, the full `bg-accent` of
+  `QuickAdd`'s day chip, `TaskListPanel`'s mode / tag toggles, `ChatAuthSettings`' chosen sign-in
+  radio, `TreeRow`, `ChatSidebar`, `FoundRows`, `FindEmpty`) → `selected-*`; focus outlines
+  (`outline-accent`, `ring-accent`, `focus:border-accent`) → `focus-ring` / `focus-border`; AI marks
+  (`TaskCard` / `TaskRow` / `QuickAdd` sparkle and robot, AI boxes `border-accent/30 bg-accent/5`)
+  → `ai-*`; counts and new dots (`LeftPanelTabs`) → `primary` / `unread`; the member's own chat
+  bubbles (`ChatMessageList`, `ChoicePrompt`, `SteerInstruction`), the AI avatar gradient
+  (`ChatHeader`, `ChatMessageList`), the typing dots / cursor, `RateLimitMeter`'s bar and
+  `ResizeHandle`'s drag line → a decision each (likely `primary` / `selected`); `ThingIcon`'s task
+  colour → `thing-task`. Also not primary actions and left: the app `Switch` / `Checkbox` and the
+  settings nav (indigo; P2 switch / checkbox), `CompletedReviewBanner`'s 「変更表示中」 toggle.
 
 ## Order of the next PRs (from the proposal)
 

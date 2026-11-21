@@ -6,6 +6,7 @@ import type { RecordCardField, RecordCardHistoryLine } from '../../../shared/rec
 import { useIsNarrowerThan } from '../hooks/useIsNarrowerThan'
 import type { ThingKind } from '../../../shared/thing-words'
 import { ThingIcon } from './ThingIcon'
+import { PRIMARY_ACTION } from './buttonStyles'
 
 /**
  * The one layout every record opens in (新しい画面のデモ A–C): the kind and its state as small
@@ -71,7 +72,7 @@ export function Chip({ children, tone = 'gray' }: { children: ReactNode; tone?: 
   return <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${CHIP[tone]}`}>{children}</span>
 }
 
-export const MAIN_BUTTON = 'inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-accent/90 disabled:opacity-40'
+export const MAIN_BUTTON = `inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-medium ${PRIMARY_ACTION}`
 export const SMALL_BUTTON = 'inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-0.5 text-[11.5px] text-gray-700 hover:border-accent hover:text-accent disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200'
 
 /** A section folded until opened (details on demand). */

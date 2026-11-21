@@ -11,6 +11,7 @@ import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { useSlashCommands } from '../hooks/useSlashCommands'
 import { SlashCommandDropdown, type SlashCommandItem } from './SlashCommandDropdown'
 import type { ChatInputApi } from '../hooks/useChatDraft'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 interface CodeMirrorChatInputProps {
   initialDraft?: string
@@ -194,15 +195,15 @@ export const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
         <button
           onClick={handleSend}
           disabled={disabled}
-          className="
+          className={`
             flex-shrink-0 w-9 h-9 rounded-lg
-            bg-accent hover:bg-accent/90
-            disabled:bg-ink-faint disabled:cursor-not-allowed
+            disabled:cursor-not-allowed
             flex items-center justify-center
             transition-all duration-200
-            hover:shadow-glow hover:scale-[1.02]
+            enabled:hover:shadow-glow enabled:hover:scale-[1.02]
             active:scale-[0.98]
-          "
+            ${PRIMARY_ACTION}
+          `}
         >
           <ArrowUp size={18} weight="bold" className="text-white" />
         </button>

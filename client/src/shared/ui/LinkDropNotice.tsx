@@ -1,6 +1,7 @@
 // ACB foundation: what a drop on a record said (useLinkDrop), shown by the task card, the record
 // card and the task list.
 import type { LinkDropNotice as Notice } from '../hooks/useLinkDrop'
+import { PRIMARY_ACTION } from './buttonStyles'
 
 /** 「…をつなぎました［取り消す］」, the tiny chooser when several links fit, or the one-line refusal. */
 export function LinkDropNotice({ notice, busy }: { notice: Notice | null; busy: boolean }) {
@@ -11,7 +12,7 @@ export function LinkDropNotice({ notice, busy }: { notice: Notice | null; busy: 
       <div role="group" aria-label="相談の主題" data-link-drop="switch" className="space-y-1 rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5 text-[11.5px] text-gray-700 dark:text-zinc-200">
         <p>{notice.question}</p>
         <span className="flex flex-wrap gap-1">
-          <button type="button" disabled={busy} onClick={() => void notice.confirm()} className="rounded bg-accent px-1.5 text-white hover:bg-accent/90 disabled:opacity-40">切り替える</button>
+          <button type="button" disabled={busy} onClick={() => void notice.confirm()} className={`rounded px-1.5 ${PRIMARY_ACTION}`}>切り替える</button>
           <button type="button" onClick={notice.keep} className="px-1.5 text-gray-500 hover:underline">このまま</button>
         </span>
       </div>

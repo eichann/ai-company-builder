@@ -9,6 +9,7 @@ import { Microphone, Stop, X, CaretDown } from '@phosphor-icons/react'
 import { microphoneSelection, deviceFailureMessage } from '../../voice/microphoneSelection'
 import { voiceAvailability, recheckView } from '../../voice/voiceAvailability'
 import { cancelRecording, onVoiceEvent, startRecording, stopRecording } from '../../voice/api'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 export interface VoiceEditor {
   focus?: () => void
@@ -165,7 +166,7 @@ export function VoiceInputControl({ editor, active, pane, disabled, scope, onBus
           {devices?.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}
         </select>
       </label>
-      {!configured && <button type="button" disabled={busy || !devices?.length || deviceMissing} className="rounded bg-accent px-3 py-1.5 text-white disabled:opacity-40"
+      {!configured && <button type="button" disabled={busy || !devices?.length || deviceMissing} className={`rounded px-3 py-1.5 ${PRIMARY_ACTION}`}
         onClick={() => { microphoneSelection.select(selectedDevice); setShowDevices(false) }}>このマイクを使う</button>}
       <div className="flex justify-between gap-2"><span className="opacity-60">選択はこのPCに保存します。録音中は変更できません。</span><button type="button" onClick={() => void refreshDevices()} className="underline shrink-0">再取得</button></div>
     </div>}

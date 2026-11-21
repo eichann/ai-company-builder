@@ -14,6 +14,7 @@ import { canCollapse, shownCollapsedGroups } from '../conversationGroups'
 import type { ChatWindowStatus } from '../../../../shared/chat-windows'
 import { canMoveToWindow, MOVE_WHILE_WORKING, statusOfTab, windowSessionOf, windowTabs } from '../chatWindows'
 import { deleteChatSession, getChatSessionSummaries, onChatHistoryChanged, patchChatSession, searchChatSessions } from '../api'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 interface Props {
   companyId: string
@@ -203,7 +204,7 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
       <button onClick={onHide} aria-label="AIへの相談の一覧を閉じる" className="ml-auto p-1.5 rounded hover:bg-gray-200 dark:hover:bg-zinc-800"><X size={16} /></button>
     </div>
     <div className="px-3 space-y-3 pb-1">
-      <button onClick={onNew} className="w-full flex items-center justify-center gap-2 bg-accent text-white rounded-lg py-2 text-sm"><Plus size={16} />AIに相談する</button>
+      <button onClick={onNew} className={`w-full flex items-center justify-center gap-2 rounded-lg py-2 text-sm ${PRIMARY_ACTION}`}><Plus size={16} />AIに相談する</button>
       <label className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-2 py-2">
         <MagnifyingGlass size={16} className="shrink-0 text-gray-400" />
         <input aria-label="相談を検索" placeholder="相談の名前や、やること・案件の名前で探す" value={text}

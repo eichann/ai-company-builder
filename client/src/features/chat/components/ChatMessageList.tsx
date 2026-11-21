@@ -9,6 +9,7 @@ import { earlierAnchor, windowStart } from '../messageWindow'
 import { appInstructionOf } from '../../../../shared/app-instruction'
 import { droppedRecordsOf } from '../../../../shared/record-drop'
 import { droppedRecordLine } from '../recordDrop'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 // The conversation's messages: only the latest are rendered (messageWindow.ts;
 // 「以前のメッセージを表示」 keeps the reading position), each one memoised, and
@@ -110,7 +111,7 @@ function UserMessageBubble({
           <button
             onClick={submitEdit}
             disabled={!editText.trim() || editText.trim() === originalText}
-            className="px-3 py-1 text-xs rounded-md bg-accent text-white hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className={`px-3 py-1 text-xs rounded-md disabled:cursor-not-allowed transition-colors ${PRIMARY_ACTION}`}
           >
             {t('chat.resend')}
           </button>

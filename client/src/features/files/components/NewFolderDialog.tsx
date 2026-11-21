@@ -297,7 +297,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
             <Callout
               tone="warning"
               title="アプリの更新が必要なメンバーがいます"
-              action={outdated.canForce ? <Button size="sm" variant="danger" onClick={() => { setOutdated(null); void submit(true) }} disabled={busy}>それでも作成する</Button> : undefined}
+              action={outdated.canForce ? <Button size="sm" onClick={() => { setOutdated(null); void submit(true) }} disabled={busy}>それでも作成する</Button> : undefined}
             >
               次のメンバーは古いアプリを使っているため、非公開フォルダを扱えません：{outdated.members.join('、') || '不明'}。
               {outdated.canForce ? '' : '先にアプリを更新してもらうか、管理者に作成を依頼してください。'}

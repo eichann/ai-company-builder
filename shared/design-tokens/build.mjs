@@ -129,10 +129,11 @@ module.exports = ${JSON.stringify(appPreset, null, 2)}
 `
 
 // shadcn/ui's variables in the admin console → the semantic token each one stands for. The admin's
-// own colours stay until the per-component PRs switch them (owner decisions 2 and 6: black primary
-// buttons → primary, Geist → system font): a row with `keep` emits today's value for that theme,
-// and the comment names the token it moves to. Only exact matches are aliased now, so nothing
-// changes on screen. Remove a `keep` = a visible change: do it in the component's PR.
+// own colours stay until the per-component PRs switch them (owner decision 6: Geist → system font):
+// a row with `keep` emits today's value for that theme, and the comment names the token it moves
+// to. Remove a `keep` = a visible change: do it in the component's PR. Dropped so far: light
+// card / popover (exact matches), primary / primary-foreground (P2a, owner decision 2: the black
+// primary buttons became the primary blue).
 const ADMIN_SHADCN = [
   ['background', 'color-bg', 'oklch(0.99 0 0)', 'oklch(0.16 0.004 286)'],
   ['foreground', 'color-text', 'oklch(0.21 0.006 285.9)', 'oklch(0.96 0 0)'],
@@ -140,8 +141,8 @@ const ADMIN_SHADCN = [
   ['card-foreground', 'color-text', 'oklch(0.21 0.006 285.9)', 'oklch(0.96 0 0)'],
   ['popover', 'color-surface-raised', null, 'oklch(0.21 0.006 286)'],
   ['popover-foreground', 'color-text', 'oklch(0.21 0.006 285.9)', 'oklch(0.96 0 0)'],
-  ['primary', 'color-primary', 'oklch(0.21 0.006 285.9)', 'oklch(0.94 0 0)'],
-  ['primary-foreground', 'color-on-primary', 'oklch(0.985 0 0)', 'oklch(0.21 0.006 285.9)'],
+  ['primary', 'color-primary', null, null],
+  ['primary-foreground', 'color-on-primary', null, null],
   ['secondary', 'color-surface-sunken', 'oklch(0.967 0.001 286.4)', 'oklch(0.26 0.006 286)'],
   ['secondary-foreground', 'color-text', 'oklch(0.21 0.006 285.9)', 'oklch(0.96 0 0)'],
   ['muted', 'color-surface-sunken', 'oklch(0.967 0.001 286.4)', 'oklch(0.24 0.006 286)'],

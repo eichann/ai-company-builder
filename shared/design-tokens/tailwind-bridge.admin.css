@@ -17,8 +17,8 @@
   --card-foreground: oklch(0.21 0.006 285.9); /* later: var(--color-text) */
   --popover: var(--color-surface-raised);
   --popover-foreground: oklch(0.21 0.006 285.9); /* later: var(--color-text) */
-  --primary: oklch(0.21 0.006 285.9); /* later: var(--color-primary) */
-  --primary-foreground: oklch(0.985 0 0); /* later: var(--color-on-primary) */
+  --primary: var(--color-primary);
+  --primary-foreground: var(--color-on-primary);
   --secondary: oklch(0.967 0.001 286.4); /* later: var(--color-surface-sunken) */
   --secondary-foreground: oklch(0.21 0.006 285.9); /* later: var(--color-text) */
   --muted: oklch(0.967 0.001 286.4); /* later: var(--color-surface-sunken) */
@@ -46,8 +46,8 @@
   --card-foreground: oklch(0.96 0 0); /* later: var(--color-text) */
   --popover: oklch(0.21 0.006 286); /* later: var(--color-surface-raised) */
   --popover-foreground: oklch(0.96 0 0); /* later: var(--color-text) */
-  --primary: oklch(0.94 0 0); /* later: var(--color-primary) */
-  --primary-foreground: oklch(0.21 0.006 285.9); /* later: var(--color-on-primary) */
+  --primary: var(--color-primary);
+  --primary-foreground: var(--color-on-primary);
   --secondary: oklch(0.26 0.006 286); /* later: var(--color-surface-sunken) */
   --secondary-foreground: oklch(0.96 0 0); /* later: var(--color-text) */
   --muted: oklch(0.24 0.006 286); /* later: var(--color-surface-sunken) */

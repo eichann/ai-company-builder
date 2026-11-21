@@ -48,6 +48,7 @@ function Preview() {
           { label: '削除する', hint: '元に戻せません', danger: true, icon: <Trash size={13} />, onClick: () => answer('more:delete') },
         ]} />
         <Button variant="danger" onClick={() => answer('button:danger')}>参加者から外す</Button>
+        <Button variant="primary" onClick={() => answer('button:primary')}>下書きを保存</Button>
       </div>
       <label className="block text-small text-text-muted">
         相談の入力欄

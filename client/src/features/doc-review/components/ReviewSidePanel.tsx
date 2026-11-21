@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { ArrowBendDownRight, CheckCircle, Trash, User } from '@phosphor-icons/react'
 import type { CommentSeverity, Review, ReviewComment } from '../model'
 import { SEVERITY_ORDER, SeverityBadge } from './severity'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 function ReplyInput({
   onSubmit,
@@ -44,7 +45,7 @@ function ReplyInput({
         <button
           onClick={() => body.trim() && onSubmit(body.trim())}
           disabled={!body.trim()}
-          className="px-1.5 py-0.5 text-[10px] rounded bg-blue-600 text-white disabled:opacity-40"
+          className={`px-1.5 py-0.5 text-[10px] rounded ${PRIMARY_ACTION}`}
         >
           返信
         </button>

@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import { Info } from '@phosphor-icons/react'
 import { AGENT_LOG_NOTICE_MORE, AGENT_LOG_NOTICE_TEXT, markAgentLogNoticeSeen, shouldShowAgentLogNotice } from '../../../shared/lib/agentLogNotice'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 // One-time notice over the chat (per account on this PC): the AI action log
 // is sent to the company's administrators. Non-modal: the chat stays usable;
@@ -32,7 +33,7 @@ export function AgentLogNotice({ userId }: { userId: string }) {
               autoFocus
               type="button"
               onClick={close}
-              className="h-8 rounded-lg bg-indigo-600 px-4 text-[13px] font-medium text-white hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 focus-visible:ring-offset-1 dark:bg-indigo-500 dark:hover:bg-indigo-400 dark:focus-visible:ring-offset-zinc-900"
+              className={`h-8 rounded-lg px-4 text-[13px] font-medium ${PRIMARY_ACTION}`}
             >
               OK
             </button>

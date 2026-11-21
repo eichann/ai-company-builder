@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { UsersThree } from '@phosphor-icons/react'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 /** A department the member may put a task into: its folder as the company names it, and its name. */
 export interface ShareFolder {
@@ -56,7 +57,7 @@ export function ShareToDepartment({ folders, busy, onShare }: Props) {
       </p>
       {error && <p role="alert" className="text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex gap-2">
-        <button type="button" disabled={busy || !chosen} onClick={() => void submit()} className="rounded bg-accent px-2.5 py-0.5 text-white disabled:opacity-50">この部署に出す</button>
+        <button type="button" disabled={busy || !chosen} onClick={() => void submit()} className={`rounded px-2.5 py-0.5 ${PRIMARY_ACTION}`}>この部署に出す</button>
         <button type="button" disabled={busy} onClick={() => { setOpen(false); setError(null) }} className="rounded border border-gray-300 px-2.5 py-0.5 dark:border-zinc-600">やめる</button>
       </div>
     </div>

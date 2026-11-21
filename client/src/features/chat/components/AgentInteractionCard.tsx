@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { AgentInteractionRequest, AgentInteractionResponse } from '../../../../shared/agent-interaction'
 import { ChoicePromptCard } from './ChoicePrompt'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 // Keyed by the request: a new question starts with empty answers.
 export function AgentInteractionCard({ request, onRespond }: { request: AgentInteractionRequest; onRespond: (response: AgentInteractionResponse) => Promise<boolean> }) {
@@ -32,7 +33,7 @@ function CodexInteractionCard({ request, onRespond }: { request: Exclude<AgentIn
         {(!q.options?.length || other[q.id]) && <input aria-label={`${q.header}の回答`} type={q.isSecret ? 'password' : 'text'} autoComplete="off" maxLength={10000} value={answers[q.id] || ''} onChange={e => setAnswers(v => ({ ...v, [q.id]: e.target.value }))} className="w-full rounded-lg border border-white/10 bg-surface p-2 text-ink" />}
         {q.isSecret && <p className="text-xs text-ink-muted">入力はCodexに送信されます。ACBの相談履歴には保存しません。</p>}
       </fieldset>)}
-      <div className="flex gap-3"><button disabled={sending} onClick={() => void respond({ cancelled: true })} className="text-ink-muted">回答せず停止</button><button disabled={sending || request.questions.some(q => !answers[q.id]?.trim())} onClick={() => void respond({ answers })} className="ml-auto rounded-lg bg-accent px-4 py-2 text-white disabled:opacity-40">回答を送信</button></div>
+      <div className="flex gap-3"><button disabled={sending} onClick={() => void respond({ cancelled: true })} className="text-ink-muted">回答せず停止</button><button disabled={sending || request.questions.some(q => !answers[q.id]?.trim())} onClick={() => void respond({ answers })} className={`ml-auto rounded-lg px-4 py-2 ${PRIMARY_ACTION}`}>回答を送信</button></div>
     </> : <>
       {request.reason && <p className="mb-2 text-ink">{request.reason}</p>}
       {request.cwd && <p className="text-xs text-ink-muted break-all mb-2">作業フォルダ: {request.cwd}</p>}
@@ -40,7 +41,7 @@ function CodexInteractionCard({ request, onRespond }: { request: Exclude<AgentIn
       {request.network && <p className="mt-2 text-ink">ネットワークへの接続（接続先を限定しない許可）</p>}
       <p className="my-3 text-xs text-ink-muted">許可は今回の応答が終わるまで有効です。以後の相談には引き継ぎません。</p>
       {!request.supported && <p className="my-2 text-red-500">この形式の権限要求はまだ確認できないため、許可できません。対象を具体的なフォルダで指定するよう依頼してください。</p>}
-      <div className="flex gap-3"><button disabled={sending} onClick={() => void respond({ approved: false })} className="text-ink-muted">許可しない</button><button disabled={sending || !request.supported} onClick={() => void respond({ approved: true })} className="ml-auto rounded-lg bg-accent px-4 py-2 text-white disabled:opacity-40">今回だけ許可</button></div>
+      <div className="flex gap-3"><button disabled={sending} onClick={() => void respond({ approved: false })} className="text-ink-muted">許可しない</button><button disabled={sending || !request.supported} onClick={() => void respond({ approved: true })} className={`ml-auto rounded-lg px-4 py-2 ${PRIMARY_ACTION}`}>今回だけ許可</button></div>
     </>}
     {error && <p role="alert" className="text-red-500 mt-2">{error}</p>}
     <p className="mt-3 text-xs text-ink-muted">別の相談に切り替えても、この相談に戻って回答できます。5分間未回答の場合は確認を終了します。</p>
