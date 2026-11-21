@@ -5,6 +5,7 @@
  * never reads them, and `CREATE … IF NOT EXISTS` makes a second start change nothing.
  * Test: tests/unit/jobs-schema.test.ts (the frozen database before them, upgraded twice).
  */
+import { randomUUID } from 'crypto'
 import type Database from 'better-sqlite3'
 
 /**
@@ -101,6 +102,70 @@ export function migrateJobEvents(conn: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_ai_job_event_gaps_job ON ai_job_event_gaps(company_id, job_key);
   `)
+}
+
+/**
+ * Stage 4b-0.5 (the rollback floor; owner memo 「段4b 設計メモ」 第4版 §5-3, corrected by Codex's 4th review #1): **watch
+ * generations**. An event job's watch can start over on the same record (「見張るやることを選び直す」 of the record it watched),
+ * and an occurrence made for the earlier watch must then never move, stop or clear the new one. So:
+ *
+ * - `ai_job_event_cursors.watch_generation` — which watch this is: 1 when first watched, + 1 every time the watch starts
+ *   over or moves (`startEventCursor` on a new start record, `restartWatch`, `moveWatch`);
+ * - `ai_job_occurrences.watch_generation` — the watch an event occurrence was made for, pinned when made (the scan).
+ *   NULL: a time occurrence, or an event occurrence whose watch is not known — it stays **isolated**: when it ends it
+ *   moves, stops and clears no watch.
+ *
+ * Additive (an older build neither reads nor writes them) and idempotent: only cursors still without a generation are
+ * looked at. For those (4a's data) the generation is 1, and an existing occurrence gets it **only when its provenance is
+ * certain** — never inferred from which pending occurrence is newest (`watch_fired` is also set without an occurrence: a
+ * paused gap, an assignee who is not the responsible person, the day's limit; and the newest occurrence may have ended
+ * while an older one waits). Certain = the watch fired, its chain is not stopped (in 4a every firing that makes no
+ * occurrence stops it, and only the occurrence of a record can clear that stop), and the job has exactly **one**
+ * occurrence of the watched record, still waiting or running (no other could have made or cleared anything). Anything
+ * else is ambiguous: every occurrence stays isolated, and a watch that fired, is not stopped and has no occurrence of
+ * its own now is an **orphan** — its chain is stopped once (`WATCH_RESET`, 「仕組みの入れ替えのため、止まりました」) and the
+ * approved version's responsible person (while a member) is told once (`job_chain_stopped`; the job's creator is not:
+ * whether they read the record cannot be judged here, D7), so they choose the next watched やること. Only for a job whose
+ * approved version is an event job of this build's shape (schema 2) that is not retired.
+ * Test: tests/unit/job-watch-generations.test.ts (on the frozen database before it), job-events.test.ts.
+ */
+export function migrateJobWatchGenerations(conn: Database.Database): void {
+  const cols = (table: string) => new Set((conn.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols('ai_job_event_cursors').has('watch_generation')) conn.exec('ALTER TABLE ai_job_event_cursors ADD COLUMN watch_generation INTEGER')
+  if (!cols('ai_job_occurrences').has('watch_generation')) conn.exec('ALTER TABLE ai_job_occurrences ADD COLUMN watch_generation INTEGER')
+  const companies = conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>
+  for (const { id: companyId } of companies) {
+    conn.transaction(() => {
+      const cursors = conn.prepare(`SELECT job_id, watch_record_id, watch_fired, chain_stop_code FROM ai_job_event_cursors WHERE company_id = ? AND watch_generation IS NULL`)
+        .all(companyId) as Array<{ job_id: string; watch_record_id: string; watch_fired: number; chain_stop_code: string | null }>
+      for (const c of cursors) {
+        const live = c.watch_fired === 1 && c.chain_stop_code === null
+        const mine = live
+          ? conn.prepare(`SELECT id, state FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_record_id = ?`).all(companyId, c.job_id, c.watch_record_id) as Array<{ id: string; state: string }>
+          : []
+        if (mine.length === 1 && (mine[0].state === 'due' || mine[0].state === 'running')) {
+          conn.prepare(`UPDATE ai_job_occurrences SET watch_generation = 1 WHERE company_id = ? AND id = ? AND watch_generation IS NULL`).run(companyId, mine[0].id)
+        } else if (live) {
+          // An orphan: stopped once, its responsible person told once — for an event job of this build's shape only.
+          const job = conn.prepare(`SELECT j.state, v.acting_user_id FROM ai_jobs j JOIN ai_job_versions v ON v.company_id = j.company_id AND v.job_id = j.id
+              AND v.version = j.approved_version WHERE j.company_id = ? AND j.id = ? AND v.schema = 2 AND json_valid(v.definition)
+              AND json_extract(v.definition, '$.schema') = 2 AND json_extract(v.definition, '$.trigger.kind') = 'record'`)
+            .get(companyId, c.job_id) as { state: string; acting_user_id: string } | undefined
+          if (job && job.state !== 'retired') {
+            const at = new Date().toISOString()
+            conn.prepare(`UPDATE ai_job_event_cursors SET chain_stop_code = 'WATCH_RESET', chain_stop_record = watch_record_id, chain_stop_at = ?
+                WHERE company_id = ? AND job_id = ? AND chain_stop_code IS NULL`).run(at, companyId, c.job_id)
+            const member = conn.prepare(`SELECT 1 FROM memberships WHERE company_id = ? AND user_id = ?`).get(companyId, job.acting_user_id)
+            if (member) {
+              conn.prepare(`INSERT OR IGNORE INTO notifications (company_id, id, user_id, kind, record_id, record_version, action, actor_id, actor_kind, dedupe_key, created_at, read_at)
+                  VALUES (?, ?, ?, 'job_chain_stopped', '', 0, '', NULL, NULL, ?, ?, NULL)`).run(companyId, randomUUID(), job.acting_user_id, `job_chain_stopped:${c.job_id}:${at}`, at)
+            }
+          }
+        }
+        conn.prepare(`UPDATE ai_job_event_cursors SET watch_generation = 1 WHERE company_id = ? AND job_id = ? AND watch_generation IS NULL`).run(companyId, c.job_id)
+      }
+    })()
+  }
 }
 
 export const jobSchema = `

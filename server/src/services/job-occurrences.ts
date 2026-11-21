@@ -161,6 +161,18 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     try { deps.noticesChanged?.(companyId, [...told]) } catch { /* the apps' own check catches up */ }
   }
 
+  /**
+   * Whether an event occurrence belongs to its job's watch **now** (stage 4b-0.5, watch generations): made for this very
+   * watch (`watchGeneration`, pinned when made) and that watch still on its record. One of an earlier watch — the same
+   * record watched again (「選び直す」), or one whose watch the startup migration could not prove — stops no chain when it
+   * ends (and moves or clears nothing: `moveWatch` / `clearChainStop` take its generation).
+   */
+  const ownsWatch = (handle: CompanyData, occ: JobOccurrenceRow): boolean => {
+    if (!occ.eventRecordId || occ.watchGeneration === null || occ.watchGeneration === undefined) return false
+    const cursor = handle.jobs.eventCursor(occ.jobId)
+    return cursor !== null && cursor.generation === occ.watchGeneration && cursor.watch === occ.eventRecordId
+  }
+
   /** The approved version's responsible person accepted that version's consent. */
   const accepted = (job: JobRow, version: JobVersionRow) => job.acceptedConsent !== null && job.acceptedConsent === version.consentFingerprint
   /** The place the responsible person chose for the version's deliverables is theirs and usable now (job-runs.ts checks it again at the claim). */
@@ -302,7 +314,7 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         changed++
         const job = handle.jobs.find(occ.jobId)
         notice(companyId, handle, 'job_expired', occ, job, handle.jobs.version(occ.jobId, occ.jobVersion)?.actingUserId ?? null, told)
-        if (occ.eventRecordId) events.chainStopped(handle, occ.jobId, 'EXPIRED', occ.eventRecordId, told)
+        if (occ.eventRecordId && ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, 'EXPIRED', occ.eventRecordId, told)
       })
     }
     tell(companyId, told)
@@ -345,7 +357,7 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
           if (!handle.jobs.moveOccurrence(occ.id, ['due'], to, { outcomeCode: code }, at)) return null
           if (kind) notice(companyId, handle, kind, occ, job, acting, told)
           // An event occurrence that did not make its やること stops its job's chain (owner decision ①).
-          if (occ.eventRecordId && job) events.chainStopped(handle, job.id, code, occ.eventRecordId, told)
+          if (occ.eventRecordId && job && ownsWatch(handle, occ)) events.chainStopped(handle, job.id, code, occ.eventRecordId, told)
           return to
         }
         const job = handle.jobs.find(occ.jobId)
@@ -410,8 +422,9 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         // server, in the same transaction (a duplicate, a tag or an edit of anything never moves it). Either way a chain
         // that had stopped on this record goes on (it ran after 「もう一度」).
         if (event && occ.eventRecordId) {
-          if (isRecordTrigger(definition.trigger) && definition.trigger.followMadeTask) handle.jobs.moveWatch(job.id, occ.eventRecordId, made.record.id, at)
-          else handle.jobs.clearChainStop(job.id, occ.eventRecordId)
+          // Only its own watch (stage 4b-0.5: the generation it was made for; an earlier watch's occurrence moves nothing).
+          if (isRecordTrigger(definition.trigger) && definition.trigger.followMadeTask) handle.jobs.moveWatch(job.id, occ.eventRecordId, made.record.id, at, occ.watchGeneration ?? null)
+          else handle.jobs.clearChainStop(job.id, occ.eventRecordId, occ.watchGeneration ?? null)
         }
         if (!runs.update({ ...run, state: 'done', updatedAt: at, closedAt: at }, { generation: 1, state: 'running' })) throw new Error('run changed')
         runs.appendEvent({ runId, event: 'finished', generation: 1, stateAfter: 'done', code: 'DONE', at })
@@ -429,7 +442,7 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         if (!occ || !handle.jobs.moveOccurrence(occ.id, ['due'], 'needs_person', { outcomeCode: 'TASK_NOT_CREATED' }, clock.now())) return null
         notice(companyId, handle, 'job_failed', occ, handle.jobs.find(occ.jobId), handle.jobs.version(occ.jobId, occ.jobVersion)?.actingUserId ?? null, told)
         // Its やること was not made: the chain stops there too (owner decision ①; Codex review of #700).
-        if (occ.eventRecordId) events.chainStopped(handle, occ.jobId, 'TASK_NOT_CREATED', occ.eventRecordId, told)
+        if (occ.eventRecordId && ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, 'TASK_NOT_CREATED', occ.eventRecordId, told)
         return 'needs_person' as const
       })
     }
@@ -459,7 +472,7 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
         if (!handle.jobs.moveOccurrence(occ.id, ['due'], 'held', { outcomeCode: code }, at)) continue
         moved++
         // A held event occurrence never runs: its chain stops (owner decision ①).
-        if (occ.eventRecordId) events.chainStopped(handle, occ.jobId, code, occ.eventRecordId, told)
+        if (occ.eventRecordId && ownsWatch(handle, occ)) events.chainStopped(handle, occ.jobId, code, occ.eventRecordId, told)
       }
       if (moved === 0) break
     }

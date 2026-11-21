@@ -62,7 +62,9 @@ New tables only (additive; `CREATE … IF NOT EXISTS`, nothing else changes):
   (due / running / done / nothing / needs_person / skipped / expired / held), `run_id`, `outcome_code`, and (5a-2, additive: `migrateJobOccurrenceCheckedUntil`) `checked_until` — where its check
   stopped looking, set once at the first claim (`moveOccurrence`'s `checkedUntil`, `COALESCE`: never moved), and
   `checked_commit` — the commit a `new_files` check in the shared folder looked up to (the app's, with that claim),
-  and (5b, additive: `migrateJobOccurrenceRetries`) `retries` (0 = never), `retried_by`, `retried_at` — 「もう一度」.
+  and (5b, additive: `migrateJobOccurrenceRetries`) `retries` (0 = never), `retried_by`, `retried_at` — 「もう一度」, and
+  (4b-0.5, additive: `migrateJobWatchGenerations`) `watch_generation` — the watch an event occurrence was made for
+  ("Event-triggered jobs" "Watch generations").
   Written by the clock and the runner (3b, below).
 - `ai_job_settings`: 「定期の仕事をすべて止める」 (`stopped`; no row = not stopped).
 
@@ -888,6 +890,25 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   second completion of it make nothing more (also when the day's limit skipped it). `assignee: 'responsible'` is checked
   on the record (its assignee at the event's version and right before acting), not on who completed it (the requester
   and the checker may).
+- **Watch generations** (stage 4b-0.5, owner memo 「段4b 設計メモ」 第4版 §5-3 with Codex's 4th review #1): the cursor's
+  `watch_generation` says which watch it is — 1 when first watched, + 1 each time the watch starts over (`restartWatch`,
+  `startEventCursor` on a new start record) or moves (`moveWatch`) — and an event occurrence pins the generation it was
+  made for (`ai_job_occurrences.watch_generation`, the scan). **Only an occurrence of the watch now moves, stops or clears
+  it** (`moveWatch` / `clearChainStop` take its generation in SQL; the chain-stopping paths — the clock's expiry, the
+  runner's held / skipped / needs-person, a refused やること, `holdDue` — ask `ownsWatch`): the same record chosen again,
+  an occurrence of the earlier watch that expires, is held (its version is no longer the approved one), fails or runs
+  stops and moves nothing (F7). A NULL generation (a time occurrence, or one the migration could not place) is
+  **isolated**. The startup migration (`migrateJobWatchGenerations`, additive, only cursors without a generation)
+  gives 4a's data generation 1 and pins it on an occurrence only when its provenance is certain — the watch fired, its
+  chain is not stopped, and the job's **one** occurrence of the watched record is still `due` / `running` (F8) — never
+  from which pending one is newest (`watch_fired` is also set without an occurrence, and the newest may have ended while
+  an older one waits); a watch that fired, is not stopped and has no occurrence of its own is an **orphan**: stopped once
+  (`WATCH_RESET`, 「仕組みの入れ替えのため、止まりました」) and its responsible person (not the creator: whether they read the
+  record cannot be judged there, D7) told once, so they choose again (F9). Tests: `job-events.test.ts` "watch
+  generations", `tests/unit/job-watch-generations.test.ts` (on `tests/fixtures/app-schema-before-watch-generations.sql`).
+  Mutation check: 25 mutations, 22 fail a test; not alone: the `ownsWatch` null-generation check (a cursor always has
+  a generation once the migration ran, so the comparison alone refuses) and the migration's schema check on the column
+  and on the text (each alone suffices, as in `storedJobDefinition`; both removed together fails).
 - **The start record**: read by whoever saves it **and** by the responsible person (one problem code,
   `trigger.startRecord.NOT_FOUND`, for missing / unreadable: an answer never tells them apart); a viewer who does not
   read it gets the version without definition, fingerprints and trigger — owners and admins too (`readsStart`). The admin

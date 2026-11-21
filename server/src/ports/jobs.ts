@@ -83,6 +83,11 @@ export interface JobOccurrenceRow {
   eventRecordId?: string | null
   eventVersion?: number | null
   eventDay?: string | null
+  /**
+   * Stage 4b-0.5: the watch (`JobEventCursor.generation`) an event occurrence was made for. Only an occurrence of the
+   * watch now moves, stops or clears it; null / absent (a time slot, or a watch not known) never does.
+   */
+  watchGeneration?: number | null
   createdAt: string
   updatedAt: string
 }
@@ -101,6 +106,8 @@ export interface JobEventCursor {
   jobStamp: string; stopStamp: string
   /** The chain of watched records stopped (owner decision ①): why, on which record, when; null while it goes on. */
   chainStop: { code: string; record: string; at: string } | null
+  /** Stage 4b-0.5: which watch this is (+ 1 each time it starts over or moves); null only before the startup migration. */
+  generation: number | null
 }
 
 export interface JobRepository {
@@ -191,12 +198,15 @@ export interface JobRepository {
   moveEventCursor(jobId: string, from: number, to: number, at: string): boolean
   /** The watched record made its occurrence: it fires no more (compare-and-set on the record; false = it was not, or fired). */
   markWatchFired(jobId: string, recordId: string, at: string): boolean
-  /** The next record to watch (`followMadeTask`): only while `from` is still the watched one (false = it was not: nothing written). Ends a chain stop. */
-  moveWatch(jobId: string, from: string, to: string, at: string): boolean
+  /**
+   * The next record to watch (`followMadeTask`): only while `from` is still the watched one **of `generation`** — the
+   * occurrence's own watch (false = it was not: nothing written; null never matches). Ends a chain stop; a new generation.
+   */
+  moveWatch(jobId: string, from: string, to: string, at: string, generation: number | null): boolean
   /** The chain stopped (owner decision ①) on `recordId`, the one watched now: false when it had stopped already (one notice per stop) or another record is watched. */
   stopChain(jobId: string, code: string, recordId: string, at: string): boolean
-  /** The chain goes on after all (the occurrence it stopped on ran, after 「もう一度」): only a stop on `recordId`. */
-  clearChainStop(jobId: string, recordId: string): void
+  /** The chain goes on after all (the occurrence it stopped on ran, after 「もう一度」): only a stop on `recordId`, of the watch `generation` (null: none). */
+  clearChainStop(jobId: string, recordId: string, generation: number | null): void
   /** Which gaps are open now: the job's (`jobId` as given) and / or the company's stop's (''). */
   openGapKeys(jobId: string): string[]
   /** The job's gaps and the company's (its stops), in any order. */
