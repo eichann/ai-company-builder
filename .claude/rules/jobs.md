@@ -1138,8 +1138,10 @@ and やること. Stopping the AI on the PC when the server cannot be reached (a
   schema 3 its assignee them — else `trigger.startRecord.NOT_FOUND`, one code —; then membership and rights, the consent
   accepted, a place outside still theirs and usable → `JOB_PLACE_NOT_USABLE`).
 - **Rolling back** to 4b-0.5 (the floor, D8): schema-3 versions and their occurrences are frozen there (not shown, run,
-  told or expired; a stop holds them and ends their runs; reconciled again here). F11's cross-build run (the floor's code
-  on a database 4b-1 wrote) is a CI job of its own (not in this repository's workflow yet).
+  told or expired; a stop holds them and ends their runs; reconciled again here). F11 across builds — this build writes the
+  database, the floor's code (the commit pinned in `.github/rollback-floor-commit`) runs on it, this build again — is
+  `.github/scripts/rollback-floor-check.sh` (`server/tests/cross-build/`, a step of the "Server tests" job;
+  `deployment.md` "Rolling back production").
 - Test: `server/tests/integration/job-event-runs.test.ts` (S1–S10 of §8, the compatibility rows of §7, D5),
   `jobs-definition.test.ts` "an event run by the PC AI (schema 3)", `job-words.test.ts` (every new code has words),
   `job-runs.test.ts` / `job-retry.test.ts` (the closed run-level routes), permission matrix row `GET /me/job-occurrences`.
