@@ -1137,6 +1137,18 @@ describe('D7 = A: a stopped chain of a record the viewer cannot read', () => {
     expect(await seenBy(admin(), job2)).toMatchObject({ detail: null, listed: null })
     // Alice, the responsible person, still sees it.
     expect(await seenBy(alice(), job2)).toMatchObject({ unread: 1, detail: { why: expect.stringContaining('一時停止している間') } })
+    // A creator demoted to member after being told: the notice is gone (they no longer see the job at all).
+    db.prepare('DELETE FROM notifications').run()
+    const third = task('三つめ・作った人が外れる')
+    const job3 = await runnableJob(chain(third, { name: '三つめ' }))
+    ok(jobs.pause(owner(), job3))
+    await complete(third)
+    ok(await jobs.resume(owner(), job3))
+    tick()
+    expect(ok(services.notifications.list(owner())).unread).toBe(1)
+    db.prepare("UPDATE memberships SET role = 'member' WHERE company_id = ? AND user_id = 'u-owner'").run(CO)
+    expect(ok(services.notifications.list(m('u-owner', 'member')))).toMatchObject({ unread: 0, items: [] })
+    db.prepare("UPDATE memberships SET role = 'owner' WHERE company_id = ? AND user_id = 'u-owner'").run(CO)
   })
 
   it('a record removed after the stop: nobody but the responsible person sees it (plain words)', async () => {

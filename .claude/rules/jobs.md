@@ -932,7 +932,7 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   consented to), and the watch starts over there (`restartWatch` — also when it is the start record it began from).
   Accepting a new consent first checks what the watched record did since the cursor (`dropUntilNow`, `VERSION_EVENT`),
   so a completion between approval and acceptance stops the chain even before the clock looked. The app's 「定期の仕事」 shows the stop and 「見張るやることを選び直す」
-  (`jobs:watchChoices` — their own open やること by name — and `jobs:rewatch`); the admin list shows it (an admin may also
+  (`jobs:watchChoices` — their own open やること by name — and `jobs:rewatch`); the admin list shows it to an owner / admin who reads the stop's record now (D7 = A; an admin may also
   「直す」 the start record; the responsible person then accepts).
 - **Who sees an event occurrence** (⑥, `eventShown`): only someone who reads its record now — owners and admins too.
   `GET /jobs/:jobId/occurrences` leaves the others out **before** the limit (page by page), the job's `lastOccurrence` is
