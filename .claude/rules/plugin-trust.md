@@ -25,7 +25,7 @@ signed **that company's list** with that fingerprint in it — even if the serve
   record's state machine — pure functions in `shared/core/` over an injected clock (`now`) and
   injected crypto, plus the app's `node:crypto` adapter and the tests.
 - **P2 provides** (section "P2" below): the app's trust record on disk, the root each build
-  carries (and the release build's refusal without the production root), the server reading
+  carries (and the release build's check of the production root: a warning until the switch), the server reading
   `PLUGINS_DIR/trust/` and handing each company only its own documents, and the owner's and
   operator's tools (`sign-targets` and the rest).
 - **Does not do yet**: **no enforcement** — no package is refused, hidden or stopped because of
@@ -157,25 +157,43 @@ behind the newest `issued` seen. P4 closes frames and engines at that time.
   server × company; after a restart the next refresh re-accepts the same text (the record refuses
   anything older). `status(companyId)` is `codeMayRunUntil` — **nobody calls it yet** (P4). A
   build whose root cannot start keeps no trust and logs it (`no-trust`), never throws.
-- `trust-roots.ts` + `trust-roots/development.json` / `production.json`: a packaged app carries the
-  production root, anything else the development root (`main.ts`: `app.isPackaged`). The
+- **"Unknown" is kept** (`TrustState.unknown`, stored in the record): an unreadable record or a
+  stored chain that did not authenticate sets it; every later write keeps it and every restart
+  reads it back (`health().unknown`), so one refresh never turns lost records into a clean
+  history. Only `clearTrustUnknown` (a deliberate step; nothing calls it in P2) ends it. What was
+  taken while unknown is judged as on a first start (an older still-valid list can be taken —
+  nothing is left to compare); P4 decides what "unknown" allows.
+- `trust-roots.ts` + `trust-roots/development.json` / `production.json` (`carriedTrustRoot`): an
+  unpackaged app carries the development root; a packaged one the production root **when it is a
+  real one** (`releaseTrustRootProblem`: not the placeholder, its own root threshold, **no** key
+  shared with the development root, ≥ 30 days left), else — while `RELEASE_REQUIRES_PRODUCTION_ROOT`
+  is `false` — the development root, logged at start, and `health().root` says `development`.
+  **Enforcement (P4) must act on trust only when `health().root` is `production`.** The
   development root has its own keys (`scripts/plugin-trust-dev-root.ts`; the private keys are
   deleted unless `--keep <folder outside the repository>`). `production.json` is a **placeholder**
-  until the owner makes the root keys. `releaseTrustRootProblem` refuses a placeholder, anything
-  that does not carry its own root threshold, a root sharing **any** key with the development
-  root, and one expiring within 30 days; `scripts/check-trust-root.ts` runs it first in `pnpm
-  build` and in electron-builder's `beforePack` (`scripts/before-pack.mjs`, which then runs the
-  bundled-git merge), so **no release build can be made until the owner's root is in place**.
+  until the owner makes the root keys. `scripts/check-trust-root.ts` runs first in `pnpm build` and
+  in electron-builder's `beforePack` (`scripts/before-pack.mjs`, which then runs the bundled-git
+  merge): today a loud warning ("this build carries the DEVELOPMENT plugin trust root") and the
+  build goes on; with the switch `RELEASE_REQUIRES_PRODUCTION_ROOT = true` (one line, the
+  enforcement PR, owner decision pending) it exits 1 and a packaged app never falls back.
+- **One record per carried root**: `<userData>/trust/<development|production>/`, so a development
+  app and a packaged app on one computer never share (or overwrite) a record or a halt.
 - Wiring: `trust-wire.ts` (main.ts passes it to `wireAgentControl`); the policy's `pluginTrust`
   marker (a hex digest; anything else dropped by `parseAgentPolicy`) starts a refresh once per new
-  marker per company (`refreshTrustOnMarker`; again after a failure; never without a marker).
+  marker per company (`refreshTrustOnMarker`). A marker is done only when the refresh was
+  `settled`: the documents were taken in or refused for good. A failed refresh, or a refusal that
+  may pass by itself (`TRANSIENT_TRUST_REFUSALS`: `issued-in-future`, `clock-went-back` — this
+  computer's clock), is tried again at the next policy answer with the same marker.
 
 **The server** (`server/src/`):
 
 - `PLUGINS_DIR/trust/` (read only; `adapters/plugin-trust-files.ts`, port `ports/plugin-trust.ts`):
   `root/<version>.json`, `targets/company-<id>.json`, `freshness/company-<id>.json`. `trust` itself
-  may be a link (the install's swap); every file inside must be a plain file ≤ 1 MiB (a link is
-  refused and named), ≤ 64 roots. Read again on every call. The shelf skips `trust`.
+  may be a link (the install's swap); every step below it is `lstat`ed — the three folders real
+  folders, every file a plain file ≤ 1 MiB (a link anywhere is refused and named), ≤ 64 roots.
+  Every call takes the places' stamp (`lstat` only: link target, inode, size, time); the files are
+  read and verified again only when it changed, else the answer is reused until the earliest
+  expiry or 5 minutes. The shelf skips `trust`.
 - `services/plugin-trust.ts`: `documentsFor(member)` — `GET /api/companies/:companyId/plugin-trust`
   (`routes/plugins.ts`, `companyMember`: any member; a non-member 404, signed out 401 — permission
   matrix row; there is no object id, so no `CROSS` row: the company is the member's, its file name
@@ -185,8 +203,7 @@ behind the newest `issued` seen. P4 closes frames and engines at that time.
   checks **by the server's clock** on a fresh record (the server keeps none: it is a filter, not
   the authority). A root conflict → nothing. Withheld documents and "runs out within 48 h" are
   logged for the operator (`[plugin-trust] company=<id>: …`, codes and hours only, at most hourly
-  per note). Verification is cached per company by the texts' hash until the earliest expiry or 5
-  minutes. `PUBLIC_URL` must be `http(s)://host[:port]`, else nothing is handed out.
+  per note). `PUBLIC_URL` must be `http(s)://host[:port]`, else nothing is handed out.
 - `digestFor(companyId)` → the agent policy's `pluginTrust` (part of its version / ETag), so a new
   document reaches the apps at their next policy refresh; no `trust/` → no marker.
 - Clocks: the server's clock only decides what it hands out (keep it NTP-synced: a server clock
@@ -196,16 +213,28 @@ behind the newest `issued` seen. P4 closes frames and engines at that time.
 **The tools** (`server/src/cli/plugin-trust.ts`, `adapters/plugin-trust-tools.ts`; they hold no
 key and sign with `ssh-keygen -Y sign` — a key file, or a public key file whose key the agent
 holds): `check-key` (the owner's first real-device check: sign through the agent, verify with the
-core, key type per role), `sign-root` (one root key's signature at a time; only a key the root
-lists for `root`, the signature verified), `sign-targets` (each package from the lock: the tag's
-commit must be reachable from `origin/main` — the reviewed merge — and the folder's fingerprint v2
-at the tag must equal the lock's; next version; ≤ 90 days; verified against the roots before it
-is written), `sign-freshness` (per company list: bound to its version and sha256, next version, ≤ 3
-days, verified), `install` (the operator's hourly timer: copies `root/` + `targets/` from the main
-checkout and `freshness/` from the freshness checkout into a new `.trust-<time>-<id>` folder of
-`PLUGINS_DIR`, refuses everything unless every company's list **and** freshness verify, then
-renames a new `trust` link over the old one and removes the previous folder). Commands:
-`deployment.md` "Plugin trust documents".
+core, key type per role; `--role` must be one of the three), `sign-root` (one root key's
+signature at a time, verified; for a **rotation** `--predecessor <root/N-1.json>` (a signed root
+carrying its own threshold, version N − 1): a key that root lists for `root` may sign too — a key
+being removed — and its signature is checked against **the predecessor's** key; the answer says
+whether each threshold is met and whether the root is complete (`stepRoot`: both)), `sign-targets`
+(each package from the lock: the tag's commit must be reachable from `origin/main` — the reviewed
+merge; cloned `--filter=blob:none` — and the folder's fingerprint v2 at the tag must equal the
+lock's; next version; ≤ 90 days; verified against the roots before it is written),
+`sign-freshness` (per company list: bound to its version and sha256, next version, ≤ 3 days,
+verified; one company whose list does not verify is reported and the others are still signed;
+exit 1), `install` (the operator's hourly timer; below). **An existing document whose version
+cannot be read refuses to sign** (never "start again at v1").
+
+`install` copies `root/` + `targets/` from the main checkout and `freshness/` from the freshness
+checkout into a new `.trust-<time>-<id>` folder of `PLUGINS_DIR`, then renames a new `trust` link
+over the old one and removes the previous folder. It refuses, changing nothing, when a source
+folder cannot be read or is missing (never read as "no companies"), when `targets/` holds no
+company (unless `--allow-empty yes`), when a root version installed now is missing from the new
+`root/` (apps may carry it: never remove a root version), and when no company verifies. One
+company whose list or freshness does not verify does not block the others: its installed
+documents are kept when they still verify, else it is left out; it is reported and the command
+exits 1 (the timer alerts). Commands: `deployment.md` "Plugin trust documents".
 
 ## Owner steps (段2; nothing is enforced before them)
 
@@ -221,7 +250,8 @@ renames a new `trust` link over the old one and removes the previous folder). Co
    targets the Secretive key, freshness the Actions key + the emergency key) and sign it with two
    USB keys: `plugin-trust.ts sign-root --root root.json --key <usb key> --key-id <id> --out root/1.json`
    twice. Put the signed envelope in `client/electron/features/plugins/trust-roots/production.json`
-   (a PR; `scripts/check-trust-root.ts` then passes).
+   (a PR; `scripts/check-trust-root.ts` then reports it in place). A later root N+1 is signed with
+   `--predecessor root/N.json` so the keys it removes can still sign (both thresholds).
 4. The private "trust" repository (`main`: `root/`, `targets/`; `freshness` branch) and the daily
    workflow (v3.1 §3), then sign every current version for every company (`sign-targets`), run the
    workflow once, install on the server, and confirm "versions on the shelf not in a list: 0"
@@ -259,15 +289,22 @@ P2: `client/tests/plugin-trust-store.test.ts` (S the record on disk: written, ro
 across a restart, deleted, damaged / unreadable = unknown and kept aside, the halt through a
 restart and a damaged or deleted record, damaged / empty / unreadable halt file, an interrupted
 write leaves the old record and nothing moves in memory, halt written first; B6 / B7 / B9 / C14 /
-C1 through the store; T1 the app's clock; W the answer's shape, the marker, once per marker; K the
-release root check), `server/tests/unit/plugin-trust-serve.test.ts` (V what one company is handed:
-its own only, other server / list, conflict, junk root, no self-signed root, the server's clock
-and the 48 h note, file names; F the folder: only its own two files, a link inside refused),
+C1 through the store; S3b "unknown" kept through a refresh and a restart; T1 the app's clock; W
+the answer's shape, the marker, once per marker, W4 / W5 a transient refusal retried with the same
+marker and a permanent one not; K the release root check, K5 what a build carries and the switch,
+K6 the root kind reported and one record folder per kind), `server/tests/unit/plugin-trust-serve.test.ts`
+(V what one company is handed: its own only, other server / list, conflict, junk root, no
+self-signed root, the server's clock and the 48 h note, file names; F the folder: only its own two
+files, a link inside refused — a file or a folder —, read again only when the stamp changed),
 `server/tests/integration/plugin-trust.test.ts` (c1 / c2 apart, the marker follows the files, no
 `trust/`), `server/tests/unit/plugin-trust-tools.test.ts` (real `ssh-keygen`, keys made in the
-test: root signing, list and freshness verified before writing, the key check, the install swap
-and its refusal, reviewed tags only), the permission matrix row, `plugin-shelf.test.ts` (`trust` is
-not a package). 32 mutations, each caught (removed or inverted → a named test fails).
+test: root signing and a rotation replacing two of three root keys, list and freshness verified
+before writing, an unreadable version refuses, one bad company does not block freshness, the key
+check and its role, the install swap; refused for an unreadable source, no company, a removed root
+version, no company verifying; one bad company kept or left out; reviewed tags only), the
+permission matrix row, `plugin-shelf.test.ts` (`trust` is not a package). 60 mutations (32 + 28
+after the review), each caught (removed or inverted → a named test fails; leaving out the carried
+root's kind fails the type check: `rootKind` is required).
 
 P1: `client/tests/plugin-trust.test.ts` (A signatures and root shape, B root history / conflict /
 restart, C the list, D a stolen signing key, H freshness, R the review's cases: a malformed stored

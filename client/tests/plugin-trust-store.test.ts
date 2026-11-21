@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url'
 import { nodePluginTrustCrypto as C } from '../electron/features/plugins/trust-crypto'
 import { createPluginTrust, type RefreshOutcome } from '../electron/features/plugins/trust'
 import { createTrustFiles, TRUST_HALT_FILE, TRUST_RECORD_FILE, TRUST_UNUSABLE_FILE, type TrustFs } from '../electron/features/plugins/trust-store'
-import { bakedTrustRoot, releaseTrustRootProblem } from '../electron/features/plugins/trust-roots'
+import { RELEASE_REQUIRES_PRODUCTION_ROOT, bakedTrustRoot, carriedTrustRoot, releaseTrustRootProblem } from '../electron/features/plugins/trust-roots'
+import { wirePluginTrust } from '../electron/features/plugins/trust-wire'
 import { refreshTrustOnMarker } from '../electron/features/agent-control/wire'
 import { parseAgentPolicy } from '../electron/services/agent-policy-store'
 import { parsePluginTrustDocuments, type PluginTrustDocuments } from '../../shared/core/plugin-trust-distribution'
@@ -45,6 +46,7 @@ function app(opts: {
   return createPluginTrust({
     files: createTrustFiles(() => dir, opts.fsOps),
     bakedRoot: doc(opts.baked ?? 'root-v1'),
+    rootKind: 'development',
     crypto: C,
     serverUrl: () => opts.server ?? `${SERVER}/`,
     fetchDocuments: async companyId => (companyId in answers ? answers[companyId] : null),
@@ -63,7 +65,7 @@ const file = (name: string) => path.join(dir, name)
 describe('P2 the app keeps its trust record on disk', () => {
   it('S1 an accepted list and freshness are written; after a restart the record refuses an older list (C3 across a restart)', async () => {
     const first = app({ answers: { c1: v5 } })
-    assert.deepEqual(await first.refresh('c1'), { ok: true, notes: [] })
+    assert.deepEqual(await first.refresh('c1'), { ok: true, settled: true, notes: [] })
     assert.equal(runsUntil(first), '2026-11-24T00:00:00.000Z')
     assert.ok(fs.existsSync(file(TRUST_RECORD_FILE)))
     assert.equal(fs.existsSync(file(TRUST_HALT_FILE)), false)
@@ -73,7 +75,7 @@ describe('P2 the app keeps its trust record on disk', () => {
     refused(await restarted.refresh('c1'), 'list refused: rollback')
     // the same v5 again is fine after the restart
     const again = app({ answers: { c1: v5 } })
-    assert.deepEqual(await again.refresh('c1'), { ok: true, notes: [] })
+    assert.deepEqual(await again.refresh('c1'), { ok: true, settled: true, notes: [] })
     assert.equal(runsUntil(again), '2026-11-24T00:00:00.000Z')
   })
 
@@ -81,7 +83,7 @@ describe('P2 the app keeps its trust record on disk', () => {
     await app({ answers: { c1: v5 } }).refresh('c1')
     fs.rmSync(file(TRUST_RECORD_FILE))
     const after = app({ answers: { c1: docs({ targets: 't-c1-v4' }) } })
-    assert.deepEqual(await after.refresh('c1'), { ok: true, notes: ['no freshness handed out'] })
+    assert.deepEqual(await after.refresh('c1'), { ok: true, settled: true, notes: ['no freshness handed out'] })
     assert.equal(after.health().problem, null)
   })
 
@@ -95,6 +97,24 @@ describe('P2 the app keeps its trust record on disk', () => {
     assert.equal(fs.readFileSync(file(TRUST_UNUSABLE_FILE), 'utf8'), good.slice(0, good.length / 2))
     assert.ok(warnings.some(w => /could not be read/.test(w)))
     assert.equal(runsUntil(damaged), 'list-not-current')
+  })
+
+  it('S3b "unknown" is kept with the record: a refresh that takes an older list does not make it clean, nor does a restart', async () => {
+    await app({ answers: { c1: v5 } }).refresh('c1')
+    fs.writeFileSync(file(TRUST_RECORD_FILE), '{ damaged')
+    const damaged = app({ answers: { c1: docs({ targets: 't-c1-v4' }) } })
+    assert.match(damaged.health().unknown ?? '', /could not be read/)
+    // v4 is older than the v5 seen before the damage: with the records lost it cannot be told apart
+    // from a first start (the documented limit) — it is taken, but the state stays "unknown"
+    assert.equal((await damaged.refresh('c1')).ok, true)
+    assert.match(damaged.health().unknown ?? '', /could not be read/)
+    assert.match(JSON.parse(fs.readFileSync(file(TRUST_RECORD_FILE), 'utf8')).unknown, /could not be read/)
+    const restarted = app({ answers: { c1: docs({ targets: 't-c1-v4' }) } })
+    assert.match(restarted.health().unknown ?? '', /could not be read/)
+    assert.match(restarted.health().problem ?? '', /could not be read/)
+    // a later write keeps it too (only a deliberate clearTrustUnknown ends it)
+    assert.equal((await restarted.refresh('c1')).ok, true)
+    assert.match(app().health().unknown ?? '', /could not be read/)
   })
 
   it('S4 a record that exists but cannot be read (a folder in its place) is unknown too, never empty', () => {
@@ -150,7 +170,7 @@ describe('P2 the app keeps its trust record on disk', () => {
     // v6 was not taken in memory either: once the disk works again, v5 is still the current list here
     cut = false
     answers.c1 = v5
-    assert.deepEqual(await b.refresh('c1'), { ok: true, notes: [] })
+    assert.deepEqual(await b.refresh('c1'), { ok: true, settled: true, notes: [] })
     // a leftover .tmp (a crash between write and rename) is never read and is swept at the next start
     fs.writeFileSync(file(`${TRUST_RECORD_FILE}.abc.tmp`), '{"format":1,"chain":[],"marks":{},"freshMarks":{},"halted":null}')
     const c = app({ answers: { c1: docs({ targets: 't-c1-v4' }) } })
@@ -173,7 +193,7 @@ describe('P2 roots, servers, companies and clocks through the store', () => {
     const a = app({ answers: { c1: docs({ roots: ['root-v1', 'root-v2', 'root-v3'], targets: 't-c1-v6-tb', freshness: 'f-c1-v6-tb-fresh-b' }) } })
     assert.ok((await a.refresh('c1')).ok)
     const later = app({ answers: { c1: docs({ roots: [], targets: 't-c1-v6-tb', freshness: 'f-c1-v6-tb-fresh-b' }) } })
-    assert.deepEqual(await later.refresh('c1'), { ok: true, notes: [] }) // the stored chain still has v3's keys
+    assert.deepEqual(await later.refresh('c1'), { ok: true, settled: true, notes: [] }) // the stored chain still has v3's keys
   })
 
   it('B7 a new app carrying v3 keeps the records of the same generation from disk', async () => {
@@ -193,7 +213,7 @@ describe('P2 roots, servers, companies and clocks through the store', () => {
   it('C14 records are per server: the same company on staging after production is not a rollback, across a restart', async () => {
     await app({ answers: { c1: docs({ targets: 't-c1-v5' }) } }).refresh('c1')
     const staging = app({ server: 'https://staging.example', answers: { c1: docs({ targets: 't-c1-v4-staging' }) } })
-    assert.deepEqual(await staging.refresh('c1'), { ok: true, notes: ['no freshness handed out'] })
+    assert.deepEqual(await staging.refresh('c1'), { ok: true, settled: true, notes: ['no freshness handed out'] })
     // and production's record is untouched by staging's
     refused(await app({ answers: { c1: docs({ targets: 't-c1-v4' }) } }).refresh('c1'), 'list refused: rollback')
   })
@@ -229,7 +249,7 @@ describe('P2 roots, servers, companies and clocks through the store', () => {
 
   it('R a build whose root cannot start keeps no trust and says so (never throws into the app)', async () => {
     const a = createPluginTrust({
-      files: createTrustFiles(() => dir), bakedRoot: { placeholder: 'x' }, crypto: C, serverUrl: () => SERVER,
+      files: createTrustFiles(() => dir), bakedRoot: { placeholder: 'x' }, rootKind: 'production', crypto: C, serverUrl: () => SERVER,
       fetchDocuments: async () => v5, now: () => NOW, log: silent,
     })
     assert.deepEqual(await a.refresh('c1'), { ok: false, reason: 'no-trust' })
@@ -255,7 +275,7 @@ describe('P2 the answer and the policy marker', () => {
   it('W3 a refresh runs once per new marker per company, again after a failure, never without a marker', async () => {
     const calls: string[] = []
     let ok = false
-    const onMarker = refreshTrustOnMarker({ refresh: async c => { calls.push(c); return ok ? { ok: true, notes: [] } : { ok: false, reason: 'unreachable' } } })
+    const onMarker = refreshTrustOnMarker({ refresh: async c => { calls.push(c); return ok ? { ok: true, settled: true, notes: [] } : { ok: false, reason: 'unreachable' } } })
     const settle = () => new Promise(r => setTimeout(r, 0))
     onMarker('c1', undefined); await settle()
     onMarker('c1', 'm1'); await settle()
@@ -265,6 +285,35 @@ describe('P2 the answer and the policy marker', () => {
     onMarker('c2', 'm1'); await settle()
     onMarker('c1', 'm2'); await settle()
     assert.deepEqual(calls, ['c1', 'c1', 'c2', 'c1'])
+  })
+
+  it('W4 documents refused because this computer\'s clock was behind are taken in once the clock is right, with the same marker', async () => {
+    let now = Date.parse('2026-11-20T23:00:00Z') // an hour behind the list's issue time
+    const trust = createPluginTrust({
+      files: createTrustFiles(() => dir), bakedRoot: doc('root-v1'), rootKind: 'development', crypto: C, serverUrl: () => SERVER,
+      fetchDocuments: async () => v5, now: () => now, log: silent,
+    })
+    const settle = () => new Promise(r => setTimeout(r, 20))
+    const outcomes: RefreshOutcome[] = []
+    const onMarker = refreshTrustOnMarker({ refresh: async c => { const r = await trust.refresh(c); outcomes.push(r); return r } })
+    onMarker('c1', 'm1'); await settle()
+    assert.deepEqual(outcomes[0], { ok: true, settled: false, notes: ['list refused: issued-in-future'] })
+    now = NOW
+    onMarker('c1', 'm1'); await settle()
+    assert.deepEqual(outcomes[1], { ok: true, settled: true, notes: [] })
+    assert.equal(runsUntil(trust), '2026-11-24T00:00:00.000Z')
+    onMarker('c1', 'm1'); await settle()
+    assert.equal(outcomes.length, 2) // done now: the same marker is not fetched again
+  })
+
+  it('W5 a refusal for good (another company\'s list) is done: the same marker is not fetched again', async () => {
+    const outcomes: RefreshOutcome[] = []
+    const a = app({ answers: { c1: docs({ targets: 't-c2-v5' }) } })
+    const onMarker = refreshTrustOnMarker({ refresh: async c => { const r = await a.refresh(c); outcomes.push(r); return r } })
+    const settle = () => new Promise(r => setTimeout(r, 20))
+    onMarker('c1', 'm1'); await settle()
+    onMarker('c1', 'm1'); await settle()
+    assert.deepEqual(outcomes, [{ ok: true, settled: true, notes: ['list refused: other-company'] }])
   })
 })
 
@@ -285,7 +334,32 @@ describe('P2 a release build carries the production root', () => {
   })
   it('K4 the development root is a valid root of its own (a development build starts)', () => {
     assert.equal(app({ baked: undefined }).health().available, true)
-    const a = createPluginTrust({ files: createTrustFiles(() => dir), bakedRoot: dev, crypto: C, serverUrl: () => SERVER, fetchDocuments: async () => null, log: silent })
+    const a = createPluginTrust({ files: createTrustFiles(() => dir), bakedRoot: dev, rootKind: 'development', crypto: C, serverUrl: () => SERVER, fetchDocuments: async () => null, log: silent })
     assert.equal(a.health().available, true)
+  })
+
+  it('K5 what a build carries: unpackaged → development; packaged without a real production root → development and said so (until required); required → never the development root', () => {
+    const roots = { production: bakedTrustRoot('production'), development: dev }
+    assert.deepEqual(carriedTrustRoot(false, C, NOW, roots), { kind: 'development', envelope: dev, warning: null })
+    const fallback = carriedTrustRoot(true, C, NOW, roots, false)
+    assert.equal(fallback.kind, 'development')
+    assert.match(fallback.warning ?? '', /DEVELOPMENT plugin trust root.*placeholder/)
+    const required = carriedTrustRoot(true, C, NOW, roots, true)
+    assert.equal(required.kind, 'production')
+    assert.equal(required.envelope, roots.production)
+    const real = carriedTrustRoot(true, C, NOW, { production: doc('root-v1'), development: dev }, false)
+    assert.deepEqual([real.kind, real.warning], ['production', null])
+    // the switch is off until the enforcement PR (owner decision): a release build is not refused meanwhile
+    assert.equal(RELEASE_REQUIRES_PRODUCTION_ROOT, false)
+  })
+
+  it('K6 the app reports which root it carries, and keeps a record per root kind (a development app never shares one with a packaged app)', async () => {
+    const answer = { data: { roots: [], targets: null, freshness: null } }
+    const fakeFetch = (async () => new Response(JSON.stringify(answer), { status: 200 })) as typeof fetch
+    const trust = wirePluginTrust({ userDataDir: () => dir, serverUrl: () => SERVER, session: { cookies: () => [] }, packaged: true, log: silent, fetch: fakeFetch })
+    assert.equal(trust.health().root, 'development') // the production root is still the placeholder
+    assert.ok((await trust.refresh('c1')).ok)
+    assert.ok(fs.existsSync(path.join(dir, 'trust', 'development', TRUST_RECORD_FILE)))
+    assert.equal(fs.existsSync(path.join(dir, 'trust', TRUST_RECORD_FILE)), false)
   })
 })

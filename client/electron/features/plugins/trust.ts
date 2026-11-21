@@ -26,8 +26,10 @@ import type { TrustFiles } from './trust-store'
 
 export interface PluginTrustDeps {
   files: TrustFiles
-  /** The root envelope this build carries (`bakedTrustRoot`). */
+  /** The root envelope this build carries (`carriedTrustRoot`). */
   bakedRoot: unknown
+  /** Which root that is (P4 enforces only with `production`): required, so no caller can leave it out. */
+  rootKind: 'development' | 'production'
   crypto: PluginTrustCrypto
   /** The server the app is connected to (its configured URL; `trustServerOf` makes the signed spelling). */
   serverUrl: () => string
@@ -38,7 +40,8 @@ export interface PluginTrustDeps {
 }
 
 export type RefreshOutcome =
-  | { ok: true; notes: string[] }
+  /** `settled`: false when a refusal may pass by itself (this computer's clock): ask again at the next policy answer. */
+  | { ok: true; settled: boolean; notes: string[] }
   | { ok: false; reason: 'no-trust' | 'no-server' | 'unreachable' | 'unreadable' | 'not-saved' }
 
 export function createPluginTrust(deps: PluginTrustDeps) {
@@ -97,7 +100,7 @@ export function createPluginTrust(deps: PluginTrustDeps) {
     // it is still current (a newer list, a rotated key or a freshness bound to another list refuses).
     handles.set(k, { list: taken.list ?? before?.list ?? null, freshness: taken.freshness ?? before?.freshness ?? null })
     for (const n of taken.notes) log.info(`[plugin-trust] company=${companyId}: ${n}`)
-    return { ok: true, notes: taken.notes }
+    return { ok: true, settled: !taken.retry, notes: taken.notes }
   }
 
   return {
@@ -116,10 +119,17 @@ export function createPluginTrust(deps: PluginTrustDeps) {
       const h = handles.get(key(server, companyId))
       return codeMayRunUntil(current, h?.list ?? null, h?.freshness ?? null, { server, companyId, now: now() })
     },
-    /** The start's or the last root update's note (unknown, not empty), and the halt. */
-    health(): { available: boolean; halted: boolean; problem: string | null } {
+    /**
+     * The start's or the last root update's note, the halt, whether the records were lost once and
+     * not cleared since (`unknown`, stored with the record), and which root this build carries —
+     * enforcement (P4) must refuse to act on trust unless it is `production`.
+     */
+    health(): { available: boolean; halted: boolean; problem: string | null; unknown: string | null; root: 'development' | 'production' } {
       const current = loaded()
-      return { available: current !== null, halted: Boolean(current?.halted), problem: current?.problem ?? null }
+      return {
+        available: current !== null, halted: Boolean(current?.halted), problem: current?.problem ?? null,
+        unknown: current?.unknown ?? null, root: deps.rootKind,
+      }
     },
   }
 }

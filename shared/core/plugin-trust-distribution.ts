@@ -154,7 +154,15 @@ export function companyTrustToServe(texts: CompanyTrustTexts, ctx: TrustContext,
 
 // ---------------------------------------------------------------- the app
 
+/**
+ * Refusals that can pass without any new document: this computer's clock was behind (or set back).
+ * A refresh that met one is not "done": the app asks again at the next policy answer.
+ */
+export const TRANSIENT_TRUST_REFUSALS: readonly string[] = ['issued-in-future', 'clock-went-back']
+
 export interface TakenCompanyTrust {
+  /** True when a refusal may pass by itself (`TRANSIENT_TRUST_REFUSALS`): the same documents should be taken in again later. */
+  retry: boolean
   state: TrustState
   /** The list and freshness accepted now (null = not accepted now; an earlier handle may still be the record's). */
   list: AcceptedList | null
@@ -170,14 +178,14 @@ export interface TakenCompanyTrust {
  * the app's: its own root and record, its own clock (`ctx.now`).
  */
 export function takeCompanyTrust(state: TrustState, documents: PluginTrustDocuments, ctx: TrustContext, crypto: PluginTrustCrypto): TakenCompanyTrust {
-  const notes: string[] = []
+  const retry = (code: string) => TRANSIENT_TRUST_REFUSALS.includes(code)
   const rooted = documents.roots.length > 0 ? updateTrustRoot(state, documents.roots, crypto) : state
-  if (rooted.halted) return { state: rooted, list: null, freshness: null, notes: [`halted: ${rooted.halted.reason}`] }
-  if (!documents.targets) return { state: rooted, list: null, freshness: null, notes: ['no list handed out'] }
+  if (rooted.halted) return { retry: false, state: rooted, list: null, freshness: null, notes: [`halted: ${rooted.halted.reason}`] }
+  if (!documents.targets) return { retry: false, state: rooted, list: null, freshness: null, notes: ['no list handed out'] }
   const t = acceptTargets(rooted, documents.targets, ctx, crypto)
-  if (!t.ok) return { state: rooted, list: null, freshness: null, notes: [`list refused: ${t.code}`] }
-  if (!documents.freshness) return { state: t.state, list: t.list, freshness: null, notes: ['no freshness handed out'] }
+  if (!t.ok) return { retry: retry(t.code), state: rooted, list: null, freshness: null, notes: [`list refused: ${t.code}`] }
+  if (!documents.freshness) return { retry: false, state: t.state, list: t.list, freshness: null, notes: ['no freshness handed out'] }
   const f = acceptFreshness(t.state, documents.freshness, t.list, ctx, crypto)
-  if (!f.ok) return { state: t.state, list: t.list, freshness: null, notes: [`freshness refused: ${f.code}`] }
-  return { state: f.state, list: t.list, freshness: f.freshness, notes }
+  if (!f.ok) return { retry: retry(f.code), state: t.state, list: t.list, freshness: null, notes: [`freshness refused: ${f.code}`] }
+  return { retry: false, state: f.state, list: t.list, freshness: f.freshness, notes: [] }
 }

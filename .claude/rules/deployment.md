@@ -118,8 +118,11 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
       --main /srv/acb-trust/main --freshness /srv/acb-trust/freshness --dir "$PLUGINS_DIR" --server "$PUBLIC_URL")
   ```
 
-  It refuses (and changes nothing) unless every company's list and freshness verify; otherwise it
-  swaps the `trust` link in one rename. Freshness documents live ≤ 3 days, so a timer stopped for
+  It swaps the `trust` link in one rename. It refuses (and changes nothing) when a checkout's
+  folder is missing or unreadable, when there is no company list (`--allow-empty yes` to hand out
+  none on purpose), when a root version already installed is missing, or when no company verifies;
+  a single company that does not verify keeps its installed documents (or is left out) and the
+  command exits 1, so the timer's failure mail fires. Freshness documents live ≤ 3 days, so a timer stopped for
   that long stops every company's plugin code once P4 enforces (the api logs
   `[plugin-trust] … runs out in N h` from 48 h before). The api's clock must be right (NTP): one
   more than 10 minutes behind withholds fresh documents.
@@ -417,7 +420,7 @@ is public, so anyone can open a PR; code from a fork must never run on that Mac.
 ## Universal bundled git (macOS app)
 
 electron-builder's `beforePack` hook (`client/scripts/before-pack.mjs`: first the release build's
-plugin trust root check, `plugin-trust.md` "P2", then `client/scripts/universal-git.mjs`) downloads both darwin
+plugin trust root check — a loud warning until the enforcement switch, `plugin-trust.md` "P2" —, then `client/scripts/universal-git.mjs`) downloads both darwin
 dugite-native archives pinned in dugite's `embedded-git.json` (sha256 verified), `lipo -create`s
 every Mach-O, requires all other files to be byte-identical (else the build fails), keeps
 symlinks/permissions and replaces `node_modules/dugite/git`. Git Credential Manager (~110 MB,

@@ -32,8 +32,8 @@ export interface AgentControlDeps {
 
 /**
  * The policy answer's `pluginTrust` marker → a trust refresh (plugin-trust.md "P2"): once per new
- * marker per company (and once after a start, when nothing was taken yet). A failed refresh is
- * tried again at the next answer; an answer without the marker (an older server, no `trust/`)
+ * marker per company (and once after a start, when nothing was taken yet). A failed refresh, or
+ * one refused for a reason that may pass (`settled: false`), is tried again at the next answer; an answer without the marker (an older server, no `trust/`)
  * changes nothing.
  */
 export function refreshTrustOnMarker(trust: Pick<PluginTrust, 'refresh'>) {
@@ -43,7 +43,9 @@ export function refreshTrustOnMarker(trust: Pick<PluginTrust, 'refresh'>) {
     if (!marker || taken.get(companyId) === marker || running.has(companyId)) return
     running.add(companyId)
     void trust.refresh(companyId)
-      .then(outcome => { if (outcome.ok) taken.set(companyId, marker) })
+      // Done only when the documents were taken in, or refused for good; a refusal that may pass
+      // by itself (this computer's clock) is asked again at the next policy answer.
+      .then(outcome => { if (outcome.ok && outcome.settled) taken.set(companyId, marker) })
       .catch(() => undefined)
       .finally(() => running.delete(companyId))
   }

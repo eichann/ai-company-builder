@@ -13,6 +13,7 @@ import { companyTrustFiles, companyTrustToServe, trustServerOf, type CompanyTrus
 import type { SignedEnvelope } from '../../../shared/core/plugin-trust-documents'
 import { nodePluginTrustCrypto as C } from '../../src/adapters/plugin-trust-crypto'
 import { diskPluginTrustFiles } from '../../src/adapters/plugin-trust-files'
+import { createPluginTrustService } from '../../src/services/plugin-trust'
 
 const FIX = join(__dirname, '../../../client/tests/fixtures/plugin-trust/documents.json')
 const DOCS = JSON.parse(readFileSync(FIX, 'utf8')) as Record<string, SignedEnvelope>
@@ -112,5 +113,31 @@ describe('the operator\'s trust/ folder on disk', () => {
     const read = await diskPluginTrustFiles(dir).read('c1')
     expect(read?.freshness).toBeNull()
     expect(read?.problems).toEqual(['freshness/company-c1.json'])
+  })
+
+  it('F3 a folder inside trust/ that is a link is refused and named (only trust itself may be one)', async () => {
+    place(join(dir, 'trust'))
+    place(join(dir, 'elsewhere'))
+    rmSync(join(dir, 'trust', 'targets'), { recursive: true })
+    symlinkSync(join(dir, 'elsewhere', 'targets'), join(dir, 'trust', 'targets'))
+    const read = await diskPluginTrustFiles(dir).read('c1')
+    expect(read?.targets).toBeNull()
+    expect(read?.problems).toEqual(['targets/'])
+    expect(read?.freshness).toBe(text('f-c1-v5'))
+  })
+
+  it('F4 the files are read again only when their stamp changed (not on every policy request)', async () => {
+    place(join(dir, 'trust'))
+    const disk = diskPluginTrustFiles(dir)
+    let reads = 0
+    const files = { read: (c: string) => { reads++; return disk.read(c) }, stamp: (c: string) => disk.stamp(c) }
+    const service = createPluginTrustService({ files, crypto: C, clock: { nowMs: () => NOW }, publicUrl: () => 'https://acb.example', log: { warn: () => {} } })
+    const first = await service.digestFor('c1')
+    await service.digestFor('c1')
+    await service.documentsFor({ companyId: 'c1' })
+    expect(reads).toBe(1)
+    writeFileSync(join(dir, 'trust', 'freshness', 'company-c1.json'), '{ replaced')
+    expect(await service.digestFor('c1')).not.toBe(first)
+    expect(reads).toBe(2)
   })
 })

@@ -5,12 +5,15 @@
  *
  *   node --import tsx src/cli/plugin-trust.ts check-key --key <key.pub> --role targets|freshness|root
  *   node --import tsx src/cli/plugin-trust.ts sign-root --root <root.json> --key <file> --key-id <id> --out <root/N.json>
+ *        [--predecessor <root/N-1.json>]   (a rotation: a key of the version before may sign too)
  *   node --import tsx src/cli/plugin-trust.ts sign-targets --trust <trust repo main> --company <id> --server <PUBLIC_URL>
  *        --lock <plugins.lock> --packages <id@ver,…> [--floor <id>=<ver> …] --key <key.pub> --key-id <id> [--days 90] [--main main]
  *   node --import tsx src/cli/plugin-trust.ts sign-freshness --lists <trust repo main> --out <freshness checkout>
  *        --server <PUBLIC_URL> --key <file> --key-id <id> [--company <id> …] [--days 3]
  *   node --import tsx src/cli/plugin-trust.ts install --main <main checkout> --freshness <freshness checkout>
- *        --dir <PLUGINS_DIR> --server <PUBLIC_URL>
+ *        --dir <PLUGINS_DIR> --server <PUBLIC_URL> [--allow-empty yes]
+ *
+ * sign-freshness and install exit 1 when a company was refused (the others are done): the timer alerts.
  *
  * Output is names, versions and refusal reasons only — never a key or a signature.
  */
@@ -20,7 +23,6 @@ import { parsePluginsLock } from '../adapters/plugin-collect'
 import {
   TrustToolError, checkSigningKey, installTrust, reviewedPackage, signFreshness, signRoot, signTargets,
 } from '../adapters/plugin-trust-tools'
-import type { TrustRoleName } from '../../shared/core/plugin-trust-documents'
 
 function options(argv: string[]): Map<string, string[]> {
   const out = new Map<string, string[]>()
@@ -44,14 +46,17 @@ async function main(argv: string[]): Promise<number> {
   const maybe = (name: string): string | undefined => o.get(name)?.[0]
   switch (command) {
     case 'check-key': {
-      const r = await checkSigningKey({ publicKeyFile: resolve(one('key')), role: one('role') as TrustRoleName })
+      const r = await checkSigningKey({ publicKeyFile: resolve(one('key')), role: one('role') })
       console.log(`good: the agent signed and the app's verification accepts it (${r.type}).`)
       console.log(`root's "keys" entry: "<key id>": "${r.base64}"`)
       return 0
     }
     case 'sign-root': {
-      const r = await signRoot({ rootFile: resolve(one('root')), keyFile: resolve(one('key')), keyId: one('key-id'), out: resolve(one('out')) })
-      console.log(`signed; the root now carries ${r.signatures} signature(s)`)
+      const predecessor = maybe('predecessor')
+      const r = await signRoot({ rootFile: resolve(one('root')), keyFile: resolve(one('key')), keyId: one('key-id'), out: resolve(one('out')), predecessor: predecessor ? resolve(predecessor) : undefined })
+      console.log(`signed; ${r.signatures} signature(s); its own root threshold ${r.newThreshold ? 'met' : 'not yet met'}` +
+        (r.predecessorThreshold === null ? '' : `; the predecessor's ${r.predecessorThreshold ? 'met' : 'not yet met'}`) +
+        `; ${r.complete ? 'COMPLETE' : 'not complete yet'}`)
       return 0
     }
     case 'sign-targets': {
@@ -81,13 +86,18 @@ async function main(argv: string[]): Promise<number> {
         listsDir: resolve(one('lists')), outDir: resolve(one('out')), server: one('server'), companies: o.get('company'),
         keyFile: resolve(one('key')), keyId: one('key-id'), days: maybe('days') ? Number(maybe('days')) : undefined,
       })
-      for (const f of r) console.log(`signed     company ${f.companyId} freshness v${f.version}`)
-      return 0
+      for (const f of r.signed) console.log(`signed     company ${f.companyId} freshness v${f.version}`)
+      for (const f of r.refused) console.error(`REFUSED    company ${f.companyId}: ${f.reason}`)
+      return r.refused.length > 0 ? 1 : 0
     }
     case 'install': {
-      const r = await installTrust({ mainDir: resolve(one('main')), freshnessDir: resolve(one('freshness')), pluginsDir: resolve(one('dir')), server: one('server') })
+      const r = await installTrust({
+        mainDir: resolve(one('main')), freshnessDir: resolve(one('freshness')), pluginsDir: resolve(one('dir')), server: one('server'),
+        allowEmpty: maybe('allow-empty') === 'yes',
+      })
       console.log(`installed  ${r.companies.length} company list(s) (${r.folder}); the api reads them at its next request`)
-      return 0
+      for (const c of r.refused) console.error(`REFUSED    company ${c.companyId}${r.kept.includes(c.companyId) ? ' (kept its installed documents)' : ' (left without documents)'}: ${c.reason}`)
+      return r.refused.length > 0 ? 1 : 0
     }
     default:
       console.error('Usage: plugin-trust.ts check-key | sign-root | sign-targets | sign-freshness | install … (see the header of src/cli/plugin-trust.ts)')

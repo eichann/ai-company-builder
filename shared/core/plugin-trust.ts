@@ -57,7 +57,16 @@ export interface TrustState {
   halted: TrustHalt | null
   /** Why the stored record was not (fully) used, or why a root update stopped: trust is "unknown", not "empty". */
   problem: string | null
+  /**
+   * P2: the records were lost once (an unreadable record, or a stored chain that did not
+   * authenticate) — what the record holds since is not a full history. Stored with the record, so
+   * it survives later writes and restarts, until `clearTrustUnknown` (a deliberate step).
+   */
+  unknown?: string | null
 }
+
+/** The deliberate step that ends "unknown" (P2 never takes it by itself). */
+export const clearTrustUnknown = (state: TrustState): TrustState => ({ ...state, unknown: null })
 
 /** What P2 stores: the record and, in its own small file, a halt. Either may be missing or damaged. */
 export interface StoredTrust {
@@ -206,7 +215,10 @@ const STATE_FORMAT = 1
  */
 export function serializeTrustState(state: TrustState): { record: string; halt: string | null } {
   return {
-    record: JSON.stringify({ format: STATE_FORMAT, chain: state.chain.map(r => r.envelope), marks: state.marks, freshMarks: state.freshMarks, halted: state.halted }),
+    record: JSON.stringify({
+      format: STATE_FORMAT, chain: state.chain.map(r => r.envelope), marks: state.marks, freshMarks: state.freshMarks, halted: state.halted,
+      ...(state.unknown ? { unknown: state.unknown } : {}),
+    }),
     halt: state.halted ? JSON.stringify({ format: STATE_FORMAT, halted: state.halted }) : null,
   }
 }
@@ -272,11 +284,17 @@ export function startTrust(bakedEnvelope: unknown, stored: StoredTrust | null | 
   const marks = marksOf(parsed?.marks)
   const freshMarks = marksOf(parsed?.freshMarks)
   if (!parsed || parsed.format !== STATE_FORMAT || !Array.isArray(parsed.chain) || !marks || !freshMarks) {
-    return { ...base, problem: 'the stored trust record could not be read: started from the app\'s root' }
+    const why = 'the stored trust record could not be read: started from the app\'s root'
+    return { ...base, problem: why, unknown: why }
   }
   const chain = restoreChain(baked, parsed.chain, crypto)
-  if (!chain) return { ...base, problem: 'the stored chain did not authenticate: started from the app\'s root' }
-  return { root: chain[chain.length - 1], chain, marks, freshMarks, halted: null, problem: null }
+  if (!chain) {
+    const why = 'the stored chain did not authenticate: started from the app\'s root'
+    return { ...base, problem: why, unknown: why }
+  }
+  // "unknown" written by an earlier start stays until cleared deliberately (a later write keeps it).
+  const unknown = typeof parsed.unknown === 'string' && parsed.unknown ? parsed.unknown.slice(0, 300) : null
+  return { root: chain[chain.length - 1], chain, marks, freshMarks, halted: null, problem: unknown, unknown }
 }
 
 /** Offer root envelopes the server handed out (all versions it has). A halt is final for this state. */

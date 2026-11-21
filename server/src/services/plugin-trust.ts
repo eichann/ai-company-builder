@@ -9,8 +9,9 @@
  *   core from that id. Nothing is enforced here: P2 only hands documents out.
  * - `digestFor(companyId)`: what the agent policy carries (`pluginTrust`), so a new document reaches
  *   the apps at their next policy refresh without them asking this route every time.
- * - The files are read again on every call (the operator's timer swaps them; like `stopped`);
- *   verification is cached per company by the texts' hash until the earliest expiry or 5 minutes.
+ * - Every call looks at the files' stamp (`lstat` only: the operator's timer swaps them); they are
+ *   read and verified again when the stamp changed, else the answer is reused until the earliest
+ *   expiry or 5 minutes (policy requests do not read every root file each time).
  * - The operator is told (log, at most hourly per company and note) what was withheld and when the
  *   documents run out within 48 hours (v3.1 §4). Codes and hours only, never a document's content.
  */
@@ -41,6 +42,7 @@ interface Cached { key: string; served: ServedCompanyTrust; until: number }
 export function createPluginTrustService(deps: PluginTrustDeps) {
   const log = deps.log ?? console
   const cache = new Map<string, Cached>()
+  const stamped = new Map<string, { stamp: string; served: ServedCompanyTrust | null; until: number }>()
   const noted = new Map<string, number>()
   const sha256 = (text: string): string => toHex(deps.crypto.sha256(utf8(text)))
 
@@ -53,6 +55,16 @@ export function createPluginTrustService(deps: PluginTrustDeps) {
 
   /** What this company's members are handed now, or null when no `trust/` folder is set up. */
   async function served(companyId: string): Promise<ServedCompanyTrust | null> {
+    // Nothing changed on disk (same stamp: no file read) and still within the answer's life → reuse it.
+    const stamp = `${deps.publicUrl()}\n${await deps.files.stamp(companyId)}`
+    const seen = stamped.get(companyId)
+    if (seen && seen.stamp === stamp && deps.clock.nowMs() < seen.until) return seen.served
+    const result = await readAndServe(companyId)
+    stamped.set(companyId, { stamp, served: result, until: Math.min(deps.clock.nowMs() + CACHE_MS, result?.until ?? Infinity) })
+    return result
+  }
+
+  async function readAndServe(companyId: string): Promise<ServedCompanyTrust | null> {
     const texts = await deps.files.read(companyId)
     if (!texts) return null
     const now = deps.clock.nowMs()
