@@ -908,12 +908,23 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   someone else as assignee, or in 「AI の番」 (`EVENT_RECORD_GONE` / `EVENT_NOT_ASSIGNEE` / `EVENT_AI_TURN` — never a silent
   skip), or its occurrence ended without its やること (held, skipped — absent, assignee changed,
   unreadable, 「AI の番」 —, expired, needs a person) — the cursor keeps why, on which record and when
-  (`chain_stop_code` / `_record` / `_at`, `stopChain`: once per stop), and the responsible person and the job's creator
-  (while an owner / admin) are told once (`job_chain_stopped`, recordless, key `job_chain_stopped:<job>:<at>`, shown while
-  that very stop stands). `JobView.chainStopped { why }` and the notice word the cause **when read, per viewer**
-  (`jobChainStopText`): job-side causes for anyone who sees the job; a record-side cause in full, with the record's title,
-  only to someone who reads that record now — anyone else (an admin who does not read an owner-only やること included) gets
-  「見張っていたやることの都合で止まりました」; nothing of the record is stored in a notice. The chain goes on again when the
+  (`chain_stop_code` / `_record` / `_at`, `stopChain`: once per stop), and it is told once (`job_chain_stopped`,
+  recordless, key `job_chain_stopped:<job>:<at>`, shown while that very stop stands). **Who learns of a stop** (stage
+  4b-0.2, owner decision D7 = A, 2026-11-21 — before it, the creator and every owner / admin were shown it, in plain
+  words when they did not read the record, which still told them that something happened to it and when): **every stop
+  is record-side** — each happens because the watched record reached the watched state, so even the day's limit, an
+  absence, a pause or an expiry says the record had an event; no cause is shown as job-side. So a stop exists only for
+  (a) someone who **reads the stop's record now** — the job's creator (while an owner / admin) is written the notice only
+  when they read it at that moment (`chainStopped` in `job-events.ts`), and for anyone the notice's text
+  (`jobs.chainStopNotice`) and `JobView.chainStopped` are there only while they still read it (checked again when read:
+  a notice already written disappears once access is lost — a rule, a members-only list, owner-only, a removed record);
+  and (b) **the approved version's responsible person, always** (an explicit, owner-approved exception to ⑥: they must
+  choose the next watched やること) — in full while they read the record, else only
+  「見張っていたやることの都合で止まりました」 whatever the cause (`jobChainStopText` with no title). For anyone else
+  (an owner / admin who does not read an owner-only やること included) nothing differs before and after: no notice row, no
+  unread count, no push signal, `chainStopped: null` in the list and the detail — the job looks as if it goes on, as an
+  event occurrence they cannot see. Nothing of the record is stored in a notice. Rolling back to a build before 4b-0.2
+  brings the old reach back (known). The chain goes on again when the
   watch moves (the runner) or when a 「もう一度」 makes its やること; else **the responsible person chooses the next watched
   やること**: `POST /me/jobs/:jobId/watch { version, recordId }` (the approved version's responsible person only; the
   version shown; not while a newer draft waits; the record checked as any start record) adds a version that differs only
@@ -952,7 +963,12 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   rows came delays no other, a job that throws holds none back (logged once), two clocks (a pass whose cursor moved keeps
   nothing), re-accepting the same start record keeps the chain, a limit-skipped target never fires later, the
   still-watched recheck, the order of a mixed history, acceptance's trigger check, the limit notice shown to the
-  responsible person only, the start list's search and pages. Mutation check: 51 guards removed or inverted one at a time
+  responsible person only, the start list's search and pages. Stage 4b-0.2 (D7 = A): "D7 = A: a stopped chain of a
+  record the viewer cannot read" (non-reader creator and admin identical before and after — rows, unread, bell, push,
+  list and detail —; a reader admin; the responsible person in plain words; checked again when read after a members-only
+  list, owner-only or a removed record), and (1)'s comparison now includes the stop — 5 guards mutation-checked, each
+  fails; the removed-record check in `chainOf` is defence only (`records.byIds` never returns a removed record).
+  Mutation check: 51 guards removed or inverted one at a time
   (`job-events.test.ts` + `jobs-definition.test.ts`); each fails except the `ev:<seq>` slot, which the partial unique
   index on `event_seq` also guards (each alone suffices). The still-watched recheck is a defence (only the runner moves
   the watch, after acting); its test sets the watch directly.
