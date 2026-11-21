@@ -317,7 +317,7 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   there to the next `id="templateStep…"`; **every** `openModal(<reminder>, <step>, <hole>, <template>,
   <type>)` in the box must name this reminder and this step, and none of this step may stand outside
   the box (else no target). The state is the box's template ids (`templates`). Every id of the plan
-  (the change's included) is a positive integer (never `0` / `-1`). `_token` / `_lm_user_id` are taken from
+  (each target and change field, so a later operation's extra id too) is a positive integer (never `0` / `-1`). `_token` / `_lm_user_id` are taken from
   hidden inputs of the markup (`_token` also `meta[name=csrf-token]`), one value each, plain token
   characters; none → `csrf-missing`, no write. (Whether the real page has its slots in `onclick`
   attributes, as captured, rather than in a script is not verified beyond the capture: if not, the

@@ -107,8 +107,9 @@ export function createLstepReminderStepChecker(readAccount: AccountReader): Brow
       if (user) ignored._lm_user_id = user
       const problem = token ? undefined : 'csrf-missing'
       const none = { account, state: null, ignored, problem }
-      // Every id of the plan (the template to add included) is a positive integer: never "all".
-      if (![reminder, step, ...Object.values(values.change)].every(v => POSITIVE_ID.test(v ?? ''))) return none
+      // Every id of the plan — each target field (a later type's `hole` too) and each change field —
+      // is a positive integer: never `0`, `-1` or "all", whichever operation uses this checker.
+      if (![reminder, step, ...Object.values(values.target), ...Object.values(values.change)].every(v => POSITIVE_ID.test(v ?? ''))) return none
       // The step is one of this reminder's: its box (`id="templateStep<step>"`, exactly once, as an
       // attribute in the markup) is on the reminder's page.
       const starts = stepBoxStarts(markup, step)

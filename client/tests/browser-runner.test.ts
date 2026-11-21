@@ -193,7 +193,8 @@ test('Lステップ\'s checker reads the step\'s templates, the account and the 
   assert.deepEqual(box('<div id="templateStep201"><a onclick="openModal(101, 201, 1, 300, 1)"></a></div>'), { templates: ['300'] })
   // A slot of the step under another reminder: not what we think it is.
   assert.equal(checker.view(values, read(lstepPage({ reminder: '999', steps: { 201: ['300'] } }))).state, null)
-  for (const bad of [{ ...values, target: { reminder: '101', step: '0' } }, { ...values, change: { template: '-1' } }]) {
+  // A later operation's extra target id (a slot to remove) is held to the same rule.
+  for (const bad of [{ ...values, target: { reminder: '101', step: '0' } }, { ...values, change: { template: '-1' } }, { ...values, target: { reminder: '101', step: '201', hole: 'all' } }]) {
     assert.equal(checker.view(bad, read(lstepPage({ steps: { 0: [], 201: [] } }))).state, null)
   }
   // Two different tokens: none taken, the write cannot be made.
