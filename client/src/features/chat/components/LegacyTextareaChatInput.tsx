@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useImperativeHandle, useRef, type MutableRefObject } from 'react'
 import { ArrowUp } from '@phosphor-icons/react'
 import type { ChatInputApi } from '../hooks/useChatDraft'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 interface LegacyTextareaChatInputProps {
   initialDraft?: string
@@ -114,14 +115,14 @@ export const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
         <button
           onClick={handleSend}
           disabled={disabled}
-          className="
+          className={`
             flex-shrink-0 w-9 h-9 rounded-md
-            bg-accent
-            disabled:bg-ink-faint disabled:cursor-not-allowed
+            disabled:cursor-not-allowed
             flex items-center justify-center
-          "
+            ${PRIMARY_ACTION}
+          `}
         >
-          <ArrowUp size={18} weight="bold" className="text-white" />
+          <ArrowUp size={18} weight="bold" />
         </button>
       </div>
       <div className="absolute -bottom-5 left-3 text-[10px] text-gray-400 dark:text-zinc-500 opacity-60">

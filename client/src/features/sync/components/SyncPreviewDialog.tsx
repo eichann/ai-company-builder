@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CaretDown, CaretRight, Plus, PencilSimple, Minus, X, SpinnerGap, Sparkle, ArrowCounterClockwise, CloudArrowUp } from '@phosphor-icons/react'
 import { DiffModal } from '../../../shared/ui/DiffViewer'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 interface SyncPreviewDialogProps {
   isOpen: boolean
@@ -297,7 +298,7 @@ export function SyncPreviewDialog({
             <button
               onClick={() => { onSync(commitMessage.trim() || undefined); setCommitBoxExpanded(false) }}
               disabled={isSyncing}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-accent text-white hover:bg-accent/90 disabled:opacity-50 transition-colors"
+              className={`w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${PRIMARY_ACTION}`}
             >
               {isSyncing ? (
                 <>

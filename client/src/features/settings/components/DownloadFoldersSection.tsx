@@ -475,7 +475,7 @@ function ConfirmUnsynced({ files, onCancel, onConfirm }: { files: string[]; onCa
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <Button ref={cancelRef} onClick={onCancel}>キャンセル</Button>
-          <Button variant="danger" onClick={onConfirm}>.backups に保存して進める</Button>
+          <Button variant="primary" onClick={onConfirm}>.backups に保存して進める</Button>
         </div>
       </div>
     </div>

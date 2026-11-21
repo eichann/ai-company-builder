@@ -26,6 +26,7 @@ import type { ShelfSendAnswer, Skill, SkillTool } from '../model'
 import { startSkillTool, stopSkillTool } from '../api'
 import { useAppStore } from '../../../stores/appStore'
 import { SHELF_CLASH_NOTE, SHELF_COMPANY_NOTE, SHELF_EDITING_NOTE, SHELF_EDITING_TITLE, SHELF_OUTPUTS_GO_BACK, SHELF_OUTPUTS_LEAVE_OUT, SHELF_OUTPUTS_NOTE, SHELF_OUTPUTS_QUESTION, SHELF_PUBLISH_CONFIRM, SHELF_REPLACE_CONFIRM, SHELF_REQUEST_CONFIRM, SHELF_RESTORE_CONFIRM, type KeptAside, shelfEditTexts, shelfKeptAsideNote, shelfMarkTitle, shelfNewerText, shelfRequestStateText } from '../../../../shared/skill-shelf'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 type TabId = 'overview' | 'rules' | 'references' | 'scripts' | 'tools'
 
@@ -192,7 +193,7 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
   const [outputs, setOutputs] = useState<{ paths: string[]; send: ShelfSend } | null>(null)
   const [kept, setKept] = useState<KeptAside | null>(null)
   const box = 'p-3 rounded-xl bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50 text-xs text-gray-600 dark:text-zinc-400 space-y-2'
-  const button = 'w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50'
+  const button = `w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${PRIMARY_ACTION}`
   const quiet = 'w-full flex items-center justify-center gap-2 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50'
   const run = (action: (skill: Skill) => Promise<string | null>) => {
     setBusy(true)
@@ -230,7 +231,7 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
         <span>{text}</span>
       </div>
       <div className="flex gap-2">
-        <button onClick={go} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors">{label}</button>
+        <button onClick={go} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${PRIMARY_ACTION}`}>{label}</button>
         <button onClick={() => setConfirming(null)} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors">キャンセル</button>
       </div>
     </div>
@@ -255,7 +256,7 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
         {outputs.paths.length > OUTPUTS_SHOWN && <li>ほか {outputs.paths.length - OUTPUTS_SHOWN} 個</li>}
       </ul>
       <div className="flex gap-2">
-        <button disabled={busy} onClick={() => send(outputs.send, true)} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50">{SHELF_OUTPUTS_LEAVE_OUT}</button>
+        <button disabled={busy} onClick={() => send(outputs.send, true)} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${PRIMARY_ACTION}`}>{SHELF_OUTPUTS_LEAVE_OUT}</button>
         <button disabled={busy} onClick={() => setOutputs(null)} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50">{SHELF_OUTPUTS_GO_BACK}</button>
       </div>
     </div>
@@ -359,13 +360,13 @@ function OverviewTab({
             {!showPublishConfirm ? (
               <button
                 onClick={() => setShowPublishConfirm(true)}
-                className="
+                className={`
                   w-full flex items-center justify-center gap-2
                   py-2 rounded-lg
                   text-sm font-medium
-                  bg-blue-600 hover:bg-blue-700 text-white
                   transition-colors
-                "
+                  ${PRIMARY_ACTION}
+                `}
               >
                 <CloudArrowUp size={14} />
                 公開する
@@ -382,7 +383,7 @@ function OverviewTab({
                       void onPublish?.(skill).then(setRefusal)
                       setShowPublishConfirm(false)
                     }}
-                    className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${PRIMARY_ACTION}`}
                   >
                     公開する
                   </button>

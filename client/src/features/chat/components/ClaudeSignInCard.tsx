@@ -4,6 +4,7 @@ import { claudeAccountNotice, type ClaudeSignInResult } from '../../../../shared
 import type { ClaudeCodeStatus } from '../../../../shared/ipc-contract'
 import { cancelClaudeSignIn, openClaudeSignInPage, openInBrowser, startClaudeSignIn } from '../api'
 import { claudeSetupStep, CLAUDE_SETUP_GUIDE_URL } from '../claudeSetup'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 /**
  * Getting Claude Code ready without a terminal: install guidance when it is missing, and
@@ -69,7 +70,7 @@ export function ClaudeSignInCard({ status, root, onRecheck }: { status: ClaudeCo
           <>
             <p className="text-xs text-ink-muted">ボタンを押すと、ブラウザで Anthropic のログイン画面が開きます。パスワードなどはこのアプリには渡りません。</p>
             {result && result.outcome !== 'signed-in' && <p role="alert" className="text-xs text-amber-400">{result.message}</p>}
-            <button type="button" onClick={() => void signIn()} className="mt-1 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90">
+            <button type="button" onClick={() => void signIn()} className={`mt-1 rounded-lg px-4 py-2 text-sm font-medium ${PRIMARY_ACTION}`}>
               Claude にログインする
             </button>
           </>

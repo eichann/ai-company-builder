@@ -10,6 +10,7 @@ import { RESEND_REASON_MAX } from '../../../../../shared/core/mail'
 import type { MailAlreadySent, MailAttachmentView, MailRecipientView, OutboundMailView } from '../../../../../shared/types/outbound-mail'
 import { runCommand, useCommandAvailable } from '../../../shared/commands/commands'
 import { mailOutbound, type MailOutbound } from '../api'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 type Step = 'view' | 'edit' | 'confirm'
 interface Notice { tone: 'ok' | 'warn' | 'error'; text: string }
@@ -20,7 +21,7 @@ const NOTICE_CLASS = {
   error: 'border-red-500/40 bg-red-500/5',
 } as const
 const BUTTON = 'rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800'
-const PRIMARY = 'rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50'
+const PRIMARY = `rounded-lg px-3 py-1.5 text-xs font-medium ${PRIMARY_ACTION}`
 
 function RecipientList({ label, list }: { label: string; list: MailRecipientView[] }) {
   if (list.length === 0) return null

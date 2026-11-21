@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { ShieldWarning } from '@phosphor-icons/react'
 import { getToolDisplayName } from '../toolRows'
 import type { ToolApprovalRequest } from '../../../../shared/ipc-contract'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 // ============================================================================
 // Tool Approval Banner
@@ -55,7 +56,7 @@ export function ToolApprovalBanner({
           </button>
           <button
             onClick={() => onRespond(request.toolUseId, true)}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors"
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${PRIMARY_ACTION}`}
           >
             {t('chat.toolApprovalAllow')}
           </button>

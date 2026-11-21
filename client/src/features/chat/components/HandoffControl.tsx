@@ -4,6 +4,7 @@ import { Note, X } from '@phosphor-icons/react'
 import type { HandoffView } from '../../../../shared/handoff'
 import { agentShortLabel } from '../../../../shared/agents/registry'
 import { getHandoff, onHandoffChanged, updateHandoff } from '../api'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 export function HandoffControl({ companyId, sessionId, active = true }: { companyId: string; sessionId: string; active?: boolean }) {
   const [view, setView] = useState<HandoffView | null>(null)
@@ -44,7 +45,7 @@ export function HandoffControl({ companyId, sessionId, active = true }: { compan
       </div>
       <div className="mt-4 flex items-center justify-between gap-4">
         <p className="text-[11px] text-gray-500">自動更新：16往復または約12,000文字から。<br />同じ相談は10分間隔、全体で最大4回／時。</p>
-        <button type="button" disabled={!view?.canUpdate} onClick={() => void update()} className="rounded-lg bg-accent px-3 py-2 text-xs text-white disabled:opacity-40 shrink-0">メモを更新</button>
+        <button type="button" disabled={!view?.canUpdate} onClick={() => void update()} className={`rounded-lg px-3 py-2 text-xs shrink-0 ${PRIMARY_ACTION}`}>メモを更新</button>
       </div>
       <p className="mt-2 text-[10px] text-gray-400">手動更新も利用量の上限内で実行します。AIの要約なので、重要な判断は元の履歴でも確認してください。</p>
     </dialog>

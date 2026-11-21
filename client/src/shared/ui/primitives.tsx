@@ -1,9 +1,10 @@
 // Small building blocks for the settings pages, in the visual language of the
-// admin console (neutral zinc greys, one indigo accent, status colours only
-// for state, light and dark). Tailwind + Phosphor, like the rest of the
+// admin console (neutral zinc greys, the primary blue for the main action, status
+// colours only for state, light and dark). Tailwind + Phosphor, like the rest of the
 // renderer.
 import { forwardRef, type ReactNode, type ButtonHTMLAttributes } from 'react'
 import { Check, Minus, Info, WarningCircle, WifiSlash } from '@phosphor-icons/react'
+import { PRIMARY_ACTION } from './buttonStyles'
 
 export function SectionHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
   return (
@@ -32,7 +33,7 @@ export function SubHeading({ children }: { children: ReactNode }) {
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
 const BUTTON: Record<ButtonVariant, string> = {
-  primary: 'bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white',
+  primary: PRIMARY_ACTION,
   secondary: 'border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-white/[0.06]',
   ghost: 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/[0.06] dark:hover:text-zinc-100',
   danger: 'bg-danger text-on-danger hover:bg-danger-hover active:bg-danger-active',
@@ -44,7 +45,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLBut
       ref={ref}
       type="button"
       {...props}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 focus-visible:ring-offset-1 focus-visible:ring-offset-white disabled:pointer-events-none disabled:opacity-50 dark:focus-visible:ring-offset-zinc-900 ${size === 'sm' ? 'h-7 px-2.5 text-xs' : 'h-8 px-3.5 text-[13px]'} ${BUTTON[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring focus-visible:ring-offset-focus focus-visible:ring-offset-bg disabled:pointer-events-none disabled:opacity-disabled ${size === 'sm' ? 'h-7 px-2.5 text-xs' : 'h-8 px-3.5 text-[13px]'} ${BUTTON[variant]} ${className}`}
     />
   )
 })

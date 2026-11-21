@@ -4,6 +4,7 @@ import type { AgentInteractionRequest, AgentInteractionResponse } from '../../..
 import { agentShortLabel } from '../../../../shared/agents/registry'
 import { MAX_OTHER_LENGTH, choiceAnswerText, choiceCancelLabel, type ChoicePromptRecord, type ChoiceQuestion } from '../../../../shared/choice-prompt'
 import { buildChoiceAnswers, choiceAnswerLines, emptyDraft, toggleOption, toggleOther, type ChoiceDraft } from '../choicePromptState'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 type ChoiceRequest = Extract<AgentInteractionRequest, { kind: 'choices' }>
 
@@ -95,7 +96,7 @@ export function ChoicePromptCard({ request, onRespond }: { request: ChoiceReques
           className="px-3 py-1.5 text-xs rounded-lg text-gray-500 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-50">回答せずに閉じる</button>
         <span className="ml-auto text-[11px] text-gray-400 dark:text-zinc-500 hidden sm:inline">⌘/Ctrl + Enter で回答</span>
         <button type="button" disabled={sending || !answers} onClick={() => answers && void respond({ choices: answers })}
-          className="px-4 py-1.5 text-sm font-medium rounded-lg bg-accent text-white hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed">回答する</button>
+          className={`px-4 py-1.5 text-sm font-medium rounded-lg disabled:cursor-not-allowed ${PRIMARY_ACTION}`}>回答する</button>
       </div>
     </section>
   )

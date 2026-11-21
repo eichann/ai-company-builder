@@ -6,6 +6,7 @@ import type { AiTurnItemState, AiTurnItemView } from '../../../../shared/ai-turn
 import type { TaskListItem } from '../../../../shared/tasks'
 import { dueText, dueWhen, type CompanyNow, type ListEvent } from '../model'
 import { isFileTreeDrag, isLinkableDrag, startRecordDrag } from '../../../shared/lib/dragTypes'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 const CHIP = 'shrink-0 rounded px-1 text-[10px]'
 /** Where the automatic 「AI の番」 stands (ai-turns.md "Never silent"), before its reason. */
@@ -139,7 +140,7 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
             <ChatCircleDots size={14} />
           </button>
         )}
-        {onAccept && <button type="button" disabled={busy} onClick={onAccept} className="rounded bg-accent px-2 py-0.5 text-[11px] text-white disabled:opacity-40">{NEXT_STEP.accept}</button>}
+        {onAccept && <button type="button" disabled={busy} onClick={onAccept} className={`rounded px-2 py-0.5 text-[11px] ${PRIMARY_ACTION}`}>{NEXT_STEP.accept}</button>}
         {extra.length > 0 && (
           <span className="flex flex-wrap justify-end gap-1">
             {extra.map(x => <button key={x.label} type="button" disabled={busy} onClick={x.run} className="rounded border border-accent/40 px-1.5 text-[10.5px] text-accent hover:bg-accent/10 disabled:opacity-40">{x.label}</button>)}

@@ -36,6 +36,8 @@ const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
 const ME = 'u-sato'
 const people = { [ME]: '佐藤', 'u-abe': '阿部', 'u-tanaka': '田中' }
 const params = new URLSearchParams(location.search)
+// `?theme=dark` for dark mode (the primary-action spec reads the main action in both themes).
+if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const done = params.get('task') === 'done'
 const withSource = params.get('source') === '1'
 const shared = params.get('shared') === '1'
@@ -246,7 +248,7 @@ const createTodayFile = async (name: string) => {
 
 function Preview() {
   return (
-    <main className="min-h-screen bg-white text-gray-900">
+    <main className="min-h-screen bg-white text-gray-900 dark:bg-zinc-900 dark:text-zinc-100">
       <pre id="acted" className="text-[10px]" />
       <TaskCard companyId="co-preview" rootPath="/Users/me/company" recordId={card.record.id} renderPrepared={r => <div data-testid="prepared">用意したもの：{r.title}</div>}
         renderSource={r => <div>元のメール：{r.title}</div>}

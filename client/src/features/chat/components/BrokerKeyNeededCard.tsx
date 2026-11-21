@@ -9,6 +9,7 @@ import { builtinBrokerService } from '../../../../../shared/core/key-broker'
 import { runCommand, useCommandAvailable } from '../../../shared/commands/commands'
 import { useAppStore } from '../../../stores/appStore'
 import { useOwnKeyService } from '../hooks/useOwnKeyService'
+import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 export const BrokerKeyNeededCard = memo(function BrokerKeyNeededCard({ service }: { service: string }) {
   const companyId = useAppStore(s => s.currentCompany?.id)
@@ -38,7 +39,7 @@ export const BrokerKeyNeededCard = memo(function BrokerKeyNeededCard({ service }
       {offer && state.kind !== 'loading' && (canOpen
         ? (
           <button type="button" onClick={() => void runCommand('settings.openOwnKey', { service })}
-            className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-xs text-white hover:bg-accent/90">
+            className={`mt-2 rounded-lg px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
             {registered ? '「自分の鍵」を開く' : '自分の鍵を登録する'}
           </button>
         )

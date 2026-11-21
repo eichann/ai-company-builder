@@ -93,6 +93,9 @@ const message: UIMessage = {
   ] as UIMessage['parts'],
 }
 
+// `?theme=dark` for dark mode (the primary-action spec reads the buttons in both themes).
+if (new URLSearchParams(location.search).get('theme') === 'dark') document.documentElement.classList.add('dark')
+
 function Preview() {
   const [received, setReceived] = useState<string | null>(null)
   const [awaited, setAwaited] = useState<string | null>(null)
@@ -102,7 +105,7 @@ function Preview() {
   report = (hash, awaitReply, shown, why) => { setReceived(hash); setAwaited(awaitReply); setFiles(shown ?? null); setReason(why ?? null) }
   opened = setOpenedFile
   return (
-    <main className="min-h-screen bg-white p-8 text-gray-900">
+    <main className="min-h-screen bg-white p-8 text-gray-900 dark:bg-zinc-900 dark:text-zinc-100">
       <p className="mb-4 text-xs text-gray-500">表示確認用の人工データ。本番のメールは送りません。</p>
       <section className="mx-auto max-w-xl"><AssistantMessageParts parts={message.parts} isStreaming={false} markdown /></section>
       {received !== null && <p aria-label="受け取った印">{received}</p>}
