@@ -27,7 +27,7 @@ import {
   type BrowserOperation, type BrowserPlanValues, type BrowserWriteRequest, type PluginManifest,
 } from '../../../shared/core/plugins'
 import { levelAllows, type BrowserOperationEffect, type BrowserOperationSettings } from '../../../shared/core/browser-operation'
-import { explorePath } from '../../../shared/core/plugin-browser-declaration'
+import { exploreAddressProblem, explorePath } from '../../../shared/core/plugin-browser-declaration'
 
 const FIXTURES = join(__dirname, '../fixtures/plugins')
 const fixture = (pkg: string, file: string) => readFileSync(join(FIXTURES, pkg, file), 'utf8')
@@ -515,5 +515,61 @@ describe('the preview\'s declared reads (explore, design memo §33 2-2)', () => 
     expect(explorePath(read, { reminder: '1', step: '2' })).toBeNull()
     for (const bad of ['../x', '1/2', '1?x=2', 'a b', '%2e%2e', '']) expect(explorePath(read, { reminder: bad }), bad).toBeNull()
     expect(explorePath(parse(withExplore(EXPLORE)).browser!.explore.reminders, {})).toBe('/line/episode')
+  })
+})
+
+describe('a declared read\'s query string (§33 decision 6: ids and fixed values only, exact)', () => {
+  const READS = `  explore:
+    reminders:
+      label: フォルダの中のリマインダ
+      path: /api/episodes
+      query:
+        - { name: group, value: "{group}" }
+        - { name: page, value: "1" }
+      reader: lstep.reminders
+      no_side_effects: reviewed
+`
+  const withQuery = (lines: string) => `${LSTEP}  explore:\n    r:\n      label: 読む\n      path: /api/x\n      reader: site.thing\n      no_side_effects: reviewed\n      query:\n${lines}`
+
+  it('parses the parameters in order, a literal or one {name}, and counts the {name} as one the read needs', () => {
+    expect(parse(`${LSTEP}${READS}`).browser!.explore.reminders).toEqual({
+      label: 'フォルダの中のリマインダ', path: '/api/episodes', placeholders: ['group'], reader: 'lstep.reminders',
+      query: [{ name: 'group', field: 'group' }, { name: 'page', value: '1' }],
+    })
+    expect(errorsOf(withQuery('        - { name: a, value: "{x}" }\n        - { name: b, value: "v-1.2_~" }\n'))).toBe('')
+  })
+
+  it('refuses free text, a repeated or method-override name, an empty name, a {name} inside text or twice, a number, unknown keys and too many parameters', () => {
+    const one = (value: string, name = 'group') => withQuery(`        - { name: ${name}, value: ${value} }\n`)
+    for (const value of ['"a b"', '"a%20b"', '"a+b"', '"a&b=c"', '"x{id}"', '"{id}{id2}"', '"{Bad}"', '""', '"あ"', '1', '"' + 'a'.repeat(65) + '"']) {
+      expect(errorsOf(one(value)), value).not.toBe('')
+    }
+    for (const name of ['_method', '_METHOD', '"_token"', '"1a"', '"a-b"', '""', '"a b"']) expect(errorsOf(one('"1"', name)), name).not.toBe('')
+    expect(errorsOf(withQuery('        - { name: page, value: "1" }\n        - { name: page, value: "2" }\n'))).toMatch(/2回/)
+    expect(errorsOf(withQuery('        - { name: page, value: "1" }\n        - { name: Page, value: "2" }\n'))).toMatch(/2回/)
+    expect(errorsOf(withQuery('        - { name: a, value: "{id}" }\n        - { name: b, value: "{id}" }\n'))).not.toBe('')
+    expect(errorsOf(withQuery('        - { name: a, value: "1", encode: none }\n'))).not.toBe('')
+    expect(errorsOf(withQuery([1, 2, 3, 4, 5, 6].map(i => `        - { name: p${i}, value: "1" }\n`).join('')))).not.toBe('')
+    expect(errorsOf(`${LSTEP}  explore:\n    r:\n      label: 読む\n      path: /api/x\n      reader: site.thing\n      no_side_effects: reviewed\n      query: { group: "{id}" }\n`)).not.toBe('')
+    expect(errorsOf(`${LSTEP}  explore:\n    r:\n      label: 読む\n      path: /api/x\n      reader: site.thing\n      no_side_effects: reviewed\n      query: []\n`)).not.toBe('')
+    // A {name} of the path may not come back in the query.
+    expect(errorsOf(`${LSTEP}  explore:\n    r:\n      label: 読む\n      path: "/api/{id}"\n      reader: site.thing\n      no_side_effects: reviewed\n      query:\n        - { name: a, value: "{id}" }\n`)).toMatch(/2回/)
+  })
+
+  it('builds the address from the declaration only: its order, plain ids, nothing more', () => {
+    const read = parse(`${LSTEP}${READS}`).browser!.explore.reminders
+    expect(explorePath(read, { group: '29529' })).toBe('/api/episodes?group=29529&page=1')
+    expect(explorePath(read, {})).toBeNull()
+    expect(explorePath(read, { group: '29529', page: '2' })).toBeNull()
+    for (const bad of ['1&page=2', '1%262', 'a b', '1#x', '', '1=2']) expect(explorePath(read, { group: bad }), bad).toBeNull()
+  })
+
+  it('knows the addresses a declared read can have: a fixed path and plain name=value pairs, nothing encoded, no name twice', () => {
+    for (const ok of ['/a', '/api/episodes?group=1&page=1', '/a?b=c.d~e_f-g']) expect(exploreAddressProblem(ok), ok).toBeNull()
+    for (const bad of ['/a?', '/a?b', '/a?b=', '/a?b=%31', '/a?b=1&b=2', '/a?b=1&B=2', '/a?_method=x', '/a?b=1#c', '/a?b=1&&c=2', '/a?1=2', '/a?b=c=d']) {
+      expect(exploreAddressProblem(bad), bad).toBe('query')
+    }
+    for (const bad of ['a', '/a/../b', '/a//b', '/a#b']) expect(exploreAddressProblem(bad), bad).toBe('path')
+    expect(exploreAddressProblem(`/a?${[1, 2, 3, 4, 5, 6].map(i => `p${i}=1`).join('&')}`)).toBe('query')
   })
 })

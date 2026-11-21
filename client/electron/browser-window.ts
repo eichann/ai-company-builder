@@ -20,8 +20,7 @@
 import net from 'node:net'
 import { BrowserWindow, net as electronNet, session, type Session, type WebContents } from 'electron'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
-import { BROWSER_PATH_RE } from '../../shared/core/plugin-browser-declaration'
-import { checkUpstreamPath } from '../../shared/core/upstream-path'
+import { exploreAddressProblem } from '../../shared/core/plugin-browser-declaration'
 import {
   BROWSER_WORDS, browserProxyScript, browserReadPartition, browserWritePartition, browserResponseHeaders, createRefusalTally, decideAiRead, decideAiWrite, decideWindowRequest,
   hostForLog, isReadMethod, navigationAllowed,
@@ -422,12 +421,13 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
         closed,
       }
       // The preview reads through the read session only: the window keeps its mode, page and the
-      // member's typing (design memo §33 2-4); only exactly that path, GET, no query.
+      // member's typing (design memo §33 2-4); only exactly that address, GET.
       const preview: BrowserPreviewSurface = {
-        async read(path, signal) {
-          // A fixed path only: no query, fragment, `..` or `//` (the preview builds it from the declaration).
-          if (closed() || !BROWSER_PATH_RE.test(path) || !checkUpstreamPath(path)) throw new Error('window closed')
-          const url = `https://${state.site!.host}${path}`
+        async read(address, signal) {
+          // A fixed path, and a query only of plain `name=value` pairs: no fragment, `..`, `//` or
+          // percent-encoding (the preview builds the address from the declaration, `explorePath`).
+          if (closed() || exploreAddressProblem(address)) throw new Error('window closed')
+          const url = `https://${state.site!.host}${address}`
           return throughSession(lanes, readKey, reads, { method: 'GET', url }, exactRead(url), signal, () => !closed())
         },
         closed,

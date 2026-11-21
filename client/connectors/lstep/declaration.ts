@@ -19,16 +19,27 @@
  * - `reminder`: `GET /line/episode/show/<reminder>` — read only, changes nothing (the owner's login,
  *   2026-11-22, design memo §34: only our fixed GETs were made; the page's own background reads do
  *   not run, since main reads without a page).
- * Not declared (not confirmed, or would need a query string, which no read may carry yet — §33
- * decision 6): the reminders' list, `/api/templates?group=`, `/api/landings/<id>`. `delivers` stays
- * `none`: what a step's time means for people already past it is not known yet (§34), so no
- * `scheduled` type exists.
+ *
+ * 0.4.0 adds the lists the site's own pages read as JSON (design memo §35, §36), with the query
+ * strings §33 decision 6 allows (ids and fixed values only, the address built from the declaration
+ * and read exactly), each read only — the owner's login, read-only windows: our fixed GETs changed
+ * nothing — and each with its reviewed reader (./list-readers.ts):
+ * - `reminder_folders`: `GET /api/episode-groups` (no query: an id-free read the preview starts from;
+ *   the site's own page sends it with an empty `?`, we send none) → `group`;
+ * - `reminders`: `GET /api/episodes?group={group}&page=1` (§36) → `reminder`;
+ * - `template_folders`: `GET /api/template-groups` (§36; id-free) → `template_group` (「未分類」, id 0,
+ *   is not selectable);
+ * - `templates`: `GET /api/templates?group={template_group}&page=1` (§34, §36) → `template`.
+ * Page 1 only: a longer list reads as incomplete. Not declared: `/api/landings/<id>` (not this
+ * type's). `delivers` stays `none`: what a step's time means for people already past it is not known
+ * yet (§34), so no `scheduled` type exists.
  */
+import { LSTEP_REMINDER_FOLDERS_READER, LSTEP_REMINDERS_READER, LSTEP_TEMPLATE_FOLDERS_READER, LSTEP_TEMPLATES_READER } from './list-readers'
 import { LSTEP_REMINDER_STEP_CHECKER } from './reminder-step'
 import { LSTEP_REMINDER_STEPS_READER } from './reminder-steps-reader'
 
 export const LSTEP_DECLARATION = `id: lstep
-version: 0.3.0
+version: 0.4.0
 label: Lステップ
 contract: 1
 browser:
@@ -65,6 +76,32 @@ browser:
         template_bodies: { required: true, complete: true }
         shared_with: { required: true, complete: true }
   explore:
+    reminder_folders:
+      label: リマインダのフォルダの一覧
+      path: /api/episode-groups
+      reader: ${LSTEP_REMINDER_FOLDERS_READER}
+      no_side_effects: reviewed
+    reminders:
+      label: フォルダの中のリマインダ（1ページ目）
+      path: /api/episodes
+      query:
+        - { name: group, value: "{group}" }
+        - { name: page, value: "1" }
+      reader: ${LSTEP_REMINDERS_READER}
+      no_side_effects: reviewed
+    template_folders:
+      label: テンプレートのフォルダの一覧
+      path: /api/template-groups
+      reader: ${LSTEP_TEMPLATE_FOLDERS_READER}
+      no_side_effects: reviewed
+    templates:
+      label: フォルダの中のテンプレート（1ページ目）
+      path: /api/templates
+      query:
+        - { name: group, value: "{template_group}" }
+        - { name: page, value: "1" }
+      reader: ${LSTEP_TEMPLATES_READER}
+      no_side_effects: reviewed
     reminder:
       label: リマインダの中身（段の一覧）
       path: "/line/episode/show/{reminder}"

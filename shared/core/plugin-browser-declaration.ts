@@ -61,6 +61,7 @@ export const BROWSER_DECLARATION_LIMITS = {
   facts: 20,
   explore: 10,
   explorePlaceholders: 5,
+  exploreQuery: 5,
 } as const
 
 /** Operation, target and change names. */
@@ -163,16 +164,25 @@ export interface BrowserOperation {
  * id a reader already took out of an earlier page of the same request), the reviewed reader that
  * takes the declared items out of it (`<site>.<thing>`, code in the app's connector folder) and the
  * reviewed mark that reading it changes nothing on the site (`no_side_effects: reviewed`; a read
- * without it is refused). No query string: none is allowed yet (§33 decision 6).
+ * without it is refused). A query string only when declared (§33 decision 6, used from Lステップ
+ * 0.4.0, design memo §35): an ordered list of parameters, each a fixed literal or exactly one
+ * `{name}` filled with a plain id; the read's address is built from the declaration alone
+ * (`explorePath`) and the read session lets through exactly that address and nothing else
+ * (`exploreAddressProblem`, the window's `exactRead`).
  */
 export interface BrowserExploreRead {
   label: string
   /** The raw path with `{name}` segments, e.g. `/line/episode/show/{reminder}`. */
   path: string
-  /** The `{name}`s of the path, in order. */
+  /** The `{name}`s of the path, then of the query, in order. */
   placeholders: string[]
   reader: string
+  /** The query string's parameters in the order they are sent (absent: no query). */
+  query?: BrowserExploreQueryParam[]
 }
+
+/** One parameter of a declared read's query: a fixed literal, or one `{name}` filled with a plain id. */
+export type BrowserExploreQueryParam = { name: string; value: string } | { name: string; field: string }
 
 export interface PluginBrowser {
   /** The operated host (exact, `normalizeBrowserHost`). */
@@ -395,21 +405,95 @@ function parseExpect(where: string, raw: YamlValue | undefined, fields: Readonly
 /** The one value of `no_side_effects`: a person reviewed that reading the page changes nothing. */
 export const BROWSER_NO_SIDE_EFFECTS_REVIEWED = 'reviewed'
 const EXPLORE_SEGMENT_RE = /^(?:[A-Za-z0-9_.~-]+|\{([a-z][a-z0-9_]{0,39})\})$/
+/** A query parameter's name: a letter first (so never `_method`, `_token`…), then letters, digits, `_`. */
+export const BROWSER_QUERY_NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,39}$/
+/**
+ * A query parameter's literal value: unreserved characters only (RFC 3986), so it is sent exactly as
+ * written — nothing to percent-encode; no `+`, `%`, `&`, `=` or space. A `{name}`'s value is a plain id
+ * (`BROWSER_ID_VALUE_RE`), a subset.
+ */
+export const BROWSER_QUERY_VALUE_RE = /^[A-Za-z0-9_.~-]{1,64}$/
 
 /**
- * The path of an explore read with `values` put in its `{name}` segments, or null when a value is
- * missing, not a plain id (`BROWSER_ID_VALUE_RE`) or a name is given that the path does not have.
+ * Why `address` (a path, or a path, `?` and a query) is not one a declared read can have, or null:
+ * the path a fixed one (`BROWSER_PATH_RE`, `checkUpstreamPath`); the query, when there is one,
+ * `name=value` pairs joined by `&` — names `BROWSER_QUERY_NAME_RE`, none twice (in any case), values
+ * `BROWSER_QUERY_VALUE_RE`, at most `exploreQuery` of them — and nothing else (no `#`, no empty query,
+ * no percent-encoding). The window asks it before a preview read; `explorePath` builds only such
+ * addresses.
+ */
+export function exploreAddressProblem(address: string): 'path' | 'query' | null {
+  const at = address.indexOf('?')
+  const path = at < 0 ? address : address.slice(0, at)
+  if (!PATH_RE.test(path) || !checkUpstreamPath(path)) return 'path'
+  if (at < 0) return null
+  const pairs = address.slice(at + 1).split('&')
+  if (pairs.length > BROWSER_DECLARATION_LIMITS.exploreQuery) return 'query'
+  const names = new Set<string>()
+  for (const pair of pairs) {
+    const eq = pair.indexOf('=')
+    if (eq < 0) return 'query'
+    const name = pair.slice(0, eq)
+    if (!BROWSER_QUERY_NAME_RE.test(name) || !BROWSER_QUERY_VALUE_RE.test(pair.slice(eq + 1))) return 'query'
+    if (names.has(name.toLowerCase())) return 'query'
+    names.add(name.toLowerCase())
+  }
+  return null
+}
+
+/**
+ * The address of an explore read with `values` put in its `{name}`s — the path's segments and the
+ * query's values, the query's parameters in their declared order — or null when a value is missing,
+ * not a plain id (`BROWSER_ID_VALUE_RE`) or a name is given that the read does not have. Built from
+ * the declaration only: the operator names the read and the ids, never an address.
  */
 export function explorePath(read: BrowserExploreRead, values: Readonly<Record<string, string>>): string | null {
   const names = Object.keys(values)
   if (names.length !== read.placeholders.length || names.some(n => !read.placeholders.includes(n))) return null
   let failed = false
-  const path = read.path.replace(/\{([a-z][a-z0-9_]{0,39})\}/g, (_m, name: string) => {
+  const fill = (name: string): string => {
     const v = own(values, name) ? values[name] : undefined
     if (typeof v !== 'string' || !BROWSER_ID_VALUE_RE.test(v)) { failed = true; return '' }
     return v
-  })
-  return failed || !PATH_RE.test(path) || !checkUpstreamPath(path) ? null : path
+  }
+  const path = read.path.replace(/\{([a-z][a-z0-9_]{0,39})\}/g, (_m, name: string) => fill(name))
+  const query = (read.query ?? []).map(p => `${p.name}=${'field' in p ? fill(p.field) : p.value}`).join('&')
+  const address = query ? `${path}?${query}` : path
+  return failed || exploreAddressProblem(address) ? null : address
+}
+
+/** `query`: `[{ name, value }]` in the order sent — `value` a fixed literal, or exactly one `{name}`. */
+function parseExploreQuery(where: string, raw: YamlValue | undefined, placeholders: string[], e: (m: string) => void): BrowserExploreQueryParam[] | undefined {
+  if (raw === undefined) return undefined
+  const shape = `${where}の query は「- { name: 名前, value: 決まった値 か "{名前}" }」の並びです（1〜${BROWSER_DECLARATION_LIMITS.exploreQuery} 個）`
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > BROWSER_DECLARATION_LIMITS.exploreQuery) { e(shape); return undefined }
+  const out: BrowserExploreQueryParam[] = []
+  const seen = new Set<string>()
+  for (const entry of raw) {
+    if (!isYamlMap(entry)) { e(shape); return undefined }
+    let ok = true
+    unknownKeys(`${where}の query: `, entry, ['name', 'value'], m => { ok = false; e(m) })
+    if (!ok) return undefined
+    const { name, value } = entry
+    // A method override in the query (`_method=DELETE`) is never a read: the name rule keeps it out; said in words too.
+    if (typeof name === 'string' && isMethodOverrideKey(name)) { e(`${where}の query に _method は書けません`); return undefined }
+    if (typeof name !== 'string' || !BROWSER_QUERY_NAME_RE.test(name)) { e(`${where}の query の name は英字で始まる英数字・_ です（40 文字まで）`); return undefined }
+    if (seen.has(name.toLowerCase())) { e(`${where}の query に「${name}」が2回あります`); return undefined }
+    seen.add(name.toLowerCase())
+    if (typeof value !== 'string') { e(`${where}の query「${name}」の value は文字で書いてください（"1" のように引用符で）`); return undefined }
+    const placeholder = PLACEHOLDER_RE.exec(value)
+    if (placeholder) {
+      if (placeholders.includes(placeholder[1])) { e(`${where}に {${placeholder[1]}} が2回あります`); return undefined }
+      placeholders.push(placeholder[1])
+      out.push({ name, field: placeholder[1] })
+    } else if (BROWSER_QUERY_VALUE_RE.test(value)) {
+      out.push({ name, value })
+    } else {
+      e(`${where}の query「${name}」の value は、英数字・_ . ~ - だけの決まった値か、{名前} ひとつだけです（空白・% & = + や文の混ざった値は書けません）`)
+      return undefined
+    }
+  }
+  return out
 }
 
 /** `explore`: `{ <name>: { label, path, reader, no_side_effects: reviewed } }` — nothing else. */
@@ -425,7 +509,7 @@ function parseExplore(raw: YamlValue | undefined, err: (m: string) => void): Rec
     if (!isYamlMap(entry)) { err(`${where}は { label, path, reader, no_side_effects } の形で書いてください`); continue }
     let ok = true
     const e = (m: string) => { ok = false; err(m) }
-    unknownKeys(`${where}: `, entry, ['label', 'path', 'reader', 'no_side_effects'], e)
+    unknownKeys(`${where}: `, entry, ['label', 'path', 'query', 'reader', 'no_side_effects'], e)
     const label = plainText(entry.label, BROWSER_DECLARATION_LIMITS.label)
     if (!label) e(`${where}の label は ${BROWSER_DECLARATION_LIMITS.label} 文字までの1行で書いてください`)
     const reader = entry.reader
@@ -446,11 +530,12 @@ function parseExplore(raw: YamlValue | undefined, err: (m: string) => void): Rec
           placeholders.push(m[1])
         }
       }
-      if (placeholders.length > BROWSER_DECLARATION_LIMITS.explorePlaceholders) e(`${where}の path の {名前} は ${BROWSER_DECLARATION_LIMITS.explorePlaceholders} 個までです`)
       const sample = path.replace(/\{[a-z][a-z0-9_]{0,39}\}/g, '1')
       if (!PATH_RE.test(sample) || !checkUpstreamPath(sample)) e(`${where}の path は / で始まる決まった道です（? # //・.. は使えません）`)
     }
-    if (ok) out[name] = { label: label as string, path: path as string, placeholders, reader: reader as string }
+    const query = parseExploreQuery(where, entry.query, placeholders, e)
+    if (placeholders.length > BROWSER_DECLARATION_LIMITS.explorePlaceholders) e(`${where}の {名前} は path と query で ${BROWSER_DECLARATION_LIMITS.explorePlaceholders} 個までです`)
+    if (ok) out[name] = { label: label as string, path: path as string, placeholders, reader: reader as string, ...(query ? { query } : {}) }
   }
   return out
 }

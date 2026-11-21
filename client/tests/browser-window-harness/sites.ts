@@ -123,6 +123,13 @@ export async function startSites(certDir: string, ports: { site: number; evil: n
         res.end(page(ports.udp))
         return
       }
+      if (host === 'op.test' && url.startsWith('/api/episodes?')) {
+        // A list the site's own pages read as JSON (Lステップ, design memo §36), behind the login.
+        if (!/(^|;\s*)sid=1(;|$)/.test(req.headers.cookie ?? '')) { res.writeHead(302, { location: '/login' }); res.end(); return }
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ current_page: 1, data: [{ id: 101, name: 'r', group_id: 29529 }], last_page: 1 }))
+        return
+      }
       if (host === 'op.test' && url.startsWith('/line/')) {
         // Logged in = the window's cookie; otherwise the login page, as a real site would.
         if (!/(^|;\s*)sid=1(;|$)/.test(req.headers.cookie ?? '')) { res.writeHead(302, { location: '/login' }); res.end(); return }

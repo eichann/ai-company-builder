@@ -13,11 +13,12 @@ import { browserOperationsAllowed, type BrowserOperation, type PluginBrowser } f
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
 import type { BrowserHtmlDocument } from '../../../shared/browser-page'
 import { runExploreReader } from '../../../shared/browser-page'
+import { runJsonExploreReader } from '../../../shared/browser-json'
 import {
   BROWSER_OPERATOR_LIMITS, operatorMaterial, parseOperatorAnswer, previewProblem, seenValues,
   type BrowserOperatorFailure, type BrowserOperatorPage, type BrowserOperatorRequest, type BrowserOperatorStopReason,
 } from '../../../shared/browser-operator'
-import type { BrowserExploreReader, BrowserPreviewSurface } from '../../../shared/browser-runner'
+import type { BrowserPreviewReader, BrowserPreviewSurface } from '../../../shared/browser-runner'
 import type { BrowserAiSwitch } from './ai-switch'
 
 /** The CLI fixed for a request (agents/claude-browser-operator.ts `BrowserOperatorCli`). */
@@ -41,7 +42,7 @@ export interface BrowserPreviewDeps {
   /** The connector declaration at exactly this id and version (bundled with the app for now). */
   connector(id: string, version: string): PluginBrowser | null
   /** The reviewed preview reader of this id (handed in by the composition root; none = that read never runs). */
-  reader(id: string): BrowserExploreReader | undefined
+  reader(id: string): BrowserPreviewReader | undefined
   /** The site as the member's current valid policy lists it (null: off, not listed, unknown). */
   site(companyId: string, host: string): BrowserSiteSetting | null
   /** The emergency stop for the company's AI (`browserAiStopped`). */
@@ -137,8 +138,11 @@ export async function runBrowserPreview(request: BrowserPreviewRequest, deps: Br
     if (!current()) return failed(request.signal.aborted ? 'cancelled' : 'context-changed')
     // A redirect (logged out), an error page: nothing to read the items from.
     if (page.status !== OK_READ) return failed('read-failed')
-    const reader = deps.reader(connector.explore[answer.read].reader) as BrowserExploreReader
-    const { items, complete } = runExploreReader(reader, answer.values, deps.parse(page.body))
+    const reader = deps.reader(connector.explore[answer.read].reader) as BrowserPreviewReader
+    // A JSON reader gets the answer parsed strictly; a page reader the page as the core shows it.
+    const { items, complete } = 'answer' in reader
+      ? runJsonExploreReader(reader, answer.values, page.body)
+      : runExploreReader(reader, answer.values, deps.parse(page.body))
     pages.push({ read: answer.read, values: answer.values, items, complete })
   }
   return failed('rounds')
