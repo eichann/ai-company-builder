@@ -34,6 +34,12 @@ const LATER_TABLES = [
   'agent_browser_settings',
   'agent_browser_overrides',
   'agent_browser_history',
+  // agent-browser.md "Plans, executions, permits and locks": plans, executions, reports, target locks, type grants.
+  'browser_plans',
+  'browser_executions',
+  'browser_execution_reports',
+  'browser_target_locks',
+  'browser_type_grants',
 ]
 /** Indexes later builds add on a table that was there before. */
 const LATER_INDEXES = [

@@ -32,6 +32,7 @@ import { sqliteInboxRepository } from './inbox'
 // lane C ▼
 import { sqlitePluginStepRepository } from './plugin-steps'
 import { sqlitePluginRoleRepository } from './plugin-roles'
+import { sqliteBrowserPlanRepository } from './browser-plans'
 // lane C ▲
 /**
  * Company handles over the one application database (案 A). Moving to a
@@ -75,6 +76,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         // lane C ▼
         pluginSteps: sqlitePluginStepRepository(conn, companyId),
         pluginRoles: sqlitePluginRoleRepository(conn, companyId),
+        browserPlans: sqliteBrowserPlanRepository(conn, companyId),
         // lane C ▲
         archive: sqliteCompanyRowsExport(conn, companyId),
       }

@@ -588,6 +588,11 @@ browser:
           ignore_body: [_token, _lm_user_id] # keys that may come with any value (CSRF / session), ≤ 10; never _method
       expect:                                # 1–5 on write / delete, none on a read
         - { list: templates, add: "{template}" }   # or remove: "{name}"; exactly one, one whole plan field
+      lock: { kind: lstep.reminder_step }    # required on write / delete, refused on a read: the server's target lock kind
+      delivers: none                         # required: none | immediate | unknown (reaches people at once?)
+      facts:                                 # what the checker reads for a plan (≤ 20); a write needs account (required)
+        account: { required: true }          # required: no plan without it; complete: true = read whole
+        state: { required: true, complete: true }
 ```
 
 - **A browser connector is `browser` and the common keys only** (role `connector`, `PluginManifest.browser`;
@@ -615,6 +620,15 @@ browser:
 - **Plain text** (`label`, `shared`, the account's `label`, literals, a plan's `text`) has no control
   characters, bidirectional marks / overrides / isolates or zero-width characters (U+061C,
   U+200B–U+200F, U+202A–U+202E, U+2066–U+2069, U+FEFF).
+- **`lock`, `delivers`, `facts`** (PR 6a, design memo §30.6; `agent-browser.md` "Plans, executions,
+  permits and locks"): `lock.kind` is `<site>.<thing>` (`BROWSER_CHECKER_RE`) — the server's target
+  lock key is built from it and the type's target fields; `delivers` says whether the write reaches
+  people at once; `facts` names what the checker reads for a plan, each `{ required, complete? }`
+  (booleans, nothing else), and every name must be known to the facts version's schema for the
+  type's checker (`shared/core/browser-plans.ts`; the approved list's script refuses otherwise). A
+  write / delete type without `lock`, without `facts.account` required, or any type without
+  `delivers` is refused, with the reason. **The first version runs** only `delivers: none`, not
+  irreversible, exactly one write, not delete (`browserFirstVersionProblem`, asked by the server).
 - **`ignore_body` is trusted**: whatever it names passes with any value. A reviewer checks that each
   entry is a CSRF / session field and nothing that changes what the request does.
 - **`effect: delete` requires `irreversible: true`** (the person confirms right before the deletion).
@@ -650,10 +664,12 @@ browser:
   app fetches it; `combineUse` refuses one, so no business plugin uses it. A released app's older parser
   does not know `browser` (an unknown key: unusable). The first declaration (`lstep@0.2.0`, 「リマインダの段に
   テンプレートを足す」) ships **inside the app** with its checker (`client/connectors/lstep/`),
-  parsed by `parsePluginManifest`; the runner exists but nothing starts it, and the plan / approval
-  flow is a later PR.
+  parsed by `parsePluginManifest`; the runner exists but nothing starts it. The server accepts plans
+  only for a combination listed in `shared/browser-connectors/approved.json` (the declaration's text
+  with its hash, the site folder's hash, the facts version; `agent-browser.md` "Plans, executions,
+  permits and locks"); nothing in the app registers one yet.
 - Test: `server/tests/unit/plugin-browser-declaration.test.ts` (the example, every refusal, every
-  mismatch reason, `ignore_body`, `expect` and `expectedAfter`, the setting, `levelAllows` with an unknown effect), `plugin-shelf.test.ts` (refused on the shelf) — each
+  mismatch reason, `ignore_body`, `expect` and `expectedAfter`, the setting, `levelAllows` with an unknown effect), `browser-plan-rules.test.ts` (`lock`, `delivers`, `facts`, the first version's rule), `plugin-shelf.test.ts` (refused on the shelf) — each
   guard mutation-checked.
 
 ## Handing packages to the app (plan C2 「配る道」)

@@ -18,6 +18,8 @@ import { sqlitePushRejectionRepository } from './adapters/sqlite/push-rejections
 import { sqliteAgentEventRepository, sqliteAgentEventSettingsRepository } from './adapters/sqlite/agent-events'
 import { sqliteAgentSandboxRepository } from './adapters/sqlite/agent-sandbox'
 import { sqliteAgentBrowserRepository } from './adapters/sqlite/agent-browser'
+import { sqliteBrowserExecutionLookup } from './adapters/sqlite/browser-plans'
+import { fileBrowserConnectorCatalog } from './adapters/browser-connector-catalog'
 import { sqliteAgentStopRepository } from './adapters/sqlite/agent-stops'
 import { sqliteBrokerTokenRepository, sqliteKeyBrokerRepository } from './adapters/sqlite/key-broker'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
@@ -54,6 +56,8 @@ import { createCompanyScopeService } from './services/company-scopes'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
 import { createAgentBrowserService } from './services/agent-browser'
+import { createBrowserPlanService } from './services/browser-plans'
+import type { BrowserConnectorCatalog } from './ports/browser-plans'
 import { createTaskSettingsService } from './services/task-settings'
 import { createFeatureService } from './services/features'
 import { noticeTurnedOff } from '../shared/core/features'
@@ -167,6 +171,8 @@ export interface ServiceOptions {
   practiceUpstreams?: PracticeUpstreams
   /** The plugin shelf's folder (default: PLUGINS_DIR). */
   pluginsDir?: string | null
+  /** The approved browser connector combinations (default: shared/browser-connectors/approved.json). */
+  browserConnectors?: BrowserConnectorCatalog
 }
 
 export function createServices(conn: Database.Database, brokerCipher: BrokerCipherState = brokerCipherFromEnv(), options: ServiceOptions = {}) {
@@ -237,6 +243,13 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // 「もう一方の AI に聞く」: kept here, handed to the apps in their policy (chat-and-agents.md).
   const secondOpinion = createSecondOpinionSettingService(shared)
   const agentPolicy = createAgentPolicyService({ agentSandbox, agentBrowser, agentStops, secondOpinion, digest: sha256TokenDigest, push })
+  // 「ブラウザ操作」 plans (agent-browser.md "Plans, executions, permits and locks"): the approved
+  // combinations from shared/browser-connectors/approved.json; the member's setting and stops now.
+  const browserPlans = createBrowserPlanService({
+    ...shared, memberships: repos.memberships, tokenDigest: sha256TokenDigest,
+    catalog: options.browserConnectors ?? fileBrowserConnectorCatalog(), executionLookup: sqliteBrowserExecutionLookup(conn),
+    browserPolicy: member => agentBrowser.policyFor(member), aiStops: member => agentStops.policyFor(member),
+  })
   const brokerTokens = createBrokerTokenService({
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
     // With several company keys, the one a plugin's connection uses (bound below).
@@ -719,7 +732,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       isOperator: userId => operatorUserIds().has(userId),
       indexRecords: companyId => recordIndexer.schedule(companyId),
       // The responsible person of a scheduled job left or lost rights: the job pauses (jobs.md).
-      onMemberLeft: (companyId, userId, actorId) => jobs.memberLeft(companyId, userId, actorId),
+      onMemberLeft: (companyId, userId, actorId) => {
+        jobs.memberLeft(companyId, userId, actorId)
+        // …and their browser plans close, a claimed execution is void, their type grants go (agent-browser.md).
+        browserPlans.memberLeft(companyId, userId)
+      },
       onRoleChanged: (companyId, userId, actorId) => jobs.roleChanged(companyId, userId, actorId),
     }),
     /**
@@ -783,6 +800,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     agentEvents,
     agentSandbox,
     agentBrowser,
+    browserPlans,
     agentStops,
     agentPolicy,
     secondOpinion,

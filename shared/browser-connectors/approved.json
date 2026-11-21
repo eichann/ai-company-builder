@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "combinations": [
+    {
+      "connector": "lstep",
+      "version": "0.2.0",
+      "declarationHash": "sha256:f9cb1cf87131406c9d517aa0427c580aefe3e5735090649686333c6a038e1938",
+      "checkerHash": "sha256:ec1daec07142d9b501aaad64be48e8d789ca86062c2a8e16a79f08c4a8a403fb",
+      "factsVersion": 1,
+      "minAppVersion": null,
+      "status": "approved",
+      "declaration": "id: lstep\nversion: 0.2.0\nlabel: Lステップ\ncontract: 1\nbrowser:\n  host: manager.linestep.net\n  asset_hosts: [d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net]\n  account:\n    label: LINE アカウント\n  operations:\n    reminder_step_add_template:\n      label: リマインダの段にテンプレートを足す\n      effect: write\n      checker: lstep.reminder_step\n      lock:\n        kind: lstep.reminder_step\n      delivers: none\n      shared: 全部の回で共有のリマインダです。前の回の人にも届きます。\n      target:\n        reminder: id\n        step: id\n      change:\n        template: id\n      writes:\n        - method: POST\n          path: /line/episode/step/pack/template\n          body: { content_id: \"{step}\", template_id: \"{template}\" }\n          ignore_body: [_token, _lm_user_id]\n      expect:\n        - { list: templates, add: \"{template}\" }\n      facts:\n        account: { required: true }\n        step_parent: { required: true }\n        state: { required: true, complete: true }\n        names: { required: true }\n        template_bodies: { required: true, complete: true }\n        shared_with: { required: true, complete: true }\n"
+    }
+  ]
+}
