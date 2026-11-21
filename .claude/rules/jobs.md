@@ -754,16 +754,26 @@ POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile { done }  
   (`DRIVE_FILE_NOT_THIS_JOB`), `DRIVE_FILE_CHANGED_SINCE`, `DRIVE_FILE_NOT_VERIFIABLE` (a Google document whose state since its put
   cannot be proven — e.g. every document put before that rule: the first run after it writes a new file), `keepForever` /
   `DRIVE_FILE_FIXED` (`google-drive.md`).
-- **Reconcile** (`reconcile`): only on a `needs_person` / `expired` occurrence (else 409 `NOT_RETRYABLE`), the body
-  `{ done: boolean }` (400), an operation of its PC run whose result is unknown (else 404 `OPERATION_NOT_FOUND`; one
-  still marked in flight on a run that no longer runs is made `unknown` first, as a finish does — never stuck); the
-  run core's reconciliation (`aiRuns.reconcileFor`, shared with `reconcile`: `reconciled_by` = the owner / admin, a run
-  `waiting_reconcile` with nothing unknown left → `open`). The admin console asks them to have the responsible person
-  look first (an owner / admin cannot see the person's drafts). The in-flight mark and the answer are one transaction.
+- **Reconcile** (`reconcile`): only on a `needs_person` / `expired` / **`held`** occurrence (`JOB_RECONCILE_STATES`, else
+  409 `NOT_RETRYABLE`; `held` since stage 4b-0.5, owner memo 「段4b 設計メモ」 §4-1: a pause / the company's stop / a restore
+  that ended a run while a Drive put or a draft was in flight left it held with its run `waiting_reconcile`, and before
+  nobody could record what happened — today's time jobs too), the body `{ done: boolean }` (400), an operation of its PC
+  run whose result is unknown (else 404 `OPERATION_NOT_FOUND`; one still marked in flight on a run that no longer runs is
+  made `unknown` first, as a finish does — never stuck); the run core's reconciliation (`aiRuns.reconcileFor`, shared
+  with `reconcile`: `reconciled_by` = the owner / admin). **Reconciling never resumes**: a job's run waiting for it goes
+  back to `open` only while its occurrence is `running` (`ai-runs.ts` `mayGoOn`, also on the run's own
+  `…/reconcile`); otherwise it stays `waiting_reconcile` (stopped: its token fenced, renew refused), a held occurrence
+  stays held (a resume runs nothing; 「もう一度」 stays `NOT_RETRYABLE`), and a `needs_person` / `expired` one runs again
+  only by 「もう一度」. A frozen occurrence (a later build's shape) is the one 404 here; back on its build it can be
+  reconciled the same way. Who: owner / admin, as today (the responsible person's own part, D11, is 4b-1). The admin
+  console asks them to have the responsible person look first (an owner / admin cannot see the person's drafts). The
+  in-flight mark and the answer are one transaction. Test: `job-runs.test.ts` "a held occurrence whose run waits for
+  reconciliation" (F5 / F6).
 - **The view** (`GET /jobs/:jobId/occurrences`, owners / admins only, `JobServiceDeps.occurrenceRetry` → `viewOf`):
   `retries`, `retriedBy`, `retriedAt`, and on a `needs_person` / `expired` one `retry` (`{ allowed: true }` or
-  `{ allowed: false, why }`), `unknownOperations` (key and kind only) and `madeBefore` (kinds and counts). The responsible
-  person's view has none.
+  `{ allowed: false, why }`), `unknownOperations` (key and kind only) and `madeBefore` (kinds and counts); on a `held` one
+  `unknownOperations` only (stage 4b-0.5: the admin console's ［作られていた］［作られていなかった］ then show for it, no
+  ［もう一度］). The responsible person's view has none.
 - **Told again, in its own words**: an occurrence notice's key is `<kind>:<job>:<occurrence>:<retries>:<code>`, read
   from the occurrence as written in that transaction — a second failure after a press is told once more, and the bell
   words an older notice by the code it was written with (a press clears the occurrence's own code); a key without a code

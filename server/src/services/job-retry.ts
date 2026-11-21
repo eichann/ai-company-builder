@@ -25,7 +25,7 @@
  * Anyone else: 403 before anything; an occurrence of another job or company, or none: the one 404 `JOB_NOT_FOUND`.
  */
 import {
-  JOB_PC_STEP, JOB_RETRY_MAX, JOB_RETRY_STATES, isJobId, isOccurrenceId, jobRetryExpiresAt, storedJobDefinition,
+  JOB_PC_STEP, JOB_RECONCILE_STATES, JOB_RETRY_MAX, JOB_RETRY_STATES, isJobId, isOccurrenceId, jobRetryExpiresAt, storedJobDefinition,
   type JobDefinition, type JobDeliveryPlace, type JobRetryBlock,
 } from '../../shared/core/jobs'
 import { jobRetryBlockText } from '../../shared/core/job-words'
@@ -164,8 +164,10 @@ export function createJobRetry(deps: JobRetryDeps) {
   /** What an owner / admin's occurrence view adds (`JobOccurrenceView`'s 「もう一度」 fields). */
   function viewOf(companyId: string, occ: JobOccurrenceRow): Pick<JobOccurrenceView, 'retries' | 'retriedBy' | 'retriedAt' | 'retry' | 'unknownOperations' | 'madeBefore'> {
     const base = { retries: occ.retries ?? 0, retriedBy: occ.retriedBy ?? null, retriedAt: occ.retriedAt ?? null }
-    if (!JOB_RETRY_STATES.includes(occ.state)) return base
+    if (!JOB_RECONCILE_STATES.includes(occ.state)) return base
     const handle = companyData.forCompany(companyId)
+    // Held (stage 4b-0.5): never sent back, but what its ended run left unknown is offered for reconciling.
+    if (!JOB_RETRY_STATES.includes(occ.state)) return { ...base, unknownOperations: unknownOperations(handle, occ) }
     const job = handle.jobs.find(occ.jobId)
     if (!job) return base
     const why = blockOf({ handle, job, occ, version: handle.jobs.version(job.id, occ.jobVersion) }, clock.nowMs())
@@ -224,8 +226,9 @@ export function createJobRetry(deps: JobRetryDeps) {
       if (!f) return NOT_FOUND()
       const done = typeof body === 'object' && body !== null ? (body as { done?: unknown }).done : undefined
       if (typeof done !== 'boolean') return refuse('bad-request', 'done is true or false')
-      // Only an occurrence a person looks at now (a running one's run is still its app's to finish).
-      if (!JOB_RETRY_STATES.includes(f.occ.state)) return BLOCKED('NOT_RETRYABLE')
+      // Only an occurrence a person looks at now (a running one's run is still its app's to finish) — or one held while
+      // its run had something in flight (stage 4b-0.5): reconciling it resumes nothing (ai-runs.ts `reconcileRun`).
+      if (!JOB_RECONCILE_STATES.includes(f.occ.state)) return BLOCKED('NOT_RETRYABLE')
       const run = f.occ.runId ? f.handle.aiRuns.byId(f.occ.runId) : null
       if (!run || run.step !== JOB_PC_STEP || !unknownOperations(f.handle, f.occ).some(o => o.key === key)) {
         return refuse('not-found', '操作が見つかりません', { code: 'OPERATION_NOT_FOUND' })

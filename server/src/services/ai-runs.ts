@@ -326,8 +326,17 @@ export function createAiRunService(deps: AiRunDeps) {
     }))
   }
 
-  /** A person says whether an operation of unknown result happened; with nothing unknown left, a run waiting for it is `open`. */
-  function reconcileRun(r: AiRunRepository, run: AiRunRow, key: string, done: boolean, byUserId: string): Outcome<{ run: AiRunView }> {
+  /**
+   * A scheduled job's run may go on after a reconciliation only while its occurrence is `running` (stage 4b-0.5, owner memo
+   * 「段4b 設計メモ」 §4-1): one held, needing a person, expired — or not there for this build — stays stopped; only the
+   * occurrence's 「もう一度」 (or nothing, for a held one) runs it again. Any other run: as before.
+   */
+  function mayGoOn(companyId: string, run: AiRunRow): boolean {
+    return run.subject.kind !== 'occurrence' || companyData.forCompany(companyId).jobs.occurrence(run.subject.id)?.state === 'running'
+  }
+
+  /** A person says whether an operation of unknown result happened; with nothing unknown left, a run waiting for it is `open` (`mayGoOn`). */
+  function reconcileRun(companyId: string, r: AiRunRepository, run: AiRunRow, key: string, done: boolean, byUserId: string): Outcome<{ run: AiRunView }> {
     const op = OPERATION_KEY_RE.test(key) ? r.operation(run.id, key) : null
     if (!op) return refuse('not-found', '操作が見つかりません', { code: 'OPERATION_NOT_FOUND' })
     const at = clock.now()
@@ -336,7 +345,7 @@ export function createAiRunService(deps: AiRunDeps) {
         return refuse('conflict', 'この操作は結果の確かめを待っていません', { code: 'OPERATION_NOT_UNKNOWN' })
       }
       let current = run
-      if (run.state === 'waiting_reconcile' && unsettled(r.operations(run.id)).length === 0) {
+      if (run.state === 'waiting_reconcile' && unsettled(r.operations(run.id)).length === 0 && mayGoOn(companyId, run)) {
         const next: AiRunRow = { ...run, state: 'open', failureClass: null, failureCode: null, updatedAt: at }
         if (save(r, run, next)) current = next
       }
@@ -513,7 +522,7 @@ export function createAiRunService(deps: AiRunDeps) {
       const own = ownRun(member, runId)
       if ('ok' in own) return own
       if (!isObj(body) || typeof body.done !== 'boolean') return refuse('bad-request', 'done is true or false')
-      return reconcileRun(own.r, own.run, key, body.done, member.userId)
+      return reconcileRun(member.companyId, own.r, own.run, key, body.done, member.userId)
     },
 
     /**
@@ -525,7 +534,7 @@ export function createAiRunService(deps: AiRunDeps) {
       const r = repo(companyId)
       const run = r.byId(runId)
       if (!run) return refuse('not-found', '操作が見つかりません', { code: 'OPERATION_NOT_FOUND' })
-      return reconcileRun(r, run, key, done, byUserId)
+      return reconcileRun(companyId, r, run, key, done, byUserId)
     },
 
     /** GET …/ai-runs — the member's open runs of records only: the app's 「AI の番」 knows no other kind. */
