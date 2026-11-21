@@ -9,12 +9,14 @@
  *   root's expiry is not looked at. Only the newest root's expiry decides whether anything is
  *   usable now.
  * - **Root conflict halts for good**: two different texts for one root version, each a valid step
- *   from the version before it, = the root keys were misused. The record keeps `halted`; nothing
- *   is accepted and no code may run, across restarts, until an app that carries a newer root
- *   (Codex's P1 condition 3). A text that does not authenticate is noise and changes nothing.
- * - **Records per server × company × generation** (condition 2): the last accepted list's version,
- *   text hash and `issued`, and the same for freshness, keyed by server and company; a record is
- *   used only while its role's generation (`roleGeneration`) is the current root's.
+ *   from the version before it, = the root keys were misused. The halt is its own stored value
+ *   (and is also kept in the record): nothing is accepted and no code may run, across restarts and
+ *   a damaged record, until an app that carries a newer root (Codex's P1 condition 3). A text that
+ *   does not authenticate is noise and changes nothing.
+ * - **Records per server × company × generation** (condition 2): of the last accepted list and
+ *   freshness document, only what was read from the verified text (version, hash, issued,
+ *   expires, and the list a freshness document is bound to), keyed by server and company; a record
+ *   is used only while its role's generation (`roleGeneration`) is the current root's.
  */
 import {
   openEnvelope, parseEnvelope, parseFreshness, parseRoot, parseTargets, parseTrustTime, refuse, roleGeneration, rootVersionOf,
@@ -28,13 +30,17 @@ export interface TrustedRoot extends ParsedRoot {
   envelope: SignedEnvelope
 }
 
+/** What the record keeps of an accepted document: only values read from its verified text. */
 export interface ListMark {
   generation: string
   version: number
   /** sha256 (hex) of the signed text. */
   sha256: string
-  /** `issued`, epoch ms. */
+  /** `issued` and `expires`, epoch ms. */
   issued: number
+  expires: number
+  /** Freshness only: sha256 of the list it is bound to. */
+  boundTo?: string
 }
 
 export interface TrustHalt { version: number; reason: string }
@@ -49,8 +55,14 @@ export interface TrustState {
   /** Last accepted freshness document per `markKey(server, company)`. */
   freshMarks: Record<string, ListMark>
   halted: TrustHalt | null
-  /** Why the stored record was not used (unreadable, a chain that did not authenticate): trust is "unknown", not "empty". */
+  /** Why the stored record was not (fully) used, or why a root update stopped: trust is "unknown", not "empty". */
   problem: string | null
+}
+
+/** What P2 stores: the record and, in its own small file, a halt. Either may be missing or damaged. */
+export interface StoredTrust {
+  record?: string | null
+  halt?: string | null
 }
 
 export interface TrustContext {
@@ -60,12 +72,12 @@ export interface TrustContext {
   now: number
 }
 
-/** A list this state accepted, for one server and company. */
+/** A list this state accepted, for one server and company: a handle; its times are read from the record. */
 export interface AcceptedList {
   server: string
   companyId: string
   document: TargetsDocument
-  /** sha256 (hex) of its signed text: what a freshness document is bound to. */
+  /** sha256 (hex) of its signed text: what identifies it in the record and binds a freshness document. */
   sha256: string
 }
 
@@ -117,37 +129,69 @@ interface ChainOutcome {
   error: string | null
 }
 
+const conflictHalt = (version: number): TrustHalt => ({ version, reason: `two different signed roots for version ${version}` })
+
 /**
- * Extend `chain` with the offered root envelopes (any order). Same text as a known version:
- * nothing. Another text for a known version that is itself a valid step from the version before
- * it: halt. Older than what the chain starts with: ignored. A step that fails: stop there, keep
- * what authenticated so far.
+ * Extend `chain` with root envelopes a server offered (any order, junk included). Per version,
+ * every candidate is tried: one that does not authenticate is skipped, so junk cannot block the
+ * real root. A known version: another text that is itself a valid step from the version before
+ * halts. A new version: two different texts that both authenticate halt; one moves the chain on;
+ * none stops there (reported). Versions at or below the chain's start without a known text are ignored.
  */
 function extendChain(chain: TrustedRoot[], offered: readonly unknown[], crypto: PluginTrustCrypto): ChainOutcome {
   const out = [...chain]
   const byVersion = new Map(out.map(r => [r.document.version, r]))
-  const sorted = offered
-    .map(env => ({ env, version: rootVersionOf(env) }))
-    .filter((e): e is { env: unknown; version: number } => e.version !== null)
-    .sort((a, b) => a.version - b.version)
-  for (const { env, version } of sorted) {
+  const candidates = new Map<number, SignedEnvelope[]>()
+  for (const value of offered) {
+    const env = parseEnvelope(value)
+    const version = rootVersionOf(env)
+    if (!env || version === null) continue
+    // every envelope is a candidate: the same text may come once with too few signatures and once with enough
+    candidates.set(version, [...(candidates.get(version) ?? []), env])
+  }
+  for (const version of [...candidates.keys()].sort((a, b) => a - b)) {
+    const envs = candidates.get(version) as SignedEnvelope[]
     const known = byVersion.get(version)
     if (known) {
-      if (parseEnvelope(env)?.signed === known.envelope.signed) continue
       const before = byVersion.get(version - 1)
-      if (before && stepRoot(before, env, crypto).ok) {
-        return { chain: out, halted: { version, reason: `two different signed roots for version ${version}` }, error: null }
+      if (before && envs.some(env => env.signed !== known.envelope.signed && stepRoot(before, env, crypto).ok)) {
+        return { chain: out, halted: conflictHalt(version), error: null }
       }
       continue
     }
     const newest = out[out.length - 1]
     if (version <= newest.document.version) continue
-    const step = stepRoot(newest, env, crypto)
-    if (!step.ok) return { chain: out, halted: null, error: `root v${version}: ${step.code}${step.detail ? ` (${step.detail})` : ''}` }
-    out.push(step.root)
-    byVersion.set(version, step.root)
+    const steps = envs.map(env => stepRoot(newest, env, crypto))
+    const good = steps.flatMap(s => (s.ok ? [s.root] : []))
+    if (new Set(good.map(r => r.envelope.signed)).size > 1) return { chain: out, halted: conflictHalt(version), error: null }
+    if (good.length === 0) {
+      const first = steps[0] as { code: string; detail?: string }
+      return { chain: out, halted: null, error: `root v${version}: ${first.code}${first.detail ? ` (${first.detail})` : ''}` }
+    }
+    out.push(good[0])
+    byVersion.set(version, good[0])
   }
   return { chain: out, halted: null, error: null }
+}
+
+/**
+ * Re-authenticate a stored chain from the app's root, strictly: every stored entry must be an
+ * envelope, and every entry above the app's version must be the next authentic step. Entries at
+ * or below the app's version are the app's own history (a same-version text differing from the
+ * app's loses to it). Anything else → null (the caller falls back and says so).
+ */
+function restoreChain(baked: TrustedRoot, stored: readonly unknown[], crypto: PluginTrustCrypto): TrustedRoot[] | null {
+  const chain = [baked]
+  for (const value of stored) {
+    const env = parseEnvelope(value)
+    const version = rootVersionOf(env)
+    if (!env || version === null) return null
+    if (version <= baked.document.version) continue
+    const step = stepRoot(chain[chain.length - 1], env, crypto)
+    if (!step.ok) return null
+    chain.push(step.root)
+  }
+  return chain
 }
 
 export const rootIsFresh = (state: TrustState, now: number): boolean => time(state.root.document.expires) > now
@@ -156,55 +200,82 @@ export const rootIsFresh = (state: TrustState, now: number): boolean => time(sta
 
 const STATE_FORMAT = 1
 
-/** What is stored (P2 writes it): the chain's envelopes, the records and a halt. */
-export function serializeTrustState(state: TrustState): string {
-  return JSON.stringify({
-    format: STATE_FORMAT,
-    chain: state.chain.map(r => r.envelope),
-    marks: state.marks,
-    freshMarks: state.freshMarks,
-    halted: state.halted,
-  })
+/**
+ * What is stored (P2 writes both): the record (chain envelopes, records, the halt again) and the
+ * halt alone in its own small file — so a damaged record never lifts a halt.
+ */
+export function serializeTrustState(state: TrustState): { record: string; halt: string | null } {
+  return {
+    record: JSON.stringify({ format: STATE_FORMAT, chain: state.chain.map(r => r.envelope), marks: state.marks, freshMarks: state.freshMarks, halted: state.halted }),
+    halt: state.halted ? JSON.stringify({ format: STATE_FORMAT, halted: state.halted }) : null,
+  }
 }
 
+const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const isMark = (m: unknown): m is ListMark => {
   if (typeof m !== 'object' || m === null) return false
   const v = m as Record<string, unknown>
   return typeof v.generation === 'string' && Number.isInteger(v.version) && typeof v.sha256 === 'string'
-    && /^[0-9a-f]{64}$/.test(v.sha256) && typeof v.issued === 'number' && Number.isFinite(v.issued)
+    && /^[0-9a-f]{64}$/.test(v.sha256) && isFiniteNumber(v.issued) && isFiniteNumber(v.expires)
+    && (v.boundTo === undefined || (typeof v.boundTo === 'string' && /^[0-9a-f]{64}$/.test(v.boundTo)))
 }
 const marksOf = (v: unknown): Record<string, ListMark> | null => {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
   const entries = Object.entries(v as Record<string, unknown>)
   return entries.every(([, m]) => isMark(m)) ? Object.fromEntries(entries) as Record<string, ListMark> : null
 }
+const haltOf = (v: unknown): TrustHalt | null => {
+  if (typeof v !== 'object' || v === null) return null
+  const h = v as Record<string, unknown>
+  return Number.isInteger(h.version) && (h.version as number) >= 1 && typeof h.reason === 'string' ? { version: h.version as number, reason: h.reason } : null
+}
+
+/**
+ * Every halt that can be read from what was stored: the halt file, the record's copy, and — when
+ * either text is damaged — a `"version": N` found next to `halted` in the raw text. A halt file
+ * that is present but yields nothing is a halt of unknown version (taken as the app's own).
+ */
+function storedHalts(stored: StoredTrust, bakedVersion: number): TrustHalt[] {
+  const halts: TrustHalt[] = []
+  const fromFile = stored.halt ? safeJson(stored.halt) as Record<string, unknown> | undefined : undefined
+  const fromRecord = stored.record ? safeJson(stored.record) as Record<string, unknown> | undefined : undefined
+  for (const h of [haltOf(fromFile?.halted), haltOf(fromRecord?.halted)]) if (h) halts.push(h)
+  for (const raw of [stored.halt, stored.record]) {
+    const m = raw ? /"halted"\s*:\s*\{\s*"version"\s*:\s*(\d{1,10})/.exec(raw) : null
+    if (m) halts.push({ version: Number(m[1]), reason: 'a halt recovered from a damaged trust record' })
+  }
+  if (stored.halt && stored.halt.trim() !== '' && halts.length === 0) {
+    halts.push({ version: bakedVersion, reason: 'the stored halt could not be read' })
+  }
+  return halts
+}
 
 /**
  * Start from the app's own root and what was stored (v3 §3 「始まり」):
+ * - a halt readable from the halt file or the record (even a damaged one) for a version the app's
+ *   root has not passed → halted, whatever else is stored;
  * - nothing stored → the app's root, no records;
- * - unreadable, or a stored chain that does not authenticate from the app's root → the same, with
- *   `problem` set (unknown, not "empty");
- * - a stored halt for a version the app's root has not passed → halted;
- * - otherwise the stored chain re-authenticated from the app's root (only versions above it; a
- *   stored root of the app's own version with another text loses to the app's), with the records.
+ * - an unreadable record, or a stored chain with any entry that is not an authentic step from the
+ *   app's root → the app's root, no records, `problem` set (unknown, not "empty");
+ * - otherwise the stored chain (only versions above the app's) with the records.
  */
-export function startTrust(bakedEnvelope: unknown, stored: string | null | undefined, crypto: PluginTrustCrypto): TrustState {
+export function startTrust(bakedEnvelope: unknown, stored: StoredTrust | null | undefined, crypto: PluginTrustCrypto): TrustState {
   const baked = bakedRoot(bakedEnvelope, crypto)
   const base: TrustState = { root: baked, chain: [baked], marks: {}, freshMarks: {}, halted: null, problem: null }
-  if (stored === null || stored === undefined) return base
-  const parsed = safeJson(stored) as Record<string, unknown> | undefined
+  if (!stored) return base
+  const halt = storedHalts(stored, baked.document.version)
+    .filter(h => h.version >= baked.document.version)
+    .sort((a, b) => b.version - a.version)[0]
+  if (halt) return { ...base, halted: halt }
+  if (stored.record === null || stored.record === undefined) return base
+  const parsed = safeJson(stored.record) as Record<string, unknown> | undefined
   const marks = marksOf(parsed?.marks)
   const freshMarks = marksOf(parsed?.freshMarks)
-  const halted = parsed?.halted as TrustHalt | null | undefined
-  const haltOk = halted === null || (typeof halted === 'object' && Number.isInteger(halted?.version) && typeof halted?.reason === 'string')
-  if (!parsed || parsed.format !== STATE_FORMAT || !Array.isArray(parsed.chain) || !marks || !freshMarks || !haltOk) {
+  if (!parsed || parsed.format !== STATE_FORMAT || !Array.isArray(parsed.chain) || !marks || !freshMarks) {
     return { ...base, problem: 'the stored trust record could not be read: started from the app\'s root' }
   }
-  if (halted && halted.version >= baked.document.version) return { ...base, halted }
-  const extended = extendChain([baked], parsed.chain, crypto)
-  if (extended.halted) return { ...base, halted: extended.halted }
-  if (extended.error) return { ...base, problem: `the stored chain did not authenticate (${extended.error}): started from the app's root` }
-  const chain = extended.chain
+  const chain = restoreChain(baked, parsed.chain, crypto)
+  if (!chain) return { ...base, problem: 'the stored chain did not authenticate: started from the app\'s root' }
   return { root: chain[chain.length - 1], chain, marks, freshMarks, halted: null, problem: null }
 }
 
@@ -214,7 +285,7 @@ export function updateTrustRoot(state: TrustState, envelopes: readonly unknown[]
   const extended = extendChain(state.chain, envelopes, crypto)
   if (extended.halted) return { ...state, halted: extended.halted }
   const chain = extended.chain
-  return { ...state, root: chain[chain.length - 1], chain, problem: extended.error }
+  return { ...state, root: chain[chain.length - 1], chain, problem: extended.error ?? state.problem }
 }
 
 // ---------------------------------------------------------------- the company's list
@@ -253,7 +324,8 @@ export function acceptTargets(state: TrustState, envelope: unknown, ctx: TrustCo
   if (doc.scope !== `company:${ctx.companyId}`) return refuse('other-company')
   if (doc.server !== ctx.server) return refuse('other-server')
   const issued = time(doc.issued)
-  const timing = timeProblem(issued, time(doc.expires), PLUGIN_TRUST_POLICY.maxTargetsLifetimeMs, ctx.now)
+  const expires = time(doc.expires)
+  const timing = timeProblem(issued, expires, PLUGIN_TRUST_POLICY.maxTargetsLifetimeMs, ctx.now)
   if (timing) return timing as TrustResult<never>
   const seen = new Set<string>()
   for (const p of doc.packages) {
@@ -268,27 +340,28 @@ export function acceptTargets(state: TrustState, envelope: unknown, ctx: TrustCo
   if (against) return against as TrustResult<never>
   return {
     ok: true,
-    state: { ...state, marks: { ...state.marks, [key]: { generation, version: doc.version, sha256, issued } } },
+    state: { ...state, marks: { ...state.marks, [key]: { generation, version: doc.version, sha256, issued, expires } } },
     list: { server: ctx.server, companyId: ctx.companyId, document: doc, sha256 },
   }
 }
 
-/** The list is the one this state's record holds now for its server and company, under the current targets generation. */
-function listIsCurrent(state: TrustState, list: AcceptedList, ctx: TrustContext): ListMark | null {
+/** The record this state holds now for the context's server and company under the current targets generation, if `list` is it. */
+function currentListMark(state: TrustState, list: AcceptedList, ctx: TrustContext): ListMark | null {
   if (list.server !== ctx.server || list.companyId !== ctx.companyId) return null
   const mark = markOf(state.marks, markKey(ctx.server, ctx.companyId), roleGeneration(state.root, 'targets'))
-  return mark && mark.version === list.document.version && mark.sha256 === list.sha256 ? mark : null
+  return mark && mark.sha256 === list.sha256 ? mark : null
 }
 
 // ---------------------------------------------------------------- freshness
 
-/** Accept a freshness document for the current list (v3.1 §2). */
+/** Accept a freshness document for the current list (v3.1 §2). The binding is checked against the record, not the handle. */
 export function acceptFreshness(
   state: TrustState, envelope: unknown, list: AcceptedList, ctx: TrustContext, crypto: PluginTrustCrypto,
 ): TrustResult<{ state: TrustState; freshness: AcceptedFreshness }> {
   if (state.halted) return refuse('halted', state.halted.reason)
   if (!rootIsFresh(state, ctx.now)) return refuse('root-expired')
-  if (!listIsCurrent(state, list, ctx)) return refuse('list-not-current')
+  const listMark = currentListMark(state, list, ctx)
+  if (!listMark) return refuse('list-not-current')
   const opened = openEnvelope(envelope, TRUST_NAMESPACES.freshness, state.root.keys, state.root.document.roles.freshness, crypto)
   if (!opened.ok) return opened
   const parsed = parseFreshness(opened.payload)
@@ -296,9 +369,10 @@ export function acceptFreshness(
   const doc = parsed.document
   if (doc.scope !== `company:${ctx.companyId}`) return refuse('other-company')
   if (doc.server !== ctx.server) return refuse('other-server')
-  if (doc.targets.version !== list.document.version || doc.targets.sha256 !== list.sha256) return refuse('other-list')
+  if (doc.targets.version !== listMark.version || doc.targets.sha256 !== listMark.sha256) return refuse('other-list')
   const issued = time(doc.issued)
-  const timing = timeProblem(issued, time(doc.expires), PLUGIN_TRUST_POLICY.maxFreshnessLifetimeMs, ctx.now)
+  const expires = time(doc.expires)
+  const timing = timeProblem(issued, expires, PLUGIN_TRUST_POLICY.maxFreshnessLifetimeMs, ctx.now)
   if (timing) return timing as TrustResult<never>
   const sha256 = sha256Hex(opened.envelope.signed, crypto)
   const key = markKey(ctx.server, ctx.companyId)
@@ -307,7 +381,7 @@ export function acceptFreshness(
   if (against) return against as TrustResult<never>
   return {
     ok: true,
-    state: { ...state, freshMarks: { ...state.freshMarks, [key]: { generation, version: doc.version, sha256, issued } } },
+    state: { ...state, freshMarks: { ...state.freshMarks, [key]: { generation, version: doc.version, sha256, issued, expires, boundTo: listMark.sha256 } } },
     freshness: { server: ctx.server, companyId: ctx.companyId, document: doc, sha256 },
   }
 }
@@ -317,19 +391,21 @@ export function acceptFreshness(
 /**
  * Until when the company's plugin code may run (v3.1 §2): min(newest root, list, freshness)
  * expiry — needing the list **and** its freshness, both still the current records of their
- * generations (a root that replaced either key revokes them), and a clock not behind what was seen.
+ * generations (a root that replaced either key revokes them), the freshness bound to that list,
+ * and a clock not behind what was seen. Every time and version comes from the record (read from
+ * verified text when it was accepted); the handles only say which documents are meant.
  * P1 only answers; P4 closes frames and engines with it.
  */
 export function codeMayRunUntil(state: TrustState, list: AcceptedList | null, freshness: AcceptedFreshness | null, ctx: TrustContext): TrustResult<{ until: number }> {
   if (state.halted) return refuse('halted', state.halted.reason)
-  const mark = list ? listIsCurrent(state, list, ctx) : null
-  if (!list || !mark) return refuse('list-not-current')
+  const mark = list ? currentListMark(state, list, ctx) : null
+  if (!mark) return refuse('list-not-current')
   if (!freshness) return refuse('no-freshness')
   const fresh = markOf(state.freshMarks, markKey(ctx.server, ctx.companyId), roleGeneration(state.root, 'freshness'))
-  if (!fresh || fresh.sha256 !== freshness.sha256 || freshness.server !== ctx.server || freshness.companyId !== ctx.companyId
-    || freshness.document.targets.sha256 !== list.sha256) return refuse('freshness-not-current')
+  if (!fresh || fresh.sha256 !== freshness.sha256 || fresh.boundTo !== mark.sha256
+    || freshness.server !== ctx.server || freshness.companyId !== ctx.companyId) return refuse('freshness-not-current')
   if (ctx.now < Math.max(mark.issued, fresh.issued) - PLUGIN_TRUST_POLICY.clockSkewMs) return refuse('clock-went-back')
-  const until = Math.min(time(state.root.document.expires), time(list.document.expires), time(freshness.document.expires))
+  const until = Math.min(time(state.root.document.expires), mark.expires, fresh.expires)
   if (until <= ctx.now) return refuse('expired')
   return { ok: true, until }
 }

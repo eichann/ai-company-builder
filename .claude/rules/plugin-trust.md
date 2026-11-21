@@ -59,16 +59,30 @@ two roles**. A signature counts only for a key the role lists, in the role's nam
   expired v2 → v3 authenticates).
 - **Freshness**: only the newest root's `expires` — past it, nothing is accepted and no code runs
   until a newer root arrives.
-- **Start** (`startTrust(bakedEnvelope, stored)`): the app's own root (a build carrying one that
-  fails its own threshold throws), then the stored chain re-authenticated from it (versions above
-  it only; a stored root of the same version with another text loses to the app's). Unreadable
-  record or a chain that does not authenticate → the app's root, **no records**, `problem` set
-  (unknown, never "empty").
+- **Stored as two values** (`serializeTrustState` → `{ record, halt }`; P2 writes `halt` to its
+  own small file): the record (chain envelopes, records, the halt again) and the halt alone.
+- **Start** (`startTrust(bakedEnvelope, { record, halt })`): the app's own root (a build carrying
+  one that fails its own threshold throws). **First the halt**: from the halt file, the record's
+  copy, or — when either text is damaged — a `"halted": { "version": N` still found in the raw
+  text; a halt file present but unreadable counts as a halt at the app's version. A halt at or
+  above the app's root version → halted, whatever the record says. Then the record: unreadable,
+  or a stored chain with **any** entry that is not an envelope or not the next authentic step
+  above the app's version → the app's root, **no records**, `problem` set (unknown, never
+  "empty"). Stored entries at or below the app's version are its own history (a same-version
+  text differing from the app's loses to it).
+- **Updates** (`updateTrustRoot`): every envelope offered for a version is tried — junk, or the
+  same text with too few signatures, never blocks the real root. A version where none
+  authenticates stops the update there (`problem`; an earlier `problem` from the start is kept,
+  not overwritten).
 - **Conflict** (Codex condition 3): another text for a known version that is itself a valid step
-  from the version before it → `halted { version, reason }`, kept in the record; every accept and
-  `codeMayRunUntil` answers `halted`, after a restart too and whatever roots the server sends.
+  from the version before it, or two different texts for a new version that both authenticate
+  (one answer) → `halted { version, reason }`; every accept and `codeMayRunUntil` answers
+  `halted`, after a restart, after the record is damaged and whatever roots the server sends.
   Only an app carrying a root **newer** than the halted version starts clean. A differing text
   that does not authenticate is noise (no halt: a server without root keys cannot stop everyone).
+  The app's own root version has no predecessor in the app, so a differing text **for the app's
+  own version** cannot be authenticated and is ignored (anyone can self-sign a "v1"; halting on it
+  would let a server stop every app).
 
 ## A company's list (`acceptTargets`, v3 §4–§5)
 
@@ -81,25 +95,38 @@ now + 10 min, `issued < expires ≤ issued + 90 days`, `expires > now`; no `id@v
 against the record of this **server × company × targets generation** (Codex condition 2): clock
 not 10 min behind its `issued`, no lower version (across restarts), the same version only with
 the same text (sha256), a step ≤ 1000, a higher version not issued earlier. Accepted → the
-record moves to `{ generation, version, sha256, issued }`.
+record moves to `{ generation, version, sha256, issued, expires }` — **only values read from the
+verified text**. The returned `AcceptedList` is a handle: what it carries is never trusted later
+(its `sha256` only says which document is meant).
 
 **Generation** = the role's threshold + its keys' decoded identities. A root that replaces the
 targets key changes it: the old generation's records stop applying (a stolen key's huge version
 or near-future `issued` cannot block recovery) and lists under the old key no longer verify.
+**Any change to a role's key set changes its generation**, an addition too: adding the emergency
+freshness key in a root update restarts the freshness records (the next freshness document is
+judged with nothing to compare, as on a first start; lists are untouched). Make such additions
+together with a planned rotation, or accept that one restart.
+
+**Shapes**: every level is closed (a key named `""` is an unknown key too); times are
+`YYYY-MM-DDTHH:MM:SS(.mmm)Z` and must be real calendar times (no `02-30`, no `24:00`); a signed
+text with a lone surrogate is refused (it has no one UTF-8 form, so two such strings could sign
+the same bytes).
 
 ## Freshness (`acceptFreshness`, v3.1 §2)
 
 A closed document "this list (its version and the sha256 of its signed text) is still current
 until X": the list must be the record's current one; freshness threshold in `acb-freshness-v1`;
-scope and server; bound to that list's version **and** hash; the same time rules with ≤ 3 days;
-monotonic per server × company × freshness generation.
+scope and server; bound to the **recorded** list's version **and** hash; the same time rules with
+≤ 3 days; monotonic per server × company × freshness generation. Its record also keeps the list
+it is bound to (`boundTo`).
 
 ## May code run? (`codeMayRunUntil`)
 
-`min(newest root, list, freshness)` expiry, only when not halted, the list is still the current
-record of the current targets generation (a newer list or a rotated key revokes it), its
-freshness is the current record of the current freshness generation and bound to it, and the
-clock is not behind the newest `issued` seen. P4 closes frames and engines at that time.
+`min(newest root, list, freshness)` expiry **taken from the record** (never from the handles'
+documents), only when not halted, the list is still the current record of the current targets
+generation (a newer list or a rotated key revokes it), the freshness handle is the current record
+of the current freshness generation and that record is bound to this list, and the clock is not
+behind the newest `issued` seen. P4 closes frames and engines at that time.
 
 ## Threat model limits (v3 §1, v3.1 §5) — what this does not protect
 
@@ -114,6 +141,10 @@ clock is not behind the newest `issued` seen. P4 closes frames and engines at th
   server, and the review that decides what is signed.
 - Server URLs are compared exactly as signed: the app must pass the server's public URL in the
   same spelling the signing tool writes.
+- The stored record and halt file are protected only as files of the member's OS account:
+  deleting **both** (or the whole record) is an action of that same user (or malware running as
+  them), outside this threat model — it can also replace the app. It lifts a halt and forgets the
+  records (the first-start case above). A damaged record alone never lifts a halt.
 
 ## Fixtures
 
@@ -126,9 +157,14 @@ ssh-keygen and pass their own `now` (2026-11-21T12:00Z), so the fixtures never g
 ## Tests
 
 `client/tests/plugin-trust.test.ts` (A signatures and root shape, B root history / conflict /
-restart, C the list, D a stolen signing key, H freshness), with the real adapter. Every guard was
-mutation-checked (removed or inverted → its named test fails). Three mutants are equivalent by
-construction and kept as defence in depth: the decoded-key comparison alone (strict base64 makes
-spellings unique; removed together with the base64 check → A6c fails), `verifySshSig`'s
-"signature's key = expected key" (verification uses the expected key anyway), and
-`listIsCurrent`'s server/company check (the record key and the text's hash already bind them).
+restart, C the list, D a stolen signing key, H freshness, R the review's cases: a malformed stored
+chain, keys named `""`, a halt surviving a damaged record, expiry from the record, junk root
+candidates, SSHSIG strictness — version, reserved, hash, types, trailing bytes —, lone surrogates,
+calendar times, the start `problem` kept), with the real adapter. Every guard was
+mutation-checked (removed or inverted → its named test fails; 79 mutations). Four mutants are
+equivalent by construction and kept as defence in depth: the decoded-key comparison alone (strict
+base64 makes spellings unique; removed together with the base64 check → A6c fails),
+`verifySshSig`'s "signature's key = expected key" (verification uses the expected key anyway),
+`currentListMark`'s server/company check (the record key and the text's hash already bind them),
+and parsing the halt file / the record's halt as JSON (the raw-text scan finds the same halt;
+removing the scan → R3 fails).

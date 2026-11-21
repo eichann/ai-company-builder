@@ -133,23 +133,34 @@ const SERVER_RE = /^https?:\/\/[^\s/?#]+$/
 export function parseTrustTime(value: unknown): number | null {
   if (typeof value !== 'string' || !ISO_RE.test(value)) return null
   const ms = Date.parse(value)
-  return Number.isFinite(ms) ? ms : null
+  // Date.parse rolls 2026-02-30 over to March 2 and 24:00 to the next day: only a real calendar time passes.
+  return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 19) === value.slice(0, 19) ? ms : null
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const isInt = (v: unknown, lo: number, hi: number): v is number => typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi
 const own = (o: Record<string, unknown>, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k)
-const extraKey = (o: Record<string, unknown>, allowed: readonly string[]): string | undefined => Object.keys(o).find(k => !allowed.includes(k))
+/**
+ * The first key `allowed` does not name, as an object (never a bare string: a key named `""` is
+ * falsy and would read as "none"), or null.
+ */
+const unknownKey = (o: Record<string, unknown>, allowed: readonly string[]): { name: string } | null => {
+  const name = Object.keys(o).find(k => !allowed.includes(k))
+  return name === undefined ? null : { name }
+}
 
 // ---------------------------------------------------------------- envelope
 
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
 export function parseEnvelope(value: unknown): SignedEnvelope | null {
-  if (!isRecord(value) || extraKey(value, ['signed', 'signatures'])) return null
+  if (!isRecord(value) || unknownKey(value, ['signed', 'signatures'])) return null
   const { signed, signatures } = value
   if (typeof signed !== 'string' || signed.length === 0 || signed.length > PLUGIN_TRUST_POLICY.maxSignedLength) return null
+  if (LONE_SURROGATE_RE.test(signed)) return null // two such strings can encode to the same UTF-8 bytes
   if (!Array.isArray(signatures) || signatures.length > PLUGIN_TRUST_POLICY.maxSignatures) return null
   for (const s of signatures) {
-    if (!isRecord(s) || extraKey(s, ['key_id', 'sig']) || typeof s.key_id !== 'string' || typeof s.sig !== 'string') return null
+    if (!isRecord(s) || unknownKey(s, ['key_id', 'sig']) || typeof s.key_id !== 'string' || typeof s.sig !== 'string') return null
   }
   return { signed, signatures: signatures as SignedEnvelope['signatures'] }
 }
@@ -201,8 +212,8 @@ export function rootVersionOf(value: unknown): number | null {
 export function parseRoot(value: unknown): { ok: true; root: ParsedRoot } | { ok: false; problem: string } {
   const bad = (problem: string) => ({ ok: false as const, problem })
   if (!isRecord(value)) return bad('not an object')
-  const extra = extraKey(value, ['_type', 'version', 'expires', 'keys', 'roles'])
-  if (extra) return bad(`unknown key ${extra}`)
+  const extra = unknownKey(value, ['_type', 'version', 'expires', 'keys', 'roles'])
+  if (extra) return bad(`unknown key ${JSON.stringify(extra.name)}`)
   if (value._type !== 'acb-root') return bad('_type')
   if (!isInt(value.version, 1, PLUGIN_TRUST_POLICY.maxVersion)) return bad('version')
   if (parseTrustTime(value.expires) === null) return bad('expires')
@@ -220,12 +231,12 @@ export function parseRoot(value: unknown): { ok: true; root: ParsedRoot } | { ok
     keys.set(id, key.key)
   }
 
-  const extraRole = extraKey(value.roles, TRUST_ROLES)
-  if (extraRole) return bad(`unknown role ${extraRole}`)
+  const extraRole = unknownKey(value.roles, TRUST_ROLES)
+  if (extraRole) return bad(`unknown role ${JSON.stringify(extraRole.name)}`)
   const roleOf = new Map<string, TrustRoleName>()
   for (const name of TRUST_ROLES) {
     const r = value.roles[name]
-    if (!isRecord(r) || extraKey(r, ['keys', 'threshold']) || !Array.isArray(r.keys) || r.keys.length === 0) return bad(`role ${name}`)
+    if (!isRecord(r) || unknownKey(r, ['keys', 'threshold']) || !Array.isArray(r.keys) || r.keys.length === 0) return bad(`role ${name}`)
     const ids = r.keys as unknown[]
     if (ids.some(k => typeof k !== 'string' || !keys.has(k)) || new Set(ids).size !== ids.length) return bad(`role ${name}: keys`)
     if (!isInt(r.threshold, name === 'root' ? PLUGIN_TRUST_POLICY.minRootThreshold : 1, ids.length)) return bad(`role ${name}: threshold`)
@@ -257,8 +268,8 @@ const PACKAGE_KEYS = ['id', 'version', 'fingerprint', 'commit', 'tag', 'min_app_
 
 function packageProblem(p: unknown, i: number): string | null {
   if (!isRecord(p)) return `packages[${i}]`
-  const extra = extraKey(p, PACKAGE_KEYS)
-  if (extra) return `packages[${i}]: unknown key ${extra}`
+  const extra = unknownKey(p, PACKAGE_KEYS)
+  if (extra) return `packages[${i}]: unknown key ${JSON.stringify(extra.name)}`
   if (typeof p.id !== 'string' || !PLUGIN_ID_RE.test(p.id)) return `packages[${i}].id`
   if (typeof p.version !== 'string' || !PLUGIN_VERSION_RE.test(p.version)) return `packages[${i}].version`
   if (typeof p.fingerprint !== 'string' || !SHA256_HEX_RE.test(p.fingerprint)) return `packages[${i}].fingerprint`
@@ -279,8 +290,8 @@ const serverOk = (server: unknown): server is string => typeof server === 'strin
 export function parseTargets(value: unknown): { ok: true; document: TargetsDocument } | { ok: false; problem: string } {
   const bad = (problem: string) => ({ ok: false as const, problem })
   if (!isRecord(value)) return bad('not an object')
-  const extra = extraKey(value, ['_type', 'scope', 'server', 'version', 'issued', 'expires', 'packages', 'floors'])
-  if (extra) return bad(`unknown key ${extra}`)
+  const extra = unknownKey(value, ['_type', 'scope', 'server', 'version', 'issued', 'expires', 'packages', 'floors'])
+  if (extra) return bad(`unknown key ${JSON.stringify(extra.name)}`)
   if (value._type !== 'acb-targets') return bad('_type')
   if (!scopeOk(value.scope)) return bad('scope')
   if (!serverOk(value.server)) return bad('server')
@@ -303,15 +314,15 @@ export function parseTargets(value: unknown): { ok: true; document: TargetsDocum
 export function parseFreshness(value: unknown): { ok: true; document: FreshnessDocument } | { ok: false; problem: string } {
   const bad = (problem: string) => ({ ok: false as const, problem })
   if (!isRecord(value)) return bad('not an object')
-  const extra = extraKey(value, ['_type', 'scope', 'server', 'version', 'issued', 'expires', 'targets'])
-  if (extra) return bad(`unknown key ${extra}`)
+  const extra = unknownKey(value, ['_type', 'scope', 'server', 'version', 'issued', 'expires', 'targets'])
+  if (extra) return bad(`unknown key ${JSON.stringify(extra.name)}`)
   if (value._type !== 'acb-freshness') return bad('_type')
   if (!scopeOk(value.scope)) return bad('scope')
   if (!serverOk(value.server)) return bad('server')
   if (!isInt(value.version, 1, PLUGIN_TRUST_POLICY.maxVersion)) return bad('version')
   if (parseTrustTime(value.issued) === null || parseTrustTime(value.expires) === null) return bad('issued / expires')
   const t = value.targets
-  if (!isRecord(t) || extraKey(t, ['version', 'sha256']) || !isInt(t.version, 1, PLUGIN_TRUST_POLICY.maxVersion)
+  if (!isRecord(t) || unknownKey(t, ['version', 'sha256']) || !isInt(t.version, 1, PLUGIN_TRUST_POLICY.maxVersion)
     || typeof t.sha256 !== 'string' || !SHA256_HEX_RE.test(t.sha256)) return bad('targets')
   return { ok: true, document: value as unknown as FreshnessDocument }
 }

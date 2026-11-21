@@ -101,6 +101,7 @@ try {
     't-c1-v7-issued-back': [T({ version: 7, issued: '2026-11-19T00:00:00Z' }), ta],
     't-c1-duplicate': [T({ version: 6, issued: '2026-11-21T06:00:00Z', packages: [lstep, lstep] }), ta],
     't-c1-extra-key': [T({ version: 6, issued: '2026-11-21T06:00:00Z', note: 'x' }), ta],
+    't-c1-empty-name-key': [T({ version: 6, issued: '2026-11-21T06:00:00Z', '': true }), ta],
     't-c1-v6-tb': [T({ version: 6, issued: '2026-11-21T06:00:00Z' }), tb],
     't-c1-v5-tb': [T({ version: 5, issued: '2026-11-21T03:00:00Z' }), tb],
   }
@@ -123,6 +124,7 @@ try {
   docs['f-c2'] = envelope(F('t-c1-v5', { scope: 'company:c2' }), fa, FNS)
   docs['f-c1-staging'] = envelope(F('t-c1-v5', { server: 'https://staging.example' }), fa, FNS)
   docs['f-c1-adds-package'] = envelope({ ...F('t-c1-v5'), packages: [{ id: 'evil', version: '9.9.9', fingerprint: '0'.repeat(64) }] }, fa, FNS)
+  docs['f-c1-empty-name-key'] = envelope({ ...F('t-c1-v5'), '': true, packages: [{ id: 'evil', version: '9.9.9', fingerprint: '0'.repeat(64) }] }, fa, FNS)
   docs['f-c1-v6'] = envelope(F('t-c1-v6', { version: 2, issued: '2026-11-21T06:00:00Z' }), fa, FNS)
   docs['f-c1-v6-tb-fresh-b'] = envelope(F('t-c1-v6-tb'), [['test-fresh-b']], FNS)
   docs['f-c1-v6-tb-fresh-a'] = envelope(F('t-c1-v6-tb', { version: 3, issued: '2026-11-21T07:00:00Z' }), fa, FNS)   // the replaced freshness key

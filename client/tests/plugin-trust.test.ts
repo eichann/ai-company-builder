@@ -16,8 +16,11 @@ import {
   acceptFreshness, acceptTargets, bakedRoot, codeMayRunUntil, serializeTrustState, startTrust, stepRoot, updateTrustRoot,
   type AcceptedList, type TrustContext, type TrustState,
 } from '../../shared/core/plugin-trust'
-import { openEnvelope, parseRoot, roleGeneration, TRUST_NAMESPACES, type SignedEnvelope, type TrustResult } from '../../shared/core/plugin-trust-documents'
-import { decodeBase64Strict, parseRootKey, utf8, verifySshSig } from '../../shared/core/plugin-trust-sshsig'
+import {
+  openEnvelope, parseEnvelope, parseFreshness, parseRoot, parseTargets, parseTrustTime, roleGeneration, TRUST_NAMESPACES,
+  type SignedEnvelope, type TrustResult,
+} from '../../shared/core/plugin-trust-documents'
+import { decodeBase64Strict, parseRootKey, parseSshSig, utf8, verifySshSig, type SshPublicKey } from '../../shared/core/plugin-trust-sshsig'
 
 const DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/plugin-trust')
 const DOCS = JSON.parse(readFileSync(join(DIR, 'documents.json'), 'utf8')) as Record<string, SignedEnvelope>
@@ -244,9 +247,9 @@ describe('B. the root history, its freshness, and a conflict', () => {
 
   it('B9 a stored chain that does not authenticate is dropped with its records: the app\'s root, problem noted', () => {
     const t = ok(acceptTargets(start(), doc('t-c1-v5'), CTX, C))
-    const forged = JSON.parse(serializeTrustState(t.state))
+    const forged = JSON.parse(serializeTrustState(t.state).record)
     forged.chain = [doc('root-v1'), doc('root-v2'), doc('root-v3-old-keys-only')]
-    const st = startTrust(doc('root-v1'), JSON.stringify(forged), C)
+    const st = startTrust(doc('root-v1'), { record: JSON.stringify(forged) }, C)
     assert.equal(st.root.document.version, 1)
     assert.deepEqual(st.marks, {})
     assert.ok(st.problem)
@@ -254,7 +257,7 @@ describe('B. the root history, its freshness, and a conflict', () => {
 
   it('B10 an unreadable stored record → the app\'s root, no records, problem noted (unknown, not empty)', () => {
     for (const stored of ['{broken', '{"format":1,"chain":[],"marks":{"x":{"version":9}},"freshMarks":{},"halted":null}']) {
-      const st = startTrust(doc('root-v1'), stored, C)
+      const st = startTrust(doc('root-v1'), { record: stored }, C)
       assert.equal(st.root.document.version, 1)
       assert.deepEqual(st.marks, {})
       assert.ok(st.problem)
@@ -451,5 +454,149 @@ describe('H. freshness (the daily document)', () => {
     const t6 = ok(acceptTargets(state, doc('t-c1-v6'), CTX, C))
     refusedWith(codeMayRunUntil(t6.state, list, freshness, CTX), 'list-not-current')
     refusedWith(codeMayRunUntil(t6.state, t6.list, freshness, CTX), 'freshness-not-current')
+  })
+
+  it('H12 a freshness handle older than the recorded one is not the current freshness', () => {
+    const { state, list, freshness } = v5WithFreshness()
+    const n2 = ok(acceptFreshness(state, doc('f-c1-v5-n2'), list, CTX, C))
+    refusedWith(codeMayRunUntil(n2.state, list, freshness, CTX), 'freshness-not-current')
+    ok(codeMayRunUntil(n2.state, list, n2.freshness, CTX))
+  })
+})
+
+// ---------------------------------------------------------------- review fixes (Codex, independent review)
+
+/** An SSHSIG's fields, to rebuild a real signature with one thing changed. */
+interface SigFields {
+  magic: Buffer; version: number; publicKey: Buffer; namespace: Buffer; reserved: Buffer; hash: Buffer
+  sigType: Buffer; sigRaw: Buffer; sigTrailing: Buffer; trailing: Buffer
+}
+function splitSig(armored: string): SigFields {
+  const b = Buffer.from(armored.replace(/-----[A-Z ]+-----/g, '').replace(/\s/g, ''), 'base64')
+  let o = 6
+  const u32 = () => { const v = b.readUInt32BE(o); o += 4; return v }
+  const str = () => { const n = u32(); const v = Buffer.from(b.subarray(o, o + n)); o += n; return v }
+  const magic = Buffer.from(b.subarray(0, 6))
+  const version = u32(); const publicKey = str(); const namespace = str(); const reserved = str(); const hash = str()
+  const sig = str()
+  const trailing = Buffer.from(b.subarray(o))
+  let so = 0
+  const sstr = () => { const n = sig.readUInt32BE(so); so += 4; const v = Buffer.from(sig.subarray(so, so + n)); so += n; return v }
+  const sigType = sstr(); const sigRaw = sstr()
+  return { magic, version, publicKey, namespace, reserved, hash, sigType, sigRaw, sigTrailing: Buffer.from(sig.subarray(so)), trailing }
+}
+function joinSig(f: SigFields): string {
+  const str = (v: Buffer) => { const l = Buffer.alloc(4); l.writeUInt32BE(v.length); return Buffer.concat([l, v]) }
+  const ver = Buffer.alloc(4)
+  ver.writeUInt32BE(f.version)
+  const sig = Buffer.concat([str(f.sigType), str(f.sigRaw), f.sigTrailing])
+  const b64 = Buffer.concat([f.magic, ver, str(f.publicKey), str(f.namespace), str(f.reserved), str(f.hash), str(sig), f.trailing]).toString('base64')
+  return `-----BEGIN SSH SIGNATURE-----\n${(b64.match(/.{1,70}/g) ?? []).join('\n')}\n-----END SSH SIGNATURE-----\n`
+}
+
+describe('review fixes', () => {
+  it('R1 a stored chain with a malformed entry is not used: the app\'s root, no records, problem noted', () => {
+    const t = ok(acceptTargets(start(), doc('t-c1-v5'), CTX, C))
+    const onV2 = updateTrustRoot(t.state, [doc('root-v2')], C)
+    for (const junk of [{ signed: 5 }, 'junk', null, { signed: '{"version":"x"}', signatures: [] }]) {
+      const record = JSON.parse(serializeTrustState(onV2).record)
+      record.chain.splice(1, 0, junk)
+      const st = startTrust(doc('root-v1'), { record: JSON.stringify(record) }, C)
+      assert.equal(st.root.document.version, 1)
+      assert.deepEqual(st.marks, {})
+      assert.ok(st.problem, JSON.stringify(junk))
+    }
+  })
+
+  it('R2 a key named "" is an unknown key at every level of every document', () => {
+    const t = ok(acceptTargets(start(), doc('t-c1-v5'), CTX, C))
+    refusedWith(acceptFreshness(t.state, doc('f-c1-empty-name-key'), t.list, CTX, C), 'freshness-shape')
+    refusedWith(acceptTargets(start(), doc('t-c1-empty-name-key'), CTX, C), 'targets-shape')
+    const env = doc('t-c1-v5')
+    assert.equal(parseEnvelope({ ...env, '': 1 }), null)
+    assert.equal(parseEnvelope({ ...env, signatures: [{ ...env.signatures[0], '': 1 }] }), null)
+    const root = payload('root-v1')
+    assert.ok(rootProblem({ ...root, '': 1 }))
+    assert.ok(rootProblem({ ...root, roles: { ...root.roles, '': { keys: ['test-root-1'], threshold: 1 } } }))
+    assert.ok(rootProblem({ ...root, roles: { ...root.roles, targets: { ...root.roles.targets, '': 1 } } }))
+    const list = payload('t-c1-v5')
+    assert.equal(parseTargets({ ...list, packages: [{ ...list.packages[0], '': 1 }] }).ok, false)
+    const fresh = payload('f-c1-v5')
+    assert.equal(parseFreshness({ ...fresh, targets: { ...fresh.targets, '': 1 } }).ok, false)
+  })
+
+  it('R3 a damaged record never lifts a halt: the halt file, the record\'s copy, or a halt left in a damaged record', () => {
+    const halted = updateTrustRoot(updateTrustRoot(start(), [doc('root-v2')], C), [doc('root-v2-conflict')], C)
+    const { record, halt } = serializeTrustState(halted)
+    assert.ok(halt)
+    const stays = (stored: { record?: string | null; halt?: string | null }, why: string) => {
+      const st = startTrust(doc('root-v1'), stored, C)
+      assert.ok(st.halted, why)
+      refusedWith(acceptTargets(st, doc('t-c1-v5'), CTX, C), 'halted')
+    }
+    stays({ record: '{broken', halt }, 'record corrupt, halt file intact')
+    stays({ record: null, halt }, 'record deleted, halt file intact')
+    stays({ record, halt: null }, 'halt file deleted, record intact')
+    stays({ record: record.slice(0, -5), halt: null }, 'halt file deleted, record damaged after its halt')
+    stays({ record: '{broken', halt: 'garbage' }, 'halt file unreadable')
+    assert.equal(startTrust(doc('root-v1'), { record: null, halt: null }, C).halted, null, 'both deleted: outside the threat model')
+  })
+
+  it('R4 code may run only until the verified expiry, whatever the handles\' documents say', () => {
+    const { state, list, freshness } = v5WithFreshness()
+    const longer = '2026-12-31T00:00:00Z'
+    const editedList = { ...list, document: { ...list.document, expires: longer } }
+    const editedFresh = { ...freshness, document: { ...freshness.document, expires: longer } }
+    assert.equal(ok(codeMayRunUntil(state, editedList, editedFresh, CTX)).until, at('2026-11-24T00:00:00Z'))
+    refusedWith(codeMayRunUntil(state, editedList, editedFresh, { ...CTX, now: at('2026-11-24T00:00:01Z') }), 'expired')
+  })
+
+  it('R5 junk offered for a version does not block the real root; two authentic texts in one answer halt', () => {
+    const junk = { signed: '{"version":2}', signatures: [] }
+    const st = updateTrustRoot(start(), [doc('root-v2-noise'), doc('root-v2-one-key'), junk, doc('root-v2'), doc('root-v3')], C)
+    assert.equal(st.root.document.version, 3)
+    assert.equal(st.halted, null)
+    assert.ok(updateTrustRoot(start(), [doc('root-v2-conflict'), doc('root-v2')], C).halted)
+  })
+
+  it('R6 the SSHSIG reader takes only what ssh-keygen writes: version 1, empty reserved, sha256/512, matching types, nothing trailing', () => {
+    const env = doc('root-v1')
+    const good = env.signatures[0].sig
+    const r1 = parseRoot(payload('root-v1'))
+    assert.ok(r1.ok)
+    const key = r1.root.keys.get('test-root-1') as SshPublicKey
+    assert.equal(verifySshSig(joinSig(splitSig(good)), utf8(env.signed), TRUST_NAMESPACES.root, key, C), true)
+    const variants: Array<[string, (f: SigFields) => void]> = [
+      ['version 2', f => { f.version = 2 }],
+      ['reserved not empty', f => { f.reserved = Buffer.from('x') }],
+      ['hash sha384', f => { f.hash = Buffer.from('sha384') }],
+      ['signature type differs from the key', f => { f.sigType = Buffer.from('ecdsa-sha2-nistp256') }],
+      ['bytes after the signature', f => { f.trailing = Buffer.from([0]) }],
+      ['bytes inside the signature after its value', f => { f.sigTrailing = Buffer.from([0]) }],
+    ]
+    for (const [why, change] of variants) {
+      const f = splitSig(good)
+      change(f)
+      assert.equal(parseSshSig(joinSig(f)), null, why)
+      assert.equal(verifySshSig(joinSig(f), utf8(env.signed), TRUST_NAMESPACES.root, key, C), false, why)
+    }
+  })
+
+  it('R7 a signed text that is not well-formed Unicode is refused (it has no one UTF-8 form)', () => {
+    const env = doc('t-c1-v5')
+    assert.equal(parseEnvelope({ ...env, signed: env.signed.replace('lstep', 'lstep\uD800') }), null)
+    assert.ok(parseEnvelope({ ...env, signed: env.signed.replace('lstep', 'lstep😀') }))
+  })
+
+  it('R8 times must be real calendar times', () => {
+    assert.equal(parseTrustTime('2026-02-30T00:00:00Z'), null)
+    assert.equal(parseTrustTime('2026-11-21T24:00:00Z'), null)
+    assert.equal(parseTrustTime('2026-11-21T12:00:00.5Z'), at('2026-11-21T12:00:00.5Z'))
+  })
+
+  it('R9 a root update keeps the note that the stored record was not used', () => {
+    const st = startTrust(doc('root-v1'), { record: '{broken' }, C)
+    assert.ok(st.problem)
+    assert.ok(updateTrustRoot(st, [doc('root-v2')], C).problem)
   })
 })
