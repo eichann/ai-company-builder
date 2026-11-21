@@ -866,7 +866,8 @@ export function createJobService(deps: JobServiceDeps) {
      * watched やること themselves. A new version that differs from the approved one only in its start record, approved and
      * accepted by that one press (the trigger is part of what they accept; nobody else's consent is involved) — the
      * record checked as any start record (they read it, a やること, not 「AI の番」). Only the approved version's
-     * responsible person, only on the version shown (`version`), and not while a newer draft waits for approval.
+     * responsible person, only on the version shown (`version`), not while a newer draft waits for approval, and only on
+     * top of a consent they have accepted (the press accepts the new version: never what they did not see, stage 4b-0).
      */
     async rewatch(member: Member, jobId: string, body: unknown, reads: readonly number[] = SCHEMA_1_ONLY): Promise<Outcome<JobView>> {
       const found = visibleJob(member, jobId)
@@ -896,7 +897,7 @@ export function createJobService(deps: JobServiceDeps) {
         const current = handle.jobs.find(jobId) as JobRow
         if (current.latestVersion !== b.version || current.approvedVersion !== b.version) return FINGERPRINT_CHANGED()
         // A rewatch approves and accepts in one press: only on top of content the person has accepted already, else it
-        // would accept what they never saw (an AI grant, a place). The app offers no picker then; the server decides.
+        // would accept what they never saw (an AI grant, a place). The app normally offers no picker then; the server decides.
         if (!consentAccepted(handle, current)) return ACCEPT_BEFORE_REWATCH()
         const at = clock.now()
         const canonical = jobDefinitionCanonical(next)
@@ -906,7 +907,7 @@ export function createJobService(deps: JobServiceDeps) {
         handle.jobs.accept(jobId, row.version, row.consentFingerprint, member.userId, at, current.acceptedPlace)
         // The record chosen: the watch starts over there, the stop is gone — also when it is the start record it began
         // from (an explicit choice is never the chain's position kept; Codex review of #700).
-        // A job its responsible person never accepted has no cursor yet: this press starts it (Codex review of #700).
+        // Kept as a defence: an accepted job always has its cursor (acceptance starts it), so this starts nothing new.
         handle.jobs.startEventCursor(jobId, b.recordId as string, at)
         handle.jobs.restartWatch(jobId, b.recordId as string, at)
         return ok(undefined)

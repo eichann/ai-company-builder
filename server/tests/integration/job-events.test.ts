@@ -871,7 +871,22 @@ describe('① a stopped chain', () => {
     expect(tick()).toBe(0)
     // Accepted with its own press, the same choice goes through.
     ok(await jobs.accept(alice(), made.id, { version: 1 }, READS_2, true))
-    expect((await call('u-alice', 'POST', `/me/jobs/${made.id}/watch`, { version: 1, recordId: task('受け取ってから選ぶ') }, S2)).status).toBe(200)
+    const chosen = task('受け取ってから選ぶ')
+    expect((await call('u-alice', 'POST', `/me/jobs/${made.id}/watch`, { version: 1, recordId: chosen }, S2)).status).toBe(200)
+    expect(cursorOf(made.id)).toMatchObject({ watch_record_id: chosen })
+    await complete(chosen)
+    expect(tick()).toBe(1)
+  })
+
+  it('a newer approved version with the same consent (a name change) is still chosen over with one press', async () => {
+    const start = task('名前だけ変わる')
+    const job = await runnableJob(chain(start))
+    ok(await jobs.update(owner(), job, { definition: chain(start, { name: '名前だけの直し' }) }, READS_2))
+    ok(await jobs.approve(owner(), job, { version: 2 }, READS_2))
+    const next = task('同じ同意のまま選ぶ')
+    expect(await call('u-alice', 'POST', `/me/jobs/${job}/watch`, { version: 2, recordId: next }, S2)).toMatchObject({ status: 200, body: { data: { approvedVersion: 3, latestConsentAccepted: true } } })
+    await complete(next)
+    expect(tick()).toBe(1)
   })
 
   it('a new content approved but not accepted yet is never accepted by choosing the next やること', async () => {
