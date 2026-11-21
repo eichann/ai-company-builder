@@ -629,6 +629,8 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/plugin-bridge', w => ({ path: `${C(w)}/plugin-bridge`, body: { pluginId: 'no-such-plugin', version: '0.1.0', op: 'records.query', args: { type: 'deal' } } }), [403, 403, 403, 403, 404, 401]),
   // lane B ▲
   // lane C ▼
+  // Plugin trust P2: any member, their own company's signed documents only (no object id: the company is the member's).
+  r('GET /api/companies/:companyId/plugin-trust', w => ({ path: `${C(w)}/plugin-trust` }), [200, 200, 200, 200, 404, 401]),
   // Plugin packages for the members' apps (plan C2): any member, only a version their policy lists (none here: 404).
   r('GET /api/companies/:companyId/plugins/:pluginId/package/:version', w => ({ path: `${C(w)}/plugins/no-such-plugin/package/0.1.0` }), [404, 404, 404, 404, 404, 401]),
   // Business roles (plan C3, plugin-roles.md): the company's assignment is owner/admin; a まとまり's override

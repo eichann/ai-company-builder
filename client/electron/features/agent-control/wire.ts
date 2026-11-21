@@ -10,6 +10,7 @@ import { createAgentEventRecorder } from '../../services/agent-events'
 import type { AppLifecycle } from '../ports'
 import { createPluginFetcher } from '../plugins/fetch'
 import { createPluginPackageStore } from '../plugins/store'
+import type { PluginTrust } from '../plugins/trust'
 
 export interface AgentControlDeps {
   serverUrl: () => string
@@ -25,6 +26,29 @@ export interface AgentControlDeps {
   onNotifications?: (companyId: string) => void
   /** The plugin packages a company lists and this app keeps changed (its plugin screens change, A6). */
   onPluginsChanged?: (companyId: string) => void
+  /** Plugin trust P2 (plugins/trust-wire.ts): refreshed when a company's `pluginTrust` marker changes. */
+  pluginTrust?: Pick<PluginTrust, 'refresh'>
+}
+
+/**
+ * The policy answer's `pluginTrust` marker → a trust refresh (plugin-trust.md "P2"): once per new
+ * marker per company (and once after a start, when nothing was taken yet). A failed refresh, or
+ * one refused for a reason that may pass (`settled: false`), is tried again at the next answer; an answer without the marker (an older server, no `trust/`)
+ * changes nothing.
+ */
+export function refreshTrustOnMarker(trust: Pick<PluginTrust, 'refresh'>) {
+  const taken = new Map<string, string>()
+  const running = new Set<string>()
+  return (companyId: string, marker: string | undefined): void => {
+    if (!marker || taken.get(companyId) === marker || running.has(companyId)) return
+    running.add(companyId)
+    void trust.refresh(companyId)
+      // Done only when the documents were taken in, or refused for good; a refusal that may pass
+      // by itself (this computer's clock) is asked again at the next policy answer.
+      .then(outcome => { if (outcome.ok && outcome.settled) taken.set(companyId, marker) })
+      .catch(() => undefined)
+      .finally(() => running.delete(companyId))
+  }
 }
 
 /**
@@ -38,7 +62,7 @@ export function refreshOnPush(policy: Pick<AgentPolicyStore, 'confirmVersion' | 
   }
 }
 
-export function wireAgentControl({ serverUrl, session, userDataDir, home, turns, lifecycle, onRecords, onNotifications, onPluginsChanged }: AgentControlDeps) {
+export function wireAgentControl({ serverUrl, session, userDataDir, home, turns, lifecycle, onRecords, onNotifications, onPluginsChanged, pluginTrust }: AgentControlDeps) {
   // The member's AI policy per company (「AI の囲い」 and the stop), read at each chat turn.
   // The stop part is also kept on disk per account (the emergency stop survives a restart offline).
   const policy = createAgentPolicyStore({
@@ -55,8 +79,10 @@ export function wireAgentControl({ serverUrl, session, userDataDir, home, turns,
     fetchPackage: createPluginFetcher({ baseUrl: serverUrl, cookies: session.cookies }),
     onChanged: onPluginsChanged,
   })
+  const trustOnMarker = pluginTrust ? refreshTrustOnMarker(pluginTrust) : null
   policy.onPolicy((companyId, answer) => {
     if (answer.plugins) void pluginPackages.sync(companyId, answer.plugins)
+    trustOnMarker?.(companyId, answer.pluginTrust)
   })
   // The push channel's only effect is a policy refetch; a received stop stops
   // the company's running turns (services/agent-stop.ts).

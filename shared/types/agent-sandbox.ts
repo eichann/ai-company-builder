@@ -77,4 +77,11 @@ export interface AgentPolicy {
    * Absent from an older server: the app treats it as off.
    */
   browser?: AgentBrowserPolicy
+  /**
+   * A digest of the plugin trust documents the server hands this company now (plugin-trust.md
+   * "P2": roots, its signed list, its freshness document). Only a marker: a new value tells the
+   * app to fetch `GET /api/companies/:companyId/plugin-trust`; it vouches for nothing. Absent from
+   * an older server or when the operator put no `trust/` folder.
+   */
+  pluginTrust?: string
 }

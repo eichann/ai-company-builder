@@ -18,6 +18,8 @@
  *
  * Handing packages to the app (plan C2; any member, services/plugin-distribution.ts):
  *   GET  /plugins/:pluginId/package/:version   a version the member's agent policy lists now: its files (base64)
+ *   GET  /plugin-trust                         the signed trust documents of the member's own company only
+ *                                              (roots, its list, its freshness; services/plugin-trust.ts, plugin-trust.md "P2")
  *
  * Business roles (plan C3, services/plugin-roles.ts, plugin-roles.md):
  *   GET  /plugins/:pluginId/roles                              owner/admin: declared roles, the company's assignment, overrides, history
@@ -47,7 +49,7 @@ import { refusal } from './respond'
 import { companyMember, serviceBody } from './guards'
 
 export const pluginsRoute = new Hono()
-const { plugins, pluginImport, pluginOperations, pluginMappingCheck, approvals, agentPolicy, pluginDistribution, pluginRoles } = services
+const { plugins, pluginImport, pluginOperations, pluginMappingCheck, approvals, agentPolicy, pluginDistribution, pluginRoles, pluginTrust } = services
 /** A call with the member's session is the member's own (their AI calls with a record token: records-ai.ts). */
 const HUMAN = { kind: 'human' } as const
 
@@ -104,6 +106,9 @@ pluginsRoute.put('/plugins/:pluginId/roles/:role/bundles/:recordId', companyMemb
   const member = c.var.member
   return answer(c, pluginRoles.setBundleOverride(member, c.req.param('pluginId'), c.req.param('role'), c.req.param('recordId'), c.var.body))
 })
+
+// Any member: their company's signed plugin trust documents (P2; another company's never — the company is the member's).
+pluginsRoute.get('/plugin-trust', companyMember, async (c) => answer(c, await pluginTrust.documentsFor(c.var.member)))
 
 // Any member: a package their app keeps (plan C2; only a version their agent policy lists now).
 pluginsRoute.get('/plugins/:pluginId/package/:version', companyMember, async (c) => {

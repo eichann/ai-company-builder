@@ -1198,6 +1198,14 @@ cd server && node --import tsx src/cli/collect-plugins.ts --fingerprint <package
 - Test: `server/tests/unit/plugin-collect.test.ts` (tag content byte for byte and the shelf's own
   fingerprint, refusal on a differing fingerprint with nothing written, no replacing a version,
   prune only unlisted packages, strict lock).
+- **Signing** (`plugin-trust.md`; P2, nothing enforced yet): the owner signs each company's list
+  from the same lock — `cd server && node --import tsx src/cli/plugin-trust.ts sign-targets --trust
+  <trust repo main> --company <id> --server <PUBLIC_URL> --lock <plugins.lock> --packages <id@ver,…>
+  --key <targets key .pub> --key-id <id>` (Secretive signs, Touch ID). Each package's tag commit
+  must be reachable from its repository's `main` (the reviewed merge) and its folder's fingerprint
+  v2 at the tag must equal the lock's; a package for every company goes into every company's list.
+  The daily freshness documents and the server's copy: `plugin-trust.md` "P2", `deployment.md`
+  "Plugin trust documents".
 
 ## A company's install, mapping and history (P4, `services/plugins.ts`)
 

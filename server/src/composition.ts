@@ -171,6 +171,8 @@ export interface ServiceOptions {
   practiceUpstreams?: PracticeUpstreams
   /** The plugin shelf's folder (default: PLUGINS_DIR). */
   pluginsDir?: string | null
+  /** Plugin trust's clock (tests: a fixed time; default the system clock). */
+  pluginTrustNow?: () => number
   /** The approved browser connector combinations (default: shared/browser-connectors/approved.json). */
   browserConnectors?: BrowserConnectorCatalog
 }
@@ -668,6 +670,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
     hasCompanyFolder: companyFolders.has,
+    pluginsDir: options.pluginsDir !== undefined ? options.pluginsDir : PLUGINS_DIR, publicUrl, pluginTrustNow: options.pluginTrustNow,
   })
   // lanes ▲
 

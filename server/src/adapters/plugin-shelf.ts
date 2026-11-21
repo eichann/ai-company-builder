@@ -148,7 +148,8 @@ export function diskPluginShelf(root: string | null): PluginShelfSource {
       const packages: PluginPackageFiles[] = []
       const problems: PluginShelfScan['problems'] = []
       for (const dir of names) {
-        if (dir === 'stopped' || dir.startsWith('.')) continue
+        // `stopped` and `trust/` (the signed lists, plugin-trust.md "P2") are the operator's, not packages.
+        if (dir === 'stopped' || dir === 'trust' || dir.startsWith('.')) continue
         if (packages.length >= MAX_PACKAGES) { problems.push({ dir, reason: 'too many packages on the shelf' }); continue }
         try {
           const st = await lstat(join(root, dir))

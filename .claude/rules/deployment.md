@@ -105,6 +105,27 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   the host or the operator's machine with `gh` signed in, against the operator's `plugins.lock`
   (fingerprint v2 per package; refuses on any mismatch). Then restart the api. Details: `plugins.md`
   "Where packages come from".
+- **Plugin trust documents** (`PLUGINS_DIR/trust/`, `plugin-trust.md` "P2"; nothing enforced yet):
+  the signed root, each company's list and its freshness document, read by the api on every
+  request (no restart). Filled only by `server/src/cli/plugin-trust.ts install` on the host (not in
+  the api container), from two checkouts of the owner's private trust repository (its `main` and
+  `freshness` branches; read-only deploy key; never name the repository here). An **hourly timer**
+  on the host (cron / systemd / launchd), e.g.:
+
+  ```bash
+  git -C /srv/acb-trust/main pull --ff-only -q && git -C /srv/acb-trust/freshness pull --ff-only -q && \
+    (cd /srv/acb/server && node --import tsx src/cli/plugin-trust.ts install \
+      --main /srv/acb-trust/main --freshness /srv/acb-trust/freshness --dir "$PLUGINS_DIR" --server "$PUBLIC_URL")
+  ```
+
+  It swaps the `trust` link in one rename. It refuses (and changes nothing) when a checkout's
+  folder is missing or unreadable, when there is no company list (`--allow-empty yes` to hand out
+  none on purpose), when a root version already installed is missing, or when no company verifies;
+  a single company that does not verify keeps its installed documents (or is left out) and the
+  command exits 1, so the timer's failure mail fires. Freshness documents live ≤ 3 days, so a timer stopped for
+  that long stops every company's plugin code once P4 enforces (the api logs
+  `[plugin-trust] … runs out in N h` from 48 h before). The api's clock must be right (NTP): one
+  more than 10 minutes behind withholds fresh documents.
 - `OPERATOR_USER_IDS` (comma-separated user ids; a signed-in operator sees theirs at
   `/api/me`) and `COMPANY_CREATION_POLICY` (`operator`) decide who creates companies after the
   first one (`server.md` "Accounts and roles"); passed through by both compose files.
@@ -398,7 +419,8 @@ is public, so anyone can open a PR; code from a fork must never run on that Mac.
 
 ## Universal bundled git (macOS app)
 
-electron-builder's `beforePack` hook (`client/scripts/universal-git.mjs`) downloads both darwin
+electron-builder's `beforePack` hook (`client/scripts/before-pack.mjs`: first the release build's
+plugin trust root check — a loud warning until the enforcement switch, `plugin-trust.md` "P2" —, then `client/scripts/universal-git.mjs`) downloads both darwin
 dugite-native archives pinned in dugite's `embedded-git.json` (sha256 verified), `lipo -create`s
 every Mach-O, requires all other files to be byte-identical (else the build fails), keeps
 symlinks/permissions and replaces `node_modules/dugite/git`. Git Credential Manager (~110 MB,

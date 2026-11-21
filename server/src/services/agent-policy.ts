@@ -37,36 +37,58 @@ export interface PolicyPluginSource {
   pluginsFor(companyId: string): Promise<DistributedPlugin[]>
 }
 
+/** The marker of a company's plugin trust documents (services/plugin-trust.ts; plugin-trust.md "P2"). */
+export interface PolicyTrustSource {
+  digestFor(companyId: string): Promise<string | null>
+}
+
 export function createAgentPolicyService(deps: AgentPolicyDeps) {
   let pluginSource: PolicyPluginSource | null = null
+  let trustSource: PolicyTrustSource | null = null
   const log = deps.log ?? console
 
-  function compose(member: Pick<Member, 'companyId' | 'userId'>, plugins: DistributedPlugin[] | undefined): AgentPolicy {
+  interface CompanyParts { plugins: DistributedPlugin[] | undefined; pluginTrust: string | null }
+  function compose(member: Pick<Member, 'companyId' | 'userId'>, { plugins, pluginTrust }: CompanyParts): AgentPolicy {
     const as = { ...member, role: 'member' }
     const sandbox = deps.agentSandbox.policyFor(as)
     const stop = deps.agentStops.policyFor(as)
     const secondOpinion = { allowed: deps.secondOpinion.allowedFor(member.companyId) }
     const browser = deps.agentBrowser.policyFor(member)
-    const parts = plugins ? { sandbox, stop, secondOpinion, browser, plugins } : { sandbox, stop, secondOpinion, browser }
+    const parts = {
+      sandbox, stop, secondOpinion, browser,
+      ...(plugins ? { plugins } : {}),
+      ...(pluginTrust ? { pluginTrust } : {}),
+    }
     const version = deps.digest.digest(JSON.stringify(parts)).slice(0, 32)
     return { version, ...parts }
   }
   const pluginsOf = (companyId: string): Promise<DistributedPlugin[] | undefined> =>
     pluginSource ? pluginSource.pluginsFor(companyId) : Promise.resolve(undefined)
+  /** The plugin trust marker; a source that fails leaves the marker out (the app keeps what it has). */
+  const trustOf = (companyId: string): Promise<string | null> =>
+    trustSource ? trustSource.digestFor(companyId).catch(() => null) : Promise.resolve(null)
+  const companyParts = async (companyId: string): Promise<CompanyParts> => {
+    const [plugins, pluginTrust] = await Promise.all([pluginsOf(companyId), trustOf(companyId)])
+    return { plugins, pluginTrust }
+  }
 
   return {
     async policyFor(member: Pick<Member, 'companyId' | 'userId'>): Promise<AgentPolicy> {
-      return compose(member, await pluginsOf(member.companyId))
+      return compose(member, await companyParts(member.companyId))
     },
     /** After any change to a company's sandbox, browser operation, stops, second-opinion setting or plugins. */
     announce(companyId: string): void {
-      pluginsOf(companyId)
-        .then(plugins => deps.push.announce(companyId, userId => compose({ companyId, userId }, plugins).version))
+      companyParts(companyId)
+        .then(parts => deps.push.announce(companyId, userId => compose({ companyId, userId }, parts).version))
         .catch((error: unknown) => log.warn(`[agent-policy] ${companyId}: announcing failed (${error instanceof Error ? error.message : 'unknown'})`))
     },
     /** Bound once by the plugins lane's wiring (composition/plugins.ts). */
     usePlugins(source: PolicyPluginSource): void {
       pluginSource = source
+    },
+    /** Bound once by the plugins lane's wiring (composition/plugins.ts): plugin trust P2. */
+    usePluginTrust(source: PolicyTrustSource): void {
+      trustSource = source
     },
   }
 }
