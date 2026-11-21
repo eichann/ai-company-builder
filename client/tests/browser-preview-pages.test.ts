@@ -5,9 +5,10 @@
  * the real read-session chunk with its real `exactRead` hook (a fake page-less session that sends only
  * what the hook lets through). What is protected: the app — never the operator — chooses the page
  * numbers and reads them in order, each address exactly as built from the declaration; a list longer
- * than the declared 10 pages (or 500 items) offers nothing; a failed page, a page that is not the one
- * asked, a changed `last_page` / `total`, an id seen twice or a count other than `total` ends the list
- * incomplete; the operator sees one merged list that never names a page.
+ * than the declared 10 pages (or 500 items), or one that cannot be read whole — a failed later page, a
+ * page that is not the one asked, a changed `last_page` / `total`, an id seen twice, a count other than
+ * `total` — offers nothing (design memo §38: not chosen from); the operator sees one merged list that
+ * never names a page.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -47,7 +48,7 @@ const candidateWith = (reminder: string) => JSON.stringify({ do: 'candidate', ta
  * The preview with the fake site behind the real session chunk: `sent` is every URL the session's
  * request hook (`exactRead`) let through to the site, in order.
  */
-function harness(site: Record<string, string | ((n: number) => string)>, answers: string[], o: { deps?: Partial<BrowserPreviewDeps>; onRead?: (address: string) => void } = {}) {
+function harness(site: Record<string, string | { status: number; body: string }>, answers: string[], o: { deps?: Partial<BrowserPreviewDeps>; onRead?: (address: string) => void; hang?: string } = {}) {
   const sent: string[] = []
   const refusedByHook: string[] = []
   const materials: unknown[] = []
@@ -61,8 +62,10 @@ function harness(site: Record<string, string | ((n: number) => string)>, answers
       const request = { method: r.method, url: r.url, body: r.body }
       if (!allow || !allow(request)) { refusedByHook.push(r.url); throw new Error('blocked by the request hook') }
       sent.push(r.url)
+      // A page that never answers (the request's stop or the deadline must cut it off).
+      if (r.url === `https://${HOST}${o.hang}`) return new Promise(() => { /* never */ })
       const answer = site[r.url.slice(`https://${HOST}`.length)]
-      return answer === undefined ? { status: 404, body: '' } : { status: 200, body: typeof answer === 'function' ? answer(sent.length) : answer }
+      return answer === undefined ? { status: 404, body: '' } : typeof answer === 'string' ? { status: 200, body: answer } : answer
     },
   }
   const lanes = createSessionLanes()
@@ -153,54 +156,82 @@ test('a list of 10 pages (500 items) is read whole; one of 11 pages is read no f
   assert.deepEqual(eleven.remindersSeen(), { values: { group: String(FOLDER) }, ids: [], complete: false })
 })
 
-test('more than 500 items over pages within the limit: nothing of the list is offered', async () => {
-  // 9 pages of 60 (540): within 10 pages, over the item cap.
-  const h = harness(list(9, 60), walk)
+test('more than 500 items over pages within the limit: nothing of the list is offered, whatever total says', async () => {
+  // 9 pages of 60 (540) while every page says total 500, one entry of another folder (so the count is
+  // not compared): within 10 pages, over the item cap.
+  const site = list(9, 60)
+  for (let n = 1; n <= 9; n++) {
+    const ids = idsOf(n, 60)
+    site[pageAddress(n)] = JSON.stringify({ ...JSON.parse(listPage({ current: n, last: 9, total: 500, ids })), data: [...ids.slice(1).map(entry), { ...entry(ids[0]), group_id: n === 1 ? 777 : FOLDER }] })
+  }
+  const h = harness(site, walk)
   await runBrowserPreview(h.request, h.deps)
   assert.deepEqual(h.remindersSeen().ids, [])
   assert.equal(h.remindersSeen().complete, false)
 })
 
-test('a last_page or total that changes between pages ends the list there, incomplete, with the pages before', async () => {
+test('more pages than the declared 10, however few items: page 1 only, nothing offered', async () => {
+  const h = harness(list(11, 10), walk)
+  await runBrowserPreview(h.request, h.deps)
+  assert.deepEqual(h.sentPaths().slice(1), [pageAddress(1)])
+  assert.deepEqual(h.remindersSeen().ids, [])
+  assert.equal(h.remindersSeen().complete, false)
+})
+
+/** The reminders the operator got: nothing, not whole, and page 1's ids nowhere. */
+const nothingOffered = (h: ReturnType<typeof harness>, label: string) => {
+  assert.deepEqual(h.remindersSeen(), { values: { group: String(FOLDER) }, ids: [], complete: false }, label)
+  assert.equal(JSON.stringify(h.materials.at(-1)).includes(String(idsOf(1)[0])), false, label)
+}
+
+test('a list that cannot be read whole offers nothing, not even the pages before: a last_page or total that changes between pages', async () => {
   for (const changed of [{ last: 4, total: 150 }, { last: 3, total: 151 }]) {
     const site = list(3)
     site[pageAddress(2)] = listPage({ current: 2, ...changed, ids: idsOf(2) })
     const h = harness(site, walk)
     await runBrowserPreview(h.request, h.deps)
     assert.deepEqual(h.sentPaths().slice(1), [pageAddress(1), pageAddress(2)], JSON.stringify(changed))
-    assert.deepEqual(h.remindersSeen().ids, idsOf(1).map(String))
-    assert.equal(h.remindersSeen().complete, false)
+    nothingOffered(h, JSON.stringify(changed))
   }
 })
 
-test('a page that is not the one asked (its current_page) ends the list, its items left out', async () => {
+test('a page that is not the one asked (its current_page) offers nothing of the list', async () => {
   const site = list(3)
   site[pageAddress(2)] = listPage({ current: 1, last: 3, total: 150, ids: idsOf(2) })
   const h = harness(site, walk)
   await runBrowserPreview(h.request, h.deps)
   assert.deepEqual(h.sentPaths().slice(1), [pageAddress(1), pageAddress(2)])
-  assert.deepEqual(h.remindersSeen().ids, idsOf(1).map(String))
-  assert.equal(h.remindersSeen().complete, false)
+  nothingOffered(h, 'current_page')
 })
 
-test('an id seen on an earlier page (the list moved while read) ends the list, that page left out', async () => {
-  const site = list(3)
-  site[pageAddress(2)] = listPage({ current: 2, last: 3, total: 150, ids: [idsOf(1)[49], ...idsOf(2).slice(1)] })
-  const h = harness(site, walk)
-  await runBrowserPreview(h.request, h.deps)
-  assert.deepEqual(h.sentPaths().slice(1), [pageAddress(1), pageAddress(2)])
-  assert.deepEqual(h.remindersSeen().ids, idsOf(1).map(String))
-  assert.equal(h.remindersSeen().complete, false)
+test('an id twice — on an earlier page (the list moved while read) or within one page — offers nothing of the list', async () => {
+  const across = list(3)
+  across[pageAddress(2)] = listPage({ current: 2, last: 3, total: 150, ids: [idsOf(1)[49], ...idsOf(2).slice(1)] })
+  const a = harness(across, walk)
+  await runBrowserPreview(a.request, a.deps)
+  assert.deepEqual(a.sentPaths().slice(1), [pageAddress(1), pageAddress(2)])
+  nothingOffered(a, 'across pages')
+  // Within page 1, its total equal to the entries' count: still not one list of distinct items.
+  const within: Record<string, string> = { '/api/episode-groups': folders, [pageAddress(1)]: listPage({ current: 1, last: 1, total: 3, ids: [1_000_000, 1_000_001, 1_000_000] }) }
+  const w = harness(within, walk)
+  await runBrowserPreview(w.request, w.deps)
+  nothingOffered(w, 'within a page')
 })
 
-test('a failing page 2 ends the list incomplete with page 1, and the request goes on; page 1 failing is the read failing', async () => {
+test('a failing page 2 offers nothing of the list and the request goes on; page 1 failing is the read failing', async () => {
   const site = list(3)
   delete site[pageAddress(2)]
   const h = harness(site, walk)
   assert.deepEqual(await runBrowserPreview(h.request, h.deps), { outcome: 'stopped', why: 'need-person', question: '' })
   assert.deepEqual(h.sentPaths().slice(1), [pageAddress(1), pageAddress(2)])
-  assert.deepEqual(h.remindersSeen().ids, idsOf(1).map(String))
-  assert.equal(h.remindersSeen().complete, false)
+  nothingOffered(h, 'page 2 failed')
+
+  // An error status with an answer that looks like the right page is still a failed page.
+  const error = list(3)
+  error[pageAddress(2)] = { status: 500, body: listPage({ current: 2, last: 3, total: 150, ids: idsOf(2) }) }
+  const e = harness(error, walk)
+  await runBrowserPreview(e.request, e.deps)
+  nothingOffered(e, 'page 2 status 500')
 
   const first = list(3)
   delete first[pageAddress(1)]
@@ -209,13 +240,56 @@ test('a failing page 2 ends the list incomplete with page 1, and the request goe
   assert.deepEqual(f.sentPaths().slice(1), [pageAddress(1)])
 })
 
-test('all pages whole but fewer items than the reported total: incomplete', async () => {
-  const site = list(2)
-  for (const n of [1, 2]) site[pageAddress(n)] = listPage({ current: n, last: 2, total: 101, ids: idsOf(n) })
-  const h = harness(site, walk)
+test('every entry kept but fewer than the reported total offers nothing; entries the reader leaves out (another folder) make the list incomplete, as in any read', async () => {
+  const short = list(2)
+  for (const n of [1, 2]) short[pageAddress(n)] = listPage({ current: n, last: 2, total: 101, ids: idsOf(n) })
+  const h = harness(short, walk)
   await runBrowserPreview(h.request, h.deps)
-  assert.equal(h.remindersSeen().ids.length, 100)
-  assert.equal(h.remindersSeen().complete, false)
+  nothingOffered(h, 'short of total')
+
+  const mixed = list(2)
+  mixed[pageAddress(2)] = JSON.stringify({ ...JSON.parse(mixed[pageAddress(2)]), data: [...idsOf(2).slice(1).map(entry), { ...entry(idsOf(2)[0]), group_id: 777 }] })
+  const m = harness(mixed, walk)
+  await runBrowserPreview(m.request, m.deps)
+  assert.equal(m.remindersSeen().ids.length, 99)
+  assert.equal(m.remindersSeen().complete, false)
+})
+
+test('page 1 reporting more than 500 items offers nothing and reads no further, even within the declared pages', async () => {
+  for (const last of [1, 2]) {
+    const site: Record<string, string> = { '/api/episode-groups': folders }
+    for (let n = 1; n <= last; n++) site[pageAddress(n)] = listPage({ current: n, last, total: 501, ids: idsOf(n) })
+    const h = harness(site, walk)
+    await runBrowserPreview(h.request, h.deps)
+    assert.deepEqual(h.sentPaths().slice(1), [pageAddress(1)], `last ${last}`)
+    nothingOffered(h, `total 501, last ${last}`)
+  }
+})
+
+test('a stop or a changed context while a later page is read ends the request there: no further page is read', async () => {
+  const controller = new AbortController()
+  const stopped = harness(list(5), walk, { onRead: address => { if (address === pageAddress(2)) controller.abort() } })
+  assert.deepEqual(await runBrowserPreview({ ...stopped.request, signal: controller.signal }, stopped.deps), { outcome: 'failed', reason: 'cancelled' })
+  assert.deepEqual(stopped.sentPaths().slice(1), [pageAddress(1)])
+
+  let current = true
+  const changed = harness(list(5), walk, { deps: { stillCurrent: () => current }, onRead: address => { if (address === pageAddress(2)) current = false } })
+  assert.deepEqual(await runBrowserPreview(changed.request, changed.deps), { outcome: 'failed', reason: 'context-changed' })
+  assert.deepEqual(changed.sentPaths().slice(1), [pageAddress(1), pageAddress(2)])
+})
+
+test('a later page that never answers is cut off at the request\'s 4 minutes', async () => {
+  const clock = { now: 1_000_000 }
+  // Page 1 takes all but 50 ms of the 4 minutes; page 2 hangs.
+  const h = harness(list(3), walk, {
+    hang: pageAddress(2),
+    deps: { now: () => clock.now },
+    onRead: address => { if (address === pageAddress(1)) clock.now += 4 * 60_000 - 50 },
+  })
+  const started = Date.now()
+  assert.deepEqual(await runBrowserPreview(h.request, h.deps), { outcome: 'failed', reason: 'timeout' })
+  assert.ok(Date.now() - started < 5_000)
+  assert.deepEqual(h.sentPaths().slice(1), [pageAddress(1), pageAddress(2)])
 })
 
 test('page 1 not saying where it stands: nothing of the list is offered and no other page is read', async () => {

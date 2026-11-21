@@ -98,13 +98,15 @@ type PageRead = (address: string, page: number) => Promise<{ status: number; bod
  * One declared JSON read, its pages merged (design memo §38). A read without `pages` is one answer: if
  * its reader reports where it stands, whole only as its only page (`current_page` 1, `last_page` 1).
  * With `pages`, page 1 is the operator's read (`firstAddress`, built from the declaration); pages
- * 2..last are main's: only when page 1 reports `last_page` ≤ the declared `max`, in order, each address
- * `explorePath(read, values, n)`. It stops, incomplete, keeping the pages before, on: a failed later
- * page, a page that does not report where it stands, a `current_page` other than the one asked, a
- * `last_page` or `total` that changed since page 1, an id seen twice in this read. A list that cannot
- * be known to fit — page 1 not saying where it stands, more than `max` pages or `BROWSER_PAGED_ITEMS`
- * items — offers nothing (nothing of it is chosen from). All pages read whole: complete only when the
- * count is the reported `total`. `'stop'` from `fetch`: the request ended (context, cancel, time).
+ * 2..last are main's: only when page 1 reports `last_page` ≤ the declared `max` and `total` ≤
+ * `BROWSER_PAGED_ITEMS`, in order, each address `explorePath(read, values, n)`. **A list that cannot be
+ * read whole offers nothing** (nothing of it is chosen from — not even the pages before): page 1 not
+ * saying where it stands, more than `max` pages or `BROWSER_PAGED_ITEMS` items, a failed later page, a
+ * page that does not say where it stands, a `current_page` other than the one asked, a `last_page` or
+ * `total` other than page 1's, an id seen twice in the read (on one page or across pages), or — every
+ * entry kept — a count other than `total`. Entries a reader leaves out (another folder, no name) make
+ * the merged list incomplete, as in any read. Page 1 failing is the read failing. `'stop'` from
+ * `fetch`: the request ended (context, cancel, time).
  */
 export async function readPages(
   read: BrowserExploreRead, values: Readonly<Record<string, string>>, firstAddress: string,
@@ -118,6 +120,7 @@ export async function readPages(
     const only = !result.page || (result.page.current === 1 && result.page.last === 1)
     return { items: result.items, complete: result.complete && only }
   }
+  const nothing = { items: [] as BrowserExploreItem[], complete: false }
   const max = read.pages.max
   const items: BrowserExploreItem[] = []
   const seen = new Set<string>()
@@ -125,27 +128,27 @@ export async function readPages(
   let whole = true
   for (let n = 1; ; n++) {
     const address = n === 1 ? firstAddress : explorePath(read, values, n)
-    if (!address) return { items, complete: false }
+    if (!address) return nothing
     const page = await fetch(address, n)
     if (page === 'stop') return 'stop'
-    // Page 1 failing is the read failing (as any read); a later page only ends the list, incomplete.
-    if (page === 'failed' || page.status !== OK_READ) return n === 1 ? 'failed' : { items, complete: false }
+    if (page === 'failed' || page.status !== OK_READ) return n === 1 ? 'failed' : nothing
     const result: BrowserJsonExploreResult = runJsonExploreReader(reader, values, page.body)
     const at = result.page
-    if (!at) return { items, complete: false }
-    if (at.current !== n) return { items, complete: false }
+    if (!at || at.current !== n) return nothing
     if (!first) {
-      // Too long to read whole: nothing of it is offered.
-      if (at.last > max) return { items: [], complete: false }
+      if (at.last > max || at.total > BROWSER_PAGED_ITEMS) return nothing
       first = { last: at.last, total: at.total }
-    } else if (at.last !== first.last || at.total !== first.total) return { items, complete: false }
+    } else if (at.last !== first.last || at.total !== first.total) return nothing
     const keys = result.items.map(item => `${item.field}\n${item.value}`)
-    if (keys.some(k => seen.has(k)) || new Set(keys).size !== keys.length) return { items, complete: false }
-    if (items.length + result.items.length > BROWSER_PAGED_ITEMS) return { items: [], complete: false }
+    if (keys.some(k => seen.has(k)) || new Set(keys).size !== keys.length) return nothing
+    if (items.length + result.items.length > BROWSER_PAGED_ITEMS) return nothing
     for (const k of keys) seen.add(k)
     items.push(...result.items)
     whole &&= result.complete
-    if (n >= first.last) return { items, complete: whole && items.length === first.total }
+    if (n >= first.last) {
+      if (whole && items.length !== first.total) return nothing
+      return { items, complete: whole }
+    }
   }
 }
 
@@ -209,13 +212,23 @@ export async function runBrowserPreview(request: BrowserPreviewRequest, deps: Br
     const reader = deps.reader(declared.reader) as BrowserPreviewReader
     let stop: BrowserPreviewResult | null = null
     const fetch: PageRead = async (address, n) => {
-      // Main's own later pages stay within the request's 4 minutes.
-      if (n > 1 && deps.now() >= deadline) { stop = failed('timeout'); return 'stop' }
+      // Main's own later pages stay within the request's 4 minutes: none starts after it, and one
+      // still waiting when it comes is cut off (the request's stop and the deadline, one signal).
+      const left = deadline - deps.now()
+      if (n > 1 && left <= 0) { stop = failed('timeout'); return 'stop' }
+      const cut = new AbortController()
+      const onStop = () => cut.abort()
+      request.signal.addEventListener('abort', onStop, { once: true })
+      const timer = n > 1 ? setTimeout(() => cut.abort(), left) : null
       let page: { status: number; body: string }
-      try { page = await firstWindow.read(address, request.signal) } catch {
+      try { page = await firstWindow.read(address, cut.signal) } catch {
         if (request.signal.aborted) { stop = failed('cancelled'); return 'stop' }
+        if (cut.signal.aborted) { stop = failed('timeout'); return 'stop' }
         if (!current()) { stop = failed('context-changed'); return 'stop' }
         return 'failed'
+      } finally {
+        if (timer) clearTimeout(timer)
+        request.signal.removeEventListener('abort', onStop)
       }
       if (!current()) { stop = failed(request.signal.aborted ? 'cancelled' : 'context-changed'); return 'stop' }
       return page

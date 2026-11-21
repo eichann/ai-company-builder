@@ -663,7 +663,8 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   strictly (`parseStrictJson`: standard JSON only, ≤ 2 000 000 characters, ≤ 32 levels, **a key written
   twice refuses the whole answer** — `JSON.parse` keeps the last copy —, objects without a prototype),
   never the text; one that does not parse is no items, incomplete. What it hands back is kept by the same
-  rules as an HTML reader's (`keepReaderItems`: declared fields, plain ids, cleaned labels, 300 items).
+  rules as an HTML reader's (`keepReaderItems`: declared fields, plain ids, cleaned labels, 300 items per
+  answer; a paginated read's merged list up to 500, `BROWSER_PAGED_ITEMS`, below).
   The preview picks the reader's kind by its mark (`preview.ts`).
 - **Declared reads** (`explore` in the declaration, `shared/core/plugin-browser-declaration.ts`; `plugins.md`
   "Browser connectors"): ≤ 10 per connector, each `{ label, path, query?, reader, no_side_effects:
@@ -688,16 +689,23 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   (`BrowserListPage`) and nothing about what to read next; `runJsonExploreReader` passes it on only as
   whole numbers that fit (`current`, `last` ≥ 1, `current` ≤ `last`, `total` ≥ 0), else drops it and
   the read is incomplete. `readPages` (`preview.ts`) reads page 1 (the operator's read), then — only
-  when page 1 reports `last` ≤ `max` — pages 2..last **in order**, each through `exactRead` byte for
-  byte and within the request's 4 minutes (else `timeout`); it stops, **incomplete, keeping the pages
-  before**, on: a later page failing (status, no answer), a page not reporting where it stands, a
-  `current` other than the page asked, a `last` or `total` other than page 1's, an id (field + value)
-  seen twice in the read; **nothing of the list is offered** when page 1 does not report, `last` >
-  `max` or the items pass 500 (`BROWSER_PAGED_ITEMS`) — decision, safe side: a list that cannot be read
-  whole is not chosen from at all. Page 1 failing is the read failing (`read-failed`), as before. All
-  pages whole: complete only when the count equals `total`. A read declared without `pages` whose
-  reader reports a page is whole only as its only page (`current` 1, `last` 1). The operator gets one
-  merged list for the read, its values as it asked them — no page, `last_page` or `total` anywhere.
+  when page 1 reports `last` ≤ `max` and `total` ≤ 500 (`BROWSER_PAGED_ITEMS`) — pages 2..last **in
+  order**, each through `exactRead` byte for byte and within the request's 4 minutes: no later page
+  starts after them, and one still waiting is cut off then (`timeout`; the request's stop and the
+  deadline as one signal; a stop or a changed context ends the request with no further page read).
+  **A list that cannot be read whole offers nothing** (design memo §38: it is not chosen from — not
+  even the pages already read): page 1 not reporting where it stands, `last` > `max`, `total` or the
+  merged items over 500, a later page failing (status, no answer), a page not reporting, a `current`
+  other than the page asked, a `last` or `total` other than page 1's, an id (field + value) twice in
+  the read — on one page or across pages —, or, every entry kept, a count other than `total`. Page 1
+  failing is the read failing (`read-failed`), as before. Entries a reader leaves out (another folder, no
+  name) make the merged list incomplete with the rest, as in any read. A read declared without `pages`
+  whose reader reports a page is whole only as its only page (`current` 1, `last` 1), its items offered
+  as before (0.4.0's shape: page 1, incomplete when longer). The operator gets one merged list for the
+  read, its values as it asked them — no page, `last_page` or `total` anywhere. Size: a full list is
+  ~150 KB of material (500 items, 80-character labels), so the 8 rounds' material can reach ~1 MB; it
+  goes on the CLI's stdin, whose size nothing caps (the 2 / 4 MiB limits are the answer's) — a material
+  too large for the model ends the step (`failed`), never a looser read.
 - **Not done here** (6b-2 and later): no chat tool, IPC or wiring in `main.ts` (nothing in the app
   imports `preview.ts`), registering the plan, the facts read for it (the checker's `factPaths` /
   `facts`), the card, claim → permit → send → report.
@@ -727,10 +735,13 @@ without a prototype —; the list readers: ids and names only, 「未分類」 l
 the page report — whole numbers that fit, else dropped and incomplete —, no page fields, bad ids → incomplete),
 `browser-preview-pages.test.ts` (the real Lステップ 0.5.0 connector against a fake Lステップ of 1, 3, 10
 and 11 pages, every read through the real session chunk and `exactRead`: exactly `…&page=1..N` in
-order; 11 pages or over 500 items → nothing offered; a changed `last_page` / `total`, a wrong
-`current_page`, an id twice, a failing page 2, a count short of `total`, page 1 without a report; a page
-from the operator refused with nothing read; time running out between pages; a read without `pages`
-whole only as its only page; a paginated read with an HTML reader refused), `browser-read-session.test.ts` (an aborted read's late clean-up never
+order; 11 pages, over 500 items or a `total` over 500 on one page → nothing offered; a changed
+`last_page` / `total`, a wrong `current_page`, an id twice across pages or within one, a failing page 2,
+a count short of `total`, page 1 without a report → nothing offered; entries of another folder →
+incomplete with the rest; a page from the operator refused with nothing read; a stop or a changed
+context while a later page is read; time running out between pages, and a later page that never answers
+cut off at the 4 minutes; a read without `pages` whole only as its only page; a paginated read with an
+HTML reader refused), `browser-read-session.test.ts` (an aborted read's late clean-up never
 clears a newer read's login, also across a reopened window; one request at a time per session; a failed
 request still cleaned; a queued chunk whose window closed sends nothing; `exactRead`: an extra,
 reordered, changed, percent-encoded, re-spelled or second parameter, and addresses no read can have),
