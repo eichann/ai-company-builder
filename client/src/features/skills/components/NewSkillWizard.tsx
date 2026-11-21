@@ -138,7 +138,7 @@ export function NewSkillWizard({
                   text-xs font-medium transition-colors
                   ${i <= currentStepIndex
                     ? 'text-white'
-                    : 'bg-surface-sunken text-text-subtle'
+                    : 'bg-surface-sunken text-text-muted'
                   }
                 `}
                 style={{

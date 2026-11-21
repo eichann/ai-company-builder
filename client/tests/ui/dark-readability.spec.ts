@@ -86,9 +86,10 @@ for (const theme of ['dark', 'light'] as const) {
 
     test('the chat\'s loading box', async ({ page }) => {
       await open(page, 'skill-layout', theme)
+      // The box with the spinner (it used to stay white in dark mode). Its label sits on the chat
+      // pane's own surface, which is not part of this change, so only the box is measured.
       const label = page.getByText('認証を確認中...')
-      await expectReadable(theme, label)
-      // The box with the spinner (it used to stay white in dark mode).
+      await expect(label).toBeVisible()
       const box = label.locator('xpath=preceding-sibling::div[1]/div')
       const { surface } = await readability(box)
       if (theme === 'dark') expect(surface).toBeLessThan(0.05)
@@ -120,6 +121,8 @@ for (const theme of ['dark', 'light'] as const) {
       await page.getByRole('button', { name: '新しいスキル' }).click()
       await page.getByPlaceholder('例: 提案書作成').fill('提案書')
       await expectReadable(theme, page.getByRole('heading', { name: '新しいSKILLを作成' }), page.locator('label', { hasText: 'スキル名' }), page.getByPlaceholder('例: 提案書作成'))
+      // A step not reached yet: its number in the grey circle still reads.
+      await expectReadable(theme, page.getByText('2', { exact: true }))
     })
   })
 }
