@@ -105,7 +105,8 @@ UNIVERSAL=(client/scripts/universal-git.mjs client/package.json)
 # token CSS and the app bridge) and ADMIN (globals.css imports the tokens and the admin bridge):
 # keep it covered there if those lists ever narrow `shared/`.
 # staging/: the staging kit's helpers, tested by server/tests/unit/staging-kit.test.ts.
-SERVER=(server/ shared/ staging/)
+# The rollback floor's pin and its cross-build check (deployment.md "Rolling back production") run in the server job.
+SERVER=(server/ shared/ staging/ .github/rollback-floor-commit .github/scripts/rollback-floor-check.sh)
 ADMIN=(admin/ shared/)
 
 pathspecs() {

@@ -26,10 +26,12 @@ import { RECORD_ID_RE } from './records'
 
 /**
  * The definition shapes this build reads: `1` — a time of day (`JobTimeTrigger`); `2` (stage 4a of event-triggered
- * jobs) — a record's event (`JobRecordTrigger`). A schema-2 version is made only by a client that announced it reads
- * schema 2 (`JOB_SCHEMAS_HEADER`): the admin console and the app of 4a.
+ * jobs) — a record's event (`JobRecordTrigger`), run by the server's operation; `3` (stage 4b-1, owner memo 「段4b 設計メモ」
+ * D2) — a record's event run by the responsible person's PC AI (a procedure, placement `a`, the check
+ * `source_record`). A version of a schema is made only by a client that announced it reads that schema
+ * (`JOB_SCHEMAS_HEADER`): the screens announce what they can show (`ADMIN_JOB_SCHEMAS` / `APP_JOB_SCHEMAS`), never this list.
  */
-export const JOB_SCHEMAS = [1, 2] as const
+export const JOB_SCHEMAS = [1, 2, 3] as const
 export type JobSchema = typeof JOB_SCHEMAS[number]
 
 /** A job's state: a draft until first approved; paused / retired keep it from running. */
@@ -139,10 +141,32 @@ export const JOB_EVENT_TYPES: readonly string[] = Object.keys(JOB_EVENT_STATES)
  * when the grant names `JOB_MINUTES_ROUTE` (part of what the responsible person accepts).
  */
 export type JobCheck = { kind: 'none' } | { kind: 'new_files'; path: string } | { kind: 'new_meetings'; titleWords: string[] }
+  | { kind: 'source_record'; doneMark: JobDoneMark }
+
+/**
+ * The done mark of an event job run by the PC (schema 3, owner memo 「段4b 設計メモ」 D3): what, on the watched record, says
+ * the work is done already, so the AI is not called — `none`, or `file_linked` (a file — a company file or a Drive file
+ * a person linked — is linked from the record already). The server reads the record's links only, never a file.
+ */
+export const JOB_DONE_MARKS = ['none', 'file_linked'] as const
+export type JobDoneMark = typeof JOB_DONE_MARKS[number]
 
 /** The checks a PC can run (`none` is the server's operation only). The app says which it runs when it claims. */
 export const JOB_PC_CHECK_KINDS = ['new_files', 'new_meetings'] as const
 export type JobPcCheckKind = typeof JOB_PC_CHECK_KINDS[number]
+/**
+ * The check of an event job run by the PC (schema 3, stage 4b-1): `source_record` — the server checks, before the AI
+ * and at every call, that the watched record still asks for it (still in the trigger's state, its assignee the
+ * responsible person, theirs to read, not 「AI の番」, no done mark). Kept **out of** `JOB_PC_CHECK_KINDS`, which every
+ * app build sends on its claim: an app names it only once it runs event occurrences (stage 4b-2), so a rebuilt older
+ * app never claims one (together with the occurrence kind `event`, `JobOccurrenceKind`).
+ */
+export const JOB_EVENT_CHECK_KINDS = ['source_record'] as const
+/**
+ * How long an event occurrence run by the PC waits for the responsible person's app by default (owner memo D6: one day;
+ * `missed.expiresAfterMinutes`). The admin form's default (stage 4b-3); the parser keeps the range of every job.
+ */
+export const JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES = 24 * 60
 export const JOB_TITLE_WORDS_MAX = 5
 export const JOB_TITLE_WORD_MAX = 40
 /** The route that reads a meeting's minutes (`minutes_read`): a PC job's run reaches it only for the meetings its check found. */
@@ -306,8 +330,8 @@ function parseRecordTrigger(v: Obj, problems: string[]): JobRecordTrigger | null
 
 function parseTrigger(v: unknown, schema: unknown, problems: string[]): JobTrigger | null {
   if (!isObj(v)) { problems.push('trigger.BAD'); return null }
-  // Schema 2 is a record's event, and only that; schema 1 a time of day, and only that.
-  if (schema === 2) {
+  // Schemas 2 and 3 are a record's event, and only that; schema 1 a time of day, and only that.
+  if (schema === 2 || schema === 3) {
     if (v.kind !== 'record') { problems.push('trigger.kind.BAD'); return null }
     return parseRecordTrigger(v, problems)
   }
@@ -352,6 +376,11 @@ function parseCheck(v: unknown, problems: string[]): JobCheck | null {
     }, JOB_TITLE_WORDS_MAX)
     if (!words) { problems.push('check.titleWords.BAD'); return null }
     return { kind: 'new_meetings', titleWords: words }
+  }
+  if (v.kind === 'source_record') {
+    if (!keysExactly(v, ['kind', 'doneMark'], 'check', problems)) return null
+    if (!(JOB_DONE_MARKS as readonly unknown[]).includes(v.doneMark)) { problems.push('check.doneMark.BAD'); return null }
+    return { kind: 'source_record', doneMark: v.doneMark as JobDoneMark }
   }
   problems.push('check.kind.BAD')
   return null
@@ -559,8 +588,15 @@ export function parseJobDefinition(input: unknown): JobDefinitionResult {
   if (check.kind === 'new_files' && !grant.reads.paths.includes(check.path)) problems.push('check.path.NOT_IN_READS')
   // Reading the meetings' minutes is a power the responsible person accepts (the grant), not the check alone.
   if (check.kind === 'new_meetings' && !grant.routes.includes(JOB_MINUTES_ROUTE)) problems.push('check.NEEDS_MINUTES_ROUTE')
-  // Stage 4a: an event runs only the server's operation (no AI; the PC's AI for events is 4b, with its own check).
-  if (isRecordTrigger(trigger) && run.kind !== 'operation') problems.push('trigger.EVENT_SERVER_ONLY')
+  // Stage 4a: a schema-2 event runs only the server's operation (no AI); the PC's AI for events is schema 3 (stage 4b-1).
+  if (input.schema === 2 && run.kind !== 'operation') problems.push('trigger.EVENT_SERVER_ONLY')
+  // Schema 3 (owner memo 「段4b 設計メモ」 D2): an event, run by the responsible person's PC AI, checked by the server on its
+  // source record first (`source_record`, with its done mark) — and that check is schema 3's only.
+  if (input.schema === 3 && run.kind !== 'procedure') problems.push('run.EVENT_PC_ONLY')
+  if (input.schema === 3 && check.kind !== 'source_record') problems.push('check.EVENT_NEEDS_SOURCE_RECORD')
+  if (check.kind === 'source_record' && input.schema !== 3) problems.push('check.SOURCE_RECORD_EVENTS_ONLY')
+  // An event run must finish with its one やること (it may never finish 'nothing'): without `task` it could only run out its time.
+  if (input.schema === 3 && !grant.creates.includes('task')) problems.push('grant.creates.EVENT_NEEDS_TASK')
   if (problems.length > 0) return { ok: false, problems }
   return { ok: true, definition: { schema: input.schema as JobSchema, name, actingUser: input.actingUser as string, trigger, check, run, placement, missed, grant } }
 }
@@ -579,6 +615,11 @@ export function jobConsentCanonical(definition: JobDefinition): string {
   // Schema 1: byte for byte what it always was (a time job's name or time change needs no new acceptance).
   if (!isRecordTrigger(definition.trigger)) {
     return canonicalJson({ actingUser: definition.actingUser, run: definition.run, placement: definition.placement, grant: definition.grant })
+  }
+  // An event job run by the PC (schema 3, owner memo 「段4b 設計メモ」 §5-1): the check — its done mark decides when the AI is
+  // called — is part of the consent too. Schema 2's stays byte for byte what it was.
+  if (definition.schema === 3) {
+    return canonicalJson({ actingUser: definition.actingUser, run: definition.run, placement: definition.placement, grant: definition.grant, trigger: definition.trigger, check: definition.check })
   }
   // An event job (stage 4a, owner memo §10-5): what it watches is part of what the responsible person accepts — a
   // job never turns to watching something else without a new 受け取る.
@@ -799,6 +840,10 @@ export const JOB_OUTCOME_CODES = [
   // them too), its assignee is someone else now, its state is now the AI's turn (owner decision ⑧), or the job watches
   // another record now (a new start record accepted since).
   'EVENT_RECORD_GONE', 'EVENT_NOT_ASSIGNEE', 'EVENT_AI_TURN', 'EVENT_NOT_WATCHED',
+  // Stage 4b-1, an event occurrence run by the PC (owner memo 「段4b 設計メモ」 §4-4): its record no longer in the trigger's
+  // state (`nothing`: no longer needed), its done mark found (`nothing`), or stopped after its run made something outside
+  // that is known (`needs_person`: a person looks at what was made).
+  'EVENT_NOT_NEEDED', 'EVENT_DONE_MARK', 'MADE_THEN_STOPPED',
 ] as const
 export type JobOutcomeCode = typeof JOB_OUTCOME_CODES[number]
 
@@ -830,6 +875,10 @@ export const JOB_RETRY_BLOCKS = [
   'JOB_GRANT_EXCEEDS', 'JOB_SKILL_MISSING', 'JOB_PLACE_NOT_USABLE', 'JOB_RESULT_UNKNOWN', 'RETRY_LIMIT', 'NEXT_SLOT_SOON',
   // Stage 4-0: the version is of a shape this server build does not know (a newer build wrote it).
   'JOB_SCHEMA_UNKNOWN',
+  // Stage 4b-1, an event occurrence run by the PC (owner memo 「段4b 設計メモ」 §4-2): its source record no longer asks for it
+  // (not in the trigger's state, another assignee, unreadable for the responsible person, 「AI の番」, another watch, the
+  // done mark) — or the company's records are off (C7).
+  'SOURCE_CHANGED', 'RECORDS_OFF',
 ] as const
 
 /**

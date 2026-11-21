@@ -15,8 +15,11 @@
  *   GET  /me/job-turns                 the caller's PC-job occurrences they may claim now (B PR 5a, services/job-runs.ts)
  *   POST /job-run-claims               the responsible person's app claims one { occurrenceId, deviceId, conversationId }
  *                                      (the run core of services/ai-runs.ts; `/job-run-claims`, not `/jobs/…`: its own segment)
- *   POST /jobs/:jobId/occurrences/:occurrenceId/retry                      owner/admin: 「もう一度」 (B PR 5b, services/job-retry.ts)
- *   POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile  owner/admin { done }: its run's unknown outside result
+ *   POST /jobs/:jobId/occurrences/:occurrenceId/retry                      owner/admin: 「もう一度」 (B PR 5b, services/job-retry.ts);
+ *                                                                           since 4b-1 also an event PC occurrence's responsible person (D11)
+ *   POST /jobs/:jobId/occurrences/:occurrenceId/operations/:key/reconcile  owner/admin { done }: its run's unknown outside result;
+ *                                                                           since 4b-1 also the pinned responsible person of an event PC occurrence
+ *   GET  /me/job-occurrences           the event PC occurrences the caller ran as responsible person (4b-1, D11)
  */
 import { Hono, type Context } from 'hono'
 import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE, JOB_NEEDS_NEWER_APP, JOB_SCHEMAS_HEADER, parseJobOccurrenceKinds, parseJobSchemasHeader } from '../../shared/core/jobs'
@@ -63,6 +66,13 @@ jobsRoute.get('/jobs/:jobId', companyMember, async (c) => {
 
 jobsRoute.get('/jobs/:jobId/occurrences', companyMember, async (c) => {
   const result = jobs.occurrences(c.var.member, c.req.param('jobId'))
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+// Stage 4b-1 (D11): the event occurrences run by the PC the caller ran as responsible person, also after a hand-over.
+jobsRoute.get('/me/job-occurrences', companyMember, async (c) => {
+  const result = jobRetry.mine(c.var.member)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })

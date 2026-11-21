@@ -183,10 +183,12 @@ export function createAiRunService(deps: AiRunDeps) {
     const r = repo(member.companyId)
     const run = typeof runId === 'string' && runId.length <= 100 ? r.byId(runId) : null
     if (!run || run.userId !== member.userId) return refuse('not-found', RUN_NOT_FOUND.error, { code: RUN_NOT_FOUND.code })
-    // A job occurrence's run on an event occurrence (stage 4-0.1, jobs.md "Event occurrences do not exist on this
-    // build") is a missing run too: no get, renew, finish, retry, reconcile or token binding.
-    if (run.subject.kind === 'occurrence' && companyData.forCompany(member.companyId).jobs.isHiddenOccurrence(run.subject.id)) {
-      return refuse('not-found', RUN_NOT_FOUND.error, { code: RUN_NOT_FOUND.code })
+    // A job occurrence's run the subject does not show the member (a frozen occurrence; an event occurrence unless a PC's of
+    // schema 3 whose record they read now — stage 4b-1, ⑥) is a missing run too: no get, renew, finish or token binding.
+    // Without the subject's say (an older composition), every event or frozen occurrence's run stays hidden (4-0.1's rule).
+    if (run.subject.kind === 'occurrence') {
+      const hidden = subjects.hides ? subjects.hides(member, liveRun(run)) : companyData.forCompany(member.companyId).jobs.isHiddenOccurrence(run.subject.id)
+      if (hidden) return refuse('not-found', RUN_NOT_FOUND.error, { code: RUN_NOT_FOUND.code })
     }
     return { r, run }
   }
@@ -410,6 +412,10 @@ export function createAiRunService(deps: AiRunDeps) {
       // A lease that ran out is not extended: meanwhile another step of the record may have claimed it (the app
       // stops this run on the 409; claiming again raises the generation).
       if (!held(run, generation, clock.nowMs())) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
+      // The subject's conditions at every renew (stage 4b-1: a PC event job's run whose record no longer asks for it — the
+      // subject ends the run itself, so the renew is refused and the app stops its AI).
+      const refused = subjects.renewRefusal?.(member, liveRun(run)) ?? null
+      if (refused) return refused
       // Not refused while stopped: the run's token is (`runStopped`). A lease left to run out would let another
       // PC or step claim the record the moment the stop is released, while this PC still holds the run.
       const at = clock.nowMs()
@@ -484,6 +490,9 @@ export function createAiRunService(deps: AiRunDeps) {
       const own = ownRun(member, runId)
       if ('ok' in own) return own
       const { r, run } = own
+      // A job occurrence's run is retried on its occurrence only (stage 4b-1, owner memo 「段4b 設計メモ」 §4-3 / D11:
+      // `POST /jobs/:jobId/occurrences/:id/retry`, who may press it and when are that route's): a missing run here.
+      if (run.subject.kind === 'occurrence') return refuse('not-found', RUN_NOT_FOUND.error, { code: RUN_NOT_FOUND.code })
       const nowMs = clock.nowMs()
       if (run.state === 'done') return refuse('conflict', 'この実行はもう終わっています', { code: 'RUN_DONE' })
       if (run.state === 'open') return ok({ run: view(r, run) })
@@ -521,6 +530,9 @@ export function createAiRunService(deps: AiRunDeps) {
     reconcile(member: Member, runId: string, key: string, body: unknown): Outcome<{ run: AiRunView }> {
       const own = ownRun(member, runId)
       if ('ok' in own) return own
+      // A job occurrence's run is reconciled on its occurrence only (stage 4b-1, D11: who may say what happened is that
+      // route's — the version's responsible person while they read its record, or an owner / admin who does): missing here.
+      if (own.run.subject.kind === 'occurrence') return refuse('not-found', RUN_NOT_FOUND.error, { code: RUN_NOT_FOUND.code })
       if (!isObj(body) || typeof body.done !== 'boolean') return refuse('bad-request', 'done is true or false')
       return reconcileRun(member.companyId, own.r, own.run, key, body.done, member.userId)
     },

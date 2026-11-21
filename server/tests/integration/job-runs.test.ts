@@ -344,8 +344,9 @@ describe('the grant at every call', () => {
     expect((await as('jr-alice', 'POST', `/ai-runs/${run.id}/renew`, { generation: run.generation })).status).toBe(409)
     vi.setSystemTime(Date.now() + 6 * MINUTE)
     expect(await claim(occ, 'jr-alice', 'device-alice-2')).toMatchObject({ status: 409, body: { code: 'JOB_TURN_GONE' } })
-    // 「もう一度」 of the ended run gives it back, and still nothing claims the held occurrence.
-    expect((await as('jr-alice', 'POST', `/ai-runs/${run.id}/retry`)).status).toBe(200)
+    // The ended run has no run-level 「もう一度」 (stage 4b-1, D11: the occurrence's is the only one), and still nothing
+    // claims the held occurrence.
+    expect(await as('jr-alice', 'POST', `/ai-runs/${run.id}/retry`)).toMatchObject({ status: 404, body: { code: 'RUN_NOT_FOUND' } })
     expect(await claim(occ, 'jr-alice', 'device-alice-3')).toMatchObject({ status: 409, body: { code: 'JOB_TURN_GONE' } })
     vi.setSystemTime(Date.now() - 6 * MINUTE)
     expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'JOB_PAUSED' })
@@ -376,7 +377,9 @@ describe('the grant at every call', () => {
     db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, created_at, updated_at)
       VALUES (?, ?, 'draft-2', 'f', 'outbound', 'unknown', 1, ?, ?)`).run(CO, run3.id, at, at)
     expect((await finish(run3, { outcome: 'done', jobResult: 'nothing' })).status).toBe(200)
-    expect((await as('jr-alice', 'POST', `/ai-runs/${run3.id}/operations/draft-2/reconcile`, { done: true })).status).toBe(200)
+    // Reconciled meanwhile (by a build before 4b-1, whose run-level reconcile reopened it; this build has none for a job's run).
+    db.prepare("UPDATE ai_run_operations SET state = 'done' WHERE company_id = ? AND run_id = ? AND key = 'draft-2'").run(CO, run3.id)
+    db.prepare("UPDATE ai_runs SET state = 'open', failure_class = NULL, failure_code = NULL WHERE company_id = ? AND id = ?").run(CO, run3.id)
     expect(runOf(run3.id).state).toBe('open')
     expect(services.jobs.pause(owner(), reopened.job).ok).toBe(true)
     expect(runOf(run3.id)).toMatchObject({ state: 'waiting_person', failure_code: 'JOB_PAUSED' })
@@ -769,13 +772,15 @@ describe('a held occurrence whose run waits for reconciliation (stage 4b-0.5, F5
     expect(tasksOf()).toEqual([])
   })
 
-  it('the run’s own member reconciling it on the run (the company’s stop) does not reopen it either', async () => {
-    const { occ } = await runnable()
+  it('the run’s own member cannot reconcile it on the run (stage 4b-1, D11); reconciled on the occurrence it does not reopen', async () => {
+    const { job, occ } = await runnable()
     const run = (await claim(occ)).body.data.run
     inFlight(run.id, 'draft-9')
     services.jobs.setStopped(owner(), { stopped: true })
     expect(occOf(occ)).toMatchObject({ state: 'held', outcome_code: 'COMPANY_STOPPED' })
-    expect((await as('jr-alice', 'POST', `/ai-runs/${run.id}/operations/draft-9/reconcile`, { done: false })).status).toBe(200)
+    expect(await as('jr-alice', 'POST', `/ai-runs/${run.id}/operations/draft-9/reconcile`, { done: false })).toMatchObject({ status: 404, body: { code: 'RUN_NOT_FOUND' } })
+    expect(opOf(run.id, 'draft-9')).toMatchObject({ state: 'unknown' })
+    expect((await as('jr-owner', 'POST', `/jobs/${job}/occurrences/${occ}/operations/draft-9/reconcile`, { done: false })).status).toBe(200)
     expect(opOf(run.id, 'draft-9')).toMatchObject({ state: 'not_done' })
     expect(runOf(run.id)).toMatchObject({ state: 'waiting_reconcile' })
     services.jobs.setStopped(owner(), { stopped: false })

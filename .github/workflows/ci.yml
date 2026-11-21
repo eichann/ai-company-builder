@@ -396,6 +396,11 @@ jobs:
       - uses: ./.github/actions/setup
       - run: npx vitest run
         working-directory: server
+      # The rollback floor (deployment.md "Rolling back production"): a database this build writes, run through the floor
+      # build's code (a worktree of .github/rollback-floor-commit) and back through this build. Server only, one SQLite
+      # file between the steps; the floor reuses this checkout's node_modules while the lockfile is the same.
+      - name: Rollback floor, across builds
+        run: .github/scripts/rollback-floor-check.sh
 
   test-admin:
     name: Admin tests

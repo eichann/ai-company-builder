@@ -1,7 +1,9 @@
 /**
  * The rollback floor (stage 4b-0.5, owner memo 「段4b 設計メモ」 第4版 §5, jobs.md "Shapes this build does not know"):
  * production may run this build again after a later one (4b-1) wrote versions of a shape this build does not know
- * (`schema: 3`, an event job run by the responsible person's PC AI) and their occurrences, runs, notices. Such an
+ * (`schema: 3`, an event job run by the responsible person's PC AI) and their occurrences, runs, notices. Since stage 4b-1
+ * this build knows schema 3 itself, so the tests stand in the next shape (`LATER_SCHEMA`, 4) for "a shape this build does
+ * not know": the freeze is the same mechanism (the floor build runs this file with schema 3 as written). Such an
  * occurrence is **frozen** here: never shown, counted, told, expired, run, claimed, retried or reconciled — left out in
  * SQL before every limit — and only a pause, the company's stop or a restore reaches it (held, its run ended, nothing
  * told, no chain stopped). The memo's tests F1–F4, F10 and F11 (F5 / F6: job-runs.test.ts; F7–F9: job-events.test.ts and
@@ -89,8 +91,13 @@ function publishSkill(): string {
   if (!r.ok) throw new Error(JSON.stringify(r.body))
   return r.value.item.id
 }
-/** What a later build (4b-1) stores: an event job run by the PC's AI — a shape this build does not know. */
-const as4b1 = (d: Json): Json => ({ ...d, schema: 3, placement: 'a', trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', startRecord: 'task-0000000000000001', ai: true } })
+/**
+ * A shape this build does not know. On the floor (4b-0.5) that was 4b-1's schema 3; since 4b-1 this build reads schema 3,
+ * so the next one stands in for it (the freeze does not depend on which number is unknown).
+ */
+const LATER_SCHEMA = 4
+/** What a later build stores: an event job run by the PC's AI — a shape this build does not know. */
+const as4b1 = (d: Json): Json => ({ ...d, schema: LATER_SCHEMA, placement: 'a', trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', startRecord: 'task-0000000000000001', ai: true } })
 
 async function approvedJob(definition: Json = serverJob()): Promise<string> {
   const made = await services.jobs.create(owner(), { definition })
@@ -103,14 +110,14 @@ async function approvedJob(definition: Json = serverJob()): Promise<string> {
   return job
 }
 
-/** Version 2 as 4b-1 writes it (schema 3), approved and accepted: what a server rolled back to this build finds. */
+/** Version 2 as a later build writes it (`LATER_SCHEMA`), approved and accepted: what a server rolled back to this build finds. */
 function store4b1(job: string, definition: Json = as4b1(serverJob())) {
   const text = canonicalJson(definition)
   const consent = hashCanonical(jobConsentCanonical(definition as JobDefinition))
   const at = past(3 * 24 * 60)
   db.prepare(`INSERT INTO ai_job_versions (company_id, job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at,
-      approved_by, approved_at, accepted_by, accepted_at) VALUES (?, ?, 2, 3, ?, ?, ?, 'rf-alice', 'rf-owner', ?, 'rf-owner', ?, 'rf-alice', ?)`)
-    .run(CO, job, text, hashCanonical(text), consent, at, at, at)
+      approved_by, approved_at, accepted_by, accepted_at) VALUES (?, ?, 2, ?, ?, ?, ?, 'rf-alice', 'rf-owner', ?, 'rf-owner', ?, 'rf-alice', ?)`)
+    .run(CO, job, LATER_SCHEMA, text, hashCanonical(text), consent, at, at, at)
   db.prepare(`UPDATE ai_jobs SET latest_version = 2, approved_version = 2, approved_fingerprint = ?, accepted_version = 2, accepted_consent = ?, state = 'active'
     WHERE company_id = ? AND id = ?`).run(hashCanonical(text), consent, CO, job)
 }
@@ -439,16 +446,16 @@ describe('F4: a pause, the company stop and a restore hold frozen ones and end t
 })
 
 describe('F10: screens that do not show a shape cannot edit, approve or accept it', () => {
-  /** A server of a later build (its core reads schema 3: 4b-1), with the same rules. */
+  /** A server of a later build (its core reads `LATER_SCHEMA`), with the same rules. */
   const laterServer = () => createJobService({
     companyData, memberships: sqliteMembershipRepository(db), transactions: sqliteTransactions(db), clock, ids: randomIds,
-    skillTree: async () => null, hasCompanyFolder: () => false, knownSchemas: [1, 2, 3],
+    skillTree: async () => null, hasCompanyFolder: () => false, knownSchemas: [1, 2, 3, LATER_SCHEMA],
   })
   it('an old tab (schema 1) and a rebuilt screen that shows 1 and 2 only are both refused; the version is not handed to them', async () => {
     const job = await approvedJob()
     const text = canonicalJson(as4b1(serverJob()))
     db.prepare(`INSERT INTO ai_job_versions (company_id, job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at)
-      VALUES (?, ?, 2, 3, ?, ?, ?, 'rf-alice', 'rf-owner', ?)`).run(CO, job, text, hashCanonical(text), hashCanonical(jobConsentCanonical(as4b1(serverJob()))), past())
+      VALUES (?, ?, 2, ?, ?, ?, ?, 'rf-alice', 'rf-owner', ?)`).run(CO, job, LATER_SCHEMA, text, hashCanonical(text), hashCanonical(jobConsentCanonical(as4b1(serverJob()))), past())
     db.prepare('UPDATE ai_jobs SET latest_version = 2 WHERE company_id = ? AND id = ?').run(CO, job)
     const s = laterServer()
     for (const reads of [[1], [1, 2]]) {
@@ -484,6 +491,10 @@ describe('F11: a database as 4b-1 leaves it, under this build', () => {
     const rec = alicesTask()
     const sql = FIXTURE.replaceAll('{{CO}}', CO).replaceAll('{{ALICE}}', 'rf-alice').replaceAll('{{OWNER}}', 'rf-owner').replaceAll('{{REC}}', rec)
       .replaceAll('{{NOW}}', new Date().toISOString()).replaceAll('{{PAST}}', past(2 * 24 * 60)).replaceAll('{{LATER}}', later(10))
+      // The frozen fixture's 4b-1 version (schema 3, which this build knows since 4b-1) read as one shape later, so the
+      // freeze is still what is tested here; the floor build loads it as written.
+      .replace("'job.4b100000000000000000000000000001', 2, 3,", `'job.4b100000000000000000000000000001', 2, ${LATER_SCHEMA},`)
+      .replace('"schema":3,', `"schema":${LATER_SCHEMA},`)
     db.exec(sql)
     return rec
   }

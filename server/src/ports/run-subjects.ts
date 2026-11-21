@@ -116,6 +116,17 @@ export interface RunSubjects<Refused> {
    * steps have their own table); absent → every route refused.
    */
   routeRefusal?(member: RunSubjectMember, run: RunSubjectLiveRun, route: string, params: Readonly<Record<string, string | undefined>>): Refused | null
+  /**
+   * A renew of the run (its lease, every minute while the AI works): a refusal the renew answers instead (stage 4b-1: a PC
+   * event job's run whose conditions failed — the subject ends the run itself first). Absent / null: renewed as before.
+   */
+  renewRefusal?(member: RunSubjectMember, run: RunSubjectLiveRun): Refused | null
+  /**
+   * Whether a run of this subject is a missing run for its own member now (no get, renew, finish or token binding): a job
+   * occurrence's run whose occurrence this build does not show them (a later build's shape; an event occurrence of a
+   * record they do not read). Absent: never hidden.
+   */
+  hides?(member: RunSubjectMember, run: RunSubjectLiveRun): boolean
   /** Whether a record token may be bound to this run at all (B PR 5a: a PC job's run); absent → only a record's run. */
   bindsTokens?(run: RunSubjectLiveRun): boolean
 }

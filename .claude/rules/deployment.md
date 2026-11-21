@@ -298,6 +298,24 @@ generation, so a cursor 4b-1 wrote is never re-judged. Rolling back the desktop 
 (memo §7: it never claims an event occurrence and stops renewing; the server's deadline ends the run). Everything below
 was the previous floor's reasoning and still holds for builds older than 4b-0.5.
 
+**The floor is pinned and checked across builds** (stage 4b-1, coordinator decision 2026-11-22): `.github/rollback-floor-commit`
+holds the floor's merge commit (`6760eef3…`, #720) — the one place it is named; **move it when the floor moves** (the
+oldest version production may go back to), in the same PR that says so here. `.github/scripts/rollback-floor-check.sh`,
+a step of CI's "Server tests" job (and runnable locally from the repository root), passes one SQLite file through three
+steps (`server/tests/cross-build/`, skipped in ordinary runs without `ACB_CROSS_BUILD_DB`): **1-make** — this build writes
+what production would hold (schema-3 event jobs, a running PC run with a Drive put done and one in flight and its receipt,
+an occurrence with an unknown outside result whose chain stopped and whose notices were written, a watch moved to the
+やること a run made and a waiting occurrence of it); **2-floor** — the floor's code (a `git worktree` of the pinned commit,
+using this checkout's `node_modules` while the lockfile is the same, else its own install of the server) on that file:
+nothing listed, worded, claimed, run or expired (also with the clock two days later), a pause / the company's stop / a
+restore hold what waits or runs and end the run (its put in flight unknown), a resume refused there
+(`JOB_SCHEMA_UNKNOWN`), nobody told, everything 4b-1 needs unchanged (`snapshot.ts`); **3-return** — this build again:
+nothing lost, nothing made twice by the clock, held stays held, the stopped chain worded again, and the unknown results
+reconciled on the occurrences by their responsible person without resuming anything. `2-floor.test.ts` is copied into the
+floor's worktree, so it uses only what the floor build has (its routes and services); keep it so when the floor moves.
+It fails on a build that does not freeze schema 3 (checked: step 2 run with 4b-1's own code fails at the first listing).
+The older fixture test (`job-rollback-floor.test.ts` F11 on `stage4b1-shaped-jobs.sql`) stays as the floor's own.
+
 ### The previous floor (stage 4-0.1)
 
 **Once event-triggered jobs (stage 4a) are in production, never roll production back to a version older than

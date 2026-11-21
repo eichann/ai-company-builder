@@ -150,6 +150,21 @@ export interface JobRepository {
   /** Occurrences in `running` (a PC's run holds them, B PR 5a), oldest due first (every job of the company, or `jobId`'s only). */
   runningOccurrences(limit: number, jobId?: string | null): JobOccurrenceRow[]
   /**
+   * Stage 4b-1: whether an occurrence of the job other than `exceptId` is `running` — every one, no limit (a PC's event
+   * occurrence waits while another of its job runs: they never run side by side, whatever the history's length).
+   */
+  otherRunning(jobId: string, exceptId: string): boolean
+  /**
+   * Stage 4b-1 (owner memo 「段4b 設計メモ」 D11): the distinct event records of occurrences pinned to a version whose
+   * responsible person is `userId`, newest event first, from `offset`, at most `limit` (the reader check is the caller's).
+   */
+  eventRecordsPinnedTo(userId: string, limit: number, offset?: number): string[]
+  /**
+   * The occurrences pinned to a version whose responsible person is `userId`, of the event `records` only (left out in
+   * SQL before the limit), newest first, at most `limit`: what that person ran, whoever is responsible now.
+   */
+  occurrencesPinnedTo(userId: string, records: readonly string[], limit: number): JobOccurrenceRow[]
+  /**
    * Stage 4b-0.5: a pause, the company's stop or a restore holds every frozen occurrence of the job (null: of every job)
    * still `due` or `running` — `held` with `code`, **no limit** — and answers the runs of those that were running, for
    * the caller to end. Nothing else: no notice, no watch stopped (a later build reads them again).
