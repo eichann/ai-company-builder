@@ -1071,8 +1071,8 @@ and やること. Stopping the AI on the PC when the server cannot be reached (a
   deadline, the one やること at the finish, a place outside) plus the ones below. The server's runner never takes it
   (placement `a`). `missed.expiresAfterMinutes` is how long it waits for the app (D6: one day is the admin form's default,
   `JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES`).
-- **Old apps never run it** (two locks, §7): a claim must name the kind `event` (`kinds`; `GET /me/job-turns?kinds=event`) and
-  the check `source_record` (`checks`). `JOB_EVENT_CHECK_KINDS` is kept out of `JOB_PC_CHECK_KINDS`, which every app build
+- **Old apps never run it** (two locks, §7): a claim must name the kind `event` (`kinds`) and the check `source_record`
+  (`checks`). The list (`GET /me/job-turns?kinds=event`) is gated by the kind only — the check lock is the claim's. `JOB_EVENT_CHECK_KINDS` is kept out of `JOB_PC_CHECK_KINDS`, which every app build
   sends, so a rebuilt app of today never names it (`JOB_KIND_NOT_SUPPORTED` / `JOB_CHECK_NOT_SUPPORTED`, nothing written).
   A screen announcing `1,2` gets no definition, and its create / approve / accept is `JOB_NEEDS_NEWER_SCREEN` (the app is
   told to update).
@@ -1085,8 +1085,8 @@ and やること. Stopping the AI on the PC when the server cannot be reached (a
   the watch it was made for (`ownsWatch`: its generation, the watched record); C4 the record still in the trigger's
   `to` state; C5 its assignee them; C6 that state not 「AI の番」 now (a business plugin's step since: `aiTurnState`); C9 no
   done mark (`file_linked`: a link from the record with a target path — a company file or a `drive:` file; the server
-  reads links only). Before a run starts (the list and a `due` claim) also D5: absent on the event's company day (never
-  the `ev:` slot read as a date).
+  reads links only). Before a run starts (the list, a `due` claim, and the clock's look at a waiting one) also D5: absent
+  on the event's company day (never the `ev:` slot read as a date).
 - **Where they are checked**: the list (left out, nothing written), the claim (`resolve`), every call of the run's token
   (`routeRefusal`), every renew (the run subject's new `renewRefusal`, asked by `ai-runs.ts` `renew` after its lease
   check: the app renews every minute), the finish (`beforeFinish`; `finishing` refuses a race and rolls back), and the
@@ -1113,7 +1113,11 @@ and やること. Stopping the AI on the PC when the server cannot be reached (a
   (time occurrences keep 5b's earlier-slot rule). The occurrence itself is never counted.
 - **A run on it** (`ai-runs.ts` `ownRun` asks the subject's new `hides`): a frozen occurrence's run and an event
   occurrence's run are missing runs, except a schema-3 one whose record the member reads now (⑥) — get, renew, finish,
-  token binding. The run-level 「もう一度」 and reconcile (`POST /ai-runs/:runId/retry`, `…/operations/:key/reconcile`) answer
+  token binding. When the member's own running event run is hidden for that reason (C3), `hides` **ends it there**
+  (`EVENT_RECORD_GONE`): a renew or a finish answered 404 never reaches the conditions, so without it the run would stay
+  unfenced until the next call or clock pass (independent review of 4b-1). A claim of an event occurrence the claimer
+  cannot read answers the one 404 **before** the kind and check locks; it ends the occurrence only when the claiming app
+  runs event occurrences (an app of the wrong kind writes nothing). The run-level 「もう一度」 and reconcile (`POST /ai-runs/:runId/retry`, `…/operations/:key/reconcile`) answer
   404 `RUN_NOT_FOUND` for **every** job's run, time ones too (D11: the occurrence's are the only ones; no released app
   used them for a job's run — `aiTurns:retry` does nothing for an occurrence, `ai-turns.md`).
 - **Who reconciles and presses** (D11 table, `job-retry.ts` `rightsOf`; Codex review 4 #2 / #3): an owner / admin who
@@ -1124,10 +1128,13 @@ and やること. Stopping the AI on the PC when the server cannot be reached (a
   included — the press answers 409 `JOB_VERSION_CHANGED`, whoever asks; it never moves whose rights run it. A member
   without such a right gets 403 `JOBS_FORBIDDEN` whatever the ids (missing, unreadable, someone else's: one answer).
   Time jobs: owner / admin only, as before. The views (`GET /jobs/:jobId/occurrences`, `viewFor`) carry the 「もう一度」
-  fields only to someone whose rights cover them (a reconcile-only person: what is unknown, not the button).
+  fields only to someone whose rights cover them: an owner / admin and the pinned person all of them; the current
+  responsible person on an occurrence pinned to the one before only `retry` (its answer, `JOB_VERSION_CHANGED`) — never what
+  that person's run sent or made (`unknownOperations`, `madeBefore`, who pressed).
 - **Finding one's own after a hand-over** (`GET /me/job-occurrences`, `jobRetry.mine`): every member; the event PC
-  occurrences pinned to a version naming them (`eventRecordsPinnedTo` / `occurrencesPinnedTo`: their records checked in one
-  batch, the rest left out in SQL before the limit of 100), with `jobId` and the name of **the version they ran**
+  occurrences pinned to a version naming them (`eventRecordsPinnedTo` / `occurrencesPinnedTo`: their records, newest event
+  first, checked a page of `EVENT_RECORDS_CHECKED` at a time — up to `MINE_PAGES` (5) pages, until 100 readable occurrences —
+  the unreadable left out in SQL before the limit; beyond the pages, fails closed), with `jobId` and the name of **the version they ran**
   (`jobs.pinnedNameOf`: 「定期の仕事」 when it names a place they cannot read) — never the job's newer versions or name.
 - **「もう一度」 of an event PC occurrence** (§4-2): `blockOf` as for any, plus its conditions now (`eventCondition` without
   D5): C7 → `RECORDS_OFF`, C2 → `JOB_GRANT_EXCEEDS`, any other → `SOURCE_CHANGED` — refused without changing the state, the
@@ -1154,7 +1161,12 @@ and やること. Stopping the AI on the PC when the server cannot be reached (a
   same), `mine`'s two reader checks (the readable-records batch and `eventShown`: each alone suffices), and the clock
   leaving an expired waiting one to its expiry instead of the conditions (an ordering choice: expired and told, as any).
   Not reachable: `finishing`'s event re-check (`beforeFinish` checked in the same synchronous stretch: a race only), the
-  self-exclusion in `otherRunning` (only a `due` one asks, never running itself), `own`'s fail-closed without `eventRuns`.
+  self-exclusion in `otherRunning` (only a `due` one asks, never running itself), `own`'s fail-closed without `eventRuns`,
+  and `end` answering null when nothing moved (its callers then stop no chain: the move and its check are one synchronous
+  stretch). `deliveryPlace`'s event conditions (`stillRuns`) are behind the record-token guard's `routeRefusal`, which ends
+  the run at the Drive route's call first, so removing them alone changes nothing (as its time-job check, "A deliverable
+  place outside"). After the independent review: `hides` ending the run, the claim's 404 before the locks and its
+  write only for an app of the kind, `viewFor`'s retry-only view, `mine`'s paging — 5 mutations, each fails.
 
 ## Tests (each guard mutation-checked, with the exceptions named)
 

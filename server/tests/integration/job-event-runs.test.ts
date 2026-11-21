@@ -368,15 +368,41 @@ describe('S1 (each condition on its own, at the renew or a call)', () => {
     const token = await tokenFor(run)
     expect((await as('ej-alice', 'GET', `/ai-runs/${run.id}`)).status).toBe(200)
     db.prepare("UPDATE records SET personal_owner = 'ej-bob' WHERE company_id = ? AND id = ?").run(CO, start)
-    // The run is a missing run for her now (⑥), and the next call of its token ends it.
-    expect(await as('ej-alice', 'GET', `/ai-runs/${run.id}`)).toMatchObject({ status: 404, body: { code: 'RUN_NOT_FOUND' } })
+    // The next call of its token ends it (403); the run is a missing run for her from then on (⑥).
     expect(await ai(token, 'POST', '/query', { type: 'task' })).toMatchObject({ status: 403, body: { code: 'NOT_IN_STEP' } })
+    expect(await as('ej-alice', 'GET', `/ai-runs/${run.id}`)).toMatchObject({ status: 404, body: { code: 'RUN_NOT_FOUND' } })
     expect(occOf(occ)).toMatchObject({ state: 'skipped', outcome_code: 'EVENT_RECORD_GONE' })
 
     const waiting = await eventOccurrence()
     db.prepare("UPDATE records SET personal_owner = 'ej-bob' WHERE company_id = ? AND id = ?").run(CO, waiting.start)
     expect(await claim(waiting.occ)).toMatchObject({ status: 404, body: { code: 'JOB_NOT_FOUND' } })
     expect(occOf(waiting.occ)).toMatchObject({ state: 'skipped', outcome_code: 'EVENT_RECORD_GONE', run_id: null })
+  })
+
+  it('C3 found at a renew or a finish (answered as a missing run) still ends the run at once: its token fenced', async () => {
+    for (const via of ['renew', 'finish'] as const) {
+      const { occ, start } = await eventOccurrence()
+      const run = (await claim(occ)).body.data.run
+      const token = await tokenFor(run)
+      db.prepare("UPDATE records SET personal_owner = 'ej-bob' WHERE company_id = ? AND id = ?").run(CO, start)
+      const answered = via === 'renew' ? await renew(run) : await finish(run, { outcome: 'done', jobResult: { title: '報告書' } })
+      expect(answered, via).toMatchObject({ status: 404, body: { code: 'RUN_NOT_FOUND' } })
+      expect(occOf(occ), via).toMatchObject({ state: 'skipped', outcome_code: 'EVENT_RECORD_GONE' })
+      expect(runOf(run.id).state, via).toBe('waiting_person')
+      db.prepare('UPDATE records SET personal_owner = NULL WHERE company_id = ? AND id = ?').run(CO, start)
+      // Even readable again, the token is fenced: the run ended at that renew / finish, not at a later call.
+      expect(await ai(token, 'POST', '/query', { type: 'task' }), via).toMatchObject({ status: 409, body: { code: 'RUN_SUPERSEDED' } })
+      expect(madeTasks()).toEqual([])
+    }
+  })
+
+  it('an app of the wrong kind claiming an occurrence it cannot read gets the one 404, and nothing is written', async () => {
+    const { occ, start } = await eventOccurrence()
+    db.prepare("UPDATE records SET personal_owner = 'ej-bob' WHERE company_id = ? AND id = ?").run(CO, start)
+    for (const opts of [{ kinds: null }, { checks: ['new_files', 'new_meetings'] }]) {
+      expect(await claim(occ, opts)).toMatchObject({ status: 404, body: { code: 'JOB_NOT_FOUND' } })
+      expect(occOf(occ)).toMatchObject({ state: 'due', outcome_code: null })
+    }
   })
 
   it('C8: another occurrence of the watch moved it on (a new generation) — this one ends, and stops nothing of the new watch', async () => {
@@ -585,6 +611,12 @@ describe('S5 / S6: reconciling and 「もう一度」 — who (D11)', () => {
     // Bob, responsible now, may ask (and gets the same answer) but cannot reconcile what alice's run sent.
     expect(await retry('ej-bob', job, occ)).toMatchObject({ status: 409, body: { code: 'JOB_VERSION_CHANGED' } })
     expect(await reconcile('ej-bob', job, occ)).toMatchObject({ status: 403 })
+    // Bob's view of the job: the button's answer only — nothing of what alice's run sent or made.
+    const bobs = (await as('ej-bob', 'GET', `/jobs/${job}/occurrences`)).body.data.occurrences.find((o: Json) => o.id === occ)
+    expect(bobs).toMatchObject({ retry: { allowed: false, why: 'JOB_VERSION_CHANGED' } })
+    expect(bobs).not.toHaveProperty('unknownOperations')
+    expect(bobs).not.toHaveProperty('madeBefore')
+    expect(bobs).not.toHaveProperty('retriedBy')
     expect((await as('ej-bob', 'GET', '/me/job-occurrences')).body.data.occurrences).toEqual([])
     // Bob's own occurrence of the same record (version 2 names him) is his; alice's stays hers alone.
     const at = new Date().toISOString()
@@ -622,6 +654,20 @@ describe('S5 / S6: reconciling and 「もう一度」 — who (D11)', () => {
     expect((await as('ej-alice', 'GET', '/me/job-occurrences')).body.data.occurrences).toEqual([])
     expect(await reconcile('ej-alice', made.job, occ)).toMatchObject({ status: 403 })
     expect(opOf(run.id, 'put-1').state).toBe('unknown')
+  })
+
+  it('S6: her list pages past records she no longer reads (more than one page of them, newer than hers)', async () => {
+    const { job, occ, start } = await unknownAfterUndo()
+    // 2,000 newer event records of the same job pinned to alice, none of them hers to read now.
+    db.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000)
+      INSERT INTO records (company_id, id, type, type_version, scope_id, path, folder, title, summary, created_at, updated_at, removed_at, personal_owner)
+      SELECT company_id, 'task-' || printf('%016x', 1000000 + i), type, type_version, scope_id, path, folder, title, summary, created_at, updated_at, removed_at, 'ej-bob'
+      FROM records, n WHERE company_id = '${CO}' AND id = '${start}'`)
+    db.exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000)
+      INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, created_at, updated_at, event_seq, event_record_id, event_version, event_day)
+      SELECT '${CO}', 'occ.' || printf('%032x', 1000000 + i), '${job}', 1, 'ev:' || (5000000 + i), 'Asia/Tokyo', '2026-11-22T00:00:00.000Z', '2026-11-22T00:00:00.000Z', 'nothing',
+        '2026-11-22T00:00:00.000Z', '2026-11-22T00:00:00.000Z', 5000000 + i, 'task-' || printf('%016x', 1000000 + i), 1, '2026-11-22' FROM n`)
+    expect((await as('ej-alice', 'GET', '/me/job-occurrences')).body.data.occurrences.map((o: Json) => o.id)).toEqual([occ])
   })
 
   it('S6: the responsible person’s view of the job carries what she may press; a time job’s responsible person gets none of it', async () => {

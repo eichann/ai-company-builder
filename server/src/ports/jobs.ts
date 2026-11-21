@@ -156,9 +156,9 @@ export interface JobRepository {
   otherRunning(jobId: string, exceptId: string): boolean
   /**
    * Stage 4b-1 (owner memo 「段4b 設計メモ」 D11): the distinct event records of occurrences pinned to a version whose
-   * responsible person is `userId`, newest event first, at most `limit` (the reader check is the caller's).
+   * responsible person is `userId`, newest event first, from `offset`, at most `limit` (the reader check is the caller's).
    */
-  eventRecordsPinnedTo(userId: string, limit: number): string[]
+  eventRecordsPinnedTo(userId: string, limit: number, offset?: number): string[]
   /**
    * The occurrences pinned to a version whose responsible person is `userId`, of the event `records` only (left out in
    * SQL before the limit), newest first, at most `limit`: what that person ran, whoever is responsible now.

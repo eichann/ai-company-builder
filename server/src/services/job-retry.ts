@@ -79,6 +79,8 @@ export interface JobRetryDeps {
 
 const NOT_FOUND = () => refuse('not-found', '定期の仕事が見つかりません。', { code: 'JOB_NOT_FOUND' })
 const FORBIDDEN = () => refuse('forbidden', JOBS_FORBIDDEN)
+/** How many pages of a person's event records `GET /me/job-occurrences` reads at most (`EVENT_RECORDS_CHECKED` each). */
+export const MINE_PAGES = 5
 /** What a member may do with an occurrence (D11): nothing, ask for 「もう一度」, say what its run's outside operation did. */
 interface Rights { retry: boolean; reconcile: boolean }
 const NO_RIGHTS: Rights = { retry: false, reconcile: false }
@@ -223,8 +225,10 @@ export function createJobRetry(deps: JobRetryDeps) {
     const rights = rightsOf(member, { handle, job, occ, version: handle.jobs.version(job.id, occ.jobVersion) })
     if (!rights.retry && !rights.reconcile) return {}
     const all = viewOf(member.companyId, occ)
-    // Someone who may reconcile but not ask for 「もう一度」 sees what is unknown, not the button's answer.
-    return rights.retry ? all : { retries: all.retries, retriedBy: all.retriedBy, retriedAt: all.retriedAt, ...(all.unknownOperations ? { unknownOperations: all.unknownOperations } : {}) }
+    if (rights.reconcile) return all
+    // Someone who may only ask for 「もう一度」 (the job's current responsible person on an occurrence pinned to the one
+    // before): the button's answer only — never what the earlier person's run sent or made (independent review of 4b-1).
+    return all.retry ? { retry: all.retry } : {}
   }
 
   /** The 「もう一度」 fields of an occurrence (`viewFor` decides who gets them). */
@@ -270,10 +274,18 @@ export function createJobRetry(deps: JobRetryDeps) {
     mine(member: Member): Outcome<{ occurrences: MyJobOccurrenceView[] }> {
       const handle = companyData.forCompany(member.companyId)
       const reader = recordReader(member, handle.scopes.listWithRules())
-      const records = handle.jobs.eventRecordsPinnedTo(member.userId, EVENT_RECORDS_CHECKED)
-      const readable = records.length === 0 ? [] : handle.records.byIds(records).filter(r => r.removedAt === null && reader.record(r)).map(r => r.id)
+      // Their records, newest event first, page by page (`EVENT_RECORDS_CHECKED` a page, at most `MINE_PAGES`), until a
+      // full answer is readable: records they cannot read never push readable ones out; beyond the pages, fails closed.
+      const readable: string[] = []
+      let pinned: JobOccurrenceRow[] = []
+      for (let page = 0; page < MINE_PAGES; page++) {
+        const records = handle.jobs.eventRecordsPinnedTo(member.userId, EVENT_RECORDS_CHECKED, page * EVENT_RECORDS_CHECKED)
+        if (records.length > 0) readable.push(...handle.records.byIds(records).filter(r => r.removedAt === null && reader.record(r)).map(r => r.id))
+        pinned = readable.length === 0 ? [] : handle.jobs.occurrencesPinnedTo(member.userId, readable, OCCURRENCES_LISTED)
+        if (records.length < EVENT_RECORDS_CHECKED || pinned.length >= OCCURRENCES_LISTED) break
+      }
       const out: MyJobOccurrenceView[] = []
-      for (const occ of handle.jobs.occurrencesPinnedTo(member.userId, readable, OCCURRENCES_LISTED)) {
+      for (const occ of pinned) {
         const version = handle.jobs.version(occ.jobId, occ.jobVersion)
         if (!version || !eventPc(occ, definitionOf(version)) || !eventShown(handle, member, occ)) continue
         out.push({ ...occurrenceView(occ), jobId: occ.jobId, name: deps.jobs.pinnedNameOf(member, version), ...viewFor(member, occ) })

@@ -229,8 +229,9 @@ export function createJobRuns(deps: JobRunDeps) {
   }
 
   /** Move the occurrence and say why, in its own transaction (or the caller's); the members told. */
-  function end(f: Found, from: JobOccurrenceState[], to: JobOccurrenceState, code: JobOutcomeCode, notice: 'job_skipped' | 'job_failed' | null): string[] {
-    if (!f.handle.jobs.moveOccurrence(f.occ.id, from, to, { outcomeCode: code }, clock.now())) return []
+  /** null: it was no longer in `from` (nothing moved, nothing told — and an event occurrence's chain is not stopped for it). */
+  function end(f: Found, from: JobOccurrenceState[], to: JobOccurrenceState, code: JobOutcomeCode, notice: 'job_skipped' | 'job_failed' | null): string[] | null {
+    if (!f.handle.jobs.moveOccurrence(f.occ.id, from, to, { outcomeCode: code }, clock.now())) return null
     return notice ? deps.notices.writeNotice(f.handle.companyId, notice, f.occ) : []
   }
 
@@ -259,10 +260,11 @@ export function createJobRuns(deps: JobRunDeps) {
         }
       } else if (why === 'PLACE_NOT_USABLE') {
         // A person chooses the place again (「受け取る」); nothing ran, or what runs ends here.
-        told = end(f, ['due', 'running'], 'needs_person', 'PLACE_NOT_USABLE', 'job_failed')
+        const moved = end(f, ['due', 'running'], 'needs_person', 'PLACE_NOT_USABLE', 'job_failed')
         if (f.occ.state === 'running') endPcRun(f.handle, f.occ.runId, 'PLACE_NOT_USABLE', at)
-        if (f.event && told !== null) told = [...told, ...(deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, null, 'PLACE_NOT_USABLE') ?? [])]
-      } else if (why === 'OWNER_ABSENT') told = end(f, ['due'], 'skipped', 'OWNER_ABSENT', 'job_skipped')
+        // Only an occurrence that moved here stops its chain (another end got there first: its own end said so).
+        if (moved !== null) told = f.event ? [...moved, ...(deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, null, 'PLACE_NOT_USABLE') ?? [])] : moved
+      } else if (why === 'OWNER_ABSENT') told = end(f, ['due'], 'skipped', 'OWNER_ABSENT', 'job_skipped') ?? []
       else if (why === 'JOB_VERSION_CHANGED') end(f, ['due'], 'held', 'JOB_VERSION_CHANGED', null)
     })
     deps.notices.tell(f.handle.companyId, told)
@@ -388,16 +390,18 @@ export function createJobRuns(deps: JobRunDeps) {
       if (subject.kind !== 'occurrence' || step !== JOB_PC_STEP) return NOT_FOUND()
       const f = own(member, subject.id)
       if (!f) return NOT_FOUND()
+      // An event occurrence of a record the caller cannot read now does not exist for them (⑥): the same 404, before any
+      // other answer (an app of the wrong kind learns nothing either, and nothing is written for it).
+      if (!seen(member, f)) {
+        // The claiming app runs event occurrences: the occurrence is ended (C3), so it waits for nobody.
+        const runsIt = (subject.kinds ?? ['time']).includes('event') && !!subject.checks?.includes(f.definition.check.kind)
+        if (runsIt && (f.occ.state === 'due' || f.occ.state === 'running')) record(f, 'EVENT', 'EVENT_RECORD_GONE')
+        return NOT_FOUND()
+      }
       // An app that does not run this kind of occurrence never claims it (stage 4-0: absent = time only).
       if (!(subject.kinds ?? ['time']).includes(jobOccurrenceKind(f.occ.dueSlot))) return KIND_NOT_SUPPORTED()
       // An app that cannot run this check never claims it (B PR 5a-2); nothing is written for it.
       if (!subject.checks?.includes(f.definition.check.kind)) return CHECK_NOT_SUPPORTED()
-      // An event occurrence of a record the caller cannot read now does not exist for them (⑥): the same 404 — and it is
-      // ended (C3), so it waits for nobody.
-      if (!seen(member, f)) {
-        if (f.occ.state === 'due' || f.occ.state === 'running') record(f, 'EVENT', 'EVENT_RECORD_GONE')
-        return NOT_FOUND()
-      }
       const found = whyNot(f, clock.nowMs())
       if (found?.why === 'GONE') return GONE()
       if (found) {
@@ -446,7 +450,7 @@ export function createJobRuns(deps: JobRunDeps) {
       const code: JobOutcomeCode = refused.reason === 'records-off' ? 'RECORDS_OFF' : 'TASK_NOT_CREATED'
       let told: string[] = []
       transactions.run(() => {
-        told = end(f, ['running'], 'needs_person', code, 'job_failed')
+        told = end(f, ['running'], 'needs_person', code, 'job_failed') ?? []
         endPcRun(f.handle, run.id, code, clock.now())
         if (f.event) told = [...told, ...(deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, null, code) ?? [])]
       })
@@ -461,9 +465,9 @@ export function createJobRuns(deps: JobRunDeps) {
       if (!f) return null
       if (run.state === 'waiting_person' || run.state === 'waiting_setup') {
         const told = end(f, ['running'], 'needs_person', 'RUN_FAILED', 'job_failed')
-        // An event occurrence ended without its やること: its chain stops (stage 4b-1).
+        // An event occurrence ended without its やること: its chain stops (stage 4b-1) — only when it moved here.
         const stopped = f.event && told !== null ? deps.eventRuns?.eventEnded(f.handle.companyId, f.occ, null, 'RUN_FAILED') ?? [] : []
-        toTell.set(run.id, { companyId: f.handle.companyId, userIds: [...told, ...stopped] })
+        toTell.set(run.id, { companyId: f.handle.companyId, userIds: [...(told ?? []), ...stopped] })
         return null
       }
       if (run.state !== 'done') return null
@@ -560,7 +564,11 @@ export function createJobRuns(deps: JobRunDeps) {
       const handle = companyData.forCompany(member.companyId)
       if (!handle.jobs.isHiddenOccurrence(run.subject.id)) return false
       const f = own(member, run.subject.id)
-      return !(f && f.event && seen(member, f))
+      if (f && f.event && seen(member, f)) return false
+      // The member's own event run whose record they no longer read (C3): a renew or a finish answered 404 here never
+      // reaches the conditions, so the run is ended now — its tokens fenced at once, not at the next call or clock pass.
+      if (f && f.event && f.occ.state === 'running' && f.occ.runId === run.id) record(f, 'EVENT', 'EVENT_RECORD_GONE')
+      return true
     },
 
     bindsTokens(run: RunSubjectLiveRun) {
