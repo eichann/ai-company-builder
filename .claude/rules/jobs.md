@@ -132,7 +132,11 @@ PUT  /jobs-stop { stopped }         owner/admin
   folders) — and may **write** where the deliverables go (`writes.place`, `resolveAccess`); otherwise 409
   `JOB_GRANT_EXCEEDS`, naming no place. A pinned Skill is still the company's at that tree (409
   `JOB_SKILL_MISSING` / `JOB_SKILL_CHANGED`: make a new version). A `fingerprint` that is not the
-  version's → 409 `JOB_VERSION_FINGERPRINT`. **Acceptance and every resume of an approved job run the
+  version's → 409 `JOB_VERSION_FINGERPRINT` — compared only where the caller's view shows the fingerprint
+  (`fingerprintShown`, stage 4b-0.5, independent review): a shape this server does not know answers
+  `JOB_SCHEMA_UNKNOWN` **before** the comparison, and a version hidden from the caller (a place or start record they
+  cannot read) never compares it — its other refusal comes whatever was sent, so a guess never tells the hidden sha256
+  (approve and accept alike; `job-rollback-floor.test.ts` F1). **Acceptance and every resume of an approved job run the
   same rights and Skill checks.**
 - **Approving is not accepting — two presses, also for the same person** (owner decision 2026-11-18, memo 「AI が自動化を
   提案する」 ⑦): an owner/admin who approves a job they are themselves the responsible person of has approved it as an

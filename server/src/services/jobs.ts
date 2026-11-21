@@ -190,6 +190,16 @@ export function createJobService(deps: JobServiceDeps) {
     return start === undefined || eventShown(handle, member, { eventRecordId: start })
   }
 
+  /**
+   * May `member` be told a version's fingerprints (the view's own rule, `view`)? Not for a shape this server does not know,
+   * nor for a version hidden from them (a place they cannot read; a start record they cannot read). Where they may not,
+   * approve and accept never compare a fingerprint they send (stage 4b-0.5, independent review): the answer would say
+   * whether a guess was the hidden sha256.
+   */
+  function fingerprintShown(member: Member, handle: CompanyData, definition: JobDefinition | null): boolean {
+    return definition !== null && (hasFullAccess(member.role) || readsAll(handle, member.userId, member.role, definition)) && readsStart(handle, member, definition)
+  }
+
   /** The company's own checks of a record trigger (job-events.ts): who must read its start record — `who` and the responsible person. */
   function triggerProblems(handle: CompanyData, definition: JobDefinition, who: Member | null): string[] {
     if (!isRecordTrigger(definition.trigger)) return []
@@ -370,7 +380,6 @@ export function createJobService(deps: JobServiceDeps) {
   }
 
   function view(member: Member, handle: CompanyData, job: JobRow, withVersions: boolean, reads: readonly number[] = SCHEMA_1_ONLY, reader: RecordReader = readerOf(member, handle)): JobView {
-    const full = hasFullAccess(member.role)
     // The name shown is the newest version's (`ai_jobs.name`). A responsible person who is not owner/admin
     // gets it only while they read every place that version names — an admin may have named the job after
     // a place (「経理部の月次報告」) they cannot read; otherwise the neutral 「定期の仕事」.
@@ -391,7 +400,7 @@ export function createJobService(deps: JobServiceDeps) {
         // A start record the viewer cannot read (stage 4a): the version is hidden from them, owners and admins too (⑥).
         // A shape this server does not know (stage 4b-0.5): nobody, owners and admins included, gets its fingerprints —
         // a sha256 of a shape another build reads lets someone test guesses, and nothing here could vouch for it.
-        const shown = definition !== null && (full || readsAll(handle, member.userId, member.role, definition)) && readsStart(handle, member, definition)
+        const shown = fingerprintShown(member, handle, definition)
         // A shape the client does not read (or this server does not know) goes without its definition: an older
         // screen would fail on it (jobs.md "Shapes this build does not know").
         const readable = shownTo(v, reads) !== null
@@ -581,10 +590,11 @@ export function createJobService(deps: JobServiceDeps) {
       const { handle } = found
       const v = handle.jobs.version(jobId, b.version)
       if (!v) return VERSION_NOT_FOUND()
-      if (b.fingerprint !== null && b.fingerprint !== v.fingerprint) return FINGERPRINT_CHANGED()
-      if (found.job.state === 'retired') return RETIRED()
+      // A shape this server does not know first, and a fingerprint compared only where the view shows it (no oracle).
       const definition = definitionOf(v)
       if (definition === null) return SCHEMA_UNKNOWN()
+      if (b.fingerprint !== null && fingerprintShown(member, handle, definition) && b.fingerprint !== v.fingerprint) return FINGERPRINT_CHANGED()
+      if (found.job.state === 'retired') return RETIRED()
       if (!reads.includes(v.schema)) return NEEDS_NEWER_SCREEN()
       const skill = await skillPinned(member.companyId, definition)
       if (!skill.ok) return skill
@@ -635,10 +645,11 @@ export function createJobService(deps: JobServiceDeps) {
       const v = handle.jobs.version(jobId, b.version)
       if (!v) return VERSION_NOT_FOUND()
       if (v.actingUserId !== member.userId) return refuse('forbidden', 'この定期の仕事の責任者だけが受け取れます。', { code: 'JOB_NOT_RESPONSIBLE' })
-      if (b.fingerprint !== null && b.fingerprint !== v.fingerprint) return FINGERPRINT_CHANGED()
-      if (job.approvedVersion !== v.version) return refuse('conflict', 'まだ承認されていない版は受け取れません。', { code: 'JOB_NOT_APPROVED' })
+      // A shape this server does not know first, and a fingerprint compared only where the view shows it (no oracle).
       const definition = definitionOf(v)
       if (definition === null) return SCHEMA_UNKNOWN()
+      if (b.fingerprint !== null && fingerprintShown(member, handle, definition) && b.fingerprint !== v.fingerprint) return FINGERPRINT_CHANGED()
+      if (job.approvedVersion !== v.version) return refuse('conflict', 'まだ承認されていない版は受け取れません。', { code: 'JOB_NOT_APPROVED' })
       // What is accepted is what the screen showed: one that cannot show this shape never accepts it.
       if (!reads.includes(v.schema)) return NEEDS_NEWER_SCREEN()
       const wanted = definition.grant.deliverTo

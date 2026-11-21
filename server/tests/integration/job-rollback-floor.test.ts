@@ -249,6 +249,49 @@ describe('F1: a frozen occurrence is not there for anyone', () => {
   })
 })
 
+describe('F1: a fingerprint not shown cannot be guessed through approve or accept (independent review)', () => {
+  const GUESS = 'sha256:' + '0'.repeat(64)
+  const versionFp = (job: string, version: number) => (db.prepare('SELECT fingerprint FROM ai_job_versions WHERE company_id = ? AND job_id = ? AND version = ?').get(CO, job, version) as Json).fingerprint
+  /** Version 2 of a 4a event job (schema 2) watching `startRecord`, approved, not accepted: written as a screen of 4a would. */
+  function eventVersion(job: string, startRecord: string) {
+    const d = { ...serverJob(), schema: 2, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord, followMadeTask: true } }
+    const text = canonicalJson(d)
+    db.prepare(`INSERT INTO ai_job_versions (company_id, job_id, version, schema, definition, fingerprint, consent_fingerprint, acting_user_id, created_by, created_at, approved_by, approved_at)
+      VALUES (?, ?, 2, 2, ?, ?, ?, 'rf-alice', 'rf-owner', ?, 'rf-owner', ?)`).run(CO, job, text, hashCanonical(text), hashCanonical(jobConsentCanonical(d as JobDefinition)), past(), past())
+    db.prepare('UPDATE ai_jobs SET latest_version = 2, approved_version = 2, approved_fingerprint = ? WHERE company_id = ? AND id = ?').run(hashCanonical(text), CO, job)
+  }
+
+  it('a version of a shape this server does not know: the right fingerprint and a guess get the same JOB_SCHEMA_UNKNOWN', async () => {
+    const job = await approvedJob()
+    store4b1(job)
+    const right = versionFp(job, 2)
+    for (const fingerprint of [right, GUESS]) {
+      expect(await services.jobs.approve(owner() as Json, job, { version: 2, fingerprint }, [1, 2])).toMatchObject({ ok: false, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
+      expect(await services.jobs.accept(alice() as Json, job, { version: 2, fingerprint }, [1, 2], true)).toMatchObject({ ok: false, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
+    }
+  })
+
+  it('a version hidden from the caller (a start record they cannot read): a guess is answered as the right one', async () => {
+    // Watching Alice's own やること: the owner may not see the version. Watching the owner's own one: Alice may not.
+    const forOwner = await approvedJob()
+    eventVersion(forOwner, alicesTask())
+    const ownersOwn = services.recordEngine.create(owner() as Json, { kind: 'human' }, { type: 'task', title: '持ち主のやること', personal: true, fields: { assignee: 'rf-owner' } })
+    if (!ownersOwn.ok) throw new Error(JSON.stringify(ownersOwn.body))
+    const forAlice = await approvedJob(serverJob({ name: '別の仕事' }))
+    eventVersion(forAlice, ownersOwn.value.record.id)
+    expect((await call('rf-owner', 'GET', `/jobs/${forOwner}`)).body.data.versions[0].fingerprint).toBeNull()
+    const approveRight = await services.jobs.approve(owner() as Json, forOwner, { version: 2, fingerprint: versionFp(forOwner, 2) }, [1, 2])
+    expect(approveRight.ok).toBe(false)
+    expect(await services.jobs.approve(owner() as Json, forOwner, { version: 2, fingerprint: GUESS }, [1, 2])).toEqual(approveRight)
+    const acceptRight = await services.jobs.accept(alice() as Json, forAlice, { version: 2, fingerprint: versionFp(forAlice, 2) }, [1, 2], true)
+    expect(acceptRight.ok).toBe(false)
+    expect(await services.jobs.accept(alice() as Json, forAlice, { version: 2, fingerprint: GUESS }, [1, 2], true)).toEqual(acceptRight)
+    // A version they do see still checks the fingerprint.
+    const plain = await approvedJob(serverJob({ name: '三つめ' }))
+    expect(await services.jobs.approve(owner() as Json, plain, { version: 1, fingerprint: GUESS })).toMatchObject({ ok: false, body: { code: 'JOB_VERSION_FINGERPRINT' } })
+  })
+})
+
 describe('F2: the clock leaves a frozen occurrence alone', () => {
   it('a waiting or running one past its time is not expired, told or ended, and its chain is not stopped', async () => {
     const job = await approvedJob()
