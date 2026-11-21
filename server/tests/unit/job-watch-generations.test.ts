@@ -64,8 +64,11 @@ describe('watch generations are additive', () => {
     const once = objects(conn)
     initDatabase(conn)
     expect(objects(conn)).toEqual(once)
-    const changed = once.filter(o => !before.some(b => b.name === o.name && b.sql === o.sql))
+    // Of what the frozen schema had, only the two tables change; tables later areas add (another PR's migration on main
+    // since the fixture was frozen) are not this migration's, but no new job object may appear.
+    const changed = once.filter(o => before.some(b => b.name === o.name) && !before.some(b => b.name === o.name && b.sql === o.sql))
     expect(changed.map(o => o.name).sort()).toEqual(['ai_job_event_cursors', 'ai_job_occurrences'])
+    expect(once.filter(o => !before.some(b => b.name === o.name) && /ai_job/.test(o.name))).toEqual([])
     for (const o of changed) {
       const was = before.find(b => b.name === o.name)?.sql as string
       expect(o.sql).toContain(', watch_generation INTEGER')
