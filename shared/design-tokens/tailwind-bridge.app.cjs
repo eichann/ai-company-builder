@@ -88,47 +88,47 @@ module.exports = {
           "var(--font-size-caption)",
           {
             "lineHeight": "var(--line-height-caption)",
-            "fontWeight": "var(--font-weight-caption)"
+            "fontWeight": "var(--weight-caption)"
           }
         ],
         "small": [
           "var(--font-size-small)",
           {
             "lineHeight": "var(--line-height-small)",
-            "fontWeight": "var(--font-weight-small)"
+            "fontWeight": "var(--weight-small)"
           }
         ],
         "body": [
           "var(--font-size-body)",
           {
             "lineHeight": "var(--line-height-body)",
-            "fontWeight": "var(--font-weight-body)"
+            "fontWeight": "var(--weight-body)"
           }
         ],
         "title": [
           "var(--font-size-title)",
           {
             "lineHeight": "var(--line-height-title)",
-            "fontWeight": "var(--font-weight-title)"
+            "fontWeight": "var(--weight-title)"
           }
         ],
         "heading": [
           "var(--font-size-heading)",
           {
             "lineHeight": "var(--line-height-heading)",
-            "fontWeight": "var(--font-weight-heading)"
+            "fontWeight": "var(--weight-heading)"
           }
         ],
         "page": [
           "var(--font-size-page)",
           {
             "lineHeight": "var(--line-height-page)",
-            "fontWeight": "var(--font-weight-page)"
+            "fontWeight": "var(--weight-page)"
           }
         ]
       },
       "fontWeight": {
-        "strong": "var(--font-weight-strong)"
+        "strong": "var(--weight-strong)"
       },
       "fontFamily": {
         "body": "var(--font-family-body)"

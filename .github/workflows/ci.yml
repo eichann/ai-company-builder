@@ -447,8 +447,9 @@ jobs:
       # Design tokens (.claude/rules/design-system.md): the generated CSS and Tailwind bridges match
       # tokens.json and its colour pairs meet WCAG AA; the design lint's per-file findings in
       # client/src and admin/src match design-lint-baseline.txt (more fails, and so does fewer
-      # without lowering the baseline). Whole tree, every run: a few seconds.
+      # without lowering the baseline; a rename or split only moves counts), and the committed
+      # baseline has not been raised against the base commit's. Whole tree, every run: seconds.
       - name: Design tokens and design lint (ratchet)
         run: |
           node shared/design-tokens/build.mjs --check
-          node shared/design-tokens/design-lint.mjs
+          node shared/design-tokens/design-lint.mjs --base "${{ steps.base.outputs.sha }}"

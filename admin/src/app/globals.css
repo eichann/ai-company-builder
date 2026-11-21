@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Tests are not markup: their strings must not add classes to the production CSS. */
+@source not "../../tests";
+
 /*
  * Design tokens (.claude/rules/design-system.md): raw values, the semantic tokens (light, dark
  * under .dark, the admin's density via <html data-density="comfortable">), then the generated

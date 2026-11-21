@@ -8,6 +8,7 @@ paths:
   - "admin/src/**/*.tsx"
   - "client/tests/design-lint.test.ts"
   - "client/tests/design-tokens-bridge.test.ts"
+  - "admin/tests/design-tokens-bridge.test.ts"
 ---
 
 # Design system: tokens, bridges and the design lint
@@ -67,23 +68,35 @@ live, how screens use them, and what CI holds.
   `bg-primary/10` works (but see the lint: use a set's `-bg` instead). Class names:
   `bg-bg`, `bg-surface-raised`, `text-text-muted`, `border-border-control`, `bg-danger-bg`,
   `text-body`, `font-strong`, `rounded-control`, `shadow-pop`, `z-dialog`, `opacity-disabled`,
-  `h-control`, `size-icon`, `px-control-x`, `ring-focus`, `duration-fast`, …
+  `h-control`, `size-icon`, `px-control-x` / `py-toast-y` (every padding axis), `ring-focus`,
+  `duration-fast`, …
 - **Admin** (`admin/`, Tailwind 4 + shadcn/ui): `globals.css` imports `primitives.css`,
   `theme.css`, then `tailwind-bridge.admin.css`, which defines shadcn's variables
   (`--background`, `--primary`, `--muted-foreground`, `--ring`, `--radius`, `--destructive`, …)
   as aliases of the semantic tokens, registers them for Tailwind as before, and adds the same
-  semantic class names (`@theme inline reference`: the utility reads the token variable; no second
-  variable of the same name is emitted). The Dockerfile copies `shared/` into the build stage.
+  semantic class names. Every `@theme` block there is `inline reference`: a utility reads the
+  variable directly and Tailwind emits no variable of its own, so nothing it emits can share a
+  name with a token. Sizes and paddings are spacing names (`--spacing-control-x`), so every axis
+  and property works (`px-control-x`, `py-toast-y`, `h-control`, `size-icon`). The Dockerfile
+  copies `shared/` into the build stage.
+- **Token variables never shadow Tailwind 4's own** (`--font-weight-medium`, `--text-sm`,
+  `--radius-md`, `--shadow-sm`, `--spacing`, …): theme.css is unlayered and would win over
+  Tailwind's theme layer. Hence `--weight-*` (not `--font-weight-*`), `--font-size-*`,
+  `--font-family-*`. `admin/tests/design-tokens-bridge.test.ts` fails on a clash with Tailwind 4's
+  default theme or with a registration the bridge does not mark `reference`.
 - **Nothing changed on screen when they arrived**: existing names keep their values.
   `client/tests/design-tokens-bridge.test.ts` fails when the app bridge redefines any theme value
-  the app had without it, and when a bridge references a variable the tokens do not define.
+  the app had without it, and when a bridge references a variable the tokens do not define;
+  `admin/tests/design-tokens-bridge.test.ts` holds every shadcn variable and `--radius` to the
+  value the admin had before the tokens, light and dark (its `TODAY` table).
   Names already taken keep their old meaning until their screens move: in the app `surface`
   (`bg-surface` = #fff in both themes) and `border` (#e0e0e0); `accent`, `ink`, `text-primary`,
   `sidebar-bg`, … stay as they are. In the admin, every shadcn colour except light `--card` /
   `--popover` keeps today's value (`ADMIN_SHADCN` in `build.mjs`: `keep` and a `later:` comment
   naming its token), and `--font-sans` stays Geist. Dropping a `keep` is a visible change: do it
-  in the PR of that component (owner decisions 2 black primary buttons → primary, 6 admin font →
-  system font, 7 admin radius 8px; the admin's `rounded-md` 6px, shadcn `accent` = sunken).
+  in the PR of that component and update `TODAY` there (owner decisions 2 black primary buttons →
+  primary, 6 admin font → system font, 7 admin radius 8px; the admin's `rounded-md` 6px, shadcn
+  `accent` = sunken).
 - Do not change what an existing Tailwind name means (`text-sm`, `rounded-lg`, `accent`) to reach
   a token: move the screen to the semantic name instead.
 
@@ -92,24 +105,50 @@ live, how screens use them, and what CI holds.
 `shared/design-tokens/design-lint.mjs` reads every string in `client/src` and `admin/src`
 (`.ts` / `.tsx`, tests excluded; class attributes, `cn()` arguments and class constants alike)
 with the TypeScript parser. It judges only a class's body: variants (`dark:`, `hover:`,
-`data-[state=open]:`, `aria-[selected=true]:`, `group-data-[…]:`, `[&>svg]:`) are never findings.
-Rules: `palette-color` (`bg-zinc-100`), `white-black`, `color-literal` (`bg-[#fff]`),
-`inline-color` (a colour literal in `style={{…}}`), `arbitrary-value` (`text-[13px]`, `z-[60]`;
-`w-[var(--size-menu)]` with a token is fine), `type-scale` (`text-xs…`), `radius-scale`
-(`rounded-md…`; `rounded-full` / `-none` fine), `shadow-scale`, `z-index` (`z-50`),
-`opacity-scale` (`opacity-40`; 0 and 100 fine), `color-opacity` (`bg-warning/10`).
+`data-[state=open]:`, `aria-[selected=true]:`, `group-data-[…]:`, `has-[:focus]:`, `[&>svg]:`)
+are never findings. Rules: `palette-color` (`bg-zinc-100`; the palettes are read from Tailwind 4's
+default theme and Tailwind 3's colours, so `olive`, `taupe`, … are included), `white-black`,
+`color-literal` (`bg-[#fff]`), `inline-color` (a colour literal in `style={{…}}`),
+`arbitrary-value` (`text-[13px]`, `z-[60]`, `bg-(--x)`; a token — `w-[var(--size-menu)]`,
+`w-(--size-menu)` — or a Radix run-time measure `(--radix-…)` is fine), `type-scale`
+(`text-xs…`), `radius-scale` (anything but `rounded-small / control / card / full / none`, sides
+included), `shadow-scale` (anything but `shadow-card / pop / dialog / none`; any `drop-shadow-*`,
+`inset-shadow-*`, `text-shadow-*`), `z-index` (`z-50`), `opacity-scale` (`opacity-40`; 0 and 100
+fine), `color-opacity` (`bg-warning/10`).
 
-- **No new raw values.** Today's findings (2026-11-21: app 6,863, admin 1,235) are recorded per
+- **No new raw values.** Today's findings (2026-11-21: app 6,872, admin 1,235) are recorded per
   file and rule in `design-lint-baseline.txt`. CI ("Lint (changed files)", step "Design tokens and
-  design lint") fails when a file's count for a rule grows or a file not listed has findings, and
-  also when a count drops without the baseline being lowered — the list only shrinks.
-- After fixing a file: `node shared/design-tokens/design-lint.mjs --update` (it refuses to raise a
-  count; `--allow-growth` only for an exception the owner accepted) and commit the baseline with
-  the fix. `--list <file>` shows each finding with its line and the name to use instead.
+  design lint") fails when a rule gains findings, when the tree differs from the baseline without
+  it being updated (the list only shrinks), and (`--base <sha>`) when the committed baseline was
+  raised against the base commit's (unless the lint itself — `design-lint.mjs` or `theme.css` —
+  changed in the same change: a new rule may find more, and that PR says so).
+- **Renames and splits** move counts: when a file gains findings of a rule and at least as many
+  of that rule went away elsewhere in the same change (`git mv`, a component split out of a file),
+  it is a move, not growth. `--update` writes it; more than went away is growth and refused.
+- After fixing, renaming or splitting: `node shared/design-tokens/design-lint.mjs --update` (it
+  never raises a total) and commit the baseline with the change. `--list <file>` shows each
+  finding with its line and the name to use instead.
+- **A legitimate exception** (a layout width that has no token, a third-party value): a comment
+  `design-lint-allow <rule>[, <rule>] -- <reason>` on the line or the line above, e.g.
+  `{/* design-lint-allow arbitrary-value -- the column matches the PDF page width */}`. Without a
+  reason it does not count. Prefer a token when the value recurs.
 - `client/tests/design-lint.test.ts` holds the rules to the failing examples in
   `shared/design-tokens/lint-examples/` (the admin's warning callout: 5 findings; an app dialog:
-  13) and the passing one, and the ratchet's arithmetic.
+  13; Tailwind 4 spellings: 10) and the passing one, the exception comment, the ratchet's
+  arithmetic (growth, rename, split) and the CLI (`--update`, `--base`).
 
+### Known gaps
+
+- Style objects outside a JSX `style` attribute (`const s = { color: '#fff' }` passed later) and
+  numeric inline styles (`style={{ zIndex: 60, fontSize: 13 }}`) are not judged.
+- Class names built from pieces (`` `text-${size}` ``, `bg-${tone}-50`) are invisible: only whole
+  tokens in a string are read. Prefer a map of complete class names.
+- `.css` files (`client/src/index.css`, `admin/src/app/globals.css`, component CSS) are not
+  scanned; their raw values move to tokens with the component that uses them.
+- Prose strings that happen to look like a class (`"z-10"` in a message) count as findings; reword
+  or record an exception.
+- Layout values (`w-[420px]`, `grid-cols-[…]`, `max-h-[60vh]`) are findings until there are
+  layout tokens; record a real one-off with `design-lint-allow`.
 ## Order of the next PRs (from the proposal)
 
 - **P1**: danger vs ordinary actions and the confirm dialog (red only for delete / remove; focus,

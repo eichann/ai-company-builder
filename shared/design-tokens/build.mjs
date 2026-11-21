@@ -99,8 +99,8 @@ const appPreset = {
       colors: Object.fromEntries(COLORS.filter(c => !APP_TAKEN.includes(c)).map(c => [c,
         c === 'scrim' ? 'var(--color-scrim)' : `rgb(var(--color-${c}-rgb) / <alpha-value>)`])),
       fontSize: Object.fromEntries(STEPS.map(n => [n, [`var(--font-size-${n})`,
-        { lineHeight: `var(--line-height-${n})`, fontWeight: `var(--font-weight-${n})` }]])),
-      fontWeight: { strong: 'var(--font-weight-strong)' },
+        { lineHeight: `var(--line-height-${n})`, fontWeight: `var(--weight-${n})` }]])),
+      fontWeight: { strong: 'var(--weight-strong)' },
       fontFamily: { body: 'var(--font-family-body)' },
       borderRadius: Object.fromEntries(RADII.map(r => [r, `var(--radius-${r})`])),
       boxShadow: Object.fromEntries(SHADOWS.map(s => [s, `var(--shadow-${s})`])),
@@ -173,9 +173,12 @@ const adminBridge = `/* Tailwind 4 bridge for the admin console (admin/src/app/g
    primitives.css and theme.css). ${GENERATED}
    1. shadcn/ui's variables, as aliases of the semantic tokens. Where the alias would change what
       the admin shows today, today's value is kept and the comment names the token it moves to.
-   2. Their @theme registration (bg-primary, text-muted-foreground, rounded-lg, …), unchanged.
+   2. Their @theme registration (bg-primary, text-muted-foreground, rounded-lg, …), unchanged in
+      what the classes produce; \`reference\`, so no --color-primary of its own is emitted next to
+      the token of that name.
    3. The semantic class names, added (bg-surface-raised, text-text-muted, bg-danger-bg, text-body,
-      rounded-control, shadow-dialog, z-dialog, …). \`inline reference\`: utilities read the token
+      rounded-control, shadow-dialog, z-dialog, px-control-x, …); sizes and paddings are spacing
+      names, so every axis works (h-control, size-icon, px-control-x, py-toast-y). \`inline reference\`: utilities read the token
       variable directly and no second variable of the same name is emitted. */
 :root {
   --radius: var(--radius-control);
@@ -184,7 +187,7 @@ ${ADMIN_SHADCN.map(([n, t, light]) => shadcnVar(n, t, light)).join('')}}
 .dark {
 ${ADMIN_SHADCN.map(([n, t, , dark]) => shadcnVar(n, t, dark)).join('')}}
 
-@theme inline {
+@theme inline reference {
 ${ADMIN_SHADCN.map(([n]) => `  --color-${n}: var(--${n});\n`).join('')}  --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -194,11 +197,11 @@ ${ADMIN_SHADCN.map(([n]) => `  --color-${n}: var(--${n});\n`).join('')}  --radiu
 @theme inline reference {
 ${COLORS.filter(c => !ADMIN_TAKEN.has(c)).map(c => `  --color-${c}: var(--color-${c});\n`).join('')}\
 ${RADII.map(r => `  --radius-${r}: var(--radius-${r});\n`).join('')}\
-${STEPS.map(n => `  --text-${n}: var(--font-size-${n});\n  --text-${n}--line-height: var(--line-height-${n});\n  --text-${n}--font-weight: var(--font-weight-${n});\n`).join('')}\
-  --font-weight-strong: var(--font-weight-strong);
+${STEPS.map(n => `  --text-${n}: var(--font-size-${n});\n  --text-${n}--line-height: var(--line-height-${n});\n  --text-${n}--font-weight: var(--weight-${n});\n`).join('')}\
+  --font-weight-strong: var(--weight-strong);
   --font-body: var(--font-family-body);
 ${SHADOWS.map(s => `  --shadow-${s}: var(--shadow-${s});\n`).join('')}\
-${Object.entries({ ...HEIGHTS, ...SIZES }).map(([k, v]) => `  --spacing-${k}: var(--${v});\n`).join('')}\
+${Object.entries({ ...HEIGHTS, ...SIZES, ...PADDINGS }).map(([k, v]) => `  --spacing-${k}: var(--${v});\n`).join('')}\
   --ease-standard: var(--ease);
 }
 
@@ -206,7 +209,6 @@ ${LAYERS.map(z => `@utility z-${z} {\n  z-index: var(--z-${z});\n}\n`).join('')}
 @utility opacity-disabled {
   opacity: var(--opacity-disabled);
 }
-${Object.entries(PADDINGS).map(([k, v]) => `@utility p-${k} {\n  padding: var(--${v});\n}\n`).join('')}\
 @utility duration-fast {
   --tw-duration: var(--duration-fast);
   transition-duration: var(--duration-fast);

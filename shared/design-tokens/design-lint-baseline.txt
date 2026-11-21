@@ -105,18 +105,18 @@ client/src/features/chat/components/AiTurnNotice.tsx palette-color=10 radius-sca
 client/src/features/chat/components/AppInstructionChip.tsx palette-color=10 type-scale=1
 client/src/features/chat/components/ApprovalCard.tsx arbitrary-value=7 opacity-scale=1 palette-color=102 radius-scale=6 type-scale=16 white-black=2
 client/src/features/chat/components/BrokerKeyNeededCard.tsx arbitrary-value=1 color-opacity=1 palette-color=8 radius-scale=2 type-scale=3 white-black=1
-client/src/features/chat/components/ChatAuthGate.tsx arbitrary-value=5 color-opacity=1 palette-color=3 radius-scale=4 type-scale=7 white-black=3
-client/src/features/chat/components/ChatAuthSettings.tsx color-opacity=10 opacity-scale=1 palette-color=7 radius-scale=11 type-scale=27 white-black=17
+client/src/features/chat/components/ChatAuthGate.tsx arbitrary-value=5 color-opacity=1 palette-color=3 radius-scale=4 shadow-scale=2 type-scale=7 white-black=3
+client/src/features/chat/components/ChatAuthSettings.tsx color-opacity=10 opacity-scale=1 palette-color=7 radius-scale=11 shadow-scale=3 type-scale=27 white-black=17
 client/src/features/chat/components/ChatComposer.tsx arbitrary-value=1 color-opacity=5 palette-color=1 radius-scale=5 shadow-scale=1 type-scale=1 white-black=1 z-index=1
 client/src/features/chat/components/ChatConversation.tsx palette-color=11 type-scale=3 white-black=1
 client/src/features/chat/components/ChatHeader.tsx arbitrary-value=10 color-opacity=8 opacity-scale=4 palette-color=49 radius-scale=12 white-black=5
 client/src/features/chat/components/ChatMarkdownImage.tsx opacity-scale=1 palette-color=2
-client/src/features/chat/components/ChatMessageList.tsx arbitrary-value=14 color-opacity=20 opacity-scale=1 palette-color=27 radius-scale=18 type-scale=4 white-black=7
+client/src/features/chat/components/ChatMessageList.tsx arbitrary-value=14 color-opacity=20 opacity-scale=1 palette-color=27 radius-scale=18 shadow-scale=1 type-scale=4 white-black=7
 client/src/features/chat/components/ChatPanel.tsx shadow-scale=1 white-black=1 z-index=3
 client/src/features/chat/components/ChatSidebar.tsx arbitrary-value=6 color-opacity=3 opacity-scale=1 palette-color=76 radius-scale=14 type-scale=12 white-black=6 z-index=1
 client/src/features/chat/components/ChoicePrompt.tsx arbitrary-value=9 color-literal=2 color-opacity=9 opacity-scale=2 palette-color=48 radius-scale=9 shadow-scale=1 type-scale=8 white-black=6
 client/src/features/chat/components/ClaudeSignInCard.tsx color-opacity=1 palette-color=6 radius-scale=3 type-scale=13 white-black=1
-client/src/features/chat/components/CodeMirrorChatInput.tsx arbitrary-value=5 color-opacity=4 opacity-scale=1 palette-color=8 radius-scale=3 white-black=1
+client/src/features/chat/components/CodeMirrorChatInput.tsx arbitrary-value=5 color-opacity=4 opacity-scale=1 palette-color=8 radius-scale=3 shadow-scale=2 white-black=1
 client/src/features/chat/components/ComposerAttachments.tsx arbitrary-value=2 color-opacity=2 opacity-scale=1 palette-color=2 radius-scale=2 type-scale=3 white-black=1
 client/src/features/chat/components/ConsultationReference.tsx type-scale=1
 client/src/features/chat/components/DriveOverwriteCard.tsx opacity-scale=2 palette-color=29 radius-scale=3 type-scale=8
@@ -124,7 +124,7 @@ client/src/features/chat/components/HandoffControl.tsx arbitrary-value=8 opacity
 client/src/features/chat/components/LegacyTextareaChatInput.tsx arbitrary-value=4 opacity-scale=2 palette-color=9 radius-scale=2 white-black=2
 client/src/features/chat/components/MailDraftCard.tsx arbitrary-value=7 opacity-scale=2 palette-color=110 radius-scale=15 type-scale=19 white-black=1
 client/src/features/chat/components/MarkdownMessage.tsx arbitrary-value=1 opacity-scale=1 palette-color=4 radius-scale=1
-client/src/features/chat/components/MessageParts.tsx arbitrary-value=2 color-opacity=1 palette-color=17 radius-scale=5 type-scale=2 white-black=1
+client/src/features/chat/components/MessageParts.tsx arbitrary-value=2 color-opacity=1 palette-color=17 radius-scale=5 shadow-scale=1 type-scale=2 white-black=1
 client/src/features/chat/components/MinutesBundleChoiceCard.tsx opacity-scale=3 palette-color=37 radius-scale=4 type-scale=11
 client/src/features/chat/components/PluginOperationCard.tsx arbitrary-value=2 opacity-scale=5 palette-color=60 radius-scale=8 type-scale=12
 client/src/features/chat/components/PreparedMailCard.tsx arbitrary-value=2 palette-color=2
