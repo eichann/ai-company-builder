@@ -63,20 +63,24 @@ const aborted = () => Object.assign(new Error('aborted'), { name: 'AbortError' }
 
 /**
  * One request through a page-less session, as one chunk of its lane. Rejects at once when `signal`
- * aborts (the answer is dropped), while the chunk itself still ends with its clean-up.
+ * aborts (the answer is dropped), while the chunk itself still ends with its clean-up. `stillOpen`:
+ * the caller's own window is still the one open — asked again when the chunk's turn comes (it may
+ * have waited behind another window's chunk), never sent otherwise.
  */
 export function throughSession(
   lanes: SessionLanes, key: string, session: PagelessSession, request: SessionRequest,
-  allow: (request: BrowserSessionRequest) => boolean, signal?: AbortSignal,
+  allow: (request: BrowserSessionRequest) => boolean, signal?: AbortSignal, stillOpen: () => boolean = () => true,
 ): Promise<SessionAnswer> {
   if (signal?.aborted) return Promise.reject(aborted())
   const chunk = lanes.run(key, async () => {
     try {
       await session.wipe()
       if (signal?.aborted) throw aborted()
+      if (!stillOpen()) throw new Error('window closed')
       await session.guard(allow)
       await session.copyCookies(request.url)
       if (signal?.aborted) throw aborted()
+      if (!stillOpen()) throw new Error('window closed')
       return await session.send(request, signal)
     } finally {
       await session.wipe()

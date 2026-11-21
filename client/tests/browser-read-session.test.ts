@@ -96,6 +96,28 @@ test('a request that fails still cleans its session up, and the lane goes on', a
   assert.equal((await throughSession(lanes, key, sessions.open(key, { cookie: 'y' }), { method: 'GET', url: URL_A }, allow)).status, 200)
 })
 
+test('a chunk whose window is no longer the one open when its turn comes sends nothing, and still cleans up', async () => {
+  const lanes = createSessionLanes()
+  const sessions = fakeSessions()
+  const key = browserReadPartition('acb-browser-w')
+  let open = true
+  const slow = throughSession(lanes, key, sessions.open(key, { cookie: 'a', slowSendMs: 50 }), { method: 'GET', url: URL_A }, allow)
+  const queued = throughSession(lanes, key, sessions.open(key, { cookie: 'b' }), { method: 'GET', url: URL_A }, allow, undefined, () => open)
+  open = false
+  await slow
+  await assert.rejects(queued, /window closed/)
+  const log = sessions.of(key).log
+  assert.equal(log.some(l => l.startsWith('send:b')), false, log.join(' '))
+  assert.equal(log.at(-1), 'wipe:b')
+  // Closed while its chunk was being prepared: still nothing sent.
+  let stillOpen = true
+  const base = sessions.open(key, { cookie: 'c' })
+  const closing: PagelessSession = { ...base, copyCookies: async url => { await base.copyCookies(url); stillOpen = false } }
+  await assert.rejects(throughSession(lanes, key, closing, { method: 'GET', url: URL_A }, allow, undefined, () => stillOpen), /window closed/)
+  assert.equal(sessions.of(key).log.some(l => l.startsWith('send:c')), false)
+  assert.equal(sessions.of(key).cookies.size, 0)
+})
+
 test('a preview read lets through exactly its own address: GET, no query, no body', () => {
   const rule = exactRead(URL_A)
   assert.equal(rule({ method: 'GET', url: URL_A }), true)

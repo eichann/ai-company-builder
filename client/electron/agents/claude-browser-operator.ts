@@ -52,6 +52,17 @@ type Spawn = typeof spawnVoiceProcess
 
 const VERSION_TIMEOUT_MS = 10_000
 
+/**
+ * Every process the CLI started goes with it: the CLI runs in a process group of its own (`detached`),
+ * and the whole group is killed (a hook's or a tool's child included), never only the CLI.
+ */
+function killGroup(child: ReturnType<Spawn>) {
+  try {
+    if (child.pid) { process.kill(-child.pid, 'SIGKILL'); return }
+  } catch { /* the group is gone */ }
+  try { child.kill('SIGKILL') } catch { /* gone */ }
+}
+
 async function executableFile(path: string): Promise<boolean> {
   try {
     const stat = await fs.stat(path)
@@ -95,9 +106,9 @@ function readVersion(cli: BrowserOperatorCli, parentEnv: BrowserOperatorStepJob[
     let timer: ReturnType<typeof setTimeout> | undefined
     const env = browserOperatorEnv(parentEnv, { pathDirs: cli.pathDirs, tmpdir: cwd })
     let child: ReturnType<Spawn>
-    try { child = spawn(cli.path, ['--version'], { cwd, env }, { inheritEnv: false }) } catch { resolve(''); return }
+    try { child = spawn(cli.path, ['--version'], { cwd, env, detached: true }, { inheritEnv: false }) } catch { resolve(''); return }
     const done = () => { if (!settled) { settled = true; clearTimeout(timer); resolve(out) } }
-    timer = setTimeout(() => { child.kill('SIGKILL'); done() }, VERSION_TIMEOUT_MS)
+    timer = setTimeout(() => { killGroup(child); done() }, VERSION_TIMEOUT_MS)
     child.stdout.on('data', (chunk: Buffer) => { if (out.length < 4096) out += chunk.toString() })
     child.stderr.resume()
     child.stdin.end()
@@ -165,13 +176,19 @@ export async function runClaudeBrowserOperatorStep(job: BrowserOperatorStepJob, 
   if (job.signal.aborted) return { ok: false, code: 'cancelled' }
   // A new empty working folder and TMPDIR for every step, removed afterwards (realpath: macOS /var → /private/var).
   const cwd = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'acb-operator-')))
-  const tmp = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'acb-operator-tmp-')))
+  let tmp: string
+  try {
+    tmp = await fs.realpath(await fs.mkdtemp(join(tmpdir(), 'acb-operator-tmp-')))
+  } catch {
+    await fs.rm(cwd, { recursive: true, force: true }).catch(() => {})
+    return { ok: false, code: 'start-failed' }
+  }
   try {
     return await new Promise<BrowserOperatorStepResult>(resolve => {
       const env = browserOperatorEnv(job.parentEnv, { pathDirs: job.cli.pathDirs, tmpdir: tmp })
       let child: ReturnType<Spawn>
       try {
-        child = spawn(job.cli.path, browserOperatorArgs(job.model), { cwd, env }, { inheritEnv: false })
+        child = spawn(job.cli.path, browserOperatorArgs(job.model), { cwd, env, detached: true }, { inheritEnv: false })
       } catch {
         resolve({ ok: false, code: 'start-failed' })
         return
@@ -188,7 +205,8 @@ export async function runClaudeBrowserOperatorStep(job: BrowserOperatorStepJob, 
         clearTimeout(timer)
         job.signal.removeEventListener('abort', cancel)
         lines.close()
-        if (!result.ok) child.kill('SIGKILL')
+        // Whatever the outcome, nothing the CLI started outlives the step.
+        killGroup(child)
         resolve(result)
       }
       function cancel() { finish({ ok: false, code: 'cancelled' }) }

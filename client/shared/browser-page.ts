@@ -7,11 +7,13 @@
  *
  * The rules every reader gets, whatever its site:
  * - only what a person could see: nothing inside `hidden`, `aria-hidden="true"`, `<template>`,
- *   `<noscript>`, `<script>`, `<style>`, comments, or an element whose own `style` says
- *   `display:none` / `visibility:hidden` (a stylesheet elsewhere is not known: the remaining limit,
- *   the person checks the card);
- * - an attribute written twice on one element (the parser keeps the first) or an id used twice in
- *   the document (hidden copies counted too) makes that element unreadable and the read incomplete;
+ *   `<noscript>`, `<script>`, `<style>`, `<meta>`, `<link>`, `<base>`, `<input type="hidden">`,
+ *   comments, or an element whose own `style` says `display:none` / `visibility:hidden` — the page's
+ *   `<html>` and `<body>` included (a hidden root hides the whole page) (a stylesheet elsewhere is
+ *   not known: the remaining limit, the person checks the card);
+ * - an element with an attribute written twice (the parser keeps the first) or an id used twice in
+ *   the document (hidden copies counted too) is ambiguous: neither it nor anything inside it is shown
+ *   to a reader, whatever the query, and the read is incomplete;
  * - the reader never sees the HTML, only elements, their attributes and their visible text, so
  *   references (ids) come from attributes of the declared region and text stays text;
  * - what comes back is cut to the reader's declared fields and extras, ids in
@@ -41,6 +43,8 @@ export type BrowserHtmlNode = BrowserHtmlElement | BrowserHtmlText
 
 /** The parsed page: the `<body>` element (null when the parser made none). */
 export interface BrowserHtmlDocument {
+  /** The `<html>` element (its visibility is the whole page's). */
+  root?: BrowserHtmlElement | null
   body: BrowserHtmlElement | null
   /** Every element's id across the whole document, hidden ones included, with how often each stands. */
   idCounts: ReadonlyMap<string, number>
@@ -48,7 +52,7 @@ export interface BrowserHtmlDocument {
 
 export const BROWSER_PAGE_LIMITS = { items: 300, label: 80, extra: 200 } as const
 
-const SKIPPED_TAGS = new Set(['template', 'noscript', 'script', 'style'])
+const SKIPPED_TAGS = new Set(['template', 'noscript', 'script', 'style', 'meta', 'link', 'base'])
 
 function attrOf(el: BrowserHtmlElement, name: string): string | null {
   const found = el.attrs.find(([n]) => n === name)
@@ -58,6 +62,7 @@ function attrOf(el: BrowserHtmlElement, name: string): string | null {
 /** Not shown to a person: the element and everything inside it are skipped. */
 export function hiddenElement(el: BrowserHtmlElement): boolean {
   if (SKIPPED_TAGS.has(el.tag)) return true
+  if (el.tag === 'input' && (attrOf(el, 'type') ?? '').trim().toLowerCase() === 'hidden') return true
   if (attrOf(el, 'hidden') !== null) return true
   if ((attrOf(el, 'aria-hidden') ?? '').trim().toLowerCase() === 'true') return true
   const style = (attrOf(el, 'style') ?? '').toLowerCase().replace(/\s+/g, '')
@@ -94,38 +99,28 @@ export function createPageView(doc: BrowserHtmlDocument): { view: BrowserPageVie
   const incomplete = () => { whole = false }
   const ids = doc.idCounts
 
-  /** The element's id when it is unambiguous; null (and incomplete) otherwise. */
-  const idOf = (el: BrowserHtmlElement): string | null => {
+  /** An element whose id stands more than once, or with an attribute written twice: never shown, nor anything in it. */
+  const ambiguous = (el: BrowserHtmlElement): boolean => {
     const id = attrOf(el, 'id')
-    if (id === null) return null
-    if (el.duplicateAttribute || (ids.get(id) ?? 0) !== 1) { incomplete(); return null }
-    return id
+    return el.duplicateAttribute || (id !== null && (ids.get(id) ?? 0) !== 1)
   }
 
   const matches = (el: BrowserHtmlElement, q: BrowserPageQuery): boolean => {
     if (q.tag !== undefined && el.tag !== q.tag.toLowerCase()) return false
     if (q.id !== undefined || q.idPattern !== undefined) {
-      if (attrOf(el, 'id') === null) return false
-      const raw = attrOf(el, 'id') as string
-      const wanted = q.id !== undefined ? raw === q.id : (q.idPattern as RegExp).test(raw)
-      if (!wanted) return false
-      // A wanted id that is ambiguous (repeated, or on an element with a repeated attribute) is never read.
-      if (idOf(el) === null) return false
+      const raw = attrOf(el, 'id')
+      if (raw === null) return false
+      if (!(q.id !== undefined ? raw === q.id : (q.idPattern as RegExp).test(raw))) return false
     }
-    if (q.hasAttribute !== undefined) {
-      if (attrOf(el, q.hasAttribute.toLowerCase()) === null) return false
-      if (el.duplicateAttribute) { incomplete(); return false }
-    }
+    if (q.hasAttribute !== undefined && attrOf(el, q.hasAttribute.toLowerCase()) === null) return false
     return true
   }
 
+  // Only elements that passed `visible` below are ever wrapped: unambiguous, shown, under a shown root.
   const wrap = (el: BrowserHtmlElement): BrowserPageElement => ({
     tag: el.tag,
-    get id() { return idOf(el) },
-    attr(name: string) {
-      if (el.duplicateAttribute) { incomplete(); return null }
-      return attrOf(el, name.toLowerCase())
-    },
+    id: attrOf(el, 'id'),
+    attr: (name: string) => attrOf(el, name.toLowerCase()),
     text: () => visibleText(el),
     find: q => findIn(el, q),
   })
@@ -135,6 +130,8 @@ export function createPageView(doc: BrowserHtmlDocument): { view: BrowserPageVie
     const walk = (el: BrowserHtmlElement) => {
       for (const child of el.children) {
         if (child.kind !== 'element' || hiddenElement(child)) continue
+        // An ambiguous element is not read, nor what is inside it; the read is not whole.
+        if (ambiguous(child)) { incomplete(); continue }
         // Re-test the pattern from the start each time (a global RegExp keeps its position).
         if (q.idPattern) q.idPattern.lastIndex = 0
         if (matches(child, q)) out.push(wrap(child))
@@ -145,8 +142,10 @@ export function createPageView(doc: BrowserHtmlDocument): { view: BrowserPageVie
     return out
   }
 
+  // A hidden or ambiguous `<html>` / `<body>` hides the whole page.
+  const body = doc.body && ![doc.root, doc.body].some(el => el && (hiddenElement(el) || ambiguous(el))) ? doc.body : null
   const view: BrowserPageView = {
-    find: q => (doc.body ? findIn(doc.body, q) : []),
+    find: q => (body ? findIn(body, q) : []),
     one(q) {
       const found = view.find(q)
       if (found.length !== 1) { incomplete(); return null }
@@ -154,7 +153,7 @@ export function createPageView(doc: BrowserHtmlDocument): { view: BrowserPageVie
     },
     incomplete,
   }
-  if (!doc.body) incomplete()
+  if (!body) incomplete()
   return { view, complete: () => whole }
 }
 

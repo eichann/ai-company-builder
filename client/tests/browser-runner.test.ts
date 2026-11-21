@@ -210,6 +210,13 @@ test('the app\'s own Lステップ checker reads the account from the page\'s lm
   assert.equal(account('<meta name="lm-account-id" content="all">'), null)
   assert.equal(account('<!-- <meta name="lm-account-id" content="5550001"> -->'), null)
   assert.equal(account('<script>"<meta name=\\"lm-account-id\\" content=\\"5550001\\">"</script>'), null)
+  // Only real markup: not spelled inside an attribute value, a style, a noscript or a template.
+  assert.equal(account(`<div title='<meta name="lm-account-id" content="5550001">'></div>`), null)
+  assert.equal(account(`<div title='a>b <meta name="lm-account-id" content="5550001">'></div>`), null, 'a > inside a quoted value does not end the tag')
+  assert.equal(account(`<meta name="lm-account-id" content="5550001"><div title='<meta name="lm-account-id" content="999">'></div>`), '5550001')
+  assert.equal(account('<style>/* <meta name="lm-account-id" content="5550001"> */</style>'), null)
+  assert.equal(account('<noscript><meta name="lm-account-id" content="5550001"></noscript>'), null)
+  assert.equal(account('<template><meta name="lm-account-id" content="5550001"></template>'), null)
   // A meta of another name is not the account.
   assert.equal(account('<meta name="lm-account" content="5550001">'), null)
 })

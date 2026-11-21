@@ -35,6 +35,10 @@ let stdin = ''
 process.stdin.on('data', d => { stdin += d })
 process.stdin.on('end', () => {
   fs.appendFileSync(path.join(here, 'calls.jsonl'), JSON.stringify({ script: ${JSON.stringify(name)}, argv: process.argv.slice(2), cwd: process.cwd(), env: process.env, stdin }) + '\\n')
+  if (scenario.grandchild) {
+    const c = require('child_process').spawn('/bin/sleep', ['60'], { stdio: 'ignore' })
+    fs.writeFileSync(path.join(here, 'grandchild.pid'), String(c.pid))
+  }
   const model = process.argv[process.argv.indexOf('--model') + 1]
   const init = Object.assign({ type: 'system', subtype: 'init', cwd: process.cwd(), model, permissionMode: 'dontAsk', tools: [], mcp_servers: [], slash_commands: [], skills: [], plugins: [], agents: [] }, scenario.init || {})
   const out = []
@@ -52,7 +56,7 @@ process.stdin.on('end', () => {
 const answer = (text: string) => ({ type: 'result', subtype: 'success', is_error: false, result: text })
 const STOP = JSON.stringify({ do: 'stop', why: 'not-found', question: '' })
 
-function scenario(s: { version?: string; lines?: unknown[]; init?: Record<string, unknown>; sleepMs?: number }) {
+function scenario(s: { version?: string; lines?: unknown[]; init?: Record<string, unknown>; sleepMs?: number; grandchild?: boolean }) {
   fs.writeFileSync(path.join(dir, 'bin', 'scenario.json'), JSON.stringify({ version: '2.1.320 (Claude Code)', lines: ['$INIT', answer(STOP)], ...s }))
   fs.rmSync(path.join(dir, 'bin', 'calls.jsonl'), { force: true })
 }
@@ -64,7 +68,7 @@ function calls(): Array<{ script: string; argv: string[]; cwd: string; env: Reco
 const PARENT = {
   PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
   HOME: os.homedir(), USER: 'member', LOGNAME: 'member',
-  HTTPS_PROXY: 'http://proxy.example:8080', NODE_EXTRA_CA_CERTS: '/etc/ca.pem',
+  HTTPS_PROXY: 'http://proxy.example:8080', https_proxy: 'http://proxy.example:8080', NODE_EXTRA_CA_CERTS: '/etc/ca.pem',
   ANTHROPIC_API_KEY: 'sk-secret', CLAUDE_CONFIG_DIR: '/elsewhere', CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_AGENT_SDK_X: '1',
   XDG_CONFIG_HOME: '/x', AWS_SECRET_ACCESS_KEY: 'aws', GITHUB_TOKEN: 'gh', SHELL: '/bin/zsh', TERM: 'xterm',
 }
@@ -108,7 +112,7 @@ test('the operator starts with exactly the closed arguments, in a fresh empty fo
   const env = Object.fromEntries(Object.entries(call.env).filter(([k]) => !shellOwn.has(k)))
   assert.deepEqual(Object.keys(env).sort(), [
     'CLAUDE_CODE_DISABLE_AUTO_MEMORY', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'DISABLE_AUTOUPDATER', 'HOME', 'HTTPS_PROXY',
-    'LANG', 'LOGNAME', 'NODE_EXTRA_CA_CERTS', 'PATH', 'TMPDIR', 'USER',
+    'LANG', 'LOGNAME', 'NODE_EXTRA_CA_CERTS', 'PATH', 'TMPDIR', 'USER', 'https_proxy',
   ])
   assert.equal(env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1')
   assert.equal(env.LANG, 'en_US.UTF-8')
@@ -205,4 +209,19 @@ test('a stream message out of order is refused before init, and only Claude Code
   assert.ok(browserOperatorOf('claude-code'))
   assert.equal(browserOperatorOf('codex'), null)
   assert.equal(browserOperatorOf('api-key'), null)
+})
+
+test('a stopped step takes every process the CLI started with it (its own process group)', async () => {
+  const cli = await resolved()
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
+  for (const [s, code] of [[{ lines: ['$INIT'], sleepMs: 60_000, grandchild: true }, 'timeout'], [{ lines: ['$INIT', { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash' }] } }], sleepMs: 60_000, grandchild: true }, 'tool-asked']] as const) {
+    scenario(s)
+    fs.rmSync(path.join(dir, 'bin', 'grandchild.pid'), { force: true })
+    assert.deepEqual(await step(cli, {}, 1500), { ok: false, code })
+    const pidFile = path.join(dir, 'bin', 'grandchild.pid')
+    for (let i = 0; i < 50 && !fs.existsSync(pidFile); i++) await new Promise(r => setTimeout(r, 20))
+    const pid = Number(fs.readFileSync(pidFile, 'utf8'))
+    for (let i = 0; i < 50 && alive(pid); i++) await new Promise(r => setTimeout(r, 20))
+    assert.equal(alive(pid), false, `${code}: the CLI's own child is gone`)
+  }
 })

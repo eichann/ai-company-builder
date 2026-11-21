@@ -14,6 +14,8 @@ import { buildAiSwitch } from '../electron/features/browser/ai-switch'
 import { BROWSER_AI_BUILD_SWITCH } from '../shared/browser-ai'
 import { createBrowserConnectors } from '../shared/browser-checkers'
 import type { BrowserExploreReader, BrowserPreviewSurface } from '../shared/browser-runner'
+import { previewProblem } from '../shared/browser-operator'
+import { lstepConnector } from '../connectors/lstep'
 
 const HOST = 'shop.example.net'
 const DECLARATION = `id: shop
@@ -118,6 +120,7 @@ function harness(o: { answers?: string[]; deps?: Partial<BrowserPreviewDeps>; cl
     cliPath: () => '/usr/local/bin/claude',
     parentEnv: () => ({}),
     parse: parseBrowserHtml,
+    stillCurrent: () => true,
     now: () => clock.now,
     ...o.deps,
   }
@@ -238,4 +241,50 @@ test('nothing starts without the type, the setting, the window or an operator; a
   assert.deepEqual(await runBrowserPreview(request(), notFound.deps), { outcome: 'failed', reason: 'read-failed' })
   const failing = harness({ deps: { operator: () => ({ model: 'm', resolve: async () => ({ ok: false, code: 'cli-too-old' }), step: async () => { throw new Error('never') } }) } })
   assert.deepEqual(await runBrowserPreview(request(), failing.deps), { outcome: 'failed', reason: 'cli-too-old' })
+})
+
+test('the window is part of the context: a window closed and opened again between steps ends the request, nothing read through either', async () => {
+  const h = harness({ answers: [read('items'), candidate('11', '7')] })
+  const first = h.deps.window('c1', HOST)!
+  let calls = 0
+  const other: BrowserPreviewSurface = { read: async () => { throw new Error('never') }, closed: () => false }
+  // The first look is the request's window; afterwards another one stands in its place.
+  h.deps.window = () => (calls++ === 0 ? first : other)
+  assert.deepEqual(await runBrowserPreview(request(), h.deps), { outcome: 'failed', reason: 'context-changed' })
+  assert.deepEqual(h.reads, [])
+  // Closed meanwhile: the same.
+  let open = true
+  const closing = harness({ answers: [read('items')] })
+  const surface = closing.deps.window('c1', HOST)!
+  closing.deps.window = () => ({ ...surface, closed: () => !open })
+  const op = closing.deps.operator()!
+  closing.deps.operator = () => ({ ...op, step: async job => { open = false; return op.step(job) } })
+  assert.deepEqual(await runBrowserPreview(request(), closing.deps), { outcome: 'failed', reason: 'context-changed' })
+  assert.deepEqual(closing.reads, [])
+})
+
+test('Lステップ 0.3.0 cannot be previewed yet and fails closed: no read to start from, no reader for a reminder or a template to add', async () => {
+  const lstep = lstepConnector()
+  const declared = createBrowserConnectors([lstep.declaration])
+  const h = harness({
+    answers: [read('reminder', { reminder: '101' }), JSON.stringify({ do: 'candidate', target: { reminder: '101', step: '201' }, change: { template: '300' }, explanation: 'x' })],
+    deps: {
+      connector: declared,
+      reader: id => lstep.readers.find(r => r.id === id),
+      site: () => ({ host: 'manager.linestep.net', level: 'write', assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }),
+    },
+  })
+  const req = { ...request(), connector: { id: 'lstep', version: '0.3.0' }, operation: 'reminder_step_add_template', hints: { targetHints: {}, changeHints: {}, reason: '' } }
+  assert.deepEqual(await runBrowserPreview(req, h.deps), { outcome: 'refused', reason: 'not-previewable' })
+  assert.deepEqual(h.reads, [])
+  assert.equal(h.resolves(), 0)
+  assert.equal(h.steps.length, 0)
+  // What is missing, in the declaration's own terms.
+  const browser = declared('lstep', '0.3.0')!
+  const fields = (id: string) => lstep.readers.find(r => r.id === id)?.fields
+  assert.equal(previewProblem(browser.operations.reminder_step_add_template, browser.explore, fields), 'no-starting-read')
+  const withList = { ...browser.explore, reminders: { label: 'list', path: '/line/episode', placeholders: [], reader: 'lstep.reminder_steps' } }
+  assert.equal(previewProblem(browser.operations.reminder_step_add_template, withList, fields), 'no-source', 'a list read alone is not enough: no reader takes out a reminder or a template to add')
+  // The attached templates are another field: a candidate's `template` can never be one already on the step.
+  assert.equal(fields('lstep.reminder_steps')!.includes('template'), false)
 })

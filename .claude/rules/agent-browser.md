@@ -351,15 +351,22 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   state reads empty and the run stops with `before-changed` or ends `empty-state`, never `failed`.)
 - **The account** (6b-1; confirmed on the real site with the owner's login, design memo §34): every page
   carries `<meta name="lm-account-id" content="<id>">`; the checker's default reader `accountFromMeta`
-  takes it from the markup (scripts, text areas, comments left out): exactly one value, a positive
+  takes it from real markup only — whole start tags, so a tag spelled inside an attribute value is not
+  one, and nothing of scripts, text areas, comments, `<style>`, `<noscript>` or `<template>`: exactly one value, a positive
   integer, else none (missing, empty, two different values) — the run then stops with
   `account-unknown` before writing. `lstepConnector({ account })` still takes another reader (the
   real-Electron harness's test site).
 - **0.3.0** adds the preview's read `explore.reminder` (`GET /line/episode/show/{reminder}`, reader
-  `lstep.reminder_steps`, `no_side_effects: reviewed` — §34: our fixed GETs changed nothing; the page's
-  own background reads do not run since main reads without a page). Not declared: the reminders' list
-  (its path is not confirmed), `/api/templates?group=` and `/api/landings/<id>` (a query, or not this
-  type's). `delivers` stays `none` and the facts stay version 1: what a step's time means for people
+  `lstep.reminder_steps`: the steps, and the templates already on each step as `attached_template` —
+  never `template`, so a candidate can never "add" one already there; `no_side_effects: reviewed` — §34:
+  our fixed GETs changed nothing; the page's own background reads do not run since main reads without a
+  page). Not declared: the reminders' list (its path is not confirmed), `/api/templates?group=` and
+  `/api/landings/<id>` (a query, or not this type's). **So 0.3.0's preview is not usable yet and fails
+  closed** (`previewProblem`: `no-starting-read` — no read without a `{name}` to start from — and
+  `no-source` — no reader takes out a `reminder` or a `template` to add): refused `not-previewable`
+  before anything is read or started (`browser-preview.test.ts`, with the real connector). Once the
+  owner's login confirms the list's path and a page of templates without a query, each is an `explore`
+  entry (the list one with no `{name}`) plus its reviewed reader in this folder — no core change. `delivers` stays `none` and the facts stay version 1: what a step's time means for people
   already past it is not known (§34), so no `scheduled` type and no facts version 2 yet.
 
 Tests: `client/tests/browser-runner.test.ts` (the gate: not armed, another step / template, an extra /
@@ -570,11 +577,12 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   --strict-mcp-config --setting-sources "" --disable-slash-commands --no-session-persistence --max-turns 1
   --output-format stream-json --verbose --system-prompt <BROWSER_OPERATOR_SYSTEM_PROMPT>`
   (`browserOperatorArgs`), started with `spawnVoiceProcess(cli, args, { cwd, env }, { inheritEnv: false })`
-  in a new empty folder (removed afterwards) with an environment **built from nothing**
+  in a new empty folder (removed afterwards), in a process group of its own (`detached`; the whole group is SIGKILLed when a step ends, so nothing the
+  CLI started outlives it) with an environment **built from nothing**
   (`browserOperatorEnv`): PATH = the CLI's folder (and its `node`'s for a `#!…node` script) + /usr/bin:/bin,
   HOME / USER / LOGNAME, TMPDIR (another new folder), `LANG=en_US.UTF-8`,
   `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_AUTOUPDATER=1`,
-  and `HTTPS_PROXY` / `NO_PROXY` / `NODE_EXTRA_CA_CERTS` only when set — never `CLAUDE_CONFIG_DIR` (its
+  and `HTTPS_PROXY` / `NO_PROXY` (either case) / `NODE_EXTRA_CA_CERTS` only when set — never `CLAUDE_CONFIG_DIR` (its
   users cannot use it: remaining limit), another `CLAUDE_CODE_*`, `CLAUDE_AGENT_SDK_*`, `XDG_*`,
   `ANTHROPIC_*` or a key. The material goes as JSON on stdin; the SDK is not used (it cannot pass
   `--safe-mode`).
@@ -589,15 +597,19 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   machine (§33 1-6). Failures are fixed words (`BROWSER_OPERATOR_FAILURES`) and one sentence
   (`browserOperatorFailureSentence`); the CLI's text is never shown or logged.
 - **The step loop** (`electron/features/browser/preview.ts` `runBrowserPreview`, no Electron): the switch
-  → the type (an operation that writes, every `explore` read with its handed-in reader) → the member's
+  → the type (an operation that writes, every `explore` read with its handed-in reader, and previewable:
+  `previewProblem` — a read without a `{name}` to start from, and every id field of the target and change
+  taken out by some declared reader, else `not-previewable`) → the member's
   setting (`browserOperationsAllowed`) → the AI stop → the open window → the agent's operator → the CLI
   → up to **8 steps in 4 minutes** (each ≤ 90 s and ≤ what is left). Each answer is **exactly one JSON
   object** (`parseOperatorAnswer`, unknown keys refused): `{ do: read, read, values }` — a declared read
   with exactly its `{name}`s —, `{ do: candidate, target, change, explanation }` — exactly the type's
   fields, fitting it (`browserPlanProblem`) —, or `{ do: stop, why, question }`. **Every id must be one a
   reader took out of a page of this request under the same field name** (`seenValues`), else
-  `bad-answer` and nothing is read. Context (`stillCurrent`, the signal, the stop) is checked after the
-  CLI's answer and after each read. The candidate comes back to the caller (registering it is 6b-2).
+  `bad-answer` and nothing is read. Context (`stillCurrent`, required; the signal; the stop; and **the
+  window**: the one open when the request started — closed, or another one in its place, even on the same
+  partition, is a changed context, and every read goes through that first window) is checked after the
+  CLI's answer and after each read. The 4 minutes count from before the CLI's version check. The candidate comes back to the caller (registering it is 6b-2).
 - **The read session** (`features/browser/read-session.ts`, the shell's `pageless` in
   `browser-window.ts`): main's reads — the preview's (`BrowserPreviewSurface.read`, controller
   `previewWindow`) and the runner's before / after a write (`run.request` GET) — go through the window's
@@ -605,9 +617,11 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   session as before; never through the page or the window's session. One request = one chunk on the
   session's **lane** (`createSessionLanes`, one table per app keyed by the partition's name, so a window
   closed and opened again waits for the old chunk): connections closed and storage cleared (awaited), its
-  one request hook (the preview: `exactRead` — exactly that address, GET, no query, no body; the runner:
-  the run's gate), the site's proxy rule, the window's cookies for exactly that address copied in → the
-  request (no redirect followed, 5 MiB) → cleared again. A caller that gives up only drops the answer:
+  one request hook (the preview: `exactRead` — exactly that address, GET, no query, no body, the path a
+  fixed one without `..` or `//`; the runner: the run's gate, and only while the session's window is still
+  this window, in `ai` mode), the site's proxy rule, the window's cookies for exactly that address copied in → the
+  request (no redirect followed, 5 MiB) → cleared again. A chunk asks again, when its turn comes, whether
+  its own window is still the one open (it may have waited behind another's) and sends nothing otherwise. A caller that gives up only drops the answer:
   the chunk finishes its clean-up before the lane goes on, so an old clean-up never clears a newer
   read's login. The preview never touches the window (no `ai` mode, its page and the member's typing
   stay). `clearPartition` also clears both page-less sessions (through their lanes). Two connections
@@ -620,10 +634,12 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   already in the lockfile through jsdom; main process only — and `client/shared/browser-page.ts`): the
   page becomes a neutral tree and a reader sees only `BrowserPageView` (elements, their attributes,
   their visible text; types in `client/shared/browser-runner.ts`). Nothing inside `hidden`,
-  `aria-hidden="true"`, `<template>`, `<noscript>`, `<script>`, `<style>`, comments or an inline
-  `display:none` / `visibility:hidden` is seen; an id used twice in the document (hidden copies counted)
-  or an attribute written twice on an element (the parser's `duplicate-attribute`, mapped to its start
-  tag) makes that element unreadable and the read incomplete. `runExploreReader` keeps only the reader's
+  `aria-hidden="true"`, `<template>`, `<noscript>`, `<script>`, `<style>`, `<meta>`, `<link>`, `<base>`,
+  `<input type="hidden">`, comments or an inline `display:none` / `visibility:hidden` is seen — `<html>`
+  and `<body>` included (a hidden root hides the whole page); an element whose id stands twice in the
+  document (hidden copies counted) or with an attribute written twice (the parser's
+  `duplicate-attribute`, mapped to its start tag) is never shown, nor anything in it, **whatever the
+  query** (by id, tag or attribute), and the read is incomplete. `runExploreReader` keeps only the reader's
   declared `fields` with plain ids (`BROWSER_ID_VALUE_RE`), labels cleaned (`cleanLabel`: NFC, no control /
   bidirectional / zero-width characters, one line, 80) and declared `extra`s; anything else, more than
   300 items or a reader that throws → incomplete. A stylesheet elsewhere that hides something is not
@@ -647,14 +663,16 @@ Tests: `client/tests/browser-operator.test.ts` (a fake `claude` through the real
 exact arguments and the final child environment with secrets in the app's environment, a fresh folder
 per step, the real path fixed for the request after the link moved, the floor / unreadable version /
 missing / not executable, every init check, a second or missing init, a tool request, a long line, a
-long stream, a non-JSON line, an error result, a time-out and a stop; on the macOS list),
+long stream, a non-JSON line, an error result, a time-out and a stop; a child the CLI started dies with
+it; on the macOS list),
 `browser-preview.test.ts` (the switch: nothing asked, read or started; the loop; what the material holds
 and never holds; ids not taken out refused with nothing read; one JSON object; 8 steps and 4 minutes;
-refusals before anything; a changed context; a failed read), `browser-page.test.ts` (hidden parts,
-repeated ids and attributes, mended HTML, references never from text, the kept items, labels, Lステップ's
+refusals before anything; a changed context; the window closed or replaced; the real Lステップ connector
+refused `not-previewable` with nothing read or started), `browser-page.test.ts` (hidden parts, hidden
+inputs / meta / link / base, a hidden root, repeated ids and attributes under any query, mended HTML, references never from text, the kept items, labels, Lステップ's
 reader and 0.3.0's `explore`), `browser-read-session.test.ts` (an aborted read's late clean-up never
 clears a newer read's login, also across a reopened window; one request at a time per session; a failed
-request still cleaned; `exactRead`), `browser-runner.test.ts` (the window's session refuses a worker's read
+request still cleaned; a queued chunk whose window closed sends nothing; `exactRead`), `browser-runner.test.ts` (the window's session refuses a worker's read
 of main's path in `ai`, the member's browsing passes in `human`; the runner off by default),
 `browser-window-electron.test.ts` (the runs' reads and writes through the read and write sessions made
 with the window; a preview read with the login leaves the member's typing and an empty session),

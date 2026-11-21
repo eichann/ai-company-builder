@@ -29,13 +29,39 @@ export const LSTEP_REMINDER_STEP_CHECKER = 'lstep.reminder_step'
 export type AccountReader = (html: string) => string | null
 
 /**
- * The LINE account from the page's `<meta name="lm-account-id" content="…">` (outside scripts, text
- * areas and comments): exactly one value, a positive integer, else null (missing, two different
- * values, anything else).
+ * The start tags of real markup, each whole: an attribute value that spells a tag (`title='<meta …>'`)
+ * stays inside its own tag, and what `<style>`, `<noscript>` and `<template>` hold (besides scripts,
+ * text areas and comments, `markupOnly`) is not markup a person sees.
+ */
+function startTags(html: string): string[] {
+  const markup = markupOnly(html).replace(/<(style|noscript|template)\b[\s\S]*?(?:<\/\1\s*>|$)/gi, ' ')
+  const tags: string[] = []
+  let at = 0
+  while (at < markup.length) {
+    const open = markup.indexOf('<', at)
+    if (open < 0) break
+    if (!/[A-Za-z]/.test(markup[open + 1] ?? '')) { at = open + 1; continue }
+    let end = open + 1
+    let quote: string | null = null
+    for (; end < markup.length; end++) {
+      const c = markup[end]
+      if (quote) { if (c === quote) quote = null } else if (c === '"' || c === "'") quote = c
+      else if (c === '>') break
+    }
+    tags.push(markup.slice(open, end + 1))
+    at = end + 1
+  }
+  return tags
+}
+
+/**
+ * The LINE account from the page's `<meta name="lm-account-id" content="…">`, in real markup only
+ * (`startTags`): exactly one value, a positive integer, else null (missing, two different values,
+ * anything else).
  */
 export const accountFromMeta: AccountReader = html => {
   const found = new Set<string>()
-  for (const tag of markupOnly(html).match(/<meta\b[^>]*>/gi) ?? []) {
+  for (const tag of startTags(html).filter(t => /^<meta\b/i.test(t))) {
     if (attribute(tag, 'name')?.toLowerCase() !== 'lm-account-id') continue
     const value = attribute(tag, 'content')
     found.add(value === null ? '' : value.trim())

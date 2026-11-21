@@ -20,6 +20,8 @@
 import net from 'node:net'
 import { BrowserWindow, net as electronNet, session, type Session, type WebContents } from 'electron'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
+import { BROWSER_PATH_RE } from '../../shared/core/plugin-browser-declaration'
+import { checkUpstreamPath } from '../../shared/core/upstream-path'
 import {
   BROWSER_WORDS, browserProxyScript, browserReadPartition, browserWritePartition, browserResponseHeaders, createRefusalTally, decideAiRead, decideAiWrite, decideWindowRequest,
   hostForLog, isReadMethod, navigationAllowed,
@@ -399,10 +401,12 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
           const gate = runGate
           if (!gate) throw new Error('no run')
           const url = `https://${state.site!.host}${path}`
-          const asks = (r: BrowserSessionRequest) => state.mode === 'ai' && r.url === url && gate(r).allow
+          // This window's own run only: the session's window is still this one and in `ai` mode.
+          const asks = (r: BrowserSessionRequest) => state.contentsId === contentsId && state.mode === 'ai' && r.url === url && gate(r).allow
+          const open = () => !closed()
           // A read through the read session (page-less: a worker of the page cannot ask the same path
           // and have its answer taken for main's, design memo §33 2-4).
-          if (isReadMethod(method)) return throughSession(lanes, readKey, reads, { method, url }, asks)
+          if (isReadMethod(method)) return throughSession(lanes, readKey, reads, { method, url }, asks, undefined, open)
           // A write goes on a connection of its own (agent-browser.md "The runner"): Chromium resends a
           // request whose reused keep-alive connection dropped before the answer — below the request
           // hook, so the gate's "once" never sees it (verified on Electron 45: one lost answer reached
@@ -413,7 +417,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
           // ONE request hook, the run's gate (Electron keeps the last one: replaced each write). What
           // the site sets in its answer (Set-Cookie) is not carried back to the window (decision: the
           // runner re-reads with the window's own login; a rotated cookie stays the window's).
-          return throughSession(lanes, writeKey, writes, { method, url, contentType, body }, asks)
+          return throughSession(lanes, writeKey, writes, { method, url, contentType, body }, asks, undefined, open)
         },
         closed,
       }
@@ -421,9 +425,10 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       // member's typing (design memo §33 2-4); only exactly that path, GET, no query.
       const preview: BrowserPreviewSurface = {
         async read(path, signal) {
-          if (closed() || !/^\/[A-Za-z0-9/_.~-]*$/.test(path)) throw new Error('window closed')
+          // A fixed path only: no query, fragment, `..` or `//` (the preview builds it from the declaration).
+          if (closed() || !BROWSER_PATH_RE.test(path) || !checkUpstreamPath(path)) throw new Error('window closed')
           const url = `https://${state.site!.host}${path}`
-          return throughSession(lanes, readKey, reads, { method: 'GET', url }, exactRead(url), signal)
+          return throughSession(lanes, readKey, reads, { method: 'GET', url }, exactRead(url), signal, () => !closed())
         },
         closed,
       }

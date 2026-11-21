@@ -14,7 +14,7 @@ import type { BrowserSiteSetting } from '../../../../shared/core/browser-operati
 import type { BrowserHtmlDocument } from '../../../shared/browser-page'
 import { runExploreReader } from '../../../shared/browser-page'
 import {
-  BROWSER_OPERATOR_LIMITS, operatorMaterial, parseOperatorAnswer, seenValues,
+  BROWSER_OPERATOR_LIMITS, operatorMaterial, parseOperatorAnswer, previewProblem, seenValues,
   type BrowserOperatorFailure, type BrowserOperatorPage, type BrowserOperatorRequest, type BrowserOperatorStopReason,
 } from '../../../shared/browser-operator'
 import type { BrowserExploreReader, BrowserPreviewSurface } from '../../../shared/browser-runner'
@@ -57,7 +57,7 @@ export interface BrowserPreviewDeps {
   /** The page's text → the neutral tree (features/browser/html.ts). */
   parse(html: string): BrowserHtmlDocument
   /** False once the request's context changed (sign-out, company, setting, conversation stopped). */
-  stillCurrent?(): boolean
+  stillCurrent(): boolean
   now(): number
 }
 
@@ -69,7 +69,7 @@ export interface BrowserPreviewRequest {
   signal: AbortSignal
 }
 
-export type BrowserPreviewRefusal = 'off' | 'connector' | 'operation' | 'policy' | 'stopped' | 'no-window' | 'no-operator'
+export type BrowserPreviewRefusal = 'off' | 'connector' | 'operation' | 'not-previewable' | 'policy' | 'stopped' | 'no-window' | 'no-operator'
 
 export type BrowserPreviewResult =
   /** Nothing started: no page read, no CLI checked or started. */
@@ -93,6 +93,9 @@ export async function runBrowserPreview(request: BrowserPreviewRequest, deps: Br
   if (!operation || operation.effect === 'read') return refused('operation')
   // Every declared read needs its reviewed reader, or the type is not previewed at all.
   if (Object.keys(connector.explore).length === 0 || Object.values(connector.explore).some(r => !deps.reader(r.reader))) return refused('connector')
+  // A type its declared reads can never complete (no read to start from, an id field no reader takes
+  // out) fails closed here, before anything is read or started.
+  if (previewProblem(operation, connector.explore, id => deps.reader(id)?.fields)) return refused('not-previewable')
   const site = deps.site(request.companyId, connector.host)
   if (!site || site.host !== connector.host || !browserOperationsAllowed(connector, { mode: 'on', sites: [site] }).usable.includes(request.operation)) return refused('policy')
   if (deps.stopped(request.companyId)) return refused('stopped')
@@ -101,13 +104,17 @@ export async function runBrowserPreview(request: BrowserPreviewRequest, deps: Br
   const operator = deps.operator()
   if (!operator) return refused('no-operator')
 
-  const current = () => !request.signal.aborted && (deps.stillCurrent?.() ?? true) && !deps.stopped(request.companyId)
+  // The context includes the window: the one open when the request started (a window closed and opened
+  // again is another window, even on the same site).
+  const current = () => !request.signal.aborted && deps.stillCurrent() && !deps.stopped(request.companyId)
+    && !firstWindow.closed() && deps.window(request.companyId, connector.host) === firstWindow
   const parentEnv = deps.parentEnv()
+  // The 4 minutes count from before the CLI's version check.
+  const deadline = deps.now() + BROWSER_OPERATOR_LIMITS.totalMs
   const resolved = await operator.resolve(deps.cliPath(), parentEnv)
   if (!resolved.ok) return failed(resolved.code)
   if (!current()) return failed(request.signal.aborted ? 'cancelled' : 'context-changed')
 
-  const deadline = deps.now() + BROWSER_OPERATOR_LIMITS.totalMs
   const pages: BrowserOperatorPage[] = []
   for (let round = 1; round <= BROWSER_OPERATOR_LIMITS.rounds; round++) {
     const left = deadline - deps.now()
@@ -125,10 +132,8 @@ export async function runBrowserPreview(request: BrowserPreviewRequest, deps: Br
     if (answer.do === 'stop') return { outcome: 'stopped', why: answer.why, question: answer.question }
     if (answer.do === 'candidate') return { outcome: 'candidate', target: answer.target, change: answer.change, explanation: answer.explanation }
 
-    const surface = deps.window(request.companyId, connector.host)
-    if (!surface || surface.closed()) return failed('read-failed')
     let page: { status: number; body: string }
-    try { page = await surface.read(answer.path, request.signal) } catch { return failed(request.signal.aborted ? 'cancelled' : 'read-failed') }
+    try { page = await firstWindow.read(answer.path, request.signal) } catch { return failed(request.signal.aborted ? 'cancelled' : 'read-failed') }
     if (!current()) return failed(request.signal.aborted ? 'cancelled' : 'context-changed')
     // A redirect (logged out), an error page: nothing to read the items from.
     if (page.status !== OK_READ) return failed('read-failed')

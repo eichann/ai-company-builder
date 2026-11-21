@@ -39,7 +39,7 @@ function slotsOf(box: BrowserPageElement): Array<{ reminder: string; step: strin
 export function createLstepReminderStepsReader(): BrowserExploreReader {
   return {
     id: LSTEP_REMINDER_STEPS_READER,
-    fields: ['step', 'template'],
+    fields: ['step', 'attached_template'],
     extra: ['in_step'],
     read(values, page) {
       const reminder = values.reminder
@@ -54,7 +54,7 @@ export function createLstepReminderStepsReader(): BrowserExploreReader {
         items.push({ field: 'step', value: step, label: box.text() })
         for (const slot of slotsOf(box)) {
           if (slot.reminder !== reminder || slot.step !== step) { complete = false; continue }
-          items.push({ field: 'template', value: slot.template, extra: { in_step: step } })
+          items.push({ field: 'attached_template', value: slot.template, extra: { in_step: step } })
         }
       }
       return { items, complete }

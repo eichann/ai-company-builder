@@ -70,7 +70,7 @@ export function browserOperatorArgs(model: string): string[] {
 }
 
 /** Variables passed on from the member's environment only when present, exactly as they are. */
-const PASSED_WHEN_SET = ['HTTPS_PROXY', 'NO_PROXY', 'NODE_EXTRA_CA_CERTS'] as const
+const PASSED_WHEN_SET = ['HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy', 'NODE_EXTRA_CA_CERTS'] as const
 
 /**
  * The operator's whole environment, built from nothing (design memo §33 1-2): never the member's
@@ -196,6 +196,22 @@ export function operatorMaterial(input: {
     round,
     roundsLeft: BROWSER_OPERATOR_LIMITS.rounds - round,
   }
+}
+
+/**
+ * Why a type cannot be previewed with these declared reads, or null: the operator can only start from a
+ * read without a `{name}` (it has seen no id yet), and every id field of the type's target and change
+ * must be one a declared read's reader can take out (else no candidate can ever be made). Asked before
+ * anything is read or started: such a type fails closed at once.
+ */
+export function previewProblem(
+  operation: BrowserOperation, explore: Readonly<Record<string, BrowserExploreRead>>, fieldsOf: (reader: string) => readonly string[] | undefined,
+): 'no-starting-read' | 'no-source' | null {
+  const reads = Object.values(explore)
+  if (!reads.some(r => r.placeholders.length === 0)) return 'no-starting-read'
+  const produced = new Set(reads.flatMap(r => fieldsOf(r.reader) ?? []))
+  const needed = [...Object.entries(operation.target), ...Object.entries(operation.change)].filter(([, kind]) => kind === 'id').map(([name]) => name)
+  return needed.every(name => produced.has(name)) ? null : 'no-source'
 }
 
 /** Every id the readers took out in this request, by field. */

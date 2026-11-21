@@ -38,5 +38,5 @@ export function parseBrowserHtml(html: string): BrowserHtmlDocument {
 
   let root: BrowserHtmlElement | null = null
   for (const child of document.childNodes) if (isElement(child)) root = convert(child)
-  return { body, idCounts: countIds(root) }
+  return { root, body, idCounts: countIds(root) }
 }

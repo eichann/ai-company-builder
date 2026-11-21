@@ -175,9 +175,9 @@ export interface BrowserPageQuery {
  */
 export interface BrowserPageElement {
   readonly tag: string
-  /** The element's id, or null (none, or not readable: then the read is incomplete). */
+  /** The element's id, or null (none). An element whose id stands twice is never shown to a reader. */
   readonly id: string | null
-  /** An attribute's value, or null (none, or written twice on the element: then the read is incomplete). */
+  /** An attribute's value, or null (none). An element with an attribute written twice is never shown. */
   attr(name: string): string | null
   /** The element's visible text, whitespace folded (a label: the core cleans and cuts it). */
   text(): string

@@ -5,6 +5,6 @@
  * while it is off, returns at once: no page read, no CLI check or start, no server call, no send.
  * The clean-up paths (cancel, report, confirm, the waiting list, the card) never ask it.
  *
- * `client/tests/browser-ai-switch.test.ts` fails while this is anything but `false`.
+ * `client/tests/browser-preview.test.ts` fails while this is anything but `false`.
  */
 export const BROWSER_AI_BUILD_SWITCH = false as boolean

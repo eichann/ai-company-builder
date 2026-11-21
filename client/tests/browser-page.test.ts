@@ -135,7 +135,7 @@ test('Lステップ\'s reader takes steps from their box ids and templates from 
     <div hidden id="templateStep555"></div>`), reader, { reminder: '101' })
   assert.deepEqual(r.items, [
     { field: 'step', value: '201', label: '当日 09:00 に送信 テンプレ' },
-    { field: 'template', value: '300', extra: { in_step: '201' } },
+    { field: 'attached_template', value: '300', extra: { in_step: '201' } },
     { field: 'step', value: '202', label: 'N 日前 に送信' },
   ])
   assert.equal(r.complete, true)
@@ -149,4 +149,42 @@ test('Lステップ\'s reader takes steps from their box ids and templates from 
   // No step box at all, or a reminder that is not a plain positive id.
   assert.equal(read(reminderPage('<p>空</p>'), reader, { reminder: '101' }).complete, false)
   assert.deepEqual(read(reminderPage(box('201', [])), reader, { reminder: '0' }), { items: [], complete: false })
+})
+
+test('an ambiguous element is never shown, whatever the query: an id used twice (found by an attribute too) or an attribute written twice hides it and everything in it', () => {
+  // Found by an attribute, not by its id: still not read.
+  const twice = read('<div id="list"><p id="x" data-ref="1">a</p><p id="x" data-ref="2">b</p><p data-ref="3">c</p></div>')
+  assert.deepEqual(values(twice), ['3'])
+  assert.equal(twice.complete, false)
+  // Nothing inside an ambiguous element is shown either.
+  const inside = read('<div id="list"><div id="y"><p data-ref="1">a</p></div><div id="y"></div></div>')
+  assert.deepEqual(inside, { items: [], complete: false })
+  // Lステップ: two slots with one id inside a box give no template.
+  const slots = read(reminderPage(`<div id="templateStep201">t<a id="s" onclick="openModal(101, 201, 1, 300, 8)">a</a><a id="s" onclick="openModal(101, 201, 2, 301, 8)">b</a></div>`), reader, { reminder: '101' })
+  assert.deepEqual(slots.items, [{ field: 'step', value: '201', label: 'ta b' }])
+  assert.equal(slots.complete, false)
+})
+
+test('hidden inputs, meta, link and base are not part of the page a reader sees: a slot written on one is not read', () => {
+  const r = read(reminderPage(`<div id="templateStep201">当日
+    <input type="hidden" onclick="openModal(101, 201, 1, 666, 8)">
+    <input type=" HIDDEN " data-x onclick="openModal(101, 201, 2, 667, 8)">
+    <meta onclick="openModal(101, 201, 3, 668, 8)"><link onclick="openModal(101, 201, 4, 669, 8)"><base onclick="openModal(101, 201, 5, 670, 8)">
+    <a onclick="openModal(101, 201, 6, 300, 8)">x</a></div>`), reader, { reminder: '101' })
+  assert.deepEqual(r.items.filter(i => i.field === 'attached_template').map(i => i.value), ['300'])
+  assert.equal(r.complete, true)
+  // A visible input is part of the page.
+  assert.deepEqual(values(read('<div id="list"><input type="text" data-ref="5"></div>')), ['5'])
+})
+
+test('a hidden <html> or <body> hides the whole page', () => {
+  for (const page of [
+    '<html><body hidden><div id="list"><p data-ref="1">a</p></div></body></html>',
+    '<html><body style="display:none"><div id="list"><p data-ref="1">a</p></div></body></html>',
+    '<html><body aria-hidden="true"><div id="list"><p data-ref="1">a</p></div></body></html>',
+    '<html aria-hidden="true"><body><div id="list"><p data-ref="1">a</p></div></body></html>',
+    '<html style="visibility:hidden"><body><div id="list"><p data-ref="1">a</p></div></body></html>',
+    '<html><body id="b" id="c"><div id="list"><p data-ref="1">a</p></div></body></html>',
+  ]) assert.deepEqual(read(page), { items: [], complete: false }, page)
+  assert.deepEqual(values(read('<html><body><div id="list"><p data-ref="1">a</p></div></body></html>')), ['1'])
 })
