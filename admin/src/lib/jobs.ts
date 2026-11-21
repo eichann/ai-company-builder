@@ -13,6 +13,21 @@ import {
 } from '../../../shared/core/jobs'
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
 
+/**
+ * The definition shapes **this console** shows, edits and accepts (stage 4b-0.5, owner memo 「段4b 設計メモ」 §5-1): its form
+ * round-trips each of them (`formFromDefinition` → `definitionFromForm`, `admin/tests/job-screen-schemas.test.ts`). It is
+ * what every job request announces (`X-ACB-Job-Schemas`, `api.ts` `JOB_READS`) — never the shared parser's `JOB_SCHEMAS`:
+ * a later build's core may read a shape (4b-1's `schema: 3`) before this form can show it, and then the server must not
+ * hand this console its definition nor take an approval, acceptance or edit of it from here.
+ */
+export const ADMIN_JOB_SCHEMAS: readonly number[] = [1, 2]
+
+/** A definition this console's form reads: a shape the core knows and this console announces. */
+function adminReadsDefinition(d: unknown): JobDefinition | null {
+  const known = knownJobDefinition(d)
+  return known !== null && ADMIN_JOB_SCHEMAS.includes(known.schema) ? known : null
+}
+
 export interface JobForm {
   name: string
   actingUser: string
@@ -123,12 +138,12 @@ const words = (text: string) => [...new Set(text.normalize('NFC').split(/[、,\s
  */
 export function editableDefinition(v: { definition: JobDefinition | null; needsUpdate?: true } | null | undefined): JobDefinition | null {
   if (!v || v.needsUpdate) return null
-  return knownJobDefinition(v.definition)
+  return adminReadsDefinition(v.definition)
 }
 
 /** The version must not be shown or edited here (see `editableDefinition`); a hidden one (`definition` null for a non-admin) is not that. */
 export function needsNewerScreen(v: { definition: JobDefinition | null; needsUpdate?: true } | null | undefined): boolean {
-  return !!v && (v.needsUpdate === true || (v.definition !== null && knownJobDefinition(v.definition) === null))
+  return !!v && (v.needsUpdate === true || (v.definition !== null && adminReadsDefinition(v.definition) === null))
 }
 
 /** The form for a version. */

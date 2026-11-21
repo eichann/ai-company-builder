@@ -824,7 +824,14 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   `needsUpdate` when the version it shows is one (an older admin calls `trigger.at.split`). Approving, accepting it
   or editing a job whose newest version is one, from that client: 409 `JOB_NEEDS_NEWER_SCREEN` (what a screen
   cannot show, it must not write over or consent to). The admin console (`admin/src/lib/api.ts` `JOB_READS`) sends
-  the header on every job call; since 4a so does the desktop app (`client/electron/features/jobs/ipc.ts`, `1,2`). An app
+  the header on every job call; since 4a so does the desktop app (`client/electron/features/jobs/ipc.ts`, `1,2`).
+  **A screen announces what it can show, edit and accept, never what the shared parser reads** (stage 4b-0.5, owner memo
+  §5-1): `ADMIN_JOB_SCHEMAS` (`admin/src/lib/jobs.ts`; also asked by `editableDefinition` / `needsNewerScreen`, so a
+  form is never built from a shape the core reads but the form cannot) and `APP_JOB_SCHEMAS` (`client/shared/jobs.ts`;
+  the 受け取る shows a definition only of such a shape, `appReadsJobDefinition`) — both `[1, 2]` now. When a later core
+  reads `schema: 3` (4b-1), the screens keep announcing `1,2` until their forms and words handle it. Tests
+  `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading schema 3; every announced schema
+  round-trips through the form) and `client/tests/job-screen-schemas.test.ts` (every announced schema has its words). An app
   before it gets an event job without its definition and its 受け取る is refused — the same code, but the app (a request
   carrying `X-ACB-Client-Version`) is told 「…アプリを新しくしてください」 (`JOB_NEEDS_NEWER_APP`, `routes/jobs.ts`), a screen
   「画面を新しくしてください」.
