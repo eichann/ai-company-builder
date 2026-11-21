@@ -100,6 +100,10 @@ PERF=(
   shared/core/instruction-like.ts shared/core/outside-text.ts
 )
 UNIVERSAL=(client/scripts/universal-git.mjs client/package.json)
+# shared/design-tokens/ (the design tokens, their Tailwind bridges and the design lint) is under
+# `shared/` in CLIENT (design-lint / design-tokens-bridge tests), UI (the renderer imports the
+# token CSS and the app bridge) and ADMIN (globals.css imports the tokens and the admin bridge):
+# keep it covered there if those lists ever narrow `shared/`.
 # staging/: the staging kit's helpers, tested by server/tests/unit/staging-kit.test.ts.
 SERVER=(server/ shared/ staging/)
 ADMIN=(admin/ shared/)
