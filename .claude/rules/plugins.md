@@ -322,7 +322,8 @@ upgrade:                                 # where work pinned to an older version
   ed25519`, `key_id`, `value` (base64) over `pluginSignedMessage(id, version, fingerprint)`.
   Shape-checked on the shelf and kept as `ShelfPackage.signature`; **not verified and not
   trusted** — verification (a public key the app carries) comes before packages go to outside
-  companies.
+  companies. The planned verification is a signed list per company instead (`plugin-trust.md`;
+  P1 has the format and the checks, nothing enforces them yet).
 
 - **Contract 3** keeps all of this (`contract >= PLUGIN_CONTRACT_V2` everywhere; flow keys, `ui/`, the
   signature slot, fingerprint v2 — a contract-1 package keeps v1).
