@@ -255,7 +255,17 @@ test('a write carries the cookies of its own address and leaves nothing behind: 
   // The site refuses the write without the cookie scoped to its path (the happy path above succeeded).
   assert.deepEqual(r.happy, { outcome: 'succeeded' })
   assert.equal(r.writeSessionCookies, 0)
-  assert.equal(r.writeSessionsCreated, 1)
+  // The read and write sessions are made once with the window; no run makes another.
+  assert.equal(r.writeSessionsCreated, 0)
+})
+
+test('main reads through the window\'s page-less read session with the member\'s login, never touching the window: what the member types stays, nothing is left in the session', { skip }, () => {
+  const r = result.runner
+  assert.equal(r.readSessionCookies, 0)
+  assert.equal(r.previewRead, 200, 'the login (a cookie the site needs) was carried')
+  assert.equal(r.previewReachedSite, 1)
+  assert.equal(r.typingAfterPreview, '入力中')
+  assert.equal(r.readSessionCookiesAfterPreview, 0)
 })
 
 test('the run\'s gate on the real window: only the armed write with the plan\'s values, once; only declared reads', { skip }, () => {

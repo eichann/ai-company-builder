@@ -27,6 +27,10 @@ import { runClaudeSecondOpinion } from './claude-second-opinion'
 import { runCodexSecondOpinion } from './codex-second-opinion'
 import type { SecondOpinionJob, SecondOpinionRequest, SecondOpinionResult } from './second-opinion-runner'
 import { SECOND_OPINION_LIMITS } from '../../shared/agents/second-opinion'
+import {
+  resolveClaudeBrowserOperatorCli, runClaudeBrowserOperatorStep,
+  type BrowserOperatorResolved, type BrowserOperatorStepJob, type BrowserOperatorStepResult,
+} from './claude-browser-operator'
 
 /** What any connection may need from the app (the chat server's config is one). */
 export interface AgentHost extends ClaudeConnectionConfig {
@@ -104,6 +108,10 @@ export interface AgentFactories {
   runWebReader?: (job: WebReaderJob) => Promise<WebReaderResult>
   /** `capabilities.secondOpinion`: a one-shot with no tools at all (second-opinion-runner.ts), in the folder and with the model it is given. */
   runSecondOpinion?: (job: SecondOpinionJob) => Promise<SecondOpinionResult>
+  /** `capabilities.browserOperator`: one step of 「ブラウザ操作」's operator (claude-browser-operator.ts). */
+  runBrowserOperatorStep?: (job: BrowserOperatorStepJob) => Promise<BrowserOperatorStepResult>
+  /** With `runBrowserOperatorStep`: the CLI fixed for one request (real path, version floor). */
+  resolveBrowserOperatorCli?: (cliPath: string, parentEnv: BrowserOperatorStepJob['parentEnv']) => Promise<BrowserOperatorResolved>
 }
 
 const model = (id: AgentId, request: OneShotTextRequest) => request.model ?? AGENTS[id].tasks[request.job]
@@ -125,6 +133,9 @@ export const AGENT_FACTORIES: { readonly [K in AgentId]: AgentFactories } = {
     writeHandoff: (request, host) => writeClaudeHandoff({ ...request, cli: host.getCli() }),
     runWebReader: job => runClaudeWebReader(job),
     runSecondOpinion: job => runClaudeSecondOpinion(job),
+    runBrowserOperatorStep: job => runClaudeBrowserOperatorStep(job),
+    resolveBrowserOperatorCli: (cliPath, parentEnv) =>
+      resolveClaudeBrowserOperatorCli(cliPath, AGENTS['claude-code'].browserOperatorCli?.min ?? '', parentEnv),
   },
   codex: {
     createConnection: host => createCodexConnection(host),
@@ -162,6 +173,7 @@ export const CAPABILITY_FACTORIES = {
   handoff: 'writeHandoff',
   webReader: 'runWebReader',
   secondOpinion: 'runSecondOpinion',
+  browserOperator: 'runBrowserOperatorStep',
 } as const satisfies Partial<Record<keyof AgentCapabilities, keyof AgentFactories>>
 
 function assertProfileSupported(id: AgentId, profile: AgentProfile | undefined) {
@@ -219,4 +231,16 @@ export function runSecondOpinion(id: AgentId, request: SecondOpinionRequest): Pr
   if (!run) return Promise.reject(new Error(`${AGENTS[id].label}: no second opinion`))
   const model = AGENTS[id].tasks.secondOpinion ?? ''
   return inEmptyFolder(cwd => run({ ...request, model, cwd, timeoutMs: request.timeoutMs ?? SECOND_OPINION_LIMITS.timeoutMs }))
+}
+
+/** 「ブラウザ操作」's operator of an agent that claims `browserOperator` (its `tasks.browserOperator` model), or null. */
+export function browserOperatorOf(id: AgentId): {
+  model: string
+  resolve: NonNullable<AgentFactories['resolveBrowserOperatorCli']>
+  step: NonNullable<AgentFactories['runBrowserOperatorStep']>
+} | null {
+  const factories = AGENT_FACTORIES[id]
+  const model = AGENTS[id].tasks.browserOperator
+  if (!AGENTS[id].capabilities.browserOperator || !factories.runBrowserOperatorStep || !factories.resolveBrowserOperatorCli || !model) return null
+  return { model, resolve: factories.resolveBrowserOperatorCli, step: factories.runBrowserOperatorStep }
 }

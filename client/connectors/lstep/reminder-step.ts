@@ -10,10 +10,12 @@
  *   `openModal(<reminder>, <step>, <hole>, <template id>, <type>)` — the 4th argument is the attached
  *   template; a step's block carries `templateStep<step>`.
  *
- * NOT CONFIRMED on the real site: where the page names the logged-in LINE account in a stable way,
- * and exactly where `_token` / `_lm_user_id` sit in the page. The account is read by an injected
- * reader; the default reads nothing (`UNCONFIRMED_ACCOUNT`), so a real run stops before any write
- * ("account-unknown") until someone confirms the reader against the real page.
+ * - Every page carries the logged-in LINE account as `<meta name="lm-account-id" content="<id>">`
+ *   (confirmed on the real site with the owner's login, 2026-11-22, design memo §34: another
+ *   account's objects answer 404). `accountFromMeta` reads it; none, or two different values, is no
+ *   account (the run stops before any write, "account-unknown").
+ *
+ * NOT CONFIRMED on the real site: exactly where `_token` / `_lm_user_id` sit in the page.
  *
  * Site code: imported only by the composition root (and tests), never by the core
  * (architecture-boundaries.test.ts 「the browser core knows no site」).
@@ -26,8 +28,22 @@ export const LSTEP_REMINDER_STEP_CHECKER = 'lstep.reminder_step'
 /** Reads the logged-in outside account's id from the page (null: cannot tell). */
 export type AccountReader = (html: string) => string | null
 
-/** The app's reader until the real page's account marker is confirmed: never an account. */
-export const UNCONFIRMED_ACCOUNT: AccountReader = () => null
+/**
+ * The LINE account from the page's `<meta name="lm-account-id" content="…">` (outside scripts, text
+ * areas and comments): exactly one value, a positive integer, else null (missing, two different
+ * values, anything else).
+ */
+export const accountFromMeta: AccountReader = html => {
+  const found = new Set<string>()
+  for (const tag of markupOnly(html).match(/<meta\b[^>]*>/gi) ?? []) {
+    if (attribute(tag, 'name')?.toLowerCase() !== 'lm-account-id') continue
+    const value = attribute(tag, 'content')
+    found.add(value === null ? '' : value.trim())
+  }
+  if (found.size !== 1) return null
+  const [value] = [...found]
+  return POSITIVE_ID.test(value) ? value : null
+}
 
 /** Lステップ's ids are positive integers: never `0`, `-1` or anything a server could read as "all". */
 const POSITIVE_ID = /^[1-9][0-9]{0,18}$/

@@ -21,6 +21,7 @@ import {
   type BrowserChecker, type BrowserPageRead, type BrowserRunPlan, type BrowserRunResult, type BrowserRunSurface,
   type BrowserStepRecord, type BrowserTargetState,
 } from '../../../shared/browser-runner'
+import { buildAiSwitch, type BrowserAiSwitch } from './ai-switch'
 
 /** The per-step states kept on this PC (run-records.ts). */
 export interface BrowserRunRecords {
@@ -31,6 +32,8 @@ export interface BrowserRunRecords {
 }
 
 export interface BrowserRunnerDeps {
+  /** The AI's browser operation's switch (default: the build's, off in 6b): off = refused at once, nothing read or sent. */
+  aiSwitch?: BrowserAiSwitch
   /** The approved plan (PR 6 adds the approval); null = none. */
   approvedPlan(planId: string): Promise<unknown>
   /** The connector declaration at exactly this id and version (bundled with the app for now: client/connectors/). */
@@ -57,6 +60,8 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
 
   async function run(planId: string): Promise<BrowserRunResult> {
     const refused = (reason: BrowserRunReason): BrowserRunResult => ({ outcome: 'refused', reason })
+    // The switch first (design memo §33.3): off = nothing asked, read or sent.
+    if (!(deps.aiSwitch ?? buildAiSwitch)()) return refused('off')
     if (runningPlans.has(planId)) return refused('already-running')
     let raw: unknown
     try { raw = await deps.approvedPlan(planId) } catch { return refused('no-plan') }

@@ -198,7 +198,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
     combinations = []
     for (const row of catalog.combinations()) {
       const fine = isMap(row) && typeof row.declaration === 'string' && typeof row.declarationHash === 'string' && typeof row.checkerHash === 'string'
-        && Number.isSafeInteger(row.factsVersion) && (row.status === 'approved' || row.status === 'retired')
+        && Number.isSafeInteger(row.factsVersion) && (row.status === 'approved' || row.status === 'retired' || row.status === 'pending')
         && (row.minAppVersion === null || (typeof row.minAppVersion === 'string' && parseClientVersion(row.minAppVersion) !== null))
       if (!fine || hashCanonical(row.declaration) !== row.declarationHash) { log.warn('[browser-plans] an approved combination does not match its hash; left out'); continue }
       const parsed = parsePluginManifest(row.declaration)
@@ -231,7 +231,8 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
   function gate(member: Member, key: Parsed['connector'] & { declarationHash: string; checkerHash: string; factsVersion: number }, operationName: string, appVersion: string | undefined):
     Outcome<{ combination: Combination; operation: BrowserOperation }> {
     const combination = findCombination(key)
-    if (!combination) return refuse('conflict', W.notApproved, { code: 'BROWSER_TYPE_NOT_APPROVED' })
+    // A `pending` row (listed, not yet made `approved`: design memo §33.5) is not approved.
+    if (!combination || combination.row.status === 'pending') return refuse('conflict', W.notApproved, { code: 'BROWSER_TYPE_NOT_APPROVED' })
     if (combination.row.status !== 'approved') return refuse('conflict', W.retired, { code: 'BROWSER_TYPE_RETIRED' })
     if (combination.row.minAppVersion !== null) {
       const app = parseClientVersion(appVersion)

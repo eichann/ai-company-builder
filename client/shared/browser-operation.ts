@@ -9,7 +9,7 @@ import {
   type BrowserRequest, type BrowserRequestRefusal, type BrowserSiteSetting,
 } from '../../shared/core/browser-operation'
 import { METHOD_OVERRIDE_HEADERS } from '../../shared/core/plugin-browser-declaration'
-import type { BrowserGateDecision, BrowserPageReadAttempt, BrowserSessionRequest } from './browser-runner'
+import type { BrowserPageReadAttempt } from './browser-runner'
 
 // ---------------------------------------------------------------------------
 // IPC payloads (browser:sites / browser:open / browser:clearLogin)
@@ -56,11 +56,6 @@ export interface BrowserWindowState {
   mode: BrowserWindowMode
   /** `ai` mode: the write gate (DevTools Fetch interception) is attached and sees the window's requests. */
   aiGateReady: boolean
-  /**
-   * `ai` mode during a run: the run's decision on a request to the operated host from outside the
-   * page (the runner's own, through the session). None = every such request refused in `ai` mode.
-   */
-  outside?: ((request: BrowserSessionRequest) => BrowserGateDecision) | null
 }
 
 export interface BrowserWindowRequest extends BrowserRequest {
@@ -80,10 +75,13 @@ export const isReadMethod = (method: string): boolean => READ_METHODS.has(method
  * Every request of a browser window's session passes here (the session's one
  * `onBeforeRequest`). The site's rule (`decideBrowserRequest`) first; then in
  * `ai` mode no WebSocket to the operated host (no operation type declares one);
- * from outside the window's page (a service worker, the runner's own read) no
- * write at all and a read only when the run's gate says yes (`outside`: a
- * service worker's GET is not in the page gate's view); and no write of the
- * page the gate cannot see (before the gate is attached).
+ * nothing at all from outside the window's page (a service worker, which the
+ * page's gate does not see: main never uses this session — its reads and writes
+ * go through page-less sessions of their own, `browserReadPartition` /
+ * `browserWritePartition` —, so no outside request here can be main's); and no
+ * write of the page the gate cannot see (before the gate is attached). In
+ * `human` mode the site's rule alone: the member's own browsing, a worker's
+ * request included, is theirs.
  */
 export function decideWindowRequest(state: BrowserWindowState, request: BrowserWindowRequest): BrowserWindowDecision {
   if (!state.site) return { allow: false, reason: 'closed' }
@@ -91,13 +89,8 @@ export function decideWindowRequest(state: BrowserWindowState, request: BrowserW
   if (!decided.allow) return decided
   if (state.mode === 'ai' && decided.use === 'operate') {
     if (request.resourceType === 'webSocket' || /^wss:/i.test(request.url)) return { allow: false, reason: 'ai-websocket' }
-    if (!request.fromWindow) {
-      // A run's write goes on a session of its own (browser-window.ts), never through this one.
-      if (!isReadMethod(request.method)) return { allow: false, reason: 'ai-unchecked-write' }
-      let outside: BrowserGateDecision = { allow: false, reason: 'none' }
-      try { if (state.outside) outside = state.outside({ method: request.method, url: request.url, body: request.body }) } catch { /* refused */ }
-      return outside.allow ? { allow: true } : { allow: false, reason: 'ai-outside' }
-    }
+    // Same path as main's read or not: a page-less session reads for main, never this one (design memo §33 2-4).
+    if (!request.fromWindow) return { allow: false, reason: isReadMethod(request.method) ? 'ai-outside' : 'ai-unchecked-write' }
     if (!isReadMethod(request.method) && !state.aiGateReady) return { allow: false, reason: 'ai-unchecked-write' }
   }
   return { allow: true }
@@ -143,6 +136,14 @@ function FindProxyForURL(url, host) {
  */
 export function browserWritePartition(partition: string): string {
   return `${partition}-write`
+}
+
+/**
+ * The session main reads a window's site through (the preview's reads and the runner's, agent-browser.md
+ * "The operator and the preview"): page-less, one per window session, in memory, named after it.
+ */
+export function browserReadPartition(partition: string): string {
+  return `${partition}-read`
 }
 
 /** Response headers that register a reporting endpoint (Reporting API, NEL): never kept. */

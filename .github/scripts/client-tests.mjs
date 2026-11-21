@@ -29,6 +29,7 @@ const MACOS = {
   'tests/voice-helper.test.ts': 'spawns the helper through voice-process.ts',
   'tests/voice-polisher.test.ts': 'spawns through the /bin/sh fd-closing wrapper',
   'tests/voice-probe.test.ts': 'spawns through voice-process.ts',
+  'tests/browser-operator.test.ts': 'spawns a fake Claude Code through voice-process.ts (the /bin/sh wrapper)',
   // Recursive fs.watch is FSEvents on macOS (members' Macs); Linux's is a
   // different implementation with different event timing.
   'tests/company-watcher.test.ts': 'recursive fs.watch = FSEvents',

@@ -630,6 +630,13 @@ browser:
   write / delete type without `lock`, without `facts.account` required, or any type without
   `delivers` is refused, with the reason. **The first version runs** only `delivers: none`, not
   irreversible, exactly one write, not delete (`browserFirstVersionProblem`, asked by the server).
+- **`explore`** (6b-1, design memo §33 2-2; `browser.explore`, optional): the pages the operator AI may
+  ask the app to read during the preview, ≤ 10, each `{ label, path, reader, no_side_effects: reviewed }`
+  — a path of literal segments and whole `{name}` segments (≤ 5, none twice; filled only with plain ids
+  a reader took out of an earlier page, `explorePath`), no query, fragment, `..` or `//`; `reader` a
+  reviewed reader `<site>.<thing>` (code in the app's connector folder); without the reviewed mark that
+  reading it changes nothing on the site, the declaration is refused (`agent-browser.md` "The operator
+  and the preview").
 - **`ignore_body` is trusted**: whatever it names passes with any value. A reviewer checks that each
   entry is a CSRF / session field and nothing that changes what the request does.
 - **`effect: delete` requires `irreversible: true`** (the person confirms right before the deletion).
@@ -663,7 +670,7 @@ browser:
 - **Not on the shelf yet**: the shelf refuses a package with `browser` (「a browser connector (browser) is not
   used yet」, `services/plugin-shelf.ts`), so no company installs it, `pluginsFor` never lists it and no
   app fetches it; `combineUse` refuses one, so no business plugin uses it. A released app's older parser
-  does not know `browser` (an unknown key: unusable). The first declaration (`lstep@0.2.0`, 「リマインダの段に
+  does not know `browser` (an unknown key: unusable). The first declaration (`lstep@0.3.0`, 「リマインダの段に
   テンプレートを足す」) ships **inside the app** with its checker (`client/connectors/lstep/`),
   parsed by `parsePluginManifest`; the runner exists but nothing starts it. The server accepts plans
   only for a combination listed in `shared/browser-connectors/approved.json` (the declaration's text

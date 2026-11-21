@@ -74,7 +74,7 @@ CLIENT_MAC=(
   client/tests/company-watcher.test.ts client/tests/ipc-fs.test.ts
   client/tests/permission-mode.test.ts client/tests/sandbox-claude.test.ts
   client/tests/voice-helper.test.ts client/tests/voice-polisher.test.ts client/tests/voice-probe.test.ts
-  client/tests/browser-window-electron.test.ts client/tests/browser-window-harness/
+  client/tests/browser-window-electron.test.ts client/tests/browser-window-harness/ client/tests/browser-operator.test.ts
   client/tests/ipc-harness/ ':(glob)client/tsconfig*.json' client/package.json shared/
   .github/scripts/client-tests.mjs
 )

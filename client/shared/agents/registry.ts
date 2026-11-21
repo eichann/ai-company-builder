@@ -98,6 +98,12 @@ export interface AgentCapabilities {
    */
   readonly secondOpinion: boolean
   /**
+   * Can be 「ブラウザ操作」's operator (agent-browser.md "The operator and the preview", design memo
+   * §33.1): its own CLI started fresh per step with no tools, no MCP, no settings, no session, the
+   * material as JSON data, one JSON answer. Only Claude Code (Team login, owner decision 2026-11-21).
+   */
+  readonly browserOperator: boolean
+  /**
    * The app can hand the company's AI sandbox (「AI の囲い」, sandbox-policy.ts)
    * to this agent's own sandbox (mode `enforce`). Without it, `enforce` runs as
    * the company's `onUnavailable` says (record only, or no AI).
@@ -134,6 +140,8 @@ export interface AgentTaskModels {
   readonly webReader?: string
   /** A second opinion asked by the other agent (`capabilities.secondOpinion`); absent → the catalog default (Codex). */
   readonly secondOpinion?: string
+  /** 「ブラウザ操作」's operator (`capabilities.browserOperator`). */
+  readonly browserOperator?: string
 }
 
 export interface AgentDescriptor<ModelId extends string = string> {
@@ -169,6 +177,11 @@ export interface AgentDescriptor<ModelId extends string = string> {
    * network proxy the sandbox uses). Undefined = no check.
    */
   readonly minCliVersion?: string
+  /**
+   * The oldest CLI 「ブラウザ操作」's operator starts (`capabilities.browserOperator`; the floor only,
+   * design memo §33 1-5): its closed start's flags (`--safe-mode`, …) were checked on that version.
+   */
+  readonly browserOperatorCli?: { readonly min: string }
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +226,11 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     webReader: CLAUDE_CHAT_MODEL,
     // A second opinion is worth the strong model (no tools, one answer).
     secondOpinion: CLAUDE_CHAT_MODEL,
+    // The operator chooses among a page's items: the strong model (no tools, one JSON answer per step).
+    browserOperator: CLAUDE_CHAT_MODEL,
   },
+  // The version 「もう一方の AI に聞く」's closed start (the same flags) was checked on.
+  browserOperatorCli: { min: '2.1.316' },
   brokerReservedServices: ['anthropic'],
   capabilities: {
     ownsConversation: true,
@@ -234,6 +251,7 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     oneShotText: true,
     webReader: true,
     secondOpinion: true,
+    browserOperator: true,
     // macOS / Linux (sandboxPlatform): Claude Code's own sandbox via the SDK `sandbox` option.
     sandbox: true,
     commitMessageFallback: true,
@@ -309,6 +327,7 @@ const CODEX: AgentDescriptor = {
     webReader: true,
     // No `tasks.secondOpinion`: the catalog's default chat model at its default effort.
     secondOpinion: true,
+    browserOperator: false,
     // macOS: Codex's permission profile + network proxy (codexSandboxConfig), checked per thread.
     sandbox: true,
     commitMessageFallback: false,
@@ -356,6 +375,7 @@ const API_KEY: AgentDescriptor = {
     // The app's own loop has no web tools to replace.
     webReader: false,
     secondOpinion: false,
+    browserOperator: false,
     sandbox: false,
     commitMessageFallback: true,
     privateFolderCommitMessages: true,

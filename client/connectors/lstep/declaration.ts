@@ -13,11 +13,22 @@
  * Adding a template to a reminder's step sends nothing to anyone by itself (`delivers: none`): the
  * step's messages go out on the reminder's schedule. The facts its checker reads for a plan are the
  * table of design memo §31.3 (shared/core/browser-plans.ts holds their shapes).
+ *
+ * 0.3.0 (PR 6b-1) adds `explore`, the pages the operator AI may ask main to read during the preview
+ * (design memo §33 2-2), each with its reviewed reader and its reviewed "no side effects" mark:
+ * - `reminder`: `GET /line/episode/show/<reminder>` — read only, changes nothing (the owner's login,
+ *   2026-11-22, design memo §34: only our fixed GETs were made; the page's own background reads do
+ *   not run, since main reads without a page).
+ * Not declared (not confirmed, or would need a query string, which no read may carry yet — §33
+ * decision 6): the reminders' list, `/api/templates?group=`, `/api/landings/<id>`. `delivers` stays
+ * `none`: what a step's time means for people already past it is not known yet (§34), so no
+ * `scheduled` type exists.
  */
 import { LSTEP_REMINDER_STEP_CHECKER } from './reminder-step'
+import { LSTEP_REMINDER_STEPS_READER } from './reminder-steps-reader'
 
 export const LSTEP_DECLARATION = `id: lstep
-version: 0.2.0
+version: 0.3.0
 label: Lステップ
 contract: 1
 browser:
@@ -53,6 +64,12 @@ browser:
         names: { required: true }
         template_bodies: { required: true, complete: true }
         shared_with: { required: true, complete: true }
+  explore:
+    reminder:
+      label: リマインダの中身（段の一覧）
+      path: "/line/episode/show/{reminder}"
+      reader: ${LSTEP_REMINDER_STEPS_READER}
+      no_side_effects: reviewed
 `
 
 /**

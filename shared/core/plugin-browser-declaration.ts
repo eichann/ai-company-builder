@@ -59,6 +59,8 @@ export const BROWSER_DECLARATION_LIMITS = {
   idValue: 64,
   textValue: 2000,
   facts: 20,
+  explore: 10,
+  explorePlaceholders: 5,
 } as const
 
 /** Operation, target and change names. */
@@ -155,6 +157,23 @@ export interface BrowserOperation {
   facts: Record<string, BrowserFactRule>
 }
 
+/**
+ * A page the operator AI may ask main to read during the preview (design memo §33 2-2): a fixed
+ * path on the operated host whose segments are literals or one `{name}` each (filled only with an
+ * id a reader already took out of an earlier page of the same request), the reviewed reader that
+ * takes the declared items out of it (`<site>.<thing>`, code in the app's connector folder) and the
+ * reviewed mark that reading it changes nothing on the site (`no_side_effects: reviewed`; a read
+ * without it is refused). No query string: none is allowed yet (§33 decision 6).
+ */
+export interface BrowserExploreRead {
+  label: string
+  /** The raw path with `{name}` segments, e.g. `/line/episode/show/{reminder}`. */
+  path: string
+  /** The `{name}`s of the path, in order. */
+  placeholders: string[]
+  reader: string
+}
+
 export interface PluginBrowser {
   /** The operated host (exact, `normalizeBrowserHost`). */
   host: string
@@ -163,6 +182,8 @@ export interface PluginBrowser {
   /** Which outside account a plan is bound to; required once a type writes. */
   account: { label: string } | null
   operations: Record<string, BrowserOperation>
+  /** The preview's reads (none when the declaration has no `explore`). */
+  explore: Record<string, BrowserExploreRead>
 }
 
 const own = (o: object, k: string): boolean => Object.prototype.hasOwnProperty.call(o, k)
@@ -371,10 +392,73 @@ function parseExpect(where: string, raw: YamlValue | undefined, fields: Readonly
   return out.length === raw.length ? out : []
 }
 
+/** The one value of `no_side_effects`: a person reviewed that reading the page changes nothing. */
+export const BROWSER_NO_SIDE_EFFECTS_REVIEWED = 'reviewed'
+const EXPLORE_SEGMENT_RE = /^(?:[A-Za-z0-9_.~-]+|\{([a-z][a-z0-9_]{0,39})\})$/
+
+/**
+ * The path of an explore read with `values` put in its `{name}` segments, or null when a value is
+ * missing, not a plain id (`BROWSER_ID_VALUE_RE`) or a name is given that the path does not have.
+ */
+export function explorePath(read: BrowserExploreRead, values: Readonly<Record<string, string>>): string | null {
+  const names = Object.keys(values)
+  if (names.length !== read.placeholders.length || names.some(n => !read.placeholders.includes(n))) return null
+  let failed = false
+  const path = read.path.replace(/\{([a-z][a-z0-9_]{0,39})\}/g, (_m, name: string) => {
+    const v = own(values, name) ? values[name] : undefined
+    if (typeof v !== 'string' || !BROWSER_ID_VALUE_RE.test(v)) { failed = true; return '' }
+    return v
+  })
+  return failed || !PATH_RE.test(path) || !checkUpstreamPath(path) ? null : path
+}
+
+/** `explore`: `{ <name>: { label, path, reader, no_side_effects: reviewed } }` — nothing else. */
+function parseExplore(raw: YamlValue | undefined, err: (m: string) => void): Record<string, BrowserExploreRead> {
+  const out: Record<string, BrowserExploreRead> = {}
+  if (raw === undefined) return out
+  if (!isYamlMap(raw)) { err('browser の explore（下見で読むページ）は「名前: { label, path, reader, no_side_effects }」の形で書いてください'); return out }
+  const entries = Object.entries(raw)
+  if (entries.length > BROWSER_DECLARATION_LIMITS.explore) err(`browser の explore は ${BROWSER_DECLARATION_LIMITS.explore} 個までです`)
+  for (const [name, entry] of entries) {
+    const where = `browser の explore「${name}」`
+    if (!BROWSER_NAME_RE.test(name)) { err(`browser の explore の名前「${name}」は英小文字・数字・_ で書いてください`); continue }
+    if (!isYamlMap(entry)) { err(`${where}は { label, path, reader, no_side_effects } の形で書いてください`); continue }
+    let ok = true
+    const e = (m: string) => { ok = false; err(m) }
+    unknownKeys(`${where}: `, entry, ['label', 'path', 'reader', 'no_side_effects'], e)
+    const label = plainText(entry.label, BROWSER_DECLARATION_LIMITS.label)
+    if (!label) e(`${where}の label は ${BROWSER_DECLARATION_LIMITS.label} 文字までの1行で書いてください`)
+    const reader = entry.reader
+    if (typeof reader !== 'string' || reader.length > BROWSER_DECLARATION_LIMITS.checker || !BROWSER_CHECKER_RE.test(reader)) e(`${where}の reader は「サイト.読むもの」の名前です（英小文字・数字・_）`)
+    // Reading a page may still change something (marked as read, a view counted): only a read a person reviewed.
+    if (entry.no_side_effects !== BROWSER_NO_SIDE_EFFECTS_REVIEWED) e(`${where}には no_side_effects: reviewed を書いてください（読んでもサイトが変わらないことを確かめた印）`)
+    const path = entry.path
+    const placeholders: string[] = []
+    if (typeof path !== 'string' || !path.startsWith('/') || path.length > BROWSER_DECLARATION_LIMITS.path) {
+      e(`${where}の path は / で始まる道です（? # は使えません）`)
+    } else {
+      const segments = path.slice(1).split('/')
+      for (const segment of segments) {
+        const m = EXPLORE_SEGMENT_RE.exec(segment)
+        if (!m || segment === '.' || segment === '..') { e(`${where}の path の「${segment}」は、英数字・_ . ~ - か {名前} ひとつだけの区切りで書いてください（? # // .. は使えません）`); break }
+        if (m[1] !== undefined) {
+          if (placeholders.includes(m[1])) { e(`${where}の path に {${m[1]}} が2回あります`); break }
+          placeholders.push(m[1])
+        }
+      }
+      if (placeholders.length > BROWSER_DECLARATION_LIMITS.explorePlaceholders) e(`${where}の path の {名前} は ${BROWSER_DECLARATION_LIMITS.explorePlaceholders} 個までです`)
+      const sample = path.replace(/\{[a-z][a-z0-9_]{0,39}\}/g, '1')
+      if (!PATH_RE.test(sample) || !checkUpstreamPath(sample)) e(`${where}の path は / で始まる決まった道です（? # //・.. は使えません）`)
+    }
+    if (ok) out[name] = { label: label as string, path: path as string, placeholders, reader: reader as string }
+  }
+  return out
+}
+
 /** The `browser` map: the site and its operation types. */
 export function parseBrowserPart(raw: YamlValue | undefined, err: (m: string) => void): PluginBrowser | null {
   if (!isYamlMap(raw)) { err('browser は { host, operations, … } の形で書いてください'); return null }
-  unknownKeys('browser: ', raw, ['host', 'asset_hosts', 'account', 'operations'], err)
+  unknownKeys('browser: ', raw, ['host', 'asset_hosts', 'account', 'operations', 'explore'], err)
   const host = normalizeBrowserHost(raw.host)
   // Exact spelling only: what the admin approves is what the declaration says, no case or dot folding.
   if (!host || host !== raw.host) err('browser の host は操作するサイトのホスト名です（英小文字。*. は使えません）')
@@ -414,12 +498,13 @@ export function parseBrowserPart(raw: YamlValue | undefined, err: (m: string) =>
     // A plan that changes something is bound to one outside account.
     if (raw.account === undefined && Object.values(rawOps).some(op => isYamlMap(op) && op.effect !== 'read')) err('書き込む操作があるときは browser の account（どのアカウントの操作か）を書いてください')
   }
-  return host ? { host, assetHosts, account, operations } : null
+  const explore = parseExplore(raw.explore, err)
+  return host ? { host, assetHosts, account, operations, explore } : null
 }
 
 /** A browser connector: the common part and `browser`; nothing of an API connector. */
 export function parseBrowserConnector(raw: { [k: string]: YamlValue }, err: (m: string) => void, common: CommonPart): PluginManifest {
-  const browser = parseBrowserPart(raw.browser, err) ?? { host: '', assetHosts: [], account: null, operations: {} }
+  const browser = parseBrowserPart(raw.browser, err) ?? { host: '', assetHosts: [], account: null, operations: {}, explore: {} }
   return {
     ...common, role: 'connector', service: '', baseUrl: { host: '', basePath: '' }, scopes: [], operationScopes: {},
     types: [], objects: {}, operations: {}, fieldPolicyDefaults: {}, uses: null, accountInfo: null, ...noFlow(), browser,

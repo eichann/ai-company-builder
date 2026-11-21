@@ -16,6 +16,19 @@ vi.mock('../../src/lib/auth', () => ({
   auth: { handler: vi.fn().mockResolvedValue(new Response('', { status: 200 })), api: { getSession: vi.fn().mockResolvedValue(null) } },
 }))
 
+// The current Lステップ row is written `pending` (design memo §33.5: approved by a reviewed edit with
+// the first app build carrying all of 6b); this test runs the real file with that row approved.
+vi.mock('../../src/adapters/browser-connector-catalog', async importOriginal => {
+  const real = await importOriginal<typeof import('../../src/adapters/browser-connector-catalog')>()
+  return {
+    ...real,
+    fileBrowserConnectorCatalog: (file?: string) => {
+      const rows = real.fileBrowserConnectorCatalog(file).combinations().map(r => (r.status === 'pending' ? { ...r, status: 'approved' } : r))
+      return { combinations: () => rows }
+    },
+  }
+})
+
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { browserPlansRoute, browserReportRoute } from '../../src/routes/browser-plans'
@@ -32,7 +45,7 @@ app.route('/api', browserReportRoute)
 const CO = 'bp-co'
 const BASE = `/api/companies/${CO}`
 const ROLE: Record<string, string> = { 'bp-owner': 'owner', 'bp-admin': 'admin', 'bp-alice': 'member', 'bp-bob': 'member' }
-const APPROVED = fileBrowserConnectorCatalog().combinations()[0]
+const APPROVED = fileBrowserConnectorCatalog().combinations().find(r => r.status === 'approved')!
 const OP = 'reminder_step_add_template'
 const SECRET_HEADER = 'X-ACB-Browser-Execution'
 const ts = (ms = Date.now()) => new Date(ms).toISOString()

@@ -1,0 +1,107 @@
+/**
+ * Main's requests through a window's page-less sessions (electron/features/browser/read-session.ts;
+ * agent-browser.md "The operator and the preview", design memo §33 2-4): one lane per session name,
+ * each request one chunk — prepare, request, clean-up — so a read given up half-way (its request
+ * stopped) never has its late clean-up clear a newer read's login or connection, also when the window
+ * was closed and opened again on the same partition. A fake session holds cookies and connections and
+ * says what each request saw.
+ */
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { createSessionLanes, exactRead, throughSession, type PagelessSession } from '../electron/features/browser/read-session'
+import { browserReadPartition, browserWritePartition } from '../shared/browser-operation'
+
+/** One Electron session by name (the same object for a reopened window), with a slow clean-up when asked. */
+function fakeSessions() {
+  const store = new Map<string, { cookies: Set<string>; connections: number; log: string[] }>()
+  const of = (name: string) => {
+    let s = store.get(name)
+    if (!s) { s = { cookies: new Set(), connections: 0, log: [] }; store.set(name, s) }
+    return s
+  }
+  const open = (name: string, o: { cookie: string; slowWipeMs?: number; slowSendMs?: number }): PagelessSession => {
+    const s = of(name)
+    let wipes = 0
+    return {
+      async wipe() {
+        wipes++
+        // The clean-up after the request (every second wipe) is the slow one.
+        if (o.slowWipeMs && wipes % 2 === 0) await new Promise(r => setTimeout(r, o.slowWipeMs))
+        s.cookies.clear()
+        s.connections = 0
+        s.log.push(`wipe:${o.cookie}`)
+      },
+      async guard() { s.log.push(`guard:${o.cookie}`) },
+      async copyCookies() { s.cookies.add(o.cookie); s.log.push(`copy:${o.cookie}`) },
+      async send(request, signal) {
+        s.connections++
+        if (o.slowSendMs) await new Promise((resolve, reject) => {
+          const t = setTimeout(resolve, o.slowSendMs)
+          signal?.addEventListener('abort', () => { clearTimeout(t); reject(new Error('aborted')) }, { once: true })
+        })
+        s.log.push(`send:${o.cookie}:${[...s.cookies].join(',')}`)
+        return { status: 200, body: `${request.url} with ${[...s.cookies].join(',')}` }
+      },
+    }
+  }
+  return { open, of }
+}
+
+const allow = () => true
+const URL_A = 'https://shop.example.net/a'
+
+test('a read given up half-way still ends with its clean-up before the next read starts: the old clean-up never clears the new read\'s login', async () => {
+  const lanes = createSessionLanes()
+  const sessions = fakeSessions()
+  const key = browserReadPartition('acb-browser-x')
+  const old = sessions.open(key, { cookie: 'old', slowSendMs: 200, slowWipeMs: 100 })
+  const stop = new AbortController()
+  const first = throughSession(lanes, key, old, { method: 'GET', url: URL_A }, allow, stop.signal)
+  await new Promise(r => setTimeout(r, 20))
+  stop.abort()
+  await assert.rejects(first, /aborted/)
+  // The window is closed and opened again on the same partition: a new session object, the same lane.
+  const fresh = sessions.open(key, { cookie: 'new' })
+  const answer = await throughSession(lanes, key, fresh, { method: 'GET', url: URL_A }, allow)
+  assert.equal(answer.body, `${URL_A} with new`, 'the new read had its own login, and only its own')
+  const log = sessions.of(key).log
+  assert.ok(log.lastIndexOf('wipe:old') < log.indexOf('wipe:new'), log.join(' '))
+  assert.deepEqual(log.slice(log.indexOf('wipe:new')), ['wipe:new', 'guard:new', 'copy:new', 'send:new:new', 'wipe:new'])
+  // Afterwards the session holds nothing.
+  assert.equal(sessions.of(key).cookies.size, 0)
+  await new Promise(r => setImmediate(r))
+  assert.deepEqual(lanes.busy(), [], 'a finished lane is let go')
+})
+
+test('reads of one session run one at a time; another session\'s lane is its own', async () => {
+  const lanes = createSessionLanes()
+  const sessions = fakeSessions()
+  const read = browserReadPartition('acb-browser-y')
+  const write = browserWritePartition('acb-browser-y')
+  const a = throughSession(lanes, read, sessions.open(read, { cookie: 'a', slowSendMs: 50 }), { method: 'GET', url: URL_A }, allow)
+  const b = throughSession(lanes, read, sessions.open(read, { cookie: 'b' }), { method: 'GET', url: URL_A }, allow)
+  const w = throughSession(lanes, write, sessions.open(write, { cookie: 'w' }), { method: 'POST', url: URL_A, body: 'x=1' }, allow)
+  assert.deepEqual((await Promise.all([a, b, w])).map(r => r.body), [`${URL_A} with a`, `${URL_A} with b`, `${URL_A} with w`])
+  const log = sessions.of(read).log
+  assert.ok(log.indexOf('send:a:a') < log.indexOf('wipe:b'), log.join(' '))
+})
+
+test('a request that fails still cleans its session up, and the lane goes on', async () => {
+  const lanes = createSessionLanes()
+  const sessions = fakeSessions()
+  const key = browserReadPartition('acb-browser-z')
+  const broken: PagelessSession = { ...sessions.open(key, { cookie: 'x' }), send: async () => { throw new Error('no answer') } }
+  await assert.rejects(throughSession(lanes, key, broken, { method: 'GET', url: URL_A }, allow), /no answer/)
+  assert.equal(sessions.of(key).log.at(-1), 'wipe:x')
+  assert.equal((await throughSession(lanes, key, sessions.open(key, { cookie: 'y' }), { method: 'GET', url: URL_A }, allow)).status, 200)
+})
+
+test('a preview read lets through exactly its own address: GET, no query, no body', () => {
+  const rule = exactRead(URL_A)
+  assert.equal(rule({ method: 'GET', url: URL_A }), true)
+  assert.equal(rule({ method: 'HEAD', url: URL_A }), false)
+  assert.equal(rule({ method: 'POST', url: URL_A, body: 'a=1' }), false)
+  assert.equal(rule({ method: 'GET', url: `${URL_A}/b` }), false)
+  assert.equal(rule({ method: 'GET', url: 'https://shop.example.net/elsewhere' }), false, 'a redirect\'s target or a page\'s part')
+  assert.equal(exactRead(`${URL_A}?x=1`)({ method: 'GET', url: `${URL_A}?x=1` }), false)
+})

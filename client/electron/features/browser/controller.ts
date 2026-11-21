@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
 import type { AgentPolicy } from '../../../../shared/types/agent-sandbox'
 import { BROWSER_WORDS, type BrowserActionResult, type BrowserSitesResult } from '../../../shared/browser-operation'
-import type { BrowserRunSurface } from '../../../shared/browser-runner'
+import type { BrowserPreviewSurface, BrowserRunSurface } from '../../../shared/browser-runner'
 
 export interface BrowserWindowSpec {
   partition: string
@@ -29,6 +29,8 @@ export interface BrowserWindowHandle {
   updateSite(site: BrowserSiteSetting): void
   /** What an operation run uses (agent-browser.md "The runner"); the shell's window always has it. */
   run?: BrowserRunSurface
+  /** What the preview reads through (agent-browser.md "The operator and the preview"); the shell's window always has it. */
+  preview?: BrowserPreviewSurface
 }
 
 /** What the shell provides (electron/browser-window.ts). */
@@ -173,6 +175,14 @@ export function createBrowserController(deps: BrowserControllerDeps) {
       if (!user || !sitesOf(companyId)?.some(s => s.host === host)) return null
       const win = [...windows.values()].find(w => w.userId === user && w.companyId === companyId && w.host === host)
       return win?.handle.run ?? null
+    },
+
+    /** The signed-in member's open window of a site their current policy lists, as the preview reads through it, or null. */
+    previewWindow(companyId: string, host: string): BrowserPreviewSurface | null {
+      const user = deps.userId()
+      if (!user || !sitesOf(companyId)?.some(s => s.host === host)) return null
+      const win = [...windows.values()].find(w => w.userId === user && w.companyId === companyId && w.host === host)
+      return win?.handle.preview ?? null
     },
 
     /** Sign-out: every window closes and every login is cleared. */
