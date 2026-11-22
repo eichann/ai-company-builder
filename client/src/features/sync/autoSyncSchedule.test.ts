@@ -124,7 +124,7 @@ test('a successful sync ends the wait for an open file (the tooltip no longer sa
 test('the member cancelling a manual sync means "not now": automatic sync resumes at its next run (owner, 2026-10-30)', () => {
   const open = at(30, 9)
   const s = settings()
-  for (const error of ['同期がキャンセルされました', '同期を中止しました（「tool」は外部Gitリポジトリです）', '同期を中止しました。\n\n管理者だけが変更できます']) {
+  for (const error of ['同期がキャンセルされました', '同期を中止しました（「tool」は、このアプリとは別に管理されているフォルダです。共有せずにこのPCだけに置くこともできます。「サーバーと同期」を押すと選べます）', '同期を中止しました。\n\n管理者だけが変更できます']) {
     for (const errorType of [undefined, 'protected_config', 'write_denied']) {
       const cancelled = { success: false, error, errorType }
       let st = afterSync(state(), cancelled, { manual: true }).state

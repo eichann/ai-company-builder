@@ -52,7 +52,7 @@ export function createMessageBoxSyncDialog(host: MessageBoxHost): SyncDialog {
         defaultId: 0,
         cancelId: 1,
         title: '別の場所から取り込んだフォルダがあります',
-        message: `「${repo}」は、GitHub など別の場所から取り込んだフォルダのようです。`,
+        message: `「${repo}」は、GitHub など、このアプリとは別の場所で管理されているフォルダのようです。このPCだけに置くこともできます。`,
         detail: `このようなフォルダには、会社で共有してはいけない情報（パスワードなど）が入っていることがあるため、共有しません。\n\n・「共有せず、このPCだけに置く」: フォルダはこのPCにそのまま残り、ほかのメンバーには共有されません。ほかのメンバーの画面には何も起きません\n・「キャンセル」: 何も変更せずに同期を中止します\n\n会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらってください。`,
       })
       return response === 1 ? 'cancel' : 'exclude'

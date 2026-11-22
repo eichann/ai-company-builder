@@ -1,51 +1,159 @@
 import fs from 'fs'
 import path from 'path'
 import type { SimpleGit } from 'simple-git'
+import { diskKey } from '../../../shared/core/paths'
 import { readExcludeBlock, writeExcludeBlock, type ExcludeBlock } from './local-excludes'
+
+/** Paths per `git check-ignore` call (the argument list stays far below any OS limit). */
+const CHECK_IGNORE_BATCH = 200
+
+/**
+ * Which of `dirs` (folders on disk, repository-relative) a **shared** ignore
+ * rule ignores, as `diskKey`s (git prints NFC; a Mac's readdir may give NFD).
+ * git decides (`check-ignore -v`: every `.gitignore`, `.git/info/exclude`,
+ * global excludes, negations honoured), and only a folder whose deciding line
+ * is in a `.gitignore` the repository tracks counts: teammates have that rule
+ * too, so none of their apps shares files there. A folder ignored only on this
+ * computer (an `info/exclude` line, a global exclude, a `.gitignore` not
+ * shared yet) is still searched and asked about as before — a teammate may
+ * share files at that path, and the pull would overwrite this computer's
+ * ignored copies without the nested-repository backup.
+ *
+ * A folder that holds a tracked file is never ignored for check-ignore
+ * (without `--no-index`): a stray `.git` in a shared folder is still found. A
+ * name git would quote (`"`, `\`, control characters) is not asked and counts
+ * as not ignored. A batch git cannot answer counts as not ignored too (exit 1
+ * also means "none ignored"): walking and asking is the safe side.
+ */
+async function sharedIgnoredAmong(git: SimpleGit, dirs: readonly string[]): Promise<Set<string>> {
+  // eslint-disable-next-line no-control-regex
+  const askable = dirs.filter(d => !/["\\\u0000-\u001f\u007f]/.test(d))
+  const decided: Array<{ source: string; dir: string }> = []
+  for (let i = 0; i < askable.length; i += CHECK_IGNORE_BATCH) {
+    const batch = askable.slice(i, i + CHECK_IGNORE_BATCH)
+    let listed = ''
+    try {
+      listed = await git.raw(['-c', 'core.quotePath=false', 'check-ignore', '-v', '--', ...batch])
+    } catch {
+      continue
+    }
+    // `<source>:<line>:<pattern>\t<path>`; with -v a path whose deciding
+    // line is a negation (`!…`) is listed too, and it is not ignored.
+    for (const line of listed.split('\n')) {
+      const tab = line.lastIndexOf('\t')
+      const m = tab === -1 ? null : /^(.*?):\d+:(.*)$/.exec(line.slice(0, tab))
+      if (!m || m[2].startsWith('!')) continue
+      const source = m[1]
+      if (path.posix.basename(source) !== '.gitignore' || source.startsWith('/') || source.startsWith('"')) continue
+      decided.push({ source, dir: line.slice(tab + 1) })
+    }
+  }
+  if (decided.length === 0) return new Set()
+  const sources = [...new Set(decided.map(d => d.source))]
+  let tracked: Set<string>
+  try {
+    const listed = await git.raw(['ls-files', '-z', '--', ...sources.map(s => `:(literal)${s}`)])
+    tracked = new Set(listed.split('\0').filter(Boolean).map(diskKey))
+  } catch {
+    return new Set()
+  }
+  return new Set(decided.filter(d => tracked.has(diskKey(d.source))).map(d => diskKey(d.dir)))
+}
+
+async function hasDotGit(dir: string): Promise<boolean> {
+  try {
+    // Either a .git directory (real repo) or a .git file (worktree/submodule pointer).
+    await fs.promises.access(path.join(dir, '.git'))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Every segment of `rel` under `root` is a real directory (no symlink on the way). */
+function realDirectoryPath(root: string, rel: string): boolean {
+  let dir = root
+  for (const segment of rel.split('/')) {
+    if (!segment || segment === '.' || segment === '..' || segment === '.git') return false
+    dir = path.join(dir, segment)
+    try {
+      if (!fs.lstatSync(dir).isDirectory()) return false
+    } catch {
+      return false
+    }
+  }
+  return true
+}
 
 /**
  * Walk the repo tree and return relative paths of any nested Git repositories
  * (i.e. directories that contain their own .git/ — either a directory or a "gitdir" file for worktrees).
  * Excludes the root repo itself, common heavy/irrelevant dirs, and stops descending into a nested repo
  * once found (so deeply-nested external repos are reported only at their topmost level).
+ * Symlinked folders are not followed. Walked level by level, so git is asked once per level.
+ *
+ * With `git`, folders a shared (tracked) `.gitignore` ignores are neither
+ * reported nor walked (2026-11-22: a clone inside `.personal/`, which is never
+ * shared, stopped sync with a question, and every sync walked the whole
+ * ignored tree): no member's `git add` records anything there, so there is
+ * nothing to ask and nothing a teammate can put over it. Folders ignored only
+ * on this computer are searched as before (sharedIgnoredAmong). A folder that
+ * holds a tracked file still counts as shared (git says so), so a stray `.git`
+ * there is still found and asked about. Folders in `known` (the member's own
+ * exclusions, legacy shared lines included; later steps still need them) are
+ * reported whenever they still have their `.git`. `onIgnored` hears each
+ * skipped folder (topmost only): a shared rule this computer has may not be on
+ * the server yet, so sync still backs up what the pull would overwrite there.
  */
-export async function findNestedGitRepos(rootPath: string): Promise<string[]> {
+export async function findNestedGitRepos(rootPath: string, options: { git?: SimpleGit; known?: readonly string[]; onIgnored?: (folder: string) => void } = {}): Promise<string[]> {
   const SKIP_DIRS = new Set(['node_modules', '.backups', '.next', '.nuxt', 'dist', '__pycache__', '.venv', 'venv', '.workspace'])
+  const { git } = options
   const results: string[] = []
+  const known = new Set((options.known ?? []).map(diskKey))
 
-  async function walk(dir: string, relativePath: string): Promise<void> {
-    if (relativePath !== '') {
-      const dotGitPath = path.join(dir, '.git')
+  let level: string[] = ['']
+  while (level.length > 0) {
+    // The sub-folders of this level, in readdir order.
+    const children: string[] = []
+    for (const rel of level) {
+      let entries: fs.Dirent[]
       try {
-        await fs.promises.access(dotGitPath)
-        // Either a .git directory (real repo) or a .git file (worktree/submodule pointer).
-        results.push(relativePath)
-        return
+        entries = await fs.promises.readdir(path.join(rootPath, rel), { withFileTypes: true })
       } catch {
-        // not a nested repo, continue walking
+        continue
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+        if (SKIP_DIRS.has(entry.name)) continue
+        // Skip the root repo's own .git
+        if (rel === '' && entry.name === '.git') continue
+        children.push(rel ? `${rel}/${entry.name}` : entry.name)
       }
     }
-
-    let entries: fs.Dirent[]
-    try {
-      entries = await fs.promises.readdir(dir, { withFileTypes: true })
-    } catch {
-      return
+    const ignored = git && children.length > 0 ? await sharedIgnoredAmong(git, children) : new Set<string>()
+    const next: string[] = []
+    for (const rel of children) {
+      const key = diskKey(rel)
+      if (ignored.has(key) && !known.has(key)) {
+        options.onIgnored?.(rel)
+        continue
+      }
+      if (await hasDotGit(path.join(rootPath, rel))) results.push(rel)
+      else next.push(rel)
     }
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      if (SKIP_DIRS.has(entry.name)) continue
-      // Skip the root repo's own .git
-      if (relativePath === '' && entry.name === '.git') continue
-
-      const childDir = path.join(dir, entry.name)
-      const childRel = relativePath ? `${relativePath}/${entry.name}` : entry.name
-      await walk(childDir, childRel)
-    }
+    level = next
   }
 
-  await walk(rootPath, '')
+  // A known exclusion inside an ignored folder is not reached by the walk.
+  const found = results.map(diskKey)
+  for (const repo of options.known ?? []) {
+    const key = diskKey(repo)
+    if (found.some(r => key === r || key.startsWith(`${r}/`))) continue
+    if (realDirectoryPath(rootPath, repo) && await hasDotGit(path.join(rootPath, repo))) {
+      results.push(repo)
+      found.push(key)
+    }
+  }
   return results
 }
 
@@ -102,6 +210,21 @@ export async function gitlinksUnder(git: SimpleGit, repo: string): Promise<strin
     if (entry.slice(0, tab).split(' ')[0] === '160000') out.push(entry.slice(tab + 1))
   }
   return out
+}
+
+// The sync result when the member (or 自動で送る) did not answer the question
+// about a nested repository. Plain words, no Git terms; it names the folder
+// and the way out. Must start with 「同期を中止しました」 (isCancelled, the
+// renderer's autoSyncSchedule: a stop the member chose).
+
+/** A new folder managed apart from the app (not shared yet). */
+export function externalNestedRepoStopMessage(repo: string): string {
+  return `同期を中止しました（「${repo}」は、このアプリとは別に管理されているフォルダです。共有せずにこのPCだけに置くこともできます。「サーバーと同期」を押すと選べます）`
+}
+
+/** A shared folder that picked up a stray `.git`. */
+export function sharedNestedRepoStopMessage(repo: string): string {
+  return `同期を中止しました（共有中のフォルダ「${repo}」に、このアプリとは別に管理するための情報が入っています。このPCで増えたファイルだけ共有しないこともできます。「サーバーと同期」を押すと選べます）`
 }
 
 export const NESTED_REPO_OVERWRITE_REASON = 'nested_repo_overwrite'

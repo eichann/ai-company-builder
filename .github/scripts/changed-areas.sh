@@ -73,7 +73,7 @@ CLIENT=(
 CLIENT_MAC=(
   client/electron/ client/shared/ client/connectors/ client/native/ ':(glob)client/tests/*.swift'
   client/tests/agent-env.test.ts client/tests/commit-message.test.ts client/tests/disk-key.test.ts
-  client/tests/company-watcher.test.ts client/tests/ipc-fs.test.ts
+  client/tests/company-watcher.test.ts client/tests/ipc-fs.test.ts client/tests/nested-repos.test.ts
   client/tests/permission-mode.test.ts client/tests/sandbox-claude.test.ts
   client/tests/voice-helper.test.ts client/tests/voice-polisher.test.ts client/tests/voice-probe.test.ts
   client/tests/browser-window-electron.test.ts client/tests/browser-window-harness/ client/tests/browser-operator.test.ts
