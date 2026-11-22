@@ -64,6 +64,9 @@ export const BROWSER_DECLARATION_LIMITS = {
   exploreQuery: 5,
   /** A paginated read: at most this many pages (design memo §38: 10 pages of 50 = 500 items). */
   explorePages: 10,
+  /** Hosts a human login needs (`login_helpers`, e.g. a CAPTCHA): few, each narrowed to a path. */
+  loginHelpers: 5,
+  loginHelperPath: 100,
 } as const
 
 /** Operation, target and change names. */
@@ -201,11 +204,32 @@ export interface BrowserExplorePages {
 /** One parameter of a declared read's query: a fixed literal, or one `{name}` filled with a plain id. */
 export type BrowserExploreQueryParam = { name: string; value: string } | { name: string; field: string }
 
+/**
+ * A host the site's login page needs while a person logs in (a CAPTCHA's frame and its parts): only
+ * under `pathPrefix`, only in the window's `human` mode, never while the AI operates (the window's
+ * rule: `decideWindowRequest`, client/shared/browser-operation.ts; agent-browser.md "Login helpers").
+ */
+export interface BrowserLoginHelper {
+  /** Exact host (`normalizeBrowserHost`, its very spelling); https on the default port only. */
+  host: string
+  /** A fixed path prefix of whole segments, starting and ending with `/` (never `/` alone). */
+  pathPrefix: string
+  /** May the site's page frame it (a subframe under the prefix)? */
+  frame: boolean
+  /** May it be sent POSTs (fetch / XHR under the prefix, as a CAPTCHA's check does)? */
+  post: boolean
+}
+
+/** A login helper's path prefix: `/seg/…/` of plain segments (no `.` / `..`, `//`, `%`, `?`, `#`). */
+export const BROWSER_LOGIN_HELPER_PATH_RE = /^(?:\/[A-Za-z0-9_~-][A-Za-z0-9_.~-]*)+\/$/
+
 export interface PluginBrowser {
   /** The operated host (exact, `normalizeBrowserHost`). */
   host: string
   /** Hosts its pages load parts from (exact; never the operated host). */
   assetHosts: string[]
+  /** Hosts a person's login needs, narrowed to a path (`login_helpers`; none when not declared). */
+  loginHelpers: BrowserLoginHelper[]
   /** Which outside account a plan is bound to; required once a type writes. */
   account: { label: string } | null
   operations: Record<string, BrowserOperation>
@@ -586,10 +610,42 @@ function parseExplore(raw: YamlValue | undefined, err: (m: string) => void): Rec
   return out
 }
 
+/**
+ * `login_helpers`: `[{ host, path_prefix, frame?, post? }]` — an exact host that is neither the operated
+ * host nor an asset host, once each; a narrow path prefix; `frame` / `post` booleans (absent = false).
+ */
+function parseLoginHelpers(raw: YamlValue | undefined, host: string | undefined, assetHosts: readonly string[], err: (m: string) => void): BrowserLoginHelper[] {
+  const out: BrowserLoginHelper[] = []
+  if (raw === undefined) return out
+  const max = BROWSER_DECLARATION_LIMITS.loginHelpers
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > max) { err(`browser の login_helpers は { host, path_prefix } の並びです（1〜${max} 個）`); return out }
+  for (const entry of raw) {
+    if (!isYamlMap(entry)) { err('browser の login_helpers は { host, path_prefix, frame, post } の形で書いてください'); continue }
+    const where = `browser の login_helpers「${String(entry.host)}」`
+    let ok = true
+    const e = (m: string) => { ok = false; err(m) }
+    unknownKeys(`${where}: `, entry, ['host', 'path_prefix', 'frame', 'post'], e)
+    const helper = normalizeBrowserHost(entry.host)
+    if (!helper || helper !== entry.host) e(`${where}の host はホスト名です（英小文字。*. は使えません）`)
+    else if (helper === host) e(`${where}: 操作するサイトのホストは書けません`)
+    else if (assetHosts.includes(helper)) e(`${where}: asset_hosts のホストは書けません（1つのホストに決まりは1つ）`)
+    else if (out.some(h => h.host === helper)) e(`${where}が2回あります`)
+    const prefix = entry.path_prefix
+    if (typeof prefix !== 'string' || prefix.length > BROWSER_DECLARATION_LIMITS.loginHelperPath || !BROWSER_LOGIN_HELPER_PATH_RE.test(prefix)) {
+      e(`${where}の path_prefix は / で始まり / で終わる決まった道です（/ だけ、. .. // % ? # は使えません）`)
+    }
+    for (const flag of ['frame', 'post'] as const) {
+      if (entry[flag] !== undefined && typeof entry[flag] !== 'boolean') e(`${where}の ${flag} は true か false です`)
+    }
+    if (ok) out.push({ host: helper as string, pathPrefix: prefix as string, frame: entry.frame === true, post: entry.post === true })
+  }
+  return out
+}
+
 /** The `browser` map: the site and its operation types. */
 export function parseBrowserPart(raw: YamlValue | undefined, err: (m: string) => void): PluginBrowser | null {
   if (!isYamlMap(raw)) { err('browser は { host, operations, … } の形で書いてください'); return null }
-  unknownKeys('browser: ', raw, ['host', 'asset_hosts', 'account', 'operations', 'explore'], err)
+  unknownKeys('browser: ', raw, ['host', 'asset_hosts', 'login_helpers', 'account', 'operations', 'explore'], err)
   const host = normalizeBrowserHost(raw.host)
   // Exact spelling only: what the admin approves is what the declaration says, no case or dot folding.
   if (!host || host !== raw.host) err('browser の host は操作するサイトのホスト名です（英小文字。*. は使えません）')
@@ -629,13 +685,14 @@ export function parseBrowserPart(raw: YamlValue | undefined, err: (m: string) =>
     // A plan that changes something is bound to one outside account.
     if (raw.account === undefined && Object.values(rawOps).some(op => isYamlMap(op) && op.effect !== 'read')) err('書き込む操作があるときは browser の account（どのアカウントの操作か）を書いてください')
   }
+  const loginHelpers = parseLoginHelpers(raw.login_helpers, host, assetHosts, err)
   const explore = parseExplore(raw.explore, err)
-  return host ? { host, assetHosts, account, operations, explore } : null
+  return host ? { host, assetHosts, loginHelpers, account, operations, explore } : null
 }
 
 /** A browser connector: the common part and `browser`; nothing of an API connector. */
 export function parseBrowserConnector(raw: { [k: string]: YamlValue }, err: (m: string) => void, common: CommonPart): PluginManifest {
-  const browser = parseBrowserPart(raw.browser, err) ?? { host: '', assetHosts: [], account: null, operations: {}, explore: {} }
+  const browser = parseBrowserPart(raw.browser, err) ?? { host: '', assetHosts: [], loginHelpers: [], account: null, operations: {}, explore: {} }
   return {
     ...common, role: 'connector', service: '', baseUrl: { host: '', basePath: '' }, scopes: [], operationScopes: {},
     types: [], objects: {}, operations: {}, fieldPolicyDefaults: {}, uses: null, accountInfo: null, ...noFlow(), browser,

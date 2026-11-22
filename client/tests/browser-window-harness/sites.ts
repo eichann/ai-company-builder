@@ -88,6 +88,30 @@ window.__attack = async () => {
 </script>`
 }
 
+/**
+ * A login page with a CAPTCHA-like helper (agent-browser.md "Login helpers"), as Lステップ's shows
+ * Google's reCAPTCHA: the API script from the framed helper, its frame (which loads a part from the
+ * parts helper and checks by XHR POST), and what the declaration does not allow — the helper outside
+ * its prefix, a frame of the parts helper, a beacon to the helper.
+ */
+const LOGIN_CAPTCHA = `<!doctype html><meta charset="utf-8"><title>login</title>
+<script src="https://helper.test/recaptcha/api.js"></script>
+<iframe id="captcha" src="https://helper.test/recaptcha/anchor?k=1"></iframe>
+<iframe src="https://helper-parts.test/recaptcha/framed"></iframe>
+<script>
+  addEventListener('message', e => { if (e.origin === 'https://helper.test') window.__captchaDone = e.data })
+  fetch('https://helper.test/other?outside=1').catch(() => {})
+  navigator.sendBeacon('https://helper.test/recaptcha/beacon', 'b')
+</script>`
+const CAPTCHA_ANCHOR = `<!doctype html><meta charset="utf-8"><title>anchor</title>
+<script src="https://helper-parts.test/recaptcha/frame.js"></script>
+<script>
+  const x = new XMLHttpRequest(); x.open('POST', '/recaptcha/reload?k=1')
+  x.onload = () => parent.postMessage(window.helperPart === true ? 'checked:' + x.status : 'no part', '*')
+  x.onerror = () => parent.postMessage('refused', '*')
+  x.send('token')
+</script>`
+
 const WORKER = `fetch('/ai-worker', { method: 'POST', body: 'w' }).then(r => postMessage(r.status), () => postMessage('refused'))`
 
 export interface Sites {
@@ -160,6 +184,14 @@ export async function startSites(certDir: string, ports: { site: number; evil: n
         res.end('ok')
         return
       }
+      if (host === 'op.test' && (url === '/login-captcha' || url === '/after-login')) {
+        res.setHeader('content-type', 'text/html; charset=utf-8')
+        res.end(url === '/login-captcha' ? LOGIN_CAPTCHA : '<!doctype html><meta charset="utf-8"><title>home</title><p>logged in</p>')
+        return
+      }
+      if (host === 'helper.test' && url.startsWith('/recaptcha/anchor')) { res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(CAPTCHA_ANCHOR); return }
+      if (host === 'helper.test' && url.startsWith('/recaptcha/api.js')) { res.setHeader('content-type', 'text/javascript'); res.end('window.helperApi = true'); return }
+      if (host === 'helper-parts.test' && url.startsWith('/recaptcha/frame.js')) { res.setHeader('content-type', 'text/javascript'); res.setHeader('access-control-allow-origin', '*'); res.end('window.helperPart = true'); return }
       if (url === '/worker.js') { res.setHeader('content-type', 'text/javascript'); res.end(WORKER); return }
       if (url.startsWith('/redirect-evil')) { res.writeHead(302, { location: 'https://evil.test/redirected' }); res.end(); return }
       if (url === '/file.csv') { res.setHeader('content-type', 'text/csv'); res.setHeader('content-disposition', 'attachment; filename="file.csv"'); res.end('a,b'); return }

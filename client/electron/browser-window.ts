@@ -16,14 +16,16 @@
 // session: page-less sessions of their own, the read session and the write session, one request at
 // a time each with the window's login (features/browser/read-session.ts; agent-browser.md "The
 // operator and the preview"); in `ai` mode the window's session refuses every request from outside
-// its page.
+// its page. A site's declared login helpers (a CAPTCHA) work only in `human` mode: entering `ai` mode
+// shuts them (the request rule, the frames' navigation and the proxy) and refuses to start while a
+// frame of another origin is still in the page (agent-browser.md "Login helpers").
 import net from 'node:net'
-import { BrowserWindow, net as electronNet, session, type Session, type WebContents } from 'electron'
+import { BrowserWindow, net as electronNet, session, type Session, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
-import { exploreAddressProblem } from '../../shared/core/plugin-browser-declaration'
+import { exploreAddressProblem, type BrowserLoginHelper } from '../../shared/core/plugin-browser-declaration'
 import {
   BROWSER_WORDS, browserProxyScript, browserReadPartition, browserWritePartition, browserResponseHeaders, createRefusalTally, decideAiRead, decideAiWrite, decideWindowRequest,
-  hostForLog, isReadMethod, navigationAllowed,
+  foreignFrameCount, frameSeenByPageGate, hostForLog, isReadMethod, proxyHelperHosts, windowNavigationAllowed,
   type BrowserReadDecider, type BrowserWindowMode, type BrowserWindowState, type BrowserWriteAttempt, type BrowserWriteDecider,
 } from '../shared/browser-operation'
 import type { BrowserGateDecision, BrowserPreviewSurface, BrowserRunSurface, BrowserSessionRequest } from '../shared/browser-runner'
@@ -118,6 +120,19 @@ interface SessionState extends BrowserWindowState {
 const REFUSAL_LOG_MS = 10_000
 
 /**
+ * Did this request come from a frame of the window's page that the page's write gate sees (the operated
+ * origin, the main frame's process)? A frame that is gone, another window's or not known: no.
+ */
+function fromPageFrame(state: SessionState, contents: WebContents | undefined, frame: WebFrameMain | null | undefined): boolean {
+  try {
+    if (!state.site || !contents || contents.isDestroyed() || contents.id !== state.contentsId || !frame) return false
+    return frameSeenByPageGate(state.site, contents.mainFrame.processId, { origin: frame.origin, processId: frame.processId })
+  } catch {
+    return false
+  }
+}
+
+/**
  * The proxy every connection to a host the site does not list is sent to: on 127.0.0.1, it answers
  * 403 to whatever it is asked and closes, so nothing goes further (a closed port could let a client
  * try another way). The HTML viewer's document session sends every connection there too (doc-view.ts).
@@ -137,8 +152,14 @@ export function startRefusingProxy(): Promise<number> {
   })
 }
 
-export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>; show?: boolean } = {}): BrowserShell & { open(spec: BrowserWindowSpec): BrowserShellWindow } {
+export function createBrowserWindowShell(options: {
+  log?: Pick<Console, 'warn'>
+  show?: boolean
+  /** The login helpers the bundled declaration of a site's host lists (main composes it; none = none). */
+  loginHelpers?: (host: string) => readonly BrowserLoginHelper[]
+} = {}): BrowserShell & { open(spec: BrowserWindowSpec): BrowserShellWindow } {
   const log = options.log ?? console
+  const helpersOf = (site: BrowserSiteSetting) => options.loginHelpers?.(site.host) ?? []
   const states = new Map<string, SessionState>()
   let refusingProxy: Promise<number> | null = null
   /** One lane per page-less session name, for the whole app run (a reopened window's too). */
@@ -153,11 +174,15 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
     state.flushTimer ??= setTimeout(() => flush(state), REFUSAL_LOG_MS)
   }
 
-  /** Points the session's proxy at the site's hosts (DIRECT) and the refusing proxy (the rest). */
-  async function routeOnly(ses: Session, site: BrowserSiteSetting) {
+  /**
+   * Points the session's proxy at the site's hosts (DIRECT) and the refusing proxy (the rest). The
+   * window's own session (`state` given) also sends its login helpers DIRECT, in `human` mode only, as
+   * the mode is when the script is made (after the wait for the port); a page-less session never.
+   */
+  async function routeOnly(ses: Session, site: BrowserSiteSetting, state?: SessionState) {
     refusingProxy ??= startRefusingProxy()
     const port = await refusingProxy
-    const script = browserProxyScript(site, port)
+    const script = browserProxyScript(site, port, state ? proxyHelperHosts(state) : [])
     await ses.setProxy({ mode: 'pac_script', pacScript: `data:application/x-ns-proxy-autoconfig;base64,${Buffer.from(script).toString('base64')}` })
   }
 
@@ -166,7 +191,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
     const ses = session.fromPartition(partition)
     let state = states.get(partition)
     if (state) return { ses, state }
-    const created: SessionState = { site: null, mode: 'human', aiGateReady: false, contentsId: null, tally: createRefusalTally(), flushTimer: null }
+    const created: SessionState = { site: null, mode: 'human', aiGateReady: false, helpers: [], contentsId: null, tally: createRefusalTally(), flushTimer: null }
     states.set(partition, created)
     state = created
     // The one request hook of this session. With no window (site null) it refuses everything:
@@ -175,6 +200,8 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       const decision = decideWindowRequest(created, {
         url: details.url, method: details.method, resourceType: details.resourceType,
         fromWindow: details.webContentsId !== undefined && details.webContentsId === created.contentsId,
+        // Only `ai` mode asks it (another frame's request is not the gate's to see then).
+        pageFrame: created.mode === 'ai' ? fromPageFrame(created, details.webContents, details.frame) : true,
         body: uploadBody(details.uploadData),
       })
       if (!decision.allow) refuse(created, hostForLog(details.url), decision.reason)
@@ -240,7 +267,8 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
   }
 
   function guardContents(contents: WebContents, state: SessionState) {
-    const allowed = (url: string, mainFrame: boolean) => !!state.site && navigationAllowed(state.site, url, mainFrame)
+    // The mode at the moment of the navigation: a login helper's frame only in `human` mode.
+    const allowed = (url: string, mainFrame: boolean) => windowNavigationAllowed(state, url, mainFrame)
     // WebRTC never sends UDP itself; its TCP goes through the session's proxy (refused off the site).
     contents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp')
     contents.setWindowOpenHandler(({ url }) => {
@@ -354,6 +382,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
     open(spec) {
       const { ses, state } = guarded(spec.partition)
       state.site = spec.site
+      state.helpers = helpersOf(spec.site)
       state.mode = 'human'
       state.aiGateReady = false
       const win = new BrowserWindow({
@@ -384,7 +413,19 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
       const contentsId = contents.id
       state.contentsId = contentsId
       guardContents(contents, state)
-      const setMode = createAiGate(contents, state)
+      const setGateMode = createAiGate(contents, state)
+      /**
+       * The mode, and the proxy to match: entering `ai` the request rule and the frames' navigation
+       * refuse the login helpers at once (`state.mode` is set before any await), then the proxy drops
+       * them and the session's open connections are closed (a pooled one would keep the old route).
+       * Back in `human` they work again.
+       */
+      const setMode = async (mode: BrowserWindowMode, gate?: BrowserAiGate) => {
+        await setGateMode(mode, gate)
+        if (state.contentsId !== contentsId || !state.site) return
+        await routeOnly(ses, state.site, state)
+        if (mode === 'ai') await ses.closeAllConnections()
+      }
       // The run's gate for its own requests (read and write sessions); none outside a run.
       let runGate: ((request: BrowserSessionRequest) => BrowserGateDecision) | null = null
       const readKey = browserReadPartition(spec.partition)
@@ -400,14 +441,27 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
         runGate = null
       }
       const closed = () => state.contentsId !== contentsId || win.isDestroyed() || !state.site
+      /** No frame but ones the page's write gate sees (`foreignFrameCount`); a closed window or a failed look: not clean. */
+      const pageClean = (): boolean => {
+        try {
+          if (closed() || contents.isDestroyed()) return false
+          const main = contents.mainFrame
+          const subframes = main.framesInSubtree.filter(f => f !== main).map(f => ({ origin: f.origin, processId: f.processId }))
+          return foreignFrameCount(state.site!, main.processId, subframes) === 0
+        } catch {
+          return false
+        }
+      }
       const run: BrowserRunSurface = {
         async enterAi(hooks) {
           if (closed()) return false
           // The run's gate on its own requests (through the read and write sessions), then the page's gate.
           runGate = hooks.sessionRequest
           await setMode('ai', { decide: () => false, decideRead: hooks.pageRead, stopped: hooks.stopped })
+          // Frames the gate does not see are the runner's to ask (`pageClean`, at every check up to the send).
           return !closed() && state.mode === 'ai' && state.aiGateReady
         },
+        pageClean,
         async leaveAi() {
           runGate = null
           if (state.contentsId === contentsId) await setMode('human')
@@ -467,7 +521,7 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
         spec.onClosed()
       })
       // Nothing loads before the session's connections are routed: the site's hosts or the refusing proxy.
-      void routeOnly(ses, spec.site).then(
+      void routeOnly(ses, spec.site, state).then(
         () => { if (!win.isDestroyed() && state.contentsId === contentsId) return win.loadURL(`https://${spec.site.host}/`) },
         error => {
           log.warn(`[browser] the window's connections could not be limited; not opened (${error instanceof Error ? error.message : 'unknown'})`)
@@ -492,7 +546,8 @@ export function createBrowserWindowShell(options: { log?: Pick<Console, 'warn'>;
         updateSite(site: BrowserSiteSetting) {
           if (state.contentsId !== contentsId) return
           state.site = site
-          void routeOnly(ses, site).catch(() => {
+          state.helpers = helpersOf(site)
+          void routeOnly(ses, site, state).catch(() => {
             log.warn('[browser] the window\'s connections could not be limited to the changed site; closed')
             revoke()
             if (!win.isDestroyed()) win.destroy()

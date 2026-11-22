@@ -53,6 +53,7 @@ interface Result {
   clicksNotRun: string[]
   urlDuringClicks: string
   runner: Record<string, unknown>
+  helpers: Record<string, unknown>
 }
 
 function freePort(): Promise<number> {
@@ -71,7 +72,7 @@ function makeCertificate(dir: string) {
   fs.writeFileSync(config, [
     '[req]', 'distinguished_name = dn', 'x509_extensions = ext', 'prompt = no',
     '[dn]', 'CN = op.test',
-    '[ext]', 'subjectAltName = DNS:op.test, DNS:assets.test, DNS:evil.test, DNS:untrusted.test',
+    '[ext]', 'subjectAltName = DNS:op.test, DNS:assets.test, DNS:evil.test, DNS:untrusted.test, DNS:helper.test, DNS:helper-parts.test',
   ].join('\n'))
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-keyout', path.join(dir, 'key.pem'), '-out', path.join(dir, 'cert.pem'), '-config', config], { stdio: 'ignore' })
 }
@@ -201,6 +202,48 @@ test('a certificate the system does not trust is refused, never bypassed', { ski
 })
 
 // ---------------------------------------------------------------------------
+// Login helpers (agent-browser.md "Login helpers")
+// ---------------------------------------------------------------------------
+
+const helperHits = () => [...hitsTo('helper.test'), ...hitsTo('helper-parts.test')].map(h => `${h.host} ${h.method} ${h.path}`)
+
+test('while the member logs in, the declared login helpers work: the frame, its part and its check by POST, only under their path', { skip }, () => {
+  const h = result.helpers
+  assert.equal(h.humanApiScript, true)
+  assert.equal(h.humanFrameDone, 'checked:200', 'the frame loaded its part and its POST was answered')
+  const hits = helperHits()
+  for (const want of ['helper.test GET /recaptcha/api.js', 'helper.test GET /recaptcha/anchor?k=1', 'helper-parts.test GET /recaptcha/frame.js', 'helper.test POST /recaptcha/reload?k=1']) {
+    assert.ok(hits.includes(want), `${want} in ${hits.join(', ')}`)
+  }
+  // Outside the prefix, a frame of the parts helper and a beacon reach nothing.
+  assert.equal(hits.some(x => x.includes('/other') || x.includes('/recaptcha/framed') || x.includes('/recaptcha/beacon')), false, hits.join(', '))
+  assert.match(result.refusalLog.join('\n'), /to helper\.test \(login-helper-path\)/)
+  assert.match(result.refusalLog.join('\n'), /to helper-parts\.test \(frame-navigation\)/)
+})
+
+test('a helper\'s frame left in the page makes it not clean for the AI, and while the AI operates no helper is reached by frame, script or fetch; back with the member they work again', { skip }, () => {
+  const h = result.helpers
+  assert.ok((h.humanFrames as string[]).some(u => u.startsWith('https://helper.test/recaptcha/anchor')), String(h.humanFrames))
+  assert.equal(h.cleanWithFrameInHuman, false)
+  assert.equal(h.enteredWithFrame, true)
+  assert.equal(h.cleanWithFrameInAi, false, 'a run stops at its next check')
+  assert.equal(h.enterClean, true)
+  assert.equal(h.cleanAfterLogin, true)
+  // Frames the window refused stay empty documents of the site: they do not keep the AI from operating.
+  assert.equal((h.refusedFrames as string[]).length, 2, String(h.refusedFrames))
+  assert.equal(h.enteredWithRefusedFrames, true)
+  assert.equal(h.cleanWithRefusedFrames, true, String(h.refusedFrames))
+  assert.equal(h.aiScript, 'refused')
+  assert.equal(h.aiFetch, 'refused')
+  assert.equal(h.helperFetchInAiWithFrame, 'refused', 'in ai mode the helpers stay shut, the frame still there or not')
+  assert.equal((h.aiFrames as string[]).some(u => u.includes('helper.test')), false, String(h.aiFrames))
+  const hits = helperHits()
+  assert.equal(hits.some(x => /[?&](ai|during)=1/.test(x)), false, hits.join(', '))
+  assert.ok(hits.includes('helper.test GET /recaptcha/anchor?again=1'), 'in human mode again the frame loads')
+  assert.ok((h.againFrames as string[]).some(u => u.startsWith('https://helper.test/recaptcha/anchor?again=1')), String(h.againFrames))
+})
+
+// ---------------------------------------------------------------------------
 // The operation runner on a Lステップ-like site (agent-browser.md "The runner")
 // ---------------------------------------------------------------------------
 
@@ -245,6 +288,7 @@ test('a write whose answer is lost is unknown and never sent again', { skip }, (
   assert.deepEqual(r.records, [
     'a:claimed', 'a:permit-asked', 'a:succeeded', 'b:claimed', 'b:failed', 'c:claimed', 'c:failed',
     'd:claimed', 'd:permit-asked', 'd:unknown', 'e:claimed', 'e:failed', 'f:claimed', 'f:permit-asked', 'f:failed',
+    '1:claimed', '1:failed', '2:claimed', '2:permit-asked', '2:failed',
   ])
 })
 
@@ -253,6 +297,19 @@ test('a permit that is 5 s old by the last check right before sending: the windo
   assert.deepEqual(r.late, { outcome: 'failed', reason: 'permit-late' })
   assert.deepEqual(r.lateReports, [{ result: 'failed', reason: 'permit-late' }])
   assert.equal(writesOfRuns().some(h => idsOf(h.body) === '201/306'), false)
+})
+
+test('a sandboxed frame the page makes while the AI operates stops the run — before the permit, or at the last check right before sending — and its own requests to the site reach nothing', { skip }, () => {
+  const r = result.runner
+  assert.deepEqual(r.frameBeforeRead, { outcome: 'stopped', reason: 'foreign-frames' })
+  assert.deepEqual(r.frameAtPermit, { outcome: 'failed', reason: 'foreign-frames' })
+  assert.deepEqual(r.frameAtPermitReports, [{ result: 'failed', reason: 'context-changed' }])
+  assert.equal(writesOfRuns().some(h => ['201/307', '201/308'].includes(idsOf(h.body))), false)
+  // The frame's own write and read, sent the moment it loaded (also while it was still loading at a check).
+  assert.equal(hitsTo('op.test').some(h => h.path === '/line/frame-write' || h.path === '/line/frame-read'), false)
+  assert.match(result.refusalLog.join('\n'), /to op\.test \(ai-other-frame\)/)
+  const facts = r.sandboxedFrame as { main: number; frames: Array<{ origin: string; processId: number }> }
+  assert.ok(facts.frames.some(f => f.origin === 'null'), JSON.stringify(facts))
 })
 
 test('an answer over the size the runner reads is refused whole, never read cut short', { skip }, () => {

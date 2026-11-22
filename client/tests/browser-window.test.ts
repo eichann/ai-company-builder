@@ -25,8 +25,8 @@ import { createAgentPolicyStore } from '../electron/services/agent-policy-store'
 import type { IpcInvokeEvent, IpcRegistrar } from '../electron/ipc/registrar'
 
 const site: BrowserSiteSetting = { host: 'manager.example.net', level: 'write', assetHosts: ['cdn.example.net'] }
-const state = (over: Partial<BrowserWindowState> = {}): BrowserWindowState => ({ site, mode: 'human', aiGateReady: false, ...over })
-const req = (url: string, method = 'GET', resourceType = 'xhr', fromWindow = true) => ({ url, method, resourceType, fromWindow })
+const state = (over: Partial<BrowserWindowState> = {}): BrowserWindowState => ({ site, mode: 'human', aiGateReady: false, helpers: [], ...over })
+const req = (url: string, method = 'GET', resourceType = 'xhr', fromWindow = true) => ({ url, method, resourceType, fromWindow, pageFrame: true })
 
 // ---------------------------------------------------------------------------
 // The request rule, navigations, the write gate
@@ -160,7 +160,7 @@ function world(options: { clearFails?: boolean; slow?: boolean } = {}) {
         focus() {},
         close() { entry.closed = true; spec.onClosed() },
         updateSite(next) { entry.site = next },
-        run: { enterAi: async () => true, leaveAi: async () => {}, request: async () => ({ status: 200, body: '' }), closed: () => entry.closed },
+        run: { enterAi: async () => true, leaveAi: async () => {}, pageClean: () => true, request: async () => ({ status: 200, body: '' }), closed: () => entry.closed },
       }
     },
     clearPartition(partition) {

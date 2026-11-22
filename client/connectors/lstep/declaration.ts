@@ -66,6 +66,14 @@
  * names of fields, no values): `POST /line/episode/step/pack/template` with `content_id` and the page's
  * script adding the chosen template, `_token` (also `meta[name=csrf-token]`) and `_lm_user_id` — the
  * `template_id` field name is the 11/20 capture's.
+ *
+ * 0.6.2 declares the login's helpers (`login_helpers`, agent-browser.md "Login helpers"): the login page
+ * (seen 2026-11-23 on staging) shows Google's reCAPTCHA — a frame `https://www.google.com/recaptcha/…`
+ * with its script from `https://www.gstatic.com/recaptcha/…` —, which the window refused, so the login
+ * button never became usable. Only those two hosts, only under `/recaptcha/`, only while a person logs
+ * in (never while the AI operates); the frame and its POSTs only on `www.google.com`. The other hosts the
+ * page asks for (tag manager, error and chat services, web fonts) are not needed to log in and stay
+ * refused. Nothing else changes.
  */
 import { LSTEP_REMINDER_FOLDERS_READER, LSTEP_REMINDERS_READER, LSTEP_TEMPLATE_FOLDERS_READER, LSTEP_TEMPLATES_READER } from './list-readers'
 import { LSTEP_REMINDER_SCHEDULE_READER, LSTEP_STEP_TIMING_READER } from './reminder-schedule'
@@ -73,12 +81,15 @@ import { LSTEP_REMINDER_STEP_CHECKER } from './reminder-step'
 import { LSTEP_REMINDER_STEPS_READER } from './reminder-steps-reader'
 
 export const LSTEP_DECLARATION = `id: lstep
-version: 0.6.1
+version: 0.6.2
 label: Lステップ
 contract: 1
 browser:
   host: manager.linestep.net
   asset_hosts: [d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net]
+  login_helpers:
+    - { host: www.google.com, path_prefix: "/recaptcha/", frame: true, post: true }
+    - { host: www.gstatic.com, path_prefix: "/recaptcha/" }
   account:
     label: LINE アカウント
   operations:

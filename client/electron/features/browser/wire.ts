@@ -7,11 +7,13 @@
 import path from 'node:path'
 import type { IpcInvokeEvent, IpcMessageEvent, IpcRegistrar } from '../../ipc/registrar'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
-import { createBrowserCheckerRegistry, createBrowserConnectors, parseBrowserDeclaration } from '../../../shared/browser-checkers'
+import { browserLoginHelpers, createBrowserCheckerRegistry, createBrowserConnectors, parseBrowserDeclaration } from '../../../shared/browser-checkers'
+import type { BrowserLoginHelper } from '../../../../shared/core/plugin-browser-declaration'
 import { stoppedBeforeSending, type BrowserChecker, type BrowserPreviewReader, type BrowserPreviewSurface, type BrowserRunSurface } from '../../../shared/browser-runner'
+import approved from '../../../../shared/browser-connectors/approved.json'
 import carried from '../../../../shared/browser-connectors/carried.json'
 import { buildAiSwitch, type BrowserAiSwitch } from './ai-switch'
-import { createCarriedCombinations } from './combination'
+import { approvedBundledDeclarations, createCarriedCombinations } from './combination'
 import { createBrowserContext } from './context'
 import { parseBrowserHtml } from './html'
 import { createBrowserPlansHttp } from './plans-api'
@@ -45,6 +47,14 @@ export interface BrowserPlansWireDeps<E> {
   parentEnv(): Readonly<Record<string, string | undefined>>
   fetch?: typeof fetch
   log?: Pick<Console, 'warn'>
+}
+
+/**
+ * The login helpers the window may use for a site's host: those of the bundled declarations this build
+ * carries and the approved list approves (`approvedBundledDeclarations`; agent-browser.md "Login helpers").
+ */
+export function bundledLoginHelpers(declarations: readonly string[]): (host: string) => readonly BrowserLoginHelper[] {
+  return browserLoginHelpers(approvedBundledDeclarations(approved, carried, declarations))
 }
 
 export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, IpcMessageEvent>, deps: BrowserPlansWireDeps<E>) {

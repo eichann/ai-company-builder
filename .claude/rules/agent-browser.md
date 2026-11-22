@@ -124,7 +124,7 @@ the item is not there otherwise): each site with 「開いてログイン」 and
 (`client/shared/browser-operation.ts`).
 
 - **Pieces.** `client/shared/browser-operation.ts` (pure: the IPC payloads, `decideWindowRequest`,
-  `navigationAllowed`, `browserProxyScript`, `browserResponseHeaders`, `decideAiWrite`, `decideAiRead`,
+  `navigationAllowed`, `windowNavigationAllowed`, `decideLoginHelper`, `frameSeenByPageGate`, `foreignFrameCount`, `browserProxyScript`, `browserResponseHeaders`, `decideAiWrite`, `decideAiRead`,
   `browserAiStopped`, `hostForLog`, `createRefusalTally`); `client/electron/browser-window.ts` (shell
   layer, the only Electron code: the window, its session's guards, the refusing proxy, the `ai`-mode
   gate, `clearPartition`); `client/electron/features/browser/` (`controller.ts`: which policy answer
@@ -162,7 +162,8 @@ the item is not there otherwise): each site with 「開いてログイン」 and
   downloads cancelled (`will-download`), every permission request and check denied (also devices), no
   client certificate ever sent (`select-client-certificate` → none), `will-frame-navigate` (every frame,
   the main one included) and `will-redirect` only to https on the operated host (`navigationAllowed`; a
-  subframe may be `about:blank` / `about:srcdoc`), certificate errors refused (`callback(false)`, no
+  subframe may be `about:blank` / `about:srcdoc`, and in `human` mode a declared login helper's frame:
+  "Login helpers"), certificate errors refused (`callback(false)`, no
   bypass; production code never sets a certificate check), HTTP auth prompts and webviews refused.
   Nothing is handed to the system browser or another app: `keepAppPageInWindow` / `webLinkForBrowser`
   are the app pages' and are not used here. Refusals are logged per host and reason
@@ -346,7 +347,7 @@ server holds ("Executing a plan" below); while the build's switch is off it refu
   are the AI's. **Prefer stable sources** for a new checker: a JSON answer the page itself uses or a
   fixed id marker over the layout of the HTML; a site whose request names the whole target needs no
   target check. What the person approves (`before`) is the state the checker read, not what the AI said.
-- **Lステップ** (`client/connectors/lstep/`): the declaration `lstep@0.6.1` (`declaration.ts`, bundled
+- **Lステップ** (`client/connectors/lstep/`): the declaration `lstep@0.6.2` (0.6.1 + its login helpers, "Login helpers"; `declaration.ts`, bundled
   until the shelf hands browser connectors out; parsed by the core's `parsePluginManifest` like any
   package) with one type, **「リマインダの段にテンプレートを足す」** (`reminder_step_add_template`): effect
   `write`, checker `lstep.reminder_step`, `lock: { kind: lstep.reminder_step }`, `delivers: scheduled`
@@ -464,6 +465,91 @@ kept on purpose: awaiting the write session's clear after the write (Chromium qu
 read, so no test can tell; it is also cleared before each write) and `runWindow`'s policy check (the
 controller already closes a window whose site leaves the policy).
 
+## Login helpers (plan B's first step, 2026-11-23: a person's login needs a CAPTCHA)
+
+Owner-approved plan B (「ブラウザ操作の始め方の改良案」 §5): Lステップ's login page shows Google's reCAPTCHA (a
+frame `https://www.google.com/recaptcha/…`, its script from `https://www.gstatic.com/recaptcha/…`); the
+window refused the frame (`frame-navigation`) and the login button stayed disabled. The window guards two
+times differently: **while a person logs in** (`human` mode) a site's declared login helpers work; **while
+the AI operates** (`ai` mode, a run's `enterAi` … `leaveAi`) they are shut. The AI never touches the window
+(main reads and writes through page-less sessions), so a helper working for the person is no path for the AI.
+
+- **The declaration owns them** (`browser.login_helpers`, `plugins.md` "Browser connectors"): ≤ 5
+  `{ host, path_prefix, frame?, post? }` — an exact host (its very spelling, no `*.`), never the operated
+  host or an asset host, once each; `path_prefix` whole plain segments starting and ending with `/`
+  (never `/` alone, no `.` / `..`, `//`, `%`, `?`, `#`, ≤ 100); `frame` / `post` booleans, absent = false.
+  Reviewed and versioned with the connector (a change is a new version and a new approved row); the admin
+  types nothing, and no vendor name is in the core. Main hands the window the helpers of the bundled
+  declaration of the site's host — approved and carried only, below — (`browserLoginHelpers`,
+  `client/shared/browser-checkers.ts`: a host two declarations name gets none). Lステップ 0.6.2: `www.google.com` under `/recaptcha/` (frame, post) and
+  `www.gstatic.com` under `/recaptcha/` (parts only). Tag manager, error / chat services and web fonts the
+  page also asks for are not needed to log in and stay refused.
+- **The rule** (`decideLoginHelper`, reached from `decideWindowRequest` only for a request the site's rule
+  refused for its host, `client/shared/browser-operation.ts`): https on the default port, no user, the
+  helper's exact host, the path (as the address parser gives it: dot segments resolved; any `%2f` / `%5c` /
+  `%2e` refused) under the prefix; then only in `human` mode (`ai` → `ai-login-helper`), only from the
+  window's page (not a service worker), GET / HEAD of script, stylesheet, image, font, media, XHR / fetch,
+  other (a worker's script); a subframe only where `frame`; a POST only by XHR / fetch and only where
+  `post`. Never a top-level navigation, a WebSocket, a beacon, a plug-in object. Out of the prefix the log
+  says `login-helper-path` (so a missing path shows as such, host only).
+- **Frames** (`windowNavigationAllowed`, the window's `will-frame-navigate` / `will-redirect`): the site's
+  rule, plus in `human` mode a subframe to a helper with `frame`, under its prefix.
+- **The proxy** (`browserProxyScript(site, port, proxyHelperHosts(state))`): the helpers' hosts DIRECT in
+  `human` mode only, for the window's own session only (never the read / write sessions). `setMode` (the
+  window's) sets the mode first — the request rule and the frames' navigation shut the helpers before any
+  await —, then re-routes the proxy for the mode and, entering `ai`, closes the session's open connections.
+- **No frame the write gate does not see, while the AI operates** (independent review M1/L1; verified on
+  Electron 45: a `<iframe sandbox="allow-scripts" srcdoc>` the page makes is opaque and in a process of its
+  own). The gate's DevTools Fetch is attached to the page's own target only, so an out-of-process frame's
+  requests pass it. A frame counts as seen only by **origin and process, never by its address**
+  (`frameSeenByPageGate`: exactly `https://<operated host>` and the main frame's process; an empty document
+  the site made inherits that; unknown = not seen). Two guards:
+  - **the request rule** (`decideWindowRequest`, `ai` mode, the operated host): a request of a frame not seen
+    — or whose frame is gone — is refused (`ai-other-frame`), reads included; only the main frame's own
+    navigation is not asked. The shell reads the frame from the request (`details.frame`, `fromPageFrame`);
+  - **the run** (`run.pageClean`, `foreignFrameCount` over every subframe): the runner's `abort()` asks it at
+    every check — before entering `ai`, after it, the gate's `stopped`, before the permit and synchronously at
+    the last check right before the request leaves. Not clean → `foreign-frames`: before the permit the plan
+    is given back (nothing sent); at the last check the write is never ended (`failed`, reported
+    `context-changed`). The card says 「サイトの窓に、ログインの確かめ（…）が残っていたので、送りませんでした。
+    ログインを済ませた画面にしてから、相談で頼み直してください。」 (`BROWSER_RUN_REASONS`). A frame still
+    loading at a check is caught by the request rule when its requests go out. A frame the window refused
+    stays an empty document of the site and does not count (tested: the start page's two refused frames).
+- **Helpers only from an approved, carried declaration** (review L2): main hands the window
+  `bundledLoginHelpers` (`features/browser/wire.ts`) = `approvedBundledDeclarations`
+  (`combination.ts`): a bundled declaration this build carries (`carried.json`, as for plans) whose one
+  row in this build's `approved.json` (the server's source for plans) is `approved` with the same checker
+  hash and exactly that declaration text. Pending, retired, another text or two rows: no helper (the login
+  page then looks as before). A server-side retirement after the build shipped reaches it only with a new
+  build (the server still refuses that combination's plans).
+- **Remaining limits** (said): a helper's script runs with the login page's authority while the person
+  logs in (GET-only loading would not make it harmless either; reviewed per helper, per path); SSO
+  (Google / Microsoft account login) is not a helper — it needs its own reviewed flow (top-level
+  navigation, return addresses) when a site needs it; asset hosts are still typed by the admin (moving them
+  to the declaration is plan B's next PR); a site that frames another origin on its pages after login can
+  never be operated (availability, never a looser check).
+
+Tests: `client/tests/browser-login-helpers.test.ts` (the rule as a table: every mode × resource kind ×
+method × in / out of the prefix × from the page or not × frame / post flag; `ai` refuses every helper
+request; exact host, https, default port, no user, the prefix literally — encoded `/`, `\`, `.` and dot
+segments; the site's own rules unchanged; frame navigation; the proxy per mode; `frameSeenByPageGate` by
+origin and process, `foreignFrameCount`; `ai-other-frame`; Lステップ 0.6.2's helpers; two declarations for
+one host → none; helpers only from a carried and approved declaration — pending, retired, another text,
+another checker, two rows, not carried → none), `server/tests/unit/plugin-browser-declaration.test.ts`
+(`login_helpers` accepted and every refusal), `client/tests/browser-execute.test.ts` (a frame not seen
+after entering `ai` → stopped before the permit, plan given back, window back to `human`; one appearing
+while the permit is asked → `failed` at the last check, never sent, the server told), `src/features/browser-plans/model.test.ts`
+(the card's words), `client/tests/browser-window-electron.test.ts` (a real window: on a login page with a
+CAPTCHA-like frame the helper's script, frame, its part and its POST work, outside the prefix / a frame of
+the parts helper / a beacon reach nothing; with the frame there the page is not clean, also in `ai` mode;
+in `ai` mode a helper's script, POST and new frame reach nothing; back in `human` the frame loads again;
+refused frames leave the page clean; a sandboxed `srcdoc` frame made by the page's script after entering
+`ai` → the run stops before the permit, made while the permit is asked → `failed` at the last check, and
+its own write and read to the site reach nothing, logged `ai-other-frame`). Each guard mutation-checked;
+survivors kept on purpose: re-routing the proxy on a mode change (the request rule refuses every helper
+request in `ai` mode first; the proxy only also stops a bare connection such as a preconnect) and the
+rule's "only for a host refusal" (the helper's own https / port / user check refuses the same).
+
 ## Plans, executions, permits and locks (PR 6a, 6b-2a: the server side; nothing in the app calls it yet)
 
 The server half of the plan and its approval (internal design memo §27–§31; §30 + §31 are the
@@ -498,7 +584,10 @@ send → report; 6c turns it on for the owner's PC).
   owner the only user; 6c) with `minAppVersion` `0.0.1+0d2fe19.20261122105658` — the commit adding the
   operator's init fix on top of this PC's opt-in (the enable PR): builds order by commit date, so the
   merge's build and every later one pass; a main build made between that commit and the merge passes too
-  but has no opt-in (its switch is the constant, off) and makes no plan;
+  but has no opt-in (its switch is the constant, off) and makes no plan; `lstep@0.6.2` (0.6.1 + the login
+  helpers) **`approved`** with `minAppVersion` = the login helpers' code commit (its PR, 2026-11-23; kept
+  `pending` if the owner says so) — 0.6.1 stays approved for the build already installed (nothing of it is
+  less safe; a type grant is per declaration hash, so 0.6.2 needs its own grant);
   `declarationHash` = `sha256:` of the declaration text, **and the text itself is in the row**: the
   server reads declarations only from this file (never from `client/`, which `server/src` may not
   import), re-hashes each and parses it with the core's parser (a row that does not match its hash
@@ -1253,7 +1342,7 @@ everyone else, and leaves that registration as the condition before anyone else 
   admin console and the member's override (`browserOperationsAllowed`, app and server), the AI stop,
   the member's **type grant** (`PUT /browser-type-grants/:userId`, owner / admin, per declaration hash —
   no admin page yet: the 6c notes give the call), the approved combination (`approved.json` `approved`
-  with its `minAppVersion`; `lstep@0.6.1` approved in this PR), the card's approval
+  with its `minAppVersion`; `lstep@0.6.1` approved in this PR, `lstep@0.6.2` since "Login helpers"), the card's approval
   and the re-read before the permit. Turning off: delete the file, or the company's setting 「使わない」 /
   the site removed (the context moves, the server's permit refuses), or the emergency stop.
 - **Weakness (said)**: **the per-PC file is not access control — the server's type grant is.** The file
@@ -1294,7 +1383,7 @@ are built (6b-1, "The operator and the preview", switched off) and the facts rea
 the execution (6b-2c, "Executing a plan": claim → re-read → permit → send → report) and the registration,
 the card, its IPC and the request tool (6b-2d, "The card, the IPC and the request tool"), all switched
 off, and the inbox's rows (switched off too); **6c** — on for the owner's PC only through "This PC's
-opt-in" (built, `lstep@0.6.1` approved), and **the server's PC
+opt-in" (built, `lstep@0.6.2` approved: "Login helpers" lets the person log in), and **the server's PC
 registration** (design memo §33.3: server × company × member × PC, `X-ACB-Browser-Device`, enabled by an
 owner / admin, checked at register / approve / claim / permit) before it is on for anyone else;
 `irreversible` types and more than one write (refused by the first version's rule today); **the method override and the swap** (design memo §24: a write may

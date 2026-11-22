@@ -33,3 +33,24 @@ export function createCarriedCombinations(file: unknown, declarations: readonly 
     return { declarationHash: own, checkerHash: r.checkerHash, factsVersion: r.factsVersion }
   }
 }
+
+/**
+ * The bundled declarations whose login helpers the window may use (agent-browser.md "Login helpers"):
+ * only one this build carries (`createCarriedCombinations`) that the approved list — the file the server
+ * reads to accept plans, `shared/browser-connectors/approved.json` as this build has it — marks
+ * `approved` for exactly that declaration text and checker hash. Anything else (pending, retired, another
+ * text, two rows) lends no helper: the login page then looks as before.
+ */
+export function approvedBundledDeclarations(approvedFile: unknown, carriedFile: unknown, declarations: readonly string[]): string[] {
+  const carriedOf = createCarriedCombinations(carriedFile, declarations)
+  const rows = approvedFile && typeof approvedFile === 'object' && (approvedFile as { format?: unknown }).format === 1 && Array.isArray((approvedFile as { combinations?: unknown }).combinations)
+    ? (approvedFile as { combinations: unknown[] }).combinations.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object') : []
+  return declarations.filter(text => {
+    const parsed = parseBrowserDeclaration(text)
+    const carried = parsed ? carriedOf(parsed.id, parsed.version) : null
+    if (!parsed || !carried) return false
+    const same = rows.filter(r => r.connector === parsed.id && r.version === parsed.version
+      && r.declarationHash === carried.declarationHash && r.checkerHash === carried.checkerHash)
+    return same.length === 1 && same[0].status === 'approved' && same[0].declaration === text
+  })
+}

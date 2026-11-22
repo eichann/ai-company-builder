@@ -8,7 +8,7 @@ import {
   browserAiStopped, decideBrowserRequest, normalizeBrowserHost,
   type BrowserRequest, type BrowserRequestRefusal, type BrowserSiteSetting,
 } from '../../shared/core/browser-operation'
-import { METHOD_OVERRIDE_HEADERS } from '../../shared/core/plugin-browser-declaration'
+import { METHOD_OVERRIDE_HEADERS, type BrowserLoginHelper } from '../../shared/core/plugin-browser-declaration'
 import type { BrowserPageReadAttempt } from './browser-runner'
 
 // ---------------------------------------------------------------------------
@@ -45,8 +45,10 @@ export const BROWSER_WORDS = {
 // ---------------------------------------------------------------------------
 
 /**
- * - `human`: the member operates; their own writes to the operated host go out as in any browser.
- * - `ai`: every write to the operated host must pass the write gate (`decideAiWrite`).
+ * - `human`: the member operates (browses, logs in); their own writes to the operated host go out as in
+ *   any browser, and the site's declared login helpers work (`decideLoginHelper`).
+ * - `ai`: every write to the operated host must pass the write gate (`decideAiWrite`); login helpers
+ *   are refused entirely.
  */
 export type BrowserWindowMode = 'human' | 'ai'
 
@@ -56,16 +58,23 @@ export interface BrowserWindowState {
   mode: BrowserWindowMode
   /** `ai` mode: the write gate (DevTools Fetch interception) is attached and sees the window's requests. */
   aiGateReady: boolean
+  /** The site's declared login helpers (its bundled declaration's `login_helpers`; none = none). */
+  helpers: readonly BrowserLoginHelper[]
 }
 
 export interface BrowserWindowRequest extends BrowserRequest {
   /** The request came from this window's own page (its webContents), not a service worker or another context. */
   fromWindow: boolean
+  /**
+   * The frame that sent it is one the page's write gate sees (`frameSeenByPageGate`: the operated origin,
+   * in the main frame's process). False for another frame, or when the frame is not known (gone).
+   */
+  pageFrame: boolean
   /** The body as the network sees it (plain bytes only; undefined for a file, a blob or none). */
   body?: string
 }
 
-export type BrowserWindowRefusal = BrowserRequestRefusal | 'closed' | 'ai-websocket' | 'ai-unchecked-write' | 'ai-outside'
+export type BrowserWindowRefusal = BrowserRequestRefusal | 'closed' | 'ai-websocket' | 'ai-unchecked-write' | 'ai-outside' | 'ai-other-frame' | LoginHelperRefusal
 export type BrowserWindowDecision = { allow: true } | { allow: false; reason: BrowserWindowRefusal }
 
 const READ_METHODS = new Set(['GET', 'HEAD'])
@@ -79,18 +88,26 @@ export const isReadMethod = (method: string): boolean => READ_METHODS.has(method
  * page's gate does not see: main never uses this session — its reads and writes
  * go through page-less sessions of their own, `browserReadPartition` /
  * `browserWritePartition` —, so no outside request here can be main's); and no
- * write of the page the gate cannot see (before the gate is attached). In
+ * write of the page the gate cannot see (before the gate is attached), nor any
+ * request of a frame the gate does not see (another origin or process: its own
+ * DevTools target; the main frame's navigation is the page's own). In
  * `human` mode the site's rule alone: the member's own browsing, a worker's
  * request included, is theirs.
  */
 export function decideWindowRequest(state: BrowserWindowState, request: BrowserWindowRequest): BrowserWindowDecision {
   if (!state.site) return { allow: false, reason: 'closed' }
   const decided = decideBrowserRequest(state.site, request)
+  // A host the site does not list may still be one of its login helpers (human mode, under its path).
+  if (!decided.allow && decided.reason === 'host') {
+    const helper = loginHelperOf(state.helpers, request.url)
+    return helper ? decideLoginHelper(state.mode, helper, request) : decided
+  }
   if (!decided.allow) return decided
   if (state.mode === 'ai' && decided.use === 'operate') {
     if (request.resourceType === 'webSocket' || /^wss:/i.test(request.url)) return { allow: false, reason: 'ai-websocket' }
     // Same path as main's read or not: a page-less session reads for main, never this one (design memo §33 2-4).
     if (!request.fromWindow) return { allow: false, reason: isReadMethod(request.method) ? 'ai-outside' : 'ai-unchecked-write' }
+    if (request.resourceType !== 'mainFrame' && !request.pageFrame) return { allow: false, reason: 'ai-other-frame' }
     if (!isReadMethod(request.method) && !state.aiGateReady) return { allow: false, reason: 'ai-unchecked-write' }
   }
   return { allow: true }
@@ -111,6 +128,106 @@ export function navigationAllowed(site: BrowserSiteSetting, url: string, mainFra
   return normalizeBrowserHost(parsed.hostname) === site.host
 }
 
+// ---------------------------------------------------------------------------
+// Login helpers (agent-browser.md "Login helpers")
+// ---------------------------------------------------------------------------
+
+export type LoginHelperRefusal = 'ai-login-helper' | 'login-helper-path' | 'login-helper-use'
+
+/** Percent-encoded `/` `\` `.`: a path that a server could read as leaving the prefix is never one of a helper's. */
+const ENCODED_PATH_PART_RE = /%(2f|5c|2e)/i
+
+/** Is the address on a declared helper's host, https and its default port, without a user? Then that helper. */
+function helperHostOf(helpers: readonly BrowserLoginHelper[], url: string): { helper: BrowserLoginHelper; path: string } | null {
+  let parsed: URL
+  try { parsed = new URL(url) } catch { return null }
+  if (parsed.protocol !== 'https:' || parsed.port !== '' || parsed.username || parsed.password) return null
+  const host = normalizeBrowserHost(parsed.hostname)
+  const helper = host ? helpers.find(h => h.host === host) : undefined
+  return helper ? { helper, path: parsed.pathname } : null
+}
+
+/**
+ * The helper an address belongs to, or null. A helper's host outside its path prefix is still that
+ * helper's host: `decideLoginHelper` then refuses it (`login-helper-path`), so the log says why.
+ */
+export function loginHelperOf(helpers: readonly BrowserLoginHelper[], url: string): (BrowserLoginHelper & { inPrefix: boolean }) | null {
+  const found = helperHostOf(helpers, url)
+  if (!found) return null
+  const inPrefix = found.path.startsWith(found.helper.pathPrefix) && !ENCODED_PATH_PART_RE.test(found.path)
+  return { ...found.helper, inPrefix }
+}
+
+const HELPER_READ_TYPES = new Set(['script', 'stylesheet', 'image', 'font', 'xhr', 'media', 'other'])
+
+/**
+ * One request to a declared login helper (the window's one rule for them; table-tested in
+ * browser-login-helpers.test.ts). Only in `human` mode — while the AI operates every helper request
+ * is refused (`ai-login-helper`) —, only from the window's own page, only under the path prefix; then
+ * GET / HEAD of a page's parts and fetches, a frame only where the helper says `frame`, a POST only by
+ * fetch / XHR and only where it says `post`. Never a top-level navigation, a WebSocket, a beacon or a
+ * plug-in object.
+ */
+export function decideLoginHelper(
+  mode: BrowserWindowMode,
+  helper: BrowserLoginHelper & { inPrefix: boolean },
+  request: { method: string; resourceType: string; fromWindow: boolean },
+): BrowserWindowDecision {
+  if (mode !== 'human') return { allow: false, reason: 'ai-login-helper' }
+  if (!helper.inPrefix) return { allow: false, reason: 'login-helper-path' }
+  if (!request.fromWindow) return { allow: false, reason: 'login-helper-use' }
+  const method = request.method.toUpperCase()
+  const type = request.resourceType
+  if (type === 'subFrame') return helper.frame && method === 'GET' ? { allow: true } : { allow: false, reason: 'login-helper-use' }
+  if (method === 'POST') return helper.post && type === 'xhr' ? { allow: true } : { allow: false, reason: 'login-helper-use' }
+  if ((method === 'GET' || method === 'HEAD') && HELPER_READ_TYPES.has(type)) return { allow: true }
+  return { allow: false, reason: 'login-helper-use' }
+}
+
+/**
+ * Where a frame of the window may navigate now: the site's rule (`navigationAllowed`), and in `human`
+ * mode a subframe also to a login helper that may be framed, under its prefix. Never the main frame.
+ */
+export function windowNavigationAllowed(state: BrowserWindowState, url: string, mainFrame: boolean): boolean {
+  if (!state.site) return false
+  if (navigationAllowed(state.site, url, mainFrame)) return true
+  if (mainFrame || state.mode !== 'human') return false
+  const helper = loginHelperOf(state.helpers, url)
+  return !!helper && helper.frame && helper.inPrefix
+}
+
+/** The hosts the window's proxy sends DIRECT besides the site's: the login helpers', in `human` mode only. */
+export function proxyHelperHosts(state: Pick<BrowserWindowState, 'mode' | 'helpers'>): string[] {
+  return state.mode === 'human' ? state.helpers.map(h => h.host) : []
+}
+
+/** A frame as the window sees it: its origin (`null` when opaque) and its renderer process. */
+export interface BrowserFrameFacts {
+  origin: string
+  processId: number
+}
+
+/**
+ * Is this a frame whose requests the page's write gate sees? Only one of the operated origin exactly
+ * (`https://<host>`; an empty document inherits it) in the main frame's process. Judged by origin and
+ * process, never by address: an opaque frame (a sandboxed `srcdoc`, `data:`) or one of another site can
+ * live in a process of its own — its own DevTools target, which the gate's Fetch does not see — whatever
+ * its address says (agent-browser.md "Login helpers"). Unknown (null) is never one.
+ */
+export function frameSeenByPageGate(site: BrowserSiteSetting, mainProcessId: number, frame: BrowserFrameFacts | null): boolean {
+  return !!frame && frame.processId === mainProcessId && frame.origin === `https://${site.host}`
+}
+
+/**
+ * Frames that keep the AI from operating: every frame but the main one the page's write gate does not
+ * see (`frameSeenByPageGate`) — a login helper's frame left from the login page, a sandboxed frame the
+ * page made, anything else. Asked as the window enters `ai` mode and again by every check of the run up
+ * to the last one right before the write leaves.
+ */
+export function foreignFrameCount(site: BrowserSiteSetting, mainProcessId: number, subframes: readonly BrowserFrameFacts[]): number {
+  return subframes.filter(f => !frameSeenByPageGate(site, mainProcessId, f)).length
+}
+
 /**
  * The window's session proxy (a PAC script): the site's hosts go DIRECT, everything else to the
  * shell's own refusing proxy on 127.0.0.1 (`refusePort`). It reaches what the request hook cannot
@@ -118,9 +235,9 @@ export function navigationAllowed(site: BrowserSiteSetting, url: string, mainFra
  * asks the proxy. Hosts are the setting's (`normalizeBrowserHost`: [a-z0-9.-]) and are embedded as
  * JSON, so the script is data, never the setting's code.
  */
-export function browserProxyScript(site: BrowserSiteSetting, refusePort: number): string {
+export function browserProxyScript(site: BrowserSiteSetting, refusePort: number, helperHosts: readonly string[] = []): string {
   if (!Number.isInteger(refusePort) || refusePort <= 0 || refusePort > 65535) throw new Error('bad refusing proxy port')
-  const hosts = [site.host, ...site.assetHosts].map(h => normalizeBrowserHost(h)).filter((h): h is string => !!h)
+  const hosts = [site.host, ...site.assetHosts, ...helperHosts].map(h => normalizeBrowserHost(h)).filter((h): h is string => !!h)
   return `var DIRECT_HOSTS = ${JSON.stringify(hosts)};
 function FindProxyForURL(url, host) {
   host = String(host).toLowerCase();

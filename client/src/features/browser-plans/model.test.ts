@@ -61,6 +61,8 @@ test('plain words for why ［任せる］ is off and for what a press led to (a 
   assert.match(notReadyText('no-window', 'Lステップ') ?? '', /このパソコンではLステップの窓が開いていません/)
   assert.equal(runResultText({ outcome: 'stopped', reason: 'facts-changed' }), '承認のあとでサイトの中身が変わったので、送りませんでした。')
   assert.match(runResultText({ outcome: 'unknown', reason: 'no-answer' }), /届いたか分かりません.*もう一度は送りません/)
+  // A login helper's frame left in the window: what to do, in the member's words.
+  assert.match(runResultText({ outcome: 'stopped', reason: 'foreign-frames' }), /ログインの確かめ.*残っていた.*ログインを済ませた画面/)
   assert.match(runResultText({ outcome: 'refused', reason: 'approve-refused', code: 'CONTENT_CHANGED' }), /開き直して/)
   for (const r of [runResultText({ outcome: 'failed', reason: 'permit-late' }), notReadyText('off', 'Lステップ') ?? '']) {
     for (const word of ['安全です', 'sha256', 'ハッシュ', 'トークン']) assert.equal(r.includes(word), false)

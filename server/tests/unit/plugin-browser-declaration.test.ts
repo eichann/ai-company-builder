@@ -166,6 +166,37 @@ describe('a browser connector declaration', () => {
     expect(errorsOf(edit('profile.line-scdn.net]', 'd1nhtjid4lgi9y.cloudfront.net]'))).toContain('2回あります')
   })
 
+  it('login helpers: exact https hosts, a narrow path prefix, frame / post only as declared booleans (agent-browser.md "Login helpers")', () => {
+    const ASSETS = '  asset_hosts: [d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net]\n'
+    const helpers = (lines: string) => edit(ASSETS, `${ASSETS}  login_helpers:\n${lines}`)
+    const ok = helpers('    - { host: www.google.com, path_prefix: "/recaptcha/", frame: true, post: true }\n    - { host: www.gstatic.com, path_prefix: "/recaptcha/api2/" }\n')
+    expect(parse(ok).browser!.loginHelpers).toEqual([
+      { host: 'www.google.com', pathPrefix: '/recaptcha/', frame: true, post: true },
+      { host: 'www.gstatic.com', pathPrefix: '/recaptcha/api2/', frame: false, post: false },
+    ])
+    expect(parse(LSTEP).browser!.loginHelpers).toEqual([])
+    const refused: Array<[string, string]> = [
+      ['    - { host: "*.google.com", path_prefix: "/recaptcha/" }\n', 'host'],
+      ['    - { host: WWW.google.com, path_prefix: "/recaptcha/" }\n', 'host'],
+      ['    - { host: "https://www.google.com", path_prefix: "/recaptcha/" }\n', 'host'],
+      ['    - { host: 10.0.0.1, path_prefix: "/recaptcha/" }\n', 'host'],
+      ['    - { host: manager.linestep.net, path_prefix: "/recaptcha/" }\n', '操作するサイトのホストは書けません'],
+      ['    - { host: profile.line-scdn.net, path_prefix: "/recaptcha/" }\n', 'asset_hosts のホストは書けません'],
+      ['    - { host: www.google.com, path_prefix: "/a/" }\n    - { host: www.google.com, path_prefix: "/b/" }\n', '2回あります'],
+      ...['"/"', '"/recaptcha"', 'recaptcha/', '"/re//captcha/"', '"/../"', '"/./x/"', '"/a/../b/"', '"/%2e%2e/"', '"/re%2fx/"', '"/a?b/"', '"/a#b/"', '"/a b/"', `"/${'a'.repeat(100)}/"`]
+        .map(p => [`    - { host: www.google.com, path_prefix: ${p} }\n`, 'path_prefix'] as [string, string]),
+      ['    - { host: www.google.com }\n', 'path_prefix'],
+      ['    - { host: www.google.com, path_prefix: "/recaptcha/", frame: "yes" }\n', 'frame は true か false'],
+      ['    - { host: www.google.com, path_prefix: "/recaptcha/", post: 1 }\n', 'post は true か false'],
+      ['    - { host: www.google.com, path_prefix: "/recaptcha/", methods: [PUT] }\n', '知らない項目「methods」'],
+      ['    - { host: www.google.com, path_prefix: "/recaptcha/", url: "https://x.example" }\n', '「url」'],
+      ['    - www.google.com\n', 'login_helpers'],
+      [Array.from({ length: 6 }, (_, i) => `    - { host: h${i}.example.com, path_prefix: "/r/" }\n`).join(''), 'login_helpers'],
+    ]
+    for (const [lines, why] of refused) expect(errorsOf(helpers(lines)), lines).toContain(why)
+    expect(errorsOf(edit(ASSETS, `${ASSETS}  login_helpers: []\n`))).toContain('login_helpers')
+  })
+
   it('names, labels, notes and the checker are plain and bounded', () => {
     expect(errorsOf(edit('    reminder_step_template:\n', '    ReminderStep:\n'))).toContain('操作の名前「ReminderStep」')
     expect(errorsOf(edit('      label: リマインダを読む\n', `      label: "${'あ'.repeat(61)}"\n`))).toContain('label は 60 文字まで')
