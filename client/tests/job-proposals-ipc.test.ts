@@ -102,3 +102,29 @@ test('取り下げる: the proposer\'s session route, ids checked first', async 
   assert.equal((await h.api.withdraw('co', C)).success, false)
   assert.equal(h.calls.length, 1)
 })
+
+test('「やめる」: the session route with the candidate\'s id; a discarded candidate is said as such; a server before it discarded nothing', async () => {
+  const h = api(() => ok({ discarded: true }))
+  assert.deepEqual(await h.api.discard('co', C), { success: true, supported: true })
+  assert.deepEqual(h.calls.map(c => [c.method, c.path, c.headers.Cookie]), [['POST', `/me/job-candidates/${C}/discard`, 's=SESSION']])
+  for (const bad of ['jc.x/../submit', 'jp.' + 'b'.repeat(32), undefined]) assert.equal((await h.api.discard('co', bad)).success, false)
+  assert.equal(h.calls.length, 1)
+  const old = await api(() => ({ status: 404, body: { success: false, error: 'Not Found' } })).api.discard('co', C)
+  assert.deepEqual(old, { success: true, supported: false })
+  const submitted = await api(() => ({ status: 409, body: { success: false, code: 'JOB_CANDIDATE_SUBMITTED', error: 'x' } })).api.discard('co', C)
+  assert.ok(!submitted.success && submitted.code === 'JOB_CANDIDATE_SUBMITTED' && submitted.error === jobProposalRefusalText('JOB_CANDIDATE_SUBMITTED'))
+  // An expired one is not "supported: false" (it names its code): the card reads it again and says it is gone.
+  assert.equal((await api(() => ({ status: 404, body: { success: false, code: 'JOB_CANDIDATE_NOT_FOUND', error: 'x' } })).api.discard('co', C)).success, false)
+  const read = await api(() => ({ status: 410, body: { success: false, code: 'JOB_CANDIDATE_DISCARDED', error: 'x' } })).api.candidate('co', C)
+  assert.deepEqual(read, { success: true, candidate: null, proposal: null, discarded: true })
+})
+
+test('the zone the server names is kept only as a zone id', async () => {
+  const shown = (timeZone: unknown) => api(() => ok({ id: C, definition: DEF, fingerprint: FP, expiresAt: 'x', proposal: null, timeZone })).api.candidate('co', C)
+  const r = await shown('Asia/Tokyo')
+  assert.ok(r.success && r.candidate?.timeZone === 'Asia/Tokyo')
+  for (const odd of ['日本時間<script>', '../etc', 42, undefined]) {
+    const x = await shown(odd)
+    assert.ok(x.success && x.candidate !== null && x.candidate.timeZone === null, String(odd))
+  }
+})

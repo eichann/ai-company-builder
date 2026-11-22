@@ -3,10 +3,10 @@ import { CalendarCheck } from '@phosphor-icons/react'
 import { Button, StatusBadge } from '../../../shared/ui/primitives'
 import { STATE_BOX, type StateBoxTone } from '../../../shared/ui/stateStyles'
 import {
-  JOB_CANDIDATE_GONE_TEXT, JOB_CANDIDATE_NOTES, JOB_PROPOSAL_READ_AGAIN_CODES, jobCandidateLines, jobProposalCardState, jobProposalStateLine,
+  JOB_CANDIDATE_DISCARDED_TEXT, JOB_CANDIDATE_GONE_TEXT, JOB_CANDIDATE_NOTES, JOB_PROPOSAL_READ_AGAIN_CODES, jobCandidateLines, jobProposalCardState, jobProposalStateLine,
   jobProposalStateWord, type JobProposalCardRef,
 } from '../../../../shared/job-proposals'
-import { submitJobProposal, withdrawJobProposal, type JobProposalCardPort } from '../api'
+import { discardJobCandidate, submitJobProposal, withdrawJobProposal, type JobProposalCardPort } from '../api'
 import { putJobProposal, reloadJobCandidate } from '../../../shared/lib/jobProposalStore'
 import { useJobProposal } from '../hooks/useJobProposal'
 
@@ -45,6 +45,24 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
     }
   }
 
+  /** 「やめる」: discarded on the server (the card then says so, also when reopened); a server before it only closes the buttons here. */
+  const discard = async (candidateId: string) => {
+    if (busy) return
+    setBusy(true)
+    setMessage(null)
+    try {
+      const r = await (port ? discardJobCandidate(card.companyId, candidateId, port) : discardJobCandidate(card.companyId, candidateId))
+      if (r.success && r.supported) putJobProposal(key, { success: true, candidate: null, proposal: null, discarded: true })
+      else if (r.success) setDeclined(true)
+      else {
+        setMessage({ tone: r.offline ? 'info' : 'error', text: r.error })
+        if (r.code && JOB_PROPOSAL_READ_AGAIN_CODES.includes(r.code)) readAgain()
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const withdraw = async (proposalId: string) => {
     if (busy || state.kind !== 'proposal') return
     setBusy(true)
@@ -61,6 +79,13 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
     }
   }
 
+  if (state.kind === 'discarded') {
+    return (
+      <div role="group" aria-label="定期の仕事の案" data-state="discarded" className={`my-2 rounded-card border p-3 text-small text-text-muted ${STATE_BOX.plain}`}>
+        {JOB_CANDIDATE_DISCARDED_TEXT}
+      </div>
+    )
+  }
   if (state.kind === 'loading' || state.kind === 'error' || state.kind === 'gone') {
     return (
       <div role="group" aria-label="定期の仕事の案" className={`my-2 rounded-card border p-3 text-small text-text-muted ${STATE_BOX.plain}`}>
@@ -84,7 +109,7 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
       {candidate && (
         <>
           <ul aria-label="案の内容" className="mt-2 space-y-0.5 text-small text-text">
-            {jobCandidateLines(candidate.definition).map(line => <li key={line}>{line}</li>)}
+            {jobCandidateLines(candidate.definition, candidate.timeZone).map(line => <li key={line}>{line}</li>)}
           </ul>
           {!proposal && (
             <ul aria-label="出す前に" className="mt-2 space-y-0.5 text-small text-text-muted">
@@ -100,11 +125,11 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
           <Button size="sm" variant="primary" disabled={busy} onClick={() => void submit(state.submit.candidateId, state.submit.fingerprint)}>
             {busy ? '出しています…' : 'これで管理者に出す'}
           </Button>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setDeclined(true); setMessage(null) }}>やめる</Button>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void discard(state.submit.candidateId)}>やめる</Button>
         </div>
       )}
       {state.kind === 'candidate' && declined && (
-        <p role="status" className="mt-2 text-small text-text-muted">出さないことにしました。この案は作ってから24時間で消えます。</p>
+        <p role="status" className="mt-2 text-small text-text-muted">出さないことにしました（このサーバーでは案を消せないため、作ってから24時間で消えます）。</p>
       )}
       {state.kind === 'proposal' && state.withdraw && (
         <div className="mt-2">

@@ -3,6 +3,9 @@ import { EVENT_OCCURRENCE_SLOT_PREFIX, JOB_SCHEMAS, type JobDeliveryPlace, type 
 import type { JobState } from '../../../shared/types/jobs'
 import type { JobCandidateRow, JobEventCursor, JobEventGap, JobOccurrenceRow, JobProposalRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
 
+/** A discarded candidate's fingerprint (member proposals' 「やめる」): never a `sha256:` value, so no fingerprint sent matches it. */
+const DISCARDED_MARK = 'discarded'
+
 interface JobDbRow {
   id: string; name: string; state: string; acting_user_id: string; latest_version: number
   approved_version: number | null; approved_fingerprint: string | null; accepted_version: number | null; accepted_consent: string | null
@@ -421,7 +424,12 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
       const r = conn.prepare(`SELECT id, created_by, definition, fingerprint, created_at, expires_at FROM ai_job_candidates
         WHERE company_id = ? AND id = ? AND created_by = ? AND expires_at > ?`).get(companyId, candidateId, createdBy, now) as
         { id: string; created_by: string; definition: string; fingerprint: string; created_at: string; expires_at: string } | undefined
-      return r ? { id: r.id, createdBy: r.created_by, definition: r.definition, fingerprint: r.fingerprint, createdAt: r.created_at, expiresAt: r.expires_at } : null
+      // A discarded candidate keeps its row until its time with the mark in place of its fingerprint (no schema change).
+      return r ? { id: r.id, createdBy: r.created_by, definition: r.definition, fingerprint: r.fingerprint, createdAt: r.created_at, expiresAt: r.expires_at, discarded: r.fingerprint === DISCARDED_MARK } : null
+    },
+    discardCandidate(candidateId, createdBy) {
+      return conn.prepare(`UPDATE ai_job_candidates SET fingerprint = ? WHERE company_id = ? AND id = ? AND created_by = ? AND fingerprint <> ?`)
+        .run(DISCARDED_MARK, companyId, candidateId, createdBy, DISCARDED_MARK).changes > 0
     },
     liveCandidates(createdBy, now) {
       return (conn.prepare(`SELECT COUNT(*) AS n FROM ai_job_candidates WHERE company_id = ? AND created_by = ? AND expires_at > ?`)

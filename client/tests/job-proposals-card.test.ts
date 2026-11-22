@@ -21,7 +21,7 @@ const definition = (parseJobDefinition(proposalDefinition(
   { skill: 'minutes-summary', trigger: { every: 'week', weekday: 'mon', at: '09:00', businessDaysBefore: 0 }, check: { kind: 'new_files', path: '営業/議事録' }, reads: ['営業/資料'], deliverable: '営業/週報', readRecords: false, mailDrafts: true, minutes: 15, missed: { policy: 'latest_only', expiresAfterMinutes: 120 } },
   { actingUser: 'me', procedure: { source: 'company_skill', skill: 'minutes-summary', fingerprint: 'c'.repeat(40) }, skillName: 'minutes-summary', candidateId: C },
 )) as { definition: JobDefinition }).definition
-const candidate = { id: C, definition, fingerprint: FP, expiresAt: '2026-11-23T00:00:00Z' }
+const candidate = { id: C, definition, fingerprint: FP, expiresAt: '2026-11-23T00:00:00Z', timeZone: null }
 const proposal = (state: string, returnReason: string | null = null): JobProposalView => ({
   id: 'jp.' + 'b'.repeat(32), jobId: 'job.' + '1'.repeat(32), proposerId: 'me', candidateId: C, submittedVersion: 1, submittedFingerprint: FP,
   state: state as JobProposalView['state'], returnReason: returnReason as JobProposalView['returnReason'], decidedBy: null, decidedAt: null, createdAt: 'x',
@@ -40,6 +40,8 @@ test('after submitting: its state, 取り下げる only while it waits; gone or 
   const later = jobProposalCardState({ success: true, candidate: null, proposal: proposal('approved') })
   assert.ok(later.kind === 'proposal' && later.candidate === null)
   assert.equal(jobProposalCardState({ success: true, candidate: null, proposal: null }).kind, 'gone')
+  // Discarded by the member (「やめる」): said as such, nothing to press.
+  assert.equal(jobProposalCardState({ success: true, candidate: null, proposal: null, discarded: true }).kind, 'discarded')
   assert.equal(jobProposalCardState({ success: false, offline: true, code: null, error: 'x' }).kind, 'error')
   assert.equal(jobProposalCardState(null).kind, 'loading')
   assert.match(jobProposalStateLine(proposal('returned', 'TOO_BROAD')), /差し戻されました（理由：読む場所や置く場所、できることが広すぎる）/)
@@ -53,6 +55,12 @@ test('before the press it says when (company time), what makes it run, the limit
     assert.ok(text.includes(words), words)
   }
   assert.doesNotMatch(text, /必ず(毎週|動きます)|毎週かならず/)
+})
+
+test('the zone by name: 日本時間 for Asia/Tokyo, a zone without words by its id, and the company\'s clock from an older server', () => {
+  assert.equal(jobCandidateLines(definition, 'Asia/Tokyo')[0], 'いつ確かめるか：毎週月曜 09:00（日本時間）')
+  assert.equal(jobCandidateLines(definition, 'Asia/Jakarta')[0], 'いつ確かめるか：毎週月曜 09:00（時間帯 Asia/Jakarta）')
+  assert.equal(jobCandidateLines(definition, null)[0], 'いつ確かめるか（会社の時刻で）：毎週月曜 09:00')
 })
 
 test('stored as a reference only, it comes back where it was when the conversation is reopened', () => {

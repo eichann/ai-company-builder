@@ -5,10 +5,11 @@
 //   jobProposals:submit     「これで管理者に出す」 with the candidate's id and the fingerprint the card shows
 //   jobProposals:mine       the member's proposals (`GET /me/job-proposals`)
 //   jobProposals:withdraw   「取り下げる」 while it waits
+//   jobProposals:discard    「やめる」: the candidate not submitted yet is discarded on the server (owner decision 2026-11-22)
 
 import {
   JOB_PROPOSALS_OFFLINE_TEXT, isJobFingerprint, jobProposalRefusalText, readProposalView, readShownCandidate,
-  type JobCandidateResult, type JobProposalResult, type JobProposalsFailure, type MyJobProposalsResult,
+  type JobCandidateDiscardResult, type JobCandidateResult, type JobProposalResult, type JobProposalsFailure, type MyJobProposalsResult,
 } from '../../../shared/job-proposals'
 import { APP_JOB_SCHEMAS } from '../../../shared/jobs'
 import { JOB_SCHEMAS_HEADER } from '../../../../shared/core/jobs'
@@ -81,6 +82,8 @@ export function createJobProposalsApi(deps: JobProposalsDeps) {
     async candidate(companyId: unknown, candidateId: unknown): Promise<JobCandidateResult> {
       if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId) || !isJobCandidateId(candidateId)) return BAD_INPUT
       const r = await call(companyId, `/me/job-candidates/${candidateId}`, 'GET')
+      // Discarded by the member (「やめる」): said as such until its 24 hours (then gone, as any).
+      if (r?.status === 410 && r.json?.code === 'JOB_CANDIDATE_DISCARDED') return { success: true, candidate: null, proposal: null, discarded: true }
       if (r?.status !== 404) {
         if (!ok(r)) return failure('candidate', r)
         const data = r.json!.data as { proposal?: unknown }
@@ -98,6 +101,14 @@ export function createJobProposalsApi(deps: JobProposalsDeps) {
       return proposal ? { success: true, proposal } : failure('submit', r)
     },
     mine,
+    /** 「やめる」 (the member's press on the card). A server before it (404 naming no job code) discarded nothing: `supported: false`. */
+    async discard(companyId: unknown, candidateId: unknown): Promise<JobCandidateDiscardResult> {
+      if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId) || !isJobCandidateId(candidateId)) return BAD_INPUT
+      const r = await call(companyId, `/me/job-candidates/${candidateId}/discard`, 'POST')
+      if (r && r.status === 404 && typeof r.json?.code !== 'string') return { success: true, supported: false }
+      if (ok(r)) return { success: true, supported: true }
+      return failure('discard', r)
+    },
     async withdraw(companyId: unknown, proposalId: unknown): Promise<JobProposalResult> {
       if (typeof companyId !== 'string' || !COMPANY_ID.test(companyId) || !isJobProposalId(proposalId)) return BAD_INPUT
       const r = await call(companyId, `/me/job-proposals/${proposalId}/withdraw`, 'POST')
@@ -113,4 +124,5 @@ export function registerJobProposalsIpc(ipc: IpcRegistrar, deps: JobProposalsDep
   ipc.handle('jobProposals:submit', (_event, companyId, candidateId, fingerprint) => api.submit(companyId, candidateId, fingerprint))
   ipc.handle('jobProposals:mine', (_event, companyId) => api.mine(companyId))
   ipc.handle('jobProposals:withdraw', (_event, companyId, proposalId) => api.withdraw(companyId, proposalId))
+  ipc.handle('jobProposals:discard', (_event, companyId, candidateId) => api.discard(companyId, candidateId))
 }

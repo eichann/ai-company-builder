@@ -383,10 +383,11 @@ export const countText = (n: number) => (n > 99 ? '99+' : String(n))
 
 /**
  * Notice kinds only owners / admins are ever written (member proposals' PR C, owner decision 2026-11-22): `job_proposal` (a
- * member's proposal arrived) and `job_paused` (a job paused because its responsible person left or lost rights). A member's
+ * member's proposal arrived), `job_paused` (a job paused because its responsible person left or lost rights) and
+ * `company_restored` (the company's data put back from a backup; owner decision 2026-11-22). A member's
  * 「知らせの設定」 does not offer them; an owner / admin's does. Unknown role (offline) → not offered (the safe side).
  */
-export const ADMIN_ONLY_NOTICE_KINDS: readonly NotificationKind[] = ['job_proposal', 'job_paused']
+export const ADMIN_ONLY_NOTICE_KINDS: readonly NotificationKind[] = ['job_proposal', 'job_paused', 'company_restored']
 
 export function noticeKindsForRole<K extends string>(kinds: readonly K[], fullAccess: boolean | null): K[] {
   return fullAccess === true ? [...kinds] : kinds.filter(k => !(ADMIN_ONLY_NOTICE_KINDS as readonly string[]).includes(k))

@@ -456,6 +456,63 @@ describe('the submit: the candidate as stored, by its id and the fingerprint sho
   })
 })
 
+describe('「やめる」: the creator discards a candidate not submitted yet (owner decision 2026-11-22)', () => {
+  it('discarded: never readable or submittable again, nothing made; again the same answer', async () => {
+    const c = await candidate()
+    const jobsBefore = jobCount()
+    expect(ok(proposals.discard(alice, c.id))).toEqual({ discarded: true })
+    expect(proposals.candidate(alice, c.id)).toMatchObject({ ok: false, kind: 'gone', body: { code: 'JOB_CANDIDATE_DISCARDED' } })
+    expect(JSON.stringify(proposals.candidate(alice, c.id))).not.toContain(c.fingerprint)
+    expect(await proposals.submit(alice, c.id, { fingerprint: c.fingerprint })).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_DISCARDED' } })
+    expect(jobCount()).toBe(jobsBefore)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM ai_job_proposals WHERE company_id = ? AND candidate_id = ?').get(CO, c.id)).toEqual({ n: 0 })
+    expect(ok(proposals.discard(alice, c.id))).toEqual({ discarded: true })
+  })
+
+  it('a submitted one is refused, its proposal unchanged (withdrawing is how it ends)', async () => {
+    const { c, p } = await submitted(newMember())
+    const who = { companyId: CO, userId: p.proposerId, role: 'member' }
+    expect(proposals.discard(who, c.id)).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_SUBMITTED' } })
+    expect(proposalState(p.id)).toBe('submitted')
+    expect(ok(proposals.candidate(who, c.id)).fingerprint).toBe(c.fingerprint)
+  })
+
+  it('only its creator: another member’s, another company’s, a missing or an expired one answer the one 404', async () => {
+    const c = await candidate()
+    const missing = proposals.discard(bob, `jc.${'0'.repeat(32)}`)
+    expect(missing).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_NOT_FOUND' } })
+    expect(proposals.discard(bob, c.id)).toEqual(missing)
+    expect(proposals.discard(m('u-alice', 'member', OTHER), c.id)).toEqual(missing)
+    expect(proposals.discard(alice, 'jc.x')).toEqual(missing)
+    expect(ok(proposals.candidate(alice, c.id)).id).toBe(c.id)
+    // Discarded, then past its time: a candidate that is not there (a plain one), like any expired one.
+    ok(proposals.discard(alice, c.id))
+    shift = 25 * HOUR
+    try {
+      expect(proposals.candidate(alice, c.id)).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_NOT_FOUND' } })
+      expect(proposals.discard(alice, c.id)).toEqual(missing)
+    } finally { shift = 0 }
+  })
+
+  it('pressed while a submit awaits the Skill: the submit is refused inside its write, nothing made', async () => {
+    const c = await candidate(carol)
+    const jobsBefore = jobCount()
+    between = () => { ok(proposals.discard(carol, c.id)) }
+    expect(await proposals.submit(carol, c.id, { fingerprint: c.fingerprint })).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_DISCARDED' } })
+    expect(jobCount()).toBe(jobsBefore)
+  })
+
+  it('the candidate names the zone its times are in (the company’s clock)', async () => {
+    const c = await candidate()
+    expect(ok(proposals.candidate(alice, c.id)).timeZone).toBe('Asia/Tokyo')
+    const zoned = createJobProposals({
+      companyData, memberships, transactions, clock, ids: randomIds, jobs, skillTree, hasCompanyFolder: () => true,
+      placeExists: async (_co, p) => EXISTS.has(p), placeFolders: async (_co, p) => FOLDERS[p] ?? null, timeZoneOf: () => 'America/New_York',
+    })
+    expect(ok(zoned.candidate(alice, c.id)).timeZone).toBe('America/New_York')
+  })
+})
+
 describe('approve, withdraw, return: one wins, only from submitted', () => {
   it('the three at once: exactly one wins, the others are told it is decided', async () => {
     const { p } = await submitted(bob)
@@ -732,6 +789,11 @@ describe('the routes: the AI’s token makes a candidate, never a run’s; the s
     // The submit is the session's: a record token alone is not signed in.
     const submitPath = `/api/companies/${co}/me/job-candidates/${created.body.data.id}/submit`
     expect((await call({ token: consultation, method: 'POST', path: submitPath, body: { fingerprint: created.body.data.fingerprint } })).status).toBe(401)
+    // 「やめる」 is the session's too: a record token alone is not signed in.
+    const spare = (await placed(['人事部'])).body.data
+    expect((await call({ token: consultation, method: 'POST', path: `/api/companies/${co}/me/job-candidates/${spare.id}/discard` })).status).toBe(401)
+    expect(await as('jq-alice', 'POST', `/me/job-candidates/${spare.id}/discard`)).toMatchObject({ status: 200, body: { data: { discarded: true } } })
+    expect((await as('jq-alice', 'GET', `/me/job-candidates/${spare.id}`)).status).toBe(410)
     const submittedR = await as('jq-alice', 'POST', `/me/job-candidates/${created.body.data.id}/submit`, { fingerprint: created.body.data.fingerprint })
     expect(submittedR.status).toBe(201)
     expect((await as('jq-alice', 'POST', `/me/job-candidates/${created.body.data.id}/submit`, { fingerprint: created.body.data.fingerprint })).status).toBe(200)

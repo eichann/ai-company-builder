@@ -114,6 +114,9 @@ test('nothing the AI reaches submits: only the session IPC names the submit rout
   // In the renderer only the chat card's data layer and the card call it.
   const renderer = filesUnder(path.join(here, '../src')).filter(f => /submitJobProposal\(/.test(readFileSync(f, 'utf8')))
   assert.deepEqual(renderer.map(f => path.relative(path.join(here, '..'), f)).sort(), ['src/features/chat/api.ts', 'src/features/chat/components/JobProposalCard.tsx'])
+  // 「やめる」 likewise: the session module alone names its route, only the card calls it.
+  assert.deepEqual(electron.filter(f => /\/discard[`'"]/.test(readFileSync(f, 'utf8')) && readFileSync(f, 'utf8').includes('job-candidates')).map(f => path.relative(path.join(here, '..'), f)), ['electron/features/jobs/proposals.ts'])
+  assert.deepEqual(filesUnder(path.join(here, '../src')).filter(f => /discardJobCandidate\(/.test(readFileSync(f, 'utf8'))).map(f => path.relative(path.join(here, '..'), f)).sort(), ['src/features/chat/api.ts', 'src/features/chat/components/JobProposalCard.tsx'])
 })
 
 async function chatTurn(body: Record<string, unknown>, extra: Record<string, unknown> = {}, guard = true) {

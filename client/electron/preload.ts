@@ -182,6 +182,7 @@ const api: ElectronAPI = {
   submitJobProposal: (companyId: string, candidateId: string, fingerprint: string) => invoke('jobProposals:submit', companyId, candidateId, fingerprint),
   getMyJobProposals: (companyId: string) => invoke('jobProposals:mine', companyId),
   withdrawJobProposal: (companyId: string, proposalId: string) => invoke('jobProposals:withdraw', companyId, proposalId),
+  discardJobCandidate: (companyId: string, candidateId: string) => invoke('jobProposals:discard', companyId, candidateId),
   getWorkSwitches: (companyId: string) => invoke('workSwitches:get', companyId),
   setWorkSwitch: (companyId: string, which: WorkSwitch, on: boolean) => invoke('workSwitches:set', companyId, which, on),
   getViewers: (companyId: string, query: ViewersQuery) => invoke('viewers:get', companyId, query),

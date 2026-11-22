@@ -160,6 +160,7 @@ contract.invoke handoff:complete
 contract.invoke handoff:get
 contract.invoke handoff:update
 contract.invoke jobProposals:candidate
+contract.invoke jobProposals:discard
 contract.invoke jobProposals:mine
 contract.invoke jobProposals:submit
 contract.invoke jobProposals:withdraw
@@ -415,6 +416,7 @@ contract.type ElectronAPI.declineMinutesBundle = declineMinutesBundle: Invoke<'m
 contract.type ElectronAPI.deleteChatSession = deleteChatSession: Invoke<'chatHistory:deleteSession'>
 contract.type ElectronAPI.deleteItem = deleteItem: Invoke<'fs:delete'>
 contract.type ElectronAPI.deleteOwnBrokerKey = deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
+contract.type ElectronAPI.discardJobCandidate = discardJobCandidate: Invoke<'jobProposals:discard'>
 contract.type ElectronAPI.discardOutboundMail = discardOutboundMail: Invoke<'outboundMail:discard'>
 contract.type ElectronAPI.disconnectGoogle = disconnectGoogle: Invoke<'google:disconnect'>
 contract.type ElectronAPI.disconnectSlack = disconnectSlack: Invoke<'slack:disconnect'>
@@ -920,6 +922,7 @@ contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args:
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
 contract.type IpcInvokeChannels.'jobProposals:candidate' = 'jobProposals:candidate': { args: [companyId: string, candidateId: string]; result: JobCandidateResult }
+contract.type IpcInvokeChannels.'jobProposals:discard' = 'jobProposals:discard': { args: [companyId: string, candidateId: string]; result: JobCandidateDiscardResult }
 contract.type IpcInvokeChannels.'jobProposals:mine' = 'jobProposals:mine': { args: [companyId: string]; result: MyJobProposalsResult }
 contract.type IpcInvokeChannels.'jobProposals:submit' = 'jobProposals:submit': { args: [companyId: string, candidateId: string, fingerprint: string]; result: JobProposalResult }
 contract.type IpcInvokeChannels.'jobProposals:withdraw' = 'jobProposals:withdraw': { args: [companyId: string, proposalId: string]; result: JobProposalResult }
@@ -1256,6 +1259,7 @@ main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle jobProposals:candidate @ features/jobs/proposals.ts (companyId, candidateId)
+main.handle jobProposals:discard @ features/jobs/proposals.ts (companyId, candidateId)
 main.handle jobProposals:mine @ features/jobs/proposals.ts (companyId)
 main.handle jobProposals:submit @ features/jobs/proposals.ts (companyId, candidateId, fingerprint)
 main.handle jobProposals:withdraw @ features/jobs/proposals.ts (companyId, proposalId)
@@ -1476,6 +1480,8 @@ preload deleteItem -> invoke fs:delete($0)
 preload deleteItem : (path: string) => Promise<FileOpResult>
 preload deleteOwnBrokerKey -> invoke brokerKeys:delete($0, $1)
 preload deleteOwnBrokerKey : (companyId: string, service: string) => Promise<OwnKeysResult>
+preload discardJobCandidate -> invoke jobProposals:discard($0, $1)
+preload discardJobCandidate : (companyId: string, candidateId: string) => Promise<JobCandidateDiscardResult>
 preload discardOutboundMail -> invoke outboundMail:discard($0, $1)
 preload discardOutboundMail : (companyId: string, messageId: string) => Promise<OutboundMailResult>
 preload disconnectGoogle -> invoke google:disconnect($0)

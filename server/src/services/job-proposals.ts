@@ -55,6 +55,8 @@ const FINGERPRINT_CHANGED = () => refuse('conflict', '画面に出ていた内�
 const GRANT_EXCEEDS = () => refuse('conflict', 'あなたの今の権限では、この案の範囲に足りません。AI にもう一度頼んでください。', { code: 'JOB_GRANT_EXCEEDS' })
 const WAITING_FULL = () => refuse('conflict', `管理者の確認を待っている案が${JOB_PROPOSALS_WAITING_MAX}つあります。どれかが決まるか、取り下げてから出してください。`, { code: 'JOB_PROPOSALS_WAITING_LIMIT' })
 const TODAY_FULL = () => refuse('conflict', `今日はもう${JOB_PROPOSALS_PER_DAY}回出しました。あした、もう一度出してください。`, { code: 'JOB_PROPOSALS_DAY_LIMIT' })
+const DISCARDED = () => refuse('gone', 'この案はやめました。出したいときは、もう一度 AI に頼んでください。', { code: 'JOB_CANDIDATE_DISCARDED' })
+const ALREADY_SUBMITTED = () => refuse('conflict', 'この案はもう管理者に出しました。やめるときは「取り下げる」を押してください。', { code: 'JOB_CANDIDATE_SUBMITTED' })
 const PROPOSAL_NOT_FOUND = () => refuse('not-found', '定期の仕事の案が見つかりません。', { code: 'JOB_PROPOSAL_NOT_FOUND' })
 const DECIDED = (state: string) => refuse('conflict', state === 'approved' ? 'この案はもう承認されました。' : 'この案はもう決まっています。', { code: 'JOB_PROPOSAL_DECIDED', state })
 
@@ -162,6 +164,8 @@ export function createJobProposals(deps: JobProposalDeps) {
     return {
       id: row.id, definition: storedJobDefinition({ schema: JOB_PROPOSAL_SCHEMA, definition: row.definition }) as JobDefinition,
       fingerprint: row.fingerprint, createdAt: row.createdAt, expiresAt: row.expiresAt, proposal: proposal ? proposalView(proposal, viewer) : null,
+      // The zone its times are in (the clock's), so the card can name it (additive: an older app ignores it).
+      timeZone: deps.timeZoneOf?.(viewer.companyId) ?? DEFAULT_COMPANY_TIME_ZONE,
     }
   }
 
@@ -245,6 +249,8 @@ export function createJobProposals(deps: JobProposalDeps) {
       const handle = companyData.forCompany(member.companyId)
       const row = handle.jobs.candidate(candidateId, member.userId, clock.now())
       if (!row) return CANDIDATE_NOT_FOUND()
+      // Discarded by its creator (their own act; it says nothing of what it named).
+      if (row.discarded) return DISCARDED()
       // What it names must still be theirs to read (jobs.md "Names never leak"): a place — or a shelf Skill's place — they no
       // longer read withholds the content and its fingerprint, answered as a candidate that is not there (naming nothing).
       const definition = storedJobDefinition({ schema: JOB_PROPOSAL_SCHEMA, definition: row.definition })
@@ -272,6 +278,7 @@ export function createJobProposals(deps: JobProposalDeps) {
       if (before) return first(before)
       const row = handle.jobs.candidate(candidateId, member.userId, clock.now())
       if (!row) return CANDIDATE_NOT_FOUND()
+      if (row.discarded) return DISCARDED()
       // As stored: never resolved again (the card showed this).
       const definition = storedJobDefinition({ schema: JOB_PROPOSAL_SCHEMA, definition: row.definition })
       if (definition === null || definition.actingUser !== member.userId) return CANDIDATE_NOT_FOUND()
@@ -289,6 +296,8 @@ export function createJobProposals(deps: JobProposalDeps) {
         // Everything that can change meanwhile, again, inside the write.
         const again = handle.jobs.proposalOfCandidate(member.userId, candidateId)
         if (again) return first(again)
+        // Discarded meanwhile (「やめる」 pressed while the awaits ran): never submitted.
+        if (handle.jobs.candidate(candidateId, member.userId, clock.now())?.discarded) return DISCARDED()
         if (!deps.jobs.rightsFit(member.companyId, member.userId, definition)) return GRANT_EXCEEDS()
         if (handle.jobs.countProposals(member.userId, { state: 'submitted' }) >= JOB_PROPOSALS_WAITING_MAX) return WAITING_FULL()
         if (handle.jobs.countProposals(member.userId, { since: dayStart(member.companyId) }) >= JOB_PROPOSALS_PER_DAY) return TODAY_FULL()
@@ -313,6 +322,24 @@ export function createJobProposals(deps: JobProposalDeps) {
       })
       if (result.ok && result.value.created) { try { deps.noticesChanged?.(member.companyId, admins) } catch { /* their own check catches up */ } }
       return result
+    },
+
+    /**
+     * `POST /me/job-candidates/:candidateId/discard` (the member's session, owner decision 2026-11-22): 「やめる」 — the creator's
+     * own candidate not submitted yet is marked discarded (kept until its time, never submittable); a submitted one is refused
+     * (its proposal is withdrawn instead), state unchanged. Again: the same answer. Another member's, another company's, an
+     * expired one: the one 404.
+     */
+    discard(member: Member, candidateId: string): Outcome<{ discarded: true }> {
+      if (!isJobCandidateId(candidateId)) return CANDIDATE_NOT_FOUND()
+      const handle = companyData.forCompany(member.companyId)
+      return transactions.run((): Outcome<{ discarded: true }> => {
+        if (handle.jobs.proposalOfCandidate(member.userId, candidateId)) return ALREADY_SUBMITTED()
+        const row = handle.jobs.candidate(candidateId, member.userId, clock.now())
+        if (!row) return CANDIDATE_NOT_FOUND()
+        if (!row.discarded) handle.jobs.discardCandidate(candidateId, member.userId)
+        return ok({ discarded: true as const })
+      })
     },
 
     /**
