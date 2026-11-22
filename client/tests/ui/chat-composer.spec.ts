@@ -157,7 +157,7 @@ async function drop(page: Page, files: { paths?: string[]; images?: Array<{ name
     for (const image of images ?? []) dt.items.add(new File([new Uint8Array(image.size ?? 4)], image.name, { type: 'image/png' }))
     return dt
   }, files)
-  await input(page).locator('xpath=ancestor::div[contains(@class, "rounded-xl")][1]').dispatchEvent('drop', { dataTransfer: data })
+  await input(page).locator('xpath=ancestor::div[contains(@class, "rounded-card")][1]').dispatchEvent('drop', { dataTransfer: data })
 }
 
 test('dropped files and images wait above the input, can be taken off, and go out with the message; the parent always knows how many wait', async ({ page }) => {

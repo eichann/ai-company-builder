@@ -206,7 +206,7 @@ function SettingsForm({ saved, onSaved }: { saved: AgentSandboxView; onSaved: (n
 
       <div
         className={cn(
-          'sticky bottom-4 z-10 flex flex-col gap-3 rounded-xl border bg-card px-4 py-3 shadow-md sm:flex-row sm:items-center sm:justify-between',
+          'sticky bottom-4 z-10 flex flex-col gap-3 rounded-card border bg-card px-4 py-3 shadow-md sm:flex-row sm:items-center sm:justify-between',
           !dirty && 'hidden'
         )}
         aria-live="polite"

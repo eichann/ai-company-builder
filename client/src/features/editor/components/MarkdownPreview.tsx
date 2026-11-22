@@ -27,9 +27,9 @@ export const MarkdownPreview = React.forwardRef<HTMLDivElement, {
         const raw = src || ''
         if (raw && !raw.startsWith('http') && !raw.startsWith('data:')) {
           // A company file: versioned URL, so a replaced image shows at once.
-          return <LocalImage {...props} filePath={`${basePath}/${raw.replace(/^\.\//, '')}`} alt={alt} className="max-w-full rounded" />
+          return <LocalImage {...props} filePath={`${basePath}/${raw.replace(/^\.\//, '')}`} alt={alt} className="max-w-full rounded-small" />
         }
-        return <img src={raw} alt={alt} {...props} className="max-w-full rounded" />
+        return <img src={raw} alt={alt} {...props} className="max-w-full rounded-small" />
       },
       a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
         <a href={href} {...props} target="_blank" rel="noopener noreferrer">{children}</a>
@@ -78,8 +78,8 @@ export const MarkdownPreview = React.forwardRef<HTMLDivElement, {
           mark.setAttribute('data-review-highlight', 'true')
           mark.setAttribute('data-comment-id', range.commentId)
           mark.className = range.resolved
-            ? 'bg-green-500/20 rounded px-0.5 transition-all'
-            : 'bg-amber-500/30 rounded px-0.5 transition-all'
+            ? 'bg-green-500/20 rounded-small px-0.5 transition-all'
+            : 'bg-amber-500/30 rounded-small px-0.5 transition-all'
           mark.textContent = before.textContent
           before.parentNode?.replaceChild(mark, before)
           // walker continues with `highlighted` node
@@ -98,7 +98,7 @@ export const MarkdownPreview = React.forwardRef<HTMLDivElement, {
     return (
       <div ref={setRefs} className="h-full overflow-auto px-8 py-6 relative">
         {search.searchOpen && (
-          <div className="sticky top-0 z-10 mb-4 flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-md max-w-md mx-auto">
+          <div className="sticky top-0 z-10 mb-4 flex items-center gap-2 px-3 py-2 rounded-control border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-md max-w-md mx-auto">
             <MagnifyingGlass size={14} className="text-gray-400 dark:text-zinc-500 flex-shrink-0" />
             <input
               ref={search.searchInputRef}
@@ -115,7 +115,7 @@ export const MarkdownPreview = React.forwardRef<HTMLDivElement, {
               autoFocus
             />
             {search.searchText && (
-              <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums flex-shrink-0">
+              <span className="text-caption font-normal text-gray-400 dark:text-zinc-500 tabular-nums flex-shrink-0">
                 {search.matchCount > 0 ? `${search.currentMatch + 1}/${search.matchCount}` : '0件'}
               </span>
             )}

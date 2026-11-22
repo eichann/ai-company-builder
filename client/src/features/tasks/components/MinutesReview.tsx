@@ -20,7 +20,7 @@ import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useTaskProposals } from '../hooks/useTaskProposals'
 import { MeetingTaskAdd } from './MeetingTaskAdd'
 
-const QUIET = 'inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-link disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
+const QUIET = 'inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-small text-gray-500 hover:bg-gray-100 hover:text-link disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
 
 const shortDue = (due: string | null) => {
   const m = due?.match(/^\d{4}-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?/)
@@ -76,7 +76,7 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
     <section aria-label={listTitle}>
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
         <Sparkle size={14} weight="fill" className="text-ai-icon" />
-        <h2 className="mr-auto text-[13px] font-semibold text-gray-700 dark:text-zinc-200">{listTitle}</h2>
+        <h2 className="mr-auto text-body font-semibold text-gray-700 dark:text-zinc-200">{listTitle}</h2>
         {!picking && <>
           {addable.length > 0 && <button type="button" disabled={busy} onClick={() => void act(addable, 'adopt')} className={MAIN_BUTTON}>全部足す</button>}
           {addable.length > 0 && <button type="button" disabled={busy} onClick={() => setPicking(new Set(addable.map(p => p.id)))} className={SMALL_BUTTON}>選んで足す</button>}
@@ -84,10 +84,10 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
         </>}
         {picking && <button type="button" onClick={() => setPicking(null)} className={SMALL_BUTTON}>選ぶのをやめる</button>}
       </div>
-      {result?.success && proposals.length > 0 && <p className="mb-1.5 text-[11.5px] text-gray-500">{proposalsHeadline(readerName, open.length)}</p>}
-      {result === null && <p className="text-[12px] text-gray-400">{CALM.loading}</p>}
-      {result && !result.success && <p role="alert" className="text-[12px] text-gray-500">{result.error}</p>}
-      {result?.success && proposals.length === 0 && others.length === 0 && <p className="text-[12px] text-gray-400">案はありません。</p>}
+      {result?.success && proposals.length > 0 && <p className="mb-1.5 text-small text-gray-500">{proposalsHeadline(readerName, open.length)}</p>}
+      {result === null && <p className="text-small text-gray-400">{CALM.loading}</p>}
+      {result && !result.success && <p role="alert" className="text-small text-gray-500">{result.error}</p>}
+      {result?.success && proposals.length === 0 && others.length === 0 && <p className="text-small text-gray-400">案はありません。</p>}
       <ul className="space-y-1.5">
         {proposals.map(p => (
           <ProposalRow key={p.id} p={p} busy={busy} picked={picking?.has(p.id) ?? null} readerId={readerId}
@@ -101,7 +101,7 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
           <button type="button" disabled={busy || picking.size === 0} onClick={() => void act(addable.filter(p => picking.has(p.id)), 'adopt')} className={MAIN_BUTTON}>選んだものを足す</button>
         </div>
       )}
-      {error && <p role="alert" className="mt-1 text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p role="alert" className="mt-1 text-small text-red-600 dark:text-red-400">{error}</p>}
       {onCreate && onUndo && (
         <MeetingTaskAdd busy={busy}
           onCreate={async title => { const r = await onCreate(title); reload(); return r }}
@@ -116,12 +116,12 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
         <section aria-label={DECISION_PROPOSAL_NAME}>
           <div className="mb-1 flex items-center gap-1.5">
             <ThingIcon kind="decision" size={14} label="" />
-            <h2 className="mr-auto text-[13px] font-semibold text-gray-700 dark:text-zinc-200">{DECISION_PROPOSAL_NAME}</h2>
+            <h2 className="mr-auto text-body font-semibold text-gray-700 dark:text-zinc-200">{DECISION_PROPOSAL_NAME}</h2>
             {confirmable.length > 1 && <button type="button" disabled={busy} onClick={() => void act(confirmable, 'confirm')} className={SMALL_BUTTON}>まとめてそうです</button>}
           </div>
-          <p className="mb-1.5 text-[11.5px] text-gray-500">AI が議事録から拾った案です。決める立場の人が「そうです」と確かめると、決めたことになります。</p>
-          {cannotRead && <p className="mb-1.5 text-[11.5px] text-gray-500">{cannotRead}</p>}
-          <ul className="space-y-1 text-[13px]">
+          <p className="mb-1.5 text-small text-gray-500">AI が議事録から拾った案です。決める立場の人が「そうです」と確かめると、決めたことになります。</p>
+          {cannotRead && <p className="mb-1.5 text-small text-gray-500">{cannotRead}</p>}
+          <ul className="space-y-1 text-body">
             {proposed.map(d => (
               <li key={d.id} className="flex items-center gap-2">
                 <button type="button" onClick={() => runCommand('record.open', { recordId: d.id })} className="min-w-0 truncate text-left hover:text-link hover:underline">{d.title}</button>
@@ -137,9 +137,9 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
         <section aria-label={decisionsTitle}>
           <div className="mb-2 flex items-center gap-1.5">
             <ThingIcon kind="decision" size={14} label="" />
-            <h2 className="mr-auto text-[13px] font-semibold text-gray-700 dark:text-zinc-200">{decisionsTitle}</h2>
+            <h2 className="mr-auto text-body font-semibold text-gray-700 dark:text-zinc-200">{decisionsTitle}</h2>
           </div>
-          <ul className="space-y-1 text-[13px]">
+          <ul className="space-y-1 text-body">
             {decided.map(d => (
               <li key={d.id} className="flex items-center gap-2">
                 <button type="button" onClick={() => runCommand('record.open', { recordId: d.id })} className="min-w-0 truncate text-left hover:text-link hover:underline">{d.title}</button>
@@ -154,10 +154,10 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
   const hasDecisions = review.decisions.length > 0
   return (
     <>
-      {!onMeetingCard && <section aria-label="要約（AI）" className="rounded-lg bg-gray-50 px-3.5 py-2.5 text-[13px] leading-relaxed dark:bg-zinc-800/50">
-        <div className="mb-0.5 text-[11px] text-gray-500">要約（AI）</div>
+      {!onMeetingCard && <section aria-label="要約（AI）" className="rounded-control bg-gray-50 px-3.5 py-2.5 text-body leading-relaxed dark:bg-zinc-800/50">
+        <div className="mb-0.5 text-caption font-normal text-gray-500">要約（AI）</div>
         <p className="whitespace-pre-wrap">{review.summary ?? 'AI はまだ議事録を読んでいません。'}</p>
-        <button type="button" onClick={() => runCommand('record.open', { recordId: review.meetingId })} className="text-[11.5px] text-link hover:underline">会議の記録を開く</button>
+        <button type="button" onClick={() => runCommand('record.open', { recordId: review.meetingId })} className="text-small text-link hover:underline">会議の記録を開く</button>
       </section>}
       {onMeetingCard && hasDecisions && decisionList}
       {proposalList}
@@ -168,7 +168,7 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
 
 function MadeRow({ t }: { t: RecordViewSummary }) {
   return (
-    <li className="rounded-lg border border-gray-200 px-3 py-2 text-[12.5px] dark:border-zinc-700">
+    <li className="rounded-control border border-gray-200 px-3 py-2 text-small dark:border-zinc-700">
       <button type="button" onClick={() => runCommand('record.open', { recordId: t.id })} className="flex w-full min-w-0 items-center gap-2 text-left hover:text-link">
         <ThingIcon kind="task" size={13} label="" />
         <span className={`min-w-0 flex-1 truncate font-medium ${t.finished ? 'text-gray-400 line-through' : ''}`}>{t.title}</span>
@@ -186,12 +186,12 @@ function ProposalRow({ p, busy, picked, readerId, onPick, onAct }: {
   // Whose AI added it, when not the one that read the meeting (another attendee's consultation).
   const origin = p.addedBy && p.addedBy !== readerId ? `${p.addedByName ?? 'メンバー'}さんの AI が追加` : null
   return (
-    <li className={`rounded-lg border px-3 py-2 text-[12.5px] ${away ? 'border-gray-100 opacity-60 dark:border-zinc-800' : 'border-gray-200 dark:border-zinc-700'}`}>
+    <li className={`rounded-control border px-3 py-2 text-small ${away ? 'border-gray-100 opacity-60 dark:border-zinc-800' : 'border-gray-200 dark:border-zinc-700'}`}>
       <div className="flex items-center gap-2">
         {picked !== null && !away && p.may.adopt && <input type="checkbox" aria-label={`${p.title} を選ぶ`} checked={picked} onChange={e => onPick(e.target.checked)} />}
         <ThingIcon kind="task" size={13} label="" />
         <span className={`min-w-0 flex-1 truncate font-medium ${away ? 'line-through' : ''}`}>{p.title}</span>
-        {sub && <span className="whitespace-nowrap text-[11px] text-gray-500">{sub}</span>}
+        {sub && <span className="whitespace-nowrap text-caption font-normal text-gray-500">{sub}</span>}
         {picked === null && !away && <>
           {p.may.adopt && <button type="button" disabled={busy} onClick={() => onAct('adopt')} className={SMALL_BUTTON}>足す</button>}
           {p.may.dismiss && <button type="button" disabled={busy} onClick={() => onAct('dismiss')} className={QUIET}>要らない</button>}
@@ -199,13 +199,13 @@ function ProposalRow({ p, busy, picked, readerId, onPick, onAct }: {
         {away && <><Chip>しまった</Chip>{p.may.proposeAgain && <button type="button" disabled={busy} onClick={() => onAct('propose_again')} className={QUIET}>戻す</button>}</>}
       </div>
       {(p.basis || origin) && (
-        <div className="mt-1 flex flex-wrap items-baseline gap-x-2 pl-5 text-[11px] text-gray-500 dark:text-zinc-400">
+        <div className="mt-1 flex flex-wrap items-baseline gap-x-2 pl-5 text-caption font-normal text-gray-500 dark:text-zinc-400">
           {p.basis && <span className="min-w-0 truncate" title={p.basis}>「{p.basis}」</span>}
           {origin && <span className="whitespace-nowrap">{origin}</span>}
         </div>
       )}
       {p.similarTo && !away && (
-        <div role="note" className="mt-1.5 flex flex-wrap items-center gap-2 rounded-md bg-amber-50 px-2 py-1 pl-5 text-[11.5px] text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+        <div role="note" className="mt-1.5 flex flex-wrap items-center gap-2 rounded-md bg-amber-50 px-2 py-1 pl-5 text-small text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
           <span className="min-w-0 flex-1">似ている案があります：「{p.similarTo.title}」</span>
           {p.may.dismiss && <button type="button" disabled={busy} onClick={() => onAct('dismiss', slotSameAsNote(p.similarTo?.title ?? ''))} className={QUIET}>同じ</button>}
           {p.may.keepApart && <button type="button" disabled={busy} onClick={() => onAct('keep_apart')} className={QUIET}>別のもの</button>}

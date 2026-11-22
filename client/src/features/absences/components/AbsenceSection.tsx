@@ -6,7 +6,7 @@ import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../share
 import { absenceDayText, absenceRangeText } from '../../../../shared/absences'
 import { useAbsences } from '../hooks/useAbsences'
 
-const INPUT = 'h-9 rounded-lg border border-zinc-200 bg-white px-3 text-[13px] text-zinc-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:focus:border-indigo-400/60'
+const INPUT = 'h-9 rounded-control border border-zinc-200 bg-white px-3 text-body text-zinc-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:focus:border-indigo-400/60'
 
 export function AbsenceSection({ companyId }: { companyId: string }) {
   const { loadRef, view, members, error, message, busy, add, remove } = useAbsences(companyId)
@@ -27,7 +27,7 @@ export function AbsenceSection({ companyId }: { companyId: string }) {
         description="不在の間、あなたの番・承認・知らせが代わりの人にも出ます。代わりの人は自分の権限で動くので、見られないものは「権限が足りない」で止まります。"
       />
       {!view && !error ? (
-        <div className="flex items-center gap-2 py-10 text-[13px] text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
+        <div className="flex items-center gap-2 py-10 text-body text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
       ) : !view ? (
         <Callout tone="danger" role="alert">{error}</Callout>
       ) : (
@@ -40,15 +40,15 @@ export function AbsenceSection({ companyId }: { companyId: string }) {
           <Card className="space-y-3 p-5">
             <SubHeading>あなたの不在</SubHeading>
             {view.absences.length === 0 ? (
-              <p className="text-[13px] text-zinc-600 dark:text-zinc-300">予定している不在はありません。</p>
+              <p className="text-body text-zinc-600 dark:text-zinc-300">予定している不在はありません。</p>
             ) : (
               <ul className="divide-y divide-zinc-100 dark:divide-white/[0.06]">
                 {view.absences.map(a => (
-                  <li key={a.id} className="flex flex-wrap items-center gap-2 py-2 text-[13px]">
+                  <li key={a.id} className="flex flex-wrap items-center gap-2 py-2 text-body">
                     <span className="font-medium">{absenceRangeText(a.from, a.until)}</span>
                     <span className="text-zinc-600 dark:text-zinc-300">代わりの人：{a.delegateName ?? 'メンバー'}さん</span>
                     {a.active && (
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">いま不在中</span>
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-caption font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">いま不在中</span>
                     )}
                     {view.canEdit && (
                       <Button size="sm" variant="ghost" className="ml-auto" disabled={busy} onClick={() => void remove(a.id)}>削除</Button>
@@ -61,7 +61,7 @@ export function AbsenceSection({ companyId }: { companyId: string }) {
           {view.canEdit && (
             <Card className="space-y-3 p-5">
               <SubHeading>不在を追加</SubHeading>
-              <div className="flex flex-wrap items-end gap-3 text-[13px]">
+              <div className="flex flex-wrap items-end gap-3 text-body">
                 <label className="flex flex-col gap-1">
                   <span className="text-zinc-500">始まりの日</span>
                   <input type="date" className={INPUT} value={from} min={view.today} onChange={e => setFrom(e.target.value)} />
@@ -79,10 +79,10 @@ export function AbsenceSection({ companyId }: { companyId: string }) {
                 </label>
                 <Button size="sm" variant="primary" disabled={!canAdd} onClick={() => void submit()}>追加</Button>
               </div>
-              {from && until && from > until && <p className="text-[12px] text-amber-700 dark:text-amber-300">終わりの日は始まりの日と同じか、それより後にしてください。</p>}
+              {from && until && from > until && <p className="text-small text-amber-700 dark:text-amber-300">終わりの日は始まりの日と同じか、それより後にしてください。</p>}
             </Card>
           )}
-          {message && <p role="status" className="text-[12px] text-zinc-600 dark:text-zinc-300">{message}</p>}
+          {message && <p role="status" className="text-small text-zinc-600 dark:text-zinc-300">{message}</p>}
         </>
       )}
     </div>

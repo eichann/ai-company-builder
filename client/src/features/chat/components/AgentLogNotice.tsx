@@ -20,12 +20,12 @@ export function AgentLogNotice({ userId }: { userId: string }) {
         aria-labelledby={titleId}
         aria-describedby={bodyId}
         onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); close() } }}
-        className="pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-xl border border-zinc-200 bg-white p-4 text-zinc-800 shadow-lg dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-100"
+        className="pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-card border border-zinc-200 bg-white p-4 text-zinc-800 shadow-lg dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-100"
       >
         <Info size={18} className="mt-0.5 shrink-0 text-indigo-600 dark:text-indigo-300" aria-hidden />
         <div className="min-w-0 flex-1">
-          <p id={titleId} className="text-[13px] font-semibold">AI の操作の記録について</p>
-          <p id={bodyId} className="mt-1 text-[13px] leading-relaxed text-zinc-600 dark:text-zinc-300">
+          <p id={titleId} className="text-body font-semibold">AI の操作の記録について</p>
+          <p id={bodyId} className="mt-1 text-body leading-relaxed text-zinc-600 dark:text-zinc-300">
             {AGENT_LOG_NOTICE_TEXT}{AGENT_LOG_NOTICE_MORE}
           </p>
           <div className="mt-3 flex justify-end">
@@ -33,7 +33,7 @@ export function AgentLogNotice({ userId }: { userId: string }) {
               autoFocus
               type="button"
               onClick={close}
-              className={`h-8 rounded-lg px-4 text-[13px] font-medium ${PRIMARY_ACTION}`}
+              className={`h-8 rounded-control px-4 text-body font-medium ${PRIMARY_ACTION}`}
             >
               OK
             </button>

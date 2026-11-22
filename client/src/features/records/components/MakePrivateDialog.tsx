@@ -4,9 +4,9 @@
 import { useState } from 'react'
 import { LockSimple } from '@phosphor-icons/react'
 import type { MakePrivateOffer } from '../../../../shared/record-views'
-import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { makePrivateWords } from '../makePrivate'
 import { Dialog, DialogCloseButton, DialogFooter, DialogTitle } from '../../../shared/ui/Dialog'
+import { Button } from '../../../shared/ui/primitives'
 
 export function MakePrivateDialog({ title, word, offer, onConfirm, onClose }: {
   title: string
@@ -28,20 +28,20 @@ export function MakePrivateDialog({ title, word, offer, onConfirm, onClose }: {
     else onClose()
   }
   return (
-    <Dialog onClose={onClose} label="非公開にする" size="md" dismissible={!busy} className="text-[13px]">
+    <Dialog onClose={onClose} label="非公開にする" size="md" dismissible={!busy} className="text-body">
         <div className="flex items-center gap-2"><DialogTitle className="flex flex-1 items-center gap-1.5"><LockSimple size={14} />『{title}』を非公開にする</DialogTitle>
           <DialogCloseButton onClick={onClose} disabled={busy} /></div>
         <div className="mt-3 space-y-3">
-          <p className="text-[12.5px] leading-relaxed">{words.who}</p>
-          {words.tasks && <p className="text-[12.5px] leading-relaxed">{words.tasks}</p>}
-          <p className="text-[12px] text-gray-600 dark:text-zinc-300">{words.stays}</p>
-          <p className="text-[12px] text-gray-600 dark:text-zinc-300">{words.once}</p>
-          {words.blocked && <p role="note" className="rounded-md bg-amber-500/[0.08] px-2.5 py-2 text-[12px]">{words.blocked}</p>}
-          {error && <p role="alert" className="whitespace-pre-line text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+          <p className="text-small leading-relaxed">{words.who}</p>
+          {words.tasks && <p className="text-small leading-relaxed">{words.tasks}</p>}
+          <p className="text-small text-gray-600 dark:text-zinc-300">{words.stays}</p>
+          <p className="text-small text-gray-600 dark:text-zinc-300">{words.once}</p>
+          {words.blocked && <p role="note" className="rounded-md bg-amber-500/[0.08] px-2.5 py-2 text-small">{words.blocked}</p>}
+          {error && <p role="alert" className="whitespace-pre-line text-small text-red-600 dark:text-red-400">{error}</p>}
         </div>
         <DialogFooter>
-          <button type="button" onClick={onClose} disabled={busy} className={SMALL_BUTTON}>やめておく</button>
-          <button type="button" disabled={busy || offer.blocked} onClick={() => void run()} className={MAIN_BUTTON}>非公開にする</button>
+          <Button onClick={onClose} disabled={busy}>やめておく</Button>
+          <Button variant="primary" disabled={busy || offer.blocked} onClick={() => void run()}>非公開にする</Button>
         </DialogFooter>
     </Dialog>
   )

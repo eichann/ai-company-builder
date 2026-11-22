@@ -111,7 +111,7 @@ export function NewSkillWizard({
         <div className="flex items-center justify-between px-6 py-4 border-b border-[color:var(--color-border)]">
           <div className="flex items-center gap-3">
             <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              className="w-8 h-8 rounded-control flex items-center justify-center"
               style={{ backgroundColor: `${color}20` }}
             >
               <Lightning size={16} weight="fill" style={{ color }} />
@@ -183,7 +183,7 @@ export function NewSkillWizard({
                   onChange={(e) => handleNameChange(e.target.value)}
                   placeholder={t('skillWizard.namePlaceholder')}
                   className="
-                    w-full px-4 py-3 rounded-xl
+                    w-full px-4 py-3 rounded-card
                     bg-[var(--color-surface)] border border-border-control
                     text-text placeholder:text-text-subtle
                     focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-transparent
@@ -206,7 +206,7 @@ export function NewSkillWizard({
                   onChange={(e) => handleFolderNameChange(e.target.value)}
                   placeholder="my-skill-name"
                   className={`
-                    w-full px-4 py-3 rounded-xl
+                    w-full px-4 py-3 rounded-card
                     bg-[var(--color-surface)] border
                     text-text placeholder:text-text-subtle
                     focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-transparent
@@ -235,7 +235,7 @@ export function NewSkillWizard({
                   placeholder={t('skillWizard.descriptionPlaceholder')}
                   rows={4}
                   className="
-                    w-full px-4 py-3 rounded-xl
+                    w-full px-4 py-3 rounded-card
                     bg-[var(--color-surface)] border border-border-control
                     text-text placeholder:text-text-subtle
                     focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-transparent
@@ -262,7 +262,7 @@ export function NewSkillWizard({
                   placeholder={t('skillWizard.promptPlaceholder', '例: ユーザーの要望を聞いて、提案書を作成してください。提案書には以下の要素を含めてください...')}
                   rows={8}
                   className="
-                    w-full px-4 py-3 rounded-xl
+                    w-full px-4 py-3 rounded-card
                     bg-[var(--color-surface)] border border-border-control
                     text-text placeholder:text-text-subtle
                     focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-transparent
@@ -277,10 +277,10 @@ export function NewSkillWizard({
 
           {step === 'confirm' && (
             <div className="space-y-4">
-              <div className="p-4 rounded-xl bg-bg border border-[color:var(--color-border)]">
+              <div className="p-4 rounded-card bg-bg border border-[color:var(--color-border)]">
                 <div className="flex items-center gap-3 mb-3">
                   <div
-                    className="w-10 h-10 rounded-xl flex items-center justify-center"
+                    className="w-10 h-10 rounded-card flex items-center justify-center"
                     style={{ backgroundColor: `${color}20` }}
                   >
                     <FileText size={20} weight="fill" style={{ color }} />
@@ -307,7 +307,7 @@ export function NewSkillWizard({
                 {t('skillWizard.foldersCreated', '作成されるフォルダ:')} <span className="font-mono">rules/</span>, <span className="font-mono">references/</span>, <span className="font-mono">scripts/</span>, <span className="font-mono">tools/</span>
               </div>
 
-              <div className="flex items-start gap-3 p-3 rounded-xl bg-info-bg border border-info-border">
+              <div className="flex items-start gap-3 p-3 rounded-card bg-info-bg border border-info-border">
                 <Sparkle size={16} className="text-info-icon flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-info-text">
                   {t('skillWizard.editHint')}
@@ -329,7 +329,7 @@ export function NewSkillWizard({
             onClick={handleBack}
             disabled={step === 'name' || busy}
             className={`
-              flex items-center gap-2 px-4 py-2 rounded-lg
+              flex items-center gap-2 px-4 py-2 rounded-control
               text-sm font-medium
               transition-colors
               ${step === 'name'
@@ -346,7 +346,7 @@ export function NewSkillWizard({
             onClick={handleNext}
             disabled={busy || (step === 'name' && (!name.trim() || !folderNameValid))}
             className={`
-              flex items-center gap-2 px-5 py-2.5 rounded-lg
+              flex items-center gap-2 px-5 py-2.5 rounded-control
               text-sm font-medium text-white
               transition-all cursor-pointer
               disabled:opacity-50 disabled:cursor-not-allowed

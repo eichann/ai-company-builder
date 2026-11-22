@@ -24,20 +24,20 @@ export function JobsSection({ companyId }: { companyId: string }) {
         description="あなたが責任者の、決まった時間に動く仕事です。あなたの権限で動くので、内容を確かめて「受け取る」を押すまでは動きません。"
       />
       {!jobs && !error ? (
-        <div className="flex items-center gap-2 py-10 text-[13px] text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
+        <div className="flex items-center gap-2 py-10 text-body text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
       ) : !jobs ? (
         <Callout tone="danger" role="alert">{error}</Callout>
       ) : jobs.length === 0 ? (
-        <p className="text-[13px] text-zinc-600 dark:text-zinc-300">あなたが責任者の定期の仕事はありません。</p>
+        <p className="text-body text-zinc-600 dark:text-zinc-300">あなたが責任者の定期の仕事はありません。</p>
       ) : (
         <>
           {waiting.map(job => (
             <Card key={job.id} className="space-y-3 p-5">
               <SubHeading>{job.toAccept?.why === 'place' ? 'できたものを置く先を選び直してください' : '受け取りを待っています'}：{job.name}</SubHeading>
-              {placeLine(job) && <p className="text-[13px] text-zinc-700 dark:text-zinc-200">{placeLine(job)}</p>}
+              {placeLine(job) && <p className="text-body text-zinc-700 dark:text-zinc-200">{placeLine(job)}</p>}
               {job.toAccept?.definition ? (
                 <>
-                  <ul aria-label={`「${job.name}」の内容`} className="space-y-1 text-[13px] text-zinc-700 dark:text-zinc-200">
+                  <ul aria-label={`「${job.name}」の内容`} className="space-y-1 text-body text-zinc-700 dark:text-zinc-200">
                     <li>いつ：{jobTriggerText(job.toAccept.definition.trigger)}</li>
                     {isRecordTrigger(job.toAccept.definition.trigger) && <li>{JOB_EVENT_NOTE}</li>}
                     <li>すること：{jobRunText(job.toAccept.definition.run)}</li>
@@ -50,13 +50,13 @@ export function JobsSection({ companyId }: { companyId: string }) {
                     <Button size="sm" variant="primary" disabled={busy || !job.toAccept.fingerprint} onClick={() => void accept(job)}>
                       {job.toAccept.why === 'place' ? '置き先を選び直す' : job.deliverTo ? '置き先を選んで受け取る' : '受け取る'}
                     </Button>
-                    <span className="text-[12px] text-zinc-500">
+                    <span className="text-small text-zinc-500">
                       {job.deliverTo ? '押すと、置き先を選ぶ画面が開きます。選んだ1か所だけに、あなたの名前で置きます。' : '受け取ると、この内容のとおりにあなたの名前で動きます。違うときは管理者に知らせてください。'}
                     </span>
                   </div>
                 </>
               ) : (
-                <p className="text-[13px] text-zinc-600 dark:text-zinc-300">この仕事には、あなたが今は見られない場所が含まれているため、内容を表示できません。管理者に確かめてください。</p>
+                <p className="text-body text-zinc-600 dark:text-zinc-300">この仕事には、あなたが今は見られない場所が含まれているため、内容を表示できません。管理者に確かめてください。</p>
               )}
             </Card>
           ))}
@@ -65,14 +65,14 @@ export function JobsSection({ companyId }: { companyId: string }) {
               <SubHeading>あなたの定期の仕事</SubHeading>
               <ul className="divide-y divide-zinc-100 dark:divide-white/[0.06]">
                 {others.map(job => (
-                  <li key={job.id} aria-label={job.name} className="flex flex-wrap items-center gap-2 py-2 text-[13px]">
+                  <li key={job.id} aria-label={job.name} className="flex flex-wrap items-center gap-2 py-2 text-body">
                     <span className="font-medium">{job.name}</span>
                     {job.trigger && <span className="text-zinc-600 dark:text-zinc-300">{jobTriggerText(job.trigger)}</span>}
                     <span className="text-zinc-600 dark:text-zinc-300">{jobRunsText(job.waiting, job.pausedReason, job.placement)}</span>
                     {job.nextSlot && job.waiting === null && job.placement !== 'a' && <span className="text-zinc-500">次は {jobSlotText(job.nextSlot)}</span>}
-                    {placeLine(job) && <span className="w-full text-[12px] text-zinc-500">{placeLine(job)}</span>}
+                    {placeLine(job) && <span className="w-full text-small text-zinc-500">{placeLine(job)}</span>}
                     {job.chainStopped && (
-                      <span role="status" className="w-full text-[12px] text-red-600 dark:text-red-400">{job.chainStopped.why}。{JOB_CHAIN_STOPPED_ASK}</span>
+                      <span role="status" className="w-full text-small text-red-600 dark:text-red-400">{job.chainStopped.why}。{JOB_CHAIN_STOPPED_ASK}</span>
                     )}
                     {job.chainStopped && job.controls && job.approvedVersion !== null && (
                       <RewatchPicker companyId={companyId} busy={busy} onPick={recordId => void rewatch(job, recordId)} />
@@ -88,7 +88,7 @@ export function JobsSection({ companyId }: { companyId: string }) {
               </ul>
             </Card>
           )}
-          {message && <p role="status" className="text-[12px] text-zinc-600 dark:text-zinc-300">{message}</p>}
+          {message && <p role="status" className="text-small text-zinc-600 dark:text-zinc-300">{message}</p>}
         </>
       )}
       {/* Stage 4b-2: also after a hand-over (the job is no longer listed above, its occurrences they ran still are). */}

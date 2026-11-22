@@ -106,7 +106,7 @@ function Filters({ filters, onChange }: { filters: LogFilters; onChange: (next: 
   return (
     <section aria-label="絞り込み" className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div role="radiogroup" aria-label="期間" className="inline-flex rounded-lg border bg-card p-0.5 shadow-xs">
+        <div role="radiogroup" aria-label="期間" className="inline-flex rounded-control border bg-card p-0.5 shadow-xs">
           {PERIODS.map((p) => (
             <button
               key={p}
@@ -213,7 +213,7 @@ function Filters({ filters, onChange }: { filters: LogFilters; onChange: (next: 
 
 function ConversationHeader({ onBack }: { onBack: () => void }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border bg-card px-4 py-3 shadow-xs sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-card border bg-card px-4 py-3 shadow-xs sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-start gap-2.5">
         <ChatsCircle size={20} className="mt-0.5 shrink-0 text-primary" />
         <div>
@@ -333,7 +333,7 @@ function SummaryStrip({ filters, onPickMember }: { filters: LogFilters; onPickMe
                 <div
                   key={days[i]}
                   title={`${days[i].replaceAll('-', '/')}: ${n}件`}
-                  className={cn('min-w-0.5 max-w-4 flex-1 rounded-t-sm', n > 0 ? 'bg-brand/70' : 'bg-muted')}
+                  className={cn('min-w-0.5 max-w-4 flex-1 rounded-t-small', n > 0 ? 'bg-brand/70' : 'bg-muted')}
                   style={{ height: n > 0 ? `${Math.max(12, (n / max) * 100)}%` : '2px' }}
                 />
               ))}
@@ -496,7 +496,7 @@ export function EventRow({
             <button
               type="button"
               onClick={() => onOpenConversation(e.conversationId!)}
-              className="rounded text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="rounded-small text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               この会話の流れ
             </button>

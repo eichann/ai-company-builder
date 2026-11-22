@@ -28,7 +28,7 @@ export const SkillCard = memo(function SkillCard({ skill, color, isSelected, onS
     >
       {/* Skill Icon/Indicator */}
       <div
-        className="w-10 h-10 rounded-xl flex items-center justify-center mb-4"
+        className="w-10 h-10 rounded-card flex items-center justify-center mb-4"
         style={{ backgroundColor: `${color}20` }}
       >
         <FileText size={20} weight="fill" style={{ color }} />
@@ -40,12 +40,12 @@ export const SkillCard = memo(function SkillCard({ skill, color, isSelected, onS
           {skill.name}
         </h3>
         {skill.shelf && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">
+          <span className="px-1.5 py-0.5 rounded-small text-[10px] font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400">
             {{ company: '会社の Skill', clash: '会社と同じ名前', editing: '自分用に直し中' }[skill.shelf.state]}
           </span>
         )}
         {skill.isNurturing && (
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+          <span className="px-1.5 py-0.5 rounded-small text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
             育て中
           </span>
         )}
@@ -64,7 +64,7 @@ export const SkillCard = memo(function SkillCard({ skill, color, isSelected, onS
             onExecute()
           }}
           className="
-            flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+            flex items-center gap-1.5 px-3 py-1.5 rounded-control
             text-xs font-medium
             transition-all duration-150
             hover:scale-105 active:scale-95
@@ -84,7 +84,7 @@ export const SkillCard = memo(function SkillCard({ skill, color, isSelected, onS
             onSelect()
           }}
           className="
-            flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+            flex items-center gap-1.5 px-3 py-1.5 rounded-control
             text-xs font-medium text-gray-500 dark:text-zinc-400
             bg-gray-200 dark:bg-white/[0.05] hover:bg-gray-300 dark:hover:bg-white/[0.08]
             transition-all duration-150

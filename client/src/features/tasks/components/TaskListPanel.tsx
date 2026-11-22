@@ -15,7 +15,7 @@ import { BundleChooser } from './BundleChooser'
 import { QuickAdd } from './QuickAdd'
 import { EventRow, TaskRow } from './TaskRow'
 
-const HEADER = 'mb-1 flex w-full items-center gap-1.5 px-2.5 text-[11px] font-semibold text-gray-500 dark:text-zinc-400'
+const HEADER = 'mb-1 flex w-full items-center gap-1.5 px-2.5 text-caption font-semibold text-gray-500 dark:text-zinc-400'
 
 interface Props {
   companyId: string
@@ -192,11 +192,11 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
     return (
       <div key={`group:${r.key}`} data-testid="bundle-group">
         <button type="button" aria-expanded={open} onClick={() => setUnfolded(u => ({ ...u, [`group:${r.key}`]: !open }))}
-          className="flex w-full items-start gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-zinc-800">
+          className="flex w-full items-start gap-2 rounded-control px-2.5 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-zinc-800">
           <Briefcase size={15} className="mt-[2px] shrink-0 text-gray-400" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] text-gray-800 dark:text-zinc-200">{meetingWords.group(r.items.length)}</span>
-            <span className="block truncate text-[11px] text-gray-500 dark:text-zinc-400">{r.label}</span>
+            <span className="block truncate text-body text-gray-800 dark:text-zinc-200">{meetingWords.group(r.items.length)}</span>
+            <span className="block truncate text-caption font-normal text-gray-500 dark:text-zinc-400">{r.label}</span>
           </span>
           {open ? <CaretDown size={10} className="mt-1.5" /> : <CaretRight size={10} className="mt-1.5" />}
         </button>
@@ -244,7 +244,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
       )}
       <section aria-label="やることの一覧" className="flex h-full w-full flex-col bg-white dark:bg-zinc-900">
         <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b border-gray-200 px-3 dark:border-zinc-800">
-          <span role="group" aria-label="並べ方" className="inline-flex overflow-hidden rounded-md border border-gray-200 text-[11px] dark:border-zinc-700">
+          <span role="group" aria-label="並べ方" className="inline-flex overflow-hidden rounded-md border border-gray-200 text-caption font-normal dark:border-zinc-700">
             {(['turn', 'bundle', 'date'] as const).map(m => (
               <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}
                 className={`px-2 py-0.5 whitespace-nowrap ${mode === m ? 'bg-primary text-on-primary' : 'text-gray-600 hover:bg-gray-100 dark:text-zinc-300 dark:hover:bg-zinc-800'}`}>
@@ -261,7 +261,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
         </div>
         <QuickAdd companyId={companyId} now={now} tagsInUse={tags.map(t => t.tag)} me={list.data?.me} members={list.data?.members} bundleWord={deptKind?.name ?? bundleWord} bundleType={askFolder ? deptKind?.type : undefined} onAdd={add} />
         {tags.length > 0 && (
-          <div role="group" aria-label="タグで絞る" className="flex flex-shrink-0 flex-wrap items-center gap-1 px-3 py-1.5 text-[11px]">
+          <div role="group" aria-label="タグで絞る" className="flex flex-shrink-0 flex-wrap items-center gap-1 px-3 py-1.5 text-caption font-normal">
             <button type="button" aria-pressed={shownTag === null} onClick={() => setTag(null)} className={`rounded-full px-2 py-px ${shownTag === null ? 'bg-gray-800 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-zinc-800'}`}>すべて</button>
             {tags.map(({ tag: t, count }) => (
               <button key={t} type="button" aria-pressed={shownTag === t} onClick={() => setTag(shownTag === t ? null : t)}
@@ -271,18 +271,18 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
             ))}
           </div>
         )}
-        {(message || list.error) && <p role="alert" className="mx-3 my-1 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">{message ?? list.error}</p>}
+        {(message || list.error) && <p role="alert" className="mx-3 my-1 rounded-small bg-amber-50 px-2 py-1 text-caption font-normal text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">{message ?? list.error}</p>}
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-1.5 pb-2 pt-1">
-          {list.data === null && !list.error && <p className="px-2.5 py-2 text-[12px] text-gray-400">{CALM.loading}</p>}
+          {list.data === null && !list.error && <p className="px-2.5 py-2 text-small text-gray-400">{CALM.loading}</p>}
           {list.data && sections.length === 0 && (
-            <p className="px-2.5 py-4 text-[12px] leading-relaxed text-gray-500 dark:text-zinc-400">
+            <p className="px-2.5 py-4 text-small leading-relaxed text-gray-500 dark:text-zinc-400">
               {shownTag ? `#${shownTag} のやることはありません。` : `${CALM.emptyTasks}。上の1行で自分のやることを足せます。`}
             </p>
           )}
           {sections.map(section)}
           {list.data?.available && <ArchiveSection companyId={companyId} activeRecordId={activeRecordId} onOpen={onOpen} />}
           {calendar?.reason === 'not-connected' && shownTag === null && (
-            <p className="px-2.5 text-[10.5px] text-gray-400">設定で Google の予定を読む許可をすると、今日の予定もここに並びます。</p>
+            <p className="px-2.5 text-caption font-normal text-gray-400">設定で Google の予定を読む許可をすると、今日の予定もここに並びます。</p>
           )}
         </div>
       </section>

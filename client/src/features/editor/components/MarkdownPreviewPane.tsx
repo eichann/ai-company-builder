@@ -93,7 +93,7 @@ export function MarkdownPreviewPane({
                     Slack通知連携で再利用予定のため残してある。 */}
                 <button
                   onClick={review.startReview}
-                  className="flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm shadow-sm text-amber-500 hover:text-amber-400 transition-colors"
+                  className="flex items-center gap-1 px-2 py-1 text-caption font-normal rounded-md border border-gray-200 dark:border-zinc-700 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm shadow-sm text-amber-500 hover:text-amber-400 transition-colors"
                   title="新しいレビューを開始する"
                 >
                   <ChatCircleDots size={12} />
@@ -104,13 +104,13 @@ export function MarkdownPreviewPane({
             <div className="flex rounded-md border border-gray-200 dark:border-zinc-700 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm shadow-sm overflow-hidden">
               <button
                 onClick={onShowEditor}
-                className="flex items-center gap-1 px-2 py-1 text-[11px] transition-colors text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300"
+                className="flex items-center gap-1 px-2 py-1 text-caption font-normal transition-colors text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300"
                 title="エディタ"
               >
                 <Code size={12} />
               </button>
               <button
-                className="flex items-center gap-1 px-2 py-1 text-[11px] transition-colors bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200"
+                className="flex items-center gap-1 px-2 py-1 text-caption font-normal transition-colors bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200"
                 title="プレビュー"
               >
                 <Eye size={12} />
@@ -121,7 +121,7 @@ export function MarkdownPreviewPane({
           {!review.isReviewing && (
             <button
               onClick={onEdit}
-              className={`absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium shadow-lg transition-colors ${PRIMARY_ACTION}`}
+              className={`absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-control text-xs font-medium shadow-lg transition-colors ${PRIMARY_ACTION}`}
             >
               <PencilSimple size={12} />
               編集

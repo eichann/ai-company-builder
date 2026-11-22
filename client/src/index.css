@@ -3,6 +3,16 @@
 @import '../../shared/design-tokens/theme.css';
 
 @tailwind base;
+
+/* Native check boxes and radio buttons are "on" in the primary colour (design-system.md "Sizes, type
+   and corners (P3, done)"), in both themes; a class (`accent-…`) still wins. */
+@layer base {
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--color-primary);
+  }
+}
+
 @tailwind components;
 @tailwind utilities;
 

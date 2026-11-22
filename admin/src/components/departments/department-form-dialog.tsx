@@ -146,7 +146,7 @@ function DepartmentForm({
       )}
 
       <div className="flex items-start gap-4">
-        <DepartmentIcon icon={icon} color={color} className="mt-6 size-10 rounded-lg" />
+        <DepartmentIcon icon={icon} color={color} className="mt-6 size-10 rounded-control" />
         <div className="grid flex-1 gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
             <Label htmlFor="dept-name">部署名</Label>

@@ -36,7 +36,7 @@ export function PersonStepButtons({ companyId, rootPath, recordId }: Props) {
     <section aria-label="手順" className="flex flex-wrap items-center gap-2 px-5 pt-5 text-xs">
       {steps.map(s => (
         <button key={`${s.pluginId}/${s.step}`} type="button" disabled={busy} onClick={() => void start(s)}
-          className="inline-flex items-center gap-1 rounded border border-gray-300 px-2.5 py-1 hover:bg-gray-50 disabled:opacity-50 dark:border-zinc-600 dark:hover:bg-zinc-800">
+          className="inline-flex items-center gap-1 rounded-small border border-gray-300 px-2.5 py-1 hover:bg-gray-50 disabled:opacity-50 dark:border-zinc-600 dark:hover:bg-zinc-800">
           <Play size={11} />{s.label}
         </button>
       ))}

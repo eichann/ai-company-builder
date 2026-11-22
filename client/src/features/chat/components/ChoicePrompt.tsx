@@ -11,13 +11,13 @@ type ChoiceRequest = Extract<AgentInteractionRequest, { kind: 'choices' }>
 function HeaderChip({ text, multiSelect }: { text: string; multiSelect: boolean }) {
   return (
     <span className="inline-flex items-center gap-1">
-      {text && <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-selected-bg text-selected-text border border-selected-border">{text}</span>}
-      {multiSelect && <span className="text-[11px] text-gray-500 dark:text-zinc-400">複数選択可</span>}
+      {text && <span className="px-2 py-0.5 rounded-md text-caption font-medium bg-selected-bg text-selected-text border border-selected-border">{text}</span>}
+      {multiSelect && <span className="text-caption font-normal text-gray-500 dark:text-zinc-400">複数選択可</span>}
     </span>
   )
 }
 
-const optionClass = (checked: boolean) => `flex items-start gap-2.5 rounded-lg border px-3 py-2 cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-focus-ring ${checked
+const optionClass = (checked: boolean) => `flex items-start gap-2.5 rounded-control border px-3 py-2 cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-focus-ring ${checked
   ? 'border-selected-border bg-selected-bg'
   : 'border-gray-200 dark:border-zinc-700 hover:bg-gray-50 dark:hover:bg-zinc-800/60'}`
 
@@ -30,7 +30,7 @@ function QuestionFields({ name, index, total, question, draft, disabled, onChang
     <fieldset disabled={disabled} className="space-y-1.5">
       <legend className="mb-2 w-full">
         <span className="flex items-center gap-2 mb-1">
-          {total > 1 && <span className="text-[11px] text-gray-400 dark:text-zinc-500">{index + 1}/{total}</span>}
+          {total > 1 && <span className="text-caption font-normal text-gray-400 dark:text-zinc-500">{index + 1}/{total}</span>}
           <HeaderChip text={question.header} multiSelect={question.multiSelect} />
         </span>
         <span className="block text-[14px] font-medium text-gray-900 dark:text-zinc-100 whitespace-pre-wrap">{question.question}</span>
@@ -39,7 +39,7 @@ function QuestionFields({ name, index, total, question, draft, disabled, onChang
         const checked = draft.selected.includes(option.label)
         return (
           <label key={option.label} className={optionClass(checked)}>
-            <input type={type} name={name} checked={checked} onChange={() => onChange(toggleOption(question, draft, option.label))} className="mt-1 accent-[#1264a3]" />
+            <input type={type} name={name} checked={checked} onChange={() => onChange(toggleOption(question, draft, option.label))} className="mt-1" />
             <span className="min-w-0">
               <span className="block text-sm text-gray-900 dark:text-zinc-100">{option.label}</span>
               {option.description && <span className="block text-xs text-gray-500 dark:text-zinc-400">{option.description}</span>}
@@ -48,7 +48,7 @@ function QuestionFields({ name, index, total, question, draft, disabled, onChang
         )
       })}
       <label className={optionClass(draft.otherOn)}>
-        <input type={type} name={name} checked={draft.otherOn} onChange={() => { onChange(toggleOther(question, draft)); setTimeout(() => otherRef.current?.focus(), 0) }} className="mt-1 accent-[#1264a3]" />
+        <input type={type} name={name} checked={draft.otherOn} onChange={() => { onChange(toggleOther(question, draft)); setTimeout(() => otherRef.current?.focus(), 0) }} className="mt-1" />
         <span className="min-w-0 flex-1">
           <span className="block text-sm text-gray-900 dark:text-zinc-100">その他</span>
           {draft.otherOn && (
@@ -77,7 +77,7 @@ export function ChoicePromptCard({ request, onRespond }: { request: ChoiceReques
   }
   const agent = agentShortLabel(request.agent)
   return (
-    <section aria-label={`${agent}からの質問`} className="flex-shrink-0 mx-4 mb-3 rounded-xl border border-selected-border bg-white dark:bg-zinc-900 shadow-sm p-4 text-sm max-h-[55vh] overflow-y-auto animate-fade-in"
+    <section aria-label={`${agent}からの質問`} className="flex-shrink-0 mx-4 mb-3 rounded-card border border-selected-border bg-white dark:bg-zinc-900 shadow-sm p-4 text-sm max-h-[55vh] overflow-y-auto animate-fade-in"
       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && answers && !sending) { e.preventDefault(); void respond({ choices: answers }) } }}>
       <div className="flex items-center gap-2 mb-3 text-gray-700 dark:text-zinc-200">
         <ListChecks size={16} weight="bold" className="text-primary flex-shrink-0" />
@@ -89,14 +89,14 @@ export function ChoicePromptCard({ request, onRespond }: { request: ChoiceReques
             onChange={draft => setDrafts(list => list.map((d, j) => j === i ? draft : d))} />
         ))}
       </div>
-      <p className="mt-3 text-[11px] text-gray-400 dark:text-zinc-500">別の相談に切り替えても、戻って回答できます。10分間回答がない場合は質問を終了します。</p>
+      <p className="mt-3 text-caption font-normal text-gray-400 dark:text-zinc-500">別の相談に切り替えても、戻って回答できます。10分間回答がない場合は質問を終了します。</p>
       {error && <p role="alert" className="mt-3 text-red-500">{error}</p>}
       <div className="sticky -bottom-4 -mx-4 -mb-4 mt-4 px-4 pt-3 pb-4 flex items-center gap-3 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-zinc-800">
         <button type="button" disabled={sending} onClick={() => void respond({ cancelled: true })}
-          className="px-3 py-1.5 text-xs rounded-lg text-gray-500 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-50">回答せずに閉じる</button>
-        <span className="ml-auto text-[11px] text-gray-400 dark:text-zinc-500 hidden sm:inline">⌘/Ctrl + Enter で回答</span>
+          className="px-3 py-1.5 text-xs rounded-control text-gray-500 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-50">回答せずに閉じる</button>
+        <span className="ml-auto text-caption font-normal text-gray-400 dark:text-zinc-500 hidden sm:inline">⌘/Ctrl + Enter で回答</span>
         <button type="button" disabled={sending || !answers} onClick={() => answers && void respond({ choices: answers })}
-          className={`px-4 py-1.5 text-sm font-medium rounded-lg disabled:cursor-not-allowed ${PRIMARY_ACTION}`}>回答する</button>
+          className={`px-4 py-1.5 text-sm font-medium rounded-control disabled:cursor-not-allowed ${PRIMARY_ACTION}`}>回答する</button>
       </div>
     </section>
   )
@@ -107,7 +107,7 @@ export const ChoicePromptRecordView = memo(function ChoicePromptRecordView({ rec
   const answered = !!record.answers
   return (
     <div className="my-2 animate-fade-in">
-      <div className="rounded-xl border border-gray-200 dark:border-zinc-700 bg-white/60 dark:bg-zinc-900/40 px-3 py-2 text-xs">
+      <div className="rounded-card border border-gray-200 dark:border-zinc-700 bg-white/60 dark:bg-zinc-900/40 px-3 py-2 text-xs">
         <div className="flex items-center gap-1.5 text-gray-500 dark:text-zinc-400 mb-1">
           {answered ? <CheckCircle size={13} weight="fill" className="text-green-500" /> : <XCircle size={13} weight="fill" className="text-gray-400" />}
           <span>{answered ? '選択肢の質問 · 回答済み' : `選択肢の質問 · ${choiceCancelLabel(record.cancelled ?? 'cancelled')}`}</span>

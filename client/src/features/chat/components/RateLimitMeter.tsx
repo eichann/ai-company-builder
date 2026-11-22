@@ -62,7 +62,7 @@ export function RateLimitMeter({ provider, compact = false }: { provider: RateLi
 
   return (
     <HoverTooltip
-      className="w-64 rounded-lg border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg p-3 text-xs text-gray-700 dark:text-zinc-200"
+      className="w-64 rounded-control border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg p-3 text-xs text-gray-700 dark:text-zinc-200"
       trigger={describedBy => (
         <button
           type="button"
@@ -95,12 +95,12 @@ export function RateLimitMeter({ provider, compact = false }: { provider: RateLi
                 <span className={`font-medium tabular-nums ${TEXT[w.level]}`}>{w.percent === null ? '使用率不明' : `${percentText(w.percent)} 使用`}</span>
               </div>
               <Bar window={w} className="w-full mt-1" />
-              {w.resetText && <div className="mt-1 text-[11px] text-gray-500 dark:text-zinc-400">{w.resetText}</div>}
+              {w.resetText && <div className="mt-1 text-caption font-normal text-gray-500 dark:text-zinc-400">{w.resetText}</div>}
             </li>
           ))}
         </ul>
       )}
-      {view.note && <p className={`${view.windows.length > 0 ? 'mt-2.5' : ''} text-[11px] leading-relaxed ${view.level === 'warn' || view.level === 'critical' ? TEXT[view.level] : 'text-gray-500 dark:text-zinc-400'}`}>{view.note}</p>}
+      {view.note && <p className={`${view.windows.length > 0 ? 'mt-2.5' : ''} text-caption font-normal leading-relaxed ${view.level === 'warn' || view.level === 'critical' ? TEXT[view.level] : 'text-gray-500 dark:text-zinc-400'}`}>{view.note}</p>}
       {snapshot && (
         <p className="mt-2.5 text-[10px] text-gray-400 dark:text-zinc-500">
           {new Date(snapshot.updatedAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} 時点（AIの応答ごとに更新）

@@ -5,11 +5,11 @@
 import { useId, useState } from 'react'
 import { UserPlus } from '@phosphor-icons/react'
 import { Dialog, DialogCloseButton, DialogFooter, DialogTitle } from '../../../shared/ui/Dialog'
-import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { INVITE_SETS_NOTE, type InviteSet } from '../../../../shared/minutes-app'
 import { inviteToMeeting } from '../api'
 import { useInviteChoices } from '../hooks/useInviteChoices'
 import { invitedText, inviteSetLabel, offeredSets } from '../model'
+import { Button } from '../../../shared/ui/primitives'
 
 export const INVITE_NOTE = '招待した人は会議の記録と要約・決めたこと・やることを見られます。Google の議事録そのものは、Google で共有されていないと読めません。一度招待すると、取り消すことはできません。'
 
@@ -50,12 +50,12 @@ export function InviteDialog({ companyId, meetingId, version, members, onDone }:
           <DialogTitle id={titleId} className="flex-1">会議に人を招待する</DialogTitle>
           <DialogCloseButton onClick={() => onDone(null)} />
         </div>
-        <p className="mb-3 text-[12.5px] leading-relaxed text-text-muted">{INVITE_NOTE}</p>
-        {listedText !== '' && <p className="mb-2 text-[12px] text-gray-600 dark:text-zinc-300">いま見られる人には、{listedText}も入っています。</p>}
+        <p className="mb-3 text-small leading-relaxed text-text-muted">{INVITE_NOTE}</p>
+        {listedText !== '' && <p className="mb-2 text-small text-gray-600 dark:text-zinc-300">いま見られる人には、{listedText}も入っています。</p>}
         <ul className="max-h-[240px] space-y-1 overflow-auto">
           {members.map(p => (
             <li key={p.id}>
-              <label className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-50 dark:hover:bg-zinc-700/50">
+              <label className="flex items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-gray-50 dark:hover:bg-zinc-700/50">
                 <input type="checkbox" checked={chosen.has(p.id)} disabled={busy} onChange={e => toggle(setChosen, p.id, e.target.checked)} />
                 {p.name}さん
               </label>
@@ -64,12 +64,12 @@ export function InviteDialog({ companyId, meetingId, version, members, onDone }:
         </ul>
         {offered.length > 0 && (
           <div className="mt-3 border-t border-gray-100 pt-3 dark:border-zinc-700">
-            <h3 className="mb-1 text-[13px] font-semibold">まとまりや部署で招待する</h3>
-            <p className="mb-2 text-[12px] leading-relaxed text-gray-600 dark:text-zinc-300">{INVITE_SETS_NOTE}</p>
+            <h3 className="mb-1 text-body font-semibold">まとまりや部署で招待する</h3>
+            <p className="mb-2 text-small leading-relaxed text-gray-600 dark:text-zinc-300">{INVITE_SETS_NOTE}</p>
             <ul className="max-h-[180px] space-y-1 overflow-auto">
               {offered.map(s => (
                 <li key={setKey(s)}>
-                  <label className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-gray-50 dark:hover:bg-zinc-700/50">
+                  <label className="flex items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-gray-50 dark:hover:bg-zinc-700/50">
                     <input type="checkbox" checked={chosenSets.has(setKey(s))} disabled={busy} onChange={e => toggle(setChosenSets, setKey(s), e.target.checked)} />
                     {s.label}
                   </label>
@@ -78,10 +78,10 @@ export function InviteDialog({ companyId, meetingId, version, members, onDone }:
             </ul>
           </div>
         )}
-        {error && <p role="alert" className="mt-2 text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+        {error && <p role="alert" className="mt-2 text-small text-red-600 dark:text-red-400">{error}</p>}
         <DialogFooter>
-          <button type="button" onClick={() => onDone(null)} className={SMALL_BUTTON}>やめる</button>
-          <button type="button" disabled={busy || chosen.size + chosenSets.size === 0} onClick={() => void invite()} className={MAIN_BUTTON}><UserPlus size={13} />招待する</button>
+          <Button onClick={() => onDone(null)}>やめる</Button>
+          <Button variant="primary" disabled={busy || chosen.size + chosenSets.size === 0} onClick={() => void invite()}><UserPlus size={13} />招待する</Button>
         </DialogFooter>
     </Dialog>
   )

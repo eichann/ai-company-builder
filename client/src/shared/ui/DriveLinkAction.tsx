@@ -37,16 +37,16 @@ export function DriveLinkAction({ companyId, linked, busy, usable, note, hint, o
           onChange={e => setText(e.target.value)}
           onPaste={e => { const pasted = e.clipboardData.getData('text'); if (pasted.trim() !== '') { e.preventDefault(); send(pasted) } }}
           onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(text) } }}
-          className="w-full rounded border border-gray-200 bg-transparent px-1.5 py-0.5 text-[11px] placeholder:text-gray-400 dark:border-zinc-700" />
+          className="w-full rounded-small border border-gray-200 bg-transparent px-1.5 py-0.5 text-caption font-normal placeholder:text-gray-400 dark:border-zinc-700" />
       )}
       {picking && (
-        <div role="status" data-drive-picking className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-600 dark:text-zinc-300">
+        <div role="status" data-drive-picking className="flex flex-wrap items-center gap-1.5 text-caption font-normal text-gray-600 dark:text-zinc-300">
           <span>{DRIVE_PICKING_TEXT}</span>
-          {onStop && <button type="button" onClick={onStop} className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] dark:border-zinc-600">やめる</button>}
+          {onStop && <button type="button" onClick={onStop} className="rounded-small border border-gray-300 px-1.5 py-0.5 text-caption font-normal dark:border-zinc-600">やめる</button>}
         </div>
       )}
-      {hint && <p role="status" data-drive-link-hint className="text-[11px] text-amber-700 dark:text-amber-300">{hint}</p>}
-      {note && <p data-drive-link-note className="text-[11px] text-gray-500 dark:text-zinc-400">{note}</p>}
+      {hint && <p role="status" data-drive-link-hint className="text-caption font-normal text-amber-700 dark:text-amber-300">{hint}</p>}
+      {note && <p data-drive-link-note className="text-caption font-normal text-gray-500 dark:text-zinc-400">{note}</p>}
     </div>
   )
 }

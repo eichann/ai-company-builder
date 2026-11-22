@@ -192,7 +192,7 @@ function CompanySwitcher({ onNavigate }: { onNavigate?: () => void }) {
   if (!company.data) {
     return (
       <div className="flex items-center gap-2.5 px-1.5 py-1.5">
-        <Skeleton className="size-8 rounded-lg" />
+        <Skeleton className="size-8 rounded-control" />
         <div className="space-y-1.5">
           <Skeleton className="h-3.5 w-28" />
           <Skeleton className="h-3 w-16" />
@@ -214,10 +214,10 @@ function CompanySwitcher({ onNavigate }: { onNavigate?: () => void }) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left transition-colors outline-none hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[state=open]:bg-sidebar-accent"
+          className="flex w-full items-center gap-2.5 rounded-control px-1.5 py-1.5 text-left transition-colors outline-none hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[state=open]:bg-sidebar-accent"
           aria-label="会社を切り替える"
         >
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-control bg-primary text-primary-foreground">
             <Buildings size={16} weight="fill" />
           </span>
           <span className="min-w-0 flex-1 leading-tight">
@@ -270,7 +270,7 @@ function UserMenu() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left transition-colors outline-none hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[state=open]:bg-sidebar-accent"
+          className="flex w-full items-center gap-2.5 rounded-control px-1.5 py-1.5 text-left transition-colors outline-none hover:bg-sidebar-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[state=open]:bg-sidebar-accent"
           aria-label="アカウントメニュー"
         >
           <Avatar name={display} seed={user.id} />

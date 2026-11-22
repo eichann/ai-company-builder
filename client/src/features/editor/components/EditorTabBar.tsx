@@ -162,10 +162,10 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
           }
         `}
       >
-        {line && <span aria-hidden className={`pointer-events-none absolute inset-y-1 w-0.5 rounded bg-indigo-500 ${line === 'before' ? '-left-px' : '-right-px'}`} />}
+        {line && <span aria-hidden className={`pointer-events-none absolute inset-y-1 w-0.5 rounded-small bg-indigo-500 ${line === 'before' ? '-left-px' : '-right-px'}`} />}
         {icon}
         {deptLabel && (
-          <span data-tab-dept className="text-[11px] text-gray-400 dark:text-zinc-500 truncate max-w-[96px] flex-shrink-[2]" title={`${deptLabel} のファイル`}>
+          <span data-tab-dept className="text-caption font-normal text-gray-400 dark:text-zinc-500 truncate max-w-[96px] flex-shrink-[2]" title={`${deptLabel} のファイル`}>
             {deptLabel} /
           </span>
         )}
@@ -173,7 +173,7 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
         {pinned && (
           <button type="button" aria-label="固定をやめる" title="固定しています（片づけても残ります）。押すと固定をやめます"
             onClick={e => { e.stopPropagation(); onTogglePinned?.(filePath) }}
-            className="flex-shrink-0 rounded p-0.5 text-indigo-500 hover:bg-gray-200 dark:hover:bg-zinc-700">
+            className="flex-shrink-0 rounded-small p-0.5 text-indigo-500 hover:bg-gray-200 dark:hover:bg-zinc-700">
             <PushPin size={11} weight="fill" />
           </button>
         )}
@@ -184,7 +184,7 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
           type="button"
           onClick={(e) => onClose(e, filePath)}
           className={`
-            p-0.5 rounded hover:bg-white/10 flex-shrink-0
+            p-0.5 rounded-small hover:bg-white/10 flex-shrink-0
             ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}
           `}
         >

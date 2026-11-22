@@ -78,9 +78,9 @@ function ChatWindowChat({ context }: { context: ChatWindowContext }) {
       </div>
       {settingsOverlay}
       {fileNotice.notice && (
-        <div role="alert" className="absolute inset-x-3 bottom-3 z-20 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow dark:bg-zinc-800 dark:text-amber-200">
+        <div role="alert" className="absolute inset-x-3 bottom-3 z-20 flex items-start gap-2 rounded-control border border-amber-500/40 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow dark:bg-zinc-800 dark:text-amber-200">
           <span className="flex-1">{fileNotice.notice}</span>
-          <button type="button" onClick={fileNotice.dismiss} className="shrink-0 rounded px-1 hover:bg-amber-500/10">閉じる</button>
+          <button type="button" onClick={fileNotice.dismiss} className="shrink-0 rounded-small px-1 hover:bg-amber-500/10">閉じる</button>
         </div>
       )}
     </div>

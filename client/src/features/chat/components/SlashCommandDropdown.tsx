@@ -44,7 +44,7 @@ export const SlashCommandDropdown = memo(function SlashCommandDropdown({
 
   return (
     <div className="absolute bottom-full left-0 right-0 mb-1 z-50">
-      <div className="mx-2 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl shadow-lg overflow-hidden">
+      <div className="mx-2 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-card shadow-lg overflow-hidden">
         {/* Header */}
         <div className="px-3 py-1.5 border-b border-gray-100 dark:border-zinc-700/50">
           <span className="text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
@@ -75,7 +75,7 @@ export const SlashCommandDropdown = memo(function SlashCommandDropdown({
               `}
             >
               <div
-                className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                className="w-7 h-7 rounded-control flex items-center justify-center flex-shrink-0"
                 style={{ backgroundColor: item.color ? `${item.color}20` : 'rgba(99,102,241,0.12)' }}
               >
                 <Lightning

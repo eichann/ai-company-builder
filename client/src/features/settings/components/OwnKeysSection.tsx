@@ -8,7 +8,7 @@ import type { MyBrokerService } from '../../../../shared/broker-keys'
 import { useOwnKeys } from '../hooks/useOwnKeys'
 import { ownKeyRow, type OwnKeyTone } from '../own-keys'
 
-const INPUT = 'h-9 w-full rounded-lg border border-zinc-200 bg-white px-3 font-mono text-[13px] text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500'
+const INPUT = 'h-9 w-full rounded-control border border-zinc-200 bg-white px-3 font-mono text-body text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500'
 const TONE: Record<OwnKeyTone, StatusBadgeVariant> = { ok: 'success', warn: 'warning', paused: 'paused', none: 'neutral' }
 
 export function OwnKeysSection({ companyId, focusService }: { companyId: string; focusService?: string }) {
@@ -21,7 +21,7 @@ export function OwnKeysSection({ companyId, focusService }: { companyId: string;
         description="AI がスキルの中で外部サービス（Gemini・OpenAI など）を使うときの鍵です。鍵は会社のサーバーで暗号化して預かり、このPCにも AI にも渡しません。AI には短い時間だけ使える通行証が渡されます。"
       />
       {loading && !data ? (
-        <div className="flex items-center gap-2 py-10 text-[13px] text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
+        <div className="flex items-center gap-2 py-10 text-body text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
       ) : error && !data ? (
         <Callout tone="danger" role="alert">{error}</Callout>
       ) : data ? (
@@ -97,11 +97,11 @@ function ServiceRow({ s, enabled, busy, focused, onSave, onRemove }: {
           )}
         </span>
       </div>
-      {row.detail && <p className="text-[12px] text-zinc-500 dark:text-zinc-400">{row.detail}</p>}
-      {s.ownKey.allowed && <p className="text-[11px] text-zinc-400">送り先: <span className="font-mono">{s.ownKey.hosts.join('、')}</span></p>}
+      {row.detail && <p className="text-small text-zinc-500 dark:text-zinc-400">{row.detail}</p>}
+      {s.ownKey.allowed && <p className="text-caption font-normal text-zinc-400">送り先: <span className="font-mono">{s.ownKey.hosts.join('、')}</span></p>}
       {open && (
         <form onSubmit={submit} className="flex flex-wrap items-end gap-2 pt-1">
-          <label htmlFor={inputId} className="grid min-w-64 flex-1 gap-1 text-[12px] text-zinc-500">
+          <label htmlFor={inputId} className="grid min-w-64 flex-1 gap-1 text-small text-zinc-500">
             鍵（発行元の画面からコピーして貼り付け）
             <input id={inputId} className={INPUT} type="password" autoComplete="off" spellCheck={false} value={secret} onChange={e => setSecret(e.target.value)} />
           </label>
@@ -109,8 +109,8 @@ function ServiceRow({ s, enabled, busy, focused, onSave, onRemove }: {
           <Button size="sm" variant="ghost" type="button" disabled={busy} onClick={() => { setOpen(false); setSecret('') }}>やめる</Button>
         </form>
       )}
-      {message && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{message}</p>}
-      {checked && <p role="status" className="text-[12px] text-zinc-600 dark:text-zinc-300">{checked}</p>}
+      {message && <p role="alert" className="text-small text-red-600 dark:text-red-400">{message}</p>}
+      {checked && <p role="status" className="text-small text-zinc-600 dark:text-zinc-300">{checked}</p>}
     </section>
   )
 }

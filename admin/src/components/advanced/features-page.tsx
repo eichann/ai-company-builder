@@ -13,7 +13,7 @@ import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
 import { useQuery } from '@/lib/use-query'
-import { cn } from '@/lib/utils'
+import { Switch } from '@/components/ui/switch'
 import { FEATURE_IDS, FEATURE_OFF_CONFIRM, FEATURE_WORDS } from '../../../../shared/core/features'
 
 /**
@@ -79,20 +79,12 @@ export function FeaturesPage() {
                     <p className="mt-1 text-xs text-muted-foreground">オフにすると：{words.whenOff}</p>
                   </div>
                   <span className="shrink-0 pt-0.5 text-xs text-muted-foreground">{on ? 'オン' : 'オフ'}</span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={on}
+                  <Switch
+                    checked={on}
                     aria-label={words.name}
                     disabled={!shown.canEdit || busy !== null}
                     onClick={() => (on ? setConfirmOff(id) : void change(id, true).catch(() => {}))}
-                    className={cn(
-                      'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-2 border-transparent transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50',
-                      on ? 'bg-primary' : 'bg-input'
-                    )}
-                  >
-                    <span className={cn('block size-5 rounded-full bg-background shadow transition-transform', on ? 'translate-x-5' : 'translate-x-0')} />
-                  </button>
+                  />
                 </li>
               )
             })}

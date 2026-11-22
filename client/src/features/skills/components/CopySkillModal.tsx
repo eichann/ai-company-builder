@@ -178,7 +178,7 @@ export function CopySkillModal({
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-zinc-800 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              className="w-8 h-8 rounded-control flex items-center justify-center"
               style={{ backgroundColor: `${color}20` }}
             >
               <Copy size={16} weight="fill" style={{ color }} />
@@ -194,7 +194,7 @@ export function CopySkillModal({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
+            className="p-1.5 rounded-control hover:bg-gray-100 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
           >
             <X size={18} />
           </button>
@@ -216,7 +216,7 @@ export function CopySkillModal({
                     setSelectedSourceId(e.target.value)
                     setFolderNameEdited(false)
                   }}
-                  className="w-full appearance-none px-3 py-2 pr-8 rounded-lg bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-sm text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                  className="w-full appearance-none px-3 py-2 pr-8 rounded-control bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-sm text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-focus-ring"
                 >
                   {sources.map(s => (
                     <option key={s.id} value={s.id}>{s.name}</option>
@@ -244,7 +244,7 @@ export function CopySkillModal({
                       key={skill.id}
                       onClick={() => setSelectedSkillId(skill.id)}
                       className={`
-                        w-full text-left px-3 py-2.5 rounded-lg transition-colors
+                        w-full text-left px-3 py-2.5 rounded-control transition-colors
                         ${selectedSkillId === skill.id
                           ? 'bg-selected-bg text-gray-900 dark:text-zinc-100'
                           : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-white/[0.03]'
@@ -286,7 +286,7 @@ export function CopySkillModal({
                     {isLoadingPreview ? (
                       <SpinnerGap size={16} className="animate-spin text-gray-400 dark:text-zinc-500" />
                     ) : previewContent ? (
-                      <pre className="text-xs text-gray-600 dark:text-zinc-400 whitespace-pre-wrap font-mono bg-gray-50 dark:bg-zinc-800/50 rounded-lg p-3 max-h-[200px] overflow-y-auto">
+                      <pre className="text-xs text-gray-600 dark:text-zinc-400 whitespace-pre-wrap font-mono bg-gray-50 dark:bg-zinc-800/50 rounded-control p-3 max-h-[200px] overflow-y-auto">
                         {previewContent}
                       </pre>
                     ) : (
@@ -306,7 +306,7 @@ export function CopySkillModal({
                       value={name}
                       onChange={(e) => handleNameChange(e.target.value)}
                       placeholder="コピー後のスキル名"
-                      className="w-full px-3 py-2 rounded-lg bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-sm text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                      className="w-full px-3 py-2 rounded-control bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-sm text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-focus-ring"
                     />
                   </div>
                   <div>
@@ -318,7 +318,7 @@ export function CopySkillModal({
                       value={folderName}
                       onChange={(e) => handleFolderNameChange(e.target.value)}
                       placeholder="skill-folder-name"
-                      className={`w-full px-3 py-2 rounded-lg bg-white dark:bg-zinc-800 border text-sm text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-focus-ring font-mono ${
+                      className={`w-full px-3 py-2 rounded-control bg-white dark:bg-zinc-800 border text-sm text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-focus-ring font-mono ${
                         folderName && !folderNameValid ? 'border-red-500' : 'border-gray-200 dark:border-zinc-700'
                       }`}
                     />
@@ -332,7 +332,7 @@ export function CopySkillModal({
                   <button
                     onClick={handleCopy}
                     disabled={!name.trim() || !folderNameValid || isCopying}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-control text-sm font-medium text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{ backgroundColor: color }}
                   >
                     {isCopying ? (

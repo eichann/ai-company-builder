@@ -233,7 +233,7 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
           data-disabled={inherited ? 'true' : 'false'}
           onClick={() => { if (node.hasChildren) void toggleExpanded(path); else if (!inherited) setDraft(d => toggleFolder(d, path)) }}
           title={inherited ? '上のフォルダごとダウンロードしない設定です。このフォルダだけをダウンロードすることはできません' : undefined}
-          className={`group flex h-9 cursor-pointer select-none items-center gap-2 rounded-md pr-3 text-[13px] outline-none transition-colors hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500/50 dark:hover:bg-white/[0.04] dark:focus-visible:bg-white/[0.04] ${inherited ? 'cursor-default' : ''}`}
+          className={`group flex h-9 cursor-pointer select-none items-center gap-2 rounded-md pr-3 text-body outline-none transition-colors hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:ring-focus focus-visible:ring-inset focus-visible:ring-focus-ring dark:hover:bg-white/[0.04] dark:focus-visible:bg-white/[0.04] ${inherited ? 'cursor-default' : ''}`}
           style={{ paddingLeft: 8 + depth * 20 }}
         >
           <button
@@ -241,7 +241,7 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
             tabIndex={-1}
             aria-label={isOpen ? '閉じる' : '開く'}
             onClick={e => { e.stopPropagation(); if (node.hasChildren) void toggleExpanded(path) }}
-            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-700 dark:text-zinc-500 dark:hover:bg-white/10 dark:hover:text-zinc-200 ${node.hasChildren ? '' : 'invisible'}`}
+            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-small text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-700 dark:text-zinc-500 dark:hover:bg-white/10 dark:hover:text-zinc-200 ${node.hasChildren ? '' : 'invisible'}`}
           >
             {loading ? <SpinnerGap size={12} className="animate-spin" /> : <CaretRight size={12} weight="bold" className={`transition-transform ${isOpen ? 'rotate-90' : ''}`} />}
           </button>
@@ -256,18 +256,18 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
             : <FolderSimple size={16} weight="fill" className="shrink-0 text-zinc-400 dark:text-zinc-500" />}
           <span id={labelId} className={`min-w-0 flex-1 truncate ${out ? 'text-zinc-400 dark:text-zinc-500' : 'text-zinc-800 dark:text-zinc-100'}`}>
             {deptName ?? node.name.normalize('NFC')}
-            {deptName && deptName !== node.name && <span className="ml-2 font-mono text-[11px] text-zinc-400 dark:text-zinc-500">{node.name}/</span>}
+            {deptName && deptName !== node.name && <span className="ml-2 font-mono text-caption font-normal text-zinc-400 dark:text-zinc-500">{node.name}/</span>}
           </span>
           {node.private && (
-            <span className="flex shrink-0 items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400" title="非公開フォルダ（見られる人だけに届きます）">
+            <span className="flex shrink-0 items-center gap-1 text-caption font-normal text-zinc-500 dark:text-zinc-400" title="非公開フォルダ（見られる人だけに届きます）">
               <Lock size={12} weight="bold" aria-hidden="true" />
               非公開
             </span>
           )}
           {changed && (
-            <span className={`shrink-0 rounded-full px-1.5 py-px text-[10.5px] font-medium ${state === 'unchecked'
+            <span className={`shrink-0 rounded-full px-1.5 py-px text-caption font-medium ${state === 'unchecked'
               ? 'bg-zinc-100 text-zinc-600 dark:bg-white/[0.08] dark:text-zinc-300'
-              : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-300'}`}>
+              : 'bg-selected-bg text-selected-text'}`}>
               {state === 'unchecked' ? 'ダウンロードしない' : 'ダウンロードする'}
             </span>
           )}
@@ -303,23 +303,23 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
         {/* Summary */}
         <Card className="px-5 py-4">
           <div className="flex items-baseline justify-between gap-4">
-            <p className="text-[13px] text-zinc-600 dark:text-zinc-300">
+            <p className="text-body text-zinc-600 dark:text-zinc-300">
               {total === null || downloadedNow === null
                 ? <span>このPCのダウンロード状況{offline && <span className="text-zinc-400 dark:text-zinc-500">（大きさはサーバーに接続すると表示されます）</span>}</span>
-                : <><span className="text-[15px] font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">{formatBytes(downloadedNow)}</span><span className="text-zinc-500 dark:text-zinc-400"> をダウンロード済み（全体 {formatBytes(total)}）</span></>}
+                : <><span className="text-title font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">{formatBytes(downloadedNow)}</span><span className="text-zinc-500 dark:text-zinc-400"> をダウンロード済み（全体 {formatBytes(total)}）</span></>}
             </p>
             {dirty && downloadedAfter !== null && downloadedNow !== null && (
               <p className="shrink-0 text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
                 適用後 <span className="font-medium text-zinc-800 dark:text-zinc-100">{formatBytes(downloadedAfter)}</span>
-                <span className={downloadedAfter >= downloadedNow ? 'text-indigo-600 dark:text-indigo-300' : ''}>（{downloadedAfter >= downloadedNow ? '+' : '−'}{formatBytes(Math.abs(downloadedAfter - downloadedNow))}）</span>
+                <span className={downloadedAfter >= downloadedNow ? 'text-selected-text' : ''}>（{downloadedAfter >= downloadedNow ? '+' : '−'}{formatBytes(Math.abs(downloadedAfter - downloadedNow))}）</span>
               </p>
             )}
           </div>
           <div className="mt-3">
             <UsageBar value={dirty ? downloadedAfter : downloadedNow} max={total} pendingFrom={dirty ? downloadedNow : undefined} />
           </div>
-          <div className="mt-2 flex items-center gap-4 text-[11px] text-zinc-500 dark:text-zinc-400">
-            <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-indigo-500 dark:bg-indigo-400" />ダウンロード済み</span>
+          <div className="mt-2 flex items-center gap-4 text-caption font-normal text-zinc-500 dark:text-zinc-400">
+            <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-primary" />ダウンロード済み</span>
             <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-zinc-200 dark:bg-white/15" />ダウンロードしていない</span>
             {applied.length > 0 && <span className="ml-auto">{applied.length} 個のフォルダをダウンロードしていません</span>}
           </div>
@@ -341,10 +341,10 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
                 onChange={e => setQuery(e.target.value)}
                 placeholder="フォルダを検索（開いたフォルダの中から）"
                 aria-label="フォルダを検索"
-                className="h-8 w-full rounded-md border border-transparent bg-zinc-50 pl-8 pr-7 text-[13px] text-zinc-800 placeholder:text-zinc-400 focus:border-zinc-300 focus:bg-white focus:outline-none dark:bg-white/[0.04] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-white/15 dark:focus:bg-transparent"
+                className="h-8 w-full rounded-md border border-transparent bg-zinc-50 pl-8 pr-7 text-body text-zinc-800 placeholder:text-zinc-400 focus:border-zinc-300 focus:bg-white focus:outline-none dark:bg-white/[0.04] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-white/15 dark:focus:bg-transparent"
               />
               {query && (
-                <button type="button" aria-label="検索をクリア" onClick={() => setQuery('')} className="absolute right-2 rounded p-0.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
+                <button type="button" aria-label="検索をクリア" onClick={() => setQuery('')} className="absolute right-2 rounded-small p-0.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
                   <X size={12} />
                 </button>
               )}
@@ -359,9 +359,9 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
               <div className="space-y-1 p-1" aria-label="読み込み中">
                 {[64, 48, 56, 40, 52].map((w, i) => (
                   <div key={i} className="flex h-9 items-center gap-3 px-2">
-                    <div className="h-4 w-4 rounded bg-zinc-100 dark:bg-white/[0.06]" />
-                    <div className="h-3 animate-pulse rounded bg-zinc-100 dark:bg-white/[0.06]" style={{ width: `${w}%` }} />
-                    <div className="ml-auto h-3 w-12 animate-pulse rounded bg-zinc-100 dark:bg-white/[0.06]" />
+                    <div className="h-4 w-4 rounded-small bg-zinc-100 dark:bg-white/[0.06]" />
+                    <div className="h-3 animate-pulse rounded-small bg-zinc-100 dark:bg-white/[0.06]" style={{ width: `${w}%` }} />
+                    <div className="ml-auto h-3 w-12 animate-pulse rounded-small bg-zinc-100 dark:bg-white/[0.06]" />
                   </div>
                 ))}
               </div>
@@ -374,10 +374,10 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
             ) : rootRows.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
                 <FolderSimpleDashed size={28} className="text-zinc-300 dark:text-zinc-600" />
-                <p className="text-[13px] text-zinc-500 dark:text-zinc-400">まだフォルダがありません</p>
+                <p className="text-body text-zinc-500 dark:text-zinc-400">まだフォルダがありません</p>
               </div>
             ) : visibleSet && visibleSet.size === 0 ? (
-              <p className="py-10 text-center text-[13px] text-zinc-500 dark:text-zinc-400">「{query}」に一致するフォルダはありません</p>
+              <p className="py-10 text-center text-body text-zinc-500 dark:text-zinc-400">「{query}」に一致するフォルダはありません</p>
             ) : (
               rootRows.map(p => renderRow(p, 0))
             )}
@@ -395,7 +395,7 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
         <div className="sticky bottom-0 border-t border-zinc-200 bg-white/95 px-8 py-3 backdrop-blur dark:border-white/[0.08] dark:bg-zinc-900/95">
           {phase.kind === 'applying' ? (
             <div className="space-y-2" role="status" aria-live="polite">
-              <div className="flex items-center justify-between text-[13px]">
+              <div className="flex items-center justify-between text-body">
                 <span className="text-zinc-700 dark:text-zinc-200">
                   {diff.included.length > 0 ? 'ダウンロードしています…' : '適用しています…'}
                 </span>
@@ -411,12 +411,12 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
                 : <IndeterminateBar />}
             </div>
           ) : phase.kind === 'done' ? (
-            <div className="flex h-8 items-center gap-2 text-[13px] text-zinc-700 dark:text-zinc-200" role="status">
+            <div className="flex h-8 items-center gap-2 text-body text-zinc-700 dark:text-zinc-200" role="status">
               <CheckCircle size={16} weight="fill" className="text-emerald-500" />適用しました
             </div>
           ) : (
             <div className="flex items-center gap-3">
-              <div className="min-w-0 flex-1 text-[13px]">
+              <div className="min-w-0 flex-1 text-body">
                 {phase.kind === 'failed' ? (
                   <span role="alert" className={`inline-flex items-center gap-2 ${phase.offline ? 'text-zinc-700 dark:text-zinc-200' : 'text-red-600 dark:text-red-300'}`}>
                     {phase.offline ? <WifiSlash size={16} className="shrink-0 text-zinc-500" /> : <WarningCircle size={16} weight="fill" className="shrink-0" />}
@@ -458,12 +458,12 @@ function ConfirmUnsynced({ files, onCancel, onConfirm }: { files: string[]; onCa
   return (
     <Dialog onClose={onCancel} role="alertdialog" labelledBy="dl-confirm-title" describedBy="dl-confirm-body" initialFocus={cancelRef}>
         <DialogTitle id="dl-confirm-title">まだ同期していない変更があります</DialogTitle>
-        <div id="dl-confirm-body" className="mt-2 space-y-3 text-[13px] leading-relaxed text-text-muted">
+        <div id="dl-confirm-body" className="mt-2 space-y-3 text-body leading-relaxed text-text-muted">
           <p>
             ダウンロードしないようにするフォルダに、同期していない変更が {files.length} 件あります。
-            このまま進めると、これらの変更は共有されず、次の同期で <code className="rounded bg-zinc-100 px-1 py-px text-[12px] dark:bg-white/10">.backups</code> フォルダに保存されます（消えることはありません）。
+            このまま進めると、これらの変更は共有されず、次の同期で <code className="rounded-small bg-zinc-100 px-1 py-px text-small dark:bg-white/10">.backups</code> フォルダに保存されます（消えることはありません）。
           </p>
-          <ul className="max-h-36 overflow-y-auto rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 font-mono text-[12px] text-zinc-700 dark:border-white/[0.06] dark:bg-white/[0.03] dark:text-zinc-300">
+          <ul className="max-h-36 overflow-y-auto rounded-control border border-zinc-100 bg-zinc-50 px-3 py-2 font-mono text-small text-zinc-700 dark:border-white/[0.06] dark:bg-white/[0.03] dark:text-zinc-300">
             {shown.map(f => <li key={f} className="truncate">{f.normalize('NFC')}</li>)}
             {files.length > shown.length && <li className="font-sans text-zinc-500">ほか {files.length - shown.length} 件</li>}
           </ul>

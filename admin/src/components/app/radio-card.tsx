@@ -11,7 +11,7 @@ export function RadioCard({ checked, onSelect, label, help }: { checked: boolean
       aria-checked={checked}
       onClick={onSelect}
       className={cn(
-        'flex flex-col items-start gap-1 rounded-xl border px-4 py-3 text-left outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50',
+        'flex flex-col items-start gap-1 rounded-card border px-4 py-3 text-left outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50',
         checked ? 'border-selected-border bg-selected-bg' : 'hover:border-foreground/20'
       )}
     >

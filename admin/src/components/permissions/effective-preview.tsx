@@ -71,7 +71,7 @@ export function EffectivePreview({
           effective.fetching && <span className="ml-2 text-xs">更新中…</span>
         )}
       </p>
-      <div className="overflow-hidden rounded-lg border">
+      <div className="overflow-hidden rounded-control border">
         <table className="w-full text-sm">
           <caption className="sr-only">この場所での各メンバーの権限</caption>
           <thead className="bg-muted/40 text-xs text-muted-foreground">

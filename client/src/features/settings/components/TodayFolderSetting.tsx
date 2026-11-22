@@ -18,7 +18,7 @@ export interface TodayFolderSettingProps {
   onChoose: (departmentId: string | null) => void
 }
 
-const SELECT = 'h-8 max-w-[16rem] rounded-lg border border-zinc-200 bg-white px-2 text-[13px] text-zinc-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-100'
+const SELECT = 'h-8 max-w-[16rem] rounded-control border border-zinc-200 bg-white px-2 text-body text-zinc-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-100'
 
 export function TodayFolderSetting({ choices, chosenId, defaultName, chosenMissingName, folderNow, onChoose }: TodayFolderSettingProps) {
   const [error, setError] = useState<string | null>(null)
@@ -30,14 +30,14 @@ export function TodayFolderSetting({ choices, chosenId, defaultName, chosenMissi
       <div className="flex items-start gap-4">
         <CalendarBlank size={18} className="mt-0.5 shrink-0 text-indigo-500" aria-hidden />
         <div className="min-w-0 flex-1">
-          <p className="text-[13.5px] font-medium">今日のフォルダ</p>
-          <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+          <p className="text-body font-medium">今日のフォルダ</p>
+          <p className="mt-0.5 text-small leading-relaxed text-zinc-500 dark:text-zinc-400">
             日付ごとのメモの置き場所です。あなたの Mac だけにあり、同期されません。ファイルの欄の「今日のフォルダを開く」と、あなただけのやることの「＋新しいファイル」がここを使います。
           </p>
-          {folderNow && <p className="mt-1 truncate font-mono text-[11.5px] text-zinc-500 dark:text-zinc-400" title={folderNow}>{folderNow}/</p>}
-          {chosenMissingName && <p className="mt-1 text-[12px] text-amber-700 dark:text-amber-300">「{chosenMissingName}」はこのPCにダウンロードしていないため、{defaultName ? `「${defaultName}」を使っています。` : '今日のフォルダを作れません。'}</p>}
-          {!defaultName && choices.length === 0 && <p className="mt-1 text-[12px] text-amber-700 dark:text-amber-300">ダウンロードしている部署がありません。</p>}
-          {error && <p role="alert" className="mt-1 text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+          {folderNow && <p className="mt-1 truncate font-mono text-small text-zinc-500 dark:text-zinc-400" title={folderNow}>{folderNow}/</p>}
+          {chosenMissingName && <p className="mt-1 text-small text-amber-700 dark:text-amber-300">「{chosenMissingName}」はこのPCにダウンロードしていないため、{defaultName ? `「${defaultName}」を使っています。` : '今日のフォルダを作れません。'}</p>}
+          {!defaultName && choices.length === 0 && <p className="mt-1 text-small text-amber-700 dark:text-amber-300">ダウンロードしている部署がありません。</p>}
+          {error && <p role="alert" className="mt-1 text-small text-red-600 dark:text-red-400">{error}</p>}
         </div>
         <label className="shrink-0">
           <span className="sr-only">今日のフォルダを置く部署</span>

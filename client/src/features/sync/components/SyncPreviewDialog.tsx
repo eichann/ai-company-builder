@@ -224,7 +224,7 @@ export function SyncPreviewDialog({
 
         {/* Review file summary */}
         {reviewFileCount > 0 && (
-          <div className="mb-2 px-3 py-1.5 rounded-control bg-surface-sunken text-[11px] text-text-muted">
+          <div className="mb-2 px-3 py-1.5 rounded-control bg-surface-sunken text-caption font-normal text-text-muted">
             レビュー関連ファイル: {reviewFileCount}件（自動同期）
           </div>
         )}

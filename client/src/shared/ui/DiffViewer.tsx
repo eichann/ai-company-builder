@@ -264,12 +264,12 @@ export function DiffViewer(props: DiffViewerProps) {
     <div className="flex h-full">
       {/* Left pane (old / removed) */}
       <div className="w-1/2 border-r border-[color:var(--color-border)] flex flex-col">
-        <div data-diff-side="before" className={`px-3 py-1.5 text-[11px] font-medium border-b ${LINE_LOOK.remove}`}>
+        <div data-diff-side="before" className={`px-3 py-1.5 text-caption font-medium border-b ${LINE_LOOK.remove}`}>
           変更前
         </div>
         <div
           ref={leftRef}
-          className="flex-1 overflow-auto text-[11px] font-mono leading-[1.7]"
+          className="flex-1 overflow-auto text-caption font-normal font-mono leading-[1.7]"
           onScroll={() => handleScroll('left')}
         >
           {splitRows.map((row, i) => (
@@ -280,12 +280,12 @@ export function DiffViewer(props: DiffViewerProps) {
 
       {/* Right pane (new / added) */}
       <div className="w-1/2 flex flex-col">
-        <div data-diff-side="after" className={`px-3 py-1.5 text-[11px] font-medium border-b ${LINE_LOOK.add}`}>
+        <div data-diff-side="after" className={`px-3 py-1.5 text-caption font-medium border-b ${LINE_LOOK.add}`}>
           変更後
         </div>
         <div
           ref={rightRef}
-          className="flex-1 overflow-auto text-[11px] font-mono leading-[1.7]"
+          className="flex-1 overflow-auto text-caption font-normal font-mono leading-[1.7]"
           onScroll={() => handleScroll('right')}
         >
           {splitRows.map((row, i) => (

@@ -224,7 +224,7 @@ function PlaceReaders({
       </DialogHeader>
       <div className="space-y-5 px-6 py-5">
         <section className="space-y-2" aria-label={`${department.name}を見られる人`}>
-          <div className="flex items-start gap-3 rounded-lg bg-muted/40 px-3 py-2.5">
+          <div className="flex items-start gap-3 rounded-control bg-muted/40 px-3 py-2.5">
             <Eye size={18} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             <div className="min-w-0 flex-1 text-sm">
               <div>
@@ -249,7 +249,7 @@ function PlaceReaders({
           {places.length === 0 ? (
             <p className="text-sm text-muted-foreground">まだありません。</p>
           ) : (
-            <ul className="divide-y rounded-lg border" aria-label="部署の中の場所">
+            <ul className="divide-y rounded-control border" aria-label="部署の中の場所">
               {places.map((p) => (
                 <li key={p} className="flex items-center gap-3 px-3 py-2.5">
                   <div className="min-w-0 flex-1">
@@ -372,7 +372,7 @@ function ReadersEditor({
       >
         <span
           aria-hidden="true"
-          className={cn('flex size-4 items-center justify-center rounded border', on ? 'border-primary bg-primary text-primary-foreground' : 'border-input')}
+          className={cn('flex size-4 items-center justify-center rounded-small border', on ? 'border-primary bg-primary text-primary-foreground' : 'border-input')}
         >
           {on && <Check size={12} weight="bold" />}
         </span>
@@ -417,7 +417,7 @@ function ReadersEditor({
         )}
         {draft.mode === 'chosen' && (
           <div className="space-y-2">
-            <Command className="rounded-lg border" loop>
+            <Command className="rounded-control border" loop>
               <CommandInput placeholder="名前・部署・まとまりで絞り込む" />
               <CommandList className="max-h-64">
                 <CommandEmpty>見つかりません</CommandEmpty>

@@ -28,7 +28,7 @@ export function ToolViewer({ tool, port, color, onClose }: ToolViewerProps) {
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900/80">
         <div className="flex items-center gap-3">
           <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            className="w-8 h-8 rounded-control flex items-center justify-center"
             style={{ backgroundColor: `${color}20` }}
           >
             <Wrench size={16} weight="fill" style={{ color }} />
@@ -45,7 +45,7 @@ export function ToolViewer({ tool, port, color, onClose }: ToolViewerProps) {
 
         <button
           onClick={onClose}
-          className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors"
+          className="p-2 rounded-control hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors"
           title={t('toolViewer.close', 'Close')}
         >
           <X size={16} />
@@ -79,7 +79,7 @@ export function ToolViewer({ tool, port, color, onClose }: ToolViewerProps) {
         <button
           onClick={handleOpenExternal}
           className="
-            flex items-center gap-3 px-6 py-3 rounded-xl
+            flex items-center gap-3 px-6 py-3 rounded-card
             text-white font-medium
             transition-all hover:brightness-110 active:scale-[0.98]
           "

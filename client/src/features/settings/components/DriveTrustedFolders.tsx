@@ -35,12 +35,12 @@ export function DriveTrustedFolders({ companyId }: { companyId: string }) {
   }
   return (
     <div ref={loadRef} data-testid="drive-trusted-folders" className={folders.length === 0 && !error ? 'hidden' : 'space-y-1 pt-2'}>
-      <p className="text-[12px] font-medium">「もう聞かない」にしたフォルダ</p>
-      <p className="text-[12px] text-zinc-500">社外の人も見られるフォルダでも、AI が確かめずに置きます（見られる社外の人が変わったら、また聞きます）。</p>
-      {error && <p role="alert" className="text-[12px] text-red-600">{error}</p>}
+      <p className="text-small font-medium">「もう聞かない」にしたフォルダ</p>
+      <p className="text-small text-zinc-500">社外の人も見られるフォルダでも、AI が確かめずに置きます（見られる社外の人が変わったら、また聞きます）。</p>
+      {error && <p role="alert" className="text-small text-red-600">{error}</p>}
       <ul className="space-y-1">
         {folders.map(f => (
-          <li key={f.folderId} className="flex items-center justify-between gap-2 text-[12px]">
+          <li key={f.folderId} className="flex items-center justify-between gap-2 text-small">
             <span className="min-w-0 truncate">{f.folderName || '（名前のないフォルダ）'}{f.outsideDomains.length > 0 ? `（${f.outsideDomains.filter(d => d !== '?').join('・') || '社外'} の人も見られます）` : ''}</span>
             <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void untrust(f.folderId)}>聞くように戻す</Button>
           </li>

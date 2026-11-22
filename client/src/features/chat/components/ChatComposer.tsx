@@ -109,7 +109,7 @@ export const ChatInput = memo(function ChatInput({
     <div
       {...attachments.dropHandlers}
       data-composer-drop
-      className={`relative rounded-xl border transition-colors ${
+      className={`relative rounded-card border transition-colors ${
         attachments.drag
           ? 'border-primary bg-selected-bg'
           : 'border-transparent'
@@ -118,7 +118,7 @@ export const ChatInput = memo(function ChatInput({
       {apiRef && <VoiceInputControl editor={apiRef} active={voiceActive} pane={voicePane} scope={voiceScope} disabled={disabled} onBusy={setVoiceBusy} />}
       {/* Drag overlay: says what dropping does — a file is read, a record becomes the topic. */}
       {attachments.drag && (
-        <div data-drop-frame className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-selected-bg border-2 border-dashed border-primary pointer-events-none px-3 text-center">
+        <div data-drop-frame className="absolute inset-0 z-10 flex items-center justify-center rounded-card bg-selected-bg border-2 border-dashed border-primary pointer-events-none px-3 text-center">
           <span className="rounded-md bg-white/95 px-3 py-1 text-sm font-medium text-link shadow-sm dark:bg-zinc-900/95">{dropFrameText(attachments.drag)}</span>
         </div>
       )}
@@ -126,11 +126,11 @@ export const ChatInput = memo(function ChatInput({
       {pendingRecords && pendingRecords.length > 0 && (
         <div className="flex flex-wrap gap-1 px-1 pb-1.5" data-pending-records>
           {pendingRecords.map(r => (
-            <span key={r.id} className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-selected-border bg-selected-bg py-0.5 pl-2 pr-1 text-[11px] text-selected-text">
+            <span key={r.id} className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-selected-border bg-selected-bg py-0.5 pl-2 pr-1 text-caption font-normal text-selected-text">
               <ListChecks size={11} aria-hidden className="shrink-0" />
               <span className="min-w-0 truncate">{droppedRecordLine(r, false)}</span>
               {onRemoveRecord && (
-                <button type="button" onClick={() => onRemoveRecord(r.id)} aria-label={`${r.title || r.word}を渡すのをやめる`} className="shrink-0 rounded p-0.5 hover:bg-selected-bg-hover">
+                <button type="button" onClick={() => onRemoveRecord(r.id)} aria-label={`${r.title || r.word}を渡すのをやめる`} className="shrink-0 rounded-small p-0.5 hover:bg-selected-bg-hover">
                   <X size={10} />
                 </button>
               )}

@@ -141,7 +141,7 @@ function SetupCard({ setup, base, hasCompanyFolder }: { setup: NonNullable<Admin
             const isNext = step === next
             const href = `${base}/${words.path}`
             return (
-              <li key={step.id} className={cn('flex items-start gap-2.5 rounded-lg px-2 py-2', isNext && 'bg-selected-bg')}>
+              <li key={step.id} className={cn('flex items-start gap-2.5 rounded-control px-2 py-2', isNext && 'bg-selected-bg')}>
                 {step.done ? (
                   <CheckCircle size={18} weight="fill" className="mt-px shrink-0 text-success" aria-label="終わった" />
                 ) : (
@@ -378,7 +378,7 @@ function AttentionCard({
   return (
     <Card className="overflow-hidden">
       <div className="flex gap-3 px-5 pt-4 pb-3">
-        <span className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg ${TONES[tone]}`}>
+        <span className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-control ${TONES[tone]}`}>
           <IconComponent size={17} weight="bold" />
         </span>
         <div className="min-w-0 space-y-0.5">
@@ -399,7 +399,7 @@ function FooterLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <Link
       href={href}
-      className="inline-flex items-center gap-1 rounded text-sm font-medium text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      className="inline-flex items-center gap-1 rounded-small text-sm font-medium text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
     >
       {children}
       <ArrowRight size={14} />
@@ -448,7 +448,7 @@ function RejectionRow({ rejection }: { rejection: PushRejection }) {
         {shown.length > 0 && (
           <ul className="flex flex-wrap gap-1.5 pt-0.5">
             {shown.map((p) => (
-              <li key={p} className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+              <li key={p} className="max-w-full truncate rounded-small bg-muted px-1.5 py-0.5 font-mono text-xs">
                 {p}
               </li>
             ))}
@@ -464,9 +464,9 @@ function StatCard({ icon: IconComponent, label, value, href }: { icon: Icon; lab
   return (
     <Link
       href={href}
-      className="group flex items-center gap-4 rounded-xl border bg-card px-5 py-4 shadow-xs transition-colors outline-none hover:bg-accent/50 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      className="group flex items-center gap-4 rounded-card border bg-card px-5 py-4 shadow-xs transition-colors outline-none hover:bg-accent/50 focus-visible:ring-[3px] focus-visible:ring-ring/50"
     >
-      <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+      <span className="flex size-9 items-center justify-center rounded-control bg-muted text-muted-foreground">
         <IconComponent size={18} />
       </span>
       <div className="flex-1">
@@ -494,12 +494,12 @@ function MemberOverview() {
           {members.data ? (
             <StatCard icon={Users} label="メンバー" value={`${members.data.length}人`} href={`${base}/members`} />
           ) : (
-            <Skeleton className="h-[74px] rounded-xl" />
+            <Skeleton className="h-[74px] rounded-card" />
           )}
           {departments.data ? (
             <StatCard icon={TreeStructure} label="部署" value={`${departments.data.length}`} href={`${base}/departments`} />
           ) : (
-            <Skeleton className="h-[74px] rounded-xl" />
+            <Skeleton className="h-[74px] rounded-card" />
           )}
         </div>
 
@@ -515,7 +515,7 @@ function MemberOverview() {
               <div className="mb-2 text-xs font-medium text-muted-foreground">管理役を務めている部署</div>
               <ul className="flex flex-wrap gap-2">
                 {managed.map((d) => (
-                  <li key={d.id} className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-sm">
+                  <li key={d.id} className="flex items-center gap-2 rounded-control border px-2.5 py-1.5 text-sm">
                     <DepartmentIcon icon={d.icon} color={d.color} size="sm" />
                     {d.name}
                   </li>
@@ -547,12 +547,12 @@ function OverviewSkeleton({ bare = false }: { bare?: boolean }) {
       )}
       <div className="space-y-8">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Skeleton className="h-[74px] rounded-xl" />
-          <Skeleton className="h-[74px] rounded-xl" />
+          <Skeleton className="h-[74px] rounded-card" />
+          <Skeleton className="h-[74px] rounded-card" />
         </div>
         <div className="space-y-3">
           <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-40 rounded-xl" />
+          <Skeleton className="h-40 rounded-card" />
         </div>
       </div>
     </div>

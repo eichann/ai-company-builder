@@ -226,7 +226,7 @@ function VersionsDialog({
         ) : !versions.data ? (
           <ListSkeleton rows={2} />
         ) : (
-          <ul aria-label="これまでの版" className="divide-y rounded-lg border">
+          <ul aria-label="これまでの版" className="divide-y rounded-control border">
             {versions.data.versions.map((v) => (
               <li key={v.version} className="flex flex-wrap items-center gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1 space-y-0.5 text-sm">

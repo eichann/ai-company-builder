@@ -33,7 +33,7 @@ export function SkillsPanel(props: Props) {
     <>
       <div className={`${selectedSkillId ? 'w-1/2' : 'w-full'} transition-all overflow-hidden flex flex-col`}>
         {!!props.ruleClashes?.length && (
-          <div role="status" className="m-3 mb-0 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-xs text-amber-700 dark:text-amber-400">{shelfRuleClashNote(props.ruleClashes)}</div>
+          <div role="status" className="m-3 mb-0 p-2 rounded-control bg-amber-50 dark:bg-amber-900/20 text-xs text-amber-700 dark:text-amber-400">{shelfRuleClashNote(props.ruleClashes)}</div>
         )}
         <SkillGrid
           skills={skills}

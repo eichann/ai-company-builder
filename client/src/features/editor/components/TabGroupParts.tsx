@@ -28,7 +28,7 @@ export function TabGroupChip({ section, name, typeLabel, collapsed, holdsActive,
       className={`flex flex-shrink-0 items-center gap-0.5 pl-1.5 pr-0.5 border-r border-gray-200 dark:border-zinc-800/50 ${dropping ? 'bg-indigo-100 dark:bg-indigo-900/40' : ''}`}>
       <button type="button" aria-expanded={!collapsed} title={collapsed ? `「${name}」を開く` : `「${name}」をたたむ`}
         onClick={onToggle} onContextMenu={e => { e.preventDefault(); onMenu(e.clientX, e.clientY) }}
-        className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap ${color ? color.chip : 'bg-gray-200/70 text-gray-700 dark:bg-zinc-800 dark:text-zinc-300'} ${holdsActive ? 'ring-1 ring-indigo-400' : ''}`}>
+        className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-caption font-medium whitespace-nowrap ${color ? color.chip : 'bg-gray-200/70 text-gray-700 dark:bg-zinc-800 dark:text-zinc-300'} ${holdsActive ? 'ring-1 ring-indigo-400' : ''}`}>
         {section.kind ? <ThingIcon kind={section.kind} typeLabel={typeLabel} size={12} label={name} /> : null}
         <span className="max-w-[120px] truncate">{name}</span>
         <span className="tabular-nums opacity-70" aria-label={`${section.keys.length}件`}>{section.keys.length}</span>
@@ -36,7 +36,7 @@ export function TabGroupChip({ section, name, typeLabel, collapsed, holdsActive,
       </button>
       <button type="button" aria-label={`${name}の操作`} title={`${name}の操作`}
         onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onMenu(r.left, r.bottom + 2) }}
-        className="rounded p-0.5 text-gray-400 hover:bg-gray-200 dark:hover:bg-zinc-700">
+        className="rounded-small p-0.5 text-gray-400 hover:bg-gray-200 dark:hover:bg-zinc-700">
         <DotsThreeVertical size={12} weight="bold" />
       </button>
     </div>

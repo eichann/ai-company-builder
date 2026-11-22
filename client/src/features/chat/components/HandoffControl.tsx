@@ -34,18 +34,18 @@ export function HandoffControl({ companyId, sessionId, active = true }: { compan
     </button>
     {recoveryLabel && <p role="status" className="px-4 text-[10px] text-gray-500">{recoveryLabel}</p>}
     <dialog ref={dialog} className="m-auto w-[min(var(--size-dialog-lg),90vw)] max-h-[85vh] rounded-card border border-[color:var(--color-border)] bg-surface-raised text-text shadow-dialog p-dialog backdrop:bg-scrim" aria-labelledby={titleId}>
-      <div className="flex justify-between items-center gap-3"><h2 id={titleId} className="text-title">引き継ぎメモ</h2><button type="button" aria-label="引き継ぎメモを閉じる" onClick={() => dialog.current?.close()} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-zinc-800"><X size={16} /></button></div>
+      <div className="flex justify-between items-center gap-3"><h2 id={titleId} className="text-title">引き継ぎメモ</h2><button type="button" aria-label="引き継ぎメモを閉じる" onClick={() => dialog.current?.close()} className="p-2 rounded-small hover:bg-gray-100 dark:hover:bg-zinc-800"><X size={16} /></button></div>
       <p className="mt-2 text-xs text-gray-500">同じ相談を長く続けるための要点です。元の履歴は残ります。相談を閉じてもメモは残り、相談を削除するとメモも削除されます。</p>
       <p className="mt-3 text-xs" role="status">{view?.message || '読み込み中…'}</p>
       {recoveryLabel && <p className="mt-2 text-xs text-gray-500">{recoveryLabel}</p>}
       {error && <p role="alert" className="mt-2 text-xs text-red-500">{error}</p>}
-      {view?.updatedAt && <p className="mt-2 text-[11px] text-gray-500">保存日時：{new Date(view.updatedAt).toLocaleString('ja-JP')} · {agentShortLabel(view.provider)}{view.metrics && ` · ${(view.metrics.totalMs / 1000).toFixed(1)}秒`}</p>}
-      <div className="mt-4 break-words text-xs leading-6 bg-gray-50 dark:bg-zinc-800 rounded-lg p-3 max-h-[45vh] overflow-auto prose prose-sm dark:prose-invert max-w-none [&_h2]:text-sm [&_h2]:mt-3 [&_h2]:mb-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0">
+      {view?.updatedAt && <p className="mt-2 text-caption font-normal text-gray-500">保存日時：{new Date(view.updatedAt).toLocaleString('ja-JP')} · {agentShortLabel(view.provider)}{view.metrics && ` · ${(view.metrics.totalMs / 1000).toFixed(1)}秒`}</p>}
+      <div className="mt-4 break-words text-xs leading-6 bg-gray-50 dark:bg-zinc-800 rounded-control p-3 max-h-[45vh] overflow-auto prose prose-sm dark:prose-invert max-w-none [&_h2]:text-sm [&_h2]:mt-3 [&_h2]:mb-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0">
         <ReactMarkdown components={{ a: ({ children }) => <span>{children}</span>, img: () => null }}>{view?.markdown || 'メモはまだありません。応答が正常に終了して保存された会話が対象です。'}</ReactMarkdown>
       </div>
       <div className="mt-4 flex items-center justify-between gap-4">
-        <p className="text-[11px] text-gray-500">自動更新：16往復または約12,000文字から。<br />同じ相談は10分間隔、全体で最大4回／時。</p>
-        <button type="button" disabled={!view?.canUpdate} onClick={() => void update()} className={`rounded-lg px-3 py-2 text-xs shrink-0 ${PRIMARY_ACTION}`}>メモを更新</button>
+        <p className="text-caption font-normal text-gray-500">自動更新：16往復または約12,000文字から。<br />同じ相談は10分間隔、全体で最大4回／時。</p>
+        <button type="button" disabled={!view?.canUpdate} onClick={() => void update()} className={`rounded-control px-3 py-2 text-xs shrink-0 ${PRIMARY_ACTION}`}>メモを更新</button>
       </div>
       <p className="mt-2 text-[10px] text-gray-400">手動更新も利用量の上限内で実行します。AIの要約なので、重要な判断は元の履歴でも確認してください。</p>
     </dialog>

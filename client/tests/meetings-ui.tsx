@@ -148,9 +148,9 @@ function Preview() {
         {arrivals.available && <MeetingBanners companyId="co" items={arrivals.items} aiTurns={null} onView={m => setOpen(m.id)} onChanged={reload} />}
         <div className="flex min-h-0 flex-1">
           <div data-testid="task-list" className="min-h-0 flex-1 overflow-y-auto">
-            <p className="p-3 text-[12px] text-gray-400">（やることの一覧）</p>
+            <p className="p-3 text-small text-gray-400">（やることの一覧）</p>
             <pre id="log" className="p-2 text-[10px]" />
-            {flood > 0 && Array.from({ length: 60 }, (_, n) => <p key={n} className="px-3 py-1.5 text-[12px]">やること {n}</p>)}
+            {flood > 0 && Array.from({ length: 60 }, (_, n) => <p key={n} className="px-3 py-1.5 text-small">やること {n}</p>)}
           </div>
         </div>
       </aside>
@@ -161,7 +161,7 @@ function Preview() {
             parts, members: Object.entries(people).filter(([id]) => id !== ME).map(([id, name]) => ({ id, name })),
             onConsult: m => say(`consult ${m.id}`), onChanged: reload,
           })} />}
-        {!open && <button type="button" className="m-4 text-[12px] text-link" onClick={() => setOpen('meeting-teirei01')}>定例ミーティングを開く</button>}
+        {!open && <button type="button" className="m-4 text-small text-link" onClick={() => setOpen('meeting-teirei01')}>定例ミーティングを開く</button>}
       </section>
     </main>
   )

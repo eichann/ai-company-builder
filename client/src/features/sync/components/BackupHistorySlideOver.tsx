@@ -133,7 +133,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
             </div>
             <button
               onClick={onClose}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 transition-colors"
+              className="p-2 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 transition-colors"
             >
               <X size={20} />
             </button>
@@ -142,7 +142,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
           {restoreNotice && (
             <p
               role={restoreNotice.ok ? 'status' : 'alert'}
-              className={`mx-6 mt-3 px-3 py-2 rounded-lg text-xs ${restoreNotice.ok
+              className={`mx-6 mt-3 px-3 py-2 rounded-control text-xs ${restoreNotice.ok
                 ? 'bg-green-50 text-green-800 dark:bg-green-500/10 dark:text-green-300'
                 : 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300'}`}
             >
@@ -185,7 +185,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
                           <span className="text-sm font-medium text-gray-900 dark:text-white">
                             {getReasonLabel(backup.reason)}
                           </span>
-                          <span className="text-xs text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 px-2 py-0.5 rounded">
+                          <span className="text-xs text-gray-500 dark:text-zinc-400 bg-gray-100 dark:bg-zinc-800 px-2 py-0.5 rounded-small">
                             {backup.files.length}ファイル
                           </span>
                         </div>
@@ -195,7 +195,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
                       </div>
                       <button
                         onClick={() => handleOpenFolder(backup.path)}
-                        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 transition-colors"
+                        className="p-2 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 transition-colors"
                         title="フォルダを開く"
                       >
                         <FolderOpen size={18} />
@@ -208,7 +208,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
                         {backup.files.map((file) => (
                           <div
                             key={file}
-                            className="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-50 dark:bg-zinc-800/50"
+                            className="flex items-center justify-between py-2 px-3 rounded-control bg-gray-50 dark:bg-zinc-800/50"
                           >
                             <div className="flex items-center gap-2 min-w-0">
                               <File size={14} className="text-gray-400 dark:text-zinc-500 flex-shrink-0" />
@@ -219,7 +219,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
                             <button
                               onClick={() => setRestoreAsk({ backupId: backup.id, filePath: file })}
                               disabled={restoringFile === `${backup.id}:${file}`}
-                              className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded transition-colors disabled:opacity-50"
+                              className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-small transition-colors disabled:opacity-50"
                             >
                               <ArrowCounterClockwise size={12} />
                               復元

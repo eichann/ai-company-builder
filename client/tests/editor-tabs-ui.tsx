@@ -161,13 +161,13 @@ export function Preview() {
       <div className="bg-amber-50 px-4 py-2 text-xs text-amber-900">表示確認用の人工データです。</div>
       <nav className="flex gap-1 border-b border-gray-200 px-3 pt-2 text-sm dark:border-zinc-800">
         {[['company', '全社'], ['content', 'コンテンツG'], ['sales', '営業部']].map(([id, name]) => (
-          <button key={id} onClick={() => setDept(id)} className={`rounded-t px-3 py-1.5 ${dept === id ? 'border border-b-0 border-gray-200 bg-white font-medium dark:border-zinc-800 dark:bg-zinc-900' : 'text-gray-500'}`}>{name}</button>
+          <button key={id} onClick={() => setDept(id)} className={`rounded-t-small px-3 py-1.5 ${dept === id ? 'border border-b-0 border-gray-200 bg-white font-medium dark:border-zinc-800 dark:bg-zinc-900' : 'text-gray-500'}`}>{name}</button>
         ))}
       </nav>
       {params.get('view') === 'external' && (
         <div className="flex gap-2 px-3 py-2 text-xs">
-          <button data-testid="external-edit" className="rounded border px-2 py-1" onClick={() => externalEdit(active)}>AIがこのファイルを書き換える</button>
-          <button data-testid="external-delete" className="rounded border px-2 py-1" onClick={() => externalDelete(active)}>AIがこのファイルを削除する</button>
+          <button data-testid="external-edit" className="rounded-small border px-2 py-1" onClick={() => externalEdit(active)}>AIがこのファイルを書き換える</button>
+          <button data-testid="external-delete" className="rounded-small border px-2 py-1" onClick={() => externalDelete(active)}>AIがこのファイルを削除する</button>
         </div>
       )}
       {htmlView && (

@@ -147,7 +147,7 @@ function SettingsForm({ saved, onSaved }: { saved: AgentBrowserView; onSaved: (n
           {sites.map((site, i) => {
             const n = i + 1
             return (
-              <fieldset key={i} aria-label={`サイト ${n}`} className="space-y-3 rounded-lg border p-4">
+              <fieldset key={i} aria-label={`サイト ${n}`} className="space-y-3 rounded-control border p-4">
                 <div className="grid gap-3 md:grid-cols-[1fr_14rem]">
                   <label className="space-y-1 text-sm">
                     <span className="font-medium">操作するサイト</span>
@@ -225,7 +225,7 @@ function SettingsForm({ saved, onSaved }: { saved: AgentBrowserView; onSaved: (n
 
       <div
         className={cn(
-          'sticky bottom-4 z-10 flex flex-col gap-3 rounded-xl border bg-card px-4 py-3 shadow-md sm:flex-row sm:items-center sm:justify-between',
+          'sticky bottom-4 z-10 flex flex-col gap-3 rounded-card border bg-card px-4 py-3 shadow-md sm:flex-row sm:items-center sm:justify-between',
           !dirty && 'hidden'
         )}
         aria-live="polite"

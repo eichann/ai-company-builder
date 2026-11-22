@@ -29,8 +29,8 @@ interface Props {
   linkedBundleId?: string | null
 }
 
-const PILL = 'inline-flex h-[22px] items-center gap-0.5 rounded-md bg-white pl-1.5 pr-1 text-[12px] font-medium text-gray-700 ring-1 ring-gray-200 dark:bg-zinc-900 dark:text-zinc-200 dark:ring-zinc-700'
-const POPOVER = 'absolute left-0 top-full z-30 mt-1 w-[290px] overflow-hidden rounded-lg border border-gray-200 bg-white text-[12.5px] text-gray-800 shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100'
+const PILL = 'inline-flex h-[22px] items-center gap-0.5 rounded-md bg-white pl-1.5 pr-1 text-small font-medium text-gray-700 ring-1 ring-gray-200 dark:bg-zinc-900 dark:text-zinc-200 dark:ring-zinc-700'
+const POPOVER = 'absolute left-0 top-full z-30 mt-1 w-[290px] overflow-hidden rounded-control border border-gray-200 bg-white text-small text-gray-800 shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100'
 
 type Row = { kind: 'tag'; tag: string; selected: boolean } | { kind: 'new'; tag: string }
 
@@ -90,8 +90,8 @@ export function TagField({ companyId, title, tags, tagsInUse, canEdit, busy, onS
   }
 
   return (
-    <div ref={setBox} className={`relative rounded-lg bg-gray-50 px-3 py-2 dark:bg-zinc-800/60 ${open ? 'ring-1 ring-focus-ring' : ''}`}>
-      <div className="flex items-center gap-1 text-[11px] text-gray-500"><Hash size={11} />タグ</div>
+    <div ref={setBox} className={`relative rounded-control bg-gray-50 px-3 py-2 dark:bg-zinc-800/60 ${open ? 'ring-1 ring-focus-ring' : ''}`}>
+      <div className="flex items-center gap-1 text-caption font-normal text-gray-500"><Hash size={11} />タグ</div>
       <div className={`mt-0.5 flex min-h-[24px] flex-wrap items-center gap-1 ${canEdit ? 'cursor-text' : ''}`}
         onClick={e => { if (e.target === e.currentTarget) start() }}>
         {tags.map(t => (
@@ -99,20 +99,20 @@ export function TagField({ companyId, title, tags, tagsInUse, canEdit, busy, onS
             <span className="text-gray-400 dark:text-zinc-500">#</span>{t}
             {canEdit && (
               <button type="button" disabled={busy} onClick={() => remove(t)} aria-label={`#${t} を外す`}
-                className="ml-0.5 rounded p-px text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40 dark:hover:bg-zinc-700 dark:hover:text-zinc-100"><X size={10} weight="bold" /></button>
+                className="ml-0.5 rounded-small p-px text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40 dark:hover:bg-zinc-700 dark:hover:text-zinc-100"><X size={10} weight="bold" /></button>
             )}
           </span>
         ))}
-        {tags.length === 0 && !canEdit && <span className="text-[13px] text-gray-400">なし</span>}
+        {tags.length === 0 && !canEdit && <span className="text-body text-gray-400">なし</span>}
         {canEdit && (
           <button type="button" disabled={busy} onClick={() => (open ? close() : start())} aria-expanded={open} aria-haspopup="dialog"
             aria-label={`タグを足す・外す（いま：${tags.length ? tags.join('、') : 'なし'}）`}
-            className="inline-flex h-[22px] items-center gap-0.5 rounded-md px-1.5 text-[12px] border border-dashed border-gray-300 text-gray-500 hover:border-selected-border hover:text-link disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-400">
+            className="inline-flex h-[22px] items-center gap-0.5 rounded-md px-1.5 text-small border border-dashed border-gray-300 text-gray-500 hover:border-selected-border hover:text-link disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-400">
             <Plus size={10} weight="bold" />{tags.length === 0 && 'タグ'}
           </button>
         )}
       </div>
-      {!open && error && <p role="alert" className="mt-1 text-[11.5px] text-red-600 dark:text-red-400">{error}</p>}
+      {!open && error && <p role="alert" className="mt-1 text-small text-red-600 dark:text-red-400">{error}</p>}
 
       {open && (
         <div role="dialog" aria-label="タグ" className={POPOVER}>
@@ -135,7 +135,7 @@ export function TagField({ companyId, title, tags, tagsInUse, canEdit, busy, onS
               className="min-w-0 flex-1 bg-transparent py-0.5 outline-none placeholder:text-gray-400" />
           </div>
           <ul id={listId} role="listbox" aria-label="タグ" aria-multiselectable className="max-h-[220px] overflow-y-auto p-1">
-            {rows.length === 0 && <li className="px-2 py-1.5 text-[11.5px] text-gray-400">{tagsInUse.length === 0 ? '言葉を入れると、タグを作れます' : '見つかりません'}</li>}
+            {rows.length === 0 && <li className="px-2 py-1.5 text-small text-gray-400">{tagsInUse.length === 0 ? '言葉を入れると、タグを作れます' : '見つかりません'}</li>}
             {rows.map((r, i) => (
               <li key={`${r.kind}:${r.tag}`} id={`${listId}-${i}`} role="option" aria-selected={r.kind === 'tag' && r.selected} data-active={i === active || undefined}
                 onMouseEnter={() => setIndex(i)} onMouseDown={e => e.preventDefault()} onClick={() => { if (!busy) choose(r) }}
@@ -148,23 +148,23 @@ export function TagField({ companyId, title, tags, tagsInUse, canEdit, busy, onS
             ))}
           </ul>
           {(asking || shownSuggestions.length > 0) && (
-            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t border-gray-100 px-2.5 py-1.5 text-[11.5px] text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t border-gray-100 px-2.5 py-1.5 text-small text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
               <Sparkle size={11} weight="fill" className="shrink-0 text-ai-icon" />
               {asking ? '合いそうなタグを探しています…' : <>合いそうなタグ：{shownSuggestions.map(t => (
                 <button key={t} type="button" disabled={busy} onClick={() => void add(t)} aria-label={`#${t} を付ける（AI の候補）`}
-                  className="rounded px-0.5 text-link hover:bg-selected-bg disabled:opacity-50">#{t}</button>
+                  className="rounded-small px-0.5 text-link hover:bg-selected-bg disabled:opacity-50">#{t}</button>
               ))}</>}
             </div>
           )}
           {named && (
-            <p role="note" className="border-t border-gray-100 px-2.5 py-1.5 text-[11.5px] text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
+            <p role="note" className="border-t border-gray-100 px-2.5 py-1.5 text-small text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
               『{named.title}』は{named.typeLabel}の名前です。
               <button type="button" disabled={busy} onClick={() => void onLinkBundle?.(named).then(f => { if (f) setError(f); else setTyped('') })}
                 className="text-link hover:underline disabled:opacity-50">{named.typeLabel}につなぐ</button>
             </p>
           )}
-          {error && <p role="alert" className="border-t border-gray-100 px-2.5 py-1.5 text-[11.5px] text-red-600 dark:border-zinc-700 dark:text-red-400">{error}</p>}
-          <p className="border-t border-gray-100 px-2.5 py-1 text-[10.5px] text-gray-400 dark:border-zinc-700 dark:text-zinc-500">↑↓ で選ぶ・Enter で付ける／外す・Esc で閉じる</p>
+          {error && <p role="alert" className="border-t border-gray-100 px-2.5 py-1.5 text-small text-red-600 dark:border-zinc-700 dark:text-red-400">{error}</p>}
+          <p className="border-t border-gray-100 px-2.5 py-1 text-caption font-normal text-gray-400 dark:border-zinc-700 dark:text-zinc-500">↑↓ で選ぶ・Enter で付ける／外す・Esc で閉じる</p>
         </div>
       )}
     </div>

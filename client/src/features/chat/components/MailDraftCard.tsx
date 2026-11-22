@@ -18,8 +18,8 @@ type Step = 'view' | 'edit' | 'confirm'
 interface Notice { tone: 'ok' | 'warn' | 'error' | 'info'; text: string }
 
 const NOTICE_CLASS = STATE_BOX
-const BUTTON = 'rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800'
-const PRIMARY = `rounded-lg px-3 py-1.5 text-xs font-medium ${PRIMARY_ACTION}`
+const BUTTON = 'rounded-control border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800'
+const PRIMARY = `rounded-control px-3 py-1.5 text-xs font-medium ${PRIMARY_ACTION}`
 
 function RecipientList({ label, list }: { label: string; list: MailRecipientView[] }) {
   if (list.length === 0) return null
@@ -29,7 +29,7 @@ function RecipientList({ label, list }: { label: string; list: MailRecipientView
       <ul aria-label={label} className="inline">
         {list.map(r => <li key={r.ref} className="ml-1 inline-block text-gray-800 dark:text-zinc-200">
           {recipientLine(r)}
-          {r.firstTime && <span className="ml-1 rounded bg-amber-100 px-1 text-[11px] text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">{MAIL_WORDS.firstTime}</span>}
+          {r.firstTime && <span className="ml-1 rounded-small bg-amber-100 px-1 text-caption font-normal text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">{MAIL_WORDS.firstTime}</span>}
         </li>)}
       </ul>
     </div>
@@ -48,7 +48,7 @@ function AttachmentList({ files, busy, onOpen, onRemove }: {
     <div className="mt-2 text-xs">
       <p className="text-gray-500 dark:text-zinc-400">{MAIL_WORDS.attachments}</p>
       <ul aria-label={MAIL_WORDS.attachments} className="mt-1 space-y-1">
-        {files.map(f => <li key={f.sha256} className="flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 px-2 py-1 dark:bg-zinc-900">
+        {files.map(f => <li key={f.sha256} className="flex flex-wrap items-center gap-2 rounded-control bg-gray-50 px-2 py-1 dark:bg-zinc-900">
           <FilePdf size={14} aria-hidden className="text-red-600" />
           <span className="font-medium text-gray-800 dark:text-zinc-200">{f.name}</span>
           <span className="text-gray-500 dark:text-zinc-400">{fileSizeLabel(f.size)}</span>
@@ -69,8 +69,8 @@ function MailContent({ draft }: { draft: OutboundMailView }) {
       <div className="mt-2">
         <p className="text-xs text-gray-500 dark:text-zinc-400">{MAIL_WORDS.slackWhere}</p>
         {draft.body !== null
-          ? <pre aria-label="本文" className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-2 font-sans text-xs text-gray-800 dark:bg-zinc-900 dark:text-zinc-200">{draft.body}</pre>
-          : <p className="mt-1 text-[11px] text-gray-500 dark:text-zinc-400">{MAIL_WORDS.bodyDeleted}</p>}
+          ? <pre aria-label="本文" className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-control bg-gray-50 p-2 font-sans text-xs text-gray-800 dark:bg-zinc-900 dark:text-zinc-200">{draft.body}</pre>
+          : <p className="mt-1 text-caption font-normal text-gray-500 dark:text-zinc-400">{MAIL_WORDS.bodyDeleted}</p>}
       </div>
     )
   }
@@ -81,8 +81,8 @@ function MailContent({ draft }: { draft: OutboundMailView }) {
       <RecipientList label="CC" list={draft.cc} />
       <p className="mt-1 text-xs"><span className="text-gray-500 dark:text-zinc-400">件名：</span><span className="font-medium">{draft.subject}</span></p>
       {draft.body !== null
-        ? <pre aria-label="本文" className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-2 font-sans text-xs text-gray-800 dark:bg-zinc-900 dark:text-zinc-200">{draft.body}</pre>
-        : <p className="mt-1 text-[11px] text-gray-500 dark:text-zinc-400">{MAIL_WORDS.bodyDeleted}</p>}
+        ? <pre aria-label="本文" className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-control bg-gray-50 p-2 font-sans text-xs text-gray-800 dark:bg-zinc-900 dark:text-zinc-200">{draft.body}</pre>
+        : <p className="mt-1 text-caption font-normal text-gray-500 dark:text-zinc-400">{MAIL_WORDS.bodyDeleted}</p>}
       {draft.linkCount > 0 && <p className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400"><LinkSimple size={12} aria-hidden />{MAIL_WORDS.links(draft.linkCount)}</p>}
     </div>
   )
@@ -96,7 +96,7 @@ function MailContent({ draft }: { draft: OutboundMailView }) {
 function EarlierSend({ earlier, reason, onReason, busy }: { earlier: MailAlreadySent; reason: string; onReason: (v: string) => void; busy: boolean }) {
   const canOpen = useCommandAvailable('record.open')
   return (
-    <div role="group" aria-label="先に送られたメール" className={`w-full rounded-lg border px-2 py-1.5 text-xs ${NOTICE_CLASS.warn}`}>
+    <div role="group" aria-label="先に送られたメール" className={`w-full rounded-control border px-2 py-1.5 text-xs ${NOTICE_CLASS.warn}`}>
       <p className="flex flex-wrap items-center gap-2 font-medium text-gray-900 dark:text-zinc-100">
         <Warning size={13} weight="bold" aria-hidden className="text-amber-500" />{earlier.message}
         {canOpen && <button type="button" className={BUTTON} onClick={() => { void runCommand('record.open', { recordId: earlier.messageId }) }}>{MAIL_WORDS.alreadySentOpen}</button>}
@@ -104,7 +104,7 @@ function EarlierSend({ earlier, reason, onReason, busy }: { earlier: MailAlready
       <p className="mt-1 text-gray-700 dark:text-zinc-300">{MAIL_WORDS.alreadySentAsk}</p>
       <label className="mt-1 block text-gray-700 dark:text-zinc-300">{MAIL_WORDS.resendReason}
         <input value={reason} disabled={busy} maxLength={RESEND_REASON_MAX} onChange={e => onReason(e.target.value)} placeholder={MAIL_WORDS.resendReasonPlaceholder}
-          className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-900" />
+          className="mt-0.5 w-full rounded-small border border-gray-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-900" />
       </label>
     </div>
   )
@@ -235,13 +235,13 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
   const heading = draft.state === 'draft' ? (slack ? MAIL_WORDS.slackDraft : 'メールの下書き') : MAIL_STATE_LABELS[draft.state]
 
   return (
-    <div role="group" aria-label={slack ? MAIL_WORDS.slackDraft : `メール：${draft.subject}`} data-state={draft.state} className="my-2 rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
+    <div role="group" aria-label={slack ? MAIL_WORDS.slackDraft : `メール：${draft.subject}`} data-state={draft.state} className="my-2 rounded-card border border-gray-200 p-3 dark:border-zinc-700">
       <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-gray-900 dark:text-zinc-100">
         {draft.state === 'sent' ? <CheckCircle size={15} weight="bold" aria-hidden className="text-emerald-600" />
           : draft.state === 'unknown' ? <Warning size={15} weight="bold" aria-hidden className="text-amber-500" />
             : <EnvelopeSimple size={15} aria-hidden className="text-gray-500" />}
         {heading}
-        {draft.lastChangedBy === 'ai' && <span className="ml-auto flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-normal text-gray-600 dark:bg-zinc-800 dark:text-zinc-300">
+        {draft.lastChangedBy === 'ai' && <span className="ml-auto flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-caption font-normal text-gray-600 dark:bg-zinc-800 dark:text-zinc-300">
           <Robot size={12} aria-hidden />{MAIL_WORDS.byAi}
         </span>}
       </div>
@@ -259,12 +259,12 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
             </ul>
             <div className="mt-1 flex gap-1">
               <input aria-label="宛先を入力" type="email" value={typed} onChange={e => setTyped(e.target.value)} placeholder="name@example.com"
-                className="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-900" />
+                className="min-w-0 flex-1 rounded-small border border-gray-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-900" />
               <button type="button" className={BUTTON} disabled={busy || typed.trim() === ''} onClick={() => void addTyped()}>入力した宛先を足す</button>
             </div>
           </fieldset>}
-          {!slack && <label className="block">件名<input value={subject} onChange={e => setSubject(e.target.value)} className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-900" /></label>}
-          <label className="block">本文<textarea value={body} onChange={e => setBody(e.target.value)} rows={10} className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 font-sans dark:border-zinc-600 dark:bg-zinc-900" /></label>
+          {!slack && <label className="block">件名<input value={subject} onChange={e => setSubject(e.target.value)} className="mt-0.5 w-full rounded-small border border-gray-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-900" /></label>}
+          <label className="block">本文<textarea value={body} onChange={e => setBody(e.target.value)} rows={10} className="mt-0.5 w-full rounded-small border border-gray-300 px-2 py-1 font-sans dark:border-zinc-600 dark:bg-zinc-900" /></label>
           <div className="flex gap-2">
             <button type="button" className={PRIMARY} disabled={busy} onClick={() => void save()}>{MAIL_WORDS.save}</button>
             <button type="button" className={BUTTON} disabled={busy} onClick={() => setStep('view')}>やめる</button>
@@ -275,11 +275,11 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
           {step === 'confirm' && <p className="mt-2 text-xs font-medium text-gray-900 dark:text-zinc-100">{MAIL_WORDS.confirmTitle}</p>}
           <MailContent draft={draft} />
           <AttachmentList files={files} busy={busy} onOpen={f => void openFile(f)} onRemove={draft.state === 'draft' && step === 'view' ? f => void removeFile(f) : null} />
-          {step === 'confirm' && files.length > 0 && <p className="mt-1 text-[11px] text-gray-600 dark:text-zinc-400">{MAIL_WORDS.attachmentsConfirm}</p>}
+          {step === 'confirm' && files.length > 0 && <p className="mt-1 text-caption font-normal text-gray-600 dark:text-zinc-400">{MAIL_WORDS.attachmentsConfirm}</p>}
         </>
       )}
 
-      {notice && <div role="status" className={`mt-2 rounded-lg border px-2 py-1.5 text-xs ${NOTICE_CLASS[notice.tone]}`}>{notice.text}</div>}
+      {notice && <div role="status" className={`mt-2 rounded-control border px-2 py-1.5 text-xs ${NOTICE_CLASS[notice.tone]}`}>{notice.text}</div>}
       {draft.state === 'sent' && draft.awaitReply?.chosenUntil && <p className="mt-2 text-xs text-gray-600 dark:text-zinc-400">{MAIL_WORDS.waitingReply(awaitDayLabel(draft.awaitReply.chosenUntil))}</p>}
       {draft.state === 'unknown' && !notice && <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{MAIL_WORDS.unknown}</p>}
 
@@ -294,7 +294,7 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
           <button type="button" className={BUTTON} disabled={busy} onClick={() => void discard()}>{MAIL_WORDS.discard}</button>
         </>}
         {draft.state === 'draft' && step === 'confirm' && <>
-          {offer && <fieldset className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs dark:border-zinc-700">
+          {offer && <fieldset className="w-full rounded-control border border-gray-200 px-2 py-1.5 text-xs dark:border-zinc-700">
             <label className="flex items-center gap-1.5 text-gray-800 dark:text-zinc-200">
               <input type="checkbox" checked={awaitOn} onChange={e => setAwaitOn(e.target.checked)} />
               {MAIL_WORDS.awaitReply(awaitDay ? awaitDayLabel(awaitDay) : '選んだ日')}
@@ -302,13 +302,13 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
             {awaitOn && <>
               <label className="mt-1 flex items-center gap-1.5 pl-5 text-gray-600 dark:text-zinc-400">{MAIL_WORDS.awaitReplyDay}
                 <input type="date" value={awaitDay} min={today} onChange={e => setAwaitDay(e.target.value)}
-                  className="rounded border border-gray-300 px-1.5 py-0.5 text-gray-800 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200" />
+                  className="rounded-small border border-gray-300 px-1.5 py-0.5 text-gray-800 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200" />
               </label>
-              <p className="mt-1 pl-5 text-[11px] text-gray-500 dark:text-zinc-400">{awaitDay ? MAIL_WORDS.awaitReplyNote : MAIL_WORDS.awaitReplyPickDay}</p>
+              <p className="mt-1 pl-5 text-caption font-normal text-gray-500 dark:text-zinc-400">{awaitDay ? MAIL_WORDS.awaitReplyNote : MAIL_WORDS.awaitReplyPickDay}</p>
             </>}
           </fieldset>}
           {earlier && <EarlierSend earlier={earlier} reason={resendReason} onReason={setResendReason} busy={busy} />}
-          <span className="w-full text-[11px] text-gray-600 dark:text-zinc-400">{MAIL_WORDS.confirmNote}</span>
+          <span className="w-full text-caption font-normal text-gray-600 dark:text-zinc-400">{MAIL_WORDS.confirmNote}</span>
           <button type="button" className={PRIMARY} disabled={busy || (!!waitChoice && !awaitDay) || (!!earlier && resendReason.trim() === '')} onClick={() => void send()}>
             {busy ? '送っています…' : earlier ? MAIL_WORDS.resendButton : MAIL_WORDS.confirmSend}
           </button>

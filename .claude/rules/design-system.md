@@ -117,7 +117,7 @@ included), `shadow-scale` (anything but `shadow-card / pop / dialog / none`; any
 fine), `color-opacity` (`bg-warning/10`).
 
 - **No new raw values.** Today's findings (2026-11-21: app 6,872, admin 1,235; after P2b app 6,371,
-  admin 1,104; after P2c app 6,010, admin 1,078; after P2d app 5,694, admin 1,078) are recorded per
+  admin 1,104; after P2c app 6,010, admin 1,078; after P2d app 5,694, admin 1,078; after P3 app 4,595, admin 977) are recorded per
   file and rule in `design-lint-baseline.txt`. CI ("Lint (changed files)", step "Design tokens and
   design lint") fails when a rule gains findings, when the tree differs from the baseline without
   it being updated (the list only shrinks), and (`--base <sha>`) when the committed baseline was
@@ -242,7 +242,7 @@ fine), `color-opacity` (`bg-warning/10`).
   `opacity-disabled`. The four colours before (the old `accent` blue, indigo, `blue-600`, black
   `zinc-900`) are gone from primary buttons.
 - **App**: `PRIMARY_ACTION` (`client/src/shared/ui/buttonStyles.ts`) holds exactly those colour
-  classes; a caller keeps its own size and shape (sizes move in P3). Used by `Button
+  classes; a caller takes its size from `BUTTON_SIZE` (P3) and adds its shape. Used by `Button
   variant="primary"` (`primitives.tsx`, was black; every variant's focus ring is now
   `ring-focus-ring` with a `bg` offset, was indigo), `RecordPage`'s `MAIN_BUTTON` (task card,
   record pages, the tasks and records dialogs), `MailDraftCard`'s `PRIMARY` (was `blue-600`),
@@ -280,8 +280,8 @@ fine), `color-opacity` (`bg-warning/10`).
   confirm, resolved through the token files in light and dark).
 - **`accent` in the app**: gone (P2c by meaning, see "Dialog frames, link and selected (P2c, done)";
   the last places in P2d), and the app's Tailwind config no longer defines it
-  (`design-tokens-bridge.test.ts` fails if it comes back). Also not primary actions and left: the app `Switch` / `Checkbox` and the settings nav
-  (indigo; P2 switch / checkbox), `CompletedReviewBanner`'s 「変更表示中」 toggle.
+  (`design-tokens-bridge.test.ts` fails if it comes back). Also not primary actions: the app `Switch` / `TriCheckbox` and the settings nav
+  (indigo until P3, see "Sizes, type and corners (P3, done)"), `CompletedReviewBanner`'s 「変更表示中」 toggle (left).
 
 ## Callouts and status badges (P2b, done)
 
@@ -393,7 +393,7 @@ fine), `color-opacity` (`bg-warning/10`).
     and the confirm never do; `dismissible={false}` while something runs (and for the skill wizard,
     whose typing Esc must not throw away; and the first-run 「仕事の道具をつなぐ」, answered only by
     its buttons). Focus starts on `initialFocus`, else on a field that focused itself (`autoFocus`),
-    else on the dialog. `padded={false}` for list pickers (their compact header stays; P3), `size=
+    else on the dialog. `padded={false}` for list pickers (their compact header stays; still to move after P3), `size=
     "custom"` for the two wide two-pane ones (`CopySkillModal` 768px, the settings).
     `ConfirmDialog` and `InputDialog` are built on it; moved onto it: `NewFolderDialog`,
     `PrivateFolderHelp`, `TooLargeFileHelp`, `DownloadFoldersSection`'s confirm, `InviteDialog`,
@@ -499,6 +499,65 @@ fine), `color-opacity` (`bg-warning/10`).
   count bubble, the chosen tab's underline and a dragged divider in `primary`, on `status-ui`) and
   `design-tokens-bridge.test.ts` (no `accent` colour). Each was checked to fail with its change
   reverted.
+
+## Sizes, type and corners (P3, done)
+
+- **Type steps by moving the screens, not the names**: every exact or half-pixel arbitrary size in the
+  app moved to its step — `text-[11px]` / `[10.5px]` → `text-caption`, `[12px]` / `[11.5px]` / `[12.5px]` →
+  `text-small`, `[13px]` / `[13.5px]` → `text-body`, `[15px]` → `title`, `[17px]` → `heading` (the admin's
+  `[11px]` / `[12px]` too). A step carries its line height and weight, so the weight the text had is kept
+  where it differs: `text-caption font-normal` (about 180 of the 11px texts were regular; the step is 500),
+  `!text-caption !font-normal` under an important size. Visible: half pixels round (11.5 / 12.5 → 12,
+  10.5 → 11, 13.5 → 13) and lines take the step's height (±1–2px per line). Not moved yet (each a
+  visible size change): `text-[10px]` / `[9px]` (→ 11), `[14px]` / `[14.5px]` / `[22px]`, and Tailwind's
+  `text-xs` / `text-sm` / `text-lg` in both apps (their fixed line heights differ from the steps').
+- **Radius steps**: the exact ones moved in both apps — `rounded` / `rounded-[4px]` (app) and
+  `rounded-sm` (admin, 4px there) → `rounded-small`, `rounded-lg` → `rounded-control`, `rounded-xl` →
+  `rounded-card` (sides included); no corner changed. Left: `rounded-md` (6px: no step — 4 or 8 is the
+  owner's call per place), `rounded-2xl` (16px), the app's `rounded-sm` (2px).
+- **Buttons**: `BUTTON_SIZE` (`client/src/shared/ui/buttonStyles.ts`) — `md` `h-control px-control-x
+  text-body` (32px, 12px sides, 13px; was 14px sides), `sm` `h-control-sm px-control-sm-x text-small`
+  (28px). The app `Button`'s `secondary` is `surface` / `border-control` / `text`, hover `surface-sunken`;
+  `ghost` `text-muted`, hover `surface-sunken` / `text`.
+- **Dialog buttons are the `Button`** (proposal: 「やめる」 secondary, the main action primary, both 32px):
+  `ConfirmDialog` (its 「やめる」 was a borderless text button, its main action 600 weight: now
+  secondary and 500), `InputDialog` (was 36px / 14px / 6px corners; its field 8px), and the task / record
+  dialogs that used `SMALL_BUTTON` + `MAIN_BUTTON` (a 20px chip beside a 30px button): `WaitParts`,
+  `TaskActions` (both), `NewBundleDialog`, `MakePrivateDialog`, `BundleActions`, `InviteDialog`.
+  `SMALL_BUTTON` / `MAIN_BUTTON` stay for buttons inside cards and rows.
+- **One switch per app**: the app's `Switch` (`primitives.tsx`; `disabled`, `className` for its place)
+  and the admin's new `Switch` (`admin/src/components/ui/switch.tsx`): `--size-switch-w|h` 36×20, on
+  `primary`, off `border-strong` (3:1; was zinc-300 / white 20 %), thumb `on-primary` with `shadow-card`,
+  the `focus-ring`, disabled `opacity-disabled`. Moved onto it: `MySwitchesSection`'s copy (was 44×24
+  indigo), the admin's `features-page` and `task-settings-page` copies (were 44×24, off `input`).
+- **Check boxes**: `TriCheckbox` — `--size-checkbox`, corner `small`, on `primary` / `on-primary`, off
+  `border-strong` on `surface`, disabled the `disabled` set (was indigo). Native check boxes and radio
+  buttons take `accent-color: var(--color-primary)` from the base layer of `client/src/index.css` and
+  `admin/src/app/globals.css` (were the browser's blue, indigo or a literal `#1264a3`); a class still wins.
+- **The settings' left list** (`SettingsPanel` nav): the chosen item `surface-raised` + `shadow-card` +
+  a `border` ring, its icon `selected-icon` (was indigo), others `text-muted` / icon `text-subtle`, hover
+  `surface-sunken`, height `control`, the `focus-ring`; group names `caption` `text-subtle` (was zinc-400,
+  under AA), the title `title`, the company name `small` `text-subtle`. The download-size bar
+  (`UsageBar`, `IndeterminateBar`) and its legend are `primary` (was indigo), a planned growth
+  `selected-border`; 「ダウンロードする」 marks `selected-bg` / `selected-text`.
+- **How it was checked**: before / after screenshots of every preview page and query the UI specs open
+  (200 × light / dark), and the computed font size, weight and colour of every text element compared
+  between the two builds: no weight changed except the confirm's two buttons; sizes changed only by
+  the half pixels above.
+- **Guarded by** `client/tests/ui/sizes-type-corners.spec.ts` (light and dark: the Button's two sizes and
+  secondary colours, the confirm's / name dialog's / new folder dialog's buttons, the switches' size and
+  colours in 「自分の設定」 and 自動同期, the tri-state and native check boxes, the settings' left list —
+  each against what its token resolves to on the page) and `admin/tests/switch-and-corners.test.tsx`
+  (the generated CSS of the admin `Switch`, the native check box rule). Each fails with its change
+  reverted (checked by mutation).
+- **Still to move** (later PRs): the list pickers' compact headers (`padded={false}`), `SMALL_BUTTON` /
+  `MAIN_BUTTON` in cards and rows, the settings' fields (`INPUT` / `SELECT` / `TEXTAREA` in
+  `SettingsPanel`, `AutoSyncSettings`, `OwnKeysSection`, `AgentEnvSettings`, `AbsenceSection`,
+  `TodayFolderSetting`, `VoicePromptSettings`: indigo focus), the other indigo (`NewFolderDialog`,
+  `FileTreeHeader`, `TidyNoticeBar`, `DepartmentBar`, `EditorTabBar`, `TabGroupParts`, `OwnKeysSection`'s
+  focused row, the settings' section icons), the admin's hand-made check boxes (`member-checklist`,
+  `groups-page`, `department-members-dialog`, `place-readers-dialog`), and in `features/inbox` and
+  `features/browser-plans` (another PR's area) 8 bare `rounded`.
 
 ## Order of the next PRs (from the proposal)
 

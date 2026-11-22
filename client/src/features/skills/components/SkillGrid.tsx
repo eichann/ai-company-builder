@@ -87,7 +87,7 @@ export function SkillGrid({
           <button
             onClick={onAddSkill}
             className="
-              flex items-center gap-2 px-4 py-2 rounded-lg
+              flex items-center gap-2 px-4 py-2 rounded-control
               bg-gray-200 dark:bg-zinc-800 hover:bg-gray-300 dark:hover:bg-zinc-700
               text-gray-700 dark:text-zinc-300 text-sm font-medium
               transition-colors
@@ -100,7 +100,7 @@ export function SkillGrid({
             <button
               onClick={onCopySkill}
               className="
-                flex items-center gap-2 px-4 py-2 rounded-lg
+                flex items-center gap-2 px-4 py-2 rounded-control
                 bg-gray-200 dark:bg-zinc-800 hover:bg-gray-300 dark:hover:bg-zinc-700
                 text-gray-700 dark:text-zinc-300 text-sm font-medium
                 transition-colors
@@ -196,7 +196,7 @@ export function SkillGrid({
             hover:bg-gray-50 dark:hover:bg-white/[0.02]
           "
         >
-          <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-zinc-800 group-hover:bg-gray-200 dark:group-hover:bg-zinc-700 flex items-center justify-center transition-colors">
+          <div className="w-12 h-12 rounded-card bg-gray-100 dark:bg-zinc-800 group-hover:bg-gray-200 dark:group-hover:bg-zinc-700 flex items-center justify-center transition-colors">
             <Plus size={24} className="text-gray-400 dark:text-zinc-500 group-hover:text-gray-600 dark:group-hover:text-zinc-300" />
           </div>
           <div className="text-center">
@@ -221,7 +221,7 @@ export function SkillGrid({
               hover:bg-gray-50 dark:hover:bg-white/[0.02]
             "
           >
-            <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-zinc-800 group-hover:bg-gray-200 dark:group-hover:bg-zinc-700 flex items-center justify-center transition-colors">
+            <div className="w-12 h-12 rounded-card bg-gray-100 dark:bg-zinc-800 group-hover:bg-gray-200 dark:group-hover:bg-zinc-700 flex items-center justify-center transition-colors">
               <Copy size={24} className="text-gray-400 dark:text-zinc-500 group-hover:text-gray-600 dark:group-hover:text-zinc-300" />
             </div>
             <div className="text-center">

@@ -79,7 +79,7 @@ export function SeenBy({ who, small }: { who: string; small?: boolean }) {
   const only = who === ONLY_YOU
   const I = only ? LockSimple : Eye
   const tone = only ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-zinc-400'
-  const pill = small ? 'text-[10px]' : `rounded-full px-2 py-0.5 text-[11px] ${only ? 'bg-amber-500/10' : 'bg-gray-100 dark:bg-zinc-800'}`
+  const pill = small ? 'text-[10px]' : `rounded-full px-2 py-0.5 text-caption font-normal ${only ? 'bg-amber-500/10' : 'bg-gray-100 dark:bg-zinc-800'}`
   return (
     <span data-seen title={`見られる人：${who}`} className={`inline-flex items-center gap-0.5 whitespace-nowrap ${tone} ${pill}`}>
       <I size={small ? 10 : 11} weight={only ? 'fill' : 'regular'} />{who}

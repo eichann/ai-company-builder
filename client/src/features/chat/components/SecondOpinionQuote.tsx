@@ -10,7 +10,7 @@ import { secondOpinionQuoteLabel, type SecondOpinionRecord } from '../../../../s
 export const SecondOpinionQuote = memo(function SecondOpinionQuote({ record }: { record: SecondOpinionRecord }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="mt-1.5 text-[12px]" data-second-opinion={record.agent}>
+    <div className="mt-1.5 text-small" data-second-opinion={record.agent}>
       <button
         type="button"
         onClick={() => setOpen(!open)}

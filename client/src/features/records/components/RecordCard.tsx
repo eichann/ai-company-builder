@@ -181,9 +181,9 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     })
     : null
   const notes = <>
-    {error && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{error}</p>}
+    {error && <p role="alert" className="text-small text-red-600 dark:text-red-400">{error}</p>}
     {notice && (
-      <p role="status" className="flex flex-wrap items-center gap-2 rounded-md bg-gray-100 px-2 py-1 text-[11.5px] dark:bg-zinc-800">
+      <p role="status" className="flex flex-wrap items-center gap-2 rounded-md bg-gray-100 px-2 py-1 text-small dark:bg-zinc-800">
         {notice.text}
         {notice.undo && <button type="button" onClick={() => void undo(notice.undo!)} className="text-link hover:underline">取り消す</button>}
       </p>
@@ -329,9 +329,9 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
 /** 「この機能は今オフです」: the record stays to read; the company turned its feature off (owner decision 2026-11-07). */
 function FeatureOffBand() {
   return (
-    <p data-testid="feature-off" role="note" className="mb-3 rounded-md bg-gray-100 px-3 py-2 text-[12.5px] leading-relaxed text-gray-700 dark:bg-zinc-800 dark:text-zinc-300">
+    <p data-testid="feature-off" role="note" className="mb-3 rounded-md bg-gray-100 px-3 py-2 text-small leading-relaxed text-gray-700 dark:bg-zinc-800 dark:text-zinc-300">
       <span className="font-medium">{FEATURE_OFF_NOTE}</span>
-      <span className="block text-[11.5px] text-gray-500 dark:text-zinc-400">{FEATURE_OFF_DETAIL}</span>
+      <span className="block text-small text-gray-500 dark:text-zinc-400">{FEATURE_OFF_DETAIL}</span>
     </p>
   )
 }

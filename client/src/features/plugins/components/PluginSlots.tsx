@@ -16,7 +16,7 @@ type OpenFromPlugin = (target: BridgeUiOpenArgs) => PluginBridgeAnswer | Promise
 /** A calm line where a plugin's screen cannot be shown (no alarm: the rest of the app works). */
 export function PluginCalmMessage({ text }: { text: string }) {
   return (
-    <div role="status" className="flex h-full min-h-[80px] items-center justify-center gap-2 px-6 text-center text-[12.5px] text-gray-500 dark:text-zinc-400">
+    <div role="status" className="flex h-full min-h-[80px] items-center justify-center gap-2 px-6 text-center text-small text-gray-500 dark:text-zinc-400">
       <PuzzlePiece size={14} />{text}
     </div>
   )
@@ -52,25 +52,25 @@ export function PluginPeek({ screen, items, onOpenRecord }: {
   const shown = items.slice(0, 8)
   return (
     <div role="dialog" aria-label={`${screen.tab?.label ?? screen.label}：${group}`}
-      className="w-72 overflow-hidden rounded-lg border border-gray-200 bg-white text-gray-800 shadow-lg dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100">
-      <p className="border-b border-gray-100 px-3 py-1.5 text-[11.5px] font-semibold text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
+      className="w-72 overflow-hidden rounded-control border border-gray-200 bg-white text-gray-800 shadow-lg dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100">
+      <p className="border-b border-gray-100 px-3 py-1.5 text-small font-semibold text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
         {group}（{items.length}）
       </p>
       {shown.length === 0 ? (
-        <p className="px-3 py-2 text-[12px] text-gray-400">いまはありません</p>
+        <p className="px-3 py-2 text-small text-gray-400">いまはありません</p>
       ) : (
         <ul className="max-h-72 overflow-y-auto py-1">
           {shown.map(i => (
             <li key={i.id}>
               <button type="button" onClick={() => onOpenRecord(i.id)} className="block w-full px-3 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-zinc-700/60">
-                <span className="block truncate text-[12.5px]">{i.title}</span>
-                <span className="block truncate text-[11px] text-gray-500 dark:text-zinc-400">{i.waitingFor ?? i.typeLabel}</span>
+                <span className="block truncate text-small">{i.title}</span>
+                <span className="block truncate text-caption font-normal text-gray-500 dark:text-zinc-400">{i.waitingFor ?? i.typeLabel}</span>
               </button>
             </li>
           ))}
         </ul>
       )}
-      {items.length > shown.length && <p className="px-3 pb-1.5 text-[11px] text-gray-400">ほか {items.length - shown.length} 件</p>}
+      {items.length > shown.length && <p className="px-3 pb-1.5 text-caption font-normal text-gray-400">ほか {items.length - shown.length} 件</p>}
     </div>
   )
 }
@@ -89,7 +89,7 @@ export function PluginRecordSections({ companyId, recordId, sections, onOpen, fr
     <>
       {sections.map(s => (
         <section key={`${s.plugin.id}:${s.entry}`} aria-label={s.label} data-slot="plugin-record-section">
-          <h2 className="mb-2 flex items-center gap-1.5 text-[12px] font-semibold"><PuzzlePiece size={13} className="text-primary" />{s.label}</h2>
+          <h2 className="mb-2 flex items-center gap-1.5 text-small font-semibold"><PuzzlePiece size={13} className="text-primary" />{s.label}</h2>
           <PluginFrame
             companyId={companyId} plugin={s.plugin} entry={s.entry} title={s.label}
             context={{ slot: 'record_section', recordId }} onOpen={onOpen} frameUrl={frameUrl} port={port}
@@ -115,10 +115,10 @@ export function PluginFileActionDialog({ companyId, action, companyPath, isFolde
   const name = companyPath.split('/').pop() ?? companyPath
   return (
     <Dialog onClose={onClose} label={action.label} size="lg" padded={false} className="flex h-[480px] flex-col overflow-hidden">
-        <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 text-[12px] text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
+        <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 text-small text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
           <PuzzlePiece size={13} />
           <span className="min-w-0 flex-1 truncate">{action.label}：「{name}」<span className="ml-1 text-gray-400">（{action.pluginLabel}）</span></span>
-          <button type="button" onClick={onClose} aria-label="閉じる" className="rounded p-0.5 hover:bg-gray-100 dark:hover:bg-zinc-700"><X size={12} /></button>
+          <button type="button" onClick={onClose} aria-label="閉じる" className="rounded-small p-0.5 hover:bg-gray-100 dark:hover:bg-zinc-700"><X size={12} /></button>
         </div>
         <PluginFrame
           companyId={companyId} plugin={action.plugin} entry={action.entry} title={action.label}

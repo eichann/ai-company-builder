@@ -7,7 +7,7 @@ interface Props {
   onForward: () => void
 }
 
-const BTN = 'p-1.5 rounded text-gray-500 dark:text-zinc-400 hover:bg-gray-200 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent'
+const BTN = 'p-1.5 rounded-small text-gray-500 dark:text-zinc-400 hover:bg-gray-200 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-transparent'
 
 /** ← → in front of the editor's tabs: back to what was shown before (a file or a record card). */
 export function PlaceNavigation({ canBack, canForward, onBack, onForward }: Props) {

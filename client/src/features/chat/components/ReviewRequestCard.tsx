@@ -17,11 +17,11 @@ export const ReviewRequestCard = memo(function ReviewRequestCard({ record }: { r
   const rootPath = useAppStore(state => state.currentCompany?.rootPath)
   const pending = actions.pendingId === record.id
   return (
-    <div role="group" aria-label="確認をお願いします" className={`my-2 rounded-xl border p-3 ${pending ? 'border-amber-500/40 bg-amber-500/5' : 'border-gray-200 dark:border-zinc-700'}`}>
+    <div role="group" aria-label="確認をお願いします" className={`my-2 rounded-card border p-3 ${pending ? 'border-amber-500/40 bg-amber-500/5' : 'border-gray-200 dark:border-zinc-700'}`}>
       <div className="flex items-center gap-1.5 text-sm font-medium text-gray-900 dark:text-zinc-100">
         <Eye size={15} weight="bold" aria-hidden className={pending ? 'text-amber-500' : 'text-gray-400'} />
         確認をお願いします
-        {!pending && <span className="ml-auto flex items-center gap-1 text-[11px] font-normal text-gray-500"><CheckCircle size={12} aria-hidden />返事済み</span>}
+        {!pending && <span className="ml-auto flex items-center gap-1 text-caption font-normal text-gray-500"><CheckCircle size={12} aria-hidden />返事済み</span>}
       </div>
       <p className="mt-1 text-sm text-gray-800 dark:text-zinc-200">{record.title}</p>
       {record.message && <p className="mt-1 whitespace-pre-wrap text-xs text-gray-600 dark:text-zinc-300">{record.message}</p>}
@@ -29,7 +29,7 @@ export const ReviewRequestCard = memo(function ReviewRequestCard({ record }: { r
         {record.files.map(file => <li key={file}>
           {canOpenFile && rootPath
             ? <button type="button" onClick={() => void runCommand('file.open', { path: `${rootPath}/${file}` })} title="エディタで開く"
-                className="flex max-w-full items-center gap-1.5 rounded px-1 py-0.5 text-left font-mono text-xs text-link hover:bg-selected-bg">
+                className="flex max-w-full items-center gap-1.5 rounded-small px-1 py-0.5 text-left font-mono text-xs text-link hover:bg-selected-bg">
                 <FileText size={13} aria-hidden className="shrink-0" /><span className="truncate">{file}</span>
               </button>
             : <span className="flex items-center gap-1.5 px-1 font-mono text-xs text-gray-600 dark:text-zinc-300"><FileText size={13} aria-hidden className="shrink-0" /><span className="truncate">{file}</span></span>}
@@ -40,9 +40,9 @@ export const ReviewRequestCard = memo(function ReviewRequestCard({ record }: { r
         <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-gray-800 dark:text-zinc-200">{record.points.map(point => <li key={point}>{point}</li>)}</ul>
       </>}
       {pending && <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={actions.confirm} className={`rounded-lg px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>この内容で進めて</button>
-        <button type="button" onClick={actions.requestChanges} className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">直してほしい</button>
-        <span className="text-[11px] text-gray-500">直してほしいところは、下の欄に書いて送ってください</span>
+        <button type="button" onClick={actions.confirm} className={`rounded-control px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>この内容で進めて</button>
+        <button type="button" onClick={actions.requestChanges} className="rounded-control border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">直してほしい</button>
+        <span className="text-caption font-normal text-gray-500">直してほしいところは、下の欄に書いて送ってください</span>
       </div>}
     </div>
   )

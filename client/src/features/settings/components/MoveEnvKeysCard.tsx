@@ -31,7 +31,7 @@ export function MoveEnvKeysCard({ companyId, rootPath, env, onMoved }: {
   return (
     <Card className="space-y-3 p-5">
       <SubHeading>この PC にある鍵を、サーバーに移せます</SubHeading>
-      <p className="text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+      <p className="text-small leading-relaxed text-zinc-500 dark:text-zinc-400">
         移すと「自分の鍵」として会社のサーバーに預け、この PC の .env からは消します（サーバーが受け取ったのを確かめてから消します）。
         移したあと、このアプリから動かすスクリプトには、鍵の代わりに短い時間だけ使える通行証が渡され、これまでどおり動きます。
         アプリの外（ターミナルなど）で .env を読むスクリプトは、この鍵を使えなくなります。
@@ -40,18 +40,18 @@ export function MoveEnvKeysCard({ companyId, rootPath, env, onMoved }: {
         {rows.map(r => (
           <li key={r.name} className="space-y-1" aria-label={`${r.label}（${r.name}）`}>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[13px] font-medium">{r.label}</span>
-              <code className="rounded bg-zinc-100 px-1 py-px font-mono text-[12px] text-zinc-700 dark:bg-white/10 dark:text-zinc-200">{r.name}</code>
-              {r.last4 && <span className="font-mono text-[12px] text-zinc-500">末尾 {r.last4}</span>}
+              <span className="text-body font-medium">{r.label}</span>
+              <code className="rounded-small bg-zinc-100 px-1 py-px font-mono text-small text-zinc-700 dark:bg-white/10 dark:text-zinc-200">{r.name}</code>
+              {r.last4 && <span className="font-mono text-small text-zinc-500">末尾 {r.last4}</span>}
               {r.canMove && (
                 <Button size="sm" variant="primary" className="ml-auto" disabled={busy !== null} onClick={() => void move(r.name)}>
                   {busy === r.name ? '移しています…' : 'この鍵をサーバーに移す'}
                 </Button>
               )}
             </div>
-            {r.note && <p className="text-[12px] text-zinc-500 dark:text-zinc-400">{r.note}</p>}
+            {r.note && <p className="text-small text-zinc-500 dark:text-zinc-400">{r.note}</p>}
             {messages[r.name] && (
-              <p role={messages[r.name].failed ? 'alert' : 'status'} className={`text-[12px] ${messages[r.name].failed ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-300'}`}>
+              <p role={messages[r.name].failed ? 'alert' : 'status'} className={`text-small ${messages[r.name].failed ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-300'}`}>
                 {messages[r.name].text}
               </p>
             )}
@@ -59,7 +59,7 @@ export function MoveEnvKeysCard({ companyId, rootPath, env, onMoved }: {
         ))}
         {done.map(name => (
           <li key={name}>
-            <p role="status" className="text-[12px] text-emerald-700 dark:text-emerald-300">{name}: {messages[name].text}</p>
+            <p role="status" className="text-small text-emerald-700 dark:text-emerald-300">{name}: {messages[name].text}</p>
           </li>
         ))}
       </ul>

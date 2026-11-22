@@ -11,8 +11,8 @@ import {
 
 // Settings → 同期 → 自動同期 (.claude/rules/sync.md "Automatic sync"): per member on this PC.
 
-const SELECT = 'h-8 rounded-lg border border-zinc-200 bg-white px-2 text-[13px] text-zinc-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-100'
-const MUTED = 'text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400'
+const SELECT = 'h-8 rounded-control border border-zinc-200 bg-white px-2 text-body text-zinc-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-50 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-100'
+const MUTED = 'text-body leading-relaxed text-zinc-500 dark:text-zinc-400'
 
 function Toggle({ title, description, checked, onChange, children }: { title: string; description: ReactNode; checked: boolean; onChange: () => void; children: ReactNode }) {
   const descriptionId = useId()
@@ -50,7 +50,7 @@ export function AutoSyncSettings() {
         checked={receive.enabled}
         onChange={() => setReceive({ enabled: !receive.enabled })}
       >
-        <label className="flex items-center gap-3 text-[13px] text-zinc-700 dark:text-zinc-300">
+        <label className="flex items-center gap-3 text-body text-zinc-700 dark:text-zinc-300">
           間隔
           <select
             className={SELECT}
@@ -71,14 +71,14 @@ export function AutoSyncSettings() {
       >
         <fieldset disabled={!send.enabled} className="space-y-3 disabled:opacity-50">
           <legend className="sr-only">送るタイミング</legend>
-          <label className="flex items-center gap-2 text-[13px] text-zinc-700 dark:text-zinc-300">
+          <label className="flex items-center gap-2 text-body text-zinc-700 dark:text-zinc-300">
             <input type="radio" name="auto-send-mode" checked={send.mode === 'times'} onChange={() => setSend({ mode: 'times' })} />
             決まった時刻に送る
           </label>
           {send.mode === 'times' && (
             <div className="ml-6 flex flex-wrap items-center gap-2" role="group" aria-label="送る時刻">
               {send.times.map(t => (
-                <span key={t} className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 px-2 text-[13px] tabular-nums text-zinc-800 dark:border-white/10 dark:text-zinc-200">
+                <span key={t} className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 px-2 text-body tabular-nums text-zinc-800 dark:border-white/10 dark:text-zinc-200">
                   {t}
                   {send.times.length > 1 && (
                     <button type="button" aria-label={`${t} を削除`} onClick={() => setSend({ times: send.times.filter(x => x !== t) })} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-100">
@@ -91,13 +91,13 @@ export function AutoSyncSettings() {
               <button
                 type="button"
                 onClick={() => setSend({ times: normalizeTimes([...send.times, newTime]) })}
-                className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[13px] text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-white/[0.06]"
+                className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-body text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-white/[0.06]"
               >
                 <Plus size={12} />時刻を追加
               </button>
             </div>
           )}
-          <label className="flex items-center gap-2 text-[13px] text-zinc-700 dark:text-zinc-300">
+          <label className="flex items-center gap-2 text-body text-zinc-700 dark:text-zinc-300">
             <input type="radio" name="auto-send-mode" checked={send.mode === 'interval'} onChange={() => setSend({ mode: 'interval' })} />
             一定の間隔で送る
           </label>
@@ -114,10 +114,10 @@ export function AutoSyncSettings() {
         </fieldset>
       </Toggle>
 
-      <p className="text-[12px] text-zinc-500 dark:text-zinc-400">
+      <p className="text-small text-zinc-500 dark:text-zinc-400">
         アプリを開いている間だけ動きます。保存していない編集があるとき、AIが作業しているとき、前回の同期で確認が必要なことが残っているときは、次の機会まで待ちます。アプリを閉じていた間の分は、開いたときに1回だけまとめて行います。設定はこのPCに自動保存されます。
       </p>
-      {error && <p role="alert" className="text-[13px] text-amber-600 dark:text-amber-400">{error}</p>}
+      {error && <p role="alert" className="text-body text-amber-600 dark:text-amber-400">{error}</p>}
     </div>
   )
 }

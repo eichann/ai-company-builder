@@ -12,7 +12,7 @@ export function PrivateFolderHelpLink({ onOpen }: { onOpen: () => void }) {
     <button
       type="button"
       onClick={onOpen}
-      className="inline-flex items-center gap-1 rounded-small text-[12px] font-medium text-link underline-offset-2 hover:text-link-hover hover:underline focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring"
+      className="inline-flex items-center gap-1 rounded-small text-small font-medium text-link underline-offset-2 hover:text-link-hover hover:underline focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring"
     >
       <Question size={13} />
       {PRIVATE_FOLDER_HELP_TITLE}
@@ -44,12 +44,12 @@ export function PrivateFolderHelpPanel({ onClose }: { onClose: () => void }) {
         <ol aria-label={PRIVATE_FOLDER_HELP_TITLE} className="space-y-3.5 overflow-y-auto px-5 py-4">
           {PRIVATE_FOLDER_HELP.map((item, i) => (
             <li key={item.title} className="flex gap-3">
-              <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-[11px] font-medium tabular-nums text-zinc-500 dark:bg-white/[0.08] dark:text-zinc-400">
+              <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-caption font-medium tabular-nums text-zinc-500 dark:bg-white/[0.08] dark:text-zinc-400">
                 {i + 1}
               </span>
               <div className="min-w-0">
-                <p className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">{item.title}</p>
-                <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-600 dark:text-zinc-400">{item.body}</p>
+                <p className="text-body font-medium text-zinc-900 dark:text-zinc-100">{item.title}</p>
+                <p className="mt-0.5 text-small leading-relaxed text-zinc-600 dark:text-zinc-400">{item.body}</p>
               </div>
             </li>
           ))}

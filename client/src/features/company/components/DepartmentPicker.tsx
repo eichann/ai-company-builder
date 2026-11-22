@@ -42,7 +42,7 @@ export function DepartmentPicker({ departments, onBack, onDownload }: {
                 isPicked ? 'border-primary bg-selected-bg' : 'border-[color:var(--color-border)] hover:border-selected-border'
               }`}
             >
-              <div className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${
+              <div className={`w-5 h-5 rounded-small border flex items-center justify-center flex-shrink-0 ${
                 isPicked ? 'bg-primary border-primary' : 'border-[color:var(--color-border)]'
               }`}>
                 {isPicked && <Check size={14} className="text-on-primary" weight="bold" />}

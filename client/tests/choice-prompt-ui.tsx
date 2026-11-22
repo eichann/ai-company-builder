@@ -64,7 +64,7 @@ function Preview() {
       <div className="max-w-3xl w-full mx-auto">
         {!record && <AgentInteractionCard request={request} onRespond={respond} />}
         <div className="border-t border-gray-200 dark:border-zinc-800 p-4 pb-7">
-          <div className="rounded-xl border border-gray-200 dark:border-zinc-700 px-3 py-3 text-sm text-gray-400 dark:text-zinc-500">メッセージを入力…</div>
+          <div className="rounded-card border border-gray-200 dark:border-zinc-700 px-3 py-3 text-sm text-gray-400 dark:text-zinc-500">メッセージを入力…</div>
         </div>
       </div>
     </main>

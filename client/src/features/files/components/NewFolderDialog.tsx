@@ -172,13 +172,13 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
         <div className="flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-5">
           <div>
             <DialogTitle id={titleId}>新しいフォルダ</DialogTitle>
-            <p className="mt-1 text-[12px] text-zinc-500 dark:text-zinc-400">
+            <p className="mt-1 text-small text-zinc-500 dark:text-zinc-400">
               場所：<span className="text-zinc-700 dark:text-zinc-300">{placeLabel}</span>
             </p>
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor={nameId} className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">名前</label>
+            <label htmlFor={nameId} className="text-body font-medium text-zinc-900 dark:text-zinc-100">名前</label>
             <input
               id={nameId}
               ref={inputRef}
@@ -188,19 +188,19 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
               placeholder="フォルダ名"
               autoComplete="off"
               aria-invalid={invalid || !!nameError || undefined}
-              className="h-9 w-full rounded-lg border border-zinc-200 bg-white px-3 text-[13px] text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-zinc-950 dark:text-zinc-100"
+              className="h-9 w-full rounded-control border border-zinc-200 bg-white px-3 text-body text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-zinc-950 dark:text-zinc-100"
             />
             {(nameError || invalid) && (
-              <p className="text-[12px] text-red-600 dark:text-red-400">
+              <p className="text-small text-red-600 dark:text-red-400">
                 {nameError ?? 'フォルダ名に使えない文字が含まれています。日本語・英数字・「.」「_」「-」が使えます。'}
               </p>
             )}
           </div>
 
           {!privateFolders ? (
-            <p className="text-[12px] text-zinc-500 dark:text-zinc-400">{WORKING_FOLDER_NOTE}</p>
+            <p className="text-small text-zinc-500 dark:text-zinc-400">{WORKING_FOLDER_NOTE}</p>
           ) : insidePrivate ? (
-            <div className="flex gap-2.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3.5 py-3 text-[13px] text-indigo-900 dark:border-indigo-400/20 dark:bg-indigo-400/[0.08] dark:text-indigo-100">
+            <div className="flex gap-2.5 rounded-control border border-indigo-200 bg-indigo-50 px-3.5 py-3 text-body text-indigo-900 dark:border-indigo-400/20 dark:bg-indigo-400/[0.08] dark:text-indigo-100">
               <LockSimple size={16} weight="fill" className="mt-0.5 shrink-0 text-indigo-500" />
               <p>
                 非公開フォルダ「{lastSegment(insidePrivate.path)}」の中なので、このフォルダも非公開になります（{insidePrivate.viewerCount}人だけが見られます）。
@@ -208,8 +208,8 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
             </div>
           ) : (
             <div className="space-y-1.5">
-              <span className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">公開範囲</span>
-              <div role="radiogroup" aria-label="公開範囲" className="grid grid-cols-2 gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-white/[0.06]">
+              <span className="text-body font-medium text-zinc-900 dark:text-zinc-100">公開範囲</span>
+              <div role="radiogroup" aria-label="公開範囲" className="grid grid-cols-2 gap-1 rounded-control bg-zinc-100 p-1 dark:bg-white/[0.06]">
                 <Segment checked={visibility === 'public'} onSelect={() => setVisibility('public')} icon={<Globe size={14} />} label="公開" />
                 <Segment
                   checked={isPrivate}
@@ -220,7 +220,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
                   title={privateDisabledReason ?? undefined}
                 />
               </div>
-              <p className="text-[12px] text-zinc-500 dark:text-zinc-400">
+              <p className="text-small text-zinc-500 dark:text-zinc-400">
                 {privateDisabledReason && ctx.status !== 'loading'
                   ? privateDisabledReason
                   : isPrivate
@@ -233,12 +233,12 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
           {isPrivate && context && (
             <>
               <div className="relative space-y-1.5">
-                <span className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">見られる人</span>
+                <span className="text-body font-medium text-zinc-900 dark:text-zinc-100">見られる人</span>
                 <ul aria-label="見られる人" className="flex flex-wrap items-center gap-1.5">
                   {viewerIds.map(id => (
-                    <li key={id} className="inline-flex h-7 items-center gap-1 rounded-full border border-zinc-200 bg-white pl-2.5 pr-1 text-[12px] text-zinc-800 dark:border-white/10 dark:bg-zinc-950 dark:text-zinc-200">
+                    <li key={id} className="inline-flex h-7 items-center gap-1 rounded-full border border-zinc-200 bg-white pl-2.5 pr-1 text-small text-zinc-800 dark:border-white/10 dark:bg-zinc-950 dark:text-zinc-200">
                       <span className="max-w-40 truncate">{nameOf(id)}</span>
-                      {context.managerIds.includes(id) && <span className="rounded bg-zinc-100 px-1 text-[10px] text-zinc-500 dark:bg-white/10 dark:text-zinc-400">管理役</span>}
+                      {context.managerIds.includes(id) && <span className="rounded-small bg-zinc-100 px-1 text-[10px] text-zinc-500 dark:bg-white/10 dark:text-zinc-400">管理役</span>}
                       {id === meId ? <span className="w-1" /> : (
                         <button type="button" aria-label={`${nameOf(id)}を外す`} onClick={() => toggleViewer(id)} className="flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 dark:hover:text-zinc-200">
                           <X size={11} weight="bold" />
@@ -248,14 +248,14 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
                   ))}
                   <li><MemberPicker members={members} chosen={viewerIds} managerIds={context.managerIds} meId={meId} onToggle={toggleViewer} /></li>
                 </ul>
-                <p className="text-[12px] text-zinc-500 dark:text-zinc-400">
+                <p className="text-small text-zinc-500 dark:text-zinc-400">
                   オーナー・管理者{admins.length > 0 ? `（${admins.length}人）` : ''}は常に見られます。
                   {context.department && MANAGERS_MAY_CHANGE_VIEWERS}
                 </p>
               </div>
 
               <div className="space-y-1.5">
-                <span className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">編集できる人</span>
+                <span className="text-body font-medium text-zinc-900 dark:text-zinc-100">編集できる人</span>
                 <div role="radiogroup" aria-label="編集できる人" className="space-y-1">
                   <Radio checked={editorsMode === 'all'} onSelect={() => setEditorsMode('all')} label="見られる人全員" />
                   <Radio checked={editorsMode === 'specific'} onSelect={() => { setEditorsMode('specific'); if (editors.length === 0) setEditors(viewerIds) }} label="指定した人だけ" />
@@ -264,8 +264,8 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
                   <ul aria-label="編集できる人" className="ml-6 grid grid-cols-2 gap-x-3 gap-y-1">
                     {viewerIds.map(id => (
                       <li key={id}>
-                        <label className="flex cursor-pointer items-center gap-2 text-[12px] text-zinc-700 dark:text-zinc-300">
-                          <input type="checkbox" checked={editors.includes(id)} onChange={() => setEditors(e => (e.includes(id) ? e.filter(x => x !== id) : [...e, id]))} className="h-3.5 w-3.5 accent-indigo-600" />
+                        <label className="flex cursor-pointer items-center gap-2 text-small text-zinc-700 dark:text-zinc-300">
+                          <input type="checkbox" checked={editors.includes(id)} onChange={() => setEditors(e => (e.includes(id) ? e.filter(x => x !== id) : [...e, id]))} className="h-3.5 w-3.5" />
                           <span className="truncate">{nameOf(id)}</span>
                         </label>
                       </li>
@@ -274,11 +274,11 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
                 )}
               </div>
 
-              <div role="status" className="flex gap-2.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3.5 py-3 dark:border-indigo-400/20 dark:bg-indigo-400/[0.08]">
+              <div role="status" className="flex gap-2.5 rounded-control border border-indigo-200 bg-indigo-50 px-3.5 py-3 dark:border-indigo-400/20 dark:bg-indigo-400/[0.08]">
                 <LockSimple size={16} weight="fill" className="mt-0.5 shrink-0 text-indigo-500" />
-                <div className="text-[13px] text-indigo-950 dark:text-indigo-100">
+                <div className="text-body text-indigo-950 dark:text-indigo-100">
                   <p className="font-medium">このフォルダとその中身は {reach} 人にだけ届きます</p>
-                  <p className="mt-0.5 text-[12px] text-indigo-900/70 dark:text-indigo-200/70">
+                  <p className="mt-0.5 text-small text-indigo-900/70 dark:text-indigo-200/70">
                     {editorReach === reach ? '全員が編集できます。' : `編集できるのは ${editorReach} 人です。`}
                     作成すると同期が始まり、あなたの手元に空のフォルダが現れます。
                   </p>
@@ -336,7 +336,7 @@ function Segment({ checked, disabled, onSelect, icon, label, title }: { checked:
       aria-disabled={disabled || undefined}
       title={title}
       onClick={() => { if (!disabled) onSelect() }}
-      className={`flex h-8 items-center justify-center gap-1.5 rounded-md text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 ${
+      className={`flex h-8 items-center justify-center gap-1.5 rounded-md text-body font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 ${
         checked
           ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-50'
           : disabled
@@ -352,8 +352,8 @@ function Segment({ checked, disabled, onSelect, icon, label, title }: { checked:
 
 function Radio({ checked, onSelect, label }: { checked: boolean; onSelect: () => void; label: string }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 text-[13px] text-zinc-800 dark:text-zinc-200">
-      <input type="radio" checked={checked} onChange={onSelect} className="h-3.5 w-3.5 accent-indigo-600" />
+    <label className="flex cursor-pointer items-center gap-2 text-body text-zinc-800 dark:text-zinc-200">
+      <input type="radio" checked={checked} onChange={onSelect} className="h-3.5 w-3.5" />
       {label}
     </label>
   )
@@ -374,24 +374,24 @@ function MemberPicker({ members, chosen, managerIds, meId, onToggle }: {
     .sort((a, b) => Number(managerIds.includes(b.userId)) - Number(managerIds.includes(a.userId)) || (a.name ?? '').localeCompare(b.name ?? '', 'ja'))
   return (
     <div>
-      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open} className="inline-flex h-7 items-center gap-1 rounded-full border border-dashed border-zinc-300 px-2.5 text-[12px] text-zinc-600 hover:border-zinc-400 hover:text-zinc-900 dark:border-white/20 dark:text-zinc-400 dark:hover:text-zinc-100">
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open} className="inline-flex h-7 items-center gap-1 rounded-full border border-dashed border-zinc-300 px-2.5 text-small text-zinc-600 hover:border-zinc-400 hover:text-zinc-900 dark:border-white/20 dark:text-zinc-400 dark:hover:text-zinc-100">
         <Plus size={12} />追加
       </button>
       {open && (
-        <div className="absolute inset-x-0 z-10 mt-1 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg dark:border-white/10 dark:bg-zinc-900">
+        <div className="absolute inset-x-0 z-10 mt-1 overflow-hidden rounded-control border border-zinc-200 bg-white shadow-lg dark:border-white/10 dark:bg-zinc-900">
           <div className="flex items-center gap-1.5 border-b border-zinc-100 px-2.5 dark:border-white/[0.06]">
             <MagnifyingGlass size={13} className="text-zinc-400" />
-            <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="名前・メールで検索" aria-label="見られる人を検索" className="h-8 w-full bg-transparent text-[12px] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100" />
+            <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="名前・メールで検索" aria-label="見られる人を検索" className="h-8 w-full bg-transparent text-small text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100" />
           </div>
           <ul className="max-h-52 overflow-y-auto py-1" aria-label="見られる人の候補">
-            {candidates.length === 0 && <li className="px-3 py-2 text-[12px] text-zinc-500">該当する人がいません</li>}
+            {candidates.length === 0 && <li className="px-3 py-2 text-small text-zinc-500">該当する人がいません</li>}
             {candidates.map(m => {
               const on = chosen.includes(m.userId)
               return (
                 <li key={m.userId}>
-                  <button type="button" role="menuitemcheckbox" aria-checked={on} onClick={() => onToggle(m.userId)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-white/[0.04]">
+                  <button type="button" role="menuitemcheckbox" aria-checked={on} onClick={() => onToggle(m.userId)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-small text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-white/[0.04]">
                     <span className="min-w-0 flex-1 truncate">{m.name || m.email || '名前未設定'}</span>
-                    {managerIds.includes(m.userId) && <span className="rounded bg-zinc-100 px-1 text-[10px] text-zinc-500 dark:bg-white/10 dark:text-zinc-400">管理役</span>}
+                    {managerIds.includes(m.userId) && <span className="rounded-small bg-zinc-100 px-1 text-[10px] text-zinc-500 dark:bg-white/10 dark:text-zinc-400">管理役</span>}
                     <Check size={13} weight="bold" className={on ? 'text-indigo-600 dark:text-indigo-400' : 'opacity-0'} />
                   </button>
                 </li>

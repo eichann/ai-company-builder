@@ -89,11 +89,11 @@ export const PluginOperationCard = memo(function PluginOperationCard({ card }: {
   }
 
   return (
-    <div role="group" aria-label={heading.text(card.systemLabel)} data-outcome={card.outcome} className={`my-2 rounded-xl border p-3 ${TONE_CLASS[heading.tone]}`}>
+    <div role="group" aria-label={heading.text(card.systemLabel)} data-outcome={card.outcome} className={`my-2 rounded-card border p-3 ${TONE_CLASS[heading.tone]}`}>
       <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-gray-900 dark:text-zinc-100">
         <ToneIcon tone={heading.tone} />
         {heading.text(card.systemLabel)}
-        {card.byAi && <span className="ml-auto flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-normal text-gray-600 dark:bg-zinc-800 dark:text-zinc-300" title="この変更は、AI があなたの代わりに行い、そのように記録されています">
+        {card.byAi && <span className="ml-auto flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-caption font-normal text-gray-600 dark:bg-zinc-800 dark:text-zinc-300" title="この変更は、AI があなたの代わりに行い、そのように記録されています">
           <Robot size={12} aria-hidden />AI が記録
         </span>}
       </div>
@@ -109,37 +109,37 @@ export const PluginOperationCard = memo(function PluginOperationCard({ card }: {
       </ul>}
       <p className="mt-2 text-xs text-gray-700 dark:text-zinc-300">{card.message}</p>
       {card.reason && <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">理由：{card.reason}</p>}
-      {card.outcome === 'applied' && <p className="mt-1 text-[11px] text-gray-500 dark:text-zinc-400">{created ? CREATE_UNDO_NOTICE_FALLBACK : UNDO_NOTICE_FALLBACK}</p>}
-      {action && <div role="status" className={`mt-2 rounded-lg border px-2 py-1.5 text-xs ${TONE_CLASS[action.tone]}`}>
+      {card.outcome === 'applied' && <p className="mt-1 text-caption font-normal text-gray-500 dark:text-zinc-400">{created ? CREATE_UNDO_NOTICE_FALLBACK : UNDO_NOTICE_FALLBACK}</p>}
+      {action && <div role="status" className={`mt-2 rounded-control border px-2 py-1.5 text-xs ${TONE_CLASS[action.tone]}`}>
         {action.message}
         {action.current && action.current.length > 0 && <ul className="mt-1">
           {action.current.map(c => <li key={c.label}>いまの {c.label}：{shownValue(c.value)}</li>)}
         </ul>}
       </div>}
-      {warning !== null && <div role="alertdialog" aria-label={RECREATE_BUTTON_LABEL} className={`mt-2 rounded-lg border px-2 py-1.5 text-xs ${TONE_CLASS.warn}`}>
+      {warning !== null && <div role="alertdialog" aria-label={RECREATE_BUTTON_LABEL} className={`mt-2 rounded-control border px-2 py-1.5 text-xs ${TONE_CLASS.warn}`}>
         <p>{warning}</p>
         <div className="mt-1.5 flex gap-2">
           <button type="button" disabled={busy} onClick={() => void recreate(true)}
-            className="rounded-lg border border-amber-500/60 px-3 py-1 text-xs text-amber-800 hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-300">
+            className="rounded-control border border-amber-500/60 px-3 py-1 text-xs text-amber-800 hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-300">
             {busy ? '作っています…' : '確かめたので作る'}
           </button>
           <button type="button" disabled={busy} onClick={() => setWarning(null)}
-            className="rounded-lg border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
+            className="rounded-control border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
             やめる
           </button>
         </div>
       </div>}
       {(canUndo || canReconcile || canRecreate) && <div className="mt-2 flex flex-wrap items-center gap-2">
         {canUndo && <button type="button" disabled={busy} onClick={() => void run('undo')}
-          className="flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
+          className="flex items-center gap-1 rounded-control border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
           <ArrowCounterClockwise size={13} aria-hidden />{busy ? (created ? '取り消しています…' : '書き戻しています…') : card.undoLabel ?? (created ? CREATE_UNDO_BUTTON_LABEL : UNDO_BUTTON_LABEL)}
         </button>}
         {canReconcile && <button type="button" disabled={busy} onClick={() => void run('reconcile')}
-          className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
+          className="rounded-control border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
           {busy ? '確かめています…' : 'もう一度確かめる'}
         </button>}
         {canRecreate && <button type="button" disabled={busy} onClick={() => void recreate(false)}
-          className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
+          className="rounded-control border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
           {RECREATE_BUTTON_LABEL}
         </button>}
       </div>}

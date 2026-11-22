@@ -26,13 +26,13 @@ export function ReviewBanner({
       </span>
       <button
         onClick={onCancel}
-        className="px-2.5 py-1 rounded text-amber-100 hover:text-white hover:bg-amber-600 transition-colors"
+        className="px-2.5 py-1 rounded-small text-amber-100 hover:text-white hover:bg-amber-600 transition-colors"
       >
         キャンセル
       </button>
       <button
         onClick={onComplete}
-        className="flex items-center gap-1 px-3 py-1.5 rounded bg-white text-amber-700 font-medium hover:bg-amber-50 transition-colors shadow-sm"
+        className="flex items-center gap-1 px-3 py-1.5 rounded-small bg-white text-amber-700 font-medium hover:bg-amber-50 transition-colors shadow-sm"
       >
         <Check size={12} />
         レビュー完了

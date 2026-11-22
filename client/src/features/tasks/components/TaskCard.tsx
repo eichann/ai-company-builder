@@ -398,7 +398,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
         {turn && <Chip>{turn}</Chip>}
         {/* 「あなただけ」 is said once, top right (見られる人), owner 2026-11-03. */}
         <RecordMarks record={record} personal={false} />
-        {card.names.assignee && <span className="text-[11.5px] text-gray-500 dark:text-zinc-400">担当 {card.names.assignee}さん{card.names.requester && !(card.roles.assignee && card.roles.requester) && card.names.requester !== card.names.assignee ? `・頼んだ人 ${card.names.requester}さん` : ''}</span>}
+        {card.names.assignee && <span className="text-small text-gray-500 dark:text-zinc-400">担当 {card.names.assignee}さん{card.names.requester && !(card.roles.assignee && card.roles.requester) && card.names.requester !== card.names.assignee ? `・頼んだ人 ${card.names.requester}さん` : ''}</span>}
       </>}
       actions={<>
         <TaskActions key={`${record.state}@${record.version}`} card={card} busy={busy} team={team} today={now.date} onRun={onRun} />
@@ -409,7 +409,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       links={<LinkedColumn rows={[...rows, ...consult.rows]}
         extras={[{ name: 'ファイル', kind: 'file' as const, action: <>
           {onLinkFile && <TaskFiles rootPath={rootPath} linked={card.files.map(f => f.path)} busy={busy} onLink={onLinkFile} />}
-          {onLinkFile && onNewFile && <button type="button" disabled={busy} onClick={() => setNaming({ error: null })} data-new-file className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-link hover:underline disabled:opacity-50"><Plus size={10} />新しいファイル</button>}
+          {onLinkFile && onNewFile && <button type="button" disabled={busy} onClick={() => setNaming({ error: null })} data-new-file className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded-small px-1 text-small text-link hover:underline disabled:opacity-50"><Plus size={10} />新しいファイル</button>}
           <DriveLinkAction companyId={companyId} linked={card.driveFiles.map(f => f.fileId)} busy={busy} usable={typedFiles.drive.usable} note={typedFiles.drive.note} hint={typedFiles.drive.hint} picking={typedFiles.drive.picking} onStop={typedFiles.drive.onStop}
             onLink={typedFiles.onLinkDrive} onLinkText={t => { void typedFiles.onLinkDriveText(t).then(setLinkError) }} />
         </>, note: typedFiles.localFiles ? TYPED_FILES_NOTE : COMPANY_AND_DRIVE_FILES_NOTE },
@@ -420,22 +420,22 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
           onDrop: e => { if (linkDrop.accepts(e)) linkDrop.drop(record.id, e); else void typedFiles.onLinkDriveText(droppedText(e.dataTransfer)).then(setLinkError) },
           notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }}
         notice={<>
-          {linkError && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{linkError}</p>}
+          {linkError && <p role="alert" className="text-small text-red-600 dark:text-red-400">{linkError}</p>}
           {unlinked && (
-            <p role="status" className="flex flex-wrap items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-[11.5px] dark:bg-zinc-800">
+            <p role="status" className="flex flex-wrap items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-small dark:bg-zinc-800">
               「{unlinked.split('/').pop()}」とのつながりを外しました
               <button type="button" disabled={busy} onClick={() => void relink(unlinked)} className="text-link hover:underline">取り消す</button>
             </p>
           )}
         </>} />}>
-      {doneLine && <p className="text-[11.5px] text-gray-500 dark:text-zinc-400">{doneLine}</p>}
+      {doneLine && <p className="text-small text-gray-500 dark:text-zinc-400">{doneLine}</p>}
       <WaitBand key={`${record.state}@${record.version}`} card={card} today={now.date} busy={busy} onRun={onRun} {...(onNudge ? { onNudge: () => onNudge({ id: record.id, title: record.title }) } : {})} />
-      {card.okLine && <p className="flex items-center gap-1.5 rounded-md bg-success-bg px-2 py-1 text-[12.5px] text-success-text"><CheckCircle size={14} weight="fill" className="text-success-icon" />{card.okLine}</p>}
+      {card.okLine && <p className="flex items-center gap-1.5 rounded-md bg-success-bg px-2 py-1 text-small text-success-text"><CheckCircle size={14} weight="fill" className="text-success-icon" />{card.okLine}</p>}
 
       {(card.prepSummary || card.prepared.length > 0) && (
-        <section aria-label="AI が用意したもの" className="space-y-2 rounded-xl border border-ai-border bg-ai-bg p-3">
-          <h2 className="flex items-center gap-1.5 text-[12px] font-semibold"><Sparkle size={13} weight="fill" className="text-ai-icon" />AI が用意したもの</h2>
-          {card.prepSummary && <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[12.5px] text-gray-700 dark:text-zinc-200">{card.prepSummary}</p>}
+        <section aria-label="AI が用意したもの" className="space-y-2 rounded-card border border-ai-border bg-ai-bg p-3">
+          <h2 className="flex items-center gap-1.5 text-small font-semibold"><Sparkle size={13} weight="fill" className="text-ai-icon" />AI が用意したもの</h2>
+          {card.prepSummary && <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-small text-gray-700 dark:text-zinc-200">{card.prepSummary}</p>}
           {card.prepared.map(p => <div key={p.id}>{renderPrepared(p)}</div>)}
         </section>
       )}
@@ -444,18 +444,18 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
 
       {card.runs.length > 0 && (
         // A run that needs a person stopped on a failure (missing rights or input, an unknown outside result): red, 「止まりました」.
-        <section aria-label="AI が止まりました" data-stopped="failed" className="space-y-2 rounded-card border border-failed-border bg-failed-bg p-3 text-[12.5px]">
+        <section aria-label="AI が止まりました" data-stopped="failed" className="space-y-2 rounded-card border border-failed-border bg-failed-bg p-3 text-small">
           {card.runs.map(run => (
             <div key={run.runId} className="space-y-1.5">
               <p className="flex items-center gap-1.5 text-failed-text"><WarningOctagon size={14} weight="fill" className="text-failed-icon" />{run.label}</p>
               {run.unknown.map(op => (
                 <div key={op.key} className="flex flex-wrap items-center gap-2 pl-5">
                   <span className="text-gray-600 dark:text-zinc-300">送った先で確かめてください：</span>
-                  <button type="button" disabled={busy} onClick={() => void runAction(() => onReconcile(run.runId, op.key, true))} className="rounded border border-gray-300 px-2 py-0.5 text-[11.5px] dark:border-zinc-600">届いていた</button>
-                  <button type="button" disabled={busy} onClick={() => void runAction(() => onReconcile(run.runId, op.key, false))} className="rounded border border-gray-300 px-2 py-0.5 text-[11.5px] dark:border-zinc-600">届いていなかった</button>
+                  <button type="button" disabled={busy} onClick={() => void runAction(() => onReconcile(run.runId, op.key, true))} className="rounded-small border border-gray-300 px-2 py-0.5 text-small dark:border-zinc-600">届いていた</button>
+                  <button type="button" disabled={busy} onClick={() => void runAction(() => onReconcile(run.runId, op.key, false))} className="rounded-small border border-gray-300 px-2 py-0.5 text-small dark:border-zinc-600">届いていなかった</button>
                 </div>
               ))}
-              {run.canRetry && <button type="button" disabled={busy} onClick={() => void runAction(() => onRetry(run.runId))} className="ml-5 rounded border border-gray-300 px-2 py-0.5 text-[11.5px] dark:border-zinc-600"><Robot size={11} className="mr-1 inline" />もう一度</button>}
+              {run.canRetry && <button type="button" disabled={busy} onClick={() => void runAction(() => onRetry(run.runId))} className="ml-5 rounded-small border border-gray-300 px-2 py-0.5 text-small dark:border-zinc-600"><Robot size={11} className="mr-1 inline" />もう一度</button>}
             </div>
           ))}
           {runError && <p role="alert" className="text-danger-text">{runError}</p>}
@@ -468,7 +468,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       {card.bundle && (record.personal || record.membersOnly) && <ShowToBundle bundle={card.bundle} busy={busy} onShow={onShowToBundle} />}
       <DueAndTags card={card} now={now} busy={busy} tagField={tagField}
         onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />
-      {card.purpose && <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[13px] text-gray-600 dark:text-zinc-300"><span className="mr-1.5 text-[11px] text-gray-500">目的</span>{card.purpose}</p>}
+      {card.purpose && <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-body text-gray-600 dark:text-zinc-300"><span className="mr-1.5 text-caption font-normal text-gray-500">目的</span>{card.purpose}</p>}
       <ShareToDepartment folders={shareFolders} busy={busy} onShare={onShare} />
       {/* もとの連絡: only for a task that came from one (no read, no 「読み込んでいます」 on every task). */}
       <RecordSourcePanel record={record}>{card.fromIncoming ? renderSource(record) : null}</RecordSourcePanel>
@@ -491,7 +491,7 @@ function typedFileRows(card: TaskCardData, rootPath: string, typed: BodyProps['t
     return {
       key: `local:${f.path}`, name: 'ファイル', kind: 'file', label,
       sub: missing ? LOCAL_FILE_MISSING : f.path,
-      marks: <span data-only-you className="rounded bg-gray-200 px-1 text-[10.5px] text-gray-600 dark:bg-zinc-700 dark:text-zinc-300">{ONLY_YOU}</span>,
+      marks: <span data-only-you className="rounded-small bg-gray-200 px-1 text-caption font-normal text-gray-600 dark:bg-zinc-700 dark:text-zinc-300">{ONLY_YOU}</span>,
       onOpen: () => {
         if (missing) { say(`「${label}」は${LOCAL_FILE_MISSING}`); return }
         void runCommand('file.open', { path: `${rootPath}/${f.path}` })

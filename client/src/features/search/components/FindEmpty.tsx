@@ -13,7 +13,7 @@ import type { PaletteRecent } from '../model'
 const MAX = 5
 
 function ListTitle({ children }: { children: ReactNode }) {
-  return <h3 className="px-3 pt-3 pb-1 text-[11px] font-semibold text-gray-500 dark:text-zinc-400">{children}</h3>
+  return <h3 className="px-3 pt-3 pb-1 text-caption font-semibold text-gray-500 dark:text-zinc-400">{children}</h3>
 }
 
 function Row({ children, active, onClick, top, data }: { children: ReactNode; active: boolean; onClick: () => void; top?: boolean; data?: string }) {
@@ -46,14 +46,14 @@ export function FindEmpty({ recent, bundles, meetings, bundleWord, today, active
             return (
               <Row key={r.key} active={false} onClick={() => onOpenFile(r.path)} data={r.key}>
                 <I size={14} className="shrink-0" />
-                <span className="flex-1 min-w-0 truncate text-[12px] text-gray-700 dark:text-zinc-300" title={r.path}>{name}</span>
+                <span className="flex-1 min-w-0 truncate text-small text-gray-700 dark:text-zinc-300" title={r.path}>{name}</span>
               </Row>
             )
           }
           return (
             <Row key={r.key} active={activeRecordId === r.recordId} onClick={() => onOpenRecord(r.recordId)} data={r.key}>
               <RecordIcon record={r.record} />
-              <span className="flex-1 min-w-0 truncate text-[12px] text-gray-700 dark:text-zinc-300">{r.record.title}</span>
+              <span className="flex-1 min-w-0 truncate text-small text-gray-700 dark:text-zinc-300">{r.record.title}</span>
               <span className="text-[10px] text-gray-400 shrink-0">{thingName(r.record)}</span>
             </Row>
           )
@@ -70,7 +70,7 @@ export function FindEmpty({ recent, bundles, meetings, bundleWord, today, active
             <Row key={b.record.id} active={activeRecordId === b.record.id} onClick={() => onOpenRecord(b.record.id)} top data={b.record.id}>
               <span className="pt-px"><ThingIcon kind={b.record.thing} typeLabel={b.record.typeLabel} /></span>
               <span className="flex-1 min-w-0">
-                <span className="block truncate text-[12px] text-gray-700 dark:text-zinc-300">{b.record.title}</span>
+                <span className="block truncate text-small text-gray-700 dark:text-zinc-300">{b.record.title}</span>
                 {line && <span className="block truncate text-[10px] text-gray-400 dark:text-zinc-500">{line}</span>}
               </span>
             </Row>
@@ -85,7 +85,7 @@ export function FindEmpty({ recent, bundles, meetings, bundleWord, today, active
           return (
             <Row key={m.record.id} active={activeRecordId === m.record.id} onClick={() => onOpenRecord(m.record.id)} data={m.record.id}>
               <ThingIcon kind="meeting" />
-              <span className={`flex-1 min-w-0 truncate text-[12px] ${ago > 0 ? 'text-gray-500 dark:text-zinc-400' : 'text-gray-700 dark:text-zinc-300'}`}>{m.record.title}</span>
+              <span className={`flex-1 min-w-0 truncate text-small ${ago > 0 ? 'text-gray-500 dark:text-zinc-400' : 'text-gray-700 dark:text-zinc-300'}`}>{m.record.title}</span>
               <span className={`text-[10px] shrink-0 tabular-nums ${ago === 0 ? 'text-link font-medium' : 'text-gray-400'}`}>{dateWords(at)}</span>
             </Row>
           )

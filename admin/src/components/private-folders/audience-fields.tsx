@@ -68,7 +68,7 @@ export function AudienceFields({
             <li key={id} className="inline-flex h-7 items-center gap-1.5 rounded-full border bg-background pr-1 pl-1 text-sm">
               <Avatar name={nameOf(byId.get(id), id)} seed={id} className="size-5 text-[9px]" />
               <span className="max-w-44 truncate">{label(id)}</span>
-              {managers.has(id) && <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">管理役</span>}
+              {managers.has(id) && <span className="rounded-small bg-muted px-1 text-[10px] text-muted-foreground">管理役</span>}
               {id === lockedViewerId ? (
                 <span className="w-1" />
               ) : (
@@ -103,7 +103,7 @@ export function AudienceFields({
           title="見られる人全員"
           detail="見られる人は、だれでも中のファイルを変更できます"
         />
-        <div className={cn('rounded-lg border transition-colors', value.editorsMode === 'specific' && 'border-selected-border bg-selected-bg')}>
+        <div className={cn('rounded-control border transition-colors', value.editorsMode === 'specific' && 'border-selected-border bg-selected-bg')}>
           <Choice
             name={editorsGroup}
             checked={value.editorsMode === 'specific'}
@@ -146,7 +146,7 @@ export function AudienceFields({
 
 export function AudienceSummary({ viewers, editors }: { viewers: number; editors: number }) {
   return (
-    <div className="flex gap-3 rounded-lg border border-private-border bg-private-bg px-3.5 py-3" role="status" aria-live="polite">
+    <div className="flex gap-3 rounded-control border border-private-border bg-private-bg px-3.5 py-3" role="status" aria-live="polite">
       <LockSimple size={18} weight="fill" className="mt-0.5 shrink-0 text-private-text" aria-hidden="true" />
       <div className="text-sm">
         <p className="font-medium">
@@ -180,7 +180,7 @@ function Choice({
     <label
       className={cn(
         'flex cursor-pointer items-start gap-3 px-3 py-2.5 has-[:disabled]:cursor-default',
-        !bare && 'rounded-lg border transition-colors',
+        !bare && 'rounded-control border transition-colors',
         !bare && checked && 'border-selected-border bg-selected-bg'
       )}
     >
@@ -249,7 +249,7 @@ function MemberPicker({
                       <span className="flex items-center gap-1.5">
                         <span className="truncate">{name}</span>
                         {managers.has(m.userId) && (
-                          <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">管理役</span>
+                          <span className="shrink-0 rounded-small bg-muted px-1 text-[10px] text-muted-foreground">管理役</span>
                         )}
                       </span>
                       {m.email && <span className="block truncate text-xs text-muted-foreground">{m.email}</span>}

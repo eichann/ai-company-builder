@@ -36,7 +36,7 @@ export function FileSidePanel({ companyId, rootPath, filePath }: Props) {
   return (
     <aside data-file-side className="flex-shrink-0 w-[240px] overflow-y-auto border-l border-gray-200 dark:border-zinc-800/50 bg-white/60 dark:bg-zinc-900/40 px-3 py-2 space-y-4">
       <div className="flex justify-end -mb-2">
-        <button type="button" onClick={toggle} title="たたむ" aria-label="つながっているもの・前の版をたたむ" className="p-0.5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-zinc-200"><CaretDoubleRight size={12} /></button>
+        <button type="button" onClick={toggle} title="たたむ" aria-label="つながっているもの・前の版をたたむ" className="p-0.5 rounded-small text-gray-400 hover:text-gray-700 dark:hover:text-zinc-200"><CaretDoubleRight size={12} /></button>
       </div>
       {companyId && <FileConnections key={`${companyId}:${companyPath}`} companyId={companyId} companyPath={companyPath} />}
       <FileVersions key={companyPath} rootPath={rootPath} companyPath={companyPath} />

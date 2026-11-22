@@ -33,7 +33,7 @@ function makeComponents(isDark: boolean, highlight: boolean): Components {
       if (!isBlock) {
         return (
           <code
-            className="px-1 py-0.5 rounded bg-gray-200/70 dark:bg-zinc-700/70 text-[0.85em] font-mono text-gray-900 dark:text-zinc-100"
+            className="px-1 py-0.5 rounded-small bg-gray-200/70 dark:bg-zinc-700/70 text-[0.85em] font-mono text-gray-900 dark:text-zinc-100"
             {...props}
           >
             {children}

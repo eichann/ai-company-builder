@@ -159,7 +159,7 @@ function MembersForm({
                   <span
                     aria-hidden="true"
                     className={cn(
-                      'flex size-4 items-center justify-center rounded border',
+                      'flex size-4 items-center justify-center rounded-small border',
                       checked ? 'border-primary bg-primary text-primary-foreground' : 'border-input'
                     )}
                   >

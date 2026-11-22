@@ -29,7 +29,7 @@ export const DriveOverwriteCard = memo(function DriveOverwriteCard({ card }: { c
   }
   const finished = outcome !== null && outcome.kind !== 'error'
   return (
-    <div role="group" aria-label={title} className="my-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3">
+    <div role="group" aria-label={title} className="my-2 rounded-card border border-amber-500/40 bg-amber-500/5 p-3">
       <div className="flex items-center gap-1.5 text-sm font-medium text-gray-900 dark:text-zinc-100">
         <FileText size={15} weight="bold" aria-hidden className="text-amber-600" />
         {title}
@@ -56,11 +56,11 @@ export const DriveOverwriteCard = memo(function DriveOverwriteCard({ card }: { c
       {!finished && (
         <div className="mt-2 flex gap-2">
           <button type="button" disabled={busy} onClick={() => void decide('confirm')}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100 dark:hover:bg-zinc-800">
+            className="rounded-control border border-gray-300 px-3 py-1.5 text-xs text-gray-800 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100 dark:hover:bg-zinc-800">
             {busy ? DRIVE_PUT_ASK_WORDS.writing(card) : DRIVE_PUT_ASK_WORDS.confirm(card)}
           </button>
           <button type="button" disabled={busy} onClick={() => void decide('decline')}
-            className="rounded-lg px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800">
+            className="rounded-control px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800">
             {DRIVE_OVERWRITE_WORDS.decline}
           </button>
         </div>

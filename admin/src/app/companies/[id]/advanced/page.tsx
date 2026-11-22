@@ -58,7 +58,7 @@ export default function AdvancedSettingsPage() {
   return (
     <>
       <PageHeader title="詳しい設定" description="ふだんは触らなくても困りません。変えた所には「変えています」が付きます。" />
-      <ul aria-label="詳しい設定の見出し" className="divide-y overflow-hidden rounded-xl border bg-card">
+      <ul aria-label="詳しい設定の見出し" className="divide-y overflow-hidden rounded-card border bg-card">
         {ADVANCED_SECTIONS.map((s) => (
           <li key={s.id}>
             <Link

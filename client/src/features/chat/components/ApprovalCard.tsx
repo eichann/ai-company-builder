@@ -22,7 +22,7 @@ function StateIcon({ state }: { state: ApprovalView['state'] }) {
   return <Warning size={15} weight="bold" aria-hidden className="text-warning-icon" />
 }
 
-const BUTTON = 'rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50'
+const BUTTON = 'rounded-control border px-3 py-1.5 text-xs disabled:opacity-50'
 const PLAIN_BUTTON = `${BUTTON} border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800`
 
 /** Why a similar record is listed, in the person's words. */
@@ -93,7 +93,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
 
   if (!view) {
     return (
-      <div role="group" aria-label="承認のお願い" className={`my-2 rounded-xl border p-3 text-xs text-gray-600 dark:text-zinc-300 ${TONE_CLASS.plain}`}>
+      <div role="group" aria-label="承認のお願い" className={`my-2 rounded-card border p-3 text-xs text-gray-600 dark:text-zinc-300 ${TONE_CLASS.plain}`}>
         {loadError ?? '承認のお願いを読み込んでいます…'}
       </div>
     )
@@ -108,11 +108,11 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
   const mustChoose = canAnswer && similarItems.length > 0 && !distinct
   const canSayDuplicate = (canAnswer || canWithdraw) && similarItems.length > 0 && !distinct
   return (
-    <div role="group" aria-label="承認のお願い" data-state={view.state} className={`my-2 rounded-xl border p-3 ${TONE_CLASS[STATE_TONE[view.state]]}`}>
+    <div role="group" aria-label="承認のお願い" data-state={view.state} className={`my-2 rounded-card border p-3 ${TONE_CLASS[STATE_TONE[view.state]]}`}>
       <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-gray-900 dark:text-zinc-100">
         <StateIcon state={view.state} />
         承認のお願い：{view.operationLabel}
-        {view.requestedByAi && <span className="ml-auto flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-normal text-gray-600 dark:bg-zinc-800 dark:text-zinc-300">
+        {view.requestedByAi && <span className="ml-auto flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-caption font-normal text-gray-600 dark:bg-zinc-800 dark:text-zinc-300">
           <Robot size={12} aria-hidden />AI の案から
         </span>}
       </div>
@@ -131,18 +131,18 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
       </div>}
       {similar && <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
         <p className="text-gray-500 dark:text-zinc-400">似ているもの（すでにある{similar.typeLabel}）</p>
-        {similarItems.length === 0 ? <p>見つかりませんでした</p> : <ul aria-label="似ているもの" className="mt-0.5 space-y-1">{similarItems.map(x => <li key={x.recordId} className="rounded-lg border border-gray-200 p-1.5 dark:border-zinc-700">
+        {similarItems.length === 0 ? <p>見つかりませんでした</p> : <ul aria-label="似ているもの" className="mt-0.5 space-y-1">{similarItems.map(x => <li key={x.recordId} className="rounded-control border border-gray-200 p-1.5 dark:border-zinc-700">
           <p className="font-medium text-gray-900 dark:text-zinc-100">{x.title || '（件名なし）'}</p>
-          <p className="text-[11px] text-gray-500 dark:text-zinc-400">
+          <p className="text-caption font-normal text-gray-500 dark:text-zinc-400">
             {[x.status, x.assignee ? `担当 ${nameOf(names, x.assignee)}さん` : null, `更新 ${x.updatedAt.slice(0, 10)}`, matchedText(x, view.systemLabel)].filter(Boolean).join('・')}
           </p>
           {canSayDuplicate && <button type="button" disabled={busy} onClick={() => void sameAs(x.recordId)} className={`${PLAIN_BUTTON} mt-1`}>
             これと同じ{similar.typeLabel}です（作らない）
           </button>}
         </li>)}</ul>}
-        {similar.outside === 'unavailable' && <p className="mt-0.5 text-[11px] text-gray-500 dark:text-zinc-400">{view.systemLabel} にはいま聞けませんでした（ACB にあるものだけを出しています）</p>}
+        {similar.outside === 'unavailable' && <p className="mt-0.5 text-caption font-normal text-gray-500 dark:text-zinc-400">{view.systemLabel} にはいま聞けませんでした（ACB にあるものだけを出しています）</p>}
         {canSayDuplicate && <div className="mt-1 flex flex-wrap items-center gap-2">
-          {view.basis.meetingId && <label className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-zinc-300">
+          {view.basis.meetingId && <label className="flex items-center gap-1 text-caption font-normal text-gray-600 dark:text-zinc-300">
             <input type="checkbox" checked={linkMeeting} onChange={e => setLinkMeeting(e.target.checked)} />同じだったら、会議もその{similar.typeLabel}につなぐ
           </label>}
           <button type="button" disabled={busy} onClick={() => setDistinct(true)} className={PLAIN_BUTTON}>別の{similar.typeLabel}として作る</button>
@@ -152,7 +152,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
         <p className="text-gray-500 dark:text-zinc-400">似ているお願い（まだ承認待ちのもの）</p>
         <ul aria-label="似ているお願い" className="mt-0.5 space-y-0.5">{view.similarRequests.map(x => <li key={x.approvalId}>
           <span className="font-medium text-gray-900 dark:text-zinc-100">{x.title || '（名前なし）'}</span>
-          <span className="text-[11px] text-gray-500 dark:text-zinc-400">{`・${nameOf(names, x.requestedBy)}さんのお願い・${x.createdAt.slice(0, 10)}${x.sameSource ? '・同じ会議から' : ''}`}</span>
+          <span className="text-caption font-normal text-gray-500 dark:text-zinc-400">{`・${nameOf(names, x.requestedBy)}さんのお願い・${x.createdAt.slice(0, 10)}${x.sameSource ? '・同じ会議から' : ''}`}</span>
         </li>)}</ul>
       </div>}
       {view.basis.quote && <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
@@ -176,15 +176,15 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
       </div>}
       {view.proposedReason && <p className="mt-2 text-xs text-gray-500 dark:text-zinc-400">{view.requestedByAi ? 'AI のまとめ（参考）' : 'お願いした人のまとめ'}：{view.proposedReason}</p>}
       <p role="status" className="mt-2 text-xs text-gray-800 dark:text-zinc-200">{stateLine(view, names)}</p>
-      {!pending && view.state !== 'sent_back' && view.outcome && <p className="mt-0.5 text-[11px] text-gray-500 dark:text-zinc-400">{outcomeByText(view.outcome, names)}・{view.outcome.at.slice(0, 16).replace('T', ' ')}</p>}
-      {message && <div role="alert" className={`mt-2 rounded-lg border px-2 py-1.5 text-xs ${TONE_CLASS[message.tone]}`}>{message.text}</div>}
+      {!pending && view.state !== 'sent_back' && view.outcome && <p className="mt-0.5 text-caption font-normal text-gray-500 dark:text-zinc-400">{outcomeByText(view.outcome, names)}・{view.outcome.at.slice(0, 16).replace('T', ' ')}</p>}
+      {message && <div role="alert" className={`mt-2 rounded-control border px-2 py-1.5 text-xs ${TONE_CLASS[message.tone]}`}>{message.text}</div>}
       {canAnswer && <div className="mt-2">
         <label className="block text-xs text-gray-600 dark:text-zinc-300">
           理由（必ず書いてください。AI の下書きを直せます）
           <textarea value={reason} onChange={e => setEdited(e.target.value)} rows={3} maxLength={2000}
-            className="mt-1 w-full rounded-lg border border-gray-300 bg-white p-2 text-xs text-gray-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100" />
+            className="mt-1 w-full rounded-control border border-gray-300 bg-white p-2 text-xs text-gray-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100" />
         </label>
-        <p className="mt-1 text-[11px] text-gray-500 dark:text-zinc-400">{mustChoose ? '似ているものと同じかどうかを先に選んでください。' : APPROVE_HASH_NOTE}</p>
+        <p className="mt-1 text-caption font-normal text-gray-500 dark:text-zinc-400">{mustChoose ? '似ているものと同じかどうかを先に選んでください。' : APPROVE_HASH_NOTE}</p>
         <div className="mt-1 flex flex-wrap gap-2">
           <button type="button" disabled={busy || reason.trim() === '' || mustChoose} title={mustChoose ? '似ているものと同じかどうかを先に選んでください' : undefined} onClick={() => void act('approve')}
             className={`${BUTTON} border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700`}>{busy ? '承認しています…' : '承認'}</button>

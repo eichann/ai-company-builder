@@ -17,12 +17,12 @@ export function ReviewSaveError({ failure, onDismiss }: { failure: ReviewSaveFai
       {failure.retry && (
         <button
           onClick={failure.retry}
-          className="px-2.5 py-1 rounded bg-surface-raised border border-danger-border font-medium hover:bg-danger-bg-hover transition-colors"
+          className="px-2.5 py-1 rounded-small bg-surface-raised border border-danger-border font-medium hover:bg-danger-bg-hover transition-colors"
         >
           もう一度試す
         </button>
       )}
-      <button onClick={onDismiss} aria-label="このお知らせを閉じる" className="p-1 rounded hover:bg-danger-bg-hover">
+      <button onClick={onDismiss} aria-label="このお知らせを閉じる" className="p-1 rounded-small hover:bg-danger-bg-hover">
         <X size={12} />
       </button>
     </div>

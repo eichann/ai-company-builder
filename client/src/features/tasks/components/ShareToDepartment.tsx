@@ -29,7 +29,7 @@ export function ShareToDepartment({ folders, busy, onShare }: Props) {
   if (!open) {
     return (
       <button type="button" disabled={busy} onClick={() => { setOpen(true); setFolder(folders.length === 1 ? folders[0].folder : '') }}
-        className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-0.5 text-[11.5px] text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
+        className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-0.5 text-small text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
         <UsersThree size={12} />部署に出す
       </button>
     )
@@ -43,22 +43,22 @@ export function ShareToDepartment({ folders, busy, onShare }: Props) {
     else setOpen(false)
   }
   return (
-    <div role="group" aria-label="部署に出す" className="w-full space-y-2 rounded-lg border border-gray-200 p-2.5 text-[12.5px] dark:border-zinc-700">
+    <div role="group" aria-label="部署に出す" className="w-full space-y-2 rounded-control border border-gray-200 p-2.5 text-small dark:border-zinc-700">
       <label className="flex flex-wrap items-center gap-2">
         <span>出す先の部署</span>
-        <select value={folder} onChange={e => setFolder(e.target.value)} className="rounded border border-gray-300 bg-white px-1.5 py-0.5 dark:border-zinc-600 dark:bg-zinc-900">
+        <select value={folder} onChange={e => setFolder(e.target.value)} className="rounded-small border border-gray-300 bg-white px-1.5 py-0.5 dark:border-zinc-600 dark:bg-zinc-900">
           <option value="">選んでください</option>
           {folders.map(f => <option key={f.folder} value={f.folder}>{f.name}</option>)}
         </select>
       </label>
-      <p className="text-[11.5px] text-gray-500 dark:text-zinc-400">
+      <p className="text-small text-gray-500 dark:text-zinc-400">
         {chosen ? `「${chosen.name}」を見られる人みんなに見えるようになります。` : '出すと、その部署を見られる人みんなに見えるようになります。'}
         あとから「あなただけ」には戻せません。
       </p>
       {error && <p role="alert" className="text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex gap-2">
-        <button type="button" disabled={busy || !chosen} onClick={() => void submit()} className={`rounded px-2.5 py-0.5 ${PRIMARY_ACTION}`}>この部署に出す</button>
-        <button type="button" disabled={busy} onClick={() => { setOpen(false); setError(null) }} className="rounded border border-gray-300 px-2.5 py-0.5 dark:border-zinc-600">やめる</button>
+        <button type="button" disabled={busy || !chosen} onClick={() => void submit()} className={`rounded-small px-2.5 py-0.5 ${PRIMARY_ACTION}`}>この部署に出す</button>
+        <button type="button" disabled={busy} onClick={() => { setOpen(false); setError(null) }} className="rounded-small border border-gray-300 px-2.5 py-0.5 dark:border-zinc-600">やめる</button>
       </div>
     </div>
   )
