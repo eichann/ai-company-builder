@@ -445,7 +445,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       // Folders a shared .gitignore ignores (`.personal/` …) are not asked
       // about: nobody's sync shares anything there (nested-repos.ts). The
       // member's earlier exclusions are still reported, for the steps below.
-      // The ignored folders still get the backup before the pull (3.9): the
+      // The ignored folders still get the backup before the pull (9.5): the
       // rule may be newer here than on the server.
       const nestedRepos: string[] = []
       const onIgnored = (folder: string) => { if (!isUnderAny(privatePaths, folder)) ignoredFolders.push(folder) }

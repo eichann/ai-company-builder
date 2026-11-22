@@ -4,8 +4,26 @@ import type { SimpleGit } from 'simple-git'
 import { diskKey } from '../../../shared/core/paths'
 import { readExcludeBlock, writeExcludeBlock, type ExcludeBlock } from './local-excludes'
 
-/** Paths per `git check-ignore` call (the argument list stays far below any OS limit). */
-const CHECK_IGNORE_BATCH = 200
+/** Paths per git call (the argument list stays far below any OS limit). */
+const GIT_PATHS_BATCH = 200
+
+/** `paths` without any that lie inside another of them (diskKey), first spelling kept. */
+export function topmostFolders(paths: readonly string[]): string[] {
+  const keys = paths.map(diskKey)
+  return paths.filter((_, i) => keys.indexOf(keys[i]) === i && !keys.some(k => keys[i].startsWith(`${k}/`)))
+}
+
+/**
+ * The per-directory `.gitignore` files whose lines can decide about `dir`:
+ * the root's and every ancestor folder's (a folder's own `.gitignore` speaks
+ * about its contents, not about the folder).
+ */
+function gitignoresAbove(dir: string): string[] {
+  const segments = dir.split('/')
+  const out: string[] = []
+  for (let n = 0; n < segments.length; n++) out.push([...segments.slice(0, n), '.gitignore'].join('/'))
+  return out
+}
 
 /**
  * Which of `dirs` (folders on disk, repository-relative) a **shared** ignore
@@ -29,23 +47,36 @@ async function sharedIgnoredAmong(git: SimpleGit, dirs: readonly string[]): Prom
   // eslint-disable-next-line no-control-regex
   const askable = dirs.filter(d => !/["\\\u0000-\u001f\u007f]/.test(d))
   const decided: Array<{ source: string; dir: string }> = []
-  for (let i = 0; i < askable.length; i += CHECK_IGNORE_BATCH) {
-    const batch = askable.slice(i, i + CHECK_IGNORE_BATCH)
+  for (let i = 0; i < askable.length; i += GIT_PATHS_BATCH) {
+    const batch = askable.slice(i, i + GIT_PATHS_BATCH)
     let listed = ''
     try {
-      listed = await git.raw(['-c', 'core.quotePath=false', 'check-ignore', '-v', '--', ...batch])
+      // `./` first: a folder named `:foo` is a name, not pathspec magic
+      // (check-ignore refuses --literal-pathspecs; it never globs, so `*` is
+      // literal already). `-z` needs --stdin, which this git runner cannot
+      // feed; names git would quote are left out above, so a line ends at
+      // its newline.
+      listed = await git.raw(['-c', 'core.quotePath=false', 'check-ignore', '-v', '--', ...batch.map(d => `./${d}`)])
     } catch {
       continue
     }
-    // `<source>:<line>:<pattern>\t<path>`; with -v a path whose deciding
-    // line is a negation (`!…`) is listed too, and it is not ignored.
+    // `<source>:<line>:<pattern>\t<path>`. The path holds no tab (left out
+    // above), so it follows the last one. The source is read as one of the
+    // `.gitignore` files that can speak about that path, never guessed from
+    // the colons (a folder or pattern may hold `:12:`). With -v a path whose
+    // deciding line is a negation (`!…`) is listed too, and it is not ignored.
     for (const line of listed.split('\n')) {
       const tab = line.lastIndexOf('\t')
-      const m = tab === -1 ? null : /^(.*?):\d+:(.*)$/.exec(line.slice(0, tab))
-      if (!m || m[2].startsWith('!')) continue
-      const source = m[1]
-      if (path.posix.basename(source) !== '.gitignore' || source.startsWith('/') || source.startsWith('"')) continue
-      decided.push({ source, dir: line.slice(tab + 1) })
+      if (tab === -1) continue
+      const echoed = line.slice(tab + 1).normalize('NFC')
+      const dir = echoed.startsWith('./') ? echoed.slice(2) : echoed
+      const head = line.slice(0, tab).normalize('NFC')
+      for (const source of gitignoresAbove(dir)) {
+        const m = head.startsWith(`${source}:`) ? /^\d+:(.*)$/s.exec(head.slice(source.length + 1)) : null
+        if (!m) continue
+        if (!m[1].startsWith('!')) decided.push({ source, dir })
+        break
+      }
     }
   }
   if (decided.length === 0) return new Set()
@@ -277,23 +308,56 @@ export async function backUpBeforeServerOverwrite(options: {
   const prefix = options.backupPrefix ? `${options.backupPrefix}/` : ''
   const candidates: Array<{ file: string; oid: string; repo: string; link: boolean }> = []
   const spec = (repo: string) => (options.files ? repo : `${repo}/`)
-  for (const repo of options.repos) {
-    const incoming = await git.raw(['ls-tree', '-r', '-z', 'origin/main', '--', spec(repo)]).catch(() => '')
-    if (!incoming) continue
-    const tracked = new Set((await git.raw(['ls-files', '-z', '--', `:(literal)${spec(repo)}`]).catch(() => '')).split('\0').filter(Boolean))
-    for (const entry of incoming.split('\0')) {
+  // A folder inside another guarded folder (a member's exclusion inside an
+  // ignored folder) would list its files twice: only the topmost counts.
+  const guarded = options.files ? [...new Set(options.repos)] : topmostFolders(options.repos)
+  const guardedKeys = guarded.map(diskKey)
+  const repoOf = (file: string): string | undefined => {
+    const key = diskKey(file)
+    const i = guardedKeys.findIndex(r => (options.files ? key === r : key.startsWith(`${r}/`)))
+    return i === -1 ? undefined : guarded[i]
+  }
+  // One ls-tree (and one ls-files) per batch of folders, not per folder:
+  // every ignored folder is guarded on every sync.
+  const incoming: Array<{ mode: string; oid: string; file: string; repo: string }> = []
+  for (let i = 0; i < guarded.length; i += GIT_PATHS_BATCH) {
+    const batch = guarded.slice(i, i + GIT_PATHS_BATCH)
+    // Literal: a local folder named `:(glob)x` must not fail the whole batch.
+    // A failure stops sync (the caller says so), unless there is no
+    // origin/main yet (a company's first push: nothing can arrive).
+    let listed: string
+    try {
+      listed = await git.raw(['--literal-pathspecs', 'ls-tree', '-r', '-z', 'origin/main', '--', ...batch.map(spec)])
+    } catch (error) {
+      // simple-git does not reject a silent non-zero exit: read the answer.
+      const hasServerBranch = await git.raw(['rev-parse', '--verify', '-q', 'origin/main^{commit}']).then(out => out.trim().length > 0, () => false)
+      if (!hasServerBranch) return null
+      throw error
+    }
+    for (const entry of listed.split('\0')) {
       const tab = entry.indexOf('\t')
       if (tab === -1) continue
       const [mode, , oid] = entry.slice(0, tab).split(' ')
       const file = entry.slice(tab + 1)
-      if (options.files && file !== repo) continue
-      // A tracked path is an ordinary shared file: the rebase handles it.
-      if (tracked.has(file) || mode === '160000') continue
-      let st: fs.Stats
-      try { st = fs.lstatSync(path.join(repoPath, file)) } catch { continue }
-      if (!st.isFile() && !st.isSymbolicLink()) continue
-      candidates.push({ file, oid, repo, link: st.isSymbolicLink() })
+      const repo = repoOf(file)
+      if (repo !== undefined) incoming.push({ mode, oid, file, repo })
     }
+  }
+  if (incoming.length === 0) return null
+  const withIncoming = [...new Set(incoming.map(e => e.repo))]
+  const tracked = new Set<string>()
+  for (let i = 0; i < withIncoming.length; i += GIT_PATHS_BATCH) {
+    const batch = withIncoming.slice(i, i + GIT_PATHS_BATCH)
+    const listed = await git.raw(['ls-files', '-z', '--', ...batch.map(r => `:(literal)${spec(r)}`)]).catch(() => '')
+    for (const file of listed.split('\0')) if (file) tracked.add(diskKey(file))
+  }
+  for (const { mode, oid, file, repo } of incoming) {
+    // A tracked path is an ordinary shared file: the rebase handles it.
+    if (tracked.has(diskKey(file)) || mode === '160000') continue
+    let st: fs.Stats
+    try { st = fs.lstatSync(path.join(repoPath, file)) } catch { continue }
+    if (!st.isFile() && !st.isSymbolicLink()) continue
+    candidates.push({ file, oid, repo, link: st.isSymbolicLink() })
   }
   if (candidates.length === 0) return null
   // A symlink where the server has something is always kept aside.

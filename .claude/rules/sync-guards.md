@@ -180,7 +180,12 @@ what git actually sees through the app's `createGit`.
   still asked about — a teammate may share that path, and without the exclusion the pull would
   overwrite the clone's ignored files with no `_nested_repo` backup (Codex review). The skipped
   folders still go through the pre-pull backup (step 9.5, `onIgnored`): the tracked rule may be
-  newer here than on the server (a teammate shared files there before it arrived). A folder
+  newer here than on the server (a teammate shared files there before it arrived); the backup
+  asks git once per batch of 200 folders, not per folder (`--literal-pathspecs`, so a folder
+  named `:(glob)x` cannot fail its batch), counts a folder inside another guarded one once, and
+  a listing that fails stops sync before the pull (no origin/main yet: nothing to back up). Paths go to check-ignore as `./<path>` (a folder named `:foo` is not
+  pathspec magic) and the deciding source is matched against the `.gitignore` files above the
+  path, never guessed from colons. A folder
   holding a tracked file is never ignored for check-ignore (no `--no-index`), so a stray `.git`
   in a shared folder is still asked about; the member's own exclusions (local block, legacy
   lines) are still reported for the backup and gitlink steps; git failing means nothing counts
