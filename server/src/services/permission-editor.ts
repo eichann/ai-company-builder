@@ -14,7 +14,7 @@ import type { NewRule, ScopeRecord } from '../ports/scopes'
 import type { PermissionHistoryEntry } from '../ports/groups'
 import type { Clock } from '../ports/clock'
 
-import type { Transactions } from '../ports/transactions'
+import type { NotPromise, Transactions } from '../ports/transactions'
 import { supportsWriteDeniedRecovery } from '../lib/client-version'
 import { membersLosingWrite } from '../lib/write-loss'
 import {
@@ -191,7 +191,7 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
     ({ subjectType: r.subjectType, subjectId: r.subjectId, canRead: r.canRead, canWrite: r.canWrite })
 
   /** Record a rule change (permission_history): the place's rules before and after. */
-  function recordChange<T>(actor: Member, action: PermissionHistoryEntry['action'], paths: string[], mutate: () => T): T {
+  function recordChange<T>(actor: Member, action: PermissionHistoryEntry['action'], paths: string[], mutate: () => NotPromise<T>): T {
     const scopes = scopesOf(actor.companyId)
     const rulesAt = (p: string) => {
       const s = scopes.getByPath(p)
@@ -352,7 +352,7 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
      * [WRITE_DENIED] (or `force`). Otherwise roll back and refuse with 409
      * OUTDATED_CLIENTS. Other errors propagate (after the rollback).
      */
-    guardWrite<T>(actor: Member, force: boolean, roots: string[], mutate: () => T): Outcome<T> {
+    guardWrite<T>(actor: Member, force: boolean, roots: string[], mutate: () => NotPromise<T>): Outcome<T> {
       const companyId = actor.companyId
       // Without the shared folder nobody pushes, so no app can be stuck on a write refusal.
       const noPushes = !companyFolders.has(companyId)

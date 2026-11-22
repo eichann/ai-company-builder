@@ -41,6 +41,7 @@ import { sqliteMembershipRepository } from '../../src/adapters/sqlite/membership
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import { randomIds, systemClock } from '../../src/adapters/system'
 import { JOB_ACCEPT_HEADER, JOB_ACCEPT_SEPARATE } from '../../shared/core/jobs'
+import { holdPoints } from '../helpers/hold'
 
 const app = new Hono()
 app.route('/api/companies/:companyId', jobsRoute)
@@ -718,11 +719,125 @@ describe('PR 4: 「受け取りが要ります」 and what the screens read', ()
   })
 })
 
+describe('SERVERCORE-1: a resume checks the pause again after its await (jobs.md "Resume checks again")', () => {
+  // The resume awaits the pinned Skill (git) between its first check and its write. The test holds it right after the
+  // Skill was read (`stopAfter`: the service goes on with a read from before the other operation), lands a stop there,
+  // then lets the resume go on. Every service below is the real one on the same database; only the Skill port is wrapped.
+  const owner = { companyId: CO, userId: 'u-owner', role: 'owner' }
+  const admin = { companyId: CO, userId: 'u-admin', role: 'admin' }
+  const bob = { companyId: CO, userId: 'u-bob', role: 'member' }
+  const points = holdPoints<'skill'>()
+  let slotsHeld = 0
+  const held = createJobService({
+    companyData: sqliteCompanyData(db), memberships: sqliteMembershipRepository(db), transactions: sqliteTransactions(db),
+    clock: systemClock, ids: randomIds, hasCompanyFolder: () => true,
+    skillTree: points.stopAfter('skill', async () => treeOf('tree-a')),
+    occurrenceHolds: { holdDue: () => {}, holdPassedSlot: () => { slotsHeld++ } },
+  })
+  const pauseRow = (id: string) => db.prepare('SELECT state, paused_reason, paused_by, approved_version FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, id) as Json
+
+  /** An approved, accepted PC job of Bob's (its Skill pinned at tree-a). */
+  async function bobsJob(name: string): Promise<string> {
+    const made = await jobsWithSkill('tree-a').create(owner, { definition: { ...procedureJob('u-bob', '総務/面談'), name } })
+    if (!made.ok) throw new Error(JSON.stringify(made.body))
+    if (!(await jobsWithSkill('tree-a').approve(owner, made.value.id, { version: 1 })).ok) throw new Error('approve')
+    if (!(await jobsWithSkill('tree-a').accept(bob, made.value.id, { version: 1 }, undefined, true)).ok) throw new Error('accept')
+    return made.value.id
+  }
+
+  it('an admin\'s stop landing while the responsible person\'s resume awaits wins: refused, still paused by the admin', async () => {
+    const id = await bobsJob('止めが勝つ')
+    expect(held.pause(bob, id).ok).toBe(true)
+    const at = points.held('skill')
+    const resuming = held.resume(bob, id)
+    await at.arrived
+    expect(held.pause(owner, id).ok).toBe(true)
+    at.release()
+    const r = await resuming
+    expect(!r.ok && [r.kind, r.body.code]).toEqual(['forbidden', 'JOB_PAUSED_BY_OTHER'])
+    expect(pauseRow(id)).toMatchObject({ state: 'paused', paused_reason: 'ADMIN', paused_by: 'u-owner' })
+  })
+
+  it('a different stop reason landing meanwhile (the server\'s own pause) refuses an admin\'s resume', async () => {
+    const id = await bobsJob('理由が変わる')
+    expect(held.pause(owner, id).ok).toBe(true)
+    const before = slotsHeld
+    const at = points.held('skill')
+    const resuming = held.resume(admin, id)
+    await at.arrived
+    // As the runner's or a claim's rights check does (Bob still reads 総務, so the rights check alone would pass).
+    held.pauseBySystem(CO, id, 'OWNER_RIGHTS_CHANGED')
+    at.release()
+    const r = await resuming
+    expect(!r.ok && [r.kind, r.body.code]).toEqual(['conflict', 'JOB_PAUSE_CHANGED'])
+    expect(pauseRow(id)).toMatchObject({ state: 'paused', paused_reason: 'OWNER_RIGHTS_CHANGED' })
+    expect(slotsHeld).toBe(before)
+  })
+
+  it('a different stopper landing meanwhile (resumed and paused again by the responsible person) refuses an admin\'s resume', async () => {
+    const id = await bobsJob('止めた人が変わる')
+    expect(held.pause(owner, id).ok).toBe(true)
+    const at = points.held('skill')
+    const resuming = held.resume(admin, id)
+    await at.arrived
+    expect((await jobsWithSkill('tree-a').resume(owner, id)).ok).toBe(true)
+    expect(held.pause(bob, id).ok).toBe(true)
+    at.release()
+    const r = await resuming
+    expect(!r.ok && r.body.code).toBe('JOB_PAUSE_CHANGED')
+    expect(pauseRow(id)).toMatchObject({ state: 'paused', paused_reason: 'BY_RESPONSIBLE', paused_by: 'u-bob' })
+  })
+
+  it('another version approved meanwhile (its Skill never checked by this press) refuses the resume', async () => {
+    const id = await bobsJob('版が変わる')
+    expect(held.pause(owner, id).ok).toBe(true)
+    const v2 = await jobsWithSkill('tree-a').update(owner, id, { definition: { ...procedureJob('u-bob', '総務/面談'), name: '版が変わる 2' } })
+    if (!v2.ok) throw new Error(JSON.stringify(v2.body))
+    const at = points.held('skill')
+    const resuming = held.resume(owner, id)
+    await at.arrived
+    expect((await jobsWithSkill('tree-a').approve(owner, id, { version: 2 })).ok).toBe(true)
+    at.release()
+    const r = await resuming
+    expect(!r.ok && r.body.code).toBe('JOB_PAUSE_CHANGED')
+    expect(pauseRow(id)).toMatchObject({ state: 'paused', paused_reason: 'ADMIN', approved_version: 2 })
+  })
+
+  it('a double resume writes once: both answer the running job, one write and one slot held', async () => {
+    const id = await bobsJob('二度押し')
+    expect(held.pause(bob, id).ok).toBe(true)
+    const before = slotsHeld
+    const first = points.held('skill')
+    const second = points.held('skill')
+    const a = held.resume(bob, id)
+    const b = held.resume(bob, id)
+    await Promise.all([first.arrived, second.arrived])
+    first.release()
+    second.release()
+    const [ra, rb] = await Promise.all([a, b])
+    expect(ra.ok && ra.value.state).toBe('active')
+    expect(rb.ok && rb.value.state).toBe('active')
+    expect(slotsHeld - before).toBe(1)
+    expect(pauseRow(id)).toMatchObject({ state: 'active', paused_reason: null, paused_by: null })
+  })
+
+  it('a plain resume still works (nothing lands in the await)', async () => {
+    const id = await bobsJob('ふつうの再開')
+    expect(held.pause(bob, id).ok).toBe(true)
+    const r = await held.resume(bob, id)
+    expect(r.ok && r.value.state).toBe('active')
+    expect(pauseRow(id)).toMatchObject({ state: 'active', paused_reason: null })
+  })
+})
+
+/** The 40-hex tree id `jobsWithSkill(tree)` reads for `tree`. */
+const treeOf = (tree: string) => `${tree.replace(/[^0-9a-f]/g, '')}${'0'.repeat(40)}`.slice(0, 40)
+
 /** A job service on the same database whose company Skill reads `tree` (null: none). */
 function jobsWithSkill(tree: string | null, opts: { folder?: boolean; noticesChanged?: (companyId: string, userIds: string[]) => void } = {}) {
   return createJobService({
     companyData: sqliteCompanyData(db), memberships: sqliteMembershipRepository(db), transactions: sqliteTransactions(db),
-    clock: systemClock, ids: randomIds, skillTree: async () => (tree === null ? null : `${tree.replace(/[^0-9a-f]/g, '')}${'0'.repeat(40)}`.slice(0, 40)),
+    clock: systemClock, ids: randomIds, skillTree: async () => (tree === null ? null : treeOf(tree)),
     hasCompanyFolder: () => opts.folder ?? true, noticesChanged: opts.noticesChanged,
   })
 }

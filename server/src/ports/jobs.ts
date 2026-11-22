@@ -27,6 +27,14 @@ export interface JobRow {
   updatedAt: string
 }
 
+/** What a resume read of the pause it lifts (`JobRepository.resume` writes only while the job still holds exactly this). */
+export interface JobPauseSnapshot {
+  pausedReason: JobPauseReason | null
+  pausedBy: string | null
+  pausedAt: string | null
+  approvedVersion: number | null
+}
+
 export interface JobVersionRow {
   jobId: string
   version: number
@@ -162,8 +170,17 @@ export interface JobRepository {
   approve(jobId: string, version: number, fingerprint: string, by: string, at: string, state: JobState): void
   /** The responsible person accepted this version's consent: the job's accepted_*, and the version's accepted_* (set once). */
   accept(jobId: string, version: number, consentFingerprint: string, by: string, at: string, place: JobDeliveryPlace | null): void
-  /** Pause / resume: the state with its reason (null on resume). */
-  setState(jobId: string, state: JobState, reason: JobPauseReason | null, by: string | null, at: string): void
+  /**
+   * Pause (with its reason) or retire — **unconditional on purpose**: a stop always wins, whatever was read before
+   * (jobs.md "Resume checks again"). A resume never goes through here: it is `resume`, a compare-and-set.
+   */
+  setState(jobId: string, state: Extract<JobState, 'paused' | 'retired'>, reason: JobPauseReason | null, by: string | null, at: string): void
+  /**
+   * Resume (compare-and-set): to `to` with no pause reason, only while the job is still `paused` exactly as `from`
+   * says — the same reason, who paused it and when, and the same approved version. false = it changed since it was
+   * read (a stop or another resume came first; nothing written).
+   */
+  resume(jobId: string, from: JobPauseSnapshot, to: Extract<JobState, 'draft' | 'active'>, at: string): boolean
   /** 「定期の仕事をすべて止める」. */
   stopped(): boolean
   setStopped(stopped: boolean, by: string, at: string): void

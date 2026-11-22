@@ -25,7 +25,7 @@ import {
 import type { JobList, JobOccurrenceView, JobState, JobVersionView, JobView, JobWaiting } from '../../shared/types/jobs'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
-import type { JobOccurrenceRow, JobProposalRow, JobRow, JobVersionRow } from '../ports/jobs'
+import type { JobOccurrenceRow, JobPauseSnapshot, JobProposalRow, JobRow, JobVersionRow } from '../ports/jobs'
 import type { MembershipRepository } from '../ports/memberships'
 import type { Transactions } from '../ports/transactions'
 import { hashCanonical } from '../lib/content-hash'
@@ -58,6 +58,11 @@ const SHELF_NOT_HERE = () => refuse('conflict', 'この会社は全社フォル�
 const SHELF_SKILL_MISSING = () => refuse('conflict', '手順の Skill が「会社の Skill」に見つかりません。公開されているか確かめてから、もう一度ためしてください。', { code: 'JOB_SKILL_MISSING' })
 const SKILL_CHANGED = () => refuse('conflict', '手順のスキルが、この版を作ったあとに変わりました。新しい版を作ってから承認してください。', { code: 'JOB_SKILL_CHANGED' })
 const NOT_RESPONSIBLE = () => refuse('forbidden', 'この定期の仕事を止められるのは、承認された版の責任者か管理者だけです。', { code: 'JOB_NOT_RESPONSIBLE' })
+const PAUSED_BY_OTHER = () => refuse('forbidden', '止めた本人か管理者だけが、この定期の仕事を再開できます。', { code: 'JOB_PAUSED_BY_OTHER' })
+/** A resume whose pause changed while it checked the Skill (another stop, another approved version): nothing written. */
+const PAUSE_CHANGED = () => refuse('conflict', '再開の確認をしている間に、この定期の仕事がほかの理由で止められたか、内容が変わりました。画面を読み直して確かめてから、もう一度押してください。', { code: 'JOB_PAUSE_CHANGED' })
+const samePause = (job: JobRow, from: JobPauseSnapshot) => job.pausedReason === from.pausedReason && job.pausedBy === from.pausedBy
+  && job.pausedAt === from.pausedAt && job.approvedVersion === from.approvedVersion
 const RETIRED = () => refuse('conflict', 'この定期の仕事はもう使われていません。', { code: 'JOB_RETIRED' })
 const PLACE_NEEDED = () => refuse('conflict', 'この定期の仕事は、できたものを置く先を責任者が受け取るときに選びます。アプリを新しくしてから、「設定」→「仕事」→「定期の仕事」の「置き先を選んで受け取る」で選んでください。', { code: 'JOB_PLACE_NEEDED' })
 const PLACE_NOT_USABLE = () => refuse('conflict', '選んだ置き先を使えません（選んでから時間がたったか、消されました）。もう一度選んでください。', { code: 'JOB_PLACE_NOT_USABLE' })
@@ -816,10 +821,11 @@ export function createJobService(deps: JobServiceDeps) {
       if (job.state !== 'paused') return ok(view(member, handle, job, true, reads))
       // A non-admin resumes only a pause they made themselves, while still the approved version's
       // responsible person (someone a later draft names may see the job, not lift another's pause).
-      if (!hasFullAccess(member.role)
-        && !(job.pausedReason === 'BY_RESPONSIBLE' && job.pausedBy === member.userId && controls(handle, job, member.userId))) {
-        return refuse('forbidden', '止めた本人か管理者だけが、この定期の仕事を再開できます。', { code: 'JOB_PAUSED_BY_OTHER' })
-      }
+      const mayResume = (j: JobRow) => hasFullAccess(member.role)
+        || (j.pausedReason === 'BY_RESPONSIBLE' && j.pausedBy === member.userId && controls(handle, j, member.userId))
+      if (!mayResume(job)) return PAUSED_BY_OTHER()
+      // The pause this press lifts, as read now: the write below happens only while the job still holds exactly it.
+      const from: JobPauseSnapshot = { pausedReason: job.pausedReason, pausedBy: job.pausedBy, pausedAt: job.pausedAt, approvedVersion: job.approvedVersion }
       if (job.approvedVersion !== null) {
         const approved = handle.jobs.version(jobId, job.approvedVersion) as JobVersionRow
         // Rights and the Skill cannot be checked on a shape this server does not know: it stays paused here.
@@ -828,17 +834,23 @@ export function createJobService(deps: JobServiceDeps) {
         const skill = await skillPinned(member.companyId, definition)
         if (!skill.ok) return skill
       }
-      const result = transactions.run((): Outcome<void> => {
+      // Re-checked after the await (SERVERCORE-1, jobs.md "Resume checks again"): a stop that landed meanwhile — an
+      // admin's, the server's (the responsible person left, lost rights), another reason or person, another approved
+      // version — always wins; a second resume of the same pause writes nothing.
+      const result = transactions.run((): Outcome<'resumed' | 'already'> => {
         const current = handle.jobs.find(jobId) as JobRow
+        if (current.state !== 'paused') return ok('already')
+        if (!mayResume(current)) return PAUSED_BY_OTHER()
+        if (!samePause(current, from)) return PAUSE_CHANGED()
         if (current.approvedVersion !== null) {
           const approved = handle.jobs.version(jobId, current.approvedVersion) as JobVersionRow
           const rights = withinRights(handle, definitionOf(approved))
           if (!rights.ok) return rights
         }
-        handle.jobs.setState(jobId, current.approvedVersion === null ? 'draft' : 'active', null, null, clock.now())
+        if (!handle.jobs.resume(jobId, from, current.approvedVersion === null ? 'draft' : 'active', clock.now())) return PAUSE_CHANGED()
         // A slot that passed while it was paused is held, never made due afterwards.
         deps.occurrenceHolds?.holdPassedSlot(member.companyId, jobId, 'JOB_PAUSED')
-        return ok(undefined)
+        return ok('resumed')
       })
       if (!result.ok) return result
       return ok(view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads))

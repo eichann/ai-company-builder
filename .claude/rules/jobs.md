@@ -263,7 +263,7 @@ and starting the runner. It reads no content and calls nothing outside.
   brings nothing back (the occurrence stays `held`; a 「もう一度」 of the ended run claims nothing). **Every one**
   (stage 4b-0.5): batch after batch of the job's own (`dueOccurrences` / `runningOccurrences` with the job), until none
   is left — before, the first 10,000 only — and the frozen ones too ("Shapes this build does not know").
-- **When it ends** — a resume, `PUT /jobs-stop { stopped: false }` (only when it was on): the newest slot
+- **When it ends** — a resume (only of the pause it read: "Resume checks again"), `PUT /jobs-stop { stopped: false }` (only when it was on): the newest slot
   at or before now, if not made yet (no clock ran meanwhile), is written `held`, so the clock never makes
   it `due`. A slot from before the pause that no clock had reached yet is held too (the safe side).
 - The runner's own stop / pause checks stay for a stop written without holding (a build before 3b,
@@ -272,6 +272,31 @@ and starting the runner. It reads no content and calls nothing outside.
   (`updated_by` `acb:restore`) and holds what is due or running, as the stop does — so a slot whose occurrence the
   restore took away is made `held` again, never run twice, also after an owner lifts the stop. Test:
   `restore-pause.test.ts`, `job-runs.test.ts` 「after a restore」.
+
+## Resume checks again (SERVERCORE-1, 2026-11-23)
+
+`POST /jobs/:jobId/resume` reads the pause it lifts, awaits the pinned Skill (git, `skillPinned`), then writes. A stop
+that lands in that await must win, so (`services/jobs.ts` `resume`):
+
+- **The pause as read** (`JobPauseSnapshot`: `pausedReason`, `pausedBy`, `pausedAt`, `approvedVersion`) is what the press
+  lifts. Inside the write's transaction the job is read again: no longer paused → nothing written, the current job
+  answered (as a press arriving after: a double resume writes once); a non-admin whose pause is no longer their own → 403
+  `JOB_PAUSED_BY_OTHER` (the answer of a later press); any other change of the four → 409 `JOB_PAUSE_CHANGED`
+  (「再開の確認をしている間に、…ほかの理由で止められたか、内容が変わりました…」; the admin console shows the sentence); then the
+  rights (`withinRights`) as before.
+- **The write is a compare-and-set** (`JobRepository.resume(jobId, from, to, at)`, the precedent `records.writeState(row,
+  expectedVersion)`): only while the row still holds exactly that pause; false → `JOB_PAUSE_CHANGED`, nothing written,
+  no slot held. The re-read and the compare-and-set each stop a changed pause alone (the transaction is synchronous), so
+  removing one is not caught by a test; both removed fail three.
+- **A stop stays unconditional**: `setState` takes only `paused` / `retired` (a resume cannot be written through it) and
+  needs no expected version — an admin's pause, the server's (`OWNER_LEFT`, `OWNER_RIGHTS_CHANGED`) and the company's stop
+  always apply to the latest row (owner decision 1 of 「TOCTOUとTLA+の進め方」: versions only for operations built on what
+  was read before).
+- Test: `tests/integration/jobs.test.ts` "SERVERCORE-1" — the Skill port wrapped with `tests/helpers/hold.ts`
+  `stopAfter`: an admin's stop during the responsible person's resume (still paused by the admin), the server's pause
+  with another reason, another stopper, another approved version (each refused), a double resume (one write, one slot
+  held), a plain resume. Mutation check: the "no longer paused" answer and the in-transaction who-check each fail a test;
+  the re-read and the compare-and-set, as above.
 
 ## The runner (3b, `createJobRunner` + `runOccurrence`)
 
