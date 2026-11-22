@@ -234,6 +234,19 @@ async function run() {
   await wait(500)
   result.reloaded = { zoom: doc.contents.getZoomFactor(), scrollY: await js('window.scrollY'), keyboard: keyboard() }
   views.zoom(doc.viewId, win.webContents.id, 1)
+  // The member clicks into the document, then goes back to the app within the click's window; the
+  // page reloads itself when it loses the keyboard (a load focuses the view): the app keeps it.
+  await js('window.onblur = () => location.reload(); 0')
+  doc.contents.sendInputEvent({ type: 'mouseDown', x: 20, y: 20, button: 'left', clickCount: 1 })
+  doc.contents.sendInputEvent({ type: 'mouseUp', x: 20, y: 20, button: 'left', clickCount: 1 })
+  doc.contents.focus()
+  await wait(100)
+  const clickedIn = keyboard()
+  win.webContents.focus()
+  await wait(1000)
+  for (let i = 0; i < 50 && doc.contents.isLoading(); i++) await wait(100)
+  await wait(300)
+  result.backToApp = { clickedIn, after: keyboard() }
   result.hostAPI = await win.webContents.executeJavaScript('typeof window.electronAPI', true)
   result.windowsAfterPopup = BrowserWindow.getAllWindows().length
   // Give preconnect and WebRTC time to try.

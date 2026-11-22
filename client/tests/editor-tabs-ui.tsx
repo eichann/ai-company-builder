@@ -120,6 +120,7 @@ export function Preview() {
   const [active, setActive] = useState(htmlView ? HTML_DOC : `${ROOT}/コンテンツG/台本.md`)
   const [menuOpen, setMenuOpen] = useState(false)
   const [smallMenu, setSmallMenu] = useState(false)
+  const [toast, setToast] = useState(false)
   const [previewTab, setPreviewTab] = useState<string | null>(tabsView ? `${ROOT}/README.md` : null)
   const closeFile = (p: string) => {
     if (!tabsView && !htmlView) return
@@ -147,6 +148,7 @@ export function Preview() {
         <div style={{ display: 'flex', gap: 8, padding: '4px 12px', fontSize: 12 }}>
           <button data-testid="open-menu" onClick={() => setMenuOpen(o => !o)}>メニューを出す</button>
           <button data-testid="open-small-menu" onClick={() => setSmallMenu(o => !o)}>小さいメニュー</button>
+          <button data-testid="open-toast" onClick={() => setToast(o => !o)}>お知らせ</button>
         </div>
       )}
       {menuOpen && (
@@ -155,6 +157,7 @@ export function Preview() {
         </div>
       )}
       {smallMenu && <div role="menu" aria-label="小さいメニュー" style={{ position: 'fixed', ...(window as unknown as { __acbSmallMenuAt?: object }).__acbSmallMenuAt, width: 12, height: 12, background: '#fff', zIndex: 60 }} />}
+      {toast && <div role="status" style={{ position: 'fixed', ...(window as unknown as { __acbSmallMenuAt?: object }).__acbSmallMenuAt, width: 12, height: 12, background: '#333', zIndex: 70 }} />}
       {/* Tailwind does not scan this page: the tabs view sets its height itself so the preview scrolls. */}
       <div className="h-[420px] w-[760px]" style={tabsView || htmlView ? { height: 420 } : undefined}>
         <TabbedEditorPanel openFiles={openFiles} activeFilePath={active} previewFilePath={previewTab} tabLabels={labels} onSelectFile={setActive} onCloseFile={closeFile} onPinFile={pinFile} />

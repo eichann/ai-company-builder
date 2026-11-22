@@ -198,6 +198,9 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
         if (input.type === 'mouseDown' || input.type === 'touchStart' || input.type === 'gestureTap') lastPointerAt = at
         if (input.type === 'mouseDown' || input.type === 'touchStart' || input.type === 'gestureTap' || input.type === 'keyDown' || input.type === 'rawKeyDown') lastInputAt = at
       })
+      // Only a click made since the view last lost the keyboard counts: after the member went back to
+      // the app (the chat, typing), a page reloading or calling focus() must not use an older click.
+      contents.on('blur', () => { lastPointerAt = -Infinity })
       // Focus stealing: a page load, `focus()` or `autofocus` must not take the member's keyboard.
       contents.on('focus', () => {
         if (!shown) { focusApp(); return }

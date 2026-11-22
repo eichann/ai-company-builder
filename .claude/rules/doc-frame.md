@@ -40,7 +40,10 @@ carrying a secret in its user name reached a local listener). Each document is s
   that had the keyboard left it nowhere. So: a focus of the view while hidden, or not within
   `FOCUS_CLICK_WINDOW_MS` (600 ms) of a click / touch in it (`input-event`, judged 150 ms after
   the focus, so the click's input may arrive after it), goes back to the app's page
-  (`owner.focus()`); hiding a view that has the keyboard gives it back too. Measured with the guard:
+  (`owner.focus()`); hiding a view that has the keyboard gives it back too. **Only a click made
+  since the view last lost the keyboard counts** (the view's `blur` forgets the click; review of
+  A2: clicking the document and then the chat within 600 ms let a page that reloads on blur, or
+  calls `focus()`, take the keyboard back while the member typed). Measured with the guard:
   a page's `focus()` every 100 ms and `autofocus` take nothing, hidden or shown. A click into the
   document gives it the keyboard on purpose (a slide's ← →); the app's shortcuts then do not reach
   the app until the member clicks outside (the proposal: not intercepted in the first version).
@@ -182,12 +185,17 @@ carrying a secret in its user name reached a local listener). Each document is s
 - **Overlays** (a native view is drawn above the app's page, so a menu, dialog, ⌘K or toast the app
   draws there would be hidden behind it): **the view is hidden while anything of the app covers
   its area** (`htmlViewer.ts` `placementOf` / `areaCovered`): any menu, listbox or dialog
-  (`OVERLAY_SELECTOR`: by role or `aria-modal`, however small) whose box overlaps the area, or
+  or toast (`OVERLAY_SELECTOR`: `menu`, `listbox`, `dialog`, `alertdialog`, `aria-modal`,
+  `status`, `alert`, `data-overlay`; however small) whose box overlaps the area, or
   anything at a grid of points ~48 px apart over the area (at most 640 points; on a 4K area at
   most 3 steps apart; `document.elementsFromPoint`: the first element at a point must be the area
   or inside it). Tooltips do not count, so the document does not blink under the toolbar's
   tooltips; an overlay with no role smaller than the grid both ways may slip between the points
-  (`htmlViewer.test.ts`). The area then says 「メニューやダイアログを閉じると、
+  (`htmlViewer.test.ts`), and an element with `pointer-events: none` is invisible to
+  `elementsFromPoint` — such an overlay needs a role or `data-overlay`. **Main does not check
+  where a placement lies** beyond the window's content area (it does not know the layout): a
+  renderer bug could place a document over the chat column. The renderer is trusted; the document
+  cannot move its own view. The area then says 「メニューやダイアログを閉じると、
   資料に戻ります。」. The link confirmation is such an overlay: the document is hidden while the
   member decides.
 - **Refusals** in plain Japanese from `docView:open` (`DOC_FRAME_WORDS`, `role="alert"`); a view
@@ -242,7 +250,9 @@ hosts, and nothing else):
 
 - **What the document says**: wrong numbers, lies, an old copy. The app cannot judge content.
 - **Deception**: the document can draw a fake login or a fake confirmation card. What is typed
-  there cannot leave (no network), but the member may type it elsewhere. Approving, sending and
+  there cannot leave (no network), but the member may type it elsewhere. **全画面 makes this far
+  more convincing**: the menu bar and the app around the document are gone, so a fake system
+  prompt or login fills the screen (the member entered it with the app's button; Esc leaves). Approving, sending and
   confirmations stay on the app's own cards, never in the view.
 - **A link the member agrees to open**: a document can put text into a link's address; once the
   member presses 「ブラウザで開く」 on the confirmation (A2) it leaves with the link. A document
@@ -295,7 +305,8 @@ hosts, and nothing else):
   allowed; the app's reload closes the view and revokes its grant.
 - A2 in `doc-frame-electron.test.ts` (the window shown and focused): the keyboard stays the app's
   while the document loads, calls `focus()` every 100 ms and has `autofocus`, hidden and shown, and
-  is the document's after a click; placed at the app page's zoom (CSS px × 1.25), visible and
+  is the document's after a click; a click no longer counts once the member went back to the app
+  (a page reloading on blur takes nothing); placed at the app page's zoom (CSS px × 1.25), visible and
   unmuted, another window cannot move it; hidden again → hidden, muted, the keyboard back to the
   app; Escape in the document in full screen leaves it; a reload keeps zoom 2 and scroll 600; a
   navigation to the web is handed over only right after a click (not by itself) and the page
@@ -306,7 +317,7 @@ hosts, and nothing else):
   the grid catches every overlay of its spacing and stays fine on a 4K area, which changes reload. `tests/ui/editor-html-viewer.spec.ts`
   (`editor-tabs-ui.html?view=html`): 見る by default, placed exactly over the area, closed on
   another tab / 中身 / ［止める］, a view made after the member left closed at once, a menu over
-  it hides it (also one smaller than the grid, by its role), the top-level refusal's words, reloads
+  it hides it (also a menu or a toast smaller than the grid, by its role), the top-level refusal's words, reloads
   on the right changes, the zoom kept across another tab and 中身, the link dialog (host large, Enter answers nothing, only ［ブラウザで開く］
   opens, another view's link ignored), zoom steps, a gone view, full screen.
 - `ipc-window-links.test.ts` (privileges; the app's session does not serve `acb-doc`),

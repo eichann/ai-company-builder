@@ -57,6 +57,11 @@ test('anything of the app drawn over the document hides its view until it goes (
   await expect.poll(() => lastBounds(page)).toBeNull()
   await page.getByTestId('open-small-menu').click()
   await expect.poll(() => lastBounds(page)).toBeTruthy()
+  // A toast (role status) as small, the same way.
+  await page.getByTestId('open-toast').click()
+  await expect.poll(() => lastBounds(page)).toBeNull()
+  await page.getByTestId('open-toast').click()
+  await expect.poll(() => lastBounds(page)).toBeTruthy()
   expectNoPageErrors(state)
 })
 

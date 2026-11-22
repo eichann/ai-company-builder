@@ -37,7 +37,7 @@ export type StackAt = (x: number, y: number) => readonly Element[]
 const isTooltip = (el: Element) => el.closest('[role="tooltip"]') !== null
 
 /** The app's overlays that say what they are: found by their box, however small. */
-export const OVERLAY_SELECTOR = '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [aria-modal="true"]'
+export const OVERLAY_SELECTOR = '[role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [aria-modal="true"], [role="status"], [role="alert"], [data-overlay]'
 
 const overlaps = (a: DocViewBounds, b: DOMRect) => b.width > 0 && b.height > 0
   && b.left < a.x + a.width && b.right > a.x && b.top < a.y + a.height && b.bottom > a.y

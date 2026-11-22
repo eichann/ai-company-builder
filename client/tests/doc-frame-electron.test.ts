@@ -43,6 +43,7 @@ interface Result {
   fullScreen: { before: boolean; after: boolean; pageFullScreen: boolean; keyboard: { app: boolean; doc: boolean } }
   hiddenAgain: { focusedBefore: boolean; visible: boolean; muted: boolean; visibility: string; keyboard: { app: boolean; doc: boolean } }
   reloaded: { zoom: number; scrollY: number; keyboard: { app: boolean; doc: boolean } }
+  backToApp: { clickedIn: { app: boolean; doc: boolean }; after: { app: boolean; doc: boolean } }
   links: { events: unknown[]; stayed: boolean }
   crashEvents: unknown[]
   otherViewId: number | null
@@ -156,6 +157,11 @@ test('a document never takes the keyboard by itself (its load, focus(), autofocu
   assert.deepEqual(result.focusWhileHidden, { app: true, doc: false }, 'loading focuses a view (Electron 45): the keyboard goes back to the app')
   assert.deepEqual(result.shown.keyboard, { app: true, doc: false }, 'shown, its focus() calls do not take the keyboard either')
   assert.deepEqual(result.focusAfterClick, { app: false, doc: true }, 'control: the member clicked into it')
+})
+
+test('a click into the document no longer counts once the member went back to the app: a reload on blur takes nothing', { skip }, () => {
+  assert.deepEqual(result.backToApp.clickedIn, { app: false, doc: true }, 'control: the click gave it the keyboard')
+  assert.deepEqual(result.backToApp.after, { app: true, doc: false })
 })
 
 test('shown over its tab: placed at the app page\'s zoom, visible and unmuted; another window cannot move it', { skip }, () => {
