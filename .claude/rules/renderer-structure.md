@@ -40,7 +40,8 @@ file's 「つながっているもの」), `settings`, `auth` (server address, s
 the task list tab, `tasks-ui.md`),
 `notifications` (the title bar's 「あなたの番」 and bell, `notifications.md`), `absences` (the settings'
 「不在と代わりの人」, shown by `settings`; `records.md` "Absence and the delegate"), `jobs` (the settings'
-「定期の仕事」: the member's scheduled jobs and 「受け取る」, `jobs.md` "The screens"). Only create what you need; add a feature
+「定期の仕事」: the member's scheduled jobs and 「受け取る」, `jobs.md` "The screens"), `records-table` (「記録の一覧」, the
+middle's table of records; reached only through its `entry.tsx`, `tasks-ui.md` "The records table (B4)"). Only create what you need; add a feature
 folder when the code has no home among these.
 
 Naming: `doc-review` is the review of a Markdown document (sidecar `*.review.*.json` files). Do

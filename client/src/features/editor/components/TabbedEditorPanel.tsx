@@ -14,7 +14,7 @@ import { useMarkdownViewMode, useScrollMemory, type MdViewMode } from '../hooks/
 import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
 import { EditorTabBar } from './EditorTabBar'
 import type { TabArrangement } from '../hooks/useTabArrangement'
-import { fileTabsOf, recordIdOfTab, type RecordTabLook } from '../editorTabs'
+import { fileTabsOf, recordIdOfTab, viewOfTab, type RecordTabLook, type ViewTabLook } from '../editorTabs'
 import { EditorError, EditorNotice, ExternalChangeBanner, MissingFileNotice, ReadOnlyNotice } from './EditorNotices'
 import { LocalImage, PdfPreview } from './BinaryPreviews'
 import { MarkdownPreviewPane } from './MarkdownPreviewPane'
@@ -37,6 +37,9 @@ interface TabbedEditorPanelProps {
   recordLooks?: Readonly<Record<string, RecordTabLook>>
   /** The card of the record whose tab is active (drawn by the screen: the task card, a record's card). */
   renderRecord?: (recordId: string) => ReactNode
+  /** Screen tabs (`viewTabKey`): their tab's title and icon, and the page the screen draws. */
+  viewLooks?: Readonly<Record<string, ViewTabLook>>
+  renderView?: (name: string) => ReactNode
   /** Beside the active file (「つながっているもの」, 「前の版」). */
   aside?: ReactNode
   /** Pinned (固定) tabs and their toggle (「タブを片づける」 leaves them open). */
@@ -63,6 +66,8 @@ export function TabbedEditorPanel({
   navigation,
   recordLooks,
   renderRecord,
+  viewLooks,
+  renderView,
   aside,
   pinnedTabs,
   onTogglePinned,
@@ -72,9 +77,10 @@ export function TabbedEditorPanel({
 }: TabbedEditorPanelProps) {
   // Records share the tabs; only the file tabs load text, save and keep scroll positions.
   const activeRecordId = recordIdOfTab(activeFilePath)
+  const activeView = viewOfTab(activeFilePath)
   const tabs = openFiles
   const fileTabs = useMemo(() => fileTabsOf(tabs), [tabs])
-  const shownFile = activeRecordId ? null : activeFilePath
+  const shownFile = activeRecordId || activeView ? null : activeFilePath
   const { isReadOnly } = useWriteAccess()
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -145,7 +151,7 @@ export function TabbedEditorPanel({
 
   const handleCloseTab = async (e: React.MouseEvent, path: string) => {
     e.stopPropagation()
-    if (recordIdOfTab(path) || await saving.saveBeforeClose(path)) {
+    if (recordIdOfTab(path) || viewOfTab(path) || await saving.saveBeforeClose(path)) {
       onCloseFile(path)
       keepFocusInEditor()
     }
@@ -177,6 +183,7 @@ export function TabbedEditorPanel({
         fileContents={fileContents}
         activeFilePath={activeFilePath}
         recordLooks={recordLooks}
+        viewLooks={viewLooks}
         previewFilePath={previewFilePath}
         tabLabels={tabLabels}
         onSelect={handleSelectFile}
@@ -202,7 +209,8 @@ export function TabbedEditorPanel({
         onCancel={() => saving.answerConfirm(false)}
       />
 
-      {activeRecordId ? <div className="flex-1 overflow-auto min-w-0" data-testid="record-tab">{renderRecord?.(activeRecordId)}</div> : <>
+      {activeView ? <div className="flex-1 min-h-0 min-w-0 flex flex-col" data-testid="view-tab">{renderView?.(activeView)}</div>
+        : activeRecordId ? <div className="flex-1 overflow-auto min-w-0" data-testid="record-tab">{renderRecord?.(activeRecordId)}</div> : <>
 
       {activeFilePath && isReadOnly(activeFilePath) && <ReadOnlyNotice />}
 

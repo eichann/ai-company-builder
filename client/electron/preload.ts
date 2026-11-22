@@ -18,6 +18,7 @@ import type { CreatePrivateFolderRequest, SetPrivateFolderMembersRequest } from 
 import type { GoogleFeature } from '../shared/google'
 import type { MailAwaitReply, MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
+import type { RecordsTableQuery } from '../shared/records-table'
 import type { WorkSwitch } from '../shared/work-switches'
 import type { ViewersQuery } from '../shared/viewers'
 import type { InviteSet } from '../shared/minutes-app'
@@ -233,6 +234,7 @@ const api: ElectronAPI = {
   findRecordsHome: (companyId: string, today: string, from: string, to: string) => invoke('recordViews:findHome', companyId, today, from, to),
   getRecordCard: (companyId: string, recordId: string) => invoke('recordViews:card', companyId, recordId),
   getConsultationTopics: (companyId: string, recordIds: string[]) => invoke('recordViews:topics', companyId, recordIds),
+  getRecordsTablePage: (companyId: string, query: RecordsTableQuery) => invoke('recordsTable:page', companyId, query),
   getRecordsForFile: (companyId: string, companyPath: string) => invoke('recordViews:forFile', companyId, companyPath),
   getOutboundMail: (companyId: string, messageId: string) => invoke('outboundMail:get', companyId, messageId),
   getOutboundMailRecipients: (companyId: string, messageId: string) => invoke('outboundMail:recipients', companyId, messageId),

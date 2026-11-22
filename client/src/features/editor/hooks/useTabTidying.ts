@@ -3,7 +3,7 @@ import { useCommandHandler } from '../../../shared/commands/commands'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { saveUnsavedEdits, unsavedPaths } from '../../../shared/lib/unsavedEdits'
 import { fileExists, recordStillThere } from '../api'
-import type { RecordTabLook } from '../editorTabs'
+import { viewOfTab, type RecordTabLook } from '../editorTabs'
 import type { TabKindGroup } from '../../../../shared/thing-words'
 import {
   groupNameKey, namedGroupOf, NO_GROUPING, pruneGrouping, regroup, tabGroupingStore, tabGroupName, tabGroupOf, type ArrangeOptions, type TabGroupingStore,
@@ -79,7 +79,8 @@ export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs: saved
     const tabs = tabGroup ? all.filter(k => namedGroupOf(k, arrange)?.id === tabGroup.id)
       : scope.kind ? all.filter(k => !namedGroupOf(k, arrange) && tabGroupOf(k, looks) === scope.kind) : all
     const plan = planTidy(tabs, pinned, [...left, ...unsavedPaths()])
-    const items = plan.close.map(key => tidiedItemOf(key, cur.rootPath, looks, namedGroupOf(key, arrange)))
+    // A screen tab (「記録の一覧」) closes too but is not listed: it is no file or record to open again.
+    const items = plan.close.filter(key => !viewOfTab(key)).map(key => tidiedItemOf(key, cur.rootPath, looks, namedGroupOf(key, arrange)))
     const at = now()
     const dropped = items.length > 0
       ? store.add(cid, { id: `g${at.toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: new Date(at).toISOString(), day: companyDay(at), auto: !!source, items })
@@ -147,7 +148,7 @@ export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs: saved
     const pins = new Set(cur.pinnedTabs)
     const arrange: ArrangeOptions = { pinned: pins, looks: cur.recordLooks, grouping: pruneGrouping(companyId ? grouping.get(companyId) : NO_GROUPING, cur.openTabs) }
     return {
-      openTabs: cur.openTabs.map(key => {
+      openTabs: cur.openTabs.filter(key => !viewOfTab(key)).map(key => {
         const tabGroup = namedGroupOf(key, arrange)?.name
         return {
           ...entryOf(tidiedItemOf(key, cur.rootPath, cur.recordLooks)), kindId: tabGroupOf(key, cur.recordLooks),

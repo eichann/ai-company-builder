@@ -36,6 +36,11 @@ paths:
   - "client/tests/ui/fixtures/link-drop.ts"
   - "shared/core/turn-timing.ts"
   - "client/src/shared/hooks/useDismiss.ts"
+  - "client/src/features/records-table/**"
+  - "client/electron/features/records-table/**"
+  - "client/shared/records-table.ts"
+  - "client/tests/records-table*"
+  - "client/tests/ui/records-table.spec.ts"
 ---
 
 # The task list and the task card in the app (やることの一覧・カード, stage 2 S7b / S7c)
@@ -972,6 +977,77 @@ unchanged.
   rest; choosing the まとまり afterwards gives just that part back to the AI once (`minutes.md` "A
   まとまり chosen later"; the row is 「AI の番」 again, without 「自分で読み取る」 / 「今は読まない」, which are
   only for a received meeting).
+
+## The records table (「記録の一覧」, B4, owner decisions 2026-11-22)
+
+A middle tab that lists one kind's records as a table (やること, 案件・プロジェクト, 会議, 決めたこと, …
+whatever kinds `/records/types` answers, in that order: `kindsOf`). **Built to be thrown away easily**:
+the owner is not sure it is the right view, so it adds no server change, no stored data and no setting
+switch, and lives in its own places with a few doors.
+
+- **What it reads**: only the existing `POST /records/query` (one kind, `limit` 200, `offset`), through
+  `recordsTable:page` (`client/electron/features/records-table/ipc.ts`, the member's session) plus
+  `/records/types` (columns, kinds) and `/members` (names in person columns). **The server decides what
+  the member sees**: owner-only, members-only and private-folder records are absent from its answer; the
+  app never filters visibility itself, and the rows shown are exactly the answers' (`tableState.ts`
+  appends 「さらに読む」 pages, each record once). 「済み以外」 is the query's `state` (the kind's non-final
+  states, `openStatesOf`), asked of the server within its rule (1–20 names): every state final → nothing
+  is asked (no row is open); no final state → no filter needed; more than 20 → no filter, and the table
+  says 「この種類は状態が多いため「済み以外」で絞れません。すべてを出しています。」. Nothing is kept on disk; the
+  table's state is memory only, tied to one member × company (another one starts from nothing,
+  `openRecordsTable`); nobody signed in reads nothing, and signing out (or another member signing in)
+  forgets the rows and drops answers on their way.
+- **Columns** come from the kind's declared server fields that fit a line (person, date, datetime,
+  choice, number, tags, boolean, text — no long text or record ids; `columnsOf`), 担当 / 責任者 / 期限 first,
+  five shown until the member picks others with 「列」 (memory only). Always 状態, 題名 and 更新日.
+- **Sorting and the text filter work on the rows read** (`model.ts`): a header press is ascending →
+  descending → the server's order (newest change first), empty values last; the filter folds width and
+  case and looks in the title, state and shown cells. When the kind has more than one page, the foot
+  says 「全 N 件のうち M 件を読み込みました（並べ替え・絞り込みは読み込んだ分の中で行います）」 with
+  ［さらに読む］. 期限 (`due`) passed on an unfinished record is red with 「（過ぎています）」.
+- **Answers out of order**: every load is numbered; an answer to an older question (a kind switched to
+  fast, 読み直す twice) is dropped; a failure keeps the same question's rows (with the reason above) and
+  never leaves another kind's rows under the new heading.
+- **Pages count by the server's offset** (`consumed`), not by the rows shown. 「さらに読む」 stops — and
+  never asks the same tail again — when the list changed between pages (the total moved, or the next
+  page repeats a record already read: one came, went or moved ahead, so another may be skipped): the
+  foot says so and offers ［最初から読み直す］. It also stops, keeping the rows read, when the server
+  answers another kind (the kind is gone), and before asking past the query's offset 10000
+  (「これ以上は読めません（1万件まで）。「済み以外」で絞り込んでください。」; main refuses past it too).
+- **States in plain Japanese** with the P2b `Callout`: loading, records off (「この会社では、やることや決めた
+  ことなどの記録を使っていません。」), offline / failed (the server text + ［もう一度］), empty
+  (「済んでいない〇〇はありません。」), no row matching the filter.
+- **Rows and keys**: a row (click, Enter or Space) opens its record in a tab beside the table (the
+  record's existing page); the table tab stays with its kind, filter and sort. ↑ ↓ Home End move between
+  rows. Loads start from presses only (open, kind, 状態, 読み直す, さらに読む), never from an effect; a
+  table tab shown again without its question (← →, another member) offers ［一覧を読み込む］.
+- **The tab** is the editor's screen tab (`viewTabKey('records-table')`, `files-and-editor.md` "Screen
+  tabs"): one at most, not kept across a restart, closed but not listed by 「タブを片づける」, left out of the
+  AI's `tabs.list`.
+- **Doors**: ［表で見る］ above the やること list (opens やること) and ⌘K 「記録の一覧」 (the kind shown last).
+  No left tab (owner: a sixth tab hides at narrow widths).
+
+**How to remove it** (`client/tests/records-table-removable.test.ts` fails on any other import of it):
+delete `client/src/features/records-table/`, `client/electron/features/records-table/`,
+`client/shared/records-table.ts`, `client/tests/records-table*.{ts,tsx,html}`,
+`client/tests/ui/records-table.spec.ts`; then remove the lines naming it: `src/app/AppShell.tsx`
+(the import, `showRecordsTable`, `onShowTable=`, `viewLooks=` / `renderView=`, `onShowRecordsTable=`),
+`src/app/AppDialogs.tsx` (the import, the palette entry, the prop and its `onAction` branch),
+`TaskListPanel.tsx`'s `onShowTable` prop and button, `shared/ipc-contract.ts` (import, channel,
+`getRecordsTablePage`), `electron/preload.ts` (import, method), `electron/main.ts` (import, register),
+`tests/skill-layout-ui.tsx`'s `getRecordsTablePage` and `tests/tasks-list-ui.tsx`'s `onShowTable`; regenerate
+`ipc-inventory.txt`; drop this section and the `paths:` above. The editor's screen-tab support can stay
+(it shows nothing without a `renderView`) or go with it.
+
+Tests: `src/features/records-table/model.test.ts` (sorting, filter, 期限切れ, columns, page note),
+`tableState.test.ts` (rows exactly the answer's, out-of-order answers dropped, another member starts
+empty, nobody reads nothing, sign-out forgets, さらに読む by offset and once each, stopping when the list
+changed / the kind is gone / past 10000, failures), `client/tests/records-table.test.ts` (main: the query asked,
+rows as answered, 済み以外 within the 1–20 rule, input checked (offset ≤ 10000), records off / offline,
+columns and kinds order),
+`records-table-removable.test.ts` (imports, and the channel's name only in the listed files), `tests/ui/records-table.spec.ts` (`records-table-ui.html`: doors,
+sorting, filter, opening a row, keys, a fast kind switch, states, paging, dark; the real `AppShell` on
+`skill-layout-ui.html?tasks=1`: one tab, tidy / the AI / a restart leave it out, a saved pin is dropped).
 
 ## Tests
 

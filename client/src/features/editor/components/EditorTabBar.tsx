@@ -6,7 +6,7 @@ import { runCommand } from '../../../shared/commands/commands'
 import { getFileIcon } from '../../../shared/ui/fileIcon'
 import { RecordIcon } from '../../../shared/ui/ThingIcon'
 import { thingName } from '../../../../shared/thing-words'
-import { recordIdOfTab, type RecordTabLook } from '../editorTabs'
+import { recordIdOfTab, viewOfTab, type RecordTabLook, type ViewTabLook } from '../editorTabs'
 import { fileNameOf } from '../fileKinds'
 import { GROUP_COLOR_CLASSES, tabGroupName, type TabSection } from '../tabArrangement'
 import type { OpenFile } from '../hooks/useOpenFiles'
@@ -22,6 +22,8 @@ interface Props {
   tabLabels?: Record<string, string>
   /** Record tabs' titles and kinds (by record id); a record not read yet shows 「読み込んでいます」. */
   recordLooks?: Readonly<Record<string, RecordTabLook>>
+  /** Screen tabs' titles and icons (by view name, `viewTabKey`). */
+  viewLooks?: Readonly<Record<string, ViewTabLook>>
   onSelect: (path: string) => void
   onPin?: (path: string) => void
   onClose: (e: React.MouseEvent, path: string) => void
@@ -42,7 +44,7 @@ type Menu = { x: number; y: number; items: ContextMenuItem[] }
  * a file from elsewhere; a record by its kind's icon and its title (plan A, no 「ファイルではありません」 line).
  * A tab dragged inside the bar moves (an insertion line shows where); dropped anywhere else it links.
  */
-export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewFilePath, tabLabels, recordLooks, onSelect, onPin, onClose, pinnedTabs, onTogglePinned, arrangement, end }: Props) {
+export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewFilePath, tabLabels, recordLooks, viewLooks, onSelect, onPin, onClose, pinnedTabs, onTogglePinned, arrangement, end }: Props) {
   const [menu, setMenu] = useState<Menu | null>(null)
   // The tab being dragged from this bar (a ref: changing the dragged element during dragstart can cancel the drag).
   const dragKey = useRef<string | null>(null)
@@ -84,7 +86,9 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
   const renderTab = (filePath: string, section: TabSection) => {
     const recordId = recordIdOfTab(filePath)
     const look = recordId ? recordLooks?.[recordId] : undefined
-    const fileName = recordId ? (look?.title ?? '読み込んでいます') : fileNameOf(filePath)
+    const view = viewOfTab(filePath)
+    const viewLook = view ? viewLooks?.[view] : undefined
+    const fileName = recordId ? (look?.title ?? '読み込んでいます') : view ? (viewLook?.title ?? view) : fileNameOf(filePath)
     const file = fileContents.get(filePath)
     const isActive = filePath === activeFilePath
     const isModified = file && file.content !== file.originalContent
@@ -92,6 +96,7 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
     const FileIcon = getFileIcon(fileName, false)
     const icon = recordId
       ? (look ? <RecordIcon record={look} size={14} /> : null)
+      : view ? (viewLook?.icon ?? null)
       : <FileIcon size={14} className="flex-shrink-0" />
     const deptLabel = tabLabels?.[filePath]
     const pinned = !!pinnedTabs?.has(filePath)
@@ -102,7 +107,7 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
         key={filePath}
         role="tab"
         aria-selected={isActive}
-        data-tab={recordId ? `record:${recordId}` : 'file'}
+        data-tab={recordId ? `record:${recordId}` : view ? `view:${view}` : 'file'}
         data-pinned={pinned || undefined}
         data-drop-line={line ?? undefined}
         onClick={() => onSelect(filePath)}
@@ -117,6 +122,7 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
         draggable
         onDragStart={e => {
           if (recordId) startRecordDrag(e.dataTransfer, { id: recordId, title: look?.title ?? '', ...(look ? { word: thingName(look) } : {}) })
+          else if (view) e.dataTransfer.effectAllowed = LINK_EFFECT_ALLOWED // a screen tab links nothing: it only moves in the bar
           else {
             e.dataTransfer.setData(FILE_PATHS_DRAG_TYPE, JSON.stringify([filePath]))
             e.dataTransfer.effectAllowed = LINK_EFFECT_ALLOWED
