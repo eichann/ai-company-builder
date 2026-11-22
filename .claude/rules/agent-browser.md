@@ -591,8 +591,8 @@ send → report; 6c turns it on for the owner's PC).
   stretch between the app's last clock check and the request leaving (§30.1); a site already
   processing a send; a parent / child target (§28.A); a version that changes `lock.kind` or the
   target fields while an execution is open is not held back yet (§30.5's compatibility rule: today
-  one version exists); and, not said until 6b-2a fixes it, a server wall clock jumping forward
-  right after a permit (an open hole, "The plan model").
+  one version exists). (A server wall clock jumping forward right after a permit was 6a's hole,
+  closed by 6b-2a's clock fix.)
 
 Tests: `server/tests/unit/browser-plans.test.ts` (the clock fix: a forward step after the permit, the
 window opening once 35 s really passed, a restart, a restart with a step, a row with no reading, the wall
@@ -645,14 +645,11 @@ README in the folder.
   clocks as separate values, a person confirming wrongly, the facts' fields (folded into
   before / after / other), a modified app, a site processing a send late, and liveness under fairness
   (R7 says a path to settled exists).
-- **Open hole, expected to fail until fixed**: `holes/HoleServerClockJumps` — the server's wall clock
-  jumping forward 35 s or more right after a permit lets 6a turn the execution unknown and accept
-  「確かめた：されていなかった」 while the app still sends inside its 5 s (R5 breaks; 6a refuses only a
-  clock going back). The fix (`proposals/FixServerClockJumps`: also require the monotonic elapsed time
-  since the permit, with the boot id) passes every rule; the server PR that makes it (6b-2a) moves it
-  into `PlanLife.tla` and deletes the hole and the proposal with their `expected.txt` lines (README
-  "Open hole"). `limits/LimitFrozenAfterCheck` is the accepted "Remaining limits" stretch between the
-  app's last clock check and the request leaving (fails R2, kept so it does not change unnoticed).
+- **The server's clock jumping forward** is part of the real model (`ServerClockJumps`; 6b-2a, "The clock
+  fix" above): the window counts on both clocks (`Past(p)`), and `broken/BrokenNoMonotonicWindow` (the
+  wall clock alone, as 6a did) must fail R5. No hole is open (`holes/`, `proposals/` empty).
+  `limits/LimitFrozenAfterCheck` is the accepted "Remaining limits" stretch between the app's last
+  clock check and the request leaving (fails R2, kept so it does not change unnoticed).
 
 ## The operator and the preview (PR 6b-1: built, switched off; nothing in the app calls it)
 

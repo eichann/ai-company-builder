@@ -2,7 +2,7 @@
 \* The life of one 「ブラウザ操作」 plan — register, approve, claim, send permit, send, report, confirm —
 \* and the rules it keeps. Copied BY HAND from the code and the design; each action names what it
 \* copies. A PR that changes the lifecycle changes this file in the same PR (agent-browser.md "The plan model").
-\*   Server: server/src/services/browser-plans.ts (PR 6a), with the states and times of
+\*   Server: server/src/services/browser-plans.ts (PR 6a; the clock fix of 6b-2a), with the states and times of
 \*           shared/core/browser-plans.ts (BrowserPlanState, BrowserExecutionState, BROWSER_PLAN_TIMES).
 \*   App:    the approved 6b-2 design (internal design memo, 6b-2 §3 and §5). Nothing in the app calls
 \*           the server's plans yet: today's runner (client/electron/features/browser/runner.ts, with
@@ -30,8 +30,8 @@ VARIABLES
                   \*   cdone (confirmed_done), cnotdone (confirmed_not_done), void
     holder,       \* the app that claimed the execution (= received the execution's secret)
     lock,         \* the plan holding the target lock ("none" = free)
-    srvAge,       \* elapsed since the permit by the server's WALL clock (capped at CAP)
-    realAge,      \* elapsed since the permit in reality (= srvAge, except in the clock-jump variants)
+    srvAge,       \* elapsed since the permit by the server's WALL clock (capped at CAP; may jump forward)
+    realAge,      \* elapsed since the permit in reality = the server's MONOTONIC clock (6b-2a)
     \* ---- network ----
     permitReq,    \* a send-permit request in flight (may arrive late, even after the app gave up)
     rep,          \* a report in flight: none, succeeded, failed, unknown (may arrive again, or be lost)
@@ -136,10 +136,15 @@ ServerRefusesPermit(p) ==
     /\ AnswerTo(p, "idle")
     /\ UNCHANGED <<approvedEver, holder, srvAge, realAge, rep, siteVars>>
 
-\* browser-plans.ts settleExecution: permitted and silent past permit + 5 s + 30 s by the server's wall
-\* clock -> unknown. Judged on every read and touch.
+\* browser-plans.ts pastWindow (6b-2a, the clock fix): permit + 5 s + 30 s have passed on BOTH the
+\* server's wall clock and its monotonic clock (since the permit on the same process start, since the
+\* start after a restart: never earlier than the real elapsed time, so realAge is the safe reading).
+Past(p) == srvAge[p] >= CAP /\ realAge[p] >= CAP
+
+\* browser-plans.ts settleExecution: permitted and silent past the window (Past) -> unknown. Judged on
+\* every read and touch.
 ServerSettlesUnknown(p) ==
-    /\ exSt[p] = "permitted" /\ srvAge[p] >= CAP
+    /\ exSt[p] = "permitted" /\ Past(p)
     /\ exSt' = [exSt EXCEPT ![p] = "unknown"]
     /\ UNCHANGED <<planSt, approvedEver, holder, lock, srvAge, realAge, permitReq, rep, appVars, siteVars>>
 
@@ -149,7 +154,7 @@ ServerSettlesUnknown(p) ==
 ServerGetsReport(p) ==
     /\ rep[p] # "none"
     /\ LET r == rep[p]
-           s == IF exSt[p] = "permitted" /\ srvAge[p] >= CAP THEN "unknown" ELSE exSt[p]
+           s == IF exSt[p] = "permitted" /\ Past(p) THEN "unknown" ELSE exSt[p]
        IN IF s = "permitted" /\ r \in {"succeeded", "failed"} THEN Fin(p, r)
           ELSE IF s = "permitted" /\ r = "unknown" THEN (exSt' = [exSt EXCEPT ![p] = "unknown"] /\ UNCHANGED <<lock, planSt>>)
           ELSE IF s = "unknown" /\ r = "succeeded" THEN Fin(p, "succeeded")
@@ -162,10 +167,10 @@ ReportLost(p) ==
     /\ rep' = [rep EXCEPT ![p] = "none"]
     /\ UNCHANGED <<srvVars, permitReq, appVars, siteVars>>
 
-\* browser-plans.ts confirm 「確かめた」: only unknown and only after permit + 35 s by the server's wall
-\* clock. The person looks at the site and answers truthfully.
+\* browser-plans.ts confirm 「確かめた」: only unknown and only past the window on both clocks (Past).
+\* The person looks at the site and answers truthfully.
 PersonConfirms(p) ==
-    /\ exSt[p] = "unknown" /\ srvAge[p] >= CAP
+    /\ exSt[p] = "unknown" /\ Past(p)
     /\ Fin(p, IF landed[p] THEN "cdone" ELSE "cnotdone")
     /\ UNCHANGED <<approvedEver, holder, srvAge, realAge, permitReq, rep, appVars, siteVars>>
 
@@ -262,6 +267,15 @@ SomeoneEdits ==
     /\ UNCHANGED <<srvVars, permitReq, rep, appVars, sends, landed, badSend>>
 
 \* Nothing left to do (a stutter step so that the deadlock check does not call this a dead end)
+\* The environment: the server's wall clock jumps FORWARD by 35 s or more right after a permit (a
+\* one-shot NTP correction, a VM's time sync). Only srvAge moves; the monotonic clock (realAge) does not.
+\* With Past requiring both, the server does not turn the execution unknown or take 「確かめた」 early
+\* (6a judged by the wall clock alone and broke R5 here; broken/BrokenNoMonotonicWindow).
+ServerClockJumps(p) ==
+    /\ exSt[p] = "permitted" /\ srvAge[p] < CAP
+    /\ srvAge' = [srvAge EXCEPT ![p] = CAP]
+    /\ UNCHANGED <<planSt, approvedEver, exSt, holder, lock, realAge, permitReq, rep, appVars, siteVars>>
+
 Done ==
     /\ \A a \in Apps : ph[a] = "idle"
     /\ \A p \in Plans : exSt[p] \notin {"claimed", "permitted", "unknown"} /\ rep[p] = "none" /\ ~permitReq[p]
@@ -271,7 +285,7 @@ ServerNext ==
     \E p \in Plans :
         \/ Register(p) \/ Approve(p) \/ CloseOpen(p) \/ VoidClaimed(p)
         \/ ServerPermits(p) \/ ServerRefusesPermit(p) \/ ServerSettlesUnknown(p)
-        \/ ServerGetsReport(p) \/ ReportLost(p) \/ PersonConfirms(p)
+        \/ ServerGetsReport(p) \/ ReportLost(p) \/ PersonConfirms(p) \/ ServerClockJumps(p)
 
 AppNext ==
     \E a \in Apps :
@@ -280,8 +294,6 @@ AppNext ==
 
 ClaimNext == \E a \in Apps, p \in Plans : Claim(a, p)
 
-\* The server's wall clock does not jump forward here: that case is holes/HoleServerClockJumps
-\* (the current 6a breaks R5 there; README "Open hole").
 Next == ServerNext \/ ClaimNext \/ AppNext \/ Tick \/ SomeoneEdits \/ Done
 
 Spec == Init /\ [][Next]_vars
