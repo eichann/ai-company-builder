@@ -1,6 +1,8 @@
 // The Electron side of tests/browser-window-electron.test.ts: runs the app's real browser window
-// (electron/browser-window.ts) against the local sites (./sites.ts) and prints what happened as one
-// `RESULT {json}` line. Started by the test with `NODE_OPTIONS=--import tsx`.
+// (electron/browser-window.ts) against the local sites (./sites.ts) and writes what happened as JSON to
+// `<BROWSER_TEST_DIR>/result.json` (written whole, then renamed: the test reads it after the process
+// exited — a long line on stdout could be cut when Electron quits before its pipe is drained). Started by
+// the test with `NODE_OPTIONS=--import tsx`.
 //
 // The certificate: production code trusts only what the system trusts. This harness alone trusts
 // its own self-signed certificate for the three test hosts, on the test session only
@@ -54,8 +56,14 @@ app.on('session-created', created => {
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const result: Record<string, unknown> = {}
+/** The result, whole: written to a temporary name and renamed, so the test never reads half of it. */
+const writeResult = (value: unknown) => {
+  const file = path.join(dir, 'result.json')
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify(value))
+  fs.renameSync(`${file}.tmp`, file)
+}
 const fail = (error: unknown) => {
-  console.log(`RESULT ${JSON.stringify({ error: error instanceof Error ? error.stack : String(error) })}`)
+  writeResult({ error: error instanceof Error ? error.stack : String(error) })
   app.exit(1)
 }
 setTimeout(() => fail(new Error('the harness timed out')), 90_000)
@@ -176,7 +184,7 @@ async function run() {
   result.evilConnections = sites.evilConnections
   result.udpPackets = sites.udpPackets
   sites.close()
-  console.log(`RESULT ${JSON.stringify(result)}`)
+  writeResult(result)
   app.quit()
 }
 

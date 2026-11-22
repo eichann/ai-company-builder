@@ -96,12 +96,14 @@ before(async () => {
     child.stdout.on('data', chunk => { out += chunk })
     child.stderr.on('data', chunk => { err += chunk })
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 120_000)
-    child.on('exit', () => { clearTimeout(timer); resolve(out + (out.includes('RESULT ') ? '' : `\n${err.slice(-4000)}`)) })
+    // `close`: the process exited and its output streams ended; the result file was renamed into place before.
+    child.on('close', () => { clearTimeout(timer); resolve(`${out}\n${err.slice(-4000)}`) })
   })
+  const resultFile = path.join(dir, 'result.json')
+  const text = fs.existsSync(resultFile) ? fs.readFileSync(resultFile, 'utf8') : null
   fs.rmSync(dir, { recursive: true, force: true })
-  const line = output.split('\n').find(l => l.startsWith('RESULT '))
-  assert.ok(line, `no result from the Electron harness:\n${output}`)
-  result = JSON.parse(line.slice('RESULT '.length)) as Result
+  assert.ok(text !== null, `no result from the Electron harness:\n${output}`)
+  result = JSON.parse(text) as Result
   assert.equal(result.error, undefined, result.error)
 })
 
