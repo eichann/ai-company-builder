@@ -38,8 +38,13 @@ const FOCUS_CHECK_DELAY_MS = 150
 const LINK_INPUT_WINDOW_MS = 1000
 /** The isolated world the app reads and restores a document's scroll position in (the page's own scripts cannot see or replace it). */
 const SCROLL_WORLD = 1001
-/** A reload waits at most this long for the scroll position (a page spinning its CPU never answers). */
-const SCROLL_READ_MS = 300
+/**
+ * A shown view's reload waits at most this long for the scroll position (a page spinning its CPU
+ * never answers). A hidden view waits until it answers or is shown: a hidden (background-throttled)
+ * view on a busy computer did not answer within 2 s, and the member was put back at the top
+ * (measured, 2026-11-22).
+ */
+const SCROLL_READ_MS = 1000
 
 /** A scroll position read from a document: two finite numbers, else none. */
 function scrollPosition(value: unknown): [number, number] | null {
@@ -212,8 +217,13 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
       let gone = false
       let shown = false
       let zoomFactor = 1
-      /** Where the document was scrolled when it was reloaded, put back once it has loaded again. */
+      /**
+       * Where the document was scrolled when it was reloaded, until it has been put back (a hidden
+       * view draws no frame, so this may wait until it is shown).
+       */
       let keepScroll: [number, number] | null = null
+      /** A reload waiting for the scroll position: starts its time limit (once the view is shown). */
+      let reloadWaiting: { limit: () => void } | null = null
       /** When the member last clicked / touched (pointer) or pressed a key (any) in the view. */
       let lastPointerAt = -Infinity
       let lastInputAt = -Infinity
@@ -280,12 +290,15 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
       })
       // The document's zoom stays across its own reloads and pages.
       contents.on('did-navigate', () => { if (!contents.isDestroyed()) contents.setZoomFactor(zoomFactor) })
+      // Put back in the page's next frame, not at once: Chromium focuses an `autofocus` field (scrolling
+      // to it) in the page's first frame, which under load comes after the load (measured: the member
+      // was back at the top). A frame flushes autofocus before its animation-frame callbacks.
       contents.on('did-finish-load', () => {
         const position = keepScroll
-        keepScroll = null
-        if (position && !contents.isDestroyed()) {
-          contents.executeJavaScriptInIsolatedWorld(SCROLL_WORLD, [{ code: `window.scrollTo(${position[0]}, ${position[1]})` }]).catch(() => {})
-        }
+        if (!position || contents.isDestroyed()) return
+        const code = `new Promise(resolve => requestAnimationFrame(() => { window.scrollTo(${position[0]}, ${position[1]}); resolve(0) }))`
+        contents.executeJavaScriptInIsolatedWorld(SCROLL_WORLD, [{ code }])
+          .then(() => { if (keepScroll === position) keepScroll = null }, () => {})
       })
       contents.once('destroyed', finish)
       contents.on('render-process-gone', finish)
@@ -318,6 +331,7 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
           view.setVisible(true)
           contents.setAudioMuted(false)
           shown = true
+          reloadWaiting?.limit()
         },
         zoom(factor) {
           zoomFactor = factor
@@ -325,14 +339,30 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
         },
         reload() {
           if (gone || !token) return
+          // An earlier reload's position not put back yet (hidden, no frame drawn): the page is at its top,
+          // keep that one — as a copy, so the replaced page putting it back late does not clear it.
+          if (keepScroll) {
+            keepScroll = [keepScroll[0], keepScroll[1]]
+            contents.reload()
+            return
+          }
+          // A reload already waiting for the position loads the file as it is by then.
+          if (reloadWaiting) return
           // The file changed: load it again where the member was (Chromium does not keep it on reload here).
-          const read = contents.executeJavaScriptInIsolatedWorld(SCROLL_WORLD, [{ code: '[window.scrollX, window.scrollY]' }]).catch(() => null)
-          const late = new Promise(resolve => setTimeout(() => resolve(null), SCROLL_READ_MS))
-          void Promise.race([read, late]).then(position => {
+          let timer: ReturnType<typeof setTimeout> | undefined
+          let settled = false
+          const done = (position: unknown) => {
+            if (settled) return
+            settled = true
+            reloadWaiting = null
+            clearTimeout(timer)
             if (gone || contents.isDestroyed()) return
             keepScroll = scrollPosition(position)
             contents.reload()
-          })
+          }
+          reloadWaiting = { limit: () => { timer ??= setTimeout(() => done(null), SCROLL_READ_MS) } }
+          contents.executeJavaScriptInIsolatedWorld(SCROLL_WORLD, [{ code: '[window.scrollX, window.scrollY]' }]).then(done, () => done(null))
+          if (shown) reloadWaiting.limit()
         },
       }
     },

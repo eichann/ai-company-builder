@@ -7,8 +7,10 @@
 // that then fails still counts —, names mapped with Chromium's `host-rules` (a loopback address
 // would bypass any proxy), and a UDP socket for STUN. Every probe is https / wss: acb-doc is a
 // secure scheme, so an http probe would be stopped by mixed-content blocking before any guard.
-// Prints what happened as one `RESULT {json}` line. Started with `NODE_OPTIONS=--import tsx`.
-import { app, BrowserWindow, session, webContents as allWebContents } from 'electron'
+// Writes what happened as JSON to `<DOC_TEST_DIR>/result.json` (written whole, then renamed: the test
+// reads it after the process exited — a long line on stdout could be cut when Electron quits before
+// its pipe is drained). Started with `NODE_OPTIONS=--import tsx`.
+import { app, BrowserWindow, session, webContents as allWebContents, type WebContents } from 'electron'
 import dgram from 'node:dgram'
 import fs from 'node:fs'
 import net from 'node:net'
@@ -27,11 +29,17 @@ app.setPath('userData', path.join(dir, 'userData'))
 registerLocalFileScheme()
 
 const result: Record<string, unknown> = {}
+/** The result, whole: written to a temporary name and renamed, so the test never reads half of it. */
+const writeResult = (value: unknown) => {
+  const file = path.join(dir, 'result.json')
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify(value))
+  fs.renameSync(`${file}.tmp`, file)
+}
 const fail = (error: unknown) => {
-  console.log(`RESULT ${JSON.stringify({ error: error instanceof Error ? error.stack : String(error) })}`)
+  writeResult({ error: error instanceof Error ? error.stack : String(error) })
   app.exit(1)
 }
-setTimeout(() => fail(new Error('the harness timed out')), 100_000)
+setTimeout(() => fail(new Error('the harness timed out')), 150_000)
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 // 1×1 PNG.
@@ -105,6 +113,8 @@ function setUp() {
 <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="${WEB('style')}/web.css">
 <script src="${WEB('script')}/cdn.js"></script><script type="module" src="mod.js"></script>
 </head><body><p>資料</p><input id="grab" autofocus><div style="height:3000px"></div><script>${probes()}</script></body></html>`)
+  fs.writeFileSync(path.join(folder, 'late.html'), `<!doctype html><meta charset="utf-8"><div style="height:3000px"></div>
+<script>addEventListener('load', () => { const i = document.createElement('input'); i.id = 'late'; i.autofocus = true; document.body.prepend(i) })</script>`)
   fs.writeFileSync(path.join(folder, 'page2.html'), '<!doctype html><p>2</p>')
   fs.writeFileSync(path.join(folder, 'style.css'), 'p { color: red }')
   fs.writeFileSync(path.join(folder, 'mod.js'), 'window.moduleRan = true\n')
@@ -148,6 +158,8 @@ async function run() {
   const events: unknown[] = []
   /** What the window was told about blocked internet parts (hosts and a count only). */
   const blockedEvents: unknown[] = []
+  /** When main sent each of them (the gaps show its throttle, however long the page takes). */
+  const blockedTimes: number[] = []
   // The first preparation of the session fails (its proxy cannot be set); the next open must recover.
   let proxyTries = 0
   const shell = createDocViewShell({
@@ -157,7 +169,7 @@ async function run() {
   })
   const views = createDocViews({
     frames: docFrames,
-    notify: (_windowId, event) => { if (event.kind === 'blocked') blockedEvents.push(event); else events.push(event) },
+    notify: (_windowId, event) => { if (event.kind === 'blocked') { blockedEvents.push(event); blockedTimes.push(performance.now()) } else events.push(event) },
     // Remember each view's address (the renderer never gets it) to probe it after the view is gone.
     shell: { onWindowReset: listener => shell.onWindowReset(listener), watch: windowId => shell.watch(windowId), create: async (windowId, hooks) => {
       const handle = await shell.create(windowId, hooks)
@@ -187,13 +199,29 @@ async function run() {
   const js = (code: string) => doc.contents.executeJavaScript(code, true)
   for (let i = 0; i < 100 && !(await js('window.__r')); i++) await wait(100)
   result.doc = await js('window.__r')
-  await wait(1200)
+  // The tally is sent at most every 500 ms: wait until it has counted every part the page asked for
+  // (the 40 the test expects; 5 s at most, then the test sees what came).
+  const lastCount = () => (blockedEvents.at(-1) as { count?: number } | undefined)?.count
+  for (let i = 0; i < 100 && lastCount() !== 40; i++) await wait(50)
   result.blocked = [...blockedEvents]
+  result.blockedGaps = blockedTimes.slice(1).map((at, i) => at - blockedTimes[i])
   // Until the viewer shows it (A2): hidden and silent.
   result.hidden = { muted: doc.contents.isAudioMuted(), visibility: await js('document.visibilityState') }
   // Loading focuses a view (measured), and the page calls focus() and has autofocus: the keyboard stays the app's.
   const keyboard = () => ({ app: win.webContents.isFocused(), doc: doc.contents.isFocused() })
   result.focusWhileHidden = keyboard()
+  /** The view loaded again (its did-finish-load, after the shell's own listener has run). */
+  const reloaded = async (viewId: number, contents: WebContents) => {
+    const loaded = new Promise(resolve => contents.once('did-finish-load', resolve))
+    views.reload(viewId, win.webContents.id)
+    if (await Promise.race([loaded.then(() => true), wait(15_000).then(() => false)]) === false) throw new Error('the view did not load again')
+  }
+  /** Two frames drawn by a shown view: the scroll position, put back in its first frame after the load, is final. */
+  const framesDrawn = (contents: WebContents) => contents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(0))))', true)
+  const reloadSettled = async (viewId: number, contents: WebContents) => {
+    await reloaded(viewId, contents)
+    await framesDrawn(contents)
+  }
   const viewOf = (id: number) => win.contentView.children.find(v => (v as { webContents?: { id: number } }).webContents?.id === id)!
   // The viewer shows it over its tab: placed (times the app page's zoom), visible, unmuted.
   win.webContents.setZoomFactor(1.25)
@@ -276,12 +304,9 @@ async function run() {
   views.place(doc.viewId, win.webContents.id, { x: 0, y: 0, width: 800, height: 600 })
   views.zoom(doc.viewId, win.webContents.id, 2)
   await js('window.scrollTo(0, 600)')
-  await wait(300)
-  await js('window.__beforeReload = true')
-  views.reload(doc.viewId, win.webContents.id)
-  for (let i = 0; i < 50 && (await js('window.__beforeReload === true').catch(() => true)); i++) await wait(100)
-  for (let i = 0; i < 50 && doc.contents.isLoading(); i++) await wait(100)
-  await wait(500)
+  await reloadSettled(doc.viewId, doc.contents)
+  // The load focused the view; the shell judges that focus FOCUS_CHECK_DELAY_MS later (2 s at most here).
+  for (let i = 0; i < 40 && !keyboard().app; i++) await wait(50)
   result.reloaded = { zoom: doc.contents.getZoomFactor(), scrollY: await js('window.scrollY'), keyboard: keyboard() }
   views.zoom(doc.viewId, win.webContents.id, 1)
   // The member clicks into the document, then goes back to the app within the click's window; the
@@ -335,7 +360,8 @@ async function run() {
   await js(`location.href = 'page2.html'`).catch(() => {})
   await wait(800)
   navigations.ownPage = doc.contents.getURL().endsWith('/page2.html') ? 'moved' : 'stayed'
-  // A page of its own with no internet parts: the band's tally starts again (the window hears 0).
+  // A page of its own with no internet parts: the band's tally starts again (the window hears 0; 2 s at most).
+  for (let i = 0; i < 40 && lastCount() !== 0; i++) await wait(50)
   result.blockedAfterOwnPage = blockedEvents.at(-1)
   result.navigations = navigations
 
@@ -370,6 +396,32 @@ async function run() {
   await wait(500)
   result.closedWithKeyboard = { before: closedHad, appAfter: win.webContents.isFocused() }
 
+  // A page whose autofocus field comes after its load (a first frame later than the load, as under
+  // CPU load, made certain): reloaded, the member stays where they were scrolled. Then hidden and
+  // reloaded twice before it is shown again (it draws no frame meanwhile): still kept.
+  const late = await open(path.join(folder, 'late.html'))
+  const lateJs = (code: string) => late.contents.executeJavaScript(code, true)
+  views.place(late.viewId, win.webContents.id, { x: 0, y: 0, width: 800, height: 600 })
+  await framesDrawn(late.contents)
+  await lateJs('window.scrollTo(0, 900)')
+  await reloadSettled(late.viewId, late.contents)
+  const lateShown = { scrollY: await lateJs('window.scrollY'), focused: await lateJs('document.activeElement && document.activeElement.id') }
+  // Hidden, the first reload loads at once, or waits until shown when the throttled page does not
+  // answer the read (then the second reload, already waiting, adds no load): two loads or one.
+  let finishes = 0
+  late.contents.on('did-finish-load', () => { finishes++ })
+  views.place(late.viewId, win.webContents.id, null)
+  views.reload(late.viewId, win.webContents.id)
+  for (let i = 0; i < 100 && finishes === 0; i++) await wait(50)
+  const expectedLoads = finishes === 0 ? 1 : 2
+  views.reload(late.viewId, win.webContents.id)
+  views.place(late.viewId, win.webContents.id, { x: 0, y: 0, width: 800, height: 600 })
+  for (let i = 0; i < 300 && finishes < expectedLoads; i++) await wait(50)
+  if (finishes < expectedLoads) throw new Error('the hidden view did not load again once shown')
+  await framesDrawn(late.contents)
+  result.lateAutofocus = { shown: lateShown, hiddenTwice: await lateJs('window.scrollY') }
+  views.close(late.viewId, win.webContents.id)
+
   // The app's page reloads: every view of the window closes and its grant goes.
   win.webContents.reload()
   await wait(1500)
@@ -380,7 +432,7 @@ async function run() {
   result.partitionFolders = fs.existsSync(path.join(dir, 'userData', 'Partitions')) ? fs.readdirSync(path.join(dir, 'userData', 'Partitions')) : []
   result.connections = net0.connections
   net0.close()
-  console.log(`RESULT ${JSON.stringify(result)}`)
+  writeResult(result)
   app.exit(0)
 }
 

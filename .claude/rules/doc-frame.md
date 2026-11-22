@@ -126,9 +126,17 @@ carrying a secret in its user name reached a local listener). Each document is s
   1 px (`docViewBounds`) hides the view rather than placing it anywhere; main multiplies by the
   app page's zoom and cuts to the window (`docViewOnScreen`); the zoom is kept within
   `DOC_ZOOM_STEPS` (50–300 %) and set again after every navigation of the view; a reload first
-  reads the window's scroll position in an isolated world (300 ms at most: a page spinning its CPU
-  is reloaded anyway; two finite numbers or nothing) and scrolls there once loaded (Chromium kept
-  no position on reload here: measured 0).
+  reads the window's scroll position in an isolated world (two finite numbers or nothing) and
+  scrolls there once loaded (Chromium kept no position on reload here: measured 0). The read waits
+  at most 1 s **while the view is shown** (a page spinning its CPU is reloaded anyway); a hidden
+  view's read has no limit until it is shown (a background-throttled page on a busy computer did
+  not answer within 2 s: the member was back at the top), and a reload asked meanwhile adds
+  nothing (the waiting one loads the file as it is by then). The position is put back **in the
+  page's first animation frame after the load**, not at once: Chromium focuses an `autofocus`
+  field (scrolling to it) in the page's first frame, which under CPU load came after the load (CI,
+  2026-11-22). A hidden view draws no frame, so the position waits until it is shown; a reload
+  meanwhile keeps that position (a copy: the replaced page putting it back late must not clear
+  it) instead of reading the top.
 - **`docView:event`** (main → the main window, sent by `main.ts`): `{ kind: 'link', url }` — only
   an `http(s)` address (`webLinkForBrowser`), at most one per view per second (`LINK_INTERVAL_MS`:
   a page cannot queue confirmations), only for a registered view; `{ kind: 'gone' }` — a view went
@@ -384,7 +392,9 @@ hosts, and nothing else):
   grant, a reload while the file is checked or the view is made), the IPC (main window
   only, before any file is read; only a view id goes back).
 - `client/tests/doc-frame-electron.test.ts` (real Electron with the real `doc-view.ts`, through
-  `tests/doc-frame-harness/main.ts`; on the macOS half of CI) — the network paths above; inline and
+  `tests/doc-frame-harness/main.ts`, which writes `result.json` whole — temporary name, then
+  rename — read after the process closed, not a stdout line Electron's exit could cut; on the macOS
+  half of CI) — the network paths above; inline and
   module scripts run; an image of its folder loads, `..`, `%2e%2e`, a link, a hidden folder,
   `local-file:` and `file:` do not; no `electronAPI` / `require` / `process`, opaque origin,
   storage throws, no popup; the session in memory, serving `acb-doc` alone (not `local-file`,
@@ -396,7 +406,9 @@ hosts, and nothing else):
   is the document's after a click; a click no longer counts once the member went back to the app
   (a page reloading on blur takes nothing); placed at the app page's zoom (CSS px × 1.25), visible and
   unmuted, another window cannot move it; hidden again → hidden, muted, the keyboard back to the
-  app; Escape in the document in full screen leaves it; a reload keeps zoom 2 and scroll 600; a
+  app; Escape in the document in full screen leaves it; a reload keeps zoom 2 and scroll 600, also
+  for a page whose `autofocus` field comes after its load (put back after its first frame), and
+  after two reloads while hidden; a
   navigation to the web is handed over only right after a click (not by itself) and the page
   stays; a crashed view is told as `gone`; with the document holding the keyboard, ⌘K / ⌘⇧V / ⌘B
   are handed over and the document sees none of them, a held ⌘B once, ⌘F stays the document's, while ←, a letter typed into
@@ -417,7 +429,7 @@ hosts, and nothing else):
   opens, another view's link ignored), zoom steps, a gone view, full screen.
 - A3: `doc-frame-electron.test.ts` — the page's web parts (in the HTML and asked by its script; one
   address with a secret path and query asked twice; 30 more hosts) reach the window as 40 parts
-  and 20 distinct hosts, never a path, query or scheme, in at most 8 events, with 0 connections;
+  and 20 distinct hosts, never a path, query or scheme, each event at least ~500 ms after the last (the throttle; how many depends on how long the page takes to ask), with 0 connections;
   its own page with no web parts brings `count: 0`. `doc-frame-protocol.test.ts` — `blockedWebHost`
   (host only; file, data, blob, acb-doc, ftp, javascript are none), the tally (distinct, an address
   counted once tells nothing, capped hosts and count, the first at once then every
