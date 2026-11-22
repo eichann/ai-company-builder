@@ -71,7 +71,7 @@ function ToolOutputDetail({ row }: { row: ToolRow }) {
         <div className="mb-1 text-gray-400 dark:text-zinc-500">{t('chat.toolTechnicalName', { name: row.line.technical })}</div>
       )}
       {row.state === 'output-error' && row.errorText && (
-        <div className="p-2 rounded-md bg-red-500/10 border border-red-500/20 text-red-400 font-mono whitespace-pre-wrap">
+        <div className="p-2 rounded-control bg-danger-bg border border-danger-border text-danger-text font-mono whitespace-pre-wrap">
           {row.errorText}
         </div>
       )}

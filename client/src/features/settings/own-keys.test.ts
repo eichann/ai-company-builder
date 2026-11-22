@@ -17,7 +17,7 @@ test('the page never promises a key the server would not use', () => {
   // 自分の鍵だけ: a company key the member may use is not used.
   assert.equal(ownKeyRow({ ...base, rule: 'user-only', companyKeys: [{ displayName: 'x', allDepartments: true, departments: [] }] }).status, '未設定')
   // A key an admin stopped is not used.
-  assert.equal(ownKeyRow({ ...base, key: { ...own, status: 'disabled' } }).tone, 'warn')
+  assert.equal(ownKeyRow({ ...base, key: { ...own, status: 'disabled' } }).tone, 'paused')
 })
 
 test('a key in the .env is offered for moving only where the server would take it as one\'s own key', () => {

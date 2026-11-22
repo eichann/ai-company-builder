@@ -1741,7 +1741,7 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   version and company key (the key by its name and last 4 from `GET /broker`; never a value),
   on / off (off with a confirmation; the server's `problem` in plain words), the mapping as a
   table (ACB field by its Japanese name from the business plugin's types — `PluginDetail.labels` — with
-  the identifier in small print, outside property, 「書き戻さない（読むだけ）」 / 「承認が要る」 / 「自動で書き戻す」;
+  the identifier in small print, outside property, 「書き戻さない（閲覧のみ）」 / 「承認が要る」 / 「自動で書き戻す」;
   the stage offers 「自動で書き戻す」 only when the mapping names `closing_stages`, with the line
   「自動にしても、受注・失注にする（そこから戻す）ときは承認が要ります」, else 「受注・失注になる段階
   （closing_stages）を書くまで、自動にはできません」 — `autoUnavailable` / `closingNote`) or as YAML for advanced use, versions with 「この版に戻す」,

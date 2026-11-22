@@ -39,6 +39,8 @@ let state: NoticesState = {
   },
 }
 const readIds: string[] = []
+// `?theme=dark` for dark mode (the status-colours spec reads the new-item dot in both themes).
+if (new URLSearchParams(location.search).get('theme') === 'dark') document.documentElement.classList.add('dark')
 const features = new URLSearchParams(location.search).get('features') === 'off'
   ? { taskList: true, meetings: false, inbox: false, decisions: true, projects: true }
   : undefined

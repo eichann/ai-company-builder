@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Eye, LockSimple, ShieldCheck } from '@phosphor-icons/react'
+import { Eye, ShieldCheck, ShieldSlash } from '@phosphor-icons/react'
 
 import { RadioCard } from '@/components/app/radio-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -32,7 +32,7 @@ export default function SecurityAlertsPage() {
     return (
       <>
         <PageHeader title={TITLE} />
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       </>
     )
   }

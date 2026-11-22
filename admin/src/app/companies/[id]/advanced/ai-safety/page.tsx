@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Barricade, Browsers, CaretRight, ChatsCircle, HandPalm, Key, LockSimple, Robot } from '@phosphor-icons/react'
+import { Barricade, Browsers, CaretRight, ChatsCircle, HandPalm, Key, Robot, ShieldSlash } from '@phosphor-icons/react'
 import type { Icon } from '@phosphor-icons/react'
 
 import { AdvancedCrumb } from '@/components/advanced/crumb'
@@ -20,7 +20,7 @@ const AI_SAFETY_PAGES: Array<{ segment: string; title: string; description: stri
   { segment: 'sandbox', title: 'AI の囲い', description: 'AI が読める場所とつないでよい宛先（初めは「使わない」）', icon: Barricade },
   { segment: 'browser', title: 'ブラウザ操作', description: 'AI が操作してよいサイトと、サイトごとにできること（初めは「使わない」）', icon: Browsers },
   { segment: 'keys', title: 'API キー', description: '会社の鍵・メンバーの自分の鍵・サービスごとの決め方・登録したサービス', icon: Key },
-  { segment: 'second-opinion', title: 'もう一方の AI に聞く', description: '相談の中で名前を書いたときだけ、もう一方の AI に読むだけで聞きます。会社の中身がもう一方の会社にも渡ります（初めは「聞かない」）', icon: ChatsCircle },
+  { segment: 'second-opinion', title: 'もう一方の AI に聞く', description: '相談の中で名前を書いたときだけ、もう一方の AI に閲覧のみで聞きます。会社の中身がもう一方の会社にも渡ります（初めは「聞かない」）', icon: ChatsCircle },
 ]
 
 export default function AiSafetyPage() {
@@ -30,7 +30,7 @@ export default function AiSafetyPage() {
       <AdvancedCrumb />
       <PageHeader title="AI の安全" description="ふだんは触らなくても困りません。もしものときは、どのページの上にもある［AI を止める］から止められます。" />
       {role !== null && !isAdmin ? (
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       ) : (
         <ul aria-label="AI の安全" className="divide-y overflow-hidden rounded-xl border bg-card">
           {AI_SAFETY_PAGES.map((p) => (

@@ -333,7 +333,7 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   `/records/my-turn` (unchanged: a released app still counts it all) and keeps the items whose
   `turnTiming` is `now` (`thisWeeksTurn`, `client/shared/notifications-app.ts`, the company's today);
   the others (`resting`) get one line, 「…は、やることの一覧の「先のこと」「いつか」にあります」. The
-  list's 「あなたの番」 and the morning summary use the same rule, so the three agree. The bell = 「起きたこと」 (読むだけ): a dot only for unread notices, the list, 「すべて読んだ」,
+  list's 「あなたの番」 and the morning summary use the same rule, so the three agree. The bell = 「起きたこと」 (閲覧のみ): a dot only for unread notices, the list, 「すべて読んだ」,
   「知らせの設定」 (one checkbox per kind, `NOTIFICATION_KIND_LABELS`; none for a kind of a feature
   that is off in 「使う機能」, `noticeKindsShown`, `records.md` "Features on and off"). Opening a notice marks only
   that notice read.

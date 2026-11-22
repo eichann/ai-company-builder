@@ -14,6 +14,7 @@ import type { AgentStopEntry, AgentStopView, Capabilities } from '@/lib/api'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok, ownerCapabilities } from './fixtures'
 import type { Call } from './mock-api'
+import { paint, token } from './token-paint'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
@@ -57,7 +58,7 @@ describe('AI の緊急停止', () => {
     expect(calls.some((c) => c.url.endsWith('/agent-stops'))).toBe(false)
   })
 
-  it('the bar stops exactly the chosen member and kind, then says the AI is stopped', async () => {
+  it('the bar stops exactly the chosen member and kind, then says the AI is stopped (grey, who and when)', async () => {
     const calls = stubApi(ownerCapabilities, {
       [`POST ${base}/agent-stops`]: (call) => ({ body: ok({ ...empty, active: [stopOf({ userId: 'u_member', userName: '田中 太郎', tool: 'command', reason: (call.body as { reason: string }).reason })] }) }),
     })
@@ -72,7 +73,11 @@ describe('AI の緊急停止', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '止める' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
     expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ userId: 'u_member', tool: 'command', reason: '調査のため' })
-    expect(await screen.findByRole('status')).toHaveTextContent('AI を止めています（1 件）')
+    // Stopped by a person: who and when (grey band, design-system.md P2b).
+    expect(await screen.findByRole('status')).toHaveTextContent(/AI を止めています（1 件・佐藤 花子・.+）/)
+    // The band is the paused set (a person stopped it), not the danger red (owner decision 2026-11-21).
+    const band = (await paint(screen.getByRole('status').parentElement!.className))
+    expect([band.light.fill, band.dark.fill, band.light.text]).toEqual([token('paused-bg').light, token('paused-bg').dark, token('paused-text').light])
     expect(within(screen.getByRole('list', { name: 'いま止めているもの' })).getByText('田中 太郎さんのコマンドの実行')).toBeInTheDocument()
   })
 

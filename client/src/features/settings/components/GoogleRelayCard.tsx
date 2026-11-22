@@ -33,7 +33,7 @@ export function GoogleRelayCard({ companyId, account, busy: parentBusy, waiting,
 
   return (
     <div ref={loadRef} data-testid="google-relay">
-      {error && <Callout tone="warning" role="alert">{error}</Callout>}
+      {error && <Callout tone="danger" role="alert">{error}</Callout>}
       {view && data && (
         <div className="space-y-3">
           <Card className="space-y-3 p-5">

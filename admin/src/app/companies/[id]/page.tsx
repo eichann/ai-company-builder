@@ -151,7 +151,7 @@ function SetupCard({ setup, base, hasCompanyFolder }: { setup: NonNullable<Admin
                   <div className={cn('flex flex-wrap items-center gap-2 text-sm', step.done ? 'text-muted-foreground line-through' : 'font-medium')}>
                     {i + 1} {words.title}
                     {step.byOperator && !step.done && (
-                      <Badge variant="brand">
+                      <Badge variant="selected">
                         <HandWaving size={11} />
                         運用担当者に頼む
                       </Badge>
@@ -384,7 +384,7 @@ function AttentionCard({
         <div className="min-w-0 space-y-0.5">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             {title}
-            <Badge variant="secondary">{count}</Badge>
+            <Badge variant="neutral">{count}</Badge>
           </h3>
           <p className="text-sm text-muted-foreground">{description}</p>
         </div>

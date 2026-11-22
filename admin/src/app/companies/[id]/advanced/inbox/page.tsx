@@ -1,6 +1,6 @@
 'use client'
 
-import { LockSimple } from '@phosphor-icons/react'
+import { ShieldSlash } from '@phosphor-icons/react'
 
 import { AdvancedCrumb } from '@/components/advanced/crumb'
 import { useCompanyFeatures, WhenFeatureOn } from '@/components/advanced/feature-off'
@@ -22,7 +22,7 @@ export default function InboxRulesPage() {
       <AdvancedCrumb />
       <PageHeader title={TITLE} />
       {role !== null && !isAdmin ? (
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       ) : (
         <>
           <p className="-mt-2 mb-6 max-w-3xl text-sm text-muted-foreground">

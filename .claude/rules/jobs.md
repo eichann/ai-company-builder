@@ -628,7 +628,10 @@ sentences the admin approved.
   also while a version's `definition` is hidden). Ids, booleans and names only, never a place. No new endpoint.
 - **Admin console 「定期の仕事」** (`/companies/:id/jobs`, menu item for owners / admins after つなぎ先;
   `admin/src/components/jobs/`): the list (name, 責任者, いつ, a badge and `jobWaitingText` — paused with
-  its reason, 承認待ち, 受け取り待ち, すべて止めています —, a newer version waiting for approval, for placement `a` that it
+  its reason, 承認待ち, 受け取り待ち, すべて止めています —; the badge splits 「止まっている」 by meaning
+  (`jobBadge`, design-system.md P2b): 止めています (grey, an admin or the responsible person paused it),
+  止まりました (red, the server paused it because the responsible person left or lost rights), すべて止めています
+  (grey), 承認を待っています / 受け取りを待っています (amber) —, a newer version waiting for approval, for placement `a` that it
   needs the responsible person's app (5a-2), 次の回, 前の回), 作る / 直す, 承認する, 止める / 再開する, 回の記録 (≤ 100,
   `jobOccurrenceText`), and 「すべて止める」 (asks first) / 「動かせるようにする」. Anyone else: the page says it
   is for owners and admins and reads nothing.

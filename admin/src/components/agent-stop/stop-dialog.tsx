@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -102,11 +103,10 @@ export function StopDialog({
             <Textarea id="stop-reason" maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="例: 不審な操作を調べるため" />
           </div>
 
-          <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm">
-            <p className="font-medium">「{label}」を止めます。</p>
-            <p className="text-muted-foreground">{stopEffect(tool)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{STOP_LIMITS}</p>
-          </div>
+          <Callout variant="warning" icon={null} title={`「${label}」を止めます。`}>
+            <p>{stopEffect(tool)}</p>
+            <p className="text-xs">{STOP_LIMITS}</p>
+          </Callout>
         </div>
 
         <DialogFooter>

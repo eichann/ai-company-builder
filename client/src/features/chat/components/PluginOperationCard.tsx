@@ -1,5 +1,6 @@
 import { memo, useState } from 'react'
 import { ArrowCounterClockwise, ArrowRight, CheckCircle, Question, Robot, Warning, XCircle } from '@phosphor-icons/react'
+import { STATE_BOX } from '../../../shared/ui/stateStyles'
 import {
   CREATE_UNDO_BUTTON_LABEL, CREATE_UNDO_NOTICE_FALLBACK, RECREATE_BUTTON_LABEL, RECREATE_NEEDS_CONFIRMATION, UNDO_BUTTON_LABEL, UNDO_NOTICE_FALLBACK,
   reconcileResultView, recreateResultView, shownValue, undoResultView,
@@ -36,18 +37,13 @@ function shownField(card: Card, f: PluginCardField, v: PluginCardField['after'])
   return shownValue(v)
 }
 
-const TONE_CLASS = {
-  ok: 'border-emerald-500/40 bg-emerald-500/5',
-  warn: 'border-amber-500/40 bg-amber-500/5',
-  error: 'border-red-500/40 bg-red-500/5',
-  plain: 'border-gray-200 dark:border-zinc-700',
-} as const
+const TONE_CLASS = STATE_BOX
 
 function ToneIcon({ tone }: { tone: 'ok' | 'warn' | 'error' | 'plain' }) {
-  if (tone === 'ok') return <CheckCircle size={15} weight="bold" aria-hidden className="text-emerald-600" />
-  if (tone === 'error') return <XCircle size={15} weight="bold" aria-hidden className="text-red-500" />
-  if (tone === 'warn') return <Warning size={15} weight="bold" aria-hidden className="text-amber-500" />
-  return <Question size={15} weight="bold" aria-hidden className="text-gray-400" />
+  if (tone === 'ok') return <CheckCircle size={15} weight="bold" aria-hidden className="text-success-icon" />
+  if (tone === 'error') return <XCircle size={15} weight="bold" aria-hidden className="text-danger-icon" />
+  if (tone === 'warn') return <Warning size={15} weight="bold" aria-hidden className="text-warning-icon" />
+  return <Question size={15} weight="bold" aria-hidden className="text-text-muted" />
 }
 
 /**

@@ -11,15 +11,13 @@ import type { MailAlreadySent, MailAttachmentView, MailRecipientView, OutboundMa
 import { runCommand, useCommandAvailable } from '../../../shared/commands/commands'
 import { mailOutbound, type MailOutbound } from '../api'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
+import { STATE_BOX } from '../../../shared/ui/stateStyles'
 
 type Step = 'view' | 'edit' | 'confirm'
-interface Notice { tone: 'ok' | 'warn' | 'error'; text: string }
+// Offline and "the next step is in the browser" are information (grey), not warnings (amber).
+interface Notice { tone: 'ok' | 'warn' | 'error' | 'info'; text: string }
 
-const NOTICE_CLASS = {
-  ok: 'border-emerald-500/40 bg-emerald-500/5',
-  warn: 'border-amber-500/40 bg-amber-500/5',
-  error: 'border-red-500/40 bg-red-500/5',
-} as const
+const NOTICE_CLASS = STATE_BOX
 const BUTTON = 'rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800'
 const PRIMARY = `rounded-lg px-3 py-1.5 text-xs font-medium ${PRIMARY_ACTION}`
 
@@ -154,7 +152,7 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
       if (r.needsGoogleConsent === 'mail') setNeedsConsent(true)
       if (r.code === 'CONTENT_CHANGED') setStep('view')
       if (r.alreadySent) { setEarlier(r.alreadySent); return }
-      setNotice({ tone: r.offline ? 'warn' : 'error', text: r.error })
+      setNotice({ tone: r.offline ? 'info' : 'error', text: r.error })
     } finally {
       setBusy(false)
     }
@@ -213,7 +211,7 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
     setNotice(null)
     try {
       const r = await outbound.openOutboundMailAttachment(card.companyId, draft.id, f.sha256)
-      setNotice(r.success ? { tone: 'ok', text: MAIL_WORDS.attachmentOpened } : { tone: r.offline ? 'warn' : 'error', text: r.error })
+      setNotice(r.success ? { tone: 'ok', text: MAIL_WORDS.attachmentOpened } : { tone: r.offline ? 'info' : 'error', text: r.error })
     } finally {
       setBusy(false)
     }
@@ -226,7 +224,7 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
     setBusy(true)
     try {
       await outbound.connectGoogle(card.companyId, ['mail'])
-      setNotice({ tone: 'warn', text: 'ブラウザで Google の画面を開きました。許可したら、もう一度「確かめて送る」を押してください。' })
+      setNotice({ tone: 'info', text: 'ブラウザで Google の画面を開きました。許可したら、もう一度「確かめて送る」を押してください。' })
       setNeedsConsent(false)
     } finally {
       setBusy(false)

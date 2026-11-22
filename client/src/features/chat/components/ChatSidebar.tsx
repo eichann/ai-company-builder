@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AppWindow, ArrowSquareOut, CaretDown, ChatCircleDots, CheckCircle, CircleNotch, Eye, LinkSimple, MagnifyingGlass, Plus, PushPin, PencilSimple, ShieldWarning, Sparkle, Trash, WarningCircle, X } from '@phosphor-icons/react'
+import { AppWindow, ArrowSquareOut, CaretDown, ChatCircleDots, CheckCircle, CircleNotch, Eye, LinkSimple, MagnifyingGlass, Plus, PushPin, PencilSimple, ShieldWarning, Sparkle, Trash, WarningOctagon, X } from '@phosphor-icons/react'
 import type { ChatSessionSummary } from '../../../../shared/chat-history'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
+import { NewDot } from '../../../shared/ui/primitives'
 
 import { startConsultationDrag } from '../../../shared/lib/dragTypes'
 import { paginateConversationRows, buildConversationRows, focusConversationRows, isEmptyConversation, markMatches, type ConversationTab } from '../conversationRows'
@@ -52,16 +53,15 @@ function StatusIcon({ status }: { status?: ConsultationStatus }) {
         ? <Eye size={14} weight="bold" aria-hidden className="shrink-0 text-amber-500" />
         : <ChatCircleDots size={14} weight="fill" aria-hidden className="shrink-0 text-amber-500" />
     case 'working': return <CircleNotch size={14} aria-hidden className="shrink-0 animate-spin text-accent" />
-    case 'unseen': return <Sparkle size={14} weight="fill" aria-hidden className="shrink-0 text-emerald-500" />
-    case 'failed': return <WarningCircle size={14} weight="fill" aria-hidden className="shrink-0 text-red-500" />
+    case 'unseen': return <Sparkle size={14} weight="fill" aria-hidden className="shrink-0 text-unread" />
+    case 'failed': return <WarningOctagon size={14} weight="fill" aria-hidden className="shrink-0 text-failed-icon" />
     default: return <CheckCircle size={14} aria-hidden className="shrink-0 text-gray-400" />
   }
 }
 
 const LINE_TONE: Record<string, string> = {
   'needs-you': 'text-amber-700 dark:text-amber-300',
-  failed: 'text-red-600 dark:text-red-400',
-  unseen: 'text-emerald-700 dark:text-emerald-400',
+  failed: 'text-failed-text',
 }
 
 /** A group's heading: a fold toggle with its count (「あなたの番」 never folds); a folded group still shows 新着.
@@ -77,7 +77,7 @@ function GroupHeading({ group, first, count, folded, unread, onToggle }: { group
     <span className="flex items-center gap-1">
       {foldable && <CaretDown size={11} weight="bold" aria-hidden className={`transition-transform ${folded ? '-rotate-90' : ''}`} />}
       {group.key === 'pinned' && <PushPin size={11} weight="fill" aria-hidden />}{group.label}
-      {unread && <span className="ml-1 rounded-full bg-emerald-600 px-1.5 py-px text-[10px] font-semibold text-white">新着</span>}
+      {unread && <NewDot className="ml-1" />}
     </span>
     <span className="font-normal tabular-nums text-gray-500 dark:text-zinc-400">{count}件</span>
   </>
@@ -253,7 +253,7 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
               <input autoFocus aria-label="相談名" value={title} onChange={e => setTitle(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setEditing(null) }} className="w-full rounded border border-accent p-1 text-sm bg-white dark:bg-zinc-800" />
               <div className="flex gap-3 mt-2 text-xs"><button type="submit" disabled={!title.trim()} className="text-accent">保存</button><button type="button" onClick={() => setEditing(null)}>キャンセル</button></div>
             </form> : <button onClick={() => elsewhere ? onOpenInWindow?.(elsewhere) : tab ? onSelectTab(tab.id) : session && onOpenSession(session.id)} aria-current={active ? 'page' : undefined} className="block w-full text-left p-2 focus-visible:outline-accent rounded-lg">
-              <div className="text-sm font-medium flex items-center gap-1.5" title={row.title}>{(live || session) && <StatusIcon status={live} />}<span className="truncate"><Marked text={row.title} query={query} /></span>{live?.state === 'unseen' && <span className="ml-auto shrink-0 rounded-full bg-emerald-600 px-1.5 py-px text-[10px] font-semibold text-white">新着</span>}</div>
+              <div className="text-sm font-medium flex items-center gap-1.5" title={row.title}>{(live || session) && <StatusIcon status={live} />}<span className="truncate"><Marked text={row.title} query={query} /></span>{live?.state === 'unseen' && <NewDot className="ml-auto" />}</div>
               {row.linked && <p className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-gray-500 dark:text-zinc-400" data-linked-record={row.linked.id}>
                 <LinkSimple size={10} className="shrink-0 text-gray-400" aria-hidden /><ThingIcon kind={row.linked.thing} typeLabel={row.linked.typeLabel} label={row.linked.kindName} size={11} />
                 <span className="truncate"><Marked text={row.linked.title} query={query} /></span>

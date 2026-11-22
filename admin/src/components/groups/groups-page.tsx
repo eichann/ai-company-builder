@@ -8,6 +8,7 @@ import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Card } from '@/components/ui/card'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -72,11 +73,9 @@ export function GroupsPage() {
         }
       />
       {deleteProblem && (
-        <p role="alert" className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
-          {deleteProblem}
-        </p>
+        <Callout variant="danger" className="mb-4">{deleteProblem}</Callout>
       )}
-      {hasCompanyFolder && <p className="mb-4 rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">{GROUPS_WITH_FOLDER_NOTE}</p>}
+      {hasCompanyFolder && <Callout variant="info" className="mb-4">{GROUPS_WITH_FOLDER_NOTE}</Callout>}
       {groups.error && !groups.data ? (
         <ErrorState error={groups.error} onRetry={groups.reload} />
       ) : groups.loading || !groups.data ? (

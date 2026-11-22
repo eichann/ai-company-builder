@@ -36,7 +36,7 @@ export function MySwitchesSection({ companyId, onOpenGoogle }: { companyId: stri
       {!switches && !error ? (
         <div className="flex items-center gap-2 py-10 text-[13px] text-zinc-500"><SpinnerGap size={16} className="animate-spin" />{CALM.loading}</div>
       ) : !switches ? (
-        <Callout tone="warning" role="alert">{error}</Callout>
+        <Callout tone="danger" role="alert">{error}</Callout>
       ) : (
         <>
           <Card className="divide-y divide-zinc-100 dark:divide-white/[0.06]">
@@ -69,7 +69,7 @@ export function MySwitchesSection({ companyId, onOpenGoogle }: { companyId: stri
               )
             })}
           </Card>
-          {error && <Callout tone="warning" role="alert">{error}</Callout>}
+          {error && <Callout tone="danger" role="alert">{error}</Callout>}
           <p className="text-[12px] text-zinc-500 dark:text-zinc-400">会社が使ってよいか・初めの値は、管理者が管理画面の「詳しい設定」で決めています。</p>
         </>
       )}

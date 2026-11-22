@@ -15,6 +15,8 @@ import type { ApprovalView } from '../../shared/types/approvals'
 import { installElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
+// `?theme=dark` for dark mode (the status-colours spec reads the card's awaiting frame in both themes).
+if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const approver = params.get('viewer') !== 'requester'
 const HASH = `sha256:${'9c1e'.repeat(16)}`
 

@@ -74,7 +74,7 @@ export function ShelfRequests({ companyId, onPublished }: { companyId: string; o
                 <p className="flex flex-wrap items-center gap-2 font-medium">
                   {r.name}
                   <Badge variant="outline">{placeOf(r)}</Badge>
-                  {r.currentVersion && <Badge variant="secondary">同じ名前の Skill を置き換え</Badge>}
+                  {r.currentVersion && <Badge variant="neutral">同じ名前の Skill を置き換え</Badge>}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {`${personOf(r.requestedBy)}さんから ${formatDateTime(r.requestedAt)}・ファイル ${r.fileCount} 個`}

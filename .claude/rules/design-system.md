@@ -116,7 +116,8 @@ included), `shadow-scale` (anything but `shadow-card / pop / dialog / none`; any
 `inset-shadow-*`, `text-shadow-*`), `z-index` (`z-50`), `opacity-scale` (`opacity-40`; 0 and 100
 fine), `color-opacity` (`bg-warning/10`).
 
-- **No new raw values.** Today's findings (2026-11-21: app 6,872, admin 1,235) are recorded per
+- **No new raw values.** Today's findings (2026-11-21: app 6,872, admin 1,235; after P2b app 6,371,
+  admin 1,104) are recorded per
   file and rule in `design-lint-baseline.txt`. CI ("Lint (changed files)", step "Design tokens and
   design lint") fails when a rule gains findings, when the tree differs from the baseline without
   it being updated (the list only shrinks), and (`--base <sha>`) when the committed baseline was
@@ -261,16 +262,15 @@ fine), `color-opacity` (`bg-warning/10`).
 - **Admin**: shadcn `--primary` / `--primary-foreground` are the tokens (`ADMIN_SHADCN` keeps
   dropped; `TODAY` marks them), so everything reading them turned blue: `Button` default (now
   `hover:bg-primary-hover active:bg-primary-active`, and every variant `rounded-control` 8px; height
-  36px stays by density), the ordinary `ConfirmDialog`, `Badge variant="default"` (owner role,
-  「動いています」 / active grants: moves to `success` in the status-badge PR), the invite steps'
+  36px stays by density), the ordinary `ConfirmDialog`, `Badge variant="default"` (gone in P2b: owner
+  role `neutral`, 「動いています」 / active grants `success`), the invite steps'
   current step, the brand mark (`brand.tsx`, `app-shell.tsx`, `permissions-view.tsx` tile), the
   "on" switches (`features-page`, `task-settings-page`) and checked boxes
   (`member-checklist`, `groups-page`, `department-members-dialog`, `place-readers-dialog`) — the
   proposal's table gives "on" the primary colour (`primary`: 主ボタン・オン・件数), so they stay —
   and the input text selection. The tooltip moved to `bg-toast text-on-toast` so it stays dark
-  (it read `--primary` only to be the inverse surface). Filter toggles that use `variant="default"`
-  for "picked" (members page department filter, google-relay 「全員」 / names) are selected states
-  drawn as primary until the selected-state PR.
+  (it read `--primary` only to be the inverse surface). Filter toggles that used `variant="default"`
+  for "picked" are `variant="selected"` since P2b.
 - **Guarded by** `client/tests/ui/primary-actions.spec.ts` (light and dark: the shared Button with
   hover, an ordinary confirm, the task card's main action, the mail card, and the two proceed
   buttons not danger; computed colours against the `--color-*-rgb` tokens on `<html>`; preview
@@ -285,12 +285,82 @@ fine), `color-opacity` (`bg-warning/10`).
   radio, `TreeRow`, `ChatSidebar`, `FoundRows`, `FindEmpty`) → `selected-*`; focus outlines
   (`outline-accent`, `ring-accent`, `focus:border-accent`) → `focus-ring` / `focus-border`; AI marks
   (`TaskCard` / `TaskRow` / `QuickAdd` sparkle and robot, AI boxes `border-accent/30 bg-accent/5`)
-  → `ai-*`; counts and new dots (`LeftPanelTabs`) → `primary` / `unread`; the member's own chat
+  → `ai-*`; counts (`LeftPanelTabs`) → `primary` (new dots are `unread` since P2b); the member's own chat
   bubbles (`ChatMessageList`, `ChoicePrompt`, `SteerInstruction`), the AI avatar gradient
   (`ChatHeader`, `ChatMessageList`), the typing dots / cursor, `RateLimitMeter`'s bar and
   `ResizeHandle`'s drag line → a decision each (likely `primary` / `selected`); `ThingIcon`'s task
   colour → `thing-task`. Also not primary actions and left: the app `Switch` / `Checkbox` and the
   settings nav (indigo; P2 switch / checkbox), `CompletedReviewBanner`'s 「変更表示中」 toggle.
+
+## Callouts and status badges (P2b, done)
+
+- **One callout per app**, drawn only from its state set (bg, border, text, icon; no `/5 /10 /15`
+  opacities, no palette colour; corner `control`, padding `callout`, type `body`): the app's `Callout`
+  (`client/src/shared/ui/primitives.tsx`, tones `info` · `warning` · `danger` (was `error`) · `success` ·
+  `offline` (the info set + WifiSlash) · `paused` · `failed` · `awaiting`; `danger` / `failed` are
+  `role="alert"` by default) and the admin's `Callout` (`admin/src/components/ui/callout.tsx`, the same
+  variants without `offline`; `title`, `action`, `icon={null}`). A hand-drawn state box (a card's frame,
+  a one-line notice) takes `STATE_BOX` (`client/src/shared/ui/stateStyles.ts`: bg + border of one set).
+- **One status badge per app** (not pressable; corner `small`): the app's `StatusBadge` (primitives,
+  `compact` for the file tree) and the admin's `Badge` (`components/ui/badge.tsx`). Variants `neutral`
+  (surface-sunken / text-muted), `outline` (admin), `info`, `success`, `warning`, `danger`, `paused`,
+  `failed`, `awaiting`, `ai`, `selected`, `readonly`. `paused` / `failed` / `awaiting` / `readonly` / `ai`
+  carry a default icon (Pause, WarningOctagon, Hourglass, Lock, Sparkle) so the stopped states differ in
+  more than colour. The admin's old names are gone: `default` (was primary blue) → by meaning,
+  `secondary` → `neutral`, `destructive` → `danger`, `brand` → `selected`. `ReadOnlyBadge` and
+  `RecordPage`'s `Chip` are thin wrappers of `StatusBadge`.
+- **「止まっている」 by meaning** (owner decision 2026-11-21): stopped by a person → `paused` (dark grey,
+  「止めています」 + who / when where known), stopped by a failure → `failed` (red, 「止まりました」 + the
+  reason / fix), awaiting approval → `awaiting` (amber, 「承認を待っています」). Applied: the admin's
+  「AI を止めています」 band (`stop-bar.tsx`, was red: grey, + who stopped the newest and when), Slack /
+  Google `operatorStopped` badge and box, the connected services' `operator-stopped`, google-relay's
+  止めています, the integrations list (`STOPPED_BY_PERSON` / `STOPPED_BY_FAILURE` in
+  `admin/src/lib/integrations.ts`; the operator-stopped box on a plugin's page), the jobs' badge
+  (`jobBadge`) and 「すべて止めています」 box, the app's task card run that needs a person (red 「AI が
+  止まりました」; `AI_RUN_STATE_LABELS` say 止まりました), the task row's failed AI (red), the chat list's
+  failed group 「止まりました」, an own key an admin stopped (「自分の鍵（管理者が止めています）」, grey), the
+  approval card while pending (amber frame, Hourglass). **Left as they were for the owner** (meaning
+  not clear from the code): plugin problems `connector-stopped` (off or stopped),
+  `auto-not-acknowledged`, `no-connector`, `not-a-business` (still 「止まっています」, outline); the
+  task row's `not-allowed` (「AI では始められません」, warning colour); 「会社の設定で止まっています」 (a
+  switch the company turned off, `MySwitchesSection`, a server text); auto sync's 「自動同期は止まって
+  います」 tooltip; `ExternalChangeBanner`'s 「自動保存は止めています」.
+- **Amber only for warning and awaiting**: 「変えています」 (advanced) is `info`; offline results in
+  `ApprovalCard` / `MailDraftCard` and 「ブラウザで Google の画面を開きました」 are the info set; error
+  messages shown in a warning callout (`{error}` callouts in settings, absences, jobs) are `danger`.
+- **New-item mark = one primary dot** `NewDot` (primitives; `bg-unread`, `size-dot`, `role="img"` named
+  by its word): the left tabs' dot, the bell's unread dot and its unread rows (were red), the chat list's
+  「新着」 (was a green word, row and folded group), the file tree's new review (was a blinking amber
+  dot). The count bubble (`LeftPanelTabs`) is unchanged (`primary` later).
+- **「閲覧のみ」 replaces 「読むだけ」** in user-facing text: the bell 「起きたこと（閲覧のみ）」, google-relay's
+  scopes, the integrations' write choice 「書き戻さない（閲覧のみ）」, the relay summary, the agent-events
+  description, the browser level's help, second-opinion's 「閲覧のみで聞きます」. Not changed: texts for
+  the AI (tool descriptions in `client/electron`), plugin-author errors (`shared/core`), the relay's
+  refusal 「ここからは読むだけです」 (server).
+- **Admin also**: the owner role badge is `neutral`, the admin role and 個別の設定 `selected`; 「動いています」,
+  「使っています」, active grants, 「いま配っている版」, connected 「動いています」 are `success`; picked
+  filter toggles (members' department filter, google-relay 「全員」 / names) use `Button variant="selected"`
+  (+ `aria-pressed`), no longer primary; the 17 「このページはオーナーと管理者だけが使えます」 /
+  「…扱えるのは…」 / 「権限を確認できるのは…」 empty states show `ShieldSlash`, the padlock stays for
+  非公開 only. `cn()` (`admin/src/lib/utils.ts`) knows the token scales (type, weight, radius, shadow):
+  tailwind-merge read `text-small` as a colour and dropped it beside `text-success-text`.
+- **Guarded by** `client/tests/ui/status-colours.spec.ts` (light and dark: every callout tone and badge
+  variant against its `--color-*-rgb` tokens on `client/tests/status-ui.html`; the three stopped states
+  differ in fill, icon and word; real screens — the task card's failed run, the pending approval card,
+  `download-folders-ui?tab=ownkeys&ownkey=stopped`, the bell's dots and 「閲覧のみ」) and
+  `admin/tests/status-colours.test.tsx` (the CSS Tailwind 4 generates for every Badge / Callout variant,
+  through `tests/token-paint.ts`, shared with `primary-action.test.tsx`; the stopped states apart;
+  `cn()` keeping the type size; `jobBadge` by meaning), `agent-stop.test.tsx` (the band's paused colours
+  and who / when). `chat-panel.spec.ts` reads the 新着 dot by its name.
+- **Still to move** (later PRs): the app's other hand-made red / amber boxes and texts (`ChatHeader`'s
+  status dots, `RateLimitMeter`, `DiffViewer`, `ReviewSidePanel`, `MarkdownDiffView`, `BackupHistorySlideOver`,
+  `TaskRow`'s CHIP and review mark, `QuickAdd` / `WaitParts` / `TagField` chips (pressable: the chip PR),
+  `ChatSidebar`'s 「あなたの番」 heading and amber icons, `TitleBarNotices`' 「あなたの番」 pill, the
+  `ExternalChangeBanner` buttons), the AI boxes (`border-accent/30 bg-accent/5` → `ai`), the admin's
+  hand-written 「管理役」 marks (`text-[10px]`: scope-editor, editor-picker, audience-fields), its
+  `ErrorState` and red text lines, `permissions-view`'s 「制限あり」 (`warning`: a decision), the
+  explanation boxes without a border (`bg-muted/40`: place-readers, scope-editor), `departments` table
+  header.
 
 ## Order of the next PRs (from the proposal)
 

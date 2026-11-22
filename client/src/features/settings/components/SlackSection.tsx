@@ -22,7 +22,7 @@ export function SlackSection({ companyId }: { companyId: string }) {
       {!data && !error ? (
         <div className="flex items-center gap-2 py-10 text-[13px] text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
       ) : !data || !view ? (
-        <Callout tone="warning" role="alert">{error}</Callout>
+        <Callout tone="danger" role="alert">{error}</Callout>
       ) : (
         <>
           {data.practice && <Callout tone="info">{SLACK_PRACTICE_TEXT}</Callout>}

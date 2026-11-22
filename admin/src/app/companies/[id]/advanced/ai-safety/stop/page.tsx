@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { ClockCounterClockwise, HandPalm, Key, LockSimple, Warning } from '@phosphor-icons/react'
+import { ClockCounterClockwise, HandPalm, Key, ShieldSlash, Warning } from '@phosphor-icons/react'
 
 import { useAgentStops } from '@/components/agent-stop/agent-stop-context'
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
@@ -28,7 +28,7 @@ export default function AgentStopPage() {
       <>
         <AdvancedCrumb aiSafety />
         <PageHeader title={TITLE} />
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       </>
     )
   }

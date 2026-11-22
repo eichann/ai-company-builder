@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { ClockCounterClockwise, GoogleLogo, HardDrives, Pause, Play, ShieldCheck, Trash, UserCircle } from '@phosphor-icons/react'
 
 import { Badge } from '@/components/ui/badge'
+import { Callout } from '@/components/ui/callout'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -28,10 +29,10 @@ export const GOOGLE_RELAY_SERVICE_TEXT: Record<GoogleRelayService, { label: stri
 }
 
 export const GOOGLE_RELAY_LATER_TEXT: Record<GoogleRelayLaterService, string> = {
-  drive: 'ドライブ（読むだけ）',
-  calendar: 'カレンダー（読むだけ）',
-  docs: 'ドキュメント（読むだけ）',
-  slides: 'スライド（読むだけ）',
+  drive: 'ドライブ（閲覧のみ）',
+  calendar: 'カレンダー（閲覧のみ）',
+  docs: 'ドキュメント（閲覧のみ）',
+  slides: 'スライド（閲覧のみ）',
 }
 
 const UNAVAILABLE_TEXT: Record<NonNullable<GoogleRelayAdminView['reason']>, string> = {
@@ -89,13 +90,13 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <GoogleLogo size={18} weight="bold" />
           <span className="font-medium">Google（本人の Google の許可で中継）</span>
-          {data.stopped ? <Badge variant="warning">止めています</Badge> : data.services.some((s) => s.on) ? <Badge variant="success">使用中</Badge> : <Badge variant="secondary">オフ</Badge>}
+          {data.stopped ? <Badge variant="paused">止めています</Badge> : data.services.some((s) => s.on) ? <Badge variant="success">使用中</Badge> : <Badge variant="neutral">オフ</Badge>}
         </div>
         {!data.available && data.reason && (
-          <p role="status" className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
+          <Callout variant={data.reason === 'operator-stopped' ? 'paused' : 'warning'} role="status">
             {UNAVAILABLE_TEXT[data.reason]}{' '}
-            <Link href={`/companies/${companyId}/integrations`} className="font-medium text-brand underline-offset-4 hover:underline">つなぎ先へ</Link>
-          </p>
+            <Link href={`/companies/${companyId}/integrations`} className="font-medium underline underline-offset-4">つなぎ先へ</Link>
+          </Callout>
         )}
         <p className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5 text-sm">
           <ShieldCheck size={16} className="mt-0.5 shrink-0" />
@@ -217,7 +218,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
                   <div className="min-w-56">
                     <p className="flex items-center gap-2 font-medium">
                       {m.memberName || m.memberEmail || '（メンバー）'}
-                      {m.stopped ? <Badge variant="warning">止めています</Badge> : m.allowed ? <Badge variant="success">許可済み</Badge> : <Badge variant="secondary">本人がやめています</Badge>}
+                      {m.stopped ? <Badge variant="paused">止めています</Badge> : m.allowed ? <Badge variant="success">許可済み</Badge> : <Badge variant="neutral">本人がやめています</Badge>}
                     </p>
                     {m.allowedAt && <p className="text-xs text-muted-foreground">{formatDateTime(m.allowedAt)} に許可</p>}
                   </div>
@@ -250,7 +251,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-muted-foreground">だれ:</span>
             {['all', ...new Set(data.records.map((r) => r.userId))].map((w) => (
-              <Button key={w} size="sm" variant={who === w ? 'default' : 'outline'} onClick={() => setWho(w)}>{w === 'all' ? '全員' : nameOf(w)}</Button>
+              <Button key={w} size="sm" variant={who === w ? 'selected' : 'outline'} aria-pressed={who === w} onClick={() => setWho(w)}>{w === 'all' ? '全員' : nameOf(w)}</Button>
             ))}
           </div>
           {records.length === 0 ? (

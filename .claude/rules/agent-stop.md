@@ -238,8 +238,8 @@ turn before any agent starts. `client/tests/agent-tool-events.test.ts`: the stop
 ## Admin console (「AI の緊急停止」)
 
 - **On every page** (owner/admin): `components/agent-stop/stop-bar.tsx` at the top of the main
-  area (`AppShell`) — 「AI を止める」 and, while something is stopped, 「AI を止めています（N 件）。
-  一覧と解除」. The dialog (`stop-dialog.tsx`): だれの AI を (全員 / one member, a native select),
+  area (`AppShell`) — 「AI を止める」 and, while something is stopped, 「AI を止めています（N 件・<who stopped the newest>・<when>）。
+  一覧と解除」 on a grey band (a person stopped it: the `paused` set, not red; design-system.md P2b). The dialog (`stop-dialog.tsx`): だれの AI を (全員 / one member, a native select),
   何を止めるか (AI のすべて (default) / コマンドの実行 / ファイルの書き込み / Web へのアクセス /
   外部の MCP), 理由 (optional, ≤ 500, admins only), a sentence of what will happen, 止める. The
   bar and the page share one query (`agent-stop-context.tsx`, `AgentStopProvider` in
@@ -252,5 +252,5 @@ turn before any agent starts. `client/tests/agent-tool-events.test.ts`: the stop
   Types re-exported from `admin/src/lib/api.ts` (`agentStopApi`), pinned by `admin-contract.test.ts`.
 - The log shows stopped calls as 「AI の停止中のため拒否」 (decision `stopped`, `agent-events.md`).
   Tests `admin/tests/agent-stop.test.tsx`: owners/admins only and a manager loads nothing; the
-  bar stops exactly the chosen member + kind and then shows the stop; the default is everyone +
+  bar stops exactly the chosen member + kind and then shows the stop (who, when, the paused colours); the default is everyone +
   the whole AI; a release asks first and sends that stop's id; the unsupported count and names.

@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { AuthLayout } from '@/components/app/brand'
 import { ErrorState, FullPageLoading } from '@/components/app/states'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -127,9 +128,9 @@ function LoginForm() {
               {isSetup && <p className="text-xs text-muted-foreground">8文字以上</p>}
             </div>
             {error && (
-              <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              <Callout variant="danger">
                 {error}
-              </p>
+              </Callout>
             )}
             <Button type="submit" disabled={submitting} className="w-full">
               {submitting ? '処理中…' : isSetup ? 'アカウントを作成' : 'ログイン'}

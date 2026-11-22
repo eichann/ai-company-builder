@@ -5,7 +5,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ClockCounterClockwise, Key, LockSimple, Plus, ShieldWarning, SlidersHorizontal, UserCircle, Warning } from '@phosphor-icons/react'
+import { ClockCounterClockwise, Key, Plus, ShieldSlash, ShieldWarning, SlidersHorizontal, UserCircle, Warning } from '@phosphor-icons/react'
 
 import { KeyForm, createBody, type KeyFormValues } from '@/components/key-broker/key-form'
 import { RelayServicesCard } from '@/components/key-broker/relay-services'
@@ -13,6 +13,7 @@ import { GoogleRelayCard } from '@/components/key-broker/google-relay'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { AdvancedCrumb } from '@/components/advanced/crumb'
 import { Badge } from '@/components/ui/badge'
+import { Callout } from '@/components/ui/callout'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -80,7 +81,7 @@ export default function ApiKeysPage() {
       <>
         <AdvancedCrumb aiSafety />
         <PageHeader title={TITLE} />
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       </>
     )
   }
@@ -159,23 +160,16 @@ export default function ApiKeysPage() {
       ) : data ? (
         <div className="space-y-6 pb-4">
           {!data.status.enabled && data.status.reason && (
-            <div role="status" className="flex gap-3 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
-              <Warning size={18} className="mt-0.5 shrink-0 text-warning" />
-              <div>
-                <p className="font-medium">API キーを預かる機能は、いまは使えません</p>
-                <p className="text-muted-foreground">
-                  {BROKER_OFF_TEXT[data.status.reason]}
-                  {BROKER_OFF_HELP}
-                </p>
-              </div>
-            </div>
+            <Callout variant="warning" role="status" title="API キーを預かる機能は、いまは使えません">
+              <p>
+                {BROKER_OFF_TEXT[data.status.reason]}
+                {BROKER_OFF_HELP}
+              </p>
+            </Callout>
           )}
 
           {data.services.filter((s) => s.practice).map((s) => (
-            <div key={s.service} role="status" className="flex gap-3 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
-              <Warning size={18} className="mt-0.5 shrink-0 text-warning" />
-              <p className="font-medium">練習用の {s.label} につながっています（このサーバーは検証用です。本物の {s.label} には届きません）</p>
-            </div>
+            <Callout key={s.service} variant="warning" role="status" title={`練習用の ${s.label} につながっています（このサーバーは検証用です。本物の ${s.label} には届きません）`} />
           ))}
 
           {data.keys.some((k) => k.status === 'active') && (

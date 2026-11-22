@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useMemo } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { LockSimple } from '@phosphor-icons/react'
+import { ShieldSlash } from '@phosphor-icons/react'
 
 import { LogView } from '@/components/agent-events/log-view'
 import { SettingsView } from '@/components/agent-events/settings-view'
@@ -53,7 +53,7 @@ function AgentEventsContent() {
         <AdvancedCrumb aiSafety />
         <PageHeader title={TITLE} />
         <EmptyState
-          icon={LockSimple}
+          icon={ShieldSlash}
           title="このページはオーナーと管理者だけが使えます"
           description="オーナーか管理者が設定で許可すると、部署の管理役も自分の部署の分を見られるようになります。"
         />

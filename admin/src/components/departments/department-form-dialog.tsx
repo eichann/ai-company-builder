@@ -2,10 +2,10 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Info, Warning } from '@phosphor-icons/react'
 
 import { DEPARTMENT_COLORS, DEPARTMENT_ICONS, DepartmentIcon } from '@/components/app/department-icon'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import {
   Dialog,
   DialogContent,
@@ -142,12 +142,7 @@ function DepartmentForm({
       </DialogHeader>
 
       {!editing && hasCompanyFolder && (
-        <p className="flex gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-foreground">
-          <Info size={16} className="mt-px shrink-0 text-muted-foreground" />
-          <span>
-            {NEW_DEPARTMENT_ACCESS_TEXT}
-          </span>
-        </p>
+        <Callout variant="info">{NEW_DEPARTMENT_ACCESS_TEXT}</Callout>
       )}
 
       <div className="flex items-start gap-4">
@@ -198,12 +193,9 @@ function DepartmentForm({
             : '使えない文字が含まれています。日本語・英数字で始め、「.」「_」「-」以外の記号やスペースは使わないでください。'}
         </p>
         {renaming && hasCompanyFolder && (
-          <p className="flex gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-foreground">
-            <Warning size={16} className="mt-px shrink-0 text-warning" />
-            <span>
-              フォルダ名を「{department.folder}」から「{folder}」に変更します。メンバーのPCでは次回の同期でフォルダの名前が変わります。
-            </span>
-          </p>
+          <Callout variant="warning">
+            フォルダ名を「{department.folder}」から「{folder}」に変更します。メンバーのPCでは次回の同期でフォルダの名前が変わります。
+          </Callout>
         )}
       </div>
 

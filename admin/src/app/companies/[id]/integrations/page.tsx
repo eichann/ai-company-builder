@@ -18,11 +18,12 @@
 // by the connector's label, never a fixed 「HubSpot」.
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowsClockwise, ClockCounterClockwise, LockSimple, PlugsConnected, Warning } from '@phosphor-icons/react'
+import { ArrowsClockwise, ClockCounterClockwise, PlugsConnected, ShieldSlash } from '@phosphor-icons/react'
 
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { Badge } from '@/components/ui/badge'
+import { Callout } from '@/components/ui/callout'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -58,6 +59,8 @@ import {
   HISTORY_LABELS,
   IMPORT_STATUS_TEXT,
   PROBLEM_TEXT,
+  STOPPED_BY_FAILURE,
+  STOPPED_BY_PERSON,
   connectionStopped,
   WRITE_CHOICE_LABELS,
   autoUnavailable,
@@ -90,7 +93,7 @@ export default function IntegrationsPage() {
     return (
       <>
         <PageHeader title={TITLE} />
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       </>
     )
   }
@@ -146,10 +149,15 @@ function labelOf(item: PluginListItem) {
 
 function StatusBadge({ item }: { item: PluginListItem }) {
   if (!item.install) return <Badge variant="outline">まだ使っていません</Badge>
-  if (item.install.problem === null) return <Badge>動いています</Badge>
+  if (item.install.problem === null) return <Badge variant="success">動いています</Badge>
   // A business without its connector still works inside ACB: only the exchange with the outside service stops.
-  if (item.install.enabled && packageOf(item)?.role === 'business') return <Badge>使っています</Badge>
-  return <Badge variant="outline">{item.install.problem === 'off' ? 'オフ' : '止まっています'}</Badge>
+  if (item.install.enabled && packageOf(item)?.role === 'business') return <Badge variant="success">使っています</Badge>
+  const problem = item.install.problem
+  if (problem === 'off') return <Badge variant="outline">オフ</Badge>
+  // The three stopped states by meaning (design-system.md P2b); a problem whose cause is unclear keeps the old word.
+  if (STOPPED_BY_PERSON.includes(problem)) return <Badge variant="paused" title={PROBLEM_TEXT[problem]}>止めています</Badge>
+  if (STOPPED_BY_FAILURE.includes(problem)) return <Badge variant="failed" title={PROBLEM_TEXT[problem]}>止まりました</Badge>
+  return <Badge variant="outline" title={PROBLEM_TEXT[problem]}>止まっています</Badge>
 }
 
 /** The version shown: the installed one, else the newest. */
@@ -317,15 +325,10 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
       <div className="space-y-6 border-t px-5 py-4">
         <ConnectionStatus item={current} />
         {service?.practice && (
-          <div role="status" className="flex gap-3 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
-            <Warning size={18} className="mt-0.5 shrink-0 text-warning" />
-            <p className="font-medium">
-              練習用の {service.label} につながっています（このサーバーは検証用です。本物の {service.label} には届きません）
-            </p>
-          </div>
+          <Callout variant="warning" role="status" title={`練習用の ${service.label} につながっています（このサーバーは検証用です。本物の ${service.label} には届きません）`} />
         )}
         {pkg?.stopped && (
-          <p role="status" className="text-sm text-destructive">運用担当者が全社で止めています。止まっている間は何も送りません。</p>
+          <Callout variant="paused" role="status">運用担当者が全社で止めています。止めている間は何も送りません。</Callout>
         )}
 
         {/* Version and key */}
@@ -424,13 +427,13 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
             </Button>
             {report && <ImportReportView report={report} system={uses.label} />}
             {accountChanged && (
-              <div role="alert" className="space-y-2 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
+              <Callout variant="warning" role="alert">
                 <p>
                   鍵が、これまでとは別のアカウントのものになっています。意図して切り替えたときだけ、新しいつなぎ先として始めてください
                   （これまでに取り込んだ記録とは混ざりません）。
                 </p>
                 <Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirmRenew(true)}>新しいつなぎ先として始める</Button>
-              </div>
+              </Callout>
             )}
           </section>
         )}
@@ -576,10 +579,9 @@ function MappingEditor({ pluginId, system, detail, busy, nameOf, onSave, onResto
         ACB の欄と {system} の項目の対応、取り込む範囲、欄ごとの書き戻し方を決めます。保存すると新しい版になり、前の版に戻せます。
       </p>
       {detail.mappingErrors.length > 0 && (
-        <div role="alert" className="rounded-xl border border-destructive/30 px-4 py-2 text-sm">
-          <p className="font-medium">いま使っている読み替え表に直すところがあります</p>
+        <Callout variant="danger" title="いま使っている読み替え表に直すところがあります">
           <ul className="list-disc pl-5">{detail.mappingErrors.map((e) => <li key={e}>{e}</li>)}</ul>
-        </div>
+        </Callout>
       )}
 
       {mode === 'table' ? (
@@ -637,10 +639,9 @@ function MappingEditor({ pluginId, system, detail, busy, nameOf, onSave, onResto
       </div>
 
       {checkErrors.length > 0 && (
-        <div role="alert" className="rounded-xl border border-destructive/30 px-4 py-2 text-sm">
-          <p className="font-medium">読み替え表の書き方に直すところがあります</p>
+        <Callout variant="danger" title="読み替え表の書き方に直すところがあります">
           <ul className="list-disc pl-5">{checkErrors.map((e) => <li key={e}>{e}</li>)}</ul>
-        </div>
+        </Callout>
       )}
       {check && <CheckResult check={check} system={system} />}
 
@@ -669,9 +670,9 @@ function MappingEditor({ pluginId, system, detail, busy, nameOf, onSave, onResto
 function CheckResult({ check, system }: { check: PluginMappingCheck; system: string }) {
   if (!check.reachable) {
     return (
-      <div role="status" className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-2 text-sm">
+      <Callout variant="warning" role="status">
         {system} に聞けませんでした：{describeReason(check.reason)}。保存はできますが、項目名が合っているかは確かめられていません。
-      </div>
+      </Callout>
     )
   }
   const entries = Object.entries(check.objects)

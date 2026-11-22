@@ -77,6 +77,8 @@ const ownKeys = {
   memberKeysAllowed: true,
   services: [
     { service: 'anthropic', label: 'Anthropic（Claude API）', category: 'tool', rule: 'company-first', ownKey: { allowed: true, hosts: ['api.anthropic.com'] }, companyKeys: [], key: null },
+    // `?ownkey=stopped`: an own key an admin stopped (a person stopped it: the grey 「止めています」 badge).
+    ...(params.get('ownkey') === 'stopped' ? [{ service: 'gemini', label: 'Gemini', category: 'tool', rule: 'company-first', ownKey: { allowed: true, hosts: ['generativelanguage.googleapis.com'] }, companyKeys: [], key: { id: 'k-own', displayName: '自分の鍵', last4: 'zz99', hosts: ['generativelanguage.googleapis.com'], status: 'disabled', secretUpdatedAt: '2026-11-01T00:00:00.000Z' } }] : []),
   ],
 }
 const progressListeners = new Set<(d: { repoPath: string; receivedBytes: number }) => void>()

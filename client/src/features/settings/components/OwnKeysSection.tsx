@@ -3,17 +3,13 @@
 // password field, sent once and never shown again — only its last 4.
 import { useEffect, useRef, useState } from 'react'
 import { SpinnerGap } from '@phosphor-icons/react'
-import { Button, Callout, Card, SectionHeader } from '../../../shared/ui/primitives'
+import { Button, Callout, Card, SectionHeader, StatusBadge, type StatusBadgeVariant } from '../../../shared/ui/primitives'
 import type { MyBrokerService } from '../../../../shared/broker-keys'
 import { useOwnKeys } from '../hooks/useOwnKeys'
 import { ownKeyRow, type OwnKeyTone } from '../own-keys'
 
 const INPUT = 'h-9 w-full rounded-lg border border-zinc-200 bg-white px-3 font-mono text-[13px] text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500'
-const TONE: Record<OwnKeyTone, string> = {
-  ok: 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20',
-  warn: 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/20',
-  none: 'bg-zinc-100 text-zinc-600 ring-zinc-200 dark:bg-white/[0.06] dark:text-zinc-300 dark:ring-white/10',
-}
+const TONE: Record<OwnKeyTone, StatusBadgeVariant> = { ok: 'success', warn: 'warning', paused: 'paused', none: 'neutral' }
 
 export function OwnKeysSection({ companyId, focusService }: { companyId: string; focusService?: string }) {
   const { data, error, loading, busy, save, remove } = useOwnKeys(companyId)
@@ -27,7 +23,7 @@ export function OwnKeysSection({ companyId, focusService }: { companyId: string;
       {loading && !data ? (
         <div className="flex items-center gap-2 py-10 text-[13px] text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
       ) : error && !data ? (
-        <Callout tone="warning" role="alert">{error}</Callout>
+        <Callout tone="danger" role="alert">{error}</Callout>
       ) : data ? (
         <>
           {!data.enabled && (
@@ -87,7 +83,7 @@ function ServiceRow({ s, enabled, busy, focused, onSave, onRemove }: {
     <section ref={sectionRef} className={`space-y-2 p-5 ${focused ? 'bg-indigo-50/60 dark:bg-indigo-500/[0.06]' : ''}`} aria-label={s.label}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[14px] font-medium">{s.label}</span>
-        <span className={`rounded-md px-1.5 py-0.5 text-[11px] ring-1 ${TONE[row.tone]}`}>{row.status}</span>
+        <StatusBadge variant={TONE[row.tone]}>{row.status}</StatusBadge>
         <span className="ml-auto flex gap-2">
           {enabled && row.canRegister && !open && (
             <Button size="sm" onClick={() => { setOpen(true); setMessage(null) }} disabled={busy}>

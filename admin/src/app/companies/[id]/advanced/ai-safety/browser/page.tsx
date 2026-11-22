@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Browsers, ClockCounterClockwise, Globe, Key, LockSimple, Plus, Trash, UserSwitch } from '@phosphor-icons/react'
+import { Browsers, ClockCounterClockwise, Globe, Key, Plus, ShieldSlash, Trash, UserSwitch } from '@phosphor-icons/react'
 
 import { RadioCard } from '@/components/app/radio-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -58,7 +58,7 @@ export default function AgentBrowserPage() {
       <>
         <AdvancedCrumb aiSafety />
         <PageHeader title={BROWSER_TITLE} />
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       </>
     )
   }

@@ -5,7 +5,7 @@ import type { OpenFile } from '../hooks/useOpenFiles'
 /** 閲覧のみ: the member may not write this file's folder (per-folder write rules). */
 export function ReadOnlyNotice() {
   return (
-    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800/50 bg-gray-50 dark:bg-zinc-900/40 text-[11px] text-gray-500 dark:text-zinc-400">
+    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-readonly-border bg-readonly-bg text-[11px] text-readonly-text">
       <ReadOnlyBadge />
       <span className="truncate">このフォルダは閲覧のみです。変更しても共有されず、同期すると元に戻ります（変更は .backups/ に保存されます）。</span>
     </div>
@@ -15,8 +15,8 @@ export function ReadOnlyNotice() {
 /** The open file (no edits) was deleted or moved on disk. */
 export function MissingFileNotice() {
   return (
-    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-amber-500/20 bg-amber-500/10 text-[11px] text-amber-700 dark:text-amber-300">
-      <Warning size={12} className="flex-shrink-0" />
+    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-warning-border bg-warning-bg text-[11px] text-warning-text">
+      <Warning size={12} className="flex-shrink-0 text-warning-icon" />
       <span className="truncate">このファイルは削除されたか、移動されました。表示しているのは開いていたときの内容です。</span>
     </div>
   )
@@ -34,8 +34,8 @@ interface ExternalChangeBannerProps {
 /** The file changed (or was deleted) on disk while this tab has edits: nothing is overwritten until the member decides. */
 export function ExternalChangeBanner({ file, diffOpen, onSave, onLoadDisk, onToggleDiff, onKeepMine }: ExternalChangeBannerProps) {
   return (
-    <div role="alert" data-external-change={file.external.kind} className="flex-shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 border-b border-amber-500/30 bg-amber-500/10 text-xs text-amber-800 dark:text-amber-200">
-      <Warning size={14} className="flex-shrink-0" />
+    <div role="alert" data-external-change={file.external.kind} className="flex-shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 border-b border-warning-border bg-warning-bg text-xs text-warning-text">
+      <Warning size={14} className="flex-shrink-0 text-warning-icon" />
       <span className="min-w-0 flex-1">
         {file.external.kind === 'deleted'
           ? 'ファイルは削除されました。保存すると作り直します'
@@ -91,7 +91,7 @@ export function ExternalChangeBanner({ file, diffOpen, onSave, onLoadDisk, onTog
 /** A note that can be dismissed (e.g. where the overwritten version was backed up). */
 export function EditorNotice({ notice, onDismiss }: { notice: string; onDismiss: () => void }) {
   return (
-    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800/50 bg-gray-50 dark:bg-zinc-900/40 text-[11px] text-gray-600 dark:text-zinc-300">
+    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-info-border bg-info-bg text-[11px] text-info-text">
       <span className="min-w-0 flex-1 truncate" title={notice}>{notice}</span>
       <button onClick={onDismiss} className="hover:text-gray-900 dark:hover:text-zinc-100" aria-label="閉じる">
         <X size={12} />
@@ -102,12 +102,12 @@ export function EditorNotice({ notice, onDismiss }: { notice: string; onDismiss:
 
 export function EditorError({ error, onDismiss }: { error: string; onDismiss: () => void }) {
   return (
-    <div className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-400 text-xs">
-      <Warning size={14} />
+    <div className="flex items-center gap-2 px-4 py-2 bg-danger-bg border-b border-danger-border text-danger-text text-xs">
+      <Warning size={14} className="text-danger-icon" />
       {error}
       <button
         onClick={onDismiss}
-        className="ml-auto hover:text-red-300"
+        className="ml-auto hover:text-text"
       >
         <X size={12} />
       </button>
