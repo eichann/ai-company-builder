@@ -617,7 +617,14 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   hold is live).
 - **Lost while its turn is prepared** (review of 4b-2, M1; `chat-server.ts`): a run lost during the awaits between the
   ceiling check and the turn's registration found no turn to stop; once the turn is tracked the chat server asks the job's
-  ceiling again (`pluginStepTools`) and, gone, stops it at once with `job-ended` (as the emergency stop's re-check does). **The last check right before the AI starts** (`deps.confirm`): after the check and the
+  ceiling again (`pluginStepTools`) and, gone, stops it at once with `job-ended` (as the emergency stop's re-check does).
+- **No start after the cutoff** (Codex re-review of 4b-2): the time limit's timer can stop nothing while the claim's last
+  check is out or before the turn is tracked. So after the last check the claim looks again — the timer fired or no time
+  left before `JOB_STOP_BEFORE_MS` → nothing starts, the run is finished `bad-input` `TIME_LIMIT` (as with too little
+  left before the claim); and a run past its stop time has no ceiling (`toolsOf`), so the chat server's re-check after
+  tracking stops a turn that slipped through. Tests: `job-runs-fail-closed.test.ts` "the stop time coming while the last
+  check is out" / "…before the turn is tracked"; the whole check and the ceiling's `timedOut` each fail a test, the two
+  halves of the check (`timedOut`, the time recomputed) each alone suffice (the timer fires when that time reaches zero). **The last check right before the AI starts** (`deps.confirm`): after the check and the
   procedure, one renew now (it runs an event's conditions on the server, `renewRefusal`); refused → lost, nothing starts;
   not answered in time → given back `temporary` `NOT_CONFIRMED`, nothing starts. Record runs and plugin steps are
   unchanged (their renew's 409 only). Decision on the safe side: a `NOT_IN_STEP` from a route outside the grant stops the

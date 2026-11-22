@@ -41,6 +41,8 @@ interface FakeOpts {
   runId?: string
   /** The turn the claim answers (default: the event turn, running). */
   claimTurn?: unknown
+  /** When the run was first claimed on the server (default: now). */
+  createdAt?: string
 }
 
 function fakeServer(opts: FakeOpts = {}) {
@@ -75,7 +77,7 @@ function fakeServer(opts: FakeOpts = {}) {
         return json(409, { code: 'JOB_KIND_NOT_SUPPORTED' })
       }
       const now = new Date().toISOString()
-      return json(201, { data: { run: { id: runId, generation: 1, createdAt: now, updatedAt: now }, turn: opts.claimTurn ?? eventTurn({ state: 'running' }) } })
+      return json(201, { data: { run: { id: runId, generation: 1, createdAt: opts.createdAt ?? now, updatedAt: now }, turn: opts.claimTurn ?? eventTurn({ state: 'running' }) } })
     }
     if (p === `/ai-runs/${runId}/renew`) {
       const list = opts.renews ?? [{ status: 200 }]
@@ -377,4 +379,26 @@ test('a hold never sends a second timed renew while its first is still out (no t
   const sent = renews(server) - before
   await claims.settle(COMPANY, OCC) // release the hold (its timer) before asserting
   assert.equal(sent, 1)
+})
+
+test('the stop time coming while the last check is out: nothing starts after the cutoff, finished as the time limit', async () => {
+  // 30 approved minutes, claimed 29 minutes ago less 300 ms: 300 ms left before the stop; the last check answers after 500 ms.
+  const server = fakeServer({ createdAt: new Date(Date.now() - 29 * 60_000 + 300).toISOString(), renews: [{ status: 200, delayMs: 500 }] })
+  const { claims, stopped } = claimsFor(server)
+  await claims.jobTurns(COMPANY)
+  assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-event-0110'), { claimed: false, reason: 'unavailable' })
+  assert.deepEqual(server.calls.filter(c => c.path.endsWith('/finish')).map(c => c.body), [{ generation: 1, outcome: 'failed', failure: { class: 'bad-input', code: 'TIME_LIMIT' } }])
+  assert.equal(claims.jobTools('conv-event-0110', 'job-procedure'), null)
+  assert.deepEqual(stopped, [])
+})
+
+test('the stop time coming before the turn is tracked: the ceiling is gone, so the chat server\'s re-check stops the turn', async () => {
+  const server = fakeServer({ createdAt: new Date(Date.now() - 29 * 60_000 + 200).toISOString() })
+  const { claims } = claimsFor(server)
+  await claims.jobTurns(COMPANY)
+  assert.ok((await claims.claim(COMPANY, OCC, 1, 'conv-event-0111')).claimed)
+  await wait(300) // the stop timer fired; no turn was tracked yet, so it stopped nothing
+  assert.equal(claims.jobTools('conv-event-0111', 'job-procedure'), null)
+  assert.deepEqual(await claims.settle(COMPANY, OCC), { outcome: 'failed' })
+  assert.deepEqual(server.calls.filter(c => c.path.endsWith('/finish')).map(c => c.body), [{ generation: 1, outcome: 'failed', failure: { class: 'bad-input', code: 'TIME_LIMIT' } }])
 })

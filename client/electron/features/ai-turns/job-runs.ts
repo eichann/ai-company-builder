@@ -339,6 +339,12 @@ export function createJobRuns(deps: JobRunDeps) {
         if (live(held)) return giveUp({ class: 'temporary', code: 'NOT_CONFIRMED' })
         return { claimed: false, reason: 'unavailable' }
       }
+      // The stop time came while the server was being asked (its timer could stop nothing yet): never started after the
+      // cutoff — finished as the time limit, as when too little was left before the claim.
+      if (held.timedOut || deadlineMs - JOB_STOP_BEFORE_MS - now() <= 0) {
+        clearTimeout(held.timer)
+        return giveUp({ class: 'bad-input', code: 'TIME_LIMIT' })
+      }
       byConversation.set(conversationId, held)
       byOccurrence.set(key, conversationId)
       const deadline = new Date(deadlineMs - JOB_STOP_BEFORE_MS)
@@ -352,7 +358,9 @@ export function createJobRuns(deps: JobRunDeps) {
     toolsOf(conversationId: string, step: string): JobToolAccess | null {
       const h = byConversation.get(conversationId)
       // No live run (taken away, released): no ceiling, so the chat server refuses the turn — never an ordinary one.
-      return h && step === JOB_PC_STEP && live(h) ? h.access : null
+      // Past its stop time (also when the stop came before the turn was tracked, so it stopped nothing): no ceiling, and
+      // the chat server's re-check after tracking stops the turn (review of 4b-2).
+      return h && step === JOB_PC_STEP && live(h) && !h.timedOut ? h.access : null
     },
 
     /** Where a job run's consultation may write; null when it is not one. */
