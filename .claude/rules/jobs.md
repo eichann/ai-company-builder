@@ -1444,17 +1444,25 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   stale one inside the write (409 `JOB_VERSION_NOT_LATEST`); approval of a proposal's job needs the fingerprint (400 without) and
   the newest version (409 `JOB_VERSION_NOT_LATEST`), and inside the write — after the asynchronous Skill check — the newest version
   again and the proposal: `submitted` moves to `approved` (the first approval), `approved` lets a later version be approved as any,
-  `withdrawn` / `returned` refuse (`JOB_PROPOSAL_CLOSED`, also for an edit under way). Approving still never accepts. Today's screens
+  `withdrawn` / `returned` refuse (`JOB_PROPOSAL_CLOSED`, also for an edit under way). **Its responsible person stays the
+  proposer** (owner decision 2026-11-22): an edit naming anyone else is refused inside the write (409
+  `JOB_PROPOSAL_RESPONSIBLE_FIXED`, 「…責任者を変えられません…新しく定期の仕事を作ってください」). Approving still never accepts. Today's screens
   announce `1,2,3`: their approve / edit of a schema-4 job is `JOB_NEEDS_NEWER_SCREEN` (the old-tab rule). `JobView.proposal`
   (additive): `id`, `proposerId` (stored), `submittedVersion`, `state`, `returnReason`.
 - **Notices** (第5版 10-5): `job_proposal` (recordless, on by default) to every owner / admin in the submit's transaction, **one row
   per recipient** (its own id; `dedupe_key = job_proposal:<proposal id>`, unique per recipient — a resend adds none), then the
   push to them; text built when read (`jobProposals.proposalNotice`: the job's server-made name, the proposer as the notice's
   actor) and shown only while the proposal is `submitted` and the reader an owner / admin. 「すべて既読」 also reads a new one (as
-  for every kind, decided in 第5版); the admin console's list of waiting proposals (PR B) keeps it.
+  for every kind, decided in 第5版); the admin console's list of waiting proposals (PR B) keeps it. **A return is told to the
+  proposer** (owner decision 2026-11-22): `job_proposal_returned` (recordless, on by default), written in the return's
+  transaction to the proposer only, one per proposal (`job_proposal_returned:<proposal id>`), then the push to them; worded when
+  read — 「出した定期の仕事の案「…」は差し戻されました（理由：…）…」 with the fixed reason's words (`jobProposalReturnReasonText`), the
+  name by `HIDDEN_JOB_NAME`'s rule — and shown only to the proposer while the proposal is returned. A withdrawal tells nobody.
+  **PR C's task** (owner decision 2026-11-22): the app's notice settings must not offer members the owner / admin-only kinds
+  (`job_proposal`, and the existing `job_paused`).
 - **The rollback floor** (6760eef3, knows `[1, 2]`): a schema-4 job is listed by name only, its versions without definition or
-  fingerprints, approve / edit / accept refused (`JOB_SCHEMA_UNKNOWN`), no occurrence made, no `job_proposal` shown (an unknown
-  kind); it never reads the new tables. Coming back: nothing revived (a withdrawn proposal stays so, its job retired), nothing
+  fingerprints, approve / edit / accept refused (`JOB_SCHEMA_UNKNOWN`), no occurrence made, no `job_proposal` /
+  `job_proposal_returned` shown (unknown kinds); it never reads the new tables. Coming back: nothing revived (a withdrawn proposal stays so, its job retired), nothing
   duplicated (the cross-build check, `deployment.md`).
 - Test: `server/tests/integration/job-proposals.test.ts` (§9 / §11 / 第5版: another person as responsible, another company's ids,
   rights removed before the submit, unreadable / missing places, a free name / folder / title words, an old fingerprint / version,

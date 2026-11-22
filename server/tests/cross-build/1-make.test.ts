@@ -179,8 +179,12 @@ describe.skipIf(!CROSS_DB)('cross-build 1/3: a database as 4b-1 leaves it', () =
     const p3 = await proposal(bob)
     const fp3 = (db.prepare('SELECT fingerprint FROM ai_job_versions WHERE company_id = ? AND job_id = ? AND version = 1').get(CO, p3.jobId) as Json).fingerprint
     ok(await services.jobs.approve(owner, p3.jobId, { version: 1, fingerprint: fp3 }, [1, 2, 3, 4]))
-    expect(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND kind = 'job_proposal'").get(CO)).toEqual({ n: 6 })
-    const proposals = { p1, p2, p3 }
+    // P4: bob's, returned by the owner — its proposer is told (`job_proposal_returned`, a kind the floor does not know).
+    const p4 = await proposal(bob)
+    ok(services.jobProposals.returnProposal(owner, p4.id, { reason: 'TOO_BROAD' }))
+    expect(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND kind = 'job_proposal'").get(CO)).toEqual({ n: 8 })
+    expect(db.prepare("SELECT user_id FROM notifications WHERE company_id = ? AND kind = 'job_proposal_returned'").all(CO)).toEqual([{ user_id: 'xb-bob' }])
+    const proposals = { p1, p2, p3, p4 }
     saveDb(db, { CO, j4: { job: j4, stop: j4Stop }, jobs: { j1: j1.job, j2: j2.job, j3: j3.job }, occ: { o1, o3, o4 }, runs: { r1: r1.id, r4: r4.id }, proposals, before: crossBuildSnapshot(db, CO) })
   })
 })

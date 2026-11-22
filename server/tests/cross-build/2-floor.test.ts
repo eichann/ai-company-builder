@@ -142,10 +142,10 @@ describe.skipIf(!CROSS_DB)('cross-build 2/3: the rollback floor on it', () => {
       expect((db.prepare('SELECT COUNT(*) AS n FROM ai_job_occurrences WHERE company_id = ? AND job_id = ?').get(CO, p.jobId) as Json).n).toBe(0)
     }
     expect(await services.jobs.accept(member('xb-bob', 'member'), p3.jobId, { version: 1 }, [1, 2, 3, 4], true)).toMatchObject({ ok: false, body: { code: 'JOB_SCHEMA_UNKNOWN' } })
-    for (const who of [owner, member('xb-admin', 'admin')]) {
+    for (const who of [owner, member('xb-admin', 'admin'), member('xb-bob', 'member')]) {
       const listed = services.notifications.list(who) as Json
       expect(listed.ok).toBe(true)
-      expect(listed.value.items.filter((i: Json) => i.kind === 'job_proposal')).toEqual([])
+      expect(listed.value.items.filter((i: Json) => i.kind === 'job_proposal' || i.kind === 'job_proposal_returned')).toEqual([])
     }
 
     // What 4b-1 needs to go on is as it wrote it.

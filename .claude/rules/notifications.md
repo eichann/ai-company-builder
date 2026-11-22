@@ -89,6 +89,10 @@ a plugin can never draw a notice (§2-2).
   `job_proposal` (「〇〇さんから定期の仕事の案「…」が届いています…」, on by default, recordless: a member submitted a proposal of a
   time job, to every owner / admin — one row per recipient, key `job_proposal:<proposal>`, a resend adds none; built when read,
   shown only while the proposal still waits and the reader is an owner / admin — `jobs.md` "Member proposals"),
+  `job_proposal_returned` (「出した定期の仕事の案「…」は差し戻されました（理由：…）…」, on by default, recordless: to the proposer
+  only, once per proposal, key `job_proposal_returned:<proposal>`; the reason a fixed code's words, never text; shown only to
+  the proposer while it is returned — `jobs.md` "Member proposals"). **PR C**: the app's notice settings must hide the owner /
+  admin-only kinds (`job_proposal`, `job_paused`) from members (today every kind is listed),
   `asked`, `morning_summary`, `due_tomorrow` (below), `others` (everything else: the AI's
   「用意ができた」 / 「先に渡す」 when it is not a first hand-over, 「自分で進める」 of task v5, sent back,
   cancelled…). While a task is the AI's (`preparing`) nobody is told on create (engine rule); the

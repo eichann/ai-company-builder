@@ -88,6 +88,9 @@ describe.skipIf(!CROSS_DB)('cross-build 3/3: this build again', () => {
     expect(counts()).toEqual(before)
     expect((await services.jobs.approve(owner, p1.jobId, { version: 1, fingerprint: fp(p1.jobId) }, [1, 2, 3, 4])).ok).toBe(true)
     expect(db.prepare('SELECT state FROM ai_job_proposals WHERE company_id = ? AND id = ?').get(CO, p1.id)).toEqual({ state: 'approved' })
+    // The return the floor did not show is bob's again, in its fixed words.
+    const bobItems = (services.notifications.list({ companyId: CO, userId: 'xb-bob', role: 'member' }) as Json).value.items.filter((i: Json) => i.kind === 'job_proposal_returned')
+    expect(bobItems).toEqual([expect.objectContaining({ text: expect.stringContaining('差し戻されました（理由：読む場所や置く場所、できることが広すぎる）') })])
 
     // The watch J2 moved to is where 4b-1 left it.
     expect((db.prepare('SELECT watch_generation AS g FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?').get(CO, j2) as Json).g)

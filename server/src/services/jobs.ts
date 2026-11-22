@@ -85,6 +85,7 @@ const ACCEPT_SEPARATELY = () => refuse('conflict', `${JOB_ACCEPT_SEPARATELY}。`
 const PROPOSAL_ONLY = () => refuse('conflict', '社員の案から生まれる形の定期の仕事は、社員が「AIへの相談」から出した案からだけ作られます。', { code: 'JOB_PROPOSAL_ONLY' })
 const PROPOSAL_SCHEMA = () => refuse('conflict', '社員の案から生まれた定期の仕事は、案の形のまま直してください（画面を新しくしてください）。', { code: 'JOB_PROPOSAL_SCHEMA' })
 const PROPOSAL_CLOSED = () => refuse('conflict', 'この案は取り下げられたか差し戻されたため、直したり承認したりできません。', { code: 'JOB_PROPOSAL_CLOSED' })
+const RESPONSIBLE_FIXED = () => refuse('conflict', '社員の案から生まれた定期の仕事は、責任者を変えられません（案を出した人のままです）。ほかの人に任せるときは、新しく定期の仕事を作ってください。', { code: 'JOB_PROPOSAL_RESPONSIBLE_FIXED' })
 const NOT_LATEST = () => refuse('conflict', 'この仕事は、画面を開いたあとにほかの人が直しました。読み直してから、もう一度ためしてください。', { code: 'JOB_VERSION_NOT_LATEST' })
 const isClosed = (p: JobProposalRow | null) => p !== null && (p.state === 'withdrawn' || p.state === 'returned')
 const NOT_EVENT_JOB = () => refuse('conflict', 'この定期の仕事は、出来事で動く仕事ではありません。', { code: 'JOB_NOT_EVENT' })
@@ -646,7 +647,10 @@ export function createJobService(deps: JobServiceDeps) {
       const written = transactions.run((): Outcome<boolean> => {
         const job = handle.jobs.find(jobId) as JobRow
         // Checked again inside the write (the Skill was read asynchronously meanwhile).
-        if (isClosed(handle.jobs.proposalOfJob(jobId))) return PROPOSAL_CLOSED()
+        const proposalNow = handle.jobs.proposalOfJob(jobId)
+        if (isClosed(proposalNow)) return PROPOSAL_CLOSED()
+        // A proposal's job runs as its proposer, always (owner decision 2026-11-22): never handed to someone else by an edit.
+        if (proposalNow && definition.actingUser !== proposalNow.proposerId) return RESPONSIBLE_FIXED()
         if (base !== undefined && job.latestVersion !== base) return NOT_LATEST()
         const latest = handle.jobs.version(jobId, job.latestVersion)
         if (latest && latest.definition === canonical) return ok(false)

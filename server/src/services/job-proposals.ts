@@ -19,7 +19,7 @@
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import {
   JOB_CANDIDATES_PER_MEMBER, JOB_CANDIDATE_TTL_MS, JOB_PROPOSALS_PER_DAY, JOB_PROPOSALS_WAITING_MAX, JOB_PROPOSAL_STATES,
-  isJobCandidateId, isJobProposalId, isJobProposalReturnReason, jobCandidatePlaces, newJobCandidateId, newJobProposalId,
+  isJobCandidateId, isJobProposalId, isJobProposalReturnReason, jobCandidatePlaces, jobProposalReturnReasonText, newJobCandidateId, newJobProposalId,
   parseJobCandidateInput, proposalDefinition, type JobProposalReturnReason,
 } from '../../shared/core/job-proposals'
 import {
@@ -36,7 +36,7 @@ import type { MembershipRepository } from '../ports/memberships'
 import type { Transactions } from '../ports/transactions'
 import { hasFullAccess, type Member } from './access'
 import { companyTimeToUtc } from './job-occurrences'
-import { JOBS_FORBIDDEN, versionRow, type JobService } from './jobs'
+import { HIDDEN_JOB_NAME, JOBS_FORBIDDEN, versionRow, type JobService } from './jobs'
 import { companyNow } from './notifications'
 import { ok, refuse, type Outcome } from './outcome'
 import { recordReader } from './record-access'
@@ -68,7 +68,7 @@ export interface JobProposalDeps {
   clock: Clock
   ids: IdGenerator
   /** The approval's own checks (services/jobs.ts): rights now, the pinned Skill still as pinned. */
-  jobs: Pick<JobService, 'rightsFit' | 'skillStillPinned'>
+  jobs: Pick<JobService, 'rightsFit' | 'skillStillPinned' | 'nameOf'>
   /** The git tree id of a company Skill now, or null. */
   skillTree: (companyId: string, name: string) => Promise<string | null>
   hasCompanyFolder: (companyId: string) => boolean
@@ -308,6 +308,17 @@ export function createJobProposals(deps: JobProposalDeps) {
       return decide(handle, member, p, 'returned', body.reason)
     },
 
+    /**
+     * The bell's words of `job_proposal_returned` for the member now: only to its proposer, while it is returned — the job's
+     * name as they may read it (`HIDDEN_JOB_NAME` rule) and the fixed reason's words, never text.
+     */
+    proposalReturned(member: Member, proposalId: string): { name: string; reason: string } | null {
+      if (!isJobProposalId(proposalId)) return null
+      const p = companyData.forCompany(member.companyId).jobs.proposal(proposalId)
+      if (!p || p.state !== 'returned' || p.proposerId !== member.userId) return null
+      return { name: deps.jobs.nameOf(member, p.jobId) ?? HIDDEN_JOB_NAME, reason: jobProposalReturnReasonText(p.returnReason ?? 'OTHER') }
+    },
+
     /** The bell's words of `job_proposal` for the member now: the job's name while it still waits and they are an owner / admin. */
     proposalNotice(member: Member, proposalId: string): { name: string } | null {
       if (!hasFullAccess(member.role) || !isJobProposalId(proposalId)) return null
@@ -321,13 +332,22 @@ export function createJobProposals(deps: JobProposalDeps) {
 
   /** From `submitted` to an end (compare-and-set) and the job retired, in one transaction; the first decision wins. */
   function decide(handle: CompanyData, member: Member, p: JobProposalRow, to: 'withdrawn' | 'returned', reason: string | null): Outcome<{ proposal: JobProposalView }> {
-    return transactions.run((): Outcome<{ proposal: JobProposalView }> => {
+    const result = transactions.run((): Outcome<{ proposal: JobProposalView }> => {
       const at = clock.now()
       if (!handle.jobs.decideProposal(p.id, to, { reason, by: member.userId, at })) return DECIDED(handle.jobs.proposal(p.id)?.state ?? p.state)
       // Never edited, approved, accepted or run again (also by a build that does not know proposals: retired).
       handle.jobs.setState(p.jobId, 'retired', null, member.userId, at)
+      // A return is told to its proposer (owner decision 2026-11-22): one notice per proposal, its words built when read.
+      if (to === 'returned') {
+        handle.notifications.insert([{
+          id: ids.newId(), userId: p.proposerId, kind: 'job_proposal_returned', recordId: '', recordVersion: 0, action: '', actorId: member.userId, actorKind: 'human',
+          dedupeKey: `job_proposal_returned:${p.id}`, createdAt: at, readAt: null,
+        }])
+      }
       return ok({ proposal: proposalView(handle.jobs.proposal(p.id) as JobProposalRow) })
     })
+    if (result.ok && to === 'returned') { try { deps.noticesChanged?.(member.companyId, [p.proposerId]) } catch { /* their own check catches up */ } }
+    return result
   }
 }
 

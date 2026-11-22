@@ -456,6 +456,18 @@ describe('the job of a proposal: schema 4 for good, only the newest version, nev
     expect(db.prepare('SELECT latest_version FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, p.jobId)).toEqual({ latest_version: 5 })
   })
 
+  it('its responsible person stays the proposer: an edit naming someone else is refused, nothing added', async () => {
+    const who = newMember()
+    const { p } = await submitted(who)
+    expect(await edit(p.jobId, 1, d => ({ ...d, actingUser: 'u-alice' }))).toMatchObject({ ok: false, body: { code: 'JOB_PROPOSAL_RESPONSIBLE_FIXED' } })
+    // Also after its first approval (a later version), and also when the edit names an owner / admin.
+    ok(await jobs.approve(owner, p.jobId, { version: 1, fingerprint: latestFingerprint(p.jobId) }, READS4))
+    expect(await edit(p.jobId, 1, d => ({ ...d, actingUser: 'u-admin' }))).toMatchObject({ ok: false, body: { code: 'JOB_PROPOSAL_RESPONSIBLE_FIXED', error: expect.stringContaining('新しく定期の仕事を作ってください') } })
+    expect(db.prepare('SELECT latest_version, acting_user_id FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, p.jobId)).toEqual({ latest_version: 1, acting_user_id: who.userId })
+    // Any other change of it is an ordinary edit.
+    expect(ok(await edit(p.jobId, 1, d => ({ ...d, name: '名前だけ直した' })))).toMatchObject({ latestVersion: 2, actingUserId: who.userId })
+  })
+
   it('no other job becomes schema 4, and an admin never makes one', async () => {
     const { c } = await submitted(bob)
     expect(await jobs.create(owner, { definition: { ...c.definition } }, READS4)).toMatchObject({ ok: false, body: { code: 'JOB_PROPOSAL_ONLY' } })
@@ -477,6 +489,35 @@ describe('the job of a proposal: schema 4 for good, only the newest version, nev
     between = () => { ok(proposals.returnProposal(admin, q.id, { reason: 'NOT_NEEDED' })) }
     expect(await edit(q.jobId, 1, d => ({ ...d, name: '差し戻しの最中' }))).toMatchObject({ ok: false, body: { code: 'JOB_PROPOSAL_CLOSED' } })
     expect(db.prepare('SELECT latest_version FROM ai_jobs WHERE company_id = ? AND id = ?').get(CO, q.jobId)).toEqual({ latest_version: 1 })
+  })
+})
+
+describe('the proposer’s notice of a return', () => {
+  const returned = () => db.prepare("SELECT id, user_id, dedupe_key FROM notifications WHERE company_id = ? AND kind = 'job_proposal_returned'").all(CO) as Json[]
+  it('to the proposer alone, once per proposal, in fixed words with the fixed reason; nothing for a withdrawal', async () => {
+    const { p } = await submitted(carol)
+    const before = returned().length
+    pushed.length = 0
+    ok(proposals.returnProposal(admin, p.id, { reason: 'SKILL_NOT_READY' }))
+    expect(returned().filter(n => n.dedupe_key === `job_proposal_returned:${p.id}`).map(n => n.user_id)).toEqual(['u-carol'])
+    expect(pushed).toEqual([['u-carol']])
+    // A second return is refused and writes nothing more.
+    expect(proposals.returnProposal(admin2, p.id, { reason: 'OTHER' })).toMatchObject({ ok: false })
+    expect(returned()).toHaveLength(before + 1)
+    const items = (who: Json) => (ok(services.notifications.list(who)) as Json).items.filter((i: Json) => i.kind === 'job_proposal_returned')
+    expect(items(carol)).toEqual([expect.objectContaining({ read: false, text: '出した定期の仕事の案「weekly-minutes（毎週月曜 09:00）」は差し戻されました（理由：先に Skill を直したい）。必要なら、AI にもう一度頼んでください' })])
+    // Anyone else holding such a row (it is never written to them) sees nothing.
+    db.prepare(`INSERT INTO notifications (company_id, id, user_id, kind, record_id, record_version, action, actor_id, actor_kind, dedupe_key, created_at, read_at)
+      VALUES (?, 'n-forged-returned', 'u-dave', 'job_proposal_returned', '', 0, '', 'u-admin', 'human', ?, ?, NULL)`).run(CO, `job_proposal_returned:${p.id}`, TS)
+    expect(items(dave)).toEqual([])
+    // A withdrawal tells nobody.
+    const w = (await submitted(carol)).p
+    ok(proposals.withdraw(carol, w.id))
+    expect(returned().filter(n => n.dedupe_key === `job_proposal_returned:${w.id}`)).toEqual([])
+    // A row naming a proposal that was not returned shows nothing, also to its proposer.
+    db.prepare(`INSERT INTO notifications (company_id, id, user_id, kind, record_id, record_version, action, actor_id, actor_kind, dedupe_key, created_at, read_at)
+      VALUES (?, 'n-forged-withdrawn', 'u-carol', 'job_proposal_returned', '', 0, '', 'u-admin', 'human', ?, ?, NULL)`).run(CO, `job_proposal_returned:${w.id}`, TS)
+    expect(items(carol)).toHaveLength(1)
   })
 })
 
