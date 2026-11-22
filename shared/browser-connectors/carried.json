@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "combinations": [
+    {
+      "connector": "lstep",
+      "version": "0.6.0",
+      "declarationHash": "sha256:839329ce6638d4a28e74c04dd6b8cf6e6c6f45605dfe12452560e2324b449a21",
+      "checkerHash": "sha256:f247800c831c45594b492b06637be7bc10b89109d7f401f3422b186b8b2faffe",
+      "factsVersion": 2
+    }
+  ]
+}

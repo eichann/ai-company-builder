@@ -314,7 +314,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `data-plugin-operation` parts; `plugins.md` "The app"), `secondOpinions` (the other AI's answer,
 「Codex の答えを全部見る」, `chat-and-agents.md`), `minutesDealChoices`
   (「どの案件の議事録ですか？」, `minutes.md` "The app"), `mailDrafts` (the mail card, `data-mail-draft`,
-  `outbound-mail.md`). The app's cards come back after the text in
+  `outbound-mail.md`), `browserPlans` (a 「ブラウザ操作」 plan's card, `data-browser-plan`, a reference only:
+  the card reads the server, `agent-browser.md`). The app's cards come back after the text in
   the order the tools produced them (`cardOrder`: their part ids, stored when a reply has two or
   more; `inCardOrder` in `chatSessionMessages.ts`). A conversation started from minutes keeps
   `minutesId` (and its title, not generated). One started by 「相談する」 keeps `topicRecordId`

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { CaretDown, CaretRight, Plus, PencilSimple, Minus, X, SpinnerGap, Sparkle, ArrowCounterClockwise, CloudArrowUp } from '@phosphor-icons/react'
+import { useId, useState } from 'react'
+import { CaretDown, CaretRight, Plus, PencilSimple, Minus, SpinnerGap, Sparkle, ArrowCounterClockwise, CloudArrowUp } from '@phosphor-icons/react'
 import { DiffModal } from '../../../shared/ui/DiffViewer'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
+import { Dialog, DialogCloseButton, DialogTitle } from '../../../shared/ui/Dialog'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
 
 interface SyncPreviewDialogProps {
@@ -33,11 +34,19 @@ function revertConfirmMessage(displayName: string, status: FileStatus): string {
 
 const COLLAPSE_THRESHOLD = 20
 
+// A change's mark by what it does to the file (design-system.md, P2d): added the success set,
+// deleted the danger set, changed the neutral info set (amber is for warnings only). The same
+// colours as the before / after of the diff (DiffViewer).
+const CHANGE_MARK: Record<FileStatus, string> = {
+  added: 'text-success-text',
+  modified: 'text-info-text',
+  deleted: 'text-danger-text',
+}
+
 function FileSection({
   label,
   files,
   icon: Icon,
-  colorClass,
   rootPath,
   fileStatus,
   onRevert,
@@ -46,7 +55,6 @@ function FileSection({
   label: string
   files: string[]
   icon: typeof Plus
-  colorClass: string
   rootPath: string
   fileStatus: 'added' | 'modified' | 'deleted'
   onRevert?: (filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => void
@@ -58,26 +66,27 @@ function FileSection({
   if (files.length === 0) return null
 
   const prefix = rootPath.endsWith('/') ? rootPath : rootPath + '/'
+  const colorClass = CHANGE_MARK[fileStatus]
 
   return (
     <div>
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 py-1.5 px-2 text-xs font-medium text-text-secondary hover:bg-activitybar-bg rounded transition-colors"
+        className="w-full flex items-center gap-2 py-1.5 px-2 text-xs font-medium text-text-muted hover:bg-surface-sunken rounded-small transition-colors"
       >
         {expanded ? <CaretDown size={12} /> : <CaretRight size={12} />}
         <span className={colorClass}>{label}</span>
-        <span className="text-text-secondary">({files.length}件)</span>
+        <span className="text-text-muted">({files.length}件)</span>
       </button>
       {expanded && (
-        <div className="ml-2 pl-2 border-l border-border">
+        <div className="ml-2 pl-2 border-l border-[color:var(--color-border)]">
           {files.map((file) => {
             const displayPath = file.startsWith(prefix) ? file.slice(prefix.length) : file
             const isReverting = revertingFiles.has(file)
             return (
               <div key={file}>
                 <div
-                  className="flex items-center gap-1.5 py-0.5 px-2 text-xs text-text-secondary hover:bg-activitybar-bg/50 rounded cursor-pointer"
+                  className="flex items-center gap-1.5 py-0.5 px-2 text-xs text-text-muted hover:bg-surface-sunken rounded-small cursor-pointer"
                   onClick={() => setDiffFile(file)}
                 >
                   <Icon size={10} weight="bold" className={colorClass} />
@@ -91,7 +100,7 @@ function FileSection({
                         onRevert(file, fileStatus)
                       }}
                       disabled={isReverting}
-                      className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-text-secondary/50 hover:text-red-500 transition-colors flex-shrink-0"
+                      className="p-0.5 rounded-small hover:bg-danger-bg text-text-subtle hover:text-danger-text transition-colors flex-shrink-0"
                       title="変更を元に戻す"
                     >
                       {isReverting ? (
@@ -138,17 +147,7 @@ export function SyncPreviewDialog({
   const [revertAsk, setRevertAsk] = useState<{ filePath: string; fileStatus: FileStatus } | null>(null)
   const [revertError, setRevertError] = useState<string | null>(null)
   const [commitBoxExpanded, setCommitBoxExpanded] = useState(!!commitMessage.trim())
-
-  useEffect(() => {
-    if (!isOpen) return
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape' && !revertAsk) {
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose, revertAsk])
+  const titleId = useId()
 
   // The commit message is kept by the caller across open/close and a failed sync.
 
@@ -192,35 +191,31 @@ export function SyncPreviewDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <div className="w-full max-w-lg p-4 bg-sidebar-bg border border-border rounded-lg shadow-xl" onClick={(e) => e.stopPropagation()}>
+    // The shared frame (design-system.md, P2d): scrim, surface, Esc / Tab and focus return. The
+    // before / after (DiffModal) and the undo confirm open on top of it and answer keys first.
+    <Dialog onClose={onClose} labelledBy={titleId}>
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-text-primary">
+          <DialogTitle id={titleId}>
             変更されたファイル ({filteredTotalCount}件)
-          </h3>
-          <button
-            onClick={onClose}
-            className="p-1 rounded hover:bg-activitybar-bg text-text-secondary transition-colors"
-          >
-            <X size={14} />
-          </button>
+          </DialogTitle>
+          <DialogCloseButton onClick={onClose} />
         </div>
 
         {/* Summary */}
         {summary ? (
-          <div className="mb-3 px-3 py-2 rounded-md bg-activitybar-bg text-xs text-text-secondary whitespace-pre-wrap">
+          <div className="mb-3 px-3 py-2 rounded-control bg-surface-sunken text-xs text-text-muted whitespace-pre-wrap">
             {summary}
           </div>
         ) : isLoadingSummary ? (
-          <div className="mb-3 px-3 py-2 rounded-md bg-activitybar-bg flex items-center gap-2 text-xs text-text-secondary">
+          <div className="mb-3 px-3 py-2 rounded-control bg-surface-sunken flex items-center gap-2 text-xs text-text-muted">
             <SpinnerGap size={12} className="animate-spin" />
             <span>サマリーを生成中...</span>
           </div>
         ) : onRequestSummary ? (
           <button
             onClick={onRequestSummary}
-            className="mb-3 px-3 py-2 rounded-md border border-border flex items-center justify-center gap-2 text-xs text-text-secondary hover:text-text-primary hover:bg-activitybar-bg hover:border-text-secondary transition-colors w-full cursor-pointer"
+            className="mb-3 px-3 py-2 rounded-control border border-border-control flex items-center justify-center gap-2 text-xs text-text-muted hover:text-text hover:bg-surface-sunken hover:border-border-strong transition-colors w-full cursor-pointer"
           >
             <Sparkle size={12} />
             <span>変更差分のサマリーを作成</span>
@@ -229,7 +224,7 @@ export function SyncPreviewDialog({
 
         {/* Review file summary */}
         {reviewFileCount > 0 && (
-          <div className="mb-2 px-3 py-1.5 rounded-md bg-activitybar-bg/50 text-[11px] text-text-secondary">
+          <div className="mb-2 px-3 py-1.5 rounded-control bg-surface-sunken text-[11px] text-text-muted">
             レビュー関連ファイル: {reviewFileCount}件（自動同期）
           </div>
         )}
@@ -246,7 +241,6 @@ export function SyncPreviewDialog({
             label="追加"
             files={filteredChanges.added}
             icon={Plus}
-            colorClass="text-green-500"
             rootPath={rootPath}
             fileStatus="added"
             onRevert={onRevertFile ? handleRevert : undefined}
@@ -256,7 +250,6 @@ export function SyncPreviewDialog({
             label="変更"
             files={filteredChanges.modified}
             icon={PencilSimple}
-            colorClass="text-amber-500"
             rootPath={rootPath}
             fileStatus="modified"
             onRevert={onRevertFile ? handleRevert : undefined}
@@ -266,7 +259,6 @@ export function SyncPreviewDialog({
             label="削除"
             files={filteredChanges.deleted}
             icon={Minus}
-            colorClass="text-red-500"
             rootPath={rootPath}
             fileStatus="deleted"
             onRevert={onRevertFile ? handleRevert : undefined}
@@ -291,14 +283,14 @@ export function SyncPreviewDialog({
               rows={1}
               onFocus={() => setCommitBoxExpanded(true)}
               onBlur={() => { if (!commitMessage.trim()) setCommitBoxExpanded(false) }}
-              className={`w-full px-3 py-2 text-xs rounded-md border border-border bg-activitybar-bg text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-focus-border resize-none transition-[height] duration-200 ${commitBoxExpanded ? 'h-20 overflow-auto' : 'h-8 overflow-hidden'}`}
+              className={`w-full px-3 py-2 text-xs rounded-control border border-border-control bg-bg text-text placeholder:text-text-subtle focus:outline-none focus:border-focus-border resize-none transition-[height] duration-200 ${commitBoxExpanded ? 'h-20 overflow-auto' : 'h-8 overflow-hidden'}`}
               disabled={isSyncing}
             />
-            <p className="text-[10px] text-text-secondary/50 text-left">Enter で改行・⌘+Enterで同期</p>
+            <p className="text-[10px] text-text-subtle text-left">Enter で改行・⌘+Enterで同期</p>
             <button
               onClick={() => { onSync(commitMessage.trim() || undefined); setCommitBoxExpanded(false) }}
               disabled={isSyncing}
-              className={`w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${PRIMARY_ACTION}`}
+              className={`w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-control transition-colors ${PRIMARY_ACTION}`}
             >
               {isSyncing ? (
                 <>
@@ -319,14 +311,12 @@ export function SyncPreviewDialog({
         <div className="flex justify-end mt-3">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-activitybar-bg rounded-md transition-colors"
+            className="px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-surface-sunken rounded-control transition-colors"
           >
             閉じる
           </button>
         </div>
-      </div>
 
-      <div onClick={(e) => e.stopPropagation()}>
         <ConfirmDialog
           isOpen={revertAsk !== null}
           title="変更を元に戻しますか？"
@@ -337,7 +327,6 @@ export function SyncPreviewDialog({
           onConfirm={() => { void runRevert() }}
           onCancel={() => setRevertAsk(null)}
         />
-      </div>
-    </div>
+    </Dialog>
   )
 }

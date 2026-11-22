@@ -262,27 +262,38 @@ function sourceFiles(dir: string): string[] {
   })
 }
 
-test('nothing in the app can start a run yet: no module imports the runner, no IPC channel or preload method reaches it', () => {
+// 6b-2d: the runner is wired, and the card's ［任せる］ (`browserPlans:run`, main window only) is its one way in.
+test('only the card\'s ［任せる］ reaches the runner: one composition makes it, one IPC handler runs it, no agent, chat server or page names it', () => {
   const app = [...sourceFiles(path.join(clientDir, 'electron')), ...sourceFiles(path.join(clientDir, 'src')), ...sourceFiles(path.join(clientDir, 'shared')), ...sourceFiles(path.join(clientDir, 'connectors'))]
   const rel = (f: string) => path.relative(clientDir, f)
   const mentioning = (re: RegExp) => app.filter(f => re.test(fs.readFileSync(f, 'utf8'))).map(rel).sort()
   // Nothing outside features/browser names the runner module, however it is written.
   assert.deepEqual(mentioning(/browser\/runner(\.js|\.ts)?['"]/).filter(f => !f.startsWith('electron/features/browser/')), [])
-  // Inside it, only its own record store, and only for a type.
+  // Inside it, the wiring alone takes a value from it; the others only its types.
   const inside = app.filter(f => rel(f).startsWith('electron/features/browser/') && rel(f) !== 'electron/features/browser/runner.ts'
-    && /from ['"]\.\/runner(\.js|\.ts)?['"]/.test(fs.readFileSync(f, 'utf8'))).map(rel)
-  assert.deepEqual(inside, ['electron/features/browser/run-records.ts'])
-  assert.match(fs.readFileSync(path.join(clientDir, 'electron/features/browser/run-records.ts'), 'utf8'), /import type \{ BrowserRunRecords \} from '\.\/runner'/)
-  assert.deepEqual(mentioning(/\bcreateBrowserRunner\b/), ['electron/features/browser/runner.ts'])
-  // Only the controller hands out a window to run in; only the runner (and the window that defines it) enters ai mode for a run.
-  assert.deepEqual(mentioning(/\brunWindow\b/), ['electron/features/browser/controller.ts'])
+    && /from ['"]\.\/runner(\.js|\.ts)?['"]/.test(fs.readFileSync(f, 'utf8'))).map(rel).sort()
+  assert.deepEqual(inside, ['electron/features/browser/plans-api.ts', 'electron/features/browser/plans-ipc.ts', 'electron/features/browser/register.ts', 'electron/features/browser/run-records.ts', 'electron/features/browser/wire.ts'])
+  for (const f of inside.filter(f => f !== 'electron/features/browser/wire.ts')) {
+    assert.doesNotMatch(fs.readFileSync(path.join(clientDir, f), 'utf8'), /^import \{[^}]*\} from '\.\/runner'/m, `${f} takes only types from the runner`)
+  }
+  assert.deepEqual(mentioning(/\bcreateBrowserRunner\b/), ['electron/features/browser/runner.ts', 'electron/features/browser/wire.ts'])
+  // The IPC module gets the runner injected and calls it in exactly one handler: browserPlans:run, after the sender check.
+  const ipcSource = fs.readFileSync(path.join(clientDir, 'electron/features/browser/plans-ipc.ts'), 'utf8')
+  assert.equal(ipcSource.match(/runner\.run\(/g)?.length, 1)
+  const runHandler = ipcSource.slice(ipcSource.indexOf("ipc.handle('browserPlans:run'"), ipcSource.indexOf("ipc.handle('browserPlans:cancel'"))
+  assert.match(runHandler, /runner\.run\(/)
+  assert.ok(runHandler.indexOf('deps.fromMainWindow(event)') < runHandler.indexOf('runner.run('))
+  // Only the controller hands out a window to run in (the wiring passes it on); only the runner (and the window that defines it) enters ai mode.
+  assert.deepEqual(mentioning(/\brunWindow\b/), ['electron/features/browser/controller.ts', 'electron/features/browser/wire.ts'])
   assert.deepEqual(mentioning(/\benterAi\b/), ['electron/browser-window.ts', 'electron/features/browser/runner.ts', 'shared/browser-runner.ts'])
-  // The browser's IPC is exactly the member's three buttons and the change event.
+  // The browser's IPC is the member's three buttons, the change event and the plan card's five channels.
   const inventory = fs.readFileSync(path.join(clientDir, 'tests/ipc-harness/ipc-inventory.txt'), 'utf8').split('\n')
-  assert.deepEqual(inventory.filter(l => /^(main\.handle|main\.on|contract\.invoke|contract\.send|contract\.sync|contract\.events) browser:/.test(l)).map(l => l.split(' ')[1]).sort(),
-    ['browser:changed', 'browser:clearLogin', 'browser:clearLogin', 'browser:open', 'browser:open', 'browser:sites', 'browser:sites'])
-  // No agent, chat server or renderer code names the runner, its gate or a run.
+  assert.deepEqual(inventory.filter(l => /^(main\.handle|main\.on|contract\.invoke|contract\.send|contract\.sync|contract\.events) browser(Plans)?:/.test(l)).map(l => l.split(' ')[1]).sort(),
+    ['browser:changed', 'browser:clearLogin', 'browser:clearLogin', 'browser:open', 'browser:open', 'browser:sites', 'browser:sites',
+      'browserPlans:cancel', 'browserPlans:cancel', 'browserPlans:confirm', 'browserPlans:confirm', 'browserPlans:get', 'browserPlans:get',
+      'browserPlans:list', 'browserPlans:list', 'browserPlans:run', 'browserPlans:run'])
+  // No agent, chat server, preload or renderer code names the runner, its gate or a run window.
   for (const f of app.filter(f => /electron\/agents\/|chat-server|electron\/preload|\/src\//.test(f))) {
-    assert.doesNotMatch(fs.readFileSync(f, 'utf8'), /createBrowserRunner|browser-runner|runWindow|enterAi/, path.relative(clientDir, f))
+    assert.doesNotMatch(fs.readFileSync(f, 'utf8'), /createBrowserRunner|createRunGate|runWindow|enterAi/, path.relative(clientDir, f))
   }
 })

@@ -6,6 +6,7 @@ import { REVIEW_PART_TYPE, readReviewRecord, type ReviewRecord } from '../../../
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, type PluginOperationCard } from '../../../shared/plugin-operations'
 import { APPROVAL_PART_TYPE, readApprovalCardRef, type ApprovalCardRef } from '../../../shared/approvals'
 import { JOB_PROPOSAL_PART_TYPE, readJobProposalCardRef, type JobProposalCardRef } from '../../../shared/job-proposals'
+import { BROWSER_PLAN_PART_TYPE, readBrowserPlanCardRef, type BrowserPlanCardRef } from '../../../shared/browser-plans'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, readMinutesBundleChoiceCard, type MinutesBundleChoiceCard } from '../../../shared/minutes-app'
 import { MAIL_DRAFT_PART_TYPE, readMailDraftCard, type MailDraftCard } from '../../../shared/outbound-mail'
 import { DRIVE_OVERWRITE_PART_TYPE, readDriveOverwriteCard, type DriveOverwriteCard } from '../../../shared/drive-overwrite'
@@ -36,6 +37,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   const pluginOperations: PluginOperationCard[] = []
   const approvals: ApprovalCardRef[] = []
   const jobProposals: JobProposalCardRef[] = []
+  const browserPlans: BrowserPlanCardRef[] = []
   const minutesDealChoices: MinutesBundleChoiceCard[] = []
   // The app's cards, in the order the tools produced them (restored in that order).
   const cardOrder: string[] = []
@@ -55,6 +57,11 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     if (part.type === JOB_PROPOSAL_PART_TYPE) {
       const ref = readJobProposalCardRef((part as { data?: unknown }).data)
       if (ref && !jobProposals.some(j => j.id === ref.id)) { jobProposals.push(ref); cardOrder.push(`job-proposal-${ref.id}`) }
+      continue
+    }
+    if (part.type === BROWSER_PLAN_PART_TYPE) {
+      const ref = readBrowserPlanCardRef((part as { data?: unknown }).data)
+      if (ref && !browserPlans.some(b => b.id === ref.id)) { browserPlans.push(ref); cardOrder.push(`browser-plan-${ref.id}`) }
       continue
     }
     if (part.type === PLUGIN_OPERATION_PART_TYPE) {
@@ -124,6 +131,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(pluginOperations.length ? { pluginOperations } : {}),
     ...(approvals.length ? { approvals } : {}),
     ...(jobProposals.length ? { jobProposals } : {}),
+    ...(browserPlans.length ? { browserPlans } : {}),
     ...(minutesDealChoices.length ? { minutesDealChoices } : {}),
     ...(cardOrder.length > 1 ? { cardOrder } : {}),
     ...(mailDrafts.length ? { mailDrafts } : {}),
@@ -182,6 +190,10 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
   for (const stored of msg.jobProposals || []) {
     const ref = readJobProposalCardRef(stored)
     if (ref) cards.push({ type: JOB_PROPOSAL_PART_TYPE, id: `job-proposal-${ref.id}`, data: ref })
+  }
+  for (const stored of msg.browserPlans || []) {
+    const ref = readBrowserPlanCardRef(stored)
+    if (ref) cards.push({ type: BROWSER_PLAN_PART_TYPE, id: `browser-plan-${ref.id}`, data: ref })
   }
   for (const stored of msg.minutesDealChoices || []) {
     const card = readMinutesBundleChoiceCard(stored)

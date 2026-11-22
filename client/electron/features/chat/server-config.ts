@@ -42,6 +42,7 @@ import { buildSystemPrompt } from './system-prompt'
 import type { WorkingFolders } from '../../services/working-folders'
 import type { SkillShelfStore } from '../skill-shelf/store'
 import { taskTopicOf, topicAfterTaskMade } from '../../../shared/consultation-task'
+import { browserRequestForTurn, type BrowserRequestPlans } from '../../browser-request/tools'
 
 export interface ChatServerConfigDeps {
   config: ConfigStore
@@ -65,6 +66,8 @@ export interface ChatServerConfigDeps {
   requestInteraction: ChatServerConfig['requestInteraction']
   /** One of the app's AI commands, run in the main window (features/app-commands/ipc.ts). */
   runAppCommand?: ChatServerConfig['runAppCommand']
+  /** 「ブラウザ操作」's plans (features/browser/wire.ts): the request tool exists only while its switch is on. */
+  browserPlans?: BrowserRequestPlans
   /** Cancel a conversation's pending choice cards (agent-interactions.ts). */
   cancelChoicePrompts: (appSessionId: string) => void
   /** The AI action log (services/agent-events.ts). */
@@ -229,6 +232,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     },
     requestInteraction: deps.requestInteraction,
     runAppCommand: deps.runAppCommand,
+    createBrowserRequest: turn => browserRequestForTurn(deps.browserPlans, turn),
     requestToolApproval: (toolName, toolInput, toolUseId, appSessionId, reason) => deps.toolApprovals.request(toolName, toolInput, toolUseId, appSessionId, reason),
     cancelInteractions: appSessionId => {
       deps.toolApprovals.cancel(appSessionId)

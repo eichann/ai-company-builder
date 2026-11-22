@@ -106,6 +106,10 @@ import { createBrowserWindowShell } from './browser-window'
 import { createBrowserController } from './features/browser/controller'
 import { removeLeftoverBrowserPartitions } from './features/browser/leftovers'
 import { isMainFrameSender, registerBrowserIpc } from './features/browser/ipc'
+import { wireBrowserPlans } from './features/browser/wire'
+import { lstepConnector } from '../connectors/lstep'
+import { browserOperatorOf } from './agents/registry'
+import { browserAiStopped } from '../../shared/core/browser-operation'
 import { createProcedureReader } from './features/ai-turns/procedures'
 import { createPersonStepBinder, registerPluginStepsIpc } from './features/plugin-steps/ipc'
 import { createStepWriteAreas } from './features/plugin-steps/write-areas'
@@ -578,6 +582,25 @@ registerBrowserIpc(ipc, {
   refresh: companyId => agentControl.policy.refresh(companyId),
   watch: companyId => agentControl.watchSignals(companyId),
 })
+// Its plans (agent-browser.md "The card, the IPC and the request tool"): the card's IPC, the runner behind
+// ［任せる］ and the request tool's factory. Reading a site, the operator and sending ask the build's switch (off in 6b).
+const lstep = lstepConnector()
+const browserPlans = wireBrowserPlans(ipc, {
+  fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
+  baseUrl: getServerApiUrl,
+  cookies: session.cookies,
+  userId: session.userId,
+  userDataDir,
+  windows: browser,
+  stopped: companyId => browserAiStopped(agentControl.policy.stop(companyId)),
+  connectors: { declarations: [lstep.declaration], checkers: lstep.checkers, readers: lstep.readers },
+  operator: () => browserOperatorOf(config.authMode()),
+  cliPath: () => claudeCli.path(),
+  parentEnv: () => shellEnv.env(),
+})
+agentControl.policy.onPolicy((companyId, policy) => browserPlans.context.policyAnswered(companyId, policy.browser))
+agentControl.policy.onRefreshFailed(() => browserPlans.context.advance())
+lifecycle.beforeQuit(() => browserPlans.context.quitting())
 // lane C ▲
 
 registerAuthIpc(ipc, {
@@ -596,10 +619,12 @@ registerAuthIpc(ipc, {
     chatWindows.closeAll()
     // …nor this one's site logins (「ブラウザ操作」).
     browser.signedOut()
+    browserPlans.context.advance()
   },
   onSignedIn: userId => {
     agentControl.eventSender.sessionStarted()
     browser.signedIn(userId)
+    browserPlans.context.advance()
   },
 })
 
@@ -700,6 +725,7 @@ app.whenReady().then(async () => {
       cancelChoicePrompts: appSessionId => agentInteractions.cancelConversation(appSessionId),
       agentEvents: agentControl.events,
       agentPolicy: agentControl.policy,
+      browserPlans,
       agentStop: agentControl.stop,
       serverUrl: getServerApiUrl,
       brokerTokens,

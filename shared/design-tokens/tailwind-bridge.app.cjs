@@ -83,7 +83,8 @@ module.exports = {
         "thing-decision": "rgb(var(--color-thing-decision-rgb) / <alpha-value>)",
         "thing-project": "rgb(var(--color-thing-project-rgb) / <alpha-value>)",
         "thing-meeting": "rgb(var(--color-thing-meeting-rgb) / <alpha-value>)",
-        "scrim": "var(--color-scrim)"
+        "scrim": "var(--color-scrim)",
+        "scrim-palette": "var(--color-scrim-palette)"
       },
       "fontSize": {
         "caption": [

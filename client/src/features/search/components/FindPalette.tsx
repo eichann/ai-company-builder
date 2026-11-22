@@ -84,10 +84,13 @@ export function FindPalette({ onClose, rootPath, companyId, departmentFolder, re
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[14vh] bg-black/20" onClick={onClose}>
-      <div role="dialog" aria-label="探す" className="w-full max-w-xl overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3 dark:border-zinc-800">
-          <MagnifyingGlass size={16} className="flex-shrink-0 text-gray-400 dark:text-zinc-500" />
+    // A palette is drawn like a menu (design-system.md, P2d): the raised surface with its border and
+    // the pop shadow, on the menus' layer, over the light `scrim-palette` veil (lighter than a
+    // dialog's scrim; owner decision 2026-11-22). A click on the veil closes it.
+    <div data-palette-backdrop className="fixed inset-0 z-menu flex items-start justify-center bg-scrim-palette pt-[14vh]" onClick={onClose}>
+      <div role="dialog" aria-label="探す" className="w-full max-w-xl overflow-hidden rounded-card border border-[color:var(--color-border)] bg-surface-raised text-text shadow-pop" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-[color:var(--color-border)] px-4 py-3">
+          <MagnifyingGlass size={16} className="flex-shrink-0 text-text-subtle" />
           <input
             ref={loadRef}
             type="text"
@@ -100,32 +103,32 @@ export function FindPalette({ onClose, rootPath, companyId, departmentFolder, re
               if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); open(items[pick]) }
             }}
             placeholder="やること・案件・ファイルなどを名前で探す"
-            className="flex-1 bg-transparent text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none dark:text-zinc-200 dark:placeholder:text-zinc-500"
+            className="flex-1 bg-transparent text-sm text-text placeholder:text-text-subtle focus:outline-none"
           />
-          <kbd className="rounded border border-gray-200 px-1.5 text-[10px] text-gray-400 dark:border-zinc-600">esc</kbd>
+          <kbd className="rounded-small border border-[color:var(--color-border)] px-1.5 text-[10px] text-text-subtle">esc</kbd>
         </div>
-        <div className="px-4 pb-1 pt-2 text-[10.5px] font-semibold text-gray-400">{query.trim() ? `見つかったもの（${items.length}）` : '最近開いたもの'}</div>
+        <div className="px-4 pb-1 pt-2 text-[10.5px] font-semibold text-text-subtle">{query.trim() ? `見つかったもの（${items.length}）` : '最近開いたもの'}</div>
         <ul role="listbox" aria-label="開くもの" className="max-h-[50vh] overflow-auto px-1.5 pb-1.5">
-          {items.length === 0 && <li className="px-3 py-3 text-[12.5px] text-gray-400">{CALM.notFound}</li>}
+          {items.length === 0 && <li className="px-3 py-3 text-[12.5px] text-text-subtle">{CALM.notFound}</li>}
           {items.map((i, n) => {
             const name = i.path ? i.path.split('/').pop() ?? i.path : i.title
             const FileIc = i.path ? getFileIcon(name, false) : null
             return (
               <li key={i.key} role="option" aria-selected={n === pick} onMouseEnter={() => setAt(n)} onClick={() => open(i)}
-                className={`flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 ${n === pick ? 'bg-selected-bg' : 'hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}>
-                {FileIc ? <FileIc size={15} className="flex-shrink-0" /> : i.actionId ? <Broom size={15} className="flex-shrink-0 text-gray-500" /> : i.record ? <RecordIcon record={i.record} size={15} />
+                className={`flex cursor-pointer items-center gap-2.5 rounded-small px-2.5 py-1.5 ${n === pick ? 'bg-selected-bg' : 'hover:bg-surface-sunken'}`}>
+                {FileIc ? <FileIc size={15} className="flex-shrink-0" /> : i.actionId ? <Broom size={15} className="flex-shrink-0 text-text-muted" /> : i.record ? <RecordIcon record={i.record} size={15} />
                   : <ThingIcon kind={i.skillId ? 'skill' : i.consultationId ? 'consultation' : 'other'} size={15} />}
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12.5px] text-gray-800 dark:text-zinc-100">{name}</span>
-                  {i.detail && <span className="block truncate text-[10.5px] text-gray-500">{i.detail}</span>}
-                  {i.path && <span className="block truncate text-[10.5px] text-gray-500">{i.path.startsWith(prefix) ? i.path.slice(prefix.length) : i.path}</span>}
+                  <span className="block truncate text-[12.5px] text-text">{name}</span>
+                  {i.detail && <span className="block truncate text-[10.5px] text-text-muted">{i.detail}</span>}
+                  {i.path && <span className="block truncate text-[10.5px] text-text-muted">{i.path.startsWith(prefix) ? i.path.slice(prefix.length) : i.path}</span>}
                 </span>
-                <span className="w-[96px] shrink-0 truncate pr-1 text-right text-[10.5px] text-gray-400">{i.path ? THING_NAMES.file : i.kindName}</span>
+                <span className="w-[96px] shrink-0 truncate pr-1 text-right text-[10.5px] text-text-subtle">{i.path ? THING_NAMES.file : i.kindName}</span>
               </li>
             )
           })}
         </ul>
-        <div className="flex gap-3 border-t border-gray-100 px-4 py-1.5 text-[10.5px] text-gray-400 dark:border-zinc-800">
+        <div className="flex gap-3 border-t border-[color:var(--color-border)] px-4 py-1.5 text-[10.5px] text-text-subtle">
           <span>↑↓ で選ぶ</span><span>Enter で開く</span><span className="ml-auto">⌘K でいつでも</span>
         </div>
       </div>

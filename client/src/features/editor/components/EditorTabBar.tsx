@@ -107,6 +107,9 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
         key={filePath}
         role="tab"
         aria-selected={isActive}
+        // Focusable by script only (no extra Tab stop): 「片づけたタブ」 gives focus back here when what
+        // opened it is gone (design-system.md, P2d).
+        tabIndex={isActive ? -1 : undefined}
         data-tab={recordId ? `record:${recordId}` : view ? `view:${view}` : 'file'}
         data-pinned={pinned || undefined}
         data-drop-line={line ?? undefined}
@@ -150,6 +153,7 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
         onDoubleClick={() => { if (isPreview && onPin) onPin(filePath) }}
         className={`
           relative group flex items-center gap-2 px-3 py-2 cursor-pointer
+          outline-none focus-visible:ring-focus focus-visible:ring-inset focus-visible:ring-focus-ring
           border-r border-gray-200 dark:border-zinc-800/50 min-w-[96px] ${deptLabel ? 'max-w-[260px]' : 'max-w-[200px]'}
           ${section.group ? `border-b-2 ${GROUP_COLOR_CLASSES[section.group.color].line}` : ''}
           ${isActive

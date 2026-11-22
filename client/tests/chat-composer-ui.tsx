@@ -46,9 +46,9 @@ function Preview() {
     <main className="min-h-screen bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100 flex flex-col">
       <p className="text-xs text-gray-500 dark:text-zinc-400 px-4 pt-3">表示確認用の人工データ。本番の相談には接続しません。</p>
       <div className="flex-1 max-w-3xl w-full mx-auto px-4 py-4 space-y-6">
-        <div className="flex justify-end"><div className="rounded-2xl rounded-br-md px-4 py-3 text-[14px] bg-accent text-white">A社向けの提案書の骨子を作ってください</div></div>
+        <div className="flex justify-end"><div className="rounded-2xl rounded-br-md px-4 py-3 text-[14px] bg-primary text-on-primary">A社向けの提案書の骨子を作ってください</div></div>
         <div className="max-w-[85%]"><AssistantMessageParts parts={parts} isStreaming={false} markdown /></div>
-        {sent && <div className="flex justify-end"><div className="rounded-2xl rounded-br-md px-4 py-3 text-[14px] bg-accent text-white">{sent}</div></div>}
+        {sent && <div className="flex justify-end"><div className="rounded-2xl rounded-br-md px-4 py-3 text-[14px] bg-primary text-on-primary">{sent}</div></div>}
       </div>
       <div className="max-w-3xl w-full mx-auto border-t border-gray-200 dark:border-zinc-800">
         <div className="p-4 pb-7">

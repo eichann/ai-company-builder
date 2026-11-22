@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { SpinnerGap, X } from '@phosphor-icons/react'
+import { useState, useEffect, useRef, useCallback, useId } from 'react'
+import { SpinnerGap } from '@phosphor-icons/react'
 import { getCommitFileDiff, getWorkingFileDiff } from '../ipc/diffs'
+import { Dialog, DialogCloseButton, DialogTitle } from './Dialog'
 
 // --- Types ---
 
@@ -43,38 +44,27 @@ interface DiffModalProps {
 }
 
 export function DiffModal({ isOpen, onClose, title, diffProps }: DiffModalProps) {
-  useEffect(() => {
-    if (!isOpen) return
-    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
-  }, [isOpen, onClose])
-
   if (!isOpen) return null
+  return <DiffDialog onClose={onClose} title={title} diffProps={diffProps} />
+}
 
+/** The shared frame (design-system.md, P2d), wide and tall: a list-like header, no padding. */
+function DiffDialog({ onClose, title, diffProps }: Omit<DiffModalProps, 'isOpen'>) {
+  const titleId = useId()
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="w-[95vw] max-w-[1400px] h-[85vh] flex flex-col bg-sidebar-bg border border-border rounded-xl shadow-2xl overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-activitybar-bg/50">
-          <h3 className="text-sm font-medium text-text-primary truncate">{title}</h3>
-          <button
-            onClick={onClose}
-            className="p-1 rounded hover:bg-activitybar-bg text-text-secondary transition-colors"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* Split Diff Content */}
-        <div className="flex-1 overflow-hidden">
-          <DiffViewer {...diffProps} />
-        </div>
+    <Dialog onClose={onClose} labelledBy={titleId} size="custom" padded={false}
+      className="max-w-[1400px] h-[85vh] flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-[color:var(--color-border)] bg-bg">
+        <DialogTitle id={titleId} className="truncate">{title}</DialogTitle>
+        <DialogCloseButton onClick={onClose} />
       </div>
-    </div>
+
+      {/* Split Diff Content */}
+      <div className="flex-1 overflow-hidden">
+        <DiffViewer {...diffProps} />
+      </div>
+    </Dialog>
   )
 }
 
@@ -176,6 +166,16 @@ function toSplitRows(lines: UnifiedDiffLine[]): SplitRow[] {
 
 // --- Component ---
 
+// Before / after by meaning (design-system.md, P2d): a removed line is the danger set, an added
+// one the success set (text on its own fill: AA in both themes, build.mjs PAIRS), so they stay
+// apart in light and dark; a padding row is the page's grey. Also each side's header.
+const LINE_LOOK = {
+  remove: 'bg-danger-bg text-danger-text border-danger-border',
+  add: 'bg-success-bg text-success-text border-success-border',
+  empty: 'bg-bg',
+  context: 'text-text-muted',
+} as const
+
 export function DiffViewer(props: DiffViewerProps) {
   const { rootPath, filePath } = props
   const [diffLines, setDiffLines] = useState<UnifiedDiffLine[]>([])
@@ -235,7 +235,7 @@ export function DiffViewer(props: DiffViewerProps) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center gap-2 py-8 text-sm text-text-secondary">
+      <div className="flex items-center justify-center gap-2 py-8 text-sm text-text-muted">
         <SpinnerGap size={16} className="animate-spin" />
         差分を読み込み中...
       </div>
@@ -244,7 +244,7 @@ export function DiffViewer(props: DiffViewerProps) {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center py-8 text-sm text-red-400">
+      <div role="alert" className="flex items-center justify-center py-8 text-sm text-danger-text">
         差分の読み込みに失敗しました
       </div>
     )
@@ -252,7 +252,7 @@ export function DiffViewer(props: DiffViewerProps) {
 
   if (diffLines.length === 0) {
     return (
-      <div className="flex items-center justify-center py-8 text-sm text-text-secondary">
+      <div className="flex items-center justify-center py-8 text-sm text-text-muted">
         差分なし
       </div>
     )
@@ -263,8 +263,8 @@ export function DiffViewer(props: DiffViewerProps) {
   return (
     <div className="flex h-full">
       {/* Left pane (old / removed) */}
-      <div className="w-1/2 border-r border-border flex flex-col">
-        <div className="px-3 py-1.5 text-[11px] text-text-secondary bg-red-500/5 border-b border-border font-medium">
+      <div className="w-1/2 border-r border-[color:var(--color-border)] flex flex-col">
+        <div data-diff-side="before" className={`px-3 py-1.5 text-[11px] font-medium border-b ${LINE_LOOK.remove}`}>
           変更前
         </div>
         <div
@@ -280,7 +280,7 @@ export function DiffViewer(props: DiffViewerProps) {
 
       {/* Right pane (new / added) */}
       <div className="w-1/2 flex flex-col">
-        <div className="px-3 py-1.5 text-[11px] text-text-secondary bg-green-500/5 border-b border-border font-medium">
+        <div data-diff-side="after" className={`px-3 py-1.5 text-[11px] font-medium border-b ${LINE_LOOK.add}`}>
           変更後
         </div>
         <div
@@ -304,18 +304,6 @@ function SplitLine({ lineNo, content, type }: {
   content: string
   type: 'add' | 'remove' | 'context' | 'empty'
 }) {
-  const bgClass =
-    type === 'remove' ? 'bg-red-500/10' :
-    type === 'add' ? 'bg-green-500/10' :
-    type === 'empty' ? 'bg-activitybar-bg/30' :
-    ''
-
-  const textClass =
-    type === 'remove' ? 'text-red-400' :
-    type === 'add' ? 'text-green-400' :
-    type === 'empty' ? '' :
-    'text-text-secondary'
-
   const prefix =
     type === 'remove' ? '−' :
     type === 'add' ? '+' :
@@ -323,16 +311,16 @@ function SplitLine({ lineNo, content, type }: {
     ' '
 
   return (
-    <div className={`flex ${bgClass} min-h-[1.7em]`}>
-      <span className="w-[45px] text-right pr-2 text-text-secondary/25 select-none flex-shrink-0">
+    <div data-diff-line={type} className={`flex ${LINE_LOOK[type]} min-h-[1.7em]`}>
+      <span className="w-[45px] text-right pr-2 text-text-subtle select-none flex-shrink-0">
         {lineNo ?? ''}
       </span>
       {type !== 'empty' && (
         <>
-          <span className={`w-[16px] text-center select-none flex-shrink-0 ${textClass}`}>
+          <span className="w-[16px] text-center select-none flex-shrink-0">
             {prefix}
           </span>
-          <span className={`flex-1 whitespace-pre pr-3 ${textClass}`}>
+          <span className="flex-1 whitespace-pre pr-3">
             {content || '\u00A0'}
           </span>
         </>

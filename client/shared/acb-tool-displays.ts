@@ -169,6 +169,8 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   mcp__acb_review__request_review: say('確認をお願いしました', '確認をお願いしています', '確認を {n} 回お願いしました', input => shortText(input.title)),
   // The question is the member's topic, never a URL path.
   mcp__acb_web__web_research: say('Webで調べました', 'Webで調べています', 'Webで {n} 回調べました', input => shortText(input.question)),
+  // 「ブラウザ操作」: the AI asked for a plan; the card shows what it is (agent-browser.md).
+  mcp__acb_browser__browser_request: say('サイトの操作を頼みました', 'サイトの中を探して計画を作っています', 'サイトの操作を {n} 回頼みました'),
   mcp__acb_ask__ask_user: say('質問しました', '質問しています', '{n} 回質問しました'),
   ...SECOND_OPINION_DISPLAYS,
 }

@@ -16,7 +16,8 @@ import { BrowserSection } from './BrowserSection'
 import { useBrowserSites } from '../hooks/useBrowserSites'
 import { LegacyKeysNote, MoveEnvKeysCard } from './MoveEnvKeysCard'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
-import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import { Dialog } from '../../../shared/ui/Dialog'
+import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo, SlackLogo, UserSwitch, UserCircle, CalendarCheck, PlugsConnected, Globe } from '@phosphor-icons/react'
 import { useAppStore } from '../../../stores/appStore'
 import { useDepartments } from '../../../shared/hooks/useDepartments'
@@ -126,20 +127,11 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const dialogRef = useRef<HTMLDivElement>(null)
 
   // Check which git binary is in use (warn when on the system git fallback)
   useEffect(() => {
     getGitBinaryStatus().then(setGitBinaryStatus).catch(() => {})
   }, [])
-
-  // Escape closes; focus starts inside the dialog.
-  useEffect(() => {
-    dialogRef.current?.focus()
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   // Load .env and .gitignore files (and whether this member may edit the latter) on mount
   useEffect(() => {
@@ -285,13 +277,6 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
     }
   }, [currentCompany?.rootPath, activeTab, envDrafts, removedKeys, pastedEnv, gitignoreContent, gitignoreEditable])
 
-  // Handle backdrop click
-  const handleBackdropClick = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) {
-      onClose()
-    }
-  }
-
   if (!currentCompany) {
     return null
   }
@@ -305,20 +290,12 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
   )
 
   return (
-    <div
-      className="fixed inset-0 z-dialog flex items-center justify-center bg-scrim p-6"
-      onClick={handleBackdropClick}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="設定"
-        tabIndex={-1}
-        className="flex h-[min(760px,92vh)] w-[min(1040px,96vw)] overflow-hidden rounded-card border border-zinc-200 bg-white text-zinc-900 shadow-dialog outline-none dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-100"
-      >
+    // The shared frame (design-system.md, P2d): its surface, scrim and keys — Tab stays inside, Esc
+    // closes and stops there, focus goes back to what opened it; a wide two-pane dialog of its own size.
+    <Dialog onClose={onClose} label="設定" size="custom" padded={false}
+      className="flex h-[min(760px,92vh)] max-w-[1040px] overflow-hidden">
         {/* Section nav */}
-        <nav ref={browser.loadRef} aria-label="設定の項目" className="flex w-60 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50/80 px-3 py-5 dark:border-white/[0.06] dark:bg-zinc-950/40">
+        <nav ref={browser.loadRef} aria-label="設定の項目" className="flex w-60 shrink-0 flex-col border-r border-[color:var(--color-border)] bg-bg px-3 py-5">
           <div className="px-2.5 pb-4">
             <p className="text-[15px] font-semibold tracking-tight">設定</p>
             <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400" title={currentCompany.rootPath}>{currentCompany.name}</p>
@@ -351,7 +328,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
             ))}
           </div>
           {/* Always shown, whatever section is open (owner decision: members are told). */}
-          <p className="mt-auto flex shrink-0 gap-1.5 border-t border-zinc-200 px-2.5 pt-3 text-[11px] leading-relaxed text-zinc-500 dark:border-white/[0.06] dark:text-zinc-400">
+          <p className="mt-auto flex shrink-0 gap-1.5 border-t border-[color:var(--color-border)] px-2.5 pt-3 text-[11px] leading-relaxed text-text-muted">
             <Info size={13} className="mt-0.5 shrink-0" aria-hidden />
             <span><span className="block">{AGENT_LOG_NOTICE_TEXT}</span><span className="mt-1 block">{SANDBOX_NOTICE_TEXT}</span></span>
           </p>
@@ -363,7 +340,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
             type="button"
             onClick={onClose}
             aria-label="閉じる"
-            className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 dark:hover:bg-white/[0.06] dark:hover:text-zinc-200"
+            className="absolute right-4 top-4 z-10 rounded-control p-1.5 text-text-subtle transition-colors hover:bg-surface-sunken hover:text-text focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring"
           >
             <X size={18} />
           </button>
@@ -572,7 +549,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
           </div>
 
           {hasSaveFooter && (
-            <div className="flex items-center justify-between gap-4 border-t border-zinc-200 bg-white px-8 py-3 dark:border-white/[0.08] dark:bg-zinc-900">
+            <div className="flex items-center justify-between gap-4 border-t border-[color:var(--color-border)] bg-surface-raised px-8 py-3">
               {error ? (
                 <p role="alert" className="text-[13px] text-red-600 dark:text-red-300">{error}</p>
               ) : (
@@ -586,8 +563,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
