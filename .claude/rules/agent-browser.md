@@ -644,10 +644,13 @@ setting generation, conversation: 6b-2d hands it in), the clocks as `now()` and 
   `fixedContentMismatch`) — else `fixed-mismatch`; record `claimed`; the PR 5a checks ("The runner")
   plus **the build's own combination** (`deps.combination`: declaration and checker hashes and facts
   version equal the fixed content's, the checker's `facts.version` too — else `connector`); the setting,
-  the stop, the expiry, the context; the window, one run per window; **the full re-read**
+  the stop, the plan's hour (the hashed `expiresAt`; the claim's `approvedAt`, not hashed, only refuses
+  at parse), the context; the window, one run per window; **the full re-read**
   (`readBrowserFacts` through the window's page-less read session, then
-  `browserFactsChangedProblem(approved facts, re-read)`: any difference, a fact unreadable, a checker
-  problem → `facts-changed`; a count may fall, never rise; unknown → known is a change); `ai` mode and the
+  `browserFactsChangedProblem(approved facts, re-read)`, saying what for the card: not read whole /
+  a read that cannot be made → `read-failed`, the checker's own problem → `checker-problem`, another
+  account → `account-mismatch`, the step's templates → `before-changed`, any other approved fact →
+  `facts-changed`; a count may fall, never rise; unknown → known is a change); `ai` mode and the
   checker's view (`checkBefore`: account, target, state, CSRF).
 - **The write** (`run.write`, typed so it cannot be sent without its two steps; shell:
   `writeThroughSession` + `sendOnce`): the write session is prepared first (connections closed, storage
@@ -658,9 +661,14 @@ setting generation, conversation: 6b-2d hands it in), the clocks as `now()` and 
   monotonic **and** wall elapsed since just before asking both in `[0, min(validMs, 5000))` (a sleep stops
   the first, a clock set back makes the second negative → `permit-late`), the context, the stop, the
   setting, the expiry, the window. False or a throw → the request is never ended → **`failed`, reported
-  failed** (the only way to `failed`: "the app stopped before sending", provably). The shell's send
-  rejects with `BrowserNotSentError` only before `request.end`; every other failure is `sent` with no
-  answer.
+  failed**. Every path to `failed` is "the app stopped before sending", provably, and only after the
+  permit was asked: no usable permit answer (none in 5 s, an error, a malformed one, `ready` throwing —
+  `permit-unanswered`), the record `permit-asked` cannot be kept, `beforeSend` false or throwing
+  (`permit-late`, `context-changed`, `stopped`…), or the request not even made (`net.request` /
+  `setHeader` failing before `end`: `error`). The shell's send rejects with `BrowserNotSentError` only
+  before `request.end`; every other failure is `sent` with no answer. **Decision (safe side)**: a
+  refusal of the write session's hook or a stop right after `end` (the hook cancels the request) is
+  reported `unknown` although nothing left — the app cannot tell it from a lost answer.
 - **After the send**: no answer / an error / a disconnect / an exception once the permit was asked →
   **`unknown`** (`no-answer`); otherwise the page read again decides: exactly `expectedAfter` →
   `succeeded`; another account, no target, a checker problem, any other state — **a 4xx with the page
@@ -680,7 +688,7 @@ checker, facts driver and parser against a fake Lステップ and a fake of the 
 `tests/browser-plans-fake.ts`: success with one write and one report; an older server, every fixed-content
 mismatch and another combination never run; each re-read change (a body, the timing, a template on the
 step, the account, the count rising, unknown → known) stops before the permit, a falling count runs; a
-stop / setting / context change before the permit; the record not kept; 4999 ms sends, 5000 ms on either
+stop / setting / context change before the permit, each saying what; a re-read that cannot be made; the record not kept; 4999 ms sends, 5000 ms on either
 clock or a clock set back does not; a stop / closed window / changed context / a throw in the last check
 → failed; a refused permit → nothing reported; no usable permit answer (an error, a malformed one, none in
 5 s) → failed, asked once; a 4xx → unknown; an error, a lost answer applied or not → unknown and never sent
@@ -714,8 +722,9 @@ README in the folder.
   file in area `model`, but nothing compares behaviour mechanically, so it can drift; regressions in
   the code stay the tests' job. The app side copies the runner of 6b-2c ("Executing a plan":
   `runner.ts`, `browser-runner.ts`, `read-session.ts`, each action naming its step; built and switched
-  off, nothing in the app calls it yet); `broken/BrokenFailedAfterSendError` (an error after the request
-  left reported failed) must fail R4. Left out on purpose: more than
+  off, nothing in the app calls it yet); `AppPermitAnswerUnusable` is the `failed` before 5 s (an unusable
+  permit answer, asking threw), and `broken/BrokenFailedOn4xx` also stands for "failed after an error once
+  the request left" (the same transition in the model). Left out on purpose: more than
   one target / two plans / two PCs, real durations (5 s and 30 s are abstract units), the app's two
   clocks as separate values, a person confirming wrongly, the facts' fields (folded into
   before / after / other), a modified app, a site processing a send late, and liveness under fairness

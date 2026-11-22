@@ -3,6 +3,11 @@
 \* unchanged, the app reports failed ("not sent"). The runner before 6b-2c had this branch (reason
 \* refused-by-site); client/electron/features/browser/runner.ts now judges a sent write only by the page
 \* read after it (succeeded or unknown). The write did reach the site, so "not sent" is false.
+\* In the model this is also the variant for "failed after an error once the request left" (no answer,
+\* a disconnect, an exception after request.end): that is the same transition — from "sent" to a
+\* "failed" report — so a second variant would be a duplicate. In the code that guard is
+\* read-session.ts writeThroughSession ("not sent" only before request.end) and runner.ts settling it
+\* unknown; tests/browser-execute.test.ts and tests/browser-read-session.test.ts hold it.
 EXTENDS PlanLife
 
 BrokenAppReadsAfter(a) ==
@@ -15,6 +20,6 @@ BrokenNext ==
     \/ ServerNext \/ ClaimNext \/ Tick \/ SomeoneEdits \/ Done
     \/ \E a \in Apps :
         \/ AppCrashes(a) \/ AppRereadSame(a) \/ AppDropsBeforePermit(a) \/ AppAsksPermit(a)
-        \/ AppPermitUnanswered(a) \/ AppSends(a) \/ AppStopsBeforeSend(a) \/ BrokenAppReadsAfter(a) \/ AppRereadAfterFails(a)
+        \/ AppPermitUnanswered(a) \/ AppPermitAnswerUnusable(a) \/ AppSends(a) \/ AppStopsBeforeSend(a) \/ BrokenAppReadsAfter(a) \/ AppRereadAfterFails(a)
 BrokenSpec == Init /\ [][BrokenNext]_vars
 ====

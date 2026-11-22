@@ -27,12 +27,12 @@ import {
 } from '../../../../shared/core/plugin-browser-declaration'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
 import {
-  BROWSER_PLAN_TIMES, BROWSER_REPORT_REASONS, browserFactsChangedProblem, type BrowserReportResult,
+  BROWSER_PLAN_TIMES, BROWSER_REPORT_REASONS, browserFactsAccount, browserFactsChangedProblem, browserFactsState, type BrowserReportResult,
 } from '../../../../shared/core/browser-plans'
 import { readBrowserFacts } from '../../../shared/browser-facts'
 import type { BrowserHtmlDocument } from '../../../shared/browser-page'
 import {
-  BROWSER_PLAN_MAX_AHEAD_MS, CONTENT_HASH_RE, createRunGate, declaredWriteBody, encodeForm, FORM_CONTENT_TYPE, fixedContentMismatch,
+  CONTENT_HASH_RE, createRunGate, declaredWriteBody, encodeForm, FORM_CONTENT_TYPE, fixedContentMismatch,
   isBrowserRunReason, parseBrowserClaim, parseFixedContent, permitValidMs, sameTargetState,
   type BrowserChecker, type BrowserClaimed, type BrowserPageRead, type BrowserPreviewReader, type BrowserPreviewSurface,
   type BrowserRunPlan, type BrowserRunReason, type BrowserRunResult, type BrowserRunSurface, type BrowserStepRecord, type BrowserTargetState,
@@ -210,7 +210,8 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
         if (!current()) return 'context-changed'
         if (deps.stopped(plan.companyId)) return 'stopped'
         if (!allowedNow(connector, plan, deps.site(plan.companyId, connector.host))) return 'policy'
-        if (deps.now() >= plan.expiresAt || deps.now() - plan.approvedAt > BROWSER_PLAN_MAX_AHEAD_MS) return 'expired'
+        // The plan's hour, from the hashed content (the claim's `approvedAt` is not covered by the hash).
+        if (deps.now() >= plan.expiresAt) return 'expired'
         return null
       }
       const early = why()
@@ -240,8 +241,16 @@ export function createBrowserRunner(deps: BrowserRunnerDeps) {
           parseHtml: deps.parse,
           now: () => new Date(deps.now()),
         })
-        if (!reread.facts) return giveBack(reread.problem === 'stop' ? abort() ?? 'context-changed' : 'facts-changed')
-        if (reread.checkerProblem || browserFactsChangedProblem(operation, claimed.fixed.factsVersion, content.facts, reread.facts, values)) return giveBack('facts-changed')
+        if (!reread.facts) return giveBack(reread.problem === 'stop' ? abort() ?? 'context-changed' : 'read-failed')
+        // What happened, in the card's words: the site could not be read whole, the checker refused, another
+        // account, the step's templates changed, or another approved fact changed.
+        if (reread.checkerProblem) return giveBack('checker-problem')
+        if (reread.problem) return giveBack('read-failed')
+        if (browserFactsAccount(reread.facts) !== browserFactsAccount(content.facts)) return giveBack('account-mismatch')
+        const stateNow = browserFactsState(reread.facts)
+        const stateThen = browserFactsState(content.facts)
+        if (!stateNow || !stateThen || !sameTargetState(stateNow, stateThen)) return giveBack('before-changed')
+        if (browserFactsChangedProblem(operation, claimed.fixed.factsVersion, content.facts, reread.facts, values)) return giveBack('facts-changed')
         let reason = abort()
         if (reason) return giveBack(reason)
 

@@ -62,19 +62,21 @@ interface FakeLstep {
   onPrepare?: () => void
   /** The page carries its CSRF fields (false: none). */
   token: boolean
+  /** Templates that are no longer text only (another form type). */
+  notText: string[]
 }
 
 function fakeLstep(over: Partial<FakeLstep> = {}): FakeLstep {
   return {
     account: ACCOUNT, steps: { [STEP]: [ON_STEP] }, timing: '3日前 09:00',
-    bodies: { [ON_STEP]: '本文1\n2行目', [TO_ADD]: '本文2\n2行目' }, audience: null, posts: [], write: 'apply', token: true, ...over,
+    bodies: { [ON_STEP]: '本文1\n2行目', [TO_ADD]: '本文2\n2行目' }, audience: null, posts: [], write: 'apply', token: true, notText: [], ...over,
   }
 }
 
 const pageOf = (data: unknown[], current = 1, last = 1, total = data.length) =>
   JSON.stringify({ current_page: current, data, last_page: last, per_page: 50, total, links: [], next_page_url: null, prev_page_url: null })
 const template = (site: FakeLstep, id: string, group: number) =>
-  ({ id: Number(id), name: `架空テンプレ${id.slice(-1)}`, content_text: site.bodies[id], created_at: 'x', form_type: 8, group: { id: group, name: '架空フォルダ' }, editor_version: 2 })
+  ({ id: Number(id), name: `架空テンプレ${id.slice(-1)}`, content_text: site.bodies[id], created_at: 'x', form_type: site.notText.includes(id) ? 2 : 8, group: { id: group, name: '架空フォルダ' }, editor_version: 2 })
 
 function reminderPage(site: FakeLstep): string {
   let hole = 1
@@ -283,21 +285,27 @@ test('with the build\'s switch (off in 6b) nothing is asked: no server call, no 
 // Before the permit: the full re-read
 // ---------------------------------------------------------------------------
 
-test('anything the person approved that changed on the site stops the run before the permit: nothing sent, the plan given back', async () => {
-  const changes: Array<[string, (site: FakeLstep) => void]> = [
-    ['a template body', s => { s.bodies[TO_ADD] = '変えた本文' }],
-    ['the step\'s timing', s => { s.timing = '当日 09:00' }],
-    ['another template on the step', s => { s.steps[STEP].push(TO_ADD) }],
-    ['the LINE account', s => { s.account = '5550002' }],
+test('anything the person approved that changed on the site stops the run before the permit, saying what: nothing sent, the plan given back', async () => {
+  const changes: Array<[string, (h: Awaited<ReturnType<typeof harness>>) => void, string]> = [
+    ['a template body', h => { h.site.bodies[TO_ADD] = '変えた本文' }, 'facts-changed'],
+    ['the step\'s timing', h => { h.site.timing = '当日 09:00' }, 'facts-changed'],
+    ['another template on the step', h => { h.site.steps[STEP].push(TO_ADD) }, 'before-changed'],
+    ['the LINE account', h => { h.site.account = '5550002' }, 'account-mismatch'],
+    // The re-read cannot make a plan by itself: the site could not be read whole.
+    ['a template list that fails', h => { h.site.bodies[TO_ADD] = '' }, 'read-failed'],
+    ['a read the checker cannot make', h => { h.deps.reader = () => undefined }, 'read-failed'],
+    // The checker's own word: the template to add is no longer text only.
+    ['a template no longer text only', h => { h.site.notText.push(TO_ADD) }, 'checker-problem'],
   ]
-  for (const [label, change] of changes) {
+  for (const [label, change, reason] of changes) {
     const h = await harness()
-    change(h.site)
-    assert.deepEqual(await h.run(), { outcome: 'stopped', reason: 'facts-changed' }, label)
+    change(h)
+    const runner = createBrowserRunner(h.deps)
+    assert.deepEqual(await runner.run({ companyId: COMPANY, planId: PLAN, contentHash: h.server.contentHash }), { outcome: 'stopped', reason }, label)
     assert.deepEqual(h.site.posts, [], label)
     assert.equal(h.server.state.calls.includes('permit'), false, `${label}: no permit asked`)
     assert.equal(h.server.state.execution, 'void', label)
-    assert.deepEqual(states(h.records), ['claimed', 'failed:facts-changed'], label)
+    assert.deepEqual(states(h.records), ['claimed', `failed:${reason}`], label)
   }
 })
 

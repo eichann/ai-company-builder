@@ -229,7 +229,7 @@ test('while a run operates, the page\'s own write (fetch, XHR, a timer\'s autosa
 
 test('a run stops before writing for another LINE account or an emergency stop during the run', { skip }, () => {
   const r = result.runner
-  assert.deepEqual(r.wrongAccount, { outcome: 'stopped', reason: 'facts-changed' })
+  assert.deepEqual(r.wrongAccount, { outcome: 'stopped', reason: 'account-mismatch' })
   assert.deepEqual(r.stoppedMidRun, { outcome: 'stopped', reason: 'stopped' })
   assert.equal(writesOfRuns().some(h => ['201/302', '201/303'].includes(idsOf(h.body))), false)
 })
@@ -254,8 +254,8 @@ test('a permit that is 5 s old by the last check right before sending: the windo
 })
 
 test('an answer over the size the runner reads is refused whole, never read cut short', { skip }, () => {
-  // The facts read again through the read session: the page is refused whole, so they cannot be compared.
-  assert.deepEqual(result.runner.oversize, { outcome: 'stopped', reason: 'facts-changed' })
+  // The facts read again through the read session: the page is refused whole, so the site cannot be read.
+  assert.deepEqual(result.runner.oversize, { outcome: 'stopped', reason: 'read-failed' })
   assert.equal(writesOfRuns().some(h => idsOf(h.body) === '201/305'), false)
 })
 

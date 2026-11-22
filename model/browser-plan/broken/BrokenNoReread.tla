@@ -13,6 +13,6 @@ BrokenNext ==
     \/ ServerNext \/ ClaimNext \/ Tick \/ SomeoneEdits \/ Done
     \/ \E a \in Apps :
         \/ AppCrashes(a) \/ BrokenAppSkipsReread(a) \/ AppDropsBeforePermit(a) \/ AppAsksPermit(a)
-        \/ AppPermitUnanswered(a) \/ AppSends(a) \/ AppStopsBeforeSend(a) \/ AppReadsAfter(a) \/ AppRereadAfterFails(a)
+        \/ AppPermitUnanswered(a) \/ AppPermitAnswerUnusable(a) \/ AppSends(a) \/ AppStopsBeforeSend(a) \/ AppReadsAfter(a) \/ AppRereadAfterFails(a)
 BrokenSpec == Init /\ [][BrokenNext]_vars
 ====

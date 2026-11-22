@@ -230,6 +230,15 @@ AppPermitUnanswered(a) ==
     /\ ToIdle(a)
     /\ UNCHANGED <<srvVars, permitReq, siteVars>>
 
+\* runner.ts ready, before 5 s: the permit's answer came but is not usable (permitValidMs refuses it), or
+\* asking threw (askWithin counts it as no answer at once) → not sent; settle('failed', 'permit-unanswered').
+\* The server may have permitted it all the same: nothing is sent, so the report "failed" stays true.
+AppPermitAnswerUnusable(a) ==
+    /\ ph[a] = "asking"
+    /\ rep' = [rep EXCEPT ![ap[a]] = "failed"]
+    /\ ToIdle(a)
+    /\ UNCHANGED <<srvVars, permitReq, siteVars>>
+
 \* runner.ts beforeSend (under the permit by both clocks, same context, not stopped, the setting, the
 \* window), asked by the shell's sendOnce right before request.end with no await in between. The write
 \* is lost, or arrives and the site changes, or arrives and the site refuses it.
@@ -302,7 +311,7 @@ ServerNext ==
 AppNext ==
     \E a \in Apps :
         \/ AppCrashes(a) \/ AppRereadSame(a) \/ AppDropsBeforePermit(a) \/ AppAsksPermit(a)
-        \/ AppPermitUnanswered(a) \/ AppSends(a) \/ AppStopsBeforeSend(a) \/ AppReadsAfter(a) \/ AppRereadAfterFails(a)
+        \/ AppPermitUnanswered(a) \/ AppPermitAnswerUnusable(a) \/ AppSends(a) \/ AppStopsBeforeSend(a) \/ AppReadsAfter(a) \/ AppRereadAfterFails(a)
 
 ClaimNext == \E a \in Apps, p \in Plans : Claim(a, p)
 
