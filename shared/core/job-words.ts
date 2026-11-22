@@ -119,9 +119,12 @@ export function jobGrantLines(grant: JobGrant, trigger?: JobTrigger): string[] {
   if (grant.routes.includes(JOB_MINUTES_ROUTE)) lines.push('議事録：確かめで見つかった、責任者が出た会議のものだけ読む')
   if (grant.routes.length > 0) lines.push(`使える操作：${grant.routes.length}種類`)
   lines.push(grant.outbound === 'draft_only' ? '外に送るもの：下書きまで（送るのは人）' : '外に送るもの：なし')
-  // An event job (stage 4a): the day's limit is kept (company time); what comes beyond it is not run.
+  // An event job (stage 4a): the day's limit is kept (company time); what comes beyond it is not run. Run by the PC's AI
+  // (schema 3, stage 4b-3) its minutes per run are a hard limit too — such a grant always has tools (it creates its やること
+  // with `records`), the server's operation never has any (`grant.OPERATION_TAKES_NO_AI_POWERS`).
+  const dayLimit = `1日 ${grant.limits.runsPerDay}回まで（超えた出来事は動かさず、責任者に知らせます）`
   lines.push(trigger && isRecordTrigger(trigger)
-    ? `上限：1日 ${grant.limits.runsPerDay}回まで（超えた出来事は動かさず、責任者に知らせます）`
+    ? (grant.tools.length > 0 ? `上限：1回 ${jobMinutesText(grant.limits.minutes)}・${dayLimit}` : `上限：${dayLimit}`)
     : `上限：1回 ${jobMinutesText(grant.limits.minutes)}・1日 ${grant.limits.runsPerDay}回`)
   return lines
 }

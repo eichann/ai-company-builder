@@ -11,8 +11,13 @@ import JobsRoute from '@/app/companies/[id]/jobs/page'
 import { NAV_ITEMS } from '@/components/app/app-shell'
 import { approvedText } from '@/components/jobs/job-dialogs'
 import type { JobView } from '@/lib/api'
-import { DELIVERY_PLACE_CHOICES, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, jobProblemText, needsNewerScreen } from '@/lib/jobs'
-import { jobConsentCanonical, type JobDefinition } from '../../shared/core/jobs'
+import { ApiError } from '@/lib/api'
+import { describeJobError } from '@/lib/errors'
+import {
+  DELIVERY_PLACE_CHOICES, JOB_VERSION_HIDDEN, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, hiddenVersion, jobProblemText, needsNewerScreen,
+  switchJobForm,
+} from '@/lib/jobs'
+import { JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, jobConsentCanonical, type JobDefinition } from '../../shared/core/jobs'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok } from './fixtures'
 import { mockApi } from './mock-api'
@@ -393,7 +398,7 @@ describe('「もう一度」 (B PR 5b)', () => {
 // Stage 4-0 (jobs.md "Shapes this build does not know"): a job of a newer definition shape (event-triggered jobs, 4a)
 // never crashes this console, is never edited or approved from it, and the console says what to do.
 describe('a definition of a shape this console does not read', () => {
-  const event = { ...def(), schema: 3, trigger: { kind: 'future', when: 'something' } } as unknown as JobDefinition
+  const event = { ...def(), schema: 4, trigger: { kind: 'future', when: 'something' } } as unknown as JobDefinition
 
   it('every job request says which shapes this console reads', async () => {
     const { calls } = mockApi({
@@ -403,7 +408,7 @@ describe('a definition of a shape this console does not read', () => {
     renderInCompany(<JobsRoute />)
     await screen.findByRole('listitem', { name: '週の報告' })
     const job = calls.find((c) => c.url.endsWith('/jobs'))!
-    expect(job.headers['X-ACB-Job-Schemas']).toBe('1,2')
+    expect(job.headers['X-ACB-Job-Schemas']).toBe('1,2,3')
   })
 
   it('the list says 「画面を新しくしてください」 instead of a time, offers no edit, and a trigger of an unknown shape never crashes it', async () => {
@@ -480,9 +485,8 @@ describe('an event job', () => {
     const none = definitionFromForm({ ...form, startRecord: '' })
     expect(none.ok).toBe(false)
     if (!none.ok) expect(jobProblemText(none.problems)).toMatch(/見張るやることを1つ選んでください/)
-    // An event runs no AI yet.
-    const pc = definitionFromForm({ ...form, kind: 'pc' })
-    expect(pc.ok).toBe(false)
+    // The server's operation: never a check or an AI power (the PC's AI is schema 3, below).
+    expect(parsed.definition.check).toEqual({ kind: 'none' })
   })
 
   it('editing keeps a source state the form does not offer: a name change never widens what it watches (Codex review)', () => {
@@ -514,7 +518,7 @@ describe('an event job', () => {
     const query = calls.find((c) => c.url.endsWith('/records/query'))!
     expect(query.body).toMatchObject({ type: 'task', fields: { assignee: 'u_member' }, offset: 0 })
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/jobs'))!
-    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2')
+    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3')
     expect((post.body as { definition: JobDefinition }).definition).toMatchObject({ schema: 2, trigger: { startRecord: START, to: 'done', followMadeTask: true } })
   })
 
@@ -590,3 +594,213 @@ describe('an event job', () => {
     expect(within(dialog).getByRole('button', { name: '承認する' })).toBeEnabled()
   })
 })
+
+// Stage 4b-3 (jobs.md "Event jobs on the PC" "The admin console"): an event run by the responsible person's PC AI
+// (schema 3) is made, read back, approved and its occurrences pressed from here; a version hidden from this viewer is
+// said as such; refusals are plain Japanese.
+describe('an event run by the responsible person’s PC AI (schema 3)', () => {
+  const START = 'task-0123456789abcdef'
+  const OCC = 'occ.eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+  const trigger = { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: START, followMadeTask: true } as const
+  const pcDef = (over: Record<string, unknown> = {}): JobDefinition => ({
+    ...def(), schema: 3, name: '面談報告書', trigger, check: { kind: 'source_record', doneMark: 'file_linked' },
+    run: { kind: 'procedure', procedure: { source: 'company_skill', skill: 'interview-report', fingerprint: '0'.repeat(40) } }, placement: 'a',
+    missed: { policy: 'latest_only', expiresAfterMinutes: 1440 },
+    grant: { tools: ['records'], creates: ['task'], routes: [], reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 15, runsPerDay: 1 } },
+    ...over,
+  }) as JobDefinition
+  const pcForm = () => switchJobForm(switchJobForm({ ...emptyJobForm('u_member'), name: '面談報告書', startRecord: START, skillName: 'interview-report' }, { when: 'event' }), { kind: 'pc' })
+
+  it('the form makes schema 3: checked on the watched やること with the done mark chosen, its one やること granted by construction', () => {
+    const parsed = definitionFromForm({ ...pcForm(), doneMark: 'file_linked' })
+    expect(parsed.ok, JSON.stringify(parsed)).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.definition).toMatchObject({ schema: 3, placement: 'a', trigger, check: { kind: 'source_record', doneMark: 'file_linked' }, run: { kind: 'procedure' } })
+    // `grant.creates.EVENT_NEEDS_TASK`: the form always grants the one やること (and `records`, which creating needs).
+    expect(parsed.definition.grant).toMatchObject({ creates: ['task'], tools: ['records'] })
+    expect(formFromDefinition(parsed.definition)).toMatchObject({ when: 'event', kind: 'pc', doneMark: 'file_linked', startRecord: START, skillName: 'interview-report' })
+    // Without a watched やること: said plainly, nothing sent.
+    const none = definitionFromForm({ ...pcForm(), startRecord: '' })
+    expect(none.ok).toBe(false)
+    if (!none.ok) expect(jobProblemText(none.problems)).toMatch(/見張るやることを1つ選んでください/)
+  })
+
+  it('a check left on the form from a time job grants nothing to an event run (no place, no minutes)', () => {
+    for (const leftover of [{ checkKind: 'new_files' as const, checkPath: '人事部/面談' }, { checkKind: 'new_meetings' as const, titleWords: '面談' }]) {
+      const parsed = definitionFromForm({ ...pcForm(), ...leftover })
+      expect(parsed.ok, JSON.stringify(parsed)).toBe(true)
+      if (!parsed.ok) return
+      expect(parsed.definition.grant.reads.paths).toEqual([])
+      expect(parsed.definition.grant.routes).not.toContain('GET /minutes/:recordId/text')
+      expect(parsed.definition.grant.tools).toEqual(['records'])
+    }
+  })
+
+  it('becoming an event run by the PC waits one day for the app by default (owner D6); a version’s own wait is kept', () => {
+    expect(JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES).toBe(1440)
+    const fresh = emptyJobForm('u_member')
+    expect(fresh.expiresAfterMinutes).not.toBe(1440)
+    expect(switchJobForm(switchJobForm(fresh, { when: 'event' }), { kind: 'pc' }).expiresAfterMinutes).toBe(1440)
+    expect(switchJobForm(switchJobForm(fresh, { kind: 'pc' }), { when: 'event' }).expiresAfterMinutes).toBe(1440)
+    // The server's event operation and a time PC job keep theirs.
+    expect(switchJobForm(fresh, { when: 'event' }).expiresAfterMinutes).toBe(fresh.expiresAfterMinutes)
+    expect(switchJobForm(fresh, { kind: 'pc' }).expiresAfterMinutes).toBe(fresh.expiresAfterMinutes)
+    // Editing one that waits 3 days: changing anything else keeps it.
+    const editing = formFromDefinition(pcDef({ missed: { policy: 'latest_only', expiresAfterMinutes: 4320 } }))
+    expect(switchJobForm(editing, { when: 'event' }).expiresAfterMinutes).toBe(4320)
+    expect(switchJobForm(editing, { kind: 'pc' }).expiresAfterMinutes).toBe(4320)
+  })
+
+  it('creating one on the page: the watched やること by name, the Skill, the done mark — schema 3 is sent, announced 1,2,3', async () => {
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [] }) },
+      [`POST ${base}/records/query`]: { body: ok({ total: 1, records: [{ id: START, type: 'task', title: '面談の準備' }] }) },
+      [`POST ${base}/jobs`]: { status: 201, body: ok(jobView({ approvedVersion: null, state: 'draft', waiting: 'NOT_APPROVED', trigger, placement: 'a' })) },
+    })
+    renderInCompany(<JobsRoute />)
+    await userEvent.click(await screen.findByRole('button', { name: '定期の仕事を作る' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '名前' }), '面談報告書')
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: '責任者' }), 'u_member')
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'いつ動くか' }), 'event')
+    await userEvent.selectOptions(await within(dialog).findByRole('combobox', { name: '見張るやること' }), await within(dialog).findByRole('option', { name: '面談の準備' }))
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'すること' }), 'pc')
+    expect((within(dialog).getByRole('combobox', { name: '期限切れまで' }) as HTMLSelectElement).value).toBe('1440')
+    // The sentence the approval and the app will say, with the name of the やること chosen from this viewer's own list.
+    expect(within(dialog).getByRole('note', { name: 'きっかけの文' })).toHaveTextContent(
+      '最初は「面談の準備」を見張ります。責任者の PC の AI が動くのは、見張っているやること（責任者が担当）が「完了」になったとき（そのあとは、この仕事が作ったやることを見張ります）です。')
+    // No check of a time job here: the server checks the watched やること.
+    expect(within(dialog).queryByRole('combobox', { name: '確かめること' })).toBeNull()
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Skill' }), 'interview-report')
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: '済みの印' }), 'file_linked')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.endsWith('/jobs'))).toHaveLength(1))
+    const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/jobs'))!
+    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3')
+    expect((post.body as { definition: JobDefinition }).definition).toMatchObject({
+      schema: 3, placement: 'a', trigger: { startRecord: START, to: 'done' }, check: { kind: 'source_record', doneMark: 'file_linked' },
+      missed: { expiresAfterMinutes: 1440 }, grant: { creates: ['task'] },
+    })
+  })
+
+  it('the approval says what it watches, the check on the watched やること, and the minutes per run; it sends the fingerprint', async () => {
+    const pending = jobView({ approvedVersion: null, state: 'draft', waiting: 'NOT_APPROVED', trigger, placement: 'a', nextSlot: null, lastOccurrence: null })
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [pending] }) },
+      [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...pending, versions: [version(1, pcDef(), 'c1')] }) },
+      [`POST ${base}/jobs/${JOB_ID}/approve`]: { body: ok({ ...pending, approvedVersion: 1, state: 'active', waiting: 'NOT_ACCEPTED' }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    expect(row).toHaveTextContent('次の回：承認すると決まります')
+    await userEvent.click(within(row).getByRole('button', { name: '承認する' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText(/見張っているやることが今もその状態で、担当が責任者のままのときだけ、AI が動きます/)).toBeInTheDocument()
+    expect(dialog).toHaveTextContent('ファイルがもうつながっていれば、AI は動きません')
+    expect(dialog).toHaveTextContent('上限：1回 15分・1日 1回まで（超えた出来事は動かさず、責任者に知らせます）')
+    expect(dialog).toHaveTextContent('出来事のあと1日のうちに動けなかったときは見送ります')
+    expect(dialog).not.toHaveTextContent(START)
+    await userEvent.click(within(dialog).getByRole('button', { name: '承認する' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([{ version: 1, fingerprint: 'sha256:v1' }]))
+  })
+
+  it('an approved event job says when its next occurrence comes (no slot)', async () => {
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [jobView({ trigger, placement: 'a', nextSlot: null, lastOccurrence: null })] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    expect(row).toHaveTextContent('次の回：見張っているやることが、きっかけの状態になったとき')
+  })
+
+  it('a version hidden from this viewer (a やること they cannot read): said as such — no words, no form over it, no approval', async () => {
+    const hidden = { ...version(1, pcDef(), 'c1'), definition: null, fingerprint: null, consentFingerprint: null }
+    expect(hiddenVersion(hidden)).toBe(true)
+    expect(hiddenVersion({ ...hidden, needsUpdate: true })).toBe(false)
+    expect(hiddenVersion(version(1, pcDef(), 'c1'))).toBe(false)
+    const pending = jobView({ approvedVersion: null, state: 'draft', waiting: 'NOT_APPROVED', trigger: undefined, placement: undefined, nextSlot: null, lastOccurrence: null })
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [pending] }) },
+      [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...pending, versions: [hidden] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    expect(row).toHaveTextContent(JOB_VERSION_HIDDEN)
+    await userEvent.click(within(row).getByRole('button', { name: '直す' }))
+    let dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText(JOB_VERSION_HIDDEN)).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '保存' })).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: /close|閉じる/i }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await userEvent.click(within(row).getByRole('button', { name: '承認する' }))
+    dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText(JOB_VERSION_HIDDEN)).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '承認する' })).toBeDisabled()
+    expect(calls.some((c) => c.method !== 'GET' && !c.url.endsWith('/records/query'))).toBe(false)
+  })
+
+  it('refusals in plain Japanese: a definition by its problem codes, a job code by the server’s sentence, 「もう一度」 by its code', async () => {
+    const refused = (status: number, body: Record<string, unknown>) => new ApiError(status, String(body.error ?? ''), body)
+    // The rollback floor does not know schema 3 yet.
+    expect(describeJobError(refused(400, { error: '定期の仕事の内容に正しくないところがあります。', code: 'BAD_JOB_DEFINITION', problems: ['schema.UNKNOWN'] }))).toMatch(/サーバーの更新が必要です/)
+    expect(describeJobError(refused(400, { error: 'x', code: 'BAD_JOB_DEFINITION', problems: ['grant.creates.EVENT_NEEDS_TASK'] }))).toMatch(/やることを1つ作ります/)
+    expect(describeJobError(refused(409, { error: '画面に出ていた内容と違います。読み直してから、もう一度ためしてください。', code: 'JOB_VERSION_FINGERPRINT' }))).toBe('画面に出ていた内容と違います。読み直してから、もう一度ためしてください。')
+    expect(describeJobError(refused(409, { error: 'x', code: 'SOURCE_CHANGED' }))).toMatch(/きっかけのやることが変わったため/)
+    // A code it does not know: the general words, never the server's text.
+    expect(describeJobError(refused(409, { error: 'Something internal', code: 'SOMETHING_ELSE' }))).toBe('ほかの変更と競合しました。ページを再読み込みしてからやり直してください。')
+
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [] }) },
+      [`POST ${base}/records/query`]: { body: ok({ total: 1, records: [{ id: START, type: 'task', title: '面談の準備' }] }) },
+      [`POST ${base}/jobs`]: { status: 400, body: { error: '定期の仕事の内容に正しくないところがあります。', code: 'BAD_JOB_DEFINITION', problems: ['schema.UNKNOWN'] } },
+    })
+    renderInCompany(<JobsRoute />)
+    await userEvent.click(await screen.findByRole('button', { name: '定期の仕事を作る' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '名前' }), '面談報告書')
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'いつ動くか' }), 'event')
+    await userEvent.selectOptions(await within(dialog).findByRole('combobox', { name: '見張るやること' }), await within(dialog).findByRole('option', { name: '面談の準備' }))
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: 'すること' }), 'pc')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Skill' }), 'interview-report')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('この種類の定期の仕事は、いまのサーバーではまだ作れません（サーバーの更新が必要です）。')
+  })
+
+  it('an event occurrence: marked as such, 「もう一度」 says the watched やること must still ask for it, pressed on the occurrence route only', async () => {
+    const occ = (id: string, over: Record<string, unknown>) => ({
+      id, jobVersion: 1, dueSlot: '2026-11-21T14:05', timeZone: 'Asia/Tokyo', dueAt: '', expiresAt: '', state: 'expired', outcomeCode: 'EXPIRED',
+      ran: false, updatedAt: '', kind: 'event', retries: 0, retriedBy: null, retriedAt: null, unknownOperations: [], madeBefore: [], ...over,
+    })
+    const OTHER = 'occ.ffffffffffffffffffffffffffffffff'
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [jobView({ trigger, placement: 'a', nextSlot: null })] }) },
+      [`GET ${base}/jobs/${JOB_ID}/occurrences`]: {
+        body: ok({ occurrences: [
+          occ(OCC, { retry: { allowed: true } }),
+          occ(OTHER, { dueSlot: '2026-11-20T10:00', state: 'needs_person', outcomeCode: 'MADE_THEN_STOPPED', retry: { allowed: false, why: 'SOURCE_CHANGED' } }),
+        ] }),
+      },
+      [`POST ${base}/jobs/${JOB_ID}/occurrences/${OCC}/retry`]: { body: ok({ occurrence: occ(OCC, { state: 'due', outcomeCode: null }) }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    await userEvent.click(within(row).getByRole('button', { name: '回の記録' }))
+    const history = await within(row).findByRole('list', { name: '回の記録' })
+    const first = within(history).getByRole('listitem', { name: '11月21日 14:05の回' })
+    expect(first).toHaveTextContent('出来事')
+    expect(history).toHaveTextContent('「もう一度」はできません：きっかけのやることが変わったため')
+    await userEvent.click(within(first).getByRole('button', { name: 'もう一度' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('きっかけのやることが今もその状態で、担当が責任者のままのときだけ動きます')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'もう一度' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => decodeURIComponent(c.url))).toEqual([`${base}/jobs/${JOB_ID}/occurrences/${OCC}/retry`]))
+    expect(calls.some((c) => c.url.includes('/ai-runs'))).toBe(false)
+  })
+})
+

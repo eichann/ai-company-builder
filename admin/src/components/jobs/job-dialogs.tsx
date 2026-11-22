@@ -15,14 +15,15 @@ import { Label } from '@/components/ui/label'
 import { JOB_START_PAGE, jobsApi, skillShelfApi, type JobVersionView, type JobView, type Member } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import { PcJobFields } from './pc-job-fields'
-import { describeError } from '@/lib/errors'
+import { describeJobError } from '@/lib/errors'
 import {
-  JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, jobProblemText, needsNewerScreen, type JobForm,
+  JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, JOB_VERSION_HIDDEN, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, hiddenVersion, jobProblemText,
+  needsNewerScreen, switchJobForm, type JobForm,
 } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
 import { JOB_NEEDS_NEWER_SCREEN, isRecordTrigger, type JobDefinition, type JobWeekday } from '../../../../shared/core/jobs'
 import {
-  JOB_EVENT_NOTE, jobCheckText, jobEventStateText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobTriggerText,
+  JOB_EVENT_NOTE, jobCheckText, jobEventStateText, jobGrantLines, jobMissedText, jobPlacementText, jobRecordTriggerText, jobRunText, jobRunsText, jobTriggerText,
 } from '../../../../shared/core/job-words'
 
 const personName = (m: { name: string | null; email: string | null } | undefined) => (m ? m.name || m.email || '名前未設定' : 'もういない人')
@@ -45,6 +46,8 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
   const newest = editableDefinition(newestVersion)
   // A shape this console does not read: never an empty form that would write over it (the server refuses it too).
   const tooNew = needsNewerScreen(newestVersion)
+  // A version hidden from this viewer (a やること or place they cannot read): shown as such, never an empty form over it.
+  const hidden = hiddenVersion(newestVersion)
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
@@ -55,9 +58,11 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
           </DialogDescription>
         </DialogHeader>
         {job && !detail.data ? (
-          detail.error ? <p role="alert" className="text-sm text-destructive">{describeError(detail.error)}</p> : <ListSkeleton rows={3} />
+          detail.error ? <p role="alert" className="text-sm text-destructive">{describeJobError(detail.error)}</p> : <ListSkeleton rows={3} />
         ) : tooNew ? (
           <p role="note" className="text-sm">{JOB_NEEDS_NEWER_SCREEN}</p>
+        ) : hidden ? (
+          <p role="note" className="text-body">{JOB_VERSION_HIDDEN}</p>
         ) : (
           <JobFormFields
             key={job?.id ?? 'new'}
@@ -130,11 +135,14 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
     try {
       await onSubmit(parsed.definition)
     } catch (err) {
-      setProblem(describeError(err))
+      setProblem(describeJobError(err))
     } finally {
       setBusy(false)
     }
   }
+  // The trigger as the approval and the app will say it, with the やること chosen by name — the name only from this
+  // viewer's own list (the server's reader), never from a definition.
+  const startTitle = startRecords.find((r) => r.id === f.startRecord)?.title ?? null
 
   return (
     <form className="grid gap-4" onSubmit={(e) => { e.preventDefault(); void submit() }}>
@@ -149,7 +157,7 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
       </Row>
       <Row label="いつ動くか">
         <select aria-label="いつ動くか" className={SELECT} value={f.when}
-          onChange={(e) => setF((prev) => ({ ...prev, when: e.target.value as JobForm['when'], kind: e.target.value === 'event' ? 'task' : prev.kind }))}>
+          onChange={(e) => setF((prev) => switchJobForm(prev, { when: e.target.value as JobForm['when'] }))}>
           <option value="time">決まった時間に</option>
           <option value="event">見張っているやることが終わったときなどに（出来事で）</option>
         </select>
@@ -182,6 +190,14 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
               作ったやることも続けて見張る（終わるたびに次を作る）
             </label>
           </Row>
+          {f.startRecord && (
+            <p className="text-small" role="note" aria-label="きっかけの文">
+              {startTitle && <>最初は「{startTitle}」を見張ります。</>}
+              {f.kind === 'pc' ? '責任者の PC の AI が動く' : 'やることを作る'}のは、
+              {jobRecordTriggerText({ kind: 'record', type: 'task', event: 'state', to: f.eventTo, ...(f.eventFrom ? { from: f.eventFrom } : {}), assignee: 'responsible', startRecord: f.startRecord, followMadeTask: f.followMadeTask })}
+              です。
+            </p>
+          )}
           <Row label="1日の上限">
             <select aria-label="1日の上限" className={SELECT} value={f.limits.runsPerDay} onChange={(e) => set('limits', { ...f.limits, runsPerDay: Number(e.target.value) })}>
               {[1, 2, 3, 5, 10, 24].map((n) => <option key={n} value={n}>1日 {n}回まで</option>)}
@@ -235,8 +251,8 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
       </Row>
       )}
       <Row label="すること">
-        <select aria-label="すること" className={SELECT} value={f.kind} disabled={f.when === 'event'}
-          onChange={(e) => setF((prev) => ({ ...prev, kind: e.target.value as JobForm['kind'], limits: e.target.value === 'pc' ? { ...prev.limits, minutes: Math.max(prev.limits.minutes, 15) } : prev.limits }))}>
+        <select aria-label="すること" className={SELECT} value={f.kind}
+          onChange={(e) => setF((prev) => switchJobForm(prev, { kind: e.target.value as JobForm['kind'] }))}>
           <option value="task">やることを作る（サーバーで。AI は使いません）</option>
           <option value="pc">Skill を責任者の PC の AI で動かす</option>
         </select>
@@ -252,9 +268,9 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
           </select>
         </Row>
       ) : (
-        <PcJobFields f={f} set={set} hasCompanyFolder={hasCompanyFolder} shelfSkills={shelfSkills} />
+        <PcJobFields f={f} set={set} hasCompanyFolder={hasCompanyFolder} shelfSkills={shelfSkills} event={f.when === 'event'} />
       )}
-      <Row label="時間に動けなかったとき（サーバーが止まっていたなど）">
+      <Row label={f.when === 'event' ? (f.kind === 'pc' ? '出来事のあと、動けなかったとき（責任者のアプリが閉じていたなど）' : '出来事のあと、動けなかったとき（サーバーが止まっていたなど）') : '時間に動けなかったとき（サーバーが止まっていたなど）'}>
         {f.when === 'time' && (
         <select aria-label="動けなかったとき" className={SELECT} value={f.missedPolicy} onChange={(e) => set('missedPolicy', e.target.value as JobForm['missedPolicy'])}>
           <option value="latest_only">あとから一番新しい回だけ動かす</option>
@@ -313,6 +329,8 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
   const newest = versions[0] ?? null
   const definition = editableDefinition(newest)
   const tooNew = needsNewerScreen(newest)
+  // Hidden from this viewer: nothing to show, no fingerprint to send — never approved from here.
+  const hidden = hiddenVersion(newest)
   // The server's own rule: the newest version's consent is the accepted one (else a new 受け取る is needed).
   const mustAccept = detail.data?.latestConsentAccepted !== true
   const who = definition ? personName(members.find((m) => m.userId === definition.actingUser)) : ''
@@ -321,7 +339,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
   const placeOutside = definition?.grant.deliverTo !== undefined
 
   const approve = async () => {
-    if (!newest?.fingerprint || tooNew) return
+    if (!newest?.fingerprint || tooNew || hidden) return
     setBusy(true)
     setProblem(null)
     try {
@@ -330,7 +348,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
       toast.success(approvedText(newest.version, next, own ? null : who))
       onClose()
     } catch (err) {
-      setProblem(describeError(err))
+      setProblem(describeJobError(err))
     } finally {
       setBusy(false)
     }
@@ -344,9 +362,11 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
           <DialogDescription>承認するのは、下の内容そのものです。あとで直しても、承認した版は変わりません。</DialogDescription>
         </DialogHeader>
         {!detail.data ? (
-          detail.error ? <p role="alert" className="text-sm text-destructive">{describeError(detail.error)}</p> : <ListSkeleton rows={4} />
+          detail.error ? <p role="alert" className="text-sm text-destructive">{describeJobError(detail.error)}</p> : <ListSkeleton rows={4} />
         ) : tooNew ? (
           <p role="note" className="text-sm">{JOB_NEEDS_NEWER_SCREEN}</p>
+        ) : hidden ? (
+          <p role="note" className="text-body">{JOB_VERSION_HIDDEN}</p>
         ) : definition ? (
           <div className="space-y-3">
             <JobVersionWords definition={definition} members={members} />
@@ -366,7 +386,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
         {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={busy}>キャンセル</Button>
-          <Button onClick={() => void approve()} disabled={busy || !newest?.fingerprint || tooNew}>承認する</Button>
+          <Button onClick={() => void approve()} disabled={busy || !newest?.fingerprint || tooNew || hidden}>承認する</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -394,10 +414,11 @@ export function JobAcceptDialog({ job, members, onClose, onAccepted }: {
   const version = (detail.data?.versions ?? []).find((v) => v.version === job.approvedVersion) ?? null
   const definition = editableDefinition(version)
   const tooNew = needsNewerScreen(version)
+  const hidden = hiddenVersion(version)
   const placeOutside = definition?.grant.deliverTo !== undefined
 
   const accept = async () => {
-    if (!version?.fingerprint || tooNew || placeOutside) return
+    if (!version?.fingerprint || tooNew || hidden || placeOutside) return
     setBusy(true)
     setProblem(null)
     try {
@@ -406,7 +427,7 @@ export function JobAcceptDialog({ job, members, onClose, onAccepted }: {
       toast.success(acceptedText(version.version, next))
       onClose()
     } catch (err) {
-      setProblem(describeError(err))
+      setProblem(describeJobError(err))
     } finally {
       setBusy(false)
     }
@@ -420,9 +441,11 @@ export function JobAcceptDialog({ job, members, onClose, onAccepted }: {
           <DialogDescription>責任者として、この仕事をあなたの権限で動かすことに同意します。承認とは別の操作です。</DialogDescription>
         </DialogHeader>
         {!detail.data ? (
-          detail.error ? <p role="alert" className="text-sm text-destructive">{describeError(detail.error)}</p> : <ListSkeleton rows={4} />
+          detail.error ? <p role="alert" className="text-sm text-destructive">{describeJobError(detail.error)}</p> : <ListSkeleton rows={4} />
         ) : tooNew ? (
           <p role="note" className="text-sm">{JOB_NEEDS_NEWER_SCREEN}</p>
+        ) : hidden ? (
+          <p role="note" className="text-body">{JOB_VERSION_HIDDEN}</p>
         ) : definition ? (
           <div className="space-y-3">
             <JobVersionWords definition={definition} members={members} />
@@ -436,7 +459,7 @@ export function JobAcceptDialog({ job, members, onClose, onAccepted }: {
         {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={busy}>キャンセル</Button>
-          <Button onClick={() => void accept()} disabled={busy || !version?.fingerprint || tooNew || placeOutside}>受け取る</Button>
+          <Button onClick={() => void accept()} disabled={busy || !version?.fingerprint || tooNew || hidden || placeOutside}>受け取る</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
