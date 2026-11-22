@@ -70,6 +70,10 @@ or who can see it. So:
   card; 見られる人 says 「『<title>』の参加者（N人）」 to its readers only. An existing public one becomes one
   through 「非公開にする」 (`records.md` "Making a 案件・プロジェクト private"): only into an empty private folder
   directly inside its department, by the same people; every other folder → the one `FOLDER_NOT_PLACEABLE`.
+- A record's 判断の材料 and attached versions (`records.md` "Evidence"): a file inside a private
+  folder is never evidence of a record outside it (one answer with an unreadable file), and 経緯
+  shows each reader only the evidence they read now — a private folder's file is left out for
+  anyone outside it.
 - 見られる人 (`POST /viewers`, `records.md` "Who can see it") names a private folder
   (「『<path>』を見られる人（N人）」) only to its readers: an unreadable record is left out, and a
   path inside an unreadable folder is answered as if the folder did not exist.

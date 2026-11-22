@@ -472,6 +472,33 @@ company path:
   「a put in a consultation about a task」 (a company with the shared folder links the put too) — every
   guard mutation-checked.
 
+### Evidence: decision materials and attached versions (code review RECORDS-1, 2026-11-22)
+
+A decision's `materials`, `precedents` / `supersedes` and an action's attached versions
+(`attachments`) are kept in the ledger as written and 経緯 (`GET …/history`, the AI's
+`records_history`) hands them to every reader of the record, so they follow the link rule
+(`services/record-engine/evidence.ts`):
+
+- **Write** (`act.ts`, `evidenceToWrite`): a company file only when the actor reads it **and** the
+  record may link to it (`linkAllowed`: never a file inside a private folder from a record outside
+  it — owners / admins and the folder's own readers included); a record — a record material, each
+  of `precedents` and `supersedes` — only when the actor reads it and the record may reach it. A file
+  the actor cannot read and a private folder's file get one answer, 400 `BAD_MATERIAL`
+  (`MATERIAL_NOT_USABLE`, plain Japanese, naming no place); a record keeps one `BAD_MATERIAL` answer
+  for a missing / unreadable / unreachable one alike (a precedent's version is not checked); an
+  attached version of a link into a private folder (a link stored before the rule) answers the same
+  400 `BAD_ATTACHMENT` as a file the record does not link. Nothing is written.
+- **Read** (`history.ts`, `evidenceToShow` + `scrubEvidence`, after `scrubLedger`): each entry by the
+  **reader's current** access, the stored ledger unchanged: a company file they cannot read now (a
+  private folder they are not in — also one made private after the entry), a record they cannot read
+  (another member's owner-only record: its id in `materials`, `precedents` or `supersedes`), and
+  someone else's `.personal/` path are **left out**, as `scrubLedger` leaves out links — no
+  placeholder, so a hidden one cannot be told from none. A folder's readers, and owners / admins for a
+  private folder, keep the whole trail. Drive materials stay (no path; "Drive and PC file links").
+- Not affected: the approval card's materials (re-checked per viewer, `approvals.md`), the service
+  writer's decisions (no materials), notices (kind + record + version only).
+- Test: `server/tests/unit/record-evidence.test.ts` — each guard mutation-checked.
+
 ### Task version 12: 返事待ち says until when (owner decision 2026-11-03 「②」)
 
 - `wait` (返事待ちにする) gains the arg `wait_until` (kind `date`): the 見込み is set with the wait, in
@@ -1617,7 +1644,8 @@ clock's, a separate service writing through the service writer: `notifications.m
   commit — checked to exist in the repository at that commit, else 409 `ATTACHMENT_NOT_SYNCED`:
   the app pushes the linked files first, 0.18-1), decision fields when the action is a decision
   (`reason` = the note, `materials` as references — a file at a commit or a record at a version
-  it has had, both readable by the actor —, `policyVersion`, `precedents`, `supersedes`; §13.2 案
+  it has had, both readable by the actor and reachable from the record, shown to each reader as
+  they read them now: "Evidence" —, `policyVersion`, `precedents`, `supersedes`; §13.2 案
   Y, only the container for now), the type version.
 - **Provenance** (owner: light and reversible; columns `proposed_by`, `conversation_id` added by
   `migrateRecordLedgerProvenance`, nullable): `proposed_by: 'ai'` when a person confirms an action

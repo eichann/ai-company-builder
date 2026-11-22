@@ -5,6 +5,7 @@ import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import type { EngineContext } from './context'
+import { evidenceToShow, scrubEvidence } from './evidence'
 import { personalPathsSeen, scrubLedger, scrubLinkValue } from './personal-links'
 
 export function ledgerReading(ctx: EngineContext) {
@@ -19,7 +20,9 @@ export function ledgerReading(ctx: EngineContext) {
       const ledger = opened.records.ledger(row.id)
       // Another member's `.personal/` links are not there for this one (records.md "Links into .personal/").
       const seen = personalPathsSeen(member.userId, row, ledger, opened.records.linksFrom([row.id]))
-      return ok({ entries: scrubLedger(ledger, seen).map(e => ({ ...e, runId: e.runId ?? null, cause: ledgerCause(e) })) })
+      // 判断の材料 and attached versions as this reader may see them now (records.md "Evidence"; stored entries unchanged).
+      const check = evidenceToShow(opened.reader, opened.records)
+      return ok({ entries: scrubEvidence(scrubLedger(ledger, seen), member.userId, check).map(e => ({ ...e, runId: e.runId ?? null, cause: ledgerCause(e) })) })
     },
 
     /** The record's server values as they were at `version` (§13.11). */

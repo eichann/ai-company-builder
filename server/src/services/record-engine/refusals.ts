@@ -40,6 +40,15 @@ export const FILE_NOT_LINKABLE = {
 }
 
 /**
+ * A decision's file material the record may not name (records.md "Evidence"): a file the member
+ * cannot read, or one inside a private folder for a record outside it — one answer, naming no place.
+ */
+export const MATERIAL_NOT_USABLE = {
+  error: 'このファイルは判断の材料にできません。あなたが見られないファイルか、この記録を見る人には見せられない場所のファイルです。',
+  code: 'BAD_MATERIAL',
+} as const
+
+/**
  * A record link on create whose target the member cannot see: a missing record,
  * another member's owner-only record and an unreadable private one all get this
  * one answer (records.md "Owner-only records").

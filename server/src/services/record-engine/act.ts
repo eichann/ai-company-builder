@@ -19,8 +19,9 @@ import { applyAcceptance } from './acceptance'
 import { BUNDLE_PLACED_TYPES, bundleLinkName, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
 import { linkAllowed, type RecordReader } from '../record-access'
 import type { EngineContext } from './context'
+import { evidenceToWrite, refId } from './evidence'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
-import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict, fileLinksUnavailable, OK_BY_CANNOT_READ, featureOffRefusal, runFenceRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, MATERIAL_NOT_USABLE, REVIEWER_CANNOT_READ, bad, conflict, fileLinksUnavailable, OK_BY_CANNOT_READ, featureOffRefusal, runFenceRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import { callVia, type ActorInput } from './types'
 import { checkValue, NOTE_MAX, OK_REQUIRED, parseMaterials, parseOkStatement, provenance, REF_RE } from './values'
 
@@ -96,6 +97,9 @@ export function whoWithFallback(action: ActionDef, who: string[], own: { readers
  * (`linkAllowed`): the members a `link:<name>.<field>` who-entry names. Read from stored values, never
  * through the caller's reader — whether the 責任者 exists is the same answer for everyone.
  */
+/** A record named as evidence (material, precedent, supersedes) that is missing, unreadable or out of reach: one answer. */
+const RECORD_MATERIAL_REFUSED = 'materials: a record you can read, at a version it has had'
+
 export function linkedPeopleOf(records: RecordRepository, row: RecordRow, name: string, field: string): string[] {
   const targets = records.linksFrom([row.id]).filter(l => l.name === name && l.targetId !== null).map(l => l.targetId as string)
   if (targets.length === 0) return []
@@ -341,8 +345,10 @@ export function acting(ctx: EngineContext) {
           const link = linked.find(l => l.name === a?.link && l.targetPath === (typeof a?.path === 'string' ? fileLinkPath(a.path) : null))
           if (!link || typeof a.commit !== 'string' || !/^[0-9a-f]{40,64}$/.test(a.commit)) return bad('attachments: { link, path, commit } of files this record links', 'BAD_ATTACHMENT')
           const path = link.targetPath as string
-          if (!reader.file(path)) return bad('attachments: { link, path, commit } of files this record links', 'BAD_ATTACHMENT')
           const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
+          // The version handed over is shown to every reader of the record: never a file inside a private
+          // folder from a record outside it (a link stored before that rule), one answer with an unreadable file.
+          if (!evidenceToWrite(reader, scopes, records, row).file(path)) return bad('attachments: { link, path, commit } of files this record links', 'BAD_ATTACHMENT')
           const priv = findPrivateScope(scopes, path)
           const repo: RecordFileRepo = priv?.repoId ? { kind: 'scope', repoId: priv.repoId } : { kind: 'company' }
           const inRepo = priv?.repoId ? path.slice(priv.path.length + 1) : path
@@ -365,11 +371,13 @@ export function acting(ctx: EngineContext) {
         const materials = parseMaterials(d.materials)
         if (typeof materials === 'string') return bad(materials)
         const linksNow = materials.some(m => m.kind === 'drive') ? records.linksFrom([row.id]) : []
+        // Materials are shown to every reader of the record (経緯): the link rule applies (records.md "Evidence").
+        const evidence = evidenceToWrite(reader, companyData.forCompany(member.companyId).scopes.listWithRules(), records, row)
         for (const m of materials) {
           if (m.kind === 'record') {
-            const r = records.byIds([m.id]).find(x => reader.record(x))
+            const r = evidence.record(m.id) ? records.byIds([m.id])[0] : undefined
             const v = r ? (records.states([r.id])[0]?.version ?? 0) : 0
-            if (!r || m.version > v) return bad('materials: a record you can read, at a version it has had', 'BAD_MATERIAL')
+            if (!r || m.version > v) return bad(RECORD_MATERIAL_REFUSED, 'BAD_MATERIAL')
           } else if (m.kind === 'drive') {
             // A Drive file the record links (any company, owner decision 2026-11-13), fixed at the
             // revision and fingerprint kept when it was linked.
@@ -381,12 +389,18 @@ export function acting(ctx: EngineContext) {
           } else {
             const noFolder = fileLinksUnavailable(deps.hasCompanyFolder, member.companyId)
             if (noFolder) return noFolder
-            if (!reader.file(m.path)) return bad('materials: a file you can read', 'BAD_MATERIAL')
+            // A file the member cannot read and one inside a private folder for a record outside it: one answer, no place named.
+            if (!evidence.file(m.path)) return bad(MATERIAL_NOT_USABLE.error, MATERIAL_NOT_USABLE.code)
           }
         }
         const precedents = d.precedents === undefined ? [] : d.precedents
         if (!Array.isArray(precedents) || precedents.length > 20 || !precedents.every(p => typeof p === 'string' && REF_RE.test(p))) return bad('precedents: up to 20 `<record id>@<version>`')
         if (d.supersedes !== undefined && d.supersedes !== null && (typeof d.supersedes !== 'string' || !REF_RE.test(d.supersedes))) return bad('supersedes: `<record id>@<version>`')
+        // Precedents and the decision replaced are records named in 経緯 too: the same rule as record materials,
+        // the same answer for a missing, unreadable or unreachable one (records.md "Evidence").
+        if ([...precedents as string[], ...(typeof d.supersedes === 'string' ? [d.supersedes] : [])].some(p => !evidence.record(refId(p)))) {
+          return bad(RECORD_MATERIAL_REFUSED, 'BAD_MATERIAL')
+        }
         if (d.policyVersion !== undefined && d.policyVersion !== null && (typeof d.policyVersion !== 'string' || d.policyVersion.length > 100)) return bad('policyVersion: up to 100 characters')
         decision = {
           reason: note, materials, policyVersion: (d.policyVersion as string | undefined) ?? null,

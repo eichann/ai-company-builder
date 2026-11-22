@@ -25,6 +25,7 @@
  *   values.ts           field values by kind, OK statements, decision materials, provenance
  *   refusals.ts         refusals shared by the operations and other services
  *   links.ts            interface links, `links.<name>` ledger values, link rows
+ *   evidence.ts         what materials / attached versions may name, and what a reader is shown of them
  *   context.ts          what every member-facing operation shares (open, reader, state, tell)
  *   create.ts / act.ts / undo.ts / file-links.ts / record-links.ts / share.ts / history.ts
  *                       the member-facing operations
