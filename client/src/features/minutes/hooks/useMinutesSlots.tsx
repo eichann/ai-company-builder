@@ -96,6 +96,8 @@ export function useMinutesSlots({ companyId, features, taskItems, reloadTasks, a
     taskListActions,
     titleBarButton,
     titleBarMeetings,
+    /** The arrivals behind `titleBarMeetings` were read once (or are not used): the inbox's dot may take its baseline. */
+    titleBarMeetingsRead: tasksShown || !companyId || !features.meetings || meetings.read,
     /** Something on a meeting changed (its card): the arrivals and the task list read again. */
     changed,
     /** A meeting's card is drawn again after a まとまり was chosen for it. */

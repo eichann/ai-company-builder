@@ -509,6 +509,8 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
   const inbox = useInboxSlot({
     // From a department not downloaded here (its prompt hides the middle and the list), 全社 shows what was opened.
     companyId: currentCompany?.id, notices, meetings: meetings.titleBarMeetings, features,
+    // Every source of its rows answered once (the task list behind the meetings, the arrivals): the dot's baseline.
+    ready: (tasksShown || taskList.data !== null || taskList.error !== null) && meetings.titleBarMeetingsRead,
     open: bottomOpen && !bottomPanel, onToggle: () => setBottomOpen(o => !o),
     onOpenRecord: id => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTab(recordTabKey(id)) },
     onOpenTasks: () => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTasks() },
@@ -679,8 +681,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
         ) : undefined}
         extra={meetings.titleBarButton}
         layoutControls={<LayoutControls leftShown={!hidden.has('fileTree')} chatShown={!hidden.has('chat')}
-          onToggleLeft={toggleLeft} onToggleChat={toggleChat} onReset={resetLayout}
-          bottom={hasBottom ? { shown: bottomOpen, onToggle: toggleBottom } : undefined} />}
+          onToggleLeft={toggleLeft} onToggleChat={toggleChat} onReset={resetLayout} />}
         inbox={inbox?.titleBarButton}
       />
       <LeaveConfirmDialog question={leaving.question} onAnswer={leaving.answer} />

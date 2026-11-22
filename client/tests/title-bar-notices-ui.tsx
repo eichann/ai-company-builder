@@ -8,7 +8,7 @@
 // `#opened`. `?undo=1`: a notice that the member's AI completed a task their reply finished (`replied_done`),
 // whose ［元に戻す］ writes the undo asked for (`<record>|<version>|<expectedVersion>`) to `#undone`;
 // `?undo=mail`: a mail closed because it was archived in Gmail, and one archived there (2026-11-05);
-// `?undo=ai`: the AI changed a deal automatically. `?features=off`: 会議と議事録 and 受信 are off in 「使う機能」.
+// `?undo=ai`: the AI changed a deal automatically; `?undo=turn` and `?late=1`: below. `?features=off`: 会議と議事録 and 受信 are off in 「使う機能」.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -71,6 +71,22 @@ if (new URLSearchParams(location.search).get('undo') === 'ai') {
   ] } }
 }
 
+// `?undo=turn`: the AI changed a task that is the member's turn (unread, merged into its row), an earlier change
+// already read (「前に確認したもの」), and 3 unread notices past the server's list.
+if (new URLSearchParams(location.search).get('undo') === 'turn') {
+  const days = (n: number) => recent(n * 24 * 60)
+  state = { ...state, notices: { ...state.notices, unread: 2 + 3, items: [
+    { id: 'n-ait', kind: 'ai_changed', recordId: 'task-preview02', recordType: 'task', recordTitle: '見積書を作る', version: 6, text: 'あなたの AIが「見積書を作る」を自動で変えました：期限 11/5 → 11/6', createdAt: recent(5), read: false, aiChange: { pluginId: 'corporate-sales', operationId: 'op-turn01', undone: false } },
+    ...state.notices.items,
+    { id: 'n-old', kind: 'ai_changed', recordId: 'deal-preview03', recordType: 'deal', recordTitle: 'C社 更新', version: 2, text: 'あなたの AIが「C社 更新」を自動で変えました：確度 C → B', createdAt: days(3), read: true, aiChange: { pluginId: 'corporate-sales', operationId: 'op-old01', undone: false } },
+  ] } }
+}
+// `?late=1`: everything already read, and the meetings (with the task list behind them) answer only at
+// `window.__acbTitleBar.load()` — the dot's baseline waits for them.
+const late = new URLSearchParams(location.search).get('late') === '1'
+if (late) state = { ...state, notices: { ...state.notices, unread: 0, items: state.notices.items.map(i => ({ ...i, read: true })) } }
+let loadLate: () => void = () => {}
+
 function Preview() {
   const [opened, setOpened] = useState('')
   const [read, setRead] = useState('')
@@ -101,9 +117,11 @@ function Preview() {
     },
   })
   const notices = useNotices('co-preview')
-  const meetings: InboxMeeting[] = withMeetings ? MEETINGS(setOpened) : []
+  const [loaded, setLoaded] = useState(!late)
+  loadLate = () => setLoaded(true)
+  const meetings: InboxMeeting[] = (withMeetings || late) && loaded ? MEETINGS(setOpened) : []
   const inbox = useInboxSlot({
-    companyId: 'co-preview', notices, meetings, features, open, onToggle: () => setOpen(o => !o),
+    companyId: 'co-preview', notices, meetings, features, open, ready: loaded, onToggle: () => setOpen(o => !o),
     onOpenRecord: id => setOpened(`record ${id}`), onOpenTasks: () => setOpened('task list'), onOpenJobs: () => setOpened('jobs'),
     renderApprovalCard: id => <p>承認のカード {id}</p>, renderMailDraft: id => <p>メールのカード {id}</p>,
   })
@@ -129,6 +147,14 @@ const MEETINGS = (setOpened: (s: string) => void): InboxMeeting[] => [
 const TASK = state.myTurn.items.find(i => i.id === 'task-preview02')!
 Object.assign(window, {
   __acbTitleBar: {
+    /** The late sources (the task list, the arrivals) answer: the meetings come. */
+    load() { loadLate() },
+    /** The AI changes 「見積書を作る」 once more (`?undo=turn`): a new change to undo on the same row. */
+    changeAgain() {
+      const item = { id: 'n-ait2', kind: 'ai_changed' as const, recordId: 'task-preview02', recordType: 'task', recordTitle: '見積書を作る', version: 8, text: 'あなたの AIが「見積書を作る」をまた変えました：期限 11/6 → 11/7', createdAt: new Date().toISOString(), read: false, aiChange: { pluginId: 'corporate-sales', operationId: 'op-turn02', undone: false } }
+      state = { ...state, notices: { ...state.notices, items: [item, ...state.notices.items], unread: state.notices.unread + 1 } }
+      changed.emit({ companyId: 'co-preview' })
+    },
     /** 「見積書を作る」 leaves the member's turn (done on the other PC), or comes back to it. */
     task(present: boolean) {
       const items = [...state.myTurn.items.filter(i => i.id !== TASK.id), ...(present ? [TASK] : [])]

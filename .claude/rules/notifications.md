@@ -390,8 +390,16 @@ already says concerns the member, by what it needs from them — no tabs by sour
   止めています — skipped on purpose) or changed (`due_changed`, `others`, `ai_changed` 「変わりました」 — but
   while the server's turn is past its first 200 these may be about a waiting record: あなた待ち); off kinds
   never arrive (decision ④); `morning_summary` is no row. Older than `DONE_KEEP_DAYS` (14) → one line 「14 日より前のもの N 件」
-  (decision ⑥). Read ones made today are 「きょう確認したもの」 (folded; there is no 「未確認に戻す」: the server
-  has no unread). At most `INBOX_MAX_ROWS` (100) rows: the oldest できた go first, あなた待ち never.
+  (decision ⑥). **Every read notice the server listed stays findable** (its newest 50, read ones included, as the
+  bell showed them — also a read stop or ask, and one about a record that waits now), folded at the bottom: made
+  today → 「きょう確認したもの」, earlier → 「前に確認したもの」 (`seenBefore`, newest first), each with ［元に戻す］ where
+  it offers one; counted nowhere (there is no 「未確認に戻す」: the server has no unread). **Unread notices past the
+  server's list** (`notices.unread` above the listed unread, `unreadNotListed`) are one line 「ほかに未読 N 件（古いもの）」
+  and count in すべて, never dropped silently. **［元に戻す］ in every state**: a change that can be undone keeps its
+  button on whatever row its notice lands — a waiting row it is the news of (the AI changed a task that is the
+  member's turn; the newest such notice — 「元に戻しました」 is kept per notice, so a later change there can be undone
+  again), a notice row in あなた待ち (the turn past its first 200), できた, or the
+  folded lists. At most `INBOX_MAX_ROWS` (100) rows: the oldest できた go first, あなた待ち never.
 - **「まとめて確認済みにする」 only for できた・未確認** (decision ⑦): `bulkSeenIds` gives every できた
   notice's id (shown, left out by the row limit, or folded; owner 2026-11-22: as the rule says) — never a stop,
   a notice that asks for something, a row's news, or the server's 「すべて」. No 「未確認に戻す」 for now (owner).
@@ -413,25 +421,33 @@ already says concerns the member, by what it needs from them — no tabs by sour
   `TitleBar`'s `inbox`): 「受け箱」 with **the number = あなた待ち** exactly as the list counts it
   (`InboxView.counts.waiting`: this week's turn + waiting meetings + unread stops and asks + 「ほかに N 件」; the
   primary count, 99+) and **the dot = something new** (`NewDot`). Pressing it opens or closes the bottom panel —
-  the same state as ⌘J and the layout button. No count or dot when there is no inbox (records off without
+  the same state as ⌘J (the 「画面の形」 panel button was removed as its duplicate, owner 2026-11-22: add one back
+  when the panel holds something else). No count or dot when there is no inbox (records off without
   company notices: no button at all).
 - **The dot** (`inboxNewsKeys` / `inboxNewsBaseline` / `hasInboxNews`, pure): every waiting / working row by key
-  and state, and every unread notice; a key not there when the inbox was last on screen is new. Before it was on
-  screen in this window, the rows count as seen and unread notices do not — so at the start the dot is the old
-  bell's (something unread on the server, the same on the member's PCs). While the panel shows, exactly what is on
-  it counts as seen (a row that left meanwhile and comes back after it closed is new again); a row leaving is not news. Memory only (AppShell is keyed by company): nothing stored, a restart starts
+  and state, every unread notice, and one key per unread notice past the server's list (more of them is news); a
+  key not there when the inbox was last on screen is new. Before it was on screen in this window, the rows count as
+  seen and unread notices do not — so at the start the dot is the old bell's (something unread on the server, the
+  same on the member's PCs); that baseline follows the rows **until every source answered once** (the slot's
+  `ready`: the task list behind the meetings, the arrivals — `useMeetingArrivals` `read`), so meetings that load late
+  are not news. While the panel shows, **what the chosen chip shows** counts as seen (`seenWhileShown`: あなた待ち
+  hidden by 「できた・未確認」 stays new), and a row that left meanwhile and comes back after it closed is new again;
+  a row leaving is not news. Memory only (AppShell is keyed by company): nothing stored, a restart starts
   from the server's unread again.
 - **Where each part of the bell and 「あなたの番」 went**: the turn list → あなた待ち; 「…は「先のこと」「いつか」にあります」
-  → the same line there; the bell's list → rows by meaning (above); ［元に戻す］ → the row (then 「「…」を元に戻しました。」 above the list:
-  marked seen, the row folds into 「きょう確認したもの」, as the bell's row said 「元に戻しました」); 「知らせの設定」 → the
+  → the same line there; the bell's list → rows by meaning (above); ［元に戻す］ → the row (then 「「…」を元に戻しました。」 above the list
+  until the panel closes or opens again: marked seen, the row folds into 「きょう確認したもの」, as the bell's row said
+  「元に戻しました」); the bell's read notices → 「きょう確認したもの」 / 「前に確認したもの」; 「知らせの設定」 → the
   inbox's heading (a late answer never reopens it once closed); the meetings and their buttons → rows (above); the morning summary's line (no row, decision) →
   its Mac notification opens the inbox; 「すべて読んだ」 → 「まとめて確認済みにする」 for できた・未確認 only (decision ⑦:
   a stop or an ask is opened one by one). ⌘K 「受け箱」 (also あなたの番 / 知らせ / 通知 / ベル) opens it
   (`AppDialogs` palette action, only while there is an inbox).
 - Tests: `tests/ui/title-bar-notices.spec.ts` (`tests/title-bar-notices-ui.html`: the number equals あなた待ち with
   meetings, the dot goes once shown and comes back for the next new thing, opening marks only its notice, the
-  meetings' buttons, every ［元に戻す］ and its line, 「知らせの設定」 by feature), `model.test.ts` (meeting rows, the dot's
-  keys, a できた notice the row limit left out still new),
+  meetings' buttons, every ［元に戻す］ and its line — also on a waiting row the AI changed —, 「前に確認したもの」 and
+  「ほかに未読」, the dot only for the chip shown and not for meetings that load late, 「知らせの設定」 by feature),
+  `model.test.ts` (meeting rows, the dot's keys, a できた notice the row limit left out still new, ［元に戻す］ in every
+  state, the read lists, unread past the list),
   `skill-layout-state.spec.ts` (the button and ⌘J one panel, ⌘K, the Mac notification opens it),
   `status-colours.spec.ts` (the dot `unread`, the count `primary`) — mutation-checked.
 - Tests: `src/features/inbox/model.test.ts` (order, one row per record, stops leave once read, the 14-day

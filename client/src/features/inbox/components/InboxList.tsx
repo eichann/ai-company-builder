@@ -100,6 +100,9 @@ interface ListProps {
   onBulkSeen: (scope: 'older' | 'done') => void
   seenOpen: boolean
   onToggleSeen: () => void
+  /** 「前に確認したもの」 (the server's other read notices) unfolded. */
+  beforeOpen: boolean
+  onToggleBefore: () => void
   error: string | null
   /** What was just done from a row that moved it away (「…を元に戻しました」: the row went to today's seen). */
   status?: string | null
@@ -114,13 +117,21 @@ const Heading = ({ label, count, action }: { label: string; count: number; actio
 )
 
 /** The inbox's body: あなた待ち (never folded, never capped), 作業中, できた・未確認, then today's seen ones. */
-export function InboxList({ view, filter, meetingButtons, onOpen, onUndo, undone, onBulkSeen, seenOpen, onToggleSeen, error, status }: ListProps) {
+export function InboxList({ view, filter, meetingButtons, onOpen, onUndo, undone, onBulkSeen, seenOpen, onToggleSeen, beforeOpen, onToggleBefore, error, status }: ListProps) {
   const showWaiting = filter === 'all' || filter === 'waiting'
   const showWorking = filter === 'working' || (filter === 'all' && view.working.length > 0)
   const showDone = filter === 'all' || filter === 'done'
   const doneCount = view.counts.done
-  const row = (item: InboxItem, dim = false) => <InboxRow key={item.key} item={item} buttons={item.meetingId ? meetingButtons?.(item.meetingId) : undefined} onOpen={onOpen} onUndo={onUndo} undone={undone.has(item.key)} dim={dim} />
-  const empty = view.counts.all === 0 && view.seenToday.length === 0
+  const row = (item: InboxItem, dim = false) => <InboxRow key={item.key} item={item} buttons={item.meetingId ? meetingButtons?.(item.meetingId) : undefined} onOpen={onOpen} onUndo={onUndo} undone={!!item.undo && undone.has(item.undo.noticeId)} dim={dim} />
+  const empty = view.counts.all === 0 && view.seenToday.length === 0 && view.seenBefore.length === 0
+  const folded = (label: string, items: InboxItem[], open: boolean, onToggle: () => void) => items.length > 0 && (
+    <section aria-label={label}>
+      <button type="button" aria-expanded={open} onClick={onToggle} className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-small text-text-muted hover:text-text">
+        {open ? <CaretDown size={12} /> : <CaretRight size={12} />}{label}（{items.length} 件）
+      </button>
+      {open && <ul>{items.map(i => row(i, true))}</ul>}
+    </section>
+  )
   return (
     <div className="text-body text-text">
       {error && <p role="alert" className="px-3 py-2 text-small text-danger-text">{error}</p>}
@@ -159,14 +170,13 @@ export function InboxList({ view, filter, meetingButtons, onOpen, onUndo, undone
           {doneCount === 0 && <p className="px-3 py-3 text-small text-text-muted">まだ確かめていない「できた」はありません。</p>}
         </section>
       )}
-      {(filter === 'all' || filter === 'done') && view.seenToday.length > 0 && (
-        <section aria-label="きょう確認したもの">
-          <button type="button" aria-expanded={seenOpen} onClick={onToggleSeen} className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-small text-text-muted hover:text-text">
-            {seenOpen ? <CaretDown size={12} /> : <CaretRight size={12} />}きょう確認したもの（{view.seenToday.length} 件）
-          </button>
-          {seenOpen && <ul>{view.seenToday.map(i => row(i, true))}</ul>}
-        </section>
+      {(filter === 'all' || filter === 'done') && view.unreadNotListed > 0 && (
+        <p data-inbox-unlisted className="px-3 py-2 text-small text-text-muted">ほかに未読 {view.unreadNotListed} 件（古いもの）</p>
       )}
+      {(filter === 'all' || filter === 'done') && <>
+        {folded('きょう確認したもの', view.seenToday, seenOpen, onToggleSeen)}
+        {folded('前に確認したもの', view.seenBefore, beforeOpen, onToggleBefore)}
+      </>}
     </div>
   )
 }

@@ -139,3 +139,61 @@ test('「知らせの設定」 (from the inbox) lists no kind of a feature that 
   await expect(dialog).toHaveCount(0)
   expectNoPageErrors(state)
 })
+
+// The independent review of I2: what the bell showed must not disappear.
+type TitleBarPage = { __acbTitleBar: { task(on: boolean): void; load(): void; changeAgain(): void } }
+
+test('the AI changed a task that is the member\'s turn: its ［元に戻す］ is on that one row', async ({ page }) => {
+  const state = await openPreview(page, 'title-bar-notices', { undo: 'turn' })
+  await openInbox(page)
+  const row = panel(page).getByRole('region', { name: 'あなた待ち' }).locator('[data-inbox-row="record:task-preview02"]')
+  await expect(row).toContainText('期限 11/5 → 11/6')
+  await row.getByRole('button', { name: '元に戻す' }).click()
+  await expect(page.locator('#undone')).toHaveText('corporate-sales|op-turn01')
+  await expect(page.locator('#read')).toHaveText('n-ait')
+  await expect(page.locator('#opened')).toHaveText('')
+  // The AI changes it again: the new change can be undone on the same row (undone is per notice, not per row).
+  await page.evaluate(() => (window as unknown as TitleBarPage).__acbTitleBar.changeAgain())
+  await expect(row).toContainText('期限 11/6 → 11/7')
+  await row.getByRole('button', { name: '元に戻す' }).click()
+  await expect(page.locator('#undone')).toHaveText('corporate-sales|op-turn02')
+  expectNoPageErrors(state)
+})
+
+test('read notices from before today are in 「前に確認したもの」 (folded) with their ［元に戻す］; unread ones past the list are told', async ({ page }) => {
+  const state = await openPreview(page, 'title-bar-notices', { undo: 'turn' })
+  await openInbox(page)
+  await expect(panel(page).locator('[data-inbox-unlisted]')).toHaveText('ほかに未読 3 件（古いもの）')
+  const before = panel(page).getByRole('region', { name: '前に確認したもの' })
+  await expect(before.locator('[data-inbox-row]')).toHaveCount(0)
+  await before.getByRole('button', { name: /前に確認したもの/ }).click()
+  await before.locator('[data-inbox-row="notice:n-old"]').getByRole('button', { name: '元に戻す' }).click()
+  await expect(page.locator('#undone')).toHaveText('corporate-sales|op-old01')
+  expectNoPageErrors(state)
+})
+
+test('the dot clears only for what the chosen chip showed; the undo line is gone when the panel opens again', async ({ page }) => {
+  const state = await openPreview(page, 'title-bar-notices', { undo: '1' })
+  await openInbox(page)
+  await panel(page).getByRole('button', { name: /^できた・未確認/ }).click()
+  // A task leaves and comes back while only できた・未確認 is shown: the member has not seen it.
+  await page.evaluate(() => (window as unknown as TitleBarPage).__acbTitleBar.task(false))
+  await expect(button(page)).toHaveAccessibleName('受け箱（あなた待ち 1 件）')
+  await page.evaluate(() => (window as unknown as TitleBarPage).__acbTitleBar.task(true))
+  await expect(button(page)).toHaveAccessibleName('受け箱（あなた待ち 2 件）')
+  await panel(page).getByRole('button', { name: '元に戻す' }).click()
+  await expect(panel(page).getByRole('status')).toContainText('元に戻しました')
+  await button(page).click()
+  await expect(page.getByTestId('inbox-news-dot')).toBeVisible()
+  await openInbox(page)
+  await expect(panel(page).getByRole('status')).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('the dot\'s baseline waits for every source: meetings that answer late are not news', async ({ page }) => {
+  const state = await openPreview(page, 'title-bar-notices', { late: '1' })
+  await expect(button(page)).toHaveAccessibleName('受け箱（あなた待ち 2 件）')
+  await page.evaluate(() => (window as unknown as TitleBarPage).__acbTitleBar.load())
+  await expect(button(page)).toHaveAccessibleName('受け箱（あなた待ち 4 件）')
+  expectNoPageErrors(state)
+})
