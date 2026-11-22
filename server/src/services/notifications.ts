@@ -57,6 +57,13 @@ import { waitingFor } from './records'
  */
 export const COMPANY_RESTORED_TEXT = '会社のデータをバックアップから戻したため、定期の仕事と AI を止めました。戻す前にもう済んでいた仕事（送ったメール・Google Drive に置いたファイル・HubSpot への書き込みなど）がないか確かめてから、管理画面で「定期の仕事」と「AI の緊急停止」を元に戻してください'
 
+/**
+ * The mark (`action`) of a stop notice brought back once because its chain stayed stopped (`job_chain_stopped`, jobs.md
+ * "A stopped chain"; services/job-events.ts `remindStoppedChains`): this build words it 「止まったままです」. A build
+ * that does not know it reads the row as the stop notice it always was.
+ */
+export const CHAIN_STOP_REMINDED = 'reminded'
+
 export interface NotificationServiceDeps {
   companyData: CompanyDataSource
   clock: Clock
@@ -956,6 +963,11 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         const [, jobId = '', ...rest] = (r.dedupeKey ?? '').split(':')
         return deps.jobChainStoppedOf?.(member, jobId, rest.join(':')) ?? null
       }
+      // The day a stop began (its key's time), in company time — null when the key does not say.
+      const stopDay = (r: NotificationRow): string | null => {
+        const at = Date.parse((r.dedupeKey ?? '').split(':').slice(2).join(':'))
+        return Number.isNaN(at) ? null : dueText(companyNow(at, zoneOf(member.companyId)).slice(0, 10))
+      }
       const visible = rows.filter(r => {
         if (r.kind === 'job_chain_stopped') return r.recordId === '' && chainStopped(r) !== null
         if (r.kind === 'job_paused') return r.recordId === '' && jobNotice(r) !== null
@@ -1000,7 +1012,11 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         if (r.kind === 'company_restored') return restoredItem(r)
         if (r.kind === 'job_chain_stopped') {
           const job = chainStopped(r) as { name: string; why: string }
-          const text = `定期の仕事「${job.name}」が止まっています（${job.why}）。次に見張るやることを選び直してください`
+          // Brought back once because it stayed stopped: since when (the stop's day, from its key), in company time.
+          const since = r.action === CHAIN_STOP_REMINDED ? stopDay(r) : null
+          const text = since
+            ? `定期の仕事「${job.name}」は${since}から止まったままです（${job.why}）。次に見張るやることを選び直してください`
+            : `定期の仕事「${job.name}」が止まっています（${job.why}）。次に見張るやることを選び直してください`
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read }
         }
         if (r.kind === 'job_accept_needed') {

@@ -21,6 +21,9 @@
  *   ⑤ the assignee checked at the event and right before acting;
  * - D7 = A (stage 4b-0.2): a stopped chain exists only for someone who reads its record now (written, worded and shown
  *   only to them, checked again when read) and for the responsible person (plain words when they do not read it).
+ * - A chain that stays stopped: the responsible person's own stop notice comes back once after three days (not before,
+ *   never twice, not after a choice made again, a pause, retirement, the company's stop, a content not accepted, a new
+ *   responsible person, a record they no longer read or their leaving); a second stop is reminded again.
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 
@@ -42,7 +45,7 @@ import { services } from '../../src/composition'
 import { createJobService, type JobService } from '../../src/services/jobs'
 import { createJobOccurrences, type JobOccurrences } from '../../src/services/job-occurrences'
 import { createJobRetry } from '../../src/services/job-retry'
-import { EVENT_ROWS_PER_TICK } from '../../src/services/job-events'
+import { CHAIN_STOP_REMIND_AFTER_MS, EVENT_ROWS_PER_TICK } from '../../src/services/job-events'
 import { createServiceRecordWriter, type ServiceRecordWriter } from '../../src/services/record-engine'
 import { insertLedgerRow, insertMigrationLedgerRow } from '../../src/adapters/sqlite/record-ledger-write'
 import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
@@ -61,6 +64,7 @@ const TS = '2026-11-01T00:00:00.000Z'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any
 const READS_2 = [1, 2]
+const DAY_MS = 24 * 60 * 60_000
 
 async function call(user: string, method: string, path: string, body?: unknown, headers: Record<string, string> = {}, company = CO) {
   currentUser.id = user
@@ -1520,5 +1524,199 @@ describe('watch generations (stage 4b-0.5, F7–F9)', () => {
     tick()
     expect(madeTasks(job)).toHaveLength(1)
     expect(watchOf(job).w).toBe(madeTasks(job)[0].id)
+  })
+})
+
+// A chain that stays stopped (jobs.md "A stopped chain", its reminder): the responsible person's own stop notice comes back
+// once, CHAIN_STOP_REMIND_AFTER_MS after the stop, while they can act on it — no new notice, kind or key.
+describe('a chain that stays stopped: one reminder to the responsible person', () => {
+  const pushed: string[][] = []
+  beforeEach(() => {
+    pushed.length = 0
+    occ = createJobOccurrences({
+      companyData, transactions, clock, ids: randomIds, timeZoneOf: () => 'Asia/Tokyo', holidaysOf: () => [], roleOf, jobs, writer, aiStepStates,
+      noticesChanged: (_co, users) => { pushed.push([...users].sort()) },
+    })
+  })
+  /** The member's stop notice rows of the job (what a build without the reminder reads too). */
+  const rowsOf = (user: string, job: string) => db.prepare(`SELECT action, read_at, created_at FROM notifications
+    WHERE company_id = ? AND user_id = ? AND kind = 'job_chain_stopped' AND dedupe_key LIKE ?`).all(CO, user, `job_chain_stopped:${job}:%`) as Json[]
+  const bell = (who: { userId: string; role: string }) => ok(services.notifications.list(m(who.userId, who.role))).items
+    .filter(i => i.kind === 'job_chain_stopped').map(i => ({ text: i.text, read: i.read }))
+  const readAll = () => { for (const who of [alice(), owner(), bob()]) ok(services.notifications.markRead(who, { all: true })) }
+  /** Alice's job (made by the owner), stopped (completed while paused) now; everyone's notices read. */
+  async function stoppedJob(title: string, extra: Record<string, unknown> = {}, definition: (start: string) => Json = chain) {
+    const start = task(title, extra)
+    const job = await runnableJob(definition(start))
+    ok(jobs.pause(owner(), job))
+    await complete(start)
+    ok(await jobs.resume(owner(), job))
+    tick()
+    expect(rowsOf('u-alice', job)).toHaveLength(1)
+    readAll()
+    pushed.length = 0
+    return { job, start }
+  }
+  const unreminded = (user: string, job: string) => expect(rowsOf(user, job)).toEqual([expect.objectContaining({ action: '', read_at: expect.any(String) })])
+  const reminded = (user: string, job: string) => expect(rowsOf(user, job)).toEqual([{ action: 'reminded', read_at: null, created_at: clock.now() }])
+
+  it('the three days are a named constant', () => {
+    expect(CHAIN_STOP_REMIND_AFTER_MS).toBe(3 * DAY_MS)
+  })
+
+  it('not before three days; then once — her own notice back on top, unread, 「止まったまま」, pushed to her alone; never again', async () => {
+    const { job } = await stoppedJob('三日止まる')
+    nowMs += CHAIN_STOP_REMIND_AFTER_MS - 60_000
+    tick()
+    unreminded('u-alice', job)
+    expect(pushed).toEqual([])
+    nowMs += 60_000
+    tick()
+    reminded('u-alice', job)
+    expect(pushed).toEqual([['u-alice']])
+    expect(bell(alice())).toEqual([{ read: false, text: '定期の仕事「次のやること」は11月18日から止まったままです（一時停止している間に完了したため、止まりました）。次に見張るやることを選び直してください' }])
+    // The creator (told as creator) and anyone else: untouched.
+    unreminded('u-owner', job)
+    expect(bell(owner())).toEqual([{ read: true, text: expect.stringContaining('が止まっています') }])
+    expect(bell(bob())).toEqual([])
+    // Read, then two more passes, a day later and after a restart: never again.
+    readAll()
+    pushed.length = 0
+    nowMs += DAY_MS
+    tick()
+    tick()
+    occ = occurrencesService()
+    tick()
+    expect(rowsOf('u-alice', job)).toEqual([expect.objectContaining({ action: 'reminded', read_at: expect.any(String) })])
+    expect(pushed).toEqual([])
+  })
+
+  it('a choice made again ends it; a second stop after that is reminded again, once', async () => {
+    const { job } = await stoppedJob('選び直す前')
+    const next = task('選び直したやること')
+    nowMs += DAY_MS
+    ok(await jobs.rewatch(alice(), job, { version: 1, recordId: next }, READS_2))
+    nowMs += CHAIN_STOP_REMIND_AFTER_MS
+    tick()
+    unreminded('u-alice', job)
+    expect(pushed).toEqual([])
+    // Stopped again on the new watch: a new stop, its own notice — and its own reminder three days later.
+    ok(jobs.pause(owner(), job))
+    await complete(next)
+    ok(await jobs.resume(owner(), job))
+    tick()
+    readAll()
+    pushed.length = 0
+    expect(rowsOf('u-alice', job)).toHaveLength(2)
+    nowMs += CHAIN_STOP_REMIND_AFTER_MS
+    tick()
+    expect(rowsOf('u-alice', job).map(r => r.action).sort()).toEqual(['', 'reminded'])
+    expect(pushed).toEqual([['u-alice']])
+  })
+
+  it('nothing while the job is paused or retired, or its new content waits for her 受け取る; the pause lifted, it comes', async () => {
+    const paused = (await stoppedJob('止めた仕事')).job
+    const retired = (await stoppedJob('やめた仕事')).job
+    const { job: waiting, start } = await stoppedJob('内容が変わった仕事')
+    ok(jobs.pause(owner(), paused))
+    db.prepare("UPDATE ai_jobs SET state = 'retired' WHERE company_id = ? AND id = ?").run(CO, retired)
+    ok(await jobs.update(owner(), waiting, { definition: chain(start, { run: { ...chain('x').run, title: '別の題' } }) }, READS_2))
+    ok(await jobs.approve(owner(), waiting, { version: 2 }, READS_2))
+    readAll()
+    nowMs += CHAIN_STOP_REMIND_AFTER_MS
+    tick()
+    for (const job of [paused, retired, waiting]) unreminded('u-alice', job)
+    expect(pushed).toEqual([])
+    ok(await jobs.resume(owner(), paused))
+    tick()
+    reminded('u-alice', paused)
+  })
+
+  it('nothing under the company\'s 「定期の仕事をすべて止める」', async () => {
+    const { job } = await stoppedJob('会社ごと止めた')
+    ok(jobs.setStopped(owner(), { stopped: true }))
+    nowMs += CHAIN_STOP_REMIND_AFTER_MS
+    tick()
+    unreminded('u-alice', job)
+    expect(pushed).toEqual([])
+  })
+
+  it('a new responsible person is not reminded — also the creator, who was told as creator', async () => {
+    const { job, start } = await stoppedJob('責任者が変わる')
+    nowMs += 60_000
+    ok(await jobs.update(owner(), job, { definition: chain(start, { actingUser: 'u-owner' }) }, READS_2))
+    ok(await jobs.approve(owner(), job, { version: 2 }, READS_2))
+    ok(await jobs.accept(owner(), job, { version: 2 }, READS_2, true))
+    readAll()
+    nowMs += CHAIN_STOP_REMIND_AFTER_MS
+    tick()
+    unreminded('u-owner', job)
+    unreminded('u-alice', job)
+    expect(pushed).toEqual([])
+  })
+
+  it('a stop ended by another server just after this one read it is not reminded (checked again with the write)', async () => {
+    const { job } = await stoppedJob('ちょうど選び直された')
+    let reads = 0
+    occ = createJobOccurrences({
+      // The reminder has read the stop and checks who was told (the versions); meanwhile another server ends the stop.
+      companyData: wrapJobs(j => ({ versions: (id: string) => {
+        if (id === job && reads++ === 0) {
+          db.prepare('UPDATE ai_job_event_cursors SET chain_stop_code = NULL, chain_stop_record = NULL, chain_stop_at = NULL WHERE company_id = ? AND job_id = ?').run(CO, id)
+        }
+        return j.versions(id)
+      } })),
+      transactions, clock, ids: randomIds, timeZoneOf: () => 'Asia/Tokyo', holidaysOf: () => [], roleOf, jobs, writer, aiStepStates,
+      noticesChanged: (_co, users) => { pushed.push([...users].sort()) },
+    })
+    nowMs += CHAIN_STOP_REMIND_AFTER_MS
+    tick()
+    expect(reads).toBeGreaterThan(0)
+    unreminded('u-alice', job)
+    expect(pushed).toEqual([])
+  })
+
+  it('a job whose reminder check throws holds no other back, and is logged once while it keeps failing', async () => {
+    const broken = (await stoppedJob('壊れた仕事・知らせ')).job
+    const fine = (await stoppedJob('動く仕事・知らせ')).job
+    const lines: string[] = []
+    occ = createJobOccurrences({
+      companyData: wrapJobs(j => ({ versions: (id: string) => { if (id === broken) throw new TypeError('broken'); return j.versions(id) } })),
+      transactions, clock, ids: randomIds, timeZoneOf: () => 'Asia/Tokyo', holidaysOf: () => [], roleOf, jobs, writer, aiStepStates,
+      log: line => lines.push(line), noticesChanged: (_co, users) => { pushed.push([...users].sort()) },
+    })
+    nowMs += CHAIN_STOP_REMIND_AFTER_MS
+    tick()
+    tick()
+    reminded('u-alice', fine)
+    unreminded('u-alice', broken)
+    expect(lines.filter(l => l.includes(broken))).toEqual([expect.stringContaining('reminder failed: TypeError')])
+  })
+
+  it('nothing to a responsible person who no longer reads the record, or has left; once reminded, a record lost since is worded plainly', async () => {
+    const lost = (await stoppedJob('二人だけ・外れる', { members: ['u-owner'] })).job
+    const lostStart = (db.prepare('SELECT chain_stop_record AS r FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?').get(CO, lost) as Json).r
+    const later = await stoppedJob('あとで外れる', { members: ['u-owner'] })
+    db.prepare("DELETE FROM record_viewers WHERE company_id = ? AND record_id = ? AND user_id = 'u-alice'").run(CO, lostStart)
+    nowMs += CHAIN_STOP_REMIND_AFTER_MS
+    tick()
+    unreminded('u-alice', lost)
+    reminded('u-alice', later.job)
+    // Reminded, then the record lost: her words say nothing of it; nobody else is shown anything new.
+    db.prepare("DELETE FROM record_viewers WHERE company_id = ? AND record_id = ? AND user_id = 'u-alice'").run(CO, later.start)
+    expect(bell(alice()).find(i => !i.read)).toEqual({ read: false, text: expect.stringContaining('から止まったままです（見張っていたやることの都合で止まりました）') })
+    expect(JSON.stringify(bell(alice()))).not.toContain('あとで外れる')
+    expect(bell(bob())).toEqual([])
+    // Left the company: nothing.
+    db.prepare('DELETE FROM notifications').run()
+    const gone = await stoppedJob('辞めた人の仕事')
+    db.prepare('DELETE FROM memberships WHERE company_id = ? AND user_id = ?').run(CO, 'u-alice')
+    try {
+      nowMs += CHAIN_STOP_REMIND_AFTER_MS
+      tick()
+      unreminded('u-alice', gone.job)
+    } finally {
+      member(CO, 'u-alice', 'member')
+    }
   })
 })

@@ -4,7 +4,8 @@
  * only what the floor build has (its routes and services as of 4b-0.5). Expected (jobs.md "Shapes this build does not
  * know"): nothing of the schema-3 jobs is listed, told, claimed, run or expired — also when the clock runs two days later;
  * a pause, the company's stop and a restore hold what waits or runs and end the running run (its put in flight unknown),
- * telling nobody; and everything step 3 needs stays as step 1 wrote it.
+ * telling nobody; a stop notice step 1 brought back once (its reminder) is shown as the stop notice it always was; and
+ * everything step 3 needs stays as step 1 wrote it.
  */
 import { CROSS_DB, manifest, saveDb } from './use-db'
 import { describe, it, expect, vi } from 'vitest'
@@ -74,6 +75,20 @@ describe.skipIf(!CROSS_DB)('cross-build 2/3: the rollback floor on it', () => {
       const stop = (db.prepare('SELECT chain_stop_at AS at FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?').get(CO, j3) as Json).at
       expect(services.jobs.chainStopNotice(who, j3, stop)).toBeNull()
     }
+    // A stop notice this build brought back once (J4, schema 2: the floor runs it): the floor shows alice that row as the
+    // stop notice it always was — unread, on top, its own words — and nobody anything new; the creator's is as it was.
+    const stops = (who: { companyId: string; userId: string; role: string }) => {
+      const listed = services.notifications.list(who) as Json
+      expect(listed.ok).toBe(true)
+      return listed.value.items.filter((i: Json) => i.kind === 'job_chain_stopped').map((i: Json) => ({ text: i.text, read: i.read }))
+    }
+    expect(stops(alice)).toEqual([{ read: false, text: expect.stringContaining('定期の仕事「日程の次」が止まっています（一時停止している間に完了したため、止まりました）') }])
+    expect(stops(owner)).toEqual([{ read: false, text: expect.stringContaining('が止まっています') }])
+    expect(stops(member('xb-bob', 'member'))).toEqual([])
+    expect(stops(member('xb-admin', 'admin'))).toEqual([])
+    // She reads it there.
+    expect((services.notifications.markRead(alice, { all: true }) as Json).ok).toBe(true)
+
     // Nothing claimed, its run a missing run.
     expect((await as('xb-alice', 'GET', '/me/job-turns?kinds=time,event')).body.data.turns).toEqual([])
     expect((await as('xb-alice', 'POST', '/job-run-claims', { occurrenceId: o3, deviceId: 'device-xb-9', conversationId: 'c-9', checks: ['new_files', 'new_meetings', 'source_record'], kinds: ['time', 'event'] })).status).toBe(404)

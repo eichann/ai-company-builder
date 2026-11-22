@@ -1,7 +1,8 @@
 /**
  * Cross-build check, step 3 of 3 (this build again, after the floor ran on the database): nothing 4b-1 wrote is lost,
  * what the floor held stays held and runs nothing (no occurrence made twice, no やること made twice), the stopped chain and
- * its notice are there again for alice, and what was left unknown can be reconciled — by alice on her occurrences (D11).
+ * its notice are there again for alice, a stop reminded before the floor is not reminded again, and what was left
+ * unknown can be reconciled — by alice on her occurrences (D11).
  */
 import { CROSS_DB, manifest } from './use-db'
 import { describe, it, expect, vi } from 'vitest'
@@ -50,6 +51,13 @@ describe.skipIf(!CROSS_DB)('cross-build 3/3: this build again', () => {
     expect(crossBuildSnapshot(db, CO)).toEqual(m.before)
     expect([o1, o3, o4].map(stateOf)).toEqual(['held', 'held', 'needs_person'])
     expect((await as('xb-alice', 'GET', '/me/job-turns?kinds=event')).body.data.turns).toEqual([])
+
+    // The reminded stop (J4): read on the floor, and the clock here does not bring it back again (once per stop); its
+    // words here say it stayed stopped.
+    expect(db.prepare('SELECT action, read_at IS NULL AS unread FROM notifications WHERE company_id = ? AND user_id = ? AND dedupe_key = ?')
+      .get(CO, 'xb-alice', `job_chain_stopped:${m.j4.job}:${m.j4.stop}`)).toEqual({ action: 'reminded', unread: 0 })
+    const j4Text = (services.notifications.list(alice) as Json).value.items.find((i: Json) => i.kind === 'job_chain_stopped' && i.text.includes('日程の次'))?.text
+    expect(j4Text).toMatch(/^定期の仕事「日程の次」は\d+月\d+日から止まったままです（一時停止している間に完了したため、止まりました）/)
 
     // The stopped chain is there again for alice (its words), and her occurrences — with what is unknown — too.
     const stop = (db.prepare('SELECT chain_stop_at AS at FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?').get(CO, j3) as Json).at
