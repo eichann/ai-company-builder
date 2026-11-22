@@ -98,9 +98,11 @@ export interface MyJobOccurrence {
   jobId: string
   name: string
   dueSlot: string
-  state: JobOccurrenceState
+  /** null: a state this app does not know (a later server's). */
+  state: JobOccurrenceState | null
   outcomeCode: string | null
-  retry: { allowed: true } | { allowed: false; why: JobRetryBlock } | null
+  /** `why`: a `JobRetryBlock`, or `UNKNOWN` for a reason this app does not know (`jobRetryBlockText` says it in generic words). */
+  retry: { allowed: true } | { allowed: false; why: JobRetryBlock | 'UNKNOWN' } | null
   unknownOperations: Array<{ key: string; kind: string }>
   madeBefore: Array<{ kind: string; count: number }>
 }

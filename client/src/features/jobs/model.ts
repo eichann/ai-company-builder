@@ -44,7 +44,7 @@ export interface OccurrenceRow {
 
 export function occurrenceRows(list: readonly MyJobOccurrence[]): OccurrenceRow[] {
   return list.filter(o => o.retry !== null || o.unknownOperations.length > 0).map(o => {
-    const { label, why } = jobOccurrenceText(o.state, o.outcomeCode)
+    const { label, why } = o.state === null ? { label: 'このアプリでは表示できない状態です', why: null } : jobOccurrenceText(o.state, o.outcomeCode)
     return {
       occurrence: o,
       heading: `${o.name}（${jobSlotText(o.dueSlot)}）`,

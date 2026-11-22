@@ -42,4 +42,9 @@ test('「AI が動いた回」 (D11): the buttons follow exactly what the server
   assert.equal(held.retry, null)
   assert.deepEqual(held.unknown, [{ key: 'acb-1', what: 'Google Drive に置くファイル' }])
   assert.equal(held.heading, '面談の報告（11月22日 10:00）')
+  // A later server's state and reason: still shown with its 「後始末」, in plain words.
+  const later = occurrenceRows([occ({ state: null, retry: { allowed: false, why: 'UNKNOWN' }, unknownOperations: [{ key: 'acb-2', kind: 'other' }] })])[0]
+  assert.equal(later.state, 'このアプリでは表示できない状態です')
+  assert.deepEqual(later.retry, { blocked: '今は「もう一度」できません' })
+  assert.equal(later.unknown.length, 1)
 })

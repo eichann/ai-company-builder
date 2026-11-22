@@ -52,47 +52,49 @@ type Answer = { status: number; json: Record<string, unknown> | null }
 /** An outside operation's key as the server's run core makes it (ids only: it goes into the reconcile's path). */
 const OPERATION_KEY = /^[A-Za-z0-9._:-]{1,100}$/
 const SHORT_KIND = /^[A-Za-z0-9._:-]{1,40}$/
+/** At most this many operations or made things are read per occurrence (the rest left out, never the occurrence). */
+const MAX_OPERATIONS = 50
 /** At most this many occurrences are shown (the server answers ≤ 100). */
 const MAX_OCCURRENCES = 100
 
 /**
- * One occurrence of `GET /me/job-occurrences`, checked (stage 4b-2): ids and codes of the server's own vocabulary only; a
- * field of the wrong shape leaves that occurrence out, never guessed. Nothing is derived — the buttons follow `retry` and
- * `unknownOperations` exactly as the server answered them (it leaves them out where the member's rights do not reach).
+ * One occurrence of `GET /me/job-occurrences`, checked (stage 4b-2): what goes into a path (`id`, `jobId`, each operation
+ * `key`) strictly — an occurrence without valid ids is left out, an operation without a valid key is left out alone. Any
+ * other field a later server words differently never hides the entry or its 「後始末」: an unknown state or code is shown as
+ * not readable here, an unknown 「もう一度」 reason as blocked in generic words, a malformed field as absent. Nothing is
+ * derived — the buttons follow `retry` and `unknownOperations` as answered (the server leaves them out where the member's
+ * rights do not reach).
  */
 export function parseMyJobOccurrence(v: unknown): MyJobOccurrence | null {
   if (typeof v !== 'object' || v === null) return null
   const o = v as Record<string, unknown>
-  if (!isOccurrenceId(o.id) || !isJobId(o.jobId) || typeof o.name !== 'string' || o.name.length === 0 || o.name.length > 200) return null
-  if (typeof o.dueSlot !== 'string' || o.dueSlot.length > 40) return null
-  if (!(JOB_OCCURRENCE_STATES as readonly unknown[]).includes(o.state)) return null
-  if (o.outcomeCode !== null && (typeof o.outcomeCode !== 'string' || !/^[A-Z_]{1,60}$/.test(o.outcomeCode))) return null
+  if (!isOccurrenceId(o.id) || !isJobId(o.jobId)) return null
+  const code = (x: unknown) => (typeof x === 'string' && /^[A-Z_]{1,60}$/.test(x) ? x : null)
   let retry: MyJobOccurrence['retry'] = null
-  if (o.retry !== undefined) {
-    const r = (typeof o.retry === 'object' && o.retry !== null ? o.retry : {}) as Record<string, unknown>
-    if (r.allowed === true) retry = { allowed: true }
-    else if (r.allowed === false && (JOB_RETRY_BLOCKS as readonly unknown[]).includes(r.why)) retry = { allowed: false, why: r.why as JobRetryBlock }
-    else return null
+  const r = (typeof o.retry === 'object' && o.retry !== null ? o.retry : null) as Record<string, unknown> | null
+  if (r?.allowed === true) retry = { allowed: true }
+  else if (r?.allowed === false) {
+    // A reason this app does not know is still a refusal (said in generic words by `jobRetryBlockText`).
+    retry = { allowed: false, why: (JOB_RETRY_BLOCKS as readonly unknown[]).includes(r.why) ? r.why as JobRetryBlock : 'UNKNOWN' }
   }
-  const list = (x: unknown) => (x === undefined ? [] : Array.isArray(x) && x.length <= 50 ? x as unknown[] : null)
-  const unknownRaw = list(o.unknownOperations)
-  const madeRaw = list(o.madeBefore)
-  if (!unknownRaw || !madeRaw) return null
+  const list = (x: unknown) => (Array.isArray(x) ? (x as unknown[]).slice(0, MAX_OPERATIONS) : [])
   const unknownOperations: MyJobOccurrence['unknownOperations'] = []
-  for (const u of unknownRaw) {
+  for (const u of list(o.unknownOperations)) {
     const x = (typeof u === 'object' && u !== null ? u : {}) as Record<string, unknown>
-    if (typeof x.key !== 'string' || !OPERATION_KEY.test(x.key) || typeof x.kind !== 'string' || !SHORT_KIND.test(x.kind)) return null
-    unknownOperations.push({ key: x.key, kind: x.kind })
+    if (typeof x.key !== 'string' || !OPERATION_KEY.test(x.key)) continue
+    unknownOperations.push({ key: x.key, kind: typeof x.kind === 'string' && SHORT_KIND.test(x.kind) ? x.kind : 'other' })
   }
   const madeBefore: MyJobOccurrence['madeBefore'] = []
-  for (const m of madeRaw) {
+  for (const m of list(o.madeBefore)) {
     const x = (typeof m === 'object' && m !== null ? m : {}) as Record<string, unknown>
-    if (typeof x.kind !== 'string' || !SHORT_KIND.test(x.kind) || typeof x.count !== 'number' || !Number.isInteger(x.count) || x.count < 0) return null
-    madeBefore.push({ kind: x.kind, count: x.count })
+    if (typeof x.kind === 'string' && SHORT_KIND.test(x.kind) && typeof x.count === 'number' && Number.isInteger(x.count) && x.count >= 0) madeBefore.push({ kind: x.kind, count: x.count })
   }
   return {
-    id: o.id, jobId: o.jobId, name: o.name, dueSlot: o.dueSlot, state: o.state as JobOccurrenceState,
-    outcomeCode: (o.outcomeCode as string | null) ?? null, retry, unknownOperations, madeBefore,
+    id: o.id, jobId: o.jobId,
+    name: typeof o.name === 'string' && o.name.length > 0 && o.name.length <= 200 ? o.name : '定期の仕事',
+    dueSlot: typeof o.dueSlot === 'string' && o.dueSlot.length <= 40 ? o.dueSlot : '',
+    state: (JOB_OCCURRENCE_STATES as readonly unknown[]).includes(o.state) ? o.state as JobOccurrenceState : null,
+    outcomeCode: code(o.outcomeCode), retry, unknownOperations, madeBefore,
   }
 }
 

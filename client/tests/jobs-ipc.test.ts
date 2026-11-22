@@ -202,11 +202,23 @@ const occurrence = (over: Record<string, unknown> = {}) => ({
   retry: { allowed: false, why: 'JOB_RESULT_UNKNOWN' }, unknownOperations: [{ key: 'acb-0123', kind: 'drive-put' }], madeBefore: [], ...over,
 })
 
-test('「AI が動いた回」: the server\'s list as answered, a malformed entry left out, an older server is not an error', async () => {
-  const { jobs } = occurrencesApi({ status: 200, data: { occurrences: [occurrence(), occurrence({ id: 'task-0123456789' }), occurrence({ retry: { allowed: 'yes' } }), occurrence({ unknownOperations: [{ key: '../x', kind: 'drive-put' }] })] } })
+test('「AI が動いた回」: the server\'s list as answered; only what reaches a path is strict — a later server\'s words never hide 「後始末」', async () => {
+  const ops = Array.from({ length: 60 }, (_, i) => ({ key: `acb-${i}`, kind: 'drive-put' }))
+  const { jobs } = occurrencesApi({ status: 200, data: { occurrences: [
+    occurrence(),
+    occurrence({ id: 'task-0123456789' }), // not an occurrence id: left out (it goes into the path)
+    occurrence({ id: 'occ.' + 'b'.repeat(32), state: 'later_state', outcomeCode: 'later code', retry: { allowed: false, why: 'LATER_REASON' }, unknownOperations: [{ key: '../x', kind: 'drive-put' }, { key: 'acb-9', kind: '??' }] }),
+    occurrence({ id: 'occ.' + 'c'.repeat(32), retry: { allowed: 'yes' }, unknownOperations: ops }),
+  ] } })
   const r = await jobs.occurrences('c1')
   assert.ok(r.success && r.supported)
-  assert.deepEqual(r.occurrences.map(o => [o.id, o.retry, o.unknownOperations]), [[O1, { allowed: false, why: 'JOB_RESULT_UNKNOWN' }, [{ key: 'acb-0123', kind: 'drive-put' }]]])
+  assert.deepEqual(r.occurrences.map(o => o.id), [O1, 'occ.' + 'b'.repeat(32), 'occ.' + 'c'.repeat(32)])
+  assert.deepEqual([r.occurrences[0].retry, r.occurrences[0].unknownOperations], [{ allowed: false, why: 'JOB_RESULT_UNKNOWN' }, [{ key: 'acb-0123', kind: 'drive-put' }]])
+  // Unknown state, code and reason: kept, shown as not readable / blocked; the bad key alone left out, the good one kept.
+  assert.deepEqual([r.occurrences[1].state, r.occurrences[1].outcomeCode, r.occurrences[1].retry, r.occurrences[1].unknownOperations],
+    [null, null, { allowed: false, why: 'UNKNOWN' }, [{ key: 'acb-9', kind: 'other' }]])
+  // A malformed retry is no button; a long list is cut, never the occurrence.
+  assert.deepEqual([r.occurrences[2].retry, r.occurrences[2].unknownOperations.length], [null, 50])
   // Fields the server left out (rights it does not give) stay out: nothing to press.
   const plain = await occurrencesApi({ status: 200, data: { occurrences: [occurrence({ retry: undefined, unknownOperations: undefined })] } }).jobs.occurrences('c1')
   assert.ok(plain.success)
