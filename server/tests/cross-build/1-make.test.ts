@@ -160,6 +160,27 @@ describe.skipIf(!CROSS_DB)('cross-build 1/3: a database as 4b-1 leaves it', () =
     expect((db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND kind IN ('job_failed', 'job_chain_stopped')").get(CO) as Json).n).toBeGreaterThan(0)
 
     expect(j4Rows()).toEqual([{ user_id: 'xb-alice', action: 'reminded', unread: 1 }, { user_id: 'xb-owner', action: '', unread: 1 }])
-    saveDb(db, { CO, j4: { job: j4, stop: j4Stop }, jobs: { j1: j1.job, j2: j2.job, j3: j3.job }, occ: { o1, o3, o4 }, runs: { r1: r1.id, r4: r4.id }, before: crossBuildSnapshot(db, CO) })
+
+    // P1–P3: alice's proposals of a time job from her AI chat (jobs.md "Member proposals", schema 4) — one waiting for the
+    // owner / admins (their notices written), one she withdrew (its job retired), one approved (not accepted yet). The floor
+    // knows no schema 4: it must show their names only, refuse to edit, approve or accept them and run nothing; back here, the
+    // withdrawn one stays withdrawn and a resend adds nothing.
+    const bob = { companyId: CO, userId: 'xb-bob', role: 'member' }
+    const proposal = async (who: typeof alice) => {
+      const c = ok(await services.jobProposals.createCandidate(who, null, {
+        skill: item, trigger: { every: 'month', day: 28, at: '03:00', ifHoliday: 'as_is' }, check: { kind: 'new_meetings' }, reads: [], deliverable: null,
+        readRecords: true, mailDrafts: false, minutes: 15, missed: { policy: 'latest_only', expiresAfterMinutes: 1440 },
+      }))
+      return { candidate: c.id, fingerprint: c.fingerprint as string, ...ok(await services.jobProposals.submit(who, c.id, { fingerprint: c.fingerprint })).proposal }
+    }
+    const p1 = await proposal(alice)
+    const p2 = await proposal(alice)
+    ok(services.jobProposals.withdraw(alice, p2.id))
+    const p3 = await proposal(bob)
+    const fp3 = (db.prepare('SELECT fingerprint FROM ai_job_versions WHERE company_id = ? AND job_id = ? AND version = 1').get(CO, p3.jobId) as Json).fingerprint
+    ok(await services.jobs.approve(owner, p3.jobId, { version: 1, fingerprint: fp3 }, [1, 2, 3, 4]))
+    expect(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND kind = 'job_proposal'").get(CO)).toEqual({ n: 6 })
+    const proposals = { p1, p2, p3 }
+    saveDb(db, { CO, j4: { job: j4, stop: j4Stop }, jobs: { j1: j1.job, j2: j2.job, j3: j3.job }, occ: { o1, o3, o4 }, runs: { r1: r1.id, r4: r4.id }, proposals, before: crossBuildSnapshot(db, CO) })
   })
 })

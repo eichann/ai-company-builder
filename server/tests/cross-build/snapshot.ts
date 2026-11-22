@@ -20,6 +20,11 @@ export function crossBuildSnapshot(db: Db, co: string) {
     puts: all('SELECT * FROM google_drive_puts WHERE company_id = ? ORDER BY id'),
     // `action`: a stop notice brought back once (its reminder) keeps its mark — no build reminds it twice.
     notices: all("SELECT id, user_id, kind, dedupe_key, action FROM notifications WHERE company_id = ? AND kind LIKE 'job_%' ORDER BY id"),
+    // Member proposals (jobs.md "Member proposals"): the proposal records and their jobs as this build wrote them — no build
+    // revives a withdrawn one, approves, edits or duplicates anything (SQL only: the floor runs it on the tables it never made).
+    proposals: all('SELECT * FROM ai_job_proposals WHERE company_id = ? ORDER BY id'),
+    proposalJobs: all(`SELECT id, name, state, acting_user_id, latest_version, approved_version, approved_fingerprint, accepted_version, accepted_consent, created_by
+      FROM ai_jobs WHERE company_id = ? AND id IN (SELECT job_id FROM ai_job_proposals WHERE company_id = ai_jobs.company_id) ORDER BY id`),
     made: all(`SELECT id FROM records WHERE company_id = ? AND type = 'task' AND id IN (SELECT 'task-' || substr(id, 5) FROM ai_job_occurrences WHERE company_id = records.company_id) ORDER BY id`),
   }
 }
