@@ -3,6 +3,7 @@ import { JOB_PC_STEP } from '../../shared/core/jobs'
 import { aiTurnStepAllowsRecordCall, aiTurnStepAllowsRecordTool, aiTurnStepCreateTypes, aiTurnStepDefinition, isAiTurnStep } from '../shared/ai-turn-steps/registry'
 import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
 import { narrowCreateTypes, type RecordTools } from './records/tools'
+import { JOB_PROPOSAL_CREATE_TOOL } from './records/job-proposal-tools'
 import type { CompanyFileTools } from './company-files/tools'
 import { createReviewTools, REVIEW_INSTRUCTIONS } from './review/tools'
 import { createAppCommandTools } from './app-commands/tools'
@@ -172,6 +173,13 @@ export interface ChatServerConfig extends AgentHost {
    * folder and reports its version (services/skill-use-reporter.ts). Must not throw or block.
    */
   onSkillUsed?: (sighting: SkillUseSighting) => void
+  /**
+   * 「毎週同じ時間にやりましょうか？」 (jobs.md "Member proposals" "Asking after repeats (PR D)", features/jobs/repeat-asks.ts):
+   * asked only for a turn where the job proposal tools are offered (a consultation the member is in — never a job run,
+   * 「AI の番」 or a step). Answers the turn's one-time question (often empty) and the sink for each Skill the AI loads in
+   * that turn, or undefined (nobody signed in, switched off). Must not throw or block.
+   */
+  jobRepeatAsk?: (turn: { companyId: string; companyRoot: string; workingDirectory?: string }) => { instructions: string; skillUsed: (skill: string) => void } | undefined
 }
 
 // ============================================================================
@@ -229,18 +237,40 @@ export function withShelfInstructions(prompt: string | undefined, shelf: { instr
 export function withSkillSightings<H extends Pick<ChatServerConfig, 'onToolEvent' | 'onSkillUsed'>>(
   config: H,
   turn: Omit<SkillUseSighting, 'skill'> | undefined,
+  /** This turn's repeat count (`jobRepeatAsk`), set once the turn knows it offers the job proposal tools. */
+  turnSkill?: { current?: (skill: string) => void },
 ): H {
   const { onSkillUsed, onToolEvent } = config
-  if (!turn || !onSkillUsed) return config
+  if (!turn || (!onSkillUsed && !turnSkill)) return config
   return {
     ...config,
     onToolEvent: (event: AgentToolEvent) => {
       onToolEvent?.(event)
       const skill = skillLoadedBy(event)
       if (!skill) return
-      try { onSkillUsed({ ...turn, skill }) } catch { /* the record is informational: never in the AI's path */ }
+      try { onSkillUsed?.({ ...turn, skill }) } catch { /* the record is informational: never in the AI's path */ }
+      try { turnSkill?.current?.(skill) } catch { /* the count is informational: never in the AI's path */ }
     },
   }
+}
+
+/**
+ * 「毎週同じ時間にやりましょうか？」 for one turn (jobs.md "Asking after repeats (PR D)"): only where the job proposal tools
+ * are really offered (the chat server's flag, an act token not bound to a run — the AI could make the candidate nowhere
+ * else), never for an unattended step. Connects the turn's Skill sink and answers the text to add to the prompt ('' for none).
+ */
+export function repeatAskForTurn(
+  ask: ChatServerConfig['jobRepeatAsk'],
+  turn: { unattended: boolean; records: Pick<RecordTools, 'specs'> | undefined; companyId?: string; companyRoot?: string; workingDirectory?: string },
+  sink: { current?: (skill: string) => void },
+): string {
+  if (!ask || turn.unattended || !turn.companyId || !turn.companyRoot) return ''
+  if (!turn.records?.specs.some(spec => spec.name === JOB_PROPOSAL_CREATE_TOOL)) return ''
+  let answer: ReturnType<NonNullable<ChatServerConfig['jobRepeatAsk']>>
+  try { answer = ask({ companyId: turn.companyId, companyRoot: turn.companyRoot, workingDirectory: turn.workingDirectory }) } catch { return '' }
+  if (!answer) return ''
+  sink.current = answer.skillUsed
+  return answer.instructions
 }
 
 /**
@@ -355,8 +385,11 @@ export async function startChatServer(config: ChatServerConfig) {
     const authMode = requestedAuthMode || config.getAuthMode()
     if (!isAgentId(authMode)) return c.json({ error: '不明なAI接続方式です。' }, 400)
     // Which Skill this consultation used (records.md "Which Skill"): seen in the AI action log's events.
+    // 「毎週同じ時間にやりましょうか？」's count (jobs.md "Asking after repeats (PR D)"): connected below, only when this turn
+    // offers the job proposal tools — an unattended run's or a step's Skill never counts.
+    const repeatSkill: { current?: (skill: string) => void } = {}
     const host = withSkillSightings(config, companyId && appSessionId && companyRootPath && !requestedStep
-      ? { companyId, conversationId: appSessionId, companyRoot: companyRootPath, workingDirectory } : undefined)
+      ? { companyId, conversationId: appSessionId, companyRoot: companyRootPath, workingDirectory } : undefined, repeatSkill)
     const connection = createAgentConnection(authMode, host)
     const can = AGENTS[authMode].capabilities
     // An unattended 「AI の番」 step (ai-turns.md): only its tools, only an agent that takes record actions.
@@ -566,6 +599,8 @@ export async function startChatServer(config: ChatServerConfig) {
         ? allRecords.execute(name, input) : Promise.resolve('この自動の作業では、この道具（またはこの種類の記録）は使えません。'),
     } : allRecords
     if (records) finalSystemPrompt = (finalSystemPrompt || '') + records.instructions
+    const repeatAsk = repeatAskForTurn(config.jobRepeatAsk, { unattended: !!aiTurnStep, records, companyId, companyRoot: companyRootPath, workingDirectory }, repeatSkill)
+    if (repeatAsk) finalSystemPrompt = (finalSystemPrompt || '') + repeatAsk
     // A consultation about a task (consultation-task.ts): new files are linked to it; a task only the
     // member sees keeps them in the member's 今日のフォルダ. Unattended steps are left as they are.
     const topicOf = () => {

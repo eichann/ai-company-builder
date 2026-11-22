@@ -40,6 +40,7 @@ import type { ApprovalResult } from './approvals'
 import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
 import type { JobActionResult, MyJobOccurrencesResult, MyJobsResult, WatchChoicesResult } from './jobs'
 import type { JobCandidateDiscardResult, JobCandidateResult, JobProposalResult, MyJobProposalsResult } from './job-proposals'
+import type { JobRepeatAskSetting } from './job-repeat-asks'
 import type { QueuedJobTurn } from './ai-turn-steps/job'
 import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
 import type { ViewersQuery, ViewersResult } from './viewers'
@@ -599,6 +600,11 @@ export interface IpcInvokeChannels {
   'jobProposals:withdraw': { args: [companyId: string, proposalId: string]; result: JobProposalResult }
   /** 「やめる」: the candidate not submitted yet is discarded on the server (the member's own press). */
   'jobProposals:discard': { args: [companyId: string, candidateId: string]; result: JobCandidateDiscardResult }
+  // 「AI から定期の仕事を提案してもらう」 (jobs.md "Asking after repeats (PR D)"): this PC's own setting per member and company.
+  /** Whether the AI may ask once, after the same Skill was used on 3 days, to make it a time job. */
+  'jobRepeatAsks:get': { args: [companyId: string]; result: JobRepeatAskSetting }
+  /** Turn it on / off (off: nothing is counted or asked). */
+  'jobRepeatAsks:set': { args: [companyId: string, on: boolean]; result: JobRepeatAskSetting }
   // 自分の設定 → 「受信を読む」「AI が自動で進める」: the member's own switches, with their session.
   /** The member's switches (+ the company's 使ってよいか / 初めの値). */
   'workSwitches:get': { args: [companyId: string]; result: WorkSwitchesResult }
@@ -1159,6 +1165,8 @@ export interface ElectronAPI {
   getMyJobProposals: Invoke<'jobProposals:mine'>
   withdrawJobProposal: Invoke<'jobProposals:withdraw'>
   discardJobCandidate: Invoke<'jobProposals:discard'>
+  getJobRepeatAsk: Invoke<'jobRepeatAsks:get'>
+  setJobRepeatAsk: Invoke<'jobRepeatAsks:set'>
   // 自分の設定 → 「受信を読む」「AI が自動で進める」.
   getWorkSwitches: Invoke<'workSwitches:get'>
   setWorkSwitch: Invoke<'workSwitches:set'>

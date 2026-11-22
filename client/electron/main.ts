@@ -72,6 +72,7 @@ import { registerApprovalsIpc } from './features/approvals/ipc'
 import { registerAbsencesIpc } from './features/absences/ipc'
 import { registerJobsIpc } from './features/jobs/ipc'
 import { registerJobProposalsIpc } from './features/jobs/proposals'
+import { createJobRepeatAsks, registerJobRepeatAsksIpc } from './features/jobs/repeat-asks'
 import { registerWorkSwitchesIpc } from './features/work-switches/ipc'
 import { registerViewersIpc } from './features/viewers/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
@@ -420,6 +421,9 @@ registerAbsencesIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // Member proposals (features/jobs/proposals): the chat card's 「これで管理者に出す」 is the member's own press, with the
 // session — no chat-server route, AI tool or record token reaches it (jobs.md "Member proposals").
 registerJobProposalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// 「毎週同じ時間にやりましょうか？」 (features/jobs/repeat-asks): this PC's count of the Skills a member's AI used, never sent anywhere.
+const jobRepeatAsks = createJobRepeatAsks({ file: () => path.join(userDataDir(), 'job-repeat-asks.json'), userId: session.userId, home: os.homedir(), log: console })
+registerJobRepeatAsksIpc(ipc, jobRepeatAsks)
 // Settings → 「定期の仕事」 (features/jobs): the jobs the member is responsible for, with the session.
 registerJobsIpc(ipc, {
   baseUrl: getServerApiUrl, cookies: session.cookies,
@@ -721,6 +725,7 @@ app.whenReady().then(async () => {
       records: recordsApi,
       recordsChanged: recordsChangedHere,
       skillUses,
+      jobRepeatAsks,
       toolApprovals,
       cancelChoicePrompts: appSessionId => agentInteractions.cancelConversation(appSessionId),
       agentEvents: agentControl.events,

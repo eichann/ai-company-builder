@@ -164,6 +164,8 @@ contract.invoke jobProposals:discard
 contract.invoke jobProposals:mine
 contract.invoke jobProposals:submit
 contract.invoke jobProposals:withdraw
+contract.invoke jobRepeatAsks:get
+contract.invoke jobRepeatAsks:set
 contract.invoke jobs:accept
 contract.invoke jobs:mine
 contract.invoke jobs:occurrences
@@ -461,6 +463,7 @@ contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:stat
 contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
 contract.type ElectronAPI.getInviteChoices = getInviteChoices: Invoke<'minutes:inviteChoices'>
 contract.type ElectronAPI.getJobCandidate = getJobCandidate: Invoke<'jobProposals:candidate'>
+contract.type ElectronAPI.getJobRepeatAsk = getJobRepeatAsk: Invoke<'jobRepeatAsks:get'>
 contract.type ElectronAPI.getMeetingArrivals = getMeetingArrivals: Invoke<'minutes:arrivals'>
 contract.type ElectronAPI.getMeetingBundleQuestion = getMeetingBundleQuestion: Invoke<'minutes:bundleQuestion'>
 contract.type ElectronAPI.getMeetingCardState = getMeetingCardState: Invoke<'minutes:meeting'>
@@ -612,6 +615,7 @@ contract.type ElectronAPI.setDocViewZoom = setDocViewZoom: Invoke<'docView:setZo
 contract.type ElectronAPI.setGoogleArchive = setGoogleArchive: Invoke<'google:setArchive'>
 contract.type ElectronAPI.setGoogleDrive = setGoogleDrive: Invoke<'google:setDrive'>
 contract.type ElectronAPI.setGoogleRelay = setGoogleRelay: Invoke<'google:setRelay'>
+contract.type ElectronAPI.setJobRepeatAsk = setJobRepeatAsk: Invoke<'jobRepeatAsks:set'>
 contract.type ElectronAPI.setMeetingAutoSeries = setMeetingAutoSeries: Invoke<'minutes:autoSeries'>
 contract.type ElectronAPI.setNotificationSetting = setNotificationSetting: Invoke<'notifications:setSetting'>
 contract.type ElectronAPI.setPermissionMode = setPermissionMode: Invoke<'config:setPermissionMode'>
@@ -926,6 +930,8 @@ contract.type IpcInvokeChannels.'jobProposals:discard' = 'jobProposals:discard':
 contract.type IpcInvokeChannels.'jobProposals:mine' = 'jobProposals:mine': { args: [companyId: string]; result: MyJobProposalsResult }
 contract.type IpcInvokeChannels.'jobProposals:submit' = 'jobProposals:submit': { args: [companyId: string, candidateId: string, fingerprint: string]; result: JobProposalResult }
 contract.type IpcInvokeChannels.'jobProposals:withdraw' = 'jobProposals:withdraw': { args: [companyId: string, proposalId: string]; result: JobProposalResult }
+contract.type IpcInvokeChannels.'jobRepeatAsks:get' = 'jobRepeatAsks:get': { args: [companyId: string]; result: JobRepeatAskSetting }
+contract.type IpcInvokeChannels.'jobRepeatAsks:set' = 'jobRepeatAsks:set': { args: [companyId: string, on: boolean]; result: JobRepeatAskSetting }
 contract.type IpcInvokeChannels.'jobs:accept' = 'jobs:accept': { args: [companyId: string, jobId: string, version: number, fingerprint: string]; result: JobActionResult }
 contract.type IpcInvokeChannels.'jobs:mine' = 'jobs:mine': { args: [companyId: string]; result: MyJobsResult }
 contract.type IpcInvokeChannels.'jobs:occurrences' = 'jobs:occurrences': { args: [companyId: string]; result: MyJobOccurrencesResult }
@@ -1263,6 +1269,8 @@ main.handle jobProposals:discard @ features/jobs/proposals.ts (companyId, candid
 main.handle jobProposals:mine @ features/jobs/proposals.ts (companyId)
 main.handle jobProposals:submit @ features/jobs/proposals.ts (companyId, candidateId, fingerprint)
 main.handle jobProposals:withdraw @ features/jobs/proposals.ts (companyId, proposalId)
+main.handle jobRepeatAsks:get @ features/jobs/repeat-asks.ts (companyId)
+main.handle jobRepeatAsks:set @ features/jobs/repeat-asks.ts (companyId, on)
 main.handle jobs:accept @ features/jobs/ipc.ts (companyId, jobId, version, fingerprint)
 main.handle jobs:mine @ features/jobs/ipc.ts (companyId)
 main.handle jobs:occurrences @ features/jobs/ipc.ts (companyId)
@@ -1570,6 +1578,8 @@ preload getInviteChoices -> invoke minutes:inviteChoices($0, $1)
 preload getInviteChoices : (companyId: string, recordId: string) => Promise<MeetingInviteChoicesResult>
 preload getJobCandidate -> invoke jobProposals:candidate($0, $1)
 preload getJobCandidate : (companyId: string, candidateId: string) => Promise<JobCandidateResult>
+preload getJobRepeatAsk -> invoke jobRepeatAsks:get($0)
+preload getJobRepeatAsk : (companyId: string) => Promise<JobRepeatAskSetting>
 preload getMeetingArrivals -> invoke minutes:arrivals($0)
 preload getMeetingArrivals : (companyId: string) => Promise<MeetingArrivalsResult>
 preload getMeetingBundleQuestion -> invoke minutes:bundleQuestion($0, $1)
@@ -1872,6 +1882,8 @@ preload setGoogleDrive -> invoke google:setDrive($0, $1)
 preload setGoogleDrive : (companyId: string, on: boolean) => Promise<GoogleStatusResult>
 preload setGoogleRelay -> invoke google:setRelay($0, $1)
 preload setGoogleRelay : (companyId: string, on: boolean) => Promise<GoogleRelayResult>
+preload setJobRepeatAsk -> invoke jobRepeatAsks:set($0, $1)
+preload setJobRepeatAsk : (companyId: string, on: boolean) => Promise<JobRepeatAskSetting>
 preload setMeetingAutoSeries -> invoke minutes:autoSeries($0, $1, $2)
 preload setMeetingAutoSeries : (companyId: string, meetingId: string, auto: boolean) => Promise<MinutesActionResult>
 preload setNotificationSetting -> invoke notifications:setSetting($0, $1, $2)

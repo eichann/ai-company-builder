@@ -37,6 +37,7 @@ const switchState = (k: 'readIncoming' | 'autoRun', def: boolean) => ({ on: poli
 const mySwitches = () => ({ readIncoming: { ...switchState('readIncoming', false), connected: { mail: params.get('mail') !== 'no', chat: false } }, autoRun: switchState('autoRun', true),
   ...(params.get('channels') === 'none' ? { channels: { mail: false, chat: false } } : {}) })
 const switchesSet: string[] = []
+let repeatAskOn = true
 if (theme === 'dark') document.documentElement.classList.add('dark')
 
 const ROOT = '/Users/demo/会社'
@@ -127,6 +128,9 @@ Object.assign(window, {
     // 自分の設定 → 「Google で許可する」 opens the Google section: offline here, it says so.
     getGoogleStatus: async () => ({ success: false, offline: true, error: 'サーバーにつながりませんでした。' }),
     getWorkSwitches: async () => ({ success: true, switches: mySwitches() }),
+    // 「AI から定期の仕事を提案してもらう」: this PC's own setting (on).
+    getJobRepeatAsk: async () => ({ success: true, on: repeatAskOn }),
+    setJobRepeatAsk: async (_companyId: string, on: boolean) => { repeatAskOn = on; return { success: true, on } },
     setWorkSwitch: async (_companyId: string, which: 'readIncoming' | 'autoRun', on: boolean) => {
       switchesSet.push(`${which}:${on}`)
       ;(window as unknown as { __switchesSet: string[] }).__switchesSet = switchesSet

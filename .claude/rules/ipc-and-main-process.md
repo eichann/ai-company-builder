@@ -64,7 +64,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `agent-browser.md` "The card, the IPC and the request tool"), `jobs` (jobs:mine / accept / pause / resume: the
   scheduled jobs the member is responsible for, with the session; `jobs.md` "The screens"; and `proposals.ts`
   jobProposals:candidate / submit / mine / withdraw: a member's proposals, the chat card's 「これで管理者に出す」 a press of the
-  member's own, session only — `jobs.md` "Member proposals" "The app (PR C)"), `ai-turns`
+  member's own, session only — `jobs.md` "Member proposals" "The app (PR C)"; and `repeat-asks.ts` jobRepeatAsks:get / set:
+  this PC's 「AI から定期の仕事を提案してもらう」, `jobs.md` "Asking after repeats (PR D)"), `ai-turns`
   (aiTurns:settings / claim / settle: the automatic 「AI の番」's claim by version and settle, main
   window only; the run itself is a hidden consultation in the renderer, `ai-turns.md`). `tasks`
   (tasks:list / create / act / card / linkFile / unlinkFile / retryRun / reconcile: the task list and card, read and

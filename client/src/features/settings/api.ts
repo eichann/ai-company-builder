@@ -231,6 +231,17 @@ export function setWorkSwitch(companyId: string, which: 'readIncoming' | 'autoRu
   return writes.setWorkSwitch(companyId, which, on)
 }
 
+/** 「AI から定期の仕事を提案してもらう」: this PC's own setting for the member in this company. */
+export type JobRepeatAskPort = ElectronPort<'getJobRepeatAsk' | 'setJobRepeatAsk'>
+
+export function getJobRepeatAsk(companyId: string, port: JobRepeatAskPort = window.electronAPI) {
+  return port.getJobRepeatAsk(companyId)
+}
+
+export function setJobRepeatAsk(companyId: string, on: boolean, port: JobRepeatAskPort = window.electronAPI) {
+  return port.setJobRepeatAsk(companyId, on)
+}
+
 /** 「ブラウザ操作」: the sites the member may open now, and hearing that they changed. */
 export type BrowserSiteReads = ElectronPort<'getBrowserSites' | 'onBrowserChanged'>
 /** 「開いてログイン」 and 「ログインを消す」: a window on this computer and the site's login kept there. */
