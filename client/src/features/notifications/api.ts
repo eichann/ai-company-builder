@@ -1,4 +1,4 @@
-// The title bar's 「あなたの番」 and bell's access to the main process (src/shared/ipc/electron-api.ts):
+// The notices' access to the main process (src/shared/ipc/electron-api.ts), used by the inbox (受け箱):
 // small ports, each function taking its port last (default window.electronAPI).
 // Main asks the company server with the member's session.
 import type { ElectronPort } from '../../shared/ipc/electron-api'
@@ -6,10 +6,10 @@ import { NO_NOTICES, type NoticesState } from '../../../shared/notifications-app
 
 /** Following a company's turn and notices: main checks with the server (start, every 5 minutes, signals). */
 export type NoticesReads = ElectronPort<'watchNotifications' | 'getNotificationsState' | 'onNotificationsChanged' | 'getNotificationSettings'>
-/** A Mac notification that opens the task list was clicked (the morning's 「今日のあなたの番」). */
+/** The morning's 「今日のあなたの番」 Mac notification was clicked (the inbox opens; the channel keeps its old name). */
 export type NoticesClicks = ElectronPort<'onNotificationsOpenTasks'>
 
-/** `listener` hears when this company's task list should be shown (a clicked Mac notification). */
+/** `listener` hears when this company's inbox should be shown (a clicked Mac notification). */
 export function subscribeOpenTasks(companyId: string, listener: () => void, clicks: NoticesClicks = window.electronAPI): () => void {
   const stop = clicks.onNotificationsOpenTasks(e => { if (e.companyId === companyId) listener() })
   return () => { stop?.() }

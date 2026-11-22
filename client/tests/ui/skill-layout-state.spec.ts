@@ -7,7 +7,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { openPreview } from './helpers'
 
-type Layout = { calls: Array<{ name: string; args: unknown[] }>; editorWasEmpty(): boolean; switchCompany(id: string): Promise<void> }
+type Layout = { calls: Array<{ name: string; args: unknown[] }>; editorWasEmpty(): boolean; switchCompany(id: string): Promise<void>; macNotificationClicked(): void }
 const layout = (page: Page) => page.evaluateHandle(() => (window as unknown as { __acbLayout: Layout }).__acbLayout)
 const editorWasEmpty = async (page: Page) => (await layout(page)).evaluate(l => l.editorWasEmpty())
 const switchCompany = async (page: Page, id: string) => (await layout(page)).evaluate((l, to) => l.switchCompany(to), id)
@@ -455,7 +455,8 @@ test.describe('the bottom panel', () => {
   const divider = (page: Page) => page.getByRole('separator', { name: 'エディタと下のパネルの境目' })
   const treeDivider = (page: Page) => page.getByRole('separator', { name: 'ファイルツリーとエディタの境目' })
   const chatDivider = (page: Page) => page.getByRole('separator', { name: '左の欄とチャットの境目' })
-  const toggle = (page: Page) => page.getByRole('group', { name: '画面の形' }).getByRole('button', { name: '下のパネル (⌘J)' })
+  // The title bar's one button for the panel is ［受け箱］ (I2; the 「画面の形」 one was removed as a duplicate).
+  const toggle = (page: Page) => page.locator('[data-inbox-button]')
   const open = (page: Page, query: Record<string, string> = {}) => openPreview(page, 'skill-layout', { bottom: '1', ...query })
   /** ⌘J (or Ctrl+J) as the browser reports it, at the focused element; whether the app took the key. */
   const pressJ = (page: Page, mods: { metaKey?: boolean; ctrlKey?: boolean } = { metaKey: true }) => page.evaluate(m => {
@@ -476,16 +477,15 @@ test.describe('the bottom panel', () => {
     await expect(divider(page)).toHaveCount(0)
   })
 
-  test('⌘J opens it under the middle only and closes it; the title bar button and 閉じる do the same; every start begins closed', async ({ page }) => {
+  test('⌘J opens it under the middle only and closes it; 閉じる does the same; every start begins closed', async ({ page }) => {
     await open(page)
     await leftTab(page, 'ファイル').click()
     await expect(panel(page)).toBeHidden()
-    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.getByRole('group', { name: '画面の形' }).getByRole('button', { name: /下のパネル/ })).toHaveCount(0)
 
     expect(await pressJ(page)).toBe(true)
     await expect(panel(page)).toBeVisible()
     await expect(page.getByText('見本の中身です。')).toBeVisible()
-    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true')
     // Under the middle only: from the tree divider to the chat divider, down to the window's bottom.
     const p = await box(panel(page))
     expect(Math.round(p.x)).toBe(Math.round((await box(treeDivider(page))).x) + 4)
@@ -496,18 +496,17 @@ test.describe('the bottom panel', () => {
 
     await pressJ(page)
     await expect(panel(page)).toBeHidden()
-    await toggle(page).click()
+    await pressJ(page)
     await expect(panel(page)).toBeVisible()
     await page.getByRole('button', { name: '下のパネルを閉じる (⌘J)' }).click()
     await expect(panel(page)).toBeHidden()
 
     // Left open, the next start still begins closed.
-    await toggle(page).click()
+    await pressJ(page)
     await expect(panel(page)).toBeVisible()
     await open(page, { keep: '1' })
     await leftTab(page, 'ファイル').click()
     await expect(panel(page)).toBeHidden()
-    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false')
   })
 
   test('on a Mac, Ctrl+J in a text field stays the field\'s own key', async ({ page }) => {
@@ -577,7 +576,6 @@ test.describe('the bottom panel', () => {
     await leftTab(page, 'スキル').click()
     const skillShown = page.getByText(/proposal|weekly-report/).first()
     await expect(skillShown).toBeVisible()
-    await expect(toggle(page)).toBeVisible()
     expect(await pressJ(page)).toBe(true)
     await expect(panel(page)).toBeVisible()
     const p = await box(panel(page))
@@ -646,6 +644,29 @@ test.describe('the bottom panel', () => {
     // Opening a done row marks it seen (the bell's same read state).
     await panel(page).locator('[data-inbox-row="notice:n-1"]').getByRole('button', { name: '開く' }).click()
     await expect.poll(async () => (await layout(page)).evaluate(l => l.calls.filter(c => c.name === 'markNotificationsRead').length)).toBe(1)
+  })
+
+  test('the title bar\'s ［受け箱］ (I2) opens and closes the same panel as ⌘J; ⌘K 「受け箱」 and the morning\'s Mac notification open it', async ({ page }) => {
+    await openPreview(page, 'skill-layout', { inbox: '1' })
+    const inboxButton = page.locator('[data-inbox-button]')
+    // One approval waits; the unread done notice is new. No 「あなたの番」 pill and no bell any more.
+    await expect(inboxButton).toHaveAccessibleName('受け箱（あなた待ち 1 件・新着あり）')
+    await expect(page.getByRole('button', { name: /^起きたこと/ })).toHaveCount(0)
+    await inboxButton.click()
+    await expect(panel(page)).toBeVisible()
+    await expect(inboxButton).toHaveAccessibleName('受け箱（あなた待ち 1 件）')
+    await inboxButton.click()
+    await expect(panel(page)).toBeHidden()
+
+    await page.keyboard.press('ControlOrMeta+k')
+    await page.keyboard.type('受け箱')
+    await page.getByRole('option', { name: /受け箱/ }).first().click()
+    await expect(panel(page)).toBeVisible()
+    await pressJ(page)
+    await expect(panel(page)).toBeHidden()
+
+    await (await layout(page)).evaluate(l => l.macNotificationClicked())
+    await expect(panel(page)).toBeVisible()
   })
 
   for (const theme of ['light', 'dark'] as const) {

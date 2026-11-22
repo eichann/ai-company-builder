@@ -338,10 +338,11 @@ fine), `color-opacity` (`bg-warning/10`).
   `ApprovalCard` / `MailDraftCard` and 「ブラウザで Google の画面を開きました」 are the info set; error
   messages shown in a warning callout (`{error}` callouts in settings, absences, jobs) are `danger`.
 - **New-item mark = one primary dot** `NewDot` (primitives; `bg-unread`, `size-dot`, `role="img"` named
-  by its word): the left tabs' dot, the bell's unread dot and its unread rows (were red), the chat list's
+  by its word): the left tabs' dot, the bell's unread dot and its unread rows (were red; since I2 the title bar's
+  ［受け箱］ dot and the inbox rows' marks), the chat list's
   「新着」 (was a green word, row and folded group), the file tree's new review (was a blinking amber
   dot). The count bubble (`LeftPanelTabs`) is unchanged (`primary` later).
-- **「閲覧のみ」 replaces 「読むだけ」** in user-facing text: the bell 「起きたこと（閲覧のみ）」, google-relay's
+- **「閲覧のみ」 replaces 「読むだけ」** in user-facing text: the bell 「起きたこと（閲覧のみ）」 (gone with the bell in I2), google-relay's
   scopes, the integrations' write choice 「書き戻さない（閲覧のみ）」, the relay summary, the agent-events
   description, the browser level's help, second-opinion's 「閲覧のみで聞きます」. Not changed: texts for
   the AI (tool descriptions in `client/electron`), plugin-author errors (`shared/core`), the relay's
@@ -356,7 +357,7 @@ fine), `color-opacity` (`bg-warning/10`).
 - **Guarded by** `client/tests/ui/status-colours.spec.ts` (light and dark: every callout tone and badge
   variant against its `--color-*-rgb` tokens on `client/tests/status-ui.html`; the three stopped states
   differ in fill, icon and word; real screens — the task card's failed run, the pending approval card,
-  `download-folders-ui?tab=ownkeys&ownkey=stopped`, the bell's dots and 「閲覧のみ」; the amber places —
+  `download-folders-ui?tab=ownkeys&ownkey=stopped`, the title bar's ［受け箱］ (its dot `unread`, its count `primary`) and the inbox rows' dots; the amber places —
   `status-ui`'s task rows (`not-allowed` amber, failed red) and title bar (sync waiting),
   `download-folders-ui?tab=mine&company=off|later` (the notice, unfaded; the refusal a warning),
   `editor-tabs-ui?view=external` 「自動保存は止めています」), `autoSyncSchedule.test.ts`
@@ -369,7 +370,7 @@ fine), `color-opacity` (`bg-warning/10`).
 - **Still to move** (later PRs): the app's other hand-made red / amber boxes and texts (`ChatHeader`'s
   status dots, `RateLimitMeter`, `DiffViewer`, `ReviewSidePanel`, `MarkdownDiffView`, `BackupHistorySlideOver`,
   `TaskRow`'s CHIP and review mark, `QuickAdd` / `WaitParts` / `TagField` chips (pressable: the chip PR),
-  `ChatSidebar`'s 「あなたの番」 heading and amber icons, `TitleBarNotices`' 「あなたの番」 pill, the
+  `ChatSidebar`'s 「あなたの番」 heading and amber icons, the
   `ExternalChangeBanner` buttons), the admin's
   hand-written 「管理役」 marks (`text-[10px]`: scope-editor, editor-picker, audience-fields), its
   `ErrorState` and red text lines, `permissions-view`'s 「制限あり」 (`warning`: a decision), the

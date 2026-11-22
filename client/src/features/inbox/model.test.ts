@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { NotificationItem } from '../../../../shared/types/notifications'
-import type { NoticesState, TurnItem } from '../../../shared/notifications-app'
-import { bulkSeenIds, countText, INBOX_MAX_ROWS, inboxView, type InboxAction } from './model'
+import type { MeetingTurn, NoticesState, TurnItem } from '../../../shared/notifications-app'
+import { bulkSeenIds, countText, hasInboxNews, INBOX_MAX_ROWS, inboxNewsBaseline, inboxNewsKeys, inboxView, seenWhileShown, type InboxAction } from './model'
 
 // Type-level guard (`pnpm typecheck`): no row action may approve or send; such a kind fails to compile here.
 type ActsOutside = Extract<InboxAction['kind'], `${string}${'approve' | 'Approve' | 'send' | 'Send'}${string}`>
@@ -67,7 +67,9 @@ test('a stop notice waits while unread and is gone once opened; a done notice mo
   const after = inboxView(state([], [{ ...stop, read: true }, { ...done, read: true }]), NOW)
   assert.equal(after.waiting.length, 0)
   assert.equal(after.done.length, 0)
-  assert.deepEqual(after.seenToday.map(i => i.key), [`notice:${done.id}`])
+  // Both stay findable, folded in 「きょう確認したもの」 (the bell listed read ones too), counted nowhere.
+  assert.deepEqual(after.seenToday.map(i => i.key), [`notice:${stop.id}`, `notice:${done.id}`].reverse())
+  assert.equal(after.counts.all, 0)
   // The morning summary is no row (it only counts what あなた待ち shows).
   assert.equal(inboxView(state([], [notice('morning_summary', '', '2026-11-22T00:00:00Z')]), NOW).counts.all, 0)
 })
@@ -137,7 +139,8 @@ test('a notice that asks for something waits even when its record is not in the 
   assert.deepEqual(bulkSeenIds(v, 'done'), [finished.id])
   // Gone once opened, like a stop.
   const read = inboxView(state([], asks.map(a => ({ ...a, read: true }))), NOW)
-  assert.equal(read.waiting.length + read.done.length + read.seenToday.length, 0)
+  assert.equal(read.waiting.length + read.done.length, 0)
+  assert.equal(read.counts.all, 0)
 })
 
 test('with the turn past the server\'s first 200, news about a record may be about a waiting one: it waits', () => {
@@ -172,4 +175,113 @@ test('a stop about a record already waiting makes that row a stop: its badge and
   assert.equal(v.waiting[0].key, 'record:task-b')
   assert.deepEqual(v.waiting[0].badge, { tone: 'needsAction', word: '止まっています' })
   assert.deepEqual(v.waiting[0].unreadNoticeIds, [stuck.id])
+})
+
+// I2: what the title bar's 「あなたの番」 and bell carried for a department without the task list.
+const meeting = (id: string, needsPerson: boolean, ai: MeetingTurn['ai'] = null, kind: MeetingTurn['kind'] = 'minutes'): MeetingTurn =>
+  ({ id, title: id, kind, text: `${id} の様子`, needsPerson, ai })
+
+test('a meeting waiting for the member is あなた待ち and counted (the old 「あなたの番 N」); one the AI reads is 作業中, not counted', () => {
+  const v = inboxView(state([turn('task-a', 'task', 'todo')], []), NOW, [
+    meeting('meeting-choose', true, null, 'bundle'),
+    meeting('meeting-failed', true, { recordId: 'meeting-failed', state: 'failed', reason: '議事録が空でした', canRetry: true, canHand: true }),
+    meeting('meeting-reading', false, { recordId: 'meeting-reading', state: 'running', reason: '', canRetry: false, canHand: false }),
+  ])
+  assert.deepEqual(v.waiting.map(i => i.key), ['record:meeting-failed', 'record:meeting-choose', 'record:task-a'])
+  assert.equal(v.waiting[0].badge.tone, 'failed')
+  assert.equal(v.waiting[1].meetingId, 'meeting-choose')
+  assert.deepEqual(v.working.map(i => i.key), ['record:meeting-reading'])
+  assert.equal(v.counts.waiting, 3)
+  assert.equal(v.counts.working, 1)
+  assert.deepEqual(v.waiting[1].action, { kind: 'openRecord', recordId: 'meeting-choose', title: 'meeting-choose' })
+})
+
+test('a meeting already in the server\'s turn stays one row; a notice about a waiting meeting is that row\'s news', () => {
+  const asked = notice('minutes_arrived', 'meeting-x', '2026-11-22T00:00:00Z')
+  const v = inboxView(state([turn('meeting-y', 'meeting', 'received')], [asked]), NOW, [meeting('meeting-y', true), meeting('meeting-x', true)])
+  assert.deepEqual(v.waiting.map(i => i.key).sort(), ['record:meeting-x', 'record:meeting-y'])
+  assert.equal(v.waiting.find(i => i.key === 'record:meeting-y')?.meetingId, 'meeting-y', 'its buttons stay with the one row')
+  assert.deepEqual(v.waiting.find(i => i.key === 'record:meeting-x')?.unreadNoticeIds, [asked.id])
+})
+
+test('the title bar\'s dot: at the start only an unread notice is new; then a new waiting row or notice, until the inbox is shown', () => {
+  const first = inboxView(state([turn('task-a', 'task', 'todo')], [notice('request_done', 'task-d', '2026-11-22T00:00:00Z', true)]), NOW)
+  let seen = new Set(inboxNewsBaseline(first))
+  assert.equal(hasInboxNews(inboxNewsKeys(first), seen), false, 'what the count already says is not news')
+  const unread = inboxView(state([turn('task-a', 'task', 'todo')], [notice('request_done', 'task-e', '2026-11-22T01:00:00Z')]), NOW)
+  assert.equal(hasInboxNews(inboxNewsKeys(unread), new Set(inboxNewsBaseline(unread))), true, 'an unread notice at the start is the old bell\'s dot')
+  const more = inboxView(state([turn('task-a', 'task', 'todo'), turn('approval-b', 'approval', 'pending')], []), NOW)
+  assert.equal(hasInboxNews(inboxNewsKeys(more), seen), true, 'a new approval request is new')
+  seen = new Set(inboxNewsKeys(more))
+  assert.equal(hasInboxNews(inboxNewsKeys(more), seen), false, 'shown: nothing new any more')
+  const fewer = inboxView(state([turn('approval-b', 'approval', 'pending')], []), NOW)
+  assert.equal(hasInboxNews(inboxNewsKeys(fewer), seen), false, 'something leaving is not news')
+  const nowWaiting = inboxView(state([], []), NOW, [meeting('meeting-r', true)])
+  assert.equal(hasInboxNews(inboxNewsKeys(nowWaiting), new Set(inboxNewsKeys(inboxView(state([], []), NOW, [meeting('meeting-r', false)])))), true,
+    'a meeting the AI was reading that now waits for the member is new')
+})
+
+test('the dot sees every unread できた notice, also one the row limit leaves out', () => {
+  const many = Array.from({ length: INBOX_MAX_ROWS }, (_, i) => turn(`task-${i}`, 'task', 'todo'))
+  const before = inboxView(state(many, []), NOW)
+  const done = notice('request_done', 'task-done', '2026-11-22T00:00:00Z')
+  const after = inboxView(state(many, [done]), NOW)
+  assert.equal(after.done.length, 0, 'no room for the row')
+  assert.equal(hasInboxNews(inboxNewsKeys(after), new Set(inboxNewsKeys(before))), true)
+})
+
+test('a meeting the AI reads keeps its unread notice as its own news: one row in 作業中, not a second one waiting', () => {
+  const arrived = notice('minutes_arrived', 'meeting-r', '2026-11-22T00:00:00Z')
+  const v = inboxView(state([], [arrived]), NOW, [meeting('meeting-r', false, { recordId: 'meeting-r', state: 'running', reason: '', canRetry: false, canHand: false })])
+  assert.deepEqual(v.waiting, [])
+  assert.deepEqual(v.working.map(i => [i.key, i.unreadNoticeIds]), [['record:meeting-r', [arrived.id]]])
+  assert.equal(v.counts.waiting, 0)
+})
+
+// The independent review of I2: nothing the bell showed may disappear.
+const aiChanged = (recordId: string, createdAt: string, read = false) => notice('ai_changed', recordId, createdAt, read, { aiChange: { pluginId: 'corporate-sales', operationId: `op-${recordId}`, undone: false } })
+
+test('［元に戻す］ stays wherever its notice lands: on a waiting row it merged into, and on a waiting notice row', () => {
+  const onTurn = aiChanged('task-mine', '2026-11-22T00:00:00Z')
+  const v = inboxView(state([turn('task-mine', 'task', 'todo')], [onTurn]), NOW)
+  assert.equal(v.waiting.length, 1)
+  assert.deepEqual(v.waiting[0].undo, { noticeId: onTurn.id, recordId: 'task-mine', version: 3, aiChange: { pluginId: 'corporate-sales', operationId: 'op-task-mine' } })
+  // The turn past the server's first 200: a change may be about a waiting record, so it waits — with its button.
+  const partial = aiChanged('task-unlisted', '2026-11-22T00:00:00Z')
+  const w = inboxView(state([turn('task-a', 'task', 'todo')], [partial], 300), NOW)
+  assert.equal(w.waiting.find(i => i.key === `notice:${partial.id}`)?.undo?.noticeId, partial.id)
+})
+
+test('read notices from before today stay in 「前に確認したもの」, newest first, with ［元に戻す］ where the bell had it', () => {
+  const older = notice('request_done', 'task-x', '2026-11-18T00:00:00Z', true)
+  const newer = aiChanged('task-mine', '2026-11-20T00:00:00Z', true)
+  const today = notice('request_done', 'task-y', '2026-11-22T00:00:00Z', true)
+  // Even a read notice about a record that waits now is listed (not only folded into its row).
+  const v = inboxView(state([turn('task-mine', 'task', 'todo')], [older, today, newer]), NOW)
+  assert.deepEqual(v.seenBefore.map(i => i.key), [`notice:${newer.id}`, `notice:${older.id}`])
+  assert.equal(v.seenBefore[0].undo?.noticeId, newer.id)
+  assert.deepEqual(v.seenToday.map(i => i.key), [`notice:${today.id}`])
+  assert.equal(v.waiting[0].undo, undefined, 'a read change is not the waiting row\'s news')
+  assert.equal(v.counts.all, 1)
+})
+
+test('unread notices past the server\'s list are told and counted, and more of them is news', () => {
+  const listed = notice('request_done', 'task-x', '2026-11-22T00:00:00Z')
+  const three = inboxView({ ...state([], [listed]), notices: { available: true, unread: 4, items: [listed] } }, NOW)
+  assert.equal(three.unreadNotListed, 3)
+  assert.equal(three.counts.all, 4)
+  const four = inboxView({ ...state([], [listed]), notices: { available: true, unread: 5, items: [listed] } }, NOW)
+  assert.equal(hasInboxNews(inboxNewsKeys(four), new Set(inboxNewsKeys(three))), true)
+  assert.equal(hasInboxNews(inboxNewsKeys(three), new Set(inboxNewsKeys(four))), false, 'fewer is not news')
+})
+
+test('only what the chosen chip shows counts as seen: あなた待ち hidden by 「できた・未確認」 stays new', () => {
+  const v = inboxView(state([turn('approval-new', 'approval', 'pending')], [notice('request_done', 'task-x', '2026-11-22T00:00:00Z')]), NOW)
+  const all = inboxNewsKeys(v)
+  const seen = seenWhileShown(new Set(), all, inboxNewsKeys(v, 'done'))
+  assert.equal(hasInboxNews(all, seen), true)
+  assert.equal(seen.has('record:approval-new#waiting'), false)
+  // Seen before and only hidden now: still seen.
+  const again = seenWhileShown(new Set(all), all, inboxNewsKeys(v, 'done'))
+  assert.equal(hasInboxNews(all, again), false)
 })

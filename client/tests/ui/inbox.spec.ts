@@ -70,8 +70,11 @@ test('opening a row marks exactly its notices seen: a stop leaves, a done one go
   await expect(rows(page, 'できた・未確認')).toHaveCount(1)
   const seen = page.getByRole('region', { name: 'きょう確認したもの' })
   await seen.getByRole('button', { name: /きょう確認したもの/ }).click()
-  // Today's seen: the one read before (created today) — the one just read was made yesterday.
-  await expect(seen.locator('[data-inbox-row]')).toHaveCount(1)
+  // Today's seen: the one read before, and the ask and the stop just read (all made today) — the done one was made
+  // yesterday and is in 「前に確認したもの」 (every read notice stays findable, as the bell listed them).
+  await expect(seen.locator('[data-inbox-row]')).toHaveCount(3)
+  await expect(seen.locator('[data-inbox-row="notice:n-stop"]')).toHaveCount(1)
+  await expect(page.getByRole('region', { name: '前に確認したもの' })).toContainText('前に確認したもの（1 件）')
 })
 
 test('a request approved on another PC leaves the list; its card then says it was approved', async ({ page }) => {

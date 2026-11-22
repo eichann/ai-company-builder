@@ -5,7 +5,7 @@
 // who may see what: every row comes from an answer the server already filtered for this member.
 import { UNDOABLE_NOTIFICATION_KINDS, type NotificationItem, type NotificationKind } from '../../../../shared/types/notifications'
 import { STOP_LOOK, type StopMeaning } from '../../../../shared/design-tokens/stop-meaning'
-import type { NoticesState, TurnItem } from '../../../shared/notifications-app'
+import type { MeetingTurn, NoticesState, TurnItem } from '../../../shared/notifications-app'
 import { jobNoticeTarget } from '../../../shared/jobs'
 import { thingKindOf, thingName, type ThingKind } from '../../../shared/thing-words'
 
@@ -51,6 +51,11 @@ export interface InboxItem {
   action: InboxAction
   /** The main button's words (「承認する…」, 「確かめて送る…」, 「開く」). */
   actionLabel: string
+  /**
+   * A meeting the title bar used to carry (a department without the task list, `useMinutesSlots`): its
+   * own buttons (choose a まとまり, read it yourself, もう一度…) are the minutes feature's, found by this id.
+   */
+  meetingId?: string
   /** ［元に戻す］ of a done notice that offers it (UNDOABLE_NOTIFICATION_KINDS, `ai_changed`). */
   undo?: { noticeId: string; recordId: string; version: number; aiChange?: { pluginId: string; operationId: string } }
 }
@@ -148,6 +153,23 @@ function turnRow(item: TurnItem): InboxItem {
   return { ...base, rank: check ? RANK.check : RANK.other, line, badge: { tone: 'neutral', word: check ? '確かめる' : 'あなたの番' }, action: { kind: 'openRecord', recordId: item.id, title: item.title }, actionLabel: '開く' }
 }
 
+/**
+ * A meeting of a department without the task list (what the title bar's 「あなたの番」 and bell carried
+ * before I2): one waiting for the member is あなた待ち (a stopped reading first, by its meaning), one the
+ * AI is reading or will read is 作業中.
+ */
+function meetingRow(m: MeetingTurn): InboxItem {
+  const base = {
+    key: `record:${m.id}`, thing: 'meeting' as const, title: m.title, line: m.text, source: m.kind === 'bundle' ? '会議' : '議事録',
+    due: null, at: null, unreadNoticeIds: [], meetingId: m.id,
+    action: { kind: 'openRecord' as const, recordId: m.id, title: m.title }, actionLabel: '開く',
+  }
+  if (!m.needsPerson) return { ...base, state: 'working', rank: RANK.other, badge: { tone: 'ai', word: m.ai?.state === 'waiting' ? 'AI が読む予定' : 'AI が読んでいます' } }
+  const stop: StopMeaning | null = m.ai?.state === 'failed' ? 'failed' : m.ai?.state === 'not-allowed' ? 'needsAction' : null
+  if (stop) return { ...base, state: 'waiting', rank: RANK.stopped, badge: { tone: stop, word: STOP_LOOK[stop].word } }
+  return { ...base, state: 'waiting', rank: RANK.check, badge: { tone: 'neutral', word: m.kind === 'bundle' ? '選んでください' : m.ai ? 'あなたの番' : '議事録が届きました' } }
+}
+
 function noticeAction(n: NotificationItem): InboxAction {
   if (n.recordId === '') {
     const job = jobNoticeTarget(n.kind)
@@ -159,10 +181,16 @@ function noticeAction(n: NotificationItem): InboxAction {
   return { kind: 'openRecord', recordId: n.recordId, title: n.recordTitle }
 }
 
+/** ［元に戻す］ of a notice that offers it (UNDOABLE_NOTIFICATION_KINDS, an `ai_changed` not yet written back). */
+function undoOf(n: NotificationItem): InboxItem['undo'] {
+  if (!UNDOABLE_NOTIFICATION_KINDS.includes(n.kind) && !(n.aiChange && !n.aiChange.undone)) return undefined
+  return { noticeId: n.id, recordId: n.recordId, version: n.version, ...(n.aiChange ? { aiChange: { pluginId: n.aiChange.pluginId, operationId: n.aiChange.operationId } } : {}) }
+}
+
 function noticeRow(n: NotificationItem, state: InboxState, rank: number, badge: InboxItem['badge']): InboxItem {
   const action = noticeAction(n)
   const recordKind = n.recordId ? thingKindOf({ type: n.recordType }) : null
-  const undoable = UNDOABLE_NOTIFICATION_KINDS.includes(n.kind) || (n.aiChange && !n.aiChange.undone)
+  const undo = undoOf(n)
   return {
     key: `notice:${n.id}`, state, rank, thing: recordKind ?? 'notice',
     title: n.recordTitle || (n.kind.startsWith('job_') ? '定期の仕事' : '知らせ'),
@@ -170,7 +198,8 @@ function noticeRow(n: NotificationItem, state: InboxState, rank: number, badge: 
     source: '知らせ',
     due: null, at: n.createdAt, unreadNoticeIds: n.read ? [] : [n.id],
     action, actionLabel: action.kind === 'none' ? '確認した' : '開く',
-    ...(undoable && state === 'done' ? { undo: { noticeId: n.id, recordId: n.recordId, version: n.version, ...(n.aiChange ? { aiChange: { pluginId: n.aiChange.pluginId, operationId: n.aiChange.operationId } } : {}) } } : {}),
+    // In every state: a change that can be undone keeps its button wherever its notice lands (as the bell had it).
+    ...(undo ? { undo } : {}),
   }
 }
 
@@ -189,8 +218,12 @@ export interface InboxView {
   done: InboxItem[]
   /** できた・未確認 older than that: one line, 「まとめて確認済みにする」. */
   olderDone: { count: number; noticeIds: string[] }
-  /** できた notices already read whose notice came today (on this PC's clock). */
+  /** Notices already read whose notice came today (on this PC's clock): 「きょう確認したもの」. */
   seenToday: InboxItem[]
+  /** The other read notices of the server's list (its newest 50), newest first: 「前に確認したもの」, folded. */
+  seenBefore: InboxItem[]
+  /** Unread notices the server counts but did not list (past its newest 50): told, never dropped. */
+  unreadNotListed: number
   /** あなた待ち the server counted but did not list (past its first 200): never hidden, only told. */
   waitingNotListed: number
   /** This week's turn does not hold them (`thisWeeksTurn`): 「先のこと」「いつか」 in the task list. */
@@ -208,17 +241,26 @@ const sameLocalDay = (iso: string, now: Date) => {
 }
 
 /**
- * The inbox from what main read for the company on screen (`NoticesState`). One record is one row: an
- * unread notice about a record in あなた待ち becomes that row's line and new mark, not a row of its own.
+ * The inbox from what main read for the company on screen (`NoticesState`) and the meetings of a department
+ * without the task list. One record is one row: an unread notice about a record in あなた待ち becomes that
+ * row's line and new mark, not a row of its own.
  */
-export function inboxView(source: NoticesState, now: Date): InboxView {
+export function inboxView(source: NoticesState, now: Date, meetings: readonly MeetingTurn[] = []): InboxView {
   const turn = source.available ? source.myTurn : { total: 0, items: [] as TurnItem[] }
   const rows = new Map<string, InboxItem>()
   for (const item of turn.items) rows.set(item.id, turnRow(item))
+  // A meeting the AI reads is one row too (作業中): its unread notices are its news, not rows of their own.
+  // One already in the server's turn stays that row and keeps the meeting's own buttons.
+  for (const m of meetings) {
+    const listed = rows.get(m.id)
+    if (listed) listed.meetingId = m.id
+    else rows.set(m.id, meetingRow(m))
+  }
 
   const waiting: InboxItem[] = []
   const done: InboxItem[] = []
   const seenToday: InboxItem[] = []
+  const seenBefore: InboxItem[] = []
   const oldIds: string[] = []
   const keepFrom = now.getTime() - DONE_KEEP_DAYS * 24 * 60 * 60 * 1000
   // Newest first, so a row's line is its newest unread notice. With records off, main still hands the company's
@@ -226,31 +268,38 @@ export function inboxView(source: NoticesState, now: Date): InboxView {
   const notices = source.available ? [...source.notices.items].sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : []
   const turnComplete = turn.total <= turn.items.length
   const stopBadge = (m: StopMeaning) => ({ tone: m, word: STOP_LOOK[m].word })
+  const badgeOf = (n: NotificationItem, place: 'stop' | 'done' | 'waiting') => place === 'stop' ? stopBadge(STOP_NOTICES[n.kind]!)
+    : place === 'done' ? (DONE_WORDS[n.kind] ?? CHANGE_WORDS[n.kind]!) : { tone: 'neutral' as const, word: ASK_WORDS[n.kind] ?? 'あなたの番' }
   for (const n of notices) {
     if (NO_ROW_NOTICES.has(n.kind)) continue
+    const place = noticePlace(n.kind, turnComplete)
+    // Every read notice the server listed stays findable (the bell showed them, ［元に戻す］ included): folded at the bottom.
+    if (n.read) {
+      const seen = noticeRow(n, 'done', 0, badgeOf(n, place))
+      if (sameLocalDay(n.createdAt, now)) seenToday.push(seen)
+      else seenBefore.push(seen)
+      continue
+    }
     const row = n.recordId ? rows.get(n.recordId) : undefined
     const stop = STOP_NOTICES[n.kind]
     if (row) {
-      if (!n.read) {
-        if (row.unreadNoticeIds.length === 0) { row.line = n.text; row.at = n.createdAt }
-        row.unreadNoticeIds.push(n.id)
-        // A stop about a waiting record makes that row a stop (its look and its place first).
-        if (stop && row.rank !== RANK.stopped) { row.badge = stopBadge(stop); row.rank = RANK.stopped; row.line = n.text }
-      }
+      if (row.unreadNoticeIds.length === 0) { row.line = n.text; row.at = n.createdAt }
+      row.unreadNoticeIds.push(n.id)
+      // Its newest change that can be undone keeps ［元に戻す］ on the one row.
+      if (!row.undo) { const undo = undoOf(n); if (undo) row.undo = undo }
+      // A stop about a waiting record makes that row a stop (its look and its place first).
+      if (stop && row.rank !== RANK.stopped) { row.badge = stopBadge(stop); row.rank = RANK.stopped; row.line = n.text; row.state = 'waiting' }
       continue
     }
-    const place = noticePlace(n.kind, turnComplete)
-    if (place !== 'done') {
-      // Gone once opened: the server keeps no 「済んだ」 for these (decision ③).
-      if (!n.read) waiting.push(place === 'stop' ? noticeRow(n, 'waiting', RANK.stopped, stopBadge(stop!)) : noticeRow(n, 'waiting', RANK.other, { tone: 'neutral', word: ASK_WORDS[n.kind] ?? 'あなたの番' }))
-      continue
-    }
-    const row2 = noticeRow(n, 'done', 0, DONE_WORDS[n.kind] ?? CHANGE_WORDS[n.kind]!)
-    if (n.read) { if (sameLocalDay(n.createdAt, now)) seenToday.push(row2) }
+    // Gone once opened: the server keeps no 「済んだ」 for these (decision ③).
+    if (place !== 'done') waiting.push(noticeRow(n, 'waiting', place === 'stop' ? RANK.stopped : RANK.other, badgeOf(n, place)))
     else if (new Date(n.createdAt).getTime() < keepFrom) oldIds.push(n.id)
-    else done.push(row2)
+    else done.push(noticeRow(n, 'done', 0, badgeOf(n, place)))
   }
-  waiting.push(...rows.values())
+  const listedUnread = source.available ? source.notices.items.filter(n => !n.read).length : 0
+  const unreadNotListed = source.available ? Math.max(0, source.notices.unread - listedUnread) : 0
+  const working = [...rows.values()].filter(r => r.state === 'working')
+  waiting.push(...[...rows.values()].filter(r => r.state === 'waiting'))
   waiting.sort(byNeed)
   done.sort(newestFirst)
   const room = Math.max(0, INBOX_MAX_ROWS - waiting.length)
@@ -259,11 +308,11 @@ export function inboxView(source: NoticesState, now: Date): InboxView {
   const waitingCount = waiting.length + waitingNotListed
   const doneCount = done.length + oldIds.length
   return {
-    waiting, working: [], done: shownDone, seenToday,
+    waiting, working, done: shownDone, seenToday, seenBefore, unreadNotListed,
     olderDone: { count: oldIds.length, noticeIds: oldIds },
     waitingNotListed, resting: turn.resting ?? 0, doneLeftOut: done.length - shownDone.length,
     doneNoticeIds: [...done.flatMap(i => i.unreadNoticeIds), ...oldIds],
-    counts: { all: waitingCount + doneCount, waiting: waitingCount, working: 0, done: doneCount },
+    counts: { all: waitingCount + working.length + doneCount + unreadNotListed, waiting: waitingCount, working: working.length, done: doneCount },
   }
 }
 
@@ -276,6 +325,56 @@ export function bulkSeenIds(view: InboxView, scope: 'older' | 'done'): string[] 
   if (scope === 'older') return [...view.olderDone.noticeIds]
   return [...view.doneNoticeIds]
 }
+
+/** At most this many keys stand for the unread notices the server did not list (one key each, so only growth is news). */
+const UNLISTED_NEWS_KEYS = 1000
+
+/**
+ * What the title bar's ［受け箱］ dot compares (owner decision ①: the dot = something new since the inbox was
+ * last on screen): every waiting / working row by key and state, every unread notice, and one key per unread
+ * notice the server counted but did not list. With `filter`, only what that chip shows (what the member saw).
+ */
+export function inboxNewsKeys(view: InboxView, filter: InboxFilter = 'all'): string[] {
+  const keys = new Set<string>()
+  const shows = (state: InboxState) => filter === 'all' || filter === state
+  for (const i of [...view.waiting, ...view.working]) {
+    if (!shows(i.state)) continue
+    // By state too: a meeting the AI was reading that now waits for the member is new.
+    keys.add(`${i.key}#${i.state}`)
+    for (const id of i.unreadNoticeIds) keys.add(`notice:${id}`)
+  }
+  if (shows('done')) {
+    // Every できた・未確認 notice, also one the row limit left out or the 14-day line folded.
+    for (const id of view.doneNoticeIds) keys.add(`notice:${id}`)
+    for (let k = 1; k <= Math.min(view.unreadNotListed, UNLISTED_NEWS_KEYS); k++) keys.add(`unlisted:${k}`)
+  }
+  return [...keys]
+}
+
+/**
+ * What counts as already seen before the inbox was ever on screen in this window: the waiting and working
+ * rows (the count says those), never an unread notice — so at the start the dot is the old bell's (something
+ * unread on the server, shared by the member's PCs).
+ */
+export function inboxNewsBaseline(view: InboxView): string[] {
+  return [...view.waiting, ...view.working].map(i => `${i.key}#${i.state}`)
+}
+
+/** The dot: a key that was not there when the inbox was last on screen. */
+export const hasInboxNews = (keys: readonly string[], seen: ReadonlySet<string>) => keys.some(k => !seen.has(k))
+
+/**
+ * What counts as seen while the panel shows: exactly what the chosen chip shows now (a row that left and comes
+ * back later is new again), plus what was seen before of the rest that is still there (hidden by the chip, so
+ * neither newly seen nor forgotten).
+ */
+export function seenWhileShown(seen: ReadonlySet<string>, all: readonly string[], shown: readonly string[]): Set<string> {
+  const next = new Set(shown)
+  for (const k of all) if (seen.has(k)) next.add(k)
+  return next
+}
+
+export const sameKeys = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every(k => b.has(k))
 
 /** 99 at most, then 「99+」. */
 export const countText = (n: number) => (n > 99 ? '99+' : String(n))

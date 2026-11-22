@@ -92,7 +92,7 @@ function Preview() {
   })
   const notices = useNotices('co-preview')
   const inbox = useInboxSlot({
-    companyId: 'co-preview', notices,
+    companyId: 'co-preview', notices, open: true, onToggle: () => setOpened('toggled'),
     onOpenRecord: id => setOpened(`record ${id}`), onOpenTasks: () => setOpened('task list'), onOpenJobs: () => setOpened('jobs'),
     renderApprovalCard: id => <ApprovalCard card={{ id: `card-${id}`, companyId: 'co-preview', conversationId: null, approvalId: id, origin: 'shown', at: '' }} />,
     renderMailDraft: id => <PreparedMailCard companyId="co-preview" messageId={id} />,
