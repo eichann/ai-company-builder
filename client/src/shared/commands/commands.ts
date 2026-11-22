@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { COMMANDS, type AppCommands } from '../../../shared/commands/catalog'
-import type { CommandArea } from '../../../shared/commands/define'
+import type { CommandArea, KeyInput } from '../../../shared/commands/define'
 import {
   CommandError, createCommandRegistry,
   type CommandArgs, type CommandHandler, type CommandHandlerArgs, type CommandId, type RegisterOptions,
@@ -50,6 +50,14 @@ export function useCommandHandler<I extends AppCommandId>(
     target,
     acceptsKey: hasAcceptsKey ? input => acceptsKeyRef.current?.(input) ?? true : undefined,
   }), [id, target, hasAcceptsKey])
+}
+
+/**
+ * A key press delivered as if it had been pressed with the focus on `element` (an HTML document's
+ * own view has the keyboard, so the page never saw the key: doc-frame.md). True when a command ran.
+ */
+export function handleKeyAt(element: Element | null, input: KeyInput): boolean {
+  return commands.handleKey(input, focusChainOf(element))
 }
 
 /** Whether a command can run now (e.g. show a file name as a link only when something opens files). */

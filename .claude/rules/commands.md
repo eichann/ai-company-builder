@@ -147,6 +147,13 @@ So the AI works only on the main window's tabs, and only for its own company. Te
   first and ending with `app`, and runs at most one command per key press. A chat-area shortcut
   therefore reaches the focused chat pane only, never every pane. Do not add new `window` /
   `document` keydown listeners for app shortcuts; dialog-local Escape handlers stay where they are.
+- **A key pressed in an HTML document's own view** never reaches the page's `document`: main
+  takes the catalog's bindings of the `editor` and `app` areas from the document
+  (`docViewShortcutOf` → `shortcutOf(catalog, input, areas)`, `define.ts`) and the viewer runs them
+  with `handleKeyAt(area, input)` (the tab's focus chain). A new `app` / `editor` binding is handed
+  over by itself; one whose command does nothing on an HTML tab sets `keybinding.notInHtmlDocument`
+  so the document keeps the key (today `editor.find` ⌘F; doc-frame.md "App shortcuts in a
+  document").
 - The one window-wide app key: voice input's start / stop (member-configurable, default ⌘⇧M), so
   not a catalog keybinding. `hooks/useVoiceShortcut.ts` holds one `window` capture listener per
   page (however many composers), skips composition, repeats and open dialogs, and runs

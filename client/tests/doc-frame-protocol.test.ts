@@ -17,8 +17,10 @@ import { createDocFrames, type DocFrameDeps } from '../electron/features/doc-fra
 import { createDocViews, MAX_VIEWS_PER_WINDOW, type DocViewHandle, type DocViewHooks, type DocViewPort, LINK_INTERVAL_MS } from '../electron/features/doc-frames/views'
 import { registerDocViewsIpc } from '../electron/features/doc-frames/ipc'
 import {
-  docFrameCsp, docFramePolicy, docFileType, docSessionRequestAllowed, docViewBounds, docViewNavigationAllowed, docViewOnScreen, parseDocFrameUrl, DOC_MAX_FILE_BYTES,
+  docFrameCsp, docFramePolicy, docFileType, docSessionRequestAllowed, docViewBounds, docViewNavigationAllowed, docViewOnScreen, docViewShortcutOf, parseDocFrameUrl, DOC_MAX_FILE_BYTES,
 } from '../shared/doc-frame'
+import { COMMANDS } from '../shared/commands/catalog'
+import type { CommandDefinition, KeyInput } from '../shared/commands/define'
 
 const quiet = { warn: () => {} }
 const TOKEN = 'a'.repeat(32)
@@ -311,6 +313,7 @@ function fakeShell(options: { fail?: boolean; hold?: boolean } = {}) {
     port, shown, destroyed, watched, made, release, calls,
     crash: (id: number) => hooksOf.get(id)?.onGone(id),
     link: (id: number, url: string) => hooksOf.get(id)?.onLink(id, url),
+    shortcut: (id: number, key: KeyInput) => hooksOf.get(id)?.onShortcut(id, key),
     resetWindow: (windowId: number) => reset(windowId),
   }
 }
@@ -547,6 +550,55 @@ test('the window hears of a link the member pressed (web only, at most one a sec
   const first = (await views.open(doc, views.begin(MAIN)))!
   for (let i = 0; i < MAX_VIEWS_PER_WINDOW; i++) await views.open(doc, views.begin(MAIN))
   assert.deepEqual(told, [[MAIN, { viewId: first, kind: 'gone' }]])
+})
+
+test('an app shortcut pressed in a document goes to that view\'s own window only, and not once the view is closed', async () => {
+  const w = world()
+  const shell = fakeShell()
+  const told: Array<[number, unknown]> = []
+  const views = createDocViews({ frames: w.frames, shell: shell.port, notify: (windowId, event) => told.push([windowId, event]) })
+  const doc = await reportDoc(w)
+  const a = (await views.open(doc, views.begin(MAIN)))!
+  const b = (await views.open(doc, views.begin(MAIN + 1)))!
+  const key: KeyInput = { key: 'k', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false }
+  shell.shortcut(a, key)
+  shell.shortcut(b, key)
+  assert.deepEqual(told, [[MAIN, { viewId: a, kind: 'shortcut', key }], [MAIN + 1, { viewId: b, kind: 'shortcut', key }]])
+  told.length = 0
+  views.close(a, MAIN)
+  shell.shortcut(a, key)
+  assert.deepEqual(told, [])
+})
+
+const press = (key: string, mods: Partial<Omit<KeyInput, 'key'>> = {}): KeyInput => ({ key, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...mods })
+
+test('the app shortcuts a document hands over are the command catalog\'s, of the areas around it (its tab, the app), but not ⌘F; its own keys stay', () => {
+  const all = Object.values(COMMANDS as Record<string, CommandDefinition>).filter(def => def.keybinding && ['editor', 'app'].includes(def.keybinding.area))
+  const around = all.filter(def => !def.keybinding!.notInHtmlDocument)
+  const kept = all.filter(def => def.keybinding!.notInHtmlDocument)
+  assert.deepEqual(kept.map(def => def.id), ['editor.find'], 'control: ⌘F is marked as nothing on an HTML tab')
+  for (const def of kept) {
+    assert.equal(docViewShortcutOf(press('f', { metaKey: true }), true), null, `${def.id}: the document keeps ⌘F`)
+    assert.equal(docViewShortcutOf(press('f', { ctrlKey: true }), false), null, `${def.id}: the document keeps Ctrl+F`)
+  }
+  assert.ok(around.some(def => def.id === 'find.byName') && around.some(def => def.id === 'editor.togglePreview'), 'control: ⌘K and ⌘⇧V are in the catalog')
+  for (const def of around) {
+    const [key, ...mods] = def.keybinding!.key.split('+').reverse()
+    const shift = mods.includes('shift')
+    const alt = mods.includes('alt')
+    assert.equal(docViewShortcutOf(press(key, { metaKey: true, shiftKey: shift, altKey: alt }), true), def.id, `⌘ on a Mac: ${def.id}`)
+    // Windows / Linux report Ctrl+Shift+letter in upper case.
+    assert.equal(docViewShortcutOf(press(shift ? key.toUpperCase() : key, { ctrlKey: true, shiftKey: shift, altKey: alt }), false), def.id, `Ctrl elsewhere: ${def.id}`)
+  }
+  for (const key of ['ArrowLeft', 'ArrowRight', ' ', 'Enter', 'Escape', 'a', 'k', 'Tab', 'PageDown']) {
+    assert.equal(docViewShortcutOf(press(key), true), null, key)
+    assert.equal(docViewShortcutOf(press(key, { shiftKey: true }), false), null, `shift ${key}`)
+  }
+  assert.equal(docViewShortcutOf(press('k', { ctrlKey: true }), true), null, 'a Mac\'s Ctrl+K is the document\'s text key')
+  assert.equal(docViewShortcutOf(press('b', { ctrlKey: true }), true), null, 'a Mac\'s Ctrl+B likewise')
+  assert.equal(docViewShortcutOf(press('k', { metaKey: true, altKey: true }), true), null, '⌥⌘K is not ⌘K')
+  assert.equal(docViewShortcutOf(press('c', { metaKey: true }), true), null, 'copy stays the document\'s')
+  assert.equal(docViewShortcutOf(press('a', { ctrlKey: true }), false), null, 'select all stays the document\'s')
 })
 
 test('docView:setBounds / setZoom / reload are the main window\'s page\'s only', async () => {

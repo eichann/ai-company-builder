@@ -17,9 +17,10 @@
 // page focuses its view (measured, Electron 45 — even hidden, even a page with no script), so a
 // focus the member did not cause by a click goes back to the app's page, and hiding a focused view
 // hands the keyboard back too. A link to the web the member pressed is handed to the registry
-// (which asks the member first); Escape in a document shown full screen leaves full screen.
+// (which asks the member first); Escape in a document shown full screen leaves full screen; the
+// app's shortcuts (the command catalog's, `docViewShortcutOf`) pressed in a document go to the app.
 import { BrowserWindow, session, WebContentsView, webContents as allWebContents, type Session, type WebContents } from 'electron'
-import { DOC_SCHEME, docSessionRequestAllowed, docViewNavigationAllowed, docViewOnScreen, parseDocFrameUrl } from '../shared/doc-frame'
+import { DOC_SCHEME, docSessionRequestAllowed, docViewNavigationAllowed, docViewOnScreen, docViewShortcutOf, parseDocFrameUrl } from '../shared/doc-frame'
 import { startRefusingProxy } from './browser-window'
 import type { DocViewBounds } from '../shared/doc-frame'
 import type { DocViewHandle, DocViewHooks, DocViewPort } from './features/doc-frames/views'
@@ -49,6 +50,8 @@ export interface DocViewShellOptions {
   serve: (request: { url: string; method: string }) => Promise<Response>
   /** The refusing proxy's port (default: the shell's one, shared with 「ブラウザ操作」). */
   refusingProxy?: () => Promise<number>
+  /** Whether Ctrl+letter is a text field's editing key rather than a shortcut (default: on macOS). */
+  mac?: boolean
   log?: Pick<Console, 'warn'>
 }
 
@@ -62,6 +65,7 @@ export function docProxyScript(refusePort: number): string {
 
 export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
   const log = options.log ?? console
+  const mac = options.mac ?? process.platform === 'darwin'
   let prepared: Promise<Session> | null = null
   const watchedWindows = new Set<number>()
   /** Windows whose page is full screen through the HTML API (the viewer's 「全画面」). */
@@ -181,16 +185,19 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
       /** When the member last clicked / touched (pointer) or pressed a key (any) in the view. */
       let lastPointerAt = -Infinity
       let lastInputAt = -Infinity
-      const finish = () => {
-        if (gone) return
-        gone = true
-        if (!win.isDestroyed()) win.contentView.removeChildView(view)
-        if (!contents.isDestroyed()) contents.close()
-        hooks.onGone(id)
-      }
       /** The keyboard back to the app's page (its own focused element keeps its place). */
       const focusApp = () => {
         if (!win.isDestroyed() && owner && !owner.isDestroyed()) owner.focus()
+      }
+      const finish = () => {
+        if (gone) return
+        gone = true
+        // Closed while it had the keyboard (中身 by ⌘⇧V, the tab closed): the keyboard goes back to the app.
+        const hadKeyboard = !contents.isDestroyed() && contents.isFocused()
+        if (!win.isDestroyed()) win.contentView.removeChildView(view)
+        if (hadKeyboard) focusApp()
+        if (!contents.isDestroyed()) contents.close()
+        hooks.onGone(id)
       }
       guard(contents, () => token)
       contents.on('input-event', (_event, input) => {
@@ -216,12 +223,23 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
         if (docViewNavigationAllowed(token, event.url, true)) return
         hooks.onLink(id, event.url)
       })
-      // Escape while the viewer is full screen leaves it, also when the document has the keyboard.
+      // Keys the app takes from a document that has the keyboard. Only the member's real key presses
+      // come here (a page's synthetic KeyboardEvent never does), so a document cannot run app commands.
       contents.on('before-input-event', (event, input) => {
-        if (input.type !== 'keyDown' || input.key !== 'Escape' || !htmlFullScreen.has(windowId) || win.isDestroyed()) return
+        if (input.type !== 'keyDown' || win.isDestroyed()) return
+        // Escape while the viewer is full screen leaves it.
+        if (input.key === 'Escape' && htmlFullScreen.has(windowId)) {
+          event.preventDefault()
+          focusApp()
+          win.setFullScreen(false)
+          return
+        }
+        // The app's shortcuts (⌘K, ⌘B, ⌘J, ⌘⇧V…): not the document's; the window runs them as if
+        // pressed in the document's tab. A held key repeats nothing.
+        const key = { key: input.key, metaKey: input.meta, ctrlKey: input.control, shiftKey: input.shift, altKey: input.alt }
+        if (!docViewShortcutOf(key, mac)) return
         event.preventDefault()
-        focusApp()
-        win.setFullScreen(false)
+        if (!input.isAutoRepeat) hooks.onShortcut(id, key)
       })
       // The document's zoom stays across its own reloads and pages.
       contents.on('did-navigate', () => { if (!contents.isDestroyed()) contents.setZoomFactor(zoomFactor) })
