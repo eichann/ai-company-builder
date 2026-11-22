@@ -141,7 +141,7 @@ export function noticePlace(kind: NotificationKind, turnComplete: boolean): 'sto
 const RANK = { stopped: 0, unsure: 1, approval: 2, mail: 3, check: 4, other: 5 } as const
 
 /**
- * 「ブラウザ操作」 rows (the member's own, `browserPlans:list`; none while the build's switch is off): a draft
+ * 「ブラウザ操作」 rows (the member's own, `browserPlans:list`; none while the switch is off on this PC): a draft
  * waits for their approval, a run nobody knows the result of waits for their 「済んでいた」/「されていなかった」 once
  * it can be pressed (until then, and while one may be sending, 作業中), an approved plan not started is 作業中.
  * Every row only opens the card; a settled plan is in neither server list, so it is gone (nothing is stored).

@@ -108,6 +108,8 @@ import { createBrowserController } from './features/browser/controller'
 import { removeLeftoverBrowserPartitions } from './features/browser/leftovers'
 import { isMainFrameSender, registerBrowserIpc } from './features/browser/ipc'
 import { wireBrowserPlans } from './features/browser/wire'
+import { createThisPcSwitch } from './features/browser/ai-switch'
+import { BROWSER_AI_OPT_IN_FILE } from '../shared/browser-ai'
 import { lstepConnector } from '../connectors/lstep'
 import { browserOperatorOf } from './agents/registry'
 import { browserAiStopped } from '../../shared/core/browser-operation'
@@ -587,9 +589,11 @@ registerBrowserIpc(ipc, {
   watch: companyId => agentControl.watchSignals(companyId),
 })
 // Its plans (agent-browser.md "The card, the IPC and the request tool"): the card's IPC, the runner behind
-// ［任せる］ and the request tool's factory. Reading a site, the operator and sending ask the build's switch (off in 6b).
+// ［任せる］ and the request tool's factory. Reading a site, the operator and sending ask the switch (off unless this PC's opt-in).
 const lstep = lstepConnector()
 const browserPlans = wireBrowserPlans(ipc, {
+  // Off for everyone unless this PC's opt-in names this server and the signed-in member (6c, owner's PC only).
+  aiSwitch: createThisPcSwitch({ file: () => path.join(userDataDir(), BROWSER_AI_OPT_IN_FILE), server: getServerApiUrl, userId: session.userId }),
   fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)),
   baseUrl: getServerApiUrl,
   cookies: session.cookies,

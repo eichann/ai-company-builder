@@ -76,7 +76,7 @@ export interface AgentConnection {
      */
     webResearch?: WebResearchTools
     /**
-     * 「ブラウザ操作」's request (browser-request/tools.ts): given only while the build's switch is on and
+     * 「ブラウザ操作」's request (browser-request/tools.ts): given only while the switch is on (this PC's opt-in) and
      * the agent has `capabilities.browserOperator`. Given → offered as `acb_browser` / `browser_request`.
      */
     browserRequest?: BrowserRequestTools

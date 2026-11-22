@@ -156,7 +156,7 @@ test('the emergency stop during a request: no further page read, nothing registe
 test('the turn stopped (the member, an administrator) while the facts are read: nothing registered', async () => {
   const turn = new AbortController()
   const { deps, calls } = registrationHarness({ checker: fakeChecker({ twoReads: true }), onRead: () => turn.abort('stopped-by-admin') })
-  deps.context = scope => createBrowserContext({ userId: () => 'u1' }).capture(scope)
+  deps.context = scope => createBrowserContext({ userId: () => 'u1', aiSwitch: () => true }).capture(scope)
   assert.deepEqual(await registerBrowserPlan(request(turn.signal), deps), { outcome: 'not-made', why: 'failed' })
   assert.deepEqual([calls.reads, calls.register], [['/api/episode-groups'], []])
 })
@@ -393,9 +393,10 @@ test('［任せる］ only where the site\'s window is open and shows the plan\'
 // The context and this build's combination
 // ---------------------------------------------------------------------------
 
-test('a capture reads false after a sign-in change, a changed browser setting, a quit or the turn\'s stop — not after the same setting again', () => {
+test('a capture reads false after a sign-in change, a changed browser setting, a quit, the turn\'s stop or the switch going off — not after the same setting again', () => {
   let user: string | null = 'u1'
-  const ctx = createBrowserContext({ userId: () => user })
+  let on = true
+  const ctx = createBrowserContext({ userId: () => user, aiSwitch: () => on })
   ctx.policyAnswered(COMPANY, { mode: 'on', sites: [SITE] })
   const a = ctx.capture({ companyId: COMPANY })
   ctx.policyAnswered(COMPANY, { mode: 'on', sites: [SITE] })
@@ -416,7 +417,13 @@ test('a capture reads false after a sign-in change, a changed browser setting, a
   ctx.quitting()
   assert.equal(ctx.capture({ companyId: COMPANY })(), false)
   user = null
-  assert.equal(createBrowserContext({ userId: () => user }).capture({ companyId: COMPANY })(), false, 'signed out')
+  assert.equal(createBrowserContext({ userId: () => user, aiSwitch: () => true }).capture({ companyId: COMPANY })(), false, 'signed out')
+  // The switch is asked on every check: this PC's opt-in removed mid-run is a changed context.
+  user = 'u1'
+  const e = createBrowserContext({ userId: () => user, aiSwitch: () => on }).capture({ companyId: COMPANY })
+  assert.equal(e(), true)
+  on = false
+  assert.equal(e(), false)
 })
 
 test('the build\'s combination is carried.json\'s row whose declaration hash is the bundled text\'s; anything doubtful is none', () => {

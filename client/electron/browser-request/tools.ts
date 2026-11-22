@@ -6,7 +6,7 @@
  * The AI gets back the plan's number and fixed words: never a fact, a hash, the page's text, and never
  * the result of a run (it cannot approve, claim, permit, report or confirm: no such tool exists).
  *
- * Given only while the build's switch is on (off in 6b: the tool does not exist) and only to an agent
+ * Given only while the switch is on (off unless this PC's opt-in: the tool does not exist) and only to an agent
  * with `capabilities.browserOperator` (Claude Code, in process; agents/claude.ts).
  */
 import { z } from 'zod'
@@ -89,7 +89,7 @@ export function createBrowserRequestTools(run: BrowserRequestRun, onPlan: (planI
 
 /** The wiring's side the tool needs (features/browser/wire.ts). */
 export interface BrowserRequestPlans {
-  /** The build's switch: off = the tool does not exist this turn. */
+  /** The switch (this PC's opt-in): off = the tool does not exist this turn. */
   requestAvailable(): boolean
   request(input: {
     companyId: string; conversationId: string | null; site: string; operation: string
@@ -97,7 +97,7 @@ export interface BrowserRequestPlans {
   }): Promise<BrowserRegistrationResult>
 }
 
-/** The tool for one consultation turn, or undefined (no wiring, or the build's switch off: no tool at all). */
+/** The tool for one consultation turn, or undefined (no wiring, or the switch off: no tool at all). */
 export function browserRequestForTurn(
   plans: BrowserRequestPlans | undefined,
   turn: { companyId: string; conversationId: string | null; signal: AbortSignal; onPlan: (planId: string) => void },

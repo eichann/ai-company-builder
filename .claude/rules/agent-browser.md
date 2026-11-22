@@ -795,11 +795,12 @@ is the member's own **Claude Code with the Team login**; the company's managed s
 Anthropic's server pushes are trusted as the company's own; the most closed start and the init checks on
 every start stay. 6b connects every path but ships **off**; 6c turns it on for the owner's PC.
 
-- **The switch** (`client/shared/browser-ai.ts` `BROWSER_AI_BUILD_SWITCH = false`, handed in as
-  `features/browser/ai-switch.ts` `buildAiSwitch`): the first line of the preview (`runBrowserPreview`)
+- **The switch** (`client/shared/browser-ai.ts` `BROWSER_AI_BUILD_SWITCH = false`; main hands in
+  `features/browser/ai-switch.ts` `createThisPcSwitch` = that constant or this PC's opt-in, "This PC's
+  opt-in" below): the first line of the preview (`runBrowserPreview`)
   and of the runner (`run` → `refused: off`) — off = nothing asked, no page read, no CLI resolved or
   started, nothing sent. Clean-up paths (cancel, report, confirm, the waiting list, the card) never ask
-  it. `browser-preview.test.ts` fails while it is anything but `false`.
+  it. `browser-preview.test.ts` fails while the constant is anything but `false`.
 - **The operator's start** (`electron/agents/claude-browser-operator.ts`, registry
   `capabilities.browserOperator` — Claude Code only —, `tasks.browserOperator`, `browserOperatorCli.min`
   2.1.316; `browserOperatorOf(id)`): per request the app's `claude` is resolved **once** to its real path
@@ -936,6 +937,12 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   `ps eww` shows only the table's variables; record the CLI version, OS and result. Also whether the real
   CLI's init lists `slash_commands` empty under `--disable-slash-commands` and names the model as asked
   (else every start stops with `init-mismatch`: availability, never a looser start).
+  **Seen 2026-11-22 (CLI 2.1.330, macOS, the owner's Mac, no markers)**: `tools`, `mcp_servers`,
+  `slash_commands`, `skills` empty, the model named without `[1m]` — but `plugins` lists the four plugins
+  built into the CLI (`{ name, path: 'builtin', source: '<name>@builtin' }`) and `agents` the CLI's own
+  (`claude`, `Explore`, `general-purpose`, `Plan`), under every flag: today every start there stops with
+  `init-mismatch`. Accepting exactly those (built-in plugins only, the built-in agents only — unusable
+  without a tool) is a loosening of this guard and waits for the owner (not in this PR).
 
 Tests: `client/tests/browser-operator.test.ts` (a fake `claude` through the real `/bin/sh` wrapper: the
 exact arguments and the final child environment with secrets in the app's environment, a fresh folder
@@ -1100,7 +1107,9 @@ paths and never ask the switch.
   No call retries.
 - **The context** (`context.ts`): one generation, advanced by sign-out, a sign-in, a failed policy
   refresh, a change of a company's browser setting (the same setting again does not) and quitting; a
-  capture also reads the signed-in member and, for a request, the turn's signal. The runner's
+  capture also reads the signed-in member, for a request the turn's signal, and **the switch, asked again
+  on every check** (this PC's opt-in removed mid-run = a changed context, up to the runner's last check
+  before the request leaves). The runner's
   `context()` and the registration's reads use it.
 - **This build's combination** (`combination.ts`): `shared/browser-connectors/carried.json`, written by
   `client/scripts/browser-connectors.ts` beside approved.json (the current folder's rows only; approved.json
@@ -1172,8 +1181,9 @@ paths and never ask the switch.
   operator).
 - **The inbox's rows** (`notifications.md` "The inbox"; `src/features/inbox/model.ts` `browserRows`,
   `hooks/useInboxBrowserPlans.ts`): AppShell hands the inbox slot the list port and the card
-  (`browserPlans`) **only while `BROWSER_AI_BUILD_SWITCH` is on** — off there is no way to read and no
-  row (composed by AppShell, so no feature-to-feature import). A draft → あなた待ち amber 「承認を待っています」
+  (`browserPlans`) whenever a company is open (composed by AppShell, so no feature-to-feature import);
+  **main decides** — switched off on this PC, `browserPlans:list` answers empty and asks the server
+  nothing, so there is no row (6c: the switch is per PC, which the renderer cannot know by itself). A draft → あなた待ち amber 「承認を待っています」
   ［承認する…］ (with the approvals); an `unknown` run the server says can be confirmed now (its `canConfirm`,
   never this PC's clock) → あなた待ち amber 「届いたか分かりません」 ［確かめる…］ (right after the stops); an approved
   plan not started, a `permitted` run and an `unknown` one not yet confirmable → 作業中. Every row only opens this
@@ -1208,6 +1218,51 @@ confirm opening by itself on a fake clock; the plain results; no jargon), `src/f
 layer kept on purpose: the registration's context check before each read (the check after each answer
 catches the same change).
 
+## This PC's opt-in (6c: on for the owner's PC only)
+
+Owner decision 2026-11-22: the AI's browser operation is turned on **only on the owner's PC** for the
+real-machine check (design memo §33 1-6) and the first real run; everyone else stays off, also members
+running the very same build. Design memo §33.3 prescribes the server's PC registration for 6c; for one
+PC whose person is the company's owner, this PR uses the smallest mechanism that keeps the build off for
+everyone else, and leaves that registration as the condition before anyone else is turned on ("Not yet").
+
+- **The build constant stays `false`** (`BROWSER_AI_BUILD_SWITCH`): no build is on for everyone. main
+  composes `createThisPcSwitch({ file: <userData>/browser-ai-this-pc.json, server, userId })`
+  (`features/browser/ai-switch.ts`) and hands it to `wireBrowserPlans` as the switch.
+- **The opt-in** is a file the person writes **by hand** in the app's userData folder (never a company
+  folder), exactly `{ "browserAi": "this-pc", "server": "<origin>", "userId": "<id>", "until": "<ISO
+  time with zone>" }` (`browserAiOptInOn`, `client/shared/browser-ai.ts`, pure): on only while `server`
+  is the app's server (origin compared), `userId` the signed-in member, and `until` in the future and at
+  most 14 days ahead (`BROWSER_AI_OPT_IN_MAX_DAYS`: a forgotten opt-in ends by itself). Any other key,
+  value or shape, more than 4 KB, a link (`O_NOFOLLOW`), a folder, a pipe (`O_NONBLOCK`, so main's thread
+  never waits) or a file that cannot be read = off. No setting, IPC or screen writes it: nothing in the
+  app can turn itself on.
+- **Read on every ask** (no cache): removing the file, `until` passing, signing in as another member or
+  to another server turns everything off at once — the request tool, the inbox's list, ［任せる］, the
+  card's readiness — and, through the context (`context.ts` asks the switch on every check), **a run or a
+  registration in progress**: the next check stops it (before the permit: the plan given back; at the
+  last check before the request leaves: `failed`, never sent).
+- **Everything else still decides** (unchanged): the company's setting 「使う」 with the site listed in the
+  admin console and the member's override (`browserOperationsAllowed`, app and server), the AI stop,
+  the member's **type grant** (`PUT /browser-type-grants/:userId`, owner / admin, per declaration hash —
+  no admin page yet: the 6c notes give the call), the approved combination (`approved.json` `approved`
+  with its `minAppVersion`; `lstep@0.6.1` is `pending` until the owner approves it), the card's approval
+  and the re-read before the permit. Turning off: delete the file, or the company's setting 「使わない」 /
+  the site removed (the context moves, the server's permit refuses), or the emergency stop.
+- **Weakness (said)**: the file is the person's own; an AI turn outside the sandbox (`record-only`, the
+  API key's agent) could write it as it could read §33.3's device file. It only narrows where it is on —
+  the server's grant and the person's approval on the card are the guards. `BROWSER_NOT_YET_NOTE` in the
+  admin page stays (true for every PC but the owner's).
+
+Tests: `client/tests/browser-ai-opt-in.test.ts` (an opt-in only for its server, member and until its end,
+14 days at most, exactly its shape; the file read on every ask — removed = off at once, a link, a folder,
+a pipe, an unworkable path = off; the same build without the opt-in — the company's setting on, the site
+listed, an opt-in for another member — reaches no site, operator or server and offers no tool; with it on,
+the tool exists and the inbox asks the server, and the opt-in removed while the approval is on its way
+stops the run before the claim), `browser-plans-app.test.ts` (a capture reads false once the switch is
+off). Each guard mutation-checked; second layer kept on purpose: the regular-file check after
+`O_NOFOLLOW` / `O_NONBLOCK` (a folder or a pipe already fails to read).
+
 ## Not yet (later PRs)
 
 **Keeping a login on disk** (`browserLoginStorage`, kept in `shared/core` for that PR): deferred until
@@ -1223,7 +1278,10 @@ are built (6b-1, "The operator and the preview", switched off) and the facts rea
 "The facts a checker reads": the unconfirmed ones read as unknown until the owner's next login) and
 the execution (6b-2c, "Executing a plan": claim → re-read → permit → send → report) and the registration,
 the card, its IPC and the request tool (6b-2d, "The card, the IPC and the request tool"), all switched
-off, and the inbox's rows (switched off too); **6c** — the switch on, on the owner's PC only;
+off, and the inbox's rows (switched off too); **6c** — on for the owner's PC only through "This PC's
+opt-in" (built; the `lstep@0.6.1` row's approval is the owner's separate edit), and **the server's PC
+registration** (design memo §33.3: server × company × member × PC, `X-ACB-Browser-Device`, enabled by an
+owner / admin, checked at register / approve / claim / permit) before it is on for anyone else;
 `irreversible` types and more than one write (refused by the first version's rule today); **the method override and the swap** (design memo §24: a write may
 declare `method: DELETE` / `PATCH` with `override: form_field`, sent as POST with `_method=<method>` in the
 body; `matchDeclaredWrite` would then match the effective method and the declared `_method` pair, still

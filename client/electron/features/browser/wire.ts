@@ -2,8 +2,8 @@
 // server's HTTP client, the context, this build's combination, the runner (6b-2c) behind the card's
 // ［任せる］, the card's IPC and the request tool's factory. No Electron: main.ts hands in the window
 // controller, the policy store's reads, the session and the bundled connectors. Everything that reads
-// a site, starts the operator or sends asks the build's switch first (off in 6b); the card's reads,
-// ［やめる］ and the confirm do not (clean-up paths).
+// a site, starts the operator or sends asks the switch first (off unless this PC's opt-in, ai-switch.ts);
+// the card's reads, ［やめる］ and the confirm do not (clean-up paths).
 import path from 'node:path'
 import type { IpcInvokeEvent, IpcMessageEvent, IpcRegistrar } from '../../ipc/registrar'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
@@ -50,7 +50,8 @@ export interface BrowserPlansWireDeps<E> {
 export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, IpcMessageEvent>, deps: BrowserPlansWireDeps<E>) {
   const aiSwitch = deps.aiSwitch ?? buildAiSwitch
   const http = createBrowserPlansHttp({ baseUrl: deps.baseUrl, cookies: deps.cookies, fetch: deps.fetch })
-  const context = createBrowserContext({ userId: deps.userId })
+  // "Still the same?" also asks the switch: this PC's opt-in removed mid-run stops the run or the registration.
+  const context = createBrowserContext({ userId: deps.userId, aiSwitch })
   const connector = createBrowserConnectors(deps.connectors.declarations)
   const combination = createCarriedCombinations(carried, deps.connectors.declarations)
   const checkers = createBrowserCheckerRegistry(deps.connectors.checkers)
@@ -68,7 +69,7 @@ export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, 
       return run && preview ? { run, preview } : null
     },
     parse: parseBrowserHtml,
-    // The card's press has no conversation: the sign-in, the company's setting and quitting decide.
+    // The card's press has no conversation: the sign-in, the company's setting, quitting and the switch decide.
     context: () => context.capture({ companyId: '' }),
     records, now, log: deps.log,
   })
@@ -117,7 +118,7 @@ export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, 
 
   return {
     context,
-    /** Whether the request tool may exist at all (the build's switch). */
+    /** Whether the request tool may exist at all (the switch, asked per turn). */
     requestAvailable: () => aiSwitch(),
     request,
   }
