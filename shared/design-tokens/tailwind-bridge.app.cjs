@@ -75,6 +75,8 @@ module.exports = {
         "disabled-border": "rgb(var(--color-disabled-border-rgb) / <alpha-value>)",
         "disabled-icon": "rgb(var(--color-disabled-icon-rgb) / <alpha-value>)",
         "private-text": "rgb(var(--color-private-text-rgb) / <alpha-value>)",
+        "private-bg": "rgb(var(--color-private-bg-rgb) / <alpha-value>)",
+        "private-border": "rgb(var(--color-private-border-rgb) / <alpha-value>)",
         "toast": "rgb(var(--color-toast-rgb) / <alpha-value>)",
         "on-toast": "rgb(var(--color-on-toast-rgb) / <alpha-value>)",
         "thing-task": "rgb(var(--color-thing-task-rgb) / <alpha-value>)",

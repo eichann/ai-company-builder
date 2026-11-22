@@ -117,7 +117,7 @@ included), `shadow-scale` (anything but `shadow-card / pop / dialog / none`; any
 fine), `color-opacity` (`bg-warning/10`).
 
 - **No new raw values.** Today's findings (2026-11-21: app 6,872, admin 1,235; after P2b app 6,371,
-  admin 1,104; after P2c app 6,010, admin 1,080) are recorded per
+  admin 1,104; after P2c app 6,010, admin 1,078) are recorded per
   file and rule in `design-lint-baseline.txt`. CI ("Lint (changed files)", step "Design tokens and
   design lint") fails when a rule gains findings, when the tree differs from the baseline without
   it being updated (the list only shrinks), and (`--base <sha>`) when the committed baseline was
@@ -423,13 +423,20 @@ fine), `color-opacity` (`bg-warning/10`).
   (`ai-bg` / `ai-border`, Sparkle `ai-icon`), the task row's AI turn (Robot, running spinner), the
   minutes review's and tag suggestions' Sparkle, 「AI が読んでいます…」 and the bundle's AI working
   line. The topic-switch and link-drop questions (not AI-made) are the `info` box.
+- **A private place is amber in both apps** (owner decision 2026-11-22, the app is the reference: its
+  「あなただけ」 is amber): the admin's 非公開 lock (`subfolder-picker`, `place-picker`, `permissions-view`)
+  is `private-text`, and the 「n 人にだけ届きます」 box (`AudienceSummary`) `private-bg` / `private-border`
+  (new tokens: amber-50 / amber-200, dark the amber `d` steps; pair `private-text` on `private-bg`). Was
+  the indigo `brand`.
+- **Owner decisions 2026-11-22 on P2c**: the list's 「番ごと／案件ごと」 and the chosen tag stay the solid
+  `primary` (not the proposal's raised segment); the skill wizard does not close on Esc or the scrim.
 - **Guarded by** `client/tests/ui/dialog-frame.spec.ts` (light and dark: the confirm, name, new folder,
   waiting and invite dialogs against the scrim / surface / corner / shadow / 15px title tokens and the
   button order; Tab wrap, Esc, focus return on a moved dialog; the scrim closes an ordinary dialog,
   not a confirm; the tree's chosen row, the task card's links and its AI box against `selected` /
   `link` / `ai`; dark links #6cb0ea) and `admin/tests/dialog-frame.test.tsx` (the generated CSS of
   `DialogContent` and the confirm: surface, scrim, 12px, shadow, 20px, 15px title, the three widths,
-  the button order; a link button and a chosen radio card). Each fails when its guard is reverted
+  the button order; a link button and a chosen radio card; the private box and lock in amber). Each fails when its guard is reverted
   (checked by mutation).
 - **Left, in paths other work held** (next PR there): `features/editor/components/TidiedTabsDialog.tsx`
   (frame), `features/workspace/components/LeftPanelTabs.tsx` (the count bubble → `primary`, the chosen
@@ -439,9 +446,8 @@ fine), `color-opacity` (`bg-warning/10`).
   `accent` from the app bridge. Also left: `SyncPreviewDialog` and
   `DiffViewer` (still the old fixed light tokens inside: their frame moves with their dark-mode
   work), `FindPalette` (a palette: its lighter scrim stays until the menus / palette PR),
-  `SettingsPanel`'s own surface and keys, the admin's private locks and their box (`text-brand`: amber
-  `private` like the app, or blue — an owner question), its activity chart bar and
-  `permissions-view`'s 「制限あり」 (P2b list). `--brand` stays `keep` until they move.
+  `SettingsPanel`'s own surface and keys, the admin's activity chart bar and `permissions-view`'s
+  「制限あり」 (P2b list). `--brand` stays `keep` until they move.
 
 ## Order of the next PRs (from the proposal)
 

@@ -66,7 +66,7 @@ admin/src/components/permissions/orphaned-scopes.tsx arbitrary-value=1 color-opa
 admin/src/components/permissions/outdated-clients-dialog.tsx arbitrary-value=1 color-opacity=1 radius-scale=2 type-scale=4
 admin/src/components/permissions/scope-editor.tsx arbitrary-value=3 color-opacity=5 radius-scale=4 type-scale=15 z-index=1
 admin/src/components/permissions/subfolder-picker.tsx arbitrary-value=1 type-scale=3
-admin/src/components/private-folders/audience-fields.tsx arbitrary-value=7 color-opacity=5 radius-scale=6 type-scale=12
+admin/src/components/private-folders/audience-fields.tsx arbitrary-value=7 color-opacity=3 radius-scale=6 type-scale=12
 admin/src/components/private-folders/create-dialog.tsx arbitrary-value=1 type-scale=3
 admin/src/components/private-folders/help-dialog.tsx arbitrary-value=2 color-opacity=1 radius-scale=1 type-scale=4
 admin/src/components/private-folders/members-dialog.tsx arbitrary-value=1

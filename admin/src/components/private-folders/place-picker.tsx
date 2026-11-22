@@ -134,7 +134,7 @@ export function PlacePicker({
                   className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent"
                 >
                   {f.private ? (
-                    <LockSimple size={16} weight="fill" className="text-brand" aria-label="非公開" />
+                    <LockSimple size={16} weight="fill" className="text-private-text" aria-label="非公開" />
                   ) : (
                     <Folder size={16} className="text-muted-foreground" />
                   )}

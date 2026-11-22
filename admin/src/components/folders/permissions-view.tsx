@@ -381,7 +381,7 @@ function TreeRow({
             ) : department && (kind === 'department' || !scope) && department.folder.normalize('NFC') === path ? (
               <DepartmentIcon icon={department.icon} color={department.color} size="sm" />
             ) : isPrivate ? (
-              <span className="flex size-6 items-center justify-center text-brand">
+              <span className="flex size-6 items-center justify-center text-private-text">
                 <LockSimple size={18} weight="fill" aria-label="非公開" />
               </span>
             ) : (

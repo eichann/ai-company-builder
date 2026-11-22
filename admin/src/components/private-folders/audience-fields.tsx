@@ -146,8 +146,8 @@ export function AudienceFields({
 
 export function AudienceSummary({ viewers, editors }: { viewers: number; editors: number }) {
   return (
-    <div className="flex gap-3 rounded-lg border border-brand/25 bg-brand/5 px-3.5 py-3" role="status" aria-live="polite">
-      <LockSimple size={18} weight="fill" className="mt-0.5 shrink-0 text-brand" aria-hidden="true" />
+    <div className="flex gap-3 rounded-lg border border-private-border bg-private-bg px-3.5 py-3" role="status" aria-live="polite">
+      <LockSimple size={18} weight="fill" className="mt-0.5 shrink-0 text-private-text" aria-hidden="true" />
       <div className="text-sm">
         <p className="font-medium">
           このフォルダとその中身は <span className="tabular-nums">{viewers}</span> 人にだけ届きます

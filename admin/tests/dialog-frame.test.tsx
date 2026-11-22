@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import { RadioCard } from '@/components/app/radio-card'
+import { AudienceSummary } from '@/components/private-folders/audience-fields'
 import { DARK, LIGHT, paint, resolve, styles } from './token-paint'
 
 const both = (name: string) => ({ light: resolve(LIGHT, `var(--${name})`), dark: resolve(DARK, `var(--${name})`) })
@@ -83,5 +84,19 @@ describe('links and chosen options read link / selected, not the indigo brand', 
     render(<RadioCard checked={false} onSelect={() => {}} label="全員" help="全員が編集できます" />)
     const off = await paint(screen.getByRole('radio', { name: /全員/ }).className)
     expect(off.light.fill).toBeUndefined()
+  }, 30_000)
+})
+
+describe('a private place is the app\'s amber (owner decision 2026-11-22: the app is the reference)', () => {
+  it('the 「n 人にだけ届きます」 box and its lock: private-bg / private-border / private-text, light and dark', async () => {
+    render(<AudienceSummary viewers={3} editors={3} />)
+    const box = screen.getByRole('status')
+    const fill = await paint(box.className)
+    expect({ light: fill.light.fill, dark: fill.dark.fill }).toEqual(both('color-private-bg'))
+    expect({ light: fill.light.border, dark: fill.dark.border }).toEqual(both('color-private-border'))
+    const lock = await paint(box.querySelector('svg')!.getAttribute('class')!)
+    expect({ light: lock.light.text, dark: lock.dark.text }).toEqual(both('color-private-text'))
+    // Amber like the app's 「あなただけ」, not the indigo brand nor the primary blue.
+    expect(lock.light.text).toBe('#b45309')
   }, 30_000)
 })
