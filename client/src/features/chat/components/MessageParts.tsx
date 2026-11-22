@@ -157,7 +157,7 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         }
         if (part.type === FILE_LINKED_PART_TYPE) {
           const linked = readFileLinkedPart((part as { data?: unknown }).data)
-          return linked ? <p key={item.key} data-file-linked className="my-1 flex items-center gap-1 text-[11.5px] text-gray-500 dark:text-zinc-400"><LinkSimple size={11} aria-hidden />{fileLinkedLine(linked)}</p> : null
+          return linked ? <p key={item.key} data-file-linked className="my-1 flex items-center gap-1 text-small text-gray-500 dark:text-zinc-400"><LinkSimple size={11} aria-hidden />{fileLinkedLine(linked)}</p> : null
         }
         if (part.type === STEER_PART_TYPE) {
           const record = readSteerRecord((part as { data?: unknown }).data)

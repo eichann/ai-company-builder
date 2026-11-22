@@ -43,13 +43,13 @@ export function CommentPopover({
 
   return (
     <div
-      className="fixed z-50 w-72 rounded-lg border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-xl"
+      className="fixed z-50 w-72 rounded-control border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-xl"
       style={{ left: position.x, top: position.y + 8 }}
     >
       <div className="p-3">
         {/* Selected text quote */}
         {selectedText && (
-          <div className="mb-2 px-2 py-1.5 border-l-2 border-gray-300 dark:border-zinc-600 bg-gray-50 dark:bg-zinc-900/50 rounded-r text-[11px] text-gray-500 dark:text-zinc-400 line-clamp-3 leading-relaxed">
+          <div className="mb-2 px-2 py-1.5 border-l-2 border-gray-300 dark:border-zinc-600 bg-gray-50 dark:bg-zinc-900/50 rounded-r-small text-caption font-normal text-gray-500 dark:text-zinc-400 line-clamp-3 leading-relaxed">
             {selectedText}
           </div>
         )}
@@ -63,7 +63,7 @@ export function CommentPopover({
               <button
                 key={s}
                 onClick={() => setSeverity(s)}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors border ${
+                className={`flex items-center gap-1 px-2 py-1 rounded-small text-caption font-normal transition-colors border ${
                   isActive
                     ? `${config.color} ${config.bgColor} border-current`
                     : 'text-gray-400 dark:text-zinc-500 border-transparent hover:text-gray-600 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700/50'
@@ -81,7 +81,7 @@ export function CommentPopover({
           onChange={(e) => setBody(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="コメントを入力... (⌘+Enter で送信)"
-          className="w-full h-20 px-2 py-1.5 rounded bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 text-sm text-gray-800 dark:text-zinc-200 placeholder-gray-400 dark:placeholder-zinc-500 resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/50"
+          className="w-full h-20 px-2 py-1.5 rounded-small bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 text-sm text-gray-800 dark:text-zinc-200 placeholder-gray-400 dark:placeholder-zinc-500 resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/50"
         />
         <div className="flex justify-end gap-2 mt-2">
           <button
@@ -93,7 +93,7 @@ export function CommentPopover({
           <button
             onClick={handleSubmit}
             disabled={!body.trim()}
-            className="flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-small bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <PaperPlaneTilt size={12} />
             コメント

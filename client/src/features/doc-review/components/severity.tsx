@@ -13,7 +13,7 @@ export const SEVERITY_ORDER: CommentSeverity[] = ['must_fix', 'should_fix', 'not
 export function SeverityBadge({ severity, size = 'sm' }: { severity: CommentSeverity; size?: 'sm' | 'xs' }) {
   const config = SEVERITY_CONFIG[severity]
   const Icon = config.icon
-  const textSize = size === 'sm' ? 'text-[11px]' : 'text-[10px]'
+  const textSize = size === 'sm' ? 'text-caption font-normal' : 'text-[10px]'
   const iconSize = size === 'sm' ? 12 : 10
   return (
     <span className={`inline-flex items-center gap-0.5 ${config.color} ${textSize}`}>

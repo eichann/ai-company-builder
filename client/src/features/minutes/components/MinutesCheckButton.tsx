@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { Notebook, SpinnerGap } from '@phosphor-icons/react'
 import { checkMinutes } from '../api'
 
-const ICON_BUTTON = 'p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
+const ICON_BUTTON = 'p-2 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
 const SHOWN_MS = 6000
 
 /**
@@ -34,7 +34,7 @@ export function MinutesCheckButton({ companyId }: { companyId: string }) {
       <button type="button" onClick={() => void check()} disabled={busy} className={`${ICON_BUTTON} disabled:opacity-50`} title="議事録を確かめる" aria-label="議事録を確かめる">
         {busy ? <SpinnerGap size={18} className="animate-spin" /> : <Notebook size={18} />}
       </button>
-      {said && <p role="status" className="absolute right-0 top-full z-20 mt-1 w-64 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 shadow dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">{said}</p>}
+      {said && <p role="status" className="absolute right-0 top-full z-20 mt-1 w-64 rounded-control border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 shadow dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">{said}</p>}
     </div>
   )
 }

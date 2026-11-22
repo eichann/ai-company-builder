@@ -91,7 +91,7 @@ function PreviewView() {
   const sync = useSync({ rootPath: ROOT, companyId: 'demo', userId: 'u1', onSynced: async () => {} })
   return (
     <div className="p-6">
-      <button onClick={() => { void sync.handlePreview() }} className="px-3 py-1.5 rounded bg-primary text-on-primary text-sm">変更を確認</button>
+      <button onClick={() => { void sync.handlePreview() }} className="px-3 py-1.5 rounded-small bg-primary text-on-primary text-sm">変更を確認</button>
       <output aria-label="同期の結果" className="block mt-2 text-xs">{sync.syncNotification?.message ?? ''}</output>
       {sync.previewData && (
         <SyncPreviewDialog
@@ -117,8 +117,8 @@ function SkillsView() {
   if (tab.selectedSkillId && tab.selectedSkillId !== selected) setSelected(tab.selectedSkillId)
   return (
     <div className="p-6 space-x-2">
-      <button onClick={() => tab.setWizardOpen(true)} className="px-3 py-1.5 rounded bg-primary text-on-primary text-sm">新しいスキル</button>
-      <button onClick={() => tab.setCopyOpen(true)} className="px-3 py-1.5 rounded bg-primary text-on-primary text-sm">スキルをコピー</button>
+      <button onClick={() => tab.setWizardOpen(true)} className="px-3 py-1.5 rounded-small bg-primary text-on-primary text-sm">新しいスキル</button>
+      <button onClick={() => tab.setCopyOpen(true)} className="px-3 py-1.5 rounded-small bg-primary text-on-primary text-sm">スキルをコピー</button>
       <output aria-label="選んだスキル" className="block mt-2 text-xs">{selected}</output>
       {tab.wizardOpen && <NewSkillWizard departmentName="営業部" color="#6366f1" onClose={() => tab.setWizardOpen(false)} onComplete={tab.create} />}
       {tab.copyOpen && <CopySkillModal rootPath={ROOT} currentDepartmentId="d-sales" departments={DEPARTMENTS} color="#6366f1" onClose={() => tab.setCopyOpen(false)} onCopy={tab.copy} />}

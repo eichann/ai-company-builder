@@ -32,7 +32,7 @@ export default function AiSafetyPage() {
       {role !== null && !isAdmin ? (
         <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       ) : (
-        <ul aria-label="AI の安全" className="divide-y overflow-hidden rounded-xl border bg-card">
+        <ul aria-label="AI の安全" className="divide-y overflow-hidden rounded-card border bg-card">
           {AI_SAFETY_PAGES.map((p) => (
             <li key={p.segment}>
               <Link

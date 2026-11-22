@@ -375,7 +375,7 @@ function DepartmentRow({
           {...attributes}
           {...listeners}
           aria-label={`${d.name} を並べ替え（スペースで持ち上げ、矢印キーで移動）`}
-          className="-ml-1.5 flex h-8 w-6 cursor-grab touch-none items-center justify-center rounded text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 active:cursor-grabbing"
+          className="-ml-1.5 flex h-8 w-6 cursor-grab touch-none items-center justify-center rounded-small text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 active:cursor-grabbing"
         >
           <DotsSixVertical size={18} weight="bold" />
         </button>
@@ -398,7 +398,7 @@ function DepartmentRow({
             type="button"
             onClick={onReaders}
             aria-label={`${d.name} を見られる人：${readers.text}`}
-            className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded-small text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             <Eye size={12} className={cn(readers.restricted && 'text-primary')} aria-hidden="true" />
             <span className="truncate">見られる人：{readers.text}</span>

@@ -113,7 +113,7 @@ const ToolInvocationPartView = memo(function ToolInvocationPartView({ row }: { r
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         title={row.line.label}
-        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-lg transition-colors flex-1 min-w-0 text-left"
+        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-control transition-colors flex-1 min-w-0 text-left"
       >
         <StatusIcon state={row.failure ? 'output-error' : row.state} />
         <IconComponent size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
@@ -166,7 +166,7 @@ function AgentProgressLine({ toolCallId }: { toolCallId: string }) {
   const summary = useAgentProgress(toolCallId)
   if (!summary) return null
   return (
-    <div className="ml-[3.25rem] -mt-0.5 mb-1 pr-2 text-[11px] text-gray-500 dark:text-zinc-400 truncate animate-fade-in" title={summary}>
+    <div className="ml-[3.25rem] -mt-0.5 mb-1 pr-2 text-caption font-normal text-gray-500 dark:text-zinc-400 truncate animate-fade-in" title={summary}>
       {summary}
     </div>
   )
@@ -186,7 +186,7 @@ const AgentToolGroup = memo(function AgentToolGroup({ item }: { item: AgentItem 
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         aria-expanded={isExpanded}
-        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-lg transition-colors w-full text-left"
+        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-control transition-colors w-full text-left"
       >
         <StatusIcon state={row.state} />
         <Robot size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
@@ -229,7 +229,7 @@ const SameToolGroup = memo(function SameToolGroup({ item }: { item: SameItem }) 
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         aria-expanded={isExpanded}
-        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-lg transition-colors w-full text-left"
+        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-control transition-colors w-full text-left"
       >
         <StatusIcon state={row.state} />
         <IconComponent size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
@@ -272,7 +272,7 @@ export const ToolRunGroup = memo(function ToolRunGroup({ item }: { item: RunItem
       key="__run-summary"
       onClick={() => setIsExpanded(!isExpanded)}
       aria-expanded={isExpanded}
-      className="my-1.5 flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-lg transition-colors w-full text-left"
+      className="my-1.5 flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-control transition-colors w-full text-left"
     >
       <ListChecks size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
       <ToolCountLabel count={item.items.reduce((n, i) => n + (i.kind === 'same' ? i.rows.length : 1), 0)} running={item.runningCount} />

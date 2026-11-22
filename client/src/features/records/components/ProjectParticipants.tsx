@@ -43,7 +43,7 @@ export function ProjectParticipants({ companyId, card, onChanged }: {
     setChoices(r.context.members.filter(m => !taken.has(m.userId) && m.role !== 'owner' && m.role !== 'admin'))
   }
   return (
-    <section aria-label="参加者" className="space-y-1.5 rounded-lg border border-gray-200 px-3 py-2 text-[12.5px] dark:border-zinc-700">
+    <section aria-label="参加者" className="space-y-1.5 rounded-control border border-gray-200 px-3 py-2 text-small dark:border-zinc-700">
       <p className="flex items-center gap-1.5 text-gray-600 dark:text-zinc-300">
         <LockSimple size={12} />見られる人：{card.viewers?.text ?? `『${card.record.title}』の参加者`}
       </p>
@@ -55,7 +55,7 @@ export function ProjectParticipants({ companyId, card, onChanged }: {
               className="rounded-full p-0.5 text-gray-500 hover:bg-gray-200 disabled:opacity-50 dark:hover:bg-zinc-700"><X size={9} /></button>}
           </li>
         ))}
-        {participants.admins > 0 && <li className="px-1 py-0.5 text-[11.5px] text-gray-500">ほかに管理者 {participants.admins}人</li>}
+        {participants.admins > 0 && <li className="px-1 py-0.5 text-small text-gray-500">ほかに管理者 {participants.admins}人</li>}
       </ul>
       {members && choices === null && (
         <button type="button" disabled={busy} onClick={() => void openAdd()} className={SMALL_BUTTON}><Plus size={10} className="mr-0.5 inline" />参加者を足す</button>
@@ -64,7 +64,7 @@ export function ProjectParticipants({ companyId, card, onChanged }: {
         <label className="flex flex-wrap items-center gap-2">
           <span className="text-gray-500">足す人</span>
           <select aria-label="足す人" disabled={busy} defaultValue="" onChange={e => { if (e.target.value) void save({ add: e.target.value }) }}
-            className="rounded border border-gray-300 bg-white px-1.5 py-0.5 dark:border-zinc-600 dark:bg-zinc-900">
+            className="rounded-small border border-gray-300 bg-white px-1.5 py-0.5 dark:border-zinc-600 dark:bg-zinc-900">
             <option value="">選んでください</option>
             {choices.map(c => <option key={c.userId} value={c.userId}>{c.name || c.email || 'メンバー'}</option>)}
           </select>

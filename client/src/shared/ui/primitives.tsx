@@ -4,14 +4,14 @@
 // renderer.
 import { forwardRef, type ReactNode, type ButtonHTMLAttributes } from 'react'
 import { Check, CheckCircle, Hourglass, Info, Lock, Minus, Pause, PauseCircle, Sparkle, WarningCircle, WarningOctagon, WifiSlash, type Icon } from '@phosphor-icons/react'
-import { PRIMARY_ACTION } from './buttonStyles'
+import { BUTTON_SIZE, PRIMARY_ACTION } from './buttonStyles'
 
 export function SectionHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-6">
       <div className="min-w-0">
-        <h2 className="text-[17px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">{title}</h2>
-        {description && <p className="mt-1 text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400">{description}</p>}
+        <h2 className="text-heading tracking-tight text-text">{title}</h2>
+        {description && <p className="mt-1 text-body leading-relaxed text-text-muted">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
@@ -20,22 +20,22 @@ export function SectionHeader({ title, description, actions }: { title: string; 
 
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`rounded-xl border border-zinc-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-white/[0.08] dark:bg-zinc-900 dark:shadow-none ${className}`}>
+    <div className={`rounded-card border border-[color:var(--color-border)] bg-[var(--color-surface)] shadow-card ${className}`}>
       {children}
     </div>
   )
 }
 
 export function SubHeading({ children }: { children: ReactNode }) {
-  return <h3 className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">{children}</h3>
+  return <h3 className="text-body font-medium text-text">{children}</h3>
 }
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
 const BUTTON: Record<ButtonVariant, string> = {
   primary: PRIMARY_ACTION,
-  secondary: 'border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-white/[0.06]',
-  ghost: 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/[0.06] dark:hover:text-zinc-100',
+  secondary: 'border border-border-control bg-[var(--color-surface)] text-text hover:bg-surface-sunken',
+  ghost: 'text-text-muted hover:bg-surface-sunken hover:text-text',
   danger: 'bg-danger text-on-danger hover:bg-danger-hover active:bg-danger-active',
 }
 
@@ -45,7 +45,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLBut
       ref={ref}
       type="button"
       {...props}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring focus-visible:ring-offset-focus focus-visible:ring-offset-bg disabled:pointer-events-none disabled:opacity-disabled ${size === 'sm' ? 'h-7 px-2.5 text-xs' : 'h-8 px-3.5 text-[13px]'} ${BUTTON[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-control font-medium transition-colors focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring focus-visible:ring-offset-focus focus-visible:ring-offset-bg disabled:pointer-events-none disabled:opacity-disabled ${BUTTON_SIZE[size]} ${BUTTON[variant]} ${className}`}
     />
   )
 })
@@ -135,8 +135,16 @@ export function NewDot({ label = '新着', className = '', testId }: { label?: s
   )
 }
 
-/** An on / off switch (the settings' toggles). */
-export function Switch({ on, onToggle, label, describedBy }: { on: boolean; onToggle: () => void; label: string; describedBy?: string }) {
+/** An on / off switch (the settings' toggles): 36×20, "on" the primary colour, "off" `border-strong` (3:1). */
+export function Switch({ on, onToggle, label, describedBy, disabled, className = 'mt-0.5' }: {
+  on: boolean
+  onToggle: () => void
+  label: string
+  describedBy?: string
+  disabled?: boolean
+  /** Where it sits beside its text (default: nudged down to the first line). */
+  className?: string
+}) {
   return (
     <button
       type="button"
@@ -144,10 +152,12 @@ export function Switch({ on, onToggle, label, describedBy }: { on: boolean; onTo
       aria-checked={on}
       aria-label={label}
       aria-describedby={describedBy}
+      disabled={disabled}
       onClick={onToggle}
-      className={`relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 focus-visible:ring-offset-1 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-900 ${on ? 'bg-indigo-600 dark:bg-indigo-500' : 'bg-zinc-300 dark:bg-white/20'}`}
+      data-switch
+      className={`relative inline-flex h-[var(--size-switch-h)] w-[var(--size-switch-w)] shrink-0 items-center rounded-full transition-colors duration-fast focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring focus-visible:ring-offset-focus focus-visible:ring-offset-bg disabled:cursor-not-allowed disabled:opacity-disabled ${on ? 'bg-primary' : 'bg-border-strong'} ${className}`}
     >
-      <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+      <span className={`absolute left-0.5 size-4 rounded-full bg-on-primary shadow-card transition-transform duration-fast ${on ? 'translate-x-4' : 'translate-x-0'}`} />
     </button>
   )
 }
@@ -172,12 +182,12 @@ export function TriCheckbox({ state, disabled, onToggle, label, describedBy }: {
       tabIndex={-1}
       data-checkbox
       onClick={e => { e.stopPropagation(); onToggle() }}
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 ${
+      className={`flex size-[var(--size-checkbox)] shrink-0 items-center justify-center rounded-small border transition-colors duration-fast focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring ${
         on && !disabled
-          ? 'border-indigo-600 bg-indigo-600 text-white dark:border-indigo-500 dark:bg-indigo-500'
+          ? 'border-primary bg-primary text-on-primary'
           : disabled
-            ? 'border-zinc-200 bg-zinc-100 dark:border-white/10 dark:bg-white/[0.04]'
-            : 'border-zinc-300 bg-white hover:border-zinc-400 dark:border-white/20 dark:bg-transparent dark:hover:border-white/40'
+            ? 'border-disabled-border bg-disabled-bg'
+            : 'border-border-strong bg-[var(--color-surface)] hover:border-text-subtle'
       }`}
     >
       {state === 'checked' && !disabled && <Check size={11} weight="bold" />}
@@ -192,11 +202,11 @@ export function UsageBar({ value, max, pendingFrom }: { value: number | null; ma
   const now = pct(pendingFrom ?? value)
   const next = pct(value)
   return (
-    <div className="relative h-2 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-white/[0.06]" aria-hidden>
-      <div className="absolute inset-y-0 left-0 rounded-full bg-indigo-500 transition-[width] duration-300 dark:bg-indigo-400" style={{ width: `${Math.min(now, next)}%` }} />
+    <div className="relative h-2 w-full overflow-hidden rounded-full bg-surface-sunken" aria-hidden>
+      <div className="absolute inset-y-0 left-0 rounded-full bg-primary transition-[width] duration-300" style={{ width: `${Math.min(now, next)}%` }} />
       {pendingFrom !== undefined && pendingFrom !== null && next !== now && (
         <div
-          className={`absolute inset-y-0 transition-[width,left] duration-300 ${next > now ? 'bg-indigo-300 dark:bg-indigo-400/50' : 'bg-zinc-300 dark:bg-white/20'}`}
+          className={`absolute inset-y-0 transition-[width,left] duration-300 ${next > now ? 'bg-selected-border' : 'bg-border-control'}`}
           style={{ left: `${Math.min(now, next)}%`, width: `${Math.abs(next - now)}%` }}
         />
       )}
@@ -206,8 +216,8 @@ export function UsageBar({ value, max, pendingFrom }: { value: number | null; ma
 
 export function IndeterminateBar() {
   return (
-    <div className="relative h-1 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-white/[0.06]" aria-hidden>
-      <div className="absolute inset-y-0 w-1/3 animate-[acb-indeterminate_1.2s_ease-in-out_infinite] rounded-full bg-indigo-500 dark:bg-indigo-400" />
+    <div className="relative h-1 w-full overflow-hidden rounded-full bg-surface-sunken" aria-hidden>
+      <div className="absolute inset-y-0 w-1/3 animate-[acb-indeterminate_1.2s_ease-in-out_infinite] rounded-full bg-primary" />
     </div>
   )
 }

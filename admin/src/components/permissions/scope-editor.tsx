@@ -316,7 +316,7 @@ export function ScopeEditor({
           />
           <div
             className={cn(
-              'rounded-lg border transition-colors',
+              'rounded-control border transition-colors',
               draft.mode === 'specific' && 'border-selected-border bg-selected-bg'
             )}
           >
@@ -343,7 +343,7 @@ export function ScopeEditor({
                         <Icon size={14} className="text-muted-foreground" aria-hidden="true" />
                         <span className="max-w-48 truncate">{label}</span>
                         {e.subjectType === 'user' && managerIds.includes(e.subjectId) && (
-                          <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">管理役</span>
+                          <span className="rounded-small bg-muted px-1 text-[10px] text-muted-foreground">管理役</span>
                         )}
                         <button
                           type="button"
@@ -388,7 +388,7 @@ export function ScopeEditor({
           </p>
         )}
 
-        <div className="flex items-start gap-3 rounded-lg bg-muted/40 px-3 py-2.5">
+        <div className="flex items-start gap-3 rounded-control bg-muted/40 px-3 py-2.5">
           <Eye size={18} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <div className="text-sm">
             {privateRoot ? (
@@ -480,7 +480,7 @@ function ModeOption({
     <label
       className={cn(
         'flex cursor-pointer items-start gap-3 px-3 py-2.5 has-[:disabled]:cursor-default',
-        !bare && 'rounded-lg border transition-colors',
+        !bare && 'rounded-control border transition-colors',
         !bare && checked && 'border-selected-border bg-selected-bg'
       )}
     >

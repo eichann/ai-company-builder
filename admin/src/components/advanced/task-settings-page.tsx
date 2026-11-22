@@ -43,6 +43,7 @@ import {
   sameSettings,
 } from '@/lib/task-settings'
 import { useQuery } from '@/lib/use-query'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 
 export type TaskSettingsPart = 'work' | 'calendar'
@@ -191,20 +192,12 @@ function RecordsSwitchCard({
           <ErrorState error={error} onRetry={onRetry} />
         ) : (
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={on}
+            <Switch
+              checked={on}
               aria-label="記録とやることの一覧を使う"
               disabled={busy}
               onClick={() => (on ? setConfirmOff(true) : void update(true).catch(() => {}))}
-              className={cn(
-                'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-2 border-transparent transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50',
-                on ? 'bg-primary' : 'bg-input'
-              )}
-            >
-              <span className={cn('block size-5 rounded-full bg-background shadow transition-transform', on ? 'translate-x-5' : 'translate-x-0')} />
-            </button>
+            />
             <span className="font-medium">{on ? 'オン（使っています）' : 'オフ（使っていません）'}</span>
             {settings.updatedAt && <span className="text-xs text-muted-foreground">最後に変えた日時: {formatDateTime(settings.updatedAt)}</span>}
           </div>
@@ -341,7 +334,7 @@ function SettingsForm({
 
       <div
         className={cn(
-          'sticky bottom-4 z-10 flex flex-col gap-3 rounded-xl border bg-card px-4 py-3 shadow-md sm:flex-row sm:items-center sm:justify-between',
+          'sticky bottom-4 z-10 flex flex-col gap-3 rounded-card border bg-card px-4 py-3 shadow-md sm:flex-row sm:items-center sm:justify-between',
           !dirty && 'hidden'
         )}
         aria-live="polite"

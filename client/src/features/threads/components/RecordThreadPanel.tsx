@@ -17,14 +17,14 @@ export function ChatText({ text }: { text: string }) {
 
 function Message({ m, chat }: { m: ThreadMessageView; chat: boolean }) {
   return (
-    <li className={`rounded-lg p-2 text-xs ${m.mine ? 'bg-blue-50 dark:bg-blue-950/30' : 'bg-gray-50 dark:bg-zinc-900'}`}>
-      <div className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-gray-500 dark:text-zinc-400">
+    <li className={`rounded-control p-2 text-xs ${m.mine ? 'bg-blue-50 dark:bg-blue-950/30' : 'bg-gray-50 dark:bg-zinc-900'}`}>
+      <div className="flex flex-wrap items-baseline gap-x-2 text-caption font-normal text-gray-500 dark:text-zinc-400">
         <span className="font-medium text-gray-800 dark:text-zinc-200">{authorLine(m)}</span>
         <span>{formatAt(m.at)}</span>
       </div>
-      {m.subject && <p className="mt-0.5 text-[11px] text-gray-600 dark:text-zinc-300">件名：{m.subject}</p>}
+      {m.subject && <p className="mt-0.5 text-caption font-normal text-gray-600 dark:text-zinc-300">件名：{m.subject}</p>}
       <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words font-sans text-gray-800 dark:text-zinc-200">{chat ? <ChatText text={m.text} /> : m.text}</pre>
-      {m.truncated && <p className="mt-0.5 text-[11px] text-gray-500">{THREAD_WORDS.truncated}</p>}
+      {m.truncated && <p className="mt-0.5 text-caption font-normal text-gray-500">{THREAD_WORDS.truncated}</p>}
     </li>
   )
 }
@@ -41,8 +41,8 @@ export function RecordThreadPanel({ companyId, recordId, renderReply, reads }: {
   reads?: ThreadReads
 }) {
   const result = useRecordThread(companyId, recordId, reads)
-  if (result === null) return <p className="flex items-center gap-1.5 text-[11px] text-gray-400"><CircleNotch size={12} className="animate-spin" />元の連絡を読み込んでいます...</p>
-  if (!result.success) return result.none ? null : <p role="alert" className="text-[11px] text-gray-500">{result.error}</p>
+  if (result === null) return <p className="flex items-center gap-1.5 text-caption font-normal text-gray-400"><CircleNotch size={12} className="animate-spin" />元の連絡を読み込んでいます...</p>
+  if (!result.success) return result.none ? null : <p role="alert" className="text-caption font-normal text-gray-500">{result.error}</p>
   const t = result.thread
   return (
     <section aria-label={THREAD_WORDS.title[t.channel]} className="mt-2">
@@ -53,7 +53,7 @@ export function RecordThreadPanel({ companyId, recordId, renderReply, reads }: {
       {t.unavailable
         ? <p role="status" className="mt-1 text-xs text-gray-600 dark:text-zinc-400">{t.unavailable.text}</p>
         : <>
-          {t.more && <p className="mt-1 text-[11px] text-gray-500">{THREAD_WORDS.more}</p>}
+          {t.more && <p className="mt-1 text-caption font-normal text-gray-500">{THREAD_WORDS.more}</p>}
           <ol className="mt-1 space-y-1.5">{t.messages.map(m => <Message key={m.id} m={m} chat={t.channel === 'chat'} />)}</ol>
         </>}
       {t.replies.length > 0 && <div className="mt-2">

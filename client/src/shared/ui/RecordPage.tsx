@@ -69,8 +69,8 @@ export function Chip({ children, tone = 'gray' }: { children: ReactNode; tone?: 
   return <StatusBadge variant={CHIP[tone]} icon={null}>{children}</StatusBadge>
 }
 
-export const MAIN_BUTTON = `inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-medium ${PRIMARY_ACTION}`
-export const SMALL_BUTTON = 'inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-0.5 text-[11.5px] text-gray-700 hover:border-primary hover:text-link disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200'
+export const MAIN_BUTTON = `inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-small font-medium ${PRIMARY_ACTION}`
+export const SMALL_BUTTON = 'inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-0.5 text-small text-gray-700 hover:border-primary hover:text-link disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200'
 
 /** A section folded until opened (details on demand). */
 export function Fold({ title, icon, count, children, open: shown, onToggle }: {
@@ -84,7 +84,7 @@ export function Fold({ title, icon, count, children, open: shown, onToggle }: {
   return (
     <section aria-label={title} className="border-t border-gray-100 pt-3 dark:border-zinc-800">
       <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
-        className="flex w-full items-center gap-1.5 text-[12.5px] font-semibold text-gray-700 hover:text-link dark:text-zinc-200">
+        className="flex w-full items-center gap-1.5 text-small font-semibold text-gray-700 hover:text-link dark:text-zinc-200">
         {open ? <CaretDown size={12} /> : <CaretRight size={12} />}{icon}{title}
         {count !== undefined && <span className="font-normal text-gray-400">（{count}）</span>}
       </button>
@@ -103,7 +103,7 @@ export function HistoryFold({ lines, open, onToggle }: { lines: RecordCardHistor
   return (
     <Fold title="経緯" icon={<ClockCounterClockwise size={13} className="text-gray-400" />} count={lines.length} open={open} onToggle={onToggle}>
       <ol className="ml-1.5 space-y-2 border-l border-gray-200 pl-4 dark:border-zinc-700">
-        {lines.map((h, i) => <li key={i} className="text-[12.5px]"><span className="mr-2 text-[11px] tabular-nums text-gray-400">{when(h.at)}</span>{h.text}</li>)}
+        {lines.map((h, i) => <li key={i} className="text-small"><span className="mr-2 text-caption font-normal tabular-nums text-gray-400">{when(h.at)}</span>{h.text}</li>)}
       </ol>
     </Fold>
   )
@@ -116,8 +116,8 @@ export function FieldsFold({ fields }: { fields: RecordCardField[] }) {
       <dl className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-2">
         {fields.map(f => (
           <div key={f.label} className="rounded-md border border-gray-200 px-2.5 py-1.5 dark:border-zinc-800">
-            <dt className="text-[10.5px] text-gray-500">{f.label}</dt>
-            <dd className="whitespace-pre-wrap break-words text-[12.5px]">{f.value}</dd>
+            <dt className="text-caption font-normal text-gray-500">{f.label}</dt>
+            <dd className="whitespace-pre-wrap break-words text-small">{f.value}</dd>
           </div>
         ))}
       </dl>

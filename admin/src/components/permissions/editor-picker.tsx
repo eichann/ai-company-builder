@@ -119,7 +119,7 @@ export function EditorPicker({
                       <span className="flex items-center gap-1.5">
                         <span className="truncate">{name}</span>
                         {managers.has(m.userId) && (
-                          <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">管理役</span>
+                          <span className="shrink-0 rounded-small bg-muted px-1 text-[10px] text-muted-foreground">管理役</span>
                         )}
                       </span>
                       {m.email && <span className="block truncate text-xs text-muted-foreground">{m.email}</span>}

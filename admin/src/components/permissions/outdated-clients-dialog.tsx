@@ -74,7 +74,7 @@ export function OutdatedClientsDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
-        <ul className="max-h-64 divide-y overflow-y-auto rounded-lg border" aria-label="古いアプリを使っているメンバー">
+        <ul className="max-h-64 divide-y overflow-y-auto rounded-control border" aria-label="古いアプリを使っているメンバー">
           {(state?.members ?? []).map((m) => {
             const name = m.name || m.email || '名前未設定'
             const build = parseBuild(m.clientVersion)
@@ -96,7 +96,7 @@ export function OutdatedClientsDialog({
 
         <Link
           href={`/companies/${companyId}/members`}
-          className="inline-flex items-center gap-1 self-start rounded text-sm font-medium text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="inline-flex items-center gap-1 self-start rounded-small text-sm font-medium text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           メンバー画面で確認
           <ArrowRight size={14} />

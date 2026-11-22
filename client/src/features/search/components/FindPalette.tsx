@@ -107,9 +107,9 @@ export function FindPalette({ onClose, rootPath, companyId, departmentFolder, re
           />
           <kbd className="rounded-small border border-[color:var(--color-border)] px-1.5 text-[10px] text-text-subtle">esc</kbd>
         </div>
-        <div className="px-4 pb-1 pt-2 text-[10.5px] font-semibold text-text-subtle">{query.trim() ? `見つかったもの（${items.length}）` : '最近開いたもの'}</div>
+        <div className="px-4 pb-1 pt-2 text-caption font-semibold text-text-subtle">{query.trim() ? `見つかったもの（${items.length}）` : '最近開いたもの'}</div>
         <ul role="listbox" aria-label="開くもの" className="max-h-[50vh] overflow-auto px-1.5 pb-1.5">
-          {items.length === 0 && <li className="px-3 py-3 text-[12.5px] text-text-subtle">{CALM.notFound}</li>}
+          {items.length === 0 && <li className="px-3 py-3 text-small text-text-subtle">{CALM.notFound}</li>}
           {items.map((i, n) => {
             const name = i.path ? i.path.split('/').pop() ?? i.path : i.title
             const FileIc = i.path ? getFileIcon(name, false) : null
@@ -119,16 +119,16 @@ export function FindPalette({ onClose, rootPath, companyId, departmentFolder, re
                 {FileIc ? <FileIc size={15} className="flex-shrink-0" /> : i.actionId ? <Broom size={15} className="flex-shrink-0 text-text-muted" /> : i.record ? <RecordIcon record={i.record} size={15} />
                   : <ThingIcon kind={i.skillId ? 'skill' : i.consultationId ? 'consultation' : 'other'} size={15} />}
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12.5px] text-text">{name}</span>
-                  {i.detail && <span className="block truncate text-[10.5px] text-text-muted">{i.detail}</span>}
-                  {i.path && <span className="block truncate text-[10.5px] text-text-muted">{i.path.startsWith(prefix) ? i.path.slice(prefix.length) : i.path}</span>}
+                  <span className="block truncate text-small text-text">{name}</span>
+                  {i.detail && <span className="block truncate text-caption font-normal text-text-muted">{i.detail}</span>}
+                  {i.path && <span className="block truncate text-caption font-normal text-text-muted">{i.path.startsWith(prefix) ? i.path.slice(prefix.length) : i.path}</span>}
                 </span>
-                <span className="w-[96px] shrink-0 truncate pr-1 text-right text-[10.5px] text-text-subtle">{i.path ? THING_NAMES.file : i.kindName}</span>
+                <span className="w-[96px] shrink-0 truncate pr-1 text-right text-caption font-normal text-text-subtle">{i.path ? THING_NAMES.file : i.kindName}</span>
               </li>
             )
           })}
         </ul>
-        <div className="flex gap-3 border-t border-[color:var(--color-border)] px-4 py-1.5 text-[10.5px] text-text-subtle">
+        <div className="flex gap-3 border-t border-[color:var(--color-border)] px-4 py-1.5 text-caption font-normal text-text-subtle">
           <span>↑↓ で選ぶ</span><span>Enter で開く</span><span className="ml-auto">⌘K でいつでも</span>
         </div>
       </div>

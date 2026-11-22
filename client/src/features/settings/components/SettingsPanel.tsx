@@ -102,9 +102,9 @@ function settingsGroupsFor(sharedFolder: boolean, browserSites: boolean): typeof
   return browserSites ? groups : groups.map(group => ({ ...group, items: group.items.filter(item => item.id !== 'browser') }))
 }
 
-const INPUT = 'h-9 rounded-lg border border-zinc-200 bg-white px-3 text-[13px] text-zinc-900 placeholder:text-zinc-400 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-indigo-400/60'
-const TEXTAREA = 'h-80 w-full resize-none rounded-lg border border-zinc-200 bg-white px-4 py-3 font-mono text-[13px] leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500'
-const CODE = 'rounded bg-zinc-100 px-1 py-px font-mono text-[12px] text-zinc-700 dark:bg-white/10 dark:text-zinc-200'
+const INPUT = 'h-9 rounded-control border border-zinc-200 bg-white px-3 text-body text-zinc-900 placeholder:text-zinc-400 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-indigo-400/60'
+const TEXTAREA = 'h-80 w-full resize-none rounded-control border border-zinc-200 bg-white px-4 py-3 font-mono text-body leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500'
+const CODE = 'rounded-small bg-zinc-100 px-1 py-px font-mono text-small text-zinc-700 dark:bg-white/10 dark:text-zinc-200'
 
 export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mineRows }: SettingsPanelProps) {
   const { currentCompany } = useAppStore()
@@ -284,7 +284,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
   const hasSaveFooter = activeTab === 'apikeys' || (activeTab === 'gitignore' && gitignoreEditable) || activeTab === 'advanced'
 
   const loadingState = (
-    <div className="flex items-center justify-center gap-2 py-16 text-[13px] text-zinc-500 dark:text-zinc-400">
+    <div className="flex items-center justify-center gap-2 py-16 text-body text-zinc-500 dark:text-zinc-400">
       <SpinnerGap size={16} className="animate-spin" />読み込み中…
     </div>
   )
@@ -297,13 +297,13 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
         {/* Section nav */}
         <nav ref={browser.loadRef} aria-label="設定の項目" className="flex w-60 shrink-0 flex-col border-r border-[color:var(--color-border)] bg-bg px-3 py-5">
           <div className="px-2.5 pb-4">
-            <p className="text-[15px] font-semibold tracking-tight">設定</p>
-            <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400" title={currentCompany.rootPath}>{currentCompany.name}</p>
+            <p className="text-title tracking-tight">設定</p>
+            <p className="mt-0.5 truncate text-small text-text-subtle" title={currentCompany.rootPath}>{currentCompany.name}</p>
           </div>
           <div className="min-h-0 space-y-5 overflow-y-auto">
             {settingsGroupsFor(companyHasSharedFolder(currentCompany), browser.sites.length > 0).map(group => (
               <div key={group.group}>
-                <p className="px-2.5 pb-1.5 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">{group.group}</p>
+                <p className="px-2.5 pb-1.5 text-caption text-text-subtle">{group.group}</p>
                 <ul className="space-y-0.5">
                   {group.items.map(item => {
                     const active = activeTab === item.id
@@ -313,11 +313,11 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
                           type="button"
                           aria-current={active ? 'page' : undefined}
                           onClick={() => { setActiveTab(item.id); setSaved(false); setError(null) }}
-                          className={`flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 ${active
-                            ? 'bg-white font-medium text-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.06)] ring-1 ring-zinc-200 dark:bg-white/[0.08] dark:text-zinc-50 dark:shadow-none dark:ring-white/[0.06]'
-                            : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/[0.04] dark:hover:text-zinc-100'}`}
+                          className={`flex h-control w-full items-center gap-2.5 rounded-control px-2.5 text-left text-body transition-colors duration-fast focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring ${active
+                            ? 'bg-surface-raised font-medium text-text shadow-card ring-1 ring-[color:var(--color-border)]'
+                            : 'text-text-muted hover:bg-surface-sunken hover:text-text'}`}
                         >
-                          <span className={active ? 'text-indigo-600 dark:text-indigo-300' : 'text-zinc-400 dark:text-zinc-500'}>{item.icon}</span>
+                          <span className={active ? 'text-selected-icon' : 'text-text-subtle'}>{item.icon}</span>
                           {item.label}
                         </button>
                       </li>
@@ -328,7 +328,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
             ))}
           </div>
           {/* Always shown, whatever section is open (owner decision: members are told). */}
-          <p className="mt-auto flex shrink-0 gap-1.5 border-t border-[color:var(--color-border)] px-2.5 pt-3 text-[11px] leading-relaxed text-text-muted">
+          <p className="mt-auto flex shrink-0 gap-1.5 border-t border-[color:var(--color-border)] px-2.5 pt-3 text-caption font-normal leading-relaxed text-text-muted">
             <Info size={13} className="mt-0.5 shrink-0" aria-hidden />
             <span><span className="block">{AGENT_LOG_NOTICE_TEXT}</span><span className="mt-1 block">{SANDBOX_NOTICE_TEXT}</span></span>
           </p>
@@ -410,7 +410,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
                         <EnvKeyRow
                           key={key}
                           name={key}
-                          label={<label htmlFor={`env-${key}`} className="w-32 shrink-0 text-[13px] text-zinc-600 dark:text-zinc-300">{label}</label>}
+                          label={<label htmlFor={`env-${key}`} className="w-32 shrink-0 text-body text-zinc-600 dark:text-zinc-300">{label}</label>}
                           inputId={`env-${key}`}
                           status={envStatus[key]}
                           draft={envDrafts[key] ?? ''}
@@ -488,7 +488,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
                   spellCheck={false}
                 />
                 <div className="grid grid-cols-2 gap-4">
-                  <Card className="p-4 text-[13px] text-zinc-600 dark:text-zinc-300">
+                  <Card className="p-4 text-body text-zinc-600 dark:text-zinc-300">
                     <SubHeading>自動で追加される項目</SubHeading>
                     <ul className="mt-2 space-y-1.5">
                       <li><code className={CODE}>.backups/</code> バックアップフォルダ</li>
@@ -496,7 +496,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
                       <li><code className={CODE}>100MB以上のファイル</code> 大容量ファイル</li>
                     </ul>
                   </Card>
-                  <Card className="p-4 text-[13px] text-zinc-600 dark:text-zinc-300">
+                  <Card className="p-4 text-body text-zinc-600 dark:text-zinc-300">
                     <SubHeading>書き方</SubHeading>
                     <ul className="mt-2 space-y-1.5">
                       <li><code className={CODE}>*.log</code> すべての .log ファイル</li>
@@ -527,11 +527,11 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
                   <SubHeading>保存されている項目</SubHeading>
                   <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">値は安全のため表示しません。</p>
                   {Object.keys(envStatus).length === 0 ? (
-                    <p className="mt-3 text-[13px] text-zinc-500 dark:text-zinc-400">まだありません。</p>
+                    <p className="mt-3 text-body text-zinc-500 dark:text-zinc-400">まだありません。</p>
                   ) : (
                     <ul className="mt-3 space-y-2">
                       {Object.keys(envStatus).map(key => (
-                        <li key={key} className="flex items-center gap-3 text-[13px]">
+                        <li key={key} className="flex items-center gap-3 text-body">
                           <code className={`${CODE} truncate`} title={key}>{key}</code>
                           <span className={removedKeys.has(key) ? 'text-red-600 dark:text-red-300' : 'text-zinc-500 dark:text-zinc-400'}>
                             {removedKeys.has(key) ? '保存すると削除されます' : envStatusLabel(envStatus[key])}
@@ -551,7 +551,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
           {hasSaveFooter && (
             <div className="flex items-center justify-between gap-4 border-t border-[color:var(--color-border)] bg-surface-raised px-8 py-3">
               {error ? (
-                <p role="alert" className="text-[13px] text-red-600 dark:text-red-300">{error}</p>
+                <p role="alert" className="text-body text-red-600 dark:text-red-300">{error}</p>
               ) : (
                 <p className="min-w-0 truncate text-xs text-zinc-500 dark:text-zinc-400">
                   保存先: <code className={CODE}>{currentCompany.rootPath}/{activeTab === 'gitignore' ? '.gitignore' : '.env'}</code>
@@ -603,7 +603,7 @@ function EnvKeyRow({ name, label, inputId, status, draft, placeholder, visible, 
           type="button"
           onClick={onToggleVisible}
           aria-label={visible ? '隠す' : '表示する'}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-small p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
         >
           {visible ? <EyeSlash size={16} /> : <Eye size={16} />}
         </button>
@@ -613,7 +613,7 @@ function EnvKeyRow({ name, label, inputId, status, draft, placeholder, visible, 
           type="button"
           onClick={onToggleRemoved}
           aria-label={removed ? `${name} の削除を取り消す` : `${name} を削除`}
-          className="rounded-lg p-2 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-400/10 dark:hover:text-red-300"
+          className="rounded-control p-2 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-400/10 dark:hover:text-red-300"
         >
           {removed ? <ArrowCounterClockwise size={16} /> : <Trash size={16} />}
         </button>

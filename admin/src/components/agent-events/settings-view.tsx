@@ -140,7 +140,7 @@ function SettingsForm({ saved, onSaved }: { saved: AgentEventSettings; onSaved: 
 
       <div
         className={cn(
-          'sticky bottom-4 z-10 flex flex-col gap-3 rounded-xl border bg-card px-4 py-3 shadow-md sm:flex-row sm:items-center sm:justify-between',
+          'sticky bottom-4 z-10 flex flex-col gap-3 rounded-card border bg-card px-4 py-3 shadow-md sm:flex-row sm:items-center sm:justify-between',
           !dirty && 'hidden'
         )}
         aria-live="polite"
@@ -211,7 +211,7 @@ function RetentionCard({ draft, setDraft, invalid }: { draft: Draft; setDraft: (
                 aria-checked={checked}
                 onClick={() => setDraft((d) => ({ ...d, choice: c }))}
                 className={cn(
-                  'rounded-lg border px-3.5 py-1.5 text-sm transition-colors outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                  'rounded-control border px-3.5 py-1.5 text-sm transition-colors outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
                   checked && 'border-selected-border bg-selected-bg font-medium text-foreground hover:bg-selected-bg-hover'
                 )}
               >
@@ -269,7 +269,7 @@ function ViewersCard({ value, onChange }: { value: AgentEventViewerMode; onChang
             <div
               key={mode}
               className={cn(
-                'flex flex-col rounded-xl border transition-colors',
+                'flex flex-col rounded-card border transition-colors',
                 checked ? 'border-selected-border bg-selected-bg' : 'hover:border-foreground/20'
               )}
               onMouseEnter={() => setPeek(mode)}
@@ -282,7 +282,7 @@ function ViewersCard({ value, onChange }: { value: AgentEventViewerMode; onChang
                 onClick={() => onChange(mode)}
                 onFocus={() => setPeek(mode)}
                 onBlur={() => setPeek((p) => (p === mode ? null : p))}
-                className="flex items-start gap-2.5 rounded-t-xl px-4 py-3 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="flex items-start gap-2.5 rounded-t-card px-4 py-3 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
               >
                 <span
                   aria-hidden="true"

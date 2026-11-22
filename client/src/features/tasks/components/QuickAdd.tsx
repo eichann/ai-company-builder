@@ -26,9 +26,9 @@ interface Props {
 
 type Picker = 'due' | 'who' | 'bundle' | 'whenDone'
 const TIMES = ['09:00', '12:00', '15:00', '17:00']
-const CHIP = 'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]'
-const POP = 'absolute left-0 top-full z-40 mt-1 rounded-lg border border-gray-200 bg-white p-1.5 text-[12px] shadow-xl dark:border-zinc-700 dark:bg-zinc-800'
-const POP_ROW = 'block w-full rounded px-2 py-1 text-left hover:bg-gray-100 dark:hover:bg-zinc-700'
+const CHIP = 'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-caption font-normal'
+const POP = 'absolute left-0 top-full z-40 mt-1 rounded-control border border-gray-200 bg-white p-1.5 text-small shadow-xl dark:border-zinc-700 dark:bg-zinc-800'
+const POP_ROW = 'block w-full rounded-small px-2 py-1 text-left hover:bg-gray-100 dark:hover:bg-zinc-700'
 
 /**
  * The list's one line (no window, owner 2026-11-02): while it has the focus, chips show under it —
@@ -96,7 +96,7 @@ export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWo
 
   return (
     <div ref={rootRef} className="flex-shrink-0 space-y-1.5 border-b border-gray-100 px-3 pb-1.5 pt-2 dark:border-zinc-800">
-      <div className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2 py-1 focus-within:border-focus-border dark:border-zinc-700">
+      <div className="flex items-center gap-1.5 rounded-control border border-gray-200 px-2 py-1 focus-within:border-focus-border dark:border-zinc-700">
         <Plus size={13} className="shrink-0 text-gray-400" />
         <input
           value={line}
@@ -105,12 +105,12 @@ export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWo
           onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) void add() }}
           aria-label="やることを足す"
           placeholder={asking ? `${askedName}さんに頼む（例：見積を直す 明日15時まで）` : 'やることを足す（例：見積を直す 明日15時まで #営業）'}
-          className="min-w-0 flex-1 bg-transparent text-[12.5px] outline-none placeholder:text-gray-400"
+          className="min-w-0 flex-1 bg-transparent text-small outline-none placeholder:text-gray-400"
         />
         {line && <span className="shrink-0 whitespace-nowrap text-[10px] text-gray-400">Enter で{asking ? '頼む' : '足す'}</span>}
       </div>
       {(focused || line) && (
-        <div data-testid="quick-add-chips" className="flex flex-wrap items-center gap-1 text-[11px] text-gray-500 dark:text-zinc-400">
+        <div data-testid="quick-add-chips" className="flex flex-wrap items-center gap-1 text-caption font-normal text-gray-500 dark:text-zinc-400">
           <span className="relative">
             {chip('due', !!due, <><CalendarBlank size={11} />{due ? `期限 ${dueText(due, now)}` : '期限'}</>)}
             {open === 'due' && (
@@ -118,17 +118,17 @@ export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWo
                 <div className="flex flex-wrap gap-1">
                   {[['今日', now.date], ['明日', addDays(now.date, 1)], ['あさって', addDays(now.date, 2)]].map(([l, d]) => (
                     <button key={l} type="button" onClick={() => setPickedDue(timeOf(due) ? `${d}T${timeOf(due)}` : d)}
-                      className={`rounded border px-1.5 ${dayOf(due) === d && due ? 'border-primary bg-primary text-on-primary' : 'border-gray-200 hover:border-primary dark:border-zinc-700'}`}>{l}</button>
+                      className={`rounded-small border px-1.5 ${dayOf(due) === d && due ? 'border-primary bg-primary text-on-primary' : 'border-gray-200 hover:border-primary dark:border-zinc-700'}`}>{l}</button>
                   ))}
                   <input type="date" aria-label="日付" value={due ? dayOf(due) : ''} onChange={e => { if (e.target.value) setPickedDue(timeOf(due) ? `${e.target.value}T${timeOf(due)}` : e.target.value) }}
-                    className="rounded border border-gray-200 bg-transparent px-1 text-[11px] dark:border-zinc-700" />
+                    className="rounded-small border border-gray-200 bg-transparent px-1 text-caption font-normal dark:border-zinc-700" />
                 </div>
-                <div className="flex flex-wrap items-center gap-1"><span className="text-[10.5px] text-gray-500">時刻</span>
+                <div className="flex flex-wrap items-center gap-1"><span className="text-caption font-normal text-gray-500">時刻</span>
                   {TIMES.map(t => (
                     <button key={t} type="button" onClick={() => { setPickedDue(`${dayOf(due)}T${t}`); setOpen(null) }}
-                      className={`rounded border px-1 text-[10.5px] ${timeOf(due) === t ? 'border-primary text-link' : 'border-gray-200 hover:border-primary dark:border-zinc-700'}`}>{t}</button>
+                      className={`rounded-small border px-1 text-caption font-normal ${timeOf(due) === t ? 'border-primary text-link' : 'border-gray-200 hover:border-primary dark:border-zinc-700'}`}>{t}</button>
                   ))}
-                  {pickedDue && <button type="button" onClick={() => { setPickedDue(null); setOpen(null) }} className="ml-auto text-[10.5px] text-gray-500 hover:text-link">選び直す</button>}
+                  {pickedDue && <button type="button" onClick={() => { setPickedDue(null); setOpen(null) }} className="ml-auto text-caption font-normal text-gray-500 hover:text-link">選び直す</button>}
                 </div>
               </div>
             )}
@@ -175,18 +175,18 @@ export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWo
           {draft.tags.map(t => <span key={t} className={`${CHIP} border-gray-200 text-gray-600 dark:border-zinc-700 dark:text-zinc-300`}><Hash size={10} />{t}</span>)}
           {choices.length > 0 && (
             <span className="inline-flex items-center gap-1">今あるタグ：{choices.map(t => (
-              <button key={t} type="button" onClick={() => setLine(l => l.replace(/[#＃][^\s#＃]*$/, `#${t} `))} className="rounded border border-gray-200 px-1 hover:border-primary hover:text-link dark:border-zinc-700">#{t}</button>
+              <button key={t} type="button" onClick={() => setLine(l => l.replace(/[#＃][^\s#＃]*$/, `#${t} `))} className="rounded-small border border-gray-200 px-1 hover:border-primary hover:text-link dark:border-zinc-700">#{t}</button>
             ))}</span>
           )}
           {suggested.length > 0 && (
             <span className="inline-flex items-center gap-1" aria-label="タグの候補">
               <Sparkle size={10} weight="fill" className="text-ai-icon" />タグの候補：{suggested.map(t => (
-                <button key={t} type="button" onClick={() => setLine(l => `${l.trimEnd()} #${t} `)} className="rounded border border-selected-border px-1 text-link hover:bg-selected-bg">#{t}</button>
+                <button key={t} type="button" onClick={() => setLine(l => `${l.trimEnd()} #${t} `)} className="rounded-small border border-selected-border px-1 text-link hover:bg-selected-bg">#{t}</button>
               ))}
             </span>
           )}
           {similar && (
-            <span className="inline-flex items-center gap-1 rounded bg-selected-bg px-1.5 py-px text-selected-text">
+            <span className="inline-flex items-center gap-1 rounded-small bg-selected-bg px-1.5 py-px text-selected-text">
               <Sparkle size={10} weight="fill" />「#{similar.from}」は今ある「#{similar.to}」と同じですか？
               <button type="button" onClick={() => replaceTag(similar.from, similar.to!)} className="underline">#{similar.to} にする</button>
             </span>
@@ -194,7 +194,7 @@ export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWo
           {line && !asking && <span className="text-gray-400">あなただけに見えます</span>}
         </div>
       )}
-      {error && <p role="alert" className="text-[11px] text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p role="alert" className="text-caption font-normal text-red-600 dark:text-red-400">{error}</p>}
     </div>
   )
 }

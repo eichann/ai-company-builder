@@ -90,7 +90,7 @@ export function SkillDetailPanel({
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-zinc-800">
         <div className="flex items-center gap-3">
           <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            className="w-8 h-8 rounded-control flex items-center justify-center"
             style={{ backgroundColor: `${color}20` }}
           >
             <FileText size={16} weight="fill" style={{ color }} />
@@ -102,7 +102,7 @@ export function SkillDetailPanel({
         </div>
         <button
           onClick={onClose}
-          className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
+          className="p-1.5 rounded-control hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
         >
           <X size={16} />
         </button>
@@ -114,7 +114,7 @@ export function SkillDetailPanel({
           onClick={onExecute}
           className="
             w-full flex items-center justify-center gap-2
-            py-3 rounded-xl
+            py-3 rounded-card
             font-medium text-sm text-white
             transition-all duration-200
             hover:brightness-110 active:scale-[0.98]
@@ -133,7 +133,7 @@ export function SkillDetailPanel({
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`
-              flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+              flex items-center gap-1.5 px-3 py-1.5 rounded-control
               text-xs font-medium transition-colors
               ${activeTab === tab.id
                 ? 'bg-gray-200 dark:bg-white/[0.08] text-gray-800 dark:text-zinc-200'
@@ -192,9 +192,9 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
   // Files that look like outputs stopped a publish or request: asked before anything is sent.
   const [outputs, setOutputs] = useState<{ paths: string[]; send: ShelfSend } | null>(null)
   const [kept, setKept] = useState<KeptAside | null>(null)
-  const box = 'p-3 rounded-xl bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50 text-xs text-gray-600 dark:text-zinc-400 space-y-2'
-  const button = `w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${PRIMARY_ACTION}`
-  const quiet = 'w-full flex items-center justify-center gap-2 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50'
+  const box = 'p-3 rounded-card bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50 text-xs text-gray-600 dark:text-zinc-400 space-y-2'
+  const button = `w-full flex items-center justify-center gap-2 py-2 rounded-control text-sm font-medium transition-colors ${PRIMARY_ACTION}`
+  const quiet = 'w-full flex items-center justify-center gap-2 py-1.5 rounded-control text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50'
   const run = (action: (skill: Skill) => Promise<string | null>) => {
     setBusy(true)
     setConfirming(null)
@@ -217,7 +217,7 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
   }
   // After 外して出す: where the files left out went (the kept copies, opened by 控えを開く).
   const keptNotice = kept && (
-    <div role="status" className="space-y-2 p-2 rounded-lg bg-white/70 dark:bg-zinc-900/40 text-gray-700 dark:text-zinc-300">
+    <div role="status" className="space-y-2 p-2 rounded-control bg-white/70 dark:bg-zinc-900/40 text-gray-700 dark:text-zinc-300">
       <p>{shelfKeptAsideNote(kept)}</p>
       {kept !== 'none' && actions?.openBackup && (
         <button disabled={busy} onClick={() => run(actions.openBackup!)} className={quiet}><FolderOpen size={14} />控えを開く</button>
@@ -226,13 +226,13 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
   )
   const confirmation = (text: string, label: string, go: () => void) => (
     <div className="space-y-2">
-      <div className="flex items-start gap-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400">
+      <div className="flex items-start gap-2 p-2 rounded-control bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400">
         <Warning size={14} className="flex-shrink-0 mt-0.5" />
         <span>{text}</span>
       </div>
       <div className="flex gap-2">
-        <button onClick={go} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${PRIMARY_ACTION}`}>{label}</button>
-        <button onClick={() => setConfirming(null)} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors">キャンセル</button>
+        <button onClick={go} className={`flex-1 py-1.5 rounded-control text-xs font-medium transition-colors ${PRIMARY_ACTION}`}>{label}</button>
+        <button onClick={() => setConfirming(null)} className="flex-1 py-1.5 rounded-control text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors">キャンセル</button>
       </div>
     </div>
   )
@@ -248,7 +248,7 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
     : <button disabled={busy} onClick={() => setConfirming('request')} className={quiet}><PaperPlaneTilt size={14} />{skill.shelfRequest.last?.state === 'pending' ? 'お願いを送り直す' : '会社に出してほしいと頼む'}</button>)
   // 「成果物が入っていませんか？」: 外して出す sends the rest, 戻って直す sends nothing (owner decision 2026-11-10).
   const outputsQuestion = outputs && (
-    <div role="alertdialog" aria-label={SHELF_OUTPUTS_QUESTION} className="space-y-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300">
+    <div role="alertdialog" aria-label={SHELF_OUTPUTS_QUESTION} className="space-y-2 p-2 rounded-control bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300">
       <div className="flex items-center gap-2 text-sm font-medium"><Warning size={14} className="flex-shrink-0" />{SHELF_OUTPUTS_QUESTION}</div>
       <p>{SHELF_OUTPUTS_NOTE}</p>
       <ul aria-label="成果物のように見えるファイル" className="list-disc pl-5 break-all">
@@ -256,8 +256,8 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
         {outputs.paths.length > OUTPUTS_SHOWN && <li>ほか {outputs.paths.length - OUTPUTS_SHOWN} 個</li>}
       </ul>
       <div className="flex gap-2">
-        <button disabled={busy} onClick={() => send(outputs.send, true)} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${PRIMARY_ACTION}`}>{SHELF_OUTPUTS_LEAVE_OUT}</button>
-        <button disabled={busy} onClick={() => setOutputs(null)} className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50">{SHELF_OUTPUTS_GO_BACK}</button>
+        <button disabled={busy} onClick={() => send(outputs.send, true)} className={`flex-1 py-1.5 rounded-control text-xs font-medium transition-colors ${PRIMARY_ACTION}`}>{SHELF_OUTPUTS_LEAVE_OUT}</button>
+        <button disabled={busy} onClick={() => setOutputs(null)} className="flex-1 py-1.5 rounded-control text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50">{SHELF_OUTPUTS_GO_BACK}</button>
       </div>
     </div>
   )
@@ -285,11 +285,11 @@ function CompanyShelfSection({ skill, actions, onEditFile, onRefused }: { skill:
   if (skill.shelf?.state === 'editing') {
     // One card: what it means, then what the member can do next (open it, go back, publish).
     return (
-      <section aria-label={SHELF_EDITING_TITLE} className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 text-xs text-gray-600 dark:text-zinc-400 space-y-2">
+      <section aria-label={SHELF_EDITING_TITLE} className="p-3 rounded-card bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/30 text-xs text-gray-600 dark:text-zinc-400 space-y-2">
         <h5 className="text-sm font-medium text-amber-800 dark:text-amber-300">{SHELF_EDITING_TITLE}</h5>
         <p className="text-gray-700 dark:text-zinc-300">{SHELF_EDITING_NOTE}</p>
         {skill.shelf.newer
-          ? <p role="note" className="p-2 rounded-lg bg-white/70 dark:bg-zinc-900/40 text-amber-800 dark:text-amber-300 font-medium">{shelfNewerText(skill.shelf.newer.at, !!skill.shelfPublish)}</p>
+          ? <p role="note" className="p-2 rounded-control bg-white/70 dark:bg-zinc-900/40 text-amber-800 dark:text-amber-300 font-medium">{shelfNewerText(skill.shelf.newer.at, !!skill.shelfPublish)}</p>
           : <p>{shelfEditTexts(!!skill.shelfPublish).detail}</p>}
         {requestState}
         {skill.files.skillMd && (
@@ -337,7 +337,7 @@ function OverviewTab({
   return (
     <div className="space-y-6">
       {refusal && (
-        <div role="alert" className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-xs text-amber-700 dark:text-amber-400">
+        <div role="alert" className="flex items-start gap-2 p-2 rounded-control bg-amber-50 dark:bg-amber-900/20 text-xs text-amber-700 dark:text-amber-400">
           <Warning size={14} className="flex-shrink-0 mt-0.5" />
           <span>{refusal}</span>
         </div>
@@ -351,7 +351,7 @@ function OverviewTab({
           // A company without the shared folder: the files stay on this PC; the Skill shelf is the way to the others.
           <CompanyShelfSection skill={skill} actions={companyShelf} onEditFile={onEditFile} onRefused={setRefusal} />
         ) : skill.isPrivate ? (
-          <div className="p-3 rounded-xl bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50">
+          <div className="p-3 rounded-card bg-gray-100 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700/50">
             <div className="flex items-center gap-2 mb-2">
               <EyeSlash size={16} className="text-gray-500 dark:text-zinc-400" />
               <span className="text-sm font-medium text-gray-700 dark:text-zinc-300">非公開</span>
@@ -362,7 +362,7 @@ function OverviewTab({
                 onClick={() => setShowPublishConfirm(true)}
                 className={`
                   w-full flex items-center justify-center gap-2
-                  py-2 rounded-lg
+                  py-2 rounded-control
                   text-sm font-medium
                   transition-colors
                   ${PRIMARY_ACTION}
@@ -373,7 +373,7 @@ function OverviewTab({
               </button>
             ) : (
               <div className="space-y-2">
-                <div className="flex items-start gap-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-xs text-blue-700 dark:text-blue-400">
+                <div className="flex items-start gap-2 p-2 rounded-control bg-blue-50 dark:bg-blue-900/20 text-xs text-blue-700 dark:text-blue-400">
                   <Warning size={14} className="flex-shrink-0 mt-0.5" />
                   <span>公開すると次回の同期で全員に共有されます。公開後は非公開に戻せません。</span>
                 </div>
@@ -383,13 +383,13 @@ function OverviewTab({
                       void onPublish?.(skill).then(setRefusal)
                       setShowPublishConfirm(false)
                     }}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${PRIMARY_ACTION}`}
+                    className={`flex-1 py-1.5 rounded-control text-xs font-medium transition-colors ${PRIMARY_ACTION}`}
                   >
                     公開する
                   </button>
                   <button
                     onClick={() => setShowPublishConfirm(false)}
-                    className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors"
+                    className="flex-1 py-1.5 rounded-control text-xs font-medium bg-gray-200 dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 hover:bg-gray-300 dark:hover:bg-zinc-700 transition-colors"
                   >
                     キャンセル
                   </button>
@@ -398,7 +398,7 @@ function OverviewTab({
             )}
           </div>
         ) : (
-          <div className="p-3 rounded-xl bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800/30">
+          <div className="p-3 rounded-card bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800/30">
             <div className="flex items-center gap-2">
               <Eye size={16} className="text-green-600 dark:text-green-400" />
               <span className="text-sm font-medium text-green-700 dark:text-green-400">公開中</span>
@@ -416,7 +416,7 @@ function OverviewTab({
         <button
           onClick={() => void onToggleNurturing?.(skill).then(setRefusal)}
           className={`
-            w-full p-3 rounded-xl border text-left transition-colors
+            w-full p-3 rounded-card border text-left transition-colors
             ${skill.isNurturing
               ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/30'
               : 'bg-gray-50 dark:bg-zinc-800/30 border-gray-200 dark:border-zinc-700/50 hover:bg-gray-100 dark:hover:bg-zinc-800/50'
@@ -464,7 +464,7 @@ function OverviewTab({
             onClick={() => onEditFile(skill.files.skillMd!)}
             className="
               w-full flex items-center justify-between
-              p-3 rounded-xl bg-gray-100 dark:bg-white/[0.03] hover:bg-gray-200 dark:hover:bg-white/[0.06]
+              p-3 rounded-card bg-gray-100 dark:bg-white/[0.03] hover:bg-gray-200 dark:hover:bg-white/[0.06]
               transition-colors group
             "
           >
@@ -482,19 +482,19 @@ function OverviewTab({
 
       {/* Quick Stats */}
       <div className="grid grid-cols-3 gap-3">
-        <div className="p-3 rounded-xl bg-gray-100 dark:bg-white/[0.03] text-center">
+        <div className="p-3 rounded-card bg-gray-100 dark:bg-white/[0.03] text-center">
           <div className="text-lg font-semibold text-gray-800 dark:text-zinc-200">
             {skill.files.rules?.length || 0}
           </div>
           <div className="text-xs text-gray-500 dark:text-zinc-500">{t('skillDetail.rules')}</div>
         </div>
-        <div className="p-3 rounded-xl bg-gray-100 dark:bg-white/[0.03] text-center">
+        <div className="p-3 rounded-card bg-gray-100 dark:bg-white/[0.03] text-center">
           <div className="text-lg font-semibold text-gray-800 dark:text-zinc-200">
             {skill.files.references?.length || 0}
           </div>
           <div className="text-xs text-gray-500 dark:text-zinc-500">{t('skillDetail.references')}</div>
         </div>
-        <div className="p-3 rounded-xl bg-gray-100 dark:bg-white/[0.03] text-center">
+        <div className="p-3 rounded-card bg-gray-100 dark:bg-white/[0.03] text-center">
           <div className="text-lg font-semibold text-gray-800 dark:text-zinc-200">
             {skill.files.scripts?.length || 0}
           </div>
@@ -531,7 +531,7 @@ function FileListTab({
           onClick={() => onEditFile(file)}
           className="
             w-full flex items-center justify-between
-            p-3 rounded-xl bg-gray-100 dark:bg-white/[0.03] hover:bg-gray-200 dark:hover:bg-white/[0.06]
+            p-3 rounded-card bg-gray-100 dark:bg-white/[0.03] hover:bg-gray-200 dark:hover:bg-white/[0.06]
             transition-colors group
           "
         >
@@ -634,12 +634,12 @@ function ToolsTab({
         return (
           <div
             key={tool.path}
-            className="p-4 rounded-xl bg-gray-100 dark:bg-white/[0.03] border border-gray-200 dark:border-zinc-800"
+            className="p-4 rounded-card bg-gray-100 dark:bg-white/[0.03] border border-gray-200 dark:border-zinc-800"
           >
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-3">
                 <div
-                  className="w-8 h-8 rounded-lg flex items-center justify-center"
+                  className="w-8 h-8 rounded-control flex items-center justify-center"
                   style={{ backgroundColor: `${color}20` }}
                 >
                   <Wrench size={16} weight="fill" style={{ color }} />
@@ -671,7 +671,7 @@ function ToolsTab({
                   disabled={isLoading || !tool.hasPackageJson}
                   className="
                     flex-1 flex items-center justify-center gap-2
-                    py-2 rounded-lg
+                    py-2 rounded-control
                     text-sm font-medium
                     bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1]
                     text-gray-700 dark:text-zinc-300
@@ -692,7 +692,7 @@ function ToolsTab({
                     onClick={() => handleOpenTool(tool)}
                     className="
                       flex-1 flex items-center justify-center gap-2
-                      py-2 rounded-lg
+                      py-2 rounded-control
                       text-sm font-medium text-white
                       transition-colors hover:brightness-110
                     "
@@ -706,7 +706,7 @@ function ToolsTab({
                     disabled={isLoading}
                     className="
                       flex items-center justify-center gap-2
-                      px-4 py-2 rounded-lg
+                      px-4 py-2 rounded-control
                       text-sm font-medium
                       bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50
                       text-red-700 dark:text-red-400

@@ -131,7 +131,7 @@ function DrivePickerSection({ companyId, view, onView }: { companyId: string; vi
         Google Cloud で「Google Picker API」と「Google Drive API」を有効にし、API キーを作って、「ウェブサイトの制限」に次の値をそのまま足してください（使える API も Picker に絞ります）。
       </p>
       <div className="flex items-center gap-2">
-        <code className="break-all rounded bg-muted px-2 py-1 text-xs" data-testid="google-picker-referrer">{allow}</code>
+        <code className="break-all rounded-small bg-muted px-2 py-1 text-xs" data-testid="google-picker-referrer">{allow}</code>
         <Button variant="outline" size="sm" aria-label="ウェブサイトの制限に足す値をコピー"
           onClick={async () => { if (await copyText(allow)) toast.success('コピーしました') }}>
           <Copy size={14} /> コピー
@@ -231,7 +231,7 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
       <section className="space-y-2">
         <h3 className="text-sm font-medium">Google Cloud に登録する戻り先（承認済みのリダイレクト URI）</h3>
         <div className="flex items-center gap-2">
-          <code className="break-all rounded bg-muted px-2 py-1 text-xs" data-testid="google-redirect-uri">{view.redirectUri}</code>
+          <code className="break-all rounded-small bg-muted px-2 py-1 text-xs" data-testid="google-redirect-uri">{view.redirectUri}</code>
           <Button variant="outline" size="sm" aria-label="戻り先をコピー"
             onClick={async () => { if (await copyText(view.redirectUri)) toast.success('コピーしました') }}>
             <Copy size={14} /> コピー

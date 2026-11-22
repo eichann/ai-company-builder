@@ -22,7 +22,7 @@ export function GoogleSection({ companyId }: { companyId: string }) {
         description="あなたの Google アカウントで「Google で許可」をすると、ACB が予定と議事録を読めるようになります。メールは、あなたが画面で送るときだけ送ります。「受信を読む」は、許可したときだけ届いたメールをその場で読みます（中身は ACB に残しません）。Google Drive は、あなたが選んだファイルとフォルダだけを使います。機能ごとにオン・オフでき、いつでも「許可をやめる」で止められます。"
       />
       {!data && !error ? (
-        <div className="flex items-center gap-2 py-10 text-[13px] text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
+        <div className="flex items-center gap-2 py-10 text-body text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
       ) : !data || !view ? (
         <Callout tone="danger" role="alert">{error}</Callout>
       ) : (
@@ -32,8 +32,8 @@ export function GoogleSection({ companyId }: { companyId: string }) {
           <Card className="space-y-3 p-5">
             {view.account ? (
               <>
-                <p className="text-[13px]">許可した Google アカウント: <span className="font-medium">{view.account}</span></p>
-                <div className="text-[13px]">
+                <p className="text-body">許可した Google アカウント: <span className="font-medium">{view.account}</span></p>
+                <div className="text-body">
                   <p className="text-zinc-500">許可していること</p>
                   <ul className="mt-1 list-disc pl-5">
                     {view.allowed.map(label => <li key={label}>{label}</li>)}
@@ -41,11 +41,11 @@ export function GoogleSection({ companyId }: { companyId: string }) {
                 </div>
               </>
             ) : (
-              <p className="text-[13px] text-zinc-600 dark:text-zinc-300">まだ許可していません。</p>
+              <p className="text-body text-zinc-600 dark:text-zinc-300">まだ許可していません。</p>
             )}
-            {view.canRenewMinutes && <p className="text-[12px] text-zinc-500">{GOOGLE_RENEW_MINUTES_TEXT}</p>}
+            {view.canRenewMinutes && <p className="text-small text-zinc-500">{GOOGLE_RENEW_MINUTES_TEXT}</p>}
             {view.domainHint && (view.connectFeatures || view.canAddMail || view.canAddInbox || view.canRenewMinutes) && (
-              <p className="text-[12px] text-zinc-500">{view.domainHint}</p>
+              <p className="text-small text-zinc-500">{view.domainHint}</p>
             )}
             <div className="flex flex-wrap gap-2 pt-1">
               {view.connectFeatures && (
@@ -65,20 +65,20 @@ export function GoogleSection({ companyId }: { companyId: string }) {
               )}
             </div>
             {confirming && (
-              <div className="flex flex-wrap items-center gap-2 rounded-lg bg-zinc-50 p-3 text-[13px] dark:bg-white/[0.04]">
+              <div className="flex flex-wrap items-center gap-2 rounded-control bg-zinc-50 p-3 text-body dark:bg-white/[0.04]">
                 <span>Google の許可をやめますか？ ACB は予定や議事録を読めなくなり、メールも送れなくなります。</span>
                 <Button size="sm" variant="primary" disabled={busy} onClick={async () => { await disconnect(); setConfirming(false) }}>許可をやめる</Button>
                 <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(false)}>やめない</Button>
               </div>
             )}
-            {message && <p role="status" className="text-[12px] text-zinc-600 dark:text-zinc-300">{message}</p>}
+            {message && <p role="status" className="text-small text-zinc-600 dark:text-zinc-300">{message}</p>}
           </Card>
           {view.archive && (
             <Card className="space-y-2 p-5" data-testid="google-archive">
-              <p className="text-[13px] font-medium">{GOOGLE_FEATURE_LABEL.inbox_archive}</p>
-              <p className="text-[12px] text-zinc-500">{GOOGLE_ARCHIVE_TEXT}</p>
-              {view.archive !== 'allow' && <p className="text-[12px] text-zinc-500">{GOOGLE_ARCHIVE_STOP_TEXT}</p>}
-              <p className="text-[12px]">{view.archive === 'on' ? 'いまは：使っています' : view.archive === 'resume' ? 'いまは：オフにしています' : 'いまは：使っていません'}</p>
+              <p className="text-body font-medium">{GOOGLE_FEATURE_LABEL.inbox_archive}</p>
+              <p className="text-small text-zinc-500">{GOOGLE_ARCHIVE_TEXT}</p>
+              {view.archive !== 'allow' && <p className="text-small text-zinc-500">{GOOGLE_ARCHIVE_STOP_TEXT}</p>}
+              <p className="text-small">{view.archive === 'on' ? 'いまは：使っています' : view.archive === 'resume' ? 'いまは：オフにしています' : 'いまは：使っていません'}</p>
               <div className="flex flex-wrap gap-2 pt-1">
                 {view.archive === 'allow' && (
                   <Button size="sm" disabled={busy || waiting} onClick={() => void connect(['inbox_archive'])}>許可する</Button>
@@ -94,10 +94,10 @@ export function GoogleSection({ companyId }: { companyId: string }) {
           )}
           {view.drive && (
             <Card className="space-y-2 p-5" data-testid="google-drive">
-              <p className="text-[13px] font-medium">{GOOGLE_FEATURE_LABEL.drive}</p>
-              <p className="text-[12px] text-zinc-500">{GOOGLE_DRIVE_TEXT}</p>
-              {view.drive !== 'allow' && <p className="text-[12px] text-zinc-500">{GOOGLE_DRIVE_OFF_TEXT}</p>}
-              <p className="text-[12px]">{view.drive === 'on' ? 'いまは：使っています' : view.drive === 'resume' ? 'いまは：オフにしています' : 'いまは：まだ許可していません（初めて使うときにも聞きます）'}</p>
+              <p className="text-body font-medium">{GOOGLE_FEATURE_LABEL.drive}</p>
+              <p className="text-small text-zinc-500">{GOOGLE_DRIVE_TEXT}</p>
+              {view.drive !== 'allow' && <p className="text-small text-zinc-500">{GOOGLE_DRIVE_OFF_TEXT}</p>}
+              <p className="text-small">{view.drive === 'on' ? 'いまは：使っています' : view.drive === 'resume' ? 'いまは：オフにしています' : 'いまは：まだ許可していません（初めて使うときにも聞きます）'}</p>
               <div className="flex flex-wrap gap-2 pt-1">
                 {view.drive === 'allow' && (
                   <Button size="sm" disabled={busy || waiting} onClick={() => void connect(['drive'])}>許可する</Button>

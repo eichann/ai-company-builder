@@ -25,7 +25,7 @@ export interface BundleQuestion {
   none?: { label: string; press: () => Promise<string | null> }
 }
 
-const QUIET = 'inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-link disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
+const QUIET = 'inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-small text-gray-500 hover:bg-gray-100 hover:text-link disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
 
 export function BundleField({ companyId, bundle, word, canSet, canRemove = true, busy, onSet, onRemove, newFrom, places, onCreate, question }: {
   companyId: string
@@ -67,7 +67,7 @@ export function BundleField({ companyId, bundle, word, canSet, canRemove = true,
   }
   const off = busy || pressing
   return (
-    <div role="group" aria-label={asked?.text ?? name} className="rounded-lg border border-gray-200 px-3 py-2 text-[12.5px] dark:border-zinc-700">
+    <div role="group" aria-label={asked?.text ?? name} className="rounded-control border border-gray-200 px-3 py-2 text-small dark:border-zinc-700">
       <div className="flex flex-wrap items-center gap-2">
         <ThingIcon kind="bundle" typeLabel={name} size={14} label="" />
         {!asked && <span className="text-gray-500">{name}</span>}
@@ -84,7 +84,7 @@ export function BundleField({ companyId, bundle, word, canSet, canRemove = true,
           </span>
         )}
       </div>
-      {error && <p role="alert" className="mt-1 text-[11.5px] text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p role="alert" className="mt-1 text-small text-red-600 dark:text-red-400">{error}</p>}
       {making && newFrom && onCreate && <NewBundleDialog companyId={companyId} word={name} source={newFrom} {...(places ? { places, privateRights: rights } : {})} onCreate={onCreate} onPick={onSet} onClose={() => setMaking(false)} />}
       {picking && <BundlePicker companyId={companyId} word={name} current={bundle?.id ?? null} onClose={() => setPicking(false)} onChoose={onSet} />}
     </div>
@@ -112,29 +112,29 @@ function BundlePicker({ companyId, word, current, onChoose, onClose }: {
   }
   return (
     <Dialog onClose={onClose} label={`${word}につなぐ`} size="sm" padded={false} className="overflow-hidden">
-        <div className="flex items-center gap-2 px-3 pb-1 pt-2.5 text-[13px]">
+        <div className="flex items-center gap-2 px-3 pb-1 pt-2.5 text-body">
           <span className="flex-1 font-semibold">{word}につなぐ</span>
-          <button type="button" onClick={onClose} aria-label="閉じる" className="rounded p-0.5 hover:bg-gray-100 dark:hover:bg-zinc-700"><X size={12} /></button>
+          <button type="button" onClick={onClose} aria-label="閉じる" className="rounded-small p-0.5 hover:bg-gray-100 dark:hover:bg-zinc-700"><X size={12} /></button>
         </div>
         <div className="flex items-center gap-1.5 border-b border-gray-100 px-3 py-1.5 dark:border-zinc-700">
           <MagnifyingGlass size={12} className="text-gray-400" />
-          <input autoFocus value={q} onChange={e => setQ(e.target.value)} aria-label={`${word}を探す`} placeholder="名前で探す" className="flex-1 bg-transparent text-[12.5px] outline-none" />
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} aria-label={`${word}を探す`} placeholder="名前で探す" className="flex-1 bg-transparent text-small outline-none" />
         </div>
         <ul className="max-h-[280px] overflow-y-auto p-1">
-          {choices === null && <li className="px-2 py-2 text-[12px] text-gray-400">読み込んでいます</li>}
-          {choices && !choices.success && <li role="alert" className="px-2 py-2 text-[12px] text-gray-500">{choices.error}</li>}
-          {choices?.success && shown.length === 0 && <li className="px-2 py-2 text-[12px] text-gray-500">見つかりませんでした</li>}
+          {choices === null && <li className="px-2 py-2 text-small text-gray-400">読み込んでいます</li>}
+          {choices && !choices.success && <li role="alert" className="px-2 py-2 text-small text-gray-500">{choices.error}</li>}
+          {choices?.success && shown.length === 0 && <li className="px-2 py-2 text-small text-gray-500">見つかりませんでした</li>}
           {shown.map(b => (
             <li key={b.id}>
               <button type="button" disabled={busy || b.id === current} onClick={() => void choose(b)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-zinc-700">
                 <ThingIcon kind="bundle" typeLabel={b.typeLabel} size={13} label="" />
-                <span className="min-w-0 flex-1 truncate text-[12.5px]">{b.title}</span>
-                <span className="text-[10.5px] text-gray-400">{b.id === current ? 'いまのもの' : b.typeLabel}</span>
+                <span className="min-w-0 flex-1 truncate text-small">{b.title}</span>
+                <span className="text-caption font-normal text-gray-400">{b.id === current ? 'いまのもの' : b.typeLabel}</span>
               </button>
             </li>
           ))}
         </ul>
-        {error && <p role="alert" className="border-t border-gray-100 px-3 py-1.5 text-[11.5px] text-red-600 dark:border-zinc-700 dark:text-red-400">{error}</p>}
+        {error && <p role="alert" className="border-t border-gray-100 px-3 py-1.5 text-small text-red-600 dark:border-zinc-700 dark:text-red-400">{error}</p>}
     </Dialog>
   )
 }

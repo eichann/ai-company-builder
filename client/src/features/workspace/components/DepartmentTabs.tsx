@@ -61,7 +61,7 @@ export const DepartmentTabs = memo(function DepartmentTabs({ departments, select
       <button
         onClick={() => onSelect(COMPANY_TAB_ID)}
         className={`
-          group relative flex items-center gap-2.5 px-4 py-2.5 rounded-xl
+          group relative flex items-center gap-2.5 px-4 py-2.5 rounded-card
           font-medium text-sm whitespace-nowrap
           transition-all duration-200 ease-out
           ${isCompanySelected
@@ -101,7 +101,7 @@ export const DepartmentTabs = memo(function DepartmentTabs({ departments, select
             key={dept.id}
             onClick={() => onSelect(dept.id)}
             className={`
-              group relative flex items-center gap-2.5 px-4 py-2.5 rounded-xl
+              group relative flex items-center gap-2.5 px-4 py-2.5 rounded-card
               font-medium text-sm whitespace-nowrap
               transition-all duration-200 ease-out
               ${isUnsynced

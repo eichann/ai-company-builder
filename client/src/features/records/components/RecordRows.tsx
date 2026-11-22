@@ -24,12 +24,12 @@ export function RecordRow({ record, sub }: { record: RecordViewSummary; sub?: st
       onClick={() => runCommand('record.open', { recordId: record.id })}
       className="group w-full text-left rounded-md px-2 py-1 hover:bg-gray-100 dark:hover:bg-zinc-800"
     >
-      <span className="flex items-center gap-1.5 text-[12px] min-w-0">
+      <span className="flex items-center gap-1.5 text-small min-w-0">
         <span className="min-w-0 truncate text-link group-hover:underline">{record.title}</span>
         <RecordMarks record={record} />
         {record.stateLabel && <span className="shrink-0 rounded-full bg-gray-200/70 dark:bg-zinc-700/70 px-1.5 text-[10px] text-gray-600 dark:text-zinc-300">{record.stateLabel}</span>}
       </span>
-      <span className="block text-[10.5px] text-gray-500 dark:text-zinc-400 truncate">{sub ?? record.typeLabel}</span>
+      <span className="block text-caption font-normal text-gray-500 dark:text-zinc-400 truncate">{sub ?? record.typeLabel}</span>
     </button>
   )
 }
@@ -39,9 +39,9 @@ export function FileLinkRow({ rootPath, path, broken }: { rootPath: string; path
   const name = path.split('/').pop() ?? path
   if (broken) {
     return (
-      <div className="px-2 py-1 text-[12px] text-gray-500 dark:text-zinc-400">
+      <div className="px-2 py-1 text-small text-gray-500 dark:text-zinc-400">
         <span className="flex items-center gap-1.5"><LinkBreak size={12} /><span className="truncate">{name}</span></span>
-        <span className="block text-[10.5px]">つながりが切れています</span>
+        <span className="block text-caption font-normal">つながりが切れています</span>
       </div>
     )
   }
@@ -51,8 +51,8 @@ export function FileLinkRow({ rootPath, path, broken }: { rootPath: string; path
       onClick={() => runCommand('file.open', { path: `${rootPath}/${path}` })}
       className="group w-full text-left rounded-md px-2 py-1 hover:bg-gray-100 dark:hover:bg-zinc-800"
     >
-      <span className="flex items-center gap-1.5 text-[12px] min-w-0"><FileText size={12} className="shrink-0 text-gray-500" /><span className="truncate text-link group-hover:underline">{name}</span></span>
-      <span className="block text-[10.5px] text-gray-500 dark:text-zinc-400 truncate">{path}</span>
+      <span className="flex items-center gap-1.5 text-small min-w-0"><FileText size={12} className="shrink-0 text-gray-500" /><span className="truncate text-link group-hover:underline">{name}</span></span>
+      <span className="block text-caption font-normal text-gray-500 dark:text-zinc-400 truncate">{path}</span>
     </button>
   )
 }

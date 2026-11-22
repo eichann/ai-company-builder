@@ -4,13 +4,14 @@
 import { useState } from 'react'
 import { Warning } from '@phosphor-icons/react'
 import type { BundleChoice } from '../../../../shared/tasks'
-import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
+import { SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { useBundleChoices } from '../hooks/useBundleChoices'
 import { similarBundles } from '../similarBundles'
 import { mayMakePrivateBundle, type BundlePlace } from '../model'
 import { Dialog, DialogCloseButton, DialogFooter, DialogTitle } from '../../../shared/ui/Dialog'
+import { Button } from '../../../shared/ui/primitives'
 
-const FIELD = 'w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-[13px] dark:border-zinc-700 dark:bg-zinc-900'
+const FIELD = 'w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-body dark:border-zinc-700 dark:bg-zinc-900'
 
 export interface NewBundleSource {
   /** The name to start from (the meeting's or the 連絡's title) and where it came from. */
@@ -68,12 +69,12 @@ export function NewBundleDialog({ companyId, word, source, places, privateRights
     else onClose()
   }
   return (
-    <Dialog onClose={onClose} label={`新しい${word}にする`} size="md" className="text-[13px]">
+    <Dialog onClose={onClose} label={`新しい${word}にする`} size="md" className="text-body">
         <div className="flex items-center gap-2"><DialogTitle className="flex-1">新しい{word}にする</DialogTitle>
           <DialogCloseButton onClick={onClose} /></div>
         <div className="mt-3 space-y-3">
           {similar.length > 0 && (
-            <div role="group" aria-label={`似た${word}`} className="space-y-1 rounded-lg bg-amber-500/[0.08] px-2.5 py-2 text-[12px]">
+            <div role="group" aria-label={`似た${word}`} className="space-y-1 rounded-control bg-amber-500/[0.08] px-2.5 py-2 text-small">
               <p className="flex items-center gap-1.5"><Warning size={13} weight="fill" className="shrink-0 text-amber-500" />似た{word}があります。新しく作らずに、そちらにつなぐこともできます。</p>
               {similar.map(b => (
                 <div key={b.id} className="flex items-center gap-2 pl-5">
@@ -83,44 +84,44 @@ export function NewBundleDialog({ companyId, word, source, places, privateRights
               ))}
             </div>
           )}
-          <label className="block text-[12px]"><span className="text-gray-500">名前</span>
+          <label className="block text-small"><span className="text-gray-500">名前</span>
             <input aria-label="名前" value={title} onChange={e => setTitle(e.target.value)} className={FIELD} />
-            <span className="text-[10.5px] text-gray-400">{source.titleNote}</span></label>
+            <span className="text-caption font-normal text-gray-400">{source.titleNote}</span></label>
           {place && (
-            <div className="text-[12px]"><span className="text-gray-500">どこの{word}</span>
+            <div className="text-small"><span className="text-gray-500">どこの{word}</span>
               {changing
                 ? <select aria-label="部署" value={place.folder ?? ''} onChange={e => { setFolder(e.target.value || null); setChanging(false) }} className={FIELD}>
                   {places!.choices.map(c => <option key={c.folder ?? ''} value={c.folder ?? ''}>{c.name}の{c.kind?.name ?? word}</option>)}
                 </select>
-                : <p className="flex items-center gap-2 py-1 text-[13px]">{place.name}の{place.kind?.name ?? word}
+                : <p className="flex items-center gap-2 py-1 text-body">{place.name}の{place.kind?.name ?? word}
                   {places!.choices.length > 1 && <button type="button" onClick={() => setChanging(true)} className={SMALL_BUTTON}>変える</button>}</p>}
             </div>
           )}
           {offersPrivate && place && (
-            <div role="radiogroup" aria-label="見られる人" className="space-y-1 text-[12.5px]"><span className="text-[12px] text-gray-500">見られる人</span>
+            <div role="radiogroup" aria-label="見られる人" className="space-y-1 text-small"><span className="text-small text-gray-500">見られる人</span>
               <label className="flex items-center gap-2"><input type="radio" name="bundle-visibility" checked={!isPrivate} onChange={() => setWantsPrivate(false)} />公開（会社のみんな）</label>
               <label className={`flex items-center gap-2 ${privateAllowed ? '' : 'text-gray-400'}`}>
                 <input type="radio" name="bundle-visibility" checked={isPrivate} disabled={!privateAllowed} onChange={() => setWantsPrivate(true)} />非公開（参加者だけ）
               </label>
               {privateRights === undefined
-                ? <p className="pl-5 text-[11px] text-gray-400">確かめています…</p>
-                : !privateAllowed && <p className="pl-5 text-[11px] text-gray-500">非公開の{kindWord}は、部署の管理役か管理者に作ってもらってください</p>}
-              {isPrivate && <p className="pl-5 text-[11px] text-gray-500">あなたと部署の管理役が参加者になります。ほかの人は、作ったあと{kindWord}の画面で足せます。</p>}
+                ? <p className="pl-5 text-caption font-normal text-gray-400">確かめています…</p>
+                : !privateAllowed && <p className="pl-5 text-caption font-normal text-gray-500">非公開の{kindWord}は、部署の管理役か管理者に作ってもらってください</p>}
+              {isPrivate && <p className="pl-5 text-caption font-normal text-gray-500">あなたと部署の管理役が参加者になります。ほかの人は、作ったあと{kindWord}の画面で足せます。</p>}
             </div>
           )}
-          <div className="text-[12px]"><span className="text-gray-500">相手</span>
-            <p className="py-1 text-[13px]">{source.counterpart?.title ?? <span className="text-gray-400">なし</span>}</p>
-            {source.counterpart && <span className="text-[10.5px] text-gray-400">参加者から入れました</span>}</div>
+          <div className="text-small"><span className="text-gray-500">相手</span>
+            <p className="py-1 text-body">{source.counterpart?.title ?? <span className="text-gray-400">なし</span>}</p>
+            {source.counterpart && <span className="text-caption font-normal text-gray-400">参加者から入れました</span>}</div>
           {source.homework > 0 && (
-            <label className="flex items-center gap-2 text-[12.5px]">
+            <label className="flex items-center gap-2 text-small">
               <input type="checkbox" checked={withHomework} onChange={e => setWithHomework(e.target.checked)} />この会議の宿題（{source.homework}）も入れる
             </label>
           )}
-          {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+          {error && <p role="alert" className="text-small text-red-600 dark:text-red-400">{error}</p>}
         </div>
         <DialogFooter>
-          <button type="button" onClick={onClose} className={SMALL_BUTTON}>やめておく</button>
-          <button type="button" disabled={busy || !title.trim()} onClick={() => void run(() => onCreate(title.trim(), withHomework && source.homework > 0, place, isPrivate))} className={MAIN_BUTTON}>作る</button>
+          <Button onClick={onClose}>やめておく</Button>
+          <Button variant="primary" disabled={busy || !title.trim()} onClick={() => void run(() => onCreate(title.trim(), withHomework && source.homework > 0, place, isPrivate))}>作る</Button>
         </DialogFooter>
     </Dialog>
   )

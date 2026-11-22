@@ -36,7 +36,7 @@ function Steps({ current }: { current: 1 | 2 | 3 }) {
           <li key={label} className="flex items-center gap-2" aria-current={n === current ? 'step' : undefined}>
             <span
               className={cn(
-                'flex size-6 items-center justify-center rounded-full text-[11px] font-bold',
+                'flex size-6 items-center justify-center rounded-full text-caption font-bold',
                 n < current ? 'bg-success text-white' : n === current ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
               )}
             >

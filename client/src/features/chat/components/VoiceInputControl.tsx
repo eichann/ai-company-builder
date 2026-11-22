@@ -116,7 +116,7 @@ export function VoiceInputControl({ editor, active, pane, disabled, scope, onBus
   // 「もう一度確認」: re-runs both the speech probe and the microphone list.
   // Rendered next to every message that asks the user to retry.
   const recheckButton = <button type="button" disabled={recheck.running} onClick={() => void voiceAvailability.recheck()}
-    className="shrink-0 rounded border border-current px-2 py-0.5 font-medium disabled:opacity-50">{recheck.running ? '確認中…' : 'もう一度確認'}</button>
+    className="shrink-0 rounded-small border border-current px-2 py-0.5 font-medium disabled:opacity-50">{recheck.running ? '確認中…' : 'もう一度確認'}</button>
   return <div className="px-2 pt-2 text-xs" aria-live="polite">
     {active && <VoiceInputCommand pane={pane} onToggle={() => void startOrStop()} />}
     <div className="flex items-center gap-2 flex-wrap">
@@ -128,7 +128,7 @@ export function VoiceInputControl({ editor, active, pane, disabled, scope, onBus
         {phase === 'listening' ? <Stop size={16} weight="fill" /> : <Microphone size={16} />}
         {phase === 'listening' ? `録音中 ${seconds}秒・停止` : phase === 'preparing' ? 'マイクを準備中…' : phase === 'finalizing' ? '音声を認識中…' : phase === 'polishing' ? '文章を整えています…' : '音声入力'}
       </button>
-      <kbd className="shrink-0 whitespace-nowrap rounded border border-gray-200 dark:border-zinc-700 px-1.5 py-0.5 font-sans text-xs leading-5 text-gray-600 dark:text-zinc-300" title="もう一度押すと停止">{formatVoiceShortcut(shortcut)}</kbd>
+      <kbd className="shrink-0 whitespace-nowrap rounded-small border border-gray-200 dark:border-zinc-700 px-1.5 py-0.5 font-sans text-xs leading-5 text-gray-600 dark:text-zinc-300" title="もう一度押すと停止">{formatVoiceShortcut(shortcut)}</kbd>
       <span className="text-[10px] text-gray-400 dark:text-zinc-500 opacity-60">{phase === 'listening' ? 'もう1回押すと停止・整文' : '1回押すと開始・もう1回で停止'}</span>
       {busy && <button type="button" onClick={cancel} aria-label="音声入力をキャンセル" className="p-1"><X size={16} /></button>}
       {!busy && caps?.available && !rawText && <span className="text-[10px] text-gray-400 dark:text-zinc-500 opacity-60">話した内容をAIで整えて入力します</span>}
@@ -139,7 +139,7 @@ export function VoiceInputControl({ editor, active, pane, disabled, scope, onBus
     {caps?.available && <button type="button" disabled={busy} aria-label="マイクを選択" aria-expanded={showDevices}
       title={phase === 'listening' ? recordingDevice : deviceLabel}
       onClick={() => { setShowDevices(value => !value); void refreshDevices() }}
-      className="mt-1 mb-2 flex max-w-full items-center gap-1 rounded px-2 py-1 text-xs text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-60">
+      className="mt-1 mb-2 flex max-w-full items-center gap-1 rounded-small px-2 py-1 text-xs text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-60">
       <span className="truncate">{phase === 'listening' ? recordingDevice : deviceLabel}</span>
       <CaretDown size={14} className={`shrink-0 transition-transform ${showDevices ? 'rotate-180' : ''}`} />
     </button>}
@@ -147,16 +147,16 @@ export function VoiceInputControl({ editor, active, pane, disabled, scope, onBus
       <span>はじめに、自分の使うマイクを設定してください。</span>
       <button type="button" className="underline font-medium" onClick={() => { setShowDevices(true); void refreshDevices() }}>マイクを設定</button>
     </div>}
-    {showDevices && <div className="my-2 rounded-lg border border-gray-200 dark:border-zinc-700 p-3 space-y-2">
+    {showDevices && <div className="my-2 rounded-control border border-gray-200 dark:border-zinc-700 p-3 space-y-2">
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium">マイク設定</span>
         <button type="button" onClick={() => setShowDevices(false)} aria-label="マイク選択を閉じる"
-          className="flex items-center gap-1 rounded px-2 py-1 hover:bg-gray-100 dark:hover:bg-zinc-800">
+          className="flex items-center gap-1 rounded-small px-2 py-1 hover:bg-gray-100 dark:hover:bg-zinc-800">
           <X size={14} /><span>閉じる</span>
         </button>
       </div>
       <label className="block">使用するマイク
-        <select aria-label="使用するマイク" value={selectedDevice} disabled={busy} className="mt-1 block w-full rounded border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-2"
+        <select aria-label="使用するマイク" value={selectedDevice} disabled={busy} className="mt-1 block w-full rounded-small border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-2"
           onChange={event => {
             const value = event.target.value
             microphoneSelection.select(value)
@@ -166,7 +166,7 @@ export function VoiceInputControl({ editor, active, pane, disabled, scope, onBus
           {devices?.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}
         </select>
       </label>
-      {!configured && <button type="button" disabled={busy || !devices?.length || deviceMissing} className={`rounded px-3 py-1.5 ${PRIMARY_ACTION}`}
+      {!configured && <button type="button" disabled={busy || !devices?.length || deviceMissing} className={`rounded-small px-3 py-1.5 ${PRIMARY_ACTION}`}
         onClick={() => { microphoneSelection.select(selectedDevice); setShowDevices(false) }}>このマイクを使う</button>}
       <div className="flex justify-between gap-2"><span className="opacity-60">選択はこのPCに保存します。録音中は変更できません。</span><button type="button" onClick={() => void refreshDevices()} className="underline shrink-0">再取得</button></div>
     </div>}
@@ -189,7 +189,7 @@ export function VoiceInputControl({ editor, active, pane, disabled, scope, onBus
       {seconds >= 5 && Date.now() - lastSample.current <= 3000 && Date.now() - lastAudible.current > 5000 && <p className="text-amber-600">音が小さいようです。マイクの選択・ミュート・入力音量をご確認ください。</p>}
     </div>}
     {error && <p className="my-1 text-amber-700 dark:text-amber-400">{error}</p>}
-    {rawText && <div className="my-2 rounded border p-2">
+    {rawText && <div className="my-2 rounded-small border p-2">
       <p className="mb-2 whitespace-pre-wrap select-text max-h-40 overflow-auto">{rawText}</p>
       <button type="button" className="mr-3 underline" onClick={() => {
         const op = operation.current

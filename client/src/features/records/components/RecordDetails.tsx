@@ -26,7 +26,7 @@ export function OpenButton({ link }: { link: OpenLink }) {
 function Section({ kind, title, children }: { kind?: 'decision' | 'task'; title: string; children: ReactNode }) {
   return (
     <section aria-label={title}>
-      <h2 className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-gray-700 dark:text-zinc-200">{kind && <ThingIcon kind={kind} size={14} label="" />}{title}</h2>
+      <h2 className="mb-2 flex items-center gap-1.5 text-body font-semibold text-gray-700 dark:text-zinc-200">{kind && <ThingIcon kind={kind} size={14} label="" />}{title}</h2>
       {children}
     </section>
   )
@@ -34,7 +34,7 @@ function Section({ kind, title, children }: { kind?: 'decision' | 'task'; title:
 
 function Items({ records }: { records: RecordViewSummary[] }) {
   return (
-    <ul className="space-y-1 text-[13.5px]">
+    <ul className="space-y-1 text-body">
       {records.map(r => (
         <li key={r.id}>
           <button type="button" onClick={() => runCommand('record.open', { recordId: r.id })}
@@ -50,7 +50,7 @@ export function MeetingLine({ m }: { m: MeetingDetailView }) {
   const at = when(m.at)
   const people = [...m.attendees, ...(m.externalCount > 0 ? [`社外 ${m.externalCount}人`] : [])]
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-gray-500 dark:text-zinc-400">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-small text-gray-500 dark:text-zinc-400">
       {at && <span className="inline-flex items-center gap-1"><CalendarBlank size={12} className="text-sky-500" />{at}</span>}
       {people.length > 0 && <span>参加 {people.join('・')}</span>}
       {m.assignee && <span>担当 {m.assignee}さん</span>}
@@ -61,10 +61,10 @@ export function MeetingLine({ m }: { m: MeetingDetailView }) {
 export function MeetingSummary({ m }: { m: MeetingDetailView }) {
   return (
     <section aria-label="要約" className="text-[14.5px] leading-[1.8]">
-      <h2 className="mb-1 text-[13px] font-semibold text-gray-700 dark:text-zinc-200">要約</h2>
+      <h2 className="mb-1 text-body font-semibold text-gray-700 dark:text-zinc-200">要約</h2>
       {m.summary
         ? <p className="whitespace-pre-wrap">{m.summary}</p>
-        : <p className="text-[13px] text-gray-500">AI はまだ議事録を読んでいません。読み終えると、ここに要約が出ます。</p>}
+        : <p className="text-body text-gray-500">AI はまだ議事録を読んでいません。読み終えると、ここに要約が出ます。</p>}
     </section>
   )
 }
@@ -88,7 +88,7 @@ export function IncomingLine({ m }: { m: IncomingDetailView }) {
   const at = when(m.at)
   const service = m.channel === 'slack' ? 'Slack' : m.channel === 'email' ? 'メール' : null
   return (
-    <div className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-gray-500 dark:text-zinc-400">
+    <div className="flex flex-wrap items-center gap-1.5 text-small text-gray-500 dark:text-zinc-400">
       {m.channel === 'slack' ? <SourceIcon source="slack" /> : m.channel === 'email' ? <SourceIcon source="gmail" /> : null}
       {[m.from ? `${m.from} から` : null, service, at].filter(Boolean).join('・')}
     </div>
@@ -98,8 +98,8 @@ export function IncomingLine({ m }: { m: IncomingDetailView }) {
 export function IncomingBody({ m }: { m: IncomingDetailView }) {
   const where = m.channel === 'slack' ? 'Slack' : m.channel === 'email' ? 'メール' : '元のサービス'
   return (
-    <section aria-label="要約" className="rounded-lg bg-gray-50 px-3.5 py-2.5 text-[13.5px] leading-relaxed dark:bg-zinc-800/50">
-      <div className="mb-0.5 text-[11px] text-gray-500">要約（本文は {where} にあります）</div>
+    <section aria-label="要約" className="rounded-control bg-gray-50 px-3.5 py-2.5 text-body leading-relaxed dark:bg-zinc-800/50">
+      <div className="mb-0.5 text-caption font-normal text-gray-500">要約（本文は {where} にあります）</div>
       <p className="whitespace-pre-wrap">{m.summary || '（要約はまだありません）'}</p>
     </section>
   )
@@ -152,7 +152,7 @@ export function IncomingActions({ m, busy, openReplies, onAct, onUndo }: {
       onClick: () => { if (!busy) onAct('drop') },
     }]} />
     {openReplies > 0 && (
-      <p role="note" className="basis-full text-[11.5px] text-amber-700 dark:text-amber-300">
+      <p role="note" className="basis-full text-small text-amber-700 dark:text-amber-300">
         この連絡の返事のお願いが残っています。返事が済んでいれば、そちらで［もう返した］を押してください。
       </p>
     )}

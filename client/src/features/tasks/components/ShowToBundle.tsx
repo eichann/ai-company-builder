@@ -21,7 +21,7 @@ export function ShowToBundle({ bundle, busy, onShow }: {
   if (!open) {
     return (
       <button type="button" disabled={busy} onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-0.5 text-[11.5px] text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
+        className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-0.5 text-small text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
         <UsersThree size={12} />{word}の人に見せる
       </button>
     )
@@ -33,12 +33,12 @@ export function ShowToBundle({ bundle, busy, onShow }: {
     else setOpen(false)
   }
   return (
-    <div role="group" aria-label={`${word}の人に見せる`} className="w-full space-y-2 rounded-lg border border-gray-200 p-2.5 text-[12.5px] dark:border-zinc-700">
+    <div role="group" aria-label={`${word}の人に見せる`} className="w-full space-y-2 rounded-control border border-gray-200 p-2.5 text-small dark:border-zinc-700">
       <p>「{bundle.title}」を見られる人みんなに、このやることが見えるようになります。あとから元には戻せません。</p>
       {error && <p role="alert" className="text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex gap-2">
-        <button type="button" disabled={busy} onClick={() => void submit()} className={`rounded px-2.5 py-0.5 ${PRIMARY_ACTION}`}>見せる</button>
-        <button type="button" disabled={busy} onClick={() => { setOpen(false); setError(null) }} className="rounded border border-gray-300 px-2.5 py-0.5 dark:border-zinc-600">やめる</button>
+        <button type="button" disabled={busy} onClick={() => void submit()} className={`rounded-small px-2.5 py-0.5 ${PRIMARY_ACTION}`}>見せる</button>
+        <button type="button" disabled={busy} onClick={() => { setOpen(false); setError(null) }} className="rounded-small border border-gray-300 px-2.5 py-0.5 dark:border-zinc-600">やめる</button>
       </div>
     </div>
   )

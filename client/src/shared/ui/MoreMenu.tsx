@@ -35,21 +35,21 @@ export function MoreMenu({ items, label = 'その他の操作', compact, align =
         type="button" data-more aria-label={label} title={label} aria-haspopup="menu" aria-expanded={open}
         onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
         className={compact
-          ? 'p-1 rounded text-gray-500 hover:bg-gray-200/70 dark:hover:bg-zinc-700'
-          : 'inline-flex items-center gap-1 rounded-md border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-2 py-1 text-[11.5px] text-gray-700 dark:text-zinc-200 hover:border-primary hover:text-link'}
+          ? 'p-1 rounded-small text-gray-500 hover:bg-gray-200/70 dark:hover:bg-zinc-700'
+          : 'inline-flex items-center gap-1 rounded-md border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-2 py-1 text-small text-gray-700 dark:text-zinc-200 hover:border-primary hover:text-link'}
       >
         <DotsThreeVertical size={compact ? 15 : 14} weight="bold" />{!compact && label}
       </button>
       {open && (
-        <div role="menu" className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-1 z-40 w-[280px] rounded-lg border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-xl p-1 text-left`}>
+        <div role="menu" className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-1 z-40 w-[280px] rounded-control border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-xl p-1 text-left`}>
           {items.map(i => (
             <button
               key={i.label} type="button" role={i.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={i.checked}
               onClick={e => { e.stopPropagation(); setOpen(false); i.onClick() }}
               className="w-full rounded-md px-2.5 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-zinc-700"
             >
-              <span className={`flex items-center gap-1.5 text-[12.5px] ${i.danger ? 'text-danger-text' : 'text-gray-800 dark:text-zinc-100'}`}>{i.icon}{i.label}{i.checked && <Check size={13} weight="bold" className="ml-auto text-selected-icon" />}</span>
-              {i.hint && <span className="block text-[10.5px] leading-snug text-gray-500 dark:text-zinc-400">{i.hint}</span>}
+              <span className={`flex items-center gap-1.5 text-small ${i.danger ? 'text-danger-text' : 'text-gray-800 dark:text-zinc-100'}`}>{i.icon}{i.label}{i.checked && <Check size={13} weight="bold" className="ml-auto text-selected-icon" />}</span>
+              {i.hint && <span className="block text-caption font-normal leading-snug text-gray-500 dark:text-zinc-400">{i.hint}</span>}
             </button>
           ))}
         </div>

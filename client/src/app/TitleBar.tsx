@@ -32,7 +32,7 @@ interface Props {
   layoutControls?: ReactNode
 }
 
-const ICON_BUTTON = 'p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
+const ICON_BUTTON = 'p-2 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
 
 /** The window's title bar (draggable): the company, 変更を確認 / 同期, backups, language, theme, settings, sign-out. */
 export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', syncWaitsForYou = false, sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra, inbox, companySwitcher, layoutControls }: Props) {
@@ -108,7 +108,7 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
         )}
         <button
           onClick={toggleLanguage}
-          className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors text-xs font-medium"
+          className="flex items-center gap-1 px-2 py-1.5 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors text-xs font-medium"
           title={language === 'ja' ? 'Switch to English' : '日本語に切り替え'}
         >
           <Globe size={16} />
@@ -130,7 +130,7 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
         </button>
         <button
           onClick={onLogout}
-          className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-red-500 transition-colors"
+          className="p-2 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-red-500 transition-colors"
           title={t('header.logout')}
         >
           <SignOut size={18} />
@@ -152,7 +152,7 @@ function WorkingFolderNote() {
         この PC だけで作業
       </button>
       {open && (
-        <div role="note" data-working-folder-note className="absolute right-0 top-full z-50 mt-1 w-80 space-y-1 rounded-lg border border-gray-200 bg-white p-3 text-xs leading-relaxed text-gray-600 shadow-lg dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+        <div role="note" data-working-folder-note className="absolute right-0 top-full z-50 mt-1 w-80 space-y-1 rounded-control border border-gray-200 bg-white p-3 text-xs leading-relaxed text-gray-600 shadow-lg dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
           <p>{WORKING_FOLDER_NOTE}</p>
           <p>{WORKING_FOLDER_BACKUP_NOTE}</p>
         </div>

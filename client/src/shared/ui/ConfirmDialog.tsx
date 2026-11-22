@@ -1,6 +1,7 @@
 import { useId, useRef, type ReactNode } from 'react'
 import { WarningCircle } from '@phosphor-icons/react'
 import { Dialog, DialogFooter, DialogTitle } from './Dialog'
+import { Button } from './primitives'
 
 interface ConfirmDialogProps {
   isOpen: boolean
@@ -79,27 +80,10 @@ function OpenConfirmDialog({
         </div>
       </div>
       <DialogFooter>
-        <button
-          ref={cancelRef}
-          type="button"
-          onClick={onCancel}
-          className="h-control px-control-x text-body text-text-muted hover:text-text hover:bg-surface-sunken rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring focus-visible:ring-offset-focus focus-visible:ring-offset-surface-raised"
-        >
-          {cancelText}
-        </button>
-        <button
-          ref={confirmRef}
-          type="button"
-          onClick={onConfirm}
-          data-variant={danger ? 'danger' : 'primary'}
-          className={`h-control px-control-x text-body font-strong rounded-control transition-colors duration-fast focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring focus-visible:ring-offset-focus focus-visible:ring-offset-surface-raised ${
-            danger
-              ? 'bg-danger text-on-danger hover:bg-danger-hover active:bg-danger-active'
-              : 'bg-primary text-on-primary hover:bg-primary-hover active:bg-primary-active'
-          }`}
-        >
+        <Button ref={cancelRef} onClick={onCancel}>{cancelText}</Button>
+        <Button ref={confirmRef} variant={danger ? 'danger' : 'primary'} onClick={onConfirm} data-variant={danger ? 'danger' : 'primary'}>
           {confirmText}
-        </button>
+        </Button>
       </DialogFooter>
     </Dialog>
   )

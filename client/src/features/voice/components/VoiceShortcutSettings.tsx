@@ -9,7 +9,7 @@ export function VoiceShortcutSettings() {
     <h3 className="font-medium">音声入力のショートカット</h3>
     <p className="text-gray-500 dark:text-zinc-400">相談画面で1回押すと録音開始、もう1回押すと録音を終了して文章を整えます。</p>
     <button type="button" data-shortcut-recorder aria-label="音声入力ショートカットを変更"
-      className="rounded-lg border border-zinc-600 px-4 py-3 focus:ring-2 focus:ring-amber-500"
+      className="rounded-control border border-zinc-600 px-4 py-3 focus:ring-2 focus:ring-amber-500"
       onClick={() => { setCapturing(true); setError('') }} onBlur={() => setCapturing(false)}
       onKeyDown={event => {
         if (!capturing) return

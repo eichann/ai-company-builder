@@ -199,7 +199,7 @@ async function dropOnComposer(page: Page, record: { id: string; title: string })
     dt.setData('text/plain', r.title)
     return dt
   }, record)
-  await composerOf(page).locator('xpath=ancestor::div[contains(@class, "rounded-xl")][1]').dispatchEvent('drop', { dataTransfer: data })
+  await composerOf(page).locator('xpath=ancestor::div[contains(@class, "rounded-card")][1]').dispatchEvent('drop', { dataTransfer: data })
 }
 
 test('ending the record keeps an automatic consultation with an edit of its message open, and after the edit is sent', async ({ page }) => {
@@ -239,7 +239,7 @@ test('ending the record keeps an automatic consultation whose message is still b
     dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'screen.png', { type: 'image/png' }))
     return dt
   })
-  await composerOf(page).locator('xpath=ancestor::div[contains(@class, "rounded-xl")][1]').dispatchEvent('drop', { dataTransfer: data })
+  await composerOf(page).locator('xpath=ancestor::div[contains(@class, "rounded-card")][1]').dispatchEvent('drop', { dataTransfer: data })
   await page.keyboard.press('Meta+Enter')
   // The composer is empty already; nothing has gone out yet.
   await expect(composerOf(page)).not.toContainText('この画像も見て')
@@ -266,7 +266,7 @@ test('a send still reading its image goes no further once the member closed its 
     dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'screen.png', { type: 'image/png' }))
     return dt
   })
-  await composerOf(page).locator('xpath=ancestor::div[contains(@class, "rounded-xl")][1]').dispatchEvent('drop', { dataTransfer: data })
+  await composerOf(page).locator('xpath=ancestor::div[contains(@class, "rounded-card")][1]').dispatchEvent('drop', { dataTransfer: data })
   await page.keyboard.press('Meta+Enter')
   const item = conversationList(page).locator('[data-conversation-id]').filter({ hasText: `A社 商談 のあと（${day()}）` })
   await item.hover()

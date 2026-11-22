@@ -30,7 +30,7 @@ export const BrokerKeyNeededCard = memo(function BrokerKeyNeededCard({ service }
   else text = '自分の鍵を登録すると、AI がこのサービスを使えるようになります。'
 
   return (
-    <div role="group" aria-label={`${label} の鍵がありません`} className="my-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3">
+    <div role="group" aria-label={`${label} の鍵がありません`} className="my-2 rounded-card border border-amber-500/40 bg-amber-500/5 p-3">
       <div className="flex items-center gap-1.5 text-sm font-medium text-gray-900 dark:text-zinc-100">
         <Key size={15} weight="bold" aria-hidden className="text-amber-500" />
         {label} の鍵がありません
@@ -39,11 +39,11 @@ export const BrokerKeyNeededCard = memo(function BrokerKeyNeededCard({ service }
       {offer && state.kind !== 'loading' && (canOpen
         ? (
           <button type="button" onClick={() => void runCommand('settings.openOwnKey', { service })}
-            className={`mt-2 rounded-lg px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
+            className={`mt-2 rounded-control px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
             {registered ? '「自分の鍵」を開く' : '自分の鍵を登録する'}
           </button>
         )
-        : <p className="mt-1 text-[11px] text-gray-500">メインの画面の「設定 → 自分の鍵」から登録できます。</p>)}
+        : <p className="mt-1 text-caption font-normal text-gray-500">メインの画面の「設定 → 自分の鍵」から登録できます。</p>)}
     </div>
   )
 })

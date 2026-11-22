@@ -71,7 +71,7 @@ export function ClaudeSignInCard({ status, root, onRecheck }: { status: ClaudeCo
           <>
             <p className="text-xs text-text-muted">ボタンを押すと、ブラウザで Anthropic のログイン画面が開きます。パスワードなどはこのアプリには渡りません。</p>
             {result && result.outcome !== 'signed-in' && <p role="alert" className="text-xs text-warning-text">{result.message}</p>}
-            <button type="button" onClick={() => void signIn()} className={`mt-1 rounded-lg px-4 py-2 text-sm font-medium ${PRIMARY_ACTION}`}>
+            <button type="button" onClick={() => void signIn()} className={`mt-1 rounded-control px-4 py-2 text-sm font-medium ${PRIMARY_ACTION}`}>
               Claude にログインする
             </button>
           </>

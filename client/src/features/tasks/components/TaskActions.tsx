@@ -5,12 +5,13 @@ import { CheckCircle, Eye } from '@phosphor-icons/react'
 import type { TaskCardAction, TaskCardData } from '../../../../shared/task-card'
 import type { TaskActInput } from '../../../../shared/tasks'
 import { MoreMenu } from '../../../shared/ui/MoreMenu'
-import { Chip, MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
+import { Chip, MAIN_BUTTON } from '../../../shared/ui/RecordPage'
 import { actionHint, actionText, doneWords, leavingWords, LEAVING_ACTIONS, placeActions, SELF_ASSIGN, SELF_ASSIGN_NOTE, WHEN_DONE, whenDoneSteps } from '../cardActions'
 import { WaitDialog } from './WaitParts'
 import { Dialog, DialogFooter, DialogTitle } from '../../../shared/ui/Dialog'
+import { Button } from '../../../shared/ui/primitives'
 
-const FIELD = 'w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-[12.5px] dark:border-zinc-600'
+const FIELD = 'w-full rounded-small border border-gray-300 bg-transparent px-2 py-1 text-small dark:border-zinc-600'
 
 interface Props {
   card: TaskCardData
@@ -45,7 +46,7 @@ export function TaskActions({ card, busy, team, today, onRun }: Props) {
         label: actionText(a, card), hint: actionHint(a, card), danger: a.action === 'decline',
         onClick: () => { if (!busy) void press(a) },
       }))} />
-      {error && <p role="alert" className="basis-full text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p role="alert" className="basis-full text-small text-red-600 dark:text-red-400">{error}</p>}
       {open && (open.action === 'wait'
         // 返事待ち says until when too (task version 12): its own window with the chips.
         ? <WaitDialog card={card} today={today} again={false} busy={busy} onClose={() => setOpen(null)} onRun={onRun} />
@@ -90,11 +91,11 @@ function ActionDialog({ card, action, busy, onClose, onRun }: { card: TaskCardDa
   }
   const title = words?.title ?? actionText(action, card)
   return (
-    <Dialog onClose={onClose} label={title} size="sm" className="text-[13px]">
+    <Dialog onClose={onClose} label={title} size="sm" className="text-body">
         <DialogTitle>{title}</DialogTitle>
         <div className="mt-3 space-y-3">
           {words && (
-            <dl className="space-y-1.5 text-[12.5px]">
+            <dl className="space-y-1.5 text-small">
               <div className="flex gap-2"><dt className="w-[84px] shrink-0 text-gray-500">何が起きるか</dt><dd>{words.what}</dd></div>
               <div className="flex gap-2"><dt className="w-[84px] shrink-0 text-gray-500">知らせる人</dt><dd>{words.tell}</dd></div>
             </dl>
@@ -107,12 +108,12 @@ function ActionDialog({ card, action, busy, onClose, onRun }: { card: TaskCardDa
                 {card.people.map(p => <option key={p.id} value={p.id}>{p.name}さん</option>)}
               </select>
               <input aria-label="OK のいきさつ" value={okNote} onChange={e => setOkNote(e.target.value)} placeholder="例：先方からメールで了承" className={FIELD} />
-              <p className="text-[11px] text-gray-500">OK をくれた人に「あなたの OK で完了にしました」と届き、その人は取り消せます。</p>
+              <p className="text-caption font-normal text-gray-500">OK をくれた人に「あなたの OK で完了にしました」と届き、その人は取り消せます。</p>
             </div>
           )}
           {shownArgs.map(x => (
             <label key={x.name} className="block space-y-1">
-              <span className="text-[12px] text-gray-600 dark:text-zinc-300">{x.label}</span>
+              <span className="text-small text-gray-600 dark:text-zinc-300">{x.label}</span>
               {x.kind === 'person' ? (
                 <select aria-label={x.label} value={args[x.name] ?? ''} onChange={e => setArgs(v => ({ ...v, [x.name]: e.target.value }))} className={FIELD}>
                   <option value="">選んでください</option>
@@ -127,11 +128,11 @@ function ActionDialog({ card, action, busy, onClose, onRun }: { card: TaskCardDa
             <textarea aria-label="理由" value={note} onChange={e => setNote(e.target.value)} rows={2}
               placeholder={action.action === 'decline' ? '受けられない理由（頼んだ人に届きます）' : reasonNeeded ? '理由（経緯に残ります）' : 'ひとこと（なくてもかまいません）'} className={FIELD} />
           )}
-          {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+          {error && <p role="alert" className="text-small text-red-600 dark:text-red-400">{error}</p>}
         </div>
         <DialogFooter>
-          <button type="button" onClick={onClose} className={SMALL_BUTTON}>やめておく</button>
-          <button type="button" disabled={busy || !ready} onClick={() => void run()} className={MAIN_BUTTON}>{actionText(action, card)}</button>
+          <Button onClick={onClose}>やめておく</Button>
+          <Button variant="primary" disabled={busy || !ready} onClick={() => void run()}>{actionText(action, card)}</Button>
         </DialogFooter>
     </Dialog>
   )
@@ -158,20 +159,20 @@ function WhenDoneDialog({ card, busy, onClose, onRun }: { card: TaskCardData; bu
   }
   const radio = 'flex items-start gap-2 rounded-md border px-2.5 py-2'
   return (
-    <Dialog onClose={onClose} label="終わったら" size="sm" className="text-[13px]">
+    <Dialog onClose={onClose} label="終わったら" size="sm" className="text-body">
         <DialogTitle>終わったら</DialogTitle>
         <div className="mt-3 space-y-3">
           <div role="radiogroup" aria-label="終わったら" className="space-y-2">
             <label className={`${radio} ${choice === 'notify' ? 'border-selected-border bg-selected-bg' : 'border-gray-200 dark:border-zinc-700'}`}>
               <input type="radio" name="when-done" checked={choice === 'notify'} onChange={() => setChoice('notify')} className="mt-0.5" />
-              <span><span className="block font-medium">知らせるだけ</span><span className="block text-[11.5px] text-gray-500">担当が完了にすると、頼んだ人に知らせます</span></span>
+              <span><span className="block font-medium">知らせるだけ</span><span className="block text-small text-gray-500">担当が完了にすると、頼んだ人に知らせます</span></span>
             </label>
             <div className={`${radio} ${choice === 'check' ? 'border-selected-border bg-selected-bg' : 'border-gray-200 dark:border-zinc-700'}`}>
               <input id="when-done-check" type="radio" name="when-done" checked={choice === 'check'} onChange={() => setChoice('check')} className="mt-0.5" />
               <div className="min-w-0 flex-1 space-y-1.5">
                 <label htmlFor="when-done-check" className="block">
                   <span className="block font-medium">{choice === 'check' && checker ? `${checker}に確かめてもらう` : '〇〇さんに確かめてもらう'}</span>
-                  <span className="block text-[11.5px] text-gray-500">担当は「終わったので見てもらう」で渡し、その人の OK で完了です</span>
+                  <span className="block text-small text-gray-500">担当は「終わったので見てもらう」で渡し、その人の OK で完了です</span>
                 </label>
                 <select aria-label="確かめる人" value={reviewer} onChange={e => { setReviewer(e.target.value); setChoice('check') }} className={FIELD}>
                   <option value="">選んでください</option>
@@ -180,11 +181,11 @@ function WhenDoneDialog({ card, busy, onClose, onRun }: { card: TaskCardData; bu
               </div>
             </div>
           </div>
-          {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+          {error && <p role="alert" className="text-small text-red-600 dark:text-red-400">{error}</p>}
         </div>
         <DialogFooter>
-          <button type="button" onClick={onClose} className={SMALL_BUTTON}>やめておく</button>
-          <button type="button" disabled={busy || steps.length === 0} onClick={() => void run()} className={MAIN_BUTTON}>決める</button>
+          <Button onClick={onClose}>やめておく</Button>
+          <Button variant="primary" disabled={busy || steps.length === 0} onClick={() => void run()}>決める</Button>
         </DialogFooter>
     </Dialog>
   )

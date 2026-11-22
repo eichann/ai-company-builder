@@ -25,7 +25,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        'flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed px-6 py-12 text-center',
+        'flex flex-col items-center justify-center gap-3 rounded-card border border-dashed px-6 py-12 text-center',
         className
       )}
     >
@@ -56,7 +56,7 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        'flex flex-col items-center justify-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-10 text-center',
+        'flex flex-col items-center justify-center gap-3 rounded-card border border-destructive/30 bg-destructive/5 px-6 py-10 text-center',
         className
       )}
     >
@@ -78,7 +78,7 @@ export function ErrorState({
 /** Table-shaped placeholder while a list loads. */
 export function ListSkeleton({ rows = 4, className }: { rows?: number; className?: string }) {
   return (
-    <div className={cn('divide-y rounded-xl border bg-card', className)} aria-busy="true" aria-label="読み込み中">
+    <div className={cn('divide-y rounded-card border bg-card', className)} aria-busy="true" aria-label="読み込み中">
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="flex items-center gap-3 px-4 py-3.5">
           <Skeleton className="size-8 rounded-full" />

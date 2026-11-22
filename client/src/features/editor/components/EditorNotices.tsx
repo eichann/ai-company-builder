@@ -5,7 +5,7 @@ import type { OpenFile } from '../hooks/useOpenFiles'
 /** 閲覧のみ: the member may not write this file's folder (per-folder write rules). */
 export function ReadOnlyNotice() {
   return (
-    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-readonly-border bg-readonly-bg text-[11px] text-readonly-text">
+    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-readonly-border bg-readonly-bg text-caption font-normal text-readonly-text">
       <ReadOnlyBadge />
       <span className="truncate">このフォルダは閲覧のみです。変更しても共有されず、同期すると元に戻ります（変更は .backups/ に保存されます）。</span>
     </div>
@@ -15,7 +15,7 @@ export function ReadOnlyNotice() {
 /** The open file (no edits) was deleted or moved on disk. */
 export function MissingFileNotice() {
   return (
-    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-warning-border bg-warning-bg text-[11px] text-warning-text">
+    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-warning-border bg-warning-bg text-caption font-normal text-warning-text">
       <Warning size={12} className="flex-shrink-0 text-warning-icon" />
       <span className="truncate">このファイルは削除されたか、移動されました。表示しているのは開いていたときの内容です。</span>
     </div>
@@ -91,7 +91,7 @@ export function ExternalChangeBanner({ file, diffOpen, onSave, onLoadDisk, onTog
 /** A note that can be dismissed (e.g. where the overwritten version was backed up). */
 export function EditorNotice({ notice, onDismiss }: { notice: string; onDismiss: () => void }) {
   return (
-    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-info-border bg-info-bg text-[11px] text-info-text">
+    <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-info-border bg-info-bg text-caption font-normal text-info-text">
       <span className="min-w-0 flex-1 truncate" title={notice}>{notice}</span>
       <button onClick={onDismiss} className="hover:text-gray-900 dark:hover:text-zinc-100" aria-label="閉じる">
         <X size={12} />

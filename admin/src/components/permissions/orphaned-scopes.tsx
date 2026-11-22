@@ -221,7 +221,7 @@ function MoveRulesDialog({
           <span className="truncate font-mono text-xs text-muted-foreground">{segments.length ? segments.join(' / ') : '会社のフォルダ全体'}</span>
         </div>
 
-        <div className="max-h-72 overflow-y-auto rounded-lg border">
+        <div className="max-h-72 overflow-y-auto rounded-control border">
           {folders.loading ? (
             <div className="space-y-2 p-3" aria-busy="true" aria-label="読み込み中">
               <Skeleton className="h-6" />

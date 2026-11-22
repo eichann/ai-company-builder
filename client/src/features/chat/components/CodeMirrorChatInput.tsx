@@ -184,9 +184,9 @@ export const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
         />
       )}
 
-      <div className="absolute -inset-px rounded-xl bg-gradient-to-r from-selected-bg via-transparent to-selected-bg opacity-0 group-focus-within:opacity-100 transition-opacity blur-sm" />
+      <div className="absolute -inset-px rounded-card bg-gradient-to-r from-selected-bg via-transparent to-selected-bg opacity-0 group-focus-within:opacity-100 transition-opacity blur-sm" />
 
-      <div className="relative flex items-end gap-2 p-2 rounded-xl bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 shadow-glass group focus-within:border-focus-border transition-colors">
+      <div className="relative flex items-end gap-2 p-2 rounded-card bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 shadow-glass group focus-within:border-focus-border transition-colors">
         <div className="flex-1 text-gray-900 dark:text-zinc-100 min-h-[40px] max-h-[200px] overflow-hidden">
           <div ref={editorHostRef} />
           <div id={suggestionId} className="sr-only" aria-live="polite">{suggestion ? suggestionDescription(suggestion) : ''}</div>
@@ -196,7 +196,7 @@ export const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
           onClick={handleSend}
           disabled={disabled}
           className={`
-            flex-shrink-0 w-9 h-9 rounded-lg
+            flex-shrink-0 w-9 h-9 rounded-control
             disabled:cursor-not-allowed
             flex items-center justify-center
             transition-all duration-200

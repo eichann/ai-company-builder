@@ -9,7 +9,7 @@ import { STEER_LABEL, type SteerRecord } from '../../../../shared/steer'
 export const SteerInstructionView = memo(function SteerInstructionView({ record }: { record: SteerRecord }) {
   return (
     <div className="my-2 flex flex-col items-end animate-fade-in">
-      <div className="mb-1 flex items-center gap-1 text-[11px] text-gray-500 dark:text-zinc-400">
+      <div className="mb-1 flex items-center gap-1 text-caption font-normal text-gray-500 dark:text-zinc-400">
         <ArrowBendDownRight size={12} weight="bold" aria-hidden="true" />
         <span>{STEER_LABEL}</span>
       </div>

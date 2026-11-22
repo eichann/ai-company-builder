@@ -187,7 +187,7 @@ export function TabbedEditorPanel({
         {(navigation || tabsEnd) && <div className="flex-shrink-0 flex items-center border-b border-gray-200 dark:border-zinc-800/50 bg-gray-100 dark:bg-zinc-900/50">{navigation}<div className="flex-1" />{tabsEnd && <div className="flex items-center px-1">{tabsEnd}</div>}</div>}
         <div className="flex-1 flex flex-col items-center justify-center text-gray-400 dark:text-zinc-600">
           <FileText size={44} className="mb-3 opacity-50" />
-          <p className="text-[12.5px]">左のやることやファイルを押すと、ここにタブで開きます</p>
+          <p className="text-small">左のやることやファイルを押すと、ここにタブで開きます</p>
         </div>
       </div>
     )
@@ -260,7 +260,7 @@ export function TabbedEditorPanel({
       <div className="flex-1 overflow-hidden min-w-0">
         {activeFile && activeFilePath && externalDiffPath === activeFilePath && activeFile.external?.kind === 'changed' ? (
           <div className="h-full flex flex-col">
-            <div className="flex-shrink-0 px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800/50 text-[11px] text-gray-500 dark:text-zinc-400">
+            <div className="flex-shrink-0 px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800/50 text-caption font-normal text-gray-500 dark:text-zinc-400">
               <span className="text-red-600 dark:text-red-400">−</span> ディスクの内容（外部の変更）／
               <span className="text-green-700 dark:text-green-400">＋</span> あなたの編集（未保存）
             </div>
@@ -331,14 +331,14 @@ export function TabbedEditorPanel({
             {activeFilePath && (isMarkdownFile(activeFilePath) || isHtmlFile(activeFilePath)) && (
               <div className="absolute top-3 right-3 flex rounded-md border border-gray-200 dark:border-zinc-700 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm shadow-sm overflow-hidden opacity-60 hover:opacity-100 transition-opacity">
                 <button
-                  className="flex items-center gap-1 px-2 py-1 text-[11px] transition-colors bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200"
+                  className="flex items-center gap-1 px-2 py-1 text-caption font-normal transition-colors bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200"
                   title="エディタ"
                 >
                   <Code size={12} />
                 </button>
                 <button
                   onClick={() => (isHtmlFile(activeFilePath) ? showHtmlSource(activeFilePath, false) : handleSetMdViewMode('preview'))}
-                  className="flex items-center gap-1 px-2 py-1 text-[11px] transition-colors text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300"
+                  className="flex items-center gap-1 px-2 py-1 text-caption font-normal transition-colors text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300"
                   title={isHtmlFile(activeFilePath) ? '見る' : 'プレビュー'}
                 >
                   <Eye size={12} />

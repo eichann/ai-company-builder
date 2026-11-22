@@ -21,8 +21,8 @@ interface Props {
   onOpen: (recordId: string) => void
 }
 
-const HEAD = 'px-2.5 pb-1 pt-2 text-[11px] font-medium text-gray-500 dark:text-zinc-400'
-const ROW = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-gray-800 hover:bg-gray-100 dark:text-zinc-100 dark:hover:bg-zinc-800'
+const HEAD = 'px-2.5 pb-1 pt-2 text-caption font-medium text-gray-500 dark:text-zinc-400'
+const ROW = 'flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-body text-gray-800 hover:bg-gray-100 dark:text-zinc-100 dark:hover:bg-zinc-800'
 
 export function CorePressPanel({ companyId, data, showCalendar, meetings, onOpen }: Props) {
   const [nowMs, setNowMs] = useState(() => Date.now())
@@ -51,8 +51,8 @@ export function CorePressPanel({ companyId, data, showCalendar, meetings, onOpen
           </div>
         )}
         {meetings}
-        <p className="px-2.5 pt-2 text-[13px] font-medium text-gray-800 dark:text-zinc-100">確かめること</p>
-        <p className="px-2.5 pb-1 text-[11px] leading-relaxed text-gray-500 dark:text-zinc-400">承認や AI が用意したものなど、ACB の中でしか押せないものです。開くと押すボタンがあります。</p>
+        <p className="px-2.5 pt-2 text-body font-medium text-gray-800 dark:text-zinc-100">確かめること</p>
+        <p className="px-2.5 pb-1 text-caption font-normal leading-relaxed text-gray-500 dark:text-zinc-400">承認や AI が用意したものなど、ACB の中でしか押せないものです。開くと押すボタンがあります。</p>
         {approvals.length > 0 && <><p className={HEAD}>承認のお願い</p>{approvals.map(row)}</>}
         {prepared.length > 0 && <><p className={HEAD}>AI が用意したもの（確かめてください）</p>{prepared.map(row)}</>}
         {decisions.length > 0 && (
@@ -66,7 +66,7 @@ export function CorePressPanel({ companyId, data, showCalendar, meetings, onOpen
             ))}
           </>
         )}
-        {data && nothing && <p className="px-2.5 py-3 text-[12px] text-gray-500 dark:text-zinc-400">今は確かめることはありません。</p>}
+        {data && nothing && <p className="px-2.5 py-3 text-small text-gray-500 dark:text-zinc-400">今は確かめることはありません。</p>}
       </div>
     </section>
   )

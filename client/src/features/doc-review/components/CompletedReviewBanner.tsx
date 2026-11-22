@@ -32,7 +32,7 @@ export function CompletedReviewBanner({
       {activeReview.snapshot && onToggleDiff && (
         <button
           onClick={onToggleDiff}
-          className={`px-2 py-1 rounded text-[11px] transition-colors ${
+          className={`px-2 py-1 rounded-small text-caption font-normal transition-colors ${
             showDiff
               ? 'bg-blue-500 text-white'
               : 'text-blue-500 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20'
@@ -43,7 +43,7 @@ export function CompletedReviewBanner({
       )}
       <button
         onClick={onClose}
-        className="px-2 py-1 rounded text-gray-400 dark:text-zinc-400 hover:text-gray-600 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-zinc-700/50 transition-colors"
+        className="px-2 py-1 rounded-small text-gray-400 dark:text-zinc-400 hover:text-gray-600 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-zinc-700/50 transition-colors"
       >
         閉じる
       </button>

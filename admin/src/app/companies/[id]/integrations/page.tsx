@@ -508,7 +508,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
 
 function ImportReportView({ report, system }: { report: ImportReport; system: string }) {
   return (
-    <div className="rounded-xl border px-4 py-3 text-sm" role="status">
+    <div className="rounded-card border px-4 py-3 text-sm" role="status">
       <p className="font-medium">{IMPORT_STATUS_TEXT[report.status]}{report.reason ? `（${describeReason(report.reason)}）` : ''}</p>
       <ul className="mt-1 text-muted-foreground">
         {Object.entries(report.objects).map(([name, o]) => (
@@ -681,7 +681,7 @@ function CheckResult({ check, system }: { check: PluginMappingCheck; system: str
   const errors = entries.flatMap(([, o]) => o.errors)
   const warnings = entries.flatMap(([, o]) => o.warnings)
   return (
-    <div role="status" className="space-y-1 rounded-xl border px-4 py-2 text-sm">
+    <div role="status" className="space-y-1 rounded-card border px-4 py-2 text-sm">
       {errors.length === 0 && warnings.length === 0 && <p className="font-medium">{system} の項目と合っています。</p>}
       {errors.length > 0 && (
         <>

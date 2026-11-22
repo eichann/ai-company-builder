@@ -57,7 +57,7 @@ export function ChatSetupNeeded({ claudeSetupShown, claudeStatus, claudeRoot, cl
           : t('auth.apiKeyRequired')}
       </p>
       {claudeCodeError && (
-        <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 max-w-[320px]">
+        <div className="mb-4 p-3 rounded-card bg-amber-500/10 border border-amber-500/20 max-w-[320px]">
           <p className="text-xs text-amber-400">{claudeCodeError}</p>
         </div>
       )}
@@ -67,7 +67,7 @@ export function ChatSetupNeeded({ claudeSetupShown, claudeStatus, claudeRoot, cl
           flex items-center gap-2
           bg-primary hover:bg-primary-hover
           text-on-primary text-sm font-medium
-          rounded-xl px-5 py-2.5
+          rounded-card px-5 py-2.5
           transition-all duration-200
           hover:shadow-glow hover:scale-[1.02]
           active:scale-[0.98]

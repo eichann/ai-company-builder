@@ -29,15 +29,15 @@ export function ReviewHistoryDropdown({
     <div ref={dropdownRef} className="relative">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm shadow-sm text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors"
+        className="flex items-center gap-1 px-2 py-1 text-caption font-normal rounded-md border border-gray-200 dark:border-zinc-700 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm shadow-sm text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors"
         title="レビュー履歴を確認"
       >
         <CheckCircle size={12} />
         レビュー履歴 ({reviews.length})
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-64 rounded-lg border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-xl z-50 overflow-hidden">
-          <div className="px-3 py-2 border-b border-gray-200 dark:border-zinc-700 text-[11px] text-gray-500 dark:text-zinc-400 font-medium">
+        <div className="absolute right-0 top-full mt-1 w-64 rounded-control border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-xl z-50 overflow-hidden">
+          <div className="px-3 py-2 border-b border-gray-200 dark:border-zinc-700 text-caption text-gray-500 dark:text-zinc-400 font-medium">
             過去のレビュー
           </div>
           <div className="max-h-48 overflow-y-auto">

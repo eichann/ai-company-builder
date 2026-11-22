@@ -37,7 +37,7 @@ Object.assign(window, { electronAPI: { voiceInput: {
 
 function Pane({ id, label }: { id: string; label: string }) {
   const editor = useRef<VoiceEditor | null>({ captureInsertion: () => () => true })
-  return <section aria-label={label} className="flex-1 rounded-lg border" {...commandArea('chat', id)}>
+  return <section aria-label={label} className="flex-1 rounded-control border" {...commandArea('chat', id)}>
     <VoiceInputControl editor={editor} active pane={id} disabled={false} scope={id} onBusy={() => {}} />
     <textarea aria-label={`${label}の入力欄`} className="block w-full border-t p-3 text-sm bg-transparent" placeholder="メッセージを入力…" />
   </section>
@@ -56,8 +56,8 @@ export function Preview() {
   if (twoPanes) return <TwoPanes />
   return <main className="min-h-screen bg-white text-gray-900 dark:bg-zinc-900 dark:text-zinc-100">
     <div className="px-4 py-2 text-xs bg-amber-50 text-amber-900">表示確認用の人工データです。音声認識やマイクには接続しません。</div>
-    <nav className="flex flex-wrap gap-2 p-4 text-xs">{Object.entries(scenarios).map(([key, s]) => <a key={key} href={`?scenario=${key}`} className={`rounded border px-2 py-1 ${key === name ? 'font-bold underline' : ''}`}>{s.label}</a>)}</nav>
-    <section className="mx-4 max-w-xl rounded-lg border"><VoiceInputControl editor={editor} active pane="chat" disabled={false} scope="preview" onBusy={() => {}} /><div className="border-t p-3 text-sm opacity-50">メッセージを入力…</div></section>
+    <nav className="flex flex-wrap gap-2 p-4 text-xs">{Object.entries(scenarios).map(([key, s]) => <a key={key} href={`?scenario=${key}`} className={`rounded-small border px-2 py-1 ${key === name ? 'font-bold underline' : ''}`}>{s.label}</a>)}</nav>
+    <section className="mx-4 max-w-xl rounded-control border"><VoiceInputControl editor={editor} active pane="chat" disabled={false} scope="preview" onBusy={() => {}} /><div className="border-t p-3 text-sm opacity-50">メッセージを入力…</div></section>
   </main>
 }
 createRoot(document.getElementById('root')!).render(<Preview />)

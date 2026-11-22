@@ -36,7 +36,7 @@ function ReplyInput({
         onChange={(e) => setBody(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="返信... (⌘+Enter)"
-        className="w-full h-14 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-[11px] text-zinc-200 placeholder-zinc-500 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+        className="w-full h-14 px-2 py-1 rounded-small bg-zinc-900 border border-zinc-700 text-caption font-normal text-zinc-200 placeholder-zinc-500 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500/50"
       />
       <div className="flex justify-end gap-1 mt-1">
         <button onClick={onCancel} className="px-1.5 py-0.5 text-[10px] text-zinc-500 hover:text-zinc-300">
@@ -45,7 +45,7 @@ function ReplyInput({
         <button
           onClick={() => body.trim() && onSubmit(body.trim())}
           disabled={!body.trim()}
-          className={`px-1.5 py-0.5 text-[10px] rounded ${PRIMARY_ACTION}`}
+          className={`px-1.5 py-0.5 text-[10px] rounded-small ${PRIMARY_ACTION}`}
         >
           返信
         </button>
@@ -139,12 +139,12 @@ export function ReviewSidePanel({
                 <SeverityBadge severity={comment.severity} size="xs" />
                 <span className="text-[10px] text-gray-400 dark:text-zinc-500">{comment.authorName}</span>
                 {comment.orphaned && (
-                  <span className="text-[9px] px-1 py-px rounded bg-red-100 dark:bg-red-500/15 text-red-500 dark:text-red-400 font-medium">位置不明</span>
+                  <span className="text-[9px] px-1 py-px rounded-small bg-red-100 dark:bg-red-500/15 text-red-500 dark:text-red-400 font-medium">位置不明</span>
                 )}
               </div>
 
               {/* Quoted text */}
-              <div className={`text-[10px] font-mono leading-relaxed mb-1.5 px-2 py-1 rounded ${
+              <div className={`text-[10px] font-mono leading-relaxed mb-1.5 px-2 py-1 rounded-small ${
                 comment.orphaned
                   ? 'text-red-300 dark:text-red-400/40 line-through bg-red-50 dark:bg-red-500/5'
                   : 'text-gray-500 dark:text-zinc-500 bg-gray-100 dark:bg-zinc-800/50'
@@ -153,7 +153,7 @@ export function ReviewSidePanel({
               </div>
 
               {/* Body */}
-              <p className="text-[13px] text-gray-800 dark:text-zinc-200 whitespace-pre-wrap break-words leading-relaxed">{comment.body}</p>
+              <p className="text-body text-gray-800 dark:text-zinc-200 whitespace-pre-wrap break-words leading-relaxed">{comment.body}</p>
             </div>
 
             {/* Replies */}
@@ -162,7 +162,7 @@ export function ReviewSidePanel({
                 {comment.replies.map((reply) => (
                   <div key={reply.id} className="py-0.5">
                     <span className="text-[10px] font-medium text-gray-400 dark:text-zinc-500">{reply.authorName}</span>
-                    <p className="text-[11px] text-gray-600 dark:text-zinc-400 whitespace-pre-wrap break-words leading-relaxed">{reply.body}</p>
+                    <p className="text-caption font-normal text-gray-600 dark:text-zinc-400 whitespace-pre-wrap break-words leading-relaxed">{reply.body}</p>
                   </div>
                 ))}
               </div>
@@ -182,7 +182,7 @@ export function ReviewSidePanel({
             <div className="flex items-center gap-0.5 px-3 py-1.5 mt-0.5 border-t border-gray-100 dark:border-zinc-800/40">
               <button
                 onClick={(e) => { e.stopPropagation(); onToggleResolved(comment.id) }}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                className={`flex items-center gap-1 px-2 py-0.5 rounded-small text-[10px] font-medium transition-colors ${
                   comment.resolved
                     ? 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-400/10 hover:bg-green-100 dark:hover:bg-green-400/20'
                     : 'text-gray-400 dark:text-zinc-500 hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-400/10'
@@ -194,7 +194,7 @@ export function ReviewSidePanel({
               {onAddReply && (
                 <button
                   onClick={(e) => { e.stopPropagation(); setReplyingTo(replyingTo === comment.id ? null : comment.id) }}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-gray-400 dark:text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-400/10 transition-colors"
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-small text-[10px] font-medium text-gray-400 dark:text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-400/10 transition-colors"
                 >
                   <ArrowBendDownRight size={11} />
                   返信
@@ -203,7 +203,7 @@ export function ReviewSidePanel({
               {!readOnly && onDeleteComment && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onDeleteComment(comment.id) }}
-                  className="ml-auto p-1 rounded text-gray-300 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-400/10 transition-colors"
+                  className="ml-auto p-1 rounded-small text-gray-300 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-400/10 transition-colors"
                 >
                   <Trash size={11} />
                 </button>

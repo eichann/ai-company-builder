@@ -73,23 +73,23 @@ export function SummaryCard({ t, hub, q, bundleWord, consults, consultsOn, onCon
   const active = a.activeRecordId === t.recordId
   return (
     <div role="button" tabIndex={0} onClick={() => a.open(t, q)} onKeyDown={e => { if (e.key === 'Enter') a.open(t, q) }} data-summary-card={t.recordId} draggable onDragStart={e => startDrag(t, a, e)}
-      className={`w-full text-left rounded-lg border px-2.5 py-2 transition-colors cursor-pointer ${active ? 'border-selected-border bg-selected-bg' : 'border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:border-selected-border hover:bg-gray-50 dark:hover:bg-zinc-800/60'}`}>
+      className={`w-full text-left rounded-control border px-2.5 py-2 transition-colors cursor-pointer ${active ? 'border-selected-border bg-selected-bg' : 'border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:border-selected-border hover:bg-gray-50 dark:hover:bg-zinc-800/60'}`}>
       <span className="flex items-center gap-1.5">
         <FoundIcon t={t} size={16} />
-        <span className={`flex-1 min-w-0 truncate text-[13px] font-semibold ${t.finished ? 'text-gray-400' : 'text-gray-800 dark:text-zinc-100'}`}><Marked text={t.title} q={q} /></span>
-        <span className="shrink-0 rounded bg-gray-100 dark:bg-zinc-800 px-1.5 py-px text-[10px] text-gray-500 dark:text-zinc-400">{t.finished ? `${t.typeLabel}・終わった` : t.typeLabel}</span>
+        <span className={`flex-1 min-w-0 truncate text-body font-semibold ${t.finished ? 'text-gray-400' : 'text-gray-800 dark:text-zinc-100'}`}><Marked text={t.title} q={q} /></span>
+        <span className="shrink-0 rounded-small bg-gray-100 dark:bg-zinc-800 px-1.5 py-px text-[10px] text-gray-500 dark:text-zinc-400">{t.finished ? `${t.typeLabel}・終わった` : t.typeLabel}</span>
       </span>
       {counts.length > 0 && (
-        <span className="mt-1 block text-[11px] text-gray-600 dark:text-zinc-300">
+        <span className="mt-1 block text-caption font-normal text-gray-600 dark:text-zinc-300">
           {counts.map((c, i) => <span key={c.label}>{i > 0 && '・'}{c.label === '相談'
             ? <button type="button" data-card-consults aria-pressed={consultsOn} title="この相談だけを並べる"
                 onClick={e => { e.stopPropagation(); onConsults() }}
-                className={`rounded px-0.5 underline decoration-dotted underline-offset-2 ${consultsOn ? 'bg-selected-bg text-selected-text' : 'text-link hover:bg-selected-bg'}`}>{c.label} {c.n}</button>
+                className={`rounded-small px-0.5 underline decoration-dotted underline-offset-2 ${consultsOn ? 'bg-selected-bg text-selected-text' : 'text-link hover:bg-selected-bg'}`}>{c.label} {c.n}</button>
             : `${c.label} ${c.n}`}</span>)}
         </span>
       )}
       <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-gray-400 dark:text-zinc-500">
-        {t.department !== a.department && <span className="rounded bg-gray-100 dark:bg-zinc-800 px-1">{a.departmentName(t.department)}</span>}
+        {t.department !== a.department && <span className="rounded-small bg-gray-100 dark:bg-zinc-800 px-1">{a.departmentName(t.department)}</span>}
         <span className="truncate">{hub.nextMeetingAt ? `次の会議 ${dateWords(hub.nextMeetingAt)}` : hub.lastMovedAt ? `最後の動き ${shortDate(hub.lastMovedAt, a.today)}` : ''}</span>
         <span className="ml-auto inline-flex items-center gap-0.5 text-link shrink-0">開く<ArrowsOutSimple size={10} /></span>
       </span>
@@ -103,7 +103,7 @@ export function Section({ id, title, list, q, open, setOpen, a }: {
   if (list.length === 0) return null
   return (
     <section className="pt-2" aria-label={title} data-section={id}>
-      <h3 className="px-3 pt-1 pb-0.5 text-[11px] font-semibold text-gray-500 dark:text-zinc-400">{title}<span className="ml-1 font-normal text-gray-400">{list.length}</span></h3>
+      <h3 className="px-3 pt-1 pb-0.5 text-caption font-semibold text-gray-500 dark:text-zinc-400">{title}<span className="ml-1 font-normal text-gray-400">{list.length}</span></h3>
       {groupByKind(list).map(g => {
         const key = `${id}:${g.key}`
         const expanded = open.has(key)
@@ -116,7 +116,7 @@ export function Section({ id, title, list, q, open, setOpen, a }: {
             {(expanded ? g.items : g.items.slice(0, TOP)).map(t => <HitRow key={t.key} t={t} q={q} a={a} />)}
             {g.items.length > TOP && (
               <button type="button" data-more={key} onClick={() => { const n = new Set(open); if (expanded) n.delete(key); else n.add(key); setOpen(n) }}
-                className="flex items-center gap-0.5 pl-[34px] pr-3 py-0.5 text-[11px] text-link hover:underline">
+                className="flex items-center gap-0.5 pl-[34px] pr-3 py-0.5 text-caption font-normal text-link hover:underline">
                 {expanded ? <><CaretDown size={10} />少なくする</> : <><CaretRight size={10} />ほか {g.items.length - TOP}件</>}
               </button>
             )}
@@ -140,17 +140,17 @@ export function HitRow({ t, q, a }: { t: FoundThing; q: string; a: FoundRowActio
         <span className="pt-px"><FoundIcon t={t} /></span>
         <span className="flex-1 min-w-0">
           <span className="flex items-center gap-1.5">
-            <span className={`flex-1 min-w-0 truncate text-[12px] ${t.finished ? 'text-gray-400 line-through' : 'text-gray-800 dark:text-zinc-200'}`} title={t.path ?? t.title}>
+            <span className={`flex-1 min-w-0 truncate text-small ${t.finished ? 'text-gray-400 line-through' : 'text-gray-800 dark:text-zinc-200'}`} title={t.path ?? t.title}>
               <Marked text={t.title} q={q} />
             </span>
             {t.department !== a.department && (
-              <span className="shrink-0 rounded bg-gray-100 dark:bg-zinc-800 px-1 text-[10px] text-gray-500 dark:text-zinc-400" data-other-department>{a.departmentName(t.department)}</span>
+              <span className="shrink-0 rounded-small bg-gray-100 dark:bg-zinc-800 px-1 text-[10px] text-gray-500 dark:text-zinc-400" data-other-department>{a.departmentName(t.department)}</span>
             )}
             {when && <span className="shrink-0 text-[10px] text-gray-400 tabular-nums">{when}</span>}
           </span>
           {t.why && <span className="flex items-center gap-1 text-[10px] text-link min-w-0" data-why><LinkSimple size={10} className="shrink-0" /><span className="truncate"><Marked text={t.why} q={q} /></span></span>}
           {sentence
-            ? <span className="block text-[11px] leading-[16px] text-gray-500 dark:text-zinc-400 line-clamp-2"><Marked text={aroundMatch(sentence, q)} q={q} /></span>
+            ? <span className="block text-caption font-normal leading-[16px] text-gray-500 dark:text-zinc-400 line-clamp-2"><Marked text={aroundMatch(sentence, q)} q={q} /></span>
             : !t.why && where && <span className="block truncate text-[10px] text-gray-400 dark:text-zinc-500">{where}</span>}
         </span>
       </button>
@@ -167,7 +167,7 @@ function ConsultsUnder({ t, a }: { t: FoundThing; a: FoundRowActions }) {
   return (
     <div className="pl-[34px] pr-3 pb-1" data-consults-under={t.recordId}>
       <button type="button" aria-expanded={shown} onClick={() => setShown(s => !s)}
-        className="inline-flex items-center gap-1 rounded px-1 -ml-1 text-[11px] text-gray-500 dark:text-zinc-400 hover:text-link hover:bg-selected-bg">
+        className="inline-flex items-center gap-1 rounded-small px-1 -ml-1 text-caption font-normal text-gray-500 dark:text-zinc-400 hover:text-link hover:bg-selected-bg">
         {shown ? <CaretDown size={10} /> : <CaretRight size={10} />}<ThingIcon kind="consultation" size={11} />AIへの相談 {list.length}
       </button>
       {shown && (
@@ -175,7 +175,7 @@ function ConsultsUnder({ t, a }: { t: FoundThing; a: FoundRowActions }) {
           {list.map(c => (
             <button key={c.id} type="button" onClick={() => a.openConsultation(c.id)} data-consult={c.id} draggable
               onDragStart={e => startConsultationDrag(e.dataTransfer, { sessionId: c.id, title: c.title, ...(t.recordId ? { topicRecordId: t.recordId } : {}) })}
-              className="w-full flex items-center gap-1.5 pl-2 pr-1 py-0.5 text-left text-[11px] text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-white/[0.04] rounded-r">
+              className="w-full flex items-center gap-1.5 pl-2 pr-1 py-0.5 text-left text-caption font-normal text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-white/[0.04] rounded-r-small">
               <span className="flex-1 min-w-0 truncate">{c.title}</span>
               <span className="shrink-0 text-[10px] text-gray-400 tabular-nums">{shortDate(c.updatedAt, a.today)}</span>
             </button>

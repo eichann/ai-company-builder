@@ -73,17 +73,17 @@ export const TreeRow = memo(function TreeRow({
         <span className="truncate" title={entry.name}>{entry.name}</span>
         <span className="ml-auto flex flex-shrink-0 items-center gap-1 pl-2">
           {downloading ? (
-            <span className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-zinc-400">
+            <span className="flex items-center gap-1 text-caption font-normal text-gray-500 dark:text-zinc-400">
               <SpinnerGap size={11} className="animate-spin" />ダウンロード中…
             </span>
           ) : (
             <>
-              <span className="text-[11px] text-gray-400 dark:text-zinc-500 group-hover:hidden group-focus-within:hidden">未ダウンロード</span>
+              <span className="text-caption font-normal text-gray-400 dark:text-zinc-500 group-hover:hidden group-focus-within:hidden">未ダウンロード</span>
               <button
                 type="button"
                 tabIndex={-1}
                 onClick={e => { e.stopPropagation(); actions.current.download(entry) }}
-                className="hidden items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-link hover:bg-selected-bg group-hover:flex group-focus-within:flex"
+                className="hidden items-center gap-1 rounded-small px-1.5 py-0.5 text-caption font-medium text-link hover:bg-selected-bg group-hover:flex group-focus-within:flex"
               >
                 <CloudArrowDown size={12} />ダウンロード
               </button>
@@ -158,7 +158,7 @@ export const TreeRow = memo(function TreeRow({
           onDoubleClick={e => e.stopPropagation()}
           title="大きすぎて共有されていません（押すと理由とできることを表示）"
           aria-label={`${entry.name}は大きすぎて共有されていません`}
-          className="flex flex-shrink-0 items-center gap-0.5 rounded px-1 text-[10px] font-medium text-amber-700 hover:bg-amber-500/15 dark:text-amber-300"
+          className="flex flex-shrink-0 items-center gap-0.5 rounded-small px-1 text-[10px] font-medium text-amber-700 hover:bg-amber-500/15 dark:text-amber-300"
           data-too-large
         >
           <CloudSlash size={12} />共有されていません
@@ -167,7 +167,7 @@ export const TreeRow = memo(function TreeRow({
       {/* 依頼バッジ: UIからの依頼ボタンは非表示にしたが、
           Slack通知連携で review-request を再利用予定のため残してある */}
       {review === 'request' && (
-        <span className="flex-shrink-0 ml-auto text-[9px] px-1 rounded bg-amber-500/20 text-amber-400" title="レビュー依頼あり">依頼</span>
+        <span className="flex-shrink-0 ml-auto text-[9px] px-1 rounded-small bg-amber-500/20 text-amber-400" title="レビュー依頼あり">依頼</span>
       )}
       {review === 'unseen' && (
         <NewDot label="新しいレビューあり" className="ml-auto" />

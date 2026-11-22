@@ -53,7 +53,7 @@ export function PlacePicker({
   ]
 
   return (
-    <div className="overflow-hidden rounded-lg border">
+    <div className="overflow-hidden rounded-control border">
       <nav aria-label="作成する場所" className="flex min-h-10 flex-wrap items-center gap-0.5 border-b bg-muted/40 px-2 py-1.5 text-sm">
         {roots.length > 1 && (
           <>
@@ -61,7 +61,7 @@ export function PlacePicker({
               type="button"
               disabled={disabled}
               onClick={() => onChange(null)}
-              className="rounded px-1.5 py-0.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="rounded-small px-1.5 py-0.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               部署
             </button>
@@ -79,7 +79,7 @@ export function PlacePicker({
                   aria-current={last ? 'location' : undefined}
                   onClick={() => onChange(c.path)}
                   className={cn(
-                    'max-w-48 truncate rounded px-1.5 py-0.5 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                    'max-w-48 truncate rounded-small px-1.5 py-0.5 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
                     last ? 'font-medium' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                   )}
                 >

@@ -11,9 +11,9 @@ import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { requestMeetingReading, setMeetingAutoSeries, skipMeetingReading, undoMeetingSkip } from '../api'
 import { foldMeetings, madeWords, meetingBanner, meetingRowWords, skippableMeetings } from '../model'
 
-const LINK = 'text-[11px] text-gray-500 underline-offset-2 hover:text-link hover:underline dark:text-zinc-400'
-const SHORT = `${MAIN_BUTTON} shrink-0 !px-1.5 !py-0.5 !text-[11px]`
-const QUIET = `${SMALL_BUTTON} shrink-0 !px-1.5 !py-0.5 !text-[11px]`
+const LINK = 'text-caption font-normal text-gray-500 underline-offset-2 hover:text-link hover:underline dark:text-zinc-400'
+const SHORT = `${MAIN_BUTTON} shrink-0 !px-1.5 !py-0.5 !text-caption`
+const QUIET = `${SMALL_BUTTON} shrink-0 !px-1.5 !py-0.5 !text-caption !font-normal`
 /** `busy` while ［まとめて読まない］ goes through the folded meetings. */
 const BULK = 'bulk'
 
@@ -152,7 +152,7 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
     const line = banner.kind === 'read' ? `読み終わりました ${m.title}：${madeWords(m.made, decisionsOn)}` : words
     return (
       <div key={m.recordId} data-banner={m.recordId} className="px-1 py-0.5">
-        <div className="flex items-center gap-1.5 text-[12px] leading-5">
+        <div className="flex items-center gap-1.5 text-small leading-5">
           {banner.kind === 'read'
             ? <CheckCircle size={13} weight="fill" className="shrink-0 text-emerald-600 dark:text-emerald-400" />
             : banner.kind === 'reading' && !banner.problem
@@ -160,24 +160,24 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
               : <NotePencil size={13} weight="duotone" className="shrink-0 text-sky-600 dark:text-sky-400" />}
           <span title={line} className="min-w-0 flex-1 truncate text-gray-800 dark:text-zinc-100">{line}</span>
           {banner.kind === 'arrived' && <>
-            {banner.failedBefore && <span title="前回は AI が読めませんでした。もう一度読ませられます" className="shrink-0 text-[10.5px] text-gray-500 dark:text-zinc-400">前回読めず</span>}
+            {banner.failedBefore && <span title="前回は AI が読めませんでした。もう一度読ませられます" className="shrink-0 text-caption font-normal text-gray-500 dark:text-zinc-400">前回読めず</span>}
             <button type="button" disabled={locked(m.recordId)} title={decisionsOn ? 'AI に読ませると、決めたこととやることの案を作ります' : 'AI に読ませると、やることの案を作ります'} onClick={() => void read(m)} className={SHORT}>AI に読ませる</button>
             <button type="button" disabled={locked(m.recordId)} onClick={() => void skip(m)} className={QUIET}>読まない</button>
           </>}
           {banner.kind === 'reading' && <>
-            {!banner.problem && <span className="min-w-0 shrink truncate text-[11px] text-ai-text">{banner.auto ? '自動で読む定例です。AI が読んでいます…' : banner.reader ? `${banner.reader}さんの AI が読んでいます…` : 'AI が読んでいます…'}</span>}
+            {!banner.problem && <span className="min-w-0 shrink truncate text-caption font-normal text-ai-text">{banner.auto ? '自動で読む定例です。AI が読んでいます…' : banner.reader ? `${banner.reader}さんの AI が読んでいます…` : 'AI が読んでいます…'}</span>}
             {banner.problem?.canRetry && <button type="button" onClick={() => aiTurns?.retry(m.recordId)} className={QUIET}>もう一度</button>}
             {banner.canSkip && <button type="button" disabled={locked(m.recordId)} onClick={() => void skip(m)} className={QUIET}>読まない</button>}
           </>}
           {banner.kind === 'read' && <>
             <button type="button" onClick={() => { close(m.recordId); onView({ id: m.recordId, title: m.title }) }} className={SHORT}>見る</button>
-            <button type="button" aria-label="閉じる" onClick={() => close(m.recordId)} className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-zinc-800"><X size={11} /></button>
+            <button type="button" aria-label="閉じる" onClick={() => close(m.recordId)} className="shrink-0 rounded-small p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-zinc-800"><X size={11} /></button>
           </>}
-          {banner.kind === 'skipped' && <span className="min-w-0 shrink truncate text-[11px] text-gray-500 dark:text-zinc-400">{banner.by}さんが読まないにしました</span>}
+          {banner.kind === 'skipped' && <span className="min-w-0 shrink truncate text-caption font-normal text-gray-500 dark:text-zinc-400">{banner.by}さんが読まないにしました</span>}
         </div>
-        {banner.kind === 'reading' && banner.problem && <p className="pl-5 text-[11px] text-gray-600 dark:text-zinc-300">{banner.problem.reason}</p>}
+        {banner.kind === 'reading' && banner.problem && <p className="pl-5 text-caption font-normal text-gray-600 dark:text-zinc-300">{banner.problem.reason}</p>}
         {banner.kind === 'reading' && banner.auto && <p className="pl-5"><button type="button" onClick={() => void stopAuto(m)} className={LINK}>次から自動で読まない</button></p>}
-        {errors[m.recordId] && <p role="alert" className="pl-5 text-[11px] leading-snug text-gray-600 dark:text-zinc-300">{errors[m.recordId]}</p>}
+        {errors[m.recordId] && <p role="alert" className="pl-5 text-caption font-normal leading-snug text-gray-600 dark:text-zinc-300">{errors[m.recordId]}</p>}
       </div>
     )
   }
@@ -186,7 +186,7 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
     {rows.length > 0 && (
       // A block of its own height at most: the list below keeps the rest of the pane, however many arrive.
       <div className="max-h-[45%] shrink-0 overflow-y-auto border-b border-gray-200 bg-sky-50/50 px-2 py-1 dark:border-zinc-800 dark:bg-sky-950/20" role="region" aria-label="議事録が届きました">
-        <p className="px-1 text-[11px] font-semibold text-gray-600 dark:text-zinc-300">議事録が届きました</p>
+        <p className="px-1 text-caption font-semibold text-gray-600 dark:text-zinc-300">議事録が届きました</p>
         {shown.map(row)}
         {folded.length > 0 && (
           <div className="flex items-center gap-2 px-1 pt-0.5">
@@ -200,7 +200,7 @@ export function MeetingBanners({ companyId, items, aiTurns, onView, onChanged, n
       </div>
     )}
     {toast && (
-      <div role="status" className="fixed bottom-4 left-4 z-[60] flex items-center gap-3 rounded-lg bg-gray-900 px-3.5 py-2 text-[12.5px] text-white shadow-lg dark:bg-zinc-700">
+      <div role="status" className="fixed bottom-4 left-4 z-[60] flex items-center gap-3 rounded-control bg-gray-900 px-3.5 py-2 text-small text-white shadow-lg dark:bg-zinc-700">
         {toast.text}
         {toast.undo && <button type="button" onClick={() => { toast.undo?.(); setToast(null) }} className="font-semibold text-sky-300 hover:underline">元に戻す</button>}
       </div>

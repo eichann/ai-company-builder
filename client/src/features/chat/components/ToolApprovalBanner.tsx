@@ -50,13 +50,13 @@ export function ToolApprovalBanner({
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={() => onRespond(request.toolUseId, false)}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-zinc-600 text-gray-600 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors"
+            className="px-3 py-1.5 text-xs font-medium rounded-control border border-gray-300 dark:border-zinc-600 text-gray-600 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors"
           >
             {t('chat.toolApprovalDeny')}
           </button>
           <button
             onClick={() => onRespond(request.toolUseId, true)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${PRIMARY_ACTION}`}
+            className={`px-3 py-1.5 text-xs font-medium rounded-control transition-colors ${PRIMARY_ACTION}`}
           >
             {t('chat.toolApprovalAllow')}
           </button>

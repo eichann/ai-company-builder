@@ -9,7 +9,7 @@ import { useCompany } from '@/lib/company-context'
 export function AdvancedCrumb({ aiSafety = false }: { aiSafety?: boolean }) {
   const { companyId } = useCompany()
   const base = `/companies/${companyId}/advanced`
-  const link = 'rounded underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50'
+  const link = 'rounded-small underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50'
   return (
     <nav aria-label="いまの場所" className="mb-3 flex items-center gap-1 text-xs text-muted-foreground">
       <CaretLeft size={12} />

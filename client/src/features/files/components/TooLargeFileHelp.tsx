@@ -33,19 +33,19 @@ export function TooLargeFileHelp({ name, onClose }: { name: string; onClose: () 
             <X size={14} />
           </button>
         </div>
-        <div className="space-y-4 overflow-y-auto px-5 py-4 text-[13px] leading-relaxed text-zinc-700 dark:text-zinc-300">
+        <div className="space-y-4 overflow-y-auto px-5 py-4 text-body leading-relaxed text-zinc-700 dark:text-zinc-300">
           <p>100MB をこえるファイルは、同期してもほかの人には届きません。このファイルはこのPCにだけあり、消えたわけではありません。</p>
           <div>
             <p className="font-medium text-zinc-900 dark:text-zinc-100">ほかの人にも見てもらうには</p>
             <ol aria-label="ほかの人にも見てもらうには" className="mt-2 space-y-3">
               {NEXT_STEPS.map((step, i) => (
                 <li key={step.title} className="flex gap-3">
-                  <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-[11px] font-medium tabular-nums text-zinc-500 dark:bg-white/[0.08] dark:text-zinc-400">
+                  <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-caption font-medium tabular-nums text-zinc-500 dark:bg-white/[0.08] dark:text-zinc-400">
                     {i + 1}
                   </span>
                   <div className="min-w-0">
                     <p className="font-medium text-zinc-900 dark:text-zinc-100">{step.title}</p>
-                    <p className="mt-0.5 text-[12px] text-zinc-600 dark:text-zinc-400">{step.body}</p>
+                    <p className="mt-0.5 text-small text-zinc-600 dark:text-zinc-400">{step.body}</p>
                   </div>
                 </li>
               ))}

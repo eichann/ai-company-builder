@@ -19,7 +19,7 @@ export function SyncNotification({ notice, onDismiss, onShowBackups }: Props) {
   return (
     <div className="fixed bottom-4 right-4 z-50 max-w-md animate-in slide-in-from-bottom-2">
       <div className={`
-        rounded-lg shadow-lg border p-4
+        rounded-control shadow-lg border p-4
         ${notice.type === 'success'
           ? 'bg-success-bg border-success-border text-success-text'
           : notice.type === 'warning'

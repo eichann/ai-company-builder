@@ -181,7 +181,7 @@ export function PermissionsView() {
 
       <FolderTabs current="edit" />
 
-      <div className="mb-6 flex gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-sm">
+      <div className="mb-6 flex gap-3 rounded-card border bg-muted/40 px-4 py-3 text-sm">
         <Info size={18} className="mt-0.5 shrink-0 text-primary" />
         <div className="space-y-1">
           <p>
@@ -194,7 +194,7 @@ export function PermissionsView() {
 
       {permissions.loading ? (
         <div className="space-y-4">
-          <Skeleton className="h-24 rounded-xl" />
+          <Skeleton className="h-24 rounded-card" />
           <ListSkeleton rows={4} />
         </div>
       ) : isForbidden(permissions.error) ? (
@@ -221,7 +221,7 @@ export function PermissionsView() {
             <Card className="flex-row items-center gap-4 px-5 py-5">
               <span
                 className={cn(
-                  'flex size-11 shrink-0 items-center justify-center rounded-xl',
+                  'flex size-11 shrink-0 items-center justify-center rounded-card',
                   companyScope.effectiveSummary === 'everyone-rw' ? 'bg-success/10 text-success' : 'bg-brand/10 text-brand'
                 )}
               >
@@ -352,7 +352,7 @@ function TreeRow({
             onClick={onToggle}
             tabIndex={-1}
             aria-label={expanded ? `${name} を折りたたむ` : `${name} を展開`}
-            className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="flex size-5 shrink-0 items-center justify-center rounded-small text-muted-foreground outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             {expanded ? <CaretDown size={12} weight="bold" /> : <CaretRight size={12} weight="bold" />}
           </button>

@@ -66,7 +66,7 @@ export function TidiedTabsDialog({ groups, onClose: close, onRestore, onRemoveIt
         </div>
         <div className="flex-1 overflow-auto px-2 py-2">
           {days.length === 0 && (
-            <p className="px-3 py-6 text-center text-[12.5px] leading-relaxed text-text-muted">
+            <p className="px-3 py-6 text-center text-small leading-relaxed text-text-muted">
               片づけたタブはまだありません。<br />タブの右の「…」から［タブを片づける］を押すと、固定したタブ以外がここにしまわれます。
             </p>
           )}
@@ -75,8 +75,8 @@ export function TidiedTabsDialog({ groups, onClose: close, onRestore, onRemoveIt
             return (
               <section key={day} data-tidied-day={day} className="mb-2 rounded-control border border-[color:var(--color-border)]">
                 <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--color-border)] px-3 py-2">
-                  <h3 className="text-[12.5px] font-semibold text-text">{dayLabel(day)}</h3>
-                  <span className="text-[11px] text-text-subtle">{items.length} 件</span>
+                  <h3 className="text-small font-semibold text-text">{dayLabel(day)}</h3>
+                  <span className="text-caption font-normal text-text-subtle">{items.length} 件</span>
                   <span className="ml-auto flex gap-1.5">
                     <Button size="sm" onClick={() => { void restore(items) }}>全部開き直す</Button>
                     <Button size="sm" variant="ghost" onClick={() => onRemoveDay(day)}>この日の分を消す</Button>
@@ -84,7 +84,7 @@ export function TidiedTabsDialog({ groups, onClose: close, onRestore, onRemoveIt
                 </div>
                 {tidies.map(g => (
                   <div key={g.id} className="px-1.5 pb-1">
-                    <div className="px-1.5 pt-1.5 text-[10.5px] text-text-subtle">{time(g.at)} に{g.auto ? '自動で' : ''}片づけ{[...new Set(g.items.flatMap(i => i.tabGroup ? [i.tabGroup.name] : []))].map(name => (
+                    <div className="px-1.5 pt-1.5 text-caption font-normal text-text-subtle">{time(g.at)} に{g.auto ? '自動で' : ''}片づけ{[...new Set(g.items.flatMap(i => i.tabGroup ? [i.tabGroup.name] : []))].map(name => (
                       <span key={name} data-tidied-group={name}>（まとまり「{name}」：開き直すとまとまりに戻ります）</span>
                     ))}</div>
                     <ul>
@@ -97,10 +97,10 @@ export function TidiedTabsDialog({ groups, onClose: close, onRestore, onRemoveIt
                               className={`flex min-w-0 flex-1 items-center gap-2 text-left ${gone ? 'cursor-default opacity-disabled' : ''}`}>
                               {FileIc ? <FileIc size={14} className="flex-shrink-0" /> : i.kind === 'record' && i.look ? <RecordIcon record={i.look} size={14} /> : <span className="w-3.5" />}
                               <span className="min-w-0 flex-1">
-                                <span className={`block truncate text-[12.5px] text-text ${gone ? 'line-through' : ''}`}>{i.title}</span>
-                                {i.kind === 'file' && i.path !== i.title && <span className="block truncate text-[10.5px] text-text-muted">{i.path}</span>}
+                                <span className={`block truncate text-small text-text ${gone ? 'line-through' : ''}`}>{i.title}</span>
+                                {i.kind === 'file' && i.path !== i.title && <span className="block truncate text-caption font-normal text-text-muted">{i.path}</span>}
                               </span>
-                              <span className="shrink-0 text-[10.5px] text-text-subtle">{gone ? '見つかりません' : itemKindName(i)}</span>
+                              <span className="shrink-0 text-caption font-normal text-text-subtle">{gone ? '見つかりません' : itemKindName(i)}</span>
                             </button>
                             <button type="button" aria-label={`${i.title} を一覧から消す`} title="一覧から消す" onClick={() => onRemoveItems([i.id])}
                               className={`rounded-small p-0.5 text-text-subtle hover:bg-surface-sunken hover:text-text ${gone ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'}`}>
@@ -116,7 +116,7 @@ export function TidiedTabsDialog({ groups, onClose: close, onRestore, onRemoveIt
             )
           })}
         </div>
-        <div className="border-t border-[color:var(--color-border)] px-4 py-1.5 text-[10.5px] text-text-subtle">
+        <div className="border-t border-[color:var(--color-border)] px-4 py-1.5 text-caption font-normal text-text-subtle">
           この Mac にだけ残ります。直近 {TIDY_LIMITS.groups} 回・{TIDY_LIMITS.items} 件まで（それより古いものは自動で消えます）。開き直したものは一覧から外れます。
         </div>
       </div>

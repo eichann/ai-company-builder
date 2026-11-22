@@ -17,15 +17,15 @@ export function PromptSuggestionSettings() {
       <div className="flex items-start justify-between gap-6">
         <div className="min-w-0">
           <SubHeading>次の質問の候補を表示する</SubHeading>
-          <p id={descriptionId} className="mt-1 text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+          <p id={descriptionId} className="mt-1 text-body leading-relaxed text-zinc-500 dark:text-zinc-400">
             AIの返答のあと、次に送りそうな指示を入力欄に薄く表示します。→キーまたはTabキーで入力欄に入れ、Escキーで消せます。
             候補はClaude Codeが返答ごとに作ります（会話の2回目の返答から。思いつかないときは出ません）。そのぶんClaudeの利用枠を少し使うので、不要ならオフにしてください。
           </p>
         </div>
         <Switch on={enabled} onToggle={toggle} label="次の質問の候補を表示する" describedBy={descriptionId} />
       </div>
-      <p className="text-[12px] text-zinc-500 dark:text-zinc-400">このPCに自動保存されます。Claude Code接続のときだけ表示されます（Codex・APIキー接続では出ません）。</p>
-      {error && <p role="alert" className="text-[13px] text-amber-600 dark:text-amber-400">{error}</p>}
+      <p className="text-small text-zinc-500 dark:text-zinc-400">このPCに自動保存されます。Claude Code接続のときだけ表示されます（Codex・APIキー接続では出ません）。</p>
+      {error && <p role="alert" className="text-body text-amber-600 dark:text-amber-400">{error}</p>}
     </div>
   )
 }

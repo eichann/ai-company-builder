@@ -30,7 +30,7 @@ export function VoicePromptSettings() {
   }, [])
 
   if (saved === null) {
-    return <div className="flex items-center gap-2 text-[13px] text-zinc-500 dark:text-zinc-400"><SpinnerGap size={14} className="animate-spin" />読み込み中…</div>
+    return <div className="flex items-center gap-2 text-body text-zinc-500 dark:text-zinc-400"><SpinnerGap size={14} className="animate-spin" />読み込み中…</div>
   }
 
   const tooLong = draft.length > VOICE_INSTRUCTIONS_MAX_LENGTH
@@ -60,16 +60,16 @@ export function VoicePromptSettings() {
     <div className="space-y-4">
       <div>
         <SubHeading>整え方の指示</SubHeading>
-        <p className="mt-1 text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+        <p className="mt-1 text-body leading-relaxed text-zinc-500 dark:text-zinc-400">
           話した内容をAIが文章に整えるときの指示です。口癖の消し方や箇条書きのルールを、自分の話し方に合わせて変えられます。
         </p>
       </div>
 
-      <div data-voice-fixed className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-white/10 dark:bg-white/[0.02]">
-        <p className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
+      <div data-voice-fixed className="rounded-control border border-dashed border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-white/10 dark:bg-white/[0.02]">
+        <p className="flex items-center gap-1.5 text-caption font-medium text-zinc-400 dark:text-zinc-500">
           <LockSimple size={12} weight="bold" />この部分は変更できません
         </p>
-        <p className="mt-1.5 select-text text-[13px] leading-relaxed text-zinc-400 dark:text-zinc-500">{VOICE_FIXED_PROMPT}</p>
+        <p className="mt-1.5 select-text text-body leading-relaxed text-zinc-400 dark:text-zinc-500">{VOICE_FIXED_PROMPT}</p>
       </div>
 
       <div>
@@ -81,7 +81,7 @@ export function VoicePromptSettings() {
           aria-describedby="voice-prompt-count"
           spellCheck={false}
           placeholder="例: 「えー」「あの」などの口癖は消してください。"
-          className="h-72 w-full resize-y rounded-lg border border-zinc-200 bg-white px-4 py-3 text-[13px] leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500"
+          className="h-72 w-full resize-y rounded-control border border-zinc-200 bg-white px-4 py-3 text-body leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500"
         />
         <div className="mt-1.5 flex items-center justify-between gap-4 text-xs">
           <span className="text-zinc-500 dark:text-zinc-400">{dirty ? '未保存の変更があります' : isDefaultDraft ? '初期値を使用中' : '編集した指示を使用中'}</span>
@@ -94,7 +94,7 @@ export function VoicePromptSettings() {
       {!draft.trim() && (
         <Callout tone="info">指示が空のときは、上の変更できない部分だけで整えます。口癖の削除や箇条書きの指示は使われません。</Callout>
       )}
-      {error && <p role="alert" className="text-[13px] text-red-600 dark:text-red-300">{error}</p>}
+      {error && <p role="alert" className="text-body text-red-600 dark:text-red-300">{error}</p>}
 
       <div className="flex items-center justify-between gap-4">
         <p className="text-xs text-zinc-500 dark:text-zinc-400">このPCにだけ保存され、チームとは同期されません。次の音声入力から反映されます。</p>

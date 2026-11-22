@@ -16,7 +16,7 @@ export function FileConnections({ companyId, companyPath }: Props) {
   if (result === null || !result.success) {
     return (
       <section aria-label="つながっているもの">
-        <p className="text-[11px] text-gray-400">{result === null ? '読み込んでいます' : result.error}</p>
+        <p className="text-caption font-normal text-gray-400">{result === null ? '読み込んでいます' : result.error}</p>
       </section>
     )
   }

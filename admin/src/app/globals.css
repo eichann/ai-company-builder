@@ -40,6 +40,12 @@
   html.dark {
     color-scheme: dark;
   }
+  /* Native check boxes and radio buttons are "on" in the primary colour, as in the app
+     (design-system.md "Sizes, type and corners (P3, done)"). */
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--color-primary);
+  }
   body {
     @apply bg-background text-foreground font-sans antialiased;
     line-height: 1.6;

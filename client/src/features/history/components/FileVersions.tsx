@@ -38,20 +38,20 @@ export function FileVersions({ rootPath, companyPath }: Props) {
 
   return (
     <section aria-label="前の版">
-      <h3 className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-700 dark:text-zinc-200 mb-1.5">
+      <h3 className="flex items-center gap-1.5 text-small font-semibold text-gray-700 dark:text-zinc-200 mb-1.5">
         <ClockCounterClockwise size={13} />前の版
       </h3>
       {versions === null ? (
-        <p className="flex items-center gap-1.5 text-[11px] text-gray-400"><CircleNotch size={11} className="animate-spin" />読み込み中...</p>
+        <p className="flex items-center gap-1.5 text-caption font-normal text-gray-400"><CircleNotch size={11} className="animate-spin" />読み込み中...</p>
       ) : versions.length === 0 ? (
-        <p className="text-[11px] text-gray-400 dark:text-zinc-500">まだ共有された版はありません</p>
+        <p className="text-caption font-normal text-gray-400 dark:text-zinc-500">まだ共有された版はありません</p>
       ) : (
         <ul className="space-y-0.5">
           {versions.map(v => (
             <li key={v.hash}>
               <button type="button" onClick={() => setShown(v)} className="w-full text-left rounded-md px-2 py-1 hover:bg-gray-100 dark:hover:bg-zinc-800">
-                <span className="block text-[12px] text-gray-800 dark:text-zinc-200 truncate">{v.message.split('\n')[0]}</span>
-                <span className="block text-[10.5px] text-gray-500 dark:text-zinc-400">{when(v.date)}・{v.author}</span>
+                <span className="block text-small text-gray-800 dark:text-zinc-200 truncate">{v.message.split('\n')[0]}</span>
+                <span className="block text-caption font-normal text-gray-500 dark:text-zinc-400">{when(v.date)}・{v.author}</span>
               </button>
             </li>
           ))}

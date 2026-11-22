@@ -35,9 +35,9 @@ export function consultationLinks(consultations: readonly LinkedConsultation[], 
         <div className="flex items-center gap-1 pt-0.5">
           {rows.length === 0
             ? <button type="button" onClick={() => onConsult(false)} title="AI に相談を始めます"
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] font-medium text-link hover:bg-selected-bg"><ChatCircleDots size={13} />相談する</button>
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-small font-medium text-link hover:bg-selected-bg"><ChatCircleDots size={13} />相談する</button>
             : <button type="button" onClick={() => onConsult(true)} title="これまでの相談とは別に、新しく相談を始めます"
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-link dark:text-zinc-400 dark:hover:bg-zinc-800"><Plus size={10} />新しい相談</button>}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-small text-gray-500 hover:bg-gray-100 hover:text-link dark:text-zinc-400 dark:hover:bg-zinc-800"><Plus size={10} />新しい相談</button>}
         </div>
       ),
     },

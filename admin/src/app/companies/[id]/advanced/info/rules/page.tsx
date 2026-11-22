@@ -117,7 +117,7 @@ export default function SecurityPage() {
             {BUILT_IN_RULES.map((r) => (
               <Card key={r.title} className="gap-2 px-5 py-4">
                 <div className="flex items-center gap-2.5">
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-control bg-muted text-foreground">
                     <r.icon size={18} />
                   </span>
                   <h3 className="text-sm font-semibold">{r.title}</h3>

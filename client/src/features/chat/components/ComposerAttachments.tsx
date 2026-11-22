@@ -17,7 +17,7 @@ function ImagePreview({ file, onRemove }: { file: File; onRemove: () => void }) 
       <img
         src={url}
         alt={file.name}
-        className="w-16 h-16 object-cover rounded-lg border border-border overflow-hidden"
+        className="w-16 h-16 object-cover rounded-control border border-border overflow-hidden"
       />
       <button
         onClick={onRemove}

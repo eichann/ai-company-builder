@@ -34,35 +34,35 @@ export function BundleChooser({ companyId, meetingTitle, word, onChoose, onNoBun
   }
   return (
     <Dialog onClose={onClose} label={words.question} size="sm" padded={false} className="overflow-hidden">
-        <div className="flex items-center gap-2 px-3 pb-1 pt-2.5 text-[12px]">
+        <div className="flex items-center gap-2 px-3 pb-1 pt-2.5 text-small">
           <span className="min-w-0 flex-1 truncate font-semibold">「{meetingTitle}」は{words.question}</span>
-          <button type="button" onClick={onClose} aria-label="閉じる" className="rounded p-0.5 hover:bg-gray-100 dark:hover:bg-zinc-700"><X size={12} /></button>
+          <button type="button" onClick={onClose} aria-label="閉じる" className="rounded-small p-0.5 hover:bg-gray-100 dark:hover:bg-zinc-700"><X size={12} /></button>
         </div>
         <div className="flex items-center gap-1.5 border-b border-gray-100 px-3 py-1.5 dark:border-zinc-700">
           <MagnifyingGlass size={12} className="text-gray-400" />
-          <input autoFocus value={q} onChange={e => setQ(e.target.value)} aria-label={`${word}を探す`} placeholder="名前で探す" className="flex-1 bg-transparent text-[12px] outline-none" />
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} aria-label={`${word}を探す`} placeholder="名前で探す" className="flex-1 bg-transparent text-small outline-none" />
         </div>
         <ul className="max-h-[280px] overflow-y-auto p-1">
-          {choices === null && <li className="px-2 py-2 text-[12px] text-gray-400">読み込んでいます</li>}
-          {choices && !choices.success && <li role="alert" className="px-2 py-2 text-[12px] text-gray-500">{choices.error}</li>}
-          {choices?.success && shown.length === 0 && <li className="px-2 py-2 text-[12px] text-gray-500">見つかりません。</li>}
+          {choices === null && <li className="px-2 py-2 text-small text-gray-400">読み込んでいます</li>}
+          {choices && !choices.success && <li role="alert" className="px-2 py-2 text-small text-gray-500">{choices.error}</li>}
+          {choices?.success && shown.length === 0 && <li className="px-2 py-2 text-small text-gray-500">見つかりません。</li>}
           {shown.map(b => (
             <li key={b.id}>
               <button type="button" disabled={busy} onClick={() => void choose(b)} className="w-full rounded-md px-2 py-1 text-left hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-zinc-700">
-                <span className="block truncate text-[12.5px]">{b.title}</span>
-                <span className="block text-[10.5px] text-gray-500">{b.typeLabel}</span>
+                <span className="block truncate text-small">{b.title}</span>
+                <span className="block text-caption font-normal text-gray-500">{b.typeLabel}</span>
               </button>
             </li>
           ))}
         </ul>
         {onNoBundle && (
           <button type="button" disabled={busy} onClick={() => void choose(null)}
-            className="w-full border-t border-gray-100 px-3 py-1.5 text-left text-[12px] text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-700">
+            className="w-full border-t border-gray-100 px-3 py-1.5 text-left text-small text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-700">
             {words.noneLong}
           </button>
         )}
-        {error && <p role="alert" className="border-t border-gray-100 px-3 py-1.5 text-[11.5px] text-red-600 dark:border-zinc-700 dark:text-red-400">{error}</p>}
-        <p className="border-t border-gray-100 px-3 py-1.5 text-[10.5px] text-gray-500 dark:border-zinc-700">選ぶと、この会議がその{word}につながります。外のサービス（HubSpot など）には書きません。</p>
+        {error && <p role="alert" className="border-t border-gray-100 px-3 py-1.5 text-small text-red-600 dark:border-zinc-700 dark:text-red-400">{error}</p>}
+        <p className="border-t border-gray-100 px-3 py-1.5 text-caption font-normal text-gray-500 dark:border-zinc-700">選ぶと、この会議がその{word}につながります。外のサービス（HubSpot など）には書きません。</p>
     </Dialog>
   )
 }

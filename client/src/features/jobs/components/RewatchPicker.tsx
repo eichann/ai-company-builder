@@ -25,14 +25,14 @@ export function RewatchPicker({ companyId, busy, onPick }: { companyId: string; 
     return <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setOpen(true); void look('') }}>見張るやることを選び直す</Button>
   }
   return (
-    <div className="flex w-full flex-wrap items-center gap-2 text-[12px]">
-      <input aria-label="見張るやることを名前で探す" className="rounded border px-2 py-1" value={text} placeholder="名前で探す"
+    <div className="flex w-full flex-wrap items-center gap-2 text-small">
+      <input aria-label="見張るやることを名前で探す" className="rounded-small border px-2 py-1" value={text} placeholder="名前で探す"
         onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void look(text) }} />
       <Button size="sm" variant="ghost" onClick={() => void look(text)}>探す</Button>
       {choices && choices.length === 0 && <span className="text-zinc-500">あなたが担当の、まだ終わっていないやることがありません</span>}
       {choices && choices.length > 0 && (
         <>
-          <select aria-label="見張るやること" className="rounded border px-2 py-1" value={chosen} onChange={e => setChosen(e.target.value)}>
+          <select aria-label="見張るやること" className="rounded-small border px-2 py-1" value={chosen} onChange={e => setChosen(e.target.value)}>
             {choices.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
           </select>
           {total > choices.length && <span className="text-zinc-500">{total}件のうち{choices.length}件（名前で絞り込めます）</span>}

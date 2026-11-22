@@ -9,7 +9,7 @@ import { slotMergedNote } from '../../../../../shared/core/source-slot-candidate
 import { runCommand } from '../../../shared/commands/commands'
 import { SimilarHint } from './SimilarHint'
 
-const QUIET = 'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-link disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
+const QUIET = 'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-small text-gray-500 hover:bg-gray-100 hover:text-link disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
 
 interface Props {
   busy: boolean
@@ -74,16 +74,16 @@ export function MeetingTaskAdd({ busy, onCreate, onAct, onUndo }: Props) {
               if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void add() }
               if (e.key === 'Escape') { setOpen(false); setLine('') }
             }}
-            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-[12.5px] dark:border-zinc-600 dark:bg-zinc-900" />
+            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1 text-small dark:border-zinc-600 dark:bg-zinc-900" />
         )}
       {hint && <SimilarHint similar={hint.similar} busy={off} onMerge={mergeActionFor(hint.state ?? 'todo') ? () => void merge(hint) : null} onKeep={() => setHint(null)} />}
       {merged && (
-        <div role="status" className="flex items-center gap-2 text-[11.5px] text-gray-600 dark:text-zinc-300">
+        <div role="status" className="flex items-center gap-2 text-small text-gray-600 dark:text-zinc-300">
           <span className="min-w-0 flex-1">「{merged.title}」とまとめました</span>
           <button type="button" disabled={off} onClick={() => void undo(merged)} className={QUIET}>元に戻す</button>
         </div>
       )}
-      {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p role="alert" className="text-small text-red-600 dark:text-red-400">{error}</p>}
     </div>
   )
 }

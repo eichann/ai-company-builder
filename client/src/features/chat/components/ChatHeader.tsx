@@ -51,7 +51,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
   return (
     <header ref={headerRef} className={`flex-shrink-0 h-12 flex items-center justify-between gap-2 min-w-0 overflow-hidden border-b border-gray-200 dark:border-zinc-800 ${tight ? 'px-2' : 'px-4'}`}>
       <div className={`flex items-center gap-3 ${tight ? 'min-w-0 shrink overflow-hidden' : 'flex-shrink-0'}`}>
-        {!tight && <div className="w-6 h-6 rounded-lg bg-primary flex items-center justify-center">
+        {!tight && <div className="w-6 h-6 rounded-control bg-primary flex items-center justify-center">
           <Sparkle size={12} weight="fill" className="text-white" />
         </div>}
         <div className="flex items-center gap-2">
@@ -88,12 +88,12 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
         {authMode === 'codex' && <>
           <select aria-label="Codexモデル" value={codexModel?.id || ''} disabled={modelLocked || !codexModel}
             onChange={e => models.chooseCodexModel(e.target.value)}
-            className="h-7 max-w-44 min-w-0 shrink text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 disabled:opacity-50">
+            className="h-7 max-w-44 min-w-0 shrink text-caption font-normal rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 disabled:opacity-50">
             {codexStatus.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
           <select aria-label="Codex思考の強さ" value={selectedCodexEffort} disabled={modelLocked || !codexModel}
             onChange={e => models.chooseCodexEffort(e.target.value)}
-            className="h-7 min-w-0 shrink text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 disabled:opacity-50">
+            className="h-7 min-w-0 shrink text-caption font-normal rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 disabled:opacity-50">
             {codexModel?.efforts.map(e => <option key={e} value={e}>{e}</option>)}
           </select>
         </>}
@@ -104,7 +104,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
             disabled={modelLocked}
             title={modelLocked ? '応答中はモデルを変更できません' : undefined}
             onChange={(e) => setAIModel(e.target.value as AIModel)}
-            className="h-7 min-w-[5.5rem] shrink text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-selected-border focus:outline-none focus:ring-1 focus:ring-focus-ring transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-gray-200 dark:disabled:hover:border-zinc-700"
+            className="h-7 min-w-[5.5rem] shrink text-caption font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-selected-border focus:outline-none focus:ring-1 focus:ring-focus-ring transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-gray-200 dark:disabled:hover:border-zinc-700"
             style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
           >
             {CLAUDE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
@@ -116,7 +116,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
           <select
             value={aiEffort}
             onChange={(e) => setAIEffort(e.target.value as AIEffort)}
-            className="h-7 min-w-[4.75rem] shrink text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-selected-border focus:outline-none focus:ring-1 focus:ring-focus-ring transition-colors"
+            className="h-7 min-w-[4.75rem] shrink text-caption font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-selected-border focus:outline-none focus:ring-1 focus:ring-focus-ring transition-colors"
             style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
           >
             {MODEL_EFFORT_OPTIONS[aiModel].map((eff) => (
@@ -131,7 +131,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
         {(status === 'submitted' || status === 'streaming') && (
           <button
             onClick={() => onStop()}
-            className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 flex items-center justify-center transition-colors"
+            className="w-8 h-8 flex-shrink-0 rounded-control hover:bg-red-100 dark:hover:bg-red-900/30 flex items-center justify-center transition-colors"
             title={t('chat.stop')}
           >
             <X size={16} className="text-red-500" />
@@ -141,7 +141,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
         {/* Markdown Render Toggle: ON = decorated rendering, OFF = raw text */}
         {!tight && <button
           onClick={() => setChatMarkdownRender(!chatMarkdownRender)}
-          className={`w-8 h-8 flex-shrink-0 rounded-lg flex items-center justify-center transition-colors ${
+          className={`w-8 h-8 flex-shrink-0 rounded-control flex items-center justify-center transition-colors ${
             chatMarkdownRender
               ? 'bg-selected-bg text-selected-text hover:bg-selected-bg-hover'
               : 'hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400'
@@ -157,7 +157,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
             disabled={openInWindowBlocked}
             aria-label="別ウィンドウで開く"
             title={openInWindowBlocked ? 'AIの作業が終わってから別ウィンドウで開けます' : '別ウィンドウで開く'}
-            className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-8 h-8 flex-shrink-0 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <ArrowSquareOut size={16} className="text-gray-500 dark:text-zinc-400" />
           </button>
@@ -167,7 +167,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
         {onNewChat && (
           <button
             onClick={onNewChat}
-            className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors"
+            className="w-8 h-8 flex-shrink-0 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors"
             title={t('chat.newChat')}
           >
             <Plus size={16} className="text-gray-500 dark:text-zinc-400" />
@@ -175,7 +175,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
         )}
 
         {onToggleSidebar && (
-          <button onClick={onToggleSidebar} aria-label="AIへの相談の一覧を開閉" aria-expanded={sidebarOpen} title="AIへの相談の一覧" className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center">
+          <button onClick={onToggleSidebar} aria-label="AIへの相談の一覧を開閉" aria-expanded={sidebarOpen} title="AIへの相談の一覧" className="w-8 h-8 flex-shrink-0 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center">
             <SidebarSimple size={16} />
           </button>
         )}
@@ -183,7 +183,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
         {/* Settings Button */}
         <button
           onClick={onShowSettings}
-          className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors"
+          className="w-8 h-8 flex-shrink-0 rounded-control hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors"
         >
           <GearSix size={16} className="text-gray-500 dark:text-zinc-400" />
         </button>

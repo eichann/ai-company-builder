@@ -31,15 +31,15 @@ export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
   const body = (
     <div ref={tools.loadRef} className="space-y-4">
       <div>
-        <h2 className="text-[17px] font-semibold text-zinc-900 dark:text-zinc-50">{title}</h2>
-        <p className="mt-1 text-[13px] leading-relaxed text-zinc-600 dark:text-zinc-300">
+        <h2 className="text-heading font-semibold text-zinc-900 dark:text-zinc-50">{title}</h2>
+        <p className="mt-1 text-body leading-relaxed text-zinc-600 dark:text-zinc-300">
           {view.onlyNew
             ? '会社で使えるものが増えました。つなぐと、次のことができるようになります。'
             : 'ふだん使っている Google や Slack とつなぐと、ACB でできることが増えます。つなぐのは一度だけで、いつでも設定から止められます。'}
         </p>
       </div>
       {!tools.loaded ? (
-        <div className="flex items-center gap-2 py-6 text-[13px] text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
+        <div className="flex items-center gap-2 py-6 text-body text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
       ) : !view.google && !view.slack ? (
         <Callout tone="info">いまは、会社でつなげるものがありません。管理者が Google や Slack を用意すると、ここからつなげます。</Callout>
       ) : (
@@ -71,7 +71,7 @@ export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
           )}
         </>
       )}
-      {tools.message && <p role="status" className="text-[12px] leading-relaxed text-zinc-600 dark:text-zinc-300">{tools.message}</p>}
+      {tools.message && <p role="status" className="text-small leading-relaxed text-zinc-600 dark:text-zinc-300">{tools.message}</p>}
       {firstRun && (
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" disabled={tools.busy} onClick={async () => { await tools.later(); setOffer('closed') }}>
@@ -80,7 +80,7 @@ export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
         </div>
       )}
       {firstRun && !connectedNow && (
-        <p className="text-right text-[11px] text-zinc-500">あとからでも、設定の「仕事の道具をつなぐ」からつなげます。</p>
+        <p className="text-right text-caption font-normal text-zinc-500">あとからでも、設定の「仕事の道具をつなぐ」からつなげます。</p>
       )}
     </div>
   )
@@ -104,11 +104,11 @@ function ServiceCard({ icon, name, account, items, hint, action }: {
     <Card className="space-y-3 p-4">
       <div className="flex items-center gap-2 text-[14px] font-medium text-zinc-900 dark:text-zinc-100">
         {icon}<span>{name}</span>
-        {account && <span className="ml-auto truncate text-[12px] font-normal text-zinc-500">{account}</span>}
+        {account && <span className="ml-auto truncate text-small font-normal text-zinc-500">{account}</span>}
       </div>
       <ul className="space-y-1.5">
         {items.map(item => (
-          <li key={item.feature} className="flex items-start gap-2 text-[13px] text-zinc-700 dark:text-zinc-200">
+          <li key={item.feature} className="flex items-start gap-2 text-body text-zinc-700 dark:text-zinc-200">
             {item.state === 'connected'
               ? <CheckCircle size={16} weight="fill" className="mt-0.5 shrink-0 text-emerald-600" aria-label="つながっています" />
               : <Circle size={16} className="mt-0.5 shrink-0 text-zinc-400" aria-label="まだつないでいません" />}
@@ -116,8 +116,8 @@ function ServiceCard({ icon, name, account, items, hint, action }: {
           </li>
         ))}
       </ul>
-      {hint && <p className="text-[12px] text-zinc-500">{hint}</p>}
-      {action ?? <p className="text-[12px] text-emerald-700 dark:text-emerald-400">つながっています</p>}
+      {hint && <p className="text-small text-zinc-500">{hint}</p>}
+      {action ?? <p className="text-small text-emerald-700 dark:text-emerald-400">つながっています</p>}
     </Card>
   )
 }

@@ -438,7 +438,7 @@ function SortableHead({
         type="button"
         onClick={() => onSort(k)}
         className={cn(
-          '-ml-1.5 inline-flex items-center gap-1 rounded px-1.5 py-1 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50',
+          '-ml-1.5 inline-flex items-center gap-1 rounded-small px-1.5 py-1 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50',
           active && 'text-foreground'
         )}
       >
@@ -464,7 +464,7 @@ function AppCell({ row, loading }: { row: Row; loading: boolean }) {
     <Tooltip>
       <TooltipTrigger asChild>
         {/* The version text folds away below lg; the tooltip keeps it reachable. */}
-        <span className="inline-flex cursor-default items-center gap-2 rounded whitespace-nowrap outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" tabIndex={0}>
+        <span className="inline-flex cursor-default items-center gap-2 rounded-small whitespace-nowrap outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50" tabIndex={0}>
           <Badge variant={badge.variant}>{badge.label}</Badge>
           <span className={cn('hidden text-sm tabular-nums lg:inline', !a?.clientVersion && 'text-muted-foreground')}>{detail}</span>
         </span>
@@ -697,7 +697,7 @@ function PendingInvitations({
       ) : invitations.error && !invitations.data ? (
         <ErrorState error={invitations.error} onRetry={invitations.reload} />
       ) : pending.length === 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-dashed px-4 py-3 text-sm text-muted-foreground">
           未使用の招待リンクはありません
           <Button variant="outline" size="sm" onClick={onInvite}>
             <UserPlus />

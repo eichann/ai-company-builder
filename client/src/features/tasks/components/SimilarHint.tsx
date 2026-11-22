@@ -4,7 +4,7 @@
 // screen's press; 取り消す brings it back) and opens the earlier one; ［このまま］ keeps both.
 import type { SimilarItem } from '../../../../shared/tasks'
 
-const QUIET = 'inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-[11.5px] text-amber-900 hover:bg-amber-100 disabled:opacity-50 dark:text-amber-100 dark:hover:bg-amber-900/40'
+const QUIET = 'inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-small text-amber-900 hover:bg-amber-100 disabled:opacity-50 dark:text-amber-100 dark:hover:bg-amber-900/40'
 
 export function SimilarHint({ similar, busy, onMerge, onKeep }: {
   similar: SimilarItem
@@ -14,7 +14,7 @@ export function SimilarHint({ similar, busy, onMerge, onKeep }: {
   onKeep: () => void
 }) {
   return (
-    <div role="note" aria-label="似ているやること" className="flex flex-wrap items-center gap-2 rounded-md bg-amber-50 px-2.5 py-1.5 text-[12px] text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+    <div role="note" aria-label="似ているやること" className="flex flex-wrap items-center gap-2 rounded-md bg-amber-50 px-2.5 py-1.5 text-small text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
       <span className="min-w-0 flex-1">似ているやることがあります：「{similar.title}」</span>
       {onMerge && <button type="button" disabled={busy} onClick={onMerge} title={`こちらはしまって、「${similar.title}」を開きます`} className={QUIET}>まとめる</button>}
       <button type="button" disabled={busy} onClick={onKeep} className={QUIET}>このまま</button>

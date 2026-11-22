@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type ReactNode } from 'react'
 import { Dialog, DialogFooter, DialogTitle } from './Dialog'
+import { Button } from './primitives'
 
 interface InputDialogProps {
   isOpen: boolean
@@ -60,27 +61,15 @@ function OpenInputDialog({
           placeholder={placeholder}
           aria-label={title}
           aria-invalid={error ? true : undefined}
-          className="w-full px-3 py-2 bg-[var(--color-surface)] border border-border-control rounded-md text-text placeholder:text-text-subtle focus:outline-none focus:border-focus-border"
+          className="w-full px-3 py-2 bg-[var(--color-surface)] border border-border-control rounded-control text-text placeholder:text-text-subtle focus:outline-none focus:border-focus-border"
         />
         {children}
         {error && (
           <p role="alert" className="mt-2 text-xs text-danger-text whitespace-pre-line">{error}</p>
         )}
         <DialogFooter>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 text-sm text-text-muted hover:text-text hover:bg-surface-sunken rounded-md transition-colors"
-          >
-            キャンセル
-          </button>
-          <button
-            type="submit"
-            disabled={!value.trim() || busy}
-            className="px-4 py-2 text-sm bg-primary hover:bg-primary-hover disabled:opacity-disabled disabled:cursor-not-allowed text-on-primary rounded-md transition-colors"
-          >
-            {confirmText}
-          </button>
+          <Button onClick={onCancel}>キャンセル</Button>
+          <Button type="submit" variant="primary" disabled={!value.trim() || busy}>{confirmText}</Button>
         </DialogFooter>
       </form>
     </Dialog>

@@ -88,7 +88,7 @@ function SlackBadge({ view }: { view: SlackAdminView }) {
 function CopyLine({ value, label, testId }: { value: string; label: string; testId: string }) {
   return (
     <div className="flex items-center gap-2">
-      <code className="break-all rounded bg-muted px-2 py-1 text-xs" data-testid={testId}>{value}</code>
+      <code className="break-all rounded-small bg-muted px-2 py-1 text-xs" data-testid={testId}>{value}</code>
       <Button variant="outline" size="sm" aria-label={`${label}をコピー`}
         onClick={async () => { if (await copyText(value)) toast.success('コピーしました') }}>
         <Copy size={14} /> コピー

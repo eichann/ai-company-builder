@@ -90,7 +90,7 @@ export function PrivateFolderPanel({
                 編集できる人 <span className="font-medium tabular-nums">{detail.data?.editorCount ?? 0}人</span>
               </span>
             </div>
-            <ul className="divide-y rounded-lg border" aria-label="見られる人">
+            <ul className="divide-y rounded-control border" aria-label="見られる人">
               {named.map((m) => {
                 const n = m.name || m.email || '名前未設定'
                 return (
@@ -133,7 +133,7 @@ export function PrivateFolderPanel({
           )}
           <Link
             href={`/companies/${companyId}/private-folders`}
-            className="ml-auto inline-flex items-center gap-1 rounded text-sm font-medium text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="ml-auto inline-flex items-center gap-1 rounded-small text-sm font-medium text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
           >
             非公開フォルダの一覧
             <ArrowRight size={14} />

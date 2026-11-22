@@ -98,7 +98,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
             <Link href={`/companies/${companyId}/integrations`} className="font-medium underline underline-offset-4">つなぎ先へ</Link>
           </Callout>
         )}
-        <p className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5 text-sm">
+        <p className="flex items-start gap-2 rounded-control bg-muted px-3 py-2.5 text-sm">
           <ShieldCheck size={16} className="mt-0.5 shrink-0" />
           <span>
             鍵は預かりません。メンバーが自分で許可したときだけ、本人の権限で届けます。
@@ -108,7 +108,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
 
         <fieldset className="space-y-2">
           <legend className="mb-2 text-sm font-medium">中継してよい Google のサービス</legend>
-          <ul className="divide-y rounded-lg border">
+          <ul className="divide-y rounded-control border">
             {data.services.map((s) => (
               <li key={s.service}>
                 <label className="flex cursor-pointer items-start gap-3 px-3 py-2.5">
@@ -122,7 +122,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
               </li>
             ))}
           </ul>
-          <p className="rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
+          <p className="rounded-control border border-dashed px-3 py-2 text-xs text-muted-foreground">
             あとから足せるもの（いまは中継しません）: {GOOGLE_RELAY_LATER.map((l) => GOOGLE_RELAY_LATER_TEXT[l]).join('、')}
           </p>
           <p className="text-xs text-muted-foreground">サービスを足したときは、使う人がアプリの「設定 → Google」でもう一度だけ許可します。</p>
@@ -171,7 +171,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
             共有ドライブの表は、ここに登録した会社の共有ドライブにあるときだけ書き込めます（ほかの共有ドライブの表は、読めますが書き込めません）。共有ドライブを開いたときのアドレスを貼ってください。
           </p>
           {(data.sharedDrives ?? []).length > 0 && (
-            <ul className="divide-y rounded-lg border">
+            <ul className="divide-y rounded-control border">
               {(data.sharedDrives ?? []).map((d) => (
                 <li key={d.driveId} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm" data-testid={`google-relay-drive-${d.driveId}`}>
                   <span className="font-medium">{d.name ?? '（名前なし）'}</span>
@@ -212,7 +212,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
           {data.members.length === 0 ? (
             <p className="text-sm text-muted-foreground">まだ誰も許可していません。</p>
           ) : (
-            <ul className="divide-y rounded-lg border">
+            <ul className="divide-y rounded-control border">
               {data.members.map((m) => (
                 <li key={m.userId} className="flex flex-wrap items-center gap-x-6 gap-y-2 px-3 py-2.5 text-sm" data-testid={`google-relay-member-${m.userId}`}>
                   <div className="min-w-56">
@@ -257,7 +257,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
           {records.length === 0 ? (
             <p className="text-sm text-muted-foreground">まだ記録はありません。</p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border">
+            <div className="overflow-x-auto rounded-control border">
               <table className="w-full text-left text-sm">
                 <thead className="bg-muted text-xs text-muted-foreground">
                   <tr><th className="px-3 py-2 font-medium">日時</th><th className="px-3 py-2 font-medium">だれ</th><th className="px-3 py-2 font-medium">したこと</th><th className="px-3 py-2 font-medium">結果</th></tr>

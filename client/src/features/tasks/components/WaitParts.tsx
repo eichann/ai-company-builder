@@ -7,9 +7,10 @@ import type { TaskCardData } from '../../../../shared/task-card'
 import { cameBackLine, defaultWaitUntil, waitChoices, waitingLine, waitUntilText, type TaskActInput } from '../../../../shared/tasks'
 import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { Dialog, DialogFooter, DialogTitle } from '../../../shared/ui/Dialog'
+import { Button } from '../../../shared/ui/primitives'
 
-const FIELD = 'w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-[12.5px] dark:border-zinc-600'
-const CHIP = 'rounded-full border px-2.5 py-0.5 text-[12px]'
+const FIELD = 'w-full rounded-small border border-gray-300 bg-transparent px-2 py-1 text-small dark:border-zinc-600'
+const CHIP = 'rounded-full border px-2.5 py-0.5 text-small'
 const CHIP_ON = 'border-selected-border bg-selected-bg text-selected-text'
 const CHIP_OFF = 'border-gray-300 text-gray-700 hover:border-primary dark:border-zinc-600 dark:text-zinc-200'
 
@@ -21,19 +22,19 @@ export function WaitChooser({ today, holidays, value, onChange, showDefault = tr
   const [picking, setPicking] = useState(value !== null && !choices.some(c => c.until === value))
   return (
     <div role="group" aria-label="いつごろ来そうか" className="space-y-1.5">
-      <span className="text-[12px] text-gray-600 dark:text-zinc-300">いつごろ来そうか</span>
+      <span className="text-small text-gray-600 dark:text-zinc-300">いつごろ来そうか</span>
       <div className="flex flex-wrap items-center gap-1.5">
         {choices.map(c => (
           <button key={c.key} type="button" aria-pressed={value === c.until && !picking}
             onClick={() => { setPicking(false); onChange(value === c.until && !picking ? null : c.until) }}
             className={`${CHIP} ${value === c.until && !picking ? CHIP_ON : CHIP_OFF}`}>
-            {c.label}<span className="ml-1 tabular-nums text-[11px] opacity-70">{waitUntilText(c.until)}</span>
+            {c.label}<span className="ml-1 tabular-nums text-caption font-normal opacity-70">{waitUntilText(c.until)}</span>
           </button>
         ))}
         <button type="button" aria-pressed={picking} onClick={() => { setPicking(p => !p); if (picking) onChange(null) }} className={`${CHIP} ${picking ? CHIP_ON : CHIP_OFF}`}>日を選ぶ</button>
-        {picking && <input type="date" aria-label="見込みの日" min={today} value={value ?? ''} onChange={e => onChange(e.target.value || null)} className="rounded border border-gray-300 bg-transparent px-1.5 py-0.5 text-[12px] dark:border-zinc-600" />}
+        {picking && <input type="date" aria-label="見込みの日" min={today} value={value ?? ''} onChange={e => onChange(e.target.value || null)} className="rounded-small border border-gray-300 bg-transparent px-1.5 py-0.5 text-small dark:border-zinc-600" />}
       </div>
-      {showDefault && value === null && <p className="text-[11px] text-gray-500">選ばなければ 3営業日後（{waitUntilText(defaultWaitUntil(today, holidays))}）にします。過ぎても返事待ちのままなら、あなたの番に戻ります。</p>}
+      {showDefault && value === null && <p className="text-caption font-normal text-gray-500">選ばなければ 3営業日後（{waitUntilText(defaultWaitUntil(today, holidays))}）にします。過ぎても返事待ちのままなら、あなたの番に戻ります。</p>}
     </div>
   )
 }
@@ -53,23 +54,23 @@ export function WaitDialog({ card, today, again, busy, onClose, onRun }: { card:
     else onClose()
   }
   return (
-    <Dialog onClose={onClose} label={title} size="md" className="text-[13px]">
+    <Dialog onClose={onClose} label={title} size="md" className="text-body">
         <DialogTitle>{title}</DialogTitle>
         <div className="mt-3 space-y-3">
-          <dl className="space-y-1.5 text-[12.5px]">
+          <dl className="space-y-1.5 text-small">
             <div className="flex gap-2"><dt className="w-[84px] shrink-0 text-gray-500">何が起きるか</dt><dd>あなたの番から外れ、「ほかの人の番・返事待ち」に移ります。見込みを過ぎたら、あなたの番に戻ります</dd></div>
             <div className="flex gap-2"><dt className="w-[84px] shrink-0 text-gray-500">知らせる人</dt><dd>だれにも知らせません</dd></div>
           </dl>
           <label className="block space-y-1">
-            <span className="text-[12px] text-gray-600 dark:text-zinc-300">何を待っていますか</span>
+            <span className="text-small text-gray-600 dark:text-zinc-300">何を待っていますか</span>
             <input aria-label="待っているもの" value={on} onChange={e => setOn(e.target.value)} placeholder="例：先方からの見積の返事" className={FIELD} />
           </label>
           <WaitChooser today={today} holidays={card.holidays} value={until} onChange={setUntil} />
-          {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+          {error && <p role="alert" className="text-small text-red-600 dark:text-red-400">{error}</p>}
         </div>
         <DialogFooter>
-          <button type="button" onClick={onClose} className={SMALL_BUTTON}>やめておく</button>
-          <button type="button" disabled={busy} onClick={() => void run()} className={MAIN_BUTTON}>{again ? 'もう少し待つ' : '返事待ちにする'}</button>
+          <Button onClick={onClose}>やめておく</Button>
+          <Button variant="primary" disabled={busy} onClick={() => void run()}>{again ? 'もう少し待つ' : '返事待ちにする'}</Button>
         </DialogFooter>
     </Dialog>
   )
@@ -90,15 +91,15 @@ export function WaitBand({ card, today, busy, onRun, onNudge }: { card: TaskCard
   const complete = card.actions.find(a => a.action === 'complete' && !a.needsOk && !a.noteRequired)
   if (wait.cameBack) {
     return (
-      <section aria-label="返事が来ていません" className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/[0.06] p-3 text-[12.5px]">
-        <p className="flex items-center gap-1.5 text-[13px] font-semibold"><Warning size={14} weight="fill" className="text-amber-500" />{cameBackLine(wait.on, wait.cameBack.waitedSince, today, card.holidays)}</p>
-        <p className="text-[11.5px] text-gray-600 dark:text-zinc-300">{wait.until ? `返事の見込み（${waitUntilText(wait.until)}）を過ぎたので、あなたの番に戻りました。` : '返事の見込みを過ぎたので、あなたの番に戻りました。'}</p>
+      <section aria-label="返事が来ていません" className="space-y-2 rounded-card border border-amber-500/40 bg-amber-500/[0.06] p-3 text-small">
+        <p className="flex items-center gap-1.5 text-body font-semibold"><Warning size={14} weight="fill" className="text-amber-500" />{cameBackLine(wait.on, wait.cameBack.waitedSince, today, card.holidays)}</p>
+        <p className="text-small text-gray-600 dark:text-zinc-300">{wait.until ? `返事の見込み（${waitUntilText(wait.until)}）を過ぎたので、あなたの番に戻りました。` : '返事の見込みを過ぎたので、あなたの番に戻りました。'}</p>
         <div className="flex flex-wrap gap-2">
           {onNudge && <button type="button" disabled={busy} onClick={onNudge} className={MAIN_BUTTON}><PencilSimpleLine size={13} />催促の下書きを作る</button>}
           {wait_ && <button type="button" disabled={busy} onClick={() => setAgain(true)} className={SMALL_BUTTON}>もう少し待つ</button>}
           {complete && <button type="button" disabled={busy} onClick={() => void onRun([{ action: 'complete' }], '完了にしました').then(setError)} className={SMALL_BUTTON}><CheckCircle size={12} className="mr-1 inline" />完了にする</button>}
         </div>
-        {onNudge && <p className="text-[10.5px] text-gray-500">AI が短い催促の下書きを作ります。送るのはあなたです。</p>}
+        {onNudge && <p className="text-caption font-normal text-gray-500">AI が短い催促の下書きを作ります。送るのはあなたです。</p>}
         {error && <p role="alert" className="text-red-600 dark:text-red-400">{error}</p>}
         {again && <WaitDialog card={card} today={today} again busy={busy} onClose={() => setAgain(false)} onRun={onRun} />}
       </section>
@@ -111,7 +112,7 @@ export function WaitBand({ card, today, busy, onRun, onNudge }: { card: TaskCard
     if (!failure) setChanging(false)
   }
   return (
-    <section aria-label="返事待ち" className="space-y-2 rounded-xl border border-sky-500/30 bg-sky-500/[0.05] p-3 text-[12.5px]">
+    <section aria-label="返事待ち" className="space-y-2 rounded-card border border-sky-500/30 bg-sky-500/[0.05] p-3 text-small">
       <div className="flex flex-wrap items-center gap-2">
         <Clock size={14} className="text-sky-600 dark:text-sky-300" />
         <span className="font-medium">{waitingLine(wait.on, wait.until)}</span>

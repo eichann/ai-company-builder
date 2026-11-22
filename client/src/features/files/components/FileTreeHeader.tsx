@@ -17,7 +17,7 @@ interface FileTreeHeaderProps {
   onOpenToday?: () => void
 }
 
-const iconButton = 'p-1 rounded hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors'
+const iconButton = 'p-1 rounded-small hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors'
 
 export function FileTreeHeader({
   readOnly, showDotFiles, onToggleDotFiles, isLoading, onRefresh, parentNotDownloaded, onNewFile, onNewFolder, onOpenToday,
@@ -39,7 +39,7 @@ export function FileTreeHeader({
         )}
         <button
           onClick={onToggleDotFiles}
-          className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-white/[0.05] transition-colors ${
+          className={`p-1 rounded-small hover:bg-gray-200 dark:hover:bg-white/[0.05] transition-colors ${
             showDotFiles ? 'text-selected-icon' : 'text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300'
           }`}
           title={showDotFiles ? t('fileTree.hideHidden') : t('fileTree.showHidden')}
@@ -81,7 +81,7 @@ export function PrivateFolderBanner({ folder }: { folder: MyPrivateFolder }) {
     <div
       role="note"
       title={viewersLabel(folder)}
-      className="flex items-center gap-1.5 border-b border-indigo-100 bg-indigo-50 px-3 py-1.5 text-[11px] text-indigo-900 dark:border-indigo-400/15 dark:bg-indigo-400/[0.08] dark:text-indigo-100"
+      className="flex items-center gap-1.5 border-b border-indigo-100 bg-indigo-50 px-3 py-1.5 text-caption font-normal text-indigo-900 dark:border-indigo-400/15 dark:bg-indigo-400/[0.08] dark:text-indigo-100"
     >
       <LockSimple size={12} weight="fill" className="flex-shrink-0 text-indigo-500 dark:text-indigo-400" />
       <span className="truncate">

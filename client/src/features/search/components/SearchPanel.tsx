@@ -46,7 +46,7 @@ interface SearchPanelProps {
 
 const DEBOUNCE_MS = 250
 const pill = (on: boolean) =>
-  `inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] whitespace-nowrap transition-colors ${on
+  `inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-caption font-normal whitespace-nowrap transition-colors ${on
     ? 'border-selected-border bg-selected-bg text-selected-text'
     : 'border-gray-200 dark:border-zinc-700 text-gray-600 dark:text-zinc-300 hover:border-primary'}`
 const PERIODS: Record<Period, string> = { week: '1週間', month: '1か月', all: 'いつでも' }
@@ -159,14 +159,14 @@ export function SearchPanel(props: SearchPanelProps) {
           />
           {text && (
             <button type="button" aria-label="消す" onClick={clear}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-gray-200 dark:hover:bg-zinc-700 text-gray-400 dark:text-zinc-500">
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded-small hover:bg-gray-200 dark:hover:bg-zinc-700 text-gray-400 dark:text-zinc-500">
               <X size={11} />
             </button>
           )}
         </div>
 
         {searching ? <>
-          <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-zinc-400" data-scope>
+          <div className="flex items-center gap-1.5 text-caption font-normal text-gray-500 dark:text-zinc-400" data-scope>
             {scope === null ? <Globe size={12} /> : <MagnifyingGlass size={12} />}
             <span><span className="font-medium text-gray-700 dark:text-zinc-200">{scope === null ? '全社' : `${nameOf(scope)}の中`}</span>で {count}件</span>
             {dept !== null && (
@@ -206,7 +206,7 @@ export function SearchPanel(props: SearchPanelProps) {
           )}
         </> : (
           <p className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-zinc-500">
-            名前が分かっているものは <kbd className="inline-flex items-center rounded border border-gray-200 dark:border-zinc-700 px-1 font-sans"><Command size={9} />K</kbd> ですぐ開けます
+            名前が分かっているものは <kbd className="inline-flex items-center rounded-small border border-gray-200 dark:border-zinc-700 px-1 font-sans"><Command size={9} />K</kbd> ですぐ開けます
           </p>
         )}
       </div>
@@ -234,7 +234,7 @@ export function SearchPanel(props: SearchPanelProps) {
           )}
           {hub && (
             <section className="pt-2" aria-label="この相談" data-section="hub-consults">
-              <h3 className="px-3 pt-1 pb-0.5 text-[11px] font-semibold text-gray-500 dark:text-zinc-400">「{hub.title}」の AIへの相談<span className="ml-1 font-normal text-gray-400">{hubList.length}</span></h3>
+              <h3 className="px-3 pt-1 pb-0.5 text-caption font-semibold text-gray-500 dark:text-zinc-400">「{hub.title}」の AIへの相談<span className="ml-1 font-normal text-gray-400">{hubList.length}</span></h3>
               {hubList.map(c => <HitRow key={c.id} t={consultRow(c)} q="" a={actions} />)}
             </section>
           )}
@@ -242,7 +242,7 @@ export function SearchPanel(props: SearchPanelProps) {
           <Section id="content" title="中身で見つかったもの" list={view.byContent} q={q} open={open} setOpen={setOpen} a={actions} />
           {!hub && scope !== null && elsewhere > 0 && (
             <button type="button" onClick={() => setScopeWide(true)} data-elsewhere
-              className="w-full flex items-center gap-1.5 px-3 py-3 text-[11px] text-gray-500 dark:text-zinc-400 hover:text-link border-t border-gray-100 dark:border-zinc-800">
+              className="w-full flex items-center gap-1.5 px-3 py-3 text-caption font-normal text-gray-500 dark:text-zinc-400 hover:text-link border-t border-gray-100 dark:border-zinc-800">
               <Globe size={12} />ほかの部署にも {elsewhere}件 あります（全社で探す）
             </button>
           )}
