@@ -19,8 +19,9 @@ import { applyAcceptance } from './acceptance'
 import { BUNDLE_PLACED_TYPES, bundleLinkName, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
 import { linkAllowed, type RecordReader } from '../record-access'
 import type { EngineContext } from './context'
+import { evidenceToWrite } from './evidence'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
-import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict, fileLinksUnavailable, OK_BY_CANNOT_READ, featureOffRefusal, runFenceRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, MATERIAL_NOT_USABLE, REVIEWER_CANNOT_READ, bad, conflict, fileLinksUnavailable, OK_BY_CANNOT_READ, featureOffRefusal, runFenceRefusal, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import { callVia, type ActorInput } from './types'
 import { checkValue, NOTE_MAX, OK_REQUIRED, parseMaterials, parseOkStatement, provenance, REF_RE } from './values'
 
@@ -341,8 +342,10 @@ export function acting(ctx: EngineContext) {
           const link = linked.find(l => l.name === a?.link && l.targetPath === (typeof a?.path === 'string' ? fileLinkPath(a.path) : null))
           if (!link || typeof a.commit !== 'string' || !/^[0-9a-f]{40,64}$/.test(a.commit)) return bad('attachments: { link, path, commit } of files this record links', 'BAD_ATTACHMENT')
           const path = link.targetPath as string
-          if (!reader.file(path)) return bad('attachments: { link, path, commit } of files this record links', 'BAD_ATTACHMENT')
           const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
+          // The version handed over is shown to every reader of the record: never a file inside a private
+          // folder from a record outside it (a link stored before that rule), one answer with an unreadable file.
+          if (!evidenceToWrite(reader, scopes, records, row).file(path)) return bad('attachments: { link, path, commit } of files this record links', 'BAD_ATTACHMENT')
           const priv = findPrivateScope(scopes, path)
           const repo: RecordFileRepo = priv?.repoId ? { kind: 'scope', repoId: priv.repoId } : { kind: 'company' }
           const inRepo = priv?.repoId ? path.slice(priv.path.length + 1) : path
@@ -365,9 +368,11 @@ export function acting(ctx: EngineContext) {
         const materials = parseMaterials(d.materials)
         if (typeof materials === 'string') return bad(materials)
         const linksNow = materials.some(m => m.kind === 'drive') ? records.linksFrom([row.id]) : []
+        // Materials are shown to every reader of the record (経緯): the link rule applies (records.md "Evidence").
+        const evidence = evidenceToWrite(reader, companyData.forCompany(member.companyId).scopes.listWithRules(), records, row)
         for (const m of materials) {
           if (m.kind === 'record') {
-            const r = records.byIds([m.id]).find(x => reader.record(x))
+            const r = evidence.record(m.id) ? records.byIds([m.id])[0] : undefined
             const v = r ? (records.states([r.id])[0]?.version ?? 0) : 0
             if (!r || m.version > v) return bad('materials: a record you can read, at a version it has had', 'BAD_MATERIAL')
           } else if (m.kind === 'drive') {
@@ -381,7 +386,8 @@ export function acting(ctx: EngineContext) {
           } else {
             const noFolder = fileLinksUnavailable(deps.hasCompanyFolder, member.companyId)
             if (noFolder) return noFolder
-            if (!reader.file(m.path)) return bad('materials: a file you can read', 'BAD_MATERIAL')
+            // A file the member cannot read and one inside a private folder for a record outside it: one answer, no place named.
+            if (!evidence.file(m.path)) return bad(MATERIAL_NOT_USABLE.error, MATERIAL_NOT_USABLE.code)
           }
         }
         const precedents = d.precedents === undefined ? [] : d.precedents
