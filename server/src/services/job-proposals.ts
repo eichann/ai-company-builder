@@ -113,7 +113,17 @@ export function createJobProposals(deps: JobProposalDeps) {
       try { exists = await deps.placeExists(member.companyId, p) } catch { exists = false }
       if (!exists) return false
     }
-    return true
+    // Read again after the awaits (Codex 4th pass): a private folder made, or its readers changed, meanwhile counts.
+    const now = currentReader(member)
+    return now !== null && places.every(p => now.reader.file(p) && (p !== deliverable || writes(handle, now.member, p)))
+  }
+
+  /** The member as they are now (role) and their reader over the scopes now; null once they are not a member. */
+  function currentReader(member: Member): { member: Member; reader: ReturnType<typeof recordReader> } | null {
+    const role = memberships.roleOf(member.companyId, member.userId)
+    if (role === null) return null
+    const now = { ...member, role }
+    return { member: now, reader: recordReader(now, companyData.forCompany(member.companyId).scopes.listWithRules()) }
   }
 
   /** The Skill pinned for the member (they are the responsible person): the shared folder's tree, or the shelf's version. */
@@ -179,11 +189,15 @@ export function createJobProposals(deps: JobProposalDeps) {
       if (path !== '' && !(reader.file(path) && await deps.placeExists(member.companyId, path).catch(() => false))) return PLACE_NOT_FOUND()
       const names = await deps.placeFolders(member.companyId, path).catch(() => null)
       if (names === null) return PLACE_NOT_FOUND()
+      // The membership and the scopes read again after the awaits (Codex 4th pass): a private folder made, or its readers
+      // changed, while the repository was listed must never be named to someone no longer among its readers.
+      const now = currentReader(member)
+      if (now === null || (path !== '' && !now.reader.file(path))) return PLACE_NOT_FOUND()
       const folders = names
         .map(name => (path ? `${path}/${name}` : name))
         // Only what the member reads (a private folder they do not read is never named) and what a grant may name.
-        .filter(p => jobPathProblem(p) === null && !p.split('/').some(s => s.startsWith('.')) && reader.file(p))
-        .map(p => ({ path: p, write: writes(handle, member, p) }))
+        .filter(p => jobPathProblem(p) === null && !p.split('/').some(s => s.startsWith('.')) && now.reader.file(p))
+        .map(p => ({ path: p, write: writes(handle, now.member, p) }))
       return ok({ under: path, folders })
     },
 
@@ -207,8 +221,6 @@ export function createJobProposals(deps: JobProposalDeps) {
       const id = newJobCandidateId(hex32(ids))
       const def = parseJobDefinition(proposalDefinition(input, { actingUser, procedure: skill.value.procedure, skillName: skill.value.name, candidateId: id }))
       if (!def.ok) return BAD_DEFINITION(def.problems)
-      // The approval's own rights check (also the shelf Skill's place), as it will run at the submit and the approval.
-      if (!deps.jobs.rightsFit(member.companyId, actingUser, def.definition)) return PLACE_REFUSED()
       const canonical = jobDefinitionCanonical(def.definition)
       const at = clock.now()
       const row: JobCandidateRow = {
@@ -216,6 +228,9 @@ export function createJobProposals(deps: JobProposalDeps) {
         expiresAt: new Date(clock.nowMs() + JOB_CANDIDATE_TTL_MS).toISOString(),
       }
       const saved = transactions.run((): Outcome<void> => {
+        // The approval's own rights check (also the shelf Skill's place) inside the write, on the membership and scopes now —
+        // after every await above — as it will run at the submit and the approval.
+        if (!deps.jobs.rightsFit(member.companyId, actingUser, def.definition)) return PLACE_REFUSED()
         if (handle.jobs.liveCandidates(member.userId, at) >= JOB_CANDIDATES_PER_MEMBER) return CANDIDATES_FULL()
         handle.jobs.insertCandidate(row)
         return ok(undefined)

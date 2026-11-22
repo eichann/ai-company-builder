@@ -76,6 +76,9 @@ const skillTree = async () => { const t = tree; const b = between; between = nul
 const EXISTS = new Set(['営業部', '営業部/週報', '秘書室', '経理部', '総務', '議事録'])
 const FOLDERS: Record<string, string[]> = { '': ['営業部', '秘書室', '経理部', '総務', '議事録', '.claude'], '営業部': ['週報'], '経理部': [], '総務': [], '秘書室': [], '議事録': [] }
 const pushed: string[][] = []
+// Runs once while the repository is asked (an existence check or a listing): something changing during that await.
+let duringGit: (() => void) | null = null
+const runHook = () => { const h = duringGit; duringGit = null; h?.() }
 
 const companyData = sqliteCompanyData(db)
 const memberships = sqliteMembershipRepository(db)
@@ -89,7 +92,8 @@ function proposalsWith(opts: { folder?: boolean } = {}) {
   return createJobProposals({
     companyData, memberships, transactions, clock, ids: randomIds, jobs, skillTree, hasCompanyFolder: () => opts.folder ?? true,
     shelfSkill: (who, item) => { shelfCalls.push(who.userId); return shelfFake(who, item) },
-    placeExists: async (_co, p) => EXISTS.has(p), placeFolders: async (_co, p) => FOLDERS[p] ?? null,
+    placeExists: async (_co, p) => { await Promise.resolve(); runHook(); return EXISTS.has(p) },
+    placeFolders: async (_co, p) => { await Promise.resolve(); runHook(); return FOLDERS[p] ?? null },
     noticesChanged: (_co, users) => { pushed.push(users) },
   })
 }
@@ -213,6 +217,37 @@ describe('a candidate: the member’s own, built by the server from list values 
     const none = await proposals.places(bob, null, 'ない部')
     expect(hidden).toMatchObject({ ok: false, body: { code: 'JOB_PLACE_NOT_FOUND' } })
     expect(hidden).toEqual(none)
+  })
+
+  it('read again after the repository is asked: a folder made private, or a reader removed, meanwhile is never named', async () => {
+    // 秘書室 becomes a private folder only alice reads while bob's listing waits for the repository.
+    duringGit = () => {
+      db.prepare("UPDATE scopes SET repo_id = 'jp-sec-repo' WHERE company_id = ? AND id = 'jp-sec'").run(CO)
+      db.prepare("UPDATE scope_rules SET can_read = 0, can_write = 0 WHERE id = 'jp-sec-e'").run()
+    }
+    try {
+      expect(ok(await proposals.places(bob, null, '')).folders.map((f: Json) => f.path)).not.toContain('秘書室')
+    } finally {
+      db.prepare("UPDATE scopes SET repo_id = NULL WHERE company_id = ? AND id = 'jp-sec'").run(CO)
+      db.prepare("UPDATE scope_rules SET can_read = 1, can_write = 1 WHERE id = 'jp-sec-e'").run()
+    }
+    const unread = () => db.prepare("UPDATE scope_rules SET can_read = 0, can_write = 0 WHERE id = 'jp-priv-a'").run()
+    const reread = () => db.prepare("UPDATE scope_rules SET can_read = 1, can_write = 1 WHERE id = 'jp-priv-a'").run()
+    try {
+      // Alice taken off 経理部's readers while the listing of the top waits: not named.
+      duringGit = unread
+      expect(ok(await proposals.places(alice, null, '')).folders.map((f: Json) => f.path)).not.toContain('経理部')
+      reread()
+      // …while the existence of 経理部 itself is asked: the one 404.
+      duringGit = unread
+      expect(await proposals.places(alice, null, '経理部')).toMatchObject({ ok: false, body: { code: 'JOB_PLACE_NOT_FOUND' } })
+      reread()
+      // …while a candidate's places are asked: refused, nothing kept.
+      const before = db.prepare('SELECT COUNT(*) AS n FROM ai_job_candidates').get()
+      duringGit = unread
+      expect(await proposals.createCandidate(alice, null, input({ reads: ['経理部'] }))).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_PLACE' } })
+      expect(db.prepare('SELECT COUNT(*) AS n FROM ai_job_candidates').get()).toEqual(before)
+    } finally { duringGit = null; reread() }
   })
 
   it('a place that does not exist, one the member cannot read, a deliverable they cannot write: one answer, nothing kept', async () => {

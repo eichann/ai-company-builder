@@ -1419,7 +1419,10 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   Places (reads, the check's place, the deliverable's place): never a hidden segment (`.claude`, … → 400); **existing folders the member reads** — the deliverable's also one
   they write — one answer for missing / unreadable / not writable (409 `JOB_CANDIDATE_PLACE`, naming nothing); the places route
   lists only readable, non-hidden folders (an unreadable private folder never named; `permissionEditor.subfolders`, unfiltered,
-  filtered by the member's reader). In a company **without the shared folder** a place exists only when its parent's listing
+  filtered by the member's reader — **read again after the repository is asked** (Codex 4th pass: the membership and scopes
+  reloaded after the existence / listing awaits, the parent and every child checked again, so a folder made private or a reader
+  removed meanwhile is never named; a candidate's places likewise, and the approval's `rightsFit` runs inside the candidate's
+  write). In a company **without the shared folder** a place exists only when its parent's listing
   names it — a department, or a place set up inside one (a scope with rules) — never any text below a department, which
   `permissionEditor.folderExists` would answer for permission rules (Codex re-review: free text into a proposal); `composition.ts`
   `placeExists`. A Skill that is not there → 409 `JOB_SKILL_MISSING` 「先に Skill を作ってから」 (Q1). The
@@ -1487,9 +1490,10 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   Also (owner decisions and reviews of PR A): the proposer's return notice, the fixed responsible person, a candidate read again
   when read (a place / the shelf Skill's place lost), hidden segments refused, an owner / admin proposer not told, a leaver's
   proposals withdrawn (through the route), an older app's 「AI の番」 token refused at the route.
-  Mutation check: 52 guards removed or inverted one at a time, then 7 for the owner decisions, 11 after the reviews, 5 after the Codex re-review and 2 after its 3rd pass (the route handing the service the token's run now fails a test of its own); each fails
+  Mutation check: 52 guards removed or inverted one at a time, then 7 for the owner decisions, 11 after the reviews, 5 after the Codex re-review, 2 after its 3rd pass and 4 after its 4th (the route handing the service the token's run now fails a test of its own); each fails
   a test except — each alone suffices, both removed fail:
-  the places' reader / write checks and the approval's own `rightsFit` at the candidate; the 20-candidate check before and inside
+  the places' reader / write checks and the approval's own `rightsFit` at the candidate (also their re-reads after the awaits:
+  the places' fresh reader and `rightsFit` inside the write); the 20-candidate check before and inside
   the write; the proposal view's owner / admin branch of `fingerprintShown` (an owner / admin reads every place anyway; kept as the
   job view's rule); — behind another guard: the pre-checks `JOB_PROPOSAL_CLOSED` of edit / approve (a
   withdrawn / returned job is `retired`, refused first; the checks inside the write are tested by races); — defence: the stored
