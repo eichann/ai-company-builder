@@ -150,6 +150,59 @@ export interface BrowserChecker {
   /** The exact paths (no query) the checker reads for these values: the only reads a run allows besides the page's parts. */
   readPaths(values: BrowserPlanValues): string[]
   view(values: BrowserPlanValues, reads: readonly BrowserPageRead[]): BrowserCheckerView
+  /** The facts this checker reads for a plan (6b-2b; agent-browser.md "The facts a checker reads"), when it reads any. */
+  readonly facts?: BrowserCheckerFacts
+}
+
+/**
+ * One read a checker asks for its facts: a read the declaration's `explore` declares (reviewed, no
+ * side effects), with exactly its `{name}`s and, for a paginated read, the page. The core builds the
+ * address (`explorePath`) and reads it exactly; a checker never names an address.
+ */
+export interface BrowserFactRequest {
+  read: string
+  values: Readonly<Record<string, string>>
+  page?: number
+}
+
+/**
+ * One answer read for a checker's facts, as the core hands it over: an HTML page as its raw text (for
+ * what only the markup holds, the account's `<meta>`) and the core's page view; a JSON answer parsed
+ * strictly; anything else (no answer, not 200, not parsed) is `ok: false`.
+ */
+export type BrowserFactAnswer = BrowserFactRequest & (
+  | { ok: true; kind: 'html'; body: string; view: BrowserPageView }
+  | { ok: true; kind: 'json'; json: BrowserJsonValue }
+  | { ok: false }
+)
+
+/** One fact as a checker reads it; the core adds when and where it was read (the answer `from`). */
+export interface BrowserFactDraft {
+  status: 'known' | 'unknown'
+  value?: unknown
+  complete?: boolean
+  /** The index of the answer it was read from. */
+  from: number
+  /**
+   * Read from the page's raw markup by the checker's own `view` — the same reading a run makes before
+   * and after its write (the account, the target's state) — not from the core's page view, so the
+   * view's wholeness does not apply to it. Without this mark a fact from an HTML page whose view was
+   * not whole is `unknown`.
+   */
+  rawMarkup?: true
+}
+
+/**
+ * The facts a checker reads for a plan (6b-2b), in one facts version. `next` says which declared reads
+ * to make given the answers so far (pure: a function of the answers; `[]` = done); `read` turns the
+ * answers into facts. What it cannot read is `unknown` (never a guess, never 0 for "unknown"); a
+ * required fact unknown makes no plan (`browserFactsProblem`). `problem` is a fixed word for why, when
+ * one applies (a template that is not text only).
+ */
+export interface BrowserCheckerFacts {
+  readonly version: number
+  next(values: BrowserPlanValues, answers: readonly BrowserFactAnswer[]): BrowserFactRequest[]
+  read(values: BrowserPlanValues, answers: readonly BrowserFactAnswer[]): { facts: Record<string, BrowserFactDraft>; problem?: string }
 }
 
 // ---------------------------------------------------------------------------

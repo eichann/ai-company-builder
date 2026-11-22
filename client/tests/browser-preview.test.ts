@@ -264,7 +264,7 @@ test('the window is part of the context: a window closed and opened again betwee
 })
 
 // ---------------------------------------------------------------------------
-// Lステップ 0.5.0, the real connector against a fake Lステップ (answers in the real site's shapes,
+// Lステップ 0.6.0, the real connector against a fake Lステップ (answers in the real site's shapes,
 // design memo §34–§36; names made up)
 // ---------------------------------------------------------------------------
 
@@ -293,13 +293,13 @@ const lstepHarness = (answers: string[]) => harness({
   },
 })
 const lstepRequest = (): BrowserPreviewRequest => ({
-  ...request(), connector: { id: 'lstep', version: '0.5.0' }, operation: 'reminder_step_add_template',
+  ...request(), connector: { id: 'lstep', version: '0.6.0' }, operation: 'reminder_step_add_template',
   hints: { targetHints: { reminder: '試験用リマインダ' }, changeHints: { template: '試験用テンプレA' }, reason: '試験' },
 })
 const lstepCandidate = (template: string) => JSON.stringify({ do: 'candidate', target: { reminder: '1904672', step: '6826586' }, change: { template }, explanation: '試験用リマインダの段にテンプレAを足す' })
 
-test('Lステップ 0.5.0 can be previewed: an id-free read to start from, and a reader for every id of the type (reminder, step, template)', () => {
-  const browser = lstepDeclared('lstep', '0.5.0')!
+test('Lステップ 0.6.0 can be previewed: an id-free read to start from, and a reader for every id of the type (reminder, step, template)', () => {
+  const browser = lstepDeclared('lstep', '0.6.0')!
   const fields = (id: string) => lstep.readers.find(r => r.id === id)?.fields
   assert.equal(previewProblem(browser.operations.reminder_step_add_template, browser.explore, fields), null)
   // Without the lists it is not (what 0.3.0 was).

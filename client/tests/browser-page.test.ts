@@ -123,8 +123,8 @@ const box = (step: string, slots: string[], text = `当日 09:00 に送信`) =>
 const reminderPage = (body: string) => `<!doctype html><html><head><meta name="lm-account-id" content="5550001"><meta name="csrf-token" content="tok"></head>
 <body><input type="hidden" name="_token" value="tok"><script>window.__state = { step: 777, template: 888 }</script>${body}</body></html>`
 
-test('Lステップ\'s declaration 0.5.0 declares its reads — folders, paginated lists with their exact queries, the reminder page — each reviewed, with its reader', () => {
-  const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.5.0')
+test('Lステップ\'s declaration 0.6.0 declares its reads — folders, paginated lists with their exact queries, the reminder page — each reviewed, with its reader', () => {
+  const browser = createBrowserConnectors([lstep.declaration])('lstep', '0.6.0')
   assert.ok(browser)
   assert.deepEqual(browser.explore, {
     reminder_folders: { label: 'リマインダのフォルダの一覧', path: '/api/episode-groups', placeholders: [], reader: 'lstep.reminder_folders' },
@@ -143,7 +143,8 @@ test('Lステップ\'s declaration 0.5.0 declares its reads — folders, paginat
   for (const r of Object.values(browser.explore).filter(r => r.pages)) assert.ok(lstep.readers.some(x => x.id === r.reader && 'answer' in x), r.reader)
   // Every declared read has its reader in the connector folder, and nothing else is handed in.
   assert.deepEqual(Object.values(browser.explore).map(r => r.reader).sort(), lstep.readers.map(r => r.id).sort())
-  assert.equal(browser.operations.reminder_step_add_template.delivers, 'none', 'no scheduled type until its meaning is known (design memo §34)')
+  // 0.6.0: scheduled (design memo §37, the owner: nobody already past the step receives it), facts version 2.
+  assert.equal(browser.operations.reminder_step_add_template.delivers, 'scheduled')
 })
 
 test('Lステップ\'s reader takes steps from their box ids and templates from the slots\' calls in each box, nothing from text, scripts or hidden parts', () => {

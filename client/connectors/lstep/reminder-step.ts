@@ -17,11 +17,15 @@
  *
  * NOT CONFIRMED on the real site: exactly where `_token` / `_lm_user_id` sit in the page.
  *
+ * The facts for a plan (facts version 2, 6b-2b) are read by ./reminder-step-facts.ts, which takes the
+ * account and the step's state from this checker's `view`.
+ *
  * Site code: imported only by the composition root (and tests), never by the core
  * (architecture-boundaries.test.ts 「the browser core knows no site」).
  */
 import type { BrowserPlanValues } from '../../../shared/core/plugin-browser-declaration'
 import type { BrowserChecker, BrowserCheckerView, BrowserPageRead } from '../../shared/browser-runner'
+import { createLstepReminderStepFacts } from './reminder-step-facts'
 
 export const LSTEP_REMINDER_STEP_CHECKER = 'lstep.reminder_step'
 
@@ -127,7 +131,7 @@ function fieldValue(html: string, name: string): string | null {
 
 export function createLstepReminderStepChecker(readAccount: AccountReader): BrowserChecker {
   const ids = (values: BrowserPlanValues) => ({ reminder: values.target.reminder, step: values.target.step })
-  return {
+  const checker: BrowserChecker = {
     id: LSTEP_REMINDER_STEP_CHECKER,
     // The write names the step only; the reminder is confirmed here: the step's box is on the reminder's page.
     confirms: ['reminder', 'step'],
@@ -171,4 +175,7 @@ export function createLstepReminderStepChecker(readAccount: AccountReader): Brow
       return { account, state: { templates: templates.sort() }, ignored, problem }
     },
   }
+  // The facts for a plan (6b-2b) read the account and the step's state with this same `view`: what the
+  // person approves as `before` is exactly what the run compares the page with.
+  return { ...checker, facts: createLstepReminderStepFacts(checker.view) }
 }

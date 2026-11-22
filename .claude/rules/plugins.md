@@ -692,7 +692,7 @@ browser:
 - **Not on the shelf yet**: the shelf refuses a package with `browser` (「a browser connector (browser) is not
   used yet」, `services/plugin-shelf.ts`), so no company installs it, `pluginsFor` never lists it and no
   app fetches it; `combineUse` refuses one, so no business plugin uses it. A released app's older parser
-  does not know `browser` (an unknown key: unusable). The first declaration (`lstep@0.5.0`, 「リマインダの段に
+  does not know `browser` (an unknown key: unusable). The current declaration (`lstep@0.6.0`, 「リマインダの段に
   テンプレートを足す」) ships **inside the app** with its checker (`client/connectors/lstep/`),
   parsed by `parsePluginManifest`; the runner exists but nothing starts it. The server accepts plans
   only for a combination listed in `shared/browser-connectors/approved.json` (the declaration's text

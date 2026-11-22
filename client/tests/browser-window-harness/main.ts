@@ -210,7 +210,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   const plans: Record<string, Record<string, unknown>> = {}
   const plan = (planId: string, over: Record<string, unknown>) => {
     plans[planId] = {
-      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.5.0' }, operation: 'reminder_step_add_template',
+      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.6.0' }, operation: 'reminder_step_add_template',
       account: 'ACC1', target: { reminder: '101', step: '201' }, change: { template: '301' }, before: { templates: ['300'] },
       approvedAt: Date.now() - 1000, expiresAt: Date.now() + 120_000, ...over,
     }
@@ -271,7 +271,7 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   await page.loadURL('https://op.test/line/episode/show/101').catch(() => {})
   await wait(300)
   const gate = createRunGate({
-    host: 'op.test', operation: connector('lstep', '0.5.0')!.operations.reminder_step_add_template,
+    host: 'op.test', operation: connector('lstep', '0.6.0')!.operations.reminder_step_add_template,
     values: { target: { reminder: '101', step: '201' }, change: { template: '304' } },
     readPaths: ['/line/episode/show/101'], stopped: () => false,
   })
