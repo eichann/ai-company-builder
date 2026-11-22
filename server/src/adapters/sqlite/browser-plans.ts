@@ -9,42 +9,48 @@
 import type Database from 'better-sqlite3'
 import type {
   BrowserExecutionChange, BrowserExecutionLookup, BrowserExecutionRow, BrowserPlanChange, BrowserPlanRepository, BrowserPlanRow,
-  BrowserReportRow, BrowserTypeGrantRow,
+  BrowserPlanSummaryRow, BrowserReportRow, BrowserTypeGrantRow,
 } from '../../ports/browser-plans'
 
-const PLAN_COLUMNS = `id, user_id, connector_id, connector_version, operation, declaration_hash, checker_hash, facts_version, account, content, content_hash,
-  state, close_reason, created_at, expires_at, approved_at, closed_at`
-type PlanDbRow = {
+// Every column but the content (the open-plans list reads these only); PLAN_COLUMNS adds it.
+const SUMMARY_COLUMNS = `id, user_id, connector_id, connector_version, operation, declaration_hash, checker_hash, facts_version, account, content_hash,
+  state, close_reason, created_at, expires_at, approved_at, closed_at, target_json, conversation_id`
+const PLAN_COLUMNS = `${SUMMARY_COLUMNS}, content`
+type SummaryDbRow = {
   id: string; user_id: string; connector_id: string; connector_version: string; operation: string; declaration_hash: string; checker_hash: string
-  facts_version: number; account: string; content: string; content_hash: string; state: BrowserPlanRow['state']; close_reason: string | null
-  created_at: string; expires_at: string; approved_at: string | null; closed_at: string | null
+  facts_version: number; account: string; content_hash: string; state: BrowserPlanRow['state']; close_reason: string | null
+  created_at: string; expires_at: string; approved_at: string | null; closed_at: string | null; target_json: string | null; conversation_id: string | null
 }
-const toPlan = (r: PlanDbRow): BrowserPlanRow => ({
+type PlanDbRow = SummaryDbRow & { content: string }
+const toSummary = (r: SummaryDbRow): BrowserPlanSummaryRow => ({
   id: r.id, userId: r.user_id, connectorId: r.connector_id, connectorVersion: r.connector_version, operation: r.operation,
-  declarationHash: r.declaration_hash, checkerHash: r.checker_hash, factsVersion: r.facts_version, account: r.account, content: r.content,
+  declarationHash: r.declaration_hash, checkerHash: r.checker_hash, factsVersion: r.facts_version, account: r.account,
   contentHash: r.content_hash, state: r.state, closeReason: r.close_reason, createdAt: r.created_at, expiresAt: r.expires_at,
-  approvedAt: r.approved_at, closedAt: r.closed_at,
+  approvedAt: r.approved_at, closedAt: r.closed_at, targetJson: r.target_json, conversationId: r.conversation_id,
 })
+const toPlan = (r: PlanDbRow): BrowserPlanRow => ({ ...toSummary(r), content: r.content })
 
-const EXEC_COLUMNS = 'id, plan_id, user_id, secret_hash, lock_key, state, void_reason, claimed_at, permitted_at, settled_at, confirmed_by'
+const EXEC_COLUMNS = 'id, plan_id, user_id, secret_hash, lock_key, state, void_reason, claimed_at, permitted_at, permitted_mono_ms, permitted_boot, settled_at, confirmed_by'
 type ExecDbRow = {
   id: string; plan_id: string; user_id: string; secret_hash: string; lock_key: string; state: BrowserExecutionRow['state']; void_reason: string | null
-  claimed_at: string; permitted_at: string | null; settled_at: string | null; confirmed_by: string | null
+  claimed_at: string; permitted_at: string | null; permitted_mono_ms: number | null; permitted_boot: string | null; settled_at: string | null; confirmed_by: string | null
 }
 const toExec = (r: ExecDbRow): BrowserExecutionRow => ({
   id: r.id, planId: r.plan_id, userId: r.user_id, secretHash: r.secret_hash, lockKey: r.lock_key, state: r.state, voidReason: r.void_reason,
-  claimedAt: r.claimed_at, permittedAt: r.permitted_at, settledAt: r.settled_at, confirmedBy: r.confirmed_by,
+  claimedAt: r.claimed_at, permittedAt: r.permitted_at, permittedMonoMs: r.permitted_mono_ms, permittedBoot: r.permitted_boot, settledAt: r.settled_at,
+  confirmedBy: r.confirmed_by,
 })
 
 const PLAN_CHANGE: Record<keyof BrowserPlanChange, string> = { approvedAt: 'approved_at', closedAt: 'closed_at', closeReason: 'close_reason' }
 const EXEC_CHANGE: Record<keyof BrowserExecutionChange, string> = {
-  permittedAt: 'permitted_at', settledAt: 'settled_at', voidReason: 'void_reason', confirmedBy: 'confirmed_by',
+  permittedAt: 'permitted_at', permittedMonoMs: 'permitted_mono_ms', permittedBoot: 'permitted_boot', settledAt: 'settled_at', voidReason: 'void_reason',
+  confirmedBy: 'confirmed_by',
 }
 
-function sets<K extends string>(change: Partial<Record<K, string>>, columns: Record<K, string>): { sql: string; values: string[] } {
+function sets<K extends string>(change: Partial<Record<K, string | number>>, columns: Record<K, string>): { sql: string; values: Array<string | number> } {
   const parts = ['state = ?']
-  const values: string[] = []
-  for (const [name, value] of Object.entries(change) as Array<[K, string | undefined]>) {
+  const values: Array<string | number> = []
+  for (const [name, value] of Object.entries(change) as Array<[K, string | number | undefined]>) {
     if (value === undefined) continue
     const column = columns[name]
     if (!column) throw new Error(`browser plans: unknown column ${name}`)
@@ -57,17 +63,21 @@ function sets<K extends string>(change: Partial<Record<K, string>>, columns: Rec
 export function sqliteBrowserPlanRepository(conn: Database.Database, companyId: string): BrowserPlanRepository {
   return {
     insertPlan(p) {
-      conn.prepare(`INSERT INTO browser_plans (company_id, ${PLAN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      conn.prepare(`INSERT INTO browser_plans (company_id, ${PLAN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(companyId, p.id, p.userId, p.connectorId, p.connectorVersion, p.operation, p.declarationHash, p.checkerHash, p.factsVersion, p.account,
-          p.content, p.contentHash, p.state, p.closeReason, p.createdAt, p.expiresAt, p.approvedAt, p.closedAt)
+          p.contentHash, p.state, p.closeReason, p.createdAt, p.expiresAt, p.approvedAt, p.closedAt, p.targetJson, p.conversationId, p.content)
     },
     plan(planId) {
       const r = conn.prepare(`SELECT ${PLAN_COLUMNS} FROM browser_plans WHERE company_id = ? AND id = ?`).get(companyId, planId) as PlanDbRow | undefined
       return r ? toPlan(r) : null
     },
     openPlansOf(userId) {
-      return (conn.prepare(`SELECT ${PLAN_COLUMNS} FROM browser_plans WHERE company_id = ? AND user_id = ? AND state IN ('draft', 'approved') ORDER BY created_at, id`)
-        .all(companyId, userId) as PlanDbRow[]).map(toPlan)
+      return (conn.prepare(`SELECT ${SUMMARY_COLUMNS} FROM browser_plans WHERE company_id = ? AND user_id = ? AND state IN ('draft', 'approved') ORDER BY created_at, id`)
+        .all(companyId, userId) as SummaryDbRow[]).map(toSummary)
+    },
+    newestOpenPlansOf(userId, limit) {
+      return (conn.prepare(`SELECT ${SUMMARY_COLUMNS} FROM browser_plans WHERE company_id = ? AND user_id = ? AND state IN ('draft', 'approved') ORDER BY created_at DESC, id DESC LIMIT ?`)
+        .all(companyId, userId, limit) as SummaryDbRow[]).map(toSummary)
     },
     setPlanState(planId, from, to, change) {
       const s = sets(change, PLAN_CHANGE)
@@ -76,8 +86,9 @@ export function sqliteBrowserPlanRepository(conn: Database.Database, companyId: 
     },
 
     insertExecution(e) {
-      conn.prepare(`INSERT INTO browser_executions (company_id, ${EXEC_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(companyId, e.id, e.planId, e.userId, e.secretHash, e.lockKey, e.state, e.voidReason, e.claimedAt, e.permittedAt, e.settledAt, e.confirmedBy)
+      conn.prepare(`INSERT INTO browser_executions (company_id, ${EXEC_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(companyId, e.id, e.planId, e.userId, e.secretHash, e.lockKey, e.state, e.voidReason, e.claimedAt, e.permittedAt, e.permittedMonoMs, e.permittedBoot,
+          e.settledAt, e.confirmedBy)
     },
     execution(executionId) {
       const r = conn.prepare(`SELECT ${EXEC_COLUMNS} FROM browser_executions WHERE company_id = ? AND id = ?`).get(companyId, executionId) as ExecDbRow | undefined

@@ -590,7 +590,7 @@ browser:
       expect:                                # 1–5 on write / delete, none on a read
         - { list: templates, add: "{template}" }   # or remove: "{name}"; exactly one, one whole plan field
       lock: { kind: lstep.reminder_step }    # required on write / delete, refused on a read: the server's target lock kind
-      delivers: none                         # required: none | immediate | unknown (reaches people at once?)
+      delivers: none                         # required: none | scheduled | immediate | unknown (reaches people at once?)
       facts:                                 # what the checker reads for a plan (≤ 20); a write needs account (required)
         account: { required: true }          # required: no plan without it; complete: true = read whole
         state: { required: true, complete: true }
@@ -628,7 +628,9 @@ browser:
   (booleans, nothing else), and every name must be known to the facts version's schema for the
   type's checker (`shared/core/browser-plans.ts`; the approved list's script refuses otherwise). A
   write / delete type without `lock`, without `facts.account` required, or any type without
-  `delivers` is refused, with the reason. **The first version runs** only `delivers: none`, not
+  `delivers` is refused, with the reason. **The first version runs** only `delivers: none` — or
+  `scheduled` (6b-2a: it reaches people only on the target's own schedule, never anyone already past
+  it, reviewed with the connector) when `facts.schedule` and `facts.templates` are `required` and `complete` —, not
   irreversible, exactly one write, not delete (`browserFirstVersionProblem`, asked by the server).
 - **`explore`** (6b-1, design memo §33 2-2; `browser.explore`, optional): the pages the operator AI may
   ask the app to read during the preview, ≤ 10, each `{ label, path, query?, pages?, reader, no_side_effects:

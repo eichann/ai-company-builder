@@ -654,6 +654,7 @@ const MATRIX: Row[] = [
   // its execution are their member's own (anyone else's is one that does not exist); grants are owner/admin's;
   // the report takes the execution's secret, never a session.
   r('POST /api/companies/:companyId/browser-plans', w => ({ path: `${C(w)}/browser-plans`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/browser-plans-open', w => ({ path: `${C(w)}/browser-plans-open` }), MEMBERS),
   r('GET /api/companies/:companyId/browser-plans/:planId', w => ({ path: `${C(w)}/browser-plans/${NO_SUCH_PLAN}` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/browser-plans/:planId/approve', w => ({ path: `${C(w)}/browser-plans/${NO_SUCH_PLAN}/approve`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/browser-plans/:planId/cancel', w => ({ path: `${C(w)}/browser-plans/${NO_SUCH_PLAN}/cancel` }), [404, 404, 404, 404, 404, 401]),

@@ -15,7 +15,11 @@ import {
   type BrowserFieldKind, type BrowserOperation, type BrowserPlanValues,
 } from './plugin-browser-declaration'
 
-/** The facts version this build reads and writes (part of each approved combination). */
+/**
+ * The facts version the approved list's script writes for a new combination (part of each approved
+ * combination). Version 2 (6b-2) exists for `delivers: scheduled` types; the script moves to it with
+ * the connector that reads it (6b-2b), since a version-1 declaration names facts version 2 lacks.
+ */
 export const BROWSER_FACTS_VERSION = 1
 
 export type BrowserFactStatus = 'known' | 'unknown'
@@ -99,9 +103,45 @@ const LSTEP_REMINDER_STEP_V1: BrowserFactSchema = {
   },
 }
 
+/** A template as v2 reads it: its name and body, for showing only. The first version reads text templates only (6b-2 decision 2). */
+const isTextTemplate = (v: unknown): boolean => isMap(v) && exactKeys(v, ['name', 'kind', 'body'])
+  && isPlainBrowserText(v.name, 200) && v.kind === 'text' && isPlainBrowserText(v.body, 5000, true)
+
+/**
+ * `lstep.reminder_step`, facts version 2 (6b-2 §2-3, used with `delivers: scheduled`): v1's facts but
+ * `templates` (each template's name, kind and body; only `kind: text` — a template of any other kind
+ * makes no plan) in place of `template_bodies`, plus `schedule` (the step's timing exactly as the page
+ * shows it, e.g. 「3日前 09:00」: shown, never parsed — its base differs per person) and `audience`
+ * (how many people will still receive the step; information for the person, declared optional: an
+ * unknown count is shown as 「読み取れませんでした」, never as 0 — 6b-2 decision 1).
+ */
+const LSTEP_REMINDER_STEP_V2: BrowserFactSchema = {
+  facts: {
+    account: LSTEP_REMINDER_STEP_V1.facts.account,
+    step_parent: LSTEP_REMINDER_STEP_V1.facts.step_parent,
+    state: LSTEP_REMINDER_STEP_V1.facts.state,
+    names: LSTEP_REMINDER_STEP_V1.facts.names,
+    shared_with: LSTEP_REMINDER_STEP_V1.facts.shared_with,
+    templates: v => isMap(v) && Object.keys(v).length <= 200 && Object.entries(v).every(([k, t]) => isId(k) && isTextTemplate(t)),
+    schedule: v => isMap(v) && exactKeys(v, ['timing']) && isPlainBrowserText(v.timing, 100),
+    audience: v => isMap(v) && exactKeys(v, ['count']) && Number.isSafeInteger(v.count) && (v.count as number) >= 0,
+  },
+  across(facts, values) {
+    const parent = facts.step_parent as { reminder: string } | undefined
+    if (parent && parent.reminder !== values.target.reminder) return 'ページで読んだ段の所属が、計画のリマインダと違います'
+    const templates = facts.templates as Record<string, unknown> | undefined
+    if (templates) {
+      const needed = [...((facts.state as { templates: string[] } | undefined)?.templates ?? []), ...(own(values.change, 'template') ? [values.change.template] : [])]
+      if (needed.some(id => !own(templates, id))) return '足すテンプレートと、段に付いているテンプレートの中身がそろっていません'
+    }
+    return null
+  },
+}
+
 /** Facts version → checker id → its schema. A version is never changed once released: a new shape is a new version. */
 export const BROWSER_FACT_SCHEMAS: Readonly<Record<number, Readonly<Record<string, BrowserFactSchema>>>> = {
   1: { 'lstep.reminder_step': LSTEP_REMINDER_STEP_V1 },
+  2: { 'lstep.reminder_step': LSTEP_REMINDER_STEP_V2 },
 }
 
 /** The schema for a type's checker in a facts version, or null. */
@@ -165,6 +205,57 @@ export function browserFactsState(facts: unknown): Record<string, string[]> | nu
   if (!isMap(v) || !Object.values(v).every(list => Array.isArray(list) && list.every(isId))) return null
   return Object.fromEntries(Object.entries(v).map(([k, list]) => [k, [...(list as string[])]]))
 }
+
+/**
+ * Why the facts the app read again right before asking for the permit differ from the facts the
+ * person approved (6b-2 §5-2), or null when they are the same. The re-read must first make a plan of
+ * this type on its own (`browserFactsProblem`: every required fact known and whole, the checks across
+ * facts). Then each fact the type declares must have the **same status** in both; a known one the
+ * same value (canonical JSON: key order plays no part) — except `audience` (the count may have
+ * fallen, never risen: decision 8) and `shared_with.items` (in any order, each as often). Unknown at approval
+ * and known at the re-read is a change (decision 9). `readAt`, `source` and `complete` are not
+ * compared. The app asks this (6b-2c); the server never sees the re-read.
+ */
+export function browserFactsChangedProblem(operation: BrowserOperation, factsVersion: number, approved: unknown, reread: unknown, values: BrowserPlanValues): string | null {
+  const invalid = browserFactsProblem(operation, factsVersion, reread, values)
+  if (invalid) return invalid
+  if (!isMap(approved)) return '承認したときの情報がありません'
+  const now = reread as Record<string, BrowserFact>
+  for (const name of Object.keys(operation.facts)) {
+    const a = own(approved, name) && isMap(approved[name]) ? approved[name] as unknown as BrowserFact : undefined
+    const b = own(now, name) ? now[name] : undefined
+    if (!a && !b) continue
+    if (!a || !b || a.status !== b.status) return `「${name}」が承認したときと変わりました`
+    if (a.status !== 'known') continue
+    if (!sameFactValue(name, a.value, b.value)) return `「${name}」が承認したときと変わりました`
+  }
+  return null
+}
+
+function sameFactValue(name: string, approved: unknown, now: unknown): boolean {
+  if (name === 'audience') {
+    const was = isMap(approved) ? approved.count : undefined
+    const is = isMap(now) ? now.count : undefined
+    return Number.isSafeInteger(was) && Number.isSafeInteger(is) && (is as number) <= (was as number)
+  }
+  if (name === 'shared_with' && isMap(approved) && isMap(now) && Array.isArray(approved.items) && Array.isArray(now.items)) {
+    // The same items in any order, each as many times (a multiset: [a, a, b] is not [a, b, b]).
+    const bag = (items: unknown[]) => canonicalJson(items.map(x => canonicalJson(x)).sort())
+    return approved.count === now.count && bag(approved.items) === bag(now.items)
+  }
+  try { return canonicalJson(approved) === canonicalJson(now) } catch { return false }
+}
+
+/**
+ * The reason words of a report and of the app's own stop (6b-2 §5-5): one list for the app and the
+ * server. The server records any word of its reason pattern (an app newer than the server may send
+ * a word not listed here), so this list never narrows what is accepted.
+ */
+export const BROWSER_REPORT_REASONS = [
+  'off', 'fixed-mismatch', 'facts-changed', 'permit-refused', 'permit-unanswered', 'permit-late', 'context-changed', 'stopped',
+  'no-answer', 'reread-failed', 'account-after', 'target-after', 'checker-problem', 'other-state',
+] as const
+export type BrowserReportReason = typeof BROWSER_REPORT_REASONS[number]
 
 /**
  * The target lock key (design memo §30.5): the canonical JSON of a structured value — never a joined

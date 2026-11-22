@@ -30,6 +30,7 @@ vi.mock('../../src/adapters/browser-connector-catalog', async importOriginal => 
 })
 
 import { Hono } from 'hono'
+import { createHash } from 'crypto'
 import { db, initDatabase } from '../../src/db'
 import { browserPlansRoute, browserReportRoute } from '../../src/routes/browser-plans'
 import { companiesRoute } from '../../src/routes/companies'
@@ -109,6 +110,10 @@ describe('「ブラウザ操作」 plans over HTTP', () => {
     const { planId, claim, claimHeaders } = await plan('bp-alice', '1')
     expect(claimHeaders.get('cache-control')).toBe('no-store')
     expect(claim.plan).toMatchObject({ planId, companyId: CO, connector: { id: 'lstep' }, operation: OP, account: 'acc1', before: { templates: [] } })
+    // The fixed content as stored (6b-2): the app checks its hash against the one approved.
+    expect(claim.fixed).toEqual(expect.objectContaining({ factsVersion: APPROVED.factsVersion }))
+    expect(`sha256:${createHash('sha256').update(claim.fixed.content, 'utf8').digest('hex')}`).toBe(claim.fixed.contentHash)
+    expect(claim.fixed.contentHash).toBe((db.prepare('SELECT content_hash FROM browser_plans WHERE id = ?').get(planId) as { content_hash: string }).content_hash)
     // Another member, a wrong secret, the secret elsewhere than its header: no permit.
     expect((await call('bp-bob', 'POST', `${BASE}/browser-executions/${claim.executionId}/send-permit`, undefined, { [SECRET_HEADER]: claim.secret })).status).toBe(404)
     expect((await call('bp-alice', 'POST', `${BASE}/browser-executions/${claim.executionId}/send-permit`, { secret: claim.secret })).status).toBe(404)
@@ -123,6 +128,19 @@ describe('「ブラウザ操作」 plans over HTTP', () => {
     expect((await call('bp-alice', 'GET', `${BASE}/browser-plans/${planId}`)).json.data).toMatchObject({ state: 'done', execution: { state: 'succeeded' } })
     // Bob does not see Alice's plan.
     expect((await call('bp-bob', 'GET', `${BASE}/browser-plans/${planId}`)).status).toBe(404)
+  })
+
+  it('the member\'s own open plans: uncached, theirs only', async () => {
+    const mine = await call('bp-alice', 'POST', `${BASE}/browser-plans`, { ...candidate('9'), conversationId: 'conv-9' })
+    expect(mine.status).toBe(201)
+    const open = await call('bp-alice', 'GET', `${BASE}/browser-plans-open`)
+    expect(open.status).toBe(200)
+    expect(open.headers.get('cache-control')).toBe('no-store')
+    expect(open.json.data.items.map((i: Json) => [i.planId, i.state, i.conversationId])).toEqual([[mine.json.data.id, 'draft', 'conv-9']])
+    expect(open.json.data.more).toBe(false)
+    expect((await call('bp-owner', 'GET', `${BASE}/browser-plans-open`)).json.data.items).toEqual([])
+    expect((await call(null, 'GET', `${BASE}/browser-plans-open`)).status).toBe(401)
+    expect((await call('bp-alice', 'POST', `${BASE}/browser-plans/${mine.json.data.id}/cancel`)).status).toBe(200)
   })
 
   it('a member removed while an execution may have been sent: it stays, the owner confirms it, the app\'s late report is still kept', async () => {

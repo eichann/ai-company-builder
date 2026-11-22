@@ -5,7 +5,7 @@
 EXTENDS PlanLife
 
 BrokenSettlesUnknown(p) ==
-    /\ exSt[p] = "permitted" /\ srvAge[p] >= CAP
+    /\ exSt[p] = "permitted" /\ Past(p)
     /\ exSt' = [exSt EXCEPT ![p] = "unknown"]
     /\ lock' = IF lock = p THEN "none" ELSE lock
     /\ UNCHANGED <<planSt, approvedEver, holder, srvAge, realAge, permitReq, rep, appVars, siteVars>>

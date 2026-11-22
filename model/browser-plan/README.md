@@ -31,7 +31,7 @@ exist or is not in that area.
 | Part | Copied from |
 |---|---|
 | Plan and execution states, times | `shared/core/browser-plans.ts` (`BrowserPlanState`, `BrowserExecutionState`, `BROWSER_PLAN_TIMES`) |
-| Server actions (register, approve, cancel / expiry / leaving, claim, permit, time-outs, report, confirm) | `server/src/services/browser-plans.ts` (PR 6a), each action naming its function |
+| Server actions (register, approve, cancel / expiry / leaving, claim, permit, time-outs, report, confirm) | `server/src/services/browser-plans.ts` (PR 6a; the clock fix of 6b-2a), each action naming its function |
 | App actions (re-read after claim, ask for the permit, the last check before sending, judging after the send, reports) | the approved 6b-2 design (internal design memo, 6b-2 §3, §5). **Not shipped code yet**: nothing in the app calls the server's plans; 6b-2 replaces today's runner (`client/electron/features/browser/runner.ts`, `client/shared/browser-runner.ts`). The 6b-2 PRs cite their own files here when they land |
 
 Each action in `PlanLife.tla` says which function or design section it copies.
@@ -57,7 +57,7 @@ reachability rule, not a state formula: `reach.mjs` checks it on the checker's s
 
 1. The real model keeps every INVARIANT (TypeOK, R1–R6) and has no dead end; the rules checked are
    exactly `expected.txt`'s `rule` lines (dropping one fails); a `CHECK_DEADLOCK` line is refused.
-2. Its distinct state count equals `states` (today **32,882**): a guard against a checker that
+2. Its distinct state count equals `states` (today **57,618**): a guard against a checker that
    explores less than it should.
 3. R7 holds over all of those states (`reach.mjs` must walk the same number).
 4. Each `broken/` variant fails on its named rule. **A variant that passes fails the job**: the
@@ -78,6 +78,7 @@ reachability rule, not a state formula: `reach.mjs` checks it on the checker's s
 | `BrokenLockFreedOnUnknown` | An unknown execution releases the target lock | R3 |
 | `BrokenNoReread` | The app asks for the permit without re-reading the fixed facts after the claim | R6 |
 | `BrokenNoServerTimeout` | The server never turns a silent permitted execution unknown | R7 |
+| `BrokenNoMonotonicWindow` | The server judges permit + 5 s + 30 s by its wall clock alone (6a), with the wall clock jumping forward | R5 |
 
 ## Accepted limits (`limits/`)
 
@@ -85,33 +86,21 @@ reachability rule, not a state formula: `reach.mjs` checks it on the checker's s
 |---|---|---|---|
 | `LimitFrozenAfterCheck` | After the last check before sending, the process freezes before the request leaves and resumes after the permit ran out | R2 | **Accepted** (agent-browser.md "Remaining limits": the stretch between the app's last clock check and the request leaving). Kept minimal (no await between the check and `request.end`); the 30 s grace delays 「確かめた」 |
 
-## Open hole: the server's clock jumping forward (`holes/`)
+## Closed hole: the server's clock jumping forward (fixed in 6b-2a)
 
-`HoleServerClockJumps` — **today's 6a breaks R5 here, and the check expects it to.** If the
-server's wall clock jumps forward by 35 s or more right after a permit (a one-shot NTP correction, a
-VM time sync), `server/src/services/browser-plans.ts` believes permit + 5 s + 30 s have passed: it
-turns the execution unknown and accepts 「確かめた：されていなかった」, releasing the lock — while the
-app, correctly by its own clocks, still sends inside its 5 s. The "not done" confirmation turns false
-and the next plan may enter the same target. 6a refuses only a clock that went back
-(`BROWSER_CLOCK_BACKWARDS`). (R2 also breaks, earlier; the variant checks only R5, the worst
-consequence.)
+The real model has an environment action `ServerClockJumps`: the server's wall clock jumps forward by
+35 s or more right after a permit (a one-shot NTP correction, a VM time sync). 6a judged
+"permit + 5 s + 30 s have passed" by the wall clock alone, so it turned the execution unknown and
+accepted 「確かめた：されていなかった」 while the app, correctly by its own clocks, still sent inside its
+5 s — the "not done" confirmation turned false (R5). 6b-2a counts the window on both clocks
+(`pastWindow` in `server/src/services/browser-plans.ts`; `Past(p)` here: the wall clock `srvAge` and the
+monotonic clock `realAge` — since the permit on the same process start, since the start after a
+restart, which is never earlier than the real elapsed time). `broken/BrokenNoMonotonicWindow` drops the
+monotonic condition again and fails R5 (R2 also breaks, earlier; it checks only R5, the worst
+consequence). The state count went from 32,882 to 57,618 with the jump in the real model.
 
-The real model (`PlanLife.tla`) has **no** clock-jump action, so R5 is checked there only for a
-server clock that does not jump; that case lives in `holes/` alone.
-
-The fix, `proposals/FixServerClockJumps`, also requires the **monotonic** elapsed time since the
-permit (with the server's boot id; since boot after a restart) to be past 35 s before "unknown" and
-「確かめた」. It keeps every rule (57,618 states).
-
-**The server PR that fixes it (6b-2a) does, in the same PR:**
-
-1. move `ServerClockJumps` and the `Past(p)` conditions of `proposals/FixServerClockJumps.tla` into
-   `PlanLife.tla` (the jump becomes an ordinary environment action of the real model);
-2. delete `holes/HoleServerClockJumps.*` and `proposals/FixServerClockJumps.*`, and their `hole` and
-   `proposal` lines in `expected.txt`;
-3. set `states` to the new count (57,618 if copied unchanged) and run `check`;
-4. add a broken variant that drops the monotonic condition again (it must fail R5), and update this
-   section and agent-browser.md "The plan model".
+`holes/` and `proposals/` are empty now; `check` still runs any variant put there (a new hole found
+in today's code, or a proposed fix).
 
 ## What the model leaves out
 

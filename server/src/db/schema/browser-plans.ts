@@ -1,3 +1,5 @@
+import type Database from 'better-sqlite3'
+
 /**
  * Plans of 「ブラウザ操作」 (PR 6a; agent-browser.md "Plans, executions, permits and locks"):
  * plans, their one execution each, the target locks, the reports, and the per-member × operation
@@ -111,3 +113,34 @@ export const browserPlanSchema = `
       PRIMARY KEY (company_id, user_id, connector_id, operation, declaration_hash)
     );
 `
+
+/**
+ * The clock fix (6b-2a; agent-browser.md "Plans, executions, permits and locks"): at the permit the
+ * server also keeps its monotonic reading (`permitted_mono_ms`, milliseconds since that process
+ * started) and that start's id (`permitted_boot`), so "35 s since the permit" is counted on both
+ * clocks and a forward step of the wall clock cannot open the confirm early. Added nullable: an older
+ * build inserts and updates without them, and a row without them (permitted by an older build, so
+ * before a restart) is counted from this process's start. Idempotent.
+ */
+export function migrateBrowserExecutionMonotonic(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(browser_executions)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('permitted_mono_ms')) conn.exec('ALTER TABLE browser_executions ADD COLUMN permitted_mono_ms INTEGER')
+  if (!cols.has('permitted_boot')) conn.exec('ALTER TABLE browser_executions ADD COLUMN permitted_boot TEXT')
+}
+
+/**
+ * The open-plans list's copies (6b-2a; `GET /browser-plans-open`): the target (canonical JSON) and the
+ * consultation, written with the plan, so the list neither reads the content (up to a few MB a plan)
+ * nor parses it. Nullable: an older build inserts without them (the list then reads the content).
+ * Fixed like the content (a trigger of their own: the first one cannot be changed in place). Idempotent.
+ */
+export function migrateBrowserPlanSummary(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(browser_plans)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('target_json')) conn.exec('ALTER TABLE browser_plans ADD COLUMN target_json TEXT')
+  if (!cols.has('conversation_id')) conn.exec('ALTER TABLE browser_plans ADD COLUMN conversation_id TEXT')
+  conn.exec(`CREATE TRIGGER IF NOT EXISTS browser_plans_fixed_summary BEFORE UPDATE ON browser_plans
+    WHEN NEW.target_json IS NOT OLD.target_json OR NEW.conversation_id IS NOT OLD.conversation_id
+  BEGIN
+    SELECT RAISE(ABORT, 'a browser plan''s fixed content never changes');
+  END`)
+}

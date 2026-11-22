@@ -14,7 +14,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
 import { randomBytes } from 'crypto'
-import { initDatabase } from '../../src/db'
+import { initDatabase, migrateBrowserExecutionMonotonic, migrateBrowserPlanSummary } from '../../src/db'
 import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
@@ -26,6 +26,7 @@ import { createBrowserPlanService, type BrowserPlanService } from '../../src/ser
 import type { ApprovedCombinationRow, BrowserPlanRepository } from '../../src/ports/browser-plans'
 import type { CompanyDataSource } from '../../src/ports/company-data'
 import type { BrowserOperationSettings } from '../../../shared/core/browser-operation'
+import { BROWSER_REPORT_REASONS } from '../../../shared/core/browser-plans'
 import type { Member } from '../../src/services/access'
 
 const T0 = Date.parse('2026-11-21T00:00:00.000Z')
@@ -47,6 +48,13 @@ let policy: BrowserOperationSettings
 let stops: { all: boolean; tools: string[] }
 let svc: BrowserPlanService
 let data: CompanyDataSource
+// The server's monotonic clock: `now - monoBase` since this process start `boot`. A forward step of the
+// wall clock moves `now` and `monoBase` together (`wallJumps`); a restart is a new `boot` (`restart`).
+let boot: string
+let monoBase: number
+const monotonic = { get bootId() { return boot }, monoMs: () => now - monoBase }
+const wallJumps = (ms: number) => { now += ms; monoBase += ms }
+const restart = () => { boot = randomBytes(8).toString('hex'); monoBase = now }
 
 const iso = (ms: number) => new Date(ms).toISOString()
 
@@ -54,7 +62,7 @@ function build() {
   data = sqliteCompanyData(conn)
   svc = createBrowserPlanService({
     companyData: data, transactions: sqliteTransactions(conn),
-    clock: { now: () => iso(now), nowMs: () => now },
+    clock: { now: () => iso(now), nowMs: () => now }, monotonic,
     ids: { newId: () => randomBytes(8).toString('hex'), newToken: () => randomBytes(32).toString('hex') },
     tokenDigest: sha256TokenDigest, catalog: { combinations: () => rows }, executionLookup: sqliteBrowserExecutionLookup(conn),
     memberships: sqliteMembershipRepository(conn), accounts: { byIds: () => new Map() } as never,
@@ -73,6 +81,8 @@ beforeEach(() => {
   for (const co of [CO, OTHER_CO]) conn.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(co, co, co, 'u-owner', iso(T0), iso(T0))
   join(CO, owner.userId, 'owner'); join(CO, admin.userId, 'admin'); join(CO, alice.userId, 'member'); join(CO, bob.userId, 'member')
   now = T0
+  boot = 'boot-1'
+  monoBase = T0 - 3_600_000
   rows = [APPROVED]
   policy = { mode: 'on', sites: [SITE] }
   stops = { all: false, tools: [] }
@@ -638,7 +648,7 @@ describe('compare-and-set', () => {
     }
     const wrapped: CompanyDataSource = { forCompany: companyId => ({ ...real.forCompany(companyId), browserPlans: repoOf(companyId) }) }
     svc = createBrowserPlanService({
-      companyData: wrapped, transactions: sqliteTransactions(conn), clock: { now: () => iso(now), nowMs: () => now },
+      companyData: wrapped, transactions: sqliteTransactions(conn), clock: { now: () => iso(now), nowMs: () => now }, monotonic,
       ids: { newId: () => randomBytes(8).toString('hex'), newToken: () => randomBytes(32).toString('hex') },
       tokenDigest: sha256TokenDigest, catalog: { combinations: () => rows }, executionLookup: sqliteBrowserExecutionLookup(conn),
       memberships: sqliteMembershipRepository(conn), accounts: { byIds: () => new Map() } as never,
@@ -682,5 +692,250 @@ describe('managing who may use a type', () => {
     const view = value(svc.grants(admin))
     expect(view.types).toEqual([{ connector: 'lstep', version: APPROVED.version, declarationHash: APPROVED.declarationHash, operation: OP, label: 'リマインダの段にテンプレートを足す' }])
     expect(view.grants.map(g => g.userId).sort()).toEqual([alice.userId, bob.userId])
+  })
+})
+
+describe('the server clock fix: the confirm window on the wall clock and the monotonic one (6b-2 §7-2)', () => {
+  const execRow = (id: string) => conn.prepare('SELECT permitted_mono_ms, permitted_boot FROM browser_executions WHERE id = ?').get(id) as { permitted_mono_ms: number | null; permitted_boot: string | null }
+
+  it('the columns are added to an older database, idempotently and nullable (an older build still writes rows without them)', () => {
+    const c = permitted()
+    conn.exec('ALTER TABLE browser_executions DROP COLUMN permitted_mono_ms; ALTER TABLE browser_executions DROP COLUMN permitted_boot')
+    migrateBrowserExecutionMonotonic(conn)
+    migrateBrowserExecutionMonotonic(conn)
+    expect(execRow(c.claim.executionId)).toEqual({ permitted_mono_ms: null, permitted_boot: null })
+    const p = approved(alice, { reminder: '71', step: '22' })
+    // What 6a's adapter inserts and updates, unchanged.
+    conn.prepare(`INSERT INTO browser_executions (company_id, id, plan_id, user_id, secret_hash, lock_key, state, void_reason, claimed_at, permitted_at, settled_at, confirmed_by)
+      VALUES (?, 'bx_old', ?, ?, 'h-old', 'k-old', 'claimed', NULL, ?, NULL, NULL, NULL)`).run(CO, p.id, alice.userId, iso(now))
+    conn.prepare("UPDATE browser_executions SET state = 'permitted', permitted_at = ? WHERE id = 'bx_old'").run(iso(now))
+    expect(execRow('bx_old')).toEqual({ permitted_mono_ms: null, permitted_boot: null })
+  })
+
+  it('the permit keeps the monotonic reading and this process start\'s id', () => {
+    const c = permitted()
+    expect(execRow(c.claim.executionId)).toEqual({ permitted_mono_ms: now - monoBase, permitted_boot: 'boot-1' })
+  })
+
+  it('a wall clock stepped forward ≥ 35 s right after the permit does not let 「されていなかった」 in early, and a correct send still lands', () => {
+    const c = permitted()
+    now += 1_000
+    wallJumps(60_000)
+    // The wall clock says 61 s; only 1 s really passed: still permitted, not confirmable, not offered.
+    expect(execState(alice, c.plan.id)).toBe('permitted')
+    expect(code(svc.confirm(alice, c.claim.executionId, { result: 'not_done' }))).toBe('BROWSER_TOO_EARLY')
+    expect(value(svc.waiting(alice)).items.map(i => [i.state, i.canConfirm])).toEqual([['permitted', false]])
+    // The app, still within its 5 s, sends and reports: the result stands.
+    now += 2_000
+    expect(value(svc.report(c.claim.secret, { result: 'succeeded' }))).toEqual({ state: 'succeeded', outcome: 'applied' })
+  })
+
+  it('an execution the app already reported unknown is not confirmable early either after a forward step', () => {
+    const c = permitted()
+    value(svc.report(c.claim.secret, { result: 'unknown', reason: 'no-answer' }))
+    now += 1_000
+    wallJumps(60_000)
+    expect(value(svc.waiting(alice)).items.map(i => [i.state, i.canConfirm])).toEqual([['unknown', false]])
+    expect(code(svc.confirm(alice, c.claim.executionId, { result: 'not_done' }))).toBe('BROWSER_TOO_EARLY')
+    now += 34_000
+    expect(value(svc.waiting(alice)).items.map(i => [i.state, i.canConfirm])).toEqual([['unknown', true]])
+    expect(value(svc.confirm(alice, c.claim.executionId, { result: 'not_done' })).state).toBe('confirmed_not_done')
+  })
+
+  it('after a forward step, the window opens once 35 s really passed since the permit', () => {
+    const c = permitted()
+    wallJumps(600_000)
+    now += 34_999
+    expect(code(svc.confirm(alice, c.claim.executionId, { result: 'not_done' }))).toBe('BROWSER_TOO_EARLY')
+    expect(execState(alice, c.plan.id)).toBe('permitted')
+    now += 1
+    expect(execState(alice, c.plan.id)).toBe('unknown')
+    expect(value(svc.waiting(alice)).items.map(i => i.canConfirm)).toEqual([true])
+    expect(value(svc.confirm(alice, c.claim.executionId, { result: 'not_done' })).state).toBe('confirmed_not_done')
+  })
+
+  it('a restart after the permit counts a whole window from the restart (the old reading is not comparable)', () => {
+    const c = permitted()
+    now += 10_000
+    restart()
+    now += 600_000
+    // Ten minutes by the wall clock, and this process started ten minutes ago: allowed.
+    expect(value(svc.confirm(alice, c.claim.executionId, { result: 'done' })).state).toBe('confirmed_done')
+    const d = permitted(alice, { reminder: '70', step: '22' })
+    restart()
+    now += 34_999
+    expect(code(svc.confirm(alice, d.claim.executionId, { result: 'not_done' }))).toBe('BROWSER_TOO_EARLY')
+    expect(execState(alice, d.plan.id)).toBe('permitted')
+    now += 1
+    expect(value(svc.confirm(alice, d.claim.executionId, { result: 'not_done' })).state).toBe('confirmed_not_done')
+  })
+
+  it('a restart with the wall clock also stepped forward still waits the whole window', () => {
+    const c = permitted()
+    restart()
+    wallJumps(3_600_000)
+    expect(code(svc.confirm(alice, c.claim.executionId, { result: 'not_done' }))).toBe('BROWSER_TOO_EARLY')
+    expect(value(svc.waiting(alice)).items.map(i => [i.state, i.canConfirm])).toEqual([['permitted', false]])
+  })
+
+  it('a row permitted by an older build (no monotonic reading) is counted from this process\'s start', () => {
+    const c = permitted()
+    conn.prepare('UPDATE browser_executions SET permitted_mono_ms = NULL, permitted_boot = NULL WHERE id = ?').run(c.claim.executionId)
+    now += 40_000
+    monoBase = now - 34_999 // this process started 34 999 ms ago
+    expect(code(svc.confirm(alice, c.claim.executionId, { result: 'not_done' }))).toBe('BROWSER_TOO_EARLY')
+    now += 1
+    expect(value(svc.confirm(alice, c.claim.executionId, { result: 'not_done' })).state).toBe('confirmed_not_done')
+  })
+
+  it('the wall clock must pass too: the monotonic window alone is not enough', () => {
+    const c = permitted()
+    now += 40_000
+    // The wall clock set back 10 s: 40 s really passed, 30 s by the wall.
+    now -= 10_000
+    monoBase -= 10_000
+    expect(code(svc.confirm(alice, c.claim.executionId, { result: 'not_done' }))).toBe('BROWSER_TOO_EARLY')
+  })
+})
+
+describe('the claim answer carries the fixed content (6b-2 §7-1)', () => {
+  it('exactly as stored and hashed, equal to the hash the person approved, with its facts version', () => {
+    const c = claimed()
+    const stored = conn.prepare('SELECT content, content_hash, facts_version FROM browser_plans WHERE id = ?').get(c.plan.id) as { content: string; content_hash: string; facts_version: number }
+    expect(c.claim.fixed).toEqual({ content: stored.content, contentHash: stored.content_hash, factsVersion: stored.facts_version })
+    expect(hashCanonical(c.claim.fixed!.content)).toBe(c.plan.contentHash)
+    expect(JSON.parse(c.claim.fixed!.content)).toMatchObject({
+      format: 1, company: CO, user: alice.userId, operation: OP, target: c.plan.target, change: c.plan.change, facts: c.plan.facts,
+    })
+  })
+})
+
+describe('the member\'s own open plans (GET /browser-plans-open)', () => {
+  it('draft and approved plans of the member, newest first; never another member\'s or company\'s, nor a claimed or closed one', () => {
+    const d1 = draft(alice, { conversationId: 'conv-1' }, { reminder: '80', step: '22' })
+    now += 1_000
+    const a1 = approved(alice, { reminder: '81', step: '22' })
+    now += 1_000
+    const c1 = claimed(alice, { reminder: '82', step: '22' })
+    now += 1_000
+    const x = draft(alice, {}, { reminder: '83', step: '22' })
+    value(svc.cancel(alice, x.id))
+    draft(bob, {}, { reminder: '84', step: '22' })
+    const list = value(svc.open(alice))
+    expect(list.more).toBe(false)
+    expect(list.items.map(i => [i.planId, i.state])).toEqual([[a1.id, 'approved'], [d1.id, 'draft']])
+    expect(list.items[1]).toEqual({
+      planId: d1.id, state: 'draft', connector: { id: 'lstep', version: APPROVED.version, label: 'Lステップ' }, operation: OP,
+      label: 'リマインダの段にテンプレートを足す', target: { reminder: '80', step: '22' }, conversationId: 'conv-1',
+      createdAt: d1.createdAt, expiresAt: d1.expiresAt, approvedAt: null,
+    })
+    expect(list.items.map(i => i.planId)).not.toContain(c1.plan.id)
+    expect(value(svc.open({ ...alice, companyId: OTHER_CO })).items).toEqual([])
+  })
+
+  it('reads the copies, never the content; a row without copies (an older build) is read from its content', () => {
+    const p = draft(alice, { conversationId: 'conv-2' }, { reminder: '90', step: '22' })
+    expect(conn.prepare('SELECT target_json, conversation_id FROM browser_plans WHERE id = ?').get(p.id)).toEqual({ target_json: '{"reminder":"90","step":"22"}', conversation_id: 'conv-2' })
+    // The copies are fixed like the content.
+    expect(() => conn.prepare("UPDATE browser_plans SET target_json = '{}' WHERE id = ?").run(p.id)).toThrow(/never changes/)
+    expect(() => conn.prepare("UPDATE browser_plans SET conversation_id = 'x' WHERE id = ?").run(p.id)).toThrow(/never changes/)
+    // A row whose content cannot even be parsed is listed from its copies alone.
+    const insert = (id: string, content: string, targetJson: string | null, conversationId: string | null, at: number) => conn.prepare(`INSERT INTO browser_plans
+      (company_id, id, user_id, connector_id, connector_version, operation, declaration_hash, checker_hash, facts_version, account, content, content_hash,
+       state, created_at, expires_at, target_json, conversation_id)
+      VALUES (?, ?, ?, 'lstep', ?, ?, ?, ?, 1, 'acc1', ?, 'sha256:x', 'draft', ?, ?, ?, ?)`)
+      .run(CO, id, alice.userId, APPROVED.version, OP, APPROVED.declarationHash, APPROVED.checkerHash, content, iso(at), iso(at + 3_600_000), targetJson, conversationId)
+    insert(`bp_${'a'.repeat(32)}`, '{not json', '{"reminder":"91","step":"22"}', null, now + 1)
+    // What 6a's adapter inserted (no copies): read from the content.
+    insert(`bp_${'b'.repeat(32)}`, JSON.stringify({ target: { reminder: '92', step: '22' }, conversation: 'conv-old' }), null, null, now + 2)
+    expect(value(svc.open(alice)).items.map(i => [i.target.reminder, i.conversationId])).toEqual([['92', 'conv-old'], ['91', null], ['90', 'conv-2']])
+  })
+
+  it('the copies are added to an older database, idempotently and nullable', () => {
+    const p = draft()
+    conn.exec('DROP TRIGGER browser_plans_fixed_summary; ALTER TABLE browser_plans DROP COLUMN target_json; ALTER TABLE browser_plans DROP COLUMN conversation_id')
+    migrateBrowserPlanSummary(conn)
+    migrateBrowserPlanSummary(conn)
+    expect(conn.prepare('SELECT target_json, conversation_id FROM browser_plans WHERE id = ?').get(p.id)).toEqual({ target_json: null, conversation_id: null })
+    expect(value(svc.open(alice)).items.map(i => i.target)).toEqual([{ reminder: '11', step: '22' }])
+  })
+
+  it('a plan past its hour is closed on this touch and not listed', () => {
+    const p = draft()
+    now += 3_600_000
+    expect(value(svc.open(alice)).items).toEqual([])
+    expect((conn.prepare('SELECT state, close_reason FROM browser_plans WHERE id = ?').get(p.id) as { state: string; close_reason: string })).toEqual({ state: 'closed', close_reason: 'expired' })
+  })
+
+  it('at most 100, and `more` says older ones remain', () => {
+    for (let i = 0; i < 101; i++) { draft(alice, {}, { reminder: String(100 + i), step: '22' }); now += 1 }
+    const list = value(svc.open(alice))
+    expect([list.items.length, list.more, list.items[0].target.reminder]).toEqual([100, true, '200'])
+    // The oldest one leaves at its hour; the rest fit.
+    now = T0 + 3_600_000
+    const after = value(svc.open(alice))
+    expect([after.items.length, after.more]).toEqual([100, false])
+  })
+})
+
+describe('a scheduled type (facts version 2)', () => {
+  const declaration = APPROVED.declaration.replace('delivers: none', 'delivers: scheduled')
+    .replace('        template_bodies: { required: true, complete: true }\n',
+      '        templates: { required: true, complete: true }\n        schedule: { required: true, complete: true }\n        audience: { required: false }\n')
+  const V2: ApprovedCombinationRow = { ...APPROVED, declaration, declarationHash: hashCanonical(declaration), factsVersion: 2 }
+  const unread = () => ({ status: 'unknown', readAt: iso(now), source: '/line/episode/show/11' })
+  const v2input = (over: Record<string, unknown> = {}, facts: Record<string, unknown> = {}) => {
+    const base = input({ declarationHash: V2.declarationHash, factsVersion: 2 })
+    const rest = Object.fromEntries(Object.entries(base.facts).filter(([k]) => k !== 'template_bodies'))
+    return {
+      ...base,
+      facts: {
+        ...rest,
+        templates: fact({ 5: { name: '前日', kind: 'text', body: '本文A' }, 7: { name: '当日', kind: 'text', body: '本文B' } }),
+        schedule: fact({ timing: '当日 09:00' }), ...facts,
+      },
+      ...over,
+    }
+  }
+  beforeEach(() => {
+    expect(V2.declaration).not.toBe(APPROVED.declaration)
+    rows = [V2]; build()
+    value(svc.setGrant(owner, alice.userId, { connector: 'lstep', operation: OP, declarationHash: V2.declarationHash, allowed: true }))
+  })
+
+  it('makes a plan with the count unknown (kept as unknown, never 0), and says it is scheduled', () => {
+    const p = value(svc.register(alice, v2input({}, { audience: unread() }), undefined))
+    expect(p).toMatchObject({ state: 'draft', delivers: 'scheduled' })
+    expect(p.facts.audience).toEqual(unread())
+    expect(code(svc.register(alice, v2input({}, { audience: fact({ count: 0 }) }), undefined))).toBe('ok')
+  })
+
+  it('no plan without the schedule, with a template that is not text, or with version 1 facts', () => {
+    expect(code(svc.register(alice, v2input({}, { schedule: unread() }), undefined))).toBe('BROWSER_FACTS_REFUSED')
+    expect(code(svc.register(alice, v2input({}, { templates: fact({ 5: { name: '前日', kind: 'text', body: '本文A' }, 7: { name: '当日', kind: 'image', body: 'x' } }) }), undefined))).toBe('BROWSER_FACTS_REFUSED')
+    expect(code(svc.register(alice, input({ declarationHash: V2.declarationHash, factsVersion: 2 }), undefined))).toBe('BROWSER_FACTS_REFUSED')
+  })
+
+  it('a scheduled type whose schedule is not required is not run', () => {
+    const looseText = V2.declaration.replace('schedule: { required: true, complete: true }', 'schedule: { required: false }')
+    const loose = { ...V2, declaration: looseText, declarationHash: hashCanonical(looseText) }
+    rows = [loose]; build()
+    expect(code(svc.register(alice, v2input({ declarationHash: loose.declarationHash }), undefined))).toBe('BROWSER_OPERATION_NOT_YET')
+  })
+
+  it('a scheduled type whose templates are optional is not run, so an unread template can never pass as text', () => {
+    const looseText = V2.declaration.replace('templates: { required: true, complete: true }', 'templates: { required: false }')
+    const loose = { ...V2, declaration: looseText, declarationHash: hashCanonical(looseText) }
+    rows = [loose]; build()
+    expect(code(svc.register(alice, v2input({ declarationHash: loose.declarationHash }, { templates: unread() }), undefined))).toBe('BROWSER_OPERATION_NOT_YET')
+  })
+})
+
+describe('report reasons', () => {
+  it('every word of the shared list is accepted and kept', () => {
+    const c = permitted()
+    for (const reason of BROWSER_REPORT_REASONS) expect(code(svc.report(c.claim.secret, { result: 'unknown', reason })), reason).toBe('ok')
+    const kept = conn.prepare('SELECT reason FROM browser_execution_reports WHERE execution_id = ? ORDER BY rowid').all(c.claim.executionId) as Array<{ reason: string }>
+    expect(kept.map(r => r.reason)).toEqual([...BROWSER_REPORT_REASONS])
   })
 })

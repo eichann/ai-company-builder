@@ -42,7 +42,8 @@ export interface BrowserPlanView {
   label: string
   /** The declaration's warning (共有のリマインダ…), or null. */
   sharedNote: string | null
-  delivers: 'none' | 'immediate' | 'unknown'
+  /** The declaration's `delivers`; `unknown` also when the combination is no longer listed. */
+  delivers: 'none' | 'scheduled' | 'immediate' | 'unknown'
   account: string
   target: Record<string, string>
   change: Record<string, string>
@@ -54,6 +55,27 @@ export interface BrowserPlanView {
   /** The fixed content's hash: approving sends back the one shown. */
   contentHash: string
   execution: BrowserExecutionView | null
+}
+
+/**
+ * A plan's fixed content (6b-2: carried in the claim answer, `BrowserClaim.fixed.content`, as the exact
+ * canonical JSON text the server stored and hashed). `format` 1; never changed once released (a new
+ * shape is a new format).
+ */
+export interface BrowserPlanContent {
+  format: 1
+  company: string
+  user: string
+  conversation: string | null
+  connector: { id: string; version: string; declarationHash: string; checkerHash: string; factsVersion: number }
+  operation: string
+  account: string
+  target: Record<string, string>
+  change: Record<string, string>
+  facts: Record<string, BrowserFact>
+  explanation: string | null
+  createdAt: string
+  expiresAt: string
 }
 
 /** POST /browser-plans/:planId/claim: the execution, its secret (once) and the fixed plan the runner takes. */
@@ -72,6 +94,17 @@ export interface BrowserClaim {
     before: Record<string, string[]>
     approvedAt: string
     expiresAt: string
+  }
+  /**
+   * The plan's fixed content as the server stored it (6b-2; added, absent from an older server): the
+   * app checks `sha256:` + hex sha256 of `content`'s UTF-8 bytes equals `contentHash`, and that hash
+   * equals the one the person approved, before it reads anything again or asks for a permit.
+   */
+  fixed?: {
+    /** Canonical JSON of a `BrowserPlanContent`. */
+    content: string
+    contentHash: string
+    factsVersion: number
   }
 }
 
@@ -115,4 +148,25 @@ export interface BrowserWaitingPage {
 export interface BrowserTypeGrantsView {
   types: Array<{ connector: string; version: string; declarationHash: string; operation: string; label: string }>
   grants: Array<{ userId: string; name: string | null; connector: string; operation: string; declarationHash: string; grantedAt: string; grantedBy: string }>
+}
+
+/** One of the member's own plans still waiting for them (draft) or approved and not yet claimed. */
+export interface BrowserOpenPlan {
+  planId: string
+  state: 'draft' | 'approved'
+  connector: { id: string; version: string; label: string }
+  operation: string
+  label: string
+  target: Record<string, string>
+  /** The consultation it came from, if the app gave one (the card opens there). */
+  conversationId: string | null
+  createdAt: string
+  expiresAt: string
+  approvedAt: string | null
+}
+
+/** GET /browser-plans-open: newest first, at most 100; `more` when there are older ones still open. */
+export interface BrowserOpenPlans {
+  items: BrowserOpenPlan[]
+  more: boolean
 }

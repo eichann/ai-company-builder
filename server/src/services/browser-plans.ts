@@ -30,13 +30,14 @@ import {
 } from '../../shared/core/plugin-browser-declaration'
 import { parsePluginManifest } from '../../shared/core/plugins'
 import type {
-  BrowserClaim, BrowserExecutionView, BrowserPermit, BrowserPlanView, BrowserReportAnswer, BrowserTypeGrantsView, BrowserWaitingPage,
+  BrowserClaim, BrowserExecutionView, BrowserOpenPlans, BrowserPermit, BrowserPlanContent, BrowserPlanView, BrowserReportAnswer, BrowserTypeGrantsView,
+  BrowserWaitingPage,
 } from '../../shared/types/browser-plans'
 import type { AccountDirectory } from '../ports/accounts'
 import type {
   ApprovedCombinationRow, BrowserConnectorCatalog, BrowserExecutionLookup, BrowserExecutionRow, BrowserPlanRepository, BrowserPlanRow,
 } from '../ports/browser-plans'
-import type { Clock, IdGenerator } from '../ports/clock'
+import type { Clock, IdGenerator, MonotonicClock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { TokenDigest } from '../ports/key-broker'
 import type { MembershipRepository } from '../ports/memberships'
@@ -49,6 +50,8 @@ export interface BrowserPlanDeps {
   companyData: CompanyDataSource
   transactions: Transactions
   clock: Clock
+  /** Counts the confirm window alongside the wall clock (the clock fix: a forward step of the wall clock never opens it early). */
+  monotonic: MonotonicClock
   ids: IdGenerator
   tokenDigest: TokenDigest
   catalog: BrowserConnectorCatalog
@@ -98,6 +101,8 @@ export const BROWSER_PLAN_WORDS = {
 const W = BROWSER_PLAN_WORDS
 /** Rows per page of the waiting list (lifecycle work has no limit: `executionsIn` without a page). */
 export const WAITING_PAGE = 100
+/** At most this many of a member's open plans are listed (newest first; `more` says there are others). */
+export const OPEN_PLANS_LIMIT = 100
 /** Why a claimed execution became void when the permit's checks refused (the refusal's code → the reason kept). */
 const GATE_VOID_REASONS: Record<string, string> = {
   BROWSER_AI_STOPPED: 'stopped',
@@ -127,22 +132,8 @@ interface Combination {
   browser: PluginBrowser
 }
 
-/** The fixed content of a plan (canonical JSON; its hash is what the person approves). */
-interface PlanContent {
-  format: 1
-  company: string
-  user: string
-  conversation: string | null
-  connector: { id: string; version: string; declarationHash: string; checkerHash: string; factsVersion: number }
-  operation: string
-  account: string
-  target: Record<string, string>
-  change: Record<string, string>
-  facts: Record<string, BrowserFact>
-  explanation: string | null
-  createdAt: string
-  expiresAt: string
-}
+/** The fixed content of a plan (canonical JSON; its hash is what the person approves; the claim answers it as stored). */
+type PlanContent = BrowserPlanContent
 
 interface Parsed {
   connector: { id: string; version: string }
@@ -188,7 +179,7 @@ function parseInput(body: unknown): Parsed | null {
 }
 
 export function createBrowserPlanService(deps: BrowserPlanDeps) {
-  const { companyData, transactions, clock, ids, tokenDigest, catalog, executionLookup, memberships } = deps
+  const { companyData, transactions, clock, monotonic, ids, tokenDigest, catalog, executionLookup, memberships } = deps
   const log = deps.log ?? console
 
   // The approved combinations, each checked: its declaration hashes to its row's hash and parses.
@@ -251,7 +242,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
   }
 
   const contentOf = (plan: BrowserPlanRow): PlanContent => JSON.parse(plan.content) as PlanContent
-  const keyOf = (plan: BrowserPlanRow) => ({
+  const keyOf = (plan: Pick<BrowserPlanRow, 'connectorId' | 'connectorVersion' | 'declarationHash' | 'checkerHash' | 'factsVersion'>) => ({
     id: plan.connectorId, version: plan.connectorVersion, declarationHash: plan.declarationHash, checkerHash: plan.checkerHash, factsVersion: plan.factsVersion,
   })
 
@@ -275,13 +266,29 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
     return true
   }
 
-  /** A claimed execution without a permit for 2 minutes (or past its plan's hour) is void; a permitted one silent past permit + 5 s + 30 s is unknown. */
+  /**
+   * Whether permit + 5 s + 30 s has passed — on **both** clocks (the clock fix, 6b-2 §7-2; model
+   * `proposals/FixServerClockJumps`): the wall clock (`permittedAt`) and the monotonic one — since the
+   * permit when this is the same process start, else since this process started (a restart, or a row
+   * an older build permitted, waits a whole window from the start). A wall clock stepped forward
+   * therefore never makes it pass early while the app may still, correctly, be sending.
+   */
+  function pastWindow(exec: BrowserExecutionRow, now: number): boolean {
+    if (!exec.permittedAt) return false
+    const window = BROWSER_PLAN_TIMES.permit + BROWSER_PLAN_TIMES.grace
+    if (now < ms(exec.permittedAt) + window) return false
+    const mono = Math.floor(monotonic.monoMs())
+    const sameStart = exec.permittedBoot === monotonic.bootId && exec.permittedMonoMs !== null
+    return (sameStart ? mono - (exec.permittedMonoMs as number) : mono) >= window
+  }
+
+  /** A claimed execution without a permit for 2 minutes (or past its plan's hour) is void; a permitted one silent past permit + 5 s + 30 s (both clocks) is unknown. */
   function settleExecution(companyId: string, exec: BrowserExecutionRow, now: number): BrowserExecutionRow {
     const repo = plans(companyId)
     if (exec.state === 'claimed') {
       const plan = repo.plan(exec.planId)
       if (now >= ms(exec.claimedAt) + BROWSER_PLAN_TIMES.claimWithoutPermit || (plan && now >= ms(plan.expiresAt))) finish(companyId, exec, 'void', { voidReason: 'expired' }, now)
-    } else if (exec.state === 'permitted' && exec.permittedAt && now >= ms(exec.permittedAt) + BROWSER_PLAN_TIMES.permit + BROWSER_PLAN_TIMES.grace) {
+    } else if (exec.state === 'permitted' && pastWindow(exec, now)) {
       repo.setExecutionState(exec.id, 'permitted', 'unknown', { settledAt: iso(now) })
     }
     return repo.execution(exec.id) as BrowserExecutionRow
@@ -383,6 +390,8 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
         declarationHash: input.declarationHash, checkerHash: input.checkerHash, factsVersion: input.factsVersion, account,
         content: canonical, contentHash: hashCanonical(canonical), state: 'draft', closeReason: null,
         createdAt: content.createdAt, expiresAt: content.expiresAt, approvedAt: null, closedAt: null,
+        // The open-plans list's copies, from the same canonical form as the content.
+        targetJson: canonicalJson(content.target), conversationId: content.conversation,
       }
       plans(member.companyId).insertPlan(row)
       return ok(planView(member.companyId, row))
@@ -477,10 +486,12 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
         if (!repo.setPlanState(plan.id, 'approved', 'claimed', {})) return refuse('conflict', W.notApprovedYet, { code: 'BROWSER_PLAN_NOT_APPROVED' })
         repo.insertExecution({
           id: executionId, planId: plan.id, userId: member.userId, secretHash: tokenDigest.digest(secret), lockKey, state: 'claimed', voidReason: null,
-          claimedAt: iso(now), permittedAt: null, settledAt: null, confirmedBy: null,
+          claimedAt: iso(now), permittedAt: null, permittedMonoMs: null, permittedBoot: null, settledAt: null, confirmedBy: null,
         })
         // Free a moment ago in this same synchronous transaction; a failure here rolls the whole claim back.
         if (!repo.takeLock(lockKey, executionId, iso(now))) throw new Error('browser plans: the target lock was taken during the claim')
+        // The fixed content exactly as stored and hashed: the app checks it against the hash the person
+        // approved before it reads anything again (6b-2 §5-1 step 5).
         return ok({
           executionId, secret,
           plan: {
@@ -488,6 +499,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
             account: plan.account, target: content.target, change: content.change, before: browserFactsState(content.facts) ?? {},
             approvedAt: plan.approvedAt as string, expiresAt: plan.expiresAt,
           },
+          fixed: { content: plan.content, contentHash: plan.contentHash, factsVersion: plan.factsVersion },
         })
       })
     },
@@ -516,7 +528,10 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
           return passed
         }
         if (repo.lockHolder(exec.lockKey) !== exec.id) return refuse('conflict', W.executionClosed, { code: 'BROWSER_EXECUTION_CLOSED' })
-        if (!repo.setExecutionState(exec.id, 'claimed', 'permitted', { permittedAt: iso(now) })) return refuse('conflict', W.permitUsed, { code: 'BROWSER_PERMIT_USED' })
+        const permittedMonoMs = Math.floor(monotonic.monoMs())
+        if (!repo.setExecutionState(exec.id, 'claimed', 'permitted', { permittedAt: iso(now), permittedMonoMs, permittedBoot: monotonic.bootId })) {
+          return refuse('conflict', W.permitUsed, { code: 'BROWSER_PERMIT_USED' })
+        }
         return ok({ permittedAt: iso(now), validMs: BROWSER_PLAN_TIMES.permit })
       })
     },
@@ -573,7 +588,8 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
     /**
      * POST /browser-executions/:executionId/confirm { result: done | not_done }: the plan's member (or an
      * owner / admin once they left, or 24 hours after the permit) says whether it happened — only
-     * after permit + 5 s + 30 s by the server's clock, never while its clock reads before the permit.
+     * after permit + 5 s + 30 s on both the server's wall clock and its monotonic one (`pastWindow`),
+     * never while its wall clock reads before the permit.
      */
     confirm(member: Member, executionId: string, body: unknown): Outcome<BrowserExecutionView> {
       if (!EXEC_ID_RE.test(executionId)) return execMissing()
@@ -596,7 +612,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
         if (isFinalExecutionState(exec.state)) return refuse('conflict', W.alreadySettled, { code: 'BROWSER_ALREADY_SETTLED' })
         const permitted = ms(exec.permittedAt as string)
         if (now < permitted) return refuse('conflict', W.clockBackwards, { code: 'BROWSER_CLOCK_BACKWARDS' })
-        if (exec.state !== 'unknown' || now < permitted + BROWSER_PLAN_TIMES.permit + BROWSER_PLAN_TIMES.grace) {
+        if (exec.state !== 'unknown' || !pastWindow(exec, now)) {
           return refuse('conflict', W.tooEarly, { code: 'BROWSER_TOO_EARLY' })
         }
         const to: BrowserExecutionState = result === 'done' ? 'confirmed_done' : 'confirmed_not_done'
@@ -632,9 +648,46 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
             executionId: exec.id, planId: plan.id, userId: exec.userId, connector: { id: plan.connectorId, version: plan.connectorVersion },
             operation: plan.operation, label: operation?.label ?? plan.operation, target: content.target, state: exec.state,
             permittedAt: exec.permittedAt, confirmableAt: confirmable === null ? null : iso(confirmable),
-            canConfirm: exec.state === 'unknown' && confirmable !== null && now >= confirmable && (mine || forOthers),
+            canConfirm: exec.state === 'unknown' && pastWindow(exec, now) && (mine || forOthers),
           }
         }) })
+      })
+    },
+
+    /**
+     * GET /browser-plans-open: the member's own draft / approved plans (the inbox's 「承認を待っています」),
+     * newest first, at most `OPEN_PLANS_LIMIT`. Plans past their hour close on this touch. Nothing of the
+     * facts or the explanation: the card reads the plan itself. The content (a v2 plan's can be a few MB)
+     * is neither read nor parsed: the target and the consultation come from their copies (a row an older
+     * build wrote without them is read whole, alone).
+     */
+    open(member: Member): Outcome<BrowserOpenPlans> {
+      return transactions.run(() => {
+        const now = clock.nowMs()
+        const repo = plans(member.companyId)
+        // One more than the limit tells whether more remain; every plan lives the same hour, so the
+        // ones that close here are the oldest, at the end.
+        const open = repo.newestOpenPlansOf(member.userId, OPEN_PLANS_LIMIT + 1).filter(p => {
+          if (now < ms(p.expiresAt)) return true
+          repo.setPlanState(p.id, p.state, 'closed', { closedAt: iso(now), closeReason: 'expired' })
+          return false
+        })
+        return ok({
+          more: open.length > OPEN_PLANS_LIMIT,
+          items: open.slice(0, OPEN_PLANS_LIMIT).map(plan => {
+            const copied = plan.targetJson !== null
+            const content = copied ? null : contentOf(repo.plan(plan.id) as BrowserPlanRow)
+            const combination = findCombination(keyOf(plan))
+            return {
+              planId: plan.id, state: plan.state as 'draft' | 'approved',
+              connector: { id: plan.connectorId, version: plan.connectorVersion, label: combination?.label ?? plan.connectorId },
+              operation: plan.operation, label: combination?.browser.operations[plan.operation]?.label ?? plan.operation,
+              target: content ? content.target : JSON.parse(plan.targetJson as string) as Record<string, string>,
+              conversationId: content ? content.conversation : plan.conversationId,
+              createdAt: plan.createdAt, expiresAt: plan.expiresAt, approvedAt: plan.approvedAt,
+            }
+          }),
+        })
       })
     },
 

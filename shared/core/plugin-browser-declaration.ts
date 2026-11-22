@@ -95,11 +95,14 @@ export function isPlainBrowserText(v: unknown, max: number, multiline = false): 
 
 /**
  * Whether a type's write reaches people at once (design memo §30.6): `none` — nothing is delivered by
- * the write itself; `immediate` — it sends to people right away; `unknown` — nobody could say. The
- * first version runs only `none` (`browserFirstVersionProblem`).
+ * the write itself; `scheduled` — it reaches people later, on the target's own schedule, and never
+ * anyone already past it (6b-2, design memo §37: confirmed by the site's owner for the type and fixed
+ * in its reviewed declaration); `immediate` — it sends to people right away; `unknown` — nobody could
+ * say. The first version runs `none`, and `scheduled` only with the schedule read as a required,
+ * complete fact (`browserFirstVersionProblem`).
  */
-export type BrowserDelivers = 'none' | 'immediate' | 'unknown'
-export const BROWSER_DELIVERS: readonly BrowserDelivers[] = ['none', 'immediate', 'unknown']
+export type BrowserDelivers = 'none' | 'scheduled' | 'immediate' | 'unknown'
+export const BROWSER_DELIVERS: readonly BrowserDelivers[] = ['none', 'scheduled', 'immediate', 'unknown']
 
 /** A fact the type's checker reads before a plan (design memo §30.6): required = no plan without it; complete = it must have been read whole. */
 export interface BrowserFactRule {
@@ -321,7 +324,7 @@ function parseOperation(name: string, raw: YamlValue, err: (m: string) => void):
   for (const n of Object.keys(change)) if (own(target, n)) e(`${where}: 「${n}」が target と change の両方にあります`)
 
   const delivers = raw.delivers
-  if (!(BROWSER_DELIVERS as readonly unknown[]).includes(delivers)) e(`${where}の delivers（すぐ人に届くか）は none / immediate / unknown のどれかを書いてください`)
+  if (!(BROWSER_DELIVERS as readonly unknown[]).includes(delivers)) e(`${where}の delivers（すぐ人に届くか）は none / scheduled / immediate / unknown のどれかを書いてください`)
   const facts = parseFacts(`${where}の facts`, raw.facts, e)
   let lock: BrowserOperation['lock'] = null
   if (effect === 'read') {
@@ -640,14 +643,24 @@ export function parseBrowserConnector(raw: { [k: string]: YamlValue }, err: (m: 
 }
 
 /**
- * Why the first version of plans (design memo §30.6, 6a) does not run this type, or null: only a type
- * that delivers nothing at once (`delivers: none`), is not irreversible, sends exactly one write and
- * does not delete. Asked by the server at every step of a plan (register, approve, claim, permit).
+ * Why the first version of plans (design memo §30.6, 6a; 6b-2 §2-3) does not run this type, or null:
+ * only a type that delivers nothing at once (`delivers: none`) or only on the target's schedule
+ * (`delivers: scheduled`, and then only when its checker reads that schedule as a required, complete
+ * fact `schedule`, so the person sees when it goes out), is not irreversible, sends exactly one write
+ * and does not delete. Asked by the server at every step of a plan (register, approve, claim, permit).
  */
 export function browserFirstVersionProblem(operation: BrowserOperation): string | null {
   if (operation.effect === 'delete') return 'この操作は消す操作なので、まだ任せられません'
   if (operation.irreversible) return 'この操作は取り消せない操作なので、まだ任せられません'
-  if (operation.delivers !== 'none') return 'この操作はすぐ人に届く（または届くか分からない）ので、まだ任せられません'
+  if (operation.delivers === 'scheduled') {
+    // What goes out and when must both be read whole: `templates` is where the first version's
+    // text-only rule lives (facts version 2), so an unread one can never make a plan.
+    const whole = (name: string) => {
+      const rule = Object.prototype.hasOwnProperty.call(operation.facts, name) ? operation.facts[name] : undefined
+      return !!rule && rule.required && rule.complete
+    }
+    if (!whole('schedule') || !whole('templates')) return 'この操作は届く時と届く中身を必ず全部読み取る型ではないので、まだ任せられません'
+  } else if (operation.delivers !== 'none') return 'この操作はすぐ人に届く（または届くか分からない）ので、まだ任せられません'
   if (operation.writes.length !== 1) return 'この操作は書き込みが1つではないので、まだ任せられません'
   if (!operation.lock) return 'この操作には作業中の印（lock）がないので、任せられません'
   return null
