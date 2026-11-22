@@ -10,6 +10,7 @@ import type { AppCommandAnswer } from '../shared/app-commands'
 import { REVIEW_PART_TYPE } from '../shared/review-request'
 import { PLUGIN_OPERATION_PART_TYPE, type PluginOperationCard } from '../shared/plugin-operations'
 import { APPROVAL_PART_TYPE, type ApprovalCardRef } from '../shared/approvals'
+import { JOB_PROPOSAL_PART_TYPE, type JobProposalCardRef } from '../shared/job-proposals'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, type MinutesBundleChoiceCard } from '../shared/minutes-app'
 import { MAIL_DRAFT_PART_TYPE, type MailDraftCard } from '../shared/outbound-mail'
 import { DRIVE_OVERWRITE_PART_TYPE, type DriveOverwriteCard } from '../shared/drive-overwrite'
@@ -97,7 +98,7 @@ export interface ChatServerConfig extends AgentHost {
    * folder under `<department>/.personal/` its writes are held to this turn; null = an ordinary one.
    */
   stepWriteArea?: (companyId: string, conversationId: string) => Promise<string | WriteArea | null>
-  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; requireRun?: boolean; companyRoot?: string; department?: string | null; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void; onDriveOverwrite?: (card: DriveOverwriteCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; requireRun?: boolean; companyRoot?: string; department?: string | null; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void; onDriveOverwrite?: (card: DriveOverwriteCard) => void; jobProposals?: boolean; onJobProposalCard?: (card: JobProposalCardRef) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * The consultation's topic as stored (chat history): the task its new files are linked to
    * (consultation-task.ts). Read at each new file, so a task the AI made earlier in the turn counts.
@@ -517,6 +518,10 @@ export async function startChatServer(config: ChatServerConfig) {
         onMailDraft: card => injector.push({ type: MAIL_DRAFT_PART_TYPE, id: `mail-draft-${card.id}`, data: card }),
         // A Google document someone else edited: 「上書きする」 / 「やめる」 is the person's, on the app's own card (drive-overwrite.ts).
         onDriveOverwrite: card => injector.push({ type: DRIVE_OVERWRITE_PART_TYPE, id: `drive-overwrite-${card.id}`, data: card }),
+        // A member's proposal of a time job (jobs.md "Member proposals"): only where the member is present — never an
+        // unattended run or a step's consultation (the server refuses a run-bound token too). The card is the app's own.
+        jobProposals: !aiTurnStep && !requestedPluginStep && !stepArea && !requestedStep,
+        onJobProposalCard: card => injector.push({ type: JOB_PROPOSAL_PART_TYPE, id: `job-proposal-${card.id}`, data: card }),
       }, c.req.raw.signal)).catch(() => null) ?? undefined
       : undefined
     // A scheduled job's run whose run is gone (taken away just now): no turn at all.

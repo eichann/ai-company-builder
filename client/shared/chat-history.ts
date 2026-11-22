@@ -5,6 +5,7 @@ import type { SteerRecord } from './steer'
 import type { ReviewRecord } from './review-request'
 import type { PluginOperationCard } from './plugin-operations'
 import type { ApprovalCardRef } from './approvals'
+import type { JobProposalCardRef } from './job-proposals'
 import type { MinutesBundleChoiceCard } from './minutes-app'
 import type { DriveOverwriteCard } from './drive-overwrite'
 import type { MailDraftCard } from './outbound-mail'
@@ -35,6 +36,8 @@ export interface ChatSession {
     pluginOperations?: PluginOperationCard[]
     /** Approval requests made or shown in this reply (approvals.ts): a reference; the card reads the request from the server. */
     approvals?: ApprovalCardRef[]
+    /** Job proposal candidates the AI made in this reply (job-proposals.ts): a reference; the card reads the candidate from the server. */
+    jobProposals?: JobProposalCardRef[]
     /** 「どの案件の議事録ですか？」 cards in this reply (minutes-app.ts). */
     minutesDealChoices?: MinutesBundleChoiceCard[]
     /** The app's cards in the order the tools produced them (part ids), when a reply has two or more. */

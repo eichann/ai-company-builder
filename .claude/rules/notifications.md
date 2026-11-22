@@ -91,8 +91,9 @@ a plugin can never draw a notice (§2-2).
   shown only while the proposal still waits and the reader is an owner / admin — `jobs.md` "Member proposals"),
   `job_proposal_returned` (「出した定期の仕事の案「…」は差し戻されました（理由：…）…」, on by default, recordless: to the proposer
   only, once per proposal, key `job_proposal_returned:<proposal>`; the reason a fixed code's words, never text; shown only to
-  the proposer while it is returned — `jobs.md` "Member proposals"). **PR C**: the app's notice settings must hide the owner /
-  admin-only kinds (`job_proposal`, `job_paused`) from members (today every kind is listed),
+  the proposer while it is returned — `jobs.md` "Member proposals"). The app's notice settings offer the owner /
+  admin-only kinds (`job_proposal`, `job_paused`; `ADMIN_ONLY_NOTICE_KINDS`) to owners / admins only (member proposals' PR C,
+  owner decision 2026-11-22),
   `asked`, `morning_summary`, `due_tomorrow` (below), `others` (everything else: the AI's
   「用意ができた」 / 「先に渡す」 when it is not a first hand-over, 「自分で進める」 of task v5, sent back,
   cancelled…). While a task is the AI's (`preparing`) nobody is told on create (engine rule); the
@@ -348,8 +349,9 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   the others (`resting`) get one line, 「…は、やることの一覧の「先のこと」「いつか」にあります」. The
   list's 「あなたの番」, the morning summary and the inbox's あなた待ち use the same rule, so they agree.
   「知らせの設定」 (one checkbox per kind, `NOTIFICATION_KIND_LABELS`; none for a kind of a feature
-  that is off in 「使う機能」, `noticeKindsShown`, `records.md` "Features on and off") opens from the inbox's
-  heading (`NoticeSettingsDialog`). Opening a row marks only its notices read.
+  that is off in 「使う機能」, `noticeKindsShown`, `records.md` "Features on and off"; none of the owner / admin-only kinds
+  `job_proposal` / `job_paused` unless the member is an owner / admin — `noticeKindsForRole`, the role read with the
+  dialog through `api:getCompanies`, not known → not offered) opens from the inbox's heading (`NoticeSettingsDialog`). Opening a row marks only its notices read.
 - **Arrived minutes** (owner decision 2026-11-07): where the department shows no task list, the
   meetings that arrived and nobody asked the AI to read (`arrived`) are rows of the 「会議」 part too,
   needing a person, with ［AI に読ませる］ (`arrivedMeetingTurns`, `client/shared/notifications-app.ts`;

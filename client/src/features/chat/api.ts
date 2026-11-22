@@ -371,3 +371,21 @@ export function settleAiTurn(companyId: string, recordId: string, writes: AiTurn
 export function retryAiTurn(companyId: string, recordId: string, writes: AiTurnWrites = window.electronAPI) {
   return writes.retryAiTurn(companyId, recordId)
 }
+
+/**
+ * The job proposal card (jobs.md "Member proposals" "The app (PR C)"): reading the candidate and the member's own presses —
+ * 「これで管理者に出す」 and 「取り下げる」 — with their session in main. The AI has no path to these.
+ */
+export type JobProposalCardPort = ElectronPort<'getJobCandidate' | 'submitJobProposal' | 'withdrawJobProposal'>
+
+export function getJobCandidate(companyId: string, candidateId: string, port: JobProposalCardPort = window.electronAPI) {
+  return port.getJobCandidate(companyId, candidateId)
+}
+
+export function submitJobProposal(companyId: string, candidateId: string, fingerprint: string, port: JobProposalCardPort = window.electronAPI) {
+  return port.submitJobProposal(companyId, candidateId, fingerprint)
+}
+
+export function withdrawJobProposal(companyId: string, proposalId: string, port: JobProposalCardPort = window.electronAPI) {
+  return port.withdrawJobProposal(companyId, proposalId)
+}

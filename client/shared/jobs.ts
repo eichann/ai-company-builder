@@ -14,8 +14,10 @@ import type { JobWaiting } from '../../shared/types/jobs'
  * then neither hand it its definition nor take its 受け取る. Each one's words are checked by
  * `client/tests/job-screen-schemas.test.ts`. `3` since stage 4b-2 (an event run by this PC's AI), in the same build
  * that runs it (fail closed, the event claim's locks: `electron/features/ai-turns/job-runs.ts`).
+ * `4` since member proposals' PR C (a member's proposal: schema 1's words, its card and 「受け取る」 in this app; `jobs.md`
+ * "Member proposals" "The app (PR C)").
  */
-export const APP_JOB_SCHEMAS: readonly number[] = [1, 2, 3]
+export const APP_JOB_SCHEMAS: readonly number[] = [1, 2, 3, 4]
 
 /** A definition this app shows: a shape the core knows and this app announces; anything else is shown as hidden. */
 export function appReadsJobDefinition(d: unknown): JobDefinition | null {
@@ -82,6 +84,10 @@ export type JobActionResult = { success: true } | JobsFailure
 export function jobNoticeTarget(kind: string): 'jobs' | 'none' | null {
   // A stopped chain (stage 4a): the responsible person chooses the next watched やること there.
   if (kind === 'job_accept_needed' || kind === 'job_chain_stopped') return 'jobs'
+  // A member's proposal returned (member proposals): the proposer sees its state in their list of proposals there.
+  if (kind === 'job_proposal_returned') return 'jobs'
+  // A proposal waiting for an owner / admin: decided in the admin console, nothing to press here.
+  if (kind === 'job_proposal') return 'none'
   // `company_restored` (deployment.md "After a restore"): about the jobs and the AI stopped; its text says what to check.
   if (kind === 'job_expired' || kind === 'job_skipped' || kind === 'job_failed' || kind === 'job_paused' || kind === 'company_restored') return 'none'
   return null

@@ -53,5 +53,5 @@ export function useMyJobs(companyId: string) {
     return run(job.id, () => rewatchJob(companyId, job.id, job.approvedVersion as number, recordId), () => '見張るやることを選び直しました。次はこのやることが終わったときに動きます。')
   }, [companyId, run])
 
-  return { loadRef, jobs, error, message, busy, accept, pause, resume, rewatch }
+  return { loadRef, jobs, error, message, busy, accept, pause, resume, rewatch, reload }
 }

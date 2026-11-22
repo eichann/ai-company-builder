@@ -154,6 +154,10 @@ contract.invoke google:untrustDriveFolder
 contract.invoke handoff:complete
 contract.invoke handoff:get
 contract.invoke handoff:update
+contract.invoke jobProposals:candidate
+contract.invoke jobProposals:mine
+contract.invoke jobProposals:submit
+contract.invoke jobProposals:withdraw
 contract.invoke jobs:accept
 contract.invoke jobs:mine
 contract.invoke jobs:occurrences
@@ -446,12 +450,14 @@ contract.type ElectronAPI.getGoogleRelay = getGoogleRelay: Invoke<'google:relay'
 contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:status'>
 contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
 contract.type ElectronAPI.getInviteChoices = getInviteChoices: Invoke<'minutes:inviteChoices'>
+contract.type ElectronAPI.getJobCandidate = getJobCandidate: Invoke<'jobProposals:candidate'>
 contract.type ElectronAPI.getMeetingArrivals = getMeetingArrivals: Invoke<'minutes:arrivals'>
 contract.type ElectronAPI.getMeetingBundleQuestion = getMeetingBundleQuestion: Invoke<'minutes:bundleQuestion'>
 contract.type ElectronAPI.getMeetingCardState = getMeetingCardState: Invoke<'minutes:meeting'>
 contract.type ElectronAPI.getMinutesNotices = getMinutesNotices: Invoke<'minutes:notices'>
 contract.type ElectronAPI.getMyDepartments = getMyDepartments: Invoke<'companySetup:myDepartments'>
 contract.type ElectronAPI.getMyJobOccurrences = getMyJobOccurrences: Invoke<'jobs:occurrences'>
+contract.type ElectronAPI.getMyJobProposals = getMyJobProposals: Invoke<'jobProposals:mine'>
 contract.type ElectronAPI.getMyJobs = getMyJobs: Invoke<'jobs:mine'>
 contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
 contract.type ElectronAPI.getNotificationSettings = getNotificationSettings: Invoke<'notifications:settings'>
@@ -618,6 +624,7 @@ contract.type ElectronAPI.startPersonStep = startPersonStep: Invoke<'pluginSteps
 contract.type ElectronAPI.startTool = startTool: Invoke<'tools:start'>
 contract.type ElectronAPI.stopDrivePick = stopDrivePick: Invoke<'tasks:cancelDrivePick'>
 contract.type ElectronAPI.stopTool = stopTool: Invoke<'tools:stop'>
+contract.type ElectronAPI.submitJobProposal = submitJobProposal: Invoke<'jobProposals:submit'>
 contract.type ElectronAPI.suggestTaskTags = suggestTaskTags: Invoke<'tasks:suggestTags'>
 contract.type ElectronAPI.toggleSkillNurturing = toggleSkillNurturing: Invoke<'skills:toggleNurturing'>
 contract.type ElectronAPI.undoPluginOperation = undoPluginOperation: Invoke<'pluginOperations:undo'>
@@ -636,6 +643,7 @@ contract.type ElectronAPI.watchCompany = watchCompany: Invoke<'fs:watch'>
 contract.type ElectronAPI.watchMinutes = watchMinutes: Invoke<'minutes:watch'>
 contract.type ElectronAPI.watchNotifications = watchNotifications: Invoke<'notifications:watch'>
 contract.type ElectronAPI.withdrawApproval = withdrawApproval: Invoke<'approvals:withdraw'>
+contract.type ElectronAPI.withdrawJobProposal = withdrawJobProposal: Invoke<'jobProposals:withdraw'>
 contract.type ElectronAPI.writeFile = writeFile: Invoke<'fs:writeFile'>
 contract.type EnvStatusResult = export interface EnvStatusResult { }
 contract.type EnvStatusResult.error = error?: string
@@ -896,6 +904,10 @@ contract.type IpcInvokeChannels.'google:untrustDriveFolder' = 'google:untrustDri
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
+contract.type IpcInvokeChannels.'jobProposals:candidate' = 'jobProposals:candidate': { args: [companyId: string, candidateId: string]; result: JobCandidateResult }
+contract.type IpcInvokeChannels.'jobProposals:mine' = 'jobProposals:mine': { args: [companyId: string]; result: MyJobProposalsResult }
+contract.type IpcInvokeChannels.'jobProposals:submit' = 'jobProposals:submit': { args: [companyId: string, candidateId: string, fingerprint: string]; result: JobProposalResult }
+contract.type IpcInvokeChannels.'jobProposals:withdraw' = 'jobProposals:withdraw': { args: [companyId: string, proposalId: string]; result: JobProposalResult }
 contract.type IpcInvokeChannels.'jobs:accept' = 'jobs:accept': { args: [companyId: string, jobId: string, version: number, fingerprint: string]; result: JobActionResult }
 contract.type IpcInvokeChannels.'jobs:mine' = 'jobs:mine': { args: [companyId: string]; result: MyJobsResult }
 contract.type IpcInvokeChannels.'jobs:occurrences' = 'jobs:occurrences': { args: [companyId: string]; result: MyJobOccurrencesResult }
@@ -1223,6 +1235,10 @@ main.handle google:untrustDriveFolder @ features/google/ipc.ts (companyId: strin
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
+main.handle jobProposals:candidate @ features/jobs/proposals.ts (companyId, candidateId)
+main.handle jobProposals:mine @ features/jobs/proposals.ts (companyId)
+main.handle jobProposals:submit @ features/jobs/proposals.ts (companyId, candidateId, fingerprint)
+main.handle jobProposals:withdraw @ features/jobs/proposals.ts (companyId, proposalId)
 main.handle jobs:accept @ features/jobs/ipc.ts (companyId, jobId, version, fingerprint)
 main.handle jobs:mine @ features/jobs/ipc.ts (companyId)
 main.handle jobs:occurrences @ features/jobs/ipc.ts (companyId)
@@ -1520,6 +1536,8 @@ preload getHandoff -> invoke handoff:get($0, $1)
 preload getHandoff : (company: string, id: string) => Promise<HandoffView>
 preload getInviteChoices -> invoke minutes:inviteChoices($0, $1)
 preload getInviteChoices : (companyId: string, recordId: string) => Promise<MeetingInviteChoicesResult>
+preload getJobCandidate -> invoke jobProposals:candidate($0, $1)
+preload getJobCandidate : (companyId: string, candidateId: string) => Promise<JobCandidateResult>
 preload getMeetingArrivals -> invoke minutes:arrivals($0)
 preload getMeetingArrivals : (companyId: string) => Promise<MeetingArrivalsResult>
 preload getMeetingBundleQuestion -> invoke minutes:bundleQuestion($0, $1)
@@ -1532,6 +1550,8 @@ preload getMyDepartments -> invoke companySetup:myDepartments($0)
 preload getMyDepartments : (companyId: string) => Promise<{ success: boolean; departmentIds?: string[] | undefined; }>
 preload getMyJobOccurrences -> invoke jobs:occurrences($0)
 preload getMyJobOccurrences : (companyId: string) => Promise<MyJobOccurrencesResult>
+preload getMyJobProposals -> invoke jobProposals:mine($0)
+preload getMyJobProposals : (companyId: string) => Promise<MyJobProposalsResult>
 preload getMyJobs -> invoke jobs:mine($0)
 preload getMyJobs : (companyId: string) => Promise<MyJobsResult>
 preload getMyPrivateFolders -> invoke privateFolders:mine($0)
@@ -1864,6 +1884,8 @@ preload stopDrivePick -> invoke tasks:cancelDrivePick($0)
 preload stopDrivePick : (companyId: string) => Promise<{ stopped: boolean; }>
 preload stopTool -> invoke tools:stop($0)
 preload stopTool : (toolPath: string) => Promise<StopToolResult>
+preload submitJobProposal -> invoke jobProposals:submit($0, $1, $2)
+preload submitJobProposal : (companyId: string, candidateId: string, fingerprint: string) => Promise<JobProposalResult>
 preload suggestTaskTags -> invoke tasks:suggestTags($0, $1, $2)
 preload suggestTaskTags : (companyId: string, title: string, tagsInUse: string[]) => Promise<TagSuggestions>
 preload toggleSkillNurturing -> invoke skills:toggleNurturing($0, $1)
@@ -1916,5 +1938,7 @@ preload watchNotifications -> invoke notifications:watch($0)
 preload watchNotifications : (companyId: string | null) => Promise<void>
 preload withdrawApproval -> invoke approvals:withdraw($0, $1)
 preload withdrawApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
+preload withdrawJobProposal -> invoke jobProposals:withdraw($0, $1)
+preload withdrawJobProposal : (companyId: string, proposalId: string) => Promise<JobProposalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)
 preload writeFile : (path: string, content: string) => Promise<boolean>

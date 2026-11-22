@@ -56,3 +56,15 @@ export function retryJobOccurrence(companyId: string, jobId: string, occurrenceI
 export function reconcileJobOccurrence(companyId: string, jobId: string, occurrenceId: string, key: string, done: boolean, writes: JobOccurrenceWrites = window.electronAPI) {
   return writes.reconcileJobOccurrence(companyId, jobId, occurrenceId, key, done)
 }
+
+/** The member's own proposals (「AIへの相談」から定期の仕事, jobs.md "Member proposals") and their 「取り下げる」. */
+export type JobProposalReads = ElectronPort<'getMyJobProposals'>
+export type JobProposalWrites = ElectronPort<'withdrawJobProposal'>
+
+export function getMyJobProposals(companyId: string, reads: JobProposalReads = window.electronAPI) {
+  return reads.getMyJobProposals(companyId)
+}
+
+export function withdrawMyJobProposal(companyId: string, proposalId: string, writes: JobProposalWrites = window.electronAPI) {
+  return writes.withdrawJobProposal(companyId, proposalId)
+}

@@ -405,6 +405,10 @@ only (registry `recordsMcp` / `recordActions`). They call the server with the tu
 token (never the session); the server records them as the AI's.
 A connector plugin's operations (HubSpot) are tools on the same server, and an update's outcome is
 a card in the reply with 「変更前の値を書き戻す」 for the person (`plugins.md` "The app").
+A member's proposal of a time job (`job_proposal_places`, `job_proposal_create`, `records/job-proposal-tools.ts`) is offered
+only to a consultation the member is in — the chat server passes `jobProposals` false for every 「AI の番」, job run and
+step consultation, and the tools need an `act` token not bound to a run (`RecordTurnAccess.boundToRun`); the candidate
+becomes the app's card, and only the member's press submits it (`jobs.md` "Member proposals" "The app (PR C)").
 
 ## Instructions while the AI works (steering)
 

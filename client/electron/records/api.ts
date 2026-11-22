@@ -53,6 +53,11 @@ export interface RecordsApiDeps {
 /** One turn's access for the AI: calls with the token, never the session. */
 export interface RecordTurnAccess {
   scope: 'read' | 'act'
+  /**
+   * The token is bound to an execution run (a scheduled job's, an 「AI の番」, a plugin step's): nobody watches it, so tools
+   * a person must be present for (a member's proposal of a job) are not offered. Absent = not bound.
+   */
+  boundToRun?: boolean
   /** `timeoutMs`: this request's own limit (default the API's; a Drive upload takes longer). */
   call(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown, signal?: AbortSignal, opts?: { timeoutMs?: number }): Promise<unknown>
   /** Revoke the token (the turn ended). */
@@ -149,6 +154,7 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
       }, signal, ownTimeoutMs)
       return {
         scope: data.scope === 'act' ? 'act' : 'read',
+        boundToRun: run !== null,
         async call(method, path, body, signal, opts) {
           if (closed) throw new RecordsApiError('TURN_ENDED', 'この会話のターンは終わりました。')
           if (method !== 'GET' && deps.beforeWrite) await deps.beforeWrite(conversationId).catch(() => undefined)

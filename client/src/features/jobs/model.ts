@@ -1,6 +1,8 @@
 // 「定期の仕事」 in the app: what a message says after the member's act, from the job as the server answers
 // after it (it may still not run: paused, the company's stop; a PC job runs only while the app is open).
 import type { MyJob, MyJobOccurrence } from '../../../shared/jobs'
+import { jobProposalStateLine, jobProposalStateWord } from '../../../shared/job-proposals'
+import type { JobProposalView } from '../../../../shared/types/job-proposals'
 import { jobMadeBeforeText, jobOccurrenceText, jobOperationKindText, jobRetryBlockText, jobRunsText, jobSlotText } from '../../../../shared/core/job-words'
 
 export const runsLine = (job: MyJob) => `いまは「${jobRunsText(job.waiting, job.pausedReason, job.placement)}」です。`
@@ -52,6 +54,36 @@ export function occurrenceRows(list: readonly MyJobOccurrence[]): OccurrenceRow[
       retry: o.retry === null ? null : o.retry.allowed ? 'allowed' : { blocked: jobRetryBlockText(o.retry.why) },
       madeBefore: jobMadeBeforeText(o.madeBefore),
       unknown: o.unknownOperations.map(u => ({ key: u.key, what: jobOperationKindText(u.kind) })),
+    }
+  })
+}
+
+/**
+ * One row of 「出した案」 (member proposals): the job's name as this member's list shows it (the server's hiding rule; a
+ * withdrawn / returned proposal's job is retired and no longer listed → 「定期の仕事」), when it was sent, its state in the
+ * proposer's words, and 「取り下げる」 only while it waits. Nothing else is derived.
+ */
+export interface ProposalRow {
+  id: string
+  state: string
+  name: string
+  sent: string
+  word: string
+  line: string
+  withdraw: boolean
+}
+
+export function proposalRows(proposals: readonly JobProposalView[], jobs: readonly MyJob[] | null): ProposalRow[] {
+  return proposals.map(p => {
+    const at = new Date(p.createdAt)
+    return {
+      id: p.id,
+      state: p.state,
+      name: jobs?.find(j => j.id === p.jobId)?.name ?? '定期の仕事',
+      sent: Number.isNaN(at.getTime()) ? '' : `${at.getMonth() + 1}/${at.getDate()} に出しました`,
+      word: jobProposalStateWord(p.state),
+      line: jobProposalStateLine(p),
+      withdraw: p.state === 'submitted',
     }
   })
 }
