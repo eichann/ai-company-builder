@@ -223,6 +223,14 @@ export const session = {
   defaultSession: new FakeSession(),
 }
 
+/** The HTML viewer's views (doc-view.ts) are made only when a document opens; never under this harness. */
+export class WebContentsView {
+  constructor() { throw new Error('the IPC harness makes no document view') }
+}
+export const webContents = {
+  fromId: (): FakeWebContents | undefined => undefined,
+}
+
 export const systemPreferences = {
   getMediaAccessStatus: () => 'granted',
   askForMediaAccess: async () => true,
@@ -254,4 +262,5 @@ export const ipcRenderer = {
 
 export default {
   app, BrowserWindow, ipcMain, dialog, shell, net, protocol, nativeImage, Notification, session, systemPreferences, contextBridge, ipcRenderer, screen,
+  WebContentsView, webContents,
 }

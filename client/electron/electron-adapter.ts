@@ -10,6 +10,7 @@ import type { AllowedRoots } from './allowed-roots'
 import { localFileTarget } from './local-file-protocol'
 import { isPluginAddress, PLUGIN_SCHEME, pluginFrameNavigationAllowed } from '../shared/plugin-bridge'
 import type { PluginFileServer } from './features/plugins/protocol'
+import { DOC_SCHEME } from '../shared/doc-frame'
 import { allowPermission, isAppPage, type AppPage } from './permission-policy'
 import { webLinkForBrowser } from './external-url'
 import type { DesktopShell, WindowPort } from './features/ports'
@@ -393,8 +394,8 @@ export function guardEverySession(page: AppPage): void {
 
 /**
  * Register the app's schemes (must run before app.whenReady(); Electron takes
- * one list): local-file:// and acb-plugin:// (a plugin's screen,
- * plugin-frame.md). acb-plugin is `standard` (relative paths resolve inside
+ * one list): local-file://, acb-plugin:// (a plugin's screen,
+ * plugin-frame.md) and acb-doc:// (the HTML viewer, doc-frame.md). acb-plugin is `standard` (relative paths resolve inside
  * the package) and `secure`; `corsEnabled` only so the frame's module scripts
  * load (its origin is opaque). Never `bypassCSP`, `supportFetchAPI`,
  * `allowServiceWorkers` or `stream`: the frame's CSP must hold.
@@ -403,6 +404,10 @@ export function registerLocalFileScheme(): void {
   protocol.registerSchemesAsPrivileged([
     { scheme: 'local-file', privileges: { stream: true, supportFetchAPI: true } },
     { scheme: PLUGIN_SCHEME, privileges: { standard: true, secure: true, corsEnabled: true } },
+    // The HTML viewer's documents (doc-frame.md): the same privileges as acb-plugin and nothing more.
+    // `standard` puts the token in the host, so each document is its own site (its own process).
+    // Served on the document session only (doc-view.ts), never on the app's default session.
+    { scheme: DOC_SCHEME, privileges: { standard: true, secure: true, corsEnabled: true } },
   ])
 }
 

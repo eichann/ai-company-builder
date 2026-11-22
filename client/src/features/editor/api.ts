@@ -13,6 +13,21 @@ export type EditorWrites = ElectronPort<'writeFile' | 'createDirectory' | 'backu
 /** Why a save was refused, in a sentence for the member (a skill file they may not change, …). */
 export type EditorRefusals = ElectronPort<'reservedPathRefusal'>
 
+/**
+ * The HTML viewer's document views (doc-frame.md): main shows an `.html`
+ * file in a view of its own (its own session, no network) and hands back only
+ * the view's id; closing it revokes the document's grant.
+ */
+export type DocViewControls = ElectronPort<'openDocView' | 'closeDocView'>
+
+export function openDocView(filePath: string, views: DocViewControls = window.electronAPI) {
+  return views.openDocView(filePath)
+}
+
+export function closeDocView(viewId: number, views: DocViewControls = window.electronAPI) {
+  return views.closeDocView(viewId)
+}
+
 /** The file's text, or null when it is gone. */
 export function readFile(filePath: string, reads: EditorReads = window.electronAPI) {
   return reads.readFile(filePath)

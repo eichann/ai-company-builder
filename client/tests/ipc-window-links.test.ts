@@ -53,6 +53,14 @@ test('acb-plugin:// is registered without CSP bypass or fetch, and served once t
   assert.ok(fake.protocolHandlers.get('acb-plugin'))
 })
 
+// The HTML viewer (doc-frame.md): acb-doc gets the plugin scheme's privileges and nothing more, and
+// the app's own (default) session never serves it: documents live on their own session (doc-view.ts).
+test('acb-doc:// is registered without CSP bypass or fetch, and never served on the app\'s session', () => {
+  assert.deepEqual(fake.privilegedSchemes.find(s => (s as { scheme: string }).scheme === 'acb-doc'),
+    { scheme: 'acb-doc', privileges: { standard: true, secure: true, corsEnabled: true } })
+  assert.equal(fake.protocolHandlers.has('acb-doc'), false)
+})
+
 test('a plugin\'s frame cannot navigate, and its window.open never reaches the browser', () => {
   const main = BrowserWindow.all[0].webContents
   const frameNavigate = (frameUrl: string, url: string) => {

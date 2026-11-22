@@ -64,7 +64,11 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (aiTurns:settings / claim / settle: the automatic 「AI の番」's claim by version and settle, main
   window only; the run itself is a hidden consultation in the renderer, `ai-turns.md`). `tasks`
   (tasks:list / create / act / card / linkFile / unlinkFile / retryRun / reconcile: the task list and card, read and
-  changed with the session; `tasks-ui.md`).
+  changed with the session; `tasks-ui.md`). `doc-frames` (docView:open / close: the HTML
+  viewer's document in a view of its own with a grant for its folder; only the view's id goes
+  back; main window's main frame only, decided before any file is read; `protocol.ts` serves the
+  scheme, `views.ts` ties grants to views; the views and their session are the shell's
+  `doc-view.ts`, `doc-frame.md`).
 - `electron/features/<domain>/wire.ts` — a feature's wiring that would otherwise sit in `main.ts`:
   `wire<Feature>(ipc?, deps)` creates the feature's services from injected ports, registers its
   IPC and its quit hooks (`AppLifecycle` in `features/ports.ts`), and returns what other features
@@ -127,14 +131,17 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
 - `electron/electron-adapter.ts` — Electron's implementations of the ports (`DesktopShell`,
   `WindowPort`, `SecretBox` (safeStorage), sync's message boxes), the windows (`createAppPages`:
   the page and web preferences; `createMainWindowHost`: the main window with its close guard;
-  `createChatWindowHost`), the `local-file://` protocol registration and `acb-plugin://` (a
-  plugin's screen: `servePluginFiles`, frame navigation; `plugin-frame.md`).
+  `createChatWindowHost`), the `local-file://` protocol registration, `acb-plugin://` (a
+  plugin's screen: `servePluginFiles`, frame navigation; `plugin-frame.md`) and the `acb-doc://` scheme's
+  privileges (served only on the document session by `doc-view.ts`, never on the app's session;
+  `doc-frame.md`).
 - `main.ts` (~320 lines) — the composition root: creates services and stores in dependency
   order, calls each `register…Ipc` / `wire…`, owns the app lifecycle, `app:closeResponse` and
   `chat-server:getInfo`, starts voice input and the chat server in `app.whenReady`.
 - Shell layer = `main.ts`, `preload.ts`, `electron-adapter.ts`, `voice-input.ts`, `browser-window.ts`
   (「ブラウザ操作」's window: one security surface of its own, kept apart so its real-Electron test loads
-  exactly it; `agent-browser.md`): the only files
+  exactly it; `agent-browser.md`), `doc-view.ts` (the HTML viewer's document views and their
+  session, likewise; `doc-frame.md`): the only files
   that import Electron, i.e. what another desktop shell (Tauri) would replace. ESLint
   `no-restricted-imports` forbids `electron` in `features/**`, `services/**`, `ipc/**`;
   `client/tests/architecture-boundaries.test.ts` checks the same over the whole tree, plus the

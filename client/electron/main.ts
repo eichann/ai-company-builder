@@ -26,6 +26,11 @@ import { killAgentProcess, spawnAgentProcess } from './agents/process'
 import { createClaudeCli } from './services/claude-cli'
 import { createClaudeSignIn } from './services/claude-sign-in'
 import { createAppPages, createBroadcastPort, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, receiveAppLinks, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
+import { createDocViewShell } from './doc-view'
+import { createDocFrames } from './features/doc-frames/protocol'
+import { createDocViews } from './features/doc-frames/views'
+import { registerDocViewsIpc } from './features/doc-frames/ipc'
+import { readSparseConfig } from './sync/sparse'
 import { diskFiles, registerChatWindowsIpc } from './features/chat-windows/ipc'
 import { createSession } from './services/session'
 import { createInFlightReads } from './services/in-flight-reads'
@@ -646,6 +651,12 @@ registerCompanySetupIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: 
 registerDownloadChoicesIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, privateFolders: gitSync, activity: syncActivity })
 
 registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell, writeRefusal: absPath => privateFolderGuards.writeRefusal(absPath) })
+
+// The HTML viewer (doc-frame.md): each document in a view of its own on the document session, which
+// alone serves acb-doc:// — only that document's folder, granted to that view and revoked with it.
+const docFrames = createDocFrames({ paths: allowedRoots, notDownloaded: root => readSparseConfig(root).excluded })
+const docViews = createDocViews({ frames: docFrames, shell: createDocViewShell({ serve: request => docFrames.serve(request) }) })
+registerDocViewsIpc(ipc, { frames: docFrames, views: docViews, fromMainWindow: event => isMainFrameSender(event, id => mainWindowHost.isWindow(id)) })
 
 // Startup runs last, once every store and service above is initialised: the
 // chat server config below captures them, and keeping the use after the
