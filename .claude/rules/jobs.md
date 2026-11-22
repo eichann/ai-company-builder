@@ -1493,20 +1493,29 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     its fingerprint; **never an acceptance**) and 「差し戻す」 one of `JOB_PROPOSAL_RETURN_REASONS` (radio buttons, **no text
     box**; the press off until one is chosen; afterwards the jobs list is read again). A server without member proposals (404)
     shows no card (none can arrive there). The bell's `job_proposal` is the app's; this card keeps every proposal (第5版).
+    **The card follows what happened elsewhere** (review L1 / Codex P2 of PR B): after any approval — from the card or from the
+    job's row — and after a refusal saying the proposal was decided meanwhile (`proposalDecidedElsewhere`: 409
+    `JOB_PROPOSAL_DECIDED` on a return, `JOB_PROPOSAL_CLOSED` on an approval; the jobs list is read again too) the page bumps
+    `staleAfter` and the card reads its list again, so a decided proposal never stays shown as waiting with 承認する / 差し戻す.
   - **Which hands made a version** (`proposalVersionText`): the approval says 「第N版：社員が出した版（…さんが出した内容のままです）」
     for the submitted version and 「管理者が直した版（…さんが出したのは第M版です）」 for a later one (only owners / admins write
-    versions after it); the job's row 「…さんからの案（<state>）」.
+    versions after it); a version before the submitted one has no words and no line (never a bare 「第N版：」, review L3); the
+    job's row 「…さんからの案（<state>）」.
   - **Withdrawn / returned** (`proposalClosed`): the job is retired (no 承認する, 直す off), and the approval and the form — which
     read the job again — say `PROPOSAL_CLOSED_TEXT` and send nothing, also when the list was read before the withdrawal.
   - **Editing a proposal's job**: `formFromDefinition` marks it (`JobForm.proposal`); `definitionFromForm` keeps it schema 4
     with `origin`, a time job run by the PC whatever 「いつ動くか」 / 「すること」 hold; the form offers neither of them nor the
     responsible person (shown as 「…（案を出した人のままです。変えられません）」 — the server would refuse
     `JOB_PROPOSAL_RESPONSIBLE_FIXED`). The edit sends `baseVersion` (the version the form was built from) **only for a
-    proposal's job** — a server before member proposals takes `{ definition }` only. `jobEditForm` gives schema 4 the form only
+    proposal's job** — a server before member proposals takes `{ definition }` only. That version is **kept with the form when
+    it is made** (`JobFormFields`' own state; the form is keyed by the newest version, so a newer version read again builds a
+    new form): a version read later is never sent as the base of an edit made on an older one (review L2). `jobEditForm` gives schema 4 the form only
     when it round-trips exactly (as schema 3; otherwise `JOB_FORM_CANNOT_EDIT`), and the grant keeps the edited version's order
     of read places (`JobForm.readsOrder`, new places after them): a proposal lists its reads before the check's place and the
     form put the check's place first, so without it an edit of the name alone would change the consent. The order rule applies
-    to every PC job's edit (versions the form made were in its order already).
+    to every PC job's edit (versions the form made were in its order already; `jobs.test.tsx` 「editing a PC job keeps its read
+    places in their order」 guards it for schema 1, review L4 — a schema-3 grant has no check place, so the form's order is
+    already its own).
   - **The proposer's 受け取る is in the app**: an owner / admin who proposed it is not offered 「責任者として受け取る」 here; the row
     and their approval say to accept in the app (decision on the safe side, owner memo §1 例1-5). Until PR C the app refuses it
     (`JOB_NEEDS_NEWER_SCREEN`).
@@ -1524,7 +1533,10 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     the own approval's note, the stored proposer in the card and the row, the submitted version shown, the return's reason and
     its disabled press, the 404, approve / return only while waiting, the new codes, the version label, the later-version note,
     the return's words); each fails a test. Not alone: the approval's own `closed` check in `approve` (behind the disabled
-    button).
+    button). After the independent review and Codex: 11 more (the card reloading on the signal, an approval bumping it, an
+    approval refusal bumping it and reading the jobs, the refusal reported by the dialog, each of the two decided codes, a
+    return refusal reloading, the base version kept with the form, no bare version line, the reads' order for schema 1 alone
+    with `jobs.test.tsx`); each fails a test.
 - **The rollback floor** (6760eef3, knows `[1, 2]`): a schema-4 job is listed by name only, its versions without definition or
   fingerprints, approve / edit / accept refused (`JOB_SCHEMA_UNKNOWN`), no occurrence made, no `job_proposal` /
   `job_proposal_returned` shown (unknown kinds); it never reads the new tables. Coming back: nothing revived (a withdrawn proposal stays so, its job retired), nothing

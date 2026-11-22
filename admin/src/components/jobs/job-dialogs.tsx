@@ -76,14 +76,16 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
           <p role="note" className="text-body">{JOB_FORM_CANNOT_EDIT}</p>
         ) : (
           <JobFormFields
-            key={job?.id ?? 'new'}
+            // A newer version read again builds a new form: never one version's form saved on top of another (review L2).
+            key={job ? `${job.id}:${newestVersion?.version ?? 0}` : 'new'}
             initial={editForm ?? emptyJobForm(defaultActingUser)}
+            baseVersion={proposal ? newestVersion?.version : undefined}
             newJob={job === null}
             members={members}
             onCancel={onClose}
-            onSubmit={async (definition) => {
+            onSubmit={async (definition, baseVersion) => {
               if (job) {
-                const saved = await jobsApi.update(companyId, job.id, definition, proposal ? newestVersion?.version : undefined)
+                const saved = await jobsApi.update(companyId, job.id, definition, baseVersion)
                 toast.success(saved.changed ? `第${saved.latestVersion}版を作りました。承認すると、この版で動きます` : '変わったところはありません')
               } else {
                 await jobsApi.create(companyId, definition)
@@ -108,14 +110,20 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function JobFormFields({ initial, newJob, members, onCancel, onSubmit }: {
+export function JobFormFields({ initial, baseVersion, newJob, members, onCancel, onSubmit }: {
   initial: JobForm
+  /**
+   * A proposal's job: the version this form was built from, kept as it was when the form was made and sent back with the
+   * edit (`baseVersion`), so the server's stale check compares with what the person edited — never a version read later.
+   */
+  baseVersion?: number
   /** A new job (not a version being edited): only then does becoming an event run by the PC take the one-day default. */
   newJob: boolean
   members: Member[]
   onCancel: () => void
-  onSubmit: (definition: JobDefinition) => Promise<void>
+  onSubmit: (definition: JobDefinition, baseVersion: number | undefined) => Promise<void>
 }) {
+  const [base] = useState(baseVersion)
   const { companyId, hasCompanyFolder } = useCompany()
   // A company without the shared folder picks its Skill from the Skill shelf (the server pins its version).
   const shelf = useQuery(!hasCompanyFolder ? `skill-shelf:${companyId}` : null, () => skillShelfApi.list(companyId))
@@ -147,7 +155,7 @@ function JobFormFields({ initial, newJob, members, onCancel, onSubmit }: {
     setProblem(null)
     setBusy(true)
     try {
-      await onSubmit(parsed.definition)
+      await onSubmit(parsed.definition, base)
     } catch (err) {
       setProblem(describeJobError(err))
     } finally {
@@ -340,12 +348,14 @@ export function JobVersionWords({ definition, members }: { definition: JobDefini
  * Approving is never accepting (owner decision 2026-11-18): also when the approver is the responsible person, their
  * consent to run it with their rights is its own press afterwards (`JobAcceptDialog`).
  */
-export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }: {
+export function JobApproveDialog({ job, members, myUserId, onClose, onApproved, onRefused }: {
   job: JobView
   members: Member[]
   myUserId: string | null
   onClose: () => void
   onApproved: (next: JobView) => void
+  /** The approval was refused (the page reads the proposals again when one was decided elsewhere meanwhile). */
+  onRefused?: (err: unknown) => void
 }) {
   const { companyId } = useCompany()
   const detail = useQuery(`job:${companyId}:${job.id}`, () => jobsApi.get(companyId, job.id))
@@ -368,6 +378,8 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
   const proposal = detail.data?.proposal ?? null
   const closed = proposalClosed(proposal)
   const proposerName = proposal ? personName(members.find((m) => m.userId === proposal.proposerId)) : ''
+  // No line at all when the words say nothing (a version before the submitted one): never a bare 「第N版：」 (review L3).
+  const versionLine = proposal && newest ? proposalVersionText(newest.version, proposal, proposerName) : null
 
   const approve = async () => {
     if (!newest?.fingerprint || tooNew || hidden || closed) return
@@ -380,6 +392,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
       onClose()
     } catch (err) {
       setProblem(describeJobError(err))
+      onRefused?.(err)
     } finally {
       setBusy(false)
     }
@@ -402,9 +415,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
           <p role="note" className="text-body">{JOB_VERSION_HIDDEN}</p>
         ) : definition ? (
           <div className="space-y-3">
-            {proposal && newest && (
-              <p className="text-body" aria-label="版の出どころ">第{newest.version}版：{proposalVersionText(newest.version, proposal, proposerName)}</p>
-            )}
+            {versionLine && newest && <p className="text-body" aria-label="版の出どころ">第{newest.version}版：{versionLine}</p>}
             <JobVersionWords definition={definition} members={members} />
             <p className="rounded-control border border-info-border bg-info-bg px-3 py-2 text-sm text-info-text" role="note">
               {own && !mustAccept

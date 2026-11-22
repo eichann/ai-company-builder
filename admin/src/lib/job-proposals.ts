@@ -4,6 +4,7 @@
  * it, and the fixed reasons a return may name (never typed text: a reason could carry a name the proposer must not see). The
  * server decides every move; these only say what it answered.
  */
+import { ApiError } from './api'
 import { JOB_PROPOSAL_RETURN_REASONS, jobProposalReturnReasonText, type JobProposalReturnReason } from '../../../shared/core/job-proposals'
 
 /** The proposal as a job carries it (`JobView.proposal`) or as the list answers it. */
@@ -36,6 +37,14 @@ export function proposalStateText(p: Pick<ProposalLike, 'state' | 'returnReason'
 /** Withdrawn or returned: its job is not used any more — never edited or approved (the server refuses it too). */
 export function proposalClosed(p: Pick<ProposalLike, 'state'> | null | undefined): boolean {
   return !!p && (p.state === 'withdrawn' || p.state === 'returned')
+}
+
+/**
+ * A refusal saying the proposal was decided by someone else meanwhile (a return or a withdrawal that came first, or an
+ * approval): 409 `JOB_PROPOSAL_DECIDED` (a return) or `JOB_PROPOSAL_CLOSED` (an approval or an edit). The lists are read again.
+ */
+export function proposalDecidedElsewhere(err: unknown): boolean {
+  return err instanceof ApiError && (err.code === 'JOB_PROPOSAL_DECIDED' || err.code === 'JOB_PROPOSAL_CLOSED')
 }
 
 /** What a closed proposal's job says instead of a form or an approval. */

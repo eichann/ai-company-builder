@@ -4,10 +4,12 @@
 // as schema 4 (the version it was made from sent, the responsible person not offered). Withdrawn / returned jobs are neither
 // edited nor approved. A server without member proposals shows no section.
 import { screen, waitFor, within } from '@testing-library/react'
+import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import JobsRoute from '@/app/companies/[id]/jobs/page'
+import { JobFormFields } from '@/components/jobs/job-dialogs'
 import { ApiError } from '@/lib/api'
 import { describeJobError } from '@/lib/errors'
 import { PROPOSAL_CLOSED_TEXT, RETURN_REASON_CHOICES, proposalStateText, proposalVersionText } from '@/lib/job-proposals'
@@ -15,7 +17,7 @@ import { JOB_FORM_CANNOT_EDIT, definitionFromForm, formFromDefinition, jobEditFo
 import { JOB_PROPOSAL_RETURN_REASONS } from '../../shared/core/job-proposals'
 import { jobConsentCanonical, parseJobDefinition, type JobDefinition } from '../../shared/core/jobs'
 import { base, companyRoutes, renderInCompany } from './company-harness'
-import { ok } from './fixtures'
+import { members as memberFixtures, ok } from './fixtures'
 import { mockApi } from './mock-api'
 
 vi.mock('next/navigation', () => ({
@@ -302,6 +304,127 @@ describe('the proposer’s 受け取る is in the app', () => {
     expect(await within(dialog).findByRole('note')).toHaveTextContent('あなたのアプリの「設定」→「仕事」→「定期の仕事」で受け取ってください')
     await userEvent.click(within(dialog).getByRole('button', { name: '承認する' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => c.url.replace(base, ''))).toEqual([`/jobs/${JOB_ID}/approve`]))
+  })
+})
+
+describe('the card follows what happened elsewhere (review L1 / Codex P2)', () => {
+  /** The card's list: waiting until `decided` is set, then empty (as the server answers once it was decided). */
+  function proposalsRoute() {
+    const state = { decided: false, reads: 0 }
+    const reply = () => { state.reads += 1; return { body: ok({ proposals: state.decided ? [] : [proposalView()] }) } }
+    return { state, reply }
+  }
+
+  it('after approving from the card, it no longer shows the proposal as waiting', async () => {
+    const job = jobView()
+    const list = proposalsRoute()
+    mockApi(routes(job, [version(1, proposalDef())], [], {
+      [`GET ${base}/job-proposals?state=submitted`]: list.reply,
+      [`POST ${base}/jobs/${JOB_ID}/approve`]: () => { list.state.decided = true; return { body: ok({ ...job, approvedVersion: 1, state: 'active', waiting: 'NOT_ACCEPTED', proposal: summary({ state: 'approved' }) }) } },
+    }))
+    renderInCompany(<JobsRoute />)
+    const card = await screen.findByLabelText('届いた案')
+    await userEvent.click(within(await within(card).findByRole('listitem', { name: '田中 太郎さんからの案' })).getByRole('button', { name: '承認する' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '承認する' }))
+    await waitFor(() => expect(within(card).queryByRole('listitem', { name: '田中 太郎さんからの案' })).not.toBeInTheDocument())
+    expect(within(card).getByText('確認を待っている案はありません。')).toBeInTheDocument()
+  })
+
+  it('after approving from the job’s row, the card is read again too', async () => {
+    const job = jobView()
+    const list = proposalsRoute()
+    mockApi(routes(job, [version(1, proposalDef())], [], {
+      [`GET ${base}/job-proposals?state=submitted`]: list.reply,
+      [`POST ${base}/jobs/${JOB_ID}/approve`]: () => { list.state.decided = true; return { body: ok({ ...job, approvedVersion: 1, state: 'active', waiting: 'NOT_ACCEPTED', proposal: summary({ state: 'approved' }) }) } },
+    }))
+    renderInCompany(<JobsRoute />)
+    const card = await screen.findByLabelText('届いた案')
+    await within(card).findByRole('listitem', { name: '田中 太郎さんからの案' })
+    await userEvent.click(within(screen.getByRole('listitem', { name: NAME })).getByRole('button', { name: '承認する' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '承認する' }))
+    await waitFor(() => expect(within(card).queryByRole('listitem', { name: '田中 太郎さんからの案' })).not.toBeInTheDocument())
+  })
+
+  it('an approval refused because the proposal was withdrawn meanwhile reads the card and the jobs again', async () => {
+    const job = jobView()
+    const list = proposalsRoute()
+    const { calls } = mockApi(routes(job, [version(1, proposalDef())], [], {
+      [`GET ${base}/job-proposals?state=submitted`]: list.reply,
+      [`POST ${base}/jobs/${JOB_ID}/approve`]: () => {
+        list.state.decided = true
+        return { status: 409, body: { success: false, error: 'この案は取り下げられたか差し戻されたため、直したり承認したりできません。', code: 'JOB_PROPOSAL_CLOSED' } }
+      },
+    }))
+    renderInCompany(<JobsRoute />)
+    const card = await screen.findByLabelText('届いた案')
+    await userEvent.click(within(await within(card).findByRole('listitem', { name: '田中 太郎さんからの案' })).getByRole('button', { name: '承認する' }))
+    const dialog = await screen.findByRole('dialog')
+    const jobReads = calls.filter((c) => c.method === 'GET' && c.url.endsWith('/jobs')).length
+    await userEvent.click(within(dialog).getByRole('button', { name: '承認する' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('取り下げられたか差し戻された')
+    await waitFor(() => expect(list.state.reads).toBe(2))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.url.endsWith('/jobs')).length).toBeGreaterThan(jobReads))
+    // With the dialog closed (an open dialog hides the page from the queries), the card no longer offers it.
+    await userEvent.click(within(dialog).getByRole('button', { name: 'キャンセル' }))
+    await waitFor(() => expect(within(card).queryByRole('listitem', { name: '田中 太郎さんからの案' })).not.toBeInTheDocument())
+  })
+
+  it('a return refused because the proposal was decided meanwhile reads the card again', async () => {
+    const job = jobView()
+    const list = proposalsRoute()
+    mockApi(routes(job, [version(1, proposalDef())], [], {
+      [`GET ${base}/job-proposals?state=submitted`]: list.reply,
+      [`POST ${base}/job-proposals/${PROPOSAL_ID}/return`]: () => {
+        list.state.decided = true
+        return { status: 409, body: { success: false, error: 'この案はもう承認されました。', code: 'JOB_PROPOSAL_DECIDED', state: 'approved' } }
+      },
+    }))
+    renderInCompany(<JobsRoute />)
+    const card = await screen.findByLabelText('届いた案')
+    await userEvent.click(within(await within(card).findByRole('listitem', { name: '田中 太郎さんからの案' })).getByRole('button', { name: '差し戻す' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('radio', { name: '先に話をしたい' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '差し戻す' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('この案はもう承認されました。')
+    await waitFor(() => expect(list.state.reads).toBe(2))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'キャンセル' }))
+    await waitFor(() => expect(within(card).queryByRole('listitem', { name: '田中 太郎さんからの案' })).not.toBeInTheDocument())
+  })
+})
+
+describe('the edit’s base version is the one the form was built from (review L2)', () => {
+  it('a later version read while the form is open is never sent as its base', async () => {
+    const sent: Array<number | undefined> = []
+    function Harness() {
+      const [v, setV] = useState(2)
+      return (
+        <>
+          <button type="button" onClick={() => setV(3)}>読み直す</button>
+          <JobFormFields initial={formFromDefinition(proposalDef())} baseVersion={v} newJob={false} members={memberFixtures}
+            onCancel={() => {}} onSubmit={async (_d, b) => { sent.push(b) }} />
+        </>
+      )
+    }
+    mockApi(companyRoutes())
+    renderInCompany(<Harness />)
+    await userEvent.click(await screen.findByRole('button', { name: '読み直す' }))
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(sent).toEqual([2]))
+  })
+})
+
+describe('a version line with nothing to say (review L3)', () => {
+  it('is not shown at all — never a bare 「第N版：」', async () => {
+    // The newest version before the submitted one (not a state the server makes): the words are null.
+    expect(proposalVersionText(1, { proposerId: 'u', submittedVersion: 2, state: 'submitted', returnReason: null }, '田中')).toBeNull()
+    const job = jobView({ proposal: summary({ submittedVersion: 2 }) })
+    mockApi(routes(job, [version(1, proposalDef())], []))
+    renderInCompany(<JobsRoute />)
+    await userEvent.click(within(await screen.findByRole('listitem', { name: NAME })).getByRole('button', { name: '承認する' }))
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByText('毎週月曜 09:00')
+    expect(within(dialog).queryByLabelText('版の出どころ')).not.toBeInTheDocument()
+    expect(dialog).not.toHaveTextContent('第1版：')
   })
 })
 

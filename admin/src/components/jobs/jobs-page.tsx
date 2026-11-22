@@ -25,7 +25,7 @@ import { STOP_LOOK } from '../../../../shared/design-tokens/stop-meaning'
 import { JobAcceptDialog, JobApproveDialog, JobFormDialog } from './job-dialogs'
 import { JobOccurrences } from './job-occurrences'
 import { JobProposals } from './job-proposals'
-import { proposalStateText } from '@/lib/job-proposals'
+import { proposalDecidedElsewhere, proposalStateText } from '@/lib/job-proposals'
 
 export const JOBS_INTRO =
   '決まった時間か、見張っているやることが終わったときなどに動く仕事です。やることを作るだけの仕事（例：毎週月曜 9:00 に「週の報告を書く」。AI は使いません）と、責任者の PC の AI が会社の Skill で作業して、終わったらやることを作る仕事があります。作ったあと、オーナーか管理者が承認し、責任者が内容を確かめて「受け取る」を押すと動き始めます。'
@@ -61,6 +61,9 @@ export function JobsPage() {
   const [accepting, setAccepting] = useState<JobView | null>(null)
   const [historyOf, setHistoryOf] = useState<string | null>(null)
   const [confirmStop, setConfirmStop] = useState(false)
+  // 「届いた案」 reads its list again after an approval from anywhere, or a refusal saying it was decided meanwhile.
+  const [proposalsStale, setProposalsStale] = useState(0)
+  const proposalsMoved = () => setProposalsStale((n) => n + 1)
 
   if (role !== null && !isAdmin) {
     return (
@@ -125,7 +128,7 @@ export function JobsPage() {
       )}
       {/* 「届いた案」 (jobs.md "Member proposals"): what members sent from the AI chat; approving opens the job's own approval. */}
       {jobs.data && members.data && (
-        <JobProposals jobs={list} members={memberList} onApprove={(job) => setApproving(job)} onChanged={() => jobs.reload()} />
+        <JobProposals jobs={list} members={memberList} onApprove={(job) => setApproving(job)} onChanged={() => jobs.reload()} staleAfter={proposalsStale} />
       )}
       {jobs.error && !jobs.data ? (
         <ErrorState error={jobs.error} onRetry={jobs.reload} />
@@ -236,7 +239,8 @@ export function JobsPage() {
           members={memberList}
           myUserId={user?.id ?? null}
           onClose={() => setApproving(null)}
-          onApproved={(next) => replace(next)}
+          onApproved={(next) => { replace(next); proposalsMoved() }}
+          onRefused={(err) => { if (proposalDecidedElsewhere(err)) { proposalsMoved(); jobs.reload() } }}
         />
       )}
       {accepting && (

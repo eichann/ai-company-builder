@@ -98,6 +98,24 @@ describe('the form', () => {
     expect(formFromDefinition(parsed.definition)).toMatchObject({ kind: 'pc', skillName: 'interview-report', checkPath: '人事部/面談', readPaths: '人事部/規程', mailDrafts: true, writeFolder: 'reports' })
   })
 
+  it('editing a PC job keeps its read places in their order (a check place listed last stays last), new places after them', () => {
+    // A schema-1 PC job made through the API with its check's place after another read place: the form puts the check's
+    // place first, so without the kept order a name-only edit would change what the responsible person accepted.
+    const parsed = definitionFromForm({
+      ...emptyJobForm('u_member'), name: '面談の報告', kind: 'pc', skillName: 'interview-report', checkKind: 'new_files', checkPath: '人事部/面談', readPaths: '人事部/規程',
+    })
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.problems))
+    const api: JobDefinition = { ...parsed.definition, grant: { ...parsed.definition.grant, reads: { paths: ['人事部/規程', '人事部/面談'], calls: [] } } }
+    const renamed = definitionFromForm({ ...formFromDefinition(api), name: '面談の報告（改）' })
+    expect(renamed.ok && renamed.definition.grant.reads.paths).toEqual(['人事部/規程', '人事部/面談'])
+    expect(renamed.ok && jobConsentCanonical(renamed.definition)).toBe(jobConsentCanonical(api))
+    // A place added goes after the kept ones; a place removed is gone.
+    const more = definitionFromForm({ ...formFromDefinition(api), readPaths: '人事部/規程\n人事部/新しい場所' })
+    expect(more.ok && more.definition.grant.reads.paths).toEqual(['人事部/規程', '人事部/面談', '人事部/新しい場所'])
+    const fewer = definitionFromForm({ ...formFromDefinition(api), readPaths: '' })
+    expect(fewer.ok && fewer.definition.grant.reads.paths).toEqual(['人事部/面談'])
+  })
+
   it('a meeting check names the minutes route in the grant (what the responsible person accepts), never the check alone', () => {
     const parsed = definitionFromForm({ ...emptyJobForm('u_member'), name: '面談', kind: 'pc', shelfItem: 'item-1', checkKind: 'new_meetings', titleWords: '面談、1on1' }, 'interview-report')
     expect(parsed.ok).toBe(true)

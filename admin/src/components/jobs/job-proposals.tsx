@@ -4,7 +4,7 @@
 // sent it (the stored proposer, never the responsible person), the server-made name, what the version they sent does in plain
 // words, its state and when. Approving goes through the job's own approval (the newest version with its fingerprint), which
 // never accepts; 「差し戻す」 names one fixed reason, never text. The server decides every move.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 import { ListSkeleton } from '@/components/app/states'
@@ -15,7 +15,7 @@ import { ApiError, jobProposalsApi, jobsApi, type JobProposalView, type JobView,
 import { useCompany } from '@/lib/company-context'
 import { describeJobError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
-import { PROPOSAL_FILTERS, RETURN_REASON_CHOICES, proposalStateText, proposalVersionText } from '@/lib/job-proposals'
+import { PROPOSAL_FILTERS, RETURN_REASON_CHOICES, proposalDecidedElsewhere, proposalStateText, proposalVersionText } from '@/lib/job-proposals'
 import { JOB_VERSION_HIDDEN, editableDefinition, hiddenVersion, needsNewerScreen } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
 import { JOB_NEEDS_NEWER_SCREEN } from '../../../../shared/core/jobs'
@@ -26,17 +26,25 @@ const personName = (m: { name: string | null; email: string | null } | undefined
 const SELECT = 'rounded-control border bg-background px-2 py-1 text-body'
 
 /** 「届いた案」: the list by state (waiting first). A server without member proposals (404) shows nothing: none can arrive there. */
-export function JobProposals({ jobs, members, onApprove, onChanged }: {
+export function JobProposals({ jobs, members, onApprove, onChanged, staleAfter }: {
   jobs: JobView[]
   members: Member[]
   /** Open the job's approval (the existing path: the newest version, its fingerprint, never an acceptance). */
   onApprove: (job: JobView) => void
   /** A return changed a job (it is retired now): read the list again. */
   onChanged: () => void
+  /**
+   * Bumped by the page whenever a proposal may have moved elsewhere — an approval from this card or the job's row, or a
+   * refusal saying it was decided meanwhile (`JOB_PROPOSAL_DECIDED` / `JOB_PROPOSAL_CLOSED`): the card reads its list again,
+   * so a decided proposal never stays shown as waiting with 承認する / 差し戻す (review L1 / Codex P2).
+   */
+  staleAfter: number
 }) {
   const { companyId } = useCompany()
   const [state, setState] = useState<(typeof PROPOSAL_FILTERS)[number]['value']>('submitted')
   const proposals = useQuery(`job-proposals:${companyId}:${state}`, () => jobProposalsApi.list(companyId, state))
+  const reloadProposals = proposals.reload
+  useEffect(() => { if (staleAfter > 0) reloadProposals() }, [staleAfter, reloadProposals])
   const [open, setOpen] = useState<string | null>(null)
   const [returning, setReturning] = useState<JobProposalView | null>(null)
   if (proposals.error instanceof ApiError && proposals.error.status === 404) return null
@@ -99,6 +107,7 @@ export function JobProposals({ jobs, members, onApprove, onChanged }: {
           proposerName={personName(byId.get(returning.proposerId))}
           onClose={() => setReturning(null)}
           onReturned={() => { proposals.reload(); onChanged() }}
+          onDecidedElsewhere={() => { proposals.reload(); onChanged() }}
         />
       )}
     </Card>
@@ -117,9 +126,10 @@ function ProposalContent({ proposal, proposerName, members }: { proposal: JobPro
   if (!detail.data) return <ListSkeleton rows={2} />
   const sent = (detail.data.versions ?? []).find((v) => v.version === proposal.submittedVersion) ?? null
   const definition = editableDefinition(sent)
+  const versionLine = proposalVersionText(proposal.submittedVersion, proposal, proposerName)
   return (
     <div className="space-y-2 rounded-control border px-3 py-2" aria-label="出した内容">
-      <p className="text-small text-muted-foreground">第{proposal.submittedVersion}版：{proposalVersionText(proposal.submittedVersion, proposal, proposerName)}</p>
+      {versionLine && <p className="text-small text-muted-foreground">第{proposal.submittedVersion}版：{versionLine}</p>}
       {needsNewerScreen(sent) ? (
         <p role="note" className="text-body">{JOB_NEEDS_NEWER_SCREEN}</p>
       ) : hiddenVersion(sent) || !definition ? (
@@ -138,12 +148,14 @@ function ProposalContent({ proposal, proposerName, members }: { proposal: JobPro
  * 「差し戻す」: one of the fixed reasons (no text box — a typed reason could carry a name the proposer must not read). The job
  * is not used afterwards (the server retires it) and the proposer is told the reason's words.
  */
-export function JobReturnDialog({ proposal, jobName, proposerName, onClose, onReturned }: {
+export function JobReturnDialog({ proposal, jobName, proposerName, onClose, onReturned, onDecidedElsewhere }: {
   proposal: JobProposalView
   jobName: string
   proposerName: string
   onClose: () => void
   onReturned: () => void
+  /** The proposal was approved, withdrawn or returned meanwhile (409 `JOB_PROPOSAL_DECIDED`): the lists are read again. */
+  onDecidedElsewhere: () => void
 }) {
   const { companyId } = useCompany()
   const [reason, setReason] = useState<JobProposalReturnReason | ''>('')
@@ -160,6 +172,7 @@ export function JobReturnDialog({ proposal, jobName, proposerName, onClose, onRe
       onClose()
     } catch (err) {
       setProblem(describeJobError(err))
+      if (proposalDecidedElsewhere(err)) onDecidedElsewhere()
     } finally {
       setBusy(false)
     }
