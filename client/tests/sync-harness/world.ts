@@ -665,6 +665,18 @@ export class World {
   }
 
   /** Every object reachable from any server ref, in every server repository. */
+  /** `pathKey(company path) + "\0" + blob` of every file in any server history (scope repositories under their folder). */
+  serverBlobsAt(): Set<string> {
+    const set = new Set<string>()
+    const repos: Array<[string, string]> = [[this.bare, ''], ...[...this.privateFolders.values()].map(f => [f.bare, `${f.path}/`] as [string, string])]
+    for (const [repo, prefix] of repos) {
+      for (const l of this.git(repo, ['rev-list', '--objects', '--all']).split('\n')) {
+        if (l.length > 41) set.add(`${pathKey(prefix + l.slice(41))}\0${l.slice(0, 40)}`)
+      }
+    }
+    return set
+  }
+
   serverObjects(): Set<string> {
     const set = new Set<string>()
     for (const repo of this.serverRepos()) {
@@ -715,6 +727,9 @@ export interface SyncOutcome {
  * those lines reach the server together; binaries must survive byte for byte.
  */
 export interface Obligation { blob: string; bytes: Buffer; added: string[] | null }
+
+/** A content a member wrote at `rel` (Member.localWrites). */
+export interface LocalWrite { rel: string; blob: string; size: number }
 
 /** Lines of `text` not in `base` (multiset difference); null for binary content. */
 export function addedLines(bytes: Buffer, base: Buffer | null): string[] | null {
@@ -781,6 +796,28 @@ export class Member {
   private readonly pending = new Set<string>()
   /** Latest committed content of every path this member wrote. */
   readonly obligations = new Map<string, Obligation>()
+  /**
+   * Every content this member wrote, committed or not (ignored `.personal/`
+   * notes, `.env`, large files, files inside a private clone): it must stay
+   * on disk, on a server or in a backup (assertNoLostLocalFiles). Only the
+   * member's own overwrite, deletion or rename of it — or access lost by
+   * design — releases one; sync moving it away does not.
+   */
+  readonly localWrites: LocalWrite[] = []
+  /** `pathKey(path) + "\0" + blob` of every content a sync committed: assertNoLostWork judges those (it knows merges). */
+  readonly committedAt = new Set<string>()
+
+  /**
+   * Release what the member wrote at or under `rel` although it is not on
+   * disk: for a test whose own step removes it by design (a backup aged out).
+   */
+  releaseLocalWritesUnder(rel: string): void {
+    const k = pathKey(rel)
+    for (let i = this.localWrites.length - 1; i >= 0; i--) {
+      const wk = pathKey(this.localWrites[i].rel)
+      if (wk === k || wk.startsWith(`${k}/`)) this.localWrites.splice(i, 1)
+    }
+  }
 
   /** A partial clone (World.addPartialMember): only the picked departments were downloaded. */
   readonly partial: boolean
@@ -1131,6 +1168,7 @@ export class Member {
     const under = (p: string) => pathKey(p) === k || pathKey(p).startsWith(`${k}/`)
     for (const p of [...this.pending]) if (under(p)) this.pending.delete(p)
     for (const p of [...this.obligations.keys()]) if (under(p)) this.obligations.delete(p)
+    for (let i = this.localWrites.length - 1; i >= 0; i--) if (under(this.localWrites[i].rel)) this.localWrites.splice(i, 1)
   }
 
   /** What the app's file operations and chat guard ask (sync's shared checker): the folder name `rel` may not use, or null. */
@@ -1168,10 +1206,32 @@ export class Member {
 
   write(rel: string, content: string | Buffer): this {
     const full = this.path(rel)
+    this.releaseLocalWrites(rel)
     fs.mkdirSync(path.dirname(full), { recursive: true })
     fs.writeFileSync(full, content)
     this.pending.add(rel)
+    const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content)
+    this.localWrites.push({ rel, blob: blobId(bytes), size: bytes.length })
     return this
+  }
+
+  /**
+   * The member's own overwrite / deletion / rename at or under `rel`: what is
+   * on disk there now is theirs to replace (returned). A content sync moved
+   * away is not on disk and stays tracked.
+   */
+  private releaseLocalWrites(rel: string): LocalWrite[] {
+    const k = pathKey(rel)
+    const released: LocalWrite[] = []
+    for (let i = this.localWrites.length - 1; i >= 0; i--) {
+      const w = this.localWrites[i]
+      const wk = pathKey(w.rel)
+      if (wk !== k && !wk.startsWith(`${k}/`)) continue
+      let onDisk = false
+      try { onDisk = blobId(fs.readFileSync(this.path(w.rel))) === w.blob } catch { /* moved away or gone */ }
+      if (onDisk) released.push(...this.localWrites.splice(i, 1))
+    }
+    return released
   }
 
   append(rel: string, text: string): this {
@@ -1181,6 +1241,7 @@ export class Member {
 
   /** Delete a file or folder. The member's own deletion releases what it had written there. */
   remove(rel: string): this {
+    this.releaseLocalWrites(rel)
     fs.rmSync(this.path(rel), { recursive: true, force: true })
     this.forget(rel)
     return this
@@ -1190,10 +1251,13 @@ export class Member {
     const src = this.path(from)
     const dest = this.path(to)
     const files = fs.statSync(src).isDirectory() ? walkFiles(src).map(f => `${to}/${f}`) : [to]
+    this.releaseLocalWrites(to)
+    const moved = this.releaseLocalWrites(from)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
     fs.renameSync(src, dest)
     this.forget(from)
     for (const f of files) this.pending.add(f)
+    for (const w of moved) this.localWrites.push({ ...w, rel: `${to}${w.rel.slice(from.length)}` })
     return this
   }
 
@@ -1333,6 +1397,9 @@ export class Member {
       const repo = this.repoOf(rel)
       if (!fs.existsSync(repo.dir) || !committedIn(repo.dir, ob.blob)) continue
       this.obligations.set(rel, ob)
+      // At this path, not merely somewhere: an ignored file with the bytes of a shared one is not
+      // committed. (Tracked is not asked: a teammate's rename can have moved a committed file.)
+      if (!this.isIgnored(rel)) this.committedAt.add(`${pathKey(rel)}\0${ob.blob}`)
       // Still pending only if it changed again after this snapshot.
       try {
         if (blobId(this.read(rel)) === ob.blob) this.pending.delete(rel)
@@ -1355,6 +1422,39 @@ export class Member {
         set.add(blobId(fs.readFileSync(path.join(dir, f))))
       }
     }
+    }
+    return set
+  }
+
+  /**
+   * `pathKey(original path) + "\0" + blob` of every copy kept for the member:
+   * the backup folders with a _metadata.json (a copy's path read back through
+   * the metadata's `copies`, `_same-name-<n>/` and the `.staged-version` /
+   * `.committed-version` names) and the sparse keep (`files/<path>`).
+   */
+  keptBlobsAt(): Set<string> {
+    const set = new Set<string>()
+    const add = (original: string, file: string) => set.add(`${pathKey(original)}\0${blobId(fs.readFileSync(file))}`)
+    for (const root of [this.path('.backups'), privateBackupsDir(this.dir)]) {
+      if (!fs.existsSync(root)) continue
+      for (const folder of fs.readdirSync(root)) {
+        const dir = path.join(root, folder)
+        const metaPath = path.join(dir, '_metadata.json')
+        if (!fs.existsSync(metaPath)) continue
+        let copies: Record<string, string> = {}
+        try { copies = JSON.parse(fs.readFileSync(metaPath, 'utf-8')).copies ?? {} } catch { /* none */ }
+        const shownAs = new Map(Object.entries(copies).map(([shown, copy]) => [copy, shown]))
+        for (const f of walkFiles(dir)) {
+          if (f === '_metadata.json') continue
+          const original = shownAs.get(f) ?? f.replace(/^_same-name-\d+\//, '').replace(/\.(?:staged|committed)-version$/, '')
+          add(original, path.join(dir, f))
+        }
+      }
+    }
+    const keep = this.path('.git/acb-sparse-keep')
+    for (const f of fs.existsSync(keep) ? walkFiles(keep) : []) {
+      const m = /^(?:run-[^/]+\/)?files\/(.+)$/.exec(f)
+      if (m) add(m[1], path.join(keep, f))
     }
     return set
   }

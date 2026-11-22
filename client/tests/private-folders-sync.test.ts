@@ -7,10 +7,13 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { cloneUrlAllowed, readPrivateExcludes, safeScopeDir, sameScopeRemote, writePrivateExcludes } from '../electron/sync/private-folders'
+import { cloneUrlAllowed, privateBackupsDir, readPrivateExcludes, safeScopeDir, sameScopeRemote, writePrivateExcludes } from '../electron/sync/private-folders'
 import { readNestedRepoExcludes, writeNestedRepoExcludes } from '../electron/sync/nested-repos'
 import { createPathChecker, pathPrefixes } from '../electron/sync/path-check'
 import { parseReservedPathRejection } from '../electron/sync/reserved-path'
+import { simpleGit } from 'simple-git'
+import { excludedCloneMessage, removeExcludedClone } from '../electron/sync/private-sync'
+import type { SyncDeps } from '../electron/sync/types'
 
 const scope = { cloneUrl: 'https://acb.example.com/api/git-http/c1/scopes/s1.git', clonePath: '/api/git-http/c1/scopes/s1.git' }
 
@@ -146,3 +149,116 @@ test('[RESERVED_PATH] section: paths and the reason lines, verbatim', () => {
   assert.deepEqual(r.folderOf, { '人事/評価/メモ.md': '人事/評価', 'hr/SECRET/a.md': 'hr/SECRET' })
   assert.equal(r.reasons[0], '（『人事/評価』というフォルダ名は使えません。別の名前にしてください。）')
 })
+
+test('a left-out private folder\'s clone is not removed when git cannot say what changed in it', async t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-excluded-')))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const dir = path.join(root, '人事', '評価')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'draft.md'), 'unsynced\n')
+  // status fails (a broken index); every other question answers "nothing".
+  const repo = { raw: async (args: string[]) => { if (args[0] === 'status') throw new Error('index file corrupt'); return args[0] === 'rev-list' ? '0' : '' } }
+  const deps = { createGit: () => repo, log: { log() {}, warn() {}, error() {} }, now: () => new Date() } as unknown as SyncDeps
+  await assert.rejects(removeExcludedClone(deps, root, dir, '人事/評価'))
+  assert.equal(fs.readFileSync(path.join(dir, 'draft.md'), 'utf-8'), 'unsynced\n')
+})
+
+/** A pushed clone at 人事/評価 with an ignored `.personal/` holding a.md and open/b.md. */
+async function excludedCloneWorld(t: { after: (fn: () => void) => void }) {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-excluded-')))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const dir = path.join(root, '人事', '評価')
+  fs.mkdirSync(dir, { recursive: true })
+  const repo = simpleGit(dir)
+  await repo.init()
+  fs.writeFileSync(path.join(dir, '.gitignore'), '.personal/\n')
+  fs.writeFileSync(path.join(dir, '表.md'), 'shared\n')
+  await repo.add('.')
+  await repo.raw(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'one'])
+  await repo.raw(['update-ref', 'refs/remotes/origin/main', 'HEAD'])
+  const personal = path.join(dir, '.personal')
+  fs.mkdirSync(path.join(personal, 'open'), { recursive: true })
+  fs.writeFileSync(path.join(personal, 'a.md'), 'only note\n')
+  fs.writeFileSync(path.join(personal, 'open', 'b.md'), 'open note\n')
+  const deps = { createGit: (d: string) => simpleGit(d), log: { log() {}, warn() {}, error() {} }, now: () => new Date('2026-11-22T00:00:00Z') } as unknown as SyncDeps
+  /** Texts of the files in the private backups. */
+  const inBackups = () => {
+    const backups = privateBackupsDir(root)
+    return !fs.existsSync(backups) ? [] : (fs.readdirSync(backups, { recursive: true }) as string[])
+      .filter(f => !f.endsWith('_metadata.json') && fs.lstatSync(path.join(backups, f)).isFile())
+      .map(f => fs.readFileSync(path.join(backups, f), 'utf-8')).sort()
+  }
+  return { root, dir, personal, deps, inBackups }
+}
+
+test('a left-out private folder: when moving an ignored folder stops half-way, the backup keeps what already left the clone and the member is told', async t => {
+  const { root, dir, personal, deps, inBackups } = await excludedCloneWorld(t)
+  // Another volume (no rename: copy, then remove), and the removal stops at a
+  // file another app holds after a.md is already gone.
+  const { renameSync, rmSync } = fs
+  t.after(() => Object.assign(fs, { renameSync, rmSync }))
+  Object.assign(fs, {
+    renameSync: (src: fs.PathLike, dest: fs.PathLike) => {
+      if (String(src) === personal) throw Object.assign(new Error('cross-device link'), { code: 'EXDEV' })
+      renameSync(src, dest)
+    },
+    rmSync: (target: fs.PathLike, options?: fs.RmOptions) => {
+      if (String(target) !== personal) return rmSync(target, options)
+      rmSync(path.join(personal, 'a.md'))
+      throw Object.assign(new Error('resource busy'), { code: 'EBUSY' })
+    },
+  })
+  const removal = await removeExcludedClone(deps, root, dir, '人事/評価')
+  Object.assign(fs, { renameSync, rmSync })
+  assert.deepEqual([removal.removed, removal.failure, removal.saved?.count], [false, 'failed', 2])
+  assert.equal(fs.readFileSync(path.join(personal, 'open', 'b.md'), 'utf-8'), 'open note\n', 'the clone stays')
+  assert.ok(inBackups().includes('only note\n'), 'a.md, already gone from the clone, is kept in the backup')
+  // Told the truth: some are in the backup (and where), not 「何も削除していません」.
+  const message = excludedCloneMessage(removal) ?? ''
+  assert.match(message, /うち2件は、すでに非公開フォルダのバックアップに保存しました（「バックアップ」の一覧で見られます。自動では消えません）/)
+  assert.doesNotMatch(message, /何も削除していません|空き容量/)
+})
+
+test('a left-out private folder: a full disk while saving is said as such, and what was copied is kept', async t => {
+  const { root, dir, personal, deps, inBackups } = await excludedCloneWorld(t)
+  const { renameSync, cpSync } = fs
+  t.after(() => Object.assign(fs, { renameSync, cpSync }))
+  Object.assign(fs, {
+    renameSync: (src: fs.PathLike, dest: fs.PathLike) => {
+      if (String(src) === personal) throw Object.assign(new Error('cross-device link'), { code: 'EXDEV' })
+      renameSync(src, dest)
+    },
+    cpSync: (src: string, dest: string) => {
+      if (src !== personal) throw new Error('unexpected copy')
+      fs.mkdirSync(dest, { recursive: true })
+      fs.copyFileSync(path.join(src, 'a.md'), path.join(dest, 'a.md'))
+      throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' })
+    },
+  })
+  const removal = await removeExcludedClone(deps, root, dir, '人事/評価')
+  Object.assign(fs, { renameSync, cpSync })
+  assert.deepEqual([removal.removed, removal.failure], [false, 'no-space'])
+  assert.equal(fs.readFileSync(path.join(personal, 'a.md'), 'utf-8'), 'only note\n', 'the clone stays whole')
+  assert.match(excludedCloneMessage(removal) ?? '', /PC の空き容量が足りませんでした/)
+  assert.deepEqual(inBackups(), removal.saved ? ['only note\n'] : [])
+})
+
+test('a left-out private folder: when the check right before the removal fails, the clone stays and the saved files are reported', async t => {
+  const { root, dir, deps, inBackups } = await excludedCloneWorld(t)
+  let statusCalls = 0
+  const flaky = (d: string) => {
+    const real = simpleGit(d)
+    return { raw: async (args: string[]) => {
+      if (args[0] === 'status' && ++statusCalls === 2) throw new Error('index file corrupt')
+      return real.raw(args)
+    } }
+  }
+  const removal = await removeExcludedClone({ ...deps, createGit: flaky } as unknown as SyncDeps, root, dir, '人事/評価')
+  assert.deepEqual([removal.removed, removal.failure, removal.saved?.count], [false, 'failed', 2])
+  assert.ok(fs.existsSync(path.join(dir, '表.md')), 'the clone stays')
+  assert.deepEqual(inBackups(), ['only note\n', 'open note\n'])
+  const message = excludedCloneMessage(removal) ?? ''
+  assert.match(message, /うち2件は、すでに非公開フォルダのバックアップに保存しました/)
+  assert.doesNotMatch(message, /移せなかった|何も削除していません/)
+})
+

@@ -348,8 +348,14 @@ what git actually sees through the app's `createGit`.
   a failed change writes the previous exclusions back (`applySparseSelection`). `init` alone
   narrowed the worktree and a failed offline `set` then left folders missing.
 - Before every `set`, ignored files inside folders it leaves excluded move to
-  `.git/acb-sparse-keep/` and come back afterwards, also on failure (`keepIgnoredInExcluded`,
-  `sync/sparse.ts`); a crash leftover is restored first and never overwrites an occupied path.
+  `.git/acb-sparse-keep/run-<ms>-<pid>-<n>/` (a new folder per `set`, never reused) and come back
+  afterwards, also on failure (`keepIgnoredInExcluded`, `sync/sparse.ts`); a crash leftover is
+  restored first (newest run first, older apps' single `files/` + `manifest.json` last) and never
+  overwrites an occupied path. A copy that cannot go back stays in its run's folder, listed in its
+  manifest; a run folder is removed only when nothing but empty folders is left (`removeIfEmpty`).
+  One shared folder let the next run write its manifest and same-named files over such a leftover,
+  and its clean-up deleted files the manifest no longer listed (code review 2026-11-22). Scenario:
+  「copies an earlier change kept and could not put back…」 in `folder-exclusions.test.ts`.
   Cone-mode `set` deletes such files (`.personal/` notes, `.env`). If `ls-files --directory`
   fails ("directory entry not superset of prefix") retry without `--directory`, else run `set`
   without the move. Tests: `outside-checkout.test.ts`, `folder-exclusions.test.ts`.

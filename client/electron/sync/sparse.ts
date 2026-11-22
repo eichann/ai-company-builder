@@ -202,32 +202,107 @@ async function reconcilePatterns(git: SimpleGit, repoPath: string, cleanExcluded
 
 const KEEP_DIR = 'acb-sparse-keep'
 
-function keepPaths(repoPath: string) {
-  const root = path.join(repoPath, '.git', KEEP_DIR)
+// Each `set` keeps its files in a folder of its own (`run-…`), never reused:
+// a kept copy that could not go back (its path is taken again) stays where it
+// is, and a later run must not write its manifest or same-named files over
+// it. Older apps used the root itself (`files/` + `manifest.json`): still read.
+interface KeepRun { root: string; files: string; manifest: string }
+
+function keepRun(root: string): KeepRun {
   return { root, files: path.join(root, 'files'), manifest: path.join(root, 'manifest.json') }
 }
 
-/** Move kept entries back. Left in place (never deleted) when something now occupies the path. */
+/**
+ * Every keep folder on disk, newest first (the run that just moved the
+ * member's current files puts them back before an older leftover could take
+ * their place), the older apps' single folder last.
+ */
+function keepRuns(repoPath: string): KeepRun[] {
+  const base = path.join(repoPath, '.git', KEEP_DIR)
+  let names: string[] = []
+  try { names = fs.readdirSync(base) } catch { return [] }
+  const runs = names.filter(n => n.startsWith('run-'))
+    .sort((a, b) => runOrder(b) - runOrder(a) || (a < b ? 1 : -1))
+    .map(name => keepRun(path.join(base, name)))
+  if (exists(path.join(base, 'manifest.json')) || exists(path.join(base, 'files'))) runs.push(keepRun(base))
+  return runs
+}
+
+/** A run folder's start time (`run-<ms>-<pid>-<n>`). */
+function runOrder(name: string): number {
+  return Number(name.split('-')[1]) || 0
+}
+
+/** A keep folder made by this call alone. */
+function newKeepRun(repoPath: string): KeepRun {
+  const base = path.join(repoPath, '.git', KEEP_DIR)
+  fs.mkdirSync(base, { recursive: true })
+  for (let n = 0; ; n++) {
+    const root = path.join(base, `run-${Date.now()}-${process.pid}-${n}`)
+    try {
+      fs.mkdirSync(root)
+      return keepRun(root)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || n >= 100) throw error
+    }
+  }
+}
+
+/** An entry at `p`, a dangling link included. */
+function exists(p: string): boolean {
+  try { fs.lstatSync(p); return true } catch { return false }
+}
+
+/** Remove `dir` and its empty folders; anything else in it stays. True when it is gone. */
+function removeIfEmpty(dir: string): boolean {
+  let st: fs.Stats
+  try { st = fs.lstatSync(dir) } catch { return true }
+  if (!st.isDirectory()) return false
+  let empty = true
+  for (const name of fs.readdirSync(dir)) {
+    if (!removeIfEmpty(path.join(dir, name))) empty = false
+  }
+  if (!empty) return false
+  try { fs.rmdirSync(dir); return true } catch { return false }
+}
+
+/**
+ * Move kept entries back. An entry whose path is taken again stays where it
+ * is (listed in its run's manifest); a run folder goes only once nothing but
+ * empty folders is left in it, so no kept file is ever deleted.
+ */
 function restoreKept(repoPath: string): void {
-  const keep = keepPaths(repoPath)
-  if (!fs.existsSync(keep.manifest)) return
-  let entries: string[] = []
-  try { entries = JSON.parse(fs.readFileSync(keep.manifest, 'utf-8')) } catch { return }
-  const leftOver: string[] = []
-  for (const entry of entries) {
-    const src = path.join(keep.files, entry)
-    const dest = path.join(repoPath, entry)
-    if (!fs.existsSync(src)) continue
-    if (fs.existsSync(dest)) {
-      console.warn(`Git sparse: ${entry} exists again; the kept copy stays in .git/${KEEP_DIR}/files`)
-      leftOver.push(entry)
+  for (const run of keepRuns(repoPath)) {
+    if (!exists(run.manifest)) {
+      removeIfEmpty(run.root) // a run stopped before it moved anything
       continue
     }
-    fs.mkdirSync(path.dirname(dest), { recursive: true })
-    fs.renameSync(src, dest)
+    let entries: unknown = null
+    try { entries = JSON.parse(fs.readFileSync(run.manifest, 'utf-8')) } catch { /* unreadable: left as it is */ }
+    if (!Array.isArray(entries)) continue
+    const leftOver: string[] = []
+    for (const entry of entries) {
+      const src = path.join(run.files, entry)
+      const dest = path.join(repoPath, entry)
+      if (!exists(src)) continue
+      if (exists(dest)) {
+        console.warn(`Git sparse: ${entry} exists again; the kept copy stays in ${path.relative(repoPath, run.files)}`)
+        leftOver.push(entry)
+        continue
+      }
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
+      fs.renameSync(src, dest)
+    }
+    if (leftOver.length > 0) {
+      fs.writeFileSync(run.manifest, JSON.stringify(leftOver))
+      continue
+    }
+    fs.rmSync(run.manifest, { force: true })
+    if (!removeIfEmpty(run.root)) {
+      console.warn(`Git sparse: files not in the manifest stay in ${path.relative(repoPath, run.root)}`)
+    }
   }
-  if (leftOver.length > 0) fs.writeFileSync(keep.manifest, JSON.stringify(leftOver))
-  else fs.rmSync(keep.root, { recursive: true, force: true })
+  removeIfEmpty(path.join(repoPath, '.git', KEEP_DIR))
 }
 
 /**
@@ -258,7 +333,8 @@ async function keepIgnoredInExcluded<T>(git: SimpleGit, repoPath: string, exclud
   const listed = [...new Set(raw.split('\0').filter(Boolean).map(e => e.replace(/\/$/, '')))].sort()
   const entries = listed.filter(e => !listed.some(o => o !== e && e.startsWith(`${o}/`)))
   if (entries.length === 0) return fn()
-  const keep = keepPaths(repoPath)
+  // A folder of this run's own: leftovers of an earlier run are never written over.
+  const keep = newKeepRun(repoPath)
   fs.mkdirSync(keep.files, { recursive: true })
   fs.writeFileSync(keep.manifest, JSON.stringify(entries))
   try {

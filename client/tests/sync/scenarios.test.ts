@@ -147,6 +147,34 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     await settleAndCheck(world)
   })
 
+  // A conflict backup's own _metadata.json must not replace the member's file of that name.
+  test('a member\'s own top-level _metadata.json survives a conflict backup (latest and earlier versions)', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { '_metadata.json': '{"v":0}\n', '_metadata (member).json': 'v0\n' } })
+    const [a, b] = world.members
+    a.offline().write('_metadata.json', '{"mine":1}\n')
+    await a.sync('first')
+    a.write('_metadata.json', '{"mine":2}\n').write('_metadata (member).json', 'mine too\n')
+    await a.sync('second')
+    b.write('_metadata.json', '{"theirs":true}\n').write('_metadata (member).json', 'theirs too\n')
+    ok(await b.sync(), 'b')
+    a.online()
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual([...(out.result.conflictFiles ?? [])].sort(), ['_metadata (member).json', '_metadata.json'])
+    const conflicts = a.backups().filter(b => b.metadata.reason === 'conflict')
+    const read = (folder: string, f: string) => fs.readFileSync(path.join(a.dir, '.backups', folder, f), 'utf-8')
+    const latest = conflicts.find(c => !c.metadata.note)!
+    assert.equal(read(latest.folder, '_metadata (member).json'), '{"mine":2}\n')
+    // The member's own file of the copy's name gets a name of its own: neither replaces the other.
+    assert.equal(read(latest.folder, '_metadata (member) (member).json'), 'mine too\n')
+    // …recorded, so the list and 復元 use the member's names (nothing guessed from file names).
+    assert.deepEqual(latest.metadata.copies, { '_metadata.json': '_metadata (member).json', '_metadata (member).json': '_metadata (member) (member).json' })
+    assert.deepEqual([...(latest.metadata.conflictFiles as string[])].sort(), ['_metadata (member).json', '_metadata.json'], 'the backup keeps its own metadata')
+    const earlier = conflicts.find(c => c.metadata.note)!
+    assert.equal(read(earlier.folder, '_metadata (member).json'), '{"mine":1}\n')
+    assert.equal(world.serverFile('_metadata.json')?.toString(), '{"theirs":true}\n')
+    await settleAndCheck(world)
+  })
+
   // Guard: nested-repo handling asks before any mutation; "don't share" (the
   // default) is the member's own choice, in .git/info/exclude — never the
   // shared .gitignore (owner decision 2026-10-24).
@@ -296,7 +324,7 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     a.initNestedRepo('ext')
     ok(await a.sync(), 'a')
     assert.deepEqual(readNestedRepoExcludes(a.dir), ['ext'])
-    fs.rmSync(a.path('ext'), { recursive: true, force: true })
+    a.remove('ext')
     ok(await a.sync(), 'a')
     assert.deepEqual(readNestedRepoExcludes(a.dir), [])
     a.write('ext/note.md', 'now a normal folder\n')

@@ -210,7 +210,18 @@ tracked. The sync message still counts the newly ignored files. Threshold:
   sync cleaned up an operation an earlier run left half-way; conflict markers included, the
   member decides what to put back; `<file>.staged-version` / `.committed-version` are versions only
   git held; `_same-name-<n>/` holds what shared a name with a file or folder in the copy; a member's
-  own root `_metadata.json` is kept as `_metadata (member).json`).
+  own root `_metadata.json` is kept as `_metadata (member).json`). That last rule holds in every
+  backup folder sync copies the member's files into: one function names the copy
+  (`backupCopyName`, `sync/backup-names.ts`: a root segment `_metadata[ (member)…].json` gets one
+  more ` (member)`, so a member's own `_metadata (member).json` does not meet the copy either),
+  used by the conflict copies (`<ts>/` and the earlier versions' `<ts>_<round>/`) and the recovery
+  copy, which record each renamed copy in the metadata's `copies` (member's path → copy). The
+  backup list shows the member's path and 復元 reads the copy through `copies` only — never guessed
+  from names, so older backups keep their meaning; a backup's root `_metadata.json` without an entry
+  is never restored (it is the backup's own file). The list hides only the root `_metadata.json`. A member's
+  `_metadata.json` was once overwritten by the conflict backup's metadata (code review 2026-11-22).
+  Scenario: 「a member's own top-level _metadata.json survives a conflict backup…」
+  (`scenarios.test.ts`); restore: `ipc-git.test.ts` 「backup:list / backup:restore…」.
 - A working folder (a company without the shared folder, no sync) has two kinds: `<ts>_skill_edit/`
   (reason `skill_edit`, `files`: the Skill folder the member moved aside with 「会社の版に戻す」) and
   `<ts>_skill_outputs/` (reason `skill_outputs`, `files`: what 外して出す moved out of a Skill; on a
@@ -218,10 +229,11 @@ tracked. The sync message still counts the newly ignored files. Threshold:
   list labels both (`BackupHistorySlideOver`), though a working folder has no backups panel today.
 - Private folders' backups live in `.git/acb-private-backups/` (`_private`, `_protected`,
   `_write_denied`, `_editor_overwrite`, `_made_public`, `_private_folder_existing`,
-  `_outside_checkout`, `_before_recovery`), never in the working tree, so no `.gitignore` edit can share them.
+  `_outside_checkout`, `_before_recovery`, `_private_excluded` (never pruned by age): the ignored files of a left-out private
+  folder's clone, moved there before the clone is removed), never in the working tree, so no `.gitignore` edit can share them.
 - `backup:list` shows both places (private ids start with `private:`). Backups older than 30 days
   are pruned in both places at the start of each sync, before the recovery copy (a full disk gets
-  its space back first).
+  its space back first) — except `_private_excluded` ones, the only copy of what they hold.
 - 復元 (`backup:restore`) and 「元に戻す」 (`git:revertFile`, added / modified) first keep the file
   on disk with `features/backups/keep-current.ts` (the private backups for a private folder or a
   nested repository); if that fails nothing changes

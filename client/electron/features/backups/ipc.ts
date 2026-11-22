@@ -7,6 +7,7 @@
 import fs from 'fs'
 import path from 'path'
 import { privateBackupsDir } from '../../sync/private-folders'
+import { BACKUP_METADATA_FILE, backupCopies } from '../../sync/backup-names'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { DesktopShell, PathGuard } from '../ports'
 import { notDownloadedRefusal } from '../../file-guards'
@@ -61,17 +62,19 @@ export function registerBackupsIpc(ipc: IpcRegistrar, { paths, shell, writeRefus
               }
             }
 
-            // List files in backup (excluding _metadata.json)
+            // List files in backup (excluding the backup's own _metadata.json at its root),
+            // each under the member's path (`copies` names those kept under another name)
+            const shownAs = new Map(Object.entries(backupCopies(metadata)).map(([shown, copy]) => [copy, shown]))
             const files: string[] = []
             const listFiles = (dir: string, prefix = '') => {
               const items = fs.readdirSync(dir, { withFileTypes: true })
               for (const item of items) {
-                if (item.name === '_metadata.json') continue
+                if (!prefix && item.name === BACKUP_METADATA_FILE) continue
                 const relativePath = prefix ? `${prefix}/${item.name}` : item.name
                 if (item.isDirectory()) {
                   listFiles(path.join(dir, item.name), relativePath)
                 } else {
-                  files.push(relativePath)
+                  files.push(shownAs.get(relativePath) ?? relativePath)
                 }
               }
             }
@@ -106,7 +109,15 @@ export function registerBackupsIpc(ipc: IpcRegistrar, { paths, shell, writeRefus
       const backupsDir = isPrivate ? privateBackupsDir(safeRepoPath) : path.join(safeRepoPath, '.backups')
       const backupPath = path.join(backupsDir, isPrivate ? backupId.slice(PRIVATE_BACKUP_ID_PREFIX.length) : backupId)
       if (!backupPath.startsWith(backupsDir + path.sep)) return { success: false, error: 'Invalid backup path' }
-      const srcPath = path.resolve(backupPath, filePath)
+      // A copy kept under another name is found through the metadata's `copies`, never
+      // guessed from names; the backup's own _metadata.json is never the member's file.
+      const named = path.resolve(backupPath, filePath)
+      const rel = path.relative(backupPath, named).split(path.sep).join('/')
+      let copies = new Map<string, string>()
+      try { copies = new Map(Object.entries(backupCopies(JSON.parse(fs.readFileSync(path.join(backupPath, BACKUP_METADATA_FILE), 'utf-8'))))) } catch { /* none */ }
+      const copy = copies.get(rel)
+      if (copy === undefined && rel === BACKUP_METADATA_FILE) return { success: false, error: 'Backup file not found' }
+      const srcPath = copy !== undefined ? path.resolve(backupPath, copy) : named
       const destPath = path.resolve(safeRepoPath, filePath)
 
       // Prevent path traversal via ../

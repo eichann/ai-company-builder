@@ -34,6 +34,7 @@ import {
   localChangesInClone,
   moveInto,
   pruneEmptyUp,
+  isOsFile,
   readPrivateScopesCache,
   writePrivateExcludes,
   writePrivateScopesCache,
@@ -337,16 +338,177 @@ function moveAside(deps: SyncDeps, repoPath: string, folder: string, backupName:
   return backupPath
 }
 
-/** Remove the clone of an excluded private folder once nothing in it is unsynced. Returns true when removed. */
-export async function removeExcludedClone(deps: SyncDeps, repoPath: string, dir: string): Promise<boolean> {
+/** The private backups' folder kind for a left-out clone's ignored files: never pruned by age (they are the only copy). */
+export const PRIVATE_EXCLUDED_BACKUP = '_private_excluded'
+
+/** A backup folder name of that kind (`<ts>_private_excluded`, `<ts>_private_excluded-2`). */
+export function isPrivateExcludedBackup(name: string): boolean {
+  return /_private_excluded(?:-\d+)?$/.test(name)
+}
+
+const WHERE_KEPT = '（「バックアップ」の一覧で見られます。自動では消えません）'
+
+/** What happened to a left-out private folder's ignored files and its clone (a sentence for the member, or none). */
+export function excludedCloneMessage(removal: ExcludedCloneRemoval): string | undefined {
+  const why = removal.failure === 'no-space'
+    ? 'PC の空き容量が足りませんでした。空きを作ってから、もう一度同期してください。'
+    : removal.failure ? '途中でうまくいかないことがありました。次の同期で、もう一度試します。' : '次の同期で、もう一度外してみます。'
+  if (removal.saved && removal.removed) {
+    return `ダウンロードしない設定にしたため、このフォルダをこの PC から外しました。同期しないファイル（${removal.saved.count}件）は非公開フォルダのバックアップに保存しました${WHERE_KEPT}。`
+  }
+  if (removal.saved) {
+    return `ダウンロードしない設定にしましたが、このフォルダはまだこの PC に残しています。同期しないファイルのうち${removal.saved.count}件は、すでに非公開フォルダのバックアップに保存しました${WHERE_KEPT}。ほかのファイルはフォルダの中にそのままあります。${why}`
+  }
+  if (removal.failure) {
+    return `ダウンロードしない設定にしましたが、このフォルダの中の同期しないファイル（大きなファイルや個人用のメモなど）を非公開フォルダのバックアップに移せなかったため、この PC から削除せずに残しました。何も削除していません。${why}`
+  }
+  return undefined
+}
+
+export interface ExcludedCloneRemoval {
+  removed: boolean
+  /**
+   * What of the member's is in the private backups now (`files`: the
+   * company-relative entries moved, folders included; `count`: the files in
+   * the backup, counted one by one), whether or not the clone went.
+   */
+  saved?: { backupPath: string; files: string[]; count: number }
+  /** The clone stays because saving failed: the disk is full, or anything else. */
+  failure?: 'no-space' | 'failed'
+}
+
+function failureOf(error: unknown): 'no-space' | 'failed' {
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  return code === 'ENOSPC' || code === 'EDQUOT' ? 'no-space' : 'failed'
+}
+
+/** Files under `dir`, one by one (a link counts as one). */
+function countFiles(dir: string): number {
+  let st: fs.Stats
+  try { st = fs.lstatSync(dir) } catch { return 0 }
+  if (!st.isDirectory()) return 1
+  try {
+    return fs.readdirSync(dir).reduce((n, name) => n + countFiles(path.join(dir, name)), 0)
+  } catch {
+    return 1
+  }
+}
+
+/** An entry at `p`, links included (never followed). */
+function present(p: string): boolean {
+  try { fs.lstatSync(p); return true } catch { return false }
+}
+
+/** Anything but folders under `dir` (links and unreadable entries count). */
+function hasFiles(dir: string): boolean {
+  let st: fs.Stats
+  try { st = fs.lstatSync(dir) } catch { return false }
+  if (!st.isDirectory()) return true
+  try {
+    return fs.readdirSync(dir).some(name => hasFiles(path.join(dir, name)))
+  } catch {
+    return true
+  }
+}
+
+/** Ignored files and folders in a clone (outermost only; OS files left out), repository-relative. */
+async function ignoredInClone(git: SimpleGit): Promise<string[]> {
+  const raw = await git.raw(['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'])
+  const listed = [...new Set(raw.split('\0').filter(Boolean).map(e => e.replace(/\/$/, '')))].sort()
+  return listed
+    .filter(e => !listed.some(o => o !== e && e.startsWith(`${o}/`)))
+    .filter(e => !isOsFile(path.basename(e)))
+}
+
+/** A backup folder made by this call alone (one of the same millisecond gets a suffix): never reused. */
+function newBackupFolder(parent: string, name: string): string {
+  fs.mkdirSync(parent, { recursive: true })
+  for (let n = 1; ; n++) {
+    const candidate = path.join(parent, n === 1 ? name : `${name}-${n}`)
+    try {
+      fs.mkdirSync(candidate)
+      return candidate
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || n >= 100) throw error
+    }
+  }
+}
+
+/**
+ * Remove the clone of an excluded private folder once nothing in it is
+ * unsynced. `git status` does not show ignored files (large files the app
+ * ignores, .personal/ notes, .env files), so those move to the private
+ * backups (`<ts>_private_excluded/`) first — as sparse.ts keeps them for a
+ * department. If one cannot be moved, what moved goes back and the clone
+ * stays (`reason`). Nothing in the clone is deleted without a copy.
+ */
+export async function removeExcludedClone(deps: SyncDeps, repoPath: string, dir: string, folder: string): Promise<ExcludedCloneRemoval> {
   const git = deps.createGit(dir)
-  const changes = await localChangesInClone(git, dir)
-  if (changes.length > 0) return false
-  const ahead = Number((await git.raw(['rev-list', '--count', 'origin/main..HEAD']).catch(() => '1')).trim()) || 0
-  if (ahead > 0) return false
+  const unsynced = async () => {
+    if ((await localChangesInClone(git, dir, { strict: true })).length > 0) return true
+    const ahead = Number((await git.raw(['rev-list', '--count', 'origin/main..HEAD']).catch(() => '1')).trim()) || 0
+    return ahead > 0
+  }
+  if (await unsynced()) return { removed: false }
+  let ignored: string[]
+  try {
+    ignored = await ignoredInClone(git)
+  } catch (error) {
+    deps.log.warn('Git sync: Could not list the ignored files of a left-out private folder; it stays:', error)
+    return { removed: false, failure: failureOf(error) }
+  }
+  let saved: ExcludedCloneRemoval['saved']
+  if (ignored.length > 0) {
+    const moved: string[] = []
+    let backupPath = ''
+    try {
+      backupPath = newBackupFolder(privateBackupsDir(repoPath), `${stampNow(deps)}${PRIVATE_EXCLUDED_BACKUP}`)
+      const files = ignored.map(e => `${folder}/${e}`)
+      fs.writeFileSync(path.join(backupPath, '_metadata.json'), JSON.stringify({
+        timestamp: deps.now().toISOString(),
+        reason: 'private_folder_excluded',
+        folders: [folder],
+        files,
+        note: 'not synced files of a private folder left out on this computer, saved before its copy here was removed',
+      }, null, 2))
+      for (const entry of ignored) {
+        const dest = path.join(backupPath, folder, entry)
+        if (present(dest)) throw new Error('already in the backup')
+        // Listed before the move: a copy-and-remove that fails half-way has touched both sides.
+        moved.push(entry)
+        moveInto(path.join(dir, entry), dest)
+      }
+      saved = { backupPath, files, count: countFiles(path.join(backupPath, folder)) }
+    } catch (error) {
+      deps.log.warn('Git sync: Could not save the ignored files of a left-out private folder; it stays:', error)
+      // What moved goes back where its place is free; the rest stays in the backup (its metadata lists it).
+      for (const entry of moved.reverse()) {
+        const kept = path.join(backupPath, folder, entry)
+        try {
+          if (present(kept) && !present(path.join(dir, entry))) moveInto(kept, path.join(dir, entry))
+        } catch { /* stays in the backup */ }
+      }
+      // The backup goes only when nothing of the member's is left in it; else the member is told it is there.
+      const failure = failureOf(error)
+      if (!backupPath) return { removed: false, failure }
+      if (!hasFiles(path.join(backupPath, folder))) {
+        fs.rmSync(backupPath, { recursive: true, force: true })
+        return { removed: false, failure }
+      }
+      return { removed: false, failure, saved: { backupPath, files: ignored.map(e => `${folder}/${e}`), count: countFiles(path.join(backupPath, folder)) } }
+    }
+  }
+  // Checked again right before the removal: something written meanwhile (the AI, another app),
+  // or a check that cannot be made, keeps the clone; the next sync tries again.
+  try {
+    if (await unsynced() || (await ignoredInClone(git)).length > 0) return { removed: false, saved }
+  } catch (error) {
+    deps.log.warn('Git sync: Could not check a left-out private folder again; it stays:', error)
+    return { removed: false, saved, failure: failureOf(error) }
+  }
   fs.rmSync(dir, { recursive: true, force: true })
   pruneEmptyUp(path.dirname(dir), repoPath)
-  return true
+  return { removed: true, saved }
 }
 
 /** A dialog whose file lists name company-relative paths (the scope's prefix added). */

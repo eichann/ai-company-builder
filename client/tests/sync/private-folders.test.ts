@@ -14,7 +14,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { World, DEFAULT_SCOPES, FAKE_AWS_KEY, privateMarker, type Member, type SyncOutcome } from '../sync-harness/world'
 import { settleAndCheck, assertPrivacy } from '../sync-harness/invariants'
-import { readPrivateExcludes } from '../../electron/sync/private-folders'
+import { privateBackupsDir, readPrivateExcludes } from '../../electron/sync/private-folders'
+import { excludedCloneMessage } from '../../electron/sync/private-sync'
 import { checkWritePath, decideReservedWrite } from '../../electron/write-guard'
 
 const CONCURRENCY = Number(process.env.SYNC_HARNESS_CONCURRENCY) || 4
@@ -401,6 +402,61 @@ describe('git:sync private folders', { concurrency: CONCURRENCY }, () => {
     assert.equal((await reader.includeFolder(HR)).success, true)
     await reader.applyPrivateFolderChoices()
     assert.match(reader.readText(`${HR}/最後.md`), /last edit/)
+    await settleAndCheck(world)
+  })
+
+  scenario('leaving the private folder out keeps the files it never shares (.personal/ notes, .env): they go to the private backups before the clone is removed', async t => {
+    const { world, reader } = create(t)
+    ok(await reader.sync(), 'reader')
+    reader.write(`${HR}/.personal/memo.md`, 'my own note\n').write(`${HR}/.env`, 'TOKEN=mine\n')
+    ok(await reader.sync(), 'reader')
+    assert.ok(reader.isIgnored(`${HR}/.personal/memo.md`) && reader.isIgnored(`${HR}/.env`), 'never shared')
+    assert.equal(world.scopeFile(HR, '.personal/memo.md'), null)
+    assert.equal((await reader.excludeFolder(HR)).success, true)
+    const reports = await reader.applyPrivateFolderChoices()
+    assert.deepEqual(reports.map(r => [r.path, r.success, r.removed, r.setAside]), [[HR, true, true, true]])
+    assert.match(reports[0].message ?? '', /同期しないファイル（2件）は非公開フォルダのバックアップに保存しました/)
+    assert.equal(reader.exists(HR), false)
+    const [saved] = backupsWith(reader, 'private_folder_excluded')
+    assert.deepEqual(saved.metadata.files, [`${HR}/.env`, `${HR}/.personal`])
+    const inBackup = (f: string) => fs.readFileSync(path.join(privateBackupsDir(reader.dir), saved.folder.slice('private:'.length), f), 'utf-8')
+    assert.equal(inBackup(`${HR}/.personal/memo.md`), 'my own note\n')
+    assert.equal(inBackup(`${HR}/.env`), 'TOKEN=mine\n')
+    assert.equal(reports[0].backupPath, path.join(privateBackupsDir(reader.dir), saved.folder.slice('private:'.length)))
+    assert.match(reports[0].message ?? '', /「バックアップ」の一覧で見られます。自動では消えません/)
+    // The only copy: never pruned with the backups older than 30 days.
+    const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000)
+    fs.utimesSync(reports[0].backupPath!, old, old)
+    ok(await reader.sync(), 'reader')
+    assert.equal(inBackup(`${HR}/.personal/memo.md`), 'my own note\n')
+    assertPrivacy(world)
+    await settleAndCheck(world)
+  })
+
+  scenario('leaving the private folder out: when its never-shared files cannot be saved, the clone stays whole and the member is told why', async t => {
+    const { world, reader } = create(t)
+    ok(await reader.sync(), 'reader')
+    reader.write(`${HR}/.personal/memo.md`, 'my own note\n')
+    ok(await reader.sync(), 'reader')
+    // The private backups cannot be made: a file stands where their folder goes.
+    fs.writeFileSync(privateBackupsDir(reader.dir), 'not a folder')
+    assert.equal((await reader.excludeFolder(HR)).success, true)
+    const reports = await reader.applyPrivateFolderChoices()
+    assert.deepEqual(reports.map(r => [r.path, r.success, r.removed]), [[HR, true, false]])
+    assert.equal(reports[0].message, excludedCloneMessage({ removed: false, failure: 'failed' }))
+    assert.match(reports[0].message ?? '', /移せなかったため、この PC から削除せずに残しました。何も削除していません。/)
+    assert.doesNotMatch(reports[0].message ?? '', /人事|評価/, 'the sentence itself names no folder (the report adds the reader\'s own)')
+    assert.equal(reader.readText(`${HR}/.personal/memo.md`), 'my own note\n')
+    assert.ok(reader.exists(`${HR}/評価表.md`) && reader.exists(`${HR}/.git`), 'the clone stays whole')
+    // The next sync says it again with the folder, until it can save them.
+    const again = ok(await reader.sync(), 'reader')
+    assert.match(again.result.message ?? '', /『人事\/評価』: ダウンロードしない設定にしましたが/)
+    assert.equal(reader.exists(HR), true)
+    fs.rmSync(privateBackupsDir(reader.dir))
+    const done = ok(await reader.sync(), 'reader')
+    assert.match(done.result.message ?? '', /同期しないファイル（1件）は非公開フォルダのバックアップに保存しました/)
+    assert.equal(reader.exists(HR), false)
+    assert.deepEqual(backupsWith(reader, 'private_folder_excluded').map(b => b.metadata.files), [[`${HR}/.personal`]])
     await settleAndCheck(world)
   })
 

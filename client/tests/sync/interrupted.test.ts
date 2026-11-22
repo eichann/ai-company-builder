@@ -431,6 +431,8 @@ describe('a sync that never finished', { concurrency: CONCURRENCY }, () => {
 
     assert.equal(fs.existsSync(folder), false)
     assert.equal(a.git(['for-each-ref', 'refs/acb-recovery/']).trim(), '')
+    // The copy it held aged out by design (backups are kept 30 days).
+    a.releaseLocalWritesUnder('x.md')
     await settleAndCheck(world)
   })
 

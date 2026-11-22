@@ -7,6 +7,7 @@ import { blobId, privateMarker, NO_LAZY_FETCH, type World } from './world'
 import { pathKey } from '../../shared/sparse-paths'
 import { readSparseConfig } from '../../electron/sync/sparse'
 import { isNotDownloaded } from '../../shared/sparse-paths'
+import { isOfficeLockFile } from '../../shared/office-lock-files'
 
 /**
  * No member's committed work is ever lost. Every file content a member
@@ -199,5 +200,46 @@ export async function settleAndCheck(world: World): Promise<void> {
   await world.settle(2)
   assertConverged(world)
   assertNoLostWork(world)
+  assertNoLostLocalFiles(world)
   assertPrivacy(world, { converged: true })
+}
+
+/**
+ * No file a member wrote vanishes, committed or not — the ignored ones
+ * included (`.personal/` notes, `.env`, large files, files in a private
+ * clone), which assertNoLostWork cannot see because sync never commits them.
+ * Every content in `Member.localWrites` (released only by the member's own
+ * overwrite, deletion or rename, or by access lost by design) must be, at its
+ * own path (content alone never counts: a lost `.env` whose bytes equal
+ * another file is still lost):
+ *  - still on disk there, byte-identical, or
+ *  - committed there by a sync (assertNoLostWork judges it, merges included), or
+ *  - in a server's history there (a scope repository's under its folder), or
+ *  - copied for it into a backup folder with a _metadata.json (.backups/ or
+ *    the private backups; renamed copies through the metadata's `copies`), or
+ *  - held for it by the sparse keep (`.git/acb-sparse-keep/…/files/<path>`).
+ */
+export function assertNoLostLocalFiles(world: World): void {
+  let server: Set<string> | null = null
+  const lost: string[] = []
+  for (const m of world.members) {
+    let kept: Set<string> | null = null
+    for (const w of m.localWrites) {
+      // An office lock file the app removes on the member's answer.
+      if (isOfficeLockFile(w.rel)) continue
+      const at = `${pathKey(w.rel)}\0${w.blob}`
+      if (m.committedAt.has(at)) continue
+      try {
+        if (blobId(fs.readFileSync(m.path(w.rel))) === w.blob) continue
+      } catch { /* not at its path */ }
+      server ??= world.serverBlobsAt()
+      if (server.has(at)) continue
+      kept ??= m.keptBlobsAt()
+      if (kept.has(at)) continue
+      lost.push(`${m.name}: ${w.rel} (${w.blob.slice(0, 10)}, ${w.size} bytes)`)
+    }
+  }
+  if (lost.length > 0) {
+    throw new Error(`local work lost (not on disk, not on a server, not in a backup):\n  ${lost.join('\n  ')}`)
+  }
 }

@@ -78,8 +78,12 @@ import {
   preparePrivateFolders,
   removeExcludedClone,
   syncReadOnlyScope,
+  isPrivateExcludedBackup,
+  excludedCloneMessage,
+  type ExcludedCloneRemoval,
 } from './private-sync'
 import type { SyncDeps, SyncDialog } from './types'
+import { BACKUP_METADATA_FILE, backupCopyName, renamedCopies } from './backup-names'
 import { readExcludeLines, writeExcludeLines, type ExcludeBlock } from './local-excludes'
 import { isTempSaveFile, TEMP_SAVE_EXCLUDE_PATTERN } from '../../shared/temp-save-file'
 import { isOfficeLockFile, OFFICE_LOCK_EXCLUDE_PATTERNS } from '../../shared/office-lock-files'
@@ -269,6 +273,8 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         try {
           const backupFolders = await fs.promises.readdir(dir)
           for (const folder of backupFolders) {
+            // A left-out private folder's ignored files exist only there: never pruned by age.
+            if (isPrivateExcludedBackup(folder)) continue
             const folderPath = path.join(dir, folder)
             try {
               const stat = await fs.promises.stat(folderPath)
@@ -845,14 +851,16 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         // a round finishes classifying, so `deletedConflictFiles` is never
         // stale (it is only known *after* the round resolves its conflicts).
         const writeBackupMetadata = () => {
+          const copies = renamedCopies([...conflictFiles, ...deletedConflictFiles], backupPrefix)
           fs.writeFileSync(
-            path.join(backupPath, '_metadata.json'),
+            path.join(backupPath, BACKUP_METADATA_FILE),
             JSON.stringify({
               timestamp: deps.now().toISOString(),
               reason: 'conflict',
               conflictFiles: conflictFiles.map(shownPath),
               deletedConflictFiles: deletedConflictFiles.map(shownPath),
-              message: commitMessage || 'Sync from AI Company Builder'
+              message: commitMessage || 'Sync from AI Company Builder',
+              ...(Object.keys(copies).length > 0 ? { copies } : {}),
             }, null, 2)
           )
         }
@@ -884,7 +892,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         const backupConflictFiles = async (files: string[]) => {
           fs.mkdirSync(backupPath, { recursive: true })
           for (const file of files) {
-            const destPath = path.join(backupPath, backupPrefix, file)
+            const destPath = path.join(backupPath, backupPrefix, backupCopyName(file, backupPrefix))
             fs.mkdirSync(path.dirname(destPath), { recursive: true })
             for (const spec of [`${localHash}:${file}`, `:3:${file}`]) {
               // Not there (e.g. a file only the server side has): try the next
@@ -921,13 +929,14 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           for (const { file, oid } of replaced) {
             const content = await catFile(oid).catch(() => null)
             if (!content) continue // unreadable object: nothing more to save for this path
-            const destPath = path.join(roundPath, backupPrefix, file)
+            const destPath = path.join(roundPath, backupPrefix, backupCopyName(file, backupPrefix))
             fs.mkdirSync(path.dirname(destPath), { recursive: true })
             fs.writeFileSync(destPath, content)
             markSaved(file, content)
           }
+          const copies = renamedCopies(replaced.map(r => r.file), backupPrefix)
           fs.writeFileSync(
-            path.join(roundPath, '_metadata.json'),
+            path.join(roundPath, BACKUP_METADATA_FILE),
             JSON.stringify({
               timestamp: deps.now().toISOString(),
               reason: 'conflict',
@@ -935,6 +944,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
               deletedConflictFiles: [],
               message: commitMessage || 'Sync from AI Company Builder',
               note: 'earlier local version replaced while replaying unpushed commits',
+              ...(Object.keys(copies).length > 0 ? { copies } : {}),
             }, null, 2)
           )
           log.log(`Git sync: Backed up ${replaced.length} earlier local version(s) to ${roundPath}`)
@@ -1942,8 +1952,21 @@ export function createGitSync(deps: SyncDeps): GitSync {
         if (!placement.clone) continue
         // Left out in settings: push its edits first, then remove it.
         const r = await syncScope(d, repoPath, companyId, commitMessage, scope, placement.dir)
-        const removed = r.success && await locked(placement.dir, () => removeExcludedClone(d, repoPath, placement.dir)).catch(() => false)
-        reports.push({ ...r, removed })
+        // Its ignored files (large files, .personal/ notes) go to the private
+        // backups first; if they cannot, the clone stays and the member is told.
+        const removal: ExcludedCloneRemoval = r.success
+          ? await locked(placement.dir, () => removeExcludedClone(d, repoPath, placement.dir, scope.path)).catch((error: unknown) => {
+              d.log.warn('Git sync: Could not remove a left-out private folder; it stays:', error)
+              return { removed: false, failure: 'failed' as const }
+            })
+          : { removed: false }
+        const note = excludedCloneMessage(removal)
+        reports.push({
+          ...r,
+          removed: removal.removed,
+          ...(note ? { message: r.message && r.message !== '同期が完了しました' ? `${r.message}\n${note}` : note } : {}),
+          ...(removal.saved ? { setAside: true, backupPath: removal.saved.backupPath } : {}),
+        })
         continue
       }
       if (!options.syncEach && !placement.cloned) continue

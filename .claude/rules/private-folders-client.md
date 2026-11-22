@@ -52,7 +52,25 @@ everyone else's editing kept, owners / admins never named: `src/features/records
 - A private folder is downloaded or not as a whole (no exclusions inside). It is excluded when it
   lies at or under an excluded folder. The settings tree lists readable ones under their parent
   (lock, 「非公開」, no size). Applying runs `applyPrivateFolderChoices` at once: an excluded
-  clone is synced one last time and removed only when nothing is left unpushed.
+  clone is synced one last time and removed only when nothing is left unpushed (`removeExcludedClone`;
+  a status git cannot give counts as "something left"). Files git does not show there — ignored ones:
+  `.personal/` notes, `.env`, large files — first move to the private backups
+  (`<ts>_private_excluded`, reason `private_folder_excluded`, OS files left out); the report says how
+  many files (counted one by one), that they are in the 「バックアップ」 list and that they are not
+  deleted automatically (`setAside`, `backupPath`): such a folder is never pruned by age
+  (`isPrivateExcludedBackup`; it is the only copy). Losing access still removes it (owner decision Q1).
+  If one cannot be moved, what moved goes back where its place is free (a copy-and-remove that
+  stopped half-way leaves its part in the backup, which is removed only when it holds nothing of the
+  member's) and the clone stays. The member is told the truth (`excludedCloneMessage`): nothing moved →
+  「…移せなかったため、この PC から削除せずに残しました。何も削除していません。」; some in the backup (a
+  half-way stop, a change or a failing check right before the removal) → how many are already there
+  and where; a full disk (ENOSPC / EDQUOT) is said as such. The sentence names no folder; the sync's
+  note adds the reader's own 『…』; the next sync tries again. Known gap: between the last check and
+  the removal there is no await, but the check itself takes a moment, so a file written exactly then
+  is removed with the clone. They were deleted silently before (code review
+  2026-11-22). Scenarios: 「leaving the private folder out keeps the files it never shares…」, 「…when
+  its never-shared files cannot be saved…」; unit `private-folders-sync.test.ts` (status failing; a move that stops half-way; a full disk; the
+  last check failing).
 - Backups go to `.git/acb-private-backups/` with the folder's path as prefix; dialogs and
   metadata use company-relative paths; messages say 「非公開フォルダのバックアップ」.
 

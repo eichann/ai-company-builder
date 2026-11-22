@@ -85,6 +85,13 @@ function downloadedUnder(world: World, m: Member, prefix: string): string[] {
   return [...tree].filter(([f, oid]) => f.startsWith(prefix) && !elsewhere.has(oid) && !missing.has(oid)).map(([f]) => f)
 }
 
+/** Every file under the sparse keep folder, manifests left out. */
+function keptFiles(keep: string): string[] {
+  if (!fs.existsSync(keep)) return []
+  return (fs.readdirSync(keep, { recursive: true }) as string[])
+    .filter(f => !f.endsWith('manifest.json') && fs.lstatSync(path.join(keep, f)).isFile())
+}
+
 function outsideCheckoutBackup(m: Member) {
   return m.backups().filter(b => b.metadata.reason === 'outside_checkout').at(-1)
 }
@@ -232,6 +239,38 @@ describe('git:sync folder-level download choices', { concurrency: CONCURRENCY },
         assert.equal(world.serverFile(`${VIDEO}/.personal/memo.md`), null)
         await settleAndCheck(world)
         assert.equal(x.readText(`${VIDEO}/.personal/memo.md`), 'private\n')
+      })
+
+      scenario('copies an earlier change kept and could not put back (their path taken again) survive later changes: never written over, never deleted', async t => {
+        const { world, x } = await create(t, kind, null)
+        x.write(`${VIDEO}/編集/.env.local`, 'TOKEN=kept earlier\n').write(`${VIDEO}/.personal/old.md`, 'not listed\n')
+        ok(await x.sync(), 'x')
+        // An earlier change (an older app's single keep folder) moved both out
+        // and stopped; its manifest lists only the first.
+        const keep = x.path('.git/acb-sparse-keep')
+        for (const rel of [`${VIDEO}/編集/.env.local`, `${VIDEO}/.personal/old.md`]) {
+          fs.mkdirSync(path.dirname(path.join(keep, 'files', rel)), { recursive: true })
+          fs.renameSync(x.path(rel), path.join(keep, 'files', rel))
+        }
+        fs.writeFileSync(path.join(keep, 'manifest.json'), JSON.stringify([`${VIDEO}/編集/.env.local`]))
+        // The member (or the AI) then wrote a new one at the free path.
+        x.write(`${VIDEO}/編集/.env.local`, 'TOKEN=now\n')
+        const keptTexts = () => keptFiles(keep).map(f => fs.readFileSync(path.join(keep, f), 'utf-8')).sort()
+        for (let round = 0; round < 2; round++) {
+          assert.equal((await x.excludeFolder(VIDEO)).success, true)
+          assert.equal(x.readText(`${VIDEO}/編集/.env.local`), 'TOKEN=now\n', 'the member\'s current file is back in its place')
+          assert.deepEqual(keptTexts(), ['TOKEN=kept earlier\n', 'not listed\n'])
+          ok(await x.sync(), 'x')
+          assert.equal((await x.includeFolder(VIDEO)).success, true)
+          assert.equal(x.readText(`${VIDEO}/編集/.env.local`), 'TOKEN=now\n')
+          assert.deepEqual(keptTexts(), ['TOKEN=kept earlier\n', 'not listed\n'])
+        }
+        // Its path free again, the kept copy goes back; the file no manifest lists still stays.
+        x.remove(`${VIDEO}/編集/.env.local`)
+        assert.equal((await x.excludeFolder(VIDEO)).success, true)
+        assert.equal(x.readText(`${VIDEO}/編集/.env.local`), 'TOKEN=kept earlier\n')
+        assert.deepEqual(keptTexts(), ['not listed\n'])
+        await settleAndCheck(world)
       })
 
       scenario('nested choices: a deeper exclusion works on its own; one inside an excluded folder is folded into it', async t => {
