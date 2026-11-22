@@ -1,6 +1,8 @@
 // The Electron side of tests/browser-window-electron.test.ts: runs the app's real browser window
-// (electron/browser-window.ts) against the local sites (./sites.ts) and prints what happened as one
-// `RESULT {json}` line. Started by the test with `NODE_OPTIONS=--import tsx`.
+// (electron/browser-window.ts) against the local sites (./sites.ts) and writes what happened as JSON to
+// `<BROWSER_TEST_DIR>/result.json` (written whole, then renamed: the test reads it after the process
+// exited — a long line on stdout could be cut when Electron quits before its pipe is drained). Started by
+// the test with `NODE_OPTIONS=--import tsx`.
 //
 // The certificate: production code trusts only what the system trusts. This harness alone trusts
 // its own self-signed certificate for the three test hosts, on the test session only
@@ -18,7 +20,10 @@ import { createBrowserCheckerRegistry, createBrowserConnectors } from '../../sha
 import { lstepConnector } from '../../connectors/lstep'
 import { LSTEP_DECLARATION } from '../../connectors/lstep/declaration'
 import { browserReadPartition, browserWritePartition } from '../../shared/browser-operation'
-import { createRunGate, encodeForm, FORM_CONTENT_TYPE, type BrowserRunSurface, type BrowserStepRecord } from '../../shared/browser-runner'
+import { createRunGate, encodeForm, FORM_CONTENT_TYPE, type BrowserChecker, type BrowserRunSurface, type BrowserStepRecord } from '../../shared/browser-runner'
+import { readBrowserFacts } from '../../shared/browser-facts'
+import { parseBrowserHtml } from '../../electron/features/browser/html'
+import { fakePlansServer, type FakeServerFaults } from '../browser-plans-fake'
 import { startSites, type Sites } from './sites'
 
 const dir = process.env.BROWSER_TEST_DIR!
@@ -51,8 +56,14 @@ app.on('session-created', created => {
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const result: Record<string, unknown> = {}
+/** The result, whole: written to a temporary name and renamed, so the test never reads half of it. */
+const writeResult = (value: unknown) => {
+  const file = path.join(dir, 'result.json')
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify(value))
+  fs.renameSync(`${file}.tmp`, file)
+}
 const fail = (error: unknown) => {
-  console.log(`RESULT ${JSON.stringify({ error: error instanceof Error ? error.stack : String(error) })}`)
+  writeResult({ error: error instanceof Error ? error.stack : String(error) })
   app.exit(1)
 }
 setTimeout(() => fail(new Error('the harness timed out')), 90_000)
@@ -173,8 +184,53 @@ async function run() {
   result.evilConnections = sites.evilConnections
   result.udpPackets = sites.udpPackets
   sites.close()
-  console.log(`RESULT ${JSON.stringify(result)}`)
+  writeResult(result)
   app.quit()
+}
+
+const PLAN_A = 'bp_00000000000000000000000000000a0a'
+const PLAN_B = 'bp_00000000000000000000000000000b0b'
+const PLAN_C = 'bp_00000000000000000000000000000c0c'
+const PLAN_D = 'bp_00000000000000000000000000000d0d'
+const PLAN_E = 'bp_00000000000000000000000000000e0e'
+const PLAN_F = 'bp_00000000000000000000000000000f0f'
+const COMBINATION = { declarationHash: `sha256:${'d'.repeat(64)}`, checkerHash: `sha256:${'c'.repeat(64)}`, factsVersion: 2 }
+
+/**
+ * The test site's checker with facts the runner can compare (version 2): the account, the step's parent
+ * and its state read by the checker's own view from the reminder page (as 0.6.0 does), everything else
+ * fixed values stamped from the site's JSON list of reminders (0.6.0's other reads are the unit tests'
+ * job, client/tests/browser-execute.test.ts). What is real here is the window: the read and write
+ * sessions, the permit inside the write's chunk and the last check right before the request leaves.
+ */
+function harnessFacts(real: BrowserChecker): BrowserChecker {
+  return {
+    ...real,
+    facts: {
+      version: 2,
+      next: (v, answers) => answers.length === 0
+        ? [{ read: 'reminder', values: { reminder: v.target.reminder } }, { read: 'reminders', values: { group: '29529' }, page: 1 }]
+        : [],
+      read: (v, answers) => {
+        const page = answers[0]
+        const view = page && page.ok && page.kind === 'html' ? real.view(v, [{ path: `/line/episode/show/${v.target.reminder}`, body: page.body }]) : null
+        const unknown = { status: 'unknown' as const, from: 0 }
+        if (!view?.state || !view.account) return { facts: { account: unknown, step_parent: unknown, state: unknown, names: unknown, templates: unknown, schedule: unknown, shared_with: unknown } }
+        const templates = Object.fromEntries([...view.state.templates, v.change.template].map(id => [id, { name: `テンプレ${id}`, kind: 'text', body: `本文${id}` }]))
+        return {
+          facts: {
+            account: { status: 'known', value: { id: view.account }, from: 0, rawMarkup: true },
+            step_parent: { status: 'known', value: { reminder: v.target.reminder }, from: 0, rawMarkup: true },
+            state: { status: 'known', value: { templates: [...view.state.templates] }, complete: true, from: 0, rawMarkup: true },
+            names: { status: 'known', value: { reminder: '架空のリマインダ', step: '3日前 09:00' }, from: 1 },
+            templates: { status: 'known', value: templates, complete: true, from: 1 },
+            schedule: { status: 'known', value: { timing: '3日前 09:00' }, complete: true, from: 1 },
+            shared_with: { status: 'known', value: { count: 1, items: ['第1回'] }, complete: true, from: 1 },
+          },
+        }
+      },
+    },
+  }
 }
 
 /**
@@ -195,43 +251,67 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   const text = LSTEP_DECLARATION.replace('host: manager.linestep.net', 'host: op.test')
     .replace('[d1nhtjid4lgi9y.cloudfront.net, profile.line-scdn.net]', '[assets.test]')
   const connector = createBrowserConnectors([text])
-  const checkers = createBrowserCheckerRegistry(lstepConnector({ account: html => /data-account-id="([^"]+)"/.exec(html)?.[1] ?? null }).checkers)
+  const lstepCheckers = lstepConnector({ account: html => /data-account-id="([^"]+)"/.exec(html)?.[1] ?? null }).checkers
+  const checker = harnessFacts(lstepCheckers[0])
+  const checkers = createBrowserCheckerRegistry([checker])
+  const readers = lstepConnector().readers
+  const browser = connector('lstep', '0.6.0')!
+  const operation = browser.operations.reminder_step_add_template
   const records: BrowserStepRecord[] = []
   let stopped = false
+  let monoJump = 0
   let beforeRead: (() => Promise<void>) | null = null
-  // The window as the runner gets it; the harness may act once, right before the run's first read.
-  const surface: BrowserRunSurface = {
-    ...win.run,
-    async request(r) {
-      if (r.method === 'GET' && beforeRead) { const act = beforeRead; beforeRead = null; await act() }
-      return win.run.request(r)
-    },
+  // The window as the runner gets it; the harness may act once, right before the run's own first read
+  // (after the facts were read again through the read session).
+  const window = {
+    run: {
+      ...win.run,
+      async request(r: { method: string; path: string }) {
+        if (r.method === 'GET' && beforeRead) { const act = beforeRead; beforeRead = null; await act() }
+        return win.run.request(r)
+      },
+    } satisfies BrowserRunSurface,
+    preview: win.preview,
   }
-  const plans: Record<string, Record<string, unknown>> = {}
-  const plan = (planId: string, over: Record<string, unknown>) => {
-    plans[planId] = {
-      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.6.0' }, operation: 'reminder_step_add_template',
-      account: 'ACC1', target: { reminder: '101', step: '201' }, change: { template: '301' }, before: { templates: ['300'] },
-      approvedAt: Date.now() - 1000, expiresAt: Date.now() + 120_000, ...over,
-    }
+  // Each plan: registered with the facts read from the site now (through the window's read session),
+  // approved, and served by its own fake server.
+  const servers: Record<string, ReturnType<typeof fakePlansServer>> = {}
+  const plan = async (planId: string, over: { target?: Record<string, string>; change: Record<string, string>; account?: string }, faults: FakeServerFaults = {}) => {
+    const values = { target: over.target ?? { reminder: '101', step: '201' }, change: over.change }
+    const read = await readBrowserFacts({
+      checker, browser, operation, factsVersion: 2, values: { target: { reminder: '101', step: '201' }, change: over.change }, readers,
+      read: address => win.preview.read(address).catch(() => 'failed' as const), parseHtml: parseBrowserHtml, now: () => new Date(),
+    })
+    const facts = { ...read.facts! }
+    if (over.account) facts.account = { ...facts.account, value: { id: over.account } } as typeof facts.account
+    servers[planId] = fakePlansServer({
+      planId, companyId: 'company-1', connector: { id: 'lstep', version: '0.6.0', ...COMBINATION }, operation: 'reminder_step_add_template',
+      account: over.account ?? 'ACC1', target: values.target, change: values.change, facts, createdAt: Date.now() - 1000,
+    }, faults)
   }
+  const route = (id: string) => servers[Object.keys(servers).find(k => id === k || id.endsWith(k.slice(-16)))!].api
   const runner = createBrowserRunner({
     aiSwitch: () => true,
-    approvedPlan: async id => plans[id] ?? null,
-    connector, checker: id => checkers.get(id), site: () => site, stopped: () => stopped,
-    window: () => surface,
+    plans: {
+      approve: (c, p, h) => route(p).approve(c, p, h), claim: (c, p) => route(p).claim(c, p), cancel: (c, p) => route(p).cancel(c, p),
+      permit: (c, e, sec, signal) => route(e).permit(c, e, sec, signal), report: (e, sec, b) => route(e).report(e, sec, b),
+    },
+    connector, combination: () => COMBINATION, checker: id => checkers.get(id), reader: id => readers.find(r => r.id === id),
+    site: () => site, stopped: () => stopped, window: () => window, parse: parseBrowserHtml, context: () => () => true,
     records: { has: id => records.some(r => r.planId === id), put: r => { records.push(r) } },
-    now: () => Date.now(),
+    now: () => Date.now(), monoMs: () => performance.now() + monoJump,
   })
+  const runPlan = (planId: string) => runner.run({ companyId: 'company-1', planId, contentHash: servers[planId].contentHash })
 
   // The happy path, while the page sends the same write, a timer's autosave, an undeclared read and a
   // tampered form.
-  plan('plan-a', {})
+  await plan(PLAN_A, { change: { template: '301' } })
   beforeRead = async () => {
     out.attack = await js('window.__attack()')
     await wait(1500)
   }
-  out.happy = await runner.run('plan-a')
+  out.happy = await runPlan(PLAN_A)
+  out.happyReports = servers[PLAN_A].state.reports
   out.stepAfterHappy = [...sites.lstep['201']]
   // The write's session holds nothing of the login once the write is done.
   out.writeSessionCookies = (await session.fromPartition(browserWritePartition(partition)).cookies.get({})).length
@@ -250,22 +330,28 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
   out.previewQueryPaths = sites.hits.slice(queryHits).filter(h => h.path.startsWith('/api/')).map(h => h.path)
   out.typingAfterPreview = await js(`document.getElementById('__typing')?.value ?? null`)
   out.readSessionCookiesAfterPreview = (await session.fromPartition(browserReadPartition(partition)).cookies.get({})).length
-  // Another LINE account shown on the page than the plan's.
-  plan('plan-b', { account: 'ACC2', change: { template: '302' }, before: { templates: ['300', '301'] } })
-  out.wrongAccount = await runner.run('plan-b')
-  // The emergency stop arrives during the run (right before its first read).
-  plan('plan-c', { change: { template: '303' }, before: { templates: ['300', '301'] } })
+  // The plan was approved for another LINE account than the page shows: the facts read again differ.
+  await plan(PLAN_B, { change: { template: '302' }, account: 'ACC2' })
+  out.wrongAccount = await runPlan(PLAN_B)
+  // The emergency stop arrives during the run (right before its own first read, after the facts).
+  await plan(PLAN_C, { change: { template: '303' } })
   beforeRead = async () => { stopped = true }
-  out.stoppedMidRun = await runner.run('plan-c')
+  out.stoppedMidRun = await runPlan(PLAN_C)
   stopped = false
   // The answer to the write is lost: unknown, and the same plan never runs again.
-  plan('plan-d', { change: { template: '999' }, before: { templates: ['300', '301'] } })
-  out.lost = await runner.run('plan-d')
-  out.lostAgain = await runner.run('plan-d')
-  // A page over the size the runner reads is refused whole, never read cut short.
-  plan('plan-e', { target: { reminder: '103', step: '201' }, change: { template: '305' } })
-  out.oversize = await runner.run('plan-e')
-  out.records = records.map(r => `${r.planId}:${r.state}`)
+  await plan(PLAN_D, { change: { template: '999' } })
+  out.lost = await runPlan(PLAN_D)
+  out.lostAgain = await runPlan(PLAN_D)
+  out.lostReports = servers[PLAN_D].state.reports
+  // A page over the size main reads is refused whole, never read cut short (the facts read again fail).
+  await plan(PLAN_E, { target: { reminder: '103', step: '201' }, change: { template: '305' } })
+  out.oversize = await runPlan(PLAN_E)
+  // The permit answered, but by the monotonic clock it is 5 s old by the last check: the window's write
+  // session never ends the request (nothing reaches the site), and the server is told "failed".
+  await plan(PLAN_F, { change: { template: '306' } }, { onPermit: () => { monoJump += 5000 } })
+  out.late = await runPlan(PLAN_F)
+  out.lateReports = servers[PLAN_F].state.reports
+  out.records = records.map(r => `${r.planId.slice(-1)}:${r.state}`)
 
   // The gate itself on the real window: an armed write of step 201 / template 304.
   await page.loadURL('https://op.test/line/episode/show/101').catch(() => {})
@@ -276,10 +362,10 @@ async function runnerScenarios(win: BrowserShellWindow, site: BrowserSiteSetting
     readPaths: ['/line/episode/show/101'], stopped: () => false,
   })
   out.gateReady = await win.run.enterAi(gate.hooks)
-  const send = (pairs: Record<string, string>) => win.run.request({
+  const send = (pairs: Record<string, string>) => win.run.write({
     method: 'POST', path: '/line/episode/step/pack/template', contentType: FORM_CONTENT_TYPE,
     body: encodeForm(Object.entries({ content_id: '201', template_id: '304', _token: 'tok', _lm_user_id: 'u1', ...pairs })),
-  }).then(r => r.status, () => 'refused')
+  }, { ready: async () => true, beforeSend: () => true }).then(r => (r.sent && r.answer ? r.answer.status : 'refused'), () => 'refused')
   out.notArmed = await send({})
   gate.arm(0)
   out.otherStep = await send({ content_id: '202' })

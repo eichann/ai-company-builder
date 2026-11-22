@@ -9,7 +9,7 @@ import type { BrowserRunRecords } from './runner'
 
 // A plan runs at most a day after it was made: records older than two days can no longer stop a run.
 const KEEP_MS = 2 * BROWSER_PLAN_MAX_AHEAD_MS
-const STATES: readonly BrowserStepState[] = ['pending', 'sent', 'succeeded', 'failed', 'unknown']
+const STATES: readonly BrowserStepState[] = ['claimed', 'permit-asked', 'succeeded', 'failed', 'unknown']
 const WORD = /^[a-z0-9:_-]{1,80}$/i
 
 function valid(r: unknown): r is BrowserStepRecord {
