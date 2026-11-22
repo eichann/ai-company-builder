@@ -262,9 +262,12 @@ function ipcHarness(over: Partial<BrowserPlansIpcDeps<IpcInvokeEvent>> = {}) {
   const ok = (value: unknown): BrowserApiAnswer => ({ kind: 'ok', value })
   registerBrowserPlansIpc(ipc, {
     fromMainWindow: event => event.sender.id === 1,
+    aiSwitch: () => true,
+    userId: () => 'u1',
     plans: {
       get: async (c, p) => { calls.push(`get ${c} ${p}`); return ok(planView()) },
       open: async c => { calls.push(`open ${c}`); return ok({ items: [], more: false }) },
+      waiting: async c => { calls.push(`waiting ${c}`); return ok({ items: [], next: null }) },
       cancel: async (c, p) => { calls.push(`cancel ${c} ${p}`); return ok(planView({ state: 'closed' })) },
       confirm: async (c, e, r) => { calls.push(`confirm ${c} ${e} ${r}`); return ok({}) },
     },
@@ -308,20 +311,51 @@ test('［任せる］ hands the runner exactly the company, the plan and the sho
 
 test('the card gets only the fields it reads, each of its shape; anything else of the answer stays in main', async () => {
   const extra = { ...planView(), secret: SECRET, content: '{"x":1}', execution: null }
-  const h = ipcHarness({ plans: { get: async () => ({ kind: 'ok', value: extra }), open: async () => ({ kind: 'no-answer' }), cancel: async () => ({ kind: 'no-answer' }), confirm: async () => ({ kind: 'no-answer' }) } })
+  const h = ipcHarness({ plans: { get: async () => ({ kind: 'ok', value: extra }), open: async () => ({ kind: 'no-answer' }), waiting: async () => ({ kind: 'no-answer' }), cancel: async () => ({ kind: 'no-answer' }), confirm: async () => ({ kind: 'no-answer' }) } })
   const got = await h.call('browserPlans:get', 1, COMPANY, PLAN) as { ok: true; card: { plan: Record<string, unknown> } }
   assert.equal(got.ok, true)
   assert.equal(JSON.stringify(got.card.plan).includes(SECRET), false)
   assert.equal('content' in got.card.plan, false)
   for (const bad of [{ ...planView(), contentHash: 'x' }, { ...planView(), state: 'sent' }, { ...planView(), target: { reminder: 7 } },
     { ...planView(), facts: { a: { status: 'known', value: 1 } } }, { ...planView(), execution: { id: '../bx_1', state: 'unknown', claimedAt: '2026-11-22T03:00:00.000Z', permittedAt: null, settledAt: null, confirmableAt: null, voidReason: null, confirmedBy: null } }]) {
-    const odd = ipcHarness({ plans: { get: async () => ({ kind: 'ok', value: bad }), open: async () => ({ kind: 'no-answer' }), cancel: async () => ({ kind: 'no-answer' }), confirm: async () => ({ kind: 'no-answer' }) } })
+    const odd = ipcHarness({ plans: { get: async () => ({ kind: 'ok', value: bad }), open: async () => ({ kind: 'no-answer' }), waiting: async () => ({ kind: 'no-answer' }), cancel: async () => ({ kind: 'no-answer' }), confirm: async () => ({ kind: 'no-answer' }) } })
     assert.equal((await odd.call('browserPlans:get', 1, COMPANY, PLAN) as { ok: boolean }).ok, false, JSON.stringify(bad).slice(0, 80))
   }
 })
 
+test('the inbox\'s list: only the member\'s own, only the fields a row shows; switched off or signed out nothing is asked', async () => {
+  const P2 = `bp_${'d'.repeat(32)}`
+  const open = { more: false, items: [
+    { planId: PLAN, state: 'draft', connector: { id: 'lstep', version: '0.6.0', label: 'Lステップ' }, operation: 'op', label: 'テンプレートを足す',
+      target: { reminder: '1' }, conversationId: 'conv-secret', createdAt: '2026-11-22T03:00:00.000Z', expiresAt: '2026-11-22T04:00:00.000Z', approvedAt: null, facts: { x: 1 } },
+    { planId: 'not-a-plan', state: 'draft', connector: { label: 'x' }, label: 'x', createdAt: '2026-11-22T03:00:00.000Z' },
+    { planId: P2, state: 'claimed', connector: { label: 'x' }, label: 'x', createdAt: '2026-11-22T03:00:00.000Z' },
+  ] }
+  const waiting = { next: null, items: [
+    { executionId: EXEC, planId: P2, userId: 'u1', connector: { id: 'lstep', version: '0.6.0' }, operation: 'op', label: '段に足す', target: { step: '2' },
+      state: 'unknown', permittedAt: '2026-11-22T03:10:00.000Z', confirmableAt: '2026-11-22T03:10:35.000Z', canConfirm: true },
+    // An owner's or admin's list holds everyone's: another member's run is not this member's row.
+    { executionId: EXEC, planId: PLAN, userId: 'u2', connector: { id: 'lstep', version: '0.6.0' }, operation: 'op', label: '他の人', target: {},
+      state: 'unknown', permittedAt: null, confirmableAt: null, canConfirm: true },
+  ] }
+  const plans = { get: async () => ({ kind: 'no-answer' as const }), open: async () => ({ kind: 'ok' as const, value: open }), waiting: async () => ({ kind: 'ok' as const, value: waiting }),
+    cancel: async () => ({ kind: 'no-answer' as const }), confirm: async () => ({ kind: 'no-answer' as const }) }
+  assert.deepEqual(await ipcHarness({ plans }).call('browserPlans:list', 1, COMPANY), { ok: true, inbox: {
+    plans: [{ planId: PLAN, state: 'draft', label: 'テンプレートを足す', site: 'Lステップ', createdAt: '2026-11-22T03:00:00.000Z' }],
+    unsure: [{ planId: P2, state: 'unknown', label: '段に足す', permittedAt: '2026-11-22T03:10:00.000Z', confirmableAt: '2026-11-22T03:10:35.000Z', canConfirm: true }],
+  } })
+  // A list that is not one is no answer to show; either list unreachable is offline.
+  assert.equal((await ipcHarness({ plans: { ...plans, waiting: async () => ({ kind: 'ok' as const, value: { items: 'x' } }) } }).call('browserPlans:list', 1, COMPANY) as { ok: boolean }).ok, false)
+  assert.equal((await ipcHarness({ plans: { ...plans, waiting: async () => ({ kind: 'no-answer' as const }) } }).call('browserPlans:list', 1, COMPANY) as { offline: boolean }).offline, true)
+  for (const over of [{ aiSwitch: () => false }, { userId: () => null }]) {
+    const h = ipcHarness(over)
+    assert.deepEqual(await h.call('browserPlans:list', 1, COMPANY), { ok: true, inbox: { plans: [], unsure: [] } })
+    assert.deepEqual(h.calls, [], 'nothing asked of the server')
+  }
+})
+
 test('a plan the server says is not there reads as not found; an unreachable server as offline', async () => {
-  const gone = ipcHarness({ plans: { get: async () => ({ kind: 'refused', code: 'BROWSER_PLAN_NOT_FOUND' }), open: async () => ({ kind: 'no-answer' }), cancel: async () => ({ kind: 'refused', code: 'BROWSER_TOO_EARLY' }), confirm: async () => ({ kind: 'refused', code: 'BROWSER_TOO_EARLY' }) } })
+  const gone = ipcHarness({ plans: { get: async () => ({ kind: 'refused', code: 'BROWSER_PLAN_NOT_FOUND' }), open: async () => ({ kind: 'no-answer' }), waiting: async () => ({ kind: 'no-answer' }), cancel: async () => ({ kind: 'refused', code: 'BROWSER_TOO_EARLY' }), confirm: async () => ({ kind: 'refused', code: 'BROWSER_TOO_EARLY' }) } })
   assert.deepEqual(await gone.call('browserPlans:get', 1, COMPANY, PLAN), { ok: false, offline: false, message: 'この計画は見つかりませんでした。' })
   assert.equal((await gone.call('browserPlans:list', 1, COMPANY) as { offline: boolean }).offline, true)
   assert.match((await gone.call('browserPlans:confirm', 1, COMPANY, EXEC, 'not_done') as { message: string }).message, /まだ確かめられません/)
@@ -425,6 +459,9 @@ test('as it ships (the build\'s switch off): ［任せる］, the request and th
     })
     const run = await handlers.get('browserPlans:run')!({ sender: { id: 1, isDestroyed: () => false, send() {} } }, COMPANY, PLAN, HASH)
     assert.deepEqual(run, { ok: true, result: { outcome: 'refused', reason: 'off' } })
+    // The inbox lists no plan and the server is not asked (the fetch below would say so).
+    const list = await handlers.get('browserPlans:list')!({ sender: { id: 1, isDestroyed: () => false, send() {} } }, COMPANY)
+    assert.deepEqual(list, { ok: true, inbox: { plans: [], unsure: [] } })
     assert.equal(wired.requestAvailable(), false)
     // The consultation's turn gets no tool at all (chat-server.ts offers `acb_browser` only when this is given).
     assert.equal(browserRequestForTurn(wired, { companyId: COMPANY, conversationId: null, signal: new AbortController().signal, onPlan: () => {} }), undefined)

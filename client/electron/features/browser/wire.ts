@@ -75,6 +75,7 @@ export function wireBrowserPlans<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, 
 
   registerBrowserPlansIpc(ipc, {
     fromMainWindow: deps.fromMainWindow,
+    aiSwitch, userId: deps.userId,
     plans: http,
     runner,
     readiness: (companyId, plan) => browserCardReadiness(companyId, plan, {

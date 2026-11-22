@@ -1,5 +1,5 @@
 // The plan card's IPC (agent-browser.md "The card, the IPC and the request tool"; design 6b-2 §2, §7-1):
-//   browserPlans:list     the member's own plans still waiting (draft / approved), for the inbox
+//   browserPlans:list     the inbox's rows: the member's own open plans and unsettled runs (only while switched on)
 //   browserPlans:get      one plan as the server fixed it + whether ［任せる］ can be pressed on this PC
 //   browserPlans:run      ［任せる］: approve (the hash the card showed) + claim + the run, one press here
 //   browserPlans:cancel   ［やめる］
@@ -8,12 +8,12 @@
 // before anything reaches the server: ids of the server's exact shapes, a hash, nothing else — never a
 // fact, a target or the AI's word. ［任せる］ takes only { companyId, planId, contentHash }.
 import type { IpcInvokeEvent, IpcMessageEvent, IpcRegistrar } from '../../ipc/registrar'
-import type { BrowserOpenPlans, BrowserPlanView } from '../../../../shared/types/browser-plans'
+import type { BrowserPlanView } from '../../../../shared/types/browser-plans'
 import type { PluginBrowser } from '../../../../shared/core/plugin-browser-declaration'
 import type { BrowserSiteSetting } from '../../../../shared/core/browser-operation'
 import {
-  BROWSER_COMPANY_ID_RE, BROWSER_EXECUTION_ID_RE, BROWSER_PLAN_ID_RE, BROWSER_PLAN_IPC_WORDS as W, readBrowserPlanView,
-  type BrowserPlanCardData, type BrowserPlansFailure,
+  BROWSER_COMPANY_ID_RE, BROWSER_EXECUTION_ID_RE, BROWSER_PLAN_ID_RE, BROWSER_PLAN_IPC_WORDS as W, readBrowserInboxPlans, readBrowserPlanView,
+  type BrowserPlanCardData, type BrowserPlanListResult, type BrowserPlansFailure,
 } from '../../../shared/browser-plans'
 import { CONTENT_HASH_RE, type BrowserChecker, type BrowserPageRead, type BrowserPreviewSurface, type BrowserRunResult } from '../../../shared/browser-runner'
 import { buildAiSwitch, type BrowserAiSwitch } from './ai-switch'
@@ -62,9 +62,14 @@ export async function browserCardReadiness(companyId: string, plan: BrowserPlanV
 export interface BrowserPlansIpcDeps<E> {
   /** The event came from the main window's main frame (`isMainFrameSender`). */
   fromMainWindow: (event: E) => boolean
+  /** The build's switch (default `buildAiSwitch`): off = the inbox's list is empty and nothing is read. */
+  aiSwitch?: BrowserAiSwitch
+  /** The signed-in member: the inbox lists only their own runs (an admin's waiting list holds everyone's). */
+  userId: () => string | null
   plans: {
     get(companyId: string, planId: string): Promise<BrowserApiAnswer>
     open(companyId: string): Promise<BrowserApiAnswer>
+    waiting(companyId: string): Promise<BrowserApiAnswer>
     cancel(companyId: string, planId: string): Promise<BrowserApiAnswer>
     confirm(companyId: string, executionId: string, result: 'done' | 'not_done'): Promise<BrowserApiAnswer>
   }
@@ -94,12 +99,18 @@ const planOk = (v: unknown): v is string => typeof v === 'string' && BROWSER_PLA
 export function registerBrowserPlansIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<E, IpcMessageEvent>, deps: BrowserPlansIpcDeps<E>): void {
   const running = new Set<string>()
 
-  ipc.handle('browserPlans:list', async (event, companyId) => {
+  ipc.handle('browserPlans:list', async (event, companyId): Promise<BrowserPlanListResult> => {
     if (!deps.fromMainWindow(event)) return NOT_MAIN
     if (!companyOk(companyId)) return BAD_INPUT
-    const answer = await deps.plans.open(companyId)
-    if (answer.kind !== 'ok' || !answer.value || typeof answer.value !== 'object' || !Array.isArray((answer.value as { items?: unknown }).items)) return failure(answer)
-    return { ok: true as const, plans: answer.value as BrowserOpenPlans }
+    // Switched off (or signed out) the inbox shows no plan, and the server is not asked.
+    const userId = deps.userId()
+    if (!(deps.aiSwitch ?? buildAiSwitch)() || !userId) return { ok: true, inbox: { plans: [], unsure: [] } }
+    const [open, waiting] = await Promise.all([deps.plans.open(companyId), deps.plans.waiting(companyId)])
+    if (open.kind !== 'ok') return failure(open)
+    if (waiting.kind !== 'ok') return failure(waiting)
+    // Only the member's own, only the fields a row shows, each of its shape: nothing else reaches the renderer.
+    const inbox = readBrowserInboxPlans(open.value, waiting.value, userId)
+    return inbox ? { ok: true, inbox } : { ok: false, offline: false, message: W.serverError }
   })
 
   ipc.handle('browserPlans:get', async (event, companyId, planId) => {

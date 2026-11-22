@@ -17,6 +17,17 @@ const loading = new Set<string>()
 export const planKey = (userId: string, companyId: string, planId: string) => `${userId}|${companyId}|${planId}`
 export const planEntry = (key: string): PlanEntry => entries.get(key) ?? EMPTY
 
+// 「A plan's state moved」 on any card (approved and run, cancelled, confirmed, a result settled): what the inbox
+// reads again on. Only a change of state counts, so a card's 15 s re-read of the same answer tells nothing.
+const stateOf = (e: PlanEntry | undefined) => (e?.card ? `${e.card.plan.state}|${e.card.plan.execution?.state ?? ''}` : '')
+let movedVersion = 0
+const movedListeners = new Set<() => void>()
+export const planStatesVersion = () => movedVersion
+export function subscribePlanStates(listener: () => void): () => void {
+  movedListeners.add(listener)
+  return () => { movedListeners.delete(listener) }
+}
+
 /**
  * Take main's answer: a card replaces the copy; the server being out of reach keeps a copy already shown
  * (a 15 s re-read during a blip must not hide what to check); any other failure — not found, not this
@@ -28,6 +39,8 @@ export function putPlan(key: string, r: BrowserPlanGetResult): void {
   if (next === prev) return
   entries.set(key, next)
   for (const l of listeners.get(key) ?? []) l()
+  // A card shown for the first time is no move (opening the chat must not make the inbox read).
+  if (prev?.card && stateOf(prev) !== stateOf(next)) { movedVersion++; for (const l of movedListeners) l() }
 }
 
 export async function reloadPlan(key: string, load: () => Promise<BrowserPlanGetResult>): Promise<void> {

@@ -8,6 +8,7 @@ import { STOP_LOOK, type StopMeaning } from '../../../../shared/design-tokens/st
 import type { MeetingTurn, NoticesState, TurnItem } from '../../../shared/notifications-app'
 import { jobNoticeTarget } from '../../../shared/jobs'
 import { thingKindOf, thingName, type ThingKind } from '../../../shared/thing-words'
+import type { BrowserInboxPlans } from '../../../shared/browser-plans'
 
 /** あなた待ち (only the member's press moves it), 作業中, できた・未確認. */
 export type InboxState = 'waiting' | 'working' | 'done'
@@ -21,6 +22,8 @@ export type InboxAction =
   | { kind: 'openRecord'; recordId: string; title: string }
   | { kind: 'openApprovalCard'; approvalId: string }
   | { kind: 'openMailDraft'; messageId: string }
+  /** A 「ブラウザ操作」 plan's card (agent-browser.md): ［任せる］ and ［済んでいた］… are the card's own buttons. */
+  | { kind: 'openBrowserPlan'; planId: string }
   | { kind: 'openTasks' }
   | { kind: 'openJobs' }
   /** A notice about nothing that can be opened: opening only marks it seen (its text says it all). */
@@ -30,10 +33,10 @@ export type InboxAction =
 export type InboxTone = StopMeaning | 'success' | 'neutral' | 'ai'
 
 export interface InboxItem {
-  /** One job = one row: `record:<id>` for a record, `notice:<id>` for a notice about no row. */
+  /** One job = one row: `record:<id>` for a record, `notice:<id>` for a notice about no row, `browser:<planId>` for a plan. */
   key: string
   state: InboxState
-  /** Order inside あなた待ち (smaller first): stopped, approval, mail, check, the rest. */
+  /** Order inside あなた待ち (smaller first): stopped, a run nobody knows the result of, approval, mail, check, the rest. */
   rank: number
   /** What it is, for the icon ('notice' for a notice about no record). */
   thing: ThingKind | 'notice'
@@ -135,7 +138,36 @@ export function noticePlace(kind: NotificationKind, turnComplete: boolean): 'sto
 }
 
 
-const RANK = { stopped: 0, approval: 2, mail: 3, check: 4, other: 5 } as const
+const RANK = { stopped: 0, unsure: 1, approval: 2, mail: 3, check: 4, other: 5 } as const
+
+/**
+ * 「ブラウザ操作」 rows (the member's own, `browserPlans:list`; none while the build's switch is off): a draft
+ * waits for their approval, a run nobody knows the result of waits for their 「済んでいた」/「されていなかった」 once
+ * it can be pressed (until then, and while one may be sending, 作業中), an approved plan not started is 作業中.
+ * Every row only opens the card; a settled plan is in neither server list, so it is gone (nothing is stored).
+ */
+function browserRows(b: BrowserInboxPlans): InboxItem[] {
+  const rows = new Map<string, InboxItem>()
+  const base = (planId: string, title: string, at: string | null) => ({
+    key: `browser:${planId}`, thing: 'approval' as const, title, source: '承認のお願い（ブラウザ操作）', due: null, at, unreadNoticeIds: [],
+    action: { kind: 'openBrowserPlan' as const, planId },
+  })
+  for (const p of b.plans) {
+    const title = `${p.label}（${p.site}）`
+    rows.set(p.planId, p.state === 'draft'
+      ? { ...base(p.planId, title, p.createdAt), state: 'waiting', rank: RANK.approval, line: 'サイトから読み取った中身と届く時を確かめてから、カードで任せてください', badge: { tone: 'awaitingApproval', word: STOP_LOOK.awaitingApproval.word }, actionLabel: '承認する…' }
+      : { ...base(p.planId, title, p.createdAt), state: 'working', rank: RANK.other, line: '承認しました。様子はカードで見られます', badge: { tone: 'neutral', word: '承認しました' }, actionLabel: '開く…' })
+  }
+  // A plan claimed for a run has left the open list; its run is the one row (the later list wins anyway).
+  for (const e of b.unsure) {
+    // The server's word (its clocks), not this PC's clock: the inbox reads again once `confirmableAt` has passed.
+    const due = e.state === 'unknown' && e.canConfirm
+    rows.set(e.planId, due
+      ? { ...base(e.planId, e.label, e.permittedAt), state: 'waiting', rank: RANK.unsure, line: 'サイトで確かめて、済んでいたかどうかをカードで押してください', badge: { tone: 'needsAction', word: '届いたか分かりません' }, actionLabel: '確かめる…' }
+      : { ...base(e.planId, e.label, e.permittedAt), state: 'working', rank: RANK.other, line: 'しばらくすると、届いたかどうかをカードで確かめられます', badge: { tone: 'neutral', word: '結果を待っています' }, actionLabel: '開く…' })
+  }
+  return [...rows.values()]
+}
 
 function turnRow(item: TurnItem): InboxItem {
   const r = { type: item.type, state: item.state }
@@ -247,7 +279,7 @@ const sameLocalDay = (iso: string, now: Date) => {
  * without the task list. One record is one row: an unread notice about a record in あなた待ち becomes that
  * row's line and new mark, not a row of its own.
  */
-export function inboxView(source: NoticesState, now: Date, meetings: readonly MeetingTurn[] = []): InboxView {
+export function inboxView(source: NoticesState, now: Date, meetings: readonly MeetingTurn[] = [], browser?: BrowserInboxPlans): InboxView {
   const turn = source.available ? source.myTurn : { total: 0, items: [] as TurnItem[] }
   const rows = new Map<string, InboxItem>()
   for (const item of turn.items) rows.set(item.id, turnRow(item))
@@ -300,8 +332,9 @@ export function inboxView(source: NoticesState, now: Date, meetings: readonly Me
   }
   const listedUnread = source.available ? source.notices.items.filter(n => !n.read).length : 0
   const unreadNotListed = source.available ? Math.max(0, source.notices.unread - listedUnread) : 0
-  const working = [...rows.values()].filter(r => r.state === 'working')
-  waiting.push(...[...rows.values()].filter(r => r.state === 'waiting'))
+  const own = [...rows.values(), ...(browser ? browserRows(browser) : [])]
+  const working = own.filter(r => r.state === 'working')
+  waiting.push(...own.filter(r => r.state === 'waiting'))
   waiting.sort(byNeed)
   done.sort(newestFirst)
   const room = Math.max(0, INBOX_MAX_ROWS - waiting.length)
