@@ -25,8 +25,12 @@ describe('sync harness self-test', { concurrency: 4 }, () => {
   test('a lost local file is detected: an ignored note sync never commits, gone without a backup', async t => {
     const world = World.create(t, { members: [{ name: 'a' }], seed: { '営業部/x.md': '0\n' } })
     const [a] = world.members
-    a.write('営業部/.personal/memo.md', 'only here\n').write('営業部/.env', 'TOKEN=a\n')
+    // A shared file with the very same bytes, a backup copy of them elsewhere: content alone keeps nothing.
+    a.write('営業部/.personal/memo.md', 'only here\n').write('営業部/.env', 'TOKEN=a\n').write('営業部/same.md', 'only here\n')
     await a.sync()
+    fs.mkdirSync(a.path('.backups/t0/別'), { recursive: true })
+    fs.writeFileSync(a.path('.backups/t0/別/memo.md'), 'only here\n')
+    fs.writeFileSync(a.path('.backups/t0/_metadata.json'), '{}')
     assertNoLostLocalFiles(world)
     // Sync moving it to a backup keeps it; the member's own deletion releases it.
     fs.mkdirSync(a.path('.backups/t1/営業部'), { recursive: true })

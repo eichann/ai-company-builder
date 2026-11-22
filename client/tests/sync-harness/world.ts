@@ -665,6 +665,18 @@ export class World {
   }
 
   /** Every object reachable from any server ref, in every server repository. */
+  /** `pathKey(company path) + "\0" + blob` of every file in any server history (scope repositories under their folder). */
+  serverBlobsAt(): Set<string> {
+    const set = new Set<string>()
+    const repos: Array<[string, string]> = [[this.bare, ''], ...[...this.privateFolders.values()].map(f => [f.bare, `${f.path}/`] as [string, string])]
+    for (const [repo, prefix] of repos) {
+      for (const l of this.git(repo, ['rev-list', '--objects', '--all']).split('\n')) {
+        if (l.length > 41) set.add(`${pathKey(prefix + l.slice(41))}\0${l.slice(0, 40)}`)
+      }
+    }
+    return set
+  }
+
   serverObjects(): Set<string> {
     const set = new Set<string>()
     for (const repo of this.serverRepos()) {
@@ -792,8 +804,8 @@ export class Member {
    * design — releases one; sync moving it away does not.
    */
   readonly localWrites: LocalWrite[] = []
-  /** Contents a sync committed: assertNoLostWork's to judge (a union-merged .gitignore included). */
-  readonly committedBlobs = new Set<string>()
+  /** `pathKey(path) + "\0" + blob` of every content a sync committed: assertNoLostWork judges those (it knows merges). */
+  readonly committedAt = new Set<string>()
 
   /**
    * Release what the member wrote at or under `rel` although it is not on
@@ -1385,7 +1397,11 @@ export class Member {
       const repo = this.repoOf(rel)
       if (!fs.existsSync(repo.dir) || !committedIn(repo.dir, ob.blob)) continue
       this.obligations.set(rel, ob)
-      this.committedBlobs.add(ob.blob)
+      // At this path, not merely somewhere: an ignored file with the bytes of a shared one is not committed.
+      const atPath = execFileSync('git', ['log', '--all', '-1', '--format=%H', `--find-object=${ob.blob}`, '--', repo.rel], {
+        cwd: repo.dir, env: this.world.env(NO_LAZY_FETCH),
+      }).toString().trim()
+      if (atPath) this.committedAt.add(`${pathKey(rel)}\0${ob.blob}`)
       // Still pending only if it changed again after this snapshot.
       try {
         if (blobId(this.read(rel)) === ob.blob) this.pending.delete(rel)
@@ -1408,6 +1424,39 @@ export class Member {
         set.add(blobId(fs.readFileSync(path.join(dir, f))))
       }
     }
+    }
+    return set
+  }
+
+  /**
+   * `pathKey(original path) + "\0" + blob` of every copy kept for the member:
+   * the backup folders with a _metadata.json (a copy's path read back through
+   * the metadata's `copies`, `_same-name-<n>/` and the `.staged-version` /
+   * `.committed-version` names) and the sparse keep (`files/<path>`).
+   */
+  keptBlobsAt(): Set<string> {
+    const set = new Set<string>()
+    const add = (original: string, file: string) => set.add(`${pathKey(original)}\0${blobId(fs.readFileSync(file))}`)
+    for (const root of [this.path('.backups'), privateBackupsDir(this.dir)]) {
+      if (!fs.existsSync(root)) continue
+      for (const folder of fs.readdirSync(root)) {
+        const dir = path.join(root, folder)
+        const metaPath = path.join(dir, '_metadata.json')
+        if (!fs.existsSync(metaPath)) continue
+        let copies: Record<string, string> = {}
+        try { copies = JSON.parse(fs.readFileSync(metaPath, 'utf-8')).copies ?? {} } catch { /* none */ }
+        const shownAs = new Map(Object.entries(copies).map(([shown, copy]) => [copy, shown]))
+        for (const f of walkFiles(dir)) {
+          if (f === '_metadata.json') continue
+          const original = shownAs.get(f) ?? f.replace(/^_same-name-\d+\//, '').replace(/\.(?:staged|committed)-version$/, '')
+          add(original, path.join(dir, f))
+        }
+      }
+    }
+    const keep = this.path('.git/acb-sparse-keep')
+    for (const f of fs.existsSync(keep) ? walkFiles(keep) : []) {
+      const m = /^(?:run-[^/]+\/)?files\/(.+)$/.exec(f)
+      if (m) add(m[1], path.join(keep, f))
     }
     return set
   }
