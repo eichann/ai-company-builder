@@ -409,7 +409,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       links={<LinkedColumn rows={[...rows, ...consult.rows]}
         extras={[{ name: 'ファイル', kind: 'file' as const, action: <>
           {onLinkFile && <TaskFiles rootPath={rootPath} linked={card.files.map(f => f.path)} busy={busy} onLink={onLinkFile} />}
-          {onLinkFile && onNewFile && <button type="button" disabled={busy} onClick={() => setNaming({ error: null })} data-new-file className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />新しいファイル</button>}
+          {onLinkFile && onNewFile && <button type="button" disabled={busy} onClick={() => setNaming({ error: null })} data-new-file className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-link hover:underline disabled:opacity-50"><Plus size={10} />新しいファイル</button>}
           <DriveLinkAction companyId={companyId} linked={card.driveFiles.map(f => f.fileId)} busy={busy} usable={typedFiles.drive.usable} note={typedFiles.drive.note} hint={typedFiles.drive.hint} picking={typedFiles.drive.picking} onStop={typedFiles.drive.onStop}
             onLink={typedFiles.onLinkDrive} onLinkText={t => { void typedFiles.onLinkDriveText(t).then(setLinkError) }} />
         </>, note: typedFiles.localFiles ? TYPED_FILES_NOTE : COMPANY_AND_DRIVE_FILES_NOTE },
@@ -424,7 +424,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
           {unlinked && (
             <p role="status" className="flex flex-wrap items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-[11.5px] dark:bg-zinc-800">
               「{unlinked.split('/').pop()}」とのつながりを外しました
-              <button type="button" disabled={busy} onClick={() => void relink(unlinked)} className="text-accent hover:underline">取り消す</button>
+              <button type="button" disabled={busy} onClick={() => void relink(unlinked)} className="text-link hover:underline">取り消す</button>
             </p>
           )}
         </>} />}>
@@ -433,8 +433,8 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       {card.okLine && <p className="flex items-center gap-1.5 rounded-md bg-success-bg px-2 py-1 text-[12.5px] text-success-text"><CheckCircle size={14} weight="fill" className="text-success-icon" />{card.okLine}</p>}
 
       {(card.prepSummary || card.prepared.length > 0) && (
-        <section aria-label="AI が用意したもの" className="space-y-2 rounded-xl border border-accent/30 bg-accent/5 p-3">
-          <h2 className="flex items-center gap-1.5 text-[12px] font-semibold"><Sparkle size={13} weight="fill" className="text-accent" />AI が用意したもの</h2>
+        <section aria-label="AI が用意したもの" className="space-y-2 rounded-xl border border-ai-border bg-ai-bg p-3">
+          <h2 className="flex items-center gap-1.5 text-[12px] font-semibold"><Sparkle size={13} weight="fill" className="text-ai-icon" />AI が用意したもの</h2>
           {card.prepSummary && <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[12.5px] text-gray-700 dark:text-zinc-200">{card.prepSummary}</p>}
           {card.prepared.map(p => <div key={p.id}>{renderPrepared(p)}</div>)}
         </section>

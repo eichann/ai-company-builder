@@ -40,7 +40,7 @@ export function FileTreeHeader({
         <button
           onClick={onToggleDotFiles}
           className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-white/[0.05] transition-colors ${
-            showDotFiles ? 'text-accent' : 'text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300'
+            showDotFiles ? 'text-selected-icon' : 'text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300'
           }`}
           title={showDotFiles ? t('fileTree.hideHidden') : t('fileTree.showHidden')}
         >

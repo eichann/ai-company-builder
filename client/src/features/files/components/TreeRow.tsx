@@ -63,7 +63,7 @@ export const TreeRow = memo(function TreeRow({
         // Never moved (it is not here), but it can be dropped on a record to link it.
         draggable
         onDragStart={e => { e.dataTransfer.setData(FILE_PATHS_DRAG_TYPE, JSON.stringify([entry.path])); e.dataTransfer.effectAllowed = LINK_EFFECT_ALLOWED }}
-        className="group w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm rounded-md outline-none transition-colors focus:ring-1 focus:ring-accent/50 text-gray-400 dark:text-zinc-500 hover:bg-gray-100 dark:hover:bg-white/[0.04]"
+        className="group w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm rounded-md outline-none transition-colors focus-visible:ring-1 focus-visible:ring-focus-ring text-gray-400 dark:text-zinc-500 hover:bg-gray-100 dark:hover:bg-white/[0.04]"
         style={{ paddingLeft: `${8 + depth * 12}px` }}
       >
         <span className="flex-shrink-0 w-3 h-4" />
@@ -83,7 +83,7 @@ export const TreeRow = memo(function TreeRow({
                 type="button"
                 tabIndex={-1}
                 onClick={e => { e.stopPropagation(); actions.current.download(entry) }}
-                className="hidden items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent/10 group-hover:flex group-focus-within:flex"
+                className="hidden items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-link hover:bg-selected-bg group-hover:flex group-focus-within:flex"
               >
                 <CloudArrowDown size={12} />ダウンロード
               </button>
@@ -110,14 +110,15 @@ export const TreeRow = memo(function TreeRow({
       onDoubleClick={() => actions.current.doubleClick(entry)}
       onContextMenu={e => actions.current.contextMenu(entry, e)}
       onKeyDown={e => actions.current.keyDown(entry, e)}
+      // The chosen row: the stronger selected step, since the tree sits on the grey side panel.
       className={`
         w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm cursor-pointer
-        rounded-md transition-colors outline-none focus:ring-1 focus:ring-accent/50
+        rounded-md transition-colors outline-none focus-visible:ring-1 focus-visible:ring-focus-ring
         ${isHighlighted
-          ? 'bg-accent/20 text-gray-900 dark:text-zinc-100'
+          ? 'bg-selected-bg-hover text-gray-900 dark:text-zinc-100'
           : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-white/[0.04] hover:text-gray-900 dark:hover:text-zinc-200'
         }
-        ${isDragOver && entry.isDirectory ? 'ring-2 ring-accent bg-accent/10' : ''}
+        ${isDragOver && entry.isDirectory ? 'ring-2 ring-primary bg-selected-bg' : ''}
         ${isDragSource ? 'opacity-50' : ''}
       `}
       style={{ paddingLeft: `${8 + depth * 12}px` }}

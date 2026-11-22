@@ -103,7 +103,7 @@ export function AudienceFields({
           title="見られる人全員"
           detail="見られる人は、だれでも中のファイルを変更できます"
         />
-        <div className={cn('rounded-lg border transition-colors', value.editorsMode === 'specific' && 'border-brand/50 bg-brand/5')}>
+        <div className={cn('rounded-lg border transition-colors', value.editorsMode === 'specific' && 'border-selected-border bg-selected-bg')}>
           <Choice
             name={editorsGroup}
             checked={value.editorsMode === 'specific'}
@@ -181,7 +181,7 @@ function Choice({
       className={cn(
         'flex cursor-pointer items-start gap-3 px-3 py-2.5 has-[:disabled]:cursor-default',
         !bare && 'rounded-lg border transition-colors',
-        !bare && checked && 'border-brand/50 bg-brand/5'
+        !bare && checked && 'border-selected-border bg-selected-bg'
       )}
     >
       <input
@@ -254,7 +254,7 @@ function MemberPicker({
                       </span>
                       {m.email && <span className="block truncate text-xs text-muted-foreground">{m.email}</span>}
                     </span>
-                    <Check size={16} weight="bold" className={on ? 'ml-auto text-brand' : 'ml-auto opacity-0'} aria-hidden="true" />
+                    <Check size={16} weight="bold" className={on ? 'ml-auto text-selected-icon' : 'ml-auto opacity-0'} aria-hidden="true" />
                     <span className="sr-only">{on ? '（選択中）' : ''}</span>
                   </CommandItem>
                 )

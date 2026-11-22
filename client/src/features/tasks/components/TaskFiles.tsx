@@ -36,7 +36,7 @@ export function TaskFiles({ rootPath, linked, busy, onLink }: Props) {
   const matches = (all ?? []).filter(c => !query || c.path.normalize('NFC').includes(query)).slice(0, 50)
   return (
     <div ref={setBox}>
-      <button type="button" onClick={open} aria-expanded={picking} className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline">
+      <button type="button" onClick={open} aria-expanded={picking} className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-link hover:underline">
         <Plus size={10} />ファイル・フォルダをつなぐ
       </button>
       {picking && (

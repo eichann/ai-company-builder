@@ -3,6 +3,7 @@
 import { useId } from 'react'
 import { X } from '@phosphor-icons/react'
 import { Button } from '../../../shared/ui/primitives'
+import { Dialog, DialogTitle } from '../../../shared/ui/Dialog'
 
 export const TOO_LARGE_TITLE = '大きすぎて共有されていません'
 
@@ -17,27 +18,17 @@ export function TooLargeFileHelp({ name, onClose }: { name: string; onClose: () 
   const titleId = useId()
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-zinc-900/30 p-6 dark:bg-black/50"
-      onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
-      onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="flex max-h-[calc(100vh-3rem)] w-full max-w-[460px] flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-white/10 dark:bg-zinc-900"
-      >
+    <Dialog onClose={onClose} labelledBy={titleId} padded={false} className="flex max-h-[calc(100vh-3rem)] flex-col overflow-hidden">
         <div className="flex items-start justify-between gap-3 px-5 pt-5">
           <div className="min-w-0">
-            <h3 id={titleId} className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-50">{TOO_LARGE_TITLE}</h3>
-            <p className="mt-1 break-all text-[12px] text-zinc-500 dark:text-zinc-400">{name}</p>
+            <DialogTitle id={titleId}>{TOO_LARGE_TITLE}</DialogTitle>
+            <p className="mt-1 break-all text-small text-text-muted">{name}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="閉じる"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 dark:hover:text-zinc-200"
+            className="flex size-7 shrink-0 items-center justify-center rounded-control text-text-subtle hover:bg-surface-sunken hover:text-text"
           >
             <X size={14} />
           </button>
@@ -61,10 +52,9 @@ export function TooLargeFileHelp({ name, onClose }: { name: string; onClose: () 
             </ol>
           </div>
         </div>
-        <div className="flex justify-end border-t border-zinc-200 px-5 py-3 dark:border-white/[0.08]">
+        <div className="flex justify-end border-t border-[color:var(--color-border)] px-5 py-3">
           <Button autoFocus onClick={onClose}>閉じる</Button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }

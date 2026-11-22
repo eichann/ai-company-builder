@@ -15,7 +15,7 @@ export function ChatMarkdownImage({ src, alt }: React.ImgHTMLAttributes<HTMLImag
       type="button"
       title={url}
       onClick={() => { void openRemoteImage(url) }}
-      className="inline text-left text-accent underline underline-offset-2 hover:opacity-80 break-all"
+      className="inline text-left text-link underline underline-offset-2 hover:opacity-80 break-all"
     >
       {label}: {url}（クリックで開く）
     </button>

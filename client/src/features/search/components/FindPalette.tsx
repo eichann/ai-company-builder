@@ -112,7 +112,7 @@ export function FindPalette({ onClose, rootPath, companyId, departmentFolder, re
             const FileIc = i.path ? getFileIcon(name, false) : null
             return (
               <li key={i.key} role="option" aria-selected={n === pick} onMouseEnter={() => setAt(n)} onClick={() => open(i)}
-                className={`flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 ${n === pick ? 'bg-accent/10' : 'hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}>
+                className={`flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 ${n === pick ? 'bg-selected-bg' : 'hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}>
                 {FileIc ? <FileIc size={15} className="flex-shrink-0" /> : i.actionId ? <Broom size={15} className="flex-shrink-0 text-gray-500" /> : i.record ? <RecordIcon record={i.record} size={15} />
                   : <ThingIcon kind={i.skillId ? 'skill' : i.consultationId ? 'consultation' : 'other'} size={15} />}
                 <span className="min-w-0 flex-1">

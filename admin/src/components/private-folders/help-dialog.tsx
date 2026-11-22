@@ -11,7 +11,7 @@ import { PRIVATE_FOLDER_HELP, PRIVATE_FOLDER_HELP_TITLE } from '@/lib/private-fo
 export function PrivateFolderHelpDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{PRIVATE_FOLDER_HELP_TITLE}</DialogTitle>
           <DialogDescription>選んだ人だけに届くフォルダです。守れることと、守れないことがあります。</DialogDescription>
@@ -46,7 +46,7 @@ export function PrivateFolderHelpButton({ variant = 'button' }: { variant?: 'but
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1 rounded text-sm font-medium text-brand underline-offset-4 outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="inline-flex items-center gap-1 rounded text-sm font-medium text-link underline-offset-4 hover:text-link-hover outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           <Question size={14} />
           {PRIVATE_FOLDER_HELP_TITLE}

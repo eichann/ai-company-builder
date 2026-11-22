@@ -11,14 +11,14 @@ type ChoiceRequest = Extract<AgentInteractionRequest, { kind: 'choices' }>
 function HeaderChip({ text, multiSelect }: { text: string; multiSelect: boolean }) {
   return (
     <span className="inline-flex items-center gap-1">
-      {text && <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-accent/10 text-accent dark:bg-accent/25 dark:text-sky-200 border border-accent/20">{text}</span>}
+      {text && <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-selected-bg text-selected-text border border-selected-border">{text}</span>}
       {multiSelect && <span className="text-[11px] text-gray-500 dark:text-zinc-400">複数選択可</span>}
     </span>
   )
 }
 
-const optionClass = (checked: boolean) => `flex items-start gap-2.5 rounded-lg border px-3 py-2 cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-accent/40 ${checked
-  ? 'border-accent/60 bg-accent/5 dark:bg-accent/15'
+const optionClass = (checked: boolean) => `flex items-start gap-2.5 rounded-lg border px-3 py-2 cursor-pointer transition-colors focus-within:ring-2 focus-within:ring-focus-ring ${checked
+  ? 'border-selected-border bg-selected-bg'
   : 'border-gray-200 dark:border-zinc-700 hover:bg-gray-50 dark:hover:bg-zinc-800/60'}`
 
 function QuestionFields({ name, index, total, question, draft, disabled, onChange }: {
@@ -54,7 +54,7 @@ function QuestionFields({ name, index, total, question, draft, disabled, onChang
           {draft.otherOn && (
             <input ref={otherRef} type="text" aria-label={`${question.header || question.question}：その他の回答`} maxLength={MAX_OTHER_LENGTH} autoComplete="off"
               value={draft.otherText} placeholder="自由に入力してください" onChange={e => onChange({ ...draft, otherText: e.target.value })}
-              className="mt-1.5 w-full rounded-md border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm text-gray-900 dark:text-zinc-100 outline-none focus:border-accent" />
+              className="mt-1.5 w-full rounded-md border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm text-gray-900 dark:text-zinc-100 outline-none focus:border-focus-border" />
           )}
         </span>
       </label>
@@ -77,10 +77,10 @@ export function ChoicePromptCard({ request, onRespond }: { request: ChoiceReques
   }
   const agent = agentShortLabel(request.agent)
   return (
-    <section aria-label={`${agent}からの質問`} className="flex-shrink-0 mx-4 mb-3 rounded-xl border border-accent/30 bg-white dark:bg-zinc-900 shadow-sm p-4 text-sm max-h-[55vh] overflow-y-auto animate-fade-in"
+    <section aria-label={`${agent}からの質問`} className="flex-shrink-0 mx-4 mb-3 rounded-xl border border-selected-border bg-white dark:bg-zinc-900 shadow-sm p-4 text-sm max-h-[55vh] overflow-y-auto animate-fade-in"
       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && answers && !sending) { e.preventDefault(); void respond({ choices: answers }) } }}>
       <div className="flex items-center gap-2 mb-3 text-gray-700 dark:text-zinc-200">
-        <ListChecks size={16} weight="bold" className="text-accent flex-shrink-0" />
+        <ListChecks size={16} weight="bold" className="text-primary flex-shrink-0" />
         <span className="font-medium" aria-live="polite">{agent}からの質問 · 回答待ち</span>
       </div>
       <div className="space-y-4">
@@ -124,7 +124,7 @@ export const ChoicePromptRecordView = memo(function ChoicePromptRecordView({ rec
       </div>
       {answered && (
         <div className="mt-2 flex justify-end">
-          <div aria-label="あなたの回答" className="max-w-[85%] rounded-2xl rounded-br-md px-4 py-2.5 text-[14px] leading-relaxed bg-accent text-white whitespace-pre-wrap">
+          <div aria-label="あなたの回答" className="max-w-[85%] rounded-2xl rounded-br-md px-4 py-2.5 text-[14px] leading-relaxed bg-primary text-on-primary whitespace-pre-wrap">
             {choiceAnswerLines(record).join('\n')}
           </div>
         </div>

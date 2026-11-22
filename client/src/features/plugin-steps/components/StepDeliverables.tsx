@@ -23,12 +23,12 @@ export function StepDeliverables({ companyId, recordId, renderPrepared, renderFi
   const view = useStepDeliverables(companyId, recordId)
   if (!view) return null
   return (
-    <section aria-label="AI が用意したもの" className="mx-5 mt-5 rounded-lg border border-accent/30 bg-accent/5 px-4 py-3 text-[12.5px]">
+    <section aria-label="AI が用意したもの" className="mx-5 mt-5 rounded-lg border border-ai-border bg-ai-bg px-4 py-3 text-[12.5px]">
       <h3 className="flex items-center gap-1.5 text-[12px] font-medium text-gray-700 dark:text-zinc-200">
-        <Sparkle size={13} className="text-accent" />AI が用意したもの
+        <Sparkle size={13} className="text-ai-icon" />AI が用意したもの
       </h3>
       <button type="button" onClick={() => void runCommand('record.open', { recordId: view.taskId })}
-        className="mt-1 text-left text-accent hover:underline">{view.title}</button>
+        className="mt-1 text-left text-link hover:underline">{view.title}</button>
       {view.questions && (
         <div className="mt-2">
           <p className="text-[11px] font-medium text-gray-600 dark:text-zinc-300">確かめる点</p>

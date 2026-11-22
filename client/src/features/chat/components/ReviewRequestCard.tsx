@@ -29,7 +29,7 @@ export const ReviewRequestCard = memo(function ReviewRequestCard({ record }: { r
         {record.files.map(file => <li key={file}>
           {canOpenFile && rootPath
             ? <button type="button" onClick={() => void runCommand('file.open', { path: `${rootPath}/${file}` })} title="エディタで開く"
-                className="flex max-w-full items-center gap-1.5 rounded px-1 py-0.5 text-left font-mono text-xs text-accent hover:bg-accent/10">
+                className="flex max-w-full items-center gap-1.5 rounded px-1 py-0.5 text-left font-mono text-xs text-link hover:bg-selected-bg">
                 <FileText size={13} aria-hidden className="shrink-0" /><span className="truncate">{file}</span>
               </button>
             : <span className="flex items-center gap-1.5 px-1 font-mono text-xs text-gray-600 dark:text-zinc-300"><FileText size={13} aria-hidden className="shrink-0" /><span className="truncate">{file}</span></span>}

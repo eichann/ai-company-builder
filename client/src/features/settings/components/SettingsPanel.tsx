@@ -306,7 +306,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/40 p-6 backdrop-blur-[2px] dark:bg-black/60"
+      className="fixed inset-0 z-dialog flex items-center justify-center bg-scrim p-6"
       onClick={handleBackdropClick}
     >
       <div
@@ -315,7 +315,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
         aria-modal="true"
         aria-label="設定"
         tabIndex={-1}
-        className="flex h-[min(760px,92vh)] w-[min(1040px,96vw)] overflow-hidden rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-2xl outline-none dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-100"
+        className="flex h-[min(760px,92vh)] w-[min(1040px,96vw)] overflow-hidden rounded-card border border-zinc-200 bg-white text-zinc-900 shadow-dialog outline-none dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-100"
       >
         {/* Section nav */}
         <nav ref={browser.loadRef} aria-label="設定の項目" className="flex w-60 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50/80 px-3 py-5 dark:border-white/[0.06] dark:bg-zinc-950/40">

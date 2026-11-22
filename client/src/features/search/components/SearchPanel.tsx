@@ -47,8 +47,8 @@ interface SearchPanelProps {
 const DEBOUNCE_MS = 250
 const pill = (on: boolean) =>
   `inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] whitespace-nowrap transition-colors ${on
-    ? 'border-accent bg-accent/10 text-accent'
-    : 'border-gray-200 dark:border-zinc-700 text-gray-600 dark:text-zinc-300 hover:border-accent'}`
+    ? 'border-selected-border bg-selected-bg text-selected-text'
+    : 'border-gray-200 dark:border-zinc-700 text-gray-600 dark:text-zinc-300 hover:border-primary'}`
 const PERIODS: Record<Period, string> = { week: '1週間', month: '1か月', all: 'いつでも' }
 const under = (folder: string, p: string) => folder === '' || p === folder || p.startsWith(`${folder}/`) || folder.startsWith(`${p}/`)
 
@@ -155,7 +155,7 @@ export function SearchPanel(props: SearchPanelProps) {
               if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); clearTimeout(timer.current); run(text) }
             }}
             placeholder="覚えている言葉で探す"
-            className="w-full pl-8 pr-8 py-1.5 text-xs rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-800 dark:text-zinc-200 placeholder:text-gray-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-accent"
+            className="w-full pl-8 pr-8 py-1.5 text-xs rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-800 dark:text-zinc-200 placeholder:text-gray-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-focus-border"
           />
           {text && (
             <button type="button" aria-label="消す" onClick={clear}
@@ -188,7 +188,7 @@ export function SearchPanel(props: SearchPanelProps) {
             <div className="flex items-center gap-1">
               <span className={pill(true)}>
                 <ThingIcon kind="consultation" size={11} />「{hub.title}」の AIへの相談
-                <button type="button" aria-label="絞り込みをやめる" onClick={() => setHubConsults(null)} className="ml-0.5 rounded-full hover:bg-accent/20"><X size={10} /></button>
+                <button type="button" aria-label="絞り込みをやめる" onClick={() => setHubConsults(null)} className="ml-0.5 rounded-full hover:bg-selected-bg-hover"><X size={10} /></button>
               </span>
             </div>
           ) : chips.length > 1 && (
@@ -242,7 +242,7 @@ export function SearchPanel(props: SearchPanelProps) {
           <Section id="content" title="中身で見つかったもの" list={view.byContent} q={q} open={open} setOpen={setOpen} a={actions} />
           {!hub && scope !== null && elsewhere > 0 && (
             <button type="button" onClick={() => setScopeWide(true)} data-elsewhere
-              className="w-full flex items-center gap-1.5 px-3 py-3 text-[11px] text-gray-500 dark:text-zinc-400 hover:text-accent border-t border-gray-100 dark:border-zinc-800">
+              className="w-full flex items-center gap-1.5 px-3 py-3 text-[11px] text-gray-500 dark:text-zinc-400 hover:text-link border-t border-gray-100 dark:border-zinc-800">
               <Globe size={12} />ほかの部署にも {elsewhere}件 あります（全社で探す）
             </button>
           )}

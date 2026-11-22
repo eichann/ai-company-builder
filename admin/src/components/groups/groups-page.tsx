@@ -192,7 +192,7 @@ function RenameDialog({
 }) {
   return (
     <Dialog open={group !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent>
         {group && <RenameForm group={group} onCancel={() => onOpenChange(false)} onSave={async (n) => { await onSave(n); onOpenChange(false) }} />}
       </DialogContent>
     </Dialog>
@@ -246,7 +246,7 @@ function GroupMembersDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-0 p-0 sm:max-w-md">
+      <DialogContent className="gap-0 p-0">
         {open && (
           <MembersForm
             group={group}

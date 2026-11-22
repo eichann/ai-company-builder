@@ -28,7 +28,7 @@ export function ChatWindowApp() {
   const theme = useAppStore(s => s.theme)
   useEffect(() => { document.documentElement.classList.toggle('dark', theme === 'dark') }, [theme])
   const self = useChatWindowSelf()
-  if (self.kind === 'loading') return <Centered><SpinnerGap size={32} className="animate-spin text-accent" /></Centered>
+  if (self.kind === 'loading') return <Centered><SpinnerGap size={32} className="animate-spin text-primary" /></Centered>
   if (self.kind === 'missing') return <Centered><p role="alert">{self.message}</p></Centered>
   return <ChatWindowChat context={self.context} />
 }

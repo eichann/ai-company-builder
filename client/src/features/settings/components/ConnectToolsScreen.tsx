@@ -8,6 +8,7 @@ import { Button, Callout, Card } from '../../../shared/ui/primitives'
 import { GOOGLE_PRACTICE_TEXT } from '../../../../shared/google'
 import { connectToolsOffer, connectToolsView, type ConnectToolItem, type ConnectToolsOffer } from '../connectTools'
 import { useConnectTools } from '../hooks/useConnectTools'
+import { Dialog } from '../../../shared/ui/Dialog'
 
 interface Props {
   companyId: string
@@ -86,9 +87,8 @@ export function ConnectToolsScreen({ companyId, firstRun = false }: Props) {
 
   if (!firstRun) return <div className="px-8 pb-8 pt-7">{body}</div>
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl dark:bg-zinc-900">{body}</div>
-    </div>
+    // Answered only with its buttons (「あとで」 records the choice): Esc and the scrim do nothing.
+    <Dialog onClose={() => {}} label={title} dismissible={false} closeOnScrim={false} className="max-h-[90vh] overflow-y-auto">{body}</Dialog>
   )
 }
 

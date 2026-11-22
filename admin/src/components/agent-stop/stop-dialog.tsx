@@ -64,7 +64,7 @@ export function StopDialog({
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>AI を止める</DialogTitle>
           <DialogDescription>メンバーのアプリの AI を、解除するまで止めます。</DialogDescription>

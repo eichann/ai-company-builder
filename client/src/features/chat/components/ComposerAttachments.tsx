@@ -54,13 +54,13 @@ export function ComposerAttachments({ imageWarning, filePaths, images, onRemoveF
             return (
               <div
                 key={filePath}
-                className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-accent/10 text-accent text-xs group"
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-selected-bg text-selected-text text-xs group"
                 title={filePath}
               >
                 <span className="max-w-[200px] truncate">{fileName}</span>
                 <button
                   onClick={() => onRemoveFilePath(i)}
-                  className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-accent/20 opacity-60 group-hover:opacity-100 transition-opacity text-[10px]"
+                  className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-selected-bg-hover opacity-60 group-hover:opacity-100 transition-opacity text-[10px]"
                 >
                   ×
                 </button>

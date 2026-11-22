@@ -7,6 +7,7 @@ import { CheckCircle } from '@phosphor-icons/react'
 import { BUNDLE_ENDS_HINT, type BundleAction, type BundleActions as Actions } from '../../../../shared/record-details'
 import { MoreMenu } from '../../../shared/ui/MoreMenu'
 import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
+import { Dialog, DialogFooter, DialogTitle } from '../../../shared/ui/Dialog'
 
 const FIELD = 'w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-[12.5px] dark:border-zinc-600'
 
@@ -56,33 +57,33 @@ function BundleActionDialog({ action, people, busy, onClose, onAct }: { action: 
     else onClose()
   }
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/25" onClick={onClose}>
-      <div role="dialog" aria-label={action.title} onClick={e => e.stopPropagation()} className="w-[420px] space-y-3 rounded-xl bg-white p-4 text-[13px] text-gray-800 shadow-2xl dark:bg-zinc-800 dark:text-zinc-100">
-        <div className="text-[14px] font-semibold">{action.title}</div>
-        {action.ends && <p className="text-[12.5px] text-gray-600 dark:text-zinc-300">{BUNDLE_ENDS_HINT}</p>}
-        {action.args.map(x => (
-          <label key={x.name} className="block space-y-1">
-            <span className="text-[12px] text-gray-600 dark:text-zinc-300">{x.label}</span>
-            {x.kind === 'person' ? (
-              <select aria-label={x.label} value={values[x.name] ?? ''} onChange={e => setValues(v => ({ ...v, [x.name]: e.target.value }))} className={FIELD}>
-                <option value="">選んでください</option>
-                {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            ) : (
-              <input aria-label={x.label} type={x.kind === 'date' ? 'date' : 'text'} value={values[x.name] ?? ''} onChange={e => setValues(v => ({ ...v, [x.name]: e.target.value }))} className={FIELD} />
-            )}
-          </label>
-        ))}
-        {(action.noteRequired || action.noteOffered) && (
-          <textarea aria-label="理由" value={note} onChange={e => setNote(e.target.value)} rows={2}
-            placeholder={action.noteRequired ? '理由（経緯に残ります）' : '理由（なくてもかまいません。経緯に残ります）'} className={FIELD} />
-        )}
-        {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
-        <div className="flex justify-end gap-2">
+    <Dialog onClose={onClose} label={action.title} size="sm" className="text-[13px]">
+        <DialogTitle>{action.title}</DialogTitle>
+        <div className="mt-3 space-y-3">
+          {action.ends && <p className="text-[12.5px] text-gray-600 dark:text-zinc-300">{BUNDLE_ENDS_HINT}</p>}
+          {action.args.map(x => (
+            <label key={x.name} className="block space-y-1">
+              <span className="text-[12px] text-gray-600 dark:text-zinc-300">{x.label}</span>
+              {x.kind === 'person' ? (
+                <select aria-label={x.label} value={values[x.name] ?? ''} onChange={e => setValues(v => ({ ...v, [x.name]: e.target.value }))} className={FIELD}>
+                  <option value="">選んでください</option>
+                  {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              ) : (
+                <input aria-label={x.label} type={x.kind === 'date' ? 'date' : 'text'} value={values[x.name] ?? ''} onChange={e => setValues(v => ({ ...v, [x.name]: e.target.value }))} className={FIELD} />
+              )}
+            </label>
+          ))}
+          {(action.noteRequired || action.noteOffered) && (
+            <textarea aria-label="理由" value={note} onChange={e => setNote(e.target.value)} rows={2}
+              placeholder={action.noteRequired ? '理由（経緯に残ります）' : '理由（なくてもかまいません。経緯に残ります）'} className={FIELD} />
+          )}
+          {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+        </div>
+        <DialogFooter>
           <button type="button" onClick={onClose} className={SMALL_BUTTON}>やめておく</button>
           <button type="button" disabled={busy || !ready} onClick={() => void run()} className={MAIN_BUTTON}>{action.title}</button>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+    </Dialog>
   )
 }

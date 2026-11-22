@@ -175,7 +175,7 @@ export default function ApiKeysPage() {
           {data.keys.some((k) => k.status === 'active') && (
             <p className="text-sm text-muted-foreground">
               緊急のときにすべての鍵を今すぐ止めるのは、
-              <Link href={`/companies/${companyId}/advanced/ai-safety/stop`} className="font-medium text-brand underline-offset-4 hover:underline">
+              <Link href={`/companies/${companyId}/advanced/ai-safety/stop`} className="font-medium text-link underline-offset-4 hover:text-link-hover hover:underline">
                 「AI を止める」の画面
               </Link>
               です（止める操作は1か所にまとめました）。再開はこのページで鍵ごとに行います。
@@ -268,7 +268,7 @@ export default function ApiKeysPage() {
       ) : null}
 
       <Dialog open={dialog?.kind === 'create' || dialog?.kind === 'edit'} onOpenChange={(o) => !o && setDialog(null)}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent size="lg" className="max-h-[90dvh] overflow-y-auto">
           {data && (dialog?.kind === 'create' || dialog?.kind === 'edit') && (
             <KeyForm
               view={data}
@@ -283,7 +283,7 @@ export default function ApiKeysPage() {
       </Dialog>
 
       <Dialog open={dialog?.kind === 'replace'} onOpenChange={(o) => !o && setDialog(null)}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent>
           {dialog?.kind === 'replace' && (
             <ReplaceForm
               k={dialog.key}
@@ -296,7 +296,7 @@ export default function ApiKeysPage() {
       </Dialog>
 
       <Dialog open={dialog?.kind === 'delete'} onOpenChange={(o) => !o && setDialog(null)}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent>
           {dialog?.kind === 'delete' && (
             <>
               <DialogHeader>

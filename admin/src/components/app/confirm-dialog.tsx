@@ -63,7 +63,6 @@ export function ConfirmDialog({
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
       <DialogContent
-        className="sm:max-w-md"
         role={destructive ? 'alertdialog' : 'dialog'}
         aria-modal="true"
         onOpenAutoFocus={(e) => {

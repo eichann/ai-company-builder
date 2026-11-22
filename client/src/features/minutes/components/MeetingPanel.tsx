@@ -81,14 +81,14 @@ export function MeetingPanel({ companyId, meetingId, members, onConsult, summary
     <section aria-label="この会議の議事録" className="space-y-5">
       {summary}
       {reading && (
-        <p className="flex items-center gap-1.5 text-[12.5px] text-accent">
+        <p className="flex items-center gap-1.5 text-[12.5px] text-link">
           <CircleNotch size={12} className="animate-spin" />{m.byYou || !m.by ? 'AI が読んでいます…' : `${m.by.displayName}さんの AI が読んでいます…`}
         </p>
       )}
       {m?.status === 'skipped' && m.by && <p className="text-[12.5px] text-gray-500">{m.byYou ? 'あなた' : `${m.by.displayName}さん`}が読まないにしました。あとから［AI に読ませる］で読めます。</p>}
       {result?.success && result.renewGoogle && (
         <p className="text-[12px] text-gray-500">{GOOGLE_RENEW_MINUTES_TEXT}
-          <button type="button" onClick={() => void renew()} className="ml-1 text-accent hover:underline">許可をし直す</button>
+          <button type="button" onClick={() => void renew()} className="ml-1 text-link hover:underline">許可をし直す</button>
         </p>
       )}
       {review ? renderReview(review) : result !== null && outputs}
@@ -99,12 +99,12 @@ export function MeetingPanel({ companyId, meetingId, members, onConsult, summary
             <span className="block text-[11.5px] text-gray-500 dark:text-zinc-400">同じ定例の議事録が届いたら、ボタンを押さなくても AI が読みます。</span>
           </span>
           <button type="button" onClick={() => void auto(true)} className={SMALL_BUTTON}>この定例は次から自動で読む</button>
-          <button type="button" onClick={markOffered} className="text-[11.5px] text-gray-500 hover:text-accent">今はいい</button>
+          <button type="button" onClick={markOffered} className="text-[11.5px] text-gray-500 hover:text-link">今はいい</button>
         </div>
       )}
       {m?.autoSeries && (
         <p className="text-[12px] text-gray-500">この定例は、議事録が届くと AI が自動で読みます。
-          <button type="button" onClick={() => void auto(false)} className="ml-1 text-accent hover:underline">次から自動で読まない</button>
+          <button type="button" onClick={() => void auto(false)} className="ml-1 text-link hover:underline">次から自動で読まない</button>
         </p>
       )}
       <div className="space-y-2">

@@ -60,7 +60,7 @@ export function DriveFiles({ companyId, linked, busy, usable, onLink }: Props) {
   return (
     <div ref={setBox}>
       <button type="button" disabled={busy || opening || !usable} onClick={() => void open()} aria-expanded={choices !== null} data-link-drive
-        className="mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />Google Drive のファイルをつなぐ</button>
+        className="mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-link hover:underline disabled:opacity-50"><Plus size={10} />Google Drive のファイルをつなぐ</button>
       {choices !== null && usable && (
         <div role="group" aria-label="つなぐ Google Drive のファイル" className="mt-1 overflow-hidden rounded-lg border border-gray-200 dark:border-zinc-700">
           <p className="border-b border-gray-100 px-2 py-1 text-[11px] text-gray-500 dark:border-zinc-700 dark:text-zinc-400">前に選んだファイルと、AI が Drive に置いたファイル</p>

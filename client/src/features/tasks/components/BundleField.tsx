@@ -12,6 +12,7 @@ import { useBundleChoices } from '../hooks/useBundleChoices'
 import { NewBundleDialog, type NewBundlePlaces, type NewBundleSource } from './NewBundleDialog'
 import { privateBundleRights } from '../api'
 import type { BundlePlace } from '../model'
+import { Dialog } from '../../../shared/ui/Dialog'
 
 /** A meeting's 「どの〇〇の会議ですか？」, asked in the field while none is linked. */
 export interface BundleQuestion {
@@ -24,7 +25,7 @@ export interface BundleQuestion {
   none?: { label: string; press: () => Promise<string | null> }
 }
 
-const QUIET = 'inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-accent disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
+const QUIET = 'inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-link disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
 
 export function BundleField({ companyId, bundle, word, canSet, canRemove = true, busy, onSet, onRemove, newFrom, places, onCreate, question }: {
   companyId: string
@@ -71,7 +72,7 @@ export function BundleField({ companyId, bundle, word, canSet, canRemove = true,
         <ThingIcon kind="bundle" typeLabel={name} size={14} label="" />
         {!asked && <span className="text-gray-500">{name}</span>}
         {bundle
-          ? <button type="button" onClick={() => runCommand('record.open', { recordId: bundle.id })} className="min-w-0 truncate font-medium text-accent hover:underline">{bundle.title}</button>
+          ? <button type="button" onClick={() => runCommand('record.open', { recordId: bundle.id })} className="min-w-0 truncate font-medium text-link hover:underline">{bundle.title}</button>
           : asked ? <span className="min-w-0">{asked.text}</span> : <span className="text-gray-400">なし</span>}
         {canSet && (
           <span className="ml-auto flex flex-wrap items-center justify-end gap-1">
@@ -110,9 +111,7 @@ function BundlePicker({ companyId, word, current, onChoose, onClose }: {
     else onClose()
   }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div role="dialog" aria-label={`${word}につなぐ`} onKeyDown={e => { if (e.key === 'Escape') onClose() }}
-        className="w-[400px] overflow-hidden rounded-xl border border-gray-200 bg-white text-gray-800 shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100">
+    <Dialog onClose={onClose} label={`${word}につなぐ`} size="sm" padded={false} className="overflow-hidden">
         <div className="flex items-center gap-2 px-3 pb-1 pt-2.5 text-[13px]">
           <span className="flex-1 font-semibold">{word}につなぐ</span>
           <button type="button" onClick={onClose} aria-label="閉じる" className="rounded p-0.5 hover:bg-gray-100 dark:hover:bg-zinc-700"><X size={12} /></button>
@@ -136,7 +135,6 @@ function BundlePicker({ companyId, word, current, onChoose, onClose }: {
           ))}
         </ul>
         {error && <p role="alert" className="border-t border-gray-100 px-3 py-1.5 text-[11.5px] text-red-600 dark:border-zinc-700 dark:text-red-400">{error}</p>}
-      </div>
-    </div>
+    </Dialog>
   )
 }

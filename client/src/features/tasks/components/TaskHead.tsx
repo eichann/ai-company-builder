@@ -26,9 +26,9 @@ export function OriginLine({ origin }: { origin: TaskCardOrigin }) {
   return (
     <div className="text-[11.5px] text-gray-500 dark:text-zinc-400">
       <span className="mr-1.5 inline-block align-[-2px]"><ThingIcon kind={origin.kind === 'meeting' ? 'meeting' : 'incoming'} size={12} label="" /></span>
-      <button type="button" onClick={() => runCommand('record.open', { recordId: origin.recordId })} className="hover:text-accent hover:underline">{what}</button>
+      <button type="button" onClick={() => runCommand('record.open', { recordId: origin.recordId })} className="hover:text-link hover:underline">{what}</button>
       {how}{origin.byAi && origin.addedBy && `・${origin.addedBy}さんが足しました`}
-      {origin.basis && <button type="button" onClick={() => setOpen(o => !o)} className="ml-1.5 text-accent hover:underline">{open ? '根拠をたたむ' : '根拠を見る'}</button>}
+      {origin.basis && <button type="button" onClick={() => setOpen(o => !o)} className="ml-1.5 text-link hover:underline">{open ? '根拠をたたむ' : '根拠を見る'}</button>}
       {open && origin.basis && <blockquote className="ml-[18px] mt-1 whitespace-pre-wrap border-l-2 border-gray-200 pl-2 text-gray-600 dark:border-zinc-700 dark:text-zinc-300">{origin.basis}</blockquote>}
     </div>
   )
@@ -70,7 +70,7 @@ export function DoneNotice({ text, busy, onUndo }: { text: string; busy: boolean
   return (
     <p role="status" className="flex flex-wrap items-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-[12.5px] dark:bg-zinc-800">
       {text}
-      {onUndo && <button type="button" disabled={busy} onClick={onUndo} className="text-accent hover:underline">取り消す</button>}
+      {onUndo && <button type="button" disabled={busy} onClick={onUndo} className="text-link hover:underline">取り消す</button>}
     </p>
   )
 }

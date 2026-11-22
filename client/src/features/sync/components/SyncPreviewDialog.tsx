@@ -291,7 +291,7 @@ export function SyncPreviewDialog({
               rows={1}
               onFocus={() => setCommitBoxExpanded(true)}
               onBlur={() => { if (!commitMessage.trim()) setCommitBoxExpanded(false) }}
-              className={`w-full px-3 py-2 text-xs rounded-md border border-border bg-activitybar-bg text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-accent resize-none transition-[height] duration-200 ${commitBoxExpanded ? 'h-20 overflow-auto' : 'h-8 overflow-hidden'}`}
+              className={`w-full px-3 py-2 text-xs rounded-md border border-border bg-activitybar-bg text-text-primary placeholder:text-text-secondary/50 focus:outline-none focus:border-focus-border resize-none transition-[height] duration-200 ${commitBoxExpanded ? 'h-20 overflow-auto' : 'h-8 overflow-hidden'}`}
               disabled={isSyncing}
             />
             <p className="text-[10px] text-text-secondary/50 text-left">Enter で改行・⌘+Enterで同期</p>

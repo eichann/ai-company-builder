@@ -12,12 +12,12 @@ export function RadioCard({ checked, onSelect, label, help }: { checked: boolean
       onClick={onSelect}
       className={cn(
         'flex flex-col items-start gap-1 rounded-xl border px-4 py-3 text-left outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50',
-        checked ? 'border-brand ring-1 ring-brand/40' : 'hover:border-foreground/20'
+        checked ? 'border-selected-border bg-selected-bg' : 'hover:border-foreground/20'
       )}
     >
       <span className="flex items-center gap-2 text-sm font-medium">
-        <span aria-hidden="true" className={cn('flex size-4 items-center justify-center rounded-full border', checked ? 'border-brand' : 'border-input')}>
-          {checked && <span className="size-2 rounded-full bg-brand" />}
+        <span aria-hidden="true" className={cn('flex size-4 items-center justify-center rounded-full border', checked ? 'border-primary' : 'border-input')}>
+          {checked && <span className="size-2 rounded-full bg-primary" />}
         </span>
         {label}
       </span>

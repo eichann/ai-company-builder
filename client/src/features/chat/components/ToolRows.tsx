@@ -57,7 +57,7 @@ const TOOL_ICONS: Record<string, React.ComponentType<any>> = {
 }
 
 function StatusIcon({ state }: { state: string }) {
-  if (isRunningState(state)) return <CircleNotch size={14} className="animate-spin text-accent flex-shrink-0" />
+  if (isRunningState(state)) return <CircleNotch size={14} className="animate-spin text-primary flex-shrink-0" />
   if (state === 'output-available') return <Check size={14} weight="bold" className="text-green-500 flex-shrink-0" />
   if (state === 'output-error') return <WarningCircle size={14} weight="fill" className="text-red-400 flex-shrink-0" />
   return <CircleNotch size={14} className="text-gray-400 flex-shrink-0" />
@@ -187,7 +187,7 @@ const AgentToolGroup = memo(function AgentToolGroup({ item }: { item: AgentItem 
           {hidden > 0 && (
             <button
               onClick={() => setShown(shown + GROUP_PAGE_SIZE)}
-              className="my-1 px-2 py-1 text-xs text-accent hover:underline"
+              className="my-1 px-2 py-1 text-xs text-link hover:underline"
             >
               {t('chat.showMoreTools', { n: hidden })}
             </button>
@@ -257,7 +257,7 @@ export const ToolRunGroup = memo(function ToolRunGroup({ item }: { item: RunItem
     >
       <ListChecks size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
       <ToolCountLabel count={item.items.reduce((n, i) => n + (i.kind === 'same' ? i.rows.length : 1), 0)} running={item.runningCount} />
-      <span className="text-accent">
+      <span className="text-link">
         {isExpanded ? t('chat.collapseTools') : t('chat.showHiddenTools', { n: hidden })}
       </span>
       {isExpanded ? (

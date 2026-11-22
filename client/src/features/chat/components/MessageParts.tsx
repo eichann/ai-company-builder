@@ -36,7 +36,7 @@ import { ToolRunGroup } from './ToolRows'
 
 function StreamingCursor() {
   return (
-    <span className="inline-block w-0.5 h-4 bg-accent/70 ml-0.5 animate-pulse-soft align-middle" />
+    <span className="inline-block w-0.5 h-4 bg-primary ml-0.5 animate-pulse-soft align-middle" />
   )
 }
 

@@ -10,6 +10,7 @@ import {
   Check
 } from '@phosphor-icons/react'
 import { isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../../../../shared/core/names'
+import { Dialog } from '../../../shared/ui/Dialog'
 
 interface NewSkillWizardProps {
   departmentName: string
@@ -104,8 +105,8 @@ export function NewSkillWizard({
   }
 
   return (
-    <div className="fixed inset-0 bg-scrim backdrop-blur-sm flex items-center justify-center z-dialog">
-      <div className="w-full max-w-lg bg-surface-raised text-text rounded-2xl border border-[color:var(--color-border)] shadow-dialog overflow-hidden">
+    // Several steps of typing: Esc and the scrim do not throw them away (its × closes).
+    <Dialog onClose={onClose} label={t('skillWizard.title')} dismissible={false} padded={false} className="overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[color:var(--color-border)]">
           <div className="flex items-center gap-3">
@@ -366,7 +367,6 @@ export function NewSkillWizard({
             )}
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }

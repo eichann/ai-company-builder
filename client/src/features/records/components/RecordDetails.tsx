@@ -38,7 +38,7 @@ function Items({ records }: { records: RecordViewSummary[] }) {
       {records.map(r => (
         <li key={r.id}>
           <button type="button" onClick={() => runCommand('record.open', { recordId: r.id })}
-            className={`text-left hover:text-accent hover:underline ${r.finished ? 'text-gray-400 line-through' : ''}`}>{r.title}</button>
+            className={`text-left hover:text-link hover:underline ${r.finished ? 'text-gray-400 line-through' : ''}`}>{r.title}</button>
         </li>
       ))}
     </ul>

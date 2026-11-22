@@ -13,6 +13,7 @@ import type { DepartmentConfig } from '../../../types'
 import type { Skill } from '../model'
 import { COMPANY_TAB_ID } from '../../../shared/lib/departments'
 import { listSkills, readSkillFile } from '../api'
+import { Dialog } from '../../../shared/ui/Dialog'
 
 interface CopySkillModalProps {
   rootPath: string
@@ -172,8 +173,7 @@ export function CopySkillModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="w-full max-w-3xl bg-white dark:bg-zinc-900 rounded-2xl border border-gray-200 dark:border-zinc-800 shadow-2xl overflow-hidden max-h-[80vh] flex flex-col">
+    <Dialog onClose={onClose} label="他の部署からスキルをコピー" size="custom" padded={false} className="max-w-3xl overflow-hidden max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-zinc-800 flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -216,7 +216,7 @@ export function CopySkillModal({
                     setSelectedSourceId(e.target.value)
                     setFolderNameEdited(false)
                   }}
-                  className="w-full appearance-none px-3 py-2 pr-8 rounded-lg bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-sm text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-accent"
+                  className="w-full appearance-none px-3 py-2 pr-8 rounded-lg bg-gray-100 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-sm text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-focus-ring"
                 >
                   {sources.map(s => (
                     <option key={s.id} value={s.id}>{s.name}</option>
@@ -246,7 +246,7 @@ export function CopySkillModal({
                       className={`
                         w-full text-left px-3 py-2.5 rounded-lg transition-colors
                         ${selectedSkillId === skill.id
-                          ? 'bg-accent/10 text-gray-900 dark:text-zinc-100'
+                          ? 'bg-selected-bg text-gray-900 dark:text-zinc-100'
                           : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-white/[0.03]'
                         }
                       `}
@@ -306,7 +306,7 @@ export function CopySkillModal({
                       value={name}
                       onChange={(e) => handleNameChange(e.target.value)}
                       placeholder="コピー後のスキル名"
-                      className="w-full px-3 py-2 rounded-lg bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-sm text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-accent"
+                      className="w-full px-3 py-2 rounded-lg bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 text-sm text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-focus-ring"
                     />
                   </div>
                   <div>
@@ -318,7 +318,7 @@ export function CopySkillModal({
                       value={folderName}
                       onChange={(e) => handleFolderNameChange(e.target.value)}
                       placeholder="skill-folder-name"
-                      className={`w-full px-3 py-2 rounded-lg bg-white dark:bg-zinc-800 border text-sm text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-accent font-mono ${
+                      className={`w-full px-3 py-2 rounded-lg bg-white dark:bg-zinc-800 border text-sm text-gray-900 dark:text-zinc-100 placeholder:text-gray-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-focus-ring font-mono ${
                         folderName && !folderNameValid ? 'border-red-500' : 'border-gray-200 dark:border-zinc-700'
                       }`}
                     />
@@ -354,7 +354,6 @@ export function CopySkillModal({
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }

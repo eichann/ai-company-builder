@@ -15,7 +15,7 @@ const buttonVariants = cva(
           'border bg-card shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/20 dark:border-input dark:hover:bg-input/40',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
-        link: 'text-brand underline-offset-4 hover:underline',
+        link: 'text-link underline-offset-4 hover:text-link-hover hover:underline',
         // A picked filter or toggle (aria-pressed): the selected set, not the primary colour (P2b).
         selected: 'border border-selected-border bg-selected-bg text-selected-text hover:bg-selected-bg-hover',
       },
