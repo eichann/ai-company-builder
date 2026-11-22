@@ -1256,9 +1256,16 @@ everyone else, and leaves that registration as the condition before anyone else 
   with its `minAppVersion`; `lstep@0.6.1` approved in this PR), the card's approval
   and the re-read before the permit. Turning off: delete the file, or the company's setting 「使わない」 /
   the site removed (the context moves, the server's permit refuses), or the emergency stop.
-- **Weakness (said)**: the file is the person's own; an AI turn outside the sandbox (`record-only`, the
-  API key's agent) could write it as it could read §33.3's device file. It only narrows where it is on —
-  the server's grant and the person's approval on the card are the guards. `BROWSER_NOT_YET_NOTE` in the
+- **Weakness (said)**: **the per-PC file is not access control — the server's type grant is.** The file
+  is the person's own; an AI turn outside the sandbox (`record-only`, the API key's agent) could write it
+  as it could read §33.3's device file. It only narrows where it is on; the grant and the person's
+  approval on the card are the guards. So **granting a second member before §33.3's registration exists
+  turns them on wherever they write the file** — do not grant anyone else until then.
+- **The operator's init check, accepted as built in** (owner decision 2026-11-22, "Checked on every
+  start"): built-in plugins are matched by **pattern** (`path: 'builtin'`, `source: '<name>@builtin'`), not
+  pinned by name — a later CLI's new built-in plugin passes (consistent with "what Anthropic ships is
+  trusted"); the agents are an **exact list** — a member's agent with one of those names cannot be told
+  apart, but the operator's flags load no member agents and with `--tools ''` none can be started. `BROWSER_NOT_YET_NOTE` in the
   admin page stays (true for every PC but the owner's).
 
 Tests: `client/tests/browser-ai-opt-in.test.ts` (an opt-in only for its server, member and until its end,
@@ -1267,7 +1274,8 @@ a pipe, an unworkable path = off; the same build without the opt-in — the comp
 listed, an opt-in for another member — reaches no site, operator or server and offers no tool; with it on,
 the tool exists and the inbox asks the server, and the opt-in removed while the approval is on its way
 stops the run before the claim), `browser-plans-app.test.ts` (a capture reads false once the switch is
-off). Each guard mutation-checked; second layer kept on purpose: the regular-file check after
+off), `browser-execute.test.ts` (the opt-in removed between the permit and the send, with the switch and
+context composed as main does: the last check refuses, failed, nothing reaches the site). Each guard mutation-checked; second layer kept on purpose: the regular-file check after
 `O_NOFOLLOW` / `O_NONBLOCK` (a folder or a pipe already fails to read).
 
 ## Not yet (later PRs)
@@ -1286,7 +1294,7 @@ are built (6b-1, "The operator and the preview", switched off) and the facts rea
 the execution (6b-2c, "Executing a plan": claim → re-read → permit → send → report) and the registration,
 the card, its IPC and the request tool (6b-2d, "The card, the IPC and the request tool"), all switched
 off, and the inbox's rows (switched off too); **6c** — on for the owner's PC only through "This PC's
-opt-in" (built; the `lstep@0.6.1` row's approval is the owner's separate edit), and **the server's PC
+opt-in" (built, `lstep@0.6.1` approved), and **the server's PC
 registration** (design memo §33.3: server × company × member × PC, `X-ACB-Browser-Device`, enabled by an
 owner / admin, checked at register / approve / claim / permit) before it is on for anyone else;
 `irreversible` types and more than one write (refused by the first version's rule today); **the method override and the swap** (design memo §24: a write may
