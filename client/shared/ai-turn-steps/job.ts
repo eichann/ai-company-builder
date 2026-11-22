@@ -90,11 +90,12 @@ export function parseJobTurn(v: unknown): QueuedJobTurn | null {
   const commit = (v: unknown) => v === undefined || v === null || (typeof v === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(v))
   if (!commit(t.sinceCommit) || !commit(t.checkedCommit)) return null
   // Stage 4b-2: an event occurrence names the record its event happened to; any other kind is not a turn this app runs.
-  if (t.kind !== undefined && t.kind !== 'event') return null
+  // A time slot may say so (`kind: 'time'`, `source: null` — harmless forms a server may send); an event is strict.
+  if (t.kind !== undefined && t.kind !== 'event' && t.kind !== 'time') return null
   const event = t.kind === 'event'
   const source = (typeof t.source === 'object' && t.source !== null ? t.source : null) as Record<string, unknown> | null
   if (event && (!source || !str(source.recordId, 80) || !RECORD_ID.test(source.recordId))) return null
-  if (!event && t.source !== undefined) return null
+  if (!event && t.source !== undefined && t.source !== null) return null
   const parsed = parseJobDefinition({
     ...(event ? EVENT_FRAME : TIME_FRAME), name: '定期の仕事', actingUser: 'u',
     check: t.check, run: { kind: 'procedure', procedure: t.procedure }, placement: 'a',

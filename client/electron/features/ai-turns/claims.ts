@@ -24,7 +24,7 @@ import { readAutoTurnSettings, readOwnAutoRun, type AiTurnClaimResult, type AiTu
 import type { RecordsApi } from '../../records/api'
 import type { RunRegistry } from '../../records/runs'
 import { isOccurrenceId, type JobRunResult } from '../../../../shared/core/jobs'
-import { JOB_CONFIRM_MAX_AGE_MS, JOB_RENEW_TIMEOUT_MS, createJobRuns, jobRunGoneOnCall, jobRunGoneOnRenew, type JobRunDeps } from './job-runs'
+import { AI_RUN_RENEW_EVERY_MS, JOB_CONFIRM_MAX_AGE_MS, JOB_RENEW_TIMEOUT_MS, createJobRuns, jobRunGoneOnCall, jobRunGoneOnRenew, type ClockStamp, type HoldHandle, type JobRunDeps } from './job-runs'
 // lane C ▼
 import {
   isPluginRunStep, parsePluginStepTurns, parsePluginStepsOn, parseProcedurePin, pluginStepFirstMessage, pluginStepToolAccess,
@@ -66,8 +66,15 @@ export interface AiTurnClaimsDeps {
    */
   jobRenewTimeoutMs?: number
   jobConfirmMaxAgeMs?: number
-  /** A monotonic clock in ms (default `performance.now`): a wall clock set back never keeps a run going. */
+  /** How often at most a job run's watch reads its age (default `JOB_WATCH_TICK_MS`); tests shorten it. */
+  jobWatchTickMs?: number
+  /**
+   * The clocks a job run's age is read on (stage 4b-2): monotonic (default `performance.now`) and wall (default `Date.now`).
+   * The age is the larger of the two elapsed times — a wall clock set back never keeps a run going, and the time a Mac
+   * slept (which `performance.now` does not count) or a wall clock moved forward always counts.
+   */
   monotonicNow?: () => number
+  wallNow?: () => number
   fetch?: typeof fetch
   log?: Pick<Console, 'warn'>
   // lane C ▼
@@ -100,15 +107,23 @@ interface HeldRun {
   conversationId: string
   timer: ReturnType<typeof setInterval>
   onLost?: () => void
-  guard?: { confirmedAt: number; watch: ReturnType<typeof setTimeout> | null }
+  guard?: { confirmedAt: ClockStamp; watch: ReturnType<typeof setTimeout> | null; renewing: boolean }
 }
+
+/** A job run's watch looks at the age at least this often, so a wake from sleep is noticed within it (timers pause in sleep). */
+export const JOB_WATCH_TICK_MS = 15_000
 
 export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   const doFetch = deps.fetch ?? fetch
   const log = deps.log ?? console
   const mono = deps.monotonicNow ?? (() => performance.now())
+  const wall = deps.wallNow ?? Date.now
+  const stamp = (): ClockStamp => ({ mono: mono(), wall: wall() })
+  /** Time since `from`: the larger of the monotonic and the wall elapsed time (sleep and a clock moved forward count; set back never shortens it). */
+  const since = (from: ClockStamp) => Math.max(mono() - from.mono, wall() - from.wall)
   const renewTimeoutMs = deps.jobRenewTimeoutMs ?? JOB_RENEW_TIMEOUT_MS
   const confirmMaxAgeMs = deps.jobConfirmMaxAgeMs ?? JOB_CONFIRM_MAX_AGE_MS
+  const watchTickMs = deps.jobWatchTickMs ?? JOB_WATCH_TICK_MS
   /** Runs this app instance holds: record → its run, generation, consultation and renewal timer. */
   const held = new Map<string, HeldRun>()
   const heldKey = (companyId: string, recordId: string) => `${companyId}\n${recordId}`
@@ -194,9 +209,10 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     guard.watch = setTimeout(() => {
       guard.watch = null
       if (held.get(heldKey(companyId, recordId)) !== entry) return
-      if (mono() - guard.confirmedAt >= confirmMaxAgeMs) lose(companyId, recordId, entry)
+      if (since(guard.confirmedAt) >= confirmMaxAgeMs) lose(companyId, recordId, entry)
       else arm(companyId, recordId, entry)
-    }, Math.max(0, guard.confirmedAt + confirmMaxAgeMs - mono()))
+      // Never longer than a tick: timers do not run while the PC sleeps, so after a wake the age is read again soon.
+    }, Math.min(watchTickMs, Math.max(0, confirmMaxAgeMs - since(guard.confirmedAt))))
     guard.watch.unref?.()
   }
 
@@ -208,8 +224,10 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
    * request was sent; a refusal (`jobRunGoneOnRenew`: 401 / 403 / 404 / 409) loses it, also late. True: confirmed now.
    */
   async function renewOnce(companyId: string, recordId: string, entry: HeldRun): Promise<boolean> {
-    const sent = mono()
+    const sent = stamp()
+    if (entry.guard) entry.guard.renewing = true
     const r = await session(companyId, 'POST', `/ai-runs/${encodeURIComponent(entry.runId)}/renew`, { generation: entry.generation }, entry.guard ? renewTimeoutMs : undefined)
+      .finally(() => { if (entry.guard) entry.guard.renewing = false })
     if (held.get(heldKey(companyId, recordId)) !== entry) return false
     if (!entry.guard) {
       // Taken over by another PC (or ended): this PC's tokens are refused from now on; stop renewing.
@@ -221,32 +239,39 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
       return false
     }
     // Late (past its deadline): never an extension — the AI may already have gone on unconfirmed for that long.
-    if (mono() - sent > renewTimeoutMs) return false
+    if (since(sent) > renewTimeoutMs) return false
     const run = r && r.status >= 200 && r.status < 300 ? (r.data as { run?: { id?: unknown; generation?: unknown } } | undefined)?.run : undefined
     if (!run || run.id !== entry.runId || run.generation !== entry.generation) return false
-    entry.guard.confirmedAt = Math.max(entry.guard.confirmedAt, sent)
+    // From when it was sent, never moved back.
+    if (sent.mono >= entry.guard.confirmedAt.mono) entry.guard.confirmedAt = sent
     arm(companyId, recordId, entry)
     return true
   }
 
   /**
    * Hold a claimed run: register it for the consultation's tokens and renew it while running. `confirmedAt` (a job's
-   * run, stage 4b-2): the monotonic time the claim was sent — the run then fails closed from there (`renewOnce`, `arm`).
+   * run, stage 4b-2): when the claim was sent — the run then fails closed from there (`renewOnce`, `arm`). The answer is
+   * this hold (`holds`, `confirm` ask about exactly it).
    */
-  function hold(companyId: string, recordId: string, conversationId: string, run: { id: string; generation: number }, onLost?: () => void, guard?: { confirmedAt: number }) {
+  function hold(companyId: string, recordId: string, conversationId: string, run: { id: string; generation: number }, onLost?: () => void, guard?: { confirmedAt: ClockStamp }): HoldHandle {
     release(companyId, recordId)
     deps.runs.set(companyId, conversationId, { id: run.id, generation: run.generation })
-    const timer = setInterval(() => { const entry = held.get(heldKey(companyId, recordId)); if (entry?.timer === timer) void renewOnce(companyId, recordId, entry) }, deps.renewEveryMs ?? 60_000)
+    const timer = setInterval(() => {
+      const entry = held.get(heldKey(companyId, recordId))
+      // A job's hold sends no second timed renew while one is still out (stage 4b-2): never two answers racing on one hold.
+      if (entry?.timer === timer && !entry.guard?.renewing) void renewOnce(companyId, recordId, entry)
+    }, deps.renewEveryMs ?? AI_RUN_RENEW_EVERY_MS)
     timer.unref?.()
-    const entry: HeldRun = { runId: run.id, generation: run.generation, conversationId, timer, ...(onLost ? { onLost } : {}), ...(guard ? { guard: { confirmedAt: guard.confirmedAt, watch: null } } : {}) }
+    const entry: HeldRun = { runId: run.id, generation: run.generation, conversationId, timer, ...(onLost ? { onLost } : {}), ...(guard ? { guard: { confirmedAt: guard.confirmedAt, watch: null, renewing: false } } : {}) }
     held.set(heldKey(companyId, recordId), entry)
     arm(companyId, recordId, entry)
+    return entry
   }
 
   /** A job's run, asked right before its AI starts (stage 4b-2): renewed now — true only when the server confirmed it. */
-  async function confirm(companyId: string, recordId: string, runId: string): Promise<boolean> {
+  async function confirm(companyId: string, recordId: string, handle: HoldHandle): Promise<boolean> {
     const entry = held.get(heldKey(companyId, recordId))
-    return !!entry?.guard && entry.runId === runId && renewOnce(companyId, recordId, entry)
+    return !!entry?.guard && entry === handle && renewOnce(companyId, recordId, entry)
   }
 
   // lane C ▼
@@ -322,8 +347,8 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
 
   // A scheduled job's run (job-runs.ts): this module's claim, hold and finish, with what only main knows.
   const jobs = deps.jobs ? createJobRuns({
-    session, hold, finishRun, confirm, monotonicNow: mono, deviceId: deps.deviceId, log,
-    holds: (companyId, key, runId) => held.get(heldKey(companyId, key))?.runId === runId,
+    session, hold, finishRun, confirm, clockStamp: stamp, deviceId: deps.deviceId, log,
+    holds: (companyId, key, handle) => held.get(heldKey(companyId, key)) === handle,
     readCompanySkill: (companyId, skill, tree, companyRoot) =>
       deps.readProcedure?.(companyId, { source: 'company_skill', skill, fingerprint: tree }, 'SKILL.md', companyRoot) ?? Promise.resolve(null),
     ...deps.jobs,

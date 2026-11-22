@@ -25,21 +25,29 @@ import {
 } from '../../../shared/ai-turn-steps/job'
 import type { AiTurnClaimResult, AiTurnSettleResult } from '../../../shared/ai-turns'
 
+/** One instant on both clocks (stage 4b-2): what a job run's age is measured from (claims.ts). */
+export interface ClockStamp { mono: number; wall: number }
+/** An opaque hold (claims.ts `hold`'s answer): a job's run asks about **its** hold, never another claim's of the same run. */
+export type HoldHandle = object
+
 type Session = (companyId: string, method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs?: number) => Promise<{ status: number; data: unknown; code?: string } | null>
 type Failure = { class: 'temporary' | 'bad-input' | 'permission' | 'unknown-result'; code: string }
 
 export interface JobRunDeps {
   /** claims.ts's own: the member's session call, holding a run (registry + renewal) and finishing it. */
   session: Session
-  /** `guard.confirmedAt`: when the claim was sent (monotonic) — the run fails closed from there (stage 4b-2). */
-  hold: (companyId: string, key: string, conversationId: string, run: { id: string; generation: number }, onLost: () => void, guard: { confirmedAt: number }) => void
-  /** Renew the held run now: true only when the server confirmed it within the deadline (stage 4b-2, before the AI starts). */
-  confirm: (companyId: string, key: string, runId: string) => Promise<boolean>
-  /** The monotonic clock the hold's guard is timed on. */
-  monotonicNow: () => number
+  /**
+   * `guard.confirmedAt`: when the claim was sent — the run fails closed from there (stage 4b-2). The answer is this hold,
+   * which `holds` and `confirm` take: an older claim never counts a newer claim's hold of the same run as its own.
+   */
+  hold: (companyId: string, key: string, conversationId: string, run: { id: string; generation: number }, onLost: () => void, guard: { confirmedAt: ClockStamp }) => HoldHandle
+  /** Renew the held run now: true only when the server confirmed this hold within the deadline (stage 4b-2, before the AI starts). */
+  confirm: (companyId: string, key: string, handle: HoldHandle) => Promise<boolean>
+  /** Now, on both clocks the hold's guard is timed on. */
+  clockStamp: () => ClockStamp
   finishRun: (companyId: string, key: string, failure: Failure | null, extra?: { jobResult: JobRunResult }) => Promise<{ status: number } | null>
-  /** Whether this app still holds that run (registered for the consultation's tokens, not taken away). */
-  holds: (companyId: string, key: string, runId: string) => boolean
+  /** Whether this app still holds that run through this very hold (registered for the consultation's tokens, not taken away, not claimed again). */
+  holds: (companyId: string, key: string, handle: HoldHandle) => boolean
   deviceId: string
   /** A company Skill's SKILL.md at the pinned tree in the company folder (claims.ts's `readProcedure`); null = not here. */
   readCompanySkill: (companyId: string, skill: string, tree: string, companyRoot: string | null) => Promise<string | null>
@@ -99,10 +107,14 @@ export const JOB_STOP_BEFORE_MS = 60_000
  * nobody watching, so its AI goes on only while the server keeps confirming it may. A renew is answered within
  * `JOB_RENEW_TIMEOUT_MS` or its answer does not count (a late success never extends the run); the AI stops once the last
  * confirmation was sent more than `JOB_CONFIRM_MAX_AGE_MS` ago — offline, the server unreachable or hung, renews failing
- * with 5xx. Renewed every minute, so two renews may fail in a row; well inside the server's 5-minute lease, after which
- * it refuses the run's token anyway.
+ * with 5xx. Renewed every minute (`AI_RUN_RENEW_EVERY_MS`), so two renews may fail in a row; well inside the server's
+ * 5-minute lease, after which it refuses the run's token anyway. The deadline is 30 s (owner decision 2026-11-22), shorter
+ * than the renew interval, so one renew is over before the next is due; a hold never sends a second renew while its first
+ * is still out (`claims.ts` `renewOnce`), and a confirmation only ever moves forward.
  */
-export const JOB_RENEW_TIMEOUT_MS = 15_000
+export const JOB_RENEW_TIMEOUT_MS = 30_000
+/** How often a held run is renewed (the server's lease lasts 5 minutes). */
+export const AI_RUN_RENEW_EVERY_MS = 60_000
 /** The occurrence kinds this app runs (stage 4b-2): time slots and events (`?kinds=` on the list, `kinds` on an event's claim). */
 const JOB_KINDS_RUN = ['time', 'event'] as const
 export const JOB_CONFIRM_MAX_AGE_MS = 3 * 60_000
@@ -140,6 +152,8 @@ interface Held {
   timedOut: boolean
   lost: boolean
   timer: ReturnType<typeof setTimeout> | null
+  /** This claim's hold (claims.ts); null until held. */
+  hold: HoldHandle | null
 }
 
 export function createJobRuns(deps: JobRunDeps) {
@@ -193,7 +207,7 @@ export function createJobRuns(deps: JobRunDeps) {
   }
 
   /** The run is still this app's: not taken away (renew 409) and still registered for the consultation's tokens. */
-  const live = (h: Held) => !h.lost && deps.holds(h.companyId, h.occurrenceId, h.runId)
+  const live = (h: Held) => !h.lost && h.hold !== null && deps.holds(h.companyId, h.occurrenceId, h.hold)
 
   return {
     /** The occurrences this app can run now; not readable (offline, an older server) → the last list. */
@@ -237,7 +251,7 @@ export function createJobRuns(deps: JobRunDeps) {
         point = p
       }
       const sentAt = now()
-      const sentMono = deps.monotonicNow()
+      const sentAtStamp = deps.clockStamp()
       // An event occurrence's claim names the kind and its check (the two locks of jobs.md "Old apps never run it"); a time
       // slot's claim stays as every earlier app sent it (only a server that listed an event ever gets `kinds`).
       const event = listedTurn.kind === 'event'
@@ -262,15 +276,16 @@ export function createJobRuns(deps: JobRunDeps) {
       const serverMs = (v: unknown) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? Date.parse(v) : null)
       const serverNow = serverMs(run.updatedAt)
       const offset: ClockOffset | null = serverNow !== null ? { min: serverNow - claimedAt, max: serverNow - sentAt } : null
-      const held: Held = { companyId, occurrenceId, runId: run.id, access: { allowsRecordTool: () => false, builtinTools: [] }, area: { nowhere: true, reads: [] }, reported: null, timedOut: false, lost: false, timer: null }
+      const held: Held = { companyId, occurrenceId, runId: run.id, access: { allowsRecordTool: () => false, builtinTools: [] }, area: { nowhere: true, reads: [] }, reported: null, timedOut: false, lost: false, timer: null, hold: null }
       // Taken away by the server (a pause, the company's stop, the time limit, another PC, a condition of an event that
       // failed), or not confirmed by it for too long (fail closed): the AI stops here too.
-      deps.hold(companyId, occurrenceId, conversationId, { id: run.id, generation: run.generation }, () => {
+      held.hold = deps.hold(companyId, occurrenceId, conversationId, { id: run.id, generation: run.generation }, () => {
         held.lost = true
         if (byConversation.get(conversationId) === held) deps.stopTurn(conversationId)
-      }, { confirmedAt: sentMono })
+      }, { confirmedAt: sentAtStamp })
       const giveUp = async (failure: Failure): Promise<AiTurnClaimResult> => {
-        await deps.finishRun(companyId, occurrenceId, failure)
+        // Only this claim's own hold is given back (a later claim's hold of the same run is not this one's to finish).
+        if (live(held)) await deps.finishRun(companyId, occurrenceId, failure)
         return { claimed: false, reason: 'unavailable' }
       }
       if (!turn || turn.occurrenceId !== occurrenceId || turn.kind !== listedTurn.kind) return giveUp({ class: 'bad-input', code: 'TURN_NOT_READABLE' })
@@ -281,10 +296,11 @@ export function createJobRuns(deps: JobRunDeps) {
       if (found === 'clock') return giveUp({ class: 'temporary', code: 'CLOCK_NOT_TRUSTED' })
       // Not synced since the window's end: a colleague's file may not be here yet — never `nothing` on a guess.
       if (found === 'not-synced') {
-        await deps.finishRun(companyId, occurrenceId, { class: 'temporary', code: 'NOT_SYNCED' })
+        if (live(held)) await deps.finishRun(companyId, occurrenceId, { class: 'temporary', code: 'NOT_SYNCED' })
         return { claimed: false, reason: 'unavailable', retryAfterMs: NOT_SYNCED_RETRY_MS }
       }
       if (found.kind !== 'record' && (found.kind === 'files' ? found.files.length : found.meetings.length) === 0) {
+        if (!live(held)) return { claimed: false, reason: 'unavailable' }
         const r = await deps.finishRun(companyId, occurrenceId, null, { jobResult: 'nothing' })
         if (!r || r.status >= 300) log.warn(`[jobs] finish (nothing): answered ${r?.status ?? 'nothing'}`)
         unlist(companyId, occurrenceId)
@@ -318,7 +334,7 @@ export function createJobRuns(deps: JobRunDeps) {
       // The last check right before the AI starts (stage 4b-2): the server confirms the run once more — a renew, which
       // also checks an event's conditions. Refused → the run is lost (nothing starts); not answered → given back, tried
       // later (never started on an old confirmation).
-      if (!(await deps.confirm(companyId, occurrenceId, run.id)) || !live(held)) {
+      if (!(await deps.confirm(companyId, occurrenceId, held.hold as HoldHandle)) || !live(held)) {
         clearTimeout(held.timer)
         if (live(held)) return giveUp({ class: 'temporary', code: 'NOT_CONFIRMED' })
         return { claimed: false, reason: 'unavailable' }

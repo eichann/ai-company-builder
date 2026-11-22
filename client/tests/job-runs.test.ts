@@ -688,3 +688,32 @@ test('the time limit\'s clock difference never counts the answer\'s travel as th
   assert.deepEqual(stopped, ['conv-job-00001'])
   await claims.settle(COMPANY, OCC)
 })
+
+test('a job\'s run lost while its turn was being prepared never runs: the turn, once tracked, is stopped as job-ended', async () => {
+  // Review of 4b-2 (M1): the run was lost (a renew refused, the watch's window) during the awaits between the ceiling and
+  // the turn's registration — main's stop found no turn then. The chat server asks the ceiling again once it tracks it.
+  const { startChatServer } = await import('../electron/chat-server')
+  let asked = 0
+  const server = await startChatServer({
+    getAuthMode: () => 'claude-code', getApiKey: () => undefined, buildSystemPrompt: () => '', getShellEnv: () => ({}),
+    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude', listenPort: 0,
+    // Held when the turn starts, gone by the time it is tracked.
+    pluginStepTools: () => (asked++ === 0 ? { allowsRecordTool: () => true, builtinTools: [] } : null),
+    getWriteGuard: async () => ({ root: os.tmpdir(), getAccess: () => undefined }),
+    stepWriteArea: async () => ({ nowhere: true, reads: [] }),
+    createRecordTools: async () => ({ specs: [], execute: async () => '', close: async () => {}, instructions: '', readTask: async () => null, linkNewFile: async () => false }) as never,
+  })
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/chat`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${server.authToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ id: 'm', role: 'user', parts: [{ type: 'text', text: 'hi' }] }], companyId: 'co', companyRootPath: os.tmpdir(), appSessionId: 'conv-job-00020', aiTurnStep: 'job-procedure' }),
+    })
+    const text = await res.text()
+    assert.ok(asked >= 2, `the ceiling is asked again after tracking (${asked})`)
+    assert.match(text, /定期の仕事/, text.slice(0, 400))
+    assert.equal(server.turns.runningCount(), 0)
+  } finally {
+    server.server.close()
+  }
+})

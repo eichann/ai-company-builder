@@ -724,6 +724,11 @@ export async function startChatServer(config: ChatServerConfig) {
     running.signal.addEventListener('abort', abortRelease, { once: true })
     // A stop that arrived while this turn was being prepared stops it now (every turn of the company is stopped).
     if (turnStop?.toolStopped('other') === 'all') chatTurns.abort(info => info.companyId === companyId, 'stopped-by-admin')
+    // A job's run lost while this turn was being prepared (stage 4b-2, jobs.md "Fail closed": a renew refused, the watch's
+    // window, a refused call): main's stop found no turn to stop then, so the run's ceiling is asked again now it is tracked.
+    if (requestedStep === JOB_PC_STEP && (!appSessionId || !config.pluginStepTools?.(appSessionId, requestedStep))) {
+      chatTurns.abort(info => info.appSessionId === appSessionId, 'job-ended')
+    }
     let result
     try { result = streamText({
       abortSignal: running.signal,

@@ -10,7 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createAiTurnClaims } from '../electron/features/ai-turns/claims'
-import { jobRunGoneOnCall } from '../electron/features/ai-turns/job-runs'
+import { AI_RUN_RENEW_EVERY_MS, JOB_CONFIRM_MAX_AGE_MS, JOB_RENEW_TIMEOUT_MS, jobRunGoneOnCall } from '../electron/features/ai-turns/job-runs'
 import { createRecordsApi } from '../electron/records/api'
 import { createRunRegistry } from '../electron/records/runs'
 import { jobFirstMessage, parseJobTurn } from '../shared/ai-turn-steps/job'
@@ -134,9 +134,10 @@ test('A3: a time slot\'s claim stays as every earlier app sent it (no `kinds`, i
   const { claims } = claimsFor(server)
   await claims.jobTurns(COMPANY)
   await claims.claim(COMPANY, OCC, 1, 'conv-time-0001')
-  const claim = server.calls.find(c => c.path === '/job-run-claims')!.body
-  assert.equal('kinds' in claim, false)
-  assert.deepEqual(claim.checks, ['new_files', 'new_meetings'])
+  // Byte for byte what every earlier app sent for a time slot (no `kinds`: a server before stage 4-0 refuses the key).
+  assert.deepEqual(server.calls.find(c => c.path === '/job-run-claims')!.body, {
+    occurrenceId: OCC, deviceId: 'device-job-1', conversationId: 'conv-time-0001', checks: ['new_files', 'new_meetings'],
+  })
 })
 
 test('an event turn is parsed with its own pairing: the record check only on an event, an event only with it and its record', () => {
@@ -148,6 +149,14 @@ test('an event turn is parsed with its own pairing: the record check only on an 
   assert.equal(parseJobTurn(eventTurn({ kind: undefined, source: undefined })), null)
   assert.equal(parseJobTurn(eventTurn({ check: { kind: 'new_meetings', titleWords: [] } })), null)
   assert.equal(parseJobTurn({ ...eventTurn({ kind: undefined, check: { kind: 'new_meetings', titleWords: [] }, grant: { ...GRANT, routes: ['GET /minutes/:recordId/text'] } }) }), null)
+  // A time turn may say so (`kind: 'time'`, `source: null`): harmless, still a time turn; an event's pairing stays strict.
+  const timeTurn = { ...eventTurn({ kind: undefined, source: undefined }), check: { kind: 'new_meetings', titleWords: [] }, grant: { ...GRANT, routes: ['GET /minutes/:recordId/text'] } }
+  assert.ok(parseJobTurn(timeTurn))
+  const saysTime = parseJobTurn({ ...timeTurn, kind: 'time' })
+  assert.ok(saysTime && saysTime.kind === undefined)
+  assert.ok(parseJobTurn({ ...timeTurn, source: null }))
+  assert.equal(parseJobTurn({ ...timeTurn, source: { recordId: SOURCE } }), null)
+  assert.equal(parseJobTurn(eventTurn({ source: null })), null)
   // The event's grant must create its one やること (the server's rule, schema 3).
   assert.equal(parseJobTurn(eventTurn({ grant: { ...GRANT, creates: [] } })), null)
   const message = jobFirstMessage({ name: 'x', found: { kind: 'record', recordId: SOURCE }, procedure: '# 手順', grant: { ...GRANT, tools: [], routes: [] }, deadline: '10:00' })
@@ -287,4 +296,85 @@ test('a claim answered with a turn of another kind than the one listed (a time t
   await claims.jobTurns(COMPANY)
   assert.deepEqual(await claims.claim(COMPANY, OCC, 1, 'conv-event-0060'), { claimed: false, reason: 'unavailable' })
   assert.deepEqual(server.calls.filter(c => c.path.endsWith('/finish')).map(c => c.body), [{ generation: 1, outcome: 'failed', failure: { class: 'bad-input', code: 'TURN_NOT_READABLE' } }])
+})
+
+test('M2: a PC asleep (the monotonic clock stood still) stops the AI on waking — the wall clock\'s elapsed time counts', async () => {
+  let wallOffset = 0
+  const frozen = performance.now()
+  const server = fakeServer()
+  const { claims, stopped } = claimsFor(server, { monotonicNow: () => frozen, wallNow: () => Date.now() + wallOffset, jobConfirmMaxAgeMs: 10_000, jobWatchTickMs: 30 })
+  await claims.jobTurns(COMPANY)
+  assert.ok((await claims.claim(COMPANY, OCC, 1, 'conv-event-0070')).claimed)
+  await wait(80)
+  assert.deepEqual(stopped, [], 'awake: within the window')
+  wallOffset = 60 * 60_000 // an hour asleep: performance.now did not move
+  await wait(150)
+  assert.deepEqual(stopped, ['conv-event-0070'], 'read again within a tick of waking, and stopped')
+})
+
+test('M2: a wall clock set back never extends the run (the monotonic time still counts)', async () => {
+  let wallOffset = 0
+  const server = fakeServer({ renews: [{ status: 200 }, 'hang'] })
+  const { claims, stopped } = claimsFor(server, { wallNow: () => Date.now() + wallOffset, renewEveryMs: 30, jobRenewTimeoutMs: 40, jobConfirmMaxAgeMs: 150, jobWatchTickMs: 30 })
+  await claims.jobTurns(COMPANY)
+  assert.ok((await claims.claim(COMPANY, OCC, 1, 'conv-event-0071')).claimed)
+  wallOffset = -60 * 60_000
+  await wait(300)
+  assert.deepEqual(stopped, ['conv-event-0071'])
+})
+
+test('L1: an older claim never counts a newer claim\'s hold of the same run as its own: only one starts', async () => {
+  const server = fakeServer()
+  let first = true
+  let release!: () => void
+  const slow = new Promise<string>(resolve => { release = () => resolve('# 手順\n') })
+  const { claims } = claimsFor(server, { readProcedure: () => { if (first) { first = false; return slow } return Promise.resolve('# 手順\n') } })
+  await claims.jobTurns(COMPANY)
+  const older = claims.claim(COMPANY, OCC, 1, 'conv-event-0080') // waits on its procedure
+  await wait(30)
+  await claims.jobTurns(COMPANY)
+  const newer = await claims.claim(COMPANY, OCC, 1, 'conv-event-0081') // the same run, held again
+  assert.ok(newer.claimed)
+  release()
+  assert.deepEqual(await older, { claimed: false, reason: 'unavailable' })
+  // The newer one is untouched: still its ceiling, nothing finished on its behalf.
+  assert.ok(claims.jobTools('conv-event-0081', 'job-procedure'))
+  assert.equal(claims.jobTools('conv-event-0080', 'job-procedure'), null)
+  assert.equal(server.calls.some(c => c.path.endsWith('/finish')), false)
+})
+
+test('L1: an older claim that gives up (its procedure not here) never finishes the newer claim\'s hold of the same run', async () => {
+  const server = fakeServer()
+  let first = true
+  let release!: () => void
+  const missing = new Promise<string | null>(resolve => { release = () => resolve(null) })
+  const { claims } = claimsFor(server, { readProcedure: () => { if (first) { first = false; return missing } return Promise.resolve('# 手順\n') } })
+  await claims.jobTurns(COMPANY)
+  const older = claims.claim(COMPANY, OCC, 1, 'conv-event-0090')
+  await wait(30)
+  await claims.jobTurns(COMPANY)
+  assert.ok((await claims.claim(COMPANY, OCC, 1, 'conv-event-0091')).claimed)
+  release()
+  assert.deepEqual(await older, { claimed: false, reason: 'unavailable' })
+  assert.equal(server.calls.some(c => c.path.endsWith('/finish')), false, 'the newer run is not given back on the older claim\'s behalf')
+  assert.ok(claims.jobTools('conv-event-0091', 'job-procedure'))
+})
+
+test('the renew deadline (30 s, owner decision) ends before the next renew is due, and the window holds two renews', () => {
+  assert.equal(JOB_RENEW_TIMEOUT_MS, 30_000)
+  assert.ok(JOB_RENEW_TIMEOUT_MS < AI_RUN_RENEW_EVERY_MS, 'one renew is over before the next one is sent')
+  assert.ok(2 * AI_RUN_RENEW_EVERY_MS + JOB_RENEW_TIMEOUT_MS <= JOB_CONFIRM_MAX_AGE_MS, 'two renews may fail before the AI is stopped')
+})
+
+test('a hold never sends a second timed renew while its first is still out (no two answers racing on one hold)', async () => {
+  // The answer takes 200 ms (ignoring the request's abort); the timer ticks every 20 ms.
+  const server = fakeServer({ renews: [{ status: 200 }, { status: 200, delayMs: 200 }] })
+  const { claims } = claimsFor(server, { renewEveryMs: 20, jobRenewTimeoutMs: 1_000, jobConfirmMaxAgeMs: 5_000 })
+  await claims.jobTurns(COMPANY)
+  assert.ok((await claims.claim(COMPANY, OCC, 1, 'conv-event-0100')).claimed)
+  const before = renews(server)
+  await wait(150)
+  const sent = renews(server) - before
+  await claims.settle(COMPANY, OCC) // release the hold (its timer) before asserting
+  assert.equal(sent, 1)
 })
