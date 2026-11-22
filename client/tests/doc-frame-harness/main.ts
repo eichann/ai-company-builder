@@ -3,7 +3,7 @@
 // way the viewer will — a view of its own in a window whose page has a preload — while local
 // listeners stand for the internet: one raw TCP listener per probe (fetch, XHR, WebSocket, beacon,
 // image, script, stylesheet, navigation, and what no request hook sees: preconnect, preload,
-// prefetch, DNS prefetch, a report, TURN over TCP), counting accepted connections — a TLS handshake
+// prefetch, DNS prefetch, TURN over TCP), counting accepted connections — a TLS handshake
 // that then fails still counts —, names mapped with Chromium's `host-rules` (a loopback address
 // would bypass any proxy), and a UDP socket for STUN. Every probe is https / wss: acb-doc is a
 // secure scheme, so an http probe would be stopped by mixed-content blocking before any guard.
@@ -21,7 +21,7 @@ import { createDocViews } from '../../electron/features/doc-frames/views'
 
 const dir = process.env.DOC_TEST_DIR!
 const ports = JSON.parse(process.env.DOC_TEST_PORTS!) as Record<string, number>
-const TCP_NAMES = ['fetch', 'xhr', 'ws', 'beacon', 'img', 'script', 'style', 'nav', 'popup', 'preconnect', 'preload', 'prefetch', 'dnsprefetch', 'turn', 'report']
+const TCP_NAMES = ['fetch', 'xhr', 'ws', 'beacon', 'img', 'script', 'style', 'nav', 'popup', 'preconnect', 'preload', 'prefetch', 'dnsprefetch', 'turn']
 app.commandLine.appendSwitch('host-rules', TCP_NAMES.map(n => `MAP ${n}.test 127.0.0.1:${ports[n]}`).join(', '))
 app.setPath('userData', path.join(dir, 'userData'))
 registerLocalFileScheme()
@@ -80,8 +80,6 @@ try {
   r.hiddenImage = await img('.hidden/x.png')
   r.localFileImage = await img('local-file://${encodeURI(path.join(dir, 'company', 'other', 'secret.png'))}')
   r.fileImage = await img('file://${encodeURI(path.join(dir, 'company', 'other', 'secret.png'))}')
-  // A violation of the document's own meta CSP (font-src), whose report-uri names a web address.
-  r.fontViolation = await document.fonts.load('16px probe').then(() => 'loaded', () => 'refused')
   r.moduleRan = window.moduleRan === true
   r.webScriptRan = window.webScriptRan === true
   try { r.popup = window.open('${WEB('popup')}/popup') === null ? 'null' : 'window' } catch (e) { r.popup = 'threw' }
@@ -96,7 +94,6 @@ function setUp() {
   for (const d of ['images', '.hidden']) fs.mkdirSync(path.join(folder, d), { recursive: true })
   fs.mkdirSync(path.join(company, 'other'), { recursive: true })
   fs.writeFileSync(path.join(folder, 'report.html'), `<!doctype html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="font-src 'none'; report-uri https://report.test/r"><style>@font-face { font-family: probe; src: url(probe.woff2) }</style>
 <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="${WEB('style')}/web.css">
 <script src="${WEB('script')}/cdn.js"></script><script type="module" src="mod.js"></script>
 </head><body><p>資料</p><script>${probes()}</script></body></html>`)
@@ -179,7 +176,7 @@ async function run() {
   result.hidden = { muted: doc.contents.isAudioMuted(), visibility: await js('document.visibilityState') }
   result.hostAPI = await win.webContents.executeJavaScript('typeof window.electronAPI', true)
   result.windowsAfterPopup = BrowserWindow.getAllWindows().length
-  // Give preconnect, WebRTC and reports time to try.
+  // Give preconnect and WebRTC time to try.
   await wait(3000)
 
   // The session: in memory, only acb-doc handled, the app's schemes not; the app's session not acb-doc.

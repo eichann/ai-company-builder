@@ -59,7 +59,7 @@ carrying a secret in its user name reached a local listener). Each document is s
   fails still counts; names, because Chromium never proxies a loopback address), plus a UDP
   socket for STUN. With the view as built: 0 connections and 0 datagrams for fetch, XHR,
   WebSocket, beacon, web image / script / stylesheet, the page's own navigation to the web,
-  `<link rel=preconnect|preload|prefetch|dns-prefetch>`, a meta-CSP `report-uri`, STUN and TURN
+  `<link rel=preconnect|preload|prefetch|dns-prefetch>`, STUN and TURN
   over TCP (with a secret in its user name). Guards removed (2026-11-22, Electron 45):
 
   | Removed | What connected |
@@ -79,8 +79,12 @@ carrying a secret in its user name reached a local listener). Each document is s
   | lock + proxy + hook | the page's own navigation to the web (2) |
 
   `data:`, `file:`, `local-file:` and `acb-plugin:` navigations stayed refused even without the
-  lock (Chromium / schemes the session does not handle). A meta-CSP `report-uri` and
-  `preconnect` / `dns-prefetch` connected in no run (Chromium ignores `report-uri` in a meta CSP).
+  lock (Chromium / schemes the session does not handle). **The zeros for `preconnect` and
+  `dns-prefetch` are unproven**: they connected in no run, not even with the proxy, the hook and
+  the CSP's network directives all removed, the view visible and 800×600 and the CSP sandbox off
+  (no positive control found; Chromium may skip them for this scheme or under `host-rules`). A
+  document cannot send reporting headers (its answers are ours) and Chromium ignores `report-uri`
+  in a meta CSP, so reports are not probed.
 
 ## Grants and views (`client/electron/features/doc-frames/`, no Electron)
 
