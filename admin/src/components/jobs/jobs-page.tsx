@@ -172,7 +172,10 @@ export function JobsPage() {
                         </p>
                       )}
                       <p className="text-xs text-muted-foreground">
-                        次の回：{job.nextSlot ? jobSlotText(job.nextSlot) : job.approvedVersion === null ? '承認すると決まります' : isRecordTrigger(job.trigger) ? '見張っているやることが、きっかけの状態になったとき' : 'ありません'}
+                        次の回：{job.nextSlot ? jobSlotText(job.nextSlot) : job.approvedVersion === null ? '承認すると決まります'
+                          : isRecordTrigger(job.trigger) ? '見張っているやることが、きっかけの状態になったとき'
+                          // A version hidden from this viewer (no trigger, not a shape it cannot show): nothing it names is said.
+                          : job.trigger === undefined && !job.needsUpdate ? '表示できません' : 'ありません'}
                         {'　'}前の回：{job.lastOccurrence && last ? `${jobSlotText(job.lastOccurrence.dueSlot)}　${last.label}` : 'まだありません'}
                       </p>
                     </div>

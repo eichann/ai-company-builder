@@ -126,10 +126,15 @@ const JOB_SENTENCE_CODES: ReadonlySet<string> = new Set([
   'JOB_PAUSED_BY_OTHER', 'JOB_NOT_ACCEPTED', 'JOB_DRAFT_WAITING',
 ])
 
+/** A job request refused with a code (or none) this console does not know, whatever the status: never the server's text. */
+export const JOB_REFUSED_GENERAL = 'できませんでした。ページを再読み込みしてから、もう一度ためしてください。'
+
 /**
  * A refused job request in plain Japanese (「定期の仕事」, jobs.md "The screens"): a definition the server refused by its
  * problem codes (`jobProblemText`, the form's own words — never a value); a job code with the server's fixed sentence as
- * the server wrote it; a 「もう一度」 refusal by its code (`jobRetryBlockText`); anything else as `describeError`.
+ * the server wrote it; a 「もう一度」 refusal by its code (`jobRetryBlockText`); anything else as `describeError`, except
+ * that its fallback for an unhandled 4xx (「操作できませんでした（<the server's text>）」) becomes `JOB_REFUSED_GENERAL` —
+ * an unknown code's text is never shown (independent review of 4b-3).
  */
 export function describeJobError(err: unknown): string {
   if (err instanceof ApiError && err.code) {
@@ -140,5 +145,8 @@ export function describeJobError(err: unknown): string {
     if (JOB_SENTENCE_CODES.has(err.code) && err.message) return err.message
     if ((JOB_RETRY_BLOCKS as readonly string[]).includes(err.code)) return `${jobRetryBlockText(err.code)}。`
   }
+  // `describeError`'s own sentences for a status (401, 403, 404, 409, 5xx), a broken answer, a timeout or no network stay;
+  // its fallback would print the server's text.
+  if (err instanceof ApiError && err.code !== INVALID_RESPONSE && err.status < 500 && ![401, 403, 404, 409].includes(err.status)) return JOB_REFUSED_GENERAL
   return describeError(err)
 }

@@ -12,6 +12,7 @@ import {
   type JobDefinition, type JobDefinitionResult, type JobDoneMark, type JobGrant, type JobWeekday,
 } from '../../../shared/core/jobs'
 import { BUILTIN_CONNECTORS, type DeliveryPlaceKind } from '../../../shared/core/builtin-connectors'
+import { canonicalJson } from '../../../shared/core/fixed-content'
 
 /**
  * The definition shapes **this console** shows, edits and accepts (stage 4b-0.5, owner memo 「段4b 設計メモ」 §5-1): its form
@@ -169,15 +170,16 @@ export function hiddenVersion(v: { definition: JobDefinition | null; needsUpdate
 export const JOB_VERSION_HIDDEN = 'この版には、あなたが見られないものが含まれているため、内容を表示・編集できません。'
 
 /**
- * A form's 「いつ動くか」 / 「すること」 changed (stage 4b-3). A PC job gets at least 15 minutes per run; becoming an event run
- * by the PC (it was not one) takes the owner's default wait of one day for the responsible person's app
- * (`JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES`, memo D6) — still a choice on the form.
+ * A form's 「いつ動くか」 / 「すること」 changed (stage 4b-3). A PC job gets at least 15 minutes per run; a **new** job becoming
+ * an event run by the PC (it was not one) takes the owner's default wait of one day for the responsible person's app
+ * (`JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES`, memo D6) — still a choice on the form. Editing a version (`newJob` false) never
+ * changes its own wait (independent review of 4b-3: switching away and back reset it).
  */
-export function switchJobForm(prev: JobForm, change: Partial<Pick<JobForm, 'when' | 'kind'>>): JobForm {
+export function switchJobForm(prev: JobForm, change: Partial<Pick<JobForm, 'when' | 'kind'>>, newJob: boolean): JobForm {
   const next = { ...prev, ...change }
   if (change.kind === 'pc' && prev.kind !== 'pc') next.limits = { ...prev.limits, minutes: Math.max(prev.limits.minutes, 15) }
   const eventPc = (f: JobForm) => f.when === 'event' && f.kind === 'pc'
-  if (eventPc(next) && !eventPc(prev)) next.expiresAfterMinutes = JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES
+  if (newJob && eventPc(next) && !eventPc(prev)) next.expiresAfterMinutes = JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES
   return next
 }
 
@@ -323,6 +325,25 @@ export function definitionFromForm(f: JobForm, shelfSkillName?: string): JobDefi
     placement: 'a',
     grant: pcGrant(f, false),
   })
+}
+
+/** Why a version is not given the edit form (`jobEditForm`): it holds what the form's fields cannot say. */
+export const JOB_FORM_CANNOT_EDIT = 'この版は、管理画面の入力欄では直せない内容（できることの細かい決まりなど）を含むため、ここでは直せません。'
+
+/**
+ * The edit form of a version, or null when the form would change it (independent review of 4b-3): the form offers a few
+ * plain choices, so a schema-3 grant made otherwise (e.g. one record route instead of the four 「やることや記録を読む」 gives)
+ * would come back **wider** from `definitionFromForm` — what the responsible person accepted widened silently. Schema 3
+ * is given the form only when it round-trips exactly (the pinned Skill's fingerprint and a shelf Skill's name are the
+ * server's, so they are left out of the comparison). Schemas 1 and 2 keep their behaviour.
+ */
+export function jobEditForm(d: JobDefinition): JobForm | null {
+  const form = formFromDefinition(d)
+  if (d.schema !== 3) return form
+  const shelfName = d.run.kind === 'procedure' && d.run.procedure.source === 'shelf_skill' ? d.run.procedure.skill : undefined
+  const back = definitionFromForm(form, shelfName)
+  const pinless = (x: JobDefinition) => canonicalJson(x.run.kind === 'procedure' ? { ...x, run: { ...x.run, procedure: { ...x.run.procedure, fingerprint: '' } } } : x)
+  return back.ok && pinless(back.definition) === pinless(d) ? form : null
 }
 
 /** What to tell the person about the parser's problem codes (never the value). */

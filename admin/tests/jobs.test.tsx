@@ -10,11 +10,12 @@ import { describe, expect, it, vi } from 'vitest'
 import JobsRoute from '@/app/companies/[id]/jobs/page'
 import { NAV_ITEMS } from '@/components/app/app-shell'
 import { approvedText } from '@/components/jobs/job-dialogs'
+import { retryConfirmText } from '@/components/jobs/job-occurrences'
 import type { JobView } from '@/lib/api'
 import { ApiError } from '@/lib/api'
-import { describeJobError } from '@/lib/errors'
+import { JOB_REFUSED_GENERAL, describeJobError } from '@/lib/errors'
 import {
-  DELIVERY_PLACE_CHOICES, JOB_VERSION_HIDDEN, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, hiddenVersion, jobProblemText, needsNewerScreen,
+  DELIVERY_PLACE_CHOICES, JOB_FORM_CANNOT_EDIT, JOB_VERSION_HIDDEN, jobEditForm, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, hiddenVersion, jobProblemText, needsNewerScreen,
   switchJobForm,
 } from '@/lib/jobs'
 import { JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES, jobConsentCanonical, type JobDefinition } from '../../shared/core/jobs'
@@ -609,7 +610,7 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
     grant: { tools: ['records'], creates: ['task'], routes: [], reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 15, runsPerDay: 1 } },
     ...over,
   }) as JobDefinition
-  const pcForm = () => switchJobForm(switchJobForm({ ...emptyJobForm('u_member'), name: '面談報告書', startRecord: START, skillName: 'interview-report' }, { when: 'event' }), { kind: 'pc' })
+  const pcForm = () => switchJobForm(switchJobForm({ ...emptyJobForm('u_member'), name: '面談報告書', startRecord: START, skillName: 'interview-report' }, { when: 'event' }, true), { kind: 'pc' }, true)
 
   it('the form makes schema 3: checked on the watched やること with the done mark chosen, its one やること granted by construction', () => {
     const parsed = definitionFromForm({ ...pcForm(), doneMark: 'file_linked' })
@@ -636,19 +637,41 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
     }
   })
 
-  it('becoming an event run by the PC waits one day for the app by default (owner D6); a version’s own wait is kept', () => {
+  it('a new job becoming an event run by the PC waits one day for the app by default (owner D6); editing never changes a version’s own wait', () => {
     expect(JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES).toBe(1440)
     const fresh = emptyJobForm('u_member')
     expect(fresh.expiresAfterMinutes).not.toBe(1440)
-    expect(switchJobForm(switchJobForm(fresh, { when: 'event' }), { kind: 'pc' }).expiresAfterMinutes).toBe(1440)
-    expect(switchJobForm(switchJobForm(fresh, { kind: 'pc' }), { when: 'event' }).expiresAfterMinutes).toBe(1440)
+    expect(switchJobForm(switchJobForm(fresh, { when: 'event' }, true), { kind: 'pc' }, true).expiresAfterMinutes).toBe(1440)
+    expect(switchJobForm(switchJobForm(fresh, { kind: 'pc' }, true), { when: 'event' }, true).expiresAfterMinutes).toBe(1440)
     // The server's event operation and a time PC job keep theirs.
-    expect(switchJobForm(fresh, { when: 'event' }).expiresAfterMinutes).toBe(fresh.expiresAfterMinutes)
-    expect(switchJobForm(fresh, { kind: 'pc' }).expiresAfterMinutes).toBe(fresh.expiresAfterMinutes)
-    // Editing one that waits 3 days: changing anything else keeps it.
+    expect(switchJobForm(fresh, { when: 'event' }, true).expiresAfterMinutes).toBe(fresh.expiresAfterMinutes)
+    expect(switchJobForm(fresh, { kind: 'pc' }, true).expiresAfterMinutes).toBe(fresh.expiresAfterMinutes)
+    // Editing one that waits 3 days: switching すること away and back keeps it (independent review).
     const editing = formFromDefinition(pcDef({ missed: { policy: 'latest_only', expiresAfterMinutes: 4320 } }))
-    expect(switchJobForm(editing, { when: 'event' }).expiresAfterMinutes).toBe(4320)
-    expect(switchJobForm(editing, { kind: 'pc' }).expiresAfterMinutes).toBe(4320)
+    const away = switchJobForm(editing, { kind: 'task' }, false)
+    expect(switchJobForm(away, { kind: 'pc' }, false).expiresAfterMinutes).toBe(4320)
+    expect(switchJobForm(switchJobForm(editing, { when: 'time' }, false), { when: 'event' }, false).expiresAfterMinutes).toBe(4320)
+  })
+
+  it('a schema-3 grant the form cannot say (one record route, not the four) is never given the edit form: it would widen it', async () => {
+    const narrow = pcDef({ grant: { ...pcDef().grant, routes: ['GET /item/:recordId'] } })
+    expect(jobEditForm(narrow)).toBeNull()
+    // What the form makes is given it, also with the server's own fingerprint and a shelf Skill's name.
+    expect(jobEditForm(pcDef({ run: { kind: 'procedure', procedure: { source: 'company_skill', skill: 'interview-report', fingerprint: 'a'.repeat(40) } } }))).not.toBeNull()
+    expect(jobEditForm(pcDef({ run: { kind: 'procedure', procedure: { source: 'shelf_skill', item: 'item-1', skill: 'interview-report', fingerprint: 'b'.repeat(64) } } }))).not.toBeNull()
+    // Schemas 1 and 2 keep their behaviour.
+    expect(jobEditForm(def({ grant: { ...def().grant, limits: { minutes: 7, runsPerDay: 2 } } }))).not.toBeNull()
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [jobView({ trigger, placement: 'a', nextSlot: null })] }) },
+      [`GET ${base}/jobs/${JOB_ID}`]: { body: ok({ ...jobView({ trigger, placement: 'a' }), versions: [version(1, narrow, 'c1')] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    await userEvent.click(within(row).getByRole('button', { name: '直す' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText(JOB_FORM_CANNOT_EDIT)).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '保存' })).toBeNull()
   })
 
   it('creating one on the page: the watched やること by name, the Skill, the done mark — schema 3 is sent, announced 1,2,3', async () => {
@@ -752,6 +775,11 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
     expect(describeJobError(refused(409, { error: 'x', code: 'SOURCE_CHANGED' }))).toMatch(/きっかけのやることが変わったため/)
     // A code it does not know: the general words, never the server's text.
     expect(describeJobError(refused(409, { error: 'Something internal', code: 'SOMETHING_ELSE' }))).toBe('ほかの変更と競合しました。ページを再読み込みしてからやり直してください。')
+    // Whatever the status (independent review): a 400 / 422 / 429 with a code it does not know, or none, never shows the text.
+    for (const status of [400, 422, 429]) {
+      expect(describeJobError(refused(status, { error: 'Body must be { definition }', code: 'BAD_REQUEST' }))).toBe(JOB_REFUSED_GENERAL)
+      expect(describeJobError(new ApiError(status, 'Too many requests', null))).toBe(JOB_REFUSED_GENERAL)
+    }
 
     mockApi({
       ...companyRoutes(),
@@ -802,5 +830,18 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => decodeURIComponent(c.url))).toEqual([`${base}/jobs/${JOB_ID}/occurrences/${OCC}/retry`]))
     expect(calls.some((c) => c.url.includes('/ai-runs'))).toBe(false)
   })
-})
 
+  it('a hidden approved event job: its next occurrence and the 「もう一度」 words say nothing of where it runs', async () => {
+    mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [jobView({ trigger: undefined, placement: undefined, nextSlot: null, lastOccurrence: null })] }) },
+    })
+    renderInCompany(<JobsRoute />)
+    const row = await screen.findByRole('listitem', { name: '週の報告' })
+    expect(row).toHaveTextContent('次の回：表示できません')
+    const neutral = retryConfirmText(undefined)
+    expect(neutral).not.toMatch(/数分のうちに|PC/)
+    expect(neutral).toMatch(/もう一度動かします/)
+    expect(retryConfirmText('e')).toMatch(/数分のうちに/)
+  })
+})

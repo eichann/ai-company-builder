@@ -1307,14 +1307,20 @@ since 4b-3 ("The admin console (4b-3)" below); it and the app announce `1,2,3`.
     read places, 「やることや記録を読む」, mail drafts, the deliverable folder and the place outside, the minutes per run. The check is
     always `source_record` — a time job's check left on the form (a place, meeting words) grants nothing (`pcGrant(f, true)`:
     no check place in the reads, no minutes route). **`grant.creates.EVENT_NEEDS_TASK` by construction**: every PC grant
-    the form makes creates `task` with `records`. Becoming an event run by the PC (`switchJobForm`) sets the wait for the
-    app to **one day** (`JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES`, D6; still a choice) and a PC job's minutes to at least 15; a
-    version's own wait is kept while editing. Under the trigger the form says the sentence the approval and the app say
+    the form makes creates `task` with `records`. A **new** job becoming an event run by the PC (`switchJobForm`, `newJob`)
+    sets the wait for the app to **one day** (`JOB_EVENT_PC_EXPIRES_DEFAULT_MINUTES`, D6; still a choice); editing never
+    changes a version's own wait, also when すること is switched away and back. A PC job's minutes become at least 15.
+    **The form never widens a grant** (`jobEditForm`, independent review): a schema-3 version is given the edit form only
+    when `definitionFromForm(formFromDefinition(d))` is `d` (the pinned fingerprint and a shelf Skill's name — the server's —
+    left out of the comparison); one made otherwise (e.g. one record route instead of the four 「やることや記録を読む」 gives)
+    says `JOB_FORM_CANNOT_EDIT` and has no 保存. Schemas 1 and 2 keep their behaviour (their round-trip widening, e.g. the
+    record routes of a time PC job made through the API, is known and left as it was). Under the trigger the form says the sentence the approval and the app say
     (`jobRecordTriggerText`), with 「最初は「…」を見張ります。」 — that name only from this viewer's own list, never from a definition.
   - **Words**: the approval and 受け取る show schema 3 through the shared words (`jobTriggerText`, `jobCheckText`,
     `jobGrantLines` — for an event run by the PC the minutes per run too: 「上限：1回 15分・1日 1回まで（…）」, told apart by
     the grant having tools, which the server's operation never has —, `jobMissedText`). The list says an approved event
-    job's next occurrence as 「見張っているやることが、きっかけの状態になったとき」 (no slot).
+    job's next occurrence as 「見張っているやることが、きっかけの状態になったとき」 (no slot); a version hidden from the viewer as
+    「表示できません」, and its 「もう一度」 confirmation (placement unknown to them) in words naming neither the server nor the PC.
   - **A hidden version** (`hiddenVersion`: a shape this console reads, answered without definition and fingerprints — a
     start record this owner / admin cannot read, `readsStart`): the list, 直す, 承認する and 受け取る say `JOB_VERSION_HIDDEN`
     (「この版には、あなたが見られないものが含まれているため、内容を表示・編集できません。」 — never what it names, nor that it is a
@@ -1325,7 +1331,8 @@ since 4b-3 ("The admin console (4b-3)" below); it and the app announce `1,2,3`.
     (`jobProblemText`: also `schema.UNKNOWN` — the rollback floor refusing schema 3 — 「…いまのサーバーではまだ作れません（サーバー
     の更新が必要です）」, `EVENT_NEEDS_TASK`, the schema-3 pairing codes, `doneMark`), the job codes whose server sentence is
     fixed Japanese (`JOB_SENTENCE_CODES`) as the server wrote them, a 「もう一度」 refusal by its code (`jobRetryBlockText`), any
-    other as `describeError` (never an unknown code's text). Used by every job dialog, the list's presses and 回の記録.
+    other as `describeError`'s sentence for its status (401, 403, 404, 409, 5xx) — and an unknown code or none on any other
+    status (400, 422, 429…) as `JOB_REFUSED_GENERAL`, never the server's text (`describeError`'s fallback would print it). Used by every job dialog, the list's presses and 回の記録.
   - **Occurrences**: exactly the server's list and fields (D11 decides who sees an event occurrence and which 「もう一度」 fields
     it carries); an event one is marked 「出来事」 (its slot is the event's time), its 「もう一度」 confirmation says it runs only
     while the watched やること still asks for it, and every press goes to the occurrence routes (`…/occurrences/:id/retry`,
@@ -1341,6 +1348,9 @@ since 4b-3 ("The admin console (4b-3)" below); it and the app announce `1,2,3`.
     one-day default and only on becoming one, the hidden version in the form, the approval and the list, each branch of
     `describeJobError` and showing an unknown code's text, the form using it, the event retry sentence and mark, the minutes
     line, the event next-occurrence words, the PC fields offered for events, the form making schema 3); each fails a test.
+    After the independent review: 9 more (an unknown code on 400 / 422 / 429 general and 409 kept, the round-trip
+    comparison, schema 3 only, the pin left out of it, the dialog's gate, the hidden next occurrence, the neutral 「もう一度」
+    words, the one-day default for a new job only); each fails a test.
     Not alone: `hidden` in the approve / accept buttons' `disabled` (a hidden version has no fingerprint, which disables
     them already); the accept dialog's hidden sentence (same code path as the approval's, not tested separately).
 - Test (4b-2): `client/tests/job-runs-fail-closed.test.ts` (A1: renew 404 / 403 / 409 / 401, a renew that hangs, no server, 5xx

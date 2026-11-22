@@ -39,7 +39,10 @@ export function retryConfirmText(placement: 'e' | 'a' | null | undefined, made: 
     ? 'この回を、もう一度動かします。責任者のアプリが開いていて「自動で進める」が入っているときに、責任者の PC の AI が始めます。きっかけのやることが今もその状態で、担当が責任者のままのときだけ動きます（途中で変わったら止めます）。期限は今から数え直します。やることが作られるのは、この回で1つだけです。'
     : placement === 'a'
     ? 'この回を、もう一度動かします。責任者のアプリが開いていて「自動で進める」が入っているときに、責任者の PC の AI が始めます。期限は今から数え直します。やることが作られるのは、この回で1つだけです。'
-    : 'この回を、もう一度動かします。数分のうちに、やることを作り直します（この回で1つだけです）。期限は今から数え直します。')
+    : placement === 'e'
+    ? 'この回を、もう一度動かします。数分のうちに、やることを作り直します（この回で1つだけです）。期限は今から数え直します。'
+    // Where it runs is not shown to this viewer (a hidden version): neither the server's nor the PC's words.
+    : 'この回を、もう一度動かします。期限は今から数え直します。やることが作られるのは、この回で1つだけです。')
 }
 
 /** A job's occurrences (newest first): when, what became of it and why, in plain words — and 「もう一度」 where it works. */

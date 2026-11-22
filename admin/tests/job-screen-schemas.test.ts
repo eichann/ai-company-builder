@@ -21,7 +21,7 @@ vi.mock('../../shared/core/jobs', async (importOriginal) => {
 })
 
 import { jobsApi } from '@/lib/api'
-import { ADMIN_JOB_SCHEMAS, definitionFromForm, editableDefinition, formFromDefinition, needsNewerScreen } from '@/lib/jobs'
+import { ADMIN_JOB_SCHEMAS, definitionFromForm, editableDefinition, formFromDefinition, jobEditForm, needsNewerScreen } from '@/lib/jobs'
 import { canonicalJson } from '../../shared/core/fixed-content'
 import { parseJobDefinition, type JobDefinition } from '../../shared/core/jobs'
 import { ok } from './fixtures'
@@ -96,6 +96,8 @@ describe('this console announces only the shapes its form round-trips', () => {
         const back = definitionFromForm(formFromDefinition(d), shelfName)
         expect(back.ok, JSON.stringify(back)).toBe(true)
         expect(canonicalJson((back as { definition: JobDefinition }).definition)).toBe(canonicalJson(d))
+        // And so it is given the edit form (`jobEditForm` refuses only what would not come back).
+        expect(jobEditForm(d)).not.toBeNull()
       }
     }
   })

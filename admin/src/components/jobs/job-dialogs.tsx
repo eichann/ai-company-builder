@@ -17,8 +17,8 @@ import { useCompany } from '@/lib/company-context'
 import { PcJobFields } from './pc-job-fields'
 import { describeJobError } from '@/lib/errors'
 import {
-  JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, JOB_VERSION_HIDDEN, definitionFromForm, editableDefinition, emptyJobForm, formFromDefinition, hiddenVersion, jobProblemText,
-  needsNewerScreen, switchJobForm, type JobForm,
+  JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, JOB_VERSION_HIDDEN, definitionFromForm, editableDefinition, emptyJobForm, hiddenVersion, jobProblemText,
+  JOB_FORM_CANNOT_EDIT, jobEditForm, needsNewerScreen, switchJobForm, type JobForm,
 } from '@/lib/jobs'
 import { useQuery } from '@/lib/use-query'
 import { JOB_NEEDS_NEWER_SCREEN, isRecordTrigger, type JobDefinition, type JobWeekday } from '../../../../shared/core/jobs'
@@ -48,6 +48,8 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
   const tooNew = needsNewerScreen(newestVersion)
   // A version hidden from this viewer (a やること or place they cannot read): shown as such, never an empty form over it.
   const hidden = hiddenVersion(newestVersion)
+  // A version the form would change on saving (a schema-3 grant made otherwise): never given the form.
+  const editForm = newest ? jobEditForm(newest) : null
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
@@ -63,10 +65,13 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
           <p role="note" className="text-sm">{JOB_NEEDS_NEWER_SCREEN}</p>
         ) : hidden ? (
           <p role="note" className="text-body">{JOB_VERSION_HIDDEN}</p>
+        ) : newest && !editForm ? (
+          <p role="note" className="text-body">{JOB_FORM_CANNOT_EDIT}</p>
         ) : (
           <JobFormFields
             key={job?.id ?? 'new'}
-            initial={newest ? formFromDefinition(newest) : emptyJobForm(defaultActingUser)}
+            initial={editForm ?? emptyJobForm(defaultActingUser)}
+            newJob={job === null}
             members={members}
             onCancel={onClose}
             onSubmit={async (definition) => {
@@ -96,8 +101,10 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function JobFormFields({ initial, members, onCancel, onSubmit }: {
+function JobFormFields({ initial, newJob, members, onCancel, onSubmit }: {
   initial: JobForm
+  /** A new job (not a version being edited): only then does becoming an event run by the PC take the one-day default. */
+  newJob: boolean
   members: Member[]
   onCancel: () => void
   onSubmit: (definition: JobDefinition) => Promise<void>
@@ -157,7 +164,7 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
       </Row>
       <Row label="いつ動くか">
         <select aria-label="いつ動くか" className={SELECT} value={f.when}
-          onChange={(e) => setF((prev) => switchJobForm(prev, { when: e.target.value as JobForm['when'] }))}>
+          onChange={(e) => setF((prev) => switchJobForm(prev, { when: e.target.value as JobForm['when'] }, newJob))}>
           <option value="time">決まった時間に</option>
           <option value="event">見張っているやることが終わったときなどに（出来事で）</option>
         </select>
@@ -252,7 +259,7 @@ function JobFormFields({ initial, members, onCancel, onSubmit }: {
       )}
       <Row label="すること">
         <select aria-label="すること" className={SELECT} value={f.kind}
-          onChange={(e) => setF((prev) => switchJobForm(prev, { kind: e.target.value as JobForm['kind'] }))}>
+          onChange={(e) => setF((prev) => switchJobForm(prev, { kind: e.target.value as JobForm['kind'] }, newJob))}>
           <option value="task">やることを作る（サーバーで。AI は使いません）</option>
           <option value="pc">Skill を責任者の PC の AI で動かす</option>
         </select>
