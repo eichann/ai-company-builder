@@ -749,6 +749,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       indexRecords: companyId => recordIndexer.schedule(companyId),
       // The responsible person of a scheduled job left or lost rights: the job pauses (jobs.md).
       onMemberLeft: (companyId, userId, actorId) => {
+        // Their waiting proposals of a time job are withdrawn first (jobs.md "Member proposals"), so the pause skips them.
+        jobProposals.memberLeft(companyId, userId, actorId)
         jobs.memberLeft(companyId, userId, actorId)
         // …and their browser plans close, a claimed execution is void, their type grants go (agent-browser.md).
         browserPlans.memberLeft(companyId, userId)

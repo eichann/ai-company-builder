@@ -97,6 +97,8 @@ export interface JobCandidateInput {
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype
 const SKILL_REF_RE = /^[A-Za-z0-9_-]{1,100}$/
+/** A place a candidate may name: a grant's path (`jobPathProblem`) with no hidden segment (`.claude`, `.acb`…: never listed). */
+const candidatePath = (p: unknown): p is string => jobPathProblem(p) === null && !(p as string).split('/').some(s => s.startsWith('.'))
 const MAX_READS = 10
 
 /** The candidate's input, strictly (an unknown key or value is a problem; codes only, never the values sent). */
@@ -111,16 +113,16 @@ export function parseJobCandidateInput(v: unknown): { ok: true; input: JobCandid
   // The trigger and the missed policy are checked by the definition's own parser (time shapes only, schema 4).
   if (!isObj(v.trigger) || 'kind' in v.trigger) problems.push('trigger.BAD')
   let check: JobCandidateInput['check'] | null = null
-  if (isObj(v.check) && v.check.kind === 'new_files' && Object.keys(v.check).length === 2 && jobPathProblem(v.check.path) === null) {
+  if (isObj(v.check) && v.check.kind === 'new_files' && Object.keys(v.check).length === 2 && candidatePath(v.check.path)) {
     check = { kind: 'new_files', path: v.check.path as string }
   } else if (isObj(v.check) && v.check.kind === 'new_meetings' && Object.keys(v.check).length === 1) {
     // Never title words (owner memo §8-1: a meeting's title could carry what the admin must not read); an admin may add them later.
     check = { kind: 'new_meetings' }
   } else problems.push('check.BAD')
-  const reads = Array.isArray(v.reads) && v.reads.length <= MAX_READS && v.reads.every(p => jobPathProblem(p) === null) && new Set(v.reads).size === v.reads.length
+  const reads = Array.isArray(v.reads) && v.reads.length <= MAX_READS && v.reads.every(candidatePath) && new Set(v.reads).size === v.reads.length
     ? v.reads as string[] : null
   if (!reads) problems.push('reads.BAD')
-  if (!(v.deliverable === null || jobPathProblem(v.deliverable) === null)) problems.push('deliverable.BAD')
+  if (!(v.deliverable === null || candidatePath(v.deliverable))) problems.push('deliverable.BAD')
   if (typeof v.readRecords !== 'boolean') problems.push('readRecords.BAD')
   if (typeof v.mailDrafts !== 'boolean') problems.push('mailDrafts.BAD')
   if (typeof v.minutes !== 'number' || !Number.isInteger(v.minutes) || v.minutes < 1 || v.minutes > 120) problems.push('minutes.BAD')

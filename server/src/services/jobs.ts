@@ -1075,6 +1075,11 @@ export function createJobService(deps: JobServiceDeps) {
       return role !== null && fitsRights(companyData.forCompany(companyId), userId, role, definition)
     },
     skillStillPinned: (companyId: string, definition: JobDefinition) => skillPinned(companyId, definition),
+    /** Does `userId` read every place a definition names now (a shelf Skill's place too)? The view's own hiding rule. */
+    readsAllFor(companyId: string, userId: string, definition: JobDefinition): boolean {
+      const role = memberships.roleOf(companyId, userId)
+      return role !== null && readsAll(companyData.forCompany(companyId), userId, role, definition)
+    },
 
     /** The job's name for a notice the member may read now (owner/admin only), or null. */
     noticeJob(member: Member, jobId: string): { name: string } | null {

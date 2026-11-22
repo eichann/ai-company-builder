@@ -80,12 +80,15 @@ const pushed: string[][] = []
 const companyData = sqliteCompanyData(db)
 const memberships = sqliteMembershipRepository(db)
 const transactions = sqliteTransactions(db)
-const jobs = createJobService({ companyData, memberships, transactions, clock, ids: randomIds, skillTree, hasCompanyFolder: () => true })
+// The shelf Skill's place: readable by everyone but bob, and by nobody while `shelfHidden`.
+let shelfHidden = false
+const shelfFake = (who: { userId: string }, item: string) => (item === 'shelf-1' ? { name: 'shelf-skill', current: 'b'.repeat(64), kept: true, readable: who.userId !== 'u-bob' && !shelfHidden } : null)
+const jobs = createJobService({ companyData, memberships, transactions, clock, ids: randomIds, skillTree, hasCompanyFolder: () => true, shelfSkill: shelfFake })
 const shelfCalls: string[] = []
 function proposalsWith(opts: { folder?: boolean } = {}) {
   return createJobProposals({
     companyData, memberships, transactions, clock, ids: randomIds, jobs, skillTree, hasCompanyFolder: () => opts.folder ?? true,
-    shelfSkill: (who, item) => { shelfCalls.push(who.userId); return item === 'shelf-1' ? { name: 'shelf-skill', current: 'b'.repeat(64), readable: who.userId !== 'u-bob' } : null },
+    shelfSkill: (who, item) => { shelfCalls.push(who.userId); return shelfFake(who, item) },
     placeExists: async (_co, p) => EXISTS.has(p), placeFolders: async (_co, p) => FOLDERS[p] ?? null,
     noticesChanged: (_co, users) => { pushed.push(users) },
   })
@@ -170,6 +173,10 @@ describe('a candidate: the member’s own, built by the server from list values 
       expect(await proposals.createCandidate(alice, null, { ...input(), ...extra })).toMatchObject({ ok: false, body: { code: 'BAD_JOB_CANDIDATE', problems: ['UNKNOWN_KEY'] } })
     }
     expect(await proposals.createCandidate(alice, null, input({ check: { kind: 'new_meetings', titleWords: ['極秘'] } }))).toMatchObject({ ok: false, body: { problems: ['check.BAD'] } })
+    // A hidden folder is never a place (`.claude`, …): the listing never offers one, the input never takes one.
+    expect(await proposals.createCandidate(alice, null, input({ reads: ['.claude'] }))).toMatchObject({ ok: false, body: { problems: ['reads.BAD'] } })
+    expect(await proposals.createCandidate(alice, null, input({ deliverable: '営業部/.secret' }))).toMatchObject({ ok: false, body: { problems: ['deliverable.BAD'] } })
+    expect(await proposals.createCandidate(alice, null, input({ check: { kind: 'new_files', path: '営業部/.git' } }))).toMatchObject({ ok: false, body: { problems: ['check.BAD'] } })
     // A trigger of another shape (an event) is not a time: the definition's own parser refuses it.
     expect(await proposals.createCandidate(alice, null, input({ trigger: { kind: 'record', type: 'task' } }))).toMatchObject({ ok: false, body: { code: 'BAD_JOB_CANDIDATE' } })
   })
@@ -235,6 +242,28 @@ describe('a candidate: the member’s own, built by the server from list values 
     expect(await proposals.submit(m('u-alice', 'member', OTHER), c.id, { fingerprint: c.fingerprint })).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_NOT_FOUND' } })
   })
 
+  it('read again when read: a place (or the shelf Skill’s place) no longer theirs withholds it; the submit is refused', async () => {
+    const c = await candidate(alice, { reads: ['経理部'] })
+    db.prepare("UPDATE scope_rules SET can_read = 0, can_write = 0 WHERE id = 'jp-priv-a'").run()
+    try {
+      const got = proposals.candidate(alice, c.id)
+      expect(got).toEqual(proposals.candidate(alice, `jc.${'0'.repeat(32)}`))
+      expect(JSON.stringify(got)).not.toContain(c.fingerprint)
+      expect(JSON.stringify(got)).not.toContain('経理部')
+      expect(await proposals.submit(alice, c.id, { fingerprint: c.fingerprint })).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_PLACE' } })
+    } finally {
+      db.prepare("UPDATE scope_rules SET can_read = 1, can_write = 1 WHERE id = 'jp-priv-a'").run()
+    }
+    expect(ok(proposals.candidate(alice, c.id)).fingerprint).toBe(c.fingerprint)
+    // A shelf Skill whose place she no longer reads.
+    const s = ok(await proposalsWith({ folder: false }).createCandidate(alice, null, input({ skill: 'shelf-1' })))
+    shelfHidden = true
+    try {
+      expect(proposals.candidate(alice, s.id)).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_NOT_FOUND' } })
+    } finally { shelfHidden = false }
+    expect(ok(proposals.candidate(alice, s.id)).id).toBe(s.id)
+  })
+
   it('at most 20 kept a member; after 24 hours a candidate is gone', async () => {
     const who = newMember()
     for (let i = 0; i < 20; i++) await candidate(who)
@@ -283,6 +312,11 @@ describe('the submit: the candidate as stored, by its id and the fingerprint sho
     expect(proposalNotices(ok(a).proposal.id)).toHaveLength(3)
     // The owners / admins are signalled once (the second submit made nothing).
     expect(pushed).toHaveLength(1)
+  })
+
+  it('an owner / admin proposing: the others are told, never themself', async () => {
+    const { p } = await submitted(admin)
+    expect(proposalNotices(p.id).map(n => n.user_id)).toEqual(['u-admin2', 'u-owner'])
   })
 
   it('an old fingerprint is refused, nothing made', async () => {
@@ -605,6 +639,18 @@ describe('the routes: the AI’s token makes a candidate, never a run’s; the s
     expect((await call({ token: runToken, method: 'GET', path: '/api/records-ai/job-proposals-ai/places' })).status).toBe(403)
     expect(db.prepare('SELECT COUNT(*) AS n FROM ai_job_candidates WHERE company_id = ?').get(co)).toEqual(before)
 
+    // A token bound to a record's 「AI の番」 run claimed by an older app (no build: the step's route scope does not apply, as for
+    // a business plugin's step) — only the service's own check stands: refused, nothing kept.
+    expect((await as('jq-owner', 'PUT', '/records/settings', { enabled: true })).status).toBe(200)
+    const task = await as('jq-alice', 'POST', '/records/item', { type: 'task', title: '下ごしらえ', state: 'preparing', fields: { assignee: 'jq-alice' } })
+    expect(task.status).toBe(201)
+    const turn = await as('jq-alice', 'POST', '/ai-run-claims', { recordId: task.body.data.record.id, step: 'task-prep', deviceId: 'device-jq-2', conversationId: 'conv-jq-2' })
+    expect(turn.status).toBe(201)
+    const turnToken = (await as('jq-alice', 'POST', '/me/record-tokens', { conversationId: turn.body.data.run.conversationId, agent: 'claude-code', scope: 'act', run: { id: turn.body.data.run.id, generation: turn.body.data.run.generation } })).body.data.token as string
+    expect(await call({ token: turnToken, method: 'POST', path: '/api/records-ai/job-proposals-ai/candidates', body })).toMatchObject({ status: 403, body: { code: 'JOB_PROPOSAL_NOT_IN_RUN' } })
+    expect(await call({ token: turnToken, method: 'GET', path: '/api/records-ai/job-proposals-ai/places' })).toMatchObject({ status: 403, body: { code: 'JOB_PROPOSAL_NOT_IN_RUN' } })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM ai_job_candidates WHERE company_id = ?').get(co)).toEqual(before)
+
     // The submit is the session's: a record token alone is not signed in.
     const submitPath = `/api/companies/${co}/me/job-candidates/${created.body.data.id}/submit`
     expect((await call({ token: consultation, method: 'POST', path: submitPath, body: { fingerprint: created.body.data.fingerprint } })).status).toBe(401)
@@ -613,6 +659,17 @@ describe('the routes: the AI’s token makes a candidate, never a run’s; the s
     expect((await as('jq-alice', 'POST', `/me/job-candidates/${created.body.data.id}/submit`, { fingerprint: created.body.data.fingerprint })).status).toBe(200)
     expect((await as('jq-owner', 'GET', '/job-proposals?state=submitted')).body.data.proposals.map((x: Json) => x.id)).toEqual([submittedR.body.data.proposal.id])
     expect((await as('jq-owner', 'POST', `/job-proposals/${submittedR.body.data.proposal.id}/return`, { reason: 'NOT_NEEDED' })).status).toBe(200)
+
+    // A member who leaves: their waiting proposals are withdrawn and their jobs retired (nobody could approve or accept them).
+    db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(`m-${co}-jq-leaver`, 'jq-leaver', co, 'member', at, at)
+    const leaver = { companyId: co, userId: 'jq-leaver', role: 'member' }
+    const lc = ok(await services.jobProposals.createCandidate(leaver, null, body))
+    const lp = ok(await services.jobProposals.submit(leaver, lc.id, { fingerprint: lc.fingerprint })).proposal
+    expect((await call({ user: 'jq-owner', method: 'DELETE', path: `/api/companies/${co}/members/jq-leaver` })).status).toBe(200)
+    expect(db.prepare('SELECT state, decided_by FROM ai_job_proposals WHERE company_id = ? AND id = ?').get(co, lp.id)).toEqual({ state: 'withdrawn', decided_by: 'jq-owner' })
+    expect(db.prepare('SELECT state FROM ai_jobs WHERE company_id = ? AND id = ?').get(co, lp.jobId)).toEqual({ state: 'retired' })
+    // …and not paused-and-told as a job of someone who left (it is retired first).
+    expect(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND kind = 'job_paused' AND dedupe_key LIKE ?").get(co, `job_paused:${lp.jobId}:%`)).toEqual({ n: 0 })
   })
 })
 

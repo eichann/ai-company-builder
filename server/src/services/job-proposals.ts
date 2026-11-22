@@ -2,7 +2,7 @@
  * A member proposes a time job from the AI chat (「AIへの相談」から定期の仕事, owner memo 2026-11-22 第1〜5版, `.claude/rules/jobs.md`
  * "Member proposals"; PR A, the server). The definitions, approval and acceptance stay services/jobs.ts's.
  *
- * - **A candidate** (案の候補, `POST /api/records-ai/job-candidates`, the member's AI): the server builds a schema-4 definition
+ * - **A candidate** (案の候補, `POST /api/records-ai/job-proposals-ai/candidates`, the member's AI): the server builds a schema-4 definition
  *   from list values only — the responsible person fixed to the signed-in member **before** any Skill is read, an existing
  *   Skill pinned now (its version / tree), places that exist and are the member's to read (and, for the deliverable, to
  *   write), the name and the deliverable folder made by the server — and keeps it for its creator alone, 24 hours, at most 20
@@ -68,7 +68,7 @@ export interface JobProposalDeps {
   clock: Clock
   ids: IdGenerator
   /** The approval's own checks (services/jobs.ts): rights now, the pinned Skill still as pinned. */
-  jobs: Pick<JobService, 'rightsFit' | 'skillStillPinned' | 'nameOf'>
+  jobs: Pick<JobService, 'rightsFit' | 'readsAllFor' | 'skillStillPinned' | 'nameOf'>
   /** The git tree id of a company Skill now, or null. */
   skillTree: (companyId: string, name: string) => Promise<string | null>
   hasCompanyFolder: (companyId: string) => boolean
@@ -155,7 +155,7 @@ export function createJobProposals(deps: JobProposalDeps) {
 
   return {
     /**
-     * `GET /api/records-ai/job-candidate-places?under=`: the existing folders directly under `under` ('' = the top) that the
+     * `GET /api/records-ai/job-proposals-ai/places?under=`: the existing folders directly under `under` ('' = the top) that the
      * member reads, and whether they may write there — what a candidate may name. `under` itself must be one (else the one
      * 404). Refused to a run-bound token.
      */
@@ -177,7 +177,7 @@ export function createJobProposals(deps: JobProposalDeps) {
     },
 
     /**
-     * `POST /api/records-ai/job-candidates` (the member's AI): a candidate for the member alone. `run`: the execution run the
+     * `POST /api/records-ai/job-proposals-ai/candidates` (the member's AI): a candidate for the member alone. `run`: the execution run the
      * token is bound to — any run refuses, before anything is read.
      */
     async createCandidate(member: Member, run: unknown, body: unknown): Promise<Outcome<JobCandidateView>> {
@@ -219,6 +219,10 @@ export function createJobProposals(deps: JobProposalDeps) {
       const handle = companyData.forCompany(member.companyId)
       const row = handle.jobs.candidate(candidateId, member.userId, clock.now())
       if (!row) return CANDIDATE_NOT_FOUND()
+      // What it names must still be theirs to read (jobs.md "Names never leak"): a place — or a shelf Skill's place — they no
+      // longer read withholds the content and its fingerprint, answered as a candidate that is not there (naming nothing).
+      const definition = storedJobDefinition({ schema: JOB_PROPOSAL_SCHEMA, definition: row.definition })
+      if (definition === null || !deps.jobs.readsAllFor(member.companyId, member.userId, definition)) return CANDIDATE_NOT_FOUND()
       return ok(candidateView(row, handle.jobs.proposalOfCandidate(member.userId, candidateId)))
     },
 
@@ -246,7 +250,8 @@ export function createJobProposals(deps: JobProposalDeps) {
       if (!(await placesUsable(member, places, definition.grant.writes.area === 'deliverable' ? definition.grant.writes.place : null))) return PLACE_REFUSED()
       const skill = await deps.jobs.skillStillPinned(member.companyId, definition)
       if (!skill.ok) return skill
-      const admins = adminsOf(member.companyId)
+      // Every owner / admin but the proposer (an owner / admin's own proposal tells nobody about itself).
+      const admins = adminsOf(member.companyId).filter(userId => userId !== member.userId)
       const result = transactions.run((): Outcome<{ proposal: JobProposalView; created: boolean }> => {
         // Everything that can change meanwhile, again, inside the write.
         const again = handle.jobs.proposalOfCandidate(member.userId, candidateId)
@@ -275,6 +280,18 @@ export function createJobProposals(deps: JobProposalDeps) {
       })
       if (result.ok && result.value.created) { try { deps.noticesChanged?.(member.companyId, admins) } catch { /* their own check catches up */ } }
       return result
+    },
+
+    /**
+     * The member left the company (`companies.removeMember`, in its transaction, before the jobs' own pause): every proposal of
+     * theirs still waiting is withdrawn (by `actorId`) and its job retired — nobody could approve or accept it any more.
+     */
+    memberLeft(companyId: string, userId: string, actorId: string): void {
+      const handle = companyData.forCompany(companyId)
+      const at = clock.now()
+      for (const p of handle.jobs.proposals({ proposerId: userId, state: 'submitted' }, JOB_PROPOSALS_WAITING_MAX * 10)) {
+        if (handle.jobs.decideProposal(p.id, 'withdrawn', { reason: null, by: actorId, at })) handle.jobs.setState(p.jobId, 'retired', null, actorId, at)
+      }
     },
 
     /** `GET /me/job-proposals`: the caller's proposals, newest first. */

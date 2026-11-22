@@ -2,8 +2,9 @@
  * API contract of member proposals (「AIへの相談」から定期の仕事, `.claude/rules/jobs.md` "Member proposals").
  *
  *   The member's AI (record token on /api/records-ai; refused for a token bound to any execution run):
- *   GET  /job-candidate-places?under=<path>   the existing folders under `under` the member reads (and whether they write)
- *   POST /job-candidates { skill, trigger, check, reads, deliverable, readRecords, mailDrafts, minutes, missed }  → 201 JobCandidateView
+ *   GET  /api/records-ai/job-proposals-ai/places?under=<path>   the existing folders under `under` the member reads (and whether they write)
+ *   POST /api/records-ai/job-proposals-ai/candidates { skill, trigger, check, reads, deliverable, readRecords, mailDrafts, minutes, missed }
+ *                                                                → 201 JobCandidateView
  *
  *   The member's own session (/api/companies/:companyId; never a record token):
  *   GET  /me/job-candidates/:candidateId            the caller's candidate (and its proposal once submitted)
