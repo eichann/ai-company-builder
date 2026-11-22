@@ -653,8 +653,13 @@ export function browserFirstVersionProblem(operation: BrowserOperation): string 
   if (operation.effect === 'delete') return 'この操作は消す操作なので、まだ任せられません'
   if (operation.irreversible) return 'この操作は取り消せない操作なので、まだ任せられません'
   if (operation.delivers === 'scheduled') {
-    const schedule = Object.prototype.hasOwnProperty.call(operation.facts, 'schedule') ? operation.facts.schedule : undefined
-    if (!schedule || !schedule.required || !schedule.complete) return 'この操作は届く時を必ず全部読み取る型ではないので、まだ任せられません'
+    // What goes out and when must both be read whole: `templates` is where the first version's
+    // text-only rule lives (facts version 2), so an unread one can never make a plan.
+    const whole = (name: string) => {
+      const rule = Object.prototype.hasOwnProperty.call(operation.facts, name) ? operation.facts[name] : undefined
+      return !!rule && rule.required && rule.complete
+    }
+    if (!whole('schedule') || !whole('templates')) return 'この操作は届く時と届く中身を必ず全部読み取る型ではないので、まだ任せられません'
   } else if (operation.delivers !== 'none') return 'この操作はすぐ人に届く（または届くか分からない）ので、まだ任せられません'
   if (operation.writes.length !== 1) return 'この操作は書き込みが1つではないので、まだ任せられません'
   if (!operation.lock) return 'この操作には作業中の印（lock）がないので、任せられません'

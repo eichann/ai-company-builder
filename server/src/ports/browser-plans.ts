@@ -25,7 +25,17 @@ export interface BrowserPlanRow {
   expiresAt: string
   approvedAt: string | null
   closedAt: string | null
+  /**
+   * Copies of two parts of the fixed content for the open-plans list, so it never reads the content
+   * (6b-2a; fixed like it): the target as canonical JSON and the consultation. Null on a row an older
+   * build wrote (the list then reads them from the content).
+   */
+  targetJson: string | null
+  conversationId: string | null
 }
+
+/** A plan as the open-plans list reads it: every column but the content. */
+export type BrowserPlanSummaryRow = Omit<BrowserPlanRow, 'content'>
 
 export interface BrowserExecutionRow {
   id: string
@@ -73,9 +83,9 @@ export interface BrowserPlanRepository {
   insertPlan(row: BrowserPlanRow): void
   plan(planId: string): BrowserPlanRow | null
   /** draft / approved plans of a member (leaving the company closes them). */
-  openPlansOf(userId: string): BrowserPlanRow[]
-  /** The member's draft / approved plans, newest first, at most `limit` (the open-plans list). */
-  newestOpenPlansOf(userId: string, limit: number): BrowserPlanRow[]
+  openPlansOf(userId: string): BrowserPlanSummaryRow[]
+  /** The member's draft / approved plans, newest first, at most `limit`, without their content (the open-plans list). */
+  newestOpenPlansOf(userId: string, limit: number): BrowserPlanSummaryRow[]
   /** Compare-and-set: only from `from`. True when the row changed. */
   setPlanState(planId: string, from: BrowserPlanState, to: BrowserPlanState, change: BrowserPlanChange): boolean
 

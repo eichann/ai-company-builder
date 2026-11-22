@@ -14,7 +14,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
 import { randomBytes } from 'crypto'
-import { initDatabase, migrateBrowserExecutionMonotonic } from '../../src/db'
+import { initDatabase, migrateBrowserExecutionMonotonic, migrateBrowserPlanSummary } from '../../src/db'
 import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
@@ -833,6 +833,33 @@ describe('the member\'s own open plans (GET /browser-plans-open)', () => {
     expect(value(svc.open({ ...alice, companyId: OTHER_CO })).items).toEqual([])
   })
 
+  it('reads the copies, never the content; a row without copies (an older build) is read from its content', () => {
+    const p = draft(alice, { conversationId: 'conv-2' }, { reminder: '90', step: '22' })
+    expect(conn.prepare('SELECT target_json, conversation_id FROM browser_plans WHERE id = ?').get(p.id)).toEqual({ target_json: '{"reminder":"90","step":"22"}', conversation_id: 'conv-2' })
+    // The copies are fixed like the content.
+    expect(() => conn.prepare("UPDATE browser_plans SET target_json = '{}' WHERE id = ?").run(p.id)).toThrow(/never changes/)
+    expect(() => conn.prepare("UPDATE browser_plans SET conversation_id = 'x' WHERE id = ?").run(p.id)).toThrow(/never changes/)
+    // A row whose content cannot even be parsed is listed from its copies alone.
+    const insert = (id: string, content: string, targetJson: string | null, conversationId: string | null, at: number) => conn.prepare(`INSERT INTO browser_plans
+      (company_id, id, user_id, connector_id, connector_version, operation, declaration_hash, checker_hash, facts_version, account, content, content_hash,
+       state, created_at, expires_at, target_json, conversation_id)
+      VALUES (?, ?, ?, 'lstep', ?, ?, ?, ?, 1, 'acc1', ?, 'sha256:x', 'draft', ?, ?, ?, ?)`)
+      .run(CO, id, alice.userId, APPROVED.version, OP, APPROVED.declarationHash, APPROVED.checkerHash, content, iso(at), iso(at + 3_600_000), targetJson, conversationId)
+    insert(`bp_${'a'.repeat(32)}`, '{not json', '{"reminder":"91","step":"22"}', null, now + 1)
+    // What 6a's adapter inserted (no copies): read from the content.
+    insert(`bp_${'b'.repeat(32)}`, JSON.stringify({ target: { reminder: '92', step: '22' }, conversation: 'conv-old' }), null, null, now + 2)
+    expect(value(svc.open(alice)).items.map(i => [i.target.reminder, i.conversationId])).toEqual([['92', 'conv-old'], ['91', null], ['90', 'conv-2']])
+  })
+
+  it('the copies are added to an older database, idempotently and nullable', () => {
+    const p = draft()
+    conn.exec('DROP TRIGGER browser_plans_fixed_summary; ALTER TABLE browser_plans DROP COLUMN target_json; ALTER TABLE browser_plans DROP COLUMN conversation_id')
+    migrateBrowserPlanSummary(conn)
+    migrateBrowserPlanSummary(conn)
+    expect(conn.prepare('SELECT target_json, conversation_id FROM browser_plans WHERE id = ?').get(p.id)).toEqual({ target_json: null, conversation_id: null })
+    expect(value(svc.open(alice)).items.map(i => i.target)).toEqual([{ reminder: '11', step: '22' }])
+  })
+
   it('a plan past its hour is closed on this touch and not listed', () => {
     const p = draft()
     now += 3_600_000
@@ -894,6 +921,13 @@ describe('a scheduled type (facts version 2)', () => {
     const loose = { ...V2, declaration: looseText, declarationHash: hashCanonical(looseText) }
     rows = [loose]; build()
     expect(code(svc.register(alice, v2input({ declarationHash: loose.declarationHash }), undefined))).toBe('BROWSER_OPERATION_NOT_YET')
+  })
+
+  it('a scheduled type whose templates are optional is not run, so an unread template can never pass as text', () => {
+    const looseText = V2.declaration.replace('templates: { required: true, complete: true }', 'templates: { required: false }')
+    const loose = { ...V2, declaration: looseText, declarationHash: hashCanonical(looseText) }
+    rows = [loose]; build()
+    expect(code(svc.register(alice, v2input({ declarationHash: loose.declarationHash }, { templates: unread() }), undefined))).toBe('BROWSER_OPERATION_NOT_YET')
   })
 })
 

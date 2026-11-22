@@ -465,7 +465,10 @@ send → report; 6c turns it on for the owner's PC).
 - **Routes** (`/api/companies/:companyId`, `companyMember` — a person's session; no record-token
   route exists): `POST /browser-plans` (candidate + facts → draft, 201), `GET /browser-plans-open` (6b-2a:
   the member's own draft / approved plans for the inbox, newest first, at most 100 with `more`, each
-  `BrowserOpenPlan` — no facts or explanation —, plans past their hour closed on this touch,
+  `BrowserOpenPlan` — no facts or explanation —, plans past their hour closed on this touch, the
+  content never read or parsed: the target and the consultation come from the plan's copies
+  `target_json` / `conversation_id` (`migrateBrowserPlanSummary`, nullable, fixed by trigger
+  `browser_plans_fixed_summary`; a row without them is read whole, alone),
   `Cache-Control: no-store`; its own segment for the RegExpRouter), `GET /browser-plans/:planId`,
   `POST …/approve { contentHash }`, `POST …/cancel`, `POST …/claim` (answers `{ executionId, secret,
   plan, fixed }` once, `Cache-Control: no-store`; `fixed` added in 6b-2a — `{ content, contentHash,
@@ -555,6 +558,12 @@ send → report; 6c turns it on for the owner's PC).
   `confirmableAt` shown stays the wall-clock estimate; a press too early gets `BROWSER_TOO_EARLY`. A
   forward step only ever voids a claimed execution or closes a plan early (nothing sent: the safe
   side). The admins' 24 hours stay on the wall clock (they say who may confirm, not when).
+  **One API process is assumed**: a monotonic reading compares only within its own process start,
+  so two API processes behind one database would each count from their own start (a row permitted by
+  the other one counts from this process's start, so never early, but the two disagree). The deploy
+  runs one `api` container; a second one needs a shared monotonic source first. **During a deploy
+  overlap** an old build (6a) still serving requests judges by the wall clock alone, so the hole stays
+  open for those requests until it stops (nothing in the app calls these routes yet).
 - **Facts version 2** (6b-2a, design 6b-2 §2-3; for `delivers: scheduled`): `lstep.reminder_step` v2 =
   v1's `account`, `step_parent`, `state`, `names`, `shared_with` + `templates` (`{ [id]: { name, kind:
   'text', body } }` — text templates only, decision 2; replaces `template_bodies`; the added one and
@@ -564,7 +573,7 @@ send → report; 6c turns it on for the owner's PC).
   writes) stays 1 until the connector reading v2 arrives (6b-2b). **The re-read**
   (`browserFactsChangedProblem`, the app's, 6b-2c): the re-read must make a plan by itself, then every
   declared fact the same status; known ones the same value (canonical JSON), except `audience` (may fall,
-  never rise — decision 8) and `shared_with.items` (a set); unknown → known is a change (decision 9).
+  never rise — decision 8) and `shared_with.items` (a multiset: any order, each as often); unknown → known is a change (decision 9).
 - **Report reasons** (`BROWSER_REPORT_REASONS`, 6b-2 §5-5): one list for the app and the server; the
   server still records any word of its pattern (an app newer than the server may send another).
 - **Target lock** (§30.5): `browserLockKey` — the canonical JSON of `{ company, host, account, kind,

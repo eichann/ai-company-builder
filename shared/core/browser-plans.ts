@@ -212,7 +212,7 @@ export function browserFactsState(facts: unknown): Record<string, string[]> | nu
  * this type on its own (`browserFactsProblem`: every required fact known and whole, the checks across
  * facts). Then each fact the type declares must have the **same status** in both; a known one the
  * same value (canonical JSON: key order plays no part) — except `audience` (the count may have
- * fallen, never risen: decision 8) and `shared_with.items` (compared as a set). Unknown at approval
+ * fallen, never risen: decision 8) and `shared_with.items` (in any order, each as often). Unknown at approval
  * and known at the re-read is a change (decision 9). `readAt`, `source` and `complete` are not
  * compared. The app asks this (6b-2c); the server never sees the re-read.
  */
@@ -239,8 +239,9 @@ function sameFactValue(name: string, approved: unknown, now: unknown): boolean {
     return Number.isSafeInteger(was) && Number.isSafeInteger(is) && (is as number) <= (was as number)
   }
   if (name === 'shared_with' && isMap(approved) && isMap(now) && Array.isArray(approved.items) && Array.isArray(now.items)) {
-    const set = (items: unknown[]) => canonicalJson([...new Set(items.map(x => canonicalJson(x)))].sort())
-    return approved.count === now.count && set(approved.items) === set(now.items)
+    // The same items in any order, each as many times (a multiset: [a, a, b] is not [a, b, b]).
+    const bag = (items: unknown[]) => canonicalJson(items.map(x => canonicalJson(x)).sort())
+    return approved.count === now.count && bag(approved.items) === bag(now.items)
   }
   try { return canonicalJson(approved) === canonicalJson(now) } catch { return false }
 }

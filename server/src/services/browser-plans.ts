@@ -242,7 +242,7 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
   }
 
   const contentOf = (plan: BrowserPlanRow): PlanContent => JSON.parse(plan.content) as PlanContent
-  const keyOf = (plan: BrowserPlanRow) => ({
+  const keyOf = (plan: Pick<BrowserPlanRow, 'connectorId' | 'connectorVersion' | 'declarationHash' | 'checkerHash' | 'factsVersion'>) => ({
     id: plan.connectorId, version: plan.connectorVersion, declarationHash: plan.declarationHash, checkerHash: plan.checkerHash, factsVersion: plan.factsVersion,
   })
 
@@ -390,6 +390,8 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
         declarationHash: input.declarationHash, checkerHash: input.checkerHash, factsVersion: input.factsVersion, account,
         content: canonical, contentHash: hashCanonical(canonical), state: 'draft', closeReason: null,
         createdAt: content.createdAt, expiresAt: content.expiresAt, approvedAt: null, closedAt: null,
+        // The open-plans list's copies, from the same canonical form as the content.
+        targetJson: canonicalJson(content.target), conversationId: content.conversation,
       }
       plans(member.companyId).insertPlan(row)
       return ok(planView(member.companyId, row))
@@ -655,7 +657,9 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
     /**
      * GET /browser-plans-open: the member's own draft / approved plans (the inbox's 「承認を待っています」),
      * newest first, at most `OPEN_PLANS_LIMIT`. Plans past their hour close on this touch. Nothing of the
-     * facts or the explanation: the card reads the plan itself.
+     * facts or the explanation: the card reads the plan itself. The content (a v2 plan's can be a few MB)
+     * is neither read nor parsed: the target and the consultation come from their copies (a row an older
+     * build wrote without them is read whole, alone).
      */
     open(member: Member): Outcome<BrowserOpenPlans> {
       return transactions.run(() => {
@@ -663,19 +667,24 @@ export function createBrowserPlanService(deps: BrowserPlanDeps) {
         const repo = plans(member.companyId)
         // One more than the limit tells whether more remain; every plan lives the same hour, so the
         // ones that close here are the oldest, at the end.
-        const open = repo.newestOpenPlansOf(member.userId, OPEN_PLANS_LIMIT + 1)
-          .map(p => settlePlan(member.companyId, p, now))
-          .filter(p => p.state === 'draft' || p.state === 'approved')
+        const open = repo.newestOpenPlansOf(member.userId, OPEN_PLANS_LIMIT + 1).filter(p => {
+          if (now < ms(p.expiresAt)) return true
+          repo.setPlanState(p.id, p.state, 'closed', { closedAt: iso(now), closeReason: 'expired' })
+          return false
+        })
         return ok({
           more: open.length > OPEN_PLANS_LIMIT,
           items: open.slice(0, OPEN_PLANS_LIMIT).map(plan => {
-            const content = contentOf(plan)
+            const copied = plan.targetJson !== null
+            const content = copied ? null : contentOf(repo.plan(plan.id) as BrowserPlanRow)
             const combination = findCombination(keyOf(plan))
             return {
               planId: plan.id, state: plan.state as 'draft' | 'approved',
               connector: { id: plan.connectorId, version: plan.connectorVersion, label: combination?.label ?? plan.connectorId },
               operation: plan.operation, label: combination?.browser.operations[plan.operation]?.label ?? plan.operation,
-              target: content.target, conversationId: content.conversation, createdAt: plan.createdAt, expiresAt: plan.expiresAt, approvedAt: plan.approvedAt,
+              target: content ? content.target : JSON.parse(plan.targetJson as string) as Record<string, string>,
+              conversationId: content ? content.conversation : plan.conversationId,
+              createdAt: plan.createdAt, expiresAt: plan.expiresAt, approvedAt: plan.approvedAt,
             }
           }),
         })

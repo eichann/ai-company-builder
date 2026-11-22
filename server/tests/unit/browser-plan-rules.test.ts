@@ -107,19 +107,26 @@ describe('the first version\'s rule', () => {
     expect(browserFirstVersionProblem({ ...op(), lock: null })).toContain('lock')
   })
 
-  it('runs a scheduled type only when its checker must read the schedule whole (6b-2 §2-3)', () => {
+  it('runs a scheduled type only when its checker must read the schedule and the templates whole (6b-2 §2-3)', () => {
     expect(errorsOf(edit('      delivers: none\n', '      delivers: scheduled\n'))).toBe('')
-    const scheduled = (schedule?: { required: boolean; complete: boolean }) => {
-      const facts = { ...op().facts }
+    type Rule = { required: boolean; complete: boolean } | undefined
+    const whole = { required: true, complete: true }
+    const scheduled = (schedule: Rule, templates: Rule) => {
+      const facts: Record<string, { required: boolean; complete: boolean }> = { ...op().facts }
       if (schedule) facts.schedule = schedule
+      if (templates) facts.templates = templates
       return { ...op(), delivers: 'scheduled' as const, facts }
     }
-    expect(browserFirstVersionProblem(scheduled({ required: true, complete: true }))).toBeNull()
-    expect(browserFirstVersionProblem(scheduled())).toContain('届く時')
-    expect(browserFirstVersionProblem(scheduled({ required: false, complete: true }))).toContain('届く時')
-    expect(browserFirstVersionProblem(scheduled({ required: true, complete: false }))).toContain('届く時')
-    // The schedule fact alone does not make another delivery runnable.
-    expect(browserFirstVersionProblem({ ...scheduled({ required: true, complete: true }), delivers: 'immediate' })).toContain('すぐ人に届く')
+    expect(browserFirstVersionProblem(scheduled(whole, whole))).toBeNull()
+    for (const [schedule, templates] of [
+      [undefined, whole], [{ required: false, complete: true }, whole], [{ required: true, complete: false }, whole],
+      // What goes out must be read whole too: an unread `templates` could never be checked for text only.
+      [whole, undefined], [whole, { required: false, complete: true }], [whole, { required: true, complete: false }],
+    ] as Array<[Rule, Rule]>) {
+      expect(browserFirstVersionProblem(scheduled(schedule, templates)), JSON.stringify({ schedule, templates })).toContain('届く時と届く中身')
+    }
+    // The facts alone do not make another delivery runnable.
+    expect(browserFirstVersionProblem({ ...scheduled(whole, whole), delivers: 'immediate' })).toContain('すぐ人に届く')
   })
 })
 
@@ -186,6 +193,10 @@ describe('the re-read compared with the approved facts (6b-2 §5-2)', () => {
     const later = Object.fromEntries(Object.entries(v2Facts()).reverse().map(([k, f]) => [k, { ...f, readAt: '2026-11-21T00:05:00.000Z' }]))
     expect(changed(later)).toBeNull()
     expect(changed({ ...v2Facts(), shared_with: fact({ count: 2, items: ['第2回', '第1回'] }) })).toBeNull()
+    // A multiset: the same items, each as many times.
+    const shared = (items: string[]) => ({ ...v2Facts(), shared_with: fact({ count: 3, items }) })
+    expect(changed(shared(['第1回', '第2回', '第1回']), shared(['第1回', '第1回', '第2回']))).toBeNull()
+    expect(changed(shared(['第1回', '第1回', '第2回']), shared(['第1回', '第2回', '第2回']))).toContain('shared_with')
   })
 
   it('any fact that differs is a change', () => {
