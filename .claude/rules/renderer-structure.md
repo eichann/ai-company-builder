@@ -255,10 +255,12 @@ D7–D9, confirmed 2026-10-30).
   the chat keeps the width the member chose and **widening the window grows the middle**; the left
   column (`fileTree`) is 200 px up to **half the window, at most 720 px**; the middle never goes under
   `MIDDLE_MIN` (360 px) while the window has room for every minimum — a smaller window takes the room
-  from the chat (min 280) first, then the left column; a drag never moves another pane and stops
-  where the middle would go under 360. What is saved is stale input: `parseLayout` checks the shape
+  from the chat (min 280) first, then the left column; a drag never moves another pane (`layoutAfterResize`: what is
+  saved after a resize is what is drawn, with that pane changed) and stops where the middle would go
+  under 360. What is saved is stale input: `parseLayout` checks the shape
   and clamps to the static limits; `fitLayout` fits it to the window every time it is drawn and is
-  never written back (a wider window shows the saved sizes again). Version 1 (the side fixed) is
+  never written back on its own (a wider window shows the saved sizes again, until the member
+  resizes a pane). Version 1 (the side fixed) is
   read as the same look in the window of that start (chat = window − side − 4) and is not
   rewritten until the member changes something; nothing saved, unreadable, another version or
   another tree shape → the first look (left 260, chat 416: today's first look). A divider is
@@ -267,8 +269,9 @@ D7–D9, confirmed 2026-10-30).
   the pointer (「340px（画面の 27%）」). **Hidden panes**: the left column (⌘B `layout.toggleLeft`; on a Mac never Ctrl+B, a text field's key, the
   title bar's 「画面の形」 buttons, the 24 px strip) and the chat (⌘⇧C, the same buttons, dragging it
   60 px under its minimum) are hidden in `AppShell` state and **not saved** (every pane shows at the
-  next start); a left tab chosen while the column is hidden (⌘⇧F, 今日のフォルダ, 「あなたの番」)
-  shows it again. Today the tree has the screen's look only; the chat no
+  next start); a left tab asked for while the column is hidden (⌘⇧F, 今日のフォルダ, 「あなたの番」, a folder
+  link, a click), even the one already chosen, shows it again (`showLeftTab`). With the column
+  hidden the middle shows even under a wide tab (スキル) and keeps its 360 px beside the strip. Today the tree has the screen's look only; the chat no
   longer assumes one panel on screen (refactor 5-7, `chat-ui-and-history.md` 「Several chat
   panes」): a tab is `isShown` in its pane, the voice key and `chat.*` commands go to the pane
   used last, a consultation is open in one pane at most, tabs are remembered per pane. A second

@@ -148,6 +148,17 @@ export function paneRange(paneId: string, shown: WorkspaceLayout, windowWidth: n
 }
 
 /**
+ * What is saved after the member sets one pane's size: the sizes drawn now (`drawn`, from
+ * `fitLayout`) with that pane changed, so a pane drawn smaller than saved stays as drawn and one
+ * divider never moves another. `saved` itself when nothing changes.
+ */
+export function layoutAfterResize(saved: WorkspaceLayout, drawn: WorkspaceLayout, splitId: 'screen' | 'files', paneId: string, size: number): WorkspaceLayout {
+  const next = { ...drawn, [splitId]: withPaneSize(drawn[splitId], paneId, size) }
+  const same = (a: SplitNode, b: SplitNode) => a.sizes.every((s, i) => s === b.sizes[i])
+  return same(next.screen, saved.screen) && same(next.files, saved.files) ? saved : next
+}
+
+/**
  * Size for a drag `offset` px (already signed: positive grows the pane) from its `startSize`,
  * within `range`; `collapse` when the pane was dragged far enough under its min to hide it.
  */

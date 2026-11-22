@@ -293,6 +293,39 @@ test.describe('panel dividers', () => {
     await expect(showLeft(page)).toBeVisible()
   })
 
+  test('asking for the tab already chosen (⌘⇧F on 探す) shows the hidden left column', async ({ page }) => {
+    await openPreview(page, 'skill-layout')
+    await leftTab(page, '探す').click()
+    await toggleLeftShortcut(page)
+    await expect(showLeft(page)).toBeVisible()
+    await shortcut(page, 'f', true)
+    await expect(showLeft(page)).toHaveCount(0)
+    await expect(searchBox(page)).toBeVisible()
+  })
+
+  test('with スキル chosen and the left column hidden, the middle shows and keeps 360 px beside the strip', async ({ page }) => {
+    await openPreview(page, 'skill-layout')
+    await leftTab(page, 'スキル').click()
+    await toggleLeftShortcut(page)
+    await expect(showLeft(page)).toBeVisible()
+    await drag(page, chatDivider(page), -900)
+    // 24 px strip + 360 px middle.
+    await expect.poll(() => at(chatDivider(page))).toBe(384)
+  })
+
+  test('dragging one divider never moves the other: a chat drawn smaller than saved stays as drawn', async ({ page }) => {
+    const big = JSON.stringify({ version: 2, trees: {
+      screen: { type: 'split', id: 'screen', direction: 'row', children: [{ type: 'pane', id: 'side' }, { type: 'pane', id: 'chat' }], sizes: [null, 900] },
+      files: { type: 'split', id: 'files', direction: 'row', children: [{ type: 'pane', id: 'fileTree' }, { type: 'pane', id: 'editor' }], sizes: [700, null] },
+    } })
+    await openPreview(page, 'skill-layout', { seed: JSON.stringify({ 'layout:demo': big }) })
+    await leftTab(page, 'ファイル').click()
+    expect(await at(chatDivider(page))).toBe(996)
+    await drag(page, treeDivider(page), -40)
+    await expect.poll(() => at(treeDivider(page))).toBe(592)
+    expect(await at(chatDivider(page))).toBe(996)
+  })
+
   test('「いつもの形に戻す」 puts every size back and shows every pane', async ({ page }) => {
     await openPreview(page, 'skill-layout')
     await leftTab(page, 'ファイル').click()

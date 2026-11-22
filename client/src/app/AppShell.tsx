@@ -187,6 +187,8 @@ export function AppShell() {
   const setPaneShown = useCallback((paneId: string, shown?: boolean) => setHidden(h => withPaneShown(h, paneId, shown)), [])
   const toggleChat = useCallback(() => setPaneShown('chat'), [setPaneShown])
   const toggleLeft = useCallback(() => setPaneShown('fileTree'), [setPaneShown])
+  // A left tab asked for (⌘⇧F, 今日のフォルダ, 「あなたの番」, a folder link) shows the column too, even when it is already the chosen tab.
+  const showLeftTab = useCallback((id: string) => { setLeftTab(id); setPaneShown('fileTree', true) }, [setLeftTab, setPaneShown])
 
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [showFileSearch, setShowFileSearch] = useState(false)
@@ -292,7 +294,7 @@ export function AppShell() {
   // The app's shortcuts are commands (shared/commands/catalog.ts), delivered to the focused area only.
   useKeybindings()
   useCommandHandler('search.show', () => {
-    setLeftTab('search')
+    showLeftTab('search')
     requestAnimationFrame(() => searchInputRef.current?.focus())
   })
   useCommandHandler('file.search', () => setShowFileSearch(true))
@@ -317,7 +319,7 @@ export function AppShell() {
     const made = await today.ensure()
     if ('error' in made) { sync.setSyncNotification({ type: 'error', message: made.error }); return }
     if (selectedDeptId !== made.department.id) handleSelectDept(made.department.id)
-    setLeftTab('files')
+    showLeftTab('files')
     // The tree shows the department after the next render.
     await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)))
     await treeControls.current?.reveal(`${rootPath}/${made.folder}`)
@@ -339,7 +341,7 @@ export function AppShell() {
     const top = inside.split('/')[0]
     const dept = departments.find(d => d.folder === top)
     if (dept && selectedDeptId !== dept.id) handleSelectDept(dept.id)
-    setLeftTab('files')
+    showLeftTab('files')
     await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)))
     await treeControls.current?.reveal(path)
   })
@@ -477,7 +479,7 @@ export function AppShell() {
   // Opening the やること tab, or leaving it, means the member has seen what is in it.
   const selectLeftTab = (id: string) => {
     if (id === 'tasks' || leftTab === 'tasks') seenTasks.markSeen(myTurnIds)
-    setLeftTab(id)
+    showLeftTab(id)
   }
   // The morning's 「今日のあなたの番」 (its Mac notification or its bell line) opens the task list.
   const openTasks = () => { if (tasksShown) selectLeftTab('tasks'); else if (pressShown) selectLeftTab('press') }
@@ -591,8 +593,8 @@ export function AppShell() {
   middleHidden.current = !!shownLeft?.wide
 
   // Pane sizes as a split tree, saved per company and fitted to the window for the panes on
-  // screen (layoutTree.ts); a wide left tab covers the middle.
-  const middleShown = !shownLeft?.wide
+  // screen (layoutTree.ts); a wide left tab covers the middle, unless the left column is hidden.
+  const middleShown = !shownLeft?.wide || hidden.has('fileTree')
   const paneView = useMemo(() => ({ leftShown: !hidden.has('fileTree'), chatShown: !hidden.has('chat'), middleShown }), [hidden, middleShown])
   const split = useSplitLayout(currentCompany?.id, paneView, paneId => setPaneShown(paneId, false))
   const layout = split.shown
@@ -601,12 +603,6 @@ export function AppShell() {
   useCommandHandler('layout.toggleChat', toggleChat, { acceptsKey: () => !isChatInputRecentlyActive() })
   // ⌘B only on a Mac: Ctrl+B stays the text fields' "back one character".
   useCommandHandler('layout.toggleLeft', toggleLeft, { acceptsKey: input => !isMacControlKey(input, IS_MAC) })
-  // A left tab chosen while the column is hidden (⌘⇧F, 今日のフォルダ, 「あなたの番」) brings the column back.
-  const [tabWhenShown, setTabWhenShown] = useState(leftTab)
-  if (tabWhenShown !== leftTab) {
-    setTabWhenShown(leftTab)
-    setPaneShown('fileTree', true)
-  }
   const splitHandlers = {
     paneClassName, dividerLabel, dividerState: split.divider, onResizeStart: split.startResize, onResize: split.resize,
     onNudge: split.nudge, onReset: split.resetDivider,

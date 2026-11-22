@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  DEFAULT_LAYOUT, MIDDLE_MIN, PANE_LIMITS, dragPane, fitLayout, paneRange, paneSize, parseLayout, serializeLayout, sizeText, withPaneSize,
+  DEFAULT_LAYOUT, MIDDLE_MIN, PANE_LIMITS, dragPane, fitLayout, layoutAfterResize, paneRange, paneSize, parseLayout, serializeLayout, sizeText, withPaneSize,
   type PaneView, type WorkspaceLayout,
 } from './layoutTree'
 
@@ -132,6 +132,18 @@ test('a drag stops where the middle would go under its minimum; only the consult
   assert.deepEqual(dragPane('chat', 420, -200, chat), { size: 280, collapse: true })
   const tree = paneRange('fileTree', shown, 1280, ALL)
   assert.deepEqual(dragPane('fileTree', 260, -5000, tree), { size: 200, collapse: false }, 'the left column never hides by dragging')
+})
+
+test('one divider never moves another: a pane drawn smaller than saved stays as drawn when the other is resized', () => {
+  const saved = sized(900, 700)
+  const drawn = fitLayout(saved, 1280, ALL)
+  assert.deepEqual([treeOf(drawn), chatOf(drawn)], [632, 280])
+  const after = layoutAfterResize(saved, drawn, 'files', 'fileTree', 600)
+  assert.deepEqual([treeOf(after), chatOf(after)], [600, 280])
+  assert.equal(chatOf(fitLayout(after, 1280, ALL)), 280, 'the chat does not grow back to its saved width')
+  // Nothing changes: what is saved stays the same object (nothing written).
+  const fits = sized(416, 260)
+  assert.equal(layoutAfterResize(fits, fitLayout(fits, 1280, ALL), 'files', 'fileTree', 260), fits)
 })
 
 test('the size shown while dragging: px and the share of the window', () => {

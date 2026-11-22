@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import {
-  DEFAULT_LAYOUT, dragPane, fitLayout, paneRange, paneSize, parseLayout, resizedBy, serializeLayout, sizeText, withPaneSize,
+  DEFAULT_LAYOUT, dragPane, fitLayout, layoutAfterResize, paneRange, paneSize, parseLayout, resizedBy, serializeLayout, sizeText,
   type PaneView, type SplitNode, type WorkspaceLayout,
 } from '../layoutTree'
 
@@ -63,13 +63,15 @@ export function useSplitLayout(companyId: string | undefined, view: PaneView, on
   const latest = useLatestRef({ shown, view })
   const onCollapseRef = useLatestRef(onCollapse)
 
+  // The other panes keep the size they are drawn at (layoutTree.ts `layoutAfterResize`).
   const setSize = useCallback((splitId: string, paneId: string, size: number) => {
+    if (splitId !== 'screen' && splitId !== 'files') return
+    const drawn = latest.current.shown
     setState(s => {
-      const split = topSplit(s.layout, splitId)
-      const next = split && withPaneSize(split, paneId, size)
-      return !next || next === split ? s : { ...s, layout: { ...s.layout, [splitId]: next }, loaded: false }
+      const next = layoutAfterResize(s.layout, drawn, splitId, paneId, size)
+      return next === s.layout ? s : { ...s, layout: next, loaded: false }
     })
-  }, [])
+  }, [latest])
 
   const target = useCallback((splitId: string, dividerIndex: number) =>
     dividerTarget(latest.current.shown, latest.current.view, windowWidth(), splitId, dividerIndex), [latest])
