@@ -76,6 +76,11 @@ try {
   r.websocket = await new Promise(resolve => { try { const w = new WebSocket('wss://ws.test/ws'); w.onopen = () => resolve('reached'); w.onerror = () => resolve('refused') } catch (e) { resolve('refused') } })
   try { navigator.sendBeacon('${WEB('beacon')}/beacon', 'x') } catch (e) {}
   r.webImage = await img('${WEB('img')}/img.png')
+  // For the band (A3): the same host again with a secret in the path and query (twice: one part),
+  // and more hosts than the band names. Nothing of a path or query may reach the window.
+  await img('${WEB('img')}/secret-path/a.png?q=secret-in-query')
+  await img('${WEB('img')}/secret-path/a.png?q=secret-in-query')
+  await Promise.all(Array.from({ length: 30 }, (_, i) => img('https://many' + i + '.test/secret-path/p.png?q=secret-in-query')))
   r.sameFolderImage = await img('images/graph.png')
   r.dotDotImage = await img('../other/secret.png')
   r.encodedDotDotImage = await img('%2e%2e/other/secret.png')
@@ -141,6 +146,8 @@ async function run() {
   })
   const shown = new Map<number, string>()
   const events: unknown[] = []
+  /** What the window was told about blocked internet parts (hosts and a count only). */
+  const blockedEvents: unknown[] = []
   // The first preparation of the session fails (its proxy cannot be set); the next open must recover.
   let proxyTries = 0
   const shell = createDocViewShell({
@@ -150,7 +157,7 @@ async function run() {
   })
   const views = createDocViews({
     frames: docFrames,
-    notify: (_windowId, event) => { events.push(event) },
+    notify: (_windowId, event) => { if (event.kind === 'blocked') blockedEvents.push(event); else events.push(event) },
     // Remember each view's address (the renderer never gets it) to probe it after the view is gone.
     shell: { onWindowReset: listener => shell.onWindowReset(listener), watch: windowId => shell.watch(windowId), create: async (windowId, hooks) => {
       const handle = await shell.create(windowId, hooks)
@@ -180,6 +187,8 @@ async function run() {
   const js = (code: string) => doc.contents.executeJavaScript(code, true)
   for (let i = 0; i < 100 && !(await js('window.__r')); i++) await wait(100)
   result.doc = await js('window.__r')
+  await wait(1200)
+  result.blocked = [...blockedEvents]
   // Until the viewer shows it (A2): hidden and silent.
   result.hidden = { muted: doc.contents.isAudioMuted(), visibility: await js('document.visibilityState') }
   // Loading focuses a view (measured), and the page calls focus() and has autofocus: the keyboard stays the app's.
@@ -326,6 +335,8 @@ async function run() {
   await js(`location.href = 'page2.html'`).catch(() => {})
   await wait(800)
   navigations.ownPage = doc.contents.getURL().endsWith('/page2.html') ? 'moved' : 'stayed'
+  // A page of its own with no internet parts: the band's tally starts again (the window hears 0).
+  result.blockedAfterOwnPage = blockedEvents.at(-1)
   result.navigations = navigations
 
   // A link to the web: the page navigating by itself asks nobody; right after the member's click it is

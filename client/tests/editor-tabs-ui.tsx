@@ -9,7 +9,9 @@
 // window.__acbPinned every pinned tab;
 // &view=html: an HTML document and one at the company folder's top level; the document views are
 // faked — window.__acbDocCalls lists every docView call, __acbDocEvent(e) sends a docView:event,
-// __acbOpened the links handed to the browser; 「メニューを出す」 draws a menu over the document).
+// __acbOpened the links handed to the browser; 「メニューを出す」 draws a menu over the document;
+// under the editor, the AI's tool rows of a reply (the chat's ［見る］, A3) — files.open and
+// chat.insertText are handled as the app does, __acbInserted lists what reached the chat's input).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -17,7 +19,10 @@ import '../src/index.css'
 import { TabbedEditorPanel } from '../src/features/editor/components/TabbedEditorPanel'
 import { tabDepartmentLabels } from '../src/features/editor/editorTabs'
 import { useAppStore } from '../src/stores/appStore'
-import { useKeybindings } from '../src/shared/commands/commands'
+import { useCommandHandler, useKeybindings } from '../src/shared/commands/commands'
+import { ToolRunGroup } from '../src/features/chat/components/ToolRows'
+import { planParts } from '../src/features/chat/toolRows'
+import type { UIMessage } from 'ai'
 import { hasUnsavedEdits } from '../src/shared/lib/unsavedEdits'
 import { WindowCloseGuard } from '../src/app/WindowCloseGuard'
 
@@ -44,12 +49,27 @@ if (tabsView) {
 const htmlView = params.get('view') === 'html'
 const HTML_DOC = `${ROOT}/営業部/報告/11月の売上.html`
 const TOP_DOC = `${ROOT}/会社案内.html`
+const SLIDES_DOC = `${ROOT}/営業部/報告/提案スライド.html`
 if (htmlView) {
   for (const key of Object.keys(files)) delete files[key]
   files[HTML_DOC] = '<!doctype html><h1>11月の売上</h1>'
   files[`${ROOT}/営業部/提案書.md`] = '# 提案書\n\n来期のご提案。'
   files[TOP_DOC] = '<!doctype html><p>会社案内</p>'
+  files[SLIDES_DOC] = '<!doctype html><h1>提案スライド</h1>'
 }
+// The AI's lines of one reply: an HTML file written in the company folder (［見る］), one read, a
+// Markdown file written, an HTML file written outside the company folder, a write that failed.
+const toolPart = (id: string, toolName: string, input: unknown, state = 'output-available') =>
+  ({ type: 'dynamic-tool', toolCallId: id, toolName, state, input, ...(state === 'output-error' ? { errorText: 'failed' } : { output: 'ok' }) }) as unknown as UIMessage['parts'][number]
+const CHAT_LINES = planParts([
+  toolPart('w1', 'Write', { file_path: SLIDES_DOC }),
+  toolPart('r1', 'Read', { file_path: HTML_DOC }),
+  toolPart('w2', 'Edit', { file_path: `${ROOT}/営業部/提案書.md` }),
+  toolPart('w3', 'Write', { file_path: '/tmp/よそ.html' }),
+  toolPart('w4', 'Write', { file_path: `${ROOT}/営業部/失敗.html` }, 'output-error'),
+  toolPart('w5', 'Edit', { file_path: HTML_DOC }),
+])
+const inserted: string[] = []
 const docCalls: unknown[][] = []
 const opened: string[] = []
 let docEvent: ((event: unknown) => void) | null = null
@@ -109,14 +129,14 @@ function externalDelete(p: string) {
   emitChanges?.([{ type: 'unlink', path: p }])
 }
 Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete, __acbFiles: files, __acbWrites: writes, __acbPinned: pinned, __acbHasUnsavedEdits: hasUnsavedEdits,
-  __acbFailWrites: failWrites, __acbDocCalls: docCalls, __acbDocEvent: (e: unknown) => docEvent?.(e), __acbOpened: opened,
+  __acbFailWrites: failWrites, __acbDocCalls: docCalls, __acbDocEvent: (e: unknown) => docEvent?.(e), __acbOpened: opened, __acbInserted: inserted,
   __acbFileChange: (p: string) => emitChanges?.([{ type: 'change', path: p }]), __acbCloseAnswers: closeAnswers, __acbRequestClose: () => requestClose?.() })
 
 export function Preview() {
   // As AppShell does: shortcuts reach the focused area only.
   useKeybindings()
   const [dept, setDept] = useState(params.get('dept') ?? 'sales')
-  const [openFiles, setOpenFiles] = useState(() => Object.keys(files))
+  const [openFiles, setOpenFiles] = useState(() => Object.keys(files).filter(f => f !== SLIDES_DOC))
   const [active, setActive] = useState(htmlView ? HTML_DOC : `${ROOT}/コンテンツG/台本.md`)
   const [menuOpen, setMenuOpen] = useState(false)
   const [smallMenu, setSmallMenu] = useState(false)
@@ -129,6 +149,12 @@ export function Preview() {
     if (active === p) setActive(rest[0] ?? '')
   }
   const pinFile = (p: string) => { pinned.push(p); setPreviewTab(null) }
+  // As AppShell and a chat pane do.
+  useCommandHandler('file.open', ({ path }) => {
+    setOpenFiles(list => (list.includes(path) ? list : [...list, path]))
+    setActive(path)
+  })
+  useCommandHandler('chat.insertText', ({ text }) => { inserted.push(text) }, { target: 'chat' })
   const labels = tabDepartmentLabels(openFiles, { rootPath: ROOT, departments, selectedDeptId: dept === 'company' ? null : dept })
   return (
     <main className="min-h-screen bg-white text-gray-900 dark:bg-zinc-950 dark:text-zinc-100">
@@ -162,6 +188,11 @@ export function Preview() {
       <div className="h-[420px] w-[760px]" style={tabsView || htmlView ? { height: 420 } : undefined}>
         <TabbedEditorPanel openFiles={openFiles} activeFilePath={active} previewFilePath={previewTab} tabLabels={labels} onSelectFile={setActive} onCloseFile={closeFile} onPinFile={pinFile} />
       </div>
+      {htmlView && (
+        <section aria-label="AI の作業" className="w-[760px] px-3 py-2">
+          {CHAT_LINES.map(item => (item.kind === 'run' ? <ToolRunGroup key={item.key} item={item} /> : null))}
+        </section>
+      )}
       <WindowCloseGuard />
     </main>
   )

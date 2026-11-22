@@ -62,7 +62,9 @@ export function handleKeyAt(element: Element | null, input: KeyInput): boolean {
 
 /** Whether a command can run now (e.g. show a file name as a link only when something opens files). */
 export function useCommandAvailable(id: AppCommandId, target?: string): boolean {
-  return useSyncExternalStore(commands.subscribe, () => commands.has(id, target))
+  const available = () => commands.has(id, target)
+  // The same answer when rendered to a string (node tests of chat rows render without a DOM).
+  return useSyncExternalStore(commands.subscribe, available, available)
 }
 
 /** Marks an element as a focus area for shortcuts: spread onto its root (`{...commandArea('chat', paneId)}`). */

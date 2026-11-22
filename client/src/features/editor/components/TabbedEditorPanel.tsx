@@ -11,7 +11,7 @@ import { useOpenFiles } from '../hooks/useOpenFiles'
 import { useFileSaving } from '../hooks/useFileSaving'
 import { useEditorReview } from '../hooks/useEditorReview'
 import { useMarkdownViewMode, useScrollMemory, type MdViewMode } from '../hooks/useMarkdownView'
-import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
+import { commandArea, runCommand, useCommandHandler } from '../../../shared/commands/commands'
 import { EditorTabBar } from './EditorTabBar'
 import type { TabArrangement } from '../hooks/useTabArrangement'
 import { fileTabsOf, recordIdOfTab, viewOfTab, type RecordTabLook, type ViewTabLook } from '../editorTabs'
@@ -156,6 +156,12 @@ export function TabbedEditorPanel({
     else if (activeIsHtml && shownFile) showHtmlSource(shownFile, !htmlSources.has(shownFile))
   }, { target: paneId, acceptsKey: () => activeIsMarkdown || activeIsHtml })
   useCommandHandler('editor.save', () => saving.handleSave(), { target: paneId })
+  // The chat's ［見る］ (doc-frame.md "The chat's ［見る］"): the document's tab, shown as 見る.
+  useCommandHandler('editor.viewDocument', ({ path }) => {
+    if (!isHtmlFile(path)) return
+    if (htmlSources.has(path)) showHtmlSource(path, false)
+    return runCommand('file.open', { path })
+  }, { target: paneId })
 
   const handleContentChange = useCallback((newContent: string) => {
     if (!activeFilePath) return

@@ -397,7 +397,9 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   hand-off compares that text; `recovery-context.ts` reads restored calls as the same markers) plus
   `toolLines` (label and `many` of a company's own type / plugin tools, never a detail);
   restoring turns each marker into a `data-tool-call` part drawn as a row. The rows are
-  `components/ToolRows.tsx`. Tests: `tests/tool-rows-real-path.test.ts` (the real main → renderer
+  `components/ToolRows.tsx`. A finished write of an HTML file in the company folder carries
+  ［見る］ (`documentLink.ts`, `editor.viewDocument`; doc-frame.md "The chat's ［見る］ (A3)"): the
+  viewer never opens by itself. Tests: `tests/tool-rows-real-path.test.ts` (the real main → renderer
   path of an AI turn, with and without main's lines, restored), `tests/tool-display.test.ts`,
   `src/features/chat/tool-rows.test.ts`, `tests/chat-panel-helpers.test.ts`.
 - Per-turn tool payload cap (`electron/ui-stream-limits.ts` `turnBudget`): after 2 MB of tool

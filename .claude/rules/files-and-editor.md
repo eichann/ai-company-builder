@@ -238,7 +238,8 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   `hooks/usePreviewSearch.ts`), `MarkdownPreviewPane` (preview + review UI), `BinaryPreviews`
   (image, PDF), `HtmlDocumentPane` (an `.html` / `.htm` file's 見る: its document in a view of its
   own, `doc-frame.md` "The viewer (A2)"; 中身 is the code editor, ⌘⇧V switches, 見る by default and
-  per tab for the app's run); `fileKinds.ts` decides how a file is shown. No band under the editor (owner
+  per tab for the app's run; the band of blocked internet parts `BlockedPartsBand` and the chat's
+  ［見る］ through `editor.viewDocument`, A3); `fileKinds.ts` decides how a file is shown. No band under the editor (owner
   2026-11-04: it only said 「自動保存」 and took space): unsaved edits are the tab's dot
   (「保存していない変更があります」), a paused autosave is the external-change banner, a failed
   save is `EditorError` above the editor (`editor-panel.spec.ts` 「a failed autosave…」). ⌘S, ⌘⇧V and ⌘F are the commands
