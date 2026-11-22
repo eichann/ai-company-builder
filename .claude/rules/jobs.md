@@ -1111,27 +1111,37 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   (the cause as `chainOf` words it when read: no title once they no longer read the record). **Nothing new is written**
   — no row, kind or key — so a build that does not know the reminder (the rollback floor 4b-0.5 included) shows and
   hides that row exactly as the stop notice it always was (its key's `<at>` still the standing stop). **Only while they
-  can act on it**: the job `active` (not paused, retired or under the company's stop — a resume later brings it then),
-  the approved content accepted, they still the approved version's responsible person **and the one the stop was told
-  to** (`responsibleAt`: the version approved last at or before the stop; a new responsible person — also the creator,
-  who was told as creator — is not reminded), a member who **reads the stop's record now** (decision on the safe side:
-  narrower than D7's exception for the first notice — someone who cannot read it is not reminded), and that very stop
-  still standing (checked again in the write's transaction). **Once per stop**: `remindOnce` brings the row back only
-  while its `action` is still '' (compare-and-set in SQL: two clocks, a restart or two servers bring it back once); a
-  choice made again or a moved watch ends the stop, and a later stop has its own key, notice and reminder. Nobody else's
-  row is touched (the creator's stays as it was); the push signal goes to the responsible person only. Each job on its
-  own (one that throws holds none back, logged once — not again when its scan already said so). Test:
-  `job-events.test.ts` "a chain that stays stopped: one reminder to the responsible person" (not before 3 days; once,
-  on top, unread, the words, pushed to her alone; never again after two passes and a restart; not after a choice made
-  again, and a second stop reminded again; not while paused, retired, a content not accepted — and after the resume;
-  not under the company's stop; not to a new responsible person who was the creator; not when the record is no longer
-  hers to read, or she left — once reminded, a record lost since worded plainly; a stop ended by another server between
-  the read and the write; a job that throws), and the cross-build check (`server/tests/cross-build/`: a schema-2 job
-  reminded by this build is shown by the floor as the plain stop notice, to alice only, and is not reminded again on
-  return). Mutation check: 17 guards removed or inverted one at a time (the age, active, the company's stop, accepted,
-  the responsible person at the stop and its time bound, reading the record, the compare-and-set, unread, on top, the
-  push, the words, the per-job catch, its log once, not logging twice with the scan, the stop's re-check in the write,
-  the clock's call); each fails a test.
+  can act on it and nothing changed since the stop**: the job `active` (not paused, retired or under the company's
+  stop), **not written since the stop** (`ai_jobs.updated_at` ≤ the stop's time: no approval — also an older version
+  approved again, which leaves that version's `approved_at` as it was, so the versions cannot say who was responsible at
+  the stop (independent review / Codex of this PR) —, no edit, acceptance, pause or resume after it; so the approved
+  version and its responsible person are the ones the stop was told about, and a new responsible person — also the
+  creator, who was told as creator — is never reminded; decision on the safe side: a pause and resume after the stop,
+  or an admin's draft, also ends the reminder, and the stop stays shown in 「定期の仕事」), the approved content accepted,
+  the responsible person a member who **reads the stop's record now** (decision on the safe side: narrower than D7's
+  exception for the first notice — someone who cannot read it is not reminded), and that very stop still standing. A
+  cheap look at the stop's age first, then **every check again inside the write's transaction** with the compare-and-set.
+  **While the company's records are off** nothing is looked at: the reminder is not used up and comes once they are on
+  again, if the chain is still stopped. **Once per stop**: `remindOnce` brings the row back only while its `action` is
+  still '' (compare-and-set in SQL: two clocks, a restart or two servers bring it back once); a choice made again or a
+  moved watch ends the stop, and a later stop has its own key, notice and reminder. Nobody else's row is touched (the
+  creator's stays as it was); the push signal goes to the responsible person only. Each job on its own (one that throws
+  holds none back, logged once; not while its scan's failure is logged already — and logged once that has passed, if
+  the reminder still fails). **The first clock pass after this build is deployed** reminds, at once, every stop that is
+  already older than 3 days and still meets the checks (known and left so: production had no event jobs when it
+  shipped). Test: `job-events.test.ts` "a chain that stays stopped: one reminder to the responsible person" (not before
+  3 days; once, on top, unread, the words, pushed to her alone; never again after two passes and a restart; not after a
+  choice made again, and a second stop reminded again; not while paused, retired, a content not accepted — nor after the
+  resume; not under the company's stop; records off waits and then comes; not to a new responsible person who was the
+  creator; an older version approved again around the stop (v1 Alice, v2 the owner, v1 again, the stop, v2 again): no
+  reminder to the owner's creator row; not when the record is no longer hers to read, or she left — once reminded, a
+  record lost since worded plainly; a stop ended by another server before the write; a job that throws; a reminder
+  failing while the scan fails, logged after the scan recovers), and the cross-build check (`server/tests/cross-build/`:
+  a schema-2 job reminded by this build is shown by the floor as the plain stop notice, to alice only, and is not
+  reminded again on return). Mutation check: 18 guards removed or inverted one at a time (the age, active, the
+  company's stop, records off, accepted, written since the stop, reading the record, the compare-and-set, unread, on
+  top, the push, the words, the per-job catch, its log once, quiet while the scan's failure is logged, not marked while
+  quiet, the stop read again in the write, the clock's call); each fails a test.
 - **Who sees an event occurrence** (⑥, `eventShown`): only someone who reads its record now — owners and admins too.
   `GET /jobs/:jobId/occurrences` leaves the others out **before** the limit (page by page), the job's `lastOccurrence` is
   the newest the viewer may see, a notice is written only to those who read it then and shown only while they still do,
