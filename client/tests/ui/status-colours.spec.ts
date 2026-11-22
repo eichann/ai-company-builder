@@ -150,5 +150,28 @@ for (const theme of ['light', 'dark'] as const) {
       expect(await style(banner, 'color')).toBe(await token(page, 'warning-text'))
       expect(await style(banner.locator('svg').first(), 'color')).toBe(await token(page, 'warning-icon'))
     })
+
+    test('the left tabs\' count bubble and the chosen tab\'s underline are `primary`; a dragged divider\'s line too (P2d)', async ({ page }) => {
+      await open(page, 'status', theme)
+      const tabs = page.getByRole('region', { name: '左のタブ' })
+      const count = tabs.locator('[data-left-tab="tasks"] [data-left-tab-name] + span')
+      await expect(count).toHaveText('3')
+      expect(await style(count, 'backgroundColor'), 'count bubble').toBe(await token(page, 'primary'))
+      expect(await style(count, 'color'), 'count text').toBe(await token(page, 'on-primary'))
+      const underline = (id: string) => tabs.locator(`[data-left-tab="${id}"]`).evaluate(n => getComputedStyle(n).borderBottomColor)
+      expect(await underline('files'), 'chosen tab').toBe(await token(page, 'primary'))
+      await tabs.locator('[data-left-tab="tasks"]').click()
+      await expect.poll(() => underline('tasks')).toBe(await token(page, 'primary'))
+      expect(await underline('files'), 'a tab not chosen has no line').toBe('rgba(0, 0, 0, 0)')
+
+      const divider = page.getByRole('region', { name: '仕切り' }).locator('[role="separator"]')
+      const box = (await divider.boundingBox())!
+      await page.mouse.move(box.x + box.width / 2, box.y + 40)
+      await page.mouse.down()
+      await page.mouse.move(box.x + box.width / 2 + 20, box.y + 50)
+      await expect.poll(() => style(divider, 'backgroundColor'), 'while dragged').toBe(await token(page, 'primary'))
+      expect(await style(divider.locator('div').last(), 'backgroundColor'), 'its line').toBe(await token(page, 'primary'))
+      await page.mouse.up()
+    })
   })
 }

@@ -124,5 +124,55 @@ for (const theme of ['dark', 'light'] as const) {
       // A step not reached yet: its number in the grey circle still reads.
       await expectReadable(theme, page.getByText('2', { exact: true }))
     })
+
+    // P2d: the last screens that stayed white in dark mode.
+    test('the chat\'s settings: the voice shortcut box, the options (the chosen one the selected set) and the sign-in box', async ({ page }) => {
+      const state = await open(page, 'sign-in', theme, { screen: 'chat-settings', claude: 'signin' })
+      const chosen = page.getByRole('button', { name: /Claude Max/ })
+      await expectReadable(theme,
+        page.getByText('認証設定'),
+        page.getByText('音声入力のショートカット'),
+        page.getByText('Claude Max / Pro'),
+        page.getByText('Codex（ChatGPTプラン）'),
+        page.getByText('Claude へのログインが必要です'),
+        page.getByText(/ボタンを押すと、ブラウザで Anthropic/))
+      const fill = (n: Locator) => n.evaluate(e => getComputedStyle(e).backgroundColor)
+      const tokenRgb = (name: string) => page.evaluate(n => `rgb(${getComputedStyle(document.documentElement).getPropertyValue(`--color-${n}-rgb`).trim().split(' ').join(', ')})`, name)
+      expect(await fill(chosen), 'the chosen option').toBe(await tokenRgb('selected-bg'))
+      expect(await fill(page.getByRole('button', { name: /Codex/ })), 'an option not chosen').not.toBe(await tokenRgb('selected-bg'))
+
+      await open(page, 'sign-in', theme, { screen: 'chat-settings', mode: 'api-key' })
+      await expectReadable(theme, page.getByText('保存されているキーをこのコンピューターでは読み取れません。', { exact: false }), page.getByRole('textbox'))
+      await open(page, 'sign-in', theme, { screen: 'chat-settings', mode: 'codex' })
+      await expectReadable(theme, page.getByText('Codex にログインしていません'), page.getByRole('button', { name: '接続を再確認' }))
+      expectNoPageErrors(state)
+    })
+
+    test('the sync preview: the title, the changed files and the 作業メモ', async ({ page }) => {
+      await open(page, 'keep-work', theme)
+      await page.getByRole('button', { name: '変更を確認' }).click()
+      const preview = page.getByRole('dialog', { name: /変更されたファイル/ })
+      await expectReadable(theme,
+        preview.getByRole('heading', { name: /変更されたファイル/ }),
+        preview.getByText('追加', { exact: true }),
+        preview.getByText('変更', { exact: true }),
+        preview.getByText('営業部/新規メモ.md'),
+        preview.getByRole('textbox'),
+        preview.getByRole('button', { name: '閉じる', exact: true }).last())
+    })
+
+    test('a change\'s before / after: removed and added lines read on their own fills and stay apart', async ({ page }) => {
+      await open(page, 'keep-work', theme, { view: 'diff' })
+      const diff = page.getByRole('dialog', { name: '営業部/提案書.md' })
+      const removed = diff.locator('[data-diff-line="remove"]').first()
+      const added = diff.locator('[data-diff-line="add"]').first()
+      await expectReadable(theme, removed, added, diff.locator('[data-diff-line="context"]').first(), diff.getByText('変更前'), diff.getByText('変更後'))
+      const look = (n: Locator) => n.evaluate(e => [getComputedStyle(e).backgroundColor, getComputedStyle(e).color].join(' / '))
+      const [r, a] = [await look(removed), await look(added)]
+      expect(r, 'removed and added differ').not.toBe(a)
+      const tokenRgb = (name: string) => page.evaluate(n => `rgb(${getComputedStyle(document.documentElement).getPropertyValue(`--color-${n}-rgb`).trim().split(' ').join(', ')})`, name)
+      expect(r).toBe(`${await tokenRgb('danger-bg')} / ${await tokenRgb('danger-text')}`)
+      expect(a).toBe(`${await tokenRgb('success-bg')} / ${await tokenRgb('success-text')}`)
+    })
   })
 }

@@ -22,7 +22,6 @@ export default {
         'border': '#e0e0e0',
         'text-primary': '#1d1c1d',
         'text-secondary': '#616061',
-        'accent': '#1264a3', // Slack-like blue
         // Extended palette for refined UI
         'surface': {
           DEFAULT: '#ffffff',
@@ -33,10 +32,6 @@ export default {
           DEFAULT: '#1d1c1d',
           muted: '#616061',
           faint: '#a0a0a0',
-        },
-        'glow': {
-          accent: 'rgba(18, 100, 163, 0.1)',
-          subtle: 'rgba(0, 0, 0, 0.02)',
         },
         // Dark theme colors
         'dark-surface': {

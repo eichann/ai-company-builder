@@ -105,7 +105,7 @@ client/src/features/chat/components/AppInstructionChip.tsx palette-color=10 type
 client/src/features/chat/components/ApprovalCard.tsx arbitrary-value=7 opacity-scale=1 palette-color=90 radius-scale=6 type-scale=16 white-black=2
 client/src/features/chat/components/BrokerKeyNeededCard.tsx arbitrary-value=1 palette-color=8 radius-scale=2 type-scale=3
 client/src/features/chat/components/ChatAuthGate.tsx arbitrary-value=5 palette-color=3 radius-scale=4 shadow-scale=2 type-scale=7
-client/src/features/chat/components/ChatAuthSettings.tsx color-opacity=9 opacity-scale=1 palette-color=7 radius-scale=11 shadow-scale=3 type-scale=27 white-black=16
+client/src/features/chat/components/ChatAuthSettings.tsx type-scale=27
 client/src/features/chat/components/ChatComposer.tsx arbitrary-value=1 palette-color=1 radius-scale=5 shadow-scale=1 type-scale=1 white-black=1 z-index=1
 client/src/features/chat/components/ChatConversation.tsx palette-color=5 type-scale=3 white-black=1
 client/src/features/chat/components/ChatHeader.tsx arbitrary-value=10 opacity-scale=4 palette-color=49 radius-scale=12 white-black=5
@@ -114,7 +114,7 @@ client/src/features/chat/components/ChatMessageList.tsx arbitrary-value=14 color
 client/src/features/chat/components/ChatPanel.tsx shadow-scale=1 white-black=1 z-index=3
 client/src/features/chat/components/ChatSidebar.tsx arbitrary-value=4 opacity-scale=1 palette-color=68 radius-scale=14 type-scale=12 white-black=3 z-index=1
 client/src/features/chat/components/ChoicePrompt.tsx arbitrary-value=9 color-literal=2 opacity-scale=1 palette-color=47 radius-scale=9 shadow-scale=1 type-scale=8 white-black=4
-client/src/features/chat/components/ClaudeSignInCard.tsx palette-color=6 radius-scale=3 type-scale=13
+client/src/features/chat/components/ClaudeSignInCard.tsx radius-scale=1 type-scale=13
 client/src/features/chat/components/CodeMirrorChatInput.tsx arbitrary-value=5 opacity-scale=1 palette-color=8 radius-scale=3 shadow-scale=2 white-black=1
 client/src/features/chat/components/ComposerAttachments.tsx arbitrary-value=2 opacity-scale=1 palette-color=2 radius-scale=2 type-scale=3 white-black=1
 client/src/features/chat/components/ConsultationReference.tsx type-scale=1
@@ -161,7 +161,7 @@ client/src/features/editor/components/MarkdownPreviewPane.tsx arbitrary-value=3 
 client/src/features/editor/components/PlaceNavigation.tsx opacity-scale=1 palette-color=6 radius-scale=1
 client/src/features/editor/components/TabGroupParts.tsx arbitrary-value=2 opacity-scale=2 palette-color=14 radius-scale=1 type-scale=1
 client/src/features/editor/components/TabbedEditorPanel.tsx arbitrary-value=7 opacity-scale=2 palette-color=33 radius-scale=1 shadow-scale=1 white-black=1
-client/src/features/editor/components/TidiedTabsDialog.tsx arbitrary-value=11 opacity-scale=1 palette-color=37 radius-scale=5 shadow-scale=1 white-black=2 z-index=1
+client/src/features/editor/components/TidiedTabsDialog.tsx arbitrary-value=9
 client/src/features/editor/components/TidyNoticeBar.tsx arbitrary-value=1 palette-color=13 radius-scale=1
 client/src/features/editor/hooks/usePreviewSearch.ts palette-color=5 radius-scale=2
 client/src/features/editor/tabArrangement.ts palette-color=36
@@ -192,7 +192,7 @@ client/src/features/records/components/RecordDetails.tsx arbitrary-value=11 pale
 client/src/features/records/components/RecordRows.tsx arbitrary-value=9 palette-color=23 radius-scale=2
 client/src/features/records/components/linkRows.tsx palette-color=2
 client/src/features/search/components/FindEmpty.tsx arbitrary-value=8 palette-color=17 white-black=1
-client/src/features/search/components/FindPalette.tsx arbitrary-value=11 palette-color=27 radius-scale=3 shadow-scale=1 type-scale=1 white-black=2 z-index=1
+client/src/features/search/components/FindPalette.tsx arbitrary-value=11 type-scale=1
 client/src/features/search/components/FoundRows.tsx arbitrary-value=19 palette-color=46 radius-scale=8 white-black=3
 client/src/features/search/components/SearchPanel.tsx arbitrary-value=6 opacity-scale=1 palette-color=43 radius-scale=3 type-scale=3 white-black=1
 client/src/features/settings/components/AgentEnvSettings.tsx arbitrary-value=5 palette-color=16 radius-scale=2 white-black=4
@@ -207,7 +207,7 @@ client/src/features/settings/components/MoveEnvKeysCard.tsx arbitrary-value=7 pa
 client/src/features/settings/components/MySwitchesSection.tsx arbitrary-value=7 opacity-scale=1 palette-color=11 shadow-scale=1 white-black=2
 client/src/features/settings/components/OwnKeysSection.tsx arbitrary-value=8 palette-color=19 radius-scale=1 white-black=4
 client/src/features/settings/components/PromptSuggestionSettings.tsx arbitrary-value=3 palette-color=6
-client/src/features/settings/components/SettingsPanel.tsx arbitrary-value=17 opacity-scale=1 palette-color=83 radius-scale=7 type-scale=4 white-black=19 z-index=1
+client/src/features/settings/components/SettingsPanel.tsx arbitrary-value=17 opacity-scale=1 palette-color=66 radius-scale=6 type-scale=4 white-black=12 z-index=1
 client/src/features/settings/components/SlackSection.tsx arbitrary-value=6 palette-color=7 radius-scale=1 white-black=1
 client/src/features/settings/components/TidyTabsSetting.tsx arbitrary-value=2 palette-color=3
 client/src/features/settings/components/TodayFolderSetting.tsx arbitrary-value=8 palette-color=17 radius-scale=1 white-black=2
@@ -221,7 +221,7 @@ client/src/features/skills/components/ToolViewer.tsx arbitrary-value=1 palette-c
 client/src/features/sync/components/BackupHistorySlideOver.tsx opacity-scale=2 palette-color=54 radius-scale=6 type-scale=9 white-black=3
 client/src/features/sync/components/DepartmentDownloadPrompt.tsx arbitrary-value=1 inline-color=1 opacity-scale=1 palette-color=15 radius-scale=2 type-scale=3 white-black=1 z-index=1
 client/src/features/sync/components/SyncNotification.tsx opacity-scale=1 radius-scale=1 shadow-scale=1 type-scale=3 z-index=1
-client/src/features/sync/components/SyncPreviewDialog.tsx arbitrary-value=4 color-opacity=5 palette-color=6 radius-scale=12 shadow-scale=1 type-scale=10 white-black=1 z-index=1
+client/src/features/sync/components/SyncPreviewDialog.tsx arbitrary-value=4 type-scale=9
 client/src/features/tasks/components/ArchiveSection.tsx arbitrary-value=10 palette-color=23 radius-scale=2
 client/src/features/tasks/components/BundleChooser.tsx arbitrary-value=11 opacity-scale=2 palette-color=24 radius-scale=2
 client/src/features/tasks/components/BundleField.tsx arbitrary-value=12 opacity-scale=2 palette-color=25 radius-scale=4
@@ -247,10 +247,10 @@ client/src/features/voice/components/VoicePromptSettings.tsx arbitrary-value=6 p
 client/src/features/voice/components/VoiceShortcutSettings.tsx palette-color=13 radius-scale=1 type-scale=1
 client/src/features/workspace/components/DepartmentBar.tsx palette-color=15 type-scale=3 white-black=1
 client/src/features/workspace/components/DepartmentTabs.tsx opacity-scale=1 palette-color=19 radius-scale=2 shadow-scale=3 type-scale=2 white-black=7
-client/src/features/workspace/components/LeftPanelTabs.tsx arbitrary-value=7 palette-color=10 white-black=1 z-index=1
+client/src/features/workspace/components/LeftPanelTabs.tsx arbitrary-value=7 palette-color=10 z-index=1
 client/src/features/workspace/components/ResizeHandle.tsx palette-color=1
 client/src/shared/ui/ContextMenu.tsx arbitrary-value=1 type-scale=2
-client/src/shared/ui/DiffViewer.tsx arbitrary-value=13 color-opacity=3 palette-color=7 radius-scale=2 shadow-scale=1 type-scale=4 white-black=1
+client/src/shared/ui/DiffViewer.tsx arbitrary-value=11 type-scale=3
 client/src/shared/ui/DriveFiles.tsx arbitrary-value=8 opacity-scale=2 palette-color=16 radius-scale=5
 client/src/shared/ui/DriveLinkAction.tsx arbitrary-value=5 palette-color=11 radius-scale=2
 client/src/shared/ui/HoverTooltip.tsx arbitrary-value=1 z-index=1

@@ -158,3 +158,113 @@ test('dark mode links are the lighter link blue, not the old accent #1264a3 on a
   const link = page.getByTestId('task-card').getByRole('button', { name: /ファイル・フォルダをつなぐ/ })
   expect(await css(link, 'color')).toBe('rgb(108, 176, 234)')
 })
+
+// P2d: the deferred spots. 「片づけたタブ」, the settings, the sync preview and its before / after are
+// on the shared frame (its scrim, surface, corner, shadow and keys); ⌘K's palette is drawn like a menu.
+const ROOT = '/Users/demo/会社'
+const TIDY_SEED = JSON.stringify({ 'editor:demo': JSON.stringify({
+  openFiles: [`${ROOT}/README.md`, `${ROOT}/営業部/営業の進め方.md`, `${ROOT}/総務/備品.md`], activeFilePath: `${ROOT}/README.md`, leftTab: 'files', pinned: [`${ROOT}/README.md`],
+}) })
+async function openTidied(page: Page, theme: Theme) {
+  const state = await open(page, 'skill-layout', theme, { seed: TIDY_SEED })
+  await page.getByRole('button', { name: 'タブの操作' }).click()
+  await page.getByRole('menuitem', { name: /タブを片づける/ }).click()
+  const opener = page.getByRole('button', { name: '片づけたタブを見る' })
+  await opener.click()
+  return { state, opener, dialog: page.getByRole('dialog', { name: '片づけたタブ' }) }
+}
+
+/** Tab and Shift+Tab never take focus out of the dialog. */
+async function expectTabStaysInside(page: Page, dialog: Locator) {
+  for (let i = 0; i < 14; i++) {
+    await page.keyboard.press(i % 4 === 3 ? 'Shift+Tab' : 'Tab')
+    expect(await dialog.evaluate(d => d.contains(document.activeElement)), `focus inside after Tab ${i + 1}`).toBe(true)
+  }
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test.describe(`${theme}: P2d`, () => {
+    test('「片づけたタブ」, the settings, the sync preview and a change\'s before / after are on the frame', async ({ page }) => {
+      const { state, dialog: tidied } = await openTidied(page, theme)
+      await expectFrame(page, tidied, { title: tidied.getByRole('heading', { name: '片づけたタブ' }) })
+      expectNoPageErrors(state)
+
+      await open(page, 'download-folders', theme)
+      await expectFrame(page, page.getByRole('dialog', { name: '設定' }))
+
+      await open(page, 'keep-work', theme)
+      await page.getByRole('button', { name: '変更を確認' }).click()
+      const preview = page.getByRole('dialog', { name: /変更されたファイル/ })
+      await expectFrame(page, preview, { title: preview.getByRole('heading', { name: /変更されたファイル/ }) })
+
+      await open(page, 'keep-work', theme, { view: 'diff' })
+      const diff = page.getByRole('dialog', { name: '営業部/提案書.md' })
+      await expectFrame(page, diff, { title: diff.getByRole('heading', { name: '営業部/提案書.md' }) })
+    })
+
+    test('⌘K\'s palette is drawn like a menu: no scrim, the raised surface and the pop shadow on the menus\' layer', async ({ page }) => {
+      await open(page, 'records-table', theme)
+      await page.getByRole('button', { name: '⌘K を開く' }).click()
+      const palette = page.getByRole('dialog', { name: '探す' })
+      await expect(palette).toBeVisible()
+      const backdrop = page.locator('[data-palette-backdrop]')
+      expect(await css(backdrop, 'background-color'), 'no scrim').toBe('rgba(0, 0, 0, 0)')
+      expect(await css(backdrop, 'z-index')).toBe(await rootVar(page, '--z-menu'))
+      expect(await css(palette, 'background-color')).toBe(await token(page, 'surface-raised'))
+      const pop = await page.evaluate(() => {
+        const el = document.createElement('div')
+        el.style.boxShadow = 'var(--shadow-pop)'
+        document.body.appendChild(el)
+        const s = getComputedStyle(el).boxShadow
+        el.remove()
+        return s
+      })
+      // Tailwind puts its empty ring shadows first; the pop shadow is what paints.
+      expect(await css(palette, 'box-shadow')).toContain(pop)
+      // A click outside still closes it.
+      await page.mouse.click(40, 780)
+      await expect(palette).toHaveCount(0)
+    })
+  })
+}
+
+test('「片づけたタブ」 keeps the keyboard rules: Tab stays inside, Esc closes it and only it', async ({ page }) => {
+  // Its opener (the tidy notice's button) is gone once the list opens, so there is no focus to return.
+  const { state, dialog } = await openTidied(page, 'light')
+  await expect(dialog).toBeVisible()
+  await expectTabStaysInside(page, dialog)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByTitle(`${ROOT}/README.md`, { exact: true })).toBeVisible()
+  expectNoPageErrors(state)
+})
+
+test('the settings keep the keyboard rules: Tab stays inside, Esc closes them, focus returns to the opener', async ({ page }) => {
+  const state = await openPreview(page, 'download-folders', { closed: '1' })
+  const opener = page.getByRole('button', { name: '設定を開く' })
+  await opener.click()
+  const settings = page.getByRole('dialog', { name: '設定' })
+  await expect(settings).toBeVisible()
+  await expect(settings).toBeFocused()
+  await expectTabStaysInside(page, settings)
+  await page.keyboard.press('Escape')
+  await expect(settings).toHaveCount(0)
+  await expect(opener).toBeFocused()
+  expectNoPageErrors(state)
+})
+
+test('the sync preview: Esc closes the before / after on top first, then the preview; a scrim click closes the preview', async ({ page }) => {
+  const state = await openPreview(page, 'keep-work')
+  await page.getByRole('button', { name: '変更を確認' }).click()
+  const preview = page.getByRole('dialog', { name: /変更されたファイル/ })
+  await preview.getByText('営業部/提案書.md').click()
+  const diff = page.getByRole('dialog', { name: '営業部/提案書.md' })
+  await expect(diff).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(diff).toHaveCount(0)
+  await expect(preview).toBeVisible()
+  await expectTabStaysInside(page, preview)
+  await page.mouse.click(20, 780)
+  await expect(preview).toHaveCount(0)
+  expectNoPageErrors(state)
+})

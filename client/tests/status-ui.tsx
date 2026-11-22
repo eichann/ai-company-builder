@@ -4,9 +4,11 @@
 // each with a `data-` name the status-colours spec reads. `?theme=dark` for dark mode. Below them,
 // real parts in a stopped state the member has to act on (「止まっている」の色: amber): a task row the
 // AI cannot start (`not-allowed`) beside one whose AI failed (red), and the title bar while
-// automatic sync waits for the member.
+// automatic sync waits for the member. Then the left tabs (the chosen tab's underline and a count
+// bubble, `primary`) and a divider (`ResizeHandle`: its line while dragged, `primary`).
+import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Circle } from '@phosphor-icons/react'
+import { Circle, FolderSimple, ListChecks, Tray } from '@phosphor-icons/react'
 import '../src/i18n'
 import '../src/index.css'
 import { TitleBar } from '../src/app/TitleBar'
@@ -15,6 +17,8 @@ import { companyNow } from '../src/features/tasks/model'
 import type { TaskListItem } from '../shared/tasks'
 import { Callout, NewDot, StatusBadge, type CalloutTone, type StatusBadgeVariant } from '../src/shared/ui/primitives'
 import { ReadOnlyBadge } from '../src/shared/ui/ReadOnlyBadge'
+import { LeftPanelTabs } from '../src/features/workspace/components/LeftPanelTabs'
+import { ResizeHandle } from '../src/features/workspace/components/ResizeHandle'
 
 if (new URLSearchParams(location.search).get('theme') === 'dark') document.documentElement.classList.add('dark')
 
@@ -29,6 +33,16 @@ const row = (id: string, title: string): TaskListItem => ({
   bundle: null, finishedAt: null, stateLabel: null, state: 'todo', due: null, turn: 'ai',
 })
 const noop = () => {}
+const PANELS = [
+  { id: 'files', title: 'ファイル', icon: FolderSimple, mount: 'always' as const, render: () => <p className="p-2">ファイルの一覧</p> },
+  { id: 'tasks', title: 'やること', icon: ListChecks, mount: 'always' as const, badgeCount: 3, render: () => <p className="p-2">やること</p> },
+  { id: 'inbox', title: '受け箱', icon: Tray, mount: 'always' as const, dot: true, render: () => <p className="p-2">受け箱</p> },
+]
+
+function LeftTabs() {
+  const [tab, setTab] = useState('files')
+  return <LeftPanelTabs panels={PANELS} selectedId={tab} onSelect={setTab} />
+}
 
 function Page() {
   return (
@@ -52,6 +66,11 @@ function Page() {
         <TitleBar companyName="プレビュー会社" isLoadingPreview={false} isSyncing={false} syncWaitsForYou
           syncTitle={'サーバーと同期\n自動同期は止まっています（このボタンで同期すると再開します）'}
           onPreview={noop} onSync={noop} onShowBackups={noop} onShowSettings={noop} onLogout={noop} />
+      </section>
+      {/* Inline sizes: Tailwind only generates classes the app itself uses. */}
+      <section aria-label="左のタブ" style={{ display: 'flex', flexDirection: 'column', height: 128, width: 420 }}><LeftTabs /></section>
+      <section aria-label="仕切り" style={{ display: 'flex', height: 96, width: 420 }}>
+        <div style={{ width: 160 }} /><ResizeHandle label="仕切り" onResizeStart={noop} onResize={noop} /><div style={{ flex: 1 }} />
       </section>
     </main>
   )

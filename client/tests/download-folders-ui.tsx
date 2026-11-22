@@ -13,6 +13,8 @@
 //            shown allowed, turning it on is refused with WORK_SWITCH_COMPANY_OFF)
 //   mail   no = Google has not let ACB read the member's mail yet
 //   channels  none = the company has neither mail nor chat connected (no 受信を読む switch, one line instead)
+//   closed 1 = start with the settings closed: a 「設定を開く」 button (always there) opens them (Esc closes, focus returns)
+import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -208,6 +210,7 @@ Object.assign(window, {
 useAppStore.setState({ currentCompany: { id: 'demo', name: '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })
 
 function Preview() {
+  const [settingsOpen, setSettingsOpen] = useState(params.get('closed') !== '1')
   if (view === 'filetree') {
     return (
       <main className="flex h-screen bg-white dark:bg-zinc-950">
@@ -220,7 +223,8 @@ function Preview() {
   }
   return (
     <main className="h-screen bg-zinc-100 dark:bg-zinc-950">
-      <SettingsPanel onClose={() => {}} initialTab={tab as never} />
+      {params.get('closed') === '1' && <button type="button" className="m-6" onClick={() => setSettingsOpen(true)}>設定を開く</button>}
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} initialTab={tab as never} />}
     </main>
   )
 }
