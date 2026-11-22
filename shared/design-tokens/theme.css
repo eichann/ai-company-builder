@@ -191,6 +191,7 @@
   --color-thing-project: var(--indigo-600);
   --color-thing-meeting: var(--sky-600);
   --color-scrim: rgba(9, 9, 11, 0.45);
+  --color-scrim-palette: rgba(9, 9, 11, 0.2);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-pop: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.10);
   --shadow-dialog: 0 24px 56px rgba(0, 0, 0, 0.18);
@@ -354,6 +355,7 @@
   --color-thing-project: var(--indigo-400);
   --color-thing-meeting: var(--sky-400);
   --color-scrim: rgba(0, 0, 0, 0.6);
+  --color-scrim-palette: rgba(0, 0, 0, 0.4);
   --shadow-card: none;
   --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-dialog: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 24px 56px rgba(0, 0, 0, 0.6);

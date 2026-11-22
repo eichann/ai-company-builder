@@ -97,7 +97,7 @@ const appPreset = {
   theme: {
     extend: {
       colors: Object.fromEntries(COLORS.filter(c => !APP_TAKEN.includes(c)).map(c => [c,
-        c === 'scrim' ? 'var(--color-scrim)' : `rgb(var(--color-${c}-rgb) / <alpha-value>)`])),
+        c.startsWith('scrim') ? `var(--color-${c})` : `rgb(var(--color-${c}-rgb) / <alpha-value>)`])),
       fontSize: Object.fromEntries(STEPS.map(n => [n, [`var(--font-size-${n})`,
         { lineHeight: `var(--line-height-${n})`, fontWeight: `var(--weight-${n})` }]])),
       fontWeight: { strong: 'var(--weight-strong)' },

@@ -259,7 +259,7 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
                 <span className="truncate"><Marked text={row.linked.title} query={query} /></span>
               </p>}
               <p className={`text-xs truncate mt-1 ${live ? LINE_TONE[live.state] ?? 'text-gray-500 dark:text-zinc-400' : 'text-gray-500 dark:text-zinc-400'}`}>{line}</p>
-              <div className="flex gap-2 mt-1 text-[10px] text-gray-500"><span>{session ? new Date(session.updatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '未送信'}</span>{elsewhere ? <span className="inline-flex items-center gap-0.5 text-link"><AppWindow size={11} aria-hidden />別ウィンドウで表示中</span> : active ? <span className="text-accent">表示中</span> : tab ? <span>開いています</span> : null}</div>
+              <div className="flex gap-2 mt-1 text-[10px] text-gray-500"><span>{session ? new Date(session.updatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '未送信'}</span>{elsewhere ? <span className="inline-flex items-center gap-0.5 text-link"><AppWindow size={11} aria-hidden />別ウィンドウで表示中</span> : active ? <span className="text-selected-text">表示中</span> : tab ? <span>開いています</span> : null}</div>
             </button>}
             <div className="flex items-center justify-end gap-1 px-2 pb-1">
               {session && <>

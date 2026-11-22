@@ -58,7 +58,7 @@ function Preview() {
       <p className="text-xs text-gray-500 dark:text-zinc-400 px-4 pt-3">表示確認用の人工データ。本番の相談には接続しません。</p>
       <div className="flex-1 max-w-3xl w-full mx-auto px-4 py-4 space-y-6">
         <div className="max-w-[85%]"><AssistantMessageParts parts={closed} isStreaming={false} markdown /></div>
-        <div className="flex justify-end"><div className="rounded-2xl rounded-br-md px-4 py-3 text-[14px] bg-accent text-white">来週の A社向け提案書を作ってください</div></div>
+        <div className="flex justify-end"><div className="rounded-2xl rounded-br-md px-4 py-3 text-[14px] bg-primary text-on-primary">来週の A社向け提案書を作ってください</div></div>
         <div className="max-w-[85%]"><AssistantMessageParts parts={parts} isStreaming={!record} markdown /></div>
       </div>
       <div className="max-w-3xl w-full mx-auto">

@@ -133,7 +133,7 @@ export function ResizeHandle({ onResizeStart, onResize, direction = 'horizontal'
           ? 'w-1 cursor-col-resize hover:w-1'
           : 'h-1 cursor-row-resize hover:h-1'
         }
-        ${isDragging ? 'bg-accent' : 'bg-transparent hover:bg-zinc-700'}
+        ${isDragging ? 'bg-primary' : 'bg-transparent hover:bg-zinc-700'}
         transition-colors outline-none focus-visible:bg-focus-ring
       `}
     >
@@ -159,8 +159,8 @@ export function ResizeHandle({ onResizeStart, onResize, direction = 'horizontal'
           absolute opacity-0 group-hover:opacity-100
           ${isDragging ? 'opacity-100' : ''}
           ${direction === 'horizontal'
-            ? 'inset-y-0 left-0 w-0.5 bg-accent'
-            : 'inset-x-0 top-0 h-0.5 bg-accent'
+            ? 'inset-y-0 left-0 w-0.5 bg-primary'
+            : 'inset-x-0 top-0 h-0.5 bg-primary'
           }
           transition-opacity
         `}

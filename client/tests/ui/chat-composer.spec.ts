@@ -18,7 +18,7 @@ const typed = (page: Page) => expect.poll(() => input(page).evaluate(content => 
 }))
 const ghost = (page: Page) => page.locator('.cm-ghost-suggestion')
 const suggestionHint = (page: Page) => page.getByText('→ または Tab で候補を入力 • Esc で消す • ⌘+Enter で送信')
-const sentBubble = (page: Page, text: string) => page.locator('main .bg-accent', { hasText: text })
+const sentBubble = (page: Page, text: string) => page.locator('main .bg-primary', { hasText: text })
 
 test('the suggestion is ghost text in the empty input, described to screen readers, with its hint', async ({ page }) => {
   await openPreview(page, 'chat-composer')

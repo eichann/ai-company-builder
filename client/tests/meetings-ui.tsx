@@ -161,7 +161,7 @@ function Preview() {
             parts, members: Object.entries(people).filter(([id]) => id !== ME).map(([id, name]) => ({ id, name })),
             onConsult: m => say(`consult ${m.id}`), onChanged: reload,
           })} />}
-        {!open && <button type="button" className="m-4 text-[12px] text-accent" onClick={() => setOpen('meeting-teirei01')}>定例ミーティングを開く</button>}
+        {!open && <button type="button" className="m-4 text-[12px] text-link" onClick={() => setOpen('meeting-teirei01')}>定例ミーティングを開く</button>}
       </section>
     </main>
   )

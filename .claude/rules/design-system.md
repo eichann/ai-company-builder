@@ -90,7 +90,7 @@ live, how screens use them, and what CI holds.
   `admin/tests/design-tokens-bridge.test.ts` holds every shadcn variable and `--radius` to the
   value the admin had before the tokens, light and dark (its `TODAY` table).
   Names already taken keep their old meaning until their screens move: in the app `surface`
-  (`bg-surface` = #fff in both themes) and `border` (#e0e0e0); `accent`, `ink`, `text-primary` (the class `text-text-primary`; not the semantic `text-primary`, which is the primary blue),
+  (`bg-surface` = #fff in both themes) and `border` (#e0e0e0); `accent` (removed in P2d), `ink`, `text-primary` (the class `text-text-primary`; not the semantic `text-primary`, which is the primary blue),
   `sidebar-bg`, … stay as they are. In the admin, every shadcn colour except light `--card` /
   `--popover` and `--primary` / `--primary-foreground` (P2a) keeps today's value (`ADMIN_SHADCN`
   in `build.mjs`: `keep` and a `later:` comment naming its token), and `--font-sans` stays Geist.
@@ -117,7 +117,7 @@ included), `shadow-scale` (anything but `shadow-card / pop / dialog / none`; any
 fine), `color-opacity` (`bg-warning/10`).
 
 - **No new raw values.** Today's findings (2026-11-21: app 6,872, admin 1,235; after P2b app 6,371,
-  admin 1,104; after P2c app 6,010, admin 1,078) are recorded per
+  admin 1,104; after P2c app 6,010, admin 1,078; after P2d app 5,694, admin 1,078) are recorded per
   file and rule in `design-lint-baseline.txt`. CI ("Lint (changed files)", step "Design tokens and
   design lint") fails when a rule gains findings, when the tree differs from the baseline without
   it being updated (the list only shrinks), and (`--base <sha>`) when the committed baseline was
@@ -231,7 +231,8 @@ fine), `color-opacity` (`bg-warning/10`).
   `TabGroupParts` (`text-text-secondary`), the chat's `AgentInteractionCard`,
   `ChatAuthSettings`, `ChatMessageList`, `ChatConversation`, `ClaudeSignInCard`, `MessageParts`
   (`ink`, `ink-muted`, `ink-faint`, `surface-elevated`) and `ComposerAttachments`
-  (`border-border`).
+  (`border-border`). `SyncPreviewDialog`, `DiffViewer`, `ChatAuthSettings` and `ClaudeSignInCard`
+  moved in P2d (see "The deferred spots and the last white screens (P2d, done)").
 
 ## Primary actions (P2a, done)
 
@@ -277,9 +278,9 @@ fine), `color-opacity` (`bg-warning/10`).
   pages `confirm-dialog-ui`, `task-card-ui` and `mail-draft-card-ui` read `?theme=dark`) and
   `admin/tests/primary-action.test.tsx` (the CSS Tailwind 4 generates for the rendered Button /
   confirm, resolved through the token files in light and dark).
-- **`accent` in the app**: gone outside the paths other work held and `ChatAuthSettings` in P2c (by meaning, see "Dialog
-  frames, link and selected (P2c, done)"); the bridge keeps `accent` = #1264a3 until the last two
-  files move. Also not primary actions and left: the app `Switch` / `Checkbox` and the settings nav
+- **`accent` in the app**: gone (P2c by meaning, see "Dialog frames, link and selected (P2c, done)";
+  the last places in P2d), and the app's Tailwind config no longer defines it
+  (`design-tokens-bridge.test.ts` fails if it comes back). Also not primary actions and left: the app `Switch` / `Checkbox` and the settings nav
   (indigo; P2 switch / checkbox), `CompletedReviewBanner`'s 「変更表示中」 toggle.
 
 ## Callouts and status badges (P2b, done)
@@ -341,7 +342,7 @@ fine), `color-opacity` (`bg-warning/10`).
   by its word): the left tabs' dot, the bell's unread dot and its unread rows (were red; since I2 the title bar's
   ［受け箱］ dot and the inbox rows' marks), the chat list's
   「新着」 (was a green word, row and folded group), the file tree's new review (was a blinking amber
-  dot). The count bubble (`LeftPanelTabs`) is unchanged (`primary` later).
+  dot). The count bubble (`LeftPanelTabs`) is `primary` / `on-primary` since P2d.
 - **「閲覧のみ」 replaces 「読むだけ」** in user-facing text: the bell 「起きたこと（閲覧のみ）」 (gone with the bell in I2), google-relay's
   scopes, the integrations' write choice 「書き戻さない（閲覧のみ）」, the relay summary, the agent-events
   description, the browser level's help, second-opinion's 「閲覧のみで聞きます」. Not changed: texts for
@@ -399,7 +400,7 @@ fine), `color-opacity` (`bg-warning/10`).
     `BundleActions`, `MakePrivateDialog`, `TaskActions` (both), `WaitParts`, `NewBundleDialog`,
     `BundleChooser`, `BundleField`'s picker, `LinkToTaskDialog`, `PluginSlots`' file action,
     `ConnectToolsScreen` (first run), `NewSkillWizard`, `CopySkillModal`. Tokens only (scrim, z,
-    corner, shadow; own surface and keys kept): `SettingsPanel`, the tool viewer (`AppDialogs`),
+    corner, shadow; own surface and keys kept): `SettingsPanel` (on `Dialog` since P2d), the tool viewer (`AppDialogs`),
     `BackupHistorySlideOver` (slide-over), `HandoffControl` (native `<dialog>`). Visible changes:
     titles 14 / 18px → 15px, padding 16 / 24px → 20px, corners 16px → 12px, widths to the nearest
     step, the dark surface zinc-800 / 900 → #202024, one scrim (45% / dark 60%, no blur), Esc and Tab
@@ -439,16 +440,65 @@ fine), `color-opacity` (`bg-warning/10`).
   `DialogContent` and the confirm: surface, scrim, 12px, shadow, 20px, 15px title, the three widths,
   the button order; a link button and a chosen radio card; the private box and lock in amber). Each fails when its guard is reverted
   (checked by mutation).
-- **Left, in paths other work held** (next PR there): `features/editor/components/TidiedTabsDialog.tsx`
-  (frame), `features/workspace/components/LeftPanelTabs.tsx` (the count bubble → `primary`, the chosen
-  tab's underline `border-accent` → `primary`), `features/workspace/components/ResizeHandle.tsx` (drag
-  line → `primary`); `ChatAuthSettings` (always light — fixed `surface` / `ink` — so the theme-following
-  `selected` set would put dark text on a dark fill: it moves with its dark-mode work); then drop
-  `accent` from the app bridge. Also left: `SyncPreviewDialog` and
-  `DiffViewer` (still the old fixed light tokens inside: their frame moves with their dark-mode
-  work), `FindPalette` (a palette: its lighter scrim stays until the menus / palette PR),
-  `SettingsPanel`'s own surface and keys, the admin's activity chart bar and `permissions-view`'s
-  「制限あり」 (P2b list). `--brand` stays `keep` until they move.
+- **Left after P2c** (all moved in P2d, below): the admin's activity chart bar and
+  `permissions-view`'s 「制限あり」 (P2b list) remain; `--brand` stays `keep` until they move.
+
+## The deferred spots and the last white screens (P2d, done)
+
+- **On the shared `Dialog`** (frame, scrim, keys): `TidiedTabsDialog` (「片づけたタブ」, `size="lg"`, list
+  picker without padding; was its own `z-50` box with a 20 % scrim and its own Esc listener), the
+  settings (`SettingsPanel`, `size="custom"`, `max-w-[1040px]`; its own window Esc listener and backdrop
+  click are gone: Tab now stays inside, focus goes back to the opener; the surface is
+  `surface-raised` — dark #202024, was zinc-900 —, the nav `bg`, lines `border`; the nav's indigo stays
+  for the switch / checkbox PR), `SyncPreviewDialog` (`md`, was 512px; its undo confirm and the
+  before / after open on top of it and take Esc first) and `DiffModal` (`DiffViewer.tsx`, wide
+  `custom`; was `z-[60]` over a 60 % scrim). When 「片づけたタブ」 closes and what opened it is gone
+  (the tidy notice's button, a menu item), focus goes to the open tab in the editor's tab bar
+  (owner decision 2026-11-22; the active tab is focusable by script, `tabIndex=-1`, with the
+  focus ring). `TidiedTabsDialog` and the settings no longer
+  listen for Esc on the document / window: an Esc a field inside handles (the voice shortcut
+  recorder) stops there.
+- **⌘K's palette (`FindPalette`) is drawn like a menu** over a light veil (owner decision
+  2026-11-22): the token `scrim-palette` (light 20 %, dark 40 %; lighter than the dialog `scrim`
+  45 % / 60 %; a click on it closes the palette), `z-menu`, `surface-raised`, `border`, corner `card`,
+  `shadow-pop`; rows `selected-bg` / `surface-sunken`. A new menu-like panel that needs a veil uses
+  `scrim-palette`, a dialog `scrim`.
+- **Theme-following now** (were white in dark): `ChatAuthSettings` (the chat's settings) — page
+  `var(--color-surface)`, lines `border`, option cards `bg` with `border` (the chosen one the
+  `selected` set, its icon tile `primary` / `on-primary`, its check `selected-icon`; `aria-pressed`),
+  the key input `bg` / `border-control` / `focus-border`, 「接続を再確認」 `link`, errors `danger-text`,
+  key notices `warning-text`, no glow shadow; its `ClaudeSignInCard` (the warning box
+  `STATE_BOX.warn`, texts `text` / `text-muted` / `warning-text`; it also shows in `ChatAuthGate`,
+  where its text was dark on dark); the voice shortcut box inside now reads in dark (it followed the
+  theme already, on a white page). `SyncPreviewDialog`: the semantic surfaces and texts; a change's
+  mark by meaning (`CHANGE_MARK`): added `success-text`, deleted `danger-text`, changed `info-text`
+  (grey: was amber, which is for warnings). `DiffViewer`: a removed line `danger-bg` /
+  `danger-text`, an added one `success-bg` / `success-text` (each pair AA in both themes, `PAIRS`),
+  the two side headers the same sets, padding rows `bg`, unchanged lines `text-muted`, line
+  numbers `text-subtle`.
+- **Primary by meaning**: `LeftPanelTabs`' count bubble `bg-primary text-on-primary` and the chosen
+  tab's underline `border-primary`; `ResizeHandle`'s line while dragged `bg-primary`; `ChatSidebar`'s
+  「表示中」 `selected-text`. Then `accent` left `client/tailwind.config.js` (with the unused `glow`
+  colours); preview pages use `bg-primary` / `text-link`.
+- **What changed in light mode**: the diff's red / green text is darker (red-700 / emerald-700 on
+  red-50 / emerald-50; was red-400 / green-400, under 3:1) and its panes white (were #f8f8f8); the
+  sync preview's 「変更」 is grey (owner: OK), its surface white (was #f8f8f8), title 15px, padding 20px, width
+  480px; the palette's veil is the same 20 % as before (dark 40 %); 「片づけたタブ」 centred (was near the top),
+  640px (was 576px), title 15px; the chat settings' option cards show a thin line and the key field's
+  corner is 8px (was 12px); the settings' nav #fafafa (was zinc-50 at 80 %). Dark: every one of
+  them follows the theme.
+- **Guarded by** `client/tests/ui/dialog-frame.spec.ts` (light and dark: 「片づけたタブ」, the settings,
+  the sync preview and the before / after against the frame tokens; the palette's veil
+  `scrim-palette` (present, lighter than `scrim`) on `z-menu` with `surface-raised` / `shadow-pop`;
+  Tab stays inside and Esc closes 「片づけたタブ」 (focus then on the open tab, by Esc and by ×) and
+  the settings, focus back to the settings' opener — `download-folders-ui?closed=1`; Esc closes the
+  before / after first, then the preview), `dark-readability.spec.ts` (the chat settings —
+  `sign-in-ui?screen=chat-settings&mode=…&claude=…` — with the chosen option `selected-bg`, the sync
+  preview, the before / after: removed and added lines readable on their fills and different,
+  painted from the danger / success sets — `keep-work-ui?view=diff`), `status-colours.spec.ts` (the
+  count bubble, the chosen tab's underline and a dragged divider in `primary`, on `status-ui`) and
+  `design-tokens-bridge.test.ts` (no `accent` colour). Each was checked to fail with its change
+  reverted.
 
 ## Order of the next PRs (from the proposal)
 

@@ -39,7 +39,7 @@ export function LeftPanelTabs({ panels, selectedId, onSelect }: Props) {
           const active = panel.id === activeId
           const Icon = panel.icon
           const mark = panel.badgeCount ? (
-            <span className="block min-w-[18px] px-1.5 rounded-full bg-accent text-white text-[11px] leading-[18px] text-center">
+            <span className="block min-w-[18px] px-1.5 rounded-full bg-primary text-on-primary text-[11px] leading-[18px] text-center">
               {panel.badgeCount}
             </span>
           ) : panel.dot ? <NewDot label="新しいものがあります" /> : null
@@ -57,7 +57,7 @@ export function LeftPanelTabs({ panels, selectedId, onSelect }: Props) {
                   ? 'grow basis-auto flex-col items-center gap-0.5 px-[3px] pt-1.5 pb-1 text-[11px] leading-[14px]'
                   : 'items-center gap-1.5 px-2.5 py-2.5 text-[13px]'}
                 ${active
-                  ? 'border-accent text-gray-900 dark:text-zinc-100'
+                  ? 'border-primary text-gray-900 dark:text-zinc-100'
                   : 'border-transparent text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
                 }
               `}

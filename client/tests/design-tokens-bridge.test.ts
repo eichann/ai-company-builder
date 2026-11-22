@@ -58,3 +58,11 @@ test('both bridges reference only variables the tokens (or the bridge, or Tailwi
     .filter(n => !defined.has(n) && !n.startsWith('tw-'))
   assert.deepEqual([...new Set(missing)], [])
 })
+
+test('the app has no `accent` colour: its meanings are primary, link, selected and focus-ring (P2d)', () => {
+  // `accent` meant four things at once (design-system.md "Accent split by meaning"); with it back, a
+  // screen could take the old fixed blue again instead of a name that follows the theme.
+  const colors = resolveConfig(appConfig).theme.colors as Record<string, unknown>
+  assert.equal(colors.accent, undefined)
+  assert.ok(colors.primary, 'the semantic primary is there (self-test)')
+})

@@ -4,6 +4,7 @@
 //   ?view=preview  the sync preview (real useSync + SyncPreviewDialog): 「元に戻す」 and the 作業メモ
 //   ?view=backups  the backup history: 復元
 //   ?view=skills   新しいスキル / コピー (real useSkillsTab + the two dialogs)
+//   ?view=diff     a change's before / after (DiffModal, as the sync preview and 「前の版」 open it)
 //   ?theme=dark    dark mode
 //
 // window.__acbCalls  every write asked for, as [method, ...args]
@@ -18,6 +19,7 @@ import { SyncPreviewDialog } from '../src/features/sync/components/SyncPreviewDi
 import { BackupHistorySlideOver } from '../src/features/sync/components/BackupHistorySlideOver'
 import { NewSkillWizard } from '../src/features/skills/components/NewSkillWizard'
 import { CopySkillModal } from '../src/features/skills/components/CopySkillModal'
+import { DiffModal } from '../src/shared/ui/DiffViewer'
 import { installElectronAPI } from './ui/fixtures/electron-api'
 
 if (new URLSearchParams(location.search).get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -38,6 +40,8 @@ const DEPARTMENTS = [
 
 installElectronAPI({
   gitPreview: async () => ({ success: true, hasChanges: true, changes, totalCount: 2 }),
+  // One removed line, one added, around unchanged ones: both sides of the before / after.
+  gitFileDiff: async () => ({ success: true, diff: '@@ -1,4 +1,4 @@\n # 提案書\n-金額は 100 万円です。\n+金額は 120 万円です。\n 納期は 3 月末です。\n+担当は営業部です。' }),
   gitRevertFile: async (_root, file, status) => {
     calls.push(['gitRevertFile', file, status])
     if (failing('gitRevertFile')) return { success: false, error: 'fatal: unable to unlink' }
@@ -87,7 +91,7 @@ function PreviewView() {
   const sync = useSync({ rootPath: ROOT, companyId: 'demo', userId: 'u1', onSynced: async () => {} })
   return (
     <div className="p-6">
-      <button onClick={() => { void sync.handlePreview() }} className="px-3 py-1.5 rounded bg-accent text-white text-sm">変更を確認</button>
+      <button onClick={() => { void sync.handlePreview() }} className="px-3 py-1.5 rounded bg-primary text-on-primary text-sm">変更を確認</button>
       <output aria-label="同期の結果" className="block mt-2 text-xs">{sync.syncNotification?.message ?? ''}</output>
       {sync.previewData && (
         <SyncPreviewDialog
@@ -113,8 +117,8 @@ function SkillsView() {
   if (tab.selectedSkillId && tab.selectedSkillId !== selected) setSelected(tab.selectedSkillId)
   return (
     <div className="p-6 space-x-2">
-      <button onClick={() => tab.setWizardOpen(true)} className="px-3 py-1.5 rounded bg-accent text-white text-sm">新しいスキル</button>
-      <button onClick={() => tab.setCopyOpen(true)} className="px-3 py-1.5 rounded bg-accent text-white text-sm">スキルをコピー</button>
+      <button onClick={() => tab.setWizardOpen(true)} className="px-3 py-1.5 rounded bg-primary text-on-primary text-sm">新しいスキル</button>
+      <button onClick={() => tab.setCopyOpen(true)} className="px-3 py-1.5 rounded bg-primary text-on-primary text-sm">スキルをコピー</button>
       <output aria-label="選んだスキル" className="block mt-2 text-xs">{selected}</output>
       {tab.wizardOpen && <NewSkillWizard departmentName="営業部" color="#6366f1" onClose={() => tab.setWizardOpen(false)} onComplete={tab.create} />}
       {tab.copyOpen && <CopySkillModal rootPath={ROOT} currentDepartmentId="d-sales" departments={DEPARTMENTS} color="#6366f1" onClose={() => tab.setCopyOpen(false)} onCopy={tab.copy} />}
@@ -130,6 +134,7 @@ function Preview() {
       {view === 'preview' && <PreviewView />}
       {view === 'backups' && <BackupHistorySlideOver isOpen onClose={() => {}} rootPath={ROOT} />}
       {view === 'skills' && <SkillsView />}
+      {view === 'diff' && <DiffModal isOpen onClose={() => {}} title="営業部/提案書.md" diffProps={{ mode: 'staged', rootPath: ROOT, filePath: `${ROOT}/営業部/提案書.md`, fileStatus: 'modified' }} />}
     </main>
   )
 }
