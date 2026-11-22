@@ -302,6 +302,7 @@ const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
   'chat -> voice/microphoneSelection.ts': 'the composer\'s microphone button lists and picks the microphone',
   'chat -> voice/voiceAvailability.ts': 'the composer\'s microphone button says whether voice input can be used',
   'chat -> voice/voiceShortcut.ts': 'the composer shows and catches the member\'s voice key (VoiceInputControl, useVoiceShortcut)',
+  'inbox -> notifications/api.ts': 'the inbox opens, marks seen and undoes the same notices as the bell (markNoticesRead, the two undos with their refusal words): one port for both until the title bar becomes ［受け箱］ (I2)',
 }
 
 /** The imported module as a file of the tree ('src/features/doc-review/model' → '….ts'). */
@@ -343,6 +344,7 @@ test('a renderer feature never imports another feature, beyond the files registe
  */
 const APP_SHELL_SLOTS: Record<string, string> = {
   minutes: 'src/features/minutes/hooks/useMinutesSlots',
+  inbox: 'src/features/inbox/hooks/useInboxSlot',
 }
 
 /** AppShell's imports of a slot feature other than its slot file. */

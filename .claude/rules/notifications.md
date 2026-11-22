@@ -15,6 +15,9 @@ paths:
   - "client/tests/notifications.test.ts"
   - "client/tests/title-bar-notices-ui.*"
   - "client/tests/ui/title-bar-notices.spec.ts"
+  - "client/src/features/inbox/**"
+  - "client/tests/inbox-ui.*"
+  - "client/tests/ui/inbox.spec.ts"
   - "shared/core/turn-timing.ts"
 ---
 
@@ -355,6 +358,59 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   come from the list main already read.
 - Opening an item runs `record.open` (`commands.md`): the record's card in the editor area, the
   same as a search hit. The consultation a record belongs to opens from there once S12 links them.
+
+## The inbox (受け箱, I1; owner design 「下のパネルを「受け箱」1 つにする」 2026-11-22, decisions ①–⑧)
+The bottom panel's content (`renderer-structure.md` "The bottom panel"): **one list** of what the server
+already says concerns the member, by what it needs from them — no tabs by source, chips by state
+(すべて / あなた待ち / 作業中 / できた・未確認, with counts, 99+). `src/features/inbox/model.ts` `inboxView`
+(pure) builds it from the `NoticesState` main already reads (`useNotices`, this week's turn through
+`thisWeeksTurn`); **no new server table, API or IPC, nothing stored**: rows are rebuilt from every answer.
+- With records off the server still sends the company's own notices (`bellOnly`, `company_restored`): they are
+  rows too (あなた待ち), and the inbox is there for them.
+- **Visibility is the server's**: every row comes from `/records/my-turn` and `/me/notifications`, which
+  already left out what the member cannot read; the inbox never filters on the client instead. AppShell is
+  keyed by company and `useNotices` drops another company's answer, so a switch or sign-out shows nothing old;
+  a row that a re-read no longer lists (removed, closed out, approved elsewhere) is gone.
+- **あなた待ち** (never folded, never capped; >10 adds 「多いときは、期限の近いものから」; items past the
+  server's first 200 are 「ほかに N 件」): this week's turn plus unread stop notices — by what the stop means
+  for the member (`STOP_LOOK`): `job_failed` red 止まりました; `job_paused`, `ai_turn_stuck`, `job_expired`,
+  `job_chain_stopped`, `delegate_stopped`, `company_restored` amber 止まっています — and every unread notice that
+  **asks for something** whose record is not a listed row (`asked` for a later task, `overdue`,
+  `acceptance_waiting`, `request_returned`, `intake_unsure`, `wait_over`, `reply_arrived`, `due_tomorrow`,
+  `minutes_arrived`, `job_accept_needed`) **and any kind this app does not know** (the safe side:
+  `noticePlace`). These rows **leave when opened** (today's read state, decision ③: no new 「済んだ」). Order:
+  stopped → (AI questions, I3) → approval → mail draft → check (minutes check, review) → the rest; then
+  nearest due, newest.
+- **One job is one row**: an unread notice about a record in あなた待ち is that row's line and new mark
+  (not a row; a stop makes the row a stop, first and with its badge); opening the row marks exactly those
+  notices read (`markNoticesRead`, both PCs agree; a failure shows 「サーバーにつながりませんでした…」).
+- **できた・未確認**: only the notices that tell of something finished (`request_done`, `ok_completed`,
+  `request_accepted`, `approval_result`, `replied_done` / `mail_*` with ［元に戻す］, `job_skipped` grey
+  止めています — skipped on purpose) or changed (`due_changed`, `others`, `ai_changed` 「変わりました」 — but
+  while the server's turn is past its first 200 these may be about a waiting record: あなた待ち); off kinds
+  never arrive (decision ④); `morning_summary` is no row. Older than `DONE_KEEP_DAYS` (14) → one line 「14 日より前のもの N 件」
+  (decision ⑥). Read ones made today are 「きょう確認したもの」 (folded; there is no 「未確認に戻す」: the server
+  has no unread). At most `INBOX_MAX_ROWS` (100) rows: the oldest できた go first, あなた待ち never.
+- **「まとめて確認済みにする」 only for できた・未確認** (decision ⑦): `bulkSeenIds` gives every できた
+  notice's id (shown, left out by the row limit, or folded; owner 2026-11-22: as the rule says) — never a stop,
+  a notice that asks for something, a row's news, or the server's 「すべて」. No 「未確認に戻す」 for now (owner).
+- **Nothing irreversible from a row** (decision on 承認): `InboxAction` has no approve or send —
+  ［承認する…］ / a sent-back request's ［開く…］ open the approval card (`ApprovalCard`, which re-reads the
+  request each time: approved elsewhere → 「承認されました」 and no button; the server's hash and CAS stop a
+  stale press), ［確かめて送る…］ the mail draft card (`PreparedMailCard`), both composed by AppShell in
+  `InboxCardDialog` (the shared `Dialog`). Other rows open their record (`record.open`'s tab), the task list
+  or 「定期の仕事」, or only mark seen. A type test (`model.test.ts`) and the hook's exhaustive switch fail to
+  compile when an action kind that approves or sends is added.
+- The panel stays reachable over a department not downloaded on this PC: its prompt covers the left side's
+  top, the panel spans the side under it (`renderer-structure.md` "The bottom panel"); opening a record or the
+  task list from there switches to 全社 first, so what was opened shows instead of the prompt.
+- 作業中 is empty in I1 (the consultations and 「AI の番」 come with I3 / I4) and says where to look meanwhile.
+  The title bar's 「あなたの番」 and bell stay as they are until I2.
+- Tests: `src/features/inbox/model.test.ts` (order, one row per record, stops leave once read, the 14-day
+  fold, the bulk only for できた, あなた待ち never capped, no approving action), `tests/ui/inbox.spec.ts`
+  (`tests/inbox-ui.html`: order and chips, ［承認する…］ opens the real card and calls nothing, opening
+  marks exactly its notices, a request approved elsewhere leaves, the fold and the bulk),
+  `skill-layout-state.spec.ts` (⌘J, the wide tab, the real inbox in the screen) — mutation-checked.
 
 ## Tests
 

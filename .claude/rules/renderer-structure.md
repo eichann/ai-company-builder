@@ -38,7 +38,8 @@ choice), `skills`, `files`, `editor`, `doc-review` (the Markdown review of a doc
 file's 「つながっているもの」), `settings`, `auth` (server address, sign-in, session),
 `company` (choosing a company and setting its folder up: the company selector), `tasks` (やること:
 the task list tab, `tasks-ui.md`),
-`notifications` (the title bar's 「あなたの番」 and bell, `notifications.md`), `absences` (the settings'
+`notifications` (the title bar's 「あなたの番」 and bell, `notifications.md`), `inbox` (受け箱, the bottom
+panel's one list, `notifications.md` "The inbox"), `absences` (the settings'
 「不在と代わりの人」, shown by `settings`; `records.md` "Absence and the delegate"), `jobs` (the settings'
 「定期の仕事」: the member's scheduled jobs and 「受け取る」, `jobs.md` "The screens"), `records-table` (「記録の一覧」, the
 middle's table of records; reached only through its `entry.tsx`, `tasks-ui.md` "The records table (B4)"). Only create what you need; add a feature
@@ -278,16 +279,24 @@ D7–D9, confirmed 2026-10-30).
   used last, a consultation is open in one pane at most, tabs are remembered per pane. A second
   chat leaf in the tree is what is left.
   **The bottom panel (B2, 2026-11-22)** is the `middle` column split: the middle's tabs over the
-  panel, under the middle only (not the left column, not the chat; a wide left tab covers it with the
-  middle). Its height is 120 px up to where the tabs keep `TABS_MIN_HEIGHT` (160 px) of the middle's
-  measured height (`useSplitLayout` `middleRef`, a ResizeObserver; not measured yet → the saved
+  panel, under the middle only (not the left column, not the chat). **While a wide left tab (スキル, a
+  plugin's tab) or the not-downloaded prompt covers the middle, the panel spans the whole left side under it** (owner decision (b),
+  2026-11-22: the inbox shows from every tab) — the same `middle` split drawn once more around the
+  left side; both splits are always drawn and only one shows the panel, so switching tabs remounts
+  neither the tab's screen nor the middle, and the panel keeps its height and stays open. Its height
+  is 120 px up to where the tabs keep `TABS_MIN_HEIGHT` (160 px) of the measured height (`useSplitLayout`
+  `middleRef` on the left side, as tall as the middle; a ResizeObserver; not measured yet → the saved
   height), first height 260; the same divider behaviour (keys, double-click, 「260px（画面の高さの 33%）」).
   Only the height is saved: the panel **starts closed at every start** (owner decision 6) and
-  「いつもの形に戻す」 closes it. It shows what a feature hands to `AppShell` as `bottomPanel`
-  (`components/BottomPanel.tsx` `BottomPanelContent`: a name and one body, no tabs — the inbox, I1);
-  **with nothing handed in there is no panel, no title bar button and ⌘J is declined** (never an
-  empty frame; until I1 the app shows none). `skill-layout-ui.html?bottom=1` gives the preview a
-  sample. A tree added later is optional within a version (missing → its first look; `trees.middle`
+  「いつもの形に戻す」 closes it. It shows the inbox (`features/inbox`, I1, below) — AppShell's
+  `bottomPanel` prop only lets a preview hand in a sample instead (`components/BottomPanel.tsx`
+  `BottomPanelContent`: a name, an optional heading part (the inbox's chips) and one body, no tabs);
+  **with nothing to show there is no panel, no title bar button and ⌘J is declined** (never an
+  empty frame: records off and no company notices → no inbox). `skill-layout-ui.html?bottom=1` gives
+  the preview a sample, `?inbox=1` the real inbox (`skill-layout-state.spec.ts` 「the bottom panel」).
+  **The inbox (受け箱, I1, owner design 2026-11-22)**: `features/inbox` — `model.ts` (`inboxView`,
+  pure), `hooks/useInboxSlot.tsx` (its slot, `APP_SHELL_SLOTS`), `components/InboxList.tsx`,
+  `InboxCardDialog.tsx`; what it shows and its guards are `notifications.md` "The inbox". A tree added later is optional within a version (missing → its first look; `trees.middle`
   arrived in version 2, so an app without it reads the other trees unchanged and keeps working);
   changing the meaning or shape of an existing tree means a new `version` and reading the old one.
   A pane that takes the remaining space (and the left side while the chat is hidden) has

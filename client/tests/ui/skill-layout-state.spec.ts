@@ -569,4 +569,95 @@ test.describe('the bottom panel', () => {
     await pressJ(page)
     await expect.poll(() => height(page)).toBe(260)
   })
+
+  // Owner decision (b), 2026-11-22: a wide left tab (スキル) covers the middle, and the panel then spans the
+  // whole left side under it, so the inbox shows from every tab.
+  test('under a wide tab it spans the whole left side; switching tabs keeps it open, its height and the tab\'s screen', async ({ page }) => {
+    await open(page)
+    await leftTab(page, 'スキル').click()
+    const skillShown = page.getByText(/proposal|weekly-report/).first()
+    await expect(skillShown).toBeVisible()
+    await expect(toggle(page)).toBeVisible()
+    expect(await pressJ(page)).toBe(true)
+    await expect(panel(page)).toBeVisible()
+    const p = await box(panel(page))
+    expect(Math.round(p.x)).toBe(0)
+    expect(Math.round(p.x + p.width)).toBe(Math.round((await box(chatDivider(page))).x) - 1)
+    expect(Math.round(p.y + p.height)).toBe(page.viewportSize()!.height)
+    expect(Math.round(p.height)).toBe(260)
+    // The skill's screen is still there, above the panel.
+    await expect(skillShown).toBeVisible()
+
+    // Its divider works the same here, and the height is the one the middle's panel has.
+    await divider(page).focus()
+    await page.keyboard.press('ArrowUp')
+    await expect.poll(() => height(page)).toBe(276)
+    await leftTab(page, 'ファイル').click()
+    await expect(panel(page)).toBeVisible()
+    expect(Math.round((await box(panel(page))).x)).toBe(Math.round((await box(treeDivider(page))).x) + 4)
+    await expect.poll(() => height(page)).toBe(276)
+    await expect(divider(page)).toHaveCount(1)
+    await leftTab(page, 'スキル').click()
+    await expect(panel(page)).toBeVisible()
+    await expect.poll(() => height(page)).toBe(276)
+    await pressJ(page)
+    await expect(panel(page)).toBeHidden()
+  })
+
+  test('a department not downloaded on this computer: its prompt covers the side, and the panel still opens under it', async ({ page }) => {
+    await open(page)
+    await leftTab(page, 'ファイル').click()
+    await page.getByRole('button', { name: '開発部' }).first().click()
+    await expect(page.getByRole('button', { name: 'ダウンロードして同期を開始' })).toBeVisible()
+    expect(await pressJ(page)).toBe(true)
+    await expect(panel(page)).toBeVisible()
+    const p = await box(panel(page))
+    expect(Math.round(p.x)).toBe(0)
+    expect(Math.round(p.y + p.height)).toBe(page.viewportSize()!.height)
+    await expect(page.getByText('見本の中身です。')).toBeVisible()
+    await page.getByRole('button', { name: '下のパネルを閉じる (⌘J)' }).click()
+    await expect(panel(page)).toBeHidden()
+  })
+
+  test('opening a row from a department not downloaded here shows what was opened (全社), not the prompt', async ({ page }) => {
+    await openPreview(page, 'skill-layout', { inbox: '1' })
+    await leftTab(page, 'ファイル').click()
+    await page.getByRole('button', { name: '開発部' }).first().click()
+    const prompt = page.getByRole('button', { name: 'ダウンロードして同期を開始' })
+    await expect(prompt).toBeVisible()
+    await pressJ(page)
+    await panel(page).locator('[data-inbox-row="notice:n-1"]').getByRole('button', { name: '開く' }).click()
+    await expect(prompt).toBeHidden()
+    await expect(panel(page)).toBeVisible()
+  })
+
+  test('the real inbox (I1): ⌘J shows it with an approval that only opens its card', async ({ page }) => {
+    await openPreview(page, 'skill-layout', { inbox: '1' })
+    await expect(toggle(page)).toBeVisible()
+    await pressJ(page)
+    await expect(panel(page)).toBeVisible()
+    const row = panel(page).locator('[data-inbox-row="record:approval-0000aa"]')
+    await expect(row).toContainText('承認を待っています')
+    await row.getByRole('button', { name: '承認する…' }).click()
+    await expect(page.getByRole('dialog', { name: '承認のお願い' })).toBeVisible()
+    const calls = await (await layout(page)).evaluate(l => l.calls.map(c => c.name))
+    expect(calls.filter(name => /approve|send/i.test(name))).toEqual([])
+    await page.keyboard.press('Escape')
+    // Opening a done row marks it seen (the bell's same read state).
+    await panel(page).locator('[data-inbox-row="notice:n-1"]').getByRole('button', { name: '開く' }).click()
+    await expect.poll(async () => (await layout(page)).evaluate(l => l.calls.filter(c => c.name === 'markNotificationsRead').length)).toBe(1)
+  })
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`the inbox in the screen, ${theme}`, async ({ page }) => {
+      await openPreview(page, 'skill-layout', { inbox: '1', ...(theme === 'dark' ? { theme } : {}) })
+      await leftTab(page, 'ファイル').click()
+      await pressJ(page)
+      await expect(panel(page)).toBeVisible()
+      if (process.env.INBOX_SHOTS) await page.screenshot({ path: `${process.env.INBOX_SHOTS}/inbox-screen-${theme}.png`, animations: 'disabled' })
+      await leftTab(page, 'スキル').click()
+      await expect(panel(page)).toBeVisible()
+      if (process.env.INBOX_SHOTS) await page.screenshot({ path: `${process.env.INBOX_SHOTS}/inbox-wide-tab-${theme}.png`, animations: 'disabled' })
+    })
+  }
 })

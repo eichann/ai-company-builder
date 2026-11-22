@@ -20,7 +20,8 @@
 //             a decision to confirm, an arrived meeting and today's meeting; listoff,meetingsoff = 会議 off too
 //   companies 1 | 2 = the member's companies from the server (株式会社デモ, then 別会社); absent = the list cannot be read
 //   sync      manual = 「サーバーと同期」 runs until window.__acbLayout.finishSync()
-//   bottom    1 = something to show in the bottom panel (the inbox, I1, will hand its own in); absent = none
+//   bottom    1 = a sample in the bottom panel instead of the inbox; absent = the inbox when main has one (see inbox)
+//   inbox     1 = records on with one approval waiting and one notice: the real inbox (I1) in the bottom panel
 //
 // 今日のフォルダ: the member belongs to 開発部 (not downloaded) and 営業部, so it is in 営業部;
 // `createDirectory` makes folders on the fake disk (recorded).
@@ -39,7 +40,7 @@ import { AppShell } from '../src/app/AppShell'
 import { emitter, installElectronAPI, type ElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
-// Synthetic content for the bottom panel's frame (B2): the real content arrives with the inbox (I1).
+// A sample for the bottom panel's frame (B2) in place of the inbox (I1), which needs records on (?inbox=1).
 const BOTTOM_PANEL = params.get('bottom') === '1'
   ? { title: '受け箱', body: <p className="p-3 text-small text-text-muted">見本の中身です。</p> }
   : undefined
@@ -381,6 +382,26 @@ const api: Partial<ElectronAPI> = {
   getMeetingArrivals: async () => featuresParam.includes('listoff')
     ? { available: true, items: [{ recordId: 'meeting-0000cc', title: 'A社 定例', version: 2, meetingAt: '2026-11-02T01:00:00Z', status: 'arrived' as const, attendeeCount: 2, by: null, byYou: false, series: false, autoSeries: false, made: null }] }
     : { available: false, items: [] },
+}
+// ?inbox=1: the real inbox (I1) from a turn and a notice main read (records on, no task list here).
+if (params.get('inbox') === '1') {
+  const notices = emitter<{ companyId: string }>()
+  let read = false
+  Object.assign(api, {
+    watchNotifications: async () => {},
+    onNotificationsChanged: notices.subscribe,
+    getNotificationsState: async () => ({
+      available: true,
+      myTurn: { total: 1, items: [{ id: 'approval-0000aa', type: 'approval', title: '金額の変更', state: 'pending', due: null }] },
+      notices: { available: true, unread: read ? 0 : 1, items: [{ id: 'n-1', kind: 'request_done', recordId: 'task-done0001', recordType: 'task', recordTitle: '見積書の確認', version: 2, text: '佐藤さんが「見積書の確認」を完了にしました', createdAt: new Date().toISOString(), read }] },
+    }),
+    markNotificationsRead: async (companyId: string) => {
+      read = true
+      record('markNotificationsRead', [companyId])
+      setTimeout(() => notices.emit({ companyId }), 0)
+      return { success: true }
+    },
+  } satisfies Partial<ElectronAPI>)
 }
 installElectronAPI(api)
 
