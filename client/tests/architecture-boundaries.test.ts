@@ -168,7 +168,7 @@ test('main-process features, services and ipc never import Electron', () => {
 
 const SHELL_AND_HOST = [
   /^pkg:electron(\/|$)/,
-  /^electron\/(main|preload|electron-adapter|voice-input|browser-window|chat-server)$/,
+  /^electron\/(main|preload|electron-adapter|voice-input|browser-window|doc-view|chat-server)$/,
   /^electron\/(features|services|ipc|sync)\//,
 ]
 

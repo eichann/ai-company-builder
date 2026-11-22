@@ -1,15 +1,16 @@
 /**
  * `acb-doc://<token>/…` — the HTML viewer's files (`.claude/rules/doc-frame.md`).
- * No Electron here: the shell registers `serve` with `protocol.handle`
- * (`electron-adapter.ts` `serveDocFrames`).
+ * No Electron here: the shell serves `serve` on the document session only
+ * (`electron/doc-view.ts`).
  *
- * A **grant** is one opened document: a random token standing for that
- * document's folder. A request reaches only a regular file inside that folder
- * (or below it), and only when:
+ * A **grant** is one document shown in one view: a random token standing for
+ * that document's folder, held by the view (`ownerId` = the view's id). A
+ * request reaches only a regular file inside that folder (or below it), and
+ * only when:
  *
  * - the address is one `parseDocFrameUrl` reads (no `..`, encoded traversal,
- *   `\`, hidden names, empty segments) and the token is a live grant whose
- *   window is still there (`ownerAlive`);
+ *   `\`, hidden names, empty segments) and the token is a grant not revoked
+ *   (a view's grants go with it: `views.ts`);
  * - the file type is one `DOC_FILE_TYPES` serves;
  * - the path is not in a folder this computer did not download;
  * - no step below the folder is a link (each one `lstat`ed; the file is
@@ -17,16 +18,18 @@
  *   holds a `.git` — another repository: a private folder's clone, which the
  *   document's author may not be able to read (refused for readers too);
  * - the file is a regular file of at most `DOC_MAX_FILE_BYTES`, one hard link;
- * - its real location is inside the folder's real path as opened (a folder
- *   swapped for a link meanwhile serves nothing).
+ * - the opened file is the one at the path's real location, inside the
+ *   folder's real path as opened (device and inode of the handle against the
+ *   real path, before and after reading): a folder swapped for a link while
+ *   the request runs serves nothing.
  *
  * Every refusal is the same 404 with the same body: an answer never names a
  * folder (private folder names never leak). Every file served carries the
  * document's CSP (`docFrameCsp`: no network source), `nosniff`, `no-store`,
- * `no-referrer`.
+ * `no-referrer`, `X-DNS-Prefetch-Control: off`.
  */
 import fs from 'node:fs/promises'
-import { constants as fsConstants } from 'node:fs'
+import { constants as fsConstants, type Stats } from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { excludedFolderOf } from '../../../shared/sparse-paths'
@@ -47,8 +50,6 @@ export interface DocFrameDeps {
   paths: DocFramePaths
   /** The folders this computer did not download (company-relative, `sync/sparse.ts`). */
   notDownloaded: (root: string) => readonly string[]
-  /** Whether the window that opened a grant is still there; a grant of a gone window is revoked. */
-  ownerAlive: (ownerId: number) => boolean
   newToken?: () => string
   log?: Pick<Console, 'warn'>
 }
@@ -56,7 +57,7 @@ export interface DocFrameDeps {
 interface Grant {
   ownerId: number
   root: string
-  /** The document's folder as opened (inside `root` by name). */
+  /** The document's folder as opened (inside `root` by name, never `root` itself). */
   folder: string
   /** Its real path when opened: a folder swapped for a link later serves nothing. */
   realFolder: string
@@ -72,19 +73,18 @@ const REFUSALS: Readonly<Record<DocFrameRefusal, DocFrameRefused>> = Object.from
   (Object.keys(DOC_FRAME_WORDS) as DocFrameRefusal[]).map(reason => [reason, { ok: false, reason, message: DOC_FRAME_WORDS[reason] }]),
 ) as Record<DocFrameRefusal, DocFrameRefused>
 
-/** At most this many open documents per window; opening one more forgets the oldest. */
-export const MAX_GRANTS_PER_OWNER = 32
-
 const NOT_FOUND_BODY = 'Not found'
 const BASE_HEADERS = {
   'Cache-Control': 'no-store',
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
+  'X-DNS-Prefetch-Control': 'off',
 }
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0
 const O_NONBLOCK = fsConstants.O_NONBLOCK ?? 0
 
-const refuse = (reason: DocFrameRefusal): DocFrameRefused => REFUSALS[reason]
+export const refuseDoc = (reason: DocFrameRefusal): DocFrameRefused => REFUSALS[reason]
+const refuse = refuseDoc
 
 /** Company-relative, `/`-separated. */
 const relativeTo = (root: string, abs: string) => path.relative(root, abs).split(path.sep).join('/')
@@ -98,27 +98,26 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
+const sameFile = (a: Stats, b: Stats) => a.dev === b.dev && a.ino === b.ino
+
 export function createDocFrames(deps: DocFrameDeps) {
   const log = deps.log ?? console
   const newToken = deps.newToken ?? (() => randomBytes(16).toString('hex'))
-  /** Token → grant, in the order opened (a Map keeps insertion order: the oldest first). */
+  /** Token → grant. */
   const grants = new Map<string, Grant>()
-
-  const liveGrant = (token: string): Grant | null => {
-    const grant = grants.get(token)
-    if (!grant) return null
-    if (!deps.ownerAlive(grant.ownerId)) {
-      grants.delete(token)
-      return null
-    }
-    return grant
-  }
 
   // The same answer for every refusal, whatever was asked: it names nothing.
   const notFound = () => new Response(NOT_FOUND_BODY, {
     status: 404,
     headers: { ...BASE_HEADERS, 'Content-Type': 'text/plain; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; sandbox" },
   })
+
+  /** Whether `target` still names exactly the opened file, at a real location inside the grant's folder. */
+  async function stillTheFile(grant: Grant, target: string, opened: Stats): Promise<boolean> {
+    const real = await fs.realpath(target)
+    if (!real.startsWith(grant.realFolder + path.sep)) return false
+    return sameFile(await fs.stat(real), opened)
+  }
 
   /** The bytes of `segments` under the grant's folder, or null for every refusal. */
   async function readInside(grant: Grant, segments: readonly string[]): Promise<Buffer | null> {
@@ -140,11 +139,13 @@ export function createDocFrames(deps: DocFrameDeps) {
       try {
         const opened = await handle.stat()
         if (!opened.isFile() || opened.nlink > 1 || opened.size > DOC_MAX_FILE_BYTES) return null
-        // Last, the real location: a folder on the way swapped for a link meanwhile leads elsewhere.
-        const real = await fs.realpath(target)
-        if (!real.startsWith(grant.realFolder + path.sep)) return null
+        // The handle, not only the path: what was opened must be the file at the real location
+        // inside the folder (a folder on the way swapped for a link while opening leads elsewhere).
+        if (!(await stillTheFile(grant, target, opened))) return null
         const buffer = Buffer.alloc(opened.size)
         const { bytesRead } = await handle.read(buffer, 0, opened.size, 0)
+        // And again after reading: a swap back during the read is refused too.
+        if (!(await stillTheFile(grant, target, opened))) return null
         return buffer.subarray(0, bytesRead)
       } finally {
         await handle.close()
@@ -157,8 +158,10 @@ export function createDocFrames(deps: DocFrameDeps) {
   return {
     /**
      * Whether `filePath` may be shown as a document: one `.html` / `.htm` file
-     * of a company folder (by name and real location), not hidden, not a link,
-     * downloaded, at most `DOC_MAX_FILE_BYTES`. Grants nothing by itself.
+     * of a company folder (by name and real location), below a folder of it
+     * (never the company folder's top level: its scripts could read every
+     * served-type file of the company), not hidden, not a link, downloaded, at
+     * most `DOC_MAX_FILE_BYTES`. Grants nothing by itself.
      */
     async check(filePath: unknown): Promise<{ ok: true; doc: OpenableDocument } | DocFrameRefused> {
       if (typeof filePath !== 'string' || filePath === '') return refuse('not_found')
@@ -173,11 +176,12 @@ export function createDocFrames(deps: DocFrameDeps) {
       if (name.startsWith('.')) return refuse('not_allowed')
       const root = deps.paths.rootOf(resolved)
       if (!root || resolved === root) return refuse('not_allowed')
+      const folder = path.dirname(resolved)
+      if (folder === root) return refuse('top_level')
       const rel = relativeTo(root, resolved)
       // Never the repository's own folder.
       if (rel.split('/').some(segment => lookalikeKey(segment) === '.git')) return refuse('not_allowed')
       if (excludedFolderOf(deps.notDownloaded(root), rel)) return refuse('not_downloaded')
-      const folder = path.dirname(resolved)
       try {
         // No link anywhere from the company folder down: the grant's folder is where it is by name.
         let dir = root
@@ -196,38 +200,28 @@ export function createDocFrames(deps: DocFrameDeps) {
     },
 
     /**
-     * A grant for a checked document, held by window `ownerId`: the document's
-     * `acb-doc://` address (the renderer gets only this). Each call is a new
-     * grant — two views of one file have two tokens, each closed on its own.
+     * A grant for a checked document, held by view `ownerId`: the document's
+     * `acb-doc://` address, for that view to load (it never leaves main). Each
+     * view has its own grant — two views of one file have two tokens.
      */
     grant(doc: OpenableDocument, ownerId: number): string {
-      const own = [...grants].filter(([, g]) => g.ownerId === ownerId)
-      for (const [token] of own.slice(0, Math.max(0, own.length - MAX_GRANTS_PER_OWNER + 1))) grants.delete(token)
       let token = newToken()
       while (grants.has(token)) token = newToken()
       grants.set(token, { ownerId, root: doc.root, folder: doc.folder, realFolder: doc.realFolder })
       return docFrameUrl(token, doc.name)
     },
 
-    /** Revoke the grant of `url` (the view closed). Only its own window may; anything else is ignored. */
-    close(url: unknown, ownerId: number): void {
-      if (typeof url !== 'string') return
-      const parsed = parseDocFrameUrl(url)
-      const grant = parsed ? grants.get(parsed.token) : undefined
-      if (parsed && grant && grant.ownerId === ownerId) grants.delete(parsed.token)
-    },
-
-    /** Revoke every grant of a window (it closed or reloaded). */
-    closeAllOf(ownerId: number): void {
+    /** Revoke every grant of a view (it closed, was destroyed or its page crashed). */
+    revoke(ownerId: number): void {
       for (const [token, grant] of grants) if (grant.ownerId === ownerId) grants.delete(token)
     },
 
-    /** Serve one request (`protocol.handle`). */
+    /** Serve one request (`protocol.handle` on the document session). */
     async serve(request: { url: string; method: string }): Promise<Response> {
       if (request.method !== 'GET') return notFound()
       const parsed = parseDocFrameUrl(request.url)
       if (!parsed) return notFound()
-      const grant = liveGrant(parsed.token)
+      const grant = grants.get(parsed.token)
       if (!grant) return notFound()
       const type = docFileType(parsed.segments[parsed.segments.length - 1])
       if (!type) return notFound()

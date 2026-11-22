@@ -109,7 +109,7 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
   database or git), so the server, app and admin apply one copy of each rule. A rule change is
   made there. → `shared-core.md`
 - **Electron is imported only in the shell layer** (`main.ts`, `preload.ts`,
-  `electron-adapter.ts`, `voice-input.ts`, `browser-window.ts`); features and services get ports injected, so another
+  `electron-adapter.ts`, `voice-input.ts`, `browser-window.ts`, `doc-view.ts`); features and services get ports injected, so another
   desktop shell can replace it. ESLint enforces this. → `ipc-and-main-process.md`
 - **App modules point one way too** (`client/tests/architecture-boundaries.test.ts`, over the
   whole tree): `client/shared` is pure (imports only itself and `shared/`; `client/shared/commands/` also

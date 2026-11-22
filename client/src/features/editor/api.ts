@@ -14,18 +14,18 @@ export type EditorWrites = ElectronPort<'writeFile' | 'createDirectory' | 'backu
 export type EditorRefusals = ElectronPort<'reservedPathRefusal'>
 
 /**
- * The HTML viewer's document frames (doc-frame.md): a grant for one `.html`
- * file's folder, as the `acb-doc://` address the sandboxed frame loads, and
- * its revocation when the view closes.
+ * The HTML viewer's document views (doc-frame.md): main shows an `.html`
+ * file in a view of its own (its own session, no network) and hands back only
+ * the view's id; closing it revokes the document's grant.
  */
-export type DocFrameGrants = ElectronPort<'openDocFrame' | 'closeDocFrame'>
+export type DocViewControls = ElectronPort<'openDocView' | 'closeDocView'>
 
-export function openDocFrame(filePath: string, grants: DocFrameGrants = window.electronAPI) {
-  return grants.openDocFrame(filePath)
+export function openDocView(filePath: string, views: DocViewControls = window.electronAPI) {
+  return views.openDocView(filePath)
 }
 
-export function closeDocFrame(url: string, grants: DocFrameGrants = window.electronAPI) {
-  return grants.closeDocFrame(url)
+export function closeDocView(viewId: number, views: DocViewControls = window.electronAPI) {
+  return views.closeDocView(viewId)
 }
 
 /** The file's text, or null when it is gone. */

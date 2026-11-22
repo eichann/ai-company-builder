@@ -148,8 +148,9 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 `Cache-Control: no-store`. An open file that is deleted shows a notice; one replaced reloads.
 
 `local-file://` reads anything in the company folders, so it is for images and PDFs shown by the
-app's own page only. An HTML document never loads through it: it is shown from `acb-doc://`,
-which serves only that document's own folder under a CSP with no network (`doc-frame.md`).
+app's own page only. An HTML document never loads through it: it is shown in a view of its own
+on the document session from `acb-doc://`, which serves only that document's own folder under a
+CSP with no network (`doc-frame.md`).
 
 ## Skills list freshness (`client/shared/skills-refresh.ts`)
 

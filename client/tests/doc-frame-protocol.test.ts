@@ -1,26 +1,30 @@
 // acb-doc:// (the HTML viewer, .claude/rules/doc-frame.md): a grant reaches only regular files
 // inside the opened document's own folder — never `..` (also encoded), hidden names, links, another
 // repository (a private folder's clone), a folder this computer did not download, a file over
-// 20 MB, a type that is not served — every refusal is the same 404 that names nothing, and every
-// answer carries the CSP with no network source. The IPC hands grants to the main window only.
+// 20 MB, a type that is not served, a file swapped in while the request runs — every refusal is the
+// same 404 that names nothing, and every answer carries the CSP with no network source. A grant
+// belongs to one view and goes with it; the IPC opens views for the main window only, before any
+// file is looked at.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { AllowedRoots } from '../electron/allowed-roots'
-import { createDocFrames, MAX_GRANTS_PER_OWNER, type DocFrameDeps } from '../electron/features/doc-frames/protocol'
-import { registerDocFramesIpc } from '../electron/features/doc-frames/ipc'
+import { createDocFrames, type DocFrameDeps } from '../electron/features/doc-frames/protocol'
+import { createDocViews, MAX_VIEWS_PER_WINDOW, type DocViewHandle, type DocViewPort } from '../electron/features/doc-frames/views'
+import { registerDocViewsIpc } from '../electron/features/doc-frames/ipc'
 import {
-  docFrameCsp, docFramePolicy, docFileType, isFromDocFrame, parseDocFrameUrl, DOC_MAX_FILE_BYTES,
+  docFrameCsp, docFramePolicy, docFileType, docSessionRequestAllowed, docViewNavigationAllowed, parseDocFrameUrl, DOC_MAX_FILE_BYTES,
 } from '../shared/doc-frame'
 
 const quiet = { warn: () => {} }
 const TOKEN = 'a'.repeat(32)
 const MAIN = 1
 
-function world(options: { notDownloaded?: string[]; ownerAlive?: (id: number) => boolean } = {}) {
+function world(options: { notDownloaded?: string[] } = {}) {
   const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-doc-frame-')))
   const root = path.join(base, 'company')
   const write = (rel: string, content: string | Buffer = 'x') => {
@@ -64,6 +68,7 @@ function world(options: { notDownloaded?: string[]; ownerAlive?: (id: number) =>
   write('notdl/doc.html', '<p>')
   fs.symlinkSync('report.html', path.join(root, '営業/linked.html'))
   write('other/plain.html', '<p>')
+  write('top.html', '<p>')
 
   const paths = new AllowedRoots()
   paths.add(root)
@@ -71,7 +76,6 @@ function world(options: { notDownloaded?: string[]; ownerAlive?: (id: number) =>
   const deps: DocFrameDeps = {
     paths,
     notDownloaded: () => options.notDownloaded ?? ['営業/notdl', 'notdl'],
-    ownerAlive: options.ownerAlive ?? (() => true),
     newToken: () => (tokens++).toString(16).padStart(32, '0'),
     log: quiet,
   }
@@ -151,6 +155,7 @@ test('the document, its styles and images in its own folder (and below) are serv
   assert.equal(page.headers.get('x-content-type-options'), 'nosniff')
   assert.equal(page.headers.get('cache-control'), 'no-store')
   assert.equal(page.headers.get('referrer-policy'), 'no-referrer')
+  assert.equal(page.headers.get('x-dns-prefetch-control'), 'off')
   assert.equal((await w.get(w.under(doc, 'style.css'))).headers.get('content-type'), 'text/css; charset=utf-8')
   assert.equal((await w.get(`${w.under(doc, 'images', 'graph.png')}?v=2`)).text, 'PNG')
   assert.equal((await w.get(w.under(doc, '資料.png'))).status, 200)
@@ -192,48 +197,22 @@ test('a file over 20 MB is not served', async () => {
   await refusedAs(w, w.under(await w.open('営業/report.html'), 'big.png'))
 })
 
-test('a wrong token, a closed view, a gone window: nothing is served', async () => {
-  let alive = true
-  const w = world({ ownerAlive: () => alive })
-  const doc = await w.open('営業/report.html')
-  const file = new URL(doc).pathname
-  await refusedAs(w, `acb-doc://${'f'.repeat(32)}${file}`)
-  // Only its own window closes a grant.
-  w.frames.close(doc, MAIN + 1)
-  assert.equal((await w.get(doc)).status, 200)
-  w.frames.close(doc, MAIN)
+test('a wrong token or a revoked grant serves nothing; revoking one view leaves another\'s', async () => {
+  const w = world()
+  const doc = await w.open('営業/report.html', 10)
+  const other = await w.open('営業/report.html', 11)
+  assert.notEqual(doc, other)
+  await refusedAs(w, `acb-doc://${'f'.repeat(32)}${new URL(doc).pathname}`)
+  w.frames.revoke(10)
   await refusedAs(w, doc)
-  const again = await w.open('営業/report.html')
-  alive = false
-  await refusedAs(w, again)
-  alive = true
-  await refusedAs(w, again)
+  assert.equal((await w.get(other)).status, 200)
 })
 
-test('two views of one file hold two grants; closing one leaves the other', async () => {
-  const w = world()
-  const a = await w.open('営業/report.html')
-  const b = await w.open('営業/report.html')
-  assert.notEqual(a, b)
-  w.frames.close(a, MAIN)
-  await refusedAs(w, a)
-  assert.equal((await w.get(b)).status, 200)
-  w.frames.closeAllOf(MAIN)
-  await refusedAs(w, b)
-})
-
-test('a window holds at most the newest grants; the oldest is revoked', async () => {
-  const w = world()
-  const first = await w.open('営業/report.html')
-  for (let i = 0; i < MAX_GRANTS_PER_OWNER; i++) await w.open('営業/report.html')
-  await refusedAs(w, first)
-})
-
-test('a grant closed while its file is read answers nothing', async () => {
+test('a grant revoked while its file is read answers nothing', async () => {
   const w = world()
   let doc = ''
   let closeDuring = false
-  w.deps.notDownloaded = () => { if (closeDuring) w.frames.close(doc, MAIN); return [] }
+  w.deps.notDownloaded = () => { if (closeDuring) w.frames.revoke(MAIN); return [] }
   doc = await w.open('営業/report.html')
   closeDuring = true
   await refusedAs(w, doc)
@@ -273,33 +252,149 @@ test('what may be opened: an .html file of a company folder, downloaded, not hid
   assert.equal(await reason(at('notdl/doc.html')), 'not_downloaded')
   assert.equal(await reason(at('営業/big.html')), 'too_large')
   assert.equal(await reason(at('営業/gone.html')), 'not_found')
+  assert.equal(await reason(at('top.html')), 'top_level', 'its scripts could read every served file of the company')
   assert.equal(await reason(42), 'not_found')
 })
 
-test('a web request is the session guard\'s when the frame or one of its parents shows a document', () => {
-  assert.equal(isFromDocFrame([`acb-doc://${TOKEN}/a.html`]), true)
-  assert.equal(isFromDocFrame(['about:srcdoc', `ACB-DOC://${TOKEN}/a.html`, 'file:///app/index.html']), true)
-  assert.equal(isFromDocFrame(['file:///app/index.html']), false)
-  assert.equal(isFromDocFrame(['acb-plugin://p/1.0.0/ui/index.html', 'http://localhost:5173/']), false)
-  assert.equal(isFromDocFrame([]), false)
+test('the document session lets out only its own scheme and in-memory data', () => {
+  for (const url of [`acb-doc://${TOKEN}/a.png`, 'data:image/png;base64,AA==', 'blob:null/1', 'about:blank']) assert.equal(docSessionRequestAllowed(url), true, url)
+  for (const url of ['https://example.com/', 'http://127.0.0.1/', 'wss://x/', 'ws://x/', 'file:///etc/passwd', 'local-file:///x', 'acb-plugin://p/1/ui/a.html', 'ftp://x/', 'chrome://gpu', 'acb-docx://a/b', 'no scheme']) {
+    assert.equal(docSessionRequestAllowed(url), false, url)
+  }
 })
 
-test('docFrames:open grants only to the main window\'s page, after the path was judged; close likewise', async () => {
+test('a document view goes only to an .html page of its own grant, never elsewhere', () => {
+  const own = (p: string) => `acb-doc://${TOKEN}/${p}`
+  assert.equal(docViewNavigationAllowed(TOKEN, own('b.html'), true), true)
+  assert.equal(docViewNavigationAllowed(TOKEN, own('sub/c.htm?x#y'), true), true)
+  for (const url of [
+    own('style.css'), own('.hidden.html'), own('%2e%2e/x.html'), `acb-doc://${'b'.repeat(32)}/b.html`, 'data:text/html,<p>', 'file:///etc/passwd',
+    'local-file:///Users/me/a.html', 'acb-plugin://p/1.0.0/ui/index.html', 'https://example.com/a.html', 'javascript:alert(1)', 'about:blank',
+  ]) assert.equal(docViewNavigationAllowed(TOKEN, url, true), false, url)
+  assert.equal(docViewNavigationAllowed(TOKEN, own('b.html'), false), false, 'a frame inside the document goes nowhere')
+  assert.equal(docViewNavigationAllowed(null, own('b.html'), true), false, 'a view without a grant goes nowhere')
+})
+
+/** A fake shell: views with ids from 100, and what happened to them. */
+function fakeShell(options: { fail?: boolean } = {}) {
+  let next = 100
+  const shown = new Map<number, string>()
+  const destroyed: number[] = []
+  const gone = new Map<number, (id: number) => void>()
+  let reset: (windowId: number) => void = () => {}
+  const port: DocViewPort = {
+    onWindowReset: listener => { reset = listener },
+    async create(_windowId, onGone): Promise<DocViewHandle | null> {
+      if (options.fail) return null
+      const id = next++
+      gone.set(id, onGone)
+      return { id, show: url => { shown.set(id, url) }, destroy: () => { destroyed.push(id); gone.get(id)?.(id) } }
+    },
+  }
+  return { port, shown, destroyed, crash: (id: number) => gone.get(id)?.(id), resetWindow: (windowId: number) => reset(windowId) }
+}
+
+const reportDoc = async (w: ReturnType<typeof world>) => {
+  const checked = await w.frames.check(path.join(w.root, '営業/report.html'))
+  assert.ok(checked.ok)
+  return checked.doc
+}
+
+test('a view holds its own grant: closed by its window, destroyed, crashed or its window reset, the grant goes', async () => {
   const w = world()
+  const shell = fakeShell()
+  const views = createDocViews({ frames: w.frames, shell: shell.port })
+  const a = (await views.open(await reportDoc(w), MAIN))!
+  const b = (await views.open(await reportDoc(w), MAIN))!
+  const c = (await views.open(await reportDoc(w), MAIN + 1))!
+  const d = (await views.open(await reportDoc(w), MAIN))!
+  const url = (id: number) => shell.shown.get(id)!
+  assert.match(url(a), /^acb-doc:\/\/[0-9a-f]{32}\/report\.html$/)
+  assert.equal((await w.get(url(a))).status, 200)
+  // Only its own window closes a view.
+  views.close(a, MAIN + 1)
+  assert.equal((await w.get(url(a))).status, 200)
+  views.close(a, MAIN)
+  await refusedAs(w, url(a))
+  assert.ok(shell.destroyed.includes(a))
+  // Its page crashed or the view was destroyed elsewhere.
+  shell.crash(b)
+  await refusedAs(w, url(b))
+  // The window reloaded: its views go, another window's stay.
+  shell.resetWindow(MAIN)
+  await refusedAs(w, url(d))
+  assert.ok(shell.destroyed.includes(d))
+  assert.equal((await w.get(url(c))).status, 200)
+})
+
+test('a window holds at most the newest views; opening one more closes the oldest and its grant', async () => {
+  const w = world()
+  const shell = fakeShell()
+  const views = createDocViews({ frames: w.frames, shell: shell.port })
+  const doc = await reportDoc(w)
+  const first = (await views.open(doc, MAIN))!
+  for (let i = 0; i < MAX_VIEWS_PER_WINDOW; i++) await views.open(doc, MAIN)
+  await refusedAs(w, shell.shown.get(first)!)
+  assert.deepEqual(shell.destroyed, [first])
+})
+
+test('a view that cannot be made gets no grant', async () => {
+  const w = world()
+  const views = createDocViews({ frames: w.frames, shell: fakeShell({ fail: true }).port })
+  assert.equal(await views.open(await reportDoc(w), MAIN), null)
+})
+
+test('docView:open is the main window\'s page\'s only, decided before any file is looked at; close likewise', async () => {
+  const w = world()
+  const shell = fakeShell()
+  const views = createDocViews({ frames: w.frames, shell: shell.port })
+  let checks = 0
+  const frames = { check: (p: unknown) => { checks++; return w.frames.check(p) } }
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>()
   const ipc = { handle: (channel: string, fn: (event: unknown, ...args: unknown[]) => unknown) => { handlers.set(channel, fn) }, on: () => {} }
-  const fromMain = (event: unknown) => (event as { main: boolean }).main
-  registerDocFramesIpc(ipc as never, { docFrames: w.frames, fromMainWindow: fromMain as never })
+  registerDocViewsIpc(ipc as never, { frames, views, fromMainWindow: ((event: { main: boolean }) => event.main) as never })
   const ev = (main: boolean, id = MAIN) => ({ main, sender: { id, isDestroyed: () => false, send: () => {} } })
-  const open = handlers.get('docFrames:open')!
+  const open = handlers.get('docView:open')!
   const file = path.join(w.root, '営業/report.html')
   const fromChat = await open(ev(false, 7), file) as { ok: boolean; reason?: string }
-  assert.deepEqual([fromChat.ok, fromChat.reason], [false, 'not_allowed'])
+  assert.deepEqual([fromChat.ok, fromChat.reason, checks], [false, 'not_allowed', 0], 'not the main window: nothing read')
   assert.deepEqual(await open(ev(true), path.join(w.base, 'x.html')), await w.frames.check(path.join(w.base, 'x.html')))
-  const granted = await open(ev(true), file) as { ok: true; url: string }
-  assert.equal(granted.ok, true)
-  await handlers.get('docFrames:close')!(ev(false), granted.url)
-  assert.equal((await w.get(granted.url)).status, 200, 'another window cannot close it')
-  await handlers.get('docFrames:close')!(ev(true), granted.url)
-  await refusedAs(w, granted.url)
+  const opened = await open(ev(true), file) as { ok: true; viewId: number }
+  assert.equal(opened.ok, true)
+  assert.deepEqual(Object.keys(opened).sort(), ['ok', 'viewId'], 'the renderer never gets the address')
+  const url = shell.shown.get(opened.viewId)!
+  await handlers.get('docView:close')!(ev(false), opened.viewId)
+  assert.equal((await w.get(url)).status, 200, 'another window cannot close it')
+  await handlers.get('docView:close')!(ev(true), opened.viewId)
+  await refusedAs(w, url)
+  const unmade = createDocViews({ frames: w.frames, shell: fakeShell({ fail: true }).port })
+  registerDocViewsIpc(ipc as never, { frames: w.frames, views: unmade, fromMainWindow: (() => true) as never })
+  assert.equal((await handlers.get('docView:open')!(ev(true), file) as { reason: string }).reason, 'unavailable')
+})
+
+test('the file opened is the file at the real location: a swap while the request runs serves nothing', async () => {
+  const w = world()
+  const doc = await w.open('営業/report.html')
+  const realOpen = fsp.open
+  const realRealpath = fsp.realpath
+  const secret = path.join(w.root, 'other', 'secret.png')
+  try {
+    // A folder on the way swapped for a link at the moment of opening, swapped back before the check.
+    fsp.open = (async (file: string, ...rest: unknown[]) =>
+      (realOpen as (...a: unknown[]) => unknown)(String(file).endsWith('style.css') ? secret : file, ...rest)) as typeof fsp.open
+    await refusedAs(w, w.under(doc, 'style.css'))
+    fsp.open = realOpen
+    // Swapped during the read: the second look at the real location finds another file.
+    let looks = 0
+    fsp.realpath = (async (p: string, ...rest: unknown[]) => {
+      const real = await (realRealpath as (...a: unknown[]) => Promise<string>)(p, ...rest)
+      return String(p).endsWith('style.css') && ++looks === 2 ? path.join(path.dirname(real), 'images', 'graph.png') : real
+    }) as typeof fsp.realpath
+    await refusedAs(w, w.under(doc, 'style.css'))
+    assert.equal(looks, 2)
+  } finally {
+    fsp.open = realOpen
+    fsp.realpath = realRealpath
+  }
+  assert.equal((await w.get(w.under(doc, 'style.css'))).status, 200, 'control: unswapped it is served')
 })

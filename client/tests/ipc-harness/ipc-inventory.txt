@@ -95,8 +95,8 @@ contract.invoke config:setPermissionMode
 contract.invoke config:setServerUrl
 contract.invoke config:validateServerUrl
 contract.invoke dialog:selectDirectory
-contract.invoke docFrames:close
-contract.invoke docFrames:open
+contract.invoke docView:close
+contract.invoke docView:open
 contract.invoke editor:backupBeforeOverwrite
 contract.invoke env:status
 contract.invoke env:update
@@ -379,7 +379,7 @@ contract.type ElectronAPI.checkMinutes = checkMinutes: Invoke<'minutes:check'>
 contract.type ElectronAPI.claimAiTurn = claimAiTurn: Invoke<'aiTurns:claim'>
 contract.type ElectronAPI.clearBrowserLogin = clearBrowserLogin: Invoke<'browser:clearLogin'>
 contract.type ElectronAPI.closeChatWindows = closeChatWindows: Invoke<'chatWindow:closeAll'>
-contract.type ElectronAPI.closeDocFrame = closeDocFrame: Invoke<'docFrames:close'>
+contract.type ElectronAPI.closeDocView = closeDocView: Invoke<'docView:close'>
 contract.type ElectronAPI.completeHandoffTurn = completeHandoffTurn: Invoke<'handoff:complete'>
 contract.type ElectronAPI.connectGoogle = connectGoogle: Invoke<'google:connect'>
 contract.type ElectronAPI.connectGoogleAll = connectGoogleAll: Invoke<'google:connectAll'>
@@ -532,7 +532,7 @@ contract.type ElectronAPI.openBrowserSite = openBrowserSite: Invoke<'browser:ope
 contract.type ElectronAPI.openChatWindow = openChatWindow: Invoke<'chatWindow:open'>
 contract.type ElectronAPI.openClaudeSignInPage = openClaudeSignInPage: Invoke<'claudeSignIn:openPage'>
 contract.type ElectronAPI.openCompanySkillBackup = openCompanySkillBackup: Invoke<'skillShelf:openBackup'>
-contract.type ElectronAPI.openDocFrame = openDocFrame: Invoke<'docFrames:open'>
+contract.type ElectronAPI.openDocView = openDocView: Invoke<'docView:open'>
 contract.type ElectronAPI.openExternal = openExternal: Invoke<'shell:openExternal'>
 contract.type ElectronAPI.openFileInMainWindow = openFileInMainWindow: Invoke<'chatWindow:openFile'>
 contract.type ElectronAPI.openOutboundMailAttachment = openOutboundMailAttachment: Invoke<'outboundMail:openAttachment'>
@@ -823,8 +823,8 @@ contract.type IpcInvokeChannels.'config:setPermissionMode' = 'config:setPermissi
 contract.type IpcInvokeChannels.'config:setServerUrl' = 'config:setServerUrl': { args: [url: string]; result: boolean }
 contract.type IpcInvokeChannels.'config:validateServerUrl' = 'config:validateServerUrl': { args: [url: string]; result: ServerUrlValidation }
 contract.type IpcInvokeChannels.'dialog:selectDirectory' = 'dialog:selectDirectory': { args: []; result: string | null }
-contract.type IpcInvokeChannels.'docFrames:close' = 'docFrames:close': { args: [url: string]; result: void }
-contract.type IpcInvokeChannels.'docFrames:open' = 'docFrames:open': { args: [filePath: string]; result: DocFrameOpenResult }
+contract.type IpcInvokeChannels.'docView:close' = 'docView:close': { args: [viewId: number]; result: void }
+contract.type IpcInvokeChannels.'docView:open' = 'docView:open': { args: [filePath: string]; result: DocViewOpenResult }
 contract.type IpcInvokeChannels.'editor:backupBeforeOverwrite' = 'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
 contract.type IpcInvokeChannels.'env:status' = 'env:status': { args: [rootPath: string]; result: EnvStatusResult }
 contract.type IpcInvokeChannels.'env:update' = 'env:update': { args: [rootPath: string, changes: Record<string, string | null>]; result: SimpleResult }
@@ -1144,8 +1144,8 @@ main.handle config:setPermissionMode @ features/settings/ipc.ts (mode: Permissio
 main.handle config:setServerUrl @ features/settings/ipc.ts (url: string)
 main.handle config:validateServerUrl @ features/settings/ipc.ts (url: string)
 main.handle dialog:selectDirectory @ features/fs/ipc.ts ()
-main.handle docFrames:close @ features/doc-frames/ipc.ts (url)
-main.handle docFrames:open @ features/doc-frames/ipc.ts (filePath)
+main.handle docView:close @ features/doc-frames/ipc.ts (viewId)
+main.handle docView:open @ features/doc-frames/ipc.ts (filePath)
 main.handle editor:backupBeforeOverwrite @ features/fs/ipc.ts (rootPath: string, filePath: string)
 main.handle env:status @ features/env/ipc.ts (rootPath: string)
 main.handle env:update @ features/env/ipc.ts (rootPath: string, changes: Record<string, string | null>)
@@ -1372,8 +1372,8 @@ preload clearBrowserLogin -> invoke browser:clearLogin($0, $1)
 preload clearBrowserLogin : (companyId: string, host: string) => Promise<BrowserActionResult>
 preload closeChatWindows -> invoke chatWindow:closeAll()
 preload closeChatWindows : () => Promise<void>
-preload closeDocFrame -> invoke docFrames:close($0)
-preload closeDocFrame : (url: string) => Promise<void>
+preload closeDocView -> invoke docView:close($0)
+preload closeDocView : (viewId: number) => Promise<void>
 preload completeHandoffTurn -> invoke handoff:complete($0, $1, $2)
 preload completeHandoffTurn : (company: string, id: string, receipt: HandoffCompletion) => Promise<void>
 preload connectGoogle -> invoke google:connect($0, $1)
@@ -1678,8 +1678,8 @@ preload openClaudeSignInPage -> invoke claudeSignIn:openPage()
 preload openClaudeSignInPage : () => Promise<boolean>
 preload openCompanySkillBackup -> invoke skillShelf:openBackup($0, $1)
 preload openCompanySkillBackup : (rootPath: string, skillPath: string) => Promise<SimpleResult>
-preload openDocFrame -> invoke docFrames:open($0)
-preload openDocFrame : (filePath: string) => Promise<DocFrameOpenResult>
+preload openDocView -> invoke docView:open($0)
+preload openDocView : (filePath: string) => Promise<DocViewOpenResult>
 preload openExternal -> invoke shell:openExternal($0)
 preload openExternal : (url: string) => Promise<SimpleResult>
 preload openFileInMainWindow -> invoke chatWindow:openFile($0)

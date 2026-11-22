@@ -206,11 +206,6 @@ type PermissionCheckHandler = (webContents: unknown, permission: string, request
 export class FakeSession {
   requestHandler: PermissionRequestHandler | null = null
   checkHandler: PermissionCheckHandler | null = null
-  /** The one `webRequest.onBeforeRequest` listener main installed (Electron keeps one per session). */
-  beforeRequest: { filter: { urls: string[] }; listener: (details: unknown, callback: (answer: { cancel?: boolean }) => void) => void } | null = null
-  readonly webRequest = {
-    onBeforeRequest: (filter: { urls: string[] }, listener: (details: unknown, callback: (answer: { cancel?: boolean }) => void) => void) => { this.beforeRequest = { filter, listener } },
-  }
   setPermissionRequestHandler(handler: PermissionRequestHandler | null): void { this.requestHandler = handler }
   setPermissionCheckHandler(handler: PermissionCheckHandler | null): void { this.checkHandler = handler }
   /** What a page at `requestingUrl` is answered when it asks for `permission`. */
@@ -226,6 +221,14 @@ export class FakeSession {
 
 export const session = {
   defaultSession: new FakeSession(),
+}
+
+/** The HTML viewer's views (doc-view.ts) are made only when a document opens; never under this harness. */
+export class WebContentsView {
+  constructor() { throw new Error('the IPC harness makes no document view') }
+}
+export const webContents = {
+  fromId: (): FakeWebContents | undefined => undefined,
 }
 
 export const systemPreferences = {
@@ -259,4 +262,5 @@ export const ipcRenderer = {
 
 export default {
   app, BrowserWindow, ipcMain, dialog, shell, net, protocol, nativeImage, Notification, session, systemPreferences, contextBridge, ipcRenderer, screen,
+  WebContentsView, webContents,
 }

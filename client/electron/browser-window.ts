@@ -102,9 +102,9 @@ const REFUSAL_LOG_MS = 10_000
 /**
  * The proxy every connection to a host the site does not list is sent to: on 127.0.0.1, it answers
  * 403 to whatever it is asked and closes, so nothing goes further (a closed port could let a client
- * try another way).
+ * try another way). The HTML viewer's document session sends every connection there too (doc-view.ts).
  */
-function startRefusingProxy(): Promise<number> {
+export function startRefusingProxy(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer(socket => {
       socket.on('error', () => {})

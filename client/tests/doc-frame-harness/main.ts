@@ -1,61 +1,86 @@
-// The Electron side of tests/doc-frame-electron.test.ts: the app's real acb-doc:// registration,
-// service and session guard (electron-adapter.ts, features/doc-frames/protocol.ts) with a document
-// shown the way the viewer will show it — `<iframe sandbox="allow-scripts">` in a page whose
-// preload exposes `window.electronAPI` — and a local HTTP server standing for the internet. Prints
-// what happened as one `RESULT {json}` line. Started by the test with `NODE_OPTIONS=--import tsx`.
-import { app, BrowserWindow } from 'electron'
+// The Electron side of tests/doc-frame-electron.test.ts: the app's real scheme registration, document
+// session and views (doc-view.ts), grants and server (features/doc-frames/), showing a document the
+// way the viewer will — a view of its own in a window whose page has a preload — while local
+// listeners stand for the internet: an HTTP server (web.test) and raw TCP listeners for what no
+// request hook sees (preconnect, preload, prefetch, DNS prefetch, TURN over TCP), names mapped with
+// Chromium's `host-rules` (a loopback address would bypass any proxy), and a UDP socket for STUN.
+// Prints what happened as one `RESULT {json}` line. Started with `NODE_OPTIONS=--import tsx`.
+import { app, BrowserWindow, session, webContents as allWebContents } from 'electron'
+import dgram from 'node:dgram'
 import fs from 'node:fs'
 import http from 'node:http'
+import net from 'node:net'
 import path from 'node:path'
-import { guardDocFrameNetwork, registerLocalFileScheme, serveDocFrames } from '../../electron/electron-adapter'
+import { registerLocalFileScheme } from '../../electron/electron-adapter'
+import { createDocViewShell, DOC_PARTITION } from '../../electron/doc-view'
 import { createDocFrames } from '../../electron/features/doc-frames/protocol'
+import { createDocViews } from '../../electron/features/doc-frames/views'
 
 const dir = process.env.DOC_TEST_DIR!
-const port = Number(process.env.DOC_TEST_PORT)
-const NET = `http://127.0.0.1:${port}`
+const ports = JSON.parse(process.env.DOC_TEST_PORTS!) as Record<string, number>
+const TCP_NAMES = ['preconnect', 'preload', 'prefetch', 'dnsprefetch', 'turn', 'report']
+app.commandLine.appendSwitch('host-rules', ['web', ...TCP_NAMES].map(n => `MAP ${n}.test 127.0.0.1:${ports[n]}`).join(', '))
 app.setPath('userData', path.join(dir, 'userData'))
+registerLocalFileScheme()
 
 const result: Record<string, unknown> = {}
 const fail = (error: unknown) => {
   console.log(`RESULT ${JSON.stringify({ error: error instanceof Error ? error.stack : String(error) })}`)
   app.exit(1)
 }
-setTimeout(() => fail(new Error('the harness timed out')), 90_000)
+setTimeout(() => fail(new Error('the harness timed out')), 100_000)
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 // 1×1 PNG.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==', 'base64')
+const WEB = 'http://web.test'
 
 function probes(): string {
   // Runs inside the document (an inline script: allowed by the owner's decision).
   return `
 const r = { inlineRan: true }
+window.__r = null
 const settle = p => p.then(() => 'reached', e => 'refused')
+const add = (rel, href, as) => { const l = document.createElement('link'); l.rel = rel; l.href = href; if (as) l.as = as; document.head.appendChild(l) }
 r.electronAPI = typeof window.electronAPI
-try { r.parentAPI = typeof parent.electronAPI } catch (e) { r.parentAPI = 'threw ' + e.name }
-try { r.parentDocument = typeof parent.document.body } catch (e) { r.parentDocument = 'threw ' + e.name }
+r.nodeGlobals = [typeof require, typeof process].join(',')
 try { localStorage.setItem('k', 'v'); r.localStorage = 'ok' } catch (e) { r.localStorage = 'threw ' + e.name }
 try { document.cookie = 'a=b'; r.cookie = 'ok ' + document.cookie } catch (e) { r.cookie = 'threw ' + e.name }
 try { indexedDB.open('x'); r.indexedDB = 'ok' } catch (e) { r.indexedDB = 'threw ' + e.name }
 r.origin = self.origin
 const img = src => new Promise(resolve => { const i = new Image(); i.onload = () => resolve('loaded'); i.onerror = () => resolve('failed'); i.src = src; document.body.appendChild(i) })
+// What no request hook sees: the listeners count connections.
+add('preconnect', 'http://preconnect.test/')
+add('preload', 'http://preload.test/x.png', 'image')
+add('prefetch', 'http://prefetch.test/x')
+add('dns-prefetch', 'http://dnsprefetch.test/')
+try {
+  const pc = new RTCPeerConnection({ iceServers: [
+    { urls: 'stun:127.0.0.1:${ports.stun}' },
+    { urls: 'turn:turn.test:3478?transport=tcp', username: 'secret-in-username', credential: 'x' },
+  ] })
+  pc.createDataChannel('x')
+  pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => {})
+  r.rtc = 'made'
+} catch (e) { r.rtc = 'threw ' + e.name }
 ;(async () => {
-  r.fetchWeb = await settle(fetch('${NET}/fetch'))
+  r.fetchWeb = await settle(fetch('${WEB}/fetch'))
   r.fetchOwnFolder = await settle(fetch('style.css'))
-  r.xhr = await new Promise(resolve => { const x = new XMLHttpRequest(); x.onload = () => resolve('reached'); x.onerror = () => resolve('refused'); try { x.open('GET', '${NET}/xhr'); x.send() } catch (e) { resolve('refused') } })
-  r.websocket = await new Promise(resolve => { try { const w = new WebSocket('${NET.replace('http', 'ws')}/ws'); w.onopen = () => resolve('reached'); w.onerror = () => resolve('refused') } catch (e) { resolve('refused') } })
-  try { r.beacon = navigator.sendBeacon('${NET}/beacon', 'x') } catch (e) { r.beacon = 'threw' }
-  r.webImage = await img('${NET}/img.png')
+  r.xhr = await new Promise(resolve => { const x = new XMLHttpRequest(); x.onload = () => resolve('reached'); x.onerror = () => resolve('refused'); try { x.open('GET', '${WEB}/xhr'); x.send() } catch (e) { resolve('refused') } })
+  r.websocket = await new Promise(resolve => { try { const w = new WebSocket('ws://web.test/ws'); w.onopen = () => resolve('reached'); w.onerror = () => resolve('refused') } catch (e) { resolve('refused') } })
+  try { navigator.sendBeacon('${WEB}/beacon', 'x') } catch (e) {}
+  r.webImage = await img('${WEB}/img.png')
   r.sameFolderImage = await img('images/graph.png')
   r.dotDotImage = await img('../other/secret.png')
   r.encodedDotDotImage = await img('%2e%2e/other/secret.png')
   r.linkImage = await img('link.png')
   r.hiddenImage = await img('.hidden/x.png')
+  r.localFileImage = await img('local-file://${encodeURI(path.join(dir, 'company', 'other', 'secret.png'))}')
+  r.fileImage = await img('file://${encodeURI(path.join(dir, 'company', 'other', 'secret.png'))}')
   r.moduleRan = window.moduleRan === true
   r.webScriptRan = window.webScriptRan === true
-  parent.postMessage({ type: 'doc-result', result: r }, '*')
-  // Last: the frame navigates itself to the web (the CSP does not cover this; the session guard does).
-  setTimeout(() => { location.href = '${NET}/nav' }, 200)
+  try { r.popup = window.open('${WEB}/popup') === null ? 'null' : 'window' } catch (e) { r.popup = 'threw' }
+  window.__r = r
 })()
 `
 }
@@ -63,93 +88,138 @@ const img = src => new Promise(resolve => { const i = new Image(); i.onload = ()
 function setUp() {
   const company = path.join(dir, 'company')
   const folder = path.join(company, '営業')
-  fs.mkdirSync(path.join(folder, 'images'), { recursive: true })
-  fs.mkdirSync(path.join(folder, '.hidden'), { recursive: true })
+  for (const d of ['images', '.hidden']) fs.mkdirSync(path.join(folder, d), { recursive: true })
   fs.mkdirSync(path.join(company, 'other'), { recursive: true })
   fs.writeFileSync(path.join(folder, 'report.html'), `<!doctype html><html><head><meta charset="utf-8">
-<link rel="stylesheet" href="style.css"><link rel="stylesheet" href="${NET}/web.css">
-<script src="${NET}/cdn.js"></script><script type="module" src="mod.js"></script>
+<meta http-equiv="Content-Security-Policy" content="connect-src 'none'; report-uri http://report.test/r">
+<link rel="stylesheet" href="style.css"><link rel="stylesheet" href="${WEB}/web.css">
+<script src="${WEB}/cdn.js"></script><script type="module" src="mod.js"></script>
 </head><body><p>資料</p><script>${probes()}</script></body></html>`)
+  fs.writeFileSync(path.join(folder, 'page2.html'), '<!doctype html><p>2</p>')
   fs.writeFileSync(path.join(folder, 'style.css'), 'p { color: red }')
   fs.writeFileSync(path.join(folder, 'mod.js'), 'window.moduleRan = true\n')
   fs.writeFileSync(path.join(folder, 'images', 'graph.png'), PNG)
   fs.writeFileSync(path.join(folder, '.hidden', 'x.png'), PNG)
   fs.writeFileSync(path.join(company, 'other', 'secret.png'), PNG)
+  fs.writeFileSync(path.join(company, 'other', 'other.html'), '<!doctype html><p>other</p>')
   fs.symlinkSync('../other/secret.png', path.join(folder, 'link.png'))
   fs.writeFileSync(path.join(dir, 'preload.js'), "require('electron').contextBridge.exposeInMainWorld('electronAPI', { marker: 'acb' })\n")
+  fs.writeFileSync(path.join(dir, 'app.html'), '<!doctype html><p>app</p>')
   return { company, folder }
 }
 
-registerLocalFileScheme()
-
-async function run() {
+async function listen() {
   const hits: string[] = []
-  const server = http.createServer((req, res) => {
+  const connections: Record<string, number> = {}
+  const web = http.createServer((req, res) => {
     hits.push(req.url ?? '')
     if (req.url === '/cdn.js') { res.setHeader('Content-Type', 'text/javascript'); res.end('window.webScriptRan = true'); return }
     res.end('ok')
   })
-  server.on('upgrade', (req, socket) => { hits.push(`upgrade ${req.url}`); socket.destroy() })
-  await new Promise<void>(resolve => server.listen(port, '127.0.0.1', resolve))
+  web.on('connection', () => { connections.web = (connections.web ?? 0) + 1 })
+  web.on('upgrade', (req, socket) => { hits.push(`upgrade ${req.url}`); socket.destroy() })
+  await new Promise<void>(resolve => web.listen(ports.web, '127.0.0.1', resolve))
+  const servers: Array<net.Server | dgram.Socket> = [web]
+  for (const name of TCP_NAMES) {
+    const s = net.createServer(socket => { connections[name] = (connections[name] ?? 0) + 1; socket.on('error', () => {}); socket.destroy() })
+    await new Promise<void>(resolve => s.listen(ports[name], '127.0.0.1', resolve))
+    servers.push(s)
+  }
+  const udp = dgram.createSocket('udp4')
+  udp.on('message', () => { connections.stun = (connections.stun ?? 0) + 1 })
+  await new Promise<void>(resolve => udp.bind(ports.stun, '127.0.0.1', resolve))
+  servers.push(udp)
+  return { hits, connections, close: () => servers.forEach(s => s.close()) }
+}
 
+async function run() {
+  const net0 = await listen()
   const { company, folder } = setUp()
-  const served: string[] = []
-  let ownerId = -1
   const docFrames = createDocFrames({
     paths: {
       validate: p => { if (!path.resolve(p).startsWith(company + path.sep)) throw new Error('outside'); return path.resolve(p) },
       rootOf: () => company,
     },
     notDownloaded: () => [],
-    ownerAlive: id => id === ownerId,
     log: { warn: () => {} },
   })
-  serveDocFrames({
-    serve: async request => {
-      const response = await docFrames.serve(request)
-      served.push(`${response.status} ${new URL(request.url).pathname}`)
-      return response
-    },
+  const shown = new Map<number, string>()
+  const shell = createDocViewShell({ serve: request => docFrames.serve(request), log: { warn: () => {} } })
+  const views = createDocViews({
+    frames: docFrames,
+    // Remember each view's address (the renderer never gets it) to probe it after the view is gone.
+    shell: { onWindowReset: listener => shell.onWindowReset(listener), create: async (windowId, onGone) => {
+      const handle = await shell.create(windowId, onGone)
+      return handle && { id: handle.id, destroy: handle.destroy, show: url => { shown.set(handle.id, url); handle.show(url) } }
+    } },
   })
-  guardDocFrameNetwork()
 
-  const win = new BrowserWindow({ show: false, webPreferences: { preload: path.join(dir, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false } })
-  ownerId = win.webContents.id
-  const checked = await docFrames.check(path.join(folder, 'report.html'))
-  if (!checked.ok) throw new Error(`check refused: ${checked.reason}`)
-  const url = docFrames.grant(checked.doc, ownerId)
-  result.url = url
-  const host = path.join(dir, 'host.html')
-  fs.writeFileSync(host, `<!doctype html><script>window.results = []; addEventListener('message', e => { if (e.data && e.data.type === 'doc-result') window.results.push(e.data.result) })</script>
-<iframe id="doc" sandbox="allow-scripts" allow="" referrerpolicy="no-referrer" src="${url}"></iframe>`)
-  await win.loadFile(host)
-  const js = (code: string) => win.webContents.executeJavaScript(code, true)
-  for (let i = 0; i < 100 && (await js('window.results.length')) === 0; i++) await wait(100)
-  result.doc = (await js('window.results'))[0]
-  result.hostAPI = await js("typeof window.electronAPI")
-  const frame = win.webContents.mainFrame.frames[0]
-  result.ownProcess = !!frame && frame.osProcessId !== win.webContents.mainFrame.osProcessId
+  const win = new BrowserWindow({ show: false, webPreferences: { preload: path.join(dir, 'preload.js'), contextIsolation: true, sandbox: true } })
+  await win.loadFile(path.join(dir, 'app.html'))
+  const open = async (file: string) => {
+    const checked = await docFrames.check(file)
+    if (!checked.ok) throw new Error(`check refused: ${checked.reason}`)
+    const viewId = await views.open(checked.doc, win.webContents.id)
+    if (viewId === null) throw new Error('no view')
+    const contents = allWebContents.fromId(viewId)!
+    for (let i = 0; i < 50 && (contents.isLoading() || !contents.getURL()); i++) await wait(100)
+    return { viewId, contents, url: shown.get(viewId)! }
+  }
+  const doc = await open(path.join(folder, 'report.html'))
+  const js = (code: string) => doc.contents.executeJavaScript(code, true)
+  for (let i = 0; i < 100 && !(await js('window.__r')); i++) await wait(100)
+  result.doc = await js('window.__r')
+  result.hostAPI = await win.webContents.executeJavaScript('typeof window.electronAPI', true)
+  result.windowsAfterPopup = BrowserWindow.getAllWindows().length
+  // Give preconnect, WebRTC and reports time to try.
+  await wait(3000)
+
+  // The session: in memory, only acb-doc handled, the app's schemes not; the app's session not acb-doc.
+  const ses = session.fromPartition(DOC_PARTITION)
+  result.session = {
+    persistent: ses.isPersistent(),
+    docHandled: ses.protocol.isProtocolHandled('acb-doc'),
+    localFileHandled: ses.protocol.isProtocolHandled('local-file'),
+    pluginHandled: ses.protocol.isProtocolHandled('acb-plugin'),
+    defaultServesDoc: session.defaultSession.protocol.isProtocolHandled('acb-doc'),
+    viewPartitionIsDoc: doc.contents.session === ses,
+  }
+
+  // Navigations of the document: each refused, the page stays.
+  const other = await open(path.join(company, 'other', 'other.html')).catch(() => null)
+  const otherUrl = other?.url ?? `acb-doc://${'f'.repeat(32)}/other.html`
+  const targets: Record<string, string> = {
+    data: 'data:text/html,<p>x</p>',
+    localFile: `local-file://${encodeURI(path.join(company, 'other', 'secret.png'))}`,
+    file: `file://${encodeURI(path.join(company, 'other', 'other.html'))}`,
+    plugin: 'acb-plugin://p/1.0.0/ui/index.html',
+    otherToken: otherUrl,
+    web: `${WEB}/nav`,
+    ownCss: doc.url.replace(/report\.html$/, 'style.css'),
+  }
+  const navigations: Record<string, string> = {}
+  for (const [name, target] of Object.entries(targets)) {
+    await js(`location.href = ${JSON.stringify(target)}`).catch(() => {})
+    await wait(600)
+    navigations[name] = doc.contents.getURL() === doc.url ? 'stayed' : 'moved'
+  }
+  // A page of its own grant is allowed (control).
+  await js(`location.href = 'page2.html'`).catch(() => {})
+  await wait(800)
+  navigations.ownPage = doc.contents.getURL().endsWith('/page2.html') ? 'moved' : 'stayed'
+  result.navigations = navigations
+
+  // The app's page reloads: every view of the window closes and its grant goes.
+  win.webContents.reload()
   await wait(1500)
-
-  // The view closed: the grant is revoked, and a new frame at the same address gets nothing.
-  docFrames.close(url, ownerId)
-  served.length = 0
-  await js(`(() => { const f = document.createElement('iframe'); f.setAttribute('sandbox', 'allow-scripts'); f.src = ${JSON.stringify(url)}; document.body.appendChild(f) })()`)
-  await wait(1000)
-  result.afterClose = [...served]
-
-  // Opened at the top level (outside the app's frame), the CSP's sandbox still makes the origin opaque.
-  const top = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, sandbox: true } })
-  ownerId = top.webContents.id
-  const again = await docFrames.check(path.join(folder, 'report.html'))
-  if (!again.ok) throw new Error('check refused')
-  await top.loadURL(docFrames.grant(again.doc, ownerId)).catch(() => {})
-  await wait(500)
-  result.topLevel = await top.webContents.executeJavaScript(`(() => { let s; try { localStorage.getItem('k'); s = 'ok' } catch (e) { s = 'threw ' + e.name } return self.origin + ' ' + s })()`, true)
-  await wait(500)
-
-  result.hits = hits
-  server.close()
+  result.afterReload = {
+    viewGone: !allWebContents.fromId(doc.viewId) || allWebContents.fromId(doc.viewId)!.isDestroyed(),
+    served: (await docFrames.serve({ url: doc.url, method: 'GET' })).status,
+  }
+  result.partitionFolders = fs.existsSync(path.join(dir, 'userData', 'Partitions')) ? fs.readdirSync(path.join(dir, 'userData', 'Partitions')) : []
+  result.hits = net0.hits
+  result.connections = net0.connections
+  net0.close()
   console.log(`RESULT ${JSON.stringify(result)}`)
   app.exit(0)
 }

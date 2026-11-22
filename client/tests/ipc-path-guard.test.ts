@@ -28,13 +28,14 @@ const IN_FILE = Symbol('inside file')
 /**
  * channel → its arguments (IN = a folder inside the root) and the indexes that are checked local paths.
  * `fromChatWindow`: only a consultation's own window may call it (it is called from one opened in IN).
+ * `fromMainFrame`: only the main window's main frame may call it (called so once the app started).
  */
-const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow?: true }> = {
+const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow?: true; fromMainFrame?: true }> = {
   'fs:readDirectory': { args: [IN], paths: [0] },
   'fs:readDirectoryTree': { args: [IN, 2], paths: [0] },
   'fs:readFile': { args: [IN_FILE], paths: [0] },
   'fs:readFileBinary': { args: [IN_FILE], paths: [0] },
-  'docFrames:open': { args: [IN_FILE], paths: [0] },
+  'docView:open': { args: [IN_FILE], paths: [0], fromMainFrame: true },
   'fs:writeFile': { args: [IN_FILE, 'x'], paths: [0] },
   'fs:createFile': { args: [IN_FILE, 'x'], paths: [0] },
   'fs:createDirectory': { args: [IN], paths: [0] },
@@ -190,9 +191,10 @@ test('each guarded parameter reaches AllowedRoots.validate, and an outside path 
   }
   try {
     const outside = path.join(h.base, 'outside-guard')
-    const probeAll = async (fromChatWindow: boolean, call: (channel: string, args: unknown[]) => Promise<unknown>) => {
+    type Sender = 'any' | 'chat' | 'mainFrame'
+    const probeAll = async (sender: Sender, call: (channel: string, args: unknown[]) => Promise<unknown>) => {
       for (const [channel, { args, paths, ...options }] of Object.entries(GUARDED)) {
-        if (!!options.fromChatWindow !== fromChatWindow) continue
+        if ((options.fromChatWindow ? 'chat' : options.fromMainFrame ? 'mainFrame' : 'any') !== sender) continue
         for (const index of paths) {
           const probe = path.join(outside, channel.replace(/[^a-zA-Z]/g, '_'), String(index))
           const callArgs = args.map((a, i) => i === index ? probe : a === IN ? root : a === IN_FILE ? path.join(root, 'a.txt') : a)
@@ -210,12 +212,19 @@ test('each guarded parameter reaches AllowedRoots.validate, and an outside path 
         }
       }
     }
-    await probeAll(false, async (channel, args) => h.fake.handlers.has(channel) ? await h.invoke(channel, ...args) : h.send(channel, ...args))
+    await probeAll('any', async (channel, args) => h.fake.handlers.has(channel) ? await h.invoke(channel, ...args) : h.send(channel, ...args))
     // Last: the main window opens a consultation window in the root, which then calls.
     await h.startApp()
     assert.deepEqual(await h.invoke('chatWindow:open', 'guard-session', { companyId: 'guard', companyName: 'Guard', rootPath: root }), { ok: true, focused: false })
     const chatWindow = BrowserWindow.all.at(-1)!.webContents
-    await probeAll(true, (channel, args) => h.invokeAs(chatWindow, channel, ...args))
+    await probeAll('chat', (channel, args) => h.invokeAs(chatWindow, channel, ...args))
+    // The main window's own page (its main frame), as Electron's invoke event names it.
+    const mainWindow = BrowserWindow.all[0].webContents
+    const mainFrame = { frameTreeNodeId: 1 }
+    await probeAll('mainFrame', async (channel, args) => {
+      const handler = h.fake.handlers.get(channel)!
+      return handler({ sender: Object.assign(Object.create(mainWindow), { mainFrame }), senderFrame: mainFrame }, ...args)
+    })
   } finally {
     AllowedRoots.prototype.validate = original
   }

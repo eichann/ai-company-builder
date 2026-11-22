@@ -1,14 +1,16 @@
 /**
  * `acb-doc://<token>/<file>` — the HTML viewer's address (`.claude/rules/doc-frame.md`).
  *
- * An HTML document is someone else's program: it is shown in a frame sandboxed
- * without `allow-same-origin` (an opaque origin), and everything it loads comes
- * from this scheme. The token stands for one opened document's folder (main
- * keeps the map, `electron/features/doc-frames/protocol.ts`); the address never
- * carries an absolute path.
+ * An HTML document is someone else's program: it is shown in a view of its own,
+ * on an in-memory session of its own (`electron/doc-view.ts`), with a CSP whose
+ * `sandbox` gives it an opaque origin, and everything it loads comes from this
+ * scheme. The token stands for one opened document's folder (main keeps the
+ * map, `electron/features/doc-frames/protocol.ts`); the address never leaves
+ * main and never carries an absolute path.
  *
- * Pure: the address grammar, the served file types and the frame's CSP. The
- * main process decides which file a request reaches.
+ * Pure: the address grammar, the served file types, the CSP, where a document
+ * view may navigate and what its session lets out. The main process decides
+ * which file a request reaches.
  */
 
 export const DOC_SCHEME = 'acb-doc'
@@ -57,10 +59,6 @@ export function docFileType(name: string): string | null {
   return Object.prototype.hasOwnProperty.call(DOC_FILE_TYPES, name.slice(dot + 1).toLowerCase())
     ? DOC_FILE_TYPES[name.slice(dot + 1).toLowerCase()]
     : null
-}
-
-export function isDocAddress(url: string | null | undefined): boolean {
-  return typeof url === 'string' && url.toLowerCase().startsWith(`${DOC_SCHEME}:`)
 }
 
 /** The address of a file directly in the grant's folder (the opened document). */
@@ -181,22 +179,34 @@ export function docFrameCsp(policy: DocFramePolicy): string {
 }
 
 /**
- * Whether a network request (http, https, ws, wss) comes from a document frame
- * or anything inside one: `frameUrls` = the requesting frame's URL, then its
- * parents'. The session guard (`electron-adapter.ts` `guardDocFrameNetwork`)
- * cancels those — a second wall behind the CSP, which does not cover a frame
- * navigating itself to a web address.
+ * The document session's one request rule (`doc-view.ts`, a second wall behind
+ * the CSP): only the document's own scheme and what a page makes in memory
+ * (`data:`, `blob:`, `about:`). Every web address (http, https, ws, wss), every
+ * file and every other scheme is cancelled.
  */
-export function isFromDocFrame(frameUrls: readonly (string | null | undefined)[]): boolean {
-  return frameUrls.some(isDocAddress)
+export function docSessionRequestAllowed(url: string): boolean {
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(url)?.[1]?.toLowerCase()
+  return scheme === DOC_SCHEME || scheme === 'data' || scheme === 'blob' || scheme === 'about'
 }
 
-/** `docFrames:open`: the address of the document's frame, or why there is none (plain Japanese). */
-export type DocFrameOpenResult = { ok: true; url: string } | DocFrameRefused
+/**
+ * Where a document view may go (`will-frame-navigate`, `will-redirect`): its
+ * main frame only to an `.html` page of its own grant (`token`). Never another
+ * token, `data:`, `file:`, `local-file:`, `acb-plugin:`, a web address; a
+ * frame inside it nowhere (its CSP allows no frame either).
+ */
+export function docViewNavigationAllowed(token: string | null, url: string, isMainFrame: boolean): boolean {
+  if (!isMainFrame || token === null) return false
+  const target = parseDocFrameUrl(url)
+  return target !== null && target.token === token && isHtmlDocumentName(target.segments[target.segments.length - 1])
+}
+
+/** `docView:open`: the view showing the document (the renderer never sees its address), or why not. */
+export type DocViewOpenResult = { ok: true; viewId: number } | DocFrameRefused
 
 export interface DocFrameRefused { ok: false; reason: DocFrameRefusal; message: string }
 
-export type DocFrameRefusal = 'not_html' | 'not_found' | 'not_allowed' | 'not_downloaded' | 'too_large'
+export type DocFrameRefusal = 'not_html' | 'not_found' | 'not_allowed' | 'not_downloaded' | 'too_large' | 'top_level' | 'unavailable'
 
 export const DOC_FRAME_WORDS: Readonly<Record<DocFrameRefusal, string>> = {
   not_html: 'HTML のファイルではないため、表示できません。',
@@ -204,4 +214,6 @@ export const DOC_FRAME_WORDS: Readonly<Record<DocFrameRefusal, string>> = {
   not_allowed: 'このファイルはアプリの中で表示できません。',
   not_downloaded: 'このパソコンにダウンロードしていないフォルダのファイルです。',
   too_large: 'ファイルが大きすぎるため表示できません（20 MB まで）。',
+  top_level: '会社フォルダのいちばん上にある HTML は表示できません。部署などのフォルダに入れてください。',
+  unavailable: 'いまは表示できません。もう一度お試しください。',
 }
