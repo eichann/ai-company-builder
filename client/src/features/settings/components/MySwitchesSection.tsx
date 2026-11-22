@@ -1,11 +1,14 @@
 // 設定 → 自分の設定: the member's own 「受信を読む」 and 「AI が自動で進める」 (言葉の決まり 5c).
 // The company decides whether each may be used (管理画面の「詳しい設定」); one it stops is greyed
-// with 「会社の設定で止まっています」. The server decides; this only shows and asks.
-import { SpinnerGap } from '@phosphor-icons/react'
+// with 「会社の設定で止まっています」 — in the warning colour, since an admin can turn it back on
+// (design-system.md 「止まっている」の色). The server decides; this only shows and asks.
+import { SpinnerGap, WarningCircle } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader } from '../../../shared/ui/primitives'
 import { companyHasMailOrChat, CONNECT_MAIL_CHAT_TEXT, WORK_SWITCH_COMPANY_OFF_TEXT, type WorkSwitch } from '../../../../shared/work-switches'
 import { CALM } from '../../../../shared/thing-words'
 import { useWorkSwitches } from '../hooks/useWorkSwitches'
+import { STOP_ICON, STOP_TEXT } from '../../../shared/ui/stateStyles'
+import { STOP_LOOK } from '../../../../../shared/design-tokens/stop-meaning'
 
 const SWITCHES: Array<{ key: WorkSwitch; title: string; text: string }> = [
   {
@@ -29,7 +32,7 @@ function Toggle({ on, label, disabled, onChange }: { on: boolean; label: string;
 
 /** `onOpenGoogle`: 受信を読む is on but Google has not let ACB read the mail yet — the way to 「Google で許可」. */
 export function MySwitchesSection({ companyId, onOpenGoogle }: { companyId: string; onOpenGoogle?: () => void }) {
-  const { loadRef, switches, error, busy, change } = useWorkSwitches(companyId)
+  const { loadRef, switches, error, companyOff, busy, change } = useWorkSwitches(companyId)
   return (
     <div ref={loadRef} className="space-y-5 px-8 pb-8 pt-7">
       <SectionHeader title="自分の設定" description="あなたの分だけの設定です。ほかの人には変わりません。" />
@@ -52,13 +55,21 @@ export function MySwitchesSection({ companyId, onOpenGoogle }: { companyId: stri
                 )
               }
               return (
-                <div key={w.key} data-my-switch={w.key} className={`flex items-start gap-4 p-5 ${s.allowed ? '' : 'opacity-60'}`}>
+                <div key={w.key} data-my-switch={w.key} className="flex items-start gap-4 p-5">
                   <div className="min-w-0 flex-1">
-                    <p className="text-[13.5px] font-medium">{w.title}</p>
-                    <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">{w.text}</p>
-                    {!s.allowed && <p className="mt-1 text-[12px] font-medium text-amber-700 dark:text-amber-300">{WORK_SWITCH_COMPANY_OFF_TEXT}</p>}
+                    {/* Only the switch's own words fade: the notice under them stays readable. */}
+                    <div className={s.allowed ? '' : 'opacity-disabled'}>
+                      <p className="text-[13.5px] font-medium">{w.title}</p>
+                      <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">{w.text}</p>
+                    </div>
+                    {!s.allowed && (
+                      <p data-company-off className={`mt-1 flex items-center gap-1 text-small font-strong ${STOP_TEXT.needsAction}`}>
+                        <WarningCircle size={13} weight="fill" aria-hidden className={`shrink-0 ${STOP_ICON.needsAction}`} />
+                        {WORK_SWITCH_COMPANY_OFF_TEXT}（使いたいときは、管理者に相談してください）
+                      </p>
+                    )}
                     {w.key === 'readIncoming' && s.on && !switches.readIncoming.connected.mail && (
-                      <p data-needs-google className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px] text-amber-700 dark:text-amber-300">
+                      <p data-needs-google className="mt-1.5 flex flex-wrap items-center gap-2 text-small text-warning-text">
                         メールを読むには、Google で許可が要ります。
                         {onOpenGoogle && <Button size="sm" onClick={onOpenGoogle}>Google で許可する</Button>}
                       </p>
@@ -69,7 +80,7 @@ export function MySwitchesSection({ companyId, onOpenGoogle }: { companyId: stri
               )
             })}
           </Card>
-          {error && <Callout tone="danger" role="alert">{error}</Callout>}
+          {error && <Callout tone={companyOff ? STOP_LOOK.needsAction.variant : 'danger'} role="alert">{error}</Callout>}
           <p className="text-[12px] text-zinc-500 dark:text-zinc-400">会社が使ってよいか・初めの値は、管理者が管理画面の「詳しい設定」で決めています。</p>
         </>
       )}

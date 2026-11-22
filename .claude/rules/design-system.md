@@ -40,7 +40,7 @@ live, how screens use them, and what CI holds.
   failure: red), awaiting (awaiting approval: amber), selected, disabled, readonly (「閲覧のみ」).
   Emphasis is one primary blue (`#1264a3`, dark buttons `#1b71b8`) under separate names: `primary`,
   `link`, `selected-*`, `focus-ring`, `unread` (the one new-item mark), `thing-task`. AI is violet.
-  Amber means warning and awaiting approval only (others later). Type: six steps `caption` 11 ·
+  Amber means warning (a stop the viewer has to act on included) and awaiting approval only. Type: six steps `caption` 11 ·
   `small` 12 · `body` 13 (admin 14) · `title` 15 · `heading` 17 · `page` 20, each with line height
   and weight.
 - `--data-*` (`--data-department-default`, the 12 department colours) are data, not meaning:
@@ -314,18 +314,37 @@ fine), `color-opacity` (`bg-warning/10`).
   reason / fix), awaiting approval → `awaiting` (amber, 「承認を待っています」). Applied: the admin's
   「AI を止めています」 band (`stop-bar.tsx`, was red: grey, + who stopped the newest and when), Slack /
   Google `operatorStopped` badge and box, the connected services' `operator-stopped`, google-relay's
-  止めています, the integrations list (`STOPPED_BY_PERSON` / `STOPPED_BY_FAILURE` in
+  止めています, the integrations list (`PROBLEM_STOP` / `problemBadge` in
   `admin/src/lib/integrations.ts`; the operator-stopped box on a plugin's page), the jobs' badge
   (`jobBadge`) and 「すべて止めています」 box, the app's task card run that needs a person (red 「AI が
   止まりました」; `AI_RUN_STATE_LABELS` say 止まりました), the task row's failed AI (red), the chat list's
   failed group 「止まりました」, an own key an admin stopped (「自分の鍵（管理者が止めています）」, grey), the
-  approval card while pending (amber frame, Hourglass). **Left as they were for the owner** (meaning
-  not clear from the code): plugin problems `connector-stopped` (off or stopped),
-  `auto-not-acknowledged`, `no-connector`, `not-a-business` (still 「止まっています」, outline); the
-  task row's `not-allowed` (「AI では始められません」, warning colour); 「会社の設定で止まっています」 (a
-  switch the company turned off, `MySwitchesSection`, a server text); auto sync's 「自動同期は止まって
-  います」 tooltip; `ExternalChangeBanner`'s 「自動保存は止めています」.
-- **Amber only for warning and awaiting**: 「変えています」 (advanced) is `info`; offline results in
+  approval card while pending (amber frame, Hourglass).
+- **「止まっている」の色は、見た人にすることがあるかで決める** (owner decision 2026-11-22; it refines the
+  one above): something to do — left alone it causes trouble — → **amber** (`warning`, with
+  WarningCircle; a badge keeps the word 「止まっています」); nothing to do — someone stopped it on
+  purpose and it is known — → grey `paused`; a failure → red `failed` 「止まりました」 with the reason and
+  the fix (unchanged). Awaiting approval stays `awaiting`.
+  **One place says the look of each meaning**: `shared/design-tokens/stop-meaning.ts` — `StopMeaning`
+  (`needsAction`, `stoppedOnPurpose`, `failed`, `awaitingApproval`) → `STOP_LOOK` (the variant and the
+  badge's word), pure data read by both apps. A screen says what its stop *means* (`PROBLEM_STOP` for the
+  plugin problems, `AI_STOP` in `TaskRow`, `jobBadge`) and takes the look from there; a hand-drawn mark
+  uses the app's `STOP_ICON` / `STOP_TEXT` (`client/src/shared/ui/stateStyles.ts`, complete class names).
+  A new stopped place picks a meaning, never a colour.
+
+  | Place | Colour | Why |
+  |---|---|---|
+  | integrations `connector-stopped`, `auto-not-acknowledged`, `no-connector`, `not-a-business` (`PROBLEM_STOP` `needsAction`, `problemBadge`) and a business's 「〇〇 との行き来は止まっています」 line while its connector is off (`connectionLineTone`) | amber | the admin turns the connector on / confirms the write-back fields |
+  | the task row's `not-allowed` 「AI では始められません」 (`TaskRow` `AI_STOP`, `STOP_ICON`) | amber | the member starts it or hands it on |
+  | 「会社の設定で止まっています（使いたいときは、管理者に相談してください）」 (`MySwitchesSection`, `data-company-off`; only the switch's words fade) and the server's `WORK_SWITCH_COMPANY_OFF` refusal (a `warning` callout, not `danger`) | amber | an admin can turn it back on |
+  | the sync button while automatic sync waits (`syncWaitsForMember`, `TitleBar` `syncWaitsForYou`: icon + mark, name 「…（自動同期は止まっています）」) | amber | the member syncs by hand to resume |
+  | `ExternalChangeBanner` 「自動保存は止めています」 (already the warning set) | amber | the member saves or reloads |
+  | 「AI を止めています」 band, Slack / Google / connected services / google-relay operator stop, plugin `stopped` | grey | the operator / an admin stopped it on purpose |
+  | plugin `key-stopped` 「選んだ鍵が止められています」 | grey | a key someone stopped on purpose; its page says where to resume (an owner question if it should be amber) |
+  | jobs paused by an admin or the responsible person, 「すべて止めています」 | grey | stopped on purpose, known |
+  | an own key an admin stopped 「自分の鍵（管理者が止めています）」 | grey | the admin's decision; the member cannot undo it (the line says to ask) |
+  | plugin failures, jobs whose person left, the task card's / row's failed AI, the chat's 「止まりました」 | red | a failure (unchanged) |
+- **Amber only for warning (a stop the viewer has to act on included) and awaiting**: 「変えています」 (advanced) is `info`; offline results in
   `ApprovalCard` / `MailDraftCard` and 「ブラウザで Google の画面を開きました」 are the info set; error
   messages shown in a warning callout (`{error}` callouts in settings, absences, jobs) are `danger`.
 - **New-item mark = one primary dot** `NewDot` (primitives; `bg-unread`, `size-dot`, `role="img"` named
@@ -347,10 +366,15 @@ fine), `color-opacity` (`bg-warning/10`).
 - **Guarded by** `client/tests/ui/status-colours.spec.ts` (light and dark: every callout tone and badge
   variant against its `--color-*-rgb` tokens on `client/tests/status-ui.html`; the three stopped states
   differ in fill, icon and word; real screens — the task card's failed run, the pending approval card,
-  `download-folders-ui?tab=ownkeys&ownkey=stopped`, the bell's dots and 「閲覧のみ」) and
+  `download-folders-ui?tab=ownkeys&ownkey=stopped`, the bell's dots and 「閲覧のみ」; the amber places —
+  `status-ui`'s task rows (`not-allowed` amber, failed red) and title bar (sync waiting),
+  `download-folders-ui?tab=mine&company=off|later` (the notice, unfaded; the refusal a warning),
+  `editor-tabs-ui?view=external` 「自動保存は止めています」), `autoSyncSchedule.test.ts`
+  (`syncWaitsForMember` only with automatic sync on) and
   `admin/tests/status-colours.test.tsx` (the CSS Tailwind 4 generates for every Badge / Callout variant,
   through `tests/token-paint.ts`, shared with `primary-action.test.tsx`; the stopped states apart;
-  `cn()` keeping the type size; `jobBadge` by meaning), `agent-stop.test.tsx` (the band's paused colours
+  `cn()` keeping the type size; `jobBadge` by meaning; `problemBadge` / `PROBLEM_STOP` covering every
+  problem, the amber badge and line painted in the warning set), `agent-stop.test.tsx` (the band's paused colours
   and who / when). `chat-panel.spec.ts` reads the 新着 dot by its name.
 - **Still to move** (later PRs): the app's other hand-made red / amber boxes and texts (`ChatHeader`'s
   status dots, `RateLimitMeter`, `DiffViewer`, `ReviewSidePanel`, `MarkdownDiffView`, `BackupHistorySlideOver`,

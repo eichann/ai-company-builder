@@ -205,7 +205,7 @@ client/src/features/settings/components/DriveTrustedFolders.tsx arbitrary-value=
 client/src/features/settings/components/GoogleRelayCard.tsx arbitrary-value=10 opacity-scale=1 palette-color=24 radius-scale=3 type-scale=4 white-black=4
 client/src/features/settings/components/GoogleSection.tsx arbitrary-value=16 palette-color=13 radius-scale=1 white-black=1
 client/src/features/settings/components/MoveEnvKeysCard.tsx arbitrary-value=7 palette-color=14 radius-scale=1 white-black=1
-client/src/features/settings/components/MySwitchesSection.tsx arbitrary-value=9 opacity-scale=2 palette-color=15 shadow-scale=1 white-black=2
+client/src/features/settings/components/MySwitchesSection.tsx arbitrary-value=7 opacity-scale=1 palette-color=11 shadow-scale=1 white-black=2
 client/src/features/settings/components/OwnKeysSection.tsx arbitrary-value=8 palette-color=19 radius-scale=1 white-black=4
 client/src/features/settings/components/PromptSuggestionSettings.tsx arbitrary-value=3 palette-color=6
 client/src/features/settings/components/SettingsPanel.tsx arbitrary-value=18 opacity-scale=1 palette-color=84 radius-scale=8 shadow-scale=1 type-scale=4 white-black=20 z-index=2

@@ -151,10 +151,18 @@ export function afterSync(state: AutoSyncState, result: SyncOutcomeView, options
   }
 }
 
+/**
+ * Automatic sync is on but stopped until the member syncs by hand: the sync button turns the
+ * warning colour (design-system.md 「止まっている」の色 — the member has something to do).
+ */
+export function syncWaitsForMember(state: AutoSyncState, settings: AutoSyncSettings): boolean {
+  return (settings.receive.enabled || settings.send.enabled) && state.needsMember
+}
+
 /** The sync button's tooltip: when the last automatic sync ran, or that automatic sync waits for the member. */
 export function syncButtonTitle(state: AutoSyncState, settings: AutoSyncSettings): string {
   if (!settings.receive.enabled && !settings.send.enabled) return 'サーバーと同期'
-  if (state.needsMember) return 'サーバーと同期\n自動同期は止まっています（このボタンで同期すると再開します）'
+  if (syncWaitsForMember(state, settings)) return 'サーバーと同期\n自動同期は止まっています（このボタンで同期すると再開します）'
   if (state.openFilesHeld !== null && settings.receive.enabled) return 'サーバーと同期\nほかのアプリで開いているファイルがあるため、ほかの人の変更の受け取りを待っています'
   if (state.lastAutoSyncAt === null) return 'サーバーと同期'
   const at = new Date(state.lastAutoSyncAt)

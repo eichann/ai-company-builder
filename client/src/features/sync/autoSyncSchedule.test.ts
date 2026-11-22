@@ -11,6 +11,7 @@ import {
   recordRun,
   runDueNow,
   syncButtonTitle,
+  syncWaitsForMember,
   type AutoSyncState,
 } from './autoSyncSchedule'
 import { DEFAULT_AUTO_SYNC_SETTINGS, normalizeAutoSyncSettings, type AutoSyncSettings } from '../../shared/lib/autoSyncSettings'
@@ -164,4 +165,11 @@ test('a receive held for a file open in another app: said once per set (kept in 
 
 test('a file open in another app is not a stop for the member: automatic sync goes on', () => {
   assert.equal(needsMemberAfter({ success: false, errorType: 'file_open' }), false)
+})
+
+test('the sync button turns amber only while automatic sync is on and waits for the member (「止まっている」の色)', () => {
+  assert.equal(syncWaitsForMember(state({ needsMember: true }), settings()), true)
+  assert.equal(syncWaitsForMember(state(), settings()), false)
+  // Automatic sync switched off by the member: nothing waits, nothing to do.
+  assert.equal(syncWaitsForMember(state({ needsMember: true }), settings({ receive: { enabled: false }, send: { enabled: false } })), false)
 })

@@ -3,7 +3,10 @@
 // colour or free opacity left; the three stopped states stay apart (a person stopped it: grey,
 // a failure: red, awaiting approval: amber); the one new-item mark is the `unread` dot; and the
 // real screens use them: the task card's failed run, the approval card awaiting approval, an own
-// key an admin stopped, the bell's unread dot, the bell's 「閲覧のみ」 (was 「読むだけ」).
+// key an admin stopped, the bell's unread dot, the bell's 「閲覧のみ」 (was 「読むだけ」). 「止まっている」 the
+// member has to act on is amber (owner decision 2026-11-22): a task row the AI cannot start, a switch
+// the company stopped (and its refusal), the sync button while automatic sync waits, the editor's
+// external-change banner with autosave paused.
 // Computed colours compared with the token's own value on <html>, not class names.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
@@ -102,6 +105,51 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.locator('body')).not.toContainText('読むだけ')
       const unread = list.getByRole('img', { name: '未読' }).first()
       expect(await style(unread, 'backgroundColor')).toBe(await token(page, 'unread'))
+    })
+
+    test('stopped, and the member has something to do: amber (warning), never grey or red', async ({ page }) => {
+      await open(page, 'status', theme)
+      // The task row the AI cannot start (「AI では始められません」): the warning icon; a failed one stays red.
+      expect(await style(page.getByRole('img', { name: 'AI では始められません' }), 'color')).toBe(await token(page, 'warning-icon'))
+      expect(await style(page.getByRole('img', { name: 'AI が止まりました' }), 'color')).toBe(await token(page, 'failed-icon'))
+      // The sync button while automatic sync waits for the member: its icon and mark in the warning colour.
+      const sync = page.getByRole('button', { name: 'サーバーと同期（自動同期は止まっています）' })
+      await expect(sync).toHaveAttribute('title', /自動同期は止まっています/)
+      for (const icon of await sync.locator('svg').all()) expect(await style(icon, 'color')).toBe(await token(page, 'warning-icon'))
+    })
+
+    test('a switch the company stopped: an amber notice that an admin can help; its refusal is a warning, not an error', async ({ page }) => {
+      await open(page, 'download-folders', theme, { tab: 'mine', company: 'off' })
+      const notice = page.locator('[data-my-switch="readIncoming"] [data-company-off]')
+      await expect(notice).toContainText('会社の設定で止まっています')
+      await expect(notice).toContainText('管理者に相談')
+      expect(await style(notice, 'color')).toBe(await token(page, 'warning-text'))
+      expect(await style(notice.locator('svg'), 'color')).toBe(await token(page, 'warning-icon'))
+      // The notice itself is not faded with the switch's words.
+      expect(await notice.evaluate(n => getComputedStyle(n.closest('[data-my-switch]')!).opacity)).toBe('1')
+
+      await open(page, 'download-folders', theme, { tab: 'mine', company: 'later' })
+      await page.getByRole('switch', { name: '受信を読む' }).click()
+      const refusal = page.locator('[data-callout]').filter({ hasText: '会社の設定で止まっています。管理者に確かめてください。' })
+      await expect(refusal).toHaveAttribute('data-callout', 'warning')
+      await expectSet(page, refusal, sets('warning'), 'company-off refusal')
+    })
+
+    test('the editor\'s 「自動保存は止めています」 banner is the warning set', async ({ page }) => {
+      await open(page, 'editor-tabs', theme, { view: 'external' })
+      const editor = page.locator('.cm-content[role="textbox"]')
+      await expect(editor).toContainText('第12回の構成案です。')
+      await editor.click()
+      await page.keyboard.press('ControlOrMeta+End')
+      await page.keyboard.insertText('\n私の追記')
+      await page.getByTestId('external-edit').click()
+      const banner = page.locator('[data-external-change]')
+      await banner.getByRole('button', { name: '自分の編集を残す' }).click()
+      await expect(banner).toContainText('自動保存は止めています')
+      expect(await style(banner, 'backgroundColor')).toBe(await token(page, 'warning-bg'))
+      expect(await style(banner, 'borderTopColor')).toBe(await token(page, 'warning-border'))
+      expect(await style(banner, 'color')).toBe(await token(page, 'warning-text'))
+      expect(await style(banner.locator('svg').first(), 'color')).toBe(await token(page, 'warning-icon'))
     })
   })
 }

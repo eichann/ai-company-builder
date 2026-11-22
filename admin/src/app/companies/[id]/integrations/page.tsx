@@ -18,7 +18,7 @@
 // by the connector's label, never a fixed 「HubSpot」.
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowsClockwise, ClockCounterClockwise, PlugsConnected, ShieldSlash } from '@phosphor-icons/react'
+import { ArrowsClockwise, ClockCounterClockwise, PlugsConnected, ShieldSlash, WarningCircle } from '@phosphor-icons/react'
 
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -59,8 +59,8 @@ import {
   HISTORY_LABELS,
   IMPORT_STATUS_TEXT,
   PROBLEM_TEXT,
-  STOPPED_BY_FAILURE,
-  STOPPED_BY_PERSON,
+  problemBadge,
+  connectionLineTone,
   connectionStopped,
   WRITE_CHOICE_LABELS,
   autoUnavailable,
@@ -153,11 +153,13 @@ function StatusBadge({ item }: { item: PluginListItem }) {
   // A business without its connector still works inside ACB: only the exchange with the outside service stops.
   if (item.install.enabled && packageOf(item)?.role === 'business') return <Badge variant="success">使っています</Badge>
   const problem = item.install.problem
-  if (problem === 'off') return <Badge variant="outline">オフ</Badge>
-  // The three stopped states by meaning (design-system.md P2b); a problem whose cause is unclear keeps the old word.
-  if (STOPPED_BY_PERSON.includes(problem)) return <Badge variant="paused" title={PROBLEM_TEXT[problem]}>止めています</Badge>
-  if (STOPPED_BY_FAILURE.includes(problem)) return <Badge variant="failed" title={PROBLEM_TEXT[problem]}>止まりました</Badge>
-  return <Badge variant="outline" title={PROBLEM_TEXT[problem]}>止まっています</Badge>
+  // 「止まっている」 by meaning (design-system.md P2b): grey by a person, red on a failure, amber when the admin has to act.
+  const badge = problemBadge(problem)
+  return (
+    <Badge variant={badge.variant} title={problem === 'off' ? undefined : PROBLEM_TEXT[problem]} {...(badge.variant === 'warning' ? { icon: WarningCircle } : {})}>
+      {badge.label}
+    </Badge>
+  )
 }
 
 /** The version shown: the installed one, else the newest. */
@@ -185,7 +187,7 @@ function ConnectionStatus({ item }: { item: PluginListItem }) {
   if (problem === null) return <p role="status" className="text-sm">{connector.label} とつながっています。</p>
   if (!CONNECTOR_PROBLEMS.includes(problem)) return null
   return (
-    <p role="status" className="text-sm text-muted-foreground">
+    <p role="status" data-connection-stopped={problem} className={`text-sm ${connectionLineTone(problem)}`}>
       {connectionStopped(connector.label)}：{PROBLEM_TEXT[problem]}。記録はそのまま使えます。
     </p>
   )

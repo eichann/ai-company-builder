@@ -54,7 +54,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLBut
 // only from its token set (text, bg, border, icon) — no free opacities, no palette colours. The
 // three stopped states are separate (owner decision 2026-11-21): `paused` stopped by a person
 // (grey, 「止めています」 + who / when), `failed` stopped by a failure (red, 「止まりました」 + reason
-// and fix), `awaiting` awaiting approval (amber). Amber is warning and awaiting only; `offline` is
+// and fix), `awaiting` awaiting approval (amber); a stop the member has to act on is `warning`
+// (`STOP_LOOK`, shared/design-tokens/stop-meaning.ts). Amber is warning and awaiting only; `offline` is
 // information (grey) with its own icon.
 export type CalloutTone = 'info' | 'warning' | 'danger' | 'success' | 'offline' | 'paused' | 'failed' | 'awaiting'
 

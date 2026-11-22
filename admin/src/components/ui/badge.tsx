@@ -8,8 +8,8 @@ import { cn } from '@/lib/utils'
 // The status badge (design-system.md "Callouts and status badges (P2b, done)"): a mark that cannot be
 // pressed, one variant per meaning, each drawn only from its token set. The three stopped states are
 // separate (owner decision 2026-11-21): `paused` stopped by a person (grey, 「止めています」), `failed`
-// stopped by a failure (red, 「止まりました」), `awaiting` awaiting approval (amber). Amber is warning and
-// awaiting only. `selected` is a picked or highlighted role (管理者, 個別の設定), `neutral` a plain one.
+// stopped by a failure (red, 「止まりました」), `awaiting` awaiting approval (amber); a stop the admin has to
+// act on is `warning` (`STOP_LOOK`, shared/design-tokens/stop-meaning.ts). Amber is warning and awaiting only. `selected` is a picked or highlighted role (管理者, 個別の設定), `neutral` a plain one.
 const badgeVariants = cva(
   'inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-small border px-badge-x py-0.5 text-small font-medium whitespace-nowrap [&>svg]:pointer-events-none [&>svg]:size-3',
   {

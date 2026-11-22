@@ -20,6 +20,7 @@ import { describeError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
 import { JOB_CHAIN_STOPPED_ASK, jobOccurrenceText, jobRunsText, jobSlotText, jobTriggerText } from '../../../../shared/core/job-words'
 import { JOB_NEEDS_NEWER_SCREEN, JOB_SYSTEM_PAUSE_REASONS, isKnownJobTrigger } from '../../../../shared/core/jobs'
+import { STOP_LOOK } from '../../../../shared/design-tokens/stop-meaning'
 import { JobAcceptDialog, JobApproveDialog, JobFormDialog } from './job-dialogs'
 import { JobOccurrences } from './job-occurrences'
 
@@ -29,21 +30,20 @@ export const JOBS_INTRO =
 const personName = (m: { name: string | null; email: string | null } | undefined) => (m ? m.name || m.email || '名前未設定' : 'もういない人')
 
 /**
- * The badge: the one word for where the job stands. 「止まっている」 by meaning (owner decision 2026-11-21,
- * design-system.md P2b): paused by a person (an admin, the responsible person, the company's stop) → grey
+ * The badge: the one word for where the job stands. 「止まっている」 by meaning (`STOP_LOOK`, owner decision
+ * 2026-11-21, design-system.md P2b): paused by a person (an admin, the responsible person, the company's stop) → grey
  * 「止めています」; paused by the server because the responsible person left or lost rights → red
  * 「止まりました」 (it needs a new responsible person); waiting for approval or acceptance → amber.
  */
 export function jobBadge(job: JobView): { label: string; variant: BadgeVariant } {
   if (job.state === 'retired') return { label: '使っていません', variant: 'neutral' }
   if (job.state === 'paused') {
-    return job.pausedReason !== null && JOB_SYSTEM_PAUSE_REASONS.includes(job.pausedReason)
-      ? { label: '止まりました', variant: 'failed' }
-      : { label: '止めています', variant: 'paused' }
+    const meaning = job.pausedReason !== null && JOB_SYSTEM_PAUSE_REASONS.includes(job.pausedReason) ? 'failed' : 'stoppedOnPurpose'
+    return { label: STOP_LOOK[meaning].word, variant: STOP_LOOK[meaning].variant }
   }
-  if (job.waiting === 'COMPANY_STOPPED') return { label: 'すべて止めています', variant: 'paused' }
-  if (job.waiting === 'NOT_APPROVED') return { label: '承認を待っています', variant: 'awaiting' }
-  if (job.waiting === 'NOT_ACCEPTED') return { label: '受け取りを待っています', variant: 'awaiting' }
+  if (job.waiting === 'COMPANY_STOPPED') return { label: 'すべて止めています', variant: STOP_LOOK.stoppedOnPurpose.variant }
+  if (job.waiting === 'NOT_APPROVED') return { label: STOP_LOOK.awaitingApproval.word, variant: STOP_LOOK.awaitingApproval.variant }
+  if (job.waiting === 'NOT_ACCEPTED') return { label: '受け取りを待っています', variant: STOP_LOOK.awaitingApproval.variant }
   if (job.placement === 'a') return { label: 'PC で動きます', variant: 'success' }
   return { label: '動いています', variant: 'success' }
 }
