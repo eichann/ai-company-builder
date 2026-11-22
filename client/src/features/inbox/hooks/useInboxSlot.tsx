@@ -6,8 +6,9 @@ import { InboxChips, InboxList, type InboxRowButton } from '../components/InboxL
 import { InboxCardDialog } from '../components/InboxCardDialog'
 import { InboxButton } from '../components/InboxButton'
 import { NoticeSettingsDialog } from '../components/NoticeSettingsDialog'
+import { hasFullAccessIn } from '../api'
 import { useInboxBrowserPlans, type InboxBrowserPlanList, type InboxPlanStates } from './useInboxBrowserPlans'
-import { bulkSeenIds, hasInboxNews, inboxNewsBaseline, inboxNewsKeys, inboxView, sameKeys, seenWhileShown, type InboxFilter, type InboxItem } from '../model'
+import { bulkSeenIds, hasInboxNews, inboxNewsBaseline, inboxNewsKeys, inboxView, sameKeys, seenWhileShown, settingsAfterSwitch, type InboxFilter, type InboxItem, type NoticeSettingsState } from '../model'
 
 /** A meeting of a department without the task list, with its own buttons (the minutes feature's `titleBarMeetings`). */
 export type InboxMeeting = MeetingTurn & { actions: InboxRowButton[] }
@@ -57,7 +58,7 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, featu
   const [undone, setUndone] = useState<ReadonlySet<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
-  const [settings, setSettings] = useState<{ kinds: Record<string, boolean> | null; error: string | null } | null>(null)
+  const [settings, setSettings] = useState<NoticeSettingsState | null>(null)
   // What was on screen when the inbox was last shown (memory only: AppShell is keyed by company); `fixed` once
   // every source answered or the panel was shown — before that the rows that arrive are the baseline, not news.
   const [seen, setSeen] = useState<{ keys: ReadonlySet<string>; fixed: boolean } | null>(null)
@@ -126,12 +127,13 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, featu
   }
   const openSettings = async () => {
     setSettings({ kinds: null, error: null })
-    const r = await getNoticeSettings(companyId)
+    // The member's role decides whether the owner / admin-only kinds are offered (not known → not offered).
+    const [r, fullAccess] = await Promise.all([getNoticeSettings(companyId), hasFullAccessIn(companyId)])
     // Closed meanwhile: the answer must not open it again.
-    setSettings(s => s && (r?.success ? { kinds: r.kinds, error: null } : { kinds: null, error: r?.error ?? '知らせの設定を読めませんでした。' }))
+    setSettings(s => s && (r?.success ? { kinds: r.kinds, error: null, fullAccess } : { kinds: null, error: r?.error ?? '知らせの設定を読めませんでした。' }))
   }
   const switchKind = async (kind: string, on: boolean) => {
-    const put = (value: boolean, err: string | null) => setSettings(s => (s?.kinds ? { kinds: { ...s.kinds, [kind]: value }, error: err } : s))
+    const put = (value: boolean, err: string | null) => setSettings(s => settingsAfterSwitch(s, kind, value, err))
     put(on, null)
     const r = await setNoticeSetting(companyId, kind, on)
     if (!r?.success) put(!on, r?.error ?? '変えられませんでした。')
@@ -144,7 +146,7 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, featu
     : card.kind === 'browser'
     ? <InboxCardDialog title="承認のお願い（ブラウザ操作）" note="一覧からは任せられません。サイトから読み取った中身と届く時を、カードで確かめてから押してください。" onClose={closeCard}>{browserPlans?.renderCard(card.id)}</InboxCardDialog>
     : <InboxCardDialog title="送るメールの下書き" note="一覧からは送れません。宛先と中身を確かめてから送ってください。" onClose={closeCard}>{renderMailDraft(card.id)}</InboxCardDialog>)
-    : settings && <NoticeSettingsDialog kinds={settings.kinds} error={settings.error} features={features} onSwitch={(k, on) => { void switchKind(k, on) }} onClose={() => setSettings(null)} />
+    : settings && <NoticeSettingsDialog kinds={settings.kinds} error={settings.error} features={features} fullAccess={settings.fullAccess ?? null} onSwitch={(k, on) => { void switchKind(k, on) }} onClose={() => setSettings(null)} />
 
   return {
     title: '受け箱',

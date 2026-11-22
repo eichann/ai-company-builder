@@ -168,7 +168,7 @@ test('a stopped chain: the member\'s own open やること are offered by name, 
 
 // Stage 4a (jobs.md "Event-triggered jobs"): the app shows event jobs, so it says it reads schema 2 on every job call —
 // a server answers an app that does not say so without the definition (and refuses its 受け取る: 「アプリを新しく」).
-test('every job call says which definition shapes this app shows (1, 2 and 3: stage 4b-2)', async () => {
+test('every job call says which definition shapes this app shows (1, 2, 3 since stage 4b-2, 4 since member proposals)', async () => {
   const headers: Array<Record<string, string>> = []
   const fetch = (async (_url: string, init: RequestInit) => {
     headers.push(init.headers as Record<string, string>)
@@ -177,7 +177,7 @@ test('every job call says which definition shapes this app shows (1, 2 and 3: st
   const jobs = createJobsApi({ baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], fetch, log: { warn() {} } })
   await jobs.mine('c1')
   await jobs.pause('c1', J1)
-  assert.ok(headers.length === 2 && headers.every(h => h['X-ACB-Job-Schemas'] === '1,2,3'))
+  assert.ok(headers.length === 2 && headers.every(h => h['X-ACB-Job-Schemas'] === '1,2,3,4'))
   // The app's 受け取る is always a press of its own (owner decision 2026-11-18): said on every job call, so the server
   // never takes it for an approval's (it refuses the approver's acceptance without it).
   assert.ok(headers.every(h => h['X-ACB-Job-Accept'] === 'separate'))

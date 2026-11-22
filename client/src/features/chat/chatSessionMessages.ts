@@ -5,6 +5,7 @@ import type { GenerateTitleRequest } from '../../../shared/chat-server-api'
 import { REVIEW_PART_TYPE, readReviewRecord, type ReviewRecord } from '../../../shared/review-request'
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, type PluginOperationCard } from '../../../shared/plugin-operations'
 import { APPROVAL_PART_TYPE, readApprovalCardRef, type ApprovalCardRef } from '../../../shared/approvals'
+import { JOB_PROPOSAL_PART_TYPE, readJobProposalCardRef, type JobProposalCardRef } from '../../../shared/job-proposals'
 import { BROWSER_PLAN_PART_TYPE, readBrowserPlanCardRef, type BrowserPlanCardRef } from '../../../shared/browser-plans'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, readMinutesBundleChoiceCard, type MinutesBundleChoiceCard } from '../../../shared/minutes-app'
 import { MAIL_DRAFT_PART_TYPE, readMailDraftCard, type MailDraftCard } from '../../../shared/outbound-mail'
@@ -35,6 +36,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   const reviewRequests: ReviewRecord[] = []
   const pluginOperations: PluginOperationCard[] = []
   const approvals: ApprovalCardRef[] = []
+  const jobProposals: JobProposalCardRef[] = []
   const browserPlans: BrowserPlanCardRef[] = []
   const minutesDealChoices: MinutesBundleChoiceCard[] = []
   // The app's cards, in the order the tools produced them (restored in that order).
@@ -50,6 +52,11 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     if (part.type === APPROVAL_PART_TYPE) {
       const ref = readApprovalCardRef((part as { data?: unknown }).data)
       if (ref && !approvals.some(a => a.id === ref.id)) { approvals.push(ref); cardOrder.push(`approval-${ref.id}`) }
+      continue
+    }
+    if (part.type === JOB_PROPOSAL_PART_TYPE) {
+      const ref = readJobProposalCardRef((part as { data?: unknown }).data)
+      if (ref && !jobProposals.some(j => j.id === ref.id)) { jobProposals.push(ref); cardOrder.push(`job-proposal-${ref.id}`) }
       continue
     }
     if (part.type === BROWSER_PLAN_PART_TYPE) {
@@ -123,6 +130,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(reviewRequests.length ? { reviewRequests } : {}),
     ...(pluginOperations.length ? { pluginOperations } : {}),
     ...(approvals.length ? { approvals } : {}),
+    ...(jobProposals.length ? { jobProposals } : {}),
     ...(browserPlans.length ? { browserPlans } : {}),
     ...(minutesDealChoices.length ? { minutesDealChoices } : {}),
     ...(cardOrder.length > 1 ? { cardOrder } : {}),
@@ -178,6 +186,10 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
   for (const stored of msg.approvals || []) {
     const ref = readApprovalCardRef(stored)
     if (ref) cards.push({ type: APPROVAL_PART_TYPE, id: `approval-${ref.id}`, data: ref })
+  }
+  for (const stored of msg.jobProposals || []) {
+    const ref = readJobProposalCardRef(stored)
+    if (ref) cards.push({ type: JOB_PROPOSAL_PART_TYPE, id: `job-proposal-${ref.id}`, data: ref })
   }
   for (const stored of msg.browserPlans || []) {
     const ref = readBrowserPlanCardRef(stored)

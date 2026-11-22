@@ -47,6 +47,9 @@ import { actionToolDisplay, pluginOperationDisplay, recordToolDisplay } from '..
 import { RecordsApiError, type RecordTurnAccess } from './api'
 import type { MailAttachmentRead } from './mail-attachments'
 import { RECORD_ID_RE } from '../../../shared/core/records'
+import { JOB_PROPOSAL_INSTRUCTIONS, JOB_PROPOSAL_PLACES_TOOL, jobCandidateSummaryForAi, jobProposalRefusalForAi, jobProposalToolSpecs } from './job-proposal-tools'
+import { isJobCandidateId } from '../../../shared/core/job-proposals'
+import type { JobProposalCardRef } from '../../shared/job-proposals'
 
 export const RECORDS_SERVER = 'acb_records'
 export const recordToolId = (name: string) => `mcp__${RECORDS_SERVER}__${name}`
@@ -94,6 +97,8 @@ export type RecordToolProvider = (access: RecordTurnAccess, signal?: AbortSignal
 export interface RecordToolSpec extends RecordToolDescriptor {
   /** Shows an approval request: the answer becomes the app's approval card in the reply. */
   approvalCard?: boolean
+  /** A member's job proposal candidate (`job_proposal_create`): the answer becomes the app's card in the reply. */
+  jobProposalCard?: true
   /** A mail draft made or changed ('changed'), or shown again unchanged ('shown'): the draft becomes a new card in the reply (outbound-mail.md). */
   mailCard?: 'changed' | 'shown'
   /** A connector's update or create: its outcome becomes a card in the reply. */
@@ -880,6 +885,13 @@ export interface RecordToolsOptions {
   onApprovalCard?: (card: ApprovalCardRef) => void
   /** Minutes read with no まとまり linked and not exactly one candidate: the member chooses on this card. */
   onBundleChoice?: (card: MinutesBundleChoiceCard) => void
+  /**
+   * Offer the job proposal tools (`job-proposal-tools.ts`): only for a consultation the member is in — the chat server
+   * leaves it off for every unattended run and step consultation; also needs an `act` token not bound to a run.
+   */
+  jobProposals?: boolean
+  /** A job proposal candidate was made: the app's card for the reply (it reads the candidate with the session). */
+  onJobProposalCard?: (card: JobProposalCardRef) => void
   /** A mail draft was made or changed: its card for the reply. */
   onMailDraft?: (card: MailDraftCard) => void
   /** Connectors' tools on the same token (`tool-providers.ts`); each one's null / failure = none of its tools this turn. */
@@ -928,10 +940,13 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
   } catch { /* no plugin tools this turn */ }
   // Mail tools exist where outbound_message does; drafting needs an act token (Codex reads only).
   const mail = types.some(t => t.name === 'outbound_message') ? [MAIL_LOOKUP_TOOL, MAIL_SHOW_TOOL, ...(access.scope === 'act' ? mailActionTools(features) : [])] : []
+  // A member's job proposal: a person present (never an unattended run), an act token not bound to a run.
+  const offersJobProposals = options.jobProposals === true && access.scope === 'act' && access.boundToRun !== true
   // A feature's tools follow the feature, not whether its type exists (the types stay installed).
-  const specs = [
+  const specs: RecordToolSpec[] = [
     ...LOOKUPS, ...(types.some(t => t.name === 'meeting') ? [minutesReadTool(features)] : []), ...(types.some(t => t.name === 'approval') ? APPROVAL_LOOKUPS : []),
     ...(access.scope === 'act' ? actionToolSpecs(types, { department: options.department }, features) : []), ...pluginToolSpecs(plugins, access.scope === 'act'), ...pluginCallToolSpecs(plugins), ...mail,
+    ...(offersJobProposals ? jobProposalToolSpecs() : []),
   ].filter(spec => toolAllowed(spec.name, features))
   const newId = options.newId ?? (() => crypto.randomUUID())
   const now = options.now ?? (() => new Date())
@@ -975,7 +990,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
   }
   return {
     specs: [...specs, ...extraSpecs],
-    instructions: recordsInstructions(features) + extraInstructions,
+    instructions: recordsInstructions(features) + (offersJobProposals ? JOB_PROPOSAL_INSTRUCTIONS : '') + extraInstructions,
     close: () => access.close(),
     readTask,
     linkNewFile,
@@ -995,6 +1010,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       const req = spec.request(parsed.data)
       if (spec.card) return runUpdate(spec.card, parsed.data, req)
       if (spec.approvalCard) return showApproval(req)
+      if (spec.jobProposalCard) return makeJobCandidate(req)
       try {
         const minutesId = spec.name === MINUTES_READ_NAME ? String(parsed.data.id) : null
         const laterPart = minutesId !== null && typeof parsed.data.part === 'number' && parsed.data.part > 1
@@ -1034,6 +1050,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
         const out = JSON.stringify(shown)
         return out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}…（長いため切り詰めました / truncated）` : out
       } catch (error) {
+        if (error instanceof RecordsApiError && spec.name === JOB_PROPOSAL_PLACES_TOOL) return JSON.stringify(jobProposalRefusalForAi(error.code, error.message))
         if (error instanceof RecordsApiError) return JSON.stringify(refusalForAi(error))
         throw error
       }
@@ -1183,6 +1200,24 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     }
     if (options.companyId) options.onOperationCard?.(result)
     return JSON.stringify(aiSummaryOf(result))
+  }
+
+  /**
+   * job_proposal_create: the server builds and pins the candidate; the card holds only its id (from the server's answer,
+   * never the AI's input) and reads it with the member's session. Nothing is submitted here.
+   */
+  async function makeJobCandidate(req: ReturnType<RecordToolSpec['request']>): Promise<string> {
+    try {
+      const answer = await access.call(req.method, req.path, req.body, signal) as { id?: unknown; definition?: { name?: unknown } } | undefined
+      if (!answer || !isJobCandidateId(answer.id)) return JSON.stringify({ error: 'サーバーの答えを読めませんでした。' })
+      if (options.companyId) {
+        options.onJobProposalCard?.({ id: newId(), companyId: options.companyId, conversationId: options.conversationId ?? null, candidateId: answer.id, at: now().toISOString() })
+      }
+      return jobCandidateSummaryForAi(answer.definition ?? {})
+    } catch (error) {
+      if (error instanceof RecordsApiError) return JSON.stringify(jobProposalRefusalForAi(error.code, error.message))
+      throw error
+    }
   }
 
   function approvalCard(approvalId: string, origin: ApprovalCardRef['origin']) {

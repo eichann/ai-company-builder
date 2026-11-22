@@ -48,3 +48,20 @@ test('「AI が動いた回」 (D11): the buttons follow exactly what the server
   assert.deepEqual(later.retry, { blocked: '今は「もう一度」できません' })
   assert.equal(later.unknown.length, 1)
 })
+
+// 「出した案」 (member proposals): only what the server answered; 「取り下げる」 only while it waits.
+test('出した案: the state in the proposer\'s words, 取り下げる only while it waits, a retired job\'s name never guessed', async () => {
+  const { proposalRows } = await import('./model')
+  const base = { jobId: 'job.' + '1'.repeat(32), proposerId: 'me', candidateId: 'jc.' + 'a'.repeat(32), submittedVersion: 1, submittedFingerprint: null, returnReason: null, decidedBy: null, decidedAt: null, createdAt: '2026-11-22T03:00:00Z' }
+  const rows = proposalRows([
+    { ...base, id: 'jp.' + '1'.repeat(32), state: 'submitted' },
+    { ...base, id: 'jp.' + '2'.repeat(32), state: 'approved' },
+    { ...base, id: 'jp.' + '3'.repeat(32), jobId: 'job.' + '3'.repeat(32), state: 'returned', returnReason: 'TALK_FIRST' },
+    { ...base, id: 'jp.' + '4'.repeat(32), state: 'withdrawn' },
+  ], [job({ name: '議事録まとめ（毎週月曜 09:00）' })])
+  assert.deepEqual(rows.map(r => r.withdraw), [true, false, false, false])
+  assert.equal(rows[0].name, '議事録まとめ（毎週月曜 09:00）')
+  assert.equal(rows[2].name, '定期の仕事')
+  assert.match(rows[2].line, /差し戻されました（理由：先に話をしたい）/)
+  assert.match(rows[1].line, /「受け取る」/)
+})

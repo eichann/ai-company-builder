@@ -11,6 +11,7 @@ import { createJobsApi } from '../electron/features/jobs/ipc'
 import { APP_JOB_SCHEMAS, appReadsJobDefinition } from '../shared/jobs'
 import { jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobTriggerText } from '../../shared/core/job-words'
 import { parseJobDefinition, type JobDefinition } from '../../shared/core/jobs'
+import { proposalDefinition } from '../../shared/core/job-proposals'
 
 const J1 = 'job.' + '1'.repeat(32)
 const FP = 'sha256:' + 'a'.repeat(64)
@@ -29,6 +30,17 @@ const SAMPLES: Record<number, unknown[]> = {
     run: { kind: 'procedure', procedure: { source: 'company_skill', skill: 'interview-report', fingerprint: 'b'.repeat(40) } },
     grant: { ...NONE_GRANT, tools: ['records'], routes: ['GET /item/:recordId'], limits: { minutes: 30, runsPerDay: 3 } },
   })),
+  // Member proposals (PR C): a proposal as the server builds it — the smallest and one with every choice, a shelf Skill.
+  4: [
+    proposalDefinition(
+      { skill: 'minutes-summary', trigger: { every: 'week', weekday: 'mon', at: '09:00', businessDaysBefore: 0 }, check: { kind: 'new_meetings' }, reads: [], deliverable: null, readRecords: false, mailDrafts: false, minutes: 15, missed: { policy: 'skip', expiresAfterMinutes: 60 } },
+      { actingUser: 'me', procedure: { source: 'company_skill', skill: 'minutes-summary', fingerprint: 'b'.repeat(40) }, skillName: 'minutes-summary', candidateId: 'jc.' + 'c'.repeat(32) },
+    ),
+    proposalDefinition(
+      { skill: 'item1', trigger: { every: 'month', day: 'last', at: '17:30', ifHoliday: 'before' }, check: { kind: 'new_files', path: '営業/議事録' }, reads: ['営業/資料'], deliverable: '営業/週報', readRecords: true, mailDrafts: true, minutes: 30, missed: { policy: 'latest_only', expiresAfterMinutes: 1440 } },
+      { actingUser: 'me', procedure: { source: 'shelf_skill', item: 'item1', skill: 'weekly-report', fingerprint: 'd'.repeat(64) }, skillName: 'weekly-report', candidateId: 'jc.' + 'e'.repeat(32) },
+    ),
+  ],
 }
 
 test('every schema this app announces has definitions it shows in words', () => {
@@ -66,7 +78,7 @@ function api(definition: unknown, headers: Array<Record<string, string>> = []) {
 }
 
 test('a definition of a shape this app does not announce is shown as one it cannot show, also when the server sends it', async () => {
-  const later = { ...(SAMPLES[2][0] as object), schema: 4, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', ai: true } }
+  const later = { ...(SAMPLES[2][0] as object), schema: 5, trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', ai: true } }
   const r = await api(later).mine('c1')
   assert.ok(r.success)
   assert.equal(r.jobs[0].toAccept?.definition, null)
@@ -92,14 +104,14 @@ test('a definition of a shape this app does not announce is shown as one it cann
 test('every job call announces exactly this app’s shapes (whatever the shared parser reads)', async () => {
   const headers: Array<Record<string, string>> = []
   await api(null, headers).mine('c1')
-  assert.ok(headers.length > 0 && headers.every(h => h['X-ACB-Job-Schemas'] === '1,2,3'))
+  assert.ok(headers.length > 0 && headers.every(h => h['X-ACB-Job-Schemas'] === '1,2,3,4'))
   // Taken from this app's own list, not the core's: a schema added to the list (as a later app will) is what is sent.
   const list = APP_JOB_SCHEMAS as number[]
   list.push(9)
   try {
     const later: Array<Record<string, string>> = []
     await api(null, later).mine('c1')
-    assert.ok(later.every(h => h['X-ACB-Job-Schemas'] === '1,2,3,9'))
+    assert.ok(later.every(h => h['X-ACB-Job-Schemas'] === '1,2,3,4,9'))
   } finally {
     list.pop()
   }

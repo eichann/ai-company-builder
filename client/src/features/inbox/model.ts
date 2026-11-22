@@ -122,6 +122,8 @@ const ASK_WORDS: Partial<Record<NotificationKind, string>> = {
   due_tomorrow: '明日が期限',
   minutes_arrived: '議事録が届きました',
   job_accept_needed: '受け取ってください',
+  job_proposal_returned: '差し戻されました',
+  job_proposal: '案が届きました',
 }
 
 /** Notices that are no row at all: the morning summary says what あなた待ち already counts. */
@@ -411,3 +413,23 @@ export const sameKeys = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.si
 
 /** 99 at most, then 「99+」. */
 export const countText = (n: number) => (n > 99 ? '99+' : String(n))
+
+/**
+ * Notice kinds only owners / admins are ever written (member proposals' PR C, owner decision 2026-11-22): `job_proposal` (a
+ * member's proposal arrived), `job_paused` (a job paused because its responsible person left or lost rights) and
+ * `company_restored` (the company's data put back from a backup; owner decision 2026-11-22). A member's
+ * 「知らせの設定」 does not offer them; an owner / admin's does. Unknown role (offline) → not offered (the safe side).
+ */
+export const ADMIN_ONLY_NOTICE_KINDS: readonly NotificationKind[] = ['job_proposal', 'job_paused', 'company_restored']
+
+export function noticeKindsForRole<K extends string>(kinds: readonly K[], fullAccess: boolean | null): K[] {
+  return fullAccess === true ? [...kinds] : kinds.filter(k => !(ADMIN_ONLY_NOTICE_KINDS as readonly string[]).includes(k))
+}
+
+/** 「知らせの設定」 as the dialog holds it: the member's switches, why not, and whether they are an owner / admin. */
+export interface NoticeSettingsState { kinds: Record<string, boolean> | null; error: string | null; fullAccess?: boolean | null }
+
+/** One switch changed (or put back): everything else kept — also whether the owner / admin-only kinds are offered. */
+export function settingsAfterSwitch(s: NoticeSettingsState | null, kind: string, value: boolean, error: string | null): NoticeSettingsState | null {
+  return s?.kinds ? { ...s, kinds: { ...s.kinds, [kind]: value }, error } : s
+}

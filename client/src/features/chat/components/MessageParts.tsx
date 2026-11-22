@@ -18,7 +18,9 @@ import { DRIVE_OVERWRITE_PART_TYPE, readDriveOverwriteCard } from '../../../../s
 import { DriveOverwriteCard } from './DriveOverwriteCard'
 import { PluginOperationCard } from './PluginOperationCard'
 import { APPROVAL_PART_TYPE, readApprovalCardRef } from '../../../../shared/approvals'
+import { JOB_PROPOSAL_PART_TYPE, readJobProposalCardRef } from '../../../../shared/job-proposals'
 import { ApprovalCard } from './ApprovalCard'
+import { JobProposalCard } from './JobProposalCard'
 import { BROWSER_PLAN_PART_TYPE, readBrowserPlanCardRef } from '../../../../shared/browser-plans'
 import { BrowserPlanCard } from '../../browser-plans/components/BrowserPlanCard'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, readMinutesBundleChoiceCard } from '../../../../shared/minutes-app'
@@ -138,6 +140,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === APPROVAL_PART_TYPE) {
           const ref = readApprovalCardRef((part as { data?: unknown }).data)
           return ref ? <ApprovalCard key={item.key} card={ref} /> : null
+        }
+        if (part.type === JOB_PROPOSAL_PART_TYPE) {
+          const ref = readJobProposalCardRef((part as { data?: unknown }).data)
+          return ref ? <JobProposalCard key={item.key} card={ref} /> : null
         }
         if (part.type === BROWSER_PLAN_PART_TYPE) {
           const ref = readBrowserPlanCardRef((part as { data?: unknown }).data)

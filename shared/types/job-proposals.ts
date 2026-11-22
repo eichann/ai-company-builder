@@ -9,6 +9,8 @@
  *   The member's own session (/api/companies/:companyId; never a record token):
  *   GET  /me/job-candidates/:candidateId            the caller's candidate (and its proposal once submitted)
  *   POST /me/job-candidates/:candidateId/submit { fingerprint }   → 201 (200 when submitted already) JobProposalView
+ *   POST /me/job-candidates/:candidateId/discard   「やめる」 → { discarded: true } (the creator's own, not submitted; again: the same)
+ *                                                  — a discarded candidate then answers 410 JOB_CANDIDATE_DISCARDED until its time
  *   GET  /me/job-proposals                          the caller's proposals, newest first
  *   POST /me/job-proposals/:proposalId/withdraw     the proposer, only while submitted
  *
@@ -29,6 +31,8 @@ export interface JobCandidateView {
   expiresAt: string
   /** Once submitted: its proposal. */
   proposal: JobProposalView | null
+  /** The IANA zone its trigger's times are in (the company's clock). Optional: absent from a server before it. */
+  timeZone?: string
 }
 
 export interface JobProposalView {

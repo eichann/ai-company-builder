@@ -71,6 +71,7 @@ import { registerRecordsTableIpc } from './features/records-table/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
 import { registerAbsencesIpc } from './features/absences/ipc'
 import { registerJobsIpc } from './features/jobs/ipc'
+import { registerJobProposalsIpc } from './features/jobs/proposals'
 import { registerWorkSwitchesIpc } from './features/work-switches/ipc'
 import { registerViewersIpc } from './features/viewers/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
@@ -416,6 +417,9 @@ registerRecordsTableIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookie
 registerApprovalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // Settings → 「不在と代わりの人」 (features/absences): the member's own absences, with the session.
 registerAbsencesIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// Member proposals (features/jobs/proposals): the chat card's 「これで管理者に出す」 is the member's own press, with the
+// session — no chat-server route, AI tool or record token reaches it (jobs.md "Member proposals").
+registerJobProposalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // Settings → 「定期の仕事」 (features/jobs): the jobs the member is responsible for, with the session.
 registerJobsIpc(ipc, {
   baseUrl: getServerApiUrl, cookies: session.cookies,

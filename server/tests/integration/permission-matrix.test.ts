@@ -237,6 +237,7 @@ const MATRIX: Row[] = [
   // Member proposals (jobs.md "Member proposals"): every member proposes (owner decision Q2) — their own candidates and
   // proposals only (anyone else's: the one 404); owners / admins list and return them; the AI's routes take a record token.
   r('GET /api/companies/:companyId/me/job-candidates/:candidateId', w => ({ path: `${C(w)}/me/job-candidates/${NO_SUCH_CANDIDATE}` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/me/job-candidates/:candidateId/discard', w => ({ path: `${C(w)}/me/job-candidates/${NO_SUCH_CANDIDATE}/discard` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/me/job-candidates/:candidateId/submit', w => ({ path: `${C(w)}/me/job-candidates/${NO_SUCH_CANDIDATE}/submit`, body: {} }), [400, 400, 400, 400, 404, 401], 'no fingerprint'),
   r('GET /api/companies/:companyId/me/job-proposals', w => ({ path: `${C(w)}/me/job-proposals` }), MEMBERS),
   r('POST /api/companies/:companyId/me/job-proposals/:proposalId/withdraw', w => ({ path: `${C(w)}/me/job-proposals/${NO_SUCH_PROPOSAL}/withdraw` }), [404, 404, 404, 404, 404, 401]),
@@ -819,6 +820,7 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/jobs/:jobId/resume', (w, id) => ({ path: `${C(w)}/jobs/${id}/resume` }), w => w.other.job, NO_SUCH_JOB),
   x('POST /api/companies/:companyId/me/jobs/:jobId/accept', (w, id) => ({ path: `${C(w)}/me/jobs/${id}/accept`, body: { version: 1 } }), w => w.other.job, NO_SUCH_JOB),
   x('GET /api/companies/:companyId/me/job-candidates/:candidateId', (w, id) => ({ path: `${C(w)}/me/job-candidates/${id}` }), () => OTHER_CANDIDATE, NO_SUCH_CANDIDATE),
+  x('POST /api/companies/:companyId/me/job-candidates/:candidateId/discard', (w, id) => ({ path: `${C(w)}/me/job-candidates/${id}/discard` }), () => OTHER_CANDIDATE, NO_SUCH_CANDIDATE),
   x('POST /api/companies/:companyId/me/job-candidates/:candidateId/submit', (w, id) => ({ path: `${C(w)}/me/job-candidates/${id}/submit`, body: { fingerprint: 'sha256:f' } }), () => OTHER_CANDIDATE, NO_SUCH_CANDIDATE),
   x('POST /api/companies/:companyId/me/job-proposals/:proposalId/withdraw', (w, id) => ({ path: `${C(w)}/me/job-proposals/${id}/withdraw` }), () => OTHER_PROPOSAL, NO_SUCH_PROPOSAL),
   x('POST /api/companies/:companyId/job-proposals/:proposalId/return', (w, id) => ({ path: `${C(w)}/job-proposals/${id}/return`, body: { reason: 'OTHER' } }), () => OTHER_PROPOSAL, NO_SUCH_PROPOSAL),

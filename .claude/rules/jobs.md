@@ -30,6 +30,10 @@ paths:
   - "server/src/**/job-proposals.ts"
   - "shared/core/job-proposals.ts"
   - "shared/types/job-proposals.ts"
+  - "client/shared/job-proposals.ts"
+  - "client/electron/records/job-proposal-tools.ts"
+  - "client/src/features/chat/components/JobProposalCard.tsx"
+  - "client/tests/job-proposal*.test.ts"
 ---
 
 # Scheduled jobs (定期の仕事, B 「実行を記録から分ける」)
@@ -944,8 +948,9 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   form that makes and reads schema 3 back) and `[1, 2, 3, 4]` since member proposals' PR B (the form reads a proposal's job back
   exactly and keeps it schema 4: "Member proposals" "The admin console (PR B)"), the app `[1, 2, 3]`
   since 4b-2 (its words for schema 3: `jobCheckText`'s `source_record`; shipped in the same build that runs such jobs and
-  fails closed). The core reads `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`) and `schema: 4` since member proposals (`[1, 2, 3, 4]`; the
-  screens do not announce 4 until their PRs B / C). The server's tests of "a shape this build does not know" stand in `schema: 5`
+  fails closed) and `[1, 2, 3, 4]` since member proposals' PR C (schema 4 is schema 1's content: the same words, its 受け取る
+  as any: "Member proposals" "The app (PR C)"). The core reads `schema: 3` since 4b-1 (`JOB_SCHEMAS` `[1, 2, 3]`) and `schema: 4` since member proposals (`[1, 2, 3, 4]`; the
+  screens announce 4 since their PRs B / C). The server's tests of "a shape this build does not know" stand in `schema: 5`
   since then (`schema: 4` before) (`job-schemas.test.ts`, `job-rollback-floor.test.ts` reads the frozen 4b-1 fixture's version one shape later;
   the floor build runs it as written). Tests
   `admin/tests/job-screen-schemas.test.ts` (the core stood in by one reading `schema: 5` since PR B — `schema: 4` since 4b-3,
@@ -1391,14 +1396,15 @@ timed renew of the same hold, moves it by milliseconds).
 A member asks their AI for a time job; the AI makes a **candidate** the server builds, the member presses 「管理者に出す」, an owner /
 admin approves it (or it is withdrawn / returned), and the proposer still presses 「受け取る」 ("Approving is not accepting"). Only
 existing Skills (Q1), every member (Q2), at most 5 waiting per member (Q4); "ask after 3 repeats" (Q3) is the app's (PR D). The
-admin console announces schema 4 since PR B ("The admin console (PR B)" below); the app's card / tool (PR C) announces it in its own
-PR — until then the app sees such a job as one it cannot show (`JOB_NEEDS_NEWER_SCREEN`, also for the proposer's 受け取る).
+admin console announces schema 4 since PR B ("The admin console (PR B)" below), the app since PR C ("The app (PR C)" below); an
+app before PR C sees such a job as one it cannot show (`JOB_NEEDS_NEWER_SCREEN`, also for the proposer's 受け取る).
 
 ```
 GET  /api/records-ai/job-proposals-ai/places?under=   the member's AI: the existing folders under `under` they read (+ write)
 POST /api/records-ai/job-proposals-ai/candidates      (act) { skill, trigger, check, reads, deliverable, readRecords, mailDrafts, minutes, missed } → 201
 GET  /me/job-candidates/:candidateId                  the session: the caller's own candidate (and its proposal once submitted)
 POST /me/job-candidates/:candidateId/submit { fingerprint }   the session → 201 (200 when submitted already)
+POST /me/job-candidates/:candidateId/discard          the session: 「やめる」, the creator's own not submitted yet (again: the same)
 GET  /me/job-proposals                                the caller's proposals
 POST /me/job-proposals/:proposalId/withdraw           the proposer, only while submitted
 GET  /job-proposals?state=                            owner / admin
@@ -1435,6 +1441,18 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   that the member no longer reads (`jobs.readsAllFor`, the view's own rule) withholds it, content and fingerprint, as the same 404,
   24 hours (`JOB_CANDIDATE_TTL_MS`; content deleted when anyone's next candidate is made), at most 20 live a member (checked
   before and inside the write). Never a job: no job list, detail or version history shows it.
+- **「やめる」** (owner decision 2026-11-22, `discard`): the session only (a record token alone is not signed in, 401); in one
+  transaction: a candidate already submitted → 409 `JOB_CANDIDATE_SUBMITTED` (its proposal unchanged: 「取り下げる」 ends it);
+  the creator's live candidate (another member's, another company's, a missing or an expired one: the one 404) is marked
+  discarded — **no schema change**: its row stays until its 24 hours with the mark `discarded` in place of its fingerprint
+  (`adapters/sqlite/jobs.ts` `DISCARDED_MARK`, never a `sha256:` value, so no fingerprint sent matches it; the floor build
+  has no such table, PR A's build would refuse every submit of it) — and answers `{ discarded: true }`, again the same. Then
+  the candidate's view answers 410 `JOB_CANDIDATE_DISCARDED` (naming nothing it held) and the submit the same, also when
+  「やめる」 lands while a submit awaits the Skill (checked again inside the submit's write); after its 24 hours it is gone as
+  any (the one 404). Still counted among the member's 20 live candidates until then (the safe side).
+- **The zone** (owner decision 2026-11-22): the candidate's view says `timeZone` — the company's zone as the clock uses it
+  (`JobProposalDeps.timeZoneOf`, today `DEFAULT_COMPANY_TIME_ZONE` for every company: there is no per-company setting yet) —
+  additive and optional; an older app ignores it.
 - **The submit** (the session only: no record-token route reaches it — a record token alone is not signed in, 401):
   `{ fingerprint }` exactly; the candidate **as stored**, never resolved again; **first** whether the member still reads every
   place it names (its shelf Skill's place too: `readsAllFor`) — else 409 `JOB_CANDIDATE_PLACE` whatever fingerprint was sent, as
@@ -1479,8 +1497,8 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   transaction to the proposer only, one per proposal (`job_proposal_returned:<proposal id>`), then the push to them; worded when
   read — 「出した定期の仕事の案「…」は差し戻されました（理由：…）…」 with the fixed reason's words (`jobProposalReturnReasonText`), the
   name by `HIDDEN_JOB_NAME`'s rule — and shown only to the proposer while the proposal is returned. A withdrawal tells nobody.
-  **PR C's task** (owner decision 2026-11-22): the app's notice settings must not offer members the owner / admin-only kinds
-  (`job_proposal`, and the existing `job_paused`).
+  The app's notice settings do not offer members the owner / admin-only kinds (`job_proposal`, and the existing
+  `job_paused`; owner decision 2026-11-22, done in PR C: "The app (PR C)").
 - **The admin console (PR B)** (`admin/src/components/jobs/job-proposals.tsx`, `admin/src/lib/job-proposals.ts`, the form in
   `admin/src/lib/jobs.ts`; owner memo §7 B, §6 #9, §8-2, §8-4, §10-2). Everything only shows and asks; the server decides.
   - **「届いた案」** (a card above the jobs, `GET /job-proposals?state=`, waiting first; a filter for 承認した / 差し戻した /
@@ -1537,6 +1555,93 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     approval refusal bumping it and reading the jobs, the refusal reported by the dialog, each of the two decided codes, a
     return refusal reloading, the base version kept with the form, no bare version line, the reads' order for schema 1 alone
     with `jobs.test.tsx`); each fails a test.
+- **The app (PR C)** (owner memo §1 例1 / 例3, §6 #3 / #4, §8-3, §8-6; "ask after 3 repeats" is PR D). Everything only shows
+  and asks; the server decides.
+  - **The AI's tools** (`client/electron/records/job-proposal-tools.ts`, merged by `createRecordTools`): `job_proposal_places
+    { under? }` (`GET /job-proposals-ai/places`) and `job_proposal_create` (`POST /job-proposals-ai/candidates`, the candidate
+    input as `parseJobCandidateInput` takes it — the zod schema mirrors it, the server checks again). **No submit tool.**
+    Their words: existing Skills only (none fits → 「先に Skill を作る必要があります」 and stop), folders only from the places
+    tool (an unreadable one is said before a candidate), no titles / quotes / names, mail drafts only, no event jobs, always a
+    check, never 「毎回必ず動きます」, and that the candidate is not sent — only the member's press does it. **Offered only where
+    a person is present**: `RecordToolsOptions.jobProposals` — the chat server passes `!aiTurnStep && !requestedPluginStep &&
+    !stepArea && !requestedStep` (no 「AI の番」, job run, plugin step run or step consultation) — **and** an `act` token **not
+    bound to a run** (`RecordTurnAccess.boundToRun`, set by `records/api.ts` from `runOf`); the server refuses a run-bound
+    token too (`JOB_PROPOSAL_NOT_IN_RUN`). Codex (read token) gets neither. A server without #751 (404 without a job code) →
+    the AI is told 「この会社のサーバーでは、まだ定期の仕事の案を作れません」 (`JOB_PROPOSALS_NOT_SUPPORTED`), no card.
+  - **The card** (`client/shared/job-proposals.ts`, `src/features/chat/components/JobProposalCard.tsx`, store
+    `jobProposalStore.ts` + `hooks/useJobProposal.ts`, loaded on first subscribe — no effect): the reply holds only a
+    reference (data part `data-job-proposal`, `JobProposalCardRef` with the candidate id **the server answered**, never the
+    AI's input; stored with the message as `jobProposals`, in `cardOrder`), and the card reads the candidate with the
+    member's **session** each time it is shown — **never a cache across showings** (review of PR C, Codex P2):
+    `src/shared/lib/jobProposalStore.ts` (shared by the card and 「出した案」) keeps an answer only while a card shows it, drops it
+    when the last card goes (a reopened conversation reads again: an approval / return since, a candidate withheld since),
+    keeps a failed read only on screen with 「読み直す」 (`reloadJobCandidate`), and a 「取り下げる」 in 「出した案」 makes a card on
+    screen read again (`jobCandidateChanged`; a read on its way is followed by one more). **A read never overwrites the
+    member's newer act** (Codex re-review): each read and each act on the card (submit, withdraw, discard: `putJobProposal`)
+    takes the next number for its candidate, a read's answer counts only while its number is still the newest, and after an
+    act the server is read once more (IPC `jobProposals:candidate` → `GET /me/job-candidates/:id`): only a
+    definition the one parser reads as schema 4 with a `sha256:<hex>` fingerprint and the asked id is shown
+    (`readShownCandidate`) — anything else is not shown and cannot be submitted. It says (§8-6, `jobCandidateLines` over the
+    shared job words): when it checks, with the zone by name (`jobTimeZoneText`: Asia/Tokyo 「日本時間」 and other common zones in
+    words, any other 「時間帯 <id>」; the server's `timeZone` kept only as a zone id; absent from an older server 「（会社の時刻で）」), what makes it run, what it does (the member is the responsible person),
+    the grant's lines (tools, read places, the deliverable place, what it may make, the minutes route, mail drafts only, the
+    limits — 1 run a day), missed runs, the deadline, and the notes (`JOB_CANDIDATE_NOTES`): nothing runs before an admin's
+    approval and their own 受け取る, it runs only when something is new, the company's / their own 「AI に任せる」 settings may
+    stop it, an admin may change name / time / check (a new 受け取る only for a new consent). Never 「必ず毎週動きます」.
+    「これで管理者に出す」 sends **the candidate's id and the fingerprint shown** (`jobProposalCardState`'s `submit`; IPC
+    `jobProposals:submit` → `POST /me/job-candidates/:id/submit { fingerprint }`); 「やめる」 discards the candidate on the server
+    (`jobProposals:discard`, session only; owner decision 2026-11-22): the card then says 「この案はやめました…」
+    (`JOB_CANDIDATE_DISCARDED_TEXT`), also when reopened — the server answers 410 `JOB_CANDIDATE_DISCARDED` until the
+    candidate's 24 hours, the plain gone message after them; a server before it (404 naming no code) only closes the buttons
+    in this view. Afterwards the state (`jobProposalStateLine`: 管理者の確認待ち・まだ何も動いていません / 承認
+    されました・「定期の仕事」で受け取る / 差し戻されました（理由：<the fixed reason's words>） / 取り下げました) and 「取り下げる」 only while
+    `submitted` (`jobProposals:withdraw`). A refusal that means the candidate or proposal moved on (`JOB_VERSION_FINGERPRINT`,
+    `JOB_PROPOSAL_DECIDED`, `JOB_CANDIDATE_NOT_FOUND`, `JOB_CANDIDATE_PLACE`, `JOB_CANDIDATE_DISCARDED`,
+    `JOB_CANDIDATE_SUBMITTED`) reads it again. **Gone or withheld** (the one 404):
+    main looks for its proposal in `GET /me/job-proposals` by the candidate's id, so a reopened conversation (or one older
+    than 24 hours) still shows what became of it; none → 「この案はもう見られません（…24時間たったか、あなたが今は読めない場所が
+    含まれています）」 — never which.
+  - **The submit is the member's press only**: the handler (`client/electron/features/jobs/proposals.ts`, session cookies) is
+    registered by that module alone; no chat-server route, AI tool or record token reaches it; in the renderer only the chat
+    card's data layer (`src/features/chat/api.ts` `JobProposalCardPort`) and the card call it. Renderer values never shape
+    the path (`isJobCandidateId`, `isJobProposalId`, the fingerprint's shape, the company id).
+  - **The chat server's flag fails closed** (review L3): the step lookup (`stepWriteArea`) is asked whenever it exists — also
+    without a write guard — and a lookup that threw or rejected (a timeout) counts as a step: no tools.
+  - **Refusals** are the app's fixed words by code (`jobProposalRefusalText`: #751's codes, `JOB_NEEDS_NEWER_*`), an unknown
+    code a general sentence — never the server's text; a proposal's `submittedFingerprint` is kept only as the server
+    answered it (`readProposalView`: withheld → null, never shown anyway).
+  - **「定期の仕事」** (`src/features/jobs/components/JobProposals.tsx`, `hooks/useMyJobProposals.ts`, `model.ts` `proposalRows`):
+    「出した案」 from `GET /me/job-proposals` (`jobProposals:mine`; a server without it, 404 → nothing shown), each with the
+    job's name from this member's jobs list (a retired one → 「定期の仕事」), when it was sent, its state and 「取り下げる」 only
+    while it waits. After approval the existing 受け取る works for schema 4 (`APP_JOB_SCHEMAS` `[1, 2, 3, 4]`), also for an
+    owner / admin who proposed it.
+  - **Notices**: `job_proposal_returned` shows the server's words and opens 「定期の仕事」 (`jobNoticeTarget`, badge 「差し戻され
+    ました」); `job_proposal` (an owner / admin's) opens nothing in the app. 「知らせの設定」 offers `job_proposal` / `job_paused` /
+    `company_restored` only to owners / admins (`ADMIN_ONLY_NOTICE_KINDS`, `company_restored` by owner decision 2026-11-22, `noticeKindsForRole`; the role from `api:getCompanies`, not known →
+    not offered; `notifications.md`).
+  - **Compatibility**: a server without #751 — the tools answer 「まだ作れません」, no card, no 「出した案」; the header's `4` is
+    ignored. The rollback floor (6760eef3): the same (no proposal routes), and a schema-4 job there is `needsUpdate` — the
+    app's list says it cannot show it, as for any shape a server withholds.
+  - Test: `client/tests/job-proposal-tools.test.ts` (offered / not offered: the flag, a read token, a run-bound token; the
+    chat server's flag for a consultation, a job run, a built-in 「AI の番」 step and a step consultation, and failing closed; the card's id from the server; a 404; no file
+    but the session module names the submit route or registers its IPC, only the card calls it), `job-proposals-ipc.test.ts`,
+    `job-proposals-card.test.ts` (the press's values, states, the §8-6 words, stored / restored in order),
+    `src/shared/lib/jobProposalStore.test.ts` (no failure sticks, re-read on reopen, 読み直す, a withdrawal elsewhere, a read on its
+    way answered after a submit / withdrawal / discard),
+    `job-screen-schemas.test.ts` (schema 4's words, header `1,2,3,4`), `jobs-ipc.test.ts`, `src/features/inbox/model.test.ts`,
+    `src/features/jobs/model.test.ts`. Mutation check: 36 guards removed or inverted one at a time, then 12 after the reviews (the store's six, the settings keeping
+    `fullAccess`, the flag's fail-closed lookup — its failure mark, the synchronous throw, asked without a guard —, the built-in
+    step), then 3 for the read / act order (the read's number checked, an act taking one, the read after an act), then 18
+    for the owner decisions (server: the view's and the submit's discarded checks — also inside the write —,
+    discard refusing a submitted one and needing the creator's live row, its id check, the mark read and written, the zone,
+    the route; app: the 410, a server before it only without a code, the ids, the zone kept as an id, its words and line, the
+    discarded state, `company_restored`); each fails a test except the discard's own id check (an id of another shape finds
+    no row: the same 404) and
+    the forwarding of the flag in `features/chat/server-config.ts` (a pass-through; the option's default is off, so a dropped
+    flag offers nothing), and — not node-tested, UI only — the card's 「読み直す」 button and the 「出した案」 hook calling
+    `jobCandidateChanged` (the store functions themselves are). Of the chat server's flag, `!aiTurnStep` / `!requestedStep` / `!stepArea` each alone suffice for a
+    job run (all three hold), `!stepArea` alone for a step consultation; `!requestedPluginStep` (a step consultation's first
+    turn, whose binding is refused or binds it) is defence.
 - **The rollback floor** (6760eef3, knows `[1, 2]`): a schema-4 job is listed by name only, its versions without definition or
   fingerprints, approve / edit / accept refused (`JOB_SCHEMA_UNKNOWN`), no occurrence made, no `job_proposal` /
   `job_proposal_returned` shown (unknown kinds); it never reads the new tables. Coming back: nothing revived (a withdrawn proposal stays so, its job retired), nothing
@@ -1549,6 +1654,8 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   Also (owner decisions and reviews of PR A): the proposer's return notice, the fixed responsible person, a candidate read again
   when read (a place / the shelf Skill's place lost), hidden segments refused, an owner / admin proposer not told, a leaver's
   proposals withdrawn (through the route), an older app's 「AI の番」 token refused at the route.
+  And (owner decisions of PR C): 「やめる」 — discarded never read or submitted again, a submitted one refused, only the creator's
+  live one, pressed while a submit awaits, through the route (a record token 401) — and the candidate's zone.
   Mutation check: 52 guards removed or inverted one at a time, then 7 for the owner decisions, 11 after the reviews, 5 after the Codex re-review, 2 after its 3rd pass and 4 after its 4th (the route handing the service the token's run now fails a test of its own); each fails
   a test except — each alone suffices, both removed fail:
   the places' reader / write checks and the approval's own `rightsFit` at the candidate (also their re-reads after the awaits:

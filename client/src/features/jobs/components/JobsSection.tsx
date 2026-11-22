@@ -4,6 +4,7 @@
 import { SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
 import { JobOccurrences } from './JobOccurrences'
+import { JobProposals } from './JobProposals'
 import { RewatchPicker } from './RewatchPicker'
 import {
   JOB_CHAIN_STOPPED_ASK, JOB_EVENT_NOTE, jobCheckText, jobGrantLines, jobMissedText, jobPlacementText, jobRunText, jobRunsText, jobSlotText, jobTriggerText,
@@ -13,7 +14,7 @@ import { useMyJobs } from '../hooks/useMyJobs'
 import { placeLine } from '../model'
 
 export function JobsSection({ companyId }: { companyId: string }) {
-  const { loadRef, jobs, error, message, busy, accept, pause, resume, rewatch } = useMyJobs(companyId)
+  const { loadRef, jobs, error, message, busy, accept, pause, resume, rewatch, reload } = useMyJobs(companyId)
   const waiting = jobs?.filter(j => j.toAccept) ?? []
   const others = jobs?.filter(j => !j.toAccept) ?? []
 
@@ -91,6 +92,8 @@ export function JobsSection({ companyId }: { companyId: string }) {
           {message && <p role="status" className="text-small text-zinc-600 dark:text-zinc-300">{message}</p>}
         </>
       )}
+      {/* Member proposals: what became of the proposals sent from the AI chat (also once their job is retired). */}
+      <JobProposals companyId={companyId} jobs={jobs} onChanged={() => { void reload() }} />
       {/* Stage 4b-2: also after a hand-over (the job is no longer listed above, its occurrences they ran still are). */}
       <JobOccurrences companyId={companyId} />
     </div>

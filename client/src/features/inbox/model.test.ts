@@ -288,6 +288,34 @@ test('only what the chosen chip shows counts as seen: あなた待ち hidden by 
   assert.equal(hasInboxNews(all, again), false)
 })
 
+// Member proposals' PR C (owner decision 2026-11-22): a member's 「知らせの設定」 never offers the owner / admin-only kinds.
+test('知らせの設定: the owner / admin-only kinds are offered to owners / admins only, never when the role is not known', async () => {
+  const { noticeKindsForRole } = await import('./model')
+  const kinds = ['asked', 'job_paused', 'job_proposal', 'job_proposal_returned', 'company_restored'] as const
+  assert.deepEqual(noticeKindsForRole(kinds, false), ['asked', 'job_proposal_returned'])
+  assert.deepEqual(noticeKindsForRole(kinds, null), ['asked', 'job_proposal_returned'])
+  assert.deepEqual(noticeKindsForRole(kinds, true), [...kinds])
+})
+
+test('a returned proposal\'s notice shows its words and opens 「定期の仕事」; an arrived one opens nothing in the app', () => {
+  const returned = notice('job_proposal_returned', '', '2026-11-22T00:00:00Z', false, { text: '出した定期の仕事の案「議事録まとめ（毎週月曜 09:00）」は差し戻されました（理由：先に話をしたい）' })
+  const arrived = notice('job_proposal', '', '2026-11-22T00:00:00Z')
+  const v = inboxView(state([], [returned, arrived]), NOW)
+  const row = (id: string) => v.waiting.find(i => i.key === `notice:${id}`)
+  assert.equal(row(returned.id)?.line, returned.text)
+  assert.deepEqual(row(returned.id)?.action, { kind: 'openJobs' })
+  assert.equal(row(returned.id)?.badge.word, '差し戻されました')
+  assert.deepEqual(row(arrived.id)?.action, { kind: 'none' })
+})
+
+test('知らせの設定: switching a kind keeps whether the owner / admin-only kinds are offered (Codex P2 of PR C)', async () => {
+  const { settingsAfterSwitch } = await import('./model')
+  const s = { kinds: { asked: true, job_proposal: true }, error: null, fullAccess: true }
+  assert.deepEqual(settingsAfterSwitch(s, 'asked', false, null), { kinds: { asked: false, job_proposal: true }, error: null, fullAccess: true })
+  assert.equal(settingsAfterSwitch(s, 'asked', true, '変えられませんでした。')?.fullAccess, true)
+  assert.equal(settingsAfterSwitch(null, 'asked', true, null), null)
+})
+
 // 「ブラウザ操作」 plans (agent-browser.md, the member's own through `browserPlans:list`).
 const bp = (n: number) => `bp_${String(n).repeat(32)}`
 const plans = (over: Partial<BrowserInboxPlans> = {}): BrowserInboxPlans => ({

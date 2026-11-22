@@ -105,6 +105,8 @@ export interface JobCandidateRow {
   fingerprint: string
   createdAt: string
   expiresAt: string
+  /** Its creator pressed 「やめる」 (kept as discarded until its time; never submitted). Absent on an insert. */
+  discarded?: boolean
 }
 
 /**
@@ -296,6 +298,8 @@ export interface JobRepository {
   /** How many candidates `createdBy` has kept at `now`. */
   liveCandidates(createdBy: string, now: string): number
   insertCandidate(row: JobCandidateRow): void
+  /** 「やめる」: `createdBy`'s candidate is marked discarded (its fingerprint replaced: nothing can submit it). Whether a row changed. */
+  discardCandidate(candidateId: string, createdBy: string): boolean
   /** The content of every candidate of the company past its time is deleted (the proposal records stay). How many. */
   dropExpiredCandidates(now: string): number
   proposal(proposalId: string): JobProposalRow | null

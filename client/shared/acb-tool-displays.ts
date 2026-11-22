@@ -139,6 +139,8 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   [records('mail_draft_update')]: say('メールの下書きを直しました', 'メールの下書きを直しています', 'メールの下書きを {n} 回直しました', mailDetail),
   [records('approvals_list')]: say('承認のお願いを見ました', '承認のお願いを見ています', '承認のお願いを {n} 回見ました'),
   [records('approvals_show')]: say('承認のお願いを出しました', '承認のお願いを出しています', '承認のお願いを {n} 件出しました'),
+  [records('job_proposal_places')]: say('定期の仕事に使えるフォルダを調べました', '定期の仕事に使えるフォルダを調べています', '定期の仕事に使えるフォルダを {n} 回調べました'),
+  [records('job_proposal_create')]: say('定期の仕事の案を作りました（まだ出していません）', '定期の仕事の案を作っています', '定期の仕事の案を {n} 件作りました（まだ出していません）'),
   // Connector providers on the same server (records/tool-providers.ts).
   // While running, the member is told where to choose (owner FB 2026-11-14): the Picker is in their browser.
   [records('drive_pick_folder')]: say('Google Drive の置き場所を選んでもらいました', 'ブラウザで Google Drive の置き場所を選んでください（開いた画面で選びます）', 'Google Drive の置き場所を {n} 回選んでもらいました'),
