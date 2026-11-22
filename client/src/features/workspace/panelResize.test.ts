@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { clampWidth, createResizeDrag, dragWidth, leftPanelDrag } from './panelResize'
+import { clampWidth, createResizeDrag, dragWidth, collapsingDrag } from './panelResize'
 
 // A fake frame scheduler: callbacks run only when the test calls frame().
 function frames() {
@@ -74,21 +74,21 @@ test('a release without movement does not report a resize', () => {
   assert.deepEqual(offsets, [])
 })
 
-test('editor ↔ chat: clamps to min/max and collapses the chat ~60px past the max', () => {
-  const limits = { min: 300, max: 900, collapseAfter: 60 }
-  assert.deepEqual(leftPanelDrag(550, 100, limits), { width: 650, collapse: false })
-  assert.deepEqual(leftPanelDrag(550, -400, limits), { width: 300, collapse: false })
-  assert.deepEqual(leftPanelDrag(550, 400, limits), { width: 900, collapse: false }, '50px past the max stays open')
-  assert.deepEqual(leftPanelDrag(550, 410, limits), { width: 900, collapse: true })
-  // Starting at the max, a fast burst of moves collapses exactly once the pointer is 60px past.
+test('the consultation: clamps to min/max and collapses ~60px below its min', () => {
+  const limits = { min: 280, max: 900, collapseAfter: 60 }
+  assert.deepEqual(collapsingDrag(420, 100, limits), { width: 520, collapse: false })
+  assert.deepEqual(collapsingDrag(420, 600, limits), { width: 900, collapse: false })
+  assert.deepEqual(collapsingDrag(420, -190, limits), { width: 280, collapse: false }, '50px under the min stays open')
+  assert.deepEqual(collapsingDrag(420, -200, limits), { width: 280, collapse: true })
+  // Starting at the min, a fast burst of moves collapses exactly once the pointer is 60px past.
   const f = frames()
   const results: Array<{ width: number; collapse: boolean }> = []
-  const drag = createResizeDrag(1000, { ...f, onResize: offset => results.push(leftPanelDrag(900, offset, limits)) })
+  const drag = createResizeDrag(1000, { ...f, onResize: offset => results.push(collapsingDrag(280, -offset, limits)) })
   for (const x of [1010, 1020, 1030]) drag.move(x)
   f.frame()
   for (const x of [1040, 1050, 1059]) drag.move(x)
   f.frame()
   assert.deepEqual(results.map(r => r.collapse), [false, false])
   drag.move(1060); f.frame()
-  assert.deepEqual(results.at(-1), { width: 900, collapse: true })
+  assert.deepEqual(results.at(-1), { width: 280, collapse: true })
 })

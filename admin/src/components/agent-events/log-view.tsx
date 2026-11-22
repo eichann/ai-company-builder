@@ -241,9 +241,9 @@ function NotSendingNotice() {
   if (behind.length === 0) return null
 
   return (
-    <section aria-labelledby="not-sending-heading" className="rounded-xl border border-warning/30 bg-warning/5 px-4 py-2.5">
+    <section aria-labelledby="not-sending-heading" className="rounded-control border border-warning-border bg-warning-bg px-4 py-2.5">
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-        <Warning size={16} className="shrink-0 text-warning" />
+        <Warning size={16} className="shrink-0 text-warning-icon" />
         <h2 id="not-sending-heading" className="text-sm font-medium">
           記録を送っていないアプリ（{behind.length}人）
         </h2>
@@ -264,7 +264,7 @@ function NotSendingNotice() {
       <ul
         id="not-sending-list"
         hidden={!open}
-        className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-warning/20 pt-2 text-sm"
+        className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-warning-border pt-2 text-sm"
       >
         {behind.map((m) => {
           const name = m.name || m.email || '名前未設定'
@@ -447,7 +447,7 @@ function EventList({ filters, onChange }: { filters: LogFilters; onChange: (next
   )
 }
 
-const DECISION_BADGE = { neutral: 'secondary', allowed: 'success', denied: 'destructive' } as const
+const DECISION_BADGE = { neutral: 'neutral', allowed: 'success', denied: 'danger' } as const
 
 export function EventRow({
   event: e,
@@ -576,7 +576,7 @@ function TargetPiece({ item }: { item: TargetItem }) {
       )
     case 'hidden':
       return (
-        <Badge variant="secondary">
+        <Badge variant="neutral">
           <LockSimple />
           {item.text}
         </Badge>

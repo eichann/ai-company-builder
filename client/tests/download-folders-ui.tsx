@@ -9,7 +9,8 @@
 //          (leaving out a folder with local edits) | applyOffline (download fails)
 //   role   owner (default) | admin | member — the member's role in the company
 //   tab    a settings section to open first (default: ダウンロードするフォルダ; mine = 自分の設定)
-//   company  the company's 受信を読む: allowed (default) | off
+//   company  the company's 受信を読む: allowed (default) | off | later (stopped after the page read it:
+//            shown allowed, turning it on is refused with WORK_SWITCH_COMPANY_OFF)
 //   mail   no = Google has not let ACB read the member's mail yet
 //   channels  none = the company has neither mail nor chat connected (no 受信を読む switch, one line instead)
 import { createRoot } from 'react-dom/client'
@@ -27,9 +28,10 @@ const state = params.get('state') ?? 'normal'
 const role = params.get('role') ?? 'owner'
 const tab = params.get('tab') ?? 'sync'
 // 自分の設定: the member's two switches as the server would answer them.
-const policy = { readIncoming: params.get('company') !== 'off', autoRun: true }
+const policy = { readIncoming: params.get('company') !== 'off' && params.get('company') !== 'later', autoRun: true }
+let stoppedLater = params.get('company') === 'later'
 const chosen: Record<string, boolean | null> = { readIncoming: null, autoRun: null }
-const switchState = (k: 'readIncoming' | 'autoRun', def: boolean) => ({ on: policy[k] && (chosen[k] ?? def), allowed: policy[k], companyDefault: def, chosen: chosen[k] })
+const switchState = (k: 'readIncoming' | 'autoRun', def: boolean) => ({ on: policy[k] && (chosen[k] ?? def), allowed: policy[k] || (k === 'readIncoming' && stoppedLater), companyDefault: def, chosen: chosen[k] })
 const mySwitches = () => ({ readIncoming: { ...switchState('readIncoming', false), connected: { mail: params.get('mail') !== 'no', chat: false } }, autoRun: switchState('autoRun', true),
   ...(params.get('channels') === 'none' ? { channels: { mail: false, chat: false } } : {}) })
 const switchesSet: string[] = []
@@ -77,6 +79,8 @@ const ownKeys = {
   memberKeysAllowed: true,
   services: [
     { service: 'anthropic', label: 'Anthropic（Claude API）', category: 'tool', rule: 'company-first', ownKey: { allowed: true, hosts: ['api.anthropic.com'] }, companyKeys: [], key: null },
+    // `?ownkey=stopped`: an own key an admin stopped (a person stopped it: the grey 「止めています」 badge).
+    ...(params.get('ownkey') === 'stopped' ? [{ service: 'gemini', label: 'Gemini', category: 'tool', rule: 'company-first', ownKey: { allowed: true, hosts: ['generativelanguage.googleapis.com'] }, companyKeys: [], key: { id: 'k-own', displayName: '自分の鍵', last4: 'zz99', hosts: ['generativelanguage.googleapis.com'], status: 'disabled', secretUpdatedAt: '2026-11-01T00:00:00.000Z' } }] : []),
   ],
 }
 const progressListeners = new Set<(d: { repoPath: string; receivedBytes: number }) => void>()
@@ -124,7 +128,7 @@ Object.assign(window, {
     setWorkSwitch: async (_companyId: string, which: 'readIncoming' | 'autoRun', on: boolean) => {
       switchesSet.push(`${which}:${on}`)
       ;(window as unknown as { __switchesSet: string[] }).__switchesSet = switchesSet
-      if (on && !policy[which]) return { success: false, offline: false, code: 'WORK_SWITCH_COMPANY_OFF', error: '会社の設定で止まっています' }
+      if (on && !policy[which]) { stoppedLater = false; return { success: false, offline: false, code: 'WORK_SWITCH_COMPANY_OFF', error: '会社の設定で止まっています。管理者に確かめてください。' } }
       chosen[which] = on
       return { success: true, switches: mySwitches() }
     },

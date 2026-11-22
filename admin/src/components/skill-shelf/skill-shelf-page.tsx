@@ -7,6 +7,7 @@ import { Lightning } from '@phosphor-icons/react'
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { Badge } from '@/components/ui/badge'
+import { Callout } from '@/components/ui/callout'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -49,7 +50,7 @@ export function SkillShelfPage() {
     return (
       <div className="mx-auto w-full max-w-4xl">
         <PageHeader title="会社の Skill" />
-        <p className="rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">{SHELF_WITH_FOLDER_NOTE}</p>
+        <Callout variant="info">{SHELF_WITH_FOLDER_NOTE}</Callout>
       </div>
     )
   }
@@ -231,7 +232,7 @@ function VersionsDialog({
                 <div className="min-w-0 flex-1 space-y-0.5 text-sm">
                   <p className="flex flex-wrap items-center gap-2 font-medium">
                     {`版 ${shortVersion(v.version)}`}
-                    {v.current && <Badge>いま配っている版</Badge>}
+                    {v.current && <Badge variant="success">いま配っている版</Badge>}
                   </p>
                   <p className="text-xs text-muted-foreground">{`${personLabel(v.publishedBy)}さん・${formatDateTime(v.publishedAt)}・ファイル ${v.fileCount} 個`}</p>
                   {requesterOf(versions.data!, v.version) && (

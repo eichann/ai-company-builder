@@ -1,5 +1,5 @@
-// Width computation and drag bookkeeping for the resizable panels (file tree,
-// editor ↔ chat). Kept free of React and the DOM so it can be unit tested.
+// Width computation and drag bookkeeping for the resizable panels (the left
+// column, the consultation). Kept free of React and the DOM so it can be unit tested.
 //
 // The width is always derived from a snapshot taken when the drag starts:
 // width = startWidth + (pointerX - startPointerX), clamped. It is never built
@@ -18,14 +18,14 @@ export function dragWidth(startWidth: number, offset: number, min: number, max: 
 }
 
 /**
- * The editor ↔ chat divider: dragging `collapseAfter` px or more past the max
- * collapses the chat (the width stays at the max, so expanding the chat again
- * restores it there).
+ * A pane that hides when dragged well under its minimum (the consultation): dragging it
+ * `collapseAfter` px or more below the min collapses it (the width stays at the min, so showing
+ * it again brings it back there).
  */
-export function leftPanelDrag(startWidth: number, offset: number, limits: { min: number; max: number; collapseAfter: number }): { width: number; collapse: boolean } {
+export function collapsingDrag(startWidth: number, offset: number, limits: { min: number; max: number; collapseAfter: number }): { width: number; collapse: boolean } {
   const raw = startWidth + offset
   const width = clampWidth(raw, limits.min, limits.max)
-  return { width, collapse: raw - Math.max(limits.min, limits.max) >= limits.collapseAfter }
+  return { width, collapse: limits.min - raw >= limits.collapseAfter }
 }
 
 export interface ResizeDragOptions {

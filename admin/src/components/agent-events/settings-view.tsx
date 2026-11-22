@@ -333,7 +333,7 @@ function ViewerList({ mode }: { mode: AgentEventViewerMode }) {
                   </span>
                 </span>
                 {v.scope === 'all' ? (
-                  <Badge variant="secondary">全部</Badge>
+                  <Badge variant="neutral">全部</Badge>
                 ) : (
                   <Badge variant="outline" className="max-w-[12rem] truncate" title={v.departments.map((d) => d.name).join('・')}>
                     {v.departments.map((d) => d.name).join('・')}の分

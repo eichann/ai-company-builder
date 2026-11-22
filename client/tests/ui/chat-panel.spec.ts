@@ -236,15 +236,16 @@ test('a reply that finishes while the member is elsewhere is marked 新着 at th
   await chat(page, c => { c.send({ type: 'text-start', id: 't1' }); c.text('t1', 'まとめました。'); c.send({ type: 'text-end', id: 't1' }); c.finish() })
   const open = sidebar.getByRole('region', { name: '開いている相談' })
   await expect(open.locator('[data-conversation-id] > button').first()).toHaveAccessibleName(/^議事録をまとめて/)
-  await expect(row).toContainText('新着')
+  // The one new-item mark: a primary dot named 新着 (design-system.md P2b), no longer a green word.
+  await expect(row.getByRole('img', { name: '新着' })).toBeVisible()
   await expect(row).toContainText('返事が届いています')
 
   // Reading it keeps the mark; moving on to another conversation clears it, still open to continue.
   await row.click()
   await expect(page.getByText('まとめました。').locator('visible=true')).toBeVisible()
-  await expect(row).toContainText('新着')
+  await expect(row.getByRole('img', { name: '新着' })).toBeVisible()
   await sidebar.getByRole('button', { name: 'AIに相談する', exact: true }).click()
-  await expect(row).not.toContainText('新着')
+  await expect(row.getByRole('img', { name: '新着' })).toHaveCount(0)
   await expect(open.getByRole('button', { name: /^議事録をまとめて/ })).toBeVisible()
 })
 

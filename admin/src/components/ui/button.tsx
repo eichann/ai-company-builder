@@ -16,6 +16,8 @@ const buttonVariants = cva(
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
         link: 'text-brand underline-offset-4 hover:underline',
+        // A picked filter or toggle (aria-pressed): the selected set, not the primary colour (P2b).
+        selected: 'border border-selected-border bg-selected-bg text-selected-text hover:bg-selected-bg-hover',
       },
       size: {
         default: 'h-9 px-4 py-2 has-[>svg]:px-3',

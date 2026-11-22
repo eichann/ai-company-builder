@@ -6,6 +6,7 @@
 
 import { isYamlMap, parseYamlLite, type YamlValue } from '../../../shared/core/yaml-lite'
 import { CLOSING_FIELDS, MAPPING_SECTIONS } from '../../../shared/core/plugins'
+import { STOP_LOOK, type StopMeaning, type StopVariant } from '../../../shared/design-tokens/stop-meaning'
 import type { FieldPolicy, ImportReport, PluginFieldPolicyView, PluginProblem } from './api'
 
 /** Why it does not run, for people (no jargon). */
@@ -32,6 +33,39 @@ export const PROBLEM_TEXT: Record<PluginProblem, string> = {
  * exchange with the outside service stops.
  */
 export const CONNECTOR_PROBLEMS: readonly PluginProblem[] = ['connector-missing', 'connector-stopped', 'connector-mismatch', 'no-key', 'key-stopped', 'key-destination']
+
+/**
+ * What each problem means for the admin looking at the list (design-system.md 「止まっている」の色; the
+ * look of each meaning is `STOP_LOOK`): the operator or a stopped key → stopped on purpose; a version,
+ * a key or the mapping to fix → failed; the connector to turn on or the write-back fields to confirm →
+ * the admin has something to do. A Record, so a new problem cannot be added without its meaning.
+ */
+export const PROBLEM_STOP: Record<PluginProblem, StopMeaning | 'off'> = {
+  off: 'off',
+  stopped: 'stoppedOnPurpose',
+  'key-stopped': 'stoppedOnPurpose',
+  'not-on-shelf': 'failed',
+  'package-changed': 'failed',
+  'no-key': 'failed',
+  'key-destination': 'failed',
+  'mapping-invalid': 'failed',
+  'connector-missing': 'failed',
+  'connector-mismatch': 'failed',
+  'connector-stopped': 'needsAction',
+  'auto-not-acknowledged': 'needsAction',
+  'no-connector': 'needsAction',
+  'not-a-business': 'needsAction',
+}
+
+export type ProblemBadge = { label: string; variant: 'outline' | StopVariant }
+export function problemBadge(problem: PluginProblem): ProblemBadge {
+  const meaning = PROBLEM_STOP[problem]
+  if (meaning === 'off') return { label: 'オフ', variant: 'outline' }
+  return { label: STOP_LOOK[meaning].word, variant: STOP_LOOK[meaning].variant }
+}
+
+/** The text colour of a business's 「〇〇 との行き来は止まっています」 line: the warning text when the admin has to act. */
+export const connectionLineTone = (problem: PluginProblem) => (PROBLEM_STOP[problem] === 'needsAction' ? 'text-warning-text' : 'text-muted-foreground')
 
 /** What a business says while its exchange with the outside service is stopped (e.g. 「HubSpot との行き来は止まっています」). */
 export const connectionStopped = (label: string) => `${label} との行き来は止まっています`
@@ -118,7 +152,7 @@ export function integrationRefusal(code: string | undefined, body: Record<string
 /** How a field is written back, as the table offers it. */
 export type WriteChoice = 'read' | 'prior' | 'auto'
 export const WRITE_CHOICE_LABELS: Record<WriteChoice, string> = {
-  read: '書き戻さない（読むだけ）',
+  read: '書き戻さない（閲覧のみ）',
   prior: '承認してから書き戻す',
   auto: '自動で書き戻す',
 }

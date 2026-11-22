@@ -1,27 +1,25 @@
 import { memo, useState } from 'react'
-import { ArrowRight, CheckCircle, Clock, Robot, Warning, XCircle } from '@phosphor-icons/react'
+import { ArrowRight, CheckCircle, Hourglass, Robot, Warning, XCircle } from '@phosphor-icons/react'
+import { STATE_BOX, type StateBoxTone } from '../../../shared/ui/stateStyles'
 import { nameOf, outcomeByText, percentText, stateLine, type ApprovalCardRef } from '../../../../shared/approvals'
 import { APPROVE_HASH_NOTE, type ApprovalView, type SimilarRecord } from '../../../../../shared/types/approvals'
 import { approveApproval, getApproval, sameAsApproval, sendBackApproval, withdrawApproval, type ApprovalOutbound } from '../api'
 import { putApproval } from '../approvalStore'
 import { useApproval } from '../hooks/useApproval'
 
-const TONE_CLASS = {
-  ok: 'border-emerald-500/40 bg-emerald-500/5',
-  warn: 'border-amber-500/40 bg-amber-500/5',
-  error: 'border-red-500/40 bg-red-500/5',
-  plain: 'border-gray-200 dark:border-zinc-700',
-} as const
+const TONE_CLASS = STATE_BOX
 
-const STATE_TONE: Record<ApprovalView['state'], keyof typeof TONE_CLASS> = {
-  pending: 'plain', approved: 'ok', sent_back: 'warn', stale: 'warn', withdrawn: 'plain', failed: 'error',
+// Awaiting approval is amber (owner decision 2026-11-21); amber otherwise means a warning only.
+const STATE_TONE: Record<ApprovalView['state'], StateBoxTone> = {
+  pending: 'awaiting', approved: 'ok', sent_back: 'warn', stale: 'warn', withdrawn: 'plain', failed: 'error',
 }
 
 function StateIcon({ state }: { state: ApprovalView['state'] }) {
-  if (state === 'approved') return <CheckCircle size={15} weight="bold" aria-hidden className="text-emerald-600" />
-  if (state === 'failed') return <XCircle size={15} weight="bold" aria-hidden className="text-red-500" />
-  if (state === 'pending') return <Clock size={15} weight="bold" aria-hidden className="text-gray-500" />
-  return <Warning size={15} weight="bold" aria-hidden className="text-amber-500" />
+  if (state === 'approved') return <CheckCircle size={15} weight="bold" aria-hidden className="text-success-icon" />
+  if (state === 'failed') return <XCircle size={15} weight="bold" aria-hidden className="text-danger-icon" />
+  if (state === 'pending') return <Hourglass size={15} weight="bold" aria-hidden className="text-awaiting-icon" />
+  if (state === 'withdrawn') return <Warning size={15} weight="bold" aria-hidden className="text-text-muted" />
+  return <Warning size={15} weight="bold" aria-hidden className="text-warning-icon" />
 }
 
 const BUTTON = 'rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50'
@@ -45,7 +43,7 @@ const MEETING_TEXT = { linked: '会議もこの記録につなぎました。', 
  */
 export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { card: ApprovalCardRef; outbound?: ApprovalOutbound }) {
   const { key, view, names, error: loadError } = useApproval(card.companyId, card.approvalId, outbound)
-  const [message, setMessage] = useState<{ tone: keyof typeof TONE_CLASS; text: string } | null>(null)
+  const [message, setMessage] = useState<{ tone: StateBoxTone; text: string } | null>(null)
   // null until the approver edits it: the AI's draft is shown first.
   const [edited, setEdited] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -64,7 +62,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
       const r = await (outbound ? sameAsApproval(card.companyId, view.id, recordId, withMeeting, outbound) : sameAsApproval(card.companyId, view.id, recordId, withMeeting))
       putApproval(key, r)
       if (r.success) setMessage({ tone: 'ok', text: `作りませんでした。${MEETING_TEXT[r.meeting ?? 'not-asked']}` })
-      else setMessage({ tone: r.offline ? 'warn' : 'error', text: r.error })
+      else setMessage({ tone: r.offline ? 'info' : 'error', text: r.error })
     } finally {
       setBusy(false)
     }
@@ -82,7 +80,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
           : await (outbound ? withdrawApproval(card.companyId, view.id, outbound) : withdrawApproval(card.companyId, view.id))
       putApproval(key, r)
       if (!r.success) {
-        setMessage({ tone: r.offline ? 'warn' : 'error', text: r.offline ? `${r.error} 承認できたかどうかは、開き直すと分かります。` : r.error })
+        setMessage({ tone: r.offline ? 'info' : 'error', text: r.offline ? `${r.error} 承認できたかどうかは、開き直すと分かります。` : r.error })
         // The content changed (or the state moved): show what the server holds now.
         if (!r.approval && (r.code === 'CONTENT_CHANGED' || r.code === 'NOT_PENDING')) {
           putApproval(key, await (outbound ? getApproval(card.companyId, view.id, outbound) : getApproval(card.companyId, view.id)))

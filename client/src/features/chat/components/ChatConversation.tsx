@@ -489,14 +489,14 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       {instructionShown && !(topicShown && instructionShown.kind === 'task' && instructionShown.recordId === topicShown) && <AppInstructionChip instruction={instructionShown} />}
 
       {historyError && (
-        <div role="alert" className="px-4 py-2 text-sm text-red-600 dark:text-red-400 bg-red-500/10">
+        <div role="alert" className="px-4 py-2 text-sm text-danger-text bg-danger-bg">
           {historyError}
         </div>
       )}
       {/* Error Banner */}
       {status === 'error' && error && (
-        <div className="flex-shrink-0 px-4 py-2 bg-red-500/10 border-b border-red-500/20">
-          <div className="text-sm text-red-400">
+        <div className="flex-shrink-0 px-4 py-2 bg-danger-bg border-b border-danger-border">
+          <div className="text-sm text-danger-text">
             {t('chat.errorOccurred', { error: error.message })}
           </div>
         </div>

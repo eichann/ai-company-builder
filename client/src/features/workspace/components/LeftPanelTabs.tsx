@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useIsNarrowerThan } from '../../../shared/hooks/useIsNarrowerThan'
+import { NewDot } from '../../../shared/ui/primitives'
 import { resolveLeftPanel, shownPanels, tabStripWidth, type LeftPanel } from '../leftPanels'
 
 interface Props {
@@ -41,7 +42,7 @@ export function LeftPanelTabs({ panels, selectedId, onSelect }: Props) {
             <span className="block min-w-[18px] px-1.5 rounded-full bg-accent text-white text-[11px] leading-[18px] text-center">
               {panel.badgeCount}
             </span>
-          ) : panel.dot ? <span data-new-dot aria-label="新しいものがあります" className="block h-2 w-2 rounded-full bg-accent" /> : null
+          ) : panel.dot ? <NewDot label="新しいものがあります" /> : null
           const tab = (
             <button
               key={panel.id}

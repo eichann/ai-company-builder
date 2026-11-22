@@ -22,7 +22,7 @@ import { useQuery } from '@/lib/use-query'
 const STATUS_TEXT: Record<CoreConnectorStatus, string> = {
   'not-configured': 'まだつないでいません',
   off: 'オフ',
-  'operator-stopped': '止まっています',
+  'operator-stopped': '止めています',
   on: '動いています',
 }
 
@@ -98,7 +98,7 @@ function ConnectorRow({ connector: c, busy, onToggle }: { connector: CoreConnect
       <div className="space-y-0.5">
         <div className="flex items-center gap-2 font-medium">
           {c.label}
-          <Badge variant={c.status === 'on' ? 'default' : 'outline'}>{STATUS_TEXT[c.status]}</Badge>
+          <Badge variant={c.status === 'on' ? 'success' : c.status === 'operator-stopped' ? 'paused' : 'outline'}>{STATUS_TEXT[c.status]}</Badge>
         </div>
         <div className="text-xs text-muted-foreground">{c.summary}</div>
         <div className="text-xs text-muted-foreground">

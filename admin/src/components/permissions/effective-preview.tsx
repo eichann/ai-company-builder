@@ -66,7 +66,7 @@ export function EffectivePreview({
         編集できる <span className="font-medium text-foreground tabular-nums">{editors}人</span> · 閲覧のみ{' '}
         <span className="font-medium text-foreground tabular-nums">{members.length - editors}人</span>
         {draft ? (
-          <span className="ml-2 inline-block rounded-full bg-warning/10 whitespace-nowrap px-2 py-0.5 text-xs text-warning">保存前のプレビュー</span>
+          <Badge variant="warning" className="ml-2">保存前のプレビュー</Badge>
         ) : (
           effective.fetching && <span className="ml-2 text-xs">更新中…</span>
         )}

@@ -66,9 +66,9 @@ export function OrphanedScopesCard({
   }
 
   return (
-    <Card className="gap-0 overflow-hidden border-warning/40 py-0" role="region" aria-label={ORPHANED_TITLE}>
+    <Card className="gap-0 overflow-hidden border-warning-border py-0" role="region" aria-label={ORPHANED_TITLE}>
       <div className="flex gap-3 px-5 pt-4 pb-3">
-        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning/15 text-warning">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-control bg-warning-bg text-warning-icon">
           <FolderSimpleDashed size={17} weight="bold" />
         </span>
         <div className="min-w-0 space-y-0.5">

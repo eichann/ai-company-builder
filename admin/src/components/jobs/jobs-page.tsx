@@ -9,7 +9,8 @@ import { ClockCounterClockwise, Plus } from '@phosphor-icons/react'
 
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
-import { Badge } from '@/components/ui/badge'
+import { Badge, type BadgeVariant } from '@/components/ui/badge'
+import { Callout } from '@/components/ui/callout'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { companiesApi, jobsApi, type JobView, type Member } from '@/lib/api'
@@ -18,7 +19,8 @@ import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
 import { JOB_CHAIN_STOPPED_ASK, jobOccurrenceText, jobRunsText, jobSlotText, jobTriggerText } from '../../../../shared/core/job-words'
-import { JOB_NEEDS_NEWER_SCREEN, isKnownJobTrigger } from '../../../../shared/core/jobs'
+import { JOB_NEEDS_NEWER_SCREEN, JOB_SYSTEM_PAUSE_REASONS, isKnownJobTrigger } from '../../../../shared/core/jobs'
+import { STOP_LOOK } from '../../../../shared/design-tokens/stop-meaning'
 import { JobAcceptDialog, JobApproveDialog, JobFormDialog } from './job-dialogs'
 import { JobOccurrences } from './job-occurrences'
 
@@ -27,13 +29,21 @@ export const JOBS_INTRO =
 
 const personName = (m: { name: string | null; email: string | null } | undefined) => (m ? m.name || m.email || '名前未設定' : 'もういない人')
 
-/** The badge: the one word for where the job stands. */
-export function jobBadge(job: JobView): { label: string; variant: 'success' | 'warning' | 'secondary' } {
-  if (job.state === 'retired') return { label: '使っていません', variant: 'secondary' }
-  if (job.state === 'paused') return { label: '止まっています', variant: 'warning' }
-  if (job.waiting === 'COMPANY_STOPPED') return { label: 'すべて止めています', variant: 'warning' }
-  if (job.waiting === 'NOT_APPROVED') return { label: '承認待ち', variant: 'secondary' }
-  if (job.waiting === 'NOT_ACCEPTED') return { label: '受け取り待ち', variant: 'warning' }
+/**
+ * The badge: the one word for where the job stands. 「止まっている」 by meaning (`STOP_LOOK`, owner decision
+ * 2026-11-21, design-system.md P2b): paused by a person (an admin, the responsible person, the company's stop) → grey
+ * 「止めています」; paused by the server because the responsible person left or lost rights → red
+ * 「止まりました」 (it needs a new responsible person); waiting for approval or acceptance → amber.
+ */
+export function jobBadge(job: JobView): { label: string; variant: BadgeVariant } {
+  if (job.state === 'retired') return { label: '使っていません', variant: 'neutral' }
+  if (job.state === 'paused') {
+    const meaning = job.pausedReason !== null && JOB_SYSTEM_PAUSE_REASONS.includes(job.pausedReason) ? 'failed' : 'stoppedOnPurpose'
+    return { label: STOP_LOOK[meaning].word, variant: STOP_LOOK[meaning].variant }
+  }
+  if (job.waiting === 'COMPANY_STOPPED') return { label: 'すべて止めています', variant: STOP_LOOK.stoppedOnPurpose.variant }
+  if (job.waiting === 'NOT_APPROVED') return { label: STOP_LOOK.awaitingApproval.word, variant: STOP_LOOK.awaitingApproval.variant }
+  if (job.waiting === 'NOT_ACCEPTED') return { label: '受け取りを待っています', variant: STOP_LOOK.awaitingApproval.variant }
   if (job.placement === 'a') return { label: 'PC で動きます', variant: 'success' }
   return { label: '動いています', variant: 'success' }
 }
@@ -98,7 +108,7 @@ export function JobsPage() {
         <Card className="mb-6 flex flex-wrap items-center gap-3 px-5 py-4" aria-label="定期の仕事をすべて止める">
           <div className="min-w-0 flex-1 text-sm">
             {jobs.data.stopped ? (
-              <p role="status" className="font-medium text-warning">いま、この会社の定期の仕事はすべて止まっています。止めていた間の回は、再開しても動きません。</p>
+              <Callout variant="paused" role="status">いま、この会社の定期の仕事はすべて止めています。止めていた間の回は、再開しても動きません。</Callout>
             ) : (
               <p className="text-muted-foreground">困ったときは、この会社の定期の仕事をまとめて止められます。止めている間の回は、あとで再開しても動きません。</p>
             )}

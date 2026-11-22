@@ -26,7 +26,7 @@ export function JobsSection({ companyId }: { companyId: string }) {
       {!jobs && !error ? (
         <div className="flex items-center gap-2 py-10 text-[13px] text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
       ) : !jobs ? (
-        <Callout tone="warning" role="alert">{error}</Callout>
+        <Callout tone="danger" role="alert">{error}</Callout>
       ) : jobs.length === 0 ? (
         <p className="text-[13px] text-zinc-600 dark:text-zinc-300">あなたが責任者の定期の仕事はありません。</p>
       ) : (

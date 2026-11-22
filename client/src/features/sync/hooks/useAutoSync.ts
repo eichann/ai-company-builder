@@ -1,7 +1,7 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { autoSync } from '../api'
 import { autoSyncNoticeFor, type SyncNotice } from '../model'
-import { afterReceive, afterSync, recordRun, runDueNow, syncButtonTitle } from '../autoSyncSchedule'
+import { afterReceive, afterSync, recordRun, runDueNow, syncButtonTitle, syncWaitsForMember } from '../autoSyncSchedule'
 import { readAutoSyncState, updateAutoSyncState, useAutoSyncState } from '../autoSyncState'
 import { autoSyncSettings } from '../../../shared/lib/autoSyncSettings'
 import { hasUnsavedEdits } from '../../../shared/lib/unsavedEdits'
@@ -110,5 +110,5 @@ export function useAutoSync({ rootPath, companyId, isSyncing, setIsSyncing, show
     }
   }, [rootPath, companyId])
 
-  return { syncButtonTitle: syncButtonTitle(state, settings) }
+  return { syncButtonTitle: syncButtonTitle(state, settings), syncWaitsForMember: syncWaitsForMember(state, settings) }
 }

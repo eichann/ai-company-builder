@@ -631,25 +631,29 @@ browser:
   `delivers` is refused, with the reason. **The first version runs** only `delivers: none`, not
   irreversible, exactly one write, not delete (`browserFirstVersionProblem`, asked by the server).
 - **`explore`** (6b-1, design memo §33 2-2; `browser.explore`, optional): the pages the operator AI may
-  ask the app to read during the preview, ≤ 10, each `{ label, path, query?, reader, no_side_effects:
+  ask the app to read during the preview, ≤ 10, each `{ label, path, query?, pages?, reader, no_side_effects:
   reviewed }` — a path of literal segments and whole `{name}` segments (no fragment, `..` or `//`); an
   optional `query` (§33 decision 6, 2026-11-22), an ordered list of 1–5 `{ name, value }`: `name` a
   letter then letters / digits / `_` (never `_method`), none twice in any case; `value` a fixed literal
   of `[A-Za-z0-9_.~-]` (≤ 64, nothing to encode) or exactly one `{name}` — never free text or text around
   a `{name}`. The `{name}`s of path and query: ≤ 5, none twice, filled only with plain ids a reader took
   out of an earlier page (`explorePath`, which builds `path?name=value&…` in the declared order; the app
-  reads exactly that address, `agent-browser.md` "The read session"). `reader` a reviewed reader
+  reads exactly that address, `agent-browser.md` "The read session"). An optional `pages: { param, max }`
+  (design memo §38, 2026-11-22) makes it a paginated list the app — never the AI — reads page 1, 2, … in
+  order: `param` a query name not in `query` (in any case; counted in the 5), `max` an integer 1–10; the
+  app appends `param=<n>` last, only 1..max, and only a JSON reader may serve it (`agent-browser.md`
+  "Paginated reads"). `reader` a reviewed reader
   `<site>.<thing>` (code in the app's connector folder, of a page or of a JSON answer); without the
   reviewed mark that reading it changes nothing on the site, the declaration is refused
   (`agent-browser.md` "The operator and the preview").
   ```yaml
   explore:
     reminders:
-      label: フォルダの中のリマインダ（1ページ目）
+      label: フォルダの中のリマインダ
       path: /api/episodes
       query:
         - { name: group, value: "{group}" }
-        - { name: page, value: "1" }
+      pages: { param: page, max: 10 }       # the app reads …&page=1, …&page=2, … up to last_page (≤ 10)
       reader: lstep.reminders
       no_side_effects: reviewed
   ```
@@ -686,7 +690,7 @@ browser:
 - **Not on the shelf yet**: the shelf refuses a package with `browser` (「a browser connector (browser) is not
   used yet」, `services/plugin-shelf.ts`), so no company installs it, `pluginsFor` never lists it and no
   app fetches it; `combineUse` refuses one, so no business plugin uses it. A released app's older parser
-  does not know `browser` (an unknown key: unusable). The first declaration (`lstep@0.4.0`, 「リマインダの段に
+  does not know `browser` (an unknown key: unusable). The first declaration (`lstep@0.5.0`, 「リマインダの段に
   テンプレートを足す」) ships **inside the app** with its checker (`client/connectors/lstep/`),
   parsed by `parsePluginManifest`; the runner exists but nothing starts it. The server accepts plans
   only for a combination listed in `shared/browser-connectors/approved.json` (the declaration's text
@@ -1737,7 +1741,7 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   version and company key (the key by its name and last 4 from `GET /broker`; never a value),
   on / off (off with a confirmation; the server's `problem` in plain words), the mapping as a
   table (ACB field by its Japanese name from the business plugin's types — `PluginDetail.labels` — with
-  the identifier in small print, outside property, 「書き戻さない（読むだけ）」 / 「承認が要る」 / 「自動で書き戻す」;
+  the identifier in small print, outside property, 「書き戻さない（閲覧のみ）」 / 「承認が要る」 / 「自動で書き戻す」;
   the stage offers 「自動で書き戻す」 only when the mapping names `closing_stages`, with the line
   「自動にしても、受注・失注にする（そこから戻す）ときは承認が要ります」, else 「受注・失注になる段階
   （closing_stages）を書くまで、自動にはできません」 — `autoUnavailable` / `closingNote`) or as YAML for advanced use, versions with 「この版に戻す」,
@@ -1755,7 +1759,8 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   uses a connector (`PluginPackageView.connector`), whether it is connected: 「HubSpot とつながって
   います」 / 「HubSpot との行き来は止まっています：<reason>。記録はそのまま使えます。」
   (`connector-*` and key problems, `CONNECTOR_PROBLEMS` in `admin/src/lib/integrations.ts`; its
-  badge stays 「使っています」), before install what the exchange needs; and its mapping and import.
+  badge stays 「使っています」; the line is amber when the admin has to act — `connector-stopped` —
+  `connectionLineTone`, design-system.md 「止まっている」の色), before install what the exchange needs; and its mapping and import.
   `CONNECTOR_REQUIRED` shows the server's sentence; 「新しいつなぎ先として始める」 on a business's
   import renews the connector's connection. A business inside ACB only shows version and on / off.
 - **The mapping and the import only for a use with records**: `PluginPackageView.connector.records`

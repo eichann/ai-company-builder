@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { CaretRight, LockSimple } from '@phosphor-icons/react'
+import { CaretRight, ShieldSlash } from '@phosphor-icons/react'
 
 import { EmptyState, PageHeader } from '@/components/app/states'
 import { Badge } from '@/components/ui/badge'
@@ -31,7 +31,7 @@ export default function AdvancedSettingsPage() {
     return (
       <>
         <PageHeader title="詳しい設定" />
-        <EmptyState icon={LockSimple} title="このページはオーナーと管理者だけが使えます" />
+        <EmptyState icon={ShieldSlash} title="このページはオーナーと管理者だけが使えます" />
       </>
     )
   }
@@ -69,8 +69,8 @@ export default function AdvancedSettingsPage() {
                 <div className="text-sm font-semibold">{s.title}</div>
                 <div className="truncate text-xs text-muted-foreground">{s.description}</div>
               </div>
-              {changed[s.id] === true && <Badge variant="warning">変えています</Badge>}
-              {changed[s.id] === false && <Badge variant="secondary">初期値のまま</Badge>}
+              {changed[s.id] === true && <Badge variant="info">変えています</Badge>}
+              {changed[s.id] === false && <Badge variant="neutral">初期値のまま</Badge>}
               <CaretRight size={14} className="shrink-0 text-muted-foreground" />
             </Link>
           </li>

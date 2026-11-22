@@ -11,18 +11,18 @@ const MESSAGES: Record<ReviewSaveFailure['kind'], string> = {
 
 export function ReviewSaveError({ failure, onDismiss }: { failure: ReviewSaveFailure; onDismiss: () => void }) {
   return (
-    <div role="alert" className="flex items-center gap-3 px-4 py-2 border-b text-xs bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30 text-red-700 dark:text-red-300">
-      <WarningCircle size={14} className="flex-shrink-0" />
+    <div role="alert" className="flex items-center gap-3 px-4 py-2 border-b text-xs bg-danger-bg border-danger-border text-danger-text">
+      <WarningCircle size={14} className="flex-shrink-0 text-danger-icon" />
       <span className="flex-1">{MESSAGES[failure.kind]}</span>
       {failure.retry && (
         <button
           onClick={failure.retry}
-          className="px-2.5 py-1 rounded bg-white dark:bg-zinc-800 border border-red-200 dark:border-red-500/40 font-medium hover:bg-red-100 dark:hover:bg-red-500/20 transition-colors"
+          className="px-2.5 py-1 rounded bg-surface-raised border border-danger-border font-medium hover:bg-danger-bg-hover transition-colors"
         >
           もう一度試す
         </button>
       )}
-      <button onClick={onDismiss} aria-label="このお知らせを閉じる" className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-500/20">
+      <button onClick={onDismiss} aria-label="このお知らせを閉じる" className="p-1 rounded hover:bg-danger-bg-hover">
         <X size={12} />
       </button>
     </div>

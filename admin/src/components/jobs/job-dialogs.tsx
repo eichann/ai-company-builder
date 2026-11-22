@@ -350,7 +350,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
         ) : definition ? (
           <div className="space-y-3">
             <JobVersionWords definition={definition} members={members} />
-            <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm" role="note">
+            <p className="rounded-control border border-info-border bg-info-bg px-3 py-2 text-sm text-info-text" role="note">
               {own && !mustAccept
                 ? 'あなたは責任者として、この内容（だれの権限で・何を・どこで）をすでに受け取っています。承認すると、受け取り直しなしでこの版に切り替わります。'
                 : own && placeOutside
@@ -426,7 +426,7 @@ export function JobAcceptDialog({ job, members, onClose, onAccepted }: {
         ) : definition ? (
           <div className="space-y-3">
             <JobVersionWords definition={definition} members={members} />
-            <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm" role="note">
+            <p className="rounded-control border border-info-border bg-info-bg px-3 py-2 text-sm text-info-text" role="note">
               {placeOutside
                 ? 'できたものを置く先を選んで受け取るので、あなたのアプリの「設定」→「仕事」→「定期の仕事」で受け取ってください。'
                 : '受け取ると、この内容のとおりにあなたの名前と権限で動きます。違うところがあれば、受け取らずに直してください。'}

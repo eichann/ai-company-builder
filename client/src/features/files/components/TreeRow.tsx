@@ -3,6 +3,7 @@ import { CaretRight, SpinnerGap, CloudArrowDown, CloudSlash, FolderSimpleDashed,
 import { FolderIcon } from '../../../shared/ui/FileIcons'
 import { getFileIcon } from '../../../shared/ui/fileIcon'
 import { ReadOnlyBadge } from '../../../shared/ui/ReadOnlyBadge'
+import { NewDot } from '../../../shared/ui/primitives'
 import { viewersLabel, type MyPrivateFolder } from '../../../../shared/private-folder-ui'
 import type { FileEntry } from '../fileTreeModel'
 import { FILE_PATHS_DRAG_TYPE, LINK_EFFECT_ALLOWED } from '../../../shared/lib/dragTypes'
@@ -168,7 +169,7 @@ export const TreeRow = memo(function TreeRow({
         <span className="flex-shrink-0 ml-auto text-[9px] px-1 rounded bg-amber-500/20 text-amber-400" title="レビュー依頼あり">依頼</span>
       )}
       {review === 'unseen' && (
-        <span className="flex-shrink-0 ml-auto w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="新しいレビューあり" />
+        <NewDot label="新しいレビューあり" className="ml-auto" />
       )}
       {review === 'seen' && (
         <span className="flex-shrink-0 ml-auto w-1.5 h-1.5 rounded-full bg-blue-400" title="レビューあり" />

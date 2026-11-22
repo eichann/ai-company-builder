@@ -1,6 +1,6 @@
 /**
  * Lステップ's preview readers of the JSON lists its own pages read (`explore` in ./declaration.ts,
- * 0.4.0; design memo §34–§36, the owner's login, read only). Each turns one answer into its declared
+ * 0.4.0, paginated from 0.5.0; design memo §34–§36, §38, the owner's login, read only). Each turns one answer into its declared
  * field only — an id, with the name as its label (the core cleans it and hands it to the operator as
  * outside text) — and nothing else of the answer. An answer that is not the shape seen on the real
  * site is `complete: false` (with the items it could still take out, or none), never a guess.
@@ -12,17 +12,19 @@
  *   folders (`template_group`). It lists 「未分類」 as `id 0`: **not selectable** (decision, safe side:
  *   every id a plan or a read carries is a positive integer, as everywhere on Lステップ — `0` / `-1`
  *   are never "one item"), so it is left out and the list says it is not whole.
- * - `GET /api/episodes?group=<folder>&page=1` → `{ current_page, data, …, last_page, per_page: 50,
+ * - `GET /api/episodes?group=<folder>&page=<n>` → `{ current_page, data, …, last_page, per_page: 50,
  *   total }`, each `{ id, name, order, type, created_at, group_id, group: { id, name, order } }`: the
  *   reminders (`reminder`).
- * - `GET /api/templates?group=<folder>&page=1` → the same pages, each `{ id, name, content_text,
+ * - `GET /api/templates?group=<folder>&page=<n>` → the same pages, each `{ id, name, content_text,
  *   created_at, form_type, group: { id, name }, editor_version }`: the templates (`template`).
- * A paginated list is whole only when it says it is its only page (`current_page` 1, `last_page` 1):
- * only page 1 is read in this version. An entry of a folder list must name the asked folder — every
- * folder id it carries (`group_id`, `group.id`, a plain `group`) equal to it, and at least one —, else
- * it is left out and the read is incomplete (the folder filter may not have applied).
+ * A paginated answer reports where it stands (`current_page`, `last_page`, `total`, each a whole
+ * number, as `page`) and nothing more: whether and which page is read next is the app's (preview.ts,
+ * the declaration's `pages`), and it is the app that checks the pages fit together. One without those
+ * three numbers is incomplete. An entry of a folder list must name the asked folder — every folder id
+ * it carries (`group_id`, `group.id`, a plain `group`) equal to it, and at least one —, else it is
+ * left out and the read is incomplete (the folder filter may not have applied); checked on every page.
  */
-import type { BrowserExploreItem, BrowserJsonExploreReader, BrowserJsonValue } from '../../shared/browser-runner'
+import type { BrowserExploreItem, BrowserJsonExploreReader, BrowserJsonValue, BrowserListPage } from '../../shared/browser-runner'
 
 type JsonObject = { readonly [key: string]: BrowserJsonValue }
 const jsonObject = (v: BrowserJsonValue | undefined): JsonObject | null => (v !== null && v !== undefined && typeof v === 'object' && !Array.isArray(v) ? v as JsonObject : null)
@@ -42,9 +44,12 @@ function idOf(v: BrowserJsonValue | undefined): string | null {
   return typeof v === 'string' && POSITIVE_ID.test(v) ? v : null
 }
 
-/** The answer says it is its only page: `current_page` 1 and `last_page` 1 (a paginated list must say both). */
-function onlyPage(answer: JsonObject | null): boolean {
-  return jsonField(answer, 'current_page') === 1 && jsonField(answer, 'last_page') === 1
+/** Where a paginated answer stands, as it says it (`current_page`, `last_page`, `total` as plain numbers), or null. */
+function pageOf(answer: JsonObject | null): BrowserListPage | null {
+  const current = jsonField(answer, 'current_page')
+  const last = jsonField(answer, 'last_page')
+  const total = jsonField(answer, 'total')
+  return typeof current === 'number' && typeof last === 'number' && typeof total === 'number' ? { current, last, total } : null
 }
 
 /** Every folder id an entry carries (`group_id`, `group.id`, a plain `group`), as written. */
@@ -60,7 +65,7 @@ function foldersOf(entry: JsonObject | null): Array<BrowserJsonValue | undefined
 interface ListRule {
   id: string
   field: string
-  /** A paginated list: whole only when it says it is its only page. */
+  /** A paginated list: the answer reports where it stands (the app reads the pages). */
   paginated: boolean
   /** The folder (a `{name}` of the read) every entry must name. */
   folder?: string
@@ -78,7 +83,8 @@ function listReader(rule: ListRule): BrowserJsonExploreReader {
       if (!Array.isArray(data)) return { items: [], complete: false }
       const folder = rule.folder === undefined ? undefined : values[rule.folder]
       if (rule.folder !== undefined && (folder === undefined || !POSITIVE_ID.test(folder))) return { items: [], complete: false }
-      let complete = rule.paginated ? onlyPage(answer) : jsonField(answer, 'last_page') === undefined
+      const page = rule.paginated ? pageOf(answer) : null
+      let complete = rule.paginated ? page !== null : jsonField(answer, 'last_page') === undefined
       const items: BrowserExploreItem[] = []
       for (const entry of data as readonly BrowserJsonValue[]) {
         const o = jsonObject(entry)
@@ -92,7 +98,7 @@ function listReader(rule: ListRule): BrowserJsonExploreReader {
         }
         items.push({ field: rule.field, value: id, label: name })
       }
-      return { items, complete }
+      return page ? { items, complete, page } : { items, complete }
     },
   }
 }

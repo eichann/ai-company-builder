@@ -1,9 +1,10 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ClockCounterClockwise, CloudArrowUp, GearSix, Globe, House, ListChecks, Moon, SignOut, SpinnerGap, Sun } from '@phosphor-icons/react'
+import { ClockCounterClockwise, CloudArrowUp, GearSix, Globe, House, ListChecks, Moon, SignOut, SpinnerGap, Sun, WarningCircle } from '@phosphor-icons/react'
 import { useAppStore } from '../stores/appStore'
 import { WORKING_FOLDER_BACKUP_NOTE, WORKING_FOLDER_NOTE } from '../../shared/company-folder'
 import { useDismiss } from '../shared/hooks/useDismiss'
+import { STOP_ICON } from '../shared/ui/stateStyles'
 
 interface Props {
   companyName: string | undefined
@@ -11,6 +12,8 @@ interface Props {
   isSyncing: boolean
   /** The sync button's tooltip (with the last automatic sync). */
   syncTitle?: string
+  /** Automatic sync stopped until the member syncs by hand: the button in the warning colour with a mark. */
+  syncWaitsForYou?: boolean
   /** False for a company without the shared company folder: no sync, preview or backups (one short note instead). */
   sharedFolder?: boolean
   onPreview: () => void
@@ -25,12 +28,14 @@ interface Props {
   notices?: ReactNode
   /** The company's name as a menu to switch companies (features/company), drawn instead of the plain name. */
   companySwitcher?: ReactNode
+  /** Show / hide the left column and the consultation, 「いつもの形に戻す」 (features/workspace). */
+  layoutControls?: ReactNode
 }
 
 const ICON_BUTTON = 'p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
 
 /** The window's title bar (draggable): the company, 変更を確認 / 同期, backups, language, theme, settings, sign-out. */
-export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra, notices, companySwitcher }: Props) {
+export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', syncWaitsForYou = false, sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra, notices, companySwitcher, layoutControls }: Props) {
   const { t } = useTranslation()
   const hasCompany = useAppStore((s) => s.currentCompany) != null
   const theme = useAppStore((s) => s.theme)
@@ -71,12 +76,18 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
         <button
           onClick={onSync}
           disabled={isSyncing || !hasCompany}
-          className={`${ICON_BUTTON} disabled:opacity-50`}
+          className={`${ICON_BUTTON} relative disabled:opacity-50`}
           title={syncTitle}
-          aria-label="サーバーと同期"
+          aria-label={syncWaitsForYou ? 'サーバーと同期（自動同期は止まっています）' : 'サーバーと同期'}
+          data-sync-waits={syncWaitsForYou ? 'true' : undefined}
         >
           {isSyncing ? (
             <SpinnerGap size={18} className="animate-spin" />
+          ) : syncWaitsForYou ? (
+            <>
+              <CloudArrowUp size={18} className={STOP_ICON.needsAction} />
+              <WarningCircle size={10} weight="fill" aria-hidden className={`absolute right-1 top-1 ${STOP_ICON.needsAction}`} />
+            </>
           ) : (
             <CloudArrowUp size={18} />
           )}
@@ -84,6 +95,7 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
         </>}
         {extra}
         <div className="w-px h-4 bg-gray-200 dark:bg-zinc-700" />
+        {layoutControls && <>{layoutControls}<div className="w-px h-4 bg-border-strong" /></>}
         {sharedFolder && (
         <button
           onClick={onShowBackups}

@@ -163,8 +163,8 @@ export const AI_RUN_STATE_LABELS: Record<AiRunState, string> = {
   running: 'AI が進めています',
   open: 'AI が始めるのを待っています',
   retry_later: '一時的にうまくいかなかったため、少し後にもう一度進めます',
-  waiting_setup: '権限が足りないため止まっています。設定を確かめてから「もう一度」を押してください',
-  waiting_person: '入力や情報が足りないため止まっています。内容を確かめてください',
+  waiting_setup: '権限が足りないため止まりました。設定を確かめてから「もう一度」を押してください',
+  waiting_person: '入力や情報が足りないため止まりました。内容を確かめてください',
   waiting_reconcile: '外への操作の結果が分かりません。相手先で確かめてから続きを進めます',
   done: '終わりました',
 }

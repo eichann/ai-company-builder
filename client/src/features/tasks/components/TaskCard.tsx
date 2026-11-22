@@ -1,7 +1,7 @@
 // A task's card in one file: the press's notices (取り消す, 先に変えた) belong to the card that
 // holds its version, so the loader and the body stay together.
 import { useMemo, useState, type ReactNode } from 'react'
-import { CheckCircle, CircleNotch, Plus, Robot, Sparkle, Warning } from '@phosphor-icons/react'
+import { CheckCircle, CircleNotch, Plus, Robot, Sparkle, WarningOctagon } from '@phosphor-icons/react'
 import { fileNameFromTitle } from '../../../../shared/today-folder'
 import { InputDialog } from '../../../shared/ui/InputDialog'
 import { runCommand } from '../../../shared/commands/commands'
@@ -430,7 +430,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
         </>} />}>
       {doneLine && <p className="text-[11.5px] text-gray-500 dark:text-zinc-400">{doneLine}</p>}
       <WaitBand key={`${record.state}@${record.version}`} card={card} today={now.date} busy={busy} onRun={onRun} {...(onNudge ? { onNudge: () => onNudge({ id: record.id, title: record.title }) } : {})} />
-      {card.okLine && <p className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-1 text-[12.5px] text-emerald-800 dark:text-emerald-300"><CheckCircle size={14} weight="fill" />{card.okLine}</p>}
+      {card.okLine && <p className="flex items-center gap-1.5 rounded-md bg-success-bg px-2 py-1 text-[12.5px] text-success-text"><CheckCircle size={14} weight="fill" className="text-success-icon" />{card.okLine}</p>}
 
       {(card.prepSummary || card.prepared.length > 0) && (
         <section aria-label="AI が用意したもの" className="space-y-2 rounded-xl border border-accent/30 bg-accent/5 p-3">
@@ -443,10 +443,11 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       {review}
 
       {card.runs.length > 0 && (
-        <section aria-label="AI が止まっています" className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-[12.5px]">
+        // A run that needs a person stopped on a failure (missing rights or input, an unknown outside result): red, 「止まりました」.
+        <section aria-label="AI が止まりました" data-stopped="failed" className="space-y-2 rounded-card border border-failed-border bg-failed-bg p-3 text-[12.5px]">
           {card.runs.map(run => (
             <div key={run.runId} className="space-y-1.5">
-              <p className="flex items-center gap-1.5"><Warning size={14} className="text-amber-500" />{run.label}</p>
+              <p className="flex items-center gap-1.5 text-failed-text"><WarningOctagon size={14} weight="fill" className="text-failed-icon" />{run.label}</p>
               {run.unknown.map(op => (
                 <div key={op.key} className="flex flex-wrap items-center gap-2 pl-5">
                   <span className="text-gray-600 dark:text-zinc-300">送った先で確かめてください：</span>
@@ -457,7 +458,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
               {run.canRetry && <button type="button" disabled={busy} onClick={() => void runAction(() => onRetry(run.runId))} className="ml-5 rounded border border-gray-300 px-2 py-0.5 text-[11.5px] dark:border-zinc-600"><Robot size={11} className="mr-1 inline" />もう一度</button>}
             </div>
           ))}
-          {runError && <p role="alert" className="text-red-600 dark:text-red-400">{runError}</p>}
+          {runError && <p role="alert" className="text-danger-text">{runError}</p>}
         </section>
       )}
 

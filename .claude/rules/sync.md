@@ -285,7 +285,9 @@ both only while the app is open:
   repeated) and the failure kinds already shown. A failed automatic send shows the
   manual sync's notice once per kind until a sync succeeds; a successful one is silent. Whatever
   sync set aside is shown on either (`autoSyncNoticeFor`, the same notice a manual sync shows). The sync button's tooltip shows
-  「最後の自動同期: M/D HH:MM」 or that automatic sync waits for the button.
+  「最後の自動同期: M/D HH:MM」 or that automatic sync waits for the button; while it waits
+  (`syncWaitsForMember`: automatic sync on and `needsMember`) the button's icon is the warning colour
+  with a small mark and its name says 「（自動同期は止まっています）」 (design-system.md 「止まっている」の色).
 - Scenarios: `client/tests/sync/auto-sync.test.ts`; schedule: `src/features/sync/autoSyncSchedule.test.ts`;
   settings page: `tests/ui/download-folders.spec.ts` 「自動同期」.
 

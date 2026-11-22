@@ -154,7 +154,7 @@ export type ConversationGroupKey = 'needs-you' | 'pinned' | 'failed' | 'working'
 export const CONVERSATION_GROUPS: ReadonlyArray<{ key: ConversationGroupKey; label: string }> = [
   { key: 'needs-you', label: 'あなたの番' },
   { key: 'pinned', label: 'ピン留め' },
-  { key: 'failed', label: '止まっています' },
+  { key: 'failed', label: '止まりました' },
   { key: 'working', label: 'AIが作業中' },
   { key: 'open', label: '開いている相談' },
   { key: 'done', label: '終わったもの' },

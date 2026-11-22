@@ -1,5 +1,5 @@
 import { useState, type DragEvent } from 'react'
-import { ArrowBendUpRight, ChatCircleDots, Check, CircleNotch, Clock, Eye, Robot, User, VideoCamera, Warning } from '@phosphor-icons/react'
+import { ArrowBendUpRight, ChatCircleDots, Check, CircleNotch, Clock, Eye, Robot, User, VideoCamera, Warning, WarningOctagon } from '@phosphor-icons/react'
 import { NEXT_STEP, ONLY_YOU, thingKindOf, type ThingKind } from '../../../../shared/thing-words'
 import { SeenBy, ThingIcon } from '../../../shared/ui/ThingIcon'
 import type { AiTurnItemState, AiTurnItemView } from '../../../../shared/ai-turns'
@@ -7,6 +7,8 @@ import type { TaskListItem } from '../../../../shared/tasks'
 import { dueText, dueWhen, type CompanyNow, type ListEvent } from '../model'
 import { isFileTreeDrag, isLinkableDrag, startRecordDrag } from '../../../shared/lib/dragTypes'
 import { PRIMARY_ACTION } from '../../../shared/ui/buttonStyles'
+import { STOP_ICON } from '../../../shared/ui/stateStyles'
+import type { StopMeaning } from '../../../../../shared/design-tokens/stop-meaning'
 
 const CHIP = 'shrink-0 rounded px-1 text-[10px]'
 /** Where the automatic 「AI の番」 stands (ai-turns.md "Never silent"), before its reason. */
@@ -17,6 +19,8 @@ const AI_STATE_WORDS: Record<AiTurnItemState, string> = {
   failed: 'AI ができませんでした',
   handed: 'あなたにお渡ししました',
 }
+/** What a stopped 「AI の番」 means for the member: they start or hand it on (amber), or it failed (red). */
+const AI_STOP = { 'not-allowed': 'needsAction', failed: 'failed' } as const satisfies Partial<Record<AiTurnItemState, StopMeaning>>
 
 interface RowProps {
   item: TaskListItem
@@ -86,7 +90,8 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
     >
       <span className="mt-[2px] shrink-0">
         {item.turn === 'ai' && !done ? (ai?.state === 'running' ? <CircleNotch size={15} className="animate-spin text-accent" aria-label="AI が進めています" />
-          : ai?.state === 'failed' || ai?.state === 'not-allowed' ? <Warning size={15} className="text-amber-500" aria-label="止まっています" />
+          : ai?.state === 'failed' ? <WarningOctagon size={15} weight="fill" className={STOP_ICON[AI_STOP.failed]} aria-label="AI が止まりました" />
+          : ai?.state === 'not-allowed' ? <Warning size={15} className={STOP_ICON[AI_STOP['not-allowed']]} aria-label={AI_STATE_WORDS['not-allowed']} />
             : <Robot size={15} className="text-accent" aria-label="AI の番" />)
           : onFinish ? (
             <button type="button" disabled={busy} onClick={onFinish} title={boxWord} aria-label={`「${item.title}」を${boxWord}`}

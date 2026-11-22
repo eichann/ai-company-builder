@@ -328,7 +328,7 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   are the AI's. **Prefer stable sources** for a new checker: a JSON answer the page itself uses or a
   fixed id marker over the layout of the HTML; a site whose request names the whole target needs no
   target check. What the person approves (`before`) is the state the checker read, not what the AI said.
-- **Lステップ** (`client/connectors/lstep/`): the declaration `lstep@0.4.0` (`declaration.ts`, bundled
+- **Lステップ** (`client/connectors/lstep/`): the declaration `lstep@0.5.0` (`declaration.ts`, bundled
   until the shelf hands browser connectors out; parsed by the core's `parsePluginManifest` like any
   package) with one type, **「リマインダの段にテンプレートを足す」** (`reminder_step_add_template`): effect
   `write`, checker `lstep.reminder_step`, `lock: { kind: lstep.reminder_step }`, `delivers: none`
@@ -357,21 +357,22 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   integer, else none (missing, empty, two different values) — the run then stops with
   `account-unknown` before writing. `lstepConnector({ account })` still takes another reader (the
   real-Electron harness's test site).
-- **The preview's reads** (0.3.0 the reminder page; 0.4.0 the lists, design memo §34–§36, each confirmed
+- **The preview's reads** (0.3.0 the reminder page; 0.4.0 the lists, 0.5.0 their pages; design memo §34–§36, §38, each confirmed
   with the owner's login in a read-only window and `no_side_effects: reviewed` — our fixed GETs changed
   nothing; the pages' own background reads do not run since main reads without a page):
   `reminder_folders` `GET /api/episode-groups` (no query; the site's page sends an empty `?`, we send
-  none) → `group`; `reminders` `GET /api/episodes?group={group}&page=1` → `reminder`; `reminder`
+  none) → `group`; `reminders` `GET /api/episodes?group={group}&page=<n>` (`pages: { param: page, max: 10 }`) → `reminder`; `reminder`
   `GET /line/episode/show/{reminder}` (reader `lstep.reminder_steps`: the steps, and the templates
   already on each step as `attached_template` — never `template`, so a candidate can never "add" one
   already there); `template_folders` `GET /api/template-groups` → `template_group`; `templates`
-  `GET /api/templates?group={template_group}&page=1` → `template`. The four list readers
-  (`list-readers.ts`, JSON) hand on ids and names only (never a template's body), and are whole only
-  when the answer is the shape seen: a paginated list must say `current_page` 1 and `last_page` 1 (page
-  1 only: a longer list reads as incomplete — the remaining limit), and every entry of a folder's list
-  must name the asked folder (`group_id` and `group.id`, each one present equal to it, at least one;
+  `GET /api/templates?group={template_group}&page=<n>` (paginated likewise) → `template`. The four list
+  readers (`list-readers.ts`, JSON) hand on ids and names only (never a template's body), and are whole
+  only when the answer is the shape seen: a paginated answer reports where it stands (`current_page`,
+  `last_page`, `total` — all three plain numbers, else no report and incomplete) and the app reads the
+  pages ("Paginated reads" below; up to 10 pages = 500 items, a longer list is not offered — design
+  memo §38, owner), and every entry of a folder's list, on every page, must name the asked folder (`group_id` and `group.id`, each one present equal to it, at least one;
   else left out, incomplete). 「未分類」 in the template folders is `id 0`: **not selectable** (decision,
-  safe side: every id is a positive integer) — left out, the list incomplete. So 0.4.0 passes
+  safe side: every id is a positive integer) — left out, the list incomplete. So 0.5.0 passes
   `previewProblem` (two id-free reads to start from; `reminder`, `step`, `template` each taken out by a
   reader) and the real connector walks a fake Lステップ to a candidate (`browser-preview.test.ts`); the
   preview stays switched off. Not declared: `/api/landings/<id>` (not this type's). `delivers` stays
@@ -434,7 +435,7 @@ send → report; 6c turns it on for the owner's PC).
   `status` is `pending` / `approved` / `retired`: the script writes a new row **`pending`** (design memo
   §33.5: listed, but the server reads it as not approved, `BROWSER_TYPE_NOT_APPROVED`) until a reviewed
   edit approves it together with its `minAppVersion` (6b: the small PR after 6b-2, the 6b-2 merge's
-  build). Today: `lstep@0.2.0` and `lstep@0.3.0` (their old checker hashes) `retired`, `lstep@0.4.0` `pending`;
+  build). Today: `lstep@0.2.0`, `lstep@0.3.0` and `lstep@0.4.0` (their old checker hashes too) `retired`, `lstep@0.5.0` `pending`;
   `declarationHash` = `sha256:` of the declaration text, **and the text itself is in the row**: the
   server reads declarations only from this file (never from `client/`, which `server/src` may not
   import), re-hashes each and parses it with the core's parser (a row that does not match its hash
@@ -630,7 +631,8 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   string compared byte for byte with what `explorePath` built (the parameters' order and spelling, no
   other or repeated parameter, nothing encoded otherwise), no body, no fragment, and only an address a
   declared read can have at all (`exploreAddressProblem`: a fixed path without `..` or `//`, plain
-  `name=value` pairs; the window asks it too before reading); the runner: the run's gate, and only while the session's window is still
+  `name=value` pairs; the window asks it too before reading; a paginated read's later pages are each
+  such an address, `…&page=2` etc., built by main); the runner: the run's gate, and only while the session's window is still
   this window, in `ai` mode), the site's proxy rule, the window's cookies for exactly that address copied in → the
   request (no redirect followed, 5 MiB) → cleared again. A chunk asks again, when its turn comes, whether
   its own window is still the one open (it may have waited behind another's) and sends nothing otherwise. A caller that gives up only drops the answer:
@@ -661,7 +663,8 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   strictly (`parseStrictJson`: standard JSON only, ≤ 2 000 000 characters, ≤ 32 levels, **a key written
   twice refuses the whole answer** — `JSON.parse` keeps the last copy —, objects without a prototype),
   never the text; one that does not parse is no items, incomplete. What it hands back is kept by the same
-  rules as an HTML reader's (`keepReaderItems`: declared fields, plain ids, cleaned labels, 300 items).
+  rules as an HTML reader's (`keepReaderItems`: declared fields, plain ids, cleaned labels, 300 items per
+  answer; a paginated read's merged list up to 500, `BROWSER_PAGED_ITEMS`, below).
   The preview picks the reader's kind by its mark (`preview.ts`).
 - **Declared reads** (`explore` in the declaration, `shared/core/plugin-browser-declaration.ts`; `plugins.md`
   "Browser connectors"): ≤ 10 per connector, each `{ label, path, query?, reader, no_side_effects:
@@ -675,6 +678,34 @@ every start stay. 6b connects every path but ships **off**; 6c turns it on for t
   `explorePath` fills only plain ids for exactly those `{name}`s and builds `path?name=value&…` in the
   declared order; the operator never names an address or a parameter (a second `page` included).
   A site's reader is code in its connector folder (`lstepConnector().readers`).
+- **Paginated reads** (design memo §38, owner 2026-11-22; Lステップ 0.5.0): a declared read may say
+  `pages: { param, max }` — `param` a query name (`BROWSER_QUERY_NAME_RE`, not `_method`, not one of
+  its `query` names in any case; it counts toward the 5 parameters), `max` an integer 1–10. **The app
+  decides the page number, never the AI**: the operator asks for the read once with its ids (a `page`
+  in its values is refused, nothing read); `explorePath(read, values, n)` appends `param=<n>` as the
+  last parameter (page 1 when not given; only 1..max; a read without `pages` takes no page). Only a
+  JSON reader may serve one (a paginated read whose reader is an HTML one: the type is refused,
+  `connector`, before anything starts). A JSON reader reports `page: { current, last, total }`
+  (`BrowserListPage`) and nothing about what to read next; `runJsonExploreReader` passes it on only as
+  whole numbers that fit (`current`, `last` ≥ 1, `current` ≤ `last`, `total` ≥ 0), else drops it and
+  the read is incomplete. `readPages` (`preview.ts`) reads page 1 (the operator's read), then — only
+  when page 1 reports `last` ≤ `max` and `total` ≤ 500 (`BROWSER_PAGED_ITEMS`) — pages 2..last **in
+  order**, each through `exactRead` byte for byte and within the request's 4 minutes: no later page
+  starts after them, and one still waiting is cut off then (`timeout`; the request's stop and the
+  deadline as one signal; a stop or a changed context ends the request with no further page read).
+  **A list that cannot be read whole offers nothing** (design memo §38: it is not chosen from — not
+  even the pages already read): page 1 not reporting where it stands, `last` > `max`, `total` or the
+  merged items over 500, a later page failing (status, no answer), a page not reporting, a `current`
+  other than the page asked, a `last` or `total` other than page 1's, an id (field + value) twice in
+  the read — on one page or across pages —, or, every entry kept, a count other than `total`. Page 1
+  failing is the read failing (`read-failed`), as before. Entries a reader leaves out (another folder, no
+  name) make the merged list incomplete with the rest, as in any read. A read declared without `pages`
+  whose reader reports a page is whole only as its only page (`current` 1, `last` 1), its items offered
+  as before (0.4.0's shape: page 1, incomplete when longer). The operator gets one merged list for the
+  read, its values as it asked them — no page, `last_page` or `total` anywhere. Size: a full list is
+  ~150 KB of material (500 items, 80-character labels), so the 8 rounds' material can reach ~1 MB; it
+  goes on the CLI's stdin, whose size nothing caps (the 2 / 4 MiB limits are the answer's) — a material
+  too large for the model ends the step (`failed`), never a looser read.
 - **Not done here** (6b-2 and later): no chat tool, IPC or wiring in `main.ts` (nothing in the app
   imports `preview.ts`), registering the plan, the facts read for it (the checker's `factPaths` /
   `facts`), the card, claim → permit → send → report.
@@ -693,15 +724,24 @@ long stream, a non-JSON line, an error result, a time-out and a stop; a child th
 it; on the macOS list),
 `browser-preview.test.ts` (the switch: nothing asked, read or started; the loop; what the material holds
 and never holds; ids not taken out refused with nothing read; one JSON object; 8 steps and 4 minutes;
-refusals before anything; a changed context; the window closed or replaced; the real Lステップ 0.4.0
+refusals before anything; a changed context; the window closed or replaced; the real Lステップ 0.5.0
 connector previewable and walking a fake Lステップ — folders → reminders → the reminder page → template
 folders → templates — to a candidate reading exactly the declared addresses, a template's body and
 「未分類」 never offered; a folder not shown, 「未分類」, a template only on the step or an extra parameter
 refused with nothing read), `browser-page.test.ts` (hidden parts, hidden
 inputs / meta / link / base, a hidden root, repeated ids and attributes under any query, mended HTML, references never from text, the kept items, labels, Lステップ's
-reader and 0.4.0's `explore`; strict JSON — a repeated key, too deep, too long, trailing text, keys
+reader and 0.5.0's `explore` (paginated reads with JSON readers); strict JSON — a repeated key, too deep, too long, trailing text, keys
 without a prototype —; the list readers: ids and names only, 「未分類」 left out, another folder or none,
-a second page, no page fields, bad ids → incomplete), `browser-read-session.test.ts` (an aborted read's late clean-up never
+the page report — whole numbers that fit, else dropped and incomplete —, no page fields, bad ids → incomplete),
+`browser-preview-pages.test.ts` (the real Lステップ 0.5.0 connector against a fake Lステップ of 1, 3, 10
+and 11 pages, every read through the real session chunk and `exactRead`: exactly `…&page=1..N` in
+order; 11 pages, over 500 items or a `total` over 500 on one page → nothing offered; a changed
+`last_page` / `total`, a wrong `current_page`, an id twice across pages or within one, a failing page 2,
+a count short of `total`, page 1 without a report → nothing offered; entries of another folder →
+incomplete with the rest; a page from the operator refused with nothing read; a stop or a changed
+context while a later page is read; time running out between pages, and a later page that never answers
+cut off at the 4 minutes; a read without `pages` whole only as its only page; a paginated read with an
+HTML reader refused), `browser-read-session.test.ts` (an aborted read's late clean-up never
 clears a newer read's login, also across a reopened window; one request at a time per session; a failed
 request still cleaned; a queued chunk whose window closed sends nothing; `exactRead`: an extra,
 reordered, changed, percent-encoded, re-spelled or second parameter, and addresses no read can have),
@@ -710,7 +750,7 @@ of main's path in `ai`, the member's browsing passes in `human`; the runner off 
 `browser-window-electron.test.ts` (the runs' reads and writes through the read and write sessions made
 with the window; a preview read with the login leaves the member's typing and an empty session; a
 declared read's query reaches the site exactly as built, an encoded one is never sent),
-`server/tests/unit/plugin-browser-declaration.test.ts` (`explore`; a query: accepted shapes, every refusal, the built address, `exploreAddressProblem`), `browser-plans.test.ts` (`pending`).
+`server/tests/unit/plugin-browser-declaration.test.ts` (`explore`; a query: accepted shapes, every refusal, the built address, `exploreAddressProblem`; `pages`: accepted, every refusal, the page appended last only 1..max), `browser-plans.test.ts` (`pending`).
 Each guard mutation-checked; kept on purpose (second layers no test can tell apart): `explorePath`'s own address check (the parser already admits only such parts) and the window's address check before a preview read (`exactRead` refuses the same address in the request hook).
 
 ## Not yet (later PRs)

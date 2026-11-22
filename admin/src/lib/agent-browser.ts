@@ -42,7 +42,7 @@ export const BROWSER_LEVEL_LABELS: Record<BrowserOperationLevel, string> = {
 }
 
 export const BROWSER_LEVEL_HELP: Record<BrowserOperationLevel, string> = {
-  read: '画面を開いて読むだけです。何も変えません。',
+  read: '閲覧のみです。画面を開いて読み、何も変えません。',
   write: '入力して保存するところまでできます。削除はしません。',
   delete: '削除を含む操作もできます。',
 }

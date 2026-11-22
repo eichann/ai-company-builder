@@ -26,8 +26,8 @@ export type CommandHandler<A> = (args: A, context: CommandContext) => unknown
 export interface RegisterOptions {
   /** Which instance of the command's target area this handler is (a chat pane id). */
   readonly target?: string
-  /** Asked when the command's shortcut is pressed: false lets the key through untouched. */
-  readonly acceptsKey?: () => boolean
+  /** Asked when the command's shortcut is pressed (with that key press): false lets the key through untouched. */
+  readonly acceptsKey?: (input: KeyInput) => boolean
 }
 
 /** One focusable area around the focus, innermost first; the chain ends with `app`. */
@@ -50,7 +50,7 @@ type ArgsParam<A> = Record<never, never> extends A ? [args?: A] : [args: A]
 
 interface Entry {
   readonly handler: CommandHandler<unknown>
-  readonly acceptsKey?: () => boolean
+  readonly acceptsKey?: (input: KeyInput) => boolean
 }
 
 const NO_TARGET = ''
@@ -164,7 +164,7 @@ export function createCommandRegistry<C extends CommandCatalog>(
           const target = def.target ? scope.target : NO_TARGET
           if (target === undefined) continue
           const entry = handlers.get(def.id)?.get(target)
-          if (!entry || (entry.acceptsKey && !entry.acceptsKey())) continue
+          if (!entry || (entry.acceptsKey && !entry.acceptsKey(input))) continue
           const args = def.target ? { [def.target.arg]: target } : {}
           const parsed = def.args.safeParse(args)
           if (!parsed.success) continue

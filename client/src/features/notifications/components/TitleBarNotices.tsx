@@ -4,6 +4,7 @@ import { NOTIFICATION_KIND_LABELS, NOTIFICATION_KINDS, UNDOABLE_NOTIFICATION_KIN
 import { DEFAULT_FEATURES, noticeKindsShown, type CompanyFeatures } from '../../../../../shared/core/features'
 import { shortDue, turnGroups, type MeetingTurn, type NoticesState, type NoticeTarget } from '../../../../shared/notifications-app'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
+import { NewDot } from '../../../shared/ui/primitives'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
 import { jobNoticeTarget } from '../../../../shared/jobs'
 import { getNoticeSettings, markNoticesRead, setNoticeSetting, undoNoticedAiChange, undoNoticedChange } from '../api'
@@ -109,9 +110,9 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
       >
         あなたの番 <b className="tabular-nums">{turnTotal}</b>
       </button>}
-      <button type="button" onClick={() => toggle('bell')} className={ICON_BUTTON} title="起きたこと（読むだけ）" aria-label={notices.unread > 0 ? `起きたこと（未読 ${notices.unread} 件）` : '起きたこと'} aria-expanded={open === 'bell'}>
+      <button type="button" onClick={() => toggle('bell')} className={ICON_BUTTON} title="起きたこと（閲覧のみ）" aria-label={notices.unread > 0 ? `起きたこと（未読 ${notices.unread} 件）` : '起きたこと'} aria-expanded={open === 'bell'}>
         <Bell size={18} />
-        {notices.unread > 0 && <span data-testid="notices-unread-dot" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />}
+        {notices.unread > 0 && <NewDot testId="notices-unread-dot" label="未読があります" className="absolute right-1.5 top-1.5" />}
       </button>
 
       {open === 'turn' && (
@@ -141,7 +142,7 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
       {open === 'bell' && (
         <div className={PANEL} role="menu" aria-label="起きたこと">
           <div className="flex items-center justify-between border-b border-gray-100 px-3 py-1.5 text-xs dark:border-zinc-800">
-            <span className="font-semibold text-gray-700 dark:text-zinc-200">起きたこと<span className="ml-1 font-normal text-gray-400">読むだけ</span></span>
+            <span className="font-semibold text-gray-700 dark:text-zinc-200">起きたこと<span className="ml-1 font-normal text-gray-400">閲覧のみ</span></span>
             <button type="button" className="text-blue-600 disabled:text-gray-400 dark:text-blue-400" disabled={notices.unread === 0}
               onClick={() => { void markNoticesRead(companyId, 'all').then(r => { if (r && !r.success) setError(r.error) }) }}>
               すべて読んだ
@@ -164,7 +165,7 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
                   else onOpen({ recordId: item.recordId, title: item.recordTitle })
                 }}>
                 <span className={`block ${item.read ? 'text-gray-500 dark:text-zinc-400' : 'font-medium text-gray-800 dark:text-zinc-100'}`}>
-                  {!item.read && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-red-500 align-middle" />}
+                  {!item.read && <NewDot label="未読" className="mr-1.5 align-middle" />}
                   {item.text}
                 </span>
                 <span className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>

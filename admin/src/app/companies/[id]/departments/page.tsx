@@ -390,7 +390,7 @@ function DepartmentRow({
               {d.folder}
             </span>
           )}
-          {isMine && <Badge variant="brand">あなたが管理役</Badge>}
+          {isMine && <Badge variant="selected">あなたが管理役</Badge>}
         </div>
         {d.description && <p className="truncate text-sm text-muted-foreground">{d.description}</p>}
         {readers && (

@@ -150,6 +150,37 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
   shapes, and the IPC contract are parsed by released apps; change them only together with a
   compatible client path. → `push-check.md`, `ipc-and-main-process.md`
 
+## How to design a change (owner's checklist)
+
+Abstraction, loose coupling and dependency direction are the means, not the goal: the goal is code
+that is correct, easy to follow and easy to change. Before and while writing code, answer these
+(and put the answers to 1, 6 and 7 in the PR body):
+
+1. **Invariants first.** Write down what must always hold, and what guards each: a type that cannot
+   represent the bad state, a DB constraint or transaction, one check at the entry point (trusted
+   inside), or state changes kept in one place plus a test.
+2. **Cohesion with coupling.** What changes for the same reason lives together; a rule exists in
+   one place (`shared/core` is the model). Hide internal decisions behind a small set of operations.
+3. **Abstraction is a bet.** Abstract only what is needed now and repeats (about three times, for
+   the same reason to change), and only if it leaves the reader fewer decisions. A wrong
+   abstraction costs more than duplication; duplicated *rules* (knowledge) are the duplication to remove.
+4. **Dependencies point from what changes often to what changes rarely**, and a test or lint
+   enforces it. An interface whose callers must know the other side's internals or call order is
+   still a strong dependency; check runtime calls and data flow too.
+5. **Do not over-split.** Following one behaviour should not mean hopping through many files.
+6. **Spend design effort on what cannot be undone**: data already stored (DB shape), contracts
+   released apps read (IPC, wire formats, push markers), deleting or sending, permission
+   boundaries. Internal function splits and names are cheap — write, then fix.
+7. **Failure, time and concurrency.** What happens if it stops halfway, runs twice, runs at the same
+   time as another, reads stale data, or the clock is off? Keep mutable state small, one owner per
+   state, "done" records against doing it twice, and stop visibly rather than continue silently.
+8. **Verify fast.** Tests protect visible behaviour and business rules (`testing.md`), not internal
+   call shapes; code that is hard to test signals mixed responsibilities or hidden dependencies.
+   Logs and measurements are part of the design.
+9. **Names are design**: use the business words members and the owner use.
+10. **Security is a boundary decision**: decide where trust ends; the server decides, client checks
+    are for experience. Constraints (performance, security, operations) can change the right answer.
+
 ## Conventions
 
 - TypeScript everywhere. User-facing text is Japanese, written for non-engineers (no Git terms);

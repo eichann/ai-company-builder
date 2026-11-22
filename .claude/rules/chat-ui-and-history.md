@@ -106,8 +106,8 @@ one place an added agent brings its own controls; everything else asks the regis
   not active; cleared when the member leaves the tab after looking, which clears the 新着 mark) or idle — and publishes it to
   `consultationStatusStore` (keyed by tab id) only when it changes, so streaming does not
   re-render the list per chunk. `groupConversationRows` orders the groups あなたの番 › ピン留め ›
-  止まっています › AIが作業中 › 開いている相談 (idle open tabs: new ones, unread replies first with a
-  「新着」 mark, and ones read and possibly continued) › 終わったもの (closed conversations only — closing ends one; a
+  止まりました (a failure, red) › AIが作業中 › 開いている相談 (idle open tabs: new ones, unread replies first with a
+  「新着」 mark — the primary dot named 新着, design-system.md P2b —, and ones read and possibly continued) › 終わったもの (closed conversations only — closing ends one; a
   conversation closed with nothing sent and no draft is deleted, and such leftovers are not listed);
   a pinned conversation leaves ピン留め only for あなたの番. An automatic 「AI の番」 consultation closes
   by itself when its run ends well, or when the member ends its record, unless it holds anything of

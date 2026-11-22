@@ -3,9 +3,9 @@ import { ChatCircleDots, Info, WarningCircle } from '@phosphor-icons/react'
 import type { CommentSeverity } from '../model'
 
 export const SEVERITY_CONFIG: Record<CommentSeverity, { label: string; color: string; bgColor: string; icon: typeof WarningCircle }> = {
-  must_fix:   { label: '対応必須', color: 'text-red-400',  bgColor: 'bg-red-500/10',  icon: WarningCircle },
-  should_fix: { label: 'できれば', color: 'text-amber-400', bgColor: 'bg-amber-500/10', icon: Info },
-  note:       { label: '感想',     color: 'text-zinc-400',  bgColor: 'bg-zinc-500/10',  icon: ChatCircleDots },
+  must_fix:   { label: '対応必須', color: 'text-danger-text',  bgColor: 'bg-danger-bg',  icon: WarningCircle },
+  should_fix: { label: 'できれば', color: 'text-warning-text', bgColor: 'bg-warning-bg', icon: Info },
+  note:       { label: '感想',     color: 'text-text-muted',   bgColor: 'bg-surface-sunken', icon: ChatCircleDots },
 }
 
 export const SEVERITY_ORDER: CommentSeverity[] = ['must_fix', 'should_fix', 'note']

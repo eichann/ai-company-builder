@@ -8,6 +8,7 @@ import { RequireAuth } from '@/components/app/auth-guard'
 import { RadioCard } from '@/components/app/radio-card'
 import { AuthLayout } from '@/components/app/brand'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -105,9 +106,9 @@ function NewCompanyForm() {
               <p id="folder-kind-hint" className="text-xs text-muted-foreground">{FOLDER_KIND_HINT}</p>
             </fieldset>
             {error && (
-              <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              <Callout variant="danger">
                 {error}
-              </p>
+              </Callout>
             )}
             <div className="flex items-center justify-between gap-2">
               <Button type="button" variant="ghost" onClick={() => router.back()}>
