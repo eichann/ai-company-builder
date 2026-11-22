@@ -83,6 +83,7 @@ import type { SyncDeps, SyncDialog } from './types'
 import { readExcludeLines, writeExcludeLines, type ExcludeBlock } from './local-excludes'
 import { isTempSaveFile, TEMP_SAVE_EXCLUDE_PATTERN } from '../../shared/temp-save-file'
 import { isOfficeLockFile, OFFICE_LOCK_EXCLUDE_PATTERNS } from '../../shared/office-lock-files'
+import { BACKUP_METADATA_FILE, backupCopyName } from './backup-names'
 import { findOpenFiles, openFilesStoppedMessage, removeLockFiles } from './open-files'
 import { isSkillLeftover, skillExcludeLines, SKILL_LEFTOVER_PATTERNS } from '../../shared/skill-leftovers'
 import { NEEDS_MEMBER_ERROR, type ReceiveResult } from '../../shared/auto-sync'
@@ -846,7 +847,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         // stale (it is only known *after* the round resolves its conflicts).
         const writeBackupMetadata = () => {
           fs.writeFileSync(
-            path.join(backupPath, '_metadata.json'),
+            path.join(backupPath, BACKUP_METADATA_FILE),
             JSON.stringify({
               timestamp: deps.now().toISOString(),
               reason: 'conflict',
@@ -884,7 +885,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         const backupConflictFiles = async (files: string[]) => {
           fs.mkdirSync(backupPath, { recursive: true })
           for (const file of files) {
-            const destPath = path.join(backupPath, backupPrefix, file)
+            const destPath = path.join(backupPath, backupPrefix, backupCopyName(file, backupPrefix))
             fs.mkdirSync(path.dirname(destPath), { recursive: true })
             for (const spec of [`${localHash}:${file}`, `:3:${file}`]) {
               // Not there (e.g. a file only the server side has): try the next
@@ -921,13 +922,13 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           for (const { file, oid } of replaced) {
             const content = await catFile(oid).catch(() => null)
             if (!content) continue // unreadable object: nothing more to save for this path
-            const destPath = path.join(roundPath, backupPrefix, file)
+            const destPath = path.join(roundPath, backupPrefix, backupCopyName(file, backupPrefix))
             fs.mkdirSync(path.dirname(destPath), { recursive: true })
             fs.writeFileSync(destPath, content)
             markSaved(file, content)
           }
           fs.writeFileSync(
-            path.join(roundPath, '_metadata.json'),
+            path.join(roundPath, BACKUP_METADATA_FILE),
             JSON.stringify({
               timestamp: deps.now().toISOString(),
               reason: 'conflict',

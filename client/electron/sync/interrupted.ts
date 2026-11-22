@@ -17,6 +17,7 @@ import path from 'path'
 import type { SimpleGit } from 'simple-git'
 import { pathKey } from '../../shared/sparse-paths'
 import { gitRunningIn } from './live-git'
+import { backupCopyName } from './backup-names'
 import type { SyncLogger } from './types'
 
 /**
@@ -172,11 +173,6 @@ function pathsTo(file: string): string[] {
   return segments.map((_, i) => segments.slice(0, i + 1).join('/'))
 }
 
-/** Where a file goes: a member's own root `_metadata.json` must not meet the backup's. */
-function copyName(file: string, prefix: string): string {
-  return !prefix && file === '_metadata.json' ? '_metadata (member).json' : file
-}
-
 async function commitOf(git: SimpleGit, spec: string): Promise<string> {
   return (await git.raw(['rev-parse', '--verify', '--quiet', `${spec}^{commit}`]).catch(() => '')).trim()
 }
@@ -227,7 +223,8 @@ interface PlannedCopy {
 async function planCopies(options: RecoveryOptions, tips: Tips): Promise<PlannedCopy[]> {
   const { git, repoPath, backupPrefix = '', skip } = options
   const shownName = (file: string) => `${backupPrefix ? `${backupPrefix}/` : ''}${file}`
-  const destName = (file: string) => path.join(backupPrefix, copyName(file, backupPrefix))
+  // A member's own root `_metadata.json` must not meet the backup's.
+  const destName = (file: string) => path.join(backupPrefix, backupCopyName(file, backupPrefix))
   const lstats = new Map<string, fs.Stats | null>()
   const lstat = (file: string): fs.Stats | null => {
     if (!lstats.has(file)) {

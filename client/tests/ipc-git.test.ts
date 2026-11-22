@@ -335,6 +335,13 @@ test('backup:list / backup:restore: both backup places, newest first, private id
   assert.equal(fs.readFileSync(path.join(repo, '営業', '提案.md'), 'utf-8'), 'local version')
   assert.deepEqual(await h.invoke('backup:restore', repo, 'private:2026-02-22T00-00-00-000_private', '人事/評価/表.md'), { success: true, message: 'Restored: 人事/評価/表.md' })
   assert.equal(fs.readFileSync(path.join(repo, '人事', '評価', '表.md'), 'utf-8'), 'private')
+  // A member's own root _metadata.json, kept beside the backup's: restoring it brings the member's version back.
+  writeFiles(repo, {
+    '.backups/2026-02-23_00-00-00.000/_metadata (member).json': '{"mine":true}',
+    '.backups/2026-02-23_00-00-00.000/_metadata.json': JSON.stringify({ timestamp: '2026-02-23T00:00:00.000Z', reason: 'conflict', conflictFiles: ['_metadata.json'] }),
+  })
+  assert.deepEqual(await h.invoke('backup:restore', repo, '2026-02-23_00-00-00.000', '_metadata.json'), { success: true, message: 'Restored: _metadata.json' })
+  assert.equal(fs.readFileSync(path.join(repo, '_metadata.json'), 'utf-8'), '{"mine":true}')
 
   const refusals: Array<[string, string, string]> = [
     ['../../..', 'x.md', 'Invalid backup path'],

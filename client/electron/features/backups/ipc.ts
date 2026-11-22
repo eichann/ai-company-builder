@@ -7,6 +7,7 @@
 import fs from 'fs'
 import path from 'path'
 import { privateBackupsDir } from '../../sync/private-folders'
+import { BACKUP_METADATA_FILE, backupCopyName } from '../../sync/backup-names'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { DesktopShell, PathGuard } from '../ports'
 import { notDownloadedRefusal } from '../../file-guards'
@@ -106,7 +107,11 @@ export function registerBackupsIpc(ipc: IpcRegistrar, { paths, shell, writeRefus
       const backupsDir = isPrivate ? privateBackupsDir(safeRepoPath) : path.join(safeRepoPath, '.backups')
       const backupPath = path.join(backupsDir, isPrivate ? backupId.slice(PRIVATE_BACKUP_ID_PREFIX.length) : backupId)
       if (!backupPath.startsWith(backupsDir + path.sep)) return { success: false, error: 'Invalid backup path' }
-      const srcPath = path.resolve(backupPath, filePath)
+      // The backup's own _metadata.json is never the member's file: theirs was kept under another name.
+      const named = path.resolve(backupPath, filePath)
+      const srcPath = path.relative(backupPath, named) === BACKUP_METADATA_FILE
+        ? path.join(backupPath, backupCopyName(BACKUP_METADATA_FILE))
+        : named
       const destPath = path.resolve(safeRepoPath, filePath)
 
       // Prevent path traversal via ../

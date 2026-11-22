@@ -210,7 +210,14 @@ tracked. The sync message still counts the newly ignored files. Threshold:
   sync cleaned up an operation an earlier run left half-way; conflict markers included, the
   member decides what to put back; `<file>.staged-version` / `.committed-version` are versions only
   git held; `_same-name-<n>/` holds what shared a name with a file or folder in the copy; a member's
-  own root `_metadata.json` is kept as `_metadata (member).json`).
+  own root `_metadata.json` is kept as `_metadata (member).json`). That last rule holds in every
+  backup folder sync copies the member's files into: one function names the copy
+  (`backupCopyName`, `sync/backup-names.ts`), used by the conflict copies (`<ts>/` and the
+  earlier versions' `<ts>_<round>/`), the recovery copy and 復元 (asking for a backup's root
+  `_metadata.json` restores the member's copy, never the backup's own file). A member's
+  `_metadata.json` was once overwritten by the conflict backup's metadata (code review 2026-11-22).
+  Scenario: 「a member's own top-level _metadata.json survives a conflict backup…」
+  (`scenarios.test.ts`); restore: `ipc-git.test.ts` 「backup:list / backup:restore…」.
 - A working folder (a company without the shared folder, no sync) has two kinds: `<ts>_skill_edit/`
   (reason `skill_edit`, `files`: the Skill folder the member moved aside with 「会社の版に戻す」) and
   `<ts>_skill_outputs/` (reason `skill_outputs`, `files`: what 外して出す moved out of a Skill; on a
