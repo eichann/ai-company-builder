@@ -62,6 +62,7 @@ import { createCalendarApi, registerCalendarIpc } from './features/calendar/ipc'
 import { registerTasksIpc } from './features/tasks/ipc'
 import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import { registerRecordViewsIpc } from './features/record-views/ipc'
+import { registerRecordsTableIpc } from './features/records-table/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
 import { registerAbsencesIpc } from './features/absences/ipc'
 import { registerJobsIpc } from './features/jobs/ipc'
@@ -401,6 +402,7 @@ registerTasksIpc(ipc, {
 registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // Search hits, the record card and a file's 「つながっているもの」 (features/record-views).
 registerRecordViewsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+registerRecordsTableIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat's approval card: approving is the person's own act, with the session (no AI route approves).
 registerApprovalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // Settings → 「不在と代わりの人」 (features/absences): the member's own absences, with the session.

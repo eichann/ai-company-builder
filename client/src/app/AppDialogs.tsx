@@ -3,6 +3,7 @@ import { NewSkillWizard } from '../features/skills/components/NewSkillWizard'
 import { CopySkillModal } from '../features/skills/components/CopySkillModal'
 import { ToolViewer } from '../features/skills/components/ToolViewer'
 import { FindPalette } from '../features/search/components/FindPalette'
+import { RECORDS_TABLE_PALETTE_ACTION } from '../features/records-table/entry'
 import type { PaletteAction, PaletteConsultation, PaletteRecent, PaletteSkill } from '../features/search/model'
 import type { useTabTidying } from '../features/editor/hooks/useTabTidying'
 import { TabTidyingList } from '../features/editor/components/TabTidyingControls'
@@ -17,7 +18,7 @@ import type { useSync } from '../features/sync/hooks/useSync'
 import type { DepartmentConfig } from '../types'
 
 // 探す ⌘K finds 「片づけたタブ」 by these words too.
-const PALETTE_ACTIONS: PaletteAction[] = [{ id: 'tidiedTabs', title: '片づけたタブ', words: ['タブ', '片づけ', '片付け', 'かたづけ', 'tab'] }]
+const PALETTE_ACTIONS: PaletteAction[] = [{ id: 'tidiedTabs', title: '片づけたタブ', words: ['タブ', '片づけ', '片付け', 'かたづけ', 'tab'] }, RECORDS_TABLE_PALETTE_ACTION]
 
 interface Props {
   /** The open company: 「仕事の道具をつなぐ」 offers itself once per member and company. */
@@ -36,6 +37,8 @@ interface Props {
   /** 探す ⌘K: the tabs open in the middle (newest first), and opening a record found. */
   recentTabs: PaletteRecent[]
   onOpenRecord: (recordId: string) => void
+  /** ⌘K 「記録の一覧」 (features/records-table). */
+  onShowRecordsTable: () => void
   /** 探す ⌘K's skills (already loaded) and 「AIへの相談」 (read when it opens), each opened in its usual place. */
   paletteSkills: PaletteSkill[]
   onOpenSkill: (skillId: string) => void
@@ -98,7 +101,7 @@ export function AppDialogs(props: Props) {
             loadConsultations={props.loadConsultations}
             onOpenConsultation={props.onOpenConsultation}
             actions={PALETTE_ACTIONS}
-            onAction={id => { if (id === 'tidiedTabs') props.tidying.openList() }}
+            onAction={id => { if (id === 'tidiedTabs') props.tidying.openList(); else if (id === RECORDS_TABLE_PALETTE_ACTION.id) props.onShowRecordsTable() }}
           />
         )}
 

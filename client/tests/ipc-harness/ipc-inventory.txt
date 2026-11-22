@@ -204,6 +204,7 @@ contract.invoke recordViews:findHome
 contract.invoke recordViews:forFile
 contract.invoke recordViews:search
 contract.invoke recordViews:topics
+contract.invoke recordsTable:page
 contract.invoke shell:openExternal
 contract.invoke skillShelf:editLocally
 contract.invoke skillShelf:openBackup
@@ -454,6 +455,7 @@ contract.type ElectronAPI.getPrivateFolderMembers = getPrivateFolderMembers: Inv
 contract.type ElectronAPI.getRecordCard = getRecordCard: Invoke<'recordViews:card'>
 contract.type ElectronAPI.getRecordThread = getRecordThread: Invoke<'threads:get'>
 contract.type ElectronAPI.getRecordsForFile = getRecordsForFile: Invoke<'recordViews:forFile'>
+contract.type ElectronAPI.getRecordsTablePage = getRecordsTablePage: Invoke<'recordsTable:page'>
 contract.type ElectronAPI.getServerUrl = getServerUrl: Invoke<'config:getServerUrl'>
 contract.type ElectronAPI.getSession = getSession: Invoke<'auth:getSession'>
 contract.type ElectronAPI.getSlackStatus = getSlackStatus: Invoke<'slack:status'>
@@ -926,6 +928,7 @@ contract.type IpcInvokeChannels.'recordViews:findHome' = 'recordViews:findHome':
 contract.type IpcInvokeChannels.'recordViews:forFile' = 'recordViews:forFile': { args: [companyId: string, companyPath: string]; result: RecordListResult }
 contract.type IpcInvokeChannels.'recordViews:search' = 'recordViews:search': { args: [companyId: string, text: string]; result: RecordListResult }
 contract.type IpcInvokeChannels.'recordViews:topics' = 'recordViews:topics': { args: [companyId: string, recordIds: string[]]; result: ConsultationTopicsResult }
+contract.type IpcInvokeChannels.'recordsTable:page' = 'recordsTable:page': { args: [companyId: string, query: RecordsTableQuery]; result: RecordsTablePage }
 contract.type IpcInvokeChannels.'shell:openExternal' = 'shell:openExternal': { args: [url: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:editLocally' = 'skillShelf:editLocally': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skillShelf:openBackup' = 'skillShelf:openBackup': { args: [rootPath: string, skillPath: string]; result: SimpleResult }
@@ -1244,6 +1247,7 @@ main.handle recordViews:findHome @ features/record-views/ipc.ts (companyId, toda
 main.handle recordViews:forFile @ features/record-views/ipc.ts (companyId, companyPath)
 main.handle recordViews:search @ features/record-views/ipc.ts (companyId, text)
 main.handle recordViews:topics @ features/record-views/ipc.ts (companyId, recordIds)
+main.handle recordsTable:page @ features/records-table/ipc.ts (companyId, query)
 main.handle shell:openExternal @ features/tools/ipc.ts (url: string)
 main.handle skillShelf:editLocally @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
 main.handle skillShelf:openBackup @ features/skill-shelf/ipc.ts (rootPath: string, skillPath: string)
@@ -1516,6 +1520,8 @@ preload getRecordThread -> invoke threads:get($0, $1)
 preload getRecordThread : (companyId: string, recordId: string) => Promise<RecordThreadResult>
 preload getRecordsForFile -> invoke recordViews:forFile($0, $1)
 preload getRecordsForFile : (companyId: string, companyPath: string) => Promise<RecordListResult>
+preload getRecordsTablePage -> invoke recordsTable:page($0, $1)
+preload getRecordsTablePage : (companyId: string, query: RecordsTableQuery) => Promise<RecordsTablePage>
 preload getServerUrl -> invoke config:getServerUrl()
 preload getServerUrl : () => Promise<string | null>
 preload getSession -> invoke auth:getSession()

@@ -125,7 +125,8 @@ function Preview() {
       <pre id="acted" className="text-[10px]" />
       <div className="flex min-h-0 flex-1">
         <TaskListPanel companyId="co-preview" rootPath="/Users/me/company" askFolder="営業部" list={list} aiTurns={null} activeRecordId={opened} onOpen={setOpened}
-          onConsult={t => { acted.push(`consult ${t.id}`); document.getElementById('acted')!.textContent = acted.join(',') }} />
+          onConsult={t => { acted.push(`consult ${t.id}`); document.getElementById('acted')!.textContent = acted.join(',') }}
+          onShowTable={() => { acted.push('show table'); document.getElementById('acted')!.textContent = acted.join(',') }} />
         {opened && <div data-testid="card">カード：{opened}</div>}
       </div>
     </main>

@@ -389,6 +389,18 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   time) and `client/tests/ui/doc-review.spec.ts` on the preview
   `client/tests/doc-review-ui.html` (the files written, byte for byte as 2-space JSON).
 
+## Screen tabs (a tab whose page the screen draws; 2026-11-22, for 「記録の一覧」)
+
+- A key `acb-view:<name>` (`editorTabs.ts` `viewTabKey` / `viewOfTab`; no path can start so) sits in the
+  same tab list as files and records. `TabbedEditorPanel` draws it with the screen's `renderView(name)`
+  and its tab with `viewLooks[name]` (title, icon); it never loads text or saves (`fileTabsOf` leaves it
+  out), has no side column, drags only within the bar, and stands in the kind group その他.
+- **Not kept**: a restart drops it and any pin saved on it (`useEditorPersistence`), 「タブを片づける」 closes it without listing it,
+  and the AI's `tabs.list` leaves it out — it is no file or record to open again; its screen opens it in
+  one press. Tests: `editorTabs.test.ts`, `tests/ui/records-table.spec.ts` (main screen).
+- One user today: 「記録の一覧」 (`tasks-ui.md` "The records table (B4)"). Not a framework: a second kind of
+  screen tab decides what it needs when it comes.
+
 ## Places, ← → and the file's side column (milestone 5 U8, design §7)
 
 - The editor area shows a file tab or a record's card (`features/records/components/RecordCard.tsx`,

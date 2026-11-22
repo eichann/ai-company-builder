@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { COMPANY_ROOT_LABEL, departmentOfFile, fileTabsOf, looksOfOpenTabs, parseRecordLooks, recordIdOfTab, recordTabKey, tabDepartmentLabels } from './editorTabs'
+import { COMPANY_ROOT_LABEL, departmentOfFile, fileTabsOf, looksOfOpenTabs, parseRecordLooks, recordIdOfTab, recordTabKey, tabDepartmentLabels, viewOfTab, viewTabKey } from './editorTabs'
 
 const root = '/Users/me/ACB/会社'
 const departments = [
@@ -48,6 +48,17 @@ test('a record tab is never taken for a file: only file tabs load text, and no f
   assert.equal(recordIdOfTab(recordTabKey('task-abc123')), 'task-abc123')
   assert.equal(recordIdOfTab(script), null)
   assert.equal(recordIdOfTab('C:\\ACB\\会社\\a.md'), null)
+  assert.deepEqual(tabDepartmentLabels(tabs, { rootPath: root, departments, selectedDeptId: 'd-sales' }), { [script]: 'コンテンツG' })
+})
+
+test('a screen tab (「記録の一覧」) is neither a file nor a record: never loaded as text, never labelled', () => {
+  const table = viewTabKey('records-table')
+  const tabs = [script, table, recordTabKey('task-abc123')]
+  assert.deepEqual(fileTabsOf(tabs), [script])
+  assert.equal(viewOfTab(table), 'records-table')
+  assert.equal(recordIdOfTab(table), null)
+  assert.equal(viewOfTab(script), null)
+  assert.equal(viewOfTab(recordTabKey('task-abc123')), null)
   assert.deepEqual(tabDepartmentLabels(tabs, { rootPath: root, departments, selectedDeptId: 'd-sales' }), { [script]: 'コンテンツG' })
 })
 

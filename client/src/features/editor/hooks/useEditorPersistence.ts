@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { fileExists } from '../api'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
-import { looksOfOpenTabs, parseRecordLooks, recordIdOfTab, type RecordTabLook } from '../editorTabs'
+import { looksOfOpenTabs, parseRecordLooks, recordIdOfTab, viewOfTab, type RecordTabLook } from '../editorTabs'
 
 // Per company, in localStorage under `editor:<company id>`: the open tabs (files
 // and records, `editorTabs.ts`), the active one, the open records' titles and the left panel tab. The left tab lives in the same entry
@@ -38,7 +38,8 @@ function safeReadEditorState(companyId: string, defaultLeftTab: string): Persist
       activeFilePath: typeof parsed.activeFilePath === 'string' ? parsed.activeFilePath : null,
       leftTab: typeof parsed.leftTab === 'string' && parsed.leftTab ? parsed.leftTab : defaultLeftTab,
       records: parseRecordLooks(parsed.records),
-      pinned: Array.isArray(parsed.pinned) ? parsed.pinned.filter((p: unknown): p is string => typeof p === 'string') : [],
+      // A screen tab is never restored, so its pin is not either.
+      pinned: Array.isArray(parsed.pinned) ? parsed.pinned.filter((p: unknown): p is string => typeof p === 'string' && !viewOfTab(p)) : [],
     }
   } catch {
     return null
@@ -114,8 +115,8 @@ export function useEditorPersistence(companyId: string | undefined, defaultLeftT
     let cancelled = false
     void (async () => {
       const checks = await Promise.all(
-        // A record tab stays: the record itself says so when it can no longer be read.
-        persisted.openFiles.map((p) => recordIdOfTab(p) ? Promise.resolve(true) : fileExists(p).catch(() => false))
+        // A record tab stays: the record itself says so when it can no longer be read. A screen tab does not.
+        persisted.openFiles.map((p) => recordIdOfTab(p) ? Promise.resolve(true) : viewOfTab(p) ? Promise.resolve(false) : fileExists(p).catch(() => false))
       )
       if (cancelled) return
       const allValid = checks.every(Boolean)
