@@ -67,6 +67,7 @@ import { useMinutesSlots } from '../features/minutes/hooks/useMinutesSlots'
 import { renderMeetingBundleChooser, renderMeetingPanel } from './meetingCard'
 import type { AiTurnItemsView } from '../../shared/ai-turns'
 import { useNotices, useOpenTasksRequest } from '../features/notifications/hooks/useNotices'
+import { useInboxSlot } from '../features/inbox/hooks/useInboxSlot'
 import { TitleBarNotices } from '../features/notifications/components/TitleBarNotices'
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { useSeenTasks } from '../features/tasks/hooks/useSeenTasks'
@@ -202,8 +203,6 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
   const toggleLeft = useCallback(() => setPaneShown('fileTree'), [setPaneShown])
   // The bottom panel starts closed at every start (owner decision 6); only its height is saved.
   const [bottomOpen, setBottomOpen] = useState(false)
-  const hasBottom = bottomPanel !== undefined
-  const toggleBottom = useCallback(() => { if (hasBottom) setBottomOpen(open => !open) }, [hasBottom])
   // A left tab asked for (⌘⇧F, 今日のフォルダ, 「あなたの番」, a folder link) shows the column too, even when it is already the chosen tab.
   const showLeftTab = useCallback((id: string) => { setLeftTab(id); setPaneShown('fileTree', true) }, [setLeftTab, setPaneShown])
 
@@ -507,6 +506,17 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
   // The morning's 「今日のあなたの番」 (its Mac notification or its bell line) opens the task list.
   const openTasks = () => { if (tasksShown) selectLeftTab('tasks'); else if (pressShown) selectLeftTab('press') }
   useOpenTasksRequest(currentCompany?.id, openTasks)
+  // The inbox (features/inbox, I1) is the bottom panel's content: rows from 「あなたの番」 and the notices main
+  // already read; its approval and mail rows open the same cards as a task (a preview may hand in a sample instead).
+  const inbox = useInboxSlot({
+    companyId: currentCompany?.id, notices, onOpenRecord: id => openTab(recordTabKey(id)), onOpenTasks: openTasks,
+    onOpenJobs: () => { setSettingsFocus({ tab: 'jobs', at: Date.now() }); setShowSettings(true) },
+    renderApprovalCard: id => approvalCard(id, ''),
+    renderMailDraft: id => currentCompany ? <PreparedMailCard companyId={currentCompany.id} messageId={id} /> : null,
+  })
+  const panel: BottomPanelContent | undefined = bottomPanel ?? inbox
+  const hasBottom = panel !== undefined
+  const toggleBottom = useCallback(() => { if (hasBottom) setBottomOpen(open => !open) }, [hasBottom])
   // A skill opens where a click in the スキル tab opens it; a company-wide one under 全社.
   const openSkillFromPalette = (id: string) => {
     if (!skills.some(s => s.id === id)) handleSelectDept(COMPANY_TAB_ID)
@@ -677,6 +687,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
         ) : undefined}
       />
       <LeaveConfirmDialog question={leaving.question} onAnswer={leaving.answer} />
+      {inbox?.dialog}
       <DepartmentBar
         departments={departments}
         isLoading={isLoadingDepartments}
@@ -723,10 +734,22 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
             and the other tabs stay mounted underneath (no cold re-read on a
             department switch), hidden while it shows. */}
           <div
+            // Measured for the bottom panel's height: as tall as the middle, which fills this side.
+            ref={split.middleRef}
             className={`flex-1 min-h-0 flex flex-col ${isSelectedDeptUnsynced ? 'invisible' : ''}`}
             aria-hidden={isSelectedDeptUnsynced || undefined}
           >
-            {/* The left tab beside the middle (open files and records, plan A); a wide tab covers the middle, which stays mounted. */}
+            {/* While a wide left tab (スキル…) covers the middle, the bottom panel spans this whole side under it
+                (owner decision (b), 2026-11-22), so the inbox shows from every tab; otherwise it stays under the
+                middle. Both splits are always drawn, so switching tabs remounts neither side. */}
+            <SplitView
+              split={layout.middle} limits={PANE_LIMITS} className="h-full w-full min-w-0"
+              collapsed={panel && bottomOpen && !middleShown ? null : 'bottom'}
+              {...splitHandlers}
+              renderPane={outer => outer === 'bottom' ? (
+                panel && !middleShown ? <BottomPanel content={panel} onClose={() => setBottomOpen(false)} /> : null
+              ) : (
+            /* The left tab beside the middle (open files and records, plan A); a wide tab covers the middle, which stays mounted. */
             <SplitView
               split={layout.files} limits={PANE_LIMITS} className="h-full min-w-0"
               collapsed={hidden.has('fileTree') ? 'fileTree' : shownLeft?.wide ? 'editor' : null}
@@ -741,14 +764,14 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
               renderPane={id => id === 'fileTree' ? (
                 <div className="h-full flex flex-col min-w-0"><LeftPanelTabs panels={leftPanels} selectedId={leftTab} onSelect={selectLeftTab} /></div>
               ) : (
-                // The middle: its tabs over the bottom panel (the `middle` split), measured for the panel's height.
-                <div ref={split.middleRef} className="h-full min-h-0">
+                // The middle: its tabs over the bottom panel (the `middle` split).
+                <div className="h-full min-h-0">
                   <SplitView
                     split={layout.middle} limits={PANE_LIMITS} className="h-full w-full min-w-0"
-                    collapsed={bottomPanel && bottomOpen ? null : 'bottom'}
+                    collapsed={panel && bottomOpen && middleShown ? null : 'bottom'}
                     {...splitHandlers}
                     renderPane={inMiddle => inMiddle === 'bottom' ? (
-                      bottomPanel ? <BottomPanel content={bottomPanel} onClose={() => setBottomOpen(false)} /> : null
+                      panel && middleShown ? <BottomPanel content={panel} onClose={() => setBottomOpen(false)} /> : null
                     ) : (
                       <TabbedEditorPanel
                         openFiles={openFiles}
@@ -776,6 +799,8 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
                     )}
                   />
                 </div>
+              )}
+            />
               )}
             />
           </div>

@@ -8,8 +8,9 @@
 //   - the middle is never narrower than MIDDLE_MIN while the window has room for every minimum;
 //     a smaller window takes the room from the consultation first, then the left column, never
 //     below their minimums (what is saved stays: a wider window shows it again);
-//   - the bottom panel (B2) sits under the middle only, 120 px up to where the middle's tabs keep
-//     TABS_MIN_HEIGHT; only its height is saved (it starts closed at every start: AppShell state).
+//   - the bottom panel (B2) sits under the middle only (under the whole left side while a wide left
+//     tab covers the middle: AppShell), 120 px up to where the middle's tabs keep TABS_MIN_HEIGHT;
+//     only its height is saved (it starts closed at every start: AppShell state).
 //
 // What is saved is stale input (another window, another version): checked and clamped when read
 // (`parseLayout`), and fitted to the window every time it is drawn (`fitLayout`).
