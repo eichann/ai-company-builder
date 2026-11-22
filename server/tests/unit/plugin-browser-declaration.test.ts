@@ -573,3 +573,44 @@ describe('a declared read\'s query string (§33 decision 6: ids and fixed values
     expect(exploreAddressProblem(`/a?${[1, 2, 3, 4, 5, 6].map(i => `p${i}=1`).join('&')}`)).toBe('query')
   })
 })
+
+describe('a paginated read (design memo §38: the app reads pages 1..N, the declaration says where and how many)', () => {
+  const read = (lines: string, query = '      query:\n        - { name: group, value: "{group}" }\n') =>
+    `${LSTEP}  explore:\n    r:\n      label: 読む\n      path: /api/episodes\n      reader: site.list\n      no_side_effects: reviewed\n${query}${lines}`
+
+  it('parses `pages: { param, max }` and puts the app\'s page number last, from 1 to max only', () => {
+    const r = parse(read('      pages: { param: page, max: 10 }\n')).browser!.explore.r
+    expect(r).toEqual({
+      label: '読む', path: '/api/episodes', placeholders: ['group'], reader: 'site.list',
+      query: [{ name: 'group', field: 'group' }], pages: { param: 'page', max: 10 },
+    })
+    expect(explorePath(r, { group: '29529' })).toBe('/api/episodes?group=29529&page=1')
+    expect(explorePath(r, { group: '29529' }, 2)).toBe('/api/episodes?group=29529&page=2')
+    expect(explorePath(r, { group: '29529' }, 10)).toBe('/api/episodes?group=29529&page=10')
+    for (const bad of [0, 11, -1, 1.5, Number.NaN, 2 ** 60]) expect(explorePath(r, { group: '29529' }, bad), String(bad)).toBeNull()
+    // The operator's values never carry the page.
+    expect(explorePath(r, { group: '29529', page: '2' })).toBeNull()
+    // Without a query, the page is the only parameter; a read without pages takes no page.
+    const alone = parse(read('      pages: { param: p, max: 1 }\n', '')).browser!.explore.r
+    expect(explorePath(alone, {})).toBe('/api/episodes?p=1')
+    expect(explorePath(alone, {}, 2)).toBeNull()
+    const plain = parse(read('')).browser!.explore.r
+    expect(plain.pages).toBeUndefined()
+    expect(explorePath(plain, { group: '1' }, 1)).toBeNull()
+  })
+
+  it('refuses a max outside 1–10 or not a whole number, a param that is also in the query or not a plain name, unknown keys, another shape, and a query that would pass 5 parameters', () => {
+    for (const max of ['0', '11', '1.5', '"10"', '-1', 'null']) expect(errorsOf(read(`      pages: { param: page, max: ${max} }\n`)), max).toMatch(/max/)
+    expect(errorsOf(read('      pages: { param: page }\n'))).toMatch(/max/)
+    expect(errorsOf(read('      pages: { param: group, max: 10 }\n'))).toMatch(/query にも/)
+    expect(errorsOf(read('      pages: { param: GROUP, max: 10 }\n'))).toMatch(/query にも/)
+    for (const param of ['_method', '"_page"', '"1page"', '"pa ge"', '"pa-ge"', '""']) expect(errorsOf(read(`      pages: { param: ${param}, max: 10 }\n`)), param).not.toBe('')
+    expect(errorsOf(read('      pages: { max: 10 }\n'))).toMatch(/param/)
+    expect(errorsOf(read('      pages: { param: page, max: 10, first: 0 }\n'))).toMatch(/知らない項目「first」/)
+    expect(errorsOf(read('      pages: page\n'))).toMatch(/pages/)
+    expect(errorsOf(read('      pages: [page, 10]\n'))).toMatch(/pages/)
+    const five = `      query:\n${[1, 2, 3, 4, 5].map(i => `        - { name: p${i}, value: "1" }\n`).join('')}`
+    expect(errorsOf(read('', five))).toBe('')
+    expect(errorsOf(read('      pages: { param: page, max: 10 }\n', five))).toMatch(/5 個まで/)
+  })
+})

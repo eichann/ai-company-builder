@@ -11,7 +11,7 @@
  * an HTML reader's (`keepReaderItems`).
  */
 import { keepReaderItems, type BrowserExploreResult } from './browser-page'
-import type { BrowserExploreItem, BrowserJsonExploreReader, BrowserJsonValue } from './browser-runner'
+import type { BrowserJsonExploreReader, BrowserJsonValue, BrowserListPage } from './browser-runner'
 
 export const BROWSER_JSON_LIMITS = { chars: 2_000_000, depth: 32 } as const
 
@@ -108,14 +108,31 @@ export function parseStrictJson(text: string): { value: BrowserJsonValue } | nul
   }
 }
 
+/** A page report as the app may use it: whole numbers, `current` and `last` from 1, `current` ≤ `last`, `total` from 0. */
+function keptPage(page: unknown): BrowserListPage | null {
+  if (!page || typeof page !== 'object') return null
+  const { current, last, total } = page as Record<string, unknown>
+  const whole = (n: unknown, min: number): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= min
+  return whole(current, 1) && whole(last, 1) && whole(total, 0) && current <= last ? { current, last, total } : null
+}
+
 /**
  * Runs a reviewed JSON reader over an answer's text: parsed strictly first (an answer that does not
- * parse is no items, incomplete), then what the reader hands back is kept as any reader's is.
+ * parse is no items, incomplete), then what the reader hands back is kept as any reader's is. A page
+ * report (`page`) is passed on only when it is whole numbers that fit together; a malformed one is
+ * dropped and the read is incomplete.
  */
-export function runJsonExploreReader(reader: BrowserJsonExploreReader, values: Readonly<Record<string, string>>, text: string): BrowserExploreResult {
+export function runJsonExploreReader(reader: BrowserJsonExploreReader, values: Readonly<Record<string, string>>, text: string): BrowserJsonExploreResult {
   const json = parseStrictJson(text)
   if (!json) return { items: [], complete: false }
-  let raw: { items: BrowserExploreItem[]; complete: boolean }
+  let raw: ReturnType<BrowserJsonExploreReader['read']>
   try { raw = reader.read(values, json.value) } catch { return { items: [], complete: false } }
-  return keepReaderItems(reader, raw, true)
+  const page = raw?.page === undefined ? undefined : keptPage(raw.page)
+  const kept = keepReaderItems(reader, raw, page !== null)
+  return page ? { ...kept, page } : kept
+}
+
+export interface BrowserJsonExploreResult extends BrowserExploreResult {
+  /** Where this answer stands in a paginated list, as its reader reported it (checked numbers). */
+  page?: BrowserListPage
 }

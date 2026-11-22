@@ -62,6 +62,8 @@ export const BROWSER_DECLARATION_LIMITS = {
   explore: 10,
   explorePlaceholders: 5,
   exploreQuery: 5,
+  /** A paginated read: at most this many pages (design memo §38: 10 pages of 50 = 500 items). */
+  explorePages: 10,
 } as const
 
 /** Operation, target and change names. */
@@ -169,6 +171,11 @@ export interface BrowserOperation {
  * `{name}` filled with a plain id; the read's address is built from the declaration alone
  * (`explorePath`) and the read session lets through exactly that address and nothing else
  * (`exploreAddressProblem`, the window's `exactRead`).
+ *
+ * A paginated list (design memo §38, Lステップ 0.5.0): `pages: { param, max }` — the app, never the
+ * operator, reads pages 1, 2, … in order, appending `param=<n>` as the last parameter of the query,
+ * up to `max` (1–10) pages; a JSON reader reports `current_page` / `last_page` / `total` and the app
+ * decides (agent-browser.md "The operator and the preview").
  */
 export interface BrowserExploreRead {
   label: string
@@ -179,6 +186,13 @@ export interface BrowserExploreRead {
   reader: string
   /** The query string's parameters in the order they are sent (absent: no query). */
   query?: BrowserExploreQueryParam[]
+  /** A paginated read: the page parameter (sent last, filled by the app only) and the most pages read. */
+  pages?: BrowserExplorePages
+}
+
+export interface BrowserExplorePages {
+  param: string
+  max: number
 }
 
 /** One parameter of a declared read's query: a fixed literal, or one `{name}` filled with a plain id. */
@@ -445,9 +459,11 @@ export function exploreAddressProblem(address: string): 'path' | 'query' | null 
  * The address of an explore read with `values` put in its `{name}`s — the path's segments and the
  * query's values, the query's parameters in their declared order — or null when a value is missing,
  * not a plain id (`BROWSER_ID_VALUE_RE`) or a name is given that the read does not have. Built from
- * the declaration only: the operator names the read and the ids, never an address.
+ * the declaration only: the operator names the read and the ids, never an address. A paginated read
+ * gets `<param>=<page>` as its last parameter (`page` 1 when not given; an integer 1..max, chosen by
+ * the app); a read that is not paginated takes no page.
  */
-export function explorePath(read: BrowserExploreRead, values: Readonly<Record<string, string>>): string | null {
+export function explorePath(read: BrowserExploreRead, values: Readonly<Record<string, string>>, page?: number): string | null {
   const names = Object.keys(values)
   if (names.length !== read.placeholders.length || names.some(n => !read.placeholders.includes(n))) return null
   let failed = false
@@ -457,7 +473,13 @@ export function explorePath(read: BrowserExploreRead, values: Readonly<Record<st
     return v
   }
   const path = read.path.replace(/\{([a-z][a-z0-9_]{0,39})\}/g, (_m, name: string) => fill(name))
-  const query = (read.query ?? []).map(p => `${p.name}=${'field' in p ? fill(p.field) : p.value}`).join('&')
+  const params = (read.query ?? []).map(p => `${p.name}=${'field' in p ? fill(p.field) : p.value}`)
+  if (read.pages) {
+    const n = page ?? 1
+    if (!Number.isSafeInteger(n) || n < 1 || n > read.pages.max) return null
+    params.push(`${read.pages.param}=${n}`)
+  } else if (page !== undefined) return null
+  const query = params.join('&')
   const address = query ? `${path}?${query}` : path
   return failed || exploreAddressProblem(address) ? null : address
 }
@@ -496,7 +518,27 @@ function parseExploreQuery(where: string, raw: YamlValue | undefined, placeholde
   return out
 }
 
-/** `explore`: `{ <name>: { label, path, reader, no_side_effects: reviewed } }` — nothing else. */
+/**
+ * `pages`: `{ param, max }` — the page parameter's name (a query name, not one `query` already has) and
+ * the most pages read (an integer 1..`explorePages`); the parameter counts toward the query's 5.
+ */
+function parseExplorePages(where: string, raw: YamlValue | undefined, query: BrowserExploreQueryParam[] | undefined, e: (m: string) => void): BrowserExplorePages | undefined {
+  if (raw === undefined) return undefined
+  const max = BROWSER_DECLARATION_LIMITS.explorePages
+  if (!isYamlMap(raw)) { e(`${where}の pages は「{ param: page, max: ${max} }」の形で書いてください（ページの番号はアプリが 1 から順に入れます）`); return undefined }
+  let ok = true
+  unknownKeys(`${where}の pages: `, raw, ['param', 'max'], m => { ok = false; e(m) })
+  if (!ok) return undefined
+  const { param, max: most } = raw
+  if (typeof param === 'string' && isMethodOverrideKey(param)) { e(`${where}の pages の param に _method は書けません`); return undefined }
+  if (typeof param !== 'string' || !BROWSER_QUERY_NAME_RE.test(param)) { e(`${where}の pages の param は英字で始まる英数字・_ です（40 文字まで）`); return undefined }
+  if ((query ?? []).some(p => p.name.toLowerCase() === param.toLowerCase())) { e(`${where}の pages の param「${param}」は query にも書かれています（ページの番号はアプリだけが入れます。query から消してください）`); return undefined }
+  if (typeof most !== 'number' || !Number.isInteger(most) || most < 1 || most > max) { e(`${where}の pages の max は 1〜${max} の整数です（読むページの数の上限）`); return undefined }
+  if ((query ?? []).length + 1 > BROWSER_DECLARATION_LIMITS.exploreQuery) { e(`${where}の query は pages の param と合わせて ${BROWSER_DECLARATION_LIMITS.exploreQuery} 個までです`); return undefined }
+  return { param, max: most }
+}
+
+/** `explore`: `{ <name>: { label, path, query?, pages?, reader, no_side_effects: reviewed } }` — nothing else. */
 function parseExplore(raw: YamlValue | undefined, err: (m: string) => void): Record<string, BrowserExploreRead> {
   const out: Record<string, BrowserExploreRead> = {}
   if (raw === undefined) return out
@@ -509,7 +551,7 @@ function parseExplore(raw: YamlValue | undefined, err: (m: string) => void): Rec
     if (!isYamlMap(entry)) { err(`${where}は { label, path, reader, no_side_effects } の形で書いてください`); continue }
     let ok = true
     const e = (m: string) => { ok = false; err(m) }
-    unknownKeys(`${where}: `, entry, ['label', 'path', 'query', 'reader', 'no_side_effects'], e)
+    unknownKeys(`${where}: `, entry, ['label', 'path', 'query', 'pages', 'reader', 'no_side_effects'], e)
     const label = plainText(entry.label, BROWSER_DECLARATION_LIMITS.label)
     if (!label) e(`${where}の label は ${BROWSER_DECLARATION_LIMITS.label} 文字までの1行で書いてください`)
     const reader = entry.reader
@@ -534,8 +576,9 @@ function parseExplore(raw: YamlValue | undefined, err: (m: string) => void): Rec
       if (!PATH_RE.test(sample) || !checkUpstreamPath(sample)) e(`${where}の path は / で始まる決まった道です（? # //・.. は使えません）`)
     }
     const query = parseExploreQuery(where, entry.query, placeholders, e)
+    const pages = parseExplorePages(where, entry.pages, query, e)
     if (placeholders.length > BROWSER_DECLARATION_LIMITS.explorePlaceholders) e(`${where}の {名前} は path と query で ${BROWSER_DECLARATION_LIMITS.explorePlaceholders} 個までです`)
-    if (ok) out[name] = { label: label as string, path: path as string, placeholders, reader: reader as string, ...(query ? { query } : {}) }
+    if (ok) out[name] = { label: label as string, path: path as string, placeholders, reader: reader as string, ...(query ? { query } : {}), ...(pages ? { pages } : {}) }
   }
   return out
 }

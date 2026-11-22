@@ -30,7 +30,12 @@
  * - `template_folders`: `GET /api/template-groups` (§36; id-free) → `template_group` (「未分類」, id 0,
  *   is not selectable);
  * - `templates`: `GET /api/templates?group={template_group}&page=1` (§34, §36) → `template`.
- * Page 1 only: a longer list reads as incomplete. Not declared: `/api/landings/<id>` (not this
+ * Page 1 only in 0.4.0: a longer list read as incomplete.
+ *
+ * 0.5.0 reads the paginated lists whole (design memo §38, the owner: folders can hold more than 50):
+ * `reminders` and `templates` declare `pages: { param: page, max: 10 }` instead of the fixed `page=1`,
+ * so the app — never the AI — reads `…&page=1`, `…&page=2`, … up to `last_page`, at most 10 pages (500
+ * items); a longer list is not offered. Not declared: `/api/landings/<id>` (not this
  * type's). `delivers` stays `none`: what a step's time means for people already past it is not known
  * yet (§34), so no `scheduled` type exists.
  */
@@ -39,7 +44,7 @@ import { LSTEP_REMINDER_STEP_CHECKER } from './reminder-step'
 import { LSTEP_REMINDER_STEPS_READER } from './reminder-steps-reader'
 
 export const LSTEP_DECLARATION = `id: lstep
-version: 0.4.0
+version: 0.5.0
 label: Lステップ
 contract: 1
 browser:
@@ -82,11 +87,11 @@ browser:
       reader: ${LSTEP_REMINDER_FOLDERS_READER}
       no_side_effects: reviewed
     reminders:
-      label: フォルダの中のリマインダ（1ページ目）
+      label: フォルダの中のリマインダ
       path: /api/episodes
       query:
         - { name: group, value: "{group}" }
-        - { name: page, value: "1" }
+      pages: { param: page, max: 10 }
       reader: ${LSTEP_REMINDERS_READER}
       no_side_effects: reviewed
     template_folders:
@@ -95,11 +100,11 @@ browser:
       reader: ${LSTEP_TEMPLATE_FOLDERS_READER}
       no_side_effects: reviewed
     templates:
-      label: フォルダの中のテンプレート（1ページ目）
+      label: フォルダの中のテンプレート
       path: /api/templates
       query:
         - { name: group, value: "{template_group}" }
-        - { name: page, value: "1" }
+      pages: { param: page, max: 10 }
       reader: ${LSTEP_TEMPLATES_READER}
       no_side_effects: reviewed
     reminder:
