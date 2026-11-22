@@ -36,6 +36,11 @@ export interface CommandKeybinding {
   readonly key: string
   /** Only a focus inside this area receives the key (the innermost area wins). */
   readonly area: CommandArea
+  /**
+   * The command does nothing on an HTML document's tab, so a document shown there keeps the key
+   * (doc-frame.md "App shortcuts in a document"); without it an `editor` / `app` key is the app's.
+   */
+  readonly notInHtmlDocument?: boolean
 }
 
 export interface CommandDefinition<Id extends string = string, Args extends z.ZodObject = z.ZodObject> {
@@ -177,4 +182,22 @@ export function matchesKey(spec: ParsedKey, input: KeyInput): boolean {
     && spec.shift === input.shiftKey
     && spec.alt === input.altKey
     && spec.key === keyName(input.key)
+}
+
+/**
+ * The command whose shortcut a key press is, looking only at the shortcuts of `areas` (in that
+ * order) that `accept` takes; null when none. For a key pressed where the renderer's focus chain cannot see it (an
+ * HTML document's own view, doc-frame.md "App shortcuts in a document"), so the catalog stays the
+ * one list of shortcuts.
+ */
+export function shortcutOf(
+  catalog: CommandCatalog, input: KeyInput, areas: readonly CommandArea[], accept: (def: CommandDefinition) => boolean = () => true,
+): string | null {
+  const defs = Object.values(catalog as Record<string, CommandDefinition>).filter(accept)
+  for (const area of areas) {
+    for (const def of defs) {
+      if (def.keybinding?.area === area && matchesKey(parseKey(def.keybinding.key)!, input)) return def.id
+    }
+  }
+  return null
 }

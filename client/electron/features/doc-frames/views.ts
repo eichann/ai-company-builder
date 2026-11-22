@@ -16,6 +16,7 @@
  */
 import { docViewBounds, docZoomFactor, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
 import { webLinkForBrowser } from '../../external-url'
+import type { KeyInput } from '../../../shared/commands/define'
 import type { DocFrames, OpenableDocument } from './protocol'
 
 export interface DocViewHandle {
@@ -43,6 +44,8 @@ export interface DocViewHooks {
   onGone(viewId: number): void
   /** The member pressed a link to somewhere outside the document (the shell refused the navigation). */
   onLink(viewId: number, url: string): void
+  /** The member pressed one of the app's shortcuts in it (a real key press: the shell took it from the document). */
+  onShortcut(viewId: number, key: KeyInput): void
 }
 
 export interface DocViewPort {
@@ -111,6 +114,10 @@ export function createDocViews(deps: DocViewsDeps) {
       if (last !== undefined && at - last < LINK_INTERVAL_MS) return
       lastLink.set(viewId, at)
       deps.notify?.(view.windowId, { viewId, kind: 'link', url: link })
+    },
+    onShortcut(viewId, key) {
+      const view = views.get(viewId)
+      if (view) deps.notify?.(view.windowId, { viewId, kind: 'shortcut', key })
     },
   }
   /** The view, when `windowId` holds it. */

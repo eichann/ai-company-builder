@@ -47,6 +47,16 @@ interface Result {
   links: { events: unknown[]; stayed: boolean }
   crashEvents: unknown[]
   otherViewId: number | null
+  keys: {
+    afterFind: { shortcuts: string[]; keys: string }
+    ownKeys: { shortcuts: string[]; keys: string; typed: string }
+    more: { shortcuts: string[]; keys: string }
+    macControl: { shortcuts: string[]; keys: string }
+    synthetic: string[]
+    keyboard: { app: boolean; doc: boolean }
+    mac: boolean
+  }
+  closedWithKeyboard: { before: { app: boolean; doc: boolean }; appAfter: boolean }
 }
 
 function freePort(): Promise<number> {
@@ -190,4 +200,21 @@ test('a link to the web is handed to the window only right after the member pres
   assert.deepEqual(result.links.events, [{ viewId: result.links.events.length ? (result.links.events[0] as { viewId: number }).viewId : -1, kind: 'link', url: 'https://nav.test/pressed?from=doc' }])
   assert.equal(result.links.stayed, true)
   assert.deepEqual(result.crashEvents, [{ viewId: result.otherViewId, kind: 'gone' }])
+})
+
+test('the app\'s shortcuts reach the app while the document has the keyboard; its own keys and typing stay with it', { skip }, () => {
+  const k = result.keys
+  assert.deepEqual(k.afterFind, { shortcuts: ['mod+k'], keys: '' }, '⌘K goes to the app (palette), not to the document')
+  assert.deepEqual(k.ownKeys.shortcuts, [], 'arrows, letters and Space are the document\'s')
+  assert.equal(k.ownKeys.keys, 'ArrowRighta ')
+  assert.equal(k.ownKeys.typed, 'a ', 'typing into its own input stays there')
+  assert.deepEqual(k.more, { shortcuts: ['mod+shift+v', 'mod+b'], keys: 'f' }, '⌘⇧V (見る｜中身) and ⌘B too; a held key repeats nothing; ⌘F stays the document\'s')
+  if (k.mac) assert.deepEqual(k.macControl, { shortcuts: [], keys: 'k' }, 'a Mac\'s Ctrl+K is the document\'s text key')
+  assert.deepEqual(k.synthetic, [], 'a document\'s synthetic KeyboardEvent runs nothing of the app')
+  assert.deepEqual(k.keyboard, { app: false, doc: true }, 'control: the document had the keyboard all along')
+})
+
+test('a view closed while it has the keyboard (中身, the tab closed) gives the keyboard back to the app', { skip }, () => {
+  assert.deepEqual(result.closedWithKeyboard.before, { app: false, doc: true }, 'control: the document had the keyboard')
+  assert.equal(result.closedWithKeyboard.appAfter, true)
 })

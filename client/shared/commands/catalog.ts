@@ -218,7 +218,8 @@ export const COMMANDS = defineCommands([
     id: 'editor.find', title: '文書の中を検索する', class: 'view',
     args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
     target: { arg: 'pane', area: 'editor' },
-    keybinding: { key: 'mod+f', area: 'editor' },
+    // Does nothing on an HTML document's tab: the document keeps ⌘F (its own find, or nothing).
+    keybinding: { key: 'mod+f', area: 'editor', notInHtmlDocument: true },
   },
 ])
 

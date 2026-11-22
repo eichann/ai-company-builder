@@ -45,8 +45,9 @@ carrying a secret in its user name reached a local listener). Each document is s
   A2: clicking the document and then the chat within 600 ms let a page that reloads on blur, or
   calls `focus()`, take the keyboard back while the member typed). Measured with the guard:
   a page's `focus()` every 100 ms and `autofocus` take nothing, hidden or shown. A click into the
-  document gives it the keyboard on purpose (a slide's ← →); the app's shortcuts then do not reach
-  the app until the member clicks outside (the proposal: not intercepted in the first version).
+  document gives it the keyboard on purpose (a slide's ← →); the app's shortcuts still reach the
+  app ("App shortcuts in a document" below). A view closed while it has the keyboard (中身, the tab
+  closed) gives it back to the app too (measured: otherwise it was nowhere).
   Known: when the member comes back to the app's window while the document had the keyboard,
   Chromium's `focus` event comes without a click, so the keyboard returns to the app.
 - **The document session** (`acb-doc`, prepared on the first view; a failed preparation — its proxy
@@ -129,7 +130,8 @@ carrying a secret in its user name reached a local listener). Each document is s
 - **`docView:event`** (main → the main window, sent by `main.ts`): `{ kind: 'link', url }` — only
   an `http(s)` address (`webLinkForBrowser`), at most one per view per second (`LINK_INTERVAL_MS`:
   a page cannot queue confirmations), only for a registered view; `{ kind: 'gone' }` — a view went
-  without its window asking (its page crashed, the cap closed it).
+  without its window asking (its page crashed, the cap closed it); `{ kind: 'shortcut', key }` — the
+  member pressed one of the app's shortcuts in it (below), only for a registered view.
 - **Revocation goes with the view** (`views.ts`): `docView:close(viewId)` by its own window; the
   view destroyed or its page crashed (`onGone`); the window's page reloading, crashing or closing
   (`onWindowReset`: every view of that window closes); at most `MAX_VIEWS_PER_WINDOW` (32) per
@@ -213,6 +215,25 @@ carrying a secret in its user name reached a local listener). Each document is s
   HTML full screen (`enter/leave-html-full-screen`), gives the keyboard back to the app and calls
   `setFullScreen(false)` (measured: leaves the page's full screen too). ← / → are the document's
   own (one click into it first).
+- **App shortcuts in a document** (owner, 2026-11-22): while the document has the keyboard, the
+  app's shortcuts still reach the app. **One list**: the command catalog's keybindings of the areas
+  around the view, `DOC_VIEW_SHORTCUT_AREAS` = its tab (`editor`) and the `app`
+  (`docViewShortcutOf`, `client/shared/doc-frame.ts`, through `shortcutOf` in
+  `shared/commands/define.ts`), except a binding marked `notInHtmlDocument` (its command does
+  nothing on an HTML tab) — today ⌘K, ⌘P, ⌘B, ⌘J, ⌘⇧C, ⌘⇧F, ⌘⇧T, ⌘⇧V, ⌘S (Ctrl on Windows /
+  Linux); ⌘F (`editor.find`, marked) stays the document's (its own find, or nothing: owner,
+  「UI/UX が損なわれなければ良い」). A binding added to the catalog joins by itself. Main's `before-input-event`
+  takes a matching key-down from the document (`preventDefault`: the page never sees it) and sends
+  `{ kind: 'shortcut', key }`; a held key's repeats are taken but not sent. The window
+  (`docViewSession.ts`) runs it **as if pressed in the document's tab** (`handleKeyAt`: the area's
+  focus chain, so `acceptsKey` and the editor's target apply as for a key pressed in the page). An
+  overlay it opens (⌘K) hides the view, and hiding gives the keyboard back (above). Everything else
+  stays the document's: arrows, letters, Space, Enter, Tab, ⌘C / ⌘V / ⌘A, and **on a Mac Ctrl+letter**
+  (a text field's own editing key: Ctrl+K, Ctrl+B; `isMacControlKey`). Not caught: the voice key
+  (member-configurable, not a catalog binding) and keys the app has no command for. **A document
+  cannot run app commands**: only the member's real input reaches `before-input-event` (a page's
+  synthetic `KeyboardEvent` does not: measured), and what main sends is a key, never a command
+  the page chose. Known: ⌘S is taken from the document (it saves the tab's file, harmless).
 - **［止める］** closes the view (its scripts stop, its grant goes); ［もう一度表示する］ opens it again.
 - **Links** (proposal item 5, A2): main hands a web link the member pressed (above) to the window;
   `ConfirmDialog` 「外のサイトを開きますか？」 with the **host large** (`URL.host`: a look-alike
@@ -310,15 +331,22 @@ hosts, and nothing else):
   unmuted, another window cannot move it; hidden again → hidden, muted, the keyboard back to the
   app; Escape in the document in full screen leaves it; a reload keeps zoom 2 and scroll 600; a
   navigation to the web is handed over only right after a click (not by itself) and the page
-  stays; a crashed view is told as `gone`. `doc-frame-protocol.test.ts`: placing / zooming /
+  stays; a crashed view is told as `gone`; with the document holding the keyboard, ⌘K / ⌘⇧V / ⌘B
+  are handed over and the document sees none of them, a held ⌘B once, ⌘F stays the document's, while ←, a letter typed into
+  its input and Space stay the document's, a Mac's Ctrl+K stays the document's, and the page's
+  synthetic `KeyboardEvent`s hand over nothing; a view closed while it has the keyboard gives it
+  back to the app. `doc-frame-protocol.test.ts`: placing / zooming /
   reloading only by the view's own window, bad placements hide, zoom clamped, `docViewOnScreen`,
   link events web-only and one a second, `gone` for a crash and the cap but not for the window's
-  own close, the three IPC channels main-window-only. `src/features/editor/htmlViewer.test.ts`:
+  own close, a shortcut only to its own window and not once closed, every catalog binding of the
+  editor and app areas handed over (⌘ on a Mac, Ctrl elsewhere) but those marked
+  `notInHtmlDocument` (only ⌘F), and the document's own keys not,
+  the three IPC channels main-window-only. `src/features/editor/htmlViewer.test.ts`:
   the grid catches every overlay of its spacing and stays fine on a 4K area, which changes reload. `tests/ui/editor-html-viewer.spec.ts`
   (`editor-tabs-ui.html?view=html`): 見る by default, placed exactly over the area, closed on
   another tab / 中身 / ［止める］, a view made after the member left closed at once, a menu over
   it hides it (also a menu or a toast smaller than the grid, by its role), the top-level refusal's words, reloads
-  on the right changes, the zoom kept across another tab and 中身, the link dialog (host large, Enter answers nothing, only ［ブラウザで開く］
+  on the right changes, the zoom kept across another tab and 中身, a handed-over ⌘⇧V switching to 中身 (another view's ignored), the link dialog (host large, Enter answers nothing, only ［ブラウザで開く］
   opens, another view's link ignored), zoom steps, a gone view, full screen.
 - `ipc-window-links.test.ts` (privileges; the app's session does not serve `acb-doc`),
   `ipc-path-guard.test.ts` (`docView:open` from the main frame reaches the allowed roots),

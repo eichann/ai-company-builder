@@ -8,6 +8,7 @@
  * and attaches the area with a callback ref, so no effect is needed.
  */
 import { DOC_ZOOM_STEPS, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
+import { handleKeyAt } from '../../shared/commands/commands'
 import { subscribeFileChanges } from '../../shared/lib/fileEvents'
 import type { DocLinkOutbound, DocViewControls } from './api'
 import { changeShowsIn, nextZoom, placementOf, sameBounds } from './htmlViewer'
@@ -200,6 +201,13 @@ export class DocViewSession {
 
   private onEvent(event: DocViewEvent) {
     if (event.viewId !== this.viewId) return
+    if (event.kind === 'shortcut') {
+      // One of the app's shortcuts pressed while the document had the keyboard (main took it from
+      // the document): run as if pressed in this tab. An overlay it opens (⌘K) hides the view, and
+      // hiding gives the keyboard back to the app.
+      handleKeyAt(this.area, event.key)
+      return
+    }
     if (event.kind === 'gone') {
       this.viewId = null
       this.placed = null

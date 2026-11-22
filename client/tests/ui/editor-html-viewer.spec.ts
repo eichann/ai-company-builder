@@ -96,6 +96,20 @@ test('中身 shows the source and closes the view; ⌘⇧V goes back to 見る a
   expectNoPageErrors(state)
 })
 
+test('an app shortcut pressed while the document has the keyboard runs as if pressed in its tab (⌘⇧V → 中身); another view\'s does not', async ({ page }) => {
+  const state = await open(page)
+  const key = { key: 'v', metaKey: true, ctrlKey: false, shiftKey: true, altKey: false }
+  await sendEvent(page, { viewId: 99, kind: 'shortcut', key })
+  await page.waitForTimeout(200)
+  await expect(page.getByRole('toolbar', { name: '資料の表示' })).toBeVisible()
+  // The focus is elsewhere in the page (the document's own view had the keyboard): the tab still gets it.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await sendEvent(page, { viewId: 7, kind: 'shortcut', key })
+  await expect(page.locator('.cm-content[role="textbox"]')).toContainText('11月の売上')
+  expect(await calls(page)).toContainEqual(['close', 7])
+  expectNoPageErrors(state)
+})
+
 test('a change of the document or a file it loads reloads it; a data file or another folder does not', async ({ page }) => {
   const state = await open(page)
   const change = (p: string) => page.evaluate(path => (window as unknown as { __acbFileChange: (p: string) => void }).__acbFileChange(path), p)

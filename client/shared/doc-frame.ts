@@ -13,6 +13,9 @@
  * which file a request reaches.
  */
 
+import { COMMANDS } from './commands/catalog'
+import { isMacControlKey, shortcutOf, type CommandArea, type KeyInput } from './commands/define'
+
 export const DOC_SCHEME = 'acb-doc'
 
 /** A token is 32 lowercase hex characters (16 random bytes): a valid host label, never guessable. */
@@ -252,9 +255,32 @@ export function docZoomFactor(input: unknown): number | null {
  * What main tells the main window about one of its document views
  * (`docView:event`): the member pressed a link to the web inside it (`link`:
  * the app asks before the member's browser opens it), or the view went by
- * itself (`gone`: its page crashed, or more views were opened than a window keeps).
+ * itself (`gone`: its page crashed, or more views were opened than a window keeps), or the member
+ * pressed one of the app's shortcuts while the document had the keyboard (`shortcut`: the key, run
+ * by the window as if pressed in the document's tab).
  */
-export type DocViewEvent = { viewId: number; kind: 'link'; url: string } | { viewId: number; kind: 'gone' }
+export type DocViewEvent =
+  | { viewId: number; kind: 'link'; url: string }
+  | { viewId: number; kind: 'gone' }
+  | { viewId: number; kind: 'shortcut'; key: KeyInput }
+
+/**
+ * The command areas around a document's view: it sits in the editor (its tab), inside the app.
+ * Their shortcuts (the catalog's) reach the app even while the document has the keyboard.
+ */
+export const DOC_VIEW_SHORTCUT_AREAS: readonly CommandArea[] = ['editor', 'app']
+
+/**
+ * Whether a key pressed in a document's view is one of the app's shortcuts, which main takes from
+ * the document and hands to the window (doc-frame.md "App shortcuts in a document"): the command it
+ * would run, or null (the key stays the document's: arrows, typing, Space, Enter). On a Mac only ⌘
+ * counts: Ctrl+letter is the text fields' own editing key (Ctrl+K, Ctrl+B), left to the document;
+ * a binding marked `notInHtmlDocument` (⌘F: nothing on an HTML tab) is the document's too.
+ */
+export function docViewShortcutOf(input: KeyInput, mac: boolean): string | null {
+  if (isMacControlKey(input, mac)) return null
+  return shortcutOf(COMMANDS, input, DOC_VIEW_SHORTCUT_AREAS, def => !def.keybinding?.notInHtmlDocument)
+}
 
 /** `docView:open`: the view showing the document (the renderer never sees its address), or why not. */
 export type DocViewOpenResult = { ok: true; viewId: number } | DocFrameRefused
