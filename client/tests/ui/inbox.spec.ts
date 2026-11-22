@@ -156,6 +156,42 @@ test('a plan approved on another PC leaves the list on the next read (a card clo
   await expect(chip(page, /^あなた待ち 6$/)).toBeVisible()
 })
 
+test('［任せる］ on a card elsewhere (the consultation) moves the inbox\'s row at once: the draft becomes 「届いたか分かりません」', async ({ page }) => {
+  await openPreview(page, 'inbox', { plans: '1', chatcard: '1' })
+  const draft = page.locator(`[data-inbox-row="browser:${DRAFT}"]`)
+  await expect(draft).toContainText('承認を待っています')
+  await page.getByRole('region', { name: '相談のカード' }).getByRole('button', { name: '任せる' }).click()
+  await expect(page.locator('#acted')).toHaveText('run')
+  // No panel opened or card closed in the inbox: the card's state moving is what made it read again.
+  await expect(draft).toContainText('届いたか分かりません')
+  await expect(draft.getByRole('button', { name: '確かめる…' })).toBeVisible()
+})
+
+test('while a plan is listed the inbox reads every minute, a few minutes on through a run claimed elsewhere, then stops', async ({ page }) => {
+  await page.clock.install()
+  await openPreview(page, 'inbox', { plans: '1' })
+  const reads = page.locator('#plan-reads')
+  const inbox = (call: 'plansSettled' | 'claimedRunUnknown') => page.evaluate(c => (window as unknown as { __acbInbox: Record<string, () => void> }).__acbInbox[c](), call)
+  await expect(reads).toHaveText('1')
+  await page.clock.runFor(61_000)
+  await expect(reads).toHaveText('2')
+  // The draft was claimed on another PC: in neither list while it waits for its permit…
+  await inbox('plansSettled')
+  await page.clock.runFor(61_000)
+  await expect(reads).toHaveText('3')
+  await expect(page.locator('[data-inbox-row^="browser:"]')).toHaveCount(0)
+  // …then its result is unknown and confirmable: the reads went on, so it shows without opening anything.
+  await inbox('claimedRunUnknown')
+  await page.clock.runFor(61_000)
+  await expect(page.locator(`[data-inbox-row="browser:${DRAFT}"]`)).toContainText('届いたか分かりません')
+  // Settled for good: a few more minutes of reads, then none.
+  await inbox('plansSettled')
+  await page.clock.runFor(600_000)
+  const settled = await reads.textContent()
+  await page.clock.runFor(600_000)
+  await expect(reads).toHaveText(settled ?? '')
+})
+
 for (const theme of ['light', 'dark'] as const) {
   test(`renders in the ${theme} theme`, async ({ page }) => {
     const state = await openPreview(page, 'inbox', theme === 'dark' ? { theme } : {})

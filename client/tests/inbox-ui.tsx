@@ -10,6 +10,7 @@
 // run nobody knows the result of); `?plans=off`: switched off (no list handed in, as AppShell does). Every
 // `listBrowserPlans` reaching main counts in `#plan-reads`; a run, cancel or confirm shows in `#acted`.
 // `window.__acbInbox.planApprovedElsewhere()`: the draft was approved on another PC (the next read lacks it).
+// `&chatcard=1`: the draft's card as a consultation shows it, outside the inbox (its ［任せる］ runs it there).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -21,6 +22,7 @@ import { ApprovalCard } from '../src/features/chat/components/ApprovalCard'
 import { PreparedMailCard } from '../src/features/chat/components/PreparedMailCard'
 import { BrowserPlanCard } from '../src/features/browser-plans/components/BrowserPlanCard'
 import { listBrowserPlans } from '../src/features/browser-plans/api'
+import { planStatesVersion, subscribePlanStates } from '../src/features/browser-plans/planStore'
 import type { BrowserInboxPlans } from '../shared/browser-plans'
 import type { BrowserPlanView } from '../../shared/types/browser-plans'
 import type { NoticesState } from '../shared/notifications-app'
@@ -80,15 +82,18 @@ const DRAFT = `bp_${'1a'.repeat(16)}`
 const UNSURE = `bp_${'2b'.repeat(16)}`
 let browserInbox: BrowserInboxPlans = {
   plans: [{ planId: DRAFT, state: 'draft', label: 'リマインダの段にテンプレートを足す', site: 'Lステップ', createdAt: at(0, 9) }],
-  unsure: [{ planId: UNSURE, state: 'unknown', label: 'リマインダの段にテンプレートを足す', permittedAt: at(0, 8), confirmableAt: at(0, 8) }],
+  unsure: [{ planId: UNSURE, state: 'unknown', label: 'リマインダの段にテンプレートを足す', permittedAt: at(0, 8), confirmableAt: at(0, 8), canConfirm: true }],
 }
+let draftRan = false
 const planView = (id: string): BrowserPlanView => ({
-  id, state: id === DRAFT ? 'draft' : 'claimed', closeReason: null, connector: { id: 'lstep', version: '0.6.0', label: 'Lステップ' },
+  id, state: id === DRAFT && !draftRan ? 'draft' : 'claimed', closeReason: null, connector: { id: 'lstep', version: '0.6.0', label: 'Lステップ' },
   operation: 'reminder_step_add_template', label: 'リマインダの段にテンプレートを足す', sharedNote: null, delivers: 'scheduled', account: '5550001',
   target: { reminder: '7001001', step: '7002001' }, change: { template: '7003002' }, facts: {}, explanation: null,
   createdAt: at(0, 9), expiresAt: new Date(Date.now() + 3_000_000).toISOString(), approvedAt: null, contentHash: `sha256:${'7a'.repeat(32)}`,
-  execution: id === DRAFT ? null : { id: `bx_${'3c'.repeat(16)}`, state: 'unknown', claimedAt: at(0, 8), permittedAt: at(0, 8), settledAt: null, confirmableAt: at(0, 8), voidReason: null, confirmedBy: null },
+  execution: id === DRAFT && !draftRan ? null : { id: `bx_${'3c'.repeat(16)}`, state: 'unknown', claimedAt: at(0, 8), permittedAt: at(0, 8), settledAt: null, confirmableAt: at(0, 8), voidReason: null, confirmedBy: null },
 })
+
+const PLAN_STATES = { subscribe: subscribePlanStates, version: planStatesVersion }
 
 function Preview() {
   const [opened, setOpened] = useState('')
@@ -98,7 +103,13 @@ function Preview() {
   installElectronAPI({
     listBrowserPlans: async () => { setPlanReads(n => n + 1); return { ok: true, inbox: browserInbox } },
     getBrowserPlan: async (_companyId, planId) => ({ ok: true, card: { plan: planView(planId), ready: { ok: true }, stoppedHere: false, runningHere: false, siteHost: 'manager.linestep.net' } }),
-    runBrowserPlan: async () => { setActed('run'); return { ok: false, offline: true, message: '（見本）' } },
+    runBrowserPlan: async () => {
+      setActed('run')
+      // The run's answer was lost: the draft became a run nobody knows the result of (the server's lists move with it).
+      draftRan = true
+      browserInbox = { plans: [], unsure: [...browserInbox.unsure, { planId: DRAFT, state: 'unknown', label: 'リマインダの段にテンプレートを足す', permittedAt: at(0, 9), confirmableAt: at(0, 9), canConfirm: true }] }
+      return { ok: true, result: { outcome: 'unknown', reason: 'no-answer' } }
+    },
     cancelBrowserPlan: async () => { setActed('cancel'); return { ok: false, offline: true, message: '（見本）' } },
     confirmBrowserExecution: async () => { setActed('confirm'); return { ok: false, offline: true, message: '（見本）' } },
     watchNotifications: async () => {},
@@ -124,7 +135,7 @@ function Preview() {
     onOpenRecord: id => setOpened(`record ${id}`), onOpenTasks: () => setOpened('task list'), onOpenJobs: () => setOpened('jobs'),
     renderApprovalCard: id => <ApprovalCard card={{ id: `card-${id}`, companyId: 'co-preview', conversationId: null, approvalId: id, origin: 'shown', at: '' }} />,
     renderMailDraft: id => <PreparedMailCard companyId="co-preview" messageId={id} />,
-    browserPlans: params.get('plans') === '1' ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard companyId="co-preview" planId={id} /> } : undefined,
+    browserPlans: params.get('plans') === '1' ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard companyId="co-preview" planId={id} />, planStates: PLAN_STATES } : undefined,
   })
   return (
     <main className="flex h-screen flex-col bg-bg text-text">
@@ -133,6 +144,7 @@ function Preview() {
       <pre id="read">{read}</pre>
       <pre id="acted">{acted}</pre>
       <pre id="plan-reads">{planReads}</pre>
+      {params.get('chatcard') === '1' && <section aria-label="相談のカード"><BrowserPlanCard companyId="co-preview" planId={DRAFT} /></section>}
       <div className="mt-auto h-[480px]">{inbox && <BottomPanel content={inbox} onClose={() => setOpened('closed')} />}</div>
       {inbox?.dialog}
     </main>
@@ -150,6 +162,15 @@ Object.assign(window, {
     /** The browser plan's draft was approved on another PC: the next read of the plans no longer lists it. */
     planApprovedElsewhere() {
       browserInbox = { ...browserInbox, plans: [] }
+    },
+    /** Every plan settled elsewhere: the next read lists none. */
+    plansSettled() {
+      browserInbox = { plans: [], unsure: [] }
+    },
+    /** The draft claimed elsewhere ended without an answer: the next read lists it as a confirmable unknown run. */
+    claimedRunUnknown() {
+      draftRan = true
+      browserInbox = { plans: [], unsure: [{ planId: DRAFT, state: 'unknown', label: 'リマインダの段にテンプレートを足す', permittedAt: at(0, 9), confirmableAt: at(0, 9), canConfirm: true }] }
     },
   },
 })

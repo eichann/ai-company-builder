@@ -185,6 +185,8 @@ export interface BrowserInboxUnsure {
   permittedAt: string | null
   /** From when 「済んでいた」/「されていなかった」 can be pressed (null: not known yet). */
   confirmableAt: string | null
+  /** The server says the member may press 「済んでいた」/「されていなかった」 now (its clocks, not this PC's). */
+  canConfirm: boolean
 }
 
 export interface BrowserInboxPlans {
@@ -208,8 +210,8 @@ export function readBrowserInboxPlans(open: unknown, waiting: unknown, userId: s
   const unsure: BrowserInboxUnsure[] = []
   for (const e of waiting.items as unknown[]) {
     if (!isMap(e) || e.userId !== userId || !isStr(e.planId) || !BROWSER_PLAN_ID_RE.test(e.planId) || (e.state !== 'permitted' && e.state !== 'unknown')
-      || !isStr(e.label, 200) || !strOrNull(e.permittedAt, 40) || !strOrNull(e.confirmableAt, 40)) continue
-    unsure.push({ planId: e.planId, state: e.state, label: e.label, permittedAt: e.permittedAt, confirmableAt: e.confirmableAt })
+      || !isStr(e.label, 200) || !strOrNull(e.permittedAt, 40) || !strOrNull(e.confirmableAt, 40) || typeof e.canConfirm !== 'boolean') continue
+    unsure.push({ planId: e.planId, state: e.state, label: e.label, permittedAt: e.permittedAt, confirmableAt: e.confirmableAt, canConfirm: e.canConfirm })
   }
   return { plans, unsure }
 }

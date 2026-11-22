@@ -6,7 +6,7 @@ import { InboxChips, InboxList, type InboxRowButton } from '../components/InboxL
 import { InboxCardDialog } from '../components/InboxCardDialog'
 import { InboxButton } from '../components/InboxButton'
 import { NoticeSettingsDialog } from '../components/NoticeSettingsDialog'
-import { useInboxBrowserPlans, type InboxBrowserPlanList } from './useInboxBrowserPlans'
+import { useInboxBrowserPlans, type InboxBrowserPlanList, type InboxPlanStates } from './useInboxBrowserPlans'
 import { bulkSeenIds, hasInboxNews, inboxNewsBaseline, inboxNewsKeys, inboxView, sameKeys, seenWhileShown, type InboxFilter, type InboxItem } from '../model'
 
 /** A meeting of a department without the task list, with its own buttons (the minutes feature's `titleBarMeetings`). */
@@ -36,7 +36,7 @@ interface InboxSlotInput {
    * 「ブラウザ操作」's plans, composed by AppShell only while the build's switch is on (agent-browser.md): absent =
    * no plan row and nothing read. A row opens the plan's own card (`browser-plans`); only the card acts.
    */
-  browserPlans?: { list: InboxBrowserPlanList; renderCard: (planId: string) => ReactNode }
+  browserPlans?: { list: InboxBrowserPlanList; renderCard: (planId: string) => ReactNode; planStates: InboxPlanStates }
 }
 
 type OpenCard = { kind: 'approval'; id: string } | { kind: 'mail'; id: string } | { kind: 'browser'; id: string } | null
@@ -65,7 +65,7 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, featu
   const [wasShown, setWasShown] = useState(shown)
   // The plans are read again when the panel opens and when a card closes (approved or run there, or elsewhere).
   const [planReadKey, setPlanReadKey] = useState(0)
-  const plans = useInboxBrowserPlans(companyId, browserPlans?.list, planReadKey)
+  const plans = useInboxBrowserPlans(companyId, browserPlans?.list, planReadKey, browserPlans?.planStates)
   // Rebuilt from every answer main hands over (nothing of its own is kept); the 14-day line moves with it, and a
   // run's confirm time with the plans' own read at that time (a new answer).
   const view = useMemo(() => inboxView(notices, new Date(), meetings, plans.inbox), [notices, meetings, plans.inbox])

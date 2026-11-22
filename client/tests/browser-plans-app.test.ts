@@ -342,7 +342,7 @@ test('the inbox\'s list: only the member\'s own, only the fields a row shows; sw
     cancel: async () => ({ kind: 'no-answer' as const }), confirm: async () => ({ kind: 'no-answer' as const }) }
   assert.deepEqual(await ipcHarness({ plans }).call('browserPlans:list', 1, COMPANY), { ok: true, inbox: {
     plans: [{ planId: PLAN, state: 'draft', label: 'テンプレートを足す', site: 'Lステップ', createdAt: '2026-11-22T03:00:00.000Z' }],
-    unsure: [{ planId: P2, state: 'unknown', label: '段に足す', permittedAt: '2026-11-22T03:10:00.000Z', confirmableAt: '2026-11-22T03:10:35.000Z' }],
+    unsure: [{ planId: P2, state: 'unknown', label: '段に足す', permittedAt: '2026-11-22T03:10:00.000Z', confirmableAt: '2026-11-22T03:10:35.000Z', canConfirm: true }],
   } })
   // A list that is not one is no answer to show; either list unreachable is offline.
   assert.equal((await ipcHarness({ plans: { ...plans, waiting: async () => ({ kind: 'ok' as const, value: { items: 'x' } }) } }).call('browserPlans:list', 1, COMPANY) as { ok: boolean }).ok, false)

@@ -144,7 +144,7 @@ const RANK = { stopped: 0, unsure: 1, approval: 2, mail: 3, check: 4, other: 5 }
  * it can be pressed (until then, and while one may be sending, 作業中), an approved plan not started is 作業中.
  * Every row only opens the card; a settled plan is in neither server list, so it is gone (nothing is stored).
  */
-function browserRows(b: BrowserInboxPlans, now: Date): InboxItem[] {
+function browserRows(b: BrowserInboxPlans): InboxItem[] {
   const rows = new Map<string, InboxItem>()
   const base = (planId: string, title: string, at: string | null) => ({
     key: `browser:${planId}`, thing: 'approval' as const, title, source: '承認のお願い（ブラウザ操作）', due: null, at, unreadNoticeIds: [],
@@ -158,8 +158,8 @@ function browserRows(b: BrowserInboxPlans, now: Date): InboxItem[] {
   }
   // A plan claimed for a run has left the open list; its run is the one row (the later list wins anyway).
   for (const e of b.unsure) {
-    const from = e.confirmableAt ? Date.parse(e.confirmableAt) : NaN
-    const due = e.state === 'unknown' && Number.isFinite(from) && now.getTime() >= from
+    // The server's word (its clocks), not this PC's clock: the inbox reads again once `confirmableAt` has passed.
+    const due = e.state === 'unknown' && e.canConfirm
     rows.set(e.planId, due
       ? { ...base(e.planId, e.label, e.permittedAt), state: 'waiting', rank: RANK.unsure, line: 'サイトで確かめて、済んでいたかどうかをカードで押してください', badge: { tone: 'needsAction', word: '届いたか分かりません' }, actionLabel: '確かめる…' }
       : { ...base(e.planId, e.label, e.permittedAt), state: 'working', rank: RANK.other, line: 'しばらくすると、届いたかどうかをカードで確かめられます', badge: { tone: 'neutral', word: '結果を待っています' }, actionLabel: '開く…' })
@@ -330,7 +330,7 @@ export function inboxView(source: NoticesState, now: Date, meetings: readonly Me
   }
   const listedUnread = source.available ? source.notices.items.filter(n => !n.read).length : 0
   const unreadNotListed = source.available ? Math.max(0, source.notices.unread - listedUnread) : 0
-  const own = [...rows.values(), ...(browser ? browserRows(browser, now) : [])]
+  const own = [...rows.values(), ...(browser ? browserRows(browser) : [])]
   const working = own.filter(r => r.state === 'working')
   waiting.push(...own.filter(r => r.state === 'waiting'))
   waiting.sort(byNeed)

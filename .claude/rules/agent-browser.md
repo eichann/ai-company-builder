@@ -1094,16 +1094,19 @@ paths and never ask the switch.
   `hooks/useInboxBrowserPlans.ts`): AppShell hands the inbox slot the list port and the card
   (`browserPlans`) **only while `BROWSER_AI_BUILD_SWITCH` is on** — off there is no way to read and no
   row (composed by AppShell, so no feature-to-feature import). A draft → あなた待ち amber 「承認を待っています」
-  ［承認する…］ (with the approvals); an `unknown` run whose `confirmableAt` has passed → あなた待ち amber
-  「届いたか分かりません」 ［確かめる…］ (right after the stops); an approved plan not started, a `permitted` run
-  and an `unknown` one before its time → 作業中. Every row only opens this card in `InboxCardDialog` (the type
-  guard in `model.test.ts` refuses an action kind that approves, sends, runs or confirms). Settled = in neither
-  list = gone (nothing stored; no できた・未確認, the server keeps no notice for plans). Read when the inbox mounts,
-  when the panel opens, when a card closes (approved / run elsewhere → gone on that read) and a second after the
-  next `confirmableAt`; offline keeps the rows shown, another failure clears them. Limits (said): a plan made
-  while the panel stays open shows at the next read (no push for plans); only the waiting list's first page is
-  read (100, oldest claim first: an admin with more open runs of others may not see their own there; the open
-  list's `more` is not told).
+  ［承認する…］ (with the approvals); an `unknown` run the server says can be confirmed now (its `canConfirm`,
+  never this PC's clock) → あなた待ち amber 「届いたか分かりません」 ［確かめる…］ (right after the stops); an approved
+  plan not started, a `permitted` run and an `unknown` one not yet confirmable → 作業中. Every row only opens this
+  card in `InboxCardDialog` (the type guard in `model.test.ts` refuses an action kind that approves, sends, runs
+  or confirms). Settled = in neither list = gone (nothing stored; no できた・未確認, the server keeps no notice for
+  plans). **Read** when the inbox mounts, when the panel opens, when a card in the inbox closes, **when a plan's
+  state moves on any card** (`planStore` `subscribePlanStates`: ［任せる］ in the consultation's card, a cancel, a
+  confirm, a settled result — not a card's first look or the same state read again), a second after the next
+  `confirmableAt`, and **every 60 s while any plan or run is listed and 3 minutes after the last answer that listed one** (`PLANS_REREAD_MS`, `PLANS_GRACE_MS`: a run claimed on another PC is in neither list until its permit, which the server waits for at most 2 minutes; then no timer);
+  offline keeps the rows shown, another failure clears them. Limits (said): a plan made in a consultation shows
+  at the next of those reads (no push for plans); **only the waiting list's first page is read** (100, oldest
+  claim first: an admin with more open runs of others may not see their own there; the open list's `more` is
+  not told).
 
 Tests: `client/tests/browser-plans-app.test.ts` (the switch off: no preview, read or server call — the inbox's list empty with no request —; the inbox's list: the member's own runs only, the row's fields only, a bad list refused, either list offline; a plan
 registered with this build's combination and the checker's facts, the AI's words only as the explanation;
@@ -1121,7 +1124,7 @@ result nobody knows says what to check, no resend, confirm only after its time; 
 timing sentence, 「読み取れませんでした」, the shared warning; ［任せる］ sends only the plan and the shown
 hash; disabled with the reason and 「開いてログイン」; ［やめる］; unknown before and after its time, the
 confirm opening by itself on a fake clock; the plain results; no jargon), `src/features/browser-plans/planStore.test.ts`
-(a card shown again reads again, a failure recovers, two cards share one read; a copy survives only the server being out of reach), `browser-runner.test.ts` (the one way in). Each guard mutation-checked; second
+(a card shown again reads again, a failure recovers, two cards share one read; a copy survives only the server being out of reach; a state moving is told, a first look or the same state is not), `browser-runner.test.ts` (the one way in). Each guard mutation-checked; second
 layer kept on purpose: the registration's context check before each read (the check after each answer
 catches the same change).
 

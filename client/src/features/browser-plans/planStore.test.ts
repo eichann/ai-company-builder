@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { BrowserPlanGetResult } from '../../../shared/browser-plans'
-import { planEntry, putPlan, subscribePlan } from './planStore'
+import { planEntry, planStatesVersion, putPlan, subscribePlan, subscribePlanStates } from './planStore'
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 
@@ -36,4 +36,22 @@ test('a copy shown is kept through the server being out of reach, never through 
   putPlan(key, { ok: false, offline: false, message: 'この計画は見つかりませんでした。' })
   assert.equal(planEntry(key).card, null)
   assert.equal(planEntry(key).error, 'この計画は見つかりませんでした。')
+})
+
+test('a plan\'s state moving on any card is told (the inbox reads again); a first look or the same state again is not', () => {
+  const key = 'u|c|bp_moved'
+  const card = (state: string, exec: string | null) =>
+    ({ ok: true, card: { plan: { id: 'bp_moved', state, execution: exec ? { state: exec } : null }, ready: { ok: true }, stoppedHere: false, runningHere: false, siteHost: null } }) as unknown as BrowserPlanGetResult
+  let told = 0
+  const stop = subscribePlanStates(() => { told++ })
+  const at = planStatesVersion()
+  putPlan(key, card('draft', null))
+  assert.equal(told, 0, 'a card shown for the first time')
+  putPlan(key, card('draft', null))
+  assert.equal(told, 0, 'the same state read again')
+  putPlan(key, card('claimed', 'unknown'))
+  assert.equal(told, 1, '［任せる］ ran it: the inbox must read again')
+  putPlan(key, card('done', 'confirmed_done'))
+  assert.deepEqual([told, planStatesVersion() - at], [2, 2])
+  stop()
 })

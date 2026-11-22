@@ -296,15 +296,15 @@ const plans = (over: Partial<BrowserInboxPlans> = {}): BrowserInboxPlans => ({
     { planId: bp(2), state: 'approved', label: 'テンプレートを足す', site: 'Lステップ', createdAt: '2026-11-22T00:10:00Z' },
   ],
   unsure: [
-    { planId: bp(3), state: 'unknown', label: '段に足す（済）', permittedAt: '2026-11-22T00:00:00Z', confirmableAt: '2026-11-22T00:00:35Z' },
-    { planId: bp(4), state: 'unknown', label: '段に足す（まだ）', permittedAt: '2026-11-22T00:59:40Z', confirmableAt: '2026-11-22T01:00:15Z' },
-    { planId: bp(5), state: 'permitted', label: '段に足す（送信中）', permittedAt: '2026-11-22T00:59:50Z', confirmableAt: null },
+    { planId: bp(3), state: 'unknown', label: '段に足す（済）', permittedAt: '2026-11-22T00:00:00Z', confirmableAt: '2026-11-22T00:00:35Z', canConfirm: true },
+    { planId: bp(4), state: 'unknown', label: '段に足す（まだ）', permittedAt: '2026-11-22T00:59:40Z', confirmableAt: '2026-11-22T01:00:15Z', canConfirm: false },
+    { planId: bp(5), state: 'permitted', label: '段に足す（送信中）', permittedAt: '2026-11-22T00:59:50Z', confirmableAt: null, canConfirm: false },
   ],
   ...over,
 })
 
 test('a browser plan waiting for approval and a run due for its confirm wait for the member; the rest is 作業中', () => {
-  // NOW = 01:00:00Z: bp(3)'s confirm opened at 00:00:35, bp(4)'s opens at 01:00:15.
+  // bp(3): the server says its confirm can be pressed; bp(4): not yet.
   const v = inboxView(state([turn('approval-a', 'approval', 'pending'), turn('task-a', 'task', 'todo')], [notice('job_failed', '', '2026-11-22T00:00:00Z')]), NOW, [], plans())
   assert.deepEqual(v.waiting.map(i => i.key).slice(1), [`browser:${bp(3)}`, `browser:${bp(1)}`, 'record:approval-a', 'record:task-a'], 'after a stop: the unknown result, then the approvals (newest first)')
   const draft = v.waiting.find(i => i.key === `browser:${bp(1)}`)!
@@ -313,9 +313,12 @@ test('a browser plan waiting for approval and a run due for its confirm wait for
   assert.deepEqual([unsure.badge, unsure.actionLabel], [{ tone: 'needsAction', word: '届いたか分かりません' }, '確かめる…'])
   assert.deepEqual(v.working.map(i => i.key).sort(), [`browser:${bp(2)}`, `browser:${bp(4)}`, `browser:${bp(5)}`].sort())
   assert.equal(v.counts.waiting, 5)
-  // Sixteen seconds later bp(4)'s confirm has opened: the same answer puts it in あなた待ち.
-  const later = inboxView(state([], []), new Date(NOW.getTime() + 16_000), [], plans())
-  assert.ok(later.waiting.some(i => i.key === `browser:${bp(4)}`))
+  // The server's word decides, not this PC's clock: an hour on, bp(4) is still 作業中 until a read says it can be pressed.
+  const later = inboxView(state([], []), new Date(NOW.getTime() + 3_600_000), [], plans())
+  assert.ok(later.working.some(i => i.key === `browser:${bp(4)}`))
+  const told = plans()
+  told.unsure[1] = { ...told.unsure[1], canConfirm: true }
+  assert.ok(inboxView(state([], []), NOW, [], told).waiting.some(i => i.key === `browser:${bp(4)}`))
 })
 
 test('a browser plan row only opens its card: never an approval or a run', () => {
@@ -326,10 +329,8 @@ test('a browser plan row only opens its card: never an approval or a run', () =>
   }
 })
 
-test('without the plans (switched off) or once settled (no longer listed), there is no browser row', () => {
-  assert.equal(inboxView(state([], []), NOW).counts.all, 0)
-  assert.equal(inboxView(state([], []), NOW, [], plans({ plans: [], unsure: [] })).counts.all, 0)
-  // A plan claimed for its run is one row, its run's (were a late answer still to list it as open).
+test('a plan listed both as open and as a run is one row, its run\'s', () => {
+  // A plan claimed for its run has left the open list; were a late answer still to list it, the run decides.
   const both = inboxView(state([], []), NOW, [], plans({ plans: [{ planId: bp(3), state: 'approved', label: 'x', site: 'y', createdAt: '2026-11-22T00:00:00Z' }] }))
   assert.equal([...both.waiting, ...both.working].filter(i => i.key === `browser:${bp(3)}`).length, 1)
   assert.equal(both.waiting.find(i => i.key === `browser:${bp(3)}`)?.actionLabel, '確かめる…')

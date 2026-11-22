@@ -420,7 +420,7 @@ already says concerns the member, by what it needs from them — no tabs by sour
 - **「ブラウザ操作」 plans** (`agent-browser.md` "The inbox's rows"; a second source besides `NoticesState`, the
   member's own through `browserPlans:list`, **only while the build's switch is on** — off, AppShell hands no
   list: no row, nothing read): a draft waits with the approvals (amber 「承認を待っています」 ［承認する…］), a run
-  nobody knows the result of waits right after the stops once its confirm can be pressed (amber
+  nobody knows the result of waits right after the stops once the server says its confirm can be pressed (amber
   「届いたか分かりません」 ［確かめる…］), the rest is 作業中; each opens the plan's own card (`BrowserPlanCard`,
   composed by AppShell) in `InboxCardDialog`, never acts. Key `browser:<planId>`; no notice, so nothing to mark
   seen; a settled plan is in no list and gone. Rows count in あなた待ち (and the title bar's number) and are
@@ -468,7 +468,7 @@ already says concerns the member, by what it needs from them — no tabs by sour
 - Tests: `src/features/inbox/model.test.ts` (order, one row per record, stops leave once read, the 14-day
   fold, the bulk only for できた, あなた待ち never capped, no approving action), `tests/ui/inbox.spec.ts`
   (`tests/inbox-ui.html`: order and chips, ［承認する…］ opens the real card and calls nothing, opening
-  marks exactly its notices, a request approved elsewhere leaves, the fold and the bulk; `?plans=1|off`: a plan's rows open the real plan card and nothing runs, a plan approved elsewhere leaves on the next read, switched off no row and no read),
+  marks exactly its notices, a request approved elsewhere leaves, the fold and the bulk; `?plans=1|off`: a plan's rows open the real plan card and nothing runs, a plan approved elsewhere leaves on the next read, ［任せる］ on a card elsewhere moves the row at once, a read every minute while a plan is listed and a few minutes on through a run claimed elsewhere, then none, switched off no row and no read),
   `skill-layout-state.spec.ts` (⌘J, the wide tab, the real inbox in the screen — as shipped it never reads the plans), `model.test.ts` (the plans' order and states) — mutation-checked.
 
 ## Tests

@@ -89,6 +89,7 @@ import { PreparedMailCard } from '../features/chat/components/PreparedMailCard'
 import { ApprovalCard } from '../features/chat/components/ApprovalCard'
 import { BrowserPlanCard } from '../features/browser-plans/components/BrowserPlanCard'
 import { listBrowserPlans } from '../features/browser-plans/api'
+import { planStatesVersion, subscribePlanStates } from '../features/browser-plans/planStore'
 import { BROWSER_AI_BUILD_SWITCH } from '../../shared/browser-ai'
 import { FileLinkRow, RecordRow } from '../features/records/components/RecordRows'
 import type { RecordViewSummary } from '../../shared/record-views'
@@ -129,6 +130,9 @@ interface AppShellProps {
   /** What the bottom panel shows (the inbox, I1, hands it in); without it there is no panel, button or ⌘J. */
   bottomPanel?: BottomPanelContent
 }
+
+// A plan's state moving on any card (the chat's ［任せる］) makes the inbox read its plans again.
+const PLAN_STATES = { subscribe: subscribePlanStates, version: planStatesVersion }
 
 export function AppShell({ bottomPanel }: AppShellProps = {}) {
   const { t } = useTranslation()
@@ -521,7 +525,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
     renderApprovalCard: id => approvalCard(id, ''),
     renderMailDraft: id => currentCompany ? <PreparedMailCard key={id} companyId={currentCompany.id} messageId={id} /> : null,
     // 「ブラウザ操作」's plans only while the build's switch is on: off, the inbox has no way to read them at all.
-    browserPlans: BROWSER_AI_BUILD_SWITCH && currentCompany ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard key={id} companyId={currentCompany.id} planId={id} /> } : undefined,
+    browserPlans: BROWSER_AI_BUILD_SWITCH && currentCompany ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard key={id} companyId={currentCompany.id} planId={id} />, planStates: PLAN_STATES } : undefined,
   })
   const panel: BottomPanelContent | undefined = bottomPanel ?? inbox
   const hasBottom = panel !== undefined
