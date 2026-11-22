@@ -39,6 +39,8 @@ const at = (daysAgo: number, hour = 9) => {
   d.setHours(hour, 0, 0, 0)
   return d.toISOString()
 }
+/** A moment already passed whatever the hour the tests run at (`at(0, 8)` is still ahead before 08:00). */
+const justPast = () => new Date(Date.now() - 60_000).toISOString()
 const note = (id: string, kind: NotificationItem['kind'], recordId: string, recordType: string, recordTitle: string, text: string, createdAt: string, read = false): NotificationItem =>
   ({ id, kind, recordId, recordType, recordTitle, version: 4, text, createdAt, read })
 
@@ -82,7 +84,7 @@ const DRAFT = `bp_${'1a'.repeat(16)}`
 const UNSURE = `bp_${'2b'.repeat(16)}`
 let browserInbox: BrowserInboxPlans = {
   plans: [{ planId: DRAFT, state: 'draft', label: 'リマインダの段にテンプレートを足す', site: 'Lステップ', createdAt: at(0, 9) }],
-  unsure: [{ planId: UNSURE, state: 'unknown', label: 'リマインダの段にテンプレートを足す', permittedAt: at(0, 8), confirmableAt: at(0, 8), canConfirm: true }],
+  unsure: [{ planId: UNSURE, state: 'unknown', label: 'リマインダの段にテンプレートを足す', permittedAt: at(0, 8), confirmableAt: justPast(), canConfirm: true }],
 }
 let draftRan = false
 const planView = (id: string): BrowserPlanView => ({
@@ -90,7 +92,7 @@ const planView = (id: string): BrowserPlanView => ({
   operation: 'reminder_step_add_template', label: 'リマインダの段にテンプレートを足す', sharedNote: null, delivers: 'scheduled', account: '5550001',
   target: { reminder: '7001001', step: '7002001' }, change: { template: '7003002' }, facts: {}, explanation: null,
   createdAt: at(0, 9), expiresAt: new Date(Date.now() + 3_000_000).toISOString(), approvedAt: null, contentHash: `sha256:${'7a'.repeat(32)}`,
-  execution: id === DRAFT && !draftRan ? null : { id: `bx_${'3c'.repeat(16)}`, state: 'unknown', claimedAt: at(0, 8), permittedAt: at(0, 8), settledAt: null, confirmableAt: at(0, 8), voidReason: null, confirmedBy: null },
+  execution: id === DRAFT && !draftRan ? null : { id: `bx_${'3c'.repeat(16)}`, state: 'unknown', claimedAt: at(0, 8), permittedAt: at(0, 8), settledAt: null, confirmableAt: justPast(), voidReason: null, confirmedBy: null },
 })
 
 const PLAN_STATES = { subscribe: subscribePlanStates, version: planStatesVersion }
@@ -107,7 +109,7 @@ function Preview() {
       setActed('run')
       // The run's answer was lost: the draft became a run nobody knows the result of (the server's lists move with it).
       draftRan = true
-      browserInbox = { plans: [], unsure: [...browserInbox.unsure, { planId: DRAFT, state: 'unknown', label: 'リマインダの段にテンプレートを足す', permittedAt: at(0, 9), confirmableAt: at(0, 9), canConfirm: true }] }
+      browserInbox = { plans: [], unsure: [...browserInbox.unsure, { planId: DRAFT, state: 'unknown', label: 'リマインダの段にテンプレートを足す', permittedAt: at(0, 9), confirmableAt: justPast(), canConfirm: true }] }
       return { ok: true, result: { outcome: 'unknown', reason: 'no-answer' } }
     },
     cancelBrowserPlan: async () => { setActed('cancel'); return { ok: false, offline: true, message: '（見本）' } },
@@ -170,7 +172,7 @@ Object.assign(window, {
     /** The draft claimed elsewhere ended without an answer: the next read lists it as a confirmable unknown run. */
     claimedRunUnknown() {
       draftRan = true
-      browserInbox = { plans: [], unsure: [{ planId: DRAFT, state: 'unknown', label: 'リマインダの段にテンプレートを足す', permittedAt: at(0, 9), confirmableAt: at(0, 9), canConfirm: true }] }
+      browserInbox = { plans: [], unsure: [{ planId: DRAFT, state: 'unknown', label: 'リマインダの段にテンプレートを足す', permittedAt: at(0, 9), confirmableAt: justPast(), canConfirm: true }] }
     },
   },
 })
