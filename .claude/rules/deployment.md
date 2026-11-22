@@ -347,20 +347,22 @@ are additive and travel in a company archive like every `company_id` table; the 
 ## CI
 
 - `.github/workflows/ci.yml`: job `changes` runs `.github/scripts/changed-areas.sh`, which emits
-  `sync`, `client`, `clientmac`, `ui`, `perf`, `universal`, `server`, `admin` = true/false for
-  pull requests (push to main: the Linux areas only — `client`, `ui`, `server`, `admin` — since its
+  `sync`, `client`, `clientmac`, `ui`, `perf`, `universal`, `server`, `admin`, `model` = true/false for
+  pull requests (push to main: the Linux areas only — `client`, `ui`, `server`, `admin`, `model` — since its
   PR ran the macOS ones; nightly at 18:17 UTC and manual runs: everything). A path in `COMMON`
   (manifests, lockfile, `patches/`, the workflow, `.github/actions/`, the script itself) runs
   every job. A job skipped by its `if` reports success, so required checks pass for PRs that do
   not touch them. `check-areas.mjs` (step in "Lint (changed files)") follows each area's test
-  imports with esbuild and fails, naming the files, when a list misses one: extend the list.
+  imports with esbuild and fails, naming the files, when a list misses one: extend the list
+  (for `model`, the code files the browser plan model cites).
 - macOS runners are scarce (all PRs share a few), so only what needs a Mac runs on one. Jobs:
   Typecheck (all packages, ubuntu), Lint (changed files, `lint-changed.sh`, + `check-areas.mjs`),
   Client tests 1/2 (Linux) + 2/2 (macOS) + the aggregate required "Client tests (macOS)"
   (ubuntu; `client-tests.mjs`, `testing.md`), Renderer UI tests (Linux), Renderer bundle size
   (Linux), Sync harness 1–4/4 (macOS) + the aggregate "Sync harness (macOS)", Performance
   baselines (macOS), Universal bundled git (macOS), Server tests (ubuntu, vitest), Admin tests
-  (ubuntu, vitest + jsdom). Required: Typecheck, Lint (changed files), Server tests, Client tests
+  (ubuntu, vitest + jsdom), Model (browser plan) (ubuntu; `model/browser-plan/check`, its npm
+  checker installed with scripts off in that job only; `agent-browser.md` "The plan model"). Required: Typecheck, Lint (changed files), Server tests, Client tests
   (macOS), Sync harness (macOS) — keep those names (branch protection), or change protection with
   them.
 - Every macOS job's `runs-on` is `needs.changes.outputs.mac-runner`: the repository variable

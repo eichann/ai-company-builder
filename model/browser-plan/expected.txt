@@ -1,0 +1,31 @@
+# What model/browser-plan/check compares against on every run. It exists to catch the checker (or a
+# careless edit) passing something that is broken: a rule dropped, a state count that moved, a variant
+# that no longer fails. Change a line only together with the model, and say why in the PR.
+#
+# rule <a rule the real model must check> (must equal the INVARIANT line plus the "\* REACH" line of PlanLife.cfg)
+rule TypeOK
+rule R1_AtMostOneSendPerPlan
+rule R2_NoSendWithoutApprovalAndLivePermit
+rule R3_OneOpenExecutionPerTarget
+rule R4_FailedOnlyIfNotSent
+rule R5_NotDoneStaysTrue
+rule R6_NoDoubleApply
+rule R7_EverythingSettles
+# states <distinct states of the real model (PlanLife.cfg)>
+states 32882
+# broken <variant in broken/> <the rule it must break> (one guard removed; a guard added = a variant added)
+broken BrokenRetryAfterUnknown R1_AtMostOneSendPerPlan
+broken BrokenNoCheckBeforeSend R2_NoSendWithoutApprovalAndLivePermit
+broken BrokenPermitReplayed R2_NoSendWithoutApprovalAndLivePermit
+broken BrokenFailedOn4xx R4_FailedOnlyIfNotSent
+broken BrokenLockFreedOnUnknown R3_OneOpenExecutionPerTarget
+broken BrokenNoReread R6_NoDoubleApply
+broken BrokenNoServerTimeout R7_EverythingSettles
+# limit <variant in limits/> <the rule it breaks> (an accepted limit the rule file states; kept failing so
+# it neither disappears nor grows unnoticed)
+limit LimitFrozenAfterCheck R2_NoSendWithoutApprovalAndLivePermit
+# hole <variant in holes/> <the rule it breaks> (a hole in TODAY's code, to be fixed: the fixing PR moves
+# its proposal into PlanLife.tla and deletes both this line and the proposal line)
+hole HoleServerClockJumps R5_NotDoneStaysTrue
+# proposal <variant in proposals/> <distinct states> (a fix: must keep every rule, R7 included)
+proposal FixServerClockJumps 57618
