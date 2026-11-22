@@ -1,16 +1,27 @@
 // Names inside a backup folder (.backups/<ts>…/ or the private backups):
 // each folder has one `_metadata.json` of its own at its root, so a member's
-// own root `_metadata.json` is kept under another name beside it. Used by
-// every writer that copies the member's files into a backup folder and by
-// 復元, so a copy and its metadata never meet.
+// own `_metadata.json` at that level (file or folder) is kept under another
+// name beside it. Used by every writer that copies the member's files into a
+// backup folder and by 復元, so a copy and the metadata never meet.
 
 export const BACKUP_METADATA_FILE = '_metadata.json'
-export const MEMBER_METADATA_COPY = '_metadata (member).json'
+
+/** `_metadata.json`, `_metadata (member).json`, `_metadata (member) (member).json`, … */
+const METADATA_FAMILY = /^_metadata((?: \(member\))*)\.json$/
 
 /**
  * Where a member's file goes inside a backup folder. `prefix` is the folder
  * the copies sit under (a private folder's path), empty for the backup root.
+ * At the root, a first segment of the `_metadata…json` family gets one more
+ * ` (member)`: `_metadata.json` → `_metadata (member).json`, and a member's
+ * own `_metadata (member).json` → `_metadata (member) (member).json`, so no
+ * two of the member's paths share a copy and none meets the metadata.
  */
 export function backupCopyName(file: string, prefix = ''): string {
-  return !prefix && file === BACKUP_METADATA_FILE ? MEMBER_METADATA_COPY : file
+  if (prefix) return file
+  const slash = file.indexOf('/')
+  const first = slash === -1 ? file : file.slice(0, slash)
+  const m = METADATA_FAMILY.exec(first)
+  if (!m) return file
+  return `_metadata${m[1]} (member).json${slash === -1 ? '' : file.slice(slash)}`
 }

@@ -212,9 +212,11 @@ tracked. The sync message still counts the newly ignored files. Threshold:
   git held; `_same-name-<n>/` holds what shared a name with a file or folder in the copy; a member's
   own root `_metadata.json` is kept as `_metadata (member).json`). That last rule holds in every
   backup folder sync copies the member's files into: one function names the copy
-  (`backupCopyName`, `sync/backup-names.ts`), used by the conflict copies (`<ts>/` and the
-  earlier versions' `<ts>_<round>/`), the recovery copy and 復元 (asking for a backup's root
-  `_metadata.json` restores the member's copy, never the backup's own file). A member's
+  (`backupCopyName`, `sync/backup-names.ts`: a root segment `_metadata[ (member)…].json` gets one
+  more ` (member)`, so a member's own `_metadata (member).json` does not meet the copy either),
+  used by the conflict copies (`<ts>/` and the earlier versions' `<ts>_<round>/`), the recovery
+  copy and 復元 (it reads the renamed copy when there is one; asking for a backup's root
+  `_metadata.json` never restores the backup's own file). A member's
   `_metadata.json` was once overwritten by the conflict backup's metadata (code review 2026-11-22).
   Scenario: 「a member's own top-level _metadata.json survives a conflict backup…」
   (`scenarios.test.ts`); restore: `ipc-git.test.ts` 「backup:list / backup:restore…」.

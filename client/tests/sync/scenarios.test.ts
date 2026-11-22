@@ -149,22 +149,24 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
 
   // A conflict backup's own _metadata.json must not replace the member's file of that name.
   test('a member\'s own top-level _metadata.json survives a conflict backup (latest and earlier versions)', async t => {
-    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { '_metadata.json': '{"v":0}\n' } })
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { '_metadata.json': '{"v":0}\n', '_metadata (member).json': 'v0\n' } })
     const [a, b] = world.members
     a.offline().write('_metadata.json', '{"mine":1}\n')
     await a.sync('first')
-    a.write('_metadata.json', '{"mine":2}\n')
+    a.write('_metadata.json', '{"mine":2}\n').write('_metadata (member).json', 'mine too\n')
     await a.sync('second')
-    b.write('_metadata.json', '{"theirs":true}\n')
+    b.write('_metadata.json', '{"theirs":true}\n').write('_metadata (member).json', 'theirs too\n')
     ok(await b.sync(), 'b')
     a.online()
     const out = ok(await a.sync(), 'a')
-    assert.deepEqual(out.result.conflictFiles, ['_metadata.json'])
+    assert.deepEqual([...(out.result.conflictFiles ?? [])].sort(), ['_metadata (member).json', '_metadata.json'])
     const conflicts = a.backups().filter(b => b.metadata.reason === 'conflict')
     const read = (folder: string, f: string) => fs.readFileSync(path.join(a.dir, '.backups', folder, f), 'utf-8')
     const latest = conflicts.find(c => !c.metadata.note)!
     assert.equal(read(latest.folder, '_metadata (member).json'), '{"mine":2}\n')
-    assert.deepEqual(latest.metadata.conflictFiles, ['_metadata.json'], 'the backup keeps its own metadata')
+    // The member's own file of the copy's name gets a name of its own: neither replaces the other.
+    assert.equal(read(latest.folder, '_metadata (member) (member).json'), 'mine too\n')
+    assert.deepEqual([...(latest.metadata.conflictFiles as string[])].sort(), ['_metadata (member).json', '_metadata.json'], 'the backup keeps its own metadata')
     const earlier = conflicts.find(c => c.metadata.note)!
     assert.equal(read(earlier.folder, '_metadata (member).json'), '{"mine":1}\n')
     assert.equal(world.serverFile('_metadata.json')?.toString(), '{"theirs":true}\n')

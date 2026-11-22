@@ -107,11 +107,12 @@ export function registerBackupsIpc(ipc: IpcRegistrar, { paths, shell, writeRefus
       const backupsDir = isPrivate ? privateBackupsDir(safeRepoPath) : path.join(safeRepoPath, '.backups')
       const backupPath = path.join(backupsDir, isPrivate ? backupId.slice(PRIVATE_BACKUP_ID_PREFIX.length) : backupId)
       if (!backupPath.startsWith(backupsDir + path.sep)) return { success: false, error: 'Invalid backup path' }
-      // The backup's own _metadata.json is never the member's file: theirs was kept under another name.
+      // A member's `_metadata…json` was kept under another name (backupCopyName); the
+      // backup's own _metadata.json is never the member's file.
       const named = path.resolve(backupPath, filePath)
-      const srcPath = path.relative(backupPath, named) === BACKUP_METADATA_FILE
-        ? path.join(backupPath, backupCopyName(BACKUP_METADATA_FILE))
-        : named
+      const rel = path.relative(backupPath, named).split(path.sep).join('/')
+      const copy = path.resolve(backupPath, backupCopyName(rel))
+      const srcPath = copy !== named && (fs.existsSync(copy) || rel === BACKUP_METADATA_FILE) ? copy : named
       const destPath = path.resolve(safeRepoPath, filePath)
 
       // Prevent path traversal via ../
