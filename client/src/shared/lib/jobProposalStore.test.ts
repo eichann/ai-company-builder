@@ -30,7 +30,7 @@ test('a failed first read does not stick: shown while on screen, read again when
   off2()
 })
 
-test('a reopened card reads the server again (approved since); a read answered after the card went is not kept', async () => {
+test('a reopened card reads the server again (approved since); an answer after the card went is not kept', async () => {
   const h = harness([proposal('submitted'), proposal('approved')])
   const off = subscribeJobProposal(h.key, h.loader, () => {})
   await tick()
@@ -67,5 +67,39 @@ test('「取り下げる」 elsewhere: a card on screen reads it again (once mor
   await tick(); await tick()
   assert.equal(h.asked(), 2)
   assert.deepEqual(jobProposalEntry(h.key), proposal('withdrawn'))
+  off()
+})
+
+test('a read on its way never puts back what the member\'s act replaced (withdraw / submit / discard), and the server is read once more', async () => {
+  const cases: Array<[JobCandidateResult, JobCandidateResult]> = [
+    [proposal('submitted'), proposal('withdrawn')],
+    [{ success: true, candidate: { id: 'x' }, proposal: null } as unknown as JobCandidateResult, proposal('submitted')],
+    [proposal('submitted'), { success: true, candidate: null, proposal: null, discarded: true }],
+  ]
+  for (const [before, after] of cases) {
+    const key = jobProposalKey('co', `jc.race${++n}`)
+    const releases: Array<(r: JobCandidateResult) => void> = []
+    // Every read waits until the test answers it: the first answers the state before the act.
+    const off = subscribeJobProposal(key, () => new Promise<JobCandidateResult>(r => { releases.push(r) }), () => {})
+    putJobProposal(key, after)
+    releases[0](before)
+    await tick(); await tick()
+    assert.deepEqual(jobProposalEntry(key), after, 'the older read is dropped')
+    assert.equal(releases.length, 2, 'read once more after the act')
+    releases[1](after)
+    await tick()
+    assert.deepEqual(jobProposalEntry(key), after)
+    off()
+  }
+  // A read asked while one is on its way follows it (never two at once), and its answer is the one shown.
+  const key = jobProposalKey('co', `jc.race${++n}`)
+  const releases: Array<(r: JobCandidateResult) => void> = []
+  const off = subscribeJobProposal(key, () => new Promise<JobCandidateResult>(r => { releases.push(r) }), () => {})
+  reloadJobCandidate(key)
+  releases[0](proposal('submitted'))
+  await tick(); await tick()
+  releases[1](proposal('approved'))
+  await tick()
+  assert.deepEqual(jobProposalEntry(key), proposal('approved'))
   off()
 })

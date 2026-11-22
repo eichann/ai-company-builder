@@ -1576,7 +1576,10 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     `src/shared/lib/jobProposalStore.ts` (shared by the card and 「出した案」) keeps an answer only while a card shows it, drops it
     when the last card goes (a reopened conversation reads again: an approval / return since, a candidate withheld since),
     keeps a failed read only on screen with 「読み直す」 (`reloadJobCandidate`), and a 「取り下げる」 in 「出した案」 makes a card on
-    screen read again (`jobCandidateChanged`; a read on its way is followed by one more) (IPC `jobProposals:candidate` → `GET /me/job-candidates/:id`): only a
+    screen read again (`jobCandidateChanged`; a read on its way is followed by one more). **A read never overwrites the
+    member's newer act** (Codex re-review): each read and each act on the card (submit, withdraw, discard: `putJobProposal`)
+    takes the next number for its candidate, a read's answer counts only while its number is still the newest, and after an
+    act the server is read once more (IPC `jobProposals:candidate` → `GET /me/job-candidates/:id`): only a
     definition the one parser reads as schema 4 with a `sha256:<hex>` fingerprint and the asked id is shown
     (`readShownCandidate`) — anything else is not shown and cannot be submitted. It says (§8-6, `jobCandidateLines` over the
     shared job words): when it checks, with the zone by name (`jobTimeZoneText`: Asia/Tokyo 「日本時間」 and other common zones in
@@ -1623,11 +1626,13 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     chat server's flag for a consultation, a job run, a built-in 「AI の番」 step and a step consultation, and failing closed; the card's id from the server; a 404; no file
     but the session module names the submit route or registers its IPC, only the card calls it), `job-proposals-ipc.test.ts`,
     `job-proposals-card.test.ts` (the press's values, states, the §8-6 words, stored / restored in order),
-    `src/shared/lib/jobProposalStore.test.ts` (no failure sticks, re-read on reopen, 読み直す, a withdrawal elsewhere),
+    `src/shared/lib/jobProposalStore.test.ts` (no failure sticks, re-read on reopen, 読み直す, a withdrawal elsewhere, a read on its
+    way answered after a submit / withdrawal / discard),
     `job-screen-schemas.test.ts` (schema 4's words, header `1,2,3,4`), `jobs-ipc.test.ts`, `src/features/inbox/model.test.ts`,
     `src/features/jobs/model.test.ts`. Mutation check: 36 guards removed or inverted one at a time, then 12 after the reviews (the store's six, the settings keeping
     `fullAccess`, the flag's fail-closed lookup — its failure mark, the synchronous throw, asked without a guard —, the built-in
-    step), then 18 for the owner decisions (server: the view's and the submit's discarded checks — also inside the write —,
+    step), then 3 for the read / act order (the read's number checked, an act taking one, the read after an act), then 18
+    for the owner decisions (server: the view's and the submit's discarded checks — also inside the write —,
     discard refusing a submitted one and needing the creator's live row, its id check, the mark read and written, the zone,
     the route; app: the 410, a server before it only without a code, the ids, the zone kept as an id, its words and line, the
     discarded state, `company_restored`); each fails a test except the discard's own id check (an id of another shape finds
