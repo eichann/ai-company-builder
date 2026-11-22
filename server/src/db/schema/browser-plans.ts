@@ -1,3 +1,5 @@
+import type Database from 'better-sqlite3'
+
 /**
  * Plans of 「ブラウザ操作」 (PR 6a; agent-browser.md "Plans, executions, permits and locks"):
  * plans, their one execution each, the target locks, the reports, and the per-member × operation
@@ -111,3 +113,17 @@ export const browserPlanSchema = `
       PRIMARY KEY (company_id, user_id, connector_id, operation, declaration_hash)
     );
 `
+
+/**
+ * The clock fix (6b-2a; agent-browser.md "Plans, executions, permits and locks"): at the permit the
+ * server also keeps its monotonic reading (`permitted_mono_ms`, milliseconds since that process
+ * started) and that start's id (`permitted_boot`), so "35 s since the permit" is counted on both
+ * clocks and a forward step of the wall clock cannot open the confirm early. Added nullable: an older
+ * build inserts and updates without them, and a row without them (permitted by an older build, so
+ * before a restart) is counted from this process's start. Idempotent.
+ */
+export function migrateBrowserExecutionMonotonic(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(browser_executions)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('permitted_mono_ms')) conn.exec('ALTER TABLE browser_executions ADD COLUMN permitted_mono_ms INTEGER')
+  if (!cols.has('permitted_boot')) conn.exec('ALTER TABLE browser_executions ADD COLUMN permitted_boot TEXT')
+}

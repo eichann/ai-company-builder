@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'crypto'
-import type { Clock, IdGenerator } from '../ports/clock'
+import { performance } from 'perf_hooks'
+import type { Clock, IdGenerator, MonotonicClock } from '../ports/clock'
 import type { CompanyLock } from '../ports/transactions'
 import type { TokenDigest } from '../ports/key-broker'
 import { withCompanyLock } from '../lib/company-lock'
@@ -7,6 +8,12 @@ import { withCompanyLock } from '../lib/company-lock'
 export const systemClock: Clock = {
   now: () => new Date().toISOString(),
   nowMs: () => Date.now(),
+}
+
+/** `performance.now()` counts from this process's start and is monotonic; the id is this start's. */
+export const systemMonotonicClock: MonotonicClock = {
+  bootId: randomUUID(),
+  monoMs: () => performance.now(),
 }
 
 export const randomIds: IdGenerator = {

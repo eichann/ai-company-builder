@@ -285,7 +285,7 @@ GET  /api/config                                  setup state (no auth)
                               GET|PUT /agent-browser, PUT /agent-browser/overrides/:userId
                                                                              agent-browser.ts
                                                                 (「ブラウザ操作」: agent-browser.md)
-                              POST /browser-plans, GET /browser-plans/:planId,
+                              POST /browser-plans, GET /browser-plans-open, GET /browser-plans/:planId,
                               POST /browser-plans/:planId/approve | cancel | claim,
                               POST /browser-executions/:executionId/send-permit | confirm,
                               GET /browser-executions-waiting, GET /browser-type-grants,

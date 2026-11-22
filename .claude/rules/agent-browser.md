@@ -377,8 +377,9 @@ inventory and the agents / chat server / renderer). PR 6 adds the approval (the 
   `previewProblem` (two id-free reads to start from; `reminder`, `step`, `template` each taken out by a
   reader) and the real connector walks a fake Lステップ to a candidate (`browser-preview.test.ts`); the
   preview stays switched off. Not declared: `/api/landings/<id>` (not this type's). `delivers` stays
-  `none` and the facts stay version 1: what a step's time means for people already past it is not known
-  (§34), so no `scheduled` type and no facts version 2 yet.
+  `none` and the facts stay version 1 in 0.5.0: the core has `scheduled` and facts version 2 since 6b-2a
+  (the owner confirmed for this type that nobody already past the step receives it, design memo §37);
+  the connector reading them is `lstep@0.6.0` (6b-2b).
 
 Tests: `client/tests/browser-runner.test.ts` (the gate: not armed, another step / template, an extra /
 repeated / `_method` key, no body, a query, http / another host, an undeclared method, a second send,
@@ -408,7 +409,7 @@ kept on purpose: awaiting the write session's clear after the write (Chromium qu
 read, so no test can tell; it is also cleared before each write) and `runWindow`'s policy check (the
 controller already closes a window whose site leaves the policy).
 
-## Plans, executions, permits and locks (PR 6a: the server side; nothing in the app calls it yet)
+## Plans, executions, permits and locks (PR 6a, 6b-2a: the server side; nothing in the app calls it yet)
 
 The server half of the plan and its approval (internal design memo §27–§31; §30 + §31 are the
 contract). A plan is fixed on the server, approved by its member, claimed **once**, and every
@@ -418,8 +419,9 @@ send → report; 6c turns it on for the owner's PC).
 
 - **Pieces.** `shared/core/browser-plans.ts` (pure: the fact shape `BrowserFact` and its checks
   `browserFactShapeProblem` / `browserFactsProblem` / `browserFactsDeclarationProblem`, one schema per
-  facts version and checker — `BROWSER_FACT_SCHEMAS`, version 1 = `lstep.reminder_step` —,
-  `browserLockKey`, the states, `BROWSER_PLAN_TIMES`); the declaration's `lock` / `delivers` /
+  facts version and checker — `BROWSER_FACT_SCHEMAS`, versions 1 and 2 of `lstep.reminder_step` —,
+  `browserFactsChangedProblem` (the app's re-read against the approved facts, below), the report
+  reasons `BROWSER_REPORT_REASONS`, `browserLockKey`, the states, `BROWSER_PLAN_TIMES`); the declaration's `lock` / `delivers` /
   `facts` and `browserFirstVersionProblem` (`plugin-browser-declaration.ts`, `plugins.md` "Browser
   connectors"); `browserAiStopped` moved to `shared/core/browser-operation.ts` (the app re-exports
   it). Server: `routes/browser-plans.ts` → `services/browser-plans.ts` → the handle's `browserPlans`
@@ -453,16 +455,23 @@ send → report; 6c turns it on for the owner's PC).
   (the fixed content as canonical JSON + `content_hash`; trigger `browser_plans_fixed` refuses any change
   of the id, company, member, connector, version, operation, combination hashes, facts version,
   account, content, hash or times — only the state and its times move), `browser_executions` (one per plan: unique index; `secret_hash`,
-  `lock_key`, state, `claimed_at` / `permitted_at` / `settled_at`, `void_reason`, `confirmed_by`),
+  `lock_key`, state, `claimed_at` / `permitted_at` / `settled_at`, `void_reason`, `confirmed_by`, and
+  since 6b-2a `permitted_mono_ms` / `permitted_boot` — nullable, added by `migrateBrowserExecutionMonotonic`),
   `browser_execution_reports` (every report, append-only — no UPDATE, no DELETE while its company
   exists; deleting the company still cascades: result, a fixed reason word, `outcome` applied / same /
   recorded / conflict, the state before), `browser_target_locks` (company × key →
   execution), `browser_type_grants` (member × connector × operation × **declaration hash**: a
   changed declaration needs a new grant).
 - **Routes** (`/api/companies/:companyId`, `companyMember` — a person's session; no record-token
-  route exists): `POST /browser-plans` (candidate + facts → draft, 201), `GET /browser-plans/:planId`,
+  route exists): `POST /browser-plans` (candidate + facts → draft, 201), `GET /browser-plans-open` (6b-2a:
+  the member's own draft / approved plans for the inbox, newest first, at most 100 with `more`, each
+  `BrowserOpenPlan` — no facts or explanation —, plans past their hour closed on this touch,
+  `Cache-Control: no-store`; its own segment for the RegExpRouter), `GET /browser-plans/:planId`,
   `POST …/approve { contentHash }`, `POST …/cancel`, `POST …/claim` (answers `{ executionId, secret,
-  plan }` once, `Cache-Control: no-store`), `POST /browser-executions/:executionId/send-permit`
+  plan, fixed }` once, `Cache-Control: no-store`; `fixed` added in 6b-2a — `{ content, contentHash,
+  factsVersion }`, `content` the exact canonical JSON stored and hashed (`BrowserPlanContent`), so the
+  app checks `sha256:` of it equals `contentHash` equals the hash the person approved; optional in the
+  type: an older server sends none and the app must then refuse to run), `POST /browser-executions/:executionId/send-permit`
   (`X-ACB-Browser-Execution: <secret>`), `POST /browser-executions/:executionId/confirm { result:
   done | not_done }`, `GET /browser-executions-waiting?after=` (「確かめ待ち」, 100 open executions a page,
   oldest claim first, `{ items, next }`; its own segment for the RegExpRouter), `GET /browser-type-grants`, `PUT /browser-type-grants/:userId { connector, operation,
@@ -475,8 +484,9 @@ send → report; 6c turns it on for the owner's PC).
   (connector, version, declaration hash, checker hash, facts version) is in the catalog
   (`BROWSER_TYPE_NOT_APPROVED`) and not retired (`BROWSER_TYPE_RETIRED`), the app at least
   `minAppVersion` (`BROWSER_APP_TOO_OLD`), the operation exists, **the first version's rule**
-  (`browserFirstVersionProblem`: `delivers: none`, not irreversible, exactly one write, not delete,
-  a lock kind — `BROWSER_OPERATION_NOT_YET`), the member's browser setting (company mode with their
+  (`browserFirstVersionProblem`: `delivers: none`, or `delivers: scheduled` with `facts.schedule`
+  `required` and `complete` (6b-2a), not irreversible, exactly one write, not delete, a lock kind —
+  `BROWSER_OPERATION_NOT_YET`), the member's browser setting (company mode with their
   override, `browserOperationsAllowed`: site and level — `BROWSER_NOT_ALLOWED`), the AI stop
   (`browserAiStopped` of the member's stops: whole AI, `web`, `mcp-external` — `BROWSER_AI_STOPPED`),
   the member's grant given while they are a member this time (`BROWSER_TYPE_NOT_GRANTED`). Report,
@@ -505,7 +515,7 @@ send → report; 6c turns it on for the owner's PC).
   (`not-granted`), the combination retired or no longer approved (`retired` / `not-approved`), the app
   below `minAppVersion` (`app-too-old`): lifting the cause later never revives that secret;
   `permitted` → report `succeeded` / `failed` (**only** "the app stopped before sending", the first
-  version's one failure) / `unknown`, or `unknown` at permit + 5 s + 30 s without a report — a stop, a
+  version's one failure) / `unknown`, or `unknown` at permit + 5 s + 30 s (both clocks, below) without a report — a stop, a
   revoked grant or a time-out never make it `void` (it may have been sent); `unknown` → a report
   `succeeded` (the secret proves it; a late, sure success) or a person's confirm (`confirmed_done` /
   `confirmed_not_done`). `succeeded`, `failed`, `confirmed_*`, `void` are final: the lock goes (only
@@ -520,7 +530,7 @@ send → report; 6c turns it on for the owner's PC).
 - **Permit** (§29.3, §30.1): the member's own execution and its secret (else 404), then in one
   transaction: time-outs, state `claimed` (`BROWSER_PERMIT_USED` after a permit — asking again is
   never a new permit; `BROWSER_EXECUTION_CLOSED` when void), the plan's checks again (a refusal makes
-  the execution `void` and lets its target go, in the same transaction), this execution holds its lock, `claimed → permitted` with the server's wall-clock time. Answer `{ permittedAt,
+  the execution `void` and lets its target go, in the same transaction), this execution holds its lock, `claimed → permitted` with the server's wall-clock time, its monotonic reading and this process start's id (the clock fix). Answer `{ permittedAt,
   validMs: 5000 }`: the app sends only within 5 s (6b: counted from just before it asked, both
   clocks).
 - **Report**: `permitted` → the result; `unknown` + `succeeded` → `succeeded`, + `failed` → kept,
@@ -532,8 +542,31 @@ send → report; 6c turns it on for the owner's PC).
 - **Confirm** 「済んでいた / されていなかった」: the plan's member; an owner / admin only once the member
   left or 24 hours after the permit (`BROWSER_CONFIRM_NOT_YET`); others 404. Refused while the
   server's clock reads before the permit (`BROWSER_CLOCK_BACKWARDS`) and before permit + 5 s + 30 s
-  (`BROWSER_TOO_EARLY`); `claimed` / `void` → `BROWSER_NOT_PERMITTED`; once only
+  on both clocks (`BROWSER_TOO_EARLY`); `claimed` / `void` → `BROWSER_NOT_PERMITTED`; once only
   (`BROWSER_ALREADY_SETTLED`). After it a report never changes the result.
+- **The clock fix** (6b-2a, design 6b-2 §7-2; found by the model, `model/browser-plan/`): 6a counted the
+  35 s on the wall clock alone, so a forward step of it (NTP, a VM resumed) right after a permit let a
+  person confirm 「されていなかった」 while the app was still, correctly, sending — a confirm that a
+  later send made false (R5). Now "past the window" (`pastWindow`: `permitted → unknown`, confirm, the
+  waiting list's `canConfirm`) = wall elapsed ≥ 35 s **and** monotonic elapsed ≥ 35 s — since the
+  permit when `permitted_boot` is this process start's id (`MonotonicClock` port: `bootId`,
+  `monoMs()` = `performance.now()`, `adapters/system.ts`), else since this process started (a restart,
+  or a row an older build permitted with no reading, waits a whole window from the start). The
+  `confirmableAt` shown stays the wall-clock estimate; a press too early gets `BROWSER_TOO_EARLY`. A
+  forward step only ever voids a claimed execution or closes a plan early (nothing sent: the safe
+  side). The admins' 24 hours stay on the wall clock (they say who may confirm, not when).
+- **Facts version 2** (6b-2a, design 6b-2 §2-3; for `delivers: scheduled`): `lstep.reminder_step` v2 =
+  v1's `account`, `step_parent`, `state`, `names`, `shared_with` + `templates` (`{ [id]: { name, kind:
+  'text', body } }` — text templates only, decision 2; replaces `template_bodies`; the added one and
+  every one on the step) + `schedule` (`{ timing }` as the page shows it, ≤ 100, never parsed) +
+  `audience` (`{ count ≥ 0 }`; the declaration makes it optional: unknown makes a plan and is shown as
+  「読み取れませんでした」, never 0 — decision 1). `BROWSER_FACTS_VERSION` (what the approved list's script
+  writes) stays 1 until the connector reading v2 arrives (6b-2b). **The re-read**
+  (`browserFactsChangedProblem`, the app's, 6b-2c): the re-read must make a plan by itself, then every
+  declared fact the same status; known ones the same value (canonical JSON), except `audience` (may fall,
+  never rise — decision 8) and `shared_with.items` (a set); unknown → known is a change (decision 9).
+- **Report reasons** (`BROWSER_REPORT_REASONS`, 6b-2 §5-5): one list for the app and the server; the
+  server still records any word of its pattern (an app newer than the server may send another).
 - **Target lock** (§30.5): `browserLockKey` — the canonical JSON of `{ company, host, account, kind,
   fields: [[name, value]…] by name }` from the approved declaration's `lock.kind` and target fields
   and the plan's values (built by the server, never sent by the app; the type's version plays no
@@ -552,7 +585,12 @@ send → report; 6c turns it on for the owner's PC).
   one version exists); and, not said until 6b-2a fixes it, a server wall clock jumping forward
   right after a permit (an open hole, "The plan model").
 
-Tests: `server/tests/unit/browser-plans.test.ts` (every row of both state tables, the time-outs on
+Tests: `server/tests/unit/browser-plans.test.ts` (the clock fix: a forward step after the permit, the
+window opening once 35 s really passed, a restart, a restart with a step, a row with no reading, the wall
+clock must pass too, the columns added to an older database; the claim's `fixed`; the open plans: own,
+newest first, not claimed / closed / another's, closed on touch, 100 and `more`; a scheduled v2 type:
+count unknown or 0, no schedule, a non-text template, v1 facts, a schedule not required; every report
+reason kept; every row of both state tables, the time-outs on
 touch, claim / permit / confirm once, the service's own compare-and-set losing to a row changed
 between its read and its write (claim and permit), compare-and-set on stale state, a refused permit
 voids the execution for good (stop, setting, grant, retired, app version), leaving with 520 claimed
@@ -561,9 +599,11 @@ across members; reports: late, duplicate, contradicting, without a permit, after
 secret; confirm timing, the clock behind, admins after leaving / 24 h; leaving; unknown, retired,
 mismatching and too-old combinations; facts missing / unknown / incomplete / stale / contradicting;
 grants), `server/tests/unit/browser-plan-rules.test.ts` (the declaration's new keys and refusals,
-the first version's rule, each fact's shape, unknown / empty / 0, the lock key, the stop),
+the first version's rule (also `scheduled`), each fact's shape, unknown / empty / 0, facts version 2,
+the re-read comparison, the reasons, the lock key, the stop),
 `server/tests/integration/browser-plans.test.ts` (over HTTP: grants owner/admin only, the secret once
-and uncached and only in its header, the report without a session, the real member removal),
+and uncached and only in its header, the claim's `fixed` hashing to the stored hash, the open plans
+uncached and own only, the report without a session, the real member removal),
 `client/tests/browser-connectors-approved.test.ts`, permission matrix rows + `CROSS`,
 `company-scoped-sql.test.ts` (`HANDLE_TABLES`, the lookup), `jobs-schema.test.ts` (additive tables).
 Each guard mutation-checked.

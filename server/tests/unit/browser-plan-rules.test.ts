@@ -13,7 +13,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  BROWSER_FACTS_VERSION, browserFactsAccount, browserFactsDeclarationProblem, browserFactsProblem, browserFactsState, browserLockKey,
+  BROWSER_FACTS_VERSION, BROWSER_REPORT_REASONS, browserFactsAccount, browserFactsChangedProblem, browserFactsDeclarationProblem, browserFactsProblem,
+  browserFactsState, browserLockKey,
 } from '../../../shared/core/browser-plans'
 import { browserFirstVersionProblem, parsePluginManifest, type BrowserOperation } from '../../../shared/core/plugins'
 import { browserAiStopped } from '../../../shared/core/browser-operation'
@@ -104,6 +105,123 @@ describe('the first version\'s rule', () => {
     expect(browserFirstVersionProblem({ ...op(), writes: [...op().writes, ...op().writes] })).toContain('1つではない')
     expect(browserFirstVersionProblem({ ...op(), writes: [] })).toContain('1つではない')
     expect(browserFirstVersionProblem({ ...op(), lock: null })).toContain('lock')
+  })
+
+  it('runs a scheduled type only when its checker must read the schedule whole (6b-2 §2-3)', () => {
+    expect(errorsOf(edit('      delivers: none\n', '      delivers: scheduled\n'))).toBe('')
+    const scheduled = (schedule?: { required: boolean; complete: boolean }) => {
+      const facts = { ...op().facts }
+      if (schedule) facts.schedule = schedule
+      return { ...op(), delivers: 'scheduled' as const, facts }
+    }
+    expect(browserFirstVersionProblem(scheduled({ required: true, complete: true }))).toBeNull()
+    expect(browserFirstVersionProblem(scheduled())).toContain('届く時')
+    expect(browserFirstVersionProblem(scheduled({ required: false, complete: true }))).toContain('届く時')
+    expect(browserFirstVersionProblem(scheduled({ required: true, complete: false }))).toContain('届く時')
+    // The schedule fact alone does not make another delivery runnable.
+    expect(browserFirstVersionProblem({ ...scheduled({ required: true, complete: true }), delivers: 'immediate' })).toContain('すぐ人に届く')
+  })
+})
+
+const omit = <T extends Record<string, unknown>>(o: T, key: string): Partial<T> => Object.fromEntries(Object.entries(o).filter(([k]) => k !== key)) as Partial<T>
+
+// Facts version 2 (6b-2 §2-3): a `delivers: scheduled` type reading `templates`, `schedule` and, optionally, `audience`.
+const V2_DECL = DECL.replace('      delivers: none\n', '      delivers: scheduled\n')
+  .replace('        template_bodies: { required: true, complete: true }\n',
+    '        templates: { required: true, complete: true }\n        schedule: { required: true, complete: true }\n        audience: { required: false }\n')
+const v2op = () => op(V2_DECL)
+const v2Facts = (): Record<string, ReturnType<typeof fact> | { status: 'unknown'; readAt: string; source: string }> => {
+  return {
+    ...omit(goodFacts(), 'template_bodies'),
+    templates: fact({ 5: { name: '前日', kind: 'text', body: '本文A' }, 7: { name: '当日', kind: 'text', body: '本文B\n2行目' } }),
+    schedule: fact({ timing: '3日前 09:00' }),
+    audience: fact({ count: 12 }),
+  }
+}
+const v2problem = (facts: unknown) => browserFactsProblem(v2op(), 2, facts, values)
+
+describe('facts version 2 (lstep.reminder_step, delivers: scheduled)', () => {
+  it('the declaration is readable with version 2 and not with version 1; version 1 does not know the new facts', () => {
+    expect(browserFactsDeclarationProblem(v2op(), 2)).toBeNull()
+    expect(browserFactsDeclarationProblem(v2op(), 1)).toContain('templates')
+    expect(browserFactsDeclarationProblem(op(), 2)).toContain('template_bodies')
+    expect(browserFirstVersionProblem(v2op())).toBeNull()
+  })
+
+  it('a full set passes; the count is optional: unknown or absent still makes a plan, and 0 is a known answer', () => {
+    expect(v2problem(v2Facts())).toBeNull()
+    expect(v2problem({ ...v2Facts(), audience: { status: 'unknown', readAt: AT, source: '/line/episode/show/11' } })).toBeNull()
+    expect(v2problem(omit(v2Facts(), 'audience'))).toBeNull()
+    expect(v2problem({ ...v2Facts(), audience: fact({ count: 0 }) })).toBeNull()
+    for (const bad of [{ count: -1 }, { count: 1.5 }, { count: '3' }, { count: 3, more: 1 }, {}]) {
+      expect(v2problem({ ...v2Facts(), audience: fact(bad) }), JSON.stringify(bad)).toContain('audience')
+    }
+  })
+
+  it('the schedule is required, whole, and plain text of at most 100 characters', () => {
+    expect(v2problem({ ...v2Facts(), schedule: { status: 'unknown', readAt: AT, source: '/line/episode/show/11' } })).toContain('schedule')
+    expect(v2problem({ ...v2Facts(), schedule: fact({ timing: '3日前 09:00' }, false) })).toContain('全部は')
+    for (const bad of [{ timing: '' }, { timing: 'x'.repeat(101) }, { timing: '当日\n09:00' }, { timing: '当日‮' }, { timing: '当日', at: 1 }, { at: '当日' }]) {
+      expect(v2problem({ ...v2Facts(), schedule: fact(bad) }), JSON.stringify(bad)).toContain('schedule')
+    }
+  })
+
+  it('templates: text templates only (decision 2), each with its name and body; every one on the step and the added one', () => {
+    const t = (over: Record<string, unknown>) => fact({ 5: { name: '前日', kind: 'text', body: '本文A' }, 7: { name: '当日', kind: 'text', body: '本文B', ...over } })
+    for (const bad of [{ kind: 'image' }, { kind: 'carousel' }, { name: '' }, { name: 'a\nb' }, { body: '' }, { body: 'x'.repeat(5001) }, { extra: 1 }]) {
+      expect(v2problem({ ...v2Facts(), templates: t(bad) }), JSON.stringify(bad)).toContain('templates')
+    }
+    expect(v2problem({ ...v2Facts(), templates: fact({ 5: { name: '前日', kind: 'text' }, 7: { name: '当日', kind: 'text', body: '本文B' } }) })).toContain('templates')
+    expect(v2problem({ ...v2Facts(), templates: fact({ 5: { name: '前日', kind: 'text', body: '本文A' } }) })).toContain('そろっていません')
+    expect(v2problem({ ...v2Facts(), templates: fact({ 7: { name: '当日', kind: 'text', body: '本文B' } }) })).toContain('そろっていません')
+    expect(v2problem({ ...v2Facts(), step_parent: fact({ reminder: '12' }) })).toContain('所属')
+  })
+})
+
+describe('the re-read compared with the approved facts (6b-2 §5-2)', () => {
+  const changed = (reread: unknown, approved: unknown = v2Facts()) => browserFactsChangedProblem(v2op(), 2, approved, reread, values)
+  const unknown = { status: 'unknown', readAt: AT, source: '/line/episode/show/11' }
+
+  it('the same facts, read later, in another order, are the same', () => {
+    const later = Object.fromEntries(Object.entries(v2Facts()).reverse().map(([k, f]) => [k, { ...f, readAt: '2026-11-21T00:05:00.000Z' }]))
+    expect(changed(later)).toBeNull()
+    expect(changed({ ...v2Facts(), shared_with: fact({ count: 2, items: ['第2回', '第1回'] }) })).toBeNull()
+  })
+
+  it('any fact that differs is a change', () => {
+    for (const [name, value] of [
+      ['account', { id: 'acc2' }], ['state', { templates: [] }], ['names', { reminder: 'リマインダ', step: '2日目' }],
+      ['shared_with', { count: 3, items: ['第1回', '第2回'] }], ['shared_with', { count: 2, items: ['第1回', '第3回'] }], ['schedule', { timing: '当日 09:00' }],
+      ['templates', { 5: { name: '前日', kind: 'text', body: '本文A!' }, 7: { name: '当日', kind: 'text', body: '本文B\n2行目' } }],
+      ['templates', { 5: { name: '前日', kind: 'text', body: '本文A' }, 7: { name: '当日', kind: 'text', body: '本文B\n2行目' }, 8: { name: '別', kind: 'text', body: 'x' } }],
+    ] as const) {
+      expect(changed({ ...v2Facts(), [name]: fact(value) }), `${name} ${JSON.stringify(value)}`).toContain(name)
+    }
+  })
+
+  it('the count may fall, never rise; unknown and known are never the same (decisions 8, 9)', () => {
+    expect(changed({ ...v2Facts(), audience: fact({ count: 12 }) })).toBeNull()
+    expect(changed({ ...v2Facts(), audience: fact({ count: 3 }) })).toBeNull()
+    expect(changed({ ...v2Facts(), audience: fact({ count: 13 }) })).toContain('audience')
+    expect(changed({ ...v2Facts(), audience: unknown })).toContain('audience')
+    expect(changed({ ...v2Facts(), audience: fact({ count: 0 }) }, { ...v2Facts(), audience: unknown })).toContain('audience')
+    expect(changed({ ...v2Facts(), audience: unknown }, { ...v2Facts(), audience: unknown })).toBeNull()
+    const without = omit(v2Facts(), 'audience')
+    expect(changed(without, without)).toBeNull()
+    expect(changed({ ...v2Facts(), audience: unknown }, without)).toContain('audience')
+  })
+
+  it('a re-read that could not make a plan by itself is refused before any comparison', () => {
+    expect(changed({ ...v2Facts(), schedule: unknown })).toContain('schedule')
+    expect(changed({ ...v2Facts(), templates: fact({ 5: { name: '前日', kind: 'text', body: '本文A' }, 7: { name: '当日', kind: 'text', body: '本文B\n2行目' } }, false) })).toContain('全部は')
+    expect(changed(v2Facts(), null)).toContain('承認したとき')
+  })
+})
+
+describe('the report reasons (6b-2 §5-5)', () => {
+  it('are unique fixed words of the server\'s reason pattern', () => {
+    expect(new Set(BROWSER_REPORT_REASONS).size).toBe(BROWSER_REPORT_REASONS.length)
+    for (const r of BROWSER_REPORT_REASONS) expect(r).toMatch(/^[a-z][a-z0-9-]{0,39}$/)
   })
 })
 

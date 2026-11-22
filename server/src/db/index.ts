@@ -36,7 +36,7 @@ import { migrateRecordLedgerVia } from './schema/plugin-bridge'
 // lane C ▼
 import { pluginStepSchema } from './schema/plugin-steps'
 import { pluginRoleSchema } from './schema/plugin-roles'
-import { browserPlanSchema } from './schema/browser-plans'
+import { browserPlanSchema, migrateBrowserExecutionMonotonic } from './schema/browser-plans'
 // lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateCompanyFolderKind, migrateInvitationClaims } from './schema/company'
@@ -52,6 +52,7 @@ export { migrateMemberAbsenceHistory, migrateMemberWorkSwitches } from './schema
 export { migrateSkillUseColumns } from './schema/skill-uses'
 export { migrateSecondOpinionSetting } from './schema/agents'
 export { migrateShelfHistoryRequester } from './schema/skill-shelf'
+export { migrateBrowserExecutionMonotonic } from './schema/browser-plans'
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -170,6 +171,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateJobWatchGenerations(conn)
   // Absences are history: removed periods are marked, never deleted (records.md "Whose turn it was").
   migrateMemberAbsenceHistory(conn)
+  // 「ブラウザ操作」 permits counted on the monotonic clock too (agent-browser.md, the clock fix).
+  migrateBrowserExecutionMonotonic(conn)
   // Before the seeding below: it deletes stale manager rows per company.
   migrateRuleAndManagerCompanies(conn)
   // After it: the rebuild keeps company_id and recreates its triggers.

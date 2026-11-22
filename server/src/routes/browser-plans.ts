@@ -6,6 +6,7 @@
  *
  * Mounted at /api/companies/:companyId:
  *   POST /browser-plans                                   register a candidate + facts (draft)
+ *   GET  /browser-plans-open                              the member's own draft / approved plans, newest first
  *   GET  /browser-plans/:planId                           the member's own plan
  *   POST /browser-plans/:planId/approve                   { contentHash } the content the member saw
  *   POST /browser-plans/:planId/cancel                    「やめる」
@@ -33,6 +34,14 @@ const { browserPlans } = services
 browserPlansRoute.post('/browser-plans', companyMember, serviceBody, (c) => {
   const r = browserPlans.register(c.var.member, c.var.body, c.req.header(CLIENT_VERSION_HEADER))
   return r.ok ? c.json({ success: true, data: r.value }, 201) : refusal(c, r)
+})
+
+// Its own segment (not /browser-plans/open beside /browser-plans/:planId): keeps Hono's RegExpRouter (server.md).
+browserPlansRoute.get('/browser-plans-open', companyMember, (c) => {
+  const r = browserPlans.open(c.var.member)
+  if (!r.ok) return refusal(c, r)
+  c.header('Cache-Control', 'no-store')
+  return c.json({ success: true, data: r.value })
 })
 
 browserPlansRoute.get('/browser-plans/:planId', companyMember, (c) => {

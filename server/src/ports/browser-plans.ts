@@ -37,6 +37,9 @@ export interface BrowserExecutionRow {
   voidReason: string | null
   claimedAt: string
   permittedAt: string | null
+  /** The server's monotonic reading at the permit and that process start's id (the clock fix; null before a permit, or from an older build). */
+  permittedMonoMs: number | null
+  permittedBoot: string | null
   settledAt: string | null
   confirmedBy: string | null
 }
@@ -62,13 +65,17 @@ export interface BrowserTypeGrantRow {
 
 /** Fields a state change may set with it. */
 export interface BrowserPlanChange { approvedAt?: string; closedAt?: string; closeReason?: string }
-export interface BrowserExecutionChange { permittedAt?: string; settledAt?: string; voidReason?: string; confirmedBy?: string }
+export interface BrowserExecutionChange {
+  permittedAt?: string; permittedMonoMs?: number; permittedBoot?: string; settledAt?: string; voidReason?: string; confirmedBy?: string
+}
 
 export interface BrowserPlanRepository {
   insertPlan(row: BrowserPlanRow): void
   plan(planId: string): BrowserPlanRow | null
   /** draft / approved plans of a member (leaving the company closes them). */
   openPlansOf(userId: string): BrowserPlanRow[]
+  /** The member's draft / approved plans, newest first, at most `limit` (the open-plans list). */
+  newestOpenPlansOf(userId: string, limit: number): BrowserPlanRow[]
   /** Compare-and-set: only from `from`. True when the row changed. */
   setPlanState(planId: string, from: BrowserPlanState, to: BrowserPlanState, change: BrowserPlanChange): boolean
 
