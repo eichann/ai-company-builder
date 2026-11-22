@@ -95,6 +95,7 @@ import {
   privateRootRuleError,
 } from '../services/permission-editor'
 import { refusal } from './respond'
+import type { NotPromise } from '../ports/transactions'
 import { companyMember, serviceBody } from './guards'
 
 export { OUTDATED_CLIENTS_ERROR, PRIVATE_SUBJECT_ERROR, READ_RESTRICTION_UNAVAILABLE }
@@ -130,7 +131,7 @@ function parseForce(c: Ctx, actor: Member, body: Record<string, unknown> | null)
 }
 
 /** A guarded write's 409 OUTDATED_CLIENTS as a Response, else its value. */
-function guarded<T>(c: Ctx, actor: Member, force: boolean, roots: string[], mutate: () => T): T | Response {
+function guarded<T>(c: Ctx, actor: Member, force: boolean, roots: string[], mutate: () => NotPromise<T>): T | Response {
   const outcome = editor.guardWrite(actor, force, roots, mutate)
   return outcome.ok ? outcome.value : refusal(c, outcome)
 }

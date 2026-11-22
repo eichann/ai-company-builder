@@ -199,6 +199,18 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
         stampJob(jobId, before)
       })()
     },
+    resume(jobId, from, to, at) {
+      return conn.transaction(() => {
+        const before = jobUpdatedAt(jobId)
+        const moved = conn.prepare(`
+          UPDATE ai_jobs SET state = ?, paused_reason = NULL, paused_by = NULL, paused_at = NULL, updated_at = ?
+          WHERE company_id = ? AND id = ? AND state = 'paused'
+            AND paused_reason IS ? AND paused_by IS ? AND paused_at IS ? AND approved_version IS ?
+        `).run(to, at, companyId, jobId, from.pausedReason, from.pausedBy, from.pausedAt, from.approvedVersion).changes === 1
+        if (moved) stampJob(jobId, before)
+        return moved
+      })()
+    },
     stopped() {
       const r = conn.prepare(`SELECT stopped FROM ai_job_settings WHERE company_id = ?`).get(companyId) as { stopped: number } | undefined
       return r?.stopped === 1

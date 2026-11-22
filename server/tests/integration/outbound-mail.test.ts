@@ -29,6 +29,7 @@ import { GOOGLE_SEED } from '../fakes/google/seed'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
 import { withRecordText } from '../helpers/record-text'
+import { holdPoints } from '../helpers/hold'
 import { awaitReplyDefault } from '../../../shared/core/mail'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
@@ -1134,22 +1135,10 @@ describe('one send per source: what was already sent is shown, a reason lets it 
 
 describe('SEND-1: the draft as confirmed, or nothing — changes while the send awaits its checks', () => {
   // The service with its awaits (the sender's account, the recipients' source, Gmail) held open on
-  // purpose, on the same database as the routes: each race happens in a fixed order.
-  type Deferred = { promise: Promise<void>; open: () => void }
-  const deferred = (): Deferred => { let open!: () => void; const promise = new Promise<void>(r => { open = r }); return { promise, open } }
-  type Kind = 'sender' | 'contacts' | 'send' | 'replier'
-  /** The next calls of each kind, in order: each signals its arrival and waits for its release. */
-  const queue: Record<Kind, Array<{ arrived: Deferred; gate: Deferred }>> = { sender: [], contacts: [], send: [], replier: [] }
+  // purpose, on the same database as the routes: each race happens in a fixed order. Every point stops
+  // before its port answers (tests/helpers/hold.ts `stopBefore` / `pass`).
+  const { held, pass, stopBefore } = holdPoints<'sender' | 'contacts' | 'send' | 'replier'>()
   const posted: string[] = []
-  const held = (kind: Kind) => {
-    const slot = { arrived: deferred(), gate: deferred() }
-    queue[kind].push(slot)
-    return { arrived: slot.arrived.promise, release: slot.gate.open }
-  }
-  const pass = async (kind: Kind) => {
-    const slot = queue[kind].shift()
-    if (slot) { slot.arrived.open(); await slot.gate.promise }
-  }
   const sent: string[] = []
   let service: Json
   const sato = { companyId: CO, userId: 'm-sato', role: 'member' }
@@ -1174,9 +1163,9 @@ describe('SEND-1: the draft as confirmed, or nothing — changes while the send 
       digest: text => createHash('sha256').update(text).digest('hex'),
       members: () => [{ userId: 'm-sato', email: EMAILS['m-sato'], name: NAMES['m-sato'] }],
       meetingAttendees: async () => null,
-      bundleContacts: async () => { await pass('contacts'); return { ok: true, contacts: CONTACTS } },
+      bundleContacts: stopBefore('contacts', async () => ({ ok: true, contacts: CONTACTS })),
       mail: {
-        senderAccount: async () => { await pass('sender'); return { ok: true, account: EMAILS['m-sato'] } },
+        senderAccount: stopBefore('sender', async () => ({ ok: true, account: EMAILS['m-sato'] })),
         send: async (_co: string, _user: string, raw: string) => {
           await pass('send')
           sent.push(Buffer.from(raw, 'base64url').toString('utf8'))
@@ -1184,7 +1173,7 @@ describe('SEND-1: the draft as confirmed, or nothing — changes while the send 
         },
       },
       chat: {
-        replierAccount: async () => { await pass('replier'); return { ok: true, account: EMAILS['m-sato'] } },
+        replierAccount: stopBefore('replier', async () => ({ ok: true, account: EMAILS['m-sato'] })),
         reply: async (_co: string, _user: string, _ref: unknown, text: string) => { posted.push(text); return { ok: true, ts: `${1700000000 + posted.length}.000100` } },
       },
       companyIds: () => [CO],

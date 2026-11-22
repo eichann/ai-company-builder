@@ -52,7 +52,7 @@ import type { MailReader, MailSendResult, MailSender, MailThread } from '../port
 import type { CompanyDataSource } from '../ports/company-data'
 import type { OutboundMailRow, OutboundRecipientRow } from '../ports/outbound-mail'
 import type { RecordRow } from '../ports/records'
-import type { Transactions } from '../ports/transactions'
+import type { NotPromise, Transactions } from '../ports/transactions'
 import type { FixedPayloadService } from './fixed-payloads'
 import { buildMailMessage, gmailRaw } from '../lib/mail-message'
 import { logError } from '../lib/error-log'
@@ -217,7 +217,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
   const slots = deps.slots ?? createSourceSlots({ companyData })
 
   /** All or nothing: the fixed content, the record and the rows. */
-  function tryWrite<T>(fn: () => T): T | ServiceWriteFailed {
+  function tryWrite<T>(fn: () => NotPromise<T>): T | ServiceWriteFailed {
     try {
       return deps.transactions.run(fn)
     } catch (e) {

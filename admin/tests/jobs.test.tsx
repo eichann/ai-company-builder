@@ -791,6 +791,8 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
     expect(describeJobError(refused(400, { error: 'x', code: 'BAD_JOB_DEFINITION', problems: ['grant.creates.EVENT_NEEDS_TASK'] }))).toMatch(/やることを1つ作ります/)
     expect(describeJobError(refused(409, { error: '画面に出ていた内容と違います。読み直してから、もう一度ためしてください。', code: 'JOB_VERSION_FINGERPRINT' }))).toBe('画面に出ていた内容と違います。読み直してから、もう一度ためしてください。')
     expect(describeJobError(refused(409, { error: 'x', code: 'SOURCE_CHANGED' }))).toMatch(/きっかけのやることが変わったため/)
+    // A resume refused because the pause changed meanwhile (SERVERCORE-1): the server's sentence, not the general 409 words.
+    expect(describeJobError(refused(409, { error: '再開の確認をしている間に、この定期の仕事がほかの理由で止められたか、内容が変わりました。', code: 'JOB_PAUSE_CHANGED' }))).toMatch(/再開の確認をしている間に/)
     // A code it does not know: the general words, never the server's text.
     expect(describeJobError(refused(409, { error: 'Something internal', code: 'SOMETHING_ELSE' }))).toBe('ほかの変更と競合しました。ページを再読み込みしてからやり直してください。')
     // Whatever the status (independent review): a 400 / 422 / 429 with a code it does not know, or none, never shows the text.

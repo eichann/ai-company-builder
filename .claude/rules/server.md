@@ -53,7 +53,16 @@ src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts
   active-members build check; table in `adapters/sqlite/client-activity.ts`.
 - Repository ports are synchronous on purpose (better-sqlite3): a check followed by a write in
   one handler cannot interleave with another request. Keep check-then-write sequences inside one
-  synchronous stretch or a `transactions.run(...)`. A move to Postgres would turn these
+  synchronous stretch or a `transactions.run(...)`. **A transaction body is synchronous**
+  (`ports/transactions.ts`): `run` refuses an async body or one returning a Promise at compile time
+  (`NotPromise<T>`: `() => void` alone would not), and the adapter throws on a thenable that got
+  through `any` (rolled back; better-sqlite3 12 refuses one too). A wrapper that hands its callback to
+  `run` types it `() => NotPromise<T>` (`permission-editor.ts`, `outbound-mail.ts`). What a service
+  read **before an await** is stale in the transaction after it: read it again there and write with a
+  compare-and-set (`records.writeState(row, expectedVersion)`, `jobs.resume(jobId, from, …)`), except
+  a stop, which always wins unconditionally (`jobs.md` "Resume checks again"). Race tests hold a real
+  port with `tests/helpers/hold.ts` (`stopBefore` / `stopAfter`), never a hook in `src`. Test:
+  `tests/unit/transactions.test.ts` (the type, with the compiler; the run-time refusal). A move to Postgres would turn these
   signatures into Promises at this one seam.
 - Services return `Outcome<T>` (`services/outcome.ts`): a value or a refusal (`bad-request` /
   `forbidden` / `not-found` / `conflict` / `gone` / `unavailable`) carrying the exact API error
