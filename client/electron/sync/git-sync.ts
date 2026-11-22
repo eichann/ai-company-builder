@@ -763,11 +763,11 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           backupPrefix: opts.backupPrefix, now: deps.now(), log,
         })
       } catch (backupError) {
+        // git's own (English) words stay in the log; the member reads one sentence.
         log.error('Git sync: Could not back up files of excluded nested repositories:', backupError)
-        const msg = backupError instanceof Error ? backupError.message : String(backupError)
         return {
           success: false,
-          error: `共有していないフォルダのファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。\n${msg}`,
+          error: '共有していないフォルダのファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。もう一度同期しても直らないときは、管理者に連絡してください。',
         }
       }
     }
@@ -785,10 +785,9 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       }
     } catch (backupError) {
       log.error('Git sync: Could not back up large files kept on this computer:', backupError)
-      const msg = backupError instanceof Error ? backupError.message : String(backupError)
       return {
         success: false,
-        error: `このPCだけに置いている大きなファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。\n${msg}`,
+        error: 'このPCだけに置いている大きなファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。もう一度同期しても直らないときは、管理者に連絡してください。',
       }
     }
 

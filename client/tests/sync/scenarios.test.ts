@@ -374,6 +374,22 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     await settleAndCheck(world)
   })
 
+  test('the check before the pull fails: sync stops before the pull with one plain sentence (git\'s words only in the log), the work stays', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], gitignore: `${ESSENTIAL_GITIGNORE}\nscratch/\n` })
+    const [a] = world.members
+    a.write('scratch/notes.md', 'mine\n').write('memo.md', 'to share\n')
+    a.failNextRaw(args => args.includes('ls-tree') && args.includes('--literal-pathspecs'), 'fatal: unable to read tree 0123abcd')
+    const out = await a.sync()
+    assert.equal(out.result.success, false)
+    assert.equal(out.result.error, '共有していないフォルダのファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。もう一度同期しても直らないときは、管理者に連絡してください。')
+    assert.ok(logged(out, 'Could not back up files of excluded nested repositories'))
+    assert.equal(world.serverFile('memo.md'), null, 'nothing pushed before the check')
+    assert.equal(a.readText('scratch/notes.md'), 'mine\n')
+    ok(await a.sync(), 'a')
+    assert.equal(world.serverFile('memo.md')?.toString(), 'to share\n')
+    await settleAndCheck(world)
+  })
+
   test('a nested repository inside an ignored folder but holding shared files → still asked; cancelling changes nothing', async t => {
     const world = World.create(t, {
       members: [{ name: 'a' }, { name: 'b' }],
