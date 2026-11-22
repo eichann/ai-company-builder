@@ -277,6 +277,10 @@ const api: Partial<ElectronAPI> = {
       links: [{ label: '関係するファイル', path: '営業部/提案書/A社_提案.md' }, { label: '決めたこと', record: RECORD_DECISION }],
     } }
     : { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' },
+  // 「記録の一覧」 (features/records-table): the server's answer for やること, already what this member reads.
+  getRecordsTablePage: async (_companyId, query) => ({ success: true, available: true, kinds: [{ name: 'task', label: 'やること' }], kind: 'task',
+    columns: [{ field: 'assignee', label: '担当', kind: 'person', shown: true }], total: 1, offset: query.offset,
+    rows: [{ id: RECORD_TASK.id, title: RECORD_TASK.title, stateLabel: '進めている', finished: false, updatedAt: RECORD_TASK.updatedAt, cells: { assignee: { text: '田中 太郎', sort: '田中 太郎' } } }] }),
   // A task opens in the task card (features/tasks): the same data, with nothing for this member to press.
   getTaskCard: async (_companyId: string, recordId: string) => recordId === RECORD_TASK.id
     ? (cardReads++, await sleep(120), { success: true, card: {

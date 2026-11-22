@@ -5,14 +5,14 @@
 // new tab lands at the end of its run. Pure except the per company store on this Mac.
 import { nameKey } from '../../../../shared/core/paths'
 import { TAB_KIND_GROUPS, tabKindGroupName, tabKindGroupOf, type TabKindGroup } from '../../../shared/thing-words'
-import { recordIdOfTab, type RecordTabLook } from './editorTabs'
+import { recordIdOfTab, viewOfTab, type RecordTabLook } from './editorTabs'
 
 type Looks = Readonly<Record<string, RecordTabLook>>
 
 /** The kind group of a tab: a file's is `file`; a record's comes from its look (`other` until read). */
 export function tabGroupOf(key: string, looks: Looks): TabKindGroup {
   const id = recordIdOfTab(key)
-  return id ? tabKindGroupOf(looks[id]) : 'file'
+  return id ? tabKindGroupOf(looks[id]) : viewOfTab(key) ? tabKindGroupOf(undefined) : 'file'
 }
 
 /** A kind group's name for the tabs in it (bundles by the labels of the ones open: 「案件・プロジェクト」). */

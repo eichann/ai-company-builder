@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from 'react'
-import { CaretDown, CaretRight, Briefcase } from '@phosphor-icons/react'
+import { CaretDown, CaretRight, Briefcase, Table } from '@phosphor-icons/react'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import { meetingBundleWords, type TaskActInput, type TaskCreateInput, type TaskListData, type TaskListItem } from '../../../../shared/tasks'
 import { useInterval } from '../../../shared/hooks/useInterval'
@@ -47,10 +47,12 @@ interface Props {
   showCalendar?: boolean
   /** A company without the shared folder: a file dropped on a row is linked as the member's own (あなただけ). */
   localFiles?: boolean
+  /** ［表で見る］: 「記録の一覧」 in the middle (AppShell; absent = no button). */
+  onShowTable?: () => void
 }
 
 /** The task list tab (やること): the list; an item opens in a tab in the middle (records and files share the tabs). */
-export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult, askFolder = null, onCompleted, showCalendar = true, localFiles = false }: Props) {
+export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult, askFolder = null, onCompleted, showCalendar = true, localFiles = false, onShowTable }: Props) {
   const [choosing, setChoosing] = useState<TaskListItem | null>(null)
   const [mode, setMode] = useState<ListMode>('turn')
   const [tag, setTag] = useState<string | null>(null)
@@ -250,6 +252,12 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
               </button>
             ))}
           </span>
+          {onShowTable && (
+            <button type="button" onClick={onShowTable} title="やることや決めたことを表で見る（並べ替え・絞り込み）"
+              className="ml-auto inline-flex h-control-sm items-center gap-1 rounded-control border border-border-control px-control-sm-x text-small text-text-muted hover:bg-surface-sunken hover:text-text">
+              <Table size={13} aria-hidden />表で見る
+            </button>
+          )}
         </div>
         <QuickAdd companyId={companyId} now={now} tagsInUse={tags.map(t => t.tag)} me={list.data?.me} members={list.data?.members} bundleWord={deptKind?.name ?? bundleWord} bundleType={askFolder ? deptKind?.type : undefined} onAdd={add} />
         {tags.length > 0 && (

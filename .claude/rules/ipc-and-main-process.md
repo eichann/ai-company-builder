@@ -52,6 +52,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (recordViews:search / find / findHome / card / forFile / topics: ⌘K and 探す hits, the record card, a file's
   「つながっているもの」 and the やること / 案件 of the member's consultations, read with the session;
   `records.md` "The app's views"),
+  `records-table` (recordsTable:page: 「記録の一覧」, one page of one kind through `/records/query`;
+  `tasks-ui.md` "The records table (B4)"),
   `notifications` (notifications:watch / state / markRead / settings / setSetting and the event
   `notifications:changed`: the title bar's 「あなたの番」 and bell, `notifications.md`), `absences`
   (absences:get / add / remove: the member's own absences and delegate, with the session;

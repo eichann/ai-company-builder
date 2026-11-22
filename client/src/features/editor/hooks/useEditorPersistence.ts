@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { fileExists } from '../api'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
-import { looksOfOpenTabs, parseRecordLooks, recordIdOfTab, type RecordTabLook } from '../editorTabs'
+import { looksOfOpenTabs, parseRecordLooks, recordIdOfTab, viewOfTab, type RecordTabLook } from '../editorTabs'
 
 // Per company, in localStorage under `editor:<company id>`: the open tabs (files
 // and records, `editorTabs.ts`), the active one, the open records' titles and the left panel tab. The left tab lives in the same entry
@@ -114,8 +114,8 @@ export function useEditorPersistence(companyId: string | undefined, defaultLeftT
     let cancelled = false
     void (async () => {
       const checks = await Promise.all(
-        // A record tab stays: the record itself says so when it can no longer be read.
-        persisted.openFiles.map((p) => recordIdOfTab(p) ? Promise.resolve(true) : fileExists(p).catch(() => false))
+        // A record tab stays: the record itself says so when it can no longer be read. A screen tab does not.
+        persisted.openFiles.map((p) => recordIdOfTab(p) ? Promise.resolve(true) : viewOfTab(p) ? Promise.resolve(false) : fileExists(p).catch(() => false))
       )
       if (cancelled) return
       const allValid = checks.every(Boolean)

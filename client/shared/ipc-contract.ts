@@ -45,6 +45,7 @@ import type { ViewersQuery, ViewersResult } from './viewers'
 import type { InviteSet, MeetingArrivalsResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteChoicesResult, MeetingInviteResult, MeetingPressResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { FindHomeResult, FindResult, MakePrivatePlanResult, RecordCardResult, RecordListResult } from './record-views'
+import type { RecordsTablePage, RecordsTableQuery } from './records-table'
 import type { ConsultationTopicsResult } from './consultation-topics'
 import type { CalendarTodayOptions, CalendarTodayResult } from './calendar'
 import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskDriveChoice, TaskDriveLinkOptions, TaskDriveLinkResult, TaskListOptions, TaskListResult, TaskProposalsResult, TaskWriteResult, TypedFileTarget } from './tasks'
@@ -681,6 +682,8 @@ export interface IpcInvokeChannels {
   'recordViews:forFile': { args: [companyId: string, companyPath: string]; result: RecordListResult }
   /** The やること / 案件 of the member's AI consultations (topic record ids); unreadable → null. */
   'recordViews:topics': { args: [companyId: string, recordIds: string[]]; result: ConsultationTopicsResult }
+  /** 「記録の一覧」: one page of one kind (records-table.ts; the server answers only what the member reads). */
+  'recordsTable:page': { args: [companyId: string, query: RecordsTableQuery]; result: RecordsTablePage }
   // The chat's mail card (outbound-mail.md): the person's own actions, with the session in main.
   'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
@@ -1167,6 +1170,7 @@ export interface ElectronAPI {
   getRecordCard: Invoke<'recordViews:card'>
   getRecordsForFile: Invoke<'recordViews:forFile'>
   getConsultationTopics: Invoke<'recordViews:topics'>
+  getRecordsTablePage: Invoke<'recordsTable:page'>
   getOutboundMail: Invoke<'outboundMail:get'>
   getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
   updateOutboundMail: Invoke<'outboundMail:update'>

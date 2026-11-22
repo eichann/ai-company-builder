@@ -20,7 +20,8 @@ import { useDepartments } from '../shared/hooks/useDepartments'
 import { useWriteAccess } from '../shared/hooks/useWriteAccess'
 import { usePrivateFolderStore } from '../features/files/hooks/usePrivateFolders'
 import { isChatInputRecentlyActive } from '../shared/lib/chatInputActivity'
-import { recordIdOfTab, recordTabKey, tabDepartmentLabels, type RecordTabLook } from '../features/editor/editorTabs'
+import { recordIdOfTab, recordTabKey, tabDepartmentLabels, viewTabKey, type RecordTabLook } from '../features/editor/editorTabs'
+import { RECORDS_TABLE_TAB_LOOK, RECORDS_TABLE_VIEW, renderRecordsTable, startRecordsTable } from '../features/records-table/entry'
 import { COMPANY_TAB_ID } from '../shared/lib/departments'
 import { TitleBar } from './TitleBar'
 import { FileTreePanel, type FileTreeControls } from '../features/files/components/FileTreePanel'
@@ -365,6 +366,12 @@ export function AppShell() {
   useCommandHandler('file.open', ({ path }) => openTab(path))
   // A record (search, 「つながっているもの」, a notice) opens in a tab in the middle, next to the files.
   useCommandHandler('record.open', ({ recordId }) => openTab(recordTabKey(recordId)))
+  // 「記録の一覧」 (features/records-table): ［表で見る］ and ⌘K open it as a tab beside the files and records.
+  const showRecordsTable = (kind?: string) => {
+    if (!currentCompany) return
+    startRecordsTable(currentCompany.id, kind)
+    openTab(viewTabKey(RECORDS_TABLE_VIEW))
+  }
   // A task list row opens its item as the preview tab, like a single click in the file tree.
   const openListItem = useCallback((item: { id: string; title: string; type: string; typeLabel: string; state: string | null; implements?: string[] }) => {
     noteRecordLook(item.id, { title: item.title, type: item.type, typeLabel: item.typeLabel, state: item.state, ...(item.implements ? { implements: item.implements } : {}) })
@@ -561,6 +568,7 @@ export function AppShell() {
           askFolder={isCompanyWide ? null : (selectedDept?.folder ?? null)}
           showCalendar={features.meetings}
           meetingActions={meetings.taskListActions}
+          onShowTable={() => showRecordsTable('task')}
         />
         </div>
         </div>
@@ -725,6 +733,8 @@ export function AppShell() {
                   onPinFile={handlePinFile}
                   navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
                   renderRecord={recordCard}
+                  viewLooks={{ [RECORDS_TABLE_VIEW]: RECORDS_TABLE_TAB_LOOK }}
+                  renderView={name => name === RECORDS_TABLE_VIEW && currentCompany ? renderRecordsTable(currentCompany.id, id => openTab(recordTabKey(id))) : null}
                   gotoLine={gotoLine?.path === activeFilePath ? gotoLine.line : null}
                   aside={activeFilePath && !activeRecordId && rootPath && sharedFolder
                     ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />
@@ -797,6 +807,7 @@ export function AppShell() {
         onFileSearchSelect={handleFileSearchSelect}
         recentTabs={recentTabs}
         onOpenRecord={id => openTab(recordTabKey(id))}
+        onShowRecordsTable={() => showRecordsTable()}
         paletteSkills={paletteSkills}
         onOpenSkill={openSkillFromPalette}
         loadConsultations={loadPaletteConsultations}

@@ -2,6 +2,7 @@
 // tabs keeps every open file. A tab whose file lives outside the selected
 // department carries a short department label so the member can tell
 // 「台本.md」 of コンテンツG from one in another department.
+import type { ReactNode } from 'react'
 import { normalizePathSeparators } from '../../shared/lib/path'
 
 export interface TabDepartment { id: string; name: string; folder: string }
@@ -53,7 +54,20 @@ const RECORD_TAB_PREFIX = 'acb-record:'
 export const recordTabKey = (recordId: string): string => `${RECORD_TAB_PREFIX}${recordId}`
 export const recordIdOfTab = (key: string | null | undefined): string | null =>
   key && key.startsWith(RECORD_TAB_PREFIX) ? key.slice(RECORD_TAB_PREFIX.length) || null : null
-export const fileTabsOf = (keys: readonly string[]): string[] => keys.filter(k => recordIdOfTab(k) === null)
+
+// --- Screen tabs: a tab whose page the screen draws (「記録の一覧」), neither a file nor a record --------
+// Not kept across a restart nor in 「片づけたタブ」: the screen opens it again in one press.
+const VIEW_TAB_PREFIX = 'acb-view:'
+
+export const viewTabKey = (name: string): string => `${VIEW_TAB_PREFIX}${name}`
+export const viewOfTab = (key: string | null | undefined): string | null =>
+  key && key.startsWith(VIEW_TAB_PREFIX) ? key.slice(VIEW_TAB_PREFIX.length) || null : null
+
+/** What a screen tab shows in the tab bar (its page is the screen's `renderView`). */
+export interface ViewTabLook { title: string; icon?: ReactNode }
+
+/** The open tabs that are files (only they load text, save and keep scroll positions). */
+export const fileTabsOf = (keys: readonly string[]): string[] => keys.filter(k => recordIdOfTab(k) === null && viewOfTab(k) === null)
 
 /** What a record tab shows without reading the record again: its icon and title (saved with the tabs). */
 export interface RecordTabLook {
