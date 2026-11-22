@@ -5,7 +5,7 @@
 // who may see what: every row comes from an answer the server already filtered for this member.
 import { UNDOABLE_NOTIFICATION_KINDS, type NotificationItem, type NotificationKind } from '../../../../shared/types/notifications'
 import { STOP_LOOK, type StopMeaning } from '../../../../shared/design-tokens/stop-meaning'
-import type { NoticesState, TurnItem } from '../../../shared/notifications-app'
+import type { MeetingTurn, NoticesState, TurnItem } from '../../../shared/notifications-app'
 import { jobNoticeTarget } from '../../../shared/jobs'
 import { thingKindOf, thingName, type ThingKind } from '../../../shared/thing-words'
 
@@ -51,6 +51,11 @@ export interface InboxItem {
   action: InboxAction
   /** The main button's words (「承認する…」, 「確かめて送る…」, 「開く」). */
   actionLabel: string
+  /**
+   * A meeting the title bar used to carry (a department without the task list, `useMinutesSlots`): its
+   * own buttons (choose a まとまり, read it yourself, もう一度…) are the minutes feature's, found by this id.
+   */
+  meetingId?: string
   /** ［元に戻す］ of a done notice that offers it (UNDOABLE_NOTIFICATION_KINDS, `ai_changed`). */
   undo?: { noticeId: string; recordId: string; version: number; aiChange?: { pluginId: string; operationId: string } }
 }
@@ -148,6 +153,23 @@ function turnRow(item: TurnItem): InboxItem {
   return { ...base, rank: check ? RANK.check : RANK.other, line, badge: { tone: 'neutral', word: check ? '確かめる' : 'あなたの番' }, action: { kind: 'openRecord', recordId: item.id, title: item.title }, actionLabel: '開く' }
 }
 
+/**
+ * A meeting of a department without the task list (what the title bar's 「あなたの番」 and bell carried
+ * before I2): one waiting for the member is あなた待ち (a stopped reading first, by its meaning), one the
+ * AI is reading or will read is 作業中.
+ */
+function meetingRow(m: MeetingTurn): InboxItem {
+  const base = {
+    key: `record:${m.id}`, thing: 'meeting' as const, title: m.title, line: m.text, source: m.kind === 'bundle' ? '会議' : '議事録',
+    due: null, at: null, unreadNoticeIds: [], meetingId: m.id,
+    action: { kind: 'openRecord' as const, recordId: m.id, title: m.title }, actionLabel: '開く',
+  }
+  if (!m.needsPerson) return { ...base, state: 'working', rank: RANK.other, badge: { tone: 'ai', word: m.ai?.state === 'waiting' ? 'AI が読む予定' : 'AI が読んでいます' } }
+  const stop: StopMeaning | null = m.ai?.state === 'failed' ? 'failed' : m.ai?.state === 'not-allowed' ? 'needsAction' : null
+  if (stop) return { ...base, state: 'waiting', rank: RANK.stopped, badge: { tone: stop, word: STOP_LOOK[stop].word } }
+  return { ...base, state: 'waiting', rank: RANK.check, badge: { tone: 'neutral', word: m.kind === 'bundle' ? '選んでください' : m.ai ? 'あなたの番' : '議事録が届きました' } }
+}
+
 function noticeAction(n: NotificationItem): InboxAction {
   if (n.recordId === '') {
     const job = jobNoticeTarget(n.kind)
@@ -208,13 +230,21 @@ const sameLocalDay = (iso: string, now: Date) => {
 }
 
 /**
- * The inbox from what main read for the company on screen (`NoticesState`). One record is one row: an
- * unread notice about a record in あなた待ち becomes that row's line and new mark, not a row of its own.
+ * The inbox from what main read for the company on screen (`NoticesState`) and the meetings of a department
+ * without the task list. One record is one row: an unread notice about a record in あなた待ち becomes that
+ * row's line and new mark, not a row of its own.
  */
-export function inboxView(source: NoticesState, now: Date): InboxView {
+export function inboxView(source: NoticesState, now: Date, meetings: readonly MeetingTurn[] = []): InboxView {
   const turn = source.available ? source.myTurn : { total: 0, items: [] as TurnItem[] }
   const rows = new Map<string, InboxItem>()
   for (const item of turn.items) rows.set(item.id, turnRow(item))
+  // A meeting the AI reads is one row too (作業中): its unread notices are its news, not rows of their own.
+  // One already in the server's turn stays that row and keeps the meeting's own buttons.
+  for (const m of meetings) {
+    const listed = rows.get(m.id)
+    if (listed) listed.meetingId = m.id
+    else rows.set(m.id, meetingRow(m))
+  }
 
   const waiting: InboxItem[] = []
   const done: InboxItem[] = []
@@ -235,7 +265,7 @@ export function inboxView(source: NoticesState, now: Date): InboxView {
         if (row.unreadNoticeIds.length === 0) { row.line = n.text; row.at = n.createdAt }
         row.unreadNoticeIds.push(n.id)
         // A stop about a waiting record makes that row a stop (its look and its place first).
-        if (stop && row.rank !== RANK.stopped) { row.badge = stopBadge(stop); row.rank = RANK.stopped; row.line = n.text }
+        if (stop && row.rank !== RANK.stopped) { row.badge = stopBadge(stop); row.rank = RANK.stopped; row.line = n.text; row.state = 'waiting' }
       }
       continue
     }
@@ -250,7 +280,8 @@ export function inboxView(source: NoticesState, now: Date): InboxView {
     else if (new Date(n.createdAt).getTime() < keepFrom) oldIds.push(n.id)
     else done.push(row2)
   }
-  waiting.push(...rows.values())
+  const working = [...rows.values()].filter(r => r.state === 'working')
+  waiting.push(...[...rows.values()].filter(r => r.state === 'waiting'))
   waiting.sort(byNeed)
   done.sort(newestFirst)
   const room = Math.max(0, INBOX_MAX_ROWS - waiting.length)
@@ -259,11 +290,11 @@ export function inboxView(source: NoticesState, now: Date): InboxView {
   const waitingCount = waiting.length + waitingNotListed
   const doneCount = done.length + oldIds.length
   return {
-    waiting, working: [], done: shownDone, seenToday,
+    waiting, working, done: shownDone, seenToday,
     olderDone: { count: oldIds.length, noticeIds: oldIds },
     waitingNotListed, resting: turn.resting ?? 0, doneLeftOut: done.length - shownDone.length,
     doneNoticeIds: [...done.flatMap(i => i.unreadNoticeIds), ...oldIds],
-    counts: { all: waitingCount + doneCount, waiting: waitingCount, working: 0, done: doneCount },
+    counts: { all: waitingCount + working.length + doneCount, waiting: waitingCount, working: working.length, done: doneCount },
   }
 }
 
@@ -276,6 +307,34 @@ export function bulkSeenIds(view: InboxView, scope: 'older' | 'done'): string[] 
   if (scope === 'older') return [...view.olderDone.noticeIds]
   return [...view.doneNoticeIds]
 }
+
+/**
+ * What the title bar's ［受け箱］ dot compares (owner decision ①: the dot = something new since the inbox was
+ * last on screen): every waiting row and every unread notice, each by its own key.
+ */
+export function inboxNewsKeys(view: InboxView): string[] {
+  const keys = new Set<string>()
+  for (const i of [...view.waiting, ...view.working]) {
+    // By state too: a meeting the AI was reading that now waits for the member is new.
+    keys.add(`${i.key}#${i.state}`)
+    for (const id of i.unreadNoticeIds) keys.add(`notice:${id}`)
+  }
+  // Every できた・未確認 notice, also one the row limit left out or the 14-day line folded.
+  for (const id of view.doneNoticeIds) keys.add(`notice:${id}`)
+  return [...keys]
+}
+
+/**
+ * What counts as already seen before the inbox was ever on screen in this window: the waiting and working
+ * rows (the count says those), never an unread notice — so at the start the dot is the old bell's (something
+ * unread on the server, shared by the member's PCs).
+ */
+export function inboxNewsBaseline(view: InboxView): string[] {
+  return [...view.waiting, ...view.working].map(i => `${i.key}#${i.state}`)
+}
+
+/** The dot: a key that was not there when the inbox was last on screen. */
+export const hasInboxNews = (keys: readonly string[], seen: ReadonlySet<string>) => keys.some(k => !seen.has(k))
 
 /** 99 at most, then 「99+」. */
 export const countText = (n: number) => (n > 99 ? '99+' : String(n))

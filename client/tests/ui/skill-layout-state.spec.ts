@@ -7,7 +7,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { openPreview } from './helpers'
 
-type Layout = { calls: Array<{ name: string; args: unknown[] }>; editorWasEmpty(): boolean; switchCompany(id: string): Promise<void> }
+type Layout = { calls: Array<{ name: string; args: unknown[] }>; editorWasEmpty(): boolean; switchCompany(id: string): Promise<void>; macNotificationClicked(): void }
 const layout = (page: Page) => page.evaluateHandle(() => (window as unknown as { __acbLayout: Layout }).__acbLayout)
 const editorWasEmpty = async (page: Page) => (await layout(page)).evaluate(l => l.editorWasEmpty())
 const switchCompany = async (page: Page, id: string) => (await layout(page)).evaluate((l, to) => l.switchCompany(to), id)
@@ -646,6 +646,29 @@ test.describe('the bottom panel', () => {
     // Opening a done row marks it seen (the bell's same read state).
     await panel(page).locator('[data-inbox-row="notice:n-1"]').getByRole('button', { name: '開く' }).click()
     await expect.poll(async () => (await layout(page)).evaluate(l => l.calls.filter(c => c.name === 'markNotificationsRead').length)).toBe(1)
+  })
+
+  test('the title bar\'s ［受け箱］ (I2) opens and closes the same panel as ⌘J; ⌘K 「受け箱」 and the morning\'s Mac notification open it', async ({ page }) => {
+    await openPreview(page, 'skill-layout', { inbox: '1' })
+    const inboxButton = page.locator('[data-inbox-button]')
+    // One approval waits; the unread done notice is new. No 「あなたの番」 pill and no bell any more.
+    await expect(inboxButton).toHaveAccessibleName('受け箱（あなた待ち 1 件・新着あり）')
+    await expect(page.getByRole('button', { name: /^起きたこと/ })).toHaveCount(0)
+    await inboxButton.click()
+    await expect(panel(page)).toBeVisible()
+    await expect(inboxButton).toHaveAccessibleName('受け箱（あなた待ち 1 件）')
+    await inboxButton.click()
+    await expect(panel(page)).toBeHidden()
+
+    await page.keyboard.press('ControlOrMeta+k')
+    await page.keyboard.type('受け箱')
+    await page.getByRole('option', { name: /受け箱/ }).first().click()
+    await expect(panel(page)).toBeVisible()
+    await pressJ(page)
+    await expect(panel(page)).toBeHidden()
+
+    await (await layout(page)).evaluate(l => l.macNotificationClicked())
+    await expect(panel(page)).toBeVisible()
   })
 
   for (const theme of ['light', 'dark'] as const) {

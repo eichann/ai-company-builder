@@ -20,7 +20,7 @@ export function useNotices(companyId: string | undefined) {
   return state.companyId === companyId ? state.value : NO_NOTICES
 }
 
-/** The morning's 「今日のあなたの番」 Mac notification was clicked for this company: `open` shows the task list. */
+/** The morning's 「今日のあなたの番」 Mac notification was clicked for this company: `open` shows the inbox (AppShell). */
 export function useOpenTasksRequest(companyId: string | undefined, open: () => void) {
   const subscribe = useCallback((listener: (payload: undefined) => void) =>
     companyId ? subscribeOpenTasks(companyId, () => listener(undefined)) : undefined, [companyId])

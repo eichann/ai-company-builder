@@ -24,8 +24,8 @@ interface Props {
   onLogout: () => void
   /** A feature's button next to sync (「議事録を確かめる」 while Google may read minutes). */
   extra?: ReactNode
-  /** 「あなたの番 N」 and the bell (features/notifications), drawn by the core app only. */
-  notices?: ReactNode
+  /** The one ［受け箱］ (features/inbox, I2: where 「あなたの番 N」 and the bell were), drawn by the core app only. */
+  inbox?: ReactNode
   /** The company's name as a menu to switch companies (features/company), drawn instead of the plain name. */
   companySwitcher?: ReactNode
   /** Show / hide the left column and the consultation, 「いつもの形に戻す」 (features/workspace). */
@@ -35,7 +35,7 @@ interface Props {
 const ICON_BUTTON = 'p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
 
 /** The window's title bar (draggable): the company, 変更を確認 / 同期, backups, language, theme, settings, sign-out. */
-export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', syncWaitsForYou = false, sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra, notices, companySwitcher, layoutControls }: Props) {
+export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', syncWaitsForYou = false, sharedFolder = true, onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra, inbox, companySwitcher, layoutControls }: Props) {
   const { t } = useTranslation()
   const hasCompany = useAppStore((s) => s.currentCompany) != null
   const theme = useAppStore((s) => s.theme)
@@ -58,7 +58,7 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
       </div>
       )}
       <div className="flex items-center gap-2 app-no-drag">
-        {notices}
+        {inbox}
         {!sharedFolder && <WorkingFolderNote />}
         {sharedFolder && <>
         <button

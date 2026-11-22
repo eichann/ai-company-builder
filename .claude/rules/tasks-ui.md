@@ -49,7 +49,7 @@ The standard list belongs to the core (owner decision 2026-11-01, 「タスク�
 waits for the member, the AI and others, today's meetings and today's done, in one place. A plugin
 may later add another look; the list, its data, states and rules stay the core's. Server side:
 `records.md` (types, queries, turns), `tasks.md` (company settings), `calendar.md` (today's
-meetings), `notifications.md` (the title bar's 「あなたの番」).
+meetings), `notifications.md` (「あなたの番」 in the inbox and the title bar's ［受け箱］).
 
 ## Main (`client/electron/features/tasks/ipc.ts`, session only)
 
@@ -135,7 +135,7 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
 - **A task only the member sees shows whatever department is on screen**: the list is read per
   company (no folder in any of its requests) and owner-only tasks come in 「あなたの番」 like any
   other; a department tab never narrows it (`tests/tasks-list.test.ts`). Where the company hides
-  the tab for that department (`taskListDepartmentIds`), the title bar's 「あなたの番」 still
+  the tab for that department (`taskListDepartmentIds`), the title bar's ［受け箱］ (あなた待ち) still
   counts it. `useCalendarToday`:
   at mount, every 10 minutes, and **at once when the app sees the member's Google permission
   change** (owner FB 2026-11-04: 「Google の設定を全部終えたのに、今日の予定が出ない」 — the list said
@@ -922,7 +922,7 @@ asked only while 決めたこと is on). AppShell reads them with `featuresFrom`
   「確かめること」 — approvals waiting for the member and what the AI prepared for them
   (`corePressItems`, `client/shared/tasks.ts`; `aiPrepared`: a handed-over `prep_summary` or
   「議事録を確認する」), and 決めたこと to confirm. Rows open the card where the press happens. The
-  morning summary opens 「確かめること」. The title bar counts the arrived minutes too
+  morning summary's Mac notification opens the inbox (I2). The inbox counts the arrived minutes too
   (`arrivedMeetingTurns`, `notifications.md`), whoever may see the meeting, until someone presses
   ［AI に読ませる］.
 - **会議と議事録 off**: no 「今日の予定」 (the list's `showCalendar`; `useCalendarToday` reads nothing),
@@ -1064,8 +1064,8 @@ offers reconciling only; run ids and keys never reshape the URL), `client/tests/
 shows); `tasks-list.test.ts` also: only a company path reaches the server; a meeting read without a まとまり
 asks once, only when its link was read as missing and the company has まとまり; 「部署に出す」 sends only a
 company folder (`tasks-list.test.ts`) and is offered only on an owner-only task (`task-card.spec.ts`);
-a department without the list gets its meetings in the title bar (`notifications.test.ts`,
-`title-bar-notices.spec.ts`). `tests/ui/ai-turns.spec.ts`
+a department without the list gets its meetings in the inbox (`notifications.test.ts`,
+`title-bar-notices.spec.ts`, `src/features/inbox/model.test.ts`). `tests/ui/ai-turns.spec.ts`
 and `minutes.spec.ts` drive the AI-turn row (`chat-header-ui.html`, the list left of the
 consultation as on the main screen). `tests/ui/tasks-layout.spec.ts` (`skill-layout-ui.html?tasks=1`,
 the real `AppShell`): the list is the narrow column, a task opens as a tab beside the open files,

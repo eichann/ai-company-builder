@@ -93,18 +93,17 @@ for (const theme of ['light', 'dark'] as const) {
       await expectSet(page, badge, sets('paused'), 'stopped own key')
     })
 
-    test('the bell: the unread dot is the new-item mark; its panel says 「閲覧のみ」, never 「読むだけ」', async ({ page }) => {
+    test('the title bar\'s ［受け箱］: the new dot is the new-item mark, the number the primary count; its rows\' dots too, never 「読むだけ」', async ({ page }) => {
       await open(page, 'title-bar-notices', theme)
-      const dot = page.getByTestId('notices-unread-dot')
+      const dot = page.getByTestId('inbox-news-dot')
       expect(await style(dot, 'backgroundColor')).toBe(await token(page, 'unread'))
-      const bell = page.getByRole('button', { name: '起きたこと（未読 1 件）' })
-      await expect(bell).toHaveAttribute('title', '起きたこと（閲覧のみ）')
-      await bell.click()
-      const list = page.getByRole('menu', { name: '起きたこと' })
-      await expect(list).toContainText('閲覧のみ')
-      await expect(page.locator('body')).not.toContainText('読むだけ')
-      const unread = list.getByRole('img', { name: '未読' }).first()
+      const count = page.locator('[data-inbox-count]')
+      expect(await style(count, 'backgroundColor')).toBe(await token(page, 'primary'))
+      expect(await style(count, 'color')).toBe(await token(page, 'on-primary'))
+      await page.locator('[data-inbox-button]').click()
+      const unread = page.getByRole('region', { name: '受け箱' }).getByRole('img', { name: '新しい知らせ' }).first()
       expect(await style(unread, 'backgroundColor')).toBe(await token(page, 'unread'))
+      await expect(page.locator('body')).not.toContainText('読むだけ')
     })
 
     test('stopped, and the member has something to do: amber (warning), never grey or red', async ({ page }) => {

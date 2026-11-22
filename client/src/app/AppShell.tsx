@@ -68,7 +68,6 @@ import { renderMeetingBundleChooser, renderMeetingPanel } from './meetingCard'
 import type { AiTurnItemsView } from '../../shared/ai-turns'
 import { useNotices, useOpenTasksRequest } from '../features/notifications/hooks/useNotices'
 import { useInboxSlot } from '../features/inbox/hooks/useInboxSlot'
-import { TitleBarNotices } from '../features/notifications/components/TitleBarNotices'
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { useSeenTasks } from '../features/tasks/hooks/useSeenTasks'
 import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
@@ -503,14 +502,14 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
     if (id === 'tasks' || leftTab === 'tasks') seenTasks.markSeen(myTurnIds)
     showLeftTab(id)
   }
-  // The morning's 「今日のあなたの番」 (its Mac notification or its bell line) opens the task list.
   const openTasks = () => { if (tasksShown) selectLeftTab('tasks'); else if (pressShown) selectLeftTab('press') }
-  useOpenTasksRequest(currentCompany?.id, openTasks)
-  // The inbox (features/inbox, I1) is the bottom panel's content: rows from 「あなたの番」 and the notices main
-  // already read; its approval and mail rows open the same cards as a task (a preview may hand in a sample instead).
+  // The inbox (features/inbox, I1) is the bottom panel's content: rows from 「あなたの番」, the notices main
+  // already read and the meetings the title bar carried; its approval and mail rows open the same cards as a
+  // task (a preview may hand in a sample instead). Its ［受け箱］ is the title bar's (I2).
   const inbox = useInboxSlot({
     // From a department not downloaded here (its prompt hides the middle and the list), 全社 shows what was opened.
-    companyId: currentCompany?.id, notices,
+    companyId: currentCompany?.id, notices, meetings: meetings.titleBarMeetings, features,
+    open: bottomOpen && !bottomPanel, onToggle: () => setBottomOpen(o => !o),
     onOpenRecord: id => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTab(recordTabKey(id)) },
     onOpenTasks: () => { if (isSelectedDeptUnsynced) handleSelectDept(COMPANY_TAB_ID); openTasks() },
     onOpenJobs: () => { setSettingsFocus({ tab: 'jobs', at: Date.now() }); setShowSettings(true) },
@@ -520,6 +519,9 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
   const panel: BottomPanelContent | undefined = bottomPanel ?? inbox
   const hasBottom = panel !== undefined
   const toggleBottom = useCallback(() => { if (hasBottom) setBottomOpen(open => !open) }, [hasBottom])
+  // The morning's 「今日のあなたの番」 Mac notification and ⌘K 「受け箱」 open the inbox (I2); without one, the task list.
+  const showInbox = () => { if (hasBottom) setBottomOpen(true); else openTasks() }
+  useOpenTasksRequest(currentCompany?.id, showInbox)
   // A skill opens where a click in the スキル tab opens it; a company-wide one under 全社.
   const openSkillFromPalette = (id: string) => {
     if (!skills.some(s => s.id === id)) handleSelectDept(COMPANY_TAB_ID)
@@ -679,17 +681,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
         layoutControls={<LayoutControls leftShown={!hidden.has('fileTree')} chatShown={!hidden.has('chat')}
           onToggleLeft={toggleLeft} onToggleChat={toggleChat} onReset={resetLayout}
           bottom={hasBottom ? { shown: bottomOpen, onToggle: toggleBottom } : undefined} />}
-        notices={currentCompany ? (
-          <TitleBarNotices
-            companyId={currentCompany.id}
-            state={notices}
-            meetings={meetings.titleBarMeetings}
-            onOpen={target => { void runCommand('record.open', { recordId: target.recordId }).catch(() => {}) }}
-            onOpenTasks={openTasks}
-            onOpenJobs={() => { setSettingsFocus({ tab: 'jobs', at: Date.now() }); setShowSettings(true) }}
-            features={features}
-          />
-        ) : undefined}
+        inbox={inbox?.titleBarButton}
       />
       <LeaveConfirmDialog question={leaving.question} onAnswer={leaving.answer} />
       {inbox?.dialog}
@@ -873,6 +865,7 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
         recentTabs={recentTabs}
         onOpenRecord={id => openTab(recordTabKey(id))}
         onShowRecordsTable={() => showRecordsTable()}
+        onOpenInbox={hasBottom ? showInbox : undefined}
         paletteSkills={paletteSkills}
         onOpenSkill={openSkillFromPalette}
         loadConsultations={loadPaletteConsultations}

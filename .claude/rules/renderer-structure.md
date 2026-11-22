@@ -38,8 +38,8 @@ choice), `skills`, `files`, `editor`, `doc-review` (the Markdown review of a doc
 file's 「つながっているもの」), `settings`, `auth` (server address, sign-in, session),
 `company` (choosing a company and setting its folder up: the company selector), `tasks` (やること:
 the task list tab, `tasks-ui.md`),
-`notifications` (the title bar's 「あなたの番」 and bell, `notifications.md`), `inbox` (受け箱, the bottom
-panel's one list, `notifications.md` "The inbox"), `absences` (the settings'
+`notifications` (the notices' port and `useNotices`, `notifications.md`), `inbox` (受け箱: the bottom
+panel's one list and the title bar's ［受け箱］ since I2, `notifications.md` "The inbox"), `absences` (the settings'
 「不在と代わりの人」, shown by `settings`; `records.md` "Absence and the delegate"), `jobs` (the settings'
 「定期の仕事」: the member's scheduled jobs and 「受け取る」, `jobs.md` "The screens"), `records-table` (「記録の一覧」, the
 middle's table of records; reached only through its `entry.tsx`, `tasks-ui.md` "The records table (B4)"). Only create what you need; add a feature
@@ -296,7 +296,8 @@ D7–D9, confirmed 2026-10-30).
   the preview a sample, `?inbox=1` the real inbox (`skill-layout-state.spec.ts` 「the bottom panel」).
   **The inbox (受け箱, I1, owner design 2026-11-22)**: `features/inbox` — `model.ts` (`inboxView`,
   pure), `hooks/useInboxSlot.tsx` (its slot, `APP_SHELL_SLOTS`), `components/InboxList.tsx`,
-  `InboxCardDialog.tsx`; what it shows and its guards are `notifications.md` "The inbox". A tree added later is optional within a version (missing → its first look; `trees.middle`
+  `InboxCardDialog.tsx`, `InboxButton.tsx` (the title bar's ［受け箱］, I2: opens and closes this panel like ⌘J),
+  `NoticeSettingsDialog.tsx`; what it shows and its guards are `notifications.md` "The inbox". A tree added later is optional within a version (missing → its first look; `trees.middle`
   arrived in version 2, so an app without it reads the other trees unchanged and keeps working);
   changing the meaning or shape of an existing tree means a new `version` and reading the old one.
   A pane that takes the remaining space (and the left side while the chat is hidden) has

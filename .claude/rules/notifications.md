@@ -21,7 +21,7 @@ paths:
   - "shared/core/turn-timing.ts"
 ---
 
-# Notices (知らせ) and the title bar's 「あなたの番」 (stage 2 S5)
+# Notices (知らせ), 「あなたの番」 and the inbox (受け箱) (stage 2 S5; the inbox I1 / I2)
 
 Owner design: 節目5 §11-29 (知らせの欄), §11-28 / §11-32 (タイトルバーの「あなたの番 N」),
 E-25 (kinds on / off), E-27 (Mac notifications), A-2 (overdue), C-18 (24 h stuck AI turn).
@@ -73,8 +73,8 @@ a plugin can never draw a notice (§2-2).
   recordless: written by `restorePause` after a restore to every owner / admin, key `company_restored:<at>`; shown only
   while the reader is owner / admin; opening it opens nothing; a Mac notification while unread — `deployment.md`
   "After a restore"). **Also with records off**: `GET /me/notifications` then answers `available: false` with only
-  these company notices (never a record's), and the app's watcher, seeing `/records/my-turn` 404, shows the bell alone
-  (`NoticesState.bellOnly`, no 「あなたの番」) when there is one, else nothing as before (`restore-pause.test.ts`,
+  these company notices (never a record's), and the app's watcher, seeing `/records/my-turn` 404, shows the inbox with
+  those notices alone (`NoticesState.bellOnly`, no 「あなたの番」) when there is one, else nothing as before (`restore-pause.test.ts`,
   `client/tests/notifications.test.ts`),
   `job_expired` / `job_skipped` / `job_failed` (on by default, recordless: an occurrence of a scheduled job
   whose time ran out, skipped because its responsible person was absent, or whose やること could not be
@@ -93,8 +93,8 @@ a plugin can never draw a notice (§2-2).
   member switches kinds (`PUT /me/notifications/settings`); kept per company × member on the
   server, so both PCs agree. Kinds filter at read time (notices are always stored).
 - **Noticing one's own turn without Slack** (owner decision 2026-11-03; all on by default, each
-  switchable like the other kinds; no new counter — they are bell notices, the title bar's count
-  stays 「あなたの番」's):
+  switchable like the other kinds; no new counter — they are notices, the title bar's ［受け箱］ count
+  stays あなた待ち's):
   - `asked` 「Aliceさんから「…」を頼まれました」 (`askedOf`): a request type's entry that leaves the
     member its assignee in a person's turn and either made them the assignee (a create, an
     `assign`; by a person or anyone's AI) or handed it over from a turn that told nobody
@@ -119,7 +119,7 @@ a plugin can never draw a notice (§2-2).
     made from that message"): the member's **own AI** completed their task because their own reply
     finished it (ledger action `replied_done`, the inbox's reply check through the service writer, which
     names them in `notify` so they are told although their AI was the actor — the writer's `tell`
-    keeps the actor only then). The bell's row has **［元に戻す］** (`TitleBarNotices`, `undoNoticedChange`
+    keeps the actor only then). The inbox's row (できた・未確認) has **［元に戻す］** (`useInboxSlot`, `undoNoticedChange`
     → `tasks:undo` of that entry at the notice's version: the server refuses when something changed
     since); then 「元に戻しました」. Not a person's own completion, not the AI's other actions.
     Tests: `notifications.test.ts` 「a task the member's reply finished」, `tests/ui/title-bar-notices.spec.ts`
@@ -139,7 +139,7 @@ a plugin can never draw a notice (§2-2).
     operation (`ai_changed:<operation id>`). Text built when read from the ledger entry: each field
     by its label (choices by `option_labels`) before → after, the AI's note as the reason (≤ 120
     characters); an attached create (a meeting logged) says it recorded to the connected service. The
-    item carries `aiChange { pluginId, operationId, undone }`; the bell's row has **［元に戻す］** while
+    item carries `aiChange { pluginId, operationId, undone }`; the inbox's row has **［元に戻す］** while
     not undone — the app's `pluginOperations:undo` with the member's session (`undoNoticedAiChange`),
     which the server allows the assignee for exactly such a change (`plugins.md` 「変更前の値を書き戻す」)
     and re-checks like any undo; once written back the text ends 「（元に戻しました）」. An app released
@@ -158,9 +158,9 @@ a plugin can never draw a notice (§2-2).
     `aiChangesToCheck`): today's text adds 「。AI が変えた・まだ確かめていない 2件：「A社」「B社」」 (up to
     `AI_CHANGES_NAMED` titles, then ほか) — the member's `ai_changed` notices since their last morning
     summary before today (all kept ones when there was none) that are not **確かめた**, about a record
-    they read now. **確かめた** = the notice was read (opened in the bell, which marks it read, or
-    「すべて読んだ」) or the change was written back (by anyone). Opening the record elsewhere does not
-    count (simple and visible: the bell's dot is the same state). A member with no turn but such
+    they read now. **確かめた** = the notice was read (its row opened in the inbox, which marks it read, or
+    「まとめて確認済みにする」) or the change was written back (by anyone). Opening the record elsewhere does not
+    count (simple and visible: the inbox's できた・未確認 is the same state). A member with no turn but such
     changes still gets the morning notice (and its Mac notification).
   - `due_tomorrow` 「「…」は明日（11月5日）が期限です」: the server clock, from `DUE_TOMORROW_FROM`
     09:00 of **the last business day before the due's day** (`dueTomorrowDays`: today a business
@@ -197,7 +197,7 @@ a plugin can never draw a notice (§2-2).
   only notices whose record now waits for the member (`slack-connector.md` "Notice DMs").
 - Read access is checked **when read** (`recordReader` with today's rules): a record the member
   can no longer read (rules changed, private folder) or that was removed drops out of the list
-  and of `unread`; nothing of it is shown. Records off → `{ available: false }` (no bell).
+  and of `unread`; nothing of it is shown. Records off → `{ available: false }` (no inbox, unless the company's own notices).
 - Notices older than 90 days are forgotten when the member next reads (`NOTIFICATION_KEEP_DAYS`).
 
 ```
@@ -305,7 +305,7 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   Cookie header — at `notifications:watch`, every 5 minutes, and on a `records` or `notifications`
   signal for that company (`agent-push-channel.ts` `onNotifications`, wired in `main.ts`). IPC
   (`features/notifications/ipc.ts`): `notifications:watch` / `state` / `markRead` / `settings` /
-  `setSetting`, event `notifications:changed` (the title bar's only: the task list does not listen).
+  `setSetting`, event `notifications:changed` (the inbox's only: the task list does not listen).
   Signals come once per burst (`push-signal-fanout.ts`, ≤ 250 ms after the first). A `records`
   signal also sends `records:changed` (the task list re-reads, `tasks-ui.md`); so does the member's
   own AI writing a record in this app, which also asks this watcher again at once. When the
@@ -322,7 +322,8 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   so a restart does not greet twice; a new turn item whose record has a fresh `asked` notice is
   not notified again (one notification per request, the asker's words). Clicking the morning
   summary's notification focuses the window and sends `notifications:openTasks` (the renderer
-  shows the task list; `useOpenTasksRequest`), the others only focus. An app released before this
+  opens the inbox since I2 — the task list when there is none; `useOpenTasksRequest`; the channel's name stays,
+  released apps read it), the others only focus. An app released before this
   drops a notice with `recordId` '' (its parser wants a record id), so it only sees the bell's
   unread number include it. Otherwise for turn items — a
   返事待ち task given back by the clock counts as new (`turnItemKey`: the server's `waitCameBack`; it was
@@ -331,31 +332,31 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   (`DesktopShell.notify`, Electron's `Notification` in `electron-adapter.ts`; a click focuses the
   main window). The first look at a company notifies no turn item; at most 3 per check. Words in
   `client/shared/notifications-app.ts` `desktopNoticeFor` (the record's title as the body).
-- Renderer: `src/features/notifications/` — `TitleBarNotices` in the title bar (`TitleBar`
-  `notices` slot, composed by `AppShell`). **Two roles, never mixed** (新しい画面のデモ I.1 / I.2):
-  「あなたの番 N」 = what the member presses, until it is done — grouped by kind with what to do
-  (`turnGroups`: 「承認のお願い 3件 — 承認してください」, 「送るメールの下書き 1件 — 確かめて送ってください」,
-  `thing-words.ts`), due shown, 「起きたことはベルに出ます。ここは押すものだけです。」; N is the list's
-  count. **Only this week's turn** (owner decision 2026-11-03): main reads the whole
+- Renderer: `src/features/notifications/` holds the notices' port (`api.ts`) and `useNotices` (what main read
+  for the company on screen); since I2 the **inbox** (`src/features/inbox`, "The inbox" below) is their only
+  screen: the title bar's one ［受け箱］ replaced 「あなたの番 N」 and the bell (owner decision ①, "The title bar's
+  ［受け箱］" below). **Only this week's turn** (owner decision 2026-11-03): main reads the whole
   `/records/my-turn` (unchanged: a released app still counts it all) and keeps the items whose
   `turnTiming` is `now` (`thisWeeksTurn`, `client/shared/notifications-app.ts`, the company's today);
   the others (`resting`) get one line, 「…は、やることの一覧の「先のこと」「いつか」にあります」. The
-  list's 「あなたの番」 and the morning summary use the same rule, so the three agree. The bell = 「起きたこと」 (閲覧のみ): a dot only for unread notices, the list, 「すべて読んだ」,
+  list's 「あなたの番」, the morning summary and the inbox's あなた待ち use the same rule, so they agree.
   「知らせの設定」 (one checkbox per kind, `NOTIFICATION_KIND_LABELS`; none for a kind of a feature
-  that is off in 「使う機能」, `noticeKindsShown`, `records.md` "Features on and off"). Opening a notice marks only
-  that notice read.
+  that is off in 「使う機能」, `noticeKindsShown`, `records.md` "Features on and off") opens from the inbox's
+  heading (`NoticeSettingsDialog`). Opening a row marks only its notices read.
 - **Arrived minutes** (owner decision 2026-11-07): where the department shows no task list, the
   meetings that arrived and nobody asked the AI to read (`arrived`) are rows of the 「会議」 part too,
   needing a person, with ［AI に読ませる］ (`arrivedMeetingTurns`, `client/shared/notifications-app.ts`;
   AppShell reads them from the arrivals). A feature turned off writes none of its notices
   (`records.md` "Features on and off").
 - **Meetings where the department shows no task list** (`tasks-ui.md` "Minutes and AI turns"):
-  `TitleBarNotices` takes `meetings` (the minutes feature's `useMinutesSlots` `titleBarMeetings`, placed by AppShell, only while the task list is hidden) — a まとまり to
-  choose and received minutes with the automatic runner's state, each with its buttons, in a 「会議」
-  part: those waiting for the member (`needsPerson`: a まとまり to choose; minutes the AI is not
-  reading or about to read) at the top of 「あなたの番」 and in its count; the others (the AI reading)
-  in the bell, as news. They never light the bell's dot. Nothing is stored or sent for them: they
-  come from the list main already read.
+  the inbox takes `meetings` (the minutes feature's `useMinutesSlots` `titleBarMeetings`, placed by AppShell, only
+  while the task list is hidden; `inboxView`'s third argument) — a まとまり to choose and received minutes with
+  the automatic runner's state, each row with its own buttons (`InboxItem.meetingId` → the feature's actions):
+  those waiting for the member (`needsPerson`: a まとまり to choose; minutes the AI is not reading or about to
+  read — a failed reading red, one the AI may not do amber, first) in あなた待ち and its count; the others (the
+  AI reading or about to) in 作業中, not counted. One already in the server's turn stays that one row, with the meeting's buttons; an unread notice
+  about a meeting (waiting or the AI's) is that row's news, never a second row. Nothing is
+  stored or sent for them: they come from the list main already read.
 - Opening an item runs `record.open` (`commands.md`): the record's card in the editor area, the
   same as a search hit. The consultation a record belongs to opens from there once S12 links them.
 
@@ -404,8 +405,35 @@ already says concerns the member, by what it needs from them — no tabs by sour
 - The panel stays reachable over a department not downloaded on this PC: its prompt covers the left side's
   top, the panel spans the side under it (`renderer-structure.md` "The bottom panel"); opening a record or the
   task list from there switches to 全社 first, so what was opened shows instead of the prompt.
-- 作業中 is empty in I1 (the consultations and 「AI の番」 come with I3 / I4) and says where to look meanwhile.
-  The title bar's 「あなたの番」 and bell stay as they are until I2.
+- 作業中 holds only the meetings the AI is reading (above) until I3 / I4 add the consultations and 「AI の番」,
+  and says where to look meanwhile.
+
+### The title bar's ［受け箱］ (I2, owner decisions ① and ②)
+- **One button** where 「あなたの番 N」 and the bell were (`components/InboxButton.tsx`, the slot's `titleBarButton`,
+  `TitleBar`'s `inbox`): 「受け箱」 with **the number = あなた待ち** exactly as the list counts it
+  (`InboxView.counts.waiting`: this week's turn + waiting meetings + unread stops and asks + 「ほかに N 件」; the
+  primary count, 99+) and **the dot = something new** (`NewDot`). Pressing it opens or closes the bottom panel —
+  the same state as ⌘J and the layout button. No count or dot when there is no inbox (records off without
+  company notices: no button at all).
+- **The dot** (`inboxNewsKeys` / `inboxNewsBaseline` / `hasInboxNews`, pure): every waiting / working row by key
+  and state, and every unread notice; a key not there when the inbox was last on screen is new. Before it was on
+  screen in this window, the rows count as seen and unread notices do not — so at the start the dot is the old
+  bell's (something unread on the server, the same on the member's PCs). While the panel shows, exactly what is on
+  it counts as seen (a row that left meanwhile and comes back after it closed is new again); a row leaving is not news. Memory only (AppShell is keyed by company): nothing stored, a restart starts
+  from the server's unread again.
+- **Where each part of the bell and 「あなたの番」 went**: the turn list → あなた待ち; 「…は「先のこと」「いつか」にあります」
+  → the same line there; the bell's list → rows by meaning (above); ［元に戻す］ → the row (then 「「…」を元に戻しました。」 above the list:
+  marked seen, the row folds into 「きょう確認したもの」, as the bell's row said 「元に戻しました」); 「知らせの設定」 → the
+  inbox's heading (a late answer never reopens it once closed); the meetings and their buttons → rows (above); the morning summary's line (no row, decision) →
+  its Mac notification opens the inbox; 「すべて読んだ」 → 「まとめて確認済みにする」 for できた・未確認 only (decision ⑦:
+  a stop or an ask is opened one by one). ⌘K 「受け箱」 (also あなたの番 / 知らせ / 通知 / ベル) opens it
+  (`AppDialogs` palette action, only while there is an inbox).
+- Tests: `tests/ui/title-bar-notices.spec.ts` (`tests/title-bar-notices-ui.html`: the number equals あなた待ち with
+  meetings, the dot goes once shown and comes back for the next new thing, opening marks only its notice, the
+  meetings' buttons, every ［元に戻す］ and its line, 「知らせの設定」 by feature), `model.test.ts` (meeting rows, the dot's
+  keys, a できた notice the row limit left out still new),
+  `skill-layout-state.spec.ts` (the button and ⌘J one panel, ⌘K, the Mac notification opens it),
+  `status-colours.spec.ts` (the dot `unread`, the count `primary`) — mutation-checked.
 - Tests: `src/features/inbox/model.test.ts` (order, one row per record, stops leave once read, the 14-day
   fold, the bulk only for できた, あなた待ち never capped, no approving action), `tests/ui/inbox.spec.ts`
   (`tests/inbox-ui.html`: order and chips, ［承認する…］ opens the real card and calls nothing, opening
@@ -443,10 +471,9 @@ run; no overlapping runs), permission-matrix rows,
 owner-only record's notices only to its owner (not other members, not owners/admins; no row, no
 signal), `client/tests/notifications.test.ts` (signal only refetches, content-carrying event dropped, an
 unknown kind dropped without closing, session in the header, Mac notification only for new items;
-a fresh notice once per PC across a restart, also on the first look, the morning summary opening
-the task list, `asked` speaking for its new turn item; the title bar counts only this week's turn),
-`client/tests/ui/title-bar-notices.spec.ts` (opening a notice marks only it read and opens its
-record; the dot goes; 「あなたの番」 lists what waits; the morning summary opens the task list) —
+a fresh notice once per PC across a restart, also on the first look, the morning summary's click
+sent as `notifications:openTasks`, `asked` speaking for its new turn item; the count is only this week's turn),
+`client/tests/ui/title-bar-notices.spec.ts` (the title bar's ［受け箱］, "The title bar's ［受け箱］" above) —
 each mutation-checked.
 
 ## Not yet

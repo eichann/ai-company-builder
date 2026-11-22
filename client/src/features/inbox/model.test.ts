@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { NotificationItem } from '../../../../shared/types/notifications'
-import type { NoticesState, TurnItem } from '../../../shared/notifications-app'
-import { bulkSeenIds, countText, INBOX_MAX_ROWS, inboxView, type InboxAction } from './model'
+import type { MeetingTurn, NoticesState, TurnItem } from '../../../shared/notifications-app'
+import { bulkSeenIds, countText, hasInboxNews, INBOX_MAX_ROWS, inboxNewsBaseline, inboxNewsKeys, inboxView, type InboxAction } from './model'
 
 // Type-level guard (`pnpm typecheck`): no row action may approve or send; such a kind fails to compile here.
 type ActsOutside = Extract<InboxAction['kind'], `${string}${'approve' | 'Approve' | 'send' | 'Send'}${string}`>
@@ -172,4 +172,65 @@ test('a stop about a record already waiting makes that row a stop: its badge and
   assert.equal(v.waiting[0].key, 'record:task-b')
   assert.deepEqual(v.waiting[0].badge, { tone: 'needsAction', word: '止まっています' })
   assert.deepEqual(v.waiting[0].unreadNoticeIds, [stuck.id])
+})
+
+// I2: what the title bar's 「あなたの番」 and bell carried for a department without the task list.
+const meeting = (id: string, needsPerson: boolean, ai: MeetingTurn['ai'] = null, kind: MeetingTurn['kind'] = 'minutes'): MeetingTurn =>
+  ({ id, title: id, kind, text: `${id} の様子`, needsPerson, ai })
+
+test('a meeting waiting for the member is あなた待ち and counted (the old 「あなたの番 N」); one the AI reads is 作業中, not counted', () => {
+  const v = inboxView(state([turn('task-a', 'task', 'todo')], []), NOW, [
+    meeting('meeting-choose', true, null, 'bundle'),
+    meeting('meeting-failed', true, { recordId: 'meeting-failed', state: 'failed', reason: '議事録が空でした', canRetry: true, canHand: true }),
+    meeting('meeting-reading', false, { recordId: 'meeting-reading', state: 'running', reason: '', canRetry: false, canHand: false }),
+  ])
+  assert.deepEqual(v.waiting.map(i => i.key), ['record:meeting-failed', 'record:meeting-choose', 'record:task-a'])
+  assert.equal(v.waiting[0].badge.tone, 'failed')
+  assert.equal(v.waiting[1].meetingId, 'meeting-choose')
+  assert.deepEqual(v.working.map(i => i.key), ['record:meeting-reading'])
+  assert.equal(v.counts.waiting, 3)
+  assert.equal(v.counts.working, 1)
+  assert.deepEqual(v.waiting[1].action, { kind: 'openRecord', recordId: 'meeting-choose', title: 'meeting-choose' })
+})
+
+test('a meeting already in the server\'s turn stays one row; a notice about a waiting meeting is that row\'s news', () => {
+  const asked = notice('minutes_arrived', 'meeting-x', '2026-11-22T00:00:00Z')
+  const v = inboxView(state([turn('meeting-y', 'meeting', 'received')], [asked]), NOW, [meeting('meeting-y', true), meeting('meeting-x', true)])
+  assert.deepEqual(v.waiting.map(i => i.key).sort(), ['record:meeting-x', 'record:meeting-y'])
+  assert.equal(v.waiting.find(i => i.key === 'record:meeting-y')?.meetingId, 'meeting-y', 'its buttons stay with the one row')
+  assert.deepEqual(v.waiting.find(i => i.key === 'record:meeting-x')?.unreadNoticeIds, [asked.id])
+})
+
+test('the title bar\'s dot: at the start only an unread notice is new; then a new waiting row or notice, until the inbox is shown', () => {
+  const first = inboxView(state([turn('task-a', 'task', 'todo')], [notice('request_done', 'task-d', '2026-11-22T00:00:00Z', true)]), NOW)
+  let seen = new Set(inboxNewsBaseline(first))
+  assert.equal(hasInboxNews(inboxNewsKeys(first), seen), false, 'what the count already says is not news')
+  const unread = inboxView(state([turn('task-a', 'task', 'todo')], [notice('request_done', 'task-e', '2026-11-22T01:00:00Z')]), NOW)
+  assert.equal(hasInboxNews(inboxNewsKeys(unread), new Set(inboxNewsBaseline(unread))), true, 'an unread notice at the start is the old bell\'s dot')
+  const more = inboxView(state([turn('task-a', 'task', 'todo'), turn('approval-b', 'approval', 'pending')], []), NOW)
+  assert.equal(hasInboxNews(inboxNewsKeys(more), seen), true, 'a new approval request is new')
+  seen = new Set(inboxNewsKeys(more))
+  assert.equal(hasInboxNews(inboxNewsKeys(more), seen), false, 'shown: nothing new any more')
+  const fewer = inboxView(state([turn('approval-b', 'approval', 'pending')], []), NOW)
+  assert.equal(hasInboxNews(inboxNewsKeys(fewer), seen), false, 'something leaving is not news')
+  const nowWaiting = inboxView(state([], []), NOW, [meeting('meeting-r', true)])
+  assert.equal(hasInboxNews(inboxNewsKeys(nowWaiting), new Set(inboxNewsKeys(inboxView(state([], []), NOW, [meeting('meeting-r', false)])))), true,
+    'a meeting the AI was reading that now waits for the member is new')
+})
+
+test('the dot sees every unread できた notice, also one the row limit leaves out', () => {
+  const many = Array.from({ length: INBOX_MAX_ROWS }, (_, i) => turn(`task-${i}`, 'task', 'todo'))
+  const before = inboxView(state(many, []), NOW)
+  const done = notice('request_done', 'task-done', '2026-11-22T00:00:00Z')
+  const after = inboxView(state(many, [done]), NOW)
+  assert.equal(after.done.length, 0, 'no room for the row')
+  assert.equal(hasInboxNews(inboxNewsKeys(after), new Set(inboxNewsKeys(before))), true)
+})
+
+test('a meeting the AI reads keeps its unread notice as its own news: one row in 作業中, not a second one waiting', () => {
+  const arrived = notice('minutes_arrived', 'meeting-r', '2026-11-22T00:00:00Z')
+  const v = inboxView(state([], [arrived]), NOW, [meeting('meeting-r', false, { recordId: 'meeting-r', state: 'running', reason: '', canRetry: false, canHand: false })])
+  assert.deepEqual(v.waiting, [])
+  assert.deepEqual(v.working.map(i => [i.key, i.unreadNoticeIds]), [['record:meeting-r', [arrived.id]]])
+  assert.equal(v.counts.waiting, 0)
 })
