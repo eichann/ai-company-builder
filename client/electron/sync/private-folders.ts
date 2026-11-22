@@ -250,6 +250,11 @@ export type CloneState =
 
 const OS_FILES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini'])
 
+/** A file the system writes by itself (Finder, Explorer), never the member's work. */
+export function isOsFile(name: string): boolean {
+  return OS_FILES.has(name)
+}
+
 /** What is at a private folder's path in the company checkout. */
 export async function cloneStateOf(createGit: (dir: string) => SimpleGit, dir: string, scope: MyPrivateScope): Promise<CloneState> {
   let st: fs.Stats
@@ -294,9 +299,12 @@ export function pruneEmptyUp(dir: string, stopAt: string): void {
  * (origin/main): edited, new (not ignored) and committed-but-unpushed —
  * those that exist on disk now. Repository-relative, sorted.
  */
-export async function localChangesInClone(git: SimpleGit, dir: string): Promise<string[]> {
+export async function localChangesInClone(git: SimpleGit, dir: string, options: { strict?: boolean } = {}): Promise<string[]> {
   const files = new Set<string>()
-  const status = await git.raw(['status', '--porcelain=v1', '-z', '--untracked-files=all']).catch(() => '')
+  // strict: a status git cannot give is an error, never "nothing changed"
+  // (the caller is about to delete the clone).
+  const statusArgs = ['status', '--porcelain=v1', '-z', '--untracked-files=all']
+  const status = options.strict ? await git.raw(statusArgs) : await git.raw(statusArgs).catch(() => '')
   const records = status.split('\0')
   for (let i = 0; i < records.length; i++) {
     const rec = records[i]

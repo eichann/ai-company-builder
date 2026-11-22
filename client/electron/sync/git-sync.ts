@@ -78,12 +78,15 @@ import {
   preparePrivateFolders,
   removeExcludedClone,
   syncReadOnlyScope,
+  EXCLUDED_CLONE_KEPT_MESSAGE,
+  excludedCloneMessage,
+  type ExcludedCloneRemoval,
 } from './private-sync'
 import type { SyncDeps, SyncDialog } from './types'
+import { BACKUP_METADATA_FILE, backupCopyName } from './backup-names'
 import { readExcludeLines, writeExcludeLines, type ExcludeBlock } from './local-excludes'
 import { isTempSaveFile, TEMP_SAVE_EXCLUDE_PATTERN } from '../../shared/temp-save-file'
 import { isOfficeLockFile, OFFICE_LOCK_EXCLUDE_PATTERNS } from '../../shared/office-lock-files'
-import { BACKUP_METADATA_FILE, backupCopyName } from './backup-names'
 import { findOpenFiles, openFilesStoppedMessage, removeLockFiles } from './open-files'
 import { isSkillLeftover, skillExcludeLines, SKILL_LEFTOVER_PATTERNS } from '../../shared/skill-leftovers'
 import { NEEDS_MEMBER_ERROR, type ReceiveResult } from '../../shared/auto-sync'
@@ -1943,8 +1946,21 @@ export function createGitSync(deps: SyncDeps): GitSync {
         if (!placement.clone) continue
         // Left out in settings: push its edits first, then remove it.
         const r = await syncScope(d, repoPath, companyId, commitMessage, scope, placement.dir)
-        const removed = r.success && await locked(placement.dir, () => removeExcludedClone(d, repoPath, placement.dir)).catch(() => false)
-        reports.push({ ...r, removed })
+        // Its ignored files (large files, .personal/ notes) go to the private
+        // backups first; if they cannot, the clone stays and the member is told.
+        const removal: ExcludedCloneRemoval = r.success
+          ? await locked(placement.dir, () => removeExcludedClone(d, repoPath, placement.dir, scope.path)).catch((error: unknown) => {
+              d.log.warn('Git sync: Could not remove a left-out private folder; it stays:', error)
+              return { removed: false, reason: EXCLUDED_CLONE_KEPT_MESSAGE }
+            })
+          : { removed: false }
+        const note = excludedCloneMessage(removal)
+        reports.push({
+          ...r,
+          removed: removal.removed,
+          ...(note ? { message: r.message && r.message !== '同期が完了しました' ? `${r.message}\n${note}` : note } : {}),
+          ...(removal.saved ? { setAside: true, backupPath: removal.saved.backupPath } : {}),
+        })
         continue
       }
       if (!options.syncEach && !placement.cloned) continue

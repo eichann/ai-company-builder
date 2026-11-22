@@ -52,7 +52,15 @@ everyone else's editing kept, owners / admins never named: `src/features/records
 - A private folder is downloaded or not as a whole (no exclusions inside). It is excluded when it
   lies at or under an excluded folder. The settings tree lists readable ones under their parent
   (lock, 「非公開」, no size). Applying runs `applyPrivateFolderChoices` at once: an excluded
-  clone is synced one last time and removed only when nothing is left unpushed.
+  clone is synced one last time and removed only when nothing is left unpushed (`removeExcludedClone`;
+  a status git cannot give counts as "something left"). Files git does not show there — ignored ones:
+  `.personal/` notes, `.env`, large files — first move to the private backups
+  (`<ts>_private_excluded`, reason `private_folder_excluded`, OS files left out); the report says how
+  many (`setAside`, `backupPath`). If one cannot be moved, what moved goes back, nothing is deleted and
+  the clone stays with `EXCLUDED_CLONE_KEPT_MESSAGE` (it names no folder; the sync's note adds the
+  reader's own 『…』); the next sync tries again. They were deleted silently before (code review
+  2026-11-22). Scenarios: 「leaving the private folder out keeps the files it never shares…」, 「…when
+  its never-shared files cannot be saved…」; unit `private-folders-sync.test.ts` (status failing).
 - Backups go to `.git/acb-private-backups/` with the folder's path as prefix; dialogs and
   metadata use company-relative paths; messages say 「非公開フォルダのバックアップ」.
 

@@ -11,6 +11,8 @@ import { cloneUrlAllowed, readPrivateExcludes, safeScopeDir, sameScopeRemote, wr
 import { readNestedRepoExcludes, writeNestedRepoExcludes } from '../electron/sync/nested-repos'
 import { createPathChecker, pathPrefixes } from '../electron/sync/path-check'
 import { parseReservedPathRejection } from '../electron/sync/reserved-path'
+import { removeExcludedClone } from '../electron/sync/private-sync'
+import type { SyncDeps } from '../electron/sync/types'
 
 const scope = { cloneUrl: 'https://acb.example.com/api/git-http/c1/scopes/s1.git', clonePath: '/api/git-http/c1/scopes/s1.git' }
 
@@ -145,4 +147,17 @@ test('[RESERVED_PATH] section: paths and the reason lines, verbatim', () => {
   assert.deepEqual(r.paths, ['人事/評価/メモ.md', 'hr/SECRET/a.md'])
   assert.deepEqual(r.folderOf, { '人事/評価/メモ.md': '人事/評価', 'hr/SECRET/a.md': 'hr/SECRET' })
   assert.equal(r.reasons[0], '（『人事/評価』というフォルダ名は使えません。別の名前にしてください。）')
+})
+
+test('a left-out private folder\'s clone is not removed when git cannot say what changed in it', async t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-excluded-')))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const dir = path.join(root, '人事', '評価')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'draft.md'), 'unsynced\n')
+  // status fails (a broken index); every other question answers "nothing".
+  const repo = { raw: async (args: string[]) => { if (args[0] === 'status') throw new Error('index file corrupt'); return args[0] === 'rev-list' ? '0' : '' } }
+  const deps = { createGit: () => repo, log: { log() {}, warn() {}, error() {} }, now: () => new Date() } as unknown as SyncDeps
+  await assert.rejects(removeExcludedClone(deps, root, dir, '人事/評価'))
+  assert.equal(fs.readFileSync(path.join(dir, 'draft.md'), 'utf-8'), 'unsynced\n')
 })
