@@ -513,8 +513,12 @@ export async function startChatServer(config: ChatServerConfig) {
       return c.json({ error: 'この手順の相談を始められませんでした。少し待ってからもう一度ためしてください。', code: 'PLUGIN_STEP_NOT_BOUND' }, 409)
     }
     // A step's run or consultation writes only inside its deliverable folder (write-guard.ts `writeArea`).
-    const stepArea = writeGuard && companyId && appSessionId && config.stepWriteArea
-      ? await config.stepWriteArea(companyId, appSessionId).catch(() => null) : null
+    // Asked whenever it can be (also without a write guard): whether the consultation is a step's decides the job proposal
+    // tools below, and a lookup that failed must not read as "not a step" there (fails closed).
+    const stepLookup: { area: string | WriteArea | null } | { failed: true } = companyId && appSessionId && config.stepWriteArea
+      ? await Promise.resolve().then(() => config.stepWriteArea!(companyId, appSessionId)).then(area => ({ area }), () => ({ failed: true as const }))
+      : { area: null }
+    const stepArea = writeGuard && 'area' in stepLookup ? stepLookup.area : null
     if (writeGuard && stepArea) {
       writeGuard = typeof stepArea === 'string' ? { ...writeGuard, writeArea: { folder: stepArea } }
         // A scheduled job's run: its grant's write area and, for its file reads, its read places (jobs.md).
@@ -544,7 +548,7 @@ export async function startChatServer(config: ChatServerConfig) {
         onDriveOverwrite: card => injector.push({ type: DRIVE_OVERWRITE_PART_TYPE, id: `drive-overwrite-${card.id}`, data: card }),
         // A member's proposal of a time job (jobs.md "Member proposals"): only where the member is present — never an
         // unattended run or a step's consultation (the server refuses a run-bound token too). The card is the app's own.
-        jobProposals: !aiTurnStep && !requestedPluginStep && !stepArea && !requestedStep,
+        jobProposals: !aiTurnStep && !requestedPluginStep && !requestedStep && 'area' in stepLookup && !stepLookup.area,
         onJobProposalCard: card => injector.push({ type: JOB_PROPOSAL_PART_TYPE, id: `job-proposal-${card.id}`, data: card }),
       }, c.req.raw.signal)).catch(() => null) ?? undefined
       : undefined

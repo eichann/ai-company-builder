@@ -391,3 +391,11 @@ export const ADMIN_ONLY_NOTICE_KINDS: readonly NotificationKind[] = ['job_propos
 export function noticeKindsForRole<K extends string>(kinds: readonly K[], fullAccess: boolean | null): K[] {
   return fullAccess === true ? [...kinds] : kinds.filter(k => !(ADMIN_ONLY_NOTICE_KINDS as readonly string[]).includes(k))
 }
+
+/** 「知らせの設定」 as the dialog holds it: the member's switches, why not, and whether they are an owner / admin. */
+export interface NoticeSettingsState { kinds: Record<string, boolean> | null; error: string | null; fullAccess?: boolean | null }
+
+/** One switch changed (or put back): everything else kept — also whether the owner / admin-only kinds are offered. */
+export function settingsAfterSwitch(s: NoticeSettingsState | null, kind: string, value: boolean, error: string | null): NoticeSettingsState | null {
+  return s?.kinds ? { ...s, kinds: { ...s.kinds, [kind]: value }, error } : s
+}

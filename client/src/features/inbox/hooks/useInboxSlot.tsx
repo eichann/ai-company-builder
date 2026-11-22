@@ -7,7 +7,7 @@ import { InboxCardDialog } from '../components/InboxCardDialog'
 import { InboxButton } from '../components/InboxButton'
 import { NoticeSettingsDialog } from '../components/NoticeSettingsDialog'
 import { hasFullAccessIn } from '../api'
-import { bulkSeenIds, hasInboxNews, inboxNewsBaseline, inboxNewsKeys, inboxView, sameKeys, seenWhileShown, type InboxFilter, type InboxItem } from '../model'
+import { bulkSeenIds, hasInboxNews, inboxNewsBaseline, inboxNewsKeys, inboxView, sameKeys, seenWhileShown, settingsAfterSwitch, type InboxFilter, type InboxItem, type NoticeSettingsState } from '../model'
 
 /** A meeting of a department without the task list, with its own buttons (the minutes feature's `titleBarMeetings`). */
 export type InboxMeeting = MeetingTurn & { actions: InboxRowButton[] }
@@ -52,7 +52,7 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, featu
   const [undone, setUndone] = useState<ReadonlySet<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
-  const [settings, setSettings] = useState<{ kinds: Record<string, boolean> | null; error: string | null; fullAccess?: boolean | null } | null>(null)
+  const [settings, setSettings] = useState<NoticeSettingsState | null>(null)
   // What was on screen when the inbox was last shown (memory only: AppShell is keyed by company); `fixed` once
   // every source answered or the panel was shown — before that the rows that arrive are the baseline, not news.
   const [seen, setSeen] = useState<{ keys: ReadonlySet<string>; fixed: boolean } | null>(null)
@@ -121,7 +121,7 @@ export function useInboxSlot({ companyId, notices, meetings = NO_MEETINGS, featu
     setSettings(s => s && (r?.success ? { kinds: r.kinds, error: null, fullAccess } : { kinds: null, error: r?.error ?? '知らせの設定を読めませんでした。' }))
   }
   const switchKind = async (kind: string, on: boolean) => {
-    const put = (value: boolean, err: string | null) => setSettings(s => (s?.kinds ? { kinds: { ...s.kinds, [kind]: value }, error: err } : s))
+    const put = (value: boolean, err: string | null) => setSettings(s => settingsAfterSwitch(s, kind, value, err))
     put(on, null)
     const r = await setNoticeSetting(companyId, kind, on)
     if (!r?.success) put(!on, r?.error ?? '変えられませんでした。')

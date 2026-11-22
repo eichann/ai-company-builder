@@ -2,6 +2,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { JobProposalView } from '../../../../../shared/types/job-proposals'
 import { getMyJobProposals, withdrawMyJobProposal } from '../api'
+import { jobCandidateChanged } from '../../../shared/lib/jobProposalStore'
 
 export function useMyJobProposals(companyId: string, onChanged?: () => void) {
   const [proposals, setProposals] = useState<JobProposalView[] | null>(null)
@@ -29,12 +30,15 @@ export function useMyJobProposals(companyId: string, onChanged?: () => void) {
     try {
       const r = await withdrawMyJobProposal(companyId, proposalId)
       setMessage(r.success ? '取り下げました。この案は動きません。' : r.error)
+      // A chat card showing this proposal reads it again (it said 確認待ち with 「取り下げる」 until now).
+      const candidateId = proposals?.find(p => p.id === proposalId)?.candidateId
+      if (candidateId) jobCandidateChanged(companyId, candidateId)
       await reload()
       onChanged?.()
     } finally {
       setBusy(false)
     }
-  }, [companyId, reload, onChanged])
+  }, [companyId, reload, onChanged, proposals])
 
   return { loadRef, proposals, supported, error, message, busy, withdraw }
 }

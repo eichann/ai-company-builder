@@ -305,3 +305,11 @@ test('a returned proposal\'s notice shows its words and opens 「定期の仕事
   assert.equal(row(returned.id)?.badge.word, '差し戻されました')
   assert.deepEqual(row(arrived.id)?.action, { kind: 'none' })
 })
+
+test('知らせの設定: switching a kind keeps whether the owner / admin-only kinds are offered (Codex P2 of PR C)', async () => {
+  const { settingsAfterSwitch } = await import('./model')
+  const s = { kinds: { asked: true, job_proposal: true }, error: null, fullAccess: true }
+  assert.deepEqual(settingsAfterSwitch(s, 'asked', false, null), { kinds: { asked: false, job_proposal: true }, error: null, fullAccess: true })
+  assert.equal(settingsAfterSwitch(s, 'asked', true, '変えられませんでした。')?.fullAccess, true)
+  assert.equal(settingsAfterSwitch(null, 'asked', true, null), null)
+})

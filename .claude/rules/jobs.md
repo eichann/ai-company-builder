@@ -1559,7 +1559,11 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     `jobProposalStore.ts` + `hooks/useJobProposal.ts`, loaded on first subscribe — no effect): the reply holds only a
     reference (data part `data-job-proposal`, `JobProposalCardRef` with the candidate id **the server answered**, never the
     AI's input; stored with the message as `jobProposals`, in `cardOrder`), and the card reads the candidate with the
-    member's **session** each time it is shown (IPC `jobProposals:candidate` → `GET /me/job-candidates/:id`): only a
+    member's **session** each time it is shown — **never a cache across showings** (review of PR C, Codex P2):
+    `src/shared/lib/jobProposalStore.ts` (shared by the card and 「出した案」) keeps an answer only while a card shows it, drops it
+    when the last card goes (a reopened conversation reads again: an approval / return since, a candidate withheld since),
+    keeps a failed read only on screen with 「読み直す」 (`reloadJobCandidate`), and a 「取り下げる」 in 「出した案」 makes a card on
+    screen read again (`jobCandidateChanged`; a read on its way is followed by one more) (IPC `jobProposals:candidate` → `GET /me/job-candidates/:id`): only a
     definition the one parser reads as schema 4 with a `sha256:<hex>` fingerprint and the asked id is shown
     (`readShownCandidate`) — anything else is not shown and cannot be submitted. It says (§8-6, `jobCandidateLines` over the
     shared job words): when it checks 「（会社の時刻で）」, what makes it run, what it does (the member is the responsible person),
@@ -1581,6 +1585,8 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     registered by that module alone; no chat-server route, AI tool or record token reaches it; in the renderer only the chat
     card's data layer (`src/features/chat/api.ts` `JobProposalCardPort`) and the card call it. Renderer values never shape
     the path (`isJobCandidateId`, `isJobProposalId`, the fingerprint's shape, the company id).
+  - **The chat server's flag fails closed** (review L3): the step lookup (`stepWriteArea`) is asked whenever it exists — also
+    without a write guard — and a lookup that threw or rejected (a timeout) counts as a step: no tools.
   - **Refusals** are the app's fixed words by code (`jobProposalRefusalText`: #751's codes, `JOB_NEEDS_NEWER_*`), an unknown
     code a general sentence — never the server's text; a proposal's `submittedFingerprint` is kept only as the server
     answered it (`readProposalView`: withheld → null, never shown anyway).
@@ -1597,13 +1603,17 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     ignored. The rollback floor (6760eef3): the same (no proposal routes), and a schema-4 job there is `needsUpdate` — the
     app's list says it cannot show it, as for any shape a server withholds.
   - Test: `client/tests/job-proposal-tools.test.ts` (offered / not offered: the flag, a read token, a run-bound token; the
-    chat server's flag for a consultation, a job run and a step consultation; the card's id from the server; a 404; no file
+    chat server's flag for a consultation, a job run, a built-in 「AI の番」 step and a step consultation, and failing closed; the card's id from the server; a 404; no file
     but the session module names the submit route or registers its IPC, only the card calls it), `job-proposals-ipc.test.ts`,
     `job-proposals-card.test.ts` (the press's values, states, the §8-6 words, stored / restored in order),
+    `src/shared/lib/jobProposalStore.test.ts` (no failure sticks, re-read on reopen, 読み直す, a withdrawal elsewhere),
     `job-screen-schemas.test.ts` (schema 4's words, header `1,2,3,4`), `jobs-ipc.test.ts`, `src/features/inbox/model.test.ts`,
-    `src/features/jobs/model.test.ts`. Mutation check: 36 guards removed or inverted one at a time; each fails a test except
+    `src/features/jobs/model.test.ts`. Mutation check: 36 guards removed or inverted one at a time, then 12 after the reviews (the store's six, the settings keeping
+    `fullAccess`, the flag's fail-closed lookup — its failure mark, the synchronous throw, asked without a guard —, the built-in
+    step); each fails a test except
     the forwarding of the flag in `features/chat/server-config.ts` (a pass-through; the option's default is off, so a dropped
-    flag offers nothing). Of the chat server's flag, `!aiTurnStep` / `!requestedStep` / `!stepArea` each alone suffice for a
+    flag offers nothing), and — not node-tested, UI only — the card's 「読み直す」 button and the 「出した案」 hook calling
+    `jobCandidateChanged` (the store functions themselves are). Of the chat server's flag, `!aiTurnStep` / `!requestedStep` / `!stepArea` each alone suffice for a
     job run (all three hold), `!stepArea` alone for a step consultation; `!requestedPluginStep` (a step consultation's first
     turn, whose binding is refused or binds it) is defence.
 - **The rollback floor** (6760eef3, knows `[1, 2]`): a schema-4 job is listed by name only, its versions without definition or

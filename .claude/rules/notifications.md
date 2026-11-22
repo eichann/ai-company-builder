@@ -351,7 +351,7 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   「知らせの設定」 (one checkbox per kind, `NOTIFICATION_KIND_LABELS`; none for a kind of a feature
   that is off in 「使う機能」, `noticeKindsShown`, `records.md` "Features on and off"; none of the owner / admin-only kinds
   `job_proposal` / `job_paused` unless the member is an owner / admin — `noticeKindsForRole`, the role read with the
-  dialog through `api:getCompanies`, not known → not offered) opens from the inbox's heading (`NoticeSettingsDialog`). Opening a row marks only its notices read.
+  dialog through `api:getCompanies`, not known → not offered; switching one keeps it, `settingsAfterSwitch`) opens from the inbox's heading (`NoticeSettingsDialog`). Opening a row marks only its notices read.
 - **Arrived minutes** (owner decision 2026-11-07): where the department shows no task list, the
   meetings that arrived and nobody asked the AI to read (`arrived`) are rows of the 「会議」 part too,
   needing a person, with ［AI に読ませる］ (`arrivedMeetingTurns`, `client/shared/notifications-app.ts`;

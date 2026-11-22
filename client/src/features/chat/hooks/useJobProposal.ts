@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import { getJobCandidate, type JobProposalCardPort } from '../api'
-import { jobProposalEntry, jobProposalKey, subscribeJobProposal } from '../jobProposalStore'
+import { jobProposalEntry, jobProposalKey, subscribeJobProposal } from '../../../shared/lib/jobProposalStore'
 
 /** One job proposal candidate as the server last answered it (loaded with the member's session when first shown). */
 export function useJobProposal(companyId: string, candidateId: string, port?: JobProposalCardPort) {

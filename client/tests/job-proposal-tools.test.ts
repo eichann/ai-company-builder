@@ -116,13 +116,13 @@ test('nothing the AI reaches submits: only the session IPC names the submit rout
   assert.deepEqual(renderer.map(f => path.relative(path.join(here, '..'), f)).sort(), ['src/features/chat/api.ts', 'src/features/chat/components/JobProposalCard.tsx'])
 })
 
-async function chatTurn(body: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+async function chatTurn(body: Record<string, unknown>, extra: Record<string, unknown> = {}, guard = true) {
   const { startChatServer } = await import('../electron/chat-server')
   const asked: Array<boolean | undefined> = []
   const server = await startChatServer({
     getAuthMode: () => 'claude-code', getApiKey: () => undefined, buildSystemPrompt: () => '', getShellEnv: () => ({}),
     getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude', listenPort: 0,
-    getWriteGuard: () => ({ root: os.tmpdir(), getAccess: () => undefined }),
+    ...(guard ? { getWriteGuard: () => ({ root: os.tmpdir(), getAccess: () => undefined }) } : {}),
     createRecordTools: async request => { asked.push(request.jobProposals); return null },
     ...extra,
   })
@@ -147,4 +147,14 @@ test('the chat server offers them to an ordinary consultation only — never a j
   assert.deepEqual(await chatTurn({ appSessionId: 'conv-job-00001', aiTurnStep: 'job-procedure' }, ceiling), [false])
   // A person step's consultation (bound to the step, its write area set) is never offered them either.
   assert.deepEqual(await chatTurn({ appSessionId: 'conv-step-0001' }, { stepWriteArea: async () => 'sales/.personal/deal-1' }), [false])
+  // A built-in 「AI の番」 step (no write area of its own).
+  assert.deepEqual(await chatTurn({ appSessionId: 'conv-turn-0001', aiTurnStep: 'minutes-reading' }), [false])
+})
+
+test('fails closed: a step lookup that did not answer, or a step consultation without a write guard, gets no tools', async () => {
+  assert.deepEqual(await chatTurn({ appSessionId: 'conv-step-0002' }, { stepWriteArea: async () => { throw new Error('timeout') } }), [false])
+  assert.deepEqual(await chatTurn({ appSessionId: 'conv-step-0003' }, { stepWriteArea: () => { throw new Error('sync') } }), [false])
+  assert.deepEqual(await chatTurn({ appSessionId: 'conv-step-0004' }, { stepWriteArea: async () => 'sales/.personal/deal-1' }, false), [false])
+  // An ordinary consultation the lookup answers "none" for still gets them.
+  assert.deepEqual(await chatTurn({ appSessionId: 'conv-plain-0002' }, { stepWriteArea: async () => null }), [true])
 })

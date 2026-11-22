@@ -6,8 +6,8 @@ import {
   JOB_CANDIDATE_GONE_TEXT, JOB_CANDIDATE_NOTES, JOB_PROPOSAL_READ_AGAIN_CODES, jobCandidateLines, jobProposalCardState, jobProposalStateLine,
   jobProposalStateWord, type JobProposalCardRef,
 } from '../../../../shared/job-proposals'
-import { getJobCandidate, submitJobProposal, withdrawJobProposal, type JobProposalCardPort } from '../api'
-import { putJobProposal } from '../jobProposalStore'
+import { submitJobProposal, withdrawJobProposal, type JobProposalCardPort } from '../api'
+import { putJobProposal, reloadJobCandidate } from '../../../shared/lib/jobProposalStore'
 import { useJobProposal } from '../hooks/useJobProposal'
 
 const STATE_BADGE: Record<string, 'awaiting' | 'success' | 'warning' | 'paused' | 'neutral'> = {
@@ -26,7 +26,7 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
   const [message, setMessage] = useState<{ tone: StateBoxTone; text: string } | null>(null)
   const state = jobProposalCardState(result)
 
-  const readAgain = async () => putJobProposal(key, await (port ? getJobCandidate(card.companyId, card.candidateId, port) : getJobCandidate(card.companyId, card.candidateId)))
+  const readAgain = () => reloadJobCandidate(key)
 
   const submit = async (candidateId: string, fingerprint: string) => {
     if (busy) return
@@ -39,7 +39,7 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
         return
       }
       setMessage({ tone: r.offline ? 'info' : 'error', text: r.offline ? `${r.error} 出せたかどうかは、開き直すと分かります（もう一度押しても二重には出されません）。` : r.error })
-      if (r.code && JOB_PROPOSAL_READ_AGAIN_CODES.includes(r.code)) await readAgain()
+      if (r.code && JOB_PROPOSAL_READ_AGAIN_CODES.includes(r.code)) readAgain()
     } finally {
       setBusy(false)
     }
@@ -54,7 +54,7 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
       if (r.success) putJobProposal(key, { success: true, candidate: state.candidate, proposal: r.proposal })
       else {
         setMessage({ tone: r.offline ? 'info' : 'error', text: r.error })
-        if (r.code && JOB_PROPOSAL_READ_AGAIN_CODES.includes(r.code)) await readAgain()
+        if (r.code && JOB_PROPOSAL_READ_AGAIN_CODES.includes(r.code)) readAgain()
       }
     } finally {
       setBusy(false)
@@ -65,6 +65,8 @@ export const JobProposalCard = memo(function JobProposalCard({ card, port }: { c
     return (
       <div role="group" aria-label="定期の仕事の案" className={`my-2 rounded-card border p-3 text-small text-text-muted ${STATE_BOX.plain}`}>
         {state.kind === 'loading' ? '定期の仕事の案を読み込んでいます…' : state.kind === 'error' ? state.text : JOB_CANDIDATE_GONE_TEXT}
+        {/* A failed read (offline, the server's error) is never kept: ask again here, or it is read again when shown next. */}
+        {state.kind === 'error' && <Button size="sm" variant="secondary" className="ml-2" onClick={readAgain}>読み直す</Button>}
       </div>
     )
   }

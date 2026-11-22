@@ -18,7 +18,7 @@ export function JobProposals({ companyId, jobs, onChanged }: { companyId: string
       {supported && rows.length > 0 && (
         <Card className="space-y-2 p-5">
           <SubHeading>出した案</SubHeading>
-          <ul aria-label="出した案" className="divide-y divide-[color:var(--color-border)]">
+          <ul aria-label="出した案" className="divide-y divide-border">
             {rows.map(row => (
               <li key={row.id} aria-label={row.name} className="flex flex-wrap items-center gap-2 py-2 text-body">
                 <span className="font-strong text-text">{row.name}</span>
