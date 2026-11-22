@@ -13,7 +13,10 @@ export interface NotificationRow {
   /** '' for a notice about no record (the morning summary). */
   recordId: string
   recordVersion: number
-  /** The ledger action it came from ('' for a computed notice: overdue, AI turn stuck, morning summary, due tomorrow). */
+  /**
+   * The ledger action it came from ('' for a computed notice: overdue, AI turn stuck, morning summary, due tomorrow). A
+   * recordless notice brought back once (`remindOnce`: a stopped chain's reminder) carries that reminder's mark here.
+   */
   action: string
   actorId: string | null
   actorKind: 'human' | 'ai' | 'external' | null
@@ -32,6 +35,12 @@ export interface NotificationRow {
 export interface NotificationRepository {
   /** Insert these notices; a row whose dedupe key the member already has is skipped. The ids written. */
   insert(rows: NotificationRow[]): string[]
+  /**
+   * Bring the member's notice with this dedupe key back once (jobs.md "A stopped chain", its reminder): unread again,
+   * dated `at` (so it is on top) and marked `mark` (its `action`) — only while its `action` is still '' (compare-and-set:
+   * once, however many clocks, restarts or servers ask). Whether it was brought back now.
+   */
+  remindOnce(userId: string, dedupeKey: string, mark: string, at: string): boolean
   /** The members of this company who already have a notice with this dedupe key. */
   usersWithKey(dedupeKey: string): string[]
   /** The member's newest notices (newest first), at most `limit`. */

@@ -2,7 +2,7 @@
  * What the cross-build check expects every build to keep as 4b-1 wrote it (SQL only, so the floor build runs it as is):
  * the versions, the watch (record, generation, its stop), the occurrences' identity (not their state: a stop may hold
  * them), the runs and their operations' identity (a stop may make one in flight unknown), the Drive receipts, the
- * notices, and the やること the occurrences made (nothing made twice, nothing made by a build that must not run them).
+ * notices (with a reminder's mark; not their read state), and the やること the occurrences made (nothing made twice, nothing made by a build that must not run them).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = { prepare(sql: string): { all(...args: unknown[]): any[] } }
@@ -18,7 +18,8 @@ export function crossBuildSnapshot(db: Db, co: string) {
     runs: all("SELECT id, subject_kind, record_id, step, user_id, generation, created_at FROM ai_runs WHERE company_id = ? AND subject_kind = 'occurrence' ORDER BY id"),
     operations: all('SELECT run_id, key, kind, ref_kind, ref_id FROM ai_run_operations WHERE company_id = ? ORDER BY run_id, key'),
     puts: all('SELECT * FROM google_drive_puts WHERE company_id = ? ORDER BY id'),
-    notices: all("SELECT id, user_id, kind, dedupe_key FROM notifications WHERE company_id = ? AND kind LIKE 'job_%' ORDER BY id"),
+    // `action`: a stop notice brought back once (its reminder) keeps its mark — no build reminds it twice.
+    notices: all("SELECT id, user_id, kind, dedupe_key, action FROM notifications WHERE company_id = ? AND kind LIKE 'job_%' ORDER BY id"),
     made: all(`SELECT id FROM records WHERE company_id = ? AND type = 'task' AND id IN (SELECT 'task-' || substr(id, 5) FROM ai_job_occurrences WHERE company_id = records.company_id) ORDER BY id`),
   }
 }

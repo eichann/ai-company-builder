@@ -33,6 +33,10 @@ export function sqliteNotificationRepository(conn: Database.Database, companyId:
       })()
       return written
     },
+    remindOnce(userId, dedupeKey, mark, at) {
+      return conn.prepare(`UPDATE notifications SET read_at = NULL, created_at = ?, action = ?
+          WHERE company_id = ? AND user_id = ? AND dedupe_key = ? AND action = ''`).run(at, mark, companyId, userId, dedupeKey).changes === 1
+    },
     usersWithKey(dedupeKey) {
       return (conn.prepare('SELECT user_id FROM notifications WHERE company_id = ? AND dedupe_key = ?').all(companyId, dedupeKey) as Array<{ user_id: string }>).map(r => r.user_id)
     },

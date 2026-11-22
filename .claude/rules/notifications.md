@@ -262,7 +262,11 @@ compare-and-set and ledger), and writes notices.
   day's limit included: its one notice) — to its responsible person (always; plain words when they do not read the
   watched record) and to the job's creator only while an owner / admin who reads that record at that moment; once per
   stop, recordless; built when read and shown to anyone but the responsible person only while they still read the record
-  (stage 4b-0.2, D7 = A: every stop is record-side; a non-reader gets no row, count or push). An
+  (stage 4b-0.2, D7 = A: every stop is record-side; a non-reader gets no row, count or push). **A stop that stands for
+  3 days** (`CHAIN_STOP_REMIND_AFTER_MS`), with the job not written since and the company's records on, brings the
+  responsible person's own row back once — unread, dated now, its
+  `action` set to `reminded` (`CHAIN_STOP_REMINDED`, the repository's `remindOnce` compare-and-set) and worded
+  「…は11月18日から止まったままです（…）」; no new row, kind or key (`jobs.md` "A stopped chain"). An
   occurrence notice of an event occurrence reaches only those who read its record (and is shown only while they do).
 
 ## The push signal

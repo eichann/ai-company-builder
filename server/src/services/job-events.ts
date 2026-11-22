@@ -23,6 +23,8 @@
  *   nothing is made, the job is never paused for it, and the chain stops — told once (`job_chain_stopped`), the limit as
  *   its cause (owner decision: one notice).
  * - **Who sees an event occurrence** (⑥, `eventShown`): only someone who reads its record now — owners and admins too.
+ * - **A chain that stays stopped** (`remindStoppedChains`): its responsible person's own stop notice comes back once,
+ *   `CHAIN_STOP_REMIND_AFTER_MS` after the stop, while they can still act on it.
  */
 import {
   eventDueSlot, isEventOccurrenceSlot, isRecordTrigger, ledgerRowIsEvent, storedJobDefinition, triggerMatches,
@@ -35,7 +37,7 @@ import type { CompanyData } from '../ports/company-data'
 import type { JobOccurrenceRow, JobRow } from '../ports/jobs'
 import type { Transactions } from '../ports/transactions'
 import type { Member } from './access'
-import { companyNow } from './notifications'
+import { CHAIN_STOP_REMINDED, companyNow } from './notifications'
 import { recordReader } from './record-access'
 import { currentTypes } from './record-index'
 
@@ -43,6 +45,13 @@ import { currentTypes } from './record-index'
 export const EVENT_ROWS_PER_TICK = 500
 /** How many of a watched record's rows a skipped stretch (an older build's pause, a content not accepted) is checked over. */
 const DROPPED_ROWS_CHECKED = 5000
+
+/**
+ * How long a chain stays stopped before its one reminder (jobs.md "A stopped chain"): 3 days. A stop on a Friday evening
+ * comes back on Monday evening — after a weekend nobody reads the bell, not before — and a daily chain has not been
+ * silently off for a whole week. One reminder only: after it the stop stays shown in 「定期の仕事」 as before.
+ */
+export const CHAIN_STOP_REMIND_AFTER_MS = 3 * 24 * 60 * 60_000
 
 /** The states where it is the AI's turn for a type, from the business plugins' steps (plugin-steps.ts). */
 export type AiStepStates = (companyId: string, type: string) => ReadonlySet<string>
@@ -137,6 +146,8 @@ export function createJobEvents(deps: JobEventDeps) {
   const log = deps.log ?? ((message: string) => console.log(message))
   /** Jobs whose scan failed last time: logged once while it keeps failing. */
   const failing = new Set<string>()
+  /** Jobs whose reminder check failed last time (logged once while it keeps failing). */
+  const remindFailing = new Set<string>()
 
   const memberOf = (companyId: string, userId: string): Member | null => {
     const role = deps.roleOf(companyId, userId)
@@ -196,6 +207,56 @@ export function createJobEvents(deps: JobEventDeps) {
       dedupeKey: `job_chain_stopped:${jobId}:${at}`, createdAt: at, readAt: null,
     })))
     if (written.length > 0) for (const u of to) told.add(u)
+  }
+
+  /**
+   * A chain that stays stopped (jobs.md "A stopped chain", its reminder): `CHAIN_STOP_REMIND_AFTER_MS` after the stop,
+   * the responsible person's **own stop notice comes back once** — unread again, on top, worded 「止まったままです」 — and
+   * nothing new is written (no new kind or key: a build that does not know the reminder, the rollback floor included,
+   * shows and hides that row exactly as before). Only while they can act on it and nothing changed since: the job active
+   * (not paused, retired or under the company's stop), **not written since the stop** (`ai_jobs.updated_at`: no approval —
+   * also an older version approved again —, edit, acceptance, pause or resume after it, so its approved version and
+   * responsible person are the ones the stop was told about), its approved content accepted, the responsible person a
+   * member who **reads the stop's record now** (never anyone who cannot: the safe side of D7's exception), and that very
+   * stop still standing (a choice made again, the watch moved, a new stop: another key). While the company's records are
+   * off nothing is looked at (the reminder waits; it is not used up). Every check and the compare-and-set on the row's
+   * mark are one transaction: once per stop. Nobody else is touched.
+   */
+  function remindStoppedChains(handle: CompanyData, stopped: boolean, told: Set<string>): void {
+    if (stopped || !handle.records.settings().enabled) return
+    const nowMs = clock.nowMs()
+    for (const job of handle.jobs.list()) {
+      // Each job on its own, as the scan: one that fails never holds another back. Logged once while it keeps failing;
+      // not while its scan's failure is logged already — and so logged once that has passed, if this still fails.
+      try {
+        remindOne(handle, job.id, nowMs, told)
+        remindFailing.delete(job.id)
+      } catch (error) {
+        if (failing.has(job.id)) continue
+        if (!remindFailing.has(job.id)) log(`[job-events] company ${handle.companyId} job ${job.id} reminder failed: ${error instanceof Error ? error.name : 'unknown error'}`)
+        remindFailing.add(job.id)
+      }
+    }
+  }
+
+  /** One job's part of `remindStoppedChains`: a cheap look first, then everything again with the write. */
+  function remindOne(handle: CompanyData, jobId: string, nowMs: number, told: Set<string>): void {
+    const due = (stop: { at: string } | null): stop is { at: string } => stop !== null && nowMs - Date.parse(stop.at) >= CHAIN_STOP_REMIND_AFTER_MS
+    const seen = handle.jobs.eventCursor(jobId)?.chainStop ?? null
+    if (!due(seen)) return
+    transactions.run(() => {
+      const job = handle.jobs.find(jobId)
+      const stop = handle.jobs.eventCursor(jobId)?.chainStop ?? null
+      if (!due(stop) || !job || job.state !== 'active' || job.approvedVersion === null) return
+      if (Date.parse(job.updatedAt) > Date.parse(stop.at)) return
+      const version = handle.jobs.version(jobId, job.approvedVersion)
+      const definition = version ? storedJobDefinition(version) : null
+      if (!version || !definition || !isRecordTrigger(definition.trigger)) return
+      if (job.acceptedConsent === null || job.acceptedConsent !== version.consentFingerprint) return
+      const responsible = memberOf(handle.companyId, version.actingUserId)
+      if (!responsible || readableRow(handle, responsible, stop.record) === null) return
+      if (handle.notifications.remindOnce(responsible.userId, `job_chain_stopped:${jobId}:${stop.at}`, CHAIN_STOP_REMINDED, clock.now())) told.add(responsible.userId)
+    })
   }
 
   /**
@@ -337,7 +398,7 @@ export function createJobEvents(deps: JobEventDeps) {
     })
   }
 
-  return { scan, recheck, chainStopped, dropUntilNow }
+  return { scan, recheck, chainStopped, dropUntilNow, remindStoppedChains }
 }
 
 export type JobEvents = ReturnType<typeof createJobEvents>

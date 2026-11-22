@@ -2,7 +2,8 @@
  * Cross-build check, step 1 of 3 (this build): a database as 4b-1 leaves it in production — event jobs run by the PC
  * (schema 3), a running event run with a Drive put in flight and a receipt, an occurrence whose outside result nobody
  * knows (its chain stopped, its notices written), a watch that moved to the やること a run made and a waiting occurrence of
- * the new watch. Step 2 runs the rollback floor's code on it, step 3 this build again (.github/scripts/rollback-floor-check.sh).
+ * the new watch; and a server event job (schema 2) whose chain stopped days ago and whose stop notice this build brought
+ * back once (its reminder). Step 2 runs the rollback floor's code on it, step 3 this build again (.github/scripts/rollback-floor-check.sh).
  * Skipped unless `ACB_CROSS_BUILD_DB` names the file.
  */
 import { CROSS_DB, saveDb } from './use-db'
@@ -93,6 +94,42 @@ describe.skipIf(!CROSS_DB)('cross-build 1/3: a database as 4b-1 leaves it', () =
         VALUES (?, ?, ?, 'f', 'drive-put', ?, 1, ?, ?, ?, ?)`).run(CO, runId, key, state, ref ? 'drive-put' : null, ref, now, now)
     }
 
+    // J4: a server event job (schema 2, which the floor runs too) whose chain stopped four days ago (completed while
+    // paused); alice read the stop notice. This build's clock brings her notice back once (the reminder) — the floor
+    // must show that row as the stop notice it always was, and nothing reminds it twice.
+    const DAY = 24 * 60 * 60_000
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.now() - 4 * DAY)
+    let j4: string
+    let j4Stop: string
+    try {
+      const start = task('面談の日程')
+      const definition = {
+        schema: 2, name: '日程の次', actingUser: 'xb-alice',
+        trigger: { kind: 'record', type: 'task', event: 'state', to: 'done', assignee: 'responsible', startRecord: start, followMadeTask: true },
+        check: { kind: 'none' }, run: { kind: 'operation', operation: 'create_task', title: '次の日程を決める', dueBusinessDays: null },
+        placement: 'e', missed: { policy: 'latest_only', expiresAfterMinutes: 1440 },
+        grant: { tools: [], creates: ['task'], routes: [], reads: { paths: [], calls: [] }, writes: { area: 'none' }, outbound: 'none', limits: { minutes: 5, runsPerDay: 5 } },
+      }
+      j4 = ok(await services.jobs.create(owner, { definition }, READS_3)).id
+      ok(await services.jobs.approve(owner, j4, { version: 1 }, READS_3))
+      ok(await services.jobs.accept(alice, j4, { version: 1 }, READS_3, true))
+      ok(services.jobs.pause(owner, j4))
+      await complete(start)
+      ok(await services.jobs.resume(owner, j4))
+      tick()
+      j4Stop = (db.prepare('SELECT chain_stop_at AS at FROM ai_job_event_cursors WHERE company_id = ? AND job_id = ?').get(CO, j4) as Json).at
+      expect(j4Stop).not.toBeNull()
+      ok(services.notifications.markRead(alice, { all: true }))
+    } finally {
+      vi.useRealTimers()
+    }
+    tick()
+    const j4Rows = () => db.prepare("SELECT user_id, action, read_at IS NULL AS unread FROM notifications WHERE company_id = ? AND dedupe_key = ? ORDER BY user_id")
+      .all(CO, `job_chain_stopped:${j4}:${j4Stop}`)
+    // Alice's is back (unread, marked); the creator's (the owner reads the record) is as it was.
+    expect(j4Rows()).toEqual([{ user_id: 'xb-alice', action: 'reminded', unread: 1 }, { user_id: 'xb-owner', action: '', unread: 1 }])
+
     // J1: running, a put done (its receipt) and another in flight.
     const j1 = await eventJob('報告書A')
     const o1 = occurrenceOf(j1.job, 'due')
@@ -122,6 +159,7 @@ describe.skipIf(!CROSS_DB)('cross-build 1/3: a database as 4b-1 leaves it', () =
     expect(db.prepare('SELECT state, outcome_code FROM ai_job_occurrences WHERE company_id = ? AND id = ?').get(CO, o4)).toEqual({ state: 'needs_person', outcome_code: 'RESULT_UNKNOWN' })
     expect((db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE company_id = ? AND kind IN ('job_failed', 'job_chain_stopped')").get(CO) as Json).n).toBeGreaterThan(0)
 
-    saveDb(db, { CO, jobs: { j1: j1.job, j2: j2.job, j3: j3.job }, occ: { o1, o3, o4 }, runs: { r1: r1.id, r4: r4.id }, before: crossBuildSnapshot(db, CO) })
+    expect(j4Rows()).toEqual([{ user_id: 'xb-alice', action: 'reminded', unread: 1 }, { user_id: 'xb-owner', action: '', unread: 1 }])
+    saveDb(db, { CO, j4: { job: j4, stop: j4Stop }, jobs: { j1: j1.job, j2: j2.job, j3: j3.job }, occ: { o1, o3, o4 }, runs: { r1: r1.id, r4: r4.id }, before: crossBuildSnapshot(db, CO) })
   })
 })

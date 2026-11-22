@@ -284,6 +284,8 @@ export function createJobOccurrences(deps: JobOccurrenceDeps) {
     }
     // Event-triggered jobs (stage 4a): what happened since each one's cursor, bounded per tick.
     changed += events.scan(handle, stopped, told)
+    // A chain stopped for days: its responsible person's stop notice comes back once (not counted: nothing is made).
+    events.remindStoppedChains(handle, stopped, told)
     // A PC's run (B PR 5a), in this order:
     // - past its hard deadline (first claim + approved minutes; renewing never moves it) → the run ended,
     //   `needs_person` `TIME_LIMIT`, told — also while its app still holds and renews it;

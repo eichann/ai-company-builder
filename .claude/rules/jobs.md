@@ -1073,7 +1073,8 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   skip), or its occurrence ended without its やること (held, skipped — absent, assignee changed,
   unreadable, 「AI の番」 —, expired, needs a person) — the cursor keeps why, on which record and when
   (`chain_stop_code` / `_record` / `_at`, `stopChain`: once per stop), and it is told once (`job_chain_stopped`,
-  recordless, key `job_chain_stopped:<job>:<at>`, shown while that very stop stands). **Who learns of a stop** (stage
+  recordless, key `job_chain_stopped:<job>:<at>`, shown while that very stop stands; brought back once to the responsible
+  person when it stands for 3 days, below). **Who learns of a stop** (stage
   4b-0.2, owner decision D7 = A, 2026-11-21 — before it, the creator and every owner / admin were shown it, in plain
   words when they did not read the record, which still told them that something happened to it and when): **every stop
   is record-side** — each happens because the watched record reached the watched state, so even the day's limit, an
@@ -1102,6 +1103,45 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   so a completion between approval and acceptance stops the chain even before the clock looked. The app's 「定期の仕事」 shows the stop and 「見張るやることを選び直す」
   (`jobs:watchChoices` — their own open やること by name — and `jobs:rewatch`); the admin list shows it to an owner / admin who reads the stop's record now (D7 = A; an admin may also
   「直す」 the start record; the responsible person then accepts).
+- **A chain that stays stopped is reminded once** (owner-approved, its own PR after 4b-2; `remindStoppedChains` in
+  `job-events.ts`, run by the clock after the scan): `CHAIN_STOP_REMIND_AFTER_MS` (**3 days**: a stop on a Friday evening
+  comes back on Monday evening, after a weekend nobody reads the bell; a daily chain is not silently off for a week)
+  after the stop, the responsible person's **own stop notice comes back** — unread again, dated now (on top), its
+  `action` set to `reminded` (`CHAIN_STOP_REMINDED`), worded 「定期の仕事「…」は11月18日から止まったままです（cause）。次に見張るやることを選び直してください」
+  (the cause as `chainOf` words it when read: no title once they no longer read the record). **Nothing new is written**
+  — no row, kind or key — so a build that does not know the reminder (the rollback floor 4b-0.5 included) shows and
+  hides that row exactly as the stop notice it always was (its key's `<at>` still the standing stop). **Only while they
+  can act on it and nothing changed since the stop**: the job `active` (not paused, retired or under the company's
+  stop), **not written since the stop** (`ai_jobs.updated_at` ≤ the stop's time: no approval — also an older version
+  approved again, which leaves that version's `approved_at` as it was, so the versions cannot say who was responsible at
+  the stop (independent review / Codex of this PR) —, no edit, acceptance, pause or resume after it; so the approved
+  version and its responsible person are the ones the stop was told about, and a new responsible person — also the
+  creator, who was told as creator — is never reminded; decision on the safe side: a pause and resume after the stop,
+  or an admin's draft, also ends the reminder, and the stop stays shown in 「定期の仕事」), the approved content accepted,
+  the responsible person a member who **reads the stop's record now** (decision on the safe side: narrower than D7's
+  exception for the first notice — someone who cannot read it is not reminded), and that very stop still standing. A
+  cheap look at the stop's age first, then **every check again inside the write's transaction** with the compare-and-set.
+  **While the company's records are off** nothing is looked at: the reminder is not used up and comes once they are on
+  again, if the chain is still stopped. **Once per stop**: `remindOnce` brings the row back only while its `action` is
+  still '' (compare-and-set in SQL: two clocks, a restart or two servers bring it back once); a choice made again or a
+  moved watch ends the stop, and a later stop has its own key, notice and reminder. Nobody else's row is touched (the
+  creator's stays as it was); the push signal goes to the responsible person only. Each job on its own (one that throws
+  holds none back, logged once; not while its scan's failure is logged already — and logged once that has passed, if
+  the reminder still fails). **The first clock pass after this build is deployed** reminds, at once, every stop that is
+  already older than 3 days and still meets the checks (known and left so: production had no event jobs when it
+  shipped). Test: `job-events.test.ts` "a chain that stays stopped: one reminder to the responsible person" (not before
+  3 days; once, on top, unread, the words, pushed to her alone; never again after two passes and a restart; not after a
+  choice made again, and a second stop reminded again; not while paused, retired, a content not accepted — nor after the
+  resume; not under the company's stop; records off waits and then comes; not to a new responsible person who was the
+  creator; an older version approved again around the stop (v1 Alice, v2 the owner, v1 again, the stop, v2 again): no
+  reminder to the owner's creator row; not when the record is no longer hers to read, or she left — once reminded, a
+  record lost since worded plainly; a stop ended by another server before the write; a job that throws; a reminder
+  failing while the scan fails, logged after the scan recovers), and the cross-build check (`server/tests/cross-build/`:
+  a schema-2 job reminded by this build is shown by the floor as the plain stop notice, to alice only, and is not
+  reminded again on return). Mutation check: 18 guards removed or inverted one at a time (the age, active, the
+  company's stop, records off, accepted, written since the stop, reading the record, the compare-and-set, unread, on
+  top, the push, the words, the per-job catch, its log once, quiet while the scan's failure is logged, not marked while
+  quiet, the stop read again in the write, the clock's call); each fails a test.
 - **Who sees an event occurrence** (⑥, `eventShown`): only someone who reads its record now — owners and admins too.
   `GET /jobs/:jobId/occurrences` leaves the others out **before** the limit (page by page), the job's `lastOccurrence` is
   the newest the viewer may see, a notice is written only to those who read it then and shown only while they still do,
@@ -1254,9 +1294,6 @@ and やること. Stopping the AI on the PC when the server cannot be reached (a
   place outside"). After the independent review: `hides` ending the run, the claim's 404 before the locks and its
   write only for an app of the kind, `viewFor`'s retry-only view, `mine`'s paging — 5 mutations, each fails.
 
-- **Not built (left out of 4b-2)**: a second notice when a chain stays stopped for days (owner memo: remind the responsible
-  person once more). It is the server's clock and the bell (a new key shape the rollback floor's reader must also hide), so
-  it is its own small server PR; today the stop is told once and stays visible in the app's 「定期の仕事」 until chosen again.
 - Test (4b-2): `client/tests/job-runs-fail-closed.test.ts` (A1: renew 404 / 403 / 409 / 401, a renew that hangs, no server, 5xx
   past the window, a token call refused for a run-ending reason — and not for a tool's own refusal; A2: a late success, a
   success naming another run, an older hold's late 200 / 409 after a re-claim; A3: the list's and the event claim's names, a
