@@ -264,7 +264,7 @@ D7–D9, confirmed 2026-10-30).
   another tree shape → the first look (left 260, chat 416: today's first look). A divider is
   keyboard-operable (`role="separator"` with `aria-valuenow/min/max`, arrows 16 px, Shift 64, Home /
   End), double-click puts that pane back to its first size, and while dragging the size shows beside
-  the pointer (「340px（画面の 27%）」). **Hidden panes**: the left column (⌘B `layout.toggleLeft`, the
+  the pointer (「340px（画面の 27%）」). **Hidden panes**: the left column (⌘B `layout.toggleLeft`; on a Mac never Ctrl+B, a text field's key, the
   title bar's 「画面の形」 buttons, the 24 px strip) and the chat (⌘⇧C, the same buttons, dragging it
   60 px under its minimum) are hidden in `AppShell` state and **not saved** (every pane shows at the
   next start); a left tab chosen while the column is hidden (⌘⇧F, 今日のフォルダ, 「あなたの番」)

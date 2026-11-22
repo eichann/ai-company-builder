@@ -56,6 +56,7 @@ import { useAutoSync } from '../features/sync/hooks/useAutoSync'
 import { forgetNotices } from '../features/sync/lastingNotice'
 import { DepartmentDownloadPrompt } from '../features/sync/components/DepartmentDownloadPrompt'
 import { runCommand, useCommandHandler, useKeybindings } from '../shared/commands/commands'
+import { isMacControlKey } from '../../shared/commands/define'
 import { useFilesFromChatWindows } from '../features/chat/hooks/useFilesFromChatWindows'
 import { useSaveBeforeLeaving } from '../features/editor/hooks/useSaveBeforeLeaving'
 import { LeaveConfirmDialog } from '../features/editor/components/LeaveConfirmDialog'
@@ -106,6 +107,9 @@ const PANE_CLASSES: Record<string, string> = {
 }
 const paneClassName = (paneId: string) => PANE_CLASSES[paneId] ?? ''
 const dividerLabel = (splitId: string) => splitId === 'files' ? 'ファイルツリーとエディタの境目' : '左の欄とチャットの境目'
+
+// navigator.platform: the one platform hint the renderer has (Electron reports 'MacIntel' on every Mac).
+const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.startsWith('Mac')
 
 // The first registered panel opens when nothing (or an id no panel has) is remembered.
 const DEFAULT_LEFT_PANEL = 'skills'
@@ -595,7 +599,8 @@ export function AppShell() {
   const resetLayout = () => { split.resetSizes(); setHidden(new Set()) }
   // Just typed in the chat: ⌘⇧C stays with the chat input instead of hiding it.
   useCommandHandler('layout.toggleChat', toggleChat, { acceptsKey: () => !isChatInputRecentlyActive() })
-  useCommandHandler('layout.toggleLeft', toggleLeft)
+  // ⌘B only on a Mac: Ctrl+B stays the text fields' "back one character".
+  useCommandHandler('layout.toggleLeft', toggleLeft, { acceptsKey: input => !isMacControlKey(input, IS_MAC) })
   // A left tab chosen while the column is hidden (⌘⇧F, 今日のフォルダ, 「あなたの番」) brings the column back.
   const [tabWhenShown, setTabWhenShown] = useState(leftTab)
   if (tabWhenShown !== leftTab) {

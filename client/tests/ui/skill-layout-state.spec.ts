@@ -277,6 +277,22 @@ test.describe('panel dividers', () => {
     await expect(showLeft(page)).toHaveCount(0)
   })
 
+  test('on a Mac, Ctrl+B in a text field stays the field\'s own key; ⌘B there hides the left column', async ({ page }) => {
+    await page.addInitScript(() => Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' }))
+    await openPreview(page, 'skill-layout')
+    await leftTab(page, '探す').click()
+    await searchBox(page).focus()
+    const press = (mods: { ctrlKey?: boolean; metaKey?: boolean }) => searchBox(page).evaluate((input, m) => {
+      const event = new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true, ...m })
+      input.dispatchEvent(event)
+      return event.defaultPrevented
+    }, mods)
+    expect(await press({ ctrlKey: true }), 'Ctrl+B reaches the field untouched').toBe(false)
+    await expect(showLeft(page)).toHaveCount(0)
+    expect(await press({ metaKey: true })).toBe(true)
+    await expect(showLeft(page)).toBeVisible()
+  })
+
   test('「いつもの形に戻す」 puts every size back and shows every pane', async ({ page }) => {
     await openPreview(page, 'skill-layout')
     await leftTab(page, 'ファイル').click()

@@ -79,7 +79,7 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `settings.openOwnKey` `{ service? }` | view | `AppShell.tsx`: Settings → 「自分の鍵」, that service shown first (highlighted, its form open when the member may register; a new request remounts the panel) | the chat's 「<サービス> の鍵がありません」 card (`features/chat/components/BrokerKeyNeededCard.tsx`; a button only while a handler exists, `useCommandAvailable` — none in a consultation's own window) |
 | `records.runAction` `{ recordId, action, expectedVersion, note?, args?, links?, ok? }` | outbound (changes shared state, tells the person it names) | none yet (the task screen, milestone 5); choices from `client/shared/record-actions.ts` | none yet (`records.md`) |
 | `layout.toggleChat` ⌘⇧C (app) | view | `AppShell.tsx` (hides / shows the chat pane); declines the key for 1.2 s after typing in the chat (`isChatInputRecentlyActive`), so the key stays with the input | the shortcut; the collapsed chat's button and the title bar's 「画面の形」 button call the same function directly |
-| `layout.toggleLeft` ⌘B (app) | view | `AppShell.tsx` (hides / shows the left column; the middle takes its room). ⌘B is free in the app: CodeMirror binds no Mod-b and nothing is rich text. On a Mac, Ctrl+B (Emacs-style "back one character" in text fields) matches `mod` too, like Ctrl+K for ⌘K | the shortcut; the title bar's 「画面の形」 button and the hidden column's strip call the same function directly |
+| `layout.toggleLeft` ⌘B (app) | view | `AppShell.tsx` (hides / shows the left column; the middle takes its room). ⌘B is free in the app: CodeMirror binds no Mod-b and nothing is rich text. **On a Mac only ⌘B**: Ctrl+B (a text field's "back one character") is declined (`acceptsKey` + `isMacControlKey`, `define.ts`), so it reaches the field; elsewhere Ctrl+B is the shortcut |  the shortcut; the title bar's 「画面の形」 button and the hidden column's strip call the same function directly |
 | `find.byName` ⌘K (app) | view | `AppShell.tsx`: 探す ⌘K, `FindPalette` — open anything by name (records the server finds, skills already loaded for the スキル tab and slash commands, 「AIへの相談」 read once when it opens, files; the open tabs as 「最近開いたもの」); a skill opens in the スキル tab (a company-wide one under 全社), a consultation through `chat.openConsultation` | the shortcut |
 | `file.search` ⌘P (app) | view | `AppShell.tsx`: the same 探す window (kept for members used to ⌘P) | the shortcut |
 | `folder.reveal` `{ path }` | view | `AppShell.tsx`: the folder's department, the ファイル tab, the folder revealed in the tree | a folder row of 「つながっているもの」 (`linkRows.tsx`, `tasks-ui.md` "Dropping links") |
@@ -137,8 +137,9 @@ So the AI works only on the main window's tabs, and only for its own company. Te
 ## Handlers and shortcuts
 
 - A handler registers where it runs: `useCommandHandler(id, handler, { target?, acceptsKey? })`
-  while its component is mounted. `acceptsKey` returning false lets the key through untouched
-  (the default action happens, as if no shortcut existed).
+  while its component is mounted. `acceptsKey(input)` (it gets the key press) returning false lets
+  the key through untouched (the default action happens, as if no shortcut existed). Test:
+  `commands.test.ts` 「a handler sees the key press…」, `skill-layout-state.spec.ts` 「on a Mac, Ctrl+B…」.
 - Shortcuts are delivered only to the focused area: `useKeybindings()` (installed once, by the
   screen skeleton) listens on `document`, builds the focus chain from `data-command-area` /
   `data-command-target` (`commandArea(area, target)` on the area's root element), innermost

@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { z } from 'zod'
-import { defineCommands, type CommandDefinition } from '../../../shared/commands/define'
+import { defineCommands, isMacControlKey, type CommandDefinition } from '../../../shared/commands/define'
 import { CommandError, createCommandRegistry, type FocusScope } from '../../../shared/commands/registry'
 import { COMMANDS } from '../../../shared/commands/catalog'
 import { focusChainOf, type AreaElement } from './focus'
@@ -146,6 +146,18 @@ test('a handler that declines the key lets it through', () => {
   registry.register('layout.toggleChat', () => { ran = true }, { acceptsKey: () => false })
   assert.equal(registry.handleKey(key({ key: 'c', mod: true, shift: true }), [{ area: 'app' }]), false)
   assert.equal(ran, false)
+})
+
+test('a handler sees the key press: on a Mac, Ctrl+letter is left to the text field while ⌘+letter runs', () => {
+  const registry = createCommandRegistry(catalog)
+  let toggled = 0
+  registry.register('layout.toggleChat', () => { toggled++ }, { acceptsKey: input => !isMacControlKey(input, true) })
+  const ctrl = { key: 'c', ctrlKey: true, metaKey: false, shiftKey: true, altKey: false }
+  assert.equal(registry.handleKey(ctrl, [{ area: 'app' }]), false, 'Ctrl is not taken on a Mac')
+  assert.equal(registry.handleKey({ ...ctrl, ctrlKey: false, metaKey: true }, [{ area: 'app' }]), true)
+  assert.equal(toggled, 1)
+  // Elsewhere Ctrl is the shortcut's modifier.
+  assert.equal(isMacControlKey(ctrl, false), false)
 })
 
 test('a call goes to the named pane, else the pane used last; an unknown pane is refused, not redirected', async () => {

@@ -164,6 +164,14 @@ function normalizeKey(spec: string): string {
  * shortcuts always were); shift and alt (⌥) must match exactly, so ⌥⌘P is
  * not ⌘P; a letter matches in either case (keyName), any other key exactly.
  */
+/**
+ * On a Mac, Ctrl (without ⌘) on a letter is the text fields' own editing key (Ctrl+B back one
+ * character, Ctrl+K delete to the line's end): a shortcut that must leave it alone declines it.
+ */
+export function isMacControlKey(input: KeyInput, mac: boolean): boolean {
+  return mac && input.ctrlKey && !input.metaKey
+}
+
 export function matchesKey(spec: ParsedKey, input: KeyInput): boolean {
   return spec.mod === (input.metaKey || input.ctrlKey)
     && spec.shift === input.shiftKey

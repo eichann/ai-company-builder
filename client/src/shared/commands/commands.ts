@@ -48,7 +48,7 @@ export function useCommandHandler<I extends AppCommandId>(
   const hasAcceptsKey = options.acceptsKey !== undefined
   useEffect(() => commands.register(id, (args, context) => handlerRef.current(args, context), {
     target,
-    acceptsKey: hasAcceptsKey ? () => acceptsKeyRef.current?.() ?? true : undefined,
+    acceptsKey: hasAcceptsKey ? input => acceptsKeyRef.current?.(input) ?? true : undefined,
   }), [id, target, hasAcceptsKey])
 }
 
