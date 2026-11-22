@@ -1137,9 +1137,10 @@ describe('SEND-1: the draft as confirmed, or nothing — changes while the send 
   // purpose, on the same database as the routes: each race happens in a fixed order.
   type Deferred = { promise: Promise<void>; open: () => void }
   const deferred = (): Deferred => { let open!: () => void; const promise = new Promise<void>(r => { open = r }); return { promise, open } }
-  type Kind = 'sender' | 'contacts' | 'send'
+  type Kind = 'sender' | 'contacts' | 'send' | 'replier'
   /** The next calls of each kind, in order: each signals its arrival and waits for its release. */
-  const queue: Record<Kind, Array<{ arrived: Deferred; gate: Deferred }>> = { sender: [], contacts: [], send: [] }
+  const queue: Record<Kind, Array<{ arrived: Deferred; gate: Deferred }>> = { sender: [], contacts: [], send: [], replier: [] }
+  const posted: string[] = []
   const held = (kind: Kind) => {
     const slot = { arrived: deferred(), gate: deferred() }
     queue[kind].push(slot)
@@ -1181,6 +1182,10 @@ describe('SEND-1: the draft as confirmed, or nothing — changes while the send 
           sent.push(Buffer.from(raw, 'base64url').toString('utf8'))
           return { ok: true, json: { id: `g${sent.length}`, threadId: 't' } }
         },
+      },
+      chat: {
+        replierAccount: async () => { await pass('replier'); return { ok: true, account: EMAILS['m-sato'] } },
+        reply: async (_co: string, _user: string, _ref: unknown, text: string) => { posted.push(text); return { ok: true, ts: `${1700000000 + posted.length}.000100` } },
       },
       companyIds: () => [CO],
     })
@@ -1267,7 +1272,7 @@ describe('SEND-1: the draft as confirmed, or nothing — changes while the send 
     expect(JSON.parse(stateOf(d.id).fields).payload_hash).toBe(d.hash)
   })
 
-  it('once the send row is written, an edit and a discard are refused (while sending, and beside a sent row whose record stayed a draft)', async () => {
+  it('once the send row is written, an edit is refused, and a discard while it is sending', async () => {
     const d = await draft('送っている途中')
     const at = held('send')
     const sending = service.send(sato, d.id, { hash: d.hash })
@@ -1277,12 +1282,79 @@ describe('SEND-1: the draft as confirmed, or nothing — changes while the send 
     expect(service.discard(sato, d.id).body.code).toBe('SEND_IN_PROGRESS')
     at.release()
     expect((await sending).value.outcome).toBe('sent')
-    // A record left 「下書き」 beside a sent row (the record's move failed, SEND-3): still no edit, no discard.
-    db.prepare("UPDATE record_state SET state = 'draft' WHERE company_id = ? AND record_id = ?").run(CO, d.id)
-    expect((await service.update(sato, human, d.id, { expectedVersion: d.version, body: '送った後の直し' })).body.code).toBe('NOT_DRAFT')
-    expect(service.discard(sato, d.id).body.code).toBe('NOT_DRAFT')
-    expect(stateOf(d.id).state).toBe('draft')
     expect(JSON.parse(stateOf(d.id).fields).payload_hash).toBe(d.hash)
+  })
+
+  it('a record left 「下書き」 beside a sent / unknown send (its move failed): no edit, no second send, but 「捨てる」 puts it away and the send row stays', async () => {
+    for (const outcome of ['sent', 'unknown'] as const) {
+      const d = await draft(`取り残された下書き ${outcome}`)
+      expect((await service.send(sato, d.id, { hash: d.hash })).value.outcome).toBe('sent')
+      const before = sent.length
+      // As if the record's move after Gmail's answer had failed (SEND-3's gap).
+      db.prepare("UPDATE record_state SET state = 'draft' WHERE company_id = ? AND record_id = ?").run(CO, d.id)
+      db.prepare('UPDATE outbound_sends SET outcome = ? WHERE company_id = ? AND message_id = ?').run(outcome, CO, d.id)
+      const edit = await service.update(sato, human, d.id, { expectedVersion: d.version, body: '送った後の直し' })
+      expect(edit.body.code).toBe('NOT_DRAFT')
+      expect(edit.body.error).toContain('捨てる')
+      expect((await service.send(sato, d.id, { hash: d.hash })).body.code).toBe('SEND_IN_PROGRESS')
+      const put = service.discard(sato, d.id)
+      expect(put.ok, JSON.stringify(put)).toBe(true)
+      expect(stateOf(d.id).state).toBe('discarded')
+      expect(sendsOf(d.id)).toEqual([{ outcome }])
+      expect(sent.length).toBe(before)
+    }
+  })
+
+  it('a record and its send both `unknown` (届いたか分かりません): 「捨てる」 is still the person\'s choice', async () => {
+    const d = await draft('分からないまま捨てる')
+    expect((await service.send(sato, d.id, { hash: d.hash })).value.outcome).toBe('sent')
+    db.prepare("UPDATE record_state SET state = 'unknown' WHERE company_id = ? AND record_id = ?").run(CO, d.id)
+    db.prepare("UPDATE outbound_sends SET outcome = 'unknown' WHERE company_id = ? AND message_id = ?").run(CO, d.id)
+    const put = service.discard(sato, d.id)
+    expect(put.ok, JSON.stringify(put)).toBe(true)
+    expect(stateOf(d.id).state).toBe('discarded')
+    expect(sendsOf(d.id)).toEqual([{ outcome: 'unknown' }])
+  })
+
+  it('the content erased while the send awaits (the hash stays, the body is gone): nothing sent', async () => {
+    const d = await draft('消えた本文')
+    const before = sent.length
+    const at = held('contacts')
+    const pending = service.send(sato, d.id, { hash: d.hash })
+    await at.arrived
+    db.prepare('UPDATE fixed_payloads SET canonical = NULL, body_deleted_at = ? WHERE company_id = ? AND owner_id = ?').run(ts(), CO, d.id)
+    at.release()
+    const r = await pending
+    expect(r.ok).toBe(false)
+    expect(r.body.code).toBe('MAIL_NOT_FOUND')
+    expect(sent.length).toBe(before)
+    expect(sendsOf(d.id)).toEqual([])
+  })
+
+  it('a Slack reply edited while 返事を送る is checked: CONTENT_CHANGED, nothing posted; unchanged, it posts once', async () => {
+    const thread = `C0RACE:${Math.floor(Date.now() / 1000)}.000200`
+    expect(services.inbox.receive(CO, 'm-sato', {
+      channel: 'chat', messageId: thread, references: [], threadRef: `slack:${thread}`, sourceRef: `slack:${thread}`,
+      occurredAt: new Date().toISOString(), subject: null, from: { address: 'slack:U0ONE' }, to: [{ address: 'slack-member:m-sato', memberId: 'm-sato' }],
+    })).toBe('created')
+    const interactionId = (db.prepare('SELECT interaction_id FROM inbox_messages WHERE company_id = ? AND message_id = ?').get(CO, thread) as Json).interaction_id
+    const made = await service.create(sato, human, { interactionId, body: '確認して返します。' })
+    expect(made.ok, JSON.stringify(made)).toBe(true)
+    const d = made.value.draft
+    expect(d.channel).toBe('slack')
+    const at = held('replier')
+    const pending = service.send(sato, d.id, { hash: d.hash })
+    await at.arrived
+    const edited = await service.update(sato, human, d.id, { expectedVersion: d.version, body: '直した返事です。' })
+    expect(edited.ok, JSON.stringify(edited)).toBe(true)
+    at.release()
+    expect((await pending).body.code).toBe('CONTENT_CHANGED')
+    expect(posted).toEqual([])
+    expect(sendsOf(d.id)).toEqual([])
+    const now = edited.value.draft
+    const r = await service.send(sato, d.id, { hash: now.hash })
+    expect(r.ok, JSON.stringify(r)).toBe(true)
+    expect(posted).toEqual(['直した返事です。'])
   })
 
   it('the normal path sends once to both; a double press sends exactly one mail', async () => {

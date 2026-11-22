@@ -564,14 +564,18 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
   const resendNote = (reason: string | null | undefined) => (reason ? `同じ件で先に送られたメールがありましたが、それでも送りました。理由：${reason}` : null)
 
   /**
-   * A send of this draft was accepted: its row is `sending`, or the mail went or may have gone
-   * (`sent`, `unknown`) — the rows `startSend` counts as busy. From then on the content is fixed:
-   * no edit, no file change, no discard of a draft (SEND-1). Null when none was.
+   * A send of this draft was accepted: its row is `sending`, or it went or may have gone (`sent`,
+   * `unknown`) — the rows `startSend` counts as busy. From then on the content is fixed: no edit,
+   * no file change (SEND-1). Null when none was. A discard is refused only while `sending`
+   * (`discard`): a record left 「下書き」 beside a `sent` / `unknown` row (its move failed) can
+   * still be put away, so the refusal points there.
    */
   function acceptedSend(companyId: string, messageId: string): Refusal | null {
     const outcome = companyData.forCompany(companyId).outbound.lastSend(messageId)?.outcome
-    if (outcome === 'sending') return refuse('conflict', 'このメールはいま送っている途中です。', { code: 'SEND_IN_PROGRESS' })
-    if (outcome === 'sent' || outcome === 'unknown') return refuse('conflict', 'このメールはもう送ったか、届いたかを確かめている途中です。直せません。', { code: 'NOT_DRAFT', state: outcome })
+    if (outcome === 'sending') return refuse('conflict', 'いま送っている途中なので、直したり捨てたりできません。', { code: 'SEND_IN_PROGRESS' })
+    if (outcome === 'sent' || outcome === 'unknown') {
+      return refuse('conflict', '送信を受け付けたので、もう直せません。片付けるときは「捨てる」を押してください（送ったものは取り消されません）。', { code: 'NOT_DRAFT', state: outcome })
+    }
     return null
   }
 
@@ -581,8 +585,8 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
    * draft can be edited or discarded; so here — one transaction with the source gate and the send
    * row, no await — it is read again: still a draft (else 409 `NOT_DRAFT`), still the version and
    * hash on screen (else 409 `CONTENT_CHANGED`); nothing is sent otherwise. Once the row is
-   * written, edits and discards are refused (`acceptedSend`, checked inside their own
-   * transactions). The record's version read here is the one the send's result moves.
+   * written, edits are refused (`acceptedSend`, checked inside their own transaction) and a
+   * discard while it is `sending`. The record's version read here is the one the send's result moves.
    */
   function claimSend(
     member: Member, messageId: string, version: number, hash: string, resendReason: string | null, busyText: string,
@@ -592,7 +596,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       if (!now) return notFound()
       if (now.state !== 'draft') return refuse('conflict', 'この下書きはもう送ったか、捨てたか、結果を確かめている途中です。', { code: 'NOT_DRAFT', state: now.state })
       const payload = deps.payloads.current(member.companyId, KIND, messageId)
-      if (now.fields.payload_version !== version || now.fields.payload_hash !== hash || !payload || payload.version !== version || payload.hash !== hash) {
+      // The content itself still there (retention may have erased it meanwhile: the hash stays, the body is gone).
+      if (!payload || payload.canonical === null) return notFound()
+      if (now.fields.payload_version !== version || now.fields.payload_hash !== hash || payload.version !== version || payload.hash !== hash) {
         const view = viewOf(member.companyId, now.mail, messageId)
         return refuse('conflict', '内容が変わりました。もう一度確かめてください。', { code: 'CONTENT_CHANGED', ...(view ? { draft: view } : {}) })
       }
@@ -1366,9 +1372,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       if (!d) return notFound()
       if (d.state !== 'draft' && d.state !== 'unknown') return refuse('conflict', 'この下書きは捨てられません。', { code: 'NOT_DRAFT', state: d.state })
       const handle = companyData.forCompany(member.companyId)
-      // A draft whose send was accepted is not thrown away (SEND-1); an `unknown` one may be, once the person sees it so.
-      const accepted = acceptedSend(member.companyId, d.mail.messageId)
-      if (accepted && !(d.state === 'unknown' && handle.outbound.lastSend(d.mail.messageId)?.outcome === 'unknown')) return accepted
+      // Not while a send is going out. A draft beside a `sent` / `unknown` row (its record's move failed) may be put
+      // away: nothing is sent again, and the row keeps that it went or may have gone.
+      if (handle.outbound.lastSend(d.mail.messageId)?.outcome === 'sending') return refuse('conflict', 'いま送っている途中なので、直したり捨てたりできません。', { code: 'SEND_IN_PROGRESS' })
       const moved = writer.transition(member.companyId, { recordId: d.mail.messageId, action: 'discard', expectedVersion: d.recordVersion, to: 'discarded', actor: { id: member.userId, kind: 'human', source: null } })
       if (!moved.ok) return writeFailed(moved)
       const at = deps.clock.now()
