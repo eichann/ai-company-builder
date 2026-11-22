@@ -21,7 +21,12 @@ import { installElectronAPI } from './ui/fixtures/electron-api'
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const ROOT = '/Users/demo/会社'
-const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+/** A calendar day in the page's own time zone (the app compares due dates there; a UTC day is off by one for 9 hours). */
+const day = (offset: number) => {
+  const d = new Date()
+  d.setDate(d.getDate() + offset)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 const cell = (text: string | null) => ({ text, sort: text })
 const task = (id: string, title: string, state: string, assignee: string | null, due: string | null, extra: Partial<RecordsTableRow> = {}): RecordsTableRow => ({
