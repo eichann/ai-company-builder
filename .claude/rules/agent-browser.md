@@ -488,7 +488,7 @@ send → report; 6c turns it on for the owner's PC).
   (`BROWSER_TYPE_NOT_APPROVED`) and not retired (`BROWSER_TYPE_RETIRED`), the app at least
   `minAppVersion` (`BROWSER_APP_TOO_OLD`), the operation exists, **the first version's rule**
   (`browserFirstVersionProblem`: `delivers: none`, or `delivers: scheduled` with `facts.schedule`
-  `required` and `complete` (6b-2a), not irreversible, exactly one write, not delete, a lock kind —
+  and `facts.templates` both `required` and `complete` (6b-2a), not irreversible, exactly one write, not delete, a lock kind —
   `BROWSER_OPERATION_NOT_YET`), the member's browser setting (company mode with their
   override, `browserOperationsAllowed`: site and level — `BROWSER_NOT_ALLOWED`), the AI stop
   (`browserAiStopped` of the member's stops: whole AI, `web`, `mcp-external` — `BROWSER_AI_STOPPED`),
