@@ -1,8 +1,8 @@
 /**
  * The HTML viewer's document view in a real Electron (doc-frame.md): what only a browser engine can
  * show. A document, in a view of its own on the in-memory document session, runs its inline and
- * module scripts and shows the images of its own folder, but reaches no network — fetch, XHR,
- * WebSocket, beacon, web image / script / stylesheet, and also what no request hook sees
+ * module scripts and shows the images of its own folder, but reaches no network — https / wss
+ * fetch, XHR, WebSocket, beacon, web image / script / stylesheet, and also what no request hook sees
  * (preconnect, preload, prefetch, DNS prefetch, a report, STUN, TURN over TCP with a secret in its
  * user name) —, no file outside its folder, no storage and nothing of the app; it navigates only to
  * a page of its own grant (never `data:`, `local-file:`, `file:`, `acb-plugin:`, another document's
@@ -33,8 +33,9 @@ interface Result {
   navigations: Record<string, string>
   afterReload: { viewGone: boolean; served: number }
   partitionFolders: string[]
-  hits: string[]
   connections: Record<string, number>
+  hidden: { muted: boolean; visibility: string }
+  firstOpenWithoutProxy: number | null
 }
 
 function freePort(): Promise<number> {
@@ -64,7 +65,7 @@ before(async () => {
   if (!canRun) return
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-doc-frame-electron-')))
   const ports: Record<string, number> = { stun: await freeUdpPort() }
-  for (const name of ['web', 'preconnect', 'preload', 'prefetch', 'dnsprefetch', 'turn', 'report']) ports[name] = await freePort()
+  for (const name of ['fetch', 'xhr', 'ws', 'beacon', 'img', 'script', 'style', 'nav', 'popup', 'preconnect', 'preload', 'prefetch', 'dnsprefetch', 'turn', 'report']) ports[name] = await freePort()
   const electron = createRequire(import.meta.url)('electron') as string
   const output = await new Promise<string>((resolve, reject) => {
     const child = spawn(electron, [path.join(clientDir, 'tests/doc-frame-harness/main.ts')], {
@@ -89,8 +90,7 @@ before(async () => {
 const skip = canRun ? false : 'needs a window (macOS, or Linux with a display)'
 
 test('nothing a document does reaches the network: requests, its own navigation, preconnect, preload, reports, STUN, TURN', { skip }, () => {
-  assert.deepEqual(result.hits, [])
-  assert.deepEqual(result.connections, {}, 'not even a TCP connection or a UDP datagram')
+  assert.deepEqual(result.connections, {}, 'not even a TCP connection (https / wss) or a UDP datagram')
   assert.equal(result.doc.fetchWeb, 'refused')
   assert.equal(result.doc.xhr, 'refused')
   assert.equal(result.doc.websocket, 'refused')
@@ -130,6 +130,12 @@ test('a document navigates only to a page of its own grant: never data:, local-f
   const { ownPage, ...refused } = result.navigations
   assert.deepEqual(refused, { data: 'stayed', localFile: 'stayed', file: 'stayed', plugin: 'stayed', otherToken: 'stayed', web: 'stayed', ownCss: 'stayed' })
   assert.equal(ownPage, 'moved', 'control: a page of its own grant')
+})
+
+test('until the viewer shows it the view is hidden and muted; a session that could not be prepared is tried again', { skip }, () => {
+  assert.deepEqual(result.hidden, { muted: true, visibility: 'hidden' })
+  assert.equal(result.firstOpenWithoutProxy, null, 'no view while the proxy cannot be set')
+  assert.equal(result.doc.inlineRan, true, 'the next open prepared the session and showed the document')
 })
 
 test('the app\'s page reloading closes its document views and revokes their grants', { skip }, () => {

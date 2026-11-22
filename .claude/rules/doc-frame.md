@@ -23,12 +23,19 @@ the address, the view and their guards in main, no screen. The middle panel (A2)
 iframe in the main window shared the default session, where the request hook cannot see a
 preconnect or WebRTC — measured on Electron 45: STUN datagrams and a TURN-over-TCP connection
 carrying a secret in its user name reached a local listener). Each document is shown in a
-`WebContentsView` of its own, added to the main window (A2 places it; until then it is 0×0), with:
+`WebContentsView` of its own, added to the main window, with:
 
 - **Web preferences**: no preload, `sandbox`, `contextIsolation`, no Node (also in subframes),
-  `webviewTag: false`, `navigateOnDragDrop: false`, `partition: 'acb-doc'` — **in memory** (no
-  `persist:`): nothing a document stores outlives the app run, no folder on disk.
-- **The document session** (`acb-doc`, prepared once on the first view): the only session that
+  `webviewTag: false`, `navigateOnDragDrop: false`, `backgroundThrottling`, `partition: 'acb-doc'`
+  — **in memory** (no `persist:`): nothing a document stores outlives the app run, no folder on disk.
+- **Hidden until shown**: the document's scripts run from the moment it loads, so until the viewer
+  (A2) places and shows it the view is 0×0, `setVisible(false)` (the page is `hidden`, throttled as
+  a background page) and muted (`setAudioMuted(true)`). A2 unmutes and shows it, and must measure
+  whether a document can take the keyboard focus from the app (`focus()`, autofocus) while hidden
+  or when shown.
+- **The document session** (`acb-doc`, prepared on the first view; a failed preparation — its proxy
+  could not be set — makes no view and is tried again on the next open: the proxy is set first and
+  the schemes are handled last, once): the only session that
   serves `acb-doc://` (`ses.protocol.handle`); `local-file://` and `acb-plugin://` are not handled
   there and `file://` answers 404; its proxy is a PAC script sending **every** connection to the
   shell's refusing proxy (`startRefusingProxy`, shared with 「ブラウザ操作」: answers 403 and
@@ -45,17 +52,35 @@ carrying a secret in its user name reached a local listener). Each document is s
 - **The CSP's `sandbox allow-scripts`** gives the page an opaque origin although it is the view's
   top-level document: `localStorage` / `document.cookie` / `indexedDB` throw, no popups, modals,
   forms or top navigation. The app's own page stays the app's: its CSP needs no `frame-src`.
-- **What the harness showed for each network path** (`doc-frame-electron.test.ts`, names mapped to
-  local listeners with `host-rules`, since Chromium never proxies a loopback address): with the
-  view as built, nothing reaches anything — fetch, XHR, WebSocket, beacon, web image / script /
-  stylesheet, the page's own navigation to the web, `<link rel=preconnect|preload|prefetch|
-  dns-prefetch>`, a meta-CSP `report-uri`, STUN and TURN over TCP: 0 requests, 0 connections, 0
-  datagrams. One guard removed at a time: without the refusing proxy TURN over TCP connected (2);
-  without the WebRTC policy STUN sent 5 datagrams; without the navigation lock the page moved to
-  another token, its own `.css` and the web (the web then stopped by the proxy, or by the request
-  hook with the proxy also off); with the proxy, the request hook and `connect-src` all opened, a
-  prefetch connected (the CSP's `default-src` held it). `data:`, `file:`, `local-file:` and
-  `acb-plugin:` navigations stayed refused even without the lock (Chromium / unhandled schemes).
+- **What the harness showed for each network path** (`doc-frame-electron.test.ts`): every probe
+  is `https://` / `wss://` (an `http://` probe from the secure `acb-doc` page is stopped by
+  mixed-content blocking before any guard, so it proves nothing), to its own name mapped with
+  `host-rules` to a raw TCP listener that counts accepted connections (a TLS handshake that then
+  fails still counts; names, because Chromium never proxies a loopback address), plus a UDP
+  socket for STUN. With the view as built: 0 connections and 0 datagrams for fetch, XHR,
+  WebSocket, beacon, web image / script / stylesheet, the page's own navigation to the web,
+  `<link rel=preconnect|preload|prefetch|dns-prefetch>`, a meta-CSP `report-uri`, STUN and TURN
+  over TCP (with a secret in its user name). Guards removed (2026-11-22, Electron 45):
+
+  | Removed | What connected |
+  |---|---|
+  | the refusing proxy | TURN over TCP (2) — nothing else holds it |
+  | the WebRTC UDP policy | STUN (5 datagrams) — nothing else holds it |
+  | the request hook, or `connect-src`, or the CSP's web sources, or `default-src`, each alone | nothing |
+  | the whole CSP's network part (`connect-src`, `default-src`, web sources) | nothing: the proxy and the hook hold every request |
+  | proxy + hook | TURN only: **the CSP alone holds every request** |
+  | proxy + hook + `connect-src` | fetch, XHR, WebSocket, beacon, prefetch |
+  | proxy + hook + web `img` / `script` / `style` sources | image, script, stylesheet, preload, prefetch |
+  | proxy + hook + `default-src` | prefetch |
+  | `connect-src` + hook (the proxy left) | nothing: **the proxy alone holds** fetch, XHR, WebSocket, beacon |
+  | `connect-src` + proxy (the hook left) | TURN only: **the hook alone holds** those requests |
+  | the navigation lock | nothing connected; the view moved to another token, its own `.css` and the web |
+  | lock + proxy / lock + hook | the web navigation held by the hook / by the proxy |
+  | lock + proxy + hook | the page's own navigation to the web (2) |
+
+  `data:`, `file:`, `local-file:` and `acb-plugin:` navigations stayed refused even without the
+  lock (Chromium / schemes the session does not handle). A meta-CSP `report-uri` and
+  `preconnect` / `dns-prefetch` connected in no run (Chromium ignores `report-uri` in a meta CSP).
 
 ## Grants and views (`client/electron/features/doc-frames/`, no Electron)
 
@@ -74,7 +99,13 @@ carrying a secret in its user name reached a local listener). Each document is s
 - **Revocation goes with the view** (`views.ts`): `docView:close(viewId)` by its own window; the
   view destroyed or its page crashed (`onGone`); the window's page reloading, crashing or closing
   (`onWindowReset`: every view of that window closes); at most `MAX_VIEWS_PER_WINDOW` (32) per
-  window, the oldest closed. A grant revoked while its file is being read answers 404.
+  window, the oldest closed — applied when a view is registered, so opens running at the same time
+  cannot pass it. A grant revoked while its file is being read answers 404.
+- **An open is tied to the page that asked** (`views.begin` → `DocViewTicket`): taken when the IPC
+  call starts, before the file check, and the shell starts watching that window's page right then
+  (`DocViewPort.watch`). If the page reloads, crashes or closes while the file is checked or the
+  view is made, nothing is registered: a view finished meanwhile is destroyed with no grant
+  (`unavailable`).
 - **What a request reaches** (`protocol.ts` `serve`): only `GET`; the address read on the raw
   string (`parseDocFrameUrl`: query and fragment dropped, each segment percent-decoded once and
   then a plain name — no empty segment, nothing starting with `.` (so `.`, `..`, `%2e%2e`, `.git`,
@@ -143,7 +174,14 @@ hosts, and nothing else):
   has ［止める］). There is no per-view memory limit in Electron.
 - **DNS**: a name the page makes Chromium resolve may still reach the system's resolver (the
   proxy carries the connections; `X-DNS-Prefetch-Control: off` stops link prefetch). Not testable
-  with `host-rules`, as for 「ブラウザ操作」 (`agent-browser.md`).
+  with `host-rules`, as for 「ブラウザ操作」 (`agent-browser.md`); whether STUN / TURN server names
+  are resolved before the WebRTC policy and the proxy stop the connection is not measured either.
+- **Loopback**: Chromium never sends a loopback address through a proxy (seen for 「ブラウザ操作」's
+  TURN, `agent-browser.md`; the A1 iframe's TURN to `127.0.0.1` connected too), so a document's
+  TURN over TCP — or a preconnect — to `127.0.0.1:<port>` may connect directly to a program
+  listening on this computer, carrying what the document holds (a TURN user name). The CSP, the
+  request hook and the navigation lock still hold requests. It reaches nothing outside this
+  computer; the harness maps names so as to measure the proxy, and does not measure this.
 - **Chromium's own holes** (kept small by updating Electron), and **the file opened outside the
   app** (Finder, a browser): none of this applies there; the app offers no 「ブラウザで開く」.
 - **Windows**: without `O_NOFOLLOW` a link as the last name is followed when it stays inside the
@@ -159,7 +197,8 @@ hosts, and nothing else):
   grant / revoked mid-read, a folder swapped for a link, a handle that is not the file at the real
   location (at opening, after the read), one identical refusal, `check`'s refusals (top level
   included), the session's request rule, the navigation rule, views (closed by their own window
-  only, destroyed, crashed, the window reset, the cap, no view = no grant), the IPC (main window
+  only, destroyed, crashed, the window reset, the cap — also 40 opens at once —, no view = no
+  grant, a reload while the file is checked or the view is made), the IPC (main window
   only, before any file is read; only a view id goes back).
 - `client/tests/doc-frame-electron.test.ts` (real Electron with the real `doc-view.ts`, through
   `tests/doc-frame-harness/main.ts`; on the macOS half of CI) — the network paths above; inline and
@@ -172,8 +211,10 @@ hosts, and nothing else):
 - `ipc-window-links.test.ts` (privileges; the app's session does not serve `acb-doc`),
   `ipc-path-guard.test.ts` (`docView:open` from the main frame reaches the allowed roots),
   `ipc-contract.test.ts`.
-- Kept on purpose (second layers no test can tell apart, like 「ブラウザ操作」's): the session's
-  request hook (the refusing proxy and the CSP hold the same requests; with the proxy and the
-  navigation lock off it alone stopped the page's navigation to the web), `file://` answering 404
-  on the session (the CSP and the navigation lock hold `file:`), `setWindowOpenHandler` (the CSP's
-  sandbox already refuses popups).
+- Kept on purpose (layers no single removal can show, like 「ブラウザ操作」's): the request hook, each
+  CSP network directive and the refusing proxy for requests (each shown holding alone in the runs
+  above, removing the others), `file://` answering 404 on the session (the CSP and the navigation
+  lock hold `file:`), `setWindowOpenHandler` (the CSP's sandbox already refuses popups). The
+  harness also checks: until shown, the view is muted and its page `hidden`; a session whose proxy
+  could not be set makes no view and the next open prepares it (with the scheme handled before the
+  proxy, the old order, the next open failed: mutation-checked).

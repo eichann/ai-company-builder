@@ -22,6 +22,8 @@ export const DOC_PARTITION = 'acb-doc'
 export interface DocViewShellOptions {
   /** The `acb-doc://` server (features/doc-frames/protocol.ts `serve`). */
   serve: (request: { url: string; method: string }) => Promise<Response>
+  /** The refusing proxy's port (default: the shell's one, shared with 「ブラウザ操作」). */
+  refusingProxy?: () => Promise<number>
   log?: Pick<Console, 'warn'>
 }
 
@@ -37,16 +39,18 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
   const log = options.log ?? console
   let prepared: Promise<Session> | null = null
   const watchedWindows = new Set<number>()
+  let schemesServed = false
   const resetListeners: Array<(windowId: number) => void> = []
   const windowReset = (windowId: number) => { for (const listener of resetListeners) listener(windowId) }
 
-  /** The document session with its guards, once (again after a failure). */
+  /**
+   * The document session with its guards, once; again after a failure. The proxy comes first and
+   * the scheme is served last, so a session whose proxy could not be set serves no document (and
+   * a later try does not meet a scheme already handled).
+   */
   async function prepare(): Promise<Session> {
     const ses = session.fromPartition(DOC_PARTITION)
-    ses.protocol.handle(DOC_SCHEME, request => options.serve({ url: request.url, method: request.method }))
-    // A file of this computer is never a document's: no file:// on this session.
-    ses.protocol.handle('file', NOT_FOUND)
-    const port = await startRefusingProxy()
+    const port = await (options.refusingProxy ?? startRefusingProxy)()
     await ses.setProxy({ mode: 'pac_script', pacScript: `data:application/x-ns-proxy-autoconfig;base64,${Buffer.from(docProxyScript(port)).toString('base64')}` })
     // The session's one request hook (Electron keeps the last listener: set here and nowhere else).
     ses.webRequest.onBeforeRequest((details, callback) => {
@@ -60,6 +64,12 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
     ses.setDevicePermissionHandler(() => false)
     ses.on('will-download', event => event.preventDefault())
     ses.setSpellCheckerEnabled(false)
+    // A file of this computer is never a document's: no file:// on this session.
+    if (!schemesServed) {
+      ses.protocol.handle('file', NOT_FOUND)
+      ses.protocol.handle(DOC_SCHEME, request => options.serve({ url: request.url, method: request.method }))
+      schemesServed = true
+    }
     return ses
   }
 
@@ -104,6 +114,7 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
     onWindowReset(listener) {
       resetListeners.push(listener)
     },
+    watch: watchWindow,
     async create(windowId, onGone): Promise<DocViewHandle | null> {
       const owner = allWebContents.fromId(windowId)
       const win = owner ? BrowserWindow.fromWebContents(owner) : null
@@ -116,7 +127,6 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
         return null
       }
       if (win.isDestroyed()) return null
-      watchWindow(windowId)
       const view = new WebContentsView({
         webPreferences: {
           partition: DOC_PARTITION,
@@ -127,6 +137,7 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
           webviewTag: false,
           spellcheck: false,
           navigateOnDragDrop: false,
+          backgroundThrottling: true,
         },
       })
       const contents = view.webContents
@@ -143,7 +154,10 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
       guard(contents, () => token)
       contents.once('destroyed', finish)
       contents.on('render-process-gone', finish)
-      // Placed by the viewer (A2); until then it takes no room.
+      // Placed and shown by the viewer (A2); until then hidden (throttled as a background page),
+      // taking no room and silent: its scripts run from the moment it loads.
+      contents.setAudioMuted(true)
+      view.setVisible(false)
       win.contentView.addChildView(view)
       view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
       return {

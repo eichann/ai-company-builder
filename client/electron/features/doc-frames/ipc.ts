@@ -11,7 +11,7 @@ import type { DocViews } from './views'
 
 export interface DocViewsIpcDeps<E> {
   frames: Pick<DocFrames, 'check'>
-  views: Pick<DocViews, 'open' | 'close'>
+  views: Pick<DocViews, 'begin' | 'open' | 'close'>
   /** The event came from the main window's main frame. */
   fromMainWindow: (event: E) => boolean
 }
@@ -20,9 +20,12 @@ export function registerDocViewsIpc<E extends IpcInvokeEvent>(ipc: IpcRegistrar<
   const { frames, views, fromMainWindow } = deps
   ipc.handle('docView:open', async (event, filePath): Promise<DocViewOpenResult> => {
     if (!fromMainWindow(event)) return refuseDoc('not_allowed')
+    // The page as it is now: if it reloads or crashes while the file is checked or the view made,
+    // nothing is registered for it.
+    const ticket = views.begin(event.sender.id)
     const checked = await frames.check(filePath)
     if (!checked.ok) return checked
-    const viewId = await views.open(checked.doc, event.sender.id)
+    const viewId = await views.open(checked.doc, ticket)
     return viewId === null ? refuseDoc('unavailable') : { ok: true, viewId }
   })
   ipc.handle('docView:close', (event, viewId) => {

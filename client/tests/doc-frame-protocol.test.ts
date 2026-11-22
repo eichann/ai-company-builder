@@ -275,23 +275,30 @@ test('a document view goes only to an .html page of its own grant, never elsewhe
   assert.equal(docViewNavigationAllowed(null, own('b.html'), true), false, 'a view without a grant goes nowhere')
 })
 
-/** A fake shell: views with ids from 100, and what happened to them. */
-function fakeShell(options: { fail?: boolean } = {}) {
+/** A fake shell: views with ids from 100, and what happened to them; `hold` keeps each creation waiting. */
+function fakeShell(options: { fail?: boolean; hold?: boolean } = {}) {
   let next = 100
   const shown = new Map<number, string>()
   const destroyed: number[] = []
+  const watched: number[] = []
   const gone = new Map<number, (id: number) => void>()
+  const waiting: Array<() => void> = []
+  const made = { count: 0 }
   let reset: (windowId: number) => void = () => {}
   const port: DocViewPort = {
     onWindowReset: listener => { reset = listener },
+    watch: windowId => { watched.push(windowId) },
     async create(_windowId, onGone): Promise<DocViewHandle | null> {
+      if (options.hold) await new Promise<void>(resolve => waiting.push(resolve))
       if (options.fail) return null
+      made.count++
       const id = next++
       gone.set(id, onGone)
       return { id, show: url => { shown.set(id, url) }, destroy: () => { destroyed.push(id); gone.get(id)?.(id) } }
     },
   }
-  return { port, shown, destroyed, crash: (id: number) => gone.get(id)?.(id), resetWindow: (windowId: number) => reset(windowId) }
+  const release = async () => { for (const resolve of waiting.splice(0)) resolve(); await new Promise(resolve => setImmediate(resolve)) }
+  return { port, shown, destroyed, watched, made, release, crash: (id: number) => gone.get(id)?.(id), resetWindow: (windowId: number) => reset(windowId) }
 }
 
 const reportDoc = async (w: ReturnType<typeof world>) => {
@@ -304,10 +311,11 @@ test('a view holds its own grant: closed by its window, destroyed, crashed or it
   const w = world()
   const shell = fakeShell()
   const views = createDocViews({ frames: w.frames, shell: shell.port })
-  const a = (await views.open(await reportDoc(w), MAIN))!
-  const b = (await views.open(await reportDoc(w), MAIN))!
-  const c = (await views.open(await reportDoc(w), MAIN + 1))!
-  const d = (await views.open(await reportDoc(w), MAIN))!
+  const openIn = async (windowId: number) => (await views.open(await reportDoc(w), views.begin(windowId)))!
+  const a = await openIn(MAIN)
+  const b = await openIn(MAIN)
+  const c = await openIn(MAIN + 1)
+  const d = await openIn(MAIN)
   const url = (id: number) => shell.shown.get(id)!
   assert.match(url(a), /^acb-doc:\/\/[0-9a-f]{32}\/report\.html$/)
   assert.equal((await w.get(url(a))).status, 200)
@@ -332,16 +340,72 @@ test('a window holds at most the newest views; opening one more closes the oldes
   const shell = fakeShell()
   const views = createDocViews({ frames: w.frames, shell: shell.port })
   const doc = await reportDoc(w)
-  const first = (await views.open(doc, MAIN))!
-  for (let i = 0; i < MAX_VIEWS_PER_WINDOW; i++) await views.open(doc, MAIN)
+  const first = (await views.open(doc, views.begin(MAIN)))!
+  for (let i = 0; i < MAX_VIEWS_PER_WINDOW; i++) await views.open(doc, views.begin(MAIN))
   await refusedAs(w, shell.shown.get(first)!)
   assert.deepEqual(shell.destroyed, [first])
+})
+
+test('opens running at the same time cannot pass the cap: 40 at once leave the newest 32 with grants', async () => {
+  const w = world()
+  const shell = fakeShell({ hold: true })
+  const views = createDocViews({ frames: w.frames, shell: shell.port })
+  const doc = await reportDoc(w)
+  const opening = Array.from({ length: 40 }, () => views.open(doc, views.begin(MAIN)))
+  await shell.release()
+  const ids = (await Promise.all(opening)) as number[]
+  const served = await Promise.all(ids.map(async id => (await w.get(shell.shown.get(id)!)).status))
+  assert.equal(served.filter(status => status === 200).length, MAX_VIEWS_PER_WINDOW)
+  assert.equal(shell.destroyed.length, 40 - MAX_VIEWS_PER_WINDOW)
+  for (const id of shell.destroyed) assert.equal(served[ids.indexOf(id)], 404)
+})
+
+test('a page that reloads or crashes while an open is under way gets no view and no grant', async () => {
+  // While the file is checked (before the view is made).
+  {
+    const w = world()
+    const shell = fakeShell()
+    const views = createDocViews({ frames: w.frames, shell: shell.port })
+    const ticket = views.begin(MAIN)
+    assert.deepEqual(shell.watched, [MAIN], 'the page is watched from the moment the member asked')
+    const doc = await reportDoc(w)
+    shell.resetWindow(MAIN)
+    assert.equal(await views.open(doc, ticket), null)
+    assert.deepEqual([shell.made.count, shell.shown.size], [0, 0], 'no view is even made for the gone page')
+    // A new open for the reloaded page works.
+    assert.notEqual(await views.open(doc, views.begin(MAIN)), null)
+  }
+  // While the view is made.
+  {
+    const w = world()
+    const shell = fakeShell({ hold: true })
+    const views = createDocViews({ frames: w.frames, shell: shell.port })
+    const opening = views.open(await reportDoc(w), views.begin(MAIN))
+    await new Promise(resolve => setImmediate(resolve))
+    shell.resetWindow(MAIN)
+    await shell.release()
+    assert.equal(await opening, null)
+    assert.deepEqual(shell.destroyed, [100], 'the view finished for the gone page is destroyed')
+    assert.equal(shell.shown.size, 0, 'and was never given a grant')
+  }
 })
 
 test('a view that cannot be made gets no grant', async () => {
   const w = world()
   const views = createDocViews({ frames: w.frames, shell: fakeShell({ fail: true }).port })
-  assert.equal(await views.open(await reportDoc(w), MAIN), null)
+  assert.equal(await views.open(await reportDoc(w), views.begin(MAIN)), null)
+})
+
+test('docView:open notes the page before the file is checked: a reload during the check registers nothing', async () => {
+  const w = world()
+  const shell = fakeShell()
+  const views = createDocViews({ frames: w.frames, shell: shell.port })
+  const frames = { check: async (p: unknown) => { const r = await w.frames.check(p); shell.resetWindow(MAIN); return r } }
+  const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>()
+  const ipc = { handle: (channel: string, fn: (event: unknown, ...args: unknown[]) => unknown) => { handlers.set(channel, fn) }, on: () => {} }
+  registerDocViewsIpc(ipc as never, { frames, views, fromMainWindow: (() => true) as never })
+  const answer = await handlers.get('docView:open')!({ sender: { id: MAIN } }, path.join(w.root, '営業/report.html')) as { ok: boolean; reason?: string }
+  assert.deepEqual([answer.ok, answer.reason, shell.shown.size], [false, 'unavailable', 0])
 })
 
 test('docView:open is the main window\'s page\'s only, decided before any file is looked at; close likewise', async () => {
