@@ -98,6 +98,24 @@ describe('the form', () => {
     expect(formFromDefinition(parsed.definition)).toMatchObject({ kind: 'pc', skillName: 'interview-report', checkPath: '人事部/面談', readPaths: '人事部/規程', mailDrafts: true, writeFolder: 'reports' })
   })
 
+  it('editing a PC job keeps its read places in their order (a check place listed last stays last), new places after them', () => {
+    // A schema-1 PC job made through the API with its check's place after another read place: the form puts the check's
+    // place first, so without the kept order a name-only edit would change what the responsible person accepted.
+    const parsed = definitionFromForm({
+      ...emptyJobForm('u_member'), name: '面談の報告', kind: 'pc', skillName: 'interview-report', checkKind: 'new_files', checkPath: '人事部/面談', readPaths: '人事部/規程',
+    })
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.problems))
+    const api: JobDefinition = { ...parsed.definition, grant: { ...parsed.definition.grant, reads: { paths: ['人事部/規程', '人事部/面談'], calls: [] } } }
+    const renamed = definitionFromForm({ ...formFromDefinition(api), name: '面談の報告（改）' })
+    expect(renamed.ok && renamed.definition.grant.reads.paths).toEqual(['人事部/規程', '人事部/面談'])
+    expect(renamed.ok && jobConsentCanonical(renamed.definition)).toBe(jobConsentCanonical(api))
+    // A place added goes after the kept ones; a place removed is gone.
+    const more = definitionFromForm({ ...formFromDefinition(api), readPaths: '人事部/規程\n人事部/新しい場所' })
+    expect(more.ok && more.definition.grant.reads.paths).toEqual(['人事部/規程', '人事部/面談', '人事部/新しい場所'])
+    const fewer = definitionFromForm({ ...formFromDefinition(api), readPaths: '' })
+    expect(fewer.ok && fewer.definition.grant.reads.paths).toEqual(['人事部/面談'])
+  })
+
   it('a meeting check names the minutes route in the grant (what the responsible person accepts), never the check alone', () => {
     const parsed = definitionFromForm({ ...emptyJobForm('u_member'), name: '面談', kind: 'pc', shelfItem: 'item-1', checkKind: 'new_meetings', titleWords: '面談、1on1' }, 'interview-report')
     expect(parsed.ok).toBe(true)
@@ -409,7 +427,7 @@ describe('a definition of a shape this console does not read', () => {
     renderInCompany(<JobsRoute />)
     await screen.findByRole('listitem', { name: '週の報告' })
     const job = calls.find((c) => c.url.endsWith('/jobs'))!
-    expect(job.headers['X-ACB-Job-Schemas']).toBe('1,2,3')
+    expect(job.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4')
   })
 
   it('the list says 「画面を新しくしてください」 instead of a time, offers no edit, and a trigger of an unknown shape never crashes it', async () => {
@@ -519,7 +537,7 @@ describe('an event job', () => {
     const query = calls.find((c) => c.url.endsWith('/records/query'))!
     expect(query.body).toMatchObject({ type: 'task', fields: { assignee: 'u_member' }, offset: 0 })
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/jobs'))!
-    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3')
+    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4')
     expect((post.body as { definition: JobDefinition }).definition).toMatchObject({ schema: 2, trigger: { startRecord: START, to: 'done', followMadeTask: true } })
   })
 
@@ -674,7 +692,7 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
     expect(within(dialog).queryByRole('button', { name: '保存' })).toBeNull()
   })
 
-  it('creating one on the page: the watched やること by name, the Skill, the done mark — schema 3 is sent, announced 1,2,3', async () => {
+  it('creating one on the page: the watched やること by name, the Skill, the done mark — schema 3 is sent, announced 1,2,3,4', async () => {
     const { calls } = mockApi({
       ...companyRoutes(),
       [`GET ${base}/jobs`]: { body: ok({ stopped: false, canManage: true, jobs: [] }) },
@@ -700,7 +718,7 @@ describe('an event run by the responsible person’s PC AI (schema 3)', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.url.endsWith('/jobs'))).toHaveLength(1))
     const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/jobs'))!
-    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3')
+    expect(post.headers['X-ACB-Job-Schemas']).toBe('1,2,3,4')
     expect((post.body as { definition: JobDefinition }).definition).toMatchObject({
       schema: 3, placement: 'a', trigger: { startRecord: START, to: 'done' }, check: { kind: 'source_record', doneMark: 'file_linked' },
       missed: { expiresAfterMinutes: 1440 }, grant: { creates: ['task'] },

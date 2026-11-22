@@ -16,6 +16,7 @@ import { JOB_START_PAGE, jobsApi, skillShelfApi, type JobVersionView, type JobVi
 import { useCompany } from '@/lib/company-context'
 import { PcJobFields } from './pc-job-fields'
 import { describeJobError } from '@/lib/errors'
+import { PROPOSAL_CLOSED_TEXT, proposalClosed, proposalVersionText } from '@/lib/job-proposals'
 import {
   JOB_EXPIRY_CHOICES, JOB_HOURS, JOB_MINUTES, JOB_VERSION_HIDDEN, definitionFromForm, editableDefinition, emptyJobForm, hiddenVersion, jobProblemText,
   JOB_FORM_CANNOT_EDIT, jobEditForm, needsNewerScreen, switchJobForm, type JobForm,
@@ -50,6 +51,10 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
   const hidden = hiddenVersion(newestVersion)
   // A version the form would change on saving (a schema-3 grant made otherwise): never given the form.
   const editForm = newest ? jobEditForm(newest) : null
+  // A job from a member's proposal (jobs.md "Member proposals"): never edited once withdrawn or returned, and an edit names
+  // the version it was made from (the server refuses a stale one).
+  const proposal = detail.data?.proposal ?? null
+  const closed = proposalClosed(proposal)
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
@@ -61,6 +66,8 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
         </DialogHeader>
         {job && !detail.data ? (
           detail.error ? <p role="alert" className="text-sm text-destructive">{describeJobError(detail.error)}</p> : <ListSkeleton rows={3} />
+        ) : closed ? (
+          <p role="note" className="text-body">{PROPOSAL_CLOSED_TEXT}</p>
         ) : tooNew ? (
           <p role="note" className="text-sm">{JOB_NEEDS_NEWER_SCREEN}</p>
         ) : hidden ? (
@@ -69,14 +76,16 @@ export function JobFormDialog({ job, members, defaultActingUser, onClose, onSave
           <p role="note" className="text-body">{JOB_FORM_CANNOT_EDIT}</p>
         ) : (
           <JobFormFields
-            key={job?.id ?? 'new'}
+            // A newer version read again builds a new form: never one version's form saved on top of another (review L2).
+            key={job ? `${job.id}:${newestVersion?.version ?? 0}` : 'new'}
             initial={editForm ?? emptyJobForm(defaultActingUser)}
+            baseVersion={proposal ? newestVersion?.version : undefined}
             newJob={job === null}
             members={members}
             onCancel={onClose}
-            onSubmit={async (definition) => {
+            onSubmit={async (definition, baseVersion) => {
               if (job) {
-                const saved = await jobsApi.update(companyId, job.id, definition)
+                const saved = await jobsApi.update(companyId, job.id, definition, baseVersion)
                 toast.success(saved.changed ? `第${saved.latestVersion}版を作りました。承認すると、この版で動きます` : '変わったところはありません')
               } else {
                 await jobsApi.create(companyId, definition)
@@ -101,14 +110,20 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function JobFormFields({ initial, newJob, members, onCancel, onSubmit }: {
+export function JobFormFields({ initial, baseVersion, newJob, members, onCancel, onSubmit }: {
   initial: JobForm
+  /**
+   * A proposal's job: the version this form was built from, kept as it was when the form was made and sent back with the
+   * edit (`baseVersion`), so the server's stale check compares with what the person edited — never a version read later.
+   */
+  baseVersion?: number
   /** A new job (not a version being edited): only then does becoming an event run by the PC take the one-day default. */
   newJob: boolean
   members: Member[]
   onCancel: () => void
-  onSubmit: (definition: JobDefinition) => Promise<void>
+  onSubmit: (definition: JobDefinition, baseVersion: number | undefined) => Promise<void>
 }) {
+  const [base] = useState(baseVersion)
   const { companyId, hasCompanyFolder } = useCompany()
   // A company without the shared folder picks its Skill from the Skill shelf (the server pins its version).
   const shelf = useQuery(!hasCompanyFolder ? `skill-shelf:${companyId}` : null, () => skillShelfApi.list(companyId))
@@ -140,7 +155,7 @@ function JobFormFields({ initial, newJob, members, onCancel, onSubmit }: {
     setProblem(null)
     setBusy(true)
     try {
-      await onSubmit(parsed.definition)
+      await onSubmit(parsed.definition, base)
     } catch (err) {
       setProblem(describeJobError(err))
     } finally {
@@ -156,12 +171,20 @@ function JobFormFields({ initial, newJob, members, onCancel, onSubmit }: {
       <Row label="名前">
         <Input aria-label="名前" value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="例：週の報告" />
       </Row>
+      {f.proposal ? (
+        // A member's proposal runs as its proposer, always (owner decision 2026-11-22): not offered, said as such.
+        <Row label="責任者（案を出した人）">
+          <span aria-label="責任者">{personName(members.find((m) => m.userId === f.actingUser))}（案を出した人のままです。変えられません）</span>
+        </Row>
+      ) : (
       <Row label="責任者（この人のやることを作ります）">
         <select aria-label="責任者" className={SELECT} value={f.actingUser} onChange={(e) => set('actingUser', e.target.value)}>
           {!members.some((m) => m.userId === f.actingUser) && <option value={f.actingUser}>もういない人</option>}
           {members.map((m) => <option key={m.userId} value={m.userId}>{personName(m)}</option>)}
         </select>
       </Row>
+      )}
+      {!f.proposal && (
       <Row label="いつ動くか">
         <select aria-label="いつ動くか" className={SELECT} value={f.when}
           onChange={(e) => setF((prev) => switchJobForm(prev, { when: e.target.value as JobForm['when'] }, newJob))}>
@@ -169,6 +192,7 @@ function JobFormFields({ initial, newJob, members, onCancel, onSubmit }: {
           <option value="event">見張っているやることが終わったときなどに（出来事で）</option>
         </select>
       </Row>
+      )}
       {f.when === 'event' ? (
         <>
           <Row label="見張るやること（責任者が担当のもの）">
@@ -257,6 +281,8 @@ function JobFormFields({ initial, newJob, members, onCancel, onSubmit }: {
         </select>
       </Row>
       )}
+      {/* A member's proposal stays a Skill run by the responsible person's PC AI (schema 4): not offered. */}
+      {!f.proposal && (
       <Row label="すること">
         <select aria-label="すること" className={SELECT} value={f.kind}
           onChange={(e) => setF((prev) => switchJobForm(prev, { kind: e.target.value as JobForm['kind'] }, newJob))}>
@@ -264,6 +290,7 @@ function JobFormFields({ initial, newJob, members, onCancel, onSubmit }: {
           <option value="pc">Skill を責任者の PC の AI で動かす</option>
         </select>
       </Row>
+      )}
       {f.kind === 'task' ? (
         <Row label="作るやること">
           <Input aria-label="作るやること" value={f.taskTitle} onChange={(e) => set('taskTitle', e.target.value)} placeholder="例：週の報告を書く" />
@@ -321,12 +348,14 @@ export function JobVersionWords({ definition, members }: { definition: JobDefini
  * Approving is never accepting (owner decision 2026-11-18): also when the approver is the responsible person, their
  * consent to run it with their rights is its own press afterwards (`JobAcceptDialog`).
  */
-export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }: {
+export function JobApproveDialog({ job, members, myUserId, onClose, onApproved, onRefused }: {
   job: JobView
   members: Member[]
   myUserId: string | null
   onClose: () => void
   onApproved: (next: JobView) => void
+  /** The approval was refused (the page reads the proposals again when one was decided elsewhere meanwhile). */
+  onRefused?: (err: unknown) => void
 }) {
   const { companyId } = useCompany()
   const detail = useQuery(`job:${companyId}:${job.id}`, () => jobsApi.get(companyId, job.id))
@@ -344,9 +373,16 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
   const own = definition !== null && definition.actingUser === myUserId
   // A place outside is chosen by the responsible person in their app when accepting: never here.
   const placeOutside = definition?.grant.deliverTo !== undefined
+  // A job from a member's proposal (jobs.md "Member proposals"): which hands made this version; never approved once the
+  // proposal was withdrawn or returned; its proposer accepts in their app (approving never accepts).
+  const proposal = detail.data?.proposal ?? null
+  const closed = proposalClosed(proposal)
+  const proposerName = proposal ? personName(members.find((m) => m.userId === proposal.proposerId)) : ''
+  // No line at all when the words say nothing (a version before the submitted one): never a bare 「第N版：」 (review L3).
+  const versionLine = proposal && newest ? proposalVersionText(newest.version, proposal, proposerName) : null
 
   const approve = async () => {
-    if (!newest?.fingerprint || tooNew || hidden) return
+    if (!newest?.fingerprint || tooNew || hidden || closed) return
     setBusy(true)
     setProblem(null)
     try {
@@ -356,6 +392,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
       onClose()
     } catch (err) {
       setProblem(describeJobError(err))
+      onRefused?.(err)
     } finally {
       setBusy(false)
     }
@@ -370,18 +407,23 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
         </DialogHeader>
         {!detail.data ? (
           detail.error ? <p role="alert" className="text-sm text-destructive">{describeJobError(detail.error)}</p> : <ListSkeleton rows={4} />
+        ) : closed ? (
+          <p role="note" className="text-body">{PROPOSAL_CLOSED_TEXT}</p>
         ) : tooNew ? (
           <p role="note" className="text-sm">{JOB_NEEDS_NEWER_SCREEN}</p>
         ) : hidden ? (
           <p role="note" className="text-body">{JOB_VERSION_HIDDEN}</p>
         ) : definition ? (
           <div className="space-y-3">
+            {versionLine && newest && <p className="text-body" aria-label="版の出どころ">第{newest.version}版：{versionLine}</p>}
             <JobVersionWords definition={definition} members={members} />
             <p className="rounded-control border border-info-border bg-info-bg px-3 py-2 text-sm text-info-text" role="note">
               {own && !mustAccept
                 ? 'あなたは責任者として、この内容（だれの権限で・何を・どこで）をすでに受け取っています。承認すると、受け取り直しなしでこの版に切り替わります。'
-                : own && placeOutside
-                ? `あなたが責任者です。${JOB_OWN_APPROVAL_NOTE}できたものを置く先は、承認したあとにあなたのアプリの「設定」→「仕事」→「定期の仕事」で選んで受け取ってください。`
+                : own && (placeOutside || proposal)
+                ? proposal && !placeOutside
+                  ? `あなたが責任者です。${JOB_OWN_APPROVAL_NOTE}承認したあと、あなたのアプリの「設定」→「仕事」→「定期の仕事」で受け取ってください。`
+                  : `あなたが責任者です。${JOB_OWN_APPROVAL_NOTE}できたものを置く先は、承認したあとにあなたのアプリの「設定」→「仕事」→「定期の仕事」で選んで受け取ってください。`
                 : own
                 ? `あなたが責任者です。${JOB_OWN_APPROVAL_NOTE}承認したあと、この画面の「受け取る」を押してください。`
                 : mustAccept
@@ -393,7 +435,7 @@ export function JobApproveDialog({ job, members, myUserId, onClose, onApproved }
         {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={busy}>キャンセル</Button>
-          <Button onClick={() => void approve()} disabled={busy || !newest?.fingerprint || tooNew || hidden}>承認する</Button>
+          <Button onClick={() => void approve()} disabled={busy || !newest?.fingerprint || tooNew || hidden || closed}>承認する</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

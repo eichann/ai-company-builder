@@ -93,6 +93,8 @@ import {
   jobRetrySchema,
   jobReconcileSchema,
   jobUpdatedSchema,
+  jobProposalListSchema,
+  jobProposalReturnedSchema,
 } from './api-schemas'
 import type {
   AgentEventQuery,
@@ -1524,9 +1526,15 @@ export const jobsApi = {
   occurrences: (companyId: string, jobId: string) => getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/occurrences`, jobOccurrencesSchema),
   create: (companyId: string, definition: JobDefinition) =>
     getData(`/api/companies/${enc(companyId)}/jobs`, jobSchema, { ...JOB_READS, method: 'POST', body: { definition } }),
-  /** A new version (the approved one keeps running until this one is approved). */
-  update: (companyId: string, jobId: string, definition: JobDefinition) =>
-    getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}`, jobUpdatedSchema, { ...JOB_READS, method: 'PUT', body: { definition } }),
+  /**
+   * A new version (the approved one keeps running until this one is approved). `baseVersion`: the version the form was made
+   * from — sent for a job from a member's proposal (the server needs it there and refuses a stale one); left out otherwise,
+   * as a server before member proposals takes `{ definition }` only.
+   */
+  update: (companyId: string, jobId: string, definition: JobDefinition, baseVersion?: number) =>
+    getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}`, jobUpdatedSchema, {
+      ...JOB_READS, method: 'PUT', body: baseVersion === undefined ? { definition } : { definition, baseVersion },
+    }),
   /** `fingerprint`: the version as shown — the server refuses when it is not that version any more. */
   approve: (companyId: string, jobId: string, version: number, fingerprint: string) =>
     getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/approve`, jobSchema, { ...JOB_READS, method: 'POST', body: { version, fingerprint } }),
@@ -1557,4 +1565,16 @@ export const jobsApi = {
   /** Whether an outside operation of the occurrence's run whose result was unknown happened (`done`) or not. */
   reconcileOccurrence: (companyId: string, jobId: string, occurrenceId: string, key: string, done: boolean) =>
     getData(`/api/companies/${enc(companyId)}/jobs/${enc(jobId)}/occurrences/${enc(occurrenceId)}/operations/${enc(key)}/reconcile`, jobReconcileSchema, { method: 'POST', body: { done } }),
+}
+
+// Member proposals (jobs.md "Member proposals", PR B): what members sent from the AI chat, for owners / admins. Approving goes
+// through `jobsApi.approve` (the job's newest version with its fingerprint); a return names one fixed reason code, never text.
+export type { JobProposalView } from '../../../shared/types/job-proposals'
+import type { JobProposalReturnReason, JobProposalState } from '../../../shared/core/job-proposals'
+
+export const jobProposalsApi = {
+  list: (companyId: string, state?: JobProposalState) =>
+    getData(`/api/companies/${enc(companyId)}/job-proposals${state ? `?state=${enc(state)}` : ''}`, jobProposalListSchema),
+  returnProposal: (companyId: string, proposalId: string, reason: JobProposalReturnReason) =>
+    getData(`/api/companies/${enc(companyId)}/job-proposals/${enc(proposalId)}/return`, jobProposalReturnedSchema, { method: 'POST', body: { reason } }),
 }

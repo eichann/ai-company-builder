@@ -30,6 +30,7 @@ import type { GoogleAdminView, GoogleRelayAdminView } from '../../../shared/type
 import type { MemberGroup, MemberGroupsView } from '../../../shared/types/groups'
 import type { InboxSettingsView } from '../../../shared/types/inbox'
 import type { JobList, JobOccurrenceView, JobRetryResult, JobView } from '../../../shared/types/jobs'
+import type { JobProposalView } from '../../../shared/types/job-proposals'
 import type { BrokerView } from '../../../shared/types/key-broker'
 import type { MinutesFolderSetting } from '../../../shared/types/minutes'
 import type { MeetingDuplicates, MeetingDuplicatesMerged } from '../../../shared/types/meeting-outputs'
@@ -391,6 +392,12 @@ export const jobStartChoicesSchema = topLevel<RecordQueryResult>({ total: z.numb
 // 「もう一度」 (jobs.md, B PR 5b)
 export const jobRetrySchema = topLevel<JobRetryResult>({ occurrence: obj })
 export const jobReconcileSchema = topLevel<{ occurrenceId: string }>({ occurrenceId: str })
+// Member proposals (jobs.md "Member proposals", PR B): an owner / admin's list and a return. Each entry's fields the page reads.
+const jobProposalEntry = z.looseObject({
+  id: str, jobId: str, proposerId: str, submittedVersion: num, state: str, returnReason: z.nullable(str), createdAt: str,
+}) as unknown as z.ZodMiniType<JobProposalView>
+export const jobProposalListSchema = topLevel<{ proposals: JobProposalView[] }>({ proposals: z.array(jobProposalEntry) })
+export const jobProposalReturnedSchema = topLevel<{ proposal: JobProposalView }>({ proposal: jobProposalEntry })
 
 // 会社の Skill (the Skill shelf of a company without the shared folder)
 export const shelfListSchema = topLevel<ShelfListView>({ items: list })

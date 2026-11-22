@@ -124,6 +124,9 @@ const JOB_SENTENCE_CODES: ReadonlySet<string> = new Set([
   'JOB_SKILL_NOT_HERE', 'JOB_SKILL_CHANGED', 'JOB_NOT_RESPONSIBLE', 'JOB_RETIRED', 'JOB_PLACE_NEEDED', 'JOB_PLACE_NOT_USABLE',
   'JOB_SCHEMA_UNKNOWN', 'JOB_NEEDS_NEWER_SCREEN', 'JOB_TRIGGER_NOT_ALLOWED', 'JOB_ACCEPT_SEPARATELY', 'JOB_NOT_APPROVED',
   'JOB_PAUSED_BY_OTHER', 'JOB_NOT_ACCEPTED', 'JOB_DRAFT_WAITING',
+  // Member proposals (jobs.md "Member proposals", services/jobs.ts and job-proposals.ts): fixed sentences, no name or place.
+  'JOB_PROPOSAL_ONLY', 'JOB_PROPOSAL_SCHEMA', 'JOB_PROPOSAL_CLOSED', 'JOB_PROPOSAL_RESPONSIBLE_FIXED', 'JOB_VERSION_NOT_LATEST',
+  'JOB_PROPOSAL_NOT_FOUND', 'JOB_PROPOSAL_DECIDED',
 ])
 
 /** A job request refused with a code (or none) this console does not know, whatever the status: never the server's text. */
