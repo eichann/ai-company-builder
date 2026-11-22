@@ -85,6 +85,18 @@ the machine is shared — CI runs all of it.
 - Every sync terminates and leaves no rebase / merge / cherry-pick in progress.
 - No committed work is lost: it is on the server, in `.backups/` with metadata, or kept locally
   at an ignored path.
+- No local file is lost either (`assertNoLostLocalFiles`, also in the soak): every content a member
+  `write`s — committed or not, so ignored `.personal/` notes, `.env`, large files and files in a
+  private clone count — is still at its path, on a server, in a backup with metadata (`.backups/` or
+  the private backups) or in the sparse keep (`.git/acb-sparse-keep/`). Only the member's own
+  overwrite, `remove` or `rename` of what is on disk there, or access lost (`revokePrivate`),
+  releases one; sync moving it away does not. Content a sync committed is left to the check above
+  (it knows union and three-way merges); office lock files are skipped (the app removes them on the
+  member's answer); a test step that removes one by design (a backup aged out) calls
+  `releaseLocalWritesUnder`. Delete with `member.remove`, not `fs`, when it is the member's deletion. The committed-only check let SYNC-1 / SYNC-3 (code
+  review 2026-11-22: ignored files deleted with a left-out private clone, a sparse keep written over)
+  through; both fail this one on the code before their fix. Self-test: 「a lost local file is
+  detected…」. Files a test puts in place with `fs` directly are not tracked.
 - After everyone syncs twice, all members are at the server's commit with a clean tree; rejected
   pushes are recoverable by the next sync.
 - `assertPrivacy`: nothing at a private path and no private content (`privateMarker`) in the

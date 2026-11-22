@@ -324,7 +324,7 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     a.initNestedRepo('ext')
     ok(await a.sync(), 'a')
     assert.deepEqual(readNestedRepoExcludes(a.dir), ['ext'])
-    fs.rmSync(a.path('ext'), { recursive: true, force: true })
+    a.remove('ext')
     ok(await a.sync(), 'a')
     assert.deepEqual(readNestedRepoExcludes(a.dir), [])
     a.write('ext/note.md', 'now a normal folder\n')

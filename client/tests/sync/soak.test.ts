@@ -39,7 +39,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { World, privateMarker, type HarnessPrivateFolder, type Member, type Role } from '../sync-harness/world'
-import { assertConverged, assertNoLostWork, assertPrivacy } from '../sync-harness/invariants'
+import { assertConverged, assertNoLostLocalFiles, assertNoLostWork, assertPrivacy } from '../sync-harness/invariants'
 import { readSparseConfig } from '../../electron/sync/sparse'
 import { isNotDownloaded } from '../../shared/sparse-paths'
 
@@ -280,6 +280,7 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
     await world.settle(2)
     assertConverged(world)
     assertNoLostWork(world)
+    assertNoLostLocalFiles(world)
     t.diagnostic(`seed ${seed}: ${opLog.length} steps, ${world.members.reduce((n, m) => n + m.results.length, 0)} syncs, ` +
       `${world.members.reduce((n, m) => n + m.results.filter(r => r.hadConflicts).length, 0)} with conflicts` +
       (partialMembers > 0
@@ -420,6 +421,7 @@ async function privateSoak(seed: number, t: { after: (fn: () => void) => void; d
     await world.settle(2)
     assertConverged(world)
     assertNoLostWork(world)
+    assertNoLostLocalFiles(world)
     assertPrivacy(world, { converged: true })
     t.diagnostic(`private seed ${seed}: ${opLog.length} steps, ${world.members.reduce((n, m) => n + m.results.length, 0)} syncs, ` +
       `${world.members.reduce((n, m) => n + m.results.filter(r => r.reservedPathFiles).length, 0)} held back reserved names, ` +

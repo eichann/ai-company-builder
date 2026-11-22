@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { World, type SyncImplFactory } from '../sync-harness/world'
-import { assertConverged, assertNoLostWork } from '../sync-harness/invariants'
+import { assertConverged, assertNoLostLocalFiles, assertNoLostWork } from '../sync-harness/invariants'
 
 describe('sync harness self-test', { concurrency: 4 }, () => {
   test('lost work is detected when the conflict backup is missing', async t => {
@@ -20,6 +20,22 @@ describe('sync harness self-test', { concurrency: 4 }, () => {
     assertNoLostWork(world)
     fs.rmSync(a.path('.backups'), { recursive: true, force: true })
     assert.throws(() => assertNoLostWork(world), /committed work lost[\s\S]*a: x\.md/)
+  })
+
+  test('a lost local file is detected: an ignored note sync never commits, gone without a backup', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }], seed: { '営業部/x.md': '0\n' } })
+    const [a] = world.members
+    a.write('営業部/.personal/memo.md', 'only here\n').write('営業部/.env', 'TOKEN=a\n')
+    await a.sync()
+    assertNoLostLocalFiles(world)
+    // Sync moving it to a backup keeps it; the member's own deletion releases it.
+    fs.mkdirSync(a.path('.backups/t1/営業部'), { recursive: true })
+    fs.renameSync(a.path('営業部/.env'), a.path('.backups/t1/営業部/.env'))
+    fs.writeFileSync(a.path('.backups/t1/_metadata.json'), '{}')
+    a.write('営業部/.personal/other.md', 'x\n').remove('営業部/.personal/other.md')
+    assertNoLostLocalFiles(world)
+    fs.rmSync(a.path('営業部/.personal/memo.md'))
+    assert.throws(() => assertNoLostLocalFiles(world), /local work lost[\s\S]*a: 営業部\/\.personal\/memo\.md/)
   })
 
   test('lost work is detected when a sync drops a commit (the rebase --skip fallback of the original single-round code)', async t => {

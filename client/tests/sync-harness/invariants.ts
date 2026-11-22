@@ -7,6 +7,7 @@ import { blobId, privateMarker, NO_LAZY_FETCH, type World } from './world'
 import { pathKey } from '../../shared/sparse-paths'
 import { readSparseConfig } from '../../electron/sync/sparse'
 import { isNotDownloaded } from '../../shared/sparse-paths'
+import { isOfficeLockFile } from '../../shared/office-lock-files'
 
 /**
  * No member's committed work is ever lost. Every file content a member
@@ -199,5 +200,48 @@ export async function settleAndCheck(world: World): Promise<void> {
   await world.settle(2)
   assertConverged(world)
   assertNoLostWork(world)
+  assertNoLostLocalFiles(world)
   assertPrivacy(world, { converged: true })
+}
+
+/**
+ * No file a member wrote vanishes, committed or not — the ignored ones
+ * included (`.personal/` notes, `.env`, large files, files in a private
+ * clone), which assertNoLostWork cannot see because sync never commits them.
+ * Every content in `Member.localWrites` (released only by the member's own
+ * overwrite, deletion or rename, or by access lost by design) must be:
+ *  - still on disk at its path, byte-identical, or
+ *  - on a server (any repository, any history), or
+ *  - in a backup folder with a _metadata.json (.backups/ or the private backups), or
+ *  - held by the sparse keep (`.git/acb-sparse-keep/`, files waiting for their place).
+ */
+export function assertNoLostLocalFiles(world: World): void {
+  let serverObjects: Set<string> | null = null
+  const lost: string[] = []
+  for (const m of world.members) {
+    let elsewhere: Set<string> | null = null
+    for (const w of m.localWrites) {
+      // Committed content is assertNoLostWork's (it knows merges); an office lock file the app removes on the member's answer.
+      if (m.committedBlobs.has(w.blob) || isOfficeLockFile(w.rel)) continue
+      try {
+        if (blobId(fs.readFileSync(m.path(w.rel))) === w.blob) continue
+      } catch { /* not at its path */ }
+      serverObjects ??= world.serverObjects()
+      if (serverObjects.has(w.blob)) continue
+      elsewhere ??= new Set([...m.backupBlobs(), ...blobsUnder(m.path('.git/acb-sparse-keep'))])
+      if (elsewhere.has(w.blob)) continue
+      lost.push(`${m.name}: ${w.rel} (${w.blob.slice(0, 10)}, ${w.size} bytes)`)
+    }
+  }
+  if (lost.length > 0) {
+    throw new Error(`local work lost (not on disk, not on a server, not in a backup):\n  ${lost.join('\n  ')}`)
+  }
+}
+
+function blobsUnder(dir: string): string[] {
+  if (!fs.existsSync(dir)) return []
+  return (fs.readdirSync(dir, { recursive: true }) as string[])
+    .map(f => path.join(dir, f))
+    .filter(f => fs.lstatSync(f).isFile())
+    .map(f => blobId(fs.readFileSync(f)))
 }
