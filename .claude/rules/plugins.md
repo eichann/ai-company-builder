@@ -631,7 +631,9 @@ browser:
   `delivers` is refused, with the reason. **The first version runs** only `delivers: none` — or
   `scheduled` (6b-2a: it reaches people only on the target's own schedule, never anyone already past
   it, reviewed with the connector) when `facts.schedule` and `facts.templates` are `required` and `complete` —, not
-  irreversible, exactly one write, not delete (`browserFirstVersionProblem`, asked by the server).
+  irreversible, exactly one write, not delete, and with a `shared` note whenever `facts.shared_with` is
+  declared optional (the card's warning then stands in for who else uses the target)
+  (`browserFirstVersionProblem`, asked by the server).
 - **`explore`** (6b-1, design memo §33 2-2; `browser.explore`, optional): the pages the operator AI may
   ask the app to read during the preview, ≤ 10, each `{ label, path, query?, pages?, reader, no_side_effects:
   reviewed }` — a path of literal segments and whole `{name}` segments (no fragment, `..` or `//`); an

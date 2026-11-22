@@ -506,7 +506,8 @@ send → report; 6c turns it on for the owner's PC).
   (`BROWSER_TYPE_NOT_APPROVED`) and not retired (`BROWSER_TYPE_RETIRED`), the app at least
   `minAppVersion` (`BROWSER_APP_TOO_OLD`), the operation exists, **the first version's rule**
   (`browserFirstVersionProblem`: `delivers: none`, or `delivers: scheduled` with `facts.schedule`
-  and `facts.templates` both `required` and `complete` (6b-2a), not irreversible, exactly one write, not delete, a lock kind —
+  and `facts.templates` both `required` and `complete` (6b-2a), a `shared` note whenever `facts.shared_with`
+  is declared optional (0.6.1: the card's warning stands in for it), not irreversible, exactly one write, not delete, a lock kind —
   `BROWSER_OPERATION_NOT_YET`), the member's browser setting (company mode with their
   override, `browserOperationsAllowed`: site and level — `BROWSER_NOT_ALLOWED`), the AI stop
   (`browserAiStopped` of the member's stops: whole AI, `web`, `mcp-external` — `BROWSER_AI_STOPPED`),
@@ -627,7 +628,7 @@ across members; reports: late, duplicate, contradicting, without a permit, after
 secret; confirm timing, the clock behind, admins after leaving / 24 h; leaving; unknown, retired,
 mismatching and too-old combinations; facts missing / unknown / incomplete / stale / contradicting;
 grants), `server/tests/unit/browser-plan-rules.test.ts` (the declaration's new keys and refusals,
-the first version's rule (also `scheduled`), each fact's shape, unknown / empty / 0, facts version 2,
+the first version's rule (also `scheduled`; an optional `shared_with` without a `shared` note), each fact's shape, unknown / empty / 0, facts version 2,
 the re-read comparison, the reasons, the lock key, the stop),
 `server/tests/integration/browser-plans.test.ts` (over HTTP: grants owner/admin only, the secret once
 and uncached and only in its header, the claim's `fixed` hashing to the stored hash, the open plans
@@ -979,11 +980,14 @@ before the permit — are read by main through the checker, never taken from the
   `GET /api/episodes/<reminder>` (strict JSON, `reminder-schedule.ts`): the answer's `id` is the
   reminder, `hid_at` present and `null` (a hidden reminder → unknown), `steps` a list of objects in which
   the target step's `id` stands **exactly once** and that step's `episode_id` is the reminder; its timing
-  only through the **fixed table** — `step_type` `1`, `step_days` `0` (numbers) and `step_time`
-  `HH:MM:00` → 「当日 HH:MM」 (the combination seen: `1` / `0` / `09:00:00` shown 「当日 09:00」);
+  only through the **fixed table** — `step_type` `1`, `step_days` `0`, `skip` `1`, `initial` `0` (numbers),
+  `step_minutes` present and `null`, and `step_time` `HH:MM:00` → 「当日 HH:MM」 (exactly the step seen in
+  §39's read-only capture of `/api/episodes/1904672`: `{ step_type: 1, step_days: 0, step_time:
+  "09:00:00", skip: 1, initial: 0, step_minutes: null, episode_id: 1904672 }`, shown 「当日 09:00」);
   anything else — a non-zero `step_days` (which sign means 「前」 / 「後」 was not seen), another
-  `step_type`, seconds, values as text — is unknown (no plan). `step_minutes`, `skip`, `initial` are not
-  read. `names` is stamped from that JSON answer. 0.6.0 read the timing from the page's text, which
+  `step_type`, `skip`, `initial` or `step_minutes` (their meaning is not confirmed; `skip 1` plausibly
+  means "people registering after the time skip the step"), seconds, values as text — is unknown (no
+  plan). `names` is stamped from that JSON answer. 0.6.0 read the timing from the page's text, which
   always failed on the real page (it repeats ids in every step's form, so the view is never whole): that
   reader is removed — the JSON is the one source. `shared_with` and `audience` **always unknown** (no
   reading exists: Lステップ has no reverse lookup of the 回 using a reminder — people join it from tags,
@@ -1004,7 +1008,8 @@ before the permit — are read by main through the checker, never taken from the
   holding every id; any non-zero `step_days`.
 - **To confirm at the owner's next login** (read-only window, as §34–§36): how a step 「N日前」 / 「N日後」
   and other `step_type`s look in `/api/episodes/<reminder>` (each mapping added only once seen beside the
-  page's text; also what `step_minutes` and `skip` mean); whether `/api/templates?group=0&page=1` lists
+  page's text; also what `skip`, `initial` and `step_minutes` mean — the table maps only `1` / `0` /
+  `null`); whether `/api/templates?group=0&page=1` lists
   「未分類」's templates and how their `group` reads (then 「未分類」 can be walked); whether any read means
   exactly "people who will still receive this step" (`audience`); that `content_text` is a text
   template's whole body (not a shortened preview) and `form_type` is a number with 8 = text; that
@@ -1022,8 +1027,9 @@ every confirmed fact known with its source and time, `shared_with` / `audience` 
 the read-after's `expectedAfter`; a non-text template (also `form_type: '8'`), one only in 「未分類」, in
 another folder, twice differently, with a control character, a failed or repeated-key folder answer, a
 misnumbered page → no templates; the timing from the reminder's JSON through the fixed table (「当日
-HH:MM」; a non-zero day of either sign, another / textual `step_type` or `step_days`, seconds, a malformed
-or missing time → unknown; the step missing, twice, naming another reminder, another reminder's answer, a
+HH:MM」; a non-zero day of either sign, another / textual `step_type` or `step_days`, any `skip` /
+`initial` / `step_minutes` but `1` / `0` / `null` (or missing), seconds, a malformed or missing time →
+unknown; the step missing, twice, naming another reminder, another reminder's answer, a
 hidden reminder, no `hid_at`, a step that is not an object, `steps` not a list, a failed or repeated-key
 answer → unknown; the page's text plays no part); a page with repeated ids (the real page's form ids)
 keeps the account, state, timing and names; no account,

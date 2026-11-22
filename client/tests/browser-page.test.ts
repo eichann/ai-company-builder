@@ -292,11 +292,11 @@ test('a page report reaches the app only as whole numbers that fit together (cur
 })
 
 test('Lステップ\'s reader of a reminder\'s steps as JSON (0.6.1, design memo §39) offers this reminder\'s steps only, labelled only with a timing its fixed table maps; another reminder, a hidden one or a step twice is not offered whole', () => {
-  const step = (id: number, over: Record<string, unknown> = {}) => ({ id, order: 1, step_days: 0, step_time: '09:00:00', step_type: 1, step_minutes: 0, skip: 0, initial: 0, egg_id: null, member_query_id: null, action_id: null, episode_id: 7001001, ...over })
+  const step = (id: number, over: Record<string, unknown> = {}) => ({ id, order: 1, step_days: 0, step_time: '09:00:00', step_type: 1, step_minutes: null, skip: 1, initial: 0, egg_id: null, member_query_id: null, action_id: null, episode_id: 7001001, ...over })
   const episode = (steps: unknown, over: Record<string, unknown> = {}) => ({ id: 7001001, name: '架空のリマインダ', order: 1, type: 1, hid_at: null, steps, ...over })
   const read = (answer: unknown, reminder = '7001001') => readJson('lstep.reminder_schedule', answer, { reminder })
-  assert.deepEqual(read(episode([step(7002001), step(7002002, { step_days: 3 })])), {
-    items: [{ field: 'step', value: '7002001', label: '当日 09:00' }, { field: 'step', value: '7002002' }], complete: true,
+  assert.deepEqual(read(episode([step(7002001), step(7002002, { step_days: 3 }), step(7002003, { skip: 0 })])), {
+    items: [{ field: 'step', value: '7002001', label: '当日 09:00' }, { field: 'step', value: '7002002' }, { field: 'step', value: '7002003' }], complete: true,
   }, 'a timing the table does not map gets no label, never a guessed one')
   // Another reminder's answer, a hidden reminder, no steps list: nothing offered.
   assert.deepEqual(read(episode([step(7002001)]), '7001002'), { items: [], complete: false })

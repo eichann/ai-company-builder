@@ -91,7 +91,7 @@ function siteAnswer(site: FakeLstep, address: string): { status: number; body: s
   if (address === `/line/episode/show/${REMINDER}`) { site.onPage?.(); return { status: 200, body: reminderPage(site) } }
   const pages: Record<string, string> = {
     [`/api/episodes/${REMINDER}`]: JSON.stringify({ id: Number(REMINDER), name: '架空のリマインダ', order: 1, type: 1, hid_at: null, steps: Object.keys(site.steps).map((id, i) => ({
-      id: Number(id), order: i, step_days: 0, step_time: site.stepTime, step_type: 1, step_minutes: 0, skip: 0, initial: 0, egg_id: null, member_query_id: null, action_id: null, episode_id: Number(REMINDER),
+      id: Number(id), order: i, step_days: 0, step_time: site.stepTime, step_type: 1, step_minutes: null, skip: 1, initial: 0, egg_id: null, member_query_id: null, action_id: null, episode_id: Number(REMINDER),
     })) }),
     '/api/episode-groups': JSON.stringify({ data: [{ id: 7100001, name: '架空の配信', order: 1, item_count: 1 }] }),
     '/api/episodes?group=7100001&page=1': pageOf([{ id: Number(REMINDER), name: '架空のリマインダ', order: 1, type: 1, created_at: 'x', group_id: 7100001, group: { id: 7100001, name: '架空', order: 1 } }]),

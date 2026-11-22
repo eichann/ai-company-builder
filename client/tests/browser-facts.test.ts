@@ -38,7 +38,7 @@ const template = (id: string, group: number, over: Record<string, unknown> = {})
   ({ id: Number(id), name: `架空テンプレ${id.slice(-1)}`, content_text: `本文${id.slice(-1)}\n2行目`, created_at: 'x', form_type: 8, group: { id: group, name: '架空フォルダ' }, editor_version: 2, ...over })
 /** `GET /api/episodes/<reminder>` in the real site's shape (design memo §39; values made up). */
 const stepJson = (id: string, over: Record<string, unknown> = {}) => ({
-  id: Number(id), order: 1, step_days: 0, step_time: '09:00:00', step_type: 1, step_minutes: 0, skip: 0, initial: 0,
+  id: Number(id), order: 1, step_days: 0, step_time: '09:00:00', step_type: 1, step_minutes: null, skip: 1, initial: 0,
   egg_id: null, member_query_id: null, action_id: null, episode_id: Number(REMINDER), ...over,
 })
 const episodeJson = (steps: unknown[], over: Record<string, unknown> = {}) =>
@@ -171,6 +171,9 @@ test('the step\'s timing comes only from the reminder\'s JSON through the fixed 
   for (const odd of [
     { step_days: 3 }, { step_days: -3 }, { step_days: 1 }, { step_type: 2 }, { step_type: 0 }, { step_type: '1' }, { step_days: '0' },
     { step_time: '09:00:30' }, { step_time: '9:00:00' }, { step_time: '24:00:00' }, { step_time: '09:00' }, { step_time: null }, { step_type: undefined },
+    // Only the skip / initial / step_minutes seen on the real site (§39: 1 / 0 / null); their meaning is not confirmed.
+    { skip: 0 }, { skip: 2 }, { skip: '1' }, { skip: true }, { skip: undefined }, { initial: 1 }, { initial: '0' }, { initial: undefined },
+    { step_minutes: 0 }, { step_minutes: 30 }, { step_minutes: undefined },
   ]) assert.equal(await timing(odd), 'unknown', JSON.stringify(odd))
   const unread = await withSteps([stepJson(STEP, { step_type: 2 })])
   assert.equal(unread.names.status, 'unknown', 'the step\'s name is its timing')

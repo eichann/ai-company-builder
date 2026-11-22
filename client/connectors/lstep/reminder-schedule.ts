@@ -6,18 +6,22 @@
  * episode_id }] }`. One source for the step's timing (0.6.0 read it from the page's text, which on the
  * real page always failed: the page repeats ids in every step's form).
  *
- * **The timing mapping** (`stepTiming`), fixed and tested — only what the JSON and the page were seen
- * to agree on (§39: the test step `step_type 1`, `step_days 0`, `step_time 09:00:00` shows 「当日 09:00」):
+ * **The timing mapping** (`stepTiming`), fixed and tested — only the step seen on the real site beside
+ * the page's text (§39, the read-only capture of `/api/episodes/1904672`: the test step `{ step_type: 1,
+ * step_days: 0, step_time: "09:00:00", skip: 1, initial: 0, step_minutes: null, episode_id: 1904672 }`
+ * shows 「当日 09:00」):
  *
- * | `step_type` | `step_days` | `step_time` | shown |
- * |---|---|---|---|
- * | `1` (number) | `0` (number) | `HH:MM:00` (00–23, 00–59) | 「当日 HH:MM」 |
- * | anything else | | | unknown (no fact, no plan) |
+ * | `step_type` | `step_days` | `step_time` | `skip` | `initial` | `step_minutes` | shown |
+ * |---|---|---|---|---|---|---|
+ * | `1` | `0` | `HH:MM:00` (00–23, 00–59) | `1` | `0` | `null` (present) | 「当日 HH:MM」 |
+ * | anything else | | | | | | unknown (no fact, no plan) |
  *
- * Not mapped (decision, safe side): any non-zero `step_days` — the page shows 「N日前 HH:MM」 forms
- * (§15, §34), but which sign (or which `step_type`) means 「前」 or 「後」 was not seen; seconds other
- * than `00`; any other `step_type`. `step_minutes`, `skip`, `initial` are not read (their meaning is not
- * confirmed; the shown timing above was confirmed whatever they held).
+ * Numbers as numbers. Not mapped (decision, safe side): any non-zero `step_days` — the page shows
+ * 「N日前 HH:MM」 forms (§15, §34), but which sign (or which `step_type`) means 「前」 or 「後」 was not
+ * seen; seconds other than `00`; any other `step_type`; and any other `skip` / `initial` /
+ * `step_minutes` — their meaning is not confirmed (`skip 1` plausibly means "people who register after
+ * the time skip this step", matching the owner's word that nobody already past the step receives it), so
+ * only the combination seen is shown, everything else makes no plan.
  *
  * The reminder's `name` (`reminderName`) is read from the same answer, under the same conditions
  * (0.6.1: the owner's rule to let plans be made where safety holds — one answer instead of a folder walk
@@ -46,6 +50,7 @@ function idOf(v: BrowserJsonValue | undefined): string | null {
 /** A step's timing as the page shows it, from its JSON (the table above), else null. */
 export function stepTiming(step: JsonObject): string | null {
   if (field(step, 'step_type') !== 1 || field(step, 'step_days') !== 0) return null
+  if (field(step, 'skip') !== 1 || field(step, 'initial') !== 0 || field(step, 'step_minutes') !== null) return null
   const time = field(step, 'step_time')
   const m = typeof time === 'string' ? STEP_TIME.exec(time) : null
   return m ? `当日 ${m[1]}:${m[2]}` : null
