@@ -1050,8 +1050,12 @@ paths and never ask the switch.
   category is `web` (the emergency stop's `web` kind stops it, as `browserAiStopped`). A plan made puts
   the card's reference in the reply (`data-browser-plan`, `BrowserPlanCardRef`, stored as `browserPlans`).
 - **IPC** (`plans-ipc.ts`; main window's main frame only, `isMainFrameSender`; every argument checked at
-  the entry before anything is asked): `browserPlans:list` (the member's own waiting plans, for the inbox's
-  rows — a follow-up), `browserPlans:get` (the server's view — every field the card reads checked for its
+  the entry before anything is asked): `browserPlans:list` (the inbox's rows, "The inbox's rows" below: **only
+  while the switch is on** — off, or signed out, it answers empty and asks the server nothing; then
+  `/browser-plans-open` and the first page of `/browser-executions-waiting` together, copied by
+  `readBrowserInboxPlans` — only the signed-in member's own runs (an owner's / admin's waiting list holds
+  everyone's), only `permitted` / `unknown`, only the fields a row shows, an item not of its shape left out —;
+  either list unreachable → offline), `browserPlans:get` (the server's view — every field the card reads checked for its
   shape and copied alone, `readBrowserPlanView`; anything else of the answer stays in main — + `ready` +
   `stoppedHere` + `runningHere` + the site's host), `browserPlans:run { companyId, planId, contentHash }` — approve + claim + the run in one
   press on this PC (decision 5), nothing else ever reaches the runner (no fact, target or AI word), one run
@@ -1065,7 +1069,7 @@ paths and never ask the switch.
   re-read is for unsettled executions only, which make no site read) — only while the switch is on and the AI not stopped (owner OK,
   2026-11-22).
 - **The card** (`client/src/features/browser-plans/`: `components/BrowserPlanCard.tsx` opened by
-  `{ companyId, planId }` from anywhere — the chat's reply today, the inbox later —, `planStore.ts` +
+  `{ companyId, planId }` from anywhere — the chat's reply and the inbox's row —, `planStore.ts` +
   `hooks/useBrowserPlan.ts` (read whenever a card shows it again — cards shown together share one read —,
   no effect of its own; an unsettled execution — claimed, permitted, unknown — is read again every 15 s,
   so the server's time-outs and the confirm's opening show without a restart), `model.ts` the words,
@@ -1085,9 +1089,23 @@ paths and never ask the switch.
   やるときは、相談で頼み直してください。」. Never: 「安全です」, a hash, a token, the secret.
 - **Remaining limits** (said): the readiness read is a hint (a logout between it and the press stops the
   run before the permit with `account-unknown`); `browser_request` is Claude Code only (Codex has no
-  operator); the inbox's row for a plan (［承認する…］ opening this card) is a follow-up.
+  operator).
+- **The inbox's rows** (`notifications.md` "The inbox"; `src/features/inbox/model.ts` `browserRows`,
+  `hooks/useInboxBrowserPlans.ts`): AppShell hands the inbox slot the list port and the card
+  (`browserPlans`) **only while `BROWSER_AI_BUILD_SWITCH` is on** — off there is no way to read and no
+  row (composed by AppShell, so no feature-to-feature import). A draft → あなた待ち amber 「承認を待っています」
+  ［承認する…］ (with the approvals); an `unknown` run whose `confirmableAt` has passed → あなた待ち amber
+  「届いたか分かりません」 ［確かめる…］ (right after the stops); an approved plan not started, a `permitted` run
+  and an `unknown` one before its time → 作業中. Every row only opens this card in `InboxCardDialog` (the type
+  guard in `model.test.ts` refuses an action kind that approves, sends, runs or confirms). Settled = in neither
+  list = gone (nothing stored; no できた・未確認, the server keeps no notice for plans). Read when the inbox mounts,
+  when the panel opens, when a card closes (approved / run elsewhere → gone on that read) and a second after the
+  next `confirmableAt`; offline keeps the rows shown, another failure clears them. Limits (said): a plan made
+  while the panel stays open shows at the next read (no push for plans); only the waiting list's first page is
+  read (100, oldest claim first: an admin with more open runs of others may not see their own there; the open
+  list's `more` is not told).
 
-Tests: `client/tests/browser-plans-app.test.ts` (the switch off: no preview, read or server call; a plan
+Tests: `client/tests/browser-plans-app.test.ts` (the switch off: no preview, read or server call — the inbox's list empty with no request —; the inbox's list: the member's own runs only, the row's fields only, a bad list refused, either list offline; a plan
 registered with this build's combination and the checker's facts, the AI's words only as the explanation;
 a required fact unread, the context moving, the emergency stop or the turn's stop during the reads or
 right after the preview, no combination, the operator not finding it → nothing registered; the plan view
@@ -1122,7 +1140,7 @@ are built (6b-1, "The operator and the preview", switched off) and the facts rea
 "The facts a checker reads": the unconfirmed ones read as unknown until the owner's next login) and
 the execution (6b-2c, "Executing a plan": claim → re-read → permit → send → report) and the registration,
 the card, its IPC and the request tool (6b-2d, "The card, the IPC and the request tool"), all switched
-off; the inbox's row for a plan (a follow-up of inbox I2); **6c** — the switch on, on the owner's PC only;
+off, and the inbox's rows (switched off too); **6c** — the switch on, on the owner's PC only;
 `irreversible` types and more than one write (refused by the first version's rule today); **the method override and the swap** (design memo §24: a write may
 declare `method: DELETE` / `PATCH` with `override: form_field`, sent as POST with `_method=<method>` in the
 body; `matchDeclaredWrite` would then match the effective method and the declared `_method` pair, still

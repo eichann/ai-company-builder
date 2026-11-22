@@ -6,6 +6,10 @@
 // `#read`, an approval or a send that reached main in `#acted` (a row must never get there by itself).
 // `window.__acbInbox.approvedElsewhere()`: another PC approved the request — main reads again without it.
 // `?theme=dark` for dark mode; `?offline=1`: marking read cannot reach the server. Synthetic data only.
+// `?plans=1`: 「ブラウザ操作」 is switched on — the slot gets the plans' list and the real plan card (a draft and a
+// run nobody knows the result of); `?plans=off`: switched off (no list handed in, as AppShell does). Every
+// `listBrowserPlans` reaching main counts in `#plan-reads`; a run, cancel or confirm shows in `#acted`.
+// `window.__acbInbox.planApprovedElsewhere()`: the draft was approved on another PC (the next read lacks it).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -15,6 +19,10 @@ import { useInboxSlot } from '../src/features/inbox/hooks/useInboxSlot'
 import { BottomPanel } from '../src/features/workspace/components/BottomPanel'
 import { ApprovalCard } from '../src/features/chat/components/ApprovalCard'
 import { PreparedMailCard } from '../src/features/chat/components/PreparedMailCard'
+import { BrowserPlanCard } from '../src/features/browser-plans/components/BrowserPlanCard'
+import { listBrowserPlans } from '../src/features/browser-plans/api'
+import type { BrowserInboxPlans } from '../shared/browser-plans'
+import type { BrowserPlanView } from '../../shared/types/browser-plans'
 import type { NoticesState } from '../shared/notifications-app'
 import type { NotificationItem } from '../../shared/types/notifications'
 import type { ApprovalView } from '../../shared/types/approvals'
@@ -68,11 +76,31 @@ const view: ApprovalView = {
 }
 let approved = false
 
+const DRAFT = `bp_${'1a'.repeat(16)}`
+const UNSURE = `bp_${'2b'.repeat(16)}`
+let browserInbox: BrowserInboxPlans = {
+  plans: [{ planId: DRAFT, state: 'draft', label: 'リマインダの段にテンプレートを足す', site: 'Lステップ', createdAt: at(0, 9) }],
+  unsure: [{ planId: UNSURE, state: 'unknown', label: 'リマインダの段にテンプレートを足す', permittedAt: at(0, 8), confirmableAt: at(0, 8) }],
+}
+const planView = (id: string): BrowserPlanView => ({
+  id, state: id === DRAFT ? 'draft' : 'claimed', closeReason: null, connector: { id: 'lstep', version: '0.6.0', label: 'Lステップ' },
+  operation: 'reminder_step_add_template', label: 'リマインダの段にテンプレートを足す', sharedNote: null, delivers: 'scheduled', account: '5550001',
+  target: { reminder: '7001001', step: '7002001' }, change: { template: '7003002' }, facts: {}, explanation: null,
+  createdAt: at(0, 9), expiresAt: new Date(Date.now() + 3_000_000).toISOString(), approvedAt: null, contentHash: `sha256:${'7a'.repeat(32)}`,
+  execution: id === DRAFT ? null : { id: `bx_${'3c'.repeat(16)}`, state: 'unknown', claimedAt: at(0, 8), permittedAt: at(0, 8), settledAt: null, confirmableAt: at(0, 8), voidReason: null, confirmedBy: null },
+})
+
 function Preview() {
   const [opened, setOpened] = useState('')
   const [read, setRead] = useState('')
   const [acted, setActed] = useState('')
+  const [planReads, setPlanReads] = useState(0)
   installElectronAPI({
+    listBrowserPlans: async () => { setPlanReads(n => n + 1); return { ok: true, inbox: browserInbox } },
+    getBrowserPlan: async (_companyId, planId) => ({ ok: true, card: { plan: planView(planId), ready: { ok: true }, stoppedHere: false, runningHere: false, siteHost: 'manager.linestep.net' } }),
+    runBrowserPlan: async () => { setActed('run'); return { ok: false, offline: true, message: '（見本）' } },
+    cancelBrowserPlan: async () => { setActed('cancel'); return { ok: false, offline: true, message: '（見本）' } },
+    confirmBrowserExecution: async () => { setActed('confirm'); return { ok: false, offline: true, message: '（見本）' } },
     watchNotifications: async () => {},
     getNotificationsState: async () => state,
     onNotificationsChanged: changed.subscribe,
@@ -96,6 +124,7 @@ function Preview() {
     onOpenRecord: id => setOpened(`record ${id}`), onOpenTasks: () => setOpened('task list'), onOpenJobs: () => setOpened('jobs'),
     renderApprovalCard: id => <ApprovalCard card={{ id: `card-${id}`, companyId: 'co-preview', conversationId: null, approvalId: id, origin: 'shown', at: '' }} />,
     renderMailDraft: id => <PreparedMailCard companyId="co-preview" messageId={id} />,
+    browserPlans: params.get('plans') === '1' ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard companyId="co-preview" planId={id} /> } : undefined,
   })
   return (
     <main className="flex h-screen flex-col bg-bg text-text">
@@ -103,6 +132,7 @@ function Preview() {
       <pre id="opened">{opened}</pre>
       <pre id="read">{read}</pre>
       <pre id="acted">{acted}</pre>
+      <pre id="plan-reads">{planReads}</pre>
       <div className="mt-auto h-[480px]">{inbox && <BottomPanel content={inbox} onClose={() => setOpened('closed')} />}</div>
       {inbox?.dialog}
     </main>
@@ -116,6 +146,10 @@ Object.assign(window, {
       approved = true
       state = { ...state, myTurn: { ...state.myTurn, total: state.myTurn.total - 1, items: state.myTurn.items.filter(i => i.type !== 'approval') } }
       changed.emit({ companyId: 'co-preview' })
+    },
+    /** The browser plan's draft was approved on another PC: the next read of the plans no longer lists it. */
+    planApprovedElsewhere() {
+      browserInbox = { ...browserInbox, plans: [] }
     },
   },
 })

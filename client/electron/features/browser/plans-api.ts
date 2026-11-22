@@ -25,6 +25,8 @@ export interface BrowserPlansHttp extends BrowserPlansApi {
   register(companyId: string, input: BrowserPlanInput): Promise<BrowserApiAnswer>
   get(companyId: string, planId: string): Promise<BrowserApiAnswer>
   open(companyId: string): Promise<BrowserApiAnswer>
+  /** 「確かめ待ち」's first page (`GET /browser-executions-waiting`): an owner's / admin's holds everyone's. */
+  waiting(companyId: string): Promise<BrowserApiAnswer>
   confirm(companyId: string, executionId: string, result: 'done' | 'not_done'): Promise<BrowserApiAnswer>
 }
 
@@ -84,6 +86,7 @@ export function createBrowserPlansHttp(deps: BrowserPlansHttpDeps): BrowserPlans
     register: async (companyId, input) => okIds(companyId) ? call(`${company(companyId)}/browser-plans`, { method: 'POST', body: input, session: true }) : refusedLocally,
     get: async (companyId, planId) => okIds(companyId, planId) ? call(plan(companyId, planId), { method: 'GET', session: true }) : refusedLocally,
     open: async companyId => okIds(companyId) ? call(`${company(companyId)}/browser-plans-open`, { method: 'GET', session: true }) : refusedLocally,
+    waiting: async companyId => okIds(companyId) ? call(`${company(companyId)}/browser-executions-waiting`, { method: 'GET', session: true }) : refusedLocally,
     confirm: async (companyId, executionId, result) => okIds(companyId) && BROWSER_EXECUTION_ID_RE.test(executionId) && (result === 'done' || result === 'not_done')
       ? call(`${company(companyId)}/browser-executions/${executionId}/confirm`, { method: 'POST', body: { result }, session: true }) : refusedLocally,
   }

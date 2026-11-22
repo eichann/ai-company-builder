@@ -58,7 +58,7 @@ interface RowProps {
 
 function InboxRow({ item, buttons = [], onOpen, onUndo, undone, dim }: RowProps) {
   const unread = item.unreadNoticeIds.length > 0
-  const primary = item.action.kind === 'openApprovalCard' || item.action.kind === 'openMailDraft'
+  const primary = item.action.kind === 'openApprovalCard' || item.action.kind === 'openMailDraft' || (item.action.kind === 'openBrowserPlan' && item.state === 'waiting')
   return (
     <li data-inbox-row={item.key} className="relative flex items-start gap-2.5 border-b border-[color:var(--color-border)] px-3 py-2.5">
       <span className="mt-1 flex w-4 flex-shrink-0 justify-center">

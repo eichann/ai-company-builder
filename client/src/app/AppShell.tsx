@@ -87,6 +87,9 @@ import { linkFileToTask, linkMeetingBundle, makeExistingBundlePrivate } from '..
 import { TaskCard } from '../features/tasks/components/TaskCard'
 import { PreparedMailCard } from '../features/chat/components/PreparedMailCard'
 import { ApprovalCard } from '../features/chat/components/ApprovalCard'
+import { BrowserPlanCard } from '../features/browser-plans/components/BrowserPlanCard'
+import { listBrowserPlans } from '../features/browser-plans/api'
+import { BROWSER_AI_BUILD_SWITCH } from '../../shared/browser-ai'
 import { FileLinkRow, RecordRow } from '../features/records/components/RecordRows'
 import type { RecordViewSummary } from '../../shared/record-views'
 import { usePluginScreens } from '../features/plugins/hooks/usePluginScreens'
@@ -517,6 +520,8 @@ export function AppShell({ bottomPanel }: AppShellProps = {}) {
     onOpenJobs: () => { setSettingsFocus({ tab: 'jobs', at: Date.now() }); setShowSettings(true) },
     renderApprovalCard: id => approvalCard(id, ''),
     renderMailDraft: id => currentCompany ? <PreparedMailCard key={id} companyId={currentCompany.id} messageId={id} /> : null,
+    // 「ブラウザ操作」's plans only while the build's switch is on: off, the inbox has no way to read them at all.
+    browserPlans: BROWSER_AI_BUILD_SWITCH && currentCompany ? { list: listBrowserPlans, renderCard: id => <BrowserPlanCard key={id} companyId={currentCompany.id} planId={id} /> } : undefined,
   })
   const panel: BottomPanelContent | undefined = bottomPanel ?? inbox
   const hasBottom = panel !== undefined

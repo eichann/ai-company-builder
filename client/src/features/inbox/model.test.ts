@@ -2,10 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { NotificationItem } from '../../../../shared/types/notifications'
 import type { MeetingTurn, NoticesState, TurnItem } from '../../../shared/notifications-app'
+import type { BrowserInboxPlans } from '../../../shared/browser-plans'
 import { bulkSeenIds, countText, hasInboxNews, INBOX_MAX_ROWS, inboxNewsBaseline, inboxNewsKeys, inboxView, seenWhileShown, type InboxAction } from './model'
 
-// Type-level guard (`pnpm typecheck`): no row action may approve or send; such a kind fails to compile here.
-type ActsOutside = Extract<InboxAction['kind'], `${string}${'approve' | 'Approve' | 'send' | 'Send'}${string}`>
+// Type-level guard (`pnpm typecheck`): no row action may approve, send, run or confirm (a browser plan's ［任せる］ and
+// ［済んでいた］ are its card's); such a kind fails to compile here.
+type ActsOutside = Extract<InboxAction['kind'], `${string}${'approve' | 'Approve' | 'send' | 'Send' | 'run' | 'Run' | 'confirm' | 'Confirm'}${string}`>
 const noRowActsOutside: [ActsOutside] extends [never] ? true : false = true
 void noRowActsOutside
 
@@ -284,4 +286,51 @@ test('only what the chosen chip shows counts as seen: あなた待ち hidden by 
   // Seen before and only hidden now: still seen.
   const again = seenWhileShown(new Set(all), all, inboxNewsKeys(v, 'done'))
   assert.equal(hasInboxNews(all, again), false)
+})
+
+// 「ブラウザ操作」 plans (agent-browser.md, the member's own through `browserPlans:list`).
+const bp = (n: number) => `bp_${String(n).repeat(32)}`
+const plans = (over: Partial<BrowserInboxPlans> = {}): BrowserInboxPlans => ({
+  plans: [
+    { planId: bp(1), state: 'draft', label: 'テンプレートを足す', site: 'Lステップ', createdAt: '2026-11-22T00:30:00Z' },
+    { planId: bp(2), state: 'approved', label: 'テンプレートを足す', site: 'Lステップ', createdAt: '2026-11-22T00:10:00Z' },
+  ],
+  unsure: [
+    { planId: bp(3), state: 'unknown', label: '段に足す（済）', permittedAt: '2026-11-22T00:00:00Z', confirmableAt: '2026-11-22T00:00:35Z' },
+    { planId: bp(4), state: 'unknown', label: '段に足す（まだ）', permittedAt: '2026-11-22T00:59:40Z', confirmableAt: '2026-11-22T01:00:15Z' },
+    { planId: bp(5), state: 'permitted', label: '段に足す（送信中）', permittedAt: '2026-11-22T00:59:50Z', confirmableAt: null },
+  ],
+  ...over,
+})
+
+test('a browser plan waiting for approval and a run due for its confirm wait for the member; the rest is 作業中', () => {
+  // NOW = 01:00:00Z: bp(3)'s confirm opened at 00:00:35, bp(4)'s opens at 01:00:15.
+  const v = inboxView(state([turn('approval-a', 'approval', 'pending'), turn('task-a', 'task', 'todo')], [notice('job_failed', '', '2026-11-22T00:00:00Z')]), NOW, [], plans())
+  assert.deepEqual(v.waiting.map(i => i.key).slice(1), [`browser:${bp(3)}`, `browser:${bp(1)}`, 'record:approval-a', 'record:task-a'], 'after a stop: the unknown result, then the approvals (newest first)')
+  const draft = v.waiting.find(i => i.key === `browser:${bp(1)}`)!
+  assert.deepEqual([draft.badge, draft.actionLabel, draft.title], [{ tone: 'awaitingApproval', word: '承認を待っています' }, '承認する…', 'テンプレートを足す（Lステップ）'])
+  const unsure = v.waiting.find(i => i.key === `browser:${bp(3)}`)!
+  assert.deepEqual([unsure.badge, unsure.actionLabel], [{ tone: 'needsAction', word: '届いたか分かりません' }, '確かめる…'])
+  assert.deepEqual(v.working.map(i => i.key).sort(), [`browser:${bp(2)}`, `browser:${bp(4)}`, `browser:${bp(5)}`].sort())
+  assert.equal(v.counts.waiting, 5)
+  // Sixteen seconds later bp(4)'s confirm has opened: the same answer puts it in あなた待ち.
+  const later = inboxView(state([], []), new Date(NOW.getTime() + 16_000), [], plans())
+  assert.ok(later.waiting.some(i => i.key === `browser:${bp(4)}`))
+})
+
+test('a browser plan row only opens its card: never an approval or a run', () => {
+  const v = inboxView(state([], []), NOW, [], plans())
+  for (const i of [...v.waiting, ...v.working]) {
+    assert.deepEqual(i.action, { kind: 'openBrowserPlan', planId: i.key.slice('browser:'.length) })
+    assert.deepEqual(i.unreadNoticeIds, [])
+  }
+})
+
+test('without the plans (switched off) or once settled (no longer listed), there is no browser row', () => {
+  assert.equal(inboxView(state([], []), NOW).counts.all, 0)
+  assert.equal(inboxView(state([], []), NOW, [], plans({ plans: [], unsure: [] })).counts.all, 0)
+  // A plan claimed for its run is one row, its run's (were a late answer still to list it as open).
+  const both = inboxView(state([], []), NOW, [], plans({ plans: [{ planId: bp(3), state: 'approved', label: 'x', site: 'y', createdAt: '2026-11-22T00:00:00Z' }] }))
+  assert.equal([...both.waiting, ...both.working].filter(i => i.key === `browser:${bp(3)}`).length, 1)
+  assert.equal(both.waiting.find(i => i.key === `browser:${bp(3)}`)?.actionLabel, '確かめる…')
 })

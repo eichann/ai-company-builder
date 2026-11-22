@@ -109,6 +109,53 @@ test('when marking seen cannot reach the server, a plain message says so and not
   await expect(page.locator('[data-inbox-older]')).toBeVisible()
 })
 
+// 「ブラウザ操作」 plans (agent-browser.md "The card, the IPC and the request tool"; the inbox's rows).
+const DRAFT = `bp_${'1a'.repeat(16)}`
+const UNSURE = `bp_${'2b'.repeat(16)}`
+
+test('switched off, no plan row appears and the plans are never read', async ({ page }) => {
+  const state = await openPreview(page, 'inbox', { plans: 'off' })
+  await expect(rows(page, 'あなた待ち')).toHaveCount(5)
+  await expect(page.locator('[data-inbox-row^="browser:"]')).toHaveCount(0)
+  await expect(page.locator('#plan-reads')).toHaveText('0')
+  expectNoPageErrors(state)
+})
+
+test('a browser plan waits for the member: ［承認する…］ / ［確かめる…］ open the plan\'s card, and nothing runs from the row', async ({ page }) => {
+  const state = await openPreview(page, 'inbox', { plans: '1' })
+  await expect(rows(page, 'あなた待ち')).toHaveCount(7)
+  const keys = await rows(page, 'あなた待ち').evaluateAll(els => els.map(e => e.getAttribute('data-inbox-row')))
+  // After the stop: the result nobody knows, then the approvals (the plan's newer than the request).
+  expect(keys.slice(0, 4)).toEqual(['notice:n-stop', `browser:${UNSURE}`, `browser:${DRAFT}`, 'record:approval-preview0001'])
+  await expect(chip(page, /^あなた待ち 7$/)).toBeVisible()
+  const draft = page.locator(`[data-inbox-row="browser:${DRAFT}"]`)
+  await expect(draft).toContainText('承認を待っています')
+  await draft.getByRole('button', { name: '承認する…' }).click()
+  const dialog = page.getByRole('dialog', { name: '承認のお願い（ブラウザ操作）' })
+  await expect(dialog).toContainText('一覧からは任せられません')
+  await expect(dialog.getByRole('button', { name: '任せる' })).toBeVisible()
+  await expect(page.locator('#acted')).toHaveText('')
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  const unsure = page.locator(`[data-inbox-row="browser:${UNSURE}"]`)
+  await expect(unsure).toContainText('届いたか分かりません')
+  await unsure.getByRole('button', { name: '確かめる…' }).click()
+  await expect(dialog.getByRole('button', { name: '済んでいた' })).toBeVisible()
+  await expect(page.locator('#acted')).toHaveText('')
+  expectNoPageErrors(state)
+})
+
+test('a plan approved on another PC leaves the list on the next read (a card closed)', async ({ page }) => {
+  await openPreview(page, 'inbox', { plans: '1' })
+  const draft = page.locator(`[data-inbox-row="browser:${DRAFT}"]`)
+  await expect(draft).toBeVisible()
+  await page.evaluate(() => (window as unknown as { __acbInbox: { planApprovedElsewhere(): void } }).__acbInbox.planApprovedElsewhere())
+  await page.locator(`[data-inbox-row="browser:${UNSURE}"]`).getByRole('button', { name: '確かめる…' }).click()
+  await page.getByRole('dialog', { name: '承認のお願い（ブラウザ操作）' }).getByRole('button', { name: '閉じる' }).click()
+  await expect(draft).toHaveCount(0)
+  await expect(chip(page, /^あなた待ち 6$/)).toBeVisible()
+})
+
 for (const theme of ['light', 'dark'] as const) {
   test(`renders in the ${theme} theme`, async ({ page }) => {
     const state = await openPreview(page, 'inbox', theme === 'dark' ? { theme } : {})
