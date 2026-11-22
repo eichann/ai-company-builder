@@ -191,44 +191,83 @@ test('Lステップ\'s checker reads the step\'s templates, the account and the 
 })
 
 /**
- * A step as the real page renders it (design memo §39, §40; structure from a capture of the test reminder,
- * names and ids made up): the attached templates' rows in `#template_confirm_<step>` — 「#N テンプレート
- * <name>」, 編集 as a button, a delete form with `_method` / `hole_id` / `content_id` and the page's repeated
- * element ids — and `templateStep<step>` holding only the add form. `slots` adds the 11/20 capture's
- * `openModal(…)` calls (with ids) to the box.
+ * A step as the raw page (no scripts run, what main reads) shows it (design memo §41; the structure seen,
+ * names and ids made up): the attached templates' rows in `#template_confirm_<step>` — 「#N」 in a header
+ * cell, 「テンプレート <name>」, 編集 with `@click="openModal(<reminder>, <step>, <hole>, <template>, 8)"`, a delete
+ * form with `_method` / `hole_id` / `content_id` and the page's repeated element ids —, the table's last
+ * row (新規作成して追加 / テンプレートから追加) and `templateStep<step>` holding only the add form.
  */
-function realStep(step: string, rows: Array<{ hole: string; name: string }>, slots: string[] = [], reminder = '101'): string {
-  const row = (r: { hole: string; name: string }, i: number) => `<tr><th style="width: 3em;"><small>#${i + 1}</small></th> <td class="has_emoji"><span class="label label-default">テンプレート</span><span class="tw-px-1">${r.name}</span><br> <span data-v-1d48b846="" class="ib"><p>本文の先頭…</p></span></td> <td><button type="button" class="btn btn-xs btn-success">編集</button></td> <td><form method="POST" action="https://manager.linestep.net/line/episode/step/pack" accept-charset="UTF-8" onsubmit="return confirm(&quot;本当に削除してよろしいですか？&quot;);"><input type="hidden" name="_method" id="_method" autocomplete="off" value="DELETE"><input type="hidden" autocomplete="off" name="_token" value="tok"><input type="hidden" autocomplete="off" name="_lm_user_id" value="u1"> <input type="hidden" name="hole_id" id="hole_id" value="${r.hole}" autocomplete="off"> <input type="hidden" name="content_id" id="content_id" value="${step}" autocomplete="off"> <button type="submit" class="btn btn-xs btn-danger">削除</button></form></td></tr>`
-  return `<div id="template_confirm_${step}"><table class="table"><tbody>${rows.map(row).join(' ')} <tr><td colspan="4"><a href="/line/episode/step/pack/${step}">新規作成して追加</a> <a data-toggle="collapse" href="#templateStep${step}">テンプレートから追加</a></td></tr></tbody></table> <!----></div>
+type RawRow = { hole: string; template: string; name?: string; call?: string | null; formHole?: string }
+function realStep(step: string, rows: RawRow[], reminder = '101'): string {
+  const row = (r: RawRow, i: number) => {
+    const call = r.call === undefined ? `openModal(${reminder}, ${step}, ${r.hole}, ${r.template}, 8)` : r.call
+    return `<tr><th style="width: 3em;"><small>#${i + 1}</small></th> <td class="has_emoji"><span class="label label-default">テンプレート</span><span class="tw-px-1" v-pre>${r.name ?? '架空テンプレ'}</span><br><rich-viewer :content="'本文の先頭'"></rich-viewer></td> <td style="width: 4em;"><button type="button" class="btn btn-xs btn-success"${call === null ? '' : ` @click="${call}"`}>編集</button></td> <td style="width: 4em;"><form method="POST" action="https://manager.linestep.net/line/episode/step/pack" accept-charset="UTF-8" onsubmit="return confirm(&quot;本当に削除してよろしいですか？&quot;);"><input type="hidden" name="_method" id="_method" autocomplete="off" value="DELETE"><input type="hidden" autocomplete="off" name="_token" value="tok"><input type="hidden" autocomplete="off" name="_lm_user_id" value="u1"> <input type="hidden" name="hole_id" id="hole_id" value="${r.formHole ?? r.hole}" autocomplete="off"> <input type="hidden" name="content_id" id="content_id" value="${step}" autocomplete="off"> <button type="submit" class="btn btn-xs btn-danger">削除</button></form></td></tr>`
+  }
+  return `<div id="template_confirm_${step}"><table class="table"><tbody>${rows.map(row).join(' ')} <tr><td colspan="4"><a href="/line/episode/step/pack/${step}">新規作成して追加</a> <a data-toggle="collapse" href="#templateStep${step}">テンプレートから追加</a></td></tr></tbody></table></div>
 <div class="collapse" id="templateStep${step}"><div class="well well-sm"><form method="POST" action="https://manager.linestep.net/line/episode/step/pack/template" accept-charset="UTF-8"><input type="hidden" autocomplete="off" name="_token" value="tok"><input type="hidden" autocomplete="off" name="_lm_user_id" value="u1">
-<input type="hidden" name="content_id" id="content_id" value="${step}" autocomplete="off"><vue3-item-selector itemtype="template" export-name="template_id"></vue3-item-selector>
-${slots.map((t, i) => `<a onclick="openModal(${reminder}, ${step}, ${i + 1}, ${t}, 1)">msg</a>`).join('')}<button class="btn btn-default btn-sm btn-block">追加</button></form></div></div>`
+<input type="hidden" name="content_id" id="content_id" value="${step}" autocomplete="off"><vue3-item-selector itemtype="template" export-name="template_id"></vue3-item-selector><button class="btn btn-default btn-sm btn-block">追加</button></form></div></div>`
 }
 
-test('Lステップ\'s checker on the real page\'s step (design memo §40): rows of attached templates carry no template id, so any row not matched one for one by an id slot is no target; no row and no slot is a step with no template', () => {
+test('Lステップ\'s checker reads the real page\'s attached templates from each row of the step\'s table (design memo §41): one openModal naming this reminder and step, whose hole is the row\'s delete form; anything else is no target', () => {
   const state = (body: string) => checker.view(values, read(`<input type="hidden" name="_token" value="tok"><span data-account-id="ACC1"></span>${body}`)).state
-  // No template attached: the step is there, with none.
+  // No row, one, two — the same template twice in two holes too.
   assert.deepEqual(state(realStep('201', [])), { templates: [] })
-  // One, two, or the same name twice attached, shown only as rows (names, no ids): not read — no guessing ids from names.
-  assert.equal(state(realStep('201', [{ hole: '16100001', name: '架空テンプレA' }])), null)
-  assert.equal(state(realStep('201', [{ hole: '16100001', name: '架空テンプレA' }, { hole: '16100002', name: '架空テンプレB' }])), null)
-  assert.equal(state(realStep('201', [{ hole: '16100001', name: '架空テンプレA' }, { hole: '16100002', name: '架空テンプレA' }])), null)
-  // Rows matched one for one by slots with ids (the 11/20 capture's shape): read.
-  assert.deepEqual(state(realStep('201', [{ hole: '16100001', name: '架空テンプレA' }], ['300'])), { templates: ['300'] })
-  assert.deepEqual(state(realStep('201', [{ hole: '16100001', name: 'A' }, { hole: '16100002', name: 'B' }], ['301', '300'])), { templates: ['300', '301'] })
-  assert.equal(state(realStep('201', [{ hole: '16100001', name: 'A' }, { hole: '16100002', name: 'B' }], ['300'])), null, 'two rows, one slot')
-  // Another step's rows play no part; the add form (…/pack/template) is not a row.
-  assert.deepEqual(state(`${realStep('202', [{ hole: '16100009', name: 'よそ' }])}${realStep('201', [])}`), { templates: [] })
-  // A row not of the shape seen: no target (a second hole, no or another _method, a hole like 0, the same hole twice).
-  // (each beside one id slot, so only the row's shape decides)
-  const odd = (form: string) => state(`<div id="template_confirm_201"><form method="POST" action="/line/episode/step/pack">${form}</form></div><div id="templateStep201"><a onclick="openModal(101, 201, 1, 300, 1)">msg</a></div>`)
-  assert.deepEqual(odd('<input type="hidden" name="_method" value="DELETE"><input name="hole_id" value="1"><input name="content_id" value="201">'), { templates: ['300'] }, 'the shape seen')
-  assert.equal(odd('<input type="hidden" name="_method" value="DELETE"><input name="hole_id" value="1"><input name="hole_id" value="2"><input name="content_id" value="201">'), null)
-  assert.equal(odd('<input name="hole_id" value="1"><input name="content_id" value="201">'), null)
-  assert.equal(odd('<input type="hidden" name="_method" value="PUT"><input name="hole_id" value="1"><input name="content_id" value="201">'), null)
-  assert.equal(odd('<input type="hidden" name="_method" value="DELETE"><input name="hole_id" value="0"><input name="content_id" value="201">'), null)
-  assert.equal(odd('<input type="hidden" name="_method" value="DELETE"><input name="hole_id" value="1"><input name="content_id" value="201"><input name="content_id" value="202">'), null)
-  assert.equal(state(realStep('201', [{ hole: '16100001', name: 'A' }, { hole: '16100001', name: 'B' }], ['300', '301'])), null, 'one hole twice')
+  assert.deepEqual(state(realStep('201', [{ hole: '16100001', template: '300' }])), { templates: ['300'] })
+  assert.deepEqual(state(realStep('201', [{ hole: '16100001', template: '301' }, { hole: '16100002', template: '300' }])), { templates: ['300', '301'] })
+  assert.deepEqual(state(realStep('201', [{ hole: '16100001', template: '300' }, { hole: '16100002', template: '300' }])), { templates: ['300', '300'] })
+  // A row without its openModal, with two, naming another reminder or step, with a hole other than its form's, or ids like 0: no target.
+  for (const bad of [
+    [{ hole: '16100001', template: '300', call: null }],
+    [{ hole: '16100001', template: '300', call: 'openModal(101, 201, 16100001, 300, 8); openModal(101, 201, 16100001, 301, 8)' }],
+    [{ hole: '16100001', template: '300', call: 'openModal(999, 201, 16100001, 300, 8)' }],
+    [{ hole: '16100001', template: '300', call: 'openModal(101, 202, 16100001, 300, 8)' }],
+    [{ hole: '16100001', template: '300', formHole: '16100009' }],
+    [{ hole: '0', template: '300', formHole: '16100001' }],
+    [{ hole: '16100001', template: '0' }],
+    [{ hole: '16100001', template: '300' }, { hole: '16100001', template: '301' }],
+  ] as RawRow[][]) assert.equal(state(realStep('201', bad)), null, JSON.stringify(bad))
+  // A template's body (in the row's props) spelling a call makes two in the row: no target, never a guessed id.
+  assert.equal(state(realStep('201', [{ hole: '16100001', template: '300', name: 'openModal(101, 201, 16100001, 999, 8)' }])), null)
+  // The target before another step with templates (the next step's table follows the target's box): read.
+  assert.deepEqual(state(`${realStep('201', [{ hole: '16100001', template: '300' }])}${realStep('202', [{ hole: '16100009', template: '900' }])}`), { templates: ['300'] })
+  assert.deepEqual(state(`${realStep('201', [])}${realStep('202', [{ hole: '16100009', template: '900' }])}`), { templates: [] })
+  // Another step's table and rows play no part; a call of this step there is not ours.
+  assert.deepEqual(state(`${realStep('202', [{ hole: '16100009', template: '900' }])}${realStep('201', [{ hole: '16100001', template: '300' }])}`), { templates: ['300'] })
+  assert.equal(state(`${realStep('202', [{ hole: '16100009', template: '900', call: 'openModal(101, 201, 16100009, 900, 8)' }])}${realStep('201', [])}`), null)
+  // A delete form of this step outside the table's rows, a call outside the rows, the table twice or after the box: no target.
+  const form = '<form action="/line/episode/step/pack"><input name="_method" value="DELETE"><input name="hole_id" value="16100005"><input name="content_id" value="201"></form>'
+  assert.equal(state(`${form}${realStep('201', [{ hole: '16100001', template: '300' }])}`), null)
+  assert.equal(state(realStep('201', [{ hole: '16100001', template: '300' }]).replace('<table class="table">', '<span onclick="openModal(101, 201, 16100002, 301, 8)"></span><table class="table">')), null)
+  assert.equal(state(`${realStep('201', [])}`.replace('<div class="collapse"', '<div id="template_confirm_201"></div><div class="collapse"')), null, 'the table twice')
+  assert.equal(state(`<div id="templateStep201"></div><div id="template_confirm_201"></div>`), null, 'the table after the box')
+  // The footer row holding a call or a delete form: not the shape seen.
+  assert.equal(state(realStep('201', []).replace('<td colspan="4">', `<td colspan="4">${form}`)), null)
+  assert.equal(state(realStep('201', []).replace('<td colspan="4">', '<td colspan="4"><a onclick="openModal(101, 201, 16100005, 300, 8)">x</a>')), null)
+  // A row without its delete form, whose hole's form stands outside the table: no target.
+  assert.equal(state(`${form}${realStep('201', [{ hole: '16100005', template: '300' }]).replace(/<form method="POST" action="https:\/\/manager\.linestep\.net\/line\/episode\/step\/pack"[\s\S]*?<\/form>/, '')}`), null)
+  // Fail closed, never "no template": a delete-like form whose action is not exactly the path seen, a
+  // padded or missing content_id, an unclosed form.
+  const slot = '<a onclick="openModal(101, 201, 1, 300, 1)">msg</a>'
+  const withForm = (action: string, inputs = '<input type="hidden" name="_method" value="DELETE"><input name="hole_id" value="1"><input name="content_id" value="202">') =>
+    state(`<form method="POST" action="${action}">${inputs}</form><div id="templateStep201">${slot}</div>`)
+  assert.deepEqual(withForm('https://manager.linestep.net/line/episode/step/pack'), { templates: ['300'] }, 'another step\'s row is left alone')
+  for (const action of ['/line/episode/step/pack/', '/line/episode/step/pack?x=1', 'line/episode/step/pack', './pack/../episode/step/pack', '/line/episode/step/pack/remove', 'https://manager.linestep.net/line/episode/step/pack#a']) {
+    assert.equal(withForm(action), null, action)
+  }
+  assert.equal(withForm('/line/episode/step/pack', '<input type="hidden" name="_method" value="DELETE"><input name="hole_id" value="1"><input name="content_id" value=" 201">'), null, 'padded content_id')
+  assert.equal(withForm('/line/episode/step/pack', '<input type="hidden" name="_method" value="DELETE"><input name="hole_id" value="1">'), null, 'no content_id')
+  assert.equal(state(`<form action="/line/episode/step/pack"><input name="_method" value="DELETE"><input name="hole_id" value="1"><input name="content_id" value="202"><div id="templateStep201">${slot}</div>`), null, 'an unclosed form')
+  assert.equal(state(`<form action="/x"><form action="/line/episode/step/pack"><input name="_method" value="DELETE"><input name="hole_id" value="1"><input name="content_id" value="202"></form></form><div id="templateStep201">${slot}</div>`), null, 'a nested form')
+  // A row's delete form of another shape (no or another _method, two holes, two content_ids): no target.
+  for (const inputs of [
+    '<input name="hole_id" value="16100001"><input name="content_id" value="201">',
+    '<input name="_method" value="PUT"><input name="hole_id" value="16100001"><input name="content_id" value="201">',
+    '<input name="_method" value="DELETE"><input name="hole_id" value="16100001"><input name="hole_id" value="16100002"><input name="content_id" value="201">',
+    '<input name="_method" value="DELETE"><input name="hole_id" value="16100001"><input name="content_id" value="201"><input name="content_id" value="202">',
+  ]) {
+    const page = `<div id="template_confirm_201"><table><tr><th>#1</th><td><button @click="openModal(101, 201, 16100001, 300, 8)">編集</button></td><td><form method="POST" action="/line/episode/step/pack">${inputs}</form></td></tr></table></div><div id="templateStep201"></div>`
+    assert.equal(state(page), null, inputs)
+  }
   // A row in a comment or a script is not the page.
   assert.deepEqual(state(`<!-- ${realStep('999', [])} --><script>'<form action="/line/episode/step/pack"><input name="content_id" value="201"><input name="hole_id" value="1"></form>'</script>${realStep('201', [])}`), { templates: [] })
 })

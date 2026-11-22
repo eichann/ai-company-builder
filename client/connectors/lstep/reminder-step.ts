@@ -15,24 +15,21 @@
  *   account's objects answer 404). `accountFromMeta` reads it; none, or two different values, is no
  *   account (the run stops before any write, "account-unknown").
  *
- * - The real page's rows of a step's attached templates (design memo §39, §40; a rendered capture of
- *   reminder 1904672 with one template attached): a table in `#template_confirm_<step>` — **outside**
- *   `templateStep<step>`, which on the real page is only the 「テンプレートから追加」 form — one row per
- *   attached template, 「#N テンプレート <name>」 with 編集 (a button, no link or data attribute) and a
+ * - The real page's rows of a step's attached templates (design memo §39–§41; §41 = the raw page as the
+ *   server sends it, no scripts run — what main reads): a table in `#template_confirm_<step>`, **outside**
+ *   `templateStep<step>` (which there holds only the 「テンプレートから追加」 form), one row per attached
+ *   template: `<tr><th><small>#N</small></th><td>テンプレート <name> …</td><td><button
+ *   @click="openModal(<reminder>, <step>, <hole>, <template id>, <form type>)">編集</button></td><td>` and a
  *   delete form `POST /line/episode/step/pack` with hidden `_method=DELETE`, `hole_id=<hole>`,
- *   `content_id=<step>` (repeated element ids on every row). **No template id is in a row**: `hole_id` is
- *   the slot, `content_id` the step; only the name is shown. So the state (template ids) cannot be read
- *   from those rows; the checker counts them instead (`stepHoles`): when the page shows any row of this
- *   step, the slots read as ids (`openModal(…)` in the box, the 11/20 capture's shape) must be exactly as
- *   many, else no target (a run stops before writing; a plan is not made; the read after a write is
- *   `unknown`, never `failed`). A page with no row and no slot is a step with no template.
- *
- * NOT CONFIRMED on the real site: exactly where `_token` / `_lm_user_id` sit in the page; whether the
- * page main reads (no scripts run) carries the rows at all — the capture is the rendered page, and the
- * rows carry Vue markers, so they may be drawn by the page's script: then the page main reads shows no
- * row, and a step with a template would read as empty (remaining limit, to check with one read at the
- * owner's next login).
- *
+ *   `content_id=<step>`. The page's inline script defines `openModal(episodeId, packId, holeId, eggId,
+ *   eggFormType)`: the 4th argument is the attached template's id (8 = text). (The rendered page loses the
+ *   `@click` attribute — Vue consumes it — which is why §40's rendered capture showed no id.) The checker
+ *   reads each row (`stepTable`): exactly one `openModal(…)` naming this reminder and this step, with a
+ *   positive hole and template id, and exactly one delete form of this step whose `hole_id` is that
+ *   hole; the footer row (no header cell) holds neither; any other shape → no target. Element ids play
+ *   no part (the page repeats them on every row). Nothing else of the page is read (it also carries
+ *   account-wide counts in Vue props: never read).
+
  * The facts for a plan (facts version 2, 6b-2b) are read by ./reminder-step-facts.ts, which takes the
  * account and the step's state from this checker's `view`.
  *
@@ -113,6 +110,11 @@ function stepBoxStarts(markup: string, step: string): number[] {
   return starts
 }
 
+/** The start of every step's attached-template table (`id="template_confirm_<n>"` as an attribute). */
+function allTableStarts(markup: string): number[] {
+  return [...markup.matchAll(/<[a-z][a-z0-9-]*\b[^<>]*?\sid\s*=\s*(["'])template_confirm_[0-9]+\1[^<>]*>/gi)].map(m => m.index ?? 0)
+}
+
 /** The start of every step's box (`id="templateStep<n>"` as an attribute), in order. */
 function allBoxStarts(markup: string): number[] {
   return [...markup.matchAll(/<[a-z][a-z0-9-]*\b[^<>]*?\sid\s*=\s*(["'])templateStep[0-9]+\1[^<>]*>/gi)].map(m => m.index ?? 0)
@@ -126,28 +128,77 @@ function attribute(tag: string, name: string): string | null {
 const DELETE_FORM_PATH = '/line/episode/step/pack'
 
 /**
- * The slots (`hole_id`) of this step's attached-template rows: every `<form>` of the markup whose action's
- * path is exactly `/line/episode/step/pack` (with or without the origin) and whose one `content_id` is the
- * step, each with exactly one positive `hole_id` and `_method` `DELETE`; null when such a form is not
- * that shape or a hole stands twice (the page is not what we think). Forms of other steps are left
- * alone. Element ids play no part (the page repeats them on every row).
+ * The slots (`hole_id`) of this step's attached-template rows, failing closed (null: the page is not
+ * what we think):
+ * - every `<form` start tag must open a form closed before the next one opens (an unclosed or nested one
+ *   leaves more start tags than closed forms);
+ * - every form whose action mentions `episode/step/pack` must have, once the origin is removed, exactly
+ *   the path `/line/episode/step/pack` (a row's delete form) or `/line/episode/step/pack/template` (the
+ *   add form) — a trailing slash, a query, a relative path or anything else → null;
+ * - a delete form has exactly one `content_id`, a positive id as written (padded → null); when it is the
+ *   step: exactly one positive `hole_id` and `_method` `DELETE`, and no hole twice; another step's form is
+ *   left alone.
+ * Element ids play no part (the page repeats them on every row).
  */
 export function stepHoles(markup: string, step: string): string[] | null {
   const holes: string[] = []
-  for (const m of markup.matchAll(/<form\b[^>]*>[\s\S]*?<\/form\s*>/gi)) {
+  const forms = [...markup.matchAll(/<form\b[^>]*>[\s\S]*?<\/form\s*>/gi)]
+  if (forms.length !== (markup.match(/<form\b/gi) ?? []).length) return null
+  for (const m of forms) {
     const tag = /^<form\b[^>]*>/i.exec(m[0])?.[0] ?? ''
-    const action = (attribute(tag, 'action') ?? '').replace(/^https?:\/\/[^/]+/i, '')
-    if (action !== DELETE_FORM_PATH) continue
+    const rawAction = attribute(tag, 'action') ?? ''
+    if (!/episode\/step\/pack/i.test(rawAction)) continue
+    const action = rawAction.replace(/^https?:\/\/[^/?#]+/i, '')
+    if (action === `${DELETE_FORM_PATH}/template`) continue
+    if (action !== DELETE_FORM_PATH) return null
     const inputs = (name: string) => (m[0].match(/<input\b[^>]*>/gi) ?? []).filter(t => attribute(t, 'name') === name).map(t => attribute(t, 'value'))
     const content = inputs('content_id')
-    if (!content.includes(step)) continue
+    if (content.length !== 1 || !POSITIVE_ID.test(content[0] ?? '')) return null
+    if (content[0] !== step) continue
     const hole = inputs('hole_id')
     const method = inputs('_method')
-    if (content.length !== 1 || hole.length !== 1 || !POSITIVE_ID.test(hole[0] ?? '') || method.length !== 1 || (method[0] ?? '').toUpperCase() !== 'DELETE') return null
+    if (hole.length !== 1 || !POSITIVE_ID.test(hole[0] ?? '') || method.length !== 1 || (method[0] ?? '').toUpperCase() !== 'DELETE') return null
     if (holes.includes(hole[0] as string)) return null
     holes.push(hole[0] as string)
   }
   return holes
+}
+
+/**
+ * This step's attached-template table (`#template_confirm_<step>`, design memo §41) from its tag to the
+ * step's box: the template id of each row and where the table stands. undefined: no such table; null:
+ * not the shape seen — the table twice or after the box; a row with a header cell (「#N」) without exactly
+ * one `openModal(<reminder>, <step>, <hole>, <template>, …)` (positive ids) and exactly one delete form of
+ * this step with that hole; a row without a header cell holding a call or a delete form of this step; a
+ * call outside the rows.
+ */
+export function stepTable(markup: string, reminder: string, step: string, boxStart: number): { templates: string[]; start: number; end: number } | null | undefined {
+  const at = [...markup.matchAll(new RegExp(`<[a-z][a-z0-9-]*\\b[^<>]*?\\sid\\s*=\\s*(["'])template_confirm_${step}\\1[^<>]*>`, 'gi'))].map(m => m.index ?? 0)
+  if (at.length === 0) return undefined
+  if (at.length !== 1 || at[0] > boxStart) return null
+  const region = markup.slice(at[0], boxStart)
+  const templates: string[] = []
+  let calls = 0
+  for (const m of region.matchAll(/<tr\b[^>]*>[\s\S]*?<\/tr\s*>/gi)) {
+    const row = m[0]
+    const found = [...row.matchAll(OPEN_MODAL)]
+    calls += found.length
+    const holes = stepHoles(row, step)
+    if (holes === null) return null
+    if (!/<th\b/i.test(row)) {
+      if (found.length > 0 || holes.length > 0) return null
+      continue
+    }
+    if (found.length !== 1) return null
+    const [, r, st, hole, template] = found[0]
+    // The hole needs no check of its own: it must equal the row's delete form's, a positive id (stepHoles).
+    if (r !== reminder || st !== step || !POSITIVE_ID.test(template)) return null
+    if (holes.length !== 1 || holes[0] !== hole) return null
+    templates.push(template)
+  }
+  // Every call in the table stands in one of its rows.
+  if ([...region.matchAll(OPEN_MODAL)].length !== calls) return null
+  return { templates, start: at[0], end: boxStart }
 }
 
 /** The one value of a hidden field (or meta) named `name`; two different values = none (ambiguous). */
@@ -204,10 +255,17 @@ export function createLstepReminderStepChecker(readAccount: AccountReader): Brow
       const starts = stepBoxStarts(markup, step)
       if (starts.length !== 1) return none
       const start = starts[0]
-      const end = allBoxStarts(markup).find(i => i > start) ?? markup.length
-      const templates: string[] = []
+      // The box ends at the next step's box or the next step's table, whichever comes first (the real page
+      // puts each step's table before its box, so the next step's table follows this box).
+      const end = [...allBoxStarts(markup), ...allTableStarts(markup)].filter(i => i > start).sort((x, y) => x - y)[0] ?? markup.length
+      // The step's attached templates: the rows of its table (the real page, design memo §41), each read
+      // whole, and the slots in its box (the 11/20 capture's shape).
+      const table = stepTable(markup, reminder, step, start)
+      if (table === null) return none
+      const templates: string[] = table ? [...table.templates] : []
       for (const m of markup.matchAll(OPEN_MODAL)) {
         const at = m.index ?? 0
+        if (table && at >= table.start && at < table.end) continue
         const inBox = at > start && at < end
         // Every slot in the box is this reminder's and this step's; a slot of the step elsewhere is not
         // what we think the page is.
@@ -215,10 +273,9 @@ export function createLstepReminderStepChecker(readAccount: AccountReader): Brow
         if (!inBox && m[2] === step) return none
         if (inBox) templates.push(m[4])
       }
-      // The rows the page shows for this step (its delete forms): when there are any, the slots read as
-      // ids must be exactly as many — the real page shows rows without ids (design memo §40).
+      // Every delete form of this step is a row of its table (one elsewhere: not what we think).
       const holes = stepHoles(markup, step)
-      if (holes === null || (holes.length > 0 && holes.length !== templates.length)) return none
+      if (holes === null || holes.length !== (table ? table.templates.length : 0)) return none
       return { account, state: { templates: templates.sort() }, ignored, problem }
     },
   }

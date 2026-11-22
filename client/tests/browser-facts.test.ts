@@ -231,12 +231,17 @@ test('a page the core could not read whole (the real page repeats ids in every s
   assert.deepEqual(valueOf(twiceId.facts, 'account'), { id: '5550001' })
 })
 
-test('the real page\'s rows of attached templates (design memo §40: names, no template ids) not matched by id slots make no state, so no plan; a step with no row and no slot has none', async () => {
-  const row = (hole: number, name: string) => `<tr><td>#1 テンプレート ${name}</td><td><form method="POST" action="https://manager.linestep.net/line/episode/step/pack"><input type="hidden" name="_method" id="_method" value="DELETE"><input type="hidden" name="hole_id" id="hole_id" value="${hole}"><input type="hidden" name="content_id" id="content_id" value="${STEP}"></form></td></tr>`
-  const page = (rows: string, inBox = '') => reminderPage(`<div id="template_confirm_${STEP}"><table>${rows}</table></div><div id="templateStep${STEP}">${inBox}</div>`)
+test('the real page\'s step (design memo §41, the raw page): the attached templates are read from its table\'s rows by their openModal ids; a row without one makes no state, so no plan', async () => {
+  const row = (hole: number, template: string | null, name = '架空テンプレ甲') => `<tr><th><small>#1</small></th><td>テンプレート <span v-pre>${name}</span></td><td><button type="button"${template === null ? '' : ` @click="openModal(${REMINDER}, ${STEP}, ${hole}, ${template}, 8)"`}>編集</button></td><td><form method="POST" action="https://manager.linestep.net/line/episode/step/pack"><input type="hidden" name="_method" id="_method" value="DELETE"><input type="hidden" name="hole_id" id="hole_id" value="${hole}"><input type="hidden" name="content_id" id="content_id" value="${STEP}"></form></td></tr>`
+  const page = (rows: string) => reminderPage(`<div id="template_confirm_${STEP}"><table>${rows}</table></div><div id="templateStep${STEP}"></div>`)
   const empty = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: page('') }))
   assert.deepEqual(valueOf(empty.facts, 'state'), { templates: [] })
-  for (const rows of [row(16100001, '架空テンプレ甲'), row(16100001, '架空テンプレ甲') + row(16100002, '架空テンプレ乙'), row(16100001, '架空テンプレ甲') + row(16100002, '架空テンプレ甲')]) {
+  const one = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: page(row(16100001, ON_STEP)) }))
+  assert.deepEqual(valueOf(one.facts, 'state'), { templates: [ON_STEP] })
+  assert.equal(one.problem, null, 'a plan for a step that already has a template')
+  const two = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: page(row(16100001, ON_STEP) + row(16100002, ON_STEP, '架空テンプレ甲')) }))
+  assert.deepEqual(valueOf(two.facts, 'state'), { templates: [ON_STEP, ON_STEP] })
+  for (const rows of [row(16100001, null), row(16100001, ON_STEP) + row(16100002, null)]) {
     const out = await factsOf(site({ [`/line/episode/show/${REMINDER}`]: page(rows) }))
     for (const name of ['step_parent', 'state', 'schedule', 'templates']) assert.equal(out.facts[name].status, 'unknown', name)
     assert.deepEqual(out.reads, [`/line/episode/show/${REMINDER}`], 'nothing else read')

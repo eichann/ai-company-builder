@@ -363,31 +363,34 @@ server holds ("Executing a plan" below); while the build's switch is off it refu
   step]`) reads `GET /line/episode/show/<reminder>`, without its
   `<script>`, `<textarea>` and comments (`markupOnly`): `id="templateStep<step>"` must stand **exactly
   once as an attribute of a tag** (not a longer id, not another attribute); the step's box runs from
-  there to the next `id="templateStep…"`; **every** `openModal(<reminder>, <step>, <hole>, <template>,
+  there to the next `id="templateStep…"` or the next step's `id="template_confirm_…"`, whichever comes first (on the real page the next step's table follows this box); **every** `openModal(<reminder>, <step>, <hole>, <template>,
   <type>)` in the box must name this reminder and this step, and none of this step may stand outside
   the box (else no target). The state is the box's template ids (`templates`). Every id of the plan
   (each target and change field, so a later operation's extra id too) is a positive integer (never `0` / `-1`). `_token` / `_lm_user_id` are taken from
   hidden inputs of the markup (`_token` also `meta[name=csrf-token]`), one value each, plain token
-  characters; none → `csrf-missing`, no write. **The real page's rows** (design memo §39, §40, a rendered
-  capture with one template attached): the attached templates are rows in `#template_confirm_<step>` —
-  outside `templateStep<step>`, which there holds only the 「テンプレートから追加」 form — 「#N テンプレート
-  <name>」, 編集 a button, and a delete form `POST /line/episode/step/pack` with hidden `_method=DELETE`,
-  `hole_id`, `content_id=<step>` (element ids repeated on every row). **No row carries a template id**
-  (`hole_id` is the slot, `content_id` the step), so the checker does not read the state from rows (a
-  name is not an id, and the run-time `view` reads only the page): it counts them (`stepHoles`: every
-  form whose action's path is exactly `/line/episode/step/pack` and whose one `content_id` is the step,
-  with one positive `hole_id` and `_method` `DELETE`; another shape, or a hole twice → no target; other
-  steps' forms and the add form are left alone; ids play no part) and, when there is any row, the `openModal(…)`
-  slots read as ids must be exactly as many — else no target: no plan (the facts' `state` unknown), a run
-  stops before writing, the read after a write is `unknown`, never `failed`. No row and no slot = a step
-  with no template. So on the real page as captured, a plan can be made only for a step with no template
-  yet, and its result is 「届いたか分かりません」 for the person to confirm (the row after the write has no
-  id). Whether the page main reads (no scripts run) carries the rows at all is **not known** — the
-  capture is the rendered page and the rows carry Vue markers: if the script draws them, main sees no row
-  and a step with templates reads as empty (remaining limit; to check with one read of the raw page at
-  the owner's next login). Reading the attached templates by id (a JSON answer, or names matched to the
-  template list with ambiguity refused, which needs the state's shape or the checker's reads to change)
-  is a later version. The write's form, seen again in §40 (read only, field
+  characters; none → `csrf-missing`, no write. **The real page's rows** (design memo §39–§41; §41 = the
+  raw page as the server sends it, no scripts run — exactly what main reads): the attached templates are
+  rows in `#template_confirm_<step>` — outside `templateStep<step>`, which there holds only the
+  「テンプレートから追加」 form —: 「#N」 in a header cell, 「テンプレート <name>」, 編集 with
+  `@click="openModal(<reminder>, <step>, <hole>, <template id>, <form type>)"` (the page's script defines
+  `openModal(episodeId, packId, holeId, eggId, eggFormType)`: the 4th is the attached template's id, 8 =
+  text; the rendered page drops `@click`, which is why §40's rendered capture showed no id) and a delete
+  form `POST /line/episode/step/pack` with hidden `_method=DELETE`, `hole_id`, `content_id=<step>`
+  (element ids repeated on every row). The checker reads each row (`stepTable`): exactly one
+  `openModal(…)` naming this reminder and this step with a positive hole and template id, and exactly one
+  delete form of this step whose `hole_id` is that hole; the table's last row (no header cell) holds
+  neither; no call outside its rows; the table once and before the box. Every delete form of the step
+  must be one of those rows (`stepHoles`, failing closed: every form closed, every `…episode/step/pack…`
+  action exactly `/line/episode/step/pack` or `…/pack/template` once the origin is removed — a trailing
+  slash, a query, a relative or another path → no target —, one `content_id` that is a positive id as
+  written, one positive `hole_id`, `_method` `DELETE`, no hole twice). Anything else → no target: no plan
+  (the facts' `state` unknown), a run stops before writing, the read after a write is `unknown`, never
+  `failed`. A template's body spelling a call in its row makes two calls there → no target (never a
+  guessed id). The state is the rows' template ids (plus slots in the box, the 11/20 capture's shape), so
+  a plan can be made for a step that already has templates and the read after a write says `succeeded`
+  when the new template's id stands in a row. The form type is not kept (the facts' `templates` check
+  says whether the added one is text). Nothing else of the page is read — it also carries account-wide
+  counts in Vue props: never read. The write's form, seen again in §40 (read only, field
   names, no values): `POST /line/episode/step/pack/template` with `content_id` (the chosen template is
   added by the page's script; `template_id` is the 11/20 capture's name), `_token` (also
   `meta[name=csrf-token]`) and `_lm_user_id` — the declaration agrees. Also seen, not declared: a step's
@@ -438,9 +441,12 @@ repeated / `_method` key, no body, a query, http / another host, an undeclared m
 a stop; declared reads only, the page's parts without a query; the window's outside rule and read
 rule; the plan's shape, expiry, `approvedAt` and one-day limits; the checker's box (exactly one id
 attribute, not in a comment / script / text area, slots of this reminder and step only, none outside)
-/ ids / token, the real page's rows counted against the id slots (no row = none; rows without slots,
-two rows and one slot, a row of another shape — two holes, no or another `_method`, hole 0, two
-`content_id`s —, a hole twice → no target; other steps' rows, the add form, a comment or script left alone),
+/ ids / token, the real page's rows (§41 structure: none, one, two, the same template in two holes read;
+a row without its openModal or with two, naming another reminder or step, a hole other than its form's,
+ids like 0, a hole twice, a body spelling a call, a call of this step in another step's table, a delete
+form or a call outside the rows, the table twice or after the box, the last row holding a form, a
+delete-like form of another action / a padded or missing `content_id` / unclosed or nested, a row's form
+of another shape → no target; other steps' rows, the add form, a comment or script left alone),
 the account from `lm-account-id` (present, missing, two different values, not a
 positive integer, only in a comment or script); the bundled declaration, its `expect`, an unknown checker and
 two checkers with one id; the record on disk and fail-closed; the closed AI entry: no module outside
@@ -538,8 +544,8 @@ send → report; 6c turns it on for the owner's PC).
   (`BROWSER_TYPE_NOT_APPROVED`) and not retired (`BROWSER_TYPE_RETIRED`), the app at least
   `minAppVersion` (`BROWSER_APP_TOO_OLD`), the operation exists, **the first version's rule**
   (`browserFirstVersionProblem`: `delivers: none`, or `delivers: scheduled` with `facts.schedule`
-  and `facts.templates` both `required` and `complete` (6b-2a), a `shared` note whenever `facts.shared_with`
-  is declared optional (0.6.1: the card's warning stands in for it), not irreversible, exactly one write, not delete, a lock kind —
+  and `facts.templates` both `required` and `complete` (6b-2a), a `shared` note unless `facts.shared_with`
+  is declared required (optional or not declared; 0.6.1: the card's warning stands in for it), not irreversible, exactly one write, not delete, a lock kind —
   `BROWSER_OPERATION_NOT_YET`), the member's browser setting (company mode with their
   override, `browserOperationsAllowed`: site and level — `BROWSER_NOT_ALLOWED`), the AI stop
   (`browserAiStopped` of the member's stops: whole AI, `web`, `mcp-external` — `BROWSER_AI_STOPPED`),
@@ -739,7 +745,7 @@ stop / setting / context change before the permit, each saying what; a re-read t
 clock or a clock set back does not; a stop / closed window / changed context / a throw in the last check
 → failed; a refused permit → nothing reported; no usable permit answer (an error, a malformed one, none in
 5 s) → failed, asked once; a 4xx → unknown; an error, a lost answer applied or not → unknown and never sent
-again, also from another PC; the page after the send decides (the real page's rows matched by id slots → succeeded, rows only → unknown); reports retried ≤ 3; the record's hint;
+again, also from another PC; the page after the send decides (the real page's rows: the new template's id in a row → succeeded, a row without its openModal → unknown); reports retried ≤ 3; the record's hint;
 the type / checker / window checks after the claim; CSRF; the hour running out; one run per window),
 `browser-read-session.test.ts` (the permit only after the write session is prepared; "not sent" only before
 the request is ended), `browser-window-electron.test.ts` (the real window: the happy path through the
@@ -1031,7 +1037,7 @@ before the permit — are read by main through the checker, never taken from the
   リマインダです。…」 always and the count as 「読み取れませんでした」; a value read is still held to its
   shape, and unknown → known at the re-read is a change. Nothing beyond the reminder page is read when the
   step is not there. So 0.6.1 **can** make a plan from the real site's shapes (any step whose timing
-  text the site gives, text templates in any folder), behind the switch and the `pending` row. Safety it leans on (the owner:
+  text the site gives, text templates in any folder, a step with or without templates already — §41), behind the switch and the `pending` row. Safety it leans on (the owner:
   let plans be made where safety holds): `delivers: scheduled`, a template removable before the step's
   time (§39), the card's approval and the re-read before the permit.
 - **Connector refusals reviewed** (0.6.1, owner: lean toward letting plans be made while safety holds):
@@ -1043,8 +1049,7 @@ before the permit — are read by main through the checker, never taken from the
 - **To confirm at the owner's next login** (read-only window, as §34–§40): the value of
   `step_timing_text` beside the page's text for a 「当日」 and a 「N日前」 step (§40 recorded its shape
   only); what `skip` means (§40: `initial` is 「リマインダ開始時に配信を行う」; `skip`'s field is hidden);
-  whether the raw reminder page (as main reads it, no scripts) carries the attached-template rows and any
-  template id for them (§40's capture is the rendered page: rows with names and `hole_id`s only); whether any read means
+  whether any read means
   exactly "people who will still receive this step" (`audience`; §40: the reminder list reads no counts);
   that `content_text` is a text template's whole body (§40: the longest, 1161 characters, has no 「…」 —
   likely whole) and `form_type` is a number with 8 = text; that
@@ -1067,8 +1072,8 @@ control or bidirectional character, over 100, not text → unknown; another step
 missing or not plain, a failed or repeated-key answer → unknown; the reminder's answer: the step missing,
 twice, naming another reminder, another reminder's answer, a hidden reminder, no `hid_at`, a step that is
 not an object, `steps` not a list, failing → unknown; the step's own fields and the page's text play no part); a page with repeated ids (the real page's form ids)
-keeps the account, state, timing and names; the real page's rows (§40 structure) without id slots — one, two,
-the same name twice — make no state and nothing else is read, no row is an empty step; no account,
+keeps the account, state, timing and names; the real page's rows (§41 structure) read by their openModal ids
+(none, one — a plan —, two), a row without one makes no state and nothing else is read; no account,
 no step (nothing else read), a failed page;
 the cap, undeclared reads, a page past `max`, a page on an unpaginated read, a bad id, another facts
 version, a stop, a careless checker (a fact from a failed answer, an undeclared fact, the same read asked

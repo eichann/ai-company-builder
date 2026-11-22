@@ -65,7 +65,7 @@
       "connector": "lstep",
       "version": "0.6.1",
       "declarationHash": "sha256:714703a3efb4d814c88d7c28ad26dfedb827f0061e9bf72f064a3b30c0938fa6",
-      "checkerHash": "sha256:36ff108d53005e5ccae10bf879b48a3385cf43e4bf3a60ba07d92b1c662b2867",
+      "checkerHash": "sha256:3ca085022670649c39db3b95bc420c049171a308b4e273e85c8a45d5502c79fb",
       "factsVersion": 2,
       "minAppVersion": null,
       "status": "pending",

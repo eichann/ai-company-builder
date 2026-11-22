@@ -66,10 +66,10 @@ interface FakeLstep {
   /** Templates that are no longer text only (another form type). */
   notText: string[]
   /**
-   * The real page's rows of attached templates (design memo §40: delete forms with `hole_id`, no template
-   * id): none (the 11/20 capture's slots only), beside the slots, or rows only (no slot with an id).
+   * The real page's rows of attached templates (design memo §41, the raw page): none (the 11/20 capture's
+   * slots in the box), the table's rows with their `openModal` ids, or rows whose openModal is missing.
    */
-  rows?: 'with-slots' | 'only'
+  rows?: 'raw' | 'raw-no-call'
 }
 
 function fakeLstep(over: Partial<FakeLstep> = {}): FakeLstep {
@@ -90,9 +90,9 @@ function reminderPage(site: FakeLstep): string {
   return `<!doctype html><html><head><meta name="lm-account-id" content="${site.account}">${site.token ? '<meta name="csrf-token" content="tok">' : ''}</head><body>`
     + (site.token ? `<input type="hidden" name="_token" value="tok"><input type="hidden" name="_lm_user_id" value="u1">` : '')
     + (site.steps[STEP] && site.rows
-      ? `<div id="template_confirm_${STEP}"><table>${(site.steps[STEP] ?? []).map((_t, i) => `<tr><td>#${i + 1} テンプレート 架空テンプレ</td><td><form method="POST" action="https://manager.linestep.net/line/episode/step/pack"><input type="hidden" name="_method" id="_method" value="DELETE"><input type="hidden" name="hole_id" id="hole_id" value="${16100001 + i}"><input type="hidden" name="content_id" id="content_id" value="${STEP}"></form></td></tr>`).join('')}</table></div>`
+      ? `<div id="template_confirm_${STEP}"><table>${(site.steps[STEP] ?? []).map((_t, i) => `<tr><th><small>#${i + 1}</small></th><td>テンプレート 架空テンプレ</td><td><button type="button"${site.rows === 'raw' ? ` @click="openModal(${REMINDER}, ${STEP}, ${16100001 + i}, ${_t}, 8)"` : ''}>編集</button></td><td><form method="POST" action="https://manager.linestep.net/line/episode/step/pack"><input type="hidden" name="_method" id="_method" value="DELETE"><input type="hidden" name="hole_id" id="hole_id" value="${16100001 + i}"><input type="hidden" name="content_id" id="content_id" value="${STEP}"></form></td></tr>`).join('')}</table></div>`
       : '')
-    + (site.steps[STEP] ? `<div class="step" id="templateStep${STEP}"><span>当日</span>${site.rows === 'only' ? '' : slots}</div>` : '') + '</body></html>'
+    + (site.steps[STEP] ? `<div class="step" id="templateStep${STEP}"><span>当日</span>${site.rows ? '' : slots}</div>` : '') + '</body></html>'
 }
 
 function siteAnswer(site: FakeLstep, address: string): { status: number; body: string } {
@@ -477,11 +477,11 @@ test('the page read after the send decides: only exactly the planned state is su
   const stopped = await harness({ site: { afterWrite: () => { stopped.live.stopped = true } } })
   assert.deepEqual(await stopped.run(), { outcome: 'unknown', reason: 'reread-failed' })
   for (const h of [other, gone, account, stopped]) assert.equal(h.site.posts.length, 1)
-  // The real page's rows (design memo §40): matched one for one by id slots, the planned state is read —
-  // success; rows without id slots after the send cannot say which template is there — unknown, never failed.
-  const rows = await harness({ site: { rows: 'with-slots' } })
+  // The real page's rows (design memo §41): the new template's id in its row after the send — success, on a
+  // step that already had one; a row without its openModal after the send — unknown, never failed.
+  const rows = await harness({ site: { rows: 'raw' } })
   assert.deepEqual(await rows.run(), { outcome: 'succeeded' })
-  const rowsOnly = await harness({ site: { rows: 'with-slots', afterWrite: () => { rowsOnly.site.rows = 'only' } } })
+  const rowsOnly = await harness({ site: { rows: 'raw', afterWrite: () => { rowsOnly.site.rows = 'raw-no-call' } } })
   assert.deepEqual(await rowsOnly.run(), { outcome: 'unknown', reason: 'target-after' })
   assert.deepEqual(rowsOnly.server.state.reports, [{ result: 'unknown', reason: 'target-after' }])
 })
