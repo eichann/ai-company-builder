@@ -1,0 +1,8 @@
+{
+  "name": "acb-browser-plan-model",
+  "private": true,
+  "description": "The checker model/browser-plan/check uses. Outside the pnpm workspace on purpose; pinned by package-lock.json (tla-ts 0.0.10, as in andon's model/).",
+  "devDependencies": {
+    "tla-ts": "0.0.10"
+  }
+}

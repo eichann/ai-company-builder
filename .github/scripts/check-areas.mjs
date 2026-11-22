@@ -11,6 +11,9 @@
 //
 // Not seen here: files read at run time instead of imported (the pre-receive
 // hook template, fixtures). changed-areas.sh names those by hand.
+//
+// Area `model` has no imports to follow: the browser plan model cites the code
+// it copies in its comments, and every cited file must be in that area.
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -69,5 +72,27 @@ for (const [area, entries] of Object.entries(AREAS)) {
     failed = true
     console.error(`::error::changed-areas.sh: area '${area}' does not list files its tests load; a PR changing them would skip those tests. Add them to the area's list:\n  ${uncovered.join('\n  ')}`)
   }
+}
+// The browser plan model (model/browser-plan/) imports nothing: it copies code by hand and each action
+// names the file it copies. Every file a .tla cites must exist and be in area `model`, or a PR changing
+// that code would not run the model (agent-browser.md "The plan model").
+const modelDir = 'model/browser-plan'
+const cited = new Set(walk(modelDir).filter(f => f.endsWith('.tla'))
+  .flatMap(f => [...fs.readFileSync(path.join(root, f), 'utf-8').matchAll(/\b(?:client|server|shared)\/[A-Za-z0-9_./-]+\.ts\b/g)].map(m => m[0])))
+const modelCovered = new Set(execFileSync('bash', ['.github/scripts/changed-areas.sh', '--files', 'model'], { cwd: root, encoding: 'utf-8' }).split('\n'))
+const missingCited = [...cited].filter(f => !fs.existsSync(path.join(root, f))).sort()
+const uncoveredCited = [...cited].filter(f => fs.existsSync(path.join(root, f)) && !modelCovered.has(f)).sort()
+console.log(`model: ${modelDir} cites ${cited.size} code files${uncoveredCited.length + missingCited.length ? `, ${uncoveredCited.length + missingCited.length} not covered` : ''}`)
+if (cited.size === 0) {
+  failed = true
+  console.error(`::error::${modelDir}: no .tla cites any code file (did the model move? update check-areas.mjs)`)
+}
+if (missingCited.length > 0) {
+  failed = true
+  console.error(`::error::${modelDir} cites files that do not exist (renamed? update the model's comments and MODEL in changed-areas.sh):\n  ${missingCited.join('\n  ')}`)
+}
+if (uncoveredCited.length > 0) {
+  failed = true
+  console.error(`::error::changed-areas.sh: area 'model' does not list files the model copies; a PR changing them would skip the model. Add them to MODEL:\n  ${uncoveredCited.join('\n  ')}`)
 }
 process.exit(failed ? 1 : 0)

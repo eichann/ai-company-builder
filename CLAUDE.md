@@ -85,6 +85,7 @@ cd client && npx tsx --test tests/sync/<name>.test.ts     # one sync-harness fil
 cd client && npx playwright test <spec>                   # one renderer UI spec
 cd server && npx vitest run tests/<path>                  # one server test file
 cd admin && npx vitest run                                # admin tests (seconds)
+model/browser-plan/check     # the browser plan lifecycle model (bash + Node + npm; outside the pnpm workspace)
 ```
 
 Run the tests for the files you touched, not whole suites. The development machine is shared and
@@ -218,7 +219,7 @@ that is correct, easy to follow and easy to change. Before and while writing cod
   jobs run only when their inputs change (`.github/scripts/changed-areas.sh`; a skipped job
   reports success). Required for merge: Typecheck, Lint (changed files), Server tests, Client
   tests (macOS) (aggregates a Linux and a macOS half), Sync harness (macOS); the UI, bundle, perf,
-  universal-git and admin jobs should be green
+  universal-git, admin and model (browser plan) jobs should be green
   too. The nightly run (and a manual run) execute everything; a push to main runs the
   Linux jobs only (typecheck, lint, Linux client half, UI, bundle, server, admin) because its PR
   already ran the macOS ones. macOS jobs can run on a self-hosted Mac (`MAC_RUNNER`; deployment rule).

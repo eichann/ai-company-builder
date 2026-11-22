@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Decide which CI jobs a change needs. Writes `<area>=true|false` lines to
 # $GITHUB_OUTPUT (stdout when unset) for: sync, client, clientmac, ui, perf,
-# universal, server, admin.
+# universal, server, admin, model.
 #
 # Pull requests are filtered by path. A push to main runs the Linux areas
-# (client, ui, server, admin) and skips the macOS ones (sync, clientmac, perf,
+# (client, ui, server, admin, model) and skips the macOS ones (sync, clientmac, perf,
 # universal): the PR already ran them and macOS runners are scarce. The nightly
 # schedule and a manual run (workflow_dispatch) run everything. Typecheck and
 # lint are not areas: they always run.
@@ -13,7 +13,8 @@
 # points (sync, client, clientmac, perf, ui) that is checked on every run by
 # .github/scripts/check-areas.mjs (job "Lint (changed files)"): a file the
 # tests import that no list here names fails the check, so a list cannot
-# silently fall behind the code. Files read at run time (the pre-receive hook
+# silently fall behind the code. For model (the browser plan model), the same
+# script checks that every code file the model cites is in MODEL. Files read at run time (the pre-receive hook
 # template, the push checker the hook runs) are named here by hand. A path in
 # COMMON (dependencies, the workflow itself) runs every job.
 #
@@ -21,7 +22,7 @@
 #        changed-areas.sh --files <area>   # tracked files that run <area> (check-areas.mjs)
 set -euo pipefail
 
-areas=(sync client clientmac ui perf universal server admin)
+areas=(sync client clientmac ui perf universal server admin model)
 
 COMMON=(
   package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc patches/
@@ -110,6 +111,13 @@ UNIVERSAL=(client/scripts/universal-git.mjs client/package.json)
 # The rollback floor's pin and its cross-build check (deployment.md "Rolling back production") run in the server job.
 SERVER=(server/ shared/ staging/ .github/rollback-floor-commit .github/scripts/rollback-floor-check.sh)
 ADMIN=(admin/ shared/)
+# The browser plan lifecycle model (model/browser-plan/, agent-browser.md "The plan model"): the model
+# itself and the code it copies by hand. check-areas.mjs fails when the model cites a file not listed
+# here (each action names the code it copies), so a lifecycle change always runs the model.
+MODEL=(
+  model/browser-plan/ shared/core/browser-plans.ts server/src/services/browser-plans.ts
+  client/shared/browser-runner.ts client/electron/features/browser/runner.ts
+)
 
 pathspecs() {
   case "$1" in
@@ -121,6 +129,7 @@ pathspecs() {
     universal) printf '%s\n' "${UNIVERSAL[@]}" ;;
     server) printf '%s\n' "${SERVER[@]}" ;;
     admin) printf '%s\n' "${ADMIN[@]}" ;;
+    model) printf '%s\n' "${MODEL[@]}" ;;
     *) echo "unknown area: $1" >&2; return 2 ;;
   esac
 }
@@ -148,7 +157,7 @@ emit() {
 if [ "$event" = "push" ]; then
   echo "Event push: Linux jobs only (macOS jobs ran on the PR; nightly runs everything)."
   for a in "${areas[@]}"; do
-    case "$a" in client|ui|server|admin) emit "$a" true ;; *) emit "$a" false ;; esac
+    case "$a" in client|ui|server|admin|model) emit "$a" true ;; *) emit "$a" false ;; esac
   done
   exit 0
 fi
