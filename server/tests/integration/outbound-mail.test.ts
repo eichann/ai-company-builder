@@ -1131,3 +1131,248 @@ describe('one send per source: what was already sent is shown, a reason lets it 
     expect(twice.body.alreadySent.message).toMatch(/^この件の催促はあなたが/)
   })
 })
+
+describe('SEND-1: the draft as confirmed, or nothing — changes while the send awaits its checks', () => {
+  // The service with its awaits (the sender's account, the recipients' source, Gmail) held open on
+  // purpose, on the same database as the routes: each race happens in a fixed order.
+  type Deferred = { promise: Promise<void>; open: () => void }
+  const deferred = (): Deferred => { let open!: () => void; const promise = new Promise<void>(r => { open = r }); return { promise, open } }
+  type Kind = 'sender' | 'contacts' | 'send' | 'replier'
+  /** The next calls of each kind, in order: each signals its arrival and waits for its release. */
+  const queue: Record<Kind, Array<{ arrived: Deferred; gate: Deferred }>> = { sender: [], contacts: [], send: [], replier: [] }
+  const posted: string[] = []
+  const held = (kind: Kind) => {
+    const slot = { arrived: deferred(), gate: deferred() }
+    queue[kind].push(slot)
+    return { arrived: slot.arrived.promise, release: slot.gate.open }
+  }
+  const pass = async (kind: Kind) => {
+    const slot = queue[kind].shift()
+    if (slot) { slot.arrived.open(); await slot.gate.promise }
+  }
+  const sent: string[] = []
+  let service: Json
+  const sato = { companyId: CO, userId: 'm-sato', role: 'member' }
+  const human = { kind: 'human' as const }
+  const CONTACTS = [{ email: 'race-a@a-corp.example', name: 'A' }, { email: 'race-b@a-corp.example', name: 'B' }]
+
+  beforeAll(async () => {
+    const { createOutboundMailService } = await import('../../src/services/outbound-mail')
+    const { createFixedPayloads } = await import('../../src/services/fixed-payloads')
+    const { sqliteCompanyData } = await import('../../src/adapters/sqlite/company-data')
+    const { sqliteTransactions } = await import('../../src/adapters/sqlite/transactions')
+    const { createServiceRecordWriter } = await import('../../src/services/record-engine')
+    const { systemClock, randomIds } = await import('../../src/adapters/system')
+    const companyData = sqliteCompanyData(db)
+    const transactions = sqliteTransactions(db)
+    const writer = createServiceRecordWriter({
+      companyData, transactions, clock: systemClock, ids: randomIds, isMember: () => true, roleOf: () => 'member', notify: () => {},
+    })
+    service = createOutboundMailService({
+      companyData, transactions, clock: systemClock, ids: randomIds, writer, roleOf: () => 'member',
+      payloads: createFixedPayloads({ companyData, clock: systemClock }),
+      digest: text => createHash('sha256').update(text).digest('hex'),
+      members: () => [{ userId: 'm-sato', email: EMAILS['m-sato'], name: NAMES['m-sato'] }],
+      meetingAttendees: async () => null,
+      bundleContacts: async () => { await pass('contacts'); return { ok: true, contacts: CONTACTS } },
+      mail: {
+        senderAccount: async () => { await pass('sender'); return { ok: true, account: EMAILS['m-sato'] } },
+        send: async (_co: string, _user: string, raw: string) => {
+          await pass('send')
+          sent.push(Buffer.from(raw, 'base64url').toString('utf8'))
+          return { ok: true, json: { id: `g${sent.length}`, threadId: 't' } }
+        },
+      },
+      chat: {
+        replierAccount: async () => { await pass('replier'); return { ok: true, account: EMAILS['m-sato'] } },
+        reply: async (_co: string, _user: string, _ref: unknown, text: string) => { posted.push(text); return { ok: true, ts: `${1700000000 + posted.length}.000100` } },
+      },
+      companyIds: () => [CO],
+    })
+  })
+
+  async function draft(subject: string, emails = CONTACTS.map(c => c.email)) {
+    const offered = await service.recipients(sato, { bundleId })
+    expect(offered.ok, JSON.stringify(offered)).toBe(true)
+    const made = await service.create(sato, human, { bundleId, toRefs: emails.map(e => refOf(offered, e)), subject, body: '本文です' })
+    expect(made.ok, JSON.stringify(made)).toBe(true)
+    return made.value.draft
+  }
+  const refOf = (offered: Json, email: string) => offered.value.recipients.find((r: Json) => r.email === email).ref
+  const sendsOf = (id: string) => db.prepare('SELECT outcome FROM outbound_sends WHERE company_id = ? AND message_id = ?').all(CO, id) as Json[]
+  const mailsTo = (email: string) => sent.filter(m => m.includes(email)).length
+
+  it('a recipient taken off while the sender\'s account is checked: CONTENT_CHANGED with the current draft, nothing sent, no send row', async () => {
+    const d = await draft('宛先を直す競争')
+    const before = sent.length
+    const at = held('sender')
+    const pending = service.send(sato, d.id, { hash: d.hash })
+    await at.arrived
+    const edited = await service.update(sato, human, d.id, { expectedVersion: d.version, toRefs: [d.to[0].ref] })
+    expect(edited.ok, JSON.stringify(edited)).toBe(true)
+    at.release()
+    const r = await pending
+    expect(r.ok).toBe(false)
+    expect(r.body.code).toBe('CONTENT_CHANGED')
+    expect(r.body.draft.to.map((x: Json) => x.email)).toEqual([CONTACTS[0].email])
+    expect(sent.length).toBe(before)
+    expect(sendsOf(d.id)).toEqual([])
+    expect(stateOf(d.id).state).toBe('draft')
+  })
+
+  it('an edit while the recipients\' source is read again: CONTENT_CHANGED, nothing sent', async () => {
+    const d = await draft('本文を直す競争')
+    const before = sent.length
+    const at = held('contacts')
+    const pending = service.send(sato, d.id, { hash: d.hash })
+    await at.arrived
+    const edited = await service.update(sato, human, d.id, { expectedVersion: d.version, body: '直した本文です' })
+    expect(edited.ok, JSON.stringify(edited)).toBe(true)
+    at.release()
+    expect((await pending).body.code).toBe('CONTENT_CHANGED')
+    expect(sent.length).toBe(before)
+    expect(sendsOf(d.id)).toEqual([])
+  })
+
+  it('discarded during either await: NOT_DRAFT, nothing sent, the draft stays discarded', async () => {
+    for (const kind of ['sender', 'contacts'] as const) {
+      const d = await draft(`捨てる競争 ${kind}`)
+      const before = sent.length
+      const at = held(kind)
+      const pending = service.send(sato, d.id, { hash: d.hash })
+      await at.arrived
+      expect(service.discard(sato, d.id).ok).toBe(true)
+      at.release()
+      expect((await pending).body.code).toBe('NOT_DRAFT')
+      expect(sent.length).toBe(before)
+      expect(sendsOf(d.id)).toEqual([])
+      expect(stateOf(d.id).state).toBe('discarded')
+    }
+  })
+
+  it('an edit that began before the send and finishes after the send was accepted is refused; the confirmed version is what left', async () => {
+    const d = await draft('受付後の直し', [CONTACTS[0].email])
+    const offered = await service.recipients(sato, { bundleId })
+    const before = sent.length
+    // The edit adds B: a ref outside the current version, so it reads the source — and waits there.
+    const editAt = held('contacts')
+    const editing = service.update(sato, human, d.id, { expectedVersion: d.version, toRefs: [refOf(offered, CONTACTS[0].email), refOf(offered, CONTACTS[1].email)] })
+    await editAt.arrived
+    // Meanwhile the person sends; it passes, claims its row and leaves while the edit still waits.
+    const r = await service.send(sato, d.id, { hash: d.hash })
+    expect(r.ok, JSON.stringify(r)).toBe(true)
+    expect(r.value.outcome).toBe('sent')
+    editAt.release()
+    const edited = await editing
+    expect(edited.ok).toBe(false)
+    expect(edited.body.code).toBe('NOT_DRAFT')
+    expect(sent.length).toBe(before + 1)
+    expect(mailsTo(CONTACTS[1].email)).toBe(0)
+    expect(stateOf(d.id).state).toBe('sent')
+    expect(JSON.parse(stateOf(d.id).fields).payload_hash).toBe(d.hash)
+  })
+
+  it('once the send row is written, an edit is refused, and a discard while it is sending', async () => {
+    const d = await draft('送っている途中')
+    const at = held('send')
+    const sending = service.send(sato, d.id, { hash: d.hash })
+    await at.arrived
+    expect(sendsOf(d.id)).toEqual([{ outcome: 'sending' }])
+    expect((await service.update(sato, human, d.id, { expectedVersion: d.version, body: '途中の直し' })).body.code).toBe('SEND_IN_PROGRESS')
+    expect(service.discard(sato, d.id).body.code).toBe('SEND_IN_PROGRESS')
+    at.release()
+    expect((await sending).value.outcome).toBe('sent')
+    expect(JSON.parse(stateOf(d.id).fields).payload_hash).toBe(d.hash)
+  })
+
+  it('a record left 「下書き」 beside a sent / unknown send (its move failed): no edit, no second send, but 「捨てる」 puts it away and the send row stays', async () => {
+    for (const outcome of ['sent', 'unknown'] as const) {
+      const d = await draft(`取り残された下書き ${outcome}`)
+      expect((await service.send(sato, d.id, { hash: d.hash })).value.outcome).toBe('sent')
+      const before = sent.length
+      // As if the record's move after Gmail's answer had failed (SEND-3's gap).
+      db.prepare("UPDATE record_state SET state = 'draft' WHERE company_id = ? AND record_id = ?").run(CO, d.id)
+      db.prepare('UPDATE outbound_sends SET outcome = ? WHERE company_id = ? AND message_id = ?').run(outcome, CO, d.id)
+      const edit = await service.update(sato, human, d.id, { expectedVersion: d.version, body: '送った後の直し' })
+      expect(edit.body.code).toBe('NOT_DRAFT')
+      expect(edit.body.error).toContain('捨てる')
+      expect((await service.send(sato, d.id, { hash: d.hash })).body.code).toBe('SEND_IN_PROGRESS')
+      const put = service.discard(sato, d.id)
+      expect(put.ok, JSON.stringify(put)).toBe(true)
+      expect(stateOf(d.id).state).toBe('discarded')
+      expect(sendsOf(d.id)).toEqual([{ outcome }])
+      expect(sent.length).toBe(before)
+    }
+  })
+
+  it('a record and its send both `unknown` (届いたか分かりません): 「捨てる」 is still the person\'s choice', async () => {
+    const d = await draft('分からないまま捨てる')
+    expect((await service.send(sato, d.id, { hash: d.hash })).value.outcome).toBe('sent')
+    db.prepare("UPDATE record_state SET state = 'unknown' WHERE company_id = ? AND record_id = ?").run(CO, d.id)
+    db.prepare("UPDATE outbound_sends SET outcome = 'unknown' WHERE company_id = ? AND message_id = ?").run(CO, d.id)
+    const put = service.discard(sato, d.id)
+    expect(put.ok, JSON.stringify(put)).toBe(true)
+    expect(stateOf(d.id).state).toBe('discarded')
+    expect(sendsOf(d.id)).toEqual([{ outcome: 'unknown' }])
+  })
+
+  it('the content erased while the send awaits (the hash stays, the body is gone): nothing sent', async () => {
+    const d = await draft('消えた本文')
+    const before = sent.length
+    const at = held('contacts')
+    const pending = service.send(sato, d.id, { hash: d.hash })
+    await at.arrived
+    db.prepare('UPDATE fixed_payloads SET canonical = NULL, body_deleted_at = ? WHERE company_id = ? AND owner_id = ?').run(ts(), CO, d.id)
+    at.release()
+    const r = await pending
+    expect(r.ok).toBe(false)
+    expect(r.body.code).toBe('MAIL_NOT_FOUND')
+    expect(sent.length).toBe(before)
+    expect(sendsOf(d.id)).toEqual([])
+  })
+
+  it('a Slack reply edited while 返事を送る is checked: CONTENT_CHANGED, nothing posted; unchanged, it posts once', async () => {
+    const thread = `C0RACE:${Math.floor(Date.now() / 1000)}.000200`
+    expect(services.inbox.receive(CO, 'm-sato', {
+      channel: 'chat', messageId: thread, references: [], threadRef: `slack:${thread}`, sourceRef: `slack:${thread}`,
+      occurredAt: new Date().toISOString(), subject: null, from: { address: 'slack:U0ONE' }, to: [{ address: 'slack-member:m-sato', memberId: 'm-sato' }],
+    })).toBe('created')
+    const interactionId = (db.prepare('SELECT interaction_id FROM inbox_messages WHERE company_id = ? AND message_id = ?').get(CO, thread) as Json).interaction_id
+    const made = await service.create(sato, human, { interactionId, body: '確認して返します。' })
+    expect(made.ok, JSON.stringify(made)).toBe(true)
+    const d = made.value.draft
+    expect(d.channel).toBe('slack')
+    const at = held('replier')
+    const pending = service.send(sato, d.id, { hash: d.hash })
+    await at.arrived
+    const edited = await service.update(sato, human, d.id, { expectedVersion: d.version, body: '直した返事です。' })
+    expect(edited.ok, JSON.stringify(edited)).toBe(true)
+    at.release()
+    expect((await pending).body.code).toBe('CONTENT_CHANGED')
+    expect(posted).toEqual([])
+    expect(sendsOf(d.id)).toEqual([])
+    const now = edited.value.draft
+    const r = await service.send(sato, d.id, { hash: now.hash })
+    expect(r.ok, JSON.stringify(r)).toBe(true)
+    expect(posted).toEqual(['直した返事です。'])
+  })
+
+  it('the normal path sends once to both; a double press sends exactly one mail', async () => {
+    const d = await draft('二度押し')
+    const before = sent.length
+    const at = held('sender')
+    const first = service.send(sato, d.id, { hash: d.hash })
+    await at.arrived
+    const second = await service.send(sato, d.id, { hash: d.hash })
+    expect(second.ok, JSON.stringify(second)).toBe(true)
+    at.release()
+    const late = await first
+    expect(late.ok).toBe(false)
+    expect(late.body.code).toMatch(/^(SEND_IN_PROGRESS|NOT_DRAFT)$/)
+    expect(sent.length).toBe(before + 1)
+    expect(mailsTo(CONTACTS[0].email)).toBeGreaterThan(0)
+    expect(sent.at(-1)).toContain(CONTACTS[1].email)
+    expect(sendsOf(d.id)).toEqual([{ outcome: 'sent' }])
+    expect(stateOf(d.id).state).toBe('sent')
+  })
+})
