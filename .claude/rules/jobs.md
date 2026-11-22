@@ -1431,7 +1431,9 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   24 hours (`JOB_CANDIDATE_TTL_MS`; content deleted when anyone's next candidate is made), at most 20 live a member (checked
   before and inside the write). Never a job: no job list, detail or version history shows it.
 - **The submit** (the session only: no record-token route reaches it — a record token alone is not signed in, 401):
-  `{ fingerprint }` exactly; the candidate **as stored**, never resolved again; the fingerprint the card showed (409
+  `{ fingerprint }` exactly; the candidate **as stored**, never resolved again; **first** whether the member still reads every
+  place it names (its shelf Skill's place too: `readsAllFor`) — else 409 `JOB_CANDIDATE_PLACE` whatever fingerprint was sent, as
+  the candidate's own view withholds it (Codex 3rd pass: no guessing oracle) —, then the fingerprint the card showed (409
   `JOB_VERSION_FINGERPRINT`); the places and the Skill checked again (`JOB_CANDIDATE_PLACE`, `JOB_SKILL_CHANGED` → ask the AI for a
   new candidate); then **one transaction**: the idempotency record again, the member's rights (`jobs.rightsFit`, the approval's own
   check → 409 `JOB_GRANT_EXCEEDS`), at most `JOB_PROPOSALS_WAITING_MAX` (5) `submitted` (409 `JOB_PROPOSALS_WAITING_LIMIT`) and
@@ -1485,7 +1487,7 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
   Also (owner decisions and reviews of PR A): the proposer's return notice, the fixed responsible person, a candidate read again
   when read (a place / the shelf Skill's place lost), hidden segments refused, an owner / admin proposer not told, a leaver's
   proposals withdrawn (through the route), an older app's 「AI の番」 token refused at the route.
-  Mutation check: 52 guards removed or inverted one at a time, then 7 for the owner decisions, 11 after the reviews and 5 after the Codex re-review (the route handing the service the token's run now fails a test of its own); each fails
+  Mutation check: 52 guards removed or inverted one at a time, then 7 for the owner decisions, 11 after the reviews, 5 after the Codex re-review and 2 after its 3rd pass (the route handing the service the token's run now fails a test of its own); each fails
   a test except — each alone suffices, both removed fail:
   the places' reader / write checks and the approval's own `rightsFit` at the candidate; the 20-candidate check before and inside
   the write; the proposal view's owner / admin branch of `fingerprintShown` (an owner / admin reads every place anyway; kept as the

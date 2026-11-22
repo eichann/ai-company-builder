@@ -257,10 +257,13 @@ export function createJobProposals(deps: JobProposalDeps) {
       if (before) return first(before)
       const row = handle.jobs.candidate(candidateId, member.userId, clock.now())
       if (!row) return CANDIDATE_NOT_FOUND()
-      if (row.fingerprint !== fingerprint) return FINGERPRINT_CHANGED()
       // As stored: never resolved again (the card showed this).
       const definition = storedJobDefinition({ schema: JOB_PROPOSAL_SCHEMA, definition: row.definition })
       if (definition === null || definition.actingUser !== member.userId) return CANDIDATE_NOT_FOUND()
+      // Its fingerprint is compared only where it is theirs to see (they read every place it names, a shelf Skill's place too —
+      // the candidate's own view withholds it otherwise): else the same refusal whatever was sent (Codex, 3rd pass).
+      if (!deps.jobs.readsAllFor(member.companyId, member.userId, definition)) return PLACE_REFUSED()
+      if (row.fingerprint !== fingerprint) return FINGERPRINT_CHANGED()
       const places = [...new Set([...definition.grant.reads.paths, ...(definition.grant.writes.area === 'deliverable' ? [definition.grant.writes.place] : [])])]
       if (!(await placesUsable(member, places, definition.grant.writes.area === 'deliverable' ? definition.grant.writes.place : null))) return PLACE_REFUSED()
       const skill = await deps.jobs.skillStillPinned(member.companyId, definition)

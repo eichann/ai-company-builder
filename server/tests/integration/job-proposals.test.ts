@@ -255,11 +255,24 @@ describe('a candidate: the member’s own, built by the server from list values 
       db.prepare("UPDATE scope_rules SET can_read = 1, can_write = 1 WHERE id = 'jp-priv-a'").run()
     }
     expect(ok(proposals.candidate(alice, c.id)).fingerprint).toBe(c.fingerprint)
+    // Not submitted yet: lost access answers the same refusal for the right fingerprint and for a guess (no oracle).
+    db.prepare("UPDATE scope_rules SET can_read = 0, can_write = 0 WHERE id = 'jp-priv-a'").run()
+    try {
+      const right = await proposals.submit(alice, c.id, { fingerprint: c.fingerprint })
+      expect(right).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_PLACE' } })
+      expect(await proposals.submit(alice, c.id, { fingerprint: `sha256:${'0'.repeat(64)}` })).toEqual(right)
+    } finally {
+      db.prepare("UPDATE scope_rules SET can_read = 1, can_write = 1 WHERE id = 'jp-priv-a'").run()
+    }
     // A shelf Skill whose place she no longer reads.
     const s = ok(await proposalsWith({ folder: false }).createCandidate(alice, null, input({ skill: 'shelf-1' })))
     shelfHidden = true
     try {
       expect(proposals.candidate(alice, s.id)).toMatchObject({ ok: false, body: { code: 'JOB_CANDIDATE_NOT_FOUND' } })
+      const shelfProposals = proposalsWith({ folder: false })
+      const right = await shelfProposals.submit(alice, s.id, { fingerprint: s.fingerprint })
+      expect(right).toMatchObject({ ok: false })
+      expect(await shelfProposals.submit(alice, s.id, { fingerprint: `sha256:${'0'.repeat(64)}` })).toEqual(right)
     } finally { shelfHidden = false }
     expect(ok(proposals.candidate(alice, s.id)).id).toBe(s.id)
   })
