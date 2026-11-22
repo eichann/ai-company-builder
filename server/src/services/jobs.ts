@@ -19,13 +19,13 @@
  *   (notice `job_paused`), in the same transaction as the change.
  */
 import {
-  JOB_ACCEPT_SEPARATELY, JOB_ACTOR, JOB_NEEDS_NEWER_SCREEN, JOB_SCHEMAS, JOB_SYSTEM_PAUSE_REASONS, isJobId, isRecordTrigger, isTimeTrigger, storedJobDefinition, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, newJobId, parseJobAcceptedPlace,
+  JOB_ACCEPT_SEPARATELY, JOB_ACTOR, JOB_NEEDS_NEWER_SCREEN, JOB_PROPOSAL_SCHEMA, JOB_SCHEMAS, JOB_SYSTEM_PAUSE_REASONS, isJobId, isRecordTrigger, isTimeTrigger, storedJobDefinition, jobConsentCanonical, jobDefinitionCanonical, jobDefinitionPaths, jobDeliveryLabel, newJobId, parseJobAcceptedPlace,
   parseJobDefinition, type JobDefinition, type JobDeliveryPlace, type JobPauseReason,
 } from '../../shared/core/jobs'
 import type { JobList, JobOccurrenceView, JobState, JobVersionView, JobView, JobWaiting } from '../../shared/types/jobs'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
-import type { JobOccurrenceRow, JobRow, JobVersionRow } from '../ports/jobs'
+import type { JobOccurrenceRow, JobProposalRow, JobRow, JobVersionRow } from '../ports/jobs'
 import type { MembershipRepository } from '../ports/memberships'
 import type { Transactions } from '../ports/transactions'
 import { hashCanonical } from '../lib/content-hash'
@@ -77,6 +77,16 @@ const ACCEPT_BEFORE_REWATCH = () => refuse('conflict', 'この仕事の新しい
  * accepted with the approval's press; owner decision 2026-11-18): approving never consents for oneself; the approval stays.
  */
 const ACCEPT_SEPARATELY = () => refuse('conflict', `${JOB_ACCEPT_SEPARATELY}。`, { code: 'JOB_ACCEPT_SEPARATELY' })
+/**
+ * Member proposals (jobs.md "Member proposals"): a schema-4 job comes only from a member's submitted candidate; every
+ * version of it stays schema 4 and no other job takes schema 4; once withdrawn or returned it is never edited or approved;
+ * an edit names the version it was made from and an approval the newest version with its fingerprint.
+ */
+const PROPOSAL_ONLY = () => refuse('conflict', '社員の案から生まれる形の定期の仕事は、社員が「AIへの相談」から出した案からだけ作られます。', { code: 'JOB_PROPOSAL_ONLY' })
+const PROPOSAL_SCHEMA = () => refuse('conflict', '社員の案から生まれた定期の仕事は、案の形のまま直してください（画面を新しくしてください）。', { code: 'JOB_PROPOSAL_SCHEMA' })
+const PROPOSAL_CLOSED = () => refuse('conflict', 'この案は取り下げられたか差し戻されたため、直したり承認したりできません。', { code: 'JOB_PROPOSAL_CLOSED' })
+const NOT_LATEST = () => refuse('conflict', 'この仕事は、画面を開いたあとにほかの人が直しました。読み直してから、もう一度ためしてください。', { code: 'JOB_VERSION_NOT_LATEST' })
+const isClosed = (p: JobProposalRow | null) => p !== null && (p.state === 'withdrawn' || p.state === 'returned')
 const NOT_EVENT_JOB = () => refuse('conflict', 'この定期の仕事は、出来事で動く仕事ではありません。', { code: 'JOB_NOT_EVENT' })
 /** What a client reads when it names no schemas (every screen before stage 4-0). */
 const SCHEMA_1_ONLY: readonly number[] = [1]
@@ -150,6 +160,15 @@ export function occurrenceView(o: JobOccurrenceRow): JobOccurrenceView {
 export const EVENT_RECORDS_CHECKED = 2000
 
 const sha256 = hashCanonical
+
+/** A new version's row: the canonical definition, its fingerprints (the whole, and the consent's part), who and when. */
+export function versionRow(jobId: string, version: number, definition: JobDefinition, canonical: string, by: string, at: string): JobVersionRow {
+  return {
+    jobId, version, schema: definition.schema, definition: canonical, fingerprint: sha256(canonical),
+    consentFingerprint: sha256(jobConsentCanonical(definition)), actingUserId: definition.actingUser, createdBy: by, createdAt: at,
+    approvedBy: null, approvedAt: null, acceptedBy: null, acceptedAt: null,
+  }
+}
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
 export function createJobService(deps: JobServiceDeps) {
@@ -396,6 +415,7 @@ export function createJobService(deps: JobServiceDeps) {
       ...forViewer(member, handle, job),
       deliverTo: placeView(member, handle, job),
       ...chainOf(member, handle, job, reader),
+      proposal: proposalView(handle, job),
     }
     if (withVersions) {
       out.versions = handle.jobs.versions(job.id).map((v): JobVersionView => {
@@ -425,8 +445,11 @@ export function createJobService(deps: JobServiceDeps) {
    * The body's definition, checked and pinned: a procedure's Skill fingerprint is the server's (read
    * now), never the caller's; the responsible person must be a member now.
    */
-  async function definitionFrom(companyId: string, body: unknown): Promise<Outcome<{ definition: JobDefinition; canonical: string }>> {
-    if (!isObject(body) || Object.keys(body).length !== 1 || !isObject(body.definition)) return BAD_BODY('{ definition }')
+  async function definitionFrom(companyId: string, body: unknown, withBase = false): Promise<Outcome<{ definition: JobDefinition; canonical: string }>> {
+    // An edit may name the version it was made from (`baseVersion`, required for a job from a member's proposal).
+    if (!isObject(body) || !isObject(body.definition) || !Object.keys(body).every(k => k === 'definition' || (withBase && k === 'baseVersion'))) {
+      return BAD_BODY(withBase ? '{ definition, baseVersion? }' : '{ definition }')
+    }
     const input: Record<string, unknown> = { ...body.definition }
     let tree: string | null | undefined
     let missing = SKILL_MISSING
@@ -460,13 +483,6 @@ export function createJobService(deps: JobServiceDeps) {
     return ok({ definition: parsed.definition, canonical: jobDefinitionCanonical(parsed.definition) })
   }
 
-  function versionRow(jobId: string, version: number, definition: JobDefinition, canonical: string, by: string, at: string): JobVersionRow {
-    return {
-      jobId, version, schema: definition.schema, definition: canonical, fingerprint: sha256(canonical),
-      consentFingerprint: sha256(jobConsentCanonical(definition)), actingUserId: definition.actingUser, createdBy: by, createdAt: at,
-      approvedBy: null, approvedAt: null, acceptedBy: null, acceptedAt: null,
-    }
-  }
 
   /** `{ version, fingerprint? }` (and, for an acceptance, `place?`: the deliverable place chosen, checked by `accept`). */
   function versionBody(body: unknown, withPlace = false): { version: number; fingerprint: string | null; place: unknown } | null {
@@ -495,6 +511,12 @@ export function createJobService(deps: JobServiceDeps) {
       connector: wanted.connector, kind: wanted.kind, label: jobDeliveryLabel(wanted) ?? wanted.kind, chosen: chosen !== null, usable: chosen !== null && live !== null,
       name: theirs && live ? live.name : null, expiresAt: theirs && live ? live.expiresAt : null,
     }
+  }
+
+  /** The proposal the job came from (jobs.md "Member proposals"): who proposed it, which version, its state; null for any other job. */
+  function proposalView(handle: CompanyData, job: JobRow): JobView['proposal'] {
+    const p = handle.jobs.proposalOfJob(job.id)
+    return p ? { id: p.id, proposerId: p.proposerId, submittedVersion: p.submittedVersion, state: p.state, returnReason: p.returnReason } : null
   }
 
   /** Pause each job the member is responsible for, for `reason`, and tell every owner / admin (in the caller's transaction). */
@@ -578,6 +600,8 @@ export function createJobService(deps: JobServiceDeps) {
       if (!parsed.ok) return parsed
       const { definition, canonical } = parsed.value
       const handle = companyData.forCompany(member.companyId)
+      // Schema 4 comes only from a member's submitted candidate (jobs.md "Member proposals"), whatever the screen reads.
+      if (definition.schema === JOB_PROPOSAL_SCHEMA) return PROPOSAL_ONLY()
       // A shape the screen did not say it reads is never made from it (stage 4a: schema 2 from a 4a client only).
       if (!reads.includes(definition.schema)) return NEEDS_NEWER_SCREEN()
       const problems = triggerProblems(handle, definition, member)
@@ -603,21 +627,34 @@ export function createJobService(deps: JobServiceDeps) {
       // Nor does a server that cannot read it (rolled back after a newer build wrote it), whatever the screen says it reads.
       if (newest && definitionOf(newest) === null) return SCHEMA_UNKNOWN()
       if (newest && !reads.includes(newest.schema)) return NEEDS_NEWER_SCREEN()
-      const parsed = await definitionFrom(member.companyId, body)
+      // A job from a member's proposal (jobs.md "Member proposals"): never once withdrawn or returned, and only on top of
+      // the version the screen showed (`baseVersion`, checked again in the write).
+      const proposal = found.handle.jobs.proposalOfJob(jobId)
+      if (isClosed(proposal)) return PROPOSAL_CLOSED()
+      const base = isObject(body) ? body.baseVersion : undefined
+      if (base !== undefined && (typeof base !== 'number' || !Number.isInteger(base) || base < 1)) return BAD_BODY('{ definition, baseVersion? }')
+      if (proposal && base === undefined) return BAD_BODY('{ definition, baseVersion }')
+      const parsed = await definitionFrom(member.companyId, body, true)
       if (!parsed.ok) return parsed
       const { definition, canonical } = parsed.value
       const { handle } = found
       if (!reads.includes(definition.schema)) return NEEDS_NEWER_SCREEN()
+      // Every version of a proposal's job stays schema 4, and no other job becomes one (the rollback floor freezes 4).
+      if ((definition.schema === JOB_PROPOSAL_SCHEMA) !== (proposal !== null)) return PROPOSAL_SCHEMA()
       const problems = triggerProblems(handle, definition, member)
       if (problems.length > 0) return BAD_DEFINITION(problems)
-      const changed = transactions.run(() => {
+      const written = transactions.run((): Outcome<boolean> => {
         const job = handle.jobs.find(jobId) as JobRow
+        // Checked again inside the write (the Skill was read asynchronously meanwhile).
+        if (isClosed(handle.jobs.proposalOfJob(jobId))) return PROPOSAL_CLOSED()
+        if (base !== undefined && job.latestVersion !== base) return NOT_LATEST()
         const latest = handle.jobs.version(jobId, job.latestVersion)
-        if (latest && latest.definition === canonical) return false
+        if (latest && latest.definition === canonical) return ok(false)
         handle.jobs.addVersion(versionRow(jobId, job.latestVersion + 1, definition, canonical, member.userId, clock.now()), clock.now())
-        return true
+        return ok(true)
       })
-      return ok({ ...view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads), changed })
+      if (!written.ok) return written
+      return ok({ ...view(member, handle, handle.jobs.find(jobId) as JobRow, true, reads), changed: written.value })
     },
 
     /** `POST /jobs/:jobId/approve { version, fingerprint? }` (owner/admin). */
@@ -636,6 +673,14 @@ export function createJobService(deps: JobServiceDeps) {
       if (b.fingerprint !== null && fingerprintShown(member, handle, definition) && b.fingerprint !== v.fingerprint) return FINGERPRINT_CHANGED()
       if (found.job.state === 'retired') return RETIRED()
       if (!reads.includes(v.schema)) return NEEDS_NEWER_SCREEN()
+      // A job from a member's proposal (jobs.md "Member proposals"): the newest version only, with the fingerprint shown;
+      // never once withdrawn or returned. All checked again inside the write.
+      const proposal = handle.jobs.proposalOfJob(jobId)
+      if (proposal) {
+        if (b.fingerprint === null) return BAD_BODY('{ version, fingerprint }')
+        if (isClosed(proposal)) return PROPOSAL_CLOSED()
+        if (v.version !== found.job.latestVersion) return NOT_LATEST()
+      }
       const skill = await skillPinned(member.companyId, definition)
       if (!skill.ok) return skill
       // Stage 4a: the trigger again (a business plugin installed since may run that state as the AI's turn, ⑧).
@@ -647,6 +692,15 @@ export function createJobService(deps: JobServiceDeps) {
         const rights = withinRights(handle, definition)
         if (!rights.ok) return rights
         const job = handle.jobs.find(jobId) as JobRow
+        if (proposal) {
+          // The proposal now: its first approval moves it (submitted → approved, compare-and-set — a withdrawal or a return
+          // that came first wins); a later version's approval needs it approved already. Still the newest version.
+          const now = handle.jobs.proposalOfJob(jobId) as JobProposalRow
+          if (job.latestVersion !== v.version) return NOT_LATEST()
+          if (now.state === 'submitted') {
+            if (!handle.jobs.decideProposal(now.id, 'approved', { reason: null, by: member.userId, at: clock.now() })) return PROPOSAL_CLOSED()
+          } else if (now.state !== 'approved') return PROPOSAL_CLOSED()
+        }
         const state: JobState = job.state === 'draft' ? 'active' : job.state
         const at = clock.now()
         handle.jobs.approve(jobId, v.version, v.fingerprint, member.userId, at, state)
@@ -1007,6 +1061,16 @@ export function createJobService(deps: JobServiceDeps) {
         choosesPlace: definitionOf(v)?.grant.deliverTo !== undefined,
       }
     },
+
+    /**
+     * Member proposals (services/job-proposals.ts): does a definition fit `userId`'s rights now (reads every place it
+     * names, writes where its deliverables go) — the approval's own check — and is its pinned Skill still as pinned?
+     */
+    rightsFit(companyId: string, userId: string, definition: JobDefinition): boolean {
+      const role = memberships.roleOf(companyId, userId)
+      return role !== null && fitsRights(companyData.forCompany(companyId), userId, role, definition)
+    },
+    skillStillPinned: (companyId: string, definition: JobDefinition) => skillPinned(companyId, definition),
 
     /** The job's name for a notice the member may read now (owner/admin only), or null. */
     noticeJob(member: Member, jobId: string): { name: string } | null {

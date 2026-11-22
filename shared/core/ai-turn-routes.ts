@@ -33,6 +33,8 @@ export const AI_ROUTES = [
   'GET /identities/records/:recordId', 'POST /identities/proposals',
   'GET /inbox/items/:recordId', 'POST /inbox/items/:recordId/judgement', 'POST /inbox/items/:recordId/reply-check',
   'GET /google/drive/status', 'POST /google/drive/read', 'POST /google/drive/put', 'GET /google/drive/puts/:putId',
+  // A member's AI proposing a time job (jobs.md "Member proposals"): a consultation's only — a run-bound token is refused there.
+  'GET /job-proposals-ai/places', 'POST /job-proposals-ai/candidates',
 ] as const
 export type AiRouteId = typeof AI_ROUTES[number]
 

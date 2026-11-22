@@ -437,6 +437,28 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
     },
 
     /**
+     * Every sub-folder name of an existing folder ('' = the top), or null when it is not one — **unfiltered**: inside a
+     * private folder its own repository's, elsewhere the company repository's plus every private folder directly under it
+     * (without the shared folder: the department places). For a caller that filters by its own reader (a member's
+     * proposal, services/job-proposals.ts): never answer it to anyone as it is.
+     */
+    async subfolders(companyId: string, path: string): Promise<string[] | null> {
+      const place = privatePlaceOf(companyId, path)
+      const privateFolder = place ? privateFoldersOf(companyId).get(place.scopeId) : null
+      const names = !companyFolders.has(companyId)
+        ? departmentPlaces(companyId, path)
+        : privateFolder
+        ? await repoStore.listPrivateSubfolders(companyId, privateFolder, path)
+        : await repoStore.listSubfolders(companyId, path)
+      if (names === null || place || !companyFolders.has(companyId)) return names
+      const depth = path === '' ? 1 : path.split('/').length + 1
+      const privateChildren = privateFoldersOf(companyId).paths()
+        .filter(p => p.split('/').length === depth && isSameOrAncestorPath(path, p))
+        .map(p => p.split('/').pop()!)
+      return [...new Set([...names, ...privateChildren])]
+    },
+
+    /**
      * Sub-folders of a path to pick from. Inside a private folder: its own
      * repository. Elsewhere: the company repository, plus the private folders
      * directly under the path — only those the actor may edit rules of, so a

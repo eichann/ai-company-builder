@@ -321,8 +321,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const actsFor = (companyId: string, userId: string) => absences.actsFor(companyId, userId)
   // The Skill shelf and 定期の仕事 (jobs.md; composition/jobs.ts): definitions and approval (PR 3a);
   // occurrences and the server's operation below (PR 3b).
-  const { skillShelf, jobs } = wireJobs({
+  const { skillShelf, jobs, jobProposals } = wireJobs({
     repos, shared, hasCompanyFolder: companyFolders.has, permissionViews, push, taskSettings,
+    // Member proposals (jobs.md "Member proposals"): the existing folders a candidate may name.
+    placeExists: (companyId, path) => permissionEditor.folderExists(companyId, path, permissionEditor.privatePlaceOf(companyId, path)),
+    placeFolders: (companyId, path) => permissionEditor.subfolders(companyId, path),
     // A pause / the company's stop holds the occurrences (jobs.md "Held"); bound late: built below.
     occurrenceHolds: {
       holdDue: (companyId, jobId, code) => jobOccurrences.holdDue(companyId, jobId, code),
@@ -341,6 +344,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     jobOccurrenceNoticeOf: (member, jobId, occurrenceId) => jobs.occurrenceNotice(member, jobId, occurrenceId),
     jobChainStoppedOf: (member, jobId, at) => jobs.chainStopNotice(member, jobId, at),
     jobAcceptNoticeOf: (member, jobId, version) => jobs.acceptNotice(member, jobId, version),
+    jobProposalNoticeOf: (member, proposalId) => jobProposals.proposalNotice(member, proposalId),
     coverOf: (companyId, userId) => absences.coverOf(companyId, userId),
     managersOf: (companyId, userId) => absences.managersOf(companyId, userId),
     activeAbsences: companyId => absences.activeToday(companyId),
@@ -857,6 +861,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     // 見える人のまとまり (server.md "Groups"): owners/admins keep them; rules name them.
     groups: createGroupService({ ...repos, ...shared }),
     jobs,
+    jobProposals,
     jobRuns,
     jobRetry,
     // The clock's part of scheduled jobs (jobs.md "The clock"): reached by the server clock; named here for the tests.

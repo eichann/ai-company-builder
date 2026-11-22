@@ -91,6 +91,9 @@ const HANDLE_TABLES: Record<string, string[]> = {
   // db/schema/jobs.ts: the startup migration that pins a watch generation on an occurrence whose watch is certain (stage 4b-0.5).
   ai_job_occurrences: ['adapters/sqlite/jobs.ts', 'db/schema/jobs.ts'],
   ai_job_settings: ['adapters/sqlite/jobs.ts'],
+  // Member proposals (jobs.md "Member proposals"): candidates and proposal records, through the handle only.
+  ai_job_candidates: ['adapters/sqlite/jobs.ts'],
+  ai_job_proposals: ['adapters/sqlite/jobs.ts'],
   // Which Skill a consultation used (records.md "Which Skill"); copied by the records / Drive adapters through skillUsesJson.
   consultation_skill_uses: ['adapters/sqlite/skill-uses.ts'],
   // The Skill shelf of a company without the shared folder (plugins.md "The Skill shelf").

@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
 import { EVENT_OCCURRENCE_SLOT_PREFIX, JOB_SCHEMAS, type JobDeliveryPlace, type JobPauseReason, type LedgerEventRow } from '../../../shared/core/jobs'
 import type { JobState } from '../../../shared/types/jobs'
-import type { JobEventCursor, JobEventGap, JobOccurrenceRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
+import type { JobCandidateRow, JobEventCursor, JobEventGap, JobOccurrenceRow, JobProposalRow, JobRepository, JobRow, JobVersionRow } from '../../ports/jobs'
 
 interface JobDbRow {
   id: string; name: string; state: string; acting_user_id: string; latest_version: number
@@ -64,6 +64,17 @@ const occurrenceOf = (r: OccurrenceDbRow): JobOccurrenceRow => ({
   state: r.state as JobOccurrenceRow['state'], runId: r.run_id, outcomeCode: r.outcome_code, checkedUntil: r.checked_until, checkedCommit: r.checked_commit, retries: r.retries, retriedBy: r.retried_by, retriedAt: r.retried_at,
   eventSeq: r.event_seq, eventRecordId: r.event_record_id, eventVersion: r.event_version, eventDay: r.event_day, watchGeneration: r.watch_generation,
   createdAt: r.created_at, updatedAt: r.updated_at,
+})
+
+interface ProposalDbRow {
+  id: string; job_id: string; proposer_id: string; candidate_id: string; submitted_version: number; submitted_fingerprint: string
+  state: string; return_reason: string | null; decided_by: string | null; decided_at: string | null; created_at: string; updated_at: string
+}
+const PROPOSAL_COLUMNS = `id, job_id, proposer_id, candidate_id, submitted_version, submitted_fingerprint, state, return_reason, decided_by, decided_at, created_at, updated_at`
+const proposalOf = (r: ProposalDbRow): JobProposalRow => ({
+  id: r.id, jobId: r.job_id, proposerId: r.proposer_id, candidateId: r.candidate_id, submittedVersion: r.submitted_version,
+  submittedFingerprint: r.submitted_fingerprint, state: r.state as JobProposalRow['state'], returnReason: r.return_reason,
+  decidedBy: r.decided_by, decidedAt: r.decided_at, createdAt: r.created_at, updatedAt: r.updated_at,
 })
 
 /** The stored place, read strictly (anything else is no place). */
@@ -403,6 +414,56 @@ export function sqliteJobRepository(conn: Database.Database, companyId: string):
     eventOccurrencesOn(jobId, day) {
       return (conn.prepare(`SELECT COUNT(*) AS n FROM ai_job_occurrences WHERE company_id = ? AND job_id = ? AND event_day = ?`)
         .get(companyId, jobId, day) as { n: number }).n
+    },
+
+    // Member proposals (jobs.md "Member proposals").
+    candidate(candidateId, createdBy, now) {
+      const r = conn.prepare(`SELECT id, created_by, definition, fingerprint, created_at, expires_at FROM ai_job_candidates
+        WHERE company_id = ? AND id = ? AND created_by = ? AND expires_at > ?`).get(companyId, candidateId, createdBy, now) as
+        { id: string; created_by: string; definition: string; fingerprint: string; created_at: string; expires_at: string } | undefined
+      return r ? { id: r.id, createdBy: r.created_by, definition: r.definition, fingerprint: r.fingerprint, createdAt: r.created_at, expiresAt: r.expires_at } : null
+    },
+    liveCandidates(createdBy, now) {
+      return (conn.prepare(`SELECT COUNT(*) AS n FROM ai_job_candidates WHERE company_id = ? AND created_by = ? AND expires_at > ?`)
+        .get(companyId, createdBy, now) as { n: number }).n
+    },
+    insertCandidate(row: JobCandidateRow) {
+      conn.prepare(`INSERT INTO ai_job_candidates (company_id, id, created_by, definition, fingerprint, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(companyId, row.id, row.createdBy, row.definition, row.fingerprint, row.createdAt, row.expiresAt)
+    },
+    dropExpiredCandidates(now) {
+      return conn.prepare(`DELETE FROM ai_job_candidates WHERE company_id = ? AND expires_at <= ?`).run(companyId, now).changes
+    },
+    proposal(proposalId) {
+      const r = conn.prepare(`SELECT ${PROPOSAL_COLUMNS} FROM ai_job_proposals WHERE company_id = ? AND id = ?`).get(companyId, proposalId) as ProposalDbRow | undefined
+      return r ? proposalOf(r) : null
+    },
+    proposalOfJob(jobId) {
+      const r = conn.prepare(`SELECT ${PROPOSAL_COLUMNS} FROM ai_job_proposals WHERE company_id = ? AND job_id = ?`).get(companyId, jobId) as ProposalDbRow | undefined
+      return r ? proposalOf(r) : null
+    },
+    proposalOfCandidate(proposerId, candidateId) {
+      const r = conn.prepare(`SELECT ${PROPOSAL_COLUMNS} FROM ai_job_proposals WHERE company_id = ? AND proposer_id = ? AND candidate_id = ?`)
+        .get(companyId, proposerId, candidateId) as ProposalDbRow | undefined
+      return r ? proposalOf(r) : null
+    },
+    proposals(filter, limit) {
+      return (conn.prepare(`SELECT ${PROPOSAL_COLUMNS} FROM ai_job_proposals WHERE company_id = ? AND (? IS NULL OR proposer_id = ?) AND (? IS NULL OR state = ?)
+        ORDER BY created_at DESC, id LIMIT ?`).all(companyId, filter.proposerId ?? null, filter.proposerId ?? null, filter.state ?? null, filter.state ?? null, limit) as ProposalDbRow[])
+        .map(proposalOf)
+    },
+    countProposals(proposerId, filter) {
+      return (conn.prepare(`SELECT COUNT(*) AS n FROM ai_job_proposals WHERE company_id = ? AND proposer_id = ? AND (? IS NULL OR state = ?) AND (? IS NULL OR created_at >= ?)`)
+        .get(companyId, proposerId, filter.state ?? null, filter.state ?? null, filter.since ?? null, filter.since ?? null) as { n: number }).n
+    },
+    insertProposal(row: JobProposalRow) {
+      conn.prepare(`INSERT INTO ai_job_proposals (company_id, ${PROPOSAL_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(companyId, row.id, row.jobId, row.proposerId, row.candidateId, row.submittedVersion, row.submittedFingerprint, row.state, row.returnReason,
+          row.decidedBy, row.decidedAt, row.createdAt, row.updatedAt)
+    },
+    decideProposal(proposalId, to, change) {
+      return conn.prepare(`UPDATE ai_job_proposals SET state = ?, return_reason = ?, decided_by = ?, decided_at = ?, updated_at = ?
+        WHERE company_id = ? AND id = ? AND state = 'submitted'`).run(to, change.reason, change.by, change.at, change.at, companyId, proposalId).changes === 1
     },
   }
 }

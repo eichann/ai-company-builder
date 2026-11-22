@@ -378,6 +378,8 @@ const jobShape = {
   needsUpdate: z.optional(z.literal(true)),
   // Stage 4a ①: an event job's stopped chain, worded for this viewer (absent from an older server).
   chainStopped: z.optional(z.nullable(z.looseObject({}))),
+  // Member proposals (jobs.md "Member proposals"): the proposal a job came from (absent from an older server; shown by PR B).
+  proposal: z.optional(z.nullable(z.looseObject({}))),
 }
 export const jobSchema = topLevel<JobView>(jobShape)
 export const jobUpdatedSchema = topLevel<JobView & { changed: boolean }>({ ...jobShape, changed: z.boolean() })

@@ -26,6 +26,7 @@
  */
 import type { JobCheck, JobDefinition, JobDeliveryPlace, JobGrant, JobOccurrenceState, JobPauseReason, JobPlacement, JobProcedure, JobRetryBlock, JobState, JobTrigger } from '../core/jobs'
 import type { AiRunView } from './ai-runs'
+import type { JobProposalState } from '../core/job-proposals'
 
 export type { JobState } from '../core/jobs'
 
@@ -116,8 +117,22 @@ export interface JobView {
    * Stage 4b-0.2 (D7 = A): null for anyone but the responsible person who does not read the stop's record now.
    */
   chainStopped?: { why: string } | null
+  /**
+   * Member proposals (jobs.md "Member proposals"): the proposal this job came from — who proposed it (stored, never
+   * derived from the responsible person), the version they submitted (versions after it are an owner / admin's edits), its
+   * state and, when returned, the fixed reason code. null: a job an owner / admin made. Absent from an older server.
+   */
+  proposal?: JobProposalSummary | null
   /** Present on GET /jobs/:jobId (newest first). */
   versions?: JobVersionView[]
+}
+
+export interface JobProposalSummary {
+  id: string
+  proposerId: string
+  submittedVersion: number
+  state: JobProposalState
+  returnReason: string | null
 }
 
 export interface JobList {

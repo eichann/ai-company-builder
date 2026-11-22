@@ -21,6 +21,7 @@ import { permissionRulesRoute } from './routes/permission-rules'
 import { skillEditorsRoute } from './routes/skill-editors'
 import { groupsRoute } from './routes/groups'
 import { jobsRoute } from './routes/jobs'
+import { jobProposalsAiRoute, jobProposalsRoute } from './routes/job-proposals'
 import { privateFoldersRoute } from './routes/private-folders'
 import { clientActivityMiddleware } from './routes/client-activity-middleware'
 import { agentEventsRoute } from './routes/agent-events'
@@ -178,6 +179,8 @@ app.route('/api/companies/:companyId', skillEditorsRoute)
 app.route('/api/companies/:companyId', groupsRoute)
 // 定期の仕事 (jobs.md): definitions and approval only.
 app.route('/api/companies/:companyId', jobsRoute)
+// A member's proposal of a time job (jobs.md "Member proposals"): the session's routes.
+app.route('/api/companies/:companyId', jobProposalsRoute)
 app.route('/api/companies/:companyId', privateFoldersRoute)
 app.route('/api/companies/:companyId', agentEventsRoute)
 app.route('/api/companies/:companyId', agentSandboxRoute)
@@ -208,6 +211,8 @@ app.route('/api/oauth', oauthRoute)
 // Approval requests: a person's session only (no AI or admin-API route; approvals.md).
 app.route('/api/companies/:companyId', approvalsRoute)
 app.route('/api/records-ai/google/drive', googleDriveAiRoute)
+// The member's AI makes a candidate of a time job (jobs.md "Member proposals"; never from a run-bound token).
+app.route('/api/records-ai/job-proposals-ai', jobProposalsAiRoute)
 app.route('/api/records-ai', recordsAiRoute)
 app.route('/api/google-picker', googlePickerPageRoute)
 app.route('/api/broker', brokerRelayRoute)

@@ -154,6 +154,11 @@ const NO_SUCH_EXECUTION = `bx_${'0'.repeat(32)}`
 const OTHER_JOB = `job.${'e'.repeat(32)}`
 const NO_SUCH_OCC = `occ.${'0'.repeat(32)}`
 const OTHER_OCC = `occ.${'b'.repeat(32)}`
+const NO_SUCH_CANDIDATE = `jc.${'0'.repeat(32)}`
+const NO_SUCH_PROPOSAL = `jp.${'0'.repeat(32)}`
+/** The other company's candidate and proposal, made by this company's owner (who is also there): the cross axis's worst case. */
+const OTHER_CANDIDATE = `jc.${'e'.repeat(32)}`
+const OTHER_PROPOSAL = `jp.${'e'.repeat(32)}`
 const OTHER_PLAN = `bp_${'e'.repeat(32)}`
 const OTHER_EXECUTION = `bx_${'e'.repeat(32)}`
 
@@ -229,6 +234,14 @@ const MATRIX: Row[] = [
   // Stage 4b-1 (D11): the event PC occurrences the caller ran as responsible person — every member, their own only.
   r('GET /api/companies/:companyId/me/job-occurrences', w => ({ path: `${C(w)}/me/job-occurrences` }), MEMBERS),
   r('POST /api/companies/:companyId/job-run-claims', w => ({ path: `${C(w)}/job-run-claims`, body: {} }), [400, 400, 400, 400, 404, 401], 'no occurrence'),
+  // Member proposals (jobs.md "Member proposals"): every member proposes (owner decision Q2) — their own candidates and
+  // proposals only (anyone else's: the one 404); owners / admins list and return them; the AI's routes take a record token.
+  r('GET /api/companies/:companyId/me/job-candidates/:candidateId', w => ({ path: `${C(w)}/me/job-candidates/${NO_SUCH_CANDIDATE}` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/me/job-candidates/:candidateId/submit', w => ({ path: `${C(w)}/me/job-candidates/${NO_SUCH_CANDIDATE}/submit`, body: {} }), [400, 400, 400, 400, 404, 401], 'no fingerprint'),
+  r('GET /api/companies/:companyId/me/job-proposals', w => ({ path: `${C(w)}/me/job-proposals` }), MEMBERS),
+  r('POST /api/companies/:companyId/me/job-proposals/:proposalId/withdraw', w => ({ path: `${C(w)}/me/job-proposals/${NO_SUCH_PROPOSAL}/withdraw` }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/companies/:companyId/job-proposals', w => ({ path: `${C(w)}/job-proposals` }), [200, 200, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/job-proposals/:proposalId/return', w => ({ path: `${C(w)}/job-proposals/${NO_SUCH_PROPOSAL}/return`, body: {} }), [400, 400, 403, 403, 404, 401], 'no reason'),
   // Department membership (所属する部署): any member reads; owner/admin and the department's own managers change it
   r('GET /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members` }), MEMBERS),
   r('PUT /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members`, body: {} }), [400, 400, 403, 400, 404, 401], 'the manager\'s department'),
@@ -556,6 +569,8 @@ const MATRIX: Row[] = [
   r('GET /api/records-ai/google/drive/status', () => ({ path: '/api/records-ai/google/drive/status' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/google/drive/read', () => ({ path: '/api/records-ai/google/drive/read', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/google/drive/put', () => ({ path: '/api/records-ai/google/drive/put', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/job-proposals-ai/places', () => ({ path: '/api/records-ai/job-proposals-ai/places' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/job-proposals-ai/candidates', () => ({ path: '/api/records-ai/job-proposals-ai/candidates', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/records-ai/google/drive/puts/:putId', () => ({ path: '/api/records-ai/google/drive/puts/drive-put-nosuch' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/google-picker', () => ({ path: '/api/google-picker' }), [200, 200, 200, 200, 200, 200], 'public: the static Picker page; it holds no secret (the pick ticket is in the URL fragment)'),
   r('POST /api/google-picker/config', () => ({ path: '/api/google-picker/config', body: {} }), [410, 410, 410, 410, 410, 410], 'public: the one-time pick ticket is the proof; no ticket, nothing'),
@@ -803,6 +818,10 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/jobs/:jobId/pause', (w, id) => ({ path: `${C(w)}/jobs/${id}/pause` }), w => w.other.job, NO_SUCH_JOB),
   x('POST /api/companies/:companyId/jobs/:jobId/resume', (w, id) => ({ path: `${C(w)}/jobs/${id}/resume` }), w => w.other.job, NO_SUCH_JOB),
   x('POST /api/companies/:companyId/me/jobs/:jobId/accept', (w, id) => ({ path: `${C(w)}/me/jobs/${id}/accept`, body: { version: 1 } }), w => w.other.job, NO_SUCH_JOB),
+  x('GET /api/companies/:companyId/me/job-candidates/:candidateId', (w, id) => ({ path: `${C(w)}/me/job-candidates/${id}` }), () => OTHER_CANDIDATE, NO_SUCH_CANDIDATE),
+  x('POST /api/companies/:companyId/me/job-candidates/:candidateId/submit', (w, id) => ({ path: `${C(w)}/me/job-candidates/${id}/submit`, body: { fingerprint: 'sha256:f' } }), () => OTHER_CANDIDATE, NO_SUCH_CANDIDATE),
+  x('POST /api/companies/:companyId/me/job-proposals/:proposalId/withdraw', (w, id) => ({ path: `${C(w)}/me/job-proposals/${id}/withdraw` }), () => OTHER_PROPOSAL, NO_SUCH_PROPOSAL),
+  x('POST /api/companies/:companyId/job-proposals/:proposalId/return', (w, id) => ({ path: `${C(w)}/job-proposals/${id}/return`, body: { reason: 'OTHER' } }), () => OTHER_PROPOSAL, NO_SUCH_PROPOSAL),
   x('POST /api/companies/:companyId/me/jobs/:jobId/watch', (w, id) => ({ path: `${C(w)}/me/jobs/${id}/watch`, body: { version: 1, recordId: 'task-0000000000000000' } }), w => w.other.job, NO_SUCH_JOB),
   x('GET /api/companies/:companyId/skill-shelf/:itemId/versions', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/versions` }), w => w.other.shelfItem),
   x('GET /api/companies/:companyId/skill-shelf/:itemId/versions/:version', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/versions/${'a'.repeat(64)}` }), w => w.other.shelfItem),
@@ -1130,6 +1149,12 @@ async function seed(): Promise<World> {
   // One of its occurrences (rows as adapters/sqlite/jobs.ts writes them, B PR 3b).
   db.prepare(`INSERT INTO ai_job_occurrences (company_id, id, job_id, job_version, due_slot, time_zone, due_at, expires_at, state, run_id, outcome_code, created_at, updated_at)
     VALUES (?, ?, ?, 1, '2026-11-16T09:00', 'Asia/Tokyo', ?, ?, 'held', NULL, 'JOB_PAUSED', ?, ?)`).run(other, OTHER_OCC, OTHER_JOB, expires, expires, expires, expires)
+  // A candidate and a submitted proposal (of the other company's job) made there by this company's owner (rows as
+  // adapters/sqlite/jobs.ts writes them; jobs.md "Member proposals").
+  db.prepare(`INSERT INTO ai_job_candidates (company_id, id, created_by, definition, fingerprint, created_at, expires_at) VALUES (?, ?, ?, '{}', 'sha256:f', ?, ?)`)
+    .run(other, OTHER_CANDIDATE, USER.owner, expires, '2999-01-01T00:00:00.000Z')
+  db.prepare(`INSERT INTO ai_job_proposals (company_id, id, job_id, proposer_id, candidate_id, submitted_version, submitted_fingerprint, state, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 1, 'sha256:f', 'submitted', ?, ?)`).run(other, OTHER_PROPOSAL, OTHER_JOB, USER.owner, OTHER_CANDIDATE, expires, expires)
   // A pending request to publish a Skill on the other company's shelf (rows as adapters/sqlite/skill-shelf.ts writes them).
   db.prepare(`INSERT INTO shelf_requests (id, company_id, department_id, name, requested_by, requested_at, version, files, file_count, total_bytes, autorun, state)
     VALUES ('shelf-request-other-1', ?, NULL, 'other-request', ?, ?, ?, '[]', 0, 0, 0, 'pending')`).run(other, otherMember, expires, 'a'.repeat(64))

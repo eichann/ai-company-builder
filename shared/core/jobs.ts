@@ -28,11 +28,19 @@ import { RECORD_ID_RE } from './records'
  * The definition shapes this build reads: `1` — a time of day (`JobTimeTrigger`); `2` (stage 4a of event-triggered
  * jobs) — a record's event (`JobRecordTrigger`), run by the server's operation; `3` (stage 4b-1, owner memo 「段4b 設計メモ」
  * D2) — a record's event run by the responsible person's PC AI (a procedure, placement `a`, the check
- * `source_record`). A version of a schema is made only by a client that announced it reads that schema
- * (`JOB_SCHEMAS_HEADER`): the screens announce what they can show (`ADMIN_JOB_SCHEMAS` / `APP_JOB_SCHEMAS`), never this list.
+ * `source_record`); `4` (member proposals, owner memo 「AIへの相談から定期の仕事」 第4版 §10-3) — schema 1's content (a time of day,
+ * a Skill run by the responsible person's PC AI) with the mark `origin: 'member_proposal'`: a job a member proposed from the AI
+ * chat. Every version of such a job stays schema 4 and only the proposal entrance makes one (jobs.md "Member proposals"), so the
+ * rollback floor, which does not know 4, freezes it. A version of a schema is made only by a client that announced it reads
+ * that schema (`JOB_SCHEMAS_HEADER`): the screens announce what they can show (`ADMIN_JOB_SCHEMAS` / `APP_JOB_SCHEMAS`), never
+ * this list.
  */
-export const JOB_SCHEMAS = [1, 2, 3] as const
+export const JOB_SCHEMAS = [1, 2, 3, 4] as const
 export type JobSchema = typeof JOB_SCHEMAS[number]
+/** The schema of a job a member proposed (jobs.md "Member proposals"): schema 1's content plus `origin`. */
+export const JOB_PROPOSAL_SCHEMA = 4
+/** The mark a schema-4 definition carries (and no other schema may). */
+export const JOB_PROPOSAL_ORIGIN = 'member_proposal'
 
 /** A job's state: a draft until first approved; paused / retired keep it from running. */
 export type JobState = 'draft' | 'active' | 'paused' | 'retired'
@@ -253,6 +261,8 @@ export interface JobDefinition {
   placement: JobPlacement
   missed: JobMissed
   grant: JobGrant
+  /** Schema 4 only (and required there): the job came from a member's proposal (jobs.md "Member proposals"). */
+  origin?: typeof JOB_PROPOSAL_ORIGIN
 }
 
 /** A refusal's codes only — never the values (a path could name a private folder). */
@@ -557,8 +567,11 @@ function parseGrant(v: unknown, problems: string[]): JobGrant | null {
 export function parseJobDefinition(input: unknown): JobDefinitionResult {
   const problems: string[] = []
   if (!isObj(input)) return { ok: false, problems: ['BAD'] }
-  const keys = ['schema', 'name', 'actingUser', 'trigger', 'check', 'run', 'placement', 'missed', 'grant']
+  // Schema 4 (a member's proposal) carries its mark, and only schema 4 may.
+  const proposal = input.schema === JOB_PROPOSAL_SCHEMA
+  const keys = ['schema', 'name', 'actingUser', 'trigger', 'check', 'run', 'placement', 'missed', 'grant', ...(proposal ? ['origin'] : [])]
   keysExactly(input, keys, 'definition', problems)
+  if (proposal && Object.prototype.hasOwnProperty.call(input, 'origin') && input.origin !== JOB_PROPOSAL_ORIGIN) problems.push('origin.BAD')
   if (!(JOB_SCHEMAS as readonly unknown[]).includes(input.schema)) problems.push('schema.UNKNOWN')
   const name = typeof input.name === 'string' ? input.name.normalize('NFC').trim() : ''
   // eslint-disable-next-line no-control-regex
@@ -597,8 +610,14 @@ export function parseJobDefinition(input: unknown): JobDefinitionResult {
   if (check.kind === 'source_record' && input.schema !== 3) problems.push('check.SOURCE_RECORD_EVENTS_ONLY')
   // An event run must finish with its one やること (it may never finish 'nothing'): without `task` it could only run out its time.
   if (input.schema === 3 && !grant.creates.includes('task')) problems.push('grant.creates.EVENT_NEEDS_TASK')
+  // Schema 4 (a member's proposal, owner decision Q1): a time of day (parseTrigger), an existing Skill run by the responsible
+  // person's PC AI — never the server's operation.
+  if (proposal && run.kind !== 'procedure') problems.push('run.PROPOSAL_PC_ONLY')
   if (problems.length > 0) return { ok: false, problems }
-  return { ok: true, definition: { schema: input.schema as JobSchema, name, actingUser: input.actingUser as string, trigger, check, run, placement, missed, grant } }
+  return {
+    ok: true,
+    definition: { schema: input.schema as JobSchema, name, actingUser: input.actingUser as string, trigger, check, run, placement, missed, grant, ...(proposal ? { origin: JOB_PROPOSAL_ORIGIN } : {}) },
+  }
 }
 
 /** The canonical text of a whole definition (its version's fingerprint is sha256 of it). */
