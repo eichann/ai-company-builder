@@ -31,7 +31,7 @@ LNext ==
            /\ UNCHANGED <<srvVars, permitReq, rep, ap, el, edited>>
         \/ /\ ~armed[a]
            /\ \/ AppCrashes(a) \/ AppRereadSame(a) \/ AppDropsBeforePermit(a) \/ AppAsksPermit(a)
-              \/ AppPermitUnanswered(a) \/ AppStopsBeforeSend(a) \/ AppReadsAfter(a) \/ AppRereadAfterFails(a)
+              \/ AppPermitUnanswered(a) \/ AppPermitAnswerUnusable(a) \/ AppStopsBeforeSend(a) \/ AppReadsAfter(a) \/ AppRereadAfterFails(a)
            /\ UNCHANGED armed
 
 LSpec == LInit /\ [][LNext]_LVars

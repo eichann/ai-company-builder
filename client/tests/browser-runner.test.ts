@@ -1,9 +1,9 @@
 /**
  * 「ブラウザ操作」's operation runner (agent-browser.md "The runner"), the parts that need no browser:
  * the run's gate (which request of a run may go out), the approved plan, Lステップ's checker and its
- * bundled declaration, the runner's steps against a fake window, the per-step record, and that the AI
- * cannot reach a run in this version. The same gate inside a real Electron window:
- * browser-window-electron.test.ts.
+ * bundled declaration, the per-step record, and that the AI cannot reach a run in this version. A
+ * run itself (claim, re-read, permit, send, report): browser-execute.test.ts. The same gate inside a
+ * real Electron window: browser-window-electron.test.ts.
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -11,18 +11,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { BrowserSiteSetting } from '../../shared/core/browser-operation'
-import type { PluginBrowser } from '../../shared/core/plugin-browser-declaration'
-import {
-  createRunGate, encodeForm, parseBrowserRunPlan,
-  type BrowserRunGateHooks, type BrowserRunSurface, type BrowserStepRecord,
-} from '../shared/browser-runner'
+import { createRunGate, encodeForm, parseBrowserRunPlan } from '../shared/browser-runner'
 import { decideAiRead, decideWindowRequest, type BrowserWindowState } from '../shared/browser-operation'
 import { createBrowserCheckerRegistry, createBrowserConnectors, parseBrowserDeclaration } from '../shared/browser-checkers'
 import { lstepConnector } from '../connectors/lstep'
 import { LSTEP_DECLARATION } from '../connectors/lstep/declaration'
 import { createLstepReminderStepChecker, LSTEP_REMINDER_STEP_CHECKER } from '../connectors/lstep/reminder-step'
-import { createBrowserRunner, type BrowserRunnerDeps } from '../electron/features/browser/runner'
 import { createBrowserRunRecords } from '../electron/features/browser/run-records'
 
 const clientDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -235,253 +229,6 @@ test('the bundled declaration passes the core\'s checks, names a reviewed checke
 })
 
 // ---------------------------------------------------------------------------
-// The runner against a fake window and site
-// ---------------------------------------------------------------------------
-
-interface FakeSite {
-  steps: Record<string, string[]>
-  account: string
-  posts: string[]
-  /** Called on each read the site answers (to change something mid-run). */
-  onRead?: () => void
-  /** The POST's answer is lost (applied or not). */
-  lose?: 'applied' | 'not-applied'
-  /** The write is refused by the site (nothing changes): the status it answers (default 422). */
-  reject?: boolean
-  rejectStatus?: number
-}
-
-function fakeSurface(site: FakeSite) {
-  let hooks: BrowserRunGateHooks | null = null
-  const calls: string[] = []
-  let closed = false
-  const surface: BrowserRunSurface = {
-    async enterAi(h) { hooks = h; calls.push('ai'); return true },
-    async leaveAi() { hooks = null; calls.push('human') },
-    async request({ method, path: p, body }) {
-      // As the window's request hook does: in ai mode the run's gate decides.
-      if (!hooks || !hooks.sessionRequest({ method, url: url(p), body }).allow) throw new Error('refused')
-      if (method === 'GET') {
-        site.onRead?.()
-        return { status: 200, body: lstepPage({ account: site.account, steps: site.steps }) }
-      }
-      site.posts.push(body ?? '')
-      const form = new URLSearchParams(body)
-      if (site.lose === 'applied') site.steps[form.get('content_id')!].push(form.get('template_id')!)
-      if (site.lose) throw new Error('connection reset')
-      if (site.reject) return { status: site.rejectStatus ?? 422, body: '' }
-      site.steps[form.get('content_id')!].push(form.get('template_id')!)
-      return { status: 302, body: '' }
-    },
-    closed: () => closed,
-  }
-  return { surface, calls, close: () => { closed = true } }
-}
-
-function harness(o: { plan?: Record<string, unknown>; site?: Partial<FakeSite>; deps?: Partial<BrowserRunnerDeps>; records?: BrowserStepRecord[] } = {}) {
-  const site: FakeSite = { steps: { 201: ['300'] }, account: 'ACC1', posts: [], ...o.site }
-  const fake = fakeSurface(site)
-  const records: BrowserStepRecord[] = [...(o.records ?? [])]
-  let stopped = false
-  let policy: BrowserSiteSetting | null = { host: HOST, level: 'write', assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }
-  const runner = createBrowserRunner({
-    aiSwitch: () => true,
-    approvedPlan: async id => (id === 'plan-1' ? planInput(o.plan) : null),
-    connector: connectors,
-    checker: id => checkers(accountReader).get(id),
-    site: () => policy,
-    stopped: () => stopped,
-    window: () => fake.surface,
-    records: { has: id => records.some(r => r.planId === id), put: r => { records.push(r) } },
-    now: () => NOW,
-    log: { warn: () => {} },
-    ...o.deps,
-  })
-  return { runner, site, records, fake, stop: () => { stopped = true }, dropSite: () => { policy = null } }
-}
-
-test('a run sends exactly the planned write once and confirms it on the page', async () => {
-  const h = harness()
-  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'succeeded' })
-  assert.deepEqual(h.site.posts, [planned()])
-  assert.deepEqual(h.site.steps[201], ['300', '301'])
-  assert.deepEqual(h.records.map(r => r.state), ['pending', 'sent', 'succeeded'])
-  assert.deepEqual(h.fake.calls, ['ai', 'human'], 'back to the member\'s mode')
-  // The record keeps ids and fixed words only: no account, template or token.
-  assert.doesNotMatch(JSON.stringify(h.records), /ACC1|301|tok|u1/)
-})
-
-test('a plan that started once never runs again (also after its answer was lost)', async () => {
-  const h = harness({ site: { lose: 'applied' } })
-  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'unknown', reason: 'no-answer' })
-  assert.equal(h.site.posts.length, 1)
-  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'refused', reason: 'already-ran' })
-  assert.equal(h.site.posts.length, 1, 'never sent again by itself')
-  assert.deepEqual(h.records.map(r => r.state), ['pending', 'sent', 'unknown'])
-})
-
-test('the wrong account, an account that cannot be read, a missing target or a changed state stop before any write', async () => {
-  const cases: Array<[Parameters<typeof harness>[0], string]> = [
-    [{ site: { account: 'ACC2' } }, 'account-mismatch'],
-    [{ deps: { checker: id => checkers().get(id) } }, 'account-unknown'],
-    [{ site: { steps: { 202: [] } } }, 'target-missing'],
-    [{ site: { steps: { 201: ['300', '305'] } } }, 'before-changed'],
-  ]
-  for (const [setup, reason] of cases) {
-    const h = harness(setup)
-    assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'stopped', reason }, reason)
-    assert.deepEqual(h.site.posts, [], reason)
-    assert.equal(h.records.at(-1)?.state, 'failed')
-  }
-})
-
-test('a stop or a policy change during the run stops it before the write', async () => {
-  for (const change of ['stop', 'policy'] as const) {
-    const h = harness()
-    h.site.onRead = () => (change === 'stop' ? h.stop() : h.dropSite())
-    const result = await h.runner.run('plan-1')
-    assert.equal(result.outcome, 'stopped', change)
-    assert.deepEqual(h.site.posts, [], change)
-    assert.deepEqual(h.fake.calls, ['ai', 'human'])
-  }
-})
-
-test('a plan that expires during the run stops before the write', async () => {
-  let now = NOW
-  const h = harness({ deps: { now: () => now } })
-  h.site.onRead = () => { now = NOW + 61_000 }
-  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'stopped', reason: 'expired' })
-  assert.deepEqual(h.site.posts, [])
-})
-
-test('a plan approved more than a day ago stops before the write, whatever its expiry', async () => {
-  let now = NOW
-  const h = harness({ deps: { now: () => now }, plan: { approvedAt: NOW - 24 * 3600_000 + 1000 } })
-  h.site.onRead = () => { now = NOW + 2000 }
-  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'stopped', reason: 'expired' })
-  assert.deepEqual(h.site.posts, [])
-})
-
-test('a target field no write carries must be one the checker confirms on the page', async () => {
-  const lax = { ...checker, confirms: ['step'] }
-  const h = harness({ deps: { checker: () => lax } })
-  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'refused', reason: 'target-unconfirmed' })
-  assert.deepEqual(h.site.posts, [])
-})
-
-test('a step record carries our fixed words only, never a checker\'s text', async () => {
-  const chatty = { ...checker, view: (v: typeof values, r: Parameters<typeof checker.view>[1]) => ({ ...checker.view(v, r), problem: 'token ACC1 tok' }) }
-  const h = harness({ deps: { checker: () => chatty } })
-  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'stopped', reason: 'checker-problem' })
-  assert.equal(h.records.at(-1)?.reason, 'checker-problem')
-})
-
-test('nothing starts for an expired plan, a stopped AI, a site not allowed, an unknown checker or a type that needs more', async () => {
-  assert.deepEqual(await harness({ plan: { expiresAt: NOW - 1 } }).runner.run('plan-1'), { outcome: 'refused', reason: 'expired' })
-  const stopped = harness(); stopped.stop()
-  assert.deepEqual(await stopped.runner.run('plan-1'), { outcome: 'refused', reason: 'stopped' })
-  const off = harness(); off.dropSite()
-  assert.deepEqual(await off.runner.run('plan-1'), { outcome: 'refused', reason: 'policy' })
-  const readOnly = harness({ deps: { site: () => ({ host: HOST, level: 'read', assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }) } })
-  assert.deepEqual(await readOnly.runner.run('plan-1'), { outcome: 'refused', reason: 'policy' }, 'the site\'s level is 見るだけ')
-  assert.deepEqual(await harness({ deps: { checker: () => undefined } }).runner.run('plan-1'), { outcome: 'refused', reason: 'unknown-checker' })
-  const otherChecker: PluginBrowser = { ...declaration.browser, operations: { reminder_step_add_template: { ...operation, checker: 'lstep.something_else' } } }
-  assert.deepEqual(await harness({ deps: { connector: () => otherChecker } }).runner.run('plan-1'), { outcome: 'refused', reason: 'unknown-checker' })
-  // A registry answering with a checker made for another type is not that type's checker.
-  assert.deepEqual(await harness({ deps: { connector: () => otherChecker, checker: () => checker } }).runner.run('plan-1'), { outcome: 'refused', reason: 'unknown-checker' })
-  assert.deepEqual(await harness({ plan: { change: { template: '301', extra: '1' } } }).runner.run('plan-1'), { outcome: 'refused', reason: 'plan' })
-  assert.deepEqual(await harness({ deps: { window: () => null } }).runner.run('plan-1'), { outcome: 'refused', reason: 'no-window' })
-  assert.deepEqual(await harness().runner.run('plan-2'), { outcome: 'refused', reason: 'no-plan' })
-})
-
-test('the page must end as the type\'s expect says: a removal of something the person did not see there never starts', async () => {
-  // The same site and checker; the declaration says the step loses the template instead of gaining it.
-  const removing: PluginBrowser = { ...declaration.browser, operations: { reminder_step_add_template: { ...operation, expect: [{ list: 'templates', change: 'remove', field: 'template' }] } } }
-  const h = harness({ deps: { connector: () => removing } })
-  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'refused', reason: 'cannot-come-true' })
-  assert.deepEqual(h.site.posts, [], 'nothing sent')
-  assert.deepEqual(h.fake.calls, [], 'the window never left the member\'s mode')
-  // With the template there before, the run goes ahead and judges the page by the declaration: the
-  // fake site adds it (a second copy), which is not what this type expects.
-  const seen = harness({ deps: { connector: () => removing }, plan: { before: { templates: ['300', '301'] } }, site: { steps: { 201: ['300', '301'] } } })
-  assert.deepEqual(await seen.runner.run('plan-1'), { outcome: 'unknown', reason: 'other-state' })
-})
-
-test('a type whose page would look the same afterwards never runs: a refused write could not be told from a done one', async () => {
-  // Added and taken away again: `expectedAfter` equals what the person saw, so a 422 with nothing changed would read as success.
-  const same: PluginBrowser = { ...declaration.browser, operations: { reminder_step_add_template: { ...operation, expect: [{ list: 'templates', change: 'add', field: 'template' }, { list: 'templates', change: 'remove', field: 'template' }] } } }
-  const h = harness({ deps: { connector: () => same }, site: { reject: true } })
-  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'refused', reason: 'no-visible-change' })
-  assert.deepEqual(h.site.posts, [], 'nothing sent')
-})
-
-test('nothing is sent when the step\'s state cannot be kept first', async () => {
-  const h = harness({ deps: { records: { has: () => false, put: () => { throw new Error('disk full') } } } })
-  assert.deepEqual(await h.runner.run('plan-1'), { outcome: 'refused', reason: 'records-unavailable' })
-  assert.deepEqual(h.site.posts, [])
-  let puts = 0
-  const second = harness({ deps: { records: { has: () => false, put: () => { if (++puts === 2) throw new Error('disk full') } } } })
-  assert.equal((await second.runner.run('plan-1')).outcome, 'stopped')
-  assert.deepEqual(second.site.posts, [], 'the "sent" mark comes before the send')
-})
-
-test('after the send: failed only when the site refused it (4xx) and nothing changed; anything else not planned = unknown', async () => {
-  const rejected = harness({ site: { reject: true } })
-  assert.deepEqual(await rejected.runner.run('plan-1'), { outcome: 'failed', reason: 'refused-by-site' })
-  // Answered "fine" (302, 200) or a 5xx, yet nothing to see: not known to have failed.
-  for (const status of [200, 302, 500]) {
-    const quiet = harness({ site: { reject: true, rejectStatus: status } })
-    assert.deepEqual(await quiet.runner.run('plan-1'), { outcome: 'unknown', reason: 'unchanged-unrefused' }, String(status))
-  }
-  // No slot before and none after: the page may not be read the way we think.
-  const empty = harness({ site: { reject: true, steps: { 201: [] } }, plan: { before: { templates: [] } } })
-  assert.deepEqual(await empty.runner.run('plan-1'), { outcome: 'unknown', reason: 'empty-state' })
-  const lostNotApplied = harness({ site: { lose: 'not-applied' } })
-  assert.equal((await lostNotApplied.runner.run('plan-1')).outcome, 'unknown', 'no answer is never read as "not done"')
-  const other = harness()
-  let reads = 0
-  other.site.onRead = () => { if (++reads === 2) other.site.steps[201].push('999') }
-  assert.deepEqual(await other.runner.run('plan-1'), { outcome: 'unknown', reason: 'other-state' })
-})
-
-test('with the build\'s switch (off in 6b) a run is refused at once: no plan asked, no window touched, nothing read or sent', async () => {
-  let asked = 0
-  const h = harness()
-  const runner = createBrowserRunner({
-    approvedPlan: async () => { asked++; return planInput() },
-    connector: connectors, checker: id => checkers(accountReader).get(id), site: () => { asked++; return null },
-    stopped: () => false, window: () => { asked++; return h.fake.surface },
-    records: { has: () => { asked++; return false }, put: () => { asked++ } }, now: () => NOW,
-  })
-  assert.deepEqual(await runner.run('plan-1'), { outcome: 'refused', reason: 'off' })
-  assert.equal(asked, 0)
-  assert.deepEqual(h.site.posts, [])
-})
-
-test('one run per window at a time', async () => {
-  let release: () => void = () => {}
-  const h = harness({ plan: {} })
-  const slowPlans: Record<string, unknown> = { 'plan-1': planInput(), 'plan-2': planInput({ planId: 'plan-2' }) }
-  const gate = new Promise<void>(r => { release = r })
-  const runner = createBrowserRunner({
-    aiSwitch: () => true,
-    approvedPlan: async id => slowPlans[id],
-    connector: connectors,
-    checker: id => checkers(accountReader).get(id),
-    site: () => ({ host: HOST, level: 'write', assetHosts: ['d1nhtjid4lgi9y.cloudfront.net', 'profile.line-scdn.net'] }),
-    stopped: () => false,
-    window: () => ({ ...h.fake.surface, enterAi: async hooks => { await gate; return h.fake.surface.enterAi(hooks) } }),
-    records: { has: () => false, put: () => {} },
-    now: () => NOW,
-  })
-  const first = runner.run('plan-1')
-  await new Promise(r => setTimeout(r, 10))
-  assert.deepEqual(await runner.run('plan-2'), { outcome: 'refused', reason: 'busy' })
-  release()
-  assert.equal((await first).outcome, 'succeeded')
-})
-
-// ---------------------------------------------------------------------------
 // The record kept on this PC
 // ---------------------------------------------------------------------------
 
@@ -491,13 +238,13 @@ test('the run record survives a restart and an unreadable one refuses every run'
     const file = path.join(dir, 'runs.json')
     const records = createBrowserRunRecords(file, { warn: () => {} })
     assert.equal(records.has('plan-1'), false)
-    records.put({ planId: 'plan-1', operation: 'reminder_step_add_template', step: 0, state: 'sent', at: NOW })
+    records.put({ planId: 'plan-1', operation: 'reminder_step_add_template', step: 0, state: 'permit-asked', at: NOW })
     assert.equal(createBrowserRunRecords(file, { warn: () => {} }).has('plan-1'), true, 'after a restart')
-    assert.throws(() => records.put({ planId: 'plan-2', operation: 'x', step: 0, state: 'sent', reason: 'ACC1 template 301' as never, at: NOW }), 'no values')
+    assert.throws(() => records.put({ planId: 'plan-2', operation: 'x', step: 0, state: 'permit-asked', reason: 'ACC1 template 301' as never, at: NOW }), 'no values')
     fs.writeFileSync(file, '{oops')
     const broken = createBrowserRunRecords(file, { warn: () => {} })
     assert.equal(broken.has('plan-9'), true)
-    assert.throws(() => broken.put({ planId: 'plan-9', operation: 'x', step: 0, state: 'pending', at: NOW }))
+    assert.throws(() => broken.put({ planId: 'plan-9', operation: 'x', step: 0, state: 'claimed', at: NOW }))
   } finally {
     fs.rmSync(dir, { recursive: true, force: true })
   }

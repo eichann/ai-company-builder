@@ -14,7 +14,8 @@
  * grant. The cap is applied when a view is registered, so opens running at
  * the same time cannot pass it.
  */
-import { docViewBounds, docZoomFactor, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
+import { createHash } from 'node:crypto'
+import { blockedWebHost, docViewBounds, docZoomFactor, DOC_BLOCKED_HOSTS_MAX, DOC_BLOCKED_PARTS_MAX, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
 import { webLinkForBrowser } from '../../external-url'
 import type { KeyInput } from '../../../shared/commands/define'
 import type { DocFrames, OpenableDocument } from './protocol'
@@ -46,6 +47,14 @@ export interface DocViewHooks {
   onLink(viewId: number, url: string): void
   /** The member pressed one of the app's shortcuts in it (a real key press: the shell took it from the document). */
   onShortcut(viewId: number, key: KeyInput): void
+  /**
+   * Its page wanted something that was not loaded: refused by its CSP (as Chromium reports it) or
+   * cancelled by the session's request hook. The whole address, in main only: the registry keeps
+   * the host for the window and drops the rest.
+   */
+  onBlocked(viewId: number, url: string): void
+  /** Its page (re)loaded: a new page, a new tally of blocked parts. */
+  onPageStart(viewId: number): void
 }
 
 export interface DocViewPort {
@@ -73,18 +82,41 @@ export const MAX_VIEWS_PER_WINDOW = 32
 /** A view asks the member about a link at most once in this long (a page cannot queue confirmations). */
 export const LINK_INTERVAL_MS = 1000
 
+/** A view's blocked parts are told at most once in this long (a page asking in a loop sends no flood). */
+export const BLOCKED_INTERVAL_MS = 500
+
 export interface DocViewsDeps {
   frames: Pick<DocFrames, 'grant' | 'revoke'>
   shell: DocViewPort
   /** Tell the window about one of its views (`docView:event`). */
   notify?: (windowId: number, event: DocViewEvent) => void
   now?: () => number
+  /** Run `fn` after `ms` (default setTimeout); returns how to cancel it. */
+  later?: (fn: () => void, ms: number) => () => void
+}
+
+/** What one view's page wanted from the internet so far (main only; the window gets hosts and a count). */
+interface BlockedTally {
+  /** Different addresses (never sent): what `count` counts, each kept as its SHA-256 (44 characters, however long the address). */
+  urls: Set<string>
+  /** Every different host (never more than the addresses counted); `hosts` is the first ones of it. */
+  allHosts: Set<string>
+  hosts: string[]
+  /** Something changed since the window was last told. */
+  dirty: boolean
+  /** The window was told something since the page started (a new page then tells it `count: 0`). */
+  told: boolean
+  /** A send is waiting for `BLOCKED_INTERVAL_MS` to pass. */
+  cancel: (() => void) | null
 }
 
 export function createDocViews(deps: DocViewsDeps) {
   const now = deps.now ?? Date.now
+  const later = deps.later ?? ((fn, ms) => { const timer = setTimeout(fn, ms); return () => clearTimeout(timer) })
   /** View id → when it last asked about a link. */
   const lastLink = new Map<number, number>()
+  /** View id → what its page wanted from the internet. */
+  const blocked = new Map<number, BlockedTally>()
   /** View id → its window and handle, in the order registered. */
   const views = new Map<number, { windowId: number; handle: DocViewHandle }>()
   /** Window → how many times its page reset (reloaded, crashed, closed). */
@@ -94,7 +126,22 @@ export function createDocViews(deps: DocViewsDeps) {
   const forget = (viewId: number) => {
     views.delete(viewId)
     lastLink.delete(viewId)
+    blocked.get(viewId)?.cancel?.()
+    blocked.delete(viewId)
     deps.frames.revoke(viewId)
+  }
+  /** Tell the window the view's tally now, then at most once per `BLOCKED_INTERVAL_MS`. */
+  const tellBlocked = (viewId: number) => {
+    const tally = blocked.get(viewId)
+    const view = views.get(viewId)
+    if (!tally || !view || tally.cancel || !tally.dirty) return
+    tally.dirty = false
+    tally.told = tally.urls.size > 0
+    deps.notify?.(view.windowId, { viewId, kind: 'blocked', count: tally.urls.size, hosts: [...tally.hosts], hostCount: tally.allHosts.size })
+    tally.cancel = later(() => {
+      tally.cancel = null
+      tellBlocked(viewId)
+    }, BLOCKED_INTERVAL_MS)
   }
   // The shell's word that a view went. Still registered = nobody here closed it (its page
   // crashed, it was destroyed): its window is told, so the tab does not show an empty area.
@@ -118,6 +165,32 @@ export function createDocViews(deps: DocViewsDeps) {
     onShortcut(viewId, key) {
       const view = views.get(viewId)
       if (view) deps.notify?.(view.windowId, { viewId, kind: 'shortcut', key })
+    },
+    onBlocked(viewId, url) {
+      // A full tally takes nothing more: a page refusing in a tight loop costs a lookup.
+      if (!views.has(viewId) || (blocked.get(viewId)?.urls.size ?? 0) >= DOC_BLOCKED_PARTS_MAX) return
+      // Only internet addresses, and only their host ever leaves main.
+      const host = blockedWebHost(url)
+      if (!host) return
+      let tally = blocked.get(viewId)
+      if (!tally) blocked.set(viewId, tally = { urls: new Set(), allHosts: new Set(), hosts: [], dirty: false, told: false, cancel: null })
+      const key = createHash('sha256').update(url).digest('base64')
+      if (tally.urls.has(key)) return
+      tally.urls.add(key)
+      tally.allHosts.add(host)
+      if (!tally.hosts.includes(host) && tally.hosts.length < DOC_BLOCKED_HOSTS_MAX) tally.hosts.push(host)
+      tally.dirty = true
+      tellBlocked(viewId)
+    },
+    onPageStart(viewId) {
+      const tally = blocked.get(viewId)
+      if (!tally || !views.has(viewId)) return
+      // A new page: its own tally. The window hears `count: 0` only if it was told something before.
+      tally.urls.clear()
+      tally.allHosts.clear()
+      tally.hosts = []
+      tally.dirty = tally.told
+      tellBlocked(viewId)
     },
   }
   /** The view, when `windowId` holds it. */

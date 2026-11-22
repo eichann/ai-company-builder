@@ -15,7 +15,7 @@
 // newer read's cookies or connection. (A new partition per request is not used: Electron keeps a
 // session for the whole app run, so they would pile up.)
 import { exploreAddressProblem } from '../../../../shared/core/plugin-browser-declaration'
-import type { BrowserSessionRequest } from '../../../shared/browser-runner'
+import type { BrowserSessionRequest, BrowserWriteOutcome, BrowserWriteSteps } from '../../../shared/browser-runner'
 
 export interface SessionRequest {
   method: string
@@ -37,9 +37,24 @@ export interface PagelessSession {
   guard(allow: (request: BrowserSessionRequest) => boolean): Promise<void>
   /** Copies the window's cookies for exactly this address in (path-scoped ones included). */
   copyCookies(url: string): Promise<void>
-  /** One request, no redirect followed, an answer over 5 MiB refused; rejects = no answer. */
-  send(request: SessionRequest, signal?: AbortSignal): Promise<SessionAnswer>
+  /**
+   * One request, no redirect followed, an answer over 5 MiB refused; rejects = no answer. With
+   * `beforeSend`, it is asked synchronously right before the request is ended: false or a throw — or
+   * anything failing before the request is ended — rejects with `BrowserNotSentError` (it never left).
+   */
+  send(request: SessionRequest, signal?: AbortSignal, beforeSend?: () => boolean): Promise<SessionAnswer>
 }
+
+/** A write that provably never left: thrown by the shell's send only before it ends the request. */
+export class BrowserNotSentError extends Error {
+  readonly notSent = true
+  constructor(why: string) {
+    super(why)
+    this.name = 'BrowserNotSentError'
+  }
+}
+
+export const isNotSent = (error: unknown): boolean => error instanceof Error && (error as { notSent?: unknown }).notSent === true
 
 /** One queue per session name: a chunk starts only after the one before it finished, clean-up included. */
 export function createSessionLanes() {
@@ -95,6 +110,47 @@ export function throughSession(
       answer => { signal.removeEventListener('abort', onAbort); resolve(answer) },
       error => { signal.removeEventListener('abort', onAbort); reject(error) },
     )
+  })
+}
+
+/**
+ * A run's one write through the window's page-less write session, as one chunk of its lane (6b-2c,
+ * design 6b-2 §3 steps 9–11): prepare (connections closed, storage cleared, the one request hook, the
+ * window's cookies for exactly this address) → `steps.ready()` (the runner asks the permit here, so the
+ * preparation never eats into it) → the send, with `steps.beforeSend` asked synchronously right before
+ * the request is ended → cleared again. Never rejects: a write that provably never left is `sent:
+ * false` with the stage it stopped at; once the request was ended it is `sent: true` (`answer: null`
+ * when no answer came — it may have reached the site).
+ */
+export function writeThroughSession(
+  lanes: SessionLanes, key: string, session: PagelessSession, request: SessionRequest,
+  allow: (request: BrowserSessionRequest) => boolean, steps: BrowserWriteSteps, stillOpen: () => boolean,
+): Promise<BrowserWriteOutcome> {
+  return lanes.run(key, async (): Promise<BrowserWriteOutcome> => {
+    let stage: 'prepare' | 'ready' | 'before-send' = 'prepare'
+    try {
+      await session.wipe()
+      if (!stillOpen()) return { sent: false, stage }
+      await session.guard(allow)
+      await session.copyCookies(request.url)
+      if (!stillOpen()) return { sent: false, stage }
+      stage = 'ready'
+      let go = false
+      try { go = (await steps.ready()) === true } catch { go = false }
+      if (!go) return { sent: false, stage }
+      stage = 'before-send'
+      try {
+        return { sent: true, answer: await session.send(request, undefined, steps.beforeSend) }
+      } catch (error) {
+        // Only the shell's own marker says it never left; anything else after the end may have.
+        return isNotSent(error) ? { sent: false, stage } : { sent: true, answer: null }
+      }
+    } catch {
+      // The preparation failed (stage 'prepare' or 'ready'): the request was never made.
+      return { sent: false, stage }
+    } finally {
+      await session.wipe().catch(() => {})
+    }
   })
 }
 

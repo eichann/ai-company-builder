@@ -7,11 +7,11 @@
  * React reads it through `subscribe` / `getSnapshot` (useSyncExternalStore)
  * and attaches the area with a callback ref, so no effect is needed.
  */
-import { DOC_ZOOM_STEPS, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
+import { DOC_ZOOM_STEPS, type DocBlockedParts, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
 import { handleKeyAt } from '../../shared/commands/commands'
 import { subscribeFileChanges } from '../../shared/lib/fileEvents'
 import type { DocLinkOutbound, DocViewControls } from './api'
-import { changeShowsIn, nextZoom, placementOf, sameBounds } from './htmlViewer'
+import { blockedBandShown, changeShowsIn, nextZoom, placementOf, sameBounds, type DismissedParts } from './htmlViewer'
 
 export type DocViewStatus =
   | { kind: 'opening' }
@@ -31,6 +31,10 @@ export interface DocViewSnapshot {
   refreshed: boolean
   /** A web link the member pressed inside it, waiting for 「ブラウザで開く」 / 「やめる」. */
   link: string | null
+  /** What the shown page wanted from the internet and did not get (hosts and a count), for the band. */
+  blocked: DocBlockedParts | null
+  /** The band shows: something was blocked and not all of it dismissed (`blockedBandShown`). */
+  bandShown: boolean
 }
 
 /** Several file events of one write (temp file, rename, its styles) reload once. */
@@ -41,7 +45,9 @@ const MUTATION_CHECK_MS = 100
 const WATCHED_ATTRIBUTES = ['class', 'style', 'hidden', 'open', 'aria-hidden', 'data-state']
 
 export class DocViewSession {
-  private snapshot: DocViewSnapshot = { status: { kind: 'opening' }, zoom: 1, fullScreen: false, refreshed: false, link: null }
+  private snapshot: DocViewSnapshot = { status: { kind: 'opening' }, zoom: 1, fullScreen: false, refreshed: false, link: null, blocked: null, bandShown: false }
+  /** Hosts the member dismissed the band for (［×］), while this tab shows the document. */
+  private dismissed: DismissedParts | null = null
   private listeners = new Set<() => void>()
   private area: HTMLElement | null = null
   private viewId: number | null = null
@@ -138,7 +144,9 @@ export class DocViewSession {
 
   private async open() {
     const generation = ++this.generation
-    this.set({ status: { kind: 'opening' }, link: null })
+    // A new view (also ［もう一度表示する］ after ［止める］ or a crash): a new band; ［×］ holds for its reloads only.
+    this.dismissed = null
+    this.set({ status: { kind: 'opening' }, link: null, blocked: null, bandShown: false })
     const result = await this.views.openDocView(this.filePath).catch(() => null)
     if (generation !== this.generation) {
       // Another tab, 中身 or ［止める］ came first: this view is nobody's.
@@ -208,10 +216,16 @@ export class DocViewSession {
       handleKeyAt(this.area, event.key)
       return
     }
+    if (event.kind === 'blocked') {
+      // Hosts and a count only (main keeps the addresses); `count: 0` = the page loaded again.
+      const blocked = { count: event.count, hosts: event.hosts, hostCount: event.hostCount }
+      this.set({ blocked, bandShown: blockedBandShown(blocked, this.dismissed) })
+      return
+    }
     if (event.kind === 'gone') {
       this.viewId = null
       this.placed = null
-      this.set({ status: { kind: 'gone' }, link: null })
+      this.set({ status: { kind: 'gone' }, link: null, blocked: null, bandShown: false })
     } else if (this.snapshot.link === null) {
       this.set({ link: event.url })
     }
@@ -229,12 +243,19 @@ export class DocViewSession {
     }, RELOAD_DELAY_MS)
   }
 
+  /** ［×］ on the band: hidden until the page wants a host not dismissed yet. */
+  dismissBand() {
+    const shown = this.snapshot.blocked
+    if (shown) this.dismissed = { hosts: new Set([...(this.dismissed?.hosts ?? []), ...shown.hosts]), hostCount: Math.max(this.dismissed?.hostCount ?? 0, shown.hostCount) }
+    this.set({ bandShown: false })
+  }
+
   /** ［止める］: the document's view closes (its scripts stop); ［もう一度表示する］ opens it again. */
   stop() {
     this.generation++
     this.closeView()
     if (this.snapshot.fullScreen) this.setFullScreen(false)
-    this.set({ status: { kind: 'stopped' }, link: null })
+    this.set({ status: { kind: 'stopped' }, link: null, blocked: null, bandShown: false })
   }
 
   restart() {

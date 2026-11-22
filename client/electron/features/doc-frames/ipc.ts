@@ -3,7 +3,8 @@
 //   docView:close  (viewId)   → the view closes and its grant is revoked
 //   docView:setBounds (viewId, bounds | null) → placed over the tab and shown, or hidden (and muted)
 //   docView:setZoom (viewId, factor) / docView:reload (viewId) → the document's zoom; load it again
-// (main → window: `docView:event`, sent by main.ts: a link the member pressed, a view that went.)
+// (main → window: `docView:event`, sent by main.ts: a link the member pressed, a view that went, an
+// app shortcut pressed in it, the internet parts its page wanted — hosts and a count only.)
 // Only the main window's own page may ask (not a consultation window, not a frame inside the page),
 // and that is decided before anything is read from the disk. The path goes through the allowed roots.
 // The document's address stays in main: the renderer only ever holds a view id.

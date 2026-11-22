@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createSessionLanes, exactRead, throughSession, type PagelessSession } from '../electron/features/browser/read-session'
+import { BrowserNotSentError, createSessionLanes, exactRead, throughSession, writeThroughSession, type PagelessSession } from '../electron/features/browser/read-session'
 import { browserReadPartition, browserWritePartition } from '../shared/browser-operation'
 
 /** One Electron session by name (the same object for a reopened window), with a slow clean-up when asked. */
@@ -155,4 +155,71 @@ test('a declared read with a query lets through exactly the built address: no ex
     'https://shop.example.net/api/episodes?a=1&b=2&c=3&d=4&e=5&f=6',
     'https://shop.example.net/a/../b',
   ]) assert.equal(exactRead(url)({ method: 'GET', url }), false, url)
+})
+
+// ---------------------------------------------------------------------------
+// A run's write (6b-2c): prepared, then the permit, then the last check right before it leaves
+// ---------------------------------------------------------------------------
+
+/** A write session as the shell's: `send` asks `beforeSend` right before the request is ended. */
+function writeSession(o: { failPrepare?: boolean; afterEnd?: 'answer' | 'error' } = {}) {
+  const log: string[] = []
+  const session: PagelessSession = {
+    async wipe() { log.push('wipe') },
+    async guard() { if (o.failPrepare) throw new Error('window closed'); log.push('guard') },
+    async copyCookies() { log.push('cookies') },
+    async send(_request, _signal, beforeSend) {
+      let go = true
+      if (beforeSend) { try { go = beforeSend() === true } catch { go = false } }
+      if (!go) throw new BrowserNotSentError('stopped right before sending')
+      log.push('end')
+      if (o.afterEnd === 'error') throw new Error('connection reset')
+      return { status: 302, body: '' }
+    },
+  }
+  return { session, log }
+}
+
+const WRITE_REQUEST = { method: 'POST', url: URL_A, contentType: 'application/x-www-form-urlencoded', body: 'a=1' }
+
+test('a run\'s write asks for the permit only once its session is prepared, and the last check right before it leaves', async () => {
+  const { session, log } = writeSession()
+  const outcome = await writeThroughSession(createSessionLanes(), 'w', session, WRITE_REQUEST, allow, {
+    async ready() { log.push('permit'); return true },
+    beforeSend() { log.push('last check'); return true },
+  }, () => true)
+  assert.deepEqual(outcome, { sent: true, answer: { status: 302, body: '' } })
+  assert.deepEqual(log, ['wipe', 'guard', 'cookies', 'permit', 'last check', 'end', 'wipe'])
+})
+
+test('a write is "not sent" only when it provably never left: a failed preparation, no permit, the last check saying no or throwing', async () => {
+  type Steps = { ready: () => Promise<boolean>; beforeSend: () => boolean }
+  const cases: Array<[string, ReturnType<typeof writeSession>, Steps, string]> = [
+    ['prepare', writeSession({ failPrepare: true }), { ready: async () => true, beforeSend: () => true }, 'prepare'],
+    ['no permit', writeSession(), { ready: async () => false, beforeSend: () => true }, 'ready'],
+    ['the permit throws', writeSession(), { ready: async () => { throw new Error('x') }, beforeSend: () => true }, 'ready'],
+    ['the last check says no', writeSession(), { ready: async () => true, beforeSend: () => false }, 'before-send'],
+    ['the last check throws', writeSession(), { ready: async () => true, beforeSend: () => { throw new Error('x') } }, 'before-send'],
+  ]
+  for (const [label, { session, log }, steps, stage] of cases) {
+    assert.deepEqual(await writeThroughSession(createSessionLanes(), 'w', session, WRITE_REQUEST, allow, steps, () => true), { sent: false, stage }, label)
+    assert.equal(log.includes('end'), false, label)
+    assert.equal(log.at(-1), 'wipe', `${label}: cleared afterwards`)
+  }
+  // A window closed before, or while, the session was prepared: the permit is never asked.
+  for (const openFor of [0, 1]) {
+    let asked = false
+    let looks = 0
+    const closed = writeSession()
+    assert.deepEqual(await writeThroughSession(createSessionLanes(), 'w', closed.session, WRITE_REQUEST, allow,
+      { ready: async () => { asked = true; return true }, beforeSend: () => true }, () => looks++ < openFor), { sent: false, stage: 'prepare' })
+    assert.equal(asked, false, `open for ${openFor} look(s)`)
+  }
+})
+
+test('a failure after the request left is "sent, no answer" — never "not sent"', async () => {
+  const { session, log } = writeSession({ afterEnd: 'error' })
+  assert.deepEqual(await writeThroughSession(createSessionLanes(), 'w', session, WRITE_REQUEST, allow,
+    { ready: async () => true, beforeSend: () => true }, () => true), { sent: true, answer: null })
+  assert.ok(log.includes('end'))
 })

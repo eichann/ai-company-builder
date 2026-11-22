@@ -96,12 +96,14 @@ before(async () => {
     child.stdout.on('data', chunk => { out += chunk })
     child.stderr.on('data', chunk => { err += chunk })
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`the Electron harness did not finish:\n${out}\n${err.slice(-4000)}`)) }, 120_000)
-    child.on('exit', () => { clearTimeout(timer); resolve(out + (out.includes('RESULT ') ? '' : `\n${err.slice(-4000)}`)) })
+    // `close`: the process exited and its output streams ended; the result file was renamed into place before.
+    child.on('close', () => { clearTimeout(timer); resolve(`${out}\n${err.slice(-4000)}`) })
   })
+  const resultFile = path.join(dir, 'result.json')
+  const text = fs.existsSync(resultFile) ? fs.readFileSync(resultFile, 'utf8') : null
   fs.rmSync(dir, { recursive: true, force: true })
-  const line = output.split('\n').find(l => l.startsWith('RESULT '))
-  assert.ok(line, `no result from the Electron harness:\n${output}`)
-  result = JSON.parse(line.slice('RESULT '.length)) as Result
+  assert.ok(text !== null, `no result from the Electron harness:\n${output}`)
+  result = JSON.parse(text) as Result
   assert.equal(result.error, undefined, result.error)
 })
 
@@ -209,6 +211,7 @@ const idsOf = (body: string) => { const f = new URLSearchParams(body); return `$
 test('a run sends exactly one write with the planned ids through the member\'s login, and the page confirms it', { skip }, () => {
   const r = result.runner
   assert.deepEqual(r.happy, { outcome: 'succeeded' })
+  assert.deepEqual(r.happyReports, [{ result: 'succeeded' }])
   assert.deepEqual(r.stepAfterHappy, ['300', '301'])
   const happy = writesOfRuns().filter(h => idsOf(h.body) === '201/301')
   assert.equal(happy.length, 1, 'one POST, the runner\'s')
@@ -236,16 +239,24 @@ test('a run stops before writing for another LINE account or an emergency stop d
 test('a write whose answer is lost is unknown and never sent again', { skip }, () => {
   const r = result.runner
   assert.deepEqual(r.lost, { outcome: 'unknown', reason: 'no-answer' })
+  assert.deepEqual(r.lostReports, [{ result: 'unknown', reason: 'no-answer' }])
   assert.deepEqual(r.lostAgain, { outcome: 'refused', reason: 'already-ran' })
   assert.equal(writesOfRuns().filter(h => idsOf(h.body) === '201/999').length, 1)
   assert.deepEqual(r.records, [
-    'plan-a:pending', 'plan-a:sent', 'plan-a:succeeded', 'plan-b:pending', 'plan-b:failed',
-    'plan-c:pending', 'plan-c:failed', 'plan-d:pending', 'plan-d:sent', 'plan-d:unknown',
-    'plan-e:pending', 'plan-e:failed',
+    'a:claimed', 'a:permit-asked', 'a:succeeded', 'b:claimed', 'b:failed', 'c:claimed', 'c:failed',
+    'd:claimed', 'd:permit-asked', 'd:unknown', 'e:claimed', 'e:failed', 'f:claimed', 'f:permit-asked', 'f:failed',
   ])
 })
 
+test('a permit that is 5 s old by the last check right before sending: the window\'s write session never ends the request — nothing reaches the site — and the server is told failed', { skip }, () => {
+  const r = result.runner
+  assert.deepEqual(r.late, { outcome: 'failed', reason: 'permit-late' })
+  assert.deepEqual(r.lateReports, [{ result: 'failed', reason: 'permit-late' }])
+  assert.equal(writesOfRuns().some(h => idsOf(h.body) === '201/306'), false)
+})
+
 test('an answer over the size the runner reads is refused whole, never read cut short', { skip }, () => {
+  // The facts read again through the read session: the page is refused whole, so the site cannot be read.
   assert.deepEqual(result.runner.oversize, { outcome: 'stopped', reason: 'read-failed' })
   assert.equal(writesOfRuns().some(h => idsOf(h.body) === '201/305'), false)
 })

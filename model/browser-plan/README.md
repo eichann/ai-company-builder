@@ -32,7 +32,7 @@ exist or is not in that area.
 |---|---|
 | Plan and execution states, times | `shared/core/browser-plans.ts` (`BrowserPlanState`, `BrowserExecutionState`, `BROWSER_PLAN_TIMES`) |
 | Server actions (register, approve, cancel / expiry / leaving, claim, permit, time-outs, report, confirm) | `server/src/services/browser-plans.ts` (PR 6a; the clock fix of 6b-2a), each action naming its function |
-| App actions (re-read after claim, ask for the permit, the last check before sending, judging after the send, reports) | the approved 6b-2 design (internal design memo, 6b-2 §3, §5). **Not shipped code yet**: nothing in the app calls the server's plans; 6b-2 replaces today's runner (`client/electron/features/browser/runner.ts`, `client/shared/browser-runner.ts`). The 6b-2 PRs cite their own files here when they land |
+| App actions (re-read after claim, ask for the permit, an unusable permit answer before 5 s, the last check before sending, judging after the send, reports) | the runner of 6b-2c: `client/electron/features/browser/runner.ts` (`createBrowserRunner`'s `run`: `giveBack`, `ready`, `beforeSend`, `settle`), `client/shared/browser-runner.ts` (the claim, the fixed content, the permit's answer), `client/electron/features/browser/read-session.ts` (`writeThroughSession`: the permit inside the prepared write session, "not sent" only before `request.end`). Built and tested, **switched off; nothing in the app calls it yet** (6b-2d wires the card's press) |
 
 Each action in `PlanLife.tla` says which function or design section it copies.
 
@@ -74,7 +74,7 @@ reachability rule, not a state formula: `reach.mjs` checks it on the checker's s
 | `BrokenRetryAfterUnknown` | The app resends the write when no answer came and the permit is not over | R1 |
 | `BrokenNoCheckBeforeSend` | No check of the permit's age (both clocks) right before sending | R2 |
 | `BrokenPermitReplayed` | The server answers send-permit again without checking it is the claiming PC | R2 |
-| `BrokenFailedOn4xx` | After a send the site refused (4xx) and the page looks unchanged, the app reports failed (today's runner branch `refused-by-site`; 6b-2 removes it) | R4 |
+| `BrokenFailedOn4xx` | After a send the site refused (4xx) and the page looks unchanged, the app reports failed (the runner's branch `refused-by-site` before 6b-2c; removed there). Also stands for "failed after an error once the request left": the same transition in the model (code guard: `writeThroughSession` + the runner, held by the tests) | R4 |
 | `BrokenLockFreedOnUnknown` | An unknown execution releases the target lock | R3 |
 | `BrokenNoReread` | The app asks for the permit without re-reading the fixed facts after the claim | R6 |
 | `BrokenNoServerTimeout` | The server never turns a silent permitted execution unknown | R7 |

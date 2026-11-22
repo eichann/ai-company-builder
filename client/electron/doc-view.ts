@@ -19,6 +19,11 @@
 // hands the keyboard back too. A link to the web the member pressed is handed to the registry
 // (which asks the member first); Escape in a document shown full screen leaves full screen; the
 // app's shortcuts (the command catalog's, `docViewShortcutOf`) pressed in a document go to the app.
+//
+// Blocked internet parts (A3): what a document's page wanted and did not get — refused by its CSP
+// (Chromium's own report: DevTools `Audits` issues, read in main through the view's debugger; the
+// page can neither send nor see them) or cancelled by the session's request hook — is handed to the
+// registry (`onBlocked`), which keeps only the host for the band. Nothing is loaded because of it.
 import { BrowserWindow, session, WebContentsView, webContents as allWebContents, type Session, type WebContents } from 'electron'
 import { DOC_SCHEME, docSessionRequestAllowed, docViewNavigationAllowed, docViewOnScreen, docViewShortcutOf, parseDocFrameUrl } from '../shared/doc-frame'
 import { startRefusingProxy } from './browser-window'
@@ -40,6 +45,28 @@ const SCROLL_READ_MS = 300
 function scrollPosition(value: unknown): [number, number] | null {
   if (!Array.isArray(value) || value.length !== 2 || !value.every(v => typeof v === 'number' && Number.isFinite(v))) return null
   return [Math.max(0, Math.round(value[0])), Math.max(0, Math.round(value[1]))]
+}
+
+/**
+ * What a document's CSP refused to load, as Chromium reports it: the `Audits` domain's
+ * `ContentSecurityPolicyIssue` (its `blockedURL`), read through the view's own debugger in main.
+ * The page cannot send or see these (its `console` and `securitypolicyviolation` events are its
+ * own and are not read). Without a debugger (one already attached) there is simply no report.
+ */
+function watchCspRefusals(contents: WebContents, report: (url: string) => void, log: Pick<Console, 'warn'>): void {
+  try {
+    contents.debugger.attach('1.3')
+  } catch {
+    log.warn('[doc-frame] cannot read what a document\'s CSP refused')
+    return
+  }
+  contents.debugger.on('message', (_event, method, params) => {
+    if (method !== 'Audits.issueAdded') return
+    const issue = (params as { issue?: { code?: unknown; details?: { contentSecurityPolicyIssueDetails?: { blockedURL?: unknown } } } }).issue
+    const url = issue?.code === 'ContentSecurityPolicyIssue' ? issue.details?.contentSecurityPolicyIssueDetails?.blockedURL : undefined
+    if (typeof url === 'string') report(url)
+  })
+  contents.debugger.sendCommand('Audits.enable').catch(() => {})
 }
 
 /** In memory (no `persist:`): nothing a document stores outlives the app run. */
@@ -72,6 +99,8 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
   const htmlFullScreen = new Set<number>()
   let schemesServed = false
   const resetListeners: Array<(windowId: number) => void> = []
+  /** View page id → where a request the session's hook cancelled for it is reported. */
+  const blockedReporters = new Map<number, (url: string) => void>()
   const windowReset = (windowId: number) => { for (const listener of resetListeners) listener(windowId) }
 
   /**
@@ -86,7 +115,10 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
     // The session's one request hook (Electron keeps the last listener: set here and nowhere else).
     ses.webRequest.onBeforeRequest((details, callback) => {
       const allowed = docSessionRequestAllowed(details.url)
-      if (!allowed) log.warn('[doc-frame] refused a request of a document')
+      if (!allowed) {
+        log.warn('[doc-frame] refused a request of a document')
+        if (typeof details.webContentsId === 'number') blockedReporters.get(details.webContentsId)?.(details.url)
+      }
       callback({ cancel: !allowed })
     })
     // Set after the app's own `guardEverySession` handler (session-created): these replace it.
@@ -196,10 +228,15 @@ export function createDocViewShell(options: DocViewShellOptions): DocViewPort {
         const hadKeyboard = !contents.isDestroyed() && contents.isFocused()
         if (!win.isDestroyed()) win.contentView.removeChildView(view)
         if (hadKeyboard) focusApp()
+        blockedReporters.delete(id)
         if (!contents.isDestroyed()) contents.close()
         hooks.onGone(id)
       }
       guard(contents, () => token)
+      // What its page wanted from the internet and did not get, for the band (hosts only leave main).
+      blockedReporters.set(id, url => hooks.onBlocked(id, url))
+      watchCspRefusals(contents, url => hooks.onBlocked(id, url), log)
+      contents.on('did-navigate', () => hooks.onPageStart(id))
       contents.on('input-event', (_event, input) => {
         const at = Date.now()
         if (input.type === 'mouseDown' || input.type === 'touchStart' || input.type === 'gestureTap') lastPointerAt = at

@@ -8,7 +8,7 @@
  * (they would make the document blink while the pointer moves over the
  * toolbar); they are drawn behind the document where they overlap it.
  */
-import { docFileType, type DocViewBounds } from '../../../shared/doc-frame'
+import { docFileType, type DocBlockedParts, type DocViewBounds } from '../../../shared/doc-frame'
 import { isPathWithin, normalizePathSeparators } from '../../shared/lib/path'
 
 /** Grid spacing (CSS px): an overlay smaller than this both ways can slip between the points. */
@@ -93,4 +93,27 @@ export function changeShowsIn(documentPath: string, changedPath: string): boolea
   if (changed === doc) return true
   const folder = doc.slice(0, doc.lastIndexOf('/'))
   return folder !== '' && changed !== folder && isPathWithin(changed, folder) && docFileType(changed.slice(changed.lastIndexOf('/') + 1)) !== null
+}
+
+/** What ［×］ on the band dismissed: the hosts it named and how many hosts there were in all. */
+export interface DismissedParts { hosts: ReadonlySet<string>; hostCount: number }
+
+/**
+ * Whether the band of blocked internet parts shows (doc-frame.md "The band of blocked internet
+ * parts (A3)"): the page wanted something from the internet, and nothing new since ［×］ — a host not
+ * dismissed, or more hosts than then (past the named ones) bring it back; an auto refresh asking the
+ * same ones does not.
+ */
+export function blockedBandShown(parts: DocBlockedParts | null, dismissed: DismissedParts | null): boolean {
+  if (parts === null || parts.count <= 0) return false
+  if (dismissed === null) return true
+  return parts.hostCount > dismissed.hostCount || parts.hosts.some(host => !dismissed.hosts.has(host))
+}
+
+/** What ［AI に直してもらう］ puts in the chat's input (nothing is sent): the file, company-relative. */
+export function rebuildRequestOf(documentPath: string, rootPath: string | null): string {
+  const path = normalizePathSeparators(documentPath)
+  const root = rootPath ? normalizePathSeparators(rootPath).replace(/\/+$/, '') : null
+  const name = root && path !== root && isPathWithin(path, root) ? path.slice(root.length + 1) : path.slice(path.lastIndexOf('/') + 1)
+  return `「${name}」を、インターネットの部品（CDN のプログラム、Web フォント、ネットの画像）を使わずに作り直してください。HTML は 1 つのファイルにまとめてください。`
 }
