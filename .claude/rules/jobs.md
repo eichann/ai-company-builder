@@ -193,7 +193,7 @@ PUT  /jobs-stop { stopped }         owner/admin
   approved version names a place the new role no longer reads (`OWNER_RIGHTS_CHANGED`). Each writes the
   notice `job_paused` (recordless, `notifications.md`) to every owner / admin and pushes the bare
   `notifications` signal to them (`noticesChanged`); its text is built when read and shown only while the
-  reader is owner / admin. While the company's records are off the bell is not shown at all (`list`
+  reader is owner / admin. While the company's records are off the inbox shows none of them (`list`
   answers `available: false`), so there the pause is seen in the job list (`pausedReason`, PR 4's screen).
 - **Rights lost elsewhere** (a permission rule, a group, 所属 or a private folder's readers changing) do not
   pause a job at the moment of the change (only leaving the company and a role change do, here). They are
@@ -317,8 +317,8 @@ when read (`notifications.ts` `jobOccurrenceText`, through `jobs.occurrenceNotic
 the reader may see the job (owner / admin, or its responsible person), its name 「定期の仕事」 when a
 place the newest version names is not theirs to read. **No `subject_kind` column on `notifications`**:
 a recordless notice with the job and occurrence in its key is enough while no notice is about a record
-and a job at once (add it, additive, when one is). While the company's records are off the bell is not
-shown at all (the occurrence's state says it: `GET /jobs/:jobId/occurrences`).
+and a job at once (add it, additive, when one is). While the company's records are off the inbox does
+not show them (the occurrence's state says it: `GET /jobs/:jobId/occurrences`).
 
 ## The PC's claim (PR 5a, `services/job-runs.ts`, design memo §3-3 / §3-5 / §4-2)
 
@@ -678,7 +678,7 @@ consultation, claim / hold / renew / finish (`claims.ts`), the same unattended C
   adding them later) is never found by a later meeting check — the window counts when the record was made.
 - **An unknown outside result** (`RESULT_UNKNOWN`, decision for the owner): a job's run reaches outside only by a
   mail **draft** (`outbound: draft_only`) or a put into its chosen place, so an unknown result means "it may or may not
-  have been made". The occurrence's state and the bell's `job_failed` tell the responsible person and the job's
+  have been made". The occurrence's state and the inbox's `job_failed` (the notice) tell the responsible person and the job's
   creator; the person looks at 送るもの (the drafts) themselves; for a time job an owner / admin records what they found on
   the occurrence (5b, "「もう一度」": 作られていた／作られていなかった) before pressing 「もう一度」; for an event job its
   pinned responsible person can record it in the app (stage 4b-2, "「もう一度」 and 「後始末」 in the app" above).
@@ -704,7 +704,7 @@ sentences the admin approved.
   it is retired; a paused or stopped job still answers it — the screen says it would not run),
   `lastOccurrence` (slot, state, code); `approved` (`responsibleUserId`, and `name` — 「定期の仕事」 for a
   non-admin who cannot read every place that version **or the newest** names: never more than the job's
-  own `name` and the bell show), `latestConsentAccepted` (the newest
+  own `name` and the inbox show), `latestConsentAccepted` (the newest
   version's consent is the accepted one: approving it runs without a new 受け取る — the screens never
   re-derive this), `you` (`named` / `controls` / `mustAccept`: the caller by the API's own rules, answered
   also while a version's `definition` is hidden). Ids, booleans and names only, never a place. No new endpoint.
@@ -757,7 +757,7 @@ sentences the admin approved.
   checks it was theirs). Renderer values never change the server path (`isJobId`, `sha256:<hex>`). A server
   that answers jobs without `you` (before PR 4) is said as such (`SERVER_TOO_OLD`, 「サーバーの更新が必要です」),
   never as 「ありません」. In the
-  bell (`jobNoticeTarget`, `client/shared/jobs.ts`): `job_accept_needed` opens this section; an occurrence's
+  inbox (`jobNoticeTarget`, `client/shared/jobs.ts`): `job_accept_needed` opens this section; an occurrence's
   notice and `job_paused` open nothing (they also reach the creator / admins, who have nothing here).
 
 ## The acceptance notice (PR 4)
@@ -878,9 +878,9 @@ GET  /me/job-occurrences                                                   any m
   ［もう一度］). The responsible person's view of a time job has none; of an event PC occurrence, what their rights cover
   (4b-1, `viewFor`).
 - **Told again, in its own words**: an occurrence notice's key is `<kind>:<job>:<occurrence>:<retries>:<code>`, read
-  from the occurrence as written in that transaction — a second failure after a press is told once more, and the bell
+  from the occurrence as written in that transaction — a second failure after a press is told once more, and the server
   words an older notice by the code it was written with (a press clears the occurrence's own code); a key without a code
-  (written before 5b) reads the occurrence's. The bell reads the job and occurrence from the first two parts, an older
+  (written before 5b) reads the occurrence's. The notice list reads the job and occurrence from the first two parts, an older
   build too.
 - **The app** (`client/shared/ai-turn-steps/job.ts`): the turn's `retries` (additive) makes the queue's `attemptKey`
   `<occurrence>#<retries>`, so today's attempts count per occurrence and press (`attemptsOf` in `aiTurns.ts`) — an
@@ -910,7 +910,7 @@ Event-triggered jobs (4a) store `schema: 2`. Production may run 4-0 again after 
   `adapters/sqlite/jobs.ts`: the pinned version's `schema` in `JOB_SCHEMAS` and its text saying the same schema —
   `occurrence`, `occurrences`, `dueOccurrences`, `runningOccurrences`, `occurrencesOf`, `eventRecordsOf`,
   `moveOccurrence`, `retryOccurrence`), so it is not listed or counted (`GET …/occurrences`, `lastOccurrence`), no notice
-  of it is shown — also one written before (the bell's `occurrenceNotice` finds no occurrence) — or written, the clock
+  of it is shown — also one written before (the notice list's `occurrenceNotice` finds no occurrence) — or written, the clock
   neither expires nor ends it (**changed from 4-0**: its expiry no longer applies here; its own build decides when it
   comes back), the server's runner and the PC's list never see it (no batch place taken: 10,000 frozen ones ahead of a
   known one hold nothing up), a claim, 「もう一度」 and reconcile answer the one 404 `JOB_NOT_FOUND`, and a PC run on one
@@ -1109,7 +1109,7 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   「直す」 the start record; the responsible person then accepts).
 - **A chain that stays stopped is reminded once** (owner-approved, its own PR after 4b-2; `remindStoppedChains` in
   `job-events.ts`, run by the clock after the scan): `CHAIN_STOP_REMIND_AFTER_MS` (**3 days**: a stop on a Friday evening
-  comes back on Monday evening, after a weekend nobody reads the bell; a daily chain is not silently off for a week)
+  comes back on Monday evening, after a weekend nobody reads the inbox; a daily chain is not silently off for a week)
   after the stop, the responsible person's **own stop notice comes back** — unread again, dated now (on top), its
   `action` set to `reminded` (`CHAIN_STOP_REMINDED`), worded 「定期の仕事「…」は11月18日から止まったままです（cause）。次に見張るやることを選び直してください」
   (the cause as `chainOf` words it when read: no title once they no longer read the record). **Nothing new is written**
@@ -1178,7 +1178,7 @@ acts), `jobs.ts` (save, approve, accept, what each viewer sees).
   nothing), re-accepting the same start record keeps the chain, a limit-skipped target never fires later, the
   still-watched recheck, the order of a mixed history, acceptance's trigger check, the limit notice shown to the
   responsible person only, the start list's search and pages. Stage 4b-0.2 (D7 = A): "D7 = A: a stopped chain of a
-  record the viewer cannot read" (non-reader creator and admin identical before and after — rows, unread, bell, push,
+  record the viewer cannot read" (non-reader creator and admin identical before and after — rows, unread, notice list, push,
   list and detail —; a reader admin; the responsible person in plain words; checked again when read after a members-only
   list, owner-only or a removed record), and (1)'s comparison now includes the stop — 5 guards mutation-checked, each
   fails; the removed-record check in `chainOf` is defence only (`records.byIds` never returns a removed record).
@@ -1409,11 +1409,11 @@ membership can fail).
   pinned approval; acceptance by the responsible person only and only again when the consent changed;
   approval refused for a place the person cannot read (private folder, rule) or a person who left, and
   for a Skill missing or changed; the definition hidden from a member who cannot read it; removeMember
-  and a demotion pause and tell owners/admins (and a demoted admin's bell drops it); pause / resume; the
+  and a demotion pause and tell owners/admins (and a demoted admin's notice list drops it); pause / resume; the
   company stop.
 - `server/tests/integration/job-occurrences.test.ts` (3b) — one occurrence per slot over two runs and a
   restart, none before its time or before approval; only the newest missed slot; expiry when made and
-  when run (told to the responsible person and the creator, the bell's text, gone once they may not see
+  when run (told to the responsible person and the creator, the notice's text, gone once they may not see
   the job); `skip` late → skipped; superseded; a PC job's occurrence made, never run by the server; exactly one owner-only やること with
   its run, events, key and 経緯 (`acb:job`, `system`, `runId`), none on a second pass, all or nothing on a
   crash, `needs_person` on a refusal and with records off, still run with every feature off, no notice

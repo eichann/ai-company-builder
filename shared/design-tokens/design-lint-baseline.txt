@@ -178,7 +178,6 @@ client/src/features/minutes/components/InviteDialog.tsx arbitrary-value=9 palett
 client/src/features/minutes/components/MeetingBanners.tsx arbitrary-value=13 palette-color=29 radius-scale=2 shadow-scale=1 white-black=1
 client/src/features/minutes/components/MeetingPanel.tsx arbitrary-value=9 palette-color=12 radius-scale=1
 client/src/features/minutes/components/MinutesCheckButton.tsx opacity-scale=1 palette-color=11 radius-scale=2 shadow-scale=1 type-scale=1 white-black=1 z-index=1
-client/src/features/notifications/components/TitleBarNotices.tsx arbitrary-value=8 palette-color=82 radius-scale=4 shadow-scale=1 type-scale=11 white-black=1 z-index=1
 client/src/features/plugin-steps/components/ContinueStepButton.tsx palette-color=4 radius-scale=1 type-scale=1
 client/src/features/plugin-steps/components/PersonStepButtons.tsx opacity-scale=1 palette-color=6 radius-scale=1 type-scale=1
 client/src/features/plugin-steps/components/StepDeliverables.tsx arbitrary-value=4 palette-color=8 radius-scale=1

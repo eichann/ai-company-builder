@@ -152,6 +152,7 @@ const fileChanges = emitter<Array<{ type: string; path: string }>>()
 const fileRequests = emitter<{ path: string }>()
 // The consultation's AI changed the task (records:changed): its version and linked files grow.
 const recordsChanged = emitter<{ companyId: string }>()
+const openTasksClicks = emitter<{ companyId: string }>()
 // The consultation AI running one of the app's commands here (shared/app-commands.ts), and the answers.
 const appCommandRequests = emitter<{ requestId: string; companyId: string; commandId: string; args: unknown }>()
 const appCommandAnswers = new Map<string, unknown>()
@@ -375,7 +376,7 @@ const api: Partial<ElectronAPI> = {
   onSkillShelfChanged: () => () => {},
   onNotificationsChanged: () => () => {},
   onRecordsChanged: recordsChanged.subscribe,
-  onNotificationsOpenTasks: () => () => {},
+  onNotificationsOpenTasks: openTasksClicks.subscribe,
   getCalendarToday: async () => ({ success: true, data: { date: '2026-11-02', timeZone: 'Asia/Tokyo', reason: null, events: featuresParam.includes('listoff')
     ? [{ id: 'ev1', title: '朝会', start: '2026-11-02T00:00:00Z', end: '2026-11-02T00:30:00Z', allDay: false, online: true, hasExternalAttendees: false, attendeeCount: 3 }] : [] } }) as never,
   // Answered even with 会議 off (the server would answer none): the screen must not show them by itself.
@@ -408,6 +409,8 @@ installElectronAPI(api)
 Object.assign(window, {
   __acbLayout: {
     calls,
+    /** The morning's 「今日のあなたの番」 Mac notification was clicked (main's `notifications:openTasks`). */
+    macNotificationClicked() { openTasksClicks.emit({ companyId: COMPANY }) },
     /** The AI (or a sync) writes a file: it lands on the fake disk and the watcher reports it. */
     addSkill(folder: string, name: string) {
       ;(SKILLS[folder] ??= []).push(skill(folder, name, `${name} の説明`))

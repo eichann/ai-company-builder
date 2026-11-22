@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Bell, CaretDown, CaretRight } from '@phosphor-icons/react'
+import { Bell, CaretDown, CaretRight, GearSix } from '@phosphor-icons/react'
 import { STOP_LOOK } from '../../../../../shared/design-tokens/stop-meaning'
 import { Button, NewDot, StatusBadge, type StatusBadgeVariant } from '../../../shared/ui/primitives'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
@@ -18,10 +18,14 @@ const toneVariant = (tone: InboxTone): StatusBadgeVariant =>
 
 const when = (iso: string) => new Date(iso).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 
-/** The chips in the panel's heading: one list filtered by state (no tabs by source, owner decision). */
-export function InboxChips({ view, filter, onFilter }: { view: InboxView; filter: InboxFilter; onFilter: (f: InboxFilter) => void }) {
+/**
+ * The chips in the panel's heading: one list filtered by state (no tabs by source, owner decision); at the
+ * right 「知らせの設定」, which the bell had (I2).
+ */
+export function InboxChips({ view, filter, onFilter, onSettings }: { view: InboxView; filter: InboxFilter; onFilter: (f: InboxFilter) => void; onSettings?: () => void }) {
   return (
-    <div role="group" aria-label="受け箱の絞り込み" className="flex min-w-0 flex-wrap items-center gap-1.5">
+    <div className="flex min-w-0 items-center gap-2">
+    <div role="group" aria-label="受け箱の絞り込み" className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
       {FILTERS.map(f => (
         <button key={f.id} type="button" aria-pressed={filter === f.id} onClick={() => onFilter(f.id)}
           className={`h-6 rounded-full border px-2.5 text-small transition-colors duration-fast ${filter === f.id
@@ -31,18 +35,28 @@ export function InboxChips({ view, filter, onFilter }: { view: InboxView; filter
         </button>
       ))}
     </div>
+    {onSettings && (
+      <button type="button" onClick={onSettings} className="flex flex-shrink-0 items-center gap-1 rounded-control px-1.5 py-1 text-small text-text-muted hover:bg-surface-sunken hover:text-text">
+        <GearSix size={12} aria-hidden /> 知らせの設定
+      </button>
+    )}
+    </div>
   )
 }
 
+/** A row's own buttons from the feature it belongs to (a meeting's: choose a まとまり, read it yourself…). */
+export interface InboxRowButton { label: string; run: () => void }
+
 interface RowProps {
   item: InboxItem
+  buttons?: readonly InboxRowButton[]
   onOpen: (item: InboxItem) => void
   onUndo?: (item: InboxItem) => void
   undone?: boolean
   dim?: boolean
 }
 
-function InboxRow({ item, onOpen, onUndo, undone, dim }: RowProps) {
+function InboxRow({ item, buttons = [], onOpen, onUndo, undone, dim }: RowProps) {
   const unread = item.unreadNoticeIds.length > 0
   const primary = item.action.kind === 'openApprovalCard' || item.action.kind === 'openMailDraft'
   return (
@@ -63,7 +77,8 @@ function InboxRow({ item, onOpen, onUndo, undone, dim }: RowProps) {
           {[item.source, item.at ? when(item.at) : null, item.due ? `期限 ${shortDue(item.due)}` : null].filter(Boolean).join('・')}
         </span>
       </button>
-      <span className="flex flex-shrink-0 items-center gap-1.5">
+      <span className="flex flex-shrink-0 flex-wrap items-center justify-end gap-1.5">
+        {buttons.map(b => <Button key={b.label} size="sm" onClick={b.run}>{b.label}</Button>)}
         {item.undo && onUndo && (undone
           ? <span className="text-small text-text-muted">元に戻しました</span>
           : <Button size="sm" onClick={() => onUndo(item)}>元に戻す</Button>)}
@@ -76,6 +91,8 @@ function InboxRow({ item, onOpen, onUndo, undone, dim }: RowProps) {
 interface ListProps {
   view: InboxView
   filter: InboxFilter
+  /** The buttons of a meeting row (`InboxItem.meetingId`), from the minutes feature through AppShell. */
+  meetingButtons?: (meetingId: string) => readonly InboxRowButton[]
   onOpen: (item: InboxItem) => void
   onUndo: (item: InboxItem) => void
   undone: ReadonlySet<string>
@@ -83,7 +100,12 @@ interface ListProps {
   onBulkSeen: (scope: 'older' | 'done') => void
   seenOpen: boolean
   onToggleSeen: () => void
+  /** 「前に確認したもの」 (the server's other read notices) unfolded. */
+  beforeOpen: boolean
+  onToggleBefore: () => void
   error: string | null
+  /** What was just done from a row that moved it away (「…を元に戻しました」: the row went to today's seen). */
+  status?: string | null
 }
 
 const Heading = ({ label, count, action }: { label: string; count: number; action?: ReactNode }) => (
@@ -95,16 +117,25 @@ const Heading = ({ label, count, action }: { label: string; count: number; actio
 )
 
 /** The inbox's body: あなた待ち (never folded, never capped), 作業中, できた・未確認, then today's seen ones. */
-export function InboxList({ view, filter, onOpen, onUndo, undone, onBulkSeen, seenOpen, onToggleSeen, error }: ListProps) {
+export function InboxList({ view, filter, meetingButtons, onOpen, onUndo, undone, onBulkSeen, seenOpen, onToggleSeen, beforeOpen, onToggleBefore, error, status }: ListProps) {
   const showWaiting = filter === 'all' || filter === 'waiting'
   const showWorking = filter === 'working' || (filter === 'all' && view.working.length > 0)
   const showDone = filter === 'all' || filter === 'done'
   const doneCount = view.counts.done
-  const row = (item: InboxItem, dim = false) => <InboxRow key={item.key} item={item} onOpen={onOpen} onUndo={onUndo} undone={undone.has(item.key)} dim={dim} />
-  const empty = view.counts.all === 0 && view.seenToday.length === 0
+  const row = (item: InboxItem, dim = false) => <InboxRow key={item.key} item={item} buttons={item.meetingId ? meetingButtons?.(item.meetingId) : undefined} onOpen={onOpen} onUndo={onUndo} undone={!!item.undo && undone.has(item.undo.noticeId)} dim={dim} />
+  const empty = view.counts.all === 0 && view.seenToday.length === 0 && view.seenBefore.length === 0
+  const folded = (label: string, items: InboxItem[], open: boolean, onToggle: () => void) => items.length > 0 && (
+    <section aria-label={label}>
+      <button type="button" aria-expanded={open} onClick={onToggle} className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-small text-text-muted hover:text-text">
+        {open ? <CaretDown size={12} /> : <CaretRight size={12} />}{label}（{items.length} 件）
+      </button>
+      {open && <ul>{items.map(i => row(i, true))}</ul>}
+    </section>
+  )
   return (
     <div className="text-body text-text">
       {error && <p role="alert" className="px-3 py-2 text-small text-danger-text">{error}</p>}
+      {status && !error && <p role="status" className="px-3 py-2 text-small text-success-text">{status}</p>}
       {empty && filter === 'all' && <p className="px-3 py-4 text-small text-text-muted">いま、受け箱は空です。あなたが押すもの・届いた知らせが、ここに並びます。</p>}
       {showWaiting && (view.counts.waiting > 0 || filter === 'waiting') && (
         <section aria-label="あなた待ち">
@@ -121,6 +152,7 @@ export function InboxList({ view, filter, onOpen, onUndo, undone, onBulkSeen, se
           <Heading label="作業中" count={view.working.length} />
           <ul>{view.working.map(i => row(i))}</ul>
           {view.working.length === 0 && <p className="px-3 py-3 text-small text-text-muted">AI が作業中の相談や「AI の番」は、まだ受け箱に出ません。右の「AI への相談」と、やることの「AI の番」で見られます。</p>}
+          {view.working.length > 0 && <p className="px-3 py-1.5 text-caption text-text-subtle">AI が作業中の相談は、右の「AI への相談」で見られます。</p>}
         </section>
       )}
       {showDone && (doneCount > 0 || filter === 'done') && (
@@ -138,14 +170,13 @@ export function InboxList({ view, filter, onOpen, onUndo, undone, onBulkSeen, se
           {doneCount === 0 && <p className="px-3 py-3 text-small text-text-muted">まだ確かめていない「できた」はありません。</p>}
         </section>
       )}
-      {(filter === 'all' || filter === 'done') && view.seenToday.length > 0 && (
-        <section aria-label="きょう確認したもの">
-          <button type="button" aria-expanded={seenOpen} onClick={onToggleSeen} className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-small text-text-muted hover:text-text">
-            {seenOpen ? <CaretDown size={12} /> : <CaretRight size={12} />}きょう確認したもの（{view.seenToday.length} 件）
-          </button>
-          {seenOpen && <ul>{view.seenToday.map(i => row(i, true))}</ul>}
-        </section>
+      {(filter === 'all' || filter === 'done') && view.unreadNotListed > 0 && (
+        <p data-inbox-unlisted className="px-3 py-2 text-small text-text-muted">ほかに未読 {view.unreadNotListed} 件（古いもの）</p>
       )}
+      {(filter === 'all' || filter === 'done') && <>
+        {folded('きょう確認したもの', view.seenToday, seenOpen, onToggleSeen)}
+        {folded('前に確認したもの', view.seenBefore, beforeOpen, onToggleBefore)}
+      </>}
     </div>
   )
 }

@@ -19,6 +19,8 @@ import type { DepartmentConfig } from '../types'
 
 // 探す ⌘K finds 「片づけたタブ」 by these words too.
 const PALETTE_ACTIONS: PaletteAction[] = [{ id: 'tidiedTabs', title: '片づけたタブ', words: ['タブ', '片づけ', '片付け', 'かたづけ', 'tab'] }, RECORDS_TABLE_PALETTE_ACTION]
+// ⌘K 「受け箱」 (I2), also by the words of what it replaced in the title bar (あなたの番, the bell's 知らせ).
+const INBOX_PALETTE_ACTION: PaletteAction = { id: 'inbox', title: '受け箱', words: ['受け箱', 'うけばこ', 'あなた待ち', 'あなたの番', '知らせ', '通知', 'ベル', 'inbox'] }
 
 interface Props {
   /** The open company: 「仕事の道具をつなぐ」 offers itself once per member and company. */
@@ -39,6 +41,8 @@ interface Props {
   onOpenRecord: (recordId: string) => void
   /** ⌘K 「記録の一覧」 (features/records-table). */
   onShowRecordsTable: () => void
+  /** ⌘K 「受け箱」: only while there is an inbox (records on, or the company's own notices). */
+  onOpenInbox?: () => void
   /** 探す ⌘K's skills (already loaded) and 「AIへの相談」 (read when it opens), each opened in its usual place. */
   paletteSkills: PaletteSkill[]
   onOpenSkill: (skillId: string) => void
@@ -100,8 +104,12 @@ export function AppDialogs(props: Props) {
             onOpenSkill={props.onOpenSkill}
             loadConsultations={props.loadConsultations}
             onOpenConsultation={props.onOpenConsultation}
-            actions={PALETTE_ACTIONS}
-            onAction={id => { if (id === 'tidiedTabs') props.tidying.openList(); else if (id === RECORDS_TABLE_PALETTE_ACTION.id) props.onShowRecordsTable() }}
+            actions={props.onOpenInbox ? [INBOX_PALETTE_ACTION, ...PALETTE_ACTIONS] : PALETTE_ACTIONS}
+            onAction={id => {
+              if (id === 'tidiedTabs') props.tidying.openList()
+              else if (id === RECORDS_TABLE_PALETTE_ACTION.id) props.onShowRecordsTable()
+              else if (id === INBOX_PALETTE_ACTION.id) props.onOpenInbox?.()
+            }}
           />
         )}
 
