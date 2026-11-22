@@ -20,6 +20,7 @@
 //             a decision to confirm, an arrived meeting and today's meeting; listoff,meetingsoff = 会議 off too
 //   companies 1 | 2 = the member's companies from the server (株式会社デモ, then 別会社); absent = the list cannot be read
 //   sync      manual = 「サーバーと同期」 runs until window.__acbLayout.finishSync()
+//   bottom    1 = something to show in the bottom panel (the inbox, I1, will hand its own in); absent = none
 //
 // 今日のフォルダ: the member belongs to 開発部 (not downloaded) and 営業部, so it is in 営業部;
 // `createDirectory` makes folders on the fake disk (recorded).
@@ -38,6 +39,10 @@ import { AppShell } from '../src/app/AppShell'
 import { emitter, installElectronAPI, type ElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
+// Synthetic content for the bottom panel's frame (B2): the real content arrives with the inbox (I1).
+const BOTTOM_PANEL = params.get('bottom') === '1'
+  ? { title: '受け箱', body: <p className="p-3 text-small text-text-muted">見本の中身です。</p> }
+  : undefined
 const featuresParam = (params.get('features') ?? '').split(',')
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const downloadOffline = params.get('download') === 'offline'
@@ -448,6 +453,6 @@ openCompany(COMPANY)
 // App.tsx shows the screen only while a company is open.
 function Screen() {
   const company = useAppStore(s => s.currentCompany)
-  return company ? <AppShell key={company.id} /> : null
+  return company ? <AppShell key={company.id} bottomPanel={BOTTOM_PANEL} /> : null
 }
 createRoot(document.getElementById('root')!).render(<div className="h-screen"><Screen /></div>)

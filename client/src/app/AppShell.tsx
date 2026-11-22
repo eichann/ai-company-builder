@@ -36,6 +36,7 @@ import { resolveLeftPanel, type LeftPanel } from '../features/workspace/leftPane
 import { SkillsPanel } from '../features/skills/components/SkillsPanel'
 import { SplitView } from '../features/workspace/components/SplitView'
 import { LayoutControls } from '../features/workspace/components/LayoutControls'
+import { BottomPanel, type BottomPanelContent } from '../features/workspace/components/BottomPanel'
 import { DepartmentBar } from '../features/workspace/components/DepartmentBar'
 import { useSplitLayout } from '../features/workspace/hooks/useSplitLayout'
 import { useDepartmentSelection } from '../features/workspace/hooks/useDepartmentSelection'
@@ -105,9 +106,15 @@ const PANE_CLASSES: Record<string, string> = {
   fileTree: 'overflow-hidden',
   // Nothing of the consultation is drawn outside its pane (over the middle's tabs).
   chat: 'min-w-0 overflow-hidden',
+  tabs: 'min-h-0',
+  bottom: 'min-h-0 overflow-hidden',
 }
 const paneClassName = (paneId: string) => PANE_CLASSES[paneId] ?? ''
-const dividerLabel = (splitId: string) => splitId === 'files' ? 'ファイルツリーとエディタの境目' : '左の欄とチャットの境目'
+const DIVIDER_LABELS: Record<string, string> = {
+  files: 'ファイルツリーとエディタの境目',
+  middle: 'エディタと下のパネルの境目',
+}
+const dividerLabel = (splitId: string) => DIVIDER_LABELS[splitId] ?? '左の欄とチャットの境目'
 
 // navigator.platform: the one platform hint the renderer has (Electron reports 'MacIntel' on every Mac).
 const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.startsWith('Mac')
@@ -115,7 +122,12 @@ const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.startsWith
 // The first registered panel opens when nothing (or an id no panel has) is remembered.
 const DEFAULT_LEFT_PANEL = 'skills'
 
-export function AppShell() {
+interface AppShellProps {
+  /** What the bottom panel shows (the inbox, I1, hands it in); without it there is no panel, button or ⌘J. */
+  bottomPanel?: BottomPanelContent
+}
+
+export function AppShell({ bottomPanel }: AppShellProps = {}) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((s) => s.currentCompany)
   const rootPath = currentCompany?.rootPath
@@ -188,6 +200,10 @@ export function AppShell() {
   const setPaneShown = useCallback((paneId: string, shown?: boolean) => setHidden(h => withPaneShown(h, paneId, shown)), [])
   const toggleChat = useCallback(() => setPaneShown('chat'), [setPaneShown])
   const toggleLeft = useCallback(() => setPaneShown('fileTree'), [setPaneShown])
+  // The bottom panel starts closed at every start (owner decision 6); only its height is saved.
+  const [bottomOpen, setBottomOpen] = useState(false)
+  const hasBottom = bottomPanel !== undefined
+  const toggleBottom = useCallback(() => { if (hasBottom) setBottomOpen(open => !open) }, [hasBottom])
   // A left tab asked for (⌘⇧F, 今日のフォルダ, 「あなたの番」, a folder link) shows the column too, even when it is already the chosen tab.
   const showLeftTab = useCallback((id: string) => { setLeftTab(id); setPaneShown('fileTree', true) }, [setLeftTab, setPaneShown])
 
@@ -606,11 +622,13 @@ export function AppShell() {
   const paneView = useMemo(() => ({ leftShown: !hidden.has('fileTree'), chatShown: !hidden.has('chat'), middleShown }), [hidden, middleShown])
   const split = useSplitLayout(currentCompany?.id, paneView, paneId => setPaneShown(paneId, false))
   const layout = split.shown
-  const resetLayout = () => { split.resetSizes(); setHidden(new Set()) }
+  const resetLayout = () => { split.resetSizes(); setHidden(new Set()); setBottomOpen(false) }
   // Just typed in the chat: ⌘⇧C stays with the chat input instead of hiding it.
   useCommandHandler('layout.toggleChat', toggleChat, { acceptsKey: () => !isChatInputRecentlyActive() })
   // ⌘B only on a Mac: Ctrl+B stays the text fields' "back one character".
   useCommandHandler('layout.toggleLeft', toggleLeft, { acceptsKey: input => !isMacControlKey(input, IS_MAC) })
+  // ⌘J the same way (never Ctrl+J on a Mac); declined while nothing is there to show.
+  useCommandHandler('layout.toggleBottom', toggleBottom, { acceptsKey: input => hasBottom && !isMacControlKey(input, IS_MAC) })
   const splitHandlers = {
     paneClassName, dividerLabel, dividerState: split.divider, onResizeStart: split.startResize, onResize: split.resize,
     onNudge: split.nudge, onReset: split.resetDivider,
@@ -644,7 +662,8 @@ export function AppShell() {
         ) : undefined}
         extra={meetings.titleBarButton}
         layoutControls={<LayoutControls leftShown={!hidden.has('fileTree')} chatShown={!hidden.has('chat')}
-          onToggleLeft={toggleLeft} onToggleChat={toggleChat} onReset={resetLayout} />}
+          onToggleLeft={toggleLeft} onToggleChat={toggleChat} onReset={resetLayout}
+          bottom={hasBottom ? { shown: bottomOpen, onToggle: toggleBottom } : undefined} />}
         notices={currentCompany ? (
           <TitleBarNotices
             companyId={currentCompany.id}
@@ -722,29 +741,41 @@ export function AppShell() {
               renderPane={id => id === 'fileTree' ? (
                 <div className="h-full flex flex-col min-w-0"><LeftPanelTabs panels={leftPanels} selectedId={leftTab} onSelect={selectLeftTab} /></div>
               ) : (
-                <TabbedEditorPanel
-                  openFiles={openFiles}
-                  activeFilePath={activeFilePath}
-                  previewFilePath={previewFilePath}
-                  tabLabels={tabLabels}
-                  recordLooks={recordLooks}
-                  onSelectFile={selectOpenFile}
-                  onCloseFile={handleCloseFile}
-                  onPinFile={handlePinFile}
-                  navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
-                  renderRecord={recordCard}
-                  viewLooks={{ [RECORDS_TABLE_VIEW]: RECORDS_TABLE_TAB_LOOK }}
-                  renderView={name => name === RECORDS_TABLE_VIEW && currentCompany ? renderRecordsTable(currentCompany.id, id => openTab(recordTabKey(id))) : null}
-                  gotoLine={gotoLine?.path === activeFilePath ? gotoLine.line : null}
-                  aside={activeFilePath && !activeRecordId && rootPath && sharedFolder
-                    ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />
-                    : undefined}
-                  pinnedTabs={tidying.pinned}
-                  onTogglePinned={tidying.togglePinned}
-                  arrangement={arrangement}
-                  notice={<TabTidyingNotice tidying={tidying} />}
-                  tabsEnd={<TabTidyingMenu tidying={tidying} arrangement={arrangement} activeKey={activeFilePath} looks={recordLooks} />}
-                />
+                // The middle: its tabs over the bottom panel (the `middle` split), measured for the panel's height.
+                <div ref={split.middleRef} className="h-full min-h-0">
+                  <SplitView
+                    split={layout.middle} limits={PANE_LIMITS} className="h-full w-full min-w-0"
+                    collapsed={bottomPanel && bottomOpen ? null : 'bottom'}
+                    {...splitHandlers}
+                    renderPane={inMiddle => inMiddle === 'bottom' ? (
+                      bottomPanel ? <BottomPanel content={bottomPanel} onClose={() => setBottomOpen(false)} /> : null
+                    ) : (
+                      <TabbedEditorPanel
+                        openFiles={openFiles}
+                        activeFilePath={activeFilePath}
+                        previewFilePath={previewFilePath}
+                        tabLabels={tabLabels}
+                        recordLooks={recordLooks}
+                        onSelectFile={selectOpenFile}
+                        onCloseFile={handleCloseFile}
+                        onPinFile={handlePinFile}
+                        navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
+                        renderRecord={recordCard}
+                        viewLooks={{ [RECORDS_TABLE_VIEW]: RECORDS_TABLE_TAB_LOOK }}
+                        renderView={name => name === RECORDS_TABLE_VIEW && currentCompany ? renderRecordsTable(currentCompany.id, id => openTab(recordTabKey(id))) : null}
+                        gotoLine={gotoLine?.path === activeFilePath ? gotoLine.line : null}
+                        aside={activeFilePath && !activeRecordId && rootPath && sharedFolder
+                          ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />
+                          : undefined}
+                        pinnedTabs={tidying.pinned}
+                        onTogglePinned={tidying.togglePinned}
+                        arrangement={arrangement}
+                        notice={<TabTidyingNotice tidying={tidying} />}
+                        tabsEnd={<TabTidyingMenu tidying={tidying} arrangement={arrangement} activeKey={activeFilePath} looks={recordLooks} />}
+                      />
+                    )}
+                  />
+                </div>
               )}
             />
           </div>

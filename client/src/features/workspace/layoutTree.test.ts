@@ -1,23 +1,25 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  DEFAULT_LAYOUT, MIDDLE_MIN, PANE_LIMITS, dragPane, fitLayout, layoutAfterResize, paneRange, paneSize, parseLayout, serializeLayout, sizeText, withPaneSize,
+  DEFAULT_LAYOUT, LAYOUT_VERSION, MIDDLE_MIN, PANE_LIMITS, TABS_MIN_HEIGHT, dragPane, fitLayout, layoutAfterResize, paneRange, paneSize, parseLayout, serializeLayout, sizeText, withPaneSize,
   type PaneView, type WorkspaceLayout,
 } from './layoutTree'
 
 const saved = (trees: unknown, version: unknown = 2) => JSON.stringify({ version, trees })
-const sized = (chat: number, fileTree: number): WorkspaceLayout => ({
+const sized = (chat: number, fileTree: number, bottom = 260): WorkspaceLayout => ({
   screen: withPaneSize(DEFAULT_LAYOUT.screen, 'chat', chat),
   files: withPaneSize(DEFAULT_LAYOUT.files, 'fileTree', fileTree),
+  middle: withPaneSize(DEFAULT_LAYOUT.middle, 'bottom', bottom),
 })
 const ALL: PaneView = { leftShown: true, chatShown: true, middleShown: true }
 // What the window gives the middle: the rest after the left column, the consultation and two 4 px dividers.
 const middleOf = (l: WorkspaceLayout, width: number) => width - paneSize(l.files, 'fileTree')! - 4 - paneSize(l.screen, 'chat')! - 4
 const chatOf = (l: WorkspaceLayout) => paneSize(l.screen, 'chat')!
 const treeOf = (l: WorkspaceLayout) => paneSize(l.files, 'fileTree')!
+const bottomOf = (l: WorkspaceLayout) => paneSize(l.middle, 'bottom')!
 
 test('what the member set comes back exactly', () => {
-  const layout = sized(512, 333)
+  const layout = sized(512, 333, 300)
   assert.deepEqual(parseLayout(serializeLayout(layout)), layout)
 })
 
@@ -148,4 +150,58 @@ test('one divider never moves another: a pane drawn smaller than saved stays as 
 
 test('the size shown while dragging: px and the share of the window', () => {
   assert.equal(sizeText(340, 1280), '340px（画面の 27%）')
+})
+
+test('the bottom panel\'s height is added to version 2: what was saved before it opens with the first height, the rest as saved', () => {
+  const before = parseLayout(saved({ screen: sized(500, 300).screen, files: sized(500, 300).files }))
+  assert.deepEqual([chatOf(before), treeOf(before), bottomOf(before)], [500, 300, 260])
+  // An app that does not know the bottom panel reads what this one writes as before (same version, same trees).
+  const written = JSON.parse(serializeLayout(sized(500, 300, 333))) as { version: number; trees: Record<string, unknown> }
+  assert.equal(written.version, LAYOUT_VERSION)
+  assert.deepEqual(written.trees.screen, sized(500, 300).screen)
+  assert.deepEqual(written.trees.files, sized(500, 300).files)
+  // A bottom tree of another shape, or junk: the first height; under its minimum: the minimum.
+  const reversed = { ...DEFAULT_LAYOUT.middle, children: [...DEFAULT_LAYOUT.middle.children].reverse(), sizes: [400, null] }
+  assert.equal(bottomOf(parseLayout(saved({ ...sized(500, 300), middle: reversed }))), 260)
+  assert.equal(bottomOf(parseLayout(saved({ ...sized(500, 300), middle: { ...DEFAULT_LAYOUT.middle, sizes: [null, 'tall'] } }))), 260)
+  assert.equal(bottomOf(parseLayout(saved({ ...sized(500, 300), middle: { ...DEFAULT_LAYOUT.middle, sizes: [null, 10] } }))), PANE_LIMITS.bottom.min)
+  // Version 1 had no bottom panel either.
+  assert.equal(bottomOf(parseLayout(saved({ files: { ...DEFAULT_LAYOUT.files, sizes: [300, null] } }, 1), 1280)), 260)
+})
+
+test('the bottom panel leaves the middle\'s tabs their height and never goes under its own; what is saved stays', () => {
+  const tall = sized(416, 260, 900)
+  // A middle 700 px high: the tabs keep TABS_MIN_HEIGHT above the 4 px divider.
+  assert.equal(bottomOf(fitLayout(tall, 1280, ALL, 700)), 700 - TABS_MIN_HEIGHT - 4)
+  // A middle too low for both: the panel keeps its minimum.
+  assert.equal(bottomOf(fitLayout(tall, 1280, ALL, 200)), PANE_LIMITS.bottom.min)
+  // Height not measured yet: the saved height.
+  assert.equal(bottomOf(fitLayout(tall, 1280, ALL)), 900)
+  assert.equal(bottomOf(fitLayout(sized(416, 260, 300), 1280, ALL, 700)), 300)
+  assert.equal(bottomOf(tall), 900, 'drawing never changes what is saved')
+  // The widths are not touched by the height.
+  assert.deepEqual(fitLayout(tall, 1280, ALL, 700).files, fitLayout(tall, 1280, ALL).files)
+})
+
+test('the bottom divider drags from 120 px up to where the tabs keep their height; it never hides the panel', () => {
+  const shown = fitLayout(sized(416, 260, 260), 1280, ALL, 700)
+  const range = paneRange('bottom', shown, 1280, ALL, 700)
+  assert.deepEqual(range, { min: 120, max: 700 - TABS_MIN_HEIGHT - 4 })
+  assert.deepEqual(dragPane('bottom', 260, 5000, range), { size: range.max, collapse: false })
+  assert.deepEqual(dragPane('bottom', 260, -5000, range), { size: 120, collapse: false })
+})
+
+test('resizing the bottom panel moves no width, and resizing a width keeps the panel\'s drawn height', () => {
+  const s = sized(416, 260, 900)
+  const drawn = fitLayout(s, 1280, ALL, 700)
+  const afterBottom = layoutAfterResize(s, drawn, 'middle', 'bottom', 300)
+  assert.deepEqual([chatOf(afterBottom), treeOf(afterBottom), bottomOf(afterBottom)], [416, 260, 300])
+  const afterTree = layoutAfterResize(s, drawn, 'files', 'fileTree', 300)
+  assert.equal(bottomOf(afterTree), bottomOf(drawn))
+  const fits = sized(416, 260, 300)
+  assert.equal(layoutAfterResize(fits, fitLayout(fits, 1280, ALL, 700), 'middle', 'bottom', 300), fits)
+})
+
+test('a height shown while dragging is the share of the window\'s height', () => {
+  assert.equal(sizeText(260, 800, 'height'), '260px（画面の高さの 33%）')
 })

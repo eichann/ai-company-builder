@@ -80,6 +80,7 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `records.runAction` `{ recordId, action, expectedVersion, note?, args?, links?, ok? }` | outbound (changes shared state, tells the person it names) | none yet (the task screen, milestone 5); choices from `client/shared/record-actions.ts` | none yet (`records.md`) |
 | `layout.toggleChat` ⌘⇧C (app) | view | `AppShell.tsx` (hides / shows the chat pane); declines the key for 1.2 s after typing in the chat (`isChatInputRecentlyActive`), so the key stays with the input | the shortcut; the collapsed chat's button and the title bar's 「画面の形」 button call the same function directly |
 | `layout.toggleLeft` ⌘B (app) | view | `AppShell.tsx` (hides / shows the left column; the middle takes its room). ⌘B is free in the app: CodeMirror binds no Mod-b and nothing is rich text. **On a Mac only ⌘B**: Ctrl+B (a text field's "back one character") is declined (`acceptsKey` + `isMacControlKey`, `define.ts`), so it reaches the field; elsewhere Ctrl+B is the shortcut |  the shortcut; the title bar's 「画面の形」 button and the hidden column's strip call the same function directly |
+| `layout.toggleBottom` ⌘J (app) | view | `AppShell.tsx` (opens / closes the bottom panel; `renderer-structure.md`). ⌘J is free in the app (CodeMirror binds no Mod-j, no menu accelerator). **On a Mac only ⌘J** (Ctrl+J declined like Ctrl+B); declined too while no feature hands the panel content, so the key is left alone | the shortcut; the title bar's 「画面の形」 button and the panel's 閉じる call the same function directly |
 | `find.byName` ⌘K (app) | view | `AppShell.tsx`: 探す ⌘K, `FindPalette` — open anything by name (records the server finds, skills already loaded for the スキル tab and slash commands, 「AIへの相談」 read once when it opens, files; the open tabs as 「最近開いたもの」); a skill opens in the スキル tab (a company-wide one under 全社), a consultation through `chat.openConsultation` | the shortcut |
 | `file.search` ⌘P (app) | view | `AppShell.tsx`: the same 探す window (kept for members used to ⌘P) | the shortcut |
 | `folder.reveal` `{ path }` | view | `AppShell.tsx`: the folder's department, the ファイル tab, the folder revealed in the tree | a folder row of 「つながっているもの」 (`linkRows.tsx`, `tasks-ui.md` "Dropping links") |
@@ -155,7 +156,7 @@ So the AI works only on the main window's tabs, and only for its own company. Te
   handlers (`ConfirmDialog`, `InputDialog`, `ContextMenu`, `DiffViewer`, `FileSearchModal`,
   `SyncPreviewDialog`, `SettingsPanel`) stay where they are.
 - UI tests: `tests/ui/skill-layout.spec.ts` 「shortcuts」 (⌘P, ⌘⇧F),
-  `skill-layout-state.spec.ts` (⌘⇧C, ⌘B), `editor-panel.spec.ts` (⌘S, ⌘⇧V, ⌘F, focus only) and
+  `skill-layout-state.spec.ts` (⌘⇧C, ⌘B, ⌘J), `editor-panel.spec.ts` (⌘S, ⌘⇧V, ⌘F, focus only) and
   `voice-input.spec.ts` (the voice key, two panes).
 - `runCommand` logs a failure (`[commands] <id> failed: <code>`) and resolves to undefined; it
   never logs arguments (paths, what a member typed).
