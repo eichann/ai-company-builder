@@ -9,6 +9,8 @@ paths:
   - "client/src/features/editor/docViewSession.ts"
   - "client/src/features/editor/components/HtmlDocumentPane.tsx"
   - "client/tests/ui/editor-html-viewer.spec.ts"
+  - "client/src/features/editor/components/BlockedPartsBand.tsx"
+  - "client/src/features/chat/documentLink*.ts"
 ---
 
 # The HTML viewer's document view (`acb-doc://`)
@@ -18,8 +20,8 @@ instruction, a teammate): the app shows it, but it must reach **no network, no a
 file and no storage**. Owner decisions (2026-11-22, the proposal 「HTML ビューワーと下のパネル」):
 internet parts (CDN scripts, web fonts, any network) are **blocked**; scripts inside the document
 **run**, in an opaque-origin sandbox; the viewer does **not** open by itself. PR A1 made the address, the view and their guards in
-main; A2 the viewer in the middle panel ("The viewer (A2)" below). The chat's ［見る］ and the
-band of blocked internet parts (A3) build on it.
+main; A2 the viewer in the middle panel ("The viewer (A2)" below); A3 the chat's ［見る］ and the
+band of blocked internet parts (below).
 
 ## The view and its session (`client/electron/doc-view.ts`, shell layer)
 
@@ -131,7 +133,9 @@ carrying a secret in its user name reached a local listener). Each document is s
   an `http(s)` address (`webLinkForBrowser`), at most one per view per second (`LINK_INTERVAL_MS`:
   a page cannot queue confirmations), only for a registered view; `{ kind: 'gone' }` — a view went
   without its window asking (its page crashed, the cap closed it); `{ kind: 'shortcut', key }` — the
-  member pressed one of the app's shortcuts in it (below), only for a registered view.
+  member pressed one of the app's shortcuts in it (below), only for a registered view;
+  `{ kind: 'blocked', count, hosts, hostCount }` — what its page wanted from the internet and did not get
+  ("The band of blocked internet parts (A3)"), hosts only, only for a registered view.
 - **Revocation goes with the view** (`views.ts`): `docView:close(viewId)` by its own window; the
   view destroyed or its page crashed (`onGone`); the window's page reloading, crashing or closing
   (`onWindowReset`: every view of that window closes); at most `MAX_VIEWS_PER_WINDOW` (32) per
@@ -242,8 +246,71 @@ carrying a secret in its user name reached a local listener). Each document is s
   (focus on the dialog, a stray Enter answers nothing). Only ［ブラウザで開く］ calls `openExternal`
   (`shell:openExternal`, http / https / mailto only). One confirmation at a time per tab; links
   arriving meanwhile are dropped.
-- Not in A2 (proposal): the chat's ［見る］ and the internet-parts band (A3); a separate window,
+- Not in A2 or A3 (proposal): a separate window,
   printing, ⌘F in the document (A4).
+
+## The chat's ［見る］ (A3)
+
+- The owner's decision ③: **the viewer never opens by itself** when the AI makes or changes an HTML
+  file. A finished, successful 「ファイルに書きました／直しました」 row (`Write`, `Edit`, `MultiEdit`,
+  `writeFile`; Codex's `Write` with `changes`) naming an `.html` / `.htm` file as an absolute path
+  inside the company folder, with no `.` / `..` / empty segment (`src/features/chat/documentLink.ts`
+  `documentToViewOf`), carries ［見る］ beside it (`ToolRows.tsx`). Not on a read, a running or failed
+  call, another file type, a file outside the company folder, a restored row (history keeps no
+  path; B3 adds it), and not in a consultation's own window (no editor: `useCommandAvailable`).
+  Inside a same-tool group the button is on the expanded rows. Kept as it is (review of A3): a
+  write the agent refused without a `failure` marker may still carry ［見る］ — harmless, the file is
+  opened only if it is there and main's checks pass.
+- It runs `editor.viewDocument { path }` (`commands.md`), handled by the editor
+  (`TabbedEditorPanel`): a tab shown as 中身 goes back to 見る, then `file.open` opens / shows the tab.
+  Main checks everything again on `docView:open` (top level, links, not downloaded…): the chat only
+  decides where the button is.
+
+## The band of blocked internet parts (A3)
+
+- **What main reports** (`doc-view.ts`): Chromium's own report of each CSP refusal — the DevTools
+  `Audits` domain's `ContentSecurityPolicyIssue` (`blockedURL`), read through the view's
+  `webContents.debugger` in main (attached when the view is made; already attached elsewhere →
+  no report, nothing else changes; attached before the page loads, so the refusals of its first
+  parse are reported too — measured on Electron 45 for the stylesheet and script in the HTML;
+  measure again on an Electron upgrade, as the harness does) — and the requests the session's hook cancelled for that view
+  (`details.webContentsId`). The page can neither send nor see either (its `console` and
+  `securitypolicyviolation` events are its own and are not read); a page can of course *cause*
+  refusals for any host by asking for it — the band says what it wanted. **Measured (harness,
+  Electron 45)**: every web part the CSP holds (stylesheet, script, preload, prefetch, fetch, XHR,
+  WebSocket, beacon, image) arrives through `Audits`; the hook reported nothing (the CSP stops each
+  request first) and stays as a second source for a request that gets past the CSP. Not reported:
+  preconnect, DNS prefetch, WebRTC, a popup, a link (the navigation lock; a link the member pressed
+  is the A2 confirmation).
+- **Hosts only** (`views.ts` `onBlocked`, `blockedWebHost` in `client/shared/doc-frame.ts`): only
+  `http` / `https` / `ws` / `wss`; the host lower case, punycode, no port, user name, path or query
+  (an address can carry what the page holds); `file:` / `data:` / other schemes are not internet
+  parts. Main counts **different addresses** (kept in main only, at most `DOC_BLOCKED_PARTS_MAX`
+  999; each kept as its SHA-256, so a long address costs no memory; a full tally takes nothing more,
+  checked before an address is even read) and keeps distinct hosts in the order first seen (at most `DOC_BLOCKED_HOSTS_MAX` 20), and
+  sends `{ kind: 'blocked', count, hosts, hostCount }` (`hostCount`: different hosts in all, past the
+  named 20 too) — the first at once, then at most every
+  `BLOCKED_INTERVAL_MS` (500 ms: a page asking in a loop sends no flood), nothing when nothing
+  changed. A main-frame navigation of the view (`did-navigate`: its reload, its own other page)
+  starts a new tally; the window hears `count: 0` once if it had heard something. A closed view
+  sends nothing more (its waiting send is cancelled).
+- **The band** (`components/BlockedPartsBand.tsx`, between the toolbar and the area: the view is
+  placed under it; `role="region"`, never `status` / `alert`, which the viewer treats as an overlay):
+  「この資料はインターネットから部品を N 件読み込もうとしています。会社の情報が外に出ないよう、読み込まずに
+  表示しています（見た目が少し違うことがあります）。」 ［止めたもの］ (the hosts; 「ほかにもあります」 at the
+  cap; the tip: ask the AI 「インターネットの部品を使わずに作り直して」, or write 「HTML は 1 つのファイル
+  にまとめ、インターネットの部品を使わない」 into the company's AI instructions), ［AI に直してもらう］
+  (`chat.insertText` with 「「<company path>」を、インターネットの部品（…）を使わずに作り直してください。HTML は
+  1 つのファイルにまとめてください。」 — nothing is sent; only where a chat pane is there,
+  `htmlViewer.ts` `rebuildRequestOf`) and ［×］. **Nothing is loaded from the band** (the owner's
+  later decisions — images the file names after 「表示する」, YouTube / Vimeo on click, company
+  storage hosts — are "Later" below).
+- ［×］ remembers the hosts shown and `hostCount` (`DocViewSession.dismissBand`, for this showing of
+  the tab): the same hosts again (an auto refresh while the AI edits) keep it closed; a host not
+  seen before — named, or past the cap (`hostCount` grew; Codex review) — brings it back
+  (`blockedBandShown`). ［止める］ and a view gone hide the band; a new view (another tab and back,
+  ［もう一度表示する］ after ［止める］ or a crash) starts with no dismissal (Codex review): ［×］ holds for
+  that view's reloads only.
 
 ## The CSP: one policy object (`docFramePolicy` → `docFrameCsp`)
 
@@ -348,6 +415,22 @@ hosts, and nothing else):
   it hides it (also a menu or a toast smaller than the grid, by its role), the top-level refusal's words, reloads
   on the right changes, the zoom kept across another tab and 中身, a handed-over ⌘⇧V switching to 中身 (another view's ignored), the link dialog (host large, Enter answers nothing, only ［ブラウザで開く］
   opens, another view's link ignored), zoom steps, a gone view, full screen.
+- A3: `doc-frame-electron.test.ts` — the page's web parts (in the HTML and asked by its script; one
+  address with a secret path and query asked twice; 30 more hosts) reach the window as 40 parts
+  and 20 distinct hosts, never a path, query or scheme, in at most 8 events, with 0 connections;
+  its own page with no web parts brings `count: 0`. `doc-frame-protocol.test.ts` — `blockedWebHost`
+  (host only; file, data, blob, acb-doc, ftp, javascript are none), the tally (distinct, an address
+  counted once tells nothing, capped hosts and count, the first at once then every
+  `BLOCKED_INTERVAL_MS`, each window its own views, a new page → 0 once, nothing after close and
+  no timer left). `src/features/chat/documentLink.test.ts` — ［見る］ only on a finished write of an
+  HTML file inside the company folder. `htmlViewer.test.ts` — the band's dismissal by host and the
+  AI request's company path. `editor-html-viewer.spec.ts` — ［見る］ on the two HTML writes only (not a
+  read, Markdown, outside, failed), opening as 見る also from 中身; the band (another view's ignored,
+  count, hosts, the view placed under it, the AI request in the chat's input, ［×］ kept for the same
+  hosts, a new host back, `count: 0` gone, a new view after ［止める］ says it again). Mutation-checked: the `Audits` reader, `did-navigate`'s
+  new tally, the scheme / host rule, dedupe, both caps, the interval, the cancel on close, the
+  editor's 中身 → 見る, the dismissed hosts, the chat row's state / failure / tool / folder / segment
+  checks. Kept on purpose: the request hook's report (no request reaches it past the CSP today).
 - `ipc-window-links.test.ts` (privileges; the app's session does not serve `acb-doc`),
   `ipc-path-guard.test.ts` (`docView:open` from the main frame reaches the allowed roots),
   `ipc-contract.test.ts`.

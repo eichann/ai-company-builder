@@ -57,6 +57,8 @@ interface Result {
     mac: boolean
   }
   closedWithKeyboard: { before: { app: boolean; doc: boolean }; appAfter: boolean }
+  blocked: Array<{ viewId: number; kind: string; count: number; hosts: string[]; hostCount: number }>
+  blockedAfterOwnPage: { viewId: number; kind: string; count: number; hosts: string[]; hostCount: number } | undefined
 }
 
 function freePort(): Promise<number> {
@@ -217,4 +219,25 @@ test('the app\'s shortcuts reach the app while the document has the keyboard; it
 test('a view closed while it has the keyboard (中身, the tab closed) gives the keyboard back to the app', { skip }, () => {
   assert.deepEqual(result.closedWithKeyboard.before, { app: false, doc: true }, 'control: the document had the keyboard')
   assert.equal(result.closedWithKeyboard.appAfter, true)
+})
+
+test('what a document wanted from the internet reaches the window as hosts and a count only: distinct, capped, a few events, nothing connects', { skip }, () => {
+  assert.deepEqual(result.connections, {}, 'reporting loads nothing')
+  const last = result.blocked.at(-1)!
+  assert.ok(last, 'the window was told')
+  // style + script (in the HTML), preload, prefetch, fetch, XHR, WebSocket, beacon, image; the image with a
+  // secret path and query once (asked twice); 30 more hosts.
+  assert.equal(last.count, 40)
+  assert.equal(last.hosts.length, 20, 'at most DOC_BLOCKED_HOSTS_MAX hosts')
+  assert.equal(new Set(last.hosts).size, last.hosts.length, 'each host once')
+  assert.equal(last.hostCount, 39, '9 hosts and 30 more, counted past the named ones')
+  for (const host of ['style.test', 'script.test', 'fetch.test', 'xhr.test', 'ws.test', 'beacon.test', 'img.test']) assert.ok(last.hosts.includes(host), host)
+  // Never a path, a query or a scheme: an address can carry what the page holds.
+  assert.doesNotMatch(JSON.stringify(result.blocked), /secret|\/|\?|https|wss/)
+  assert.ok(result.blocked.length <= 8, `told at most every BLOCKED_INTERVAL_MS, not per request (${result.blocked.length} events)`)
+  assert.ok(result.blocked.every(e => e.viewId === last.viewId && e.kind === 'blocked'))
+})
+
+test('a new page of the document starts the tally again: the window hears 0 when it wants nothing', { skip }, () => {
+  assert.deepEqual(result.blockedAfterOwnPage, { viewId: result.blocked.at(-1)!.viewId, kind: 'blocked', count: 0, hosts: [], hostCount: 0 })
 })

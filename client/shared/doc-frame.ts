@@ -257,12 +257,55 @@ export function docZoomFactor(input: unknown): number | null {
  * the app asks before the member's browser opens it), or the view went by
  * itself (`gone`: its page crashed, or more views were opened than a window keeps), or the member
  * pressed one of the app's shortcuts while the document had the keyboard (`shortcut`: the key, run
- * by the window as if pressed in the document's tab).
+ * by the window as if pressed in the document's tab), or its page wanted internet parts that were
+ * not loaded (`blocked`: the whole tally so far, hosts only — `DocBlockedParts`).
  */
 export type DocViewEvent =
   | { viewId: number; kind: 'link'; url: string }
   | { viewId: number; kind: 'gone' }
   | { viewId: number; kind: 'shortcut'; key: KeyInput }
+  | ({ viewId: number; kind: 'blocked' } & DocBlockedParts)
+
+/**
+ * The internet parts a document's page wanted and did not get (doc-frame.md "The band of blocked
+ * internet parts", A3), for the band over it: how many different addresses (`count`, at most
+ * `DOC_BLOCKED_PARTS_MAX`) and their hosts (`hosts`, distinct, at most `DOC_BLOCKED_HOSTS_MAX`, in
+ * the order first seen). **Hosts only**: an address's path and query may carry what the page holds
+ * (a document can put its content into a URL), so they never leave main. `count: 0` = the page
+ * loaded again and wanted nothing yet.
+ */
+export interface DocBlockedParts {
+  count: number
+  hosts: string[]
+  /** How many different hosts in all (beyond the named ones too): a host past the cap still brings a dismissed band back. */
+  hostCount: number
+}
+
+/** The band names at most this many hosts (the rest is counted only). */
+export const DOC_BLOCKED_HOSTS_MAX = 20
+/** Different blocked addresses counted per page (a page asking in a loop counts no further). */
+export const DOC_BLOCKED_PARTS_MAX = 999
+
+const WEB_SCHEMES = new Set(['http:', 'https:', 'ws:', 'wss:'])
+const HOST_RE = /^(?:[a-z0-9-]{1,63}\.)*[a-z0-9-]{1,63}\.?$|^\[[0-9a-f:.]{2,45}\]$/
+
+/**
+ * The host of an internet address a document wanted (lower case, punycode for a non-ASCII name, no
+ * port, user name, path or query), or null for anything that is not a web address — a file, data or
+ * another scheme is not an internet part — or whose host is not a plain name / IP address.
+ */
+export function blockedWebHost(url: string): string | null {
+  if (typeof url !== 'string' || url.length > 8192) return null
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+  if (!WEB_SCHEMES.has(parsed.protocol)) return null
+  const host = parsed.hostname.toLowerCase()
+  return host.length > 0 && host.length <= 253 && HOST_RE.test(host) ? host : null
+}
 
 /**
  * The command areas around a document's view: it sits in the editor (its tab), inside the app.

@@ -14,10 +14,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { AllowedRoots } from '../electron/allowed-roots'
 import { createDocFrames, type DocFrameDeps } from '../electron/features/doc-frames/protocol'
-import { createDocViews, MAX_VIEWS_PER_WINDOW, type DocViewHandle, type DocViewHooks, type DocViewPort, LINK_INTERVAL_MS } from '../electron/features/doc-frames/views'
+import { BLOCKED_INTERVAL_MS, createDocViews, MAX_VIEWS_PER_WINDOW, type DocViewHandle, type DocViewHooks, type DocViewPort, LINK_INTERVAL_MS } from '../electron/features/doc-frames/views'
 import { registerDocViewsIpc } from '../electron/features/doc-frames/ipc'
 import {
-  docFrameCsp, docFramePolicy, docFileType, docSessionRequestAllowed, docViewBounds, docViewNavigationAllowed, docViewOnScreen, docViewShortcutOf, parseDocFrameUrl, DOC_MAX_FILE_BYTES,
+  blockedWebHost, docFrameCsp, docFramePolicy, docFileType, docSessionRequestAllowed, docViewBounds, docViewNavigationAllowed, docViewOnScreen, docViewShortcutOf, parseDocFrameUrl,
+  DOC_BLOCKED_HOSTS_MAX, DOC_BLOCKED_PARTS_MAX, DOC_MAX_FILE_BYTES,
 } from '../shared/doc-frame'
 import { COMMANDS } from '../shared/commands/catalog'
 import type { CommandDefinition, KeyInput } from '../shared/commands/define'
@@ -314,6 +315,8 @@ function fakeShell(options: { fail?: boolean; hold?: boolean } = {}) {
     crash: (id: number) => hooksOf.get(id)?.onGone(id),
     link: (id: number, url: string) => hooksOf.get(id)?.onLink(id, url),
     shortcut: (id: number, key: KeyInput) => hooksOf.get(id)?.onShortcut(id, key),
+    blocked: (id: number, url: string) => hooksOf.get(id)?.onBlocked(id, url),
+    pageStart: (id: number) => hooksOf.get(id)?.onPageStart(id),
     resetWindow: (windowId: number) => reset(windowId),
   }
 }
@@ -568,6 +571,86 @@ test('an app shortcut pressed in a document goes to that view\'s own window only
   views.close(a, MAIN)
   shell.shortcut(a, key)
   assert.deepEqual(told, [])
+})
+
+test('a blocked internet part is named by its host only: lower case, punycode, no port, user, path or query; nothing else is one', () => {
+  assert.equal(blockedWebHost('https://user:pw@CDN.Example.com:8443/lib/chart.js?key=secret#x'), 'cdn.example.com')
+  assert.equal(blockedWebHost('wss://ws.example.org/socket?token=abc'), 'ws.example.org')
+  assert.equal(blockedWebHost('http://例え.jp/a.png'), 'xn--r8jz45g.jp')
+  assert.equal(blockedWebHost('https://192.168.0.1/x'), '192.168.0.1')
+  assert.equal(blockedWebHost('https://[::1]:3000/x'), '[::1]')
+  for (const url of ['file:///etc/passwd', 'data:image/png;base64,AAAA', 'blob:null/1', 'acb-doc://' + 'a'.repeat(32) + '/x.png', 'local-file:///x', 'javascript:alert(1)', 'not a url', 'ftp://example.com/x'])
+    assert.equal(blockedWebHost(url), null, url)
+})
+
+test('the window hears what a view\'s page wanted from the internet as hosts and a count: distinct, capped, at most every BLOCKED_INTERVAL_MS, its own window only', async () => {
+  const w = world()
+  const shell = fakeShell()
+  const timers: Array<() => void> = []
+  const told: Array<[number, unknown]> = []
+  const views = createDocViews({
+    frames: w.frames, shell: shell.port, notify: (windowId, event) => told.push([windowId, event]),
+    later: (fn, ms) => { assert.equal(ms, BLOCKED_INTERVAL_MS); timers.push(fn); return () => { timers.splice(timers.indexOf(fn), 1) } },
+  })
+  const tick = () => { for (const fn of timers.splice(0)) fn() }
+  const doc = await reportDoc(w)
+  const a = (await views.open(doc, views.begin(MAIN)))!
+  const b = (await views.open(doc, views.begin(MAIN + 1)))!
+  for (const url of ['file:///etc/passwd', 'data:text/plain,x', 'acb-doc://' + 'a'.repeat(32) + '/x.png']) shell.blocked(a, url)
+  assert.deepEqual(told, [], 'only internet addresses are internet parts')
+  shell.blocked(a, 'https://cdn.example.com/chart.js?secret=1')
+  assert.deepEqual(told, [[MAIN, { viewId: a, kind: 'blocked', count: 1, hosts: ['cdn.example.com'], hostCount: 1 }]], 'the first at once')
+  shell.blocked(a, 'https://cdn.example.com/chart.js?secret=1')
+  shell.blocked(a, 'https://cdn.example.com/other.js')
+  shell.blocked(a, 'https://fonts.example.net/css?family=x')
+  shell.blocked(b, 'https://b.example/x')
+  assert.equal(told.length, 2, 'a then waits; b is told at once, to its own window')
+  assert.deepEqual(told[1], [MAIN + 1, { viewId: b, kind: 'blocked', count: 1, hosts: ['b.example'], hostCount: 1 }])
+  tick()
+  assert.deepEqual(told[2], [MAIN, { viewId: a, kind: 'blocked', count: 3, hosts: ['cdn.example.com', 'fonts.example.net'], hostCount: 2 }], 'distinct addresses counted, each host once')
+  tick()
+  assert.equal(told.length, 3, 'nothing new: nothing told')
+  shell.blocked(a, 'https://cdn.example.com/chart.js?secret=1')
+  assert.equal(told.length, 3, 'an address already counted tells nothing')
+  // Addresses as long as a page may make them, differing only at their end: two parts.
+  told.length = 0
+  const long = `https://cdn.example.com/${'x'.repeat(7000)}`
+  shell.blocked(a, `${long}1`)
+  tick()
+  shell.blocked(a, `${long}2`)
+  tick()
+  assert.equal((told.at(-1)![1] as { count: number }).count, 5, 'the same host, two more different addresses')
+  // A page asking in a loop: capped hosts and count, few events.
+  told.length = 0
+  for (let i = 0; i < 2000; i++) shell.blocked(a, `https://h${i}.example/p?i=${i}`)
+  tick()
+  const last = told.at(-1)![1] as { count: number; hosts: string[]; hostCount: number }
+  assert.equal(told.length, 2, '2000 requests: the first at once, then one with the rest')
+  assert.equal(last.count, DOC_BLOCKED_PARTS_MAX)
+  assert.equal(last.hosts.length, DOC_BLOCKED_HOSTS_MAX)
+  assert.ok(last.hostCount > DOC_BLOCKED_HOSTS_MAX, 'hosts past the named ones are still counted (a dismissed band comes back)')
+  assert.doesNotMatch(JSON.stringify(told), /secret|family|\/|\?|https/, 'never a path, a query or a scheme')
+  // A new page: a new tally, and the window hears 0 once (only if it had heard something).
+  told.length = 0
+  shell.pageStart(a)
+  tick()
+  assert.deepEqual(told, [[MAIN, { viewId: a, kind: 'blocked', count: 0, hosts: [], hostCount: 0 }]])
+  shell.pageStart(a)
+  tick()
+  assert.equal(told.length, 1, 'already told 0')
+  shell.blocked(a, 'https://cdn.example.com/chart.js?secret=1')
+  tick()
+  assert.deepEqual(told.at(-1), [MAIN, { viewId: a, kind: 'blocked', count: 1, hosts: ['cdn.example.com'], hostCount: 1 }], 'counted again on the new page')
+  // Closed: nothing more, no timer left.
+  told.length = 0
+  shell.blocked(a, 'https://late.example/x')
+  shell.blocked(a, 'https://waiting.example/x')
+  views.close(a, MAIN)
+  assert.equal(timers.length, 0, 'closing cancels what waited')
+  tick()
+  shell.blocked(a, 'https://later.example/x')
+  assert.deepEqual(told.map(([, e]) => (e as { hosts: string[] }).hosts), [['cdn.example.com', 'late.example']], 'what waited when it closed is never told')
+  assert.equal(timers.length, 0)
 })
 
 const press = (key: string, mods: Partial<Omit<KeyInput, 'key'>> = {}): KeyInput => ({ key, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...mods })

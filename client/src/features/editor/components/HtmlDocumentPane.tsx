@@ -5,6 +5,10 @@ import { ArrowsIn, ArrowsOut, Code, Eye, LockSimple, Minus, Plus, Stop, ArrowClo
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import { docViewPorts } from '../api'
 import { DocViewSession } from '../docViewSession'
+import { rebuildRequestOf } from '../htmlViewer'
+import { runCommand, useCommandAvailable } from '../../../shared/commands/commands'
+import { useAppStore } from '../../../stores/appStore'
+import { BlockedPartsBand } from './BlockedPartsBand'
 
 const TOOL = 'inline-flex items-center gap-1 h-control-sm px-control-sm-x rounded-control text-small text-text-muted hover:text-text hover:bg-surface-sunken disabled:opacity-disabled disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring'
 
@@ -32,7 +36,9 @@ export function HtmlDocumentPane({ filePath, onShowSource, zoom: tabZoom, onZoom
     const ports = docViewPorts()
     return new DocViewSession(filePath, ports.views, ports.links, tabZoom, onZoom)
   })
-  const { status, zoom, fullScreen, refreshed, link } = useSyncExternalStore(session.subscribe, session.getSnapshot)
+  const { status, zoom, fullScreen, refreshed, link, blocked, bandShown } = useSyncExternalStore(session.subscribe, session.getSnapshot)
+  const canAskAi = useCommandAvailable('chat.insertText')
+  const rootPath = useAppStore(s => s.currentCompany?.rootPath ?? null)
   const running = status.kind === 'shown' || status.kind === 'opening'
 
   return (
@@ -68,6 +74,13 @@ export function HtmlDocumentPane({ filePath, onShowSource, zoom: tabZoom, onZoom
           ? <button type="button" className={TOOL} onClick={() => session.stop()} title="資料の中のプログラムを止めます"><Stop size={14} aria-hidden />止める</button>
           : <button type="button" className={TOOL} onClick={() => session.restart()}><Eye size={14} aria-hidden />もう一度表示する</button>}
       </div>
+      {bandShown && blocked && (
+        <BlockedPartsBand
+          parts={blocked}
+          onDismiss={() => session.dismissBand()}
+          onAskAi={canAskAi ? () => void runCommand('chat.insertText', { text: rebuildRequestOf(filePath, rootPath) }) : undefined}
+        />
+      )}
       {/* The document's own view is placed over this area; what is written here shows only when it is not. */}
       <div ref={session.attachArea} data-testid="html-viewer-area" className="flex-1 min-h-0 min-w-0 flex items-center justify-center p-card bg-surface-sunken text-small text-text-muted">
         {status.kind === 'opening' && <p>表示しています…</p>}

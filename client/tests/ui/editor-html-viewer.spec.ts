@@ -32,7 +32,7 @@ test('an .html tab opens as 見る: its view is placed exactly over the tab\'s a
   const box = await area(page).boundingBox()
   const placed = (await lastBounds(page))!
   for (const k of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(placed[k] - box![k])).toBeLessThan(1)
-  await expect(page.getByRole('button', { name: '見る' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('toolbar', { name: '資料の表示' }).getByRole('button', { name: '見る' })).toHaveAttribute('aria-pressed', 'true')
   await tab(page, MD).click()
   await expect.poll(async () => (await calls(page)).some(c => c[0] === 'close' && c[1] === 7)).toBe(true)
   await tab(page, DOC).click()
@@ -188,5 +188,67 @@ test('全画面 covers the window with the document; 全画面を終える puts 
   expect((await lastBounds(page))!.y).toBeLessThan(before.y)
   await page.getByRole('button', { name: '全画面を終える' }).click()
   await expect.poll(async () => (await lastBounds(page))?.height).toBe(before.height)
+  expectNoPageErrors(state)
+})
+
+const SLIDES = `${ROOT}/営業部/報告/提案スライド.html`
+const inserted = (page: Page) => page.evaluate(() => (window as unknown as { __acbInserted: string[] }).__acbInserted)
+const band = (page: Page) => page.getByTestId('blocked-parts-band')
+
+test('the chat\'s ［見る］ is on a finished write of an HTML file in the company folder only, and opens its tab as 見る (also from 中身)', async ({ page }) => {
+  const state = await open(page)
+  const lines = page.getByRole('region', { name: 'AI の作業' })
+  // Written HTML (2); not on a read, a Markdown file, an HTML file outside the company folder or a failed write.
+  await expect(lines.getByRole('button', { name: '見る' })).toHaveCount(2)
+  await lines.getByRole('button', { name: '見る' }).first().click()
+  await expect(tab(page, SLIDES)).toBeVisible()
+  await expect(page.getByRole('toolbar', { name: '資料の表示' })).toBeVisible()
+  await expect.poll(async () => (await calls(page)).filter(c => c[0] === 'open').map(c => c[1])).toEqual([DOC, SLIDES])
+  // The other document shown as 中身: its ［見る］ brings it back as 見る.
+  await tab(page, DOC).click()
+  await page.getByRole('button', { name: '中身' }).click()
+  await expect(page.locator('.cm-content[role="textbox"]')).toContainText('11月の売上')
+  await lines.getByRole('button', { name: '見る' }).last().click()
+  await expect(page.getByRole('toolbar', { name: '資料の表示' })).toBeVisible()
+  await expect.poll(async () => (await calls(page)).filter(c => c[0] === 'open').at(-1)?.[1]).toBe(DOC)
+  expectNoPageErrors(state)
+})
+
+test('the band says what the document wanted from the internet (count, hosts), suggests the AI fix, and stays dismissed for those hosts', async ({ page }) => {
+  const state = await open(page)
+  await sendEvent(page, { viewId: 99, kind: 'blocked', count: 2, hosts: ['other.example'], hostCount: 1 })
+  await page.waitForTimeout(150)
+  await expect(band(page)).toHaveCount(0)
+  await sendEvent(page, { viewId: 7, kind: 'blocked', count: 3, hosts: ['cdn.jsdelivr.net', 'fonts.googleapis.com'], hostCount: 2 })
+  await expect(band(page)).toContainText('この資料はインターネットから部品を 3 件読み込もうとしています。')
+  await expect(band(page)).toContainText('読み込まずに表示しています')
+  // The document's view moves under the band and stays shown (the band is not an overlay).
+  const bandBox = (await band(page).boundingBox())!
+  await expect.poll(async () => (await lastBounds(page))?.y ?? 0).toBeGreaterThanOrEqual(Math.floor(bandBox.y + bandBox.height))
+  await band(page).getByRole('button', { name: '止めたもの' }).click()
+  await expect(band(page).getByRole('listitem')).toHaveText(['cdn.jsdelivr.net', 'fonts.googleapis.com'])
+  await expect(band(page)).toContainText('HTML は 1 つのファイルにまとめ、インターネットの部品を使わない')
+  await band(page).getByRole('button', { name: 'AI に直してもらう' }).click()
+  expect(await inserted(page)).toEqual(['「営業部/報告/11月の売上.html」を、インターネットの部品（CDN のプログラム、Web フォント、ネットの画像）を使わずに作り直してください。HTML は 1 つのファイルにまとめてください。'])
+  // Dismissed: the same hosts again (an auto refresh) keep it closed; a new host brings it back.
+  await band(page).getByRole('button', { name: 'この帯を閉じる' }).click()
+  await expect(band(page)).toHaveCount(0)
+  await sendEvent(page, { viewId: 7, kind: 'blocked', count: 4, hosts: ['cdn.jsdelivr.net', 'fonts.googleapis.com'], hostCount: 2 })
+  await page.waitForTimeout(150)
+  await expect(band(page)).toHaveCount(0)
+  await sendEvent(page, { viewId: 7, kind: 'blocked', count: 5, hosts: ['cdn.jsdelivr.net', 'fonts.googleapis.com', 'unpkg.com'], hostCount: 3 })
+  await expect(band(page)).toContainText('部品を 5 件')
+  // The page loaded again and wants nothing: no band.
+  await sendEvent(page, { viewId: 7, kind: 'blocked', count: 0, hosts: [], hostCount: 0 })
+  await expect(band(page)).toHaveCount(0)
+  // Dismissed, then 止める and もう一度表示する: a new view says it again.
+  await sendEvent(page, { viewId: 7, kind: 'blocked', count: 4, hosts: ['cdn.jsdelivr.net', 'fonts.googleapis.com', 'unpkg.com', 'esm.sh'], hostCount: 4 })
+  await band(page).getByRole('button', { name: 'この帯を閉じる' }).click()
+  await page.getByRole('button', { name: '止める' }).click()
+  await expect(band(page)).toHaveCount(0)
+  await page.getByRole('button', { name: 'もう一度表示する' }).click()
+  await expect.poll(async () => (await calls(page)).filter(c => c[0] === 'open').length).toBe(2)
+  await sendEvent(page, { viewId: 8, kind: 'blocked', count: 1, hosts: ['cdn.jsdelivr.net'], hostCount: 1 })
+  await expect(band(page)).toContainText('部品を 1 件')
   expectNoPageErrors(state)
 })

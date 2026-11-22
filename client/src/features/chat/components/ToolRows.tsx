@@ -21,6 +21,9 @@ import { REVIEW_TOOL_ID } from '../../../../shared/review-request'
 import { manyLine } from '../../../../shared/tool-display'
 import { ConsultationReferenceLink } from './ConsultationReference'
 import { useAgentProgress } from '../agentStatusStore'
+import { documentToViewOf } from '../documentLink'
+import { runCommand, useCommandAvailable } from '../../../shared/commands/commands'
+import { useAppStore } from '../../../stores/appStore'
 import {
   GROUP_PAGE_SIZE,
   isRunningState,
@@ -95,6 +98,10 @@ const ToolInvocationPartView = memo(function ToolInvocationPartView({ row }: { r
   const [isExpanded, setIsExpanded] = useState(false)
   const IconComponent = TOOL_ICONS[row.toolName] || (row.line.muted ? Wrench : Sparkle)
   const isFinished = row.state === 'output-available' || row.state === 'output-error'
+  // ［見る］ only where an editor can show it (not in a consultation's own window).
+  const canView = useCommandAvailable('editor.viewDocument')
+  const rootPath = useAppStore(state => state.currentCompany?.rootPath)
+  const documentPath = canView ? documentToViewOf(row, rootPath) : null
 
   const reference = referenceFromTool(row.toolName, row.output)
   if (reference) return <ConsultationReferenceLink reference={reference} />
@@ -102,10 +109,11 @@ const ToolInvocationPartView = memo(function ToolInvocationPartView({ row }: { r
   const muted = row.line.muted && !row.failure
   return (
     <div className="my-1.5 animate-fade-in">
+      <div className="flex items-center gap-1 min-w-0">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         title={row.line.label}
-        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-lg transition-colors w-full text-left"
+        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-lg transition-colors flex-1 min-w-0 text-left"
       >
         <StatusIcon state={row.failure ? 'output-error' : row.state} />
         <IconComponent size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
@@ -124,6 +132,17 @@ const ToolInvocationPartView = memo(function ToolInvocationPartView({ row }: { r
           />
         )}
       </button>
+      {documentPath && (
+        <button
+          type="button"
+          onClick={() => void runCommand('editor.viewDocument', { path: documentPath })}
+          title="この HTML の資料を真ん中のタブで見ます"
+          className="flex-shrink-0 inline-flex items-center gap-1 h-control-sm px-control-sm-x rounded-control text-small text-link hover:bg-selected-bg focus-visible:outline-none focus-visible:ring-focus focus-visible:ring-focus-ring"
+        >
+          <Eye size={13} aria-hidden />見る
+        </button>
+      )}
+      </div>
       {isExpanded && isFinished && <ToolOutputDetail row={row} />}
     </div>
   )

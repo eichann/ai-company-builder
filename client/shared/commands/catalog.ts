@@ -214,6 +214,15 @@ export const COMMANDS = defineCommands([
     keybinding: { key: 'mod+shift+v', area: 'editor' },
   },
   {
+    // The chat's ［見る］ on a line where the AI wrote an HTML file: its tab, as 見る even if it showed 中身.
+    id: 'editor.viewDocument', title: 'HTML の資料を見る', class: 'view',
+    args: z.object({
+      path: z.string().min(1).describe('The .html / .htm file\'s absolute path inside the company folder'),
+      pane: z.string().optional().describe('The editor pane; the one used last when left out'),
+    }),
+    target: { arg: 'pane', area: 'editor' },
+  },
+  {
     // The search box of a Markdown preview (the source editor has its own ⌘F).
     id: 'editor.find', title: '文書の中を検索する', class: 'view',
     args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
