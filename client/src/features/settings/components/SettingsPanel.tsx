@@ -12,6 +12,7 @@ import { ConnectToolsScreen } from './ConnectToolsScreen'
 import { AbsenceSection } from '../../absences/components/AbsenceSection'
 import { JobsSection } from '../../jobs/components/JobsSection'
 import { MySwitchesSection } from './MySwitchesSection'
+import { JobRepeatAskSetting } from './JobRepeatAskSetting'
 import { BrowserSection } from './BrowserSection'
 import { useBrowserSites } from '../hooks/useBrowserSites'
 import { LegacyKeysNote, MoveEnvKeysCard } from './MoveEnvKeysCard'
@@ -376,7 +377,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mine
             ) : activeTab === 'mine' ? (
               <>
                 <MySwitchesSection key={currentCompany.id} companyId={currentCompany.id} onOpenGoogle={() => setActiveTab('google')} />
-                {mineRows && <div className="-mt-3 space-y-3 px-8 pb-8">{mineRows}</div>}
+                <div className="-mt-3 space-y-3 px-8 pb-8">{mineRows}<JobRepeatAskSetting key={currentCompany.id} companyId={currentCompany.id} /></div>
               </>
             ) : activeTab === 'absences' ? (
               <AbsenceSection key={currentCompany.id} companyId={currentCompany.id} />

@@ -29,6 +29,7 @@ import type { AgentEventRecorder } from '../../services/agent-events'
 import { secondOpinionAllowed, type AgentPolicyStore } from '../../services/agent-policy-store'
 import type { AgentStop } from '../../services/agent-stop'
 import type { SkillUseReporter } from '../../services/skill-use-reporter'
+import type { JobRepeatAsks } from '../jobs/repeat-asks'
 import type { BrokerTokenStore } from '../../services/broker-token-store'
 import { agentBrokerReservedServices } from '../../../shared/agents/registry'
 import type { ShellEnvironment } from '../../services/shell-env'
@@ -92,6 +93,8 @@ export interface ChatServerConfigDeps {
   paths?: PathGuard
   /** Which Skill a consultation used (services/skill-use-reporter.ts, records.md "Which Skill"); absent = not recorded. */
   skillUses?: Pick<SkillUseReporter, 'observe'>
+  /** 「毎週同じ時間にやりましょうか？」 (features/jobs/repeat-asks.ts, jobs.md "Asking after repeats (PR D)"); absent = never asked. */
+  jobRepeatAsks?: Pick<JobRepeatAsks, 'turn'>
   /**
    * Working folders of companies without the shared folder (services/working-folders.ts): the
    * write guard keeps only its own rules there, and the company file tools are not offered.
@@ -243,5 +246,6 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     onToolEvent: event => deps.agentEvents.record(event),
     toolEventPaths: () => deps.agentEvents.paths(),
     onSkillUsed: deps.skillUses ? sighting => deps.skillUses?.observe(sighting) : undefined,
+    jobRepeatAsk: deps.jobRepeatAsks ? turn => deps.jobRepeatAsks?.turn(turn) : undefined,
 }
 }

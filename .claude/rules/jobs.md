@@ -34,6 +34,10 @@ paths:
   - "client/electron/records/job-proposal-tools.ts"
   - "client/src/features/chat/components/JobProposalCard.tsx"
   - "client/tests/job-proposal*.test.ts"
+  - "client/shared/job-repeat-asks.ts"
+  - "client/electron/features/jobs/repeat-asks.ts"
+  - "client/src/features/settings/components/JobRepeatAskSetting.tsx"
+  - "client/tests/job-repeat-asks.test.ts"
 ---
 
 # Scheduled jobs (定期の仕事, B 「実行を記録から分ける」)
@@ -1395,7 +1399,8 @@ timed renew of the same hold, moves it by milliseconds).
 
 A member asks their AI for a time job; the AI makes a **candidate** the server builds, the member presses 「管理者に出す」, an owner /
 admin approves it (or it is withdrawn / returned), and the proposer still presses 「受け取る」 ("Approving is not accepting"). Only
-existing Skills (Q1), every member (Q2), at most 5 waiting per member (Q4); "ask after 3 repeats" (Q3) is the app's (PR D). The
+existing Skills (Q1), every member (Q2), at most 5 waiting per member (Q4); "ask after 3 repeats" (Q3) is the app's (PR D, "Asking
+after repeats (PR D)" below). The
 admin console announces schema 4 since PR B ("The admin console (PR B)" below), the app since PR C ("The app (PR C)" below); an
 app before PR C sees such a job as one it cannot show (`JOB_NEEDS_NEWER_SCREEN`, also for the proposer's 受け取る).
 
@@ -1642,6 +1647,59 @@ Code: `shared/core/job-proposals.ts` (ids `jc.` / `jp.` + 32 hex, limits, states
     `jobCandidateChanged` (the store functions themselves are). Of the chat server's flag, `!aiTurnStep` / `!requestedStep` / `!stepArea` each alone suffice for a
     job run (all three hold), `!stepArea` alone for a step consultation; `!requestedPluginStep` (a step consultation's first
     turn, whose binding is refused or binds it) is defence.
+- **Asking after repeats (PR D)** (owner memo 例2 / Q3 / §6 #10: 「同じ頼みが3回続いたら1回だけ聞く。「いいえ」なら同じことは聞かない」;
+  `client/shared/job-repeat-asks.ts` the rules, `client/electron/features/jobs/repeat-asks.ts` the store and the turn,
+  `chat-server.ts` `repeatAskForTurn`). Only this PC; the server knows nothing of it (no route, no field).
+  - **The same work = the same company Skill the AI loaded** (`skillLoadedBy`: Claude Code's `Skill` tool that ran — never
+    free text compared). Only a company Skill reachable from the consultation (`locateCompanySkill` answers a folder: not a
+    personal one of the same name, not a private folder's, not a missing one). Codex has no Skill tool (and no act token):
+    nothing is counted or asked for it.
+  - **Counted only where the member is present and the tools are offered**: the chat server connects the turn's Skill sink
+    (`withSkillSightings`' third argument) only through `repeatAskForTurn` — the `job_proposal_create` tool really among the
+    turn's record tools (the chat server's flag: no 「AI の番」, job run, plugin step run or step consultation; an `act` token
+    not bound to a run), not an unattended step, and the turn's tool events reach the sink (`sightings`: a consultation id
+    and company folder — without them a loaded Skill could never be marked asked, so the question would come every turn).
+    Elsewhere nothing is counted or asked.
+  - **Distinct days** (`localDay`, this PC's date): several uses a day count once; at most the 3 newest days are kept.
+  - **The question**: a turn on a day when a Skill, not yet asked, was used on 2 **other** days carries a short instruction
+    (`repeatAskInstructions`, by folder name only; at most `JOB_REPEAT_ASK_PER_TURN` Skills, **counted after** keeping only
+    company Skills this consultation reaches — a removed or out-of-reach Skill never takes a place, Codex review of PR D),
+    condition first: only if, for the work the member asked for, the AI loads that Skill in this reply and finishes it, ask
+    once at the end `JOB_REPEAT_ASK_QUESTION` (the owner's words, 「この仕事は、これまでにも何度か同じように頼まれています。毎週
+    （または毎日・毎月）同じ時間に、定期の仕事としてやりましょうか？」), and never load a Skill for this instruction;
+    otherwise say nothing; on 「はい」 confirm when and what makes it run, then PR C's tools (the member still presses 出す); on
+    「いいえ」 drop it. **Deviation from "the next turn" (decision on the simple side)**: the question goes with the turn that may
+    do the 3rd day's work, so the AI asks right after it (the memo's 例2), instead of a turn after it.
+  - **Asked for good**: a turn that carried the question for a Skill **and** loaded it marks it `asked` (whatever the AI said or
+    the member answered; never counted again). Marked when the Skill loads, not when the turn ends: a turn stopped or failed
+    afterwards is marked too and nothing was asked (fails quiet — never asked twice; decision on the simple side). A turn
+    that carried it without loading it marks nothing (it is carried again). Known: two consultations at once on that day may
+    both carry it before either marks it.
+  - **The switch** 「AI から定期の仕事を提案してもらう」 (設定 → 自分の設定, `JobRepeatAskSetting.tsx`, IPC `jobRepeatAsks:get` /
+    `jobRepeatAsks:set`; on unless turned off; per member and company, this PC only): off → no turn is asked or counted and
+    the counts are forgotten (the asked marks stay, so turning it on again never re-asks). No reset of the asked marks (owner
+    question).
+  - **The store** `<userData>/job-repeat-asks.json` (atomic, 0600): `{ version: 1, members: { "<user>/<company>": { off?,
+    skills: { <name>: { days } | { asked } } } } }` — Skill folder names and dates only, never a conversation id, text or path;
+    read strictly (`readRepeatFile` drops anything else); never logged or sent. Entries are read as own properties only
+    (`ownSkill`): a Skill folder name may be an `Object.prototype` name (`constructor`). Nobody signed in → nothing. A file
+    that exists but cannot be read or parsed → nothing asked, counted or written over it (an asked mark may be in it) while
+    it stays the same file: its identity (device, inode, size, times) is kept, and a later look reads it again once that
+    differs (fixed, replaced, removed) — no restart needed.
+    Bounded: `JOB_REPEAT_SKILLS_MAX` counted Skills, `JOB_REPEAT_ASKED_MAX` asked marks per member and company.
+  - Test: `client/tests/job-repeat-asks.test.ts` (the 3rd distinct day once, same-day repeats, asked never again — also after
+    more days —, carried without loading marks nothing, only company Skills, removed Skills never take the per-turn places,
+    `constructor` and other prototype-like names, the instruction's order and wording, the switch, per member / company /
+    nobody, the store's contents and mode, an unreadable store and its re-read once fixed, the sink only for a loaded Skill,
+    `repeatAskForTurn`'s gate — also without sightings —, and the chat server asking only an ordinary consultation with a
+    consultation id — not a job run, 「AI の番」, a step or a turn without the tools). Mutation check: 26 guards removed or
+    inverted one at a time, 21 fail; after the reviews of PR D (Codex P2 ×2, L1, L2, L4) 33, 27 fail. Not alone:
+    `repeatAskable`'s asked check (an asked entry has no days, so the count refuses it), its and `noteRepeatUse`'s off checks
+    (no turn is answered while off, and off forgets the counts: defence for a turn that began before the switch), the
+    handler's `unattended: !!aiTurnStep` (a step's record tools never include the create tool: the flag is off there), the
+    unreadable store kept while unchanged (without it the same unreadable file is read again at each look and still
+    refused: cost only); not node-tested: the handler passing the sink to `withSkillSightings` (one line of wiring — each
+    half, the sink's call and `repeatAskForTurn` connecting it, fails a test).
 - **The rollback floor** (6760eef3, knows `[1, 2]`): a schema-4 job is listed by name only, its versions without definition or
   fingerprints, approve / edit / accept refused (`JOB_SCHEMA_UNKNOWN`), no occurrence made, no `job_proposal` /
   `job_proposal_returned` shown (unknown kinds); it never reads the new tables. Coming back: nothing revived (a withdrawn proposal stays so, its job retired), nothing

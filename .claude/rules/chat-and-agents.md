@@ -410,6 +410,9 @@ A member's proposal of a time job (`job_proposal_places`, `job_proposal_create`,
 only to a consultation the member is in — the chat server passes `jobProposals` false for every 「AI の番」, job run and
 step consultation, and the tools need an `act` token not bound to a run (`RecordTurnAccess.boundToRun`); the candidate
 becomes the app's card, and only the member's press submits it (`jobs.md` "Member proposals" "The app (PR C)").
+In such a turn (the create tool really offered, never an unattended step: `repeatAskForTurn`) main may add a one-time
+question 「毎週同じ時間にやりましょうか？」 for a company Skill used on 3 distinct days (`jobRepeatAsk`, `jobs.md` "Asking after
+repeats (PR D)").
 
 ## Instructions while the AI works (steering)
 
@@ -526,6 +529,8 @@ the server: `agent-events.md` ("Sending from the app").
   host; a `Skill` call that ran (`skillLoadedBy`) also goes to `onSkillUsed` → main's
   `services/skill-use-reporter.ts` (folder name + git tree id + dirty, never a path; in a working
   folder the Skill shelf's version instead). Codex has no Skill tool: nothing is recorded for it.
+  The same sighting also reaches the turn's repeat count when that turn offers the job proposal tools (`withSkillSightings`'
+  third argument, connected by `repeatAskForTurn`; `jobs.md` "Asking after repeats (PR D)").
 - **A working folder's company Skills** (`plugins.md` "The Skill shelf in the app"): the instruction
   texts join the system prompt, Codex gets `project_root_markers`, the rule files are named to an
   agent without `capabilities.ruleFiles`.
