@@ -14,6 +14,7 @@
  * grant. The cap is applied when a view is registered, so opens running at
  * the same time cannot pass it.
  */
+import { createHash } from 'node:crypto'
 import { blockedWebHost, docViewBounds, docZoomFactor, DOC_BLOCKED_HOSTS_MAX, DOC_BLOCKED_PARTS_MAX, type DocViewBounds, type DocViewEvent } from '../../../shared/doc-frame'
 import { webLinkForBrowser } from '../../external-url'
 import type { KeyInput } from '../../../shared/commands/define'
@@ -96,7 +97,7 @@ export interface DocViewsDeps {
 
 /** What one view's page wanted from the internet so far (main only; the window gets hosts and a count). */
 interface BlockedTally {
-  /** Different addresses (never sent): what `count` counts. */
+  /** Different addresses (never sent): what `count` counts, each kept as its SHA-256 (44 characters, however long the address). */
   urls: Set<string>
   /** Every different host (never more than the addresses counted); `hosts` is the first ones of it. */
   allHosts: Set<string>
@@ -166,13 +167,16 @@ export function createDocViews(deps: DocViewsDeps) {
       if (view) deps.notify?.(view.windowId, { viewId, kind: 'shortcut', key })
     },
     onBlocked(viewId, url) {
+      // A full tally takes nothing more: a page refusing in a tight loop costs a lookup.
+      if (!views.has(viewId) || (blocked.get(viewId)?.urls.size ?? 0) >= DOC_BLOCKED_PARTS_MAX) return
       // Only internet addresses, and only their host ever leaves main.
       const host = blockedWebHost(url)
-      if (!views.has(viewId) || !host) return
+      if (!host) return
       let tally = blocked.get(viewId)
       if (!tally) blocked.set(viewId, tally = { urls: new Set(), allHosts: new Set(), hosts: [], dirty: false, told: false, cancel: null })
-      if (tally.urls.has(url) || tally.urls.size >= DOC_BLOCKED_PARTS_MAX) return
-      tally.urls.add(url)
+      const key = createHash('sha256').update(url).digest('base64')
+      if (tally.urls.has(key)) return
+      tally.urls.add(key)
       tally.allHosts.add(host)
       if (!tally.hosts.includes(host) && tally.hosts.length < DOC_BLOCKED_HOSTS_MAX) tally.hosts.push(host)
       tally.dirty = true

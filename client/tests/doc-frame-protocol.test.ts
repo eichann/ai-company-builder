@@ -612,6 +612,14 @@ test('the window hears what a view\'s page wanted from the internet as hosts and
   assert.equal(told.length, 3, 'nothing new: nothing told')
   shell.blocked(a, 'https://cdn.example.com/chart.js?secret=1')
   assert.equal(told.length, 3, 'an address already counted tells nothing')
+  // Addresses as long as a page may make them, differing only at their end: two parts.
+  told.length = 0
+  const long = `https://cdn.example.com/${'x'.repeat(7000)}`
+  shell.blocked(a, `${long}1`)
+  tick()
+  shell.blocked(a, `${long}2`)
+  tick()
+  assert.equal((told.at(-1)![1] as { count: number }).count, 5, 'the same host, two more different addresses')
   // A page asking in a loop: capped hosts and count, few events.
   told.length = 0
   for (let i = 0; i < 2000; i++) shell.blocked(a, `https://h${i}.example/p?i=${i}`)

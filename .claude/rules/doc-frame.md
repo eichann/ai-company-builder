@@ -134,7 +134,7 @@ carrying a secret in its user name reached a local listener). Each document is s
   a page cannot queue confirmations), only for a registered view; `{ kind: 'gone' }` — a view went
   without its window asking (its page crashed, the cap closed it); `{ kind: 'shortcut', key }` — the
   member pressed one of the app's shortcuts in it (below), only for a registered view;
-  `{ kind: 'blocked', count, hosts }` — what its page wanted from the internet and did not get
+  `{ kind: 'blocked', count, hosts, hostCount }` — what its page wanted from the internet and did not get
   ("The band of blocked internet parts (A3)"), hosts only, only for a registered view.
 - **Revocation goes with the view** (`views.ts`): `docView:close(viewId)` by its own window; the
   view destroyed or its page crashed (`onGone`); the window's page reloading, crashing or closing
@@ -258,7 +258,9 @@ carrying a secret in its user name reached a local listener). Each document is s
   `documentToViewOf`), carries ［見る］ beside it (`ToolRows.tsx`). Not on a read, a running or failed
   call, another file type, a file outside the company folder, a restored row (history keeps no
   path; B3 adds it), and not in a consultation's own window (no editor: `useCommandAvailable`).
-  Inside a same-tool group the button is on the expanded rows.
+  Inside a same-tool group the button is on the expanded rows. Kept as it is (review of A3): a
+  write the agent refused without a `failure` marker may still carry ［見る］ — harmless, the file is
+  opened only if it is there and main's checks pass.
 - It runs `editor.viewDocument { path }` (`commands.md`), handled by the editor
   (`TabbedEditorPanel`): a tab shown as 中身 goes back to 見る, then `file.open` opens / shows the tab.
   Main checks everything again on `docView:open` (top level, links, not downloaded…): the chat only
@@ -269,7 +271,9 @@ carrying a secret in its user name reached a local listener). Each document is s
 - **What main reports** (`doc-view.ts`): Chromium's own report of each CSP refusal — the DevTools
   `Audits` domain's `ContentSecurityPolicyIssue` (`blockedURL`), read through the view's
   `webContents.debugger` in main (attached when the view is made; already attached elsewhere →
-  no report, nothing else changes) — and the requests the session's hook cancelled for that view
+  no report, nothing else changes; attached before the page loads, so the refusals of its first
+  parse are reported too — measured on Electron 45 for the stylesheet and script in the HTML;
+  measure again on an Electron upgrade, as the harness does) — and the requests the session's hook cancelled for that view
   (`details.webContentsId`). The page can neither send nor see either (its `console` and
   `securitypolicyviolation` events are its own and are not read); a page can of course *cause*
   refusals for any host by asking for it — the band says what it wanted. **Measured (harness,
@@ -282,7 +286,8 @@ carrying a secret in its user name reached a local listener). Each document is s
   `http` / `https` / `ws` / `wss`; the host lower case, punycode, no port, user name, path or query
   (an address can carry what the page holds); `file:` / `data:` / other schemes are not internet
   parts. Main counts **different addresses** (kept in main only, at most `DOC_BLOCKED_PARTS_MAX`
-  999) and keeps distinct hosts in the order first seen (at most `DOC_BLOCKED_HOSTS_MAX` 20), and
+  999; each kept as its SHA-256, so a long address costs no memory; a full tally takes nothing more,
+  checked before an address is even read) and keeps distinct hosts in the order first seen (at most `DOC_BLOCKED_HOSTS_MAX` 20), and
   sends `{ kind: 'blocked', count, hosts, hostCount }` (`hostCount`: different hosts in all, past the
   named 20 too) — the first at once, then at most every
   `BLOCKED_INTERVAL_MS` (500 ms: a page asking in a loop sends no flood), nothing when nothing
